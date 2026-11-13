@@ -1,3 +1,4 @@
+import { WallRefusal } from '@beeline/api-contract/daemon';
 import { parseDiagnosticOrigin, withDiagnosticContext } from './diagnostics.js';
 import { parseRouterCommandIdentity } from '@beeline/api-contract/router-command';
 import type { WebSocket } from 'ws';
@@ -61,10 +62,10 @@ export function phoneSocketRequests(
         else enqueue();
       }).catch(error => {
         if (controller.signal.aborted) return;
-        const status = error instanceof PhoneOperationError ? error.status : errorStatus(error);
+        const status = error instanceof PhoneOperationError || error instanceof WallRefusal ? error.status : errorStatus(error);
         if (status >= 500) captureServerError(error);
         const message = error instanceof Error ? error.message : 'request failed';
-        const explicitCode = error instanceof PhoneOperationError ? error.payload.code ?? error.payload.error : undefined;
+        const explicitCode = error instanceof PhoneOperationError ? error.payload.code ?? error.payload.error : error instanceof WallRefusal ? error.message : undefined;
         const code = typeof explicitCode === 'string' && /^[a-z][a-z0-9_-]*$/.test(explicitCode) ? explicitCode
           : status === 400 ? 'invalid_args' : status === 401 ? 'unauthorized'
           : status === 403 ? 'access_denied' : status === 404 ? 'not_found'

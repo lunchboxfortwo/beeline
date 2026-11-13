@@ -49,7 +49,7 @@ function daemonStub(): DaemonService {
     negotiateOwnedModel:vi.fn(async()=>({freeAgent:false})),
     execute: vi.fn(async (name: string, input: { roomId: string }, agentId: string) =>
       name === 'getAgentCommands'
-        ? { commandProtocol: 1, commands: [] }
+        ? { commandProtocol: 2, commands: ['room-a', 'room-b', 'corner-a'].map(roomId => ({ id: `${agentId}-${roomId}`, roomId })) }
         : { items: [{ id: `${agentId.slice(0, 1)}-${input.roomId}-${Date.now()}` }] }),
   } as unknown as DaemonService;
 }
@@ -188,17 +188,17 @@ describe('one machine socket for every agent on a helper machine', () => {
     expect(await register(client, AGENT_A, 'bdt_a')).toMatchObject({ type: 'registered' });
 
     // Frames naming an agent that never registered reach nobody.
-    client.send({ type: 'subscribe', agentId: AGENT_RETIRED, roomId: 'room-c' });
-    client.send({ type: 'subscribe', agentId: AGENT_B, roomId: 'room-b' });
-    client.send({ type: 'subscribe', agentId: AGENT_A, roomId: 'room-a' });
-    await client.next((frame) => frame.type === 'subscribed' && frame.agentId === AGENT_B);
-    await client.next((frame) => frame.type === 'subscribed' && frame.agentId === AGENT_A);
+    client.send({ type: 'subscribe-queue', agentId: AGENT_RETIRED, roomId: 'room-c' });
+    client.send({ type: 'subscribe-queue', agentId: AGENT_B, roomId: 'room-b' });
+    client.send({ type: 'subscribe-queue', agentId: AGENT_A, roomId: 'room-a' });
+    await client.next((frame) => frame.type === 'commands' && frame.agentId === AGENT_B);
+    await client.next((frame) => frame.type === 'commands' && frame.agentId === AGENT_A);
 
     const before = client.frames.length;
-    live.publish({ type: 'invalidate', roomId: 'room-b', reason: 'postgres:messages', messageId: 'changed-message' });
+    live.publish({ type: 'invalidate', roomId: 'room-b', reason: 'postgres:agent_commands', targetAgentId: AGENT_B });
     const inbox = await client.next((frame, ) =>
-      client.frames.indexOf(frame) >= before && frame.type === 'inbox');
-    expect(inbox).toMatchObject({ agentId: AGENT_B, roomId: 'room-b' });
+      client.frames.indexOf(frame) >= before && frame.type === 'commands');
+    expect(inbox).toMatchObject({ agentId: AGENT_B });
     expect(client.frames.some((frame) => frame.agentId === AGENT_RETIRED && frame.type !== 'register-refused'))
       .toBe(false);
     expect(client.socket.readyState).toBe(WebSocket.OPEN);
@@ -209,47 +209,35 @@ describe('one machine socket for every agent on a helper machine', () => {
     const { port } = await start({ live });
     const client = await machine(port);
     await register(client, AGENT_A, 'bdt_a');
-    client.send({ type: 'subscribe', agentId: AGENT_A, roomId: 'corner-a' });
-    await client.next(frame => frame.type === 'subscribed');
+    client.send({ type: 'subscribe-queue', agentId: AGENT_A, roomId: 'corner-a' });
+    await client.next(frame => frame.type === 'commands');
     live.publish({ type: 'invalidate', roomId: 'corner-a', reason, closeRequested: true });
     expect(await client.next(frame => frame.type === 'corner-complete')).toMatchObject({
       roomId: 'corner-a', agentId: AGENT_A,
     });
   });
 
-  it('refuses excess intake without dropping either machine agent', async () => {
-    const stalled: Array<() => void> = [];
-    const canReadRooms = vi.fn((ids: readonly string[], agentId: string) =>
-      agentId === AGENT_A
-        ? new Promise<Set<string>>((resolve) => stalled.push(() => resolve(new Set(ids))))
-        : Promise.resolve(new Set(ids)));
-    const live = new LiveHub();
-    const { port } = await start({ live, phone: { canReadRooms } as unknown as PhoneService });
+  it('keeps all intake while one agent waits, without blocking its sibling', async () => {
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const daemon = daemonStub();
+    let first = true;
+    vi.mocked(daemon.execute).mockImplementation(async (name, _input, agentId) => {
+      if (name === 'getAgentCommands' && agentId === AGENT_A && first) { first = false; await held; }
+      return { commandProtocol: 2, commands: [] } as never;
+    });
+    const { port } = await start({ daemon });
     const client = await machine(port);
-    await register(client, AGENT_A, 'bdt_a');
-    await register(client, AGENT_B, 'bdt_b');
-
-    // Agent A's first read never finishes, then A sends far more than its queue holds.
-    client.send({ type: 'subscribe', agentId: AGENT_A, roomId: 'room-a' });
-    await vi.waitFor(() => expect(stalled).toHaveLength(1));
-    const padding = 'x'.repeat(60 * 1024);
-    for (let index = 0; index < 40; index++)
-      client.send({ type: 'subscribe', agentId: AGENT_A, roomId: `room-a-${index}`, padding });
-    expect(await client.next((frame) => frame.type === 'live-refused' && frame.agentId === AGENT_A))
-      .toMatchObject({ reason: 'live admission overloaded' });
-
-    // Agent B is neither delayed behind A's queue nor disconnected with it.
-    const subscribedAt = Date.now();
-    client.send({ type: 'subscribe', agentId: AGENT_B, roomId: 'room-b' });
-    await client.next((frame) => frame.type === 'subscribed' && frame.agentId === AGENT_B);
-    await client.next((frame) => frame.type === 'inbox' && frame.agentId === AGENT_B);
-    expect(Date.now() - subscribedAt).toBeLessThan(1_000);
-    const before = client.frames.length;
-    live.publish({ type: 'invalidate', roomId: 'room-b', reason: 'postgres:messages', messageId: 'changed-message' });
-    await client.next((frame) =>
-      client.frames.indexOf(frame) >= before && frame.type === 'inbox' && frame.agentId === AGENT_B);
+    await register(client, AGENT_A, 'bdt_a'); await register(client, AGENT_B, 'bdt_b');
+    try {
+      const padding = 'x'.repeat(60 * 1024);
+      for (let index = 0; index < 40; index++) client.send({ type: 'subscribe-queue', agentId: AGENT_A, padding });
+      client.send({ type: 'subscribe-queue', agentId: AGENT_B });
+      await client.next(frame => frame.type === 'commands' && frame.agentId === AGENT_B);
+      expect(client.frames.some(frame => frame.type === 'live-refused')).toBe(false);
+    } finally { release(); }
+    await client.next(frame => frame.type === 'commands' && frame.agentId === AGENT_A);
     expect(client.socket.readyState).toBe(WebSocket.OPEN);
-    for (const finish of stalled.splice(0)) finish();
   });
 
   it('keeps one winner per agent across old per-agent sockets and machine registrations', async () => {
@@ -267,16 +255,16 @@ describe('one machine socket for every agent on a helper machine', () => {
     await returning.next((frame) => frame.type === 'hello');
     expect(await client.next((frame) => frame.type === 'unregistered' && frame.agentId === AGENT_A))
       .toMatchObject({ reason: 'replaced' });
-    client.send({ type: 'subscribe', agentId: AGENT_B, roomId: 'room-b' });
-    await client.next((frame) => frame.type === 'subscribed' && frame.agentId === AGENT_B);
+    client.send({ type: 'subscribe-queue', agentId: AGENT_B, roomId: 'room-b' });
+    await client.next((frame) => frame.type === 'commands' && frame.agentId === AGENT_B);
     expect(client.socket.readyState).toBe(WebSocket.OPEN);
   });
 });
 
-describe('machine connection closes only for login or version changes',()=>{
-  it.each(['getAgentCommands','getRoomInbox'])('keeps the connection and subscriptions when %s fails',async operation=>{
+describe('machine connection preserves the queue through errors',()=>{
+  it.each(['getAgentCommands'])('keeps the connection and subscriptions when %s fails',async operation=>{
     const live=new LiveHub(),daemon=daemonStub();const {port}=await start({live,daemon});const client=await machine(port);
-    await register(client,AGENT_A,'bdt_a');client.send({type:'subscribe',agentId:AGENT_A,roomId:'room-a'});
+    await register(client,AGENT_A,'bdt_a');client.send({type:'subscribe-queue',agentId:AGENT_A,roomId:'room-a'});
     await client.next(frame=>frame.type==='commands');const error=vi.spyOn(console,'error').mockImplementation(()=>undefined);
     const change=()=>live.publish({type:'invalidate',roomId:'room-a',reason:operation==='getAgentCommands'?'postgres:agent_commands':'postgres:messages',targetAgentId:AGENT_A,...(operation==='getRoomInbox'?{messageId:'changed-message'}:{})});
     try{
@@ -284,7 +272,7 @@ describe('machine connection closes only for login or version changes',()=>{
       await vi.waitFor(()=>expect(error).toHaveBeenCalled());
       expect(client.socket.readyState).toBe(WebSocket.OPEN);expect(client.frames.some(frame=>frame.type==='unregistered')).toBe(false);
       const before=client.frames.length;change();
-      await client.next(frame=>client.frames.indexOf(frame)>=before&&frame.type===(operation==='getAgentCommands'?'commands':'inbox'));
+      await client.next(frame=>client.frames.indexOf(frame)>=before&&frame.type==='commands');
     }finally{error.mockRestore();}
   });
   it('keeps idle helpers connected without application pings or database reads',async()=>{
@@ -349,8 +337,8 @@ describe('held presence for a live connection', () => {
       const client = await machine(port);
       for (const [agentId, token] of [[AGENT_A, 'bdt_a'], [AGENT_B, 'bdt_b']]) {
         await register(client, agentId, token);
-        client.send({ type: 'subscribe', agentId, roomId: ROOM, inbox: false });
-        await client.next(frame => frame.type === 'subscribed' && frame.agentId === agentId);
+        client.send({ type: 'subscribe-queue', agentId, roomId: ROOM, inbox: false });
+        await client.next(frame => frame.type === 'commands' && frame.agentId === agentId);
       }
       const command = (agentId: string) => createAgentCommand(database, {
         roomId: ROOM, agentId, sourceMessageId: null, reason: 'human_tag',
@@ -367,7 +355,7 @@ describe('held presence for a live connection', () => {
       });
       failNextPush = true;
       change(AGENT_A);
-      await vi.waitFor(() => expect(error).toHaveBeenCalledWith('[live] daemon command push failed', 'transient read failure'));
+      await vi.waitFor(() => expect(error).toHaveBeenCalledWith('[live] queue push failed', 'transient read failure'));
       await client.next(frame => frame.type === 'commands' && frame.error === 'transient read failure');
       const reads = () => calls.mock.calls.filter(([name, , agent]) => name === 'getAgentCommands' && agent === AGENT_A).length;
       const failedReads = reads();
@@ -378,14 +366,14 @@ describe('held presence for a live connection', () => {
       expect(reads()).toBe(failedReads);
       expect(client.frames.some(frame => delivered(frame, missed.id))).toBe(false);
       if (recovery === 'resync') live.resync();
-      else live.publish({ type: 'invalidate', roomId: ROOM, reason: 'postgres:messages', messageId: 'source' });
+      else change(AGENT_A);
       const recovered = await client.next(frame => delivered(frame, missed.id));
       expect(recovered.commands).toEqual([expect.objectContaining({ id: claimed.id }),
         expect.objectContaining({ id: missed.id })]);
       // The running turn is listed only with its generation, for its helper to resume.
       expect(client.frames.flatMap(frame => frame.type === 'commands' && Array.isArray(frame.commands) ? frame.commands as { id: string; generationId?: string }[] : [])
-        .filter(command => command.id === claimed.id).every(command => command.generationId === 'first')).toBe(true);
-      expect(client.frames.filter(frame => delivered(frame, sibling.id))).toHaveLength(1);
+        .filter(command => command.id === claimed.id).every(command => command.generationId === undefined)).toBe(true);
+      expect(client.frames.filter(frame => delivered(frame, sibling.id)).length).toBeGreaterThan(0);
       expect(client.frames.some(frame => frame.type === 'unregistered')).toBe(false);
       expect(client.socket.readyState).toBe(WebSocket.OPEN);
       expect((await database.query('SELECT state FROM agent_commands WHERE id=$1', [missed.id])).rows)
@@ -527,16 +515,16 @@ it('F14 unrelated turn/activity/usage changes make zero daemon inbox reads', asy
   const live=new LiveHub(),daemon=daemonStub();
   const {port}=await start({live,daemon});const client=await machine(port);
   await register(client,AGENT_A,'bdt_a');
-  client.send({type:'subscribe',agentId:AGENT_A,roomId:'room-a'});
-  await client.next(frame=>frame.type==='subscribed'&&frame.agentId===AGENT_A);
+  client.send({type:'subscribe-queue',agentId:AGENT_A,roomId:'room-a'});
+  await client.next(frame=>frame.type==='commands'&&frame.agentId===AGENT_A);
   vi.mocked(daemon.execute).mockClear();
   for(const table of ['agent_turns','agent_activity','agent_usage','agents','agent_grants','corner_follows'])
     live.publish({type:'invalidate',roomId:'room-a',reason:`postgres:${table}`,messageId:'another-agent-source'});
   const after=client.frames.length;
-  live.publish({type:'invalidate',roomId:'room-a',reason:'postgres:messages',messageId:'real-message'});
-  await client.next(frame=>client.frames.indexOf(frame)>=after&&frame.type==='inbox');
-  expect(vi.mocked(daemon.execute).mock.calls.filter(([name])=>name==='getRoomInbox')).toHaveLength(1);
-  expect(vi.mocked(daemon.execute).mock.calls.filter(([name])=>name==='getAgentCommands')).toHaveLength(0);
+  live.publish({type:'invalidate',roomId:'room-a',reason:'postgres:agent_commands',targetAgentId:AGENT_A});
+  await client.next(frame=>client.frames.indexOf(frame)>=after&&frame.type==='commands');
+  expect(vi.mocked(daemon.execute).mock.calls.filter(([name])=>name==='getRoomInbox')).toHaveLength(0);
+  expect(vi.mocked(daemon.execute).mock.calls.filter(([name])=>name==='getAgentCommands')).toHaveLength(1);
 });
 
 it('carries ordinary daemon families through the registered machine owner with no HTTP, sharing old-wire service behavior', async () => {
@@ -583,8 +571,8 @@ it('serves controls and subscriptions while 65 ordinary operations await externa
       client.send({type: 'daemon-operation', agentId: AGENT_A, requestId: `held-${index}`, operation: 'searchMcpRegistry', input: {roomId: 'room', query: 'proof'}});
     client.send({type: 'daemon-operation', agentId: AGENT_A, requestId: 'stop', operation: 'stopAgentTurn', input: {roomId: 'room'}});
     expect(await client.next(frame => frame.requestId === 'stop')).toMatchObject({type: 'daemon-operation-result', result: {id: 'done'}});
-    client.send({type: 'subscribe', agentId: AGENT_A, requestId: 'subscribe', roomId: 'room', inbox: false});
-    await client.next(frame => frame.type === 'subscribed');
+    client.send({type: 'subscribe-queue', agentId: AGENT_A, requestId: 'subscribe', roomId: 'room', inbox: false});
+    await client.next(frame => frame.type === 'commands');
     await vi.waitFor(() => expect(vi.mocked(daemon.execute).mock.calls.filter(([name]) => name === 'searchMcpRegistry')).toHaveLength(65));
     expect(client.frames.some(frame => String(frame.requestId).startsWith('held-'))).toBe(false);
   } finally { finish({id: 'wake', createdAt: 1}); }
@@ -619,7 +607,7 @@ it('publishes a final reply over 64 KB without dropping its tool steps', async (
   expect(await client.next(frame => frame.requestId === 'publish')).toMatchObject({
     type:'daemon-operation-result',result:{id:'final-reply'},
   });
-  expect(daemon.execute).toHaveBeenCalledWith('postRoomMessage',input,AGENT_A,undefined,undefined);
+  expect(daemon.execute).toHaveBeenCalledWith('postRoomMessage',input,AGENT_A,undefined);
   client.send({type:'daemon-operation',agentId:AGENT_A,requestId:'publish',operation:'postRoomMessage',
     input:{...input,text:'changed intent'}});
   expect(await client.next(frame => frame.requestId === 'publish' && frame.status === 409))
@@ -672,12 +660,54 @@ it('dispatches turn controls with the registered machine owner through the ordin
   const presence={instanceId:'operation-owner',renewLease:async()=>undefined,claimConnection:async()=>7,releaseConnection:async()=>{}} as unknown as ConnectionPresence;
   try{
     const {port}=await start({daemon,database,connectionPresence:presence});const client=await machine(port);
-    client.send({type:'register',agentId:AGENT_A,token:'bdt_a',daemonOperationsV1:true,turnOwnershipV1:true});
+    client.send({type:'register',agentId:AGENT_A,token:'bdt_a',daemonOperationsV1:true,queueV1:true});
     const registered=await client.next(frame=>frame.type==='registered');
-    client.send({type:'daemon-operation',agentId:AGENT_A,requestId:'claim',operation:'startQueuedTurn',input:{commandId:'command'}});
-    await client.next(frame=>frame.requestId==='claim');
-    const capabilities=registered.capabilities as {turnConnectionId:string;turnConnectionEpoch:number};
-    expect(daemon.execute).toHaveBeenCalledWith('startQueuedTurn',{commandId:'command'},AGENT_A,
-      {connectionId:capabilities.turnConnectionId,epoch:capabilities.turnConnectionEpoch},undefined);
+    client.send({type:'daemon-operation',agentId:AGENT_A,requestId:'start',operation:'startAgentTurn',input:{roomId:'room',requestId:'command'}});
+    await client.next(frame=>frame.requestId==='start');
+    expect(daemon.execute).toHaveBeenCalledWith('startAgentTurn',{roomId:'room',requestId:'command'},AGENT_A,undefined);
   }finally{await database.close();}
+});
+
+
+it('accepts more than eight machine sockets and a batch of more than 64 owned agents', async () => {
+  const tokenAuth = auth();
+  vi.mocked(tokenAuth.authenticateDaemon).mockImplementation(async token => token.startsWith('bdt_') ? token.slice(4) : null);
+  const { port } = await start({ auth: tokenAuth });
+  const connected = [];
+  for (let index = 0; index < 9; index++) connected.push(await machine(port));
+  expect(connected.every(client => client.socket.readyState === WebSocket.OPEN)).toBe(true);
+  const agents = Array.from({ length: 65 }, (_, index) => {
+    const agentId = index.toString(16).padStart(64, '0');
+    return { agentId, token: `bdt_${agentId}` };
+  });
+  connected[0]!.send({ type: 'register-machine', agents });
+  await vi.waitFor(() => expect(connected[0]!.frames.filter(frame => frame.type === 'registered')).toHaveLength(65));
+  expect(connected[0]!.frames.some(frame => frame.type === 'register-refused')).toBe(false);
+});
+
+it('sends a queued answer despite an existing machine output backlog', async () => {
+  const { machineConnectionOutput } = await import('./machine-connection.js');
+  const send = vi.fn();
+  const client = { readyState: WebSocket.OPEN, OPEN: WebSocket.OPEN, bufferedAmount: 32 * 1024 * 1024, send };
+  expect(machineConnectionOutput(client as unknown as WebSocket)('stored answer')).toBe(true);
+  expect(send).toHaveBeenCalledWith('stored answer');
+});
+
+
+it('registers a ready agent while its batch sibling is still authenticating', async () => {
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const tokenAuth = auth();
+  vi.mocked(tokenAuth.authenticateDaemon).mockImplementation(async token => {
+    if (token === 'bdt_a') await held;
+    return TOKENS[token] ?? null;
+  });
+  const { port } = await start({ auth: tokenAuth });
+  const client = await machine(port);
+  try {
+    client.send({ type: 'register-machine', agents: [{agentId:AGENT_A,token:'bdt_a'},{agentId:AGENT_B,token:'bdt_b'}] });
+    expect(await client.next(frame => frame.type === 'registered' && frame.agentId === AGENT_B)).toMatchObject({ agentId: AGENT_B });
+    expect(client.frames.some(frame => frame.type === 'registered' && frame.agentId === AGENT_A)).toBe(false);
+  } finally { release(); }
+  await client.next(frame => frame.type === 'registered' && frame.agentId === AGENT_A);
 });

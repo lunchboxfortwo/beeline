@@ -10,6 +10,12 @@ import type { DaemonApiClient } from './daemon-api-client.js';
 import type { AgentRuntimeRecord } from './runtime.js';
 import { PlaceSession } from './place-session.js';
 
+// Cache persistence is tested with real files by SessionResources. These
+// prompt tests intentionally finish while optional background work is pending.
+vi.mock('./atomic-private-file.js', async original => ({
+  ...await original<typeof import('./atomic-private-file.js')>(),
+  writePrivateFileAtomically: vi.fn(async () => {}),
+}));
 vi.mock('./agent-home.js', async original => ({
   ...await original<typeof import('./agent-home.js')>(),
   prepareRoomAgentHome: vi.fn(() => new Promise(() => {})),

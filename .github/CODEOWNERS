@@ -2,3 +2,4 @@
 /docs/walls.md @lunchboxfortwo
 /scripts/check-walls.mjs @lunchboxfortwo
 /scripts/check-walls.test.mjs @lunchboxfortwo
+/packages/api-contract/src/walls.ts @lunchboxfortwo

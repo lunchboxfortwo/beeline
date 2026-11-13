@@ -1,9 +1,9 @@
+import { wall, WallRefusal } from '@beeline/api-contract/daemon';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { typedMentionHandles } from '../message-mentions.js';
 import { endAgentTurn } from '../agent-turn-end.js';
 import { cleanVoiceReply } from '../voice-reply.js';
 import { queueDatabaseWork } from '../database-work-queue.js';
-import { CommandRefusalError } from '../commander.js';
 import { routeAgentResult } from '../agent-command.js';
 import { authorizeCommandOutput } from '../agent-command-route-agent-result.js';
 import { randomBytes } from 'node:crypto';
@@ -120,7 +120,7 @@ import { daemonTurnReceipt } from './turn-receipts.js';
     input = { ...input };
     const candidate = input as Record<string, unknown>;
     if (typeof candidate.agentId === 'string' && candidate.agentId !== authenticatedAgentId)
-      throw new Error('daemon token does not own requested agent');
+      throw wall('credentials', 'daemon token does not own requested agent');
     // Command writes authorize their source before the operation checks its
     // target. Lifecycle and read operations authorize the addressed corner,
     // independently of any source context the helper also supplies.
@@ -145,7 +145,7 @@ import { daemonTurnReceipt } from './turn-receipts.js';
       'walletContractCall',
       'walletSignTypedData',
     ].includes(name);
-    if (walletCall && !scopedRoom) throw new Error('wallet access requires an active Room command');
+    if (walletCall && !scopedRoom) throw wall('credentials', 'wallet access requires an active Room command');
     let cornerReviewer = false;
     let isCorner = false;
     let privateCommand = false;
@@ -153,19 +153,19 @@ import { daemonTurnReceipt } from './turn-receipts.js';
     if (addressedRoom && name !== 'ensureAgentMembership' && !ctx.commandTransaction)
       ({ cornerReviewer, isCorner, privateCommand, voiceAgentName } = await daemonAccess(ctx, addressedRoom, authenticatedAgentId, candidate.requestId ?? candidate.turnId).catch(
         (error: unknown) => {
-          if (error instanceof AccessDeniedError &&
+          if ((error instanceof AccessDeniedError || error instanceof WallRefusal && error.kind === 'membership' && error.status < 500) &&
               (name === 'getRoomConversation' || name === 'getRoomMessage'))
             return daemonReviewSourceAccess(ctx, addressedRoom, authenticatedAgentId).then(() => ({
               cornerReviewer: false, isCorner: false, privateCommand: false, voiceAgentName: null,
             })).catch((sourceError: unknown) => {
-              if (sourceError instanceof AccessDeniedError)
+              if (sourceError instanceof AccessDeniedError || sourceError instanceof WallRefusal && sourceError.kind === 'membership' && sourceError.status < 500)
                 return daemonReach(ctx, addressedRoom, authenticatedAgentId).then(() => ({
                   cornerReviewer: false, isCorner: true, privateCommand: false, voiceAgentName: null,
                 }));
-              throw sourceError;
+              throw wall('membership', sourceError instanceof Error ? sourceError : { message: String(sourceError), status: 503 });
             });
           // Reachable corner operations also admit a parent Room member.
-          if (error instanceof AccessDeniedError &&
+          if ((error instanceof AccessDeniedError || error instanceof WallRefusal && error.kind === 'membership' && error.status < 500) &&
               (CORNER_REACH_OPERATIONS.has(name) || CORNER_CLEANUP_OPERATIONS.has(name)))
             return daemonReach(ctx, addressedRoom, authenticatedAgentId).then(() => ({
               cornerReviewer: false,
@@ -173,14 +173,11 @@ import { daemonTurnReceipt } from './turn-receipts.js';
               privateCommand: false,
               voiceAgentName: null,
             }));
-          throw error;
+          throw wall('membership', error instanceof Error ? error : { message: String(error), status: 503 });
         },
       ));
     // Repository tools resolve provider facts themselves; an answer never
     // depends on a GitHub read or a successful token refresh.
-    if (!ctx.commandTransaction && scopedRoom && ctx.github && isCorner &&
-        ['order', 'postCornerMessage'].includes(name))
-      await ctx.github.refreshCornerReviewHead?.(scopedRoom);
     if (voiceAgentName && typeof candidate.text === 'string')
       candidate.text = cleanVoiceReply(candidate.text, voiceAgentName);
 
@@ -215,8 +212,8 @@ import { daemonTurnReceipt } from './turn-receipts.js';
         authenticatedAgentId,
         true,
       ));
-      if (isCorner)
-        await daemonReconcileZeroCheckWorkerCompletion(ctx, scopedRoom!, authenticatedAgentId);
+      if (isCorner) void daemonReconcileZeroCheckWorkerCompletion(ctx, scopedRoom!, authenticatedAgentId)
+        .catch(error => console.error('[daemon] post-answer reconciliation failed', error));
       return output as Output<Name>;
     }
     if (
@@ -270,9 +267,9 @@ import { daemonTurnReceipt } from './turn-receipts.js';
           if (name !== 'postRoomMessage') return daemonWriteResult(ctx) as Output<Name>;
           const text = String(candidate.text ?? '').trim();
           if (text) {
-            const reported = await daemonReport(ctx, text, authenticatedAgentId, command, db, true);
+            const reported = await daemonReport({ ...ctx, afterCommit: task => { committedTasks.push(task); } }, text, authenticatedAgentId, command, db, true);
             if ('delivered' in reported && reported.delivered === false)
-              throw new CommandRefusalError('commander is no longer a member of the return address', 403);
+              throw wall('membership', 'commander is no longer a member of the return address');
             await endAgentTurn(db, command, 'complete', null, reported.id);
             return reported as Output<Name>;
           }
@@ -335,13 +332,6 @@ import { daemonTurnReceipt } from './turn-receipts.js';
         }
         return result;
       }));
-      for (const task of committedTasks) {
-        try {
-          await task(ctx.database);
-        } catch (error) {
-          console.error('[daemon] post-commit task failed', error);
-        }
-      }
       for (const event of events) {
         if (event.type !== 'invalidate' || !event.committedRow) {
           ctx.live.publish(event);
@@ -358,12 +348,11 @@ import { daemonTurnReceipt } from './turn-receipts.js';
         });
         }
       }
-      if (name === 'postRoomMessage' && candidate.relay === undefined && isCorner) {
-        await daemonReconcileZeroCheckWorkerCompletion(ctx,
-          scopedRoom!,
-          authenticatedAgentId,
-        );
-      }
+      for (const task of committedTasks) void Promise.resolve().then(() => task(ctx.database))
+        .catch(error => console.error('[daemon] post-commit task failed', error));
+      if (name === 'postRoomMessage' && candidate.relay === undefined && isCorner)
+        void daemonReconcileZeroCheckWorkerCompletion(ctx, scopedRoom!, authenticatedAgentId)
+          .catch(error => console.error('[daemon] post-answer reconciliation failed', error));
       return output;
     }
     if (walletCall && ctx.commandTransaction) {

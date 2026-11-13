@@ -1,61 +1,28 @@
 # Walls
 
-A message for an agent goes into that agent's queue, the helper hands it to the
-agent's live session, and the answer is posted to the item's return address.
-Only the walls below may refuse, drop, skip or hold a message on that path.
-`scripts/check-walls.mjs` (run in TYPECHECK) fails any change that adds a
-refusal, early return, skip, wait, lease or cap to the path functions it names
-unless the exact site is listed here under its wall. lunchboxfortwo reviews
-every change to this file.
+A request enters its agent's queue, reaches the live session and receives an
+answer at its recorded return address. Checks stay where their data is;
+refusals use `wall(kind, reason)` from `@beeline/api-contract/daemon`.
+`packages/api-contract/src/walls.ts` owns the kinds and error shape.
+`scripts/check-walls.mjs` rejects other refusals, gates, skips, waits and caps
+on that path. lunchboxfortwo reviews changes to these walls and their builder.
 
 ## `signed-in` The person must be signed in
 
-Why: a message has to come from a known account before any agent sees it.
-
-- `apps/server/src/agent-command-create-agent-command.ts routeHumanMessage: early return if (!source) return false;`
+Why: each request must come from a known account.
 
 ## `membership` Only members of a chat can message its agents
 
-Why: membership is the one rule for who may ask an agent and where its answer may go.
-
-- `apps/server/src/agent-command.ts insertAgentCommand: early return if (!member.rowCount) return undefined;`
-
-- `apps/server/src/agent-command-create-agent-command.ts routeHumanMessage: skip if (!agent) continue;`
-- `apps/server/src/daemon/execute.ts daemonExecute: refuse throw sourceError;`
-- `apps/server/src/daemon/execute.ts daemonExecute: refuse throw error;`
-- `apps/server/src/daemon/execute.ts daemonExecute: refuse if ('delivered' in reported && reported.delivered === false) throw new CommandRefusalError('commander is no longer a member of the return address', 403);`
-- `apps/server/src/daemon/messages.ts daemonPostRoomMessage: refuse if (!result || result.outcome === 'write_failed') throw new Error('command output authority rejected');`
-- `apps/server/src/daemon/messages.ts daemonPostRoomMessage: refuse if (result.outcome === 'authority_rejected') throw new Error('command output authority rejected');`
-- `apps/server/src/daemon/messages.ts daemonPostRoomMessage: refuse if (!result.row) throw new Error('command output authority rejected');`
+Why: membership protects who may ask an agent and where its answer may go.
 
 ## `credentials` Each agent's credentials stay its own
 
-Why: an agent answers only with its own logins, keys and hosted-model allowance, never another's.
-
-- `apps/server/src/agent-command-route-agent-result.ts authorizeCommandOutput: refuse if (!row) throw new Error('command output authority rejected: no command row');`
-
-- `apps/server/src/daemon/execute.ts daemonExecute: refuse if (typeof candidate.agentId === 'string' && candidate.agentId !== authenticatedAgentId) throw new Error('daemon token does not own requested agent');`
-- `apps/server/src/daemon/execute.ts daemonExecute: refuse if (walletCall && !scopedRoom) throw new Error('wallet access requires an active Room command');`
-
-- `apps/body/src/agent-home.ts repairRoomAgentCredentialLinks: skip if (!existsSync(source)) continue;`
-- `apps/body/src/agent-home.ts repairRoomAgentCredentialLinks: early return if (isMissingPathError(error)) return undefined;`
-- `apps/body/src/agent-home.ts repairRoomAgentCredentialLinks: refuse throw error;`
-- `apps/body/src/agent-home.ts repairRoomAgentCredentialLinks: skip if (resolve(dirname(target), linked) === source) continue;`
-- `apps/body/src/agent-home.ts repairRoomAgentCredentialLinks: skip if (outcome !== 'not-newer') continue;`
-- `apps/body/src/agent-home.ts prepareRoomAgentCredentials: refuse if (!rootStats.isDirectory() || rootStats.isSymbolicLink()) throw new AgentHomeSecurityError(\`agent home root is not an ordinary directory: ${root}\`);`
-- `apps/body/src/agent-home.ts prepareRoomAgentCredentials: refuse if (input.failClosed || input.resourceAuthFile || error instanceof AgentHomeSecurityError) throw error;`
-- `apps/body/src/agent-home.ts prepareRoomAgentCredentials: refuse if (input.failClosed || input.resourceAuthFile) throw error;`
-- `apps/body/src/agent-home.ts prepareRoomAgentCredentials: early return if (isMissingPathError(error)) return undefined;`
-- `apps/body/src/agent-home.ts prepareRoomAgentCredentials: refuse throw error;`
+Why: sessions, model use and answers must stay bound to their own identity and private state.
 
 ## `sandbox` The sandbox walls around the agent's session
 
-Why: the agent's tools reach only what its session may touch; if the sandbox cannot start, the session still runs with writes refused outside its own folder, is told so, and answers.
+Why: tools reach only permitted files and capabilities; if the sandbox fails, the agent still answers with writes restricted to its own folder.
 
 ## `stop` Stop
 
-Why: a person can end a request; a stopped item is not answered.
-
-- `apps/server/src/agent-command-route-agent-result.ts authorizeCommandOutput: refuse if (row.state === 'cancelled') throw new Error('command turn cancelled');`
-
-- `apps/server/src/daemon/messages.ts daemonPostRoomMessage: refuse if (result.outcome === 'turn_cancelled') throw new Error('command turn cancelled');`
+Why: a person can stop work; a harness that dies while answering publishes its recorded stopped-answer outcome.

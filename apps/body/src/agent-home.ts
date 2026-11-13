@@ -1,3 +1,4 @@
+import { wall } from '@beeline/api-contract/daemon';
 import { waitForPathRemoval } from './filesystem-change.js';
 /**
  * Per-room-instance harness state directories.
@@ -457,31 +458,22 @@ export async function repairRoomAgentCredentialLinks(input: {
   const operatorHome = input.operatorHome ?? homedir();
   for (const credential of SHARED_CREDENTIALS) {
     const source = resolve(operatorHome, credential.source);
-    if (!existsSync(source)) continue;
-    const target = resolve(root, credential.dir, credential.target);
-    await mkdir(dirname(target), { recursive: true, mode: 0o700 });
-    const stats = await lstat(target).catch((error: unknown) => {
-      if (isMissingPathError(error)) return undefined;
-      throw error;
-    });
-    if (stats?.isSymbolicLink()) {
-      const linked = await readlink(target);
-      if (resolve(dirname(target), linked) === source) continue;
-    }
-    if (stats) {
-      // A successful Claude refresh can replace the isolated symlink. Share
-      // that login with every Room before the old refresh token is spent.
-      // Failure retries use the shared source instead, so a failed detached
-      // refresh cannot trap the session. A busy lock keeps the detached login
-      // here until the next pass.
-      if (input.writeBackNewerClaudeLogin && credential.writeBack && stats.isFile()) {
-        const outcome = await writeBackDetachedClaudeLogin(target, source);
-        if (outcome !== 'not-newer') continue;
+    if (existsSync(source)) {
+      const target = resolve(root, credential.dir, credential.target);
+      await mkdir(dirname(target), { recursive: true, mode: 0o700 });
+      const stats = await lstat(target).catch((error: unknown) => {
+        if (!isMissingPathError(error)) throw wall('credentials', error instanceof Error ? error : { message: String(error), status: 503 });
+      });
+      const alreadyLinked = stats?.isSymbolicLink() && resolve(dirname(target), await readlink(target)) === source;
+      if (!alreadyLinked) {
+        const keptLogin = stats?.isFile() && input.writeBackNewerClaudeLogin && credential.writeBack &&
+          await writeBackDetachedClaudeLogin(target, source) !== 'not-newer';
+        if (!keptLogin) {
+          if (stats) await rename(target, `${target}.beeline-quarantine-${Date.now()}-${randomUUID()}`);
+          await symlink(source, target);
+        }
       }
-      const quarantine = `${target}.beeline-quarantine-${Date.now()}-${randomUUID()}`;
-      await rename(target, quarantine);
     }
-    await symlink(source, target);
   }
 }
 
@@ -573,9 +565,8 @@ export function sharedClaudeLoginEnv(operatorHome: string): Record<string, strin
 /**
  * Create the room-instance's harness state directories, share the operator's
  * harness login into them, and return the env overlay that points the harness at
- * them. Normally an unwritable or already-populated path degrades to the
- * daemon's ambient state; `failClosed` propagates setup errors for governed
- * credential sessions that may not fall back to ambient state.
+ * them. An unsafe or unavailable private home never falls back to another
+ * credential or ambient harness state.
  */
 export async function prepareRoomAgentCredentials(
   input: RoomAgentHomeInput,
@@ -587,7 +578,7 @@ export async function prepareRoomAgentCredentials(
     await mkdir(root, { recursive: true, mode: 0o700 });
     const rootStats = await lstat(root);
     if (!rootStats.isDirectory() || rootStats.isSymbolicLink()) {
-      throw new AgentHomeSecurityError(`agent home root is not an ordinary directory: ${root}`);
+      throw wall('credentials', `agent home root is not an ordinary directory: ${root}`);
     }
     for (const subdir of HOME_SUBDIRS) {
       const path = resolve(root, subdir);
@@ -613,10 +604,7 @@ export async function prepareRoomAgentCredentials(
       console.error(`[body] short TMPDIR link unavailable under ${root}:`, error);
     }
   } catch (error) {
-    if (input.failClosed || input.resourceAuthFile || error instanceof AgentHomeSecurityError)
-      throw error;
-    console.error(`[body] per-room agent home unavailable at ${root}; using daemon state:`, error);
-    return {};
+    throw wall('credentials', error instanceof Error ? error : { message: String(error), status: 503 });
   }
 
   try {
@@ -626,8 +614,7 @@ export async function prepareRoomAgentCredentials(
       writeBackNewerClaudeLogin: agentBehavior(input.agentKind).sharedLoginWriteBack === true,
     });
   } catch (error) {
-    if (input.failClosed || input.resourceAuthFile) throw error;
-    console.error(`[body] could not repair shared credentials under ${root}:`, error);
+    throw wall('credentials', error instanceof Error ? error : { message: String(error), status: 503 });
   }
 
   // A cold process must not start optional MCP providers from a previous
@@ -641,8 +628,7 @@ export async function prepareRoomAgentCredentials(
   await provisionPiCustomModelConfig(root, operatorHome, true, undefined);
   for (const name of GOOSE_SHARED_CONFIG_FILES) {
     const source = await readFile(resolve(operatorHome, '.config', 'goose', name), 'utf8').catch(error => {
-      if (isMissingPathError(error)) return undefined;
-      throw error;
+      if (!isMissingPathError(error)) throw wall('credentials', error instanceof Error ? error : { message: String(error), status: 503 });
     });
     if (source !== undefined) {
       const body = name === 'config.yaml' ? stringifyYaml({ ...parseYaml(source), extensions: {} }) : source;

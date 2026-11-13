@@ -63,6 +63,7 @@ it('records each corner order and report as one collapsed card in the corner onl
   await rootFixture.daemon.execute('order', { ...authority(report), address: opened.cornerId, text: 'Use endpoint v2' }, RUBY);
   expect((await commands(opened.cornerId, WORKER)).find(c => c.reason === 'order'))
     .toMatchObject({ private: true, source: { authorId: RUBY, body: 'Use endpoint v2' } });
+  await vi.waitFor(async () => expect((await rootFixture.db.query(`SELECT id FROM messages WHERE room_id=$1 AND card_type='agent-command'`, [opened.cornerId])).rows).toHaveLength(2));
   const cards = (await rootFixture.db.query<{ id: string; author_id: string; presentation: string; text: string; card: unknown }>(
     `SELECT id,author_id,presentation,text,card FROM messages WHERE room_id=$1 AND card_type='agent-command' ORDER BY created_at,id`,
     [opened.cornerId])).rows;
@@ -178,8 +179,9 @@ it('uses terminal status to deliver the canonical prefix and preserves the body'
     .toEqual([{text:'blocked: choose scope'}]);
 });
 
-it('accepts needs-decision without an ask and validates optional asks', async () => {
-  await expect(rootFixture.daemon.execute('report', { status: 'needs_decision', ...authority(rootFixture.order), text: 'needs-decision: pick scope', ask: '**Which scope?**' }, RUBY)).rejects.toThrow('plain text');
+it('optional ask formatting cannot refuse a decision report', async () => {
+  const first = await rootFixture.daemon.execute('report', { status: 'needs_decision', ...authority(rootFixture.order), text: 'needs-decision: pick scope', ask: '**Which scope?**' }, RUBY);
+  expect((await rootFixture.db.query('SELECT text FROM messages WHERE id=$1', [first.id])).rows).toEqual([{ text: 'needs-decision: pick scope' }]);
   const reported = await rootFixture.daemon.execute('report', { status: 'needs_decision', ...authority(rootFixture.order), text: 'needs-decision: Which scope should we use? @captain' }, RUBY);
   expect((await rootFixture.phone.execute('readNeedsYou', { workspaceId: WS }, HUMAN)).items.find(item => item.messageId === reported.id)?.text).toBe('Which scope should we use?');
 });
@@ -551,6 +553,7 @@ const scope1 = fixtureScope1();
   it('APPROVAL-CITATIONS: accepts the commander order card seen in the transcript', async () => {
     const opened = await open(), turn = await worker(opened.cornerId);
     await rootFixture.daemon.execute('order', { ...authority(rootFixture.order), address: opened.cornerId, text: 'Use the revised endpoint.' }, RUBY);
+    await vi.waitFor(async () => expect((await rootFixture.db.query(`SELECT id FROM messages WHERE room_id=$1 AND card_type='agent-command' AND card->>'text'=$2`, [opened.cornerId, 'Use the revised endpoint.'])).rows).toHaveLength(1));
     const card = (await rootFixture.db.query<{ id: string }>(`SELECT id FROM messages WHERE room_id=$1 AND card_type='agent-command' AND card->>'text'=$2`,
       [opened.cornerId, 'Use the revised endpoint.'])).rows[0]!;
     expect((await scope1.revise(turn, opened.cornerId, 1, card.id)).revision).toBe(2);
@@ -716,13 +719,11 @@ it('Reproduction corner-subtree-175524: the reported named parent order succeeds
     privatePayload: { text: 'Make corner state truthful', authorId: RUBY, fromRoomId: DM, kind: 'order' } });
   const turn = (await commands(cornerId, WORKER)).find(c => c.id === opening!.id)!;
   await claim(turn);
-  const before = (await rootFixture.db.query(`SELECT id FROM agent_commands ORDER BY id`)).rows;
   // Exact production payload retrieved read-only from the 17:55:24 order.
   const text = "Read-only adversarial implementation review for Jellybean's active truthful-corner-states corner f95aa673-2eb5-491a-930b-51dc1aa2d2ee, brief revision 1. Do not edit, commit, push, open a corner, change implementer, or report to Ruby. Read its brief via inspect_corner; report findings to me through this order. Step 0 file map is posted there. Need concrete smallest implementation plan for PR1 durable idle flags (commander only, once per span, worker schedule/subscription exclusions, excluding commander watch), WAITING blockers and persistent 24h reminders with human dismissal using existing approval/tray authority. Identify exact indexed writer/read paths and tests; avoid per-read messages scans. Also assess executing brief's two separate PRs when first merge archives this corner and only feature/corner-f95aa6732eb5 is authorized: propose compliant sequence. Current corner worktree has uncommitted draft state edits only in packages/api-contract/src/corner-state.ts and apps/server/src/chat-corner-counts.ts; do not treat them as finished. Include problems plus specific solutions. Report back once with findings, not progress.";
-  await expect(rootFixture.daemon.execute('order', { ...authority(turn), address: ROOM, text }, WORKER))
-    .rejects.toThrow('a Room order must name exactly one agent');
-  expect((await rootFixture.db.query(`SELECT id FROM agent_commands ORDER BY id`)).rows).toEqual(before);
+  // A Room with one other agent has an unambiguous recipient.
+  await rootFixture.daemon.execute('order', { ...authority(turn), address: ROOM, text }, WORKER);
   await rootFixture.daemon.execute('order', { ...authority(turn), address: ROOM, agent: RUBY, text }, WORKER);
   expect((await commands(ROOM, RUBY)).find(c => c.reason === 'order')?.source.body).toBe(text);
-  console.log('[corner-subtree-175524] named parent Room order delivered privately; unnamed broadcast refused');
+  console.log('[corner-subtree-175524] parent Room orders resolve the single agent and remain private');
 });

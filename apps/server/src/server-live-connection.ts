@@ -45,7 +45,7 @@ export function handleLiveConnection(ctx: LiveConnectionContext, client: WebSock
       }) {
       const sendLive = principal.kind === 'phone'
         ? phoneLiveOutput(client, MAX_LIVE_OUTBOUND_BUFFERED_BYTES, () => { ctx.liveErrors.overload++; })
-        : machineConnectionOutput(client, MAX_LIVE_OUTBOUND_BUFFERED_BYTES, () => { ctx.liveErrors.overload++; });
+        : machineConnectionOutput(client);
       if (principal.kind !== 'phone') {
         enableMachineTcpKeepalive(_request.socket);
         ctx.watchConnectionEpochs();

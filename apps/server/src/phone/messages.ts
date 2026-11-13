@@ -1,3 +1,4 @@
+import { wall } from '@beeline/api-contract/daemon';
 import { messageColumns } from '../message-columns.js';
 import { CommandScopedDatabase } from '../command-scoped-database.js';
 import { isMentionReplyInput } from '../owed-mentions.js';
@@ -159,7 +160,7 @@ import { phoneReadLiveDelta, phoneLiveStarPrompt } from './live-reads.js';
       return ctx.database.transaction(db =>
         phoneWithCommandTransaction(ctx, db, () => phoneSendMessage(ctx, input, author, sourceClient, familyId)));
     const id = input.messageId ?? messageId();
-    if (!/^[0-9a-f]{64}$/.test(id)) throw new Error('messageId is invalid');
+    if (!/^[0-9a-f]{64}$/.test(id)) throw wall('credentials', { message: 'messageId is invalid', status: 400 });
     const attachments = JSON.stringify(input.attachments ?? []);
     let database = ctx.database;
     const write = (await database.query<{
@@ -213,13 +214,13 @@ import { phoneReadLiveDelta, phoneLiveStarPrompt } from './live-reads.js';
        FROM access`,
       [id, input.roomId, author, input.text, attachments, SYSTEM_IDENTITY_ID, sourceClient ? JSON.stringify(sourceClient) : null],
     )).rows[0];
-    if (!write) throw new Error('room access denied');
+    if (!write) throw wall('membership', 'room access denied');
     database = new CornerAccessDatabase(database);
-    if (!write.writable) throw new Error('spectator access is read-only (access denied)');
+    if (!write.writable) throw wall('membership', 'spectator access is read-only (access denied)');
     if (author !== SYSTEM_IDENTITY_ID && write.system_dm)
-      throw new Error('this is a read-only system thread; only @system may post here (access denied)');
+      throw wall('credentials', 'this is a read-only system thread; only @system may post here (access denied)');
     const mayRoute = write.direct || write.corner || write.solo_agent || input.text.includes('@');
-    if (!write.inserted && !write.retry) throw new Error('messageId is invalid');
+    if (!write.inserted && !write.retry) throw wall('credentials', { message: 'messageId is invalid', status: 400 });
     if (write.inserted) {
       const noticeAgentIds = write.author_kind === 'human' && mayRoute
         ? await phoneUnansweredMentionTargets(ctx, input.roomId, author, input.text, {
@@ -269,11 +270,16 @@ import { phoneReadLiveDelta, phoneLiveStarPrompt } from './live-reads.js';
        WHERE message.id=$1 AND message.room_id=$2`,
       [input.parentMessageId, input.roomId],
     );
-    if (!parent.rows[0] || !(await phoneHasRoomAccess(ctx, input.roomId, author)))
-      throw new Error('reply parent is not in this room');
+    // A missing optional reply link does not lose the person's request.
+    // The ordinary message write checks the same Room's membership atomically.
+    if (!parent.rows[0]) return phoneSendMessage(ctx, {
+      roomId: input.roomId, text: input.text, messageId: input.messageId, attachments: input.attachments,
+    }, author, sourceClient, familyId);
+    if (!(await phoneHasRoomAccess(ctx, input.roomId, author)))
+      throw wall('membership', 'reply parent is not in this room');
     await phoneAssertRoomIsWritable(ctx, input.roomId, author);
     const id = input.messageId ?? messageId();
-    if (!/^[0-9a-f]{64}$/.test(id)) throw new Error('messageId is invalid');
+    if (!/^[0-9a-f]{64}$/.test(id)) throw wall('credentials', { message: 'messageId is invalid', status: 400 });
     // A reply in a DM addresses the agent it answers without naming it. That
     // is the DM's own doing, not a tag: `routeHumanMessage` wakes every
     // participant of a direct Room, so the address survives without a list.
@@ -305,7 +311,7 @@ import { phoneReadLiveDelta, phoneLiveStarPrompt } from './live-reads.js';
          AND reply_to_message_id=$6 AND root_message_id=$7`,
         [...values, isMentionReplyInput(input)],
       );
-      if (!retry.rowCount) throw new Error('messageId is invalid');
+      if (!retry.rowCount) throw wall('credentials', { message: 'messageId is invalid', status: 400 });
     } else {
       await advanceAuthorReadMark(database, input.roomId, author, id);
       const lifecycleCommand = await routeHumanMessage(database, id);

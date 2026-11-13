@@ -115,8 +115,8 @@ it('posts a private answer to the return address fixed at insertion, then comple
     privatePayload: { kind: 'order', text: 'answer in Two', authorId: H, fromRoomId: R2 } });
   expect((await queue()).find(entry => entry.id === item!.id)?.returnRoomId).toBe(R2);
   // A later mutable context must not move the committed return address.
-  await db.query(`UPDATE agent_commands SET private_payload=jsonb_set(private_payload,'{fromRoomId}',to_jsonb($2::text))
-    WHERE id=$1`, [item!.id, R1]);
+  await db.query(`UPDATE agent_commands SET private_payload=jsonb_set(jsonb_set(private_payload,'{fromRoomId}',to_jsonb($2::text)),'{authorId}',to_jsonb($3::text))
+    WHERE id=$1`, [item!.id, R1, A]);
   await answer(R1, item!.turn_request_id, 'recorded-route answer');
   expect((await db.query('SELECT room_id,text FROM messages WHERE author_id=$1 AND text=$2', [A, 'recorded-route answer'])).rows)
     .toEqual([{ room_id: R2, text: 'recorded-route answer' }]);
@@ -165,4 +165,16 @@ it('shows only the offline connection notice when the harness cannot start, keep
   expect(notices.rows.at(-1)?.text).toMatch(/is offline.*connect again/);
   expect((await db.query('SELECT state,completed_at FROM agent_commands WHERE id=$1', [item.id])).rows[0])
     .toEqual({ state: 'pending', completed_at: null });
+});
+
+it('a missing optional human reply link still appends and answers the request', async () => {
+  const phone = new (await import('./phone-service.js')).PhoneService(db, 'http://test');
+  const id = 'e'.repeat(64);
+  await phone.sendReply({ roomId: R1, parentMessageId: 'f'.repeat(64), messageId: id, text: '@agent answer without the missing parent' }, H);
+  const items = await queue();
+  expect(items).toHaveLength(1);
+  expect(items[0]?.source.body).toContain('answer without the missing parent');
+  await answer(R1, items[0]!.turnRequestId, 'Here is the answer.');
+  expect(await queue()).toEqual([]);
+  expect((await db.query('SELECT reply_to_message_id FROM messages WHERE id=$1', [id])).rows[0]).toEqual({ reply_to_message_id: null });
 });

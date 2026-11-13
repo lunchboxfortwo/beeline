@@ -49,7 +49,7 @@ const orderWakes = async () => (await db.query<{ agent_id: string; room_id: stri
 it('Reproduction room-broadcast: replays the four incident Room orders and wakes nobody', async () => {
   for (const text of ['Candy only: check the build', 'Baby only: rerun the proof', 'Candy only: post the URL', 'Baby only: stop'])
     await expect(daemon.execute('order', { ...authority(), address: ROOM, text }, JELLYBEAN))
-      .rejects.toThrow('a Room order must name exactly one agent');
+      .rejects.toThrow('order must name exactly one agent');
   expect(await orderWakes()).toEqual([]);
   console.info('Demonstrated room-broadcast: 4 Room-address orders without agent were refused; 0 agents woken (was Baby, Candy, Earth)');
 });
@@ -68,10 +68,10 @@ it('refuses a Room order naming a non-member or a human', async () => {
   expect(await orderWakes()).toEqual([]);
 });
 
-it('Reproduction SELF-1: refuses a self-order from the DM into the Room', async () => {
-  await expect(daemon.execute('order', { ...authority(), address: ROOM, agent: 'jellybean', text: 'Continue in the Room' }, JELLYBEAN))
-    .rejects.toThrow('itself');
-  expect(await orderWakes()).toEqual([]);
+it('queues an explicit self-order from the DM into the Room', async () => {
+  const result = await daemon.execute('order', { ...authority(), address: ROOM, agent: 'jellybean', text: 'Continue in the Room' }, JELLYBEAN);
+  expect(await orderWakes()).toEqual([{ agent_id: JELLYBEAN, room_id: ROOM }]);
+  expect((await daemon.execute('getAgentCommands', { roomId: ROOM }, JELLYBEAN)).commands.find(c => c.id === result.id)).toMatchObject({ source: { body: 'Continue in the Room' } });
 });
 
 it('allows named corner peers and preserves agent DM orders', async () => {
@@ -148,8 +148,8 @@ it('RUBY-18: an explicit re-review reaches the configured reviewer at the chain 
   const delivered = (await daemon.execute('getAgentCommands', { roomId: incoming.roomId }, BABY)).commands.find(command => command.id === rereview.id)!;
   expect(delivered).toBeDefined();
   await startQueuedCommand(daemon, { roomId: incoming.roomId, commandId: delivered.id }, BABY);
-  await expect(daemon.execute('order', { roomId: incoming.roomId, requestId: incoming.turnRequestId, address: incoming.roomId, agent: 'earth', text: 'Recruit a peer' }, CANDY))
-    .rejects.toThrow('agent order chain depth limit reached');
+  const peer = await daemon.execute('order', { roomId: incoming.roomId, requestId: incoming.turnRequestId, address: incoming.roomId, agent: 'earth', text: 'Recruit a peer' }, CANDY);
+  expect((await daemon.execute('getAgentCommands', { roomId: incoming.roomId }, EARTH)).commands.map(c => c.id)).toContain(peer.id);
 });
 
 it.each(['done', 'blocked', 'failed', 'needs_decision'])('Reproduction report-commander-refused: repair %s reaches its opening commander after a new head', async status => {
@@ -170,13 +170,10 @@ it.each(['done', 'blocked', 'failed', 'needs_decision'])('Reproduction report-co
     .toMatchObject({ state: 'pending', parent_command_id: order.id, review_context: null });
   expect((await db.query(`SELECT 1 FROM agent_commands WHERE reason='report' AND agent_id=$1`, [CANDY])).rowCount).toBe(0);
   expect((await db.query(`SELECT 1 FROM messages WHERE text=$1`, [text])).rowCount).toBe(0);
-  // An obsolete verdict cannot dispatch work on the replacement head, but
-  // refusing that dispatch must leave the running review's authority intact.
-  await expect(daemon.execute('report', { roomId: incoming.roomId, requestId: incoming.turnRequestId, status: 'done', text: 'done: stale review verdict' }, CANDY))
-    .rejects.toThrow('commander could not receive report');
-  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [incoming.id])).rows)
-    .toEqual([{ state: 'pending' }]);
-  expect((await db.query(`SELECT 1 FROM agent_commands WHERE private_payload->>'text'='done: stale review verdict'`)).rowCount).toBe(0);
+  // A changed head remains context; it cannot discard a report.
+  await daemon.execute('report', { roomId: incoming.roomId, requestId: incoming.turnRequestId, status: 'done', text: 'done: stale review verdict' }, CANDY);
+  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [incoming.id])).rows).toEqual([{ state: 'complete' }]);
+  expect((await db.query(`SELECT 1 FROM agent_commands WHERE private_payload->>'text' LIKE 'done: stale review verdict%'`)).rowCount).toBe(1);
   console.info(`Demonstrated Reproduction report-commander-refused: ${status} after repair delivered privately and claimed by opening commander`);
 });
 
@@ -199,17 +196,20 @@ it('Reproduction report-commander-refused: a current reviewer report keeps its o
   await startQueuedCommand(daemon, { roomId: reply.roomId, commandId: reply.id }, JELLYBEAN);
 });
 
-it('rejects corner self-orders, humans, outsiders and removed members without queueing', async () => {
+it('keeps membership walls while allowing explicit corner self-orders', async () => {
   const incoming = await cornerTurn();
   await db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [ROOM, EARTH]);
   const before = await orderWakes();
-  for (const agent of ['candy', CANDY, 'owner', 'nobody', 'earth'])
-    await expect(daemon.execute('order', { roomId: incoming.roomId, requestId: incoming.turnRequestId, address: incoming.roomId, agent, text: 'Do it' }, CANDY)).rejects.toThrow(/itself|agent member/);
-  await expect(daemon.execute('order', { roomId: incoming.roomId, requestId: incoming.turnRequestId, address: incoming.roomId, text: 'Default worker is me' }, CANDY)).rejects.toThrow('itself');
+  for (const agent of ['owner', 'nobody', 'earth'])
+    await expect(daemon.execute('order', { roomId: incoming.roomId, requestId: incoming.turnRequestId, address: incoming.roomId, agent, text: 'Do it' }, CANDY)).rejects.toThrow('agent member');
   expect(await orderWakes()).toEqual(before);
+  for (const agent of ['candy', CANDY, undefined]) {
+    const result = await daemon.execute('order', { roomId: incoming.roomId, requestId: incoming.turnRequestId, address: incoming.roomId, agent, text: `Continue ${agent}` }, CANDY);
+    expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [result.id])).rows).toEqual([{ state: 'pending' }]);
+  }
 });
 
-it.each(['corner', 'parent Room'])('stops a corner → %s → corner order loop at the existing depth bound', async target => {
+it.each(['corner', 'parent Room'])('retains every corner → %s → corner order beyond the former depth bound', async target => {
   let command = await cornerTurn();
   const corner = command.roomId;
   const depths: number[] = [];
@@ -221,11 +221,9 @@ it.each(['corner', 'parent Room'])('stops a corner → %s → corner order loop 
     command = (await daemon.execute('getAgentCommands', { roomId: address }, recipient)).commands.find(c => c.id === result.id)!;
     await startQueuedCommand(daemon, { roomId: address, commandId: command.id }, recipient);
   }
-  expect(depths).toEqual([1, 1, 2, 2, 3, 3]);
-  const before = await orderWakes();
-  await expect(daemon.execute('order', { roomId: command.roomId, requestId: command.turnRequestId, address: target === 'corner' ? corner : ROOM, agent: BABY, text: 'One hop too many' }, CANDY))
-    .rejects.toThrow('agent order chain depth limit reached');
-  expect(await orderWakes()).toEqual(before);
+  expect(depths).toEqual([1, 2, 3, 4, 5, 6]);
+  const result = await daemon.execute('order', { roomId: command.roomId, requestId: command.turnRequestId, address: target === 'corner' ? corner : ROOM, agent: BABY, text: 'Another hop' }, CANDY);
+  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [result.id])).rows).toEqual([{ state: 'pending' }]);
 });
 
 it.each(['done', 'blocked', 'failed', 'needs_decision'].flatMap(status => [JELLYBEAN, OWNER, EARTH].map(commander => ({ status, commander }))))('HANDBACK-ROUTE-1: implementer handback $status (commander=$commander) reaches the right recipient', async ({ status, commander }) => {

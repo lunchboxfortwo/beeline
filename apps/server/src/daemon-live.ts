@@ -1,3 +1,4 @@
+import { wall } from '@beeline/api-contract/daemon';
 import { MachineRequestResults } from './machine-request-results.js';
 import { helperUsageCodecs } from '@beeline/net/helper-codecs';
 import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
@@ -15,7 +16,6 @@ import type { PhoneService } from './phone-service.js';
 import type { ReleaseNotifier } from './release-notify.js';
 import type { SqlDatabase } from './database.js';
 
-export const MAX_LIVE_SESSION_QUEUED_BYTES = 2 * 1024 * 1024;
 
 export interface DaemonLiveDependencies {
   readonly vaultSaveRelay?: VaultSaveRelay;
@@ -86,8 +86,6 @@ export interface DaemonSessionTransport {
   isOpen(): boolean;
   /** Ends this agent's session: an old socket closes; a registration is dropped. */
   drop(code: number, reason: string): void;
-  /** False after the socket refused a frame for its helper version. */
-  admit(item: Record<string, unknown>): boolean;
   /** Ordinary operations preserve HTTP's per-request token revocation check. */
   authenticateOperation?: () => Promise<{error: string; status: number} | undefined>;
 }
@@ -101,7 +99,6 @@ export class DaemonAgentSession {
   readonly connectionId = randomUUID();
   epoch: number | undefined;
   readonly #wakeReleases: Array<() => void> = [];
-  #queuedBytes = 0;
   #tail = Promise.resolve();
   #closed = false;
   readonly #closedSignal = new AbortController();
@@ -194,6 +191,7 @@ export class DaemonAgentSession {
           transport.send({ type: 'config-changed', ...(event.roomId ? { roomId: event.roomId } : {}) });
           return;
         } else if (event.reason !== 'postgres:memberships') return;
+        if (event.reason === 'postgres:memberships') this.#pushQueue();
         transport.send({
           type: 'rooms-changed',
           ...(event.roomId ? { roomId: event.roomId } : {}),
@@ -212,13 +210,15 @@ export class DaemonAgentSession {
         else if (event.closeRequested && ['postgres:rooms', 'postgres:corner_facts', 'postgres:corner_github_cache'].includes(event.reason ?? ''))
           transport.send({ type: 'corner-complete', roomId: event.roomId });
       }),
-      live.subscribeResync(() =>
-        transport.send({ type: 'discovery-wake', reason: 'listener-resync' }),
-      ),
+      live.subscribeResync(() => {
+        this.#pushQueue();
+        transport.send({ type: 'discovery-wake', reason: 'listener-resync' });
+      }),
     );
-    const recovery = database.onRecovery?.(() =>
-      transport.send({ type: 'discovery-wake', reason: 'database-recovered' }),
-    );
+    const recovery = database.onRecovery?.(() => {
+      this.#pushQueue();
+      transport.send({ type: 'discovery-wake', reason: 'database-recovered' });
+    });
     if (recovery) this.#wakeReleases.push(recovery);
   }
 
@@ -260,8 +260,8 @@ export class DaemonAgentSession {
       const model = await this.deps.daemon.negotiateOwnedModel(this.agentId, this.presence.queueV1 === true);
       this.#ownedModelCapability = model?.capability;
       this.deps.registry.settled(this);
-      if(this.presence.usageAccountV1&&helperUsageEnabled())this.usageOwnerId=(await this.deps.database.query<{owner_id:string|null}>(
-        'SELECT owner_id FROM agents WHERE agent_id=$1',[this.agentId])).rows[0]?.owner_id??undefined;
+      if (this.presence.usageAccountV1 && helperUsageEnabled()) void this.deps.database.query<{owner_id:string|null}>(
+        'SELECT owner_id FROM agents WHERE agent_id=$1', [this.agentId]).then(result => { this.usageOwnerId = result.rows[0]?.owner_id ?? undefined; }, () => undefined);
     } catch (error) {
       console.error('[presence] connection claim failed', error instanceof Error ? error.message : String(error));
     }
@@ -275,38 +275,24 @@ export class DaemonAgentSession {
   }
 
   /** Queue one frame behind this agent's earlier frames. */
-  frame(raw: Record<string, unknown>, frameBytes: number): void {
+  frame(raw: Record<string, unknown>, _frameBytes: number): void {
     if (this.#closed) return;
     if (['daemon-operation','request-result','request-ack'].includes(String(raw.type))) {
       // Provider work and waitForCornerWake must not hold the serial intake
       // queue or its database semaphore: Stop/subscriptions still need service.
       // This is the same authenticated service adapter as old HTTP ingress.
-      if (!this.presence.daemonOperationsV1 || !this.transport.admit(raw)) return;
       void this.#operation(raw);
       return;
     }
-    if (this.#queuedBytes + frameBytes > MAX_LIVE_SESSION_QUEUED_BYTES) {
-      this.deps.errors.overload++;
-      this.transport.send({type:'live-refused',reason:'live admission overloaded'});
-      return;
-    }
-    this.#queuedBytes += frameBytes;
     this.#tail = this.#tail.then(async () => {
       if (this.#closed || !this.transport.isOpen()) return;
-      const releaseDbTask = await this.deps.acquireLiveDbTask();
-      try {
-        if (!this.#closed && this.transport.isOpen()) await this.#process(raw);
-      } finally {
-        releaseDbTask();
-      }
+      if (!this.#closed && this.transport.isOpen()) await this.#process(raw);
     }).catch((error) => {
       const retryable = isRetryableLiveError(error);
       const code = error && typeof error === 'object' ? (error as { code?: unknown }).code : undefined;
       const kind = retryable ? 'database' : code === '22P02' ? 'invalid' : 'internal';
       this.deps.errors[kind]++;
       console.error('[live] message failed', { kind, error });
-    }).finally(() => {
-      this.#queuedBytes -= frameBytes;
     });
   }
 
@@ -331,7 +317,7 @@ export class DaemonAgentSession {
   }
 
   async #operation(item: Record<string, unknown>): Promise<void> {
-    if (typeof item.requestId !== 'string' || !item.requestId || item.requestId.length > 128) return;
+    if (typeof item.requestId !== 'string' || !item.requestId) return;
     const results = new MachineRequestResults(this.deps.database);
     const requestId = item.requestId;
     const reply = (result:Record<string,unknown>|undefined) => {
@@ -341,7 +327,7 @@ export class DaemonAgentSession {
     try {
       // Re-check credentials on result reads as well as original dispatch.
       const refusal = this.transport.authenticateOperation ? await this.transport.authenticateOperation()
-        : {error:'daemon_token_required',status:401};
+        : {error:wall('credentials', 'daemon_token_required').message,status:401};
       if(refusal){reply(refusal);return;}
       if(item.type === 'request-result') { reply(await results.read(this.agentId,requestId,this.#closedSignal.signal));return; }
       if(item.type === 'request-ack') { await results.acknowledge(this.agentId,requestId);return; }
@@ -350,13 +336,14 @@ export class DaemonAgentSession {
           if(Object.keys(item).some(key=>!['type','agentId','requestId','operation','input'].includes(key)) ||
             typeof item.operation!=='string' || !DAEMON_OPERATION_NAMES.has(item.operation as keyof DaemonOperationMap) ||
             !item.input || typeof item.input!=='object' || Array.isArray(item.input))
-            return {error:'invalid_daemon_operation',status:400};
+            return {error:wall('credentials', 'invalid_daemon_operation').message,status:400};
           const operation=item.operation as keyof DaemonOperationMap;
           const input=item.input as never;
           return {result:await this.deps.daemon.execute(operation,input,this.agentId,
             operation==='getModelCredential' ? this.#ownedModelCapability : undefined)};
         } catch(error) {
-          return {error:error instanceof Error?error.message:'daemon_operation_refused',status:this.deps.operationErrorStatus?.(error)??503};
+          const failure = wall('credentials', error instanceof Error ? error : {message:'daemon_operation_refused',status:503});
+          return {error:failure.message,status:this.deps.operationErrorStatus?.(failure)??failure.status};
         }
       }));
     } catch(error) {
@@ -364,13 +351,12 @@ export class DaemonAgentSession {
       // Otherwise a finished harness stays working while publication waits forever.
       // Keep the durable request identity: no failed operation is resubmitted here.
       console.error('[live] machine request failed',error);
-      reply({error:'machine_request_failed',status:503});
+      reply({error:wall('credentials', {message:'machine_request_failed',status:503,cause:error instanceof Error?error:undefined}).message,status:503});
     }
   }
 
   async #process(item: Record<string, unknown>): Promise<void> {
-    await this.deps.connectionPresence?.renewLease();
-    if (!this.transport.admit(item)) return;
+    void this.deps.connectionPresence?.renewLease().catch(error => console.warn('[presence] refresh failed', error));
     if (item.type === 'subscribe-queue') {
       this.#queueSubscribed = true;
       await this.#readQueue();
@@ -378,7 +364,7 @@ export class DaemonAgentSession {
     }
     if (item.type === 'presence') {
       await this.deps.connectionPresence?.announce(undefined, this.agentId, {
-        ...(typeof item.lifecycleId === 'string' && item.lifecycleId.length <= 128 ? { lifecycleId: item.lifecycleId } : { lifecycleId: this.presence.lifecycleId }),
+        ...(typeof item.lifecycleId === 'string' ? { lifecycleId: item.lifecycleId } : { lifecycleId: this.presence.lifecycleId }),
         ...(typeof item.releaseVersion === 'string' ? { releaseVersion: item.releaseVersion } : {}),
         ...(typeof item.sourceSha === 'string' ? { sourceSha: item.sourceSha } : {}),
         ...(typeof item.available === 'boolean' ? { available: item.available } : {}),
@@ -387,7 +373,7 @@ export class DaemonAgentSession {
     }
     if(item.type==='usage-operation'){
       const names=['publishAgentUsageAccount','attachAgentUsageAccount','postAgentUsage'] as const;
-      if(!this.usageAccountV1||typeof item.requestId!=='string'||!item.requestId||item.requestId.length>128||
+      if(!this.usageAccountV1||typeof item.requestId!=='string'||!item.requestId||
         !names.includes(item.operation as typeof names[number]))return;
       let input:Record<string,unknown>|undefined;
       try{input=helperUsageCodecs(item.operation as typeof names[number]).params.parse(item.input) as unknown as Record<string,unknown>;}catch{
@@ -410,7 +396,7 @@ export class DaemonAgentSession {
       return;
     }
     if(item.type==='overlay-update'){
-      if(!this.overlayV1||typeof item.requestId!=='string'||item.requestId.length>128||this.epoch===undefined)return;
+      if(!this.overlayV1||typeof item.requestId!=='string'||this.epoch===undefined)return;
       const result=await applyHelperOverlay(this.deps.database,this.agentId,{connectionId:this.connectionId,epoch:this.epoch},item.frame);
       if(result.event){const event={...result.event,localOrigin:true as const};this.deps.live.publish(event);}
       if(!this.#closed&&this.transport.isOpen())this.transport.send({type:'overlay-ack',requestId:item.requestId,...result.ack});

@@ -1,3 +1,4 @@
+import { wall, WallRefusal } from '@beeline/api-contract/daemon';
 import { parseSigninFunnelEvent } from '@beeline/api-contract/signin-funnel';
 import { recordSigninFunnelEvent } from './signin-funnel.js';
 import { ingestDiagnostics, recordDiagnostic } from './diagnostics.js';
@@ -52,7 +53,7 @@ function found<T>(result: T | null): T {
   return result;
 }
 function required(input: Record<string, unknown>, key: string): string {
-  if (typeof input[key] !== 'string') refuse(400, `${key} is required`);
+  if (typeof input[key] !== 'string') throw wall('credentials', { message: `${key} is required`, status: 400 });
   return input[key];
 }
 function optional(input: Record<string, unknown>, key: string): string | undefined {
@@ -62,7 +63,7 @@ function optional(input: Record<string, unknown>, key: string): string | undefin
 function uuid(input: Record<string, unknown>, key: string): string {
   const value = required(input, key);
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value))
-    refuse(400, `${key} is invalid`);
+    throw wall('credentials', { message: `${key} is invalid`, status: 400 });
   return value;
 }
 function messageId(input: Record<string, unknown>): string {
@@ -79,7 +80,7 @@ function isIanaTimeZone(value: string): boolean {
 /** One authenticated context for both transports; no operation is reimplemented per transport. */
 export function createPhoneOperationDispatcher(
   options: ServerOptions,
-  errorStatus: (error: unknown) => number = error => error instanceof PhoneOperationError ? error.status : 500,
+  errorStatus: (error: unknown) => number = error => error instanceof PhoneOperationError || error instanceof WallRefusal ? error.status : 500,
 ) {
   const ledger = new RouterCommandLedger(options.database);
   const diagnosticsDb = options.databasePools?.diagnostics ?? options.database;
@@ -253,26 +254,25 @@ export function createPhoneOperationDispatcher(
     }
   };
 
-  const dispatch = async (name: string, input: Record<string, unknown>, viewerId: string, signal?: AbortSignal,
+  const dispatch = async (name: string, input: Record<string, unknown>, viewerId: string, _signal?: AbortSignal,
     familyId?: string, command?: RouterCommandIdentity): Promise<unknown> => {
-    if (!viewerId) refuse(401, 'phone_token_required');
-    if (!PHONE_OPERATION_NAMES.has(name as never)) refuse(404, 'unknown_phone_operation');
-    if (!input || typeof input !== 'object' || Array.isArray(input)) refuse(400, 'invalid_args');
-    signal?.throwIfAborted();
+    if (!viewerId) throw wall('signed-in', { message: 'phone_token_required', status: 401 });
+    if (!PHONE_OPERATION_NAMES.has(name as never)) throw wall('credentials', { message: 'unknown_phone_operation', status: 404 });
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw wall('credentials', { message: 'invalid_args', status: 400 });
     const startedAt = Date.now();
     // Let admitted writes settle atomically. Never race a transaction against socket closure.
     let identity: RouterCommandIdentity | undefined;
     if (command !== undefined) {
       try { identity = parseRouterCommandIdentity(command); }
-      catch { refuse(400, 'invalid_command_identity'); }
+      catch { throw wall('credentials', { message: 'invalid_command_identity', status: 400 }); }
       if (!ATOMIC_ROUTER_COMMANDS.has(name) && !preparedMessageCommands.has(name)&&!scheduledStopCommands.has(name)&&!isTrayDecisionCommand(name))
-        refuse(400, 'command_operation_not_supported');
+        throw wall('credentials', { message: 'command_operation_not_supported', status: 400 });
     }
     if (identity && preparedMessageCommands.has(name) && input.messageId !== identity.id)
-      refuse(400, 'command_message_identity_mismatch');
+      throw wall('credentials', { message: 'command_message_identity_mismatch', status: 400 });
     if(identity&&scheduledStopCommands.has(name)){
       uuid(input,'roomId');
-      if(name==='deleteRoomSchedule')uuid(input,'scheduleId');else if(required(input,'subscriptionId').length>512)refuse(400,'invalid_subscriptionId');
+      if(name==='deleteRoomSchedule')uuid(input,'scheduleId');else required(input,'subscriptionId');
     }
     let result: unknown;
     let receipt;
@@ -297,13 +297,16 @@ export function createPhoneOperationDispatcher(
         result = receipt.result;
         if (receipt.state !== 'committed') {
           if (command) return receipt;
-          refuse(409, receipt.state === 'result-expired' ? 'command_result_expired' : 'command_outcome_unknown');
+          throw wall('credentials', { message: receipt.state === 'result-expired' ? 'command_result_expired' : 'command_outcome_unknown', status: 409 });
         }
       } else result = await execute(name, input, viewerId, familyId);
     } catch (error) {
-      if (error instanceof CommandDigestConflict) refuse(409, 'command_identity_conflict');
-      if (error instanceof InvalidCommandArguments) refuse(400, 'invalid_command_arguments');
-      throw error;
+      if (error instanceof CommandDigestConflict) throw wall('credentials', { message: 'command_identity_conflict', status: 409 });
+      if (error instanceof InvalidCommandArguments) throw wall('credentials', { message: 'invalid_command_arguments', status: 400 });
+      throw wall('credentials', error instanceof WallRefusal ? error : {
+        message: error instanceof Error ? error.message : String(error), status: errorStatus(error),
+        cause: error instanceof Error ? error : undefined,
+      });
     }
     // Replaying a receipt must not replay post-commit hooks or notifications.
     if (command && !performed) return receipt;
@@ -336,7 +339,7 @@ export function createPhoneOperationDispatcher(
       options.operationOutcomes?.record(args[0], 200, '');
       return result;
     } catch (error) {
-      const explicit = error instanceof PhoneOperationError ? error.payload.code ?? error.payload.error : undefined;
+      const explicit = error instanceof PhoneOperationError ? error.payload.code ?? error.payload.error : error instanceof WallRefusal ? error.message : undefined;
       const code = typeof explicit === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(explicit)
         ? explicit : error instanceof Error ? error.name || 'Error' : 'Error';
       if (operation && operation !== 'reportDiagnostics') void recordDiagnostic(diagnosticsDb, { name: 'operation_failed', operation, outcome: errorStatus(error)<500 ? 'refused' : 'failed', code: errorStatus(error)<500 ? 'refused' : 'unexpected_error', durationMs: Date.now()-started },args[2]).catch(()=>undefined);

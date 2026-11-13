@@ -1,3 +1,4 @@
+import { wall } from '@beeline/api-contract/daemon';
 import { lockAgentCommandQueue } from './agent-command-queue.js';
 import { endAgentTurn } from './agent-turn-end.js';
 import { ExpectedRefusalError } from './command-refusal.js';
@@ -179,8 +180,8 @@ export async function authorizeCommandOutput(
          ORDER BY command.created_at DESC,command.id DESC LIMIT 1 FOR UPDATE OF command`,
         [roomId, agentId, requestId])).rows[0]
     : undefined;
-  if (!row) throw new Error('command output authority rejected: no command row');
-  if (row.state === 'cancelled') throw new Error('command turn cancelled');
+  if (!row) throw wall('credentials', 'command output authority rejected: no command row');
+  if (row.state === 'cancelled') throw wall('stop', 'command turn cancelled');
   return row;
 }
 

@@ -86,7 +86,9 @@ it.each([false, true])('nested corners report one step up even with opening pare
   await rootFixture.daemon.execute('postAgentTurnReceipt', { ...authority(parentTurn), agentId: WORKER, status: 'complete' }, WORKER);
   await claim(report);
   await rootFixture.daemon.execute('report', { ...authority(report), status: 'needs_decision', text: 'Nested decision needed' }, WORKER);
-  expect((await commands(DM, RUBY)).find(command => command.reason === 'report'))
+  if (removed) expect((await rootFixture.db.query(`SELECT room_id,text FROM messages WHERE author_id=$1 AND text=$2`, [WORKER, 'needs-decision: Nested decision needed'])).rows)
+    .toEqual([{ room_id: DM, text: 'needs-decision: Nested decision needed' }]);
+  else expect((await commands(DM, RUBY)).find(command => command.reason === 'report'))
     .toMatchObject({ private: true, source: { authorId: WORKER, body: 'needs-decision: Nested decision needed' } });
 });
 

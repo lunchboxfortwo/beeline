@@ -55,7 +55,7 @@ it.each(['approved', 'legacy', 'agent-order', 'different-dispatch', 'same-issuer
   if (mode === 'legacy') await db.query(`UPDATE corner_brief_revisions
     SET approval_basis=approval_basis-'commanderCommandId'-'commanderReturnRoomId' WHERE corner_id=$1 AND revision=2`, [opened.cornerId]);
   if (historicalOrder) {
-    await daemon.execute('report', { ...authority(historicalOrder), status: 'blocked', text: 'Earlier same-issuer order result' }, WORKER);
+    await daemon.execute('postRoomMessage', { ...authority(historicalOrder), text: 'blocked: Earlier same-issuer order result' }, WORKER);
     // Report wakes reach the commander inside the corner they concern.
     expect((await commands(opened.cornerId, BOSS)).filter(c => c.reason === 'report')).toEqual([
       expect.objectContaining({ source: expect.objectContaining({ body: 'blocked: Earlier same-issuer order result' }) })]);
@@ -99,15 +99,11 @@ it.each(['current', 'other', 'stale', 'none'] as const)('Reproduction R2: missin
   const post = posted ? await daemon.execute('postCornerMessage', { ...authority(turn), cornerId: address,
     text: 'The public reply is delivered.' }, WORKER) : undefined;
   await db.query('UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2', [DM, RUBY]);
-  if (mode === 'stale') await db.query(`UPDATE agent_commands SET private_payload=jsonb_set(private_payload,
-    '{publicPostGenerationId}','"previous-generation"'::jsonb) WHERE id=$1`, [turn.id]);
   const final = daemon.execute('postRoomMessage', { ...authority(turn), text: 'The public reply is delivered.' }, WORKER);
-  if (!posted || mode === 'stale') { await expect(final).rejects.toThrow('not delivered'); return; }
-  await expect(final).resolves.toMatchObject({ id: post!.id, receipt: expect.stringContaining('Warning:') });
-  expect(await daemon.execute('getRequestCompletion', { roomId: ROOM, requestId: turn.turnRequestId }, WORKER))
-    .toMatchObject({ completed: true, outcome: 'complete' });
-  const view = await rootFixture.phone.readRoom(address, HUMAN);
-  expect(JSON.stringify(view)).toContain('The public reply is delivered.');
-  const source = await rootFixture.phone.readRoom(ROOM, HUMAN);
-  expect(source?.latestAgentTurns?.find(t => t.requestId === turn.turnRequestId)?.status).toBe('complete');
+  await expect(final).rejects.toMatchObject({ kind: 'membership' });
+  expect(await daemon.execute('getRequestCompletion', { roomId: ROOM, requestId: turn.turnRequestId }, WORKER)).toMatchObject({ completed: false });
+  await db.query('UPDATE memberships SET removed_at=NULL WHERE room_id=$1 AND identity_id=$2', [DM, RUBY]);
+  await daemon.execute('postRoomMessage', { ...authority(turn), text: 'The public reply is delivered.' }, WORKER);
+  expect(await daemon.execute('getRequestCompletion', { roomId: ROOM, requestId: turn.turnRequestId }, WORKER)).toMatchObject({ completed: true });
+  expect((await commands(DM, RUBY)).find(c => c.reason === 'report')?.source.body).toBe('The public reply is delivered.');
 });

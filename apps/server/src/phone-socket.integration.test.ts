@@ -333,7 +333,7 @@ describe('SOCKET-OPS-1 phone request/reply', () => {
         )
       ).rows,
     ).toEqual([
-      { op: 'listRoomWorkflowRuns', status: 403, code: 'Error', release: 'socket-test', count: 2 },
+      { op: 'listRoomWorkflowRuns', status: 403, code: 'WallRefusal', release: 'socket-test', count: 2 },
       {
         op: 'notAnOperation',
         status: 404,

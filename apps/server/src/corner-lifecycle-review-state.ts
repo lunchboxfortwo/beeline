@@ -4,7 +4,7 @@ import { missingReviewAttachments } from './review-evidence.js';
 import { cornerReviewerSql } from './corner-reviewer.js';
 import { CornerAccessDatabase } from './corner-access-database.js';
 import { isZeroCheckCommander } from './corner-merge-approval.js';
-import { reportToCommander } from './commander.js';
+import { reportAgentAttention } from './commander.js';
 import type { activeCornerHolds } from './corner-holds.js';
 import { createHash } from 'node:crypto';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
@@ -47,14 +47,14 @@ export async function noteReviewDispatchFailure(
   headSha: string,
   reason: string,
 ): Promise<void> {
-  await reportToCommander(
+  await reportAgentAttention(
     db,
     cornerId,
     SYSTEM_IDENTITY_ID,
     systemMessage('corner-lifecycle.blocked', reason),
     undefined,
     createHash('sha256').update(`review-dispatch:${cornerId}:${headSha}:${reason}`).digest('hex'),
-    { agentOnly: true, wakeInCorner: true },
+    { wakeInCorner: true },
   );
 }
 
@@ -198,7 +198,7 @@ export async function noteUnreachableReviewer(
   const id = createHash('sha256')
     .update(`beeline:${input.cornerId}:reviewer-unreachable:${input.reviewerId}:${input.reason}`)
     .digest('hex');
-  await reportToCommander(
+  await reportAgentAttention(
     db,
     input.cornerId,
     input.reviewerId,
@@ -209,7 +209,7 @@ export async function noteUnreachableReviewer(
     ),
     undefined,
     id,
-    { agentOnly: true, wakeInCorner: true },
+    { wakeInCorner: true },
   );
 }
 

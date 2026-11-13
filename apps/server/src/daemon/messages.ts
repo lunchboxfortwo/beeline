@@ -1,3 +1,4 @@
+import { wall } from '@beeline/api-contract/daemon';
 import { messageColumns } from '../message-columns.js';
 import { cornerRequestSql } from '../corner-opening.js';
 import { mentionReplyKey, mentionReplyId } from '../owed-mentions.js';
@@ -337,14 +338,10 @@ import { daemonWriteResult } from './corner-messages.js';
       );
       if (ctx.livePaintDiagnostics) databaseAwaitResolvedAt = Date.now();
       const result = query.rows[0];
-      if (!result || result.outcome === 'write_failed')
-        throw new Error('command output authority rejected');
-      if (result.outcome === 'authority_rejected')
-        throw new Error('command output authority rejected');
-      if (result.outcome === 'turn_cancelled') throw new Error('command turn cancelled');
-      // The item was already answered silently: this resend has nothing to add.
-      if (result.outcome === 'already_completed') return daemonWriteResult(ctx);
-      if (!result.row) throw new Error('command output authority rejected');
+      if (result?.outcome === 'turn_cancelled') throw wall('stop', 'command turn cancelled');
+      // An already completed item returns its durable receipt.
+      if (result?.outcome === 'already_completed') return daemonWriteResult(ctx);
+      if (!result?.row) throw wall('credentials', 'command output authority rejected');
       saved = { ...result.row, created_at: new Date(result.row.created_at) };
       if (ctx.livePaintDiagnostics) projectionCompletedAt = Date.now();
     } else {

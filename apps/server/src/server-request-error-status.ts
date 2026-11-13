@@ -1,3 +1,4 @@
+import { WallRefusal } from '@beeline/api-contract/daemon';
 import { PhoneOperationError } from "./phone-operations.js";
 import { WorkflowAuthorizationError } from "./workflow-admin.js";
 import { CommandRefusalError } from "./commander.js";
@@ -11,6 +12,7 @@ import { GitHubHttpError, ProductionReleaseBusyError } from "@beeline/auth/githu
 
 
 export function requestErrorStatus(error: unknown): number {
+  if (error instanceof WallRefusal) return error.status;
   if (error instanceof ProductionReleaseBusyError) return 409;
   if (error instanceof PhoneOperationError) return error.status;
   const message = error instanceof Error ? error.message : 'request failed';

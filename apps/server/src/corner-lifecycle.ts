@@ -2,7 +2,7 @@ import { loadCornerWaiting } from './corner-waiting.js';
 import { deleteCornerWakeSources } from './corner-wake-cleanup.js';
 import { releaseArchivedCornerHolds } from './corner-holds.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
-import { reportToCommander } from './commander.js';
+import { reportAgentAttention } from './commander.js';
 import { createHash } from 'node:crypto';
 import { CornerLifecycleView } from '@beeline/api-contract/phone';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
@@ -615,19 +615,19 @@ async function writeCornerAdvance(
         effects.push(effect.key);
     }
     for (const notice of plan.notifications) {
-      if (notice.kind === 'draft') await reportToCommander(db, cornerId, corner.worker_agent_id ?? SYSTEM_IDENTITY_ID,
+      if (notice.kind === 'draft') await reportAgentAttention(db, cornerId, corner.worker_agent_id ?? SYSTEM_IDENTITY_ID,
         systemMessage('agent-command.blocked-pr-is-a-draft-marking-it-ready-for-review-failed'), undefined,
         createHash('sha256').update(`draft-blocked:${cornerId}:${head}`).digest('hex'),
-        { agentOnly: true });
+        {});
       if (notice.kind === 'idle' && row) {
-        await reportToCommander(
+        await reportAgentAttention(
           db,
           cornerId,
           SYSTEM_IDENTITY_ID,
           `blocked: Corner ${row.name} is idle. Resume it, set a hold, or close it.`,
           undefined,
           createHash('sha256').update(`idle:${cornerId}:${row.idle_since}`).digest('hex'),
-          { automatic: true, agentOnly: true, idleSince: row.idle_since },
+          { automatic: true, idleSince: row.idle_since },
         );
       }
       // Explicit reports, owed asks and action cards already deliver to their
@@ -710,7 +710,7 @@ export async function noteReviewBlocked(
 ): Promise<Applied> {
   const episode = `${cornerId}:${headKey}:${reason}`;
   if (reportCommander)
-    await reportToCommander(
+    await reportAgentAttention(
       db,
       cornerId,
       SYSTEM_IDENTITY_ID,
@@ -718,7 +718,7 @@ export async function noteReviewBlocked(
       undefined,
       createHash('sha256').update(`review-gap:${episode}`).digest('hex'),
       // The review gate is corner work: wake the implementer where its PR lives.
-      { agentOnly: true, wakeInCorner: true },
+      { wakeInCorner: true },
     );
   const command = corner.worker_agent_id
     ? await createAgentCommand(db, {

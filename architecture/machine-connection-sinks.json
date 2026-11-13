@@ -43,41 +43,29 @@
     "count": 1,
     "reason": "Machine registration, request correlation, and explicit process stop."
   },
-  "apps/server/src/machine-connection.ts::<module>::close": {
-    "count": 1,
-    "reason": "Authenticated machine output and login/version changes."
-  },
-  "apps/server/src/machine-connection.ts::#forceUpdate::send": {
-    "count": 1,
-    "reason": "Authenticated machine output and login/version changes."
-  },
-  "apps/server/src/machine-connection.ts::admit::close": {
-    "count": 1,
-    "reason": "Authenticated machine output and login/version changes."
-  },
   "apps/server/src/machine-connection.ts::serveAgentSocket::close": {
-    "count": 3,
-    "reason": "Authenticated machine output and login/version changes."
+    "count": 2,
+    "reason": "Authenticated machine output and actual login/session replacement; release readiness never refuses frames."
   },
   "apps/server/src/machine-connection.ts::serveAgentSocket::terminate": {
     "count": 1,
-    "reason": "Authenticated machine output and login/version changes."
+    "reason": "Authenticated machine output and actual login/session replacement; release readiness never refuses frames."
   },
   "apps/server/src/machine-connection.ts::serveAgentSocket::send": {
     "count": 1,
-    "reason": "Authenticated machine output and login/version changes."
+    "reason": "Authenticated machine output and actual login/session replacement; release readiness never refuses frames."
   },
   "apps/server/src/machine-connection.ts::serveMachineSocket::close": {
-    "count": 5,
-    "reason": "Authenticated machine output and login/version changes."
+    "count": 4,
+    "reason": "Authenticated machine output and actual login/session replacement; release readiness never refuses frames."
   },
   "apps/server/src/machine-connection.ts::serveMachineSocket::send": {
-    "count": 5,
-    "reason": "Authenticated machine output and login/version changes."
+    "count": 4,
+    "reason": "Authenticated machine output and actual login/session replacement; release readiness never refuses frames."
   },
   "apps/server/src/machine-connection.ts::machineConnectionOutput::send": {
     "count": 1,
-    "reason": "Authenticated machine output and login/version changes."
+    "reason": "Authenticated machine output and actual login/session replacement; release readiness never refuses frames."
   },
   "apps/server/src/server.ts::createBeelineServer::terminate": {
     "count": 1,

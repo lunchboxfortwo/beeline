@@ -1,3 +1,4 @@
+import { wall } from '@beeline/api-contract/daemon';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
@@ -165,14 +166,16 @@ export class PlaceSession {
   /** A free agent's hosted model is reachable only with a credential bound to this item. */
   private async hostedModel(item: AgentCommand): Promise<OwnedModelFiles | undefined> {
     const env = this.options.config.agentEnv;
-    if (!env?.BEELINE_FREE_AGENT_ID && !env?.BEELINE_FREE_AGENT_MODEL_TOKEN) return undefined;
-    const { modelCredential } = await this.options.api.execute('getModelCredential', { roomId: item.roomId, requestId: item.turnRequestId });
-    if (!modelCredential) return undefined;
-    return OwnedModelFiles.create({
-      root: resolve(dirname(this.contextPath), 'state', `owned-model-${item.id}`), credential: modelCredential,
-      binding: { agentId: this.options.agent.publicKey, itemId: item.id, provider: 'beeline', model: 'server-selected',
-        baseUrl: new URL('/v1/free-agents/model', this.options.api.baseUrl).href },
-    });
+    let files: OwnedModelFiles | undefined;
+    if (env?.BEELINE_FREE_AGENT_ID || env?.BEELINE_FREE_AGENT_MODEL_TOKEN) {
+      const { modelCredential } = await this.options.api.execute('getModelCredential', { roomId: item.roomId, requestId: item.turnRequestId });
+      if (modelCredential) files = await OwnedModelFiles.create({
+        root: resolve(dirname(this.contextPath), 'state', `owned-model-${item.id}`), credential: modelCredential,
+        binding: { agentId: this.options.agent.publicKey, itemId: item.id, provider: 'beeline', model: 'server-selected',
+          baseUrl: new URL('/v1/free-agents/model', this.options.api.baseUrl).href },
+      });
+    }
+    return files;
   }
 
   /** Make sure a live session serves this place; reuse the running one. */
@@ -203,7 +206,7 @@ export class PlaceSession {
       this.notes.push(`The OS sandbox could not start (${failure instanceof Error ? failure.message : String(failure)}). ` +
         `This session runs without it: you can read files, edit files only inside ${this.folder()}, and shell commands are refused.`);
       await this.activate(false);
-    } else if (failure) throw failure;
+    } else if (failure) throw wall('sandbox', failure instanceof Error ? failure : { message: String(failure), status: 503 });
   }
 
   private async activate(sandboxed: boolean): Promise<void> {
@@ -437,7 +440,7 @@ export class PlaceSession {
       result = await answering;
     } catch (error) {
       void stream.retract();
-      throw error;
+      throw wall('stop', error instanceof Error ? error : { message: String(error), status: 503 });
     } finally {
       stream.close();
       model?.revoke();
@@ -448,7 +451,7 @@ export class PlaceSession {
       void writeBackRoomClaudeLogin({ root: this.options.config.agentHomeRoot, operatorHome: this.options.config.operatorHome })
         .catch(error => console.warn('[body] refreshed Claude login not shared:', error));
     const text = durableReplyText(result.agentText) || durableReplyText(stream.lastRunText);
-    if (!text) throw new Error(`harness ended without a public answer (${result.stopReason})`);
+    if (!text) throw wall('stop', `harness ended without a public answer (${result.stopReason})`);
     let steps: Answer['steps'] = [];
     try { steps = roomReplySteps(agentTurnSteps(result.updates ?? [])); }
     catch (error) { console.warn('[body] optional answer history omitted:', error); }

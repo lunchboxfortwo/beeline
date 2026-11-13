@@ -8,7 +8,6 @@ import { sendOperatorSystemDm, readOperatorSystemDm } from '../operator-system-d
 import { productionReleaseDispatch } from '../production-release-dispatch.js';
 import { agentUsage, notifyUsageRefreshResult, postedRefreshOutcome, saveAgentUsage } from '../agent-usage.js';
 import { queueDatabaseWork } from '../database-work-queue.js';
-import { normalizeAgentAsk } from '../tray-approval-ask.js';
 import { commandAddress, sendOrder, stopCommandedTurn, CommandRefusalError } from '../commander.js';
 import { createAgentSubscription, listAgentSubscriptions, deleteAgentSubscription, listServiceSubscriptionEvents } from '../agent-subscriptions.js';
 import { completeProviderWebhookAssignment } from '../provider-webhooks.js';
@@ -176,14 +175,13 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
       case 'order':
         return await sendOrder(ctx.database, ctx.authorizedCommand!, authenticatedAgentId,
           String(candidate.address), String(candidate.text),
-          candidate.agent === undefined ? undefined : String(candidate.agent)) as Output<Name>;
+          candidate.agent === undefined ? undefined : String(candidate.agent), ctx.afterCommit) as Output<Name>;
       case 'stopAgentTurn':
         return await stopCommandedTurn(ctx.database, ctx.authorizedCommand!, authenticatedAgentId,
           String(candidate.address),
           candidate.agent === undefined ? undefined : String(candidate.agent)) as Output<Name>;
       case 'report': {
-        const ask = candidate.ask === undefined
-          ? undefined : normalizeAgentAsk(candidate.ask);
+        const ask = typeof candidate.ask === 'string' ? candidate.ask : undefined;
         return await daemonReport(ctx, typeof candidate.text === 'string' ? candidate.text : '', authenticatedAgentId, ctx.authorizedCommand!, ctx.database, false, candidate.status, ask) as Output<Name>;
       }
       case 'read': {

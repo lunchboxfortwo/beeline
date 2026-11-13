@@ -1,3 +1,4 @@
+import { wall } from '@beeline/api-contract/daemon';
 import { phoneIdentity as identity, type PhoneIdentityRow as IdentityRow } from '../phone-identity.js';
 import type { AgentGrantView } from '@beeline/api-contract/phone';
 import { type AgentGrantStatus } from '@beeline/api-contract/agent-grants';
@@ -186,16 +187,13 @@ import { AGENT_OWNER_AUTHORITY_MESSAGE, WORKSPACE_ADMIN_AUTHORITY_MESSAGE } from
 
 
   export async function phoneAssertRoomIsWritable(ctx: PhoneContext, roomId: string, author: string): Promise<void> {
-    if (author === SYSTEM_IDENTITY_ID) return;
-    const room = await ctx.database.query<{ direct_participants: string[] | null }>(
-      `SELECT direct_participants FROM rooms WHERE id=$1`,
-      [roomId],
-    );
-    const participants = room.rows[0]?.direct_participants ?? null;
-    if (participants?.includes(SYSTEM_IDENTITY_ID)) {
-      throw new Error(
-        'this is a read-only system thread; only @system may post here (access denied)',
+    if (author !== SYSTEM_IDENTITY_ID) {
+      const room = await ctx.database.query<{ direct_participants: string[] | null }>(
+        `SELECT direct_participants FROM rooms WHERE id=$1`, [roomId],
       );
+      const participants = room.rows[0]?.direct_participants ?? null;
+      if (participants?.includes(SYSTEM_IDENTITY_ID))
+        throw wall('credentials', 'this is a read-only system thread; only @system may post here (access denied)');
     }
   }
 

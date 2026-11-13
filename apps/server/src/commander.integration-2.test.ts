@@ -2,7 +2,7 @@ import { cornerImplementerSql, readCornerObjective, writeCornerObjective, corner
 
 
 
-it('Reproduction corner-ancestor-rule: corner orders reach self, siblings and children while rejecting ancestors', async () => {
+it('Reproduction corner-ancestor-rule: orders reach member agents in siblings, children, ancestors and other chats', async () => {
   const opened = await open();
   const sibling = await rootFixture.daemon.execute('createCorner', { ...authority(rootFixture.order), targetRoomId: ROOM,
     idempotencyKey: 'sibling', name: 'Sibling', objective: 'Build a sibling widget', implementer: 'worker',
@@ -24,28 +24,19 @@ it('Reproduction corner-ancestor-rule: corner orders reach self, siblings and ch
   await insertCornerFacts(rootFixture.db, { cornerId: otherCorner, ownerAgentId: RUBY });
   await rootFixture.daemon.execute('order', { ...authority(turn), address: sibling.cornerId, agent: 'ruby', text: 'Review sibling' }, WORKER);
   await rootFixture.daemon.execute('order', { ...authority(turn), address: otherCorner, text: 'Review other corner' }, WORKER);
-  await expect(rootFixture.daemon.execute('order', { ...authority(turn), address: otherRoom, agent: 'ruby', text: 'Review in other Room' }, WORKER))
-    .rejects.toThrow('Corners can only order their own parent Room');
-  const beforeDm = (await rootFixture.db.query(`SELECT id FROM agent_commands ORDER BY id`)).rows;
-  for (const address of [DM, RUBY, 'ruby', '@ruby']) {
-    await expect(rootFixture.daemon.execute('order', { ...authority(turn), address, text: 'Review through DM' }, WORKER))
-      .rejects.toThrow("Corners can't order DMs. Report to your commander instead.");
-    expect((await rootFixture.db.query(`SELECT id FROM agent_commands ORDER BY id`)).rows).toEqual(beforeDm);
-  }
-  await expect(rootFixture.daemon.execute('order', { ...authority(turn), address: otherRoom, text: 'Broadcast' }, WORKER))
-    .rejects.toThrow('Corners can only order their own parent Room');
+  await rootFixture.daemon.execute('order', { ...authority(turn), address: otherRoom, agent: 'ruby', text: 'Review in other Room' }, WORKER);
+  await rootFixture.daemon.execute('order', { ...authority(turn), address: DM, text: 'Review through DM' }, WORKER);
+  for (const address of [RUBY, 'ruby', '@ruby'])
+    await expect(rootFixture.daemon.execute('order', { ...authority(turn), address, text: 'Invalid address' }, WORKER)).rejects.toThrow('membership');
+  await rootFixture.daemon.execute('order', { ...authority(turn), address: otherRoom, text: 'Resolve the sole other agent' }, WORKER);
   await expect(rootFixture.daemon.execute('order', { ...authority(turn), address: randomUUID(), text: 'No membership' }, WORKER))
     .rejects.toThrow('address requires current membership');
   expect((await rootFixture.daemon.execute('getCornerRestoreState', { cornerId: child.cornerId }, WORKER)).openedFromCornerId)
     .toBe(opened.cornerId);
   expect((await rootFixture.daemon.execute('getCornerRestoreState', { cornerId: sibling.cornerId }, WORKER)).openedFromCornerId)
     .toBeUndefined();
-  const before = (await rootFixture.db.query(`SELECT id FROM agent_commands ORDER BY id`)).rows;
-  for (const address of [ROOM, ROOM.toUpperCase()]) {
-    await expect(rootFixture.daemon.execute('order', { ...authority(turn), address, text: 'Do the review' }, WORKER))
-      .rejects.toThrow('a Room order must name exactly one agent');
-    expect((await rootFixture.db.query(`SELECT id FROM agent_commands ORDER BY id`)).rows).toEqual(before);
-  }
+  for (const address of [ROOM, ROOM.toUpperCase()])
+    await rootFixture.daemon.execute('order', { ...authority(turn), address, text: 'Do the review' }, WORKER);
   for (const address of [child.cornerId, opened.cornerId]) {
     await rootFixture.daemon.execute('order', { ...authority(turn), address, agent: 'ruby', text: 'Review this widget' }, WORKER);
     expect((await rootFixture.db.query(`SELECT 1 FROM agent_commands WHERE room_id=$1 AND reason='order'`, [address])).rowCount).toBe(1);
@@ -59,14 +50,12 @@ it('Reproduction corner-ancestor-rule: corner orders reach self, siblings and ch
   await rootFixture.daemon.execute('order', { ...authority(turn), address: grandchild.cornerId, agent: 'ruby', text: 'Coordinate this widget' }, WORKER);
   await rootFixture.daemon.execute('order', { ...authority(childTurn), address: grandchild.cornerId, text: 'Work in the grandchild' }, RUBY);
   for (const address of [opened.cornerId]) {
-    await expect(rootFixture.daemon.execute('order', { ...authority(childTurn), address, text: 'Order ancestor' }, RUBY))
-      .rejects.toThrow("Corners can't order their parent Room. Report to your commander instead.");
+    await rootFixture.daemon.execute('order', { ...authority(childTurn), address, text: 'Order ancestor' }, RUBY);
   }
   const grandchildTurn = (await commands(grandchild.cornerId, WORKER))[0]!;
   await claim(grandchildTurn);
   for (const address of [child.cornerId, opened.cornerId]) {
-    await expect(rootFixture.daemon.execute('order', { ...authority(grandchildTurn), address, text: 'Order ancestor' }, WORKER))
-      .rejects.toThrow("Corners can't order their parent Room. Report to your commander instead.");
+    await rootFixture.daemon.execute('order', { ...authority(grandchildTurn), address, text: 'Order ancestor' }, WORKER);
   }
   for (const cornerId of [child.cornerId, opened.cornerId]) {
     await expect(rootFixture.daemon.execute('reviseCornerBrief', { ...authority(grandchildTurn), cornerId, expectedRevision: 1,
@@ -337,7 +326,7 @@ it('vocabulary: corner post tags wake conversation in the posted place without a
 
 it('vocabulary: forbidden corner orders give a usable report step', async () => {
   const opened = await open(), turn = await worker(opened.cornerId);
-  await expect(rootFixture.daemon.execute('order', {...authority(turn),address:DM,agent:'ruby',text:'Do parent work'},WORKER)).rejects.toThrow('Report to your commander');
+  await expect(rootFixture.daemon.execute('order', {...authority(turn),address:DM,agent:'ruby',text:'Do parent work'},WORKER)).rejects.toThrow('address requires current membership');
   await rootFixture.daemon.execute('report', {...authority(turn),status:'blocked',text:'blocked: parent work needs the commander'},WORKER);
   expect((await commands(opened.cornerId, RUBY)).find(command => command.reason === 'report')?.source.body).toContain('parent work');
 });
@@ -433,7 +422,7 @@ it('closed-corner reports do not fall back through a recorded opening ancestor',
   // Exercise routing itself: archived execution has no permission to write tools.
   const { reportToCommander } = await import('./commander.js');
   const command = (await rootFixture.db.query<CommandRow>('SELECT * FROM agent_commands WHERE id=$1', [turn.id])).rows[0]!;
-  await reportToCommander(rootFixture.db, opened.cornerId, WORKER, 'failed: saved login is unconfirmed', command, 'archived-report');
+  await expect(reportToCommander(rootFixture.db, opened.cornerId, WORKER, 'failed: saved login is unconfirmed', command, 'archived-report')).rejects.toMatchObject({ kind: 'stop' });
   expect((await commands(ROOM, RUBY)).find(c => c.id === 'archived-report')).toBeUndefined();
   expect((await commands(opened.cornerId, RUBY)).some(c => c.id === 'archived-report')).toBe(false);
 });
@@ -480,7 +469,7 @@ it('closed-corner reports do not wake even the nearest live opening ancestor', a
   await rootFixture.db.query('UPDATE rooms SET archived_at=now() WHERE id=$1', [opened.cornerId]);
   const { reportToCommander } = await import('./commander.js');
   const command = (await rootFixture.db.query<CommandRow>('SELECT * FROM agent_commands WHERE id=$1', [turn.id])).rows[0]!;
-  await reportToCommander(rootFixture.db, opened.cornerId, WORKER, 'failed: login is unconfirmed', command, 'nearest-live-report');
+  await expect(reportToCommander(rootFixture.db, opened.cornerId, WORKER, 'failed: login is unconfirmed', command, 'nearest-live-report')).rejects.toMatchObject({ kind: 'stop' });
   expect((await commands(ancestor, RUBY)).find(c => c.id === 'nearest-live-report')).toBeUndefined();
   expect((await commands(ROOM, RUBY)).find(c => c.id === 'nearest-live-report')).toBeUndefined();
 });

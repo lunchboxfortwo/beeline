@@ -1,3 +1,4 @@
+import { WallRefusal } from '@beeline/api-contract/daemon';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { clearOwedMention } from './owed-mentions.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -233,7 +234,7 @@ interface McpTurn { roomId: string; requestId: string; commandId: string; order:
 
 /** The plain sentence a refused call returns, or undefined for an internal failure. */
 export function mcpRefusal(error: unknown): string | undefined {
-  if (error instanceof McpToolError || error instanceof ExpectedRefusalError) return error.message;
+  if (error instanceof McpToolError || error instanceof ExpectedRefusalError || error instanceof WallRefusal && error.status < 500) return error.message;
   const message = error instanceof Error ? error.message : '';
   if (message && message.length <= 300 && !message.includes('\n') &&
     /access denied|required|invalid|conflict|not found|authority|refused|must|cannot|only|requires|already|limit/i.test(message))

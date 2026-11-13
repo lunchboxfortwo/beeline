@@ -1,3 +1,4 @@
+import { wall } from '@beeline/api-contract/daemon';
 import { endAgentTurn } from '../agent-turn-end.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { cornerObjectiveSql, writeCornerObjective } from '../corner-objective.js';
@@ -27,8 +28,8 @@ import { daemonCheckReviewerAuthors } from './corner-reads.js';
   export async function daemonReport(ctx: DaemonContext, text: string, agentId: string, command = ctx.authorizedCommand!, database = ctx.database, automatic = false, status?: unknown, ask?: string) {
     if (!automatic) {
       text = text.replace(/^(?:done|blocked|failed|needs[-_]decision):\s*/, '');
-      if (!['done', 'blocked', 'failed', 'needs_decision'].includes(String(status)) || !text.trim())
-        throw new CommandRefusalError('report requires status done, blocked, failed, or needs_decision and nonempty text', 400);
+      if (!text.trim()) throw wall('credentials', { message: 'report requires status done, blocked, failed, or needs_decision and nonempty text', status: 400 });
+      status = ['done', 'blocked', 'failed', 'needs_decision'].includes(String(status)) ? status : 'done';
       text = `${String(status).replace('_', '-')}: ${text}`;
     }
     const prefix = text.match(/^(done|blocked|failed|needs[-_]decision):\s*\S/)?.[1]?.replace('_', '-');
@@ -53,20 +54,17 @@ import { daemonCheckReviewerAuthors } from './corner-reads.js';
       .filter((row, index, all) => all.findIndex(other => other.url === row.url) === index);
     // Collapse alternate URLs for the same object; content deduplication waits
     // until reportToCommander has selected the recipient.
-    const seen = new Set<string>();
-    const uniqueAttachments = attachments.filter(attachment => {
-      const id = mediaIdFromUrl(attachment.url) ?? '';
-      if (!id) return true;
-      if (seen.has(id)) return false;
-      seen.add(id);
-      return true;
-    });
+    const byObject = new Map<string, typeof attachments[number]>();
+    for (const attachment of attachments) {
+      const key = mediaIdFromUrl(attachment.url) ?? attachment.url;
+      if (!byObject.has(key)) byObject.set(key, attachment);
+    }
+    const uniqueAttachments = [...byObject.values()];
     const result = await reportToCommander(database, command.room_id, agentId, text, command,
       createHash('sha256').update(`report:${command.id}:${text}:${ask ?? ""}:${JSON.stringify(uniqueAttachments)}`).digest('hex'), {
-        attachments: uniqueAttachments, automatic, ask,
+        attachments: uniqueAttachments, automatic, ask, afterCommit: ctx.afterCommit,
         orderIssuer: automatic && command.private_payload?.kind === 'order',
       });
-    if (result.skipped || ('delivered' in result && !result.delivered)) return result;
     for (const attachment of pending) await database.query(
       `DELETE FROM agent_pending_attachments WHERE room_id=$1 AND agent_id=$2 AND id=$3`,
       [command.room_id, agentId, attachment.id]);

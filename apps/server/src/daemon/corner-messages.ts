@@ -1,3 +1,4 @@
+import { wall } from '@beeline/api-contract/daemon';
 import { mentionReplyKey, mentionReplyId } from '../owed-mentions.js';
 import { repairAgentPost } from '../agent-post-text.js';
 import { CornerAccessDatabase } from '../corner-access-database.js';
@@ -7,7 +8,7 @@ import { authorizeCommandOutput, routeAgentResult } from '../agent-command.js';
 import { MESSAGE_REACTION_EMOJIS } from '@beeline/api-contract/phone';
 import { type SqlDatabase } from '../database.js';
 import type { DaemonContext } from './context.js';
-import { Input, id, seconds, AccessDeniedError, Output } from './values.js';
+import { Input, id, seconds, Output } from './values.js';
 
 
 
@@ -86,7 +87,7 @@ import { Input, id, seconds, AccessDeniedError, Output } from './values.js';
   /** Public posts accept Rooms and corners without broadening corner-only operations. */
   export async function daemonPostAddressAccess(ctx: DaemonContext, address: string, agentId: string) {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(address))
-      throw new CommandRefusalError('post refused: unknown address', 400);
+      throw wall('membership', { message: 'post refused: unknown address', status: 400 });
     const target = (await new CornerAccessDatabase(ctx.database).query<{
       archived: boolean; member: boolean;
     }>(`SELECT room.archived_at IS NOT NULL AS archived,
@@ -94,9 +95,9 @@ import { Input, id, seconds, AccessDeniedError, Output } from './values.js';
           WHERE member.room_id IN (room.id,room.parent_id)
             AND member.identity_id=$2 AND member.removed_at IS NULL) AS member
         FROM rooms room WHERE room.id=$1`, [address, agentId])).rows[0];
-    if (!target) throw new CommandRefusalError('post refused: unknown address', 400);
-    if (!target.member) throw new CommandRefusalError('post refused: agent is not a current member of the Room', 403);
-    if (target.archived) throw new CommandRefusalError('post refused: address is archived', 409);
+    if (!target) throw wall('membership', { message: 'post refused: unknown address', status: 400 });
+    if (!target.member) throw wall('membership', 'post refused: agent is not a current member of the Room');
+    if (target.archived) throw wall('stop', { message: 'post refused: address is archived', status: 409 });
   }
 
 
@@ -107,7 +108,7 @@ import { Input, id, seconds, AccessDeniedError, Output } from './values.js';
   export async function daemonReach(ctx: DaemonContext, cornerId: string, agentId: string, database: SqlDatabase = ctx.database) {
     database = new CornerAccessDatabase(database);
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cornerId))
-      throw new AccessDeniedError();
+      throw wall('membership', 'daemon room access denied');
     const row = (
       await database.query<{ parent_id: string }>(
         `SELECT corner.parent_id FROM rooms corner
@@ -118,7 +119,7 @@ import { Input, id, seconds, AccessDeniedError, Output } from './values.js';
         [cornerId, agentId],
       )
     ).rows[0];
-    if (!row) throw new AccessDeniedError();
+    if (!row) throw wall('membership', 'daemon room access denied');
     return row.parent_id;
   }
 

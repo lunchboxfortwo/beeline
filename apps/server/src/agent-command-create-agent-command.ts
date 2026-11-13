@@ -332,47 +332,52 @@ export async function routeHumanMessage(db: SqlDatabase, sourceId: string): Prom
       [sourceId],
     )
   ).rows[0];
-  if (!source) return false;
-  if (await routeTaggedLifecycleCommand(db, source, sourceId)) return true;
-  // A sole human and agent in a top-level Room use the same target/command
-  // path as direct conversations. Count current members in the source read,
-  // without adding a database round trip; explicit addresses keep routing.
-  const avatarJob = /^(?:@[^\s]+\s+)?\/draw-avatar(?:\s|$)/i.test(source.text.trim());
-  // A report to `@system` (feedback.ts) addresses System, which is nobody:
-  // in a DM it wakes only an agent the message also tags by name.
-  const targets = new Set([
-    ...source.tagged_ids,
-    ...(source.solo_agent_id && typedMentionHandles(source.text).size === 0
-      ? [source.solo_agent_id] : []),
-    ...(hasSystemReportMention(source.text) ? [] : (source.direct_participants ?? [])),
-  ]);
-  targets.delete(source.author_id);
-  for (const target of targets) {
-    const agent = (
-      await db.query<{ owner_id: string; access_policy: unknown; mcp_callback_url: string | null; mcp_member: boolean }>(
-        `SELECT a.owner_id,a.access_policy,COALESCE(member.callback_url,client.callback_url) mcp_callback_url,
-     member.member_id IS NOT NULL mcp_member FROM agents a
-   LEFT JOIN rooms_mcp_members member ON member.member_id=a.agent_id
-   LEFT JOIN rooms_mcp_clients client ON client.id=member.client_id
-   JOIN memberships m ON m.identity_id=$2 AND m.room_id=(SELECT COALESCE(parent_id,id) FROM rooms WHERE id=$3) AND m.removed_at IS NULL
-   WHERE a.agent_id=$1 FOR ${avatarJob ? 'UPDATE' : 'SHARE'} OF a,m`,
-        [target, source.author_id, source.room_id],
-      )
-    ).rows[0];
-    if (!agent) continue;
-    if (agent.mcp_member) {
-      await recordMcpMention(db, target, source.room_id, sourceId);
-      if (agent.mcp_callback_url)
-        await recordMcpMemberWebhook(db, target, agent.mcp_callback_url, source.room_id, sourceId, source.text);
-    } else {
-    await createAgentCommand(db, {
-      roomId: source.room_id,
-      agentId: target,
-      avatarJob,
-      sourceMessageId: sourceId,
-      reason: source.direct_participants ? 'direct_message' : 'human_tag',
-    });
+  let lifecycle = false;
+  if (source) {
+    lifecycle = await routeTaggedLifecycleCommand(db, source, sourceId);
+    if (!lifecycle) {
+      // A sole human and agent in a top-level Room use the same target/command
+      // path as direct conversations. Count current members in the source read,
+      // without adding a database round trip; explicit addresses keep routing.
+      const avatarJob = /^(?:@[^\s]+\s+)?\/draw-avatar(?:\s|$)/i.test(source.text.trim());
+      // A report to `@system` (feedback.ts) addresses System, which is nobody:
+      // in a DM it wakes only an agent the message also tags by name.
+      const targets = new Set([
+        ...source.tagged_ids,
+        ...(source.solo_agent_id && typedMentionHandles(source.text).size === 0
+          ? [source.solo_agent_id] : []),
+        ...(hasSystemReportMention(source.text) ? [] : (source.direct_participants ?? [])),
+      ]);
+      targets.delete(source.author_id);
+      for (const target of targets) {
+        const agents = (
+          await db.query<{ mcp_callback_url: string | null; mcp_member: boolean }>(
+            `SELECT COALESCE(member.callback_url,client.callback_url) mcp_callback_url,
+         member.member_id IS NOT NULL mcp_member FROM agents a
+       LEFT JOIN rooms_mcp_members member ON member.member_id=a.agent_id
+       LEFT JOIN rooms_mcp_clients client ON client.id=member.client_id
+       JOIN memberships m ON m.identity_id=$2 AND m.room_id=(SELECT COALESCE(parent_id,id) FROM rooms WHERE id=$3) AND m.removed_at IS NULL
+       WHERE a.agent_id=$1 FOR SHARE OF m`,
+            [target, source.author_id, source.room_id],
+          )
+        ).rows;
+        for (const agent of agents) {
+          if (agent.mcp_member) {
+            await recordMcpMention(db, target, source.room_id, sourceId);
+            if (agent.mcp_callback_url)
+              await recordMcpMemberWebhook(db, target, agent.mcp_callback_url, source.room_id, sourceId, source.text);
+          } else {
+            await createAgentCommand(db, {
+              roomId: source.room_id,
+              agentId: target,
+              avatarJob,
+              sourceMessageId: sourceId,
+              reason: source.direct_participants ? 'direct_message' : 'human_tag',
+            });
+          }
+        }
+      }
     }
   }
-  return false;
+  return lifecycle;
 }

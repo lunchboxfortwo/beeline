@@ -1,3 +1,6 @@
+import { cornerOpeningSql } from './corner-opening.js';
+import { cornerCommanderBriefSql } from './corner-commander.js';
+import { wall } from '@beeline/api-contract/daemon';
 import { diagnosticContext } from './diagnostics.js';
 import { dropQueuedOrdersForStop } from './agent-command-queue.js';
 import { lockAgentCommandQueue } from './agent-command-queue.js';
@@ -204,6 +207,10 @@ export type PrivateCommandPayload = {
   /** Agent whose work a server-authored report describes; prevents self-wakes. */
   sourceAgentId?: string;
   fromRoomId: string;
+  /** Recipient captured with the return chat; later handovers cannot move this answer. */
+  returnIdentityId?: string;
+  /** Frozen corner escalation route, distinct from an explicit order issuer. */
+  escalation?: { identityId: string; roomId: string };
   kind: 'order' | 'report' | 'lifecycle';
   attachments?: RoomInboxResult['items'][number]['attachments'];
   /** This item already delivered an explicit report. */
@@ -390,8 +397,11 @@ export async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInp
   return db.transaction(async (db) => {
   await lockAgentCommandQueue(db, input.roomId, input.agentId);
   // Membership removal serializes with dispatch; lifecycle wakes retain their opening order.
-  const member = await db.query<{ opening: CommandRow | null; source_text: string | null; source_author_id: string | null; source_event: { kind?: string } | null; workflow_assignment: boolean; self_authored: boolean; human_input: boolean; failing_check_wake: boolean; app_callback_url: string | null }>(
-    `SELECT (SELECT to_jsonb(opened) FROM agent_commands opened
+  const member = await db.query<{ report_opening: CommandRow | null; parent_room_id: string | null; handover: { author_id: string; source_room_id: string; approval_basis: { commanderReturnRoomId?: string } } | null; parent_return_source: { author_id: string; room_id: string } | null; opening: CommandRow | null; source_text: string | null; source_author_id: string | null; source_event: { kind?: string } | null; workflow_assignment: boolean; self_authored: boolean; human_input: boolean; failing_check_wake: boolean; app_callback_url: string | null }>(
+    `SELECT r.parent_id parent_room_id,(SELECT to_jsonb(report_opening) FROM (${cornerOpeningSql('r.id')}) report_opening) report_opening,
+       (SELECT to_jsonb(handover) FROM (${cornerCommanderBriefSql('r.id')}) handover) handover,
+       (SELECT jsonb_build_object('author_id',author_id,'room_id',room_id) FROM messages WHERE id=$9) parent_return_source,
+       (SELECT to_jsonb(opened) FROM agent_commands opened
        WHERE r.parent_id IS NOT NULL AND opened.room_id=r.id AND opened.private_payload->>'kind'='order'
        ORDER BY (opened.agent_id=$2) DESC,opened.created_at DESC,opened.id DESC LIMIT 1) opening,
        (SELECT text FROM messages WHERE id=$3) source_text,
@@ -428,9 +438,10 @@ export async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInp
      FOR SHARE OF m,r`, [input.roomId, input.agentId, input.sourceMessageId,
        input.reason !== 'schedule' && !input.privatePayload && !input.reason.startsWith('corner_'),
        input.privatePayload?.authorId ?? null, input.privatePayload?.kind === 'order', input.reason,
-       input.privatePayload?.sourceAgentId ?? null],
+       input.privatePayload?.sourceAgentId ?? null,
+       input.parent?.source_message_id ?? input.parent?.root_source_message_id ?? input.reportSource?.root_source_message_id ?? null],
   );
-  if (!member.rowCount) return undefined;
+  if (!member.rowCount) throw wall('membership', 'daemon room access denied');
   // Output is already known to its author. Keep a completed command as the
   // provenance receipt (opening orders also own corner identity), but never
   // admit another turn, delayed wake, or app delivery for that same output.
@@ -438,7 +449,7 @@ export async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInp
   // an external lifecycle event still wakes a corner's self-opening worker.
   // Assignments start work even when their assignee opened the corner or
   // advanced its workflow. Ordinary output still cannot start another turn.
-  const assignment = input.reason === 'corner_objective' ||
+  const assignment = input.privatePayload?.kind === 'order' || input.reason === 'corner_objective' ||
     input.workflowAssignment === true && member.rows[0]!.workflow_assignment;
   const selfAuthored = !assignment && member.rows[0]!.self_authored &&
     input.action !== 'restart';
@@ -470,7 +481,7 @@ export async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInp
     `Current handoff target: PR #${reviewContext.pullRequest} at ${reviewContext.headSha}. Older heads in the conversation are historical.`].filter(Boolean).join('\n') };
   const sourceText = member.rows[0]!.source_text;
   const note = input.wakeNote ? `\n${input.wakeNote}` : '';
-  const privatePayload = input.privatePayload ? { ...input.privatePayload, text: input.privatePayload.text + note }
+  let privatePayload = input.privatePayload ? { ...input.privatePayload, text: input.privatePayload.text + note }
     : input.reason === 'corner_brief_revision' ? {
         ...parent?.private_payload, reported: undefined, kind: 'order' as const,
         authorId: member.rows[0]!.source_author_id ?? parent?.agent_id ?? SYSTEM_IDENTITY_ID,
@@ -484,6 +495,18 @@ export async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInp
     : input.wakeNote
       ? { text: `${sourceText ?? ''}${note}`.trim(), authorId: SYSTEM_IDENTITY_ID, fromRoomId: input.roomId, kind: 'lifecycle' as const }
       : undefined);
+  const currentHandover = member.rows[0]!.handover;
+  const handover = lifecycle && !input.privatePayload ? currentHandover : undefined;
+  const reportOpening = input.reason === 'corner_objective' ? input.privatePayload : member.rows[0]!.report_opening?.private_payload;
+  const escalationIdentity = currentHandover?.author_id ?? reportOpening?.authorId;
+  const escalationRoom = currentHandover?.approval_basis.commanderReturnRoomId ?? currentHandover?.source_room_id ?? reportOpening?.fromRoomId;
+  if (privatePayload) privatePayload = { ...privatePayload,
+    ...(member.rows[0]!.parent_room_id && privatePayload.kind === 'order' && escalationIdentity && escalationRoom
+      ? { escalation: { identityId: escalationIdentity, roomId: escalationRoom } } : {}),
+    returnIdentityId: handover?.author_id ?? privatePayload.returnIdentityId ?? (privatePayload.kind === 'order' ? privatePayload.authorId
+      : (parent?.agent_id === input.agentId ? parent.private_payload?.returnIdentityId ??
+        (parent.private_payload?.kind === 'order' ? parent.private_payload.authorId : undefined) : undefined) ?? member.rows[0]!.parent_return_source?.author_id),
+  };
   // A current reviewer handoff continues the corner assignment, including an
   // explicit same-head re-review. Recruiting ordinary peers still adds a hop.
   const reviewHandoff = reviewContext && (input.reason === 'order' || input.reason === 'agent_tag') &&
@@ -553,7 +576,7 @@ export async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInp
       selfAuthored,
       diagnostic?.origin?.sessionId ?? null,diagnostic?.userId ?? null,diagnostic?.origin?.actionId ?? null,
       privatePayload?.kind === 'order' && /^[0-9a-f-]{36}$/.test(privatePayload.fromRoomId)
-        ? privatePayload.fromRoomId : privatePayload || lifecycle ? parent?.return_room_id ?? input.roomId : input.roomId,
+        ? privatePayload.fromRoomId : privatePayload || lifecycle ? handover?.approval_basis.commanderReturnRoomId ?? handover?.source_room_id ?? (parent?.agent_id === input.agentId ? parent.return_room_id : member.rows[0]!.parent_return_source?.room_id) ?? parent?.return_room_id ?? input.roomId : input.roomId,
     ],
   );
   const command = result.rows[0] ?? (await db.query<CommandRow>(
