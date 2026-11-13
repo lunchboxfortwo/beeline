@@ -160,8 +160,8 @@ it('labels the same waiting thread "waiting on you" in semibold for its commande
   });
 });
 
-// Text wraps, never truncates: a long preview keeps every line at every Text size.
-it.each(['small', 'medium', 'large'] as const)('a long chat preview at Text size %s wraps instead of cutting off', (size: TextSize) => {
+// Chat list previews stop at two lines at every Text size.
+it.each(['small', 'medium', 'large'] as const)('a long chat preview at Text size %s stops at two lines', (size: TextSize) => {
   const text = 'A long preview that runs well past two lines on a phone, so a line cap would cut it off. '.repeat(4);
   const long = { ...item, latestMessage: { id: 'm', text, author: { name: 'Ada' }, createdAt: 1_700_000_000 } } as unknown as ChatListItem;
   let tree!: ReactTestRenderer;
@@ -169,7 +169,7 @@ it.each(['small', 'medium', 'large'] as const)('a long chat preview at Text size
     tree = create(<TextSizeContext.Provider value={size}><ChatRow item={long} now={1_700_000_000_000} first onOpen={vi.fn()} onPin={vi.fn()} onOpenThread={vi.fn()} /></TextSizeContext.Provider>);
   });
   const preview = byTestID(tree, `room-${ROOM}-preview`);
-  expect(preview.props.numberOfLines).toBeUndefined();
+  expect(preview.props.numberOfLines).toBe(2);
   expect(preview.props.ellipsizeMode).toBeUndefined();
   act(() => tree.unmount());
 });
