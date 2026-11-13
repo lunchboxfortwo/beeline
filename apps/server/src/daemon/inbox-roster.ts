@@ -187,6 +187,7 @@ import { daemonExpiredMediaIds } from './message-reads.js';
       cursor_ms: string;
       now_ms: string;
       system_event: SystemEvent | null;
+      message_link: string | null;
     }>(
       // The newest page takes exactly `limit` rows from the tail and puts them
       // back in transcript order; the forward walk keeps its `limit + 1` probe
@@ -258,6 +259,7 @@ import { daemonExpiredMediaIds } from './message-reads.js';
         ...(row.request_id ? { requestId: row.request_id } : {}),
         ...(row.request_author_id ? { requestAuthorId: row.request_author_id } : {}),
         ...(row.agent_hop_count ? { agentHopCount: row.agent_hop_count } : {}),
+        ...(row.message_link ? { messageLink: row.message_link } : {}),
         attachments: markExpiredAttachments(row.attachments ?? [], expiredMedia),
         ...(row.system_event ? { systemEvent: row.system_event } : {}),
       })),

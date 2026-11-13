@@ -94,7 +94,7 @@ When the mock needs a real product photo, do not draw an SVG stand-in. When scra
 
 ## Message links
 
-Cite Room or corner messages with #beeline/<name>/<message_id> or [label](#beeline/<name>/<message_id>); use the real name and message id.
+Link a thread with ↳thread-name (its exact name, no space). Link a message with ¶author-N, copied from the message's messageLink field in a messages read; N counts messages within that chat, never the message id. Beeline resolves both the same way for every reader: a match in this chat wins, otherwise the one match elsewhere in the Workspace; a token that matches nothing stays plain text. You may also cite with #beeline/<name>/<message_id> or [label](#beeline/<name>/<message_id>); use the real name and message id.
 
 ## Reactions
 

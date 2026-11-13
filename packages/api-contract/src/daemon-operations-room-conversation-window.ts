@@ -127,6 +127,8 @@ export type RoomInboxResult = {
     readonly requestAuthorId?: string;
     /** Server-owned agent-to-agent chain depth. */
     readonly agentHopCount?: number;
+    /** `¶author-N`: write this in a message to link to this one. */
+    readonly messageLink?: string;
     readonly attachments: readonly DaemonAttachment[];
     /** Present on a server-phrased system line; the daemon reads the structured event, never the text. */
     readonly systemEvent?: SystemEvent;

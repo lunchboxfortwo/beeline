@@ -470,6 +470,7 @@ export async function executeAgentOperation(
             createdAt: item.createdAt,
             type: item.type,
             ...(item.attachments.length ? { attachmentCount: item.attachments.length } : {}),
+            ...(item.messageLink ? { messageLink: item.messageLink } : {}),
           };
           while (body && JSON.stringify([...items, { ...row, body }]).length > 11000)
             body = body.slice(0, Math.floor(body.length / 2));
@@ -508,6 +509,7 @@ export async function executeAgentOperation(
             type: item.type,
             ...(offset ? { bodyOffset: offset } : {}),
             ...(item.attachments.length ? { attachmentCount: item.attachments.length } : {}),
+            ...(item.messageLink ? { messageLink: item.messageLink } : {}),
           };
           // Escaped control characters can occupy six JSON characters each.
           while (body && JSON.stringify([...items, { ...row, body }]).length > 11000)

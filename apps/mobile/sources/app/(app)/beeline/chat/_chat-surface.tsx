@@ -49,6 +49,9 @@ import { ChatSurfaceTranscript } from './ChatSurfaceTranscript';
 import { ChatSurfaceComposer } from './ChatSurfaceComposer';
 import { ChatSurfaceWorkPane } from './ChatSurfaceWorkPane';
 import { ChatSurfaceOverlays } from './ChatSurfaceOverlays';
+import { ChatLinkProvider } from '@/components/buzz/ChatLinkProvider';
+import { sharedChatLinkStore } from '@/buzz/chat-link-store';
+import { openChatMessageLink } from '@/buzz/message-link';
 
 
 
@@ -414,6 +417,11 @@ export function BuzzChatSurface({
     sourceLandingFlashMessageId,
   ]);
 
+  const openLinkedThread = (link: { roomId: string; parentRoomId: string }) =>
+    void handleOpenChannelReference({ kind: 'corner', channelId: link.roomId, parentChannelId: link.parentRoomId });
+  const openLinkedMessage = (link: { roomId: string; messageId: string; workspaceId: string }) =>
+    openChatMessageLink(link, (href) => router.navigate(href as Href));
+
   if (!roomSurface && transcriptHydrationFailed) {
     return (
       <ChatSurfaceErrorHeader
@@ -483,6 +491,12 @@ export function BuzzChatSurface({
             reviewerAgentId={roomSurface?.room.reviewerAgentId}
           />
 
+          <ChatLinkProvider
+            roomId={decodedId}
+            store={sharedChatLinkStore()}
+            onOpenThread={openLinkedThread}
+            onOpenMessage={openLinkedMessage}
+          >
           <KeyboardBody>
             {/* A corner's title, status, PR, objective and brief are the
             transcript's first block (header B, `useChatThreadHeader`). */}
@@ -641,6 +655,7 @@ export function BuzzChatSurface({
 />
             )}
           </KeyboardBody>
+          </ChatLinkProvider>
           {reportToast}
         </YStack>
 <ChatSurfaceWorkPane
@@ -678,6 +693,7 @@ export function BuzzChatSurface({
   handleBookmarkMessage={handleBookmarkMessage}
   handleReportMessage={handleReportMessage}
   handleCopyLedgerMessage={handleCopyLedgerMessage}
+  showCopyToast={showReportToast}
   handleSelectLedgerMessage={handleSelectLedgerMessage}
   decodedId={decodedId}
   beginReply={beginReply}

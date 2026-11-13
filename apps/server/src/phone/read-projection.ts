@@ -246,6 +246,7 @@ export function projectedMessage(
       : {}),
     ...(!row.deleted_at && row.tagged_ids.length ? { mentionPubkeys: row.tagged_ids } : {}),
     ...(row.agent_model ? { agentModel: row.agent_model } : {}),
+    ...(typeof row.chat_seq === 'number' && row.chat_seq > 0 ? { chatSeq: row.chat_seq } : {}),
     ...(!row.deleted_at && Object.keys(row.reactions ?? {}).length
       ? {
           reactions: MESSAGE_REACTION_EMOJIS.flatMap((emoji) => {

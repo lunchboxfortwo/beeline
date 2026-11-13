@@ -405,6 +405,7 @@ export function readRoomViewMessage(value: unknown): RoomViewMessage | null {
     ...field('requestId', typeof item.requestId === 'string' ? item.requestId : undefined),
     ...field('sourceClient', sourceClient && typeof sourceClient.id === 'string' && typeof sourceClient.name === 'string' && sourceClient.name.length <= 120 ? { id: sourceClient.id, name: sourceClient.name } : undefined),
     ...field('agentModel', typeof item.agentModel === 'string' ? item.agentModel : undefined),
+    ...field('chatSeq', Number.isSafeInteger(item.chatSeq) && (item.chatSeq as number) > 0 ? item.chatSeq as number : undefined),
     ...field('attachments', readList(item.attachments, readAttachment)),
     ...field(
       'mentionPubkeys',
