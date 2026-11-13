@@ -357,10 +357,9 @@ export async function runConnectWizard(
   } catch (error) {
     // Covers every failure after claiming, including local writes and helper
     // startup. The server refuses rollback once this agent has done real work.
-    await fetchImpl(`${baseUrl}/v1/auth/daemon/rollback`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ exchangeToken: claimed.daemon_exchange_token }),
-    }).catch(() => undefined);
+    await jsonRequest(`${baseUrl}/v1/auth/daemon/rollback`, {
+      exchangeToken: claimed.daemon_exchange_token,
+    }, fetchImpl).catch(() => undefined);
     throw error;
   }
 }
