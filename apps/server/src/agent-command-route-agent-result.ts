@@ -151,7 +151,10 @@ export async function dismissAgentCommandWakes(db: SqlDatabase, roomId: string, 
         AND ($3::text IS NULL OR command.id=$3)
         AND command.state='pending' AND EXISTS(SELECT 1 FROM messages answer
           WHERE answer.room_id=command.return_room_id AND answer.author_id=command.agent_id
-            AND answer.request_id IN (command.id,command.turn_request_id) AND answer.deleted_at IS NULL)
+            AND (answer.request_id IN (command.id,command.turn_request_id) OR EXISTS(
+              SELECT 1 FROM agent_commands tool WHERE tool.parent_command_id=command.id
+                AND tool.agent_id=command.agent_id AND tool.reason='mcp_call'
+                AND tool.turn_request_id=answer.request_id)) AND answer.deleted_at IS NULL)
       ORDER BY command.created_at,command.id FOR UPDATE OF command`, [roomId,agentId,commandId ?? null])).rows;
     await db.query(`SELECT ended.id FROM agent_commands command CROSS JOIN LATERAL
       beeline_finish_agent_command(command.id,'complete',NULL,NULL) ended

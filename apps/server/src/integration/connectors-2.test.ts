@@ -385,7 +385,7 @@ const fixture = monolithFixture();
       [ROOM, AGENT, asked.messageId],
     );
     expect(states.rows).toEqual([
-      { action: 'input', state: 'claimed' },
+      { action: 'input', state: 'pending' },
       { action: 'resume', state: 'pending' },
     ]);
     const heartbeat = await fixture.request('/v1/daemon/operations/postAgentTurnReceipt', 'POST', { roomId: ROOM, requestId: asked.messageId, status: 'working', heartbeat: true }, fixture.daemonToken);

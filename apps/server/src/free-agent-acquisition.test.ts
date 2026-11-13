@@ -67,22 +67,22 @@ it.each(['before', 'after'] as const)('connected helper retains owned-model auth
   const selected = selectedBefore ?? await negotiate();
   const pending = await daemon.execute('getAgentCommands', { roomId: MODEL_ROOM }, MODEL_AGENT);
   const generationId = 'original-messages';
-  const claimed = await daemon.execute('claimAgentTurn', { roomId: MODEL_ROOM, commandId: pending.commands[0]!.id }, MODEL_AGENT, source, selected.capability);
+  await daemon.execute('startAgentTurn',{roomId:MODEL_ROOM,requestId:pending.commands[0]!.turnRequestId},MODEL_AGENT);
+  const {modelCredential}=await daemon.execute('getModelCredential',{roomId:MODEL_ROOM,requestId:pending.commands[0]!.turnRequestId},MODEL_AGENT,selected.capability);
   const workingRoom = (await phone.readRoom(MODEL_ROOM, MODEL_OWNER))!;
   const working = workingRoom.latestAgentTurns.find(turn => turn.status === 'working')!;
-  expect(workingRoom.pendingAgentCommands).toEqual([]);
+  expect(workingRoom.pendingAgentCommands).toHaveLength(1);
   const workingAck = selectComposerAckPresentation({ isCorner: false, now: Date.now(),
     activeTurnPubkey: working.agentPubkey, activeTurnRequestId: working.requestId,
     pendingAgentCommands: first.pendingAgentCommands,
     conversationIdentities: new Map([[MODEL_AGENT, { pubkey: MODEL_AGENT, kind: 'agent', name: 'Beebee' }]]) });
   expect(workingAck?.label).not.toContain('starting');
   expect(workingAck).not.toBeNull();
-  expect(claimed.commands.map(command => command.source.id)).toEqual([first.messageId, second.messageId]);
-  expect(claimed.modelCredential).toMatchObject({ v: 1 });
-  const actor = await fixture.credentials.authenticate(fixture.db, claimed.modelCredential!.token);
+  expect(pending.commands.map(command => command.source.id)).toEqual([first.messageId, second.messageId]);
+  expect(modelCredential).toMatchObject({ v: 1 });
+  const actor = await fixture.credentials.authenticate(fixture.db, modelCredential!.token);
   expect(actor.binding).toMatchObject({ connectionId: null, connectionEpoch: null });
-  await daemon.execute('postRoomMessage', { roomId: MODEL_ROOM, requestId: claimed.commands[0]!.turnRequestId!, text: 'Both original messages answered.' }, MODEL_AGENT);
-  await daemon.execute('releaseAgentTurn', { roomId: MODEL_ROOM }, MODEL_AGENT, source);
+  for(const item of pending.commands)await daemon.execute('postRoomMessage',{roomId:MODEL_ROOM,requestId:item.turnRequestId,text:'Both original messages answered.'},MODEL_AGENT);
   expect((await fixture.db.query('SELECT state FROM free_agents WHERE agent_id=$1', [MODEL_AGENT])).rows)
     .toEqual([{ state: 'sleeping' }]);
   expect((await fixture.db.query('SELECT state FROM agent_commands WHERE source_message_id=ANY($1::text[])',
@@ -225,9 +225,10 @@ it('removal during create retains the tombstone, refuses bootstrap and cleans on
     .toEqual([{fly_machine_id:null,removal_cleaned_at:expect.any(Date)}]);
 });
 
-it('resumes a snapshot with claimed work on its old image before replacing that image',async()=>{
+it('replaces a busy snapshot immediately and retains its queued work',async()=>{
   const runtime=lab('suspended');
-  await fixture.db.query("UPDATE agent_commands SET state='claimed' WHERE id='synthetic-command'");
+  await fixture.db.query("UPDATE agent_commands SET state='pending' WHERE id='synthetic-command'");
   await runtime.service().reconcile(MODEL_AGENT);
-  expect(runtime.calls).toEqual(['POST /m1/start']);expect(runtime.state()).toBe('started');
+  expect(runtime.calls).toEqual(['POST /m1','GET /m1/wait','POST /m1/start']);expect(runtime.state()).toBe('started');
+  expect((await fixture.db.query("SELECT state FROM agent_commands WHERE id='synthetic-command'")).rows).toEqual([{state:'pending'}]);
 });

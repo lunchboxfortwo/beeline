@@ -61,7 +61,7 @@ describe('solo-agent-untagged-silence', () => {
     await routeHumanMessage(db, MESSAGE);
     expect((await db.query(`SELECT 1 FROM agent_commands WHERE source_message_id=$1`, [MESSAGE])).rowCount).toBe(1);
     await startQueuedTurn(db, ROOM, AGENT, commands[0]!.id);
-    expect((await db.query(`SELECT state FROM agent_commands WHERE id=$1`, [commands[0]!.id])).rows[0]?.state).toBe('claimed');
+    expect((await db.query(`SELECT state FROM agent_commands WHERE id=$1`, [commands[0]!.id])).rows[0]?.state).toBe('pending');
     await new DaemonService(db, new LiveHub()).execute('postRoomMessage', { roomId: ROOM, requestId: MESSAGE, text: 'Hello back!' }, AGENT);
     const view = await phone.readRoom(ROOM, HUMAN);
     expect(JSON.stringify(view)).toContain('Hello back!');

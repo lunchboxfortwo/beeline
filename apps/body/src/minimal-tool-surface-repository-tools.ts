@@ -90,7 +90,7 @@ export const WORKSPACE_TOOL: ToolDefinition = {
 
 export const SILENT_TOOL: ToolDefinition = {
   "name": "no_reply_needed",
-  "description": "On a nonhuman report, order, lifecycle, scheduler or system wake with nothing to post, end the turn immediately and silently. No further tools or final text are accepted. This tool posts nothing and reports nothing. Works alone, in parallel or in the background. For a tagged message, pass its messageId to explicitly decline that one reply.",
+  "description": "Acknowledge an answer already posted for this request. An unanswered queue item remains pending: provide your own answer. For a tagged message, messageId selects the tag to acknowledge after answering it.",
   "inputSchema": {"type": "object", "properties": {"messageId": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Explicitly decline this tagged message in the current Room."}}, "additionalProperties": false}
 };
 
@@ -155,8 +155,7 @@ export function agentToolsFor(
   const tools = minimalTools(cornerTurn).filter(tool =>
     institutionalMemoryEnabled || !['search', 'remember'].includes(tool.name));
   if (commandRunnerAvailable) tools.push(invocationTool(RUNNER_TOOL), invocationTool(WORKSPACE_TOOL));
-  // no_reply_needed mounts on every harness: it is the only silence path, so a
-  // wake must always be able to end without posting prose.
+  // Every harness can acknowledge an answer it already posted through tools.
   tools.push(invocationTool(SILENT_TOOL));
   if (!nativeIoProven) tools.push(...scratchTools(cornerTurn && !repositoryCorner));
   return freeAgent ? tools.map(tool => {

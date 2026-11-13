@@ -175,7 +175,7 @@ describe('tagged agent lifecycle commands', () => {
           command.id,
         ])
       ).rows[0]?.state,
-    ).toBe('claimed');
+    ).toBe('pending');
 
     await announceAgentLifecycle(database, live, ROOM, AGENT, { lifecycleId: 'boot-2' });
     expect(

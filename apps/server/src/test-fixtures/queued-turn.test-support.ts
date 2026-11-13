@@ -10,7 +10,7 @@ export async function startQueuedTurn(db: SqlDatabase, roomId: string, agentId: 
   await db.query(`INSERT INTO agent_turns(room_id,request_id,agent_id,status)
     VALUES($1,$2,$3,'working') ON CONFLICT(room_id,request_id,agent_id) DO NOTHING`,
     [roomId, command.turn_request_id, agentId]);
-  return { commandId, requestId: command.turn_request_id };
+  return { ...command, commandId, requestId: command.turn_request_id };
 }
 
 export async function startQueuedCommand(daemon: DaemonService, input: { roomId: string; commandId: string }, agentId: string) {
@@ -18,5 +18,5 @@ export async function startQueuedCommand(daemon: DaemonService, input: { roomId:
   const command = commands.find(item => item.id === input.commandId);
   if (!command) throw new Error('queue item not found');
   await daemon.execute('startAgentTurn', { roomId: command.roomId, requestId: command.turnRequestId }, agentId);
-  return { commandId: command.id, requestId: command.turnRequestId };
+  return { ...command, commandId: command.id, requestId: command.turnRequestId };
 }

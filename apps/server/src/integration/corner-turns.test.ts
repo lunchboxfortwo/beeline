@@ -40,7 +40,7 @@ const fixture = monolithFixture();
     await startQueuedTurn(fixture.database, ROOM, AGENT, privateOrder.id);
     const privateRelay = await fixture.request('/v1/daemon/operations/postRoomMessage', 'POST', { roomId: ROOM, requestId: 'retired-private', text: 'Old private steer', relay: { fromRoomId: ROOM, toRoomId: ROOM, direction: 'down' } }, fixture.daemonToken);
     expect(privateRelay.status).toBe(410);
-    expect((await fixture.database.query(`SELECT state FROM agent_commands WHERE id=$1`, [privateOrder.id])).rows[0]?.state).toBe('claimed');
+    expect((await fixture.database.query(`SELECT state FROM agent_commands WHERE id=$1`, [privateOrder.id])).rows[0]?.state).toBe('pending');
     expect((await fixture.database.query(`SELECT 1 FROM messages WHERE text LIKE 'done: Old private steer%'`)).rowCount).toBe(0);
     expect((await fixture.database.query(`SELECT 1 FROM agent_commands WHERE private_payload->>'text'='done: Old private steer'`)).rowCount).toBe(0);
 

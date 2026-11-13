@@ -711,53 +711,13 @@ it('atomically establishes the working receipt when an input command is claimed'
   );
 });
 
-it('restarts the turn clock when a parked turn resumes after a long approval wait', async () => {
-  await send('@hoots');
-  const [c] = await commands();
-  await claim(c!, 'before-approval');
-  await result(c!, 'Waiting for your approval.', 'before-approval');
-  const turn = () =>
-    rootFixture.db
-      .query<{ status: string; age_hours: number }>(
-        `SELECT status,(extract(epoch FROM now()-started_at)/3600)::float8 age_hours FROM agent_turns
-         WHERE room_id=$1 AND request_id=$2 AND agent_id=$3`,
-        [R, c!.turnRequestId, A],
-      )
-      .then((r) => r.rows[0]!);
-  const parkFor57Hours = () =>
-    rootFixture.db.query(
-      `UPDATE agent_turns SET started_at=now()-interval '57 hours'
-       WHERE room_id=$1 AND request_id=$2 AND agent_id=$3`,
-      [R, c!.turnRequestId, A],
-    );
-  await parkFor57Hours();
-  expect((await turn()).status).not.toBe('working');
-
-  // The approval resumes the same turn: a resume command on its request id.
-  const decision = id();
-  await rootFixture.db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'approved')`, [
-    decision,
-    R,
-    H,
-  ]);
-  const resume = (await createAgentCommand(rootFixture.db, {
-    roomId: R,
-    agentId: A,
-    sourceMessageId: decision,
-    action: 'resume',
-    reason: 'resume',
-    turnRequestId: c!.turnRequestId,
-  }))!;
-  await startQueuedCommand(rootFixture.daemon, { roomId: R, commandId: resume.id }, A);
-  expect(await turn()).toMatchObject({ status: 'working' });
-  expect((await turn()).age_hours).toBeLessThan(1);
-
-  // and a receipt on a turn that is still working keeps its start.
-  await parkFor57Hours();
-  await rootFixture.daemon.execute(
-    'postAgentTurnReceipt',
-    { roomId: R, agentId: A, requestId: c!.turnRequestId, status: 'working' },
-    A, await helperOwner(A),
-  );
-  expect((await turn()).age_hours).toBeGreaterThan(56);
+it('an approval decision gets its own queue item and delivery clock',async()=>{
+  await send('@hoots');const [original]=await commands();await claim(original!);await result(original!,'Waiting for approval.');
+  await rootFixture.db.query("UPDATE agent_turns SET started_at=now()-interval '57 hours' WHERE request_id=$1",[original!.turnRequestId]);
+  const decision=id();await rootFixture.db.query("INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'approved')",[decision,R,H]);
+  const resumed=(await createAgentCommand(rootFixture.db,{roomId:R,agentId:A,sourceMessageId:decision,reason:'resume'}))!;
+  expect(resumed.action).toBe('input');expect(resumed.turn_request_id).toBe(decision);expect(resumed.turn_request_id).not.toBe(original!.turnRequestId);
+  await startQueuedCommand(rootFixture.daemon,{roomId:R,commandId:resumed.id},A);
+  expect((await rootFixture.db.query('SELECT status FROM agent_turns WHERE request_id=$1',[original!.turnRequestId])).rows).toEqual([{status:'complete'}]);
+  expect((await rootFixture.db.query("SELECT status,started_at>now()-interval '1 hour' fresh FROM agent_turns WHERE request_id=$1",[resumed.turn_request_id])).rows).toEqual([{status:'working',fresh:true}]);
 });

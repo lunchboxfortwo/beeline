@@ -53,7 +53,7 @@ m40_describe('compact session deliveries', () => {
     m40_expect(m40_renderWake({id:'wake',address:'room',reason:'system',text:'An update',createdAt:''}, joined, runner)).toBe([
       '[Beeline · room · system]', '> An update',
       'Reply: /synthetic/node /synthetic/beeline.js session reply --room room "<text>" --as codex:/synthetic/project',
-      `If nothing needs posting: /synthetic/node /synthetic/beeline.js session tool no_reply_needed '{"address":"room","commandId":"wake"}' --as codex:/synthetic/project`,
+      `After posting the answer, acknowledge it: /synthetic/node /synthetic/beeline.js session tool no_reply_needed '{"address":"room","commandId":"wake"}' --as codex:/synthetic/project`,
     ].join('\n'));
   });
 });

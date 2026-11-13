@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest';
 import { migratedDatabase, type PgliteDatabase } from './test-support.js';
-import { createAgentCommand } from './agent-command.js';
+import { AGENT_COMMAND_SCHEMA, createAgentCommand } from './agent-command.js';
 import { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
 import { claimAgentConnection, releaseAgentConnection } from './connection-presence.js';
 import { LiveHub } from './live.js';
@@ -69,6 +69,23 @@ it('a dropped helper leaves the item queued for its next registration', async ()
   await releaseAgentConnection(db, live, A, 'one');
   await claimAgentConnection(db, live, A, {}, { connectionId: 'two', instanceId: 'server' });
   expect((await queue()).map(entry => entry.id)).toEqual([item.id]);
+});
+
+it('upgrades a legacy resume sharing its parent source without losing either answer obligation', async () => {
+  const parent = await ask(R1, 'answer both items');
+  await db.query(`INSERT INTO agent_commands(id,room_id,agent_id,source_message_id,turn_request_id,
+    action,reason,root_command_id,parent_command_id,root_source_message_id,agent_depth,state)
+    SELECT 'legacy-resume',room_id,agent_id,source_message_id,turn_request_id,'resume','resume',
+      root_command_id,id,root_source_message_id,agent_depth,'pending' FROM agent_commands WHERE id=$1`, [parent.id]);
+  await db.query(AGENT_COMMAND_SCHEMA);
+  const items = await queue();
+  expect(items.map(item=>[item.id,item.turnRequestId])).toEqual([
+    [parent.id,parent.turn_request_id],['legacy-resume','legacy-resume']]);
+  expect(items[1]!.source.body).toContain('answer both items');
+  await answer(R1,parent.turn_request_id,'First answer');
+  expect((await queue()).map(item=>item.id)).toEqual(['legacy-resume']);
+  await answer(R1,'legacy-resume','Resume answer');
+  expect(await queue()).toEqual([]);
 });
 
 it('Stop cancels the item: it leaves the queue and its answer is refused', async () => {

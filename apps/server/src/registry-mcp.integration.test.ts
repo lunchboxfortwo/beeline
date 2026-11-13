@@ -389,7 +389,7 @@ describe('Registry MCP connection orchestration', () => {
       `SELECT state FROM agent_commands WHERE id=$1`,
       [COMMAND],
     );
-    expect(command.rows[0]?.state).toBe('claimed');
+    expect(command.rows[0]?.state).toBe('pending');
     expect(
       (
         await database.query(`SELECT 1 FROM messages WHERE author_id=$1 AND room_id=$2`, [

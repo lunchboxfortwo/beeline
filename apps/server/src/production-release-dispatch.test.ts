@@ -224,8 +224,7 @@ it.each(['legacy', 'helper'])('R-RELEASE-CARD: built %s MCP tool dispatches thro
   const messages = async () => (await db.query<{ count: number }>(`SELECT count(*)::int count FROM messages`)).rows[0]!.count;
   const before = { grants: await grantCount(), messages: await messages() };
   if (mode === 'helper') await db.query(`INSERT INTO live_server_instances(instance_id) VALUES('built-helper-server');
-    INSERT INTO agent_connections(agent_id,connection_id,epoch,instance_id) VALUES('${agent}','built-helper',1,'built-helper-server');
-    UPDATE agent_commands SET generation_id='built-helper-generation',turn_owner_connection_id='built-helper',turn_owner_epoch=1 WHERE id='command'`);
+    INSERT INTO agent_connections(agent_id,connection_id,epoch,instance_id) VALUES('${agent}','built-helper',1,'built-helper-server')`);
   try {
     const context = join(dir, 'turn.json');
     await writeFile(context, JSON.stringify({ ...input }));
@@ -295,7 +294,6 @@ it.each(['legacy', 'helper'])('R-RELEASE-CARD: built %s MCP tool dispatches thro
       const command = commands[0]!;
       if (humanRoot && !edited) expect(command.root_source_message_id).toBe('human-command');
       else expect(command.root_source_message_id).not.toBe('human-command');
-      await db.query(`UPDATE agent_commands SET state='claimed',generation_id='scheduled-generation' WHERE id=$1`, [command.id]);
       const scheduledContext = (await db.query<{ turn_request_id: string }>(`SELECT turn_request_id FROM agent_commands WHERE id=$1`, [command.id])).rows[0]!;
       await writeFile(context, JSON.stringify({ roomId: room, requestId: scheduledContext.turn_request_id }));
       const beforeDispatch = await messages();
@@ -319,7 +317,7 @@ it.each(['legacy', 'helper'])('R-RELEASE-CARD: built %s MCP tool dispatches thro
 
     console.log('Demonstrated R-RELEASE-CARD: built dispatch_release → authenticated daemon → committed audit receipt + one stub dispatch, zero grants/cards; scheduled human provenance accepted after schedule expiry; unapproved schedules refused and non-admin schedule edits refused. No production release.');
   } finally {
-    await db.query(`UPDATE agent_commands SET root_source_message_id='human-command',generation_id='generation',turn_owner_connection_id=NULL,turn_owner_epoch=NULL WHERE id='command'; DELETE FROM agent_connections; DELETE FROM live_server_instances`);
+    await db.query(`UPDATE agent_commands SET root_source_message_id='human-command' WHERE id='command'; DELETE FROM agent_connections; DELETE FROM live_server_instances`);
     await rm(dir, { recursive: true, force: true });
     await new Promise<void>(resolve => server.close(() => resolve()));
   }

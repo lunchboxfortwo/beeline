@@ -320,8 +320,13 @@ export class RoomsMcpAgentTools {
   }
 
   /** An unreported order stays queued; the call's own item is done when the call returns. */
-  private async end(turn: McpTurn) {
-    if (!turn.order) await endAgentTurn(this.db, { id: turn.commandId }, 'complete');
+  private async end(turn: McpTurn, member: string) {
+    if (!turn.order) {
+      await endAgentTurn(this.db, { id: turn.commandId }, 'complete');
+      const parent = (await this.db.query<{parent_command_id:string|null}>(
+        'SELECT parent_command_id FROM agent_commands WHERE id=$1',[turn.commandId])).rows[0]?.parent_command_id;
+      if (parent) await dismissAgentCommandWakes(this.db,turn.roomId,member,parent);
+    }
   }
 
   private async inTurn<T>(member: string, target: string, run: (turn: McpTurn, context: Args) => Promise<T>, order = false): Promise<T> {
@@ -331,7 +336,7 @@ export class RoomsMcpAgentTools {
     try {
       return await run(turn, { roomId: turn.roomId, requestId: turn.requestId });
     } finally {
-      await this.end(turn);
+      await this.end(turn, member);
     }
   }
 
@@ -543,7 +548,7 @@ export class RoomsMcpAgentTools {
         activity: [{ kind: 'output', title: 'Update', text: progress }] });
       return { recorded: true, address: corner };
     } finally {
-      if (!bound) await this.end(turn);
+      if (!bound) await this.end(turn,member);
     }
   }
 
@@ -569,7 +574,7 @@ export class RoomsMcpAgentTools {
       await exec('postAgentAttachment', { ...context, attachment: { url: uploaded.url, name: title, mimeType: uploaded.mimeType, size: bytes.length } });
       return await exec('postCornerMessage', { ...context, cornerId: at, text: text(args.text) ?? title });
     } finally {
-      if (!bound) await this.end(turn);
+      if (!bound) await this.end(turn,member);
     }
   }
 

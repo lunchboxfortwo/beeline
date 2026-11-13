@@ -47,7 +47,7 @@ it('release migration invents no terminal results and exposes only a live claime
         [command!.id],
       );
       await database.query(
-        `UPDATE agent_turns SET created_at=now()-interval '2 days',generation_id='retired-generation' WHERE request_id=$1`,
+        `UPDATE agent_turns SET created_at=now()-interval '2 days' WHERE request_id=$1`,
         [request],
       );
       if (index < 5) orphanIds.push(request);
@@ -84,17 +84,17 @@ it('release migration invents no terminal results and exposes only a live claime
     );
     expect(
       (
-        await database.query(`SELECT status,generation_id FROM agent_turns WHERE request_id=$1`, [
+        await database.query(`SELECT status FROM agent_turns WHERE request_id=$1`, [
           '5'.repeat(64),
         ])
       ).rows,
-    ).toEqual([{ status: 'working', generation_id: 'live-successor' }]);
+    ).toEqual([{ status: 'working' }]);
     expect((await database.query(`SELECT request_id FROM agent_turns turn
       WHERE turn.status='working' AND ${workingTurnFreshSql('turn')}`)).rows)
       .toEqual([{ request_id: '5'.repeat(64) }]);
     // Completed commands never authorize a synthetic failure on a later release.
     await database.query(
-      `UPDATE agent_commands SET state='complete' WHERE generation_id='live-successor'`,
+      `UPDATE agent_commands SET state='complete' WHERE turn_request_id='5555555555555555555555555555555555555555555555555555555555555555' AND state='pending'`,
     );
     await migrateData(database);
     expect(

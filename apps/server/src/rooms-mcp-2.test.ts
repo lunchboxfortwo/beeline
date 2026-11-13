@@ -443,7 +443,7 @@ const scope1 = fixtureScope1();
     expect(message.author_id).not.toBe(USER);
     const command = (await scope1.db.query<{ id: string }>('SELECT id FROM agent_commands WHERE source_message_id=$1 AND agent_id=$2', [message.id, AGENT])).rows[0]!;
     expect(command).toBeDefined(); await startQueuedTurn(scope1.db, ROOM, AGENT, command.id);
-    expect((await scope1.db.query('SELECT state FROM agent_commands WHERE id=$1', [command.id])).rows[0]!.state).toBe('claimed');
+    expect((await scope1.db.query('SELECT state FROM agent_commands WHERE id=$1', [command.id])).rows[0]!.state).toBe('pending');
     expect(JSON.stringify(await client.callTool({ name: 'read_messages', arguments: { room: ROOM, limit: 1 } }))).toContain('nebula test');
     const searched = JSON.stringify(await client.callTool({ name: 'search_messages', arguments: { query: 'nebula' } }));
     expect(searched).toContain('nebula test'); expect(searched).not.toContain('private nebula');

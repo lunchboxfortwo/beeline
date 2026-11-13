@@ -56,7 +56,7 @@ async function fixture() {
       CREATE TABLE agent_connections(agent_id text PRIMARY KEY,connection_id text,epoch bigint,instance_id text,released_at timestamptz);
       CREATE TABLE agent_commands(id text PRIMARY KEY,room_id uuid,agent_id text,turn_request_id text,action text,reason text,
         root_command_id text,root_source_message_id text,agent_depth integer,state text,
-        lease_expires_at timestamptz,created_at timestamptz DEFAULT now());
+        created_at timestamptz DEFAULT now());
       CREATE TABLE agent_turns(room_id uuid,request_id text,agent_id text,status text,started_at timestamptz);`);
     // Install actual authority writer triggers and actual owned source/commit
     // predicates, rather than a fake lock in the proof's membership adapter.

@@ -377,8 +377,8 @@ const scope1 = fixtureScope1();
         address: ROOM, commandId: sent.id, facet: 'members',
       } });
       expect(pickup.isError, JSON.stringify(pickup)).not.toBe(true);
-      expect((await scope1.db.query('SELECT state,generation_id FROM agent_commands WHERE id=$1', [sent.id])).rows[0])
-        .toMatchObject({ state: 'claimed', generation_id: expect.stringMatching(/^mcp:/) });
+      expect((await scope1.db.query('SELECT state FROM agent_commands WHERE id=$1', [sent.id])).rows[0])
+        .toMatchObject({ state:'pending' });
       const report = await client.callTool({ name: 'report', arguments: {
         address: ROOM, commandId: sent.id, status: 'done', text: 'Delivery checked.',
       } });
@@ -491,7 +491,7 @@ const scope1 = fixtureScope1();
     expect(revoked.id).toEqual(expect.any(String));
     expect(await queued(revoked.id)).toEqual([]);
     await scope1.db.query(`UPDATE agent_commands SET state='complete', completed_at=now() WHERE id=$1`, [commander.id]);
-    await scope1.db.query(`UPDATE agent_turns SET status='complete' WHERE agent_id=$1 AND generation_id='wake-proof'`, [AGENT]);
+    await scope1.db.query(`UPDATE agent_turns SET status='complete' WHERE agent_id=$1`, [AGENT]);
     // Reproduction (MCP-REVIEW-WAKE-1): a reviewer dispatch carried the generic "no_reply_needed" hint.
     await scope1.eventCall(token, 'events/subscribe', { ...params, name: 'wake', delivery: { ...params.delivery, url: wakeTooUrl, secret } });
     const review = await createAgentCommand(scope1.db, {

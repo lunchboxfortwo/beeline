@@ -157,10 +157,26 @@ END $$;
 DROP FUNCTION IF EXISTS beeline_activation_source();
 DROP FUNCTION IF EXISTS beeline_activation_touch(uuid);
 DROP TABLE IF EXISTS helper_activation_authority;
+ALTER TABLE agent_commands DROP CONSTRAINT IF EXISTS agent_commands_turn_owner_pair;
+ALTER TABLE agent_commands DROP CONSTRAINT IF EXISTS agent_commands_execution_kind;
+ALTER TABLE agent_commands DROP COLUMN IF EXISTS generation_id, DROP COLUMN IF EXISTS lease_expires_at,
+  DROP COLUMN IF EXISTS claimed_at, DROP COLUMN IF EXISTS execution_kind,
+  DROP COLUMN IF EXISTS turn_owner_connection_id, DROP COLUMN IF EXISTS turn_owner_epoch,
+  DROP COLUMN IF EXISTS restart_confirmed_at;
+ALTER TABLE IF EXISTS agent_pending_attachments DROP COLUMN IF EXISTS generation_id;
+${AGENT_COMMAND_DELEGATION_SCHEMA}
 UPDATE agent_commands SET state='pending' WHERE state='claimed';
-UPDATE agent_commands command SET action='input' WHERE command.state='pending' AND command.action='resume'
-  AND NOT EXISTS(SELECT 1 FROM agent_commands other WHERE other.room_id=command.room_id
-    AND other.source_message_id=command.source_message_id AND other.agent_id=command.agent_id AND other.action='input');
+-- A legacy resume can share its source and request with its parent. Preserve
+-- its message before removing that uniqueness collision; each item then owns
+-- a separate request id and can receive its own answer after the upgrade.
+UPDATE agent_commands command SET private_payload=COALESCE(command.private_payload,
+    jsonb_build_object('kind','lifecycle','text',source.text,'authorId',source.author_id,
+      'fromRoomId',source.room_id::text,'attachments',source.attachments)),source_message_id=NULL
+  FROM messages source WHERE command.state='pending' AND command.action='resume'
+    AND source.id=command.source_message_id AND EXISTS(SELECT 1 FROM agent_commands other
+      WHERE other.room_id=command.room_id AND other.source_message_id=command.source_message_id
+        AND other.agent_id=command.agent_id AND other.action='input');
+UPDATE agent_commands SET action='input',turn_request_id=id WHERE state='pending' AND action='resume';
 -- Older private wakes predate an explicit return address. Their recorded
 -- human root preserves the original chat across nested corner handoffs.
 UPDATE agent_commands command SET return_room_id=source.room_id
@@ -172,14 +188,7 @@ UPDATE agent_commands SET return_room_id=CASE WHEN private_payload->>'kind'='ord
     AND private_payload->>'fromRoomId' ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
   THEN (private_payload->>'fromRoomId')::uuid ELSE room_id END
   WHERE state='pending' AND return_room_id IS NULL;
-ALTER TABLE agent_commands DROP CONSTRAINT IF EXISTS agent_commands_turn_owner_pair;
-ALTER TABLE agent_commands DROP CONSTRAINT IF EXISTS agent_commands_execution_kind;
-ALTER TABLE agent_commands DROP COLUMN IF EXISTS generation_id, DROP COLUMN IF EXISTS lease_expires_at,
-  DROP COLUMN IF EXISTS claimed_at, DROP COLUMN IF EXISTS execution_kind,
-  DROP COLUMN IF EXISTS turn_owner_connection_id, DROP COLUMN IF EXISTS turn_owner_epoch,
-  DROP COLUMN IF EXISTS restart_confirmed_at;
-ALTER TABLE IF EXISTS agent_pending_attachments DROP COLUMN IF EXISTS generation_id;
-${AGENT_COMMAND_DELEGATION_SCHEMA}
+
 `;
 
 /** Transport data only: orders and reports never become transcript messages. */

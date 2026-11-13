@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createAgentCommand, readAgentCommands } from './agent-command.js';
+import { AGENT_COMMAND_SCHEMA, createAgentCommand, readAgentCommands } from './agent-command.js';
 import { DaemonService } from './daemon-service.js';
 import { LiveHub } from './live.js';
 import { groupBPostgresDatabase } from './test-fixtures/test-support-router-group-b-postgres.js';
@@ -62,5 +62,20 @@ describe.skipIf(!url)('durable agent queue on PostgreSQL', () => {
     await fixture.database.query(`SELECT beeline_finish_agent_command($1,'cancelled','stop',NULL)`,[item.id]);
     await expect(answer(item.turn_request_id)).rejects.toThrow('command turn cancelled');
     expect((await fixture.database.query(`SELECT 1 FROM messages WHERE author_id=$1 AND request_id=$2`,[agent,item.turn_request_id])).rowCount).toBe(0);
+  });
+
+  it('upgrades a shared legacy resume source without spending its parent answer', async () => {
+    const item=await ask('legacy resume'), resumed=randomBytes(32).toString('hex');
+    await fixture.database.query(`INSERT INTO agent_commands(id,room_id,agent_id,source_message_id,
+      turn_request_id,action,reason,root_command_id,parent_command_id,root_source_message_id,agent_depth,state)
+      SELECT $2,room_id,agent_id,source_message_id,turn_request_id,'resume','resume',root_command_id,
+        id,root_source_message_id,agent_depth,'pending' FROM agent_commands WHERE id=$1`,[item.id,resumed]);
+    await fixture.database.query(AGENT_COMMAND_SCHEMA);
+    expect((await readAgentCommands(fixture.database,agent)).commands.map(command=>[command.id,command.turnRequestId]))
+      .toEqual([[item.id,item.turn_request_id],[resumed,resumed]]);
+    await answer(item.turn_request_id);
+    expect((await readAgentCommands(fixture.database,agent)).commands.map(command=>command.id)).toEqual([resumed]);
+    await answer(resumed);
+    expect((await readAgentCommands(fixture.database,agent)).commands).toEqual([]);
   });
 });

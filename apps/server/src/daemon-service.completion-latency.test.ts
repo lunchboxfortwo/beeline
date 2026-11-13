@@ -348,7 +348,7 @@ describe('agent reply completion latency', () => {
           [command!.id],
         )
       ).rows[0],
-    ).toEqual({ state: 'claimed', status: 'working' });
+    ).toEqual({ state: 'pending', status: 'working' });
   }, 10_000);
 
   it('publishes the committed working row with its Room and an ordered trace', async () => {

@@ -207,10 +207,10 @@ const scope1 = fixtureScope1();
       ['work-1', ROOM, worker, 'f'.repeat(64)],
     );
     await scope1.database.query(
-      `UPDATE agent_commands SET state='claimed',lease_expires_at=now()+interval '90 seconds' WHERE id='work-1'`,
+      `UPDATE agent_commands SET state='pending',created_at=now()-interval '1 hour' WHERE id='work-1'`,
     );
     await scope1.database.query(
-      `UPDATE agent_commands SET lease_expires_at=now()+interval '120 seconds' WHERE id='work-1'`,
+      `UPDATE agent_commands SET created_at=now()-interval '2 hours' WHERE id='work-1'`,
     );
     await eventually(() => commandEvents().length === 3);
     expect(commandEvents().some((event) => event.type === 'invalidate' && event.commandReleased))

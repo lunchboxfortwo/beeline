@@ -649,7 +649,7 @@ it('Reproduction wake-8: a report leaves the command open for the same turn’s 
   await daemon.execute('report', { ...authority(turn), status: 'needs_decision', text: 'Which proof account?' }, WORKER);
   await daemon.execute('order', { ...authority(turn), address: opened.cornerId, agent: RUBY, text: 'Add the Android screenshot on my head.' }, WORKER);
   await daemon.execute('reportFeedback', { ...authority(turn), category: 'bug', summary: 'Follow-up after a report stays possible.' }, WORKER);
-  expect((await db.query(`SELECT state FROM agent_commands WHERE id=$1`, [turn.id])).rows[0]).toEqual({ state: 'claimed' });
+  expect((await db.query(`SELECT state FROM agent_commands WHERE id=$1`, [turn.id])).rows[0]).toEqual({ state: 'pending' });
   await daemon.execute('postAgentTurnReceipt', { ...authority(turn), agentId: WORKER, status: 'complete' }, WORKER);
   expect((await db.query(`SELECT state FROM agent_commands WHERE id=$1`, [turn.id])).rows[0]).toEqual({ state: 'complete' });
 });

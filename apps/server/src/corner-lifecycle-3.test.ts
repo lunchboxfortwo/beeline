@@ -158,7 +158,7 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
     expect(rootFixture.githubApp.mergePullRequest).not.toHaveBeenCalled();
     // Close stops only a claimed (running) assignment; pending ones are just cancelled.
     const assignmentsBefore = (await rootFixture.db.query(`SELECT DISTINCT turn_request_id FROM agent_commands
-      WHERE room_id=$1 AND agent_id=$2 AND action IN ('input','resume') AND state='claimed'`,
+      WHERE room_id=$1 AND agent_id=$2 AND action IN ('input','resume') AND state='pending'`,
       [cornerId, A])).rowCount;
     const wiredDaemon = new DaemonService(rootFixture.db, new LiveHub(), undefined, undefined, false, undefined, false, undefined,
       (input, confirmZeroChecks) => rootFixture.github.prChecksStatus(input, confirmZeroChecks), undefined, undefined, undefined, undefined, undefined, undefined,

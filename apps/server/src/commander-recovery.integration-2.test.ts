@@ -620,7 +620,7 @@ it('QUEUE-1: a tag, order and brief revision during a running turn retain separa
       approval: { sourceMessageId: rootFixture.order.sourceMessageId }, change: 'Third: keep the approved width' } }, RUBY);
   const queued = await commands(opened.cornerId, WORKER);
   expect(queued.filter(command => command.action === 'stop')).toEqual([]);
-  expect((await rootFixture.db.query('SELECT state FROM agent_commands WHERE id=$1', [active.id])).rows).toEqual([{ state: 'claimed' }]);
+  expect((await rootFixture.db.query('SELECT state FROM agent_commands WHERE id=$1', [active.id])).rows).toEqual([{ state: 'pending' }]);
   await rootFixture.daemon.execute('postAgentTurnReceipt', { ...authority(active), status: 'complete' }, WORKER);
   const next = (await commands(opened.cornerId, WORKER)).filter(command => command.action === 'input');
   expect(next).toHaveLength(3);

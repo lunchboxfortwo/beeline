@@ -576,7 +576,7 @@ const scope4 = fixtureScope4();
     live.publish({ type: 'invalidate', roomId, reason: 'turn', agentId: 'agent',
       requestId: 'request', committedRow: { type: 'turn', row: {
         room_id: roomId, request_id: 'request', agent_id: 'agent', status: 'working',
-        started_at: new Date(1), created_at: new Date(1), generation_id: null,
+        started_at: new Date(1), created_at: new Date(1),
         requested_by: null } } });
     await expect(frame).resolves.toMatchObject({ type: 'turn-delta', agentState: 'working' });
     expect(batch).toHaveBeenCalledTimes(1);

@@ -212,7 +212,7 @@ it('keeps private work across connection close and a new helper process resumes 
   const opened=await open(),turn=await worker(opened.cornerId);
   const connection=(await rootFixture.db.query<{connection_id:string}>('SELECT connection_id FROM agent_connections WHERE agent_id=$1',[WORKER])).rows[0]!;
   await releaseAgentConnection(rootFixture.db,new LiveHub(),WORKER,connection.connection_id);
-  const claimed=(await rootFixture.db.query<{state:string;generation_id:string}>('SELECT state FROM agent_commands WHERE id=$1',[turn.id])).rows[0]!;
+  const claimed=(await rootFixture.db.query<{state:string}>('SELECT state FROM agent_commands WHERE id=$1',[turn.id])).rows[0]!;
   expect(claimed.state).toBe('pending');
   await claimAgentConnection(rootFixture.db,new LiveHub(),WORKER,{lifecycleId:'restarted-helper'},
     {connectionId:'restarted-helper',instanceId:'helper-fixture'});
@@ -841,6 +841,6 @@ it('refuses retired relay writes on private turns without reporting success', as
   expect(r).toMatchObject({ ok: false, status: 410 });
   expect(
     (await rootFixture.db.query(`SELECT state FROM agent_commands WHERE id=$1`, [turn.id])).rows[0]?.state,
-  ).toBe('claimed');
+  ).toBe('pending');
   expect((await commands(DM, RUBY)).some((c) => c.reason === 'report')).toBe(false);
 });

@@ -786,25 +786,15 @@ describe('visit output through daemon completion and phone GET', () => {
     expect(fresh.history[1]!.finalReply).toBeUndefined();
   });
 
-  it('refuses a pending resume of a parent visit that has already advanced', async () => {
-    const runId = await start();
-    const held = await wake(runId);
-    await handoff(database, held, { runId, outcome: 'retry', contents: {} });
-    const source = await command(CORNER, TRIAGER);
-    const resumed = (await createAgentCommand(database, { roomId: CORNER, agentId: TRIAGER,
-      sourceMessageId: source.source_message_id, action: 'resume', reason: 'resume',
-      parent: held, retainDepth: true, turnRequestId: held.turn_request_id }))!;
-    await expect(database.transaction(db => startQueuedTurn(db, CORNER, TRIAGER, resumed.id)))
-      .rejects.toThrow('command claim conflict');
-    expect((await readAgentCommands(database, TRIAGER, CORNER)).commands.some(wake => wake.id === resumed.id)).toBe(false);
-    await expect(final({ ...resumed, generation_id: 'late-resume' }, 'Stale resume final')).rejects.toThrow();
-    // Refusing a new stale wake does not revoke the already executing parent's
-    // output binding: its final still belongs to the visit it actually served.
-    await final(held, 'Original execution final.');
-    const fresh = await read(runId);
-    expect(fresh.history[0]!.finalReply?.text).toBe('Original execution final.');
-    expect(fresh.history[1]!.finalReply).toBeUndefined();
-  });
+  it('an accepted decision remains answerable after its parent visit advances',async()=>{
+  const runId=await start(),held=await wake(runId);await handoff(database,held,{runId,outcome:'retry',contents:{}});
+  const source=await command(CORNER,TRIAGER),before=await read(runId);
+  const resumed=(await createAgentCommand(database,{roomId:CORNER,agentId:TRIAGER,sourceMessageId:source.source_message_id,reason:'resume',parent:held,retainDepth:true}))!;
+  await database.transaction(db=>startQueuedTurn(db,CORNER,TRIAGER,resumed.id));
+  expect((await readAgentCommands(database,TRIAGER,CORNER)).commands.some(item=>item.id===resumed.id)).toBe(true);
+  await final(resumed,'The decision was received.');await final(held,'The earlier visit finished.');
+  const after=await read(runId);expect(after.state).toEqual(before.state);
+});
 
   it('keeps legacy revisions executable without inventing descriptions or replies', async () => {
     const runId = await start();

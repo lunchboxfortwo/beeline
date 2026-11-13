@@ -129,7 +129,7 @@ it('STALE-ANSWERED-REPORT: preserves a report already being handled', async () =
   await answer(opened.cornerId);
   await claim(report);
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [report.id])).rows)
-    .toEqual([{ state: 'claimed' }]);
+    .toEqual([{ state: 'pending' }]);
   await db.query(`UPDATE agent_commands SET created_at=now()-interval '1 day' WHERE id=$1`, [report.id]);
   await claim(report);
   // A closed connection keeps the work claimed; its helper resumes it in the same generation.
@@ -138,7 +138,7 @@ it('STALE-ANSWERED-REPORT: preserves a report already being handled', async () =
   await releaseAgentConnection(db, new LiveHub(), RUBY, connection.connection_id);
   await claim(report);
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [report.id])).rows)
-    .toEqual([{ state: 'claimed' }]);
+    .toEqual([{ state: 'pending' }]);
 });
 it.each([
   ['delivery', false], ['cached claim', false], ['delivery', true], ['cached claim', true],

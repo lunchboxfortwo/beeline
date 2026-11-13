@@ -604,26 +604,15 @@ const scope3 = fixtureScope3(scope1);
 
     // Reproduction (R-MCP-ACK-ONE): no_reply_needed(address) marked every non-order wake at the address handled,
     // including wakes the app had not seen, and could not clear a wake whose claim had expired.
-    it('R-MCP-ACK-ONE: no_reply_needed with commandId marks only that wake handled', async () => {
-      const { client, member } = await scope1.connected();
-      const wake = (text: string) => createAgentCommand(scope1.db, { roomId: ROOM, agentId: member, sourceMessageId: null, reason: 'report',
-        privatePayload: { kind: 'report', authorId: AGENT, fromRoomId: ROOM, text } });
-      const first = (await wake('done: first'))!, second = (await wake('done: second'))!;
-      const order = (await createAgentCommand(scope1.db, { roomId: ROOM, agentId: member, sourceMessageId: null, reason: 'order',
-        privatePayload: { kind: 'order', authorId: AGENT, fromRoomId: ROOM, text: 'Do the thing' } }))!;
-      expect((await scope3.call(client, 'no_reply_needed', { address: ROOM, commandId: order.id })).text).toContain('answer it with report');
-      expect(await scope3.ok(client, 'no_reply_needed', { address: ROOM, commandId: first.id })).toEqual({ cleared: 1 });
-      const ids = () => scope3.ok(client, 'list_mentions', {}).then(page => (page.wakes as { id: string }[]).map(item => item.id));
-      expect(await ids()).toEqual(expect.arrayContaining([second.id, order.id]));
-      expect(await ids()).not.toContain(first.id);
-      // Elapsed time never steals a claimed wake from its owner.
-      await scope1.db.query(`UPDATE agent_commands SET state='claimed',lease_expires_at=now()-interval '1 minute' WHERE id=$1`, [second.id]);
-      expect(await ids()).not.toContain(second.id);
-      expect(await scope3.ok(client, 'no_reply_needed', { address: ROOM })).toEqual({ cleared: 0 });
-      await scope1.db.query(`UPDATE agent_commands SET state='pending',generation_id=NULL,lease_expires_at=NULL WHERE id=$1`, [second.id]);
-      expect(await scope3.ok(client, 'no_reply_needed', { address: ROOM })).toEqual({ cleared: 1 });
-      expect(await ids()).toEqual([order.id]);
-    });
+    it('an MCP silence acknowledgement leaves unanswered wakes in order',async()=>{
+  const {client,member}=await scope1.connected();
+  const wake=(text:string)=>createAgentCommand(scope1.db,{roomId:ROOM,agentId:member,sourceMessageId:null,reason:'report',privatePayload:{kind:'report',authorId:AGENT,fromRoomId:ROOM,text}});
+  const first=(await wake('done: first'))!,second=(await wake('done: second'))!;
+  expect(await scope3.ok(client,'no_reply_needed',{address:ROOM,commandId:first.id})).toEqual({cleared:0});
+  expect(await scope3.ok(client,'no_reply_needed',{address:ROOM})).toEqual({cleared:0});
+  const page=await scope3.ok(client,'list_mentions',{});
+  expect((page.wakes as {id:string}[]).map(item=>item.id)).toEqual([first.id,second.id]);
+});
 
     // Reproduction (R-MCP-LIMITS): search advertised limit 20 while the server refuses anything above 10.
     it('R-MCP-LIMITS: every advertised search limit is accepted', async () => {
@@ -694,8 +683,8 @@ const scope3 = fixtureScope3(scope1);
       await scope1.daemon.execute('report', { roomId: ROOM, requestId: order.turn_request_id, status: 'done', text: 'done: the numbers match' } as never, AGENT);
       const wakes = (await scope3.ok(client, 'list_mentions', {})).wakes as { address: string; reason: string; text: string }[];
       expect(wakes).toContainEqual(expect.objectContaining({ address: ROOM, reason: 'report', text: expect.stringContaining('the numbers match') }));
-      expect((await scope3.ok(client, 'no_reply_needed', { address: ROOM })).cleared).toBe(1);
-      expect((await scope3.ok(client, 'list_mentions', {})).wakes).toEqual([]);
+      expect((await scope3.ok(client,'no_reply_needed',{address:ROOM})).cleared).toBe(0);
+      expect((await scope3.ok(client,'list_mentions',{})).wakes).toContainEqual(expect.objectContaining({kind:'report'}));
     });
 
     it('R-MCP-REPORT: reports an order back to the agent that sent it', async () => {
@@ -796,14 +785,14 @@ const scope3 = fixtureScope3(scope1);
       await scope1.db.query(`UPDATE corner_github_cache SET lifecycle=$2::jsonb WHERE corner_id=$1`, [corner,
         JSON.stringify({ lifecycle: 'in-review', checks: 'passing', pr: { number: 7, headSha: head } })]);
       await scope3.ok(client, 'post', { address: corner, commandId: order!.id, progress: true, text: 'Checking the order.' });
-      const before = (await scope1.db.query<{ generation_id: string; root_source_message_id: string; state: string }>(
-        `SELECT generation_id,root_source_message_id,state FROM agent_commands WHERE id=$1`, [order!.id])).rows[0]!;
-      expect(before).toMatchObject({ state: 'claimed', root_source_message_id: source });
+      const before = (await scope1.db.query<{ root_source_message_id: string; state: string }>(
+        `SELECT root_source_message_id,state FROM agent_commands WHERE id=$1`, [order!.id])).rows[0]!;
+      expect(before).toMatchObject({ state: 'pending', root_source_message_id: source });
       await scope3.ok(client, 'record_merge_yes', { address: corner, commandId: order!.id });
       expect((await scope1.db.query(`SELECT approved_by,head_sha FROM corner_merge_approvals WHERE corner_id=$1`, [corner])).rows[0])
         .toMatchObject({ approved_by: USER, head_sha: head });
-      expect((await scope1.db.query(`SELECT generation_id FROM agent_commands WHERE id=$1`, [order!.id])).rows[0])
-        .toEqual({ generation_id: before.generation_id });
+      expect((await scope1.db.query(`SELECT state FROM agent_commands WHERE id=$1`, [order!.id])).rows[0])
+        .toEqual({state:'pending'});
       await scope3.ok(client, 'report', { address: corner, commandId: order!.id, status: 'done', text: 'done: order complete' });
       expect((await scope1.db.query(`SELECT state FROM agent_commands WHERE id=$1`, [order!.id])).rows[0]).toEqual({ state: 'complete' });
       expect((await scope3.call(client, 'record_merge_yes', { address: corner, commandId: order!.id })).error).toBe(true);
@@ -821,13 +810,7 @@ const scope3 = fixtureScope3(scope1);
       await scope1.db.query(`UPDATE agent_commands SET agent_id=$2 WHERE id=$1`, [orders[0]!.id, AGENT]);
       expect((await scope3.call(client, 'post', { address: first, commandId: orders[0]!.id, text: 'wrong member' })).error).toBe(true);
       await scope1.db.query(`UPDATE agent_commands SET agent_id=$2 WHERE id=$1`, [orders[0]!.id, member]);
-      await scope1.db.query(`UPDATE agent_commands SET state='claimed',generation_id='helper-generation',lease_expires_at=now()+interval '1 minute' WHERE id=$1`, [orders[0]!.id]);
-      expect((await scope3.call(client, 'post', { address: first, commandId: orders[0]!.id, text: 'another active lease' })).error).toBe(true);
-      await scope1.db.query(`UPDATE agent_commands SET lease_expires_at=now()-interval '1 second' WHERE id=$1`, [orders[0]!.id]);
-      expect((await scope3.call(client, 'post', { address: first, commandId: orders[0]!.id, progress: true, text: 'Expired clocks cannot steal work' })).error).toBe(true);
-      await scope1.db.query(`UPDATE agent_commands SET state='pending',generation_id=NULL,lease_expires_at=NULL WHERE id=$1`, [orders[0]!.id]);
-      await scope3.ok(client, 'post', { address: first, commandId: orders[0]!.id, progress: true, text: 'Explicitly returned work' });
-      expect((await scope1.db.query<{ generation_id: string }>(`SELECT generation_id FROM agent_commands WHERE id=$1`, [orders[0]!.id])).rows[0]!.generation_id).toMatch(/^mcp:/);
+      await scope3.ok(client,'post',{address:first,commandId:orders[0]!.id,progress:true,text:'The queued order still owns its tools.'});
       await scope3.ok(client, 'report', { address: first, commandId: orders[0]!.id, status: 'done', text: 'done: first' });
       await scope3.ok(client, 'report', { address: second, commandId: orders[1]!.id, status: 'done', text: 'done: second' });
     });

@@ -120,9 +120,7 @@ it('MODEL-UNKNOWN: a model owner end remains terminal while a new explicit comma
   const command=(await wake())!;
   await startQueuedCommand(daemon, { roomId:C, commandId:command.id }, WORKER);
   expect((await db.query<{worker_active:boolean}>(cornerIdleSql('$1'),[C])).rows[0]?.worker_active).toBe(true);
-  await db.query(`INSERT INTO agent_command_owner_ends(command_id,generation_id,model_request_id)
-    VALUES($1,'unknown-model',NULL)`,[command.id]);
-  await db.query(`SELECT beeline_finish_agent_command($1,'failed','The model result could not be confirmed.',NULL)`,[command.id]);
+  await daemon.execute('postRoomMessage',{roomId:C,requestId:command.turn_request_id,text:'Worker stopped while answering this: model result unknown'},WORKER);
   const idle=(await db.query<{worker_active:boolean;suppressed:boolean}>(cornerIdleSql('$1'),[C])).rows[0]!;
   expect(idle.worker_active).toBe(false);
   expect(idle.suppressed).toBe(false);
@@ -131,17 +129,16 @@ it('MODEL-UNKNOWN: a model owner end remains terminal while a new explicit comma
     sourceMessageId:'explicit-after-unknown',reason:'human_tag'}))!;
   expect((await readAgentCommands(db, WORKER, C)).commands.map(item=>item.id)).toContain(next.id);
   await startQueuedCommand(daemon, { roomId:C, commandId:next.id }, WORKER);
-  expect((await db.query('SELECT state,generation_id FROM agent_commands WHERE id=$1',[command.id])).rows)
-    .toEqual([{state:'complete',generation_id:'unknown-model'}]);
+  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[command.id])).rows)
+    .toEqual([{state:'complete'}]);
 });
 
 it('a pre-claim failure cannot end queued work; its owner can report a plain failure after claim', async () => {
   const command=(await wake())!;
-  await expect(daemon.execute('postAgentTurnReceipt', {roomId:C,requestId:command.turn_request_id,
-    status:'failed',reason:'git fetch failed: cannot lock ref'},WORKER)).rejects.toThrow('authority rejected');
-  expect(await state()).toBe('working');
-  await startQueuedCommand(daemon, { roomId:C, commandId:command.id }, WORKER);
-  await daemon.execute('postAgentTurnReceipt',{ roomId:C, requestId:command.turn_request_id, status:'failed', reason:'git fetch failed: cannot lock ref' },WORKER);
+  await daemon.execute('postAgentTurnReceipt',{roomId:C,requestId:command.turn_request_id,status:'failed',reason:'git fetch failed: cannot lock ref'},WORKER);
+  expect((await readAgentCommands(db,WORKER,C)).commands.map(item=>item.id)).toContain(command.id);
+  await startQueuedCommand(daemon,{roomId:C,commandId:command.id},WORKER);
+  await daemon.execute('postRoomMessage',{roomId:C,requestId:command.turn_request_id,text:'failed: git fetch failed: cannot lock ref'},WORKER);
   expect(await state()).toBe('idle');
   const failures=(await readAgentCommands(db, COMMANDER, C)).commands.filter(item=>item.reason==='report'&&item.source.body.startsWith('failed:'));
   expect(failures).toHaveLength(1);
@@ -158,7 +155,7 @@ async function turn(agent = WORKER) {
 }
 async function end(agent = WORKER, age = 0) {
   await db.query(`SELECT beeline_finish_agent_command(id,'complete',NULL,NULL) FROM agent_commands
-    WHERE room_id=$1 AND agent_id=$2 AND state='claimed'`,[C,agent]);
+    WHERE room_id=$1 AND agent_id=$2 AND state='pending'`,[C,agent]);
   await db.query(`UPDATE agent_turns SET ended_at=clock_timestamp()-make_interval(secs=>$2)
     WHERE room_id=$1 AND status<>'working' AND agent_id=$3`,[C,age,agent]);
 }
@@ -508,13 +505,12 @@ it('Reproduction R1: a worker order waiting on an offline helper stays working',
   ).toMatchObject({ state: 'working' });
   await db.query(`DELETE FROM agent_turns WHERE room_id=$1`, [behind]);
   await db.query(
-    `UPDATE agent_commands SET state='claimed',lease_expires_at=now()+interval '90 seconds',
-       claimed_at=now(),generation_id='g-hold' WHERE id='queued-implementer'`,
+    `UPDATE agent_commands SET created_at=now()-interval '1 day' WHERE id='queued-implementer'`,
   );
   expect(await daemon.execute('getCornerRestoreState', { cornerId: C }, WORKER)).toMatchObject({
     state: 'working', activity: 'running',
   });
-  await db.query(`UPDATE agent_commands SET state='pending',generation_id=NULL,lease_expires_at=NULL,claimed_at=NULL WHERE id='queued-implementer'`);
+  await db.query(`UPDATE agent_commands SET state='pending' WHERE id='queued-implementer'`);
 
   expect(await state()).toBe('working');
   await db.query("UPDATE agent_commands SET state='complete',completed_at=now() WHERE id='queued-implementer'");

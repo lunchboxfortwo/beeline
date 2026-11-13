@@ -30,11 +30,11 @@ describe('corner message attribution', () => {
     expect((await rootFixture.db.query(`SELECT 1 FROM memberships WHERE room_id=$1 AND identity_id=$2`, [source,B])).rowCount).toBe(0);
     await rootFixture.daemon.execute('postAgentTurnReceipt', { roomId:C, requestId:review!.turnRequestId, status:'complete' }, B);
     await expect(read('review-approval')).rejects.toThrow('message access denied');
-    await rootFixture.db.query(`UPDATE agent_commands SET state='claimed',completed_at=NULL WHERE id=$1`, [review!.id]);
+    await rootFixture.db.query(`UPDATE agent_commands SET state='pending',completed_at=NULL WHERE id=$1`, [review!.id]);
     await expect(read('review-approval')).resolves.toMatchObject({body:'Approved scope'});
     await rootFixture.db.query(`UPDATE agent_commands SET state='cancelled' WHERE id=$1`, [review!.id]);
     await expect(read('review-approval')).rejects.toThrow('message access denied');
-    await rootFixture.db.query(`UPDATE agent_commands SET state='claimed' WHERE id=$1`, [review!.id]);
+    await rootFixture.db.query(`UPDATE agent_commands SET state='pending' WHERE id=$1`, [review!.id]);
     await rootFixture.db.query(`UPDATE rooms SET archived_at=now() WHERE id=$1`, [C]);
     await expect(read('review-approval')).rejects.toThrow('message access denied');
     await rootFixture.db.query(`UPDATE rooms SET archived_at=NULL WHERE id=$1`, [C]);
@@ -92,7 +92,7 @@ describe('corner message attribution', () => {
       await rootFixture.db.query('UPDATE agent_commands SET state=$2 WHERE id=$1',[review!.id,state]);
       await expect(transcript()).rejects.toThrow();
     }
-    await rootFixture.db.query("UPDATE agent_commands SET state='claimed' WHERE id=$1",[review!.id]);
+    await rootFixture.db.query("UPDATE agent_commands SET state='pending' WHERE id=$1",[review!.id]);
     for (const purpose of ['repair','verdict']) {
       await rootFixture.db.query(`UPDATE agent_commands SET review_context=review_context || jsonb_build_object('purpose',$2::text) WHERE id=$1`,[review!.id,purpose]);
       await expect(transcript()).rejects.toThrow();
@@ -584,7 +584,7 @@ describe('corner message attribution', () => {
     await claim(rereview!);
     await reconcileConfiguredCornerReviewers(rootFixture.db, R);
     expect((await rootFixture.db.query(`SELECT state FROM agent_commands WHERE id=$1`, [rereview!.id])).rows)
-      .toEqual([{ state: 'claimed' }]);
+      .toEqual([{ state: 'pending' }]);
     expect(await commands(B, C)).toEqual([]);
     expect((await rootFixture.db.query<{ workflow_state: string }>(
       `SELECT ${cornerRunStateSql('corner_id')} workflow_state FROM corner_facts WHERE corner_id=$1`, [C],

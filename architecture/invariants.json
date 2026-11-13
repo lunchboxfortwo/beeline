@@ -655,7 +655,7 @@
       "apps/server/src",
       "apps/auth/src"
     ],
-    "bootstrapTotal": 1652,
+    "bootstrapTotal": 1651,
     "unusedTotal": 172,
     "tables": {
       "agent_avatars": {
@@ -941,7 +941,10 @@
           "started_at": "existing before the registry; weekly audit reviews",
           "created_at": "existing before the registry; weekly audit reviews",
           "failure_reason": "existing before the registry; weekly audit reviews",
-          "completion_kind": "existing before the registry; weekly audit reviews",
+          "completion_kind": {
+            "reason": "Historical no-reply completions remain readable while the prior server drains; new queue items can no longer finish silently.",
+            "drop": "Next release after the queue rollout: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
+          },
           "tool_calls": "existing before the registry; weekly audit reviews",
           "input_tokens": "existing before the registry; weekly audit reviews",
           "output_tokens": "existing before the registry; weekly audit reviews",

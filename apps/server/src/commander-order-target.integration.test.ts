@@ -167,7 +167,7 @@ it.each(['done', 'blocked', 'failed', 'needs_decision'])('Reproduction report-co
   expect(reply).toMatchObject({ private: true, source: { authorId: BABY, body: text } });
   await startQueuedCommand(daemon, { roomId: reply.roomId, commandId: reply.id }, JELLYBEAN);
   expect((await db.query(`SELECT state,parent_command_id,review_context FROM agent_commands WHERE id=$1`, [reply.id])).rows[0])
-    .toMatchObject({ state: 'claimed', parent_command_id: order.id, review_context: null });
+    .toMatchObject({ state: 'pending', parent_command_id: order.id, review_context: null });
   expect((await db.query(`SELECT 1 FROM agent_commands WHERE reason='report' AND agent_id=$1`, [CANDY])).rowCount).toBe(0);
   expect((await db.query(`SELECT 1 FROM messages WHERE text=$1`, [text])).rowCount).toBe(0);
   // An obsolete verdict cannot dispatch work on the replacement head, but
@@ -175,7 +175,7 @@ it.each(['done', 'blocked', 'failed', 'needs_decision'])('Reproduction report-co
   await expect(daemon.execute('report', { roomId: incoming.roomId, requestId: incoming.turnRequestId, status: 'done', text: 'done: stale review verdict' }, CANDY))
     .rejects.toThrow('commander could not receive report');
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [incoming.id])).rows)
-    .toEqual([{ state: 'claimed' }]);
+    .toEqual([{ state: 'pending' }]);
   expect((await db.query(`SELECT 1 FROM agent_commands WHERE private_payload->>'text'='done: stale review verdict'`)).rowCount).toBe(0);
   console.info(`Demonstrated Reproduction report-commander-refused: ${status} after repair delivered privately and claimed by opening commander`);
 });

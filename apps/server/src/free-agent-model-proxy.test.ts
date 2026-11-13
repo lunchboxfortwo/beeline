@@ -120,11 +120,10 @@ describe('server-owned model execution and accounting', () => {
     expect(commands.commands).toHaveLength(1);
     const command = commands.commands[0]!;
     expect(command.source.id).toBe(sent.messageId);
-    const claimed = await daemon.execute('claimAgentTurn', { roomId, commandId: command.id },
-      AGENT, { connectionId, epoch });
+    const claimed=await daemon.execute('startAgentTurn',{roomId,requestId:command.turnRequestId},AGENT);
     expect(claimed).not.toHaveProperty('modelCredential');
-    expect((await db.query('SELECT state,turn_owner_connection_id FROM agent_commands WHERE id=$1', [command.id])).rows)
-      .toEqual([{ state: 'claimed', turn_owner_connection_id: connectionId }]);
+    expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [command.id])).rows)
+      .toEqual([{state:'pending'}]);
     const response = await call({ messages: [{ role: 'user', content: 'say hello' }] });
     expect({ status: response.status, body: await response.json() }).toMatchObject({
       status: 200, body: { choices: [{ message: { content: 'done' } }] },
@@ -134,7 +133,7 @@ describe('server-owned model execution and accounting', () => {
 
     // A replacement helper registration leaves the turn claimed for that helper to resume.
     await claimAgentConnection(db, live, AGENT, {}, { connectionId: 'replacement-helper', instanceId: 'model-helper' });
-    expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [command.id])).rows).toEqual([{ state: 'claimed' }]);
+    expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [command.id])).rows).toEqual([{ state: 'pending' }]);
   });
 
   let turnSequence=0;
@@ -144,13 +143,13 @@ describe('server-owned model execution and accounting', () => {
       VALUES($1,$2,$3,$1,'input','human_tag',$1,'source',0,'pending')`,[id, ROOM, AGENT]);
   };
 
-  it('a token refusal ends the current turn and leaves fresh requests available for admission',async()=>{
+  it('a token refusal leaves the item queued and permits a later valid model request',async()=>{
     config={...CONFIG,dailyTokenCap:3_000_000,firstDayTokenCap:3_000_000,lifetimeTokenCap:0};
     await db.query('INSERT INTO free_agent_usage(owner_id,day,tokens) VALUES($1,current_date,1410000)',[OWNER]);
     const response=await call({messages:[{role:'user',content:'x'.repeat(5_000_000)}],max_tokens:1024});
     expect(response.status).toBe(403);
     expect((await response.json()).error.message).toContain('1.41M of 3M');
-    expect((await db.query("SELECT state FROM agent_commands WHERE id='turn'")).rows).toEqual([{state:'complete'}]);
+    expect((await db.query("SELECT state FROM agent_commands WHERE id='turn'")).rows).toEqual([{state:'pending'}]);
     await newTurn();
     expect((await call({messages:[]})).status).toBe(200);
     expect(upstream).toHaveLength(1);
@@ -333,7 +332,7 @@ describe('server-owned model execution and accounting', () => {
     expect((await call({ messages: [] })).status).toBe(403);
     expect(upstream).toEqual([]);
     expect(await freeAgentAllowance(db, OWNER, new Date())).toEqual({ today: 0, lifetime: 0 });
-    await db.query(`UPDATE agent_commands SET state='claimed'`);
+    await db.query(`UPDATE agent_commands SET state='pending'`);
     expect((await call({ messages: [] })).status).toBe(200);
     expect(upstream).toHaveLength(1);
     console.log('Demonstrated FREE-ABUSE-1: outside turn HTTP 403, zero upstream calls and charge; live turn HTTP 200.');
