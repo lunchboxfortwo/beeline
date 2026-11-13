@@ -1,4 +1,4 @@
-import { type MutableRefObject, type Ref } from 'react';
+import { useCallback, type MutableRefObject, type Ref } from 'react';
 import { Platform } from 'react-native';
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
 import { useAnimatedStyle } from 'react-native-reanimated';
@@ -283,7 +283,7 @@ export function BuzzChatSurface({
     visibleMessages, pendingAck, agentTurnMarkers, setPendingAck, receivedSteer, activeAgentTurn,
     setReceivedSteer, isCorner, roomSurface, viewerPubkey, conversationIdentities, agentByPubkey,
     insets, composerHeight, scrollController, decodedId, readRoom, desktopExperience,
-    setDesktopDeliveryState, agentPresences, setPresenceNow, presenceNow,
+    setDesktopDeliveryState, agentPresences, setPresenceNow, presenceNow, combinedMessages,
   ]);
   // The composer's foot follows the keyboard on the UI thread: the same inset
   // as the turn presentation's padding, drawn as the height under the row.
@@ -417,6 +417,13 @@ export function BuzzChatSurface({
     sourceLandingFlashMessageId,
   ]);
 
+  const openChatInfo = useCallback(() => openPlace({ kind: 'chat-info', roomId: decodedId }, isDesktop), [decodedId, isDesktop]);
+  const openMembers = useCallback(() => openPlace({ kind: 'members', roomId: decodedId }, isDesktop), [decodedId, isDesktop]);
+  const openDmActions = useCallback(() => {
+    setMembershipError(null);
+    setDmActionsVisible(true);
+  }, [setMembershipError, setDmActionsVisible]);
+  const openCornerActions = useCallback(() => setCornerActionsVisible(true), [setCornerActionsVisible]);
   const openLinkedThread = (link: { roomId: string; parentRoomId: string }) =>
     void handleOpenChannelReference({ kind: 'corner', channelId: link.roomId, parentChannelId: link.parentRoomId });
   const openLinkedMessage = (link: { roomId: string; messageId: string; workspaceId: string }) =>
@@ -454,20 +461,17 @@ export function BuzzChatSurface({
   memberCount={roomParticipantTotal}
   repositoryAvatar={roomSurface?.room.avatar}
   repositoryFavicon={roomSurface?.room.favicon}
-  openChatInfo={() => openPlace({ kind: 'chat-info', roomId: decodedId }, isDesktop)}
-  openMembers={() => openPlace({ kind: 'members', roomId: decodedId }, isDesktop)}
+  openChatInfo={openChatInfo}
+  openMembers={openMembers}
   dmPeer={dmPeerMark}
   dmHeaderPresence={dmHeaderPresence}
-  openDmActions={!viewerIsAgent && !isArchived ? () => {
-    setMembershipError(null);
-    setDmActionsVisible(true);
-  } : undefined}
+  openDmActions={!viewerIsAgent && !isArchived ? openDmActions : undefined}
   thread={threadHeader.thread}
   threadCollapsed={!roomSurface || threadHeader.collapsed}
   openParentChat={threadHeader.openParentChat}
   threadExpanded={threadHeader.expandedBlock}
   expandThread={threadHeader.expand}
-  openCornerActions={!viewerIsAgent && !isArchived ? () => setCornerActionsVisible(true) : undefined}
+  openCornerActions={!viewerIsAgent && !isArchived ? openCornerActions : undefined}
   threadBarRef={threadHeader.barRef}
   onThreadBarLayout={threadHeader.onBarLayout}
 />
