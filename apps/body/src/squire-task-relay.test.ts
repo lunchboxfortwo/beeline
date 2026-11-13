@@ -48,7 +48,7 @@ describe('Squire shared-session continuation', () => {
       const response = await fetch(`${url}/mcp`, { method: 'POST',
         headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
         body: JSON.stringify({ roomId: 'room', requestId, taskId: requestId,
-          generationId: 'generation', method: 'tools/call', params: { name, arguments: args } }),
+          itemId: 'generation', method: 'tools/call', params: { name, arguments: args } }),
       });
       expect(response.status).toBe(200);
       return JSON.parse((await response.json()).result.content[0].text);
