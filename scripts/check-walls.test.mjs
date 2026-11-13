@@ -86,3 +86,10 @@ test('eleven production wall constructions fail even outside the request path', 
     assert.ok(judgeWalls(target).some(error => error.includes('maximum 10')));
   } finally { rmSync(target, {recursive:true, force:true}); }
 });
+
+mutation('an MCP message budget fails', 'apps/server/src/rooms-mcp.ts',
+  '    let input: Record<string, unknown>;', '    await this.oauth.take(principal);\n    let input: Record<string, unknown>;');
+mutation('an MCP message body cap fails', 'apps/server/src/rooms-mcp.ts',
+  'mcpBody(request, null)', 'mcpBody(request, 320000)');
+mutation('an MCP audit wait fails', 'apps/server/src/rooms-mcp.ts',
+  "void this.audit(principal, name, 'succeeded');", "await this.audit(principal, name, 'succeeded');");

@@ -727,7 +727,7 @@ const scope1 = fixtureScope1();
     expect((await scope1.db.query("SELECT 1 FROM messages WHERE room_id=$1 AND text='forbidden'", [PRIVATE])).rowCount).toBe(0);
   });
 
-  it('Reproduction R1: grants every tool after one Allow, with no scope or a read-only scope, and limits per token', async () => {
+  it('Reproduction R1: grants every tool after one Allow, with no scope or a read-only scope, without a per-token message budget', async () => {
     for (const scope of ['', 'rooms:read']) {
       const { client } = await scope1.connected(scope);
       const profile = await client.callTool({ name: 'set_profile', arguments: { name: `Grok ${scope || 'none'}` } });
@@ -736,9 +736,24 @@ const scope1 = fixtureScope1();
       expect(sent.isError).toBeFalsy();
     }
     expect((await scope1.db.query("SELECT 1 FROM messages WHERE text LIKE 'full rights %'")).rowCount).toBe(2);
-    const { token } = await scope1.connected('rooms:read');
+    const { token, client } = await scope1.connected('rooms:read');
     await scope1.db.query('UPDATE rooms_mcp_tokens SET calls=60,window_at=now() WHERE hash=$1', [tokenHash(token)]);
-    expect((await phoneFetch(scope1.origin + '/mcp', { headers: { authorization: `Bearer ${token}` } })).status).toBe(429);
+    expect((await client.callTool({name:'send_message',arguments:{room:ROOM,text:'message after legacy budget'}})).isError).toBeFalsy();
+    expect((await scope1.db.query("SELECT 1 FROM messages WHERE text='message after legacy budget'")).rowCount).toBe(1);
+  });
+
+  it('queues a large message while optional audit storage never resolves', async () => {
+    const { client } = await scope1.connected();
+    const query=scope1.db.query.bind(scope1.db);
+    const spy=vi.spyOn(scope1.db,'query').mockImplementation((sql,...args)=>
+      sql.includes('INSERT INTO rooms_mcp_audit') ? new Promise(()=>{}) : query(sql,...args));
+    try {
+      const text='@demo-agent '+ 'x'.repeat(330_000);
+      expect((await client.callTool({name:'send_message',arguments:{room:ROOM,text}})).isError).toBeFalsy();
+      const item=(await query<{body:string}>(`SELECT message->>'body' body FROM agent_commands
+        WHERE agent_id=$1 AND message->>'body'=$2`,[AGENT,text])).rows[0];
+      expect(item?.body).toBe(text);
+    } finally { spy.mockRestore(); }
   });
 
   it('Reproduction R1: lets a stored read-only connection post and refresh without reconnecting', async () => {

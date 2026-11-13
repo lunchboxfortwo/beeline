@@ -8,7 +8,7 @@ export interface StoredAnswer {
   readonly itemId: string;
   readonly roomId: string;
   readonly requestId: string;
-  /** Empty only for a restart control acknowledgement. */
+  /** Empty text does not acknowledge an unanswered queue item. */
   readonly text: string;
   readonly steps?: DaemonOperationMap['postRoomMessage']['input']['steps'];
 }

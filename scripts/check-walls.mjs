@@ -14,7 +14,7 @@ export const PATH = [
   { file: 'apps/body/src/agent-home.ts', functions: ['prepareRoomAgentCredentials', 'repairRoomAgentCredentialLinks'], startup: true },
   { file: 'apps/server/src/machine-connection.ts', functions: ['machineConnectionOutput', 'serveMachineSocket', 'serveAgentSocket'], transport: true, startup: true },
   { file: 'apps/server/src/daemon-live.ts', functions: ['frame', '#operation', '#readQueue'], transport: true },
-  { file: 'apps/server/src/rooms-mcp.ts', functions: ['call','sendMessage'] },
+  { file: 'apps/server/src/rooms-mcp.ts', functions: ['call','sendMessage','handle','toolResult'], transport:true, protocol:['handle','toolResult'] },
   { file: 'apps/server/src/rooms-mcp-agent.ts', functions: ['call'] },
   { file: 'apps/server/src/phone-socket.ts', functions: ['phoneSocketRequests'], transport: true },
   { file: 'apps/server/src/phone/messages.ts', functions: ['phoneSendMessage'] },
@@ -61,7 +61,7 @@ function functionName(node) {
       (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))) return node.name.getText();
 }
 
-export function stopSites(file, text, functions, startup = false, kinds = [], transport = false) {
+export function stopSites(file, text, functions, startup = false, kinds = [], transport = false, protocol = []) {
   const tree = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
   const sites = tree.parseDiagnostics.map(error => `${file}: ${ts.flattenDiagnosticMessageText(error.messageText, ' ')}`), walls = [], found = new Set();
   const imported = tree.statements.some(node => ts.isImportDeclaration(node) &&
@@ -115,12 +115,15 @@ export function stopSites(file, text, functions, startup = false, kinds = [], tr
       if (!kind || !ts.isStringLiteral(kind) || !kinds.includes(kind.text)) add('unknown wall kind');
       else walls.push({ file, line: tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1, kind: kind.text, reason: node.arguments[1]?.getText(tree) });
     }
-    if (ts.isThrowStatement(node) && !isWall(node.expression) && !propagated(node.expression)) add('refuse without wall');
+    if (!protocol.includes(name) && ts.isThrowStatement(node) && !isWall(node.expression) && !propagated(node.expression)) add('refuse without wall');
     else if (ts.isCallExpression(node) && node.expression.getText(tree) === 'refuse') add('refuse without wall');
     else if (ts.isCallExpression(node) && node.expression.getText(tree) === 'Promise.reject' && !isWall(node.arguments[0])) add('reject without wall');
     else if (ts.isReturnStatement(node) && node.expression && ts.isObjectLiteralExpression(node.expression) && node.expression.properties.some(property => ts.isPropertyAssignment(property) && ((['delivered', 'accepted', 'allowed'].includes(property.name.getText(tree)) && property.initializer.kind === ts.SyntaxKind.FalseKeyword) || (property.name.getText(tree) === 'skipped' && property.initializer.kind === ts.SyntaxKind.TrueKeyword)))) add('negative return');
-    else if (ts.isReturnStatement(node) && ((!node.expression && !transport) || node.expression && ['undefined', 'null', 'false'].includes(node.expression.getText(tree)))) add('early return');
+    else if (!protocol.includes(name) && ts.isReturnStatement(node) && ((!node.expression && !transport) || node.expression && ['undefined', 'null', 'false'].includes(node.expression.getText(tree)))) add('early return');
     else if (ts.isContinueStatement(node) || ts.isBreakStatement(node)) add('skip');
+    else if (transport && ts.isCallExpression(node) && node.expression.getText(tree)==='mcpBody' && node.arguments[1]?.kind!==ts.SyntaxKind.NullKeyword) add('message body cap');
+    else if (transport && ts.isCallExpression(node) && /\.(?:take|acquire|reserve)$/.test(node.expression.getText(tree))) add('admission');
+    else if (transport && ts.isAwaitExpression(node) && /\.audit$/.test(node.expression.expression?.getText(tree) ?? '')) add('optional audit wait');
     else if (startup && ts.isAwaitExpression(node) && !awaited(node.expression)) add('wait');
     else if (startup && ts.isCallExpression(node) && /(?:^|\.)execute$/.test(node.expression.getText(tree)) && node.arguments[0]?.text !== 'getModelCredential') add('optional setup read');
     else if (ts.isAwaitExpression(node) && /(?:refreshCornerReviewHead|refreshToken|installDependencies|gitClone|prepareWorkspace)/.test(node.expression.getText(tree))) add('optional setup wait');
@@ -174,8 +177,8 @@ export function judgeWalls(root) {
   if (!kinds.length || new Set(kinds).size !== kinds.length || kinds.join() !== documented.join())
     errors.push(`${WALLS_FILE} must list exactly the kinds in ${WALL_BUILDER_FILE}: ${kinds.join(', ')}`);
   if (/^- `apps\//m.test(docs)) errors.push(`${WALLS_FILE} lists kinds and why, never per-line exceptions`);
-  for (const { file, functions, startup, transport } of PATH) {
-    const { sites, missing } = stopSites(file, readFileSync(resolve(root, file), 'utf8'), functions, startup, kinds, transport);
+  for (const { file, functions, startup, transport, protocol } of PATH) {
+    const { sites, missing } = stopSites(file, readFileSync(resolve(root, file), 'utf8'), functions, startup, kinds, transport, protocol);
     errors.push(...missing, ...sites.map(site => `not a wall: ${site}\n  Refusals must use wall(kind, reason); no other gate, cap, skip or wait may stop an answer.`));
   }
   return errors;
