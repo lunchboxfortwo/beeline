@@ -47,6 +47,12 @@ export function setMobileErrorRoute(segments: readonly string[]): void {
   catch { /* Diagnostics must never interrupt navigation. */ }
 }
 
+/** Only the opaque identity id; sign-out clears it so later events name nobody. */
+export function setMobileErrorUser(identityId: string | null): void {
+  try { Sentry.setUser(identityId ? { id: identityId } : null); }
+  catch { /* Diagnostics must never interrupt sign-in or sign-out. */ }
+}
+
 /** Called alongside the existing authenticated diagnostics; recovery never waits on Sentry. */
 export function captureMobileError(scope: string, cause: unknown): void {
   if (cause instanceof Error && (

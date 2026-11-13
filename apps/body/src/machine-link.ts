@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type { DaemonOperationMap, PostConnectorVaultInput } from '@beeline/api-contract/daemon';
 import { helperVersion } from './helper-version.js';
 import { unknownServerEventLogger } from './unknown-server-event.js';
+import { setHelperErrorUser } from './sentry.js';
 import { LiveLink, type LiveLinkTiming, type LiveSocketFactory } from './live-link.js';
 
 /** Subprotocol of the one socket a helper machine holds for all of its agents. */
@@ -118,6 +119,7 @@ export class AgentChannel {
       this.#registered = true;
       this.#capabilities = event.capabilities as Record<string,unknown> ?? {};
       const c = this.#capabilities;
+      if (typeof c.ownerId === 'string') setHelperErrorUser(c.ownerId);
       if (typeof c.turnConnectionId === 'string' && typeof c.turnConnectionEpoch === 'number')
         this.turnSource = {connectionId:c.turnConnectionId,epoch:c.turnConnectionEpoch};
       this.overlay.negotiate(c.overlayV1 === true);
