@@ -58,6 +58,6 @@ it('draws the speaking waveform while dictation listens', () => {
     act(() => { tree = create(<ComposerListening level={0.6} live testID="chat-speech-waveform" tagsTestID="tags" />); });
     const line = tree.root.findAll((node: any) => node.props?.testID === 'chat-speech-waveform-level' && typeof node.type === 'string');
     expect(line).toHaveLength(1);
-    expect(line[0].findAll((node: any) => node.type === 'YStack' && node.props.backgroundColor === 'needsYou')).toHaveLength(1);
+    expect(line[0].findAll((node: any) => node.type === 'YStack' && node.props.backgroundColor === 'needsYou')).toHaveLength(64);
     act(() => tree.unmount());
 });
