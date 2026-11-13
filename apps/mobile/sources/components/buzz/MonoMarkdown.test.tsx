@@ -15,6 +15,18 @@ import { MonoMarkdown } from './MonoMarkdown';
 
 beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; });
 
+it('keeps slash commands joined in rendered prose without changing paths or inline code', () => {
+    let tree: any;
+    act(() => { tree = create(<MonoMarkdown textStyle={{}} markdown={'Try /draw-avatar now. **/draw-avatar** remains joined. /tmp/file and `echo /draw-avatar` stay literal.'} />); });
+    const strings = (node: any): string => typeof node === 'string' ? node
+        : Array.isArray(node) ? node.map(strings).join('') : strings(node?.children ?? []);
+    const leaves = strings(tree.toJSON());
+    expect(leaves.split('/\u2060draw\u2060-\u2060avatar')).toHaveLength(3);
+    expect(leaves).toContain('/tmp/file');
+    expect(leaves).toContain('echo /draw-avatar');
+    act(() => tree.unmount());
+});
+
 it('keeps every nested list level 16 deeper than the one above, past depth two', () => {
     let tree: any;
     act(() => { tree = create(<MonoMarkdown textStyle={{}} markdown={'- one\n  - two\n    - three\n      - four'} />); });
