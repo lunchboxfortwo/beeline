@@ -2,7 +2,7 @@ import { afterEach, expect, it } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, symlinkSync } from 'node:fs';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { resolve } from 'node:path';
-import { createRoomPermissionHandler, roomPermissionDecision } from './monolith-room-turn.js';
+import { createRoomPermissionHandler, roomPermissionDecision } from './room-permissions.js';
 import { sandboxMountPlan, buildBwrapArgv, credentialMaskPaths } from './bwrap-sandbox.js';
 import { agentGrantAutoApproves, isPreapprovedReadOnlyCommand, parseCommandGrantTarget } from '@beeline/api-contract/agent-grants';
 import { requestGrant, readGrantScript } from './read-only-mcp-agent-grant-deps.js';

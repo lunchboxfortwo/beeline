@@ -260,7 +260,7 @@ export class VoiceService {
 
   async callWorkState(callId: string, db = this.db): Promise<{ pending: boolean; finishedAt: number }> {
     const row = (await db.query<{ pending: boolean; finished_at: Date | null }>(`SELECT
-      coalesce(bool_or(c.state IN ('pending','claimed')),false) pending, max(c.completed_at) finished_at
+      coalesce(bool_or(c.state='pending'),false) pending, max(c.completed_at) finished_at
       FROM voice_orders o JOIN agent_commands c
       ON c.source_message_id=o.source_message_id AND c.agent_id=o.agent_id WHERE o.call_id=$1`, [callId])).rows[0];
     return { pending: row?.pending ?? false, finishedAt: row?.finished_at?.getTime() ?? 0 };

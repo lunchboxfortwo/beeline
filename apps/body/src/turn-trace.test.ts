@@ -72,12 +72,6 @@ describe('turn phase trace', () => {
   it('separates queue, activation, context, model and publish time on one attempt', async () => {
     const { now, advance } = clock();
     const turn = trace(now);
-    turn.noteScheduler('queue', {
-      running: 4,
-      warm: 0,
-      busy: 4,
-      queuedChannels: 2,
-    });
     turn.start('queue-wait');
     advance(2_500);
     turn.end('queue-wait');
@@ -110,7 +104,6 @@ describe('turn phase trace', () => {
       publish: 180,
     });
     expect(record.totalMs).toBe(10_800);
-    expect(record.scheduler.atQueue?.running).toBe(4);
   });
 
   it('records how the institutional-memory snapshot fetch resolved, absent when it never ran', async () => {

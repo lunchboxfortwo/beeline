@@ -670,7 +670,6 @@ export async function registryMcpProviderToken(connectorId: string, expectedName
 export type RegistryMcpTurnContext = {
   readonly roomId: string;
   readonly requestId: string;
-  readonly generationId: string;
 };
 
 /** The existing per-call resource gate (`authorizeResourceCall`), nothing new. */
@@ -709,10 +708,8 @@ function readTurnContext(value: unknown): RegistryMcpTurnContext | undefined {
     typeof turn.roomId === 'string' &&
     turn.roomId.length > 0 &&
     typeof turn.requestId === 'string' &&
-    turn.requestId.length > 0 &&
-    typeof turn.generationId === 'string' &&
-    turn.generationId.length > 0
-    ? { roomId: turn.roomId, requestId: turn.requestId, generationId: turn.generationId }
+    turn.requestId.length > 0
+    ? { roomId: turn.roomId, requestId: turn.requestId }
     : undefined;
 }
 

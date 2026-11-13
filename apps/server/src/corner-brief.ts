@@ -83,7 +83,7 @@ export async function resolveCornerBriefAttachments(
   db: SqlDatabase,
   sourceRoomIds: readonly string[],
   draft: CornerBriefDraft,
-  pending?: { roomId: string; agentId: string; requestId: string; generationId?: string },
+  pending?: { roomId: string; agentId: string; requestId: string },
 ): Promise<CornerBriefAttachment[]> {
   validateCornerBrief(draft);
   const resolved: CornerBriefAttachment[] = [];
@@ -105,7 +105,7 @@ export async function resolveCornerBriefAttachments(
          ))
          AND (EXISTS (
            SELECT 1 FROM agent_pending_attachments p
-           WHERE p.room_id=$3 AND p.agent_id=$4 AND p.request_id=$5 AND p.generation_id=$6
+           WHERE p.room_id=$3 AND p.agent_id=$4 AND p.request_id=$5
              AND o.owner_id=p.agent_id AND p.url LIKE '%/v1/media/' || o.id::text
          ) OR EXISTS (
            SELECT 1 FROM messages m,
@@ -115,7 +115,7 @@ export async function resolveCornerBriefAttachments(
              AND (a->>'url' LIKE '%/v1/media/' || o.id::text
                OR a->>'mediaId'=o.id::text)
          )) FOR SHARE OF o`,
-        [item.objectId, sourceRoomIds, pending?.roomId ?? null, pending?.agentId ?? null, pending?.requestId ?? null, pending?.generationId ?? null],
+        [item.objectId, sourceRoomIds, pending?.roomId ?? null, pending?.agentId ?? null, pending?.requestId ?? null],
       )
     ).rows[0];
     if (!object)
@@ -145,11 +145,9 @@ export async function resolvePendingCornerBriefAttachments(
     roomId: string;
     agentId: string;
     requestId: string;
-    generationId?: string;
     excluding: readonly string[];
   },
 ): Promise<CornerBriefAttachment[]> {
-  if (!input.generationId) return [];
   const rows = (
     await db.query<{
       object_id: string;
@@ -164,9 +162,9 @@ export async function resolvePendingCornerBriefAttachments(
        JOIN objects object ON object.owner_id=pending.agent_id
          AND pending.url LIKE '%/v1/media/' || object.id::text
        WHERE pending.room_id=$1 AND pending.agent_id=$2 AND pending.request_id=$3
-         AND pending.generation_id=$4 AND object.state='ready' AND object.expires_at>now()
+         AND object.state='ready' AND object.expires_at>now()
        ORDER BY pending.created_at,pending.url`,
-      [input.roomId, input.agentId, input.requestId, input.generationId],
+      [input.roomId, input.agentId, input.requestId],
     )
   ).rows;
   const excluded = new Set(input.excluding.map((id) => id.toLowerCase()));
@@ -284,7 +282,7 @@ async function laterBriefApproval(
   const order = (
     await db.query<CommandRow>(
       `SELECT command.* FROM agent_commands command JOIN rooms corner ON corner.id=command.room_id
-       WHERE command.room_id=$2 AND command.agent_id=$3 AND command.state IN ('pending','claimed')
+       WHERE command.room_id=$2 AND command.agent_id=$3 AND command.state='pending'
          AND command.private_payload->>'kind'='order'
          AND command.private_payload->>'authorId'=${cornerCommanderIdSql('corner')}
          AND (command.id=$1 OR EXISTS (
@@ -381,7 +379,7 @@ export async function resolveCornerBriefApproval(
   // arbitrary command IDs and quoted text never do.
   const delivery = revision?.command;
   if (revision && delivery && delivery.agent_id === revision.agentId &&
-      ['pending', 'claimed'].includes(delivery.state)) {
+      delivery.state === 'pending') {
     const order = await commandOrder(db, delivery);
     const commander = (await db.query(
       `SELECT 1 FROM rooms corner WHERE id=$1 AND ${cornerCommanderIdSql('corner')}=$2`,

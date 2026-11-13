@@ -26,8 +26,6 @@ it('generates re-exported operation maps and rejects empty maps without replacin
     write('packages/api-contract/src/daemon-map.ts',
       'export type DaemonOperationMap = { fixture: { input: { roomId: string }; output: { id: string } } };');
     write('packages/net/src/helper-codecs.ts', "helperRouteCodecs('daemon.fixture');");
-    write('packages/net/src/helper-activation-codecs.ts', '');
-    write('packages/net/src/helper-turn-codecs.ts', '');
 
     expect(generate()).toContain('2 operation contracts');
     const target = path.join(root, 'packages/net/src/generated-wire-shapes.ts');

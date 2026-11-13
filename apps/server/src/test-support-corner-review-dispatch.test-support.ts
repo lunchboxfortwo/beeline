@@ -143,7 +143,7 @@ beforeEach(async () => {
 
 /** Put the corner in the state a green transition leaves it in. */
 export async function greenHead(number: number, headSha: string, checks = 'passing') {
-  await db.query(`SELECT (terminal.ended).* FROM (SELECT beeline_end_agent_turn(command.id,command.generation_id,'complete',NULL,NULL) ended
+  await db.query(`SELECT (terminal.ended).* FROM (SELECT beeline_finish_agent_command(command.id,'complete',NULL,NULL) ended
     FROM agent_commands command JOIN rooms corner ON corner.id=command.room_id JOIN corner_facts fact ON fact.corner_id=corner.id
     WHERE command.room_id=$1 AND command.agent_id=${cornerImplementerSql('fact','corner')}
       AND command.state IN ('pending','claimed') AND command.action IN ('input','resume')

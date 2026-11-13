@@ -111,8 +111,8 @@ export class StarterOnboardingService {
     let choice;
     try {
       if (lines) for (const line of lines) {
-        await this.database.query(`INSERT INTO agent_turns(room_id,request_id,agent_id,status,generation_id)
-          VALUES($1,$2,$3,'working',$2) ON CONFLICT DO NOTHING`, [roomId, run.id, line.agentId]);
+        await this.database.query(`INSERT INTO agent_turns(room_id,request_id,agent_id,status)
+          VALUES($1,$2,$3,'working') ON CONFLICT DO NOTHING`, [roomId, run.id, line.agentId]);
         await this.database.transaction(async db => {
           const active = await db.query(`SELECT 1 FROM starter_onboarding_runs WHERE id=$1 AND status='playing' FOR UPDATE`, [run.id]);
           if (!active.rowCount) return;

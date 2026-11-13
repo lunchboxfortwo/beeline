@@ -28,7 +28,7 @@ describe('Squire approval pushes', () => {
       const response = await fetch(`${url}/mcp`, { method: 'POST',
         headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
         body: JSON.stringify({ roomId: 'room', requestId: 'asking-turn', taskId: 'task',
-          generationId: 'generation', method: 'tools/call',
+          itemId: 'generation', method: 'tools/call',
           params: { name: 'inject_card', arguments: { item: 'Flowers' } } }),
       });
       expect(response.status).toBe(200);
@@ -83,7 +83,7 @@ describe('Squire approval pushes', () => {
     const response = await fetch(`${url}/mcp`, { method: 'POST',
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       body: JSON.stringify({ roomId: 'room', requestId: 'asking-turn', taskId: 'task',
-        generationId: 'generation', method: 'tools/call',
+        itemId: 'generation', method: 'tools/call',
         params: { name: 'inject_card', arguments: { item: 'Flowers' } } }),
     });
     expect(response.status).toBe(200);
@@ -117,7 +117,7 @@ describe('Squire approval pushes', () => {
     const call = (name: string) => fetch(`${url}/mcp`, { method: 'POST',
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       body: JSON.stringify({ roomId: 'room', requestId: 'asking-turn', taskId: 'task',
-        generationId: 'generation', method: 'tools/call', params: { name, arguments: {} } }),
+        itemId: 'generation', method: 'tools/call', params: { name, arguments: {} } }),
     });
     await (await call('inject_card')).json();
     const observing = call('operate_observe');

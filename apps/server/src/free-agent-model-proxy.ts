@@ -1,4 +1,3 @@
-import { OwnedModelUnknownGeneration } from './owned-model-errors.js';
 import { endFreeAgentModelTurn } from './free-agent-turn-budget.js';
 import { encodeOwnedModelReceipt } from '@beeline/api-contract/helper-model-receipt';
 import { OwnedModelStream } from './owned-model-stream.js';
@@ -227,7 +226,7 @@ export async function handleFreeAgentModelRequest(
 }
 
 interface ModelAgent { agent_id: string; owner_id: string; model: string | null }
-interface ModelTurn { id: string; generation_id: string | null; started: Date | string; room_id: string; turn_request_id: string }
+interface ModelTurn { id: string; started: Date | string; room_id: string; turn_request_id: string }
 
 function ownedOutcome(response: ServerResponse, receipt: OwnedModelAttemptReceipt,token:string): void {
   if (response.destroyed || response.writableEnded) return;
@@ -309,10 +308,10 @@ async function handleOwnedFreeAgentModel(request: IncomingMessage, response: Ser
     });
   } catch (error) {
     if (error instanceof OwnedModelAllowanceRefusal)
-      await endFreeAgentModelTurn(options.database,binding.commandId,binding.generationId,error.message);
+      await endFreeAgentModelTurn(options.database,binding.commandId,error.message);
     if (error instanceof CommandRefusalError) sendJson(response, error.status, { error: {
       code: error instanceof OwnedModelAllowanceRefusal ? 'owned_model_allowance' :
-        error instanceof OwnedModelUnknownPayload || error instanceof OwnedModelUnknownGeneration ? 'owned_model_unknown' : 'owned_model_refused', message: error.message,
+        error instanceof OwnedModelUnknownPayload ? 'owned_model_unknown' : 'owned_model_refused', message: error.message,
       ...(error instanceof OwnedModelAllowanceRefusal ? {signedReceipt:encodeOwnedModelReceipt(token,{requestId:id,state:'refused',evidence:{kind:'not-dispatched',reason:'authority'}})} : {}),
     }, ...(error instanceof OwnedModelAllowanceRefusal ? {signedReceipt:encodeOwnedModelReceipt(token,{requestId:id,state:'refused',evidence:{kind:'not-dispatched',reason:'authority'}})} : {}) });
     else sendJson(response, 503, { error: { code: 'owned_model_unknown', message: 'Model request admission is uncertain; do not resubmit.' } });
@@ -458,7 +457,7 @@ export async function executeFreeAgentModel(response: ServerResponse, body: Reco
   if ('limit' in reservation) {
     if (reservation.limit === 'budget') {
       await recordFreeAgentEvent(options.database, agent.agent_id, 'budget_reached');
-      await endFreeAgentModelTurn(options.database,turn.id,turn.generation_id,FREE_AGENT_BUDGET_MESSAGE);
+      await endFreeAgentModelTurn(options.database,turn.id,FREE_AGENT_BUDGET_MESSAGE);
       sendJson(response,403,{error:{message:FREE_AGENT_BUDGET_MESSAGE}});
       return true;
     }
@@ -466,7 +465,7 @@ export async function executeFreeAgentModel(response: ServerResponse, body: Reco
       limit: reservation.limit, roomId: turn.room_id, requestId: turn.turn_request_id,
     });
     const used = await freeAgentAllowance(options.database, agent.owner_id, now);
-    await endFreeAgentModelTurn(options.database,turn.id,turn.generation_id,
+    await endFreeAgentModelTurn(options.database,turn.id,
       allowanceMessage(reservation.limit,config,reservation.limit === 'daily' ? used.today : used.lifetime));
     sendJson(response,403,{error:{message:allowanceMessage(reservation.limit,config,reservation.limit === 'daily' ? used.today : used.lifetime)}});
     return true;
@@ -590,7 +589,7 @@ export async function completeStarterBanter(options: FreeAgentModelProxyOptions,
   try {
     await executeFreeAgentModel(response as unknown as ServerResponse,
       { messages, stream: false, max_tokens: 4096, reasoning: { exclude: true, ...(agent.model?.startsWith('openai/') ? { effort: 'low' } : {}) } }, agent,
-      { id: runId, generation_id: null, room_id: agent.room_id, turn_request_id: runId, started: new Date() }, options, signal);
+      { id: runId, room_id: agent.room_id, turn_request_id: runId, started: new Date() }, options, signal);
     if (status !== 200) throw new Error(`Onboarding model returned ${status}`);
     const result = JSON.parse(reply) as { choices?: { message?: { content?: unknown } }[] };
     const text = result.choices?.[0]?.message?.content;

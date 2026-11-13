@@ -234,7 +234,7 @@ it.runIf(Boolean(stopProofPostgresUrl))('Stop holds the claim fence through the 
   const wrapStop = (database: SqlDatabase): SqlDatabase => ({
     query: async (sql, values) => {
       const result = await database.query(sql, values);
-      if (sql.startsWith('SELECT * FROM beeline_end_agent_turn(') && values?.[2] === 'cancelled' && values?.[3] === 'stop') {
+      if (sql.startsWith('SELECT * FROM beeline_finish_agent_command(',NULL,NULL,NULL) && values?.[2] === 'cancelled' && values?.[3] === 'stop') {
         reached();
         await resume;
       }

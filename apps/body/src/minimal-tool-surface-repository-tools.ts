@@ -82,6 +82,12 @@ export const RUNNER_TOOL: ToolDefinition = {
   }
 };
 
+export const WORKSPACE_TOOL: ToolDefinition = {
+  "name": "workspace",
+  "description": "Make or refresh your own copy of this place's repository and index it. In a corner it checks out the corner branch where you can commit; in a Room it is a read-only copy of the target branch. Returns the path, or the reason it failed. Run dependency installs yourself in the copy.",
+  "inputSchema": {"type": "object", "properties": {}, "additionalProperties": false}
+};
+
 export const SILENT_TOOL: ToolDefinition = {
   "name": "no_reply_needed",
   "description": "On a nonhuman report, order, lifecycle, scheduler or system wake with nothing to post, end the turn immediately and silently. No further tools or final text are accepted. This tool posts nothing and reports nothing. Works alone, in parallel or in the background. For a tagged message, pass its messageId to explicitly decline that one reply.",
@@ -148,7 +154,7 @@ export function agentToolsFor(
   if (!agentSurface) return repositoryTools();
   const tools = minimalTools(cornerTurn).filter(tool =>
     institutionalMemoryEnabled || !['search', 'remember'].includes(tool.name));
-  if (commandRunnerAvailable) tools.push(invocationTool(RUNNER_TOOL));
+  if (commandRunnerAvailable) tools.push(invocationTool(RUNNER_TOOL), invocationTool(WORKSPACE_TOOL));
   // no_reply_needed mounts on every harness: it is the only silence path, so a
   // nonhuman wake must always be able to end without posting prose. The tool
   // itself refuses human wakes.

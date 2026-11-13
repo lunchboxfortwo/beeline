@@ -49,7 +49,7 @@ describe('opaque immutable owned-model credential primitive', () => {
       SELECT $1,key_version,token_hash,agent_id,owner_id,workspace_id,room_id,'legacy-command',generation_id,request_id,
         'legacy-socket',1,'legacy-server',model,agent_model,model_token_hash,expires_ms FROM owned_model_credentials LIMIT 1`, ['f'.repeat(32)]);
     expect(await live()).toBe(1);
-    await db.query(`SELECT beeline_end_agent_turn($1,$2,'complete',NULL,NULL)`, [MODEL_CLAIM.commandId, MODEL_CLAIM.generationId]);
+    await db.query(`SELECT beeline_finish_agent_command($1,'complete',NULL,NULL)`, [MODEL_CLAIM.commandId, MODEL_CLAIM.generationId]);
     expect(await live()).toBe(0);
   });
 

@@ -35,7 +35,7 @@ export function cornerReviewWokenSql(cornerId: string): string {
   return `EXISTS(SELECT 1 FROM agent_commands review JOIN rooms corner ON corner.id=review.room_id
     JOIN rooms parent ON parent.id=corner.parent_id JOIN corner_github_cache cache ON cache.corner_id=corner.id WHERE corner.id=${cornerId}
       AND review.agent_id=${cornerReviewerSql()} AND ${greenReviewRequestSql('review')}
-      AND review.reason='corner_review_dispatch' AND review.state IN ('pending','claimed','complete')
+      AND review.reason='corner_review_dispatch' AND review.state IN ('pending','complete')
       AND review.review_context->>'headSha'=cache.lifecycle->'pr'->>'headSha'
       AND review.review_context->'pullRequest'=cache.lifecycle->'pr'->'number')`;
 }
@@ -101,7 +101,7 @@ export async function loadCornerReviewState(db: SqlDatabase, cornerId: string, h
   const latest=rows[0];
   let emptyCount=0;
   for(const row of rows) {if(!row.ended || row.findings) break; emptyCount++;}
-  return {pending:rows.some(row=>row.state==='pending'||row.state==='claimed'),requests:rows.length,
+  return {pending:rows.some(row=>row.state==='pending'),requests:rows.length,
     ended:latest && (latest.ended||latest.findings) ? {id:latest.id,findings:latest.findings??undefined,
       emptyCount,delivered:latest.delivered}:undefined};
 }

@@ -108,7 +108,7 @@ export async function setCornerReviewerFact(
 
 
 /**
- * Cancels every pending or claimed input/resume/restart command for a corner, and any
+ * Cancels every pending item for a corner, and any
  * turn still marked `working`, so a corner that just landed never leaves a
  * stale assignment behind. Shared by every path that archives a corner:
  * `closeCornerState` and the GitHub merge webhook.
@@ -117,33 +117,10 @@ export async function setCornerReviewerFact(
  */
 export async function cancelCornerAgentCommands(database: SqlDatabase, cornerId: string): Promise<void> {
   await lockCornerArchivalAuthority(database);
-  const active = await database.query<CommandRow>(
-    `SELECT * FROM agent_commands
-     WHERE room_id=$1 AND action IN ('input','resume') AND state IN ('pending','claimed')
-     ORDER BY created_at DESC,id DESC FOR UPDATE`,
-    [cornerId],
-  );
-  // Only a claimed command has a helper turn to stop. A pending one never started;
-  // cancelling it below is enough, and a stop for it would stay pending forever.
-  const assignments = new Map<string, CommandRow>();
-  for (const command of active.rows) {
-    if (command.state !== 'claimed') continue;
-    const key = `${command.agent_id}:${command.turn_request_id}`;
-    if (!assignments.has(key)) assignments.set(key, command);
-  }
-  for (const command of assignments.values())
-    await createAgentCommand(database, {
-      roomId: cornerId,
-      agentId: command.agent_id,
-      sourceMessageId: command.source_message_id,
-      turnRequestId: command.turn_request_id,
-      action: 'stop',
-      reason: 'corner_close',
-      parent: command,
-      retainDepth: true,
-    });
+  // Cancelling is the stop: a helper running one of these items sees it
+  // leave its queue and cancels that session's turn.
   await database.query(
-    `SELECT (terminal.ended).* FROM (SELECT beeline_end_agent_turn(agent_commands.id,agent_commands.generation_id,'cancelled',NULL,NULL) ended FROM agent_commands WHERE room_id=$1 AND action IN ('input','resume','restart') AND state IN ('pending','claimed')) terminal`,
+    `SELECT (terminal.ended).* FROM (SELECT beeline_finish_agent_command(agent_commands.id,'cancelled','corner_close',NULL) ended FROM agent_commands WHERE room_id=$1 AND state='pending' ORDER BY created_at DESC,id DESC) terminal`,
     [cornerId],
   );
   await database.query(`DELETE FROM agent_pending_attachments WHERE room_id=$1`, [cornerId]);
@@ -330,7 +307,7 @@ async function readCornerAdvance(
       await db.query<{ worker: boolean; conflict: boolean; retained: string[] | null }>(
         `SELECT
       EXISTS(SELECT 1 FROM agent_commands WHERE room_id=$1 AND agent_id=$2
-        AND state IN ('pending','claimed') AND action IN ('input','resume') AND reason<>'report' AND ${currentCornerCommandTargetSql('agent_commands')}) worker,
+        AND state='pending' AND action='input' AND reason<>'report' AND ${currentCornerCommandTargetSql('agent_commands')}) worker,
       EXISTS(SELECT 1 FROM agent_commands delivered JOIN messages source ON source.id=delivered.source_message_id
         WHERE delivered.room_id=$1 AND delivered.reason='corner_merge_conflict'
           AND source.system_event->'object'->>'headSha'=$3) conflict,
@@ -556,7 +533,7 @@ async function writeCornerAdvance(
             sourceMessageId: source,
             reason: 'corner_review_dispatch',
           });
-          if (queued.blocked || queued.command && ['pending','claimed'].includes(queued.command.state))
+          if (queued.blocked || queued.command?.state === 'pending')
             delete plan.state.reviewDue;
           result = queued.command
             ? { ok: true, wake: { queued: true, agentId: reviewer } }
@@ -659,7 +636,7 @@ async function writeCornerAdvance(
     }
     // Committed command activity invalidates idle delivery immediately through its fact guard.
     const stale = await db.query(
-      `SELECT (terminal.ended).* FROM (SELECT beeline_end_agent_turn(agent_commands.id,agent_commands.generation_id,'cancelled','stale_idle_alert',NULL) ended
+      `SELECT (terminal.ended).* FROM (SELECT beeline_finish_agent_command(agent_commands.id,'cancelled','stale_idle_alert',NULL) ended
       FROM agent_commands WHERE state='pending' AND reason='report' AND private_payload->>'authorId'=$3
         AND private_payload->>'idleSince' IS NOT NULL AND COALESCE(private_payload->>'originCornerId',private_payload->>'fromRoomId')=$1::text
         AND private_payload->>'idleSince' IS DISTINCT FROM $2::text) terminal`,

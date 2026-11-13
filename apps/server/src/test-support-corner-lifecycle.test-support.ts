@@ -327,7 +327,7 @@ export async function claim(c: AgentCommand, generationId = 'g1') {
 /** Drives the real push webhook so the run's own bookkeeping reaches `checks` first. */
 export async function pushToCorner(cornerId: string, headSha: string) {
   const branch = `feature/corner-${cornerId.replaceAll('-', '').slice(0, 12)}`;
-  await db.query(`SELECT (terminal.ended).* FROM (SELECT beeline_end_agent_turn(command.id,command.generation_id,'complete',NULL,NULL) ended
+  await db.query(`SELECT (terminal.ended).* FROM (SELECT beeline_finish_agent_command(command.id,'complete',NULL,NULL) ended
     FROM agent_commands command JOIN rooms corner ON corner.id=command.room_id JOIN corner_facts fact ON fact.corner_id=corner.id
     WHERE command.room_id=$1 AND (command.agent_id=${cornerImplementerSql('fact', 'corner')}
       OR command.agent_id IS DISTINCT FROM COALESCE(fact.reviewer_agent_id,(SELECT reviewer_agent_id FROM rooms WHERE id=corner.parent_id)))

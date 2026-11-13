@@ -12,7 +12,7 @@ afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
 it('lists owed mentions once per turn and only for the place in use', async () => {
   const file = join(mkdtempSync(join(tmpdir(), 'owed-')), 'turn.json');
-  writeFileSync(file, JSON.stringify({ generationId: `gen-${Math.random()}`, roomId: room }));
+  writeFileSync(file, JSON.stringify({ itemId: `item-${Math.random()}`, roomId: room }));
   vi.stubEnv('BEELINE_DAEMON_BASE_URL', 'http://localhost');
   vi.stubEnv('BEELINE_DAEMON_TOKEN', 'local-test');
   vi.stubEnv('BEELINE_DAEMON_ROOM_ID', room);

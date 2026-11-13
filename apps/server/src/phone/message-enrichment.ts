@@ -138,7 +138,6 @@ import { projectedMessage, messageOrder } from './read-projection.js';
         status: turn.status,
         startedAt: unix(turn.started_at),
         createdAt: unix(turn.created_at),
-        ...(turn.generation_id ? { generationId: turn.generation_id } : {}),
         ...(turn.requested_by ? { requestedBy: turn.requested_by } : {}),
       }))
       .sort(

@@ -8,7 +8,6 @@ import { completeProviderWebhookAssignment } from '../provider-webhooks.js';
 import { reportAgentSignIn } from '../agent-sign-in.js';
 import { forgetSquireSignIn } from '../squire-machine.js';
 import { setCornerHold } from '../corner-holds.js';
-import { claimAgentCommand } from '../agent-command.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { endComputerSession, refreshComputerSession } from '../computer-session.js';
 import type { DaemonAttachment, DaemonOperationMap } from '@beeline/api-contract/daemon';
@@ -103,14 +102,9 @@ export const CORNER_REACH_OPERATIONS = new Set<string>([
   'approveCornerMerge',
 ]);
 
-/** Closed corners still deliver stop commands and expose cleanup/history facts. */
+/** Closed corners still expose cleanup/history facts. */
 export const CORNER_CLEANUP_OPERATIONS = new Set<string>([
   'closeCornerPullRequest',
-  'getAgentCommands',
-  'claimAgentCommand',
-  'claimAgentTurn',
-  'acknowledgeAgentCommand',
-  'releaseAgentTurn',
   'getCornerCloseRequests',
   'getRoomInbox',
 ]);
@@ -348,10 +342,8 @@ export const DAEMON_OPERATION_ROUTES: Record<keyof DaemonOperationMap, true> = {
   getAgentPresence: true,
   getRequestCompletion: true,
   getAgentCommands: true,
-  claimAgentCommand: true,
-  claimAgentTurn: true,
-  acknowledgeAgentCommand: true,
-  releaseAgentTurn: true,
+  getModelCredential: true,
+  startAgentTurn: true,
   postRoomMessage: true,
   reactToRoomMessage: true,
   postAgentAttachment: true,
@@ -375,7 +367,6 @@ export const DAEMON_OPERATION_ROUTES: Record<keyof DaemonOperationMap, true> = {
   postAgentAvatar: true,
   postAgentUsage: true,
   publishAgentUsageAccount:true,
-  readCommandActivation:true,
   attachAgentUsageAccount:true,
   getAgentUsage: true,
   answerUsageRefresh: true,

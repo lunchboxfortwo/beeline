@@ -121,7 +121,7 @@ it('MODEL-UNKNOWN: a model owner end remains terminal while a new explicit comma
   expect((await db.query<{worker_active:boolean}>(cornerIdleSql('$1'),[C])).rows[0]?.worker_active).toBe(true);
   await db.query(`INSERT INTO agent_command_owner_ends(command_id,generation_id,model_request_id)
     VALUES($1,'unknown-model',NULL)`,[command.id]);
-  await db.query(`SELECT beeline_end_agent_turn($1,'unknown-model','failed','The model result could not be confirmed.')`,[command.id]);
+  await db.query(`SELECT beeline_finish_agent_command($1,'failed','The model result could not be confirmed.',NULL)`,[command.id]);
   const idle=(await db.query<{worker_active:boolean;suppressed:boolean}>(cornerIdleSql('$1'),[C])).rows[0]!;
   expect(idle.worker_active).toBe(false);
   expect(idle.suppressed).toBe(false);
@@ -157,7 +157,7 @@ async function turn(agent = WORKER) {
   await daemon.execute('claimAgentCommand',{roomId:C,commandId:command.id,generationId:'actual'},agent);
 }
 async function end(agent = WORKER, age = 0) {
-  await db.query(`SELECT beeline_end_agent_turn(id,generation_id,'complete') FROM agent_commands
+  await db.query(`SELECT beeline_finish_agent_command(id,'complete',NULL,NULL) FROM agent_commands
     WHERE room_id=$1 AND agent_id=$2 AND state='claimed'`,[C,agent]);
   await db.query(`UPDATE agent_turns SET ended_at=clock_timestamp()-make_interval(secs=>$2)
     WHERE room_id=$1 AND status<>'working' AND agent_id=$3`,[C,age,agent]);

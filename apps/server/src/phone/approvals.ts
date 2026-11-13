@@ -66,23 +66,16 @@ import { messageId, SPENDING_OWNER_AUTHORITY_MESSAGE } from './values.js';
       await lockAgentCommandQueue(database, input.roomId, input.agentId);
       const commands = await database.query<CommandRow>(
         `SELECT agent_commands.* FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3
-         AND action IN ('input','resume') AND state IN ('pending','claimed')
+         AND action='input' AND state='pending'
          AND EXISTS(SELECT 1 FROM messages source WHERE source.id=agent_commands.root_source_message_id) ORDER BY created_at DESC,id DESC FOR UPDATE`,
         [input.roomId, input.agentId, input.requestId],
       );
       const command = commands.rows[0];
       if (!command) throw new Error('running turn not found');
-      // A claimed batch shares one process. Capture its exact invocation before
-      // ending any member, without admitting unclaimed follow-up work.
-      const invocation = command.state === 'claimed' && command.generation_id !== null
-        ? (await database.query<CommandRow>(
-          `SELECT * FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND generation_id=$3
-           AND action IN ('input','resume') AND state IN ('pending','claimed')
-           ORDER BY created_at,id FOR UPDATE`,
-          [input.roomId,input.agentId,command.generation_id],
-        )).rows : [command];
-      for (const member of invocation) await endAgentTurn(database, member, 'cancelled', 'stop');
-      const dropped = invocation.length === 1 ? await dropQueuedOrdersForStop(database, command) : 0;
+      // Stop cancels every pending item of this turn. The helper running one
+      // sees it leave the queue and cancels that session's turn.
+      for (const item of commands.rows) await endAgentTurn(database, item, 'cancelled', 'stop');
+      const dropped = await dropQueuedOrdersForStop(database, command);
       await systemLine(database, {
         roomId: input.roomId,
         authorId: viewerId,

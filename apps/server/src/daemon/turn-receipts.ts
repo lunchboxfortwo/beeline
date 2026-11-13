@@ -1,30 +1,14 @@
-import { endAgentTurn } from '../agent-turn-end.js';
-import { recordAgentTurnFailure } from '../agent-turn-failure.js';
-import { type CommandRow } from '../agent-command.js';
 import { createHash } from 'node:crypto';
 import { type CommittedTurnLiveRow } from '../live.js';
 import type { DaemonContext } from './context.js';
 import { Input, id, seconds } from './values.js';
 import { daemonAccess } from './access.js';
 import { daemonPersistTurnTrace } from './messages.js';
-import { daemonWriteResult } from './corner-messages.js';
 
 
 
+  /** Trace and usage for an item, written after its answer. Never changes the item. */
   export async function daemonTurnReceipt(ctx: DaemonContext, input: Input<'postAgentTurnReceipt'>, agentId: string) {
-    await daemonAccess(ctx, input.roomId, agentId);
-    if (input.diagnosticsOnly && (input.status !== 'complete' || input.completionKind))
-      throw new Error('invocation diagnostics cannot declare a command result');
-    if (input.heartbeat && input.status !== 'working') {
-      throw new Error('turn receipt heartbeat must be working');
-    }
-    if (input.completionKind && input.status !== 'complete') {
-      throw new Error('turn receipt completion kind requires complete status');
-    }
-    const reason =
-      input.status === 'failed' && typeof input.reason === 'string'
-        ? input.reason.trim() || null
-        : null;
     // Wire-supplied counts are only ever stored when they are what they claim:
     // a negative, fractional, or absurd value is dropped, never clamped into a
     // measurement.
@@ -41,33 +25,19 @@ import { daemonWriteResult } from './corner-messages.js';
     const inputTokens = recordedTokens(input.totalInputTokens ?? input.inputTokens);
     const outputTokens = recordedTokens(input.outputTokens);
     let committedTurn: CommittedTurnLiveRow | undefined;
-    let failureReportDelivered: boolean | undefined;
     await ctx.database.transaction(async db => {
-      const command = ctx.authorizedCommand ?? (await db.query<CommandRow>(
-        `SELECT * FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3
-          AND generation_id IS NOT DISTINCT FROM $4 FOR UPDATE`,
-        [input.roomId, agentId, input.requestId, input.generationId ?? null])).rows[0];
-      if (!command) throw new Error('command output authority rejected');
-      if (!input.diagnosticsOnly && input.status !== 'working' && await endAgentTurn(db, command, input.status, reason)) {
-        if (input.status === 'failed') failureReportDelivered = await recordAgentTurnFailure(db, command, reason);
-      }
-      // Usage and diagnostics may arrive after the reply already ended the turn.
-      // They never reopen it or replace its recorded terminal result.
-      await db.query(`UPDATE agent_turns SET tool_calls=COALESCE($5,tool_calls),
-        completion_kind=COALESCE(completion_kind,$6),input_tokens=COALESCE($7,input_tokens),
-        output_tokens=COALESCE($8,output_tokens)
-        WHERE room_id=$1 AND request_id=$2 AND agent_id=$3 AND generation_id IS NOT DISTINCT FROM $4`,
-        [input.roomId,input.requestId,agentId,input.generationId ?? null,toolCalls,
-          input.completionKind ?? null,inputTokens,outputTokens]);
+      await db.query(`UPDATE agent_turns SET tool_calls=COALESCE($4,tool_calls),
+        input_tokens=COALESCE($5,input_tokens),output_tokens=COALESCE($6,output_tokens)
+        WHERE room_id=$1 AND request_id=$2 AND agent_id=$3`,
+        [input.roomId,input.requestId,agentId,toolCalls,inputTokens,outputTokens]);
       committedTurn = (await db.query<CommittedTurnLiveRow>(
-        `SELECT room_id,request_id,agent_id,status,started_at,created_at,generation_id,NULL::text requested_by
+        `SELECT room_id,request_id,agent_id,status,started_at,created_at,NULL::text requested_by
          FROM agent_turns WHERE room_id=$1 AND request_id=$2 AND agent_id=$3`,
         [input.roomId,input.requestId,agentId])).rows[0];
       await daemonPersistTurnTrace(ctx, db, input, agentId);
     });
     ctx.live.publish({type:'invalidate',roomId:input.roomId,reason:'turn',agentId,requestId:input.requestId,
       ...(committedTurn ? {committedRow:{type:'turn' as const,row:committedTurn}} : {})});
-    return daemonWriteResult(ctx, failureReportDelivered === undefined ? {} : {failureReportDelivered});
   }
 
 

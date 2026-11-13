@@ -175,7 +175,7 @@ describe('re-runs and pushes out of review (AC-1)', () => {
     ]);
     await advanceCorner(rootFixture.db, cornerId, { kind: 'checks-pending' });
     expect(await currentState(cornerId)).toBe('working');
-    await rootFixture.db.query(`SELECT (terminal.ended).* FROM (SELECT beeline_end_agent_turn(command.id,command.generation_id,'complete',NULL,NULL) ended
+    await rootFixture.db.query(`SELECT (terminal.ended).* FROM (SELECT beeline_finish_agent_command(command.id,'complete',NULL,NULL) ended
       FROM agent_commands command WHERE command.room_id=$1 AND command.agent_id=$2
         AND command.state IN ('pending','claimed')) terminal`, [cornerId, A]);
     await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{checks}','"passing"') WHERE corner_id=$1`, [

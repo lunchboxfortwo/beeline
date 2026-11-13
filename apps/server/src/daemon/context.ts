@@ -11,7 +11,7 @@ import type { InstitutionalMemoryShadowConfig } from '../institutional-memory-sh
 import type { FeedbackLoop } from '../feedback.js';
 import type { AfterCommit, EmbedFn } from '../institutional-memory-embeddings.js';
 import type { OwnedModelConfiguration, Input, Output } from './values.js';
-import type { daemonSetOwnedModel, daemonOwnedModelReady, daemonNegotiateOwnedModel, daemonModelClaimCredentials, daemonSetStarterOnboarding, daemonLockOwnedTurnAccess, daemonFenceOwnedTurnReply, daemonReadCommandActivation } from './owned-model.js';
+import type { daemonSetOwnedModel, daemonOwnedModelReady, daemonNegotiateOwnedModel, daemonModelClaimCredentials, daemonSetStarterOnboarding } from './owned-model.js';
 import type { daemonReconcileZeroCheckWorkerCompletion } from './corner-completion.js';
 import type { daemonConnectorAssignments, daemonConnectorInstall, daemonConnectorStatusReport, daemonResumeRegistrySignIn, daemonNotifyTailscaleSignIn, daemonConnectorVaultReport, daemonConnectorStatusView, daemonConnectorVaultList, daemonConnectionDetail, daemonConnectionGrantRevoke, daemonConnectionUsage } from './connectors.js';
 import type { daemonBootstrap, daemonWorkspaceRoster, daemonInbox } from './inbox-roster.js';
@@ -86,9 +86,6 @@ export interface DaemonContext extends DaemonDependencies {
   negotiateOwnedModel: (...args: CommandArguments<typeof daemonNegotiateOwnedModel>) => ReturnType<typeof daemonNegotiateOwnedModel>;
   modelClaimCredentials: (...args: CommandArguments<typeof daemonModelClaimCredentials>) => ReturnType<typeof daemonModelClaimCredentials>;
   setStarterOnboarding: (...args: CommandArguments<typeof daemonSetStarterOnboarding>) => ReturnType<typeof daemonSetStarterOnboarding>;
-  lockOwnedTurnAccess: (...args: CommandArguments<typeof daemonLockOwnedTurnAccess>) => ReturnType<typeof daemonLockOwnedTurnAccess>;
-  fenceOwnedTurnReply: (...args: CommandArguments<typeof daemonFenceOwnedTurnReply>) => ReturnType<typeof daemonFenceOwnedTurnReply>;
-  readCommandActivation: (...args: CommandArguments<typeof daemonReadCommandActivation>) => ReturnType<typeof daemonReadCommandActivation>;
   reconcileZeroCheckWorkerCompletion: (...args: CommandArguments<typeof daemonReconcileZeroCheckWorkerCompletion>) => ReturnType<typeof daemonReconcileZeroCheckWorkerCompletion>;
   connectorAssignments: (...args: CommandArguments<typeof daemonConnectorAssignments>) => ReturnType<typeof daemonConnectorAssignments>;
   connectorInstall: (...args: CommandArguments<typeof daemonConnectorInstall>) => ReturnType<typeof daemonConnectorInstall>;

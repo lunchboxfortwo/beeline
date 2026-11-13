@@ -471,6 +471,7 @@ export async function executeAgentTool(name: string, args: JsonObject, toolCallI
     case 'post_artifact':
     case 'react_to_message':
     case 'run_granted_command':
+    case 'workspace':
     case 'store_secret':
     case 'no_reply_needed': return execute(name);
     default: throw new Error(`unknown tool: ${name}; use only tools/list names`);

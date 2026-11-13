@@ -111,7 +111,7 @@ export interface GrantRunnerRoom {
   writePolicy: () => GrantWritePolicy;
   /** The turn in flight, if any: its request id and the identity whose message started it. */
   turn: () =>
-    { requestId: string; generationId?: string; requester?: GrantRunRequester } | undefined;
+    { requestId: string; requester?: GrantRunRequester } | undefined;
 }
 
 export interface GrantRunResult {
@@ -461,11 +461,10 @@ export class GrantCommandRunner {
       throw new Error('stdin must be bounded text');
     const stdin = input.stdin as string | undefined;
     const turn = room.turn();
-    if (!turn?.requestId || !turn.generationId) throw new Error('command requires an active turn');
+    if (!turn?.requestId) throw new Error('command requires an active turn');
     const live = await this.options.api.execute('listTurnAgentGrants', {
       roomId: input.roomId,
       requestId: turn.requestId,
-      generationId: turn.generationId,
     });
     const policy = room.writePolicy();
     const checkEnv = { ...(this.options.env ?? process.env), ...policy.toolEnv };
@@ -613,7 +612,6 @@ export class GrantCommandRunner {
       agentId: this.options.agentId,
       roomId: input.roomId,
       requestId: turn?.requestId ?? `grant:${grant.grantId}`,
-      generationId: turn?.generationId,
       activity: [
         {
           kind: 'tool',
@@ -750,7 +748,11 @@ export class GrantRunnerServer {
   private server?: Server;
   private endpoint?: GrantRunnerEndpoint;
 
-  constructor(private readonly runner: GrantCommandRunner) {}
+  constructor(
+    private readonly runner: GrantCommandRunner,
+    /** The `workspace` tool: the agent's own checkout, made only when it asks. */
+    private readonly workspace?: (placeId: string, parentRoomId?: string) => Promise<string>,
+  ) {}
 
   async start(): Promise<GrantRunnerEndpoint> {
     if (this.endpoint) return this.endpoint;
@@ -790,12 +792,23 @@ export class GrantRunnerServer {
       send(401, { error: 'grant runner token required' });
       return;
     }
-    if (request.method !== 'POST' || request.url !== '/run') {
+    if (request.method !== 'POST' || (request.url !== '/run' && request.url !== '/workspace')) {
       send(404, { error: 'not found' });
       return;
     }
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(chunk as Buffer);
+    if (request.url === '/workspace') {
+      // Every failure is the agent's to read and work around.
+      try {
+        const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { placeId?: unknown; parentRoomId?: unknown };
+        if (!this.workspace || typeof body.placeId !== 'string') throw new Error('workspace is unavailable here');
+        send(200, { text: await this.workspace(body.placeId, typeof body.parentRoomId === 'string' ? body.parentRoomId : undefined) });
+      } catch (error) {
+        send(200, { text: `The checkout could not be made: ${error instanceof Error ? error.message : String(error)}` });
+      }
+      return;
+    }
     try {
       const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
         roomId?: unknown;

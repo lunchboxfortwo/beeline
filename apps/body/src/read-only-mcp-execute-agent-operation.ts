@@ -748,7 +748,7 @@ export async function executeAgentOperation(
         || !Number.isSafeInteger(amount) || amount <= 0)
         throw new Error('merchant, merchantUrl, positive amount in cents, and description are required');
       const idempotencyKey = createHash('sha256').update(
-        `link:${context.requestId}:${context.generationId}:${toolCallId || randomUUID()}`).digest('hex');
+        `link:${context.requestId}:${toolCallId || randomUUID()}`).digest('hex');
       return JSON.stringify(await daemonExecute('createLinkSpendRequest', {
         ...context, agentId: requiredEnv('BEELINE_DAEMON_AGENT_ID'),
         merchant, ...(merchantUrl ? { merchantUrl } : {}), amount, description, idempotencyKey,
@@ -835,6 +835,18 @@ export async function executeAgentOperation(
       return storeSecret(args);
     case 'run_granted_command':
       return runGrantedCommand(args);
+    case 'workspace': {
+      const response = await fetch(new URL('/workspace', `${requiredEnv('BEELINE_GRANT_RUNNER_URL')}/`), {
+        method: 'POST',
+        headers: { authorization: `Bearer ${requiredEnv('BEELINE_GRANT_RUNNER_TOKEN')}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          placeId: process.env.BEELINE_DAEMON_CORNER_ID || requiredEnv('BEELINE_DAEMON_ROOM_ID'),
+          ...(process.env.BEELINE_DAEMON_CORNER_ID ? { parentRoomId: requiredEnv('BEELINE_DAEMON_ROOM_ID') } : {}),
+        }),
+      });
+      const body = await response.json().catch(() => ({})) as { text?: unknown };
+      return typeof body.text === 'string' ? body.text : `The checkout could not be made (HTTP ${response.status}).`;
+    }
     default:
       throw new Error(`tool is not available on the agent surface: ${name}`);
   }

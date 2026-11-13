@@ -5,7 +5,7 @@ import type { CommandRow } from './agent-command.js';
 import type { SqlDatabase } from './database.js';
 import { CornerAccessDatabase } from './corner-access-database.js';
 
-/** The existing recipient membership fences insertion, claims and Stop even
+/** The existing recipient membership fences insertion, answers and Stop even
  * when the queue is empty. Take it before command rows or shared member reads. */
 export function lockAgentCommandQueue(db:SqlDatabase,roomId:string,agentId:string):Promise<void>;
 export function lockAgentCommandQueue(db:SqlDatabase,recipients:readonly {roomId:string;agentId:string}[]):Promise<void>;
@@ -25,7 +25,7 @@ export const AGENT_COMMAND_DELEGATION_SCHEMA = `
 CREATE OR REPLACE FUNCTION beeline_commit_delegated_order() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF NEW.private_payload->>'kind' IS DISTINCT FROM 'order' OR NEW.parent_command_id IS NULL THEN RETURN NULL; END IF;
-  IF EXISTS(SELECT 1 FROM agent_commands current_order WHERE current_order.id=NEW.id AND current_order.state IN ('pending','claimed'))
+  IF EXISTS(SELECT 1 FROM agent_commands current_order WHERE current_order.id=NEW.id AND current_order.state='pending')
     AND EXISTS(SELECT 1 FROM agent_commands source WHERE source.id=NEW.parent_command_id
       AND source.agent_id=NEW.private_payload->>'authorId')
     AND NOT EXISTS(SELECT 1 FROM rooms room JOIN memberships member
@@ -46,7 +46,7 @@ export async function dropQueuedOrdersForStop(db: SqlDatabase, stopped: CommandR
   const order = await commandOrder(db, stopped);
   if (order.private_payload?.kind !== 'order' || order.agent_id !== stopped.agent_id) return 0;
   const dropped = await db.query<CommandRow>(
-    `SELECT (terminal.ended).* FROM (SELECT beeline_end_agent_turn(agent_commands.id,agent_commands.generation_id,'cancelled','stop',NULL) ended FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND action='input'
+    `SELECT (terminal.ended).* FROM (SELECT beeline_finish_agent_command(agent_commands.id,'cancelled','stop',NULL) ended FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND action='input'
        AND state='pending'
        AND private_payload->>'kind'='order'
        AND private_payload->>'authorId'=$3 AND private_payload->>'fromRoomId'=$4

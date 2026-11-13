@@ -173,7 +173,7 @@ import { daemonWriteResult } from './corner-messages.js';
         ...(input.approvalId ? { approvalId: input.approvalId.trim() } : {}),
         expiresAt: input.expiresAt ?? Date.now() + 24 * 60 * 60_000,
         linkKind: input.linkKind,
-        ...(ctx.authorizedCommand ? { commandId: ctx.authorizedCommand.id, generationId: ctx.authorizedCommand.generation_id } : {}),
+        ...(ctx.authorizedCommand ? { commandId: ctx.authorizedCommand.id } : {}),
         ...source,
       },
     });

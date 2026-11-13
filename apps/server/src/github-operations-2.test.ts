@@ -286,7 +286,7 @@ const scope1 = fixtureScope1();
     expect(self).not.toHaveProperty('rule');
     expect(self).not.toHaveProperty('reviewerIsAuthor');
     // Finish the previous arrangement task before making the reviewer independent.
-    await scope1.database.query(`SELECT beeline_end_agent_turn(id,generation_id,'complete') FROM agent_commands
+    await scope1.database.query(`SELECT beeline_finish_agent_command(id,'complete',NULL,NULL) FROM agent_commands
       WHERE room_id=$1 AND state IN ('pending','claimed')`,[corners[0]]);
     await setCornerOwner(scope1.database, corners[0]!, null);
     await scope1.database.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{checks}','"unknown"') WHERE corner_id=$1`, [corners[0]]);

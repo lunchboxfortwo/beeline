@@ -210,7 +210,7 @@ export function mcpCommandWakeSql(first: number): { cte: string; join: string; p
           WHERE wake.member_id=command.agent_id AND wake.event_name='wake' AND (wake.expires_at IS NULL OR wake.expires_at>now())
             AND beeline_mcp_delivery_owner(wake.member_id,'events',wake.id))))
       JOIN rooms_mcp_connections c ON c.client_id=s.client_id AND c.identity_id=s.owner_id AND c.revoked_at IS NULL
-      WHERE beeline_mcp_delivery_owner(s.member_id,'events',s.id) AND command.state='pending' AND command.action IN ('input','resume') AND command.reason<>'mcp_call'
+      WHERE beeline_mcp_delivery_owner(s.member_id,'events',s.id) AND command.state='pending' AND command.action='input' AND command.reason<>'mcp_call'
       ON CONFLICT(subscription_id,command_id) WHERE command_id IS NOT NULL DO NOTHING
       RETURNING room_id
     )`,
@@ -246,7 +246,7 @@ export async function deliverMcpEvents(db: SqlDatabase, transport: Transport, si
            OR (d.message_id IS NOT NULL AND m.deleted_at IS NULL AND m.id IS NOT NULL
              AND NOT EXISTS(SELECT 1 FROM rooms_mcp_mentions mention WHERE mention.member_id=s.member_id
                AND mention.message_id=d.message_id AND mention.cleared_at IS NOT NULL))
-           OR (d.command_id IS NOT NULL AND command.id IS NOT NULL AND command.action IN ('input','resume')
+           OR (d.command_id IS NOT NULL AND command.id IS NOT NULL AND command.action='input'
              AND command.reason<>'mcp_call'
              AND command.state='pending'))
          AND EXISTS(SELECT 1 FROM room_access rm WHERE rm.room_id=d.room_id AND rm.identity_id=s.member_id AND rm.removed_at IS NULL)

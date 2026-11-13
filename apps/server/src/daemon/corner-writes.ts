@@ -202,13 +202,7 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
         if (implementer.kind !== 'agent') throw new Error('implementer must be an agent');
         implementerAgentId = implementer.id;
       }
-      const parentCommand = await authorizeCommandOutput(
-        db,
-        commandRoomId,
-        agentId,
-        input.requestId,
-        input.generationId,
-      );
+      const parentCommand = await authorizeCommandOutput(db, commandRoomId, agentId, input.requestId);
       const commissionedBy = (
         await db.query<{ author_id: string }>(
           `SELECT message.author_id FROM messages message
@@ -241,7 +235,7 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
             ? await daemonBriefAttachmentRooms(ctx, db, sourceRoomIds, cornerId, agentId, parentCommand)
             : sourceRoomIds,
           input.brief,
-          { roomId: commandRoomId, agentId, requestId: input.requestId, generationId: input.generationId },
+          { roomId: commandRoomId, agentId, requestId: input.requestId },
         );
         const attachments = [
           ...explicitAttachments,
@@ -249,7 +243,6 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
             roomId: commandRoomId,
             agentId,
             requestId: input.requestId,
-            generationId: input.generationId,
             excluding: explicitAttachments.map((attachment) => attachment.objectId),
           })),
         ];
@@ -386,9 +379,7 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
       }
       validateCornerBrief(draft);
       const commandRoomId = input.roomId ?? input.cornerId;
-      const command = await authorizeCommandOutput(
-        db, commandRoomId, agentId, input.requestId, input.generationId,
-      );
+      const command = await authorizeCommandOutput(db, commandRoomId, agentId, input.requestId);
       await assertCornerCommandTarget(db, command.room_id, input.cornerId);
       const current = await currentCornerBrief(db, input.cornerId);
       if ((current?.revision ?? 0) !== input.expectedRevision)
@@ -412,7 +403,7 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
           ? await daemonBriefAttachmentRooms(ctx, db, sourceRoomIds, input.cornerId, agentId, command)
           : sourceRoomIds,
         draft,
-        { roomId: commandRoomId, agentId, requestId: input.requestId, generationId: input.generationId },
+        { roomId: commandRoomId, agentId, requestId: input.requestId },
       );
       const attachments = [
         ...explicitAttachments,
@@ -420,7 +411,6 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
           roomId: input.cornerId,
           agentId,
           requestId: input.requestId,
-          generationId: input.generationId,
           excluding: explicitAttachments.map((attachment) => attachment.objectId),
         })),
       ];

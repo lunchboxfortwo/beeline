@@ -15,7 +15,7 @@ describe('Squire decision after the asking turn ended', () => {
       await fixture.database.transaction(tx =>
         claimAgentCommand(tx, ROOM, AGENT, asking!.id, 'asking-generation'));
       if (ended) await fixture.database.query(
-        `SELECT beeline_end_agent_turn(id,generation_id,'complete',NULL,NULL)
+        `SELECT beeline_finish_agent_command(id,'complete',NULL,NULL)
          FROM agent_commands WHERE id=$1`, [asking!.id],
       );
       if (ended) expect((await readAgentCommands(fixture.database, ROOM, AGENT)).commands).toEqual([]);

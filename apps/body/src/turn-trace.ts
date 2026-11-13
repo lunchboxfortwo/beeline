@@ -32,7 +32,6 @@ import { appendFile, mkdir, readdir, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import type { PromptSectionChange } from './prompt-section-baseline.js';
-import type { AgentProcessSnapshot } from './agent-process.js';
 
 /**
  * The phases a turn is cut into.
@@ -117,15 +116,6 @@ export interface TurnTraceRecord {
   /** Monotonic total for the whole turn, this process's clock. */
   totalMs: number;
   attempts: TurnAttemptTrace[];
-  /**
-   * The scheduler's own `snapshot()`, read twice: as the turn was enqueued and
-   * again once it was admitted. A long `queue-wait` beside a full snapshot is
-   * a previous turn; separate conversations never wait for process capacity.
-   */
-  scheduler: {
-    atQueue?: AgentProcessSnapshot;
-    atAdmission?: AgentProcessSnapshot;
-  };
   /** Bytes per prompt section of the last prompt built (`prompt-assembly.ts`). */
   promptSections?: Record<string, number>;
   /** Per section, whether its text matches the last prompt sent to this same harness session. */
@@ -188,8 +178,6 @@ export class TurnTrace {
   private readonly begunAt: number;
   private readonly attempts: MutableAttempt[] = [];
   private readonly open = new Map<TurnPhase, number>();
-  private atQueue?: AgentProcessSnapshot;
-  private atAdmission?: AgentProcessSnapshot;
   private finished = false;
   private promptSections?: Record<string, number>;
   private promptSectionChanges?: Record<string, PromptSectionChange>;
@@ -245,11 +233,6 @@ export class TurnTrace {
     } finally {
       this.end(phase);
     }
-  }
-
-  noteScheduler(where: 'queue' | 'admission', snapshot: AgentProcessSnapshot): void {
-    if (where === 'queue') this.atQueue = snapshot;
-    else this.atAdmission = snapshot;
   }
 
   noteActivation(kind: 'cold' | 'warm'): void {
@@ -451,10 +434,6 @@ export class TurnTrace {
         tools: [...attempt.tools.values()].map(tool => ({ ...tool.call,
           durationMs: round((tool.ended ?? this.now()) - tool.started) })),
       })),
-      scheduler: {
-        ...(this.atQueue ? { atQueue: this.atQueue } : {}),
-        ...(this.atAdmission ? { atAdmission: this.atAdmission } : {}),
-      },
       ...(this.promptSections ? { promptSections: this.promptSections } : {}),
       ...(this.promptSectionChanges ? { promptSectionChanges: this.promptSectionChanges } : {}),
       ...(this.promptWindow ? { promptWindow: this.promptWindow } : {}),

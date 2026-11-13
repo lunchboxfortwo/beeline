@@ -11,7 +11,6 @@ import { SENTRY_WAKE_SOURCE_SCHEMA } from './sentry-wake-source.js';
 import { CONNECTOR_OFFER_EXPIRY_SCHEMA } from './connector-offer-expiry.js';
 import { PENDING_ATTACHMENT_SOURCE_SCHEMA } from './pending-attachment-source.js';
 import { AGENT_SCHEDULE_SOURCE_SCHEMA } from './agent-schedule-source.js';
-import { HELPER_ACTIVATION_SCHEMA } from './helper-activation-schema.js';
 import { HELPER_USAGE_SCHEMA } from './helper-usage.js';
 import { HELPER_OVERLAY_SCHEMA } from './helper-overlay.js';
 import { BACKGROUND_DUE_SOURCE_SCHEMA } from './background-due-source.js';
@@ -21,7 +20,6 @@ import { SERVER_LEASE_DEADLINE_SCHEMA } from './server-lease-deadlines.js';
 import { commandCompletionSchema } from './command-completion.js';
 import { ROUTER_COMMAND_SCHEMA } from './router-command-ledger.js';
 import { AGENT_TURN_END_SCHEMA } from './agent-turn-end.js';
-import { clearConnectedAppPlaceholders } from './migrations/connected-app-turns.js';
 import { AGENT_CORNER_HOLDS_SCHEMA } from './migrations/agent-corner-holds.js';
 import { MOBILE_MINIMUM_SCHEMA } from './mobile-minimum.js';
 import { STARTER_ONBOARDING_SCHEMA } from './starter-onboarding-run.js';
@@ -59,7 +57,6 @@ import { restoreOwnerApprovedGrants } from './migrations/owner-approved-grants.j
 import { clearDepartedReviewers } from './migrations/departed-reviewers.js';
 import { backfillRegistryApps } from './app-connections.js';
 import { postgresLiveSchema } from './postgres-live.js';
-import { TURN_OWNERSHIP_SCHEMA } from './turn-ownership.js';
 import { COMPUTER_EXPIRY_SCHEMA } from './computer-expiry-schema.js';
 import { CHOICE_EXPIRY_SCHEMA } from './choice-expiry-schema.js';
 import { askingMessageSql, cardExpiresAtSql, EXPIRING_CARD_TYPES } from './needs-you.js';
@@ -145,9 +142,8 @@ export async function migrate(
   await runMigrationStep('one active helper restart', () => createIndexConcurrently(
     database,'agent_commands_one_restart',
     `CREATE UNIQUE INDEX CONCURRENTLY agent_commands_one_restart ON agent_commands(agent_id)
-      WHERE action='restart' AND state IN ('pending','claimed')`,
+      WHERE action='restart' AND state='pending'`,
   ));
-  await ddlScript('turn ownership schema', TURN_OWNERSHIP_SCHEMA);
   await ddlScript('agent turn ending', AGENT_TURN_END_SCHEMA);
   // The previous serving/rollback image still owns its notification capture
   // triggers. Retire them together with their storage in a later contract release.
@@ -518,16 +514,14 @@ export async function migrate(
   // Idle reads use bounded ordered probes, including a corner with a long
   // execution/transcript history. Build outside busy writer transactions.
   await runMigrationStep('corner idle turn history index', () => createIndexConcurrently(
-    database, 'agent_turns_idle_latest_idx',
-    `CREATE INDEX CONCURRENTLY IF NOT EXISTS agent_turns_idle_latest_idx
-     ON agent_turns(room_id,ended_at DESC NULLS LAST,created_at DESC) INCLUDE(agent_id,status)
-     WHERE COALESCE(generation_id,'') NOT LIKE 'pending:%'`,
+    database, 'agent_turns_idle_latest_v2_idx',
+    `CREATE INDEX CONCURRENTLY IF NOT EXISTS agent_turns_idle_latest_v2_idx
+     ON agent_turns(room_id,ended_at DESC NULLS LAST,created_at DESC) INCLUDE(agent_id,status)`,
   ));
   await runMigrationStep('corner working turn index', () => createIndexConcurrently(
-    database, 'agent_turns_working_room_idx',
-    `CREATE INDEX CONCURRENTLY IF NOT EXISTS agent_turns_working_room_idx
-     ON agent_turns(room_id,agent_id,request_id)
-     WHERE status='working' AND COALESCE(generation_id,'') NOT LIKE 'pending:%'`,
+    database, 'agent_turns_working_room_v2_idx',
+    `CREATE INDEX CONCURRENTLY IF NOT EXISTS agent_turns_working_room_v2_idx
+     ON agent_turns(room_id,agent_id,request_id) WHERE status='working'`,
   ));
   await runMigrationStep('corner human input history index', () => createIndexConcurrently(
     database, 'messages_idle_human_history_idx',
@@ -567,7 +561,6 @@ export async function migrate(
   await ddlScript('MCP member stream', MCP_MEMBER_STREAM_SCHEMA, true);
   await ddlScript('Helper overlay demand', HELPER_OVERLAY_SCHEMA);
   await ddlScript('Helper usage ownership', HELPER_USAGE_SCHEMA);
-  await ddlScript('Helper command activation', HELPER_ACTIVATION_SCHEMA);
   await ddlScript('push outbox', PUSH_OUTBOX_SCHEMA);
   await ddlScript('Background obligation sources', BACKGROUND_DUE_SOURCE_SCHEMA);
   // Retired Tray clock and background storage remains through the serving and
@@ -620,8 +613,6 @@ export async function migrateData(database: SqlDatabase): Promise<void> {
     workflowBackfillOnce(database, 'archived-corner-assignments-v1', cancelArchivedCornerAssignments));
   await dataStep('archived corner wakes', () =>
     workflowBackfillOnce(database, 'archived-corner-wakes-v1', deleteArchivedCornerWakeSources));
-  await dataStep('connected app dispatch placeholders', () =>
-    workflowBackfillOnce(database, 'connected-app-placeholders-v1', clearConnectedAppPlaceholders));
   await dataStep('terminal push claims', () =>
     workflowBackfillOnce(database, 'terminal-push-claims-v1', compactPushClaims));
   if (searchDocuments)

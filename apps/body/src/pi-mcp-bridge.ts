@@ -297,13 +297,13 @@ async function authorizeSquire(signal) {
   if (!env?.BEELINE_DAEMON_BASE_URL || !env.BEELINE_DAEMON_TOKEN || !env.BEELINE_TURN_CONTEXT_FILE)
     throw new Error('Squire authorization is unavailable.');
   const context = JSON.parse(await readFile(env.BEELINE_TURN_CONTEXT_FILE, 'utf8'));
-  if (![context.roomId, context.requestId, context.generationId].every((value) => typeof value === 'string' && value.length > 0))
+  if (![context.roomId, context.requestId].every((value) => typeof value === 'string' && value.length > 0))
     throw new Error('Squire requires an active server command.');
   const response = await fetch(new URL('/v1/daemon/operations/authorizeSquireCall', env.BEELINE_DAEMON_BASE_URL), {
     method: 'POST',
     headers: { authorization: 'Bearer ' + env.BEELINE_DAEMON_TOKEN, 'content-type': 'application/json',
       'x-beeline-helper-version': env.BEELINE_HELPER_VERSION || 'v0.0.0' },
-    body: JSON.stringify({ roomId: context.roomId, requestId: context.requestId, generationId: context.generationId }),
+    body: JSON.stringify({ roomId: context.roomId, requestId: context.requestId }),
     signal,
   });
   if (!response.ok) throw new Error('Squire authorization is unavailable.');

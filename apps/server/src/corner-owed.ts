@@ -389,7 +389,7 @@ BEGIN
   IF NOT EXISTS(SELECT 1 FROM rooms report_corner
     CROSS JOIN LATERAL (${cornerWaitingSql('report_corner')}) waiting WHERE report_corner.id=corner) THEN RETURN NULL; END IF;
   WITH cancelled AS (
-    SELECT (terminal.ended).* FROM (SELECT beeline_end_agent_turn(command.id,command.generation_id,'cancelled','corner_waiting',NULL) ended FROM agent_commands command WHERE command.room_id=corner AND command.state='pending' AND command.action IN ('input','resume')
+    SELECT (terminal.ended).* FROM (SELECT beeline_finish_agent_command(command.id,'cancelled','corner_waiting',NULL) ended FROM agent_commands command WHERE command.room_id=corner AND command.state='pending' AND command.action='input'
       AND command.private_payload->>'kind' IS DISTINCT FROM 'order'
       AND command.private_payload->>'kind' IS DISTINCT FROM 'report'
       AND NOT EXISTS(SELECT 1 FROM messages source JOIN identities author ON author.id=source.author_id

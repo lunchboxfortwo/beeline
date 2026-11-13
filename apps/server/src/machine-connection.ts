@@ -237,10 +237,7 @@ export function serveMachineSocket(
           ...(typeof item.available === 'boolean' ? { available: item.available } : {}),
           ...(item.overlayV1===true?{overlayV1:true}:{}),
           ...(item.usageAccountV1===true?{usageAccountV1:true}:{}),
-          ...(item.activationContextV1===true?{activationContextV1:true}:{}),
-          ...(item.turnOwnershipV1===true?{turnOwnershipV1:true}:{}),
-          ...(item.ownedModelV1===true?{ownedModelV1:true}:{}),
-          ...(item.ownedModelUnboundedV1===true?{ownedModelUnboundedV1:true}:{}),
+          ...(item.queueV1===true?{queueV1:true}:{}),
           ...(item.daemonOperationsV1===true?{daemonOperationsV1:true}:{}),
         },
       );
@@ -253,10 +250,8 @@ export function serveMachineSocket(
         agentId,
         capabilities: { initialSnapshotsV1: true, discoveryWake: true, pushIntake: true,
           ...(item.daemonOperationsV1 === true ? {daemonOperationsV1:true} : {}),
-          ...(session.turnOwnershipV1 ? {turnOwnershipV1:true,turnConnectionId:session.turnSource!.connectionId,turnConnectionEpoch:session.turnSource!.epoch,turnContinuationV1:session.turnContinuationV1} : {}),
-          ...(session.ownedModelV1 ? {ownedModelV1:true} : {}),
+          ...(item.queueV1 === true ? {queueV1:true} : {}),
           ...(session.overlayV1?{overlayV1:true}:{}),
-          ...(session.activationContextV1?{activationContextV1:true,activationConnectionId:session.connectionId,activationConnectionEpoch:session.epoch}:{}),
           ...(session.usageAccountV1?{usageAccountV1:true,usageOwnerId:session.usageOwnerId,usageConnectionId:session.connectionId,usageConnectionEpoch:session.epoch}:{}) },
       });
     } catch (error) {

@@ -2,8 +2,6 @@ import { lockAgentCommandQueue } from './agent-command-queue.js';
 import { endAgentTurn } from './agent-turn-end.js';
 import { ExpectedRefusalError } from './command-refusal.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
-import { commandOwnerLiveSql, registerOwnedAccessCheck } from './turn-ownership.js';
-import type { HelperTurnOwnershipSource } from '@beeline/api-contract/helper-turn-ownership';
 import { recordMcpMention, recordMcpMemberWebhook } from './rooms-mcp-members.js';
 import { commandOrder, reportToCommander } from './commander.js';
 import { workflowOutputBindingCtes } from './workflow-step-output.js';
@@ -11,7 +9,7 @@ import { createHash } from 'node:crypto';
 import type { SqlDatabase } from './database.js';
 import { resolveCurrentMemberMentions, typedMentionHandles, isChannelMentionToken } from './message-mentions.js';
 import { CORNER_LIFECYCLE_CARD_TYPE } from './room-choice.js';
-import { CommandRow, nextAgentDepth, commandValidityCtes, reviewerQuietSql, waitingReportSql, ordinaryWakeSql } from './agent-command.js';
+import { CommandRow, nextAgentDepth } from './agent-command.js';
 import { createAgentCommand } from './agent-command.js';
 
 
@@ -88,7 +86,7 @@ export async function routeAgentResult(
         return command;
       })
       : await dispatch(db);
-    if (dispatched && (dispatched.state === 'pending' || dispatched.state === 'claimed')) woken.push(mention.handle);
+    if (dispatched?.state === 'pending') woken.push(mention.handle);
     else notWoken.push({ handle: mention.handle, reason: dispatched?.state === 'complete'
       ? 'own output does not start another turn' : parent && nextAgentDepth(parent.agent_depth) === undefined
       ? 'agent tag chain depth limit reached' : 'agent or place is no longer available' });
@@ -122,14 +120,6 @@ export const CORNER_AGENT_UNREACHABLE_CARD_TYPE = 'corner-agent-unreachable';
 export const CORNER_MERGE_YES_CARD_TYPE = 'corner-merge-yes';
 
 
-/** Claims and human Stops serialize before taking command or turn row locks. */
-
-
-
-/** The Stop transaction's timestamp fences orders accepted after the Stop. */
-
-
-
 export type WakeDropLog = { drops: Record<string, unknown>[] };
 
 
@@ -138,166 +128,26 @@ export function logStaleWakeDrops(drops: WakeDropLog['drops'] | undefined): void
 }
 
 
-export class StaleWakeClaimRefused extends Error {
-  constructor(readonly drops: WakeDropLog['drops']) { super('command claim conflict'); }
-  log(): void { logStaleWakeDrops(this.drops); }
-}
-
-
-/** How a claimed generation executes. 'helper' runs the helper turn-ownership
- * protocol, 'mcp' a connected-app call, 'legacy' the installed-helper adapter.
- * One claim kind owns its admission and same-generation replay. */
-export type CommandClaim =
-  | { kind: 'helper'; owner: HelperTurnOwnershipSource; allPending?: boolean }
-  | { kind: 'mcp' }
-  | { kind: 'legacy'; allPending?: boolean };
-export const LEGACY_CLAIM: CommandClaim = Object.freeze({ kind: 'legacy' });
-export const MCP_CLAIM: CommandClaim = Object.freeze({ kind: 'mcp' });
-
-export async function claimAgentCommand(
-  db: SqlDatabase,
-  roomId: string,
-  agentId: string,
-  commandId: string,
-  generation: string,
-  claim: CommandClaim = LEGACY_CLAIM,
-): Promise<CommandRow> {
-  // The claim records its execution kind; dispatch never infers it from a socket.
-  const owner = claim.kind === 'helper' ? claim.owner : undefined;
-  const allPending = claim.kind !== 'mcp' && claim.allPending === true;
-  if (!generation || generation.length > 200) throw new Error('command generation is required');
-  // Helper claims re-check Room access at commit and replay as a read. Other
-  // claims commit the turn in their one statement.
-  const run = owner ? db.transaction.bind(db)
-    : <T>(work: (db: SqlDatabase) => Promise<T>) => work(db);
-  const result = await run(async db => {
-    if (owner) {
-    // A repeated claim of the same generation reads the running turn; it never
-    // rewrites its working row.
-    const existing = (await db.query<CommandRow & { turn_cancelled: boolean }>(
-      `SELECT command.*,EXISTS(SELECT 1 FROM agent_turns turn
-         WHERE turn.room_id=command.room_id AND turn.agent_id=command.agent_id
-           AND turn.request_id=command.turn_request_id AND turn.status='cancelled') turn_cancelled
-       FROM agent_commands command WHERE command.id=$1 AND command.room_id=$2 AND command.agent_id=$3
-         AND command.state='claimed' AND command.generation_id=$4
-         AND command.execution_kind IS DISTINCT FROM 'mcp'
-         AND beeline_command_claim_open(command.id)
-       FOR UPDATE OF command`,
-      [commandId, roomId, agentId, generation],
-    )).rows[0];
-    if (existing) {
-      if (existing.turn_cancelled) return new Error('command turn cancelled');
-      return existing;
-    }
-    }
-    const row = (
-      await db.query<CommandRow & WakeDropLog & { turn_claimed: boolean }>(
-        `WITH claim_fence AS MATERIALIZED (
-             SELECT member.removed_at FROM memberships member JOIN rooms room ON room.id=$2
-             WHERE member.room_id=COALESCE(room.parent_id,room.id) AND member.identity_id=$3
-             FOR UPDATE OF member
-           ), ${commandValidityCtes('$2', '$3', true, false)}, eligible AS MATERIALIZED (
-             SELECT agent_commands.* FROM agent_commands CROSS JOIN claim_fence
-             WHERE (id=$1 OR ($7::boolean AND state='pending' AND action IN ('input','resume')))
-               AND room_id=$2 AND agent_id=$3 AND
-               claim_fence.removed_at IS NULL AND
-               beeline_command_claim_open(id) AND
-               (state='pending' OR (state='claimed' AND generation_id=$4
-                 -- A running generation is replayed only by its own execution kind.
-                 AND (execution_kind IS NOT DISTINCT FROM 'mcp')=($8::text IS NOT DISTINCT FROM 'mcp')))
-               AND NOT EXISTS(SELECT 1 FROM cancelled_wakes cancelled WHERE cancelled.id=agent_commands.id)
-               AND ${reviewerQuietSql('agent_commands')} AND ${waitingReportSql('agent_commands')}
-
-               AND (${ordinaryWakeSql('agent_commands')} OR (state='claimed' AND generation_id=$4) OR NOT EXISTS (
-                 SELECT 1 FROM agent_commands human WHERE human.room_id=$2 AND human.agent_id=$3
-                   AND human.reason<>'computer_activity' AND human.action IN ('input','resume')
-                   AND (human.state='pending' OR (human.state='claimed' AND ${commandOwnerLiveSql('human')}))
-               ))
-             FOR UPDATE OF agent_commands
-           ), working AS (
-             INSERT INTO agent_turns(room_id,request_id,agent_id,status,generation_id)
-             SELECT room_id,turn_request_id,agent_id,'working',$4 FROM eligible
-             WHERE action<>'stop' AND action<>'restart'
-             ON CONFLICT(room_id,request_id,agent_id) DO UPDATE SET
-               status='working',generation_id=EXCLUDED.generation_id,failure_reason=NULL,created_at=now(),
-               started_at=CASE WHEN agent_turns.status='working'
-                 AND agent_turns.generation_id=EXCLUDED.generation_id
-                 THEN agent_turns.started_at ELSE now() END
-             WHERE agent_turns.status<>'cancelled'
-             RETURNING room_id,agent_id,request_id
-           ), claimed AS (
-             UPDATE agent_commands command SET state='claimed',generation_id=$4,
-               lease_expires_at=NULL,claimed_at=now(),
-               turn_owner_connection_id=$5::text,turn_owner_epoch=$6::bigint,execution_kind=$8::text
-             FROM eligible
-             WHERE command.id=eligible.id AND
-               (eligible.action='stop' OR eligible.action='restart' OR EXISTS(SELECT 1 FROM working
-                 WHERE working.room_id=command.room_id AND working.agent_id=command.agent_id
-                   AND working.request_id=command.turn_request_id))
-             RETURNING command.*
-           ), resolved_corner_attention AS (
-             UPDATE messages notice SET card=jsonb_set(notice.card,'{status}','"resolved"')
-             FROM claimed command
-             WHERE command.action IN ('input','resume') AND notice.room_id=command.room_id
-               AND notice.card_type='${CORNER_AGENT_UNREACHABLE_CARD_TYPE}'
-               AND notice.card->>'agentId'=command.agent_id
-               AND COALESCE(notice.card->>'status','open')='open'
-             RETURNING notice.id
-           ), ${workflowOutputBindingCtes('claimed')}, claim_result AS (
-           SELECT claimed.*,true turn_claimed FROM claimed
-           UNION ALL
-           SELECT eligible.*,false turn_claimed FROM eligible
-           WHERE eligible.action<>'stop' AND eligible.action<>'restart'
-             AND NOT EXISTS(SELECT 1 FROM working WHERE working.room_id=eligible.room_id
-               AND working.agent_id=eligible.agent_id AND working.request_id=eligible.turn_request_id)
-           ) SELECT claim_result.*,wake_drop_log.drops FROM wake_drop_log LEFT JOIN claim_result ON true
-             ORDER BY claim_result.created_at,claim_result.id`,
-        [commandId, roomId, agentId, generation, owner?.connectionId ?? null, owner?.epoch ?? null, allPending, claim.kind],
-      )
-    ).rows[0];
-    if (!row?.id) {
-      if (row?.drops.length) return new StaleWakeClaimRefused(row.drops);
-      return new Error('command claim conflict');
-    }
-    logStaleWakeDrops(row.drops);
-    if (!row.turn_claimed) return new Error('command turn cancelled');
-    if (owner) await registerOwnedAccessCheck(db, row);
-    return row;
-  });
-  if(result instanceof Error)throw result;
-  return result;
-}
-
-
-/** Connected-app ingress selects an order; claimAgentCommand alone decides eligibility.
- * Explicit calls reuse a live MCP generation across tools until report, never a helper owner. */
-export async function claimMcpOrder(db: SqlDatabase, agentId: string, target: string,
-  generation: string, commandId?: string): Promise<CommandRow | undefined> {
+/** A connected app answers its orders through the queue: the order it names,
+ * or its oldest pending order (this Room first). */
+export async function selectMcpOrder(db: SqlDatabase, agentId: string, target: string,
+  commandId?: string): Promise<CommandRow | undefined> {
   const waiting = (await db.query<CommandRow>(
     `SELECT command.* FROM agent_commands command
      JOIN rooms room ON room.id=command.room_id AND room.archived_at IS NULL
      JOIN room_access member ON member.room_id=room.id AND member.identity_id=$1 AND member.removed_at IS NULL
-     WHERE command.agent_id=$1 AND command.action IN ('input','resume')
+     WHERE command.agent_id=$1 AND command.action='input' AND command.state='pending'
        AND command.private_payload->>'kind'='order'
        AND ($3::text IS NULL OR (command.id=$3 AND command.room_id=$2))
-       AND (command.state='pending' OR (command.state='claimed' AND
-         ($3::text IS NOT NULL AND command.execution_kind='mcp')))
      ORDER BY (command.room_id=$2) DESC,command.created_at,command.id`,
     [agentId, target, commandId ?? null])).rows;
   if (!commandId && !waiting.some(row => row.room_id === target) && waiting.length > 1)
     throw new ExpectedRefusalError(`ambiguous report; pass commandId from the order: ${waiting.map(row => `${row.id} at ${row.room_id}`).join(', ')}`);
-  const selected = waiting[0];
-  if (!selected) return undefined;
-  // Stop and claims take this same queue lock before inspecting or writing ownership.
-  await lockAgentCommandQueue(db, selected.room_id, agentId);
-  const current = (await db.query<CommandRow>(`SELECT * FROM agent_commands WHERE id=$1 FOR UPDATE`, [selected.id])).rows[0];
-  const reuse = commandId && current?.state === 'claimed' && current.execution_kind === 'mcp';
-  return claimAgentCommand(db, selected.room_id, agentId, selected.id, reuse ? current.generation_id! : generation, MCP_CLAIM);
+  return waiting[0];
 }
 
 
-/** Inbox dismissal does not start a turn: queued non-orders may be handled
- * directly, while orders still require a report and live owners retain their work. */
+/** Inbox dismissal answers queued non-orders silently; orders still require a report. */
 export async function dismissAgentCommandWakes(db: SqlDatabase, roomId: string, agentId: string,
   commandId?: string): Promise<number> {
   return db.transaction(async db => {
@@ -305,7 +155,7 @@ export async function dismissAgentCommandWakes(db: SqlDatabase, roomId: string, 
     const waiting = (await db.query<CommandRow>(`SELECT command.* FROM agent_commands command
       JOIN rooms room ON room.id=command.room_id AND room.archived_at IS NULL
       JOIN room_access member ON member.room_id=room.id AND member.identity_id=command.agent_id AND member.removed_at IS NULL
-      WHERE command.room_id=$1 AND command.agent_id=$2 AND command.action IN ('input','resume') AND command.reason<>'mcp_call'
+      WHERE command.room_id=$1 AND command.agent_id=$2 AND command.action='input' AND command.reason<>'mcp_call'
         AND ($3::text IS NULL OR command.id=$3)
         AND ($3::text IS NOT NULL OR COALESCE(command.private_payload->>'kind','')<>'order')
         AND command.state='pending'
@@ -313,75 +163,30 @@ export async function dismissAgentCommandWakes(db: SqlDatabase, roomId: string, 
     if (waiting.some(command => command.private_payload?.kind === 'order'))
       throw new ExpectedRefusalError('that wake is an order; answer it with report');
     await db.query(`SELECT ended.id FROM agent_commands command CROSS JOIN LATERAL
-      beeline_end_agent_turn(command.id,command.generation_id,'complete',NULL,NULL) ended
+      beeline_finish_agent_command(command.id,'complete',NULL,NULL) ended
       WHERE command.id=ANY($1::text[])`,[waiting.map(command=>command.id)]);
     return waiting.length;
   });
 }
 
 
-/** A refused report leaves its order owed, without reviving a Stop or cancelled turn. */
-export async function releaseUnreportedMcpOrder(db: SqlDatabase, commandId: string, generation: string): Promise<void> {
-  const command = (await db.query<CommandRow>(`SELECT * FROM agent_commands WHERE id=$1`, [commandId])).rows[0];
-  if (!command) return;
-  await lockAgentCommandQueue(db, command.room_id, command.agent_id);
-  await db.query(`WITH released AS (
-    UPDATE agent_commands command SET state='pending',generation_id=NULL,lease_expires_at=NULL,claimed_at=NULL
-    WHERE id=$1 AND state='claimed' AND generation_id=$2
-      AND NOT EXISTS (SELECT 1 FROM agent_turns turn WHERE turn.room_id=command.room_id
-        AND turn.agent_id=command.agent_id AND turn.request_id=command.turn_request_id AND turn.status='cancelled')
-    RETURNING room_id,agent_id,turn_request_id
-  ) DELETE FROM agent_turns turn USING released
-    WHERE turn.room_id=released.room_id AND turn.agent_id=released.agent_id
-      AND turn.request_id=released.turn_request_id AND turn.status='working' AND turn.generation_id=$2`, [commandId, generation]);
-}
-
-
-/** Any server instance accepts a turn's output while its generation is claimed. */
+/** The queue item a tool call serves: the agent's newest item for this
+ * request in this Room. Stop (a cancelled item) is the only refusal. */
 export async function authorizeCommandOutput(
   db: SqlDatabase,
   roomId: string,
   agentId: string,
   requestId: unknown,
-  generation: unknown,
-  allowCompleted = false,
-  registerEffect = true,
 ): Promise<CommandRow> {
-  const row =
-    typeof requestId === 'string' && typeof generation === 'string'
-      ? (
-          await db.query<CommandRow & { turn_cancelled: boolean; rejection_reason: string | null }>(
-            `SELECT command.*,
-               CASE
-                 WHEN command.generation_id IS DISTINCT FROM $4 THEN 'generation ended'
-                 WHEN command.state<>'claimed' AND NOT ($5::boolean AND command.state='complete') THEN 'state not claimed: ' || command.state
-                 WHEN NOT beeline_command_generation_open(command.id,command.generation_id) THEN 'generation ended'
-                 ELSE NULL
-               END rejection_reason,
-               EXISTS(SELECT 1 FROM agent_turns turn
-                 WHERE turn.room_id=command.room_id AND turn.agent_id=command.agent_id
-                   AND turn.request_id=command.turn_request_id AND turn.status='cancelled') turn_cancelled
-             FROM agent_commands command
-             WHERE command.room_id=$1 AND command.agent_id=$2 AND command.turn_request_id=$3
-               AND command.action IN ('input','resume')
-             ORDER BY (command.generation_id IS NOT DISTINCT FROM $4) DESC,command.created_at DESC,command.id DESC LIMIT 1 FOR UPDATE OF command`,
-            [roomId, agentId, requestId, generation, allowCompleted],
-          )
-        ).rows[0]
-      : undefined;
-  if (!row || row.rejection_reason) {
-    const reason = row?.rejection_reason ?? 'no command row';
-    console.error('command output rejected', {
-      reason,
-      command: row?.id,
-      agent: agentId,
-      room: roomId,
-      generation: typeof generation === 'string' ? generation : undefined,
-    });
-    throw new Error(`command output authority rejected: ${reason}`);
-  }
-  if (row.turn_cancelled) throw new Error('command turn cancelled');
-  if (registerEffect) await registerOwnedAccessCheck(db, row);
+  const row = typeof requestId === 'string'
+    ? (await db.query<CommandRow>(
+        `SELECT command.* FROM agent_commands command
+         WHERE command.room_id=$1 AND command.agent_id=$2 AND command.turn_request_id=$3
+         ORDER BY command.created_at DESC,command.id DESC LIMIT 1 FOR UPDATE OF command`,
+        [roomId, agentId, requestId])).rows[0]
+    : undefined;
+  if (!row) throw new Error('command output authority rejected: no command row');
+  if (row.state === 'cancelled') throw new Error('command turn cancelled');
   return row;
 }
 

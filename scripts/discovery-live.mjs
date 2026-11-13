@@ -20,7 +20,7 @@ import { ObjectService } from '../apps/server/src/object-service.ts';
 import { prepareRoomAgentHome } from '../apps/body/src/agent-home.ts';
 import { DaemonApiClient } from '../apps/body/src/daemon-api-client.ts';
 import { runtimeConfigPath } from '../apps/body/src/runtime.ts';
-import { ThinDaemonCore } from '../apps/body/src/thin-core.ts';
+import { AgentRunner } from '../apps/body/src/agent-runner.ts';
 import { cursorAcpBridgeLaunch } from '../apps/body/src/cursor-acp-bridge.ts';
 import { summarize } from './discovery-score.mjs';
 import { discoveryResultSucceeded } from './discovery-policy.mjs';
@@ -125,26 +125,18 @@ export async function runCase(f, testCase, directory, options = {}) {
     const configPath = runtimeConfigPath(directory, AGENT);
     await mkdir(dirname(configPath), { recursive: true });
     await writeFile(configPath, JSON.stringify(runtime), { mode: 0o600 });
-    const core = new ThinDaemonCore(runtime, configPath, config, { daemonApi: new DaemonApiClient(f.origin, f.daemonToken, AGENT), reconcileHeartbeatMs: 60000 });
+    const core = new AgentRunner(runtime, configPath, config, { daemonApi: new DaemonApiClient(f.origin, f.daemonToken, AGENT) });
     const abort = new AbortController();
     const request = Object.entries(bindings).reduce((text, [placeholder, value]) => text.replaceAll(placeholder, value), testCase.request);
     await f.phone.execute('sendRoomMessage', { roomId: room, messageId: createHash('sha256').update(`${room}:request`).digest('hex'), wakes: [AGENT], text: `@nerd ${request}` }, testCase.requesterRole === 'member' ? MEMBER : HUMAN);
     const queued = await f.database.query(`SELECT state FROM agent_commands WHERE room_id=$1`, [room]);
     if (!queued.rows.length)
         throw new Error('Fixture request did not create an agent command');
-    const running = core.run({ pollMs: 100, signal: abort.signal });
+    const running = core.run({ signal: abort.signal });
     let coreError;
     running.catch((error) => { coreError = error; });
     const observation = { id: testCase.id, room, startedAt: new Date().toISOString(), completed: false, calls: [], text: '', execution: 'local-service', bindings };
     try {
-        const readyDeadline = Date.now() + 60000;
-        while (!core.activeRoomIds().includes(room)) {
-            if (coreError)
-                throw coreError;
-            if (Date.now() > readyDeadline)
-                throw new Error('Local Room startup timed out');
-            await sleep(200);
-        }
         const deadline = Date.now() + (options.timeoutMs ?? 300000);
         while (Date.now() < deadline) {
             if (coreError)

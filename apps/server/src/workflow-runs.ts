@@ -528,7 +528,7 @@ export async function cancelRunWakes(db: SqlDatabase, roomId: string, runId: str
          AND command.state='pending'
        FOR UPDATE OF command SKIP LOCKED
      ), cancelled AS (
-       SELECT (terminal.ended).* FROM (SELECT beeline_end_agent_turn(command.id,command.generation_id,'cancelled','workflow_attempt_advanced',NULL) ended FROM agent_commands command ,due WHERE command.id=due.id) terminal) SELECT cancelled.* FROM cancelled`,
+       SELECT (terminal.ended).* FROM (SELECT beeline_finish_agent_command(command.id,'cancelled','workflow_attempt_advanced',NULL) ended FROM agent_commands command ,due WHERE command.id=due.id) terminal) SELECT cancelled.* FROM cancelled`,
     [roomId, runId],
   );
 }

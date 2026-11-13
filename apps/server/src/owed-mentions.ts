@@ -56,7 +56,7 @@ export const OWED_MENTION_OPEN_SQL = `
   AND (NOT EXISTS(SELECT 1 FROM agent_commands source WHERE source.source_message_id=mention.message_id
       AND source.room_id=mention.room_id AND source.agent_id=mention.member_id AND source.state='cancelled')
     OR EXISTS(SELECT 1 FROM agent_commands source WHERE source.source_message_id=mention.message_id
-      AND source.room_id=mention.room_id AND source.agent_id=mention.member_id AND source.state IN ('pending','claimed')))`;
+      AND source.room_id=mention.room_id AND source.agent_id=mention.member_id AND source.state='pending'))`;
 
 const FULL_ROOM_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

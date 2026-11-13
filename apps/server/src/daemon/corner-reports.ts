@@ -59,9 +59,9 @@ import { daemonCheckReviewerAuthors } from './corner-reads.js';
          AND attachment.request_id IN (SELECT turn_request_id FROM chain WHERE room_id=$2 AND agent_id=$3)
        ORDER BY attachment.created_at,attachment.id`, [command.id, command.room_id, agentId],
     )).rows;
-    // Explicit report already delivered this generation; final prose adds nothing
+    // An explicit report already answered this item; final prose adds nothing
     // unless tools queued more files after that report.
-    if (automatic && command.private_payload?.reportedGenerationId === command.generation_id && !pending.length)
+    if (automatic && command.private_payload?.reported === true && !pending.length)
       return daemonWriteResult(ctx);
     const attachments = [...(command.private_payload?.attachments ?? []),
       ...pending.map(row => ({ url: row.url, name: row.name, mimeType: row.mime_type, size: row.size }))]
@@ -77,15 +77,15 @@ import { daemonCheckReviewerAuthors } from './corner-reads.js';
       return true;
     });
     const result = await reportToCommander(database, command.room_id, agentId, text, command,
-      createHash('sha256').update(`report:${command.id}:${command.generation_id}:${text}:${ask ?? ""}:${JSON.stringify(uniqueAttachments)}`).digest('hex'), { attachments: uniqueAttachments, automatic, ask });
+      createHash('sha256').update(`report:${command.id}:${text}:${ask ?? ""}:${JSON.stringify(uniqueAttachments)}`).digest('hex'), { attachments: uniqueAttachments, automatic, ask });
     if (result.skipped || ('delivered' in result && !result.delivered)) return result;
     for (const attachment of pending) await database.query(
       `DELETE FROM agent_pending_attachments WHERE room_id=$1 AND agent_id=$2 AND id=$3`,
       [command.room_id, agentId, attachment.id]);
     if (command.private_payload) await database.query(
       `UPDATE agent_commands SET private_payload=private_payload ||
-        jsonb_build_object('reportedGenerationId',$2::text,'reportedOutcome',$3::text) WHERE id=$1`,
-      [command.id, command.generation_id, prefix ?? null]);
+        jsonb_build_object('reported',true,'reportedOutcome',$2::text) WHERE id=$1`,
+      [command.id, prefix ?? null]);
     if (prefix && ['done','failed','blocked','needs-decision'].includes(prefix))
       await endAgentTurn(database,command,prefix==='failed'?'failed':'complete');
     return result;
@@ -103,7 +103,7 @@ import { daemonCheckReviewerAuthors } from './corner-reads.js';
     const kinds = [...new Set(input.kinds)];
     return ctx.database.transaction(async (db) => {
       const incoming = (await db.query<CommandRow>(`SELECT * FROM agent_commands
-        WHERE room_id=$1 AND agent_id=$2 AND action IN ('input','resume')
+        WHERE room_id=$1 AND agent_id=$2 AND action='input'
           AND ($3::text IS NULL OR turn_request_id=$3)
         ORDER BY created_at DESC,id DESC LIMIT 1`, [input.roomId, agentId, input.requestId ?? null])).rows[0];
       const member = await db.query<{ parent_id: string | null }>(
@@ -236,9 +236,7 @@ import { daemonCheckReviewerAuthors } from './corner-reads.js';
       if (objective !== undefined || input.brief) {
         if (corner.kind !== 'human' && input.brief)
           throw new Error('corner brief already exists; revise the current brief instead');
-        const command = await authorizeCommandOutput(
-          db, input.roomId ?? input.cornerId, agentId, input.requestId, input.generationId,
-        );
+        const command = await authorizeCommandOutput(db, input.roomId ?? input.cornerId, agentId, input.requestId);
         if (current || corner.kind !== 'human') {
           if (current && input.brief && (current.spec !== input.brief.spec.trim() ||
               current.repositoryWork !== input.brief.repositoryWork ||
@@ -260,7 +258,6 @@ import { daemonCheckReviewerAuthors } from './corner-reads.js';
               roomId: input.cornerId,
               agentId,
               requestId: input.requestId ?? '',
-              generationId: input.generationId,
               excluding: explicitAttachments.map((attachment) => attachment.objectId),
             })),
           ];

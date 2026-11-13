@@ -6,7 +6,6 @@ import { advanceCorner } from './corner-lifecycle.js';
 import { reviewChecksSql, greenReviewRequestSql } from './corner-lifecycle-values.js';
 import { endAgentTurn } from './agent-turn-end.js';
 import { cornerLifecycleSql } from './corner-github-cache.js';
-import { commandOwnerLiveSql } from './turn-ownership.js';
 import { currentIdleReportSql } from './corner-idle.js';
 import { cornerReviewerSql } from './corner-reviewer.js';
 import { CornerAccessDatabase } from './corner-access-database.js';
@@ -20,7 +19,7 @@ import { isCornerReviewer } from './agent-health.js';
 import { cornerImplementerSql } from './corner-worker.js';
 import { CORNER_LIFECYCLE_CARD_TYPE } from './room-choice.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
-import { claimAgentCommand, routeAgentResult, CORNER_REVIEW_DEADLOCK_CARD_TYPE, CORNER_CHECKS_BLOCKED_CARD_TYPE, CORNER_AGENT_UNREACHABLE_CARD_TYPE, CORNER_MERGE_YES_CARD_TYPE, StaleWakeClaimRefused, claimMcpOrder, dismissAgentCommandWakes, releaseUnreportedMcpOrder, authorizeCommandOutput, MCP_CLAIM } from './agent-command-route-agent-result.js';
+import { workflowOutputBindingCtes } from './workflow-step-output.js';
 import { TAGGED_AGENT_LIFECYCLE_COMMANDS, TaggedAgentLifecycleCommand, parseTaggedAgentLifecycleCommand, agentSignInCardId, isTaggedLoginText, soloRoomAgentSql, routeHumanMessage } from './agent-command-create-agent-command.js';
 import { readAgentCommands, commandInbox, routeSystemCommand, queueCornerMergeConflict, reconcileCornerMergeBlockers } from './agent-command-read-agent-commands.js';
 import { reconcileConfiguredCornerReviewers } from './agent-command-reconcile-configured-corner-reviewers.js';
@@ -56,10 +55,11 @@ export function reportedHeadBody(event: { object?: unknown } | null): string {
 export const COMMAND_MAX_DEPTH = 3;
 
 /**
- * source + explicit targets -> eligibility -> command (same transaction)
- * pending -> claimed(generation, connection) -> complete / cancelled
- * connection close -> pending; late writers lose the generation fence.
- * Transcript visibility never grants execution authority.
+ * One queue per agent: source + explicit targets -> eligibility -> pending item
+ * (same transaction) -> complete once its answer is posted to return_room_id,
+ * or cancelled by Stop. A helper that drops leaves the item pending and gets
+ * it again on its next registration. Transcript visibility never grants
+ * execution authority.
  */
 export const AGENT_COMMAND_SCHEMA = `
 CREATE TABLE IF NOT EXISTS agent_commands (
@@ -75,10 +75,7 @@ CREATE TABLE IF NOT EXISTS agent_commands (
  root_source_message_id text NOT NULL,
  agent_depth integer NOT NULL CHECK(agent_depth BETWEEN 0 AND 3),
  state text NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','claimed','complete','cancelled')),
- generation_id text,
- lease_expires_at timestamptz,
  created_at timestamptz NOT NULL DEFAULT now(),
- claimed_at timestamptz,
  completed_at timestamptz,
  result_message_id text REFERENCES messages(id),
  UNIQUE(room_id,source_message_id,agent_id,action)
@@ -90,7 +87,7 @@ ALTER TABLE corner_watches ADD COLUMN IF NOT EXISTS incoming_command_id text REF
 CREATE INDEX IF NOT EXISTS corner_watches_incoming_command_idx ON corner_watches(incoming_command_id);
 ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS avatar_job boolean NOT NULL DEFAULT false;
 CREATE UNIQUE INDEX IF NOT EXISTS agent_commands_one_avatar_job ON agent_commands(agent_id)
-  WHERE avatar_job AND state IN ('pending','claimed');
+  WHERE avatar_job AND state='pending';
 ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS hiccup_attempts integer NOT NULL DEFAULT 0;
 ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS lifecycle_before text;
 ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS review_context jsonb;
@@ -123,11 +120,58 @@ CREATE INDEX IF NOT EXISTS agent_commands_result_message_idx ON agent_commands(r
   WHERE result_message_id IS NOT NULL;
 ALTER TABLE agent_grants ADD COLUMN IF NOT EXISTS command_id text;
 ALTER TABLE agent_pending_attachments ADD COLUMN IF NOT EXISTS request_id text;
-ALTER TABLE agent_pending_attachments ADD COLUMN IF NOT EXISTS generation_id text;
 
 -- Retire synthetic working turns. Pending commands are projected directly.
 DROP TRIGGER IF EXISTS show_dispatched_agent_work ON agent_commands;
 DROP FUNCTION IF EXISTS show_dispatched_agent_work();
+-- Where the answer goes, fixed when the item is queued.
+ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS return_room_id uuid;
+-- The queue has no claim, lease or generation. Unfinished work goes back to
+-- pending; resume and stop controls are no longer queued.
+DROP TRIGGER IF EXISTS beeline_classify_claim_kind ON agent_commands;
+DROP FUNCTION IF EXISTS beeline_classify_claim_kind();
+DROP TRIGGER IF EXISTS beeline_bind_command_generation ON agent_commands;
+DROP FUNCTION IF EXISTS beeline_bind_command_generation();
+DROP TRIGGER IF EXISTS beeline_fence_ended_command_claim ON agent_commands;
+DROP FUNCTION IF EXISTS beeline_fence_ended_command_claim();
+DROP TRIGGER IF EXISTS beeline_fence_unknown_model_generation ON agent_commands;
+DROP FUNCTION IF EXISTS beeline_fence_unknown_model_generation();
+DROP FUNCTION IF EXISTS beeline_command_generation_open(text,text);
+DROP FUNCTION IF EXISTS beeline_command_claim_open(text);
+DROP FUNCTION IF EXISTS beeline_register_owned_effect(text,text,text,text,bigint);
+DROP FUNCTION IF EXISTS beeline_retain_owned_access(uuid,text,text);
+DROP TABLE IF EXISTS turn_owned_access_checks;
+DROP FUNCTION IF EXISTS beeline_commit_owned_access();
+DROP TABLE IF EXISTS turn_owned_effect_fences;
+DROP TABLE IF EXISTS agent_command_owner_ends;
+DROP FUNCTION IF EXISTS beeline_preserve_owner_end();
+DROP TABLE IF EXISTS agent_command_generation_owners;
+DROP FUNCTION IF EXISTS beeline_preserve_generation_binding();
+-- Helper activation snapshots were read only by claims.
+DO $$ DECLARE source text; BEGIN
+ FOREACH source IN ARRAY ARRAY['workspaces','agents','identities','memberships','rooms','agent_grants','workspace_apps',
+   'workspace_connectors','corner_facts','corner_brief_revisions','corner_merge_holds','corner_merge_approvals','free_agents'] LOOP
+   EXECUTE format('DROP TRIGGER IF EXISTS beeline_activation_source ON %I',source);
+ END LOOP;
+END $$;
+DROP FUNCTION IF EXISTS beeline_activation_source();
+DROP FUNCTION IF EXISTS beeline_activation_touch(uuid);
+DROP TABLE IF EXISTS helper_activation_authority;
+UPDATE agent_commands SET state='pending' WHERE state='claimed';
+UPDATE agent_commands command SET action='input' WHERE command.state='pending' AND command.action='resume'
+  AND NOT EXISTS(SELECT 1 FROM agent_commands other WHERE other.room_id=command.room_id
+    AND other.source_message_id=command.source_message_id AND other.agent_id=command.agent_id AND other.action='input');
+UPDATE agent_commands SET return_room_id=CASE WHEN private_payload->>'kind'='order'
+    AND private_payload->>'fromRoomId' ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+  THEN (private_payload->>'fromRoomId')::uuid ELSE room_id END
+  WHERE state='pending' AND return_room_id IS NULL;
+ALTER TABLE agent_commands DROP CONSTRAINT IF EXISTS agent_commands_turn_owner_pair;
+ALTER TABLE agent_commands DROP CONSTRAINT IF EXISTS agent_commands_execution_kind;
+ALTER TABLE agent_commands DROP COLUMN IF EXISTS generation_id, DROP COLUMN IF EXISTS lease_expires_at,
+  DROP COLUMN IF EXISTS claimed_at, DROP COLUMN IF EXISTS execution_kind,
+  DROP COLUMN IF EXISTS turn_owner_connection_id, DROP COLUMN IF EXISTS turn_owner_epoch,
+  DROP COLUMN IF EXISTS restart_confirmed_at;
+ALTER TABLE IF EXISTS agent_pending_attachments DROP COLUMN IF EXISTS generation_id;
 ${AGENT_COMMAND_DELEGATION_SCHEMA}
 `;
 
@@ -146,7 +190,8 @@ export type PrivateCommandPayload = {
   fromRoomId: string;
   kind: 'order' | 'report' | 'lifecycle';
   attachments?: RoomInboxResult['items'][number]['attachments'];
-  reportedGenerationId?: string;
+  /** This item already delivered an explicit report. */
+  reported?: boolean;
   reportedOutcome?: string;
   /** Origin of a forwarded report, for the existing human attention index. */
   originCornerId?: string;
@@ -165,36 +210,27 @@ export type CommandRow = {
   parent_command_id: string | null;
   root_source_message_id: string;
   agent_depth: number;
-  state: 'pending' | 'claimed' | 'complete' | 'cancelled';
-  generation_id: string | null;
-  lease_expires_at: Date | null;
-  /** NULL only for claims written by images below PR 4294. */
-  execution_kind?: 'helper' | 'mcp' | 'legacy' | null;
-  turn_owner_connection_id?: string | null;
-  turn_owner_epoch?: string | number | null;
+  state: 'pending' | 'complete' | 'cancelled';
+  /** Where the answer goes. */
+  return_room_id: string | null;
   result_message_id: string | null;
   lifecycle_before: string | null;
   review_context?: Record<string, unknown> | null;
   wake_context?: { briefRevision: number } | null;
-  restart_confirmed_at: Date | null;
   recovery_context: string | null;
 };
 
 
 /**
- * Reconcile return traffic at both delivery and claim, in the same statement
- * as either operation. A cached helper snapshot therefore grants no right to
- * run a superseded wake. Controls and avatar jobs retain their own authority.
- * Only pending work is reconciled. A running command retains its authority
- * until it reports a result or its connection closes; newer work runs next.
+ * Reconcile return traffic when the queue is read, in the same statement. A
+ * superseded wake is cancelled instead of delivered. Avatar jobs keep their
+ * own authority.
  */
-export function commandValidityCtes(roomSql: string, agentSql: string, claimFence = false, idleFence = true): string {
+export function commandValidityCtes(agentSql: string): string {
   const validity = `command_scope AS MATERIALIZED (
     SELECT command.* FROM agent_commands command
-    ${claimFence ? 'CROSS JOIN claim_fence' : ''}
-    WHERE command.room_id=${roomSql} AND command.agent_id=${agentSql}
-      AND beeline_command_claim_open(command.id)
-      AND command.action IN ('input','resume') AND NOT command.avatar_job
+    WHERE command.agent_id=${agentSql}
+      AND command.action='input' AND NOT command.avatar_job
       AND command.state='pending'
     ORDER BY command.created_at,command.id FOR UPDATE OF command
   ), command_workflows AS MATERIALIZED (
@@ -203,10 +239,10 @@ export function commandValidityCtes(roomSql: string, agentSql: string, claimFenc
       latest.card latest_card,start.card start_card
     FROM command_scope command
     JOIN messages source ON source.id=command.source_message_id
-      AND (source.room_id=command.room_id OR command.action='resume')
+      AND (source.room_id=command.room_id OR command.parent_command_id IS NOT NULL)
     LEFT JOIN room_choices choice ON choice.id::text=source.card->>'choiceId' AND choice.room_id=command.room_id
     LEFT JOIN messages choice_source ON choice_source.id=choice.message_id
-    LEFT JOIN agent_commands parent ON command.action='resume' AND parent.id=command.parent_command_id
+    LEFT JOIN agent_commands parent ON parent.id=command.parent_command_id
     LEFT JOIN messages parent_source ON parent_source.id=parent.source_message_id AND parent_source.room_id=command.room_id
     LEFT JOIN LATERAL (
       SELECT message.card FROM messages message
@@ -240,7 +276,7 @@ export function commandValidityCtes(roomSql: string, agentSql: string, claimFenc
   ), stale_idle_reports AS MATERIALIZED (
     -- Delivery recomputes the idle episode. A claim relies on the attention
     -- refresh, which cancels a superseded alert when its corner changes.
-    SELECT command.id FROM idle_reports command WHERE ${idleFence ? `NOT ${currentIdleReportSql('command')}` : 'false'}
+    SELECT command.id FROM idle_reports command WHERE NOT ${currentIdleReportSql('command')}
   ), stale_wakes AS MATERIALIZED (
     SELECT id FROM deleted_human_sources
     UNION
@@ -262,7 +298,7 @@ export function commandValidityCtes(roomSql: string, agentSql: string, claimFenc
         AND EXISTS (
         SELECT 1 FROM agent_commands earlier WHERE earlier.room_id=command.room_id
           AND earlier.agent_id=command.agent_id AND earlier.reason='report'
-          AND earlier.state IN ('pending','claimed') AND earlier.inbox_sequence<command.inbox_sequence
+          AND earlier.state='pending' AND earlier.inbox_sequence<command.inbox_sequence
           AND earlier.private_payload->>'authorId'=command.private_payload->>'authorId'
           AND COALESCE(earlier.private_payload->>'originCornerId',earlier.private_payload->>'fromRoomId')=
             COALESCE(command.private_payload->>'originCornerId',command.private_payload->>'fromRoomId')
@@ -283,7 +319,7 @@ export function commandValidityCtes(roomSql: string, agentSql: string, claimFenc
         AND EXISTS (SELECT 1 FROM agent_commands replacement
           WHERE replacement.room_id=command.room_id AND replacement.agent_id=command.agent_id
             AND replacement.reason='corner_brief_revision'
-            AND replacement.state IN ('pending','claimed','complete')
+            AND replacement.state IN ('pending','complete')
             AND replacement.wake_context->>'briefRevision'=
               (SELECT max(revision)::text FROM corner_brief_revisions WHERE corner_id=command.room_id)))
       OR (command.wake_context IS NULL AND EXISTS (SELECT 1 FROM corner_brief_revisions brief
@@ -295,10 +331,9 @@ export function commandValidityCtes(roomSql: string, agentSql: string, claimFenc
     SELECT ended.* FROM command_scope scoped
     LEFT JOIN stale_wakes stale ON stale.id=scoped.id
     LEFT JOIN superseded_corner_wakes superseded ON superseded.id=scoped.id
-    CROSS JOIN LATERAL beeline_end_agent_turn(CASE WHEN stale.id IS NOT NULL OR superseded.id IS NOT NULL THEN scoped.id END,scoped.generation_id,'cancelled',
-      CASE WHEN EXISTS(SELECT 1 FROM answered_reports answered WHERE answered.id=scoped.id) THEN 'answered_report'
+    CROSS JOIN LATERAL beeline_finish_agent_command(CASE WHEN stale.id IS NOT NULL OR superseded.id IS NOT NULL THEN scoped.id END,'cancelled',CASE WHEN EXISTS(SELECT 1 FROM answered_reports answered WHERE answered.id=scoped.id) THEN 'answered_report'
         WHEN EXISTS(SELECT 1 FROM deleted_human_sources deleted WHERE deleted.id=scoped.id) THEN 'source_deleted'
-        WHEN stale.id IS NOT NULL THEN 'workflow_attempt_advanced' ELSE 'superseded_wake' END) ended
+        WHEN stale.id IS NOT NULL THEN 'workflow_attempt_advanced' ELSE 'superseded_wake' END,NULL) ended
     WHERE stale.id IS NOT NULL OR superseded.id IS NOT NULL
   ), wake_drop_log AS (
     SELECT COALESCE(jsonb_agg(jsonb_build_object(
@@ -367,7 +402,7 @@ export async function hasPendingCornerReview(db: SqlDatabase, roomId: string, ag
   return (await db.query(`SELECT 1 FROM agent_commands command
     JOIN rooms corner ON corner.id=command.room_id JOIN rooms parent ON parent.id=corner.parent_id
     WHERE command.room_id=$1 AND command.agent_id=$2 AND command.agent_id=${cornerReviewerSql()}
-      AND command.state IN ('pending','claimed') AND ${greenReviewRequestSql('command')}
+      AND command.state='pending' AND ${greenReviewRequestSql('command')}
       AND command.review_context->>'headSha'=$3
       AND command.review_context->'pullRequest'=COALESCE($4::jsonb,
         (SELECT lifecycle->'pr'->'number' FROM corner_github_cache WHERE corner_id=$1)) LIMIT 1`,
@@ -378,7 +413,7 @@ export async function hasPendingCornerReview(db: SqlDatabase, roomId: string, ag
 /** Automatic work cannot answer a worker's explicit waiting report.
  * A green review wake still goes out: that report is often the pending gate. */
 export function waitingReportSql(command: string): string {
-  return `(${command}.action NOT IN ('input','resume') OR NOT corner_has_explicit_wait(${command}.room_id)
+  return `(${command}.action<>'input' OR NOT corner_has_explicit_wait(${command}.room_id)
     OR ${command}.private_payload->>'kind' IN ('order','report')
     OR ${command}.reason='corner_review_dispatch'
     OR (${command}.reason='corner_check' AND EXISTS (
@@ -392,19 +427,6 @@ export function waitingReportSql(command: string): string {
     SELECT 1 FROM messages source JOIN identities author ON author.id=source.author_id
     WHERE source.id=${command}.source_message_id AND author.kind='human' AND source.system_event IS NULL
   ))`;
-}
-
-
-/** Automatic review delivery waits for the implementer to release its claim. */
-export function reviewerQuietSql(command: string): string {
-  return `NOT EXISTS (SELECT 1 FROM rooms corner JOIN rooms parent ON parent.id=corner.parent_id
-    LEFT JOIN corner_facts fact ON fact.corner_id=corner.id
-    WHERE corner.id=${command}.room_id AND ${cornerReviewerSql()}=${command}.agent_id
-      AND (${command}.reason IN ('corner_check','corner_review_dispatch') OR (${command}.reason='subscribed_event' AND EXISTS (
-        SELECT 1 FROM messages source WHERE source.id=${command}.source_message_id
-          AND (source.system_event->>'kind'='check-passed' OR source.author_id=${cornerImplementerSql('fact','corner')}))))
-      AND EXISTS (SELECT 1 FROM agent_commands busy WHERE busy.room_id=corner.id
-        AND busy.agent_id=${cornerImplementerSql('fact','corner')} AND busy.state='claimed' AND ${commandOwnerLiveSql('busy')}))`;
 }
 
 
@@ -472,11 +494,10 @@ export async function supersededReview(db: SqlDatabase, command: CommandRow): Pr
 }
 
 
-/** Explicit app calls need a command before claiming, without notifying a helper.
- * Mint that row and acquire its working turn through the claim owner in one transaction;
+/** An explicit app call gets its own queue item, without notifying a helper;
  * the clamped depth and historical requester provenance remain the app-call contract. */
-export async function createClaimedMcpAgentCommand(db: SqlDatabase, input: {
-  roomId: string; agentId: string; generationId: string;
+export async function createMcpAgentCommand(db: SqlDatabase, input: {
+  roomId: string; agentId: string;
   parent?: Pick<CommandRow, 'root_command_id' | 'root_source_message_id' | 'agent_depth'>;
   requesterMessageId?: string;
 }): Promise<string> {
@@ -485,13 +506,12 @@ export async function createClaimedMcpAgentCommand(db: SqlDatabase, input: {
     const chain = input.parent;
     await lockAgentCommandQueue(db, input.roomId, input.agentId);
     await db.query(
-      `INSERT INTO agent_commands(id,room_id,agent_id,source_message_id,turn_request_id,action,reason,root_command_id,
-         root_source_message_id,agent_depth,state,generation_id,claimed_at)
-       VALUES($1,$2,$3,NULL,$1,'input','mcp_call',$4,$5,$6,'pending',$7,now())`,
+      `INSERT INTO agent_commands(id,room_id,return_room_id,agent_id,source_message_id,turn_request_id,action,reason,root_command_id,
+         root_source_message_id,agent_depth,state)
+       VALUES($1,$2,$2,$3,NULL,$1,'input','mcp_call',$4,$5,$6,'pending')`,
       [id, input.roomId, input.agentId, chain?.root_command_id ?? id,
         chain?.root_source_message_id ?? input.requesterMessageId ?? id,
-        chain ? Math.min(chain.agent_depth + 1, COMMAND_MAX_DEPTH) : 0, input.generationId]);
-    await claimAgentCommand(db, input.roomId, input.agentId, id, input.generationId, MCP_CLAIM);
+        chain ? Math.min(chain.agent_depth + 1, COMMAND_MAX_DEPTH) : 0]);
     return id;
   });
 }
@@ -507,6 +527,8 @@ export type AgentCommandInput = {
     id?: string;
     reason: string;
     action?: AgentCommandAction;
+    /** A wake that continues the parent's turn (an approval or connector answer). */
+    resume?: boolean;
     turnRequestId?: string;
     parent?: CommandRow;
     /** Report evidence belongs to the reporting turn, while parent retains the return chain. */
@@ -578,7 +600,7 @@ export async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInp
   const assignment = input.reason === 'corner_objective' ||
     input.workflowAssignment === true && member.rows[0]!.workflow_assignment;
   const selfAuthored = !assignment && member.rows[0]!.self_authored &&
-    [undefined, 'input', 'resume'].includes(input.action);
+    input.action !== 'restart';
   // A green review is the reply to a block filed while checks were still pending.
   // A red head still wakes the implementer after that block: the four-push stop
   // must not swallow failing checks.
@@ -631,19 +653,19 @@ export async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInp
   const note = input.wakeNote ? `\n${input.wakeNote}` : '';
   const privatePayload = input.privatePayload ? { ...input.privatePayload, text: input.privatePayload.text + note }
     : input.reason === 'corner_brief_revision' ? {
-        ...parent?.private_payload, reportedGenerationId: undefined, kind: 'order' as const,
+        ...parent?.private_payload, reported: undefined, kind: 'order' as const,
         authorId: member.rows[0]!.source_author_id ?? parent?.agent_id ?? SYSTEM_IDENTITY_ID,
         fromRoomId: parent?.private_payload?.fromRoomId ?? parent?.room_id ?? input.roomId,
         text: (sourceText ?? parent?.private_payload?.text ?? '') + note,
       } : (parent?.private_payload && input.inheritPrivatePayload !== false
-    ? { ...parent.private_payload, reportedGenerationId: undefined, kind: 'lifecycle' as const,
-        text: (input.action === 'resume' && sourceText
+    ? { ...parent.private_payload, reported: undefined, kind: 'lifecycle' as const,
+        text: (input.resume && sourceText
           ? `${parent.private_payload.text}\nResume context: ${sourceText}`
           : sourceText ?? parent.private_payload.text) + note }
     : input.wakeNote
       ? { text: `${sourceText ?? ''}${note}`.trim(), authorId: SYSTEM_IDENTITY_ID, fromRoomId: input.roomId, kind: 'lifecycle' as const }
       : undefined);
-  if (!selfAuthored && (input.action === undefined || input.action === 'input' || input.action === 'resume') &&
+  if (!selfAuthored && input.action !== 'restart' &&
       privatePayload?.kind !== 'order' && !member.rows[0]!.human_input && !greenReviewWake &&
       !failingCheckWake &&
       await cornerReportWaiting(db, input.roomId, privatePayload?.kind))
@@ -652,7 +674,7 @@ export async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInp
   // explicit same-head re-review. Recruiting ordinary peers still adds a hop.
   const reviewHandoff = reviewContext && (input.reason === 'order' || input.reason === 'agent_tag') &&
     await isCornerReviewer(db, input.roomId, input.agentId);
-  const depth = parent ? input.retainDepth || lifecycle || input.action === 'resume' || reviewHandoff
+  const depth = parent ? input.retainDepth || lifecycle || input.resume || reviewHandoff
     ? parent.agent_depth : nextAgentDepth(parent.agent_depth) : 0;
   if (depth === undefined) return undefined;
   const id = input.id ?? randomBytes(32).toString('hex');
@@ -671,11 +693,13 @@ export async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInp
   const result = await db.query<CommandRow>(
     `WITH created AS (
        INSERT INTO agent_commands
-        (id,room_id,agent_id,source_message_id,turn_request_id,action,reason,root_command_id,parent_command_id,root_source_message_id,agent_depth,avatar_job,private_payload,state)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,'pending')
+        (id,room_id,agent_id,source_message_id,turn_request_id,action,reason,root_command_id,parent_command_id,root_source_message_id,agent_depth,avatar_job,private_payload,state,return_room_id)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,'pending',$22::uuid)
         ON CONFLICT DO NOTHING
         RETURNING *
-     ), diagnostic_origin AS (
+     ), worked_command AS (
+       SELECT * FROM created WHERE NOT $18::boolean
+     ), ${workflowOutputBindingCtes('worked_command')}, diagnostic_origin AS (
        INSERT INTO diagnostic_command_origins(command_id,session_id,user_id,action_id)
        SELECT c.id,COALESCE(s.id,parent.session_id),COALESCE(s.user_id,parent.user_id),COALESCE($21::uuid,parent.action_id)
        FROM created c LEFT JOIN diagnostic_sessions s ON s.id=$19::uuid AND s.user_id=$20
@@ -715,6 +739,7 @@ export async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInp
       ...wake.params,
       selfAuthored,
       diagnostic?.origin?.sessionId ?? null,diagnostic?.userId ?? null,diagnostic?.origin?.actionId ?? null,
+      privatePayload?.kind === 'order' && /^[0-9a-f-]{36}$/.test(privatePayload.fromRoomId) ? privatePayload.fromRoomId : input.roomId,
     ],
   );
   const command = result.rows[0] ?? (await db.query<CommandRow>(
@@ -734,7 +759,7 @@ export async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInp
     ? /^(done|blocked|needs-decision|failed):/.exec(privatePayload.text)?.[1] : undefined;
   if (result.rows[0] && input.reason === 'report' && reportStatus) {
     await db.query(`WITH superseded AS (
-      SELECT (terminal.ended).* FROM (SELECT beeline_end_agent_turn(earlier.id,earlier.generation_id,'cancelled','superseded_report',NULL) ended FROM agent_commands earlier WHERE earlier.room_id=$1 AND earlier.agent_id=$2 AND earlier.id<>$3
+      SELECT (terminal.ended).* FROM (SELECT beeline_finish_agent_command(earlier.id,'cancelled','superseded_report',NULL) ended FROM agent_commands earlier WHERE earlier.room_id=$1 AND earlier.agent_id=$2 AND earlier.id<>$3
         AND EXISTS(SELECT 1 FROM rooms_mcp_members app WHERE app.member_id=$2)
         AND EXISTS(SELECT 1 FROM rooms origin WHERE origin.id::text=$5 AND origin.parent_id IS NOT NULL)
         AND earlier.reason='report' AND earlier.private_payload->>'kind'='report'
@@ -778,11 +803,8 @@ export { CORNER_AGENT_UNREACHABLE_CARD_TYPE } from './agent-command-route-agent-
 export { CORNER_MERGE_YES_CARD_TYPE } from './agent-command-route-agent-result.js';
 export { lockAgentCommandQueue } from './agent-command-queue.js';
 export { dropQueuedOrdersForStop } from './agent-command-queue.js';
-export { StaleWakeClaimRefused } from './agent-command-route-agent-result.js';
-export { claimAgentCommand } from './agent-command-route-agent-result.js';
-export { claimMcpOrder } from './agent-command-route-agent-result.js';
 export { dismissAgentCommandWakes } from './agent-command-route-agent-result.js';
-export { releaseUnreportedMcpOrder } from './agent-command-route-agent-result.js';
+export { selectMcpOrder } from './agent-command-route-agent-result.js';
 export { authorizeCommandOutput } from './agent-command-route-agent-result.js';
 export { readAgentCommands } from './agent-command-read-agent-commands.js';
 export { commandInbox } from './agent-command-read-agent-commands.js';

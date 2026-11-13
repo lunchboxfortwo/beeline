@@ -4,7 +4,6 @@ import { cornerOpeningSql, cornerOpenedFromSql } from './corner-opening.js';
 import { cornerCommanderBriefSql, cornerCommanderIdSql } from './corner-commander.js';
 import { cornerWaitingReportSql } from './corner-waiting-report.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
-import { commandOwnerLiveSql } from './turn-ownership.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { normalizeAgentAsk } from './tray-approval-ask.js';
 import { createHash, randomBytes } from 'node:crypto';
@@ -194,7 +193,7 @@ export async function sendOrder(
 /**
  * An agent stops the running turn of an agent it commands: the turn runs its
  * own order, or it runs in a corner this agent opened. The stop reuses the
- * tagged Stop: cancel the turn, enqueue the helper Stop, and drop the
+ * tagged Stop: cancel the turn's queue items (its helper sees them gone), and drop the
  * orderer's older queued orders. An order sent after this call runs next.
  */
 export async function stopCommandedTurn(
@@ -225,11 +224,9 @@ export async function stopCommandedTurn(
     `SELECT command.* FROM agent_turns turn
      JOIN agent_commands command ON command.room_id=turn.room_id
        AND command.agent_id=turn.agent_id AND command.turn_request_id=turn.request_id
-       AND command.action IN ('input','resume')
+       AND command.action='input'
      WHERE turn.room_id=$1 AND turn.agent_id=$2 AND turn.status='working'
-       AND command.state='claimed' AND ${commandOwnerLiveSql('command')}
-       AND command.generation_id=turn.generation_id
-       AND turn.generation_id NOT LIKE 'pending:%'
+       AND command.state='pending'
      ORDER BY turn.created_at DESC,command.created_at DESC LIMIT 1 FOR UPDATE OF command`,
     [address, worker.id])).rows[0];
   if (!running)
@@ -241,17 +238,10 @@ export async function stopCommandedTurn(
   if (!ordered && !commandsCorner)
     throw new CommandRefusalError(
       'stop refused: you did not order this turn and you do not command this corner; nothing was stopped', 403);
-  await createAgentCommand(db, {
-    id: createHash('sha256').update(`agent-stop:${command.id}:${running.id}`).digest('hex'),
-    roomId: address, agentId: worker.id, sourceMessageId: null, turnRequestId: running.turn_request_id,
-    action: 'stop', reason: 'agent_stop', parent: running, retainDepth: true,
-    privatePayload: { text: 'Stop the running turn for the commander.', authorId: agentId,
-      fromRoomId: command.room_id, kind: 'lifecycle' },
-  });
   const dropped = await dropQueuedOrdersForStop(db, running);
   await db.query(
-    `SELECT (terminal.ended).* FROM (SELECT beeline_end_agent_turn(agent_commands.id,agent_commands.generation_id,'cancelled',NULL,NULL) ended FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3
-       AND action IN ('input','resume') AND state IN ('pending','claimed')) terminal`,
+    `SELECT (terminal.ended).* FROM (SELECT beeline_finish_agent_command(agent_commands.id,'cancelled','stop',NULL) ended FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3
+       AND action='input' AND state='pending') terminal`,
     [address, worker.id, running.turn_request_id]);
   // Approved by lunchboxfortwo: "@commander stopped @worker's running turn".
   await systemLine(db, {
@@ -696,28 +686,3 @@ export async function commanderReportAddress(db: SqlDatabase, roomId: string, co
   return { recipient, returnRoom, parent, origin, incoming };
 }
 
-/** Only durable waits belonging to this execution can discharge an empty order. */
-export async function hasOrderContinuation(database: SqlDatabase, command: CommandRow): Promise<boolean> {
-  const result = await database.query(
-    `SELECT 1 FROM agent_commands current WHERE current.id=$1 AND (
-       EXISTS(SELECT 1 FROM agent_commands child JOIN rooms destination ON destination.id=child.room_id
-         WHERE child.parent_command_id=current.id AND child.state IN ('pending','claimed')
-           AND destination.archived_at IS NULL AND child.created_at>=current.claimed_at
-           AND (child.private_payload->>'kind'='order' OR child.action='resume'
-             OR (child.reason='report' AND child.agent_id=current.agent_id)))
-       OR EXISTS(SELECT 1 FROM agent_grants grant_row WHERE grant_row.command_id=current.id
-         AND grant_row.status='pending' AND grant_row.superseded_at IS NULL AND grant_row.created_at>=current.claimed_at
-         AND (grant_row.expires_at IS NULL OR grant_row.expires_at>now()))
-       OR EXISTS(SELECT 1 FROM connector_offers offer WHERE offer.command_id=current.id
-         AND offer.status IN ('pending','connecting') AND offer.created_at>=current.claimed_at)
-       OR EXISTS(SELECT 1 FROM messages approval WHERE approval.card_type='squire-approval'
-         AND approval.card->>'commandId'=current.id AND approval.card->>'generationId'=current.generation_id
-         AND NOT EXISTS(SELECT 1 FROM messages decision WHERE decision.card_type='squire-approval-decision'
-           AND decision.card->>'approvalId'=approval.card->>'approvalId'
-           AND decision.card->>'agentId'=current.agent_id)
-         AND (approval.card->>'expiresAt')::bigint>
-           extract(epoch FROM now())*1000)
-     )`, [command.id],
-  );
-  return Boolean(result.rowCount);
-}

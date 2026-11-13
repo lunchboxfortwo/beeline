@@ -463,66 +463,24 @@ export type RetractLiveOutputInput = TurnOutputAuthority &
     readonly kind: 'draft' | 'thought';
   };
 
+/**
+ * Diagnostics written after an item's answer: trace and usage. It never
+ * changes the item; a failure to write it is ignored.
+ */
 export type PostTurnReceiptInput = AgentRoomInput & {
-  /** Invocation diagnostics and usage only; an unanswered command stays claimed. */
-  readonly diagnosticsOnly?: boolean;
-  /** Current owner ends model-dependent work without claiming provider failure
-   * or delivery. An unreadable private journal ends only owner authority, not provider outcome. */
-  readonly modelOwnerEnd?: Readonly<{ requestId: string } | { journalUnavailable: true }>;
-  readonly trace?: TurnReplay;
   readonly requestId: string;
-  /**
-   * `cancelled` is TERMINAL and wins: once the requester has stopped a turn,
-   * no later receipt for that request may reopen or re-settle it, whichever
-   * party writes it.
-   */
-  readonly status: 'working' | 'complete' | 'failed' | 'cancelled';
-  /**
-   * A successful turn that intentionally produced no Room message. The server
-   * records that outcome so it cannot be mistaken for a vanished or failed
-   * answer. Omitted for ordinary replies and card-backed handoffs.
-   */
-  readonly completionKind?: 'no-reply';
-  readonly generationId?: string;
-  /** Refreshes an existing working receipt; never starts or resurrects a turn. */
-  readonly heartbeat?: boolean;
-  /** Complete failure diagnostic, including child stderr (no stack, secrets scrubbed), sent only with `failed`. */
+  readonly trace?: TurnReplay;
+  /** How the delivery ended, for the trace only. */
+  readonly outcome?: 'answered' | 'silent' | 'stopped' | 'failed';
+  /** Failure diagnostic (no stack, secrets scrubbed), for the trace only. */
   readonly reason?: string;
-  /**
-   * The turn's REAL prompt token cost as the harness itself reported it (pi's
-   * session record: uncached input + cache reads + cache writes), and the exact
-   * byte length of the prompt that produced it. Optional because most harnesses
-   * expose no usage at all; absent is "unknown", never zero, and the rollout
-   * budget gate falls back to its byte estimate rather than inventing a number.
-   */
   readonly inputTokens?: number;
   readonly promptBytes?: number;
-  /** Sum of recorded prompt usage across every model call and attempt in this turn. */
   readonly totalInputTokens?: number;
-  /**
-   * Output tokens the harness reported for this turn. Optional, so an older
-   * daemon that omits it leaves the turn unmeasured instead of zero.
-   */
   readonly outputTokens?: number;
-  /** Calls included in the total, and calls whose usage was unavailable. */
   readonly modelCalls?: number;
   readonly modelCallsWithoutUsage?: number;
-  /** Distinct tool calls this turn made, counted from the harness's own stream. */
   readonly toolCalls?: number;
-  /** Typed Room-safe classification; detail stays in the daemon log. */
-  readonly reasonKind?:
-    | 'hiccup'
-    | 'wrong-model'
-    | 'allowance-spent'
-    | 'not-signed-in'
-    | 'workspace-failure'
-    | 'helper-out-of-date'
-    | 'update-interrupted'
-    | 'process-exited'
-    | 'offline'
-    | 'context-overflow'
-    | 'resource-limit'
-    | 'model-selection-unavailable';
 };
 
 export type PostAgentActivityInput = TurnOutputAuthority &

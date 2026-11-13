@@ -13,7 +13,7 @@ import { identityFromKey } from './runtime.js';
 import { writeUpdateState } from './self-update.js';
 import { requestMachine } from './machine-control.js';
 
-it.each(['idle', 'force'] as const)('exits for a verified %s update without waiting for retained local clients', async mode => {
+it.each(['notified', 'force'] as const)('exits for a verified %s update without waiting for agents or retained local clients', async mode => {
   const root = await mkdtemp(join(tmpdir(), 'beeline-handoff-'));
   const layout = {
     libDir: join(root, 'lib/beeline'),
@@ -84,8 +84,6 @@ it.each(['idle', 'force'] as const)('exits for a verified %s update without wait
   let stageNew = false;
   let finishPrepare!: () => void;
   const forcePreparation = new Promise<void>(done => { finishPrepare = done; });
-  const interrupt = vi.fn();
-  const quiesce = vi.fn();
   const helper = runMachineHelper({
     configPaths: [config],
     signals,
@@ -106,16 +104,10 @@ it.each(['idle', 'force'] as const)('exits for a verified %s update without wait
     runAgent: async (_path, host, signal) => {
       const controller = new AbortController();
       const lifecycle = new AgentLifecycle({ controller });
-      const core = {
-        activeTurnCount: () => mode === 'force' ? 1 : 0,
-        quiesceForUpdate: quiesce,
-        interruptForServerMinimum: interrupt,
-      } as unknown as HostedAgent['core'];
       const detach = host.attach({
         agentId: identity.publicKey,
         runtimeDir: root,
         lifecycle,
-        core,
       });
       const channel = host
         .machineLink(`http://127.0.0.1:${address.port}`)
@@ -163,8 +155,6 @@ it.each(['idle', 'force'] as const)('exits for a verified %s update without wait
     expect(connected).toBe(false);
     expect(cleanupFinished).toBe(false);
     expect(retained.destroyed).toBe(false);
-    expect(quiesce).toHaveBeenCalledTimes(1);
-    expect(interrupt).toHaveBeenCalledTimes(mode === 'force' ? 1 : 0);
   } finally {
     finishPrepare();
     retained.resume();

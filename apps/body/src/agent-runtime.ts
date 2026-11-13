@@ -17,7 +17,7 @@ import {
 import { ConnectorAssignmentLoop } from './connector-assignments.js';
 import { RegistryMcpHostBroker, registryMcpBrokerSocketPath } from './registry-mcp.js';
 import { BrowserShareHost, browserShareHostPath } from './browser-share-host.js';
-import { ThinDaemonCore } from './thin-core.js';
+import { AgentRunner } from './agent-runner.js';
 import { AgentLifecycle, type AgentExitReason } from './helper-lifecycle.js';
 import { migrateLegacyDaemonTransport } from './legacy-daemon-migration.js';
 import { activateDaemonTransport, DaemonApiError } from './daemon-api-client.js';
@@ -42,7 +42,6 @@ export interface HostedAgent {
   readonly agentId: string;
   readonly runtimeDir: string;
   readonly lifecycle: AgentLifecycle;
-  readonly core: ThinDaemonCore;
 }
 
 /** What one agent runtime needs from the machine helper that hosts it. */
@@ -264,12 +263,11 @@ export async function runAgentRuntime(
       // The one per-call gate a Registry route has: the server's existing
       // requester-aware resource approval, asked here because the broker
       // socket — not the harness MCP client — is what every caller reaches.
-      async ({ roomId, requestId, generationId, target, consume, operation }) =>
+      async ({ roomId, requestId, target, consume, operation }) =>
         (
           await daemonApi.execute('authorizeResourceCall', {
             roomId,
             requestId,
-            generationId,
             target,
             consume,
             ...(operation ? { operation } : {}),
@@ -285,17 +283,14 @@ export async function runAgentRuntime(
     );
     await browserShareHost.start();
     config.browserShareHostSocket = browserShareHost.socketPath;
-    const core = new ThinDaemonCore(runtime, configPath, config, {
+    const core = new AgentRunner(runtime, configPath, config, {
       daemonApi,
       onConfigChanged: refreshCatalog,
     });
-    leaveHost = host.attach({ agentId, runtimeDir, lifecycle, core });
+    leaveHost = host.attach({ agentId, runtimeDir, lifecycle });
     daemonApi.setForceUpdateListener((minVersion) => host.requestForceUpdate(minVersion));
     daemonApi.setHelperReleaseListener(({ version, sha }) => {
       host.notifyReleaseAvailable(`${version}:${sha}`);
-      host.tickUpdate();
-    });
-    core.setInteractiveIdleListener(() => {
       host.tickUpdate();
     });
     const result = await core.run({

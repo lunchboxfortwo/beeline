@@ -2,7 +2,6 @@ import { dropQueuedOrdersForStop } from './agent-command-queue.js';
 import { lockAgentCommandQueue } from './agent-command-queue.js';
 import { endAgentTurn } from './agent-turn-end.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
-import { commandOwnerLiveSql } from './turn-ownership.js';
 import { CornerAccessDatabase } from './corner-access-database.js';
 import { recordMcpMention, recordMcpMemberWebhook } from './rooms-mcp-members.js';
 import { AGENT_SIGN_IN_SERVICE_LABELS, agentSignInUsesKey, isAgentSignInHarness } from '@beeline/api-contract/daemon';
@@ -172,12 +171,10 @@ export async function routeTaggedLifecycleCommand(
        FROM agent_turns turn
        JOIN agent_commands command ON command.room_id=turn.room_id
          AND command.agent_id=turn.agent_id AND command.turn_request_id=turn.request_id
-         AND command.action IN ('input','resume')
+         AND command.action='input'
        JOIN messages root ON root.id=command.root_source_message_id
        WHERE turn.room_id=$1 AND turn.agent_id=$2 AND turn.status='working'
-         AND command.state='claimed' AND ${commandOwnerLiveSql('command')}
-         AND command.generation_id=turn.generation_id
-         AND turn.generation_id NOT LIKE 'pending:%'
+         AND command.state='pending'
        ORDER BY turn.created_at DESC,command.created_at DESC LIMIT 1`,
       [source.room_id, target.agent_id],
     )
@@ -234,21 +231,11 @@ export async function routeTaggedLifecycleCommand(
         active.command_id,
       ])
     ).rows[0]!;
-    await createAgentCommand(db, {
-      roomId: source.room_id,
-      agentId: target.agent_id,
-      sourceMessageId: sourceId,
-      turnRequestId: active.request_id,
-      action: 'stop',
-      reason: 'tagged_lifecycle_stop',
-      parent,
-      retainDepth: true,
-    });
     if (!await endAgentTurn(db, parent, 'cancelled', 'stop')) throw new Error('running turn not found');
     const dropped = await dropQueuedOrdersForStop(db, parent);
     await db.query(
-      `SELECT (terminal.ended).* FROM (SELECT beeline_end_agent_turn(agent_commands.id,agent_commands.generation_id,'cancelled',NULL,NULL) ended FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3
-         AND action IN ('input','resume') AND state IN ('pending','claimed')) terminal`,
+      `SELECT (terminal.ended).* FROM (SELECT beeline_finish_agent_command(agent_commands.id,'cancelled','stop',NULL) ended FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3
+         AND action='input' AND state='pending') terminal`,
       [source.room_id, target.agent_id, active.request_id],
     );
     await line(systemMessage("agent-command.stopped-its-running-turn"), dropped ? systemMessage("agent-command.queued-dropped", dropped, dropped === 1 ? systemMessage("agent-command.order") : systemMessage("agent-command.orders")) : undefined);
@@ -261,7 +248,7 @@ export async function routeTaggedLifecycleCommand(
          JOIN agent_turns turn ON turn.room_id=command.room_id
            AND turn.agent_id=command.agent_id AND turn.request_id=command.turn_request_id
          WHERE command.room_id=$1 AND command.agent_id=$2
-           AND command.action IN ('input','resume') AND turn.status='failed'
+           AND command.action='input' AND turn.status='failed'
          ORDER BY turn.created_at DESC,command.created_at DESC LIMIT 1 FOR UPDATE OF command`,
         [source.room_id, target.agent_id],
       )
@@ -274,7 +261,7 @@ export async function routeTaggedLifecycleCommand(
       agentId: target.agent_id,
       sourceMessageId: sourceId,
       turnRequestId: failed.turn_request_id,
-      action: 'resume',
+      resume: true,
       reason: 'tagged_lifecycle_retry',
       parent: failed,
       retainDepth: true,
@@ -391,7 +378,7 @@ export async function routeHumanMessage(db: SqlDatabase, sourceId: string): Prom
       if (agent.owner_id !== source.author_id)
         throw new Error('only the agent owner may generate its avatar (access denied)');
       const active = await db.query(
-        `SELECT 1 FROM agent_commands WHERE agent_id=$1 AND avatar_job AND state IN ('pending','claimed')`,
+        `SELECT 1 FROM agent_commands WHERE agent_id=$1 AND avatar_job AND state='pending'`,
         [target],
       );
       if (active.rowCount) throw new Error('avatar generation already active (conflict)');

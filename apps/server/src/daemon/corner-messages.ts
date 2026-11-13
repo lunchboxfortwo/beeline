@@ -20,9 +20,7 @@ import { Input, id, seconds, AccessDeniedError, Output } from './values.js';
     const removed = [...repaired.removed];
     if (!text) throw new CommandRefusalError('post refused: reasoning block contains no public reply', 400);
     await daemonPostAddressAccess(ctx, input.cornerId, agentId);
-    const command = ctx.authorizedCommand ?? await authorizeCommandOutput(
-      ctx.database, input.roomId, agentId, input.requestId, input.generationId,
-    );
+    const command = ctx.authorizedCommand ?? await authorizeCommandOutput(ctx.database, input.roomId, agentId, input.requestId);
     const dropped = await mentionHandlesToDrop(ctx.database, input.cornerId, agentId, text,
       command.room_id === input.cornerId.toLowerCase() ? command : undefined);
     if (dropped.length) {
@@ -48,20 +46,20 @@ import { Input, id, seconds, AccessDeniedError, Output } from './values.js';
       await ctx.database.query<{ id: string; created_at: Date }>(
         `WITH pending AS (
            DELETE FROM agent_pending_attachments
-           WHERE room_id=$5 AND agent_id=$3 AND request_id=$6 AND generation_id=$7
+           WHERE room_id=$5 AND agent_id=$3 AND request_id=$6
            RETURNING url,name,mime_type,size,created_at,id
          )
          INSERT INTO messages(id,room_id,author_id,text,presentation,agent_model,request_id,legacy_event,attachments,reply_to_message_id,root_message_id)
          SELECT COALESCE((SELECT prior.id FROM messages prior
-           WHERE prior.id=$10 AND prior.room_id=$2 AND prior.author_id=$3
-             AND prior.text=$4 AND prior.reply_to_message_id=$8),
-           CASE WHEN $10::text IS NOT NULL AND NOT EXISTS(SELECT 1 FROM messages WHERE id=$10)
-             THEN $10 ELSE $1 END),
+           WHERE prior.id=$9 AND prior.room_id=$2 AND prior.author_id=$3
+             AND prior.text=$4 AND prior.reply_to_message_id=$7),
+           CASE WHEN $9::text IS NOT NULL AND NOT EXISTS(SELECT 1 FROM messages WHERE id=$9)
+             THEN $9 ELSE $1 END),
            room.id,$3,$4,'message',(SELECT selected_model FROM agents WHERE agent_id=$3),
            CASE WHEN room.id=$5::uuid THEN $6 ELSE NULL END,
-           jsonb_build_object('turnGenerationId',$7::text),
+           '{}'::jsonb,
            COALESCE((SELECT jsonb_agg(jsonb_build_object('url',url,'name',name,'mimeType',mime_type,'size',size)
-             ORDER BY created_at,id) FROM pending),'[]'::jsonb),$8,$9
+             ORDER BY created_at,id) FROM pending),'[]'::jsonb),$7,$8
          FROM rooms room WHERE room.id=$2 AND room.archived_at IS NULL
          ON CONFLICT(id) DO UPDATE SET id=messages.id
          RETURNING id,created_at`,
@@ -69,14 +67,10 @@ import { Input, id, seconds, AccessDeniedError, Output } from './values.js';
         // retry of that text keeps its id, while a new post gets its own row.
         // Keep the first post on the shared mention id so an automatic final
         // reply or a retry in another turn cannot deliver the answer again.
-        [key ? mentionReplyId(`${key}:${text}`) : id(), input.cornerId, agentId, text, input.roomId, input.requestId, input.generationId, replyTo ?? null, root, key ? mentionReplyId(key) : null],
+        [key ? mentionReplyId(`${key}:${text}`) : id(), input.cornerId, agentId, text, input.roomId, input.requestId, replyTo ?? null, root, key ? mentionReplyId(key) : null],
       )
     ).rows[0];
     if (!saved) throw new CommandRefusalError('post refused: address is archived', 409);
-    if (command.private_payload) await ctx.database.query(
-      `UPDATE agent_commands SET private_payload=private_payload ||
-        jsonb_build_object('publicPostId',$2::text,'publicPostGenerationId',$3::text) WHERE id=$1`,
-      [command.id, saved.id, command.generation_id]);
     const delivery = await routeAgentResult(ctx.database, command, saved.id, { roomId: input.cornerId, agentId });
     ctx.live.publish({ type: 'invalidate', roomId: input.cornerId, reason: 'message', agentId });
     return { id: saved.id, createdAt: seconds(saved.created_at), effect: 'conversation',

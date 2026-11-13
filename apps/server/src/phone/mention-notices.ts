@@ -5,6 +5,8 @@ import { accessNoticeBucket } from '@beeline/api-contract/agent-access';
 import { resolveCurrentMemberMentions } from '../message-mentions.js';
 import { type SqlDatabase } from '../database.js';
 import { systemLine } from '../system-line.js';
+import { freeAgentReachableSql } from '../free-agents.js';
+import { SERVER_LEASE_EXPIRY_MS } from '../connection-presence.js';
 import type { PhoneContext } from './context.js';
 import { phoneReadLiveDelta } from './live-reads.js';
 import { mentionNoticeId } from './values.js';
@@ -33,7 +35,6 @@ import { phoneProjectPendingAgentCommands } from './message-enrichment.js';
          FROM agent_commands command
          JOIN agent_turns turn ON turn.room_id=command.room_id
            AND turn.agent_id=command.agent_id AND turn.status='working'
-           AND COALESCE(turn.generation_id,'') NOT LIKE 'pending:%'
            AND turn.request_id<>command.turn_request_id
          WHERE $3::boolean AND command.source_message_id=$2 AND command.action='input'
          ORDER BY command.agent_id
@@ -90,7 +91,9 @@ import { phoneProjectPendingAgentCommands } from './message-enrichment.js';
     return phoneProjectPendingAgentCommands(ctx, commands.rows);
   }
 
-  /** The sole unsolicited agent notice: an external member has no delivery route. */
+  /** The sole unsolicited agent notice: an addressed agent has no live
+   * delivery route (an external member without one, or a helper agent whose
+   * machine is not connected). Its queue item waits; this line says so. */
   export async function phoneNoteUnansweredMentions(ctx: PhoneContext,
     roomId: string,
     senderId: string,
@@ -103,20 +106,26 @@ import { phoneProjectPendingAgentCommands } from './message-enrichment.js';
         "SELECT 1 FROM identities WHERE id=$1 AND kind='human'", [senderId],
       );
       if (!human.rowCount) return;
-      const agents = (await ctx.database.query<{ agent_id: string; agent_name: string }>(
-        `SELECT identity.id agent_id,identity.name agent_name
+      const agents = (await ctx.database.query<{ agent_id: string; agent_name: string; external: boolean; connected: boolean }>(
+        `SELECT identity.id agent_id,identity.name agent_name,external.member_id IS NOT NULL external,
+           ${freeAgentReachableSql('identity.id')} OR EXISTS(SELECT 1 FROM agent_connections connection
+             JOIN live_server_instances server ON server.instance_id=connection.instance_id
+               AND server.renewed_at>clock_timestamp()-interval '${SERVER_LEASE_EXPIRY_MS / 1000} seconds'
+             WHERE connection.agent_id=identity.id AND connection.released_at IS NULL) connected
          FROM identities identity
-         JOIN rooms_mcp_members external ON external.member_id=identity.id
+         LEFT JOIN rooms_mcp_members external ON external.member_id=identity.id
          JOIN room_access member ON member.identity_id=identity.id
            AND member.room_id=$2 AND member.removed_at IS NULL
          WHERE identity.id=ANY($1::text[]) AND identity.kind='agent'`,
         [[...agentIds], roomId],
       )).rows;
-      const deliveries = await readMemberDeliveries(ctx.database, agents.map(agent => agent.agent_id));
+      const deliveries = await readMemberDeliveries(ctx.database, agents.filter(agent => agent.external).map(agent => agent.agent_id));
       const bucket = accessNoticeBucket(Date.now());
       for (const agent of agents) {
-        const delivery = deliveries.get(agent.agent_id)!;
-        const offline = delivery.mechanism ? delivery.state !== 'proved_ready' : delivery.offline;
+        const delivery = deliveries.get(agent.agent_id);
+        const offline = delivery
+          ? delivery.mechanism ? delivery.state !== 'proved_ready' : delivery.offline
+          : !agent.connected;
         if (!offline) continue;
         await systemLine(ctx.database, {
           roomId,
@@ -128,11 +137,11 @@ import { phoneProjectPendingAgentCommands } from './message-enrichment.js';
         });
       }
     } catch (error) {
-      console.error('[server] could not record external-agent offline notice:', error);
+      console.error('[server] could not record agent offline notice:', error);
     }
   }
 
-  /** Resolve current addressed agents for the external offline notice. */
+  /** Resolve current addressed agents for the offline notice. */
   export async function phoneUnansweredMentionTargets(ctx: PhoneContext,
     roomId: string,
     author: string,

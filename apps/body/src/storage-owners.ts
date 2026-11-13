@@ -216,7 +216,7 @@ export function publishStorageFacts(supervisorRoot: string, states: readonly Sto
 /** Terminal archive facts apply to every local member, including stopped agents.
  * A host Room lease fences all schedulers; OS evidence still protects children. */
 export async function reclaimArchivedMemberStorage(supervisorRoot: string, states: readonly StorageRoomState[], options: WholeStorageOptions = {}): Promise<void> {
-  const { AgentProcesses } = await import('./agent-process.js');
+  const { HostPlaces } = await import('./agent-process.js');
   const archived = states.filter(state => state.archived === true);
   if (!archived.length) return;
   const byId = new Map(archived.map(state => [state.roomId, state]));
@@ -224,7 +224,7 @@ export async function reclaimArchivedMemberStorage(supervisorRoot: string, state
     const state = byId.get(owner.roomId);
     if (!state) continue;
     if (!options.dryRun) await rememberStorageOwner(supervisorRoot, { ...owner, archived: true, ended: true, landedHeadSha: state.landedHeadSha });
-    await AgentProcesses.withIdleHostRoom(owner.roomId, async () => {
+    await HostPlaces.withIdleHostRoom(owner.roomId, async () => {
       await reclaimOwnedCheckout(supervisorRoot, { ...owner, archived: true, ended: true, endedAt: owner.endedAt ?? Date.now() }, { ...options, landedHeadSha: state.landedHeadSha });
     });
   }
@@ -232,7 +232,7 @@ export async function reclaimArchivedMemberStorage(supervisorRoot: string, state
   // never created or its owner record is missing. Stop attributed children
   // before the generic storage reclaimer can defer an in-use home.
   for (const state of archived) {
-    await AgentProcesses.withIdleHostRoom(state.roomId, async () => {
+    await HostPlaces.withIdleHostRoom(state.roomId, async () => {
       await removeArchivedCornerData(supervisorRoot, state.roomId,
         resolve(supervisorRoot, 'beeline/corners', state.roomId), options);
     });
@@ -243,7 +243,7 @@ export async function reclaimArchivedMemberStorage(supervisorRoot: string, state
     await reclaimHelperStorage({ runtimeDir: runtimeDirectory(supervisorRoot, agentId), readStates: async () => archived,
       ...options, relatedRoots: roomId => [resolve(supervisorRoot, 'beeline/corners', roomId),
         ...owners.filter(owner => owner.roomId === roomId).map(owner => resolve(supervisorRoot, 'beeline', owner.kind, owner.itemId))],
-      withIdleRoom: (roomId, task) => AgentProcesses.withIdleHostRoom(roomId, task),
+      withIdleRoom: (roomId, task) => HostPlaces.withIdleHostRoom(roomId, task),
     });
   }
 }
@@ -253,7 +253,7 @@ export async function reclaimArchivedMemberStorage(supervisorRoot: string, state
  * commands. Transport/auth uncertainty cannot retire an owner. */
 export async function pruneStoppedAgentStorage(supervisorRoot: string, options: WholeStorageOptions = {}): Promise<void> {
   const { isAgentStopped } = await import('./runtime.js');
-  const { AgentProcesses } = await import('./agent-process.js');
+  const { HostPlaces } = await import('./agent-process.js');
   for (const agentId of await readdir(resolve(supervisorRoot, 'beeline/agents')).catch(() => [])) {
     if (!/^[a-f0-9]{64}$/.test(agentId)) continue;
     const runtimeDir = runtimeDirectory(supervisorRoot, agentId);
@@ -284,7 +284,7 @@ export async function pruneStoppedAgentStorage(supervisorRoot: string, options: 
         if (!options.dryRun) { await markAgentStorageEnded(runtime); await pruneEndedOwnerStorage(supervisorRoot, options); }
       } else {
         await reclaimHelperStorage({ runtimeDir, readStates: async () => answer.storageRooms, ...options,
-          withIdleRoom: async (roomId, task) => AgentProcesses.hostStoragePaused ? (await task(), true) : AgentProcesses.withIdleHostRoom(roomId, task),
+          withIdleRoom: async (roomId, task) => HostPlaces.hostStoragePaused ? (await task(), true) : HostPlaces.withIdleHostRoom(roomId, task),
         });
       }
     } catch (error) { console.warn(`[helper] stopped agent storage retained ${agentId}:`, error instanceof SyntaxError ? 'invalid runtime/lifecycle JSON; retained' : error instanceof Error ? error.message : 'read failed'); }
@@ -294,7 +294,7 @@ export async function pruneStoppedAgentStorage(supervisorRoot: string, options: 
 /** Code copies keep source and unpublished work, including archived dirty trees. Only whole ignored build
  * objects qualify, and a tracked descendant preserves even an ignored parent. */
 export async function pruneOpenCheckoutObjects(supervisorRoot: string, states: readonly StorageRoomState[], options: WholeStorageOptions = {}, discovered: readonly StorageOwner[] = []): Promise<void> {
-  const { AgentProcesses } = await import('./agent-process.js');
+  const { HostPlaces } = await import('./agent-process.js');
   const byId = new Map(states.map(state => [state.roomId, state]));
   const owners = [...new Map([...(await readStorageOwners(supervisorRoot)), ...discovered].map(owner => [`${owner.kind}/${owner.itemId}`, owner])).values()];
   for (const owner of owners) {
@@ -317,18 +317,18 @@ export async function pruneOpenCheckoutObjects(supervisorRoot: string, states: r
         });
       }
     };
-    if (options.dryRun || AgentProcesses.hostStoragePaused) await work();
-    else await AgentProcesses.withIdleHostRoom(owner.roomId, work);
+    if (options.dryRun || HostPlaces.hostStoragePaused) await work();
+    else await HostPlaces.withIdleHostRoom(owner.roomId, work);
   }
 }
 
 /** Persisted archive authority outlives Room access and agent credentials. */
 export async function pruneArchivedCheckoutStorage(supervisorRoot: string, options: WholeStorageOptions = {}): Promise<void> {
   await pruneOpenCheckoutObjects(supervisorRoot, [], options);
-  const { AgentProcesses } = await import('./agent-process.js');
+  const { HostPlaces } = await import('./agent-process.js');
   for (const owner of await readStorageOwners(supervisorRoot)) {
     if (owner.archived !== true) continue;
-    await AgentProcesses.withIdleHostRoom(owner.roomId, async () => {
+    await HostPlaces.withIdleHostRoom(owner.roomId, async () => {
       await reclaimOwnedCheckout(supervisorRoot, owner, options);
     });
   }

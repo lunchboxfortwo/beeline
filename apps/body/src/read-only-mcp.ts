@@ -376,17 +376,14 @@ export const commandRequest = new AsyncLocalStorage<string | undefined>();
 export async function activeCommandContext(): Promise<{
   roomId: string;
   requestId: string;
-  generationId: string;
   taskId?: string;
 }> {
   const value = await readTurnContextFile();
   const requestId = commandRequest.getStore() ?? value.requestId;
   const commands = value.commands as {requestId:string;commandReason:string;taskId:string}[] | undefined;
-  if (!value.roomId || !requestId || !value.generationId ||
-      (commands?.length && !commands.some(command => command.requestId === requestId)))
-    throw new Error('no active server command for requestId');
+  if (!value.roomId || !requestId) throw new Error('no item is being answered here');
   const taskId = commands?.find(command => command.requestId === requestId)?.taskId ?? value.taskId;
-  return {roomId:String(value.roomId),requestId:String(requestId),generationId:String(value.generationId),
+  return {roomId:String(value.roomId),requestId:String(requestId),
     ...(typeof taskId === 'string' ? {taskId} : {})};
 }
 
@@ -832,7 +829,7 @@ export async function daemonUploadArtifact(
 
 // MCP requests may run concurrently. Register artifact work before the first
 // await so an immediately following report cannot overtake its upload/queue.
-export let artifactGeneration: unknown;
+export let artifactItem: unknown;
 
 
 
@@ -841,8 +838,8 @@ export async function callCommandTool(name: string, args: JsonObject, toolCallId
   const contextFile = process.env.BEELINE_TURN_CONTEXT_FILE;
   const context = contextFile ? JSON.parse(readFileSync(contextFile, 'utf8')) as Record<string, unknown> : {};
   const key = JSON.stringify([process.env.BEELINE_DAEMON_BASE_URL, process.env.BEELINE_DAEMON_ROOM_ID,
-    context.roomId, commandRequest.getStore() ?? context.requestId, context.generationId]);
-  if (artifactGeneration !== context.generationId) { turnArtifacts.clear(); artifactGeneration = context.generationId; }
+    context.roomId, commandRequest.getStore() ?? context.requestId, context.itemId]);
+  if (artifactItem !== context.itemId) { turnArtifacts.clear(); artifactItem = context.itemId; }
   const artifacts = turnArtifacts.get(key) ?? {uploads: []};
   turnArtifacts.set(key, artifacts);
   if (name === 'post_artifact') {

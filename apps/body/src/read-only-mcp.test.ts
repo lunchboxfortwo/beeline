@@ -543,16 +543,16 @@ m9_describe('beeline-agent request_grant', () => {
   });
 
 
-  m9_it('tells an instantly approved /dev/ device grant that this same turn continues with it', async () => {
+  m9_it('tells an instantly approved /dev/ device grant that its next message has the device', async () => {
     const device = await m9_requestGrant(
       { kind: 'device', target: '/dev/kvm', purpose: 'run the Android emulator', reason: 'run the Android emulator' },
       scope8.deps({ grantId: 'g-4', status: 'approved', auto: true }),
     );
     m9_expect(device).toBe(
-      'approved: use /dev/kvm [grant g-4]. A running session cannot add a device, so end your turn now with one short line; this same turn continues straight away in a session that has /dev/kvm. Do not ask anyone to restart.',
+      'approved: use /dev/kvm [grant g-4]. A running session cannot add a device: say what you will do with /dev/kvm and end your answer; your next message runs in a session that has it.',
     );
     m9_expect(device).not.toContain('next session');
-    // The turn loop recognises exactly this reply and continues the turn.
+    // The runner recognises exactly this reply and starts a fresh session next.
     m9_expect(m9_approvedDeviceGrant([{ title: 'mcp__beeline-agent__request_grant', content: device }])).toBe(
       '/dev/kvm',
     );

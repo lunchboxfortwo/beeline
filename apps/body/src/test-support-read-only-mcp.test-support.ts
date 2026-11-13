@@ -143,7 +143,7 @@ import type { AgentCommand as m26_AgentCommand } from '@beeline/api-contract/dae
 import { callAgentTool as m26_callAgentTool } from "./read-only-mcp.js";
 
 
-import { CommandExecutionContext as m26_CommandExecutionContext } from "./server-command-intake.js";
+import { writeTurnContext as m26_writeTurnContext } from "./place-session.js";
 
 import { describe as mergedDescribe26 } from 'vitest';
 
@@ -218,7 +218,7 @@ import type { AgentCommand as m32_AgentCommand } from '@beeline/api-contract/dae
 import { agentToolsFor as m32_agentToolsFor, callAgentTool as m32_callAgentTool } from "./read-only-mcp.js";
 
 
-import { CommandExecutionContext as m32_CommandExecutionContext } from "./server-command-intake.js";
+import { writeTurnContext as m32_writeTurnContext } from "./place-session.js";
 
 import { describe as mergedDescribe32 } from 'vitest';
 
@@ -435,7 +435,7 @@ const appsIn = (text: string) => [...new Set(text.match(/beeline:[a-z_]+/g) ?? [
 
 function useEnvironment(corner: boolean) {
   const context = m24_join(m24_mkdtempSync(m24_join(m24_tmpdir(), 'place-capabilities-')), 'context.json');
-  m24_writeFileSync(context, JSON.stringify({ roomId: corner ? 'corner' : 'room', requestId: 'request', generationId: 'generation' }));
+  m24_writeFileSync(context, JSON.stringify({ roomId: corner ? 'corner' : 'room', requestId: 'request' }));
   for (const [key, value] of Object.entries({
     BEELINE_DAEMON_ROOM_ID: corner ? 'corner' : 'room',
     BEELINE_DAEMON_CORNER_ID: corner ? 'corner' : '',
@@ -497,7 +497,6 @@ export function fixtureScope23() {
       JSON.stringify({
         roomId: 'corner-room',
         requestId: 'request-1',
-        generationId: 'generation-1',
       }),
     );
     m25_vi.stubEnv('BEELINE_TURN_CONTEXT_FILE', context);
@@ -533,13 +532,13 @@ export function fixtureScope24() {
 const calls: Array<{ name: string; input: Record<string, unknown> }> = [];
 
 
-let context: m26_CommandExecutionContext;
+let context: { path: string };
 
 
 m26_beforeEach(async () => {
   calls.length=0;
-  context=new m26_CommandExecutionContext(m26_mkdtempSync(m26_join(m26_tmpdir(),'onboarding-tools-')));
-  await context.enter({roomId:'room-1',turnRequestId:'request-1',rootCommandId:'command-1'} as m26_AgentCommand);
+  context={path:m26_join(m26_mkdtempSync(m26_join(m26_tmpdir(),'onboarding-tools-')),'turn-context.json')};
+  await m26_writeTurnContext(context.path,{id:'item-1',roomId:'room-1',turnRequestId:'request-1',rootCommandId:'command-1',reason:'human_tag'} as m26_AgentCommand);
   for (const [key,value] of Object.entries({BEELINE_DAEMON_AGENT_ID:'agent-1',BEELINE_DAEMON_ROOM_ID:'room-1',BEELINE_DAEMON_BASE_URL:'http://localhost:1234',BEELINE_DAEMON_TOKEN:'test-token',BEELINE_TURN_CONTEXT_FILE:context.path})) m26_vi.stubEnv(key,value);
   m26_vi.stubGlobal('fetch', async (url:URL,init:RequestInit) => {
     calls.push({name:new URL(url).pathname.split('/').pop()!,input:JSON.parse(String(init.body))});
@@ -629,7 +628,7 @@ export function fixtureScope33() {
   m30_beforeEach(() => {
     home = m30_mkdtempSync(m30_join(m30_tmpdir(), 'beeline-usage-'));
     const context = m30_join(home, 'turn.json');
-    m30_writeFileSync(context, JSON.stringify({ roomId: 'room-1', requestId: 'r', generationId: 'g' }));
+    m30_writeFileSync(context, JSON.stringify({ roomId: 'room-1', requestId: 'r' }));
     m30_vi.stubEnv('BEELINE_TURN_CONTEXT_FILE', context);
     m30_vi.stubEnv('BEELINE_DAEMON_BASE_URL', 'http://daemon.test');
     m30_vi.stubEnv('BEELINE_DAEMON_TOKEN', 'daemon-only');
@@ -709,12 +708,12 @@ export function fixtureScope36() {
 
   const calls: { name: string; input: Record<string, unknown> }[] = [];
 
-  let context: m32_CommandExecutionContext;
+  let context: { path: string };
 
   m32_beforeEach(async () => {
     calls.length = 0;
-    context = new m32_CommandExecutionContext(m32_mkdtempSync(m32_join(m32_tmpdir(), 'workflow-tools-')));
-    await context.enter({ roomId: 'room-1', turnRequestId: 'request-1', rootCommandId: 'command-1' } as m32_AgentCommand);
+    context = { path: m32_join(m32_mkdtempSync(m32_join(m32_tmpdir(), 'workflow-tools-')), 'turn-context.json') };
+    await m32_writeTurnContext(context.path, { id: 'item-1', roomId: 'room-1', turnRequestId: 'request-1', rootCommandId: 'command-1', reason: 'human_tag' } as m32_AgentCommand);
     for (const [key, value] of Object.entries({
       BEELINE_DAEMON_AGENT_ID: 'agent-1', BEELINE_DAEMON_ROOM_ID: 'room-1',
       BEELINE_DAEMON_BASE_URL: 'http://localhost:1234', BEELINE_DAEMON_TOKEN: 'test-token',
@@ -736,12 +735,12 @@ export function fixtureScope37() {
 
   const calls: { name: string; input: Record<string, unknown> }[] = [];
 
-  let context: m32_CommandExecutionContext;
+  let context: { path: string };
 
   m32_beforeEach(async () => {
     calls.length = 0;
-    context = new m32_CommandExecutionContext(m32_mkdtempSync(m32_join(m32_tmpdir(), 'workflow-tools-corner-')));
-    await context.enter({ roomId: 'corner-1', turnRequestId: 'request-1', rootCommandId: 'command-1' } as m32_AgentCommand);
+    context = { path: m32_join(m32_mkdtempSync(m32_join(m32_tmpdir(), 'workflow-tools-corner-')), 'turn-context.json') };
+    await m32_writeTurnContext(context.path, { id: 'item-1', roomId: 'corner-1', turnRequestId: 'request-1', rootCommandId: 'command-1', reason: 'human_tag' } as m32_AgentCommand);
     for (const [key, value] of Object.entries({
       BEELINE_DAEMON_AGENT_ID: 'agent-1', BEELINE_DAEMON_ROOM_ID: 'parent-room',
       BEELINE_DAEMON_CORNER_ID: 'corner-1',
@@ -846,10 +845,9 @@ export { tmpdir as m9_tmpdir, tmpdir as m24_tmpdir, tmpdir as m25_tmpdir, tmpdir
 export { join as m9_join, join as m24_join, join as m25_join, join as m26_join, join as m30_join, join as m32_join, join as m34_join } from 'node:path';
 export { REQUESTABLE_AGENT_GRANT_KINDS as m9_REQUESTABLE_AGENT_GRANT_KINDS } from '@beeline/api-contract/agent-grants';
 export { resolveGrantCommand as m9_resolveGrantCommand } from './grant-script.js';
-export { approvedDeviceGrant as m9_approvedDeviceGrant, pendingGrantToolCall as m14_pendingGrantToolCall, resumePrompt as m14_resumePrompt } from './monolith-room-turn.js';
+export { approvedDeviceGrant as m9_approvedDeviceGrant, resumePrompt as m14_resumePrompt } from './place-prompt.js';
 export { MESSAGE_REACTION_EMOJIS as m10_MESSAGE_REACTION_EMOJIS } from '@beeline/api-contract/phone';
 export { assembleTurnPrompt as m24_assembleTurnPrompt } from './prompt-assembly.js';
-export { CommandExecutionContext as m26_CommandExecutionContext, CommandExecutionContext as m32_CommandExecutionContext } from './server-command-intake.js';
 export { beelineManagedSkills as m28_beelineManagedSkills } from './beeline-skill.js';
 export type { AgentGrantDeps as m7_AgentGrantDeps, AgentScheduleDeps as m8_AgentScheduleDeps, AgentGrantDeps as m9_AgentGrantDeps, GrantRunDeps as m9_GrantRunDeps, AgentScheduleDeps as m10_AgentScheduleDeps, AgentScheduleDeps as m11_AgentScheduleDeps, ConnectorOfferDeps as m14_ConnectorOfferDeps, PostArtifactDeps as m34_PostArtifactDeps } from './read-only-mcp.js';
 export type { PromptSurface as m24_PromptSurface } from './prompt-assembly.js';

@@ -43,7 +43,7 @@ m26_it('keeps ordinary GitHub repository reads on the connector route', async ()
 
 m26_it('binds an explicitly requested game to the active Room turn', async () => {
   await m26_callAgentTool('app_tool',{app:'beeline:onboarding',tool:'game',args:{}});
-  m26_expect(scope24.calls.find(call=>call.name==='postStarterGame')!.input).toMatchObject({roomId:'room-1',requestId:'request-1',taskId:'command-1',generationId:scope24.context.generationId});
+  m26_expect(scope24.calls.find(call=>call.name==='postStarterGame')!.input).toMatchObject({roomId:'room-1',requestId:'request-1',taskId:'command-1'});
 });
 });
 mergedDescribe27("read-only-mcp.order.test.ts", () => {
@@ -379,7 +379,7 @@ const scope36 = fixtureScope36();
     await m32_callAgentTool('app_tool', { app:'beeline:workflow', tool:'cancel', args:{ runId: 'run-1', reason: 'Request withdrawn' } });
     m32_expect(scope36.calls).toEqual([{ name: 'cancelWorkflowRun', input: {
       roomId: 'room-1', agentId: 'agent-1', runId: 'run-1', reason: 'Request withdrawn',
-      requestId: 'request-1', generationId: scope36.context.generationId, taskId: 'command-1',
+      requestId: 'request-1', taskId: 'command-1',
     } }]);
   });
 });
@@ -397,7 +397,7 @@ const scope37 = fixtureScope37();
     await m32_callAgentTool('app_tool', { app:'beeline:workflow', tool:'advance', args:{ runId: 'run-1', outcome: 'done', contents: { note: 'ready' } } });
     m32_expect(scope37.calls).toEqual([{ name: 'handoff', input: {
       roomId: 'corner-1', agentId: 'agent-1', runId: 'run-1', outcome: 'done', contents: { note: 'ready' },
-      requestId: 'request-1', generationId: scope37.context.generationId, taskId: 'command-1',
+      requestId: 'request-1', taskId: 'command-1',
     } }]);
   });
 

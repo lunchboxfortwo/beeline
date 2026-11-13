@@ -1,5 +1,3 @@
-import type { TurnTrace } from './turn-trace.js';
-import type { AgentProcessLifecycle } from './agent-process.js';
 import { mkdir, writeFile } from 'node:fs/promises';
 import type { AgentModelConfigOption } from './model-types.js';
 import { grantedSquireHostRoute, claimGrantedHostRoutes } from './host-mcp-route.js';
@@ -197,20 +195,4 @@ export function recordSessionModelFallback(
     options: options as import('@beeline/api-contract/daemon').DaemonOperationMap['postAgentModelCatalog']['input']['options'],
     selection,
   }).catch(error => console.error(`[thin-core] failed to persist automatic model fallback for ${surface}:`, error));
-}
-
-/** Close queue timing at the actual activation/current-session check. */
-export function tracedAgentProcessLifecycle(
-  activate: () => Promise<string>, isCurrent: () => Promise<boolean>, trace?: TurnTrace,
-): Pick<AgentProcessLifecycle, 'start' | 'isCurrent'> {
-  return {
-    start: async () => {
-      trace?.end('queue-wait');
-      return trace ? trace.measure('activation', activate) : activate();
-    },
-    isCurrent: () => {
-      trace?.end('queue-wait');
-      return trace ? trace.measure('activation', isCurrent) : isCurrent();
-    },
-  };
 }

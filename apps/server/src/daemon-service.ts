@@ -8,7 +8,7 @@ import { DEFAULT_MCP_REGISTRY_CLIENT } from './mcp-registry.js';
 import { feedbackConfigFromEnv } from './feedback.js';
 import type { AfterCommit, EmbedFn } from './institutional-memory-embeddings.js';
 import { OwnedModelConfiguration, DEFAULT_MEDIA_MAXIMUM_BYTES } from './daemon/values.js';
-import { daemonSetOwnedModel, daemonOwnedModelReady, daemonNegotiateOwnedModel, daemonModelClaimCredentials, daemonSetStarterOnboarding, daemonLockOwnedTurnAccess, daemonFenceOwnedTurnReply, daemonReadCommandActivation } from './daemon/owned-model.js';
+import { daemonSetOwnedModel, daemonOwnedModelReady, daemonNegotiateOwnedModel, daemonModelClaimCredentials, daemonSetStarterOnboarding } from './daemon/owned-model.js';
 import { daemonExecute } from './daemon/execute.js';
 import { daemonReconcileZeroCheckWorkerCompletion } from './daemon/corner-completion.js';
 import { daemonConnectorAssignments, daemonConnectorInstall, daemonConnectorStatusReport, daemonResumeRegistrySignIn, daemonNotifyTailscaleSignIn, daemonConnectorVaultReport, daemonConnectorStatusView, daemonConnectorVaultList, daemonConnectionDetail, daemonConnectionGrantRevoke, daemonConnectionUsage } from './daemon/connectors.js';
@@ -72,9 +72,6 @@ export class DaemonService {
 
    starterOnboarding?: StarterOnboardingService;
   setStarterOnboarding(...args: CommandArguments<typeof daemonSetStarterOnboarding>): ReturnType<typeof daemonSetStarterOnboarding> { return daemonSetStarterOnboarding(this, ...args); }
-  async lockOwnedTurnAccess(...args: CommandArguments<typeof daemonLockOwnedTurnAccess>): ReturnType<typeof daemonLockOwnedTurnAccess> { return daemonLockOwnedTurnAccess(this, ...args); }
-  async fenceOwnedTurnReply(...args: CommandArguments<typeof daemonFenceOwnedTurnReply>): ReturnType<typeof daemonFenceOwnedTurnReply> { return daemonFenceOwnedTurnReply(this, ...args); }
-  async readCommandActivation(...args: CommandArguments<typeof daemonReadCommandActivation>): ReturnType<typeof daemonReadCommandActivation> { return daemonReadCommandActivation(this, ...args); }
 
   constructor(
      readonly database: DaemonDependencies['database'],

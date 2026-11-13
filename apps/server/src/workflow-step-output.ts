@@ -12,14 +12,14 @@ export function workflowOutputBindingCtes(commandRelation: string, runIdSql = 'N
     LEFT JOIN room_choices choice ON choice.id::text=source.card->>'choiceId'
       AND choice.room_id=command.room_id
     LEFT JOIN messages choice_message ON choice_message.id=choice.message_id
-    WHERE command.action IN ('input','resume')
+    WHERE command.action='input'
   ), workflow_output_pins AS (
     SELECT scope.command_id,scope.room_id,COALESCE(parent_visit.id,latest.id) visit_id
     FROM workflow_output_scope scope
     LEFT JOIN LATERAL (
       SELECT message.id FROM messages message
       JOIN agent_commands parent ON parent.id=scope.parent_command_id AND parent.agent_id=scope.agent_id
-      WHERE scope.action='resume' AND message.room_id=scope.room_id
+      WHERE scope.parent_command_id IS NOT NULL AND message.room_id=scope.room_id
         AND message.card_type='workflow-handoff'
         AND message.card->'outputCommandIds' ? scope.parent_command_id
         AND (scope.run_id IS NULL OR message.card->>'runId'=scope.run_id)

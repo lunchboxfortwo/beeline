@@ -212,10 +212,10 @@ export async function requestGrant(
     if (kind === 'command')
       return `approved: ${ask} [grant ${grantId}]. Run it now with run_granted_command and the argv.`;
     if (kind === 'device') {
-      // bwrap fixes /dev when a session starts, so the turn loop continues
-      // this same turn in a fresh session that has it (`approvedDeviceGrant`).
+      // bwrap fixes /dev when a session starts; the next message starts a
+      // fresh session that has it (`approvedDeviceGrant`).
       return sandboxDevicePath(target)
-        ? `approved: ${ask} [grant ${grantId}]. A running session cannot add a device, so end your turn now with one short line; this same turn continues straight away in a session that has ${target}. Do not ask anyone to restart.`
+        ? `approved: ${ask} [grant ${grantId}]. A running session cannot add a device: say what you will do with ${target} and end your answer; your next message runs in a session that has it.`
         : `approved: ${ask} [grant ${grantId}], but only device nodes under /dev/ are added to your session, so nothing was added.`;
     }
     return `approved: ${ask} [grant ${grantId}]; applies at the agent's next session.`;

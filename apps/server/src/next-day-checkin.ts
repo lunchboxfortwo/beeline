@@ -4,7 +4,7 @@ DROP FUNCTION IF EXISTS note_checkin_first_message() CASCADE;
 DROP FUNCTION IF EXISTS note_checkin_reply() CASCADE;
 DO $$ BEGIN
  IF to_regclass('next_day_checkins') IS NOT NULL THEN
- PERFORM beeline_end_agent_turn(command.id,command.generation_id,'cancelled','checkin_retired',NULL)
+ PERFORM beeline_finish_agent_command(command.id,'cancelled','checkin_retired',NULL)
  FROM agent_commands command WHERE command.state='pending' AND command.id IN (SELECT command_id FROM next_day_checkins);
  END IF;
 END $$;

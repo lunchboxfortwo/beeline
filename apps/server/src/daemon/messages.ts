@@ -1,5 +1,4 @@
 import { messageColumns } from '../message-columns.js';
-import { ownedRoomAccessSql } from '../turn-ownership.js';
 import { cornerRequestSql } from '../corner-opening.js';
 import { mentionReplyKey, mentionReplyId } from '../owed-mentions.js';
 import { visibleMessageSql } from '../read-cursor.js';
@@ -9,8 +8,10 @@ import { CornerAccessDatabase } from '../corner-access-database.js';
 import { mentionHandlesToDrop, CommandRefusalError } from '../commander.js';
 import { repairAgentPost } from '../agent-post-text.js';
 import { stripMentionHandles } from '../message-mentions.js';
-import { authorizeCommandOutput, turnRootMessageSql, type CommandRow } from '../agent-command.js';
+import { turnRootMessageSql, type CommandRow } from '../agent-command.js';
+import { authorizeCommandOutput } from '../agent-command-route-agent-result.js';
 import { randomBytes } from 'node:crypto';
+import { endAgentTurn } from '../agent-turn-end.js';
 import { type SqlDatabase } from '../database.js';
 import { type CommittedMessageLiveRow } from '../live.js';
 import { taggedIdentityIdsSql } from '../message-mentions.js';
@@ -22,8 +23,8 @@ import { daemonWriteResult } from './corner-messages.js';
 
 
   /** The text a room post stores. Thinking is removed. A tag this turn may not
-   *  send is removed. Callers compare the stored row with this text, so a
-   *  repaired retry still matches and a different answer still conflicts. */
+   *  send is removed. Nothing is refused: text that is empty after repair is
+   *  the agent choosing silence. */
   export async function roomPostBody(
     database: SqlDatabase,
     roomId: string,
@@ -38,7 +39,6 @@ import { daemonWriteResult } from './corner-messages.js';
       if (repaired.removed.length) {
         text = repaired.text.trim();
         removed.push(...repaired.removed);
-        if (!text) throw new CommandRefusalError('post refused: reasoning block contains no public reply', 400);
       }
     }
     if (command && input.presentation !== 'card') {
@@ -46,8 +46,6 @@ import { daemonWriteResult } from './corner-messages.js';
       if (dropped.length) {
         text = stripMentionHandles(text, dropped).trim();
         removed.push(...dropped.map((handle) => `tag @${handle}`));
-        if (!text) throw new CommandRefusalError(
-          `post refused: nothing left to post after removing ${removed.join(', ')}`, 400);
       }
     }
     return { text, removed };
@@ -80,9 +78,8 @@ import { daemonWriteResult } from './corner-messages.js';
           `SELECT id,text FROM messages
            WHERE room_id=$1 AND author_id=$2 AND request_id=$3
              AND presentation='message' AND deleted_at IS NULL
-             AND legacy_event->>'turnGenerationId'=$4
            ORDER BY created_at DESC,id DESC LIMIT 64`,
-          [input.roomId, agentId, input.requestId, input.generationId],
+          [input.roomId, agentId, input.requestId],
         )).rows
       : [];
     const repeated = Boolean(ctx.commandTransaction && earlier.length);
@@ -102,20 +99,26 @@ import { daemonWriteResult } from './corner-messages.js';
           )
         ).rows[0]
       : undefined;
-    if (input.replyToMessageId && !parent) throw new Error('reply parent is not in this room');
+    // A reply link to a message outside this Room is dropped, never the answer.
+    if (input.replyToMessageId && !parent) input = { ...input, replyToMessageId: undefined };
     const command = atomicCommandWrite
       ? undefined
       : (ctx.authorizedCommand ??
-        (await authorizeCommandOutput(
-          ctx.database,
-          input.roomId,
-          agentId,
-          input.requestId,
-          input.generationId,
-        )));
+        (await authorizeCommandOutput(ctx.database, input.roomId, agentId, input.requestId)));
     const published = await roomPostBody(ctx.database, input.roomId, agentId, input, command);
     const text = published.text;
     const removed = published.removed;
+    // An answer with nothing left to show (and no queued files) is silence:
+    // the item is done without an empty message.
+    if (!text && input.presentation !== 'card' && input.requestId && !(await ctx.database.query(
+      `SELECT 1 FROM agent_pending_attachments WHERE room_id=$1 AND agent_id=$2 AND request_id=$3 LIMIT 1`,
+      [input.roomId, agentId, input.requestId])).rowCount) {
+      const item = command ?? await authorizeCommandOutput(ctx.database, input.roomId, agentId, input.requestId);
+      await ctx.database.query(`UPDATE agent_turns SET completion_kind='no-reply'
+        WHERE room_id=$1 AND agent_id=$2 AND request_id=$3`, [input.roomId, agentId, input.requestId]);
+      await endAgentTurn(ctx.database, item, 'complete');
+      return { ...daemonWriteResult(ctx), ...(removed.length ? { receipt: `Removed: ${removed.join(', ')}.` } : {}) };
+    }
     if (repeated) {
       const notes = Array.from({ length: Math.ceil(text.length / MAX_REPLY_NOTE_LENGTH) }, (_, index) => ({
         kind: 'note' as const, title: 'Turn summary',
@@ -148,14 +151,14 @@ import { daemonWriteResult } from './corner-messages.js';
           size: number;
         }>(
           `SELECT url,name,mime_type,size::integer AS size FROM agent_pending_attachments
-           WHERE room_id=$1 AND agent_id=$2 AND request_id=$3 AND generation_id=$4 ORDER BY created_at,id`,
-          [input.roomId, agentId, input.requestId, input.generationId],
+           WHERE room_id=$1 AND agent_id=$2 AND request_id=$3 ORDER BY created_at,id`,
+          [input.roomId, agentId, input.requestId],
         )
       ).rows;
       if (pending.length)
         await database.query(
-          `DELETE FROM agent_pending_attachments WHERE room_id=$1 AND agent_id=$2 AND request_id=$3 AND generation_id=$4`,
-          [input.roomId, agentId, input.requestId, input.generationId],
+          `DELETE FROM agent_pending_attachments WHERE room_id=$1 AND agent_id=$2 AND request_id=$3`,
+          [input.roomId, agentId, input.requestId],
         );
       const values = [
         messageId,
@@ -196,18 +199,15 @@ import { daemonWriteResult } from './corner-messages.js';
                SELECT ${messageColumns('stored')} FROM messages stored WHERE stored.id=$1 AND stored.room_id=$2 AND stored.author_id=$3
                  AND NOT EXISTS(SELECT 1 FROM new_messages)
              ), completed AS (
-               SELECT beeline_end_agent_turn($13,$14,'complete',NULL,inserted.id) ended
-               FROM inserted WHERE $15::boolean
-             ), cleared AS (
-               DELETE FROM live_outputs
-               WHERE room_id=$2 AND agent_id=$3 AND turn_id=$6 AND kind IN ('draft','thought') AND NOT $15::boolean
+               SELECT beeline_finish_agent_command($13,'complete',NULL,inserted.id) ended
+               FROM inserted
              )
              SELECT inserted.*,author.kind author_kind,author.name author_name,
                beeline_room_handle(author.id,inserted.room_id) author_handle,author.avatar author_avatar,author.face_id author_face,
                ${taggedIdentityIdsSql('inserted')} tagged_ids
              FROM inserted JOIN identities author ON author.id=inserted.author_id
              CROSS JOIN (SELECT count(*) FROM completed) completion`,
-            [...values, command!.id, command!.generation_id, true],
+            [...values, command!.id],
           )
         ).rows[0]!;
       }
@@ -244,41 +244,29 @@ import { daemonWriteResult } from './corner-messages.js';
           | 'authority_rejected'
           | 'turn_cancelled'
           | 'already_completed'
-          | 'no_reply'
-          | 'result_conflict'
           | 'write_failed';
         row: (Omit<CommittedMessageLiveRow, 'created_at'> & { created_at: string }) | null;
       };
-      // One autocommit statement owns the lock, generation/lease/cancellation
-      // decision, attachment drain, terminal turn/failure state, reply insert,
-      // command completion, and live-output cleanup. PostgreSQL commits the
+      // One autocommit statement owns the item lock, the Stop decision,
+      // attachment drain, reply insert, item completion and live-output cleanup. PostgreSQL commits the
       // statement before query() resolves, so the live row remains authoritative.
       messageWriteStartedAt = Date.now();
       const query = await ctx.database.query<AtomicReplyResult>(
-        `WITH reply_access AS MATERIALIZED (${ownedRoomAccessSql('$2','$3','NULL',true)}), candidate AS MATERIALIZED (
-             SELECT command.*,
-               EXISTS(SELECT 1 FROM agent_turns turn
-                 WHERE turn.room_id=command.room_id AND turn.agent_id=command.agent_id
-                   AND turn.request_id=command.turn_request_id AND turn.status='cancelled') turn_cancelled,
-               EXISTS(SELECT 1 FROM agent_turns turn
-                 WHERE turn.room_id=command.room_id AND turn.agent_id=command.agent_id
-                   AND turn.request_id=command.turn_request_id AND turn.completion_kind='no-reply') no_reply
-             FROM agent_commands command
+        `WITH reply_access AS MATERIALIZED (
+             SELECT 1 FROM rooms room JOIN memberships member ON member.room_id=COALESCE(room.parent_id,room.id)
+               AND member.identity_id=$3 AND member.removed_at IS NULL
+             WHERE room.id=$2 AND room.archived_at IS NULL
+           ), candidate AS MATERIALIZED (
+             SELECT command.* FROM agent_commands command
              WHERE command.room_id=$2 AND command.agent_id=$3 AND command.turn_request_id=$6
-               AND command.action IN ('input','resume')
-               AND EXISTS(SELECT 1 FROM agent_command_generation_owners binding WHERE binding.command_id=command.id AND binding.generation_id=$10)
-               AND EXISTS(SELECT 1 FROM reply_access)
-               AND (command.generation_id=$10 OR NOT EXISTS(SELECT 1 FROM messages source
-                 WHERE source.id=command.source_message_id AND source.card->>'runId' IS NOT NULL))
+               AND command.action='input' AND EXISTS(SELECT 1 FROM reply_access)
              ORDER BY command.created_at DESC,command.id DESC LIMIT 1 FOR UPDATE OF command
            ), writable AS (
-             SELECT candidate.* FROM candidate
-             WHERE state IN ('pending','claimed') AND NOT turn_cancelled AND NOT no_reply
-               AND NOT EXISTS(SELECT 1 FROM agent_turns turn WHERE turn.room_id=$2 AND turn.agent_id=$3 AND turn.request_id=$6 AND turn.status='failed')
+             SELECT candidate.* FROM candidate WHERE state='pending'
            ), pending AS (
              DELETE FROM agent_pending_attachments attachment USING writable
              WHERE attachment.room_id=$2 AND attachment.agent_id=$3
-               AND attachment.request_id=$6 AND attachment.generation_id=$10
+               AND attachment.request_id=$6
              RETURNING attachment.url,attachment.name,attachment.mime_type,attachment.size,
                attachment.created_at,attachment.id
            ), attachment_payload AS (
@@ -292,7 +280,7 @@ import { daemonWriteResult } from './corner-messages.js';
                id,room_id,author_id,text,presentation,request_id,legacy_event,
                reply_to_message_id,root_message_id,agent_hop_count,attachments,activity,agent_model
              ) SELECT $1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,
-                 writable.agent_depth,attachment_payload.attachments,$11::jsonb,
+                 writable.agent_depth,attachment_payload.attachments,$10::jsonb,
                  (SELECT selected_model FROM agents WHERE agent_id=$3)
                FROM writable,settled,attachment_payload
              ON CONFLICT(id) DO NOTHING
@@ -302,7 +290,7 @@ import { daemonWriteResult } from './corner-messages.js';
              SELECT ${messageColumns('stored')} FROM messages stored WHERE stored.id=$1 AND stored.room_id=$2 AND stored.author_id=$3
                AND NOT EXISTS(SELECT 1 FROM new_messages)
            ), completed AS (
-             SELECT (ended).* FROM (SELECT beeline_end_agent_turn(writable.id,writable.generation_id,'complete',NULL,inserted.id) ended FROM writable,inserted) ended_commands
+             SELECT (ended).* FROM (SELECT beeline_finish_agent_command(writable.id,'complete',NULL,inserted.id) ended FROM writable,inserted) ended_commands
            ), star_count AS (
              ${starPromptReplySql(
                `(SELECT writable.root_source_message_id FROM writable,completed WHERE $5='message')`,
@@ -319,7 +307,7 @@ import { daemonWriteResult } from './corner-messages.js';
                ${taggedIdentityIdsSql('message')} tagged_ids
              FROM candidate JOIN messages message ON message.id=candidate.result_message_id
              JOIN identities author ON author.id=message.author_id
-             WHERE candidate.state='complete' AND message.text=$4 AND NOT candidate.no_reply AND NOT candidate.turn_cancelled
+             WHERE candidate.state='complete'
            ), committed AS (
              SELECT inserted_public.* FROM inserted_public UNION ALL SELECT existing_public.* FROM existing_public
            )
@@ -328,11 +316,8 @@ import { daemonWriteResult } from './corner-messages.js';
            UNION ALL
            SELECT CASE
              WHEN NOT EXISTS(SELECT 1 FROM candidate) THEN 'authority_rejected'
-             WHEN (SELECT turn_cancelled FROM candidate) THEN 'turn_cancelled'
-             WHEN (SELECT no_reply FROM candidate) THEN 'no_reply'
-             WHEN (SELECT state FROM candidate)='complete'
-               AND (SELECT result_message_id FROM candidate) IS NULL THEN 'already_completed'
-             WHEN (SELECT state FROM candidate)='complete' THEN 'result_conflict'
+             WHEN (SELECT state FROM candidate)='cancelled' THEN 'turn_cancelled'
+             WHEN (SELECT state FROM candidate)='complete' THEN 'already_completed'
              ELSE 'write_failed'
            END outcome,NULL::jsonb row
            WHERE NOT EXISTS(SELECT 1 FROM committed)
@@ -347,7 +332,6 @@ import { daemonWriteResult } from './corner-messages.js';
           JSON.stringify(input.tags ?? {}),
           input.replyToMessageId ?? null,
           rootMessageId,
-          input.generationId,
           steps,
         ],
       );
@@ -358,16 +342,14 @@ import { daemonWriteResult } from './corner-messages.js';
       if (result.outcome === 'authority_rejected')
         throw new Error('command output authority rejected');
       if (result.outcome === 'turn_cancelled') throw new Error('command turn cancelled');
-      if (result.outcome === 'no_reply') throw new CommandRefusalError('Reply not delivered: text was dropped because this turn chose no reply.', 409);
-      if (result.outcome === 'already_completed') throw new Error('command already completed');
-      if (result.outcome === 'result_conflict') throw new Error('command result conflict');
+      // The item was already answered silently: this resend has nothing to add.
+      if (result.outcome === 'already_completed') return daemonWriteResult(ctx);
       if (!result.row) throw new Error('command output authority rejected');
       saved = { ...result.row, created_at: new Date(result.row.created_at) };
       if (ctx.livePaintDiagnostics) projectionCompletedAt = Date.now();
     } else {
       saved = await ctx.database.transaction(saveCompatibilityReply);
     }
-    if ((input.text || text) && saved.text !== text) throw new CommandRefusalError('Reply not delivered: this tag already has an answer.', 409);
     if (repeated && ctx.commandTransaction && saved.presentation === 'message') {
       // Deliver queued artifacts on the existing public post, so suppressing
       // closing prose never hides the turn's deliverable.
@@ -492,8 +474,8 @@ import { daemonWriteResult } from './corner-messages.js';
         400,
       );
     await ctx.database.query(
-      `INSERT INTO agent_pending_attachments(room_id,agent_id,url,name,mime_type,size,request_id,generation_id)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
+      `INSERT INTO agent_pending_attachments(room_id,agent_id,url,name,mime_type,size,request_id)
+       VALUES($1,$2,$3,$4,$5,$6,$7)`,
       [
         input.roomId,
         agentId,
@@ -502,7 +484,6 @@ import { daemonWriteResult } from './corner-messages.js';
         attachment.mimeType,
         attachment.size,
         input.requestId,
-        input.generationId,
       ],
     );
     return daemonWriteResult(ctx);
@@ -521,7 +502,7 @@ import { daemonWriteResult } from './corner-messages.js';
          SELECT 1 FROM messages visit JOIN agent_commands command ON command.room_id=visit.room_id
            AND visit.card->'outputCommandIds' ? command.id
          WHERE visit.room_id=$1 AND visit.card_type='workflow-handoff'
-           AND command.agent_id=$2 AND command.turn_request_id=$3 AND command.state='claimed'
+           AND command.agent_id=$2 AND command.turn_request_id=$3 AND command.state='pending'
        ))
        ON CONFLICT(room_id,agent_id,turn_id,kind)
        DO UPDATE SET body=EXCLUDED.body,updated_at=now()
@@ -562,7 +543,7 @@ import { daemonWriteResult } from './corner-messages.js';
   export async function daemonPersistTurnTrace(ctx: DaemonContext, database: SqlDatabase, input: Input<'postAgentTurnReceipt'>, agentId: string): Promise<void> {
     // Diagnostics share the receipt transaction, but cannot fail the receipt.
     // IDs come from committed server rows, never a helper's claimed reply.
-    if (!input.heartbeat && input.status !== 'working' && input.trace) {
+    if (input.trace) {
       await database.query('SAVEPOINT turn_trace');
       try {
         const trace = sanitizeTurnReplay(input.trace);

@@ -1,4 +1,3 @@
-import {commandOwnerLiveSql} from './turn-ownership.js';
 import { cornerOwedAnswerTimesSql, cornerReportAnswerTimesSql } from './corner-owed.js';
 import { cornerImplementerSql } from './corner-worker.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
@@ -36,7 +35,7 @@ export function cornerIdleSql(cornerId: string, includeCommander = false): strin
       (${cornerScheduledWaitSql('c')}
         OR EXISTS(SELECT 1 FROM corner_merge_holds WHERE corner_id=c.id AND released_at IS NULL)
         OR EXISTS(SELECT 1 FROM agent_commands queued WHERE queued.room_id=c.id AND queued.action='input'
-          AND (queued.state='pending' OR (queued.state='claimed' AND ${commandOwnerLiveSql('queued')}))
+          AND queued.state='pending'
           AND queued.review_context->>'headSha'=gh.lifecycle->'pr'->>'headSha'
           AND queued.review_context->>'purpose' IS NULL AND queued.agent_id IS DISTINCT FROM ${cornerImplementerSql('f', 'c')})
         OR gh.lifecycle->>'checks'='pending'
@@ -48,7 +47,6 @@ export function cornerIdleSql(cornerId: string, includeCommander = false): strin
       ${cornerWorkSql(!includeCommander)} ${cornerBlockerSql()}
       LEFT JOIN LATERAL (SELECT turn.ended_at,turn.status FROM agent_turns turn
         WHERE turn.room_id=c.id AND turn.agent_id IS DISTINCT FROM c.created_by
-          AND COALESCE(turn.generation_id,'') NOT LIKE 'pending:%'
         ORDER BY turn.ended_at DESC NULLS LAST,turn.created_at DESC LIMIT 1) ended ON true
       CROSS JOIN LATERAL (SELECT GREATEST(c.created_at,
         (SELECT max(latest.created_at) FROM identities author CROSS JOIN LATERAL (
