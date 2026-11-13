@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { buildBwrapArgv, sandboxMountPlan } from './bwrap-sandbox.js';
@@ -7,7 +7,39 @@ import { roomRuntimeCoordinatorReportCornerStartFailure } from './room-runtime-r
 import { distillTurnFailureReason, redactToolDetail } from './turn-failure-reason.js';
 
 const roots: string[] = [];
-afterEach(() => roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true })));
+afterEach(() => roots.splice(0).forEach(root => {
+  const work = resolve(root, 'work/work');
+  if (existsSync(work)) chmodSync(work, 0o700);
+  rmSync(root, { recursive: true, force: true });
+}));
+
+it.each([false, true])('runs corner commands as the host user without capabilities (overlay: %s)', overlay => {
+  const root = mkdtempSync('/var/tmp/beeline-corner-user-');
+  roots.push(root);
+  const tree = resolve(root, 'node_modules');
+  mkdirSync(tree);
+  const wrapped = buildBwrapArgv({ bwrapPath: '/usr/bin/bwrap',
+    plan: sandboxMountPlan({ mode: 'edit', cwd: root, worktreePath: root,
+      ...(overlay ? { dependencyLayers: [{ tree, upper: resolve(root, 'upper'), work: resolve(root, 'work') }] } : {}) }),
+    cwd: root, command: process.execPath, args: ['-e', `
+      const fs = require('node:fs');
+      fs.writeFileSync('node_modules/written', 'private');
+      const child = require('node:child_process').spawnSync(process.execPath, ['-e', 'process.exit(0)'], {stdio:'ignore'});
+      if (child.error) throw child.error;
+      console.log(JSON.stringify({uid:process.getuid(), gid:process.getgid(), child:child.status,
+        status:fs.readFileSync('/proc/self/status','utf8')}));
+    `] });
+  const result = spawnSync(wrapped.command, wrapped.args, { encoding: 'utf8' });
+  expect(result.status, result.stderr).toBe(0);
+  const { uid, gid, child, status } = JSON.parse(result.stdout);
+  expect(uid).toBe(process.getuid!());
+  expect(uid).not.toBe(0);
+  expect(gid).toBe(process.getgid!());
+  expect(child).toBe(0);
+  for (const cap of ['Inh', 'Prm', 'Eff', 'Bnd', 'Amb']) expect(status).toMatch(new RegExp(`Cap${cap}:\\s+0+\\n`));
+  expect(status).toMatch(/NoNewPrivs:\s+1\n/);
+  expect(existsSync(resolve(tree, 'written'))).toBe(!overlay);
+});
 
 it.each(['missing', 'dangling', 'loop', 'symlink'] as const)(
   'starts a corner with a %s saved path grant', shape => {
