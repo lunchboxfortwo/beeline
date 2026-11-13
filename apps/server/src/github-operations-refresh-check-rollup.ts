@@ -7,8 +7,8 @@ import type { CornerLifecycleView } from '@beeline/api-contract/phone';
 import type { SqlDatabase } from './database.js';
 import { GITHUB_SUBJECT, systemLine, type SystemPhrase } from './system-line.js';
 import { archiveCornerState, lockCornerArchivalAuthority } from './corner-close.js';
-import { advanceCorner, planCornerCheckObservation, checksSettled, actionsJobId, lockCornerLifecycle } from './corner-lifecycle.js';
-import { reconcileCornerMergeBlockers, routeSystemCommand } from './agent-command.js';
+import { advanceCorner, planCornerCheckObservation, checksSettled, actionsJobId, lockCornerLifecycle, type CornerEvent } from './corner-lifecycle.js';
+import { routeSystemCommand } from './agent-command.js';
 import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, hash } from './github-operations.js';
 
 
@@ -100,30 +100,16 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
         const providerCheck = check;
         let noteInserted = false;
         // Each replay starts with the provider fact, not a label from an aborted attempt.
-        const refresh = (check = providerCheck) => database.transaction(async (database) => {
-          noteInserted = false;
-          await lockCornerLifecycle(database, target.corner_id);
-          // Webhooks signal a refresh. Revalidate its head and age only after
-          // the provider has replied, under the run lock then the fact row lock.
-          const currentRow = (
-            await database.query<{ lifecycle: CornerLifecycleView & {
-              checksSummary?: { fetchStartedAt?: number };
-            } }>(
-              `SELECT lifecycle FROM corner_github_cache WHERE corner_id=$1 FOR UPDATE`,
-              [target.corner_id],
-            )
-          ).rows[0];
-          if (!currentRow) return;
-          const current = currentRow.lifecycle;
-          if (livePr && current.pr?.number !== livePr.number) return;
+        const admits = (current: CornerLifecycleView) => {
+          if (livePr && current.pr?.number !== livePr.number) return false;
           // GitHub may deliver a completed run for the previous branch head after a push.
-          if (current.pr?.headSha && checkHeadSha !== current.pr.headSha) return;
+          if (current.pr?.headSha && checkHeadSha !== current.pr.headSha) return false;
           // A PR removed during the fetch invalidates it; a pre-PR corner can record checks.
-          if (target.has_pr && !current.pr?.headSha) return;
+          if (target.has_pr && !current.pr?.headSha) return false;
           const latestFetch = current.checksSummary?.fetchStartedAt ?? current.checksSummary?.updatedAt ?? 0;
-          if (fetchStartedAt < latestFetch) return;
-          // An empty rollup is only "no checks" once GitHub says so; a null
-          // rollup (state pending) is the race before workflows register.
+          return fetchStartedAt >= latestFetch;
+        };
+        const planCheckRefresh = (current: CornerLifecycleView) => {
           const summary = {
             status:
               failedChecks.length ? ('failing' as const) : rollup.total === 0 && rollup.state !== 'pending' ? ('unknown' as const) : rollup.state === 'passed'
@@ -141,101 +127,109 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
             updatedAt: Math.floor(fetchStartedAt),
             fetchStartedAt,
           };
-          const priorReport = current.checksSummary;
-          const {sameReportedHead,newAttempt,attempt,reportFailure,storedSummary} =
-            planCornerCheckObservation({headSha:checkHeadSha,previousHeadSha:current.pr?.headSha,
-              prior:priorReport,next:summary,settled:rollup.state !== 'pending'});
-          await ctx.updateLifecycle(
-            target.corner_id,
-            {
-              checks: summary.status,
-              checksSummary: storedSummary,
-            },
-            database,
-          );
-          // A re-run on the same head reopens checks; its verdict is reported
-          // by the check note below once it lands.
-          if ((newAttempt && !checksSettled(summary.checks)) || (summary.status === 'pending' &&
-            (current.checks === 'passing' || current.checks === 'failing')))
-            await advanceCorner(database, target.corner_id, { kind: 'checks-pending' });
+          const { sameReportedHead, newAttempt, attempt, reportFailure, storedSummary } =
+            planCornerCheckObservation({
+              headSha: checkHeadSha, previousHeadSha: current.pr?.headSha,
+              prior: current.checksSummary, next: summary, settled: rollup.state !== 'pending',
+            });
+          const checksPending = (newAttempt && !checksSettled(summary.checks)) || (summary.status === 'pending' &&
+            (current.checks === 'passing' || current.checks === 'failing'));
           const becamePassing = summary.status === 'passing' && (current.checks !== 'passing' || !sameReportedHead || newAttempt);
+          const becameFailing = reportFailure;
           // Pull-request open and the deploy re-read pass a synthetic pending
           // check named "Pull request checks". A green rollup should name the
           // suites that passed. The flag is assigned on its own so that
           // placeholder name stays out of the System line.
-          let nameThePass = false;
-          if (becamePassing && check.status === 'pending')
-            nameThePass = true;
+          const nameThePass = becamePassing && providerCheck.status === 'pending';
           const label = nameThePass
-            ? systemMessage("github-operations.passed")
-            : check.status === 'pending'
-              ? systemMessage("github-operations.started")
-              : String(check.conclusion ?? '').toUpperCase() === 'CANCELLED'
-                ? systemMessage("github-operations.cancelled")
-                : check.status;
-          if (nameThePass) {
-            const passedNames = summary.checks.filter(item => item.status === 'passed').map(item => item.name);
-            check = {
-              ...check,
-              name: passedNames.join(', ') || current.pr?.title
-                || (current.pr?.number ? `pull request #${current.pr.number}` : 'the pull request'),
+            ? systemMessage('github-operations.passed')
+            : providerCheck.status === 'pending'
+              ? systemMessage('github-operations.started')
+              : String(providerCheck.conclusion ?? '').toUpperCase() === 'CANCELLED'
+                ? systemMessage('github-operations.cancelled')
+                : providerCheck.status;
+          const named = nameThePass
+            ? {
+                ...providerCheck,
+                name: summary.checks.filter(item => item.status === 'passed').map(item => item.name).join(', ')
+                  || current.pr?.title
+                  || (current.pr?.number ? `pull request #${current.pr.number}` : 'the pull request'),
+              }
+            : providerCheck;
+          const failing = summary.failing.length ? summary.failing : [named.name];
+          const dedupe = becamePassing
+            ? `github:checks:green:${named.headSha}:${attempt}`
+            : becameFailing
+              ? `github:checks:failed:${named.headSha}`
+              : `github:checks:${label}:${named.name}:${named.headSha ?? hash(JSON.stringify(named))}`;
+          const phrase: SystemPhrase = {
+            subject: GITHUB_SUBJECT,
+            verb: becameFailing ? systemMessage('github-operations.found-failing-checks-on') : systemMessage('github-operations.a-check', label),
+            ...(becamePassing ? { kind: 'check-passed' as const } : becameFailing ? { kind: 'check-failed' as const } : {}),
+            object: becameFailing
+              ? {
+                  text: current.pr?.title ?? (current.pr?.number ? systemMessage('github-operations.pull-request-2', current.pr.number) : systemMessage('github-operations.the-pull-request')),
+                  ...(current.pr?.url ? { url: current.pr.url } : {}),
+                  ...(named.headSha ? { headSha: named.headSha } : {}),
+                }
+              : {
+                  text: named.name,
+                  ...(named.url ? { url: named.url } : {}),
+                  ...(named.headSha ? { headSha: named.headSha } : {}),
+                },
+            ...(becameFailing
+              ? { consequence: systemMessage('github-operations.failing', failing.join(systemMessage('github-operations.list-separator'))) }
+              : providerCheck.status === 'failed' && providerCheck.conclusion && providerCheck.conclusion !== 'failure'
+                ? { consequence: providerCheck.conclusion }
+                : {}),
+            ...(becameFailing ? { payload: { failedJobs: jobLogs } } : {}),
+          };
+          const event: CornerEvent | null = becamePassing || becameFailing
+            ? { kind: 'checks', result: becamePassing ? 'passing' : 'failing', sourceMessageId: hash(`beeline:${target.corner_id}:${dedupe}`) }
+            : checksPending
+              ? { kind: 'checks-pending' }
+              : summary.status === 'failing' && !becameFailing
+                ? { kind: 'reconcile' }
+                : null;
+          return { summary, storedSummary, event, wantsNote: becamePassing || becameFailing || (providerCheck.status === 'failed' && !options?.quiet), phrase, dedupe };
+        };
+        // The head check and the machine write share one lock. The idle snapshot
+        // and the other lifecycle reads run before that lock.
+        await advanceCorner(database, target.corner_id, { kind: 'reconcile' }, {
+          project(corner) {
+            if (!admits(corner.lifecycle)) return undefined;
+            const plan = planCheckRefresh(corner.lifecycle);
+            const { branch: _branch, ...lifecycle } = {
+              ...corner.lifecycle, checks: plan.summary.status, checksSummary: plan.storedSummary,
             };
-          }
-          const becameFailing = reportFailure;
-          // A green/red rollup is a property of the whole head, not of the one
-          // check that happened to arrive last. Name the actual failing jobs
-          // on a failure, so the implementer knows what to fix and a passing
-          // check can never be described as the failure.
-          const failing = summary.failing.length ? summary.failing : [check.name];
-          if (becamePassing || becameFailing || (check.status === 'failed' && !options?.quiet))
-          noteInserted = await ctx.systemNote(
-            target.corner_id,
-            target.author_id,
-            {
-              subject: GITHUB_SUBJECT,
-              verb: becameFailing ? systemMessage("github-operations.found-failing-checks-on") : systemMessage("github-operations.a-check", label),
-              // A check that is still running is not yet a fact to react to.
-              ...(becamePassing
-                ? { kind: 'check-passed' as const }
-                : becameFailing
-                  ? { kind: 'check-failed' as const }
-                  : {}),
-              object: becameFailing
-                ? {
-                    text:
-                      current.pr?.title ??
-                      (current.pr?.number ? systemMessage("github-operations.pull-request-2", current.pr.number) : systemMessage("github-operations.the-pull-request")),
-                    ...(current.pr?.url ? { url: current.pr.url } : {}),
-                    ...(check.headSha ? { headSha: check.headSha } : {}),
-                  }
-                : {
-                    text: check.name,
-                    ...(check.url ? { url: check.url } : {}),
-                    ...(check.headSha ? { headSha: check.headSha } : {}),
-                  },
-              ...(becameFailing
-                ? { consequence: systemMessage("github-operations.failing", failing.join(systemMessage("github-operations.list-separator"))) }
-                : check.status === 'failed' && check.conclusion && check.conclusion !== 'failure'
-                  ? { consequence: check.conclusion }
-                  : {}),
-              ...(becameFailing ? { payload: {
-                failedJobs: jobLogs,
-              } } : {}),
-            },
-            becamePassing
-              ? `github:checks:green:${check.headSha}:${attempt}`
-              : becameFailing
-                ? `github:checks:failed:${check.headSha}`
-              : `github:checks:${label}:${check.name}:${check.headSha ?? hash(JSON.stringify(check))}`,
-            database,
-            true,
-          );
-          if (summary.status === 'failing' && !becameFailing)
-            await reconcileCornerMergeBlockers(database, target.corner_id);
+            return { corner: { ...corner, lifecycle }, event: plan.event };
+          },
+          async write(db) {
+            noteInserted = false;
+            // Webhooks signal a refresh. Revalidate its head and age only after
+            // the provider has replied, under the corner row lock.
+            const currentRow = (
+              await db.query<{ lifecycle: CornerLifecycleView & { checksSummary?: { fetchStartedAt?: number } } }>(
+                `SELECT lifecycle FROM corner_github_cache WHERE corner_id=$1 FOR UPDATE`,
+                [target.corner_id],
+              )
+            ).rows[0];
+            if (!currentRow || !admits(currentRow.lifecycle)) return false;
+            const plan = planCheckRefresh(currentRow.lifecycle);
+            await ctx.updateLifecycle(target.corner_id, { checks: plan.summary.status, checksSummary: plan.storedSummary }, db);
+            if (plan.wantsNote) {
+              noteInserted = (await systemLine(db, {
+                id: hash(`beeline:${target.corner_id}:${plan.dedupe}`),
+                roomId: target.corner_id,
+                authorId: target.author_id,
+                ...plan.phrase,
+                cardType: 'github-corner-note',
+                routeCommands: false,
+              })).inserted;
+            }
+            return plan.event ?? false;
+          },
         });
-        // The admitted webhook/command owns one transaction. Contention
-        // returns to that owner; it does not replay reads or writes here.
-        await refresh();
         if (noteInserted) ctx.onRoomChanged?.(target.corner_id);
     } catch (error) {
       if (transientGitHubError(error)) {

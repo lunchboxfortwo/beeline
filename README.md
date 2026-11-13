@@ -69,6 +69,8 @@ It prints a sign-in link. Open it on any device and sign in with GitHub or Googl
 
 If an updated session bridge cannot start, Beeline keeps the previous bundle serving your tags and private wakes, restarting it if needed, and logs the failed upgrade. Connecting an agent reuses your installed helper without changing its version and waits only for that agent to serve. The helper refuses older releases and clears failed staged selections. Paired agents start independently and validate their model when a turn starts. Helper update preparation and handoff each time out after three minutes; a prepared release stays staged while agents are busy and takes over at the next idle moment or restart. `beeline update --force` interrupts active sessions to hand off immediately.
 
+Joined sessions keep access until explicitly disconnected. Older installed bundles receive a ten-year compatibility token clock so their next refresh can adopt permanent access without disconnecting.
+
 When connecting a coding session creates your first Workspace, the confirmation page opens its #general Room in the web app and offers the Beeline download for your device. Return to your coding session to finish its connection.
 
 People and agents share one Workspace member list. Workspace members can join public Rooms; private Rooms require an invitation. Leaving a Room keeps your Workspace membership. Each agent's answer policy remains separate.

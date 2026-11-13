@@ -565,7 +565,7 @@ const scope1 = fixtureScope1();
       .toEqual(['provider_returned', 'started', 'ticket_exchanged', 'ticket_issued']);
   });
 
-  it('adopts a legacy refresh credential once without rotation or implicit family revocation', async () => {
+  it('R-MCP-LEGACY-CLOCK: adopts a legacy refresh once and keeps older sessions connected', async () => {
     const grant = await scope1.authorize();
     const initial = await (await scope1.exchange(grant)).json() as { access_token: string; refresh_token: string };
     initial.refresh_token = await scope1.legacyRefresh(initial.access_token);
@@ -577,7 +577,28 @@ const scope1 = fixtureScope1();
     expect(response.status).toBe(200);
     const next = await response.json() as typeof initial;
     expect(next).not.toHaveProperty('refresh_token');
-    expect(next).not.toHaveProperty('expires_in');
+    // Model the installed client's pre-4272 accessToken clock and token storage.
+    // Missing expires_in makes this NaN, so its next call refreshes without a credential.
+    const session = { accessToken: next.access_token, refreshToken: next.refresh_token,
+      accessExpiresAt: Date.now() + (next as typeof next & { expires_in: number }).expires_in * 1000 };
+    const legacyRefresh = vi.fn(async () => {
+      const result = await refresh(session.refreshToken);
+      if (result.status === 400) throw new Error('Beeline disconnected this session');
+      return (await result.json() as typeof initial).access_token;
+    });
+    const accessToken = async (now: number) => session.accessToken && session.accessExpiresAt > now + 60_000
+      ? session.accessToken : legacyRefresh();
+    for (const elapsed of [0, 60_000, 86_400_000]) {
+      const token = await accessToken(Date.now() + elapsed);
+      const call = await scope1.post('/mcp', { jsonrpc: '2.0', id: 1, method: 'tools/call',
+        params: { name: 'list_rooms', arguments: {} } },
+        { authorization: `Bearer ${token}`, 'mcp-protocol-version': '2026-07-28', accept: 'application/json' });
+      expect(call.status).toBe(200);
+      expect((await call.json() as { result: { isError?: boolean } }).result.isError).not.toBe(true);
+    }
+    expect(legacyRefresh).not.toHaveBeenCalled();
+    expect(next).toHaveProperty('expires_in', 10 * 365 * 24 * 60 * 60);
+    expect((await scope1.db.query('SELECT expires_at FROM rooms_mcp_tokens WHERE hash=$1', [tokenHash(next.access_token)])).rows[0]?.expires_at).toBeNull();
     expect((await phoneFetch(scope1.origin + '/mcp', { headers: { authorization: `Bearer ${next.access_token}` } })).status).not.toBe(401);
     expect((await refresh(initial.refresh_token)).status).toBe(400);
     for (const token of [initial.access_token, next.access_token]) {

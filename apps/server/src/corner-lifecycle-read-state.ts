@@ -53,6 +53,8 @@ export type CornerRow = {
   configured_reviewer_id: string | null;
   configured_reviewer_kind: string | null;
   configured_reviewer_name: string | null;
+  /** Changes on every committed write to the corner row; advanceCorner compares it. */
+  row_version?: string;
 };
 
 
@@ -66,7 +68,8 @@ export async function loadCorner(db: SqlDatabase, cornerId: string, retain: bool
               corner.archived_at IS NOT NULL archived,
               ${cornerReviewerSql()} configured_reviewer_id,
               configured.kind configured_reviewer_kind,
-              configured.name configured_reviewer_name
+              configured.name configured_reviewer_name,
+              fact.xmin::text row_version
        FROM corner_facts fact
        JOIN rooms corner ON corner.id=fact.corner_id
        JOIN rooms parent ON parent.id=corner.parent_id

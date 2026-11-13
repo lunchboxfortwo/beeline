@@ -16,7 +16,11 @@ export async function issueMcpTokens(db: SqlDatabase, grant: Grant, familyId: st
   await db.query(`INSERT INTO rooms_mcp_tokens(hash,identity_id,client_id,scope,family_id)
     VALUES($1,$2,$3,$4,$5)`,
     [tokenHash(access), grant.identity_id, grant.client_id, grant.scope, familyId]);
-  return { access_token: access, token_type: 'Bearer', scope: grant.scope };
+  // Older installed clients require a finite token clock to avoid refreshing
+  // again without a refresh credential. This is wire compatibility only:
+  // stored access never expires and remains subject to explicit revocation.
+  return { access_token: access, token_type: 'Bearer', scope: grant.scope,
+    expires_in: 10 * 365 * 24 * 60 * 60 };
 }
 
 export async function connectMcp(db: SqlDatabase, grant: Grant) {

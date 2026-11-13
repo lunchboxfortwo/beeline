@@ -2,7 +2,8 @@ import {installOwnedModelProvider} from './owned-model-install.js';
 import { postChangedAgentUsage } from './helper-usage-binding.js';
 import { agentBehavior } from './agent-command.js';
 import type { SandboxSessionSpec } from './bwrap-sandbox.js';
-import { extraDependencyRoots, dependencyFingerprint, prepareDependencyGeneration, installDependencyNpmGuard, dependencyRequest } from './dependency-generation.js';
+import { extraDependencyRoots, dependencyFingerprint, prepareDependencyGeneration, installDependencyNpmGuard, dependencyRequest, dependencyLayers, DEPENDENCY_LAYERS_DIR } from './dependency-generation.js';
+import type { DependencyLayer } from './bwrap-sandbox.js';
 import { CODE_OWNED_HOST_MCP_NAMES } from './mcp-route-class.js';
 import { createRoomPermissionHandler } from './monolith-room-turn.js';
 import { modelContextWindowTokens } from './model-context-window.js';
@@ -255,6 +256,9 @@ import { MonolithCornerTurnLoop, execFileAsync } from './monolith-corner-turn.js
     const attachScratchRoot = ctx.options.config.agentHomeRoot ?? tmpDir;
     if (attachScratchRoot) await mkdir(attachScratchRoot, { recursive: true });
     const dependencyPaths: string[] = [];
+    // Every tree prepared below is mounted copy-on-write, also for the later
+    // installs that share this spec.
+    const layers: DependencyLayer[] = [];
     const sandboxSpec: SandboxSessionSpec = {
         operatorHome,
         userRuntimeDir: `/run/user/${process.getuid?.() ?? 0}`,
@@ -264,7 +268,7 @@ import { MonolithCornerTurnLoop, execFileAsync } from './monolith-corner-turn.js
         worktreePath: ctx.options.worktreePath,
         ...(repository ? { gitCommonDir: repository.gitCommonDir } : {}),
         protectedPaths: [ctx.options.runtime.supervisorRoot],
-        dependencyPaths,
+        dependencyLayers: layers,
         harnessStateDirs: stateDirs,
         harnessHomeStateDirs: homeStateDirs,
         ...(tmpDir ? { tmpDir } : {}),
@@ -312,6 +316,12 @@ import { MonolithCornerTurnLoop, execFileAsync } from './monolith-corner-turn.js
     const needsMobile = () => existsSync(resolve(mobile, 'node_modules')) || existsSync(resolve(ctx.options.worktreePath, dependencyRequest));
     if (repository && !repository.readOnly && ctx.options.config.bwrapPath && (prepareRoot || needsMobile())) {
       const npm = (await execFileAsync('which', ['npm'])).stdout.trim();
+      // The layers live in this agent's private corner repository, so a write
+      // never reaches another corner and archive cleanup removes them.
+      const share = async (trees: string[]) => {
+        dependencyPaths.push(...trees);
+        layers.push(...await dependencyLayers(resolve(repository.gitCommonDir, DEPENDENCY_LAYERS_DIR), trees));
+      };
       const install = (cwd: string) => async () => {
         const command = wrapAgentCommand({ bwrapPath: ctx.options.config.bwrapPath,
           spec: { ...sandboxSpec, cwd }, command: npm, args: ['ci', '--no-audit', '--no-fund'] });
@@ -320,7 +330,7 @@ import { MonolithCornerTurnLoop, execFileAsync } from './monolith-corner-turn.js
         });
       };
       if (prepareRoot) {
-        dependencyPaths.push(...await prepareDependencyGeneration({
+        await share(await prepareDependencyGeneration({
           root: ctx.options.worktreePath, store: warmNodeModulesStoreDir(ctx.options.runtime.supervisorRoot), npm, cache: npmCacheDir, install: install(ctx.options.worktreePath),
         }));
         if (cornerPrepareScript) {
@@ -334,13 +344,13 @@ import { MonolithCornerTurnLoop, execFileAsync } from './monolith-corner-turn.js
         }
       }
       if (needsMobile()) {
-        dependencyPaths.push(...await prepareDependencyGeneration({
+        await share(await prepareDependencyGeneration({
           root: mobile, store: mobileNodeModulesStoreDir(ctx.options.runtime.supervisorRoot), npm, cache: npmCacheDir, install: install(mobile),
         }));
         await rm(resolve(ctx.options.worktreePath, dependencyRequest), { force: true });
       }
       if (prepareRoot) for (const extra of await extraDependencyRoots(ctx.options.worktreePath, ctx.options.config.agentHomeRoot)) {
-        dependencyPaths.push(...await prepareDependencyGeneration({
+        await share(await prepareDependencyGeneration({
           root: extra, store: warmNodeModulesStoreDir(ctx.options.runtime.supervisorRoot),
           npm, cache: npmCacheDir, install: install(extra),
         }));

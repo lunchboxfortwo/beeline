@@ -72,8 +72,10 @@ it.each([
     await expect(loop.activate()).rejects.toThrow('launch boundary');
     expect(await readFile(resolve(mobile, 'node_modules/proof/package.json'), 'utf8')).toContain('1.0.0');
     const args = launch.mock.calls[0][0].agentArgs;
-    const path = resolve(mobile, 'node_modules/proof');
-    expect(args.slice(args.lastIndexOf(path) - 2, args.lastIndexOf(path) + 1)).toEqual(['--ro-bind', path, path]);
+    // The tree is mounted copy-on-write over a layer in this agent's private repository.
+    const tree = resolve(mobile, 'node_modules'), at = args.indexOf(tree);
+    expect(args.slice(at + 1, at + 3)).toEqual(['upper', 'work'].map(dir =>
+      expect.stringMatching(new RegExp(`^${resolve(checkout, '..', 'git', 'beeline-dependency-layers')}/[0-9a-f-]+/${dir}$`))));
     expect(existsSync(resolve(checkout, 'node_modules'))).toBe(false);
     expect(existsSync(resolve(checkout, dependencyRequest))).toBe(false);
     if (state === 'warm') expect(stop).toHaveBeenCalledOnce();
@@ -119,7 +121,7 @@ fs.writeFileSync('node_modules/.package-lock.json', '{"packages":{"node_modules/
   try {
     await expect(loop.activate()).rejects.toThrow('launch boundary');
     expect(await readFile(resolve(mobile, 'node_modules/proof/package.json'), 'utf8')).toContain('1.0.0');
-    expect(launch.mock.calls[0][0].agentArgs).toContain(resolve(mobile, 'node_modules/proof'));
+    expect(launch.mock.calls[0][0].agentArgs).toContain(resolve(mobile, 'node_modules'));
     expect(existsSync(resolve(checkout, dependencyRequest))).toBe(false);
     expect(existsSync(resolve(checkout, 'node_modules'))).toBe(false);
   } finally { loop.squireRelay.close(); }

@@ -608,18 +608,28 @@ import { GitHubOperations, Input, hash, challenge, record, GitHubRecord, text, i
 
   /** Move the stored PR head to GitHub's live head, as its missed push webhook would. */
   export async function moveStoredCornerHead(ctx: GitHubOperations, cornerId: string, number: number, from: string, to: string) {
-    await ctx.database.transaction(async db => {
-      await lockCornerLifecycle(db, cornerId);
-      const changed = await db.query(
-        `UPDATE corner_github_cache SET lifecycle=jsonb_set(jsonb_set(
-           jsonb_set(lifecycle-'checksSummary','{pr,headSha}',to_jsonb($4::text)),
-           '{pr,mergeability}','"unknown"'),'{checks}','"pending"')
-         WHERE corner_id=$1 AND lifecycle->'pr'->>'number'=$2
-           AND lifecycle->'pr'->>'headSha'=$3 RETURNING corner_id`,
-        [cornerId, String(number), from, to],
-      );
-      if (changed.rowCount) await advanceCorner(db, cornerId,
-        { kind: 'push', headSha: to, contents: { headSha: to } });
+    await advanceCorner(ctx.database, cornerId, { kind: 'push', headSha: to, contents: { headSha: to } }, {
+      project(corner) {
+        const current = corner.lifecycle.pr;
+        if (!current || current.number !== number || current.headSha !== from) return undefined;
+        const lifecycle = {
+          ...corner.lifecycle, checks: 'pending' as const,
+          pr: { ...current, headSha: to, mergeability: 'unknown' as const },
+        };
+        delete (lifecycle as { checksSummary?: unknown }).checksSummary;
+        return { corner: { ...corner, lifecycle } };
+      },
+      async write(db) {
+        const changed = await db.query(
+          `UPDATE corner_github_cache SET lifecycle=jsonb_set(jsonb_set(
+             jsonb_set(lifecycle-'checksSummary','{pr,headSha}',to_jsonb($4::text)),
+             '{pr,mergeability}','"unknown"'),'{checks}','"pending"')
+           WHERE corner_id=$1 AND lifecycle->'pr'->>'number'=$2
+             AND lifecycle->'pr'->>'headSha'=$3 RETURNING corner_id`,
+          [cornerId, String(number), from, to],
+        );
+        return Boolean(changed.rowCount);
+      },
     });
   }
 
