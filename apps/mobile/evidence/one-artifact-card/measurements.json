@@ -1,0 +1,54 @@
+[
+  {
+    "theme": "light",
+    "bounds": [
+      {
+        "state": "sending",
+        "x": 60,
+        "y": 199,
+        "width": 354,
+        "height": 362
+      },
+      {
+        "state": "settled",
+        "x": 60,
+        "y": 199,
+        "width": 354,
+        "height": 362
+      },
+      {
+        "state": "refreshed",
+        "x": 60,
+        "y": 199,
+        "width": 354,
+        "height": 362
+      }
+    ]
+  },
+  {
+    "theme": "dark",
+    "bounds": [
+      {
+        "state": "sending",
+        "x": 60,
+        "y": 199,
+        "width": 354,
+        "height": 362
+      },
+      {
+        "state": "settled",
+        "x": 60,
+        "y": 199,
+        "width": 354,
+        "height": 362
+      },
+      {
+        "state": "refreshed",
+        "x": 60,
+        "y": 199,
+        "width": 354,
+        "height": 362
+      }
+    ]
+  }
+]

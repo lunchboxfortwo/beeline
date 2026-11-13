@@ -171,12 +171,14 @@ export function useChatComposerSend([
       // transport startup and outbox persistence can all take longer than a
       // frame on a cold Android device.
       // Each viewport paints its provisional row before preparation.
-      const provisionalId = activePendingAttachments.length === 0
-        ? `pending:${Date.now()}:${Math.random()}`
-        : null;
+      const provisionalId = `pending:${Date.now()}:${Math.random()}`;
       if (provisionalId) {
         const provisional = {
           id: provisionalId,
+          ...(activePendingAttachments.length ? {
+            attachmentUploadPending: true,
+            attachments: activePendingAttachments.map(({ uri, name, mimeType, size }) => ({ url: uri, name, mimeType, size })),
+          } : {}),
           text,
           isUser: true,
           timestamp: Math.floor(Date.now() / 1_000),
@@ -325,7 +327,7 @@ export function useChatComposerSend([
           ...(attachments.length ? { attachments } : {}),
         });
         landAtOwnSend(optimistic.id);
-        if (!provisionalId) addMessages([optimistic]);
+        if (activePendingAttachments.length) addMessages([optimistic]);
         if (!sendShortcut) {
           const draftCleared = clearSubmittedDraft();
           if (activeComposerDraftRef.current === composerDraft) {

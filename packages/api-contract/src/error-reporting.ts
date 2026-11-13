@@ -52,6 +52,9 @@ export function privateErrorEvent<T>(input: T): T {
   // must not bypass the privacy boundary, even if supplied by an SDK scope.
   if (typeof tags.route_pattern === 'string' && FUNNEL_SCREENS.includes(tags.route_pattern as never))
     (output.tags as Record<string, unknown>).route_pattern = tags.route_pattern;
+  // Only the opaque Beeline identity id, so Sentry counts people without naming them.
+  const userId = object(event.user).id;
+  if (typeof userId === 'string' && /^[0-9a-f]{64}$/i.test(userId)) output.user = { id: userId };
   const postgres=object(object(event.contexts).postgresql);
   if(typeof postgres.code==='string' && /^[0-9A-Z]{5}$/.test(postgres.code)
     && typeof postgres.statement_fingerprint==='string' && /^[a-f0-9]{16}$/.test(postgres.statement_fingerprint)) {
@@ -59,7 +62,7 @@ export function privateErrorEvent<T>(input: T): T {
       ...((postgres.code==='40P01'||postgres.code==='55P03')&&typeof postgres.detail==='string'
         ?{detail:redactDiagnostic(postgres.detail)}:{})}};
   }
-  // No user, IP, device identity, request, breadcrumbs, extra, source lines,
+  // No other user field, IP, device identity, request, breadcrumbs, extra, source lines,
   // locals, attachments, arbitrary contexts/tags, session replay, or log payloads.
   return output as T;
 }

@@ -1,3 +1,4 @@
+import { withSentryUser } from "./sentry.js";
 import type { WebSocket } from "ws";
 import type { DaemonLiveDependencies } from "./daemon-live.js";
 import type { LiveEvent, LiveTrace } from "./live.js";
@@ -246,7 +247,7 @@ export function handleLiveConnection(ctx: LiveConnectionContext, client: WebSock
       const handlePhoneRequest = phoneSocketRequests(client, principal.identityId,
         ctx.dispatchPhoneOperation, sendLive, requestErrorStatus, principal.familyId,
         (_name, _args, result, enqueue) => fenceCommandReceiptEnqueue(ctx.options.database, principal.identityId, result, enqueue));
-      client.on('message', (raw) => {
+      client.on('message', (raw) => withSentryUser(principal.identityId, () => {
         const frameBytes = Array.isArray(raw)
           ? raw.reduce((total, part) => total + part.length, 0)
           : raw.byteLength;
@@ -624,7 +625,7 @@ export function handleLiveConnection(ctx: LiveConnectionContext, client: WebSock
                 : { type: 'invalidate', roomId: '', reason: 'reconnect' }));
             }
           });
-      });
+      }));
       const releasePhoneView = () => {
         if (phoneViewClosed) return;
         phoneViewClosed = true;

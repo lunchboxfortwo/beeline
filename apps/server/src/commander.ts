@@ -343,7 +343,7 @@ export async function reportToCommander(
   text: string,
   command?: CommandRow,
   reportId = randomBytes(32).toString('hex'),
-  options: { orderIssuer?: boolean; automatic?: boolean; agentOnly?: boolean; ask?: string; attachments?: PrivateCommandPayload['attachments']; wakeInCorner?: boolean; idleSince?: string } = {},
+  options: { orderIssuer?: boolean; automatic?: boolean; agentOnly?: boolean; ask?: string; attachments?: PrivateCommandPayload['attachments']; idleSince?: string } = {},
 ): Promise<{ id: string; createdAt: number; delivered?: boolean; receipt?: string; skipped?: boolean }> {
   // Server-generated failure diagnostics may include long child argv/stderr.
   // The manual report limit must not roll back their terminal receipt.
@@ -365,10 +365,20 @@ export async function reportToCommander(
     console.error(`[commander] ${roomId}: cannot route report without recorded opening provenance`);
     return { id: reportId, createdAt: Math.floor(Date.now() / 1000), delivered: false };
   }
-  const wakeRoom = options.automatic && options.agentOnly && options.wakeInCorner && origin &&
-    (await db.query('SELECT 1 FROM room_access WHERE room_id=$1 AND identity_id=$2 AND removed_at IS NULL',
-      [origin,recipient])).rowCount ? origin : returnRoom;
   const recipientKind=(await db.query<{kind:string}>('SELECT kind FROM identities WHERE id=$1',[recipient])).rows[0]?.kind;
+  // A report from a thread wakes its agent commander inside that thread, so
+  // the reaction stays with the thread instead of the chat it was opened from.
+  // Effective access counts inherited parent-roster membership; callers on the
+  // raw database need the named view rather than query rewriting. A connected
+  // app has no helper turn in the thread; it keeps the session it joined. A
+  // relay from a thread the commander itself implements keeps the return route.
+  const wakeRoom = recipientKind === 'agent' && origin &&
+    (await db.query(`SELECT 1 FROM room_access access JOIN rooms corner ON corner.id=access.room_id
+      LEFT JOIN corner_facts fact ON fact.corner_id=corner.id
+      WHERE access.room_id=$1 AND access.identity_id=$2 AND access.removed_at IS NULL
+      AND NOT EXISTS(SELECT 1 FROM rooms_mcp_members app WHERE app.member_id=$2)
+      AND ${cornerImplementerSql('fact', 'corner')} IS DISTINCT FROM $2`,
+      [origin,recipient])).rowCount ? origin : returnRoom;
   if(recipientKind==='agent')
     await lockAgentCommandQueue(db,[{roomId:returnRoom,agentId:recipient},{roomId:wakeRoom,agentId:recipient}]);
   const member = (
@@ -415,13 +425,6 @@ export async function reportToCommander(
     : [];
   if (member.kind === 'agent') {
     const delivery = await db.transaction(async (db) => {
-      // Automatic agent-only system status is private coordination. Only the
-      // idle alert opts into waking the commander inside its corner, so its
-      // reply stays with the corner's members instead of a parent Room
-      // strangers read; every other report keeps the caller's return route.
-      // effective corner access: inherited parent-roster membership counts, and
-      // this caller (refreshCornerAttention) runs on the raw database, so name
-      // the effective view instead of relying on query rewriting.
       // System attention reports describe the worker's own work. Preserve that
       // source separately from the visible System author so shared admission
       // cannot wake a worker that is also its own commander.
@@ -468,6 +471,15 @@ export async function reportToCommander(
     });
     if (delivery) return delivery;
   } else {
+    // Closing prose after an explicit post to this same chat is turn activity.
+    // Delivering it as a report would post the same answer to the person twice.
+    const posted = options.automatic && command?.private_payload?.publicPostId &&
+      command.private_payload.publicPostGenerationId === command.generation_id
+      ? (await db.query<{ id: string }>(`SELECT id FROM messages WHERE id=$1 AND room_id=$2 AND deleted_at IS NULL`,
+        [command.private_payload.publicPostId, returnRoom])).rows[0]
+      : undefined;
+    if (posted)
+      return { id: posted.id, createdAt: Math.floor(Date.now() / 1000), delivered: true, skipped: true };
     // The existing attention index follows this transport provenance; no public relay is created.
     if (origin && incoming?.private_payload)
       await db.query(

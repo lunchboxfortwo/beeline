@@ -32,7 +32,7 @@ vi.mock('@/components/buzz/Button', () => ({ Button: vi.fn(() => null) }));
 vi.mock('@/components/buzz/MonoHull', () => ({ NewMessageMaterialize: vi.fn(() => null), PixelLoader: vi.fn(() => null) }));
 vi.mock('@/modal', () => ({ Modal: vi.fn(() => null) }));
 vi.mock('@/buzz/picture-actions', () => ({ showPictureActions: vi.fn(() => null) }));
-vi.mock('@/buzz/chat-attachment', () => ({ attachmentOpenUrl: vi.fn(() => null), formatAttachmentSize: vi.fn(() => null) }));
+vi.mock('@/buzz/chat-attachment', () => ({ formatAttachmentSize: vi.fn(() => null) }));
 vi.mock('@/utils/open-external-url', () => ({ openExternalUrl: vi.fn(() => null) }));
 vi.mock('@/auth/signin-funnel', () => ({ funnelOnboarding: vi.fn(() => null) }));
 vi.mock('@/buzz/artifact-viewport', () => ({ useArtifactRowVisible: vi.fn(() => null) }));

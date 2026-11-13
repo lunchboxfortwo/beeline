@@ -464,7 +464,7 @@ export const ChatSurfaceComposer = React.memo(function ChatSurfaceComposer({
                       }
                       onCancelReply={() => setReplyTarget(null)}
                       tagHandles={composerTagHandles}
-                      attachments={pendingAttachments.map((attachment) => ({
+                      attachments={(sending ? [] : pendingAttachments).map((attachment) => ({
                         uri: attachment.uri,
                         name: attachment.name,
                         mimeType: attachment.mimeType,

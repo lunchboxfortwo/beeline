@@ -16,13 +16,18 @@ import { useChatComposerSend } from './useChatComposerSend';
 import { useSendConfirmationState } from './send-confirmation';
 import { selectComposerAckPresentation } from '@/buzz/room-indicators';
 
-it.each([false, true])('SEND-CONFIRM-1 paints the optimistic row before acceptance and keeps failure feedback (reply=%s)', async (reply) => {
+it.each([[false, false], [false, true], [true, false], [true, true]])('ONE-SHAPE / SEND-CONFIRM-1 paints before preparation (attachment=%s, reply=%s) and keeps failure feedback', async (withAttachment, reply) => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   let accept!: (result: object) => void;
   const receipt = new Promise<object>(resolve => { accept = resolve; });
   const event = { id: 'signed-message', created_at: 100 };
+  let releaseUpload!: (files: object[]) => void;
+  const uploaded = new Promise<object[]>(resolve => { releaseUpload = resolve; });
+  const picked = { uri: 'file:///shot.png', name: 'shot.png', mimeType: 'image/png', size: 68, source: 'photo' };
+  const attachment = { url: '/v1/media/11111111-1111-4111-8111-111111111111', name: picked.name, mimeType: picked.mimeType, size: picked.size };
+  const uploader = { uploadAll: vi.fn(() => uploaded) };
   const compose = vi.fn(async () => event);
-  const transport = { composeMessage: compose, composeReplyMessage: compose };
+  const transport = { ensureClient: async () => ({}), composeMessage: compose, composeReplyMessage: compose };
   const outbox = { enqueue: vi.fn(async (_event: unknown, _row: unknown) => undefined), send: vi.fn(() => receipt), get: () => true };
   let inputRef!: React.RefObject<string>;
   let send!: ReturnType<typeof useChatComposerSend>[0];
@@ -39,13 +44,13 @@ it.each([false, true])('SEND-CONFIRM-1 paints the optimistic row before acceptan
     const inFlight = useRef(false);
     const input = useRef(draft.value);
     inputRef = input;
-    const args = [draft, input, replyTarget, { current: [] }, inFlight, false,
+    const args = [draft, input, replyTarget, { current: withAttachment ? [picked] : [] }, inFlight, false,
       [], { current: new Map() }, () => no, { current: new Map() }, [], true,
       { current: () => outbox }, true, confirmation.setReceivedSteer, confirmation.setPendingAck,
       setSending, true, setDelivery, null, 'viewer', { remove: no }, { request: no }, no,
-      (rows: ChatDisplayMessage[]) => setMessages(current => [...current, ...rows]), true, null,
+      (rows: ChatDisplayMessage[]) => setMessages(current => [...current.filter(message => !rows.some(row => row.id === message.id)), ...rows]), true, null,
       false, null, no, null, [], transport, null, no,
-      (id: string) => setMessages(current => current.filter(message => message.id !== id)), {}, 'room',
+      (id: string) => setMessages(current => current.filter(message => message.id !== id)), uploader, 'room',
       (from: string, to: string) => setMessages(current => current.map(message => message.id === from ? { ...message, id: to } : message)),
       { current: draft }, { current: 0 }, { current: null }, no, no, no, no, no, no, no, null,
       no, () => false, undefined, 'viewer', undefined, {}, 0, {}, new Map(), no, no];
@@ -54,7 +59,7 @@ it.each([false, true])('SEND-CONFIRM-1 paints the optimistic row before acceptan
       ...(confirmation.pendingAck ? { pendingAckSentAt: confirmation.pendingAck.sentAt,
         externalHandles: confirmation.pendingAck.externalHandles } : {}) });
     return <output data-sending={sending} data-delivery={delivery}>
-      {messages.map(message => <p key={message.id}>{message.text}</p>)}
+      {messages.map(message => <p key={message.id} data-message={message}>{message.text}</p>)}
       <span>{ack?.label ?? ''}</span>
     </output>;
   }
@@ -65,6 +70,17 @@ it.each([false, true])('SEND-CONFIRM-1 paints the optimistic row before acceptan
     await act(async () => { pending = send(); });
     expect(tree.root.findByType('p').props.children).toBe('Hello agent');
     expect(tree.root.findByType('span').props.children).toBe('sending…');
+    if (withAttachment) {
+      expect(outbox.enqueue).not.toHaveBeenCalled();
+      expect(transport.composeMessage).not.toHaveBeenCalled();
+      expect(tree.root.findByType('p').props['data-message']).toMatchObject({
+        attachmentUploadPending: true, attachments: [{ url: picked.uri, name: picked.name }],
+      });
+      await act(async () => { releaseUpload([attachment]); });
+      expect(tree.root.findAllByType('p')).toHaveLength(1);
+      expect(tree.root.findByType('p').props['data-message'].attachments).toEqual([attachment]);
+      expect(tree.root.findByType('p').props['data-message'].attachmentUploadPending).toBeUndefined();
+    }
     expect(outbox.enqueue).toHaveBeenCalledOnce();
     expect(outbox.enqueue.mock.calls[0]?.[1]).toMatchObject(reply ? { reply: reference } : {});
     await act(async () => { accept({ externalAgentHandles: ['atlas'] }); await pending; });

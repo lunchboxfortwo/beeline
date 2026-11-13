@@ -94,11 +94,6 @@ export async function pastedImageAttachment(
 
 export { formatAttachmentSize } from './artifact';
 
-/** Active file cards use the isolated renderer; ordinary files keep their media URL. */
-export function attachmentOpenUrl(attachment: AttachmentReference): string {
-  return attachment.previewUrl ?? attachment.url;
-}
-
 function replaceExtension(name: string, extension: string): string {
   const dot = name.lastIndexOf('.');
   return `${dot > 0 ? name.slice(0, dot) : name}.${extension}`;

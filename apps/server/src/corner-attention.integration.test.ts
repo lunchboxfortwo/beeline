@@ -143,7 +143,7 @@ it('a pre-claim failure cannot end queued work; its owner can report a plain fai
   await daemon.execute('postAgentTurnReceipt',{roomId:C,requestId:command.turn_request_id,generationId:'workspace-failure',
     status:'failed',reason:'git fetch failed: cannot lock ref'},WORKER);
   expect(await state()).toBe('idle');
-  const failures=(await readAgentCommands(db,ROOM,COMMANDER)).commands.filter(item=>item.reason==='report');
+  const failures=(await readAgentCommands(db,C,COMMANDER)).commands.filter(item=>item.reason==='report'&&item.source.body.startsWith('failed:'));
   expect(failures).toHaveLength(1);
   expect(failures[0]!.source.body).toContain('cannot lock ref');
 });
@@ -390,7 +390,8 @@ it('Reproduction CORNER-REVIEW-ROLE: a dispatched reviewer stays Review after Ro
   await db.query(`UPDATE rooms SET reviewer_agent_id=NULL WHERE id=$1`,[ROOM]);
   expect(await serviceStates()).toEqual(['review','review']);
   await runCornerAttention(db);
-  expect(await commanderFlags()).toHaveLength(0);
+  // The review gap notice now reaches the commander in this corner; no idle alert joins it.
+  expect((await commanderFlags()).filter(c=>c.source.body.includes(' is idle.'))).toHaveLength(0);
   await end(REVIEWER,40);
   // A terminal review without a verdict returns ownership to the implementer.
   expect(await serviceStates()).toEqual(['working','working']);
