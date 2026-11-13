@@ -1,4 +1,4 @@
-import { describe, it, expect, cornerCallText, Check, callAgentTool, CAPABILITY_TOOLS, toolValidationSchema, m7_describe, m7_expect, m7_it, m7_agentToolsFor, m7_askChoice, m7_openPoll, mergedDescribe7, m8_describe, m8_expect, m8_it, m8_agentToolsFor, m8_emitEvent, m8_listEventSubscriptions, m8_subscribeEvents, mergedDescribe8, m9_createHash, m9_tmpdir, m9_describe, m9_expect, m9_it, m9_REQUESTABLE_AGENT_GRANT_KINDS, m9_agentToolsFor, m9_listGrants, m9_requestGrant, m9_requestSharedAssetIsolation, m9_runGrantedCommand, m9_storeSecret, m9_resolveGrantCommand, m9_approvedDeviceGrant, mergedDescribe9, schema, fixtureScope3, fixtureScope6, fixtureScope8, fixtureScope12, type m9_GrantRunDeps, type Call } from './test-support-read-only-mcp.test-support.js';
+import { describe, it, expect, cornerCallText, Check, callAgentTool, CAPABILITY_TOOLS, toolValidationSchema, m7_describe, m7_expect, m7_it, m7_agentToolsFor, m7_askChoice, m7_openPoll, mergedDescribe7, m8_describe, m8_expect, m8_it, m8_agentToolsFor, m8_emitEvent, m8_listEventSubscriptions, m8_subscribeEvents, mergedDescribe8, m9_createHash, m9_tmpdir, m9_describe, m9_expect, m9_it, m9_REQUESTABLE_AGENT_GRANT_KINDS, m9_agentToolsFor, m9_listGrants, m9_requestGrant, m9_requestSharedAssetIsolation, m9_runGrantedCommand, m9_storeSecret, m9_resolveGrantCommand, mergedDescribe9, schema, fixtureScope3, fixtureScope6, fixtureScope8, fixtureScope12, type m9_GrantRunDeps, type Call } from './test-support-read-only-mcp.test-support.js';
 
 describe('corner text', () => {
   it('flattens an untidy call instead of refusing it', () => {
@@ -476,7 +476,7 @@ m9_describe('beeline-agent request_grant', () => {
     m9_expect(reply).toContain(
       "The resource owner must answer ALWAYS, ONCE, or NO in the resource owner's private Trusty Squire DM",
     );
-    m9_expect(reply).toContain('approval wake starts the fresh session with that route mounted');
+    m9_expect(reply).toContain('approval wake continues this session');
     m9_expect(reply).toContain('without restarting or scheduling another turn');
   });
 
@@ -543,19 +543,15 @@ m9_describe('beeline-agent request_grant', () => {
   });
 
 
-  m9_it('tells an instantly approved /dev/ device grant that its next message has the device', async () => {
+  m9_it('makes an approved device available to tools without replacing the session', async () => {
     const device = await m9_requestGrant(
       { kind: 'device', target: '/dev/kvm', purpose: 'run the Android emulator', reason: 'run the Android emulator' },
       scope8.deps({ grantId: 'g-4', status: 'approved', auto: true }),
     );
     m9_expect(device).toBe(
-      'approved: use /dev/kvm [grant g-4]. A running session cannot add a device: say what you will do with /dev/kvm and end your answer; your next message runs in a session that has it.',
+      'approved: use /dev/kvm [grant g-4]. Use it now through run_granted_command; its tool sandbox loads the current device grant.',
     );
     m9_expect(device).not.toContain('next session');
-    // The runner recognises exactly this reply and starts a fresh session next.
-    m9_expect(m9_approvedDeviceGrant([{ title: 'mcp__beeline-agent__request_grant', content: device }])).toBe(
-      '/dev/kvm',
-    );
     const outside = await m9_requestGrant(
       { kind: 'device', target: 'kvm', purpose: 'run the Android emulator', reason: 'run the Android emulator' },
       scope8.deps({ grantId: 'g-5', status: 'approved', auto: true }),

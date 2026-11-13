@@ -49,7 +49,6 @@ export function agentArgsWithModelSelection(
   const original = [...agent.args];
   if (
     !selection ||
-    (!selection.model && !selection.effort) ||
     !isGrokAgentCommand(agent) ||
     !original.includes('agent') ||
     !original.includes('stdio')

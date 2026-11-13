@@ -1,3 +1,4 @@
+import { sessionToolRequest } from './session-tool-connection.js';
 import { agentToolsFor, REPOSITORY_ROUTES, repositoryTools } from "./minimal-tool-surface.js";
 import { realpathSync, lstatSync, existsSync, statSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve, isAbsolute, relative, sep, join, basename } from "node:path";
@@ -101,7 +102,7 @@ export const TOOLS = agentToolsFor(
   process.env.BEELINE_AGENT_DM === '1',
   Boolean(process.env.BEELINE_DAEMON_CORNER_ID),
   process.env.BEELINE_CORNER_REPOSITORY === '1',
-  Boolean(process.env.BEELINE_GRANT_RUNNER_URL),
+  Boolean(process.env.BEELINE_GRANT_RUNNER_URL || process.env.BEELINE_GRANT_RUNNER_FILE),
   true,
   process.env.BEELINE_NATIVE_IO_PROVEN === '1',
   Boolean(process.env.BEELINE_FREE_AGENT_ID || process.env.BEELINE_FREE_AGENT_MODEL_TOKEN),
@@ -755,22 +756,7 @@ export function grantRunDepsFromEnv(): GrantRunDeps {
   return {
     roomId: agentScheduleRoomId(),
     run: async (input) => {
-      const baseUrl = requiredEnv('BEELINE_GRANT_RUNNER_URL');
-      const response = await fetch(new URL('/run', `${baseUrl}/`), {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${requiredEnv('BEELINE_GRANT_RUNNER_TOKEN')}`,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify(input),
-      });
-      const body = (await response.json().catch(() => ({}))) as JsonObject;
-      if (!response.ok) {
-        throw new Error(
-          typeof body.error === 'string' ? body.error : `grant runner failed (${response.status})`,
-        );
-      }
-      return body;
+      return await sessionToolRequest('/run', input) as JsonObject;
     },
   };
 }

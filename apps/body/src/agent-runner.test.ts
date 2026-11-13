@@ -140,3 +140,16 @@ it('hands a new busy-place item to the active session as follow-up input and ans
   await vi.waitFor(() => expect(f.execute.mock.calls.filter(call => call[0] === 'postRoomMessage')).toHaveLength(2));
   expect(harness.deliver).toHaveBeenCalledTimes(1);
 });
+
+it('posts an already stored answer when the outbox becomes unwritable afterwards', async () => {
+  const save = AnswerStore.prototype.save;
+  let writable = true;
+  vi.spyOn(AnswerStore.prototype, 'save').mockImplementation(async function (answer) {
+    if (!writable) throw new Error('outbox became read-only');
+    await save.call(this, answer);
+    writable = false;
+  });
+  const f = await fixture();
+  f.changed([f.item('stored-before-readonly')]);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({ text: 'answer' })));
+});

@@ -103,14 +103,14 @@ export function resumePrompt(item: { body: string; systemEvent?: SystemEvent }):
   if (grant?.kind === 'device' && grant.decision !== 'deny') {
     return [
       'This is the answer to your grant request; your paused work resumes now.',
-      `The approved device ${grant.target} is in this session.`,
+      `The approved device ${grant.target} is available to run_granted_command in this session.`,
       'Continue the paused work with it now; do not restart, schedule another turn, or request the device again.',
     ].join(' ');
   }
   if (grant?.kind === 'mcp' && grant.decision !== 'deny') {
     return [
       'This is the answer to your grant request; your paused work resumes now.',
-      `The approved ${grant.target} route is mounted in this session.`,
+      `The approved ${grant.target} route is available through your session tools; read(facet:session) shows its load result.`,
       'Continue the paused work with that tool now; do not restart, schedule another turn, or request the route again.',
     ].join(' ');
   }
@@ -152,22 +152,4 @@ export function itemPrompt(item: AgentCommand, options: {
     ...(source.replyToExcerpt ? [`In reply to ${source.replyToAuthorName ?? 'a message'}: ${source.replyToExcerpt}`] : []),
     ...attachmentMarkerLines(source.attachments),
   ].join('\n');
-}
-
-
-/**
- * The device an instantly approved `request_grant` added in this answer, if
- * any. bwrap fixes `/dev` when a session starts, so the next item gets a
- * fresh session that has it.
- */
-export function approvedDeviceGrant(
-  calls: readonly { title?: string; content?: unknown }[],
-): string | undefined {
-  for (const call of calls) {
-    if (!/(?:^|[._:/-])request_grant$/i.test(call.title ?? '')) continue;
-    const text = typeof call.content === 'string' ? call.content : JSON.stringify(call.content ?? '');
-    const device = /approved: use (\/dev\/\S+) \[grant [^\]]*\]\. A running session cannot add a device/.exec(text)?.[1];
-    if (device) return device;
-  }
-  return undefined;
 }

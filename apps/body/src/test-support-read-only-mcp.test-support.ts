@@ -50,7 +50,6 @@ import { agentToolsFor as m9_agentToolsFor, listGrants as m9_listGrants, request
 import { resolveGrantCommand as m9_resolveGrantCommand } from "./grant-script.js";
 
 
-import { approvedDeviceGrant as m9_approvedDeviceGrant } from "./place-prompt.js";
 
 import { describe as mergedDescribe9 } from 'vitest';
 
@@ -845,7 +844,7 @@ export { tmpdir as m9_tmpdir, tmpdir as m24_tmpdir, tmpdir as m25_tmpdir, tmpdir
 export { join as m9_join, join as m24_join, join as m25_join, join as m26_join, join as m30_join, join as m32_join, join as m34_join } from 'node:path';
 export { REQUESTABLE_AGENT_GRANT_KINDS as m9_REQUESTABLE_AGENT_GRANT_KINDS } from '@beeline/api-contract/agent-grants';
 export { resolveGrantCommand as m9_resolveGrantCommand } from './grant-script.js';
-export { approvedDeviceGrant as m9_approvedDeviceGrant, resumePrompt as m14_resumePrompt } from './place-prompt.js';
+export { resumePrompt as m14_resumePrompt } from './place-prompt.js';
 export { MESSAGE_REACTION_EMOJIS as m10_MESSAGE_REACTION_EMOJIS } from '@beeline/api-contract/phone';
 export { assembleTurnPrompt as m24_assembleTurnPrompt } from './prompt-assembly.js';
 export { beelineManagedSkills as m28_beelineManagedSkills } from './beeline-skill.js';

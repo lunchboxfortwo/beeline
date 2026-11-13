@@ -1,3 +1,4 @@
+import { sessionToolRequest } from './session-tool-connection.js';
 import { type DaemonAttachment, readAgentUsage, usageSummary, usageIsOld, type RoomConversationResult, type CornerRestoreResult, fixCornerText, type ConnectResult } from "@beeline/api-contract/daemon";
 import { withoutImageData, deliverAttachments, attachmentId } from "./attachment-delivery.js";
 import { join } from "node:path";
@@ -832,17 +833,18 @@ export async function executeAgentOperation(
       return storeSecret(args);
     case 'run_granted_command':
       return runGrantedCommand(args);
+    case 'read_session_context':
+    case 'call_session_mcp':
+      return JSON.stringify(await sessionToolRequest('/session', {
+        placeId: process.env.BEELINE_DAEMON_CORNER_ID || requiredEnv('BEELINE_DAEMON_ROOM_ID'),
+        action: name === 'read_session_context' ? 'context' : 'mcp', ...args,
+      }));
     case 'workspace': {
-      const response = await fetch(new URL('/workspace', `${requiredEnv('BEELINE_GRANT_RUNNER_URL')}/`), {
-        method: 'POST',
-        headers: { authorization: `Bearer ${requiredEnv('BEELINE_GRANT_RUNNER_TOKEN')}`, 'content-type': 'application/json' },
-        body: JSON.stringify({
-          placeId: process.env.BEELINE_DAEMON_CORNER_ID || requiredEnv('BEELINE_DAEMON_ROOM_ID'),
-          ...(process.env.BEELINE_DAEMON_CORNER_ID ? { parentRoomId: requiredEnv('BEELINE_DAEMON_ROOM_ID') } : {}),
-        }),
-      });
-      const body = await response.json().catch(() => ({})) as { text?: unknown };
-      return typeof body.text === 'string' ? body.text : `The checkout could not be made (HTTP ${response.status}).`;
+      const body = await sessionToolRequest('/workspace', {
+        placeId: process.env.BEELINE_DAEMON_CORNER_ID || requiredEnv('BEELINE_DAEMON_ROOM_ID'),
+        ...(process.env.BEELINE_DAEMON_CORNER_ID ? { parentRoomId: requiredEnv('BEELINE_DAEMON_ROOM_ID') } : {}),
+      }) as { text: string };
+      return body.text;
     }
     default:
       throw new Error(`tool is not available on the agent surface: ${name}`);

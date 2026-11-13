@@ -52,13 +52,14 @@ import { existsSync, watch, type FSWatcher } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, readFile, readlink, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { dirname, resolve } from 'node:path';
 import { DRAW_AVATAR_SKILL_NAME } from './draw-avatar-skill.js';
 import { AGENT_BEHAVIORS, SHARED_CREDENTIALS, agentBehavior, type AgentKind } from './agent-command.js';
 import { BEELINE_REVIEW_SKILL_NAME, BEELINE_SPEC_SKILL_NAME, BEELINE_ONBOARDING_SKILL_NAME, BEELINE_TRIAGE_SKILL_NAME, runningBeelineReleaseId, SITUATIONAL_SKILL_NAMES } from './beeline-skill.js';
 import { type OpenRouterRoutingHomeInput } from './openrouter-routing.js';
 import { isMissingPathError, assertRealContainedDirectory, roomSessionTmpDir, roomAgentHomeEnv, writeIsolatedHarnessFile } from './agent-home-plan-managed-skills.js';
-import { provisionAgentSkillsAndMcp } from './agent-home-provision-agent-skills-and-mcp.js';
+import { provisionAgentSkillsAndMcp, provisionPiCustomModelConfig } from './agent-home-provision-agent-skills-and-mcp.js';
 export { AGENT_PRIVATE_STATE_ENV } from './agent-private-state-env.js';
 
 
@@ -576,7 +577,7 @@ export function sharedClaudeLoginEnv(operatorHome: string): Record<string, strin
  * daemon's ambient state; `failClosed` propagates setup errors for governed
  * credential sessions that may not fall back to ambient state.
  */
-export async function prepareRoomAgentHome(
+export async function prepareRoomAgentCredentials(
   input: RoomAgentHomeInput,
 ): Promise<Record<string, string>> {
   const root = resolve(input.root);
@@ -629,6 +630,40 @@ export async function prepareRoomAgentHome(
     console.error(`[body] could not repair shared credentials under ${root}:`, error);
   }
 
+  // A cold process must not start optional MCP providers from a previous
+  // activation. They remain reachable through session tools once loaded.
+  for (const config of HARNESS_MCP_CONFIGS) await writeIsolatedHarnessFile(
+    resolve(root, config.dir, 'config.toml'),
+    config.roomDefaults ? `${CODEX_ROOM_AGENT_LOCKDOWN_TOML}\n${CODEX_ROOM_WEB_SEARCH_TOML}` : '',
+  );
+  await writeIsolatedHarnessFile(resolve(root, 'claude', '.claude.json'), '{"mcpServers":{}}');
+  await writeIsolatedHarnessFile(resolve(root, 'pi', 'mcp.json'), '{"mcpServers":{}}');
+  await provisionPiCustomModelConfig(root, operatorHome, true, undefined);
+  for (const name of GOOSE_SHARED_CONFIG_FILES) {
+    const source = await readFile(resolve(operatorHome, '.config', 'goose', name), 'utf8').catch(error => {
+      if (isMissingPathError(error)) return undefined;
+      throw error;
+    });
+    if (source !== undefined) {
+      const body = name === 'config.yaml' ? stringifyYaml({ ...parseYaml(source), extensions: {} }) : source;
+      await writeIsolatedHarnessFile(resolve(root, 'goose', 'config', name), body);
+    }
+  }
+
+  const env = tmpLinkReady
+    ? roomAgentHomeEnv(root)
+    : { ...roomAgentHomeEnv(root), TMPDIR: resolve(root, 'tmp') };
+  return {
+    ...env,
+    ...(agentBehavior(input.agentKind).sharedLoginWriteBack === true ? sharedClaudeLoginEnv(operatorHome) : {}),
+  };
+}
+/** Optional skills and MCP setup, separate from the private credential home. */
+export async function prepareRoomAgentHome(input: RoomAgentHomeInput): Promise<Record<string, string>> {
+  const env = await prepareRoomAgentCredentials(input);
+  if (!env.HOME) return env;
+  const root = resolve(input.root);
+  const operatorHome = input.operatorHome ?? homedir();
   const prior = agentHomeProvisionQueues.get(root) ?? Promise.resolve();
   const provision = prior
     .catch(() => undefined)
@@ -656,13 +691,7 @@ export async function prepareRoomAgentHome(
     if (agentHomeProvisionQueues.get(root) === provision) agentHomeProvisionQueues.delete(root);
   }
 
-  const env = tmpLinkReady
-    ? roomAgentHomeEnv(root)
-    : { ...roomAgentHomeEnv(root), TMPDIR: resolve(root, 'tmp') };
-  return {
-    ...env,
-    ...(agentBehavior(input.agentKind).sharedLoginWriteBack === true ? sharedClaudeLoginEnv(operatorHome) : {}),
-  };
+  return env;
 }
 export { SHARED_CREDENTIALS } from './agent-command.js';
 export { mountedImportedMcpServerNames } from './agent-home-provision-agent-skills-and-mcp.js';

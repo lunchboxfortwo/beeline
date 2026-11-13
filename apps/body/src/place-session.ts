@@ -1,16 +1,15 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import type { AgentCommand, DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { AcpClient, openAcpConversation, type McpServerWire, type PromptResult, type ToolCallEntry } from './acp.js';
 import { agentTurnSteps } from './acp.js';
 import { agentBehavior } from './agent-command.js';
 import { agentCommandCatalogPublisher } from './agent-command-catalog.js';
 import { agentGitIdentityEnv } from './agent-git-identity.js';
-import { grantedSquireHostBindPaths, harnessStateDirsFromEnv, hostImportedMcpDeclarations, hostImportedMcpServerNames, prepareRoomAgentHome, repairRoomAgentCredentialLinks, watchRoomClaudeLogin, writeBackRoomClaudeLogin } from './agent-home.js';
+import { harnessStateDirsFromEnv, prepareRoomAgentCredentials, prepareRoomAgentHome, repairRoomAgentCredentialLinks, watchRoomClaudeLogin, writeBackRoomClaudeLogin } from './agent-home.js';
 import { HostPlaces, startAgentProcess, stopAgentProcess } from './agent-process.js';
 import { credentialMaskPaths, harnessHomeStateDirs, sandboxMountPlan, siblingAgentMaskPaths, wrapAgentCommand, type SandboxSessionSpec } from './bwrap-sandbox.js';
-import { codegraphMcpServer } from './codegraph.js';
 import { bodyAgentCommand, type BodyConfig } from './config.js';
 import { installCornerGitHubWrappers } from './corner-github-auth.js';
 import { harnessIdentityLabel, sessionNewMcpServers } from './cursor-acp-bridge.js';
@@ -19,8 +18,8 @@ import type { GrantRunnerEndpoint, GrantRunnerRoom } from './grant-runner.js';
 import { resourceCallFacts } from './resource-mcp-facade.js';
 import { harnessEnforcement, roomShellCapability } from './harness-capabilities.js';
 import { postChangedAgentUsage } from './helper-usage-binding.js';
-import { grantedHostRouteWires, grantedSquireHostRoute, ungatedHostServers } from './host-mcp-route.js';
-import { machineHost } from './machine-host.js';
+import { hostname } from 'node:os';
+import { SessionResources } from './session-resources.js';
 import { CODE_OWNED_HOST_MCP_NAMES } from './mcp-route-class.js';
 import { agentArgsWithModelSelection, applyAgentModelSelection, filterAllowedModelConfigOptions, parseAdvertisedConfigOptions } from './model-config.js';
 import { agentOpenRouterKey } from './openrouter-key-usage.js';
@@ -30,9 +29,8 @@ import { OwnedModelFiles } from './owned-model-files.js';
 import { installPiMcpBridge } from './pi-mcp-bridge.js';
 import { itemPrompt } from './place-prompt.js';
 import { assembleSessionPrompt, cornerHasRepositoryWork } from './prompt-assembly.js';
-import { registryMcpHostBindPaths, registryMcpHostDeclarations } from './registry-mcp.js';
 import { roomPermissionDecision, unsandboxedPermissionDecision } from './room-permissions.js';
-import { beelineAgentMcpServer, readOnlyMcpServer, recordSessionModelFallback, sessionGrantedResources, writeSessionResourceAuth } from './room-session.js';
+import { beelineAgentMcpServer, readOnlyMcpServer } from './room-session.js';
 import { roomReplySteps } from './room-turn-steps.js';
 import type { AgentRuntimeRecord } from './runtime.js';
 import { runtimeDirectory } from './runtime.js';
@@ -41,8 +39,6 @@ import { WarmTranscript } from './warm-transcript.js';
 import { cornerCheckoutFolders } from './workspace-checkout.js';
 import { SquireTaskRelay } from './squire-task-relay.js';
 
-type Configuration = DaemonOperationMap['getAgentConfiguration']['output'];
-type Roster = DaemonOperationMap['getWorkspaceRoster']['output'];
 
 export interface PlaceSessionOptions {
   agent: { publicKey: string; name: string };
@@ -55,6 +51,7 @@ export interface PlaceSessionOptions {
   parentRoomId?: string;
   workspaceId: string;
   grantRunner?: GrantRunnerEndpoint;
+  grantRunnerFile?: string;
   createAcpClient?: (options: ConstructorParameters<typeof AcpClient>[0]) => AcpClient;
   /** The harness exited on its own. */
   onExit(): void;
@@ -72,14 +69,14 @@ export interface Answer {
 
 /**
  * One live harness conversation for one place (Room, DM or corner) of one
- * agent. Starting it reads optional context and prepares optional helpers;
- * every one of those that fails becomes a note the agent is shown. Only a
+ * agent. Optional context and capabilities load after delivery and are read
+ * with session tools; startup uses cached facts or disclosed defaults. Only a
  * harness that cannot start at all leaves the item waiting in its queue.
  */
 export class PlaceSession {
   client?: AcpClient;
   sessionId?: string;
-  /** Mounts or configuration changed; start fresh before the next item. */
+  /** Configuration changed; start fresh before the next item. */
   stale = false;
   private notes: string[] = [];
   private turnPrefix = '';
@@ -91,13 +88,18 @@ export class PlaceSession {
   private scratch?: string;
   private claudeLoginWatch?: { close(): void };
   private stopping = false;
+  readonly resources: SessionResources;
   private followUps: AgentCommand[] = [];
-  private steering: Promise<void>[] = [];
   readonly contextPath: string;
 
   constructor(readonly options: PlaceSessionOptions) {
     const root = options.config.workspaceRoot ?? resolve(options.runtime.supervisorRoot, 'places', options.placeId);
     this.contextPath = resolve(root, 'turn-context.json');
+    this.resources = new SessionResources({ api: options.api, agentId: options.agent.publicKey,
+      placeId: options.placeId, workspaceId: options.workspaceId, parentRoomId: options.parentRoomId,
+      cachePath: resolve(root, 'session-context.json'), brokerSocket: options.config.registryMcpBrokerSocket,
+      configured: () => this.prepareOptionalHome(),
+    });
     this.warm = new WarmTranscript({ path: resolve(root, 'agent-home', 'warm-transcript.json') });
     const api = options.api;
     const roomId = options.placeId;
@@ -206,21 +208,12 @@ export class PlaceSession {
 
   private async activate(sandboxed: boolean): Promise<void> {
     const { config, api, agent, runtime, placeId, parentRoomId, workspaceId } = this.options;
-    if (config.agentProgramError) throw new Error(config.agentProgramError);
     const corner = Boolean(parentRoomId);
     const folder = this.folder();
     await mkdir(folder, { recursive: true, mode: 0o700 });
     const gitCommonDir = corner ? cornerCheckoutFolders(runtime.supervisorRoot, placeId, agent.publicKey).gitCommonDir : undefined;
     if (gitCommonDir) await mkdir(gitCommonDir, { recursive: true, mode: 0o700 });
-    const [configuration, roster, grants, repository, restore] = await Promise.all([
-      this.optional<Configuration | undefined>('Agent configuration', () =>
-        api.execute('getAgentConfiguration', { agentId: agent.publicKey, roomId: placeId }), undefined),
-      this.optional<Roster | undefined>('Member list', () =>
-        api.execute('getWorkspaceRoster', { agentId: agent.publicKey, workspaceId }), undefined),
-      sessionGrantedResources(config, () => api.execute('listAgentGrants', { agentId: agent.publicKey, roomId: placeId })),
-      this.optional('Repository state', () => api.execute('getRoomRepositoryState', { roomId: parentRoomId ?? placeId }), undefined),
-      corner ? this.optional('Corner state', () => api.execute('getCornerRestoreState', { cornerId: placeId }), undefined) : undefined,
-    ]);
+    const { configuration, roster, repository, restore } = this.resources.context;
     this.names = new Map((roster?.members ?? []).map(member => [member.identityId, member.name]));
     const self = roster?.members.find(member => member.identityId === agent.publicKey);
     const selection = {
@@ -229,22 +222,9 @@ export class PlaceSession {
       fastMode: configuration?.fastMode,
     };
     const operatorHome = config.operatorHome ?? homedir();
-    const registryHostDeclarations = registryMcpHostDeclarations(configuration?.registryMcpRoutes, this.contextPath, config.registryMcpBrokerSocket);
-    const mountedHostRoutes = [...grants.hostRoutes, ...Object.keys(registryHostDeclarations)];
-    const squireScope = {
-      agentId: agent.publicKey, roomId: placeId,
-      ...(grantedSquireHostRoute(mountedHostRoutes, {
-        ...hostImportedMcpDeclarations({ operatorHome, agentKind: config.agentKind }), ...registryHostDeclarations,
-      }) ? { relay: await this.squireRelay.listen(this.contextPath) } : {}),
-    };
-    const resourceAuthFile = await writeSessionResourceAuth(api, this.contextPath);
-    const homeOverlay = config.agentHomeRoot ? await prepareRoomAgentHome({
-      root: config.agentHomeRoot, squireScope, sharedSkills: config.sharedSkills ?? [],
-      isReviewer: configuration?.isReviewer === true, grantedHostRoutes: mountedHostRoutes,
-      extraHostRoutes: registryHostDeclarations, resourceAuthFile,
-      ...(config.agentKind ? { agentKind: config.agentKind } : {}),
-      ...(config.operatorHome ? { operatorHome: config.operatorHome } : {}),
-      ...openRouterRoutingInput(config, selection, undefined, {}),
+    const homeOverlay = config.agentHomeRoot ? await prepareRoomAgentCredentials({
+      root: config.agentHomeRoot, failClosed: true, agentKind: config.agentKind,
+      operatorHome: config.operatorHome,
     }) : {};
     const command = bodyAgentCommand(config);
     const harnessLabel = harnessIdentityLabel({ kind: config.agentKind, command });
@@ -253,29 +233,16 @@ export class PlaceSession {
       ...(corner ? agentGitIdentityEnv(agent) : {}),
       BEELINE_TURN_CONTEXT_FILE: this.contextPath,
     };
-    let githubCli: Parameters<typeof assembleSessionPrompt>[0]['githubCli'];
     const featureBranch = restore?.featureBranch ?? `feature/corner-${placeId.replaceAll('-', '').slice(0, 12)}`;
     const targetBranch = repository?.targetBranch || 'main';
     const repositoryBacked = repository?.resolution === 'repository';
-    if (corner && repositoryBacked && config.runtimeConfigPath && config.agentHomeRoot) {
-      // GitHub tokens are fetched when git or gh runs, never before delivery.
-      await this.optional('GitHub command wrappers', async () => {
-        const which = async (name: string) => (await import('./workspace-checkout.js')).execFileAsync('which', [name])
-          .then(result => String(result.stdout).trim()).catch(() => undefined);
-        const gitBinary = await which('git');
-        if (!gitBinary) throw new Error('git is not installed on this machine');
-        const ghBinary = await which('gh');
-        const launchers = await installCornerGitHubWrappers({
-          root: config.agentHomeRoot!, runtimeConfigPath: config.runtimeConfigPath!, roomId: parentRoomId!,
-          cliEntrypoint: process.argv[1]!, gitBinary, featureBranch, targetBranch,
-          ...(ghBinary ? { ghBinary } : {}),
-          inheritedPath: homeOverlay.PATH ?? config.agentEnv.PATH ?? process.env.PATH,
-        });
-        Object.assign(agentEnv, launchers.env);
-        githubCli = launchers.githubCli;
-      }, undefined);
-    }
-    const agentArgs = agentArgsWithModelSelection({ kind: config.agentKind, command, args: config.agentArgs ?? [] }, selection);
+    // The wrapper directory is stable; setup may populate it while the
+    // session is already answering. Until then a tool receives its own error.
+    if (corner && config.agentHomeRoot) agentEnv.PATH = [resolve(config.agentHomeRoot, 'beeline-github-bin'),
+      agentEnv.PATH ?? process.env.PATH].filter(Boolean).join(delimiter);
+    const knownModels = this.resources.context.modelCatalog?.find(option => option.category === 'model');
+    const launchSelection = selection.model && knownModels?.options.some(option => option.id === selection.model) ? selection : selection.model ? {} : undefined;
+    const agentArgs = agentArgsWithModelSelection({ kind: config.agentKind, command, args: config.agentArgs ?? [] }, launchSelection);
     const { stateDirs, tmpDir } = harnessStateDirsFromEnv(agentEnv);
     this.scratch = tmpDir;
     const homeStateDirs = harnessHomeStateDirs(harnessLabel, agentEnv.HOME ?? operatorHome);
@@ -285,7 +252,6 @@ export class PlaceSession {
     const sandboxSpec: SandboxSessionSpec = {
       operatorHome,
       userRuntimeDir: `/run/user/${process.getuid?.() ?? 0}`,
-      grantedPaths: grants.paths,
       mode: corner ? 'edit' : 'readonly',
       cwd: folder,
       ...(corner ? { worktreePath: folder, protectedPaths: [runtime.supervisorRoot] } : {}),
@@ -296,10 +262,7 @@ export class PlaceSession {
       additionalWritablePaths: [
         ...(config.browserShareHostSocket ? [dirname(config.browserShareHostSocket)] : []),
         ...(attachScratchRoot ? [attachScratchRoot] : []),
-        ...registryMcpHostBindPaths(configuration?.registryMcpRoutes, config.registryMcpBrokerSocket),
-        ...grantedSquireHostBindPaths({ operatorHome, agentKind: config.agentKind, grantedHostRoutes: mountedHostRoutes }),
       ],
-      devices: grants.devices,
       maskPaths: [
         ...credentialMaskPaths(config.sandboxMaskPaths, operatorHome),
         ...siblingAgentMaskPaths(runtimeDirectory(runtime.supervisorRoot, runtime.agent.publicKey)),
@@ -315,34 +278,28 @@ export class PlaceSession {
     const servers: McpServerWire[] = inspection ? [inspection] : [];
     const agentTools = await this.optional('Beeline tools', async () => beelineAgentMcpServer(config, api, {
         roomId: parentRoomId ?? placeId, workspaceId,
-        ...(corner ? { cornerId: placeId, repositoryBacked } : {}),
+        ...(corner ? { cornerId: placeId, repositoryBacked: true } : {}),
         reviewer: configuration?.isReviewer === true,
         directMessage: repository?.directParticipants?.length === 2,
         nativeIoProven, agentCommand: harnessLabel, attachRoot: folder,
         ...(attachScratchRoot ? { attachScratchRoot } : {}),
         ...(corner && !repositoryBacked ? { cornerScratchRoot: folder } : {}),
         turnContextPath: this.contextPath,
-        ...(squireScope.relay ? { squireRelay: squireScope.relay } : {}),
         ...(this.options.grantRunner ? { grantRunner: this.options.grantRunner } : {}),
+        ...(this.options.grantRunnerFile ? { grantRunnerFile: this.options.grantRunnerFile } : {}),
       }), undefined);
     if (agentTools) servers.push(agentTools);
-    const codegraph = codegraphMcpServer(config, folder, { readonly: !corner });
-    if (codegraph) servers.push(codegraph);
-    const hostDeclarations = hostImportedMcpDeclarations({ operatorHome, agentKind: config.agentKind });
-    const grantedRouteServers = grantedHostRouteWires(mountedHostRoutes, operatorHome,
-      { ...hostDeclarations, ...registryHostDeclarations }, resourceAuthFile, squireScope);
-    const sessionServers = sessionNewMcpServers<McpServerWire>(harnessLabel, servers, grantedRouteServers);
+    const sessionServers = sessionNewMcpServers<McpServerWire>(harnessLabel, servers, []);
     if (agentEnv.BEELINE_FREE_AGENT_ID || agentEnv.BEELINE_FREE_AGENT_MODEL_TOKEN)
-      await installOwnedModelProvider(agentEnv.PI_CODING_AGENT_DIR);
+      await this.optional('Hosted model binding', () => installOwnedModelProvider(agentEnv.PI_CODING_AGENT_DIR), undefined);
     await installPiMcpBridge({
+      nativeMcp: false,
       agentCommand: harnessLabel, piHome: agentEnv.PI_CODING_AGENT_DIR,
       piCommand: agentEnv.PI_ACP_PI_COMMAND ?? process.env.PI_ACP_PI_COMMAND,
-      agentEnv, servers: [...servers, ...grantedRouteServers],
+      agentEnv, servers,
     });
-    const mountedServers = [...servers, ...grantedRouteServers].map(server => server.name);
-    const hostServers = ungatedHostServers(
-      [...CODE_OWNED_HOST_MCP_NAMES, ...hostImportedMcpServerNames({ operatorHome, agentKind: config.agentKind })],
-      mountedHostRoutes);
+    const mountedServers = servers.map(server => server.name);
+    const hostServers = [...CODE_OWNED_HOST_MCP_NAMES];
     const plan = sandboxed ? sandboxMountPlan(sandboxSpec) : undefined;
     const editing = corner && sandboxed;
     const client = (this.options.createAcpClient ?? (value => new AcpClient(value)))({
@@ -369,17 +326,16 @@ export class PlaceSession {
       this.claudeLoginWatch = watchRoomClaudeLogin({ root: config.agentHomeRoot, operatorHome: config.operatorHome });
     const brief = restore?.brief;
     const session = assembleSessionPrompt({
-      squireAvailable: Boolean(squireScope.relay),
+      squireAvailable: false,
       surface: corner ? (repositoryBacked ? 'code-corner' : 'repo-less-corner')
         : repository?.directParticipants?.length === 2 ? 'dm' : 'room',
       agentName: self?.name ?? agent.name,
-      machineHost: await machineHost(),
+      machineHost: { hostname: hostname() },
       ...(configuration?.soul ? { soul: configuration.soul } : self?.soul ? { soul: self.soul } : {}),
       agentCommand: command,
       ...(brief ? { brief } : {}),
       ...(corner && repositoryBacked ? { worktree: { featureBranch, targetBranch } } : {}),
       ...(!corner && repositoryBacked && repository?.key ? { repository: { name: repository.key, branch: targetBranch } } : {}),
-      ...(githubCli ? { githubCli } : {}),
       ...(configuration?.reviewerHandle ? { reviewerHandle: configuration.reviewerHandle } : {}),
       reviewer: configuration?.isReviewer === true,
       cornerPrepareScript: corner && repositoryBacked && cornerHasRepositoryWork(brief),
@@ -401,27 +357,56 @@ export class PlaceSession {
     });
     this.warm.rememberSession(opened.sessionId, fingerprint);
     this.sessionId = opened.sessionId;
+    const catalog = filterAllowedModelConfigOptions(parseAdvertisedConfigOptions(opened.raw));
+    this.resources.rememberModelCatalog(catalog);
+    const advertisedDefault = catalog.find(option => option.category === 'model')?.currentValue;
+    let runningModel = advertisedDefault ?? 'the agent default';
     if (selection.model || selection.effort) {
-      await this.optional('Model selection', async () => {
-        const options = filterAllowedModelConfigOptions(parseAdvertisedConfigOptions(opened.raw, selection.model));
-        const applied = await applyAgentModelSelection(client, opened.sessionId, options, selection);
-        if (selection.model && applied.appliedSelection.model && applied.appliedSelection.model !== selection.model)
-          recordSessionModelFallback(api, agent.publicKey, workspaceId, applied.appliedSelection, applied.options, `place ${placeId}`);
-      }, undefined);
+      const available = !selection.model || catalog.some(option => option.category === 'model' && option.options.some(value => value.id === selection.model));
+      if (available) {
+        const applied = await this.optional('Model selection', () => applyAgentModelSelection(client, opened.sessionId, catalog, selection), undefined);
+        runningModel = applied?.appliedSelection.model ?? runningModel;
+        if (!applied && selection.model) this.notes.push(`Selected model ${selection.model} could not be applied; this session runs with ${runningModel}.`);
+      } else this.notes.push(`Selected model ${selection.model} is unavailable; this session runs with ${runningModel}.`);
     }
+    this.notes.push(`This session uses ${runningModel}; persona and reviewer skills use ${configuration ? 'cached configuration' : 'the agent default'}. Optional context and capability status: read(facet:session).`);
     if (agentOpenRouterKey(config.agentKind, selection.model, config.agentEnv))
       console.log(`[body] place ${placeId} uses an OpenRouter key`);
+  }
+
+  private async prepareOptionalHome(): Promise<void> {
+    const { config, parentRoomId, placeId } = this.options;
+    const configuration = this.resources.context.configuration;
+    if (config.agentHomeRoot) await prepareRoomAgentHome({
+      root: config.agentHomeRoot, failClosed: true, operatorHome: config.operatorHome,
+      agentKind: config.agentKind, sharedSkills: config.sharedSkills,
+      isReviewer: configuration?.isReviewer === true,
+      ...openRouterRoutingInput(config, { model: configuration?.model ?? config.modelSelection?.model }, undefined, {}),
+    });
+    if (parentRoomId && config.runtimeConfigPath && config.agentHomeRoot) {
+      const { execFileAsync } = await import('./workspace-checkout.js');
+      const which = (name: string) => execFileAsync('which', [name]).then(result => String(result.stdout).trim()).catch(() => undefined);
+      const gitBinary = await which('git');
+      if (!gitBinary) throw new Error('git is not installed');
+      await installCornerGitHubWrappers({ root: config.agentHomeRoot, runtimeConfigPath: config.runtimeConfigPath,
+        roomId: parentRoomId, cliEntrypoint: process.argv[1]!, gitBinary, ghBinary: await which('gh'),
+        featureBranch: this.resources.context.restore?.featureBranch ?? `feature/corner-${placeId.replaceAll('-', '').slice(0, 12)}`,
+        targetBranch: this.resources.context.repository?.targetBranch || 'main',
+        inheritedPath: config.agentEnv.PATH ?? process.env.PATH,
+      });
+    }
   }
 
   /** New input joins the active prompt; unsupported steering leaves it queued. */
   followUp(item: AgentCommand): void {
     if (this.current && this.client && this.sessionId) {
       const prompt = itemPrompt(item, { names: this.names, notes: [], turnPrefix: this.turnPrefix });
-      this.steering.push(this.client.sessionSteer(this.sessionId, prompt).then(() => {
-        this.followUps.push(item);
+      const accepted = this.followUps;
+      void this.client.sessionSteer(this.sessionId, prompt).then(() => {
+        accepted.push(item);
       }).catch(error => {
         console.warn('[body] follow-up remains queued:', error);
-      }));
+      });
     }
   }
 
@@ -436,7 +421,6 @@ export class PlaceSession {
     this.current = item;
     if (item.roomId === this.options.placeId) this.squireRelay.activate(item, item.id);
     this.followUps = [];
-    this.steering = [];
     const model = await this.optional('Hosted model credential', () => this.hostedModel(item), undefined);
     await this.optional('Tool context', () => this.writeContext(item, queued, model?.paths().directory), undefined);
     const prompt = itemPrompt(item, { names: this.names, notes: this.notes, turnPrefix: this.turnPrefix });
@@ -448,9 +432,9 @@ export class PlaceSession {
     let result: PromptResult;
     try {
       const answering = client.sessionPrompt(sessionId, prompt, stream.onChunk);
+      this.resources.refresh();
       for (const next of queued) this.followUp(next);
       result = await answering;
-      await Promise.all(this.steering);
     } catch (error) {
       void stream.retract();
       throw error;

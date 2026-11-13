@@ -37,6 +37,17 @@ Why: an agent answers only with its own logins, keys and hosted-model allowance,
 - `apps/server/src/daemon/execute.ts daemonExecute: refuse if (typeof candidate.agentId === 'string' && candidate.agentId !== authenticatedAgentId) throw new Error('daemon token does not own requested agent');`
 - `apps/server/src/daemon/execute.ts daemonExecute: refuse if (walletCall && !scopedRoom) throw new Error('wallet access requires an active Room command');`
 
+- `apps/body/src/agent-home.ts repairRoomAgentCredentialLinks: skip if (!existsSync(source)) continue;`
+- `apps/body/src/agent-home.ts repairRoomAgentCredentialLinks: early return if (isMissingPathError(error)) return undefined;`
+- `apps/body/src/agent-home.ts repairRoomAgentCredentialLinks: refuse throw error;`
+- `apps/body/src/agent-home.ts repairRoomAgentCredentialLinks: skip if (resolve(dirname(target), linked) === source) continue;`
+- `apps/body/src/agent-home.ts repairRoomAgentCredentialLinks: skip if (outcome !== 'not-newer') continue;`
+- `apps/body/src/agent-home.ts prepareRoomAgentCredentials: refuse if (!rootStats.isDirectory() || rootStats.isSymbolicLink()) throw new AgentHomeSecurityError(\`agent home root is not an ordinary directory: ${root}\`);`
+- `apps/body/src/agent-home.ts prepareRoomAgentCredentials: refuse if (input.failClosed || input.resourceAuthFile || error instanceof AgentHomeSecurityError) throw error;`
+- `apps/body/src/agent-home.ts prepareRoomAgentCredentials: refuse if (input.failClosed || input.resourceAuthFile) throw error;`
+- `apps/body/src/agent-home.ts prepareRoomAgentCredentials: early return if (isMissingPathError(error)) return undefined;`
+- `apps/body/src/agent-home.ts prepareRoomAgentCredentials: refuse throw error;`
+
 ## `sandbox` The sandbox walls around the agent's session
 
 Why: the agent's tools reach only what its session may touch; if the sandbox cannot start, the session still runs with writes refused outside its own folder, is told so, and answers.

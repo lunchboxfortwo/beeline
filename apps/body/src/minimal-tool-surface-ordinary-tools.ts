@@ -29,9 +29,10 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
             "checks",
             "pr",
             "procedure",
-            "usage"
+            "usage",
+            "session"
           ],
-          "description": "addresses discovers places; messages uses bounded paging; procedure uses slug; message uses messageId; attachment uses attachmentId; usage reads only your own usage."
+          "description": "addresses discovers places; messages uses bounded paging; procedure uses slug; message uses messageId; attachment uses attachmentId; usage reads only your own usage; session reads optional configuration and capability load results."
         },
         "cursor": {
           "type": "object",

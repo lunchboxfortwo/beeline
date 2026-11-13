@@ -311,6 +311,7 @@ export async function executeAgentTool(name: string, args: JsonObject, toolCallI
         case 'pr': return execute('read_pull_request', input);
         case 'procedure': return execute('load_workspace_skill', { ...input, slug: args.slug });
         case 'usage': return execute('read_agent_usage', {});
+        case 'session': return execute('read_session_context', { prepare: args.name === 'prepare' });
         default: throw new Error('unknown read facet');
       }
     }
@@ -386,6 +387,7 @@ export async function executeAgentTool(name: string, args: JsonObject, toolCallI
     }
     case 'app_tool': {
       const app = String(args.app ?? '');
+      if (app.startsWith('registry-mcp:')) return execute('call_session_mcp', { app, tool: args.tool, args: args.args ?? args.arguments });
       if (app.startsWith('beeline:')) {
         const capability = app.slice('beeline:'.length);
         if (!(await availableCapabilities(app === 'beeline:onboarding')).includes(app)) throw new Error(placeRefusal(app));

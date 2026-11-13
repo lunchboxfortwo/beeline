@@ -1,6 +1,5 @@
 import { waitForPathRemoval } from './filesystem-change.js';
 import { resolveGrantCommand, isNativeGrantExecutable, installedGrantExecutable } from './grant-script.js';
-import { pathGrantAllowsWrite } from '@beeline/api-contract/agent-grants';
 /**
  * The command-kind grant runner (Agent Grants, slice 2).
  *
@@ -64,7 +63,7 @@ import {
 } from '@beeline/api-contract/agent-grants';
 import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { surfaceAllows, type AgentSurface } from '@beeline/api-contract/surface-capabilities';
-import { wrapAgentCommand, type MaskedPath, type SandboxSessionSpec } from './bwrap-sandbox.js';
+import { grantedSandboxDevices, grantedSandboxPaths, wrapAgentCommand, type MaskedPath, type SandboxSessionSpec } from './bwrap-sandbox.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
 import {
   PROVIDER_KEY_ENV_VARS,
@@ -527,8 +526,7 @@ export class GrantCommandRunner {
     const spawn = runsOnHost
       ? { command: argv[0]!, args: argv.slice(1) }
       : roomSandboxCommand(policy, room.cwd, argv, sandboxMarker!, env.XDG_RUNTIME_DIR!,
-          live.grants.filter(entry => entry.kind === 'path' && entry.status === 'approved' && entry.target.startsWith('/'))
-            .map(entry => ({ path: entry.target, writable: pathGrantAllowsWrite(entry.capabilities) })));
+          grantedSandboxPaths(live), grantedSandboxDevices(live));
     // Re-check after secret resolution and Once consumption, immediately before exec.
     await this.checkScriptBinding(grant, room.cwd, env, argv, stdin);
     const outcome = await new Promise<{
@@ -711,6 +709,7 @@ function roomSandboxCommand(
   sandboxMarker: string,
   runtimeDir: string,
   grantedPaths: NonNullable<SandboxSessionSpec['grantedPaths']>,
+  devices: SandboxSessionSpec['devices'],
 ): { command: string; args: string[] } {
   if (!policy.bwrapPath) throw new Error(ROOM_SANDBOX_UNAVAILABLE);
   return wrapAgentCommand({
@@ -720,6 +719,7 @@ function roomSandboxCommand(
       operatorHome: policy.operatorHome,
       userRuntimeDir: runtimeDir,
       grantedPaths,
+      devices,
       cwd,
       // The Room keeps every writable surface its session already had: the
       // scratch and the agent-home overlay. Only the repository copy and the
@@ -752,6 +752,7 @@ export class GrantRunnerServer {
     private readonly runner: GrantCommandRunner,
     /** The `workspace` tool: the agent's own checkout, made only when it asks. */
     private readonly workspace?: (placeId: string, parentRoomId?: string) => Promise<string>,
+    private readonly session?: (placeId: string, input: { action?: unknown; prepare?: unknown; app?: unknown; tool?: unknown; args?: unknown }) => Promise<unknown>,
   ) {}
 
   async start(): Promise<GrantRunnerEndpoint> {
@@ -792,12 +793,20 @@ export class GrantRunnerServer {
       send(401, { error: 'grant runner token required' });
       return;
     }
-    if (request.method !== 'POST' || (request.url !== '/run' && request.url !== '/workspace')) {
+    if (request.method !== 'POST' || !['/run', '/workspace', '/session'].includes(request.url ?? '')) {
       send(404, { error: 'not found' });
       return;
     }
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(chunk as Buffer);
+    if (request.url === '/session') {
+      try {
+        const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        if (!this.session || typeof body.placeId !== 'string') throw new Error('Session tools unavailable');
+        send(200, await this.session(body.placeId, body));
+      } catch (error) { send(400, { error: error instanceof Error ? error.message : String(error) }); }
+      return;
+    }
     if (request.url === '/workspace') {
       // Every failure is the agent's to read and work around.
       try {

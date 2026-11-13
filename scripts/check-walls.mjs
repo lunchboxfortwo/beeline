@@ -11,6 +11,9 @@ import ts from 'typescript';
  */
 export const PATH = [
   { file: 'apps/body/src/agent-runner.ts', functions: ['queueChanged', 'reconcileQueue', 'resendStoredAnswers', 'pump', 'deliver', 'store', 'post'] },
+  { file: 'apps/body/src/place-session.ts', functions: ['start', 'startFresh', 'activate', 'deliver', 'followUp', 'repairCredentialLinks'], startup: true },
+  { file: 'apps/body/src/session-resources.ts', functions: ['refresh', 'load', 'rememberModelCatalog', 'persist'] },
+  { file: 'apps/body/src/agent-home.ts', functions: ['prepareRoomAgentCredentials', 'repairRoomAgentCredentialLinks'], startup: true },
   { file: 'apps/server/src/agent-command-create-agent-command.ts', functions: ['routeHumanMessage'] },
   { file: 'apps/server/src/agent-command.ts', functions: ['insertAgentCommand'] },
   { file: 'apps/server/src/agent-command-read-agent-commands.ts', functions: ['readAgentCommands'] },
@@ -27,7 +30,7 @@ const WAITS = new Set(['setTimeout', 'setInterval', 'setImmediate', 'sleep', 'de
 
 function collapse(text) {
   const flat = text.replace(/\s+/g, ' ').trim();
-  return flat.length > 160 ? `${flat.slice(0, 157)}...` : flat;
+  return flat;
 }
 
 function functionName(node) {
@@ -38,7 +41,7 @@ function functionName(node) {
 }
 
 /** Stop sites inside the named functions of one file. */
-export function stopSites(file, text, functions) {
+export function stopSites(file, text, functions, startup = false) {
   const tree = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
   const sites = [];
   const found = new Set();
@@ -54,7 +57,25 @@ export function stopSites(file, text, functions) {
   };
   const scan = (name, node) => {
     const add = (kind, at) => sites.push(`${file} ${name}: ${kind} ${collapse(`${guard(at)}${at.getText(tree)}`)}`);
-    if (ts.isThrowStatement(node)) add('refuse', node);
+    // These propagate a physical harness failure to AgentRunner, which
+    // retains an offline item or posts the required stopped-answer outcome.
+    // A new conditional refusal still fails, including inside setup callbacks.
+    const physicalFailure = file.endsWith('/place-session.ts') && ts.isThrowStatement(node) &&
+      ['if (failure) throw failure;', 'throw error;', 'if (!text) throw new Error(`harness ended without a public answer (${result.stopReason})`);'].includes(`${guard(node)}${node.getText(tree)}`);
+    if (ts.isThrowStatement(node) && !physicalFailure) add('refuse', node);
+    else if (startup && ts.isAwaitExpression(node)) {
+      let expression = node.expression;
+      while (ts.isCallExpression(expression) && ts.isPropertyAccessExpression(expression.expression) &&
+          ['catch', 'then', 'finally'].includes(expression.expression.name.text)) expression = expression.expression.expression;
+      const callee = ts.isCallExpression(expression) ? expression.expression.getText(tree) : expression.getText(tree);
+      const sessionOperations = new Set(['this.repairCredentialLinks', 'this.startFresh', 'this.stop',
+        'this.activate', 'mkdir', 'prepareRoomAgentCredentials', 'Promise.all',
+        'this.optional', 'installPiMcpBridge', 'startAgentProcess', 'openAcpConversation', 'applyAgentModelSelection', 'answering',
+        'repairRoomAgentCredentialLinks', 'lstat', 'assertRealContainedDirectory', 'writeIsolatedHarnessFile',
+        'readlink', 'rm', 'symlink', 'rename', 'writeBackDetachedClaudeLogin', 'readFile', 'provisionPiCustomModelConfig']);
+      if (!sessionOperations.has(callee)) add('wait', node);
+    }
+    else if (startup && ts.isCallExpression(node) && /(?:^|\.)execute$/.test(node.expression.getText(tree))) add('optional setup read', node);
     else if (ts.isReturnStatement(node) && !isFinal(node) &&
         (!node.expression || ['undefined', 'null', 'false'].includes(node.expression.getText(tree)))) add('early return', node);
     else if (ts.isContinueStatement(node) || ts.isBreakStatement(node)) add('skip', node);
@@ -99,8 +120,8 @@ export function judgeWalls(root) {
     errors.push(`${WALLS_FILE} must list exactly these walls, in order: ${WALL_IDS.join(', ')} (found ${ids.join(', ') || 'none'})`);
   const listed = new Set([...walls.values()].flat());
   const present = new Set();
-  for (const { file, functions } of PATH) {
-    const { sites, missing } = stopSites(file, readFileSync(resolve(root, file), 'utf8'), functions);
+  for (const { file, functions, startup } of PATH) {
+    const { sites, missing } = stopSites(file, readFileSync(resolve(root, file), 'utf8'), functions, startup);
     errors.push(...missing);
     for (const site of sites) {
       present.add(site);

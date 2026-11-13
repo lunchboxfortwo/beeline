@@ -66,3 +66,38 @@ test('a sixth wall fails', () => {
     assert.ok(judgeWalls(target).some(error => error.includes('must list exactly these walls')));
   } finally { rmSync(target, { recursive: true, force: true }); }
 });
+
+for (const [name, code] of [
+  ['refusal', "if (placeId === 'blocked') throw new Error('new startup refusal');"],
+  ['optional read', "await api.execute('getAgentConfiguration', { agentId: agent.publicKey });"],
+  ['setup dependency', 'await installNewDependency();'],
+]) {
+  test(`a planted startup ${name} fails`, () => {
+    const target = copy();
+    try {
+      plant(target, 'apps/body/src/place-session.ts', '    const corner = Boolean(parentRoomId);', `${code}\n    const corner = Boolean(parentRoomId);`);
+      assert.ok(judgeWalls(target).some(error => error.startsWith('not a wall: apps/body/src/place-session.ts activate:')), judgeWalls(target).join('\n'));
+    } finally { rmSync(target, { recursive: true, force: true }); }
+  });
+}
+
+test('a new dependency hidden in credential preparation fails', () => {
+  const target = copy();
+  try {
+    plant(target, 'apps/body/src/agent-home.ts', '  const root = resolve(input.root);', '  await installNewDependency();\n  const root = resolve(input.root);');
+    assert.ok(judgeWalls(target).some(error => error.startsWith('not a wall: apps/body/src/agent-home.ts')));
+  } finally { rmSync(target, { recursive: true, force: true }); }
+});
+
+test('a long listed guard cannot hide a new refusal behind a truncated fingerprint', () => {
+  const target = copy();
+  try {
+    const first = `${'a'.repeat(200)}first`, second = `${'a'.repeat(200)}second`;
+    plant(target, 'apps/body/src/agent-runner.ts', 'place.running = item;\n    ', `place.running = item;\n    if (item.reason === '${first}') throw new Error('refuse');\n    `);
+    const site = judgeWalls(target).find(error => error.startsWith('not a wall:')).split('\n')[0].slice('not a wall: '.length);
+    plant(target, WALLS_FILE, '## `stop` Stop', `## \`stop\` Stop\n\n- \`${site}\``);
+    assert.deepEqual(judgeWalls(target), []);
+    plant(target, 'apps/body/src/agent-runner.ts', first, second);
+    assert.ok(judgeWalls(target).some(error => error.startsWith('not a wall:')));
+  } finally { rmSync(target, { recursive: true, force: true }); }
+});

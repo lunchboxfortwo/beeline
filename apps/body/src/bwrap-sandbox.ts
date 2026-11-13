@@ -19,7 +19,7 @@ import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path
 import { executableOnPath } from './agent-command.js';
 import type { SessionMode } from './config.js';
 import { CURSOR_HARNESS_COMMAND } from './cursor-acp-bridge.js';
-import { agentGrantAutoApproves, namesCredentialFile, type SharedAssetCategory } from '@beeline/api-contract/agent-grants';
+import { agentGrantAutoApproves, namesCredentialFile, pathGrantAllowsWrite, type SharedAssetCategory } from '@beeline/api-contract/agent-grants';
 import { PACKAGE_CACHE_DIRS } from './workspace-assets.js';
 
 
@@ -334,10 +334,17 @@ export interface SandboxSessionSpec {
 
 
 /**
- * The device nodes an approved `device` grant mounts on the agent's next
- * session. Only absolute paths under `/dev/` qualify; any other target is
+ * The device nodes an approved `device` grant mounts for a tool call. Only absolute paths under `/dev/` qualify; any other target is
  * ignored rather than bound.
  */
+export function grantedSandboxPaths(result: unknown): Array<{ path: string; writable: boolean }> {
+  const grants = (result as { grants?: unknown } | undefined)?.grants;
+  if (!Array.isArray(grants)) return [];
+  return grants.filter(grant => grant?.kind === 'path' && grant.status === 'approved' &&
+    typeof grant.target === 'string' && isAbsolute(grant.target))
+    .map(grant => ({ path: grant.target, writable: pathGrantAllowsWrite(grant.capabilities) }));
+}
+
 export function grantedSandboxDevices(result: unknown): string[] {
   if (!result || typeof result !== 'object' || !('grants' in result)) return [];
   const grants = (result as { grants?: unknown }).grants;

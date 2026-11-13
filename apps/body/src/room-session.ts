@@ -1,13 +1,6 @@
-import { mkdir, writeFile } from 'node:fs/promises';
-import type { AgentModelConfigOption } from './model-types.js';
-import { grantedSquireHostRoute, claimGrantedHostRoutes } from './host-mcp-route.js';
-import { grantedSandboxDevices } from './bwrap-sandbox.js';
-import { pathGrantAllowsWrite } from '@beeline/api-contract/agent-grants';
-import { isAbsolute } from 'node:path';
-import { isolatedSharedAssetCategories } from './workspace-assets.js';
-import { dirname, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { agentSkillDir, hostImportedMcpDeclarations } from './agent-home.js';
+import { agentSkillDir } from './agent-home.js';
 import type { McpServerWire } from './acp.js';
 import type { BodyConfig } from './config.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
@@ -45,6 +38,7 @@ export function beelineAgentMcpServer(
     agentCommand?: string;
     /** The daemon's loopback grant runner, for run_granted_command. */
     grantRunner?: GrantRunnerEndpoint;
+    grantRunnerFile?: string;
     /** The granted Squire route used by this session's tools and status probe. */
     squireRelay?: { url: string; token: string };
   },
@@ -96,6 +90,7 @@ export function beelineAgentMcpServer(
       ...(context.cornerScratchRoot
         ? [{ name: 'BEELINE_CORNER_SCRATCH_ROOT', value: context.cornerScratchRoot }]
         : []),
+      ...(context.grantRunnerFile ? [{ name: 'BEELINE_GRANT_RUNNER_FILE', value: context.grantRunnerFile }] : []),
       ...(context.grantRunner
         ? [
             { name: 'BEELINE_GRANT_RUNNER_URL', value: context.grantRunner.url },
@@ -145,54 +140,4 @@ export function readOnlyMcpServer(
         : []),
     ],
   };
-}
-
-/** Room and corner sessions use the same grants; callers retain their own address. */
-export async function sessionGrantedResources(
-  config: BodyConfig,
-  read: () => Promise<import('@beeline/api-contract/daemon').DaemonOperationMap['listAgentGrants']['output']>,
-) {
-  try {
-    const grants = await read();
-    const approved = await claimGrantedHostRoutes(grants);
-    const freeAgent = Boolean(config.agentEnv?.BEELINE_FREE_AGENT_ID || config.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN);
-    const declarations = hostImportedMcpDeclarations({ operatorHome: config.operatorHome, agentKind: config.agentKind });
-    // Discovery is safe to mount; the transport gate authorizes every use.
-    // This also lets an owner use a yolo resource without an activation prompt.
-    return {
-      hostRoutes: [
-        ...new Set([
-          ...approved,
-          ...Object.keys(declarations),
-        ]),
-      ].filter(route => !freeAgent || !grantedSquireHostRoute([route], declarations)),
-      devices: grantedSandboxDevices(grants),
-      paths: grants.grants.filter(grant => grant.kind === 'path' &&
-        grant.status === 'approved' && isAbsolute(grant.target))
-        .map(grant => ({ path: grant.target, writable: pathGrantAllowsWrite(grant.capabilities) })),
-      isolatedCategories: isolatedSharedAssetCategories(grants),
-    };
-  } catch {
-    return { hostRoutes: [], devices: [], paths: [], isolatedCategories: [] };
-  }
-}
-
-/** The private resource facade receives the same connection and turn context on both surfaces. */
-export async function writeSessionResourceAuth(api: DaemonApiClient, turnContextPath: string): Promise<string> {
-  const resourceAuthFile = `${turnContextPath}.resource-auth.json`;
-  await mkdir(dirname(resourceAuthFile), { recursive: true, mode: 0o700 });
-  await writeFile(resourceAuthFile, JSON.stringify({ ...api.connection(), turnContextPath }), { mode: 0o600 });
-  return resourceAuthFile;
-}
-
-/** Persist a successful same-family correction without delaying its turn. */
-export function recordSessionModelFallback(
-  api: DaemonApiClient, agentId: string, workspaceId: string,
-  selection: { model?: string; effort?: string }, options: AgentModelConfigOption[], surface: string,
-): void {
-  api.execute('postAgentModelCatalog', {
-    agentId, workspaceId,
-    options: options as import('@beeline/api-contract/daemon').DaemonOperationMap['postAgentModelCatalog']['input']['options'],
-    selection,
-  }).catch(error => console.error(`[thin-core] failed to persist automatic model fallback for ${surface}:`, error));
 }

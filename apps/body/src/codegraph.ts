@@ -2,49 +2,16 @@ import { execFile } from 'node:child_process';
 import { access, appendFile, mkdir, readFile } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import type { McpServerWire } from './acp.js';
 import type { BodyConfig } from './config.js';
 
 const execFileAsync = promisify(execFile);
 
-export const CODEGRAPH_MCP_SERVER_NAME = 'codegraph';
 const CODEGRAPH_INDEX_PATH = '.codegraph/codegraph.db';
 const CODEGRAPH_PREPARE_TIMEOUT_MS = 120_000;
 
 /** The one repository path CodeGraph must update even in a read-only Room. */
 export function codegraphIndexDirectory(cwd: string): string {
   return resolve(cwd, dirname(CODEGRAPH_INDEX_PATH));
-}
-
-/** Release-owned, repository-scoped CodeGraph MCP server. */
-export function codegraphMcpServer(
-  config: BodyConfig,
-  cwd: string,
-  options: { readonly: boolean },
-): McpServerWire | undefined {
-  if (!config.codegraphCommand) return undefined;
-  return {
-    name: CODEGRAPH_MCP_SERVER_NAME,
-    command: config.codegraphCommand,
-    args: ['serve', '--mcp', '--path', resolve(cwd), ...(options.readonly ? ['--no-watch'] : [])],
-    env: [
-      { name: 'CODEGRAPH_TELEMETRY', value: '0' },
-      // One MCP child per harness session is easier to contain than a daemon
-      // that can outlive the Room/corner whose index and permissions it used.
-      { name: 'CODEGRAPH_NO_DAEMON', value: '1' },
-    ],
-  };
-}
-
-/** Add CodeGraph to the retained-session identity only when it can be mounted. */
-export function codegraphFingerprintServers(
-  config: BodyConfig,
-  servers: readonly string[],
-  mounted = Boolean(config.codegraphCommand),
-): string[] {
-  return config.codegraphCommand && mounted
-    ? [...servers, CODEGRAPH_MCP_SERVER_NAME]
-    : [...servers];
 }
 
 async function isGitWorktree(cwd: string): Promise<boolean> {

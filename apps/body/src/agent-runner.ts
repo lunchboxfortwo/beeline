@@ -1,6 +1,7 @@
 import { dirname, resolve } from 'node:path';
 import type { AgentCommand } from '@beeline/api-contract/daemon';
 import { resolveSessionIdleMs } from './agent-process.js';
+import { writePrivateFileAtomically } from './atomic-private-file.js';
 import { AnswerStore, type StoredAnswer } from './answer-store.js';
 import type { BodyConfig } from './config.js';
 import { captureConnectionUsage, ConnectorUsageRecorder } from './connector-runner.js';
@@ -8,7 +9,6 @@ import { isAgentRemovedError, type DaemonApiClient } from './daemon-api-client.j
 import { GrantCommandRunner, GrantRunnerServer, type GrantRunnerEndpoint } from './grant-runner.js';
 import { openRouterRoutingCacheDir } from './openrouter-routing.js';
 import { PlaceSession, type Answer } from './place-session.js';
-import { approvedDeviceGrant } from './place-prompt.js';
 import { PlaceStorage } from './place-storage.js';
 import { runtimeIdentity, type AgentRuntimeRecord } from './runtime.js';
 import { publishStorageFacts } from './storage-owners.js';
@@ -38,6 +38,7 @@ export class AgentRunner {
   private readonly answers: AnswerStore;
   private readonly stored = new Map<string, StoredAnswer>();
   private readonly posting = new Set<string>();
+  private readonly durable = new Set<string>();
   private readonly restored: Promise<void>;
   private readonly connectionUsage = new ConnectorUsageRecorder();
   private readonly storage: PlaceStorage;
@@ -64,6 +65,7 @@ export class AgentRunner {
     this.restored = this.answers.all().then(answers => {
       for (const answer of answers) {
         this.stored.set(answer.itemId, answer);
+        this.durable.add(answer.itemId);
         this.answered.add(answer.itemId);
       }
     });
@@ -71,7 +73,16 @@ export class AgentRunner {
     this.grantRunnerServer = new GrantRunnerServer(this.grantRunner, (placeId, parentRoomId) => prepareWorkspace({
       api: options.daemonApi, config: this.baseConfig, supervisorRoot: runtime.supervisorRoot,
       workspaceId: runtime.communityId, agent: this.agent, placeId, ...(parentRoomId ? { parentRoomId } : {}),
-    }));
+    }), async (placeId, input) => {
+      const session = this.places.get(placeId)?.session;
+      if (!session) throw new Error('This place has no live session');
+      if (input.action === 'context') {
+        if (input.prepare === true) await session.resources.prepare();
+        return session.resources.read();
+      }
+      if (!session.current) throw new Error('Registry MCP requires the current request');
+      return session.resources.mcp(input, { roomId: session.current.roomId, requestId: session.current.turnRequestId });
+    });
     this.storage = new PlaceStorage({
       supervisorRoot: runtime.supervisorRoot, runtimeDir, workspaceId: runtime.communityId,
       agentId: this.agent.publicKey, operatorHome: baseConfig.operatorHome, api: options.daemonApi,
@@ -106,6 +117,7 @@ export class AgentRunner {
       waiting: [],
       session: new PlaceSession({
         agent: this.agent, runtime: this.runtime, config: this.placeConfig(placeId), api: this.options.daemonApi,
+        grantRunnerFile: resolve(dirname(this.configPath), 'session-tools.json'),
         placeId, ...(item.parentRoomId ? { parentRoomId: item.parentRoomId } : {}), workspaceId: this.runtime.communityId,
         ...(this.endpoint ? { grantRunner: this.endpoint } : {}),
         onExit: () => this.sessionExited(placeId),
@@ -203,7 +215,6 @@ export class AgentRunner {
       await place.session.stop().catch(stopError => console.warn('[body] session stop failed:', stopError));
     } finally {
       place.running = undefined;
-      await place.session.writeContext(undefined, []).catch(contextError => console.warn('[body] turn context not cleared:', contextError));
     }
     if (started) void this.pump(placeId);
   }
@@ -226,11 +237,7 @@ export class AgentRunner {
       outcome: answer.text ? 'answered' : 'silent', toolCalls: answer.toolCalls.length,
       ...(replay ? { trace: replay } : {}),
     }).catch(error => console.warn('[body] turn diagnostics not written:', error));
-    if (approvedDeviceGrant(answer.toolCalls)) {
-      // A device joins a sandbox only when the session starts.
-      const place = this.places.get(item.roomId);
-      if (place) place.session.stale = true;
-    }
+
   }
 
   private async store(answer: StoredAnswer): Promise<void> {
@@ -239,6 +246,7 @@ export class AgentRunner {
     this.posting.add(answer.itemId);
     try {
       await this.answers.save(answer);
+      this.durable.add(answer.itemId);
       void this.post(answer);
     } catch (error) {
       this.posting.delete(answer.itemId);
@@ -251,13 +259,17 @@ export class AgentRunner {
     const api = this.options.daemonApi;
     this.posting.add(answer.itemId);
     try {
-      await this.answers.save(answer);
+      if (!this.durable.has(answer.itemId)) {
+        await this.answers.save(answer);
+        this.durable.add(answer.itemId);
+      }
       if (answer.text) await api.execute('postRoomMessage', {
         roomId: answer.roomId, requestId: answer.requestId, text: answer.text, presentation: 'message',
         ...(answer.steps ? { steps: answer.steps } : {}),
       });
       else await api.execute('markAgentTurnSilent', { roomId: answer.roomId, requestId: answer.requestId });
       this.stored.delete(answer.itemId);
+      this.durable.delete(answer.itemId);
       void this.answers.remove(answer.itemId).catch(error => console.warn('[body] answer cleanup failed:', error));
     } catch (error) {
       // A queued item still owns its stored answer, including after a refusal.
@@ -287,6 +299,7 @@ export class AgentRunner {
 
   private configChanged(): void {
     for (const [placeId, place] of this.places) {
+      place.session.resources.refresh();
       place.session.stale = true;
       if (!place.running) void place.session.stop().then(() => this.pump(placeId));
     }
@@ -328,7 +341,10 @@ export class AgentRunner {
     onEstablished?: () => void | Promise<void>;
     onProgress?: (status: string, fault?: unknown) => void | Promise<void>;
   } = {}): Promise<'aborted' | 'agent-removed'> {
-    void this.grantRunnerEndpoint().then(endpoint => { this.endpoint = endpoint; });
+    void this.grantRunnerEndpoint().then(async endpoint => {
+      this.endpoint = endpoint;
+      if (endpoint) await writePrivateFileAtomically(resolve(dirname(this.configPath), 'session-tools.json'), JSON.stringify(endpoint));
+    }).catch(error => console.warn('[body] session tools unavailable:', error));
     this.options.daemonApi.subscribeQueue();
     let established = false;
     try {
