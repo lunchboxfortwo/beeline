@@ -206,7 +206,7 @@ const DesktopSidebarNavigator = React.memo(() => {
         />
         </YStack>
         {document && desktopLayout.availableWidth >= DESKTOP_WORK_PANE_THRESHOLD && (
-          <DesktopViewerPane>
+          <DesktopViewerPane initialShare={0.55}>
             <DesktopArtifactPane {...document} onClose={() => setDocument(null)} />
           </DesktopViewerPane>
         )}

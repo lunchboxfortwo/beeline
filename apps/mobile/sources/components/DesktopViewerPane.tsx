@@ -5,7 +5,10 @@ import { useDesktopLayout } from '@/buzz/desktop-layout-state';
 import { desktopDocumentPaneWidth, loadDesktopViewerWidth, saveDesktopViewerWidth } from '@/buzz/desktop-workbench-state';
 
 /** One left-edge divider for artifact viewers in chats and other desktop routes. */
-export function DesktopViewerPane({ children }: { children: React.ReactNode }) {
+export function DesktopViewerPane({ children, initialShare = 0.48 }: {
+  children: React.ReactNode;
+  initialShare?: number;
+}) {
   const { availableWidth } = useDesktopLayout();
   const [rowWidth, setRowWidth] = React.useState<number | null>(null);
   const [requestedWidth, setRequestedWidth] = React.useState<number | undefined>();
@@ -19,7 +22,7 @@ export function DesktopViewerPane({ children }: { children: React.ReactNode }) {
   }, []);
   const measuredWidth = availableWidth || rowWidth || Number.POSITIVE_INFINITY;
   const width = desktopDocumentPaneWidth(measuredWidth,
-    requestedWidth ?? (Number.isFinite(measuredWidth) ? measuredWidth * 0.48 : undefined));
+    requestedWidth ?? (Number.isFinite(measuredWidth) ? measuredWidth * initialShare : undefined));
   const latest = React.useRef({ width, measuredWidth });
   latest.current = { width, measuredWidth };
   const dragStart = React.useRef(width);
