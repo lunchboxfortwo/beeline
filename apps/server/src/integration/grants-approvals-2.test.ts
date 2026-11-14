@@ -2,6 +2,7 @@ import { phoneFetch } from '../../../../tests/helpers/phone-operation.js';
 import * as approvalSources from '.././approval-card-source.js';
 import * as serverSentry from '.././sentry.js';
 import { createAgentCommand } from '.././agent-command.js';
+import { ensureSystemIdentity } from '.././system-line.js';
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { type RoomHistoryView, type RoomView } from '@beeline/api-contract/phone';
@@ -22,6 +23,8 @@ const fixture = monolithFixture();
     });
     const { messageId: root } = await source.json() as { messageId: string };
     const requestId = createHash('sha256').update('grant-src-1-turn').digest('hex');
+    // System authors are created on demand, not seeded by the empty fixture schema.
+    await ensureSystemIdentity(fixture.database);
     await fixture.database.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Agent request')`,
       [requestId, ROOM, SYSTEM_IDENTITY_ID]);
     const command = await createAgentCommand(fixture.database, {
