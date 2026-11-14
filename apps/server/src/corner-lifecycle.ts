@@ -15,6 +15,7 @@ import { deleteCornerWakeSources } from './corner-wake-cleanup.js';
 import type { SqlDatabase } from './database.js';
 import { GITHUB_SUBJECT,ensureSystemIdentity,systemLine } from './system-line.js';
 import { abandonCornerWorkflowRuns } from './workflow-runs.js';
+import { SYSTEM_AUTHOR_ID,systemText } from './message-origin.js';
 
 
 
@@ -472,8 +473,8 @@ async function writeCornerAdvance(
               agentId: corner.worker_agent_id,
               sourceMessageId: sourceId ?? null,
               ...(!sourceId ? { id: createHash('sha256').update(`cached-checks:${cornerId}:${corner.lifecycle.pr?.number}:${head}`).digest('hex'),
-                privatePayload: { kind: 'lifecycle' as const, authorId: SYSTEM_IDENTITY_ID, fromRoomId: cornerId,
-                  text: `Failing checks on head ${head}: ${corner.lifecycle.checksSummary?.failing.length ? corner.lifecycle.checksSummary.failing.join(', ') : 'the recorded checks failed; read the current checks for details'}. Fix these recorded failures.` } } : {}),
+                privatePayload: { kind: 'lifecycle' as const, authorId: SYSTEM_AUTHOR_ID, fromRoomId: cornerId,
+                  text: systemText(`Failing checks on head ${head}: ${corner.lifecycle.checksSummary?.failing.length ? corner.lifecycle.checksSummary.failing.join(', ') : 'the recorded checks failed; read the current checks for details'}. Fix these recorded failures.`) } } : {}),
               reason: 'corner_check',
             });
             if (command) effects.push(`command:${effect.key}:${command.id}`);
@@ -548,7 +549,7 @@ async function writeCornerAdvance(
           const command = corner.worker_agent_id ? await createAgentCommand(db,{
             id:createHash('sha256').update(`review-failed:${cornerId}:${head}:${facts.reviewEnded!.id}`).digest('hex'),
             roomId:cornerId,agentId:corner.worker_agent_id,sourceMessageId:null,reason:'corner_review_needed',
-            privatePayload:{kind:'lifecycle',authorId:SYSTEM_IDENTITY_ID,fromRoomId:cornerId,text:`FAIL: ${reason}`},
+            privatePayload:{kind:'lifecycle',authorId:SYSTEM_AUTHOR_ID,fromRoomId:cornerId,text:systemText(`FAIL: ${reason}`)},
           }) : undefined;
           result={ok:true,wake:{queued:Boolean(command),...(command?{agentId:command.agent_id}:{})}};
           break;
@@ -565,9 +566,9 @@ async function writeCornerAdvance(
               reason: 'corner_land',
               privatePayload: {
                 kind: 'lifecycle',
-                authorId: SYSTEM_IDENTITY_ID,
+                authorId: SYSTEM_AUTHOR_ID,
                 fromRoomId: cornerId,
-                text: `A yes is recorded on ${head} and checks passed. Call merge_corner through the normal merge gate.`,
+                text: systemText(`A yes is recorded on ${head} and checks passed. Call merge_corner through the normal merge gate.`),
               },
             });
             result = {
@@ -583,7 +584,7 @@ async function writeCornerAdvance(
                 roomId: cornerId,
                 agentId: corner.worker_agent_id,
                 sourceMessageId: null,
-                privatePayload: { kind: 'lifecycle', authorId: SYSTEM_IDENTITY_ID, fromRoomId: cornerId, text: event.reason },
+                privatePayload: { kind: 'lifecycle', authorId: SYSTEM_AUTHOR_ID, fromRoomId: cornerId, text: systemText(event.reason) },
                 reason: 'corner_merge_refused',
               })
             : undefined;
@@ -603,8 +604,8 @@ async function writeCornerAdvance(
         await reportAgentAttention(
           db,
           cornerId,
-          SYSTEM_IDENTITY_ID,
-          `blocked: Corner ${row.name} is idle. Resume it, set a hold, or close it.`,
+          SYSTEM_AUTHOR_ID,
+          systemText(`blocked: Corner ${row.name} is idle. Resume it, set a hold, or close it.`),
           undefined,
           createHash('sha256').update(`idle:${cornerId}:${row.idle_since}`).digest('hex'),
           { automatic: true, idleSince: row.idle_since },
@@ -647,8 +648,8 @@ export async function noteMissingReviewer(
           agentId: corner.worker_agent_id,
           sourceMessageId: null,
           privatePayload: {
-            text: "This pull request has no checks and no reviewer. Landing needs your commander's yes. Ask your commander using your normal report tool.",
-            authorId: SYSTEM_IDENTITY_ID,
+            text: systemText("This pull request has no checks and no reviewer. Landing needs your commander's yes. Ask your commander using your normal report tool."),
+            authorId: SYSTEM_AUTHOR_ID,
             fromRoomId: cornerId,
             kind: 'lifecycle',
           },
@@ -693,8 +694,8 @@ export async function noteReviewBlocked(
     await reportAgentAttention(
       db,
       cornerId,
-      SYSTEM_IDENTITY_ID,
-      systemMessage('corner-lifecycle.blocked', reason),
+      SYSTEM_AUTHOR_ID,
+      systemText(systemMessage('corner-lifecycle.blocked', reason)),
       undefined,
       createHash('sha256').update(`review-gap:${episode}`).digest('hex'),
       // The review gate is corner work: wake the implementer where its PR lives.
@@ -707,8 +708,8 @@ export async function noteReviewBlocked(
         agentId: corner.worker_agent_id,
         sourceMessageId: null,
         privatePayload: {
-          text: `${corner.lifecycle.checks === 'passing' ? 'Checks passed; ' : ''}${reason}; arrange review or report the blocker to its commander`,
-          authorId: SYSTEM_IDENTITY_ID,
+          text: systemText(`${corner.lifecycle.checks === 'passing' ? 'Checks passed; ' : ''}${reason}; arrange review or report the blocker to its commander`),
+          authorId: SYSTEM_AUTHOR_ID,
           fromRoomId: cornerId,
           kind: 'lifecycle',
         },

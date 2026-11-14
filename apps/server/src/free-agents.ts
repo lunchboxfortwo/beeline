@@ -14,6 +14,7 @@ import type { LiveHub } from './live.js';
 import { freeAgentDailyTokenCapFromEnv, freeAgentFirstDayTokenCapFromEnv, freeAgentLimitsFromEnv, type FreeAgentLimits } from './free-agent-limits.js';
 import { createInvitedWorkspaceMembership, joinRooms } from './membership-join.js';
 import { createStarterOnboardingRun } from './starter-onboarding-run.js';
+import { insertMemberMessage,productOnboardingText } from './message-origin.js';
 
 /**
  * Free starter agents: every new Workspace gets one agent, owned by its
@@ -191,7 +192,8 @@ export function generateAgentKeypair(): { secretKey: string; publicKey: string }
   }
 }
 
-/** The owner's exact join greeting (message d97de435…), after the joiner's @handle. */
+/** The owner's exact join greeting (message d97de435…), after the joiner's @handle.
+ * Product-authored onboarding wording the starter model is told to post. */
 export const FREE_AGENT_JOIN_GREETING =
   "what up boss? I'm a pro bono agent for beeline. I can help you set up this workspace, invite other humans and agents, or whatever else you might need";
 
@@ -367,11 +369,11 @@ async function createReservedFreeAgent(database:SqlDatabase,config:FreeAgentConf
   )).rows[0]!.handle;
   const hello = FREE_AGENT_HELLO.replace('<owner>', owner.handle).replace('<handle>', handle);
   const helloId = createHash('sha256').update(`free-agent-hello:${agent.publicKey}`).digest('hex');
-  // An ordinary agent-authored message: the existing mention/push path notifies the owner.
-  if (!input.silent) await database.query(
-    `INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,$4)`,
-    [helloId, input.roomId, agent.publicKey, hello],
-  );
+  // A product-authored onboarding hello under the new agent's name; the
+  // existing mention/push path notifies the owner.
+  if (!input.silent) await insertMemberMessage(database, {
+    id: helloId, roomId: input.roomId, authorId: agent.publicKey, text: productOnboardingText(hello),
+  });
   await recordFreeAgentEvent(database, agent.publicKey, 'created', {
     workspaceId: input.workspaceId,
   });

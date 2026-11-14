@@ -7,6 +7,7 @@ import { daemonAccess } from './access.js';
 import type { DaemonContext } from './context.js';
 import { daemonWriteResult } from './corner-messages.js';
 import { Input,MEDIA_URL_PATTERN } from './values.js';
+import { modelText } from '../message-origin.js';
 
   export async function daemonCompletion(ctx: DaemonContext, input: Input<'getRequestCompletion'>, agentId: string) {
     await daemonAccess(ctx, input.roomId, agentId);
@@ -27,7 +28,7 @@ import { Input,MEDIA_URL_PATTERN } from './values.js';
   export async function daemonPostRoomMessage(ctx: DaemonContext, input: Input<'postRoomMessage'>, agentId: string, _atomicCommandWrite = false) {
     if (input.presentation === 'card') {
       const saved = await queueMessage(ctx.database, { kind: 'post', roomId: input.roomId,
-        authorId: agentId, text: input.text, requestId: input.requestId, presentation: 'card', tags: input.tags,
+        authorId: agentId, text: modelText(input.text), requestId: input.requestId, presentation: 'card', tags: input.tags,
       });
       return { id: saved.id, createdAt: saved.createdAt };
     }

@@ -21,6 +21,7 @@ import { McpEventError,RoomsMcpEvents } from './rooms-mcp-events.js';
 import { MCP_AVATAR_MAX_CHARS,McpToolError,setMcpMemberProfile,setMcpMemberWebhook } from './rooms-mcp-members.js';
 import { RoomsMcpOAuth,mcpBody,mcpJson,type McpPrincipal } from './rooms-mcp-oauth.js';
 import { memberStreamEnabled,serveMcpMemberStream,type McpStreamCursor } from './rooms-mcp-stream.js';
+import { modelText } from './message-origin.js';
 
 const JOIN_PAGE = readFileSync(new URL('../assets/mcp/join.html', import.meta.url), 'utf8');
 
@@ -282,7 +283,7 @@ export class RoomsMcp {
       const saved = item ? await answerQueuedMessage(this.oauth.database,principal.member_id!,{
         roomId:item.room_id,requestId:item.turn_request_id,text:String(args.text ?? ''),messageId:id,replyToMessageId:replyTo,
       }) : await queueMessage(this.oauth.database, {kind:'post',authorId:principal.member_id!,
-        roomId:String(args.room ?? ''),text:String(args.text ?? ''),replyTo,id});
+        roomId:String(args.room ?? ''),text:modelText(String(args.text ?? '')),replyTo,id});
       this.live.publish({type:'invalidate',roomId:String(args.room),reason:'phone-write',messageId:saved.id});
       return {messageId:saved.id,woken:'woken' in saved ? saved.woken : [],notWoken:'notWoken' in saved ? saved.notWoken : []};
   }

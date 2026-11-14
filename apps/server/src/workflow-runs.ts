@@ -9,10 +9,10 @@ import { createAgentCommand, type CommandRow } from './agent-command.js';
 import type { SqlDatabase } from './database.js';
 import { firstHealthyAgent, roomAgentHealth, type AgentHealthReason } from './agent-health.js';
 import { systemIdentityMention } from './system-line.js';
-import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { workflowGatePrompt, cancelWorkflowRun } from './workflow-runs-cancel-run-timers.js';
 import { handoff, settleWorkflowGate, abandonCornerWorkflowRuns, liveWorkflowRun, saveWorkflow, activeRunIdsForSchedule } from './workflow-runs-repeated-result.js';
 import { startWorkflow, assignWorkflowRole, archiveWorkflow, describedLegacyWorkflowContract, backfillWorkflowSkillDescriptions, closeStaleWorkflowGateChoices } from './workflow-runs-start-workflow.js';
+import { SYSTEM_AUTHOR_ID,systemText } from './message-origin.js';
 
 
 
@@ -237,8 +237,8 @@ export async function noteWorkflowRoleExhausted(
     id: createHash('sha256').update(`beeline:workflow-role-exhausted:v1:${input.runId}:${input.role}:${input.afterMessageId}`).digest('hex'),
     roomId: input.roomId, agentId: starter.id, sourceMessageId: input.afterMessageId,
     reason: 'system',
-    privatePayload: { kind: 'lifecycle', authorId: SYSTEM_IDENTITY_ID, fromRoomId: input.roomId,
-      text: `Workflow ${input.workflowSlug} (${input.runId}) has no eligible agent for role ${input.role}. Assign another workflow role agent to continue.` },
+    privatePayload: { kind: 'lifecycle', authorId: SYSTEM_AUTHOR_ID, fromRoomId: input.roomId,
+      text: systemText(`Workflow ${input.workflowSlug} (${input.runId}) has no eligible agent for role ${input.role}. Assign another workflow role agent to continue.`) },
   });
 }
 

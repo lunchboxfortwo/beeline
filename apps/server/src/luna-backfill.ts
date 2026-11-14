@@ -3,6 +3,7 @@ import { setRoomEventSubscriptions } from './agent-subscriptions.js';
 import { createHash } from 'node:crypto';
 import type { SqlDatabase } from './database.js';
 import { createFreeAgentInWorkspace, FREE_AGENT_EVENT_SUBSCRIPTIONS, LUNA_BACKFILL_HELLO, type FreeAgentConfig } from './free-agents.js';
+import { insertMemberMessage,productOnboardingText } from './message-origin.js';
 
 /** IDs verified against production on 2026-10-27; names are documentation only. */
 export const LUNA_BACKFILL_SKIP = [
@@ -81,10 +82,11 @@ export async function backfillLuna(database: SqlDatabase, config: FreeAgentConfi
         [current.workspace_id])).rowCount ? 'already present' : 'owner at agent limit';
       for (const agent of [current.beebee_id, luna]) await setRoomEventSubscriptions(db, current.room_id, agent, FREE_AGENT_EVENT_SUBSCRIPTIONS);
       await db.query(`UPDATE free_agents SET starter_role='beebee' WHERE agent_id=$1 AND starter_role IS NULL`, [current.beebee_id]);
-      await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,$4) ON CONFLICT(id) DO NOTHING`, [
-        createHash('sha256').update(`luna-backfill-intro:${current.workspace_id}`).digest('hex'),
-        current.room_id, luna, LUNA_BACKFILL_HELLO.replace('{name}', `@${current.owner_handle}`),
-      ]);
+      await insertMemberMessage(db, {
+        id: createHash('sha256').update(`luna-backfill-intro:${current.workspace_id}`).digest('hex'),
+        roomId: current.room_id, authorId: luna,
+        text: productOnboardingText(LUNA_BACKFILL_HELLO.replace('{name}', `@${current.owner_handle}`)), ignoreExisting: true,
+      });
       return 'added Luna and intro';
     });
     results.push({ ...target, result });

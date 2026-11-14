@@ -1,4 +1,3 @@
-import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { createHash } from 'node:crypto';
 import { reportAgentAttention } from './commander.js';
@@ -14,6 +13,7 @@ import { ROUTER_AUTHORITY_LOCK } from './router-authority-lock.js';
 
 import { CornerRow,loadCorner } from './corner-lifecycle-read-state.js';
 import { CORNER_LIFECYCLE_SLUG,greenReviewRequestSql } from './corner-lifecycle-values.js';
+import { SYSTEM_AUTHOR_ID,systemText } from './message-origin.js';
 
 
 
@@ -49,8 +49,8 @@ export async function noteReviewDispatchFailure(
   await reportAgentAttention(
     db,
     cornerId,
-    SYSTEM_IDENTITY_ID,
-    systemMessage('corner-lifecycle.blocked', reason),
+    SYSTEM_AUTHOR_ID,
+    systemText(systemMessage('corner-lifecycle.blocked', reason)),
     undefined,
     createHash('sha256').update(`review-dispatch:${cornerId}:${headSha}:${reason}`).digest('hex'),
     { wakeInCorner: true },

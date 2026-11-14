@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { createCommunityInviteToken } from '@beeline/api-contract/phone';
 import type { SqlDatabase } from './database.js';
 import { recordOnboardingEvent } from './signin-funnel.js';
+import { insertMemberMessage,productOnboardingText } from './message-origin.js';
 
 export async function postStarterInviteOffer(database: SqlDatabase, roomId: string, agentId: string, personId: string, publicOrigin: string) {
   const invite = await createStarterInvite(database, roomId, personId, publicOrigin);
@@ -11,8 +12,8 @@ export async function postStarterInviteOffer(database: SqlDatabase, roomId: stri
      AND f.starter_role='beebee' AND f.removed_at IS NULL LIMIT 1`, [roomId, personId],
   )).rows[0];
   const messageId = randomBytes(32).toString('hex');
-  await database.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,$4)`,
-    [messageId, roomId, beebee?.agent_id ?? agentId, invite.message]);
+  await insertMemberMessage(database, { id: messageId, roomId, authorId: beebee?.agent_id ?? agentId,
+    text: productOnboardingText(invite.message) });
   await recordOnboardingEvent(database, personId, 'invite_shared', { roomId });
   return { ...invite, messageId };
 }

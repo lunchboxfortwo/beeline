@@ -5,6 +5,7 @@ import type { SqlDatabase } from './database.js';
 import { readFile } from 'node:fs/promises';
 import { identityFaceDataUri } from './identity-face.js';
 import { recordOnboardingEvent } from './signin-funnel.js';
+import { insertMemberMessage,productOnboardingText } from './message-origin.js';
 
 export function starterHello(name: string) {
   return localizedStarterHello(name, 'en');
@@ -20,9 +21,8 @@ export async function postStarterWelcome(database: SqlDatabase, input: {
   const card = { starterOnboarding: 'welcome', ...(input.manualUserId ? {
     onboardingManual: true, onboardingUserId: input.manualUserId, onboardingRunId: input.runId ?? randomUUID(),
   } : {}) };
-  await database.query(`INSERT INTO messages(id,room_id,author_id,text,card,created_at) VALUES($1,$2,$3,$4,$5::jsonb,clock_timestamp())`, [
-    messageId, input.roomId, input.agentId, localizedStarterHello(person?.name ?? '', await readStarterLanguage(database, input.roomId, userId)), JSON.stringify(card),
-  ]);
+  await insertMemberMessage(database, { id: messageId, roomId: input.roomId, authorId: input.agentId, card,
+    text: productOnboardingText(localizedStarterHello(person?.name ?? '', await readStarterLanguage(database, input.roomId, userId))) });
   if (userId) await recordOnboardingEvent(database, userId, 'welcome_shown', { roomId: input.roomId });
   return { messageId };
 }
@@ -57,11 +57,9 @@ export async function postStarterGame(database: SqlDatabase, objects: ObjectServ
   if (!objects) throw new Error('Object storage is not configured');
   const game = await buildStarterGame(database, roomId, userId);
   const stored = await objects.uploadArtifact(game.rival.id, Buffer.from(game.html), 'application/vnd.beeline.game+html', 'Tic-tac-toe', database);
-  await database.query(`INSERT INTO messages(id,room_id,author_id,text,attachments,created_at,card)
-    VALUES($1,$2,$3,$4,$5::jsonb,clock_timestamp(),'{"starterOnboarding":"game"}'::jsonb)`, [
-    randomBytes(32).toString('hex'), roomId, game.rival.id,
-    `Game on. You and ${game.ally.name} play against me. Tap Open to start.`,
-    JSON.stringify([{ url: stored.url, name: stored.title, mimeType: stored.mimeType, size: stored.size }]),
-  ]);
+  await insertMemberMessage(database, { id: randomBytes(32).toString('hex'), roomId, authorId: game.rival.id,
+    text: productOnboardingText(`Game on. You and ${game.ally.name} play against me. Tap Open to start.`),
+    attachments: [{ url: stored.url, name: stored.title, mimeType: stored.mimeType, size: stored.size }],
+    card: { starterOnboarding: 'game' } });
   await recordOnboardingEvent(database, userId, 'game_posted', { artifactId: stored.objectId, roomId });
 }

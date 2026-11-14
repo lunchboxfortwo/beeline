@@ -13,6 +13,7 @@ import {
 import type { SqlDatabase } from './database.js';
 import { systemLine } from './system-line.js';
 import { liveWorkflowRun } from './workflow-runs.js';
+import { insertMemberMessage,personText } from './message-origin.js';
 
 const MINUTE_MS = 60_000;
 const MAX_INTERVAL_MINUTES = 366 * 24 * 60;
@@ -225,10 +226,11 @@ export class AgentScheduleLoop {
             // The agent is woken by the command created just below, never by a
             // tag: a scheduled prompt is the creator's words, and those words
             // need not name anybody.
-            await database.query(
-              `INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,$4)`,
-              [messageId, current.room_id, current.creator_id, current.message],
-            );
+            // Only a person or the target agent itself creates a due schedule (the
+            // selection above); here the creator is the person who wrote the prompt.
+            await insertMemberMessage(database, {
+              id: messageId, roomId: current.room_id, authorId: current.creator_id, text: personText(current.message),
+            });
           }
           await database.query(
             `UPDATE messages SET card=COALESCE(card,'{}'::jsonb) || jsonb_build_object('trigger',jsonb_build_object('scheduleId',$2::text,'period',$3::text)) || $4::jsonb WHERE id=$1`,

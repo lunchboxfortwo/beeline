@@ -6,6 +6,7 @@ import { completeStarterBanter } from './free-agent-model-proxy.js';
 import { generateStarterBanter, starterBanterBeforeDeadline, type BanterAgent, type BanterLine } from './starter-banter.js';
 import { postStarterWelcome } from './starter-onboarding.js';
 import { recordOnboardingEvent } from './signin-funnel.js';
+import { insertMemberMessage,modelText } from './message-origin.js';
 
 export const STARTER_ONBOARDING_SCHEMA = `CREATE TABLE IF NOT EXISTS starter_onboarding_runs (
   id uuid PRIMARY KEY,
@@ -116,8 +117,8 @@ export class StarterOnboardingService {
         await this.database.transaction(async db => {
           const active = await db.query(`SELECT 1 FROM starter_onboarding_runs WHERE id=$1 AND status='playing' FOR UPDATE`, [run.id]);
           if (!active.rowCount) return;
-          await db.query(`INSERT INTO messages(id,room_id,author_id,text,created_at) VALUES($1,$2,$3,$4,clock_timestamp())`,
-            [randomBytes(32).toString('hex'), roomId, line.agentId, line.text]);
+          // Each banter line is a real completion from that agent's model.
+          await insertMemberMessage(db, { id: randomBytes(32).toString('hex'), roomId, authorId: line.agentId, text: modelText(line.text) });
           await db.query(`DELETE FROM agent_turns WHERE room_id=$1 AND request_id=$2 AND agent_id=$3`, [roomId, run.id, line.agentId]);
         });
       }
