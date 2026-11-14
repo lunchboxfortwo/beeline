@@ -15,11 +15,13 @@ export async function readPlayRuntime(buildNumber, token, { fetchImpl = fetch, i
   };
   const metadata = await (await get(base)).json();
   const keys = metadata.generatedApks ?? [];
-  const apk = keys.flatMap(key => key.generatedSplitApks ?? []).find(apk => apk.moduleName === 'base' && !apk.splitId)
+  // Variant 1 is Play's archived-app stub; the newest variant carries the real manifest.
+  const apk = keys.flatMap(key => key.generatedSplitApks ?? []).filter(apk => apk.moduleName === 'base' && !apk.splitId)
+    .sort((a, b) => b.variantId - a.variantId)[0]
     ?? keys.find(key => key.generatedUniversalApk)?.generatedUniversalApk
     ?? keys.flatMap(key => key.generatedStandaloneApks ?? [])[0];
   if (!apk?.downloadId) throw new Error('Play has no downloadable base APK');
-  const bytes = Buffer.from(await (await get(`${base}/downloads/${encodeURIComponent(apk.downloadId)}:download`)).arrayBuffer());
+  const bytes = Buffer.from(await (await get(`${base}/downloads/${encodeURIComponent(apk.downloadId)}:download?alt=media`)).arrayBuffer());
   return inspect(bytes);
 }
 
