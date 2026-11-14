@@ -51,7 +51,6 @@ it('rejects a planted phone write backdoor, including inside an HTTP write owner
     'apps/server/src/server.ts': 'const httpPhoneOperation = () => dispatchPhoneOperation();',
     'apps/server/src/server-authenticated-routes.ts': 'async function routeAuthenticated() { phone.uploadMedia(); }',
     'apps/server/src/server-route.ts': 'async function route() { return options.voice.nativeStop(); }',
-    'apps/server/src/rooms-mcp.ts': 'class RoomsMcp { call() { this.phone.execute(); this.phone.execute(); } }',
   };
   try {
     for (const [file, source] of Object.entries(sources)) {

@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { OwnedModelCredentials } from './owned-model-credential.js';
 
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -50,9 +51,9 @@ if (stopProofPostgresUrl && !['127.0.0.1', 'localhost', '[::1]'].includes(new UR
 
 export let db: SqlDatabase, closeDatabase: () => Promise<void>, phone: PhoneService, daemon: DaemonService, live: LiveHub;
 
-/** Waiting work only; a running turn is listed with its generation for its helper to resume. */
+/** Tests addressing one place project that place from the agent's whole queue. */
 export const commands = (agentId = A, roomId = R) =>
-  daemon.execute('getAgentCommands', { roomId }, agentId).then((r) => r.commands.filter(command => !command.generationId));
+  daemon.execute('getAgentCommands', { roomId }, agentId).then((r) => r.commands.filter(command => command.roomId === roomId));
 
 export const send = (text: string, roomId = R) => phone.execute('sendRoomMessage', { roomId, text }, H);
 
@@ -70,7 +71,7 @@ export const connectingOwners=new Map<string,Promise<{connectionId:string;epoch:
 
 export async function helperOwner(agentId:string):Promise<{connectionId:string;epoch:number}>{
   const current=(await db.query<{connectionId:string;epoch:number}>(
-    `SELECT COALESCE(turn_connection_id,connection_id) "connectionId",COALESCE(turn_connection_epoch,epoch)::integer epoch
+    `SELECT connection_id "connectionId",epoch::integer epoch
       FROM agent_connections WHERE agent_id=$1 AND released_at IS NULL`,[agentId])).rows[0];
   if(current)return current;
   let pending=connectingOwners.get(agentId);
@@ -106,8 +107,7 @@ export async function queueStopOrders() {
   const [root] = await commands(B);
   await claim(root!);
   for (let i = 1; i <= 3; i++) {
-    await daemon.execute('order', { roomId: R, address: R, agent: 'hoots', text: `queued task ${i}`,
-      requestId: root!.turnRequestId, generationId: 'g1' }, B);
+    await daemon.execute('order', { roomId: R, address: R, agent: 'hoots', text: `queued task ${i}`, requestId: root!.turnRequestId }, B);
   }
   const queued = await commands();
   expect(queued).toHaveLength(3);
@@ -118,24 +118,14 @@ export async function queueStopOrders() {
 export async function claim(c: AgentCommand, generationId = 'g1') {
   const source=await helperOwner(c.agentId);
   const {capability}=await daemon.negotiateOwnedModel(c.agentId,true);
-  await daemon.execute(
-    'claimAgentCommand',
-    { roomId: c.roomId, commandId: c.id, generationId },
-    c.agentId, source, capability,
-  );
+  await startQueuedCommand(daemon, { roomId: c.roomId, commandId: c.id }, c.agentId);
 
 }
 
 export const result = (c: AgentCommand, text: string, generationId = 'g1', extra = {}) =>
   daemon.execute(
     'postRoomMessage',
-    {
-      roomId: c.roomId,
-      requestId: c.turnRequestId,
-      generationId,
-      text,
-      ...extra,
-    },
+    { roomId: c.roomId, requestId: c.turnRequestId, text, ...extra },
     c.agentId,
   );
 

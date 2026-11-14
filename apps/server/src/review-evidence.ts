@@ -35,7 +35,8 @@ export async function missingReviewAttachments(
   reviewerId: string,
 ): Promise<boolean> {
   const turns = (await db.query<{ id: string; turn_request_id: string; agent_id: string; report_ids: string[] }>(
-    `SELECT id,turn_request_id,agent_id,COALESCE(review_context->'reportIds','[]'::jsonb) report_ids FROM agent_commands
+    `SELECT id,turn_request_id,agent_id,(COALESCE(review_context->'reportIds','[]'::jsonb) || CASE WHEN result_message_id IS NOT NULL
+       THEN jsonb_build_array(result_message_id) ELSE '[]'::jsonb END) report_ids FROM agent_commands
      WHERE room_id=$1 AND review_context->>'headSha'=$2
        AND review_context->>'purpose' IS DISTINCT FROM 'verdict'
        AND agent_id=$3 AND review_context->'pullRequest'=$4::jsonb`,
@@ -43,8 +44,8 @@ export async function missingReviewAttachments(
   )).rows;
   for (const turn of turns) {
     const messages = (await db.query<{ text: string; attachments: unknown[] }>(
-      `SELECT text,attachments FROM messages WHERE room_id=$1 AND author_id=$2
-         AND (request_id=$3 OR id=(SELECT result_message_id FROM agent_commands WHERE id=$4))
+      `SELECT text,attachments FROM messages WHERE author_id=$2
+         AND ((room_id=$1 AND request_id=$3) OR id=(SELECT result_message_id FROM agent_commands WHERE id=$4))
          AND deleted_at IS NULL`,
       [cornerId, turn.agent_id, turn.turn_request_id, turn.id],
     )).rows;

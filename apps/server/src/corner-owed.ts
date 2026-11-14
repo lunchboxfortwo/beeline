@@ -375,37 +375,9 @@ CREATE TRIGGER corner_report_order AFTER INSERT ON agent_commands FOR EACH ROW E
 DROP TRIGGER IF EXISTS corner_report_push ON corner_facts;
 DROP TRIGGER IF EXISTS corner_report_push ON corner_github_cache;
 -- A queued automatic wake predating the report is not new input either.
-CREATE OR REPLACE FUNCTION quiet_corner_report_wakes() RETURNS trigger LANGUAGE plpgsql AS $quiet$
-DECLARE corner uuid; ignored bigint;
-BEGIN
-  IF TG_TABLE_NAME='agent_commands' THEN
-    IF NEW.private_payload->>'kind' IS DISTINCT FROM 'report' THEN RETURN NULL; END IF;
-    SELECT id INTO corner FROM rooms WHERE NEW.private_payload->>'fromRoomId'=id::text;
-  ELSE
-    IF NEW.card_type='agent-command' AND NEW.card->>'kind'='report' THEN
-      corner=NEW.room_id;
-    ELSIF NEW.card->>'reportToId' IS NOT NULL THEN
-      SELECT id INTO corner FROM rooms WHERE ${humanReportCornerSql('NEW')}=id::text;
-    ELSE RETURN NULL;
-    END IF;
-  END IF;
-  IF NOT EXISTS(SELECT 1 FROM rooms report_corner
-    CROSS JOIN LATERAL (${cornerWaitingSql('report_corner')}) waiting WHERE report_corner.id=corner) THEN RETURN NULL; END IF;
-  WITH cancelled AS (
-    SELECT (terminal.ended).* FROM (SELECT beeline_end_agent_turn(command.id,command.generation_id,'cancelled','corner_waiting',NULL) ended FROM agent_commands command WHERE command.room_id=corner AND command.state='pending' AND command.action IN ('input','resume')
-      AND command.private_payload->>'kind' IS DISTINCT FROM 'order'
-      AND command.private_payload->>'kind' IS DISTINCT FROM 'report'
-      AND NOT EXISTS(SELECT 1 FROM messages source JOIN identities author ON author.id=source.author_id
-        WHERE source.id=command.source_message_id AND author.kind='human' AND source.system_event IS NULL)) terminal)
-  SELECT count(*) INTO ignored FROM cancelled;
-  RETURN NULL;
-END $quiet$;
 DROP TRIGGER IF EXISTS corner_report_quiet ON agent_commands;
-CREATE TRIGGER corner_report_quiet AFTER INSERT OR UPDATE OF private_payload ON agent_commands
-  FOR EACH ROW EXECUTE FUNCTION quiet_corner_report_wakes();
 DROP TRIGGER IF EXISTS corner_report_quiet ON messages;
-CREATE TRIGGER corner_report_quiet AFTER INSERT OR UPDATE OF card,text ON messages
-  FOR EACH ROW EXECUTE FUNCTION quiet_corner_report_wakes();
+DROP FUNCTION IF EXISTS quiet_corner_report_wakes();
 CREATE TABLE IF NOT EXISTS corner_owed (
   corner_id uuid NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
   person_id text NOT NULL REFERENCES identities(id) ON DELETE CASCADE,

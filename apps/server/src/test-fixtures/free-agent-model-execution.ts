@@ -4,7 +4,6 @@ import {
   type FreeAgentModelProxyOptions,
 } from '../free-agent-model-proxy.js';
 import { tokenHash } from '../free-agents.js';
-import { commandOwnerLiveSql } from '../turn-ownership.js';
 import { freeAgentModelTakesImages, imageInput } from '../free-agent-image-input.js';
 
 /** Synthetic caller of the shared server-owned model execution leaf. Production
@@ -56,16 +55,14 @@ export async function handleModelExecutionFixture(
   const turn = (
     await options.database.query<{
       id: string;
-      generation_id: string | null;
       started: Date;
       room_id: string;
       turn_request_id: string;
     }>(
-      `SELECT command.id,command.generation_id,command.room_id,command.turn_request_id,COALESCE(turn.started_at,command.claimed_at) started FROM agent_commands command LEFT JOIN agent_turns turn
+      `SELECT command.id,command.room_id,command.turn_request_id,COALESCE(turn.started_at,command.created_at) started FROM agent_commands command LEFT JOIN agent_turns turn
        ON turn.agent_id=command.agent_id AND turn.room_id=command.room_id
          AND turn.request_id=command.turn_request_id
-       WHERE command.agent_id=$1 AND command.state='claimed'
-         AND command.action IN ('input','resume') AND ${commandOwnerLiveSql('command')}
+       WHERE command.agent_id=$1 AND command.state='pending' AND command.action='input'
        ORDER BY started DESC LIMIT 1`,
       [agent.agent_id],
     )

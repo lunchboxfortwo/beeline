@@ -4,7 +4,6 @@ import {
   type HelperOverlayDemand, type HelperOverlayFrame,
 } from '@beeline/api-contract/helper-overlay';
 import { authorizeCommandOutput, type CommandRow } from './agent-command.js';
-import { registerOwnedAccessCheck } from './turn-ownership.js';
 import { subscribeCommandCompletion } from './command-completion.js';
 import type { SqlDatabase } from './database.js';
 import type { LiveEvent } from './live.js';
@@ -93,15 +92,10 @@ async function currentOwner(db:SqlDatabase,metadata:HelperOverlayMetadata):Promi
     WHERE connection.agent_id=$1 AND connection.connection_id=$2 AND connection.epoch=$3
     AND connection.released_at IS NULL FOR SHARE OF connection`,[metadata.agentId,metadata.connectionId,metadata.connectionEpoch]);
   if(!row.rowCount)return;
-  const command=await authorizeCommandOutput(db,metadata.roomId,metadata.agentId,metadata.turnId,metadata.turnGeneration,
-    metadata.type==='end'||metadata.type==='retract',false);
-  if(command.id!==metadata.commandId)return;
-  if((await db.query(`SELECT 1 FROM agent_commands newer JOIN agent_commands current ON current.id=$1
-    WHERE newer.room_id=current.room_id AND newer.agent_id=current.agent_id AND newer.state='claimed'
-      AND (newer.created_at,newer.id)>(current.created_at,current.id)`,[command.id])).rowCount)return;
-  if((await db.query(`SELECT 1 FROM agent_turns WHERE room_id=$1 AND agent_id=$2 AND request_id=$3
-    AND generation_id=$4 AND status IN ('complete','failed','cancelled')`,
-    [metadata.roomId,metadata.agentId,metadata.turnId,metadata.turnGeneration])).rowCount)return;
+  // The draft lane belongs to one queue item: its id is both commandId and turnGeneration.
+  const command=await authorizeCommandOutput(db,metadata.roomId,metadata.agentId,metadata.turnId);
+  if(command.id!==metadata.commandId||command.id!==metadata.turnGeneration)return;
+  if(command.state!=='pending'&&metadata.type!=='end'&&metadata.type!=='retract')return;
   return command;
 }
 /** Caller authenticates the agent and pins the actual machine registration.
@@ -143,7 +137,6 @@ export async function applyHelperOverlay(db:SqlDatabase,authenticatedAgentId:str
     const body={text,overlayV1:metadata};
     const event=helperOverlayEvent(body);
     if(!event||Buffer.byteLength(JSON.stringify(event))+256>HELPER_OVERLAY_MAX_FRAME_BYTES)return {ack:{accepted:false,reason:'unavailable'}};
-    await registerOwnedAccessCheck(tx,command);
     await tx.query(`INSERT INTO live_outputs(room_id,agent_id,turn_id,kind,body) VALUES($1,$2,$3,$4,$5::jsonb)
       ON CONFLICT(room_id,agent_id,turn_id,kind) DO UPDATE SET body=EXCLUDED.body,updated_at=now()`,
       [frame.roomId,frame.agentId,frame.turnId,frame.kind,JSON.stringify(body)]);

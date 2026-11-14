@@ -45,6 +45,7 @@ it.skipIf(!postgresUrl)(
       SELECT md5('migration-corner-'||n)::uuid,$1,$2,'Corner '||n FROM generate_series(1,1033) n`,
         [workspace, room],
       );
+      await db.query('ALTER TABLE memberships DISABLE TRIGGER USER');
       await db.query(
         `INSERT INTO memberships(workspace_id,room_id,identity_id,role,event_subscriptions)
       SELECT corner.workspace_id,corner.id,person.id,'member',
@@ -52,12 +53,13 @@ it.skipIf(!postgresUrl)(
       FROM rooms corner CROSS JOIN identities person WHERE corner.parent_id=$1 AND person.handle LIKE 'member%'`,
         [room],
       );
+      await db.query('ALTER TABLE memberships ENABLE TRIGGER USER');
       await db.query('ALTER TABLE messages DISABLE TRIGGER USER');
-      await db.query(
+      for(let first=1;first<=333000;first+=50000) await db.query(
         `INSERT INTO messages(id,room_id,author_id,text)
-      SELECT 'migration-history-'||n,$1,repeat(md5('member-1'),2),'Historical conversation '||n
-      FROM generate_series(1,333000) n`,
-        [unrelated],
+         SELECT 'migration-history-'||n,$1,repeat(md5('member-1'),2),'Historical conversation '||n
+         FROM generate_series($2::int,$3::int) n`,
+        [unrelated,first,Math.min(333000,first+49999)],
       );
       await db.query('ALTER TABLE messages ENABLE TRIGGER USER');
       await db.query('ANALYZE');

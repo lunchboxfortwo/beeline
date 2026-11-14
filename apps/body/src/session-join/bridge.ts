@@ -67,7 +67,7 @@ export function renderWake(w: Wake, joined: JoinedSession, runner: Runner): stri
     `Report: ${command(runner, joined, `tool report '{"address":"${w.address}","commandId":"${w.id}","status":"done","text":"done: <result>"}'`)}`].join('\n');
   return [...header,
     `Reply: ${command(runner, joined, `reply --room ${w.address} "<text>"`)}`,
-    `If nothing needs posting: ${command(runner, joined, `tool no_reply_needed '{"address":"${w.address}","commandId":"${w.id}"}'`)}`].join('\n');
+    `After posting the answer, acknowledge it: ${command(runner, joined, `tool no_reply_needed '{"address":"${w.address}","commandId":"${w.id}"}'`)}`].join('\n');
 }
 
 /** A real handoff error is explicit; a quiet session never becomes a timed failure. */

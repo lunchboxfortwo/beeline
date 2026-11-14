@@ -1,3 +1,6 @@
+import { PostgresLiveListener } from './postgres-live.js';
+import { PgliteListenClient } from './test-support-postgres-live.test-support.js';
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import * as phoneLiveReads from './phone/live-reads.js';
 import { createCipheriv, createHash, randomBytes } from 'node:crypto';
 import { createServer, request, type Server } from 'node:http';
@@ -56,25 +59,18 @@ async function turn(text = 'hello', artifact = false): Promise<string> {
   await phone.execute('sendRoomMessage', { roomId: R, text: `@hoots ${text}` }, H);
   const commands = (await daemon.execute('getAgentCommands', { roomId: R }, A)).commands;
   const command = commands.at(-1) as AgentCommand;
-  await daemon.execute(
-    'claimAgentCommand',
-    { roomId: R, commandId: command.id, generationId: 'g1' },
-    A,
-  );
+  await startQueuedCommand(daemon, { roomId: R, commandId: command.id }, A);
   await daemon.execute(
     'postAgentTurnReceipt',
-    { roomId: R, agentId: A, requestId: command.turnRequestId, generationId: 'g1', status: 'working' },
+    { roomId: R, agentId: A, requestId: command.turnRequestId, status: 'working' },
     A,
   );
-  if (artifact)
-    await db.query(
-      `INSERT INTO agent_pending_attachments(room_id,agent_id,url,name,mime_type,size,request_id,generation_id)
-       VALUES($1,$2,'https://server.test/media/artifact','report.html','text/html',10,$3,'g1')`,
-      [R, A, command.turnRequestId],
-    );
+  if (artifact) await db.query(`UPDATE agent_commands SET answer_attachments=$4::jsonb
+    WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3`,[R,A,command.turnRequestId,
+      JSON.stringify([{url:'https://server.test/media/artifact',name:'report.html',mimeType:'text/html',size:10}])]);
   const reply = await daemon.execute(
     'postRoomMessage',
-    { roomId: R, requestId: command.turnRequestId, generationId: 'g1', text: `answer to ${text}` },
+    { roomId: R, requestId: command.turnRequestId, text: `answer to ${text}` },
     A,
   );
   return reply.id;
@@ -397,20 +393,10 @@ it('counts only replies to a person, never cards', async () => {
   const command = (await daemon.execute('getAgentCommands', { roomId: R }, A)).commands.at(
     -1,
   ) as AgentCommand;
-  await daemon.execute(
-    'claimAgentCommand',
-    { roomId: R, commandId: command.id, generationId: 'g1' },
-    A,
-  );
+  await startQueuedCommand(daemon, { roomId: R, commandId: command.id }, A);
   await daemon.execute(
     'postRoomMessage',
-    {
-      roomId: R,
-      requestId: command.turnRequestId,
-      generationId: 'g1',
-      text: 'a card',
-      presentation: 'card',
-    },
+    { roomId: R, requestId: command.turnRequestId, text: 'a card', presentation: 'card' },
     A,
   );
   expect(
@@ -433,17 +419,15 @@ it('shows on the 300th reply once, and does not count failed receipts or duplica
     VALUES($1,299,30)`, [H]);
   await phone.execute('sendRoomMessage', { roomId: R, text: '@hoots failing' }, H);
   const command = (await daemon.execute('getAgentCommands', { roomId: R }, A)).commands.at(-1) as AgentCommand;
-  await daemon.execute('claimAgentCommand', { roomId: R, commandId: command.id, generationId: 'failed' }, A);
-  await daemon.execute('postAgentTurnReceipt', { roomId: R, requestId: command.turnRequestId,
-    generationId: 'failed', status: 'failed', reason: 'not signed in', reasonKind: 'not-signed-in' }, A);
+  await startQueuedCommand(daemon, { roomId: R, commandId: command.id }, A);
+  await daemon.execute('postAgentTurnReceipt', { roomId: R, requestId: command.turnRequestId, status: 'failed', reason: 'not signed in', reasonKind: 'not-signed-in' }, A);
   expect((await db.query(`SELECT replies FROM github_star_prompts`)).rows).toEqual([{ replies: 299 }]);
   expect(await read()).toEqual({ prompt: null });
   await turn('three hundred');
   expect((await read()).prompt?.milestone).toBe(300);
   const completed = (await db.query<{turn_request_id: string}>(`SELECT turn_request_id FROM agent_commands
     WHERE result_message_id IS NOT NULL ORDER BY completed_at DESC LIMIT 1`)).rows[0]!;
-  await daemon.execute('postRoomMessage', { roomId: R, requestId: completed.turn_request_id,
-    generationId: 'g1', text: 'answer to three hundred' }, A);
+  await daemon.execute('postRoomMessage', { roomId: R, requestId: completed.turn_request_id, text: 'answer to three hundred' }, A);
   expect((await db.query(`SELECT replies FROM github_star_prompts`)).rows).toEqual([{ replies: 300 }]);
   await answer('later', 300);
   await turn('three hundred and one');
@@ -453,6 +437,9 @@ it('shows on the 300th reply once, and does not count failed receipts or duplica
 it('delivers the third plain reply’s prompt over the live socket without a later win', async () => {
   const server = createBeelineServer({ database: db, phone, daemon, live, mediaMaximumBytes: 1,
     auth: { authenticatePhone: async () => H } as unknown as TokenAuth });
+  const listener=new PostgresLiveListener(db,live,()=>new PgliteListenClient(db));
+  void listener.run();
+  await vi.waitFor(()=>expect(listener.projectionHealth().connected).toBe(true));
   let socket: WebSocket | undefined;
   try {
     server.listen(0, '127.0.0.1');
@@ -474,6 +461,7 @@ it('delivers the third plain reply’s prompt over the live socket without a lat
     }
   } finally {
     socket?.terminate();
+    await listener.stop();
     server.closeAllConnections();
     await new Promise<void>(resolve => server.close(() => resolve()));
   }

@@ -1,18 +1,14 @@
-import { lockAgentCommandQueue } from '../agent-command-queue.js';
-import { OwnedModelUnknownGeneration, isOwnedModelUnknownGenerationError } from '../owned-model-errors.js';
+import { workflowOutputBindingCtes } from '../workflow-step-output.js';
+import { createHash } from 'node:crypto';
 import { endAgentTurn } from '../agent-turn-end.js';
-import { registerOwnedAccessCheck } from '../turn-ownership.js';
-import type { HelperTurnOwnershipSource } from '@beeline/api-contract/helper-turn-ownership';
-import { OwnedModelCredentials } from '../owned-model-credential.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { clearOwedMention, mentionReplyKey } from '../owed-mentions.js';
 import { postRepositoryOnboarding } from '../repository-onboarding.js';
-import { queueDatabaseWork } from '../database-work-queue.js';
 import { CommandRefusalError } from '../commander.js';
 import { vaultSaveRequest, type VaultSaveCard } from '@beeline/api-contract/daemon';
 import { FIRST_PARTY_INTEGRATIONS } from '../first-party-integrations.js';
 import { setCornerHold } from '../corner-holds.js';
-import { authorizeCommandOutput, claimAgentCommand, StaleWakeClaimRefused, readAgentCommands, type CommandRow } from '../agent-command.js';
+import { authorizeCommandOutput } from '../agent-command-route-agent-result.js';
 import { endComputerSession, getComputerSession } from '../computer-session.js';
 import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { recordPersonMergeYes } from '../corner-merge-approval.js';
@@ -26,7 +22,7 @@ import { searchInstitutionalHistory } from '../institutional-history.js';
 import { loadWorkspaceSkill } from '../institutional-skills.js';
 import type { DaemonContext } from './context.js';
 import { Input, OwnedModelClaimCapability, Output, id, seconds } from './values.js';
-import { daemonLockOwnedTurnAccess, daemonOwnedModelReady, daemonModelClaimCredentials } from './owned-model.js';
+import { daemonOwnedModelReady, daemonModelClaimCredentials } from './owned-model.js';
 import { daemonWriteResult } from './corner-messages.js';
 import { daemonPostRoomMessage } from './messages.js';
 import { daemonAccess } from './access.js';
@@ -34,7 +30,7 @@ import { daemonLinkSpendApproval, daemonSquireApprovalDecision } from './approva
 import { daemonGrantRequester } from './grants.js';
 import { daemonAgentWorkbench, daemonOfferContext } from './workbench.js';
 
-export async function getInstitutionalContextOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, turnOwner: HelperTurnOwnershipSource | undefined, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined, ownedIntent: boolean): Promise<Output<Name>> {
+export async function getInstitutionalContextOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 if (!ctx.commandTransaction || !ctx.authorizedCommand) {
           throw new Error('institutional context requires an active command');
         }
@@ -54,7 +50,7 @@ if (!ctx.commandTransaction || !ctx.authorizedCommand) {
         )) as Output<Name>;
 }
 
-export async function saveInstitutionalMemoryOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, turnOwner: HelperTurnOwnershipSource | undefined, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined, ownedIntent: boolean): Promise<Output<Name>> {
+export async function saveInstitutionalMemoryOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 
         if (!ctx.commandTransaction || !ctx.authorizedCommand) {
           throw new Error('institutional memory changes require an active command');
@@ -94,7 +90,7 @@ export async function saveInstitutionalMemoryOperation<Name extends keyof Daemon
 
 }
 
-export async function searchInstitutionalMemoryOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, turnOwner: HelperTurnOwnershipSource | undefined, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined, ownedIntent: boolean): Promise<Output<Name>> {
+export async function searchInstitutionalMemoryOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 if (!ctx.commandTransaction || !ctx.authorizedCommand) {
           throw new Error('institutional memory search requires an active command');
         }
@@ -109,7 +105,7 @@ if (!ctx.commandTransaction || !ctx.authorizedCommand) {
         )) as Output<Name>;
 }
 
-export async function searchInstitutionalHistoryOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, turnOwner: HelperTurnOwnershipSource | undefined, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined, ownedIntent: boolean): Promise<Output<Name>> {
+export async function searchInstitutionalHistoryOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 if (!ctx.commandTransaction || !ctx.authorizedCommand) {
           throw new Error('institutional history search requires an active command');
         }
@@ -123,7 +119,7 @@ if (!ctx.commandTransaction || !ctx.authorizedCommand) {
         )) as Output<Name>;
 }
 
-export async function loadWorkspaceSkillOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, turnOwner: HelperTurnOwnershipSource | undefined, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined, ownedIntent: boolean): Promise<Output<Name>> {
+export async function loadWorkspaceSkillOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 if (!ctx.commandTransaction || !ctx.authorizedCommand) {
           throw new Error('workspace skill load requires an active command');
         }
@@ -137,93 +133,49 @@ if (!ctx.commandTransaction || !ctx.authorizedCommand) {
         )) as Output<Name>;
 }
 
-export async function claimAgentCommandOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, turnOwner: HelperTurnOwnershipSource | undefined, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined, ownedIntent: boolean): Promise<Output<Name>> {
+/** A hosted-model credential bound to one pending queue item. */
+export async function getModelCredentialOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
+        const request = input as Input<'getModelCredential'>;
+        return await ctx.database.transaction(async db => {
+          if (!daemonOwnedModelReady(ctx) ||
+              !(await db.query('SELECT 1 FROM free_agents WHERE agent_id=$1', [authenticatedAgentId])).rowCount)
+            return {} as Output<Name>;
+          const command = await authorizeCommandOutput(db, request.roomId, authenticatedAgentId, request.requestId);
+          const credentials = daemonModelClaimCredentials(ctx, modelClaim, authenticatedAgentId);
+          return { modelCredential: await credentials.issueInTransaction(db, { agentId: authenticatedAgentId, commandId: command.id }) } as Output<Name>;
+        });
+}
 
-        const claimed = await queueDatabaseWork(ctx.database, `turn:${scopedRoom}:${authenticatedAgentId}`, () => ctx.database.transaction(async (db) => {
-          if (ownedIntent) await daemonLockOwnedTurnAccess(ctx, db, scopedRoom!, authenticatedAgentId, String(candidate.commandId));
-          const row = await claimAgentCommand(db, scopedRoom!, authenticatedAgentId,
-            String(candidate.commandId), typeof candidate.generationId === 'string' ? candidate.generationId : '',
-            turnOwner ? { kind: 'helper', owner: turnOwner, allPending: name === 'claimAgentTurn' }
-              : { kind: 'legacy', allPending: name === 'claimAgentTurn' })
-            .catch((error: unknown) => {
-              if (isOwnedModelUnknownGenerationError(error)) throw new OwnedModelUnknownGeneration();
-              // Commit stale cancellations before refusing a cached helper claim.
-              if (error instanceof StaleWakeClaimRefused) return error;
-              throw error;
-            });
-          if (row instanceof StaleWakeClaimRefused) return row;
-          let modelCredential: Awaited<ReturnType<OwnedModelCredentials['issueInTransaction']>> | undefined;
-          if (turnOwner && daemonOwnedModelReady(ctx) && (row.action === 'input' || row.action === 'resume') &&
-              (await db.query('SELECT 1 FROM free_agents WHERE agent_id=$1', [authenticatedAgentId])).rowCount) {
-            const credentials = daemonModelClaimCredentials(ctx, modelClaim, authenticatedAgentId);
-            modelCredential = await credentials.issueInTransaction(db, { agentId: authenticatedAgentId, commandId: row.id,
-              generationId: row.generation_id! });
-          }
-          const activity = row.reason === 'computer_activity' ? (await db.query<{
-            text: string; system_event: NonNullable<import('@beeline/api-contract/daemon').AgentCommand['source']['systemEvent']>;
-          }>(`SELECT text,system_event FROM messages WHERE id=$1`, [row.source_message_id])).rows[0] : undefined;
-          const commands = name === 'claimAgentTurn'
-            ? (await readAgentCommands(db, scopedRoom!, authenticatedAgentId, row.generation_id!)).commands
-            : undefined;
-          return { row, activity, modelCredential, commands };
-        }));
-        if (claimed instanceof StaleWakeClaimRefused) {
-          claimed.log();
-          throw claimed;
+/** Status only: the helper handed this item to the agent session. */
+export async function startAgentTurnOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
+        const request = input as Input<'startAgentTurn'>;
+        if (request.available === false) {
+          const command = await authorizeCommandOutput(ctx.database, request.roomId, authenticatedAgentId, request.requestId);
+          const agent = (await ctx.database.query<{ name: string }>('SELECT name FROM identities WHERE id=$1', [authenticatedAgentId])).rows[0]!;
+          await systemLine(ctx.database, {
+            id: createHash('sha256').update(`offline:${command.id}`).digest('hex'),
+            roomId: command.room_id,
+            subject: { kind: 'agent', id: authenticatedAgentId, name: agent.name },
+            verb: systemMessage('phone-service.is-offline'),
+            consequence: systemMessage('phone-service.connect-again'),
+          });
+          ctx.live.publish({ type: 'invalidate', roomId: request.roomId, reason: 'message', agentId: authenticatedAgentId });
+        } else {
+        await ctx.database.query(`WITH delivered AS (SELECT * FROM agent_commands
+          WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3 AND state='pending'),
+          ${workflowOutputBindingCtes('delivered')}
+          INSERT INTO agent_turns(room_id,request_id,agent_id,status)
+          SELECT command.room_id,command.turn_request_id,command.agent_id,'working' FROM delivered command
+          ORDER BY command.created_at DESC LIMIT 1
+          ON CONFLICT(room_id,request_id,agent_id) DO UPDATE SET status='working',failure_reason=NULL,
+            completion_kind=NULL,created_at=now(),started_at=now()
+          WHERE agent_turns.status<>'cancelled'`, [request.roomId, authenticatedAgentId, request.requestId]);
+        ctx.live.publish({ type: 'invalidate', roomId: request.roomId, reason: 'turn', agentId: authenticatedAgentId });
         }
-        ctx.live.publish({ type: 'invalidate', roomId: scopedRoom!, reason: 'turn', agentId: authenticatedAgentId });
-        return { ...daemonWriteResult(ctx),
-          ...(claimed.commands ? { commands: claimed.commands } : {}),
-          ...(claimed.modelCredential ? { modelCredential: claimed.modelCredential } : {}),
-          ...(claimed.row.recovery_context ? { recoveryContext: claimed.row.recovery_context } : {}),
-          ...(claimed.activity ? { activitySource: { body: claimed.activity.text, systemEvent: claimed.activity.system_event } } : {}),
-        } as Output<Name>;
-
-}
-
-export async function releaseAgentTurnOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, turnOwner: HelperTurnOwnershipSource | undefined, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined, ownedIntent: boolean): Promise<Output<Name>> {
-
-        const released = await ctx.database.transaction(async db => {
-          await lockAgentCommandQueue(db, scopedRoom!, authenticatedAgentId);
-          // The invocation has seen these wakes. Ending it consumes them;
-          // only events admitted after its claim may start another invocation.
-          const consumed = await db.query<CommandRow>(`SELECT (ended).* FROM (
-            SELECT beeline_end_agent_turn(id,generation_id,'complete') ended FROM agent_commands
-            WHERE room_id=$1 AND agent_id=$2 AND state='claimed' AND generation_id=$3
-              AND action IN ('input','resume')
-            ORDER BY created_at,id) consumed`,
-            [scopedRoom,authenticatedAgentId,candidate.generationId]);
-          if (consumed.rows[0]) await registerOwnedAccessCheck(db,consumed.rows[0]);
-          return readAgentCommands(db, scopedRoom!, authenticatedAgentId);
-        });
-        ctx.live.publish({type:'invalidate',roomId:scopedRoom!,reason:'turn',agentId:authenticatedAgentId});
-        return {...daemonWriteResult(ctx), commands: released.commands} as Output<Name>;
-
-}
-
-export async function acknowledgeAgentCommandOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, turnOwner: HelperTurnOwnershipSource | undefined, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined, ownedIntent: boolean): Promise<Output<Name>> {
-
-        const acknowledged = await ctx.database.transaction(async db => {
-          if (ownedIntent) await daemonLockOwnedTurnAccess(ctx, db, scopedRoom!, authenticatedAgentId, String(candidate.commandId));
-          const previous = await db.query<CommandRow>(`SELECT * FROM agent_commands WHERE id=$1 AND room_id=$2
-            AND agent_id=$3 AND generation_id=$4 AND action IN ('stop','restart') AND state='complete' FOR UPDATE`,
-            [candidate.commandId, scopedRoom, authenticatedAgentId, candidate.generationId]);
-          if (previous.rowCount) return previous;
-          const written = await db.query<CommandRow>(
-          `SELECT (ended).* FROM (SELECT beeline_end_agent_turn(id,generation_id,'complete') ended FROM agent_commands WHERE id=$1 AND room_id=$2 AND agent_id=$3 AND generation_id=$4 AND state='claimed'
-          AND action IN ('stop','restart')) ended_commands`,
-          [candidate.commandId, scopedRoom, authenticatedAgentId, candidate.generationId]);
-          if (written.rows[0]?.action==='restart') await db.query(`UPDATE agent_commands
-            SET restart_confirmed_at=COALESCE(restart_confirmed_at,clock_timestamp()) WHERE id=$1`,[written.rows[0].id]);
-          if (written.rows[0]) await registerOwnedAccessCheck(db, written.rows[0]);
-          return written;
-        });
-        if (!acknowledged.rowCount) throw new Error('command acknowledgement conflict');
         return daemonWriteResult(ctx) as Output<Name>;
-
 }
 
-export async function getRoomGitHubTokenOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, turnOwner: HelperTurnOwnershipSource | undefined, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined, ownedIntent: boolean): Promise<Output<Name>> {
+export async function getRoomGitHubTokenOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 
         if (!ctx.roomGitHubToken) throw new Error('GitHub room token service unavailable');
         const roomId = (input as Input<'getRoomGitHubToken'>).roomId;
@@ -243,7 +195,7 @@ export async function getRoomGitHubTokenOperation<Name extends keyof DaemonOpera
 
 }
 
-export async function markAgentTurnSilentOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, turnOwner: HelperTurnOwnershipSource | undefined, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined, ownedIntent: boolean): Promise<Output<Name>> {
+export async function markAgentTurnSilentOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 
         const declinedMessage = name === 'markAgentTurnSilent' ? (input as Input<'markAgentTurnSilent'>).messageId : undefined;
         if (name === 'markAgentTurnSilent') {
@@ -252,19 +204,21 @@ export async function markAgentTurnSilentOperation<Name extends keyof DaemonOper
           if (declinedMessage && !await mentionReplyKey(ctx.database, authenticatedAgentId, command.room_id, declinedMessage))
             throw new CommandRefusalError('messageId must be a tagged message in this Room', 400);
           if (!(await ctx.database.query(`SELECT 1 FROM agent_pending_attachments
-            WHERE room_id=$1 AND agent_id=$2 AND request_id=$3 AND generation_id=$4 LIMIT 1`,
-            [command.room_id, authenticatedAgentId, command.turn_request_id, command.generation_id])).rowCount) {
-            await ctx.database.query(`UPDATE agent_turns SET completion_kind='no-reply'
-              WHERE room_id=$1 AND agent_id=$2 AND request_id=$3`,
-              [command.room_id, authenticatedAgentId, command.turn_request_id]);
-            await endAgentTurn(ctx.database, command, 'complete');
-            if (declinedMessage) await clearOwedMention(ctx.database, authenticatedAgentId, command.room_id, declinedMessage);
-            return daemonWriteResult(ctx) as Output<Name>;
+            WHERE room_id=$1 AND agent_id=$2 AND request_id=$3 LIMIT 1`,
+            [command.room_id, authenticatedAgentId, command.turn_request_id])).rowCount) {
+            const answered = command.state === 'complete' || command.action === 'restart' || Boolean((await ctx.database.query(
+              `SELECT 1 FROM messages WHERE room_id=$1 AND author_id=$2 AND request_id=$3
+                AND deleted_at IS NULL LIMIT 1`,
+              [command.return_room_id, authenticatedAgentId, command.turn_request_id])).rowCount);
+            if (answered) {
+              await endAgentTurn(ctx.database, command, 'complete');
+              if (declinedMessage) await clearOwedMention(ctx.database, authenticatedAgentId, command.room_id, declinedMessage);
+            }
+            return { ...daemonWriteResult(ctx), answered } as Output<Name>;
           }
           // Drain promised files through the same ordinary reply path before
           // recording silence; the reply writer never receives System prose.
-          input = { roomId: command.room_id, requestId: command.turn_request_id!,
-            generationId: command.generation_id!, text: '' } as Input<Name>;
+          input = { roomId: command.room_id, requestId: command.turn_request_id!, text: '' } as Input<Name>;
         }
         const output = await daemonPostRoomMessage(ctx,
           input as Input<'postRoomMessage'>,
@@ -272,17 +226,14 @@ export async function markAgentTurnSilentOperation<Name extends keyof DaemonOper
         );
         if (name === 'markAgentTurnSilent') {
           const command = ctx.authorizedCommand!;
-          await ctx.database.query(`UPDATE agent_turns SET completion_kind='no-reply'
-            WHERE room_id=$1 AND agent_id=$2 AND request_id=$3`,
-            [command.room_id, authenticatedAgentId, command.turn_request_id]);
           if (declinedMessage) await clearOwedMention(ctx.database, authenticatedAgentId, command.room_id, declinedMessage);
-          return daemonWriteResult(ctx) as Output<Name>;
+          return { ...daemonWriteResult(ctx), answered: true } as Output<Name>;
         }
         return output as Output<Name>;
 
 }
 
-export async function postBackgroundToolCompletionOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, turnOwner: HelperTurnOwnershipSource | undefined, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined, ownedIntent: boolean): Promise<Output<Name>> {
+export async function postBackgroundToolCompletionOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 
         const completion = input as Input<'postBackgroundToolCompletion'>;
         if (!completion.toolCallId || completion.toolCallId.length > 512 ||
@@ -290,30 +241,28 @@ export async function postBackgroundToolCompletionOperation<Name extends keyof D
           throw new Error('invalid background tool completion');
         await daemonAccess(ctx, completion.roomId, authenticatedAgentId);
         return await ctx.database.transaction(async (db) => {
-          if (ownedIntent) await daemonLockOwnedTurnAccess(ctx, db, completion.roomId, authenticatedAgentId);
-          const origin = await authorizeCommandOutput(db, completion.roomId, authenticatedAgentId,
-            completion.requestId, completion.generationId, true);
+          const origin = await authorizeCommandOutput(db, completion.roomId, authenticatedAgentId, completion.requestId);
           // Older helpers may detach the terminal MCP call before its result
           // arrives. Its result cannot add work to a turn already ended silently.
           // Preserve every other background job and every later generation.
           if (/^(?:(?:mcp__)?beeline[-_]agent__|mcp\.beeline-agent\.)?no_reply_needed$/.test(completion.title) &&
               (await db.query(`SELECT 1 FROM agent_turns
-                WHERE room_id=$1 AND agent_id=$2 AND request_id=$3 AND generation_id=$4
+                WHERE room_id=$1 AND agent_id=$2 AND request_id=$3
                   AND completion_kind='no-reply'`,
-              [completion.roomId, authenticatedAgentId, completion.requestId, completion.generationId])).rowCount)
+              [completion.roomId, authenticatedAgentId, completion.requestId])).rowCount)
             return daemonWriteResult(ctx);
           // Legacy helpers may acknowledge a detached tool. Its invocation owns
           // the result; a completion receipt never authorizes another model turn.
           await db.query(`INSERT INTO free_agent_events(agent_id,kind,detail)
             SELECT agent_id,'background_tool_result',$2::jsonb FROM free_agents WHERE agent_id=$1`,
-            [authenticatedAgentId,JSON.stringify({commandId:origin.id,generationId:completion.generationId,
+            [authenticatedAgentId,JSON.stringify({commandId:origin.id,
               toolCallId:completion.toolCallId,status:completion.status})]);
           return daemonWriteResult(ctx);
         }) as Output<Name>;
 
 }
 
-export async function endComputerSessionOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, turnOwner: HelperTurnOwnershipSource | undefined, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined, ownedIntent: boolean): Promise<Output<Name>> {
+export async function endComputerSessionOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 
         const ending = input as Input<'endComputerSession'>;
         const session = (await ctx.database.query<{ id: string }>(
@@ -328,7 +277,7 @@ export async function endComputerSessionOperation<Name extends keyof DaemonOpera
 
 }
 
-export async function createLinkSpendRequestOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, turnOwner: HelperTurnOwnershipSource | undefined, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined, ownedIntent: boolean): Promise<Output<Name>> {
+export async function createLinkSpendRequestOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 
         if (!ctx.linkWallet) throw new Error('Link is not configured');
         const request = input as Input<'createLinkSpendRequest'>;
@@ -344,7 +293,7 @@ export async function createLinkSpendRequestOperation<Name extends keyof DaemonO
 
 }
 
-export async function retrieveLinkSpendRequestOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, turnOwner: HelperTurnOwnershipSource | undefined, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined, ownedIntent: boolean): Promise<Output<Name>> {
+export async function retrieveLinkSpendRequestOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 
         if (!ctx.linkWallet) throw new Error('Link is not configured');
         const request = input as Input<'retrieveLinkSpendRequest'>;
@@ -392,7 +341,7 @@ export async function retrieveLinkSpendRequestOperation<Name extends keyof Daemo
 
 }
 
-export async function postStarterWelcomeOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, turnOwner: HelperTurnOwnershipSource | undefined, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined, ownedIntent: boolean): Promise<Output<Name>> {
+export async function postStarterWelcomeOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 
         const request = input as Input<'postStarterWelcome'>;
         await daemonAccess(ctx, request.roomId, authenticatedAgentId);
@@ -413,7 +362,7 @@ export async function postStarterWelcomeOperation<Name extends keyof DaemonOpera
 
 }
 
-export async function postRepositoryOnboardingOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, turnOwner: HelperTurnOwnershipSource | undefined, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined, ownedIntent: boolean): Promise<Output<Name>> {
+export async function postRepositoryOnboardingOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 
         const request = input as Input<'postRepositoryOnboarding'>;
         await daemonAccess(ctx, request.roomId, authenticatedAgentId);
@@ -432,7 +381,7 @@ export async function postRepositoryOnboardingOperation<Name extends keyof Daemo
 
 }
 
-export async function findConnectorsOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, turnOwner: HelperTurnOwnershipSource | undefined, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined, ownedIntent: boolean): Promise<Output<Name>> {
+export async function findConnectorsOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 
         const request = input as Input<'findConnectors'>;
         const query = typeof request.query === 'string' ? request.query.trim() : '';
@@ -464,7 +413,7 @@ export async function findConnectorsOperation<Name extends keyof DaemonOperation
 
 }
 
-export async function postVaultSaveCardOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, turnOwner: HelperTurnOwnershipSource | undefined, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined, ownedIntent: boolean): Promise<Output<Name>> {
+export async function postVaultSaveCardOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 
         const cardInput = input as Input<'postVaultSaveCard'>;
         const metadata = vaultSaveRequest(cardInput);
@@ -480,15 +429,13 @@ export async function postVaultSaveCardOperation<Name extends keyof DaemonOperat
 
 }
 
-export async function setCornerHoldOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, turnOwner: HelperTurnOwnershipSource | undefined, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined, ownedIntent: boolean): Promise<Output<Name>> {
+export async function setCornerHoldOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 
         const hold = input as Input<'setCornerHold'>;
         await daemonAccess(ctx, hold.cornerId, authenticatedAgentId);
         const result = await ctx.database.transaction(async (db) => {
           await lockCornerLifecycle(db, hold.cornerId);
-          const command = await authorizeCommandOutput(
-            db, hold.roomId, authenticatedAgentId, hold.requestId, hold.generationId,
-          );
+          const command = await authorizeCommandOutput(db, hold.roomId, authenticatedAgentId, hold.requestId);
           const actor = (await db.query<{ author_id: string }>(
             `SELECT message.author_id FROM messages message
              JOIN identities person ON person.id=message.author_id AND person.kind='human'
@@ -505,14 +452,12 @@ export async function setCornerHoldOperation<Name extends keyof DaemonOperationM
 
 }
 
-export async function orderCornerMergeOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, turnOwner: HelperTurnOwnershipSource | undefined, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined, ownedIntent: boolean): Promise<Output<Name>> {
+export async function orderCornerMergeOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 
         const order = input as Input<'orderCornerMerge'>;
         await daemonAccess(ctx, order.cornerId, authenticatedAgentId);
         const actorId = await ctx.database.transaction(async (db) => {
-          const command = await authorizeCommandOutput(
-            db, order.roomId, authenticatedAgentId, order.requestId, order.generationId,
-          );
+          const command = await authorizeCommandOutput(db, order.roomId, authenticatedAgentId, order.requestId);
           const actor = (await db.query<{ author_id: string }>(
             `SELECT message.author_id FROM messages message
              JOIN identities person ON person.id=message.author_id AND person.kind='human'

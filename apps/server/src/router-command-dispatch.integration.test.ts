@@ -92,12 +92,12 @@ describe('P7 dispatcher durable command adapter', () => {
     expect(regranted).toHaveBeenCalledWith({ v: 1, operation: 'reactToMessage', commandId: identity.id, state: 'committed' });
     expect(replay).not.toHaveProperty('coverage');
   });
-  it('cancel before dispatch creates no durable intent or effect', async () => {
+  it('a disconnected transport does not discard an accepted operation', async () => {
     const { dispatch } = server(), controller = new AbortController();
     controller.abort(new Error('cancel before send'));
-    await expect(dispatch('reactToMessage', { roomId: ROOM, messageId: MESSAGE, emoji: '👍' }, VIEWER, controller.signal, undefined, { v: 1, id: 'cancelled' })).rejects.toThrow('cancel before send');
-    expect((await db.query('SELECT * FROM router_commands')).rows).toEqual([]);
-    expect((await db.query('SELECT reactions FROM messages WHERE id=$1', [MESSAGE])).rows[0]?.reactions).toEqual({});
+    await expect(dispatch('reactToMessage', { roomId: ROOM, messageId: MESSAGE, emoji: '👍' }, VIEWER, controller.signal, undefined, { v: 1, id: 'cancelled' })).resolves.toMatchObject({ state: 'committed' });
+    expect((await db.query('SELECT command_id,state FROM router_commands')).rows).toEqual([{ command_id: 'cancelled', state: 'committed' }]);
+    expect((await db.query('SELECT reactions FROM messages WHERE id=$1', [MESSAGE])).rows[0]?.reactions).toEqual({ '👍': [VIEWER] });
   });
   it('does not claim command completion when a DB-only operation is refused', async () => {
     const { dispatch } = server();

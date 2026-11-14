@@ -32,7 +32,7 @@ it('corner-read-token exits without replacing the helper registration', async ()
       if (owner && owner !== socket) owner.send(JSON.stringify({ type: 'unregistered', agentId: identity.publicKey, reason: 'replaced' }));
       owner = socket;
       socket.send(JSON.stringify({type:'registered-machine',agents:[{type:'registered',agentId:identity.publicKey,
-        capabilities:{daemonOperationsV1:true,turnOwnershipV1:true,turnConnectionId:'parent',turnConnectionEpoch:1}}]}));
+        capabilities:{daemonOperationsV1:true}}]}));
     }
     if (frame.type === 'daemon-operation') socket.send(JSON.stringify({ type: 'daemon-operation-result',
       agentId: identity.publicKey, requestId: frame.requestId, result: { token: 'fixture-repository-token', expiresAt: Date.now() + 60_000 } }));
@@ -52,7 +52,7 @@ it('corner-read-token exits without replacing the helper registration', async ()
     expect(result.stdout.trim()).toBe('fixture-repository-token');
     expect({ exited: result.exited, registrations, requests })
       .toEqual({ exited: true, registrations: 1, requests: ['/v1/daemon/operations/getRoomGitHubToken'] });
-    expect(api.turnOwnershipScope()).toEqual({ connectionId: 'parent', epoch: 1 });
+    expect(api.channel.isOpen()).toBe(true);
   } finally {
     api.closeLive();
     for (const socket of sockets.clients) socket.terminate();

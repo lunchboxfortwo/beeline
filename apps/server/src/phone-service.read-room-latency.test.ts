@@ -8,18 +8,18 @@ import { taggedIdentityIdsSql } from './message-mentions.js';
 import type { CommittedMessageLiveRow } from './live.js';
 import { PgliteDatabase, insertCornerFacts } from './test-support.js';
 
-// A working turn counts only while a claimed command owns it (#3956).
-async function claimWorkingTurn(
+// A delivered item remains pending while its working status is projected.
+async function deliverWorkingTurn(
   database: SqlDatabase,
   roomId: string,
   agentId: string,
   requestId: string,
 ): Promise<void> {
-  const id = `command-${requestId}`;
+  const id = requestId;
   await database.query(
     `INSERT INTO agent_commands(id,room_id,agent_id,source_message_id,turn_request_id,
        action,reason,root_command_id,root_source_message_id,agent_depth,state)
-     VALUES($1,$2,$3,$4,$4,'input','mention',$1,$4,0,'claimed')`,
+     VALUES($1,$2,$3,$4,$4,'input','mention',$1,$4,0,'pending')`,
     [id, roomId, agentId, requestId],
   );
 }
@@ -158,7 +158,7 @@ describe('PhoneService.readRoom latency', () => {
        VALUES($1,'message-179',$2,'working',now())`,
       [ROOM, '0'.repeat(64)],
     );
-    await claimWorkingTurn(database, ROOM, '0'.repeat(64), 'message-179');
+    await deliverWorkingTurn(database, ROOM, '0'.repeat(64), 'message-179');
     await database.query(
       `INSERT INTO messages(id,room_id,author_id,text,presentation,activity,created_at)
        VALUES('current-activity',$1,$2,'','activity','[]'::jsonb,now() + interval '1 second')`,
@@ -241,7 +241,7 @@ describe('PhoneService.readRoom latency', () => {
          VALUES($1,'corner-message-60',$2,'working',now())`,
         [CORNER, AGENT],
       );
-      await claimWorkingTurn(database, CORNER, AGENT, 'corner-message-60');
+      await deliverWorkingTurn(database, CORNER, AGENT, 'corner-message-60');
       await database.query(
         `INSERT INTO messages(id,room_id,author_id,text,presentation,activity,created_at)
          VALUES('corner-current-activity',$1,$2,'','activity',

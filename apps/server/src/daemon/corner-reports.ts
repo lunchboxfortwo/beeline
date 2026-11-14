@@ -1,93 +1,29 @@
-import { systemMessage } from '@beeline/api-contract/system-message-catalog';
-import { cornerObjectiveSql, writeCornerObjective } from '../corner-objective.js';
-import { cornerKindSql } from '../corner-opening.js';
-import { cornerRunStateSql } from '../corner-run.js';
-import { setCornerReviewer } from '../corner-reviewer.js';
-import { reportToCommander, CommandRefusalError } from '../commander.js';
-import { authorizeCommandOutput, type CommandRow } from '../agent-command.js';
-import { createHash } from 'node:crypto';
-import { cornerImplementerSql } from '../corner-worker.js';
-import { currentCornerBrief, resolveCornerBriefApproval, resolveCornerBriefAttachments, resolvePendingCornerBriefAttachments, validateCornerBrief } from '../corner-brief.js';
 import { fixCornerText } from '@beeline/api-contract/daemon';
-import { type SqlDatabase } from '../database.js';
-import { writeCornerTitle } from '../corner-title.js';
+import { systemMessage } from '@beeline/api-contract/system-message-catalog';
+import { answerQueuedMessage,authorizeCommandOutput,type CommandRow } from '../agent-command.js';
+import { CommandRefusalError } from '../commander.js';
+import { currentCornerBrief,resolveCornerBriefApproval,resolveCornerBriefAttachments,resolvePendingCornerBriefAttachments,validateCornerBrief } from '../corner-brief.js';
+import { cornerLifecycleSql,recordHelperRemoteState } from '../corner-github-cache.js';
 import { lockCornerLifecycle } from '../corner-lifecycle.js';
-import { systemLine, wakeLateCornerWatcher } from '../system-line.js';
-import { mediaIdFromUrl } from '../media-ttl.js';
+import { cornerObjectiveSql,writeCornerObjective } from '../corner-objective.js';
+import { cornerKindSql } from '../corner-opening.js';
+import { setCornerReviewer } from '../corner-reviewer.js';
+import { cornerRunStateSql } from '../corner-run.js';
+import { writeCornerTitle } from '../corner-title.js';
+import { type SqlDatabase } from '../database.js';
 import { AUTHORIZED_ROOMS_CTE } from '../institutional-history.js';
-import { cornerLifecycleSql, recordHelperRemoteState } from '../corner-github-cache.js';
+import { systemLine,wakeLateCornerWatcher } from '../system-line.js';
+import { daemonAccess,daemonIdentity } from './access.js';
 import type { DaemonContext } from './context.js';
-import { id, Input, Output } from './values.js';
-import { daemonWriteResult, daemonReach } from './corner-messages.js';
-import { daemonAccess, daemonIdentity } from './access.js';
+import { daemonReach,daemonWriteResult } from './corner-messages.js';
 import { daemonCheckReviewerAuthors } from './corner-reads.js';
+import { id,Input,Output } from './values.js';
 
 
   export async function daemonReport(ctx: DaemonContext, text: string, agentId: string, command = ctx.authorizedCommand!, database = ctx.database, automatic = false, status?: unknown, ask?: string) {
-    if (!automatic) {
-      text = text.replace(/^(?:done|blocked|failed|needs[-_]decision):\s*/, '');
-      if (!['done', 'blocked', 'failed', 'needs_decision'].includes(String(status)) || !text.trim())
-        throw new CommandRefusalError('report requires status done, blocked, failed, or needs_decision and nonempty text', 400);
-      text = `${String(status).replace('_', '-')}: ${text}`;
-    }
-    const prefix = text.match(/^(done|blocked|failed|needs[-_]decision):\s*\S/)?.[1]?.replace('_', '-');
-    // Keep automatic reports' established prefix without inventing a status.
-    text = text.replace(/^needs_decision:/, 'needs-decision:');
-    if (prefix === 'done') {
-      const corner = (await database.query<{ worker: string; merged: boolean; has_pr: boolean }>(
-        `SELECT ${cornerImplementerSql('fact', 'room')} worker,
-          ${cornerLifecycleSql('fact.corner_id')}->'pr'->>'number' IS NOT NULL has_pr,
-          ${cornerLifecycleSql('fact.corner_id')}->'pr'->>'mergeCommitSha' IS NOT NULL merged
-         FROM rooms room JOIN corner_facts fact ON fact.corner_id=room.id WHERE room.id=$1`,
-        [command.room_id])).rows[0];
-      if (corner?.worker === agentId && !corner.merged) {
-        const brief = await currentCornerBrief(database, command.room_id);
-        if (brief?.repositoryWork !== false) {
-          // An unavailable registration read must not silence the worker.
-          // This command-local exception grants no merge authority.
-          if (!corner.has_pr && !ctx.cornerPrRegistrationUnavailable) throw new CommandRefusalError(
-            'done requires an opened or merged PR; post progress in the corner instead (non-PR deliverables require repositoryWork false)', 409);
-        }
-      }
-    }
-
-    const pending = (await database.query<{ id: string; url: string; name: string; mime_type: string; size: number }>(
-      `WITH RECURSIVE chain AS (
-         SELECT * FROM agent_commands WHERE id=$1
-         UNION ALL SELECT parent.* FROM agent_commands parent JOIN chain child ON parent.id=child.parent_command_id
-       ) SELECT attachment.id,attachment.url,attachment.name,attachment.mime_type,attachment.size::integer size
-       FROM agent_pending_attachments attachment WHERE attachment.room_id=$2 AND attachment.agent_id=$3
-         AND attachment.request_id IN (SELECT turn_request_id FROM chain WHERE room_id=$2 AND agent_id=$3)
-       ORDER BY attachment.created_at,attachment.id`, [command.id, command.room_id, agentId],
-    )).rows;
-    // Explicit report already delivered this generation; final prose adds nothing
-    // unless tools queued more files after that report.
-    if (automatic && command.private_payload?.reportedGenerationId === command.generation_id && !pending.length)
-      return daemonWriteResult(ctx);
-    const attachments = [...(command.private_payload?.attachments ?? []),
-      ...pending.map(row => ({ url: row.url, name: row.name, mimeType: row.mime_type, size: row.size }))]
-      .filter((row, index, all) => all.findIndex(other => other.url === row.url) === index);
-    // Collapse alternate URLs for the same object; content deduplication waits
-    // until reportToCommander has selected the recipient.
-    const seen = new Set<string>();
-    const uniqueAttachments = attachments.filter(attachment => {
-      const id = mediaIdFromUrl(attachment.url) ?? '';
-      if (!id) return true;
-      if (seen.has(id)) return false;
-      seen.add(id);
-      return true;
+    return answerQueuedMessage(database, agentId, { roomId: command.room_id, requestId: command.turn_request_id,
+      text, report: !automatic, status, ask,
     });
-    const result = await reportToCommander(database, command.room_id, agentId, text, command,
-      createHash('sha256').update(`report:${command.id}:${command.generation_id}:${text}:${ask ?? ""}:${JSON.stringify(uniqueAttachments)}`).digest('hex'), { attachments: uniqueAttachments, automatic, ask });
-    if (result.skipped || ('delivered' in result && !result.delivered)) return result;
-    for (const attachment of pending) await database.query(
-      `DELETE FROM agent_pending_attachments WHERE room_id=$1 AND agent_id=$2 AND id=$3`,
-      [command.room_id, agentId, attachment.id]);
-    if (command.private_payload) await database.query(
-      `UPDATE agent_commands SET private_payload=private_payload ||
-        jsonb_build_object('reportedGenerationId',$2::text,'reportedOutcome',$3::text) WHERE id=$1`,
-      [command.id, command.generation_id, prefix ?? null]);
-    return result;
   }
 
   export async function daemonWatchCorner(ctx: DaemonContext,
@@ -102,7 +38,7 @@ import { daemonCheckReviewerAuthors } from './corner-reads.js';
     const kinds = [...new Set(input.kinds)];
     return ctx.database.transaction(async (db) => {
       const incoming = (await db.query<CommandRow>(`SELECT * FROM agent_commands
-        WHERE room_id=$1 AND agent_id=$2 AND action IN ('input','resume')
+        WHERE room_id=$1 AND agent_id=$2 AND action='input'
           AND ($3::text IS NULL OR turn_request_id=$3)
         ORDER BY created_at DESC,id DESC LIMIT 1`, [input.roomId, agentId, input.requestId ?? null])).rows[0];
       const member = await db.query<{ parent_id: string | null }>(
@@ -235,9 +171,7 @@ import { daemonCheckReviewerAuthors } from './corner-reads.js';
       if (objective !== undefined || input.brief) {
         if (corner.kind !== 'human' && input.brief)
           throw new Error('corner brief already exists; revise the current brief instead');
-        const command = await authorizeCommandOutput(
-          db, input.roomId ?? input.cornerId, agentId, input.requestId, input.generationId,
-        );
+        const command = await authorizeCommandOutput(db, input.roomId ?? input.cornerId, agentId, input.requestId);
         if (current || corner.kind !== 'human') {
           if (current && input.brief && (current.spec !== input.brief.spec.trim() ||
               current.repositoryWork !== input.brief.repositoryWork ||
@@ -259,7 +193,6 @@ import { daemonCheckReviewerAuthors } from './corner-reads.js';
               roomId: input.cornerId,
               agentId,
               requestId: input.requestId ?? '',
-              generationId: input.generationId,
               excluding: explicitAttachments.map((attachment) => attachment.objectId),
             })),
           ];

@@ -1,8 +1,9 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it, beforeEach, vi } from 'vitest';
 import { INSTITUTIONAL_MEMORY_EMBEDDING_DIMENSIONS } from '@beeline/api-contract/daemon';
 import { PgliteDatabase, migratedDatabase } from './test-support.js';
-import { claimAgentCommand, createAgentCommand } from './agent-command.js';
+import { createAgentCommand } from './agent-command.js';
 import { DaemonService } from './daemon-service.js';
 import { LiveHub } from './live.js';
 import { OPENROUTER_EMBEDDINGS_URL } from './institutional-memory-embeddings.js';
@@ -85,9 +86,9 @@ async function openCommand(requestId: string, generationId: string) {
     agentId: RONNIE,
     sourceMessageId: MESSAGE,
     reason: 'human_tag',
-    turnRequestId: requestId,
+    id: requestId,
   });
-  await claimAgentCommand(database, ROOM, RONNIE, command!.id, generationId);
+  await startQueuedTurn(database, ROOM, RONNIE, command!.id);
   return command!;
 }
 
@@ -110,11 +111,8 @@ describe('search_memory recall (institutional memory)', () => {
       data:[{embedding:[1,...new Array(1023).fill(0)],index:0}],
     }),{status:200,headers:{'content-type':'application/json'}})));
     await daemon.execute('getInstitutionalContext',
-      {roomId:ROOM,requestId:'floor-turn',generationId:'floor-generation'},RONNIE);
-    const result = await daemon.execute('searchInstitutionalMemory',{
-      agentId:RONNIE,roomId:ROOM,requestId:'floor-turn',
-      generationId:'floor-generation',query:'semantically distant question',
-    },RONNIE);
+      { roomId:ROOM, requestId:'floor-turn' },RONNIE);
+    const result = await daemon.execute('searchInstitutionalMemory',{ agentId:RONNIE, roomId:ROOM, requestId:'floor-turn', query:'semantically distant question' },RONNIE);
     expect(result.results).toEqual([]);
     const stats = (await database.query<{ search_memory_misses: number }>(
       `SELECT search_memory_misses FROM institutional_context_serves
@@ -165,19 +163,7 @@ describe('search_memory recall (institutional memory)', () => {
 
     const saved = await daemon.execute(
       'saveInstitutionalMemory',
-      {
-        agentId: RONNIE,
-        roomId: ROOM,
-        requestId: 'cake-order-turn',
-        generationId: 'cake-order-generation',
-        memoryKind: 'human_profile_fact',
-        canonicalKey: 'requester.wife.daeun_lee.japan_delivery',
-        body: "Daeun's Tokyo delivery address is Motoazabu Hills 3-2-1 #402, phone 03-4700-2210, email daeun.lee@example.com.",
-        keywords: ['wife', 'tokyo', 'delivery', 'address'],
-        sourceMessageIds: [MESSAGE],
-        personAsked: false,
-        confidence: 0.9,
-      },
+      { agentId: RONNIE, roomId: ROOM, requestId: 'cake-order-turn', memoryKind: 'human_profile_fact', canonicalKey: 'requester.wife.daeun_lee.japan_delivery', body: "Daeun's Tokyo delivery address is Motoazabu Hills 3-2-1 #402, phone 03-4700-2210, email daeun.lee@example.com.", keywords: ['wife', 'tokyo', 'delivery', 'address'], sourceMessageIds: [MESSAGE], personAsked: false, confidence: 0.9 },
       RONNIE,
     );
     expect(saved.itemId).toBeTruthy();
@@ -186,7 +172,7 @@ describe('search_memory recall (institutional memory)', () => {
     // item's keywords overlap, so it is already carried in ambient context.
     const context = await daemon.execute(
       'getInstitutionalContext',
-      { roomId: ROOM, requestId: 'cake-order-turn', generationId: 'cake-order-generation' },
+      { roomId: ROOM, requestId: 'cake-order-turn' },
       RONNIE,
     );
     expect(context.itemIds).toContain(saved.itemId);
@@ -206,13 +192,7 @@ describe('search_memory recall (institutional memory)', () => {
     for (const query of onTopicQueries) {
       const result = await daemon.execute(
         'searchInstitutionalMemory',
-        {
-          agentId: RONNIE,
-          roomId: ROOM,
-          requestId: 'cake-order-turn',
-          generationId: 'cake-order-generation',
-          query,
-        },
+        { agentId: RONNIE, roomId: ROOM, requestId: 'cake-order-turn', query },
         RONNIE,
       );
       expect(result.results.map((r) => r.id), `query: ${query}`).toContain(saved.itemId);
@@ -220,13 +200,7 @@ describe('search_memory recall (institutional memory)', () => {
 
     const offTopic = await daemon.execute(
       'searchInstitutionalMemory',
-      {
-        agentId: RONNIE,
-        roomId: ROOM,
-        requestId: 'cake-order-turn',
-        generationId: 'cake-order-generation',
-        query: 'birthday',
-      },
+      { agentId: RONNIE, roomId: ROOM, requestId: 'cake-order-turn', query: 'birthday' },
       RONNIE,
     );
     expect(offTopic.results.map((r) => r.id)).not.toContain(saved.itemId);
@@ -237,19 +211,7 @@ describe('search_memory recall (institutional memory)', () => {
     await openCommand('cake-order-turn', 'cake-order-generation');
     const saved = await daemon.execute(
       'saveInstitutionalMemory',
-      {
-        agentId: RONNIE,
-        roomId: ROOM,
-        requestId: 'cake-order-turn',
-        generationId: 'cake-order-generation',
-        memoryKind: 'workspace_fact',
-        canonicalKey: 'recipient.daeun_lee.delivery_details',
-        body: 'Daeun receives deliveries at Motoazabu Hills 3-2-1 #402 in Tokyo.',
-        keywords: ['daeun', 'motoazabu', 'delivery'],
-        sourceMessageIds: [MESSAGE],
-        personAsked: false,
-        confidence: 0.9,
-      },
+      { agentId: RONNIE, roomId: ROOM, requestId: 'cake-order-turn', memoryKind: 'workspace_fact', canonicalKey: 'recipient.daeun_lee.delivery_details', body: 'Daeun receives deliveries at Motoazabu Hills 3-2-1 #402 in Tokyo.', keywords: ['daeun', 'motoazabu', 'delivery'], sourceMessageIds: [MESSAGE], personAsked: false, confidence: 0.9 },
       RONNIE,
     );
     await database.query(`UPDATE institutional_memory_items
@@ -258,13 +220,7 @@ describe('search_memory recall (institutional memory)', () => {
     ]);
     const result = await daemon.execute(
       'searchInstitutionalMemory',
-      {
-        agentId: RONNIE,
-        roomId: ROOM,
-        requestId: 'cake-order-turn',
-        generationId: 'cake-order-generation',
-        query: 'phone number recipient',
-      },
+      { agentId: RONNIE, roomId: ROOM, requestId: 'cake-order-turn', query: 'phone number recipient' },
       RONNIE,
     );
     expect(result.results).toEqual([]);
@@ -280,60 +236,24 @@ describe('search_memory recall (institutional memory)', () => {
     await openCommand('cake-order-turn', 'cake-order-generation');
     const saved = await daemon.execute(
       'saveInstitutionalMemory',
-      {
-        agentId: RONNIE,
-        roomId: ROOM,
-        requestId: 'cake-order-turn',
-        generationId: 'cake-order-generation',
-        memoryKind: 'human_profile_fact',
-        canonicalKey: 'requester.wife.daeun_lee.korean_address',
-        body: '다은 주소는 서울시 강남구에 있습니다.',
-        keywords: ['korean', 'address'],
-        sourceMessageIds: [MESSAGE],
-        personAsked: false,
-        confidence: 0.9,
-      },
+      { agentId: RONNIE, roomId: ROOM, requestId: 'cake-order-turn', memoryKind: 'human_profile_fact', canonicalKey: 'requester.wife.daeun_lee.korean_address', body: '다은 주소는 서울시 강남구에 있습니다.', keywords: ['korean', 'address'], sourceMessageIds: [MESSAGE], personAsked: false, confidence: 0.9 },
       RONNIE,
     );
     const result = await daemon.execute(
       'searchInstitutionalMemory',
-      {
-        agentId: RONNIE,
-        roomId: ROOM,
-        requestId: 'cake-order-turn',
-        generationId: 'cake-order-generation',
-        query: '다은 주소',
-      },
+      { agentId: RONNIE, roomId: ROOM, requestId: 'cake-order-turn', query: '다은 주소' },
       RONNIE,
     );
     expect(result.results.map((r) => r.id)).toContain(saved.itemId);
     const japanese = await daemon.execute(
       'saveInstitutionalMemory',
-      {
-        agentId: RONNIE,
-        roomId: ROOM,
-        requestId: 'cake-order-turn',
-        generationId: 'cake-order-generation',
-        memoryKind: 'human_profile_fact',
-        canonicalKey: 'requester.wife.daeun_lee.japan_address',
-        body: '受取人: ダウン 電話: 03-4700-2210 元麻布のマンション',
-        keywords: ['japan', 'address'],
-        sourceMessageIds: [MESSAGE],
-        personAsked: false,
-        confidence: 0.9,
-      },
+      { agentId: RONNIE, roomId: ROOM, requestId: 'cake-order-turn', memoryKind: 'human_profile_fact', canonicalKey: 'requester.wife.daeun_lee.japan_address', body: '受取人: ダウン 電話: 03-4700-2210 元麻布のマンション', keywords: ['japan', 'address'], sourceMessageIds: [MESSAGE], personAsked: false, confidence: 0.9 },
       RONNIE,
     );
     for (const query of ['元麻布', 'ダウン 電話']) {
       const result = await daemon.execute(
         'searchInstitutionalMemory',
-        {
-          agentId: RONNIE,
-          roomId: ROOM,
-          requestId: 'cake-order-turn',
-          generationId: 'cake-order-generation',
-          query,
-        },
+        { agentId: RONNIE, roomId: ROOM, requestId: 'cake-order-turn', query },
         RONNIE,
       );
       expect(result.results.map((r) => r.id), `query: ${query}`).toContain(japanese.itemId);
@@ -345,30 +265,12 @@ describe('search_memory recall (institutional memory)', () => {
     await openCommand('cake-order-turn', 'cake-order-generation');
     const saved = await daemon.execute(
       'saveInstitutionalMemory',
-      {
-        agentId: RONNIE,
-        roomId: ROOM,
-        requestId: 'cake-order-turn',
-        generationId: 'cake-order-generation',
-        memoryKind: 'human_profile_fact',
-        canonicalKey: 'requester.wife.daeun_lee.mixed_address',
-        body: 'Daeun 住所: 東京都港区元麻布',
-        keywords: ['daeun', 'address'],
-        sourceMessageIds: [MESSAGE],
-        personAsked: false,
-        confidence: 0.9,
-      },
+      { agentId: RONNIE, roomId: ROOM, requestId: 'cake-order-turn', memoryKind: 'human_profile_fact', canonicalKey: 'requester.wife.daeun_lee.mixed_address', body: 'Daeun 住所: 東京都港区元麻布', keywords: ['daeun', 'address'], sourceMessageIds: [MESSAGE], personAsked: false, confidence: 0.9 },
       RONNIE,
     );
     const result = await daemon.execute(
       'searchInstitutionalMemory',
-      {
-        agentId: RONNIE,
-        roomId: ROOM,
-        requestId: 'cake-order-turn',
-        generationId: 'cake-order-generation',
-        query: 'Daeun 住所',
-      },
+      { agentId: RONNIE, roomId: ROOM, requestId: 'cake-order-turn', query: 'Daeun 住所' },
       RONNIE,
     );
     expect(result.results.map((r) => r.id)).toContain(saved.itemId);
@@ -435,19 +337,7 @@ describe('search_memory hybrid vector recall (no shared words)', () => {
   async function saveDaeunFactWithoutWifeWord(daemon: DaemonService) {
     return daemon.execute(
       'saveInstitutionalMemory',
-      {
-        agentId: RONNIE,
-        roomId: ROOM,
-        requestId: 'cake-order-turn',
-        generationId: 'cake-order-generation',
-        memoryKind: 'human_profile_fact',
-        canonicalKey: 'requester.spouse.daeun_lee.japan_residence',
-        body: "Daeun's Tokyo residence is Motoazabu Hills 3-2-1 #402, phone 03-4700-2210.",
-        keywords: ['daeun', 'tokyo', 'residence', 'address'],
-        sourceMessageIds: [MESSAGE],
-        personAsked: false,
-        confidence: 0.9,
-      },
+      { agentId: RONNIE, roomId: ROOM, requestId: 'cake-order-turn', memoryKind: 'human_profile_fact', canonicalKey: 'requester.spouse.daeun_lee.japan_residence', body: "Daeun's Tokyo residence is Motoazabu Hills 3-2-1 #402, phone 03-4700-2210.", keywords: ['daeun', 'tokyo', 'residence', 'address'], sourceMessageIds: [MESSAGE], personAsked: false, confidence: 0.9 },
       RONNIE,
     );
   }
@@ -469,13 +359,7 @@ describe('search_memory hybrid vector recall (no shared words)', () => {
 
     const result = await daemon.execute(
       'searchInstitutionalMemory',
-      {
-        agentId: RONNIE,
-        roomId: ROOM,
-        requestId: 'cake-order-turn',
-        generationId: 'cake-order-generation',
-        query: 'where does my wife live',
-      },
+      { agentId: RONNIE, roomId: ROOM, requestId: 'cake-order-turn', query: 'where does my wife live' },
       RONNIE,
     );
     expect(result.results.map((r) => r.id)).toContain(saved.itemId);
@@ -508,10 +392,7 @@ describe('search_memory hybrid vector recall (no shared words)', () => {
       FROM generate_series(1,5) AS n`,
       [WORKSPACE,ROOM,MESSAGE,pgvectorLiteral(smallVector)]);
     await openCommand('small-workspace-turn','small-workspace-generation');
-    const result=await liveDaemon().execute('searchInstitutionalMemory',{
-      agentId:RONNIE,roomId:ROOM,requestId:'small-workspace-turn',
-      generationId:'small-workspace-generation',query:'where does my wife live',
-    },RONNIE);
+    const result=await liveDaemon().execute('searchInstitutionalMemory',{ agentId:RONNIE, roomId:ROOM, requestId:'small-workspace-turn', query:'where does my wife live' },RONNIE);
     expect(result.results).toHaveLength(5);
     expect(result.results.every(row=>row.body.startsWith('Small workspace fact'))).toBe(true);
   });
@@ -560,19 +441,7 @@ describe('search_memory hybrid vector recall (no shared words)', () => {
     // A stale copy in THIS workspace that would otherwise win by concept.
     const staleFact = await daemon.execute(
       'saveInstitutionalMemory',
-      {
-        agentId: RONNIE,
-        roomId: ROOM,
-        requestId: 'cake-order-turn',
-        generationId: 'cake-order-generation',
-        memoryKind: 'workspace_fact',
-        canonicalKey: 'recipient.daeun_lee.old_residence',
-        body: 'Daeun used to reside at a different address.',
-        keywords: ['daeun', 'residence'],
-        sourceMessageIds: [MESSAGE],
-        personAsked: false,
-        confidence: 0.9,
-      },
+      { agentId: RONNIE, roomId: ROOM, requestId: 'cake-order-turn', memoryKind: 'workspace_fact', canonicalKey: 'recipient.daeun_lee.old_residence', body: 'Daeun used to reside at a different address.', keywords: ['daeun', 'residence'], sourceMessageIds: [MESSAGE], personAsked: false, confidence: 0.9 },
       RONNIE,
     );
     await database.query(
@@ -591,13 +460,7 @@ describe('search_memory hybrid vector recall (no shared words)', () => {
 
     const result = await daemon.execute(
       'searchInstitutionalMemory',
-      {
-        agentId: RONNIE,
-        roomId: ROOM,
-        requestId: 'cake-order-turn',
-        generationId: 'cake-order-generation',
-        query: 'where does my wife live',
-      },
+      { agentId: RONNIE, roomId: ROOM, requestId: 'cake-order-turn', query: 'where does my wife live' },
       RONNIE,
     );
     const ids = result.results.map((r) => r.id);

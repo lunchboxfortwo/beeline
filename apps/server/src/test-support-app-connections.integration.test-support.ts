@@ -79,7 +79,7 @@ export const REQUEST = 'app-connect-request';
 export const GENERATION = 'app-connect-generation';
 
 
-export const turn = { roomId: ROOM, requestId: REQUEST, generationId: GENERATION };
+export const turn = { roomId: ROOM, requestId: REQUEST };
 
 
 export const linearServer = {
@@ -247,10 +247,10 @@ export function fixtureScope2() {
     await database.query(
       `INSERT INTO agent_commands(
          id,room_id,agent_id,source_message_id,turn_request_id,action,reason,
-         root_command_id,root_source_message_id,agent_depth,state,generation_id,lease_expires_at
+         root_command_id,root_source_message_id,agent_depth,state
        ) VALUES($1,$2,$3,'app-source',$4,'input','human_tag',$1,'app-source',0,
-         'claimed',$5,now()+interval '10 minutes')`,
-      [COMMAND, ROOM, HELPER, REQUEST, GENERATION],
+         'pending')`,
+      [COMMAND, ROOM, HELPER, REQUEST],
     );
   }, 120_000);
 

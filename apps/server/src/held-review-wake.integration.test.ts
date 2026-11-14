@@ -84,39 +84,34 @@ async function source(text: string): Promise<string> {
   return id;
 }
 
-describe('Reproduction S-07 end to end: a held review wake reaches the reviewer helper', () => {
-  it('delivers the review command when the worker finishes, with no viewer and no helper reconnect', async () => {
-    // The worker is mid-turn: its command holds a live lease.
-    const work = await createAgentCommand(db, { roomId: CORNER, agentId: WORKER, sourceMessageId: await source('@worker fix it'), reason: 'human_tag' });
-    const generationId = randomUUID();
-    await call(WORKER, 'claimAgentCommand', { roomId: CORNER, commandId: work!.id, generationId });
-    const turn = { roomId: CORNER, requestId: work!.turn_request_id, generationId, agentId: WORKER };
-    await call(WORKER, 'postAgentTurnReceipt', { ...turn, status: 'working' });
-
-    // The reviewer's helper watches the corner on one socket for the whole test.
-    const socket = new WebSocket(`ws://${origin}/v1/phone/live`, [`bearer.${tokens.get(REVIEWER)}`]);
-    const frames: Record<string, unknown>[] = [];
-    socket.on('message', (raw) => frames.push(JSON.parse(raw.toString()) as Record<string, unknown>));
-    await new Promise<void>((resolve, reject) => {
-      socket.once('open', resolve);
-      socket.once('error', reject);
-    });
-    socket.send(JSON.stringify({ type: 'subscribe', roomId: CORNER }));
-    await expect.poll(() => frames.some((frame) => frame.type === 'commands'), { timeout: 5_000 }).toBe(true);
-
-    // CI turns green while the worker is busy: the review wake is queued and held.
-    const review = await createAgentCommand(db, { roomId: CORNER, agentId: REVIEWER, sourceMessageId: await source('Checks passed'), reason: 'corner_check' });
-    const delivered = () => frames.some((frame) =>
-      frame.type === 'commands' && (frame.commands as { id: string }[]).some((command) => command.id === review!.id));
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(delivered()).toBe(false);
-
-    // The worker's turn ends. Nobody opens the corner and the helper keeps its socket.
-    await call(WORKER, 'postAgentTurnReceipt', { ...turn, status: 'complete' });
-    expect((await db.query<{ state: string }>(`SELECT state FROM agent_commands WHERE id=$1`, [work!.id])).rows[0]?.state)
-      .toBe('complete');
-    await expect.poll(delivered, { timeout: 5_000 }).toBe(true);
-    expect(socket.readyState).toBe(WebSocket.OPEN);
-    socket.close();
+describe('Reproduction S-07: review items reach the native helper queue', () => {
+  it('delivers while another agent is busy and completes only after each answer', async () => {
+    const work=await createAgentCommand(db,{roomId:CORNER,agentId:WORKER,
+      sourceMessageId:await source('@worker fix it'),reason:'human_tag'});
+    await call(WORKER,'startAgentTurn',{roomId:CORNER,requestId:work!.id});
+    const socket=new WebSocket(`ws://${origin}/v1/phone/live`,['beeline.machine.1']);
+    const frames:Record<string,unknown>[]=[];
+    socket.on('message',raw=>frames.push(JSON.parse(raw.toString()) as Record<string,unknown>));
+    await new Promise<void>((resolve,reject)=>{socket.once('open',resolve);socket.once('error',reject);});
+    try {
+      socket.send(JSON.stringify({type:'register',agentId:REVIEWER,token:tokens.get(REVIEWER),queueV1:true}));
+      await expect.poll(()=>frames.some(frame=>frame.type==='registered'),{timeout:5000}).toBe(true);
+      socket.send(JSON.stringify({type:'subscribe-queue',agentId:REVIEWER}));
+      await expect.poll(()=>frames.some(frame=>frame.type==='commands'),{timeout:5000}).toBe(true);
+      const review=await createAgentCommand(db,{roomId:CORNER,agentId:REVIEWER,
+        sourceMessageId:await source('Checks passed'),reason:'corner_check'});
+      await expect.poll(()=>frames.some(frame=>frame.type==='commands'&&
+        (frame.commands as {id:string}[]).some(item=>item.id===review!.id)),{timeout:5000}).toBe(true);
+      expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[work!.id])).rows[0]?.state).toBe('pending');
+      await call(WORKER,'postRoomMessage',{roomId:CORNER,requestId:work!.id,text:'The work is ready.'});
+      expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[review!.id])).rows[0]?.state).toBe('pending');
+      await call(REVIEWER,'postRoomMessage',{roomId:CORNER,requestId:review!.id,text:'The review is ready.'});
+      expect((await db.query('SELECT state FROM agent_commands WHERE id=ANY($1::text[])',[[work!.id,review!.id]])).rows)
+        .toEqual([{state:'complete'},{state:'complete'}]);
+      expect(socket.readyState).toBe(WebSocket.OPEN);
+    } finally {
+      socket.close();
+      await new Promise<void>(resolve=>socket.once('close',()=>resolve()));
+    }
   });
 });

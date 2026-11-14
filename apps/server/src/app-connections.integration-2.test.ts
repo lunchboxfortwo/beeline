@@ -99,17 +99,15 @@ const scope2 = fixtureScope2();
     await scope2.database.query(
       `INSERT INTO agent_commands(
          id,room_id,agent_id,source_message_id,turn_request_id,action,reason,
-         root_command_id,root_source_message_id,agent_depth,state,generation_id,lease_expires_at
-       ) VALUES('corner-service-command',$1,$2,'corner-service-source','corner-service-request',
+         root_command_id,root_source_message_id,agent_depth,state) VALUES('corner-service-command',$1,$2,'corner-service-source','corner-service-request',
          'input','human_tag','corner-service-command','corner-service-source',0,
-         'claimed','corner-service-generation',now()+interval '10 minutes')`,
+         'pending')`,
       [CORNER, HELPER],
     );
     const provider = scope2.fakeComposio('x');
     provider.supportsOAuth.mockResolvedValue(true);
     const daemon = scope2.daemonWith(fakeRegistry([]).client, provider);
-    const cornerTurn = { roomId: CORNER, requestId: 'corner-service-request',
-      generationId: 'corner-service-generation' };
+    const cornerTurn = { roomId: CORNER, requestId: 'corner-service-request' };
     const before = await daemon.execute('readAgentWorkbench', { roomId: CORNER }, HELPER);
     expect(before.apps).toEqual([]);
     const started = await daemon.execute('connectApp', { ...cornerTurn, app: 'X',
@@ -362,10 +360,8 @@ const scope2 = fixtureScope2();
         VALUES($1,$2,$3,'Use my connected app')`, [sourceId, roomId, host]);
       await scope2.database.query(`INSERT INTO agent_commands(
         id,room_id,agent_id,source_message_id,turn_request_id,action,reason,
-        root_command_id,root_source_message_id,agent_depth,state,generation_id,lease_expires_at
-      ) VALUES($1,$2,$3,$4,$5,'input','human_tag',$1,$4,0,'claimed',$6,
-        now()+interval '10 minutes')`, [commandId, roomId, HELPER, sourceId, requestId, generationId]);
-      const input = { roomId, requestId, generationId, appId: started.appId! };
+        root_command_id,root_source_message_id,agent_depth,state) VALUES($1,$2,$3,$4,$5,'input','human_tag',$1,$4,0,'pending')`, [commandId, roomId, HELPER, sourceId, requestId]);
+      const input = { roomId, requestId, appId: started.appId! };
       expect((await daemon.execute('readAgentWorkbench', { roomId }, HELPER)).apps)
         .toContainEqual(expect.objectContaining({ appId: started.appId, status: 'connected' }));
       expect((await daemon.execute('listAppTools', input, HELPER)).tools).toHaveLength(1);

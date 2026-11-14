@@ -1,19 +1,19 @@
-import { ROUTER_AUTHORITY_LOCK } from './router-authority-lock.js';
-import { systemMessage } from '@beeline/api-contract/system-message-catalog';
-import { missingReviewAttachments } from './review-evidence.js';
-import { cornerReviewerSql } from './corner-reviewer.js';
-import { CornerAccessDatabase } from './corner-access-database.js';
-import { isZeroCheckCommander } from './corner-merge-approval.js';
-import { reportToCommander } from './commander.js';
-import type { activeCornerHolds } from './corner-holds.js';
-import { createHash } from 'node:crypto';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
-import type { SqlDatabase } from './database.js';
+import { systemMessage } from '@beeline/api-contract/system-message-catalog';
+import { createHash } from 'node:crypto';
+import { reportAgentAttention } from './commander.js';
+import { CornerAccessDatabase } from './corner-access-database.js';
 import { assertCornerBriefAllowsMerge } from './corner-brief.js';
+import type { activeCornerHolds } from './corner-holds.js';
+import { isZeroCheckCommander } from './corner-merge-approval.js';
+import { cornerReviewerSql } from './corner-reviewer.js';
 import { cornerImplementerSql } from './corner-worker.js';
+import type { SqlDatabase } from './database.js';
+import { missingReviewAttachments } from './review-evidence.js';
+import { ROUTER_AUTHORITY_LOCK } from './router-authority-lock.js';
 
-import { CornerRow, loadCorner } from './corner-lifecycle-read-state.js';
-import { greenReviewRequestSql, CORNER_LIFECYCLE_SLUG } from './corner-lifecycle-values.js';
+import { CornerRow,loadCorner } from './corner-lifecycle-read-state.js';
+import { CORNER_LIFECYCLE_SLUG,greenReviewRequestSql } from './corner-lifecycle-values.js';
 
 
 
@@ -34,7 +34,7 @@ export function cornerReviewWokenSql(cornerId: string): string {
   return `EXISTS(SELECT 1 FROM agent_commands review JOIN rooms corner ON corner.id=review.room_id
     JOIN rooms parent ON parent.id=corner.parent_id JOIN corner_github_cache cache ON cache.corner_id=corner.id WHERE corner.id=${cornerId}
       AND review.agent_id=${cornerReviewerSql()} AND ${greenReviewRequestSql('review')}
-      AND review.reason='corner_review_dispatch' AND review.state IN ('pending','claimed','complete')
+      AND review.reason='corner_review_dispatch' AND review.state IN ('pending','complete')
       AND review.review_context->>'headSha'=cache.lifecycle->'pr'->>'headSha'
       AND review.review_context->'pullRequest'=cache.lifecycle->'pr'->'number')`;
 }
@@ -46,14 +46,14 @@ export async function noteReviewDispatchFailure(
   headSha: string,
   reason: string,
 ): Promise<void> {
-  await reportToCommander(
+  await reportAgentAttention(
     db,
     cornerId,
     SYSTEM_IDENTITY_ID,
     systemMessage('corner-lifecycle.blocked', reason),
     undefined,
     createHash('sha256').update(`review-dispatch:${cornerId}:${headSha}:${reason}`).digest('hex'),
-    { agentOnly: true, wakeInCorner: true },
+    { wakeInCorner: true },
   );
 }
 
@@ -65,9 +65,7 @@ export async function loadCornerReviewState(db: SqlDatabase, cornerId: string, h
   if(!headSha) return empty;
   const rows=(await db.query<{id:string;state:string;ended:boolean;findings:string|null;delivered:boolean}>(
     `SELECT command.id,command.state,
-      command.state IN ('complete','cancelled') AND NOT EXISTS (SELECT 1 FROM agent_turns running
-        WHERE running.room_id=command.room_id AND running.agent_id=command.agent_id
-          AND running.request_id=command.turn_request_id AND running.status='working') ended,
+      command.state IN ('complete','cancelled') ended,
       verdict.text findings,COALESCE(verdict.delivered,false) delivered
      FROM agent_commands command JOIN rooms corner ON corner.id=command.room_id
      JOIN rooms parent ON parent.id=corner.parent_id
@@ -78,13 +76,13 @@ export async function loadCornerReviewState(db: SqlDatabase, cornerId: string, h
          AND repair.review_context->>'purpose'='repair' AND repair.private_payload->>'text' ~* $3
        UNION ALL
        SELECT message.text,false FROM messages message
-       WHERE message.room_id=command.room_id AND message.author_id=command.agent_id
+       WHERE message.author_id=command.agent_id
          AND (message.id=command.result_message_id OR message.request_id=command.turn_request_id
            OR message.id IN (SELECT jsonb_array_elements_text(COALESCE(command.review_context->'reportIds','[]'::jsonb))))
          AND message.deleted_at IS NULL AND message.text ~* $3
        UNION ALL
        SELECT report.private_payload->>'text',false FROM agent_commands report
-       WHERE report.id IN (SELECT jsonb_array_elements_text(COALESCE(command.review_context->'reportIds','[]'::jsonb)))
+       WHERE (report.id=command.result_message_id OR report.id IN (SELECT jsonb_array_elements_text(COALESCE(command.review_context->'reportIds','[]'::jsonb))))
          AND report.private_payload->>'authorId'=command.agent_id AND report.private_payload->>'text' ~* $3
        ORDER BY delivered DESC LIMIT 1
      ) verdict ON true
@@ -100,7 +98,7 @@ export async function loadCornerReviewState(db: SqlDatabase, cornerId: string, h
   const latest=rows[0];
   let emptyCount=0;
   for(const row of rows) {if(!row.ended || row.findings) break; emptyCount++;}
-  return {pending:rows.some(row=>row.state==='pending'||row.state==='claimed'),requests:rows.length,
+  return {pending:rows.some(row=>row.state==='pending'),requests:rows.length,
     ended:latest && (latest.ended||latest.findings) ? {id:latest.id,findings:latest.findings??undefined,
       emptyCount,delivered:latest.delivered}:undefined};
 }

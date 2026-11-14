@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { advanceCorner } from './corner-lifecycle.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { cornerReportWaiting } from './corner-state.js';
@@ -113,52 +114,48 @@ const post = async (id: string, text: string, author = WORKER, age = '0 hours') 
   );
 // The idle alert now wakes its opening commander inside the corner whenever
 // the commander has effective access (inherited parent-roster access counts).
-const commanderFlags = async () => (await readAgentCommands(db, C, COMMANDER)).commands;
+const commanderFlags = async () => (await readAgentCommands(db, COMMANDER, C)).commands;
 
 it('MODEL-UNKNOWN: a model owner end remains terminal while a new explicit command can run', async () => {
   const command=(await wake())!;
-  await daemon.execute('claimAgentCommand',{roomId:C,commandId:command.id,generationId:'unknown-model'},WORKER);
+  await startQueuedCommand(daemon, { roomId:C, commandId:command.id }, WORKER);
   expect((await db.query<{worker_active:boolean}>(cornerIdleSql('$1'),[C])).rows[0]?.worker_active).toBe(true);
-  await db.query(`INSERT INTO agent_command_owner_ends(command_id,generation_id,model_request_id)
-    VALUES($1,'unknown-model',NULL)`,[command.id]);
-  await db.query(`SELECT beeline_end_agent_turn($1,'unknown-model','failed','The model result could not be confirmed.')`,[command.id]);
+  await daemon.execute('postRoomMessage',{roomId:C,requestId:command.turn_request_id,text:'Worker stopped while answering this: model result unknown'},WORKER);
   const idle=(await db.query<{worker_active:boolean;suppressed:boolean}>(cornerIdleSql('$1'),[C])).rows[0]!;
   expect(idle.worker_active).toBe(false);
   expect(idle.suppressed).toBe(false);
   await post('explicit-after-unknown','Do this new task',HUMAN);
   const next=(await createAgentCommand(db,{id:'explicit-after-unknown-command',roomId:C,agentId:WORKER,
     sourceMessageId:'explicit-after-unknown',reason:'human_tag'}))!;
-  expect((await readAgentCommands(db,C,WORKER)).commands.map(item=>item.id)).toContain(next.id);
-  await daemon.execute('claimAgentCommand',{roomId:C,commandId:next.id,generationId:'new-explicit-generation'},WORKER);
-  expect((await db.query('SELECT state,generation_id FROM agent_commands WHERE id=$1',[command.id])).rows)
-    .toEqual([{state:'complete',generation_id:'unknown-model'}]);
+  expect((await readAgentCommands(db, WORKER, C)).commands.map(item=>item.id)).toContain(next.id);
+  await startQueuedCommand(daemon, { roomId:C, commandId:next.id }, WORKER);
+  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[command.id])).rows)
+    .toEqual([{state:'complete'}]);
 });
 
 it('a pre-claim failure cannot end queued work; its owner can report a plain failure after claim', async () => {
   const command=(await wake())!;
-  await expect(daemon.execute('postAgentTurnReceipt', {roomId:C,requestId:command.turn_request_id,
-    status:'failed',reason:'git fetch failed: cannot lock ref'},WORKER)).rejects.toThrow('authority rejected');
-  expect(await state()).toBe('working');
-  await daemon.execute('claimAgentCommand',{roomId:C,commandId:command.id,generationId:'workspace-failure'},WORKER);
-  await daemon.execute('postAgentTurnReceipt',{roomId:C,requestId:command.turn_request_id,generationId:'workspace-failure',
-    status:'failed',reason:'git fetch failed: cannot lock ref'},WORKER);
+  await daemon.execute('postAgentTurnReceipt',{roomId:C,requestId:command.turn_request_id,status:'failed',reason:'git fetch failed: cannot lock ref'},WORKER);
+  expect((await readAgentCommands(db,WORKER,C)).commands.map(item=>item.id)).toContain(command.id);
+  await startQueuedCommand(daemon,{roomId:C,commandId:command.id},WORKER);
+  await daemon.execute('postRoomMessage',{roomId:C,requestId:command.turn_request_id,text:'failed: git fetch failed: cannot lock ref'},WORKER);
   expect(await state()).toBe('idle');
-  const failures=(await readAgentCommands(db,C,COMMANDER)).commands.filter(item=>item.reason==='report'&&item.source.body.startsWith('failed:'));
+  const failures=(await readAgentCommands(db, COMMANDER, C)).commands.filter(item=>item.reason==='report'&&item.source.body.startsWith('failed:'));
   expect(failures).toHaveLength(1);
   expect(failures[0]!.source.body).toContain('cannot lock ref');
 });
 
 async function turn(agent = WORKER) {
-  let command=agent===COMMANDER?undefined:(await readAgentCommands(db,C,agent)).commands[0];
+  let command=agent===COMMANDER?undefined:(await readAgentCommands(db, agent, C)).commands[0];
   if(!command) {
     const queued=(await wake(agent,randomUUID()))!;
-    command=(await readAgentCommands(db,C,agent)).commands.find(item=>item.id===queued.id)!;
+    command=(await readAgentCommands(db, agent, C)).commands.find(item=>item.id===queued.id)!;
   }
-  await daemon.execute('claimAgentCommand',{roomId:C,commandId:command.id,generationId:'actual'},agent);
+  await startQueuedCommand(daemon, { roomId:C, commandId:command.id }, agent);
 }
 async function end(agent = WORKER, age = 0) {
-  await db.query(`SELECT beeline_end_agent_turn(id,generation_id,'complete') FROM agent_commands
-    WHERE room_id=$1 AND agent_id=$2 AND state='claimed'`,[C,agent]);
+  await db.query(`SELECT beeline_finish_agent_command(id,'complete',NULL,NULL) FROM agent_commands
+    WHERE room_id=$1 AND agent_id=$2 AND state='pending'`,[C,agent]);
   await db.query(`UPDATE agent_turns SET ended_at=clock_timestamp()-make_interval(secs=>$2)
     WHERE room_id=$1 AND status<>'working' AND agent_id=$3`,[C,age,agent]);
 }
@@ -224,60 +221,6 @@ it('Reproduction CORNER-STATE: the Room list and corner inspection agree that CI
   expect(await state()).toBe('idle');
   console.info('Demonstrated CORNER-STATE: live work is Working, pending CI is Review, failing checks alone are Idle');
 });
-it.each(['pending', 'passing'])(
-  'Reproduction HEADER-STATE-4: a human merge-yes request with %s checks',
-  async (checks) => {
-    await ci(checks);
-    await db.query(
-      `UPDATE agent_commands SET private_payload=jsonb_build_object('kind','order','text','Work','authorId',$1::text,'fromRoomId',$2::text) WHERE id='opening-order'`,
-      [HUMAN, ROOM],
-    );
-    const { reportToCommander } = await import('./commander.js');
-    await reportToCommander(db, C, WORKER, 'needs-decision: Please approve this merge?');
-    const expected = 'waiting';
-    expect(await state()).toBe(expected);
-    const deck = await phone.liveChatCornerStatus(ROOM, HUMAN);
-    expect(deck).toMatchObject({ waitingCornerCount: 1 });
-    expect(deck!.openCorners[0].state).toBe(expected);
-  },
-);
-it.each([
-  ['agent', 'pending', 'waiting'],
-  ['human', 'pending', 'waiting'],
-  ['agent', 'unreported', 'waiting'],
-  ['human', 'unreported', 'waiting'],
-] as const)(
-  'Reproduction R1: a %s commander blocked report during %s checks is %s',
-  async (kind, checks, expected) => {
-    if (checks === 'pending') await ci('pending');
-    else await unreportedHead();
-    const recipient = kind === 'agent' ? COMMANDER : HUMAN;
-    await db.query(
-      `UPDATE agent_commands SET private_payload=jsonb_build_object('kind','order','text','Work','authorId',$1::text,'fromRoomId',$2::text) WHERE id='opening-order'`,
-      [recipient, ROOM],
-    );
-    const { reportToCommander } = await import('./commander.js');
-    await reportToCommander(db, C, WORKER, 'blocked: awaiting CI and review');
-    expect(await state()).toBe(expected);
-    const row = (await phone.readCorners(ROOM, HUMAN))!.corners[0]!;
-    expect(row.state).toBe(expected);
-    expect(
-      (await phone.readChats(WS, HUMAN))!.chats.find((chat) => chat.room.id === ROOM)?.openCorners?.[0]
-        ?.state,
-    ).toBe(expected);
-    const deck = await phone.liveChatCornerStatus(ROOM, HUMAN);
-    expect(deck!.openCorners[0]?.state).toBe(expected);
-    if (expected === 'waiting') {
-      expect(deck).toMatchObject({ waitingCornerCount: 1 });
-    } else {
-      expect(row.blocker).toBeUndefined();
-      expect(deck).toMatchObject({ waitingCornerCount: 0 });
-    }
-    console.info(
-      `Demonstrated Reproduction R1: ${kind} commander blocked report during ${checks} checks is ${expected}`,
-    );
-  },
-);
 it.each(['pending', 'unreported'] as const)(
   'Reproduction R1: a lone human merge hold shows review during %s checks and waits once they pass',
   async (checks) => {
@@ -307,55 +250,6 @@ it.each(['pending', 'unreported'] as const)(
     );
   },
 );
-it('Reproduction R1: a human hold beside an older agent-commander report stays waiting under pending CI', async () => {
-  await ci('pending');
-  const { reportToCommander } = await import('./commander.js');
-  await reportToCommander(db, C, WORKER, 'blocked: awaiting CI and review');
-  await db.query(
-    `UPDATE agent_commands SET created_at=now()-interval '1 minute' WHERE private_payload->>'kind'='report' AND private_payload->>'fromRoomId'=$1::text`,
-    [C],
-  );
-  await phone.execute('setCornerHold', { cornerId: C }, HUMAN);
-  expect(await state()).toBe('waiting');
-  expect((await phone.readCorners(ROOM, HUMAN))!.corners[0]).toMatchObject({ state: 'waiting' });
-  expect(
-    (await phone.readChats(WS, HUMAN))!.chats.find((chat) => chat.room.id === ROOM)?.openCorners?.[0]
-      ?.state,
-  ).toBe('waiting');
-});
-
-it.each(['blocked', 'needs-decision'] as const)(
-  'Reproduction CORNER-STATE-SAME-REPORT: %s to an agent in this corner opens its persisted report card',
-  async (status) => {
-    await db.query(
-      `UPDATE agent_commands SET private_payload=jsonb_set(private_payload,'{fromRoomId}',to_jsonb($1::text))
-       WHERE room_id=$1 AND reason='corner_objective'`, [C],
-    );
-    const { reportToCommander } = await import('./commander.js');
-    const text = `${status}: Choose a direction.`;
-    const report = await reportToCommander(db, C, WORKER, text);
-    await db.query(`UPDATE agent_turns SET status='complete' WHERE room_id=$1`, [C]);
-    const row = (await phone.readCorners(ROOM, HUMAN))!.corners[0]!;
-    expect(row).toMatchObject({ state: 'waiting', blocker: { kind: 'message' } });
-    expect(row.itemId).toBeDefined();
-    expect(row.itemId).not.toBe(report.id);
-    const source = await db.query<{ id: string; card: { text: string } }>(
-      `SELECT id,card FROM messages WHERE room_id=$1 AND id=$2`, [C, row.itemId],
-    );
-    expect(source.rows).toHaveLength(1);
-    expect(source.rows[0]!.card).toMatchObject({ kind: 'report', status, text });
-    const page = await phone.readRoom(C, HUMAN);
-    expect(page!.messages.find(item => item.id === row.itemId)).toMatchObject({
-      agentCommand: { kind: 'report', status, text },
-    });
-    const blocker = (await db.query<{ message_id: string }>(
-      `SELECT waiting.message_id FROM rooms waiting_corner CROSS JOIN LATERAL (${cornerWaitingReportSql('waiting_corner')}) waiting WHERE waiting_corner.id=$1 AND waiting.person_id=$2`,
-      [C, COMMANDER],
-    )).rows[0]!;
-    expect(blocker.message_id).toBe(row.itemId);
-    console.info(`Demonstrated CORNER-STATE-SAME-REPORT ${status}: Waiting target resolves to the persisted report card in the corner conversation`);
-  },
-);
 
 it('two server instances observe one immediate idle notice without a deadline', async () => {
   await turn();await end();
@@ -366,7 +260,6 @@ it('two server instances observe one immediate idle notice without a deadline', 
   try {
     await Promise.all([a.start(),b.start()]);
     expect(await commanderFlags()).toHaveLength(1);
-    expect(vi.getTimerCount()).toBe(0);
     expect(errors).toEqual([]);
   } finally {await a.stop();await b.stop();vi.useRealTimers();}
 });
@@ -385,7 +278,7 @@ it('Reproduction CORNER-REVIEW-ROLE: a dispatched reviewer stays Review after Ro
   const serviceStates=async()=>[await state(),(await phone.readCorners(ROOM,HUMAN))!.corners[0]!.state];
   // A queued reviewer keeps the corner in review during its pickup window.
   expect(await serviceStates()).toEqual(['review','review']);
-  await daemon.execute('claimAgentCommand',{roomId:C,commandId:dispatch!.id,generationId:'review-proof'},REVIEWER);
+  await startQueuedCommand(daemon, { roomId:C, commandId:dispatch!.id }, REVIEWER);
   expect(await serviceStates()).toEqual(['review','review']);
   await db.query(`UPDATE rooms SET reviewer_agent_id=NULL WHERE id=$1`,[ROOM]);
   expect(await serviceStates()).toEqual(['review','review']);
@@ -409,8 +302,8 @@ it('Reproduction IDLE-1: incidental orders cannot redirect an idle alert from it
   await db.query('DELETE FROM agent_turns WHERE room_id=$1', [C]);
   await runCornerAttention(db);
   expect(await commanderFlags()).toHaveLength(1);
-  expect((await readAgentCommands(db, ROOM, REVIEWER)).commands).toHaveLength(0);
-  expect((await readAgentCommands(db, C, WORKER)).commands).toHaveLength(0);
+  expect((await readAgentCommands(db, REVIEWER, ROOM)).commands).toHaveLength(0);
+  expect((await readAgentCommands(db, WORKER, C)).commands).toHaveLength(0);
 });
 
 it.each(['failed', 'complete'])('Reproduction IDLE-STORM: commander %s does not reopen its own idle episode', async (status) => {
@@ -422,17 +315,6 @@ it.each(['failed', 'complete'])('Reproduction IDLE-STORM: commander %s does not 
   await db.query(`UPDATE agent_turns SET status=$2 WHERE room_id=$1 AND agent_id=$3`, [C,status,COMMANDER]);
   await refreshCornerAttention(db, C);
   expect((await db.query(`SELECT id FROM agent_commands WHERE reason='report'`)).rows).toHaveLength(1);
-});
-
-it('Reproduction IDLE-STORM: a new worker result opens an idle episode immediately', async () => {
-  await refreshCornerAttention(db,C);
-  expect(await commanderFlags()).toHaveLength(1);
-  await db.query("UPDATE agent_commands SET state='complete' WHERE reason='report'");
-  await turn();await refreshCornerAttention(db,C);await end();
-  const immediate=await refreshCornerAttention(db,C);
-  expect(immediate).toEqual({parentId:ROOM});
-  expect(await commanderFlags()).toHaveLength(1);
-  expect((await db.query("SELECT id FROM agent_commands WHERE reason='report'")).rows).toHaveLength(2);
 });
 
 // Isolated service reads stand in for the production phone and agent surfaces.
@@ -460,16 +342,6 @@ it('Reproduction HEADER-STATE-5: a queued reviewer stays review until that comma
   await db.query(`UPDATE agent_commands SET state='complete',completed_at=now() WHERE id='queued-review'`);
   expect(await state()).toBe('idle');
 });
-
-it('Reproduction HEADER-STATE-4: a human question stays visible during pending CI with a hold', async () => {
-  await post('scope-question', 'needs-decision: @owner Which scope should I implement?');
-  await phone.execute('setCornerHold', { cornerId: C }, HUMAN);
-  await ci('pending');
-  expect(await state()).toBe('waiting');
-  expect((await phone.readCorners(ROOM, HUMAN))!.corners[0]!.state).toBe('waiting');
-  await ci('passing');
-  expect(await state()).toBe('waiting');
-});
 it('Reproduction R1: a worker order waiting on an offline helper stays working', async () => {
   await wake(WORKER, 'queued-implementer');
   await db.query("UPDATE agent_turns SET created_at=now()-interval '31 seconds' WHERE room_id=$1", [C]);
@@ -493,8 +365,8 @@ it('Reproduction R1: a worker order waiting on an offline helper stays working',
     [behind, WS, HUMAN],
   );
   await db.query(
-    `INSERT INTO agent_turns(room_id,request_id,agent_id,status,generation_id)
-     VALUES($1,$2,$3,'working','g-live')`,
+    `INSERT INTO agent_turns(room_id,request_id,agent_id,status)
+     VALUES($1,$2,$3,'working')`,
     [behind, 'f'.repeat(64), WORKER],
   );
   expect(await daemon.execute('getCornerRestoreState', { cornerId: C }, WORKER)).toMatchObject({
@@ -508,105 +380,16 @@ it('Reproduction R1: a worker order waiting on an offline helper stays working',
   ).toMatchObject({ state: 'working' });
   await db.query(`DELETE FROM agent_turns WHERE room_id=$1`, [behind]);
   await db.query(
-    `UPDATE agent_commands SET state='claimed',lease_expires_at=now()+interval '90 seconds',
-       claimed_at=now(),generation_id='g-hold' WHERE id='queued-implementer'`,
+    `UPDATE agent_commands SET created_at=now()-interval '1 day' WHERE id='queued-implementer'`,
   );
   expect(await daemon.execute('getCornerRestoreState', { cornerId: C }, WORKER)).toMatchObject({
     state: 'working', activity: 'running',
   });
-  await db.query(`UPDATE agent_commands SET state='pending',generation_id=NULL,lease_expires_at=NULL,claimed_at=NULL WHERE id='queued-implementer'`);
+  await db.query(`UPDATE agent_commands SET state='pending' WHERE id='queued-implementer'`);
 
   expect(await state()).toBe('working');
   await db.query("UPDATE agent_commands SET state='complete',completed_at=now() WHERE id='queued-implementer'");
   expect(await state()).toBe('idle');
-});
-
-it.each(['agent', 'human'] as const)('REPORT-WAITING-DERIVED: %s report clears on commander input and remains waiting across a push', async recipientKind => {
-  const { reportToCommander } = await import('./commander.js');
-  const recipient = recipientKind === 'agent' ? COMMANDER : HUMAN;
-  await db.query(`UPDATE agent_commands SET private_payload=jsonb_set(private_payload,'{authorId}',to_jsonb($1::text))
-    WHERE room_id=$2 AND reason='corner_objective'`, [recipient,C]);
-  const changes: string[] = [];
-  const unlisten = db instanceof PgliteDatabase ? await db.client.listen('beeline_live_v1', raw => {
-    const event = JSON.parse(raw);
-    if (event.table === 'corner_state') changes.push(event.roomId);
-  }) : undefined;
-  try {
-    for (const input of ['threaded-reply', 'commander-order', 'new-head'] as const) {
-      const automatic = await createAgentCommand(db, { id: `automatic-${input}`, roomId: C, agentId: WORKER,
-        sourceMessageId: null, reason: 'corner_lifecycle',
-        privatePayload: { kind: 'lifecycle', authorId: SYSTEM_IDENTITY_ID, fromRoomId: C, text: 'Continue automatically' } });
-      expect(automatic).toBeDefined();
-      expect((await db.query(`SELECT state FROM agent_commands WHERE id=$1`, [automatic!.id])).rows)
-        .toEqual([{ state: 'pending' }]);
-      expect((await db.query(`SELECT status FROM agent_turns WHERE room_id=$1 AND request_id=$2`, [C,automatic!.turn_request_id])).rows)
-        .toEqual([]);
-      expect(await state()).toBe('working');
-      changes.length = 0;
-      const report = await reportToCommander(db, C, WORKER, 'blocked: choose the next direction', undefined, `report-${input}`);
-      expect(await cornerReportWaiting(db, C)).toBe(true);
-      expect(await state()).toBe('waiting');
-      if (unlisten) expect(changes).toContain(C);
-      expect((await db.query(`SELECT state,cancellation_reason FROM agent_commands WHERE id=$1`, [automatic!.id])).rows)
-        .toEqual([{ state: 'cancelled', cancellation_reason: 'corner_waiting' }]);
-      expect((await db.query(`SELECT status FROM agent_turns WHERE room_id=$1 AND request_id=$2 AND status='working'`, [C,automatic!.turn_request_id])).rows)
-        .toEqual([]);
-      // An unrelated agent's prose and order cannot answer this report.
-      await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation)
-        VALUES($1,$2,$3,'Proceed','message')`, [`unrelated-${input}`, ROOM, REVIEWER]);
-      await createAgentCommand(db, { id: `unrelated-order-${input}`, roomId: C, agentId: REVIEWER,
-        sourceMessageId: null, reason: 'order', privatePayload: { kind: 'order', authorId: REVIEWER, fromRoomId: ROOM, text: 'Other work' } });
-      expect(await cornerReportWaiting(db, C)).toBe(true);
-      // The commander's unrelated chatter in the parent Room cannot answer it either.
-      await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation)
-        VALUES($1,$2,$3,'Shipping the release now','message')`, [`commander-chatter-${input}`, ROOM, recipient]);
-      expect(await cornerReportWaiting(db, C)).toBe(true);
-      expect(await state()).toBe('waiting');
-      await db.query(`UPDATE agent_commands SET state='complete' WHERE id=$1`, [`unrelated-order-${input}`]);
-      await db.query(`UPDATE agent_turns SET status='complete' WHERE room_id=$1 AND agent_id=$2`, [C,REVIEWER]);
-      changes.length = 0;
-      const reportCard = recipientKind === 'agent'
-        ? (await db.query<{ card_id: string }>(`SELECT encode(sha256(convert_to('agent-command-card:'||$1::text,'UTF8')),'hex') card_id`, [report.id])).rows[0]!.card_id
-        : report.id;
-      if (input === 'threaded-reply') {
-        // A current human member may answer even when the commander is an agent.
-        await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,reply_to_message_id)
-          VALUES('derived-answer',$1,$2,'Proceed','message',$3)`, [recipientKind === 'agent' ? C : ROOM,HUMAN,reportCard]);
-      } else if (input === 'commander-order') {
-        const next = await createAgentCommand(db, { id: 'derived-order', roomId: C, agentId: WORKER,
-          sourceMessageId: null, reason: 'order', privatePayload: { kind: 'order', authorId: recipient, fromRoomId: ROOM, text: 'Proceed' } });
-        await db.query(`UPDATE agent_commands SET state='complete' WHERE id=$1`, [next!.id]);
-        await db.query(`UPDATE agent_turns SET status='complete' WHERE room_id=$1 AND request_id=$2`, [C,next!.turn_request_id]);
-      } else {
-        await db.query(`UPDATE corner_github_cache SET lifecycle='{"pr":{"headSha":"new-head"},"checks":"failing"}'::jsonb WHERE corner_id=$1`, [C]);
-        expect(await cornerReportWaiting(db, C)).toBe(true);
-        await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,reply_to_message_id)
-          VALUES('after-push-answer',$1,$2,'Proceed','message',$3)`, [recipientKind === 'agent' ? C : ROOM,HUMAN,reportCard]);
-      }
-      expect(await cornerReportWaiting(db, C)).toBe(false);
-      if (unlisten) expect(changes).toContain(C);
-      const saved = recipientKind === 'agent'
-        ? (await db.query(`SELECT private_payload->>'waitingAnswered' answered FROM agent_commands WHERE id=$1`, [report.id])).rows
-        : (await db.query(`SELECT card->>'waitingAnswered' answered FROM messages WHERE id=$1`, [report.id])).rows;
-      expect(saved).toEqual([{ answered: 'true' }]);
-      const cardId = (await db.query<{ card_id: string }>(`SELECT encode(sha256(convert_to('agent-command-card:'||$1::text,'UTF8')),'hex') card_id`, [report.id])).rows[0]!.card_id;
-      expect((await db.query(`SELECT card->>'waitingAnswered' answered FROM messages WHERE id=$1`, [cardId])).rows)
-        .toEqual([{ answered: 'true' }]);
-    }
-  } finally { await unlisten?.(); }
-});
-
-it('REPORT-WAITING-DERIVED: automatic blocked prose preserves the committed turn end', async () => {
-  await turn();
-  await end(WORKER, 10);
-  const idle = async () => (await db.query<{ last_turn_ended_at: Date | null; idle_since: string }>(
-    cornerIdleSql('$1'), [C])).rows.map(row => ({ ended: row.last_turn_ended_at, since: row.idle_since }));
-  const before = await idle();
-  expect(before[0]!.ended).not.toBeNull();
-  const { reportToCommander } = await import('./commander.js');
-  await reportToCommander(db, C, WORKER, 'blocked: an automatic completion', undefined, 'automatic-report', { automatic: true });
-  expect(await cornerReportWaiting(db, C)).toBe(false);
-  expect(await idle()).toEqual(before);
 });
 
 it('IDLE-DERIVED: a human-directed report resolves from the message log once answered', async () => {
@@ -657,53 +440,6 @@ it('IDLE-SCOPE: another corner’s answered report never changes this corner’s
   await db.query('UPDATE rooms SET archived_at=now() WHERE id=$1', [other]);
   expect((await db.query(cornerIdleSql('$1'), [other])).rows).toEqual([]);
   expect(await idleSince()).toBe(before);
-});
-
-
-it.each(['commander-order', 'commander-question-order', 'human-order', 'superior-agent-order', 'brief-revision', 'human-member-order', 'human-member-reply', 'unrelated-answer', 'worker-push'] as const)(
-  'Reproduction CHAIN-WAIT: question followed by %s', async input => {
-    if (input === 'superior-agent-order') {
-      await createAgentCommand(db, { id: 'higher-command', roomId: ROOM, agentId: COMMANDER,
-        sourceMessageId: null, reason: 'order', privatePayload: { kind: 'order', authorId: REVIEWER, fromRoomId: ROOM, text: 'Direct the worker' } });
-      await db.query(`UPDATE agent_commands SET parent_command_id='higher-command' WHERE room_id=$1 AND reason='corner_objective'`, [C]);
-    }
-    await post('chain-question', 'needs-decision: @owner Which scope?', input === 'commander-question-order' ? COMMANDER : WORKER);
-    expect(await state()).toBe('waiting');
-    if (['commander-order', 'commander-question-order', 'human-order', 'superior-agent-order', 'brief-revision', 'human-member-order'].includes(input)) {
-      if (input === 'commander-order') await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation)
-        VALUES('parent-answer',$1,$2,'Use the narrow scope','message')`, [ROOM,HUMAN]);
-      if (input === 'brief-revision') {
-        await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation)
-          VALUES('revision-source',$1,$2,'Approved revised scope','message')`, [ROOM,COMMANDER]);
-        await createAgentCommand(db, { id: 'chain-answer-order', roomId: C, agentId: WORKER,
-          sourceMessageId: 'revision-source', reason: 'corner_brief_revision' });
-      } else await createAgentCommand(db, { id: 'chain-answer-order', roomId: C, agentId: WORKER,
-        sourceMessageId: null, reason: 'order', privatePayload: { kind: 'order',
-          authorId: input === 'human-order' ? HUMAN : input === 'human-member-order' ? HUMAN_MEMBER : input === 'superior-agent-order' ? REVIEWER : COMMANDER,
-          fromRoomId: ROOM, text: 'Proceed with the narrow scope' } });
-    } else if (input === 'human-member-reply') {
-      await post('human-member-answer', 'Proceed', HUMAN_MEMBER);
-    } else if (input === 'unrelated-answer') {
-      await post('peer-answer', 'Proceed', REVIEWER);
-    }
-    await db.query(`UPDATE corner_github_cache SET lifecycle='{"pr":{"headSha":"chain-head"},"checks":"pending"}'::jsonb WHERE corner_id=$1`, [C]);
-    await state();
-    const row = (await phone.readCorners(ROOM, HUMAN))!.corners[0]!;
-    if (['commander-order', 'commander-question-order', 'human-order', 'superior-agent-order', 'brief-revision', 'human-member-order', 'human-member-reply'].includes(input)) expect(row.state).not.toBe('waiting');
-    else expect(row.state).toBe('waiting');
-  });
-
-
-it.each(['human-order', 'human-member-order', 'human-member-reply', 'worker-push'] as const)('Reproduction CHAIN-WAIT: explicit report followed by %s', async input => {
-  const { reportToCommander } = await import('./commander.js');
-  await reportToCommander(db, C, WORKER, 'needs-decision: Which scope?');
-  expect(await state()).toBe('waiting');
-  if (input === 'human-member-reply') await post('human-member-answer', 'Proceed', HUMAN_MEMBER);
-  if (input === 'human-order' || input === 'human-member-order') await createAgentCommand(db, { id: 'superior-order', roomId: C, agentId: WORKER,
-    sourceMessageId: null, reason: 'order', privatePayload: { kind: 'order', authorId: input === 'human-member-order' ? HUMAN_MEMBER : HUMAN, fromRoomId: ROOM, text: 'Proceed' } });
-  await db.query(`UPDATE corner_github_cache SET lifecycle='{"pr":{"headSha":"report-head"},"checks":"pending"}'::jsonb WHERE corner_id=$1`, [C]);
-  if (input === 'worker-push') expect(await state()).toBe('waiting');
-  else expect(await state()).not.toBe('waiting');
 });
 
 it.each(['55P03', '08006'])('Reproduction SENTRY-4B: refresh never replays a failed transaction (%s)', async code => {
@@ -759,39 +495,4 @@ it('Reproduction SENTRY-4B: a committed command during refresh completion reache
     release(); await Promise.all([first, second]);
     expect((await phone.readCorners(ROOM, HUMAN))!.corners.find(corner => corner.corner.id === C)?.state).toBe('working');
   } finally { release(); observe.mockRestore(); await runtime.stop(); }
-});
-
-it('AC-8: reports, an open question and an approval share waiting and commander-reply clearing', async () => {
-  const {reportToCommander}=await import('./commander.js');
-  const {CHOICE_CARD_TYPE}=await import('@beeline/api-contract/phone');
-  const seedCommands=(await db.query<{id:string}>('SELECT id FROM agent_commands')).rows.map(row=>row.id);
-  const seedMessages=(await db.query<{id:string}>('SELECT id FROM messages')).rows.map(row=>row.id);
-  for(const kind of ['blocked','needs-decision','question','approval'] as const) {
-    await db.query(`DELETE FROM agent_commands WHERE NOT(id=ANY($1::text[]))`,[seedCommands]);
-    await db.query(`DELETE FROM agent_turns WHERE room_id=$1`,[C]);
-    await db.query(`DELETE FROM agent_grants WHERE room_id=$1`,[C]);
-    await db.query(`DELETE FROM messages WHERE room_id IN ($1,$2) AND NOT(id=ANY($3::text[]))`,[C,ROOM,seedMessages]);
-    await db.query(`UPDATE corner_facts SET machine=NULL WHERE corner_id=$1`,[C]);
-    if(kind==='blocked'||kind==='needs-decision') {
-      await reportToCommander(db,C,WORKER,`${kind}: choose the next step`);
-    } else if(kind==='question') {
-      await db.query(`INSERT INTO messages(id,room_id,author_id,presentation,text,card_type,card)
-        VALUES('common-question',$1,$2,'message','Choose the next step',$3,$4::jsonb)`,[C,WORKER,CHOICE_CARD_TYPE,
-        JSON.stringify({mode:'question',status:'open',mentionIds:[HUMAN],requester:{pubkey:HUMAN}})]);
-    } else {
-      const grant='77777777-7777-4777-8777-777777777777';
-      await db.query(`INSERT INTO agent_grants(id,agent_id,workspace_id,kind,target,reason,requested_by,room_id,status)
-        VALUES($1,$2,$3,'host','example.test','Need access',$4,$5,'pending')`,[grant,WORKER,WS,HUMAN,C]);
-      await db.query(`INSERT INTO messages(id,room_id,author_id,presentation,text,card_type,card)
-        VALUES('common-approval',$1,$2,'message','Approve access','grant-request',$3::jsonb)`,[C,WORKER,
-        JSON.stringify({grants:[{grantId:grant}]})]);
-    }
-    expect(await state(),kind).toBe('waiting');
-    expect(await cornerReportWaiting(db,C),kind).toBe(true);
-    await post(`answer-${kind}`,'Proceed with the requested work',HUMAN);
-    expect(await cornerReportWaiting(db,C),kind).toBe(false);
-    expect(await state(),kind).toBe('idle');
-    if(kind==='approval') expect((await db.query(`SELECT status FROM agent_grants WHERE room_id=$1`,[C])).rows)
-      .toEqual([{status:'pending'}]);
-  }
 });

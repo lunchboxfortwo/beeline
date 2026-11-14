@@ -23,7 +23,7 @@ import {
   tagSquireSessionSchedule,
 } from './squire-session-registry.js';
 
-type TurnKey = { roomId: string; requestId: string; taskId: string; generationId: string };
+type TurnKey = { roomId: string; requestId: string; taskId: string; itemId: string };
 type RelayRequest = TurnKey & { operationId?:string; method: string; params?: Record<string, unknown> };
 export type SquireTaskCall = TurnKey & { tool: string; args: Record<string, unknown> };
 
@@ -226,14 +226,14 @@ export class SquireTaskRelay {
     return { url: this.url!, token: this.token, contextFile };
   }
 
-  activate(command: AgentCommand, generationId: string): void {
+  activate(command: AgentCommand, itemId: string): void {
     if (command.agentId !== this.agentId || command.roomId !== this.roomId)
       throw new Error('Squire task scope does not match the server command');
     this.active = {
       roomId: command.roomId,
       requestId: command.turnRequestId,
       taskId: command.rootCommandId,
-      generationId,
+      itemId,
     };
     this.activeScheduleId = command.scheduleId ?? command.source?.systemEvent?.scheduleId;
     if (this.task) {
@@ -399,7 +399,7 @@ export class SquireTaskRelay {
   private handle(input: RelayRequest): Promise<unknown> {
     if (input.method === 'beeline/read_operation') {
       const receipt = input.operationId && this.operations.get(input.operationId);
-      if (!receipt || ['roomId','requestId','taskId','generationId'].some(key =>
+      if (!receipt || ['roomId','requestId','taskId','itemId'].some(key =>
           input[key as keyof TurnKey] !== receipt.input[key as keyof TurnKey]))
         return Promise.reject(new SquireOperationError('Browser result is unknown. Do not repeat it.',
           {cause:'result-unknown',operationId:input.operationId,accepted:null,completed:false}));
@@ -418,7 +418,7 @@ export class SquireTaskRelay {
     const active = this.active;
     const inventory = input.method === 'initialize' || input.method === 'tools/list';
     const suppliedTurn = Object.keys(input).some((key) =>
-      key === 'roomId' || key === 'requestId' || key === 'taskId' || key === 'generationId');
+      key === 'roomId' || key === 'requestId' || key === 'taskId' || key === 'itemId');
     if (this.closed || (!inventory && (!active || Object.keys(active).some((key) =>
       input[key as keyof TurnKey] !== active[key as keyof TurnKey]))) ||
       (inventory && active && suppliedTurn && Object.keys(active).some((key) =>

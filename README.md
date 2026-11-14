@@ -20,3 +20,9 @@ Join Beeline at join.usebeeline.app
 ```
 
 [usebeeline.app](https://usebeeline.app)
+
+Messages to helper agents stay in their server queue until an answer is posted to the recorded chat.
+The helper delivers into the live agent session, including follow-up input while it works.
+Repository setup and optional context run through session tools; their errors reach the agent so it can still answer.
+Saved answers survive reconnects and helper updates without another agent turn.
+An unavailable agent leaves its messages queued and shows “agent is offline · connect again”.

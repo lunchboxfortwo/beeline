@@ -19,6 +19,8 @@ const fixture = monolithFixture();
           .id;
       const cornerId = await create('Unbriefed-work');
       const unrelated = await create('Other-work');
+      const sent = await fixture.phone.execute('sendRoomMessage', { roomId: cornerId, text: '@bee Complete the approved work.' }, HUMAN);
+      const command = (await fixture.database.query<{id:string}>('SELECT id FROM agent_commands WHERE source_message_id=$1 AND agent_id=$2', [sent.messageId,AGENT])).rows[0]!;
       const approvals = new Map<string, string>();
       for (const roomId of [ROOM, cornerId, unrelated]) {
         const messageId = createHash('sha256').update(roomId).digest('hex');
@@ -32,7 +34,7 @@ const fixture = monolithFixture();
       }
       const revise = (roomId: string, expectedRevision: number) =>
         fixture.daemonOperation('reviseCornerBrief', {
-          roomId: ROOM,
+          roomId: cornerId, requestId: command.id,
           cornerId,
           expectedRevision,
           brief: {
@@ -781,6 +783,6 @@ const fixture = monolithFixture();
       `SELECT message.card,command.action FROM messages message JOIN agent_commands command
        ON command.source_message_id=message.id WHERE message.card_type='grant-decision'`,
     )).rows;
-    expect(wake).toEqual([{ card: { grantId: current.grantId, status: 'once' }, action: 'resume' }]);
+    expect(wake).toEqual([{ card: { grantId: current.grantId, status: 'once' }, action: 'input' }]);
   });
 });

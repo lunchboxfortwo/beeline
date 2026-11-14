@@ -1,20 +1,19 @@
 import { phoneFetch } from '../../../tests/helpers/phone-operation.js';
+import { startQueuedCommand,startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 
-import { COMMAND_COMPLETION_CHANNEL, notifyCommandCompletion } from './command-completion.js';
+import { COMMAND_COMPLETION_CHANNEL,notifyCommandCompletion } from './command-completion.js';
 
-import { cornerOwnerSql } from './corner-worker.js';
 
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll,afterEach,beforeAll,beforeEach,expect,vi } from 'vitest';
 
-import type { createServer } from 'node:http';
 
 import { Webhook } from 'standardwebhooks';
 
-import { MCP_ORDER_WAKE_HINT, MCP_REVIEW_WAKE_HINT, MCP_WAKE_HINT, RoomsMcpEvents } from './rooms-mcp-events.js';
+import { RoomsMcpEvents } from './rooms-mcp-events.js';
 
-import { backfillMcpMemberAvatars, ensureMcpMember, MCP_TAG_INSTRUCTION, postMcpWebhook } from './rooms-mcp-members.js';
+import { postMcpWebhook } from './rooms-mcp-members.js';
 
-import { randomBytes, createHash, randomUUID } from 'node:crypto';
+import { createHash,randomBytes,randomUUID } from 'node:crypto';
 
 import type { AddressInfo } from 'node:net';
 
@@ -24,13 +23,12 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 
 import { migrate } from './database.js';
 
-import { MemoryObjectStorage, PgliteDatabase, assignCornerWorker, insertCornerFacts } from './test-support.js';
+import { assignCornerWorker,insertCornerFacts,MemoryObjectStorage,PgliteDatabase } from './test-support.js';
 
 import { ObjectService } from './object-service.js';
 
-import { TokenAuth, tokenHash } from './auth.js';
+import { TokenAuth,tokenHash } from './auth.js';
 
-import { recordSigninAttempt } from './signin-attempts.js';
 
 import { PhoneService } from './phone-service.js';
 
@@ -40,28 +38,20 @@ import { LiveHub } from './live.js';
 
 import { createBeelineServer } from './server.js';
 
-import { BROWSER_REFUSALS, RoomsMcpOAuth } from './rooms-mcp-oauth.js';
+import { RoomsMcpOAuth } from './rooms-mcp-oauth.js';
 
 import { RoomsMcp } from './rooms-mcp.js';
 
-import { MCP_AGENT_EXCLUSIONS, MCP_AGENT_TOOLS, MCP_APP_ROUTE_OPERATIONS, pendingMcpWakes } from './rooms-mcp-agent.js';
 
-import { claimAgentCommand, createAgentCommand, routeHumanMessage, routeAgentResult } from './agent-command.js';
 
 import { cornerWorkSql } from './chat-corner-counts.js';
 
-import { openSecrets } from './free-agents.js';
-
-import { deliverMcpMemberWebhooks, runMcpWebhookDelivery } from './rooms-mcp-members.js';
 
 
-import { PREREGISTERED_MCP_CLIENTS } from './rooms-mcp-preregistered.js';
 
-import type { readFileSync } from 'node:fs';
 
-import sharp from 'sharp';
 
-import { MCP_STARTER_ROUTINE, FACE_SOULS } from '@beeline/api-contract/phone';
+
 
 
 export const USER = tokenHash('google:mcp-demo'), OTHER = 'b'.repeat(64), AGENT = 'c'.repeat(64);
@@ -306,8 +296,8 @@ export function fixtureScope3(scope1: ReturnType<typeof fixtureScope1>) {
       const command = (await scope1.db.query<{ id: string; turn_request_id: string }>(
         'SELECT id,turn_request_id FROM agent_commands WHERE source_message_id=$1 AND agent_id=$2', [sent.messageId, AGENT])).rows[0]!;
       const generationId = `gen-${randomBytes(4).toString('hex')}`;
-      await scope1.daemon.execute('claimAgentCommand', { roomId: ROOM, commandId: command.id, generationId } as never, AGENT);
-      return { roomId: ROOM, requestId: command.turn_request_id, generationId };
+      await startQueuedCommand(scope1.daemon, { roomId: ROOM, commandId: command.id } as never, AGENT);
+      return { roomId: ROOM, requestId: command.turn_request_id };
     }
 
     async function reportCorner(member: string) {
@@ -333,34 +323,36 @@ reportCorner,
 cornerWorking,
 };
 }
-export { phoneFetch } from '../../../tests/helpers/phone-operation.js';
-export { COMMAND_COMPLETION_CHANNEL, notifyCommandCompletion } from './command-completion.js';
-export { cornerOwnerSql } from './corner-worker.js';
-export { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-export { createServer } from 'node:http';
-export { Webhook } from 'standardwebhooks';
-export { MCP_ORDER_WAKE_HINT, MCP_REVIEW_WAKE_HINT, MCP_WAKE_HINT, RoomsMcpEvents } from './rooms-mcp-events.js';
-export { backfillMcpMemberAvatars, ensureMcpMember, MCP_TAG_INSTRUCTION, postMcpWebhook, deliverMcpMemberWebhooks, runMcpWebhookDelivery } from './rooms-mcp-members.js';
-export { randomBytes, createHash, randomUUID } from 'node:crypto';
+export { FACE_SOULS,MCP_STARTER_ROUTINE } from '@beeline/api-contract/phone';
 export { Client } from '@modelcontextprotocol/sdk/client/index.js';
 export { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-export { migrate } from './database.js';
-export { MemoryObjectStorage, PgliteDatabase, assignCornerWorker, insertCornerFacts } from './test-support.js';
-export { ObjectService } from './object-service.js';
-export { TokenAuth, tokenHash } from './auth.js';
-export { recordSigninAttempt } from './signin-attempts.js';
-export { PhoneService } from './phone-service.js';
-export { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
-export { LiveHub } from './live.js';
-export { createBeelineServer } from './server.js';
-export { BROWSER_REFUSALS, RoomsMcpOAuth } from './rooms-mcp-oauth.js';
-export { RoomsMcp } from './rooms-mcp.js';
-export { MCP_AGENT_EXCLUSIONS, MCP_AGENT_TOOLS, MCP_APP_ROUTE_OPERATIONS, pendingMcpWakes } from './rooms-mcp-agent.js';
-export { claimAgentCommand, createAgentCommand, routeHumanMessage, routeAgentResult } from './agent-command.js';
-export { cornerWorkSql } from './chat-corner-counts.js';
-export { openSecrets } from './free-agents.js';
-export { PREREGISTERED_MCP_CLIENTS } from './rooms-mcp-preregistered.js';
+export { createHash,randomBytes,randomUUID } from 'node:crypto';
 export { readFileSync } from 'node:fs';
-export { default as sharp } from 'sharp';
-export { MCP_STARTER_ROUTINE, FACE_SOULS } from '@beeline/api-contract/phone';
+export { createServer } from 'node:http';
 export type { AddressInfo } from 'node:net';
+export { default as sharp } from 'sharp';
+export { Webhook } from 'standardwebhooks';
+export { afterAll,afterEach,beforeAll,beforeEach,describe,expect,it,vi } from 'vitest';
+export { phoneFetch } from '../../../tests/helpers/phone-operation.js';
+export { createAgentCommand } from './agent-command.js';
+export { TokenAuth,tokenHash } from './auth.js';
+export { cornerWorkSql } from './chat-corner-counts.js';
+export { COMMAND_COMPLETION_CHANNEL,notifyCommandCompletion } from './command-completion.js';
+export { cornerOwnerSql } from './corner-worker.js';
+export { migrate } from './database.js';
+export { openSecrets } from './free-agents.js';
+export { LiveHub } from './live.js';
+export { ObjectService } from './object-service.js';
+export { PhoneService } from './phone-service.js';
+export { MCP_AGENT_EXCLUSIONS,MCP_AGENT_TOOLS,MCP_APP_ROUTE_OPERATIONS,pendingMcpWakes } from './rooms-mcp-agent.js';
+export { MCP_ORDER_WAKE_HINT,MCP_REVIEW_WAKE_HINT,MCP_WAKE_HINT,RoomsMcpEvents } from './rooms-mcp-events.js';
+export { backfillMcpMemberAvatars,deliverMcpMemberWebhooks,ensureMcpMember,MCP_TAG_INSTRUCTION,postMcpWebhook,runMcpWebhookDelivery } from './rooms-mcp-members.js';
+export { BROWSER_REFUSALS,RoomsMcpOAuth } from './rooms-mcp-oauth.js';
+export { PREREGISTERED_MCP_CLIENTS } from './rooms-mcp-preregistered.js';
+export { RoomsMcp } from './rooms-mcp.js';
+export { createBeelineServer } from './server.js';
+export { recordSigninAttempt } from './signin-attempts.js';
+export { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
+export { routeAgentResult,routeHumanMessage } from './test-fixtures/queue-routing.test-support.js';
+export { assignCornerWorker,insertCornerFacts,MemoryObjectStorage,PgliteDatabase } from './test-support.js';
+export { startQueuedTurn };

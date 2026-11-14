@@ -1,10 +1,11 @@
+import { WallRefusal } from '@beeline/api-contract/daemon';
 import { finishLiveClose } from './shutdown.js';
 import { type Server, createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { runnableOrigin, serveRunnableArtifact } from "./runnable-artifact.js";
 import type { LiveEvent, LiveHub } from "./live.js";
 import { type RoomLiveDelta, type MessageBookmarkView, PHONE_READ_OPERATIONS } from "@beeline/api-contract/phone";
 import type { PhoneService } from "./phone-service.js";
-import { HelperVersionGate, helperVersionBelowMinimum } from "./helper-version-gate.js";
+import { HelperVersionGate } from "./helper-version-gate.js";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { Duplex } from "node:stream";
 import { DaemonConnectionRegistry, type DaemonLiveDependencies } from "./daemon-live.js";
@@ -105,8 +106,6 @@ export const LIVE_PONG_FRAME = JSON.stringify({ type: 'pong' });
 export const ROOM_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 
-/** Machine sockets authenticate per agent after upgrade; cap them per client address. */
-export const MAX_MACHINE_SOCKETS_PER_CLIENT = 8;
 
 
 export interface GitHubServerHooks {
@@ -479,7 +478,6 @@ export function createBeelineServer(options: ServerOptions): Server {
     helperForceUpdates: 0,
     heartbeatTerminations: 0,
   };
-  const machineSocketCounts = new Map<string, number>();
   const liveHealth = () => ({
     sockets: webSockets.clients.size,
     subscriptions: [...socketSubscriptions.values()].reduce((total, count) => total + count(), 0),
@@ -595,21 +593,6 @@ export function createBeelineServer(options: ServerOptions): Server {
       });
     }
     console.log('[req]', method, url.pathname);
-    const minimum = helperVersionGate.minimum;
-    const reportedVersion = request.headers['x-beeline-helper-version'];
-    if (
-      minimum &&
-      method === 'POST' &&
-      url.pathname.startsWith('/v1/daemon/') &&
-      helperVersionBelowMinimum(
-        typeof reportedVersion === 'string' ? reportedVersion : undefined,
-        minimum,
-      )
-    ) {
-      liveCounters.helperVersionRefusals++;
-      json(response, 426, { error: 'update_required', minVersion: minimum });
-      return;
-    }
     if (url.pathname !== '/v1/site/download-tap' && isWebAppCorsPath(url.pathname) && applyWebAppCors(request, response, options)) return;
     if (url.pathname === '/v1/vault-save/submit' || url.pathname === '/v1/vault-save/answer') {
       void vaultSaveHttp(request, response, options, vaultSaveRelay);
@@ -637,7 +620,7 @@ export function createBeelineServer(options: ServerOptions): Server {
         `status=${status}`,
         error instanceof Error ? error.stack || error.message : String(error),
       );
-      json(response, status, error instanceof PhoneOperationError ? error.payload : { error: message });
+      json(response, status, error instanceof PhoneOperationError || error instanceof WallRefusal ? error.payload : { error: message });
     });
   }));
   // Send a restart close frame; bound peers that never acknowledge it.
@@ -702,38 +685,8 @@ export function createBeelineServer(options: ServerOptions): Server {
       const raw = tokenFromProtocol(request);
       const helperVersion = url.searchParams.get('helperVersion') ?? undefined;
       const helperSourceSha = url.searchParams.get('sourceSha') ?? undefined;
-      const minimum = helperVersionGate.minimum;
       const machine = isMachineSocket(request);
-      if (
-        (machine || raw?.startsWith('bdt_')) &&
-        minimum &&
-        helperVersionBelowMinimum(helperVersion, minimum)
-      ) {
-        liveCounters.helperVersionRefusals++;
-        const payload = JSON.stringify({ error: 'update_required', minVersion: minimum });
-        socket.write(
-          `HTTP/1.1 426 Upgrade Required\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(payload)}\r\nConnection: close\r\n\r\n${payload}`,
-        );
-        socket.destroy();
-        return;
-      }
       if (machine) {
-        // Identity arrives per agent after the upgrade; bound the anonymous
-        // sockets one client address can hold open meanwhile.
-        const key = clientKey(request);
-        const open = machineSocketCounts.get(key) ?? 0;
-        if (open >= MAX_MACHINE_SOCKETS_PER_CLIENT) {
-          liveErrors.overload++;
-          socket.write('HTTP/1.1 503 Service Unavailable\r\nRetry-After: 5\r\n\r\n');
-          socket.destroy();
-          return;
-        }
-        machineSocketCounts.set(key, open + 1);
-        socket.once('close', () => {
-          const remaining = (machineSocketCounts.get(key) ?? 1) - 1;
-          if (remaining <= 0) machineSocketCounts.delete(key);
-          else machineSocketCounts.set(key, remaining);
-        });
         if (shuttingDown) { socket.destroy(); return; }
         webSockets.handleUpgrade(request, socket, head, (client) =>
           webSockets.emit('connection', client, request, {

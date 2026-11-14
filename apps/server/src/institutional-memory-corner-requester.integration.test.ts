@@ -1,9 +1,10 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import type { GitHubAppClient, GitHubOAuthClient } from '@beeline/auth/github';
 import { AuthStore, type TransactionalDatabase } from '@beeline/auth/store';
-import { claimAgentCommand, createAgentCommand } from './agent-command.js';
+import { createAgentCommand } from './agent-command.js';
 import { TokenAuth } from './auth.js';
 import { DaemonService } from './daemon-service.js';
 import { migrate } from './database.js';
@@ -187,8 +188,8 @@ describe('save_memory requester authority on corner wakes', () => {
 
   async function claim(roomId: string, commandId: string, requestId: string): Promise<Turn> {
     const generationId = `generation-${commandId.slice(0, 8)}`;
-    await claimAgentCommand(database, roomId, AGENT, commandId, generationId);
-    return { roomId, requestId, generationId };
+    await startQueuedTurn(database, roomId, AGENT, commandId);
+    return { roomId, requestId };
   }
 
   async function operation(name: string, turn: Turn, payload: object = {}) {

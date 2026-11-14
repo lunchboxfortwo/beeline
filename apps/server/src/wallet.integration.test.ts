@@ -17,8 +17,8 @@ const scope1 = fixtureScope1();
     expect((await readCatalog()).find((entry) => entry.connectorType === 'wallet')?.paired).toMatchObject({ status: 'connected', onThisMachine: true });
     for (const agentId of ['self', 'f'.repeat(64)]) {
       const result = await scope1.daemonOperation('getWalletToolState', { agentId });
-      expect(result.status).toBe(503);
-      expect(result.body.error).toBe('daemon token does not own requested agent');
+      expect(result.status).toBe(403);
+      expect(result.body.error).toMatch(/does not own|daemon room access denied/);
     }
     await scope1.database.query(`UPDATE wallet_bindings SET delegation_standing=false,delegation_expires_at=NULL WHERE identity_id=$1`, [HUMAN]);
     expect((await readCatalog()).find((entry) => entry.connectorType === 'wallet')?.paired).toBeUndefined();
@@ -112,7 +112,7 @@ const scope1 = fixtureScope1();
     await scope1.phoneOperation('decideAgentGrant', { grantId: pending.body.grantId, decision: 'once' });
     expect((await scope1.daemonOperation('walletSignTypedData', input)).body.outcome).toBe('signed');
     expect((await scope1.daemonOperation('walletSignTypedData', input)).body.status).toBe('permission-required');
-    expect((await scope1.daemonOperation('walletSignTypedData', { ...input, agentId: 'f'.repeat(64) })).status).toBe(503);
+    expect((await scope1.daemonOperation('walletSignTypedData', { ...input, agentId: 'f'.repeat(64) })).status).toBe(403);
     expect(sign).toHaveBeenCalledTimes(1);
   });
 

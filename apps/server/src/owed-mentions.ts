@@ -32,10 +32,6 @@ export async function prepareMentionReplyInput(db: SqlDatabase, member: string,
   serverMentionInputs.add(input);
 }
 
-export function isMentionReplyInput(input: object): boolean {
-  return serverMentionInputs.has(input);
-}
-
 /** Catch-up pages read the outstanding obligation.
  * Helper final answers carry request_id even when they have no replyTo. A
  * cancelled source command closes that conversation; completion alone does not
@@ -56,7 +52,7 @@ export const OWED_MENTION_OPEN_SQL = `
   AND (NOT EXISTS(SELECT 1 FROM agent_commands source WHERE source.source_message_id=mention.message_id
       AND source.room_id=mention.room_id AND source.agent_id=mention.member_id AND source.state='cancelled')
     OR EXISTS(SELECT 1 FROM agent_commands source WHERE source.source_message_id=mention.message_id
-      AND source.room_id=mention.room_id AND source.agent_id=mention.member_id AND source.state IN ('pending','claimed')))`;
+      AND source.room_id=mention.room_id AND source.agent_id=mention.member_id AND source.state='pending'))`;
 
 /** Private, current membership-scoped catch-up read. Tool results never carry it. */
 export async function owedMentions(db: SqlDatabase, member: string) {

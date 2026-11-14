@@ -23,12 +23,12 @@ it('retires the check-in command trigger even when its private table is already 
       END $$;
       CREATE TRIGGER beeline_background_source_2 AFTER INSERT OR UPDATE OR DELETE ON agent_commands
         FOR EACH ROW EXECUTE FUNCTION beeline_background_source('next-day-checkin','state');`);
-    const claim = () => db.query(`UPDATE agent_commands SET state='claimed' WHERE id='ordinary-owner-schedule'`);
+    const claim = () => db.query(`UPDATE agent_commands SET state='pending' WHERE id='ordinary-owner-schedule'`);
     await expect(claim()).rejects.toThrow('relation "next_day_checkins" does not exist');
     for (let pass = 0; pass < 2; pass++) {
       await db.query(BACKGROUND_DUE_SOURCE_SCHEMA);
       await expect(claim()).resolves.toMatchObject({ rowCount: 1 });
-      expect((await db.query(`SELECT state FROM agent_commands`)).rows).toEqual([{ state: 'claimed' }]);
+      expect((await db.query(`SELECT state FROM agent_commands`)).rows).toEqual([{ state: 'pending' }]);
       expect((await db.query(`SELECT to_regclass('next_day_checkins') AS relation`)).rows).toEqual([{ relation: null }]);
       expect((await db.query(`SELECT 1 FROM pg_trigger
         WHERE tgrelid='agent_commands'::regclass AND NOT tgisinternal`)).rows).toEqual([]);

@@ -1,42 +1,26 @@
-import { VOICE_DATA_TOPIC } from '@beeline/api-contract/phone';
 
-import * as backgroundWork from './background-work.js';
 
 import { EventEmitter } from 'node:events';
 
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach,vi } from 'vitest';
 
-import { voiceTempo } from './voice-tempo.js';
 
-import { markdownToSpeech } from './markdown-to-speech.js';
 
 import { VoiceService } from './voice-service.js';
 
-import * as telemetry from './sentry.js';
 
-import { VoiceRoomRuntime, spokenReport, confirmedVoiceSpeech, voiceInterrupt, voicePlaybackEcho } from './voice-room-runtime.js';
 
-import { AuraSpeech, OpenRouterVoiceBrain, VoiceQuotaError } from './voice-providers.js';
 
-import { VoiceService as RealVoiceService } from './voice-service.js';
 
-import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 
-import { migrate } from './database.js';
 
-import { PgliteDatabase } from './test-support.js';
 
 import { LiveHub } from './live.js';
 
-import { routeHumanMessage, claimAgentCommand } from './agent-command.js';
 
-import { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
 
-import { PhoneService } from './phone-service.js';
 
-import { ConnectionPresence } from './connection-presence.js';
 
-import { groupBPostgresDatabase } from './test-fixtures/test-support-router-group-b-postgres.js';
 
 
 afterEach(() => { vi.useRealTimers(); });
@@ -123,18 +107,10 @@ export function phantomHarness(answer = 'Hey there is the answer.') {
     access: vi.fn(async () => {}), agents: vi.fn(async () => [agent]),
     lastActiveAgent: vi.fn(async () => undefined),
     speech: vi.fn(async () => speech), humanCount: vi.fn(async () => 1),
-    recordHuman: vi.fn(async (call: string, room: string, human: string, target: typeof agent, text: string, leaseOwner?: string): Promise<string> => {
-      const writer = { access: service.access, live: new LiveHub(), db: {
-        transaction: async (write: (db: { query(sql: string, args: unknown[]): Promise<unknown> }) => Promise<void>) => write({
-          async query(sql, args) {
-            if (sql.includes('INSERT INTO messages')) {
-              const content = String(args[3]); messages.push(content); note(`message send: ${content}`);
-            }
-            return { rowCount: 1, rows: [] };
-          },
-        }),
-      } } as unknown as VoiceService;
-      return VoiceService.prototype.recordHuman.call(writer, call, room, human, target, text, leaseOwner);
+    recordHuman: vi.fn(async (_call: string, _room: string, _human: string, target: typeof agent, text: string): Promise<string> => {
+      const content=`@${target.handle} ${text.replace(/@/g,'')}`;
+      messages.push(content);note(`message send: ${content}`);
+      return `source-${messages.length}`;
     }), reviseHuman: vi.fn(async (_call: string, _room: string, _human: string, _target: unknown, _source: string, text: string) => {
       messages[0] = `@ronnie ${text}`;
     }), recordAnswer: vi.fn(async () => {}), dispatch: vi.fn(async () => {}),
@@ -178,19 +154,20 @@ export const inputOwnerPostgresUrl = process.env.BEELINE_COMMAND_TEST_POSTGRES_U
 
 
 export { VOICE_DATA_TOPIC } from '@beeline/api-contract/phone';
-export { EventEmitter } from 'node:events';
-export { afterEach, expect, it, vi } from 'vitest';
-export { voiceTempo } from './voice-tempo.js';
-export { markdownToSpeech } from './markdown-to-speech.js';
-export { VoiceService, VoiceService as RealVoiceService } from './voice-service.js';
-export { VoiceRoomRuntime, spokenReport, confirmedVoiceSpeech, voiceInterrupt, voicePlaybackEcho } from './voice-room-runtime.js';
-export { AuraSpeech, OpenRouterVoiceBrain, VoiceQuotaError } from './voice-providers.js';
 export { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
-export { migrate } from './database.js';
-export { PgliteDatabase } from './test-support.js';
-export { LiveHub } from './live.js';
-export { routeHumanMessage, claimAgentCommand } from './agent-command.js';
-export { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
-export { PhoneService } from './phone-service.js';
+export { EventEmitter } from 'node:events';
+export { afterEach,expect,it,vi } from 'vitest';
 export { ConnectionPresence } from './connection-presence.js';
+export { migrate } from './database.js';
+export { LiveHub } from './live.js';
+export { markdownToSpeech } from './markdown-to-speech.js';
+export { PhoneService } from './phone-service.js';
+export { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
+export { routeHumanMessage } from './test-fixtures/queue-routing.test-support.js';
+export { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 export { groupBPostgresDatabase } from './test-fixtures/test-support-router-group-b-postgres.js';
+export { PgliteDatabase } from './test-support.js';
+export { AuraSpeech,OpenRouterVoiceBrain,VoiceQuotaError } from './voice-providers.js';
+export { confirmedVoiceSpeech,spokenReport,voiceInterrupt,voicePlaybackEcho,VoiceRoomRuntime } from './voice-room-runtime.js';
+export { VoiceService as RealVoiceService,VoiceService } from './voice-service.js';
+export { voiceTempo } from './voice-tempo.js';

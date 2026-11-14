@@ -1,8 +1,5 @@
-import { RECLAIMED_REPLY_REFUSAL } from '@beeline/api-contract/helper-turn-ownership';
-import { DaemonApiError } from './daemon-api-client.js';
-import { HelperOverlayOwner } from './helper-overlay.js';
-import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
 import type { DaemonApiClient } from './daemon-api-client.js';
+import { HelperOverlayOwner } from './helper-overlay.js';
 import { sanitizeAgentReply } from './reply-sanitizer.js';
 
 /**
@@ -39,17 +36,10 @@ export interface AgentTurnStreamOptions {
    * any other id leaves a ghost draft duplicating the message.
    */
   requestId: string;
-  commandId?:string;
-  turnGeneration?:string;
+  /** The queue item this draft belongs to. */
+  commandId: string;
   /** Log prefix naming the surface, e.g. `monolith Room <id>` or `corner <id>`. */
   label: string;
-}
-
-/** Extra fields the durable reply carries on one surface but not the other. */
-export interface DurableReplyFields {
-  triggerMessageId?: string;
-  /** A Room reply's tool calls and earlier text runs, in turn order. */
-  steps?: DaemonOperationMap['postRoomMessage']['input']['steps'];
 }
 
 /**
@@ -105,10 +95,9 @@ export class AgentTurnStream {
     if(transport && (transport.enabled() || transport.selected?.())) {
       // Registration loss cannot restore the growing-snapshot producer while
       // this command is still bound to the negotiated overlay protocol.
-      if(!options.commandId || !options.turnGeneration) throw new Error('Overlay requires a claimed command generation');
       this.overlay=new HelperOverlayOwner({
         agentId:options.agentId,roomId:options.roomId,commandId:options.commandId,turnId:options.requestId,
-        turnGeneration:options.turnGeneration,kind:'draft'},transport);
+        turnGeneration:options.commandId,kind:'draft'},transport);
     }
   }
 
@@ -304,49 +293,5 @@ export class AgentTurnStream {
         .catch((error) => console.error(`[thin-core] ${label} draft retract failed:`, error));
     })();
     await this.retraction;
-  }
-
-  /**
-   * Post the durable reply under the turn's request id and dissolve the draft.
-   * An empty reply settles through the turn receipt instead, and the lane is
-   * retracted either way.
-   *
-   * The durable reply is this turn's answer and its last word. The draft lane
-   * is presentation, so a refused retract is logged like a refused draft and
-   * the turn still settles complete: raising here failed a turn that had
-   * already answered, which posts a `failed` receipt and inscribes "<agent>
-   * could not answer" UNDER the answer the reader is looking at. The reader
-   * loses nothing by it either — the phone ends a retracted draft on the
-   * turn's own complete receipt (`visibleLiveOverlays`).
-   */
-  async settle(
-    reply: string,
-    fields: DurableReplyFields = {},
-    onReplyPosted?: () => void,
-  ): Promise<void> {
-    this.close();
-    const { api, roomId, requestId } = this.options;
-    if (reply) {
-      const publish = () => api.execute('postRoomMessage', {
-        roomId,
-        requestId,
-        text: reply,
-        presentation: 'message',
-        ...fields,
-      });
-      try { await publish(); }
-      catch (error) {
-        // Only a reclaimed/requeued execution warrants another publication.
-        // Idempotent server delivery keeps uncertain first success from doubling.
-        if (!(error instanceof DaemonApiError) || error.status !== RECLAIMED_REPLY_REFUSAL.status ||
-            error.message !== RECLAIMED_REPLY_REFUSAL.message) throw error;
-        console.error(`[thin-core] ${this.options.label} reply was not delivered; retrying once:`, error.message);
-        await publish();
-      }
-      onReplyPosted?.();
-    }
-    // The retract stays after the reply: a late draft write must never put an
-    // obsolete snapshot back under a message the reader has already been given.
-    await this.retract();
   }
 }

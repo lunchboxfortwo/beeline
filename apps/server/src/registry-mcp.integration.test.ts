@@ -10,7 +10,7 @@ const ROOM = '22222222-2222-4222-8222-222222222222';
 const OWNER = 'a'.repeat(64);
 const HELPER = 'b'.repeat(64);
 const COMMAND = 'registry-connect-command';
-const REQUEST = 'registry-connect-request';
+const REQUEST = COMMAND;
 const GENERATION = 'registry-connect-generation';
 
 describe('Registry MCP connection orchestration', () => {
@@ -48,10 +48,9 @@ describe('Registry MCP connection orchestration', () => {
     await database.query(
       `INSERT INTO agent_commands(
          id,room_id,agent_id,source_message_id,turn_request_id,action,reason,
-         root_command_id,root_source_message_id,agent_depth,state,generation_id,lease_expires_at
-       ) VALUES($1,$2,$3,'registry-source',$4,'input','human_tag',$1,'registry-source',0,
-         'claimed',$5,now()+interval '10 minutes')`,
-      [COMMAND, ROOM, HELPER, REQUEST, GENERATION],
+         root_command_id,root_source_message_id,agent_depth,state) VALUES($1,$2,$3,'registry-source',$4,'input','human_tag',$1,'registry-source',0,
+         'pending')`,
+      [COMMAND, ROOM, HELPER, REQUEST],
     );
     exactFetches = vi.fn(async () =>
       Response.json({
@@ -84,15 +83,7 @@ describe('Registry MCP connection orchestration', () => {
 
   afterEach(async () => database.close());
 
-  const connectInput = (handoffToOwner = false) => ({
-    roomId: ROOM,
-    requestId: REQUEST,
-    generationId: GENERATION,
-    serverName: 'app.linear/linear',
-    version: '1.0.1',
-    reason: 'Create the requested Linear issue',
-    ...(handoffToOwner ? { handoffToOwner: true } : {}),
-  });
+  const connectInput = (handoffToOwner = false) => ({ roomId: ROOM, requestId: REQUEST, serverName: 'app.linear/linear', version: '1.0.1', reason: 'Create the requested Linear issue', ...(handoffToOwner ? { handoffToOwner: true } : {}) });
 
   it('reuses one pinned row, deduplicates both handoff paths, resumes, and mounts without a new gate', async () => {
     const first = await daemon.execute('connectMcpServer', connectInput(), HELPER);
@@ -179,18 +170,7 @@ describe('Registry MCP connection orchestration', () => {
     );
     await daemon.execute(
       'postSquireApproval',
-      {
-        roomId: ROOM,
-        requestId: REQUEST,
-        generationId: GENERATION,
-        tool: 'operate_login',
-        title: 'Continue Linear sign-in',
-        detail: 'Approve the provider sign-in in the shared browser session.',
-        approvalUrl: 'https://squire.example/approval/one',
-        approvalId: 'squire-attempt-two',
-        linkKind: 'approval',
-        signInUrl: 'https://mcp.linear.app/authorize?state=opaque-two',
-      },
+      { roomId: ROOM, requestId: REQUEST, tool: 'operate_login', title: 'Continue Linear sign-in', detail: 'Approve the provider sign-in in the shared browser session.', approvalUrl: 'https://squire.example/approval/one', approvalId: 'squire-attempt-two', linkKind: 'approval', signInUrl: 'https://mcp.linear.app/authorize?state=opaque-two' },
       HELPER,
     );
     await daemon.execute('connectMcpServer', connectInput(true), HELPER);
@@ -226,18 +206,7 @@ describe('Registry MCP connection orchestration', () => {
     );
     await daemon.execute(
       'postSquireApproval',
-      {
-        roomId: ROOM,
-        requestId: REQUEST,
-        generationId: GENERATION,
-        tool: 'fetch_credential',
-        title: 'Credential access approval',
-        detail: 'Reveal an unrelated saved credential.',
-        approvalUrl: 'https://squire.example/approval/two',
-        approvalId: 'squire-unrelated',
-        linkKind: 'approval',
-        signInUrl: 'https://unrelated.example/sign-in',
-      },
+      { roomId: ROOM, requestId: REQUEST, tool: 'fetch_credential', title: 'Credential access approval', detail: 'Reveal an unrelated saved credential.', approvalUrl: 'https://squire.example/approval/two', approvalId: 'squire-unrelated', linkKind: 'approval', signInUrl: 'https://unrelated.example/sign-in' },
       HELPER,
     );
     await daemon.execute('connectMcpServer', connectInput(true), HELPER);
@@ -274,7 +243,7 @@ describe('Registry MCP connection orchestration', () => {
       (
         await database.query(
           `SELECT 1 FROM agent_commands
-       WHERE room_id=$1 AND agent_id=$2 AND action='resume' AND parent_command_id=$3`,
+       WHERE room_id=$1 AND agent_id=$2 AND action='input' AND parent_command_id=$3`,
           [ROOM, HELPER, COMMAND],
         )
       ).rowCount,
@@ -381,7 +350,7 @@ describe('Registry MCP connection orchestration', () => {
     expect(lines.rows[0]!.event_url).toBe('https://mcp.linear.app/authorize?state=resume-one');
     const resume = await database.query(
       `SELECT 1 FROM agent_commands
-       WHERE agent_id=$1 AND action='resume' AND parent_command_id=$2`,
+       WHERE agent_id=$1 AND action='input' AND parent_command_id=$2`,
       [HELPER, COMMAND],
     );
     expect(resume).toHaveProperty('rowCount', 1);
@@ -403,7 +372,7 @@ describe('Registry MCP connection orchestration', () => {
     expect(
       (
         await database.query(
-          `SELECT 1 FROM agent_commands WHERE action='resume' AND parent_command_id=$1`,
+          `SELECT 1 FROM agent_commands WHERE action='input' AND parent_command_id=$1`,
           [COMMAND],
         )
       ).rowCount,
@@ -420,7 +389,7 @@ describe('Registry MCP connection orchestration', () => {
       `SELECT state FROM agent_commands WHERE id=$1`,
       [COMMAND],
     );
-    expect(command.rows[0]?.state).toBe('claimed');
+    expect(command.rows[0]?.state).toBe('pending');
     expect(
       (
         await database.query(`SELECT 1 FROM messages WHERE author_id=$1 AND room_id=$2`, [
@@ -432,12 +401,7 @@ describe('Registry MCP connection orchestration', () => {
     await expect(
       daemon.execute(
         'postRoomMessage',
-        {
-          roomId: ROOM,
-          requestId: REQUEST,
-          generationId: GENERATION,
-          text: 'Continuing Linear setup',
-        },
+        { roomId: ROOM, requestId: REQUEST, text: 'Continuing Linear setup' },
         HELPER,
       ),
     ).resolves.toMatchObject({ id: expect.any(String) });

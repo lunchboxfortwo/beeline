@@ -1,3 +1,4 @@
+import { WallRefusal } from '@beeline/api-contract/daemon';
 import {postgresErrorContext} from './postgres-error.js';
 import { ExpectedRefusalError } from './command-refusal.js';
 import { GitHubCheckPermissionError, GitHubHttpError, ProductionReleaseBusyError } from '@beeline/auth/github';
@@ -136,7 +137,7 @@ export async function sentryAccount(
 }
 
 export function captureServerError(error: unknown, tags: Record<string, string> = {}): void {
-  if (error instanceof ExpectedRefusalError) return;
+  if (error instanceof ExpectedRefusalError || error instanceof WallRefusal && error.status < 500) return;
   if (error instanceof ProductionReleaseBusyError) return;
   if (error instanceof GitHubCheckPermissionError) return;
   if (error instanceof GitHubHttpError && error.rateLimited) return;

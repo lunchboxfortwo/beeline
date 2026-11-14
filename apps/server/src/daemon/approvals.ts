@@ -91,7 +91,7 @@ import type { SqlDatabase } from '../database.js';
           ...(context.agent_avatar ? { avatar: context.agent_avatar } : {}) },
         owner,
         tool: 'Link', title, detail, approvalUrl, approvalId: requestId,
-        ...(ctx.authorizedCommand ? { commandId: ctx.authorizedCommand.id, generationId: ctx.authorizedCommand.generation_id } : {}),
+        ...(ctx.authorizedCommand ? { commandId: ctx.authorizedCommand.id } : {}),
         linkKind: 'approval',
         expiresAt: Date.now() + 24 * 60 * 60_000,
         ...source,
@@ -201,7 +201,7 @@ import type { SqlDatabase } from '../database.js';
         ...(input.approvalId ? { approvalId: input.approvalId.trim() } : {}),
         expiresAt: input.expiresAt ?? Date.now() + 24 * 60 * 60_000,
         linkKind: input.linkKind,
-        ...(ctx.authorizedCommand ? { commandId: ctx.authorizedCommand.id, generationId: ctx.authorizedCommand.generation_id } : {}),
+        ...(ctx.authorizedCommand ? { commandId: ctx.authorizedCommand.id } : {}),
         ...source,
       },
     });

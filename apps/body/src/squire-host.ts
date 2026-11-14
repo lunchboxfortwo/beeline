@@ -10,24 +10,24 @@
  */
 import { spawn } from 'node:child_process';
 import {
-  accessSync,
-  constants as fsConstants,
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  rmSync,
-  statSync,
-  symlinkSync,
-  writeFileSync,
+accessSync,
+existsSync,
+constants as fsConstants,
+lstatSync,
+mkdirSync,
+mkdtempSync,
+readFileSync,
+realpathSync,
+renameSync,
+rmSync,
+statSync,
+symlinkSync,
+writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { createConnection } from 'node:net';
 import { homedir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename,dirname,join,resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runSquireBrokerLink } from './squire-broker-link.js';
 import { reclaimSquireBrokerSockets } from './squire-broker-squatter.js';
@@ -113,16 +113,6 @@ export function writeSquireBrokerUnitMarker(home: string): string {
   };
   writeFileSync(path, `${JSON.stringify(marker, null, 2)}\n`, { mode: 0o600 });
   return path;
-}
-
-/**
- * Bind-mount the host broker directory read-write, and only for an agent whose
- * grant actually rewrites a Squire route: the broker socket and the logged-in
- * Chrome profile live there, so an unrelated `mcp` grant must not reach them.
- */
-export function squireHostBindPaths(home: string, squireRouteGranted: boolean): string[] {
-  if (!squireRouteGranted) return [];
-  return [ensureSquireHostDir(home).dir];
 }
 
 /**

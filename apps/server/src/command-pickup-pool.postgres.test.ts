@@ -36,7 +36,7 @@ async function burst(database: SqlDatabase): Promise<string[]> {
     try {
       await database.transaction(async (db) => {
         await lockAgentCommandQueue(db, corner, agent);
-        await readAgentCommands(db, corner, agent);
+        await readAgentCommands(db, agent, corner);
       });
       return '';
     } catch (error) {
@@ -72,7 +72,7 @@ describe.skipIf(!url)('command pickup and membership reads at the production bur
         FROM generate_series(1,8) n`, [corner, agent]);
       const offered = await jobs.transaction(async (db) => {
         await lockAgentCommandQueue(db, corner, agent);
-        return readAgentCommands(db, corner, agent);
+        return readAgentCommands(db, agent, corner);
       });
       expect(offered.commands.filter(command => command.reason === 'human_tag').length).toBe(8);
 

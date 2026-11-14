@@ -188,7 +188,7 @@ export async function vaultSaveHttp(
             agentId: row.card.agentId,
             sourceMessageId: line.id,
             reason: 'vault_saved',
-            action: 'resume',
+            resume: true,
             parent,
             retainDepth: true,
           });

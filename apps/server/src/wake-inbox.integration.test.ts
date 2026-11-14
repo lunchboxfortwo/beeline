@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { randomBytes } from 'node:crypto';
 import { setImmediate as yieldToDatabase } from 'node:timers/promises';
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
@@ -17,13 +18,10 @@ const ROOM = '22222222-2222-4222-8222-222222222222';
 const OTHER = '33333333-3333-4333-8333-333333333333';
 let db: PgliteDatabase, daemon: DaemonService, phone: PhoneService, humanCommand: AgentCommand;
 const id = () => randomBytes(32).toString('hex');
-const authority = (command: AgentCommand) => ({ roomId: command.roomId,
-  requestId: command.turnRequestId, generationId: 'inbox-proof' });
+const authority = (command: AgentCommand) => ({ roomId: command.roomId, requestId: command.turnRequestId });
 const inbox = (database: SqlDatabase = db, roomId = ROOM, agentId = AGENT) =>
-  readAgentCommands(database, roomId, agentId).then(result => result.commands);
-const claim = (command: AgentCommand) => daemon.execute('claimAgentCommand', {
-  roomId: command.roomId, commandId: command.id, generationId: 'inbox-proof',
-}, command.agentId);
+  readAgentCommands(database, agentId, roomId).then(result => result.commands);
+const claim = (command: AgentCommand) => startQueuedCommand(daemon, { roomId: command.roomId, commandId: command.id }, command.agentId);
 async function wake(text: string, reason = 'corner_brief', roomId = ROOM, agentId = AGENT) {
   return createAgentCommand(db, { id: id(), roomId, agentId, sourceMessageId: null, reason,
     privatePayload: { text, authorId: WORKER, fromRoomId: roomId, kind: 'lifecycle' } });

@@ -1,3 +1,4 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { randomUUID } from 'node:crypto';
 import { Pool, type QueryResultRow } from 'pg';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -5,7 +6,7 @@ import type { GitHubAppClient, GitHubOAuthClient } from '@beeline/auth/github';
 import { migrate, PostgresDatabase, type SqlDatabase } from './database.js';
 import { PgliteDatabase, insertCornerFacts } from './test-support.js';
 import { GitHubOperations } from './github-operations.js';
-import { claimAgentCommand, createAgentCommand } from './agent-command.js';
+import { createAgentCommand } from './agent-command.js';
 import { DaemonService } from './daemon-service.js';
 import { PhoneService } from './phone-service.js';
 import { LiveHub } from './live.js';
@@ -75,7 +76,7 @@ beforeEach(async () => {
     }) });
   const command = await createAgentCommand(db, { roomId: C, agentId: A, sourceMessageId: null, reason: 'system' });
   requestId = command!.turn_request_id;
-  await db.transaction(tx => claimAgentCommand(tx, C, A, command!.id, 'generation'));
+  await db.transaction(tx => startQueuedTurn(tx, C, A, command!.id));
 }, 60_000);
 afterEach(async () => { await close?.(); });
 
@@ -85,7 +86,7 @@ function operations(database = db) {
 
 async function assertArchived(stoppedAgent = A, merged = true) {
   expect((await db.query(`SELECT 1 FROM rooms WHERE id=$1 AND archived_at IS NOT NULL`, [C])).rowCount).toBe(1);
-  expect((await db.query(`SELECT 1 FROM agent_commands WHERE room_id=$1 AND action='stop' AND agent_id=$2`, [C,stoppedAgent])).rowCount).toBe(1);
+  expect((await db.query(`SELECT 1 FROM agent_commands WHERE room_id=$1 AND action='stop' AND agent_id=$2`, [C,stoppedAgent])).rowCount).toBe(0);
   expect((await db.query(`SELECT agent_id,turn_request_id FROM agent_commands
     WHERE room_id=$1 AND action='stop' GROUP BY agent_id,turn_request_id HAVING count(*)>1`, [C])).rowCount).toBe(0);
   expect((await db.query(`SELECT 1 FROM agent_commands WHERE room_id=$1 AND action IN ('input','resume') AND state IN ('pending','claimed')`, [C])).rowCount).toBe(0);
@@ -187,7 +188,7 @@ it.skipIf(!postgresUrl).each(['merge webhook', 'agent close', 'phone close'] as 
   'Reproduction MERGE-DEADLOCK-1: tagged final reply and %s both commit', async path => {
   if (path !== 'merge webhook') await db.query(`UPDATE corner_github_cache SET lifecycle=lifecycle-'pr' WHERE corner_id=$1`, [C]);
   const peer = await createAgentCommand(db, { roomId: C, agentId: B, sourceMessageId: null, reason: 'system' });
-  await db.transaction(tx => claimAgentCommand(tx, C, B, peer!.id, 'peer-generation'));
+  await db.transaction(tx => startQueuedTurn(tx, C, B, peer!.id));
   let releaseReply!: () => void, replyLocked!: () => void, cancellationStarted!: () => void;
   const resume = new Promise<void>(resolve => { releaseReply = resolve; });
   const locked = new Promise<void>(resolve => { replyLocked = resolve; });
@@ -202,7 +203,7 @@ it.skipIf(!postgresUrl).each(['merge webhook', 'agent close', 'phone close'] as 
         sqlErrors.push(error.code);
         throw error;
       });
-      if (!paused && sql.includes('turn_cancelled') && sql.includes('FOR UPDATE OF command')) {
+      if (!paused && sql.includes('FROM agent_commands item') && sql.includes('FOR UPDATE OF item')) {
         paused = true;
         replyLocked();
         await resume;
@@ -213,9 +214,7 @@ it.skipIf(!postgresUrl).each(['merge webhook', 'agent close', 'phone close'] as 
   });
   const hooked = wrap(db);
   const daemon = new DaemonService(hooked, new LiveHub());
-  const reply = daemon.execute('postRoomMessage', {
-    roomId: C, requestId, generationId: 'generation', text: '@peer finished the fix',
-  }, A);
+  const reply = daemon.execute('postRoomMessage', { roomId: C, requestId, text: '@peer finished the fix' }, A);
   await locked;
   const archive = path === 'merge webhook'
     ? operations(hooked).processWebhook('pull_request', event)

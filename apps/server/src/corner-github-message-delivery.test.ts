@@ -36,8 +36,8 @@ it.each(['blocked', 'failed', 'done', 'done-unregistered'] as const)('Reproducti
     await claim(report);
     await execute('order', { ...authority(report), address: opened.cornerId, text: 'Continue with local proof' }, RUBY);
     expect((await commands(opened.cornerId, WORKER)).find(command => command.reason === 'order')?.source.body).toBe('Continue with local proof');
-    expect(unavailable).toHaveBeenCalledTimes(scenario === 'done-unregistered' ? 2 : 3);
-    expect(warning).toHaveBeenCalledTimes(scenario === 'done-unregistered' ? 2 : 3);
+    expect(unavailable).not.toHaveBeenCalled();
+    expect(warning).not.toHaveBeenCalled();
   } finally {
     Object.assign(rootFixture.daemon, { github: previous });
     warning.mockRestore();

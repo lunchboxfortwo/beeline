@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import type { readFileSync } from 'node:fs';
 
 import type { runInNewContext } from 'node:vm';
@@ -379,27 +380,19 @@ export function fixtureScope2() {
       reason: 'corner_objective',
     });
     const [worker] = (await rootFixture.daemon.execute('getAgentCommands', { roomId: C }, A)).commands;
-    await rootFixture.daemon.execute(
-      'claimAgentCommand',
-      { roomId: C, commandId: worker!.id, generationId: 'g1' },
-      A,
-    );
+    await startQueuedCommand(rootFixture.daemon, { roomId: C, commandId: worker!.id }, A);
     await rootFixture.daemon.execute(
       'postAgentTurnReceipt',
-      {
-        roomId: C,
-        agentId: A,
-        requestId: worker!.turnRequestId,
-        generationId: 'g1',
-        status: 'working',
-      },
+      { roomId: C, agentId: A, requestId: worker!.turnRequestId, status: 'working' },
       A,
     );
     await rootFixture.daemon.execute(
       'postRoomMessage',
-      { roomId: C, requestId: worker!.turnRequestId, generationId: 'g1', text },
+      { roomId: C, requestId: worker!.turnRequestId, text },
       A,
     );
+    // Publication already finished; now inspect the existing optional lifecycle worker's result.
+    await rootFixture.db.backgroundWork.drain();
     const lifecycle = (
       await rootFixture.db.query<{ lifecycle: Record<string, unknown> & { pr: Record<string, unknown> } }>(
         `SELECT lifecycle FROM corner_facts WHERE corner_id=$1`,

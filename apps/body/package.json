@@ -25,9 +25,7 @@
     "body": "node --import tsx src/cli.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit --incremental --tsBuildInfoFile .typecheck.tsbuildinfo",
-    "test": "vitest run",
-    "measure:turns": "node --import tsx scripts/measure-turn-phases.ts",
-    "measure:fast-resume": "node --import tsx scripts/measure-fast-resume.ts"
+    "test": "vitest run"
   },
   "dependencies": {
     "@beeline/api-contract": "*",

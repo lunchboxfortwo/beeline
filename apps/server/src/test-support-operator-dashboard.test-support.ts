@@ -2,39 +2,29 @@ import { phoneFetch } from '../../../tests/helpers/phone-operation.js';
 
 import type { AddressInfo } from 'node:net';
 
-import type { randomUUID } from 'node:crypto';
 
-import { recordSigninFunnelEvent } from './signin-funnel.js';
 
-import { createSigninFunnelClient } from '@beeline/api-contract/signin-funnel-client';
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach,beforeEach,vi } from 'vitest';
 
-import { PgliteDatabase, migratedDatabase } from './test-support.js';
+import { PgliteDatabase,migratedDatabase } from './test-support.js';
 
 import { createBeelineServer } from './server.js';
 
-import { dashboardHealth, dashboardOps } from './operator-dashboard.js';
 
-import { dashboardOverview } from './operator-dashboard-overview.js';
 
-import { REVIEW_IDENTITY_ID } from './review-access.js';
 
-import { QueryWindow } from './query-profile.js';
 
-import type { SqlDatabase } from './database.js';
 
 import type { TokenAuth } from './auth.js';
 
 import type { PhoneService } from './phone-service.js';
 
-import { claimAgentCommand, createAgentCommand } from './agent-command.js';
 
 import { DaemonService } from './daemon-service.js';
 
 import { LiveHub } from './live.js';
 
-import { dashboardCoreMetrics } from './operator-dashboard-core-metrics.js';
 
 
 export const workspace = '10000000-0000-4000-8000-000000000801';
@@ -200,6 +190,7 @@ export function fixtureScope3() {
   async function person(n: number, platform: 'ios' | 'android', createdAt?: string, ws = workspace) {
     await identity(n, 'human', createdAt);
     await join(n, ws);
+    await rootFixture.db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) SELECT workspace_id,id,$2,'member' FROM rooms WHERE id=$1 AND workspace_id=$3 ON CONFLICT DO NOTHING`, [room,coreId(n),ws]);
     await device(n, platform);
   }
 
@@ -294,22 +285,23 @@ say,
 repoCard,
 };
 }
-export { phoneFetch } from '../../../tests/helpers/phone-operation.js';
-export { AddressInfo } from 'node:net';
-export { randomUUID } from 'node:crypto';
-export { recordSigninFunnelEvent } from './signin-funnel.js';
 export { createSigninFunnelClient } from '@beeline/api-contract/signin-funnel-client';
-export { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-export { PgliteDatabase, migratedDatabase } from './test-support.js';
-export { createBeelineServer } from './server.js';
-export { dashboardHealth, dashboardOps } from './operator-dashboard.js';
-export { dashboardOverview } from './operator-dashboard-overview.js';
-export { REVIEW_IDENTITY_ID } from './review-access.js';
-export { QueryWindow } from './query-profile.js';
-export { claimAgentCommand, createAgentCommand } from './agent-command.js';
+export { randomUUID } from 'node:crypto';
+export { AddressInfo } from 'node:net';
+export { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
+export { phoneFetch } from '../../../tests/helpers/phone-operation.js';
+export { createAgentCommand } from './agent-command.js';
+export type { TokenAuth } from './auth.js';
 export { DaemonService } from './daemon-service.js';
+export type { SqlDatabase } from './database.js';
 export { LiveHub } from './live.js';
 export { dashboardCoreMetrics } from './operator-dashboard-core-metrics.js';
-export type { SqlDatabase } from './database.js';
-export type { TokenAuth } from './auth.js';
+export { dashboardOverview } from './operator-dashboard-overview.js';
+export { dashboardHealth,dashboardOps } from './operator-dashboard.js';
 export type { PhoneService } from './phone-service.js';
+export { QueryWindow } from './query-profile.js';
+export { REVIEW_IDENTITY_ID } from './review-access.js';
+export { createBeelineServer } from './server.js';
+export { recordSigninFunnelEvent } from './signin-funnel.js';
+export { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
+export { PgliteDatabase,migratedDatabase } from './test-support.js';

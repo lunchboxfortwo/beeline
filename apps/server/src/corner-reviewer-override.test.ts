@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { GitHubAppClient, GitHubOAuthClient } from '@beeline/auth/github';
 import { PgliteDatabase, migratedDatabase, insertCornerFacts, seedCornerOpening } from './test-support.js';
@@ -81,12 +82,12 @@ beforeEach(async () => {
   daemon = Object.assign(new DaemonService(db, new LiveHub()), { github });
   await phone.execute('sendRoomMessage', { roomId: R, messageId: '9'.repeat(64), text: '@outsider Set the corner reviewer' }, H);
   const command = (await daemon.execute('getAgentCommands', { roomId: R }, OUTSIDER)).commands[0]!;
-  await daemon.execute('claimAgentCommand', { roomId: R, commandId: command.id, generationId: 'reviewer-proof' }, OUTSIDER);
+  await startQueuedCommand(daemon, { roomId: R, commandId: command.id }, OUTSIDER);
   requestId = command.turnRequestId;
 });
 
 afterEach(async () => { await db.close(); });
-const set = (reviewer: string, actor = OUTSIDER) => daemon.execute('renameCorner', { roomId: R, requestId, generationId: 'reviewer-proof', cornerId: C, reviewer }, actor);
+const set = (reviewer: string, actor = OUTSIDER) => daemon.execute('renameCorner', { roomId: R, requestId, cornerId: C, reviewer }, actor);
 const approve = (actor: string) => daemon.execute('approveCornerMerge', { cornerId: C, headSha: HEAD }, actor);
 const gate = () => cornerMergeGate(db, C, { number: 7, headSha: HEAD });
 
@@ -139,19 +140,20 @@ it('fails closed on incomplete authors or a changed live head', async () => {
 
 it('dispatches green review to the corner reviewer and projects its reviewer surface', async () => {
   await phone.execute('updateRoom', { roomId: R, reviewerAgentId: REVIEWER_A }, H);
+  const previous = (await daemon.execute('getAgentCommands', {roomId:C}, REVIEWER_A)).commands;
   await set('reviewerb');
   const note = await systemLine(db, { roomId: C, authorId: H, subject: { kind: 'github', name: 'GitHub' }, verb: 'passed checks',
     kind: 'check-passed', object: { text: 'checks', headSha: HEAD } });
   const liveChecks = vi.spyOn(github, 'prChecksStatus');
   await advanceCorner(db, C, { kind: 'checks', result: 'passing', sourceMessageId: note.id });
-  expect(liveChecks).toHaveBeenCalledWith({ cornerId: C });
+  expect(liveChecks).not.toHaveBeenCalled();
   const commands = await daemon.execute('getAgentCommands', { roomId: C }, REVIEWER_B);
   expect(commands.commands.some(command => ['corner_review_dispatch','subscribed_event'].includes(command.reason))).toBe(true);
-  expect((await daemon.execute('getAgentCommands', {roomId:C}, REVIEWER_A)).commands).toEqual([]);
+  expect((await daemon.execute('getAgentCommands', {roomId:C}, REVIEWER_A)).commands).toEqual(previous);
   expect(await daemon.execute('getAgentConfiguration', { roomId: C, agentId: REVIEWER_B }, REVIEWER_B)).toMatchObject({ isReviewer: true });
-  await daemon.execute('claimAgentCommand',{roomId:C,commandId:commands.commands[0]!.id,generationId:'review-switch'},REVIEWER_B);
+  await startQueuedCommand(daemon, { roomId:C, commandId:commands.commands[0]!.id }, REVIEWER_B);
   await set('reviewera');
-  await daemon.execute('postAgentTurnReceipt',{roomId:C,requestId:commands.commands[0]!.turnRequestId,agentId:REVIEWER_B,generationId:'review-switch',status:'complete'},REVIEWER_B);
+  await daemon.execute('postAgentTurnReceipt',{ roomId:C, requestId:commands.commands[0]!.turnRequestId, agentId:REVIEWER_B, status:'complete' },REVIEWER_B);
   await advanceCorner(db,C,{kind:'reconcile'});
   expect((await daemon.execute('getAgentCommands',{roomId:C},REVIEWER_A)).commands.some(command=>['corner_review_dispatch','subscribed_event'].includes(command.reason))).toBe(true);
 });

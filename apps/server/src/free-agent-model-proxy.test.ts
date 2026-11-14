@@ -57,8 +57,8 @@ describe('server-owned model execution and accounting', () => {
     );
     await db.query(`INSERT INTO rooms(id,workspace_id,created_by,name,visibility) VALUES($1,$2,$3,'General','public')`, [ROOM, WORKSPACE, OWNER]);
     await db.query(`INSERT INTO agent_commands(id,room_id,agent_id,turn_request_id,action,reason,
-      root_command_id,root_source_message_id,agent_depth,state,claimed_at,lease_expires_at)
-      VALUES('turn',$1,$2,'request','input','human_tag','turn','source',0,'claimed',now(),now()+interval '90 seconds')`, [ROOM, AGENT]);
+      root_command_id,root_source_message_id,agent_depth,state)
+      VALUES('turn',$1,$2,'request','input','human_tag','turn','source',0,'pending')`, [ROOM, AGENT]);
     upstream = [];
     reply = () =>
       Response.json({
@@ -120,11 +120,10 @@ describe('server-owned model execution and accounting', () => {
     expect(commands.commands).toHaveLength(1);
     const command = commands.commands[0]!;
     expect(command.source.id).toBe(sent.messageId);
-    const claimed = await daemon.execute('claimAgentTurn', { roomId, commandId: command.id, generationId: 'model-generation' },
-      AGENT, { connectionId, epoch });
+    const claimed=await daemon.execute('startAgentTurn',{roomId,requestId:command.turnRequestId},AGENT);
     expect(claimed).not.toHaveProperty('modelCredential');
-    expect((await db.query('SELECT state,turn_owner_connection_id FROM agent_commands WHERE id=$1', [command.id])).rows)
-      .toEqual([{ state: 'claimed', turn_owner_connection_id: connectionId }]);
+    expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [command.id])).rows)
+      .toEqual([{state:'pending'}]);
     const response = await call({ messages: [{ role: 'user', content: 'say hello' }] });
     expect({ status: response.status, body: await response.json() }).toMatchObject({
       status: 200, body: { choices: [{ message: { content: 'done' } }] },
@@ -134,23 +133,23 @@ describe('server-owned model execution and accounting', () => {
 
     // A replacement helper registration leaves the turn claimed for that helper to resume.
     await claimAgentConnection(db, live, AGENT, {}, { connectionId: 'replacement-helper', instanceId: 'model-helper' });
-    expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [command.id])).rows).toEqual([{ state: 'claimed' }]);
+    expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [command.id])).rows).toEqual([{ state: 'pending' }]);
   });
 
   let turnSequence=0;
   const newTurn=async()=>{
     const id='request-'+(++turnSequence);
-    await db.query(`INSERT INTO agent_commands(id,room_id,agent_id,turn_request_id,action,reason,root_command_id,root_source_message_id,agent_depth,state,claimed_at)
-      VALUES($1,$2,$3,$1,'input','human_tag',$1,'source',0,'claimed',clock_timestamp())`,[id,ROOM,AGENT]);
+    await db.query(`INSERT INTO agent_commands(id,room_id,agent_id,turn_request_id,action,reason,root_command_id,root_source_message_id,agent_depth,state)
+      VALUES($1,$2,$3,$1,'input','human_tag',$1,'source',0,'pending')`,[id, ROOM, AGENT]);
   };
 
-  it('a token refusal ends the current turn and leaves fresh requests available for admission',async()=>{
+  it('a token refusal leaves the item queued and permits a later valid model request',async()=>{
     config={...CONFIG,dailyTokenCap:3_000_000,firstDayTokenCap:3_000_000,lifetimeTokenCap:0};
     await db.query('INSERT INTO free_agent_usage(owner_id,day,tokens) VALUES($1,current_date,1410000)',[OWNER]);
     const response=await call({messages:[{role:'user',content:'x'.repeat(5_000_000)}],max_tokens:1024});
     expect(response.status).toBe(403);
     expect((await response.json()).error.message).toContain('1.41M of 3M');
-    expect((await db.query("SELECT state FROM agent_commands WHERE id='turn'")).rows).toEqual([{state:'complete'}]);
+    expect((await db.query("SELECT state FROM agent_commands WHERE id='turn'")).rows).toEqual([{state:'pending'}]);
     await newTurn();
     expect((await call({messages:[]})).status).toBe(200);
     expect(upstream).toHaveLength(1);
@@ -163,8 +162,8 @@ describe('server-owned model execution and accounting', () => {
     await db.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Luna')`, [luna]);
     await db.query(`WITH workspace AS (SELECT $2::uuid) INSERT INTO free_agents(agent_id,owner_id,sealed_keys,model_token_hash,state,model) VALUES($1,$3,'sealed',$4,'running','openai/gpt-6-luna')`, [luna, WORKSPACE, OWNER, tokenHash(lunaToken)]);
     await db.query(`INSERT INTO agent_commands(id,room_id,agent_id,turn_request_id,action,reason,
-      root_command_id,root_source_message_id,agent_depth,state,claimed_at,lease_expires_at)
-      VALUES('luna-turn',$1,$2,'luna-request','input','human_tag','luna-turn','source',0,'claimed',now(),now()+interval '90 seconds')`, [ROOM, luna]);
+      root_command_id,root_source_message_id,agent_depth,state)
+      VALUES('luna-turn',$1,$2,'luna-request','input','human_tag','luna-turn','source',0,'pending')`, [ROOM, luna]);
     config = { ...CONFIG, dailyTokenCap: 10_000, firstDayTokenCap: 10_000 };
     for (const token of [TOKEN, lunaToken]) {
       const response = await call({ model: 'attacker/model', messages: [{ role: 'user', content: 'Hello' }], max_tokens: 50 }, token);
@@ -333,7 +332,7 @@ describe('server-owned model execution and accounting', () => {
     expect((await call({ messages: [] })).status).toBe(403);
     expect(upstream).toEqual([]);
     expect(await freeAgentAllowance(db, OWNER, new Date())).toEqual({ today: 0, lifetime: 0 });
-    await db.query(`UPDATE agent_commands SET state='claimed'`);
+    await db.query(`UPDATE agent_commands SET state='pending'`);
     expect((await call({ messages: [] })).status).toBe(200);
     expect(upstream).toHaveLength(1);
     console.log('Demonstrated FREE-ABUSE-1: outside turn HTTP 403, zero upstream calls and charge; live turn HTTP 200.');
@@ -386,11 +385,11 @@ describe('server-owned model execution and accounting', () => {
   });
 
   it('ignores obsolete execution clocks while the invocation remains current',async()=>{
-    await db.query("UPDATE agent_commands SET lease_expires_at=now()-interval '1 second'");
+    await db.query("UPDATE agent_commands SET created_at=now()-interval '1 day'");
     const live=await call({messages:[]});expect(live.status).toBe(200);await live.text();
-    await db.query("UPDATE agent_commands SET claimed_at=now()-interval '16 minutes'");
+    await db.query("UPDATE agent_commands SET created_at=now()-interval '2 days'");
     expect((await call({messages:[]})).status).toBe(200);
-    expect((await db.query("SELECT state FROM agent_commands WHERE id='turn'")).rows).toEqual([{state:'claimed'}]);
+    expect((await db.query("SELECT state FROM agent_commands WHERE id='turn'")).rows).toEqual([{state:'pending'}]);
     expect(upstream).toHaveLength(2);
   });
 

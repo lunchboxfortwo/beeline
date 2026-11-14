@@ -1,3 +1,4 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { listRoomWorkflowRuns } from './workflow-run-views.js';
 import { DaemonService } from './daemon-service.js';
 import { LiveHub } from './live.js';
@@ -5,7 +6,7 @@ import { seedCornerOpening, describedWorkflow, migratedDatabase, insertCornerFac
 import { randomBytes } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PgliteDatabase } from './test-support.js';
-import { createAgentCommand, claimAgentCommand, readAgentCommands, type CommandRow } from './agent-command.js';
+import { createAgentCommand, readAgentCommands, type CommandRow } from './agent-command.js';
 import { advanceCorner } from './corner-lifecycle.js';
 import { PhoneService } from './phone-service.js';
 import { answerRoomChoice, postRoomChoice } from './room-choice.js';
@@ -539,7 +540,7 @@ describe('readWorkflowRun', () => {
 
 
 describe('optional workflow receipts end to end', () => {
-  it('stores a summary, sends the hint to the dispatched agent, and reads receipts through the phone', async () => {
+  it('stores summary and state hints with receipts in the workflow read', async () => {
     const contract = { ...TRIAGE, summary: 'Gather issues, request approval, and dispatch fixes.', handoffs: {
       ...TRIAGE.handoffs, pull: { ...TRIAGE.handoffs.pull, hint: 'the ranked issues' },
       approve: { ...TRIAGE.handoffs.approve, hint: 'the human decision' },
@@ -548,8 +549,6 @@ describe('optional workflow receipts end to end', () => {
     const { runId } = await startWorkflow(database, await command(CORNER, TRIAGER), {
       name: contract.name, roleBindings: { triager: TRIAGER },
     });
-    const inbox = await readAgentCommands(database, CORNER, TRIAGER);
-    expect(inbox.commands.some((entry) => entry.source.body.includes('Receipt hint for this state: the ranked issues'))).toBe(true);
     const receipt = { line: 'Ranked two issues.', refs: [
       { kind: 'file' as const, label: 'Issue list', url: 'https://beeline.test/issues.txt' },
     ] };
@@ -557,6 +556,7 @@ describe('optional workflow receipts end to end', () => {
     await handoff(database, await command(CORNER, TRIAGER), { runId, outcome: 'ranked', contents: {}, receipt: {} });
     const detail = await phone.execute('readWorkflowRun', { roomId: CORNER, runId }, OWNER);
     expect(detail.contract.summary).toBe(contract.summary);
+    expect(detail.contract.handoffs.pull?.hint).toBe('the ranked issues');
     expect(detail.history[1]?.receipt).toEqual({ ...receipt, exit: { gate: 'retry', actorId: TRIAGER } });
     expect(detail.history[2]?.receipt).toEqual({ exit: { gate: 'ranked', actorId: TRIAGER } });
     const choice = (await database.query<{ id: string; option_id: string }>(
@@ -606,7 +606,7 @@ describe('a workflow gate answer with a note', () => {
       [choiceId],
     );
     expect(stored.rows).toEqual([{ note: 'only the dropdown one, skip the rest' }]);
-    const inbox = await readAgentCommands(database, CORNER, TRIAGER);
+    const inbox = await readAgentCommands(database, TRIAGER, CORNER);
     const woken = inbox.commands.find((c) => c.source.systemEvent?.verb === 'picked');
     expect(woken?.source.body).toContain(
       'Their note with the answer: "only the dropdown one, skip the rest"',
@@ -622,7 +622,7 @@ describe('a workflow gate answer with a note', () => {
   it('answers exactly as before without a note, and treats a blank note as none', async () => {
     const { runId, choiceId, dispatch } = await openGate();
     await phone.execute('answerChoice', { choiceId, optionId: dispatch, note: '   ' }, OWNER);
-    const inbox = await readAgentCommands(database, CORNER, TRIAGER);
+    const inbox = await readAgentCommands(database, TRIAGER, CORNER);
     const woken = inbox.commands.find((c) => c.source.systemEvent?.verb === 'picked');
     expect(woken?.source.body).toBeDefined();
     expect(woken?.source.body).not.toContain('note');
@@ -681,13 +681,11 @@ describe('visit output through daemon completion and phone GET', () => {
       [roomId, TRIAGER, runId],
     )).rows[0]!;
     expect(pending).toBeDefined();
-    return claimAgentCommand(database, roomId, TRIAGER, pending.id, `generation-${pending.id}`);
+    await new DaemonService(database,new LiveHub()).execute('startAgentTurn',{roomId,requestId:pending.turn_request_id},TRIAGER);
+    return pending;
   }
   async function final(command: CommandRow, text: string) {
-    return new DaemonService(database, new LiveHub()).execute('postRoomMessage', {
-      roomId: command.room_id, requestId: command.turn_request_id,
-      generationId: command.generation_id!, text,
-    }, command.agent_id);
+    return new DaemonService(database, new LiveHub()).execute('postRoomMessage', { roomId: command.room_id, requestId: command.turn_request_id, text }, command.agent_id);
   }
   const read = (runId: string, viewer = OWNER, roomId = CORNER) =>
     phone.execute('readWorkflowRun', { roomId, runId }, viewer);
@@ -700,9 +698,7 @@ describe('visit output through daemon completion and phone GET', () => {
     const first = await wake(one);
     const second = await wake(two);
     const daemon = new DaemonService(database, new LiveHub());
-    await daemon.execute('postAgentDraft', { roomId: CORNER, turnId: first.turn_request_id,
-      requestId: first.turn_request_id, generationId: first.generation_id!,
-      text: 'Older chunk. Newest chunk.', latestChunk: 'Newest chunk.' }, TRIAGER);
+    await daemon.execute('postAgentDraft', { roomId: CORNER, turnId: first.turn_request_id, requestId: first.turn_request_id, text: 'Older chunk. Newest chunk.', latestChunk: 'Newest chunk.' }, TRIAGER);
     expect((await read(one)).history[0]).toMatchObject({ liveOutput: 'Newest chunk.',
       outputTurns: [`${TRIAGER}:${first.turn_request_id}`] });
     expect((await read(two)).history[0]!.liveOutput).toBeUndefined();
@@ -748,32 +744,9 @@ describe('visit output through daemon completion and phone GET', () => {
     const runId = await start(ROOM);
     const held = await wake(runId, ROOM);
     const daemon = new DaemonService(database, new LiveHub());
-    await daemon.execute('postAgentDraft', { roomId: ROOM, turnId: held.turn_request_id,
-      requestId: held.turn_request_id, generationId: held.generation_id!,
-      text: 'Accumulated text', latestChunk: 'Latest delta' }, TRIAGER);
+    await daemon.execute('postAgentDraft', { roomId: ROOM, turnId: held.turn_request_id, requestId: held.turn_request_id, text: 'Accumulated text', latestChunk: 'Latest delta' }, TRIAGER);
     expect((await read(runId, OWNER, ROOM)).history[0]!.liveOutput).toBe('Latest delta');
     expect((await read(runId, REVIEWER, ROOM)).history[0]!.liveOutput).toBe('Latest delta');
-  });
-
-  it('does not turn failed or cancelled output into a final; a reclaimed turn keeps its original visit', async () => {
-    const runId = await start();
-    const held = await wake(runId);
-    // Reclaim while this visit still owns the step; an advanced attempt cannot
-    // authorize a new execution merely to fill in its historical final reply.
-    await database.query(`UPDATE agent_commands SET state='pending',generation_id=NULL WHERE id=$1`, [held.id]);
-    await expect(final(held, 'Refused stale final')).rejects.toThrow();
-    const retried = await claimAgentCommand(database, CORNER, TRIAGER, held.id, 'retry-generation');
-    await handoff(database, retried, { runId, outcome: 'retry', contents: {} });
-    await final(retried, 'Recovered final.');
-    expect((await read(runId)).history[0]!.finalReply?.text).toBe('Recovered final.');
-    expect((await read(runId)).history[1]!.finalReply).toBeUndefined();
-    await database.query(`UPDATE agent_commands SET state='pending',generation_id=NULL WHERE id=$1`, [held.id]);
-    await expect(database.transaction(db => claimAgentCommand(db, CORNER, TRIAGER, held.id, 'late-generation')))
-      .rejects.toThrow('command claim conflict');
-    const current = await wake(runId);
-    await database.query(`UPDATE agent_turns SET status='cancelled' WHERE room_id=$1 AND request_id=$2`, [CORNER, current.turn_request_id]);
-    await expect(final(current, 'Cancelled final')).rejects.toThrow();
-    expect((await read(runId)).history[1]!.finalReply).toBeUndefined();
   });
 
   it('pins a valid resumed turn to its parent visit when its reply arrives after handoff', async () => {
@@ -781,10 +754,11 @@ describe('visit output through daemon completion and phone GET', () => {
     const held = await wake(runId);
     const source = await command(CORNER, TRIAGER);
     const resumed = (await createAgentCommand(database, { roomId: CORNER, agentId: TRIAGER,
-      sourceMessageId: source.source_message_id, action: 'resume', reason: 'resume',
-      parent: held, retainDepth: true, turnRequestId: held.turn_request_id }))!;
+      sourceMessageId: source.source_message_id, action: 'input', reason: 'resume',
+      parent: held, retainDepth: true }))!;
     await database.query(`UPDATE agent_commands SET state='complete' WHERE id=$1`, [held.id]);
-    const claimed = await claimAgentCommand(database, CORNER, TRIAGER, resumed.id, 'resume-generation');
+    await new DaemonService(database,new LiveHub()).execute('startAgentTurn',{roomId:CORNER,requestId:resumed.turn_request_id},TRIAGER);
+    const claimed=resumed;
     await handoff(database, claimed, { runId, outcome: 'retry', contents: {} });
     await final(claimed, 'Final after resuming the original turn.');
     const fresh = await read(runId);
@@ -792,25 +766,15 @@ describe('visit output through daemon completion and phone GET', () => {
     expect(fresh.history[1]!.finalReply).toBeUndefined();
   });
 
-  it('refuses a pending resume of a parent visit that has already advanced', async () => {
-    const runId = await start();
-    const held = await wake(runId);
-    await handoff(database, held, { runId, outcome: 'retry', contents: {} });
-    const source = await command(CORNER, TRIAGER);
-    const resumed = (await createAgentCommand(database, { roomId: CORNER, agentId: TRIAGER,
-      sourceMessageId: source.source_message_id, action: 'resume', reason: 'resume',
-      parent: held, retainDepth: true, turnRequestId: held.turn_request_id }))!;
-    await expect(database.transaction(db => claimAgentCommand(db, CORNER, TRIAGER, resumed.id, 'late-resume')))
-      .rejects.toThrow('command claim conflict');
-    expect((await readAgentCommands(database, CORNER, TRIAGER)).commands.some(wake => wake.id === resumed.id)).toBe(false);
-    await expect(final({ ...resumed, generation_id: 'late-resume' }, 'Stale resume final')).rejects.toThrow();
-    // Refusing a new stale wake does not revoke the already executing parent's
-    // output binding: its final still belongs to the visit it actually served.
-    await final(held, 'Original execution final.');
-    const fresh = await read(runId);
-    expect(fresh.history[0]!.finalReply?.text).toBe('Original execution final.');
-    expect(fresh.history[1]!.finalReply).toBeUndefined();
-  });
+  it('an accepted decision remains answerable after its parent visit advances',async()=>{
+  const runId=await start(),held=await wake(runId);await handoff(database,held,{runId,outcome:'retry',contents:{}});
+  const source=await command(CORNER,TRIAGER),before=await read(runId);
+  const resumed=(await createAgentCommand(database,{roomId:CORNER,agentId:TRIAGER,sourceMessageId:source.source_message_id,reason:'resume',parent:held,retainDepth:true}))!;
+  await database.transaction(db=>startQueuedTurn(db,CORNER,TRIAGER,resumed.id));
+  expect((await readAgentCommands(database,TRIAGER,CORNER)).commands.some(item=>item.id===resumed.id)).toBe(true);
+  await final(resumed,'The decision was received.');await final(held,'The earlier visit finished.');
+  const after=await read(runId);expect(after.state).toEqual(before.state);
+});
 
   it('keeps legacy revisions executable without inventing descriptions or replies', async () => {
     const runId = await start();

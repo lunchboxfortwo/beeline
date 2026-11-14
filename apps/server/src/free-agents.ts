@@ -479,13 +479,11 @@ interface RuntimeFacts {
   fly_machine_id: string | null;
   removed_at: Date | null;
   pending: boolean;
-  claimed: boolean;
   connector: boolean;
   connection_id: string | null;
 }
 const runtimeFactsSql = `SELECT f.fly_machine_id,f.removed_at,
   EXISTS(SELECT 1 FROM agent_commands c WHERE c.agent_id=f.agent_id AND c.state='pending') pending,
-  EXISTS(SELECT 1 FROM agent_commands c WHERE c.agent_id=f.agent_id AND c.state='claimed') claimed,
   ${connectorWorkSql('f.agent_id')} connector,
   (SELECT c.connection_id FROM agent_connections c JOIN live_server_instances server ON server.instance_id=c.instance_id
     WHERE c.agent_id=f.agent_id AND c.released_at IS NULL
@@ -577,7 +575,7 @@ export class FreeAgentService {
           WHERE agent_id=$1 AND runtime_operation_id=$2`, [agentId,operationId]);
         return;
       }
-      const work = initial.pending || initial.claimed || initial.connector;
+      const work = initial.pending || initial.connector;
       let machine = machineId ? await this.machines.read(machineId) : undefined;
       machine ??= await this.machines.find(agentId);
       if (!machine) {
@@ -595,8 +593,8 @@ export class FreeAgentService {
       }
       if (machine.id !== machineId) await adopt(machine.id);
       if (!['created','stopped','suspended','started'].includes(machine.state)) return;
-      // Never replace a claimed invocation or an in-progress connector install.
-      if (!sameMachineImage(machine.config.image,this.config.image) && !initial.claimed && !initial.connector) {
+      // Queued and running items survive a replacement; never replace an in-progress connector install.
+      if (!sameMachineImage(machine.config.image,this.config.image) && !initial.connector) {
         if (!await owns()) return;
         const before = machine;
         machine = await this.machines.update(machine,this.config.image);
@@ -618,7 +616,7 @@ export class FreeAgentService {
         // Image replacement does not make an idle connection busy. Re-read work
         // committed during provider observation/replacement before taking its snapshot.
         const current = (await this.database.query<RuntimeFacts>(runtimeFactsSql,[agentId])).rows[0];
-        if (current?.connection_id && !current.pending && !current.claimed && !current.connector && await owns()) {
+        if (current?.connection_id && !current.pending && !current.connector && await owns()) {
           // Work committed while the snapshot is being taken is read at handoff.
           await this.machines.suspend(machine.id);
           await this.machines.waitFor(machine.id,'suspended',60,machine.instance_id);
@@ -653,7 +651,7 @@ export class FreeAgentService {
     const machines = await this.machines.list();
     const rows = await this.database.query<{agent_id:string;fly_machine_id:string|null;needed:boolean}>(`SELECT agent_id,fly_machine_id,
       (${connectorWorkSql('f.agent_id')} OR EXISTS(SELECT 1 FROM agent_commands c
-        WHERE c.agent_id=f.agent_id AND c.state IN ('pending','claimed'))) needed FROM free_agents f`);
+        WHERE c.agent_id=f.agent_id AND c.state='pending')) needed FROM free_agents f`);
     const identities = new Set(rows.rows.map(row => row.agent_id));
     for (const machine of machines) {
       const agent = (machine.config.metadata as {beeline_agent?:string}|undefined)?.beeline_agent;

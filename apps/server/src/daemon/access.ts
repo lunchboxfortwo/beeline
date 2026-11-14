@@ -1,9 +1,9 @@
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
-import { cornerReviewerSql } from '../corner-reviewer.js';
 import { agentMemberMetadata } from '../agent-member-metadata.js';
 import { CornerAccessDatabase } from '../corner-access-database.js';
+import { cornerReviewerSql } from '../corner-reviewer.js';
 import type { DaemonContext } from './context.js';
-import { AccessDeniedError, id } from './values.js';
+import { AccessDeniedError } from './values.js';
 
 
   export async function daemonIdentity(ctx: DaemonContext, agentId: string) {
@@ -30,7 +30,7 @@ import { AccessDeniedError, id } from './values.js';
          WHERE corner_id=corner.id ORDER BY revision DESC LIMIT 1) brief
          ON brief.source_room_id=source.id
        JOIN agent_commands command ON command.room_id=corner.id AND command.agent_id=$2
-         AND command.state IN ('pending','claimed') AND command.review_context IS NOT NULL
+         AND command.state='pending' AND command.review_context IS NOT NULL
          AND command.review_context->>'purpose' IS NULL
          AND command.review_context->>'headSha'=fact.lifecycle->'pr'->>'headSha'
          AND command.review_context->'pullRequest'=fact.lifecycle->'pr'->'number'

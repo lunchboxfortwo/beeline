@@ -25,44 +25,6 @@ import {
 } from './mcp-route-class.js';
 import { squireFacadeLaunch, type SquireAgentScope } from './squire-host.js';
 
-export function grantedMcpServerNames(
-  grants: readonly { kind: string; target: string }[] | undefined,
-): string[] {
-  const names = new Set<string>();
-  for (const grant of grants ?? []) {
-    if (grant.kind !== 'mcp') continue;
-    const name = grant.target.trim();
-    if (name) names.add(name);
-  }
-  return [...names];
-}
-
-export function ungatedHostServers(
-  hostServers: readonly string[],
-  granted: readonly string[],
-): string[] {
-  const allowed = new Set(granted);
-  return hostServers.filter((name) => !allowed.has(name));
-}
-
-/** Mounting is not resource use. All Once grants are consumed by the per-call server gate. */
-export async function claimGrantedHostRoutes(result: unknown): Promise<string[]> {
-  if (!result || typeof result !== 'object' || !('grants' in result)) return [];
-  const grants = (result as { grants?: unknown }).grants;
-  if (!Array.isArray(grants)) return [];
-  return grantedMcpServerNames(
-    grants.flatMap((entry) => {
-      if (!entry || typeof entry !== 'object') return [];
-      const grant = entry as Record<string, unknown>;
-      return grant.kind === 'mcp' &&
-        typeof grant.target === 'string' &&
-        (grant.status === 'once' || grant.status === 'approved')
-        ? [{ kind: 'mcp', target: grant.target }]
-        : [];
-    }),
-  );
-}
-
 function recordValue(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -201,43 +163,6 @@ export function rewriteGrantedHostRoutes(
     );
   }
   return rewritten;
-}
-
-/** Session MCP wires for granted host routes, including code-owned Squire. */
-export function grantedHostRouteWires(
-  granted: readonly string[],
-  hostHome: string,
-  declarations: Record<string, Record<string, unknown>> = {},
-  resourceAuthFile?: string,
-  squireScope?: SquireAgentScope,
-): Array<{
-  name: string;
-  command: string;
-  args: string[];
-  env?: Array<{ name: string; value: string }>;
-}> {
-  const routes = rewriteGrantedHostRoutes(
-    declarations, granted, hostHome, resourceAuthFile, squireScope,
-  );
-  return Object.entries(routes).flatMap(([name, declaration]) => {
-    const command =
-      (typeof declaration.command === 'string' && declaration.command) ||
-      (typeof declaration.cmd === 'string' && declaration.cmd) ||
-      '';
-    if (!command) return [];
-    const envRecord = recordValue(declaration.env) ?? recordValue(declaration.envs) ?? {};
-    const env = Object.entries(envRecord).flatMap(([envName, value]) =>
-      typeof value === 'string' ? [{ name: envName, value }] : [],
-    );
-    return [
-      {
-        name,
-        command,
-        args: stringArray(declaration.args),
-        ...(env.length ? { env } : {}),
-      },
-    ];
-  });
 }
 
 export function mergeTomlHostRoutes(

@@ -1,3 +1,4 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import * as daemonWorkbench from './daemon/workbench.js';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -10,9 +11,9 @@ import { LiveHub } from './live.js';
 import { TokenAuth, tokenHash } from './auth.js';
 import { PhoneService } from './phone-service.js';
 import { createBeelineServer } from './server.js';
-import { createAgentCommand, claimAgentCommand } from './agent-command.js';
+import { createAgentCommand } from './agent-command.js';
 
-it('Reproduction R1 / ask-refusal: corner brief and ask refusals do not reach Sentry; unexpected faults still report', async () => {
+it('Reproduction R1 / ask-refusal: corner brief and choice refusals stay out of Sentry while reports accept prose', async () => {
   const envelopes: string[] = [];
   const collector = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
@@ -46,8 +47,8 @@ it('Reproduction R1 / ask-refusal: corner brief and ask refusals do not reach Se
     await db.query(`INSERT INTO daemon_tokens(token_hash,agent_id) VALUES($1,$2)`, [tokenHash('bdt_refusal_fixture_123456789'), agent]);
     await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Run proof')`, [source, room, owner]);
     const command = await createAgentCommand(db, { roomId: room, agentId: agent, sourceMessageId: source, reason: 'human_tag' });
-    await claimAgentCommand(db, room, agent, command!.id, 'proof');
-    const turn = { roomId: room, requestId: command!.turn_request_id, generationId: 'proof' };
+    await startQueuedTurn(db, room, agent, command!.id);
+    const turn = { roomId: room, requestId: command!.turn_request_id };
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     const post = async (operation: string, input: unknown) => {
       const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/daemon/operations/${operation}`, {
@@ -56,13 +57,14 @@ it('Reproduction R1 / ask-refusal: corner brief and ask refusals do not reach Se
       return { status: response.status, body: await response.json() };
     };
     for (const ask of ['x'.repeat(141), '**Choose now?**', 'First? Second?', 'First\nSecond', 42, '']) {
-      for (const operation of ['report', 'askRoomChoice']) {
+      for (const operation of ['askRoomChoice']) {
         const refused = await post(operation, { ...turn, status: 'needs_decision', text: 'needs-decision: Choose now',
           prompt: 'Choose now?', options: [{ label: 'Yes', consequence: 'Continue' }, { label: 'No', consequence: 'Stop' }], ask });
         expect(refused.status).toBe(400);
         expect(refused.body.error).toMatch(/^ask /);
       }
     }
+    expect((await post('report',{...turn,status:'needs_decision',text:'Choose **either** path. '.repeat(100),ask:'x'.repeat(141)})).status).toBe(200);
     await Sentry.flush(2000);
     expect(envelopes.some(envelope => envelope.includes('"exception"'))).toBe(false);
     expect((await post('askRoomChoice', { ...turn, ask: 'x'.repeat(140), prompt: 'Choose now?',

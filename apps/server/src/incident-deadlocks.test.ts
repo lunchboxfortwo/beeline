@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { insertCornerFacts } from './test-support.js';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
@@ -134,7 +135,7 @@ describe.skipIf(!url)('production incident deadlocks on real PostgreSQL', () => 
     await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Work')`, [source,R,H]);
     const command = await createAgentCommand(db, { roomId: R, agentId: A, sourceMessageId: source, reason: 'human_tag' });
     const setup = new DaemonService(db, new LiveHub());
-    await setup.execute('claimAgentCommand', { roomId: R, commandId: command!.id, generationId: 'rollout-proof' }, A, helperSource);
+    await startQueuedCommand(setup, { roomId: R, commandId: command!.id }, A);
     await db.query(`INSERT INTO identity_external_links(provider,subject,identity_id,issuer,audience,provider_login)
       VALUES('github','rollout-proof',$1,'https://github.com','beeline','owner') ON CONFLICT DO NOTHING`, [H]);
     const auth = new TokenAuth(appDb, async () => ({ subject: 'rollout-proof', login: 'owner', name: 'Owner' }));
@@ -157,7 +158,7 @@ describe.skipIf(!url)('production incident deadlocks on real PostgreSQL', () => 
       }),
     };
     const daemon = new DaemonService(watched, new LiveHub());
-    const turn = { roomId: R, requestId: command!.turn_request_id, generationId: 'rollout-proof', agentId: A };
+    const turn = { roomId: R, requestId: command!.turn_request_id, agentId: A };
     const requests = Array.from({ length: 8 }, (_, n) => n % 2
       ? daemon.execute('postAgentTurnReceipt', { ...turn, status: 'working' }, A, helperSource)
       : daemon.execute('postAgentActivity', { ...turn, activity: [{ kind: 'thinking', title: 'Working', status: 'in_progress' }] }, A));
@@ -194,8 +195,7 @@ describe.skipIf(!url)('production incident deadlocks on real PostgreSQL', () => 
     const source = 'e'.repeat(64);
     await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Work')`, [source,R,H]);
     const command = await createAgentCommand(db, { roomId: R, agentId: A, sourceMessageId: source, reason: 'human_tag' });
-    await new DaemonService(db, new LiveHub()).execute('claimAgentCommand',
-      { roomId: R, commandId: command!.id, generationId: 'deadline-proof' }, A, helperSource);
+    await startQueuedCommand(new DaemonService(db, new LiveHub()), { roomId: R, commandId: command!.id }, A);
     const watched: SqlDatabase = { query: appDb.query.bind(appDb), transaction: work => appDb.transaction(tx => {
       const wrapped: SqlDatabase = { query: async (sql, values) => {
         const result = await tx.query(sql, values);
@@ -207,10 +207,7 @@ describe.skipIf(!url)('production incident deadlocks on real PostgreSQL', () => 
     }) };
     const daemon = new DaemonService(watched, new LiveHub());
     try {
-      const results = await Promise.allSettled(Array.from({ length: 4 }, () => daemon.execute('postAgentTurnReceipt', {
-        roomId: R, requestId: command!.turn_request_id, generationId: 'deadline-proof', agentId: A,
-        status: 'working',
-      }, A, helperSource)));
+      const results = await Promise.allSettled(Array.from({ length: 4 }, () => daemon.execute('postAgentTurnReceipt', { roomId: R, requestId: command!.turn_request_id, agentId: A, status: 'working' }, A, helperSource)));
       const errors = results.flatMap(result => result.status === 'rejected' ? [String(result.reason)] : []);
       expect(errors).toEqual([]);
     } finally { await appDb.close(); }
@@ -252,8 +249,8 @@ describe.skipIf(!url)('production incident deadlocks on real PostgreSQL', () => 
     await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Clarify the brief')`, [source,R,H]);
     const command = await createAgentCommand(db,{roomId:R,agentId:A,sourceMessageId:source,reason:'human_tag'});
     const daemon = new DaemonService(db,new LiveHub());
-    await daemon.execute('claimAgentCommand',{roomId:R,commandId:command!.id,generationId:'brief-proof'},A,helperSource);
-    const turn = {roomId:R,requestId:command!.turn_request_id,generationId:'brief-proof'};
+    await startQueuedCommand(daemon, { roomId:R, commandId:command!.id }, A);
+    const turn = { roomId:R, requestId:command!.turn_request_id };
     await daemon.execute('reviseCornerBrief',{...turn,cornerId:C,expectedRevision:0,
       brief:{spec:'Build the widget',change:'Record scope'}},A);
     const race = contention(db);

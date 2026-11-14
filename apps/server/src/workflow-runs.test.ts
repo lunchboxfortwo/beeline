@@ -1,3 +1,4 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { CommandRefusalError } from './command-refusal.js';
 import { DaemonService } from './daemon-service.js';
 import { LiveHub } from './live.js';
@@ -8,7 +9,7 @@ import { randomBytes } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import type { QueryResultRow } from 'pg';
 import { type SqlDatabase } from './database.js';
-import { claimAgentCommand, readAgentCommands, type CommandRow } from './agent-command.js';
+import { readAgentCommands, type CommandRow } from './agent-command.js';
 import { AgentScheduleLoop } from './agent-schedules.js';
 import { PhoneService } from './phone-service.js';
 import { ensureSystemIdentity } from './system-line.js';
@@ -24,11 +25,9 @@ describe('save_workflow', () => {
   it('demonstrates split validators through the daemon save operation', async () => {
     const command = await commandFor(WORKER_A);
     const generationId = 'validator-split';
-    await claimAgentCommand(database, ROOM, WORKER_A, command.id, generationId);
+    await startQueuedTurn(database, ROOM, WORKER_A, command.id);
     const daemon = new DaemonService(database, new LiveHub());
-    const save = (contract: unknown) => daemon.execute('saveWorkflow', {
-      roomId: ROOM, requestId: command.turn_request_id, generationId, contract,
-    }, WORKER_A);
+    const save = (contract: unknown) => daemon.execute('saveWorkflow', { roomId: ROOM, requestId: command.turn_request_id, contract }, WORKER_A);
     const described = describedWorkflow(CONTRACT);
     for (const field of ['implicitEdges', 'externalOutcomes']) {
       const reason = `${field} is corner-only and cannot be saved in a workflow`;
@@ -377,7 +376,8 @@ describe('start_workflow', () => {
       roleBindings: { implementer: target, reviewer: REVIEWER, approver: APPROVER },
     });
     expect(started.state).toBe('implement');
-    expect(await pendingCommandsFor(target)).toBe(1);
+    expect(await pendingCommandsFor(target)).toBe(target === IMPLEMENTER ? 2 : 1);
+    expect((await database.query("SELECT id FROM agent_commands WHERE agent_id=$1 AND source_message_id=$2 AND state='pending'",[target,started.runId])).rowCount).toBe(1);
     const card = await database.query<{ card_type: string; text: string; card: { runId: string } }>(
       `SELECT card_type,text,card FROM messages WHERE id=$1`,
       [started.runId],
@@ -386,7 +386,7 @@ describe('start_workflow', () => {
     // The phone renders this text column for workflow-handoff cards.
     expect(card.rows[0]?.text).toBe(`Impy started workflow corner · run ${started.runId.slice(0, 8)}`);
     expect(card.rows[0]?.card.runId).toBe(started.runId);
-    const inbox = await readAgentCommands(database, ROOM, target);
+    const inbox = await readAgentCommands(database, target, ROOM);
     const woken = inbox.commands.find((c) => c.sourceMessageId === started.runId);
     expect((await database.query(`SELECT state FROM agent_commands WHERE source_message_id=$1 AND agent_id=$2`,
       [started.runId,target])).rows).toEqual([{state:'pending'}]);

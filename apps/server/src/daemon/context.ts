@@ -1,37 +1,37 @@
-import type { StarterOnboardingService } from '../starter-onboarding-run.js';
 import type { CommandRow } from '../agent-command.js';
+import type { ComposioApps } from '../composio-apps.js';
 import type { SqlDatabase } from '../database.js';
-import type { GitHubOperations, LandCornerOutcome } from '../github-operations.js';
+import type { FeedbackLoop } from '../feedback.js';
+import type { GitHubOperations,LandCornerOutcome } from '../github-operations.js';
+import type { AfterCommit,EmbedFn } from '../institutional-memory-embeddings.js';
+import type { InstitutionalMemoryShadowConfig } from '../institutional-memory-shadow.js';
 import type { LiveHub } from '../live.js';
 import type { McpRegistryClient } from '../mcp-registry.js';
-import type { RegistryMcpOAuth } from '../registry-mcp-oauth.js';
-import type { ComposioApps } from '../composio-apps.js';
 import type { ObjectService } from '../object-service.js';
-import type { InstitutionalMemoryShadowConfig } from '../institutional-memory-shadow.js';
-import type { FeedbackLoop } from '../feedback.js';
-import type { AfterCommit, EmbedFn } from '../institutional-memory-embeddings.js';
-import type { OwnedModelConfiguration, Input, Output } from './values.js';
-import type { daemonSetOwnedModel, daemonOwnedModelReady, daemonNegotiateOwnedModel, daemonModelClaimCredentials, daemonSetStarterOnboarding, daemonLockOwnedTurnAccess, daemonFenceOwnedTurnReply, daemonReadCommandActivation } from './owned-model.js';
+import type { RegistryMcpOAuth } from '../registry-mcp-oauth.js';
+import type { StarterOnboardingService } from '../starter-onboarding-run.js';
+import type { daemonAccess,daemonIdentity,daemonReviewSourceAccess,daemonRoomMembers } from './access.js';
+import type { daemonApprovalSource,daemonLinkSpendApproval,daemonPermissionExecution,daemonPermissionRequest,daemonSquireApproval,daemonSquireApprovalDecision,daemonSquireLoginWall } from './approvals.js';
+import type { daemonConnectAppFrontDoor,daemonConnectedAppForTool,daemonConnectService,daemonExecuteAppTool,daemonListAppTools } from './apps.js';
+import type { daemonMandate,daemonMissionAuthority,daemonPermissionAuthority,daemonRoomAuthority,daemonScheduleAuthority,daemonTargetAuthority } from './authority.js';
+import type { daemonConfiguration,daemonIdentitySuccession,daemonPresence,daemonReleaseReadiness } from './configuration.js';
+import type { daemonAuthorizeResource,daemonConnectMcpServer,daemonOfferConnector } from './connector-offers.js';
+import type { daemonConnectionDetail,daemonConnectionGrantRevoke,daemonConnectionUsage,daemonConnectorAssignments,daemonConnectorInstall,daemonConnectorStatusReport,daemonConnectorStatusView,daemonConnectorVaultList,daemonConnectorVaultReport,daemonNotifyTailscaleSignIn,daemonResumeRegistrySignIn } from './connectors.js';
 import type { daemonReconcileZeroCheckWorkerCompletion } from './corner-completion.js';
-import type { daemonConnectorAssignments, daemonConnectorInstall, daemonConnectorStatusReport, daemonResumeRegistrySignIn, daemonNotifyTailscaleSignIn, daemonConnectorVaultReport, daemonConnectorStatusView, daemonConnectorVaultList, daemonConnectionDetail, daemonConnectionGrantRevoke, daemonConnectionUsage } from './connectors.js';
-import type { daemonBootstrap, daemonWorkspaceRoster, daemonInbox } from './inbox-roster.js';
-import type { daemonRoomMessage, daemonRoomAttachment, daemonWithStoredDigests, daemonExpiredMediaIds } from './message-reads.js';
-import type { daemonRoomAuthority, daemonPermissionAuthority, daemonMissionAuthority, daemonScheduleAuthority, daemonMandate, daemonTargetAuthority } from './authority.js';
-import type { daemonCorners, daemonCornerRestore, daemonListCornerBriefRevisions, daemonMergeCorner, daemonCloseCornerPullRequest, daemonCheckReviewerAuthors, daemonApproveCornerMerge, daemonRepository, daemonTargetBranch } from './corner-reads.js';
-import type { daemonIdentitySuccession, daemonConfiguration, daemonPresence, daemonReleaseReadiness } from './configuration.js';
-import type { daemonCompletion, daemonPostRoomMessage, daemonPostAgentAttachment, daemonLiveOutput, daemonRetract, daemonPersistTurnTrace } from './messages.js';
-import type { daemonTurnReceipt, daemonActivity } from './turn-receipts.js';
-import type { daemonApprovalSource, daemonLinkSpendApproval, daemonSquireApproval, daemonSquireApprovalDecision, daemonSquireLoginWall, daemonPermissionRequest, daemonPermissionExecution } from './approvals.js';
-import type { daemonCreateAgentSchedule, daemonRecordScheduleAuthorization, daemonSetEventSubscriptions, daemonListEventSubscriptions, daemonPostRoomEvent, daemonListAgentSchedules, daemonRequireScheduleAdmin, daemonDeleteAgentSchedule, daemonUpdateAgentSchedule } from './schedules-events.js';
-import type { daemonPostMandate, daemonAgentAvatar, daemonCommands, daemonModelCatalog, daemonMachineReport } from './models.js';
-import type { daemonReport, daemonWatchCorner, daemonCornerRemote, daemonCornerPlan, daemonBriefAttachmentRooms, daemonRenameCorner, daemonTargetProposal } from './corner-reports.js';
-import type { daemonRequestAgentGrant, daemonAskRoomChoice, daemonOpenRoomPoll, daemonWriteRoomChoice, daemonListAgentGrants, daemonConsumeAgentGrant, daemonListAgentGrantRequests, daemonRepositoryOnboardingRequester, daemonGrantRequester, daemonFindGrantRequester, daemonAuthorizeSquireCall, daemonAuthorizeScopedGrant } from './grants.js';
-import type { daemonAppCardMark, daemonOfferContext, daemonAgentWorkbench, daemonSearchMcpRegistry, daemonWarmConnectorIndex } from './workbench.js';
-import type { daemonConnectService, daemonConnectAppFrontDoor, daemonConnectedAppForTool, daemonListAppTools, daemonExecuteAppTool } from './apps.js';
-import type { daemonAuthorizeResource, daemonConnectMcpServer, daemonOfferConnector } from './connector-offers.js';
-import type { daemonCreateCorner, daemonReviseCornerBrief, daemonArchiveCorner, daemonEnsureMembership } from './corner-writes.js';
-import type { daemonIdentity, daemonReviewSourceAccess, daemonAccess, daemonRoomMembers } from './access.js';
-import type { daemonPostCornerMessage, daemonPostAddressAccess, daemonReach, daemonReactToRoomMessage, daemonWriteResult } from './corner-messages.js';
+import type { daemonPostCornerMessage,daemonReach,daemonReactToRoomMessage,daemonWriteResult } from './corner-messages.js';
+import type { daemonApproveCornerMerge,daemonCheckReviewerAuthors,daemonCloseCornerPullRequest,daemonCornerRestore,daemonCorners,daemonListCornerBriefRevisions,daemonMergeCorner,daemonRepository,daemonTargetBranch } from './corner-reads.js';
+import type { daemonBriefAttachmentRooms,daemonCornerPlan,daemonCornerRemote,daemonRenameCorner,daemonReport,daemonTargetProposal,daemonWatchCorner } from './corner-reports.js';
+import type { daemonArchiveCorner,daemonCreateCorner,daemonEnsureMembership,daemonReviseCornerBrief } from './corner-writes.js';
+import type { daemonAskRoomChoice,daemonAuthorizeScopedGrant,daemonAuthorizeSquireCall,daemonConsumeAgentGrant,daemonFindGrantRequester,daemonGrantRequester,daemonListAgentGrantRequests,daemonListAgentGrants,daemonOpenRoomPoll,daemonRepositoryOnboardingRequester,daemonRequestAgentGrant,daemonWriteRoomChoice } from './grants.js';
+import type { daemonBootstrap,daemonInbox,daemonWorkspaceRoster } from './inbox-roster.js';
+import type { daemonExpiredMediaIds,daemonRoomAttachment,daemonRoomMessage,daemonWithStoredDigests } from './message-reads.js';
+import type { daemonCompletion,daemonLiveOutput,daemonPersistTurnTrace,daemonPostAgentAttachment,daemonPostRoomMessage,daemonRetract } from './messages.js';
+import type { daemonAgentAvatar,daemonCommands,daemonMachineReport,daemonModelCatalog,daemonPostMandate } from './models.js';
+import type { daemonModelClaimCredentials,daemonNegotiateOwnedModel,daemonOwnedModelReady,daemonSetOwnedModel,daemonSetStarterOnboarding } from './owned-model.js';
+import type { daemonCreateAgentSchedule,daemonDeleteAgentSchedule,daemonListAgentSchedules,daemonListEventSubscriptions,daemonPostRoomEvent,daemonRecordScheduleAuthorization,daemonRequireScheduleAdmin,daemonSetEventSubscriptions,daemonUpdateAgentSchedule } from './schedules-events.js';
+import type { daemonActivity,daemonTurnReceipt } from './turn-receipts.js';
+import type { Input,Output,OwnedModelConfiguration } from './values.js';
+import type { daemonAgentWorkbench,daemonAppCardMark,daemonOfferContext,daemonSearchMcpRegistry,daemonWarmConnectorIndex } from './workbench.js';
 
 /** Named service dependencies shared by ordinary and command-scoped handlers. */
 export interface DaemonDependencies {
@@ -75,8 +75,6 @@ export type CommandArguments<Handler> = Handler extends (ctx: infer _Context, ..
 
 /** Handler capabilities are derived from their owners, never from the service facade. */
 export interface DaemonContext extends DaemonDependencies {
-  /** This command could not verify a missing PR during registration repair. */
-  cornerPrRegistrationUnavailable?: boolean;
   readonly dependencies: DaemonDependencies;
   ownedModel?: OwnedModelConfiguration;
   readonly modelClaims: WeakMap<object, { agentId: string; configuration: OwnedModelConfiguration }>;
@@ -88,9 +86,6 @@ export interface DaemonContext extends DaemonDependencies {
   negotiateOwnedModel: (...args: CommandArguments<typeof daemonNegotiateOwnedModel>) => ReturnType<typeof daemonNegotiateOwnedModel>;
   modelClaimCredentials: (...args: CommandArguments<typeof daemonModelClaimCredentials>) => ReturnType<typeof daemonModelClaimCredentials>;
   setStarterOnboarding: (...args: CommandArguments<typeof daemonSetStarterOnboarding>) => ReturnType<typeof daemonSetStarterOnboarding>;
-  lockOwnedTurnAccess: (...args: CommandArguments<typeof daemonLockOwnedTurnAccess>) => ReturnType<typeof daemonLockOwnedTurnAccess>;
-  fenceOwnedTurnReply: (...args: CommandArguments<typeof daemonFenceOwnedTurnReply>) => ReturnType<typeof daemonFenceOwnedTurnReply>;
-  readCommandActivation: (...args: CommandArguments<typeof daemonReadCommandActivation>) => ReturnType<typeof daemonReadCommandActivation>;
   reconcileZeroCheckWorkerCompletion: (...args: CommandArguments<typeof daemonReconcileZeroCheckWorkerCompletion>) => ReturnType<typeof daemonReconcileZeroCheckWorkerCompletion>;
   connectorAssignments: (...args: CommandArguments<typeof daemonConnectorAssignments>) => ReturnType<typeof daemonConnectorAssignments>;
   connectorInstall: (...args: CommandArguments<typeof daemonConnectorInstall>) => ReturnType<typeof daemonConnectorInstall>;
@@ -199,7 +194,6 @@ export interface DaemonContext extends DaemonDependencies {
   access: (...args: CommandArguments<typeof daemonAccess>) => ReturnType<typeof daemonAccess>;
   roomMembers: (...args: CommandArguments<typeof daemonRoomMembers>) => ReturnType<typeof daemonRoomMembers>;
   postCornerMessage: (...args: CommandArguments<typeof daemonPostCornerMessage>) => ReturnType<typeof daemonPostCornerMessage>;
-  postAddressAccess: (...args: CommandArguments<typeof daemonPostAddressAccess>) => ReturnType<typeof daemonPostAddressAccess>;
   reach: (...args: CommandArguments<typeof daemonReach>) => ReturnType<typeof daemonReach>;
   reactToRoomMessage: (...args: CommandArguments<typeof daemonReactToRoomMessage>) => ReturnType<typeof daemonReactToRoomMessage>;
   writeResult: (...args: CommandArguments<typeof daemonWriteResult>) => ReturnType<typeof daemonWriteResult>;

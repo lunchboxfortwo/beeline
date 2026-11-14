@@ -117,34 +117,6 @@ describe('who may address an agent', () => {
     }
   });
 
-  it('enforces creator-only routing without posting an access refusal', async () => {
-    const database = await fixture();
-    try {
-      const phone = new PhoneService(database, 'http://local.test');
-      await setPolicy(database, 'creator');
-      for (const seed of ['1', '2', '3']) await send(phone, OUTSIDER, seed, '@greeter hello');
-      expect(await lines(database)).toEqual([]);
-      expect((await database.query('SELECT 1 FROM agent_commands WHERE agent_id=$1', [AGENT])).rowCount).toBe(0);
-      const sent = await send(phone, OWNER, '4', '@greeter hello');
-      expect((await database.query('SELECT 1 FROM agent_commands WHERE source_message_id=$1', [sent.messageId])).rowCount).toBe(1);
-      expect(await lines(database)).toEqual([]);
-    } finally { await database.close(); }
-  });
-
-  it('keeps the human message last when its mention is refused, and reading clears unread', async () => {
-    const database = await fixture();
-    try {
-      const phone = new PhoneService(database, 'http://local.test');
-      await setPolicy(database, 'creator');
-      const sent = await send(phone, OUTSIDER, '1', '@greeter hello');
-      const view = await phone.readRoom(ROOM, OUTSIDER);
-      expect(view!.messages.at(-1)!.id).toBe(sent.messageId);
-      expect(await lines(database)).toEqual([]);
-      await phone.markRead(ROOM, sent.messageId, OUTSIDER);
-      expect((await phone.readChats(WORKSPACE, OUTSIDER))?.chats.find(chat => chat.room.id === ROOM)?.unread).toBe(false);
-    } finally { await database.close(); }
-  });
-
   it('hands a running helper the server policy, changed or not, on every candidate message', async () => {
     const database = await fixture();
     try {

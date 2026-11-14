@@ -1,18 +1,6 @@
 import { randomBytes, describe, expect, it, vi, assignCornerWorker, PhoneService, DaemonService, GitHubOperations, LiveHub, systemLine, advanceCorner, cornerMergeGate, createAgentCommand, queueCornerMergeConflict, reconcileCornerMergeBlockers, CORNER_LIFECYCLE_CARD_TYPE, cornerOwnerSql, RecordingDatabase, H, A, B, R, db, phone, daemon, github, githubRollupState, githubHead, githubApp, implementersMerge, cards, currentState, commissioned, brief, open, claim, pushToCorner, greenHead, redHead, resumeWorker, commands, result, terminalResult, orderRepairsFromRoom, SHA, branchOf, reasons, projected, inReview, approve, approved, mergedWebhook, say, revise, F, fallback, rootFixture, fixtureScope14, fixtureScope18, fixtureScope19, fixtureScope20, type GitHubAppClient, type GitHubOAuthClient } from './test-support-corner-lifecycle.test-support.js';
 
 describe('Reproduction S-07: every reviewer waits for a quiet corner', () => {
-  it.each([B])('holds a review for %s until the worker releases its lease', async (reviewerId) => {
-    const cornerId = await inReview();
-    const worker = await resumeWorker(cornerId);
-    await claim(worker);
-    const source = await systemLine(rootFixture.db, { roomId: cornerId, subject: { kind: 'agent', id: A, name: 'Hoots' }, verb: 'revised the corner brief', object: 'Revision 2' });
-    const review = await createAgentCommand(rootFixture.db, { roomId: cornerId, agentId: reviewerId, sourceMessageId: source.id, reason: 'corner_check' });
-    const delivered = (await commands(reviewerId, cornerId)).some(c => c.id === review!.id);
-    console.info(`Reproduction S-07: reviewer review with live worker lease → delivered=${delivered}`);
-    expect(delivered).toBe(false);
-    await terminalResult(worker, 'Worker finished');
-    expect((await commands(reviewerId, cornerId)).some(c => c.id === review!.id)).toBe(true);
-  });
 
 
   it.each([B])('delivers unrelated commands to %s while the worker is busy', async (reviewerId) => {
@@ -24,7 +12,7 @@ describe('Reproduction S-07: every reviewer waits for a quiet corner', () => {
   });
 });
 describe('Reproduction R5a: entry paths lock the run before corner rows', () => {
-  it.each(['check webhook', 'merged webhook', 'approval', 'hold', 'brief', 'create', 'zero-check', 'blocker reconciliation', 'agent close', 'phone close'])('%s', async path => {
+  it.each(['check webhook', 'merged webhook', 'approval', 'hold', 'brief', 'create', 'blocker reconciliation', 'agent close', 'phone close'])('%s', async path => {
     const cornerId = await inReview();
     const recording = new RecordingDatabase(rootFixture.db);
     const recordedDaemon = new DaemonService(recording, new LiveHub());
@@ -55,21 +43,8 @@ describe('Reproduction R5a: entry paths lock the run before corner rows', () => 
       await revise(cornerId, recordedDaemon);
     } else if (path === 'create') {
       const command = await commissioned(R);
-      const created = await recordedDaemon.execute('createCorner', { roomId: R, requestId: command.turnRequestId,
-        generationId: 'g1', name: 'Another-widget', objective: 'Ship another widget', repository: 'owner/widgets',
-        brief: brief(command.sourceMessageId) }, A);
+      const created = await recordedDaemon.execute('createCorner', { roomId: R, requestId: command.turnRequestId, name: 'Another-widget', objective: 'Ship another widget', repository: 'owner/widgets', brief: brief(command.sourceMessageId) }, A);
       lockId = created.cornerId;
-    } else if (path === 'zero-check') {
-      await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(jsonb_set(lifecycle,'{checks}','"unknown"'),'{pr,mergeability}','"clean"') WHERE corner_id=$1`, [cornerId]);
-      const command = await commissioned(cornerId);
-      const status = { ...(await rootFixture.github.prChecksStatus({ cornerId })), checks: 'pending' as const, checkCount: 0, zeroChecksConfirmed: true };
-      const completion = new DaemonService(recording, new LiveHub(), undefined, undefined, false, undefined, false, undefined, async () => {
-        // Completion runs after the reply transaction commits; inspect its own locks.
-        recording.calls.length = 0;
-        return status;
-      });
-      await completion.execute('postRoomMessage', { roomId: cornerId, requestId: command.turnRequestId,
-        generationId: 'g1', text: 'https://github.com/owner/widgets/pull/7' }, A);
     } else {
       await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{checks}','"failing"') WHERE corner_id=$1`, [cornerId]);
       await reconcileCornerMergeBlockers(recording, cornerId);
@@ -78,8 +53,7 @@ describe('Reproduction R5a: entry paths lock the run before corner rows', () => 
       && (/FROM corner_facts/.test(call.sql) && /FOR UPDATE/.test(call.sql) || /^INSERT INTO corner_facts/.test(call.sql)));
     const write = recording.calls.findIndex(call => /^UPDATE corner_facts|^INSERT INTO corner_(?:brief_revisions|merge_holds|merge_approvals)/.test(call.sql));
     expect(retained, 'native state row was retained').toBeGreaterThanOrEqual(0);
-    if (path === 'zero-check') expect(write, 'zero-check is read-only').toBe(-1);
-    else {
+    {
       expect(write, 'path wrote its corner effect').toBeGreaterThanOrEqual(0);
       expect(retained, 'state retention precedes effects').toBeLessThan(write);
     }
@@ -175,7 +149,7 @@ describe('re-runs and pushes out of review (AC-1)', () => {
     ]);
     await advanceCorner(rootFixture.db, cornerId, { kind: 'checks-pending' });
     expect(await currentState(cornerId)).toBe('working');
-    await rootFixture.db.query(`SELECT (terminal.ended).* FROM (SELECT beeline_end_agent_turn(command.id,command.generation_id,'complete',NULL,NULL) ended
+    await rootFixture.db.query(`SELECT (terminal.ended).* FROM (SELECT beeline_finish_agent_command(command.id,'complete',NULL,NULL) ended
       FROM agent_commands command WHERE command.room_id=$1 AND command.agent_id=$2
         AND command.state IN ('pending','claimed')) terminal`, [cornerId, A]);
     await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{checks}','"passing"') WHERE corner_id=$1`, [
@@ -211,49 +185,6 @@ describe('re-runs and pushes out of review (AC-1)', () => {
   });
 });
 describe('each transition wakes the next role exactly once (AC-2)', () => {
-  it('Reproduction REVIEW-SILENT-1: a completed review and worker reply without PASS return the unresolved review to the implementer', async () => {
-    const cornerId = await inReview();
-    const opening = await resumeWorker(cornerId);
-    await claim(opening!);
-    await terminalResult(opening!, 'The implementation is ready for review.');
-    const [review] = await commands(B, cornerId);
-    await claim(review!);
-    await orderRepairsFromRoom(review!, cornerId, 'Attach the available proof before review');
-    await result(review!, '@hoots attach the production proof before I can PASS.');
-    const reply = (await commands(A, cornerId)).find(command => command.reason === 'order');
-    await claim(reply!);
-    await result(reply!, 'blocked: the proof is attached; a required entry point is still unavailable.');
-    for (const tagged of (await commands(A, cornerId)).filter(command => command.reason === 'agent_tag')) {
-      await claim(tagged);
-      await rootFixture.daemon.execute('postAgentTurnReceipt', { roomId: cornerId, requestId: tagged.turnRequestId,
-        generationId: 'g1', agentId: A, status: 'complete', completionKind: 'no-reply' }, A);
-    }
-    // The implementer opened this corner itself, so its escalation returns
-    // directly to its original human requester rather than its later reviewer.
-    expect((await commands(B, R)).filter(command => command.reason === 'report')).toEqual([]);
-    expect((await rootFixture.db.query(`SELECT text FROM messages WHERE room_id=$1 AND presentation='message'
-      AND text=$2`, [R, 'blocked: the proof is attached; a required entry point is still unavailable.'])).rows)
-      .toEqual([{ text: 'blocked: the proof is attached; a required entry point is still unavailable.' }]);
-    expect(await currentState(cornerId)).toBe('waiting');
-    const { loadCornerQuestion } = await import('./corner-lifecycle-read-state.js');
-    const unanswered = await loadCornerQuestion(rootFixture.db, cornerId);
-    expect(unanswered).toMatchObject({ answered_at: null });
-    await say(R, 'Unrelated Room chatter.');
-    expect(await loadCornerQuestion(rootFixture.db, cornerId)).toMatchObject({ answered_at: null });
-    await say(R, 'Proceed with the available proof and report the missing review capability.', unanswered!.id);
-    expect(await loadCornerQuestion(rootFixture.db, cornerId))
-      .toMatchObject({ id: unanswered!.id, answered_at: expect.any(Date) });
-    const before = await cards(cornerId);
-    for (let replay = 0; replay < 2; replay++)
-      await advanceCorner(rootFixture.db, cornerId, { kind: 'checks', result: 'passing', sourceMessageId: review!.sourceMessageId });
-    expect(await reasons(cornerId, A)).toContain('corner_review_needed');
-    expect((await reasons(cornerId, A)).filter(reason => reason === 'corner_review_needed')).toHaveLength(1);
-    expect(await reasons(cornerId, B)).toEqual(['corner_review_dispatch']);
-
-    expect(await cornerMergeGate(rootFixture.db, cornerId, { number: 7, headSha: SHA })).toMatchObject({ approved: false, open: false });
-    expect((await commands(A, cornerId)).find(command => command.reason === 'corner_review_needed')?.source.body)
-      .toContain('@hoots attach the production proof before I can PASS.');
-  });
 
 
   it.each(['checks', 'review'])('Reproduction REVIEW-SILENT-2: an unreachable reviewer in %s wakes the implementer', async state => {

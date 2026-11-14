@@ -1,4 +1,4 @@
-import type { AgentCommandInput, CommandRow } from './agent-command.js';
+import type { AgentCommandInput,CommandRow } from './agent-command.js';
 
 
 
@@ -59,5 +59,4 @@ export type CornerEvent =
   | { kind: 'pull-request-closed'; number: number }
   | { kind: 'closed' }
   | { kind: 'merge-conflict'; sourceMessageId: string }
-  | { kind: 'reconcile' }
-  | { kind: 'command'; command: AgentCommandInput };
+  | { kind: 'reconcile' };

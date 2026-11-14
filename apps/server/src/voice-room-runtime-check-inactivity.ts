@@ -1,4 +1,3 @@
-import { commandOwnerLiveSql } from './turn-ownership.js';
 import { namedVoiceTarget, openingVoiceName } from "./voice-target.js";
 import type { FluxEvent, VoiceBrain } from "./voice-providers.js";
 import { VoiceEagerReply } from "./voice-eager-reply.js";
@@ -17,8 +16,8 @@ import { VoiceRoomRuntime, DeliveredVoicePlaybackError, spokenReport } from './v
 async function voiceAgentBusy(ctx: VoiceRoomRuntime, agentId: string): Promise<boolean> {
   const result = await ctx.observe(() => ctx.service.db.query<{ busy: boolean }>(`SELECT EXISTS(
     SELECT 1 FROM agent_commands command WHERE command.room_id=$1 AND command.agent_id=$2
-      AND command.action IN ('input','resume')
-      AND (command.state='pending' OR ${commandOwnerLiveSql('command')})) busy`, [ctx.roomId, agentId]));
+      AND command.action='input'
+      AND command.state='pending') busy`, [ctx.roomId, agentId]));
   return result.rows[0]?.busy === true;
 }
 
@@ -440,7 +439,7 @@ async function voiceAgentBusy(ctx: VoiceRoomRuntime, agentId: string): Promise<b
           `SELECT source.text,o.source_message_id,o.agent_id,source.author_id human_id FROM voice_orders o
            JOIN messages source ON source.id=o.source_message_id
            JOIN agent_commands c ON c.source_message_id=o.source_message_id AND c.agent_id=o.agent_id
-           WHERE o.call_id=$1 AND c.state IN ('pending','claimed') ORDER BY c.created_at`, [ctx.callId]));
+           WHERE o.call_id=$1 AND c.state='pending' ORDER BY c.created_at`, [ctx.callId]));
         for (const id of known) ctx.pendingWork.delete(id);
         for (const row of pending.rows) ctx.pendingWork.set(row.source_message_id, row);
         ctx.workHydrated = true;

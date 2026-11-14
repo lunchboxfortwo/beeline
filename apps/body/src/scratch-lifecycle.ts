@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import {lstat} from 'node:fs/promises';
+import { lstat } from 'node:fs/promises';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -19,15 +19,6 @@ export async function allocatedDirectoryBytes(path: string): Promise<number> {
 export function scratchBudgetMessage(usage: number, budget = CORNER_SCRATCH_BUDGET_BYTES): string {
   const mib = (bytes: number) => Math.ceil(bytes / 1024 ** 2);
   return `Scratch ${mib(usage)} / ${mib(budget)} MiB; Use scratch_status and your shell to inspect, update or delete files. ${usage > budget ? 'OVER BUDGET: remove files before writing more.' : ''}`.trim();
-}
-
-/** Existing oversized scratch stays available for a cleanup turn. */
-export function scratchGrowthExceedsBudget(
-  usage: number,
-  atTurnStart: number,
-  budget = CORNER_SCRATCH_BUDGET_BYTES,
-): boolean {
-  return usage > budget && usage > atTurnStart;
 }
 
 export async function assertScratchWriteBudget(

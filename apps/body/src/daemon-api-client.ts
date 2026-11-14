@@ -1,34 +1,33 @@
-import { renewSquireShareOnViewerActivity } from './squire-share-renewals.js';
-import { invalidateUsageAccountAttachment } from './helper-usage-publisher.js';
-import { postChangedAgentUsage } from './helper-usage-binding.js';
 import {
-  isAgentCommand,
-  type AgentCommand,
-  type AgentSignInFrame,
-  type DaemonOperationMap,
+isAgentCommand,
+type AgentCommand,
+type AgentSignInFrame,
+type DaemonOperationMap,
 } from '@beeline/api-contract/daemon';
-import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { helperVersion, helperVersionHeader } from './helper-version.js';
-import {
-  retryAfterMs,
-  type LiveLink,
-  type LiveLinkTiming,
-  type LiveSocketFactory,
-} from './live-link.js';
-import { MachineLink, type AgentChannel } from './machine-link.js';
+import { resolve } from 'node:path';
 import { agentSignInFrame } from './agent-sign-in.js';
-import { unknownServerEventLogger } from './unknown-server-event.js';
+import { postChangedAgentUsage } from './helper-usage-binding.js';
+import { invalidateUsageAccountAttachment } from './helper-usage-publisher.js';
+import { helperVersion,helperVersionHeader } from './helper-version.js';
 import {
-  readRuntimeRecord,
-  runtimeDirectory,
-  writeRuntimeRecord,
-  type AgentRuntimeRecord,
+retryAfterMs,
+type LiveLink,
+type LiveLinkTiming,
+type LiveSocketFactory,
+} from './live-link.js';
+import { MachineLink,type AgentChannel } from './machine-link.js';
+import {
+readRuntimeRecord,
+runtimeDirectory,
+writeRuntimeRecord,
+type AgentRuntimeRecord,
 } from './runtime.js';
+import { renewSquireShareOnViewerActivity } from './squire-share-renewals.js';
+import { unknownServerEventLogger } from './unknown-server-event.js';
 
 type Input<Name extends keyof DaemonOperationMap> = DaemonOperationMap[Name]['input'];
 type Output<Name extends keyof DaemonOperationMap> = DaemonOperationMap[Name]['output'];
-export type InboxItem = Output<'getRoomInbox'>['items'][number];
 
 /** Membership / corner set change pushed on the daemon live socket. */
 export type RoomMembershipChange = {
@@ -136,9 +135,7 @@ const DAEMON_LIVE_EVENT_TYPES = new Set<unknown>([
   'usage-refresh',
   'agent-sign-in',
   'config-changed',
-  'subscribed',
   'commands',
-  'inbox',
 ]);
 
 /** Typed client for the complete named daemon operation contract. */
@@ -164,31 +161,15 @@ export class DaemonApiClient {
   readonly #channel: AgentChannel;
   /** Features can observe negotiation and use the existing overlay owner, but
    * cannot obtain ordinary/turn/usage/activation request capabilities. */
-  readonly channel: Readonly<Pick<AgentChannel, 'isOpen' | 'activationScope' | 'usageAccountScope' | 'overlay'>>;
+  readonly channel: Readonly<Pick<AgentChannel, 'isOpen' | 'usageAccountScope' | 'overlay'>>;
   readonly #machine: MachineLink;
   private registrationRefusal?: DaemonApiError;
   private authorityRefusalListener?: (error: DaemonApiError) => void;
   private channelStateListener?: (connected: boolean, refusal?: string) => void;
   private inFlight = 0;
   private requestCount = 0;
-  private subscriptionCount = 0;
-  private operationChannelDemanded = false;
-  private readonly liveRooms = new Map<
-    string,
-    {
-      cursor?: string;
-      pushedIds: Set<string>;
-      registrations: Set<{
-        onItems?: (items: readonly InboxItem[], cursor?: string) => void;
-        onState?: (
-          connected: boolean,
-          capabilities?: { pushIntake: boolean; connectionPresence: boolean; connectionGeneration?: number },
-        ) => void;
-        onCommands?: (commands: readonly AgentCommand[]) => void;
-        presence?: { releaseVersion?: string; sourceSha?: string; available?: boolean };
-      }>;
-    }
-  >();
+  private queueListener?: (commands: readonly AgentCommand[]) => void;
+  private queueDemanded = false;
   private roomsChangedListener?: (event?: RoomMembershipChange) => void;
   private configChangedListener?: () => void;
   private connectorAssignmentListener?: () => void;
@@ -232,10 +213,7 @@ export class DaemonApiClient {
       },
       onMessage: (event) => this.liveMessage(event),
       onClose: () => {
-        this.liveSubscriptions.clear();
         this.channelStateListener?.(false);
-        for (const room of this.liveRooms.values())
-          for (const registration of room.registrations) registration.onState?.(false);
       },
       // Registration uses the same settled retirement check as HTTP. Preserve
       // that proof even after socket selection prohibits HTTP fallback.
@@ -294,7 +272,7 @@ export class DaemonApiClient {
       requests: this.requestCount,
       timeouts: 0,
       reconnects: this.#channel.reconnects,
-      subscriptionsSent: this.subscriptionCount,
+      subscriptionsSent: this.queueDemanded ? 1 : 0,
       readQueueDepth: 0,
       readQueueWaitMs: 0,
     };
@@ -310,42 +288,16 @@ export class DaemonApiClient {
     this.#channel.reconnect();
   }
 
-  /** Add one Room to this agent's shared live socket. */
-  liveSubscribe(
-    roomId: string,
-    cursor?: string,
-    onItems?: (items: readonly InboxItem[], cursor?: string) => void,
-    onState?: (
-      connected: boolean,
-      capabilities?: { pushIntake: boolean; connectionPresence: boolean; connectionGeneration?: number },
-    ) => void,
-    presence?: { releaseVersion?: string; sourceSha?: string; available?: boolean },
-    onCommands?: (commands: readonly AgentCommand[]) => void,
-  ): () => void {
-    let room = this.liveRooms.get(roomId);
-    if (!room) {
-      room = { pushedIds: new Set(), registrations: new Set() };
-      this.liveRooms.set(roomId, room);
-    }
-    room.cursor = cursor ?? room.cursor;
-    const previous = this.liveSubscriptions.get(roomId);
-    const registration = { onItems, onState, presence, onCommands };
-    room.registrations.add(registration);
+  /** The one listener for this agent's queue: every undone item, oldest first. */
+  setQueueListener(listener: (commands: readonly AgentCommand[]) => void): void {
+    this.queueListener = listener;
+  }
+
+  /** Ask for this agent's queue on the machine socket, now and after every reconnect. */
+  subscribeQueue(): void {
+    this.queueDemanded = true;
     this.ensureLiveSocket();
-    this.sendLiveSubscription(roomId);
-    if (previous?.ready && this.liveSubscriptions.get(roomId) === previous)
-      registration.onState?.(true, previous.capabilities);
-    return () => {
-      if (!room.registrations.delete(registration)) return;
-      if (room.registrations.size) {
-        this.sendLiveSubscription(roomId);
-        return;
-      }
-      this.liveRooms.delete(roomId);
-      this.liveSubscriptions.delete(roomId);
-      this.#channel.send({ type: 'unsubscribe', roomId });
-      if (!this.liveRooms.size && !this.roomsChangedListener && !this.operationChannelDemanded) this.#channel.stop();
-    };
+    if (this.#channel.isOpen()) this.#channel.send({ type: 'subscribe-queue' });
   }
 
   /** Register the one listener invoked when the server reports this agent's
@@ -404,11 +356,6 @@ export class DaemonApiClient {
     this.helperReleaseListener = listener;
   }
 
-  updateLiveCursor(roomId: string, cursor: string | undefined): void {
-    const room = this.liveRooms.get(roomId);
-    if (room && cursor) room.cursor = cursor;
-  }
-
   /** Leave the machine socket when this agent's runtime stops. */
   closeLive(): void {
     this.#channel.stop();
@@ -416,19 +363,6 @@ export class DaemonApiClient {
 
   /** Join the existing registration wake; socket loss is not a turn failure. */
   waitForConnection(): Promise<void> { return this.#channel.operationReady(); }
-
-  /** One negotiated command setup read, carried only by the existing machine
-   * channel. This method bypasses generic HTTP and context argument injection. */
-  async readCommandActivation(input:import('@beeline/api-contract/helper-activation').CommandActivationInput){
-    const identity=input&&typeof input==='object'?Object.getOwnPropertyDescriptor(input,'agentId'):undefined;
-    if(!identity||!('value' in identity)||identity.value!==this.agentId)throw new Error('Activation runtime identity mismatch');
-    this.requestCount++;this.inFlight++;
-    try{await this.#channel.operationReady();return await this.#channel.requestOperation('readCommandActivation',input);}finally{this.inFlight--;}
-  }
-
-  turnOwnershipScope(): import('@beeline/api-contract/helper-turn-ownership').HelperTurnOwnershipSource | undefined {
-    return this.#channel.turnSource;
-  }
 
   async execute<Name extends keyof DaemonOperationMap>(
     name: Name,
@@ -440,12 +374,10 @@ export class DaemonApiClient {
         throw new Error('Repository credential reader cannot dispatch another operation');
       return this.#requestHttp(name, input);
     }
-    if(name==='readCommandActivation')throw new Error('Activation context requires the command-owned machine adapter');
     const candidate = input as Record<string, unknown>;
     if (typeof candidate.agentId === 'string' && candidate.agentId !== this.agentId) {
       throw new Error('daemon operation agentId does not match the runtime identity');
     }
-    this.operationChannelDemanded = true;
     await this.#channel.operationReady();
     if (name === 'postAgentUsage' && candidate.usageSource === undefined)
       return postChangedAgentUsage(this,this.agentId,(input as Input<'postAgentUsage'>).usage) as Promise<Output<Name>>;
@@ -503,41 +435,11 @@ export class DaemonApiClient {
   }
 
   private ensureLiveSocket(): void {
-    if (this.liveRooms.size || this.roomsChangedListener) this.#channel.start();
-  }
-
-  /** Ephemeral request correlation, never persisted or used as turn authority. */
-  private readonly liveSubscriptions = new Map<string, {
-    requestId: string;
-    inboxRequested: boolean;
-    commandsSeen: boolean;
-    inboxSeen: boolean;
-    inboxRequired: boolean;
-    ready: boolean;
-    capabilities?: {pushIntake:boolean; connectionPresence:boolean; connectionGeneration:number};
-  }>();
-
-  private completeLiveSubscription(roomId: string): void {
-    const current = this.liveSubscriptions.get(roomId);
-    if (!current || current.ready || !current.capabilities || !current.commandsSeen ||
-        (current.inboxRequired && !current.inboxSeen)) return;
-    current.ready = true;
-    for (const registration of this.liveRooms.get(roomId)?.registrations ?? [])
-      registration.onState?.(true, current.capabilities);
-  }
-
-  private currentLiveSubscription(event: Record<string, unknown>) {
-    if (typeof event.roomId !== 'string') return undefined;
-    const current = this.liveSubscriptions.get(event.roomId);
-    if (!current || (this.#channel.initialSnapshotsV1
-      ? event.requestId !== current.requestId
-      : event.requestId !== undefined && event.requestId !== current.requestId)) return undefined;
-    return current;
+    if (this.queueDemanded || this.roomsChangedListener) this.#channel.start();
   }
 
   private liveOpened(): void {
-    this.liveSubscriptions.clear();
-    for (const roomId of this.liveRooms.keys()) this.sendLiveSubscription(roomId);
+    if (this.queueDemanded) this.#channel.send({ type: 'subscribe-queue' });
     // Every wake on this socket is fire-and-forget: a membership written, or
     // a Connect tapped, while this socket was connecting (or between
     // reconnects) never replays its frame. Treat every open as both wakes,
@@ -596,92 +498,19 @@ export class DaemonApiClient {
       this.configChangedListener?.();
       return;
     }
-    if (event.type === 'subscribed' && typeof event.roomId === 'string') {
-      const current = this.currentLiveSubscription(event);
-      if (!current || current.ready) return;
-      const capabilities = event.capabilities as Record<string, unknown> | undefined;
-      // Old servers ignore inbox:false. Only the explicit current-server echo
-      // retires that lane; an old empty inbox is still a real initial snapshot.
-      current.inboxRequired = current.inboxRequested || capabilities?.inboxSnapshot !== false ||
-        !this.#channel.initialSnapshotsV1 || capabilities?.initialSnapshotsV1 !== true;
-      current.capabilities = {
-        pushIntake: capabilities?.pushIntake === true,
-        connectionGeneration: this.#channel.reconnects,
-        connectionPresence: capabilities?.connectionPresence === true,
-      };
-      this.completeLiveSubscription(event.roomId);
-      return;
-    }
     if (event.type === 'commands' && typeof event.error === 'string') {
-      if (this.currentLiveSubscription(event)) this.reconnectLive();
+      // A failed queue read is answered by reading it again on a fresh registration.
+      this.reconnectLive();
       return;
     }
-    if (
-      event.type === 'commands' &&
-      typeof event.roomId === 'string' &&
-      event.commandProtocol === 1 &&
-      Array.isArray(event.commands)
-    ) {
-      const room = this.liveRooms.get(event.roomId);
-      const current = this.currentLiveSubscription(event);
-      if (!room || !current) return;
-      const commands = event.commands.filter(
-        (command): command is AgentCommand =>
-          isAgentCommand(command) &&
-          command.roomId === event.roomId &&
-          command.agentId === this.agentId,
-      );
-      for (const registration of room.registrations) registration.onCommands?.(commands);
-      if (commands.length === event.commands.length) current.commandsSeen = true;
-      this.completeLiveSubscription(event.roomId);
+    if (event.type === 'commands' && event.commandProtocol === 2 && Array.isArray(event.commands)) {
+      if (typeof event.agentId === 'string' && event.agentId !== this.agentId) return;
+      this.queueListener?.(event.commands.filter(
+        (command): command is AgentCommand => isAgentCommand(command) && command.agentId === this.agentId,
+      ));
       return;
     }
-    if (event.type !== 'inbox' || typeof event.roomId !== 'string' || !Array.isArray(event.items)) {
-      if (!DAEMON_LIVE_EVENT_TYPES.has(event.type)) this.logUnknownLiveEvent(event.type);
-      return;
-    }
-    const room = this.liveRooms.get(event.roomId);
-    const current = this.currentLiveSubscription(event);
-    if (!room || !current) return;
-    const items: InboxItem[] = [];
-    for (const candidate of event.items) {
-      if (!candidate || typeof candidate !== 'object') continue;
-      const id = (candidate as { id?: unknown }).id;
-      if (typeof id === 'string') {
-        if (!room.pushedIds.has(id)) items.push(candidate as InboxItem);
-        room.pushedIds.add(id);
-      }
-    }
-    while (room.pushedIds.size > 10_000)
-      room.pushedIds.delete(room.pushedIds.values().next().value!);
-    if (items.length)
-      for (const registration of room.registrations)
-        registration.onItems?.(items, typeof event.cursor === 'string' ? event.cursor : undefined);
-    if (event.items.every(candidate => candidate && typeof candidate === 'object' && typeof candidate.id === 'string'))
-      current.inboxSeen = true;
-    this.completeLiveSubscription(event.roomId);
-  }
-
-  private sendLiveSubscription(roomId: string): void {
-    const room = this.liveRooms.get(roomId);
-    if (!room || !this.#channel.isOpen()) return;
-    const inboxRequested = [...room.registrations].some(registration => registration.onItems !== undefined);
-    const previous = this.liveSubscriptions.get(roomId);
-    if (previous?.inboxRequested === inboxRequested) return;
-    if (previous) this.#channel.send({ type: 'unsubscribe', roomId });
-    const current = { requestId: randomUUID(), inboxRequested, commandsSeen: false, inboxSeen: false,
-      inboxRequired: true, ready: false };
-    this.liveSubscriptions.set(roomId, current);
-    this.subscriptionCount += 1;
-    if (!this.#channel.send({
-      type: 'subscribe',
-      roomId,
-      requestId: current.requestId,
-      inbox: inboxRequested,
-      lifecycleId: this.presenceLifecycleId,
-      ...(room.cursor ? { cursor: room.cursor } : {}),
-      ...[...room.registrations].reverse().find((registration) => registration.presence)?.presence,
-    }) && this.liveSubscriptions.get(roomId) === current) this.liveSubscriptions.delete(roomId);
+    if (!DAEMON_LIVE_EVENT_TYPES.has(event.type)) this.logUnknownLiveEvent(event.type);
   }
 }
 

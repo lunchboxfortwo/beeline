@@ -86,31 +86,6 @@ it('acceptance 3: lost response replay has one authoritative workspace fact with
   expect((await db.query(`SELECT 1 FROM diagnostic_actions WHERE detail->>'name'='workspace_created'`)).rowCount).toBe(3);
 });
 
-it('command origin crosses the durable queue and terminal observations never invent a reply',async()=>{
-  const b=batch();await ingestDiagnostics(db,b,user);
-  const ws=await db.transaction(tx=>createWorkspace(tx,{name:'Command fixture'},user));
-  const agent='d'.repeat(64),message='e'.repeat(64);
-  await db.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Fixture worker')`,[agent]);
-  await db.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`,[agent,user]);
-  await db.query(`INSERT INTO memberships(workspace_id,identity_id,role) VALUES($1,$2,'member')`,[ws.id,agent]);
-  await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`,[ws.id,ws.roomId,agent]);
-  await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'private order')`,[message,ws.roomId,user]);
-  const actionId=randomUUID();
-  const command=await withDiagnosticContext(user,{deviceId:b.deviceId,sessionId:b.sessionId,viewId:b.viewId,actionId,requestId:randomUUID()},
-    ()=>db.transaction(tx=>createAgentCommand(tx,{roomId:ws.roomId,agentId:agent,sourceMessageId:message,reason:'human_tag'})));
-  expect(command).toBeDefined();
-  expect((await db.query(`SELECT session_id,action_id FROM diagnostic_command_origins WHERE command_id=$1`,[command!.id])).rows[0])
-    .toEqual({session_id:b.sessionId,action_id:actionId});
-  await db.query(`INSERT INTO agent_turns(room_id,request_id,agent_id,status) VALUES($1,$2,$3,'working') ON CONFLICT(room_id,request_id,agent_id) DO UPDATE SET status='working',generation_id=NULL`,[ws.roomId,command!.turn_request_id,agent]);
-  expect(await db.transaction(tx=>endAgentTurn(tx,command!,'failed','activation-failed'))).toBe(true);
-  expect((await db.query(`SELECT status FROM agent_turns WHERE room_id=$1 AND request_id=$2 AND agent_id=$3`,[ws.roomId,command!.turn_request_id,agent])).rows[0]).toEqual({status:'failed'});
-  const steps=(await readPersonDiagnostics(db,user))!.devices[0]!.sessions[0]!.actions.filter(a=>a.command_id===command!.id);
-  expect(steps.map(s=>s.detail.name)).toEqual(['agent_command','agent_terminal']);
-  expect(steps[1]!.detail.outcome).toBe('failed');
-  expect(steps[1]!.detail.hostResult).toBe('failed');
-  expect(JSON.stringify(steps)).not.toContain('private order');
-});
-
 it('acceptance 4: callback receipt, HTTP refusal, network failure, access skip and absent host acknowledgement remain distinct',async()=>{
   vi.stubEnv('BEELINE_MCP_WEBHOOK_KEY','fixture-key');
   const ws=await db.transaction(tx=>createWorkspace(tx,{name:'Delivery fixture'},user));

@@ -17,10 +17,9 @@
  * in the SAME turn instead of inventing a description or waiting on a picture
  * that is not coming.
  */
-import { mkdir, writeFile } from 'node:fs/promises';
-import { basename, extname, join } from 'node:path';
 import type { DaemonAttachment } from '@beeline/api-contract/daemon';
-import type { AcpPromptBlock } from './acp.js';
+import { mkdir,writeFile } from 'node:fs/promises';
+import { basename,extname,join } from 'node:path';
 
 /** Same ceiling as the artifact path (`read-only-mcp.ts`). */
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
@@ -241,81 +240,4 @@ export function attachmentMarkerLines(attachments: readonly DaemonAttachment[]):
 /** Drop the inline image bytes once the prompt is built, so a transcript cache stays small. */
 export function withoutImageData(delivered: readonly DeliveredAttachment[]): DeliveredAttachment[] {
   return delivered.map(({ image: _image, ...rest }) => rest);
-}
-
-/**
- * Why an image attachment that HAS a local copy still does not reach the model
- * as image content, or `undefined` when it does.
- */
-function unseenImageReason(
-  attachment: DaemonAttachment,
-  entry: DeliveredAttachment | undefined,
-  harnessAcceptsImages: boolean,
-): string | undefined {
-  const isImage =
-    attachment.mimeType?.startsWith('image/') || Boolean(entry?.image) || Boolean(entry?.inlineSkipped);
-  if (!isImage || !entry?.path) return undefined;
-  if (entry.inlineSkipped) return entry.inlineSkipped;
-  if (!harnessAcceptsImages) return 'this session cannot take image content';
-  return undefined;
-}
-
-/**
- * The prompt lines for one message's attachments. `harnessAcceptsImages` is
- * the live `promptCapabilities.image` answer: with it false, an image is named
- * as unseen rather than left to look like a picture the model was shown.
- */
-export function attachmentPromptLines(
-  attachments: readonly DaemonAttachment[],
-  delivered?: readonly DeliveredAttachment[],
-  harnessAcceptsImages = true,
-): string[] {
-  if (!attachments.length) return [];
-  const byUrl = new Map(delivered?.map((entry) => [entry.attachment.url, entry]) ?? []);
-  const unseen = new Set<string>();
-  const lines = attachments.map((attachment) => {
-    const kind = attachment.mimeType?.startsWith('image/') ? 'image' : 'file';
-    const metadata = [attachment.mimeType, attachment.size ? `${attachment.size} bytes` : '']
-      .filter(Boolean)
-      .join(', ');
-    const entry = byUrl.get(attachment.url);
-    const location = entry?.path
-      ? `local file ${entry.path}`
-      : (entry?.reason ?? 'no local copy in this session');
-    const reason = unseenImageReason(attachment, entry, harnessAcceptsImages);
-    if (reason) unseen.add(reason);
-    return `- ${kind}: ${attachment.name ?? 'attachment'}${metadata ? ` (${metadata})` : ''}: ${location}${
-      reason ? ` (NOT shown to you as an image: ${reason})` : ''
-    } (source ${attachment.url})`;
-  });
-  return [
-    'Attachments shared with this message (read the local file; the trailing URL is only a reference, do not download it):',
-    ...lines,
-    ...(unseen.size
-      ? [
-          `You were not shown the picture itself: ${[...unseen].join('; ')}. If you are asked about it, say that in one plain sentence rather than describing an image you cannot see.`,
-        ]
-      : []),
-  ];
-}
-
-/** Inline image blocks for the harness, only when it advertised `promptCapabilities.image`. */
-export function attachmentImageBlocks(
-  delivered: readonly DeliveredAttachment[],
-  harnessAcceptsImages: boolean,
-): AcpPromptBlock[] {
-  if (!harnessAcceptsImages) return [];
-  return delivered.flatMap((entry) =>
-    entry.image
-      ? [{ type: 'image' as const, data: entry.image.data, mimeType: entry.image.mimeType }]
-      : [],
-  );
-}
-
-/** A text prompt plus its inline image blocks, or the bare string when there are none. */
-export function promptWithImages(
-  text: string,
-  images: readonly AcpPromptBlock[],
-): string | AcpPromptBlock[] {
-  return images.length ? [{ type: 'text', text }, ...images] : text;
 }

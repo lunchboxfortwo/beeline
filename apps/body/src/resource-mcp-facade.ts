@@ -464,7 +464,7 @@ async function postSquireApproval(
     unknown
   >;
   if (
-    ![context.roomId, context.requestId, context.generationId].every(
+    ![context.roomId, context.requestId].every(
       (value) => typeof value === 'string' && value.length > 0,
     )
   )
@@ -497,7 +497,7 @@ async function postSquireLoginWall(
     unknown
   >;
   if (
-    ![context.roomId, context.requestId, context.generationId].every(
+    ![context.roomId, context.requestId].every(
       (value) => typeof value === 'string' && value.length > 0,
     )
   )
@@ -545,7 +545,7 @@ export async function authorizeResourceMessage(
     unknown
   >;
   if (
-    ![context.roomId, context.requestId, context.generationId].every(
+    ![context.roomId, context.requestId].every(
       (value) => typeof value === 'string' && value.length > 0,
     )
   )

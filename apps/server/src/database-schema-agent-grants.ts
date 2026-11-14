@@ -605,7 +605,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS workspace_connections_machine_reference_unique
   ON workspace_connections(owner_identity_id,machine_id,reference) WHERE machine_id IS NOT NULL;
 DELETE FROM workspace_connectors WHERE connector_type='trusty-squire';
 DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='workspace_connectors_no_squire') THEN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='workspace_connectors_no_squire'
+    AND conrelid='workspace_connectors'::regclass) THEN
     ALTER TABLE workspace_connectors ADD CONSTRAINT workspace_connectors_no_squire
       CHECK (connector_type<>'trusty-squire') NOT VALID;
   END IF;

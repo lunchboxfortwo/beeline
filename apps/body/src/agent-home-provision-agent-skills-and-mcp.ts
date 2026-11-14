@@ -48,24 +48,24 @@ import { piNoRetrySettings } from './pi-retry-settings.js';
  * Pi uses `PI_CODING_AGENT_DIR` and the isolated `$HOME`, preventing its
  * otherwise-implicit reads from the operator's `~/.pi` and `~/.agents` trees.
  */
-import { existsSync, readFileSync } from 'node:fs';
-import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
-import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { randomUUID } from 'node:crypto';
-import { lstat, mkdir, realpath, rename, rm, unlink } from 'node:fs/promises';
+import { existsSync,readFileSync } from 'node:fs';
+import { lstat,mkdir,realpath,rename,rm,unlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, resolve } from 'node:path';
-import { NATIVE_SHELL_OUTPUT_SCRIPT, nativeShellHookCommand, nativeShellHookConfig } from './native-shell-output.js';
-import { DRAW_AVATAR_SKILL_NAME, drawAvatarSkillMarkdown } from './draw-avatar-skill.js';
-import { AGENT_BEHAVIORS, IMPORTED_MCP_KINDS, agentBehavior, type AgentKind } from './agent-command.js';
+import { dirname,resolve } from 'node:path';
+import { parse as parseToml,stringify as stringifyToml } from 'smol-toml';
+import { parse as parseYaml,stringify as stringifyYaml } from 'yaml';
+import { AGENT_BEHAVIORS,IMPORTED_MCP_KINDS,agentBehavior,type AgentKind } from './agent-command.js';
+import { assertRealContainedDirectory,copySafeSkillTree,materializedSkillManifest,planManagedSkills,resolveSharedSkillSources,writeIsolatedHarnessFile } from './agent-home-plan-managed-skills.js';
+import { AgentHomeSecurityError,AgentSkillDir,CODEX_ROOM_AGENT_LOCKDOWN_TOML,CODEX_ROOM_WEB_SEARCH_TOML,GOOSE_SHARED_CONFIG_FILES,HARNESS_MCP_CONFIGS,PI_CUSTOM_MODEL_CONFIG,PI_MCP_CONFIG,RoomAgentHomeInput } from './agent-home.js';
 import { beelineManagedSkills } from './beeline-skill.js';
-import { classifyImportedMcpServer, isCodeOwnedHostMcpName } from './mcp-route-class.js';
-import { grantedSquireHostRoute, mergeGooseHostRoutes, mergeJsonHostRoutes, mergeTomlHostRoutes, rewriteGrantedHostRoutes } from './host-mcp-route.js';
-import { ensureSquireHostDir, squireHostBindPaths } from './squire-host.js';
-import { OPENROUTER_MAX_OUTPUT_TOKENS, resolveOpenRouterRouting, withOpenRouterModelRouting, type OpenRouterRoutingDecision } from './openrouter-routing.js';
-import { extractTomlSections, tomlChildTableNames } from './toml-section.js';
-import { AgentSkillDir, RoomAgentHomeInput, HARNESS_MCP_CONFIGS, CODEX_ROOM_AGENT_LOCKDOWN_TOML, CODEX_ROOM_WEB_SEARCH_TOML, GOOSE_SHARED_CONFIG_FILES, PI_MCP_CONFIG, PI_CUSTOM_MODEL_CONFIG, AgentHomeSecurityError } from './agent-home.js';
-import { resolveSharedSkillSources, writeIsolatedHarnessFile, assertRealContainedDirectory, planManagedSkills, materializedSkillManifest, copySafeSkillTree } from './agent-home-plan-managed-skills.js';
+import { DRAW_AVATAR_SKILL_NAME,drawAvatarSkillMarkdown } from './draw-avatar-skill.js';
+import { grantedSquireHostRoute,mergeGooseHostRoutes,mergeJsonHostRoutes,mergeTomlHostRoutes,rewriteGrantedHostRoutes } from './host-mcp-route.js';
+import { classifyImportedMcpServer } from './mcp-route-class.js';
+import { NATIVE_SHELL_OUTPUT_SCRIPT,nativeShellHookCommand,nativeShellHookConfig } from './native-shell-output.js';
+import { OPENROUTER_MAX_OUTPUT_TOKENS,resolveOpenRouterRouting,withOpenRouterModelRouting,type OpenRouterRoutingDecision } from './openrouter-routing.js';
+import { ensureSquireHostDir } from './squire-host.js';
+import { extractTomlSections,tomlChildTableNames } from './toml-section.js';
 
 
 
@@ -483,31 +483,6 @@ export function recordValue(value: unknown): Record<string, unknown> | undefined
 }
 
 
-export function mountedImportedMcpServerNames(
-  input: {
-    operatorHome?: string;
-    agentKind?: AgentKind;
-    preparedEnv?: Record<string, string>;
-  } = {},
-): string[] {
-  const names = new Set<string>();
-  if (input.preparedEnv) {
-    const env = input.preparedEnv;
-    const home = env.HOME ?? input.operatorHome ?? homedir();
-    for (const config of importedMcpConfigs(input.agentKind)) {
-      const hasHome = config.format === 'extensions' ? Boolean(env[config.homeEnv]) : env[config.homeEnv] !== undefined;
-      const path = hasHome
-        ? resolve(env[config.homeEnv]!, config.file)
-        : resolve(home, config.source);
-      addMcpNamesFromMap(names, readImportedMcpServers(config.format, path));
-    }
-  } else {
-    collectImportedMcpNames(input.operatorHome ?? homedir(), names, input.agentKind);
-  }
-  return [...names].sort((left, right) => left.localeCompare(right));
-}
-
-
 /**
  * Host-classified imported servers, read from the operator's own configs.
  * Ungranted ones stay out of the isolated home; granted ones are rewritten in
@@ -535,66 +510,6 @@ export function hostImportedMcpDeclarations(
 }
 
 
-export function hostImportedMcpServerNames(
-  input: {
-    operatorHome?: string;
-    agentKind?: AgentKind;
-  } = {},
-): string[] {
-  return Object.keys(hostImportedMcpDeclarations(input)).sort((left, right) =>
-    left.localeCompare(right),
-  );
-}
-
-
-/**
- * The host paths a session must have bound read-write: only the Squire broker
- * directory, and only for an agent whose grant actually rewrites a Squire
- * route. Any other `mcp` grant reaches none of it.
- */
-export function grantedSquireHostBindPaths(input: {
-  operatorHome?: string;
-  agentKind?: AgentKind;
-  grantedHostRoutes?: readonly string[];
-}): string[] {
-  const operatorHome = input.operatorHome ?? homedir();
-  const granted = input.grantedHostRoutes ?? [];
-  if (granted.length === 0) return [];
-  return squireHostBindPaths(
-    operatorHome,
-    grantedSquireHostRoute(
-      granted,
-      hostImportedMcpDeclarations({ operatorHome, agentKind: input.agentKind }),
-    ),
-  );
-}
-
-
-/** Local copies plus granted host routes — the inventory prepare would write. */
-export function expectedMountedImportedMcpServerNames(input: {
-  operatorHome?: string;
-  agentKind?: AgentKind;
-  grantedHostRoutes?: readonly string[];
-}): string[] {
-  const local = mountedImportedMcpServerNames({
-    operatorHome: input.operatorHome,
-    agentKind: input.agentKind,
-  });
-  const allowed = new Set(input.grantedHostRoutes ?? []);
-  const grantedHost = hostImportedMcpServerNames({
-    operatorHome: input.operatorHome,
-    agentKind: input.agentKind,
-  }).filter((name) => allowed.has(name));
-  // A code-owned host name is a standing route even when this harness has
-  // no operator declaration to rewrite. The grant target is `squire`; the
-  // operator file may use another key or be missing.
-  for (const name of allowed) {
-    if (isCodeOwnedHostMcpName(name)) grantedHost.push(name);
-  }
-  return [...new Set([...local, ...grantedHost])].sort((left, right) => left.localeCompare(right));
-}
-
-
 export function importedMcpConfigs(kind?: AgentKind) {
   const behaviors = kind ? [agentBehavior(kind)] : IMPORTED_MCP_KINDS.map(kind => AGENT_BEHAVIORS[kind]);
   return behaviors.flatMap((behavior) => behavior.importedMcp ? [behavior.importedMcp] : []);
@@ -605,19 +520,6 @@ export function readImportedMcpServers(format: 'toml' | 'json' | 'extensions', p
   if (format === 'toml') return readTomlMcpServers(path);
   if (format === 'extensions') return readGooseExtensions(path);
   return recordValue(readJsonObject(path)?.mcpServers);
-}
-
-
-export function collectImportedMcpNames(operatorHome: string, names: Set<string>, kind?: AgentKind): void {
-  for (const config of importedMcpConfigs(kind)) {
-    addLocalMcpNames(names, readImportedMcpServers(config.format, resolve(operatorHome, config.source)));
-  }
-}
-
-
-export function addLocalMcpNames(names: Set<string>, servers: Record<string, unknown> | undefined): void {
-  if (!servers) return;
-  for (const name of Object.keys(localMcpServers(servers))) names.add(name);
 }
 
 
@@ -642,15 +544,6 @@ export function readGooseExtensions(path: string): Record<string, unknown> | und
     return undefined;
   }
   return recordValue(recordValue(parsed)?.extensions);
-}
-
-
-export function addMcpNamesFromMap(
-  names: Set<string>,
-  servers: Record<string, unknown> | undefined,
-): void {
-  if (!servers) return;
-  for (const name of Object.keys(servers)) names.add(name);
 }
 
 
