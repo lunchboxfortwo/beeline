@@ -6,7 +6,7 @@ import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { clearOwedMention, mentionReplyKey } from '../owed-mentions.js';
 import { postRepositoryOnboarding } from '../repository-onboarding.js';
 import { CommandRefusalError } from '../commander.js';
-import { vaultSaveRequest, type VaultSaveCard } from '@beeline/api-contract/daemon';
+import { isBackgroundCommand, vaultSaveRequest, type VaultSaveCard } from '@beeline/api-contract/daemon';
 import { FIRST_PARTY_INTEGRATIONS } from '../first-party-integrations.js';
 import { setCornerHold } from '../corner-holds.js';
 import { authorizeCommandOutput } from '../agent-command-route-agent-result.js';
@@ -207,7 +207,7 @@ export async function markAgentTurnSilentOperation<Name extends keyof DaemonOper
           if (!(await ctx.database.query(`SELECT 1 FROM agent_pending_attachments
             WHERE room_id=$1 AND agent_id=$2 AND request_id=$3 LIMIT 1`,
             [command.room_id, authenticatedAgentId, command.turn_request_id])).rowCount) {
-            const answered = command.state === 'complete' || command.action === 'restart' || Boolean((await ctx.database.query(
+            const answered = command.state === 'complete' || command.action === 'restart' || isBackgroundCommand(command.reason) || Boolean((await ctx.database.query(
               `SELECT 1 FROM messages WHERE room_id=$1 AND author_id=$2 AND request_id=$3
                 AND deleted_at IS NULL LIMIT 1`,
               [command.return_room_id, authenticatedAgentId, command.turn_request_id])).rowCount);

@@ -396,6 +396,44 @@ it('keeps an 18-hour offline backlog pending until one combined answer completes
   expect((await queue()).find(item => item.id === fresh.id)?.offlineSeconds).toBeUndefined();
 });
 
+it('a quiet reconnect batch completes its schedule and event wake silently while the human tag stays owed', async () => {
+  await claimAgentConnection(db, live, A, {}, { connectionId: 'before-quiet', instanceId: 'server' });
+  await releaseAgentConnection(db, live, A, 'before-quiet');
+  await db.query(`UPDATE agent_connections SET released_at=clock_timestamp()-interval '6 hours' WHERE agent_id=$1`, [A]);
+  await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,system_event) VALUES
+    ('quiet-schedule',$1,$2,'errors schedule ran','system',$3::jsonb),('quiet-event',$1,$2,'a member joined','system',$4::jsonb)`,
+    [R1, H, JSON.stringify({ kind:'schedule-ran',scheduleId:'errors',consequence:'errors schedule ran' }), JSON.stringify({ kind:'member-joined' })]);
+  const schedule = (await createAgentCommand(db, { roomId:R1,agentId:A,sourceMessageId:'quiet-schedule',reason:'schedule' }))!;
+  const event = (await createAgentCommand(db, { roomId:R1,agentId:A,sourceMessageId:'quiet-event',reason:'subscribed_event' }))!;
+  const tag = await ask(R1, '@other are you there?');
+  await claimAgentConnection(db, live, A, {}, { connectionId: 'after-quiet', instanceId: 'server' });
+  expect((await queue()).map(item => [item.id, item.offlineSeconds !== undefined])).toEqual([[schedule.id,true],[event.id,true],[tag.id,true]]);
+  const before = (await db.query(`SELECT count(*)::int n FROM messages WHERE author_id=$1`, [A])).rows[0];
+  // The helper's quiet answer: nothing for the background items, nothing yet for the person.
+  expect(await answer(R1, schedule.id, '')).not.toMatchObject({ answered: false });
+  expect(await daemon.execute('postRoomMessage', { roomId:R1,requestId:event.id,text:'' }, A)).not.toMatchObject({ answered: false });
+  expect(await answer(R1, tag.id, '')).toMatchObject({ answered: false });
+  expect((await queue()).map(item => item.id)).toEqual([tag.id]);
+  expect((await db.query(`SELECT id,state,result_message_id FROM agent_commands WHERE id=ANY($1::text[]) ORDER BY id`, [[schedule.id,event.id]])).rows)
+    .toEqual([schedule.id,event.id].sort().map(id => ({ id,state:'complete',result_message_id:null })));
+  // A later closing line for a quietly finished item is not published, and wakes nobody.
+  await answer(R1, schedule.id, 'Nothing to report.');
+  expect((await db.query(`SELECT count(*)::int n FROM messages WHERE author_id=$1`, [A])).rows[0]).toEqual(before);
+  await answer(R1, tag.id, 'Yes, I am here.');
+  expect(await queue()).toEqual([]);
+});
+
+it('no_reply_needed finishes a background item but not an owed human answer', async () => {
+  await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,system_event) VALUES('silent-schedule',$1,$2,'ads ran','system',$3::jsonb)
+    ON CONFLICT(id) DO NOTHING`, [R1, H, JSON.stringify({ kind:'schedule-ran',scheduleId:'ads',consequence:'ads ran' })]);
+  const schedule = (await createAgentCommand(db, { roomId:R1,agentId:A,sourceMessageId:'silent-schedule',reason:'schedule' }))!;
+  const tag = await ask(R1, 'still need an answer');
+  expect(await daemon.execute('markAgentTurnSilent', { roomId:R1,requestId:schedule.id }, A)).toMatchObject({ answered: true });
+  expect(await daemon.execute('markAgentTurnSilent', { roomId:R1,requestId:tag.id }, A)).toMatchObject({ answered: false });
+  expect((await queue()).map(item => item.id)).toEqual([tag.id]);
+  expect((await db.query(`SELECT 1 FROM messages WHERE author_id=$1 AND request_id=$2`, [A, schedule.id])).rows).toEqual([]);
+});
+
 it('publishes a combined answer to each recorded return address', async () => {
   const first = await ask(R1,'answer here');
   const second = (await createAgentCommand(db, { roomId:R1,agentId:A,sourceMessageId:null,reason:'order',

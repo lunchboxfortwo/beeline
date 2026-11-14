@@ -1,5 +1,5 @@
 import type { AgentCommand,AgentCommandAction,RoomInboxResult } from '@beeline/api-contract/daemon';
-import { wall } from '@beeline/api-contract/daemon';
+import { isBackgroundCommand,wall } from '@beeline/api-contract/daemon';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { createHash,randomBytes } from 'node:crypto';
 import { parseTaggedAgentLifecycleCommand } from './agent-command-create-agent-command.js';
@@ -781,8 +781,9 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
        WHERE item.agent_id=$1 AND item.room_id::text=$2 AND item.id=$3 FOR UPDATE OF item`,
       [agentId, input.roomId, input.requestId ?? null],
     )).rows[0];
-    if (item?.state === 'complete' && item.result_message_id)
-      return { id: item.result_message_id, createdAt: Math.floor(new Date(item.created_at).getTime() / 1000), delivered: true };
+    // A quietly finished background item stays quiet when a closing line arrives later.
+    if (item?.state === 'complete' && (item.result_message_id || isBackgroundCommand(item.reason)))
+      return { id: item.result_message_id ?? item.id, createdAt: Math.floor(new Date(item.created_at).getTime() / 1000), delivered: true };
     const payload = item?.private_payload;
     const escalation = input.report ? item?.report_address ?? (payload?.kind === 'order' ? payload.escalation : undefined) : undefined;
     const roomId = escalation?.roomId ?? item?.return_room_id ?? payload?.fromRoomId ?? input.roomId;
@@ -800,6 +801,12 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
       await endAgentTurn(db,item,input.report && input.status === 'failed' ? 'failed' : 'complete',null,item.public_reply_id);
       history = {id,roomId:item.return_room_id ?? input.roomId,text:publicText};
       return {id:item.public_reply_id,createdAt:Math.floor(Date.now()/1000),delivered:true};
+    }
+    // Background work with nothing to say finishes without a post; an owed answer stays queued.
+    if (!publicText && item?.state === 'pending' && isBackgroundCommand(item.reason) && !item.answer_attachments?.length) {
+      completedNow = true;
+      await endAgentTurn(db, item, 'complete');
+      return { id: item.id, createdAt: Math.floor(Date.now() / 1000) };
     }
     if (!publicText) return { id: item?.id ?? hash(`${agentId}:${input.roomId}`), createdAt: Math.floor(Date.now() / 1000), answered: false };
     const text = (input.report ? `${status}: ${publicText.replace(/^(?:done|blocked|failed|needs[-_]decision):\s*/, '')}` : publicText).trim();
