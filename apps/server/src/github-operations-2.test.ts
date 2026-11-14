@@ -58,11 +58,12 @@ const scope1 = fixtureScope1();
     runInNewContext(formatter.code, { module, exports: module.exports });
     const { cornerStatusLine } = module.exports as typeof import('../../mobile/sources/buzz/corner-status-line.js');
     expect(cornerStatusLine(lifecycle, false)).toBe('PR #1 · all 31 tests passed');
+    // A green head prints no check line; the reviewer's request is the record.
     const facts = () => scope1.database.query(`SELECT 1 FROM messages WHERE room_id=$1
-      AND system_event->>'kind'='check-passed' AND system_event->'object'->>'headSha'=$2`, [corner, newHead]);
+      AND system_event->>'verb'='requested review of' AND system_event->'object'->>'headSha'=$2`, [corner, newHead]);
     const wakes = () => scope1.database.query(`SELECT command.agent_id FROM agent_commands command
       JOIN messages source ON source.id=command.source_message_id WHERE command.room_id=$1
-      AND source.system_event->>'kind'='check-passed'
+      AND source.system_event->>'verb'='requested review of'
       AND source.system_event->'object'->>'headSha'=$2`, [corner, newHead]);
     expect((await facts()).rowCount).toBe(1);
     expect((await wakes()).rows).toEqual([{ agent_id: REVIEWER }]);
@@ -176,13 +177,13 @@ const scope1 = fixtureScope1();
       `SELECT lifecycle FROM corner_facts WHERE corner_id=$1`, [corner],
     )).rows[0]?.lifecycle).toMatchObject({ pr: { headSha: newHead }, checks: 'passing' });
     expect((await scope1.database.query(
-      `SELECT 1 FROM messages WHERE room_id=$1 AND system_event->>'kind'='check-passed'`,
+      `SELECT 1 FROM messages WHERE room_id=$1 AND text LIKE '%passed a check%'`,
       [corner],
-    )).rowCount).toBe(1);
+    )).rowCount).toBe(0);
   });
 
 
-  it('B3: records no started or individual passed notes while retaining the green rollup', async () => {
+  it('B3: records no started or passed notes while retaining the green rollup', async () => {
     const { corners, app, payload } = await scope1.checksFixture();
     const operations = new GitHubOperations(scope1.database, {} as GitHubOAuthClient, app as unknown as GitHubAppClient, 'secret');
     app.readCommitCheckRollup.mockResolvedValue({ state: 'pending', total: 2, failing: [], checks: [
@@ -196,8 +197,8 @@ const scope1 = fixtureScope1();
       { name: 'tests', status: 'passed' }, { name: 'lint', status: 'passed' },
     ] });
     await operations.processWebhook('check_run', payload);
-    expect((await scope1.database.query(`SELECT card,system_event->>'kind' kind FROM messages WHERE room_id=$1 AND card_type='github-corner-note'`, [corners[0]])).rows)
-      .toEqual([{ card: null, kind: 'check-passed' }]);
+    expect((await scope1.database.query(`SELECT 1 FROM messages WHERE room_id=$1 AND card_type='github-corner-note'`, [corners[0]])).rows).toHaveLength(0);
+    expect((await operations.lifecycle(corners[0]!)).checks).toBe('passing');
   });
 
 
@@ -205,16 +206,20 @@ const scope1 = fixtureScope1();
     const { corners, headSha, app, payload } = await scope1.checksFixture();
     const operations = new GitHubOperations(scope1.database, {} as GitHubOAuthClient, app as unknown as GitHubAppClient, 'secret');
     await scope1.database.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{checks}','"unknown"') WHERE corner_id=$1`, [corners[0]]);
+    // Only a failing check prints a line; other checks are still running.
+    app.readCommitCheckRollup.mockResolvedValue({ state: 'pending', total: 2, failing: [], checks: [
+      { name: 'GitHub Actions check suite', status: 'failed' }, { name: 'lint', status: 'pending' },
+    ] });
     await operations.processWebhook('check_suite', {
       ...payload,
       check_suite: {
-        id: 42, status: 'completed', conclusion: 'success', head_branch: 'feature/corner-333333330001',
+        id: 42, status: 'completed', conclusion: 'failure', head_branch: 'feature/corner-333333330001',
         head_sha: headSha, app: { name: 'GitHub Actions' },
         url: 'https://api.github.com/repos/owner/widgets/check-suites/42',
       },
     });
     const row = (await scope1.database.query<{ card_type: string; card: { source: string }; system_event: { object: { url: string } } }>(
-      `SELECT card_type,card,system_event FROM messages WHERE room_id=$1 AND text='@GitHub passed a check GitHub Actions check suite'`,
+      `SELECT card_type,card,system_event FROM messages WHERE room_id=$1 AND text='@GitHub failed a check GitHub Actions check suite'`,
       [corners[0]],
     )).rows[0];
     expect(row).toMatchObject({

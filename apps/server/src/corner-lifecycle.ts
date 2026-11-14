@@ -279,7 +279,7 @@ async function readCornerAdvance(
     await ensureSystemIdentity(db);
     const row = (await db.query<CornerIdleRow>(cornerIdleSql('$1', true), [cornerId])).rows[0];
     const sourceHead =
-      event.kind === 'checks'
+      event.kind === 'checks' && event.sourceMessageId
         ? (
             await db.query<{ head: string | null }>(
               `SELECT system_event->'object'->>'headSha' head FROM messages WHERE id=$1 AND room_id=$2`,
