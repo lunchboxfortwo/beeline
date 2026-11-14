@@ -64,6 +64,15 @@ it('starts and answers before optional reads begin, even if none of them resolve
   await f.session.dispose();
 });
 
+it('allows an unchanged automatic attention wake to finish without repeating a status', async () => {
+  const f = await fixture();
+  await f.session.start();
+  await f.session.deliver({ ...f.item, reason: 'attention_report' });
+  expect(f.prompt.mock.calls[0]![1]).toContain('If nothing has changed or needs action, call no_reply_needed');
+  expect(f.prompt.mock.calls[0]![1]).toContain('Human requests in this batch still need an answer.');
+  await f.session.dispose();
+});
+
 it('keeps a cold repository corner able to check out and push after session context loads', async () => {
   const f = await fixture(true);
   const source = join(f.config.workspaceRoot!, 'source');
@@ -251,7 +260,7 @@ it('delivers an 18-hour offline backlog as one prompt without requiring steering
     source: { ...f.item.source, id: `run-source-${n}`, body: `scheduled run ${n}` } }));
   const batch = [...tags, ...runs];
   await f.session.start();
-  await f.session.deliver(tags[0]!, [], batch);
+  await f.session.deliver(tags[0]!, batch);
   expect(f.prompt).toHaveBeenCalledTimes(1);
   const prompt = f.prompt.mock.calls[0]![1];
   expect(prompt).toContain('> You were offline for 18 h. These arrived while you were away and may be outdated.');

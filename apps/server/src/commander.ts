@@ -227,6 +227,7 @@ export async function reportToCommander(
     recipientId: recipient, authorId: agentId, text, id: reportId,
     sourceRoomId: roomId, sourceItem: source, parent,
     attachments: options.attachments, ask: options.ask,
+    automatic: options.automatic, idleSince: options.idleSince,
   });
 }
 
@@ -237,7 +238,7 @@ export async function reportAgentAttention(
 ): Promise<void> {
   const route = await commanderReportAddress(db, roomId, command);
   const agent = (await db.query("SELECT 1 FROM identities WHERE id=$1 AND kind='agent'", [route.recipient])).rowCount;
-  if (agent) await reportToCommander(db, roomId, agentId, text, command, reportId, options);
+  if (agent) await reportToCommander(db, roomId, agentId, text, command, reportId, { ...options, automatic: true });
 }
 
 /** Approved revisions replace the opening route without changing its provenance. */

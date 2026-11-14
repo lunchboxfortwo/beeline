@@ -5,6 +5,7 @@ import { RETIRED_STOP_CONTROLS } from './agent-turn-end.js';
 import { claimAgentConnection,releaseAgentConnection } from './connection-presence.js';
 import type { SqlDatabase } from './database.js';
 import { LiveHub } from './live.js';
+import { owedMentions } from './owed-mentions.js';
 import { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
 import { migratedDatabase,type PgliteDatabase } from './test-support.js';
 
@@ -444,17 +445,50 @@ it('publishes a combined answer to each recorded return address', async () => {
     .toEqual([{room_id:R1},{room_id:R2}]);
 });
 
-it('reuses a mid-turn reply for the whole batch and carries every attachment', async () => {
+it('publishes one answer for a chat batch, dedupes replay, and settles every covered tag', async () => {
+  const first = await ask(R1, 'first question'), second = await ask(R1, 'second question');
+  const covered = [first.source_message_id, second.source_message_id];
+  expect((await owedMentions(db, A)).map(item => item.messageId).filter(id => covered.includes(id))).toEqual(covered);
+  const input = { roomId: R1, requestId: first.id, queuedRequestIds: [second.id], text: 'One combined answer' };
+  await daemon.execute('postRoomMessage', input, A);
+  await daemon.execute('postRoomMessage', input, A);
+  expect((await db.query("SELECT id FROM messages WHERE author_id=$1 AND text='One combined answer'", [A])).rows).toHaveLength(1);
+  expect(await queue()).toEqual([]);
+  expect((await owedMentions(db, A)).filter(item => covered.includes(item.messageId))).toEqual([]);
+});
+
+it('groups reports by their recorded recipient, rather than treating their author as a recipient', async () => {
+  const items = await Promise.all(['one', 'two'].map(text => createAgentCommand(db, {
+    roomId: R1, agentId: A, sourceMessageId: null, reason: 'report',
+    privatePayload: { kind: 'report', authorId: A, fromRoomId: R1, text },
+  })));
+  await daemon.execute('postRoomMessage', { roomId: R1, requestId: items[0]!.id,
+    queuedRequestIds: [items[1]!.id], text: 'Combined report response' }, A);
+  expect((await db.query("SELECT id FROM messages WHERE author_id=$1 AND text='Combined report response'", [A])).rows).toHaveLength(1);
+  expect(await queue()).toEqual([]);
+});
+
+it.each([0, 1].flatMap(postedIndex => ['', 'Closing summary'].map(closing => ({postedIndex,closing}))))(
+  'reuses a mid-turn reply for batch item $postedIndex with closing "$closing" and carries every attachment', async ({ postedIndex, closing }) => {
   const first = await ask(R1,'first batch asker');
   const second = await ask(R1,'second batch asker');
-  const posted = await daemon.execute('postCornerMessage', { roomId:R1,cornerId:R1,requestId:first.id,text:'Both answers from the tool.' }, A);
+  const posted = await daemon.execute('postCornerMessage', { roomId:R1,cornerId:R1,requestId:[first,second][postedIndex]!.id,text:'Both answers from the tool.' }, A);
   const file = {url:'https://example.test/batch-proof',name:'batch-proof.txt',mimeType:'text/plain',size:12};
   await db.query('UPDATE agent_commands SET answer_attachments=$2::jsonb WHERE id=$1',[second.id,JSON.stringify([file])]);
-  await daemon.execute('postRoomMessage',{roomId:R1,requestId:first.id,queuedRequestIds:[second.id],text:'Closing summary'},A);
+  await daemon.execute('postRoomMessage',{roomId:R1,requestId:first.id,queuedRequestIds:[second.id],text:closing},A);
   expect(await queue()).toEqual([]);
   expect((await db.query('SELECT attachments FROM messages WHERE id=$1',[posted.id])).rows[0]).toEqual({attachments:[file]});
   expect((await db.query("SELECT count(*)::int n FROM messages WHERE author_id=$1 AND room_id=$2 AND text='Closing summary' AND presentation='message'",[A,R1])).rows[0])
     .toEqual({n:0});
+});
+
+it('an empty mixed batch finishes all background work and retains the unanswered human request', async () => {
+  const human = await ask(R1, 'still owed in the middle');
+  const before = (await createAgentCommand(db, { roomId:R1,agentId:A,sourceMessageId:null,reason:'schedule' }))!;
+  const after = (await createAgentCommand(db, { roomId:R1,agentId:A,sourceMessageId:null,reason:'subscribed_event' }))!;
+  expect(await daemon.execute('postRoomMessage', { roomId:R1,requestId:before.id,
+    queuedRequestIds:[human.id,after.id],text:'',harnessEnded:true }, A)).toMatchObject({ answered:false });
+  expect((await queue()).map(item=>item.id)).toEqual([human.id]);
 });
 
 it('keeps the whole batch queued if one recorded return address cannot receive its answer', async () => {
@@ -470,18 +504,18 @@ it('keeps the whole batch queued if one recorded return address cannot receive i
   } finally { await db.query('UPDATE memberships SET removed_at=NULL WHERE room_id=$1 AND identity_id=$2',[R2,H]); }
 });
 
-it.each(['human_tag', 'order'])('an empty harness completion ends %s without chat or a report wake', async reason => {
+it.each(['human_tag', 'order'])('an empty harness completion keeps %s owed without a notice', async reason => {
   const first = await ask(R1, 'answer please');
   const second = (await createAgentCommand(db, { roomId: R1, agentId: A, sourceMessageId: null, reason,
     privatePayload: { kind: 'order', text: 'work', authorId: A, fromRoomId: R2 } }))!;
   const before = (await db.query('SELECT count(*)::int n FROM messages')).rows;
   const input = { roomId: R1, requestId: first.id, queuedRequestIds: [second.id], text: '', harnessEnded: true };
-  await daemon.execute('postRoomMessage', input, A);
-  await daemon.execute('postRoomMessage', input, A);
-  expect(await queue()).toEqual([]);
+  expect(await daemon.execute('postRoomMessage', input, A)).toMatchObject({ answered: false });
+  expect(await daemon.execute('postRoomMessage', input, A)).toMatchObject({ answered: false });
+  expect((await queue()).map(item => item.id)).toEqual([first.id, second.id]);
   expect((await db.query('SELECT state,result_message_id FROM agent_commands WHERE id=ANY($1::text[])',
     [[first.id, second.id]])).rows).toEqual([
-      { state: 'complete', result_message_id: null }, { state: 'complete', result_message_id: null },
+      { state: 'pending', result_message_id: null }, { state: 'pending', result_message_id: null },
     ]);
   expect((await db.query('SELECT count(*)::int n FROM messages')).rows).toEqual(before);
   expect((await db.query("SELECT id FROM agent_commands WHERE reason='report'")).rows).toEqual([]);

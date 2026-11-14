@@ -89,8 +89,8 @@ it('retains a refused stored answer and never runs the agent again on another qu
   expect(harness.deliver).toHaveBeenCalledTimes(1);
 });
 
-it('durably closes a failed running harness without a public answer or redelivery', async () => {
-  const f = await fixture(), item = f.item('exited');
+it('durably closes failed background work without a public answer or redelivery', async () => {
+  const f = await fixture(), item = { ...f.item('exited'), reason: 'schedule' };
   harness.deliver.mockRejectedValueOnce(new Error('signal SIGKILL'));
   f.changed([item]);
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({
@@ -128,17 +128,39 @@ it('continues delivering queued input while a stored answer awaits its post ackn
   await vi.waitFor(async () => expect(await new AnswerStore(join(f.root, 'answers')).all()).toEqual([]));
 });
 
-it('hands a new busy-place item to the active session as follow-up input and answers each item', async () => {
+it.each(['end_turn', 'cancelled'])('answers busy-place human input in the next turn after %s', async stopReason => {
   const f = await fixture(), first = f.item('running'), next = f.item('followup');
   const answering = deferred<Record<string, unknown>>();
   harness.deliver.mockReturnValueOnce(answering.promise);
   f.changed([first]);
   await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(1));
   f.changed([first, next]);
-  await vi.waitFor(() => expect(harness.steer).toHaveBeenCalledWith(next));
-  answering.resolve({ text: 'combined answer', followUps: [next], steps: [], toolCalls: [], cleanup: async () => {} });
-  await vi.waitFor(() => expect(f.execute.mock.calls.filter(call => call[0] === 'postRoomMessage')).toHaveLength(2));
-  expect(harness.deliver).toHaveBeenCalledTimes(1);
+  await Promise.resolve();
+  expect(harness.steer).not.toHaveBeenCalled();
+  answering.resolve({ text: '', stopReason, steps: [], toolCalls: [], cleanup: async () => {} });
+  await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(2));
+  expect(harness.deliver).toHaveBeenLastCalledWith(next, [next]);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({
+    requestId: next.id, text: 'answer',
+  })));
+  expect(f.execute.mock.calls.filter(call => call[0] === 'postRoomMessage' && call[1].requestId === next.id && call[1].text === '')).toEqual([]);
+});
+
+it('answers all input waiting in a busy place with one batch publication', async () => {
+  const f = await fixture(), first = f.item('running');
+  const waiting = [f.item('followup-one'), f.item('followup-two')];
+  const answering = deferred<Record<string, unknown>>();
+  harness.deliver.mockReturnValueOnce(answering.promise);
+  f.changed([first]);
+  await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(1));
+  f.changed([first, ...waiting]);
+  await Promise.resolve();
+  answering.resolve({ text: 'First answer', steps: [], toolCalls: [], cleanup: async () => {} });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({
+    requestId: waiting[0]!.id, queuedRequestIds: [waiting[1]!.id], text: 'answer',
+  })));
+  expect(harness.deliver).toHaveBeenCalledTimes(2);
+  expect(harness.deliver).toHaveBeenLastCalledWith(waiting[0], waiting);
 });
 
 it('posts an already stored answer when the outbox becomes unwritable afterwards', async () => {
@@ -169,18 +191,23 @@ it('sends empty closing text through the answer exit and retains it while no ans
   expect(harness.deliver).toHaveBeenCalledTimes(1);
 });
 
-it.each(['end_turn', 'cancelled'])('closes every item in an empty reconnect batch after %s', async stopReason => {
+it.each(['end_turn', 'cancelled'])('closes only background items in an empty reconnect batch after %s', async stopReason => {
   const f = await fixture(), offlineSeconds = 18 * 3600;
   const tag = { ...f.item('tag'), offlineSeconds };
   const schedule = { ...f.item('schedule'), offlineSeconds, reason: 'schedule', scheduleId: 'errors' };
   const event = { ...f.item('event'), offlineSeconds, reason: 'subscribed_event' };
   harness.deliver.mockResolvedValueOnce({ text: '', steps: [], stopReason, toolCalls: [], cleanup: async () => {} });
+  f.execute.mockImplementation(async (_name, input) => ({ id: 'receipt', createdAt: 1,
+    ...(_name === 'postRoomMessage' && !input.text ? { answered: false } : {}) }));
   f.changed([schedule, tag, event]);
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({
     requestId: schedule.id, queuedRequestIds: [tag.id, event.id], text: '', harnessEnded: true })));
   await vi.waitFor(async () => expect(await new AnswerStore(join(f.root, 'answers')).all()).toEqual([]));
-  f.changed([schedule, tag, event]);
-  expect(harness.deliver).toHaveBeenCalledTimes(1);
+  f.changed([tag]);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({
+    requestId: tag.id, text: 'answer',
+  })));
+  expect(harness.deliver).toHaveBeenCalledTimes(2);
 });
 
 it('keeps the genuine answer durable when optional cleanup fails', async () => {
@@ -211,7 +238,7 @@ it('stores and posts one answer for every item in an offline chat batch', async 
   harness.deliver.mockReturnValueOnce(answering.promise);
   f.changed(batch);
   await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(1));
-  expect(harness.deliver).toHaveBeenCalledWith(batch[0], [], batch);
+  expect(harness.deliver).toHaveBeenCalledWith(batch[0], batch);
   expect(f.execute.mock.calls.filter(call => call[0] === 'postRoomMessage')).toHaveLength(0);
   f.execute.mockImplementation(async name => {
     if (name === 'postRoomMessage') throw new Error('disconnected before publication');
@@ -242,17 +269,16 @@ it('restores every item covered by a stored batch answer without asking the harn
   expect(harness.deliver).not.toHaveBeenCalled();
 });
 
-it('keeps offline batches in their own chat and leaves later live input separate', async () => {
+it('batches pending input in its own chat, including live input after reconnect', async () => {
   const f = await fixture();
   const offlineSeconds = 18*3600;
   const first = {...f.item('room-one'),offlineSeconds};
   const second = {...f.item('room-two'),roomId:'another-room',returnRoomId:'another-room',offlineSeconds};
   const live = f.item('live-after-reconnect');
   f.changed([first,second,live]);
-  await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(3));
-  expect(harness.deliver).toHaveBeenCalledWith(first,[live],[first]);
-  expect(harness.deliver).toHaveBeenCalledWith(second,[],[second]);
-  expect(harness.deliver).toHaveBeenCalledWith(live,[],[]);
+  await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(2));
+  expect(harness.deliver).toHaveBeenCalledWith(first,[first,live]);
+  expect(harness.deliver).toHaveBeenCalledWith(second,[second]);
 });
 
 it('replays a durable empty harness completion without running the agent again', async () => {
@@ -265,6 +291,23 @@ it('replays a durable empty harness completion without running the agent again',
     requestId: 'silent', text: '', harnessEnded: true,
   })));
   expect(harness.deliver).not.toHaveBeenCalled();
+});
+
+it('lets a refused legacy empty human completion run on the next queue delivery', async () => {
+  vi.spyOn(AnswerStore.prototype, 'all').mockResolvedValueOnce([{
+    itemId: 'unanswered', roomId: 'room', requestId: 'unanswered', text: '', harnessEnded: true,
+  }]);
+  const f = await fixture(), item = f.item('unanswered');
+  f.execute.mockImplementation(async (_name, input) => ({ id: 'receipt', createdAt: 1,
+    ...(_name === 'postRoomMessage' && !input.text ? { answered: false } : {}) }));
+  f.changed([item]);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({ text: '' })));
+  await vi.waitFor(async () => expect(await new AnswerStore(join(f.root, 'answers')).all()).toEqual([]));
+  f.changed([item]);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({
+    requestId: item.id, text: 'answer',
+  })));
+  expect(harness.deliver).toHaveBeenCalledTimes(1);
 });
 
 it('retires a generated failure notice restored from an older helper outbox', async () => {

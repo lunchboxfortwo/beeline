@@ -103,7 +103,7 @@ export type AgentCommandAction = 'input' | 'restart';
  * finish without a reply, so a run with nothing to say posts nothing. */
 const BACKGROUND_COMMAND_REASONS: ReadonlySet<string> = new Set(['schedule', 'subscribed_event',
   'computer_activity', 'watched_corner', 'corner_check', 'corner_review_dispatch', 'corner_review_needed',
-  'corner_merge_conflict', 'corner_land', 'corner_merge_refused']);
+  'corner_merge_conflict', 'corner_land', 'corner_merge_refused', 'attention_report']);
 export function isBackgroundCommand(reason: string): boolean {
   return BACKGROUND_COMMAND_REASONS.has(reason);
 }

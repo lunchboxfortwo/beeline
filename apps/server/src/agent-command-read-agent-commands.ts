@@ -3,25 +3,37 @@ import { isResumeKind } from '@beeline/api-contract/phone';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { CommandRow,checkFailureLogBody,createAgentCommand,reportedHeadBody } from './agent-command.js';
 import { advanceCorner } from './corner-lifecycle.js';
+import { currentIdleReportSql } from './corner-idle.js';
 import type { SqlDatabase } from './database.js';
 
 
 
 /** One durable queue read, shared by helper push and connected-app delivery. */
 export async function readAgentQueueRows(db:SqlDatabase,agentId:string,roomId?:string) {
+  // Idle notices describe one episode, unlike accepted human work. Retire an
+  // obsolete episode through the terminal owner before delivering the queue.
   return db.query<CommandRow & { parent_room_id: string | null; offline_seconds: number | null }>(
-    `SELECT item.*,room.parent_id parent_room_id,
+    `WITH queued AS MATERIALIZED (
+       SELECT * FROM agent_commands WHERE agent_id=$1 AND ($2::text IS NULL OR room_id::text=$2) AND state='pending'
+     ), obsolete AS MATERIALIZED (
+       SELECT item.id FROM queued item WHERE item.private_payload->>'authorId'='${SYSTEM_IDENTITY_ID}'
+         AND item.private_payload->>'automatic'='true' AND item.private_payload->>'idleSince' IS NOT NULL
+         AND NOT ${currentIdleReportSql('item')}
+     ), retired AS MATERIALIZED (
+       SELECT obsolete.id FROM obsolete LEFT JOIN LATERAL
+         beeline_finish_agent_command(obsolete.id,'complete',NULL,NULL) ended ON true
+     ) SELECT item.*,room.parent_id parent_room_id,
        CASE WHEN item.created_at<=connection.connected_at THEN
          EXTRACT(EPOCH FROM connection.connected_at-connection.offline_since)::double precision END offline_seconds
-     FROM agent_commands item
+     FROM queued item
      LEFT JOIN rooms room ON room.id=item.room_id
      LEFT JOIN agent_connections connection ON connection.agent_id=item.agent_id
-     WHERE item.agent_id=$1 AND ($2::text IS NULL OR item.room_id::text=$2) AND item.state='pending'
+     WHERE NOT EXISTS(SELECT 1 FROM retired WHERE retired.id=item.id)
      ORDER BY item.inbox_sequence,item.created_at,item.id`, [agentId, roomId ?? null]);
  }
 
-/** Every pending item in one agent's queue, in append order.
- * Membership belongs to insertion and publication; reading never spends an item. */
+/** Every current pending item in one agent's queue, in append order.
+ * Membership belongs to insertion and publication; accepted requests stay owed. */
 export async function readAgentCommands(
   db: SqlDatabase,
   agentId: string,
@@ -43,7 +55,8 @@ export async function readAgentCommands(
         id: item.id, roomId: item.room_id, returnRoomId: item.return_room_id ?? item.room_id,
         ...(item.parent_room_id ? {parentRoomId:item.parent_room_id} : {}),
         agentId: item.agent_id, createdAt, sourceMessageId: source.id,
-        turnRequestId: item.turn_request_id, action: item.action, reason: item.reason,
+        turnRequestId: item.turn_request_id, action: item.action,
+        reason: item.reason === 'report' && item.private_payload?.automatic ? 'attention_report' : item.reason,
         rootCommandId: item.root_command_id, rootSourceMessageId: item.root_source_message_id,
         ...(item.parent_command_id ? {parentCommandId:item.parent_command_id} : {}),
         agentDepth: item.agent_depth, ...(source.type === 'private' ? {private:true} : {}),

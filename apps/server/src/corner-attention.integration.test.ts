@@ -116,6 +116,53 @@ const post = async (id: string, text: string, author = WORKER, age = '0 hours') 
 // the commander has effective access (inherited parent-roster access counts).
 const commanderFlags = async () => (await readAgentCommands(db, COMMANDER, C)).commands;
 
+it('IDLE-QUEUE: retains the episode metadata and permits an unchanged status to finish silently', async () => {
+  await turn(); await end();
+  await refreshCornerAttention(db, C);
+  const [notice] = await commanderFlags();
+  expect(notice).toBeDefined();
+  const row = (await db.query('SELECT private_payload FROM agent_commands WHERE id=$1', [notice!.id])).rows[0]!;
+  expect(row.private_payload).toMatchObject({ automatic: true, originCornerId: C,
+    idleSince: expect.any(String) });
+  expect(await daemon.execute('markAgentTurnSilent', { roomId: C, requestId: notice!.turnRequestId }, COMMANDER))
+    .toMatchObject({ answered: true });
+  expect((await db.query('SELECT id FROM messages WHERE author_id=$1 AND request_id=$2',
+    [COMMANDER, notice!.turnRequestId])).rows).toEqual([]);
+  await refreshCornerAttention(db, C);
+  expect(await commanderFlags()).toEqual([]);
+});
+
+it('IDLE-QUEUE: drops superseded idle wakes while preserving a human instruction', async () => {
+  await turn(); await end();
+  await refreshCornerAttention(db, C);
+  const [notice] = await commanderFlags();
+  expect(notice).toBeDefined();
+  await post('resume-instruction', '@commander resume the work', HUMAN);
+  const instruction = (await createAgentCommand(db, { roomId: C, agentId: COMMANDER,
+    sourceMessageId: 'resume-instruction', reason: 'human_tag' }))!;
+  expect((await commanderFlags()).map(item => item.id)).toEqual([instruction.id]);
+  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [notice!.id])).rows)
+    .toEqual([{ state: 'complete' }]);
+  // A late answer from a turn already in flight cannot repeat the obsolete status.
+  await daemon.execute('postRoomMessage', { roomId: C, requestId: notice!.id, text: 'Still waiting to resume.' }, COMMANDER);
+  expect((await db.query('SELECT id FROM messages WHERE author_id=$1 AND request_id=$2',
+    [COMMANDER, notice!.turnRequestId])).rows).toEqual([]);
+});
+
+it('IDLE-QUEUE: an obsolete idle item cannot spend the answer for a human in the same batch', async () => {
+  await turn(); await end();
+  await refreshCornerAttention(db, C);
+  const [notice] = await commanderFlags();
+  await post('batch-human', '@commander do option 1', HUMAN);
+  const instruction = (await createAgentCommand(db, { roomId: C, agentId: COMMANDER,
+    sourceMessageId: 'batch-human', reason: 'human_tag' }))!;
+  await daemon.execute('postRoomMessage', { roomId: C, requestId: notice!.id,
+    queuedRequestIds: [instruction.id], text: 'Doing option 1.' }, COMMANDER);
+  expect((await db.query("SELECT id FROM messages WHERE author_id=$1 AND text='Doing option 1.'", [COMMANDER])).rows).toHaveLength(1);
+  expect((await db.query('SELECT state,result_message_id FROM agent_commands WHERE id=$1', [instruction.id])).rows)
+    .toEqual([{ state: 'complete', result_message_id: expect.any(String) }]);
+});
+
 it('MODEL-UNKNOWN: a model owner end remains terminal while a new explicit command can run', async () => {
   const command=(await wake())!;
   await startQueuedCommand(daemon, { roomId:C, commandId:command.id }, WORKER);
