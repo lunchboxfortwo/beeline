@@ -659,6 +659,9 @@ jobs:
           node scripts/smoke-helper-package.mjs "$tarball" "${RELEASE_VERSION#v}"
           echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
       - name: Publish the exact helper CLI package
+        # npm publishes only through trusted publishing from GitHub Actions; a
+        # local release skips it until Actions returns (captain, 14 Nov).
+        if: env.SKIP_HELPER_NPM != 'true'
         env:
           RELEASE_VERSION: ${{ needs.initialize.outputs.release_version }}
           HELPER_TARBALL: ${{ steps.helper_package.outputs.tarball }}
