@@ -100,6 +100,23 @@ it('durably closes failed background work without a public answer or redelivery'
   expect(harness.deliver).toHaveBeenCalledTimes(1);
 });
 
+it('names a sign-in or spent allowance on the failed receipt and nothing else', async () => {
+  const f = await fixture();
+  harness.deliver.mockRejectedValueOnce(new Error('ACP error -32000: Authentication required'))
+    .mockRejectedValueOnce(new Error("You've hit your usage limit. Try again at Sep 19th, 2026 4:09 AM."))
+    .mockRejectedValueOnce(new Error('signal SIGKILL'));
+  for (const id of ['signed-out', 'limited', 'crashed']) {
+    f.changed([f.item(id)]);
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({ requestId: id, text: '' })));
+  }
+  const receipts = f.execute.mock.calls.filter(call => call[0] === 'postAgentTurnReceipt' && call[1].outcome === 'failed');
+  expect(receipts.map(call => [call[1].requestId, call[1].reasonKind])).toEqual([
+    ['signed-out', 'not-signed-in'], ['limited', 'allowance-spent'],
+  ]);
+  expect(receipts[1]![1].reason).toContain('Sep 19th, 2026 4:09 AM');
+  expect(f.execute.mock.calls.filter(call => call[0] === 'postRoomMessage').map(call => call[1].text)).toEqual(['', '', '']);
+});
+
 it('leaves an unstartable harness item queued for the next connection event', async () => {
   const f = await fixture(), item = f.item('offline');
   harness.start.mockRejectedValueOnce(new Error('missing executable'));

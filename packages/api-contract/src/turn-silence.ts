@@ -55,7 +55,7 @@ export function receiptKindToSilenceKind(kind: TurnReceiptReasonKind | undefined
 }
 
 const ALLOWANCE_UNTIL =
-  /(?:try again at|until|resets?(?: at)?|available(?: again)?(?: at)?)\s+([A-Z][a-z]{2,9}\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}(?:\s+\d{1,2}:\d{2}(?:\s*[AP]M)?)?)/i;
+  /(?:try again at|until|resets?(?: at)?|available(?: again)?(?: at)?)\s+([A-Z][a-z]{2,9}\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}(?:\s+\d{1,2}:\d{2}(?:\s*[AP]M)?)?|midnight UTC)/i;
 const REPO_FROM_URL = /github\.com[:/]([^/\s]+\/[^/\s.]+?)(?:\.git)?(?:[/\s]|$)/i;
 const REPO_FROM_SLUG = /\b([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\b/;
 
@@ -158,7 +158,8 @@ export function classifyTurnSilence(
     /usage limit/i.test(text) ||
     /more credits/i.test(text) ||
     /quota/i.test(text) ||
-    /allowance is spent/i.test(text)
+    /allowance is spent/i.test(text) ||
+    /used (?:today's|all of my) free allowance/i.test(text)
   ) {
     return {
       kind: 'allowance-spent',

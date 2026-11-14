@@ -67,6 +67,8 @@ describe('turn silence classification', () => {
     expect(classifyTurnSilence('provider error 402: This request requires more credits').kind).toBe(
       'allowance-spent',
     );
+    expect(classifyTurnSilence("403: I've used today's free allowance (200K tokens), so I have to pause until it resets at midnight UTC."))
+      .toEqual({ kind: 'allowance-spent', allowanceUntil: 'midnight UTC' });
     expect(classifyTurnSilence('ACP error -32000: Authentication required').kind).toBe(
       'not-signed-in',
     );

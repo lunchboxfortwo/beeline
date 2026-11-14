@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { beginAgentSignInCards } from '../agent-sign-in.js';
+import { noteAgentNeedsOwner } from '../agent-needs-owner.js';
 import { type CommittedTurnLiveRow } from '../live.js';
 import { daemonAccess } from './access.js';
 import type { DaemonContext } from './context.js';
@@ -25,6 +27,7 @@ import { Input,id,seconds } from './values.js';
     const inputTokens = recordedTokens(input.totalInputTokens ?? input.inputTokens);
     const outputTokens = recordedTokens(input.outputTokens);
     let committedTurn: CommittedTurnLiveRow | undefined;
+    let signInCardId: string | undefined;
     await ctx.database.transaction(async db => {
       await db.query(`SELECT beeline_record_agent_answer(id,$4,$5) FROM agent_commands
         WHERE room_id=$1 AND turn_request_id=$2 AND agent_id=$3`,
@@ -39,6 +42,16 @@ import { Input,id,seconds } from './values.js';
         [input.roomId,input.requestId,agentId])).rows[0];
       await daemonPersistTurnTrace(ctx, db, input, agentId);
     });
+    // Only the owner can clear these: one sign-in card, or one limit line.
+    const reasonKind = input.reasonKind;
+    if (input.outcome === 'failed' && (reasonKind === 'not-signed-in' || reasonKind === 'allowance-spent'))
+      signInCardId = (await ctx.database.transaction(db => noteAgentNeedsOwner(db, {
+        roomId: input.roomId, agentId, kind: reasonKind, reason: input.reason,
+      }))).signInCardId;
+    // The card's button needs a sign-in link from the agent's machine; ask once committed.
+    if (signInCardId) void beginAgentSignInCards(ctx.database, ctx.live, input.roomId, signInCardId).catch(error =>
+      console.error('[agent-sign-in] start failed', error instanceof Error ? error.message : String(error)));
+    if (input.outcome === 'failed' && input.reasonKind) ctx.live.publish({ type: 'invalidate', roomId: input.roomId, reason: 'message' });
     ctx.live.publish({type:'invalidate',roomId:input.roomId,reason:'turn',agentId,requestId:input.requestId,
       ...(committedTurn ? {committedRow:{type:'turn' as const,row:committedTurn}} : {})});
   }
