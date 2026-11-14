@@ -530,15 +530,15 @@ export class FreeAgentService {
     void this.reconcile(agentId).catch(error => this.log(`agent ${agentId.slice(0,12)}: ${String(error)}`));
   }
 
-  reconcile(agentId: string): Promise<void> {
+  reconcile(agentId: string, refreshImage = false): Promise<void> {
     const previous = this.#inFlight.get(agentId) ?? Promise.resolve();
-    const work = previous.catch(() => {}).then(() => this.#reconcile(agentId))
+    const work = previous.catch(() => {}).then(() => this.#reconcile(agentId, refreshImage))
       .finally(() => { if (this.#inFlight.get(agentId) === work) this.#inFlight.delete(agentId); });
     this.#inFlight.set(agentId,work);
     return work;
   }
 
-  async #reconcile(agentId: string): Promise<void> {
+  async #reconcile(agentId: string, refreshImage = false): Promise<void> {
     const operationId = randomUUID();
     // A real signal is source evidence; idle time never renews ownership.
     await this.database.query(`INSERT INTO live_server_instances(instance_id,renewed_at) VALUES($1,clock_timestamp())
@@ -556,6 +556,7 @@ export class FreeAgentService {
     if (!admitted.rowCount) return;
     let initial: RuntimeFacts | undefined;
     let completedEffect = false;
+    let mutationStarted = false;
     let machineId: string | null = null;
     const owns = async () => Boolean((await this.database.query(`SELECT 1 FROM free_agents
       WHERE agent_id=$1 AND runtime_operation_id=$2 AND removed_at IS NULL`, [agentId,operationId])).rowCount);
@@ -570,12 +571,15 @@ export class FreeAgentService {
       machineId = initial.fly_machine_id;
       if (initial.removed_at) {
         const machine = machineId ? await this.machines.read(machineId) : await this.machines.find(agentId);
-        if (machine) await this.machines.destroy(machine.id);
+        if (machine) { mutationStarted = true; await this.machines.destroy(machine.id); }
         await this.database.query(`UPDATE free_agents SET fly_machine_id=NULL,removal_cleaned_at=clock_timestamp()
           WHERE agent_id=$1 AND runtime_operation_id=$2`, [agentId,operationId]);
         return;
       }
       const work = initial.pending || initial.connector;
+      // A disconnected idle helper needs no provider action. Connection/work
+      // events own waking and sleeping; only startup/release visits check images.
+      if (!work && !initial.connection_id && !refreshImage) return;
       let machine = machineId ? await this.machines.read(machineId) : undefined;
       machine ??= await this.machines.find(agentId);
       if (!machine) {
@@ -583,6 +587,7 @@ export class FreeAgentService {
         const bootstrap = opaque('bfb');
         await this.database.query(`UPDATE free_agents SET bootstrap_hash=$3 WHERE agent_id=$1 AND runtime_operation_id=$2`,
           [agentId,operationId,tokenHash(bootstrap)]);
+        mutationStarted = true;
         const created = await this.machines.create({ agentId,image:this.config.image,region:this.config.region,
           cpus:this.config.cpus,memoryMb:this.config.memoryMb,
           env:{BEELINE_FREE_AGENT_ID:agentId,BEELINE_FREE_AGENT_BOOTSTRAP:bootstrap,BEELINE_SERVER_URL:this.config.publicOrigin} });
@@ -597,6 +602,7 @@ export class FreeAgentService {
       if (!sameMachineImage(machine.config.image,this.config.image) && !initial.connector) {
         if (!await owns()) return;
         const before = machine;
+        mutationStarted = true;
         machine = await this.machines.update(machine,this.config.image);
         if (!machine.instance_id) throw new Error('Fly update returned no replacement version');
         // Provider completion is version-bound. A timeout leaves the result unknown.
@@ -608,6 +614,7 @@ export class FreeAgentService {
       }
       if (machine.state === 'stopped' || machine.state === 'suspended' || machine.state === 'created') {
         if ((work || completedEffect) && await owns()) {
+          mutationStarted = true;
           await this.machines.start(machine.id);
           completedEffect = true;
           await recordFreeAgentEvent(this.database,agentId,'start_requested',{machineId:machine.id,operationId,machineVersion:machine.instance_id});
@@ -618,6 +625,7 @@ export class FreeAgentService {
         const current = (await this.database.query<RuntimeFacts>(runtimeFactsSql,[agentId])).rows[0];
         if (current?.connection_id && !current.pending && !current.connector && await owns()) {
           // Work committed while the snapshot is being taken is read at handoff.
+          mutationStarted = true;
           await this.machines.suspend(machine.id);
           await this.machines.waitFor(machine.id,'suspended',60,machine.instance_id);
           completedEffect = true;
@@ -629,9 +637,11 @@ export class FreeAgentService {
       await recordFreeAgentEvent(this.database,agentId,'runtime_result_lost',{
         operationId,machineId,...(error instanceof FlyApiError ? {status:error.status,operation:error.operation} : {}) });
       // Observe once over a fresh transport. Never replay the unknown mutation.
-      const provider = this.machines.reconnect();
-      const observed = machineId ? await provider.read(machineId) : await provider.find(agentId);
-      if (observed) await adopt(observed.id);
+      if (mutationStarted) {
+        const provider = this.machines.reconnect();
+        const observed = machineId ? await provider.read(machineId) : await provider.find(agentId);
+        if (observed) await adopt(observed.id);
+      }
       throw error;
     } finally {
       await this.database.transaction(async db => {
@@ -661,7 +671,7 @@ export class FreeAgentService {
     for (const row of rows.rows) {
       if (!row.fly_machine_id && !row.needed && !machines.some(machine =>
         (machine.config.metadata as {beeline_agent?:string}|undefined)?.beeline_agent === row.agent_id)) continue;
-      try { await this.reconcile(row.agent_id); }
+      try { await this.reconcile(row.agent_id, true); }
       catch { failures.push(row.agent_id); }
     }
     if (failures.length) throw new Error(`Free-agent observation unavailable for ${failures.length} Machines`);

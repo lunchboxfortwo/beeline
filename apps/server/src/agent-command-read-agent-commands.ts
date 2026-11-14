@@ -43,7 +43,7 @@ export async function readAgentCommands(
         id: item.id, roomId: item.room_id, returnRoomId: item.return_room_id ?? item.room_id,
         ...(item.parent_room_id ? {parentRoomId:item.parent_room_id} : {}),
         agentId: item.agent_id, createdAt, sourceMessageId: source.id,
-        turnRequestId: item.id, action: item.action, reason: item.reason,
+        turnRequestId: item.turn_request_id, action: item.action, reason: item.reason,
         rootCommandId: item.root_command_id, rootSourceMessageId: item.root_source_message_id,
         ...(item.parent_command_id ? {parentCommandId:item.parent_command_id} : {}),
         agentDepth: item.agent_depth, ...(source.type === 'private' ? {private:true} : {}),

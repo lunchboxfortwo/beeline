@@ -1,3 +1,6 @@
+import { createAgentCommand } from './agent-command.js';
+import { DaemonService } from './daemon-service.js';
+import { LiveHub } from './live.js';
 import { createHash } from 'node:crypto';
 import { seedCornerOpening, describedWorkflow, migratedDatabase, insertCornerFacts } from './test-support.js';
 import { readFileSync } from 'node:fs';
@@ -268,6 +271,20 @@ describe('merge-derived restricted Workspace procedures', () => {
 });
 
 describe('load_workspace_skill', () => {
+  it.each(['beeline-corners-and-merging', 'beeline-waiting-and-wakes'])(
+    'serves built-in %s without a saved Workspace procedure', async slug => {
+      const queued = await createAgentCommand(database, { roomId: ROOM, agentId: OTHER_AGENT,
+        sourceMessageId: ROOT, reason: 'human_tag' });
+      const daemon = new DaemonService(database, new LiveHub());
+      expect(daemon.institutionalMemoryShadow.live).toBeFalsy();
+      const loaded = await daemon.execute('loadWorkspaceSkill', { agentId: OTHER_AGENT, roomId: ROOM,
+        requestId: queued!.id, slug }, OTHER_AGENT);
+      expect(loaded).toMatchObject({ slug, skillId: slug, sourceRoomId: ROOM });
+      expect(loaded.markdown).toContain(`name: ${slug}`);
+      expect(loaded.markdown).not.toContain('Restricted Workspace procedure');
+      expect((await database.query('SELECT 1 FROM workspace_skills WHERE slug=$1', [slug])).rowCount).toBe(0);
+    });
+
   const load = (slug: string) =>
     loadWorkspaceSkill(database, command, { agentId: OTHER_AGENT, roomId: ROOM, slug });
 

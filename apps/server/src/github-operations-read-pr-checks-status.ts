@@ -1,3 +1,5 @@
+import { readRecordedPullRequest } from './github-missing-pull-request.js';
+import { ExpectedRefusalError } from './command-refusal.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { cornerObjectiveSql } from './corner-objective.js';
 import { cornerOwnerSql } from './corner-worker.js';
@@ -63,7 +65,8 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
     const fetchStartedAt = (await ctx.database.query<{ started_at: number }>(
       `SELECT extract(epoch FROM clock_timestamp())::double precision started_at`,
     )).rows[0]!.started_at;
-    const pr = await ctx.app.readPullRequest(target.token, target.repository, number);
+    const pr = await readRecordedPullRequest(ctx, input.cornerId, target.token, target.repository, number);
+    if (!pr) throw new ExpectedRefusalError('the corner has no pull request');
     // Explicit reconciliation also observes an unmerged close even when the
     // check verdict is unchanged. No clock scans for missed close webhooks.
     if (!corner.archived && pr.state === 'closed' && !pr.merged && corner.lifecycle.pr?.number === number) {
@@ -100,7 +103,8 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
       const absent = await ctx.app.confirmNoChecks(target.token, target.repository, pr.headSha);
       // Re-read after registration evidence: neither a new head nor a newly
       // registered status context can inherit the earlier empty rollup.
-      const latestPr = await ctx.app.readPullRequest(target.token, target.repository, number);
+      const latestPr = await readRecordedPullRequest(ctx, input.cornerId, target.token, target.repository, number);
+      if (!latestPr) throw new ExpectedRefusalError('the corner has no pull request');
       rollup = await ctx.app.readCommitCheckRollup(target.token, target.repository, pr.headSha);
       zeroChecksConfirmed = absent && !rollup.pendingRegistrations && latestPr.headSha === pr.headSha && rollup.total === 0;
     }
@@ -472,7 +476,7 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
     cornerId: string,
     number: number,
     database: SqlDatabase = ctx.database,
-  ): Promise<void> {
+  ): Promise<boolean> {
     let changed = false;
     await database.transaction(async db => {
       await lockCornerLifecycle(db, cornerId);
@@ -494,6 +498,7 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
         await advanceCorner(db, cornerId, { kind: 'pull-request-closed', number });
     });
     if (changed) ctx.onRoomChanged?.(cornerId);
+    return changed;
   }
 
 
@@ -589,7 +594,8 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
         });
         const pr = cornerId && confirmedPr?.number === row.number
           ? confirmedPr
-          : await ctx.app.readPullRequest(token.token, row.repository, row.number);
+          : await readRecordedPullRequest(ctx, row.corner_id, token.token, row.repository, row.number);
+        if (!pr) continue;
         if (pr.mergeability === 'unknown') continue;
         const staleBase = Boolean(
           row.base_sha &&

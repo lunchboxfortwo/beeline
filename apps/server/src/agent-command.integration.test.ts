@@ -1,8 +1,27 @@
+import { migrate } from './database.js';
 import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { describe, expect, it, taggedIdentityIdsSql, seedCornerOpening, PhoneService, DaemonService, createAgentCommand, H, A, B, P, R, C, id, stopProofPostgresUrl, db, phone, daemon, live, commands, send, disconnectHelper, helperOwner, queuedHumanTags, queueStopOrders, claim, result, rootFixture, fixtureScope1, type SqlDatabase } from './test-support-agent-command.integration.test-support.js';
 
 
 
+
+it('RUBY-RESOURCE-ACCESS: release migration retains a running helper request identity', async () => {
+  await rootFixture.db.query("INSERT INTO messages(id,room_id,author_id,text) VALUES('ruby-resource-root',$1,$2,'Check the service')", [R,H]);
+  const queued = await createAgentCommand(rootFixture.db, { roomId: R, agentId: A,
+    sourceMessageId: 'ruby-resource-root', reason: 'human_tag' });
+  const requestId = 'already-delivered-request';
+  await rootFixture.db.query('UPDATE agent_commands SET turn_request_id=$2 WHERE id=$1', [queued!.id, requestId]);
+  await migrate(rootFixture.db);
+  const delivered = (await commands(A, R)).find(item => item.id === queued!.id)!;
+  expect(delivered.turnRequestId).toBe(requestId);
+  // The original helper keeps its authority even if the command is answered
+  // before its next resource call. An explicit Stop remains a refusal.
+  await rootFixture.daemon.execute('authorizeResourceCall', { roomId: R, requestId,
+    target: 'squire', consume: false, appKeys: ['fly'] }, A);
+  await result(delivered, 'The requested work is done.');
+  await expect(rootFixture.daemon.execute('authorizeResourceCall', { roomId: R, requestId,
+    target: 'squire', consume: false, appKeys: ['fly'] }, A)).resolves.toBeDefined();
+});
 
 it.each(['ordinary', 'tagged', 'threaded', 'private', 'private-agent', 'corner', 'dm'])(
   'a silence acknowledgement preserves the answer obligation on the %s path', async path => {

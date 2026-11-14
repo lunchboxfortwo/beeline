@@ -391,7 +391,7 @@ export class PostgresDatabase implements ClosableDatabase {
       console.warn('[database] connection wait timeout', {
         pool: this.#poolMode, total, idle, inUse: total - idle,
         waiting, waitingAtCheckout: waiters,
-      });
+      }, error.stack ?? error);
     }
   }
 

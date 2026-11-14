@@ -116,6 +116,10 @@ CREATE INDEX IF NOT EXISTS agent_commands_coalesced_into ON agent_commands(cance
 ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS created_offline boolean;
 ALTER TABLE agent_commands DROP CONSTRAINT IF EXISTS agent_commands_action_check;
 ALTER TABLE agent_commands ADD CONSTRAINT agent_commands_action_check CHECK(action IN ('input','resume','stop','restart'));
+CREATE INDEX IF NOT EXISTS agent_commands_parent_order ON agent_commands(parent_command_id)
+ WHERE reason='order' AND parent_command_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS agent_commands_pending_delivery ON agent_commands(agent_id,inbox_sequence,created_at,id)
+ WHERE state='pending';
 CREATE INDEX IF NOT EXISTS agent_commands_delivery ON agent_commands(agent_id,room_id,state,created_at);
 CREATE INDEX IF NOT EXISTS agent_commands_turn ON agent_commands(room_id,agent_id,turn_request_id);
 CREATE INDEX IF NOT EXISTS agent_commands_corner_opening ON agent_commands(room_id) WHERE reason='corner_objective';
@@ -165,8 +169,9 @@ ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS generation_id text,
 ALTER TABLE agent_pending_attachments ADD COLUMN IF NOT EXISTS generation_id text;
 ${AGENT_COMMAND_DELEGATION_SCHEMA}
 UPDATE agent_commands SET state='pending' WHERE state='claimed';
--- The item owns its answer. Source ids are provenance, including older queues.
-UPDATE agent_commands SET turn_request_id=id WHERE state='pending' AND turn_request_id<>id;
+-- Keep an existing request identity stable across a serving-image overlap.
+-- A connected helper can still be acting on that request during migration.
+-- New items already use their command id; source ids remain provenance.
 -- A legacy resume can share its source and request with its parent. Preserve
 -- its message before removing that uniqueness collision; each item then owns
 -- a separate request id and can receive its own answer after the upgrade.

@@ -236,7 +236,7 @@ async closeCornerPullRequest(cornerId: string): Promise<{
     blocker: string;
 }> { return gitHubOperationsCloseCornerPullRequest(this, cornerId); }
 /** PR association and run state move together for tool calls and GitHub facts. */
-async recordClosedCornerPullRequest(cornerId: string, number: number, database: SqlDatabase = this.database): Promise<void> { return gitHubOperationsRecordClosedCornerPullRequest(this, cornerId, number, database); }
+async recordClosedCornerPullRequest(cornerId: string, number: number, database: SqlDatabase = this.database): Promise<boolean> { return gitHubOperationsRecordClosedCornerPullRequest(this, cornerId, number, database); }
 /** Caller is authorized by DaemonService: it reaches the corner. */
 async readCornerPullRequest(cornerId: string): Promise<CornerPullRequestResult> { return gitHubOperationsReadCornerPullRequest(this, cornerId); }
 

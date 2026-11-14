@@ -1,3 +1,4 @@
+import { beelineManagedSkills } from '@beeline/api-contract/beeline-guides';
 import { procedureToolVocabulary } from './procedure-tool-vocabulary.js';
 import { activeWorkflowRunIds } from './workflow-admin.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -365,6 +366,14 @@ export async function loadWorkspaceSkill(
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) || slug.length > 64) {
     throw new Error('workspace skill slug is invalid');
   }
+  const builtIn = beelineManagedSkills(process.env.BEELINE_RELEASE_SHA ?? 'source', {
+    isReviewer: true, freeAgent: false,
+  }).find(skill => skill.name === slug);
+  if (builtIn) return {
+    skillId: slug, slug, description: builtIn.content.match(/^description: (.+)$/m)?.[1] ?? slug,
+    version: 1, markdown: builtIn.content, sourceRoomId: command.room_id,
+    anchor: { repository: '', targetCommit: process.env.BEELINE_RELEASE_SHA ?? '' },
+  };
   return database.transaction(async (db) => {
     // The skill belongs to the calling Room's own Workspace; who or what
     // authored the turn's root message (a human, or a schedule/event/

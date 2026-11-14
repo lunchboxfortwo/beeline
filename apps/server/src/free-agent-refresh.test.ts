@@ -18,6 +18,7 @@ describe('release refresh and committed free-agent sleep events', () => {
   let service: FreeAgentService;
   let off: () => void;
   let failStart: string | undefined;
+  let failRead = false;
   let beforeUpdate: (() => Promise<void>) | undefined;
   const fleet = new Map<string, { state: string; instance_id: string; config: {
     image: string; env: { keep: string }; rootfs: { persist: string };
@@ -29,14 +30,14 @@ describe('release refresh and committed free-agent sleep events', () => {
   beforeEach(async () => {
     db = await migratedDatabase();
     live = new LiveHub();
-    fleet.clear(); calls.length = 0; logs.length = 0; failStart = undefined; beforeUpdate = undefined;
+    fleet.clear(); calls.length = 0; logs.length = 0; failStart = undefined; failRead = false; beforeUpdate = undefined;
     const request = vi.fn<typeof fetch>(async (url, init) => {
       if (new URL(String(url)).pathname.endsWith('/machines')) return Response.json([...fleet].map(([id,machine])=>({id,...machine})));
       const match = new URL(String(url)).pathname.match(/\/machines\/(m\d+)(.*)/)!;
       const [, id, path] = match;
       const machine = fleet.get(id!)!;
       calls.push(`${init?.method} ${id}${path}`);
-      if (!path && init?.method === 'GET') return Response.json({id,...machine});
+      if (!path && init?.method === 'GET') return failRead ? new Response('rate limited', { status: 429 }) : Response.json({id,...machine});
       if (!path && init?.method === 'POST') {
         await beforeUpdate?.();
         const update = JSON.parse(String(init.body));
@@ -103,6 +104,25 @@ describe('release refresh and committed free-agent sleep events', () => {
       connectionId: `legacy-helper-${n}`, instanceId: 'legacy-helper-server',
     });
   }
+
+  it('does not read Fly status for an idle disconnected agent on ordinary notifications', async () => {
+    await seed(1);
+    await service.reconcile(agentId(1));
+    await service.reconcile(agentId(1));
+    expect(calls).toEqual([]);
+    await command(1, 'pending');
+    await service.reconcile(agentId(1));
+    expect(calls).toContain('GET m1');
+    expect(calls).toContain('POST m1/start');
+  });
+
+  it('does not repeat a refused status read when no mutation was dispatched', async () => {
+    await seed(1);
+    await command(1, 'pending');
+    failRead = true;
+    await expect(service.reconcile(agentId(1))).rejects.toThrow('HTTP 429');
+    expect(calls).toEqual(['GET m1']);
+  });
 
   it.each(['current', 'old'])('suspends an idle %s-image helper from its authenticated connection alone', async release => {
     const startup = vi.spyOn(service, 'reconcileAll');
