@@ -1,7 +1,7 @@
 import type { CommandRow } from './agent-command.js';
 import type { SqlDatabase } from './database.js';
 
-/** Pin authorized turns to visits within the statement that claims them. */
+/** Pin delivered queue items to visits within their status statement. */
 export function workflowOutputBindingCtes(commandRelation: string, runIdSql = 'NULL::text'): string {
   return `workflow_output_scope AS (
     SELECT command.id command_id,command.room_id,command.action,command.parent_command_id,

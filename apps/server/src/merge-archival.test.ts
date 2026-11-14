@@ -203,7 +203,7 @@ it.skipIf(!postgresUrl).each(['merge webhook', 'agent close', 'phone close'] as 
         sqlErrors.push(error.code);
         throw error;
       });
-      if (!paused && sql.includes('turn_cancelled') && sql.includes('FOR UPDATE OF command')) {
+      if (!paused && sql.includes('FROM agent_commands item') && sql.includes('FOR UPDATE OF item')) {
         paused = true;
         replyLocked();
         await resume;

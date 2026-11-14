@@ -1,3 +1,4 @@
+import { workflowOutputBindingCtes } from '../workflow-step-output.js';
 import { createHash } from 'node:crypto';
 import { endAgentTurn } from '../agent-turn-end.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
@@ -160,9 +161,11 @@ export async function startAgentTurnOperation<Name extends keyof DaemonOperation
           });
           ctx.live.publish({ type: 'invalidate', roomId: request.roomId, reason: 'message', agentId: authenticatedAgentId });
         } else {
-        await ctx.database.query(`INSERT INTO agent_turns(room_id,request_id,agent_id,status)
-          SELECT command.room_id,command.turn_request_id,command.agent_id,'working' FROM agent_commands command
-          WHERE command.room_id=$1 AND command.agent_id=$2 AND command.turn_request_id=$3 AND command.state='pending'
+        await ctx.database.query(`WITH delivered AS (SELECT * FROM agent_commands
+          WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3 AND state='pending'),
+          ${workflowOutputBindingCtes('delivered')}
+          INSERT INTO agent_turns(room_id,request_id,agent_id,status)
+          SELECT command.room_id,command.turn_request_id,command.agent_id,'working' FROM delivered command
           ORDER BY command.created_at DESC LIMIT 1
           ON CONFLICT(room_id,request_id,agent_id) DO UPDATE SET status='working',failure_reason=NULL,
             completion_kind=NULL,created_at=now(),started_at=now()
