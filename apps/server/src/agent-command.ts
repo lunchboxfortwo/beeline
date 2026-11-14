@@ -169,8 +169,9 @@ ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS generation_id text,
 ALTER TABLE agent_pending_attachments ADD COLUMN IF NOT EXISTS generation_id text;
 ${AGENT_COMMAND_DELEGATION_SCHEMA}
 UPDATE agent_commands SET state='pending' WHERE state='claimed';
--- The item owns its answer. Source ids are provenance, including older queues.
-UPDATE agent_commands SET turn_request_id=id WHERE state='pending' AND turn_request_id<>id;
+-- Keep an existing request identity stable across a serving-image overlap.
+-- A connected helper can still be acting on that request during migration.
+-- New items already use their command id; source ids remain provenance.
 -- A legacy resume can share its source and request with its parent. Preserve
 -- its message before removing that uniqueness collision; each item then owns
 -- a separate request id and can receive its own answer after the upgrade.
