@@ -9,22 +9,16 @@ export function storeRuntimeTargets({ pins, stores, previouslyLive = [], previou
     const store = stores?.[platform];
     const live = store?.status === 'readable' ? store.live : [];
     if (!Array.isArray(live)) throw new Error(`Invalid ${platform} live store runtimes`);
-    const anchor = store?.latestRuntimeVersion ?? [...live].sort((a, b) => BigInt(a.runtimeVersion) > BigInt(b.runtimeVersion) ? -1 : 1)[0]?.runtimeVersion;
-    const known = [...previouslyLive, ...(store?.historical ?? []), ...live].filter(t => t.platform === platform);
-    const older = [...new Set(known.map(t => t.runtimeVersion))]
-      .filter(v => /^\d+$/.test(v) && anchor && BigInt(v) < BigInt(anchor))
-      .sort((a, b) => BigInt(a) > BigInt(b) ? -1 : 1).slice(0, 2);
-    const retained = store?.status === 'readable' ? [] : previousTargets.filter(t => t.platform === platform);
+    if (store?.unknownRuntime) throw new Error(store.unknownRuntime);
+    const retained = previousTargets.filter(t => t.platform === platform);
+    const known = [...previouslyLive, ...(store?.historical ?? []), ...live,
+      ...(channel === 'next' ? [...(store?.betaLive ?? []), ...(store?.warnings?.length ? retained : [])] : [])].filter(t => t.platform === platform);
     const selected = store?.status === 'readable'
-      ? (anchor ? [{ platform, runtimeVersion: anchor }, ...older.map(runtimeVersion => ({ platform, runtimeVersion }))] : [])
+      ? [...new Set(known.map(t => t.runtimeVersion))].filter(v => /^\d+$/.test(v))
+        .sort((a, b) => BigInt(a) > BigInt(b) ? -1 : 1).slice(0, 3)
+        .map(runtimeVersion => ({ platform, runtimeVersion }))
       : retained;
-    if (channel === 'next') {
-      // Keep every previously served runtime if this additional audience could
-      // not be read, plus any beta runtimes independently proved live now.
-      if (store?.warnings?.length) selected.push(...previousTargets.filter(t => t.platform === platform));
-      selected.push(...live);
-      selected.push(...(store?.betaLive ?? []));
-    }
+    if (channel === 'next' && store?.status !== 'readable') selected.push(...(store?.betaLive ?? []));
     for (const target of selected) {
       if (target.platform !== platform || !/^\d+$/.test(target.runtimeVersion)) {
         throw new Error(`Invalid store runtime: ${runtimeKey(target)}`);
@@ -60,7 +54,9 @@ export function resolveStoreBuilds(platform, buildNumbers, builds) {
     const matches = builds.filter(b => b.platform.toLowerCase() === platform && String(b.appBuildVersion ?? b.buildNumber) === buildNumber);
     const versions = [...new Set(matches.map(b => b.runtimeVersion))];
     if (versions.length !== 1 || !/^\d+$/.test(versions[0])) {
-      throw new Error(`Cannot prove runtime of ${platform} store build ${buildNumber}`);
+      const error = new Error(`Cannot prove runtime of ${platform} store build ${buildNumber}`);
+      error.code = 'UNKNOWN_STORE_RUNTIME';
+      throw error;
     }
     return { platform, runtimeVersion: versions[0], buildNumber };
   });

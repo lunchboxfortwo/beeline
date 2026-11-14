@@ -11,6 +11,7 @@
     "packages/*"
   ],
   "scripts": {
+    "release": "node scripts/release.mjs",
     "dev": "turbo run dev",
     "build": "turbo run build",
     "build:invite-web": "esbuild web/join/invite-source.js --bundle --format=iife --minify --platform=browser --target=es2022 --outfile=web/join/invite.js",

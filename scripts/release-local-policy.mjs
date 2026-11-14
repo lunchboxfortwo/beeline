@@ -16,7 +16,7 @@ export function droppedChecks(workflow) {
   return Object.keys(workflow.jobs).filter(id => !localChecks.includes(id));
 }
 
-export function localWorkflow(workflow) {
+export function localWorkflow(workflow, { channel = 'next' } = {}) {
   const local = structuredClone(workflow);
   // This edge reserved hosted capacity; helper publication consumes only its
   // two builds. All real inputs, validation and final publication joins stay.
@@ -28,18 +28,27 @@ export function localWorkflow(workflow) {
     'echo "Full suites run on PRs; this release produces no runtime coverage map." >> "$GITHUB_STEP_SUMMARY"',
     'test "$CHECKS_RESULT" = success',
   ].join('\n') }];
+  if (channel === 'latest') {
+    // initialize already proves that this exact SHA completed next. Keep the
+    // final result join, without invoking Checks or repeating quick checks.
+    delete local.jobs.release_checks;
+    for (const job of Object.values(local.jobs)) {
+      if (job.needs) job.needs = [job.needs].flat().filter(id => id !== 'release_checks');
+    }
+    validation.steps = [{ name: 'Reuse the successful next verdict', run: 'echo "Promoting the successful next commit; no checks run."' }];
+  }
   return local;
 }
 
-export function releasePlan(workflow, checks) {
-  const local = localWorkflow(workflow);
+export function releasePlan(workflow, checks, options = {}) {
+  const local = localWorkflow(workflow, options);
   return {
     targetSeconds: 1800,
     target: 'routine squire release; check budget ~5 min + concurrent delivery ~20 min + finalization',
     localCapacity: '3 jobs on existing 3-CPU/12-GiB slices, plus 1 capped Mac orchestration job; Mac compilation runs remotely',
-    checks: { retained: ['build once', 'typecheck', 'dead-code', 'design grammar', 'network codecs'], dropped: droppedChecks(checks), smoke: 'existing short TYPECHECK policy regressions only' },
+    checks: options.channel === 'latest' ? { retained: [], reusedFrom: 'successful next release of this commit' } : { retained: ['build once', 'typecheck', 'dead-code', 'design grammar', 'network codecs'], dropped: droppedChecks(checks), smoke: 'existing short TYPECHECK policy regressions only' },
     jobs: Object.entries(local.jobs).map(([id, job]) => ({ id, needs: [job.needs ?? []].flat(), if: job.if ?? 'success()',
-      placement: id === 'helper_macos' ? 'remote Mac, separate queue' : 'bounded local queue',
+      placement: ['helper_macos', 'mobile_native_ios'].includes(id) ? 'remote Mac, separate queue' : 'bounded local queue',
       policy: id === 'desktop_installers' ? 'published signed updater set carried unchanged under the existing local recovery policy' : undefined })),
     coverage: 'no release coverage map is fabricated; PR Checks remain unchanged',
     safety: 'dispatch attribution, exact SHA, quick-check verdict, migrations, canary/rollback, helper proofs and final result joins retained',

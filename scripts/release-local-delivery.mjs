@@ -31,7 +31,7 @@ export class LocalDelivery {
     };
   }
   run(job, context, label, env) {
-    return (context.github.job === 'helper_macos' ? this.mac : this.queue).run(job, context, label, env);
+    return (['helper_macos', 'mobile_native_ios'].includes(context.github.job) ? this.mac : this.queue).run(job, context, label, env);
   }
   async command(command, args, options = {}) { return this.engine.processes.run(command, args, { env: process.env, quiet: true, ...options }); }
   async source(directory, context) {

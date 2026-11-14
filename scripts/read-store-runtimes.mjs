@@ -2,33 +2,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { appStoreClient } from './ios-store-build.mjs';
 import { mintAccessToken } from './play-token.mjs';
-import { publicationSeed } from './seed-store-runtime-history.mjs';
+import { readPlayRuntime, easBuildInventory } from './store-build-runtime.mjs';
 import { playLiveBuilds, resolveStoreBuilds } from '../apps/mobile/scripts/store-runtime-targets.mjs';
-
-const COMMITTED_BUILDS = new URL('../apps/mobile/store/native-runtime-builds.json', import.meta.url);
-
-// Store build identities (build number -> runtime) come from the committed
-// list and from the release record of the previous release, which records the
-// builds this pipeline uploaded. No Actions artifact is read.
-export function knownBuilds(previous = []) {
-  const builds = [...JSON.parse(readFileSync(COMMITTED_BUILDS, 'utf8'))];
-  for (const build of previous) {
-    if (!builds.some(b => b.platform.toLowerCase() === build.platform.toLowerCase()
-      && String(b.buildNumber) === String(build.buildNumber))) builds.push(build);
-  }
-  return builds;
-}
-
-async function easBuildInventory() {
-  if (!process.env.EXPO_TOKEN) return [];
-  const response = await fetch('https://api.expo.dev/graphql', {
-    method: 'POST', headers: { Authorization: `Bearer ${process.env.EXPO_TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query: 'query { app { byId(appId:"58f1e94e-5ce5-475e-9dde-3eaa9e36699c") { builds(limit:100,offset:0) { platform appBuildVersion runtimeVersion } } } }' }),
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!response.ok) return [];
-  return (await response.json()).data?.app?.byId?.builds ?? [];
-}
 
 function newestBuildFirst(a, b) {
   const left = a.split('.').map(Number), right = b.split('.').map(Number);
@@ -39,11 +14,24 @@ function newestBuildFirst(a, b) {
   return 0;
 }
 
-function publishedWindow(platform, numbers, historicalNumbers, builds) {
+async function publishedWindow(platform, numbers, historicalNumbers, builds, resolveRuntime) {
   const ordered = [...new Set([...numbers, ...historicalNumbers])].sort(newestBuildFirst);
   const records = [], runtimes = new Set();
   for (const number of ordered) {
-    const target = resolveStoreBuilds(platform, [number], builds)[0];
+    let target;
+    try { target = resolveStoreBuilds(platform, [number], builds)[0]; }
+    catch (error) {
+      if (!resolveRuntime) throw error;
+      try {
+        const runtimeVersion = await resolveRuntime(number);
+        if (!/^\d+$/.test(runtimeVersion)) throw new Error('invalid runtime');
+        target = { platform, buildNumber: number, runtimeVersion, evidence: 'Play generated APK native manifest' };
+        builds.push(target);
+      } catch (cause) {
+        error.message += `: ${cause.message}`;
+        throw error;
+      }
+    }
     records.push(target);
     runtimes.add(target.runtimeVersion);
     // Unknown identities inside this window still fail closed. Older ASC
@@ -95,12 +83,12 @@ async function readPlayTrack(track, token, fetchImpl) {
   }
 }
 
-export async function readStores({ builds, env = process.env, fetchImpl = fetch, appleApi } = {}) {
+export async function readStores({ builds = [], previouslyLive = [], env = process.env, fetchImpl = fetch, appleApi, playRuntime = readPlayRuntime } = {}) {
   const stores = {};
   await Promise.all(['android', 'ios'].map(async platform => {
     let numbers = [];
     let playToken;
-    const historicalNumbers = [];
+    const historicalNumbers = previouslyLive.filter(build => build.platform === platform && build.buildNumber).map(build => String(build.buildNumber));
     try {
       if (platform === 'android') {
         playToken = await mintAccessToken(env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON, { fetchImpl });
@@ -119,21 +107,25 @@ export async function readStores({ builds, env = process.env, fetchImpl = fetch,
             if (!['READY_FOR_DISTRIBUTION', 'READY_FOR_SALE', 'REPLACED_WITH_NEW_VERSION'].includes(state)) continue;
             const id = version.relationships?.build?.data?.id;
             const build = page.included?.find(b => b.type === 'builds' && b.id === id);
-            if (!build?.attributes?.version) throw new Error('Live App Store version has no build identity');
+            if (!build?.attributes?.version) {
+              const error = new Error(`Cannot prove runtime of ios store build ${id ?? '(missing build identity)'}`);
+              error.code = 'UNKNOWN_STORE_RUNTIME';
+              throw error;
+            }
             (state === 'REPLACED_WITH_NEW_VERSION' ? historicalNumbers : numbers).push(build.attributes.version);
           }
           path = page.links?.next ? new URL(page.links.next).pathname + new URL(page.links.next).search : null;
         }
       }
       const observedAt = new Date().toISOString();
-      const resolved = platform === 'ios' ? publishedWindow(platform, numbers, historicalNumbers, builds)
-        : resolveStoreBuilds(platform, numbers, builds);
+      const resolved = await publishedWindow(platform, numbers, historicalNumbers, builds,
+        platform === 'android' ? number => playRuntime(number, playToken, { fetchImpl }) : undefined);
       const live = resolved.filter(t => numbers.includes(t.buildNumber)).map(t => ({ ...t, observedLiveAt: observedAt }));
-      const historical = resolved.filter(t => !numbers.includes(t.buildNumber)).map(t => ({ ...t, publicationEvidence: 'ASC REPLACED_WITH_NEW_VERSION', observedAt }));
+      const historical = resolved.filter(t => !numbers.includes(t.buildNumber)).map(t => ({ ...t, publicationEvidence: platform === 'ios' ? 'ASC REPLACED_WITH_NEW_VERSION' : 'previous Play production observation', observedAt }));
       const newest = [...live].sort((a, b) => newestBuildFirst(a.buildNumber, b.buildNumber))[0];
       stores[platform] = { status: 'readable', live, historical, latestRuntimeVersion: newest?.runtimeVersion, buildNumbers: numbers };
     } catch (error) {
-      stores[platform] = { status: 'unavailable',
+      stores[platform] = { status: 'unavailable', unknownRuntime: error.code === 'UNKNOWN_STORE_RUNTIME' ? error.message : undefined,
         reason: platform === 'android' ? `Play production runtime lookup failed: ${error.message}` : error.message,
         buildNumbers: numbers, historicalBuildNumbers: historicalNumbers };
     }
@@ -143,9 +135,11 @@ export async function readStores({ builds, env = process.env, fetchImpl = fetch,
     if (platform === 'android' && env.BEELINE_RELEASE_CHANNEL === 'next' && playToken) {
       try {
         const betaNumbers = await readPlayTrack('beta', playToken, fetchImpl);
-        stores.android.betaLive = resolveStoreBuilds('android', betaNumbers, builds)
+        stores.android.betaLive = (await publishedWindow('android', betaNumbers, [], builds,
+          number => playRuntime(number, playToken, { fetchImpl })))
           .map(target => ({ ...target, observedLiveAt: new Date().toISOString() }));
       } catch (error) {
+        if (error.code === 'UNKNOWN_STORE_RUNTIME') stores.android.unknownRuntime = error.message;
         stores.android.warnings = [`Play beta runtime lookup failed: ${error.message}`];
       }
     }
@@ -155,18 +149,10 @@ export async function readStores({ builds, env = process.env, fetchImpl = fetch,
 
 async function main() {
   const previous = process.argv[2] ? JSON.parse(readFileSync(process.argv[2], 'utf8')) : {};
-  const builds = knownBuilds(previous.builds ?? []);
-  try {
-    for (const build of await easBuildInventory()) {
-      if (!build.appBuildVersion || !build.runtimeVersion) continue;
-      if (!builds.some(b => b.platform.toLowerCase() === build.platform.toLowerCase()
-        && String(b.buildNumber ?? b.appBuildVersion) === String(build.appBuildVersion)
-        && b.runtimeVersion === build.runtimeVersion)) builds.push(build);
-    }
-  } catch { /* Missing identities fail closed per store. */ }
-  const stores = await readStores({ builds });
-  let previouslyLive = previous.previouslyLive ?? [];
-  try { previouslyLive = [...publicationSeed(builds), ...previouslyLive]; } catch { /* Keep the recorded history. */ }
+  const builds = [...(previous.builds ?? []), ...(previous.previouslyLive ?? []).filter(build => build.buildNumber)];
+  try { builds.push(...await easBuildInventory()); } catch { /* Missing identities fail closed when selected. */ }
+  const previouslyLive = previous.previouslyLive ?? [];
+  const stores = await readStores({ builds, previouslyLive });
   console.log(JSON.stringify({ observedAt: new Date().toISOString(), stores, builds, previouslyLive }));
 }
 if (process.argv[1] === fileURLToPath(import.meta.url)) await main();

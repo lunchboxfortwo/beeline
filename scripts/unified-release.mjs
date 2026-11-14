@@ -48,8 +48,8 @@ export const COMPONENT_PATH_RULES = [
   { exact: 'apps/mobile/scripts/upload-sentry-sourcemaps.mjs', components: ['mobile-ota', 'website'] },
   { exact: 'apps/mobile/scripts/prepare-web-sourcemaps.mjs', components: ['website'] },
   { exact: 'apps/mobile/scripts/store-runtime-targets.mjs', components: ['mobile-ota'] },
-  { exact: 'apps/mobile/store/native-runtime-builds.json', components: ['mobile-ota'] },
   { exact: 'scripts/read-store-runtimes.mjs', components: ['mobile-ota'] },
+  { exact: 'scripts/store-build-runtime.mjs', components: ['mobile-ota'] },
   { exact: 'scripts/android-release-channel.mjs', components: ['mobile-native'] },
   { exact: 'apps/mobile/app.config.js', components: ['mobile-ota', 'mobile-native', 'desktop', 'website'] },
   { exact: 'apps/mobile/package.json', components: ['mobile-ota', 'mobile-native', 'desktop', 'website'] },
@@ -400,6 +400,9 @@ export function initializeRelease({ version, sourceSha, previous, selectedCompon
       state.plan.nativePlatforms = runtimePin?.changed ? runtimePin.changedPlatforms : ['android', 'ios'];
     }
     if (channel === 'next') state.plan.nativePlatforms = ['android'];
+    // A production track request builds both subscriptions. A runtime delta
+    // on only iOS must not suppress Android's production store submission.
+    else if (selectedComponents.includes('mobile-native')) state.plan.nativePlatforms = ['android', 'ios'];
     if (state.state !== 'delivered') for (const component of state.plan.carried)
       state.components[component] = previousComponent(state, component);
     return state;

@@ -3,7 +3,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { uploadSentrySourcemaps } from './upload-sentry-sourcemaps.mjs';
 
-/** Finish private symbol upload before the export may reach a public host. */
+/** Upload when configured, then strip private maps before public hosting. */
 export function prepareWebSourcemaps(directory, release, options = {}) {
   const bundles = join(directory, '_expo/static/js/web');
   const files = readdirSync(bundles, { recursive: true }).filter(file => file.endsWith('.js'));
@@ -16,7 +16,7 @@ export function prepareWebSourcemaps(directory, release, options = {}) {
       throw new Error(`Web bundle and source map debug IDs do not match: ${file}`);
     }
   }
-  uploadSentrySourcemaps(directory, release, { ...options, required: true });
+  uploadSentrySourcemaps(directory, release, { ...options, required: Boolean(process.env.SENTRY_AUTH_TOKEN) });
   console.log(`Sentry web source maps processed for release ${release}`);
   for (const file of readdirSync(directory, { recursive: true })) {
     if (file.endsWith('.map')) rmSync(join(directory, file));

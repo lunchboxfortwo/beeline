@@ -1,7 +1,9 @@
 # Production release pipeline
 
-`Unified production release` is the only workflow that releases current
-`main` to `next`, or promotes its last successful `next` release to `latest`. It is manually dispatched; merging to main starts no workflow.
+`Unified production release` owns the shared release legs. On squire,
+`npm run release` runs them locally for current `origin/main`: first `next`,
+then `latest` at the same successful commit. The hosted workflow remains
+manually dispatched; merging to main starts no workflow.
 
 ## GitLab npm publishing during an Actions outage
 
@@ -28,7 +30,32 @@ It builds, packs and locally installs/smokes the exact tarball before publishing
 an already published version is skipped. It does not release native helpers
 or update the unified release record.
 
-## Local recovery during an Actions outage
+## One-command release on squire
+
+```sh
+npm run release
+```
+
+There are no required inputs. The command creates a fresh private release copy,
+fetches `origin/main` and tags, and sets both its detached HEAD and local `main`
+to that immutable commit. It holds one per-user lock through next and latest,
+removing an old lock only when its recorded owner PID has exited. It leaves an
+active release alone. Each identity read fetches tags again, including the rc
+published between the two legs. Version allocation reads release records and
+all versioned OTA branch names, so an orphaned OTA rc cannot be reused.
+
+Store tracks pair automatically: next uses beta, latest uses production.
+The next leg runs the existing quick local checks. Latest promotes that exact
+successful next SHA without invoking Checks or repeating typecheck, dead-code,
+grammar or codec checks. Neither leg dispatches GitHub CI. Existing delivery
+proofs, canary, rollback and finalization stay with their release legs.
+
+The existing dispatched-by fields default to the invoking user (or `firstmate`),
+place `squire`, and local command/audit IDs `squire-release-<UTC timestamp>`.
+`--dispatched-by '<JSON>'` is an optional attribution override. These are local
+execution IDs; the local command does not request a server receipt.
+
+## Local recovery legs during an Actions outage
 
 `node scripts/release-local.mjs --plan` shows the local recovery path without
 running release commands.
@@ -81,7 +108,7 @@ Cache misses rebuild; unknown action types fail.
 
 The temporary outage policy is explicit: **website not released** means static
 GitHub Pages is left serving its published site. The selected EAS web app leg
-still exports, uploads private source maps, deploys and verifies its canonical
+still exports, uploads private source maps when configured, deploys and verifies its canonical
 origin. The published Apple-silicon helper archive is carried byte for byte,
 with its original per-platform commit/version/checksum and a `carriedFrom`
 record; Linux and Intel Mac helpers build and prove their new bytes. The Intel
@@ -130,7 +157,7 @@ missing history fails closed locally. Keep tags current with a normal full
 | `SERVER_CANARY_REVIEW_SECRET` or legacy `SERVER_CANARY_PHONE_TOKEN`, `SERVER_CANARY_ROOM_ID` | Next authenticated server canary |
 | `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` | Required only when the release plan selects a native Android store build; optional for OTA store-runtime reads |
 | `EXPO_ASC_KEY_ID`, `EXPO_ASC_ISSUER_ID`, `EXPO_ASC_API_KEY_P8` | Live App Store runtime reads for OTA |
-| `SENTRY_AUTH_TOKEN` | OTA source maps; required for latest web app delivery |
+| `SENTRY_AUTH_TOKEN` | Optional OTA/web source maps; web exports strip private maps even when the token is absent |
 | `BEELINE_REVIEW_SECRET` | Explicit `--run-release-proof` device proof |
 | `BEELINE_RELEASE_NOTIFY_SECRET` | Existing best-effort release notification |
 | `BEELINE_INSIGHTS_TOKEN`, `MOBILE_OTA_OWNER_PUBKEY`, `MOBILE_OTA_RECEIPT_TOKEN` | Existing best-effort release bookkeeping |
@@ -163,15 +190,14 @@ Keep vaulted keys vaulted; suitable provider API calls can use Squire's
 `use_credential`. A CLI requiring a raw credential needs a provider-issued
 local credential or approved secure injection, not plaintext vault retrieval.
 
-Run from a clean checkout of the exact commit on `origin/main`, using Node 22 or newer,
+Run the command using Node 22 or newer,
 the pinned Rust toolchain, Docker, Fly, gh, gh-axi and SSH tools. The Mac needs
 Git, curl, tar, shasum, rustup and its normal compiler/SDK. The controller downloads
 checksum-verified Node 22.23.2 and installs Rust 1.95.0 into the task's remote
 temporary directory, without changing shared host tools or toolchain defaults.
 `--dry-run --leg mac-tools` proves that setup alone. The runner never
-shallow-fetches shared history. It checks for active
-hosted releases and holds a local per-user release lock. A stale lock is an
-operator recovery decision; it is never automatically removed.
+shallow-fetches shared history. It checks for active hosted releases;
+`release.mjs` owns the local lock across both channels and clears dead owners.
 
 When available, fnm selects an installed Node version using a compatible
 `.nvmrc` or `engines.node` preference. Older repository pins cannot lower the
@@ -204,17 +230,13 @@ node scripts/release-local.mjs --dry-run --leg pages
 node scripts/release-local.mjs --dry-run --channel next \
   --release-sha <full-main-commit> --env-file ~/.config/beeline-release.env \
   --state-dir /private/path/outside-the-checkout
-node scripts/release-local.mjs --execute --channel next \
-  --release-sha <full-main-commit> --dispatched-by '<server-recorded attribution JSON>' \
-  --state-dir /private/path/outside-the-checkout
+npm run release
 ```
 
-The unchanged attribution fields are `agentId`, `handle`, `place`,
-`humanCommandMessageId` and `auditMessageId`. Preserve the server's audit receipt;
-the local runner does not mint a replacement human command or dispatch receipt.
-Only firstmate runs the first production recovery. `--channel latest` retains
-the successful-next promotion rules. `--run-release-proof` retains the original
-proof-before-promotion gate. Store submission remains `store_track=none`.
+`release-local.mjs` retains plan, dry-run and checks-only commands; delivery
+uses `release.mjs`. Its internal latest leg retains the successful-next source
+rules. Hosted dispatches retain server-issued attribution and their existing
+optional proof and store controls.
 
 `--dry-run --leg release` prints the complete dependency, placement and omission
 plan without executing commands.
@@ -388,12 +410,14 @@ override. A native production URL alone is insufficient: an inlined
 `EXPO_PUBLIC_*` value overrides it at runtime. The check fails closed if it
 cannot verify the embedded function. It adds no app runtime behavior.
 
-Locally built store binaries also need a build-number/runtime identity in
-`apps/mobile/store/native-runtime-builds.json` or the release record. EAS's
-cloud-build inventory does not contain local builds. Publication is still
-verified against Play/App Store Connect; adding an identity does not admit an
-unpublished runtime. The next release rereads live store state before choosing
-OTA targets.
+Store build numbers come from Play and App Store Connect. Uploaded native
+builds record their embedded runtime in `release.json`; EAS build metadata
+supplies cloud upload identities. An unrecorded Play build resolves through
+Play's generated base APK and its native Expo runtime stamp, read with `aapt2`.
+ASC's public build API does not expose Expo.plist, so its exact distributed
+build number must match recorded upload metadata. Unknown runtimes within the
+newest three distinct published runtimes stop OTA delivery with the platform
+and build number. There is no hand-maintained binary/runtime list.
 
 ## Routine release
 
@@ -515,11 +539,17 @@ The per-platform native runtime pins no longer gate an OTA release. When
 `apps/mobile/native-fingerprint.json` changes a runtime pin and `store_track`
 is `none`, the plan ships the OTA to the runtimes live in the stores and prints
 a notice; the new runtime gets OTAs once a store release puts it live. With an
-explicit store track, native builds run only for the platforms whose pins
-changed. The `allow_pin_restore` input is accepted and ignored.
+explicit beta track, next builds Android. A production promotion builds and
+submits both Android and iOS, even if only one platform's runtime changed. The `allow_pin_restore` input is accepted and ignored.
 
-iOS store binaries build locally on the self-hosted `macbook-pro-7` Mac runner
-and are submitted to TestFlight from its generated IPA. The iOS leg inspects the
+On hosted releases, iOS store binaries build locally on the self-hosted
+`macbook-pro-7` Mac runner. On squire, iOS uses the authorized
+`dani@100.104.88.126` Mac through the same serialized remote queue as the Intel
+helper. The remote job receives its Expo/ASC credentials and existing GitHub
+authority through stdin into a temporary job file removed on exit; other local
+delivery secrets stay on squire. The remote runner uses a private
+HOME, TMPDIR and signing keychain, and restores the prior keychain selection.
+The generated IPA is submitted directly to TestFlight. The iOS leg inspects the
 IPA's bundle, version, build number, runtime and required photo purpose string
 (`scripts/ios-build-evidence.py`), then verifies the exact Apple delivery UUID
 and a new `VALID` build under App Store app `6803948500`
@@ -873,22 +903,15 @@ concurrency group and has a `dry_run` mode.
   staged (`inProgress`) and halted releases retain their installed audience;
   drafts are excluded. Edit-track status does not distinguish review approval,
   so a completed release can receive an OTA before store review finishes.
-  Beta runtimes are added alongside the production retention window; they
-  never replace its anchor or enter production publication history. Each Play
-  track is read independently with an explicit JSON response format, so an
-  unreadable production response cannot hide a readable beta build (or vice
-  versa). Empty and malformed responses retain recorded targets and produce
-  an Actions warning and an OTA warning section in the release summary, with
-  the track, endpoint, HTTP status and response format when available. There
-  are no retries. Latest continues to read production alone.
-  ASC uses distributed iOS versions and their exact build identities. Build
-  numbers map to runtime pins through the committed
-  `apps/mobile/store/native-runtime-builds.json`, the store builds recorded in
-  the previous release record, and EAS build metadata. Unknown binary
-  identities or an unreadable store keep that platform's targets from the
-  previous release record (or, on the first release of this scheme, the
-  runtimes production serves now). The Play history seed is parsed from its
-  captured production release history; an undated upload is excluded.
+  Both platforms target their newest three distinct published runtimes.
+  Next includes the live Play beta audience in that three-runtime window;
+  latest uses production and its publication history. Store observations and
+  upload records carry publication history forward between releases. Play
+  resolves unrecorded binaries from its generated APK manifest, while ASC
+  distributed build identities join recorded upload metadata. An unknown
+  runtime inside the window stops release with its build number; unreadable
+  store responses retain the existing recorded-target fallback and warnings.
+  No retry is added.
 - For a deterministic offline target plan, run
   `node scripts/ota-release.mjs targets --store-status <stores.json>` from
   `apps/mobile`. The file holds `stores.android` and `stores.ios`, each with

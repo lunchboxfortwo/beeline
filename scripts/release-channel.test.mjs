@@ -4,6 +4,7 @@ import { createHash, generateKeyPairSync } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { createServer } from 'node:http';
 import { parse } from 'yaml';
 import { releaseChannel, channelComponents, promotionSource } from './release-channel.mjs';
@@ -12,10 +13,13 @@ import { latestPublished, assignReleaseVersion, compareVersions, versionedReleas
 import { pagesChannelTag, publishPagesChannel, downloadPagesChannel } from './pages-channel.mjs';
 import { buildPagesSite } from './pages-site.mjs';
 import { deployPages } from './deploy-pages.mjs';
-import { knownBuilds, readStores } from './read-store-runtimes.mjs';
+import { readStores } from './read-store-runtimes.mjs';
+import { readPlayRuntime, runtimeFromApkDump, easBuildInventory } from './store-build-runtime.mjs';
 import { androidReleaseProfile } from './android-release-channel.mjs';
 import { computeTargets } from '../apps/mobile/scripts/ota-release.mjs';
 import { playLiveBuilds } from '../apps/mobile/scripts/store-runtime-targets.mjs';
+import { prepareWebSourcemaps } from '../apps/mobile/scripts/prepare-web-sourcemaps.mjs';
+import { condition } from './release-local-expressions.mjs';
 
 test('Reproduction 24: empty Pages status retries once immediately, then fails and cancels', async () => {
   for (const recovered of [false, true]) {
@@ -130,9 +134,33 @@ const nextRecord = () => {
   return record;
 };
 const fixture = (fn) => {
-  const directory = mkdtempSync(join(process.cwd(), '.release-channel-test-'));
+  const directory = mkdtempSync(join(tmpdir(), 'beeline-release-channel-test-'));
   return Promise.resolve().then(() => fn(directory)).finally(() => rmSync(directory, { recursive: true, force: true }));
 };
+
+test('web source maps are private and optional when Sentry credentials are absent', () => fixture(directory => {
+  const previous = process.env.SENTRY_AUTH_TOKEN;
+  delete process.env.SENTRY_AUTH_TOKEN;
+  try {
+    const bundles = join(directory, '_expo/static/js/web');
+    mkdirSync(bundles, { recursive: true });
+    writeFileSync(join(bundles, 'app.js'), '// debugId=fixture-debug-id');
+    writeFileSync(join(bundles, 'app.js.map'), JSON.stringify({ debugId: 'fixture-debug-id', sources: ['app.ts'], mappings: 'AAAA' }));
+    const warnings = [];
+    assert.doesNotThrow(() => prepareWebSourcemaps(directory, sha, { warn: warning => warnings.push(warning),
+      run: () => assert.fail('Missing token must not start a Sentry upload') }));
+    assert.throws(() => readFileSync(join(bundles, 'app.js.map')), /ENOENT/);
+    assert.match(readFileSync(join(bundles, 'app.js'), 'utf8'), /fixture-debug-id/);
+    assert.match(warnings.join(' '), /SENTRY_AUTH_TOKEN is unavailable/);
+    writeFileSync(join(bundles, 'app.js.map'), JSON.stringify({ debugId: 'fixture-debug-id', sources: ['app.ts'], mappings: 'AAAA' }));
+    process.env.SENTRY_AUTH_TOKEN = 'fixture-configured-token';
+    assert.throws(() => prepareWebSourcemaps(directory, sha, { run: () => ({ status: 1 }) }), /Required Sentry source map upload failed/);
+    assert.ok(readFileSync(join(bundles, 'app.js.map')).length > 0);
+  } finally {
+    if (previous === undefined) delete process.env.SENTRY_AUTH_TOKEN;
+    else process.env.SENTRY_AUTH_TOKEN = previous;
+  }
+}));
 const workflow = parse(readFileSync('.github/workflows/unified-release.yml', 'utf8'));
 
 test('channel defaults to next; native consent and latest selection stay separate', () => {
@@ -431,8 +459,8 @@ const playKey = JSON.stringify({ type: 'service_account', client_email: 'fixture
   private_key: playPrivateKey.export({ type: 'pkcs8', format: 'pem' }) });
 const playResponses = JSON.parse(readFileSync(new URL('./fixtures/play-store-runtimes.json', import.meta.url)));
 // The release record supplies local beta builds absent from EAS inventory.
-const storeBuilds = knownBuilds([{ platform: 'android', buildNumber: '144', runtimeVersion: '44' },
-  { platform: 'android', buildNumber: '146', runtimeVersion: '47' }]);
+const storeBuilds = [{ platform: 'android', buildNumber: '144', runtimeVersion: '44' },
+  { platform: 'android', buildNumber: '146', runtimeVersion: '47' }];
 const liveRelease = versionCode => ({ status: 'completed', versionCodes: [String(versionCode)] });
 const iosStore = { status: 'readable', live: [{ platform: 'ios', runtimeVersion: '36' }] };
 const storeMemory = { previouslyLive: ['39', '40'].map(runtimeVersion => ({ platform: 'android', runtimeVersion })),
@@ -472,7 +500,7 @@ test('next adds published Play beta runtime without evicting production retentio
     }
     assert.deepEqual(stores.android.live.map(t => t.runtimeVersion), ['44']);
     assert.deepEqual(planStoreTargets(stores, channel), channel === 'next'
-      ? ['android@44', 'android@40', 'android@39', 'android@47', 'ios@36']
+      ? ['android@47', 'android@44', 'android@40', 'ios@36']
       : ['android@44', 'android@40', 'android@39', 'ios@36']);
   }
 });
@@ -495,7 +523,7 @@ test('documented Play API fixtures read both tracks through deleted edits and ma
       assert.equal(options.headers['Content-Type'], 'application/json');
     } else assert.equal(options.body, undefined);
   }
-  assert.deepEqual(planStoreTargets(stores, 'next'), ['android@44', 'android@40', 'android@39', 'android@47', 'ios@36']);
+  assert.deepEqual(planStoreTargets(stores, 'next'), ['android@47', 'android@44', 'android@40', 'ios@36']);
 });
 
 test('Play accepts an empty successful edit deletion and never retries failed edit creation', async () => {
@@ -545,7 +573,6 @@ test('a broken beta response preserves production targets and reports its exact 
     [() => new Response('{"releases":['), /invalid JSON/],
     [() => new Response(new ReadableStream({ start(controller) { controller.error(new Error('terminated')); } })), /response body read failed/],
     [() => Response.json({ error: { message: 'denied' } }, { status: 403 }), /HTTP 403/],
-    [() => Response.json({ track: 'beta', releases: [liveRelease(999)] }), /Cannot prove runtime/],
   ]) {
     const requests = [];
     const stores = await playStores('next', track => track === 'beta' ? response()
@@ -572,6 +599,82 @@ test('the Play reader waits for the complete response body before parsing JSON',
   assert.deepEqual(stores.android.betaLive.map(t => t.runtimeVersion), ['47']);
 });
 
+test('Play build 148 resolves its runtime from the store APK without a committed build list', async () => {
+  const calls = [], builds = [];
+  const stores = await readStores({ builds, env: { GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: playKey },
+    appleApi: async () => ({ data: [] }),
+    playRuntime: (number, token, options) => readPlayRuntime(number, token, { ...options, inspect: bytes => {
+      assert.equal(bytes.toString(), 'base-apk');
+      return runtimeFromApkDump('E: meta-data\n A: android:name="expo.modules.updates.EXPO_RUNTIME_VERSION"\n A: android:value=@0x7f120001',
+        'resource 0x7f120001 string/expo_runtime_version\n () "49"');
+    } }),
+    fetchImpl: async (url, options) => {
+      calls.push([url, options]);
+      if (url.includes('oauth2')) return Response.json({ access_token: 'fixture' });
+      if (url.endsWith('/edits')) return Response.json({ id: 'fixture-edit' });
+      if (options.method === 'DELETE') return new Response(null, { status: 204 });
+      if (url.includes('/tracks/')) return Response.json({ track: 'production', releases: [liveRelease(148)] });
+      if (url.endsWith('/generatedApks/148')) return Response.json({ generatedApks: [{ generatedSplitApks: [
+        { moduleName: 'base', splitId: 'config.arm64_v8a', downloadId: 'wrong' },
+        { moduleName: 'base', splitId: '', downloadId: 'base-148' },
+      ] }] });
+      assert.match(url, /generatedApks\/148\/downloads\/base-148:download$/);
+      return new Response('base-apk');
+    },
+  });
+  assert.equal(stores.android.status, 'readable');
+  assert.equal(stores.android.live[0].runtimeVersion, '49');
+  assert.deepEqual(builds.map(b => [b.buildNumber, b.runtimeVersion]), [['148', '49']]);
+  assert.equal(calls.filter(([url]) => url.includes('/generatedApks/')).length, 2);
+  assert.equal(runtimeFromApkDump('E: meta-data\n A: android:name="expo.modules.updates.EXPO_RUNTIME_VERSION"\n A: android:value="53" (Raw: "53")', ''), '53');
+});
+
+test('unknown store runtimes stop target selection with the exact platform and build number', async () => {
+  const stores = await readStores({ builds: [], env: { GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: playKey, BEELINE_RELEASE_CHANNEL: 'next' },
+    appleApi: async () => ({ data: [{ attributes: { appVersionState: 'READY_FOR_DISTRIBUTION' }, relationships: { build: { data: { id: 'ios-109' } } } }],
+      included: [{ type: 'builds', id: 'ios-109', attributes: { version: '109' } }] }),
+    playRuntime: async () => { throw new Error('native runtime unavailable'); },
+    fetchImpl: async (url, options) => {
+      if (url.includes('oauth2')) return Response.json({ access_token: 'fixture' });
+      if (options.method === 'POST') return Response.json({ id: 'fixture-edit' });
+      if (options.method === 'DELETE') return new Response(null, { status: 204 });
+      const track = url.split('/').at(-1);
+      return Response.json({ track, releases: [liveRelease(148)] });
+    },
+  });
+  assert.match(stores.android.unknownRuntime, /android store build 148/);
+  assert.match(stores.ios.unknownRuntime, /ios store build 109/);
+  assert.throws(() => planStoreTargets(stores, 'latest'), /android store build 148/);
+  assert.throws(() => computeTargets({ stores: { android: iosStore, ios: stores.ios }, memory: storeMemory,
+    pins: { android: '49', ios: '41' } }), /ios store build 109/);
+});
+
+test('ASC distribution history and upload metadata select three distinct runtimes, ignoring older unknown builds', async () => {
+  const numbers = ['110', '109', '108', '107', '106'];
+  const builds = ['41', '41', '40', '39'].map((runtimeVersion, i) => ({ platform: 'ios', buildNumber: numbers[i], runtimeVersion }));
+  const stores = await readStores({ builds, env: {}, appleApi: async () => ({
+    data: numbers.map((number, i) => ({ attributes: { appVersionState: i === 0 ? 'READY_FOR_DISTRIBUTION' : 'REPLACED_WITH_NEW_VERSION' },
+      relationships: { build: { data: { id: number } } } })),
+    included: numbers.map(number => ({ type: 'builds', id: number, attributes: { version: number } })),
+  }) });
+  assert.equal(stores.ios.status, 'readable');
+  const plan = computeTargets({ stores: { android: { status: 'readable', live: [{ platform: 'android', runtimeVersion: '49' }] }, ios: stores.ios },
+    pins: { android: '53', ios: '45' } });
+  assert.deepEqual(plan.targets.map(t => `${t.platform}@${t.runtimeVersion}`), ['android@49', 'ios@41', 'ios@40', 'ios@39']);
+});
+
+test('build-time runtime inventory paginates instead of losing older App Store uploads', async () => {
+  const offsets = [];
+  const builds = await easBuildInventory({ EXPO_TOKEN: 'fixture' }, async (_url, options) => {
+    const offset = Number(JSON.parse(options.body).query.match(/offset:(\d+)/)[1]);
+    offsets.push(offset);
+    return Response.json({ data: { app: { byId: { builds: offset === 0 ? Array.from({ length: 100 }, (_, i) =>
+      ({ platform: 'IOS', appBuildVersion: String(300 - i), runtimeVersion: '41' })) : [{ platform: 'IOS', appBuildVersion: '109', runtimeVersion: '39' }] } } } });
+  });
+  assert.deepEqual(offsets, [0, 100]);
+  assert.equal(builds.at(-1).appBuildVersion, '109');
+});
+
 test('Play edit-track parsing retains completed, staged and halted users and excludes drafts', () => {
   const releases = ['completed', 'inProgress', 'halted', 'draft'].map((status, i) => ({
     status, versionCodes: [String(146 + i)],
@@ -585,13 +688,13 @@ test('Play edit-track parsing retains completed, staged and halted users and exc
   }
 });
 
-test('next keeps every live production runtime and deduplicates beta without polluting production history', () => {
+test('next selects the newest three distinct store runtimes without polluting production history', () => {
   const live = ['44', '40', '39', '38'].map(runtimeVersion => ({ platform: 'android', runtimeVersion }));
   const stores = { android: { status: 'readable', live, latestRuntimeVersion: '44',
     betaLive: [{ platform: 'android', runtimeVersion: '47' }, ...live] }, ios: iosStore };
   const plan = computeTargets({ stores, memory: storeMemory, pins: { android: '47', ios: '38' }, channel: 'next' });
   assert.deepEqual(plan.targets.map(t => `${t.platform}@${t.runtimeVersion}`),
-    ['android@44', 'android@40', 'android@39', 'android@38', 'android@47', 'ios@36']);
+    ['android@47', 'android@44', 'android@40', 'ios@36']);
   assert.ok(!plan.previouslyLive.some(t => t.runtimeVersion === '47'));
   assert.deepEqual(planStoreTargets(stores, 'latest'), ['android@44', 'android@40', 'android@39', 'ios@36']);
 });
@@ -625,6 +728,14 @@ test('targets CLI reports store failures in Actions and the summary while preser
   assert.match(result.stderr, /::warning::android store status unavailable/);
   assert.match(readFileSync(summary, 'utf8'), /OTA store runtime lookup warnings[\s\S]*Play production HTTP 200: empty response body/);
   assert.ok(JSON.parse(readFileSync(output)).targets.some(t => t.platform === 'android' && t.runtimeVersion === '47'));
+  const blockedOutput = join(directory, 'blocked-targets.json');
+  writeFileSync(status, JSON.stringify({ stores: { android: { status: 'unavailable',
+    unknownRuntime: 'Cannot prove runtime of android store build 148' }, ios: iosStore } }));
+  const blocked = spawnSync(process.execPath, ['scripts/ota-release.mjs', 'targets', '--store-status', status,
+    '--memory', memory, '--output', blockedOutput], { cwd: 'apps/mobile', encoding: 'utf8', env: process.env });
+  assert.notEqual(blocked.status, 0);
+  assert.match(blocked.stderr, /Cannot prove runtime of android store build 148/);
+  assert.throws(() => readFileSync(blockedOutput), /ENOENT/);
 }));
 
 test('OTA rebuilds from the rc commit with the final stamp, then reuses only that final branch on rerun', () => fixture(directory => {
@@ -700,6 +811,25 @@ test('an explicit store build cannot reuse a binary subscribed to the other OTA 
     channel: 'next', selectedComponents: channelComponents(['mobile-native'], { storeTrack: 'beta' }) });
   assert.equal(missingBeta.components['mobile-native'].state, 'pending');
   assert.deepEqual(missingBeta.plan.nativePlatforms, ['android']);
+});
+
+test('production promotion selects Android even when only the iOS runtime changed', () => {
+  const next = nextRecord();
+  next.components['mobile-native'].storeTrack = 'beta';
+  const state = initializeRelease({ version: promotionSource(next).version, sourceSha: sha, previous: delivered(), next, channel: 'latest',
+    selectedComponents: channelComponents([], { channel: 'latest', storeTrack: 'production' }),
+    runtimePin: { changed: true, changedPlatforms: ['ios'], previous: { android: '53', ios: '40' }, next: { android: '53', ios: '41' } } });
+  const flags = Object.fromEntries(planOutputs(state, delivered()).trim().split('\n').map(line => line.split('=')));
+  assert.equal(flags.run_mobile_native, 'true');
+  assert.equal(flags.native_android, 'true');
+  assert.equal(flags.native_ios, 'true');
+  assert.deepEqual(state.plan.nativePlatforms, ['android', 'ios']);
+  const context = { inputs: { store_track: 'production', selection: 'auto' }, steps: { android_build: { outcome: 'success' } },
+    needs: { initialize: { result: 'success', outputs: flags }, release_validation: { result: 'success' }, delivery_result: { result: 'success' } },
+    job: { status: 'success' } };
+  assert.equal(condition(workflow.jobs.mobile_native_android.if, context, { success: true, cancelled: false }), true);
+  const upload = workflow.jobs.mobile_native_android.steps.find(step => step.name === 'Publish Android to Play');
+  assert.equal(condition(upload.if, context, { success: true, cancelled: false }), true);
 });
 
 test('a delivered no-op needs no outputs from skipped jobs', () => {
