@@ -51,22 +51,31 @@ import { Input,MEDIA_URL_PATTERN } from './values.js';
       throw new Error('attachment mimeType is invalid');
     const mediaId = MEDIA_URL_PATTERN.exec(attachment.url)?.[1];
     if (!mediaId) throw new Error('attachment url is not a server media reference');
-    const owned = await ctx.database.query(
-      `SELECT 1 FROM objects
-        WHERE id=$1 AND owner_id=$2 AND state='ready' AND expires_at > now()`,
-      [mediaId, agentId],
+    const owned = await ctx.database.query<{ canonical: typeof attachment | null }>(
+      `SELECT (SELECT file.part FROM agent_commands command
+         CROSS JOIN LATERAL jsonb_array_elements(COALESCE(command.private_payload->'attachments','[]'::jsonb))
+           WITH ORDINALITY file(part,position)
+         JOIN objects carried ON carried.id::text=substring(file.part->>'url' from '/v1/media/([0-9a-f-]{36})')
+           AND carried.sha256=uploaded.sha256 AND carried.state='ready' AND carried.expires_at>now()
+         WHERE command.room_id=$3 AND command.agent_id=$2 AND command.turn_request_id=$4
+         ORDER BY file.position LIMIT 1) canonical
+       FROM objects uploaded
+       WHERE uploaded.id=$1 AND uploaded.owner_id=$2 AND uploaded.state='ready' AND uploaded.expires_at>now()`,
+      [mediaId, agentId, input.roomId, input.requestId],
     );
     if (!owned.rowCount) throw new Error('attachment media is not owned by this agent');
+    // Deduplicate the upload inside its tool call, before it becomes answer data.
+    const saved = owned.rows[0]?.canonical ?? attachment;
     // Older servers and brief tools still read the pending-media table during
     // this rolling release. The queue owns the answer's copy before upload returns.
     await ctx.database.query(
       `INSERT INTO agent_pending_attachments(room_id,agent_id,url,name,mime_type,size,request_id)
        VALUES($1,$2,$3,$4,$5,$6,$7)`,
-      [input.roomId,agentId,attachment.url,attachment.name,attachment.mimeType,attachment.size,input.requestId]);
+      [input.roomId,agentId,saved.url,saved.name,saved.mimeType,saved.size,input.requestId]);
     await ctx.database.query(
       `UPDATE agent_commands SET answer_attachments=answer_attachments || $4::jsonb
        WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3`,
-      [input.roomId, agentId, input.requestId, JSON.stringify([attachment])]);
+      [input.roomId, agentId, input.requestId, JSON.stringify([saved])]);
     return daemonWriteResult(ctx);
   }
 

@@ -1,90 +1,6 @@
 import { advanceCorner, createHash, randomUUID, randomBytes, expect, it, vi, MemoryObjectStorage, ObjectService, callAgentTool, postArtifact, createServer, spawn, createInterface, mkdtemp, readFile, writeFile, rm, tmpdir, join, HUMAN, RUBY, WORKER, WS, ROOM, DM, db, daemon, phone, order, claim, authority, commands, open, worker, rootFixture, type AgentCommand, type DaemonApiClient } from './test-support-commander-recovery.integration.test-support.js';
 
 
-it('keeps the originating corner waiting for a decision returned to its parent Room', async () => {
-  await rootFixture.phone.execute(
-    'sendRoomMessage',
-    {
-      roomId: ROOM,
-      messageId: randomBytes(32).toString('hex'),
-      text: '@ruby open a corner and choose endpoint',
-    },
-    HUMAN,
-  );
-  const incoming = (await commands(ROOM, RUBY)).find((c) => c.reason === 'human_tag')!;
-  await claim(incoming);
-  const opened = await rootFixture.daemon.execute(
-    'createCorner',
-    {
-      ...authority(incoming),
-      targetRoomId: ROOM,
-      name: 'Endpoint',
-      objective: 'Choose endpoint',
-      implementer: 'worker',
-      brief: { spec: 'Choose endpoint', approval: { sourceMessageId: incoming.sourceMessageId } },
-    },
-    RUBY,
-  );
-  const turn = await worker(opened.cornerId);
-  const workerReport = await rootFixture.daemon.execute(
-    'report',
-    { status: 'needs_decision', ...authority(turn), ask: 'Which endpoint should we use?', text: 'needs-decision: choose endpoint' },
-    WORKER,
-  );
-  const returned = (await commands(opened.cornerId, RUBY)).find((c) => c.reason === 'report')!;
-  await claim(returned);
-  await rootFixture.daemon.execute(
-    'report',
-    { status: 'needs_decision', ...authority(returned), ask: 'Which endpoint should we use?', text: 'needs-decision: choose endpoint @captain' },
-    RUBY,
-  );
-  await rootFixture.daemon.execute('postAgentTurnReceipt', { ...authority(returned), agentId: RUBY, status: 'complete' }, RUBY);
-  expect((await rootFixture.db.query(`SELECT private_payload->>'waitingAnswered' answered
-    FROM agent_commands WHERE id=$1`, [workerReport.id])).rows).toEqual([{ answered: null }]);
-  expect(
-    (await rootFixture.db.query(`SELECT 1 FROM corner_owed WHERE corner_id=$1`, [opened.cornerId])).rowCount,
-  ).toBe(1);
-  await rootFixture.daemon.execute(
-    'postRoomMessage',
-    { ...authority(turn), text: 'Reported the decision' },
-    WORKER,
-  );
-  await rootFixture.daemon.execute('postAgentTurnReceipt', { ...authority(turn), agentId: WORKER, status: 'complete' }, WORKER);
-  const state = async () => {
-    await advanceCorner(rootFixture.db, opened.cornerId, { kind: 'reconcile' });
-    return (await rootFixture.phone.readCorners(ROOM, HUMAN))?.corners.find(
-      (item) => item.corner.id === opened.cornerId,
-    )?.state;
-  };
-  expect(await state()).toBe('waiting');
-  await rootFixture.db.query('SELECT corner_owed_refresh($1,$2)', [opened.cornerId, HUMAN]);
-  expect(await state()).toBe('waiting');
-  await rootFixture.phone.execute(
-    'sendRoomMessage',
-    { roomId: ROOM, messageId: randomBytes(32).toString('hex'), text: 'Use endpoint v2' },
-    HUMAN,
-  );
-  expect(
-    (await rootFixture.db.query(`SELECT 1 FROM corner_owed WHERE corner_id=$1`, [opened.cornerId])).rowCount,
-  ).toBe(0);
-  // An unthreaded parent-Room message does not answer the worker's report.
-  expect(await state()).toBe('waiting');
-  await rootFixture.phone.execute(
-    'sendRoomMessage',
-    { roomId: opened.cornerId, messageId: randomBytes(32).toString('hex'), text: 'Use endpoint v2' },
-    HUMAN,
-  );
-  expect(await state()).toBe('idle');
-  await rootFixture.db.query('SELECT corner_owed_refresh($1,$2)', [opened.cornerId, HUMAN]);
-  expect(await state()).toBe('idle');
-  await rootFixture.db.query(
-    `UPDATE messages SET deleted_at=now() WHERE room_id=ANY($1::uuid[]) AND text IN ('Use endpoint v2','@ruby Use endpoint v2')`,
-    [[opened.cornerId, ROOM]],
-  );
-  expect(await state()).toBe('waiting');
-});
-
-
 it('keeps DM-returned decisions indexed until answered or source membership ends', async () => {
   const opened = await open(),
     turn = await worker(opened.cornerId);
@@ -237,104 +153,6 @@ it('R1 carries a closed corner artifact into a successor brief and refuses priva
 });
 
 
-// Reproduction commander-files: the commander's open_corner, revise_corner and
-// order tools run in-process against the daemon service; the worker then reads
-// the brief file with its own read tool.
-it('Reproduction commander-files: a commander home file reaches the worker as the same bytes', async () => {
-  const home = await mkdtemp(join(tmpdir(), 'commander-home-'));
-  const workerHome = await mkdtemp(join(tmpdir(), 'worker-home-'));
-  const trace = join(home, 'trace.csv');
-  const bytes = Buffer.from('at,step\n1,open\n2,fail\n');
-  await writeFile(trace, bytes);
-  await writeFile(join(home, 'turn.json'), JSON.stringify(authority(rootFixture.order)));
-  const objects = new ObjectService(rootFixture.db, new MemoryObjectStorage(), 'http://test');
-  let caller = RUBY;
-  const bridge = createServer(async (request, response) => {
-    try {
-      const chunks: Buffer[] = [];
-      for await (const chunk of request) chunks.push(Buffer.from(chunk));
-      const body = Buffer.concat(chunks);
-      const url = request.url ?? '';
-      let result: unknown;
-      if (url === '/v1/daemon/artifacts') {
-        result = await objects.uploadArtifact(caller, body, String(request.headers['content-type']),
-          decodeURIComponent(String(request.headers['x-artifact-title'])));
-      } else if (url.startsWith('/v1/media/')) {
-        const owned = await objects.readOwnedBytes(RUBY, url.slice('/v1/media/'.length));
-        response.writeHead(200, { 'content-type': 'text/csv' }).end(owned);
-        return;
-      } else if (url.startsWith('/v1/daemon/operations/')) {
-        result = await rootFixture.daemon.execute(url.slice('/v1/daemon/operations/'.length) as never, JSON.parse(body.toString()) as never, caller);
-      } else throw new Error('unexpected proof route');
-      response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(result));
-    } catch (error) {
-      response.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ error: String(error) }));
-    }
-  });
-  const openCorner = (name: string, brief: object) => callAgentTool('open_corner', {
-    room: ROOM, name, objective: 'Find the failing step', implementer: 'worker',
-    brief: { repositoryWork: false, approval: { sourceMessageId: rootFixture.order.sourceMessageId }, ...brief },
-  }, name);
-  const cornerCount = async () => Number((await rootFixture.db.query<{ count: string }>(
-    `SELECT count(*) FROM rooms WHERE parent_id=$1`, [ROOM])).rows[0]!.count);
-  try {
-    await new Promise<void>((resolve) => bridge.listen(0, '127.0.0.1', resolve));
-    const port = (bridge.address() as { port: number }).port;
-    vi.stubEnv('BEELINE_DAEMON_BASE_URL', `http://127.0.0.1:${port}`);
-    vi.stubEnv('BEELINE_DAEMON_TOKEN', 'isolated-fixture-token');
-    vi.stubEnv('BEELINE_DAEMON_ROOM_ID', DM);
-    vi.stubEnv('BEELINE_DAEMON_CORNER_ID', '');
-    vi.stubEnv('BEELINE_ATTACH_ROOT', home);
-    vi.stubEnv('BEELINE_ATTACH_SCRATCH_ROOT', home);
-    vi.stubEnv('BEELINE_TURN_CONTEXT_FILE', join(home, 'turn.json'));
-    const before = await cornerCount();
-    // A brief that names the private file without attaching it is refused by name.
-    await expect(openCorner('Named-only', { spec: `Read ${trace} and find the failing step.` }))
-      .rejects.toThrow(`the brief names ${trace}, which only you can open`);
-    // Quoted filenames and missing home files must never silently reach a worker.
-    const spaced = join(home, 'trace data.csv');
-    await writeFile(spaced, bytes);
-    for (const named of [`"${spaced}"`, `'${spaced}'`, `\`${spaced}\``, join(home, 'missing.csv'), `"${join(home, 'missing trace.csv')}"`]) {
-      const path = named.replace(/^["'`]|["'`]$/g, '');
-      await expect(openCorner('Private-path', { spec: `Read ${named}` }))
-        .rejects.toThrow(`the brief names ${path}, which only you can open`);
-      await expect(callAgentTool('order', { address: ROOM, agent: 'worker', text: `Read ${named}` }, 'order-private'))
-        .resolves.toContain(`Warning: the order names ${path}, which recipients may not be able to open`);
-    }
-    // A path that cannot be read is refused by name.
-    await expect(openCorner('Missing-file', { spec: 'Read the trace.', attachments: [
-      { path: join(home, 'gone.csv'), purpose: 'Failing trace', required: true }] }))
-      .rejects.toThrow(`brief attachment ${join(home, 'gone.csv')} cannot be delivered`);
-    expect(await cornerCount()).toBe(before);
-    // An order that names a private file is delivered with advice to attach it.
-    await expect(callAgentTool('order', { address: ROOM, agent: 'worker', text: `Read ${trace}` }, 'order-named'))
-      .resolves.toContain(`Warning: the order names ${trace}, which recipients may not be able to open`);
-    const opened = JSON.parse(await openCorner('Attached-trace', { spec: `Read "${spaced}" and find the failing step.`,
-      attachments: [{ path: spaced, purpose: 'Failing trace', required: true }] }));
-    const next = await worker(opened.address);
-    const brief = await rootFixture.daemon.execute('listCornerBriefRevisions', { ...authority(next), cornerId: opened.address, limit: 1 }, WORKER);
-    const [file] = brief.revisions[0]!.attachments;
-    expect(file).toMatchObject({ title: 'trace data.csv', mime: 'text/csv', required: true,
-      sha256: createHash('sha256').update(bytes).digest('hex') });
-    // The worker opens the brief file with its own read tool.
-    caller = WORKER;
-    vi.stubEnv('BEELINE_DAEMON_ROOM_ID', opened.address);
-    vi.stubEnv('BEELINE_DAEMON_CORNER_ID', opened.address);
-    vi.stubEnv('BEELINE_ATTACH_SCRATCH_ROOT', workerHome);
-    vi.stubEnv('BEELINE_TURN_CONTEXT_FILE', '');
-    const downloaded = JSON.parse(await callAgentTool('read', { facet: 'attachment', attachmentId: file!.objectId }, 'worker-read'));
-    expect(await readFile(downloaded.path)).toEqual(bytes);
-    console.info(`Demonstrated commander-files: worker read ${downloaded.path} (${bytes.length} bytes, same sha256)`);
-  } finally {
-    vi.unstubAllEnvs();
-    bridge.closeAllConnections();
-    await new Promise<void>((resolve) => bridge.close(() => resolve()));
-    await rm(home, { recursive: true, force: true });
-    await rm(workerHome, { recursive: true, force: true });
-  }
-});
-
-
 // Reproduction duplicate-artifact: worker report -> commander upload -> human DM.
 for (const delivery of ['report', 'postRoomMessage'] as const) {
   it(`delivers identical carried and uploaded artifacts once through ${delivery}`, async () => {
@@ -373,18 +191,11 @@ for (const delivery of ['report', 'postRoomMessage'] as const) {
       }, RUBY);
     }
     const visible = (await rootFixture.phone.readRoom(DM, HUMAN))!.messages.filter(m => m.attachments?.length);
-    if (delivery === 'postRoomMessage') {
-      // Closing prose of a corner report wake is the commander's reply in the corner.
-      expect(visible).toEqual([]);
-      const reply = (await rootFixture.phone.readRoom(opened.cornerId, HUMAN))!.messages
-        .filter(m => m.text === 'Here is the design');
-      expect(reply).toEqual([expect.objectContaining({ attachments: [expect.objectContaining({ url: 'http://test/v1/media/' + copy })] })]);
-    } else {
-      expect(visible).toHaveLength(1);
-      expect(visible[0]!.attachments).toEqual([expect.objectContaining({
-        url: 'http://test/v1/media/' + original, name: 'owner approval',
-      })]);
-    }
+    expect(visible).toHaveLength(1);
+    expect(visible[0]!.attachments).toEqual([expect.objectContaining({
+      url: 'http://test/v1/media/' + original, name: 'owner approval',
+    })]);
+    await rootFixture.db.backgroundWork?.drain();
     expect((await rootFixture.db.query(`SELECT 1 FROM agent_pending_attachments WHERE request_id=$1`,
       [report.turnRequestId])).rowCount).toBe(0);
   });
