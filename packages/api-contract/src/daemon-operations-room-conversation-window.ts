@@ -430,6 +430,8 @@ export type ReactToRoomMessageInput = RoomInput & {
 export type PostRoomMessageInput = TurnOutputAuthority &
   RoomInput & {
     readonly requestId?: string;
+    /** Other queue items answered by this combined reply, in the same chat. */
+    readonly queuedRequestIds?: readonly string[];
     readonly text: string;
     /** The daemon never phrases a system line; the server does (`system-line.ts`). */
     readonly presentation?: 'message' | 'card';

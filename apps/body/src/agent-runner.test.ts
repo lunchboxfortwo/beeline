@@ -186,3 +186,57 @@ it('keeps the genuine answer durable when optional cleanup fails', async () => {
   expect(JSON.parse(await readFile(join(f.root,'answers',`${item.id}.json`),'utf8')).text).toBe('The genuine answer');
   expect(harness.deliver).toHaveBeenCalledTimes(1);
 });
+
+it('stores and posts one answer for every item in an offline chat batch', async () => {
+  const f = await fixture();
+  const batch = Array.from({ length: 28 }, (_, n) => ({ ...f.item(`offline-${n}`),
+    offlineSeconds: 18 * 3600,
+    ...(n >= 3 ? { reason: 'schedule', scheduleId: 'one-schedule' } : {}),
+  }));
+  const answering = deferred<Record<string, unknown>>();
+  harness.deliver.mockReturnValueOnce(answering.promise);
+  f.changed(batch);
+  await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(1));
+  expect(harness.deliver).toHaveBeenCalledWith(batch[0], [], batch);
+  expect(f.execute.mock.calls.filter(call => call[0] === 'postRoomMessage')).toHaveLength(0);
+  f.execute.mockImplementation(async name => {
+    if (name === 'postRoomMessage') throw new Error('disconnected before publication');
+    return { id: 'status', createdAt: 1 };
+  });
+  answering.resolve({ text: 'Answers for all three askers and the latest schedule', steps: [], toolCalls: [], cleanup: async () => {} });
+  await vi.waitFor(() => expect(f.execute.mock.calls.filter(call => call[0] === 'postRoomMessage')).toHaveLength(1));
+  expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({
+    requestId: batch[0]!.id, queuedRequestIds: batch.slice(1).map(item => item.id),
+  }));
+  expect((await new AnswerStore(join(f.root, 'answers')).all())[0]?.queuedRequestIds).toHaveLength(27);
+  f.execute.mockResolvedValue({ id: 'combined-answer', createdAt: 1 });
+  f.changed(batch);
+  await vi.waitFor(async () => expect(await new AnswerStore(join(f.root, 'answers')).all()).toEqual([]));
+  expect(harness.deliver).toHaveBeenCalledTimes(1);
+  expect(harness.steer).not.toHaveBeenCalled();
+});
+
+it('restores every item covered by a stored batch answer without asking the harness again', async () => {
+  vi.spyOn(AnswerStore.prototype, 'all').mockResolvedValueOnce([{
+    itemId: 'first', queuedRequestIds: ['second', 'third'], roomId: 'room', requestId: 'first', text: 'combined answer',
+  }]);
+  const f = await fixture();
+  f.changed(['first', 'second', 'third'].map(f.item));
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({
+    requestId: 'first', queuedRequestIds: ['second', 'third'], text: 'combined answer',
+  })));
+  expect(harness.deliver).not.toHaveBeenCalled();
+});
+
+it('keeps offline batches in their own chat and leaves later live input separate', async () => {
+  const f = await fixture();
+  const offlineSeconds = 18*3600;
+  const first = {...f.item('room-one'),offlineSeconds};
+  const second = {...f.item('room-two'),roomId:'another-room',returnRoomId:'another-room',offlineSeconds};
+  const live = f.item('live-after-reconnect');
+  f.changed([first,second,live]);
+  await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(3));
+  expect(harness.deliver).toHaveBeenCalledWith(first,[live],[first]);
+  expect(harness.deliver).toHaveBeenCalledWith(second,[],[second]);
+  expect(harness.deliver).toHaveBeenCalledWith(live,[],[]);
+});

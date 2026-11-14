@@ -9,9 +9,13 @@ import type { SqlDatabase } from './database.js';
 
 /** One durable queue read, shared by helper push and connected-app delivery. */
 export async function readAgentQueueRows(db:SqlDatabase,agentId:string,roomId?:string) {
-  return db.query<CommandRow & { parent_room_id: string | null }>(
-    `SELECT item.*,room.parent_id parent_room_id FROM agent_commands item
+  return db.query<CommandRow & { parent_room_id: string | null; offline_seconds: number | null }>(
+    `SELECT item.*,room.parent_id parent_room_id,
+       CASE WHEN item.created_at<=connection.connected_at THEN
+         EXTRACT(EPOCH FROM connection.connected_at-connection.offline_since)::double precision END offline_seconds
+     FROM agent_commands item
      LEFT JOIN rooms room ON room.id=item.room_id
+     LEFT JOIN agent_connections connection ON connection.agent_id=item.agent_id
      WHERE item.agent_id=$1 AND ($2::text IS NULL OR item.room_id::text=$2) AND item.state='pending'
      ORDER BY item.inbox_sequence,item.created_at,item.id`, [agentId, roomId ?? null]);
  }
@@ -35,6 +39,7 @@ export async function readAgentCommands(
         attachments: item.private_payload?.attachments ?? [], type: item.private_payload ? 'private' : 'system',
       };
       return {
+        ...(item.offline_seconds != null ? { offlineSeconds: Math.max(0, item.offline_seconds) } : {}),
         id: item.id, roomId: item.room_id, returnRoomId: item.return_room_id ?? item.room_id,
         ...(item.parent_room_id ? {parentRoomId:item.parent_room_id} : {}),
         agentId: item.agent_id, createdAt, sourceMessageId: source.id,

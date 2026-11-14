@@ -338,3 +338,77 @@ it('gives same-source obligations distinct item-owned answer identities by defau
   await answer(R1,first.id,'Answer to the first item');
   expect(await queue()).toEqual([]);
 });
+
+it('keeps an 18-hour offline backlog pending until one combined answer completes all 28 items', async () => {
+  await claimAgentConnection(db, live, A, {}, { connectionId: 'before-offline', instanceId: 'server' });
+  await releaseAgentConnection(db, live, A, 'before-offline');
+  await db.query(`UPDATE agent_connections SET released_at=clock_timestamp()-interval '18 hours' WHERE agent_id=$1`, [A]);
+  const tags = [];
+  for (let n = 1; n <= 3; n++) tags.push(await ask(R1, `question ${n}`));
+  const runs = [];
+  for (let n = 0; n < 25; n++) {
+    const source = `offline-schedule-${n}`;
+    await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,system_event)
+      VALUES($1,$2,$3,$4,'system',$5::jsonb)`, [source,R1,H,`scheduled run ${n}`,
+        JSON.stringify({ kind:'schedule-ran',scheduleId:'daily-check',consequence:`scheduled run ${n}` })]);
+    runs.push((await createAgentCommand(db, { roomId:R1,agentId:A,sourceMessageId:source,reason:'schedule' }))!);
+  }
+  await claimAgentConnection(db, live, A, {}, { connectionId: 'after-offline', instanceId: 'server' });
+  const items = await queue();
+  expect(items).toHaveLength(28);
+  expect(items.every(item => item.offlineSeconds !== undefined)).toBe(true);
+  expect(items[0]!.offlineSeconds! / 3600).toBeCloseTo(18, 1);
+  expect(items.filter(item => item.scheduleId === 'daily-check')).toHaveLength(25);
+  const pending = await db.query(`SELECT count(*)::int n FROM agent_commands WHERE state='pending'`);
+  expect(pending.rows[0]).toEqual({ n:28 });
+  const input = { roomId:R1,requestId:items[0]!.id,queuedRequestIds:items.slice(1).map(item => item.id),
+    text:'Answers to all three questions and the latest scheduled run.' };
+  const posted = await daemon.execute('postRoomMessage', input, A);
+  expect(await queue()).toEqual([]);
+  expect((await db.query(`SELECT count(*)::int n FROM agent_commands WHERE state='complete' AND result_message_id=$1`, [posted.id])).rows[0])
+    .toEqual({ n:28 });
+  expect((await db.query(`SELECT count(*)::int n FROM messages WHERE author_id=$1 AND text=$2`, [A,input.text])).rows[0])
+    .toEqual({ n:1 });
+  expect((await daemon.execute('postRoomMessage',input,A)).id).toBe(posted.id);
+  expect((await db.query(`SELECT count(*)::int n FROM messages WHERE author_id=$1 AND text=$2`, [A,input.text])).rows[0])
+    .toEqual({ n:1 });
+  // New live inputs belong to their own turn, without the stale-work note.
+  const fresh = await ask(R1,'live input');
+  expect((await queue()).find(item => item.id === fresh.id)?.offlineSeconds).toBeUndefined();
+});
+
+it('publishes a combined answer to each recorded return address', async () => {
+  const first = await ask(R1,'answer here');
+  const second = (await createAgentCommand(db, { roomId:R1,agentId:A,sourceMessageId:null,reason:'order',
+    privatePayload:{kind:'order',text:'answer in Two',authorId:H,fromRoomId:R2} }))!;
+  await daemon.execute('postRoomMessage', {roomId:R1,requestId:first.id,queuedRequestIds:[second.id],text:'Both answers'}, A);
+  expect(await queue()).toEqual([]);
+  expect((await db.query(`SELECT room_id FROM messages WHERE author_id=$1 AND text='Both answers' ORDER BY room_id`, [A])).rows)
+    .toEqual([{room_id:R1},{room_id:R2}]);
+});
+
+it('reuses a mid-turn reply for the whole batch and carries every attachment', async () => {
+  const first = await ask(R1,'first batch asker');
+  const second = await ask(R1,'second batch asker');
+  const posted = await daemon.execute('postCornerMessage', { roomId:R1,cornerId:R1,requestId:first.id,text:'Both answers from the tool.' }, A);
+  const file = {url:'https://example.test/batch-proof',name:'batch-proof.txt',mimeType:'text/plain',size:12};
+  await db.query('UPDATE agent_commands SET answer_attachments=$2::jsonb WHERE id=$1',[second.id,JSON.stringify([file])]);
+  await daemon.execute('postRoomMessage',{roomId:R1,requestId:first.id,queuedRequestIds:[second.id],text:'Closing summary'},A);
+  expect(await queue()).toEqual([]);
+  expect((await db.query('SELECT attachments FROM messages WHERE id=$1',[posted.id])).rows[0]).toEqual({attachments:[file]});
+  expect((await db.query("SELECT count(*)::int n FROM messages WHERE author_id=$1 AND room_id=$2 AND text='Closing summary' AND presentation='message'",[A,R1])).rows[0])
+    .toEqual({n:0});
+});
+
+it('keeps the whole batch queued if one recorded return address cannot receive its answer', async () => {
+  const first = await ask(R1,'answer here atomically');
+  const second = (await createAgentCommand(db,{roomId:R1,agentId:A,sourceMessageId:null,reason:'order',
+    privatePayload:{kind:'order',text:'answer in Two atomically',authorId:H,fromRoomId:R2}}))!;
+  await db.query('UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2',[R2,H]);
+  try {
+    await expect(daemon.execute('postRoomMessage',{roomId:R1,requestId:first.id,queuedRequestIds:[second.id],text:'Atomic batch answer'},A))
+      .rejects.toThrow('return address');
+    expect((await queue()).map(item=>item.id)).toEqual([first.id,second.id]);
+    expect((await db.query("SELECT 1 FROM messages WHERE author_id=$1 AND text='Atomic batch answer'",[A])).rows).toEqual([]);
+  } finally { await db.query('UPDATE memberships SET removed_at=NULL WHERE room_id=$1 AND identity_id=$2',[R2,H]); }
+});

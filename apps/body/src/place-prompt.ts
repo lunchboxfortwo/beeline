@@ -154,3 +154,19 @@ export function itemPrompt(item: AgentCommand, options: {
     ...attachmentMarkerLines(source.attachments),
   ].join('\n');
 }
+
+/** One reconnect input per chat. Repeated runs keep only the newest run's content;
+ * all queue items still belong to the answer, including the collapsed runs. */
+export function offlineBatchPrompt(items: readonly AgentCommand[], options: Parameters<typeof itemPrompt>[1]): string {
+  const latestSchedule = new Map<string, AgentCommand>();
+  for (const item of items) if (item.scheduleId) latestSchedule.set(item.scheduleId, item);
+  const visible = items.filter(item => !item.scheduleId || latestSchedule.get(item.scheduleId) === item);
+  const hours = Number(((items[0]?.offlineSeconds ?? 0) / 3600).toFixed(1));
+  return [
+    ...(options.turnPrefix ? [options.turnPrefix] : []),
+    `> You were offline for ${hours} h. These arrived while you were away and may be outdated.`,
+    'Answer each asker in one combined reply. The offline note is private context for you.',
+    ...(options.notes?.length ? ['Session setup notes:', ...options.notes.map(note => `- ${note}`)] : []),
+    ...visible.map(item => itemPrompt(item, { names: options.names })),
+  ].join('\n\n');
+}

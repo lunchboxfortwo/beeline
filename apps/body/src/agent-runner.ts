@@ -66,7 +66,7 @@ export class AgentRunner {
       for (const answer of answers) {
         this.stored.set(answer.itemId, answer);
         this.durable.add(answer.itemId);
-        this.answered.add(answer.itemId);
+        for (const id of [answer.itemId, ...(answer.queuedRequestIds ?? [])]) this.answered.add(id);
       }
     });
     this.grantRunner = new GrantCommandRunner({ api: options.daemonApi, agentId: this.agent.publicKey });
@@ -160,7 +160,7 @@ export class AgentRunner {
    * acknowledgement: a membership change can hide an item that is still owed. */
   private async resendStoredAnswers(listed: ReadonlySet<string>): Promise<void> {
     for (const answer of this.stored.values()) {
-      if (listed.has(answer.itemId) && !this.posting.has(answer.itemId)) {
+      if ([answer.itemId, ...(answer.queuedRequestIds ?? [])].some(id => listed.has(id)) && !this.posting.has(answer.itemId)) {
         void this.post(answer);
       }
     }
@@ -176,6 +176,8 @@ export class AgentRunner {
 
   private async deliver(placeId: string, place: Place, item: AgentCommand): Promise<void> {
     place.running = item;
+    const batch = item.offlineSeconds !== undefined ? [item, ...place.waiting.filter(next => next.offlineSeconds !== undefined)] : [];
+    const batched = new Set(batch.map(next => next.id));
     let started = false;
     try {
         // A harness that cannot start leaves the item waiting for the next queue update.
@@ -183,15 +185,21 @@ export class AgentRunner {
         started = true;
         void this.options.daemonApi.execute('startAgentTurn', { roomId: item.roomId, requestId: item.turnRequestId })
           .catch(error => console.warn('[body] delivery status not written:', error));
-        const answer = await place.session.deliver(item, place.waiting);
+        const answer = await place.session.deliver(item, place.waiting.filter(next => !batched.has(next.id)), batch);
         // Stop wall: a stopped item gets no answer.
-        for (const answered of [item, ...(answer.followUps ?? [])]) {
+        const pendingBatch = batch.filter(next => this.latest.some(listed => listed.id === next.id));
+        if (pendingBatch.length) await this.store({
+          itemId: pendingBatch[0]!.id, roomId: item.roomId, requestId: pendingBatch[0]!.turnRequestId,
+          queuedRequestIds: pendingBatch.slice(1).map(next => next.id),
+          text: answer.text, ...(answer.text && answer.steps.length ? { steps: answer.steps } : {}),
+        });
+        for (const answered of [...(batch.length ? [] : [item]), ...(answer.followUps ?? [])]) {
           if (this.latest.some(listed => listed.id === answered.id)) await this.store({
             itemId: answered.id, roomId: answered.roomId, requestId: answered.turnRequestId,
             text: answer.text, ...(answer.text && answer.steps.length ? { steps: answer.steps } : {}),
           });
         }
-        const consumed = new Set(answer.followUps?.map(next => next.id));
+        const consumed = new Set([...batched, ...(answer.followUps ?? []).map(next => next.id)]);
         place.waiting = place.waiting.filter(next => !consumed.has(next.id));
         void Promise.resolve().then(() => this.afterAnswer(item, answer))
           .catch(error => console.warn('[body] answer diagnostics failed:', error));
@@ -200,6 +208,7 @@ export class AgentRunner {
       if (this.latest.some(listed => listed.id === item.id) && !this.answered.has(item.id)) {
         if (started && !this.stopped) await this.store({
           itemId: item.id, roomId: item.roomId, requestId: item.turnRequestId,
+          ...(batch.length ? { queuedRequestIds: batch.slice(1).filter(next => this.latest.some(listed => listed.id === next.id)).map(next => next.id) } : {}),
           text: `${this.agent.name} stopped while answering this: ${error instanceof Error ? error.message : String(error)}`,
         });
         else {
@@ -209,6 +218,7 @@ export class AgentRunner {
           }).catch(error => console.warn('[body] offline status not written:', error));
         }
       }
+      if (started) place.waiting = place.waiting.filter(next => !batched.has(next.id));
       await place.session.stop().catch(stopError => console.warn('[body] session stop failed:', stopError));
     } finally {
       place.running = undefined;
@@ -238,7 +248,7 @@ export class AgentRunner {
   }
 
   private async store(answer: StoredAnswer): Promise<void> {
-    this.answered.add(answer.itemId);
+    for (const id of [answer.itemId, ...(answer.queuedRequestIds ?? [])]) this.answered.add(id);
     this.stored.set(answer.itemId, answer);
     this.posting.add(answer.itemId);
     try {
@@ -262,6 +272,7 @@ export class AgentRunner {
       }
       const receipt=await api.execute('postRoomMessage', {
         roomId: answer.roomId, requestId: answer.itemId, text: answer.text, presentation: 'message',
+        ...(answer.queuedRequestIds?.length ? { queuedRequestIds: answer.queuedRequestIds } : {}),
         ...(answer.steps ? { steps: answer.steps } : {}),
       });
       if (receipt.answered!==false) {

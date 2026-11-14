@@ -120,6 +120,8 @@ export type AgentCommand = {
   readonly reason: string;
   /** The schedule whose run woke this turn, when this is a `schedule` command. */
   readonly scheduleId?: string;
+  /** Pending at reconnect; duration is measured from the previous connection release. */
+  readonly offlineSeconds?: number;
   readonly rootCommandId: string;
   readonly parentCommandId?: string;
   readonly rootSourceMessageId: string;

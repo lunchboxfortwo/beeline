@@ -114,7 +114,7 @@ export async function claimAgentConnection(
        VALUES($1,1,$2,$3,clock_timestamp(),NULL)
        ON CONFLICT(agent_id) DO UPDATE SET epoch=agent_connections.epoch+1,
          connection_id=EXCLUDED.connection_id,instance_id=EXCLUDED.instance_id,
-         connected_at=EXCLUDED.connected_at,released_at=NULL
+         connected_at=EXCLUDED.connected_at,offline_since=agent_connections.released_at,released_at=NULL
        RETURNING epoch`,
       [agentId, connection.connectionId, connection.instanceId],
     );

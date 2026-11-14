@@ -727,7 +727,33 @@ const hash = (text: string) => createHash('sha256').update(text).digest('hex');
 export async function answerQueuedMessage(database: SqlDatabase, agentId: string, input: {
   roomId: string; requestId?: string; text: string; report?: boolean; status?: unknown; ask?: string;
   steps?: unknown; messageId?: string; replyToMessageId?: string;
+  queuedRequestIds?: readonly string[];
+  /** Internal publication receipt shared by items with the same return address. */
+  sharedReplyId?: string;
 }): Promise<{ id: string; createdAt: number; delivered?: boolean; receipt?: string; answered?: boolean; woken?: string[]; notWoken?: {handle:string;reason:string}[] }> {
+  if (input.queuedRequestIds?.length) return database.transaction(async db => {
+    const ids = [...new Set([input.requestId, ...(input.queuedRequestIds ?? [])].filter((id): id is string => Boolean(id)))];
+    const items = (await db.query<CommandRow & { return_agent_id: string | null }>(`SELECT item.*,recipient.id return_agent_id
+      FROM agent_commands item LEFT JOIN identities recipient ON recipient.kind='agent'
+        AND recipient.id=COALESCE(item.private_payload->>'returnIdentityId',item.private_payload->>'authorId')
+      WHERE item.agent_id=$1 AND item.room_id::text=$2 AND item.id=ANY($3::text[])
+      ORDER BY item.inbox_sequence,item.created_at,item.id FOR UPDATE OF item`,
+      [agentId,input.roomId,ids])).rows;
+    const receipts = new Map<string,string>();
+    let result: Awaited<ReturnType<typeof answerQueuedMessage>> | undefined;
+    for (const item of items) {
+      const address = JSON.stringify([item.return_room_id ?? input.roomId,item.return_agent_id]);
+      const saved = await answerQueuedMessage(db,agentId,{
+        ...input,queuedRequestIds:undefined,requestId:item.id,
+        sharedReplyId:item.return_agent_id ? undefined : receipts.get(address),
+        messageId:hash(`answer:${item.return_agent_id ? item.id : input.requestId}:${address}`),
+      });
+      result ??= saved;
+      if (saved.answered === false) return saved;
+      if (!receipts.has(address)) receipts.set(address,item.posted_reply_id ?? saved.id);
+    }
+    return result ?? answerQueuedMessage(db,agentId,{...input,queuedRequestIds:undefined});
+  });
   let history: {id:string;roomId:string;text:string} | undefined;
   let completedNow = false;
   const published = await database.transaction(async db => {
@@ -773,7 +799,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
       root_source_message_id: answerId, turn_request_id: input.requestId ?? answerId } as CommandRow;
     const saved = await queueMessage(db, { kind: 'delivery', roomId, authorId: agentId, recipientId,
       sourceRoomId: input.roomId, sourceItem, parent: item?.root_command_row && item.root_command_row.agent_id === recipientId ? item.root_command_row : item?.parent_row ?? undefined,
-      stopped: item?.state === 'cancelled', id: answerId, text, attachments, ask: input.ask, replyTo: input.replyToMessageId ?? item?.source_message_id ?? undefined,
+      stopped: item?.state === 'cancelled', id: answerId, postedReplyId: input.sharedReplyId, text, attachments, ask: input.ask, replyTo: input.replyToMessageId ?? item?.source_message_id ?? undefined,
     });
     completedNow = true;
     if (item) await endAgentTurn(db, item, input.report && input.status === 'failed' ? 'failed' : 'complete', null, saved.id);
