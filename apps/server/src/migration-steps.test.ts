@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { migrate, migrateData, MIGRATION_LOCK_TIMEOUT_MS, PostgresDatabase } from './database.js';
 import { alreadyNoOp, alreadySatisfied, normalizeDefault, lockedTables, noOpCheck, logLockHolders, normalizeTriggerDefinition, runMigrationStep, satisfiedCheck, splitMigrationStatements, triggerAlreadyCurrent, triggerPair } from './migration-steps.js';
 import { CORNER_ATTENTION_SCHEMA } from './corner-attention.js';
+import { CHAT_SEQ_INDEX } from './chat-seq.js';
+import { createIndexConcurrently } from './database-backfill-squire-approval-expiry.js';
 
 const postgresUrl = process.env.BEELINE_MIGRATION_LOCK_TEST_POSTGRES_URL;
 if (postgresUrl && !['127.0.0.1', 'localhost', '[::1]'].includes(new URL(postgresUrl).hostname))
@@ -12,6 +14,90 @@ if (postgresUrl && !['127.0.0.1', 'localhost', '[::1]'].includes(new URL(postgre
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe('release-owned migration steps', () => {
+  it.skipIf(!postgresUrl).each(['missing', 'invalid'])('builds the %s chat lookup index while serving writers outlive the DDL lock budget', async state => {
+    const schema = `chat_lookup_${randomUUID().replaceAll('-', '')}`;
+    const admin = new Pool({ connectionString: postgresUrl, max: 2 });
+    const holder = await admin.connect();
+    const migration = new PostgresDatabase('', 1, { mode: 'migration', pool: new Pool({
+      connectionString: postgresUrl, max: 1,
+      options: `-c search_path=${schema} -c lock_timeout=${MIGRATION_LOCK_TIMEOUT_MS}ms -c statement_timeout=8000ms`,
+    }) });
+    let build: Promise<unknown> | undefined;
+    try {
+      await holder.query(`CREATE SCHEMA ${schema};
+        CREATE TABLE ${schema}.messages(author_id text,chat_seq integer)`);
+      await holder.query(`BEGIN; INSERT INTO ${schema}.messages VALUES('held-writer',1)`);
+      const holderPid = (await holder.query('SELECT pg_backend_pid() pid')).rows[0].pid;
+      if (state === 'invalid') {
+        // A cancelled concurrent build leaves exactly the release's repair case.
+        const failed = new Pool({ connectionString: postgresUrl, max: 1,
+          options: `-c search_path=${schema} -c lock_timeout=30ms` });
+        try {
+          await expect(failed.query(CHAT_SEQ_INDEX)).rejects.toMatchObject({ code: '55P03' });
+        } finally { await failed.end(); }
+      }
+      const pid = (await migration.query('SELECT pg_backend_pid() pid')).rows[0]!.pid;
+      build = createIndexConcurrently(migration, 'messages_author_chat_seq_idx', CHAT_SEQ_INDEX)
+        .then(() => ({ ok: true }), error => ({ error }));
+      let waiting = false;
+      for (let attempt = 0; attempt < 400; attempt++) {
+        const { rows } = await admin.query(`SELECT $2::int=ANY(pg_blocking_pids($1)) blocked
+          FROM pg_locks WHERE pid=$1 AND locktype='virtualxid' AND NOT granted`, [pid, holderPid]);
+        if (rows.some(row => row.blocked)) { waiting = true; break; }
+        await new Promise(resolve => setTimeout(resolve, 5));
+      }
+      expect(waiting, 'the concurrent operation waits for the serving transaction').toBe(true);
+      // New traffic must keep writing while the build waits for the old writer.
+      await admin.query(`INSERT INTO ${schema}.messages VALUES('new-writer',2)`);
+      await holder.query(`SELECT pg_sleep(${(MIGRATION_LOCK_TIMEOUT_MS + 100) / 1000})`);
+      expect((await admin.query('SELECT $2::int=ANY(pg_blocking_pids($1)) blocked', [pid, holderPid])).rows)
+        .toEqual([{ blocked: true }]);
+      await holder.query('COMMIT');
+      expect(await build).toEqual({ ok: true });
+      expect((await migration.query(`SELECT indisvalid FROM pg_index
+        WHERE indexrelid='messages_author_chat_seq_idx'::regclass`)).rows).toEqual([{ indisvalid: true }]);
+      expect((await migration.query('SELECT * FROM messages ORDER BY chat_seq')).rows)
+        .toEqual([{ author_id: 'held-writer', chat_seq: 1 }, { author_id: 'new-writer', chat_seq: 2 }]);
+      expect((await migration.query('SHOW lock_timeout')).rows).toEqual([{ lock_timeout: '1s' }]);
+      // The repaired/installed index is a no-op under subsequent serving writes.
+      await holder.query(`BEGIN; INSERT INTO ${schema}.messages VALUES('later-writer',3)`);
+      await createIndexConcurrently(migration, 'messages_author_chat_seq_idx', CHAT_SEQ_INDEX);
+    } finally {
+      await holder.query('ROLLBACK');
+      await build;
+      await migration.close();
+      await holder.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+      holder.release();
+      await admin.end();
+    }
+  });
+
+  it.skipIf(!postgresUrl)('bounds an online index wait by statement timeout and keeps the DDL lock budget after failure', async () => {
+    const schema = `chat_lookup_budget_${randomUUID().replaceAll('-', '')}`;
+    const admin = new Pool({ connectionString: postgresUrl, max: 1 });
+    const holder = await admin.connect();
+    const migration = new PostgresDatabase('', 1, { mode: 'migration', pool: new Pool({
+      connectionString: postgresUrl, max: 1,
+      options: `-c search_path=${schema} -c lock_timeout=30ms -c statement_timeout=150ms`,
+    }) });
+    try {
+      await holder.query(`CREATE SCHEMA ${schema};
+        CREATE TABLE ${schema}.messages(author_id text,chat_seq integer)`);
+      await holder.query(`BEGIN; INSERT INTO ${schema}.messages VALUES('held-writer',1)`);
+      await expect(createIndexConcurrently(migration, 'messages_author_chat_seq_idx', CHAT_SEQ_INDEX))
+        .rejects.toMatchObject({ code: '57014' });
+      expect((await migration.query('SHOW lock_timeout')).rows).toEqual([{ lock_timeout: '30ms' }]);
+      await expect(migration.query('ALTER TABLE messages ADD COLUMN extra text'))
+        .rejects.toMatchObject({ code: '55P03' });
+    } finally {
+      await holder.query('ROLLBACK');
+      await migration.close();
+      await holder.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+      holder.release();
+      await admin.end();
+    }
+  });
+
   it.skipIf(!postgresUrl)('restores only unexpired owner approvals revoked by the provenance upgrade, once', async () => {
     const schema = `grant_restore_${randomUUID().replaceAll('-', '')}`;
     const admin = new Pool({ connectionString: postgresUrl, max: 1 });
