@@ -1,4 +1,4 @@
-const RELEASE_ROOT = 'https://github.com/Beeline-Work/beeline/releases/latest/download';
+const RELEASE_ROOT = 'https://downloads.usebeeline.app/latest';
 
 export const DESKTOP_INSTALLERS = Object.freeze([
   { platform: 'macos', label: 'macOS · Universal DMG', asset: 'Beeline-universal.dmg' },

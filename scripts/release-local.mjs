@@ -349,7 +349,7 @@ async function main(argv) {
   const secrets = args.mode === 'execute' || (args.mode === 'dry-run' && args['env-file']) ? loadEnvironment(envFile) : {};
   if (!secrets.GITHUB_TOKEN && secrets.GH_TOKEN) secrets.GITHUB_TOKEN = secrets.GH_TOKEN;
   const processes = new Processes(secrets);
-  const variables = { BEELINE_HELPER_SENTRY_DSN: secrets.BEELINE_HELPER_SENTRY_DSN || '', BEELINE_MOBILE_SENTRY_DSN: secrets.BEELINE_MOBILE_SENTRY_DSN || '' };
+  const variables = { CLOUDFLARE_ACCOUNT_ID: secrets.CLOUDFLARE_ACCOUNT_ID || '', BEELINE_HELPER_SENTRY_DSN: secrets.BEELINE_HELPER_SENTRY_DSN || '', BEELINE_MOBILE_SENTRY_DSN: secrets.BEELINE_MOBILE_SENTRY_DSN || '' };
   const engine = new LocalActions({ root, directory, secrets, variables, processes, github: localGithub, hooks: localHooks(directory, processes) });
   engine.inspect(WORKFLOW);
   const context = { github: { repository: 'Beeline-Work/beeline', sha, run_id: String(Math.floor(Date.now() / 1000)), run_attempt: '1', event_name: 'workflow_dispatch', event: {}, actor: 'local-release', token: secrets.GITHUB_TOKEN || secrets.GH_TOKEN || '' }, runner: {}, job: { status: 'success' } };
