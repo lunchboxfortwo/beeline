@@ -50,11 +50,16 @@ CREATE TRIGGER corner_github_cache_mirror AFTER INSERT OR UPDATE OF lifecycle ON
  * this module (its lock and its reviewer). Its GitHub display cache row starts
  * with it and is then written only from GitHub (`corner_github_cache`).
  */
-export async function createCornerFacts(db: SqlDatabase, cornerId: string): Promise<void> {
+export async function createCornerFacts(db: SqlDatabase, cornerId: string, humanOpen = false): Promise<void> {
+  // A just-inserted human corner has no commands, checks, receipts or waits to
+  // discover. Seed the same pure transition within its creation transaction.
+  const machine = humanOpen ? transitionCorner({ state: 'idle' }, {
+    facts: { archived: false, turnRunning: false }, event: { kind: 'open' },
+  }).state : null;
   await db.query(
-    `INSERT INTO corner_facts(corner_id,lifecycle)
-     VALUES($1,'{"lifecycle":"working","checks":"unknown"}') ON CONFLICT(corner_id) DO NOTHING`,
-    [cornerId],
+    `INSERT INTO corner_facts(corner_id,lifecycle,machine)
+     VALUES($1,'{"lifecycle":"working","checks":"unknown"}',$2::jsonb) ON CONFLICT(corner_id) DO NOTHING`,
+    [cornerId, machine ? JSON.stringify(machine) : null],
   );
   await db.query(
     `INSERT INTO corner_github_cache(corner_id) VALUES($1) ON CONFLICT(corner_id) DO NOTHING`,
@@ -306,6 +311,11 @@ async function readCornerAdvance(
     const corner = projected?.corner ?? await loadCorner(db, cornerId, false);
     if (!corner) return undefined;
     const head = corner.lifecycle.pr?.headSha ?? (event.kind === 'push' ? event.headSha : undefined);
+    // Explicit close is terminal regardless of review, checks, activity or
+    // waiting. The machine still owns archival and all command/hold cleanup.
+    if (event.kind === 'closed') return { corner, head, row: undefined, checkSource: undefined,
+      facts: { archived: corner.archived, locked: corner.locked, lifecycle: corner.lifecycle,
+        headSha: head, turnRunning: false } };
     await ensureSystemIdentity(db);
     const row = (await db.query<CornerIdleRow>(cornerIdleSql('$1', true), [cornerId])).rows[0];
     const sourceHead =

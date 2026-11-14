@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { requireRoomSlug, reserveRoomName } from '../room-names.js';
 import { ROOM_VIEW_MEMBER_LIMIT } from '@beeline/api-contract/phone';
 import { type SqlDatabase } from '../database.js';
-import { advanceCorner, createCornerFacts } from '../corner-lifecycle.js';
+import { createCornerFacts } from '../corner-lifecycle.js';
 import { joinRoomCreator, removeRoomMembership, joinRooms, joinWorkspaceMembersToPublicRoom } from '../membership-join.js';
 import { identitySubject, systemLine } from '../system-line.js';
 import { writeCornerTitle } from '../corner-title.js';
@@ -79,7 +79,7 @@ import { normalizeHumanCornerTitle, UUID_PATTERN } from './values.js';
       throw new Error('corner id must be a UUID');
     }
     const id = input.cornerId ?? randomUUID();
-    const created = await ctx.database.transaction(async (database) => {
+    await ctx.database.transaction(async (database) => {
       const parent = (
         await database.query<{ workspace_id: string; viewer_name: string }>(
           `SELECT room.workspace_id,viewer.name viewer_name FROM rooms room
@@ -110,10 +110,7 @@ import { normalizeHumanCornerTitle, UUID_PATTERN } from './values.js';
         if (!replay.rowCount) throw new Error('corner id is already in use');
         return false;
       }
-      await createCornerFacts(database, id);
-      await advanceCorner(database, id, {
-        kind: 'open',
-      });
+      await createCornerFacts(database, id, true);
       // Every new corner leaves a static opening in its Room. A resident
       // requesting message anchors it; scratch openings stay at their open time.
       // No kind: a person opening a scratch corner wakes no subscriber.
