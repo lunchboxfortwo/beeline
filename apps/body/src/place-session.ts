@@ -57,7 +57,6 @@ export interface PlaceSessionOptions {
 
 export interface Answer {
   readonly text: string;
-  readonly followUps?: readonly AgentCommand[];
   readonly steps: NonNullable<DaemonOperationMap['postRoomMessage']['input']['steps']>;
   readonly stopReason: string;
   readonly toolCalls: readonly ToolCallEntry[];
@@ -68,8 +67,8 @@ export interface Answer {
 /**
  * One live harness conversation for one place (Room, DM or corner) of one
  * agent. Optional context and capabilities load after delivery and are read
- * with session tools; startup uses cached facts or disclosed defaults. Only a
- * harness that cannot start at all leaves the item waiting in its queue.
+ * with session tools; startup uses cached facts or disclosed defaults. A
+ * harness failure or empty result cannot complete an unanswered human request.
  */
 export class PlaceSession {
   client?: AcpClient;
@@ -88,7 +87,6 @@ export class PlaceSession {
   private claudeLoginWatch?: { close(): void };
   private stopping = false;
   readonly resources: SessionResources;
-  private followUps: AgentCommand[] = [];
   readonly contextPath: string;
 
   constructor(readonly options: PlaceSessionOptions) {
@@ -388,34 +386,21 @@ export class PlaceSession {
     }
   }
 
-  /** New input joins the active prompt; unsupported steering leaves it queued. */
-  followUp(item: AgentCommand): void {
-    if (this.current && this.client && this.sessionId) {
-      const prompt = itemPrompt(item, { names: this.names, notes: [], turnPrefix: this.turnPrefix });
-      const accepted = this.followUps;
-      void this.client.sessionSteer(this.sessionId, prompt).then(() => {
-        accepted.push(item);
-      }).catch(error => {
-        console.warn('[body] follow-up remains queued:', error);
-      });
-    }
-  }
-
   /**
    * Hand one item to the session and wait for its answer. Throws only when
-   * the harness itself fails; the runner then completes the item silently.
+   * the harness itself fails; only background work may complete silently.
    */
-  async deliver(item: AgentCommand, queued: readonly AgentCommand[], batch: readonly AgentCommand[] = []): Promise<Answer> {
+  async deliver(item: AgentCommand, batch: readonly AgentCommand[] = []): Promise<Answer> {
     // start() ran first; a session that died since fails its prompt.
     const client = this.client!;
     const sessionId = this.sessionId!;
     this.current = item;
     if (item.roomId === this.options.placeId) this.squireRelay.activate(item, item.id);
-    this.followUps = [];
     const model = await this.optional('Hosted model credential', () => this.hostedModel(item), undefined);
-    await this.optional('Tool context', () => this.writeContext(item, [...batch.slice(1), ...queued], model?.paths().directory), undefined);
+    await this.optional('Tool context', () => this.writeContext(item, batch.slice(1), model?.paths().directory), undefined);
     const options = { names: this.names, notes: this.notes, turnPrefix: this.turnPrefix };
-    const prompt = batch.length ? offlineBatchPrompt(batch, options) : itemPrompt(item, options);
+    const prompt = batch.length > 1 || item.offlineSeconds !== undefined
+      ? offlineBatchPrompt(batch.length ? batch : [item], options) : itemPrompt(item, options);
     this.notes = [];
     const stream = new AgentTurnStream({
       api: this.options.api, agentId: this.options.agent.publicKey, roomId: item.roomId,
@@ -425,7 +410,6 @@ export class PlaceSession {
     try {
       const answering = client.sessionPrompt(sessionId, prompt, stream.onChunk);
       this.resources.refresh();
-      for (const next of queued) this.followUp(next);
       result = await answering;
     } catch (error) {
       void stream.retract();
@@ -444,7 +428,6 @@ export class PlaceSession {
     catch (error) { console.warn('[body] optional answer history omitted:', error); }
     return {
       text,
-      followUps: this.followUps,
       steps,
       stopReason: result.stopReason,
       toolCalls: result.toolCalls,

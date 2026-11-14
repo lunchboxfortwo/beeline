@@ -46,7 +46,8 @@ export const OWED_MENTION_OPEN_SQL = `
     AND reply.deleted_at IS NULL AND reply.presentation='message')
   AND NOT EXISTS(SELECT 1 FROM agent_commands source
     JOIN messages reply ON reply.room_id=source.room_id AND reply.author_id=source.agent_id
-      AND reply.request_id=source.turn_request_id AND reply.deleted_at IS NULL AND reply.presentation='message'
+      AND (reply.request_id=source.turn_request_id OR reply.id=source.result_message_id)
+      AND reply.deleted_at IS NULL AND reply.presentation='message'
     WHERE source.source_message_id=mention.message_id AND source.room_id=mention.room_id
       AND source.agent_id=mention.member_id)
   AND (NOT EXISTS(SELECT 1 FROM agent_commands source WHERE source.source_message_id=mention.message_id

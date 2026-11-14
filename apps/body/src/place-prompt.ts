@@ -1,4 +1,4 @@
-import { subscriptionActionPrompt, type AgentCommand, type SystemEvent } from '@beeline/api-contract/daemon';
+import { isBackgroundCommand, subscriptionActionPrompt, type AgentCommand, type SystemEvent } from '@beeline/api-contract/daemon';
 import { parseGrantDecisionLine } from '@beeline/api-contract/agent-grants';
 import { SCHEDULE_RAN_VERB, SCHEDULE_SCHEDULER_NAME } from '@beeline/api-contract/scheduled-prompts';
 import { attachmentMarkerLines } from './attachment-delivery.js';
@@ -147,6 +147,8 @@ export function itemPrompt(item: AgentCommand, options: {
     ...(options.notes?.length ? ['Session setup notes:', ...options.notes.map(note => `- ${note}`)] : []),
     `Request ${item.turnRequestId} (${item.reason}) from ${author} in ${item.roomId}. ${answerTo}`,
     'Use this requestId with tools that ask for one.',
+    ...(isBackgroundCommand(item.reason)
+      ? ['This is background context. If nothing has changed or needs action, call no_reply_needed and finish without a public reply. Human requests in this batch still need an answer.'] : []),
     `[message id: ${source.id}]`,
     ...(source.replyToMessageId ? [`Reply to message ${source.replyToMessageId}; read it with session tools if needed.`] : []),
     `${author}: ${body.trim() || '(shared attachments)'}`,
@@ -155,7 +157,7 @@ export function itemPrompt(item: AgentCommand, options: {
   ].join('\n');
 }
 
-/** One reconnect input per chat. Repeated runs keep only the newest run's content;
+/** One pending batch per chat. Repeated runs keep only the newest run's content;
  * all queue items still belong to the answer, including the collapsed runs. */
 export function offlineBatchPrompt(items: readonly AgentCommand[], options: Parameters<typeof itemPrompt>[1]): string {
   const latestSchedule = new Map<string, AgentCommand>();
@@ -164,8 +166,10 @@ export function offlineBatchPrompt(items: readonly AgentCommand[], options: Para
   const hours = Number(((items[0]?.offlineSeconds ?? 0) / 3600).toFixed(1));
   return [
     ...(options.turnPrefix ? [options.turnPrefix] : []),
-    `> You were offline for ${hours} h. These arrived while you were away and may be outdated.`,
-    'Answer each asker in one combined reply. The offline note is private context for you.',
+    ...(items[0]?.offlineSeconds !== undefined
+      ? [`> You were offline for ${hours} h. These arrived while you were away and may be outdated.`] : []),
+    'Answer each asker in one combined reply. Follow the newest instructions when earlier discussion has moved on.',
+    'The offline note, when present, is private context for you.',
     ...(options.notes?.length ? ['Session setup notes:', ...options.notes.map(note => `- ${note}`)] : []),
     ...visible.map(item => itemPrompt(item, { names: options.names })),
   ].join('\n\n');

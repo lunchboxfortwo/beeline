@@ -12,6 +12,7 @@ import { closingActivity,replySteps } from './answer-activity.js';
 import { CornerAccessDatabase } from './corner-access-database.js';
 import { cornerCommanderBriefSql } from './corner-commander.js';
 import { cornerLifecycleSql } from './corner-github-cache.js';
+import { currentIdleReportSql } from './corner-idle.js';
 import { greenReviewRequestSql,reviewChecksSql } from './corner-lifecycle-values.js';
 import { cornerOpeningSql } from './corner-opening.js';
 import { cornerReviewerSql } from './corner-reviewer.js';
@@ -417,6 +418,7 @@ export type QueuedDelivery = {
   kind: 'delivery'; roomId: string; authorId: string; recipientId?: string; text: string; id: string;
   sourceRoomId: string; sourceItem: CommandRow; parent?: CommandRow; stopped?: boolean;
   attachments?: readonly Attachment[]; ask?: string; replyTo?: string; postedReplyId?:string;
+  automatic?: boolean; idleSince?: string;
 };
 export type QueuedOrder = {
   kind: 'order'; roomId: string; authorId: string; agent?: string; text: string;
@@ -533,7 +535,8 @@ export async function queueMessage(database: SqlDatabase, raw: QueuedPost | Queu
           sourceMessageId: null, reason: 'report', parent: input.parent, reportSource: input.sourceItem,
           scheduledHumanCommandMessageId: input.sourceItem.root_source_message_id, retainDepth: true,
           privatePayload: { kind: 'report', text: input.text, authorId: input.authorId, fromRoomId: input.sourceRoomId,
-            ask: input.ask, sourceAgentId:input.sourceItem.agent_id, originCornerId: chat.source_parent_id ? input.sourceRoomId : input.sourceItem.private_payload?.originCornerId, attachments: input.attachments ? [...input.attachments] : undefined },
+            ask: input.ask, sourceAgentId:input.sourceItem.agent_id, automatic: input.automatic, idleSince: input.idleSince,
+            originCornerId: chat.source_parent_id ? input.sourceRoomId : input.sourceItem.private_payload?.originCornerId, attachments: input.attachments ? [...input.attachments] : undefined },
         }, wakeHere ? { ...chat, id: input.sourceRoomId, parent_id: chat.source_parent_id } : chat);
         return { id: queued!.id, createdAt: new Date(queued!.created_at).getTime() / 1000, delivered: true, receipt: 'Report queued privately; not confirmation of execution.' };
       }
@@ -744,14 +747,22 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
 }): Promise<{ id: string; createdAt: number; delivered?: boolean; receipt?: string; answered?: boolean; woken?: string[]; notWoken?: {handle:string;reason:string}[] }> {
   if (input.queuedRequestIds?.length) return database.transaction(async db => {
     const ids = [...new Set([input.requestId, ...(input.queuedRequestIds ?? [])].filter((id): id is string => Boolean(id)))];
-    const items = (await db.query<CommandRow & { return_agent_id: string | null }>(`SELECT item.*,recipient.id return_agent_id
+    const items = (await db.query<CommandRow & { return_agent_id: string | null; batch_reply_id: string | null }>(`SELECT item.*,recipient.id return_agent_id,posted.id batch_reply_id
       FROM agent_commands item LEFT JOIN identities recipient ON recipient.kind='agent'
-        AND recipient.id=COALESCE(item.private_payload->>'returnIdentityId',item.private_payload->>'authorId')
+        AND recipient.id=COALESCE(item.private_payload->>'returnIdentityId',
+          CASE WHEN item.private_payload->>'kind'='order' THEN item.private_payload->>'authorId' END)
+      LEFT JOIN messages posted ON posted.id=COALESCE(item.posted_reply_id,item.result_message_id)
+        AND posted.author_id=item.agent_id AND posted.room_id=item.return_room_id AND posted.deleted_at IS NULL
+        AND (posted.request_id=item.turn_request_id OR posted.id=item.result_message_id)
       WHERE item.agent_id=$1 AND item.room_id::text=$2 AND item.id=ANY($3::text[])
       ORDER BY item.inbox_sequence,item.created_at,item.id FOR UPDATE OF item`,
       [agentId,input.roomId,ids])).rows;
     const receipts = new Map<string,string>();
+    // A tool may have answered any item in the batch before the closing text.
+    for (const item of items) if (!item.return_agent_id && item.batch_reply_id)
+      receipts.set(JSON.stringify([item.return_room_id ?? input.roomId,null]),item.batch_reply_id);
     let result: Awaited<ReturnType<typeof answerQueuedMessage>> | undefined;
+    let unanswered = false;
     for (const item of items) {
       const address = JSON.stringify([item.return_room_id ?? input.roomId,item.return_agent_id]);
       const saved = await answerQueuedMessage(db,agentId,{
@@ -760,10 +771,11 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
         messageId:hash(`answer:${item.return_agent_id ? item.id : input.requestId}:${address}`),
       });
       result ??= saved;
-      if (saved.answered === false) return saved;
-      if (!receipts.has(address)) receipts.set(address,item.posted_reply_id ?? saved.id);
+      if (saved.answered === false) unanswered = true;
+      if (!receipts.has(address) && saved.delivered && item.state === 'pending') receipts.set(address,saved.id);
     }
-    return result ?? answerQueuedMessage(db,agentId,{...input,queuedRequestIds:undefined});
+    const saved = result ?? await answerQueuedMessage(db,agentId,{...input,queuedRequestIds:undefined});
+    return unanswered ? { ...saved, answered: false } : saved;
   });
   let history: {id:string;roomId:string;text:string} | undefined;
   let completedNow = false;
@@ -785,6 +797,13 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
     // A terminal item never publishes again, including a silent harness exit.
     if (item?.state === 'complete')
       return { id: item.result_message_id ?? item.id, createdAt: Math.floor(new Date(item.created_at).getTime() / 1000), delivered: true };
+    if (item?.state === 'pending' && item.private_payload?.automatic && item.private_payload.idleSince
+      && item.private_payload.authorId === SYSTEM_IDENTITY_ID
+      && !(await db.query(`SELECT 1 FROM agent_commands item WHERE item.id=$1 AND ${currentIdleReportSql('item')}`, [item.id])).rowCount) {
+      completedNow = true;
+      await endAgentTurn(db, item, 'complete');
+      return { id: item.id, createdAt: Math.floor(Date.now() / 1000) };
+    }
     const payload = item?.private_payload;
     const escalation = input.report ? item?.report_address ?? (payload?.kind === 'order' ? payload.escalation : undefined) : undefined;
     const roomId = escalation?.roomId ?? item?.return_room_id ?? payload?.fromRoomId ?? input.roomId;
@@ -793,23 +812,20 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
     const status = ['done', 'blocked', 'failed', 'needs_decision'].includes(String(input.status))
       ? String(input.status).replace('_', '-') : 'done';
     const publicText = repairAgentPost(item?.reason==='voice_order' ? cleanVoiceReply(input.text,item.name) : input.text).text.replace(input.report ? /^(?:done|blocked|failed|needs[-_]decision):\s*/ : /^$/, '').trim();
-    if (!publicText && input.harnessEnded === true && item?.state === 'pending') {
-      completedNow = true;
-      await endAgentTurn(db, item, 'complete', null, item.public_reply_id ?? undefined);
-      return { id: item.public_reply_id ?? item.id, createdAt: Math.floor(Date.now() / 1000) };
-    }
-    if (item?.public_reply_id) {
+    const publicReplyId = item?.public_reply_id ?? input.sharedReplyId;
+    if (publicReplyId && item) {
       completedNow = true;
       const id = hash(`closing:${item.id}`);
       await queueMessage(db,{kind:'delivery',roomId:item.return_room_id ?? input.roomId,authorId:agentId,
-        sourceRoomId:input.roomId,sourceItem:item,id:item.public_reply_id,postedReplyId:item.public_reply_id,
+        sourceRoomId:input.roomId,sourceItem:item,id:publicReplyId,postedReplyId:publicReplyId,
         text:'',attachments:item.answer_attachments,stopped:item.state==='cancelled'});
-      await endAgentTurn(db,item,input.report && input.status === 'failed' ? 'failed' : 'complete',null,item.public_reply_id);
-      history = {id,roomId:item.return_room_id ?? input.roomId,text:publicText};
-      return {id:item.public_reply_id,createdAt:Math.floor(Date.now()/1000),delivered:true};
+      await endAgentTurn(db,item,input.report && input.status === 'failed' ? 'failed' : 'complete',null,publicReplyId);
+      if (item.public_reply_id && publicText) history = {id,roomId:item.return_room_id ?? input.roomId,text:publicText};
+      return {id:publicReplyId,createdAt:Math.floor(Date.now()/1000),delivered:true};
     }
     // Background work with nothing to say finishes without a post; an owed answer stays queued.
-    if (!publicText && item?.state === 'pending' && isBackgroundCommand(item.reason) && !item.answer_attachments?.length) {
+    if (!publicText && item?.state === 'pending'
+      && isBackgroundCommand(item.private_payload?.automatic ? 'attention_report' : item.reason) && !item.answer_attachments?.length) {
       completedNow = true;
       await endAgentTurn(db, item, 'complete');
       return { id: item.id, createdAt: Math.floor(Date.now() / 1000) };

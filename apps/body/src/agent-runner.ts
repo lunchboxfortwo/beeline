@@ -1,4 +1,5 @@
 import type { AgentCommand } from '@beeline/api-contract/daemon';
+import { isBackgroundCommand } from '@beeline/api-contract/daemon';
 import { dirname,resolve } from 'node:path';
 import { resolveSessionIdleMs } from './agent-process.js';
 import { AnswerStore,type StoredAnswer } from './answer-store.js';
@@ -154,7 +155,6 @@ export class AgentRunner {
     for (const item of commands.filter(item => !known(item))) {
       const place = this.place(item);
       place.waiting.push(item);
-      if (place.running) place.session.followUp(item);
     }
     for (const placeId of this.places.keys()) void this.pump(placeId);
   }
@@ -179,7 +179,9 @@ export class AgentRunner {
 
   private async deliver(placeId: string, place: Place, item: AgentCommand): Promise<void> {
     place.running = item;
-    const batch = item.offlineSeconds !== undefined ? [item, ...place.waiting.filter(next => next.offlineSeconds !== undefined)] : [];
+    // Input arriving during a prompt belongs to the next prompt. Steering
+    // acceptance does not prove the running answer covered that new request.
+    const batch = [item, ...place.waiting];
     const batched = new Set(batch.map(next => next.id));
     let started = false;
     try {
@@ -188,8 +190,8 @@ export class AgentRunner {
         started = true;
         void this.options.daemonApi.execute('startAgentTurn', { roomId: item.roomId, requestId: item.turnRequestId })
           .catch(error => console.warn('[body] delivery status not written:', error));
-        const answer = await place.session.deliver(item, place.waiting.filter(next => !batched.has(next.id)), batch);
-        // A completed harness with no public answer closes its items quietly.
+        const answer = await place.session.deliver(item, batch);
+        // Empty background work closes quietly; an unanswered request stays owed.
         const steps = answer.text && answer.steps.length ? { steps: answer.steps } : {};
         // Stop wall: a stopped item gets no answer.
         const pendingBatch = batch.filter(next => this.latest.some(listed => listed.id === next.id));
@@ -199,25 +201,19 @@ export class AgentRunner {
             queuedRequestIds: pendingBatch.slice(1).map(next => next.id), text: answer.text, harnessEnded: true, ...steps,
           });
         }
-        for (const answered of [...(batch.length ? [] : [item]), ...(answer.followUps ?? [])]) {
-          if (this.latest.some(listed => listed.id === answered.id)) await this.store({
-            itemId: answered.id, roomId: answered.roomId, requestId: answered.turnRequestId,
-            text: answer.text, harnessEnded: true, ...steps,
-          });
-        }
-        const consumed = new Set([...batched, ...(answer.followUps ?? []).map(next => next.id)]);
-        place.waiting = place.waiting.filter(next => !consumed.has(next.id));
+        place.waiting = place.waiting.filter(next => !batched.has(next.id));
         void Promise.resolve().then(() => this.afterAnswer(item, answer))
           .catch(error => console.warn('[body] answer diagnostics failed:', error));
     } catch (error) {
       console.error(`[body] place ${placeId} could not answer ${item.id}:`, error);
       if (this.latest.some(listed => listed.id === item.id) && !this.answered.has(item.id)) {
-        if (started && !this.stopped) await this.store({
-          itemId: item.id, roomId: item.roomId, requestId: item.turnRequestId,
-          ...(batch.length ? { queuedRequestIds: batch.slice(1).filter(next => this.latest.some(listed => listed.id === next.id)).map(next => next.id) } : {}),
-          text: '', harnessEnded: true,
-        });
-        else {
+        if (started && !this.stopped) {
+          const pending = batch.filter(next => this.latest.some(listed => listed.id === next.id));
+          if (pending.length) await this.store({
+            itemId: pending[0]!.id, roomId: item.roomId, requestId: pending[0]!.turnRequestId,
+            queuedRequestIds: pending.slice(1).map(next => next.id), text: '', harnessEnded: true,
+          });
+        } else {
           place.waiting.unshift(item);
           if (!this.stopped) void this.options.daemonApi.execute('startAgentTurn', {
             roomId: item.roomId, requestId: item.turnRequestId, available: false,
@@ -286,6 +282,14 @@ export class AgentRunner {
         this.stored.delete(answer.itemId);
         this.durable.delete(answer.itemId);
         void this.answers.remove(answer.itemId).catch(error => console.warn('[body] answer cleanup failed:', error));
+      } else if (!answer.text && this.latest.some(item =>
+        [answer.itemId, ...(answer.queuedRequestIds ?? [])].includes(item.id) && !isBackgroundCommand(item.reason))) {
+        // An older helper may have persisted an empty human completion. The
+        // server refused it, so it must not suppress the next queue delivery.
+        await this.answers.remove(answer.itemId);
+        this.stored.delete(answer.itemId);
+        this.durable.delete(answer.itemId);
+        for (const id of [answer.itemId, ...(answer.queuedRequestIds ?? [])]) this.answered.delete(id);
       }
     } catch (error) {
       // A queued item still owns its stored answer, including after a refusal.
@@ -299,7 +303,7 @@ export class AgentRunner {
   private sessionExited(placeId: string): void {
     const place = this.places.get(placeId);
     if (!place || this.stopped) return;
-    // deliver() durably completes a running item, including a silent harness exit.
+    // deliver() stores closing output; the server retains unanswered requests.
     if (!place.running) void place.session.stop().then(() => this.pump(placeId));
   }
 

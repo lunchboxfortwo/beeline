@@ -1,4 +1,6 @@
 import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
+import { randomUUID } from 'node:crypto';
+import { cornerIdleSql } from './corner-idle.js';
 import { expect, it, insertCornerFacts, DaemonService, LiveHub, createAgentCommand, SYSTEM_IDENTITY_ID, ensureSystemIdentity, advanceCorner, H, A, B, P, W, R, C, id, stopProofPostgresUrl, db, phone, daemon, live, commands, send, helperOwner, claim, result, rootFixture, type SqlDatabase } from './test-support-agent-command.integration.test-support.js';
 
 
@@ -542,21 +544,33 @@ it.each(['no_reply_needed', 'mcp__beeline-agent__no_reply_needed', 'mcp__beeline
 // Command-only roots are server-authored private work, never synthetic messages.
 it.each(['replay', 'idle'] as const)('command-only requester: System %s survives a cold repository read and delegation', async kind => {
   await ensureSystemIdentity(rootFixture.db);
-  const root = (await createAgentCommand(rootFixture.db, { roomId: R, agentId: A, sourceMessageId: null,
-    reason: kind === 'replay' ? 'order' : 'report', privatePayload: {
-      kind: kind === 'replay' ? 'order' : 'report', authorId: SYSTEM_IDENTITY_ID, fromRoomId: R,
-      text: kind === 'replay' ? 'Automatic prompt replay for a verified head.' : 'blocked: Corner is idle.',
-      ...(kind === 'idle' ? { automatic: true, idleSince: new Date().toISOString(), originCornerId: C } : {}),
-    } }))!;
-  expect(root.root_source_message_id).toBe(root.id);
-  expect(await rootFixture.daemon['grantRequester'](root)).toMatchObject({ id: SYSTEM_IDENTITY_ID });
-  const command = (await commands()).find(c => c.id === root.id)!;
-  await claim(command);
-  await expect(rootFixture.daemon.execute('getRoomRepositoryState', { roomId: R, requestId: command.turnRequestId }, A)).resolves.toMatchObject({ resolution: 'none', repositoryOnboarding: true });
-  const child = (await createAgentCommand(rootFixture.db, { roomId: R, agentId: B, sourceMessageId: null,
-    parent: root, reason: 'order', privatePayload: { kind: 'order', authorId: A, fromRoomId: R, text: 'Delegated replay' } }))!;
-  expect(await rootFixture.daemon['grantRequester'](child)).toMatchObject({ id: SYSTEM_IDENTITY_ID });
-  expect((await rootFixture.db.query('SELECT 1 FROM messages WHERE id=$1', [root.id])).rowCount).toBe(0);
+  const origin = randomUUID();
+  if (kind === 'idle') {
+    await rootFixture.db.query(`INSERT INTO rooms(id,workspace_id,parent_id,name,created_by) VALUES($1,$2,$3,'Idle requester',$4)`, [origin,W,R,A]);
+    await insertCornerFacts(rootFixture.db, { cornerId: origin, ownerAgentId: B, workerAgentId: B });
+    await rootFixture.db.query(`UPDATE corner_facts SET machine='{"state":"idle","effects":[]}'::jsonb WHERE corner_id=$1`, [origin]);
+  }
+  const idle = kind === 'idle' ? (await rootFixture.db.query<{ idle_since: string; idle_eligible: boolean }>(cornerIdleSql('$1'), [origin])).rows[0]! : undefined;
+  if (idle) expect(idle.idle_eligible).toBe(true);
+  try {
+    const root = (await createAgentCommand(rootFixture.db, { roomId: R, agentId: A, sourceMessageId: null,
+      reason: kind === 'replay' ? 'order' : 'report', privatePayload: {
+        kind: kind === 'replay' ? 'order' : 'report', authorId: SYSTEM_IDENTITY_ID, fromRoomId: R,
+        text: kind === 'replay' ? 'Automatic prompt replay for a verified head.' : 'blocked: Corner is idle.',
+        ...(idle ? { automatic: true, idleSince: idle.idle_since, originCornerId: origin } : {}),
+      } }))!;
+    expect(root.root_source_message_id).toBe(root.id);
+    expect(await rootFixture.daemon['grantRequester'](root)).toMatchObject({ id: SYSTEM_IDENTITY_ID });
+    const command = (await commands()).find(c => c.id === root.id)!;
+    await claim(command);
+    await expect(rootFixture.daemon.execute('getRoomRepositoryState', { roomId: R, requestId: command.turnRequestId }, A)).resolves.toMatchObject({ resolution: 'none', repositoryOnboarding: true });
+    const child = (await createAgentCommand(rootFixture.db, { roomId: R, agentId: B, sourceMessageId: null,
+      parent: root, reason: 'order', privatePayload: { kind: 'order', authorId: A, fromRoomId: R, text: 'Delegated replay' } }))!;
+    expect(await rootFixture.daemon['grantRequester'](child)).toMatchObject({ id: SYSTEM_IDENTITY_ID });
+    expect((await rootFixture.db.query('SELECT 1 FROM messages WHERE id=$1', [root.id])).rowCount).toBe(0);
+  } finally {
+    if (kind === 'idle') await rootFixture.db.query('DELETE FROM rooms WHERE id=$1', [origin]);
+  }
 });
 
 
