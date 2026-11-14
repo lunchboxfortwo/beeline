@@ -16,7 +16,7 @@ import { useChatComposerSend } from './useChatComposerSend';
 import { useSendConfirmationState } from './send-confirmation';
 import { selectComposerAckPresentation } from '@/buzz/room-indicators';
 
-it.each([[false, false], [false, true], [true, false], [true, true]])('ONE-SHAPE / SEND-CONFIRM-1 paints before preparation (attachment=%s, reply=%s) and keeps failure feedback', async (withAttachment, reply) => {
+it.each([[false, false, false], [false, true, false], [true, false, false], [true, true, false], [true, false, true], [true, true, true]])('ONE-SHAPE / SEND-CONFIRM-1 preserves preparation feedback and sends ready files once (attachment=%s, reply=%s, ready=%s)', async (withAttachment, reply, ready) => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   let accept!: (result: object) => void;
   const receipt = new Promise<object>(resolve => { accept = resolve; });
@@ -25,7 +25,7 @@ it.each([[false, false], [false, true], [true, false], [true, true]])('ONE-SHAPE
   const uploaded = new Promise<object[]>(resolve => { releaseUpload = resolve; });
   const picked = { uri: 'file:///shot.png', name: 'shot.png', mimeType: 'image/png', size: 68, source: 'photo' };
   const attachment = { url: '/v1/media/11111111-1111-4111-8111-111111111111', name: picked.name, mimeType: picked.mimeType, size: picked.size };
-  const uploader = { uploadAll: vi.fn(() => uploaded) };
+  const uploader = { state: () => ready ? 'uploaded' : 'uploading', uploadAll: vi.fn(() => ready ? Promise.resolve([attachment]) : uploaded) };
   const compose = vi.fn(async () => event);
   const transport = { ensureClient: async () => ({}), composeMessage: compose, composeReplyMessage: compose };
   const outbox = { enqueue: vi.fn(async (_event: unknown, _row: unknown) => undefined), send: vi.fn(() => receipt), get: () => true };
@@ -70,7 +70,7 @@ it.each([[false, false], [false, true], [true, false], [true, true]])('ONE-SHAPE
     await act(async () => { pending = send(); });
     expect(tree.root.findByType('p').props.children).toBe('Hello agent');
     expect(tree.root.findByType('span').props.children).toBe('sending…');
-    if (withAttachment) {
+    if (withAttachment && !ready) {
       expect(outbox.enqueue).not.toHaveBeenCalled();
       expect(transport.composeMessage).not.toHaveBeenCalled();
       expect(tree.root.findByType('p').props['data-message']).toMatchObject({

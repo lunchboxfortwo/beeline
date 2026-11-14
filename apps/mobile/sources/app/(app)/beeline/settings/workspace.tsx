@@ -1,19 +1,10 @@
 import React from 'react';
-import { Redirect, useLocalSearchParams, type Href } from 'expo-router';
+import { SettingsScreen } from '@/ui/screens/settings/SettingsScreen';
 
 /**
  * Workspace settings now live in the Settings screen's workspace tab. Old
- * links to this screen land there with that tab selected.
+ * links render that same screen with the tab selected, without another navigation.
  */
-export default function WorkspaceSettingsRedirect() {
-  const { communityId } = useLocalSearchParams<{ communityId?: string | string[] }>();
-  const workspaceId = Array.isArray(communityId) ? communityId[0] : communityId;
-  return (
-    <Redirect
-      href={{
-        pathname: '/beeline/settings',
-        params: { tab: 'workspace', ...(workspaceId ? { workspaceId } : {}) },
-      } as unknown as Href}
-    />
-  );
+export default function WorkspaceSettingsRoute() {
+  return <SettingsScreen initialScope="workspace" />;
 }

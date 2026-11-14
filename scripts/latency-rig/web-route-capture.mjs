@@ -4,6 +4,8 @@ import { resolve } from 'node:path';
 import { routeFixture, waitForRouteContent } from './web-route-fixtures.mjs';
 import { summarize } from './web-capture.mjs';
 import { readWebResources } from './web-resources.mjs';
+import { armTapTiming } from './web-tap-timing.mjs';
+import { fixtureSignIn } from './web-signin.mjs';
 
 export async function captureRoutes({
   browser,
@@ -38,7 +40,13 @@ export async function captureRoutes({
           variant,
           state: config.state,
           capture,
+          cache: {
+            app: variant === 'cold' ? 'cleared' : 'target-route-primed',
+            http: 'disabled-by-request-routing-and-no-store-server',
+            javascript: 'fresh-document-in-reused-browser',
+          },
           samples: [],
+          timings: [],
           resources: [],
         };
         captures.push(record);
@@ -119,14 +127,7 @@ export async function captureRoutes({
           page.setDefaultNavigationTimeout(15000);
           try {
             if (!storageState) {
-              await page.goto(`/review/${secret}`);
-              await page.waitForURL('**/beeline/channels**');
-              storageState = await context.storageState();
-              for (const origin of storageState.origins)
-                origin.localStorage = origin.localStorage.filter(
-                  ({ name }) =>
-                    !name.startsWith('beeline.surface.') && !name.startsWith('beeline.outbox.'),
-                );
+              storageState = await fixtureSignIn(context, secret);
             }
             try {
               // A warm page that never shows its fixture used to throw here and
@@ -135,8 +136,8 @@ export async function captureRoutes({
                 await page.goto(config.url);
                 await waitForRouteContent(page, config);
               }
-              // Warm document loads retain browser and surface caches. Cold loads
-              // clear app caches and the HTTP cache, preserving authentication only.
+              // Routing disables HTTP caching in both variants. Only application
+              // storage is primed by the warm target load.
               await page.goto('/__latency_blank.html');
               if (variant === 'cold') {
                 await page.evaluate(async () => {
@@ -157,16 +158,34 @@ export async function captureRoutes({
                 await session.detach();
               }
               const before = await readWebResources(context, page);
+              await page.addInitScript(armTapTiming, {
+                ...config,
+                scope: 'body',
+                navigation: true,
+                hidden: config.absent,
+                path: undefined,
+              });
               const started = performance.now();
               await page.goto(config.url, { waitUntil: 'commit' });
               await waitForRouteContent(page, config);
-              await page.evaluate(
-                () =>
-                  new Promise((resolve) =>
-                    requestAnimationFrame(() => requestAnimationFrame(resolve)),
-                  ),
-              );
-              record.samples.push(performance.now() - started);
+              const timing = await page.evaluate(async () => {
+                await new Promise((resolve) =>
+                  requestAnimationFrame(() => requestAnimationFrame(resolve)),
+                );
+                return {
+                  ...window.__latencyTapTiming,
+                  navigation: performance
+                    .getEntriesByType('navigation')
+                    .map((entry) => entry.toJSON()),
+                  resources: performance
+                    .getEntriesByType('resource')
+                    .map((entry) => entry.toJSON()),
+                };
+              });
+              if (!Number.isFinite(timing.durationMs) || timing.durationMs <= 0)
+                throw new Error('Route content frame was not observed');
+              record.samples.push(timing.durationMs);
+              record.timings.push({ ...timing, driverObservedMs: performance.now() - started });
               record.resources.push({ before, after: await readWebResources(context, page) });
               if (sample === 0 && capture === 1)
                 await page.screenshot({
@@ -209,7 +228,7 @@ export async function captureRoutes({
   const summary = {
     samplesPerCapture: count,
     method:
-      'Fresh context per sample; document navigation to explicit visible content plus two frames, driver overhead included. Cold clears app/HTTP caches; warm first loads only its target route. Redirect and unavailable states are labelled, never inferred as successful integration completion.',
+      'Fresh context per sample; browser navigation time origin to explicit visible content plus two frames; driver totals retained separately. Cold clears application storage; warm primes the target route. HTTP caching is disabled in both variants by request routing and the no-store fixture server. Browser process is reused; compiled-code cache state is uncontrolled. Redirect and unavailable states retain their labels.',
     ...summarize(inventory, captures, { samplesPerCapture: count, budgetMs: 450 }),
     states: Object.fromEntries(routes.map(({ path }) => [path, routeFixture(path, secret).state])),
   };

@@ -46,7 +46,9 @@ test('route captures cannot inherit another route context and retain resource ob
             waitForURL: async () => {},
             locator: () => target,
             getByText: () => target,
-            evaluate: async () => {},
+            evaluate: async () => ({ startMs: 0, domMs: 90, frameMs: 100, durationMs: 100 }),
+            addInitScript: async () => {},
+            close: async () => {},
             screenshot: async () => {},
           };
         },
@@ -85,6 +87,8 @@ test('route captures cannot inherit another route context and retain resource ob
     for (const capture of captures) {
       assert.equal(capture.resources.length, capture.samples.length);
       assert.equal(capture.resources.length, 3);
+      assert.deepEqual(capture.samples, [100, 100, 100]);
+      assert.match(capture.cache.http, /disabled/);
       for (const { before, after } of capture.resources) {
         assert.equal(before.page.JSHeapUsedSize, 1024);
         assert.equal(after.page.TaskDuration, 0.1);
@@ -141,7 +145,9 @@ test('a warm page that misses its fixture is recorded and the sweep continues', 
             waitForURL: async () => {},
             locator: () => target,
             getByText: () => target,
-            evaluate: async () => {},
+            evaluate: async () => ({ startMs: 0, domMs: 90, frameMs: 100, durationMs: 100 }),
+            addInitScript: async () => {},
+            close: async () => {},
             screenshot: async () => {},
           };
         },

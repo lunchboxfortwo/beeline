@@ -58,6 +58,7 @@ for (const feedback of [false, true]) test(`forward feedback=${feedback} is reco
       assert.ok(first.durationMs >= first.removalMs);
     }
     assert.ok(first.removalMs >= first.dispatchMs);
+    assert.equal(first.dispatchMs, 0, 'driver dispatch delay is outside the browser click interval');
     assert.equal(first.configuredAnimationMs, 250);
     assert.ok(
       feedback ? first.animationMs >= 250 : first.animationMs < 250,

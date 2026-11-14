@@ -11,8 +11,8 @@ import { steps, exclusions } from './web-steps.mjs';
 import { captureRoutes } from './web-route-capture.mjs';
 import { readWebResources } from './web-resources.mjs';
 import { tapFeedback, armTapTiming, readTapTiming } from './web-tap-timing.mjs';
-import { measureLongPress } from './web-long-press.mjs';
 import { armForwardTiming, readForwardTiming } from './web-forward-timing.mjs';
+import { fixtureSignIn } from './web-signin.mjs';
 async function bounded(work, milliseconds, label) {
   let timer;
   try {
@@ -79,6 +79,8 @@ export function summarize(inventory, captures, { samplesPerCapture = 20, budgetM
     const longPress = paired.flatMap((c) => c.longPressTimings ?? []);
     const forward = paired.flatMap((c) => c.forwardTimings ?? []);
     const tap = paired.flatMap((c) => c.tapTimings ?? []);
+    const navigation = paired.flatMap((c) => c.timings ?? []);
+    const observed = tap.length ? tap : navigation;
     const uploads = paired.flatMap((c) => c.uploadPreparationMs ?? []);
     rows.push({
       name,
@@ -91,17 +93,28 @@ export function summarize(inventory, captures, { samplesPerCapture = 20, budgetM
             },
           }
         : {}),
-      ...(tap.length === samplesPerCapture * 2
+      ...(observed.length === samplesPerCapture * 2
         ? {
-            timingContract:
-              'browser pointerdown to the driver fixture result DOM plus two frames; excludes driver actionability and observation delay',
+            timingContract: navigation.length
+              ? 'browser navigation time origin to the fixture result DOM plus two frames'
+              : 'browser input event to the driver fixture result DOM plus two frames; excludes driver actionability and observation delay',
             driverObserved: {
               p50Ms: percentile(
-                tap.map((t) => t.driverObservedMs),
+                observed.map((t) => t.driverObservedMs),
                 0.5,
               ),
               p95Ms: percentile(
-                tap.map((t) => t.driverObservedMs),
+                observed.map((t) => t.driverObservedMs),
+                0.95,
+              ),
+            },
+            profile: {
+              startToDomP95Ms: percentile(
+                observed.map((t) => t.domMs - t.startMs),
+                0.95,
+              ),
+              domToFrameP95Ms: percentile(
+                observed.map((t) => t.frameMs - t.domMs),
                 0.95,
               ),
             },
@@ -171,14 +184,14 @@ export function summarize(inventory, captures, { samplesPerCapture = 20, budgetM
       })),
     });
   }
-  // A percentage of interactions meeting the existing 150ms tap p50 budget.
+  // A percentage of interactions meeting the standing p95 budget.
   // Incomplete inventories have no score, not a misleading partial average.
   return {
     fullInventoryScore:
       unmeasured.length || !inventory.length
         ? null
-        : (100 * rows.filter((r) => r.p50Ms < budgetMs).length) / inventory.length,
-    scoreDefinition: `Percentage of the complete inventory with paired pooled p50 below ${budgetMs} ms; null if any item is unmeasured`,
+        : (100 * rows.filter((r) => r.p95Ms < budgetMs).length) / inventory.length,
+    scoreDefinition: `Percentage of the complete inventory with paired pooled p95 below ${budgetMs} ms; null if any item is unmeasured`,
     coverage: { measured: rows.length, total: inventory.length },
     rows,
     unmeasured,
@@ -213,10 +226,11 @@ async function main() {
   );
   validateInventory(inventory);
   const selected = process.env.LATENCY_RIG_WEB_INTERACTION;
-  if (selected && !inventory.includes(selected))
+  const selectedInventory = selected ? selected.split(',') : undefined;
+  if (selectedInventory?.some((name) => !inventory.includes(name)))
     throw new Error(`Unknown interaction: ${selected}`);
   const captureInventory =
-    process.env.LATENCY_RIG_WEB_ROUTES_ONLY === '1' ? [] : selected ? [selected] : inventory;
+    process.env.LATENCY_RIG_WEB_ROUTES_ONLY === '1' ? [] : (selectedInventory ?? inventory);
   const routes = JSON.parse(await readFile(new URL('./routes.json', import.meta.url), 'utf8'));
   for (const name of inventory)
     if (!routes.some((route) => route.path === fixture(name).route))
@@ -241,6 +255,7 @@ async function main() {
         'web-long-press.mjs',
         'web-resources.mjs',
         'web-tap-timing.mjs',
+        'web-signin.mjs',
         'interactions.json',
         'routes.json',
       ].map(async (name) => [
@@ -311,14 +326,7 @@ async function main() {
               page.setDefaultTimeout(4000);
               page.setDefaultNavigationTimeout(6000);
               if (!storageState) {
-                await page.goto(`/review/${secret}`);
-                await page.waitForURL('**/beeline/channels**', { timeout: 15000 });
-                storageState = await context.storageState();
-                for (const origin of storageState.origins)
-                  origin.localStorage = origin.localStorage.filter(
-                    ({ name }) =>
-                      !name.startsWith('beeline.surface.') && !name.startsWith('beeline.outbox.'),
-                  );
+                storageState = await fixtureSignIn(context, secret);
               }
               try {
                 const prepared = await bounded(
@@ -333,7 +341,7 @@ async function main() {
                 if (prepared.uploadMs !== undefined)
                   (record.uploadPreparationMs ??= []).push(prepared.uploadMs);
                 const before = await readWebResources(context, page);
-                const feedback = tapFeedback(name, f);
+                const feedback = tapFeedback(name, f, `rig-${name}-${capture}-${sample}`);
                 if (feedback) await page.evaluate(armTapTiming, feedback);
                 if (name === 'forward-message')
                   await page.evaluate(armForwardTiming, { messageText: f.text });
@@ -346,39 +354,29 @@ async function main() {
                   'Action start',
                 );
                 let duration;
-                if (prepared.longPressThresholdMs !== undefined) {
-                  const timing = await bounded(
-                    () => measureLongPress(page, prepared),
-                    10000,
-                    'Long press and visible result',
-                  );
-                  (record.longPressTimings ??= []).push(timing);
-                  duration = timing.postRecognitionMs;
-                } else {
-                  await bounded(
-                    async () => {
-                      await prepared.act();
-                      await prepared.done();
-                    },
-                    10000,
-                    'Action and visible result',
-                  );
-                  duration = await bounded(
-                    () =>
-                      page.evaluate(
-                        () =>
-                          new Promise((resolve) =>
+                await bounded(
+                  async () => {
+                    await prepared.act();
+                    await prepared.done();
+                  },
+                  10000,
+                  'Action and visible result',
+                );
+                duration = await bounded(
+                  () =>
+                    page.evaluate(
+                      () =>
+                        new Promise((resolve) =>
+                          requestAnimationFrame(() =>
                             requestAnimationFrame(() =>
-                              requestAnimationFrame(() =>
-                                resolve(performance.now() - window.__latencyStart),
-                              ),
+                              resolve(performance.now() - window.__latencyStart),
                             ),
                           ),
-                      ),
-                    2000,
-                    'Result frame',
-                  );
-                }
+                        ),
+                    ),
+                  2000,
+                  'Result frame',
+                );
                 if (feedback) {
                   // The frame stamp is already frozen in the page. Wait until
                   // that stamp exists; do not move it.
@@ -453,8 +451,6 @@ async function main() {
     const summary = {
       routeInventory,
       schemaVersion: 1,
-      longPressContract:
-        'pointerdown + threshold from source to existing result plus two frames; observed during hold; gesture-inclusive timings retained separately',
       platform: 'headless-chromium-web',
       commit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
       browser: browser.version(),

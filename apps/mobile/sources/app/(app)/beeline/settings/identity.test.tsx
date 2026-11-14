@@ -254,6 +254,7 @@ import { beelineThemes } from '@/buzz/groknight';
 import IdentitySettingsScreen from './identity';
 import { mobileSurfaceCache } from '@/buzz/surface-storage';
 import { openExternalUrl } from '@/utils/open-external-url';
+import { useYouSettings } from '@/ui/screens/settings/useYouSettings';
 
 const originalConsoleError = console.error;
 
@@ -329,6 +330,32 @@ function operations(state: { avatar?: string }) {
     throw new Error(`unexpected operation ${name}`);
   });
 }
+
+it('renders a saved Workspace role during refresh and applies the fresh role when it arrives', async () => {
+  const { surfaceAddress } = await import('@/buzz/surface-storage');
+  const { isWorkspaceListView } = await import('@beeline/buzz-client');
+  const entry = { id: 'workspace-1', name: 'Workspace', role: 'owner' as const, visibility: 'invite-only' as const,
+    updatedAt: 1, roomCount: 0, attention: false };
+  await mobileSurfaceCache.write(surfaceAddress('https://relay.test', 'a'.repeat(64), '/workspaces'),
+    { viewer: { pubkey: 'a'.repeat(64), kind: 'human', name: 'Dan' }, workspaces: [entry], truncated: false, watchFilters: [] }, isWorkspaceListView);
+  let complete!: (value: unknown) => void;
+  phoneOperation.mockImplementation((name: string) => name === 'readIdentitySettings'
+    ? new Promise(resolve => { complete = resolve; })
+    : Promise.resolve({ apps: [], helpers: [], connectors: [], connections: [] }));
+  let settings!: ReturnType<typeof useYouSettings>;
+  function Probe() {
+    settings = useYouSettings({ linkedWorkspaceId: entry.id, showWorkbench: false });
+    return null;
+  }
+  let renderer!: ReactTestRenderer;
+  await act(async () => { renderer = create(<Probe />); });
+  await vi.waitFor(() => expect(settings.canManageWorkspace).toBe(true));
+  expect(phoneOperation.mock.calls.filter(([name]) => name === 'readIdentitySettings')).toHaveLength(1);
+  expect(phoneOperation).not.toHaveBeenCalledWith('readWorkbench', expect.anything());
+  await act(async () => { complete({ identity: managed(), workspaces: { workspaces: [{ ...entry, role: 'member' }] } }); });
+  expect(settings.canManageWorkspace).toBe(false);
+  await act(async () => renderer.unmount());
+});
 
 describe('Settings → You → Profile picture', () => {
   it('shows the generated mark with Upload photo and no Remove when there is no photo', async () => {

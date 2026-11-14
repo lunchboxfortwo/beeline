@@ -1,6 +1,6 @@
 import type { MessageSendState } from '@/buzz/message-outbox';
 import { appReadErrorCopy } from '@/buzz/app-error-copy';
-import { useEffect, type MutableRefObject } from 'react';
+import { startTransition, useEffect, type MutableRefObject } from 'react';
 import { AppState } from 'react-native';
 import { router } from 'expo-router';
 import { KIND_AGENT_DRAFT, LiveOverlayDecoder, isRoomView, type LiveOverlay, type RoomView, type RoomViewMessage } from '@beeline/buzz-client';
@@ -612,8 +612,10 @@ export function useRoomSurfaceSubscription([
         outboxRef.current = outbox;
         await outbox.restore();
         if (cancelled) return;
-        setTransport(nextTransport);
-        setRoomClient(nextRoomClient);
+        startTransition(() => {
+          setTransport(nextTransport);
+          setRoomClient(nextRoomClient);
+        });
         const restored = outbox
           .list()
           .map((record) => displayRoomMessages([record.row], identity.publicKey)[0]!);

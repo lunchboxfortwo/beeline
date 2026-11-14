@@ -299,6 +299,10 @@ export function SheetFrame({ open, close, title, testID, children, back }: {
     // focused composer would leave its scrim taking every tap with the sheet
     // itself hidden. Lower the keyboard as it opens.
     useEffect(() => { if (open) lowerKeyboard(); }, [open]);
+    const opened = React.useRef(false);
+    if (open) opened.current = true;
+    // Retain an opened sheet for native dismissal; unopened sheets have no body to lay out.
+    if (!opened.current) return null;
     return (
         <Theme name={theme}>
             <Sheet modal open={open} onOpenChange={(o: boolean) => { if (!o) close(); }} snapPointsMode="fit" dismissOnSnapToBottom>

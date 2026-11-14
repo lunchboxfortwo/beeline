@@ -1,6 +1,5 @@
 /** Every timer starts at the final user action, after fixture/navigation setup. */
 import { workspace, alternateWorkspace, agent, fixture } from './web-fixtures.mjs';
-import { cornerLongPressThreshold } from './web-long-press.mjs';
 const id = (p, value) => p.getByTestId(value).filter({ visible: true });
 const button = (p, value) => p.getByRole('button', { name: value, exact: true });
 const visible = (locator) => locator.waitFor({ state: 'visible' });
@@ -35,12 +34,6 @@ async function agentProfile(p) {
   await p.goto(`/beeline/agent-profile?communityId=${workspace}&agentId=${agent}`);
   await visible(id(p, 'agent-profile-head'));
 }
-async function hold(p, target) {
-  await target.hover();
-  await p.mouse.down();
-  await p.waitForTimeout(650);
-  await p.mouse.up();
-}
 async function messageMenu(p, f) {
   await room(p, f);
   // React Native Web maps a long press to a held primary pointer.
@@ -62,7 +55,8 @@ export const steps = {
     };
   },
   'open-corner': async (p, f) => {
-    await p.goto(`/beeline/corners/${f.roomId}?communityId=${workspace}`);
+    await room(p, f);
+    await click(id(p, 'threads-dropdown-trigger'));
     await visible(id(p, `thread-row-${f.cornerId}`));
     return {
       act: () => click(id(p, `thread-row-${f.cornerId}`)),
@@ -97,13 +91,12 @@ export const steps = {
     return { act: () => click(target), done: () => visible(id(p, 'chat-input')) };
   },
   'create-corner': async (p, f) => {
-    // Holding a chat row's mark on the list opens a new thread in that chat.
-    await list(p);
-    const target = id(p, `room-${f.roomId}-new-thread`);
+    await room(p, f);
+    await click(id(p, 'threads-new-thread'));
+    const target = id(p, 'forward-corner-open');
     await visible(target);
     return {
-      longPressThresholdMs: await cornerLongPressThreshold(),
-      act: () => hold(p, target),
+      act: () => click(target),
       done: async () => {
         await p.waitForFunction(
           (roomId) => {

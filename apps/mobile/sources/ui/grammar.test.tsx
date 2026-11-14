@@ -124,6 +124,26 @@ it('lowers the keyboard as a sheet opens, so the sheet is never drawn under it',
     expect(dismiss).toHaveBeenCalledTimes(1);
 });
 
+it('mounts a sheet body on first opening and retains its state through dismissal', () => {
+    const mounted = vi.fn(), unmounted = vi.fn();
+    function Body() {
+        React.useEffect(() => { mounted(); return unmounted; }, []);
+        return <T>Sheet contents</T>;
+    }
+    let tree: any;
+    const sheet = (open: boolean) => <SheetFrame open={open} close={() => undefined} title="Attach"><Body /></SheetFrame>;
+    act(() => { tree = create(sheet(false)); });
+    expect(mounted).not.toHaveBeenCalled();
+    act(() => { tree.update(sheet(true)); });
+    expect(mounted).toHaveBeenCalledTimes(1);
+    act(() => { tree.update(sheet(false)); });
+    expect(unmounted).not.toHaveBeenCalled();
+    act(() => { tree.update(sheet(true)); });
+    expect(mounted).toHaveBeenCalledTimes(1);
+    act(() => tree.unmount());
+    expect(unmounted).toHaveBeenCalledTimes(1);
+});
+
 it('preserves the inset viewer face inside its existing bordered target', () => {
     let tree: any;
     act(() => { tree = create(<Btn kind="icon" label="Talk to agent" viewerInset />); });

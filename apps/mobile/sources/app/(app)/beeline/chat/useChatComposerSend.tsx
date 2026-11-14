@@ -170,8 +170,10 @@ export function useChatComposerSend([
       // Text feedback lands in the local overlay in this same turn. Signing,
       // transport startup and outbox persistence can all take longer than a
       // frame on a cold Android device.
-      // Each viewport paints its provisional row before preparation.
-      const provisionalId = `pending:${Date.now()}:${Math.random()}`;
+      // Each viewport inserts its provisional row before preparation.
+      const filesReady = activePendingAttachments.length > 0 && !viewer?.screenshotBase64 &&
+        activePendingAttachments.every(attachment => attachmentUploader.state(attachment) === 'uploaded');
+      const provisionalId = filesReady ? null : `pending:${Date.now()}:${Math.random()}`;
       if (provisionalId) {
         const provisional = {
           id: provisionalId,
