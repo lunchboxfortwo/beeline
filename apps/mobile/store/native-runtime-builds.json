@@ -46,5 +46,11 @@
     "buildNumber": "88",
     "runtimeVersion": "34",
     "evidence": "Authenticated Expo EAS project 58f1e94e-5ce5-475e-9dde-3eaa9e36699c build b95f431a-f41f-4ba8-88db-e68ea9a86bbb: platform IOS, appBuildVersion 88, runtimeVersion 34 (observed 2026-10-30)"
+  },
+  {
+    "platform": "android",
+    "buildNumber": "148",
+    "runtimeVersion": "49",
+    "evidence": "Play production release '0.2.25 (v0.1.202@411764ba130c)' serves versionCode 148 (read 2026-11-14); source 411764ba130c pins android@49"
   }
 ]
