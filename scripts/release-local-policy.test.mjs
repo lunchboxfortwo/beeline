@@ -54,6 +54,32 @@ test('local delivery preserves real dependency joins and requires the quick verd
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
+test('local latest promotion has no reusable Checks call or quick gates', async () => {
+  const workflow = localWorkflow(read('unified-release.yml'), { channel: 'latest' });
+  assert.equal(workflow.jobs.release_checks, undefined);
+  assert.ok(Object.values(workflow.jobs).every(job => ![job.needs ?? []].flat().includes('release_checks')));
+  assert.deepEqual(workflow.jobs.release_validation.steps.map(step => step.run), ['echo "Promoting the successful next commit; no checks run."']);
+  const plan = releasePlan(read('unified-release.yml'), read('checks.yml'), { channel: 'latest' });
+  assert.deepEqual(plan.checks.retained, []);
+  const directory = temporary(), started = [];
+  try {
+    const engine = new LocalActions({ root, directory, processes: new Processes({}, () => {}) });
+    engine.hooks.workflow = ({ workflow, inputs }) => ({ workflow: localWorkflow(workflow, inputs),
+      job: async (_job, context) => {
+        started.push(context.github.job);
+        return { result: 'success', outputs: context.github.job === 'initialize' ? {
+          channel: 'latest', run_helper: 'true', run_mobile_ota: 'true', run_website: 'true',
+        } : {} };
+      } });
+    const results = await engine.workflow('.github/workflows/unified-release.yml', { channel: 'latest' }, {
+      github: { repository: 'Beeline-Work/beeline', sha: 'a'.repeat(40), run_id: '1' },
+    });
+    assert.equal(results.release_validation.result, 'success');
+    assert.ok(!started.some(id => ['release_checks', 'typecheck', 'dead-code', 'codecs'].includes(id)));
+    assert.ok(started.includes('helper') && started.includes('release_result'));
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
 test('the real release DAG overlaps three local legs with Mac work, carries outputs and waits for final joins', async () => {
   const directory = temporary(), started = new Set(), finished = new Set(), active = new Set();
   let peak = 0, overlap = false, helperBeforeDelivery = false;

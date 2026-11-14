@@ -27,3 +27,5 @@ The helper delivers into the live agent session, including follow-up input while
 Repository setup and optional context run through session tools; their errors reach the agent so it can still answer.
 Saved answers survive reconnects and helper updates without another agent turn.
 An unavailable agent leaves its messages queued and shows “agent is offline · connect again”.
+
+Releases on squire use `npm run release` to publish current main to next and then latest. See the [release runbook](docs/release-pipeline.md#one-command-release-on-squire).

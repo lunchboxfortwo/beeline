@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// Recovery runner for unified-release.yml. Safe by default: --execute is
-// required for delivery. See docs/release-pipeline.md for the outage policy.
+// Recovery legs for unified-release.yml. release.mjs owns delivery; this CLI
+// only plans, builds proofs or executes the checks-only leg. See docs/release-pipeline.md for the outage policy.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
-import { homedir, tmpdir, userInfo } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LocalActions } from './release-local-actions.mjs';
@@ -30,7 +30,7 @@ export function parseArguments(argv) {
       args.mode = arg.slice(2); args.explicitMode = true;
     } else if (arg === '--run-release-proof') args.proof = true;
     else if (arg === '--help') args.help = true;
-    else if (['--channel', '--release-sha', '--release-version', '--dispatched-by', '--env-file', '--state-dir', '--leg', '--mac-host', '--remote-job', '--store-track'].includes(arg)) {
+    else if (['--channel', '--release-sha', '--env-file', '--state-dir', '--leg', '--mac-host', '--remote-job', '--store-track'].includes(arg)) {
       if (!argv[i + 1] || argv[i + 1].startsWith('--')) throw new Error(`Missing value for ${arg}`);
       args[arg.slice(2)] = argv[++i];
     } else throw new Error(`Unknown argument: ${arg}`);
@@ -39,6 +39,7 @@ export function parseArguments(argv) {
   if (args['release-sha'] && !/^[0-9a-f]{40}$/.test(args['release-sha'])) throw new Error('release-sha must be a full commit SHA');
   if (args['mac-host'] !== MAC) throw new Error(`Only the authorized Mac build host ${MAC} is supported`);
   if (args.leg && args.mode !== 'dry-run' && !(args.mode === 'execute' && args.leg === 'release_checks')) throw new Error('--leg requires --dry-run or --execute --leg release_checks');
+  if (args.mode === 'execute' && args.leg !== 'release_checks') throw new Error('Use node scripts/release.mjs for delivery');
   return args;
 }
 
@@ -164,7 +165,7 @@ rustup run 1.95.0 rustc --version
 
 export function localHooks(directory, processes) {
   return {
-    workflow: async ({ file, workflow, inherited, engine }) => {
+    workflow: async ({ file, workflow, inputs, inherited, engine }) => {
       file = file.replace(/^\.\//, '');
       if (file === checksWorkflow) {
         const checks = new LocalChecks(engine);
@@ -174,13 +175,14 @@ export function localHooks(directory, processes) {
       if (file === WORKFLOW) {
         const delivery = new LocalDelivery(engine);
         process.once('SIGINT', delivery.cancel); process.once('SIGTERM', delivery.cancel);
-        return { workflow: localWorkflow(workflow), parallel: true, job: (...args) => delivery.run(...args),
+        return { workflow: localWorkflow(workflow, inputs), parallel: true, job: (...args) => delivery.run(...args),
           finish: () => { process.removeListener('SIGINT', delivery.cancel); process.removeListener('SIGTERM', delivery.cancel); } };
       }
     },
     job: async args => {
       const { context, engine } = args;
       context.env.BEELINE_LOCAL_RELEASE = 'true';
+      context.env.BEELINE_LOCAL_OTA_VERSIONS = JSON.stringify(engine.variables.otaVersions ?? []);
       if (context.github.token) {
         // Private HOME must not depend on the operator's credential helper.
         // Config is passed via the child environment, never command arguments
@@ -214,6 +216,11 @@ export function localHooks(directory, processes) {
       }
     },
     step: async ({ step, context, env, result }) => {
+      if (context?.github?.job === 'initialize' && step.id === 'identity' && step.run?.includes('node scripts/release-record.mjs identity')) {
+        // next creates its tag in another private worker. A plain fetch may
+        // omit it, and tag-based outage discovery must see it before latest.
+        await processes.run('git', ['fetch', '--tags', 'origin'], { cwd: env.GITHUB_WORKSPACE, env, quiet: true });
+      }
       if (context?.github?.job === 'nightly_checks' && step.name === 'Dispatch nightly checks for the released commit') {
         const message = 'Nightly checks dispatch is not available during local recovery (GitHub Actions unavailable); release Checks run locally.';
         processes.log(message);
@@ -281,7 +288,9 @@ export function localHooks(directory, processes) {
         delete record.runId;
         record.execution = { kind: 'local', id: basename(directory), dispatchedBy: JSON.parse(context.inputs.dispatched_by) };
         record.delivery.localExceptions = { staticWebsite: 'not released', helperArm64: 'carried unchanged', desktop: 'published signed updater set carried unchanged, including Windows' };
-        record.delivery.localExceptions.checks = { retained: ['build', 'typecheck', 'dead-code', 'design grammar', 'codecs'], dropped: droppedChecks(engine.read(checksWorkflow)), coverage: 'not produced by quick release checks' };
+        record.delivery.localExceptions.checks = context.inputs.channel === 'latest'
+          ? { retained: [], reusedFrom: 'successful next release of this commit', coverage: 'no checks run on promotion' }
+          : { retained: ['build', 'typecheck', 'dead-code', 'design grammar', 'codecs'], dropped: droppedChecks(engine.read(checksWorkflow)), coverage: 'not produced by quick release checks' };
         const previousPath = join(context.runner.temp, 'previous/release.json');
         if (existsSync(previousPath)) {
           const previous = JSON.parse(readFileSync(previousPath, 'utf8'));
@@ -320,7 +329,7 @@ export function dryInitializeJob(workflow) {
 
 export async function dryRun(args, engine, context) {
   if (args.leg === 'release') {
-    engine.processes.log(JSON.stringify(releasePlan(engine.read(WORKFLOW), engine.read(checksWorkflow)), null, 2));
+    engine.processes.log(JSON.stringify(releasePlan(engine.read(WORKFLOW), engine.read(checksWorkflow), args), null, 2));
     return;
   }
   if (args.leg === 'release_checks') {
@@ -335,7 +344,7 @@ export async function dryRun(args, engine, context) {
     engine.processes.log(`Dry-run build: ${leg}; no publication, migration, channel move or rollout`);
     if (leg === 'initialize') {
       if (!context.github.token) throw new Error('Dry-run initialize requires --env-file with GITHUB_TOKEN or GH_TOKEN');
-      const inputs = { channel: args.channel, release_sha: sha, release_version: args['release-version'] || '', selection: 'auto', store_track: args['store-track'] || 'none', run_release_proof: false };
+      const inputs = { channel: args.channel, release_sha: sha, release_version: '', selection: 'auto', store_track: args['store-track'] || 'none', run_release_proof: false };
       const job = await engine.job(dryInitializeJob(engine.read(WORKFLOW)), { ...context, inputs, matrix: {}, needs: {}, steps: {}, github: { ...context.github, job: 'initialize' } }, 'dry-initialize', engine.read(WORKFLOW).env);
       privateWrite(join(engine.directory, 'dry-initialize.json'), JSON.stringify(job, null, 2));
       if (job.result !== 'success') throw new Error('Dry-run initialize failed; no release was attempted');
@@ -371,9 +380,9 @@ export async function releaseChecks(engine, context) {
   return results;
 }
 
-async function main(argv) {
-  const args = parseArguments(argv);
-  if (args.help) { console.log('node scripts/release-local.mjs [--plan | --dry-run [--leg release|release_checks|initialize|server|helper|mobile-ota|pages|web-app|eas-cli|require-tools|mac-tools] | --execute [--leg release_checks]] --channel next|latest --release-sha <40-char SHA> --dispatched-by <audited JSON> [--env-file ~/.config/beeline-release.env] [--run-release-proof] [--store-track none|beta|production] [--state-dir /outside/repo]'); return; }
+export async function runLocalRelease(args, { repository = root, secrets: providedSecrets } = {}) {
+  const root = repository;
+  if (args.help) { console.log('node scripts/release-local.mjs [--plan | --dry-run [--leg release|release_checks|initialize|server|helper|mobile-ota|pages|web-app|eas-cli|require-tools|mac-tools] | --execute --leg release_checks] [--channel next|latest] [--release-sha <40-char SHA>] [--env-file ~/.config/beeline-release.env] [--run-release-proof] [--store-track none|beta|production] [--state-dir /outside/repo]'); return; }
   if (args['remote-job']) { await remoteJob(args['remote-job']); return; }
   if (process.platform !== 'linux') throw new Error('Run the release controller on Linux squire');
   const sha = args['release-sha'] || execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
@@ -382,19 +391,19 @@ async function main(argv) {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   if (!outside(root, realpathSync(directory))) throw new Error('Release state symlink points inside the repository');
   const envFile = resolve(args['env-file'] || join(homedir(), '.config/beeline-release.env'));
-  const secrets = args.mode === 'execute' || (args.mode === 'dry-run' && args['env-file']) ? loadEnvironment(envFile) : {};
+  const secrets = providedSecrets ?? (args.mode === 'execute' || (args.mode === 'dry-run' && args['env-file']) ? loadEnvironment(envFile, root) : {});
   if (!secrets.GITHUB_TOKEN && secrets.GH_TOKEN) secrets.GITHUB_TOKEN = secrets.GH_TOKEN;
   const processes = new Processes(secrets);
-  const variables = { CLOUDFLARE_ACCOUNT_ID: secrets.CLOUDFLARE_ACCOUNT_ID || '', BEELINE_HELPER_SENTRY_DSN: secrets.BEELINE_HELPER_SENTRY_DSN || '', BEELINE_MOBILE_SENTRY_DSN: secrets.BEELINE_MOBILE_SENTRY_DSN || '' };
+  const variables = { otaVersions: args.otaVersions ?? [], CLOUDFLARE_ACCOUNT_ID: secrets.CLOUDFLARE_ACCOUNT_ID || '', BEELINE_HELPER_SENTRY_DSN: secrets.BEELINE_HELPER_SENTRY_DSN || '', BEELINE_MOBILE_SENTRY_DSN: secrets.BEELINE_MOBILE_SENTRY_DSN || '' };
   const engine = new LocalActions({ root, directory, secrets, variables, processes, github: localGithub, hooks: localHooks(directory, processes) });
   engine.inspect(WORKFLOW);
   const context = { github: { repository: 'Beeline-Work/beeline', sha, run_id: String(Math.floor(Date.now() / 1000)), run_attempt: '1', event_name: 'workflow_dispatch', event: {}, actor: 'local-release', token: secrets.GITHUB_TOKEN || secrets.GH_TOKEN || '' }, runner: {}, job: { status: 'success' } };
   if (args.mode === 'plan') {
     console.log(`Local ${args.channel} release at ${sha}; no release commands executed.`);
-    console.log(JSON.stringify(releasePlan(engine.read(WORKFLOW), engine.read(checksWorkflow)), null, 2));
+    console.log(JSON.stringify(releasePlan(engine.read(WORKFLOW), engine.read(checksWorkflow), args), null, 2));
     console.log('website not released: static Pages is suspended; selected web app leg still runs.');
     console.log('Apple-silicon helper carried unchanged. Published desktop updater set (including Windows) carried unchanged; its global version is retained.');
-    console.log(`Intel helper builds over SSH on ${MAC}. Canary, helper update proof, optional device proof, rollback, quick release checks and finalization stay enabled.`);
+    console.log(`Intel helper builds over SSH on ${MAC}. Canary, helper update proof, optional device proof, rollback and finalization stay enabled. ${args.channel === 'latest' ? 'Promotion reuses the successful next verdict; no checks run.' : 'Quick checks run before next delivery.'}`);
     return;
   }
   if (args.mode === 'dry-run') { await dryRun(args, engine, context); return; }
@@ -423,11 +432,7 @@ async function main(argv) {
   engine.baseEnv.PATH = toolEnv.PATH;
   if (toolEnv.FNM_DIR) engine.baseEnv.FNM_DIR = toolEnv.FNM_DIR;
   await processes.run('bash', ['-c', 'for tool in docker git ssh scp gh gh-axi flyctl rustup; do command -v "$tool" >/dev/null || exit 1; done'], { env: toolEnv, quiet: true });
-  // A local lock plus the existing advisory Actions check. The operator must
-  // keep hosted release dispatch disabled until this recovery run completes.
-  const lock = join(tmpdir(), `beeline-unified-release-${userInfo().uid}.lock`);
-  mkdirSync(lock, { mode: 0o700 });
-  privateWrite(join(lock, 'owner'), `${process.pid}\n${directory}\n`);
+  // release.mjs holds one local lock across both channel executions.
   const cancel = () => { engine.cancelled = true; engine.abortController.abort(); processes.cancel(); };
   process.once('SIGINT', cancel); process.once('SIGTERM', cancel);
   try {
@@ -435,17 +440,16 @@ async function main(argv) {
     if (!response.ok) throw new Error(`Cannot verify hosted release inactivity (HTTP ${response.status})`);
     const runs = await response.json();
     if (runs.workflow_runs.some(run => run.status !== 'completed')) throw new Error('A hosted production release is queued or active');
-    const inputs = { channel: args.channel, release_sha: sha, release_version: args['release-version'] || '', dispatched_by: args['dispatched-by'], selection: 'auto', store_track: args['store-track'] || 'none', run_release_proof: Boolean(args.proof), allow_pin_restore: false, mobile_store_minimum: '', publish_listing: false };
+    const inputs = { channel: args.channel, release_sha: sha, release_version: '', dispatched_by: args['dispatched-by'], selection: 'auto', store_track: args['store-track'] || 'none', run_release_proof: Boolean(args.proof), allow_pin_restore: false, mobile_store_minimum: '', publish_listing: false };
     const results = await engine.workflow(WORKFLOW, inputs, context);
     if (results.release_result?.outputs.outcome !== 'success' || results.release_validation?.result !== 'success') throw new Error(`Release failed; inspect private results under ${directory}`);
     console.log(`Local release completed; private results: ${directory}`);
     console.log('website not released: static Pages suspended. Platform carry details are in the release record.');
   } finally {
     process.removeListener('SIGINT', cancel); process.removeListener('SIGTERM', cancel);
-    rmSync(lock, { recursive: true });
   }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main(process.argv.slice(2)).catch(error => { console.error(error.message); process.exitCode = 1; });
+  runLocalRelease(parseArguments(process.argv.slice(2))).catch(error => { console.error(error.message); process.exitCode = 1; });
 }

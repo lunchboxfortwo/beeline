@@ -81,7 +81,7 @@ export function migrationRecord({ version, sourceSha, desktopVersion }) {
 }
 
 /** Reserve rc counters per unreleased final; promotion reserves that final at the rc's SHA. */
-export function assignReleaseVersion({ releases, previous, sha, requestedVersion = '', channel = 'next', next }) {
+export function assignReleaseVersion({ releases, previous, sha, requestedVersion = '', channel = 'next', next, occupiedVersions = [] }) {
   releaseChannel(channel);
   if (!SHA.test(sha ?? '')) fail(`invalid release sha: ${sha}`);
   const versioned = versionedReleases(releases);
@@ -112,13 +112,14 @@ export function assignReleaseVersion({ releases, previous, sha, requestedVersion
     return { version: previous.version, reason: 'already-published' };
   // A final draft may already have published npm bytes. New source must use
   // the next free final identity; retrying its rc/promotion keeps the old one.
-  const reserved = new Set(versioned.map(release => release.tag_name));
+  const reserved = new Set([...versioned.map(release => release.tag_name), ...occupiedVersions]);
   while (reserved.has(base)) base = `v${floor[1]}.${floor[2]}.${++patch}`;
   const candidates = versioned.filter(release => release.tag_name.startsWith(`${base}-rc.`));
-  const draft = candidates.find(release => release.draft && commitOf(release) === sha && compareVersions(release.tag_name, previous?.version ?? 'v0.0.0') > 0);
+  const draft = candidates.find(release => release.draft && !occupiedVersions.includes(release.tag_name) && commitOf(release) === sha && compareVersions(release.tag_name, previous?.version ?? 'v0.0.0') > 0);
   if (draft) return { version: draft.tag_name, reason: 'resume-draft' };
   const previousCounter = previous?.version.startsWith(`${base}-rc.`) ? Number(floor[4]) : 0;
-  const counter = Math.max(previousCounter, ...candidates.map(release => Number(VERSION.exec(release.tag_name)[4]))) + 1;
+  const counter = Math.max(previousCounter, ...candidates.map(release => Number(VERSION.exec(release.tag_name)[4])),
+    ...occupiedVersions.filter(version => version.startsWith(`${base}-rc.`)).map(version => Number(VERSION.exec(version)?.[4] ?? 0))) + 1;
   return { version: `${base}-rc.${counter}`, reason: 'next' };
 }
 
@@ -299,7 +300,7 @@ function main(argv) {
     }
     if (previous) write(args.previous, previous);
     const { version, reason } = assignReleaseVersion({ releases, previous, sha, requestedVersion: args.requested ?? '', channel,
-      next });
+      next, occupiedVersions: JSON.parse(process.env.BEELINE_LOCAL_OTA_VERSIONS || '[]') });
     const draft = versionedReleases(releases).find((release) => release.tag_name === version);
     console.error(`release identity ${version}@${sha}: ${reason}${previous ? ` (previous ${previous.version}${previous.migrated ? ', migrated' : ''})` : ''}`);
     process.stdout.write(`version=${version}\nrelease_sha=${sha}\nreason=${reason}\nhas_release=${draft ? 'true' : 'false'}\n`);

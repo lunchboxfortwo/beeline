@@ -18,18 +18,89 @@ import { run as bookkeeping } from './release-bookkeeping.mjs';
 import { localGithub } from './release-local-github.mjs';
 import { assignReleaseVersion, latestPublished, recoverTaggedReleases } from './release-record.mjs';
 import { CheckQueue, checkPlan, checkWorkspace, LocalChecks } from './release-local-checks.mjs';
+import { acquireReleaseLock, localAttribution, prepareReleaseSource, readOtaVersions, releaseArguments, releaseSequence } from './release.mjs';
 
 const repository = resolve(import.meta.dirname, '..');
 const temporary = () => mkdtempSync(join(tmpdir(), 'beeline-local-test-'));
 const sha = 'a'.repeat(40), oldSha = 'b'.repeat(40);
 test('execution is explicit and requires immutable identity and complete attribution', () => {
   assert.equal(parseArguments([]).mode, 'plan');
+  assert.throws(() => parseArguments(['--execute']), /scripts\/release.mjs/);
+  assert.deepEqual(releaseArguments([]), {});
+  assert.throws(() => releaseArguments(['--release-sha', sha]), /Usage/);
+  assert.equal(localAttribution({ username: 'firstmate', now: new Date('2026-11-14T00:00:00Z') }).auditMessageId,
+    'squire-release-2026-11-14T00:00:00.000Z');
   assert.throws(() => parseArguments(['--execute', '--dry-run']), /exactly one/);
   assert.throws(() => parseArguments(['--release-sha', 'main']), /full commit/);
   assert.throws(() => parseArguments(['--channel', 'production']), /next or latest/);
   assert.throws(() => attribution('{}'), /agentId/);
   const provenance = Object.fromEntries(['agentId', 'handle', 'place', 'humanCommandMessageId', 'auditMessageId'].map(k => [k, k]));
   assert.deepEqual(attribution(JSON.stringify(provenance)), provenance);
+});
+test('one command completes next before promoting the same SHA with automatic store pairing', async () => {
+  const calls = [], dispatchedBy = localAttribution();
+  const spec = { source: '/fixture/source', sha, directory: '/fixture/state', secrets: {}, dispatchedBy, otaVersions: ['v0.1.2-rc.9'] };
+  await releaseSequence(spec, async (args, options) => calls.push({ args, options }));
+  assert.deepEqual(calls.map(c => [c.args.channel, c.args['store-track'], c.args['release-sha']]),
+    [['next', 'beta', sha], ['latest', 'production', sha]]);
+  assert.deepEqual(calls.map(c => c.args['state-dir']), ['/fixture/state/next', '/fixture/state/latest']);
+  assert.ok(calls.every(c => c.options.repository === spec.source && c.args['dispatched-by'] === JSON.stringify(dispatchedBy)));
+  const failed = [];
+  await assert.rejects(releaseSequence(spec, async args => { failed.push(args.channel); throw new Error('next failed'); }), /next failed/);
+  assert.deepEqual(failed, ['next']);
+});
+test('release lock clears only a dead owner and spans both channel runs', async () => {
+  const directory = temporary(), lock = join(directory, 'release.lock');
+  try {
+    mkdirSync(lock);
+    writeFileSync(join(lock, 'owner'), '123\nold-state\n');
+    assert.throws(() => acquireReleaseLock(lock, directory, { alive: () => true }), /already active/);
+    assert.equal(readFileSync(join(lock, 'owner'), 'utf8'), '123\nold-state\n');
+    const unlock = acquireReleaseLock(lock, directory, { alive: () => false });
+    assert.equal(readFileSync(join(lock, 'owner'), 'utf8').split('\n')[0], String(process.pid));
+    unlock();
+    assert.throws(() => readFileSync(join(lock, 'owner')), /ENOENT/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+test('release source refreshes main and sees the rc tag created before promotion', async () => {
+  const directory = temporary();
+  const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  try {
+    const upstream = join(directory, 'upstream'), operator = join(directory, 'operator'), state = join(directory, 'state');
+    mkdirSync(upstream); mkdirSync(state);
+    git(upstream, 'init', '--quiet', '-b', 'main');
+    const commit = text => {
+      writeFileSync(join(upstream, 'source'), text);
+      git(upstream, 'add', 'source');
+      git(upstream, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--quiet', '-m', text);
+      return git(upstream, 'rev-parse', 'HEAD');
+    };
+    const old = commit('old');
+    git(directory, 'clone', '--quiet', upstream, operator);
+    const current = commit('current main');
+    const prepared = prepareReleaseSource(operator, state);
+    assert.equal(prepared.sha, current);
+    for (const ref of ['HEAD', 'main', 'origin/main']) assert.equal(git(prepared.source, 'rev-parse', ref), current);
+    assert.equal(readFileSync(join(prepared.source, 'source'), 'utf8'), 'current main');
+    assert.equal(git(operator, 'rev-parse', 'HEAD'), old);
+    git(upstream, 'tag', 'v0.1.2-rc.1');
+    assert.throws(() => git(prepared.source, 'rev-parse', '--verify', 'refs/tags/v0.1.2-rc.1'));
+    const hook = localHooks(state, new Processes({}, () => {}));
+    await hook.step({ step: { id: 'identity', run: 'node scripts/release-record.mjs identity' },
+      context: { github: { job: 'initialize' }, inputs: { channel: 'latest' } },
+      env: { ...process.env, GITHUB_WORKSPACE: prepared.source } });
+    assert.equal(git(prepared.source, 'rev-parse', 'refs/tags/v0.1.2-rc.1'), current);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+test('OTA branch inventory paginates so orphaned high rc numbers are reserved', async () => {
+  const offsets = [];
+  const versions = await readOtaVersions({ EXPO_TOKEN: 'fixture' }, async (_url, options) => {
+    const offset = Number(JSON.parse(options.body).query.match(/offset:(\d+)/)[1]); offsets.push(offset);
+    return Response.json({ data: { app: { byId: { updateBranches: offset === 0 ? Array.from({ length: 100 }, (_, i) => ({ name: `release-v0.1.2-rc.${i + 1}` })) : [{ name: 'release-v0.1.2-rc.110' }] } } } });
+  });
+  assert.deepEqual(offsets, [0, 100]);
+  assert.equal(assignReleaseVersion({ releases: [], previous: { version: 'v0.1.1' }, sha, occupiedVersions: versions }).version, 'v0.1.2-rc.111');
+  assert.equal(assignReleaseVersion({ releases: [], previous: { version: 'v0.1.1' }, sha, occupiedVersions: ['v0.1.2'] }).version, 'v0.1.3-rc.1');
 });
 test('local preflight requires user GitHub authority instead of App credentials', async () => {
   const missing = missingReleaseCredentials({ channel: 'next' }, {});
@@ -38,6 +109,17 @@ test('local preflight requires user GitHub authority instead of App credentials'
   assert.equal(missing.includes('GITHUB_TOKEN or GH_TOKEN'), true);
   const policy = localHooks(tmpdir(), new Processes({}, () => {}));
   await assert.rejects(policy.step({ step: { id: 'app_token' }, context: { github: { job: 'initialize' } }, result: { outputs: {} } }), /requires GITHUB_TOKEN or GH_TOKEN/);
+});
+test('both channel identity reads fetch newly published tags before consulting release records', async () => {
+  const calls = [], processes = new Processes({}, () => {});
+  processes.run = async (...args) => { calls.push(args); };
+  const hook = localHooks('/fixture/state', processes);
+  for (const channel of ['next', 'latest']) {
+    const env = { GITHUB_WORKSPACE: '/fixture/source', GH_TOKEN: 'fixture-token' };
+    await hook.step({ step: { id: 'identity', run: 'node scripts/release-record.mjs identity' },
+      context: { github: { job: 'initialize' }, inputs: { channel } }, env });
+    assert.deepEqual(calls.at(-1), ['git', ['fetch', '--tags', 'origin'], { cwd: '/fixture/source', env, quiet: true }]);
+  }
 });
 test('local initialization routes App-token consumers through the user token without minting an installation token', async () => {
   const directory = temporary(), token = 'fixture-local-user-token', messages = [], authenticated = [];
