@@ -1,5 +1,7 @@
 import { afterAll,beforeAll,beforeEach,expect,it,vi } from 'vitest';
 import { AGENT_COMMAND_SCHEMA,answerQueuedMessage,createAgentCommand,queueMessage,readAgentCommands } from './agent-command.js';
+import { isAgentCommand } from '@beeline/api-contract/daemon';
+import { RETIRED_STOP_CONTROLS } from './agent-turn-end.js';
 import { claimAgentConnection,releaseAgentConnection } from './connection-presence.js';
 import type { SqlDatabase } from './database.js';
 import { LiveHub } from './live.js';
@@ -87,6 +89,23 @@ it('upgrades a legacy resume sharing its parent source without losing either ans
   expect((await queue()).map(item=>item.id)).toEqual(['legacy-resume']);
   await answer(R1,'legacy-resume','Resume answer');
   expect(await queue()).toEqual([]);
+});
+
+it('retires a surviving legacy corner-close stop instead of delivering it as work', async () => {
+  const parent = await ask(R1, 'original human order');
+  await db.query(`UPDATE agent_commands SET state='cancelled',cancellation_reason='corner_close' WHERE id=$1`, [parent.id]);
+  await db.query(`INSERT INTO agent_commands(id,room_id,agent_id,source_message_id,turn_request_id,action,reason,
+    root_command_id,parent_command_id,root_source_message_id,agent_depth,state,private_payload)
+    VALUES('legacy-stop',$1,$2,NULL,'legacy-stop','stop','corner_close',$3,$3,$4,0,'pending',$5::jsonb)`,
+    [R2, A, parent.id, parent.source_message_id,
+      JSON.stringify({ kind:'lifecycle',text:'@GitHub passed a check',authorId:H,fromRoomId:R2 })]);
+  const live = await ask(R2, 'still owed');
+  await db.query(AGENT_COMMAND_SCHEMA);
+  await db.query(RETIRED_STOP_CONTROLS);
+  expect((await queue()).map(item => item.id)).toEqual([live.id]);
+  expect((await db.query(`SELECT state,cancellation_reason,result_message_id FROM agent_commands WHERE id='legacy-stop'`)).rows[0])
+    .toEqual({ state:'cancelled',cancellation_reason:'corner_close',result_message_id:null });
+  expect(isAgentCommand({ ...(await queue())[0], action:'stop' })).toBe(false);
 });
 
 it('Stop cancels the item: it leaves the queue and its answer is refused', async () => {
