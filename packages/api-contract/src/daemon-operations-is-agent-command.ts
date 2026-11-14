@@ -20,7 +20,7 @@ export function isAgentCommand(value: unknown): value is AgentCommand {
   )
     return false;
   if (
-    !['input', 'resume', 'stop', 'restart'].includes(String(c.action)) ||
+    !['input', 'resume', 'restart'].includes(String(c.action)) ||
     !Number.isInteger(c.agentDepth) ||
     Number(c.agentDepth) < 0 ||
     Number(c.agentDepth) > 3

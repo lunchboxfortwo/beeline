@@ -99,6 +99,15 @@ export type AgentReportStatus = 'done' | 'blocked' | 'failed' | 'needs_decision'
 
 export type AgentCommandAction = 'input' | 'restart';
 
+/** Background work no person is waiting on: schedules and event wakes. It may
+ * finish without a reply, so a run with nothing to say posts nothing. */
+const BACKGROUND_COMMAND_REASONS: ReadonlySet<string> = new Set(['schedule', 'subscribed_event',
+  'computer_activity', 'watched_corner', 'corner_check', 'corner_review_dispatch', 'corner_review_needed',
+  'corner_merge_conflict', 'corner_land', 'corner_merge_refused']);
+export function isBackgroundCommand(reason: string): boolean {
+  return BACKGROUND_COMMAND_REASONS.has(reason);
+}
+
 /**
  * One item in an agent's queue. The server keeps it until the answer is
  * posted to `returnRoomId` (or the agent chooses silence, or Stop cancels it).

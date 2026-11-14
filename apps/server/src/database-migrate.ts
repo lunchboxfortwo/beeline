@@ -20,7 +20,7 @@ import { X_SIGNUP_DELIVERY_SCHEMA } from './x-ads.js';
 import { SERVER_LEASE_DEADLINE_SCHEMA } from './server-lease-deadlines.js';
 import { commandCompletionSchema } from './command-completion.js';
 import { ROUTER_COMMAND_SCHEMA } from './router-command-ledger.js';
-import { AGENT_TURN_END_SCHEMA } from './agent-turn-end.js';
+import { AGENT_TURN_END_SCHEMA,RETIRED_STOP_CONTROLS } from './agent-turn-end.js';
 import { AGENT_CORNER_HOLDS_SCHEMA } from './migrations/agent-corner-holds.js';
 import { MOBILE_MINIMUM_SCHEMA } from './mobile-minimum.js';
 import { STARTER_ONBOARDING_SCHEMA } from './starter-onboarding-run.js';
@@ -146,6 +146,7 @@ export async function migrate(
       WHERE action='restart' AND state='pending'`,
   ));
   await ddlScript('agent turn ending', AGENT_TURN_END_SCHEMA);
+  await ddlScript('retired stop controls', RETIRED_STOP_CONTROLS);
   // The previous serving/rollback image still owns its notification capture
   // triggers. Retire them together with their storage in a later contract release.
   await ddlScript('router command identity', ROUTER_COMMAND_SCHEMA);

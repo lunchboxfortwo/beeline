@@ -156,7 +156,7 @@ it('posts an already stored answer when the outbox becomes unwritable afterwards
 
 
 it('sends empty closing text through the answer exit and retains it while no answer exists',async()=>{
-  const f=await fixture(),item=f.item('empty-closing');
+  const f=await fixture(),item={...f.item('empty-closing'),reason:'schedule'};
   harness.deliver.mockResolvedValueOnce({text:'',steps:[],toolCalls:[],cleanup:async()=>{}});
   f.execute.mockImplementation(async name=>name==='postRoomMessage'?{id:'owed',createdAt:1,answered:false}:{id:'status',createdAt:1});
   f.changed([item]);
@@ -166,6 +166,21 @@ it('sends empty closing text through the answer exit and retains it while no ans
   f.execute.mockResolvedValue({id:'posted',createdAt:1});
   f.changed([item]);
   await vi.waitFor(async()=>expect(await new AnswerStore(join(f.root,'answers')).all()).toEqual([]));
+  expect(harness.deliver).toHaveBeenCalledTimes(1);
+});
+
+it('lets quiet background items in a reconnect batch finish silently while the human tag stays owed', async () => {
+  const f = await fixture(), offlineSeconds = 18 * 3600;
+  const tag = { ...f.item('tag'), offlineSeconds };
+  const schedule = { ...f.item('schedule'), offlineSeconds, reason: 'schedule', scheduleId: 'errors' };
+  const event = { ...f.item('event'), offlineSeconds, reason: 'subscribed_event' };
+  harness.deliver.mockResolvedValueOnce({ text: '', steps: [], stopReason: 'end_turn', toolCalls: [], cleanup: async () => {} });
+  f.changed([schedule, tag, event]);
+  await vi.waitFor(() => expect(f.execute.mock.calls.filter(call => call[0] === 'postRoomMessage')).toHaveLength(2));
+  expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({
+    requestId: schedule.id, queuedRequestIds: [event.id], text: '' }));
+  expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({ requestId: tag.id,
+    text: 'Agent stopped while answering this: harness ended without a public answer (end_turn)' }));
   expect(harness.deliver).toHaveBeenCalledTimes(1);
 });
 

@@ -438,8 +438,7 @@ export class PlaceSession {
     if (this.privateHomeRoot && agentBehavior(this.options.config.agentKind).sharedLoginWriteBack)
       void writeBackRoomClaudeLogin({ root: this.privateHomeRoot, operatorHome: this.options.config.operatorHome })
         .catch(error => console.warn('[body] refreshed Claude login not shared:', error));
-    const text = durableReplyText(result.agentText) || durableReplyText(stream.lastRunText) ||
-      `${this.options.agent.name} stopped while answering this: harness ended without a public answer (${result.stopReason})`;
+    const text = durableReplyText(result.agentText) || durableReplyText(stream.lastRunText);
     let steps: Answer['steps'] = [];
     try { steps = roomReplySteps(agentTurnSteps(result.updates ?? [])); }
     catch (error) { console.warn('[body] optional answer history omitted:', error); }

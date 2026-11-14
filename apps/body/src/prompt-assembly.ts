@@ -1,5 +1,5 @@
 import type { CornerBrief } from '@beeline/api-contract/daemon';
-import { boundReplyExcerpt,subscriptionActionPrompt,WORKSPACE_CORE_SKILL_SLUG,type RoomInboxResult,type SystemEvent } from '@beeline/api-contract/daemon';
+import { boundReplyExcerpt,isBackgroundCommand,subscriptionActionPrompt,WORKSPACE_CORE_SKILL_SLUG,type RoomInboxResult,type SystemEvent } from '@beeline/api-contract/daemon';
 import { mentionReplyRule } from '@beeline/api-contract/phone';
 import { createHash } from 'node:crypto';
 import { ACP_SESSION_MEMORY_MAX_BYTES } from './acp-resource-scope.js';
@@ -838,7 +838,9 @@ export const TURN_SECTIONS: readonly PromptSection<TurnPromptContext>[] = [
     surfaces: EVERYWHERE,
     render: ({ task, surface, brief }) => [
       nonhumanSilentWake(task.commandReason)
-        ? 'This is a nonhuman wake. Do not post an update merely because time has passed or a reminder asks you to say what you are doing. Answer this queued request, including actual blockers. If you already posted its answer, call the no_reply_needed tool to acknowledge it.'
+        ? `This is a nonhuman wake. Do not post an update merely because time has passed or a reminder asks you to say what you are doing. ${isBackgroundCommand(task.commandReason ?? '')
+          ? 'Post only what someone needs to read, including actual blockers. With nothing to say, call the no_reply_needed tool and end without a reply.'
+          : 'Answer this queued request, including actual blockers. If you already posted its answer, call the no_reply_needed tool to acknowledge it.'}`
         : ['human_tag', 'direct_message'].includes(task.commandReason ?? '')
           ? 'Reply to the human message that triggered this turn. A progress reminder is relevant only while that human is still waiting for your reply to their own message.'
         : '',

@@ -1,4 +1,4 @@
-import type { AgentCommand } from '@beeline/api-contract/daemon';
+import { isBackgroundCommand,type AgentCommand } from '@beeline/api-contract/daemon';
 import { dirname,resolve } from 'node:path';
 import { resolveSessionIdleMs } from './agent-process.js';
 import { AnswerStore,type StoredAnswer } from './answer-store.js';
@@ -186,17 +186,23 @@ export class AgentRunner {
         void this.options.daemonApi.execute('startAgentTurn', { roomId: item.roomId, requestId: item.turnRequestId })
           .catch(error => console.warn('[body] delivery status not written:', error));
         const answer = await place.session.deliver(item, place.waiting.filter(next => !batched.has(next.id)), batch);
+        // Without a public answer, background work finishes quietly; an owed answer gets the stopped notice.
+        const reply = (next: AgentCommand) => answer.text || (isBackgroundCommand(next.reason) ? ''
+          : `${this.agent.name} stopped while answering this: harness ended without a public answer (${answer.stopReason})`);
+        const steps = answer.text && answer.steps.length ? { steps: answer.steps } : {};
         // Stop wall: a stopped item gets no answer.
         const pendingBatch = batch.filter(next => this.latest.some(listed => listed.id === next.id));
-        if (pendingBatch.length) await this.store({
-          itemId: pendingBatch[0]!.id, roomId: item.roomId, requestId: pendingBatch[0]!.turnRequestId,
-          queuedRequestIds: pendingBatch.slice(1).map(next => next.id),
-          text: answer.text, ...(answer.text && answer.steps.length ? { steps: answer.steps } : {}),
-        });
+        for (const text of new Set(pendingBatch.map(reply))) {
+          const group = pendingBatch.filter(next => reply(next) === text);
+          await this.store({
+            itemId: group[0]!.id, roomId: item.roomId, requestId: group[0]!.turnRequestId,
+            queuedRequestIds: group.slice(1).map(next => next.id), text, ...steps,
+          });
+        }
         for (const answered of [...(batch.length ? [] : [item]), ...(answer.followUps ?? [])]) {
           if (this.latest.some(listed => listed.id === answered.id)) await this.store({
             itemId: answered.id, roomId: answered.roomId, requestId: answered.turnRequestId,
-            text: answer.text, ...(answer.text && answer.steps.length ? { steps: answer.steps } : {}),
+            text: reply(answered), ...steps,
           });
         }
         const consumed = new Set([...batched, ...(answer.followUps ?? []).map(next => next.id)]);

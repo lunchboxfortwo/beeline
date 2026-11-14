@@ -26,7 +26,7 @@ const command = {
 };
 
 move7_describe('server command protocol 1', () => {
-  move7_it.each(['input', 'resume', 'stop'])('recognizes %s', (action) =>
+  move7_it.each(['input', 'resume'])('recognizes %s', (action) =>
     move7_expect(move7_isAgentCommand({ ...command, action })).toBe(true),
   );
   move7_it.each([
@@ -34,6 +34,7 @@ move7_describe('server command protocol 1', () => {
     null,
     {},
     { ...command, action: 'message' },
+    { ...command, action: 'stop' },
     { ...command, agentDepth: -1 },
     { ...command, agentDepth: 4 },
     { ...command, source: {} },

@@ -44,6 +44,10 @@ END; $$;
 
 `;
 
+/** Legacy stop controls are not queue work. Retire any that outlived the queue upgrade. */
+export const RETIRED_STOP_CONTROLS = `SELECT beeline_finish_agent_command(id,'cancelled',reason,NULL)
+  FROM agent_commands WHERE state='pending' AND action='stop'`;
+
 /** Use within the caller's transaction. A terminal replay is a no-op. */
 export async function endAgentTurn(db: SqlDatabase, command: Pick<CommandRow, 'id'>,
   outcome: 'complete' | 'failed' | 'cancelled', reason?: string | null, resultMessageId?: string): Promise<boolean> {
