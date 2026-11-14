@@ -612,8 +612,10 @@ export function useRoomSurfaceSubscription([
         outboxRef.current = outbox;
         await outbox.restore();
         if (cancelled) return;
-        setTransport(nextTransport);
-        setRoomClient(nextRoomClient);
+        if (paintedCache) {
+          setTransport(nextTransport);
+          setRoomClient(nextRoomClient);
+        }
         const restored = outbox
           .list()
           .map((record) => displayRoomMessages([record.row], identity.publicKey)[0]!);
@@ -663,6 +665,8 @@ export function useRoomSurfaceSubscription([
             if (cancelled) return;
             roomReadStampRef.current = readStamp;
             reading = false;
+            setTransport(nextTransport);
+            setRoomClient(nextRoomClient);
             applyView(
               {
                 ...view,

@@ -426,13 +426,14 @@ it.each([false, true])('keeps a human opening static with a resident source=%s',
   const command = withSource ? await request(R) : undefined;
   const input = { roomId: R, title: 'human-work', cornerId: randomUUID(),
     ...(command ? { sourceMessageId: command.sourceMessageId } : {}) };
-  await phone.execute('createHumanCorner', input, H);
+  const created = await phone.execute('createHumanCorner', input, H);
   await phone.execute('createHumanCorner', input, H);
   expect((await db.query('SELECT machine FROM corner_facts WHERE corner_id=$1', [input.cornerId])).rows[0].machine)
     .toEqual({ state: 'idle', effects: [] });
   expect((await db.query('SELECT id FROM agent_commands WHERE room_id=$1', [input.cornerId])).rows).toEqual([]);
   const row = (await phone.readRoom(R, OUTSIDER))!.messages.filter(m => m.daemonFact?.cornerId === input.cornerId);
   expect(row).toHaveLength(1);
+  expect(created.messageId).toBe(row[0].id);
   expect(row[0].daemonFact).toMatchObject({ type: 'corner-open', name: 'human-work' });
   await phone.execute('requestCornerClose', { roomId: input.cornerId }, H);
   expect((await phone.readRoom(R, OUTSIDER))!.messages.filter(m => m.daemonFact?.cornerId === input.cornerId)).toEqual(row);

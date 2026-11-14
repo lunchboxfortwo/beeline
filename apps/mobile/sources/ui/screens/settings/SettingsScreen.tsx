@@ -6,6 +6,7 @@ import { TabHeader, TabRail, useScrolledUnder } from '@/ui/shell/TabHeader';
 import { useIsDesktop } from '@/utils/responsive';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
+import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
 import { WORKSPACE_LABEL } from '@/buzz/vocabulary';
 import { useYouSettings } from './useYouSettings';
 import { YouSettings } from './YouSettings';
@@ -59,7 +60,9 @@ export function SettingsScreen({ initialScope = 'you' }: { initialScope?: Scope 
                         ) : null}
                         {caption ? <Copy small quiet testID="settings-caption">{caption}</Copy> : null}
                     </YStack>
-                    {showWorkspace ? <WorkspaceSettings key={workspace.id} workspaceId={workspace.id} /> : <YouSettings you={you} />}
+                    {showWorkspace ? <WorkspaceSettings key={workspace.id} workspaceId={workspace.id} />
+                        : scope === 'workspace' && !you.workspacesReady ? <SurfaceGlyphLoader testID="workspace-settings-loader" />
+                            : <YouSettings you={you} />}
                 </YStack>
             </ScrollView>
         </YStack>

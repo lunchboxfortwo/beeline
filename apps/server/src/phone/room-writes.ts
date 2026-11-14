@@ -79,7 +79,7 @@ import { normalizeHumanCornerTitle, UUID_PATTERN } from './values.js';
       throw new Error('corner id must be a UUID');
     }
     const id = input.cornerId ?? randomUUID();
-    await ctx.database.transaction(async (database) => {
+    const messageId = await ctx.database.transaction(async (database) => {
       const parent = (
         await database.query<{ workspace_id: string; viewer_name: string }>(
           `SELECT room.workspace_id,viewer.name viewer_name FROM rooms room
@@ -108,7 +108,7 @@ import { normalizeHumanCornerTitle, UUID_PATTERN } from './values.js';
           [id, input.roomId, viewerId],
         );
         if (!replay.rowCount) throw new Error('corner id is already in use');
-        return false;
+        return undefined;
       }
       await createCornerFacts(database, id, true);
       // Every new corner leaves a static opening in its Room. A resident
@@ -120,7 +120,7 @@ import { normalizeHumanCornerTitle, UUID_PATTERN } from './values.js';
             input.roomId,
           ])
         : undefined;
-      await systemLine(database, {
+      const opening = await systemLine(database, {
         roomId: input.roomId,
         subject: identitySubject({ id: viewerId, kind: 'human', name: parent.viewer_name }),
         verb: systemMessage("phone-service.opened-a-corner"),
@@ -136,9 +136,9 @@ import { normalizeHumanCornerTitle, UUID_PATTERN } from './values.js';
         },
       });
 
-      return true;
+      return opening.id;
     });
-    return { id };
+    return { id, ...(messageId ? { messageId } : {}) };
   }
 
   export async function phoneRenameCorner(ctx: PhoneContext, roomId: string, name: string | undefined, viewerId: string) {

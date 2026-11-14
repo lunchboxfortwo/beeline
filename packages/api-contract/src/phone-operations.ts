@@ -154,7 +154,7 @@ export type PhoneOperationMap = PhoneRouteOperationMap & {
   readWorkflowRun: { input: ReadWorkflowRunInput; output: WorkflowRunDetailView };
   cancelAgentTurn: { input: CancelAgentTurnInput; output: void };
   actOnRepositoryCard: { input: RepositoryOnboardingAction; output: { readonly url?: string; readonly selected?: string; readonly openPicker?: boolean } };
-  createHumanCorner: { input: CreateHumanCornerInput; output: IdResult };
+  createHumanCorner: { input: CreateHumanCornerInput; output: IdResult & { readonly messageId?: string } };
   requestCornerClose: { input: RoomInput; output: void };
   setCornerLocked: { input: RoomInput & { readonly locked: boolean }; output: void };
   decideApprovalCard: { input: RoomInput & { readonly messageId: string; readonly decision: 'allow' | 'deny' }; output: MessageWriteResult };
