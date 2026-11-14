@@ -1,4 +1,7 @@
 import * as React from 'react';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { runInNewContext } from 'node:vm';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { expect, it, vi } from 'vitest';
@@ -171,5 +174,42 @@ it.each(['small', 'medium', 'large'] as const)('a long chat preview at Text size
   const preview = byTestID(tree, `room-${ROOM}-preview`);
   expect(preview.props.numberOfLines).toBe(2);
   expect(preview.props.ellipsizeMode).toBeUndefined();
+  act(() => tree.unmount());
+});
+
+it('selection preserves the content columns and leaves an inset around the mark and age', () => {
+  const { tree } = row();
+  const frame = () => byTestID(tree, `room-${ROOM}`).props;
+  const plain = frame();
+  act(() => tree.update(<ChatRow item={item} now={1_700_000_000_000} first selected onOpen={vi.fn()} onPin={vi.fn()} onOpenThread={vi.fn()} />));
+  const selected = frame();
+  for (const props of [plain, selected]) {
+    expect(props.paddingHorizontal).toBe('2');
+    expect(props.paddingVertical).toBe('2');
+    expect(props.paddingLeft).toBeUndefined();
+    expect(props.borderLeftWidth).toBe(1);
+  }
+  expect(plain.borderColor).toBe('transparent');
+  expect(selected.borderColor).toBe('needsYou');
+  act(() => tree.unmount());
+});
+
+it('the Desktop layout proof uses recent activity rather than Unix-epoch sentinels', () => {
+  const require = createRequire(import.meta.url);
+  const source = readFileSync(new URL('../../../../scripts/desktop-proportions-native-fixture.cjs', import.meta.url), 'utf8');
+  // Evaluate the fixture's actual data without opening its HTTP listener.
+  const fixture = runInNewContext(`${source}\n;({ room, messages })`, {
+    require: (name: string) => name === 'http' ? { createServer: () => ({ listen() {} }) } : require(name),
+    process: { env: {} },
+  });
+  const now = Date.now();
+  const latest = fixture.messages.at(-1);
+  expect(latest.createdAt).toBeGreaterThan(Math.floor(now / 1000) - 120);
+  expect(fixture.room.updatedAt).toBe(latest.createdAt);
+  let tree!: ReactTestRenderer;
+  act(() => {
+    tree = create(<ChatRow item={{ ...item, room: fixture.room, latestMessage: latest }} now={now} first onOpen={vi.fn()} onPin={vi.fn()} onOpenThread={vi.fn()} />);
+  });
+  expect(byTestID(tree, `room-${fixture.room.id}-age`).props.children).toBe('1m');
   act(() => tree.unmount());
 });
