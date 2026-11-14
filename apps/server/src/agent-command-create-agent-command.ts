@@ -9,7 +9,7 @@ import { AGENT_SIGN_IN_SERVICE_LABELS, agentSignInUsesKey, isAgentSignInHarness 
 import { createHash } from 'node:crypto';
 import { parseAgentAccessPolicy, senderMayAddressAgent } from '@beeline/api-contract/agent-access';
 import type { SqlDatabase } from './database.js';
-import { hasSystemReportMention, taggedIdentityIdsSql, typedMentionHandles } from './message-mentions.js';
+import { hasSystemReportMention, taggedIdentityIdsSql } from './message-mentions.js';
 import { systemLine } from './system-line.js';
 import { AgentCommandInput, CommandRow, createAgentCommand } from './agent-command.js';
 
@@ -355,7 +355,7 @@ export async function routeHumanMessage(db: SqlDatabase, sourceId: string): Prom
   // in a DM it wakes only an agent the message also tags by name.
   const targets = new Set([
     ...source.tagged_ids,
-    ...(source.solo_agent_id && typedMentionHandles(source.text).size === 0
+    ...(source.solo_agent_id && source.tagged_ids.length === 0
       ? [source.solo_agent_id] : []),
     ...(hasSystemReportMention(source.text) ? [] : (source.direct_participants ?? [])),
   ]);

@@ -1,29 +1,23 @@
-import { directMessageRoomId } from './system-line.js';
 import { CommandScopedDatabase } from './command-scoped-database.js';
-import type { TrayDecisionOperation } from './tray-decision-command.js';
-import { createWorkspace } from './workspace-creation.js';
 import { ConnectorDiscoveryCache } from './connector-discovery-cache.js';
 import { StarterOnboardingService } from './starter-onboarding-run.js';
 import { CornerAccessDatabase } from './corner-access-database.js';
 import { type ComposioApps } from './composio-apps.js';
 import type { LinkAgentWallet } from './link-agent-wallet.js';
-import type { AgentGrantView, AgentDetailView, AgentPairingClaimView, ChatListView, ChatListItem, ChatListCorner, CornerListView, InviteView, MessageSearchView, MessageBookmarkView, NeedsYouItemView, RoomLiveDelta, RoomHistoryOutline, RoomHistoryView, RoomView, RoomViewIdentity, RoomViewMember, RoomViewMessage, WorkspaceListView, WorkspaceAgentView, WorkspaceMemberGrantView, WorkspaceMemberListQuery, WorkspaceMemberListView, WorkspaceView } from '@beeline/api-contract/phone';
-import { type PhoneOperationMap, type WelcomeCardsView, type PushLevel } from '@beeline/api-contract/phone';
-import { type ConnectorOfferStatus } from '@beeline/api-contract/connector-offers';
+import { type PhoneOperationMap } from '@beeline/api-contract/phone';
 import { type SqlDatabase } from './database.js';
-import type { CommittedMessageLiveRow, LiveEvent, LiveHub } from './live.js';
+import type { CommittedMessageLiveRow, LiveHub } from './live.js';
 import { HistoryOutlineCache } from './history-outline-cache.js';
 import type { GitHubOperations } from './github-operations.js';
 import type { FreeAgentService } from './free-agents.js';
 import { McpRegistryClient } from './mcp-registry.js';
 import type { ObjectService } from './object-service.js';
-import { listRoomWorkflowRuns, readWorkflowRun } from './workflow-run-views.js';
 import { phoneSetStarterOnboarding, phoneSetFreeAgents, phoneWithCommandTransaction, phoneApplyTrayDecisionCommand, phoneStopScheduledWorkCommand } from './phone/command-context.js';
 import { phoneOptionalEnrichment } from './phone/optional-enrichment.js';
 import { phoneCanReadRoom, phoneCanReadRooms, phoneRequireGrantAuthority, phoneRequireGitHub, phoneRequireIdentity, phoneRequireWorkspaceAgent, phoneRequireWorkspaceAgentRemover, phoneRequireWorkspaceMember, phoneHasRoomAccess, phoneAssertRoomIsWritable, phoneRequireRoomWorkspaceManager, phoneRequireHumanRoomWorkspaceManager, phoneRequireTopLevelChatMember, phoneRequireTopLevelRoom, phoneRequireWorkspaceManager, phoneRequireWorkspaceOwner } from './phone/access.js';
 import { phoneProjectCommittedLiveDelta, phoneReadLiveDelta, phoneReadLiveDeltas, phoneReadLiveBookmark, phoneLiveWorkspaceChange, phoneLivePersonChange, phoneLiveNeedsYou, phoneLiveDraftSnapshot, phoneReadWelcomeCards, phoneCompleteWelcomeCards, phoneLiveChatCornerStatus, phoneLiveReadState, phoneLiveRoomCommands, phoneLiveWorkflowRuns, phoneLiveStarPrompt } from './phone/live-reads.js';
-import { AttachmentFacts, DeckCornerFacts, RoomReadRow, MemberRow, RoomReadEnrichment, CornerRow, AgentGrantRow, Input, Output, RosterAgentRow, MessageRow, AgentTurnRow } from './phone/types.js';
-import { messageId, ArchivedCornerCursor, MemberGrantRow } from './phone/values.js';
+import type { AttachmentFacts } from './phone/types.js';
+import type { PhoneArguments } from './phone/context.js';
 import { phoneReadWorkspaces, phoneReadWorkspace, phoneReadWorkspaceMembers } from './phone/workspaces.js';
 import { phoneReadChats, phoneDirectMessagePresence } from './phone/chat-list.js';
 import { phoneReadRoom, phoneResolveMessageLink } from './phone/room-read.js';
@@ -72,6 +66,10 @@ export { REVIEW_IDENTITY_MESSAGE } from './phone/values.js';
 export { REVIEW_LOCKED_OPERATIONS } from './phone/operation-names.js';
 export { PHONE_OPERATION_NAMES } from './phone/operation-names.js';
 
+type AgentConnectResult = Awaited<ReturnType<typeof phoneClaimAgentConnectPairing>>;
+type AgentConnectClaim = Extract<AgentConnectResult, { status: 'claimed' }>;
+type AgentConnectFailure = Exclude<AgentConnectResult, AgentConnectClaim>;
+
 export class PhoneService {
 
    readonly lastEnrichmentLogAt = new Map<string, number>();
@@ -81,11 +79,11 @@ export class PhoneService {
 
 
    starterOnboarding?: StarterOnboardingService;
-  setStarterOnboarding(service: StarterOnboardingService): void { return phoneSetStarterOnboarding(this, service); }
+  setStarterOnboarding(...args: PhoneArguments<typeof phoneSetStarterOnboarding>): ReturnType<typeof phoneSetStarterOnboarding> { return phoneSetStarterOnboarding(this, ...args); }
 
 
    freeAgents?: Pick<FreeAgentService, 'createInWorkspace' | 'kick' | 'remove' | 'cleanupRemoved'>;
-  setFreeAgents(freeAgents: Pick<FreeAgentService, 'createInWorkspace' | 'kick' | 'remove' | 'cleanupRemoved'>): void { return phoneSetFreeAgents(this, freeAgents); }
+  setFreeAgents(...args: PhoneArguments<typeof phoneSetFreeAgents>): ReturnType<typeof phoneSetFreeAgents> { return phoneSetFreeAgents(this, ...args); }
 
 
   constructor(
@@ -111,437 +109,196 @@ export class PhoneService {
 
 
    readonly connectorDiscovery: ConnectorDiscoveryCache;
-  async optionalEnrichment<T>(name: string, work: Promise<T>): Promise<T | undefined> { return phoneOptionalEnrichment<T>(this, name, work); }
-  withCommandTransaction<T>(database: SqlDatabase, work: () => Promise<T>): Promise<T> { return phoneWithCommandTransaction<T>(this, database, work); }
-  async applyTrayDecisionCommand(operation: TrayDecisionOperation, input: PhoneOperationMap[TrayDecisionOperation]['input'], viewerId: string, defer: (notification: () => void) => void): Promise<void> { return phoneApplyTrayDecisionCommand(this, operation, input, viewerId, defer); }
-  async stopScheduledWorkCommand(operation: 'deleteRoomSchedule' | 'deleteRoomSubscription', input: {
-    roomId: string;
-    scheduleId?: string;
-    subscriptionId?: string;
-}, viewer: string): Promise<void> { return phoneStopScheduledWorkCommand(this, operation, input, viewer); }
-  canReadRoom(roomId: string, identityId: string): Promise<boolean> { return phoneCanReadRoom(this, roomId, identityId); }
-  async canReadRooms(roomIds: readonly string[], identityId: string): Promise<ReadonlySet<string>> { return phoneCanReadRooms(this, roomIds, identityId); }
-  async projectCommittedLiveDelta(roomId: string, committed: {
-    type: 'message';
-    row: CommittedMessageLiveRow;
-}, viewerId?: string): Promise<RoomLiveDelta | null> { return phoneProjectCommittedLiveDelta(this, roomId, committed, viewerId); }
+  async optionalEnrichment<T>(...args: PhoneArguments<typeof phoneOptionalEnrichment<T>>): ReturnType<typeof phoneOptionalEnrichment<T>> { return phoneOptionalEnrichment<T>(this, ...args); }
+  withCommandTransaction<T>(...args: PhoneArguments<typeof phoneWithCommandTransaction<T>>): ReturnType<typeof phoneWithCommandTransaction<T>> { return phoneWithCommandTransaction<T>(this, ...args); }
+  async applyTrayDecisionCommand(...args: PhoneArguments<typeof phoneApplyTrayDecisionCommand>): ReturnType<typeof phoneApplyTrayDecisionCommand> { return phoneApplyTrayDecisionCommand(this, ...args); }
+  async stopScheduledWorkCommand(...args: PhoneArguments<typeof phoneStopScheduledWorkCommand>): ReturnType<typeof phoneStopScheduledWorkCommand> { return phoneStopScheduledWorkCommand(this, ...args); }
+  canReadRoom(...args: PhoneArguments<typeof phoneCanReadRoom>): ReturnType<typeof phoneCanReadRoom> { return phoneCanReadRoom(this, ...args); }
+  async canReadRooms(...args: PhoneArguments<typeof phoneCanReadRooms>): ReturnType<typeof phoneCanReadRooms> { return phoneCanReadRooms(this, ...args); }
+  async projectCommittedLiveDelta(...args: PhoneArguments<typeof phoneProjectCommittedLiveDelta>): ReturnType<typeof phoneProjectCommittedLiveDelta> { return phoneProjectCommittedLiveDelta(this, ...args); }
 
    readonly committedAttachmentFacts =
     new WeakMap<CommittedMessageLiveRow, Promise<AttachmentFacts>>();
-  async readLiveDelta(roomId: string, viewerId: string, target: {
-    type: 'message';
-    messageId: string;
-} | {
-    type: 'turn';
-    agentId: string;
-    requestId: string;
-}, database: SqlDatabase = this.database): Promise<RoomLiveDelta | null> { return phoneReadLiveDelta(this, roomId, viewerId, target, database); }
-  async readLiveDeltas(roomId: string, viewerIds: readonly string[], target: {
-    type: 'message';
-    messageId: string;
-} | {
-    type: 'turn';
-    agentId: string;
-    requestId: string;
-}, database: SqlDatabase = this.database): Promise<ReadonlyMap<string, RoomLiveDelta>> { return phoneReadLiveDeltas(this, roomId, viewerIds, target, database); }
-  async readLiveBookmark(messageId: string, viewerId: string): Promise<MessageBookmarkView | null> { return phoneReadLiveBookmark(this, messageId, viewerId); }
-  async liveWorkspaceChange(workspaceId: string): Promise<{
-    workspace: {
-        id: string;
-        name: string;
-        avatar?: string;
-    };
-    viewers: ReadonlySet<string>;
-} | null> { return phoneLiveWorkspaceChange(this, workspaceId); }
-  async livePersonChange(personId: string): Promise<{
-    person: RoomViewIdentity;
-    pushLevel?: PushLevel;
-    viewers: ReadonlySet<string>;
-} | null> { return phoneLivePersonChange(this, personId); }
-  async liveNeedsYou(roomId: string, viewerId: string): Promise<{
-    workspaceId: string;
-    count: number;
-    items: readonly NeedsYouItemView[];
-} | null> { return phoneLiveNeedsYou(this, roomId, viewerId); }
-  async liveDraftSnapshot(roomId: string): Promise<LiveEvent[]> { return phoneLiveDraftSnapshot(this, roomId); }
-  async readWelcomeCards(viewerId: string): Promise<WelcomeCardsView> { return phoneReadWelcomeCards(this, viewerId); }
-  async completeWelcomeCards(viewerId: string): Promise<WelcomeCardsView> { return phoneCompleteWelcomeCards(this, viewerId); }
-  async readWorkspaces(viewerId: string): Promise<WorkspaceListView> { return phoneReadWorkspaces(this, viewerId); }
-  async readWorkspace(workspaceId: string, viewerId: string, query: WorkspaceMemberListQuery = {}): Promise<WorkspaceView | null> { return phoneReadWorkspace(this, workspaceId, viewerId, query); }
-  async readWorkspaceMembers(workspaceId: string, viewerId: string, query: WorkspaceMemberListQuery = {}): Promise<WorkspaceMemberListView | null> { return phoneReadWorkspaceMembers(this, workspaceId, viewerId, query); }
-  async liveChatCornerStatus(parentRoomId: string, viewerId: string): Promise<{
-    cornerCount: number;
-    waitingCornerCount: number;
-    mineCornerCount: number;
-    openCorners: ChatListCorner[];
-    agentState: 'needs-you' | 'working' | null;
-    attentionReason?: NonNullable<ChatListItem['attentionReason']>;
-    corners: CornerListView['corners'];
-    nextOpen?: string;
-} | null> { return phoneLiveChatCornerStatus(this, parentRoomId, viewerId); }
-  async readChats(workspaceId: string, viewerId: string): Promise<ChatListView | null> { return phoneReadChats(this, workspaceId, viewerId); }
-  directMessagePresence(row: {
-    peer_id: string | null;
-    peer_kind: 'human' | 'agent' | null;
-    peer_presence_body: Record<string, unknown> | null;
-    peer_presence_updated_at: Date | null;
-    peer_activity_at: Date | null;
-}): {
-    status: 'online' | 'offline';
-    observedAt: number;
-    held?: true;
-} | undefined { return phoneDirectMessagePresence(this, row); }
-  async readRoom(roomId: string, viewerId: string): Promise<RoomView | null> { return phoneReadRoom(this, roomId, viewerId); }
-  async resolveMessageLink(messageId: string, viewerId: string) { return phoneResolveMessageLink(this, messageId, viewerId); }
-  async resolveChatLinks(roomId: string, tokens: readonly string[], viewerId: string) { return phoneResolveChatLinks(this, roomId, tokens, viewerId); }
-  async searchMessages(workspaceId: string, viewerId: string, query: string, before?: string): Promise<MessageSearchView | null> { return phoneSearchMessages(this, workspaceId, viewerId, query, before); }
-  async readHistoryAround(roomId: string, viewerId: string, targetId: string): Promise<RoomHistoryView | null> { return phoneReadHistoryAround(this, roomId, viewerId, targetId); }
-  async readHistoryAfter(roomId: string, viewerId: string, afterId: string): Promise<RoomHistoryView | null> { return phoneReadHistoryAfter(this, roomId, viewerId, afterId); }
-  async readHistory(roomId: string, viewerId: string, before?: {
-    createdAt: number;
-    id: string;
-}): Promise<RoomHistoryView | null> { return phoneReadHistory(this, roomId, viewerId, before); }
-  async readHistoryOutline(roomId: string, viewerId: string, timeZone: string): Promise<RoomHistoryOutline | null> { return phoneReadHistoryOutline(this, roomId, viewerId, timeZone); }
-  async countHistoryOutline(roomId: string, timeZone: string): Promise<RoomHistoryOutline> { return phoneCountHistoryOutline(this, roomId, timeZone); }
-  async readCorners(roomId: string, viewerId: string, roomViewFamilyOrder = false, archived = false, archivedBefore?: ArchivedCornerCursor, openBefore?: ArchivedCornerCursor): Promise<CornerListView | null> { return phoneReadCorners(this, roomId, viewerId, roomViewFamilyOrder, archived, archivedBefore, openBefore); }
-  async loadCorners(roomId: string, viewerId: string, { roomViewFamilyOrder = false, archived = false, before, deck = false, }: {
-    roomViewFamilyOrder?: boolean;
-    archived?: boolean;
-    before?: ArchivedCornerCursor;
-    deck?: boolean;
-} = {}): Promise<{
-    view: CornerListView;
-    deck: DeckCornerFacts | null;
-} | null> { return phoneLoadCorners(this, roomId, viewerId, {roomViewFamilyOrder, archived, before, deck}); }
-  async roomRows(roomId: string, viewerId: string): Promise<RoomReadRow | undefined> { return phoneRoomRows(this, roomId, viewerId); }
-  async cornerRoomEnrichment(room: RoomReadRow['room'], rows: RoomReadRow, messageResult: {
-    messages: RoomViewMessage[];
-    toolRows: RoomViewMessage[];
-}, viewerId: string): Promise<{
-    presence: Array<{
-        id: string;
-        presence_body: MemberRow['presence_body'];
-        presence_updated_at: Date | null;
-    }>;
-    tags: Array<{
-        id: string;
-        tagged_ids: string[];
-    }>;
-    bookmarks: Array<{
-        message_id: string;
-    }>;
-    reports: Array<{
-        trigger_message_id: string;
-    }>;
-    attachmentFacts: AttachmentFacts;
-    allow_auto_merge: boolean | null;
-} | undefined> { return phoneCornerRoomEnrichment(this, room, rows, messageResult, viewerId); }
-  projectRoomEnrichment(value: RoomReadEnrichment) { return phoneProjectRoomEnrichment(this, value); }
-  cornerRowsSql(roomViewFamilyOrder = false, archived = false, before?: ArchivedCornerCursor): string { return phoneCornerRowsSql(this, roomViewFamilyOrder, archived, before); }
-  projectCorners(rows: readonly CornerRow[]): CornerListView['corners'] { return phoneProjectCorners(this, rows); }
-  async readAgent(workspaceId: string, agentId: string, viewerId: string, workCursor?: string): Promise<AgentDetailView | null> { return phoneReadAgent(this, workspaceId, agentId, viewerId, workCursor); }
-  projectAgentGrants(rows: AgentGrantRow[]): AgentGrantView[] { return phoneProjectAgentGrants(this, rows); }
-  projectMemberGrantRows(rows: readonly MemberGrantRow[]): WorkspaceMemberGrantView[] { return phoneProjectMemberGrantRows(this, rows); }
-  async readInvite(rawToken: string, viewerId: string): Promise<InviteView | null> { return phoneReadInvite(this, rawToken, viewerId); }
-  async lockPairingIssuer(database: SqlDatabase, workspaceId: string, issuerId: string) { return phoneLockPairingIssuer(this, database, workspaceId, issuerId); }
-  async claimAgentPairing(code: string, agentId: string): Promise<AgentPairingClaimView | null> { return phoneClaimAgentPairing(this, code, agentId); }
-  async wornSeededIdentity(database: SqlDatabase, workspaceId: string, exceptIdentityId: string): Promise<{
-    faces: string[];
-    names: string[];
-}> { return phoneWornSeededIdentity(this, database, workspaceId, exceptIdentityId); }
-  async claimAgentConnectPairing(input: {
-    code: string;
-    agentPubkey: string;
-    model: string;
-    effort?: string;
-    avatarSeed?: string;
-    eventSubscriptions?: readonly string[];
-    deferJoin?: boolean;
-}): Promise<{
-    status: 'claimed';
-    workspaceId: string;
-    workspaceName: string;
-    pairedBy: string;
-    agentName: string;
-    soul: string;
-    face: string;
-    workspaceJoined: boolean;
-} | {
-    status: 'not_found' | 'expired' | 'already_claimed';
-}>;
-  async claimAgentConnectPairing(input: {
-    code: string;
-    agentPubkey: string;
-    model: string;
-    effort?: string;
-    avatarSeed?: string;
-    eventSubscriptions?: readonly string[];
-    deferJoin?: boolean;
-    machineId?: string;
-    machineName?: string;
-}, createDaemonExchange: (agentId: string, database: SqlDatabase) => Promise<{
-    exchangeToken: string;
-}>): Promise<{
-    status: 'claimed';
-    workspaceId: string;
-    workspaceName: string;
-    pairedBy: string;
-    agentName: string;
-    soul: string;
-    face: string;
-    workspaceJoined: boolean;
-    daemonExchangeToken: string;
-} | {
-    status: 'not_found' | 'expired' | 'already_claimed';
-}>;
-  async claimAgentConnectPairing(input: {
-    code: string;
-    agentPubkey: string;
-    model: string;
-    effort?: string;
-    avatarSeed?: string;
-    eventSubscriptions?: readonly string[];
-    deferJoin?: boolean;
-    machineId?: string;
-    machineName?: string;
-}, createDaemonExchange?: (agentId: string, database: SqlDatabase) => Promise<{
-    exchangeToken: string;
-}>): Promise<{
-    status: 'claimed';
-    workspaceId: string;
-    workspaceName: string;
-    pairedBy: string;
-    agentName: string;
-    soul: string;
-    face: string;
-    workspaceJoined: boolean;
-    daemonExchangeToken?: string;
-} | {
-    status: 'not_found' | 'expired' | 'already_claimed';
-}> { return phoneClaimAgentConnectPairing(this, input, createDaemonExchange); }
-  async renameConnectedAgent(input: {
-    code: string;
-    name: string;
-}): Promise<{
-    status: 'renamed';
-    agentName: string;
-} | {
-    status: 'not_found' | 'expired';
-}> { return phoneRenameConnectedAgent(this, input); }
-  async finishAgentConnectPairing(input: {
-    code: string;
-    workspaceJoined: boolean;
-    eventSubscriptions?: readonly string[];
-}): Promise<{
-    status: 'finished';
-    agentHandle: string;
-} | {
-    status: 'not_found' | 'expired';
-}> { return phoneFinishAgentConnectPairing(this, input); }
-  async execute<Name extends keyof PhoneOperationMap>(name: Name, input: Input<Name>, viewerId: string, sourceClient?: {
-    id: string;
-    name: string;
-}, familyId?: string, deferPostCommitObservation = false): Promise<Output<Name>> { return phoneExecute<Name>(this, name, input, viewerId, sourceClient, familyId, deferPostCommitObservation); }
-  async executeOperation<Name extends keyof PhoneOperationMap>(name: Name, input: Input<Name>, viewerId: string, sourceClient?: {
-    id: string;
-    name: string;
-}, familyId?: string, deferPostCommitObservation = false): Promise<Output<Name>> { return phoneExecuteOperation<Name>(this, name, input, viewerId, sourceClient, familyId, deferPostCommitObservation); }
-  async liveReadState(roomId: string, viewerId: string) { return phoneLiveReadState(this, roomId, viewerId); }
-  async liveRoomCommands(roomId: string, viewerId: string) { return phoneLiveRoomCommands(this, roomId, viewerId); }
-  async markRead(roomId: string, messageIdValue: string, viewerId: string): Promise<void> { return phoneMarkRead(this, roomId, messageIdValue, viewerId); }
-  async markUnread(roomId: string, messageIdValue: string, viewerId: string): Promise<void> { return phoneMarkUnread(this, roomId, messageIdValue, viewerId); }
-  async uploadMedia(viewerId: string, bytes: Uint8Array, mimeType: string, name: string, maximumBytes: number) { return phoneUploadMedia(this, viewerId, bytes, mimeType, name, maximumBytes); }
-  async observeSentMessage(roomId: string, viewerId: string, defer: boolean): Promise<void> { return phoneObserveSentMessage(this, roomId, viewerId, defer); }
-  async sendMessage(input: Input<'sendRoomMessage'>, author: string, sourceClient?: {
-    id: string;
-    name: string;
-}, familyId?: string): Promise<Output<'sendRoomMessage'>> { return phoneSendMessage(this, input, author, sourceClient, familyId); }
-  async listRoomSchedules(roomId: string, viewerId: string) { return phoneListRoomSchedules(this, roomId, viewerId); }
-  async readScheduledWork(roomId: string, viewerId: string): Promise<Output<'readScheduledWork'>> { return phoneReadScheduledWork(this, roomId, viewerId); }
-  async listRoomWorkflowRuns(roomId: string, viewerId: string) { return phoneListRoomWorkflowRuns(this, roomId, viewerId); }
-  async liveWorkflowRuns(roomId: string, viewerId: string) { return phoneLiveWorkflowRuns(this, roomId, viewerId); }
-  async readWorkflowRun(input: Input<'readWorkflowRun'>, viewerId: string) { return phoneReadWorkflowRun(this, input, viewerId); }
-  async deleteRoomSchedule(input: Input<'deleteRoomSchedule'>, viewerId: string): Promise<void> { return phoneDeleteRoomSchedule(this, input, viewerId); }
-  async sendReply(input: Input<'sendRoomReply'>, author: string, sourceClient?: {
-    id: string;
-    name: string;
-}, familyId?: string): Promise<Output<'sendRoomReply'>> { return phoneSendReply(this, input, author, sourceClient, familyId); }
-  async liveStarPrompt(viewerId: string) { return phoneLiveStarPrompt(this, viewerId); }
-  async reactToMessage(input: Input<'reactToMessage'>, viewerId: string): Promise<Output<'reactToMessage'>> { return phoneReactToMessage(this, input, viewerId); }
-  async deleteRoomMessage(input: Input<'deleteRoomMessage'>, viewerId: string): Promise<RoomViewMessage | null> { return phoneDeleteRoomMessage(this, input, viewerId); }
-  async setMessageBookmark(input: Input<'setMessageBookmark'>, viewerId: string): Promise<Output<'setMessageBookmark'>> { return phoneSetMessageBookmark(this, input, viewerId); }
-  async clearMessageBookmarks(input: Input<'clearMessageBookmarks'>, viewerId: string): Promise<void> { return phoneClearMessageBookmarks(this, input, viewerId); }
-  async readNeedsYou(input: Input<'readNeedsYou'>, viewerId: string): Promise<Output<'readNeedsYou'>> { return phoneReadNeedsYou(this, input, viewerId); }
-  async readTray(input: Input<'readTray'>, viewerId: string): Promise<Output<'readTray'>> { return phoneReadTray(this, input, viewerId); }
-  async countNeedsYou(input: Input<'countNeedsYou'>, viewerId: string): Promise<Output<'countNeedsYou'>> { return phoneCountNeedsYou(this, input, viewerId); }
-  async clearNeedsYou(input: Input<'clearNeedsYou'>, viewerId: string): Promise<void> { return phoneClearNeedsYou(this, input, viewerId); }
-  async clearNeedsYouSection(input: Input<'clearNeedsYouSection'>, viewerId: string): Promise<void> { return phoneClearNeedsYouSection(this, input, viewerId); }
-  async listMessageBookmarks(input: Input<'listMessageBookmarks'>, viewerId: string): Promise<Output<'listMessageBookmarks'>> { return phoneListMessageBookmarks(this, input, viewerId); }
-  async receiptMessage(roomId: string, viewerId: string, messageIdValue: string, database: SqlDatabase) { return phoneReceiptMessage(this, roomId, viewerId, messageIdValue, database); }
-  async pendingAgentCommandsForMessage(database: SqlDatabase, roomId: string, messageIdValue: string): Promise<NonNullable<RoomView['pendingAgentCommands']>> { return phonePendingAgentCommandsForMessage(this, database, roomId, messageIdValue); }
-  async noteUnansweredMentions(roomId: string, senderId: string, agentIds: readonly string[], afterMessageId?: string): Promise<void> { return phoneNoteUnansweredMentions(this, roomId, senderId, agentIds, afterMessageId); }
-  async unansweredMentionTargets(roomId: string, author: string, text: string, source?: {
-    authorKind: 'human' | 'agent';
-    direct: boolean;
-    corner: boolean;
-}): Promise<readonly string[]> { return phoneUnansweredMentionTargets(this, roomId, author, text, source); }
-  async cancelAgentTurn(input: Input<'cancelAgentTurn'>, viewerId: string) { return phoneCancelAgentTurn(this, input, viewerId); }
-  async requestCornerClose(roomId: string, viewerId: string, locked?: boolean) { return phoneRequestCornerClose(this, roomId, viewerId, locked); }
-  async decideApprovalCard(input: Input<'decideApprovalCard'>, viewerId: string) { return phoneDecideApprovalCard(this, input, viewerId); }
-  async decidePermission(input: Input<'decideWritePermission'>, viewerId: string) { return phoneDecidePermission(this, input, viewerId); }
-  async createWorkspace(input: Input<'createWorkspace'>, viewerId: string) { return phoneCreateWorkspace(this, input, viewerId); }
-  async updateWorkspace(input: Input<'updateWorkspace'>, viewerId: string) { return phoneUpdateWorkspace(this, input, viewerId); }
-  async leaveWorkspace(input: Input<'leaveWorkspace'>, viewerId: string) { return phoneLeaveWorkspace(this, input, viewerId); }
-  async deleteWorkspace(input: Input<'deleteWorkspace'>, viewerId: string) { return phoneDeleteWorkspace(this, input, viewerId); }
-  async createRoom(input: Input<'createRoom'>, viewerId: string) { return phoneCreateRoom(this, input, viewerId); }
-  async createHumanCorner(input: Input<'createHumanCorner'>, viewerId: string) { return phoneCreateHumanCorner(this, input, viewerId); }
-  async renameCorner(roomId: string, name: string | undefined, viewerId: string) { return phoneRenameCorner(this, roomId, name, viewerId); }
-  async updateRoom(input: Input<'updateRoom'>, viewerId: string) { return phoneUpdateRoom(this, input, viewerId); }
-  async deleteRoom(roomId: string, viewerId: string) { return phoneDeleteRoom(this, roomId, viewerId); }
-  async deleteRoomRows(database: SqlDatabase, roomId: string) { return phoneDeleteRoomRows(this, database, roomId); }
-  async leaveRoom(input: Input<'leaveRoom'>, viewerId: string) { return phoneLeaveRoom(this, input, viewerId); }
-  async closeChat(roomId: string, viewerId: string) { return phoneCloseChat(this, roomId, viewerId); }
-  async reopenChat(roomId: string, viewerId: string) { return phoneReopenChat(this, roomId, viewerId); }
-  async addRoomMember(input: Input<'addRoomMember'>, viewerId: string) { return phoneAddRoomMember(this, input, viewerId); }
-  async removeRoomMember(input: Input<'removeRoomMember'>, viewerId: string) { return phoneRemoveRoomMember(this, input, viewerId); }
-  async addWorkspaceMember(input: Input<'addWorkspaceMember'>, viewerId: string) { return phoneAddWorkspaceMember(this, input, viewerId); }
-  async removeWorkspaceMember(input: Input<'removeWorkspaceMember'>, viewerId: string) { return phoneRemoveWorkspaceMember(this, input, viewerId); }
-  async resolveDirectMessage(input: Input<'resolveDirectMessage'>, viewerId: string) { return phoneResolveDirectMessage(this, input, viewerId); }
-  async createInvite(input: Input<'createInvite'>, viewerId: string) { return phoneCreateInvite(this, input, viewerId); }
-  async redeemInvite(input: Input<'redeemInvite'>, viewerId: string) { return phoneRedeemInvite(this, input, viewerId); }
-  async createPairing(input: Input<'createAgentPairingCode'>, viewerId: string) { return phoneCreatePairing(this, input, viewerId); }
-  async updateAgentSoul(input: Input<'updateAgentSoul'>, viewerId: string) { return phoneUpdateAgentSoul(this, input, viewerId); }
-  async updateAgentModel(input: Input<'updateAgentModelSelection'>, viewerId: string) { return phoneUpdateAgentModel(this, input, viewerId); }
-  beginAgentSignIn(input: {
-    roomId: string;
-    text: string;
-}, messageId: string) { return phoneBeginAgentSignIn(this, input, messageId); }
-  async completeAgentSignIn(input: Input<'completeAgentSignIn'>, viewerId: string) { return phoneCompleteAgentSignIn(this, input, viewerId); }
-  async refreshAgentModelCatalog(input: Input<'refreshAgentModelCatalog'>, viewerId: string) { return phoneRefreshAgentModelCatalog(this, input, viewerId); }
-  async decideAgentGrant(input: Input<'decideAgentGrant'>, viewerId: string, defer?: (notification: () => void) => void) { return phoneDecideAgentGrant(this, input, viewerId, defer); }
-  async revokeAgentGrant(input: Input<'revokeAgentGrant'>, viewerId: string) { return phoneRevokeAgentGrant(this, input, viewerId); }
-  async createRoomPoll(input: Input<'createRoomPoll'>, viewerId: string) { return phoneCreateRoomPoll(this, input, viewerId); }
-  async actOnRepositoryCard(input: Input<'actOnRepositoryCard'>, viewerId: string): Promise<Output<'actOnRepositoryCard'>> { return phoneActOnRepositoryCard(this, input, viewerId); }
-  async answerChoice(input: Input<'answerChoice'>, viewerId: string) { return phoneAnswerChoice(this, input, viewerId); }
-  async skipChoice(input: Input<'skipChoice'>, viewerId: string) { return phoneSkipChoice(this, input, viewerId); }
-  async requireGrantAuthority(grantId: unknown, viewerId: string) { return phoneRequireGrantAuthority(this, grantId, viewerId); }
-  async acceptConnectorOffer(input: Input<'acceptConnectorOffer'>, viewerId: string): Promise<Output<'acceptConnectorOffer'>> { return phoneAcceptConnectorOffer(this, input, viewerId); }
-  async acceptWalletOffer(offer: {
-    id: string;
-    workspace_id: string;
-    room_id: string;
-    addressee_id: string;
-    status: ConnectorOfferStatus;
-}, viewerId: string): Promise<Output<'acceptConnectorOffer'>> { return phoneAcceptWalletOffer(this, offer, viewerId); }
-  async markConnectorOfferConnecting(database: SqlDatabase, input: {
-    roomId: string;
-    offerId: string;
-    acceptedBy: RoomViewIdentity;
-    acceptedAt: Date;
-    connectorId?: string;
-}) { return phoneMarkConnectorOfferConnecting(this, database, input); }
-  async updateAgentYolo(input: Input<'updateAgentYolo'>, viewerId: string) { return phoneUpdateAgentYolo(this, input, viewerId); }
-  async updateAgentAccessPolicy(input: Input<'updateAgentAccessPolicy'>, viewerId: string) { return phoneUpdateAgentAccessPolicy(this, input, viewerId); }
-  async rollbackUnrealizedAgent(agentId: string) { return phoneRollbackUnrealizedAgent(this, agentId); }
-  async removeAgent(input: Input<'removeAgent'>, viewerId: string) { return phoneRemoveAgent(this, input, viewerId); }
-  async deleteAccount(viewerId: string) { return phoneDeleteAccount(this, viewerId); }
-  async updateProfile(input: Input<'updatePersonProfile'>, viewerId: string) { return phoneUpdateProfile(this, input, viewerId); }
-  async updateFace(input: Input<'updateIdentityFace'>, viewerId: string) { return phoneUpdateFace(this, input, viewerId); }
-  async updateRoomPushState(input: Input<'updateRoomPushState'>, viewerId: string) { return phoneUpdateRoomPushState(this, input, viewerId); }
-  async updatePushLevel(input: Input<'updateIdentityPushLevel'>, viewerId: string) { return phoneUpdatePushLevel(this, input, viewerId); }
-  async setRepository(input: Input<'setRoomRepository'>, viewerId: string) { return phoneSetRepository(this, input, viewerId); }
-  async removeRepositoryBinding(input: Input<'removeRoomRepository'>, viewerId: string) { return phoneRemoveRepositoryBinding(this, input, viewerId); }
-  async roomRepository(roomId: string) { return phoneRoomRepository(this, roomId); }
-  async setTargetBranch(input: Input<'setRoomTargetBranch'>, viewerId: string) { return phoneSetTargetBranch(this, input, viewerId); }
-  async managedIdentity(viewerId: string) { return phoneManagedIdentity(this, viewerId); }
-  async claimManagedHandle(viewerId: string, handle: string) { return phoneClaimManagedHandle(this, viewerId, handle); }
-  async adoptGitHubHandle(viewerId: string) { return phoneAdoptGitHubHandle(this, viewerId); }
-  async identityRecovery(viewerId: string) { return phoneIdentityRecovery(this, viewerId); }
-  async listRepositories(viewerId: string) { return phoneListRepositories(this, viewerId); }
-  async repositoryAccess(fullName: string, viewerId: string) { return phoneRepositoryAccess(this, fullName, viewerId); }
-  async registerPush(input: Input<'registerPushDevice'>, viewerId: string) { return phoneRegisterPush(this, input, viewerId); }
-  async reportUpdate(input: Input<'reportRunningUpdate'>, viewerId: string, familyId?: string) { return phoneReportUpdate(this, input, viewerId, familyId); }
-  requireGitHub() { return phoneRequireGitHub(this); }
-  async requireIdentity(id: string, database: SqlDatabase = this.database) { return phoneRequireIdentity(this, id, database); }
-  async requireWorkspaceAgent(workspaceId: string, agentId: string, viewerId: string) { return phoneRequireWorkspaceAgent(this, workspaceId, agentId, viewerId); }
-  async requireWorkspaceAgentRemover(workspaceId: string, agentId: string, viewerId: string) { return phoneRequireWorkspaceAgentRemover(this, workspaceId, agentId, viewerId); }
-  async requireWorkspaceMember(workspaceId: string, identityId: string, database = this.database) { return phoneRequireWorkspaceMember(this, workspaceId, identityId, database); }
-  async hasRoomAccess(roomId: string, identityId: string) { return phoneHasRoomAccess(this, roomId, identityId); }
-  async assertWorkbenchViewer(_workspaceId: string, viewerId: string): Promise<void> { return phoneAssertWorkbenchViewer(this, _workspaceId, viewerId); }
-  async viewerWorkbenchWorkspace(viewerId: string): Promise<string> { return phoneViewerWorkbenchWorkspace(this, viewerId); }
-  async readAppCatalog(keys: Iterable<string>): Promise<{
-    appKey: string;
-    description?: string;
-    logo?: string;
-    domain?: string;
-}[]> { return phoneReadAppCatalog(this, keys); }
-  async searchWorkbenchApps(input: Input<'searchWorkbenchApps'>, viewerId: string): Promise<Output<'searchWorkbenchApps'>> { return phoneSearchWorkbenchApps(this, input, viewerId); }
-  async decorateVoiceCallReasons(roomId: string, messages: RoomViewMessage[]): Promise<RoomViewMessage[]> { return phoneDecorateVoiceCallReasons(this, roomId, messages); }
-  async decorateApprovalSources(messages: RoomViewMessage[]): Promise<RoomViewMessage[]> { return phoneDecorateApprovalSources(this, messages); }
-  async decorateCornerOpenCards(roomId: string, messages: RoomViewMessage[]): Promise<RoomViewMessage[]> { return phoneDecorateCornerOpenCards(this, roomId, messages); }
-  async decorateMessageCards(roomId: string, messages: RoomViewMessage[], viewerId: string): Promise<RoomViewMessage[]> { return phoneDecorateMessageCards(this, roomId, messages, viewerId); }
-  async decorateApprovalIdentities(messages: RoomViewMessage[]): Promise<RoomViewMessage[]> { return phoneDecorateApprovalIdentities(this, messages); }
-  async decorateAppSignInCards(messages: RoomViewMessage[]): Promise<RoomViewMessage[]> { return phoneDecorateAppSignInCards(this, messages); }
-  async readConnectorInstall(input: Input<'readConnectorInstall'>, viewerId: string): Promise<Output<'readConnectorInstall'>> { return phoneReadConnectorInstall(this, input, viewerId); }
-  async readWorkbench(input: Input<'readWorkbench'>, viewerId: string): Promise<Output<'readWorkbench'>> { return phoneReadWorkbench(this, input, viewerId); }
-  async resolveViewerHelper(helperAgentId: string, viewerId: string) { return phoneResolveViewerHelper(this, helperAgentId, viewerId); }
-  async connectWorkbenchApp(input: Input<'connectWorkbenchApp'>, viewerId: string): Promise<Output<'connectWorkbenchApp'>> { return phoneConnectWorkbenchApp(this, input, viewerId); }
-  async completeAppSignIn(sessionUri: string, appId: string, viewerId: string) { return phoneCompleteAppSignIn(this, sessionUri, appId, viewerId); }
-  async disconnectWorkbenchApp(input: Input<'disconnectWorkbenchApp'>, viewerId: string): Promise<void> { return phoneDisconnectWorkbenchApp(this, input, viewerId); }
-  async pairConnector(input: Input<'pairConnector'>, viewerId: string): Promise<Output<'pairConnector'>> { return phonePairConnector(this, input, viewerId); }
-  async armConnectorPairing(database: SqlDatabase, input: {
-    workspaceId: string;
-    ownerIdentityId: string;
-    connectorType: Input<'pairConnector'>['connectorType'];
-    helperAgentId: string;
-    machineId: string;
-}): Promise<Output<'pairConnector'>> { return phoneArmConnectorPairing(this, database, input); }
-  async assertOwnedConnector(connectorId: string, viewerId: string) { return phoneAssertOwnedConnector(this, connectorId, viewerId); }
-  async unpairConnector(input: Input<'unpairConnector'>, viewerId: string): Promise<void> { return phoneUnpairConnector(this, input, viewerId); }
-  async readConnectionDetail(input: Input<'readConnectionDetail'>, viewerId: string): Promise<Output<'readConnectionDetail'>> { return phoneReadConnectionDetail(this, input, viewerId); }
-  async revokeConnectionGrants(input: Input<'revokeConnectionGrants'>, viewerId: string): Promise<Output<'revokeConnectionGrants'>> { return phoneRevokeConnectionGrants(this, input, viewerId); }
-  async assertRoomIsWritable(roomId: string, author: string): Promise<void> { return phoneAssertRoomIsWritable(this, roomId, author); }
-  async requireRoomWorkspaceManager(roomId: string, identityId: string, database = this.database) { return phoneRequireRoomWorkspaceManager(this, roomId, identityId, database); }
-  async requireHumanRoomWorkspaceManager(roomId: string, identityId: string) { return phoneRequireHumanRoomWorkspaceManager(this, roomId, identityId); }
-  async requireTopLevelChatMember(roomId: string, identityId: string, database = this.database) { return phoneRequireTopLevelChatMember(this, roomId, identityId, database); }
-  async requireTopLevelRoom(roomId: string) { return phoneRequireTopLevelRoom(this, roomId); }
-  async requireWorkspaceManager(workspaceId: string, identityId: string, database = this.database) { return phoneRequireWorkspaceManager(this, workspaceId, identityId, database); }
-  async requireWorkspaceOwner(workspaceId: string, identityId: string, database = this.database) { return phoneRequireWorkspaceOwner(this, workspaceId, identityId, database); }
-  rosterSearchNeedle(query: string | undefined): string | null { return phoneRosterSearchNeedle(this, query); }
-  async workspaceRoster(workspaceId: string, viewerId: string, query: WorkspaceMemberListQuery = {}): Promise<(WorkspaceMemberListView & {
-    workspaceRow: {
-        id: string;
-        name: string;
-        avatar: string | null;
-        visibility: 'public' | 'invite-only';
-        allow_fix_sweep: boolean;
-        created_at: Date;
-        updated_at: Date;
-        role: 'owner' | 'admin' | 'member' | 'spectator';
-    };
-    viewerIdentity: RoomViewIdentity;
-    managedRoomRows: Array<{
-        id: string;
-        name: string;
-        visibility: 'public' | 'invite-only';
-        created_at: Date;
-    }>;
-}) | null> { return phoneWorkspaceRoster(this, workspaceId, viewerId, query); }
-  projectWorkspaceAgents(rows: MemberRow[], configs: RosterAgentRow[]): WorkspaceAgentView[] { return phoneProjectWorkspaceAgents(this, rows, configs); }
-  async members(workspaceId: string, roomId: string | null, memberId?: string): Promise<RoomViewMember[]> { return phoneMembers(this, workspaceId, roomId, memberId); }
-  projectMembers(rows: readonly MemberRow[], roomId: string | null): RoomViewMember[] { return phoneProjectMembers(this, rows, roomId); }
-  async attachmentFacts(...groups: readonly (readonly RoomViewMessage[])[]): Promise<AttachmentFacts> { return phoneAttachmentFacts(this, ...groups); }
-  async enrichHistoryRows(rows: MessageRow[], viewerId: string): Promise<AttachmentFacts> { return phoneEnrichHistoryRows(this, rows, viewerId); }
-  async enrichMessageTags(rows: MessageRow[]): Promise<void> { return phoneEnrichMessageTags(this, rows); }
-  projectAgentTurns(turns: readonly AgentTurnRow[]): RoomView['latestAgentTurns'] { return phoneProjectAgentTurns(this, turns); }
-  projectPendingAgentCommands(commands: readonly {
-    agent_id: string;
-    turn_request_id: string;
-    created_at: Date | string;
-}[]): NonNullable<RoomView['pendingAgentCommands']> { return phoneProjectPendingAgentCommands(this, commands); }
-  async enrichMessageBookmarks(rows: readonly MessageRow[], viewerId: string): Promise<void> { return phoneEnrichMessageBookmarks(this, rows, viewerId); }
-  projectRoomMessages(transcriptRows: readonly MessageRow[], liveRows: readonly MessageRow[], cornerActivityRows: readonly MessageRow[], resolvedAgentTurns: RoomView['latestAgentTurns'], isCorner: boolean, viewerId?: string): {
-    messages: RoomViewMessage[];
-    toolRows: RoomViewMessage[];
-} { return phoneProjectRoomMessages(this, transcriptRows, liveRows, cornerActivityRows, resolvedAgentTurns, isCorner, viewerId); }
+  async readLiveDelta(...args: PhoneArguments<typeof phoneReadLiveDelta>): ReturnType<typeof phoneReadLiveDelta> { return phoneReadLiveDelta(this, ...args); }
+  async readLiveDeltas(...args: PhoneArguments<typeof phoneReadLiveDeltas>): ReturnType<typeof phoneReadLiveDeltas> { return phoneReadLiveDeltas(this, ...args); }
+  async readLiveBookmark(...args: PhoneArguments<typeof phoneReadLiveBookmark>): ReturnType<typeof phoneReadLiveBookmark> { return phoneReadLiveBookmark(this, ...args); }
+  async liveWorkspaceChange(...args: PhoneArguments<typeof phoneLiveWorkspaceChange>): ReturnType<typeof phoneLiveWorkspaceChange> { return phoneLiveWorkspaceChange(this, ...args); }
+  async livePersonChange(...args: PhoneArguments<typeof phoneLivePersonChange>): ReturnType<typeof phoneLivePersonChange> { return phoneLivePersonChange(this, ...args); }
+  async liveNeedsYou(...args: PhoneArguments<typeof phoneLiveNeedsYou>): ReturnType<typeof phoneLiveNeedsYou> { return phoneLiveNeedsYou(this, ...args); }
+  async liveDraftSnapshot(...args: PhoneArguments<typeof phoneLiveDraftSnapshot>): ReturnType<typeof phoneLiveDraftSnapshot> { return phoneLiveDraftSnapshot(this, ...args); }
+  async readWelcomeCards(...args: PhoneArguments<typeof phoneReadWelcomeCards>): ReturnType<typeof phoneReadWelcomeCards> { return phoneReadWelcomeCards(this, ...args); }
+  async completeWelcomeCards(...args: PhoneArguments<typeof phoneCompleteWelcomeCards>): ReturnType<typeof phoneCompleteWelcomeCards> { return phoneCompleteWelcomeCards(this, ...args); }
+  async readWorkspaces(...args: PhoneArguments<typeof phoneReadWorkspaces>): ReturnType<typeof phoneReadWorkspaces> { return phoneReadWorkspaces(this, ...args); }
+  async readWorkspace(...args: PhoneArguments<typeof phoneReadWorkspace>): ReturnType<typeof phoneReadWorkspace> { return phoneReadWorkspace(this, ...args); }
+  async readWorkspaceMembers(...args: PhoneArguments<typeof phoneReadWorkspaceMembers>): ReturnType<typeof phoneReadWorkspaceMembers> { return phoneReadWorkspaceMembers(this, ...args); }
+  async liveChatCornerStatus(...args: PhoneArguments<typeof phoneLiveChatCornerStatus>): ReturnType<typeof phoneLiveChatCornerStatus> { return phoneLiveChatCornerStatus(this, ...args); }
+  async readChats(...args: PhoneArguments<typeof phoneReadChats>): ReturnType<typeof phoneReadChats> { return phoneReadChats(this, ...args); }
+  directMessagePresence(...args: PhoneArguments<typeof phoneDirectMessagePresence>): ReturnType<typeof phoneDirectMessagePresence> { return phoneDirectMessagePresence(this, ...args); }
+  async readRoom(...args: PhoneArguments<typeof phoneReadRoom>): ReturnType<typeof phoneReadRoom> { return phoneReadRoom(this, ...args); }
+  async resolveMessageLink(...args: PhoneArguments<typeof phoneResolveMessageLink>): ReturnType<typeof phoneResolveMessageLink> { return phoneResolveMessageLink(this, ...args); }
+  async resolveChatLinks(...args: PhoneArguments<typeof phoneResolveChatLinks>): ReturnType<typeof phoneResolveChatLinks> { return phoneResolveChatLinks(this, ...args); }
+  async searchMessages(...args: PhoneArguments<typeof phoneSearchMessages>): ReturnType<typeof phoneSearchMessages> { return phoneSearchMessages(this, ...args); }
+  async readHistoryAround(...args: PhoneArguments<typeof phoneReadHistoryAround>): ReturnType<typeof phoneReadHistoryAround> { return phoneReadHistoryAround(this, ...args); }
+  async readHistoryAfter(...args: PhoneArguments<typeof phoneReadHistoryAfter>): ReturnType<typeof phoneReadHistoryAfter> { return phoneReadHistoryAfter(this, ...args); }
+  async readHistory(...args: PhoneArguments<typeof phoneReadHistory>): ReturnType<typeof phoneReadHistory> { return phoneReadHistory(this, ...args); }
+  async readHistoryOutline(...args: PhoneArguments<typeof phoneReadHistoryOutline>): ReturnType<typeof phoneReadHistoryOutline> { return phoneReadHistoryOutline(this, ...args); }
+  async countHistoryOutline(...args: PhoneArguments<typeof phoneCountHistoryOutline>): ReturnType<typeof phoneCountHistoryOutline> { return phoneCountHistoryOutline(this, ...args); }
+  async readCorners(...args: PhoneArguments<typeof phoneReadCorners>): ReturnType<typeof phoneReadCorners> { return phoneReadCorners(this, ...args); }
+  async loadCorners(...args: PhoneArguments<typeof phoneLoadCorners>): ReturnType<typeof phoneLoadCorners> { return phoneLoadCorners(this, ...args); }
+  async roomRows(...args: PhoneArguments<typeof phoneRoomRows>): ReturnType<typeof phoneRoomRows> { return phoneRoomRows(this, ...args); }
+  async cornerRoomEnrichment(...args: PhoneArguments<typeof phoneCornerRoomEnrichment>): ReturnType<typeof phoneCornerRoomEnrichment> { return phoneCornerRoomEnrichment(this, ...args); }
+  projectRoomEnrichment(...args: PhoneArguments<typeof phoneProjectRoomEnrichment>): ReturnType<typeof phoneProjectRoomEnrichment> { return phoneProjectRoomEnrichment(this, ...args); }
+  cornerRowsSql(...args: PhoneArguments<typeof phoneCornerRowsSql>): ReturnType<typeof phoneCornerRowsSql> { return phoneCornerRowsSql(this, ...args); }
+  projectCorners(...args: PhoneArguments<typeof phoneProjectCorners>): ReturnType<typeof phoneProjectCorners> { return phoneProjectCorners(this, ...args); }
+  async readAgent(...args: PhoneArguments<typeof phoneReadAgent>): ReturnType<typeof phoneReadAgent> { return phoneReadAgent(this, ...args); }
+  projectAgentGrants(...args: PhoneArguments<typeof phoneProjectAgentGrants>): ReturnType<typeof phoneProjectAgentGrants> { return phoneProjectAgentGrants(this, ...args); }
+  projectMemberGrantRows(...args: PhoneArguments<typeof phoneProjectMemberGrantRows>): ReturnType<typeof phoneProjectMemberGrantRows> { return phoneProjectMemberGrantRows(this, ...args); }
+  async readInvite(...args: PhoneArguments<typeof phoneReadInvite>): ReturnType<typeof phoneReadInvite> { return phoneReadInvite(this, ...args); }
+  async lockPairingIssuer(...args: PhoneArguments<typeof phoneLockPairingIssuer>): ReturnType<typeof phoneLockPairingIssuer> { return phoneLockPairingIssuer(this, ...args); }
+  async claimAgentPairing(...args: PhoneArguments<typeof phoneClaimAgentPairing>): ReturnType<typeof phoneClaimAgentPairing> { return phoneClaimAgentPairing(this, ...args); }
+  async wornSeededIdentity(...args: PhoneArguments<typeof phoneWornSeededIdentity>): ReturnType<typeof phoneWornSeededIdentity> { return phoneWornSeededIdentity(this, ...args); }
+  async claimAgentConnectPairing(input: Omit<PhoneArguments<typeof phoneClaimAgentConnectPairing>[0], 'machineId' | 'machineName'>): Promise<Omit<AgentConnectClaim, 'daemonExchangeToken'> | AgentConnectFailure>;
+  async claimAgentConnectPairing(input: PhoneArguments<typeof phoneClaimAgentConnectPairing>[0], createDaemonExchange: NonNullable<PhoneArguments<typeof phoneClaimAgentConnectPairing>[1]>): Promise<(AgentConnectClaim & Required<Pick<AgentConnectClaim, 'daemonExchangeToken'>>) | AgentConnectFailure>;
+  async claimAgentConnectPairing(...args: PhoneArguments<typeof phoneClaimAgentConnectPairing>): ReturnType<typeof phoneClaimAgentConnectPairing> { return phoneClaimAgentConnectPairing(this, ...args); }
+  async renameConnectedAgent(...args: PhoneArguments<typeof phoneRenameConnectedAgent>): ReturnType<typeof phoneRenameConnectedAgent> { return phoneRenameConnectedAgent(this, ...args); }
+  async finishAgentConnectPairing(...args: PhoneArguments<typeof phoneFinishAgentConnectPairing>): ReturnType<typeof phoneFinishAgentConnectPairing> { return phoneFinishAgentConnectPairing(this, ...args); }
+  async execute<Name extends keyof PhoneOperationMap>(...args: PhoneArguments<typeof phoneExecute<Name>>): ReturnType<typeof phoneExecute<Name>> { return phoneExecute<Name>(this, ...args); }
+  async executeOperation<Name extends keyof PhoneOperationMap>(...args: PhoneArguments<typeof phoneExecuteOperation<Name>>): ReturnType<typeof phoneExecuteOperation<Name>> { return phoneExecuteOperation<Name>(this, ...args); }
+  async liveReadState(...args: PhoneArguments<typeof phoneLiveReadState>): ReturnType<typeof phoneLiveReadState> { return phoneLiveReadState(this, ...args); }
+  async liveRoomCommands(...args: PhoneArguments<typeof phoneLiveRoomCommands>): ReturnType<typeof phoneLiveRoomCommands> { return phoneLiveRoomCommands(this, ...args); }
+  async markRead(...args: PhoneArguments<typeof phoneMarkRead>): ReturnType<typeof phoneMarkRead> { return phoneMarkRead(this, ...args); }
+  async markUnread(...args: PhoneArguments<typeof phoneMarkUnread>): ReturnType<typeof phoneMarkUnread> { return phoneMarkUnread(this, ...args); }
+  async uploadMedia(...args: PhoneArguments<typeof phoneUploadMedia>): ReturnType<typeof phoneUploadMedia> { return phoneUploadMedia(this, ...args); }
+  async observeSentMessage(...args: PhoneArguments<typeof phoneObserveSentMessage>): ReturnType<typeof phoneObserveSentMessage> { return phoneObserveSentMessage(this, ...args); }
+  async sendMessage(...args: PhoneArguments<typeof phoneSendMessage>): ReturnType<typeof phoneSendMessage> { return phoneSendMessage(this, ...args); }
+  async listRoomSchedules(...args: PhoneArguments<typeof phoneListRoomSchedules>): ReturnType<typeof phoneListRoomSchedules> { return phoneListRoomSchedules(this, ...args); }
+  async readScheduledWork(...args: PhoneArguments<typeof phoneReadScheduledWork>): ReturnType<typeof phoneReadScheduledWork> { return phoneReadScheduledWork(this, ...args); }
+  async listRoomWorkflowRuns(...args: PhoneArguments<typeof phoneListRoomWorkflowRuns>): ReturnType<typeof phoneListRoomWorkflowRuns> { return phoneListRoomWorkflowRuns(this, ...args); }
+  async liveWorkflowRuns(...args: PhoneArguments<typeof phoneLiveWorkflowRuns>): ReturnType<typeof phoneLiveWorkflowRuns> { return phoneLiveWorkflowRuns(this, ...args); }
+  async readWorkflowRun(...args: PhoneArguments<typeof phoneReadWorkflowRun>): ReturnType<typeof phoneReadWorkflowRun> { return phoneReadWorkflowRun(this, ...args); }
+  async deleteRoomSchedule(...args: PhoneArguments<typeof phoneDeleteRoomSchedule>): ReturnType<typeof phoneDeleteRoomSchedule> { return phoneDeleteRoomSchedule(this, ...args); }
+  async sendReply(...args: PhoneArguments<typeof phoneSendReply>): ReturnType<typeof phoneSendReply> { return phoneSendReply(this, ...args); }
+  async liveStarPrompt(...args: PhoneArguments<typeof phoneLiveStarPrompt>): ReturnType<typeof phoneLiveStarPrompt> { return phoneLiveStarPrompt(this, ...args); }
+  async reactToMessage(...args: PhoneArguments<typeof phoneReactToMessage>): ReturnType<typeof phoneReactToMessage> { return phoneReactToMessage(this, ...args); }
+  async deleteRoomMessage(...args: PhoneArguments<typeof phoneDeleteRoomMessage>): ReturnType<typeof phoneDeleteRoomMessage> { return phoneDeleteRoomMessage(this, ...args); }
+  async setMessageBookmark(...args: PhoneArguments<typeof phoneSetMessageBookmark>): ReturnType<typeof phoneSetMessageBookmark> { return phoneSetMessageBookmark(this, ...args); }
+  async clearMessageBookmarks(...args: PhoneArguments<typeof phoneClearMessageBookmarks>): ReturnType<typeof phoneClearMessageBookmarks> { return phoneClearMessageBookmarks(this, ...args); }
+  async readNeedsYou(...args: PhoneArguments<typeof phoneReadNeedsYou>): ReturnType<typeof phoneReadNeedsYou> { return phoneReadNeedsYou(this, ...args); }
+  async readTray(...args: PhoneArguments<typeof phoneReadTray>): ReturnType<typeof phoneReadTray> { return phoneReadTray(this, ...args); }
+  async countNeedsYou(...args: PhoneArguments<typeof phoneCountNeedsYou>): ReturnType<typeof phoneCountNeedsYou> { return phoneCountNeedsYou(this, ...args); }
+  async clearNeedsYou(...args: PhoneArguments<typeof phoneClearNeedsYou>): ReturnType<typeof phoneClearNeedsYou> { return phoneClearNeedsYou(this, ...args); }
+  async clearNeedsYouSection(...args: PhoneArguments<typeof phoneClearNeedsYouSection>): ReturnType<typeof phoneClearNeedsYouSection> { return phoneClearNeedsYouSection(this, ...args); }
+  async listMessageBookmarks(...args: PhoneArguments<typeof phoneListMessageBookmarks>): ReturnType<typeof phoneListMessageBookmarks> { return phoneListMessageBookmarks(this, ...args); }
+  async receiptMessage(...args: PhoneArguments<typeof phoneReceiptMessage>): ReturnType<typeof phoneReceiptMessage> { return phoneReceiptMessage(this, ...args); }
+  async pendingAgentCommandsForMessage(...args: PhoneArguments<typeof phonePendingAgentCommandsForMessage>): ReturnType<typeof phonePendingAgentCommandsForMessage> { return phonePendingAgentCommandsForMessage(this, ...args); }
+  async noteUnansweredMentions(...args: PhoneArguments<typeof phoneNoteUnansweredMentions>): ReturnType<typeof phoneNoteUnansweredMentions> { return phoneNoteUnansweredMentions(this, ...args); }
+  async unansweredMentionTargets(...args: PhoneArguments<typeof phoneUnansweredMentionTargets>): ReturnType<typeof phoneUnansweredMentionTargets> { return phoneUnansweredMentionTargets(this, ...args); }
+  async cancelAgentTurn(...args: PhoneArguments<typeof phoneCancelAgentTurn>): ReturnType<typeof phoneCancelAgentTurn> { return phoneCancelAgentTurn(this, ...args); }
+  async requestCornerClose(...args: PhoneArguments<typeof phoneRequestCornerClose>): ReturnType<typeof phoneRequestCornerClose> { return phoneRequestCornerClose(this, ...args); }
+  async decideApprovalCard(...args: PhoneArguments<typeof phoneDecideApprovalCard>): ReturnType<typeof phoneDecideApprovalCard> { return phoneDecideApprovalCard(this, ...args); }
+  async decidePermission(...args: PhoneArguments<typeof phoneDecidePermission>): ReturnType<typeof phoneDecidePermission> { return phoneDecidePermission(this, ...args); }
+  async createWorkspace(...args: PhoneArguments<typeof phoneCreateWorkspace>): ReturnType<typeof phoneCreateWorkspace> { return phoneCreateWorkspace(this, ...args); }
+  async updateWorkspace(...args: PhoneArguments<typeof phoneUpdateWorkspace>): ReturnType<typeof phoneUpdateWorkspace> { return phoneUpdateWorkspace(this, ...args); }
+  async leaveWorkspace(...args: PhoneArguments<typeof phoneLeaveWorkspace>): ReturnType<typeof phoneLeaveWorkspace> { return phoneLeaveWorkspace(this, ...args); }
+  async deleteWorkspace(...args: PhoneArguments<typeof phoneDeleteWorkspace>): ReturnType<typeof phoneDeleteWorkspace> { return phoneDeleteWorkspace(this, ...args); }
+  async createRoom(...args: PhoneArguments<typeof phoneCreateRoom>): ReturnType<typeof phoneCreateRoom> { return phoneCreateRoom(this, ...args); }
+  async createHumanCorner(...args: PhoneArguments<typeof phoneCreateHumanCorner>): ReturnType<typeof phoneCreateHumanCorner> { return phoneCreateHumanCorner(this, ...args); }
+  async renameCorner(...args: PhoneArguments<typeof phoneRenameCorner>): ReturnType<typeof phoneRenameCorner> { return phoneRenameCorner(this, ...args); }
+  async updateRoom(...args: PhoneArguments<typeof phoneUpdateRoom>): ReturnType<typeof phoneUpdateRoom> { return phoneUpdateRoom(this, ...args); }
+  async deleteRoom(...args: PhoneArguments<typeof phoneDeleteRoom>): ReturnType<typeof phoneDeleteRoom> { return phoneDeleteRoom(this, ...args); }
+  async deleteRoomRows(...args: PhoneArguments<typeof phoneDeleteRoomRows>): ReturnType<typeof phoneDeleteRoomRows> { return phoneDeleteRoomRows(this, ...args); }
+  async leaveRoom(...args: PhoneArguments<typeof phoneLeaveRoom>): ReturnType<typeof phoneLeaveRoom> { return phoneLeaveRoom(this, ...args); }
+  async closeChat(...args: PhoneArguments<typeof phoneCloseChat>): ReturnType<typeof phoneCloseChat> { return phoneCloseChat(this, ...args); }
+  async reopenChat(...args: PhoneArguments<typeof phoneReopenChat>): ReturnType<typeof phoneReopenChat> { return phoneReopenChat(this, ...args); }
+  async addRoomMember(...args: PhoneArguments<typeof phoneAddRoomMember>): ReturnType<typeof phoneAddRoomMember> { return phoneAddRoomMember(this, ...args); }
+  async removeRoomMember(...args: PhoneArguments<typeof phoneRemoveRoomMember>): ReturnType<typeof phoneRemoveRoomMember> { return phoneRemoveRoomMember(this, ...args); }
+  async addWorkspaceMember(...args: PhoneArguments<typeof phoneAddWorkspaceMember>): ReturnType<typeof phoneAddWorkspaceMember> { return phoneAddWorkspaceMember(this, ...args); }
+  async removeWorkspaceMember(...args: PhoneArguments<typeof phoneRemoveWorkspaceMember>): ReturnType<typeof phoneRemoveWorkspaceMember> { return phoneRemoveWorkspaceMember(this, ...args); }
+  async resolveDirectMessage(...args: PhoneArguments<typeof phoneResolveDirectMessage>): ReturnType<typeof phoneResolveDirectMessage> { return phoneResolveDirectMessage(this, ...args); }
+  async createInvite(...args: PhoneArguments<typeof phoneCreateInvite>): ReturnType<typeof phoneCreateInvite> { return phoneCreateInvite(this, ...args); }
+  async redeemInvite(...args: PhoneArguments<typeof phoneRedeemInvite>): ReturnType<typeof phoneRedeemInvite> { return phoneRedeemInvite(this, ...args); }
+  async createPairing(...args: PhoneArguments<typeof phoneCreatePairing>): ReturnType<typeof phoneCreatePairing> { return phoneCreatePairing(this, ...args); }
+  async updateAgentSoul(...args: PhoneArguments<typeof phoneUpdateAgentSoul>): ReturnType<typeof phoneUpdateAgentSoul> { return phoneUpdateAgentSoul(this, ...args); }
+  async updateAgentModel(...args: PhoneArguments<typeof phoneUpdateAgentModel>): ReturnType<typeof phoneUpdateAgentModel> { return phoneUpdateAgentModel(this, ...args); }
+  beginAgentSignIn(...args: PhoneArguments<typeof phoneBeginAgentSignIn>): ReturnType<typeof phoneBeginAgentSignIn> { return phoneBeginAgentSignIn(this, ...args); }
+  async completeAgentSignIn(...args: PhoneArguments<typeof phoneCompleteAgentSignIn>): ReturnType<typeof phoneCompleteAgentSignIn> { return phoneCompleteAgentSignIn(this, ...args); }
+  async refreshAgentModelCatalog(...args: PhoneArguments<typeof phoneRefreshAgentModelCatalog>): ReturnType<typeof phoneRefreshAgentModelCatalog> { return phoneRefreshAgentModelCatalog(this, ...args); }
+  async decideAgentGrant(...args: PhoneArguments<typeof phoneDecideAgentGrant>): ReturnType<typeof phoneDecideAgentGrant> { return phoneDecideAgentGrant(this, ...args); }
+  async revokeAgentGrant(...args: PhoneArguments<typeof phoneRevokeAgentGrant>): ReturnType<typeof phoneRevokeAgentGrant> { return phoneRevokeAgentGrant(this, ...args); }
+  async createRoomPoll(...args: PhoneArguments<typeof phoneCreateRoomPoll>): ReturnType<typeof phoneCreateRoomPoll> { return phoneCreateRoomPoll(this, ...args); }
+  async actOnRepositoryCard(...args: PhoneArguments<typeof phoneActOnRepositoryCard>): ReturnType<typeof phoneActOnRepositoryCard> { return phoneActOnRepositoryCard(this, ...args); }
+  async answerChoice(...args: PhoneArguments<typeof phoneAnswerChoice>): ReturnType<typeof phoneAnswerChoice> { return phoneAnswerChoice(this, ...args); }
+  async skipChoice(...args: PhoneArguments<typeof phoneSkipChoice>): ReturnType<typeof phoneSkipChoice> { return phoneSkipChoice(this, ...args); }
+  async requireGrantAuthority(...args: PhoneArguments<typeof phoneRequireGrantAuthority>): ReturnType<typeof phoneRequireGrantAuthority> { return phoneRequireGrantAuthority(this, ...args); }
+  async acceptConnectorOffer(...args: PhoneArguments<typeof phoneAcceptConnectorOffer>): ReturnType<typeof phoneAcceptConnectorOffer> { return phoneAcceptConnectorOffer(this, ...args); }
+  async acceptWalletOffer(...args: PhoneArguments<typeof phoneAcceptWalletOffer>): ReturnType<typeof phoneAcceptWalletOffer> { return phoneAcceptWalletOffer(this, ...args); }
+  async markConnectorOfferConnecting(...args: PhoneArguments<typeof phoneMarkConnectorOfferConnecting>): ReturnType<typeof phoneMarkConnectorOfferConnecting> { return phoneMarkConnectorOfferConnecting(this, ...args); }
+  async updateAgentYolo(...args: PhoneArguments<typeof phoneUpdateAgentYolo>): ReturnType<typeof phoneUpdateAgentYolo> { return phoneUpdateAgentYolo(this, ...args); }
+  async updateAgentAccessPolicy(...args: PhoneArguments<typeof phoneUpdateAgentAccessPolicy>): ReturnType<typeof phoneUpdateAgentAccessPolicy> { return phoneUpdateAgentAccessPolicy(this, ...args); }
+  async rollbackUnrealizedAgent(...args: PhoneArguments<typeof phoneRollbackUnrealizedAgent>): ReturnType<typeof phoneRollbackUnrealizedAgent> { return phoneRollbackUnrealizedAgent(this, ...args); }
+  async removeAgent(...args: PhoneArguments<typeof phoneRemoveAgent>): ReturnType<typeof phoneRemoveAgent> { return phoneRemoveAgent(this, ...args); }
+  async deleteAccount(...args: PhoneArguments<typeof phoneDeleteAccount>): ReturnType<typeof phoneDeleteAccount> { return phoneDeleteAccount(this, ...args); }
+  async updateProfile(...args: PhoneArguments<typeof phoneUpdateProfile>): ReturnType<typeof phoneUpdateProfile> { return phoneUpdateProfile(this, ...args); }
+  async updateFace(...args: PhoneArguments<typeof phoneUpdateFace>): ReturnType<typeof phoneUpdateFace> { return phoneUpdateFace(this, ...args); }
+  async updateRoomPushState(...args: PhoneArguments<typeof phoneUpdateRoomPushState>): ReturnType<typeof phoneUpdateRoomPushState> { return phoneUpdateRoomPushState(this, ...args); }
+  async updatePushLevel(...args: PhoneArguments<typeof phoneUpdatePushLevel>): ReturnType<typeof phoneUpdatePushLevel> { return phoneUpdatePushLevel(this, ...args); }
+  async setRepository(...args: PhoneArguments<typeof phoneSetRepository>): ReturnType<typeof phoneSetRepository> { return phoneSetRepository(this, ...args); }
+  async removeRepositoryBinding(...args: PhoneArguments<typeof phoneRemoveRepositoryBinding>): ReturnType<typeof phoneRemoveRepositoryBinding> { return phoneRemoveRepositoryBinding(this, ...args); }
+  async roomRepository(...args: PhoneArguments<typeof phoneRoomRepository>): ReturnType<typeof phoneRoomRepository> { return phoneRoomRepository(this, ...args); }
+  async setTargetBranch(...args: PhoneArguments<typeof phoneSetTargetBranch>): ReturnType<typeof phoneSetTargetBranch> { return phoneSetTargetBranch(this, ...args); }
+  async managedIdentity(...args: PhoneArguments<typeof phoneManagedIdentity>): ReturnType<typeof phoneManagedIdentity> { return phoneManagedIdentity(this, ...args); }
+  async claimManagedHandle(...args: PhoneArguments<typeof phoneClaimManagedHandle>): ReturnType<typeof phoneClaimManagedHandle> { return phoneClaimManagedHandle(this, ...args); }
+  async adoptGitHubHandle(...args: PhoneArguments<typeof phoneAdoptGitHubHandle>): ReturnType<typeof phoneAdoptGitHubHandle> { return phoneAdoptGitHubHandle(this, ...args); }
+  async identityRecovery(...args: PhoneArguments<typeof phoneIdentityRecovery>): ReturnType<typeof phoneIdentityRecovery> { return phoneIdentityRecovery(this, ...args); }
+  async listRepositories(...args: PhoneArguments<typeof phoneListRepositories>): ReturnType<typeof phoneListRepositories> { return phoneListRepositories(this, ...args); }
+  async repositoryAccess(...args: PhoneArguments<typeof phoneRepositoryAccess>): ReturnType<typeof phoneRepositoryAccess> { return phoneRepositoryAccess(this, ...args); }
+  async registerPush(...args: PhoneArguments<typeof phoneRegisterPush>): ReturnType<typeof phoneRegisterPush> { return phoneRegisterPush(this, ...args); }
+  async reportUpdate(...args: PhoneArguments<typeof phoneReportUpdate>): ReturnType<typeof phoneReportUpdate> { return phoneReportUpdate(this, ...args); }
+  requireGitHub(...args: PhoneArguments<typeof phoneRequireGitHub>): ReturnType<typeof phoneRequireGitHub> { return phoneRequireGitHub(this, ...args); }
+  async requireIdentity(...args: PhoneArguments<typeof phoneRequireIdentity>): ReturnType<typeof phoneRequireIdentity> { return phoneRequireIdentity(this, ...args); }
+  async requireWorkspaceAgent(...args: PhoneArguments<typeof phoneRequireWorkspaceAgent>): ReturnType<typeof phoneRequireWorkspaceAgent> { return phoneRequireWorkspaceAgent(this, ...args); }
+  async requireWorkspaceAgentRemover(...args: PhoneArguments<typeof phoneRequireWorkspaceAgentRemover>): ReturnType<typeof phoneRequireWorkspaceAgentRemover> { return phoneRequireWorkspaceAgentRemover(this, ...args); }
+  async requireWorkspaceMember(...args: PhoneArguments<typeof phoneRequireWorkspaceMember>): ReturnType<typeof phoneRequireWorkspaceMember> { return phoneRequireWorkspaceMember(this, ...args); }
+  async hasRoomAccess(...args: PhoneArguments<typeof phoneHasRoomAccess>): ReturnType<typeof phoneHasRoomAccess> { return phoneHasRoomAccess(this, ...args); }
+  async assertWorkbenchViewer(...args: PhoneArguments<typeof phoneAssertWorkbenchViewer>): ReturnType<typeof phoneAssertWorkbenchViewer> { return phoneAssertWorkbenchViewer(this, ...args); }
+  async viewerWorkbenchWorkspace(...args: PhoneArguments<typeof phoneViewerWorkbenchWorkspace>): ReturnType<typeof phoneViewerWorkbenchWorkspace> { return phoneViewerWorkbenchWorkspace(this, ...args); }
+  async readAppCatalog(...args: PhoneArguments<typeof phoneReadAppCatalog>): ReturnType<typeof phoneReadAppCatalog> { return phoneReadAppCatalog(this, ...args); }
+  async searchWorkbenchApps(...args: PhoneArguments<typeof phoneSearchWorkbenchApps>): ReturnType<typeof phoneSearchWorkbenchApps> { return phoneSearchWorkbenchApps(this, ...args); }
+  async decorateVoiceCallReasons(...args: PhoneArguments<typeof phoneDecorateVoiceCallReasons>): ReturnType<typeof phoneDecorateVoiceCallReasons> { return phoneDecorateVoiceCallReasons(this, ...args); }
+  async decorateApprovalSources(...args: PhoneArguments<typeof phoneDecorateApprovalSources>): ReturnType<typeof phoneDecorateApprovalSources> { return phoneDecorateApprovalSources(this, ...args); }
+  async decorateCornerOpenCards(...args: PhoneArguments<typeof phoneDecorateCornerOpenCards>): ReturnType<typeof phoneDecorateCornerOpenCards> { return phoneDecorateCornerOpenCards(this, ...args); }
+  async decorateMessageCards(...args: PhoneArguments<typeof phoneDecorateMessageCards>): ReturnType<typeof phoneDecorateMessageCards> { return phoneDecorateMessageCards(this, ...args); }
+  async decorateApprovalIdentities(...args: PhoneArguments<typeof phoneDecorateApprovalIdentities>): ReturnType<typeof phoneDecorateApprovalIdentities> { return phoneDecorateApprovalIdentities(this, ...args); }
+  async decorateAppSignInCards(...args: PhoneArguments<typeof phoneDecorateAppSignInCards>): ReturnType<typeof phoneDecorateAppSignInCards> { return phoneDecorateAppSignInCards(this, ...args); }
+  async readConnectorInstall(...args: PhoneArguments<typeof phoneReadConnectorInstall>): ReturnType<typeof phoneReadConnectorInstall> { return phoneReadConnectorInstall(this, ...args); }
+  async readWorkbench(...args: PhoneArguments<typeof phoneReadWorkbench>): ReturnType<typeof phoneReadWorkbench> { return phoneReadWorkbench(this, ...args); }
+  async resolveViewerHelper(...args: PhoneArguments<typeof phoneResolveViewerHelper>): ReturnType<typeof phoneResolveViewerHelper> { return phoneResolveViewerHelper(this, ...args); }
+  async connectWorkbenchApp(...args: PhoneArguments<typeof phoneConnectWorkbenchApp>): ReturnType<typeof phoneConnectWorkbenchApp> { return phoneConnectWorkbenchApp(this, ...args); }
+  async completeAppSignIn(...args: PhoneArguments<typeof phoneCompleteAppSignIn>): ReturnType<typeof phoneCompleteAppSignIn> { return phoneCompleteAppSignIn(this, ...args); }
+  async disconnectWorkbenchApp(...args: PhoneArguments<typeof phoneDisconnectWorkbenchApp>): ReturnType<typeof phoneDisconnectWorkbenchApp> { return phoneDisconnectWorkbenchApp(this, ...args); }
+  async pairConnector(...args: PhoneArguments<typeof phonePairConnector>): ReturnType<typeof phonePairConnector> { return phonePairConnector(this, ...args); }
+  async armConnectorPairing(...args: PhoneArguments<typeof phoneArmConnectorPairing>): ReturnType<typeof phoneArmConnectorPairing> { return phoneArmConnectorPairing(this, ...args); }
+  async assertOwnedConnector(...args: PhoneArguments<typeof phoneAssertOwnedConnector>): ReturnType<typeof phoneAssertOwnedConnector> { return phoneAssertOwnedConnector(this, ...args); }
+  async unpairConnector(...args: PhoneArguments<typeof phoneUnpairConnector>): ReturnType<typeof phoneUnpairConnector> { return phoneUnpairConnector(this, ...args); }
+  async readConnectionDetail(...args: PhoneArguments<typeof phoneReadConnectionDetail>): ReturnType<typeof phoneReadConnectionDetail> { return phoneReadConnectionDetail(this, ...args); }
+  async revokeConnectionGrants(...args: PhoneArguments<typeof phoneRevokeConnectionGrants>): ReturnType<typeof phoneRevokeConnectionGrants> { return phoneRevokeConnectionGrants(this, ...args); }
+  async assertRoomIsWritable(...args: PhoneArguments<typeof phoneAssertRoomIsWritable>): ReturnType<typeof phoneAssertRoomIsWritable> { return phoneAssertRoomIsWritable(this, ...args); }
+  async requireRoomWorkspaceManager(...args: PhoneArguments<typeof phoneRequireRoomWorkspaceManager>): ReturnType<typeof phoneRequireRoomWorkspaceManager> { return phoneRequireRoomWorkspaceManager(this, ...args); }
+  async requireHumanRoomWorkspaceManager(...args: PhoneArguments<typeof phoneRequireHumanRoomWorkspaceManager>): ReturnType<typeof phoneRequireHumanRoomWorkspaceManager> { return phoneRequireHumanRoomWorkspaceManager(this, ...args); }
+  async requireTopLevelChatMember(...args: PhoneArguments<typeof phoneRequireTopLevelChatMember>): ReturnType<typeof phoneRequireTopLevelChatMember> { return phoneRequireTopLevelChatMember(this, ...args); }
+  async requireTopLevelRoom(...args: PhoneArguments<typeof phoneRequireTopLevelRoom>): ReturnType<typeof phoneRequireTopLevelRoom> { return phoneRequireTopLevelRoom(this, ...args); }
+  async requireWorkspaceManager(...args: PhoneArguments<typeof phoneRequireWorkspaceManager>): ReturnType<typeof phoneRequireWorkspaceManager> { return phoneRequireWorkspaceManager(this, ...args); }
+  async requireWorkspaceOwner(...args: PhoneArguments<typeof phoneRequireWorkspaceOwner>): ReturnType<typeof phoneRequireWorkspaceOwner> { return phoneRequireWorkspaceOwner(this, ...args); }
+  rosterSearchNeedle(...args: PhoneArguments<typeof phoneRosterSearchNeedle>): ReturnType<typeof phoneRosterSearchNeedle> { return phoneRosterSearchNeedle(this, ...args); }
+  async workspaceRoster(...args: PhoneArguments<typeof phoneWorkspaceRoster>): ReturnType<typeof phoneWorkspaceRoster> { return phoneWorkspaceRoster(this, ...args); }
+  projectWorkspaceAgents(...args: PhoneArguments<typeof phoneProjectWorkspaceAgents>): ReturnType<typeof phoneProjectWorkspaceAgents> { return phoneProjectWorkspaceAgents(this, ...args); }
+  async members(...args: PhoneArguments<typeof phoneMembers>): ReturnType<typeof phoneMembers> { return phoneMembers(this, ...args); }
+  projectMembers(...args: PhoneArguments<typeof phoneProjectMembers>): ReturnType<typeof phoneProjectMembers> { return phoneProjectMembers(this, ...args); }
+  async attachmentFacts(...args: PhoneArguments<typeof phoneAttachmentFacts>): ReturnType<typeof phoneAttachmentFacts> { return phoneAttachmentFacts(this, ...args); }
+  async enrichHistoryRows(...args: PhoneArguments<typeof phoneEnrichHistoryRows>): ReturnType<typeof phoneEnrichHistoryRows> { return phoneEnrichHistoryRows(this, ...args); }
+  async enrichMessageTags(...args: PhoneArguments<typeof phoneEnrichMessageTags>): ReturnType<typeof phoneEnrichMessageTags> { return phoneEnrichMessageTags(this, ...args); }
+  projectAgentTurns(...args: PhoneArguments<typeof phoneProjectAgentTurns>): ReturnType<typeof phoneProjectAgentTurns> { return phoneProjectAgentTurns(this, ...args); }
+  projectPendingAgentCommands(...args: PhoneArguments<typeof phoneProjectPendingAgentCommands>): ReturnType<typeof phoneProjectPendingAgentCommands> { return phoneProjectPendingAgentCommands(this, ...args); }
+  async enrichMessageBookmarks(...args: PhoneArguments<typeof phoneEnrichMessageBookmarks>): ReturnType<typeof phoneEnrichMessageBookmarks> { return phoneEnrichMessageBookmarks(this, ...args); }
+  projectRoomMessages(...args: PhoneArguments<typeof phoneProjectRoomMessages>): ReturnType<typeof phoneProjectRoomMessages> { return phoneProjectRoomMessages(this, ...args); }
 }
