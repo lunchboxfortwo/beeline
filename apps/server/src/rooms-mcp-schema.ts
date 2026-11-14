@@ -193,7 +193,8 @@ CREATE INDEX IF NOT EXISTS rooms_mcp_event_subscriptions_connection ON rooms_mcp
 -- Existing rows are mention subscriptions. Wake is a separate subscribable event.
 ALTER TABLE rooms_mcp_event_subscriptions ADD COLUMN IF NOT EXISTS event_name text NOT NULL DEFAULT 'mention';
 DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='rooms_mcp_event_subscriptions_event_name') THEN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='rooms_mcp_event_subscriptions_event_name'
+    AND conrelid='rooms_mcp_event_subscriptions'::regclass) THEN
     ALTER TABLE rooms_mcp_event_subscriptions ADD CONSTRAINT rooms_mcp_event_subscriptions_event_name
       CHECK (event_name IN ('mention','wake')) NOT VALID;
   END IF;
@@ -243,7 +244,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS rooms_mcp_event_deliveries_message
 CREATE UNIQUE INDEX IF NOT EXISTS rooms_mcp_event_deliveries_command
   ON rooms_mcp_event_deliveries(subscription_id,command_id) WHERE command_id IS NOT NULL;
 DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='rooms_mcp_event_deliveries_subject') THEN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='rooms_mcp_event_deliveries_subject'
+    AND conrelid='rooms_mcp_event_deliveries'::regclass) THEN
     ALTER TABLE rooms_mcp_event_deliveries ADD CONSTRAINT rooms_mcp_event_deliveries_subject
       CHECK ((message_id IS NOT NULL) <> (command_id IS NOT NULL)) NOT VALID;
   END IF;
