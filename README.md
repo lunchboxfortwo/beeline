@@ -28,4 +28,6 @@ Repository setup and optional context run through session tools; their errors re
 Saved answers survive reconnects and helper updates without another agent turn.
 An unavailable agent leaves its messages queued and shows “agent is offline · connect again”.
 
+Reply quotes preview at most two lines on phone and web/desktop; the reply’s own message text wraps in full. Viewer provenance stays on one line.
+
 Releases on squire use `npm run release` to publish current main to next and then latest. See the [release runbook](docs/release-pipeline.md#one-command-release-on-squire).
