@@ -25,7 +25,7 @@ it.each([[false, false], [false, true], [true, false], [true, true]])('ONE-SHAPE
   const uploaded = new Promise<object[]>(resolve => { releaseUpload = resolve; });
   const picked = { uri: 'file:///shot.png', name: 'shot.png', mimeType: 'image/png', size: 68, source: 'photo' };
   const attachment = { url: '/v1/media/11111111-1111-4111-8111-111111111111', name: picked.name, mimeType: picked.mimeType, size: picked.size };
-  const uploader = { uploadAll: vi.fn(() => uploaded) };
+  const uploader = { state: () => 'uploading', uploadAll: vi.fn(() => uploaded) };
   const compose = vi.fn(async () => event);
   const transport = { ensureClient: async () => ({}), composeMessage: compose, composeReplyMessage: compose };
   const outbox = { enqueue: vi.fn(async (_event: unknown, _row: unknown) => undefined), send: vi.fn(() => receipt), get: () => true };

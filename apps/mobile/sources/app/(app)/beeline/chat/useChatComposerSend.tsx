@@ -13,6 +13,7 @@ import { BuzzRigTransport } from '@/sync/transport';
 import { publishViewerConversation, removeViewerConversation } from '@/buzz/viewer-conversation';
 import { type RoomRepository } from '@beeline/buzz-client';
 import { type ChatDisplayMessage } from '@/buzz/room-view-presentation';
+import { yieldToNextPaint } from '@/buzz/host-scheduler';
 import { RoomSendPreview } from '@/buzz/room-send-list';
 import { mentionedAgentPubkey, resolveComposerMentions, selectedMentionAgentPubkey } from '@/buzz/room-participants';
 import { fallbackMemberName } from '@/buzz/member-display';
@@ -201,6 +202,11 @@ export function useChatComposerSend([
         } else {
           addMessages([provisional]);
           landAtOwnSend(provisionalId);
+          // Ready files need no preparation frame. Keep it for text, in-flight
+          // uploads and screenshots whose byte conversion can occupy this turn.
+          if (!activePendingAttachments.length || viewer?.screenshotBase64 ||
+              activePendingAttachments.some(attachment => attachmentUploader.state(attachment) !== 'uploaded'))
+            await yieldToNextPaint();
         }
       }
       // Repository guidance is optional; the agent must still receive the request.
