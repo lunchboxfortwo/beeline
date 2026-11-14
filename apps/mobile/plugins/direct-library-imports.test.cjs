@@ -38,7 +38,7 @@ test('unknown, namespace and side-effect imports preserve the package contract',
 
 test('voice SDK evaluation stays inside the original audio gesture', () => {
   const first = transformSync("import { Room, RoomEvent } from 'livekit-client'; export async function join() { const room = new Room(); room.startAudio(); return RoomEvent; }", {
-    configFile: false, babelrc: false, plugins: [plugin, '@babel/plugin-transform-modules-commonjs'],
+    configFile: false, babelrc: false, plugins: [plugin, require.resolve('@babel/plugin-transform-modules-commonjs')],
   }).code;
   const compiled = transformSync(first, {
     configFile: false, babelrc: false, plugins: [[require('metro-transform-plugins').inlineRequiresPlugin, { ignoredRequires: ['@tamagui/stacks', 'tamagui/sheet', 'livekit-client', 'posthog-react-native'] }]],
@@ -57,7 +57,7 @@ test('voice SDK evaluation stays inside the original audio gesture', () => {
 
 test('an unconfigured analytics client does not evaluate its SDK', () => {
   const first = transformSync("import PostHog, { PostHogProvider } from 'posthog-react-native'; export const client = configured ? new PostHog() : null; export function provider() { return PostHogProvider; }", {
-    configFile: false, babelrc: false, plugins: [plugin, '@babel/plugin-transform-modules-commonjs'],
+    configFile: false, babelrc: false, plugins: [plugin, require.resolve('@babel/plugin-transform-modules-commonjs')],
   }).code;
   const compiled = transformSync(first, {
     configFile: false, babelrc: false, plugins: [[require('metro-transform-plugins').inlineRequiresPlugin, { ignoredRequires: ['@tamagui/stacks', 'tamagui/sheet', 'livekit-client', 'posthog-react-native'] }]],
@@ -78,7 +78,7 @@ test('an unconfigured analytics client does not evaluate its SDK', () => {
 test('transforms JSX value references after TypeScript types are removed', () => {
   const result = transformSync("import { YStack } from 'tamagui'; type Props = { children?: string }; export const Screen = (props: Props) => <YStack>{props.children}</YStack>;", {
     configFile: false, babelrc: false, filename: 'screen.tsx',
-    plugins: [plugin, ['@babel/plugin-transform-typescript', { isTSX: true }], ['@babel/plugin-transform-react-jsx', { runtime: 'automatic' }]],
+    plugins: [plugin, [require.resolve('@babel/plugin-transform-typescript'), { isTSX: true }], [require.resolve('@babel/plugin-transform-react-jsx'), { runtime: 'automatic' }]],
   }).code;
   assert.match(result, /import \{ YStack \} from "@tamagui\/stacks"/);
   assert.doesNotMatch(result, /from ['"]tamagui['"]|type Props/);
