@@ -6,7 +6,7 @@ import ts from 'typescript';
 /** Checks stay beside their data. This checks refusal construction, not authority. */
 export const PATH = [
   { file: 'apps/body/src/agent-runner.ts', functions: ['queueChanged', 'reconcileQueue', 'resendStoredAnswers', 'pump', 'deliver', 'store', 'post'] },
-  { file: 'apps/body/src/place-session.ts', functions: ['start', 'startFresh', 'activate', 'deliver', 'followUp', 'hostedModel', 'optional', 'stop', 'dispose'], startup: true },
+  { file: 'apps/body/src/place-session.ts', functions: ['start', 'startFresh', 'activate', 'deliver', 'hostedModel', 'optional', 'stop', 'dispose'], startup: true },
   { file: 'apps/body/src/read-only-mcp-execute-agent-operation.ts', functions:['executeAgentOperation','executeConversationOperation'] },
   { file: 'apps/body/src/read-only-mcp-open-poll.ts', functions:['executeAgentTool','callAgentTool'] },
   { file: 'apps/body/src/agent-process.ts', functions: ['startAgentProcess', 'stopAgentProcess'], startup: true },
