@@ -134,7 +134,7 @@ export function TurnSettledLine({ line, testID, inset = true, leading = false, l
 }) {
   return (
     <TurnLineBar inset={inset} accessibilityLabel={line} accessibilityLiveRegion={leading ? 'polite' : undefined} testID={testID}>
-      <XStack height={multiline ? undefined : TURN_LINE_ROW_MIN_HEIGHT} minHeight={TURN_LINE_ROW_MIN_HEIGHT} minWidth={0}
+      <XStack height={multiline ? undefined : TURN_LINE_ROW_MIN_HEIGHT} minWidth={0}
         gap={action && !leadingGlyph ? '0' : '2'} alignItems={multiline ? "baseline" : "center"}>
         {leadingGlyph ? (
           <YStack testID={testID ? `${testID}-glyph` : undefined}><BeelineMarkSpinner /></YStack>
