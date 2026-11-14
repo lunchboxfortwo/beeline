@@ -12,7 +12,7 @@ import { threadDotTone, threadStatusText } from './thread-status';
  * it) and ⋯; the title, status, pull request and objective are the first
  * block of the transcript. Once that block scrolls away, the bar takes the
  * title with a status dot. A small scroll up, or a tap on that title, shows
- * the full header under the bar until the reader reaches the newest message.
+ * the full header under the bar until the reader scrolls down.
  * There is no driver line.
  */
 export type ThreadHeaderData = {

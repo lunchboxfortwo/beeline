@@ -9,17 +9,13 @@ type TranscriptPositions = {
     getSnapshot(): { metrics: { offset: number } | null; position: number | null };
 };
 
-/** Within this distance of the newest message, the reader is at the end of the transcript. */
-export const NEWEST_MESSAGE_SLOP = 50;
-
 /**
  * Whether the full header shows after the reader moved from `from` to `to`,
- * both distances from the newest message. A move toward older messages
- * shows it; reaching the newest message hides it; any other move keeps it.
+ * both coordinates increasing toward older messages. A move toward older messages
+ * shows it; a move toward newer messages hides it. Ignore rounding noise.
  */
 export function headerRevealAfterScroll(revealed: boolean, from: number | null, to: number): boolean {
-    if (to <= NEWEST_MESSAGE_SLOP) return false;
-    if (from !== null && to - from > 1) return true;
+    if (from !== null && Math.abs(to - from) > 1) return to > from;
     return revealed;
 }
 
@@ -39,6 +35,15 @@ export function useTitleBlockVisibility(enabled: boolean, positions?: Transcript
     const lastPosition = useRef<number | null>(null);
     const [collapsed, setCollapsed] = useState(false);
     const [revealed, setRevealed] = useState(false);
+    const collapsedRef = useRef(false);
+    const revealedRef = useRef(false);
+
+    // Scroll frames update refs; React only sees an actual visibility change.
+    const reveal = useCallback((shown: boolean) => {
+        if (shown === revealedRef.current) return;
+        revealedRef.current = shown;
+        setRevealed(shown);
+    }, []);
 
     const measure = useCallback(() => {
         if (!enabled) return;
@@ -46,11 +51,14 @@ export function useTitleBlockVisibility(enabled: boolean, positions?: Transcript
         block?.measureInWindow?.((_x, y, _width, height) => {
             if (!Number.isFinite(y) || !Number.isFinite(height)) return;
             const away = y + height <= barBottom.current;
-            setCollapsed(away);
+            if (away !== collapsedRef.current) {
+                collapsedRef.current = away;
+                setCollapsed(away);
+            }
             // Back in view, the block is the header again until the next scroll up.
-            if (!away) setRevealed(false);
+            if (!away) reveal(false);
         });
-    }, [enabled]);
+    }, [enabled, reveal]);
 
     const onBarLayout = useCallback(() => {
         const bar = barRef.current as unknown as Measurable | null;
@@ -63,8 +71,8 @@ export function useTitleBlockVisibility(enabled: boolean, positions?: Transcript
     const observeDistance = useCallback((distance: number) => {
         const from = lastDistance.current;
         lastDistance.current = distance;
-        setRevealed((shown) => headerRevealAfterScroll(shown, from, distance));
-    }, []);
+        reveal(collapsedRef.current && headerRevealAfterScroll(revealedRef.current, from, distance));
+    }, [reveal]);
 
     useEffect(() => {
         if (!enabled) return;
@@ -91,7 +99,9 @@ export function useTitleBlockVisibility(enabled: boolean, positions?: Transcript
                 // message at its foot; it does not feed the position store.
                 const node = event.target as HTMLElement | null;
                 if (!positions?.getSnapshot().metrics && node?.getAttribute?.('data-testid') === 'chat-messages')
-                    observeDistance(node.scrollHeight - node.scrollTop - node.clientHeight);
+                    // Only the offset carries direction. Revealing the header
+                    // resizes the viewport; history arrivals change content height.
+                    observeDistance(-node.scrollTop);
             };
             window.addEventListener('scroll', onWindowScroll, true);
             stops.push(() => window.removeEventListener('scroll', onWindowScroll, true));
@@ -99,7 +109,7 @@ export function useTitleBlockVisibility(enabled: boolean, positions?: Transcript
         return () => stops.forEach((stop) => stop());
     }, [enabled, measure, observeDistance, positions]);
 
-    const expand = useCallback(() => setRevealed(true), []);
+    const expand = useCallback(() => reveal(true), [reveal]);
 
     return {
         blockRef, barRef, onBlockLayout: measure, onBarLayout, expand,
