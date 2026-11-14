@@ -116,6 +116,10 @@ CREATE INDEX IF NOT EXISTS agent_commands_coalesced_into ON agent_commands(cance
 ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS created_offline boolean;
 ALTER TABLE agent_commands DROP CONSTRAINT IF EXISTS agent_commands_action_check;
 ALTER TABLE agent_commands ADD CONSTRAINT agent_commands_action_check CHECK(action IN ('input','resume','stop','restart'));
+CREATE INDEX IF NOT EXISTS agent_commands_parent_order ON agent_commands(parent_command_id)
+ WHERE reason='order' AND parent_command_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS agent_commands_pending_delivery ON agent_commands(agent_id,inbox_sequence,created_at,id)
+ WHERE state='pending';
 CREATE INDEX IF NOT EXISTS agent_commands_delivery ON agent_commands(agent_id,room_id,state,created_at);
 CREATE INDEX IF NOT EXISTS agent_commands_turn ON agent_commands(room_id,agent_id,turn_request_id);
 CREATE INDEX IF NOT EXISTS agent_commands_corner_opening ON agent_commands(room_id) WHERE reason='corner_objective';

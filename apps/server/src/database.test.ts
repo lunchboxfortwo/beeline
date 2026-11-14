@@ -407,7 +407,7 @@ describe('connection wait timeout diagnostics', () => {
       await expect(work).rejects.toThrow(failure.message);
       expect(warn).toHaveBeenCalledWith('[database] connection wait timeout', {
         pool: 'enrichment', total: 5, idle: 1, inUse: 4, waiting: 3, waitingAtCheckout: 3,
-      });
+      }, failure.stack); 
       expect(pool.connect).toHaveBeenCalledOnce();
     } finally { warn.mockRestore(); await database.close(); }
   });
