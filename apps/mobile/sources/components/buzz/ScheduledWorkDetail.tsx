@@ -1,6 +1,6 @@
 import { RoomListSectionHeader } from '@/components/buzz/RoomListSectionHeader';
 import React, { useState } from 'react';
-import { YStack, XStack } from 'tamagui';
+import { XStack } from 'tamagui';
 import { Square } from 'lucide-react-native';
 import { T, Btn, Glyph } from '@/ui/grammar';
 
@@ -37,7 +37,7 @@ export function StopScheduledWork({
   testID: string;
 }) {
   const [confirming, setConfirming] = useState(false);
-  return <YStack>
+  return <XStack gap="2" alignItems="center">
     <Btn kind="destructive" label={confirming ? `Confirm ${label.toLowerCase()}` : label}
       disabled={working} onPress={confirming ? onStop : () => setConfirming(true)}
       testID={confirming ? `${testID}-confirm` : testID}>
@@ -45,5 +45,5 @@ export function StopScheduledWork({
     </Btn>
     {confirming ? <Btn kind="quiet" label="Cancel" disabled={working}
       onPress={() => setConfirming(false)} testID={`${testID}-cancel`}>Cancel</Btn> : null}
-  </YStack>;
+  </XStack>;
 }

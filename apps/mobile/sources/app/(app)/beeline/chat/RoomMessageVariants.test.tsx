@@ -181,7 +181,7 @@ it.each([
   const props = ordinaryProps(), retry = vi.fn();
   act(() => { renderer = create(<OrdinaryLedgerMessage {...props} sendState={sendState} sendFailureIds={['pending']} onRetry={retry} />); });
   const line = vi.mocked(TurnSettledLine).mock.calls.at(-1)![0];
-  expect(line).toMatchObject({ line: sendState.text, inset: false, leadingGlyph: false, action: { label: 'Retry' } });
+  expect(line).toMatchObject({ line: sendState.text, inset: false, leadingGlyph: false, multiline: true, action: { label: 'Retry' } });
   line.action!.onPress(); expect(retry).toHaveBeenCalledWith(['pending']);
   expect(vi.mocked(LedgerSteer).mock.calls.at(-1)?.[0].pending).toBe(true);
 });

@@ -104,7 +104,10 @@ describe('person marks', () => {
   it('keeps agents as animals', async () => {
     const tree = await render(<IdentityMark kind="agent" seed="pk-alan" name="Alan" face="fox" />);
     expect(letters(tree)).toHaveLength(0);
-    expect(tree.root.findAll((node: any) => node.props.testID === 'face-figure').length).toBeGreaterThan(0);
+    expect(tree.root.find((node: any) => node.type === 'YStack' && node.props.testID === 'identity-face-plate').props.position).toBe('relative');
+    const figure = tree.root.find((node: any) => node.type === 'Svg' &&
+      node.findAll((child: any) => child.type === 'G' && child.props.testID === 'face-figure').length > 0);
+    expect(figure.findAll((node: any) => node.type === 'Rect' && node.props.width === 100 && node.props.height === 100)).toHaveLength(1);
   });
 });
 

@@ -30,12 +30,12 @@ export function useSharedSurface<T>(
   const [error, setError] = useState<string | null>(null);
   const reset = useSyncExternalStore(subscribeClientReset, clientResetGeneration);
   const paramsKey = JSON.stringify(params ?? {});
-  const addressKey = JSON.stringify([endpoint, paramsKey, reset, enabled]);
+  // Focus controls reads, not the identity of the retained server answer.
+  const addressKey = JSON.stringify([endpoint, paramsKey, reset]);
   const address = resolved?.key === addressKey ? resolved.address : null;
 
   useEffect(() => {
     let cancelled = false;
-    setResolved(null);
     if (!enabled) { setLoading(false); return () => { cancelled = true; }; }
     setLoading(true);
     void Promise.all([loadBuzzIdentity(), getEffectiveRelayUrl()]).then(([identity, relay]) => {
@@ -48,7 +48,7 @@ export function useSharedSurface<T>(
   const value = useSurfaceSnapshot(address, guard);
 
   const refresh = useCallback(async () => {
-    if (!address) return null;
+    if (!enabled || !address) return null;
     try {
       const next = await mobileSurfaceCache.fetch(address, guard, request);
       setError(null);
@@ -59,7 +59,7 @@ export function useSharedSurface<T>(
     } finally {
       setLoading(false);
     }
-  }, [address, guard, request]);
+  }, [enabled, address, guard, request]);
 
   useEffect(() => {
     if (!address) return;
@@ -74,7 +74,7 @@ export function useSharedSurface<T>(
 
   useFocusEffect(useCallback(() => {
     if (address) void refresh();
-  }, [address, refresh]));
+  }, [enabled, address, refresh]));
 
   return { value, address, loading, error, setError, refresh };
 }
@@ -90,7 +90,7 @@ export function useFreshWorkbenchSurface<T>(
   const resource = useSharedSurface(endpoint, params, guard, request, enabled);
   const { address, refresh } = resource;
   useFocusEffect(useCallback(() => {
-    if (!address) return;
+    if (!enabled || !address) return;
     let cancelled = false;
     let stop: (() => void) | undefined;
     void sharedLiveConnection().register([], (event) => {
@@ -102,6 +102,6 @@ export function useFreshWorkbenchSurface<T>(
         void refresh();
     }).then((unregister) => { if (cancelled) unregister(); else stop = unregister; }, () => undefined);
     return () => { cancelled = true; stop?.(); };
-  }, [address, refresh]));
+  }, [enabled, address, refresh]));
   return resource;
 }
