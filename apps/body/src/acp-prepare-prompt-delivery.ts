@@ -157,7 +157,7 @@ import { AcpClient, isPiAcpHarness, flattenHarnessCause, AcpRuntimeExitedError, 
     if (!sessionId) throw new Error('session/new missing sessionId');
     if (/(^|[/\\])pi-acp(\.[a-z]+)?$/i.test(ctx.agentLabel) && opts.systemPrompt)
       ctx.piSessionInstructions.remember(sessionId, opts.systemPrompt);
-    await ctx.applySessionMode(sessionId, raw, opts.mode);
+    if (!ctx.osSandbox) await ctx.applySessionMode(sessionId, raw, opts.mode);
     if (ctx.codexBlockDelivery)
       ctx.promptDeliveries.set(sessionId, new CodexPromptDelivery(isPiAcpHarness(ctx.agentLabel) ? undefined : opts.systemPrompt));
     return { sessionId, raw };
@@ -194,7 +194,7 @@ import { AcpClient, isPiAcpHarness, flattenHarnessCause, AcpRuntimeExitedError, 
     ctx.promptDeliveries.delete(opts.sessionId);
     const result = await ctx.request('session/load', params);
     const raw = result && typeof result === 'object' ? (result as Record<string, unknown>) : {};
-    await ctx.applySessionMode(opts.sessionId, raw, opts.mode);
+    if (!ctx.osSandbox) await ctx.applySessionMode(opts.sessionId, raw, opts.mode);
     if (ctx.codexBlockDelivery)
       ctx.promptDeliveries.set(opts.sessionId, new CodexPromptDelivery());
     return { sessionId: opts.sessionId, raw };

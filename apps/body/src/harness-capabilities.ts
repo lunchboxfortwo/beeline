@@ -3,8 +3,8 @@
  * adapters, not assumed from the protocol.
  *
  * Beeline's Room read-only callback and its corner hygiene-denylist callback
- * live in `session-sandbox.ts`. A corner also selects each adapter's no-prompt
- * autonomy mode; bubblewrap supplies the filesystem mount policy underneath.
+ * live in `session-sandbox.ts`. Sandboxed sessions retain the adapter's native
+ * defaults; bubblewrap supplies the filesystem mount policy underneath.
  * The callback only binds a harness that *asks*. Two adapters do; one does not:
  *
  *   - `codex-acp` (@agentclientprotocol/codex-acp): routes every command
@@ -14,18 +14,14 @@
  *     (`sandboxPolicy: { type: 'readOnly', networkAccess: false }`). That mode
  *     is offline as well as read-only, so Beeline selects it for a Room ONLY
  *     when the daemon's own OS sandbox is not wrapping the child. Under
- *     bubblewrap a Room selects `agent-full-access` exactly like a corner —
- *     Codex stops asking and has network — and the read-only filesystem rule
- *     is held by bwrap (checkout mounted read-only, private /tmp, harness
- *     state the only writable roots), which is how claude/pi Rooms are already
- *     held. See `roomModeCandidates`. Corners always select
- *     `agent-full-access` (`cornerAutonomyModeCandidates`).
+ *     bubblewrap, the namespace and permission callback own the boundary;
+ *     startup sends no native mode-selection RPC. See `roomModeCandidates`.
  *   - `claude-agent-acp` (@agentclientprotocol/claude-agent-acp): routes every
  *     tool through the SDK's `canUseTool` -> `session/request_permission`. It
  *     advertises no read-only mode, so a Room stays in `default`, which asks —
  *     our handler approves its mounted MCP calls and, while bwrap wraps the
  *     session, the `execute`-kind shell it requests, and denies native reads and
- *     writes. Corners select its ACP `bypassPermissions` mode. No built-in OS
+ *     writes. Unwrapped edit sessions select ACP `bypassPermissions`. No built-in OS
  *     sandbox; Room enforcement is the daemon callback plus bubblewrap.
  *   - `pi-acp` (pi-acp, driving @earendil-works/pi-coding-agent): **never** calls
  *     `requestPermission` for a tool. Its only permission requests are pi's own

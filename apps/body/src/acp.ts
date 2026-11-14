@@ -217,10 +217,9 @@ export class AcpClient extends EventEmitter {
     agentLabel?: string;
     /**
      * The child is wrapped in the daemon's OS sandbox (`bwrap-sandbox.ts`), so
-     * the filesystem rule is held by the kernel and a `readonly` session may
-     * select a harness mode that does not itself cut the network
-     * (`roomModeCandidates`). Defaults to false: an unwrapped child keeps the
-     * harness's own read-only mode.
+     * the filesystem rule is held by the kernel. Such sessions keep their
+     * advertised mode and do not wait for a native mode switch. Defaults to
+     * false: an unwrapped child keeps the harness's own read-only mode.
      */
     osSandbox?: boolean;
     agentEnv: Record<string, string>;
