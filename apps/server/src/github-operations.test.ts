@@ -19,6 +19,27 @@ function checkStatusLine(lifecycle: unknown): string | undefined {
 describe('GitHub phone operations', () => {
 const scope1 = fixtureScope1();
 
+  it.each(['checks event', 'mergeability', 'explicit read'])(
+    'RUBY-GITHUB-404: retires a missing PR on %s and stops later refreshes', async path => {
+      const { corners, app, payload } = await scope1.checksFixture();
+      const corner = corners[0]!;
+      app.readPullRequest.mockRejectedValue(new GitHubHttpError('GitHub pull request', 404));
+      const operations = new GitHubOperations(scope1.database, {} as GitHubOAuthClient,
+        app as unknown as GitHubAppClient, 'secret');
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        if (path === 'checks event') await operations.processWebhook('check_run', payload);
+        else if (path === 'mergeability') await operations.refreshStaleMergeability(corner);
+        else await expect(operations.prChecksStatus({ cornerId: corner })).rejects.toThrow('the corner has no pull request');
+        expect((await operations.lifecycle(corner)).pr).toBeUndefined();
+        await operations.processWebhook('check_run', payload);
+        await operations.refreshStaleMergeability(corner);
+        expect(app.readPullRequest).toHaveBeenCalledOnce();
+        expect(warn).toHaveBeenCalledOnce();
+      } finally { warn.mockRestore(); }
+    });
+
+
 
   it.each(['parent Room', 'corner override'] as const)(
     'REVIEW-DISPATCH-BOUNDARY: green checks wake the %s reviewer exactly once inside the corner', async assignment => {
