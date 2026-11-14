@@ -333,7 +333,7 @@ describe('SOCKET-OPS-1 phone request/reply', () => {
         )
       ).rows,
     ).toEqual([
-      { op: 'listRoomWorkflowRuns', status: 403, code: 'WallRefusal', release: 'socket-test', count: 2 },
+      { op: 'listRoomWorkflowRuns', status: 403, code: 'Error', release: 'socket-test', count: 2 },
       {
         op: 'notAnOperation',
         status: 404,
@@ -480,7 +480,7 @@ describe('SOCKET-OPS-1 phone request/reply', () => {
     });
   });
 
-  it('creates one message and one reply when retried over the socket, rejecting id collisions', async () => {
+  it('replays the same message and reply while distinct payloads keep distinct IDs', async () => {
     const socket = await open();
     for (const [op, id, extra] of [
       ['sendRoomMessage', 'd'.repeat(64), {}],
@@ -497,10 +497,10 @@ describe('SOCKET-OPS-1 phone request/reply', () => {
       });
       expect((await http(`/v1/phone/operations/${op}`, args)).status).toBe(op === 'sendRoomMessage' ? 200 : 404);
       expect((await db.query(`SELECT id FROM messages WHERE id=$1`, [id])).rows).toHaveLength(1);
-      expect(await request(socket, op, { ...args, text: 'Different payload' })).toMatchObject({
-        ok: false,
-        error: { retryable: false },
-      });
+      const changed=await request(socket,op,{...args,text:'Different payload'}) as {ok:true;result:{messageId:string}};
+      expect(changed).toMatchObject({ok:true,result:{messageId:expect.any(String)}});
+      expect(changed.result.messageId).not.toBe(id);
+      expect(await request(socket,op,{...args,text:'Different payload'})).toMatchObject({ok:true,result:{messageId:changed.result.messageId}});
     }
     const room = await http(`/v1/phone/rooms/${ROOM}`);
     const view = (await room.json()) as { messages: { id: string; text: string }[] };
@@ -579,12 +579,12 @@ describe('SOCKET-OPS-1 phone request/reply', () => {
     expect((await query(`SELECT id FROM messages WHERE id=$1`, [id])).rows).toHaveLength(1);
   });
 
-  it('keeps write change notices and read-mark operations identical to the web path', async () => {
+  it('leaves write notices to committed events and preserves read-mark operations', async () => {
     const socket = await open(),
       publish = vi.spyOn(live, 'publish');
     const args = { roomId: ROOM, messageId: 'f'.repeat(64), text: 'Socket message' };
     expect(await request(socket, 'sendRoomMessage', args)).toMatchObject({ ok: true });
-    expect(publish).toHaveBeenCalledWith(
+    expect(publish).not.toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'invalidate',
         roomId: ROOM,

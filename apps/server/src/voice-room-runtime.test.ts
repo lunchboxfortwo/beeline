@@ -500,7 +500,7 @@ it('Reproduction voice-lost-1 stand-in: mixed request dispatch and failure follo
     expect(command).toHaveLength(1);
     expect((await db.query<{text:string}>(`SELECT text FROM messages WHERE id=$1`, [command[0]!.source_message_id])).rows[0]!.text).toBe('@ruby ' + request);
     await startQueuedTurn(db, room, agent, command[0]!.id);
-    await new DaemonService(db, live).execute('postRoomMessage', { roomId: room, requestId: command[0]!.source_message_id, text: failure }, agent);
+    await new DaemonService(db, live).execute('postRoomMessage', { roomId: room, requestId: command[0]!.id, text: failure }, agent);
     const phone = new PhoneService(db, 'http://proof');
     const replies = (await phone.readRoom(room, human))!.messages.filter(message => message.author.pubkey === agent && message.presentation === 'message');
     expect(replies.map(reply => reply.text)).toEqual(['Checking. I’ll tell you when I have it.', failure]);

@@ -4,19 +4,19 @@ import {
 } from './test-support-corner-review-dispatch.test-support.js';
 
 describe('revision 4 simple corner review model', () => {
-  it('Reproduction REVIEW-EMPTY: ends an empty green review once silently without retry', async () => {
+  it('Reproduction REVIEW-EMPTY: keeps an unanswered green review queued without appending a retry', async () => {
     await rootFixture.phone.execute('updateRoom', {roomId:R,reviewerAgentId:B},H);
     await greenHead(104,'4'.repeat(40));
     const [first] = await commands(B,C);
     await claim(first!);
     await rootFixture.daemon.execute('postAgentTurnReceipt', { roomId:C, requestId:first!.turnRequestId, status:'complete' },B);
     for(let replay=0;replay<3;replay++) await reconcileConfiguredCornerReviewers(rootFixture.db,R);
-    expect(await commands(B,C)).toEqual([]);
+    expect((await commands(B,C)).map(item=>item.id)).toEqual([first!.id]);
     const lines = (await rootFixture.db.query<{text:string}>(
       `SELECT text FROM messages WHERE room_id=$1`,[C])).rows;
     expect(lines.some(line=>line.text.includes('reviewer gave no verdict'))).toBe(false);
     expect((await rootFixture.db.query('SELECT status FROM agent_turns WHERE request_id=$1',[first!.turnRequestId])).rows)
-      .toEqual([{status:'complete'}]);
+      .toEqual([{status:'working'}]);
     expect((await rootFixture.db.query(`SELECT id FROM agent_commands WHERE room_id=$1 AND agent_id=$2
       AND reason='corner_review_dispatch'`,[C,B])).rowCount).toBe(1);
   });

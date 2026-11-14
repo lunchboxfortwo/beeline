@@ -76,6 +76,9 @@ describe('solo-agent-untagged-silence', () => {
     const client={id:'send-proof',name:'Proof client'};
     const first=await phone.execute(operation,input,HUMAN,client);
     expect(await phone.execute(operation,input,HUMAN,client)).toEqual(first);
+    const version=(await db.query('SELECT version FROM messages WHERE id=$1',[MESSAGE])).rows[0]?.version;
+    await phone.execute(operation,input,HUMAN,client);
+    expect((await db.query('SELECT version FROM messages WHERE id=$1',[MESSAGE])).rows[0]?.version).toBe(version);
     expect((await db.query(`SELECT id FROM messages WHERE id=$1`,[MESSAGE])).rows).toHaveLength(1);
     expect((await db.query(`SELECT id FROM agent_commands WHERE source_message_id=$1`,[MESSAGE])).rows).toHaveLength(1);
     expect((await db.query(`SELECT message_id FROM rooms_mcp_webhook_outbox WHERE message_id=$1`,[MESSAGE])).rows).toHaveLength(0);
@@ -87,6 +90,8 @@ describe('solo-agent-untagged-silence', () => {
     expect(distinct.messageId).not.toBe(first.messageId);
     expect((await db.query('SELECT text FROM messages WHERE id=$1',[distinct.messageId])).rows).toEqual([{text:'Different content'}]);
     expect((await db.query(`SELECT text FROM messages WHERE id=$1`,[MESSAGE])).rows).toEqual([{text:'Please review'}]);
+    await new DaemonService(db,new LiveHub()).execute('postRoomMessage',{roomId:ROOM,requestId:first.pendingAgentCommands![0]!.requestId,text:'The answer.'},AGENT);
+    expect((await phone.execute(operation,input,HUMAN,client)).pendingAgentCommands).toEqual([]);
   });
 
   it.each(['sendRoomMessage','sendRoomReply'] as const)('%s rolls back source, read mark and callback if routing fails',async operation=>{

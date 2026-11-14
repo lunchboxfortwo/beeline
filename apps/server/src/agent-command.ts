@@ -575,10 +575,11 @@ async function postMessage(db: SqlDatabase, input: QueuedPost, chat: Chat): Prom
     `INSERT INTO messages(id,room_id,author_id,text,attachments,source_client,presentation,request_id,card,reply_to_message_id,root_message_id,legacy_event)
      SELECT $1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8,$9::jsonb,parent.id,COALESCE(parent.root_message_id,parent.id),$11::jsonb
      FROM (SELECT 1) source LEFT JOIN messages parent ON parent.id=$10 AND parent.room_id=$2 AND parent.deleted_at IS NULL
-     ON CONFLICT(id) DO UPDATE SET id=messages.id RETURNING id,created_at`,
+     ON CONFLICT(id) DO NOTHING RETURNING id,created_at`,
     [id, chat.id, input.authorId, input.text, attachments, input.sourceClient ? json(input.sourceClient) : author?.client_id ? json({id:author.client_id,name:author.client_name}) : null,
       input.presentation ?? 'message', input.requestId ?? null, input.card ? json(input.card) : null, input.replyTo ?? null, input.tags ? json(input.tags) : null],
-  )).rows[0]!;
+  )).rows[0] ?? (await db.query<{ id:string; created_at:Date }>(
+    'SELECT id,created_at FROM messages WHERE id=$1',[id])).rows[0]!;
   // A reply tool records the committed answer for this request. Progress in
   // another place and private agent reports do not spend its return obligation.
   if (input.requestId && input.text.trim() && input.presentation !== 'card') await db.query(
@@ -597,7 +598,8 @@ async function postMessage(db: SqlDatabase, input: QueuedPost, chat: Chat): Prom
   if (human) await db.query(
     `INSERT INTO room_read_marks(room_id,identity_id,message_created_at,message_id,updated_at)
      VALUES($1,$2,$3,$4,'epoch'::timestamptz) ON CONFLICT(room_id,identity_id) DO UPDATE SET
-       message_created_at=EXCLUDED.message_created_at,message_id=EXCLUDED.message_id`,
+       message_created_at=EXCLUDED.message_created_at,message_id=EXCLUDED.message_id
+       WHERE (EXCLUDED.message_created_at,EXCLUDED.message_id)>(room_read_marks.message_created_at,room_read_marks.message_id)`,
     [chat.id, input.authorId, saved.created_at, id]);
   const handles = [...typedMentionHandles(input.text)];
   const stops = human ? chat.members.filter(member => member.kind === 'agent' &&
@@ -610,7 +612,7 @@ async function postMessage(db: SqlDatabase, input: QueuedPost, chat: Chat): Prom
   const channel = handles.some(isChannelMentionToken);
   const explicit = chat.members.filter(member => channel || handles.some(handle => member.handle?.toLowerCase() === handle.toLowerCase()));
   const agents = chat.members.filter(member => member.kind === 'agent');
-  const solo = !chat.parent_id && chat.members.filter(member => member.kind === 'human').length === 1 &&
+  const solo = !chat.direct && !chat.parent_id && chat.members.filter(member => member.kind === 'human').length === 1 &&
     (agents.length === 1 ? agents[0] : agents.length === 2 && agents.some(member => member.starter === 'luna')
       ? agents.find(member => member.starter === 'beebee') : undefined);
   const targets = input.presentation === 'card' || stops.length ? [] : input.agentIds ? chat.members.filter(member => input.agentIds!.includes(member.id)) : [...new Map([

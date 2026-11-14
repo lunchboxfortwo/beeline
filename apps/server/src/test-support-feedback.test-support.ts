@@ -182,6 +182,7 @@ export async function triageTurn(roomId = TRIAGE_CORNER, agentId = TRIAGE) {
 
 
 export async function items() {
+  await database.backgroundWork.drain();
   return (
     await database.query<{
       id: string;

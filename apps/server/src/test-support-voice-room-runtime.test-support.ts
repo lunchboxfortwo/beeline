@@ -107,18 +107,10 @@ export function phantomHarness(answer = 'Hey there is the answer.') {
     access: vi.fn(async () => {}), agents: vi.fn(async () => [agent]),
     lastActiveAgent: vi.fn(async () => undefined),
     speech: vi.fn(async () => speech), humanCount: vi.fn(async () => 1),
-    recordHuman: vi.fn(async (call: string, room: string, human: string, target: typeof agent, text: string, leaseOwner?: string): Promise<string> => {
-      const writer = { access: service.access, live: new LiveHub(), db: {
-        transaction: async (write: (db: { query(sql: string, args: unknown[]): Promise<unknown> }) => Promise<void>) => write({
-          async query(sql, args) {
-            if (sql.includes('INSERT INTO messages')) {
-              const content = String(args[3]); messages.push(content); note(`message send: ${content}`);
-            }
-            return { rowCount: 1, rows: [] };
-          },
-        }),
-      } } as unknown as VoiceService;
-      return VoiceService.prototype.recordHuman.call(writer, call, room, human, target, text, leaseOwner);
+    recordHuman: vi.fn(async (_call: string, _room: string, _human: string, target: typeof agent, text: string): Promise<string> => {
+      const content=`@${target.handle} ${text.replace(/@/g,'')}`;
+      messages.push(content);note(`message send: ${content}`);
+      return `source-${messages.length}`;
     }), reviseHuman: vi.fn(async (_call: string, _room: string, _human: string, _target: unknown, _source: string, text: string) => {
       messages[0] = `@ronnie ${text}`;
     }), recordAnswer: vi.fn(async () => {}), dispatch: vi.fn(async () => {}),

@@ -212,7 +212,7 @@ it('SENTRY-7807034373: schedule HTTP refusals stay visible without Sentry events
       await db.query("INSERT INTO identities(id,kind,name) VALUES($1,'agent','Worker')", [agent]);
       await db.query("INSERT INTO workspaces(id,name) VALUES($1,'Test')", [workspace]);
       await db.query("INSERT INTO rooms(id,workspace_id,created_by,name) VALUES($1,$2,$3,'Test')", [room,workspace,agent]);
-      await db.query("INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$3,'member'),($1,$2,$3,'member'),($1,NULL,$4,'owner'),($1,$2,$4,'owner')", [workspace,room,agent,human]);
+      await db.query("INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')", [workspace,room,agent]);
       const live = new LiveHub();
       const daemon = new DaemonService(db, live);
       const server = createBeelineServer({ database: db, live, daemon, phone: {},

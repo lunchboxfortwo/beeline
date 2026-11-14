@@ -151,13 +151,17 @@ import { Input,Output } from './types.js';
       authorId: author, text: input.text, id: input.messageId, attachments: input.attachments,
       replyTo: 'parentMessageId' in input ? input.parentMessageId : undefined, sourceClient,
     });
-    if (input.text.includes('@')) void recordSystemReportMention(ctx.database, {
-      roomId: input.roomId, messageId: saved.id, authorId: author, text: input.text,
-      ...(familyId ? { familyId } : {}),
-    }).catch(error => console.warn('[message] feedback observation failed', error));
+    if (input.text.includes('@')) {
+      const observe = async () => { await recordSystemReportMention(ctx.database, {
+        roomId: input.roomId, messageId: saved.id, authorId: author, text: input.text,
+        ...(familyId ? { familyId } : {}),
+      }).catch(error => console.warn('[message] feedback observation failed', error)); };
+      const background=CornerAccessDatabase.physical(ctx.database).backgroundWork;
+      if (background) background.run(observe); else void observe();
+    }
     const receipt = await ctx.receiptMessage(input.roomId, author, saved.id, ctx.database)
       .catch(error => { console.warn('[message] receipt enrichment omitted:', error); return {}; });
-    return { ...receipt, messageId: saved.id, pendingAgentCommands: saved.commands.map(command => ({
+    return { ...receipt, messageId: saved.id, pendingAgentCommands: saved.commands.filter(command => command.state === 'pending').map(command => ({
       requestId: command.turn_request_id, agentPubkey: command.agent_id,
       createdAt: Math.floor(new Date(command.created_at).getTime() / 1000),
     })) };
