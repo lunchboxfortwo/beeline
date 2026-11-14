@@ -17,20 +17,6 @@ import { type ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { type UseRoomSurfaceSessionResult } from './useRoomSurfaceSession';
 
 describe('reopening a dismissed Room', () => {
-  it('uses the restored viewer clients on the first render without replacing them during hydration', async () => {
-    controls.hotViewer = true;
-    let session!: UseRoomSurfaceSessionResult;
-    let renderer!: ReactTestRenderer;
-    act(() => { renderer = create(React.createElement(Harness, { channelId: 'room-a', capture: value => { session = value; } })); });
-    const initialTransport = session.transport, initialClient = session.roomClient;
-    expect(initialTransport).not.toBeNull();
-    expect(initialClient).not.toBeNull();
-    await flushEffects();
-    expect(session.transport).toBe(initialTransport);
-    expect(session.roomClient).toBe(initialClient);
-    expect(controls.transportCount).toBe(1);
-    await act(async () => renderer.unmount());
-  });
 const scope1 = fixtureScope1();
 
 

@@ -171,7 +171,9 @@ export function useChatComposerSend([
       // transport startup and outbox persistence can all take longer than a
       // frame on a cold Android device.
       // Each viewport inserts its provisional row before preparation.
-      const provisionalId = `pending:${Date.now()}:${Math.random()}`;
+      const filesReady = activePendingAttachments.length > 0 && !viewer?.screenshotBase64 &&
+        activePendingAttachments.every(attachment => attachmentUploader.state(attachment) === 'uploaded');
+      const provisionalId = filesReady ? null : `pending:${Date.now()}:${Math.random()}`;
       if (provisionalId) {
         const provisional = {
           id: provisionalId,
@@ -202,11 +204,7 @@ export function useChatComposerSend([
         } else {
           addMessages([provisional]);
           landAtOwnSend(provisionalId);
-          // Ready files need no preparation frame. Keep it for text, in-flight
-          // uploads and screenshots whose byte conversion can occupy this turn.
-          if (!activePendingAttachments.length || viewer?.screenshotBase64 ||
-              activePendingAttachments.some(attachment => attachmentUploader.state(attachment) !== 'uploaded'))
-            await yieldToNextPaint();
+          await yieldToNextPaint();
         }
       }
       // Repository guidance is optional; the agent must still receive the request.

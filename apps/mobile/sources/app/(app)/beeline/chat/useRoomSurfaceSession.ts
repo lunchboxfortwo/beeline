@@ -287,18 +287,8 @@ export function useRoomSurfaceSession({
   useEffect(() => {
     if (openingCache) queueNewestFrameMark(openingCache.view.messages.at(-1)?.id, channelId);
   }, [openingCache]);
-  const [openingClients] = useState(() => {
-    if (!openingViewer) return null;
-    const identity = { publicKey: openingViewer.viewerPubkey, secretKey: new Uint8Array() };
-    return {
-      viewerPubkey: identity.publicKey,
-      relayUrl: openingViewer.relayUrl,
-      transport: new BuzzRigTransport(identity),
-      roomClient: new RoomViewClient({ baseUrl: openingViewer.relayUrl, identity }),
-    };
-  });
-  const [transport, setTransport] = useState<BuzzRigTransport | null>(openingClients?.transport ?? null);
-  const [roomClient, setRoomClient] = useState<RoomViewClient | null>(openingClients?.roomClient ?? null);
+  const [transport, setTransport] = useState<BuzzRigTransport | null>(null);
+  const [roomClient, setRoomClient] = useState<RoomViewClient | null>(null);
   const [roomSurface, setRoomSurface] = useState<RoomView | null>(openingCache?.view ?? null);
   const scheduleCacheWriteRef = useRef<(() => void) | undefined>(undefined);
   const [identityRecordScope, setIdentityRecordScope] = useState<string | null>(openingCache?.scope ?? openingScope);
@@ -574,7 +564,7 @@ export function useRoomSurfaceSession({
   const sessionActivated = isFocused || sessionStartedRef.current;
   useRoomSurfaceSubscription([
     liveDraftDrainStore, channelId, sessionActivated, isCornerRef, setFirstUnreadMessageId, isFocusedRef,
-    sessionStartedRef, openingCache, openingClients, agentPresencesRef, reconnectGraceRef, setAgentPresences,
+    sessionStartedRef, openingCache, agentPresencesRef, reconnectGraceRef, setAgentPresences,
     setPresenceReconnectGrace, setPresenceResolved, liveOverlaysRef, setLiveOverlays,
     reconciledViewRef, setFailedIds, setOutboxStates, setHydrationFailed, setHydrationError,
     bindingsRef, applyAgentPresence, readCursorRef, messageRecordScopeRef, setRoomSurface,

@@ -1,6 +1,6 @@
 import type { MessageSendState } from '@/buzz/message-outbox';
 import { appReadErrorCopy } from '@/buzz/app-error-copy';
-import { useEffect, type MutableRefObject } from 'react';
+import { startTransition, useEffect, type MutableRefObject } from 'react';
 import { AppState } from 'react-native';
 import { router } from 'expo-router';
 import { KIND_AGENT_DRAFT, LiveOverlayDecoder, isRoomView, type LiveOverlay, type RoomView, type RoomViewMessage } from '@beeline/buzz-client';
@@ -31,7 +31,6 @@ type Props = [
   isFocusedRef: import("react/index").RefObject<boolean>,
   sessionStartedRef: import("react/index").RefObject<boolean>,
   openingCache: { view: RoomView; scope: string; relayUrl: string; viewerPubkey: string; } | null,
-  openingClients: { viewerPubkey: string; relayUrl: string; transport: BuzzRigTransport; roomClient: RoomViewClient } | null,
   agentPresencesRef: import("react/index").RefObject<Record<string, RoomAgentPresence>>,
   reconnectGraceRef: import("react/index").RefObject<Record<string, number>>,
   setAgentPresences: import("react/index").Dispatch<import("react/index").SetStateAction<Record<string, RoomAgentPresence>>>,
@@ -66,7 +65,7 @@ type Props = [
 export function useRoomSurfaceSubscription([
   liveDraftDrainStore,
   channelId, sessionActivated, isCornerRef, setFirstUnreadMessageId, isFocusedRef,
-  sessionStartedRef, openingCache, openingClients, agentPresencesRef, reconnectGraceRef, setAgentPresences,
+  sessionStartedRef, openingCache, agentPresencesRef, reconnectGraceRef, setAgentPresences,
   setPresenceReconnectGrace, setPresenceResolved, liveOverlaysRef, setLiveOverlays,
   reconciledViewRef, setFailedIds, setOutboxStates, setHydrationFailed, setHydrationError,
   bindingsRef, applyAgentPresence, readCursorRef, messageRecordScopeRef, setRoomSurface,
@@ -599,9 +598,8 @@ export function useRoomSurfaceSubscription([
         }
         if (cancelled) return;
 
-        const clients = openingClients?.viewerPubkey === identity.publicKey && openingClients.relayUrl === relayUrl ? openingClients : null;
-        const nextTransport = clients?.transport ?? new BuzzRigTransport(identity);
-        const nextRoomClient = clients?.roomClient ?? new RoomViewClient({
+        const nextTransport = new BuzzRigTransport(identity);
+        const nextRoomClient = new RoomViewClient({
           baseUrl: relayUrl,
           identity,
           onPhysicalRequest: ({ method, path }) => {
@@ -614,8 +612,10 @@ export function useRoomSurfaceSubscription([
         outboxRef.current = outbox;
         await outbox.restore();
         if (cancelled) return;
-        setTransport(nextTransport);
-        setRoomClient(nextRoomClient);
+        startTransition(() => {
+          setTransport(nextTransport);
+          setRoomClient(nextRoomClient);
+        });
         const restored = outbox
           .list()
           .map((record) => displayRoomMessages([record.row], identity.publicKey)[0]!);
