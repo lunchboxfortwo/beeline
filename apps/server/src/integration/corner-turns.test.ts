@@ -15,7 +15,7 @@ const fixture = monolithFixture();
     const messageId = createHash('sha256').update('retired-tool-source').digest('hex');
     await fixture.database.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'@bee do this')`, [messageId, ROOM, HUMAN]);
     const command = (await createAgentCommand(fixture.database, {
-      roomId: ROOM, agentId: AGENT, sourceMessageId: messageId, reason: 'human_tag', turnRequestId: 'retired-tool',
+      roomId: ROOM, agentId: AGENT, sourceMessageId: messageId, reason: 'human_tag', id: 'retired-tool',
     }))!;
     await startQueuedTurn(fixture.database, ROOM, AGENT, command.id);
     const turn = { roomId: ROOM, requestId: 'retired-tool' };
@@ -34,7 +34,7 @@ const fixture = monolithFixture();
     const empty = await fixture.request('/v1/daemon/operations/report', 'POST', { ...turn, text: 'blocked:' }, fixture.daemonToken);
     expect(empty.status).toBe(400);
     const privateOrder = (await createAgentCommand(fixture.database, {
-      roomId: ROOM, agentId: AGENT, sourceMessageId: null, reason: 'order', turnRequestId: 'retired-private',
+      roomId: ROOM, agentId: AGENT, sourceMessageId: null, reason: 'order', id: 'retired-private',
       privatePayload: { kind: 'order', authorId: HUMAN, fromRoomId: ROOM, text: 'Do the private work' },
     }))!;
     await startQueuedTurn(fixture.database, ROOM, AGENT, privateOrder.id);
@@ -68,7 +68,7 @@ const fixture = monolithFixture();
         agentId: AGENT,
         sourceMessageId: messageId,
         reason: 'human_tag',
-        turnRequestId: requestId,
+        id: requestId,
       });
       await startQueuedTurn(fixture.database, roomId, AGENT, command!.id);
       return { roomId, requestId, messageId };
@@ -433,7 +433,7 @@ const fixture = monolithFixture();
         roomId: corner,
         agentId: AGENT,
         sourceMessageId: 'triage-root',
-        turnRequestId: 'triage-request',
+        id: 'triage-request',
         reason: 'fixture',
       });
       expect(command).toBeTruthy();

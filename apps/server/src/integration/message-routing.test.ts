@@ -33,7 +33,7 @@ const fixture = monolithFixture();
       agentId: AGENT,
       sourceMessageId: messageId,
       reason: 'human_tag',
-      turnRequestId: requestId,
+      id: requestId,
     });
     await startQueuedTurn(fixture.database, ROOM, AGENT, command!.id);
     // The membership check is a database read; its failure is an outage, not a

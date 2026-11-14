@@ -37,11 +37,11 @@ export async function readAgentCommands(
       return {
         id: item.id, roomId: item.room_id, returnRoomId: item.return_room_id ?? item.room_id,
         ...(item.parent_room_id ? {parentRoomId:item.parent_room_id} : {}),
-        agentId: item.agent_id, createdAt, sourceMessageId: item.private_payload ? item.id : item.source_message_id ?? item.id,
+        agentId: item.agent_id, createdAt, sourceMessageId: source.id,
         turnRequestId: item.id, action: item.action, reason: item.reason,
         rootCommandId: item.root_command_id, rootSourceMessageId: item.root_source_message_id,
         ...(item.parent_command_id ? {parentCommandId:item.parent_command_id} : {}),
-        agentDepth: item.agent_depth, ...(item.private_payload ? {private:true} : {}),
+        agentDepth: item.agent_depth, ...(source.type === 'private' ? {private:true} : {}),
         ...(source.systemEvent?.scheduleId ? {scheduleId:source.systemEvent.scheduleId} : {}),
         source: { ...source, createdAt, body: source.body + checkFailureLogBody(source.systemEvent ?? null) + reportedHeadBody(source.systemEvent ?? null) },
       };

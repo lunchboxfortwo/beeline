@@ -243,7 +243,9 @@ it('keeps closing text in activity when a reply tool already answered this reque
   const settled = await answer(R1, item.turn_request_id, 'Closing details belong in activity.');
   expect((await db.query("SELECT id,text FROM messages WHERE request_id=$1 AND author_id=$2 AND presentation='message'",
     [item.turn_request_id,A])).rows).toEqual([{id:posted.id,text:'The reply from the tool.'}]);
-  expect((await db.query('SELECT activity FROM messages WHERE id=$1', [settled.id])).rows[0]?.activity)
+  expect(settled.id).toBe(posted.id);
+  expect((await db.query('SELECT result_message_id FROM agent_commands WHERE id=$1',[item.id])).rows[0]?.result_message_id).toBe(posted.id);
+  expect((await db.query("SELECT activity FROM messages WHERE request_id=$1 AND presentation='activity'", [item.id])).rows[0]?.activity)
     .toContainEqual({kind:'note',title:'Turn summary',text:'Closing details belong in activity.'});
   expect((await answer(R1,item.turn_request_id,'Closing details belong in activity.')).id).toBe(settled.id);
   expect(await queue()).toEqual([]);

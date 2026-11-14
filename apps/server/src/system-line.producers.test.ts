@@ -393,7 +393,7 @@ describe('system-line producers', () => {
     }
   });
 
-  it('keeps terminal failure and conflicting replays out of chat', async () => {
+  it('legacy failure receipts cannot spend an unanswered queue item', async () => {
     const database = await fixture();
     try {
       const requestId = 'f'.repeat(64);
@@ -403,6 +403,7 @@ describe('system-line producers', () => {
       );
       const command = await database.transaction((tx) =>
         createAgentCommand(tx, {
+          id: requestId,
           roomId: ROOM,
           agentId: AGENT,
           sourceMessageId: requestId,
@@ -434,9 +435,9 @@ describe('system-line producers', () => {
       ).resolves.toBeDefined();
       expect(await lines(database)).toEqual(failed);
       expect((await database.query('SELECT status FROM agent_turns WHERE request_id=$1',[requestId])).rows)
-        .toEqual([{status:'failed'}]);
+        .toEqual([{status:'working'}]);
       expect((await database.query('SELECT state FROM agent_commands WHERE id=$1',[command!.id])).rows)
-        .toEqual([{state:'complete'}]);
+        .toEqual([{state:'pending'}]);
     } finally {
       await database.close();
     }

@@ -389,7 +389,7 @@ export function monolithFixture() {
           roomId: String(input.roomId),
           agentId: who,
           sourceMessageId: sourceId,
-          turnRequestId: requestId,
+          id: requestId,
           reason: 'fixture',
         });
         if (command)

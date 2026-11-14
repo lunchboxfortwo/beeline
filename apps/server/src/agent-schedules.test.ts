@@ -79,13 +79,15 @@ it.each([OWNER, OTHER_AGENT, null, AGENT])('Reproduction schedule-report-owner: 
     expect(await new AgentScheduleLoop(database).runOnce()).toBe(1);
     const [command] = (await daemon.execute('getAgentCommands', { roomId: ROOM }, AGENT)).commands;
     await startQueuedCommand(daemon, { roomId: ROOM, commandId: command!.id }, AGENT);
+    await database.query("UPDATE messages SET card=jsonb_set(card,'{ownerId}',to_jsonb($2::text)) WHERE id=$1",[command!.sourceMessageId,MEMBER]);
     const authority = { roomId: ROOM, requestId: command!.turnRequestId };
     await daemon.execute('postCornerMessage', { ...authority, cornerId: ROOM, text: 'Work posted' }, AGENT);
     await expect(daemon.execute('report', { ...authority, status: 'done', text: 'Work complete' }, AGENT))
       .resolves.toMatchObject({ delivered: true });
     if (owner !== OTHER_AGENT) {
+      expect((await database.query("SELECT text FROM messages WHERE request_id=$1 AND presentation='activity'",[command!.id])).rows).toEqual([{text:'Work complete'}]);
       const phone = new PhoneService(database, new LiveHub());
-      expect((await phone.readRoom(ROOM, OWNER))!.messages.filter(row => row.text === 'done: Work complete'))
+      expect((await phone.readRoom(ROOM, OWNER))!.messages.filter(row => row.text === 'Work posted'))
         .toHaveLength(1);
     } else {
       expect((await database.query("SELECT agent_id FROM agent_commands WHERE reason='report'")).rows)
@@ -601,8 +603,8 @@ describe('agent tool schedule daemon operations', () => {
       );
       await database.query(
         `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES
-          ($1,$2,$3,'member'),($1,$2,$4,'member')`,
-        [WORKSPACE, elsewhere, AGENT, OTHER_AGENT],
+          ($1,$2,$3,'member'),($1,$2,$4,'member'),($1,$2,$5,'owner')`,
+        [WORKSPACE, elsewhere, AGENT, OTHER_AGENT, OWNER],
       );
       if (surface === 'corner') {
         await database.query(`DELETE FROM memberships WHERE room_id=$1`, [elsewhere]);
@@ -753,7 +755,7 @@ describe('agent tool schedule daemon operations', () => {
           },
           AGENT,
         ),
-      ).rejects.toThrow('daemon token does not own requested agent');
+      ).rejects.toThrow(/daemon (?:token does not own requested agent|room access denied)/);
     } finally {
       await database.close();
     }

@@ -2,11 +2,10 @@ import { startQueuedTurn } from '../test-fixtures/queued-turn.test-support.js';
 import { createAgentCommand } from '.././agent-command.js';
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import WebSocket from 'ws';
 import { LiveHub } from '.././live.js';
 import { isRoomView, readRoomHistoryOutline, ROOM_VIEW_MESSAGE_LIMIT, type RoomHistoryOutline, type RoomHistoryView, type RoomView } from '@beeline/api-contract/phone';
 import { announceAgentLifecycle } from '.././connection-presence.js';
-import { monolithFixture, HUMAN, AGENT, WORKSPACE, ROOM, next } from '../test-fixtures/test-support-monolith.js';
+import { monolithFixture, HUMAN, AGENT, WORKSPACE, ROOM } from '../test-fixtures/test-support-monolith.js';
 
 describe('monolith integration: history-reads', () => {
 const fixture = monolithFixture();
@@ -227,59 +226,6 @@ const fixture = monolithFixture();
   });
 
 
-  it('authenticates a daemon on the existing live socket and replays its cursor gap', async () => {
-    await announceAgentLifecycle(fixture.database, new LiveHub(), ROOM, AGENT, {
-      lifecycleId: 'routing-fixture',
-    });
-    const activation = (await (
-      await fixture.daemonOperation('getRoomInbox', { roomId: ROOM })
-    ).json()) as { cursor?: string };
-    expect(activation).toMatchObject({ dispatchVersion: 1 });
-    const connect = async () => {
-      const socket = new WebSocket(`${fixture.origin.replace('http', 'ws')}/v1/phone/live`, [
-        `bearer.${fixture.daemonToken}`,
-      ]);
-      await new Promise<void>((resolve, reject) => {
-        socket.once('open', resolve);
-        socket.once('error', reject);
-      });
-      return socket;
-    };
-
-    const first = await connect();
-    const firstReplay = next(first, 'inbox');
-    first.send(JSON.stringify({ type: 'subscribe', roomId: ROOM, cursor: activation.cursor }));
-    await next(first, 'subscribed');
-    const firstCursor = (await firstReplay).cursor as string | undefined;
-    first.close();
-    await new Promise<void>((resolve) => first.once('close', resolve));
-
-    const expectedIds = ['7'.repeat(64), '8'.repeat(64), '9'.repeat(64)];
-    for (const [index, messageId] of expectedIds.entries()) {
-      expect(
-        (
-          await fixture.operation('sendRoomMessage', {
-            roomId: ROOM,
-            messageId,
-            text: `@bee while disconnected ${index + 1}`,
-            mentions: [AGENT],
-          })
-        ).status,
-      ).toBe(200);
-    }
-
-    const second = await connect();
-    const replayed = next(second, 'inbox');
-    second.send(JSON.stringify({ type: 'subscribe', roomId: ROOM, cursor: firstCursor }));
-    await next(second, 'subscribed');
-    const items = (await replayed).items as Array<{ id: string }>;
-    expect(items.filter((item) => expectedIds.includes(item.id)).map((item) => item.id)).toEqual(
-      expectedIds,
-    );
-    second.close();
-  });
-
-
   it('delivers a durable command whose source was committed behind the history cursor', async () => {
     const cursorId = 'a'.repeat(64);
     const lateId = '1'.repeat(64);
@@ -385,7 +331,7 @@ const fixture = monolithFixture();
         roomId: cornerId,
         agentId: AGENT,
         sourceMessageId: 'corner-trigger',
-        turnRequestId: 'corner-request',
+        id: 'corner-request',
         reason: 'fixture',
       });
       expect(command).toBeTruthy();

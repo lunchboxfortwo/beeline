@@ -97,7 +97,7 @@ const fixture = monolithFixture();
     const requestId = createHash('sha256').update('cross-room-request').digest('hex');
     await ensureSystemIdentity(fixture.database);
     await fixture.database.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Agent request')`, [requestId, ROOM, SYSTEM_IDENTITY_ID]);
-    const command = await createAgentCommand(fixture.database, { roomId: ROOM, agentId: AGENT, sourceMessageId: requestId, turnRequestId: requestId, reason: 'fixture' });
+    const command = await createAgentCommand(fixture.database, { roomId: ROOM, agentId: AGENT, sourceMessageId: requestId, id: requestId, reason: 'fixture' });
     await fixture.database.query(`UPDATE agent_commands SET root_source_message_id=$2 WHERE id=$1`, [command!.id, root]);
     const payload = { roomId: ROOM, requestId, approvalId: 'cross-room', tool: 'fetch_credential',
       title: 'Credential access approval', detail: 'Reveal harmless test credential',

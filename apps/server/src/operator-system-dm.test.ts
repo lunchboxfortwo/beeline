@@ -37,7 +37,7 @@ async function turn(author = OWNER) {
   const id = (++seq).toString(16).padStart(64, '0');
   await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Send the test notice')`, [id, ROOM, author]);
   const requestId = `request-${seq}`, generationId = `generation-${seq}`;
-  const command = await createAgentCommand(db, { roomId: ROOM, agentId: AGENT, sourceMessageId: id, reason: 'human_tag', turnRequestId: requestId });
+  const command = await createAgentCommand(db, { roomId: ROOM, agentId: AGENT, sourceMessageId: id, reason: 'human_tag', id: requestId });
   await startQueuedTurn(db, ROOM, AGENT, command!.id);
   return { agentId: AGENT, roomId: ROOM, requestId };
 }

@@ -369,7 +369,6 @@ export type AgentCommandInput = {
     action?: AgentCommandAction;
     /** A wake that continues the parent's turn (an approval or connector answer). */
     resume?: boolean;
-    turnRequestId?: string;
     parent?: CommandRow;
     /** Report evidence belongs to the reporting turn, while parent retains the return chain. */
     reportSource?: CommandRow;
@@ -419,7 +418,7 @@ export type QueuedOrder = {
   parent?: CommandRow; id?: string;
 };
 type Member = { id: string; kind: 'human' | 'agent'; handle: string | null; name: string;
-  callback: string | null; client_id: string | null; client_name: string | null; mcp: boolean; starter: string | null };
+  callback: string | null; client_id: string | null; client_name: string | null; mcp: boolean; starter: string | null; owner_id: string | null };
 type Chat = { id: string; parent_id: string | null; archived: boolean; direct: boolean;
   worker: string | null; source_member: boolean; source_archived: boolean; source_parent_id: string | null;
   source_worker: string | null; source_target_member: boolean;
@@ -454,10 +453,11 @@ export async function queueMessage(database: SqlDatabase, raw: QueuedPost | Queu
          SELECT member.identity_id id,identity.kind,identity.name,
            beeline_workspace_handle(identity.id,member.workspace_id) handle,
            COALESCE(app.callback_url,client.callback_url) callback,client.id client_id,client.name client_name,app.member_id IS NOT NULL mcp,
-           starter.starter_role starter
+           starter.starter_role starter,worker.owner_id
          FROM rooms room JOIN memberships member ON member.room_id=COALESCE(room.parent_id,room.id)
            AND member.removed_at IS NULL
          JOIN identities identity ON identity.id=member.identity_id
+         LEFT JOIN agents worker ON worker.agent_id=identity.id
          LEFT JOIN rooms_mcp_members app ON app.member_id=identity.id
          LEFT JOIN rooms_mcp_clients client ON client.id=app.client_id
          LEFT JOIN free_agents starter ON starter.agent_id=identity.id AND starter.removed_at IS NULL
@@ -492,7 +492,7 @@ export async function queueMessage(database: SqlDatabase, raw: QueuedPost | Queu
        FROM rooms room LEFT JOIN corner_facts fact ON fact.corner_id=room.id
        LEFT JOIN LATERAL (${cornerOpeningSql('room.id')}) initial ON true WHERE room.id::text=$1`,
       [input.roomId, command?.sourceMessageId ?? null,
-        parent?.source_message_id ?? parent?.root_source_message_id ?? command?.reportSource?.root_source_message_id ?? null,
+        parent?.source_message_id ?? parent?.root_source_message_id ?? command?.reportSource?.root_source_message_id ?? command?.scheduledHumanCommandMessageId ?? null,
         delivery ? input.sourceRoomId : null, delivery ? input.authorId : null, delivery ? input.recipientId : null],
     )).rows[0];
     const audience = chat?.members ?? [];
@@ -645,7 +645,15 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
   const escalationIdentity = chat.handover?.author_id ?? opening?.authorId;
   const escalationRoom = chat.handover?.approval_basis.commanderReturnRoomId ?? chat.handover?.source_room_id ?? opening?.fromRoomId;
   const sourceText = chat.source?.text;
-  let payload: PrivateCommandPayload | undefined = input.privatePayload ?? (parent?.private_payload && input.inheritPrivatePayload !== false
+  const scheduleOwner = (chat.source?.card as { ownerId?: unknown } | null)?.ownerId;
+  const scheduledReturn = input.reason === 'schedule' ? {
+    kind: 'lifecycle' as const, authorId: chat.source?.author_id ?? SYSTEM_IDENTITY_ID,
+    text: sourceText ?? input.reason, fromRoomId: chat.id,
+    returnIdentityId: typeof scheduleOwner === 'string' && scheduleOwner !== input.agentId ? scheduleOwner
+      : chat.parent_source?.author_id ?? (!chat.source?.system_event ? chat.source?.author_id : undefined)
+        ?? chat.members.find(member => member.id === input.agentId)?.owner_id ?? undefined,
+  } : undefined;
+  let payload: PrivateCommandPayload | undefined = input.privatePayload ?? scheduledReturn ?? (parent?.private_payload && input.inheritPrivatePayload !== false
     ? { ...parent.private_payload, kind: 'lifecycle', reported: undefined, text: sourceText ?? parent.private_payload.text } : undefined);
   const parentReturn=parent?.private_payload?.returnIdentityId ??
     (parent?.private_payload?.kind==='order'?parent.private_payload.authorId:undefined);
@@ -656,7 +664,7 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
     returnIdentityId: handover?.author_id ?? payload.returnIdentityId ?? (payload.kind === 'order' ? payload.authorId
       : (parent?.agent_id === input.agentId && parentReturn!==input.agentId ? parentReturn : undefined) ?? chat.parent_source?.author_id),
   };
-  const returnRoom = payload?.kind === 'order' ? payload.fromRoomId : payload || lifecycle
+  const returnRoom = input.reason === 'schedule' ? chat.id : payload?.kind === 'order' ? payload.fromRoomId : payload || lifecycle
     ? handover?.approval_basis.commanderReturnRoomId ?? handover?.source_room_id ??
       (parent?.agent_id === input.agentId ? parent.return_room_id : undefined) ?? chat.parent_source?.room_id ?? parent?.return_room_id ?? chat.id : chat.id;
   const reviewSource = input.reason === 'report' ? input.reportSource ?? input.parent : input.parent;
@@ -671,6 +679,7 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
   const reportAddress = chat.parent_id && commander ? commander === input.agentId && chat.opening_root
     ? { identityId: chat.opening_root.author_id, roomId: chat.opening_root.room_id }
     : { identityId: commander, roomId: escalationRoom ?? chat.id } : null;
+  const privateMessage = Boolean(payload) && input.reason !== 'schedule';
   const wake = mcpCommandWakeSql(19);
   const saved = (await db.query<CommandRow>(
     `WITH inserted AS (INSERT INTO agent_commands(id,room_id,agent_id,source_message_id,turn_request_id,action,reason,
@@ -684,14 +693,14 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
       parent ? input.retainDepth || lifecycle || input.resume ? parent.agent_depth : parent.agent_depth + 1 : 0,
       input.avatarJob ?? false, payload ? json(payload) : null, returnRoom, review ? json(review) : null, input.reason === 'corner_brief_revision' ?
         json({briefRevision: chat.handover?.revision ?? 0}) : null, reportAddress ? json(reportAddress) : null,
-      json({ id: payload ? id : input.sourceMessageId ?? id,
+      json({ id: privateMessage ? id : input.sourceMessageId ?? id,
         authorId: payload?.authorId ?? chat.source?.author_id ?? SYSTEM_IDENTITY_ID,
         body: (payload?.text ?? subscriptionPromptBody(sourceText ?? input.reason, chat.source?.system_event ?? null)) +
           squireDecisionDetail(chat.source?.card_type ?? null,chat.source?.card ?? null) +
           workflowWakeDetail(chat.source?.card_type ?? null,chat.source?.card ?? null,null,null,null) +
           (!payload && input.wakeNote ? `\n${input.wakeNote}` : ''),
         attachments: payload?.attachments ?? chat.source?.attachments ?? [],
-        type: payload ? 'private' : chat.source?.presentation ?? 'system',
+        type: privateMessage ? 'private' : chat.source?.presentation ?? 'system',
         systemEvent: chat.source?.system_event }),...wake.params,
     ],
   )).rows[0] ?? (await db.query<CommandRow>(
@@ -729,24 +738,24 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
       [agentId, input.roomId, input.requestId ?? null],
     )).rows[0];
     if (item?.state === 'complete' && item.result_message_id)
-      return { id: item.result_message_id, createdAt: Math.floor(new Date(item.created_at).getTime() / 1000) };
+      return { id: item.result_message_id, createdAt: Math.floor(new Date(item.created_at).getTime() / 1000), delivered: true };
     const payload = item?.private_payload;
     const escalation = input.report ? item?.report_address ?? (payload?.kind === 'order' ? payload.escalation : undefined) : undefined;
     const roomId = escalation?.roomId ?? item?.return_room_id ?? payload?.fromRoomId ?? input.roomId;
     const recipientId = escalation?.identityId ?? (payload ? payload.returnIdentityId ??
-      (payload.kind === 'order' ? payload.authorId : item?.root_author ?? undefined) : input.report ? item?.source_author ?? item?.root_author ?? undefined : undefined);
+      (payload.kind === 'order' ? payload.authorId : undefined) : input.report ? item?.source_author ?? item?.root_author ?? undefined : undefined);
     const status = ['done', 'blocked', 'failed', 'needs_decision'].includes(String(input.status))
       ? String(input.status).replace('_', '-') : 'done';
     const publicText = repairAgentPost(item?.reason==='voice_order' ? cleanVoiceReply(input.text,item.name) : input.text).text.replace(input.report ? /^(?:done|blocked|failed|needs[-_]decision):\s*/ : /^$/, '').trim();
     if (item?.public_reply_id) {
       completedNow = true;
       const id = hash(`closing:${item.id}`);
-      await queueMessage(db,{kind:'delivery',roomId:item.return_room_id ?? input.roomId,authorId:agentId,recipientId,
+      await queueMessage(db,{kind:'delivery',roomId:item.return_room_id ?? input.roomId,authorId:agentId,
         sourceRoomId:input.roomId,sourceItem:item,id:item.public_reply_id,postedReplyId:item.public_reply_id,
         text:'',attachments:item.answer_attachments,stopped:item.state==='cancelled'});
-      await endAgentTurn(db,item,input.report && input.status === 'failed' ? 'failed' : 'complete',null,id);
+      await endAgentTurn(db,item,input.report && input.status === 'failed' ? 'failed' : 'complete',null,item.public_reply_id);
       history = {id,roomId:item.return_room_id ?? input.roomId,text:publicText};
-      return {id,createdAt:Math.floor(Date.now()/1000)};
+      return {id:item.public_reply_id,createdAt:Math.floor(Date.now()/1000),delivered:true};
     }
     if (!publicText) return { id: item?.id ?? hash(`${agentId}:${input.roomId}`), createdAt: Math.floor(Date.now() / 1000), answered: false };
     const text = (input.report ? `${status}: ${publicText.replace(/^(?:done|blocked|failed|needs[-_]decision):\s*/, '')}` : publicText).trim();

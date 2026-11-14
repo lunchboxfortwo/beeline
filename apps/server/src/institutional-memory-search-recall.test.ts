@@ -86,7 +86,7 @@ async function openCommand(requestId: string, generationId: string) {
     agentId: RONNIE,
     sourceMessageId: MESSAGE,
     reason: 'human_tag',
-    turnRequestId: requestId,
+    id: requestId,
   });
   await startQueuedTurn(database, ROOM, RONNIE, command!.id);
   return command!;

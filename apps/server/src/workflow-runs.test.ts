@@ -376,7 +376,8 @@ describe('start_workflow', () => {
       roleBindings: { implementer: target, reviewer: REVIEWER, approver: APPROVER },
     });
     expect(started.state).toBe('implement');
-    expect(await pendingCommandsFor(target)).toBe(1);
+    expect(await pendingCommandsFor(target)).toBe(target === IMPLEMENTER ? 2 : 1);
+    expect((await database.query("SELECT id FROM agent_commands WHERE agent_id=$1 AND source_message_id=$2 AND state='pending'",[target,started.runId])).rowCount).toBe(1);
     const card = await database.query<{ card_type: string; text: string; card: { runId: string } }>(
       `SELECT card_type,text,card FROM messages WHERE id=$1`,
       [started.runId],

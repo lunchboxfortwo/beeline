@@ -26,7 +26,7 @@ const fixture = monolithFixture();
       [requestId, ROOM, SYSTEM_IDENTITY_ID]);
     const command = await createAgentCommand(fixture.database, {
       roomId: ROOM, agentId: AGENT, sourceMessageId: requestId,
-      turnRequestId: requestId, reason: 'fixture',
+      id: requestId, reason: 'fixture',
     });
     await fixture.database.query(`UPDATE agent_commands SET root_source_message_id=$2 WHERE id=$1`, [command!.id, root]);
     const ask = await fixture.daemonOperation('requestAgentGrant', {

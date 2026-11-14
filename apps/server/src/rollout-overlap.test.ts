@@ -17,6 +17,8 @@ async function fixture() {
   await db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Rollout proof')`, [W]);
   await db.query(`INSERT INTO rooms(id,workspace_id,name,created_by) VALUES($1,$2,'Parent',$3)`, [R,W,H]);
   await db.query(`INSERT INTO rooms(id,workspace_id,parent_id,name,created_by) VALUES($1,$2,$3,'Corner',$4)`, [C,W,R,A]);
+  await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES
+    ($1,NULL,$2,'owner'),($1,NULL,$3,'member'),($1,$4,$2,'owner'),($1,$4,$3,'member')`, [W,H,A,R]);
   await db.query(`INSERT INTO corner_facts(corner_id) VALUES($1)`, [C]);
 }
 

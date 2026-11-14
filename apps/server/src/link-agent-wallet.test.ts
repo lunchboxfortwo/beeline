@@ -66,7 +66,7 @@ it.each(['approved', 'denied', 'expired'] as const)('settles a Link %s at the or
   await ensureSystemIdentity(database);
   const requestId = createHash('sha256').update('link-asking-turn').digest('hex');
   await database.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Buy a book')`, [requestId, ROOM, SYSTEM_IDENTITY_ID]);
-  const command = await createAgentCommand(database, { roomId: ROOM, agentId: AGENT, sourceMessageId: requestId, turnRequestId: requestId, reason: 'fixture' });
+  const command = await createAgentCommand(database, { roomId: ROOM, agentId: AGENT, sourceMessageId: requestId, id: requestId, reason: 'fixture' });
   let providerStatus = 'pending_approval';
   const transport = vi.fn(async (url: string | URL | Request) => {
     if (String(url).endsWith('/auth/token')) return Response.json({ access_token: 'access',
@@ -95,7 +95,7 @@ it.each(['approved', 'denied', 'expired'] as const)('settles a Link %s at the or
   const laterRequestId = createHash('sha256').update('link-retrieving-turn').digest('hex');
   await database.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Retrieve the purchase')`, [laterRequestId, otherRoom, SYSTEM_IDENTITY_ID]);
   const laterCommand = await createAgentCommand(database, { roomId: otherRoom, agentId: AGENT,
-    sourceMessageId: laterRequestId, turnRequestId: laterRequestId, reason: 'fixture' });
+    sourceMessageId: laterRequestId, id: laterRequestId, reason: 'fixture' });
   const retrieving = new DaemonService(database, live, undefined, undefined,
     true, laterCommand!, false, undefined, undefined, undefined, undefined, undefined,
     undefined, undefined, undefined, undefined, client);

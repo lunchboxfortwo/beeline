@@ -63,7 +63,7 @@ it('release migration invents no terminal results and exposes only a live claime
           sourceMessageId: source,
           reason: 'resume',
           action: 'resume',
-          turnRequestId: request,
+          id: request,
         });
         await startQueuedTurn(database, room, agent, successor!.id);
       }

@@ -116,7 +116,7 @@ describe('institutional memory phase-0 shadow capture', () => {
       agentId: OTHER_AGENT,
       sourceMessageId: nextHumanMessage,
       reason: 'human_tag',
-      turnRequestId: 'next-human-turn',
+      id: 'next-human-turn',
     });
     await startQueuedTurn(rootFixture.database, ROOM, OTHER_AGENT, humanCommand!.id);
     const humanContext = await liveDaemon().execute(
@@ -140,7 +140,7 @@ describe('institutional memory phase-0 shadow capture', () => {
       agentId: OTHER_AGENT,
       sourceMessageId: otherHumanMessage,
       reason: 'human_tag',
-      turnRequestId: 'other-human-turn',
+      id: 'other-human-turn',
     });
     await startQueuedTurn(rootFixture.database, ROOM, OTHER_AGENT, otherCommand!.id);
     const otherContext = await liveDaemon().execute(
@@ -161,7 +161,7 @@ describe('institutional memory phase-0 shadow capture', () => {
       agentId: OTHER_AGENT,
       sourceMessageId: unauthorizedMessage,
       reason: 'human_tag',
-      turnRequestId: 'unauthorized-turn',
+      id: 'unauthorized-turn',
     });
     await startQueuedTurn(rootFixture.database, OTHER_ROOM, OTHER_AGENT, unauthorizedCommand!.id);
     const unauthorizedContext = await liveDaemon().execute(
@@ -184,7 +184,7 @@ describe('institutional memory phase-0 shadow capture', () => {
       agentId: AGENT,
       sourceMessageId: MESSAGE,
       reason: 'human_tag',
-      turnRequestId: 'proposal-turn',
+      id: 'proposal-turn',
     });
     await startQueuedTurn(rootFixture.database, ROOM, AGENT, command!.id);
     const daemon = liveDaemon();
@@ -346,7 +346,7 @@ describe('institutional memory phase-0 shadow capture', () => {
       agentId: AGENT,
       sourceMessageId: source,
       reason: 'human_tag',
-      turnRequestId: 'subject-first',
+      id: 'subject-first',
     });
     await startQueuedTurn(rootFixture.database, ROOM, AGENT, first!.id);
     const daemon = liveDaemon();
@@ -399,7 +399,7 @@ describe('institutional memory phase-0 shadow capture', () => {
       agentId: AGENT,
       sourceMessageId: otherSource,
       reason: 'human_tag',
-      turnRequestId: 'subject-other',
+      id: 'subject-other',
     });
     await startQueuedTurn(rootFixture.database, ROOM, AGENT, next!.id);
     const otherContext = await daemon.execute(
@@ -426,7 +426,7 @@ describe('institutional memory phase-0 shadow capture', () => {
       agentId: AGENT,
       sourceMessageId: ownNextSource,
       reason: 'human_tag',
-      turnRequestId: 'subject-own-next',
+      id: 'subject-own-next',
     });
     await startQueuedTurn(rootFixture.database, ROOM, AGENT, ownNext!.id);
     const ownContext = await daemon.execute(
@@ -496,7 +496,7 @@ describe('institutional memory phase-0 shadow capture', () => {
       agentId: AGENT,
       sourceMessageId: DM_MESSAGE,
       reason: 'human_tag',
-      turnRequestId: 'subject-dm',
+      id: 'subject-dm',
     });
     await startQueuedTurn(rootFixture.database, DM, AGENT, dmCommand!.id);
     await expect(

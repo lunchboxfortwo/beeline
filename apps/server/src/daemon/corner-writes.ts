@@ -284,7 +284,6 @@ import { Input } from './values.js';
         reason: 'corner_objective',
         parent: parentCommand,
         retainDepth: true,
-        turnRequestId: input.requestId,
       },
       });
       // After the opening order: the reviewer must be independent of the agent it assigns.

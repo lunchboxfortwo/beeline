@@ -155,7 +155,9 @@ import { Input,Output } from './types.js';
       roomId: input.roomId, messageId: saved.id, authorId: author, text: input.text,
       ...(familyId ? { familyId } : {}),
     }).catch(error => console.warn('[message] feedback observation failed', error));
-    return { messageId: saved.id, pendingAgentCommands: saved.commands.map(command => ({
+    const receipt = await ctx.receiptMessage(input.roomId, author, saved.id, ctx.database)
+      .catch(error => { console.warn('[message] receipt enrichment omitted:', error); return {}; });
+    return { ...receipt, messageId: saved.id, pendingAgentCommands: saved.commands.map(command => ({
       requestId: command.turn_request_id, agentPubkey: command.agent_id,
       createdAt: Math.floor(new Date(command.created_at).getTime() / 1000),
     })) };

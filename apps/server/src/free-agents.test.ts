@@ -506,7 +506,7 @@ describe('free starter agents', () => {
     const ownerMessageId = 'd'.repeat(64);
     await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Help with this project')`, [ownerMessageId, roomId, OWNER]);
     const ownerCommand = (await createAgentCommand(db, { roomId, agentId: agent.agent_id,
-      sourceMessageId: ownerMessageId, reason: 'human_tag', turnRequestId: 'owner-request' }))!;
+      sourceMessageId: ownerMessageId, reason: 'human_tag', id: 'owner-request' }))!;
     await startQueuedTurn(db, roomId, agent.agent_id, ownerCommand.id);
     const ownerContext = { roomId, requestId: ownerCommand.turn_request_id };
     expect((await daemon.execute('getAgentConfiguration', ownerContext as never, agent.agent_id)).soul?.instructions).toContain('beeline:onboarding');

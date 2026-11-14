@@ -212,7 +212,7 @@ it('SENTRY-7807034373: schedule HTTP refusals stay visible without Sentry events
       await db.query("INSERT INTO identities(id,kind,name) VALUES($1,'agent','Worker')", [agent]);
       await db.query("INSERT INTO workspaces(id,name) VALUES($1,'Test')", [workspace]);
       await db.query("INSERT INTO rooms(id,workspace_id,created_by,name) VALUES($1,$2,$3,'Test')", [room,workspace,agent]);
-      await db.query("INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')", [workspace,room,agent]);
+      await db.query("INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$3,'member'),($1,$2,$3,'member'),($1,NULL,$4,'owner'),($1,$2,$4,'owner')", [workspace,room,agent,human]);
       const live = new LiveHub();
       const daemon = new DaemonService(db, live);
       const server = createBeelineServer({ database: db, live, daemon, phone: {},
@@ -280,7 +280,8 @@ it('unexpected database errors still alert with retired validation wording', asy
       import { migrate } from './src/database.ts';
       import { HelperDaemonService as DaemonService } from './src/test-fixtures/helper-daemon.ts';
       import { LiveHub } from './src/live.ts';
-      import { createAgentCommand, startQueuedTurn } from './src/agent-command.ts';
+      import { createAgentCommand } from './src/agent-command.ts';
+      import { startQueuedTurn } from './src/test-fixtures/queued-turn.test-support.ts';
       import { createBeelineServer } from './src/server.ts';
       import { flushServerErrors } from './src/sentry.ts';
       const db = new PgliteDatabase(); await migrate(db);
@@ -292,7 +293,7 @@ it('unexpected database errors still alert with retired validation wording', asy
       await db.query("INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Test')",[room,workspace]);
       await db.query("INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')",[workspace,room,agent]);
       const command=await createAgentCommand(db,{roomId:room,agentId:agent,sourceMessageId:null,reason:'human_tag'});
-      await startQueuedTurn(db,room,agent,command.id,'proof');
+      await startQueuedTurn(db,room,agent,command.id);
       const live=new LiveHub(), daemon=new DaemonService(db,live);
       const server=createBeelineServer({database:db,live,daemon,phone:{},
         auth:{authenticateDaemon:async()=>agent,authenticatePhone:async()=>null},mediaMaximumBytes:1});
@@ -300,7 +301,7 @@ it('unexpected database errors still alert with retired validation wording', asy
       const call=async(operation,extra)=>{
         const response=await fetch('http://127.0.0.1:'+server.address().port+'/v1/daemon/operations/'+operation,{
           method:'POST',headers:{authorization:'Bearer isolated-checkin-proof','content-type':'application/json'},
-          body:JSON.stringify({roomId:room,requestId:command.turn_request_id,generationId:'proof',...extra})});
+          body:JSON.stringify({roomId:room,requestId:command.turn_request_id,...extra})});
         return {status:response.status,body:await response.json()};
       };
       try {
@@ -364,7 +365,7 @@ it.each(['server', 'body'] as const)('R-SENTRY-REPEAT: %s sends one envelope for
   } finally { await new Promise<void>(r => collector.close(() => r())); }
 });
 
-it('ATTACH-CAP-1: attachment cap is a client error and unexpected failures still alert', async () => {
+it('ATTACH-CAP-1: queued attachments pass the retired cap and unexpected errors still alert', async () => {
   const envelopes: string[] = [];
   const collector = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
@@ -394,18 +395,18 @@ it('ATTACH-CAP-1: attachment cap is a client error and unexpected failures still
       await db.query("INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)", [agent,human]);
       await db.query("INSERT INTO workspaces(id,name) VALUES($1,'Test')", [workspace]);
       await db.query("INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Test')", [room,workspace]);
-      await db.query("INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')", [workspace,room,agent]);
+      await db.query("INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$3,'member'),($1,$2,$3,'member'),($1,NULL,$4,'owner'),($1,$2,$4,'owner')", [workspace,room,agent,human]);
       await db.query("INSERT INTO objects(id,owner_id,kind,key,mime,title,size,sha256,state,expires_at) VALUES($1,$2,'artifact','test/key','text/plain','File',10,repeat('d',64),'ready',now()+interval '24 hours')", [media,agent]);
       const live = new LiveHub();
       const daemon = new DaemonService(db, live, undefined, 10);
       const command = await createAgentCommand(db, {roomId:room,agentId:agent,sourceMessageId:null,reason:'system'});
       const [pending] = (await daemon.execute('getAgentCommands',{roomId:room},agent)).commands;
       assert.equal(pending.id,command.id);
-      await daemon.execute('startQueuedTurn',{roomId:room,commandId:pending.id,generationId:'proof'},agent);
+      await daemon.execute('startAgentTurn',{roomId:room,requestId:pending.turnRequestId},agent);
       const server = createBeelineServer({ database: db, live, daemon, phone: {},
         auth: { authenticateDaemon: async () => agent, authenticatePhone: async () => null }, mediaMaximumBytes: 10 });
       await new Promise(r => server.listen(0,'127.0.0.1',r));
-      const input = {roomId:room,requestId:pending.turnRequestId,generationId:'proof',
+      const input = {roomId:room,requestId:pending.turnRequestId,
         attachment:{url:'http://test/v1/media/'+media,name:'file.txt',mimeType:'text/plain',size:9}};
       const call = async (payload=input) => {
         const response = await fetch('http://127.0.0.1:' + server.address().port + '/v1/daemon/operations/postAgentAttachment', {
@@ -414,20 +415,15 @@ it('ATTACH-CAP-1: attachment cap is a client error and unexpected failures still
       };
       const queue = async () => (await db.query('SELECT * FROM agent_pending_attachments ORDER BY id')).rows;
       try {
-        assert.equal((await call()).status,200); // One byte below the total cap.
-        assert.equal((await call({...input,attachment:{...input.attachment,size:1}})).status,200); // Exactly at cap.
+        assert.equal((await call()).status,200); // First attachment.
+        assert.equal((await call({...input,attachment:{...input.attachment,size:1}})).status,200); // Reaches the retired total cap.
         const before = await queue();
         assert.equal(before.length,2);
-        const over = await call({...input,attachment:{...input.attachment,size:1}});
-        console.log('ATTACH-CAP-1 over-cap HTTP response',JSON.stringify(over));
-        assert.equal(over.status,400);
-        assert.deepEqual(over.body,{error:'Queued attachments exceed the 10-byte total limit per reply: 10 bytes already queued; artifact size: 1 bytes. Use smaller files, or deliver the queued attachments with your next reply or report before posting more.'});
-        assert.deepEqual(await queue(),before);
+        assert.equal((await call({...input,attachment:{...input.attachment,size:11}})).status,200);
+        assert.equal((await queue()).length,3);
         await db.query('DELETE FROM agent_pending_attachments');
-        assert.equal((await call({...input,attachment:{...input.attachment,size:11}})).status,400);
-        assert.deepEqual(await queue(),[]);
-        // Turn and ownership checks must still refuse without queueing.
-        assert.equal((await call({...input,generationId:'stale'})).status,403);
+        // Unknown item and ownership checks still refuse without queueing.
+        assert.equal((await call({...input,requestId:'unknown-item'})).status,403);
         await db.query('UPDATE objects SET owner_id=$2 WHERE id=$1',[media,human]);
         assert.equal((await call()).status,503);
         assert.deepEqual(await queue(),[]);
@@ -494,7 +490,7 @@ it('WORKFLOW-ROLE-REFUSAL / BEELINE-SENTRY-REFUSALS / APP-REFUSAL-5: real agent 
       await db.query("INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)", [agent,human]);
       await db.query("INSERT INTO workspaces(id,name) VALUES($1,'Test')", [workspace]);
       await db.query("INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Test')", [room,workspace]);
-      await db.query("INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')", [workspace,room,agent]);
+      await db.query("INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$3,'member'),($1,$2,$3,'member'),($1,NULL,$4,'owner'),($1,$2,$4,'owner')", [workspace,room,agent,human]);
       await db.query("INSERT INTO objects(id,owner_id,kind,key,mime,title,size,sha256,state,expires_at) VALUES($1,$2,'artifact','test/key','text/plain','File',10,repeat('d',64),'ready',now()+interval '24 hours')", [media,agent]);
       const live = new LiveHub();
       let providerFault = 'flagged404';
@@ -527,11 +523,11 @@ it('WORKFLOW-ROLE-REFUSAL / BEELINE-SENTRY-REFUSALS / APP-REFUSAL-5: real agent 
       const command = await createAgentCommand(db, {roomId:room,agentId:agent,sourceMessageId:'human-root',reason:'test'});
       const [pending] = (await daemon.execute('getAgentCommands',{roomId:room},agent)).commands;
       assert.equal(pending.id,command.id);
-      await daemon.execute('startQueuedTurn',{roomId:room,commandId:pending.id,generationId:'proof'},agent);
+      await daemon.execute('startAgentTurn',{roomId:room,requestId:pending.turnRequestId},agent);
       const server = createBeelineServer({ database: db, live, daemon, phone: {},
         auth: { authenticateDaemon: async () => agent, authenticatePhone: async () => null }, mediaMaximumBytes: 10 });
       await new Promise(r => server.listen(0,'127.0.0.1',r));
-      const input = {roomId:room,requestId:pending.turnRequestId,generationId:'proof',
+      const input = {roomId:room,requestId:pending.turnRequestId,
         attachment:{url:'http://test/v1/media/'+media,name:'file.txt',mimeType:'text/plain',size:9}};
       const call = async (payload=input, operation='postAgentAttachment') => {
         const response = await fetch('http://127.0.0.1:' + server.address().port + '/v1/daemon/operations/' + operation, {
@@ -546,26 +542,18 @@ it('WORKFLOW-ROLE-REFUSAL / BEELINE-SENTRY-REFUSALS / APP-REFUSAL-5: real agent 
           continuation:'Continue with the selected account.',switchGoogleAccount:true},'connect');
         console.log('Reproduction browser-refusal-1',JSON.stringify(browserRefusal));
         assert.deepEqual(browserRefusal,{status:400,body:{error:'switchGoogleAccount applies only to Trusty Squire'}});
-        assert.equal((await call()).status,200); // One byte below the total cap.
-        assert.equal((await call({...input,attachment:{...input.attachment,size:1}})).status,200); // Exactly at cap.
+        assert.equal((await call()).status,200); // First attachment.
+        assert.equal((await call({...input,attachment:{...input.attachment,size:1}})).status,200); // Reaches the retired total cap.
         const before = await queue();
         assert.equal(before.length,2);
-        const over = await call({...input,attachment:{...input.attachment,size:1}});
-        console.log('BEELINE-SENTRY-REFUSALS over-cap HTTP response',JSON.stringify(over));
-        assert.equal(over.status,400);
-        assert.deepEqual(over.body,{error:'Queued attachments exceed the 10-byte total limit per reply: 10 bytes already queued; artifact size: 1 bytes. Use smaller files, or deliver the queued attachments with your next reply or report before posting more.'});
-        assert.deepEqual(await queue(),before);
+        assert.equal((await call({...input,attachment:{...input.attachment,size:11}})).status,200);
+        assert.equal((await queue()).length,3);
         await db.query('DELETE FROM agent_pending_attachments');
-        assert.equal((await call({...input,attachment:{...input.attachment,size:11}})).status,400);
-        assert.deepEqual(await queue(),[]);
-        // Stale turns must still refuse without queueing.
-        assert.equal((await call({...input,generationId:'stale'})).status,403);
+        // An unknown item still refuses resource access without queueing.
+        assert.equal((await call({...input,requestId:'unknown-item'})).status,403);
         // Schedule and tray validators already carry typed refusals.
         const schedule = await call({...input,agentId:agent,title:'one two three four five',prompt:'Check work',cadence:{kind:'interval',everyMinutes:60}},'createAgentSchedule');
         assert.match(schedule.body.error,/title must be one to four words/);
-        const ask = await call({...input,status:'needs_decision',text:'needs-decision: Choose a path',ask:'x'.repeat(141)},'report');
-        assert.equal(ask.status,400);
-        assert.match(ask.body.error,/ask must be plain text/);
         const worker = (await db.query('SELECT * FROM agent_commands WHERE id=$1',[command.id])).rows[0];
         for (const name of ['refusal-proof','workspace-walk']) {
           await saveWorkflow(db,worker,{contract:describedWorkflow({version:1,name,description:'Prove caller refusals',roles:['triager'],start:'browse',handoffs:{

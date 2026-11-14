@@ -332,7 +332,7 @@ const fixture = monolithFixture();
       roomId: cornerId,
       agentId: AGENT,
       sourceMessageId: requestId,
-      turnRequestId: requestId,
+      id: requestId,
       reason: 'corner_objective',
     });
     await fixture.daemonOperation('postAgentTurnReceipt', {

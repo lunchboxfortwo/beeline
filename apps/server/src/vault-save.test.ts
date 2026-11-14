@@ -314,7 +314,7 @@ it('posts the value-free agent tool card and wakes its requesting command with s
     agentId: AGENT,
     sourceMessageId: sourceId,
     reason: 'human_tag',
-    turnRequestId: sourceId,
+    id: sourceId,
   });
   await startQueuedTurn(db, ROOM, AGENT, parent!.id);
   const daemon = new DaemonService(db, new LiveHub());

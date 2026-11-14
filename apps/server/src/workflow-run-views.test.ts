@@ -776,7 +776,7 @@ describe('visit output through daemon completion and phone GET', () => {
     const source = await command(CORNER, TRIAGER);
     const resumed = (await createAgentCommand(database, { roomId: CORNER, agentId: TRIAGER,
       sourceMessageId: source.source_message_id, action: 'resume', reason: 'resume',
-      parent: held, retainDepth: true, turnRequestId: held.turn_request_id }))!;
+      parent: held, retainDepth: true }))!;
     await database.query(`UPDATE agent_commands SET state='complete' WHERE id=$1`, [held.id]);
     const claimed = await startQueuedTurn(database, CORNER, TRIAGER, resumed.id);
     await handoff(database, claimed, { runId, outcome: 'retry', contents: {} });

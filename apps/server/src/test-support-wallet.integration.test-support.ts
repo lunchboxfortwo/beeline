@@ -99,6 +99,7 @@ export function fixtureScope1() {
       [WALLET_REQUEST, ROOM, HUMAN],
     );
     const command = await createAgentCommand(database, {
+      id: WALLET_REQUEST,
       roomId: ROOM,
       agentId: HELPER,
       sourceMessageId: WALLET_REQUEST,

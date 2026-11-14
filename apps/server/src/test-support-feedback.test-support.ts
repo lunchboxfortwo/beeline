@@ -131,7 +131,7 @@ export async function openTurn(sourceMessageId: string, roomId = ROOM, agentId =
     agentId,
     sourceMessageId,
     reason: 'human_tag',
-    turnRequestId: requestId,
+    id: requestId,
   });
   await startQueuedTurn(database, roomId, agentId, command!.id);
   return { roomId, requestId };

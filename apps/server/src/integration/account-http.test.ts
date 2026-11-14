@@ -466,7 +466,7 @@ const fixture = monolithFixture();
   });
 
 
-  it('refreshes a working receipt from activity but leaves a terminal receipt untouched', async () => {
+  it('refreshes unfinished activity but preserves published completion', async () => {
     const requestId = '5'.repeat(64);
     await fixture.daemonOperation('postAgentTurnReceipt', { roomId: ROOM, requestId, status: 'working' });
     await fixture.database.query(
@@ -489,6 +489,7 @@ const fixture = monolithFixture();
       ).rows[0],
     ).toEqual({ fresh: true });
 
+    await fixture.daemonOperation('postRoomMessage', { roomId: ROOM, requestId, text: 'The stored answer.' });
     await fixture.daemonOperation('postAgentTurnReceipt', { roomId: ROOM, requestId, status: 'failed' });
     await fixture.database.query(
       `UPDATE agent_turns SET created_at=now()-interval '1 minute'
@@ -508,7 +509,7 @@ const fixture = monolithFixture();
           [ROOM, requestId, AGENT],
         )
       ).rows[0],
-    ).toEqual({ status: 'failed', old: true });
+    ).toEqual({ status: 'complete', old: true });
   });
 
 

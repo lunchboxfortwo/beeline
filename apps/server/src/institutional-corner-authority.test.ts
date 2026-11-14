@@ -104,7 +104,7 @@ async function claim(roomId: string, requestId: string, generationId: string) {
     agentId: NIGLET,
     sourceMessageId: requestId,
     reason: 'corner_objective',
-    turnRequestId: requestId,
+    id: requestId,
   });
   await startQueuedTurn(database, roomId, NIGLET, command!.id);
   return command!;
@@ -118,7 +118,7 @@ describe('corner turn institutional authority', () => {
       agentId: NIGLET,
       sourceMessageId: ROOT,
       reason: 'human_tag',
-      turnRequestId: 'room-turn',
+      id: 'room-turn',
     });
     const corner = await createAgentCommand(database, {
       roomId: CORNER,
@@ -127,7 +127,7 @@ describe('corner turn institutional authority', () => {
       reason: 'corner_objective',
       parent: roomCommand!,
       retainDepth: true,
-      turnRequestId: 'corner-turn',
+      id: 'corner-turn',
     });
     await startQueuedTurn(database, CORNER, NIGLET, corner!.id);
     const memory = await daemon.execute(
@@ -154,7 +154,7 @@ describe('corner turn institutional authority', () => {
       agentId: NIGLET,
       sourceMessageId: CARD,
       reason: 'subscribed_event',
-      turnRequestId: 'dispatch-turn',
+      id: 'dispatch-turn',
     });
     const corner = await createAgentCommand(database, {
       roomId: CORNER,
@@ -163,7 +163,7 @@ describe('corner turn institutional authority', () => {
       reason: 'corner_objective',
       parent: dispatch!,
       retainDepth: true,
-      turnRequestId: 'corner-from-corner-turn',
+      id: 'corner-from-corner-turn',
     });
     await startQueuedTurn(database, CORNER, NIGLET, corner!.id);
     const memory = await daemon.execute(

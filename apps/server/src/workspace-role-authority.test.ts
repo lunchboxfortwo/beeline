@@ -109,7 +109,7 @@ describe('permissions: agent owner, Workspace admin, or anyone in the Room', () 
       reason: 'human_tag',
     });
     await startQueuedTurn(database, roomId, AGENT, command!.id);
-    return ask;
+    return command!.id;
   }
 
   async function errorOf(work: Promise<unknown>): Promise<string | undefined> {

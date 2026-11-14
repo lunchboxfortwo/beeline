@@ -107,7 +107,7 @@ async function turn(roomId = ROOM, text = 'Please keep memory current.') {
     agentId: AGENT,
     sourceMessageId,
     reason: 'human_tag',
-    turnRequestId: requestId,
+    id: requestId,
   });
   await startQueuedTurn(database, roomId, AGENT, command!.id);
   openTurn = { agentId: AGENT, roomId, requestId };

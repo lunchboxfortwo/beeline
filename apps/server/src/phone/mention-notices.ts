@@ -23,6 +23,7 @@ import { phoneProjectPendingAgentCommands } from './message-enrichment.js';
     const delta = await phoneReadLiveDelta(ctx, roomId, viewerId, {
       type: 'message', messageId: messageIdValue,
     }, database);
+    mayRoute = mayRoute && delta?.type === 'message-delta' && delta.message.author.kind === 'human';
     // Read both routing facts in the existing steer-receipt round trip.
     // Routing records MCP mentions only after membership and addressing policy
     // pass; presence never determines whether a recipient is external.
@@ -44,7 +45,7 @@ import { phoneProjectPendingAgentCommands } from './message-enrichment.js';
          FROM memberships membership
          JOIN rooms_mcp_members external ON external.member_id=membership.identity_id
          JOIN identities identity ON identity.id=external.member_id
-         WHERE membership.room_id=(SELECT COALESCE(parent_id,id) FROM rooms WHERE id=$1)
+         WHERE $3::boolean AND membership.room_id=(SELECT COALESCE(parent_id,id) FROM rooms WHERE id=$1)
            AND membership.removed_at IS NULL
            AND NULLIF(identity.handle,'') IS NOT NULL
            AND EXISTS(SELECT 1 FROM rooms_mcp_mentions mention

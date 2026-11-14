@@ -108,7 +108,7 @@ describe('authorized institutional history search', () => {
     await database.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [AGENT, REQUESTER]);
     const active = await createAgentCommand(database, {
       roomId: OUTPUT, agentId: AGENT, sourceMessageId: ROOT,
-      reason: 'human_tag', turnRequestId: 'hsa-1',
+      reason: 'human_tag', id: 'hsa-1',
     });
     await startQueuedTurn(database, OUTPUT, AGENT, active!.id);
     const daemon = new DaemonService(database, new LiveHub(), undefined, undefined, false,
@@ -193,7 +193,7 @@ describe('authorized institutional history search', () => {
       agentId: AGENT,
       sourceMessageId: ROOT,
       reason: 'human_tag',
-      turnRequestId: 'rhs-1',
+      id: 'rhs-1',
     });
     await startQueuedTurn(database, OUTPUT, AGENT, active!.id);
     const daemon = new DaemonService(

@@ -311,7 +311,7 @@ describe('institutional memory authority for agent-started turns', () => {
       agentId: AGENT,
       sourceMessageId: crossRoot,
       reason: 'test',
-      turnRequestId: 'cross-workspace-turn',
+      id: 'cross-workspace-turn',
     });
     await startQueuedTurn(rootFixture.database, ROOM, AGENT, command!.id);
     await expect(
