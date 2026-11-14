@@ -11,6 +11,9 @@ import { LocalActions } from './release-local-actions.mjs';
 import { Processes, privateWrite, appendSummary } from './release-local-process.mjs';
 import { localGithub } from './release-local-github.mjs';
 import { downloadPagesChannel } from './pages-channel.mjs';
+import { checksWorkflow, checkPlan, LocalChecks } from './release-local-checks.mjs';
+import { LocalDelivery } from './release-local-delivery.mjs';
+import { droppedChecks, localWorkflow, quickChecks, releasePlan } from './release-local-policy.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const WORKFLOW = '.github/workflows/unified-release.yml';
@@ -84,7 +87,7 @@ export function missingReleaseCredentials(args, secrets, plan = {}) {
 }
 
 async function carryArm64(engine, context) {
-  const directory = join(engine.directory, 'carried-arm64');
+  const directory = join(engine.runDirectory || engine.directory, 'carried-arm64');
   if (!existsSync(join(directory, 'manifest.json'))) {
     const [owner, repo] = context.github.repository.split('/');
     await downloadPagesChannel({ github: localGithub(context.github.token, undefined, engine.abortController.signal), repo: { owner, repo }, directory, channel: context.inputs.channel });
@@ -109,7 +112,7 @@ async function macJob({ job, context, label, engine }) {
     variables: engine.variables,
   };
   privateWrite(join(local, 'job.json'), JSON.stringify(spec));
-  await engine.processes.run('git', ['bundle', 'create', join(local, 'source.bundle'), 'HEAD'], { cwd: root, quiet: true, env: process.env });
+  await engine.processes.run('git', ['bundle', 'create', join(local, 'source.bundle'), 'HEAD'], { cwd: engine.root, quiet: true, env: process.env });
   await engine.processes.run('ssh', ['-o', 'BatchMode=yes', MAC, `umask 077; mkdir -p '${remote}'`], { env: process.env, timeout: 30_000 });
   await engine.processes.run('scp', ['-q', join(local, 'source.bundle'), join(local, 'job.json'), `${MAC}:${remote}/`], { env: process.env });
   const command = `set -e; export PATH='${tools}/node/bin':/usr/local/bin:/opt/homebrew/bin:$HOME/.cargo/bin:$PATH; export RUSTUP_HOME='${tools}/rustup' CARGO_HOME='${tools}/cargo'; if [ -d '${remote}/source/.git' ]; then test "$(git -C '${remote}/source' rev-parse HEAD)" = '${context.github.sha}'; else git clone --quiet '${remote}/source.bundle' '${remote}/source'; fi; ( cd '${remote}/source' && npm ci --ignore-scripts --no-audit --no-fund && node scripts/release-local.mjs --remote-job '${remote}/job.json' )`;
@@ -162,9 +165,34 @@ rustup run 1.95.0 rustc --version
 
 export function localHooks(directory, processes) {
   return {
+    workflow: async ({ file, workflow, inherited, engine }) => {
+      file = file.replace(/^\.\//, '');
+      if (file === checksWorkflow) {
+        const checks = new LocalChecks(engine);
+        await checks.prepare(inherited);
+        return { workflow: quickChecks(workflow), parallel: true, job: (...args) => checks.queue.run(...args), finish: () => checks.finish() };
+      }
+      if (file === WORKFLOW) {
+        const delivery = new LocalDelivery(engine);
+        process.once('SIGINT', delivery.cancel); process.once('SIGTERM', delivery.cancel);
+        return { workflow: localWorkflow(workflow), parallel: true, job: (...args) => delivery.run(...args),
+          finish: () => { process.removeListener('SIGINT', delivery.cancel); process.removeListener('SIGTERM', delivery.cancel); } };
+      }
+    },
     job: async args => {
       const { context, engine } = args;
       context.env.BEELINE_LOCAL_RELEASE = 'true';
+      if (context.github.token) {
+        // Private HOME must not depend on the operator's credential helper.
+        // Config is passed via the child environment, never command arguments
+        // or a persistent gitconfig; register the encoded form for redaction.
+        const basic = Buffer.from(`x-access-token:${context.github.token}`).toString('base64');
+        processes.mask(basic);
+        const index = Number(context.env.GIT_CONFIG_COUNT || 0);
+        Object.assign(context.env, { GIT_CONFIG_COUNT: String(index + 1),
+          [`GIT_CONFIG_KEY_${index}`]: 'http.https://github.com/.extraheader',
+          [`GIT_CONFIG_VALUE_${index}`]: `AUTHORIZATION: basic ${basic}`, GIT_TERMINAL_PROMPT: '0' });
+      }
       if (['helper_linux', 'helper_macos', 'server'].includes(context.github.job)) context.env.CARGO_BUILD_JOBS = '2';
       if (context.github.job === 'helper_macos') {
         if (context.matrix.platform === 'darwin-arm64') return carryArm64(engine, context);
@@ -232,7 +260,7 @@ export function localHooks(directory, processes) {
         if (!context.env.NPM_AUTOMATION_TOKEN) throw new Error('Local npm publication requires NPM_AUTOMATION_TOKEN');
       }
     },
-    afterStep: async ({ step, context, env, result }) => {
+    afterStep: async ({ step, context, env, result, engine }) => {
       if (step.name === 'Produce the inspectable release plan' &&
           result.outputs.run_mobile_native === 'true' && result.outputs.native_android === 'true' &&
           !context.secrets?.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON) {
@@ -254,6 +282,7 @@ export function localHooks(directory, processes) {
         delete record.runId;
         record.execution = { kind: 'local', id: basename(directory), dispatchedBy: JSON.parse(context.inputs.dispatched_by) };
         record.delivery.localExceptions = { staticWebsite: 'not released', helperArm64: 'carried unchanged', desktop: 'published signed updater set carried unchanged, including Windows' };
+        record.delivery.localExceptions.checks = { retained: ['build', 'typecheck', 'dead-code', 'design grammar', 'codecs'], dropped: droppedChecks(engine.read(checksWorkflow)), coverage: 'not produced by quick release checks' };
         const previousPath = join(context.runner.temp, 'previous/release.json');
         if (existsSync(previousPath)) {
           const previous = JSON.parse(readFileSync(previousPath, 'utf8'));
@@ -291,6 +320,14 @@ export function dryInitializeJob(workflow) {
 }
 
 export async function dryRun(args, engine, context) {
+  if (args.leg === 'release') {
+    engine.processes.log(JSON.stringify(releasePlan(engine.read(WORKFLOW), engine.read(checksWorkflow)), null, 2));
+    return;
+  }
+  if (args.leg === 'release_checks') {
+    engine.processes.log(JSON.stringify(checkPlan(engine), null, 2));
+    return;
+  }
   context = { ...context, vars: engine.variables || {}, secrets: engine.secrets || {}, env: {} };
   const legs = args.leg ? [args.leg] : ['initialize', 'require-tools', 'eas-cli', 'server', 'helper', 'mobile-ota', 'pages', 'web-app'];
   const sha = context.github.sha;
@@ -330,14 +367,14 @@ export async function releaseChecks(engine, context) {
   const inputs = engine.value(call.with, { ...context, needs: { initialize: { outputs: { release_sha: context.github.sha } } } });
   const results = await engine.workflow(call.uses, inputs, context, 'release_checks/');
   privateWrite(join(engine.directory, 'release-checks.json'), JSON.stringify(results, null, 2));
-  if (Object.values(results).some(result => result.result === 'failure')) throw new Error(`Release checks failed; inspect private results under ${engine.directory}`);
+  if (Object.values(results).some(result => ['failure', 'cancelled'].includes(result.result))) throw new Error(`Release checks failed; inspect private results under ${engine.directory}`);
   engine.processes.log('Release checks complete; no release identity reserved or delivery attempted.');
   return results;
 }
 
 async function main(argv) {
   const args = parseArguments(argv);
-  if (args.help) { console.log('node scripts/release-local.mjs [--plan | --dry-run [--leg initialize|server|helper|mobile-ota|pages|web-app|eas-cli|require-tools|mac-tools] | --execute [--leg release_checks]] --channel next|latest --release-sha <40-char SHA> --dispatched-by <audited JSON> [--env-file ~/.config/beeline-release.env] [--run-release-proof] [--store-track none|beta|production] [--state-dir /outside/repo]'); return; }
+  if (args.help) { console.log('node scripts/release-local.mjs [--plan | --dry-run [--leg release|release_checks|initialize|server|helper|mobile-ota|pages|web-app|eas-cli|require-tools|mac-tools] | --execute [--leg release_checks]] --channel next|latest --release-sha <40-char SHA> --dispatched-by <audited JSON> [--env-file ~/.config/beeline-release.env] [--run-release-proof] [--store-track none|beta|production] [--state-dir /outside/repo]'); return; }
   if (args['remote-job']) { await remoteJob(args['remote-job']); return; }
   if (process.platform !== 'linux') throw new Error('Run the release controller on Linux squire');
   const sha = args['release-sha'] || execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
@@ -355,10 +392,10 @@ async function main(argv) {
   const context = { github: { repository: 'Beeline-Work/beeline', sha, run_id: String(Math.floor(Date.now() / 1000)), run_attempt: '1', event_name: 'workflow_dispatch', event: {}, actor: 'local-release', token: secrets.GITHUB_TOKEN || secrets.GH_TOKEN || '' }, runner: {}, job: { status: 'success' } };
   if (args.mode === 'plan') {
     console.log(`Local ${args.channel} release at ${sha}; no release commands executed.`);
-    console.log(`Workflow jobs in dependency order: ${Object.keys(engine.read(WORKFLOW).jobs).join(', ')}`);
+    console.log(JSON.stringify(releasePlan(engine.read(WORKFLOW), engine.read(checksWorkflow)), null, 2));
     console.log('website not released: static Pages is suspended; selected web app leg still runs.');
     console.log('Apple-silicon helper carried unchanged. Published desktop updater set (including Windows) carried unchanged; its global version is retained.');
-    console.log(`Intel helper builds over SSH on ${MAC}. Canary, helper update proof, optional device proof, rollback, full Checks gate and finalization stay enabled.`);
+    console.log(`Intel helper builds over SSH on ${MAC}. Canary, helper update proof, optional device proof, rollback, quick release checks and finalization stay enabled.`);
     return;
   }
   if (args.mode === 'dry-run') { await dryRun(args, engine, context); return; }
@@ -387,7 +424,6 @@ async function main(argv) {
   engine.baseEnv.PATH = toolEnv.PATH;
   if (toolEnv.FNM_DIR) engine.baseEnv.FNM_DIR = toolEnv.FNM_DIR;
   await processes.run('bash', ['-c', 'for tool in docker git ssh scp gh gh-axi flyctl rustup; do command -v "$tool" >/dev/null || exit 1; done'], { env: toolEnv, quiet: true });
-  await prepareMacTools(engine);
   // A local lock plus the existing advisory Actions check. The operator must
   // keep hosted release dispatch disabled until this recovery run completes.
   const lock = join(tmpdir(), `beeline-unified-release-${userInfo().uid}.lock`);

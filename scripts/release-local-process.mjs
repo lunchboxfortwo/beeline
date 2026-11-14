@@ -1,17 +1,21 @@
 import { spawn } from 'node:child_process';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 export class Processes {
   constructor(secrets = {}, log = console.log) {
+    this.logs = new AsyncLocalStorage();
     this.masks = new Set(Object.values(secrets).filter(v => typeof v === 'string' && v.length > 3));
     this.log = value => {
       const safe = this.redact(String(value));
-      if (this.logFile) appendFileSync(this.logFile, `${safe}\n`, { mode: 0o600 });
+      const logFile = this.logs.getStore() || this.logFile;
+      if (logFile) appendFileSync(logFile, `${safe}\n`, { mode: 0o600 });
       log(safe);
     };
     this.children = new Set();
   }
+  withLogFile(path, run) { return this.logs.run(path, run); }
   mask(value) { if (value?.length > 3) this.masks.add(value); }
   redact(value) {
     for (const secret of [...this.masks].sort((a, b) => b.length - a.length)) value = value.split(secret).join('***');
