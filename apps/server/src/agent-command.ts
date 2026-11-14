@@ -738,6 +738,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
   roomId: string; requestId?: string; text: string; report?: boolean; status?: unknown; ask?: string;
   steps?: unknown; messageId?: string; replyToMessageId?: string;
   queuedRequestIds?: readonly string[];
+  harnessEnded?: boolean;
   /** Internal publication receipt shared by items with the same return address. */
   sharedReplyId?: string;
 }): Promise<{ id: string; createdAt: number; delivered?: boolean; receipt?: string; answered?: boolean; woken?: string[]; notWoken?: {handle:string;reason:string}[] }> {
@@ -781,8 +782,8 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
        WHERE item.agent_id=$1 AND item.room_id::text=$2 AND item.id=$3 FOR UPDATE OF item`,
       [agentId, input.roomId, input.requestId ?? null],
     )).rows[0];
-    // A quietly finished background item stays quiet when a closing line arrives later.
-    if (item?.state === 'complete' && (item.result_message_id || isBackgroundCommand(item.reason)))
+    // A terminal item never publishes again, including a silent harness exit.
+    if (item?.state === 'complete')
       return { id: item.result_message_id ?? item.id, createdAt: Math.floor(new Date(item.created_at).getTime() / 1000), delivered: true };
     const payload = item?.private_payload;
     const escalation = input.report ? item?.report_address ?? (payload?.kind === 'order' ? payload.escalation : undefined) : undefined;
@@ -792,6 +793,11 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
     const status = ['done', 'blocked', 'failed', 'needs_decision'].includes(String(input.status))
       ? String(input.status).replace('_', '-') : 'done';
     const publicText = repairAgentPost(item?.reason==='voice_order' ? cleanVoiceReply(input.text,item.name) : input.text).text.replace(input.report ? /^(?:done|blocked|failed|needs[-_]decision):\s*/ : /^$/, '').trim();
+    if (!publicText && input.harnessEnded === true && item?.state === 'pending') {
+      completedNow = true;
+      await endAgentTurn(db, item, 'complete', null, item.public_reply_id ?? undefined);
+      return { id: item.public_reply_id ?? item.id, createdAt: Math.floor(Date.now() / 1000) };
+    }
     if (item?.public_reply_id) {
       completedNow = true;
       const id = hash(`closing:${item.id}`);

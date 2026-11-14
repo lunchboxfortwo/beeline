@@ -1,4 +1,4 @@
-import { isBackgroundCommand,type AgentCommand } from '@beeline/api-contract/daemon';
+import type { AgentCommand } from '@beeline/api-contract/daemon';
 import { dirname,resolve } from 'node:path';
 import { resolveSessionIdleMs } from './agent-process.js';
 import { AnswerStore,type StoredAnswer } from './answer-store.js';
@@ -63,9 +63,12 @@ export class AgentRunner {
     this.agent = runtimeIdentity(runtime.agent);
     this.answers = new AnswerStore(resolve(runtimeDir, 'answers'));
     this.restored = this.answers.all().then(answers => {
-      for (const answer of answers) {
+      for (const saved of answers) {
+        // Retire generated notices left in an older helper's durable outbox.
+        const retiredNotice = saved.text.startsWith(`${this.agent.name} stopped while answering this: `);
+        const answer = retiredNotice ? { ...saved, text: '', harnessEnded: true, steps: undefined } : saved;
         this.stored.set(answer.itemId, answer);
-        this.durable.add(answer.itemId);
+        if (!retiredNotice) this.durable.add(answer.itemId);
         for (const id of [answer.itemId, ...(answer.queuedRequestIds ?? [])]) this.answered.add(id);
       }
     });
@@ -186,23 +189,20 @@ export class AgentRunner {
         void this.options.daemonApi.execute('startAgentTurn', { roomId: item.roomId, requestId: item.turnRequestId })
           .catch(error => console.warn('[body] delivery status not written:', error));
         const answer = await place.session.deliver(item, place.waiting.filter(next => !batched.has(next.id)), batch);
-        // Without a public answer, background work finishes quietly; an owed answer gets the stopped notice.
-        const reply = (next: AgentCommand) => answer.text || (isBackgroundCommand(next.reason) ? ''
-          : `${this.agent.name} stopped while answering this: harness ended without a public answer (${answer.stopReason})`);
+        // A completed harness with no public answer closes its items quietly.
         const steps = answer.text && answer.steps.length ? { steps: answer.steps } : {};
         // Stop wall: a stopped item gets no answer.
         const pendingBatch = batch.filter(next => this.latest.some(listed => listed.id === next.id));
-        for (const text of new Set(pendingBatch.map(reply))) {
-          const group = pendingBatch.filter(next => reply(next) === text);
+        if (pendingBatch.length) {
           await this.store({
-            itemId: group[0]!.id, roomId: item.roomId, requestId: group[0]!.turnRequestId,
-            queuedRequestIds: group.slice(1).map(next => next.id), text, ...steps,
+            itemId: pendingBatch[0]!.id, roomId: item.roomId, requestId: pendingBatch[0]!.turnRequestId,
+            queuedRequestIds: pendingBatch.slice(1).map(next => next.id), text: answer.text, harnessEnded: true, ...steps,
           });
         }
         for (const answered of [...(batch.length ? [] : [item]), ...(answer.followUps ?? [])]) {
           if (this.latest.some(listed => listed.id === answered.id)) await this.store({
             itemId: answered.id, roomId: answered.roomId, requestId: answered.turnRequestId,
-            text: reply(answered), ...steps,
+            text: answer.text, harnessEnded: true, ...steps,
           });
         }
         const consumed = new Set([...batched, ...(answer.followUps ?? []).map(next => next.id)]);
@@ -215,7 +215,7 @@ export class AgentRunner {
         if (started && !this.stopped) await this.store({
           itemId: item.id, roomId: item.roomId, requestId: item.turnRequestId,
           ...(batch.length ? { queuedRequestIds: batch.slice(1).filter(next => this.latest.some(listed => listed.id === next.id)).map(next => next.id) } : {}),
-          text: `${this.agent.name} stopped while answering this: ${error instanceof Error ? error.message : String(error)}`,
+          text: '', harnessEnded: true,
         });
         else {
           place.waiting.unshift(item);
@@ -278,6 +278,7 @@ export class AgentRunner {
       }
       const receipt=await api.execute('postRoomMessage', {
         roomId: answer.roomId, requestId: answer.itemId, text: answer.text, presentation: 'message',
+        ...(answer.harnessEnded ? { harnessEnded: true } : {}),
         ...(answer.queuedRequestIds?.length ? { queuedRequestIds: answer.queuedRequestIds } : {}),
         ...(answer.steps ? { steps: answer.steps } : {}),
       });
@@ -298,7 +299,7 @@ export class AgentRunner {
   private sessionExited(placeId: string): void {
     const place = this.places.get(placeId);
     if (!place || this.stopped) return;
-    // deliver() posts the stopped-answer notice for a running item.
+    // deliver() durably completes a running item, including a silent harness exit.
     if (!place.running) void place.session.stop().then(() => this.pump(placeId));
   }
 

@@ -403,10 +403,10 @@ export class PlaceSession {
 
   /**
    * Hand one item to the session and wait for its answer. Throws only when
-   * the harness itself fails; the item then stays in the queue.
+   * the harness itself fails; the runner then completes the item silently.
    */
   async deliver(item: AgentCommand, queued: readonly AgentCommand[], batch: readonly AgentCommand[] = []): Promise<Answer> {
-    // start() ran first; a session that died since fails its prompt and the item is queued again.
+    // start() ran first; a session that died since fails its prompt.
     const client = this.client!;
     const sessionId = this.sessionId!;
     this.current = item;
