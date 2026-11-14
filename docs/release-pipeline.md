@@ -65,6 +65,21 @@ missing history fails closed locally. Keep tags current with a normal full
 | `BEELINE_INSIGHTS_TOKEN`, `MOBILE_OTA_OWNER_PUBKEY`, `MOBILE_OTA_RECEIPT_TOKEN` | Existing best-effort release bookkeeping |
 | `BEELINE_HELPER_SENTRY_DSN`, `BEELINE_MOBILE_SENTRY_DSN` | Public build configuration, corresponding to repository variables |
 
+Desktop downloads are served from `https://downloads.usebeeline.app/latest`.
+Latest publication copies every installer, signature and `Beeline-latest.json`
+to the `beeline-downloads` R2 bucket under both `v<version>/` and `latest/`;
+GitHub releases retain a second copy. The updater checks R2 first and GitHub
+second, and manifest payload URLs use the versioned R2 prefix. Local recovery
+copies its carried signed set through the same publication step, preserving
+its desktop version and signatures.
+
+Provide `CLOUDFLARE_R2_TOKEN` (a Cloudflare API bearer token with R2 object
+write authority) and `CLOUDFLARE_ACCOUNT_ID` in the private local release env
+file. Hosted releases use the `CLOUDFLARE_R2_TOKEN` Actions secret and
+`CLOUDFLARE_ACCOUNT_ID` repository variable. The publisher uses the
+[Cloudflare object upload API](https://developers.cloudflare.com/api/resources/r2/subresources/buckets/subresources/objects/methods/upload/)
+and uploads each manifest after its installers, without additional retries.
+
 The carried desktop set requires no new Apple signing or Tauri private keys.
 Keep vaulted keys vaulted; suitable provider API calls can use Squire's
 `use_credential`. A CLI requiring a raw credential needs a provider-issued

@@ -29,16 +29,19 @@ export function updaterBuildConfig({ version, publicKey, endpoint }) {
   if (typeof publicKey !== 'string' || publicKey.trim().length === 0) {
     fail('TAURI_UPDATER_PUBLIC_KEY is required for a production desktop build');
   }
-  let url;
-  try { url = new URL(endpoint); } catch { fail('desktop updater endpoint is not a valid URL'); }
-  if (url.protocol !== 'https:') fail('desktop updater endpoint must use HTTPS');
+  const endpoints = (Array.isArray(endpoint) ? endpoint : [endpoint]).map(value => {
+    let url;
+    try { url = new URL(value); } catch { fail('desktop updater endpoint is not a valid URL'); }
+    if (url.protocol !== 'https:') fail('desktop updater endpoint must use HTTPS');
+    return url.toString();
+  });
   return {
     version: normalized,
     bundle: { createUpdaterArtifacts: true },
     plugins: {
       updater: {
         pubkey: publicKey.trim(),
-        endpoints: [url.toString()],
+        endpoints,
         windows: { installMode: 'passive' },
       },
     },
@@ -55,7 +58,7 @@ export function createDesktopUpdateManifest({ directory, version, releaseTag, re
     if (!signature) fail(`${file}.sig is empty`);
     platforms[platform] = {
       signature,
-      url: `https://github.com/${repository}/releases/download/${releaseTag}/${file}`,
+      url: `https://downloads.usebeeline.app/${releaseTag}/${file}`,
     };
   }
   const date = new Date(publishedAt);
@@ -83,6 +86,7 @@ function options(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
     if (!value.startsWith('--')) result._.push(value);
+    else if (value === '--endpoint') (result.endpoint ??= []).push(argv[++index]);
     else result[value.slice(2)] = argv[++index];
   }
   return result;

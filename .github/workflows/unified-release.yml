@@ -1375,6 +1375,8 @@ jobs:
       - name: Publish the one GitHub release record with its release.json and stable desktop downloads
         if: steps.result.outputs.outcome == 'success' && steps.result.outputs.no_op != 'true' && needs.initialize.outputs.channel == 'latest'
         env:
+          CLOUDFLARE_R2_TOKEN: ${{ secrets.CLOUDFLARE_R2_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ needs.initialize.outputs.release_version }}
           RELEASE_SHA: ${{ needs.initialize.outputs.release_sha }}
@@ -1413,6 +1415,13 @@ jobs:
           fi
           test -f "$manifest" || { echo 'desktop updater manifest is missing' >&2; exit 1; }
           mapfile -t assets < <(find "$RUNNER_TEMP/desktop-release" -maxdepth 1 -type f -name 'Beeline-*' ! -name 'Beeline-latest.json' | sort)
+          # Publish the installers before either updater manifest can name them.
+          # Local recovery executes this same step with its carried signed set.
+          node scripts/desktop-r2.mjs \
+            --directory "$RUNNER_TEMP/desktop-release" \
+            --manifest "$manifest" --tag "$RELEASE_VERSION" \
+            --output "$RUNNER_TEMP/desktop-release/Beeline-latest.json"
+          manifest="$RUNNER_TEMP/desktop-release/Beeline-latest.json"
           previous="$RUNNER_TEMP/desktop-rollback/Beeline-latest.json"
           # initialize reserved this identity as a draft; create it only if
           # that draft is gone.
