@@ -28,8 +28,8 @@ async function updaterModule() {
 
 export async function verifyPagesUpdate({ manifestUrl, expectedManifest, workDir }) {
   const strictFetch = async (url, options) => {
-    // The download route must serve bytes directly; GitHub asset redirects
-    // are followed inside the Worker, never by the installed helper.
+    // The download route must serve R2 bytes directly through the Worker,
+    // without redirects reaching the installed helper.
     const response = await fetch(url, { ...options, redirect: 'error', cache: 'no-store' });
     if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
     return response;

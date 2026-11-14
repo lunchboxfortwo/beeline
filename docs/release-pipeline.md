@@ -119,6 +119,13 @@ second, and manifest payload URLs use the versioned R2 prefix. Local recovery
 copies its carried signed set through the same publication step, preserving
 its desktop version and signatures.
 
+Helper channels use the same R2 client and bucket: every channel file is
+uploaded under `dl/` (latest) or `dl/next/` (next), with the manifest last.
+The `/dl/*` Worker reads those public objects through
+`https://downloads.usebeeline.app`; GitHub rolling releases retain secondary
+copies. The existing helper update proof still runs against `usebeeline.app/dl`
+immediately after publication, without additional gates or retries.
+
 Provide `CLOUDFLARE_R2_TOKEN` (a Cloudflare API bearer token with R2 object
 write authority) and `CLOUDFLARE_ACCOUNT_ID` in the private local release env
 file. Hosted releases use the `CLOUDFLARE_R2_TOKEN` Actions secret and

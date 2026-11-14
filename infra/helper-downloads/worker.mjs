@@ -1,5 +1,5 @@
-// Keep installed helpers' /dl URLs stable while streaming the public Release
-// assets. No GitHub credentials, Pages deployment or archive buffering needed.
+// Keep installed helpers' /dl URLs stable while streaming public R2 objects.
+// No download credentials, Pages deployment or archive buffering needed.
 export async function serveDownloads(request, fetchImpl = fetch) {
   const path = new URL(request.url).pathname;
   const match = /^\/dl\/(next\/)?(manifest\.json|beeline-bootstrap\.mjs(?:\.sha256)?|beeline-(?:linux-x64|darwin-arm64|darwin-x64)\.tar\.gz(?:\.sha256)?)$/.exec(path);
@@ -7,10 +7,9 @@ export async function serveDownloads(request, fetchImpl = fetch) {
   if (!['GET', 'HEAD'].includes(request.method)) {
     return new Response('Method not allowed\n', { status: 405, headers: { Allow: 'GET, HEAD' } });
   }
-  const tag = `helper-update-channel${match[1] ? '-next' : ''}`;
-  const url = new URL(`https://github.com/Beeline-Work/beeline/releases/download/${tag}/${match[2]}`);
-  // Channel assets are replaced by publication. Bypass cached GitHub redirects
-  // as well as Cloudflare's cache so a release proof sees the current channel.
+  const url = new URL(`https://downloads.usebeeline.app/dl/${match[1] ? 'next/' : ''}${match[2]}`);
+  // Channel objects are replaced by publication. Bypass Cloudflare's cache
+  // so a release proof sees the current channel immediately.
   url.searchParams.set('channel_check', String(Date.now()));
   const headers = new Headers({ 'Accept-Encoding': 'identity', 'Cache-Control': 'no-cache' });
   for (const name of ['range', 'if-range']) {
@@ -29,7 +28,7 @@ export async function serveDownloads(request, fetchImpl = fetch) {
   outgoing.set('Cache-Control', 'no-store');
   outgoing.set('Access-Control-Allow-Origin', '*');
   outgoing.set('X-Content-Type-Options', 'nosniff');
-  outgoing.set('X-Beeline-Downloads', 'github-release');
+  outgoing.set('X-Beeline-Downloads', 'r2');
   outgoing.set('Content-Type', match[2] === 'manifest.json' ? 'application/json; charset=utf-8'
     : match[2].endsWith('.sha256') ? 'text/plain; charset=utf-8'
     : match[2].endsWith('.mjs') ? 'text/javascript; charset=utf-8' : 'application/gzip');

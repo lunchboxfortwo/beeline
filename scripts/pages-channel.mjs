@@ -3,6 +3,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { validateBundleDirectory } from './pages-site.mjs';
+import { createR2Uploader } from './r2-client.mjs';
 
 export const CHANNEL_TAG = 'helper-update-channel';
 export function pagesChannelTag(channel = 'latest') {
@@ -65,28 +66,15 @@ export async function publishPagesChannel({
   expectedSha,
   expectedVersion,
   channel = 'latest',
+  token,
+  accountId,
+  fetchImpl,
 }) {
+  const tag = pagesChannelTag(channel);
   const { manifest, files } = await validateBundleDirectory(directory, {
     expectedSha,
     expectedVersion,
   });
-  let release;
-  try {
-    ({ data: release } = await github.rest.repos.getReleaseByTag({ ...repo, tag: pagesChannelTag(channel) }));
-  } catch (error) {
-    if (error.status !== 404) throw error;
-    ({ data: release } = await github.rest.repos.createRelease({
-      ...repo,
-      tag_name: pagesChannelTag(channel),
-      target_commitish: manifest.sourceCommit,
-      name: `Current helper ${channel} update channel`,
-      prerelease: true,
-      make_latest: 'false',
-      body: 'Public assets for the usebeeline.app/dl download route. Managed by the daemon release leg; do not edit assets by hand.',
-    }));
-  }
-  // A retry replaces a partial backup too. Never update the manifest before
-  // its payloads; an interrupted write cannot pass downloadPagesChannel.
   const inputs = [];
   for (const name of MAC_INPUT_FILES) {
     try {
@@ -94,7 +82,30 @@ export async function publishPagesChannel({
       inputs.push(name);
     } catch { /* A bundle built without input hashes is simply not carried. */ }
   }
-  for (const name of [...files, ...inputs, 'manifest.json']) {
+  const channelFiles = [...files, ...inputs, 'manifest.json'];
+  const put = createR2Uploader({ token, accountId, fetchImpl });
+  const prefix = channel === 'next' ? 'dl/next' : 'dl';
+  // Publish the public channel first, with its manifest after all payloads.
+  // GitHub retains a secondary copy for authenticated build carry/downloads.
+  for (const name of channelFiles) await put(prefix, name, join(directory, name));
+  let release;
+  try {
+    ({ data: release } = await github.rest.repos.getReleaseByTag({ ...repo, tag }));
+  } catch (error) {
+    if (error.status !== 404) throw error;
+    ({ data: release } = await github.rest.repos.createRelease({
+      ...repo,
+      tag_name: tag,
+      target_commitish: manifest.sourceCommit,
+      name: `Current helper ${channel} update channel`,
+      prerelease: true,
+      make_latest: 'false',
+      body: 'Secondary copy of the R2 helper channel served at usebeeline.app/dl. Managed by the daemon release leg; do not edit assets by hand.',
+    }));
+  }
+  // A retry replaces a partial backup too. Never update the manifest before
+  // its payloads; an interrupted write cannot pass downloadPagesChannel.
+  for (const name of channelFiles) {
     const previous = release.assets.find((asset) => asset.name === name);
     if (previous) await github.rest.repos.deleteReleaseAsset({ ...repo, asset_id: previous.id });
     const data = await readFile(join(directory, name));

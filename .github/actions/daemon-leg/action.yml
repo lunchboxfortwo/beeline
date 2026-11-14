@@ -1,7 +1,7 @@
 # Daemon leg of the unified release (was .github/workflows/beeline-bundle.yml).
 # unified-release.yml calls it twice from the self-hosted production host:
 # phase=collect combines the install-verified Linux and macOS native bundles,
-# phase=promote publishes public Release assets and smoke-tests the exact manifest. Fleet
+# phase=promote publishes R2 and secondary Release assets and smoke-tests the exact manifest. Fleet
 # uptake is asynchronous observability and never holds a release open. The
 # caller installs Node 22 and root dependencies; each native builder owns
 # its Rust toolchain.
