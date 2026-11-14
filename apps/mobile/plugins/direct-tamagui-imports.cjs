@@ -62,7 +62,10 @@ module.exports = function directTamaguiImports(api) {
       if (!t.isImportSpecifier(specifier) || specifier.importKind === 'type') return true;
       const source = imports.get(specifier.imported.name);
       if (!source) return true;
-      direct.push(t.importDeclaration([specifier], t.stringLiteral(target(source))));
+      // Metro's existing inlineRequires transform can then load each component
+      // when used, rather than evaluating every component imported by grammar.
+      direct.push(t.variableDeclaration('const', [t.variableDeclarator(specifier.local,
+        t.memberExpression(t.callExpression(t.identifier('require'), [t.stringLiteral(target(source))]), specifier.imported))]));
       return false;
     });
     if (!direct.length) return;

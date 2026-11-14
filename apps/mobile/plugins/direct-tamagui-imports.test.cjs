@@ -10,10 +10,10 @@ const transform = (source, platform = 'web') => transformSync(source, {
 test('loads the same core, wrapped components and provider without the whole barrel', () => {
   const result = transform("import { YStack, Button as Action, TamaguiProvider, useTheme, Text, createTamagui } from 'tamagui';");
   assert.match(result, /import .*setup\.mjs/);
-  assert.match(result, /import \{ YStack \} from "@tamagui\/stacks"/);
-  assert.match(result, /import \{ Button as Action \} from "tamagui\/button"/);
-  assert.match(result, /import \{ TamaguiProvider \} from "tamagui\/provider"/);
-  assert.match(result, /import \{ useTheme \} from "@tamagui\/core"/);
+  assert.match(result, /YStack = require\("@tamagui\/stacks"\)\.YStack/);
+  assert.match(result, /Action = require\("tamagui\/button"\)\.Button/);
+  assert.match(result, /TamaguiProvider = require\("tamagui\/provider"\)\.TamaguiProvider/);
+  assert.match(result, /useTheme = require\("@tamagui\/core"\)\.useTheme/);
   assert.match(result, /views\/Text\.mjs/);
   assert.match(result, /createTamagui\.mjs/);
   assert.doesNotMatch(result, /from ['"]tamagui['"]/);
@@ -32,5 +32,29 @@ test('unknown, namespace and side-effect imports preserve the package contract',
   assert.match(result, /import \{ FutureComponent \} from 'tamagui'/);
   assert.match(result, /import \* as UI from 'tamagui'/);
   assert.match(result, /import 'tamagui'/);
-  assert.match(result, /import \{ useTheme \} from "@tamagui\/core"/);
+  assert.match(result, /useTheme = require\("@tamagui\/core"\)\.useTheme/);
+});
+
+
+test('existing Metro inline requires leave unused components unevaluated', () => {
+  const first = transformSync("import { YStack, Sheet } from 'tamagui'; export function body() { return YStack; } export function modal() { return Sheet; }", {
+    configFile: false, babelrc: false, plugins: [plugin, '@babel/plugin-transform-modules-commonjs'],
+  }).code;
+  const compiled = transformSync(first, {
+    configFile: false, babelrc: false,
+    plugins: [require('metro-transform-plugins').inlineRequiresPlugin],
+  }).code;
+  const loaded = [];
+  const exports = {};
+  new Function('require', 'exports', compiled)(name => {
+    loaded.push(name);
+    return { YStack: 'stack', Sheet: 'sheet' };
+  }, exports);
+  assert.equal(loaded.length, 1); // The original setup side effect remains eager.
+  assert.match(loaded[0], /setup\.mjs$/);
+  assert.equal(exports.body(), 'stack');
+  assert.equal(loaded.at(-1), '@tamagui/stacks');
+  assert.equal(loaded.includes('tamagui/sheet'), false);
+  assert.equal(exports.modal(), 'sheet');
+  assert.equal(loaded.at(-1), 'tamagui/sheet');
 });
