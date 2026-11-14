@@ -71,11 +71,12 @@ export function activeMentionAtCursor(text: string, cursor: number): ActiveMenti
   };
 }
 
-/** Prefix matches lead substring matches while preserving Room roster order within each group. */
+/** Return every Room match for the scrollable menu; its viewport owns height.
+ * Prefix matches lead substring matches while preserving roster order. */
 export function filterMentionCandidates<T extends MentionCandidate>(
   candidates: readonly T[],
   query: string,
-  limit = 6,
+  limit = candidates.length,
 ): { matches: T[]; overflow: number } {
   const normalizedQuery = normalizeMentionSearch(query);
   const matching = candidates

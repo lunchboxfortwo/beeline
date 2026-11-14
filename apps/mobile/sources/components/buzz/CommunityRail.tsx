@@ -158,6 +158,12 @@ type BuzzCommunityShellProps = CommunityRailProps & {
 };
 
 export function BuzzCommunityShell({ children, communities, activeCommunityId, onSelect, onAdd, onLeaveWorkspace }: BuzzCommunityShellProps) {
+  const parent=useCommunityDrawer();
+  return parent ? <>{children}</> : <CommunityDrawerShell communities={communities} activeCommunityId={activeCommunityId}
+    onSelect={onSelect} onAdd={onAdd} onLeaveWorkspace={onLeaveWorkspace}>{children}</CommunityDrawerShell>;
+}
+
+function CommunityDrawerShell({ children, communities, activeCommunityId, onSelect, onAdd, onLeaveWorkspace }: BuzzCommunityShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerX = useSharedValue(-DRAWER_WIDTH);
   const scrimOpacity = useSharedValue(0);

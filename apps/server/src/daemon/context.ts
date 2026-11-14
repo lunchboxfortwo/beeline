@@ -35,6 +35,7 @@ import type { daemonAgentWorkbench,daemonAppCardMark,daemonOfferContext,daemonSe
 
 /** Named service dependencies shared by ordinary and command-scoped handlers. */
 export interface DaemonDependencies {
+  readonly helperConnection?: { connectionId: string; epoch: number };
   readonly database: SqlDatabase;
   readonly live: LiveHub;
   readonly roomGitHubToken?: (

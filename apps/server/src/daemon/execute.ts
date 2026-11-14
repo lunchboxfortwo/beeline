@@ -302,6 +302,7 @@ import { modelText } from '../message-origin.js';
 /** Conversational operations have one queue entry and one answer exit. */
 export async function daemonExecute<Name extends keyof DaemonOperationMap>(ctx: DaemonContext,
   name: Name, input: Input<Name>, agentId: string, modelClaim?: OwnedModelClaimCapability,
+  helperConnection?: { connectionId: string; epoch: number },
 ): Promise<Output<Name>> {
   const value = input as Record<string, unknown>;
   if (name === 'postRoomMessage' || name === 'report') {
@@ -335,5 +336,5 @@ export async function daemonExecute<Name extends keyof DaemonOperationMap>(ctx: 
       typeof value.agent === 'string' ? value.agent : undefined, undefined,
       typeof value.transportRequestId === 'string' ? createHash('sha256').update(`order:${agentId}:${value.transportRequestId}`).digest('hex') : undefined) as Promise<Output<Name>>;
   }
-  return daemonExecuteTool(ctx, name, input, agentId, modelClaim);
+  return daemonExecuteTool(helperConnection ? {...ctx,helperConnection} : ctx, name, input, agentId, modelClaim);
 }

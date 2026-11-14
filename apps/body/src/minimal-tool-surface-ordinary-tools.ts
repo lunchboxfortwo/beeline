@@ -595,7 +595,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
         "capabilities": { "type": "string", "minLength": 1, "maxLength": 240, "description": "What this command can do, for example Delete files. Omit when unknown; never invent a scope." },
         "purpose": {
           "type": "string", "minLength": 1, "maxLength": 240,
-          "description": "Plain language: what you want to do and why. Example: Free about 5 GB of disk by deleting old build files in 3 finished corners, so the Android test build can finish."
+          "description": "Short purpose, about 12 words or fewer, starting with a verb. Example: Deploy the Milo site. Do not paste the command; target carries its exact argv."
         },
         "reason": {
           "type": "string",

@@ -670,7 +670,8 @@ it('dispatches turn controls with the registered machine owner through the ordin
     const registered=await client.next(frame=>frame.type==='registered');
     client.send({type:'daemon-operation',agentId:AGENT_A,requestId:'start',operation:'startAgentTurn',input:{roomId:'room',requestId:'command'}});
     await client.next(frame=>frame.requestId==='start');
-    expect(daemon.execute).toHaveBeenCalledWith('startAgentTurn',{roomId:'room',requestId:'command'},AGENT_A,undefined);
+    expect(daemon.execute).toHaveBeenCalledWith('startAgentTurn',{roomId:'room',requestId:'command'},AGENT_A,undefined,
+      {connectionId:expect.any(String),epoch:7});
   }finally{await database.close();}
 });
 

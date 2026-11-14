@@ -22,28 +22,6 @@ export function agentPresenceTier(
   return resolveAgentPresenceTier(presence, now);
 }
 
-/**
- * Active mention/autocomplete targets: candidates minus DORMANT agents.
- *
- * A merely-offline agent stays addressable (messages wait for its daemon to
- * reconnect); a dormant one has been dark past the sustained-absence grace,
- * so affordances implying it can receive work right now omit it. Historical
- * references are untouched — transcript rows resolve identity late-bound from
- * the signer pubkey and never consult this list.
- */
-export function activeMentionCandidates<T extends { pubkey: string }>(
-  candidates: readonly T[],
-  presences: Readonly<Record<string, RoomAgentPresence | AgentPresence>>,
-  now = Date.now(),
-): T[] {
-  return candidates.filter((candidate) => {
-    const presence = presences[candidate.pubkey];
-    // Unknown presence is NOT dormant (dormancy requires a measurable
-    // last-seen instant), so an unobserved agent stays mentionable.
-    return !presence || agentPresenceTier(presence, now) !== 'dormant';
-  });
-}
-
 export function nextAgentPresenceTransitionAt(
   presences: Readonly<Record<string, RoomAgentPresence | AgentPresence>>,
   now = Date.now(),

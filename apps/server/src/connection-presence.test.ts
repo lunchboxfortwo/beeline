@@ -6,6 +6,7 @@ import {migratedDatabase,type PgliteDatabase} from './test-support.js';
 import {ConnectionPresence,recordAgentEvidence} from './connection-presence.js';
 import { authorizeCommandOutput, createAgentCommand } from './agent-command.js';
 import {LiveHub} from './live.js';
+import {interruptAgentTurns} from './agent-turn-end.js';
 
 const ROOM='22222222-2222-4222-8222-222222222222',WORKSPACE='11111111-1111-4111-8111-111111111111';
 const AGENT='b'.repeat(64),HUMAN='a'.repeat(64);
@@ -42,13 +43,19 @@ it('a late close of an older socket cannot release the current owner',async()=>{
     .toEqual([{state:'pending'}]);
   expect(await body()).toMatchObject({status:'online',held:true,connectionId:'new'});
 });
-it('a new authenticated connection, from the same or a new helper process, leaves the item pending',async()=>{
+it('a replacement connection interrupts the old execution while leaving its answer pending',async()=>{
   const {command}=await claimed('old');
   await presence.claimConnection(AGENT,{connectionId:'new',lifecycleId:'same-process'});
   await presence.claimConnection(AGENT,{connectionId:'restarted',lifecycleId:'new-process'});
   expect((await database.query('SELECT state FROM agent_commands WHERE id=$1',[command.id])).rows)
     .toEqual([{state:'pending'}]);
-  expect((await database.query('SELECT status FROM agent_turns WHERE request_id=$1',[command.turn_request_id])).rows).toEqual([{status:'working'}]);
+  expect((await database.query('SELECT status,ended_at FROM agent_turns WHERE request_id=$1',[command.turn_request_id])).rows)
+    .toEqual([{status:'cancelled',ended_at:expect.any(Date)}]);
+  const daemon=new DaemonService(database,live);
+  expect((await daemon.execute('getAgentCommands',{},AGENT)).commands.map(item=>item.id)).toContain(command.id);
+  await daemon.execute('startAgentTurn',{roomId:ROOM,requestId:command.turn_request_id},AGENT);
+  expect((await database.query('SELECT status,ended_at FROM agent_turns WHERE request_id=$1',[command.turn_request_id])).rows)
+    .toEqual([{status:'working',ended_at:null}]);
 });
 it('turn age and incoming messages never arm a presence or stalled-turn watchdog',async()=>{
   const {command}=await claimed();const schedule=vi.spyOn(globalThis,'setTimeout');
@@ -57,6 +64,17 @@ it('turn age and incoming messages never arm a presence or stalled-turn watchdog
   live.publish({type:'invalidate',roomId:ROOM,reason:'message'});await Promise.resolve();
   expect(schedule).not.toHaveBeenCalled();
   expect((await database.query('SELECT state FROM agent_commands WHERE id=$1',[command.id])).rows).toEqual([{state:'pending'}]);
+});
+it('a late registration repair and old transport start cannot interrupt or revive the newest execution',async()=>{
+  const {source,command}=await claimed('old');
+  const current={connectionId:'new',epoch:await presence.claimConnection(AGENT,{connectionId:'new'})};
+  const daemon=new DaemonService(database,live);
+  await daemon.execute('startAgentTurn',{roomId:ROOM,requestId:command.turn_request_id},AGENT,undefined,source);
+  expect((await database.query('SELECT status FROM agent_turns WHERE request_id=$1',[command.turn_request_id])).rows).toEqual([{status:'cancelled'}]);
+  await daemon.execute('startAgentTurn',{roomId:ROOM,requestId:command.turn_request_id},AGENT,undefined,current);
+  await interruptAgentTurns(database,AGENT,current.epoch);
+  expect((await database.query('SELECT status,connection_epoch FROM agent_turns WHERE request_id=$1',[command.turn_request_id])).rows)
+    .toEqual([{status:'working',connection_epoch:current.epoch}]);
 });
 it('retains one aggregate server lease while actual connections are held',async()=>{
   const release=presence.holdServerConnection();await presence.renewLease();

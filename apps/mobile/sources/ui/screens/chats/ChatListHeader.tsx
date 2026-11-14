@@ -12,6 +12,13 @@ const CHIPS: { value: SearchChip; label: string }[] = [
   { value: 'pinned', label: 'Pinned' },
 ];
 
+/** The workspace title is static across tab controls, searches and row updates. */
+const WorkspaceSwitcher=React.memo(function WorkspaceSwitcher({name,open}:{name:string;open?:()=>void}) {
+  return open ? <Btn kind="quiet" label={`Workspace: ${name}. Switch workspace`} paddingHorizontal="2" onPress={open} testID="workspace-switcher">
+    <XStack gap="1" alignItems="center"><T v="heading" numberOfLines={1}>{name}</T><Glyph icon={ChevronDown} size={16} /></XStack>
+  </Btn> : <YStack paddingHorizontal="2"><T v="heading" numberOfLines={1}>{name}</T></YStack>;
+});
+
 /**
  * The list header (every phone tab and the desktop sidebar): the Workspace
  * name opens today's Workspace switcher, then that place's buttons. On Chats
@@ -29,6 +36,8 @@ export function ChatListHeader({ workspaceName, onWorkspace, onNew, search, onSe
   /** A tab's own buttons, after Search and New chat. */
   actions?: React.ReactNode;
 }) {
+  const openRef=React.useRef(onWorkspace);openRef.current=onWorkspace;
+  const open=React.useCallback(()=>openRef.current?.(),[]);
   if (search?.open && onSearch) {
     return (
       <YStack paddingHorizontal="3" paddingTop="2" paddingBottom="2" gap="2" testID="header-search">
@@ -84,16 +93,7 @@ export function ChatListHeader({ workspaceName, onWorkspace, onNew, search, onSe
   }
   return (
     <XStack paddingHorizontal="2" height={HEIGHT.tabBar} alignItems="center" gap="1" testID="chat-list-header">
-      {onWorkspace ? (
-        <Btn kind="quiet" label={`Workspace: ${workspaceName}. Switch workspace`} paddingHorizontal="2" onPress={onWorkspace} testID="workspace-switcher">
-          <XStack gap="1" alignItems="center">
-            <T v="heading" numberOfLines={1}>{workspaceName}</T>
-            <Glyph icon={ChevronDown} size={16} />
-          </XStack>
-        </Btn>
-      ) : (
-        <YStack paddingHorizontal="2"><T v="heading" numberOfLines={1}>{workspaceName}</T></YStack>
-      )}
+      <WorkspaceSwitcher name={workspaceName} open={onWorkspace?open:undefined} />
       <YStack flex={1} />
       <XStack gap="1">
         {search && onSearch ? <Btn kind="icon" label="Search" onPress={() => onSearch({ ...search, open: true })} testID="room-search-open"><Glyph icon={Search} /></Btn> : null}

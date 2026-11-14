@@ -719,7 +719,7 @@ describe('background advisory-lock ownership', () => {
     }
   });
 
-  it('sends a permission ask whole and stays quiet for an automatic access receipt', async () => {
+  it.each([undefined,'Deploy the Milo site'])('sends a purpose or generic command ask without argv (%s)', async purpose => {
     const db = await migratedDatabase();
     try {
       const human = 'a'.repeat(64),
@@ -771,7 +771,7 @@ describe('background advisory-lock ownership', () => {
           ask,
           JSON.stringify({
             agent: { pubkey: agent, name: 'wren' },
-            grants: [{ grantId: pending, kind: 'command', target }],
+            grants: [{ grantId: pending, kind: 'command', target, purpose, machine:'squire' }],
           }),
           '2'.repeat(64),
           JSON.stringify({ grantId: auto }),
@@ -779,7 +779,7 @@ describe('background advisory-lock ownership', () => {
       );
       expect(await loop.runOnce()).toBe(1);
       expect(send.mock.calls.map(([, message]) => message)).toEqual([
-        expect.objectContaining({ messageId: '1'.repeat(64), text: ask, permission: true }),
+        expect.objectContaining({ messageId: '1'.repeat(64), text: `wren wants to ${purpose ? 'deploy the Milo site' : 'run a command'} on squire`, permission: true }),
       ]);
     } finally {
       await db.close();

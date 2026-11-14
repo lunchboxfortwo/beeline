@@ -1,4 +1,4 @@
-import { connectionInstallName,interpreterScriptArgument,isCommandGrantScript,type AgentGrantKind,type CommandGrantRule,type CommandGrantScript } from '@beeline/api-contract/agent-grants';
+import { commandGrantAction,connectionInstallName,interpreterScriptArgument,isCommandGrantScript,type AgentGrantKind,type CommandGrantRule,type CommandGrantScript } from '@beeline/api-contract/agent-grants';
 import type { DaemonAttachment,DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { REPLY_EXCERPT_MAX_LENGTH } from '@beeline/api-contract/daemon';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
@@ -154,7 +154,7 @@ export function validateGrantScript(
 export function grantCardPhrase(
   _requester: { pubkey: string; kind: 'human' | 'agent'; name: string },
   agent: { pubkey: string; name: string },
-  grants: readonly { kind: AgentGrantKind; target: string; appName?: string }[],
+  grants: readonly { kind: AgentGrantKind; target: string; appName?: string; purpose?: string; machine?: string; script?: unknown }[],
 ): SystemPhrase {
   if (grants.every(grant => connectionInstallName(grant))) {
     return { subject: { kind: 'agent', id: agent.pubkey, name: agent.name },
@@ -176,6 +176,7 @@ export function grantCardPhrase(
     verb: systemMessage("daemon-service.wants-to"),
     object: grants.map(grant => {
       const app = connectionInstallName(grant);
+      if (grant.kind === 'command') return commandGrantAction(grant);
       return app ? systemMessage("daemon-service.connect-app", app)
         : systemMessage("daemon-service.grant-action", verbs[grant.kind], grant.target);
     }).join(systemMessage("daemon-service.and")),

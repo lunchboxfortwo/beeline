@@ -689,6 +689,12 @@ export function pathGrantAllowsWrite(capabilities?: string): boolean {
 export const SQUIRE_MCP_TARGET = 'squire';
 
 /** Paint-ready grant details shared by the DM card and the server's tray projection. */
+export function commandGrantAction(grant: {purpose?: string; machine?: string; script?: unknown}): string {
+  const words=grant.purpose?.trim().replace(/\s+/g,' ').split(' ').slice(0,12).join(' ');
+  const purpose=words ? words.charAt(0).toLowerCase()+words.slice(1) : `run a ${grant.script ? 'script' : 'command'}`;
+  return `${purpose}${grant.machine?.trim() ? ` on ${grant.machine.trim()}` : ''}`;
+}
+
 export function grantPresentation(grant: {
   kind: AgentGrantKind; target: string; appName?: string; reason?: string;
   purpose?: string; touches?: string; capabilities?: string;

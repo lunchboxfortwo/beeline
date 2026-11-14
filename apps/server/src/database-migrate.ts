@@ -1,4 +1,5 @@
 import { cleanupConnectHandles } from './migrations/connect-handle-cleanup.js';
+import { repairOrphanedTurns } from './migrations/orphaned-turns.js';
 import { backfillProviderPhotos } from './migrations/provider-photos.js';
 import { DIAGNOSTIC_COMMAND_SCHEMA } from './diagnostics-schema.js';
 import { SQUIRE_MACHINE_SCHEMA } from './squire-machine.js';
@@ -585,6 +586,8 @@ export async function migrateData(database: SqlDatabase): Promise<void> {
     });
     return result;
   };
+  await dataStep('orphaned helper turns', () => workflowBackfillOnce(
+    database, 'orphaned-helper-turns-2026-11-14-v1', repairOrphanedTurns));
   await dataStep('connect handle cleanup', () => workflowBackfillOnce(
     database, 'connect-handle-cleanup-v1', cleanupConnectHandles));
   await dataStep('chat message numbers', () => workflowBackfillOnce(

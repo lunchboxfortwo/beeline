@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import { router, type Href } from 'expo-router';
-import { Separator } from 'tamagui';
+import { Separator, YStack } from 'tamagui';
 import { isWorkspaceListView } from '@beeline/buzz-client';
 import { getEffectiveRelayUrl, loadBuzzIdentity } from '@/auth/buzz-identity-storage';
 import { saveActiveCommunityId } from '@/buzz/community-storage';
@@ -11,6 +11,23 @@ import { BuzzCommunityShell, useCommunityDrawer, type CommunityRailItem } from '
 import { SafeTop } from '@/ui/grammar';
 import { ChatListHeader } from '@/ui/screens/chats/ChatListHeader';
 import { TAB_ROUTES, type Tab } from './tab-routes';
+
+type HeaderProps = Omit<React.ComponentProps<typeof ChatListHeader>, 'onWorkspace'> & { scrolled: boolean };
+const HeaderHost = createContext<((header: HeaderProps) => () => void) | null>(null);
+
+/** The shell owns the header; a mounted tab supplies only its controls. */
+export function TabHeaderHost({workspaceName,children,visible=true}:{workspaceName:string;children:React.ReactNode;visible?:boolean}) {
+    const [slot,setSlot]=useState<{key:symbol;header:HeaderProps}|null>(null);
+    const register=useCallback((header:HeaderProps)=>{
+        const key=Symbol();setSlot({key,header});
+        return ()=>setSlot(current=>current?.key===key?null:current);
+    },[]);
+    const header=slot?.header;
+    return <HeaderHost.Provider value={register}>
+        <YStack display={visible?'flex':'none'}><MountedTabHeader {...header} workspaceName={workspaceName} scrolled={header?.scrolled ?? false} /></YStack>
+        {children}
+    </HeaderHost.Provider>;
+}
 
 /** Whether content has scrolled under a tab's header, and the scroll props that track it. */
 export function useScrolledUnder() {
@@ -26,7 +43,15 @@ export function useScrolledUnder() {
  * Workspace rail, then that tab's own buttons. No line at rest; a hairline
  * once content scrolls under it.
  */
-export function TabHeader({ scrolled, ...header }: Omit<React.ComponentProps<typeof ChatListHeader>, 'onWorkspace'> & { scrolled: boolean }) {
+export function TabHeader(props: HeaderProps) {
+    const register=useContext(HeaderHost);
+    const {workspaceName,scrolled,onNew,search,onSearch,actions}=props;
+    const header=useMemo(()=>({workspaceName,scrolled,onNew,search,onSearch,actions}),[workspaceName,scrolled,onNew,search,onSearch,actions]);
+    useLayoutEffect(()=>register?.(header),[register,header]);
+    return register ? null : <MountedTabHeader {...props} />;
+}
+
+function MountedTabHeader({scrolled,...header}:HeaderProps) {
     const drawer = useCommunityDrawer();
     return (
         <>
@@ -44,6 +69,11 @@ export function TabHeader({ scrolled, ...header }: Omit<React.ComponentProps<typ
 export function TabRail({ tab, workspaceId, children }: {
     tab: Exclude<Tab, 'chats'>; workspaceId?: string | null; children: React.ReactNode;
 }) {
+    const hosted=useContext(HeaderHost);
+    return hosted ? <>{children}</> : <StandaloneTabRail tab={tab} workspaceId={workspaceId}>{children}</StandaloneTabRail>;
+}
+
+function StandaloneTabRail({tab,workspaceId,children}:{tab:Exclude<Tab,'chats'>;workspaceId?:string|null;children:React.ReactNode}) {
     const [viewer, setViewer] = useState<string | null>(null);
     const [communities, setCommunities] = useState<CommunityRailItem[]>([]);
     useEffect(() => {

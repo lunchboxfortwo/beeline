@@ -49,14 +49,16 @@ async function render(): Promise<ReactTestRenderer> {
 beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; });
 afterEach(async () => { for (const tree of mounted.splice(0)) await act(async () => tree.unmount()); });
 
-it('carries the shared tab header with Invite in it, and no People title or section +', async () => {
+it('keeps Invite beside the People section and out of the shared phone header', async () => {
     const tree = await render();
     const header = hosts(tree, 'chat-list-header')[0];
     expect(header.findAll((node: any) => node.type === 'Text' && node.props.children === 'Tubing crew')).not.toHaveLength(0);
     expect(tree.root.findAll((node: any) => node.type === 'Text' && node.props.children === 'People')).toHaveLength(0);
     const invite = hosts(tree, 'people-invite');
     expect(invite).toHaveLength(1);
-    expect(header.findAll((node: any) => node.props.testID === 'people-invite' && typeof node.type === 'string')).toHaveLength(1);
+    expect(header.findAll((node: any) => node.props.testID === 'people-invite' && typeof node.type === 'string')).toHaveLength(0);
+    expect(hosts(tree, 'people-humans')[0].findAll((node: any) => node.props.testID === 'people-invite' && typeof node.type === 'string')).toHaveLength(1);
+    expect(hosts(tree, 'people-add-agent')).toHaveLength(1);
     expect(invite[0].props['aria-label']).toBe('Invite to Tubing crew');
     expect(hosts(tree, 'room-search-open')).toHaveLength(0);
     await act(async () => invite[0].props.onPress());

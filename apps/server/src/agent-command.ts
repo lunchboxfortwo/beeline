@@ -839,7 +839,11 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
       await endAgentTurn(db, item, 'complete');
       return { id: item.id, createdAt: Math.floor(Date.now() / 1000) };
     }
-    if (!publicText) return { id: item?.id ?? hash(`${agentId}:${input.roomId}`), createdAt: Math.floor(Date.now() / 1000), answered: false };
+    if (!publicText) {
+      if (item && input.harnessEnded) await db.query('SELECT * FROM beeline_interrupt_agent_turn($1,$2,$3,NULL,NULL)',
+        [agentId,item.room_id,item.turn_request_id]);
+      return { id: item?.id ?? hash(`${agentId}:${input.roomId}`), createdAt: Math.floor(Date.now() / 1000), answered: false };
+    }
     // The agent's own answer; the status word is the agent's report outcome.
     const text = modelText((input.report ? `${status}: ${publicText.replace(/^(?:done|blocked|failed|needs[-_]decision):\s*/, '')}` : publicText).trim());
     const answerId = input.messageId ?? hash(`answer:${item?.id ?? `${agentId}:${input.roomId}:${input.requestId ?? ''}`}`);

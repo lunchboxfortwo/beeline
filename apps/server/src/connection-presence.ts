@@ -3,6 +3,7 @@ import type { SqlDatabase } from './database.js';
 import { LiveHub } from './live.js';
 import { freeAgentReachableSql } from './free-agents.js';
 import { notifyAgentConnection } from './postgres-live.js';
+import { interruptAgentTurns } from './agent-turn-end.js';
 
 const FULL_ROOM_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -125,6 +126,10 @@ export async function claimAgentConnection(
     return { epoch: Number(claimed.rows[0]?.epoch ?? 0), announcement };
   });
   const { epoch } = claimedConnection;
+  // Presence commits first; turn projections take Room journal locks. The
+  // epoch fence also makes overlapping registrations safe across servers.
+  const interruptedRooms = await database.transaction(db=>interruptAgentTurns(db,agentId,epoch));
+  for (const roomId of interruptedRooms) live.publish({type:'invalidate',roomId,reason:'turn',agentId});
   await notifyAgentConnection(database,agentId,epoch);
   live.publish({ type: 'agent-connection', roomId: '', agentId, epoch });
   await broadcastAgentPresence(database, live, agentId);

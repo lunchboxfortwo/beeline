@@ -8,6 +8,7 @@ import { ConnectionStatus } from '@/components/buzz/ConnectionStatus';
 import { CornerOpenToast } from '@/components/buzz/CornerOpenToast';
 import { useIsDesktop } from '@/utils/responsive';
 import { PhoneTabScreen } from '@/ui/shell/PhoneTabScreen';
+import { WorkspaceTabShell } from '@/ui/shell/WorkspaceTabShell';
 
 /** @public Expo Router consumes this named export through its filesystem convention. */
 export const unstable_settings = {
@@ -37,6 +38,7 @@ export default function RootLayout() {
     <YStack flex={1} backgroundColor="canvas">
       <SessionRequired />
       <ConnectionStatus>
+      <WorkspaceTabShell>
       <Stack
         initialRouteName="index"
         screenLayout={isDesktop ? undefined : PhoneTabScreen}
@@ -207,6 +209,7 @@ export default function RootLayout() {
         <Stack.Screen name="artifact-viewer" options={{ headerShown: false }} />
         <Stack.Screen name="text-selection" options={{ headerShown: false }} />
       </Stack>
+      </WorkspaceTabShell>
       </ConnectionStatus>
       {/* One corner-open notice over every screen: pending, or a failed action with Retry. */}
       <CornerOpenToast />

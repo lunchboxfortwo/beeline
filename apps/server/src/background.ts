@@ -1,3 +1,4 @@
+import { commandGrantAction } from '@beeline/api-contract/agent-grants';
 import { messageColumns } from './message-columns.js';
 import { captureServerError } from './sentry.js';
 import { DatabaseTransactionStartError, type SqlDatabase } from './database.js';
@@ -283,6 +284,7 @@ export class PushDeliveryLoop {
       grant_id: string | null;
       grant_kind: string | null;
       grant_target: string | null;
+      grant_detail: {purpose?:string;machine?:string;script?:unknown} | null;
       grant_agent_name: string | null;
       author_name: string | null;
       collapse_id: string | null;
@@ -375,6 +377,7 @@ export class PushDeliveryLoop {
           m.card->'grants'->0->>'grantId' grant_id,
           m.card->'grants'->0->>'kind' grant_kind,
           m.card->'grants'->0->>'target' grant_target,
+          m.card->'grants'->0 grant_detail,
           m.card->'agent'->>'name' grant_agent_name,
           COALESCE(NULLIF(author.name,''),'Someone') author_name,
           CASE WHEN attention.direct OR m.presentation<>'message' THEN m.id
@@ -419,7 +422,7 @@ export class PushDeliveryLoop {
           'workspace-join' notification_type,
           btrim(notification.text) text,device.device_token token,push_device.identity_id,
           notification.created_at,
-          NULL::text action,NULL::text grant_id,NULL::text grant_kind,NULL::text grant_target,
+          NULL::text action,NULL::text grant_id,NULL::text grant_kind,NULL::text grant_target,NULL::jsonb grant_detail,
           NULL::text grant_agent_name,NULL::text author_name,NULL::text collapse_id,
           false direct_attention,NULL::text room_name,NULL::text corner_name,NULL::jsonb dm_peer
         FROM jsonb_to_recordset($1::jsonb) queued(message_id text,device_token text)
@@ -442,7 +445,7 @@ export class PushDeliveryLoop {
           candidate.corner_id,candidate.target,
           candidate.notification_type,candidate.text,candidate.token,candidate.identity_id,
           candidate.created_at,device.platform,
-          candidate.action,candidate.grant_id,candidate.grant_kind,candidate.grant_target,
+          candidate.action,candidate.grant_id,candidate.grant_kind,candidate.grant_target,candidate.grant_detail,
           candidate.grant_agent_name,candidate.author_name,candidate.collapse_id,
           candidate.direct_attention,candidate.room_name,candidate.corner_name,candidate.dm_peer
         FROM candidates candidate
@@ -455,7 +458,7 @@ export class PushDeliveryLoop {
       )
       SELECT message_id,workspace_id,room_id,channel_id,corner_id,target,
         notification_type,text,token,identity_id,platform,
-        action,grant_id,grant_kind,grant_target,grant_agent_name,author_name,collapse_id,
+        action,grant_id,grant_kind,grant_target,grant_detail,grant_agent_name,author_name,collapse_id,
         direct_attention,room_name,corner_name,dm_peer
       FROM unclaimed ORDER BY created_at,message_id
     `, [JSON.stringify(due.rows)]);
@@ -581,7 +584,9 @@ export class PushDeliveryLoop {
                   : {}),
                 target: candidate.target,
                 type: 'message' as const,
-                text: candidate.text,
+                text: candidate.grant_kind === 'command'
+                  ? `${candidate.grant_agent_name ?? candidate.author_name ?? 'An agent'} wants to ${commandGrantAction(candidate.grant_detail ?? {})}`
+                  : candidate.text,
                 ...(candidate.collapse_id ? { collapseId: candidate.collapse_id } : {}),
                 ...pushTitleFor(
                   candidate.room_name,

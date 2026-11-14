@@ -1,5 +1,6 @@
 import { chmod, mkdir, writeFile } from 'node:fs/promises';
-import { delimiter, resolve } from 'node:path';
+import { delimiter, dirname, resolve } from 'node:path';
+import { anchorLayout, BUNDLE_ENTRYPOINT, releaseIdFromPath } from './self-update.js';
 
 /** What a corner's `gh` launcher actually is: a host binary or the REST fallback. */
 export type CornerGitHubCli = 'host' | 'rest';
@@ -48,7 +49,11 @@ export async function installCornerGitHubWrappers(input: {
   await mkdir(bin, { recursive: true, mode: 0o700 });
   const common = {
     node: process.execPath,
-    cli: input.cliEntrypoint,
+    // Sessions outlive helper updates. Keep the install anchor unresolved so
+    // release pruning cannot delete the CLI their credential launcher calls.
+    cli: releaseIdFromPath(input.cliEntrypoint)
+      ? resolve(anchorLayout(dirname(input.cliEntrypoint)).libDir,BUNDLE_ENTRYPOINT)
+      : input.cliEntrypoint,
     config: input.runtimeConfigPath,
     room: input.roomId,
     featureBranch: input.featureBranch,

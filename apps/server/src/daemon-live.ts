@@ -329,8 +329,11 @@ export class DaemonAgentSession {
           if (!DAEMON_OPERATION_NAMES.has(operation)) return { error: 'invalid_daemon_operation', status: 400 };
           const input = operation === 'order' || operation === 'postCornerMessage'
             ? { ...(item.input as object), transportRequestId: requestId } : item.input;
-          const result = await this.deps.daemon.execute(operation, input as never, this.agentId,
-            operation === 'getModelCredential' ? this.#ownedModelCapability : undefined);
+          const result = operation === 'startAgentTurn'
+            ? await this.deps.daemon.execute(operation, input as never, this.agentId,undefined,
+              this.epoch === undefined ? undefined : {connectionId:this.connectionId,epoch:this.epoch})
+            : await this.deps.daemon.execute(operation, input as never, this.agentId,
+              operation === 'getModelCredential' ? this.#ownedModelCapability : undefined);
           return { result };
         } catch (error) {
           return { error: error instanceof Error ? error.message : String(error),

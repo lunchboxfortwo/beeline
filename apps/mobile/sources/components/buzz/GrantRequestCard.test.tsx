@@ -40,6 +40,15 @@ function render(props: Partial<React.ComponentProps<typeof GrantRequestCard>> = 
 const button = (tree: any, testID: string) => tree.root.find((node: any) => node.type === 'Button' && node.props.testID === testID);
 
 describe('grant request card', () => {
+    it('puts the purpose and host in the title, with argv retained in details',()=>{
+        const target='["/private/node","/private/deploy.mjs"]';
+        const updated={...(message as any),grantRequest:{...(message as any).grantRequest,
+            grants:[{...grant,target,purpose:'Deploy the Milo site',machine:'squire'}]}};
+        const tree=render({message:updated as any});
+        const title=tree.root.find((node:any)=>node.type==='Text'&&node.props.testID==='grant-grant-1-ask');
+        expect(title.props.children).toBe('@Alan wants to deploy the Milo site on squire');
+        expect(JSON.stringify(tree.toJSON())).toContain('/private/deploy.mjs');
+    });
     it('is one raised request card with Always, Once and Deny for bash with stdin', () => {
         const tree = render();
         expect(tree.root.find((node: any) => node.type === 'Card').props.backgroundColor).toBe('raised');

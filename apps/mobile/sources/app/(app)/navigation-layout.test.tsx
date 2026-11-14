@@ -31,6 +31,7 @@ vi.mock('@/components/buzz/ConnectionStatus', () => ({ ConnectionStatus: ({ chil
 vi.mock('@/components/buzz/CornerOpenToast', () => ({ CornerOpenToast: () => null }));
 vi.mock('@/utils/responsive', () => ({ useIsDesktop: () => false }));
 vi.mock('@/ui/shell/PhoneTabScreen', () => ({ PhoneTabScreen: (props: any) => React.createElement('TabScreen', props) }));
+vi.mock('@/ui/shell/WorkspaceTabShell', () => ({ WorkspaceTabShell: ({ children }: { children: React.ReactNode }) => children }));
 import RootLayout from './_layout';
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;

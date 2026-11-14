@@ -113,10 +113,14 @@ it('R1: a claimed report survives a dropped socket and a helper restart, unsuper
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[expired!.id])).rows).toEqual([{state:'pending'}]);
   await claimAgentConnection(db,new LiveHub(),APP,{lifecycleId:'restarted-helper'},
     {connectionId:'restarted-helper',instanceId:'helper-fixture'});
-  // The restarted helper resumes the claimed report; a newer report does not supersede it.
+  // Replacement ends the old execution; its independently owed report is redelivered.
   const current=await report('needs-decision: new context after a helper restart');
-  expect((await db.query(`SELECT status FROM agent_turns WHERE request_id=$1`, [expired!.turn_request_id])).rows)
-    .toEqual([{ status: 'working' }]);
+  expect((await db.query(`SELECT status,ended_at FROM agent_turns WHERE request_id=$1`, [expired!.turn_request_id])).rows)
+    .toEqual([{ status: 'cancelled', ended_at: expect.any(Date) }]);
+  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[expired!.id])).rows).toEqual([{state:'pending'}]);
+  await startQueuedCommand(daemon, { roomId:R, commandId:expired!.id }, APP);
+  expect((await db.query(`SELECT status,ended_at FROM agent_turns WHERE request_id=$1`, [expired!.turn_request_id])).rows)
+    .toEqual([{ status: 'working', ended_at: null }]);
   await db.query(`UPDATE agent_commands SET state='complete',completed_at=now() WHERE id=$1`, [current!.id]);
   await report('needs-decision: a later decision after handling');
   expect((await db.query(`SELECT state FROM agent_commands WHERE id=$1`, [current!.id])).rows).toEqual([{ state: 'complete' }]);

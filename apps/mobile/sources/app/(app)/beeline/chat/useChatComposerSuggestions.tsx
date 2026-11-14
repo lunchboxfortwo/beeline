@@ -8,7 +8,7 @@ import { roomOpenCornerRows } from '@/buzz/room-corner-store';
 import { activeMentionAtCursor, filterMentionCandidates, mentionedAgentPubkey } from '@/buzz/room-participants';
 import { useStarPrompt } from '@/components/buzz/StarPromptCard';
 import { availableAgentMentionCommands, fastModeCommandState, slashVerbQuery, agentMentionSlashQuery, type FastModeCommandState } from '@/buzz/slash-verbs';
-import { isAgentTurnActive, activeMentionCandidates } from '@/buzz/agent-presence';
+import { isAgentTurnActive } from '@/buzz/agent-presence';
 import { sameElementRefs, useStable } from '@/buzz/use-stable';
 import { roomMemberManagementState } from '@/buzz/room-member-management';
 import { type RoomRosterParticipant } from '@/buzz/room-participants';
@@ -16,8 +16,6 @@ import { CHANNEL_MENTION_OPTION, SYSTEM_MENTION_OPTION } from './chat-surface-va
 
 type Props = [
   roomParticipants: RoomRosterParticipant[],
-  agentPresences: Record<string, import("@/buzz/agent-presence").RoomAgentPresence>,
-  presenceNow: number,
   inputSelection: { start: number; end: number; },
   inputText: string,
   describedRoomParticipants: RoomRosterParticipant[],
@@ -46,7 +44,7 @@ type Props = [
 ];
 
 export function useChatComposerSuggestions([
-  roomParticipants, agentPresences, presenceNow, inputSelection, inputText,
+  roomParticipants, inputSelection, inputText,
   describedRoomParticipants, composerFocused, dismissedMentionKey, isDirectMessage, parentChannelId,
   decodedId, roomClient, workspaceChats, roomSurface, presenceReconnectGrace, unprojectedMessages,
   participantsHydrated, participantPickerVisible, viewerPubkey, agentCommandsByScope,
@@ -80,20 +78,18 @@ export function useChatComposerSuggestions([
   memberManagement: { canOpenRoster: boolean; pickerVisible: boolean; },
 ] {
 
+  // The committed Room roster supplies addresses, including disconnected
+  // session agents whose messages wait in the ordinary queue.
   const mentionableAgents = useMemo(
     () =>
-      activeMentionCandidates(
-        roomParticipants
-          .filter((participant) => participant.kind === 'agent')
-          .map((participant) => ({
-            pubkey: participant.pubkey,
-            name: participant.name,
-            handle: participant.handle,
-          })),
-        agentPresences,
-        presenceNow,
-      ),
-    [roomParticipants, agentPresences, presenceNow],
+      roomParticipants
+        .filter((participant) => participant.kind === 'agent')
+        .map((participant) => ({
+          pubkey: participant.pubkey,
+          name: participant.name,
+          handle: participant.handle,
+        })),
+    [roomParticipants],
   );
 
   const activeMention = useMemo(
@@ -117,11 +113,11 @@ export function useChatComposerSuggestions([
     () =>
       activeMention
         ? filterMentionCandidates(
-            activeMentionCandidates(mentionCandidateRoster, agentPresences, presenceNow),
+            mentionCandidateRoster,
             activeMention.query,
           )
         : { matches: [], overflow: 0 },
-    [activeMention, mentionCandidateRoster, agentPresences, presenceNow],
+    [activeMention, mentionCandidateRoster],
   );
 
   const mentionMenuVisible = Boolean(

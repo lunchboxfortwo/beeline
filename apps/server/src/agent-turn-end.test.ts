@@ -12,7 +12,7 @@ beforeAll(async () => {
   await pg.exec(`CREATE TABLE agent_commands(id text PRIMARY KEY,room_id text,agent_id text,turn_request_id text,
     state text,reason text,report_outcome text,completed_at timestamptz,cancellation_reason text,result_message_id text);
     CREATE TABLE agent_turns(room_id text,agent_id text,request_id text,status text,
-      failure_reason text,created_at timestamptz DEFAULT now());
+      failure_reason text,started_at timestamptz,created_at timestamptz DEFAULT now());
     CREATE TABLE live_outputs(room_id text,agent_id text,turn_id text,kind text);
     ${AGENT_TURN_END_SCHEMA}`);
 });

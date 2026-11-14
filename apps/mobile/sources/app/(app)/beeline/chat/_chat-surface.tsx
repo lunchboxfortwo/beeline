@@ -196,7 +196,7 @@ export function BuzzChatSurface({
     mentionMenuVisible, mentionSuggestions, channelMenuVisible, channelSuggestions, suggestionCount,
     mentionMenuKey, channelMenuKey, memberManagement,
   ] = useChatComposerSuggestions([
-    roomParticipants, agentPresences, presenceNow, inputSelection, inputText,
+    roomParticipants, inputSelection, inputText,
     describedRoomParticipants, composerFocused, dismissedMentionKey, isDirectMessage,
     parentChannelId, decodedId, roomClient, workspaceChats, roomSurface, presenceReconnectGrace,
     unprojectedMessages, participantsHydrated, participantPickerVisible,

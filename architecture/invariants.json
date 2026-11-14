@@ -504,7 +504,7 @@
     {
       "id": "work.command-terminal",
       "module": "Turn lifecycle",
-      "invariant": "Only beeline_finish_agent_command changes a command or turn to a terminal state.",
+      "invariant": "Only beeline_finish_agent_command changes a command to a terminal state.",
       "pattern": "(?:UPDATE\\s+(?:\"?\\w+\"?\\s*\\.\\s*)?\"?agent_commands\"?\\s+(?:(?:AS\\s+)?\"?\\w+\"?\\s+)?|INSERT\\s+INTO\\s+(?:\"?\\w+\"?\\s*\\.\\s*)?\"?agent_commands\"?\\s*\\((?:(?!;|`).)*?\\bON\\s+CONFLICT(?:(?!;|`).)*?\\bDO\\s+UPDATE\\s+)SET\\s+(?:(?!\\bWHERE\\b|;|`).)*?\\b\"?state\"?\\s*=(?!\\s*'(?:pending|claimed)')",
       "flags": "is",
       "scope": [
@@ -526,7 +526,7 @@
     {
       "id": "work.turn-terminal",
       "module": "Turn lifecycle",
-      "invariant": "Only beeline_finish_agent_command changes a command or turn to a terminal state.",
+      "invariant": "The turn-ending owner records terminal answers and interrupted executions.",
       "pattern": "(?:UPDATE\\s+(?:\"?\\w+\"?\\s*\\.\\s*)?\"?agent_turns\"?\\s+(?:(?:AS\\s+)?\"?\\w+\"?\\s+)?|INSERT\\s+INTO\\s+(?:\"?\\w+\"?\\s*\\.\\s*)?\"?agent_turns\"?\\s*\\((?:(?!;|`).)*?\\bON\\s+CONFLICT(?:(?!;|`).)*?\\bDO\\s+UPDATE\\s+)SET\\s+(?:(?!\\bWHERE\\b|;|`).)*?\\b\"?status\"?\\s*=(?!\\s*'working')",
       "flags": "is",
       "scope": [
@@ -989,6 +989,7 @@
           "tool_calls": "existing before the registry; weekly audit reviews",
           "input_tokens": "existing before the registry; weekly audit reviews",
           "output_tokens": "existing before the registry; weekly audit reviews",
+          "connection_epoch": "Recorded helper connection epoch at start; replacements interrupt only earlier executions.",
           "ended_at": "when a turn ended; set by the turn's own status change, so idle timing never reads a mutable corner span",
           "startup_outcome": {
             "reason": "Retained without runtime use until the previous server drains during this rolling release.",
@@ -3723,6 +3724,7 @@
         "confirmed": "existing before the registry; weekly audit reviews"
       },
       "card": {
+        "expiresAt": "The recorded sign-in or approval expiry is retained on its card so reads and retries use the original provider deadline.",
         "runStatus": "Workflow run start cards persist the committed live or terminal status so assignment admission cannot wake a finished run.",
         "reason": "The terminal wallet verdict retains its original explanation when later provider observations arrive.",
         "execution": "Server execution attribution distinguishes an initiated operation from provider-only transaction observations.",

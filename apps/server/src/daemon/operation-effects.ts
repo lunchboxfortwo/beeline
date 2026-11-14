@@ -162,15 +162,22 @@ export async function startAgentTurnOperation<Name extends keyof DaemonOperation
           });
           ctx.live.publish({ type: 'invalidate', roomId: request.roomId, reason: 'message', agentId: authenticatedAgentId });
         } else {
-        await ctx.database.query(`WITH delivered AS (SELECT * FROM agent_commands
-          WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3 AND state='pending'),
+        await ctx.database.transaction(async db=>{
+        const source=ctx.helperConnection;
+        const connection=await db.query<{epoch:string}>(`SELECT epoch FROM agent_connections WHERE agent_id=$1
+          AND ($2::text IS NULL OR (connection_id=$2 AND epoch=$3)) FOR SHARE`,
+          [authenticatedAgentId,source?.connectionId ?? null,source?.epoch ?? null]);
+        if(source && !connection.rowCount) return;
+        await db.query(`WITH delivered AS (SELECT * FROM agent_commands
+          WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3 AND state='pending' FOR SHARE),
           ${workflowOutputBindingCtes('delivered')}
-          INSERT INTO agent_turns(room_id,request_id,agent_id,status)
-          SELECT command.room_id,command.turn_request_id,command.agent_id,'working' FROM delivered command
+          INSERT INTO agent_turns(room_id,request_id,agent_id,status,connection_epoch)
+          SELECT command.room_id,command.turn_request_id,command.agent_id,'working',$4::bigint FROM delivered command
           ORDER BY command.created_at DESC LIMIT 1
           ON CONFLICT(room_id,request_id,agent_id) DO UPDATE SET status='working',failure_reason=NULL,
-            completion_kind=NULL,created_at=now(),started_at=now()
-          WHERE agent_turns.status<>'cancelled'`, [request.roomId, authenticatedAgentId, request.requestId]);
+            completion_kind=NULL,created_at=now(),started_at=now(),connection_epoch=EXCLUDED.connection_epoch`,
+          [request.roomId, authenticatedAgentId, request.requestId,connection.rows[0]?.epoch ?? null]);
+        });
         ctx.live.publish({ type: 'invalidate', roomId: request.roomId, reason: 'turn', agentId: authenticatedAgentId });
         }
         return daemonWriteResult(ctx) as Output<Name>;

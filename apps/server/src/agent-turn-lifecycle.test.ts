@@ -63,6 +63,15 @@ it('a failed diagnostic keeps the item pending until its answer is posted',async
   await daemon.execute('postRoomMessage',{roomId:R,requestId:c.turnRequestId,text:'The provider is unavailable.'},A);
   expect((await readAgentCommands(db,A,R)).commands).toEqual([]);
 });
+it('a recorded empty harness exit ends execution while preserving the unanswered human request',async()=>{
+  const c=await ask();
+  await daemon.execute('postRoomMessage',{roomId:R,requestId:c.turnRequestId,text:'',harnessEnded:true},A);
+  expect((await db.query('SELECT status,ended_at FROM agent_turns WHERE request_id=$1',[c.turnRequestId])).rows)
+    .toEqual([{status:'cancelled',ended_at:expect.any(Date)}]);
+  expect((await readAgentCommands(db,A,R)).commands.map(item=>item.id)).toContain(c.id);
+  expect((await phone.readRoom(R,H))?.latestAgentTurns?.some(turn=>turn.status==='working')).toBe(false);
+  expect((await notices()).rowCount).toBe(0);
+});
 it('stores and delivers a complete child-process failure beyond the manual report limit, including stderr',async()=>{
   const commander='c'.repeat(64);
   await db.query("INSERT INTO identities(id,kind,name) VALUES($1,'agent','Commander')",[commander]);
@@ -101,6 +110,7 @@ it('a failed diagnostic and revoked return membership leave the answer owed',asy
 it('Stop wins over a late result and uses the same terminal owner',async()=>{
   const c=await ask();
   await phone.execute('cancelAgentTurn',{roomId:R,agentId:A,requestId:c.turnRequestId},H);
+  await daemon.execute('startAgentTurn',{roomId:R,requestId:c.turnRequestId},A,undefined,owner);
   await receipt(c.turnRequestId,'complete');
   expect((await db.query('SELECT status FROM agent_turns WHERE request_id=$1',[c.turnRequestId])).rows).toEqual([{status:'cancelled'}]);
 });
@@ -120,12 +130,15 @@ it('a long claimed invocation ends on its actual answer through the terminal own
   expect((await readAgentCommands(db, A, R)).commands).toEqual([]);
 });
 
-it('disconnect keeps the running turn; the same helper continues it, and a new helper process resumes it in its generation',async()=>{
+it('replacement closes the phone running indicator and redelivers the unanswered item',async()=>{
   const c=await ask();
   await releaseAgentConnection(db,live,A,owner.connectionId);
   expect((await readAgentCommands(db, A, R)).commands.map(item=>item.id)).toEqual([c.id]);
   expect((await phone.readRoom(R,H))?.latestAgentTurns?.some(turn=>turn.status==='working')).toBe(true);
   await claimAgentConnection(db,live,A,{lifecycleId:'first-boot'},{connectionId:'second-connection',instanceId:'test-server'});
+  expect((await phone.readRoom(R,H))?.latestAgentTurns?.some(turn=>turn.status==='working')).toBe(false);
+  expect((await db.query('SELECT status,ended_at FROM agent_turns WHERE request_id=$1',[c.turnRequestId])).rows)
+    .toEqual([{status:'cancelled',ended_at:expect.any(Date)}]);
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[c.id])).rows)
     .toEqual([{state:'pending'}]);
   const next={connectionId:'third-connection',epoch:await claimAgentConnection(db,live,A,{lifecycleId:'second-boot'},
@@ -133,7 +146,8 @@ it('disconnect keeps the running turn; the same helper continues it, and a new h
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[c.id])).rows)
     .toEqual([{state:'pending'}]);
   expect((await readAgentCommands(db, A, R)).commands.map(item=>item.id)).toEqual([c.id]);
-  await startQueuedTurn(db, R, A, c.id);
+  await daemon.execute('startAgentTurn',{roomId:R,requestId:c.turnRequestId},A,undefined,next);
+  expect((await phone.readRoom(R,H))?.latestAgentTurns).toContainEqual(expect.objectContaining({status:'working',requestId:c.turnRequestId}));
   await daemon.execute('postRoomMessage',{ roomId:R, requestId:c.turnRequestId, text:'Recovered answer.' },A);
   expect((await readAgentCommands(db, A, R)).commands).toEqual([]);
   expect((await notices()).rowCount).toBe(0);

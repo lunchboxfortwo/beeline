@@ -164,6 +164,7 @@
       "Span"
     ],
     "components/buzz/CommunityRail.tsx": [
+      "CommunityDrawerShell",
       "BuzzCommunityShell",
       "CommunityDrawerContext",
       "CommunityRail",

@@ -3,7 +3,7 @@ import { YStack } from 'tamagui';
 import { T } from '@/ui/grammar';
 import { PillRow, type PillFace, type PillItem } from '@/ui/screens/transcript/PillRow';
 import { RequestMedia } from '@/ui/screens/transcript/cards/RequestMedia';
-import { AGENT_GRANT_VERBS, grantPresentation } from '@beeline/api-contract/agent-grants';
+import { AGENT_GRANT_VERBS, commandGrantAction, grantPresentation } from '@beeline/api-contract/agent-grants';
 import type { AgentPresentation, ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { resolveAgentDisplayIdentity } from '@/buzz/agent-display';
 import { ledgerStamp } from '@/buzz/relative-time';
@@ -116,7 +116,7 @@ export const GrantRequestCard = React.memo(function GrantRequestCard({
             wrapTitle
             title={
               <T v="heading" testID={`grant-${grant.grantId}-ask`}>
-                {`@${agentName.replace(/^@/, '')} wants to ${grant.kind === 'command' ? grant.purpose || grant.script ? 'run a script' : 'run a command' : `${grant.kind === 'mcp' && grant.target.startsWith('connection-install:') ? 'connect' : AGENT_GRANT_VERBS[grant.kind]} ${grant.appName ?? grant.target}`}`}
+                {`@${agentName.replace(/^@/, '')} wants to ${grant.kind === 'command' ? commandGrantAction(grant) : `${grant.kind === 'mcp' && grant.target.startsWith('connection-install:') ? 'connect' : AGENT_GRANT_VERBS[grant.kind]} ${grant.appName ?? grant.target}`}`}
               </T>
             }
             stamp={ledgerStamp(message.timestamp)}

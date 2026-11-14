@@ -16,7 +16,7 @@ import {
   type NeedsYouItemView,
   type RoomViewIdentity,
 } from '@beeline/api-contract/phone';
-import { AGENT_GRANT_VERBS, grantPresentation, connectionInstallName, isCommandGrantScript, type AgentGrantKind, type CommandGrantScript } from '@beeline/api-contract/agent-grants';
+import { AGENT_GRANT_VERBS, commandGrantAction, grantPresentation, connectionInstallName, isCommandGrantScript, type AgentGrantKind, type CommandGrantScript } from '@beeline/api-contract/agent-grants';
 import type { SqlDatabase } from './database.js';
 import { tagsKnownIdentitySql } from './message-mentions.js';
 
@@ -136,7 +136,7 @@ export function needsYouRowText(message: string, readerHandle: string | null, as
   return shortenAsk(withoutReaderTags(ask || needsYouSentence(message), readerHandle));
 }
 
-type GrantCardEntry = { grantId?: string; kind?: AgentGrantKind; target?: string; appName?: string; reason?: string; purpose?: string; touches?: string; capabilities?: string; script?: CommandGrantScript };
+type GrantCardEntry = { machine?: string; grantId?: string; kind?: AgentGrantKind; target?: string; appName?: string; reason?: string; purpose?: string; touches?: string; capabilities?: string; script?: CommandGrantScript };
 
 /** The raw card fields the approval rows read; every kind's card is a subset. */
 type ApprovalCard = {
@@ -717,9 +717,9 @@ function approvalView(
       const appName = connectionInstallName({ kind: first.kind, target: first.target, appName: first.appName });
       const result = view(
         'grant',
-        appName ? 'wants to connect' : first.kind === 'command' ? `wants to run a ${first.script ? 'script' : 'command'}` : `wants to ${AGENT_GRANT_VERBS[first.kind] ?? 'use'}`,
-        appName ?? first.target,
-        !appName,
+        appName ? 'wants to connect' : first.kind === 'command' ? 'wants to' : `wants to ${AGENT_GRANT_VERBS[first.kind] ?? 'use'}`,
+        first.kind === 'command' ? commandGrantAction(first) : appName ?? first.target,
+        first.kind !== 'command' && !appName,
         text(`${first.purpose ?? first.reason ?? ''}${more}`),
         forName,
       );

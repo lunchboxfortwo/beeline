@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocalSearchParams } from 'expo-router';
 import { ScrollView, Separator, XStack, YStack } from 'tamagui';
-import { UserPlus } from 'lucide-react-native';
-import { Btn, Copy, Glyph, T } from '@/ui/grammar';
+import { Btn, Copy, T } from '@/ui/grammar';
 import { TabHeader, TabRail, useScrolledUnder } from '@/ui/shell/TabHeader';
 import { WORKSPACE_LABEL } from '@/buzz/vocabulary';
 import { openPlace } from '@/ui/shell/panel';
@@ -19,8 +18,8 @@ import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
 const first = (value: string | string[] | undefined) => Array.isArray(value) ? value[0] : value;
 
 /**
- * The People tab: the workspace's contact list in two sections. Invite (the
- * header on a phone, People + on desktop) invites to the workspace; Agents +
+ * The People tab: the workspace's contact list in two sections. People +
+ * invites to the workspace; Agents +
  * invites an external agent or creates one. Rows open profiles (build spec
  * decisions 2, 8 and 9).
  */
@@ -62,10 +61,7 @@ export function PeopleTabScreen() {
                     <Separator borderColor="stroke" />
                 </>
             ) : (
-                // The header every tab shares; Invite is People's own button.
-                <TabHeader workspaceName={workspaceName || WORKSPACE_LABEL} scrolled={scrolled} actions={invite ? (
-                    <Btn kind="icon" label={`Invite to ${workspaceName}`} onPress={invite} testID="people-invite"><Glyph icon={UserPlus} /></Btn>
-                ) : null} />
+                <TabHeader workspaceName={workspaceName || WORKSPACE_LABEL} scrolled={scrolled} />
             )}
             {!roster.surface && !roster.error ? <SurfaceGlyphLoader /> : <ScrollView flex={1} minHeight={0} {...(desktop ? {} : scrollProps)}>
                 <YStack padding="4" gap="5" paddingBottom="8" width="100%" maxWidth={760} alignSelf="center">
@@ -75,7 +71,7 @@ export function PeopleTabScreen() {
                     {roster.error ? <Copy small quiet role="alert">{roster.error}</Copy> : null}
                     <YStack gap="2" testID="people-humans">
                         <SectionHead title={`People · ${roster.peopleTotal}`} addLabel={`Invite to ${workspaceName}`} testID="people-invite"
-                            onAdd={desktop ? invite : undefined} />
+                            onAdd={invite} />
                         <MemberCard rows={people} open={openPerson} roleAtEnd />
                         {roster.morePeople ? <Btn kind="quiet" label="Show more people" disabled={roster.loadingMore} onPress={() => void roster.loadMore('human')}>Show more</Btn> : null}
                         <Copy small quiet>Owners and admins invite people and change roles: open a person to change theirs.</Copy>

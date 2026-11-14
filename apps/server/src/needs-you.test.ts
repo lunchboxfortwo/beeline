@@ -526,7 +526,7 @@ describe('PhoneService Needs-you tray', () => {
     expect(item?.approval).toMatchObject({ actor: 'Hoots', ask: 'wants to connect', subject: 'GitHub', literal: false });
   });
 
-  it('shows a pending grant card the reader can decide, with no expiry, until decided', async () => {
+  it.each([undefined,'Deploy the Milo site'])('shows a pending grant purpose on its host (%s) until decided', async purpose => {
     await database.query(
       `INSERT INTO agent_grants(id,agent_id,workspace_id,kind,target,reason,requested_by,room_id,status,created_at)
        VALUES($1,$2,$3,'command','gh pr checks','watch CI',$2,$4,'pending',now() - interval '3 days')`,
@@ -549,6 +549,7 @@ describe('PhoneService Needs-you tray', () => {
               kind: 'command',
               target: 'gh pr checks',
               reason: 'watch CI',
+              purpose,machine:'squire',
               status: 'pending',
             },
           ],
@@ -559,15 +560,15 @@ describe('PhoneService Needs-you tray', () => {
     expect(await count()).toBe(1);
     expect(item).toMatchObject({
       messageId: card,
-      text: 'gh pr checks',
+      text: `${purpose ? 'deploy the Milo site' : 'run a command'} on squire`,
       approval: {
         kind: 'grant',
         actor: 'Hoots',
-        ask: 'wants to run a command',
-        subject: 'gh pr checks',
-        literal: true,
-        detail: 'watch CI',
-        purpose: 'watch CI',
+        ask: 'wants to',
+        subject: `${purpose ? 'deploy the Milo site' : 'run a command'} on squire`,
+        literal: false,
+        detail: purpose ?? 'watch CI',
+        purpose: purpose ?? 'watch CI',
         facts: [{ label: 'Runs', value: 'gh pr checks' }],
         forName: 'Juniper',
       },
@@ -624,7 +625,7 @@ describe('PhoneService Needs-you tray', () => {
       await card(ROOM, 'grant-request', { agent: hoots, grants: [{ grantId: id, kind, target, ...(kind === 'command' ? { script } : {}) }] });
     }
     const items = (await read()).items;
-    expect(items.find(item => item.approval?.subject === 'python3 checks.py')?.approval?.script).toEqual(script);
+    expect(items.find(item => item.approval?.subject === 'run a script')?.approval?.script).toEqual(script);
     expect(items.find(item => item.approval?.subject === 'codex-plugin-cache')?.approval?.actions)
       .toEqual([
         { kind: 'grant', label: 'Always', grantId: sharedId, decision: 'always' },
@@ -748,7 +749,7 @@ describe('PhoneService Needs-you tray', () => {
     const squire = await card(ROOM, 'squire-approval', { agent: hoots, tool: 'fetch_credential', title: 'Credential access approval', detail: 'Reveal a saved credential',
       action: 'reveal a key', reason: 'Sign in the Fly CLI.', sourceRoomId: CORNER, approvalUrl: 'https://squire.example/approve/1', approvalId: 'approval-1', expiresAt: Date.now() + 600000, linkKind: 'passkey' });
     const items = (await read()).items;
-    for (const [id, subject, reason] of [[grant, 'python3 cleanup.py', 'Free disk space'], [connector, 'Gmail', 'Read the release thread.'], [squire, 'reveal a key', 'Sign in the Fly CLI.']]) {
+    for (const [id, subject, reason] of [[grant, 'run a command', 'Free disk space'], [connector, 'Gmail', 'Read the release thread.'], [squire, 'reveal a key', 'Sign in the Fly CLI.']]) {
       expect(items.find(item => item.messageId === id)).toMatchObject({ text: subject, approval: { subject, detail: reason } });
     }
   });
