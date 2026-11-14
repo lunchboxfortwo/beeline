@@ -88,3 +88,6 @@ agent-home/
 
 # Exact-head CI build archive metadata
 .beeline-ci-build.json
+
+# Generated from README.md by scripts/build-usebeeline-package.mjs
+packages/usebeeline/README.md

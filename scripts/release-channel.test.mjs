@@ -209,7 +209,7 @@ test('latest reserves the final at the rc source and rejects a conflicting ident
 
 test('the workflow publishes rc with next and final with the default npm tag, using OIDC', () => fixture(directory => {
   const publish = workflow.jobs.helper.steps.find(s => s.name === 'Publish the exact helper CLI package');
-  assert.equal(publish.if, undefined);
+  assert.equal(publish.if, "env.SKIP_HELPER_NPM != 'true'");
   assert.equal(workflow.jobs.helper.permissions['id-token'], 'write');
   const calls = join(directory, 'npm-calls.jsonl');
   writeFileSync(join(directory, 'npm'), `#!${process.execPath}
