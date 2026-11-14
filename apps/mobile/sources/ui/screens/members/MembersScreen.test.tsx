@@ -85,6 +85,8 @@ describe('chat Members', () => {
     it('offers only the workspace agents not in the chat, and no + without authority', () => {
         let tree: any;
         act(() => { tree = create(<MembersScreen roomId={ROOM} close={vi.fn()} />); });
+        // Sheet bodies mount when opened.
+        act(() => { tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'add-agents').props.onPress(); });
         const sheet = tree.root.find((node: any) => node.props.testID === 'sheet-add-agent-member' && typeof node.type === 'string');
         expect(sheet).toBeDefined();
         expect(tree.root.findAll((node: any) => typeof node.props.testID === 'string' && node.props.testID.startsWith('pick-') && node.type === 'ListItem')
