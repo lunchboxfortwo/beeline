@@ -69,15 +69,34 @@ test('local latest promotion has no reusable Checks call or quick gates', async 
         started.push(context.github.job);
         return { result: 'success', outputs: context.github.job === 'initialize' ? {
           channel: 'latest', run_helper: 'true', run_mobile_ota: 'true', run_website: 'true',
+          run_mobile_native: 'true', native_android: 'true', native_ios: 'true',
         } : {} };
       } });
-    const results = await engine.workflow('.github/workflows/unified-release.yml', { channel: 'latest' }, {
+    const results = await engine.workflow('.github/workflows/unified-release.yml', { channel: 'latest', store_track: 'production' }, {
       github: { repository: 'Beeline-Work/beeline', sha: 'a'.repeat(40), run_id: '1' },
     });
     assert.equal(results.release_validation.result, 'success');
     assert.ok(!started.some(id => ['release_checks', 'typecheck', 'dead-code', 'codecs'].includes(id)));
     assert.ok(started.includes('helper') && started.includes('release_result'));
+    assert.ok(started.includes('mobile_native_android') && started.includes('mobile_native_ios'));
   } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('iOS and Mac helpers share the remote queue while Android stays in a local slot', async () => {
+  const engine = { cancelled: false }, delivery = new LocalDelivery(engine), placements = [];
+  let activeMac = 0;
+  delivery.execute = async (slot, _job, context) => {
+    placements.push([context.github.job, slot]);
+    if (slot === 4) { activeMac++; assert.equal(activeMac, 1); }
+    await new Promise(resolve => setTimeout(resolve, 5));
+    if (slot === 4) activeMac--;
+    return { result: 'success', outputs: {} };
+  };
+  await Promise.all(['helper_macos', 'mobile_native_ios', 'mobile_native_android'].map(id => delivery.run({}, { github: { job: id } }, id)));
+  assert.deepEqual(placements.filter(([, slot]) => slot === 4).map(([id]) => id), ['helper_macos', 'mobile_native_ios']);
+  assert.ok(placements.some(([id, slot]) => id === 'mobile_native_android' && slot < 4));
+  const plan = releasePlan(read('unified-release.yml'), read('checks.yml'), { channel: 'latest' });
+  assert.equal(plan.jobs.find(job => job.id === 'mobile_native_ios').placement, 'remote Mac, separate queue');
 });
 
 test('the real release DAG overlaps three local legs with Mac work, carries outputs and waits for final joins', async () => {

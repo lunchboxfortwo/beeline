@@ -18,6 +18,8 @@ import { readPlayRuntime, runtimeFromApkDump, easBuildInventory } from './store-
 import { androidReleaseProfile } from './android-release-channel.mjs';
 import { computeTargets } from '../apps/mobile/scripts/ota-release.mjs';
 import { playLiveBuilds } from '../apps/mobile/scripts/store-runtime-targets.mjs';
+import { prepareWebSourcemaps } from '../apps/mobile/scripts/prepare-web-sourcemaps.mjs';
+import { condition } from './release-local-expressions.mjs';
 
 test('Reproduction 24: empty Pages status retries once immediately, then fails and cancels', async () => {
   for (const recovered of [false, true]) {
@@ -135,6 +137,30 @@ const fixture = (fn) => {
   const directory = mkdtempSync(join(tmpdir(), 'beeline-release-channel-test-'));
   return Promise.resolve().then(() => fn(directory)).finally(() => rmSync(directory, { recursive: true, force: true }));
 };
+
+test('web source maps are private and optional when Sentry credentials are absent', () => fixture(directory => {
+  const previous = process.env.SENTRY_AUTH_TOKEN;
+  delete process.env.SENTRY_AUTH_TOKEN;
+  try {
+    const bundles = join(directory, '_expo/static/js/web');
+    mkdirSync(bundles, { recursive: true });
+    writeFileSync(join(bundles, 'app.js'), '// debugId=fixture-debug-id');
+    writeFileSync(join(bundles, 'app.js.map'), JSON.stringify({ debugId: 'fixture-debug-id', sources: ['app.ts'], mappings: 'AAAA' }));
+    const warnings = [];
+    assert.doesNotThrow(() => prepareWebSourcemaps(directory, sha, { warn: warning => warnings.push(warning),
+      run: () => assert.fail('Missing token must not start a Sentry upload') }));
+    assert.throws(() => readFileSync(join(bundles, 'app.js.map')), /ENOENT/);
+    assert.match(readFileSync(join(bundles, 'app.js'), 'utf8'), /fixture-debug-id/);
+    assert.match(warnings.join(' '), /SENTRY_AUTH_TOKEN is unavailable/);
+    writeFileSync(join(bundles, 'app.js.map'), JSON.stringify({ debugId: 'fixture-debug-id', sources: ['app.ts'], mappings: 'AAAA' }));
+    process.env.SENTRY_AUTH_TOKEN = 'fixture-configured-token';
+    assert.throws(() => prepareWebSourcemaps(directory, sha, { run: () => ({ status: 1 }) }), /Required Sentry source map upload failed/);
+    assert.ok(readFileSync(join(bundles, 'app.js.map')).length > 0);
+  } finally {
+    if (previous === undefined) delete process.env.SENTRY_AUTH_TOKEN;
+    else process.env.SENTRY_AUTH_TOKEN = previous;
+  }
+}));
 const workflow = parse(readFileSync('.github/workflows/unified-release.yml', 'utf8'));
 
 test('channel defaults to next; native consent and latest selection stay separate', () => {
@@ -785,6 +811,25 @@ test('an explicit store build cannot reuse a binary subscribed to the other OTA 
     channel: 'next', selectedComponents: channelComponents(['mobile-native'], { storeTrack: 'beta' }) });
   assert.equal(missingBeta.components['mobile-native'].state, 'pending');
   assert.deepEqual(missingBeta.plan.nativePlatforms, ['android']);
+});
+
+test('production promotion selects Android even when only the iOS runtime changed', () => {
+  const next = nextRecord();
+  next.components['mobile-native'].storeTrack = 'beta';
+  const state = initializeRelease({ version: promotionSource(next).version, sourceSha: sha, previous: delivered(), next, channel: 'latest',
+    selectedComponents: channelComponents([], { channel: 'latest', storeTrack: 'production' }),
+    runtimePin: { changed: true, changedPlatforms: ['ios'], previous: { android: '53', ios: '40' }, next: { android: '53', ios: '41' } } });
+  const flags = Object.fromEntries(planOutputs(state, delivered()).trim().split('\n').map(line => line.split('=')));
+  assert.equal(flags.run_mobile_native, 'true');
+  assert.equal(flags.native_android, 'true');
+  assert.equal(flags.native_ios, 'true');
+  assert.deepEqual(state.plan.nativePlatforms, ['android', 'ios']);
+  const context = { inputs: { store_track: 'production', selection: 'auto' }, steps: { android_build: { outcome: 'success' } },
+    needs: { initialize: { result: 'success', outputs: flags }, release_validation: { result: 'success' }, delivery_result: { result: 'success' } },
+    job: { status: 'success' } };
+  assert.equal(condition(workflow.jobs.mobile_native_android.if, context, { success: true, cancelled: false }), true);
+  const upload = workflow.jobs.mobile_native_android.steps.find(step => step.name === 'Publish Android to Play');
+  assert.equal(condition(upload.if, context, { success: true, cancelled: false }), true);
 });
 
 test('a delivered no-op needs no outputs from skipped jobs', () => {

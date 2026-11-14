@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import test from 'node:test';
 import { parse } from 'yaml';
 import { LocalActions, matrixRows } from './release-local-actions.mjs';
-import { attribution, dryInitializeJob, dryRun, loadEnvironment, localHooks, missingReleaseCredentials, parseArguments, releaseChecks } from './release-local.mjs';
+import { attribution, dryInitializeJob, dryRun, loadEnvironment, localHooks, missingReleaseCredentials, parseArguments, releaseChecks, remoteJob } from './release-local.mjs';
 import { setupJava } from './release-local-java.mjs';
 import { condition, evaluate, readCommandFile, render } from './release-local-expressions.mjs';
 import { Processes } from './release-local-process.mjs';
@@ -109,6 +109,61 @@ test('local preflight requires user GitHub authority instead of App credentials'
   assert.equal(missing.includes('GITHUB_TOKEN or GH_TOKEN'), true);
   const policy = localHooks(tmpdir(), new Processes({}, () => {}));
   await assert.rejects(policy.step({ step: { id: 'app_token' }, context: { github: { job: 'initialize' } }, result: { outputs: {} } }), /requires GITHUB_TOKEN or GH_TOKEN/);
+});
+test('iOS store jobs use the authorized Mac transport with only scoped credentials', async () => {
+  const directory = temporary(), calls = [], messages = [];
+  const secrets = { EXPO_TOKEN: 'fixture-expo-token', EXPO_ASC_KEY_ID: 'fixture-key-id', EXPO_ASC_ISSUER_ID: 'fixture-issuer',
+    EXPO_ASC_API_KEY_P8: 'fixture-base64-key', FLY_API_TOKEN: 'must-stay-local' };
+  const processes = new Processes(secrets, message => messages.push(message));
+  processes.run = async (command, args, options = {}) => {
+    calls.push({ command, args, options });
+    if (command === 'scp' && args.some(arg => arg.endsWith('/result.json'))) {
+      writeFileSync(args.at(-1), JSON.stringify({ job: { result: 'success', outputs: { build_number: '109' } }, artifacts: [] }));
+    }
+    return '';
+  };
+  try {
+    const engine = { directory, root: repository, secrets, variables: {}, artifacts: new Map(), macTools: '/fixture/mac-tools', processes };
+    const job = parse(readFileSync(join(repository, '.github/workflows/unified-release.yml'), 'utf8')).jobs.mobile_native_ios;
+    const result = await localHooks(directory, processes).job({ job, context: {
+      env: {}, secrets, inputs: { channel: 'latest', store_track: 'production' }, needs: {}, matrix: {}, github: { job: 'mobile_native_ios', sha, token: 'github-fixture' },
+    }, label: 'mobile_native_ios-local', engine });
+    assert.equal(result?.result, 'success');
+    assert.equal(result.outputs.build_number, '109');
+    const remote = calls.find(call => call.command === 'ssh' && call.options.input);
+    assert.ok(remote.args.includes('dani@100.104.88.126'));
+    const spec = JSON.parse(remote.options.input);
+    assert.deepEqual(Object.keys(spec.secrets).sort(), Object.keys(secrets).filter(name => name !== 'FLY_API_TOKEN').sort());
+    assert.deepEqual(spec.context.secrets, {});
+    assert.equal(spec.label, 'mobile_native_ios-local');
+    assert.match(spec.job.steps.find(step => step.name === 'Isolate the iOS signing keychain').run, /security create-keychain/);
+    assert.match(remote.args.at(-1), /trap .*job.json.*EXIT/);
+    assert.equal(remote.options.timeout, 90 * 60_000);
+    assert.ok(!messages.some(message => Object.values(secrets).some(secret => message.includes(secret))));
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+test('remote native runner receives scoped secrets and keeps HOME and temporary output private', async () => {
+  const directory = temporary(), path = join(directory, 'job.json');
+  try {
+    const secret = 'fixture-expo-token';
+    writeFileSync(path, JSON.stringify({ label: 'mobile_native_ios-local', secrets: { EXPO_TOKEN: secret },
+      variables: { BEELINE_MOBILE_SENTRY_DSN: 'fixture-dsn' }, workflowEnv: { EXPO_PUBLIC_SENTRY_DSN: '${{ vars.BEELINE_MOBILE_SENTRY_DSN }}' },
+      context: { github: { job: 'mobile_native_ios', repository: 'fixture/repo', sha, run_id: 'fixture' }, inputs: {}, needs: {}, matrix: {}, steps: {}, job: { status: 'success', services: {} } },
+      job: { steps: [{ id: 'upload', env: { EXPO_TOKEN: '${{ secrets.EXPO_TOKEN }}' }, run: [
+        `test "$EXPO_TOKEN" = '${secret}'`,
+        'test "$EXPO_PUBLIC_SENTRY_DSN" = fixture-dsn',
+        'test "$HOME" = "$RUNNER_TEMP/home"',
+        'test "$TMPDIR" = "$RUNNER_TEMP/tmp"',
+        'echo build_number=109 >> "$GITHUB_OUTPUT"',
+      ].join('\n') }], outputs: { build_number: '${{ steps.upload.outputs.build_number }}' } },
+    }));
+    await assert.rejects(remoteJob(path, { platform: 'linux', arch: 'x64' }), /authorized Intel Mac/);
+    await remoteJob(path, { platform: 'darwin', arch: 'x64' });
+    const result = JSON.parse(readFileSync(join(directory, 'result.json'), 'utf8'));
+    assert.equal(result.job.result, 'success');
+    assert.equal(result.job.outputs.build_number, '109');
+    assert.ok(!readFileSync(join(directory, 'state/jobs/mobile_native_ios-local/output.log'), 'utf8').includes(secret));
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 test('both channel identity reads fetch newly published tags before consulting release records', async () => {
   const calls = [], processes = new Processes({}, () => {});

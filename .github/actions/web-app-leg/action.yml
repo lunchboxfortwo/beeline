@@ -4,8 +4,9 @@ name: Publish the Expo web app
 description: Export the release app, deploy it to EAS Hosting production, and verify the canonical custom domain
 inputs:
   sentry_auth_token:
-    description: Sentry release upload token; required before hosting promotion
-    required: true
+    description: Optional Sentry release upload token; private maps are stripped even without it
+    required: false
+    default: ''
   expo_token:
     description: Expo access token
     required: true

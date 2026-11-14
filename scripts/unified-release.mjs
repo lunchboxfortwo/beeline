@@ -400,6 +400,9 @@ export function initializeRelease({ version, sourceSha, previous, selectedCompon
       state.plan.nativePlatforms = runtimePin?.changed ? runtimePin.changedPlatforms : ['android', 'ios'];
     }
     if (channel === 'next') state.plan.nativePlatforms = ['android'];
+    // A production track request builds both subscriptions. A runtime delta
+    // on only iOS must not suppress Android's production store submission.
+    else if (selectedComponents.includes('mobile-native')) state.plan.nativePlatforms = ['android', 'ios'];
     if (state.state !== 'delivered') for (const component of state.plan.carried)
       state.components[component] = previousComponent(state, component);
     return state;

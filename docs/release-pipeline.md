@@ -108,7 +108,7 @@ Cache misses rebuild; unknown action types fail.
 
 The temporary outage policy is explicit: **website not released** means static
 GitHub Pages is left serving its published site. The selected EAS web app leg
-still exports, uploads private source maps, deploys and verifies its canonical
+still exports, uploads private source maps when configured, deploys and verifies its canonical
 origin. The published Apple-silicon helper archive is carried byte for byte,
 with its original per-platform commit/version/checksum and a `carriedFrom`
 record; Linux and Intel Mac helpers build and prove their new bytes. The Intel
@@ -157,7 +157,7 @@ missing history fails closed locally. Keep tags current with a normal full
 | `SERVER_CANARY_REVIEW_SECRET` or legacy `SERVER_CANARY_PHONE_TOKEN`, `SERVER_CANARY_ROOM_ID` | Next authenticated server canary |
 | `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` | Required only when the release plan selects a native Android store build; optional for OTA store-runtime reads |
 | `EXPO_ASC_KEY_ID`, `EXPO_ASC_ISSUER_ID`, `EXPO_ASC_API_KEY_P8` | Live App Store runtime reads for OTA |
-| `SENTRY_AUTH_TOKEN` | OTA source maps; required for latest web app delivery |
+| `SENTRY_AUTH_TOKEN` | Optional OTA/web source maps; web exports strip private maps even when the token is absent |
 | `BEELINE_REVIEW_SECRET` | Explicit `--run-release-proof` device proof |
 | `BEELINE_RELEASE_NOTIFY_SECRET` | Existing best-effort release notification |
 | `BEELINE_INSIGHTS_TOKEN`, `MOBILE_OTA_OWNER_PUBKEY`, `MOBILE_OTA_RECEIPT_TOKEN` | Existing best-effort release bookkeeping |
@@ -539,11 +539,17 @@ The per-platform native runtime pins no longer gate an OTA release. When
 `apps/mobile/native-fingerprint.json` changes a runtime pin and `store_track`
 is `none`, the plan ships the OTA to the runtimes live in the stores and prints
 a notice; the new runtime gets OTAs once a store release puts it live. With an
-explicit store track, native builds run only for the platforms whose pins
-changed. The `allow_pin_restore` input is accepted and ignored.
+explicit beta track, next builds Android. A production promotion builds and
+submits both Android and iOS, even if only one platform's runtime changed. The `allow_pin_restore` input is accepted and ignored.
 
-iOS store binaries build locally on the self-hosted `macbook-pro-7` Mac runner
-and are submitted to TestFlight from its generated IPA. The iOS leg inspects the
+On hosted releases, iOS store binaries build locally on the self-hosted
+`macbook-pro-7` Mac runner. On squire, iOS uses the authorized
+`dani@100.104.88.126` Mac through the same serialized remote queue as the Intel
+helper. The remote job receives its Expo/ASC credentials and existing GitHub
+authority through stdin into a temporary job file removed on exit; other local
+delivery secrets stay on squire. The remote runner uses a private
+HOME, TMPDIR and signing keychain, and restores the prior keychain selection.
+The generated IPA is submitted directly to TestFlight. The iOS leg inspects the
 IPA's bundle, version, build number, runtime and required photo purpose string
 (`scripts/ios-build-evidence.py`), then verifies the exact Apple delivery UUID
 and a new `VALID` build under App Store app `6803948500`

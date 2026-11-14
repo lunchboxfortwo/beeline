@@ -107,17 +107,21 @@ async function macJob({ job, context, label, engine }) {
   const tools = await prepareMacTools(engine);
   const local = join(engine.directory, 'remote', label);
   mkdirSync(local, { recursive: true, mode: 0o700 });
+  const secrets = context.github.job === 'mobile_native_ios' ? Object.fromEntries(
+    ['EXPO_TOKEN', 'EXPO_ASC_KEY_ID', 'EXPO_ASC_ISSUER_ID', 'EXPO_ASC_API_KEY_P8'].map(name => [name, engine.secrets[name] || '']),
+  ) : {};
+  if (secrets.EXPO_ASC_API_KEY_P8?.includes('-----BEGIN')) secrets.EXPO_ASC_API_KEY_P8 = Buffer.from(secrets.EXPO_ASC_API_KEY_P8).toString('base64');
   const spec = {
-    job, context: { ...context, secrets: {}, github: { ...context.github } },
-    variables: engine.variables,
+    job: context.github.job === 'mobile_native_ios' ? privateIosJob(job) : job,
+    label, secrets, context: { ...context, secrets: {}, github: { ...context.github } },
+    variables: engine.variables, workflowEnv: engine.read?.(WORKFLOW)?.env,
   };
-  privateWrite(join(local, 'job.json'), JSON.stringify(spec));
   await engine.processes.run('git', ['bundle', 'create', join(local, 'source.bundle'), 'HEAD'], { cwd: engine.root, quiet: true, env: process.env });
   await engine.processes.run('ssh', ['-o', 'BatchMode=yes', MAC, `umask 077; mkdir -p '${remote}'`], { env: process.env, timeout: 30_000 });
-  await engine.processes.run('scp', ['-q', join(local, 'source.bundle'), join(local, 'job.json'), `${MAC}:${remote}/`], { env: process.env });
-  const command = `set -e; export PATH='${tools}/node/bin':/usr/local/bin:/opt/homebrew/bin:$HOME/.cargo/bin:$PATH; export RUSTUP_HOME='${tools}/rustup' CARGO_HOME='${tools}/cargo'; if [ -d '${remote}/source/.git' ]; then test "$(git -C '${remote}/source' rev-parse HEAD)" = '${context.github.sha}'; else git clone --quiet '${remote}/source.bundle' '${remote}/source'; fi; ( cd '${remote}/source' && npm ci --ignore-scripts --no-audit --no-fund && node scripts/release-local.mjs --remote-job '${remote}/job.json' )`;
+  await engine.processes.run('scp', ['-q', join(local, 'source.bundle'), `${MAC}:${remote}/`], { env: process.env });
+  const command = `set -e; umask 077; trap 'rm -f "${remote}/job.json"' EXIT; export PATH='${tools}/node/bin':/usr/local/bin:/opt/homebrew/bin:$HOME/.cargo/bin:$PATH; export RUSTUP_HOME='${tools}/rustup' CARGO_HOME='${tools}/cargo'; if [ -d '${remote}/source/.git' ]; then test "$(git -C '${remote}/source' rev-parse HEAD)" = '${context.github.sha}'; else git clone --quiet '${remote}/source.bundle' '${remote}/source'; fi; ( cd '${remote}/source' && npm ci --ignore-scripts --no-audit --no-fund && cat > '${remote}/job.json' && node scripts/release-local.mjs --remote-job '${remote}/job.json' )`;
   let failure;
-  try { await engine.processes.run('ssh', ['-o', 'BatchMode=yes', MAC, command], { env: process.env, timeout: 40 * 60_000 }); }
+  try { await engine.processes.run('ssh', ['-o', 'BatchMode=yes', MAC, command], { env: process.env, input: JSON.stringify(spec), timeout: (job['timeout-minutes'] ?? 40) * 60_000 }); }
   catch (error) { failure = error; }
   await engine.processes.run('scp', ['-q', `${MAC}:${remote}/result.json`, join(local, 'result.json')], { env: process.env });
   const result = JSON.parse(readFileSync(join(local, 'result.json'), 'utf8'));
@@ -130,6 +134,25 @@ async function macJob({ job, context, label, engine }) {
   }
   if (failure) throw failure;
   return result.job;
+}
+
+function privateIosJob(job) {
+  const local = structuredClone(job);
+  for (const step of local.steps) {
+    if (step.name === 'Isolate the iOS signing keychain') step.run = `set -euo pipefail
+security list-keychains -d user > "$RUNNER_TEMP/user-keychains.txt"
+security default-keychain -d user > "$RUNNER_TEMP/user-default-keychain.txt"
+mkdir -p "$HOME/Library/Keychains"
+keychain="$HOME/Library/Keychains/login.keychain-db"
+password=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(24).toString("hex"))')
+security create-keychain -p "$password" "$keychain"
+security set-keychain-settings -lut 21600 "$keychain"
+security unlock-keychain -p "$password" "$keychain"
+security list-keychains -d user -s "$keychain"
+security default-keychain -d user -s "$keychain"`;
+    if (step.name === 'Restore the runner user keychains') step.run += '\nif [ -f "$HOME/Library/Keychains/login.keychain-db" ]; then security delete-keychain "$HOME/Library/Keychains/login.keychain-db"; fi';
+  }
+  return local;
 }
 
 async function prepareMacTools(engine) {
@@ -199,6 +222,7 @@ export function localHooks(directory, processes) {
         if (context.matrix.platform === 'darwin-arm64') return carryArm64(engine, context);
         return macJob(args);
       }
+      if (context.github.job === 'mobile_native_ios') return macJob(args);
       if (context.github.job === 'helper') context.env.BEELINE_RELEASE_CARRIED_ARM64_DIR = join(directory, 'carried-arm64');
       if (['release_validation', 'bookkeeping'].includes(context.github.job)) {
         context.env.BEELINE_LOCAL_RELEASE_RECORDS = join(directory, 'records.json');
@@ -305,12 +329,13 @@ export function localHooks(directory, processes) {
   };
 }
 
-async function remoteJob(path) {
-  if (process.platform !== 'darwin' || process.arch !== 'x64') throw new Error('Remote job requires the authorized Intel Mac');
+export async function remoteJob(path, { platform = process.platform, arch = process.arch } = {}) {
+  if (platform !== 'darwin' || arch !== 'x64') throw new Error('Remote job requires the authorized Intel Mac');
   const spec = JSON.parse(readFileSync(path, 'utf8')), directory = join(dirname(path), 'state');
-  const processes = new Processes({ token: spec.context.github.token });
-  const engine = new LocalActions({ root, directory, secrets: {}, variables: spec.variables, processes, github: localGithub });
-  const job = await engine.job(spec.job, spec.context, 'helper-darwin-x64');
+  const secrets = spec.secrets ?? {}, processes = new Processes({ ...secrets, token: spec.context.github.token });
+  const engine = new LocalActions({ root, directory, secrets, variables: spec.variables, processes, github: localGithub, isolateTemporary: true });
+  Object.assign(spec.context, { secrets, vars: engine.variables });
+  const job = await engine.job(spec.job, spec.context, spec.label || 'helper-darwin-x64', spec.workflowEnv);
   privateWrite(join(dirname(path), 'result.json'), JSON.stringify({ job, artifacts: [...engine.artifacts] }));
   if (job.result !== 'success') process.exitCode = 1;
 }
