@@ -1,12 +1,12 @@
 import { subscribeDesktopArtifact, type DesktopArtifactSelection } from '@/buzz/desktop-artifact-pane';
 import { DesktopArtifactPane } from '@/components/buzz/DesktopArtifactPane';
-import { desktopDocumentPaneWidth, DESKTOP_WORK_PANE_THRESHOLD } from '@/buzz/desktop-workbench-state';
+import { DESKTOP_WORK_PANE_THRESHOLD } from '@/buzz/desktop-workbench-state';
 import { setDesktopPaneOpen, useDesktopLayout, setDesktopAvailableWidth } from '@/buzz/desktop-layout-state';
 import * as React from 'react';
 import { Drawer } from 'expo-router/drawer';
 import { useIsDesktop, useIsTablet, useHeaderHeight } from '@/utils/responsive';
 import { SidebarView } from './SidebarView';
-import { DesktopPanel } from '@/ui/shell/DesktopPanel';
+import { DesktopViewerPane } from './DesktopViewerPane';
 import { useWindowDimensions, Platform, PanResponder } from 'react-native';
 import { XStack, YStack, useTheme } from 'tamagui';
 import { ChevronLeft, ChevronRight } from 'lucide-react-native';
@@ -205,11 +205,10 @@ const DesktopSidebarNavigator = React.memo(() => {
           drawerContent={showSessionChrome ? drawerContent : undefined}
         />
         </YStack>
-        {showSessionChrome && <DesktopPanel />}
         {document && desktopLayout.availableWidth >= DESKTOP_WORK_PANE_THRESHOLD && (
-          <YStack width={desktopDocumentPaneWidth(desktopLayout.availableWidth)}>
+          <DesktopViewerPane>
             <DesktopArtifactPane {...document} onClose={() => setDocument(null)} />
-          </YStack>
+          </DesktopViewerPane>
         )}
       </XStack>
       {desktopPlatform && showSidebar && (

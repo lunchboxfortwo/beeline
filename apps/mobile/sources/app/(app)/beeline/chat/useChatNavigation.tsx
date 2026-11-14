@@ -19,10 +19,7 @@ type Props = [
   desktopExperience: boolean,
   openDesktopCorner: (roomId: string, cornerId: string) => void,
   commitDesktopWorkPane: (event: DesktopWorkPaneEvent) => import("@/buzz/desktop-workbench-state").DesktopWorkPaneTransition,
-  desktopWorkRoomId: string,
   focusComposer: () => void,
-  profileAgentId: string | null,
-  setProfileAgentId: React.Dispatch<React.SetStateAction<string | null>>,
   desktopWorkPaneMounted: import("@beeline/api-contract/phone").RoomView | null,
   sending: boolean,
   pendingAttachments: PickedChatAttachment[],
@@ -31,8 +28,8 @@ type Props = [
 
 export function useChatNavigation([
   liveDraftStore, navigation, parentChannelId, cornerReturnTarget, transport, decodedId, readRoom,
-  desktopExperience, openDesktopCorner, commitDesktopWorkPane, desktopWorkRoomId, focusComposer,
-  profileAgentId, setProfileAgentId, desktopWorkPaneMounted, sending, pendingAttachments,
+  desktopExperience, openDesktopCorner, commitDesktopWorkPane, focusComposer,
+  desktopWorkPaneMounted, sending, pendingAttachments,
   replacePendingAttachments,
 ]: Props): [
   handleCloseCorner: () => Promise<void>,
@@ -41,7 +38,6 @@ export function useChatNavigation([
   handleCommunitySelect: (communityId: string | null) => void,
   handleDesktopDrop: (event: React.DragEvent<HTMLElement>) => void,
   handleDesktopPaste: (event: ClipboardEvent) => void,
-  expandDesktopCorner: (cornerId: string) => void,
   closeDesktopWorkPane: () => void,
 ] {
 
@@ -117,16 +113,6 @@ export function useChatNavigation([
   }, [commitDesktopWorkPane]);
 
 
-  // Expand moves the corner into the primary view and closes the pane.
-  const expandDesktopCorner = useCallback(
-    (cornerId: string) => {
-      commitDesktopWorkPane({ type: 'expand' });
-      router.push(cornerHref(cornerId, desktopWorkRoomId));
-    },
-    [commitDesktopWorkPane, desktopWorkRoomId],
-  );
-
-
   useEffect(() => {
     if (!desktopExperience || Platform.OS !== 'web' || typeof window === 'undefined') return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -137,9 +123,6 @@ export function useChatNavigation([
       ) {
         event.preventDefault();
         focusComposer();
-      } else if (event.key === 'Escape' && profileAgentId) {
-        event.preventDefault();
-        setProfileAgentId(null);
       } else if (event.key === 'Escape' && desktopWorkPaneMounted) {
         event.preventDefault();
         closeDesktopWorkPane();
@@ -152,7 +135,6 @@ export function useChatNavigation([
     desktopExperience,
     desktopWorkPaneMounted,
     focusComposer,
-    profileAgentId,
   ]);
 
 
@@ -204,6 +186,6 @@ export function useChatNavigation([
   );
   return [
     handleCloseCorner, openCorner, handleBack, handleCommunitySelect, handleDesktopDrop,
-    handleDesktopPaste, expandDesktopCorner, closeDesktopWorkPane,
+    handleDesktopPaste, closeDesktopWorkPane,
   ];
 }

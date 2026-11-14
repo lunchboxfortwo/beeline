@@ -1,6 +1,5 @@
-import React, { useCallback, useContext, useEffect, useState } from 'react';
+import React, { useCallback, useContext, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
-import { usePanel } from '@/ui/shell/panel';
 import { Platform, useWindowDimensions } from 'react-native';
 import { Collapsible, ScrollView, Separator, XStack, YStack } from 'tamagui';
 import { ChevronDown, ChevronUp, CornerDownRight } from 'lucide-react-native';
@@ -24,8 +23,6 @@ const DropdownContext = React.createContext<{
 export function ThreadsDropdownScope({ children }: { children: React.ReactNode }) {
     const [open, setOpen] = useState(false);
     const close = useCallback(() => setOpen(false), []);
-    const panel = usePanel();
-    useEffect(close, [close, panel]);
     useFocusEffect(useCallback(() => close, [close]));
     return <DropdownContext.Provider value={{ open, setOpen }}>
         <YStack flex={1} onTouchStart={close} {...(Platform.OS === 'web' ? { onPointerDown: close } : {})} testID="threads-dismiss-scope">{children}</YStack>

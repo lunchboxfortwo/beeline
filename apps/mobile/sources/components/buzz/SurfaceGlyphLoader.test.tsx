@@ -48,7 +48,6 @@ const LOADING_SURFACES: readonly LoadingSurface[] = [
     treatment: 'glyph',
   },
   { id: 'desktop-sidebar', file: 'components/SidebarView.tsx', treatment: 'glyph' },
-  { id: 'desktop-inspector', file: 'components/DesktopRoomInspector.tsx', treatment: 'glyph' },
   { id: 'invite-join', file: 'app/(app)/join/[token].tsx', treatment: 'glyph' },
   { id: 'review-signin', file: 'app/(app)/review/[secret].tsx', treatment: 'glyph' },
   {

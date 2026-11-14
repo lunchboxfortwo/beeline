@@ -23,10 +23,6 @@ export function useChatRoute([
   allowOlderHistoryRef: React.RefObject<boolean>,
   routeChannelTitle: string | undefined,
   routeCommunityId: string | undefined,
-  profileKind: "human" | "agent",
-  profileAgentId: string | null,
-  setProfileKind: React.Dispatch<React.SetStateAction<"human" | "agent">>,
-  setProfileAgentId: React.Dispatch<React.SetStateAction<string | null>>,
   messageAnchorId: string,
   notificationResponseId: string | undefined,
   notificationMessageId: string | undefined,
@@ -90,13 +86,6 @@ export function useChatRoute([
   // A packaged Tauri window keeps the desktop experience at every width.
   const desktopExperience = isDesktop || isDesktopShell();
 
-  const [profileKind, setProfileKind] = useState<'human' | 'agent'>('agent');
-
-  const [profileAgentId, setProfileAgentId] = useState<string | null>(null);
-
-  useEffect(() => {
-    setProfileAgentId(null);
-  }, [decodedId]);
 
   const routeParentChannelId = parent?.trim() || undefined;
 
@@ -117,8 +106,7 @@ export function useChatRoute([
   const navigation = useNavigation();
   return [
     sendPreview, decodedId, navigation, desktopExperience, desktopAvailableWidth,
-    routeParentChannelId, allowOlderHistoryRef, routeChannelTitle, routeCommunityId, profileKind,
-    profileAgentId, setProfileKind, setProfileAgentId, messageAnchorId, notificationResponseId,
+    routeParentChannelId, allowOlderHistoryRef, routeChannelTitle, routeCommunityId, messageAnchorId, notificationResponseId,
     notificationMessageId, notificationTarget, insets, cornerReturnTarget, isDesktop,
     readOnlyFooterInset,
   ];

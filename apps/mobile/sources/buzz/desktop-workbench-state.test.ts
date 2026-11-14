@@ -21,6 +21,8 @@ import {
   DESKTOP_WORK_PANE_THRESHOLD,
   initialDesktopWorkPaneState,
   loadDesktopPaneWidth,
+  loadDesktopViewerWidth,
+  saveDesktopViewerWidth,
   saveDesktopPaneWidth,
   transitionDesktopWorkPane,
 } from './desktop-workbench-state';
@@ -62,6 +64,37 @@ describe('desktop workbench state', () => {
     });
     expect(opened.placement).toBe('primary');
     expect(opened.state).toBe(state);
+  });
+
+  it('never admits threads across primary destinations, widths, or an already open viewer', () => {
+    for (const primary of ['room', 'corner', 'direct-message'] as const) {
+      for (const width of [NARROW, WIDE]) {
+        for (const content of [null, { kind: 'artifact', artifact }] as const) {
+          const state = { ...initialDesktopWorkPaneState(width), content };
+          const result = transitionDesktopWorkPane(state, { type: 'open-corner', cornerId: 'thread', primary });
+          expect(result.placement).toBe('primary');
+          expect(result.state).toBe(state);
+        }
+      }
+    }
+  });
+  it('admits only explicit live browser opens and uses the full-screen fallback when needed', () => {
+    const session = { id: 'browser' } as never;
+    for (const width of [NARROW, WIDE]) {
+      for (const primary of ['room', 'corner', 'direct-message'] as const) {
+        const state = initialDesktopWorkPaneState(width);
+        const result = transitionDesktopWorkPane(state, { type: 'open-computer', session, primary });
+        const pane = width === WIDE && primary !== 'direct-message';
+        expect(result.placement).toBe(pane ? 'pane' : 'primary');
+        expect(result.state.content).toEqual(pane ? { kind: 'computer', session } : null);
+      }
+    }
+  });
+  it('restores only a viewer width, never saved pane content', async () => {
+    expect(await loadDesktopViewerWidth()).toBeUndefined();
+    await saveDesktopViewerWidth(780);
+    expect(await loadDesktopViewerWidth()).toBe(780);
+    expect(initialDesktopWorkPaneState(WIDE).content).toBeNull();
   });
 
   it('opens a corner in the primary view when a corner is already there', () => {
@@ -106,7 +139,7 @@ describe('desktop workbench state', () => {
     expect(state.content).toEqual({ kind: 'artifact', artifact: other });
   });
 
-  it('closes on close and on expand, and an artifact never comes back afterwards', () => {
+  it('closes on close, and an artifact never comes back afterwards', () => {
     let state = transitionDesktopWorkPane(initialDesktopWorkPaneState(WIDE), {
       type: 'open-artifact',
       artifact,
@@ -119,9 +152,8 @@ describe('desktop workbench state', () => {
       artifact,
       primary: 'room',
     }).state;
-    const expanded = transitionDesktopWorkPane(state, { type: 'expand' });
-    expect(expanded.placement).toBe('primary');
-    expect(expanded.state.content).toBeNull();
+    state = transitionDesktopWorkPane(state, { type: 'close' }).state;
+    expect(state.content).toBeNull();
   });
 
   it('falls back to the primary view in a narrow window or a direct message', () => {

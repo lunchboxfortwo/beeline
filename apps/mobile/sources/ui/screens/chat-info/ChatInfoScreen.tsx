@@ -5,7 +5,7 @@ import { Card, Input, ListItem, Separator, Switch, XStack, YStack } from 'tamagu
 import { Check } from 'lucide-react-native';
 import { cornerShortTitle, roomTitle } from '@beeline/api-contract/phone';
 import { Btn, ChatName, Copy, Glyph, HEIGHT, PlaceHeader, Row, Screen, Section, SheetFrame, SheetRow, T } from '@/ui/grammar';
-import { closePanel, openPlace } from '@/ui/shell/panel';
+import { openPlace } from '@/ui/shell/panel';
 import { useIsDesktop } from '@/utils/responsive';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import { appErrorCopy } from '@/buzz/app-error-copy';
@@ -78,7 +78,6 @@ export function ChatInfoScreen({ roomId, close }: { roomId: string; close: () =>
         finally { setBusy(null); }
     };
     const leaveToChats = () => {
-        closePanel();
         router.replace({ pathname: '/beeline/channels', ...(workspaceId ? { params: { communityId: workspaceId } } : {}) } as Href);
     };
     const toggleMute = async (next: boolean) => {

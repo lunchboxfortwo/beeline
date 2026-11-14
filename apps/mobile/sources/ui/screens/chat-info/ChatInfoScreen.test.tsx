@@ -222,7 +222,6 @@ describe('Chat info', () => {
         await act(async () => { await pressable(tree, 'leave-chat').props.onPress(); });
         expect(leave).toHaveBeenCalledTimes(1);
         expect(operation).toHaveBeenCalledWith('leaveRoom', { roomId: ROOM });
-        expect(panel.closePanel).toHaveBeenCalled();
         expect(router.replace).toHaveBeenCalledWith({ pathname: '/beeline/channels', params: { communityId: WORKSPACE } });
     });
 

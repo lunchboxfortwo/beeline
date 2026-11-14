@@ -64,8 +64,7 @@ export function BuzzChatSurface({
 }) {
   const [
     sendPreview, decodedId, navigation, desktopExperience, desktopAvailableWidth,
-    routeParentChannelId, allowOlderHistoryRef, routeChannelTitle, routeCommunityId, profileKind,
-    profileAgentId, setProfileKind, setProfileAgentId, messageAnchorId, notificationResponseId,
+    routeParentChannelId, allowOlderHistoryRef, routeChannelTitle, routeCommunityId, messageAnchorId, notificationResponseId,
     notificationMessageId, notificationTarget, insets, cornerReturnTarget, isDesktop,
     readOnlyFooterInset,
   ] = useChatRoute([
@@ -163,8 +162,7 @@ export function BuzzChatSurface({
     chatListKey, decodedId, roomSurface, userPubkey, isFocused, isDirectMessage, isArchived,
     isCorner, activeCommunityId, surfaceParentId, roomRepoAccessIssue, setCornerOpenRepoPrompt,
     parentChannelId, resolvedChannelName, routeChannelTitle, commitDesktopWorkPane,
-    desktopExperience, desktopWorkRoomId, roomClient, cacheViewerPubkey, setProfileKind,
-    setProfileAgentId, transport,
+    desktopExperience, desktopWorkRoomId, roomClient, cacheViewerPubkey, transport,
   ]);
   const [
     transcriptHostIdsRef, foldedMessages, loadOlderTranscriptMessages, anchoredSegmentActive,
@@ -373,11 +371,11 @@ export function BuzzChatSurface({
   ]);
   const [
     handleCloseCorner, openCorner, handleBack, handleCommunitySelect, handleDesktopDrop,
-    handleDesktopPaste, expandDesktopCorner, closeDesktopWorkPane,
+    handleDesktopPaste, closeDesktopWorkPane,
   ] = useChatNavigation([
     liveDraftStore, navigation, parentChannelId, cornerReturnTarget, transport, decodedId, readRoom,
-    desktopExperience, openDesktopCorner, commitDesktopWorkPane, desktopWorkRoomId, focusComposer,
-    profileAgentId, setProfileAgentId, desktopWorkPaneMounted, sending, pendingAttachments,
+    desktopExperience, openDesktopCorner, commitDesktopWorkPane, focusComposer,
+    desktopWorkPaneMounted, sending, pendingAttachments,
     replacePendingAttachments,
   ]);
   const [
@@ -663,21 +661,8 @@ export function BuzzChatSurface({
           {reportToast}
         </YStack>
 <ChatSurfaceWorkPane
-  profileAgentId={profileAgentId}
-  desktopExperience={desktopExperience}
-  activeCommunityId={activeCommunityId}
-  profileKind={profileKind}
-  setProfileAgentId={setProfileAgentId}
-  decodedId={decodedId}
   desktopWorkPaneMounted={desktopWorkPaneMounted}
-  desktopWorkPaneContent={desktopWorkPaneContent}
-  roomClient={roomClient}
-  channelReferenceIndex={channelReferenceIndex}
-  handleOpenChannelReference={handleOpenChannelReference}
   displayedDesktopWorkPaneContent={displayedDesktopWorkPaneContent}
-  openDesktopCorner={openDesktopCorner}
-  desktopWorkRoomId={desktopWorkRoomId}
-  expandDesktopCorner={expandDesktopCorner}
   closeDesktopWorkPane={closeDesktopWorkPane}
 />
       </ConversationFrame>
