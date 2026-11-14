@@ -6,6 +6,8 @@ import { writePrivateFileAtomically } from './atomic-private-file.js';
 /** An answer the agent produced, kept on disk until the server has it. */
 export interface StoredAnswer {
   readonly itemId: string;
+  /** Other items covered by this one durable answer. */
+  readonly queuedRequestIds?: readonly string[];
   readonly roomId: string;
   readonly requestId: string;
   /** Empty text does not acknowledge an unanswered queue item. */

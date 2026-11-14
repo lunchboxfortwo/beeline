@@ -23,7 +23,7 @@ import { openRouterRoutingInput } from './openrouter-routing.js';
 import { OwnedModelFiles } from './owned-model-files.js';
 import { installOwnedModelProvider } from './owned-model-install.js';
 import { installPiMcpBridge } from './pi-mcp-bridge.js';
-import { itemPrompt } from './place-prompt.js';
+import { itemPrompt,offlineBatchPrompt } from './place-prompt.js';
 import { assembleSessionPrompt,cornerHasRepositoryWork } from './prompt-assembly.js';
 import { resourceCallFacts } from './resource-mcp-facade.js';
 import { roomPermissionDecision,unsandboxedPermissionDecision } from './room-permissions.js';
@@ -401,7 +401,7 @@ export class PlaceSession {
    * Hand one item to the session and wait for its answer. Throws only when
    * the harness itself fails; the item then stays in the queue.
    */
-  async deliver(item: AgentCommand, queued: readonly AgentCommand[]): Promise<Answer> {
+  async deliver(item: AgentCommand, queued: readonly AgentCommand[], batch: readonly AgentCommand[] = []): Promise<Answer> {
     // start() ran first; a session that died since fails its prompt and the item is queued again.
     const client = this.client!;
     const sessionId = this.sessionId!;
@@ -409,8 +409,9 @@ export class PlaceSession {
     if (item.roomId === this.options.placeId) this.squireRelay.activate(item, item.id);
     this.followUps = [];
     const model = await this.optional('Hosted model credential', () => this.hostedModel(item), undefined);
-    await this.optional('Tool context', () => this.writeContext(item, queued, model?.paths().directory), undefined);
-    const prompt = itemPrompt(item, { names: this.names, notes: this.notes, turnPrefix: this.turnPrefix });
+    await this.optional('Tool context', () => this.writeContext(item, [...batch.slice(1), ...queued], model?.paths().directory), undefined);
+    const options = { names: this.names, notes: this.notes, turnPrefix: this.turnPrefix };
+    const prompt = batch.length ? offlineBatchPrompt(batch, options) : itemPrompt(item, options);
     this.notes = [];
     const stream = new AgentTurnStream({
       api: this.options.api, agentId: this.options.agent.publicKey, roomId: item.roomId,

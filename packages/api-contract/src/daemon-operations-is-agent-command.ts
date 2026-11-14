@@ -26,6 +26,8 @@ export function isAgentCommand(value: unknown): value is AgentCommand {
     Number(c.agentDepth) > 3
   )
     return false;
+  if (c.offlineSeconds !== undefined && (typeof c.offlineSeconds !== 'number' ||
+      !Number.isFinite(c.offlineSeconds) || c.offlineSeconds < 0)) return false;
   const source = c.source as Record<string, unknown> | undefined;
   return Boolean(
     source &&

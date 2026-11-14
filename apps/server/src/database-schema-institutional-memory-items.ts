@@ -491,6 +491,8 @@ CREATE TABLE IF NOT EXISTS agent_connections (
 ALTER TABLE agent_connections ADD COLUMN IF NOT EXISTS turn_connection_id text;
 ALTER TABLE agent_connections ADD COLUMN IF NOT EXISTS turn_connection_epoch bigint;
 ALTER TABLE agent_connections ADD COLUMN IF NOT EXISTS turn_transport_id text;
+-- Retain the previous release when claiming the next connection.
+ALTER TABLE agent_connections ADD COLUMN IF NOT EXISTS offline_since timestamptz;
 CREATE INDEX IF NOT EXISTS agent_connections_held ON agent_connections(instance_id) WHERE released_at IS NULL;
 
 -- Each server instance renews its own row; an instance that stops renewing

@@ -149,3 +149,24 @@ it('starts and answers without awaiting an optional model setter', async () => {
   expect(f.prompt).toHaveBeenCalledTimes(1);
   await f.session.dispose();
 });
+
+it('delivers an 18-hour offline backlog as one prompt without requiring steering', async () => {
+  const f = await fixture();
+  const offlineSeconds = 18 * 3600;
+  const tags = [1, 2, 3].map(n => ({ ...f.item, id: `tag-${n}`, turnRequestId: `tag-${n}`, offlineSeconds,
+    source: { ...f.item.source, id: `tag-source-${n}`, authorId: `asker-${n}`, body: `question ${n}` } }));
+  const runs = Array.from({ length: 25 }, (_, n) => ({ ...f.item, id: `run-${n}`, turnRequestId: `run-${n}`,
+    offlineSeconds, reason: 'schedule', scheduleId: 'daily-check',
+    source: { ...f.item.source, id: `run-source-${n}`, body: `scheduled run ${n}` } }));
+  const batch = [...tags, ...runs];
+  await f.session.start();
+  await f.session.deliver(tags[0]!, [], batch);
+  expect(f.prompt).toHaveBeenCalledTimes(1);
+  const prompt = f.prompt.mock.calls[0]![1];
+  expect(prompt).toContain('> You were offline for 18 h. These arrived while you were away and may be outdated.');
+  for (let n = 1; n <= 3; n++) expect(prompt).toContain(`asker-${n}: question ${n}`);
+  expect(prompt.match(/scheduled run/g)).toHaveLength(1);
+  expect(prompt).toContain('scheduled run 24');
+  expect(prompt).toContain('Answer each asker in one combined reply.');
+  await f.session.dispose();
+});

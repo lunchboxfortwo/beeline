@@ -40,4 +40,10 @@ move7_describe('server command protocol 1', () => {
     { ...command, agentId: '' },
   ])('rejects malformed command %#', (value) => move7_expect(move7_isAgentCommand(value)).toBe(false));
 });
+move7_it('accepts a reconnect batch and rejects malformed offline durations', () => {
+  move7_expect(move7_isAgentCommand({...command,offlineSeconds:18*3600})).toBe(true);
+  for (const offlineSeconds of [null,{},-1,Infinity,'18'])
+    move7_expect(move7_isAgentCommand({...command,offlineSeconds})).toBe(false);
+});
+
 });
