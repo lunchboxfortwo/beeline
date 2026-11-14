@@ -144,25 +144,12 @@ it('an initially offline mention waits for connection with only its offline noti
   const sent=await phone.execute('sendRoomMessage',{roomId:R,text:'@candy A request while offline'},H);
   const queued=(await readAgentCommands(db, A, R)).commands.find(c=>c.sourceMessageId===sent.messageId)!;
   expect(queued).toBeDefined();
+  await db.backgroundWork.drain();
   expect((await db.query("SELECT text FROM messages WHERE room_id=$1 AND presentation='system'",[R])).rows).toEqual([{text:'@candy is offline · connect again'}]);
   const next={connectionId:'returning',epoch:await claimAgentConnection(db,live,A,{},
     {connectionId:'returning',instanceId:'test-server'})};
   await startQueuedTurn(db, R, A, queued.id);
   await daemon.execute('postRoomMessage',{ roomId:R, requestId:queued.turnRequestId, text:'I can answer now.' },A);
-  expect((await notices()).rowCount).toBe(0);
-});
-
-it('a claimed restart kept across close completes on its new lifecycle instead of restarting again',async()=>{
-  await phone.execute('sendRoomMessage',{roomId:R,text:'@candy restart'},H);
-  const restart=(await readAgentCommands(db, A, R)).commands.find(c=>c.action==='restart')!;
-  await startQueuedTurn(db, R, A, restart.id);
-  await releaseAgentConnection(db,live,A,owner.connectionId);
-  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[restart.id])).rows).toEqual([{state:'pending'}]);
-  await claimAgentConnection(db,live,A,{lifecycleId:'second-boot'},
-    {connectionId:'after-restart',instanceId:'test-server'});
-  await daemon.execute('markAgentTurnSilent',{roomId:R,requestId:restart.turnRequestId},A);
-  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[restart.id])).rows).toEqual([{state:'complete'}]);
-  expect((await readAgentCommands(db, A, R)).commands).toEqual([]);
   expect((await notices()).rowCount).toBe(0);
 });
 

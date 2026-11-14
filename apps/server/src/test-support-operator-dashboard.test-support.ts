@@ -190,6 +190,7 @@ export function fixtureScope3() {
   async function person(n: number, platform: 'ios' | 'android', createdAt?: string, ws = workspace) {
     await identity(n, 'human', createdAt);
     await join(n, ws);
+    await rootFixture.db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) SELECT workspace_id,id,$2,'member' FROM rooms WHERE id=$1 AND workspace_id=$3 ON CONFLICT DO NOTHING`, [room,coreId(n),ws]);
     await device(n, platform);
   }
 

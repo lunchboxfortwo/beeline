@@ -86,7 +86,7 @@ function operations(database = db) {
 
 async function assertArchived(stoppedAgent = A, merged = true) {
   expect((await db.query(`SELECT 1 FROM rooms WHERE id=$1 AND archived_at IS NOT NULL`, [C])).rowCount).toBe(1);
-  expect((await db.query(`SELECT 1 FROM agent_commands WHERE room_id=$1 AND action='stop' AND agent_id=$2`, [C,stoppedAgent])).rowCount).toBe(1);
+  expect((await db.query(`SELECT 1 FROM agent_commands WHERE room_id=$1 AND action='stop' AND agent_id=$2`, [C,stoppedAgent])).rowCount).toBe(0);
   expect((await db.query(`SELECT agent_id,turn_request_id FROM agent_commands
     WHERE room_id=$1 AND action='stop' GROUP BY agent_id,turn_request_id HAVING count(*)>1`, [C])).rowCount).toBe(0);
   expect((await db.query(`SELECT 1 FROM agent_commands WHERE room_id=$1 AND action IN ('input','resume') AND state IN ('pending','claimed')`, [C])).rowCount).toBe(0);

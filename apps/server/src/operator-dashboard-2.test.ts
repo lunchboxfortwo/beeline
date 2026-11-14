@@ -340,12 +340,15 @@ const scope3 = fixtureScope3();
         [requestId, room, coreId(scope3.K)],
       );
       const command = await createAgentCommand(rootFixture.db, {
+        id: requestId,
         roomId: room,
         agentId: coreId(scope3.K_AGENT),
         sourceMessageId: requestId,
         reason: 'human_tag',
       });
       await startQueuedTurn(rootFixture.db, room, coreId(scope3.K_AGENT), command!.id);
+      await daemon.execute('postRoomMessage', { roomId: room, requestId, text: 'Measured answer.' }, coreId(scope3.K_AGENT));
+      await rootFixture.db.backgroundWork.drain();
       await daemon.execute('postAgentTurnReceipt', { roomId: room, requestId, status: 'complete', agentId: coreId(scope3.K_AGENT), ...tokens }, coreId(scope3.K_AGENT));
     };
     await receipt('core-measured', { inputTokens: 10, totalInputTokens: 1000, outputTokens: 200 });

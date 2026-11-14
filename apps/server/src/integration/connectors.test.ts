@@ -359,7 +359,7 @@ const fixture = monolithFixture();
     ).toEqual(expect.objectContaining({ rowCount: 0 }));
     expect(
       await fixture.database.query(
-        `SELECT 1 FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND action='resume'`,
+        `SELECT 1 FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND action='input' AND reason='resume'`,
         [ROOM, AGENT],
       ),
     ).toEqual(expect.objectContaining({ rowCount: 0 }));
@@ -400,10 +400,10 @@ const fixture = monolithFixture();
       object: { text: 'Trusty Squire' },
     });
     const resume = await fixture.database.query<{ action: string; state: string }>(
-      `SELECT action,state FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND action='resume'`,
+      `SELECT action,state FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND action='input' AND reason='resume'`,
       [ROOM, AGENT],
     );
-    expect(resume.rows).toEqual([{ action: 'resume', state: 'pending' }]);
+    expect(resume.rows).toEqual([{ action: 'input', state: 'pending' }]);
     expect(await pushes.runOnce()).toBe(0);
     for (const token of [zeke.token, fixture.accessToken]) {
       const room = (await (
@@ -428,15 +428,14 @@ const fixture = monolithFixture();
     expect(
       history.messages.filter((message) => /\badded Trusty Squire\b/.test(message.text)),
     ).toEqual([]);
-    // The helper owner now has the tool; a fresh offer of it is refused, and
-    // workbench_status says so.
+    // Re-offering an installed tool remains a successful tool response.
     const duplicate = await fixture.daemonOperation('offerConnector', {
       roomId: ROOM,
       requestId: ask.messageId,
       connectorType: 'trusty-squire',
       reason: 'provision the 1inch API key into its vault',
     });
-    expect(duplicate.status).toBe(409);
+    expect(duplicate.status).toBe(200);
     const after = (await (
       await fixture.daemonOperation('readAgentWorkbench', { roomId: ROOM })
     ).json()) as { catalog: Array<{ connectorType: string; paired?: Record<string, unknown> }> };
@@ -710,10 +709,10 @@ const fixture = monolithFixture();
     expect(decision.map(row => row.text).join(' ')).toContain('reconnected automatically');
     expect(settled.rows[0]!.card.acceptedBy).toBeUndefined();
     const resume = await fixture.database.query<{ action: string; state: string }>(
-      `SELECT action,state FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND action='resume'`,
+      `SELECT action,state FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND action='input' AND reason='resume'`,
       [ROOM, AGENT],
     );
-    expect(resume.rows).toEqual([{ action: 'resume', state: 'pending' }]);
+    expect(resume.rows).toEqual([{ action: 'input', state: 'pending' }]);
   });
 
 

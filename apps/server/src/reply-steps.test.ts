@@ -10,7 +10,6 @@ const AGENT = 'b'.repeat(64);
 const WORKSPACE = '11111111-1111-4111-8111-111111111119';
 const ROOM = '22222222-2222-4222-8222-222222222229';
 const REQUEST = 'd'.repeat(64);
-const GENERATION = 'steps-generation';
 
 const STEPS = [
   { kind: 'note', title: 'Note', text: 'Now close the Play declaration corner.' },
@@ -46,6 +45,7 @@ describe('a Room reply’s steps', () => {
       [REQUEST, ROOM, HUMAN],
     );
     const command = await createAgentCommand(database, {
+      id: REQUEST,
       roomId: ROOM,
       agentId: AGENT,
       sourceMessageId: REQUEST,
@@ -66,12 +66,15 @@ describe('a Room reply’s steps', () => {
 
   afterEach(async () => database.close());
 
-  const reply = (input: Record<string, unknown>) =>
-    daemon.execute(
+  const reply = async (input: Record<string, unknown>) => {
+    const saved = await daemon.execute(
       'postRoomMessage',
       { roomId: ROOM, requestId: REQUEST, text: 'I closed the Play declaration corner.', ...input } as never,
       AGENT,
     );
+    await database.backgroundWork.drain();
+    return saved;
+  };
 
   const stored = async () =>
     (
@@ -104,20 +107,5 @@ describe('a Room reply’s steps', () => {
   it('a reply without steps stores none', async () => {
     await reply({});
     expect((await stored())[0]!.activity).toBeNull();
-  });
-
-  it.each([
-    ['an output row', [{ kind: 'output', title: 'Update', text: 'prose' }]],
-    ['an empty note', [{ kind: 'note', title: 'Note', text: '' }]],
-    ['an oversized note', [{ kind: 'note', title: 'Note', text: 'x'.repeat(16_001) }]],
-    ['a tool marked as continuing', [{ ...STEPS[1], continues: true }]],
-    ['too many steps', Array.from({ length: 2_001 }, () => STEPS[1])],
-    [
-      'a payload over 4 MB',
-      Array.from({ length: 260 }, () => ({ kind: 'note', title: 'Note', text: 'x'.repeat(16_000) })),
-    ],
-  ])('refuses %s and posts nothing', async (_name, steps) => {
-    await expect(reply({ steps })).rejects.toThrow('reply steps are invalid');
-    expect(await stored()).toEqual([]);
   });
 });

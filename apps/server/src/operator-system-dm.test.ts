@@ -82,11 +82,11 @@ describe('owner-command operator System DMs', () => {
       warning.mockRestore();
     }
   });
-  it('refuses a missing command, non-owner root, wrong agent owner, and stale generation', async () => {
+  it('refuses a missing command, non-owner root, wrong agent owner, and unknown command', async () => {
     await expect(daemon.execute('sendOperatorSystemDm', { agentId: AGENT, roomId: ROOM, requestId: 'absent', recipients: PERSON, text: 'hello' }, AGENT)).rejects.toThrow();
     await expect(daemon.execute('sendOperatorSystemDm', { ...await turn(OTHER), recipients: PERSON, text: 'hello' }, AGENT)).rejects.toThrow(/operator owner/);
     const current = await turn();
-    await expect(daemon.execute('sendOperatorSystemDm', { ...current, recipients: PERSON, text: 'hello' }, AGENT)).rejects.toThrow();
+    await expect(daemon.execute('sendOperatorSystemDm', { ...current, requestId: 'absent', recipients: PERSON, text: 'hello' }, AGENT)).rejects.toThrow();
     await db.query(`UPDATE agents SET owner_id=$1 WHERE agent_id=$2`, [OTHER, AGENT]);
     await expect(daemon.execute('sendOperatorSystemDm', { ...current, recipients: PERSON, text: 'hello' }, AGENT)).rejects.toThrow(/operator owner/);
     expect((await db.query(`SELECT * FROM operator_system_dm_sends`)).rowCount).toBe(0);

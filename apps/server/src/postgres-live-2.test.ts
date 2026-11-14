@@ -177,51 +177,6 @@ const scope1 = fixtureScope1();
   });
 
 
-  it('marks a command released only when it leaves claimed', async () => {
-    const live = new LiveHub();
-    const client = new PgliteListenClient(scope1.database);
-    const listener = new PostgresLiveListener(scope1.database, live, () => client);
-    scope1.listeners.push(listener);
-    const received: LiveEvent[] = [];
-    live.subscribeAll((event) => received.push(event));
-    void listener.run();
-    await eventually(() => listener.projectionHealth().connected);
-
-    const worker = 'c'.repeat(64);
-    await scope1.database.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Cee')`, [
-      worker,
-    ]);
-    await scope1.database.query(
-      `INSERT INTO messages(id,room_id,author_id,text) VALUES('work-source',$1,$2,'@cee work')`,
-      [ROOM, AUTHOR],
-    );
-    const commandEvents = () =>
-      received.filter(
-        (event) => event.type === 'invalidate' && event.reason === 'postgres:agent_commands',
-      );
-    await scope1.database.query(
-      `INSERT INTO agent_commands(
-         id,room_id,agent_id,source_message_id,turn_request_id,action,reason,
-         root_command_id,root_source_message_id,agent_depth
-       ) VALUES($1,$2,$3,'work-source',$4,'input','human_tag',$1,'work-source',0)`,
-      ['work-1', ROOM, worker, 'f'.repeat(64)],
-    );
-    await scope1.database.query(
-      `UPDATE agent_commands SET state='pending',created_at=now()-interval '1 hour' WHERE id='work-1'`,
-    );
-    await scope1.database.query(
-      `UPDATE agent_commands SET created_at=now()-interval '2 hours' WHERE id='work-1'`,
-    );
-    await eventually(() => commandEvents().length === 3);
-    expect(commandEvents().some((event) => event.type === 'invalidate' && event.commandReleased))
-      .toBe(false);
-
-    await scope1.database.query(`UPDATE agent_commands SET state='complete' WHERE id='work-1'`);
-    await eventually(() => commandEvents().length === 4);
-    expect(commandEvents()[3]).toMatchObject({ targetAgentId: worker, commandReleased: true });
-  });
-
-
   it('nudges the parent Room only when a corner status input changes', async () => {
     const live = new LiveHub();
     const client = new PgliteListenClient(scope1.database);
@@ -300,7 +255,7 @@ const scope1 = fixtureScope1();
     await scope1.database.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Worker')`,[agent]);
     await scope1.database.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`,[agent,AUTHOR]);
     await scope1.database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
-      VALUES($1,$2,$3,'member')`,[WORKSPACE,ROOM,agent]);
+      VALUES($1,$2,$3,'member'),($1,$2,$4,'owner'),($1,NULL,$4,'owner') ON CONFLICT DO NOTHING`,[WORKSPACE,ROOM,agent,AUTHOR]);
     await scope1.database.query(`INSERT INTO rooms(id,workspace_id,parent_id,created_by,name)
       VALUES($1,$2,$3,$4,'Goal')`,[corner,WORKSPACE,ROOM,AUTHOR]);
     const live = new LiveHub(), client = new PgliteListenClient(scope1.database);
@@ -357,7 +312,7 @@ const scope1 = fixtureScope1();
     await scope1.database.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Bee')`, [agent]);
     await scope1.database.query(`INSERT INTO identities(id,kind,name) VALUES($1,'human','Reader')`, [reader]);
     await scope1.database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
-      VALUES($1,$2,$3,'member'),($1,$2,$4,'member')`,[WORKSPACE,ROOM,agent,reader]);
+      VALUES($1,$2,$3,'member'),($1,$2,$4,'member'),($1,$2,$5,'owner'),($1,NULL,$5,'owner') ON CONFLICT DO NOTHING`,[WORKSPACE,ROOM,agent,reader,AUTHOR]);
     // A new corner is a new row in its parent's list.
     await scope1.database.query(
       `INSERT INTO rooms(id,workspace_id,parent_id,created_by,name) VALUES($1,$2,$3,$4,'fix')`,

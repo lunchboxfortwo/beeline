@@ -1,4 +1,4 @@
-import { afterAll,beforeAll,beforeEach,expect,it } from 'vitest';
+import { afterAll,beforeAll,beforeEach,expect,it,vi } from 'vitest';
 import { AGENT_COMMAND_SCHEMA,answerQueuedMessage,createAgentCommand,queueMessage,readAgentCommands } from './agent-command.js';
 import { claimAgentConnection,releaseAgentConnection } from './connection-presence.js';
 import type { SqlDatabase } from './database.js';
@@ -168,6 +168,31 @@ it('shows only the offline connection notice when the harness cannot start, keep
   expect(notices.rows.at(-1)?.text).toMatch(/is offline.*connect again/);
   expect((await db.query('SELECT state,completed_at FROM agent_commands WHERE id=$1', [item.id])).rows[0])
     .toEqual({ state: 'pending', completed_at: null });
+});
+
+it('an unresolved offline-notice read cannot hold intake or the answer', async () => {
+  const phone = new (await import('./phone-service.js')).PhoneService(db, 'http://test');
+  const original = db.query.bind(db);
+  let resume!: () => void, observed = false;
+  const waiting = new Promise<void>(resolve => { resume = resolve; });
+  const spy = vi.spyOn(db, 'query').mockImplementation(async (sql, values) => {
+    if (sql === "SELECT 1 FROM identities WHERE id=$1 AND kind='human'") {
+      observed = true;
+      await waiting;
+    }
+    return original(sql, values);
+  });
+  try {
+    await phone.execute('sendRoomMessage', { roomId: R1, text: '@agent answer before the notice read finishes' }, H);
+    expect(observed).toBe(true);
+    const [item] = await queue();
+    await answer(R1, item!.id, 'The answer is already posted.');
+    expect(await queue()).toEqual([]);
+  } finally {
+    resume();
+    spy.mockRestore();
+    await db.backgroundWork.drain();
+  }
 });
 
 it('a missing optional human reply link still appends and answers the request', async () => {

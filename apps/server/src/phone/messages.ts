@@ -12,6 +12,7 @@ import { deletedMessageEvent } from '../system-line.js';
 import { phoneRequireWorkspaceMember } from './access.js';
 import type { PhoneContext } from './context.js';
 import { phoneLiveStarPrompt,phoneReadLiveDelta } from './live-reads.js';
+import { phoneNoteUnansweredMentions } from './mention-notices.js';
 import { Input,Output } from './types.js';
 
 
@@ -151,17 +152,20 @@ import { Input,Output } from './types.js';
       authorId: author, text: input.text, id: input.messageId, attachments: input.attachments,
       replyTo: 'parentMessageId' in input ? input.parentMessageId : undefined, sourceClient,
     });
-    if (input.text.includes('@')) {
-      const observe = async () => { await recordSystemReportMention(ctx.database, {
+    const pending = saved.commands.filter(command => command.state === 'pending');
+    // The queue has committed; neither offline presentation nor feedback can hold delivery.
+    const observe = async () => { await Promise.all([
+      phoneNoteUnansweredMentions(ctx, input.roomId, author, pending.map(command => command.agent_id), saved.id),
+      recordSystemReportMention(ctx.database, {
         roomId: input.roomId, messageId: saved.id, authorId: author, text: input.text,
         ...(familyId ? { familyId } : {}),
-      }).catch(error => console.warn('[message] feedback observation failed', error)); };
-      const background=CornerAccessDatabase.physical(ctx.database).backgroundWork;
-      if (background) background.run(observe); else void observe();
-    }
+      }).catch(error => console.warn('[message] feedback observation failed', error)),
+    ]); };
+    const background=CornerAccessDatabase.physical(ctx.database).backgroundWork;
+    if (background) background.run(observe); else void observe();
     const receipt = await ctx.receiptMessage(input.roomId, author, saved.id, ctx.database)
       .catch(error => { console.warn('[message] receipt enrichment omitted:', error); return {}; });
-    return { ...receipt, messageId: saved.id, pendingAgentCommands: saved.commands.filter(command => command.state === 'pending').map(command => ({
+    return { ...receipt, messageId: saved.id, pendingAgentCommands: pending.map(command => ({
       requestId: command.turn_request_id, agentPubkey: command.agent_id,
       createdAt: Math.floor(new Date(command.created_at).getTime() / 1000),
     })) };

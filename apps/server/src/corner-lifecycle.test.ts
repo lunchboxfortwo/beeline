@@ -245,7 +245,7 @@ describe('a person-opened corner in a repository Room', () => {
     await say(cornerId, '@goosy take this over');
     expect(await derivedWorker(cornerId)).toBe(B);
     expect((await rootFixture.db.query(`SELECT action,reason FROM agent_commands WHERE room_id=$1 AND agent_id=$2
-      AND state='pending'`, [cornerId, A])).rows).toEqual([]);
+      AND state='pending'`, [cornerId, A])).rows).toEqual([{ action: 'input', reason: 'human_tag' }]);
     expect((await rootFixture.db.query(`SELECT status FROM agent_turns WHERE room_id=$1 AND agent_id=$2 AND request_id=$3`,
       [cornerId, A, working!.turnRequestId])).rows).toEqual([{ status: 'working' }]);
     console.log('NO-SWAP Demonstrated: the tagged agent became the worker; the running agent kept its turn and got no stop.');
@@ -663,9 +663,8 @@ it('Reproduction F1-7: opener revises a delegated sibling from its own command',
   await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id IN ($1,$2) AND identity_id=$3`, [cornerId, R, F]);
   await expect(rootFixture.daemon.execute('reviseCornerBrief', { roomId: cornerId, cornerId, requestId: outsider!.turn_request_id, expectedRevision: 2, brief: { ...input.brief, change: 'Unauthorized' } }, F)).rejects.toThrow(/denied/);
   await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [R, B]);
-  const unwoken = await rootFixture.daemon.execute('reviseCornerBrief', { roomId: source, cornerId, requestId: command.turnRequestId, expectedRevision: 2, brief: { ...input.brief, spec: 'Saved without a worker', change: 'Keep the revision' } }, A);
-  expect(unwoken).toMatchObject({ revision: 3, wake: { queued: false, reason: expect.any(String) } });
-  expect((await rootFixture.daemon.execute('listCornerBriefRevisions', { cornerId }, A)).revisions[0]!.revision).toBe(3);
+  await expect(rootFixture.daemon.execute('reviseCornerBrief', { roomId: source, cornerId, requestId: command.turnRequestId, expectedRevision: 2, brief: { ...input.brief, spec: 'Saved without a worker', change: 'Keep the revision' } }, A)).rejects.toThrow('address requires current membership');
+  expect((await rootFixture.daemon.execute('listCornerBriefRevisions', { cornerId }, A)).revisions[0]!.revision).toBe(2);
 });
 
 

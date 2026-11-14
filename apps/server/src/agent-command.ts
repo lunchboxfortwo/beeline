@@ -680,8 +680,9 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
     : reviewSource?.review_context && reviewSource.review_context.purpose !== 'repair' ? { ...reviewSource.review_context,
     purpose: input.reason === 'report' ? 'verdict' : 'repair' } : null;
   const commander = chat.handover?.author_id ?? opening?.authorId;
-  const reportAddress = chat.parent_id && commander ? commander === input.agentId && chat.opening_root
-    ? { identityId: chat.opening_root.author_id, roomId: chat.opening_root.room_id }
+  const openingOrigin = chat.opening_root ?? chat.parent_source;
+  const reportAddress = chat.parent_id && commander ? commander === input.agentId && openingOrigin
+    ? { identityId: openingOrigin.author_id, roomId: openingOrigin.room_id }
     : { identityId: commander, roomId: escalationRoom ?? chat.id } : null;
   const privateMessage = Boolean(payload) && input.reason !== 'schedule';
   const wake = mcpCommandWakeSql(19);
@@ -712,8 +713,9 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
   )).rows[0];
   if (saved && input.sourceMessageId) await recordMcpMention(db,input.agentId,chat.id,input.sourceMessageId);
   const member = chat.members.find(member => member.id === input.agentId);
-  if (saved && input.reason !== 'mcp_call' && member?.mcp && member.callback) await recordMcpMemberWebhook(db, member.id, member.callback, chat.id, input.sourceMessageId ?? saved.id,
-    input.sourceMessageId ? sourceText ?? '' : `${payload?.kind === 'order' ? 'Order' : 'Wake'} (${input.reason}): ${payload?.text ?? sourceText ?? ''}`);
+  const webhookSource = privateMessage ? null : input.sourceMessageId;
+  if (saved && input.reason !== 'mcp_call' && member?.mcp && member.callback) await recordMcpMemberWebhook(db, member.id, member.callback, chat.id, webhookSource ?? saved.id,
+    webhookSource ? sourceText ?? '' : `${payload?.kind === 'order' ? 'Order' : 'Wake'} (${input.reason}): ${payload?.text ?? sourceText ?? ''}`);
   return saved;
 }
 

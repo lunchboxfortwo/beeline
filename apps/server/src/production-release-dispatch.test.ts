@@ -92,7 +92,7 @@ it('release-dispatch-attribution: commits readable server provenance before disp
 it('refuses missing agent identity, stale turns, nonhuman provenance and forged attribution before dispatch', async () => {
   const dispatch = vi.fn();
   await expect(productionReleaseDispatch(db, human, input, dispatch)).rejects.toThrow(/agent identity/);
-  await expect(productionReleaseDispatch(db, agent, { ...input }, dispatch)).rejects.toThrow(/authority rejected/);
+  await expect(productionReleaseDispatch(db, agent, { ...input, requestId: 'missing-command' }, dispatch)).rejects.toThrow(/authority rejected/);
   await expect(productionReleaseDispatch(db, agent, { ...input, inputs: { dispatched_by: 'forged' } }, dispatch)).rejects.toThrow(/Invalid/);
   await db.query(`UPDATE agent_commands SET root_source_message_id='missing' WHERE id='command'`);
   try {
@@ -260,7 +260,7 @@ it.each(['legacy', 'helper'])('R-RELEASE-CARD: built %s MCP tool dispatches thro
 
     const { AgentScheduleLoop } = await import('./agent-schedules.js');
     const scheduleLoop = new AgentScheduleLoop(db);
-    await expect(service.execute('createAgentSchedule', { title: 'Scheduled check', roomId: room, requestId: input.requestId, prompt: 'Unauthorized schedule', cadence: { kind: 'interval', everyMinutes: 60 } }, agent)).rejects.toThrow(/authority rejected/);
+    await expect(service.execute('createAgentSchedule', { title: 'Scheduled check', roomId: room, requestId: 'missing-command', prompt: 'Unauthorized schedule', cadence: { kind: 'interval', everyMinutes: 60 } }, agent)).rejects.toThrow(/authority rejected/);
     expect((await db.query(`SELECT id FROM agent_schedules WHERE message='Unauthorized schedule'`)).rows).toHaveLength(0);
     const scheduledRun = async (humanRoot: boolean, edited = false, legacy = false) => {
       await db.query(`UPDATE agent_commands SET root_source_message_id=$1 WHERE id='command'`, [humanRoot && !legacy ? 'human-command' : 'missing']);

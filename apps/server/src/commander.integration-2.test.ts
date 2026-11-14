@@ -727,10 +727,12 @@ it('Reproduction ff0ec4df: a mid-turn post keeps its row while the closing narra
   const posted = await rootFixture.daemon.execute('postCornerMessage', { ...authority(rootFixture.order), cornerId: DM, text: list }, RUBY);
   const narration = 'Posted the list above and told Mohammed it is coming before six.';
   const reply = await rootFixture.daemon.execute('postRoomMessage', { ...authority(rootFixture.order), text: narration }, RUBY);
+  expect(reply.id).toBe(posted.id);
+  await rootFixture.db.backgroundWork.drain();
   const rows = (await rootFixture.db.query<{ id: string; text: string; presentation: string; version: number }>(
-    `SELECT id,text,presentation,version FROM messages WHERE id IN ($1,$2)`, [posted.id, reply.id])).rows;
+    `SELECT id,text,presentation,version FROM messages WHERE request_id=$1`, [rootFixture.order.id])).rows;
   expect(rows.find(row => row.id === posted.id)).toMatchObject({ text: list, presentation: 'message', version: 0 });
-  expect(rows.find(row => row.id === reply.id)).toMatchObject({ text: narration, presentation: 'activity', version: 0 });
+  expect(rows.find(row => row.presentation === 'activity')).toMatchObject({ text: narration, presentation: 'activity', version: 0 });
   expect((await rootFixture.phone.readRoom(DM, HUMAN))!.messages.filter(m => m.author.pubkey === RUBY && m.presentation === 'message').map(m => m.text))
     .toEqual([list]);
   console.info('Demonstrated Reproduction ff0ec4df: the closing reply is stored directly as activity (version 0); the posted list is untouched (version 0)');
@@ -754,7 +756,8 @@ it('dedupe retains activity and accepts an identical final retry', async () => {
   const final = await rootFixture.daemon.execute('postRoomMessage', { ...authority(rootFixture.order), text, steps }, RUBY);
   const replay = await rootFixture.daemon.execute('postRoomMessage', { ...authority(rootFixture.order), text, steps }, RUBY);
   expect(replay.id).toBe(final.id);
-  expect((await rootFixture.db.query(`SELECT presentation,activity FROM messages WHERE id=$1`, [final.id])).rows[0])
+  await rootFixture.db.backgroundWork.drain();
+  expect((await rootFixture.db.query(`SELECT presentation,activity FROM messages WHERE request_id=$1 AND presentation='activity'`, [rootFixture.order.id])).rows[0])
     .toMatchObject({ presentation: 'activity', activity: [...steps, { kind: 'note', title: 'Turn summary', text }] });
 });
 
@@ -774,7 +777,8 @@ it('dedupe keeps a lightly reworded summary in collapsed activity', async () => 
   await rootFixture.daemon.execute('postCornerMessage', { ...authority(rootFixture.order), cornerId: DM, text }, RUBY);
   const final = text.replace('and the account', 'and account');
   const result = await rootFixture.daemon.execute('postRoomMessage', { ...authority(rootFixture.order), text: final }, RUBY);
-  expect((await rootFixture.db.query(`SELECT presentation,activity FROM messages WHERE id=$1`, [result.id])).rows[0])
+  await rootFixture.db.backgroundWork.drain();
+  expect((await rootFixture.db.query(`SELECT presentation,activity FROM messages WHERE request_id=$1 AND presentation='activity'`, [rootFixture.order.id])).rows[0])
     .toMatchObject({ presentation: 'activity', activity: [{ kind: 'note', title: 'Turn summary', text: final }] });
 });
 

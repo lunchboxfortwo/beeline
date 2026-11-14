@@ -255,7 +255,7 @@ describe('free starter agents', () => {
     const periods = await dashboardPeriods(db, new Date().toISOString());
     const funnel = periods['24h'].onboardingFunnel!;
     expect('steps' in funnel && funnel.steps[0]!.count).toBe(0);
-    await expect(daemon.execute('postStarterWelcome', { roomId: other.id, requestId: command.turn_request_id } as never, beebee)).rejects.toThrow();
+    await expect(daemon.execute('postStarterWelcome', { roomId: other.id, requestId: 'absent-command' } as never, beebee)).rejects.toThrow();
   });
 
   it('starts playback on the first Room read only for the onboarding person', async () => {

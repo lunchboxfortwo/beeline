@@ -3563,6 +3563,25 @@
       }
     },
     "jsonb": {
+      "answer_attachments": {
+        "url": "The uploaded answer object reference survives replacement.",
+        "name": "The stored answer keeps its media filename.",
+        "mimeType": "The stored answer keeps its media type.",
+        "size": "The stored answer keeps its media byte length."
+      },
+      "report_address": {
+        "identityId": "The commander recipient is frozen when the request is appended.",
+        "roomId": "The commander return chat is frozen when the request is appended."
+      },
+      "message": {
+        "id": "The queue stores its delivered source independently of mutable transcript context.",
+        "authorId": "The queue stores its delivered source independently of mutable transcript context.",
+        "body": "The queue stores its delivered source independently of mutable transcript context.",
+        "attachments": "The queue stores its delivered source independently of mutable transcript context.",
+        "type": "The queue stores its delivered source independently of mutable transcript context.",
+        "systemEvent": "The queue stores its delivered source independently of mutable transcript context.",
+        "replyToMessageId": "The queue stores its delivered source independently of mutable transcript context."
+      },
       "drawing": {},
       "private_payload": {
         "kind": "existing before the registry; weekly audit reviews",

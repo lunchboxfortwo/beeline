@@ -140,15 +140,16 @@ it('fails closed on incomplete authors or a changed live head', async () => {
 
 it('dispatches green review to the corner reviewer and projects its reviewer surface', async () => {
   await phone.execute('updateRoom', { roomId: R, reviewerAgentId: REVIEWER_A }, H);
+  const previous = (await daemon.execute('getAgentCommands', {roomId:C}, REVIEWER_A)).commands;
   await set('reviewerb');
   const note = await systemLine(db, { roomId: C, authorId: H, subject: { kind: 'github', name: 'GitHub' }, verb: 'passed checks',
     kind: 'check-passed', object: { text: 'checks', headSha: HEAD } });
   const liveChecks = vi.spyOn(github, 'prChecksStatus');
   await advanceCorner(db, C, { kind: 'checks', result: 'passing', sourceMessageId: note.id });
-  expect(liveChecks).toHaveBeenCalledWith({ cornerId: C });
+  expect(liveChecks).not.toHaveBeenCalled();
   const commands = await daemon.execute('getAgentCommands', { roomId: C }, REVIEWER_B);
   expect(commands.commands.some(command => ['corner_review_dispatch','subscribed_event'].includes(command.reason))).toBe(true);
-  expect((await daemon.execute('getAgentCommands', {roomId:C}, REVIEWER_A)).commands).toEqual([]);
+  expect((await daemon.execute('getAgentCommands', {roomId:C}, REVIEWER_A)).commands).toEqual(previous);
   expect(await daemon.execute('getAgentConfiguration', { roomId: C, agentId: REVIEWER_B }, REVIEWER_B)).toMatchObject({ isReviewer: true });
   await startQueuedCommand(daemon, { roomId:C, commandId:commands.commands[0]!.id }, REVIEWER_B);
   await set('reviewera');

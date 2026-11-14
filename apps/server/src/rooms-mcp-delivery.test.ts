@@ -46,6 +46,7 @@ describe('JOIN-DELIVERY: OAuth is membership, host receipts prove delivery', () 
         { roomId: ROOM, text: `@${rooms.you.handle} are you there?` },
         USER,
       );
+      await scope.db.backgroundWork.drain();
       expect(JSON.stringify(await scope.phone.readRoom(ROOM, USER))).toContain(
         'is offline · connect again',
       );
@@ -63,6 +64,7 @@ describe('JOIN-DELIVERY: OAuth is membership, host receipts prove delivery', () 
         { roomId: dm.id, text: '你在嘛' },
         USER,
       );
+      await scope.db.backgroundWork.drain();
       expect(sent.externalAgentDelivery).toEqual([
         expect.objectContaining({ memberId: member, state: host === 'Failed local' ? 'failed' : 'setup_unfinished' }),
       ]);
@@ -216,7 +218,7 @@ describe('JOIN-DELIVERY transport and credential proofs', () => {
       agentId: member,
       sourceMessageId: mention.messageId,
       reason: 'order',
-      privatePayload: { kind: 'order', authorId: USER, text: 'private assignment' },
+      privatePayload: { kind: 'order', authorId: USER, fromRoomId: ROOM, text: 'private assignment' },
     });
     expect(order).toBeDefined();
     expect(await deliverMcpMemberWebhooks(scope.db, transport)).toBe(3);
@@ -420,7 +422,8 @@ describe('JOIN-DELIVERY local selected-path proof', () => {
         USER,
       );
       await waitFor(`mention:${tagged.messageId}:0`);
-      expect((await scope.phone.readRoom(ROOM, USER))?.messages.filter(m => m.author.pubkey === member && m.presentation === 'system')).toEqual([]);
+      await scope.db.backgroundWork.drain();
+  expect((await scope.phone.readRoom(ROOM, USER))?.messages.filter(m => m.author.pubkey === member && m.presentation === 'system')).toEqual([]);
       // A replacement conversation on the same live stream must also be confirmable.
       const replacement = data(await client.callTool({ name: 'setup_delivery', arguments: { ...args, conversation: 'next-host-thread' } })).delivery;
       await waitFor(`wake:${replacement.generation}`);
@@ -443,7 +446,7 @@ describe('JOIN-DELIVERY local selected-path proof', () => {
         agentId: member,
         sourceMessageId: tagged.messageId,
         reason: 'order',
-        privatePayload: { kind: 'order', authorId: USER, text: 'local private assignment' },
+        privatePayload: { kind: 'order', authorId: USER, fromRoomId: ROOM, text: 'local private assignment' },
       });
       await waitFor(`wake:${order!.id}`);
       expect(

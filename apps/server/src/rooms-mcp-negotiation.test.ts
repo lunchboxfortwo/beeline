@@ -15,7 +15,6 @@ async function fixture(ready:boolean){
   // authenticated principal and admission are synthetic in this zero-read proof.
   const oauth=new RoomsMcpOAuth({query} as unknown as SqlDatabase,'http://127.0.0.1',{} as TokenAuth);
   vi.spyOn(oauth,'principal').mockResolvedValue({hash:'synthetic',client_id:'client',identity_id:'owner',member_id:'member',scope:'rooms:read'});
-  vi.spyOn(oauth,'take').mockResolvedValue(true);
   vi.spyOn(oauth,'audit').mockResolvedValue(undefined);
   const mcp=new RoomsMcp(oauth,{} as PhoneService,new LiveHub(),undefined,undefined,undefined,()=>ready);
   const server=createServer((request,response)=>{void mcp.handle(request,response).catch(()=>{response.statusCode=500;response.end();});});
