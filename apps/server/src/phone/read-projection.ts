@@ -1,5 +1,6 @@
 import { phoneIdentity as identity } from '../phone-identity.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
+import { nextScheduleOccurrence } from '../agent-schedules.js';
 import { scheduleDisplayTitle } from '../schedule-title.js';
 import { modelChoiceLabel, readRepositoryOnboardingCard } from '@beeline/api-contract/phone';
 import type { AgentDetailView, MessageSearchSnippetPart, RoomScheduleView, RoomViewMember, RoomViewMessage } from '@beeline/api-contract/phone';
@@ -416,7 +417,11 @@ export function titledDaemonFact(card: unknown): NonNullable<RoomViewMessage['da
 }
 
 
-export function roomSchedule(row: RoomScheduleRow): RoomScheduleView {
+export function roomSchedule(row: RoomScheduleRow, now = new Date()): RoomScheduleView {
+  // The stored due time is the scheduler's dispatch cursor. An overdue recurring
+  // cursor is not the next future occurrence shown on a routine's profile.
+  const next = !row.paused_at && row.max_runs !== 1 && row.next_run_at <= now
+    ? nextScheduleOccurrence(row.cadence, now, row.next_run_at) : row.next_run_at;
   return {
     id: row.id,
     workspaceId: row.workspace_id,
@@ -428,7 +433,7 @@ export function roomSchedule(row: RoomScheduleRow): RoomScheduleView {
     ...(row.max_runs != null ? { maxRuns: row.max_runs } : {}),
     cadence: row.cadence,
     message: row.message,
-    nextRunAt: unix(row.next_run_at),
+    nextRunAt: unix(next),
     createdAt: unix(row.created_at),
     ...(row.surface_parent_id && row.surface_name
       ? { corner: { id: row.room_id, name: row.surface_name } }

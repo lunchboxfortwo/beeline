@@ -20,7 +20,7 @@ import { roomSchedule } from './read-projection.js';
        ORDER BY schedule.created_at,schedule.id`,
       [roomId],
     );
-    return { schedules: schedules.rows.map(roomSchedule) };
+    return { schedules: schedules.rows.map(row => roomSchedule(row)) };
   }
 
   export async function phoneReadScheduledWork(ctx: PhoneContext, roomId: string, viewerId: string): Promise<Output<'readScheduledWork'>> {

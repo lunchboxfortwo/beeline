@@ -355,7 +355,7 @@ export const IdentityMark = React.memo(function IdentityMark(props: IdentityMark
         height={size}
         testID={testID}
       >
-        <YStack borderRadius="sm" overflow="hidden" width={size} height={size} testID="identity-face-plate">
+        <YStack position="relative" borderRadius="sm" overflow="hidden" width={size} height={size} testID="identity-face-plate">
           {showPersonPicture ? (
             <>
               <PlateFill size={size} fill={plate} />
@@ -389,10 +389,10 @@ export const IdentityMark = React.memo(function IdentityMark(props: IdentityMark
   }
 
   return (
-    <YStack accessibilityLabel={label} alignItems="center" justifyContent="center" width={size} height={size} testID={testID}>
-      <YStack borderRadius="sm" overflow="hidden" width={size} height={size} testID="identity-face-plate">
+    <YStack position="relative" accessibilityLabel={label} alignItems="center" justifyContent="center" width={size} height={size} testID={testID}>
+      <YStack position="relative" borderRadius="sm" overflow="hidden" width={size} height={size} testID="identity-face-plate">
         {/* The plate in the agent's hue, under its portrait or creature. */}
-        <PlateFill size={size} fill={plate} />
+        {showGeneratedAvatar ? <PlateFill size={size} fill={plate} /> : null}
         {showGeneratedAvatar ? (
           <Filled
             view={Image}
@@ -403,6 +403,7 @@ export const IdentityMark = React.memo(function IdentityMark(props: IdentityMark
           />
         ) : (
           <Svg width={size} height={size} viewBox="0 0 100 100">
+            <Rect width={100} height={100} fill={plate} />
             {agentFaceLayers(face)}
           </Svg>
         )}

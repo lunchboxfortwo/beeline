@@ -121,29 +121,34 @@ const TurnProgressLineBody = React.memo(function TurnProgressLineBody({
  * verb, total seconds and the "done" stamp. Static, with the completed mark;
  * the screen clears it after a few seconds. A failed send uses it with Retry.
  */
-export function TurnSettledLine({ line, testID, inset = true, leading = false, leadingGlyph = true, action }: {
+export function TurnSettledLine({ line, testID, inset = true, leading = false, leadingGlyph = true, multiline = false, action }: {
   line: string;
   testID?: string;
   inset?: boolean;
   /** The external-send variant shares the thinking line's live region. */
   leading?: boolean;
   leadingGlyph?: boolean;
+  /** Failed message reasons stay readable in the transcript. */
+  multiline?: boolean;
   action?: { label: string; onPress(): void };
 }) {
   return (
     <TurnLineBar inset={inset} accessibilityLabel={line} accessibilityLiveRegion={leading ? 'polite' : undefined} testID={testID}>
-      <XStack height={TURN_LINE_ROW_MIN_HEIGHT} minWidth={0} gap={action && !leadingGlyph ? '0' : '2'} alignItems="center">
+      <XStack height={multiline ? undefined : TURN_LINE_ROW_MIN_HEIGHT} minHeight={TURN_LINE_ROW_MIN_HEIGHT} minWidth={0}
+        gap={action && !leadingGlyph ? '0' : '2'} alignItems={multiline ? "baseline" : "center"}>
         {leadingGlyph ? (
           <YStack testID={testID ? `${testID}-glyph` : undefined}><BeelineMarkSpinner /></YStack>
         ) : null}
-        <T v="meta" color="needsYou" numberOfLines={1} testID={testID ? `${testID}-line` : undefined}>{line}</T>
+        <T v="meta" color="needsYou" numberOfLines={multiline ? undefined : 1}
+          flexShrink={multiline ? 1 : undefined} testID={testID ? `${testID}-line` : undefined}>{line}</T>
         {action ? (
-          <>
+          <XStack flexShrink={0} alignItems="baseline">
             <T v="meta" color="needsYou"> · </T>
             <T
               v="meta"
               color="needsYou"
               accessibilityRole="button"
+              flexShrink={0}
               hitSlop={SLOP}
               onPressIn={(event: { stopPropagation(): void }) => event.stopPropagation()}
               onPress={(event: { stopPropagation(): void }) => { event.stopPropagation(); action.onPress(); }}
@@ -151,7 +156,7 @@ export function TurnSettledLine({ line, testID, inset = true, leading = false, l
             >
               {action.label}
             </T>
-          </>
+          </XStack>
         ) : null}
       </XStack>
     </TurnLineBar>

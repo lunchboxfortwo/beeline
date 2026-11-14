@@ -18,6 +18,8 @@ const operation = vi.hoisted(() => vi.fn(async (name: string, _input?: unknown) 
   { id: 'daily', roomId: 'room', agentId: 'agent-1', cadence: { kind: 'interval', everyMinutes: 60 }, message: 'Morning summary', nextRunAt: 1790000000, runCount: 14 },
   { id: 'video', title: 'Post youtube video', maxRuns: 1, roomId: 'corner-1', agentId: 'agent-1', cadence: { kind: 'interval', everyMinutes: 1440 }, message: 'Start the workflow', nextRunAt: 1790000000, runCount: 2, workflowSlug: 'post_youtube_video', corner: { id: 'corner-1', name: 'video' } },
 ], subscriptions: [{ id: 'sub', roomId: 'room', agentId: 'agent-1', source: 'repository', event: 'issue.opened', repository: 'owner/widgets', prompt: 'Triage new issues.', firedCount: 3 }] } : {}));
+const focus = vi.hoisted(() => ({ active: true }));
+vi.mock('@/buzz/use-surface-focus', () => ({ useSurfaceFocus: () => focus.active }));
 const params = vi.hoisted(() => ({ value: { roomId: 'room', workspaceId: 'ws' } as Record<string, string> }));
 const router = vi.hoisted(() => ({ back: vi.fn(), push: vi.fn(), replace: vi.fn() }));
 vi.mock('expo-router', () => ({ router, useLocalSearchParams: () => params.value, useFocusEffect: (effect: any) => React.useEffect(effect, [effect]) }));
@@ -82,6 +84,7 @@ import PromptSchedule from './schedule';
 import Subscription from './subscription';
 
 beforeEach(() => {
+  focus.active = true;
   resetClientState();
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
   router.push.mockClear();
@@ -242,6 +245,10 @@ it.each([
   const tree = await render(<Page />);
   try {
     await act(async () => press(tree, stopId));
+    const cancel = tree.root.find((node: any) => node.type === 'Button' && node.props.testID === `${stopId}-cancel`);
+    const confirm = tree.root.find((node: any) => node.type === 'Button' && node.props.testID === `${stopId}-confirm`);
+    const row = (node: any): any => node.parent.type === 'XStack' ? node.parent : row(node.parent);
+    expect(row(cancel) === row(confirm)).toBe(true);
     await act(async () => press(tree, `${stopId}-cancel`));
     expect(tree.root.findAll((node: any) => node.props.testID === `${stopId}-confirm`)).toHaveLength(0);
     expect(operation.mock.calls.some(([name]) => name.startsWith('delete'))).toBe(false);
@@ -310,4 +317,21 @@ it('uses the server DM flag for location and fallback trigger wording, not a mis
 it('shows paused schedules and subscriptions without claiming a next run', () => {
   expect(scheduleTrigger({ paused: true } as any)).toBe('Paused while you were away');
   expect(subscriptionWhen({ paused: true, registrationStatus: 'registering' } as any)).toBe('Paused while you were away');
+});
+
+it('retains the routines list during blur and restores focus without an empty first paint', async () => {
+  params.value = { roomId: 'room' };
+  const tree = await render(<ScheduledWork />);
+  try {
+    expect(words(tree)).toContain('Morning summary');
+    const reads = operation.mock.calls.length;
+    focus.active = false;
+    await act(async () => tree.update(<ScheduledWork />));
+    expect(words(tree)).toContain('Morning summary');
+    expect(tree.root.findAll((node: any) => node.props.testID === 'scheduled-work-empty')).toHaveLength(0);
+    expect(operation.mock.calls.length).toBe(reads);
+    focus.active = true;
+    await act(async () => tree.update(<ScheduledWork />));
+    expect(words(tree)).toContain('Morning summary');
+  } finally { await act(async () => tree.unmount()); }
 });

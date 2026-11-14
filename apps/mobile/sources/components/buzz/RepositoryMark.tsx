@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Image, YStack } from 'tamagui';
+import { Image } from 'react-native';
+import { YStack } from 'tamagui';
 import { Hash } from 'lucide-react-native';
-import { Glyph } from '@/ui/grammar';
+import { Filled, Glyph } from '@/ui/grammar';
 
 /** The stored owner picture, its site's favicon, then the existing generic chat mark. */
 export function RepositoryMark({ avatarUrl, faviconUrl, size = 36 }: {
@@ -11,7 +12,7 @@ export function RepositoryMark({ avatarUrl, faviconUrl, size = 36 }: {
   const uri = [avatarUrl, faviconUrl].find(url => url && !failed.includes(url));
   return <YStack width={size} height={size} borderRadius="sm" overflow="hidden" backgroundColor="highlight"
     alignItems="center" justifyContent="center" testID="repository-mark">
-    {uri ? <Image source={{ uri }} resizeMode="cover" width={size} height={size}
+    {uri ? <Filled view={Image} source={{ uri }} resizeMode="cover"
       onError={() => setFailed(values => [...values, uri])} testID="repository-mark-image" />
       : <Glyph icon={Hash} size={size >= 36 ? 20 : 16} />}
   </YStack>;

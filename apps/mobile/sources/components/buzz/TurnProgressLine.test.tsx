@@ -10,13 +10,17 @@ vi.mock('./BeelineMarkSpinner', () => ({ BeelineMarkSpinner: () => React.createE
 
 const texts = (renderer: any): unknown[] => renderer.root.findAllByType('T').map((node: any) => node.props.children);
 
-it('keeps failure copy on one ellipsizing line and the tappable word separate from it', () => {
+it('wraps failure reasons and keeps Retry on the same baseline', () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   const retry = vi.fn(), stopPropagation = vi.fn(); let renderer: any;
   act(() => { renderer = create(<TurnSettledLine line={'Not sent: ' + 'A long server refusal. '.repeat(20)}
-    leadingGlyph={false} inset={false} action={{ label: 'Retry', onPress: retry }} testID="failed" />); });
+    leadingGlyph={false} inset={false} multiline action={{ label: 'Retry', onPress: retry }} testID="failed" />); });
   const line = renderer.root.find((node: any) => node.props.testID === 'failed-line');
-  expect(line.props.numberOfLines).toBe(1);
+  expect(line.props.numberOfLines).toBeUndefined();
+  expect(line.props.flexShrink).toBe(1);
+  const row = renderer.root.findAllByType('XStack')[0];
+  expect(row.props.height).toBeUndefined();
+  expect(row.props.alignItems).toBe('baseline');
   expect(line.props.children).toContain('A long server refusal.');
   expect(renderer.root.findAllByType('Mark')).toHaveLength(0);
   const action = renderer.root.find((node: any) => node.props.testID === 'failed-retry');
@@ -31,6 +35,7 @@ it('keeps the existing settled-turn mark when no failure-line options are suppli
   let renderer: any; act(() => { renderer = create(<TurnSettledLine line="Finished" />); });
   expect(renderer.root.findAllByType('Mark')).toHaveLength(1);
   expect(texts(renderer)).toEqual(['Finished']);
+  expect(renderer.root.findAllByType('T')[0].props.numberOfLines).toBe(1);
   act(() => renderer.unmount());
 });
 
