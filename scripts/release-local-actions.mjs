@@ -33,8 +33,8 @@ export function matrixRows(matrix = {}) {
 }
 
 export class LocalActions {
-  constructor({ root, directory, secrets, variables = {}, processes, github, hooks = {}, baseEnv = process.env }) {
-    Object.assign(this, { root, directory, secrets, variables, processes, github, hooks });
+  constructor({ root, directory, secrets, variables = {}, processes, github, hooks = {}, baseEnv = process.env, isolateTemporary = false }) {
+    Object.assign(this, { root, directory, secrets, variables, processes, github, hooks, isolateTemporary });
     this.artifacts = new Map();
     this.records = new Map();
     this.counter = 0;
@@ -82,44 +82,64 @@ export class LocalActions {
   env(value, context) { return Object.fromEntries(Object.entries(this.value(value ?? {}, context)).map(([k, v]) => [k, String(v ?? '')])); }
   async workflow(file, inputs, inherited, prefix = '') {
     const workflow = this.read(file), results = {}, pending = new Set(Object.keys(workflow.jobs));
-    while (pending.size) {
-      let advanced = false;
-      for (const id of pending) {
-        const job = workflow.jobs[id], dependencies = [job.needs ?? []].flat();
-        if (!dependencies.every(name => Object.hasOwn(results, name))) continue;
-        advanced = true;
-        pending.delete(id);
-        const needs = Object.fromEntries(dependencies.map(name => [name, results[name]]));
-        const context = {
-          ...inherited, inputs, needs, steps: {}, matrix: {}, env: {}, secrets: this.secrets, vars: this.variables,
-          job: { status: dependencies.some(name => results[name].result !== 'success') ? 'failure' : 'success', services: {} },
-          github: { ...inherited.github, job: id },
-        };
-        if (!condition(job.if, context, this.options(context))) { results[id] = { result: 'skipped', outputs: {} }; continue; }
-        context.job.status = 'success';
-        const label = `${prefix}${id}`;
-        this.processes.log(`Job: ${label}`);
-        try {
-          if (job.uses) {
-            const nested = await this.workflow(job.uses, this.value(job.with ?? {}, context), context, `${label}/`);
-            results[id] = { result: Object.values(nested).some(result => result.result === 'failure') ? 'failure' : 'success', outputs: {} };
-          } else {
-            const rows = matrixRows(this.value(job.strategy?.matrix ?? {}, context));
-            let result = { result: 'success', outputs: {} };
-            for (const matrix of rows) {
-              const instance = await this.job(job, { ...context, matrix }, `${label}-${Object.values(matrix).join('-') || 'local'}`, workflow.env);
-              if (instance.result === 'failure') result.result = 'failure';
-              Object.assign(result.outputs, instance.outputs);
+    const execution = await this.hooks.workflow?.({ file, inputs, inherited, prefix, engine: this }) ?? {};
+    const running = new Map();
+    const run = async id => {
+      const job = workflow.jobs[id], dependencies = [job.needs ?? []].flat();
+      const needs = Object.fromEntries(dependencies.map(name => [name, results[name]]));
+      const context = {
+        ...inherited, inputs, needs, steps: {}, matrix: {}, env: {}, secrets: this.secrets, vars: this.variables,
+        job: { status: dependencies.some(name => results[name].result !== 'success') ? 'failure' : 'success', services: {} },
+        github: { ...inherited.github, job: id },
+      };
+      if (!condition(job.if, context, this.options(context))) { results[id] = { result: 'skipped', outputs: {} }; return; }
+      context.job.status = 'success';
+      const label = `${prefix}${id}`;
+      this.processes.log(`Job: ${label}`);
+      try {
+        if (job.uses) {
+          const nested = await this.workflow(job.uses, this.value(job.with ?? {}, context), context, `${label}/`);
+          results[id] = { result: Object.values(nested).some(result => ['failure', 'cancelled'].includes(result.result)) ? 'failure' : 'success', outputs: {} };
+        } else {
+          const rows = matrixRows(this.value(job.strategy?.matrix ?? {}, context));
+          const execute = async matrix => {
+            const instanceLabel = `${label}-${Object.values(matrix).join('-') || 'local'}`;
+            try { return await (execution.job ?? this.job.bind(this))(job, { ...context, matrix }, instanceLabel, workflow.env); }
+            catch (error) {
+              // Await every sibling even when setup/transport rejects one row.
+              this.processes.log(this.processes.redact(`${instanceLabel}: ${error.message}`));
+              return { result: job['continue-on-error'] ? 'success' : 'failure', outputs: {} };
             }
-            results[id] = result;
-          }
-        } catch (error) {
-          this.processes.log(this.processes.redact(`${label}: ${error.message}`));
-          results[id] = { result: job['continue-on-error'] ? 'success' : 'failure', outputs: {} };
+          };
+          const instances = [];
+          if (execution.parallel) instances.push(...await Promise.all(rows.map(execute)));
+          else for (const matrix of rows) instances.push(await execute(matrix));
+          results[id] = { result: instances.some(instance => ['failure', 'cancelled'].includes(instance.result)) ? 'failure' : 'success', outputs: Object.assign({}, ...instances.map(instance => instance.outputs)) };
         }
-        privateWrite(join(this.directory, 'jobs.json'), JSON.stringify(results, null, 2));
+      } catch (error) {
+        this.processes.log(this.processes.redact(`${label}: ${error.message}`));
+        results[id] = { result: job['continue-on-error'] ? 'success' : 'failure', outputs: {} };
       }
-      if (!advanced) throw new Error(`Unresolved workflow dependencies: ${[...pending].join(', ')}`);
+      privateWrite(join(this.directory, 'jobs.json'), JSON.stringify(results, null, 2));
+    };
+    try {
+      while (pending.size || running.size) {
+        let advanced = false;
+        for (const id of pending) {
+          const job = workflow.jobs[id], dependencies = [job.needs ?? []].flat();
+          if (!dependencies.every(name => Object.hasOwn(results, name))) continue;
+          advanced = true;
+          pending.delete(id);
+          if (execution.parallel) running.set(id, run(id).finally(() => running.delete(id)));
+          else await run(id);
+        }
+        if (running.size) { await Promise.race(running.values()); continue; }
+        if (!pending.size) break;
+        if (!advanced) throw new Error(`Unresolved workflow dependencies: ${[...pending].join(', ')}`);
+      }
+    } finally {
+      await Promise.allSettled(running.values());
+      await execution.finish?.(results);
     }
     return results;
   }
@@ -129,13 +149,13 @@ export class LocalActions {
     const started = new Date().toISOString();
     const logFile = join(directory, 'output.log');
     privateWrite(logFile, '');
-    const previousLogFile = this.processes.logFile;
-    this.processes.logFile = logFile;
+    return this.processes.withLogFile(logFile, () => this.runJob(job, context, label, workflowEnv, directory, started, logFile));
+  }
+  async runJob(job, context, label, workflowEnv, directory, started, logFile) {
     const finish = result => {
       if (this.cancelled && result.result === 'success') result.result = 'cancelled';
       this.records.set(label, { id: label, name: label, conclusion: result.result, started_at: started, completed_at: new Date().toISOString(), logFile });
       privateWrite(join(this.directory, 'records.json'), JSON.stringify([...this.records.values()], null, 2));
-      this.processes.logFile = previousLogFile;
       return result;
     };
     context = structuredClone(context);
@@ -153,6 +173,10 @@ export class LocalActions {
     };
     context.env.PATH = `${context.env.NPM_CONFIG_PREFIX}/bin:${context.env.PATH}`;
     mkdirSync(context.env.HOME, { recursive: true, mode: 0o700 });
+    if (this.isolateTemporary) {
+      Object.assign(context.env, { TMPDIR: join(directory, 'tmp'), XDG_CACHE_HOME: join(directory, 'cache'), DOCKER_CONFIG: join(directory, 'docker') });
+      mkdirSync(context.env.TMPDIR, { recursive: true, mode: 0o700 });
+    }
     Object.assign(context.env, this.env(workflowEnv, context), this.env(job.env, context));
     try {
       const intercepted = await this.hooks.job?.({ job, context, label, directory, engine: this });

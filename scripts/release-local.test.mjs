@@ -17,6 +17,7 @@ import { initializeRelease, planOutputs, restoreReleasePlan } from './unified-re
 import { run as bookkeeping } from './release-bookkeeping.mjs';
 import { localGithub } from './release-local-github.mjs';
 import { assignReleaseVersion, latestPublished, recoverTaggedReleases } from './release-record.mjs';
+import { CheckQueue, checkPlan, checkWorkspace, LocalChecks } from './release-local-checks.mjs';
 
 const repository = resolve(import.meta.dirname, '..');
 const temporary = () => mkdtempSync(join(tmpdir(), 'beeline-local-test-'));
@@ -226,6 +227,185 @@ test('checks-only execution uses the complete reusable release gate without init
     assert.equal(JSON.parse(readFileSync(join(directory, 'release-checks.json'), 'utf8')).mobile.result, 'success');
     engine.workflow = async () => ({ mobile: { result: 'failure' } });
     await assert.rejects(releaseChecks(engine, { github: { sha } }), /Release checks failed/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+test('the four shard queue never overlaps jobs on a shard and drains after failures', async () => {
+  const active = new Set(), completed = [], starts = [], releases = [];
+  let peak = 0;
+  const queue = new CheckQueue({ execute: async (slot, id) => {
+    assert.equal(active.has(slot), false);
+    active.add(slot); starts.push(id); peak = Math.max(peak, active.size);
+    await new Promise(resolveRun => releases.push(resolveRun));
+    active.delete(slot); completed.push(id);
+    if (id === 1) throw new Error('fixture failure');
+    return slot;
+  } });
+  const pending = Array.from({ length: 10 }, (_, id) => queue.run(id));
+  const results = Promise.allSettled(pending);
+  while (completed.length < 10) {
+    await new Promise(resolveRun => setImmediate(resolveRun));
+    assert.ok(active.size <= 4);
+    releases.splice(0).forEach(release => release());
+  }
+  assert.equal(peak, 4);
+  assert.deepEqual(starts, Array.from({ length: 10 }, (_, id) => id));
+  assert.equal((await results).filter(result => result.status === 'rejected').length, 1);
+  assert.equal(active.size, 0);
+});
+test('parallel Checks wait for dependencies and every matrix verdict while delivery stays sequential', async () => {
+  const directory = temporary(), starts = [], releases = new Map();
+  try {
+    writeFileSync(join(directory, 'checks.yml'), JSON.stringify({ jobs: {
+      shards: { strategy: { matrix: { shard: [1, 2, 3, 4, 5, 6, 7, 8] } }, steps: [] },
+      independent: { steps: [] },
+      report: { needs: ['shards', 'independent'], if: 'always()', steps: [] },
+      promotion: { needs: 'shards', steps: [] },
+    } }));
+    const engine = new LocalActions({ root: directory, directory: join(directory, 'state'), secrets: {}, processes: new Processes({}, () => {}),
+      hooks: { workflow: () => ({ parallel: true, job: async (_job, context, label) => {
+        starts.push(label);
+        if (context.github.job !== 'report') await new Promise(resolveRun => releases.set(label, resolveRun));
+        else assert.equal(context.needs.shards.result, 'failure');
+        if (context.matrix.shard === 2) throw new Error('fixture transport failure');
+        return { result: 'success', outputs: { shard: String(context.matrix.shard || '') } };
+      } }) },
+    });
+    const pending = engine.workflow('checks.yml', {}, { github: { sha, repository: 'owner/repo' } });
+    await new Promise(resolveRun => setImmediate(resolveRun));
+    assert.equal(starts.length, 9);
+    releases.get('independent-local')();
+    for (let shard = 1; shard <= 7; shard++) releases.get(`shards-${shard}`)();
+    await new Promise(resolveRun => setImmediate(resolveRun));
+    assert.equal(starts.includes('report-local'), false);
+    releases.get('shards-8')();
+    const result = await pending;
+    assert.equal(result.shards.result, 'failure');
+    assert.equal(result.report.result, 'success');
+    assert.equal(result.promotion.result, 'skipped');
+    assert.equal(starts.includes('promotion-local'), false);
+
+    writeFileSync(join(directory, 'release.yml'), JSON.stringify({ jobs: { server: { steps: [] }, helper: { steps: [] } } }));
+    engine.hooks = {};
+    let concurrent = 0;
+    engine.job = async () => {
+      assert.equal(concurrent++, 0);
+      await new Promise(resolveRun => setImmediate(resolveRun));
+      concurrent--;
+      return { result: 'success', outputs: {} };
+    };
+    await engine.workflow('release.yml', {}, { github: { sha } });
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+test('concurrent job logs and temporary files stay private and retain secret masking', async () => {
+  const directory = temporary();
+  try {
+    const engine = new LocalActions({ root: directory, directory, secrets: {}, processes: new Processes({ TOKEN: 'secret-fixture-token' }, () => {}), isolateTemporary: true });
+    const context = { github: { sha, repository: 'owner/repo', job: 'fixture' }, job: { status: 'success' }, steps: {} };
+    const results = await Promise.all(['one', 'two'].map(label => engine.job({ steps: [{ run: `echo '${label} secret-fixture-token'; sleep 0.05; echo '${label} done'; echo private > "$TMPDIR/fixture"` }] }, context, label)));
+    assert.equal(results.every(result => result.result === 'success'), true);
+    for (const label of ['one', 'two']) {
+      const log = readFileSync(join(directory, 'jobs', label, 'output.log'), 'utf8');
+      assert.match(log, new RegExp(`${label} \\*\\*\\*`));
+      assert.match(log, new RegExp(`${label} done`));
+      assert.doesNotMatch(log, new RegExp(`^${label === 'one' ? 'two' : 'one'} `, 'm'));
+      assert.equal(log.includes('secret-fixture-token'), false);
+      assert.equal(readFileSync(join(directory, 'jobs', label, 'tmp/fixture'), 'utf8'), 'private\n');
+    }
+    assert.equal(JSON.parse(readFileSync(join(directory, 'records.json'), 'utf8')).length, 2);
+    const delivery = new LocalActions({ root: directory, directory, secrets: {}, processes: new Processes({}, () => {}), baseEnv: { PATH: process.env.PATH, TMPDIR: '/tmp' } });
+    const ordinary = await delivery.job({ steps: [{ run: 'test "$TMPDIR" = /tmp' }] }, context, 'delivery');
+    assert.equal(ordinary.result, 'success');
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+test('the dry Checks plan includes all eight shards, writer isolation, existing budgets and no publication', async () => {
+  const messages = [], engine = new LocalActions({ root: repository, directory: tmpdir(), secrets: {}, processes: new Processes({}, message => messages.push(message)) });
+  const plan = checkPlan(engine);
+  assert.equal(plan.jobs.filter(job => job.id === 'server-suite-shard').length, 8);
+  assert.equal(checkWorkspace('server-suite-shard'), 'shared build with private write layer');
+  for (const writer of ['typecheck', 'dead-code', 'mobile-suite', 'mobile-export-reachability', 'native-fingerprint']) assert.equal(checkWorkspace(writer), 'private copy of build');
+  engine.job = () => { throw new Error('A dry plan must not execute jobs'); };
+  await dryRun({ leg: 'release_checks' }, engine, { github: { sha } });
+  assert.deepEqual(JSON.parse(messages[0]), plan);
+  assert.match(plan.execution, /four existing/);
+});
+test('shard transport inherits existing slices and jails without changing their budgets or services', async () => {
+  const directory = temporary(), calls = [];
+  try {
+    const engine = new LocalActions({ root: repository, directory, secrets: {}, processes: new Processes({}, () => {}) });
+    const checks = new LocalChecks(engine);
+    checks.source = directory;
+    checks.shards.set(1, { name: 'beeline-ci-shard-1', slice: 'beeline-ci1.slice', pid: '123' });
+    checks.privileged = async args => {
+      calls.push(args);
+      if (args[0] === 'systemd-run') {
+        const jobDirectory = join(directory, 'jobs/release_checks-server-suite-shard-1');
+        writeFileSync(join(jobDirectory, 'result.json'), JSON.stringify({ job: { result: 'success', outputs: {} }, records: [], artifacts: [] }));
+      }
+      return '';
+    };
+    const result = await checks.execute(1, { steps: [] }, { github: { sha, job: 'server-suite-shard' }, matrix: { shard: 1 } }, 'release_checks/server-suite-shard-1');
+    assert.equal(result.result, 'success');
+    const command = calls.find(args => args[0] === 'systemd-run');
+    assert.ok(command.includes('--slice=beeline-ci1.slice'));
+    assert.ok(command.includes('--user') && command.includes('--net'));
+    assert.ok(command.includes(`BindReadOnlyPaths=${directory}:/build`));
+    assert.ok(command.some(arg => arg.includes('lowerdir=/build,upperdir=/state/upper,workdir=/state/overlay-work')));
+    assert.equal(command.some(arg => /CPUQuota|MemoryMax|registration|restart/.test(arg)), false);
+    assert.equal(calls.some(args => args[0] === 'systemctl'), false);
+    checks.privileged = async args => {
+      if (args[0] === 'systemd-run') {
+        writeFileSync(join(directory, 'jobs/release_checks-server-suite-shard-2/output.log'), 'FAIL src/fixture.test.ts > fixture failure\n');
+        throw new Error('worker crashed');
+      }
+      if (args[0] === 'systemctl') assert.match(args[2], /^beeline-release-check-[a-f0-9]+\.service$/);
+      return '';
+    };
+    const failed = await checks.execute(1, { steps: [] }, { github: { sha, job: 'server-suite-shard' } }, 'release_checks/server-suite-shard-2');
+    assert.equal(failed.result, 'failure');
+    assert.match(readFileSync(join(directory, 'jobs/release_checks-server-suite-shard-2/output.log'), 'utf8'), /FAIL src\/fixture.test.ts/);
+    assert.equal(engine.records.get('release_checks/server-suite-shard-2').conclusion, 'failure');
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+test('private HOME GitHub fetches use ephemeral credentials and redact their encoded form', async () => {
+  const directory = temporary(), messages = [], token = 'fixture-private-home-token';
+  const encoded = Buffer.from(`x-access-token:${token}`).toString('base64');
+  try {
+    const processes = new Processes({ TOKEN: token }, line => messages.push(line));
+    const engine = new LocalActions({ root: directory, directory, secrets: {}, processes, hooks: localHooks(directory, processes), isolateTemporary: true });
+    const result = await engine.job({ steps: [{ run: 'git config --get http.https://github.com/.extraheader > "$TMPDIR/header"; cat "$TMPDIR/header"' }] },
+      { github: { sha, token, job: 'fixture', repository: 'owner/repo' }, job: { status: 'success' }, steps: {} }, 'git-auth');
+    assert.equal(result.result, 'success');
+    assert.equal(readFileSync(join(directory, 'jobs/git-auth/tmp/header'), 'utf8').trim(), `AUTHORIZATION: basic ${encoded}`);
+    assert.equal(messages.some(line => line.includes(token) || line.includes(encoded)), false);
+    assert.throws(() => readFileSync(join(directory, 'jobs/git-auth/home/.gitconfig')));
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+test('Body occupies a queue slot through a bounded host-user scope with private source and HOME', async () => {
+  const directory = temporary(), calls = [];
+  try {
+    const engine = new LocalActions({ root: repository, directory, secrets: {}, processes: new Processes({}, () => {}) });
+    const checks = new LocalChecks(engine);
+    checks.shards.set(4, { name: 'beeline-ci-shard-4', slice: 'beeline-ci4.slice', pid: '456' });
+    checks.privileged = async args => { calls.push(args); return ''; };
+    checks.command = async (command, args) => {
+      assert.equal(command, 'systemd-run');
+      assert.ok(args.includes('--user') && args.includes('--scope'));
+      assert.ok(args.includes('CPUQuota=300%') && args.includes('MemoryMax=12G'));
+      assert.equal(args.some(arg => /nsenter|setfcap/.test(arg)), false);
+      const jobDirectory = join(directory, 'jobs/release_checks-body-suite-local');
+      const spec = JSON.parse(readFileSync(join(jobDirectory, 'spec.json'), 'utf8'));
+      assert.equal(spec.root, join(jobDirectory, 'source'));
+      assert.equal(spec.directory, jobDirectory);
+      assert.match(spec.temporary, /^\/tmp\/beeline-check-[\w-]+$/);
+      assert.ok(spec.temporary.length < 40);
+      assert.equal(spec.context.secrets, undefined);
+      writeFileSync(join(jobDirectory, 'result.json'), JSON.stringify({ job: { result: 'success', outputs: {} }, records: [], artifacts: [] }));
+      return '';
+    };
+    const result = await checks.execute(4, { steps: [] }, { github: { sha, job: 'body-suite' }, secrets: { PRIVATE: 'never-forward' } }, 'release_checks/body-suite-local');
+    assert.equal(result.result, 'success');
+    assert.ok(calls.some(args => args[0] === 'cp'));
+    assert.ok(calls.some(args => args[0] === 'chown' && args[2] === `${process.getuid()}:${process.getgid()}`));
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 test('workflow expressions preserve hyphenated identifiers, booleans, defaults and failure semantics', () => {

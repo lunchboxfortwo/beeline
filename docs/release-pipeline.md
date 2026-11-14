@@ -10,8 +10,28 @@ running release commands. The runner reads the committed unified workflow,
 including its complete Checks dependency, release validation, composite steps,
 canary, helper download proof, optional device proof, rollback and finalization.
 The composite shell and github-script bodies live in `scripts/release-steps/`;
-Actions and the local runner call the same files. Jobs run sequentially through
-the existing dependency graph. Cache misses rebuild; unknown action types fail.
+Actions and the local runner call the same files. Full Checks queue on the four
+existing `beeline-ci-shard-1..4` jails, one job per shard. Their existing parent
+slices each enforce 3 CPUs / 12 GiB; Vitest keeps its at-most-two-worker settings.
+The runner changes no listener, Docker daemon or slice configuration. Delivery
+jobs still run sequentially through the existing dependency graph. Cache misses
+rebuild; unknown action types fail.
+
+Checks install dependencies and build/provenance-verify once on shard 1.
+Server shards, PostgreSQL proofs, corpus replay, app associations and the auth
+image share that build as a read-only lower layer with private writable
+overlays for Vite's compiled configuration and caches. TYPECHECK, shared tests,
+dead-code, Body, mobile, mobile export, fingerprint and actionlint get private
+copies so generated fixtures, compiler state and rebuilds cannot race readers.
+Each job has its own HOME, temporary directory, Vite cache, Docker config and
+log. PGlite instances remain independent; PostgreSQL uses the shard's rootless
+Docker with an ephemeral loopback port. Completed results, artifacts and failure
+logs retain their existing local handoff. `release-checks-timing.json` records
+wall time, sampled host load and shard placement under the private state directory.
+Body instead runs as the operator's unprivileged host user in a private source
+copy, HOME and short temporary directory. Its user scope enforces 3 CPUs / 12 GiB
+and occupies one of the same four queue slots. This preserves its nested bwrap
+user-namespace proofs without granting capabilities or changing a shard jail.
 
 The temporary outage policy is explicit: **website not released** means static
 GitHub Pages is left serving its published site. The selected EAS web app leg
@@ -37,6 +57,11 @@ publication uses `NPM_AUTOMATION_TOKEN` in a private job npmrc; hosted
 publication retains OIDC. Populate `GITHUB_TOKEN` from the existing gh login,
 `FLY_API_TOKEN` from the authorized Fly login, and `EXPO_TOKEN` from the existing
 squire secret file. Provision the remaining workflow authorities separately:
+
+GitHub HTTPS git commands receive the configured token through ephemeral Git
+configuration in each job's environment, including inside its private HOME.
+They do not depend on the operator's global credential helper or write a token
+to a gitconfig. Both the token and its encoded HTTP form are masked in logs.
 
 All local GitHub calls, including identity reservation and release-record reads,
 use the configured `GITHUB_TOKEN` (or `GH_TOKEN`). Local initialization skips the
@@ -109,9 +134,17 @@ reported as unavailable locally; the full local release Checks gate still runs.
 To execute that complete gate without reserving a release identity or delivering
 anything, use `--execute --leg release_checks --release-sha <full-main-commit>`
 with `--env-file` and a fresh `--state-dir`. This checks-only mode needs no
-dispatch receipt or delivery credentials.
+dispatch receipt or delivery credentials. It does not acquire the production
+release lock. The controller needs passwordless sudo for task-owned transient
+units inside the existing CI slices; it never starts or stops a shard service.
+`--dry-run --leg release_checks` prints the queue and isolation plan without
+executing any job; no release credentials are required.
 
 ```sh
+node scripts/release-local.mjs --dry-run --leg release_checks
+node scripts/release-local.mjs --execute --leg release_checks \
+  --release-sha <full-main-commit> --env-file ~/.config/beeline-release.env \
+  --state-dir /private/path/outside-the-checkout
 node scripts/release-local.mjs --dry-run --leg require-tools
 node scripts/release-local.mjs --dry-run --leg pages
 node scripts/release-local.mjs --dry-run --channel next \

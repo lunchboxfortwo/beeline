@@ -43,6 +43,8 @@
         // Shared release shell/composite steps invoke these outside the JavaScript graph.
         "scripts/release-steps/{daemon-leg-step1,pages-leg-step3}.mjs",
         "scripts/server-previous-sources.mjs",
+        // The local Checks queue launches this worker by path in CI units and Body scopes.
+        "scripts/release-local-check-worker.mjs",
         "scripts/verify-pages-update.mjs",
         "scripts/release-preflight.cjs",
         "scripts/prompt-pr-replay.mjs",

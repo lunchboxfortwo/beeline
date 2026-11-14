@@ -11,6 +11,7 @@ import { LocalActions } from './release-local-actions.mjs';
 import { Processes, privateWrite, appendSummary } from './release-local-process.mjs';
 import { localGithub } from './release-local-github.mjs';
 import { downloadPagesChannel } from './pages-channel.mjs';
+import { checksWorkflow, checkPlan, LocalChecks } from './release-local-checks.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const WORKFLOW = '.github/workflows/unified-release.yml';
@@ -162,9 +163,26 @@ rustup run 1.95.0 rustc --version
 
 export function localHooks(directory, processes) {
   return {
+    workflow: async ({ file, inherited, engine }) => {
+      if (file.replace(/^\.\//, '') !== checksWorkflow) return;
+      const checks = new LocalChecks(engine);
+      await checks.prepare(inherited);
+      return { parallel: true, job: (...args) => checks.queue.run(...args), finish: () => checks.finish() };
+    },
     job: async args => {
       const { context, engine } = args;
       context.env.BEELINE_LOCAL_RELEASE = 'true';
+      if (context.github.token) {
+        // Private HOME must not depend on the operator's credential helper.
+        // Config is passed via the child environment, never command arguments
+        // or a persistent gitconfig; register the encoded form for redaction.
+        const basic = Buffer.from(`x-access-token:${context.github.token}`).toString('base64');
+        processes.mask(basic);
+        const index = Number(context.env.GIT_CONFIG_COUNT || 0);
+        Object.assign(context.env, { GIT_CONFIG_COUNT: String(index + 1),
+          [`GIT_CONFIG_KEY_${index}`]: 'http.https://github.com/.extraheader',
+          [`GIT_CONFIG_VALUE_${index}`]: `AUTHORIZATION: basic ${basic}`, GIT_TERMINAL_PROMPT: '0' });
+      }
       if (['helper_linux', 'helper_macos', 'server'].includes(context.github.job)) context.env.CARGO_BUILD_JOBS = '2';
       if (context.github.job === 'helper_macos') {
         if (context.matrix.platform === 'darwin-arm64') return carryArm64(engine, context);
@@ -291,6 +309,10 @@ export function dryInitializeJob(workflow) {
 }
 
 export async function dryRun(args, engine, context) {
+  if (args.leg === 'release_checks') {
+    engine.processes.log(JSON.stringify(checkPlan(engine), null, 2));
+    return;
+  }
   context = { ...context, vars: engine.variables || {}, secrets: engine.secrets || {}, env: {} };
   const legs = args.leg ? [args.leg] : ['initialize', 'require-tools', 'eas-cli', 'server', 'helper', 'mobile-ota', 'pages', 'web-app'];
   const sha = context.github.sha;
@@ -330,14 +352,14 @@ export async function releaseChecks(engine, context) {
   const inputs = engine.value(call.with, { ...context, needs: { initialize: { outputs: { release_sha: context.github.sha } } } });
   const results = await engine.workflow(call.uses, inputs, context, 'release_checks/');
   privateWrite(join(engine.directory, 'release-checks.json'), JSON.stringify(results, null, 2));
-  if (Object.values(results).some(result => result.result === 'failure')) throw new Error(`Release checks failed; inspect private results under ${engine.directory}`);
+  if (Object.values(results).some(result => ['failure', 'cancelled'].includes(result.result))) throw new Error(`Release checks failed; inspect private results under ${engine.directory}`);
   engine.processes.log('Release checks complete; no release identity reserved or delivery attempted.');
   return results;
 }
 
 async function main(argv) {
   const args = parseArguments(argv);
-  if (args.help) { console.log('node scripts/release-local.mjs [--plan | --dry-run [--leg initialize|server|helper|mobile-ota|pages|web-app|eas-cli|require-tools|mac-tools] | --execute [--leg release_checks]] --channel next|latest --release-sha <40-char SHA> --dispatched-by <audited JSON> [--env-file ~/.config/beeline-release.env] [--run-release-proof] [--state-dir /outside/repo]'); return; }
+  if (args.help) { console.log('node scripts/release-local.mjs [--plan | --dry-run [--leg release_checks|initialize|server|helper|mobile-ota|pages|web-app|eas-cli|require-tools|mac-tools] | --execute [--leg release_checks]] --channel next|latest --release-sha <40-char SHA> --dispatched-by <audited JSON> [--env-file ~/.config/beeline-release.env] [--run-release-proof] [--state-dir /outside/repo]'); return; }
   if (args['remote-job']) { await remoteJob(args['remote-job']); return; }
   if (process.platform !== 'linux') throw new Error('Run the release controller on Linux squire');
   const sha = args['release-sha'] || execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
