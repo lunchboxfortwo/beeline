@@ -1,6 +1,6 @@
 import React from 'react';
-import * as Native from 'react-native';
-import { View, type ViewProps } from 'react-native';
+import type * as Native from 'react-native';
+import { View, Text as NativeText, TextInput as NativeTextInput, type ViewProps } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
 import Reanimated, { useAnimatedStyle } from 'react-native-reanimated';
@@ -69,7 +69,7 @@ export function NativeTypeInput({ v, line, color, centered = false, hidden = fal
     const theme = useTheme() as Record<string, { val: string } | undefined>;
     const textSize = useTextSize();
     return (
-        <Native.TextInput
+        <NativeTextInput
             ref={ref}
             placeholderTextColor={theme.secondary?.val}
             {...rest}
@@ -91,7 +91,7 @@ export function NativeTypeMeasure({ v, line, color, centered = false, fill = fal
     const theme = useTheme() as Record<string, { val: string } | undefined>;
     const textSize = useTextSize();
     return (
-        <Native.Text
+        <NativeText
             {...rest}
             style={[
                 nativeType({ v, line, color }, textSize, theme),

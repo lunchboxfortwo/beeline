@@ -1,3 +1,9 @@
+// Remove unused module exports from production bundles before minification.
+// Expo reads these flags after loading Metro configuration; development keeps
+// its ordinary transforms. Explicit build-environment overrides still apply.
+process.env.EXPO_UNSTABLE_METRO_OPTIMIZE_GRAPH ??= '1';
+process.env.EXPO_UNSTABLE_TREE_SHAKING ??= '1';
+
 const { getSentryExpoConfig } = require("@sentry/react-native/metro");
 const fs = require("fs");
 const path = require("path");
@@ -85,7 +91,7 @@ config.transformer.minifierConfig = {
 
 config.transformer.getTransformOptions = async () => ({
   transform: {
-    experimentalImportSupport: false,
+    experimentalImportSupport: true,
     inlineRequires: true,
   },
 });

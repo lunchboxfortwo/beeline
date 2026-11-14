@@ -3,6 +3,7 @@ import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { expect, it, vi } from 'vitest';
 import { prefetchRoomOpen } from '@/push/push-room-prefetch';
+import { router } from 'expo-router';
 vi.mock('react-native', () => ({ View: 'View', Platform: { OS: 'web' } }));
 vi.mock('expo-haptics', () => ({ notificationAsync: vi.fn(), selectionAsync: vi.fn(), NotificationFeedbackType: {} }));
 vi.mock('expo-router', () => ({ router: { push: vi.fn() } }));
@@ -17,6 +18,8 @@ import { useChatCornerActions } from './useChatCornerActions';
 
 it('guards corner creation without redrawing the departing conversation', async () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  vi.mocked(prefetchRoomOpen).mockClear();
+  vi.mocked(router.push).mockClear();
   let accept!: (id: string) => void;
   const created = new Promise<string>(resolve => { accept = resolve; });
   const createHumanCorner = vi.fn(() => created);
@@ -38,8 +41,12 @@ it('guards corner creation without redrawing the departing conversation', async 
     act(() => { pending = open(); void open(); });
     expect(createHumanCorner).toHaveBeenCalledOnce();
     expect(renders).toBe(mounted);
+    expect(prefetchRoomOpen).not.toHaveBeenCalled();
     await act(async () => { accept('accepted-corner'); await pending; });
     expect(renders).toBe(mounted);
+    expect(prefetchRoomOpen).toHaveBeenCalledExactlyOnceWith('accepted-corner');
+    expect(vi.mocked(prefetchRoomOpen).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(router.push).mock.invocationCallOrder[0]!);
   } finally { act(() => renderer.unmount()); }
 });
 

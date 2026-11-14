@@ -255,6 +255,7 @@ import IdentitySettingsScreen from './identity';
 import { mobileSurfaceCache } from '@/buzz/surface-storage';
 import { openExternalUrl } from '@/utils/open-external-url';
 import { useYouSettings } from '@/ui/screens/settings/useYouSettings';
+import { SettingsScreen } from '@/ui/screens/settings/SettingsScreen';
 
 const originalConsoleError = console.error;
 
@@ -355,6 +356,19 @@ it('renders a saved Workspace role during refresh and applies the fresh role whe
   await act(async () => { complete({ identity: managed(), workspaces: { workspaces: [{ ...entry, role: 'member' }] } }); });
   expect(settings.canManageWorkspace).toBe(false);
   await act(async () => renderer.unmount());
+});
+
+it('does not mount the unselected You form while resolving Workspace scope, and retains the empty-workspace fallback', async () => {
+  let complete!: (value: unknown) => void;
+  phoneOperation.mockImplementation(() => new Promise(resolve => { complete = resolve; }));
+  let renderer!: ReactTestRenderer;
+  await act(async () => { renderer = create(<SettingsScreen initialScope="workspace" />); });
+  try {
+    expect(byId(renderer, 'workspace-settings-loader')).toBeDefined();
+    expect(byId(renderer, 'profile-picture-mark')).toBeUndefined();
+    await act(async () => { complete(identitySettings(null)); });
+    expect(byId(renderer, 'profile-picture-mark')).toBeDefined();
+  } finally { act(() => renderer.unmount()); }
 });
 
 describe('Settings → You → Profile picture', () => {

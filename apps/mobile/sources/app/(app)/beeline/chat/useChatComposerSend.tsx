@@ -165,14 +165,14 @@ export function useChatComposerSend([
       let activeOutbox = outbox.current();
       sendInFlightRef.current = true;
       const listPreview = !desktopTranscript && activePendingAttachments.length === 0;
+      const filesReady = activePendingAttachments.length > 0 && !viewer?.screenshotBase64 &&
+        activePendingAttachments.every(attachment => attachmentUploader.state(attachment) === 'uploaded');
       const updateSendStatus = () => confirmation.begin(addressesAgent);
-      if (!listPreview) updateSendStatus();
+      if (!listPreview && !filesReady) updateSendStatus();
       // Text feedback lands in the local overlay in this same turn. Signing,
       // transport startup and outbox persistence can all take longer than a
       // frame on a cold Android device.
       // Each viewport inserts its provisional row before preparation.
-      const filesReady = activePendingAttachments.length > 0 && !viewer?.screenshotBase64 &&
-        activePendingAttachments.every(attachment => attachmentUploader.state(attachment) === 'uploaded');
       const provisionalId = filesReady ? null : `pending:${Date.now()}:${Math.random()}`;
       if (provisionalId) {
         const provisional = {
@@ -286,6 +286,7 @@ export function useChatComposerSend([
                   }
                 : undefined,
             );
+        if (filesReady) updateSendStatus();
         confirmation.signed(preparedEvent.id, addressesAgent);
         if (provisionalId) {
           if (listPreview) sendPreview.reconcile(provisionalId, preparedEvent.id);

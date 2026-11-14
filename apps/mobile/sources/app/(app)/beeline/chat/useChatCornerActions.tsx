@@ -12,6 +12,7 @@ import { newCornerOpenAttempt, openRandomNamedCorner, type CornerOpenAttempt } f
 import { alertCornerOpenFailure } from '@/buzz/room-list-new-corner';
 import { cornerOpenTappedAgain } from '@/buzz/corner-open-status';
 import { forwardMessageToNewCorner } from '@/buzz/message-corner-forward';
+import { prefetchRoomOpen } from '@/push/push-room-prefetch';
 
 type Props = [
   canRenameTitle: boolean,
@@ -78,6 +79,7 @@ export function useChatCornerActions([
         // Inside a corner the new corner is a sibling under the parent Room.
         roomId: parentChannelId ?? decodedId,
         openCorner: (cornerId, title) => {
+          prefetchRoomOpen(cornerId);
           void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           if (desktopExperience) openDesktopCorner(parentChannelId ?? decodedId, cornerId);
           else router.push(cornerHref(cornerId, parentChannelId ?? decodedId, title));
@@ -152,6 +154,7 @@ export function useChatCornerActions([
         // Inside a corner the new corner is a sibling under the parent Room.
         roomId: parentChannelId ?? decodedId,
         openCorner: (cornerId, title) => {
+          prefetchRoomOpen(cornerId);
           void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           if (desktopExperience) openDesktopCorner(parentChannelId ?? decodedId, cornerId);
           else router.push(cornerHref(cornerId, parentChannelId ?? decodedId, title));

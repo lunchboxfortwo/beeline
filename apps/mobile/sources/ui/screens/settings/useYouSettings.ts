@@ -292,7 +292,7 @@ export function useYouSettings({ linkedWorkspaceId, githubReconnect, githubConne
 
     return {
         error, notice, pubkey, name, handle, avatar: managed?.avatar, providers: managed ? managed.providers ?? [] : null,
-        role, workspace, canManageWorkspace, workbench,
+        role, workspace, canManageWorkspace, workbench, workspacesReady: workspaceList !== null,
         push: {
             supported: pushPermission !== null && pushPermission.status !== 'unsupported',
             level: shownPushLevel, disabled: pushEnabled === null || pushWorking, working: pushWorking,

@@ -224,7 +224,7 @@ describe('a person-opened corner in a repository Room', () => {
     const cornerId = '6f1d8c2a-4b3e-4f5a-9c7d-2e8b1a0f3c4d';
     const open = () =>
       rootFixture.phone.execute('createHumanCorner', { roomId: R, title: 'Retry-safe', cornerId }, H);
-    expect(await open()).toEqual({ id: cornerId });
+    expect(await open()).toEqual({ id: cornerId, messageId: expect.any(String) });
     expect(await open()).toEqual({ id: cornerId });
     expect((await rootFixture.db.query(`SELECT count(*)::int n FROM rooms WHERE parent_id=$1 AND name='Retry-safe'`, [R]))
       .rows[0]).toEqual({ n: 1 });

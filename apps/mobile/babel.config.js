@@ -21,6 +21,7 @@ module.exports = function (api) {
   return {
     presets: ['babel-preset-expo'],
     plugins: [
+      require.resolve('./plugins/direct-lucide-imports.cjs'),
       ...(process.env.BEELINE_TRANSCRIPT_MEASURE === '1'
         ? [require.resolve('../../scripts/transcript-speed/commits.cjs')]
         : []),
