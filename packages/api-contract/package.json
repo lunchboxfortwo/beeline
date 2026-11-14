@@ -143,6 +143,11 @@
       "types": "./dist/installation-identity.d.ts",
       "import": "./dist/installation-identity.js",
       "default": "./dist/installation-identity.js"
+    },
+    "./beeline-guides": {
+      "types": "./dist/beeline-guides.d.ts",
+      "import": "./dist/beeline-guides.js",
+      "default": "./dist/beeline-guides.js"
     }
   },
   "scripts": {

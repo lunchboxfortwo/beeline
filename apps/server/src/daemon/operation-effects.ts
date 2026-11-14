@@ -1,3 +1,4 @@
+import { isBeelineGuideName } from '@beeline/api-contract/beeline-guides';
 import { workflowOutputBindingCtes } from '../workflow-step-output.js';
 import { createHash } from 'node:crypto';
 import { endAgentTurn } from '../agent-turn-end.js';
@@ -123,7 +124,7 @@ export async function loadWorkspaceSkillOperation<Name extends keyof DaemonOpera
 if (!ctx.commandTransaction || !ctx.authorizedCommand) {
           throw new Error('workspace skill load requires an active command');
         }
-        if (!ctx.institutionalMemoryShadow.live) {
+        if (!ctx.institutionalMemoryShadow.live && !isBeelineGuideName((input as Input<'loadWorkspaceSkill'>).slug.trim())) {
           throw new Error('institutional memory is disabled');
         }
         return (await loadWorkspaceSkill(
