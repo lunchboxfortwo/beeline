@@ -20,7 +20,7 @@ const first = (value: string | string[] | undefined) => Array.isArray(value) ? v
  */
 export function SettingsScreen({ initialScope = 'you' }: { initialScope?: Scope } = {}) {
     const desktop = useIsDesktop();
-    useLatencyRouteFrame('/beeline/settings');
+    useLatencyRouteFrame(initialScope === 'workspace' ? '/beeline/settings/workspace' : '/beeline/settings');
     const params = useLocalSearchParams<{ tab?: string; workspaceId?: string; communityId?: string; githubReconnect?: string; githubConnectionError?: string }>();
     const tab = first(params.tab);
     const linkedWorkspaceId = first(params.workspaceId) ?? first(params.communityId);
