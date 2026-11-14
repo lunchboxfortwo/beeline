@@ -77,7 +77,6 @@ export function attribution(text) {
 export function missingReleaseCredentials(args, secrets, plan = {}) {
   const required = ['EXPO_TOKEN', 'EXPO_ASC_KEY_ID', 'EXPO_ASC_ISSUER_ID', 'EXPO_ASC_API_KEY_P8', 'NPM_AUTOMATION_TOKEN'];
   if (args.channel === 'next') required.push('FLY_API_TOKEN', 'FLY_FREE_AGENT_IMAGE_TOKEN', 'MIGRATION_DATABASE_URL', 'SERVER_CANARY_ROOM_ID');
-  if (args.channel === 'latest') required.push('SENTRY_AUTH_TOKEN');
   if (plan.run_mobile_native === 'true' && plan.native_android === 'true') required.push('GOOGLE_PLAY_SERVICE_ACCOUNT_JSON');
   const missing = required.filter(name => !secrets[name]);
   if (!secrets.GITHUB_TOKEN && !secrets.GH_TOKEN) missing.push('GITHUB_TOKEN or GH_TOKEN');
