@@ -18,7 +18,7 @@ import { run as bookkeeping } from './release-bookkeeping.mjs';
 import { localGithub } from './release-local-github.mjs';
 import { assignReleaseVersion, latestPublished, recoverTaggedReleases } from './release-record.mjs';
 import { CheckQueue, checkPlan, checkWorkspace, LocalChecks } from './release-local-checks.mjs';
-import { acquireReleaseLock, localAttribution, prepareReleaseSource, readOtaVersions, releaseArguments, releaseSequence } from './release.mjs';
+import { acquireReleaseLock, localAttribution, pinnedRuntimes, prepareReleaseSource, readOtaVersions, releaseArguments, releaseSequence, storeReleaseNeeded } from './release.mjs';
 
 const repository = resolve(import.meta.dirname, '..');
 const temporary = () => mkdtempSync(join(tmpdir(), 'beeline-local-test-'));
@@ -27,6 +27,7 @@ test('execution is explicit and requires immutable identity and complete attribu
   assert.equal(parseArguments([]).mode, 'plan');
   assert.throws(() => parseArguments(['--execute']), /scripts\/release.mjs/);
   assert.deepEqual(releaseArguments([]), {});
+  assert.deepEqual(releaseArguments(['--no-store']), { noStore: true });
   assert.throws(() => releaseArguments(['--release-sha', sha]), /Usage/);
   assert.equal(localAttribution({ username: 'firstmate', now: new Date('2026-11-14T00:00:00Z') }).auditMessageId,
     'squire-release-2026-11-14T00:00:00.000Z');
@@ -37,17 +38,29 @@ test('execution is explicit and requires immutable identity and complete attribu
   const provenance = Object.fromEntries(['agentId', 'handle', 'place', 'humanCommandMessageId', 'auditMessageId'].map(k => [k, k]));
   assert.deepEqual(attribution(JSON.stringify(provenance)), provenance);
 });
-test('one command completes next before promoting the same SHA with automatic store pairing', async () => {
+test('one command completes next before promoting the same SHA; store builds go only to production', async () => {
   const calls = [], dispatchedBy = localAttribution();
-  const spec = { source: '/fixture/source', sha, directory: '/fixture/state', secrets: {}, dispatchedBy, otaVersions: ['v0.1.2-rc.9'] };
+  const spec = { source: '/fixture/source', sha, directory: '/fixture/state', secrets: {}, dispatchedBy, otaVersions: ['v0.1.2-rc.9'], store: true };
   await releaseSequence(spec, async (args, options) => calls.push({ args, options }));
   assert.deepEqual(calls.map(c => [c.args.channel, c.args['store-track'], c.args['release-sha']]),
-    [['next', 'beta', sha], ['latest', 'production', sha]]);
+    [['next', 'none', sha], ['latest', 'production', sha]]);
+  const otaOnly = [];
+  await releaseSequence({ ...spec, store: false }, async args => otaOnly.push(args['store-track']));
+  assert.deepEqual(otaOnly, ['none', 'none']);
   assert.deepEqual(calls.map(c => c.args['state-dir']), ['/fixture/state/next', '/fixture/state/latest']);
   assert.ok(calls.every(c => c.options.repository === spec.source && c.args['dispatched-by'] === JSON.stringify(dispatchedBy)));
   const failed = [];
   await assert.rejects(releaseSequence(spec, async args => { failed.push(args.channel); throw new Error('next failed'); }), /next failed/);
   assert.deepEqual(failed, ['next']);
+});
+test('a store release is needed only when a pinned runtime is not the newest live store runtime', () => {
+  const config = 'ios: {\n runtimeVersion: runtimeVersionOverride || "41",\n},\nandroid: {\n runtimeVersion: runtimeVersionOverride || "53",\n}';
+  const pins = pinnedRuntimes(config);
+  assert.deepEqual(pins, { android: '53', ios: '41' });
+  const live = (android, ios) => ({ android: { status: 'readable', latestRuntimeVersion: android }, ios: { status: 'readable', latestRuntimeVersion: ios } });
+  assert.equal(storeReleaseNeeded(pins, live('53', '41')), false);
+  assert.equal(storeReleaseNeeded(pins, live('49', '41')), true);
+  assert.equal(storeReleaseNeeded(pins, { ...live('53', '41'), ios: { status: 'unavailable' } }), true);
 });
 test('release lock clears only a dead owner and spans both channel runs', async () => {
   const directory = temporary(), lock = join(directory, 'release.lock');
