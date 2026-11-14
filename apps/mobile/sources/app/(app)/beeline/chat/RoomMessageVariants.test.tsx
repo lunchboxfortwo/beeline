@@ -23,7 +23,6 @@ vi.mock('@/components/buzz/ButtonRow', () => ({ ButtonRowFrame: vi.fn(() => null
 vi.mock('@/components/buzz/DesktopWorkspacePortal', () => ({ DesktopWorkspacePortal: vi.fn(() => null) }));
 vi.mock('@/components/buzz/AppMark', () => ({ AppMark: vi.fn(() => null) }));
 vi.mock('@/components/buzz/ArtifactMedia', () => ({ ArtifactImage: vi.fn(() => null) }));
-vi.mock('@/components/buzz/TranscriptReference', () => ({ TranscriptReference: vi.fn(() => null) }));
 vi.mock('@/components/buzz/ComputerSession', () => ({ openComputerSessionViewer: vi.fn(() => null) }));
 vi.mock('@/components/buzz/ArtifactCard', () => ({ ArtifactCard: vi.fn(() => null), openArtifactViewer: vi.fn(() => null) }));
 vi.mock('@/components/buzz/ArtifactViewer', () => ({ ArtifactViewerScreen: vi.fn(() => null) }));
@@ -233,4 +232,18 @@ it('ONE-SHAPE renders the artifact card for a posted file with or without server
   act(() => renderer.update(<OrdinaryLedgerMessage {...props} message={{ ...props.message, attachmentUploadPending: true, attachments: [postedFile] }} />));
   expect(postedAttachmentElement()?.type).toBe(ArtifactCard);
   expect(postedAttachmentElement()?.props.visible).toBe(false);
+});
+
+it.each([false, true])('QUOTE-CLAMP: the original stays within two lines while the full reply body reaches the ledger (desktop=%s)', desktopLayout => {
+  const props = ordinaryProps();
+  const original = Array.from({ length: 8 }, (_, i) => `Original paragraph ${i + 1}. ${'Long quoted text. '.repeat(20)}`).join('\n\n');
+  const reply = Array.from({ length: 8 }, (_, i) => `Reply paragraph ${i + 1}. ${'Full reply text. '.repeat(20)}`).join('\n\n');
+  vi.mocked(LedgerSteer).mockImplementation((ledger: any) => React.createElement('LedgerSteer', ledger, ledger.replyReference));
+  act(() => { renderer = create(<OrdinaryLedgerMessage {...props} desktopLayout={desktopLayout}
+    message={{ ...props.message, text: reply, replyToId: 'original' }}
+    referencedTarget={{ messageId: 'original', authorName: 'Ruby', isAgent: true, preview: original }} />); });
+  const quote = renderer.root.findByType('Text');
+  expect(quote.props.numberOfLines).toBe(2);
+  expect(quote.props.children).toContain(original);
+  expect(renderer.root.findByType('LedgerSteer').props.bodyText).toBe(reply);
 });
