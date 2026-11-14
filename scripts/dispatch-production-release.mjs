@@ -24,7 +24,7 @@ try {
   });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error?.message ?? result.error ?? 'Production release dispatch was refused');
-  console.log(`Production release dispatched. Audit message: ${result.auditMessageId}`);
+  console.log(`Production release dispatched. Dispatch id: ${result.auditMessageId}`);
 } catch (error) {
   console.error(error.message);
   process.exitCode = 1;

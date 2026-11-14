@@ -418,7 +418,7 @@ it.each([false, true])('Reproduction SPOKEN-1: records search speech before a fi
 });
 
 
-it('lookup goes to order: speaks a short checking line at once when the brain streams only whitespace', async () => {
+it('lookup goes to order: dispatches without a canned line when the brain streams only whitespace', async () => {
   const { service, speech } = conversationService(1);
   service.config.brain.answer.mockImplementation(async (_agent, _history, onText) => {
     onText(' '); return { text: '', order: true };
@@ -427,8 +427,8 @@ it('lookup goes to order: speaks a short checking line at once when the brain st
   try {
     await runtime.utterance('human', 'Ruby build a widget');
     expect(service.dispatch).toHaveBeenCalledOnce();
-    expect(service.recordAnswer).toHaveBeenCalledWith('room', 'ruby', 'Checking. I’ll tell you when I have it.', expect.any(Object));
-    expect(speech.synthesize.mock.calls.map(call => call[0]).join(' ')).toBe('Checking. I’ll tell you when I have it.');
+    expect(service.recordAnswer).not.toHaveBeenCalled();
+    expect(speech.synthesize).not.toHaveBeenCalled();
   } finally { await runtime.close(); }
 });
 
@@ -503,7 +503,7 @@ it('Reproduction voice-lost-1 stand-in: mixed request dispatch and failure follo
     await new DaemonService(db, live).execute('postRoomMessage', { roomId: room, requestId: command[0]!.id, text: failure }, agent);
     const phone = new PhoneService(db, 'http://proof');
     const replies = (await phone.readRoom(room, human))!.messages.filter(message => message.author.pubkey === agent && message.presentation === 'message');
-    expect(replies.map(reply => reply.text)).toEqual(['Checking. I’ll tell you when I have it.', failure]);
+    expect(replies.map(reply => reply.text)).toEqual([failure]);
     await runtime!.refresh(); await (runtime as any).reportQueue;
     await runtime!.refresh(); await (runtime as any).reportQueue;
     expect(synthesized.filter(text => text === failure)).toHaveLength(1);
@@ -525,8 +525,8 @@ it('Reproduction voice-lost-1 stand-in: mixed request dispatch and failure follo
     const spoken = (await phone.readRoom(room, human))!.messages.filter(message => message.author.pubkey === agent);
     expect(spoken.slice(-2).map(message => message.text)).toEqual(['Let me look.', 'The answer is here.']);
     await vi.waitFor(async () => expect((await db.query(`SELECT 1 FROM voice_turn_timings
-      WHERE call_id=$1 AND stage='first_voiced_audio_published'`, [joined.call.id])).rowCount).toBe(3));
-    console.log('SPOKEN-1: spoken acknowledgement → normal completion and search announcement → answer; persisted phone reads preserve every utterance once, in order.');
+      WHERE call_id=$1 AND stage='first_voiced_audio_published'`, [joined.call.id])).rowCount).toBe(2));
+    console.log('SPOKEN-1: silent order → normal completion and search announcement → answer; persisted phone reads preserve every utterance once, in order.');
   } finally { await voice.close(); await db.close(); }
 }, 30_000);
 

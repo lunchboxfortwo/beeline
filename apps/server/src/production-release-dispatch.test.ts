@@ -34,7 +34,7 @@ it('R-RELEASE-PROVENANCE: capture boundary excludes missing human provenance but
   const capture = vi.mocked(Sentry.captureException);
   const dispatch = vi.fn(async () => {});
   const refusal = 'Production release requires a cited human command message from a workspace owner or admin';
-  const receipts = async () => (await db.query(`SELECT id FROM messages WHERE text LIKE 'Production release dispatch requested:%'`)).rows;
+  const receipts = async () => (await db.query(`SELECT id FROM messages WHERE author_id=$1`, [agent])).rows;
   const throughBoundary = async () => {
     try { return await productionReleaseDispatch(db, agent, input, dispatch); }
     catch (error) { captureServerError(error); throw error; }
@@ -62,15 +62,14 @@ it('R-RELEASE-PROVENANCE: capture boundary excludes missing human provenance but
     expect(capture).toHaveBeenLastCalledWith(providerError, expect.anything());
     expect(capture).toHaveBeenCalledTimes(2);
     expect(dispatch).toHaveBeenCalledOnce();
-    expect((await receipts()).length).toBe(before.length + 1);
+    expect(await receipts()).toEqual(before);
   } finally {
     await db.query(`UPDATE agent_commands SET root_source_message_id='human-command' WHERE id='command'`);
-    await db.query(`DELETE FROM messages WHERE text LIKE 'Production release dispatch requested:%' AND NOT (id = ANY($1::text[]))`, [before.map(row => row.id)]);
     vi.restoreAllMocks();
   }
 });
 
-it('release-dispatch-attribution: commits readable server provenance before dispatch and preserves recovery inputs', async () => {
+it('release-dispatch-attribution: sends server provenance without a Room line and preserves recovery inputs', async () => {
   const mobileMinimum = JSON.stringify({ android: { minVersion: '0.2.24', reason: 'Required sign-in fix' } });
   const dispatch = vi.fn(async (inputs: Record<string, string>) => {
     const provenance = JSON.parse(inputs.dispatched_by!);
@@ -78,9 +77,9 @@ it('release-dispatch-attribution: commits readable server provenance before disp
     expect(inputs.release_version).toBe('v0.1.94');
     expect(inputs.selection).toBe('server');
     expect(inputs.mobile_store_minimum).toBe(mobileMinimum);
-    const receipt = (await db.query<{ text: string }>(`SELECT text FROM messages WHERE id=$1`, [provenance.auditMessageId])).rows[0];
-    expect(receipt?.text).toContain(inputs.dispatched_by);
-    expect(receipt?.text).not.toMatch(/token|secret/i);
+    expect(provenance.auditMessageId).toBeTruthy();
+    expect(inputs.dispatched_by).not.toMatch(/token|secret/i);
+    expect((await db.query(`SELECT 1 FROM messages WHERE author_id=$1`, [agent])).rowCount).toBe(0);
   });
   const result = await productionReleaseDispatch(db, agent, {
     ...input, inputs: { ...input.inputs, mobile_store_minimum: mobileMinimum },
@@ -116,14 +115,12 @@ it('requires a current workspace owner or admin human command', async () => {
   }
 });
 
-it('retains the request receipt when GitHub refuses, without claiming success', async () => {
+it('posts no Room line under the agent\'s name when GitHub refuses', async () => {
   await expect(productionReleaseDispatch(db, agent, input, async () => { throw new Error('already queued'); })).rejects.toThrow('already queued');
-  const records = await db.query<{ text: string }>(`SELECT text FROM messages WHERE text LIKE 'Production release dispatch requested:%'`);
-  expect(records.rows.length).toBe(3);
-  expect(records.rows.every(row => !row.text.includes('succeeded'))).toBe(true);
+  expect((await db.query(`SELECT 1 FROM messages WHERE author_id=$1`, [agent])).rowCount).toBe(0);
 });
 
-it('demonstrates the operator executable through authenticated daemon dispatch to a readable receipt', async () => {
+it('demonstrates the operator executable through authenticated daemon dispatch with server attribution', async () => {
   const { createServer } = await import('node:http');
   const { spawn } = await import('node:child_process');
   const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
@@ -167,22 +164,22 @@ it('demonstrates the operator executable through authenticated daemon dispatch t
     child.stdout.on('data', chunk => { output += chunk; });
     child.stderr.on('data', chunk => { output += chunk; });
     const code = await new Promise<number | null>((resolve, reject) => { child.on('error', reject); child.on('exit', resolve); });
-    expect(output).toMatch(/Production release dispatched. Audit message:/);
+    expect(output).toMatch(/Production release dispatched. Dispatch id:/);
     expect(code).toBe(0);
     expect(dispatched).toHaveLength(1);
     const provenance = JSON.parse(dispatched[0]!.dispatched_by!);
     expect(provenance.handle).toBe('jellybean');
     expect(dispatched[0]!.selection).toBe('server');
-    const receipt = (await db.query<{ text: string }>(`SELECT text FROM messages WHERE id=$1`, [provenance.auditMessageId])).rows[0];
-    expect(receipt?.text).toContain('human-command');
-    console.log('Demonstrated release-dispatch-attribution: operator command → daemon active-turn authority → persisted Room receipt + GitHub attribution (provider mocked, no production dispatch)');
+    expect(provenance.humanCommandMessageId).toBe('human-command');
+    expect((await db.query(`SELECT 1 FROM messages WHERE author_id=$1`, [agent])).rowCount).toBe(0);
+    console.log('Demonstrated release-dispatch-attribution: operator command → daemon active-turn authority → GitHub attribution, no Room line (provider mocked, no production dispatch)');
   } finally {
     await rm(dir, { recursive: true, force: true });
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   }
 });
 
-it.each(['legacy', 'helper'])('R-RELEASE-CARD: built %s MCP tool dispatches through the daemon with a receipt and zero grants or cards', async mode => {
+it.each(['legacy', 'helper'])('R-RELEASE-CARD: built %s MCP tool dispatches through the daemon with zero messages, grants or cards', async mode => {
   vi.mocked(Sentry.captureException).mockClear();
   const { createServer } = await import('node:http');
   const { spawn } = await import('node:child_process');
@@ -245,8 +242,8 @@ it.each(['legacy', 'helper'])('R-RELEASE-CARD: built %s MCP tool dispatches thro
     };
     const result = await run();
     expect(result.result.isError).not.toBe(true);
-    const receiptId = JSON.parse(result.result.content[0].text).auditMessageId;
-    expect((await db.query(`SELECT id FROM messages WHERE id=$1 AND text LIKE 'Production release dispatch requested:%'`, [receiptId])).rows).toHaveLength(1);
+    const dispatchId = JSON.parse(result.result.content[0].text).auditMessageId;
+    expect(JSON.parse((dispatch.mock.calls.at(-1) as unknown as [string, Record<string, string>])[1].dispatched_by!).auditMessageId).toBe(dispatchId);
     expect(dispatch).toHaveBeenCalledOnce();
     await db.query(`UPDATE agent_commands SET root_source_message_id='missing' WHERE id='command'`);
     const refused = await run();
@@ -256,7 +253,7 @@ it.each(['legacy', 'helper'])('R-RELEASE-CARD: built %s MCP tool dispatches thro
     expect(dispatch).toHaveBeenCalledOnce();
     expect(operations).toHaveLength(2);
     expect(await grantCount()).toBe(before.grants);
-    expect(await messages()).toBe(before.messages + 1);
+    expect(await messages()).toBe(before.messages);
 
     const { AgentScheduleLoop } = await import('./agent-schedules.js');
     const scheduleLoop = new AgentScheduleLoop(db);
@@ -299,12 +296,9 @@ it.each(['legacy', 'helper'])('R-RELEASE-CARD: built %s MCP tool dispatches thro
       const beforeDispatch = await messages();
       const result = await run();
       expect(result.result.isError === true).toBe(!humanRoot || edited);
-      expect(await messages()).toBe(beforeDispatch + (humanRoot && !edited ? 1 : 0));
-      if (humanRoot && !edited) {
-        const auditId = JSON.parse(result.result.content[0].text).auditMessageId;
-        const audit = (await db.query<{ text: string }>(`SELECT text FROM messages WHERE id=$1`, [auditId])).rows[0]!;
-        expect(audit.text).toContain('"humanCommandMessageId":"human-command"');
-      }
+      expect(await messages()).toBe(beforeDispatch);
+      if (humanRoot && !edited)
+        expect(JSON.parse((dispatch.mock.calls.at(-1) as unknown as [string, Record<string, string>])[1].dispatched_by!).humanCommandMessageId).toBe('human-command');
       expect(await grantCount()).toBe(before.grants);
     };
     await scheduledRun(true);
@@ -315,7 +309,7 @@ it.each(['legacy', 'helper'])('R-RELEASE-CARD: built %s MCP tool dispatches thro
     await scheduledRun(true, false, true);
     expect(dispatch).toHaveBeenCalledTimes(4);
 
-    console.log('Demonstrated R-RELEASE-CARD: built dispatch_release → authenticated daemon → committed audit receipt + one stub dispatch, zero grants/cards; scheduled human provenance accepted after schedule expiry; unapproved schedules refused and non-admin schedule edits refused. No production release.');
+    console.log('Demonstrated R-RELEASE-CARD: built dispatch_release → authenticated daemon → attributed stub dispatch, no Room line, zero grants/cards; scheduled human provenance accepted after schedule expiry; unapproved schedules refused and non-admin schedule edits refused. No production release.');
   } finally {
     await db.query(`UPDATE agent_commands SET root_source_message_id='human-command' WHERE id='command'; DELETE FROM agent_connections; DELETE FROM live_server_instances`);
     await rm(dir, { recursive: true, force: true });

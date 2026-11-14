@@ -100,16 +100,12 @@ soul. Existing free agents keep their names.
   the oldest owner and to `#general`, or to the oldest public
   top-level Room when there is no `#general`.
 - **Membership events.** From creation, each free agent's `#general` membership
-  carries `event_subscriptions` `joined` and `left`. A join is the existing `joined`
-  event. A Room leave or removal already writes a `member-left` or `member-removed`
-  line, and `wakeFreeAgentsForLeaves` (run by the leader on every committed message)
-  queues one wake on it. No System message producer changed. Leaving the Workspace
-  stays silent, as Beeline already decides. An agent joining still wakes the free
+  carries the `joined` event subscription. An agent joining still wakes the free
   agent, and its instructions say never to greet an agent. The instructions pin the
   owner's exact join greeting (`FREE_AGENT_JOIN_GREETING`, after the joiners'
-  @handles) and the exit note (`FREE_AGENT_EXIT_NOTE`). Greetings and notes spend the
-  owner's allowance like any turn. Several events while the Machine sleeps are
-  coalesced on return into one turn.
+  @handles). A leave or removal is already its System line; a free agent is not
+  woken to restate it. Greetings spend the owner's allowance like any turn. Several
+  events while the Machine sleeps are coalesced on return into one turn.
 
 `free_agent_events` records factual provisioning, connection, start requests,
 suspension, retirement and spend observations. Historical state/phase events remain
