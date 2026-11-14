@@ -615,10 +615,11 @@ test('Play build 148 resolves its runtime from the store APK without a committed
       if (options.method === 'DELETE') return new Response(null, { status: 204 });
       if (url.includes('/tracks/')) return Response.json({ track: 'production', releases: [liveRelease(148)] });
       if (url.endsWith('/generatedApks/148')) return Response.json({ generatedApks: [{ generatedSplitApks: [
-        { moduleName: 'base', splitId: 'config.arm64_v8a', downloadId: 'wrong' },
-        { moduleName: 'base', splitId: '', downloadId: 'base-148' },
+        { moduleName: 'base', splitId: 'config.arm64_v8a', variantId: 3, downloadId: 'wrong' },
+        { moduleName: 'base', splitId: '', variantId: 1, downloadId: 'archived-stub' },
+        { moduleName: 'base', splitId: '', variantId: 3, downloadId: 'base-148' },
       ] }] });
-      assert.match(url, /generatedApks\/148\/downloads\/base-148:download$/);
+      assert.match(url, /generatedApks\/148\/downloads\/base-148:download\?alt=media$/);
       return new Response('base-apk');
     },
   });
