@@ -8,19 +8,19 @@ const transform = (source, platform = 'web') => transformSync(source, {
 }).code;
 
 test('loads the same core, wrapped components and provider without the whole barrel', () => {
-  const result = transform("import { YStack, Button as Action, TamaguiProvider, useTheme, Text, createTamagui } from 'tamagui';");
+  const result = transform("import { YStack, Button as Action, TamaguiProvider, useTheme, Text, createTamagui } from 'tamagui'; export const values = [YStack, Action, TamaguiProvider, useTheme, Text, createTamagui];");
   assert.match(result, /import .*setup\.mjs/);
-  assert.match(result, /YStack = require\("@tamagui\/stacks"\)\.YStack/);
-  assert.match(result, /Action = require\("tamagui\/button"\)\.Button/);
-  assert.match(result, /TamaguiProvider = require\("tamagui\/provider"\)\.TamaguiProvider/);
-  assert.match(result, /useTheme = require\("@tamagui\/core"\)\.useTheme/);
+  assert.match(result, /require\("@tamagui\/stacks"\)\.YStack/);
+  assert.match(result, /require\("tamagui\/button"\)\.Button/);
+  assert.match(result, /require\("tamagui\/provider"\)\.TamaguiProvider/);
+  assert.match(result, /require\("@tamagui\/core"\)\.useTheme/);
   assert.match(result, /views\/Text\.mjs/);
   assert.match(result, /createTamagui\.mjs/);
   assert.doesNotMatch(result, /from ['"]tamagui['"]/);
 });
 
 test('native private entrypoints retain platform implementations', () => {
-  const result = transform("import { Text, createTamagui } from 'tamagui';", 'android');
+  const result = transform("import { Text, createTamagui } from 'tamagui'; export const values = [Text, createTamagui];", 'android');
   assert.match(result, /setup\.native\.js/);
   assert.match(result, /views\/Text\.native\.js/);
   assert.match(result, /createTamagui\.native\.js/);
@@ -28,21 +28,21 @@ test('native private entrypoints retain platform implementations', () => {
 });
 
 test('unknown, namespace and side-effect imports preserve the package contract', () => {
-  const result = transform("import { FutureComponent, useTheme } from 'tamagui'; import * as UI from 'tamagui'; import 'tamagui';");
+  const result = transform("import { FutureComponent, useTheme } from 'tamagui'; import * as UI from 'tamagui'; import 'tamagui'; export const values = [FutureComponent, useTheme];");
   assert.match(result, /import \{ FutureComponent \} from 'tamagui'/);
   assert.match(result, /import \* as UI from 'tamagui'/);
   assert.match(result, /import 'tamagui'/);
-  assert.match(result, /useTheme = require\("@tamagui\/core"\)\.useTheme/);
+  assert.match(result, /require\("@tamagui\/core"\)\.useTheme/);
 });
 
 
-test('existing Metro inline requires leave unused components unevaluated', () => {
+test('unused components stay unevaluated even when Metro preserves their side effects', () => {
   const first = transformSync("import { YStack, Sheet } from 'tamagui'; export function body() { return YStack; } export function modal() { return Sheet; }", {
     configFile: false, babelrc: false, plugins: [plugin, '@babel/plugin-transform-modules-commonjs'],
   }).code;
   const compiled = transformSync(first, {
     configFile: false, babelrc: false,
-    plugins: [require('metro-transform-plugins').inlineRequiresPlugin],
+    plugins: [[require('metro-transform-plugins').inlineRequiresPlugin, { ignoredRequires: ['@tamagui/stacks', 'tamagui/sheet', 'livekit-client', 'posthog-react-native'] }]],
   }).code;
   const loaded = [];
   const exports = {};
@@ -64,7 +64,7 @@ test('voice SDK evaluation stays inside the original audio gesture', () => {
     configFile: false, babelrc: false, plugins: [plugin, '@babel/plugin-transform-modules-commonjs'],
   }).code;
   const compiled = transformSync(first, {
-    configFile: false, babelrc: false, plugins: [require('metro-transform-plugins').inlineRequiresPlugin],
+    configFile: false, babelrc: false, plugins: [[require('metro-transform-plugins').inlineRequiresPlugin, { ignoredRequires: ['@tamagui/stacks', 'tamagui/sheet', 'livekit-client', 'posthog-react-native'] }]],
   }).code;
   const steps = [];
   const exports = {};
@@ -83,7 +83,7 @@ test('an unconfigured analytics client does not evaluate its SDK', () => {
     configFile: false, babelrc: false, plugins: [plugin, '@babel/plugin-transform-modules-commonjs'],
   }).code;
   const compiled = transformSync(first, {
-    configFile: false, babelrc: false, plugins: [require('metro-transform-plugins').inlineRequiresPlugin],
+    configFile: false, babelrc: false, plugins: [[require('metro-transform-plugins').inlineRequiresPlugin, { ignoredRequires: ['@tamagui/stacks', 'tamagui/sheet', 'livekit-client', 'posthog-react-native'] }]],
   }).code;
   const loaded = [];
   const run = new Function('require', 'exports', 'configured', compiled);
@@ -96,4 +96,13 @@ test('an unconfigured analytics client does not evaluate its SDK', () => {
   run(load, enabled, true);
   assert.equal(loaded[0], 'posthog-react-native');
   assert.equal(enabled.provider(), 'provider');
+});
+
+test('transforms JSX value references after TypeScript types are removed', () => {
+  const result = transformSync("import { YStack } from 'tamagui'; type Props = { children?: string }; export const Screen = (props: Props) => <YStack>{props.children}</YStack>;", {
+    configFile: false, babelrc: false, filename: 'screen.tsx',
+    plugins: [plugin, ['@babel/plugin-transform-typescript', { isTSX: true }], ['@babel/plugin-transform-react-jsx', { runtime: 'automatic' }]],
+  }).code;
+  assert.match(result, /require\("@tamagui\/stacks"\)\.YStack/);
+  assert.doesNotMatch(result, /from ['"]tamagui['"]|type Props/);
 });

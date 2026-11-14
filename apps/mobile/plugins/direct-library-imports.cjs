@@ -54,28 +54,39 @@ module.exports = function directLibraryImports(api) {
     return path.join(root, native ? relative.replace(/\.mjs$/, '.native.js') : relative);
   };
   const setup = target('./setup.mjs');
-  return { visitor: { ImportDeclaration(importPath) {
+  return { visitor: { Program: { exit(programPath) {
+    // JSX and type transforms have finished; references are ordinary values.
+    programPath.scope.crawl();
+    programPath.traverse({ ImportDeclaration(importPath) {
     const node = importPath.node;
     const tamagui = node.source.value === 'tamagui';
     const lazy = ['livekit-client', 'posthog-react-native'].includes(node.source.value);
     if ((!tamagui && !lazy) || node.importKind === 'type' || !node.specifiers.length) return;
-    const direct = [];
+    let changed = false;
     node.specifiers = node.specifiers.filter(specifier => {
       if (specifier.importKind === 'type' || t.isImportNamespaceSpecifier(specifier)) return true;
       if (tamagui && !t.isImportSpecifier(specifier)) return true;
       const imported = t.isImportDefaultSpecifier(specifier) ? t.identifier('default') : specifier.imported;
       const source = tamagui ? imports.get(imported.name) : node.source.value;
       if (!source) return true;
-      // Metro's existing inlineRequires transform can then load each component
-      // when used, rather than evaluating every component imported by grammar.
-      direct.push(t.variableDeclaration('const', [t.variableDeclarator(specifier.local,
-        t.memberExpression(t.callExpression(t.identifier('require'), [t.stringLiteral(target(source))]), imported))]));
+      const binding = importPath.scope.getBinding(specifier.local.name);
+      // A re-export still needs a local binding. Preserve its eager semantics.
+      if (!binding || binding.referencePaths.some(reference => !reference.isIdentifier() || reference.parentPath.isExportSpecifier())) return true;
+      for (const reference of binding.referencePaths) {
+        reference.scope.rename('require');
+        const value = t.memberExpression(t.callExpression(t.identifier('require'),
+          [t.stringLiteral(target(source))]), t.cloneNode(imported), t.isStringLiteral(imported));
+        reference.replaceWith(reference.parentPath.isCallExpression({ callee: reference.node })
+          ? t.sequenceExpression([t.numericLiteral(0), value]) : value);
+      }
+      changed = true;
       return false;
     });
-    if (!direct.length) return;
+    if (!changed) return;
     // Preserve the barrel's setup while loading only its requested components.
-    if (tamagui) direct.unshift(t.importDeclaration([], t.stringLiteral(setup)));
+    const direct = tamagui ? [t.importDeclaration([], t.stringLiteral(setup))] : [];
     if (node.specifiers.length) importPath.insertAfter(direct);
     else importPath.replaceWithMultiple(direct);
-  } } };
+    } });
+  } } } };
 };
