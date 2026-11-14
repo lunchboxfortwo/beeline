@@ -372,3 +372,17 @@ import { daemonIdentity, daemonAccess } from './access.js';
     if (!row) throw new Error('room not found');
     return { targetBranch: row.repository_target_branch, updatedAt: seconds(row.updated_at) };
   }
+
+/** A committed explicit reviewer report can record its verdict independently
+ * of answer delivery. The approval owner retains all exact-head/merge policy. */
+export async function recordReportedReviewApproval(ctx: DaemonContext, agentId: string, requestId: string): Promise<void> {
+  const review=(await ctx.database.query<{corner_id:string;head_sha:string}>(
+    `SELECT review.* FROM (SELECT COALESCE(review_context->>'cornerId',room_id::text) corner_id,
+       review_context->>'headSha' head_sha FROM agent_commands
+       WHERE agent_id=$1 AND turn_request_id=$2 AND review_context->>'headSha' IS NOT NULL
+       ORDER BY created_at DESC LIMIT 1) review
+     WHERE NOT EXISTS(SELECT 1 FROM corner_merge_approvals approval WHERE approval.corner_id::text=review.corner_id
+       AND approval.head_sha=review.head_sha AND approval.approved_by=$1)`,[agentId,requestId])).rows[0];
+  if (review && await isCornerReviewer(ctx.database,review.corner_id,agentId))
+    await daemonApproveCornerMerge(ctx,{cornerId:review.corner_id,headSha:review.head_sha},agentId);
+}

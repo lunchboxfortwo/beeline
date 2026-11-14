@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, it } from 'vitest';
+import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { migratedDatabase, type PgliteDatabase } from './test-support.js';
 import { PhoneService } from './phone-service.js';
 
@@ -50,4 +50,15 @@ it('does not acknowledge unaddressed or agent-authored messages as external send
 it('does not name an external nonmember when a typed handle cannot route', async () => {
   await db.query('UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2', [R, B]);
   expect((await phone.sendMessage({ roomId: R, text: '@nova please check this' }, H)).externalAgentHandles).toEqual([]);
+});
+
+it('keeps an accepted item queued when optional receipt enrichment fails', async () => {
+  const id='5'.repeat(64);
+  const receipt=vi.spyOn(phone,'receiptMessage').mockRejectedValueOnce(new Error('optional receipt read failed'));
+  try {
+    const result=await phone.sendMessage({roomId:R,messageId:id,text:'@atlas accepted before receipt read'},H);
+    expect(result.messageId).toBe(id);
+    expect((await db.query('SELECT agent_id,state FROM agent_commands WHERE source_message_id=$1',[id])).rows)
+      .toEqual([{agent_id:A,state:'pending'}]);
+  } finally { receipt.mockRestore(); }
 });

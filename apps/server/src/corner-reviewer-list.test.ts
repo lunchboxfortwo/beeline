@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cornerRunOutcomeSql, cornerRunStateSql } from './corner-run.js';
 import { migrate, PostgresDatabase, type SqlDatabase } from './database.js';
@@ -51,11 +52,7 @@ const commands = (agentId: string, roomId = C) =>
   daemon.execute('getAgentCommands', { roomId }, agentId).then((r) => r.commands);
 
 async function claim(c: AgentCommand, generationId = 'g1') {
-  await daemon.execute(
-    'claimAgentCommand',
-    { roomId: c.roomId, commandId: c.id, generationId },
-    c.agentId,
-  );
+  await startQueuedCommand(daemon, { roomId: c.roomId, commandId: c.id }, c.agentId);
 }
 
 async function greenCheck() {
@@ -125,20 +122,12 @@ async function failTurn(c: AgentCommand) {
   await claim(c);
   await daemon.execute(
     'postAgentTurnReceipt',
-    { roomId: c.roomId, agentId: c.agentId, requestId: c.turnRequestId, generationId: 'g1', status: 'working' },
+    { roomId: c.roomId, agentId: c.agentId, requestId: c.turnRequestId, status: 'working' },
     c.agentId,
   );
   await daemon.execute(
     'postAgentTurnReceipt',
-    {
-      roomId: c.roomId,
-      agentId: c.agentId,
-      requestId: c.turnRequestId,
-      generationId: 'g1',
-      status: 'failed',
-      reasonKind: 'wrong-model',
-      reason: 'the selected model is no longer available',
-    },
+    { roomId: c.roomId, agentId: c.agentId, requestId: c.turnRequestId, status: 'failed', reasonKind: 'wrong-model', reason: 'the selected model is no longer available' },
     c.agentId,
   );
 }

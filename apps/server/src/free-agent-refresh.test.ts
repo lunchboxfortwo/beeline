@@ -82,10 +82,11 @@ describe('release refresh and committed free-agent sleep events', () => {
     return agent;
   }
 
-  async function command(n: number, state: 'pending' | 'claimed') {
+  async function command(n: number, state: 'pending' | 'working') {
     await db.query(`INSERT INTO agent_commands(id,room_id,agent_id,turn_request_id,action,reason,
       root_command_id,root_source_message_id,agent_depth,state)
-      VALUES($1,$2,$3,$1,'input','human_tag',$1,$1,0,$4)`, [`command-${n}`, ROOM, agentId(n), state]);
+      VALUES($1,$2,$3,$1,'input','human_tag',$1,$1,0,$4)`, [`command-${n}`, ROOM, agentId(n), 'pending']);
+    if (state === 'working') await db.query(`INSERT INTO agent_turns(room_id,request_id,agent_id,status) VALUES($1,$2,$3,'working')`, [ROOM, `command-${n}`, agentId(n)]);
   }
 
   async function connector(n: number) {
@@ -122,12 +123,12 @@ describe('release refresh and committed free-agent sleep events', () => {
     ]);
   });
 
-  it.each(['claimed', 'connector'] as const)('release visits replace and suspend a connected idle helper while %s work retains its image', async work => {
+  it.each(['working', 'connector'] as const)('release visits replace and suspend a connected idle helper while %s work survives image replacement', async work => {
     await seed(1, 'running', 'started');
     await seed(2, 'running', 'started');
     await connect(1);
     await connect(2);
-    if (work === 'claimed') await command(2, work);
+    if (work === 'working') await command(2, work);
     else {
       await connector(2);
       expect(await new DaemonService(db, live).execute('getConnectorAssignments', { agentId: agentId(2) }, agentId(2)))
@@ -137,9 +138,10 @@ describe('release refresh and committed free-agent sleep events', () => {
     await service.reconcileAll();
 
     expect(fleet.get('m1')).toMatchObject({ state: 'suspended', config: { image: IMAGE } });
-    expect(fleet.get('m2')).toMatchObject({ state: 'started', instance_id: 'v2' });
-    expect(fleet.get('m2')!.config.image).not.toBe(IMAGE);
-    expect(calls.filter(call => call.startsWith('POST'))).toEqual(['POST m1', 'POST m1/suspend']);
+    expect(fleet.get('m2')).toMatchObject({ state: 'started', instance_id: work === 'working' ? 'v2-updated' : 'v2' });
+    if (work === 'working') expect(fleet.get('m2')!.config.image).toBe(IMAGE);
+    else expect(fleet.get('m2')!.config.image).not.toBe(IMAGE);
+    expect(calls.filter(call => call.startsWith('POST'))).toEqual(['POST m1', 'POST m1/suspend', ...(work === 'working' ? ['POST m2'] : [])]);
   });
 
   it.each(['startup', 'release', 'connection'].flatMap(signal =>
@@ -188,7 +190,7 @@ describe('release refresh and committed free-agent sleep events', () => {
       .toEqual([{ install: 'true' }]);
   });
 
-  it.each(['pending', 'claimed', 'connector'] as const)('keeps %s work committed during image replacement running', async work => {
+  it.each(['pending', 'working', 'connector'] as const)('keeps %s work committed during image replacement running', async work => {
     await seed(1, 'running', 'started');
     await connect(1);
     beforeUpdate = () => work === 'connector' ? connector(1) : command(1, work);
@@ -199,18 +201,18 @@ describe('release refresh and committed free-agent sleep events', () => {
     expect(calls.filter(call => call.startsWith('POST'))).toEqual(['POST m1']);
   });
 
-  it('visits all stored lifecycle values, preserves idle identities and defers image replacement for claimed work',async()=>{
+  it('visits all stored lifecycle values, preserves idle identities and replaces the image while preserving working queue items',async()=>{
     const states=['sleeping','waking','stopped','running','failed','destroyed','provisioning'];
     for(let n=1;n<=32;n++)await seed(n,states[n%states.length]);
     await seed(33,'provisioning','stopped',false,false);
-    await command(32,'claimed');
+    await command(32,'working');
     await service.reconcileAll();
     for(let n=1;n<=31;n++)expect(fleet.get(`m${n}`)?.config.image).toBe(IMAGE);
-    expect(fleet.get('m32')?.config.image).not.toBe(IMAGE);
+    expect(fleet.get('m32')?.config.image).toBe(IMAGE);
     expect((await db.query(`SELECT fly_machine_id FROM free_agents WHERE agent_id=$1`,[agentId(33)])).rows).toEqual([{fly_machine_id:null}]);
     expect(calls.filter(call=>call.includes('/start'))).toHaveLength(32);
     expect(fleet.get('m32')?.state).toBe('started');
-    expect((await db.query(`SELECT 1 FROM agent_commands WHERE state='pending'`)).rowCount).toBe(0);
+    expect((await db.query(`SELECT 1 FROM agent_commands WHERE state='pending'`)).rowCount).toBe(1);
   });
 
   it('reports unknown observations after visiting the rest of the inventory',async()=>{

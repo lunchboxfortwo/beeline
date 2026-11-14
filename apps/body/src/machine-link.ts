@@ -1,5 +1,4 @@
 import { HelperOverlayChannel } from './helper-overlay-channel.js';
-import type { HelperTurnOwnershipSource } from '@beeline/api-contract/helper-turn-ownership';
 import { randomUUID } from 'node:crypto';
 import type { DaemonOperationMap, PostConnectorVaultInput } from '@beeline/api-contract/daemon';
 import { helperVersion } from './helper-version.js';
@@ -28,8 +27,6 @@ export interface AgentChannelHandlers {
 /** Agent identity and request correlation on the machine connection. Registration
  * metadata is immutable until the next handshake, never a capability lifecycle. */
 export class AgentChannel {
-  /** The connection a free agent's model credential is issued to. */
-  turnSource?: HelperTurnOwnershipSource;
   readonly overlay = new HelperOverlayChannel(frame => this.send(frame), () => this.isOpen());
   readonly #waiters = new Set<{resolve:()=>void;reject:(error:Error)=>void}>();
   readonly #requests = new Map<string, {
@@ -45,11 +42,6 @@ export class AgentChannel {
   constructor(private readonly machine: MachineLink, readonly agentId: string, private readonly handlers: AgentChannelHandlers) {}
   isOpen(): boolean { return this.#registered && this.machine.link.isOpen(); }
   get reconnects(): number { return this.machine.link.reconnects; }
-  activationScope(): {origin:string; generation:number; source:{connectionId:string;epoch:number}} | undefined {
-    const c = this.#capabilities;
-    return typeof c.activationConnectionId === 'string' && typeof c.activationConnectionEpoch === 'number'
-      ? {origin:this.machine.origin, generation:this.reconnects, source:{connectionId:c.activationConnectionId,epoch:c.activationConnectionEpoch}} : undefined;
-  }
   usageAccountScope(): {origin:string;ownerId:string;generation:number;source:{connectionId:string;epoch:number}} | undefined {
     const c = this.#capabilities;
     return typeof c.usageOwnerId === 'string' && typeof c.usageConnectionId === 'string' && typeof c.usageConnectionEpoch === 'number'
@@ -78,7 +70,6 @@ export class AgentChannel {
     const input = {...pending.frame.input as Record<string,unknown>};
     // Waiting work binds to the newly authenticated source. Sent work is only
     // read by id: its original effect and source must never be rewritten.
-    if (pending.frame.operation === 'readCommandActivation') input.source = this.activationScope()?.source;
     if (['publishAgentUsageAccount','attachAgentUsageAccount'].includes(String(pending.frame.operation))) input.source = this.usageAccountScope()?.source;
     if (pending.frame.operation === 'postAgentUsage' && input.usageSource)
       input.usageSource = {...input.usageSource as object,source:this.usageAccountScope()?.source};
@@ -110,8 +101,7 @@ export class AgentChannel {
     if(!this.#wanted||this.#registered||this.#registrationSent)return;
     this.#registrationSent=true;
     return {...this.handlers.registration(),agentId:this.agentId,
-      overlayV1:true,usageAccountV1:true,activationContextV1:true,turnOwnershipV1:true,
-      daemonOperationsV1:true,ownedModelV1:true,ownedModelUnboundedV1:true};
+      overlayV1:true,usageAccountV1:true,queueV1:true,daemonOperationsV1:true};
   }
   receive(event:Record<string,unknown>):void {
     if (event.type === 'registered') {
@@ -120,8 +110,6 @@ export class AgentChannel {
       this.#capabilities = event.capabilities as Record<string,unknown> ?? {};
       const c = this.#capabilities;
       if (typeof c.ownerId === 'string') setHelperErrorUser(c.ownerId);
-      if (typeof c.turnConnectionId === 'string' && typeof c.turnConnectionEpoch === 'number')
-        this.turnSource = {connectionId:c.turnConnectionId,epoch:c.turnConnectionEpoch};
       this.overlay.negotiate(c.overlayV1 === true);
       for (const pending of this.#requests.values()) this.#dispatch(pending);
       for (const waiter of this.#waiters) waiter.resolve();
@@ -160,7 +148,6 @@ export class AgentChannel {
     if (ended) {
       for(const waiter of this.#waiters)waiter.reject(new Error('Agent runtime ended'));
       this.#waiters.clear();
-      this.turnSource = undefined;
       for (const pending of this.#requests.values()) pending.reject(new Error('Agent runtime ended'));
       this.#requests.clear();
     }

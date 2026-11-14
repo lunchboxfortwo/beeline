@@ -1,4 +1,4 @@
-import { m9_createHash, m9_describe, m9_expect, m9_it, m9_requestGrant, m9_runGrantedCommand, mergedDescribe9, m10_describe, m10_expect, m10_it, m10_MESSAGE_REACTION_EMOJIS, m10_agentToolsFor, m10_reactToMessage, mergedDescribe10, m11_describe, m11_expect, m11_it, m11_createSchedule, m11_deleteSchedule, m11_listSchedules, m11_updateSchedule, mergedDescribe11, m14_describe, m14_expect, m14_it, m14_vi, m14_agentToolsFor, m14_connectorOfferDepsFromEnv, m14_offerConnector, m14_workbenchStatus, m14_pendingGrantToolCall, m14_resumePrompt, mergedDescribe14, m24_describe, m24_expect, m24_it, m24_callAgentTool, m24_assembleTurnPrompt, mergedDescribe24, m25_describe, m25_expect, m25_it, m25_callAgentTool, mergedDescribe25, m26_expect, m26_it, m26_vi, m26_callAgentTool, mergedDescribe26, fixtureScope8, fixtureScope12, fixtureScope16, fixtureScope18, fixtureScope20, fixtureScope21, fixtureScope23, fixtureScope24, type m10_AgentScheduleDeps } from './test-support-read-only-mcp.test-support.js';
+import { m9_createHash, m9_describe, m9_expect, m9_it, m9_requestGrant, m9_runGrantedCommand, mergedDescribe9, m10_describe, m10_expect, m10_it, m10_MESSAGE_REACTION_EMOJIS, m10_agentToolsFor, m10_reactToMessage, mergedDescribe10, m11_describe, m11_expect, m11_it, m11_createSchedule, m11_deleteSchedule, m11_listSchedules, m11_updateSchedule, mergedDescribe11, m14_describe, m14_expect, m14_it, m14_vi, m14_agentToolsFor, m14_connectorOfferDepsFromEnv, m14_offerConnector, m14_workbenchStatus, m14_resumePrompt, mergedDescribe14, m24_describe, m24_expect, m24_it, m24_callAgentTool, m24_assembleTurnPrompt, mergedDescribe24, m25_describe, m25_expect, m25_it, m25_callAgentTool, mergedDescribe25, m26_expect, m26_it, m26_vi, m26_callAgentTool, mergedDescribe26, fixtureScope8, fixtureScope12, fixtureScope16, fixtureScope18, fixtureScope20, fixtureScope21, fixtureScope23, fixtureScope24, type m10_AgentScheduleDeps } from './test-support-read-only-mcp.test-support.js';
 
 mergedDescribe9("agent-grant-tools.test.ts", () => {
 const scope8 = fixtureScope8();
@@ -367,15 +367,6 @@ m11_describe('beeline-agent schedule tools', () => {
 mergedDescribe14("connector-offer-tools.test.ts", () => {
 const scope18 = fixtureScope18();
 m14_describe('beeline-agent connectors_status + offer_connector (R5)', () => {
-  m14_it('pauses a connect call on its committed sign-in or approval card, including MCP text content', () => {
-    for (const status of ['needs_sign_in', 'needs_approval']) {
-      const text = JSON.stringify({ status, app: 'Link' });
-      m14_expect(m14_pendingGrantToolCall({ title: 'beeline-agent.connect', content: text })).toBe(true);
-      m14_expect(m14_pendingGrantToolCall({ title: 'beeline-agent.connect', content: { content: [{ type: 'text', text }] } })).toBe(true);
-    }
-    m14_expect(m14_pendingGrantToolCall({ title: 'beeline-agent.connect', content: '{"status":"ready"}' })).toBe(false);
-  });
-
   m14_it('uses this machine broker report when no Squire route is granted', async () => {
     m14_vi.stubEnv('BEELINE_DAEMON_ROOM_ID', 'room-1');
     m14_vi.stubEnv('BEELINE_SQUIRE_RELAY_URL', '');
@@ -579,14 +570,11 @@ m14_describe('beeline-agent connectors_status + offer_connector (R5)', () => {
     m14_expect(reply).toMatch(/^pending, card posted: add trusty-squire \[offer o-1\]/);
     m14_expect(reply).toContain('your turn is paused on this offer');
     m14_expect(reply).toContain('Do not ask them to open Settings or the Connectors page');
-    // The room turn recognises that reply as a pause, exactly like a grant card.
-    m14_expect(m14_pendingGrantToolCall({ title: 'beeline-agent.offer_connector', content: reply })).toBe(true);
     const joined = await m14_offerConnector(
       { connectorType: 'trusty-squire', reason: 'provision the 1inch API key into its vault' },
       scope18.deps({ offerId: 'o-1', status: 'pending', messageId: 'm-1', joined: true }),
     );
     m14_expect(joined).toMatch(/^already offered, card still open: add trusty-squire \[offer o-1\]/);
-    m14_expect(m14_pendingGrantToolCall({ title: 'offer_connector', content: joined })).toBe(true);
   });
 
 
@@ -608,12 +596,10 @@ m14_describe('beeline-agent connectors_status + offer_connector (R5)', () => {
       },
     ]);
     m14_expect(reply).toMatch(/^pending, card posted: switch trusty-squire account \[offer o-2\]/);
-    m14_expect(m14_pendingGrantToolCall({ title: 'offer_connector', content: reply })).toBe(true);
     const joined = await m14_offerConnector(
       { connectorType: 'trusty-squire', reason: 'sign up with your work account', intent: 'switch' },
       scope18.deps({ offerId: 'o-2', status: 'pending', messageId: 'm-2', joined: true }),
     );
-    m14_expect(m14_pendingGrantToolCall({ title: 'offer_connector', content: joined })).toBe(true);
     await m14_expect(
       m14_offerConnector({ connectorType: 'trusty-squire', reason: 'x', intent: 'add' }, scope18.deps({ offerId: 'never' })),
     ).rejects.toThrow('intent must be "switch" when given');
@@ -748,7 +734,6 @@ const scope23 = fixtureScope23();
           roomId: 'corner-room',
           messageId: 'corner-transcript-id',
           requestId: 'request-1',
-          generationId: 'generation-1',
         }),
       },
     ]);
@@ -778,14 +763,14 @@ m26_it('discovers cards and Room invitations without an external connection and 
   m26_expect(discovered.tools.map((t:{name:string})=>t.name)).toEqual(m26_expect.arrayContaining(['welcome','game','invite','repository','starters']));
   scope24.calls.length = 0;
   await m26_callAgentTool('app_tool',{app:'beeline:onboarding',tool:'welcome',args:{}});
-  m26_expect(scope24.calls.find(call => call.name === 'postStarterWelcome')!.input).toMatchObject({roomId:'room-1',requestId:'request-1',taskId:'command-1',generationId:scope24.context.generationId});
+  m26_expect(scope24.calls.find(call => call.name === 'postStarterWelcome')!.input).toMatchObject({roomId:'room-1',requestId:'request-1',taskId:'command-1'});
   for (const tool of ['repository','starters']) await m26_callAgentTool('app_tool',{app:'beeline:onboarding',tool,args:{}});
   m26_expect(scope24.calls.filter(call=>call.name === 'postRepositoryOnboarding').map(call=>call.name)).toEqual(['postRepositoryOnboarding','postRepositoryOnboarding']);
   m26_expect(scope24.calls.filter(call=>call.name === 'postRepositoryOnboarding').map(call=>call.input.kind)).toEqual(['repository','starters']);
-  m26_expect(scope24.calls.find(call=>call.name === 'postRepositoryOnboarding')!.input).toMatchObject({roomId:'room-1',requestId:'request-1',generationId:scope24.context.generationId});
+  m26_expect(scope24.calls.find(call=>call.name === 'postRepositoryOnboarding')!.input).toMatchObject({roomId:'room-1',requestId:'request-1'});
   await m26_callAgentTool('app_tool',{app:'beeline:onboarding',tool:'invite',args:{}});
   m26_expect(scope24.calls.filter(call=>call.name === 'postRoomInvite')).toEqual([{
-    name:'postRoomInvite', input:{roomId:'room-1',requestId:'request-1',taskId:'command-1',generationId:scope24.context.generationId},
+    name:'postRoomInvite', input:{roomId:'room-1',requestId:'request-1',taskId:'command-1'},
   }]);
 });
 

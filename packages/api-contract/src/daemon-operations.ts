@@ -97,36 +97,42 @@ export type PostRoomEventInput = TurnOutputAuthority &
 export type AgentReportStatus = 'done' | 'blocked' | 'failed' | 'needs_decision';
 
 
-export type AgentCommandAction = 'input' | 'resume' | 'stop' | 'restart';
+export type AgentCommandAction = 'input' | 'restart';
 
+/**
+ * One item in an agent's queue. The server keeps it until the answer is
+ * posted to `returnRoomId` (or the agent chooses silence, or Stop cancels it).
+ * The helper may deliver it more than once; the answer is idempotent.
+ */
 export type AgentCommand = {
   readonly id: string;
+  /** Where the request came from. */
   readonly roomId: string;
+  /** Where the answer goes. */
+  readonly returnRoomId: string;
+  /** Set when `roomId` is a corner: that corner's parent Room. */
+  readonly parentRoomId?: string;
   readonly agentId: string;
   readonly sourceMessageId: string;
+  /** The queue item id, carried as `requestId` by every tool call for it. */
   readonly turnRequestId: string;
   readonly action: AgentCommandAction;
   readonly reason: string;
   /** The schedule whose run woke this turn, when this is a `schedule` command. */
   readonly scheduleId?: string;
+  /** Pending at reconnect; duration is measured from the previous connection release. */
+  readonly offlineSeconds?: number;
   readonly rootCommandId: string;
   readonly parentCommandId?: string;
   readonly rootSourceMessageId: string;
   readonly agentDepth: number;
   readonly private?: boolean;
-  /** Set on a claimed turn its helper did not finish; the helper resumes it in this generation. */
-  readonly generationId?: string;
   readonly source: RoomInboxResult['items'][number];
-  /** Superseded wakes, quoted as history; only source authorizes this turn. */
-  readonly recoveryContext?: string;
+  readonly createdAt: number;
 };
 
-export type CommandClaimInput = RoomInput & {
-  readonly commandId: string;
-  readonly generationId: string;
-};
-
-export type TurnOutputAuthority = { readonly generationId?: string; readonly requestId?: string };
+/** `requestId` names the queue item a tool call serves. */
+export type TurnOutputAuthority = { readonly requestId?: string };
 
 /** A commander's stop: whether a running turn was cancelled, and how many of its queued orders were dropped. */
 export interface StopAgentTurnResult {

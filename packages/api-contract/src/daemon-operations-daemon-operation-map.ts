@@ -1,4 +1,3 @@
-import type { CommandActivationInput, CommandActivationSnapshot } from './helper-activation.js';
 import type { OwnedModelCredential } from './helper-model.js';
 import type { UsageAccountPublicationResult, UsageAccountReference, UsageWriteSource } from './helper-usage.js';
 import type { RepositoryOnboardingCard } from './repository-onboarding.js';
@@ -12,7 +11,7 @@ import type { WorkflowRoleBinding, WorkflowReceiptInput, WorkflowRunReadResult }
 import type { DeleteInstitutionalMemoryInput, InstitutionalContextSnapshot, InstitutionalMemoryTurnStats, InstitutionalMemoryWriteResult, LoadWorkspaceSkillInput, LoadWorkspaceSkillResult, ReportInstitutionalMemoryUsedInput, ReportInstitutionalMemoryUsedResult, SaveInstitutionalMemoryInput, SearchInstitutionalHistoryInput, SearchInstitutionalHistoryResult, SearchInstitutionalMemoryInput, SearchInstitutionalMemoryResult, UpdateInstitutionalMemoryInput } from './institutional-memory.js';
 import type { NotifyFeedbackFixedInput, NotifyFeedbackFixedResult, ReportFeedbackInput, ReportFeedbackResult } from './feedback.js';
 import type { WalletPayInput, WalletContractCallInput, WalletSendOutcome, WalletSwapInput, WalletSwapResult, WalletToolBalanceInput, WalletToolBalanceResult, WalletToolChainsInput, WalletToolChainsResult, WalletToolHistoryInput, WalletToolHistoryResult, WalletToolQuoteInput, WalletToolQuoteResult, WalletToolState, WalletToolStateInput, WalletSignTypedDataInput, WalletSignTypedDataResult } from './wallet.js';
-import { TurnOutputAuthority, AgentCommand, CommandClaimInput, StopAgentTurnResult, AgentReportStatus, CreateAgentScheduleInput, AgentScheduleResult, SetEventSubscriptionsInput, EventSubscriptionsResult, PostRoomEventInput, AgentScheduleListResult, DeleteAgentScheduleInput, UpdateAgentScheduleInput } from './daemon-operations.js';
+import { TurnOutputAuthority, AgentCommand, StopAgentTurnResult, AgentReportStatus, CreateAgentScheduleInput, AgentScheduleResult, SetEventSubscriptionsInput, EventSubscriptionsResult, PostRoomEventInput, AgentScheduleListResult, DeleteAgentScheduleInput, UpdateAgentScheduleInput } from './daemon-operations.js';
 import { WriteResult, DaemonBootstrapInput, DaemonBootstrapResult, WorkspaceRosterInput, WorkspaceRosterResult, RoomInboxResult, RoomConversationInput, RoomConversationResult, DaemonAttachment, RoomPrincipalInput, RoomAuthorityResult, PermissionAuthorityInput, AuthorityDecisionResult, MissionAuthorityInput, CornerWatchKind, CornerWatchResult, WorkScheduleAuthorityInput, AgentToolMandateResult, TargetAgentAuthorityInput, CornerListResult, CornerRestoreResult, CornerBrief, CornerCursorInput, RoomRepositoryStateResult, RoomGitHubTokenResult, RoomTargetBranchResult, IdentitySuccessionResult, AgentConfigurationResult, AgentPresenceResult, RequestCompletionResult, PostRoomMessageInput, PostRoomMessageResult, ReactToRoomMessageInput, PostAgentAttachmentInput, PostLiveOutputInput, RetractLiveOutputInput, PostTurnReceiptInput, PostAgentActivityInput, PostPermissionRequestInput, PostPermissionExecutionInput, PostAgentToolMandateInput, PostAgentCommandsInput, PostAgentModelCatalogInput, PostCornerRemoteStateInput, PostCornerPlanInput, CornerBriefDraft, PostTargetBranchProposalInput, SearchMcpRegistryInput, SearchMcpRegistryResult, ConnectMcpServerInput, ConnectMcpServerResult, ConnectAppInput, ConnectAppResult, ConnectInput, ConnectResult, ConnectorSearchMatch, CreateCornerInput } from './daemon-operations-room-conversation-window.js';
 import { ReviseCornerBriefInput, PostSquireApprovalInput, PostSquireLoginWallInput, PostSquireLoginWallResult, PostSquireApprovalDecisionInput, RequestAgentGrantInput, RequestAgentGrantResult, AskRoomChoiceResult, AskRoomChoiceInput, OpenRoomPollInput, AgentGrantListResult, AgentGrantRequestListResult, ConsumeAgentGrantInput, AuthorizeSquireCallInput, AuthorizeSquireCallResult, AgentWorkbenchView, OfferConnectorInput, OfferConnectorResult, InstallConnectorInput, PostConnectorStatusInput, PostConnectorVaultInput, GetConnectorStatusInput, ConnectorStatus, ConnectorVaultListResult, ConnectionRefInput, ConnectionDetail, ConnectionGrantRevokeResult, PostConnectionUsageInput, ConnectorAssignmentsResult, CornerResult } from './daemon-operations-revise-corner-brief-input.js';
 
@@ -145,14 +144,15 @@ export type DaemonOperationMap = {
       },
     { readonly runId: string; readonly state: string }
   >;
+  /** Every undone item in the authenticated agent's queue, oldest first. */
   getAgentCommands: Operation<
-    RoomInput,
-    { readonly commandProtocol: 1; readonly commands: readonly AgentCommand[] }
+    Record<string, never>,
+    { readonly commandProtocol: 2; readonly commands: readonly AgentCommand[] }
   >;
-  claimAgentCommand: Operation<CommandClaimInput, WriteResult & { readonly modelCredential?: OwnedModelCredential; readonly recoveryContext?: string; readonly activitySource?: { readonly body: string; readonly systemEvent: SystemEvent } }>;
-  claimAgentTurn: Operation<CommandClaimInput, WriteResult & { readonly commands: readonly AgentCommand[]; readonly modelCredential?: OwnedModelCredential; readonly recoveryContext?: string; readonly activitySource?: { readonly body: string; readonly systemEvent: SystemEvent } }>;
-  acknowledgeAgentCommand: Operation<CommandClaimInput, WriteResult>;
-  releaseAgentTurn: Operation<RoomInput & { readonly generationId: string }, WriteResult & { readonly commands: readonly AgentCommand[] }>;
+  /** Marks the item's turn as working once its helper hands it to the agent session. Status only. */
+  startAgentTurn: Operation<RoomInput & { readonly requestId: string; readonly available?: boolean }, WriteResult>;
+  /** A hosted-model credential bound to one undone queue item (`requestId`). */
+  getModelCredential: Operation<RoomInput & { readonly requestId: string }, { readonly modelCredential?: OwnedModelCredential }>;
   getDaemonBootstrap: Operation<DaemonBootstrapInput, DaemonBootstrapResult>;
   getWorkspaceRoster: Operation<WorkspaceRosterInput, WorkspaceRosterResult>;
   getOwedMentions: Operation<Record<string, never>, { readonly owedMentions: readonly { readonly roomId: string; readonly messageId: string; readonly memberId: string; readonly replyRule: string; readonly idempotencyKey: string }[] }>;
@@ -166,7 +166,6 @@ export type DaemonOperationMap = {
       readonly attachmentId?: string;
       readonly offset?: number;
       readonly requestId?: string;
-      readonly generationId?: string;
     },
     {
       readonly messageId: string;
@@ -338,7 +337,7 @@ export type DaemonOperationMap = {
   postAgentDraft: Operation<PostLiveOutputInput, WriteResult>;
   postAgentThought: Operation<PostLiveOutputInput, WriteResult>;
   retractAgentLiveOutput: Operation<RetractLiveOutputInput, WriteResult>;
-  markAgentTurnSilent: Operation<RoomInput & TurnOutputAuthority & { readonly messageId?: string }, WriteResult>;
+  markAgentTurnSilent: Operation<RoomInput & TurnOutputAuthority & { readonly messageId?: string }, WriteResult & { readonly answered?: boolean }>;
   postAgentTurnReceipt: Operation<PostTurnReceiptInput, WriteResult>;
   postAgentActivity: Operation<PostAgentActivityInput, WriteResult>;
   /** Push a continuation when a tool from this command finishes after its prompt ended. */
@@ -381,7 +380,6 @@ export type DaemonOperationMap = {
   getAgentAvatar: Operation<RoomInput, { readonly drawing: unknown; readonly soul: unknown }>;
   postAgentAvatar: Operation<RoomInput & { readonly drawing: unknown }, WriteResult>;
   postAgentUsage: Operation<AgentInput & { readonly usage: AgentUsage; readonly usageSource?:UsageWriteSource }, WriteResult>;
-  readCommandActivation: Operation<CommandActivationInput, CommandActivationSnapshot>;
   publishAgentUsageAccount: Operation<AgentInput & { readonly usage: AgentUsage; readonly revision: string; readonly ownerId: string; readonly source: { readonly connectionId: string; readonly epoch: number } }, WriteResult & UsageAccountPublicationResult>;
   attachAgentUsageAccount: Operation<AgentInput & UsageAccountReference & { readonly source: { readonly connectionId: string; readonly epoch: number } }, WriteResult>;
   getAgentUsage: Operation<AgentInput, AgentUsage | null>;

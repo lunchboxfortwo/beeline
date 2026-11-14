@@ -1,6 +1,6 @@
+import { callAgentTool,validateAdvertisedToolInput } from './read-only-mcp-open-poll.js';
+import { JsonObject,JsonRpcRequest,TOOLS,agentSurface,asObject,callTool,withToolResult } from './read-only-mcp.js';
 import { boundToolResult } from "./tool-output-budget.js";
-import { JsonObject, JsonRpcRequest, asObject, agentSurface, TOOLS, readTurnContextFile, callTool, withToolResult } from './read-only-mcp.js';
-import { validateAdvertisedToolInput, callAgentTool } from './read-only-mcp-open-poll.js';
 
 
 
@@ -80,8 +80,6 @@ export async function handleLine(line: string): Promise<void> {
       // reaches it at all - as "the call failed", with the sentence explaining
       // why buried in a transport frame (C90).
       const work = async () => {
-        if (process.env.BEELINE_TURN_CONTEXT_FILE && (await readTurnContextFile()).terminalReason)
-          throw new Error('turn has ended; further tool calls are refused');
         const definition = TOOLS.find(tool => tool.name === params.name);
         if (!definition) throw new Error(`unknown or unavailable tool: ${params.name}`);
         if (params.arguments !== undefined && (!params.arguments || typeof params.arguments !== 'object' || Array.isArray(params.arguments))) throw new Error('tool arguments must be an object');

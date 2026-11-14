@@ -1,6 +1,21 @@
-import { randomBytes, randomUUID, expect, it, HUMAN, RUBY, WORKER, WS, ROOM, DM, rootFixture,
-  authority, claim, commands, open, worker, privateAssignment, createAgentCommand, type CommandRow } from './test-support-commander.integration.test-support.js';
-import { commanderReportAddress, commanderChainSql } from './commander.js';
+import { commanderChainSql,commanderReportAddress } from './commander.js';
+import {
+authority,claim,commands,
+createAgentCommand,
+DM,
+expect,
+HUMAN,
+it,
+open,
+privateAssignment,
+randomBytes,randomUUID,
+ROOM,
+rootFixture,
+RUBY,WORKER,
+worker,
+WS,
+type CommandRow
+} from './test-support-commander.integration.test-support.js';
 
 const BOSS = 'f'.repeat(64);
 
@@ -55,7 +70,7 @@ it.each(['approved', 'legacy', 'agent-order', 'different-dispatch', 'same-issuer
   if (mode === 'legacy') await db.query(`UPDATE corner_brief_revisions
     SET approval_basis=approval_basis-'commanderCommandId'-'commanderReturnRoomId' WHERE corner_id=$1 AND revision=2`, [opened.cornerId]);
   if (historicalOrder) {
-    await daemon.execute('report', { ...authority(historicalOrder), status: 'blocked', text: 'Earlier same-issuer order result' }, WORKER);
+    await daemon.execute('postRoomMessage', { ...authority(historicalOrder), text: 'blocked: Earlier same-issuer order result' }, WORKER);
     // Report wakes reach the commander inside the corner they concern.
     expect((await commands(opened.cornerId, BOSS)).filter(c => c.reason === 'report')).toEqual([
       expect.objectContaining({ source: expect.objectContaining({ body: 'blocked: Earlier same-issuer order result' }) })]);
@@ -72,9 +87,9 @@ it.each(['approved', 'legacy', 'agent-order', 'different-dispatch', 'same-issuer
   await claim(turn);
   const posted = await daemon.execute('postCornerMessage', { ...authority(turn), cornerId: opened.cornerId,
     text: '@captain Choose the endpoint' }, WORKER);
-  expect(posted.receipt).toContain('tag @captain');
+  expect(posted.receipt).toContain('Message stored and visible.');
   expect((await db.query<{ text: string }>(`SELECT text FROM messages WHERE id=$1`, [posted.id])).rows[0]?.text)
-    .toBe('Choose the endpoint');
+    .toBe('@captain Choose the endpoint');
   const chain = (await db.query<{ id: string }>(`SELECT id FROM rooms corner WHERE corner.id=$1 AND EXISTS (
     SELECT 1 FROM (${commanderChainSql('corner', '$2', 'now()')}) commanders WHERE commanders.id=$3)`, [opened.cornerId, WORKER, BOSS])).rows;
   expect(chain.length).toBe(approved ? 1 : 0);
@@ -99,15 +114,11 @@ it.each(['current', 'other', 'stale', 'none'] as const)('Reproduction R2: missin
   const post = posted ? await daemon.execute('postCornerMessage', { ...authority(turn), cornerId: address,
     text: 'The public reply is delivered.' }, WORKER) : undefined;
   await db.query('UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2', [DM, RUBY]);
-  if (mode === 'stale') await db.query(`UPDATE agent_commands SET private_payload=jsonb_set(private_payload,
-    '{publicPostGenerationId}','"previous-generation"'::jsonb) WHERE id=$1`, [turn.id]);
   const final = daemon.execute('postRoomMessage', { ...authority(turn), text: 'The public reply is delivered.' }, WORKER);
-  if (!posted || mode === 'stale') { await expect(final).rejects.toThrow('not delivered'); return; }
-  await expect(final).resolves.toMatchObject({ id: post!.id, receipt: expect.stringContaining('Warning:') });
-  expect(await daemon.execute('getRequestCompletion', { roomId: ROOM, requestId: turn.turnRequestId }, WORKER))
-    .toMatchObject({ completed: true, outcome: 'complete' });
-  const view = await rootFixture.phone.readRoom(address, HUMAN);
-  expect(JSON.stringify(view)).toContain('The public reply is delivered.');
-  const source = await rootFixture.phone.readRoom(ROOM, HUMAN);
-  expect(source?.latestAgentTurns?.find(t => t.requestId === turn.turnRequestId)?.status).toBe('complete');
+  await expect(final).rejects.toMatchObject({ kind: 'membership' });
+  expect(await daemon.execute('getRequestCompletion', { roomId: ROOM, requestId: turn.turnRequestId }, WORKER)).toMatchObject({ completed: false });
+  await db.query('UPDATE memberships SET removed_at=NULL WHERE room_id=$1 AND identity_id=$2', [DM, RUBY]);
+  await daemon.execute('postRoomMessage', { ...authority(turn), text: 'The public reply is delivered.' }, WORKER);
+  expect(await daemon.execute('getRequestCompletion', { roomId: ROOM, requestId: turn.turnRequestId }, WORKER)).toMatchObject({ completed: true });
+  expect((await commands(DM, RUBY)).find(c => c.reason === 'report')?.source.body).toBe('The public reply is delivered.');
 });

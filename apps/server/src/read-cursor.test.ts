@@ -280,14 +280,15 @@ describe('the read cursor over the live phone surface', () => {
         roomId: ROOM, messageId: 'e'.repeat(64), text: '@bee help with this please',
       });
       expect(response.status).toBe(200);
-      for (let i = 0; i < 100 && !frames.some(frame => frame.type === 'room-commands'); i++) await settle();
+      const sent=await response.json() as {pendingAgentCommands:Array<{requestId:string}>};
+      for (let i = 0; i < 100 && (!frames.some(frame => frame.type === 'room-commands') || !frames.some(frame => frame.type === 'message-delta')); i++) await settle();
       expect(frames).toEqual(expect.arrayContaining([
         expect.objectContaining({ type: 'message-delta' }),
         expect.objectContaining({ type: 'read-state', readCursor: expect.objectContaining({
           messageId: 'e'.repeat(64), unreadCount: 0,
         }) }),
         expect.objectContaining({ type: 'room-commands', commands: [expect.objectContaining({
-          requestId: 'e'.repeat(64), agentPubkey: AGENT,
+          requestId: sent.pendingAgentCommands[0]!.requestId, agentPubkey: AGENT,
         })] }),
       ]));
       expect(frames.filter(frame => frame.type === 'invalidate' &&

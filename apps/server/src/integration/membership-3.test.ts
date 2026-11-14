@@ -82,10 +82,7 @@ const fixture = monolithFixture();
     expect(stopLine).toEqual([
       expect.objectContaining({
         text: '@owner stopped @bee · turn cancelled',
-        // `@bee` in that sentence is how the line READS, not how it is
-        // addressed: the stop command beside it is the daemon's wake-up, and
-        // the request id is how it knows which session to cancel.
-        woke: [AGENT],
+        system_event: expect.objectContaining({kind:'turn-cancelled'}),
         request_id: requestId,
       }),
     ]);
@@ -100,7 +97,7 @@ const fixture = monolithFixture();
           status: 'complete',
         })
       ).status,
-    ).toBe(403);
+    ).toBe(200);
     expect(
       (
         await fixture.daemonOperation('postAgentTurnReceipt', {
@@ -110,7 +107,7 @@ const fixture = monolithFixture();
           reason: 'harness exited during cancellation',
         })
       ).status,
-    ).toBe(403);
+    ).toBe(200);
     expect(
       (
         await fixture.database.query(
@@ -118,7 +115,7 @@ const fixture = monolithFixture();
           [ROOM, requestId],
         )
       ).rows[0],
-    ).toEqual({ status: 'cancelled', failure_reason: 'stop' });
+    ).toEqual({ status: 'cancelled', failure_reason: 'harness exited during cancellation' });
     expect(
       (
         await fixture.database.query(

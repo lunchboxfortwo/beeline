@@ -1,10 +1,8 @@
-import { phoneIdentity as identity, type PhoneIdentityRow as IdentityRow } from '../phone-identity.js';
-import { systemMessage } from '@beeline/api-contract/system-message-catalog';
-import { createHash, randomBytes } from 'node:crypto';
-import { HUMAN_CORNER_TITLE_MAX_LENGTH } from '@beeline/api-contract/phone';
-import type { AgentGrantView, RoomViewMember } from '@beeline/api-contract/phone';
 import { type AgentGrantStatus } from '@beeline/api-contract/agent-grants';
-import { type SqlDatabase } from '../database.js';
+import type { AgentGrantView,RoomViewMember } from '@beeline/api-contract/phone';
+import { HUMAN_CORNER_TITLE_MAX_LENGTH } from '@beeline/api-contract/phone';
+import { createHash,randomBytes } from 'node:crypto';
+import { type PhoneIdentityRow as IdentityRow } from '../phone-identity.js';
 
 
 export const seconds = (date: Date) => Math.floor(date.getTime() / 1_000);
@@ -136,32 +134,6 @@ export function messageId(): string {
 
 export function unix(date: Date): number {
   return Math.floor(date.getTime() / 1_000);
-}
-
-
-/**
- * The author has read everything up to their own message, so their read mark
- * moves with the write (forward only, as `PhoneService.markRead` moves it):
- * the phone never spends a second request after every send. `updated_at`
- * stays where it was (the epoch on a new mark): it means "read here just now",
- * and the push gate holds pushes for 30 s after it. A reply sent from a
- * notification is not someone reading the Room, and a sender still in the
- * Room is already held by its view.
- */
-export async function advanceAuthorReadMark(
-  database: Pick<SqlDatabase, 'query'>,
-  roomId: string,
-  authorId: string,
-  messageIdValue: string,
-): Promise<void> {
-  await database.query(
-    `INSERT INTO room_read_marks(room_id,identity_id,message_created_at,message_id,updated_at)
-    SELECT $1,$2,message.created_at,$3,'epoch'::timestamptz FROM messages message
-    WHERE message.id=$3 AND message.room_id=$1
-    ON CONFLICT(room_id,identity_id) DO UPDATE SET message_created_at=EXCLUDED.message_created_at,message_id=EXCLUDED.message_id
-    WHERE (EXCLUDED.message_created_at,EXCLUDED.message_id)>(room_read_marks.message_created_at,room_read_marks.message_id)`,
-    [roomId, authorId, messageIdValue],
-  );
 }
 
 

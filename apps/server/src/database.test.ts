@@ -1,5 +1,29 @@
 import { CornerAccessDatabase, CommandScopedDatabase, describe, expect, it, vi, INSTITUTIONAL_HISTORY_MAX_AGE_DAYS, assertSchemaCurrent, backfillMessageSearchDocuments, MESSAGE_SEARCH_DOCUMENT_MAX_BYTES, migrate, APP_POOL_WAIT_TIMEOUT_MS, postgresPoolConfig, REQUIRED_SCHEMA_VERSION, REQUIRED_ROUTER_SCHEMA_VERSION, migrateData, PostgresDatabase, HEALTH_POOL_WAIT_TIMEOUT_MS, MIGRATION_LOCK_TIMEOUT_MS, MIGRATION_STATEMENT_TIMEOUT_MS, isTransientDatabaseConnectionError, PgliteDatabase, migratedDatabase, requireRoomSlug, reserveRoomName, result, TERMINATED, stubClient, poolHandingOut, poolWithQuery, type Pool, type SqlDatabase } from './test-support-database.test-support.js';
 
+it('installs current-table constraints when another schema uses the same names', async () => {
+  const database = new PgliteDatabase();
+  const checks = [
+    ['workspace_connectors', 'workspace_connectors_no_squire'],
+    ['rooms_mcp_event_subscriptions', 'rooms_mcp_event_subscriptions_event_name'],
+    ['rooms_mcp_event_deliveries', 'rooms_mcp_event_deliveries_subject'],
+    ['agent_subscriptions', 'agent_subscriptions_room_prompt'],
+    ['agent_subscriptions', 'agent_subscriptions_source_v3_check'],
+    ['agent_subscriptions', 'agent_subscriptions_shape_v3_check'],
+  ];
+  try {
+    await database.query(`CREATE SCHEMA other_installation;
+      CREATE TABLE other_installation.checks (value boolean,
+        ${checks.map(([, name]) => `CONSTRAINT ${name} CHECK(value)`).join(',')});`);
+    await migrate(database);
+    await migrate(database);
+    for (const [table, name] of checks) {
+      expect((await database.query(`SELECT convalidated FROM pg_constraint
+        WHERE conrelid=$1::regclass AND conname=$2`, [table, name])).rows)
+        .toEqual([{ convalidated: true }]);
+    }
+  } finally { await database.close(); }
+});
+
 
 
 it('R-RELEASE-OVERLAP: preserves installed Tray clocks and old notification writes during deployment', async () => {

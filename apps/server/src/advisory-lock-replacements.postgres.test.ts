@@ -612,20 +612,15 @@ describe.skipIf(!url)('atomic claims replace advisory serialization', () => {
     await expect(confirmCornerMergeAuthority(first,corner,head)).rejects.toThrow('does not assign repository work');
   });
 
-  it('two allowance-warning writers deliver one message and one event pair', async () => {
-    const agent='a'.repeat(64),owner='9'.repeat(64),day=new Date().toISOString().slice(0,10);
-    await first.query(`WITH workspace AS (SELECT $2::uuid) INSERT INTO free_agents(agent_id,owner_id,sealed_keys) VALUES($1,$3,'fixture')`,[agent,workspace,owner]);
-    await first.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'owner') ON CONFLICT DO NOTHING`,[workspace,room,owner]);
-    await first.query(`INSERT INTO free_agent_events(agent_id,kind,detail) VALUES($1,'model_usage',$2::jsonb)`,[agent,JSON.stringify({day,tokens:800})]);
-    await overlap(db=>db.transaction(tx=>warnFreeAgentOwner(tx,agent,owner,day,1000,room)),'WITH candidate AS');
-    expect((await first.query(`SELECT kind FROM free_agent_events WHERE agent_id=$1 AND kind IN ('allowance_warning','nudge_shown') ORDER BY kind`,[agent])).rows)
-      .toEqual([{kind:'allowance_warning'},{kind:'nudge_shown'}]);
-    expect((await first.query(`SELECT id FROM messages WHERE room_id=$1 AND text LIKE 'I''ve used 80%'`,[room])).rows).toHaveLength(1);
-  });
-
-  it('two Add agent commands record one guide start for their warning', async () => {
-    await overlap(db=>db.transaction(tx=>recordFreeAgentGuideStarted(tx,'9'.repeat(64),workspace)),'INSERT INTO free_agent_events');
-    expect((await first.query(`SELECT id FROM free_agent_events WHERE agent_id=$1 AND kind='guide_started'`,['a'.repeat(64)])).rows).toHaveLength(1);
+  it('two Add agent commands record one guide start for their historical warning', async () => {
+    const guideAgent=randomUUID().replaceAll('-','').repeat(2),guideOwner=randomUUID().replaceAll('-','').repeat(2);
+    await first.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Guide free'),($2,'human','Guide owner')`,[guideAgent,guideOwner]);
+    await first.query('INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)',[guideAgent,guideOwner]);
+    await first.query(`INSERT INTO free_agents(agent_id,owner_id,sealed_keys) VALUES($1,$2,'fixture')`,[guideAgent,guideOwner]);
+    await first.query(`INSERT INTO memberships(workspace_id,identity_id,role) VALUES($1,$2,'member'),($1,$3,'owner')`,[workspace,guideAgent,guideOwner]);
+    await first.query(`INSERT INTO free_agent_events(agent_id,kind,detail) VALUES($1,'allowance_warning','{}')`,[guideAgent]);
+    await overlap(db=>db.transaction(tx=>recordFreeAgentGuideStarted(tx,guideOwner,workspace)),'INSERT INTO free_agent_events');
+    expect((await first.query(`SELECT id FROM free_agent_events WHERE agent_id=$1 AND kind='guide_started'`,[guideAgent])).rows).toHaveLength(1);
   });
 
   it('two procedure saves allocate successive immutable versions with one SQL statement each', async () => {

@@ -1,4 +1,4 @@
-import { lockOwnedTurnRoomAccess } from './turn-ownership.js';
+import { lockRoomAccess } from './room-access-lock.js';
 import { randomUUID } from 'node:crypto';
 import type { SqlDatabase } from './database.js';
 import { authorizeCommandOutput } from './agent-command.js';
@@ -7,7 +7,6 @@ import { ExpectedRefusalError } from './command-refusal.js';
 type ReleaseDispatchInput = {
   roomId: string;
   requestId: string;
-  generationId?: string;
   inputs?: Record<string, string>;
 };
 
@@ -35,9 +34,9 @@ export async function productionReleaseDispatch(
       `SELECT id,beeline_room_handle(id,$2) handle FROM identities WHERE id=$1 AND kind='agent' AND handle IS NOT NULL`, [agentId,input.roomId],
     )).rows[0];
     if (!agent?.handle) throw new Error('Production release requires an agent identity');
-    if (!await lockOwnedTurnRoomAccess(db, input.roomId, agentId))
+    if (!await lockRoomAccess(db, [input.roomId], [agentId]))
       throw new ExpectedRefusalError('Production release requires current Room and Workspace membership');
-    const command = await authorizeCommandOutput(db, input.roomId, agentId, input.requestId, input.generationId, false, true);
+    const command = await authorizeCommandOutput(db, input.roomId, agentId, input.requestId);
     const human = (await db.query<{ id: string; text: string; role: string }>(
       `SELECT m.id,m.text,manager.role FROM messages m JOIN identities i ON i.id=m.author_id AND i.kind='human'
        JOIN rooms room ON room.id=$2

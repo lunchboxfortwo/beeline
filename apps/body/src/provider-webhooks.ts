@@ -86,7 +86,7 @@ class StripeMcp {
   async call(method: string, params: Record<string, unknown>): Promise<unknown> {
     const lines = await this.broker.request(this.job.connectorId,
       JSON.stringify({ jsonrpc: '2.0', id: ++this.id, method, params }),
-      { roomId: 'connector', requestId: this.job.id, generationId: this.connectionId },
+      { roomId: 'connector', requestId: this.job.id },
       this.connectionId);
     for (const line of lines) {
       const message = object(parsedText(line));
@@ -103,7 +103,7 @@ class StripeMcp {
       clientInfo: { name: 'beeline-provider-webhooks', version: '1' } });
     await this.broker.request(this.job.connectorId,
       JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
-      { roomId: 'connector', requestId: this.job.id, generationId: this.connectionId },
+      { roomId: 'connector', requestId: this.job.id },
       this.connectionId);
   }
   async tool(name: string, args: Record<string, unknown>): Promise<unknown> {

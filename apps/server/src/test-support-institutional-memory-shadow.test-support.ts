@@ -1,12 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach,beforeEach } from 'vitest';
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 
-import { migrateData } from './database.js';
 
-import { INSTITUTIONAL_CONTEXT_HEADER, tombstoneInstitutionalMemoryForMessage, } from './institutional-memory-shadow.js';
 
-import { PgliteDatabase, migratedDatabase } from './test-support.js';
+import { PgliteDatabase,migratedDatabase } from './test-support.js';
 
-import { claimAgentCommand, createAgentCommand } from './agent-command.js';
+import { createAgentCommand } from './agent-command.js';
 
 import { DaemonService } from './daemon-service.js';
 
@@ -150,10 +149,10 @@ export async function openTurn(
     agentId,
     sourceMessageId,
     reason: 'human_tag',
-    turnRequestId: requestId,
+    id: requestId,
   });
-  await claimAgentCommand(database, roomId, agentId, command!.id, generationId);
-  return { roomId, requestId, generationId };
+  await startQueuedTurn(database, roomId, agentId, command!.id);
+  return { roomId, requestId };
 }
 
 
@@ -171,10 +170,11 @@ export const rootFixture = {
 get database(){return database;}, set database(value: typeof database){database=value;},
 };
 
-export { afterEach, beforeEach, describe, expect, it } from 'vitest';
-export { migrateData } from './database.js';
-export { INSTITUTIONAL_CONTEXT_HEADER, tombstoneInstitutionalMemoryForMessage } from './institutional-memory-shadow.js';
-export { PgliteDatabase, migratedDatabase } from './test-support.js';
-export { claimAgentCommand, createAgentCommand } from './agent-command.js';
+export { afterEach,beforeEach,describe,expect,it } from 'vitest';
+export { createAgentCommand } from './agent-command.js';
 export { DaemonService } from './daemon-service.js';
+export { migrateData } from './database.js';
+export { INSTITUTIONAL_CONTEXT_HEADER,tombstoneInstitutionalMemoryForMessage } from './institutional-memory-shadow.js';
 export { LiveHub } from './live.js';
+export { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
+export { PgliteDatabase,migratedDatabase } from './test-support.js';

@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { Room, AudioSource, LocalAudioTrack, TrackPublishOptions, TrackSource, RoomEvent } from '@livekit/rtc-node';
 import { PgliteDatabase } from '../apps/server/src/test-support.js';
 import { PhoneService } from '../apps/server/src/phone-service.js';
-import { routeHumanMessage } from '../apps/server/src/agent-command.js';
+import { answerQueuedMessage,queueMessage } from '../apps/server/src/agent-command.js';
 import { migrate } from '../apps/server/src/database.js';
 import { LiveHub } from '../apps/server/src/live.js';
 import { VoiceService } from '../apps/server/src/voice-service.js';
@@ -104,11 +104,16 @@ const server = createServer((req,res)=> { void (async()=>{
   else if(req.url==='/work-start' || req.url==='/outside-start') {
     const agent=(await service.agents(R,H))[0]!;
     workSource=await service.recordHuman(first.call.id,R,H,agent,'Work until finished');
-    if(req.url==='/outside-start') await db.transaction(tx=>routeHumanMessage(tx,workSource!));
+    if(req.url==='/outside-start') await queueMessage(db,{roomId:R,agentId:A,sourceMessageId:workSource!,reason:'human_tag'});
     else await service.dispatch(first.call.id,workSource,A);
     await runtime.refresh();
   }
-  else if(req.url==='/work-finish') { await db.query(`UPDATE agent_commands SET state='complete',completed_at=now() WHERE source_message_id=$1`,[workSource]); await runtime.refresh(); }
+  else if(req.url==='/work-finish') {
+    const item=(await db.query<{turn_request_id:string}>(`SELECT turn_request_id FROM agent_commands
+      WHERE source_message_id=$1 AND agent_id=$2 AND state='pending' ORDER BY inbox_sequence LIMIT 1`,[workSource,A])).rows[0];
+    if(item) await answerQueuedMessage(db,A,{roomId:R,requestId:item.turn_request_id,text:'Finished.'});
+    await runtime.refresh();
+  }
   else if(req.url==='/say') { speechMs=body.speechMs??100; const current=await service.current(R,H); if(!current)throw new Error('No active call'); const row=(await db.query<any>('SELECT * FROM voice_calls WHERE id=$1',[current.id])).rows[0]; await (await service.ensureRuntime(row))!.utterance(H,body.text??'How are you doing today?'); speechMs=100; }
   else if(req.url==='/partner-leave') { await service.leave(first.call.id,partner); }
   else if(req.url==='/partner-rejoin') { await connectPartner(await service.join(R,partner)); }

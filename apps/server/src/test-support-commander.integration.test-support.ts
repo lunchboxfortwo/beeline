@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { cornerImplementerSql } from './corner-worker.js';
 
 import { readCornerObjective, writeCornerObjective } from './corner-objective.js';
@@ -86,17 +87,14 @@ beforeEach(async () => {
   await claim(order);
 });
 
-export const claim = (command: AgentCommand) => daemon.execute('claimAgentCommand', {
-  roomId: command.roomId, commandId: command.id, generationId: 'proof-generation',
-}, command.agentId);
+export const claim = (command: AgentCommand) => startQueuedCommand(daemon, { roomId: command.roomId, commandId: command.id }, command.agentId);
 
-export const authority = (command: AgentCommand) => ({ roomId: command.roomId,
-  requestId: command.turnRequestId, generationId: 'proof-generation' });
+export const authority = (command: AgentCommand) => ({ roomId: command.roomId, requestId: command.turnRequestId });
 
 export const commands = async (roomId: string, agentId: string) => {
 
 
-  return (await readAgentCommands(db, roomId, agentId)).commands.filter(command => !command.generationId);
+  return (await readAgentCommands(db, agentId, roomId)).commands.filter(command => command.roomId === roomId);
 };
 
 export async function open() {

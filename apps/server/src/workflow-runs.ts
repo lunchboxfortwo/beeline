@@ -518,20 +518,6 @@ export async function openRun(db: SqlDatabase, roomId: string, runId: string): P
 }
 
 
-/** Cancel pending wakes; an already executing turn retains its output binding. */
-export async function cancelRunWakes(db: SqlDatabase, roomId: string, runId: string): Promise<void> {
-  await db.query(
-    `WITH due AS MATERIALIZED (
-       SELECT command.id FROM agent_commands command
-       JOIN messages message ON message.id=command.source_message_id
-       WHERE command.room_id=$1 AND message.card->>'runId'=$2
-         AND command.state='pending'
-       FOR UPDATE OF command SKIP LOCKED
-     ), cancelled AS (
-       SELECT (terminal.ended).* FROM (SELECT beeline_end_agent_turn(command.id,command.generation_id,'cancelled','workflow_attempt_advanced',NULL) ended FROM agent_commands command ,due WHERE command.id=due.id) terminal) SELECT cancelled.* FROM cancelled`,
-    [roomId, runId],
-  );
-}
 export { workflowGatePrompt } from './workflow-runs-cancel-run-timers.js';
 export { cancelWorkflowRun } from './workflow-runs-cancel-run-timers.js';
 export { handoff } from './workflow-runs-repeated-result.js';

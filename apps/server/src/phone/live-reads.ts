@@ -1,6 +1,6 @@
 import { messageColumns } from '../message-columns.js';
 import { assetUrl, phoneIdentity as identity, type PhoneIdentityRow as IdentityRow } from '../phone-identity.js';
-import { workingTurnFreshSql } from '../turn-ownership.js';
+import { workingTurnFreshSql } from '../agent-turn-end.js';
 import { readHelperOverlayFrame } from '@beeline/api-contract/helper-overlay';
 import { CommandScopedDatabase } from '../command-scoped-database.js';
 import { readRepositoryOnboardingCard } from '@beeline/api-contract/phone';
@@ -98,7 +98,7 @@ import { phoneListRoomWorkflowRuns } from './schedules.js';
                AND workspace_member.removed_at IS NULL
              WHERE room.id=$1
            )
-           SELECT turn.request_id,turn.agent_id,turn.status,turn.started_at,turn.created_at,turn.generation_id,
+           SELECT turn.request_id,turn.agent_id,turn.status,turn.started_at,turn.created_at,
              requester.id requested_by,
              ARRAY(SELECT identity_id FROM authorized) authorized_viewers,
              ${roomNeedsYouSql('room')} deck_needs_you,

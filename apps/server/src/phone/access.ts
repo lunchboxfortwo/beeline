@@ -1,10 +1,10 @@
-import { phoneIdentity as identity, type PhoneIdentityRow as IdentityRow } from '../phone-identity.js';
-import type { AgentGrantView } from '@beeline/api-contract/phone';
 import { type AgentGrantStatus } from '@beeline/api-contract/agent-grants';
-import { type SqlDatabase } from '../database.js';
+import type { AgentGrantView } from '@beeline/api-contract/phone';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
+import { type SqlDatabase } from '../database.js';
+import { phoneIdentity as identity,type PhoneIdentityRow as IdentityRow } from '../phone-identity.js';
 import type { PhoneContext } from './context.js';
-import { AGENT_OWNER_AUTHORITY_MESSAGE, WORKSPACE_ADMIN_AUTHORITY_MESSAGE } from './values.js';
+import { AGENT_OWNER_AUTHORITY_MESSAGE,WORKSPACE_ADMIN_AUTHORITY_MESSAGE } from './values.js';
 
 
 
@@ -186,16 +186,13 @@ import { AGENT_OWNER_AUTHORITY_MESSAGE, WORKSPACE_ADMIN_AUTHORITY_MESSAGE } from
 
 
   export async function phoneAssertRoomIsWritable(ctx: PhoneContext, roomId: string, author: string): Promise<void> {
-    if (author === SYSTEM_IDENTITY_ID) return;
-    const room = await ctx.database.query<{ direct_participants: string[] | null }>(
-      `SELECT direct_participants FROM rooms WHERE id=$1`,
-      [roomId],
-    );
-    const participants = room.rows[0]?.direct_participants ?? null;
-    if (participants?.includes(SYSTEM_IDENTITY_ID)) {
-      throw new Error(
-        'this is a read-only system thread; only @system may post here (access denied)',
+    if (author !== SYSTEM_IDENTITY_ID) {
+      const room = await ctx.database.query<{ direct_participants: string[] | null }>(
+        `SELECT direct_participants FROM rooms WHERE id=$1`, [roomId],
       );
+      const participants = room.rows[0]?.direct_participants ?? null;
+      if (participants?.includes(SYSTEM_IDENTITY_ID))
+        throw new Error('this is a read-only system thread; only @system may post here (access denied)');
     }
   }
 

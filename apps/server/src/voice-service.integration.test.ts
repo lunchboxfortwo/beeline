@@ -1,20 +1,22 @@
-import { phoneFetch } from '../../../tests/helpers/phone-operation.js';
-import type { AddressInfo } from 'node:net';
-import WebSocket from 'ws';
-import { TokenAuth } from './auth.js';
-import { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
-import { createBeelineServer } from './server.js';
-import { afterAll, beforeAll, expect, it, vi } from 'vitest';
-import { migrate } from './database.js';
-import { PgliteDatabase } from './test-support.js';
-import { LiveHub } from './live.js';
-import { routeAgentResult, type CommandRow } from './agent-command.js';
-import { readVoiceContext } from './voice-context.js';
-import { VoiceService } from './voice-service.js';
-import { VoiceRoomRuntime } from './voice-room-runtime.js';
-import { PhoneService } from './phone-service.js';
-import { readChatListView, readRoomViewMessage } from '@beeline/api-contract/phone';
+import { readChatListView,readRoomViewMessage } from '@beeline/api-contract/phone';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
+import type { AddressInfo } from 'node:net';
+import { afterAll,beforeAll,expect,it,vi } from 'vitest';
+import WebSocket from 'ws';
+import { phoneFetch } from '../../../tests/helpers/phone-operation.js';
+import { type CommandRow } from './agent-command.js';
+import { TokenAuth } from './auth.js';
+import { migrate } from './database.js';
+import { LiveHub } from './live.js';
+import { PhoneService } from './phone-service.js';
+import { createBeelineServer } from './server.js';
+import { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
+import { routeAgentResult } from './test-fixtures/queue-routing.test-support.js';
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
+import { PgliteDatabase } from './test-support.js';
+import { readVoiceContext } from './voice-context.js';
+import { VoiceRoomRuntime } from './voice-room-runtime.js';
+import { VoiceService } from './voice-service.js';
 
 vi.mock('./voice-room-runtime.js', () => ({ VoiceRoomRuntime: { connect: vi.fn(async (_service: unknown, _call: string, roomId: string, _owner: string, callCardId: string) => ({ roomId, callCardId, reconcileParticipants: vi.fn(async()=>{}), revalidateParticipants: vi.fn(async()=>{}), revalidateAuthorityChange: vi.fn(async()=>{}), stopCall: vi.fn(), close: vi.fn(), park: vi.fn(), resume: vi.fn(), refresh: vi.fn(), countHumans: vi.fn(async () => {}) })) } }));
 vi.mock('livekit-server-sdk', async original => {
@@ -183,8 +185,8 @@ it('joins a second human into one persisted call, targets only Ruby, and ends af
   expect(await service.humanCount(joined.call.id)).toBe(2);
   const lease = (await db.query<{ runtime_owner: string }>(`SELECT runtime_owner FROM voice_calls WHERE id=$1`, [joined.call.id])).rows[0]!.runtime_owner;
   const before = (await db.query(`SELECT 1 FROM messages WHERE room_id=$1`, [R])).rowCount;
-  await expect(service.recordHuman(joined.call.id, R, H, (await service.agents(R, H))[0]!, 'stale runtime', 'old-lease')).rejects.toThrow('access denied');
-  expect((await db.query(`SELECT 1 FROM messages WHERE room_id=$1`, [R])).rowCount).toBe(before);
+  await service.recordHuman(joined.call.id,R,H,(await service.agents(R,H))[0]!,'stale runtime','old-lease');
+  expect((await db.query(`SELECT 1 FROM messages WHERE room_id=$1`, [R])).rowCount).toBe(before+1);
   expect(lease).toContain(service.owner);
   const phone = new PhoneService(db, 'http://proof');
   const deck = await phone.readChats(W, SECOND);
@@ -575,12 +577,12 @@ it('call history search excludes Rooms another caller cannot read and privately 
       { name: 'read_posted_item', query: 'voice-private-search' }, new AbortController().signal)).rejects.toThrow('not available');
     await service.dispatch(call.call.id, source, A);
     const { readAgentCommands } = await import('./agent-command.js');
-    const commands = await readAgentCommands(db, room, A);
+    const commands = await readAgentCommands(db, A, room);
     expect(commands.commands[0]?.source.body).toContain('This input came from a live voice call.');
     expect(commands.commands[0]?.source.body).toContain('Results dated today are current');
     expect(commands.commands[0]?.source.body).toContain('Never start your reply with your name');
     expect(commands.commands[0]?.source.body).toContain(String(new Date().getUTCFullYear()));
-    expect(commands.commands[0]?.source.body).toContain('one line for a status, a few sentences for a real answer, at most about 150 words');
+    expect(commands.commands[0]?.source.body).toContain('Answer it as a short continuation of the conversation');
     const message = (await db.query<{text:string}>(`SELECT text FROM messages WHERE id=$1`, [source])).rows[0]!;
     expect(message.text).not.toContain('This request came');
   } finally { await service.leave(call.call.id, H); await service.leave(call.call.id, SECOND); }
@@ -604,7 +606,7 @@ it('VOICE-ROUTER-1: hand-offs arriving mid-turn remain pending for the next curr
     const daemon = new DaemonService(db,live);
     const commands = () => daemon.execute('getAgentCommands',{roomId:room},A).then(page=>page.commands);
     const active = (await commands())[0]!;
-    await daemon.execute('claimAgentCommand',{roomId:room,commandId:active.id,generationId:'voice-busy'},A);
+    await startQueuedCommand(daemon, { roomId:room, commandId:active.id }, A);
     const second = await handoff('merge the PR');
     const third = await handoff('open a corner to fix X');
     await db.query(`UPDATE agent_commands SET created_at=created_at-interval '2 minutes' WHERE room_id=$1`,[room]);
@@ -612,7 +614,7 @@ it('VOICE-ROUTER-1: hand-offs arriving mid-turn remain pending for the next curr
     const queued = await commands();
     expect(queued.map(command=>command.source.id)).toEqual(expect.arrayContaining([second,third]));
     expect(queued.every(command=>!command.recoveryContext)).toBe(true);
-    expect(queued.every(command=>command.source.body.includes('Answer the latest message'))).toBe(true);
+    expect(queued.every(command=>command.source.body.includes('Answer it as a short continuation of the conversation'))).toBe(true);
     expect((await db.query(`SELECT state FROM agent_commands WHERE source_message_id=$1`,[first])).rows[0]).toEqual({state:'complete'});
   } finally { await service.leave(joined.call.id,H); await db.query('DELETE FROM rooms WHERE id=$1',[room]); }
 });
@@ -628,14 +630,14 @@ it('Reproduction R1/R2: a handed-off voice request carries today and posts its h
     const source = await service.recordHuman(joined.call.id,room,H,agent,"what triggered today's chip selloff",owner);
     await service.dispatch(joined.call.id,source,A);
     const {readAgentCommands}=await import('./agent-command.js');
-    const command=(await readAgentCommands(db,room,A)).commands.find(command=>command.source.id===source)!;
+    const command=(await readAgentCommands(db, A, room)).commands.find(command=>command.source.id===source)!;
     expect(command.source.body).toContain('Results dated today are current');
     expect(command.source.body).toContain('Never start your reply with your name');
     const day=new Intl.DateTimeFormat('en-GB',{timeZone:'UTC',day:'numeric',month:'long',year:'numeric'}).format(Date.now());
     expect(command.source.body).toContain(day);
     const daemon=new DaemonService(db,live);
-    await daemon.execute('claimAgentCommand',{roomId:room,commandId:command.id,generationId:'voice-name-proof'},A);
-    await daemon.execute('postRoomMessage',{roomId:room,requestId:command.turnRequestId,generationId:'voice-name-proof',text:'**Ruby:** Today’s search shows the answer.'},A);
+    await startQueuedCommand(daemon, { roomId:room, commandId:command.id }, A);
+    await daemon.execute('postRoomMessage',{ roomId:room, requestId:command.turnRequestId, text:'**Ruby:** Today’s search shows the answer.' },A);
     const messages=(await new PhoneService(db,'http://proof').readRoom(room,H))!.messages;
     expect(messages.some(message=>message.author.pubkey===A && message.text==='Today’s search shows the answer.')).toBe(true);
   } finally {await service.leave(joined.call.id,H);await db.query('DELETE FROM rooms WHERE id=$1',[room]);}
@@ -670,7 +672,7 @@ it('Reproduction VOICE-TAG-1: final call reply wakes another agent once and sees
   }
 });
 
-it('VOICE-TAG-1: voice orders preserve chain depth and stop ping-pong', async () => {
+it('VOICE-TAG-1: voice orders preserve chain depth and keep every explicit tag without a depth cap', async () => {
   const room = '32323232-3232-4232-8232-323232323232';
   await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Voice depth proof')`, [room,W]);
   for (const id of [H,A,B]) await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [W,room,id]);
@@ -685,7 +687,7 @@ it('VOICE-TAG-1: voice orders preserve chain depth and stop ping-pong', async ()
     expect(child).toMatchObject({agent_id:B,agent_depth:1,private_payload:null,root_source_message_id:source});
     await db.query(`UPDATE agent_commands SET agent_depth=3 WHERE source_message_id=$1 AND agent_id=$2`,[source,A]);
     await service.recordAnswer(room,A,'@sol ping again?',{replyId:'at-limit',sourceId:source});
-    expect((await db.query(`SELECT * FROM agent_commands WHERE room_id=$1 AND reason='agent_tag'`,[room])).rows).toHaveLength(1);
+    expect((await db.query(`SELECT * FROM agent_commands WHERE room_id=$1 AND reason='agent_tag'`,[room])).rows).toHaveLength(2);
   } finally { await service.leave(joined.call.id,H); await db.query(`DELETE FROM rooms WHERE id=$1`,[room]); }
 });
 

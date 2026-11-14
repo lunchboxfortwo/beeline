@@ -3,7 +3,7 @@ import { memberPresenceSql } from '../member-presence.js';
 import { messageColumns } from '../message-columns.js';
 import { assetUrl, phoneIdentity as identity, type PhoneIdentityRow as IdentityRow } from '../phone-identity.js';
 import { roomMessageTagsSql } from '../room-router-read.js';
-import { workingTurnFreshSql } from '../turn-ownership.js';
+import { workingTurnFreshSql } from '../agent-turn-end.js';
 import { cornerLifecycleSql } from '../corner-github-cache.js';
 import { cornerObjectiveSql } from '../corner-objective.js';
 import { cornerCommissionerSql } from '../corner-opening.js';
@@ -135,7 +135,7 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
         // The Workspace role: a Room, corner or DM role grants nothing.
         role: room.workspace_role,
         permissions: {
-          send: room.workspace_role !== 'spectator' && !room.archived_at,
+          send: !room.archived_at,
           manage: room.workspace_role === 'owner' || room.workspace_role === 'admin',
         },
       },
@@ -193,7 +193,7 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
            ORDER BY (i.id<>$2),i.id LIMIT (SELECT CASE WHEN parent_id IS NULL THEN 2147483647
              ELSE ${ROOM_VIEW_MEMBER_LIMIT} END FROM authorized_room)
          ), turn_rows AS (
-           SELECT turn.request_id,turn.agent_id,turn.status,turn.started_at,turn.created_at,turn.generation_id,
+           SELECT turn.request_id,turn.agent_id,turn.status,turn.started_at,turn.created_at,
              requester.id requested_by
            FROM authorized_room room
            CROSS JOIN LATERAL (

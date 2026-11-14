@@ -1,4 +1,5 @@
-import { createAgentCommand, claimAgentCommand } from '.././agent-command.js';
+import { startQueuedTurn } from '../test-fixtures/queued-turn.test-support.js';
+import { createAgentCommand } from '.././agent-command.js';
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { insertCornerFacts } from '.././test-support.js';
@@ -11,56 +12,6 @@ import { monolithFixture, taggedBy, wokenBy, HUMAN, AGENT, WORKSPACE, ROOM } fro
 
 describe('monolith integration: message-routing', () => {
 const fixture = monolithFixture();
-
-  it('answers a membership-check outage while ordering as a 503, never a membership refusal', async () => {
-    const steerCorner = '55555555-5555-4555-8555-555555555555';
-    await fixture.database.query(
-      `INSERT INTO rooms(id,workspace_id,parent_id,name) VALUES($1,$2,$3,'Steer target')`,
-      [steerCorner, WORKSPACE, ROOM],
-    );
-    await insertCornerFacts(fixture.database, { cornerId: steerCorner, ownerAgentId: AGENT, lifecycle: '{}' });
-    const messageId = createHash('sha256').update('steer-outage').digest('hex');
-    await fixture.database.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,$4)`, [
-      messageId,
-      ROOM,
-      HUMAN,
-      '@bee steer the corner',
-    ]);
-    const requestId = 'steer-outage';
-    const command = await createAgentCommand(fixture.database, {
-      roomId: ROOM,
-      agentId: AGENT,
-      sourceMessageId: messageId,
-      reason: 'human_tag',
-      turnRequestId: requestId,
-    });
-    await claimAgentCommand(fixture.database, ROOM, AGENT, command!.id, `${requestId}-g`);
-    // The membership check is a database read; its failure is an outage, not a
-    // refusal, so it must reach the route's 503 default intact.
-    const query = fixture.database.query.bind(fixture.database);
-    const querySpy = vi.spyOn(fixture.database, 'query').mockImplementation(async (sql, values) => {
-      if (sql.includes(') corner_reviewer,')) throw new Error('database is unavailable');
-      return query(sql, values);
-    });
-    try {
-      const outage = await fixture.request(
-        '/v1/daemon/operations/order',
-        'POST',
-        {
-          roomId: ROOM,
-          requestId,
-          generationId: `${requestId}-g`,
-          text: 'Steer into the corner',
-          address: steerCorner,
-        },
-        fixture.daemonToken,
-      );
-      expect(outage.status).toBe(503);
-      expect(await outage.json()).toEqual({ error: 'database is unavailable' });
-    } finally {
-      querySpy.mockRestore();
-    }
-  });
 
 
   it('never turns a bare agent name into a mention of the agent that just replied', async () => {
@@ -331,132 +282,6 @@ const fixture = monolithFixture();
       [ROOM],
     );
     expect(notices.rows).toEqual([]);
-  });
-
-
-  it('routes a reply only to the explicitly tagged agent', async () => {
-    const peer = 'c'.repeat(64);
-    await fixture.database.query(
-      `INSERT INTO identities(id,kind,name,handle) VALUES($1,'agent','Peer','peer')`,
-      [peer],
-    );
-    await fixture.database.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [peer, HUMAN]);
-    await fixture.database.query(
-      `INSERT INTO memberships(workspace_id,room_id,identity_id,role)
-       VALUES($1,NULL,$2,'member'),($1,$3,$2,'member')`,
-      [WORKSPACE, peer, ROOM],
-    );
-    const peerExchange = await fixture.auth.createDaemonExchange(peer);
-    const peerToken = (await fixture.auth.exchangeDaemonToken(peerExchange.exchangeToken))!.daemonToken;
-    const first = '9'.repeat(64);
-    await fixture.operation('sendRoomMessage', {
-      roomId: ROOM,
-      messageId: first,
-      text: '@bee Start this exchange.',
-      mentions: [AGENT],
-    });
-    const parent = await fixture.daemonOperation('postRoomMessage', {
-      roomId: ROOM,
-      requestId: first,
-      triggerMessageId: first,
-      text: 'My first answer.',
-    });
-    const parentId = ((await parent.json()) as { id: string }).id;
-    const peerRequest = 'a'.repeat(64);
-    await fixture.operation('sendRoomMessage', {
-      roomId: ROOM,
-      messageId: peerRequest,
-      text: '@Peer Please answer too.',
-      mentions: [peer],
-    });
-    await fixture.daemonOperation(
-      'postRoomMessage',
-      {
-        roomId: ROOM,
-        requestId: peerRequest,
-        triggerMessageId: peerRequest,
-        text: 'My later answer.',
-      },
-      peerToken,
-    );
-    const reply = '6'.repeat(64);
-    await fixture.operation('sendRoomReply', {
-      roomId: ROOM,
-      messageId: reply,
-      parentMessageId: parentId,
-      text: 'Please continue the first answer.',
-    });
-    expect(
-      (
-        await fixture.database.query<{ agent_id: string; reason: string }>(
-          `SELECT agent_id,reason FROM agent_commands WHERE source_message_id=$1`,
-          [reply],
-        )
-      ).rows,
-    ).toEqual([]);
-
-    const continued = await fixture.request(
-      '/v1/daemon/operations/postRoomMessage',
-      'POST',
-      {
-        roomId: ROOM,
-        requestId: reply,
-        triggerMessageId: reply,
-        text: 'Continuing the first answer.',
-      },
-      fixture.daemonToken,
-    );
-    expect(continued.status).toBe(403);
-    const pileOn = await fixture.request(
-      '/v1/daemon/operations/postRoomMessage',
-      'POST',
-      {
-        roomId: ROOM,
-        requestId: reply,
-        triggerMessageId: reply,
-        text: 'I should not answer this reply.',
-      },
-      peerToken,
-    );
-    expect(pileOn.status).toBe(403);
-
-    const taggedReply = '7'.repeat(64);
-    const tagged = await fixture.operation('sendRoomReply', {
-      roomId: ROOM,
-      messageId: taggedReply,
-      parentMessageId: parentId,
-      text: '@peer Please continue the first answer.',
-    });
-    expect(tagged.status).toBe(200);
-    expect(
-      (
-        await fixture.request(
-          '/v1/daemon/operations/postRoomMessage',
-          'POST',
-          {
-            roomId: ROOM,
-            requestId: taggedReply,
-            triggerMessageId: taggedReply,
-            text: 'The structurally addressed parent agent must not answer.',
-          },
-          fixture.daemonToken,
-        )
-      ).status,
-    ).toBe(403);
-    expect(
-      (
-        await fixture.daemonOperation(
-          'postRoomMessage',
-          {
-            roomId: ROOM,
-            requestId: taggedReply,
-            triggerMessageId: taggedReply,
-            text: 'The explicitly addressed agent answers.',
-          },
-          peerToken,
-        )
-      ).status,
-    ).toBe(200);
   });
 
 
@@ -763,6 +588,7 @@ const fixture = monolithFixture();
     const openingSource = createHash('sha256').update(openingRequest).digest('hex');
     await fixture.database.query(`INSERT INTO messages(id,room_id,author_id,text,presentation)
       VALUES($1,$2,$3,'@bee Ship the widget','message')`, [openingSource, ROOM, HUMAN]);
+    await createAgentCommand(fixture.database, { id: openingRequest, roomId: ROOM, agentId: AGENT, sourceMessageId: openingSource, reason: 'human_tag' });
     const created = await fixture.daemonOperation('createCorner', {
       roomId: ROOM,
       requestId: openingRequest,
@@ -778,11 +604,8 @@ const fixture = monolithFixture();
     const opening = (await fixture.database.query<{ id: string; turn_request_id: string }>(
       `SELECT id,turn_request_id FROM agent_commands WHERE room_id=$1 AND reason='corner_objective'`, [cornerId],
     )).rows[0]!;
-    await claimAgentCommand(fixture.database, cornerId, AGENT, opening.id, 'question-generation');
-    const reply = await fixture.daemonOperation('report', {
-      roomId: cornerId, requestId: opening.turn_request_id, generationId: 'question-generation',
-      status: 'needs_decision', text: '@owner which release should I target?',
-    });
+    await startQueuedTurn(fixture.database, cornerId, AGENT, opening.id);
+    const reply = await fixture.daemonOperation('report', { roomId: cornerId, requestId: opening.turn_request_id, status: 'needs_decision', text: '@owner which release should I target?' });
     expect(reply.status).toBe(200);
     const stored = await fixture.database.query<{ tagged_ids: string[] }>(
       `SELECT ${taggedIdentityIdsSql('m')} tagged_ids FROM messages m

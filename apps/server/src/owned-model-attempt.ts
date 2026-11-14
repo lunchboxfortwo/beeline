@@ -1,4 +1,4 @@
-import { OwnedModelRefusal, OwnedModelUnknownGeneration, OWNED_MODEL_UNKNOWN_GENERATION_MESSAGE } from './owned-model-errors.js';
+import { OwnedModelRefusal } from './owned-model-errors.js';
 import type { OwnedModelAttemptReceipt } from '@beeline/api-contract/helper-model';
 export type { OwnedModelAttemptReceipt } from '@beeline/api-contract/helper-model';
 import { createHash } from 'node:crypto';
@@ -10,6 +10,7 @@ import { AllowanceRefusal } from './free-agent-accounting.js';
 
 /** Same body bound as the existing model HTTP endpoint, never a larger escape. */
 const MAX_PAYLOAD_BYTES = 8 * 1024 * 1024;
+/** `generation_id` is retained storage and holds the item id. */
 export const OWNED_MODEL_ATTEMPT_SCHEMA = `
 CREATE TABLE IF NOT EXISTS owned_model_attempts (
  credential_id text NOT NULL REFERENCES owned_model_credentials(id), model_request_id text NOT NULL,
@@ -38,24 +39,6 @@ END; $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS beeline_owned_model_attempt_immutable ON owned_model_attempts;
 CREATE TRIGGER beeline_owned_model_attempt_immutable BEFORE UPDATE OR DELETE ON owned_model_attempts
  FOR EACH ROW EXECUTE FUNCTION beeline_owned_model_attempt_immutable();
--- Once installed, this meaning survives admission-off or an older compatible
--- caller. Legacy model tokens cannot reclaim a new generation to evade UNKNOWN.
--- Pending requeue, Stop, exact current recovery and ordinary progress remain legal.
-CREATE OR REPLACE FUNCTION beeline_fence_unknown_model_generation() RETURNS trigger AS $$
-BEGIN
- IF NEW.action IN ('input','resume') AND NEW.state='claimed' AND
-   (TG_OP='INSERT' OR ROW(NEW.state,NEW.generation_id,NEW.action)
-     IS DISTINCT FROM ROW(OLD.state,OLD.generation_id,OLD.action)) AND
-   EXISTS(SELECT 1 FROM owned_model_attempts attempt WHERE attempt.command_id=NEW.id AND attempt.state='unknown'
-     AND attempt.generation_id IS DISTINCT FROM NEW.generation_id) THEN
-   RAISE EXCEPTION '${OWNED_MODEL_UNKNOWN_GENERATION_MESSAGE}' USING ERRCODE='23514';
- END IF;
- RETURN NEW;
-END; $$ LANGUAGE plpgsql;
-DROP TRIGGER IF EXISTS beeline_fence_unknown_model_generation ON agent_commands;
-CREATE TRIGGER beeline_fence_unknown_model_generation
- BEFORE INSERT OR UPDATE OF state,generation_id,action ON agent_commands
- FOR EACH ROW EXECUTE FUNCTION beeline_fence_unknown_model_generation();
 `;
 
 /** Canonical server-pinned semantic input/final payload. Only digests reach
@@ -111,7 +94,7 @@ declare const permitBrand: unique symbol;
 export type OwnedModelDispatchPermit = Readonly<{ readonly [permitBrand]: true }>;
 type Permit = { actor: AuthenticatedOwnedModel; requestId: string; digest: string; body: string; consumed: boolean; entered: boolean };
 interface Row {
-  credential_id: string; model_request_id: string; command_id: string; generation_id: string; agent_id: string; owner_id: string;
+  credential_id: string; model_request_id: string; command_id: string; agent_id: string; owner_id: string;
   request_digest: string; payload_digest: string; reservation: OwnedModelReservation;
   state: 'unknown' | 'succeeded' | 'refused'; evidence: OwnedModelEvidence | null; evidence_hash: string | null;
 }
@@ -167,8 +150,6 @@ export class OwnedModelAttempts {
       throw new ReplayedAttempt(row);
     };
     const admitted: { row: Row; body?: string } = await this.database.transaction(async database => {
-      // Serializes reservation COMMIT with a new claim generation. Otherwise
-      // its UNKNOWN could appear just after a new credential was issued.
       await this.credentials.lockInvocation(database, actor);
       await this.credentials.assertCurrent(database, actor);
       const old = (await database.query<Row>('SELECT * FROM owned_model_attempts WHERE credential_id=$1 AND model_request_id=$2 FOR UPDATE', [owned.id, id])).rows[0];
@@ -176,10 +157,8 @@ export class OwnedModelAttempts {
         if (old.request_digest !== semantic) throw new OwnedModelIdentityConflict();
         return { row: old };
       }
-      if ((await database.query(`SELECT 1 FROM owned_model_attempts WHERE command_id=$1 AND generation_id<>$2 AND state='unknown' LIMIT 1`,
-        [owned.commandId, owned.generationId])).rowCount) throw new OwnedModelUnknownGeneration();
-      if ((await database.query(`SELECT 1 FROM owned_model_attempts WHERE command_id=$1 AND generation_id=$2 AND request_digest=$3 AND state='unknown'`,
-        [owned.commandId, owned.generationId, semantic])).rowCount) throw new OwnedModelUnknownPayload();
+      if ((await database.query(`SELECT 1 FROM owned_model_attempts WHERE command_id=$1 AND generation_id=$1 AND request_digest=$2 AND state='unknown'`,
+        [owned.commandId, semantic])).rowCount) throw new OwnedModelUnknownPayload();
       let prepared: Awaited<ReturnType<typeof reserve>>;
       try { prepared = await reserve(database, owned); }
       catch (error) {
@@ -193,9 +172,9 @@ export class OwnedModelAttempts {
       const payload = canonicalOwnedModelPayload(prepared.payload);
       if (prepared.payload.model !== owned.model || prepared.payload.max_tokens !== prepared.reservation.maxOutput) throw new OwnedModelIdentityConflict();
       const row = (await database.query<Row>(`INSERT INTO owned_model_attempts(credential_id,model_request_id,command_id,generation_id,agent_id,owner_id,
-        request_digest,payload_digest,reservation,state) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,'unknown')
+        request_digest,payload_digest,reservation,state) VALUES($1,$2,$3,$3,$4,$5,$6,$7,$8::jsonb,'unknown')
         ON CONFLICT(credential_id,model_request_id) DO NOTHING RETURNING *`,
-      [owned.id, id, owned.commandId, owned.generationId, owned.agentId, owned.ownerId, semantic, payload.digest, JSON.stringify(prepared.reservation)])).rows[0];
+      [owned.id, id, owned.commandId, owned.agentId, owned.ownerId, semantic, payload.digest, JSON.stringify(prepared.reservation)])).rows[0];
       if (!row) { await replay(database); throw new OwnedModelUnknownPayload(); }
       return { row, body: payload.body };
     }).catch((error: unknown) => {
@@ -233,8 +212,6 @@ export class OwnedModelAttempts {
         const row = (await database.query<Row>('SELECT * FROM owned_model_attempts WHERE credential_id=$1 AND model_request_id=$2 FOR SHARE NOWAIT',
           [owned.id, pending.requestId])).rows[0];
         if (!row || row.state !== 'unknown' || row.evidence || row.payload_digest !== pending.digest) throw new OwnedModelRefusal();
-        if ((await database.query(`SELECT 1 FROM owned_model_attempts WHERE command_id=$1 AND generation_id<>$2 AND state='unknown' LIMIT 1`,
-          [owned.commandId, owned.generationId])).rowCount) throw new OwnedModelUnknownGeneration();
         await this.credentials.assertCurrent(database, pending.actor);
         pending.entered = true;
         completion = start(pending.body);
@@ -269,7 +246,7 @@ export class OwnedModelAttempts {
     if (!requestId(id)) throw new OwnedModelIdentityConflict();
     return this.database.transaction(async database => {
       const old = (await database.query<Row>('SELECT * FROM owned_model_attempts WHERE credential_id=$1 AND model_request_id=$2 FOR UPDATE', [owned.id, id])).rows[0];
-      if (!old || old.command_id !== owned.commandId || old.generation_id !== owned.generationId || old.owner_id !== owned.ownerId ||
+      if (!old || old.command_id !== owned.commandId || old.owner_id !== owned.ownerId ||
           old.evidence_hash && old.evidence_hash !== digest || old.state !== 'unknown' && old.state !== outcome) throw new OwnedModelIdentityConflict();
       if (!old.evidence_hash) await settle(database, old.reservation, value);
       else if (old.state === outcome) return receipt(old);

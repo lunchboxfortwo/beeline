@@ -1,8 +1,9 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { createHmac, randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DaemonService } from './daemon-service.js';
-import { claimAgentCommand, type CommandRow } from './agent-command.js';
+import { type CommandRow } from './agent-command.js';
 import { saveWorkflow, startWorkflow } from './workflow-runs.js';
 import { describedWorkflow, migratedDatabase } from './test-support.js';
 import { AGENT_SUBSCRIPTIONS_SCHEMA, subscriptionPromptBody } from './agent-subscriptions.js';
@@ -29,10 +30,9 @@ async function fixture() {
   await db.query(`INSERT INTO agent_commands(id,room_id,agent_id,source_message_id,turn_request_id,
     action,reason,root_command_id,root_source_message_id,agent_depth)
     VALUES('create-hook',$1,$2,$3,'create-hook','input','human_message','create-hook',$3,0)`, [ROOM, AGENT, root]);
-  await claimAgentCommand(db, ROOM, AGENT, 'create-hook', 'fixture-generation');
+  await startQueuedTurn(db, ROOM, AGENT, 'create-hook');
   const daemon = new DaemonService(db, new LiveHub());
-  const create = () => daemon.execute('createAgentSubscription', { roomId: ROOM, source: 'webhook', event: 'webhook.called',
-    workflowName: 'feedback-triage', title: 'Cursor automation', when: 'On webhook call', prompt: 'Run the saved feedback triage.', requestId: 'create-hook', generationId: 'fixture-generation' }, AGENT);
+  const create = () => daemon.execute('createAgentSubscription', { roomId: ROOM, source: 'webhook', event: 'webhook.called', workflowName: 'feedback-triage', title: 'Cursor automation', when: 'On webhook call', prompt: 'Run the saved feedback triage.', requestId: 'create-hook' }, AGENT);
   const phone = new PhoneService(db, 'https://beeline.test');
   return { db, create, phone, root };
 }

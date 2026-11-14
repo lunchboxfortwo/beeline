@@ -33,13 +33,13 @@ export function ownedModelStream(
   options: Options = {},
 ): ReturnType<typeof streamSimple> {
   const active = JSON.parse(readFileSync(process.env.BEELINE_TURN_CONTEXT_FILE!, 'utf8')) as {
-    generationId: string;
+    itemId: string;
     ownedModelDirectory: string;
   };
   const owner = OwnedModelFiles.open(active.ownedModelDirectory);
   const binding = owner.binding();
   if (
-    binding.generationId !== active.generationId ||
+    binding.itemId !== active.itemId ||
     model.provider !== 'beeline' ||
     model.baseUrl.replace(/\/$/, '') !== binding.baseUrl
   )

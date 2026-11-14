@@ -400,7 +400,7 @@ it('records provider/tool-delta timing without retaining conversation text', asy
     [{role:'user',content:'private request'}],()=>{},new AbortController().signal,
     {agents:[],diagnostic,announce:async()=>{},search:async()=>''});
   expect(diagnostic).toHaveBeenCalledOnce();
-  expect(diagnostic.mock.calls[0]![0]).toMatchObject({generationId:'generation-test',provider:'Test provider',model:'test-model',historyMessages:1,historyCharacters:15,searched:false,firstDeltaMs:expect.any(Number)});
+  expect(diagnostic.mock.calls[0]![0]).toMatchObject({ provider:'Test provider', model:'test-model', historyMessages:1, historyCharacters:15, searched:false, firstDeltaMs:expect.any(Number) });
   expect(JSON.stringify(diagnostic.mock.calls)).not.toContain('private request');
 });
 

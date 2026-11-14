@@ -175,7 +175,7 @@ it('refreshes the shared machine observation through local Squire activity witho
   const call = async (tool: string) => {
     const response = await fetch(`${url}/mcp`, { method: 'POST',
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ roomId: 'room', requestId: 'request', taskId: 'task', generationId: 'generation',
+      body: JSON.stringify({ roomId: 'room', requestId: 'request', taskId: 'task', itemId: 'generation',
         method: 'tools/call', params: { name: tool, arguments: {} } }) });
     expect(response.status).toBe(200);
     return response.json();

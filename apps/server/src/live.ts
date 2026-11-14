@@ -40,7 +40,6 @@ export type CommittedTurnLiveRow = {
   status: 'working' | 'complete' | 'failed' | 'cancelled';
   started_at: Date;
   created_at: Date;
-  generation_id: string | null;
   requested_by: string | null;
 };
 
@@ -102,8 +101,6 @@ export type LiveEvent =
       repositoryChanged?: boolean;
       /** True when the corner_facts row records a requested close. */
       closeRequested?: boolean;
-      /** An agent_commands row left `claimed`, so another agent's held wake may be due. */
-      commandReleased?: boolean;
       trace?: LiveTrace;
       /** Same-process only. PostgreSQL notifications deliberately remain ID-only. */
       committedRow?:

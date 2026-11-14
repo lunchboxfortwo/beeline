@@ -1,4 +1,6 @@
 import { once } from 'node:events';
+import { randomUUID,randomBytes } from 'node:crypto';
+import { createAgentCommand } from '../../server/src/agent-command.js';
 import type { AddressInfo } from 'node:net';
 import WebSocket from 'ws';
 import { expect, it, vi } from 'vitest';
@@ -6,7 +8,7 @@ import { MachineLink } from './machine-link.js';
 import { DaemonApiClient } from './daemon-api-client.js';
 import { createBeelineServer } from '../../server/src/server.js';
 import { migratedDatabase } from '../../server/src/test-support.js';
-import type { DaemonService } from '../../server/src/daemon-service.js';
+import { DaemonService } from '../../server/src/daemon-service.js';
 import type { TokenAuth } from '../../server/src/auth.js';
 import type { PhoneService } from '../../server/src/phone-service.js';
 import { LiveHub } from '../../server/src/live.js';
@@ -14,27 +16,39 @@ import { LiveHub } from '../../server/src/live.js';
 const agentId='ab'.repeat(32);
 const gate=()=>{let resolve!:()=>void;const promise=new Promise<void>(done=>{resolve=done;});return {promise,resolve};};
 
-it('DROP-24: completes every turn across repeated mid-turn drops with one reconnect per drop and no failed requests',async()=>{
+it('DROP-24: delivers every answer across repeated mid-answer drops with one reconnect per drop and no failed requests',async()=>{
   const database=await migratedDatabase();
-  const claimGate=gate(),effectGate=gate();
-  const claimed=new Set<string>(),completed=new Set<string>();
+  const owner='a'.repeat(64),workspace=randomUUID(),rooms=Array.from({length:24},()=>randomUUID());
+  await database.query(`INSERT INTO identities(id,kind,name) VALUES($1,'human','Owner'),($2,'agent','Agent')`,[owner,agentId]);
+  await database.query('INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)',[agentId,owner]);
+  await database.query("INSERT INTO workspaces(id,name) VALUES($1,'Drop proof')",[workspace]);
+  const requests=new Map<string,string>();
+  for(const roomId of rooms){
+    await database.query("INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Drop')",[roomId,workspace]);
+    for(const id of [owner,agentId])await database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`,[workspace,roomId,id]);
+    const source=randomBytes(32).toString('hex');
+    await database.query("INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Request')",[source,roomId,owner]);
+    requests.set(roomId,(await createAgentCommand(database,{roomId,agentId,sourceMessageId:source,reason:'human_tag'}))!.id);
+  }
+  const live=new LiveHub(),real=new DaemonService(database,live);
+  const answerGate=gate(),traceGate=gate();
+  const answered=new Set<string>(),traced=new Set<string>();
   const calls=new Map<string,number>();
   const daemon={execute:vi.fn(async(name:string,input:Record<string,any>)=>{
     const key=JSON.stringify([name,input.roomId]);calls.set(key,(calls.get(key)??0)+1);
-    if(name==='getAgentCommands')return {commandProtocol:1,commands:[]};
-    if(name==='getRoomInbox')return {items:[],cursor:undefined};
-    if(name==='claimAgentCommand'){
-      claimed.add(input.roomId);await claimGate.promise;return {id:input.commandId,createdAt:1};
-    }
+    if(name==='getAgentCommands')return {commandProtocol:2,commands:[]};
     if(name==='postRoomMessage'){
-      completed.add(input.roomId);await effectGate.promise;return {id:input.requestId,createdAt:1};
+      answered.add(input.roomId);await answerGate.promise;return real.execute(name,input as never,agentId);
     }
-    return {id:input.commandId??'ok',createdAt:1};
+    if(name==='postAgentTurnReceipt'){
+      traced.add(input.roomId);await traceGate.promise;return {id:input.requestId,createdAt:1};
+    }
+    return {id:'ok',createdAt:1};
   })} as unknown as DaemonService;
   const server=createBeelineServer({database,daemon,
     auth:{authenticateDaemon:async()=>agentId,retiredDaemonAgent:async()=>null} as unknown as TokenAuth,
     phone:{canReadRooms:async(ids:string[])=>new Set(ids)} as unknown as PhoneService,
-    live:new LiveHub(),mediaMaximumBytes:1});
+    live,mediaMaximumBytes:1});
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   const sockets:WebSocket[]=[];
   const frames:Record<string,any>[][]=[];
@@ -47,8 +61,7 @@ it('DROP-24: completes every turn across repeated mid-turn drops with one reconn
   const fetcher=vi.fn(()=>{throw new Error('machine requests must not use HTTP');});
   const api=new DaemonApiClient(machine.origin,'bdt_test',agentId,fetcher,undefined,undefined,machine);
   const failures:unknown[]=[];
-  const rooms=Array.from({length:24},(_,index)=>`room-${index}`);
-  const subscriptions=rooms.map(room=>api.liveSubscribe(room));
+  api.subscribeQueue();
   const drop=async()=>{
     const socket=sockets.at(-1)!;
     const count=sockets.length;
@@ -59,35 +72,34 @@ it('DROP-24: completes every turn across repeated mid-turn drops with one reconn
   try{
     await vi.waitFor(()=>expect(api.channel.isOpen()).toBe(true));
     const turns=rooms.map(async roomId=>{
-      await api.execute('claimAgentCommand',{roomId,commandId:`command-${roomId}`,generationId:`generation-${roomId}`});
-      await api.execute('postRoomMessage',{roomId,requestId:`command-${roomId}`,generationId:`generation-${roomId}`,text:'completed'});
-      await api.execute('acknowledgeAgentCommand',{roomId,commandId:`command-${roomId}`});
+      await api.execute('postRoomMessage',{roomId,requestId:requests.get(roomId)!,text:'answer'});
+      await api.execute('postAgentTurnReceipt',{agentId,roomId,requestId:requests.get(roomId)!,outcome:'answered'});
     });
     for(const turn of turns)void turn.catch(error=>{failures.push(error);});
-    await vi.waitFor(()=>expect(claimed.size).toBe(24));
-    await drop();await drop(); // All accepted claims remain in flight.
-    claimGate.resolve();
-    await vi.waitFor(()=>expect(completed.size).toBe(24));
-    await drop();await drop(); // Effects committed, replies still withheld.
-    effectGate.resolve();
+    await vi.waitFor(()=>expect(answered.size).toBe(24));
+    await drop();await drop(); // Every answer is on the wire, none acknowledged.
+    answerGate.resolve();
+    await vi.waitFor(()=>expect(traced.size).toBe(24));
+    await drop();await drop(); // Diagnostics sent, results still withheld.
+    traceGate.resolve();
     await Promise.all(turns);
     expect(failures).toEqual([]);
-    expect(completed.size).toBe(24);
+    expect(answered.size).toBe(24);
     expect(machine.link.reconnects).toBe(4);
     expect(sockets).toHaveLength(5);
     expect(fetcher).not.toHaveBeenCalled();
     for(const roomId of rooms){
-      expect(calls.get(JSON.stringify(['claimAgentCommand',roomId]))).toBe(1);
-      expect(calls.get(JSON.stringify(['postRoomMessage',roomId]))).toBe(1);
-      expect(calls.get(JSON.stringify(['acknowledgeAgentCommand',roomId]))).toBe(1);
+      expect(calls.get(JSON.stringify(['postRoomMessage',roomId]))).toBeGreaterThanOrEqual(1);
+      expect((await database.query(`SELECT count(*)::int n FROM messages WHERE room_id=$1 AND author_id=$2 AND text='answer'`,[roomId,agentId])).rows).toEqual([{n:1}]);
+      expect(calls.get(JSON.stringify(['postAgentTurnReceipt',roomId]))).toBe(1);
     }
     expect(frames.flat().filter(frame=>frame.type==='request-result').length).toBeGreaterThanOrEqual(96);
     for(const sent of frames){
       expect(sent.filter(frame=>frame.type==='register-machine')).toHaveLength(1);
-      for(const roomId of rooms)expect(sent.filter(frame=>frame.type==='subscribe'&&frame.roomId===roomId)).toHaveLength(1);
+      expect(sent.filter(frame=>frame.type==='subscribe-queue')).toHaveLength(1);
     }
   }finally{
-    claimGate.resolve();effectGate.resolve();for(const unsubscribe of subscriptions)unsubscribe();machine.stop();
+    answerGate.resolve();traceGate.resolve();machine.stop();
     for(const socket of sockets)socket.terminate();
     const closed=once(server,'close');server.close();await closed;await database.close();
   }

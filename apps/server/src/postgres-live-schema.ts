@@ -77,8 +77,6 @@ BEGIN
       -- its own parent Room and opener, exactly as a membership push does, so
       -- the agent-wide wake can start that corner's intake directly instead
       -- of waiting for the next discovery reconciliation.
-      -- A claimed command that ends releases the corner: a review wake held
-      -- while this agent worked becomes deliverable with no write of its own.
       payload = jsonb_build_object('table', TG_TABLE_NAME, 'operation', TG_OP,
         'roomId', COALESCE(NEW.room_id, OLD.room_id), 'agentId', COALESCE(NEW.agent_id, OLD.agent_id),
         'cornerTextChanged', COALESCE(NEW.reason,OLD.reason)='corner_objective'
@@ -87,11 +85,7 @@ BEGIN
             THEN NEW.private_payload->>'objective' IS DISTINCT FROM OLD.private_payload->>'objective' ELSE false END,
         'cornerParentId', CASE WHEN ${rowChangedSql(['state','agent_id','room_id','action'])}
           OR (COALESCE(NEW.reason,OLD.reason)='corner_objective' AND ${rowChangedSql(['private_payload'])})
-          THEN (SELECT parent_id FROM rooms WHERE id=COALESCE(NEW.room_id,OLD.room_id)) END,
-        'released', CASE
-          WHEN TG_OP = 'UPDATE' THEN OLD.state = 'claimed' AND NEW.state <> 'claimed'
-          WHEN TG_OP = 'DELETE' THEN OLD.state = 'claimed'
-          ELSE false END)
+          THEN (SELECT parent_id FROM rooms WHERE id=COALESCE(NEW.room_id,OLD.room_id)) END)
         || COALESCE((
           SELECT jsonb_build_object(
             'parentRoomId', room.parent_id,

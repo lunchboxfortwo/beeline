@@ -188,7 +188,7 @@ const fixture = monolithFixture();
   });
 
 
-  it('stays silent for parentless continuity outside the conversation window', async () => {
+  it('queues a solo-Room request regardless of old conversation history', async () => {
     await fixture.database.query(
       `INSERT INTO messages(id,room_id,author_id,text,created_at)
        VALUES($1,$2,$3,'@owner Aged-out answer.',now()-interval '1 hour')`,
@@ -208,11 +208,14 @@ const fixture = monolithFixture();
       text: 'No active exchange remains.',
     });
     expect(sent.status).toBe(200);
+    await fixture.database.backgroundWork.drain();
     const notices = await fixture.database.query<{ text: string }>(
       `SELECT text FROM messages WHERE room_id=$1 AND presentation='system'`,
       [ROOM],
     );
-    expect(notices.rows).toEqual([]);
+    expect(notices.rows).toEqual([{text:'@bee is offline · connect again'}]);
+    const queued=await fixture.daemonOperation('getAgentCommands',{roomId:ROOM});
+    expect((await queued.json()).commands.some((item:{sourceMessageId:string})=>item.sourceMessageId==='e'.repeat(64))).toBe(true);
   });
 
 
@@ -466,7 +469,7 @@ const fixture = monolithFixture();
   });
 
 
-  it('refreshes a working receipt from activity but leaves a terminal receipt untouched', async () => {
+  it('refreshes unfinished activity but preserves published completion', async () => {
     const requestId = '5'.repeat(64);
     await fixture.daemonOperation('postAgentTurnReceipt', { roomId: ROOM, requestId, status: 'working' });
     await fixture.database.query(
@@ -489,6 +492,7 @@ const fixture = monolithFixture();
       ).rows[0],
     ).toEqual({ fresh: true });
 
+    await fixture.daemonOperation('postRoomMessage', { roomId: ROOM, requestId, text: 'The stored answer.' });
     await fixture.daemonOperation('postAgentTurnReceipt', { roomId: ROOM, requestId, status: 'failed' });
     await fixture.database.query(
       `UPDATE agent_turns SET created_at=now()-interval '1 minute'
@@ -508,7 +512,7 @@ const fixture = monolithFixture();
           [ROOM, requestId, AGENT],
         )
       ).rows[0],
-    ).toEqual({ status: 'failed', old: true });
+    ).toEqual({ status: 'complete', old: true });
   });
 
 

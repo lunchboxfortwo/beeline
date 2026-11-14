@@ -2,9 +2,9 @@
  * Process-wide provenance for live Squire browser sessions.
  *
  * One helper process serves every Room, DM and corner an agent belongs to, and
- * each of those conversations owns its own `SquireTaskRelay` and MCP
- * connection. A browser session is owned by the MCP connection that opened it,
- * so a second conversation cannot drive it directly. The registry is what lets
+ * each of those conversations owns its own `SquireTaskRelay` and request
+ * context. Browser ownership is bound to that place context before calls reach
+ * the shared broker connection, so a second conversation cannot drive it directly. The registry is what lets
  * a *scheduled* turn inherit a session opened by the conversation that created
  * the schedule, or by an earlier run of that same schedule: the owning relay's
  * client stays the one that issues the call, and this table is the authority
@@ -13,14 +13,14 @@
  * Ordinary conversations never consult it: a turn may only use a session it
  * owns or one a schedule it is a run of is allowed to inherit.
  */
-import type { StdioSquireMcpClient } from './squire-mcp-client.js';
+import type { SquireMcpConnection } from './squire-mcp-client.js';
 
 export type SquireSessionOwner = {
   readonly agentId: string;
   /** The Room/DM/corner whose turn opened the session. */
   readonly conversationId: string;
-  /** The live MCP connection that owns the session at the broker. */
-  readonly client: StdioSquireMcpClient;
+  /** The place context that owns the session on the shared helper transport. */
+  readonly client: SquireMcpConnection;
   /** Schedules whose runs have legitimately created or used this session. */
   readonly scheduleIds: Set<string>;
 };

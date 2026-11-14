@@ -1,29 +1,28 @@
-import { cornerCommanderIdSql } from '../corner-commander.js';
-import { joinRooms } from '../membership-join.js';
+import { fixCornerText,type CornerWatchKind } from '@beeline/api-contract/daemon';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
-import { cornerObjectiveSql, readCornerObjective } from '../corner-objective.js';
-import { deleteCornerBranchBestEffort } from '../corner-branch-cleanup.js';
-import { cornerOpeningSql, cornerKindSql, cornerOpenedFromSql, cornerRequestSql } from '../corner-opening.js';
-import { cornerOwnerSql } from '../corner-worker.js';
-import { setCornerReviewer } from '../corner-reviewer.js';
-import { ExpectedRefusalError } from '../command-refusal.js';
-import { assertCornerCommandTarget, CommandRefusalError } from '../commander.js';
-import { setCornerHold } from '../corner-holds.js';
-import { authorizeCommandOutput } from '../agent-command.js';
 import { randomUUID } from 'node:crypto';
-import { cornerImplementerSql } from '../corner-worker.js';
-import { cornerBriefRevisionHash, currentCornerBrief, resolveCornerBriefApproval, resolveCornerBriefAttachments, resolvePendingCornerBriefAttachments, validateCornerBrief } from '../corner-brief.js';
-import { fixCornerText, type CornerWatchKind } from '@beeline/api-contract/daemon';
+import { authorizeCommandOutput } from '../agent-command.js';
+import { ExpectedRefusalError } from '../command-refusal.js';
+import { assertCornerCommandTarget,CommandRefusalError } from '../commander.js';
+import { deleteCornerBranchBestEffort } from '../corner-branch-cleanup.js';
+import { cornerBriefRevisionHash,currentCornerBrief,resolveCornerBriefApproval,resolveCornerBriefAttachments,resolvePendingCornerBriefAttachments,validateCornerBrief } from '../corner-brief.js';
+import { closeCornerPullRequestBestEffort,closeCornerState,lockCornerArchivalAuthority } from '../corner-close.js';
+import { cornerCommanderIdSql } from '../corner-commander.js';
+import { setCornerHold } from '../corner-holds.js';
+import { advanceCorner,createCornerFacts,lockCornerLifecycle } from '../corner-lifecycle.js';
+import { cornerObjectiveSql,readCornerObjective } from '../corner-objective.js';
+import { cornerKindSql,cornerOpenedFromSql,cornerOpeningSql,cornerRequestSql } from '../corner-opening.js';
+import { setCornerReviewer } from '../corner-reviewer.js';
+import { cornerImplementerSql,cornerOwnerSql } from '../corner-worker.js';
 import { type SqlDatabase } from '../database.js';
-import { closeCornerPullRequestBestEffort, closeCornerState, lockCornerArchivalAuthority } from '../corner-close.js';
-import { advanceCorner, createCornerFacts, lockCornerLifecycle } from '../corner-lifecycle.js';
+import { joinRooms } from '../membership-join.js';
 import { systemLine } from '../system-line.js';
+import { daemonAccess,daemonIdentity } from './access.js';
 import type { DaemonContext } from './context.js';
-import { Input, id } from './values.js';
-import { daemonAccess, daemonIdentity } from './access.js';
-import { daemonBriefAttachmentRooms } from './corner-reports.js';
+import { daemonReach,daemonWriteResult } from './corner-messages.js';
 import { daemonCheckReviewerAuthors } from './corner-reads.js';
-import { daemonReach, daemonWriteResult } from './corner-messages.js';
+import { daemonBriefAttachmentRooms } from './corner-reports.js';
+import { Input } from './values.js';
 
 
 
@@ -125,7 +124,7 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
            LEFT JOIN corner_brief_revisions initial
              ON initial.corner_id=child.id AND initial.revision=1
            WHERE child.parent_id=$1
-             AND COALESCE(opening.private_payload->>'openKey',opening.turn_request_id)=$2
+             AND COALESCE(opening.private_payload->>'openKey',${cornerRequestSql('child.id')})=$2
              AND child.archived_at IS NULL
            ORDER BY child.created_at,child.id
            LIMIT 1`,
@@ -202,13 +201,7 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
         if (implementer.kind !== 'agent') throw new Error('implementer must be an agent');
         implementerAgentId = implementer.id;
       }
-      const parentCommand = await authorizeCommandOutput(
-        db,
-        commandRoomId,
-        agentId,
-        input.requestId,
-        input.generationId,
-      );
+      const parentCommand = await authorizeCommandOutput(db, commandRoomId, agentId, input.requestId);
       const commissionedBy = (
         await db.query<{ author_id: string }>(
           `SELECT message.author_id FROM messages message
@@ -241,7 +234,7 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
             ? await daemonBriefAttachmentRooms(ctx, db, sourceRoomIds, cornerId, agentId, parentCommand)
             : sourceRoomIds,
           input.brief,
-          { roomId: commandRoomId, agentId, requestId: input.requestId, generationId: input.generationId },
+          { roomId: commandRoomId, agentId, requestId: input.requestId },
         );
         const attachments = [
           ...explicitAttachments,
@@ -249,7 +242,6 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
             roomId: commandRoomId,
             agentId,
             requestId: input.requestId,
-            generationId: input.generationId,
             excluding: explicitAttachments.map((attachment) => attachment.objectId),
           })),
         ];
@@ -292,7 +284,6 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
         reason: 'corner_objective',
         parent: parentCommand,
         retainDepth: true,
-        turnRequestId: input.requestId,
       },
       });
       // After the opening order: the reviewer must be independent of the agent it assigns.
@@ -386,9 +377,7 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
       }
       validateCornerBrief(draft);
       const commandRoomId = input.roomId ?? input.cornerId;
-      const command = await authorizeCommandOutput(
-        db, commandRoomId, agentId, input.requestId, input.generationId,
-      );
+      const command = await authorizeCommandOutput(db, commandRoomId, agentId, input.requestId);
       await assertCornerCommandTarget(db, command.room_id, input.cornerId);
       const current = await currentCornerBrief(db, input.cornerId);
       if ((current?.revision ?? 0) !== input.expectedRevision)
@@ -412,7 +401,7 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
           ? await daemonBriefAttachmentRooms(ctx, db, sourceRoomIds, input.cornerId, agentId, command)
           : sourceRoomIds,
         draft,
-        { roomId: commandRoomId, agentId, requestId: input.requestId, generationId: input.generationId },
+        { roomId: commandRoomId, agentId, requestId: input.requestId },
       );
       const attachments = [
         ...explicitAttachments,
@@ -420,7 +409,6 @@ import { daemonReach, daemonWriteResult } from './corner-messages.js';
           roomId: input.cornerId,
           agentId,
           requestId: input.requestId,
-          generationId: input.generationId,
           excluding: explicitAttachments.map((attachment) => attachment.objectId),
         })),
       ];

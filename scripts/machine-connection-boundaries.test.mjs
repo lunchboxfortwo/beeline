@@ -50,11 +50,11 @@ test('the real tree checker rejects a planted second reconnect and timer',()=>{
   }finally{rmSync(root,{recursive:true,force:true});}
 });
 
-test('the sole warm countdown is pinned to AgentProcesses.workChanged',()=>{
-  const file='apps/body/src/agent-process.ts';
-  assert.deepEqual(inspectMachineConnectionSource(file,'class AgentProcesses { workChanged(){setTimeout(stop,60000)} }'),[]);
-  assert.ok(inspectMachineConnectionSource(file,'class AgentProcesses { workChanged(){setTimeout(stop,60000);setTimeout(other,10)} }').length);
-  assert.ok(inspectMachineConnectionSource(file,'class AgentProcesses { extra(){setTimeout(stop,60000)} }').length);
+test('the sole warm countdown is pinned to AgentRunner.armIdle',()=>{
+  const file='apps/body/src/agent-runner.ts';
+  assert.deepEqual(inspectMachineConnectionSource(file,'class AgentRunner { armIdle(){setTimeout(stop,60000)} }'),[]);
+  assert.ok(inspectMachineConnectionSource(file,'class AgentRunner { armIdle(){setTimeout(stop,60000);setTimeout(other,10)} }').length);
+  assert.ok(inspectMachineConnectionSource(file,'class AgentRunner { extra(){setTimeout(stop,60000)} }').length);
 });
 
 test('the sole update timeout is pinned to ReleaseTransaction.begin',()=>{
@@ -79,9 +79,3 @@ test('server shutdown sinks follow only an unchanged mechanical owner move',()=>
   assert.ok(judgeMachineSites(new Map([[id,2]]),{[id]:{count:2,reason:'shutdown'}},baseline,true).length);
 });
 
-test('only the invocation owner may bound a model turn with one deadline',()=>{
-  const file='apps/body/src/agent-turn-deadline.ts';
-  assert.deepEqual(inspectMachineConnectionSource(file,'class AgentTurnDeadline { run(){setTimeout(stop,21600000)} }'),[]);
-  assert.ok(inspectMachineConnectionSource(file,'class AgentTurnDeadline { run(){setTimeout(stop,21600000);setTimeout(retry,1)} }').length);
-  assert.ok(inspectMachineConnectionSource(file,'class AgentTurnDeadline { retry(){setTimeout(stop,1)} }').length);
-});

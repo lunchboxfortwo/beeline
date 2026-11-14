@@ -1,3 +1,4 @@
+import { WORKSPACE_HANDLE_SCHEMA } from './workspace-handles.js';
 import { randomUUID } from 'node:crypto';
 import { CHOICE_CARD_TYPE } from '@beeline/api-contract/phone';
 import { Pool } from 'pg';
@@ -51,6 +52,7 @@ async function rig(work: (reader: SqlDatabase, writer: SqlDatabase) => Promise<v
       CREATE TABLE connector_offers(id uuid PRIMARY KEY,workspace_id uuid,room_id uuid,message_id text,addressee_id text,connector_type text,status text);
       CREATE TABLE message_bookmarks(identity_id text,workspace_id uuid,room_id uuid,message_id text);
       CREATE TABLE needs_you_marks(identity_id text,workspace_id uuid,message_id text);`);
+    await reader.query(WORKSPACE_HANDLE_SCHEMA);
     await reader.query(COMMITTED_JOURNAL_SCHEMA);
     await reader.query(MEMBERSHIP_AUTHORITY_SCHEMA);
     await reader.query(ROUTER_COMMAND_SCHEMA);
@@ -87,26 +89,6 @@ async function unchanged(reader: SqlDatabase, publish: unknown) {
 }
 
 describe.skipIf(!url)('real PostgreSQL selected Tray decision contention', () => {
-  it('refuses NOWAIT source-row contention instead of deadlocking with a legacy source→authority writer', async () => {
-    await rig(async (reader, writer) => {
-      await reader.query(`UPDATE messages SET card=card-'runId' WHERE id='choice-card'`);
-      await reader.query('UPDATE room_choices SET workflow_run_id=NULL WHERE id=$1', [CHOICE]);
-      await reader.query(`DELETE FROM live_journal WHERE event->>'sourceTable'='tray-projection'`);
-      const live = new LiveHub(), publish = vi.spyOn(live, 'publish'), held = deferred(), release = deferred();
-      const legacy = writer.transaction(async tx => {
-        await tx.query('SELECT id FROM room_choices WHERE id=$1 FOR UPDATE', [CHOICE]);
-        held.resolve(); await release.promise;
-        await skipRoomChoice(tx, { choiceId: CHOICE, viewerId: A }, { wake: false });
-      });
-      try {
-        await held.promise;
-        await expect(selected(reader, live)('busy-choice')).rejects.toMatchObject({ status: 409, message: expect.stringContaining('busy') });
-        await unchanged(reader, publish);
-        release.resolve(); await legacy;
-        expect((await reader.query('SELECT status FROM room_choices WHERE id=$1', [CHOICE])).rows).toEqual([{ status: 'skipped' }]);
-      } finally { release.resolve(); await legacy; }
-    });
-  });
 
   it('observes committed parent-Room revocation and refuses without a decision or compatibility notification', async () => {
     await rig(async (reader, writer) => {

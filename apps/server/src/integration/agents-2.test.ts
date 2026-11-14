@@ -286,45 +286,6 @@ const fixture = monolithFixture();
   });
 
 
-  it('does not restart a standing wrong-model failure', async () => {
-    const requestId = 'a'.repeat(64);
-    await fixture.operation('sendRoomMessage', {
-      roomId: ROOM,
-      messageId: requestId,
-      text: '@bee pick a model',
-      mentions: [AGENT],
-    });
-    await fixture.daemonOperation('postAgentTurnReceipt', { roomId: ROOM, requestId, status: 'working' });
-    const failed = await fixture.daemonOperation('postAgentTurnReceipt', {
-      roomId: ROOM,
-      requestId,
-      status: 'failed',
-      reason: 'model selection unavailable',
-      reasonKind: 'wrong-model',
-    });
-    expect(failed.status).toBe(200);
-    expect(await failed.json()).not.toMatchObject({ hiccupRestart: true });
-    expect((await fixture.database.query("SELECT 1 FROM messages WHERE card_type='turn-failed' AND card->>'requestId'=$1", [requestId])).rowCount).toBe(0);
-    expect((await fixture.database.query('SELECT state FROM agent_commands WHERE turn_request_id=$1', [requestId])).rows[0]).toEqual({state: 'complete'});
-    expect(
-      (
-        await fixture.daemonOperation('postAgentTurnReceipt', {
-          roomId: ROOM,
-          requestId,
-          status: 'working',
-        })
-      ).status,
-    ).toBe(403);
-    const lateReply = await fixture.daemonOperation('postRoomMessage', {
-      roomId: ROOM,
-      requestId,
-      triggerMessageId: requestId,
-      text: 'Not much!',
-    });
-    expect(lateReply.status).toBe(403);
-  });
-
-
   it('records agent-initiated openings without human context, and rejects an over-long spec', async () => {
     const agentMessage = 'agent-approval-message';
     await fixture.database.query(

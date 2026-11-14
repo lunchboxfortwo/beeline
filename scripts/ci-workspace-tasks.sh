@@ -20,6 +20,9 @@ typecheck() {
   node scripts/check-router-boundaries.mjs --base "$CHANNEL_BASE"
   node scripts/check-no-emulator-start.mjs
   node --test scripts/no-emulator-start.test.mjs
+  # Nothing but the walls in docs/walls.md may refuse or hold a request
+  node scripts/check-walls.mjs
+  node --test scripts/check-walls.test.mjs
   # Keep each module's sinks in their owner files
   export ARCHITECTURE_BASE="$CI_BASE_SHA"
   git fetch --no-tags origin "$ARCHITECTURE_BASE"

@@ -1,3 +1,4 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { phoneFetch } from '../../../tests/helpers/phone-operation.js';
 import { cornerOwnerSql } from './corner-worker.js';
 import { cornerCommissionerSql, cornerKindSql, cornerOpenedFromSql, cornerRequestSql } from './corner-opening.js';
@@ -6,7 +7,7 @@ import { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { migrate, type SqlDatabase } from './database.js';
-import { claimAgentCommand } from './agent-command.js';
+
 import { setCornerHold } from './corner-holds.js';
 import { taggedIdentityIdsSql } from './message-mentions.js';
 import { cornerRunStateSql } from './corner-run.js';
@@ -715,7 +716,7 @@ describe('deleteAccount', () => {
       [CORNER, helper]);
     // Dispatch already created optimistic activity. Claim it as the helper
     // would, so deletion must cancel the actual running assignment too.
-    await claimAgentCommand(database, CORNER, helper, 'helper-input', 'helper-generation');
+    await startQueuedTurn(database, CORNER, helper, 'helper-input');
     await phone.execute('deleteAccount', {}, OWNER);
     await expectRowCount(
       `SELECT 1 FROM agent_commands WHERE room_id=$1 AND action IN ('input','resume')

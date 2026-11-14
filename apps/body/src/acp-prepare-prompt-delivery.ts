@@ -157,7 +157,7 @@ import { AcpClient, isPiAcpHarness, flattenHarnessCause, AcpRuntimeExitedError, 
     if (!sessionId) throw new Error('session/new missing sessionId');
     if (/(^|[/\\])pi-acp(\.[a-z]+)?$/i.test(ctx.agentLabel) && opts.systemPrompt)
       ctx.piSessionInstructions.remember(sessionId, opts.systemPrompt);
-    await ctx.applySessionMode(sessionId, raw, opts.mode);
+    if (!ctx.osSandbox) await ctx.applySessionMode(sessionId, raw, opts.mode);
     if (ctx.codexBlockDelivery)
       ctx.promptDeliveries.set(sessionId, new CodexPromptDelivery(isPiAcpHarness(ctx.agentLabel) ? undefined : opts.systemPrompt));
     return { sessionId, raw };
@@ -194,7 +194,7 @@ import { AcpClient, isPiAcpHarness, flattenHarnessCause, AcpRuntimeExitedError, 
     ctx.promptDeliveries.delete(opts.sessionId);
     const result = await ctx.request('session/load', params);
     const raw = result && typeof result === 'object' ? (result as Record<string, unknown>) : {};
-    await ctx.applySessionMode(opts.sessionId, raw, opts.mode);
+    if (!ctx.osSandbox) await ctx.applySessionMode(opts.sessionId, raw, opts.mode);
     if (ctx.codexBlockDelivery)
       ctx.promptDeliveries.set(opts.sessionId, new CodexPromptDelivery());
     return { sessionId: opts.sessionId, raw };
@@ -317,13 +317,6 @@ import { AcpClient, isPiAcpHarness, flattenHarnessCause, AcpRuntimeExitedError, 
     };
     let watcher: FSWatcher | undefined;
     if (contextPath) watcher = watch(contextPath, checkTerminalContext);
-    const stable = (value: unknown): unknown => {
-      if (Array.isArray(value)) return value.map(stable);
-      if (value && typeof value === 'object') return Object.fromEntries(
-        Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, stable(item)]),
-      );
-      return value;
-    };
     const onUpdate = (u: SessionUpdate) => {
       if (u.sessionId !== sessionId || terminalReason) return;
       if (['tool_call', 'tool_call_update', 'tool_result'].includes(String(u.update.sessionUpdate))) {
@@ -342,23 +335,6 @@ import { AcpClient, isPiAcpHarness, flattenHarnessCause, AcpRuntimeExitedError, 
       onActivity?.(agentStreamSnapshot(updates, ctx.agentLabel));
       const calls = [...toolCallEntries(updates),...asyncTasks.values()];
       onToolCalls?.(calls);
-      let previous: string | undefined;
-      let repeats = 0;
-      for (const call of calls) {
-        if (!call.title || (!call.resultReceived && !['completed', 'failed'].includes(call.status ?? ''))) {
-          previous = undefined;
-          repeats = 0;
-          continue;
-        }
-        const key = JSON.stringify([call.title, stable(call.rawInput ?? {}),
-          call.status === 'failed', stable(call.content), stable(call.rawOutput)]);
-        repeats = key === previous ? repeats + 1 : 1;
-        previous = key;
-        if (repeats === 5) {
-          stop('repeated-tool-call');
-          return;
-        }
-      }
       if (onChunk) {
         const delta = agentMessageChunkText(u.update);
         if (delta) {

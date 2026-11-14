@@ -87,19 +87,18 @@ import { daemonWriteResult } from './corner-messages.js';
         title ?? scheduleDisplayTitle({ workflow: workflowName, prompt: input.prompt }),
       ],
     );
-    await daemonRecordScheduleAuthorization(ctx, db, scheduleId, input.roomId, agentId, requestId,
-      (input as { generationId?: unknown }).generationId);
+    await daemonRecordScheduleAuthorization(ctx, db, scheduleId, input.roomId, agentId, requestId);
     return { scheduleId, nextRunAt: Math.floor(nextRunAt.getTime() / 1_000) };
   }
 
   export async function daemonRecordScheduleAuthorization(ctx: DaemonContext,
-    db: SqlDatabase, scheduleId: string, roomId: string, agentId: string, requestId: unknown, generationId: unknown,
+    db: SqlDatabase, scheduleId: string, roomId: string, agentId: string, requestId: unknown,
   ): Promise<void> {
     // Only a server-validated human-rooted turn may authorize the saved task.
     // Nonhuman edits clear old authority, even if the task text is unchanged.
     let humanCommandMessageId: string | null = null;
-    if (typeof requestId === 'string' && typeof generationId === 'string') {
-      const command = await authorizeCommandOutput(db, roomId, agentId, requestId, generationId);
+    if (typeof requestId === 'string') {
+      const command = await authorizeCommandOutput(db, roomId, agentId, requestId);
       const human = (await db.query<{ id: string }>(
         `SELECT root.id FROM messages root
          JOIN identities person ON person.id=root.author_id AND person.kind='human' AND NOT person.hidden_from_roster
@@ -212,14 +211,8 @@ import { daemonWriteResult } from './corner-messages.js';
         throw new Error(`not an agent member of this Room: ${missing.join(', ')}`);
       wakes = [...resolved];
     }
-    const active = await ctx.database.query<{ request_id: string }>(
-      `SELECT request_id FROM agent_turns
-       WHERE room_id=$1 AND agent_id=$2 AND request_id=$3 AND status='working'
-       ORDER BY created_at DESC LIMIT 1`,
-      [input.roomId, agentId, input.requestId],
-    );
-    const causeId = active.rows[0]?.request_id;
-    if (!causeId) throw new Error('invalid event: this agent has no turn running here');
+    const command=await authorizeCommandOutput(ctx.database,input.roomId,agentId,input.requestId);
+    const causeId=command.source_message_id ?? undefined;
     const self = await ctx.database.query<{ name: string }>(
       `SELECT COALESCE(NULLIF(name,''),$2::text) name FROM identities WHERE id=$1`,
       [agentId, systemMessage("daemon-service.an-agent")],
@@ -233,15 +226,7 @@ import { daemonWriteResult } from './corner-messages.js';
       kind: input.kind,
       wakes,
       causeId,
-      commandId: (
-        await authorizeCommandOutput(
-          ctx.database,
-          input.roomId,
-          agentId,
-          input.requestId,
-          input.generationId,
-        )
-      ).id,
+      commandId: command.id,
     });
     return { id: line.id, createdAt: Math.floor(Date.now() / 1_000) };
   }
@@ -321,12 +306,12 @@ import { daemonWriteResult } from './corner-messages.js';
   export async function daemonRequireScheduleAdmin(ctx: DaemonContext,
     db: SqlDatabase,
     scheduleRoomId: string,
-    input: { roomId: string; requestId?: unknown; generationId?: unknown },
+    input: { roomId: string; requestId?: unknown },
     agentId: string,
   ) {
     const command = ctx.authorizedCommand ?? (
-      typeof input.requestId === 'string' && typeof input.generationId === 'string'
-        ? await authorizeCommandOutput(db, input.roomId, agentId, input.requestId, input.generationId)
+      typeof input.requestId === 'string'
+        ? await authorizeCommandOutput(db, input.roomId, agentId, input.requestId)
         : undefined);
     const requester = command
       ? (await db.query<{ author_id: string }>(
@@ -449,7 +434,7 @@ import { daemonWriteResult } from './corner-messages.js';
     const row = updated.rows[0];
     if (!row) throw new Error('schedule not found');
     await daemonRecordScheduleAuthorization(ctx, db, input.scheduleId, input.roomId, agentId,
-      (input as { requestId?: unknown }).requestId, (input as { generationId?: unknown }).generationId);
+      (input as { requestId?: unknown }).requestId);
     return {
       scheduleId: input.scheduleId,
       nextRunAt: Math.floor(row.next_run_at.getTime() / 1_000),

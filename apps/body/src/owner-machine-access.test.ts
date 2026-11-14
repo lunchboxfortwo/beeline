@@ -2,12 +2,10 @@ import { afterEach, expect, it } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, symlinkSync } from 'node:fs';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { resolve } from 'node:path';
-import { createRoomPermissionHandler, roomPermissionDecision } from './monolith-room-turn.js';
-import { sandboxMountPlan, buildBwrapArgv, credentialMaskPaths } from './bwrap-sandbox.js';
+import { createRoomPermissionHandler, roomPermissionDecision } from './room-permissions.js';
+import { sandboxMountPlan, buildBwrapArgv, credentialMaskPaths, grantedSandboxPaths } from './bwrap-sandbox.js';
 import { agentGrantAutoApproves, isPreapprovedReadOnlyCommand, parseCommandGrantTarget } from '@beeline/api-contract/agent-grants';
 import { requestGrant, readGrantScript } from './read-only-mcp-agent-grant-deps.js';
-import { sessionGrantedResources } from './room-session.js';
-import type { BodyConfig } from './config.js';
 import { GrantCommandRunner } from './grant-runner.js';
 
 it.each([
@@ -206,10 +204,9 @@ it.each(['/tmp', '/var/tmp'])('R2 a write path grant under %s retains its capabi
     roomId: 'room', execute: async (_name, input) => { calls.push(input); return { auto: true, grantId: 'write' }; },
   });
   expect(result).toContain('read and write');
-  const resources = await sessionGrantedResources({ operatorHome: target } as BodyConfig,
-    async () => ({ grants: [{ ...calls[0], grantId: 'write', status: 'approved' }] }) as never);
-  expect(resources.paths).toEqual([{ path: target, writable: true }]);
-  const plan = sandboxMountPlan({ mode: 'readonly', cwd: target, grantedPaths: resources.paths });
+  const paths = grantedSandboxPaths({ grants: [{ ...calls[0], grantId: 'write', status: 'approved' }] });
+  expect(paths).toEqual([{ path: target, writable: true }]);
+  const plan = sandboxMountPlan({ mode: 'readonly', cwd: target, grantedPaths: paths });
   const child = buildBwrapArgv({ bwrapPath: 'bwrap', plan, cwd: target, command: '/usr/bin/touch', args: [resolve(target, 'written')] });
   expect(spawnSync(child.command, child.args).status).toBe(0);
   expect(existsSync(resolve(target, 'written'))).toBe(true);

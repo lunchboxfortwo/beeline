@@ -1,42 +1,30 @@
 import { cornerImplementerSql } from './corner-worker.js';
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 
-import { INSTITUTIONAL_MEMORY_ON } from './institutional-memory-shadow.js';
 
-import type { readFileSync } from 'node:fs';
 
-import { cornerRunStateSql } from './corner-run.js';
 
-import type { mkdtemp, rm, writeFile } from 'node:fs/promises';
 
-import type { tmpdir } from 'node:os';
 
-import type { join } from 'node:path';
 
-import { AcpClient } from '../../body/src/acp.js';
 
-import { assembleTurnPrompt, cornerReviewerInstruction } from '../../body/src/prompt-assembly.js';
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll,beforeAll,beforeEach } from 'vitest';
 
-import { seedCornerOpening, PgliteDatabase, migratedDatabase, assignCornerWorker, insertCornerFacts } from './test-support.js';
+import { insertCornerFacts,migratedDatabase,PgliteDatabase,seedCornerOpening } from './test-support.js';
 
 import { PhoneService } from './phone-service.js';
 
 import { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
 
-import { announceAgentLifecycle } from './connection-presence.js';
 
 import { LiveHub } from './live.js';
 
-import { PushDeliveryLoop } from './background.js';
 
 import { systemLine } from './system-line.js';
 
-import { createAgentCommand, reconcileConfiguredCornerReviewers, REVIEWER_DISPATCH_REASONS, reviewerDispatchCarriesHead, routeSystemCommand } from './agent-command.js';
 
-import { advanceCorner } from './corner-lifecycle.js';
 
-import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 
 import type { AgentCommand } from '@beeline/api-contract/daemon';
 
@@ -50,41 +38,24 @@ export const W = '11111111-1111-4111-8111-111111111111',
 
 export let db: PgliteDatabase, phone: PhoneService, daemon: DaemonService;
 
-/** Waiting work only; a running turn is listed with its generation for its helper to resume. */
+/** A scoped fixture view of the agent's single pending queue. */
 export const commands = (agentId = A, roomId = R) =>
-  daemon.execute('getAgentCommands', { roomId }, agentId).then((r) => r.commands.filter(command => !command.generationId));
+  daemon.execute('getAgentCommands', { roomId }, agentId).then((r) => r.commands.filter(command=>command.roomId===roomId));
 
 export async function claim(c: AgentCommand, generationId = 'g1') {
-  await daemon.execute(
-    'claimAgentCommand',
-    { roomId: c.roomId, commandId: c.id, generationId },
-    c.agentId,
-  );
+  await startQueuedCommand(daemon, { roomId: c.roomId, commandId: c.id }, c.agentId);
   await daemon.execute(
     'postAgentTurnReceipt',
-    {
-      roomId: c.roomId,
-      agentId: c.agentId,
-      requestId: c.turnRequestId,
-      generationId,
-      status: 'working',
-    },
+    { roomId: c.roomId, agentId: c.agentId, requestId: c.turnRequestId, status: 'working' },
     c.agentId,
   );
 }
 
-export const result = (c: AgentCommand, text: string, generationId = 'g1', extra = {}) =>
-  daemon.execute(
-    'postRoomMessage',
-    {
-      roomId: c.roomId,
-      requestId: c.turnRequestId,
-      generationId,
-      text,
-      ...extra,
-    },
-    c.agentId,
-  );
+export const result = async(c:AgentCommand,text:string,_generationId='g1',extra={})=>{
+  const posted=await daemon.execute('postRoomMessage',{roomId:c.roomId,requestId:c.turnRequestId,text,...extra},c.agentId);
+  await db.backgroundWork.drain();
+  return posted;
+};
 
 beforeAll(async () => {
   db = await migratedDatabase();
@@ -118,6 +89,7 @@ beforeAll(async () => {
 afterAll(async () => db?.close());
 
 beforeEach(async () => {
+  await db.backgroundWork.drain();
   daemon = new DaemonService(db, new LiveHub());
   // These lifecycle fixtures model an independent PR author; provider checks have separate coverage.
   Object.assign(daemon, { github: { assertCornerReviewerNotAuthor: async () => {} } });
@@ -143,7 +115,7 @@ beforeEach(async () => {
 
 /** Put the corner in the state a green transition leaves it in. */
 export async function greenHead(number: number, headSha: string, checks = 'passing') {
-  await db.query(`SELECT (terminal.ended).* FROM (SELECT beeline_end_agent_turn(command.id,command.generation_id,'complete',NULL,NULL) ended
+  await db.query(`SELECT (terminal.ended).* FROM (SELECT beeline_finish_agent_command(command.id,'complete',NULL,NULL) ended
     FROM agent_commands command JOIN rooms corner ON corner.id=command.room_id JOIN corner_facts fact ON fact.corner_id=corner.id
     WHERE command.room_id=$1 AND command.agent_id=${cornerImplementerSql('fact','corner')}
       AND command.state IN ('pending','claimed') AND command.action IN ('input','resume')
@@ -173,24 +145,24 @@ get phone(){return phone;}, set phone(value: typeof phone){phone=value;},
 get daemon(){return daemon;}, set daemon(value: typeof daemon){daemon=value;},
 };
 
-export { cornerImplementerSql } from './corner-worker.js';
-export { INSTITUTIONAL_MEMORY_ON } from './institutional-memory-shadow.js';
+export type { AgentCommand } from '@beeline/api-contract/daemon';
+export { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 export { readFileSync } from 'node:fs';
-export { cornerRunStateSql } from './corner-run.js';
-export { mkdtemp, rm, writeFile } from 'node:fs/promises';
+export { mkdtemp,rm,writeFile } from 'node:fs/promises';
 export { tmpdir } from 'node:os';
 export { join } from 'node:path';
+export { afterAll,beforeAll,beforeEach,describe,expect,it,vi } from 'vitest';
 export { AcpClient } from '../../body/src/acp.js';
-export { assembleTurnPrompt, cornerReviewerInstruction } from '../../body/src/prompt-assembly.js';
-export { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-export { seedCornerOpening, PgliteDatabase, migratedDatabase, assignCornerWorker, insertCornerFacts } from './test-support.js';
-export { PhoneService } from './phone-service.js';
-export { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
-export { announceAgentLifecycle } from './connection-presence.js';
-export { LiveHub } from './live.js';
+export { assembleTurnPrompt,cornerReviewerInstruction } from '../../body/src/prompt-assembly.js';
+export { createAgentCommand,reconcileConfiguredCornerReviewers,REVIEWER_DISPATCH_REASONS,reviewerDispatchCarriesHead,routeSystemCommand } from './agent-command.js';
 export { PushDeliveryLoop } from './background.js';
-export { systemLine } from './system-line.js';
-export { createAgentCommand, reconcileConfiguredCornerReviewers, REVIEWER_DISPATCH_REASONS, reviewerDispatchCarriesHead, routeSystemCommand } from './agent-command.js';
+export { announceAgentLifecycle } from './connection-presence.js';
 export { advanceCorner } from './corner-lifecycle.js';
-export { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
-export type { AgentCommand } from '@beeline/api-contract/daemon';
+export { cornerRunStateSql } from './corner-run.js';
+export { cornerImplementerSql } from './corner-worker.js';
+export { INSTITUTIONAL_MEMORY_ON } from './institutional-memory-shadow.js';
+export { LiveHub } from './live.js';
+export { PhoneService } from './phone-service.js';
+export { systemLine } from './system-line.js';
+export { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
+export { assignCornerWorker,insertCornerFacts,migratedDatabase,PgliteDatabase,seedCornerOpening } from './test-support.js';

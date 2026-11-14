@@ -7,7 +7,7 @@ import type { AgentRuntimeRecord } from './runtime.js';
 import { runtimeDirectory } from './runtime.js';
 import { workspaceAssetRoot } from './workspace-assets.js';
 import { writePrivateFileAtomically } from './atomic-private-file.js';
-import { reclaimWholeStorageObject, capturePrivateProcessUse, ordinaryDirectory, storageTree, isSquirePath, reclaimHelperStorage, type StorageRoomState, type WholeStorageOptions } from './helper-storage.js';
+import { storageOperation, reclaimWholeStorageObject, ordinaryDirectory, storageTree, isSquirePath, reclaimHelperStorage, type StorageRoomState, type WholeStorageOptions } from './helper-storage.js';
 import { canonicalStoragePath } from './storage-filesystem.js';
 import { removeArchivedCornerData } from './archived-corner-cleanup.js';
 
@@ -31,6 +31,7 @@ export async function rememberStorageOwner(supervisorRoot: string, owner: Storag
 /** Local publication evidence remains authoritative after the owner's token
  * is revoked. Failed reads, local changes and unpublished HEADs all preserve. */
 export async function reclaimOwnedCheckout(supervisorRoot: string, owner: StorageOwner, options: WholeStorageOptions = {}): Promise<string[]> {
+  options = storageOperation(options);
   if (!['corners', 'room-checkouts'].includes(owner.kind) || !/^[a-zA-Z0-9-]{1,80}$/.test(owner.itemId)) return [];
   if (owner.ended && !Number.isFinite(owner.endedAt)) {
     owner = { ...owner, endedAt: options.now ?? Date.now() };
@@ -133,6 +134,7 @@ async function endedRootCleared(root: string): Promise<boolean> {
 }
 
 export async function pruneEndedOwnerStorage(supervisorRoot: string, options: WholeStorageOptions = {}): Promise<string[]> {
+  options = storageOperation(options);
   const root = ownersRoot(supervisorRoot);
   const removed: string[] = [];
   for (const name of await readdir(root).catch(() => [])) {
@@ -141,7 +143,7 @@ export async function pruneEndedOwnerStorage(supervisorRoot: string, options: Wh
     if (!/^[a-f0-9]{64}$/.test(owner.agentId) || !owner.workspaceId) continue;
     const source = runtimeDirectory(supervisorRoot, owner.agentId);
     removed.push(...(await reclaimWholeStorageObject(source, true, options)).map(entry => entry.path));
-    if ((!options.dryRun && !await endedRootCleared(source)) || await (options.inUse ?? (async path => (await capturePrivateProcessUse())(path)))(source)) continue;
+    if ((!options.dryRun && !await endedRootCleared(source)) || await (options.inUse!)(source)) continue;
     for (const checkout of await readStorageOwners(supervisorRoot)) {
       if (checkout.agentId === owner.agentId)
         removed.push(...await reclaimOwnedCheckout(supervisorRoot, checkout, options));
@@ -216,7 +218,8 @@ export function publishStorageFacts(supervisorRoot: string, states: readonly Sto
 /** Terminal archive facts apply to every local member, including stopped agents.
  * A host Room lease fences all schedulers; OS evidence still protects children. */
 export async function reclaimArchivedMemberStorage(supervisorRoot: string, states: readonly StorageRoomState[], options: WholeStorageOptions = {}): Promise<void> {
-  const { AgentProcesses } = await import('./agent-process.js');
+  options = storageOperation(options);
+  const { HostPlaces } = await import('./agent-process.js');
   const archived = states.filter(state => state.archived === true);
   if (!archived.length) return;
   const byId = new Map(archived.map(state => [state.roomId, state]));
@@ -224,7 +227,7 @@ export async function reclaimArchivedMemberStorage(supervisorRoot: string, state
     const state = byId.get(owner.roomId);
     if (!state) continue;
     if (!options.dryRun) await rememberStorageOwner(supervisorRoot, { ...owner, archived: true, ended: true, landedHeadSha: state.landedHeadSha });
-    await AgentProcesses.withIdleHostRoom(owner.roomId, async () => {
+    await HostPlaces.withIdleHostRoom(owner.roomId, async () => {
       await reclaimOwnedCheckout(supervisorRoot, { ...owner, archived: true, ended: true, endedAt: owner.endedAt ?? Date.now() }, { ...options, landedHeadSha: state.landedHeadSha });
     });
   }
@@ -232,7 +235,7 @@ export async function reclaimArchivedMemberStorage(supervisorRoot: string, state
   // never created or its owner record is missing. Stop attributed children
   // before the generic storage reclaimer can defer an in-use home.
   for (const state of archived) {
-    await AgentProcesses.withIdleHostRoom(state.roomId, async () => {
+    await HostPlaces.withIdleHostRoom(state.roomId, async () => {
       await removeArchivedCornerData(supervisorRoot, state.roomId,
         resolve(supervisorRoot, 'beeline/corners', state.roomId), options);
     });
@@ -243,7 +246,7 @@ export async function reclaimArchivedMemberStorage(supervisorRoot: string, state
     await reclaimHelperStorage({ runtimeDir: runtimeDirectory(supervisorRoot, agentId), readStates: async () => archived,
       ...options, relatedRoots: roomId => [resolve(supervisorRoot, 'beeline/corners', roomId),
         ...owners.filter(owner => owner.roomId === roomId).map(owner => resolve(supervisorRoot, 'beeline', owner.kind, owner.itemId))],
-      withIdleRoom: (roomId, task) => AgentProcesses.withIdleHostRoom(roomId, task),
+      withIdleRoom: (roomId, task) => HostPlaces.withIdleHostRoom(roomId, task),
     });
   }
 }
@@ -252,8 +255,9 @@ export async function reclaimArchivedMemberStorage(supervisorRoot: string, state
  * existing credentials for lifecycle only; it never exchanges tokens or claims
  * commands. Transport/auth uncertainty cannot retire an owner. */
 export async function pruneStoppedAgentStorage(supervisorRoot: string, options: WholeStorageOptions = {}): Promise<void> {
+  options = storageOperation(options);
   const { isAgentStopped } = await import('./runtime.js');
-  const { AgentProcesses } = await import('./agent-process.js');
+  const { HostPlaces } = await import('./agent-process.js');
   for (const agentId of await readdir(resolve(supervisorRoot, 'beeline/agents')).catch(() => [])) {
     if (!/^[a-f0-9]{64}$/.test(agentId)) continue;
     const runtimeDir = runtimeDirectory(supervisorRoot, agentId);
@@ -284,7 +288,7 @@ export async function pruneStoppedAgentStorage(supervisorRoot: string, options: 
         if (!options.dryRun) { await markAgentStorageEnded(runtime); await pruneEndedOwnerStorage(supervisorRoot, options); }
       } else {
         await reclaimHelperStorage({ runtimeDir, readStates: async () => answer.storageRooms, ...options,
-          withIdleRoom: async (roomId, task) => AgentProcesses.hostStoragePaused ? (await task(), true) : AgentProcesses.withIdleHostRoom(roomId, task),
+          withIdleRoom: async (roomId, task) => HostPlaces.hostStoragePaused ? (await task(), true) : HostPlaces.withIdleHostRoom(roomId, task),
         });
       }
     } catch (error) { console.warn(`[helper] stopped agent storage retained ${agentId}:`, error instanceof SyntaxError ? 'invalid runtime/lifecycle JSON; retained' : error instanceof Error ? error.message : 'read failed'); }
@@ -294,7 +298,8 @@ export async function pruneStoppedAgentStorage(supervisorRoot: string, options: 
 /** Code copies keep source and unpublished work, including archived dirty trees. Only whole ignored build
  * objects qualify, and a tracked descendant preserves even an ignored parent. */
 export async function pruneOpenCheckoutObjects(supervisorRoot: string, states: readonly StorageRoomState[], options: WholeStorageOptions = {}, discovered: readonly StorageOwner[] = []): Promise<void> {
-  const { AgentProcesses } = await import('./agent-process.js');
+  options = storageOperation(options);
+  const { HostPlaces } = await import('./agent-process.js');
   const byId = new Map(states.map(state => [state.roomId, state]));
   const owners = [...new Map([...(await readStorageOwners(supervisorRoot)), ...discovered].map(owner => [`${owner.kind}/${owner.itemId}`, owner])).values()];
   for (const owner of owners) {
@@ -303,7 +308,7 @@ export async function pruneOpenCheckoutObjects(supervisorRoot: string, states: r
     if (state?.archived !== false && state?.archived !== true && (owner.kind === 'corners' || !owner.ended)) continue;
     const root = resolve(supervisorRoot, 'beeline', owner.kind, owner.itemId);
     const work = async () => {
-      const inUse = options.inUse ?? (async (path: string) => (await capturePrivateProcessUse(options.progress))(path));
+      const inUse = options.inUse!;
       if (await inUse(root)) return;
       const ignored = await execFileAsync('git', ['-C', root, 'ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory'],
         { env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' }, maxBuffer: 16 * 1024 * 1024 }).then(result => result.stdout.split('\0'), () => []);
@@ -312,23 +317,24 @@ export async function pruneOpenCheckoutObjects(supervisorRoot: string, states: r
         if (!/(?:^|\/)(?:node_modules|\.codegraph|\.beeline-cargo-target|target|dist|build|\.next|\.turbo)$/.test(relative)) continue;
         const path = resolve(root, relative);
         if (!path.startsWith(`${root}/`) || await inUse(root)) continue;
-        await reclaimWholeStorageObject(path, false, { ...options,
+        await reclaimWholeStorageObject(path, false, { ...options, inUse,
           beforeRemove: async () => !(await execFileAsync('git', ['-C', root, 'ls-files', '-z', '--', relative])).stdout,
         });
       }
     };
-    if (options.dryRun || AgentProcesses.hostStoragePaused) await work();
-    else await AgentProcesses.withIdleHostRoom(owner.roomId, work);
+    if (options.dryRun || HostPlaces.hostStoragePaused) await work();
+    else await HostPlaces.withIdleHostRoom(owner.roomId, work);
   }
 }
 
 /** Persisted archive authority outlives Room access and agent credentials. */
 export async function pruneArchivedCheckoutStorage(supervisorRoot: string, options: WholeStorageOptions = {}): Promise<void> {
+  options = storageOperation(options);
   await pruneOpenCheckoutObjects(supervisorRoot, [], options);
-  const { AgentProcesses } = await import('./agent-process.js');
+  const { HostPlaces } = await import('./agent-process.js');
   for (const owner of await readStorageOwners(supervisorRoot)) {
     if (owner.archived !== true) continue;
-    await AgentProcesses.withIdleHostRoom(owner.roomId, async () => {
+    await HostPlaces.withIdleHostRoom(owner.roomId, async () => {
       await reclaimOwnedCheckout(supervisorRoot, owner, options);
     });
   }
@@ -337,6 +343,7 @@ export async function pruneArchivedCheckoutStorage(supervisorRoot: string, optio
 /** Legacy code copies without a recorded owner still expire under the seven-day
  * rule, with the same local publication proof. Missing ownership isn't archival. */
 export async function pruneUnusedCheckoutStorage(supervisorRoot: string, options: WholeStorageOptions = {}): Promise<void> {
+  options = storageOperation(options);
   const recorded = new Set((await readStorageOwners(supervisorRoot)).map(owner => `${owner.kind}/${owner.itemId}`));
   const candidates: Array<{ path: string; clone: boolean }> = [];
   for (const kind of ['corners', 'room-checkouts', 'repositories'] as const) {

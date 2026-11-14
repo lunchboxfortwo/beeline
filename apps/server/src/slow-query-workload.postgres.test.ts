@@ -93,24 +93,15 @@ describe.skipIf(!url)('production-shaped slow-query regression', () => {
       await explain('advisory lock 4c93380abebe4682', 'SELECT pg_advisory_xact_lock(hashtext($1))', ['slow-query-proof']);
       await writer.query('ROLLBACK');
 
-      // A restart receipt can wait on its command row, but it must release
-      // presence and its advisory lock before completing that durable work.
+      // Presence remains independent of an unfinished queue item held by another transaction.
       await database.query(`INSERT INTO agent_commands(id,room_id,agent_id,turn_request_id,action,reason,
-        root_command_id,root_source_message_id,agent_depth,state,lifecycle_before)
-        VALUES('restart-proof',$1,$2,'restart-proof','restart','tagged_lifecycle_restart',
-          'restart-proof','restart-proof',0,'claimed','old-lifecycle')`, [room, agent]);
-      const pid = (await database.query<{pid: number}>('SELECT pg_backend_pid() pid')).rows[0]!.pid;
+        root_command_id,root_source_message_id,agent_depth,state)
+        VALUES('presence-proof',$1,$2,'presence-proof','input','human_tag',
+          'presence-proof','presence-proof',0,'pending')`, [room,agent]);
       await writer.query('BEGIN');
-      await writer.query("SELECT id FROM agent_commands WHERE id='restart-proof' FOR UPDATE");
-      announcing = announceAgentLifecycle(database, new LiveHub(), room, agent, {lifecycleId: 'new-lifecycle'});
-      void announcing.catch(() => {});
-      let blocked = false;
-      for (let attempt = 0; attempt < 200; attempt++) {
-        blocked = (await admin.query('SELECT cardinality(pg_blocking_pids($1))>0 blocked', [pid])).rows[0].blocked;
-        if (blocked) break;
-        await new Promise(done => setTimeout(done, 5));
-      }
-      expect(blocked, 'restart receipt reached its command-row wait').toBe(true);
+      await writer.query("SELECT id FROM agent_commands WHERE id='presence-proof' FOR UPDATE");
+      announcing=announceAgentLifecycle(database,new LiveHub(),room,agent,{lifecycleId:'new-lifecycle'});
+      await announcing;
       expect((await reader.query(`SELECT body->>'lifecycleId' lifecycle FROM live_outputs
         WHERE agent_id=$1 AND kind='presence'`, [agent])).rows[0].lifecycle).toBe('new-lifecycle');
       const presenceStarted = performance.now();

@@ -1,59 +1,16 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { expect, it, insertCornerFacts, DaemonService, LiveHub, createAgentCommand, SYSTEM_IDENTITY_ID, ensureSystemIdentity, advanceCorner, H, A, B, P, W, R, C, id, stopProofPostgresUrl, db, phone, daemon, live, commands, send, helperOwner, claim, result, rootFixture, type SqlDatabase } from './test-support-agent-command.integration.test-support.js';
 
 
-it('rolls the command claim back when a cancelled turn cannot become working', async () => {
-  await send('@hoots');
-  const [c] = await commands();
-  await rootFixture.db.query(
-    `INSERT INTO agent_turns(room_id,request_id,agent_id,status)
-     VALUES($1,$2,$3,'cancelled') ON CONFLICT(room_id,request_id,agent_id)
-     DO UPDATE SET status='cancelled'`,
-    [R, c!.turnRequestId, A],
-  );
-  await expect(
-    rootFixture.daemon.execute(
-      'claimAgentCommand',
-      { roomId: R, commandId: c!.id, generationId: 'too-late' },
-      A, await helperOwner(A),
-    ),
-  ).rejects.toThrow('cancelled');
-  expect((await rootFixture.db.query(`SELECT state FROM agent_commands WHERE id=$1`, [c!.id])).rows).toEqual([
-    { state: 'pending' },
-  ]);
-});
 
-it('never reopens terminal commands and never accepts missing generation claims', async () => {
-  await send('@hoots');
-  const [c] = await commands();
-  await expect(
-    rootFixture.daemon.execute('claimAgentCommand', { roomId: R, commandId: c!.id } as never, A, await helperOwner(A)),
-  ).rejects.toThrow();
-  await claim(c!);
-  await result(c!, 'Terminal');
-  await expect(claim(c!, 'another')).rejects.toThrow();
-});
 
-it('settles a failed command instead of redelivering it after its lease expires', async () => {
-  await send('@hoots');
-  const [c] = await commands();
-  await claim(c!);
-  await rootFixture.daemon.execute(
-    'postAgentTurnReceipt',
-    {
-      roomId: R,
-      requestId: c!.turnRequestId,
-      generationId: 'g1',
-      status: 'failed',
-      reason: 'authentication required',
-    },
-    A, await helperOwner(A),
-  );
-  await rootFixture.db.query(
-    `UPDATE agent_commands SET lease_expires_at=now()-interval '1 second' WHERE id=$1`,
-    [c!.id],
-  );
-  expect(await commands()).toEqual([]);
-  await expect(claim(c!, 'retry')).rejects.toThrow('conflict');
+
+
+it('a failed diagnostic receipt leaves an unanswered item queued',async()=>{
+  await send('@hoots');const [command]=await commands();await claim(command!);
+  await rootFixture.daemon.execute('postAgentTurnReceipt',{roomId:R,requestId:command!.turnRequestId,status:'failed',reason:'authentication required'},A,await helperOwner(A));
+  expect((await commands()).map(c=>c.id)).toContain(command!.id);
+  await result(command!,'I could not authenticate.');expect(await commands()).toEqual([]);
 });
 
 it('rechecks tagged agent membership at final commit', async () => {
@@ -76,14 +33,7 @@ it('binds emitted events to the issuing command when agents share a human reques
   await claim(b!);
   const event = await rootFixture.daemon.execute(
     'postRoomEvent',
-    {
-      roomId: R,
-      requestId: a!.turnRequestId,
-      generationId: 'g1',
-      kind: 'agent:handoff',
-      consequence: 'Ready',
-      mentionAgentIds: [B],
-    },
+    { roomId: R, requestId: a!.turnRequestId, kind: 'agent:handoff', consequence: 'Ready', mentionAgentIds: [B] },
     A,
   );
   const [child] = (await commands(B)).filter((c) => c.sourceMessageId === event.id);
@@ -92,19 +42,13 @@ it('binds emitted events to the issuing command when agents share a human reques
 });
 
 
-it.each(['unknown', 'wrong-agent', 'wrong-room', 'stale', 'cancelled', 'completed'])(
-  'rejects every output surface for %s authority',
+it.each(['unknown', 'wrong-agent', 'wrong-room', 'cancelled'])(
+  'keeps command resources bound to %s authority without blocking member prose',
   async (invalid) => {
     await send('@hoots');
     const [c] = await commands();
     await claim(c!);
-    const input = {
-      roomId: R,
-      agentId: A,
-      requestId: c!.turnRequestId,
-      turnId: c!.turnRequestId,
-      generationId: 'g1',
-    };
+    const input = { roomId: R, agentId: A, requestId: c!.turnRequestId, turnId: c!.turnRequestId };
     let author = A;
     if (invalid === 'unknown') {
       input.requestId = id();
@@ -115,14 +59,12 @@ it.each(['unknown', 'wrong-agent', 'wrong-room', 'stale', 'cancelled', 'complete
       input.agentId = B;
     }
     if (invalid === 'wrong-room') input.roomId = C;
-    if (invalid === 'stale') input.generationId = 'stale';
     if (invalid === 'cancelled')
       await rootFixture.phone.execute(
         'cancelAgentTurn',
         { roomId: R, agentId: A, requestId: c!.turnRequestId },
         H,
       );
-    if (invalid === 'completed') await result(c!, 'Already done');
     const writes = [
       ['postAgentDraft', { text: 'Late draft' }],
       ['postAgentThought', { text: 'Late thought' }],
@@ -141,7 +83,6 @@ it.each(['unknown', 'wrong-agent', 'wrong-room', 'stale', 'cancelled', 'complete
           },
         },
       ],
-      ['postRoomMessage', { text: 'Late final' }],
     ] as const;
     const before = (await rootFixture.db.query(`SELECT count(*)::int n FROM messages`)).rows[0];
     for (const [operation, payload] of writes)
@@ -149,6 +90,12 @@ it.each(['unknown', 'wrong-agent', 'wrong-room', 'stale', 'cancelled', 'complete
         rootFixture.daemon.execute(operation, { ...input, ...payload } as never, author),
       ).rejects.toThrow();
     expect((await rootFixture.db.query(`SELECT count(*)::int n FROM messages`)).rows[0]).toEqual(before);
+    const final = rootFixture.daemon.execute('postRoomMessage', { ...input, text: 'Late final' }, author);
+    if (invalid === 'cancelled') await expect(final).rejects.toThrow();
+    else {
+      await expect(final).resolves.toBeDefined();
+      expect((await commands(A)).map(item => item.id)).toContain(c!.id);
+    }
   },
 );
 
@@ -156,13 +103,7 @@ it('accepts and settles draft, thought, activity, attachment and final under one
   await send('@hoots');
   const [c] = await commands();
   await claim(c!);
-  const input = {
-    roomId: R,
-    agentId: A,
-    requestId: c!.turnRequestId,
-    turnId: c!.turnRequestId,
-    generationId: 'g1',
-  };
+  const input = { roomId: R, agentId: A, requestId: c!.turnRequestId, turnId: c!.turnRequestId };
   await rootFixture.daemon.execute('postAgentDraft', { ...input, text: 'Draft' }, A);
   await rootFixture.daemon.execute('postAgentThought', { ...input, text: 'Thought' }, A);
   await rootFixture.daemon.execute(
@@ -234,13 +175,7 @@ it('keeps Room drafts private while preserving liveness, final replies, and corn
   await send('@hoots work in the Room');
   const [roomCommand] = await commands();
   await claim(roomCommand!);
-  const roomInput = {
-    roomId: R,
-    agentId: A,
-    requestId: roomCommand!.turnRequestId,
-    turnId: roomCommand!.turnRequestId,
-    generationId: 'g1',
-  };
+  const roomInput = { roomId: R, agentId: A, requestId: roomCommand!.turnRequestId, turnId: roomCommand!.turnRequestId };
   const events: Array<{ type: string; roomId?: string }> = [];
   const unsubscribe = rootFixture.live.subscribeAll((event) => events.push(event));
   try {
@@ -282,14 +217,7 @@ it('keeps Room drafts private while preserving liveness, final replies, and corn
     await claim(cornerCommand!);
     await rootFixture.daemon.execute(
       'postAgentDraft',
-      {
-        roomId: C,
-        agentId: A,
-        requestId: cornerCommand!.turnRequestId,
-        turnId: cornerCommand!.turnRequestId,
-        generationId: 'g1',
-        text: 'Corner draft',
-      },
+      { roomId: C, agentId: A, requestId: cornerCommand!.turnRequestId, turnId: cornerCommand!.turnRequestId, text: 'Corner draft' },
       A,
     );
     expect(
@@ -328,14 +256,7 @@ it('keeps Room drafts private while preserving liveness, final replies, and corn
     await claim(repositoryCornerCommand!);
     await rootFixture.daemon.execute(
       'postAgentDraft',
-      {
-        roomId: C,
-        agentId: A,
-        requestId: repositoryCornerCommand!.turnRequestId,
-        turnId: repositoryCornerCommand!.turnRequestId,
-        generationId: 'g1',
-        text: 'Repository corner draft',
-      },
+      { roomId: C, agentId: A, requestId: repositoryCornerCommand!.turnRequestId, turnId: repositoryCornerCommand!.turnRequestId, text: 'Repository corner draft' },
       A,
     );
     expect(
@@ -361,25 +282,18 @@ it('keeps Room drafts private while preserving liveness, final replies, and corn
 });
 
 
-it('deletes draft and thought rows when a successful turn settles without a reply', async () => {
+it('keeps drafts until the answer commits despite an early success diagnostic', async () => {
   await send('@hoots open a corner');
   const [command] = await commands();
   await claim(command!);
-  const input = {
-    roomId: R,
-    agentId: A,
-    requestId: command!.turnRequestId,
-    turnId: command!.turnRequestId,
-    generationId: 'g1',
-  };
+  const input = { roomId: R, agentId: A, requestId: command!.turnRequestId, turnId: command!.turnRequestId };
   await rootFixture.daemon.execute('postAgentDraft', { ...input, text: 'Opening a corner.' }, A);
   await rootFixture.daemon.execute('postAgentThought', { ...input, text: 'Preparing the handoff.' }, A);
 
-  // A successful open_corner turn has no postRoomMessage call. Its terminal
-  // receipt is the durable ending and must reap the live rows itself even if
-  // the best-effort retract never arrived.
+  // A diagnostic success receipt cannot spend the answer obligation.
   await rootFixture.daemon.execute('postAgentTurnReceipt', { ...input, status: 'complete' }, A, await helperOwner(A));
-
+  expect((await commands()).map(c=>c.id)).toContain(command!.id);
+  await result(command!,'The corner is open.');
   expect(
     (
       await rootFixture.db.query(
@@ -392,15 +306,15 @@ it('deletes draft and thought rows when a successful turn settles without a repl
 });
 
 
-it('stores an ambiguous legacy agent tag as prose without dispatching either candidate', async () => {
+it('preserves an ambiguous legacy tag and queues both addressed members', async () => {
   // An overlapping old writer can leave an agent without a workspace reservation.
-  // Its global fallback must still be rejected if it collides with a reserved tag.
+  // A reservation collision cannot silently discard either addressed request.
   await rootFixture.db.query(`DELETE FROM workspace_handles WHERE workspace_id=$1 AND identity_id=$2`, [W, B]);
   await rootFixture.db.query(`UPDATE identities SET handle='hoots' WHERE id=$1`, [B]);
   try {
     const source = await send('@hoots who is this?');
-    expect(await commands(A)).toEqual([]);
-    expect(await commands(B)).toEqual([]);
+    expect(await commands(A)).toHaveLength(1);
+    expect(await commands(B)).toHaveLength(1);
     expect(
       (await rootFixture.db.query(`SELECT text FROM messages WHERE id=$1`, [source.messageId])).rows[0]?.text,
     ).toBe('@hoots who is this?');
@@ -410,18 +324,17 @@ it('stores an ambiguous legacy agent tag as prose without dispatching either can
 });
 
 
-  it('stamps the producing model on an agent reply at generation time', async () => {
+  it('does not infer a producing model from the roster selection', async () => {
     await rootFixture.db.query(`UPDATE agents SET selected_model='grok-4-fast' WHERE agent_id=$1`, [A]);
     await send('@hoots model check');
     const command = (await commands(A))[0]!;
     await claim(command);
     await result(command, 'Stamped answer');
-    // The stamp freezes the selection as of the turn; a later roster change
-    // must not retro-label the row.
+    // Selection is not evidence of the model the live harness actually used.
     await rootFixture.db.query(`UPDATE agents SET selected_model='newer-model' WHERE agent_id=$1`, [A]);
     const view = await rootFixture.phone.readRoom(R, H);
     const reply = view!.messages.find((message) => message.text === 'Stamped answer');
-    expect(reply?.agentModel).toBe('grok-4-fast');
+    expect(reply?.agentModel).toBeUndefined();
     // A human row carries no stamp, and an agent row with no known model
     // stays unstamped rather than guessing.
     expect(
@@ -431,17 +344,15 @@ it('stores an ambiguous legacy agent tag as prose without dispatching either can
 
 
 
-it('excludes concurrent avatar jobs across rooms and refuses non-owner generation', async () => {
+it('queues every avatar request while avatar tool authority stays with the owner', async () => {
   const outcomes = await Promise.allSettled([
     send('@hoots /draw-avatar', R),
     send('@hoots /draw-avatar brighter eyes', C),
   ]);
-  expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
-  expect(outcomes.filter((outcome) => outcome.status === 'rejected')).toHaveLength(1);
+  expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(2);
+  expect(outcomes.filter((outcome) => outcome.status === 'rejected')).toHaveLength(0);
   expect((await rootFixture.phone.readAgent(W, A, H))?.avatarGenerationPending).toBe(true);
-  await expect(
-    rootFixture.phone.execute('sendRoomMessage', { roomId: R, text: '@hoots /draw-avatar' }, P),
-  ).rejects.toThrow();
+  await expect(rootFixture.phone.execute('sendRoomMessage', { roomId: R, text: '@hoots /draw-avatar' }, P)).resolves.toBeDefined();
   await rootFixture.db.query(`UPDATE agent_commands SET state='complete' WHERE agent_id=$1 AND avatar_job`, [
     A,
   ]);
@@ -455,7 +366,7 @@ it.runIf(Boolean(stopProofPostgresUrl))('R-ACTIVITY-DEADLOCK: attempts concurren
   await send('@hoots inspect contention', C);
   const [command] = await commands(A, C);
   await claim(command!);
-  const authority = { roomId: C, requestId: command!.turnRequestId!, generationId: 'g1' };
+  const authority = { roomId: C, requestId: command!.turnRequestId! };
   await Promise.all(Array.from({ length: 12 }, async (_, index) => Promise.all([
     rootFixture.daemon.execute('postAgentActivity', { ...authority, cornerActivityKey: `contention-${index}`,
       activity: [{ kind: 'tool', title: 'Inspect', operation: 'read', status: 'completed' }] }, A),
@@ -475,9 +386,7 @@ it('R-ACTIVITY-DEADLOCK: never replays another daemon operation', async () => {
     query: (sql, values) => rootFixture.db.query(sql, values),
     transaction: async () => { attempts++; throw failure; },
   }, rootFixture.live);
-  await expect(watched.execute('postAgentThought', {
-    roomId: C, requestId: command!.turnRequestId!, generationId: 'g1', text: 'Inspecting',
-  }, A)).rejects.toBe(failure);
+  await expect(watched.execute('postAgentThought', { roomId: C, requestId: command!.turnRequestId!, text: 'Inspecting' }, A)).rejects.toBe(failure);
   expect(attempts).toBe(1);
 });
 
@@ -491,9 +400,7 @@ it.each([
   await send('@hoots inspect recovery', C);
   const [command] = await commands(A, C);
   await claim(command!);
-  const input = { roomId: C, requestId: command!.turnRequestId!, generationId: 'g1',
-    cornerActivityKey: 'deadlock-proof',
-    activity: [{ kind: 'tool' as const, title: 'Inspect', operation: 'read', status: 'completed' }] };
+  const input = { roomId: C, requestId: command!.turnRequestId!, cornerActivityKey: 'deadlock-proof', activity: [{ kind: 'tool' as const, title: 'Inspect', operation: 'read', status: 'completed' }] };
   const originalTurn = (await rootFixture.db.query(`SELECT created_at FROM agent_turns WHERE request_id=$1`, [input.requestId])).rows;
   let attempts = 0;
   const events: unknown[] = [];
@@ -562,8 +469,7 @@ it.each([
   await claim(command!);
   const activity = [{ kind: 'tool' as const, title: 'Inspect', operation: 'read', status: 'completed', output,
     files: [{ path: output }], plan: { items: [{ step: output, status: 'completed' as const }] } }];
-  const input = { roomId: C, requestId: command!.turnRequestId!, generationId: 'g1',
-    cornerActivityKey: 'unicode-proof', activity };
+  const input = { roomId: C, requestId: command!.turnRequestId!, cornerActivityKey: 'unicode-proof', activity };
   const first = await rootFixture.daemon.execute('postAgentActivity', input, A);
   expect(await rootFixture.daemon.execute('postAgentActivity', input, A)).toEqual(first);
   const stored = [{ ...activity[0], output: expected, files: [{ path: expected }],
@@ -600,8 +506,7 @@ it('superseded review output completes its running command and posts its reply',
   expect((await rootFixture.db.query(`SELECT text FROM messages WHERE room_id=$1 AND request_id=$2`,
     [corner,command!.turnRequestId])).rows).toEqual([{text:'@hoots Review output for the old head'}]);
   expect(await state()).toBe('idle');
-  await rootFixture.daemon.execute('postAgentTurnReceipt', {roomId:corner,requestId:command!.turnRequestId,
-    generationId:'g1',status:'complete'}, A, await helperOwner(A));
+  await rootFixture.daemon.execute('postAgentTurnReceipt', { roomId:corner, requestId:command!.turnRequestId, status:'complete' }, A, await helperOwner(A));
   expect((await rootFixture.db.query(`SELECT status FROM agent_turns WHERE room_id=$1 AND request_id=$2 AND agent_id=$3`,
     [corner,command!.turnRequestId,A])).rows).toEqual([{status:'complete'}]);
 });
@@ -614,7 +519,7 @@ it.each(['no_reply_needed', 'mcp__beeline-agent__no_reply_needed', 'mcp__beeline
   const queued = await createAgentCommand(rootFixture.db, { roomId: C, agentId: A, sourceMessageId: null, reason: 'system' });
   const command = (await commands(A, C)).find(c => c.id === queued!.id)!;
   await claim(command);
-  const turn = { roomId: C, requestId: command.turnRequestId, generationId: 'g1' };
+  const turn = { roomId: C, requestId: command.turnRequestId };
   await rootFixture.daemon.execute('markAgentTurnSilent', turn, A);
   await rootFixture.daemon.execute('postAgentTurnReceipt', { ...turn, status: 'complete', completionKind: 'no-reply' }, A, await helperOwner(A));
   for (const status of ['completed', 'failed'] as const) {
@@ -647,9 +552,7 @@ it.each(['replay', 'idle'] as const)('command-only requester: System %s survives
   expect(await rootFixture.daemon['grantRequester'](root)).toMatchObject({ id: SYSTEM_IDENTITY_ID });
   const command = (await commands()).find(c => c.id === root.id)!;
   await claim(command);
-  await expect(rootFixture.daemon.execute('getRoomRepositoryState', {
-    roomId: R, requestId: command.turnRequestId, generationId: 'g1',
-  }, A)).resolves.toMatchObject({ resolution: 'none', repositoryOnboarding: true });
+  await expect(rootFixture.daemon.execute('getRoomRepositoryState', { roomId: R, requestId: command.turnRequestId }, A)).resolves.toMatchObject({ resolution: 'none', repositoryOnboarding: true });
   const child = (await createAgentCommand(rootFixture.db, { roomId: R, agentId: B, sourceMessageId: null,
     parent: root, reason: 'order', privatePayload: { kind: 'order', authorId: A, fromRoomId: R, text: 'Delegated replay' } }))!;
   expect(await rootFixture.daemon['grantRequester'](child)).toMatchObject({ id: SYSTEM_IDENTITY_ID });
@@ -711,6 +614,6 @@ it('Reproduction 13: a corner order closes when its final reply commits without 
   expect((await rootFixture.db.query(`SELECT status FROM agent_turns WHERE room_id=$1 AND agent_id=$2 AND request_id=$3`,
     [C, A, command.turnRequestId])).rows[0]?.status).toBe('complete');
   const room = await rootFixture.phone.readRoom(C, H);
-  expect(room?.messages.some(message => message.text === 'Finished the requested work')).toBe(true);
+  expect((await rootFixture.phone.readRoom(R,H))?.messages.some(message => message.text === 'Finished the requested work')).toBe(true);
   expect(room?.latestAgentTurns?.some(turn => turn.agentPubkey === A && turn.status === 'working')).toBe(false);
 });

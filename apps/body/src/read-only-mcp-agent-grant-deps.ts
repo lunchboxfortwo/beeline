@@ -212,12 +212,12 @@ export async function requestGrant(
     if (kind === 'command')
       return `approved: ${ask} [grant ${grantId}]. Run it now with run_granted_command and the argv.`;
     if (kind === 'device') {
-      // bwrap fixes /dev when a session starts, so the turn loop continues
-      // this same turn in a fresh session that has it (`approvedDeviceGrant`).
       return sandboxDevicePath(target)
-        ? `approved: ${ask} [grant ${grantId}]. A running session cannot add a device, so end your turn now with one short line; this same turn continues straight away in a session that has ${target}. Do not ask anyone to restart.`
+        ? `approved: ${ask} [grant ${grantId}]. Use it now through run_granted_command; its tool sandbox loads the current device grant.`
         : `approved: ${ask} [grant ${grantId}], but only device nodes under /dev/ are added to your session, so nothing was added.`;
     }
+    if (kind === 'path') return `approved: ${ask} [grant ${grantId}]. Use it now through run_granted_command; its tool sandbox loads the current path grant.`;
+    if (kind === 'mcp') return `approved: ${ask} [grant ${grantId}]. Use your session tools; read(facet:session) shows the route's load result.`;
     return `approved: ${ask} [grant ${grantId}]; applies at the agent's next session.`;
   }
   // Yolo covers most asks; these two shapes never do, and saying which one this
@@ -252,7 +252,7 @@ export async function requestGrant(
     `${authority} must answer ${kind === 'command' ? 'Always, Once, or Deny' : 'ALWAYS, ONCE, or NO'} ${destination}; ` +
     'your turn is paused on this grant. Tell the human what you are waiting for and end your turn now; ' +
     (kind === 'mcp'
-      ? 'the approval wake starts the fresh session with that route mounted, so use it immediately without restarting or scheduling another turn.'
+      ? 'the approval wake continues this session; read(facet:session) shows the route load result, then use it with your session tools without restarting or scheduling another turn.'
       : 'you will be woken with the answer.')
   );
 }

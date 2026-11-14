@@ -1,3 +1,4 @@
+import { wall } from '@beeline/api-contract/daemon';
 import { expect, it, vi } from 'vitest';
 import * as Sentry from '@sentry/node';
 import { ProductionReleaseBusyError } from '@beeline/auth/github';
@@ -13,13 +14,14 @@ it('Reproduction SENTRY-REFUSALS: shared capture excludes typed refusals and ret
     captureServerError(new CommandRefusalError('Expected refusal', status));
   }
   captureServerError(new ExpectedRefusalError('Expected legacy refusal'));
+  captureServerError(wall('membership', 'Expected wall refusal'));
   captureServerError(new CornerVerdictRejectedError('STALE_HEAD', 'Review current head'));
   const busy = new ProductionReleaseBusyError();
   expect(busy.message).toBe('busy');
   expect(requestErrorStatus(busy)).toBe(409);
   captureServerError(busy);
   expect(Sentry.captureException).not.toHaveBeenCalled();
-  for (const error of [new Error('Unexpected fault'), { status: 403 }, 'unknown failure']) {
+  for (const error of [new Error('Unexpected fault'), wall('membership', new Error('database unavailable')), { status: 403 }, 'unknown failure']) {
     captureServerError(error);
     expect(Sentry.captureException).toHaveBeenLastCalledWith(error, expect.anything());
   }

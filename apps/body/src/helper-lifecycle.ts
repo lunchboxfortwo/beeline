@@ -7,48 +7,21 @@ export const HELPER_EXIT_CODES: Readonly<Record<HelperExitReason, 0 | 75>> = {
   failed: 75,
 };
 export type AgentExitReason = HelperExitReason | 'agent-removed';
-export type QuiesceReason = 'update' | 'force-update';
 export type HelperLifecycleState =
   { kind: 'starting' } | { kind: 'serving' } | { kind: 'stopping'; reason: HelperExitReason };
 
-/** Cancellation and intake closure for one hosted agent never control process exit. */
+/** Cancellation for one hosted agent never controls process exit. */
 export class AgentLifecycle {
-  #quiesced: QuiesceReason | undefined;
   #reason: AgentExitReason | undefined;
   constructor(private readonly options: { controller: AbortController }) {}
   get serving(): boolean {
-    return !this.#quiesced && !this.options.controller.signal.aborted;
+    return !this.options.controller.signal.aborted;
   }
-  get state():
-    | { kind: 'serving' }
-    | { kind: 'quiescing'; reason: QuiesceReason }
-    | { kind: 'stopping'; reason: AgentExitReason } {
-    return this.#reason
-      ? { kind: 'stopping', reason: this.#reason }
-      : this.#quiesced
-        ? { kind: 'quiescing', reason: this.#quiesced }
-        : { kind: 'serving' };
+  get state(): { kind: 'serving' } | { kind: 'stopping'; reason: AgentExitReason } {
+    return this.#reason ? { kind: 'stopping', reason: this.#reason } : { kind: 'serving' };
   }
   get stopReason(): AgentExitReason | undefined {
     return this.#reason;
-  }
-  quiesce(reason: QuiesceReason): boolean {
-    if (!this.serving && !(this.#quiesced === 'update' && reason !== 'update')) return false;
-    this.#quiesced = reason;
-    return true;
-  }
-  resume(): boolean {
-    if (this.#reason || !this.#quiesced) return false;
-    this.#quiesced = undefined;
-    return true;
-  }
-  quiesceUpdateIfIdle(close: () => boolean): boolean {
-    return this.serving && close() && this.quiesce('update');
-  }
-  resumeAfterFailedUpdate(reopen: () => void): boolean {
-    if (this.#quiesced !== 'update' || !this.resume()) return false;
-    reopen();
-    return true;
   }
   stop(reason: AgentExitReason): void {
     this.#reason ??= reason;

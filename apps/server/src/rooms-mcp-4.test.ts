@@ -1,4 +1,5 @@
-import { cornerOwnerSql, describe, expect, it, randomUUID, createAgentCommand, USER, AGENT, WORKSPACE, ROOM, CORNER, PUBLIC_CORNER, fixtureScope1, fixtureScope3 } from './test-support-rooms-mcp.test-support.js';
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
+import { AGENT,CORNER,cornerOwnerSql,createAgentCommand,describe,expect,fixtureScope1,fixtureScope3,it,PUBLIC_CORNER,randomUUID,ROOM,USER,WORKSPACE } from './test-support-rooms-mcp.test-support.js';
 
 describe('Rooms connector HTTP OAuth and MCP', () => {
 const scope1 = fixtureScope1();
@@ -35,8 +36,8 @@ const scope3 = fixtureScope3(scope1);
       const { client, member } = await scope1.connected();
       const corner = await scope3.reportCorner(member);
       await scope3.ok(client, 'report', { address: corner, status: 'done', text: 'done: finished without a pending order' });
-      expect((await scope1.db.query(`SELECT 1 FROM agent_commands WHERE agent_id=$1 AND reason='report' AND private_payload->>'originCornerId'=$2`, [AGENT, corner])).rowCount).toBe(1);
-      expect((await scope3.call(client, 'report', { address: CORNER, status: 'done', text: 'done: forbidden corner' })).text).toContain('Access denied');
+      expect((await scope1.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND author_id=$2 AND text='done: finished without a pending order'`,[corner,member])).rowCount).toBe(1);
+      expect((await scope3.call(client,'report',{address:CORNER,status:'done',text:'done: forbidden corner'})).text).toContain('commander is no longer a member of the return address');
     });
 
     it('R1: prefers the given address, then the oldest pending order elsewhere', async () => {
@@ -92,9 +93,8 @@ const scope3 = fixtureScope3(scope1);
       const corner = opened.address as string;
       const assignment = (await scope1.db.query<{ id: string; turn_request_id: string }>(
         `SELECT id,turn_request_id FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND reason='corner_objective'`, [corner, AGENT])).rows[0]!;
-      await scope1.daemon.execute('claimAgentCommand', { roomId: corner, commandId: assignment.id, generationId: 'blocked-worker' }, AGENT);
-      await scope1.daemon.execute('report', { roomId: corner, requestId: assignment.turn_request_id,
-        generationId: 'blocked-worker', status: 'blocked', text: 'Choose the nebula source' }, AGENT);
+      await startQueuedCommand(scope1.daemon, { roomId: corner, commandId: assignment.id }, AGENT);
+      await scope1.daemon.execute('report', { roomId: corner, requestId: assignment.turn_request_id, status: 'blocked', text: 'Choose the nebula source' }, AGENT);
       const handback = (await scope1.db.query<{ id: string; room_id: string }>(
         `SELECT id,room_id FROM agent_commands WHERE agent_id=$1 AND reason='report'`, [member])).rows[0]!;
       expect(handback.room_id).toBe(ROOM);

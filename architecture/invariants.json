@@ -38,7 +38,7 @@
           "httpPhoneOperation"
         ]
       },
-      "ownerSites": 16,
+      "ownerSites": 14,
       "strict": true,
       "total": 0,
       "fix": "Send phone operations through LiveConnection.request. Keep HTTP limited to its documented non-phone tool commands; do not add another sender. Rooms MCP retains its separate authenticated tool boundary."
@@ -46,7 +46,7 @@
     {
       "id": "work.command-creation",
       "module": "Work authority",
-      "invariant": "Agent commands are created only by agent-command.ts creation functions; only a command authorizes a turn.",
+      "invariant": "Agent queue items are appended only by the conversational queue owner; only an item authorizes a turn.",
       "pattern": "INSERT\\s+INTO\\s+(?:\"?\\w+\"?\\s*\\.\\s*)?\"?agent_commands\"?\\b",
       "flags": "i",
       "scope": [
@@ -56,59 +56,46 @@
         "apps/server/src/agent-command.ts"
       ],
       "total": 0,
-      "fix": "Call createAgentCommand(db, {...}) or createClaimedMcpAgentCommand for an explicit connected-app call in apps/server/src/agent-command.ts instead of inserting the row; it owns depth, dedupe and wake routing.",
+      "fix": "Call queueMessage in apps/server/src/agent-command.ts; it owns membership, source/return addresses and durable append.",
       "strict": true,
       "ownerFunctions": {
         "apps/server/src/agent-command.ts": [
-          "createClaimedMcpAgentCommand",
           "insertAgentCommand"
         ]
       },
-      "ownerSites": 2
+      "ownerSites": 1
     },
     {
       "id": "work.command-claim",
       "module": "Work authority",
-      "invariant": "Only claimAgentCommand can assign a claimed command; its working-turn write must succeed first.",
+      "invariant": "The queue has no claimed state: nothing assigns state='claimed'.",
       "pattern": "UPDATE\\s+(?:\\\"?\\w+\\\"?\\s*\\.\\s*)?\\\"?agent_commands\\\"?\\s+(?:(?:AS\\s+)?\"?\\w+\"?\\s+)?SET\\s+(?:(?!\\bWHERE\\b|;|`).)*?\\b\\\"?state\\\"?\\s*=\\s*'claimed'",
       "flags": "is",
       "scope": [
         "apps/server/src"
       ],
-      "owners": [
-        "apps/server/src/agent-command-route-agent-result.ts"
-      ],
-      "ownerFunctions": {
-        "apps/server/src/agent-command-route-agent-result.ts": [
-          "claimAgentCommand"
-        ]
-      },
-      "ownerSites": 1,
+      "owners": [],
       "strict": true,
       "total": 0,
-      "fix": "Call claimAgentCommand; connected apps select orders with claimMcpOrder."
+      "fix": "Items stay pending until their answer is posted; deliver them from getAgentCommands without claiming.",
+      "ownerFunctions": {},
+      "ownerSites": 0
     },
     {
       "id": "work.command-owner-fields",
       "module": "Work authority",
-      "invariant": "Only the command owner assigns generations, owners and leases; progress cannot acquire a command.",
+      "invariant": "The queue has no generation, lease or owner: nothing writes those retired columns.",
       "pattern": "UPDATE\\s+(?:\\\"?\\w+\\\"?\\s*\\.\\s*)?\\\"?agent_commands\\\"?\\s+(?:(?:AS\\s+)?\"?\\w+\"?\\s+)?SET\\s+(?:(?!\\bWHERE\\b|;|`).)*?\\b\\\"?(?:generation_id|lease_expires_at|claimed_at|turn_owner_connection_id|turn_owner_epoch)\\\"?\\s*=(?!\\s*NULL\\b)",
       "flags": "is",
       "scope": [
         "apps/server/src"
       ],
-      "owners": [
-        "apps/server/src/agent-command-route-agent-result.ts"
-      ],
-      "ownerFunctions": {
-        "apps/server/src/agent-command-route-agent-result.ts": [
-          "claimAgentCommand"
-        ]
-      },
-      "ownerSites": 1,
+      "owners": [],
       "strict": true,
       "total": 0,
-      "fix": "Call claimAgentCommand; connected apps select orders with claimMcpOrder."
+      "fix": "Identify a queue item by its id and requestId; it carries no generation, lease or owner.",
+      "ownerFunctions": {},
+      "ownerSites": 0
     },
     {
       "id": "work.mcp-turn-state",
@@ -123,7 +110,7 @@
       "owners": [],
       "strict": true,
       "total": 0,
-      "fix": "Use the command owner (claimMcpOrder, dismissAgentCommandWakes, releaseUnreportedMcpOrder) or postAgentTurnReceipt; MCP may only adapt ingress."
+      "fix": "Use the queue owners (selectMcpOrder, dismissAgentCommandWakes, endAgentTurn) or postAgentTurnReceipt; MCP may only adapt ingress."
     },
     {
       "id": "work.subscription-store",
@@ -517,7 +504,7 @@
     {
       "id": "work.command-terminal",
       "module": "Turn lifecycle",
-      "invariant": "Only beeline_end_agent_turn changes a command or turn to a terminal state.",
+      "invariant": "Only beeline_finish_agent_command changes a command or turn to a terminal state.",
       "pattern": "(?:UPDATE\\s+(?:\"?\\w+\"?\\s*\\.\\s*)?\"?agent_commands\"?\\s+(?:(?:AS\\s+)?\"?\\w+\"?\\s+)?|INSERT\\s+INTO\\s+(?:\"?\\w+\"?\\s*\\.\\s*)?\"?agent_commands\"?\\s*\\((?:(?!;|`).)*?\\bON\\s+CONFLICT(?:(?!;|`).)*?\\bDO\\s+UPDATE\\s+)SET\\s+(?:(?!\\bWHERE\\b|;|`).)*?\\b\"?state\"?\\s*=(?!\\s*'(?:pending|claimed)')",
       "flags": "is",
       "scope": [
@@ -534,12 +521,12 @@
       "ownerSites": 1,
       "strict": true,
       "total": 0,
-      "fix": "Call endAgentTurn or beeline_end_agent_turn in the caller authority transaction; connection loss returns work to pending."
+      "fix": "Call endAgentTurn or beeline_finish_agent_command in the caller's transaction; a dropped helper leaves the item pending."
     },
     {
       "id": "work.turn-terminal",
       "module": "Turn lifecycle",
-      "invariant": "Only beeline_end_agent_turn changes a command or turn to a terminal state.",
+      "invariant": "Only beeline_finish_agent_command changes a command or turn to a terminal state.",
       "pattern": "(?:UPDATE\\s+(?:\"?\\w+\"?\\s*\\.\\s*)?\"?agent_turns\"?\\s+(?:(?:AS\\s+)?\"?\\w+\"?\\s+)?|INSERT\\s+INTO\\s+(?:\"?\\w+\"?\\s*\\.\\s*)?\"?agent_turns\"?\\s*\\((?:(?!;|`).)*?\\bON\\s+CONFLICT(?:(?!;|`).)*?\\bDO\\s+UPDATE\\s+)SET\\s+(?:(?!\\bWHERE\\b|;|`).)*?\\b\"?status\"?\\s*=(?!\\s*'working')",
       "flags": "is",
       "scope": [
@@ -556,7 +543,7 @@
       "ownerSites": 1,
       "strict": true,
       "total": 0,
-      "fix": "Call endAgentTurn or beeline_end_agent_turn in the caller authority transaction; connection loss returns work to pending."
+      "fix": "Call endAgentTurn or beeline_finish_agent_command in the caller's transaction; a dropped helper leaves the item pending."
     },
     {
       "id": "work.terminal-turn-insert",
@@ -588,7 +575,7 @@
       "owners": [],
       "strict": true,
       "total": 0,
-      "fix": "Insert pending commands, then claim them through claimAgentCommand; end them through endAgentTurn.",
+      "fix": "Insert pending commands; end them through endAgentTurn.",
       "insertColumnValue": {
         "column": "state",
         "value": "'pending'"
@@ -667,7 +654,7 @@
       "apps/server/src",
       "apps/auth/src"
     ],
-    "bootstrapTotal": 1658,
+    "bootstrapTotal": 1647,
     "unusedTotal": 172,
     "tables": {
       "agent_avatars": {
@@ -707,10 +694,7 @@
           "root_source_message_id": "existing before the registry; weekly audit reviews",
           "agent_depth": "existing before the registry; weekly audit reviews",
           "state": "existing before the registry; weekly audit reviews",
-          "generation_id": "existing before the registry; weekly audit reviews",
-          "lease_expires_at": "existing before the registry; weekly audit reviews",
           "created_at": "existing before the registry; weekly audit reviews",
-          "claimed_at": "existing before the registry; weekly audit reviews",
           "completed_at": "existing before the registry; weekly audit reviews",
           "result_message_id": "existing before the registry; weekly audit reviews",
           "private_payload": "existing before the registry; weekly audit reviews",
@@ -719,13 +703,18 @@
             "reason": "Retained without runtime use until the previous server drains during this rolling release.",
             "drop": "Next release after turn-lifecycle cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
           },
-          "lifecycle_before": "existing before the registry; weekly audit reviews",
+          "lifecycle_before": {
+            "reason": "Historical orchestration field retained for the previous server during this rolling release.",
+            "drop": "Next release after https://github.com/Beeline-Work/beeline/pull/4310 drains old servers."
+          },
           "review_context": "existing before the registry; weekly audit reviews",
           "wake_context": "existing before the registry; weekly audit reviews",
-          "report_outcome": "existing before the registry; weekly audit reviews",
-          "restart_confirmed_at": "existing before the registry; weekly audit reviews",
+          "report_outcome": "The published answer outcome distinguishes failed work from a successful answer while both complete their queue obligation.",
           "cancellation_reason": "existing before the registry; weekly audit reviews",
-          "recovery_context": "existing before the registry; weekly audit reviews",
+          "recovery_context": {
+            "reason": "Retired browser-activity accumulator; each observation now owns an immutable queued input. Retained for preceding serving and rollback images.",
+            "drop": "docs/agent-server-surfaces.md#turn-recovery-storage-retirement after serving and rollback images drain"
+          },
           "wake_after": {
             "reason": "Retained without runtime use until the previous server drains during this rolling release.",
             "drop": "Next release after turn-lifecycle cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
@@ -743,12 +732,42 @@
             "reason": "Retained without runtime use until the previous server drains during this rolling release.",
             "drop": "Next release after turn-lifecycle cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
           },
-          "execution_kind": "Records how the claimed generation executes (helper protocol, connected app, or legacy installed-helper adapter) so dispatch never reads a socket. NULL only for claims written by images below PR 4294.",
-          "turn_owner_connection_id": { "reason": "retired: claims still write it only so the previous release reads owned turns after a rollback; only the beeline_classify_claim_kind older-writer trigger reads it", "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (rollback floor passes this release; drop the trigger first)" },
-          "turn_owner_epoch": { "reason": "retired: claims still write it only so the previous release reads owned turns after a rollback; nothing reads it", "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (rollback floor passes this release)" },
           "startup_wake_after": {
             "reason": "Retained without runtime use until the previous server drains during this rolling release.",
             "drop": "Next release after turn-lifecycle cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
+          },
+          "return_room_id": "Where the item's answer goes, fixed when the item is queued (an order's issuer place).",
+          "answer_attachments": "Uploaded answer media must survive helper/server replacement without an optional table read before publication.",
+          "report_address": "The original commander escalation address is frozen at append so later orders or transcript changes cannot redirect a report.",
+          "message": "The delivered source text, author and attachments must survive transcript edits and be readable without optional context joins.",
+          "posted_reply_id": "A committed mid-turn reply suppresses closing-message publication and survives helper/server replacement.",
+          "generation_id": {
+            "reason": "Retired queue ownership storage; current requests do not read or write it, retained for preceding serving and rollback images.",
+            "drop": "docs/release-pipeline.md#release-memory - beeline-drop-retired-turn-schema contract release"
+          },
+          "lease_expires_at": {
+            "reason": "Retired queue ownership storage; current requests do not read or write it, retained for preceding serving and rollback images.",
+            "drop": "docs/release-pipeline.md#release-memory - beeline-drop-retired-turn-schema contract release"
+          },
+          "claimed_at": {
+            "reason": "Retired queue ownership storage; current requests do not read or write it, retained for preceding serving and rollback images.",
+            "drop": "docs/release-pipeline.md#release-memory - beeline-drop-retired-turn-schema contract release"
+          },
+          "execution_kind": {
+            "reason": "Retired queue ownership storage; current requests do not read or write it, retained for preceding serving and rollback images.",
+            "drop": "docs/release-pipeline.md#release-memory - beeline-drop-retired-turn-schema contract release"
+          },
+          "turn_owner_connection_id": {
+            "reason": "Retired queue ownership storage; current requests do not read or write it, retained for preceding serving and rollback images.",
+            "drop": "docs/release-pipeline.md#release-memory - beeline-drop-retired-turn-schema contract release"
+          },
+          "turn_owner_epoch": {
+            "reason": "Retired queue ownership storage; current requests do not read or write it, retained for preceding serving and rollback images.",
+            "drop": "docs/release-pipeline.md#release-memory - beeline-drop-retired-turn-schema contract release"
+          },
+          "restart_confirmed_at": {
+            "reason": "Retired queue ownership storage; current requests do not read or write it, retained for preceding serving and rollback images.",
+            "drop": "docs/release-pipeline.md#release-memory - beeline-drop-retired-turn-schema contract release"
           }
         }
       },
@@ -762,9 +781,18 @@
           "instance_id": "existing before the registry; weekly audit reviews",
           "connected_at": "existing before the registry; weekly audit reviews",
           "released_at": "existing before the registry; weekly audit reviews",
-          "turn_connection_id": { "reason": "retired: a running turn has no owning connection; kept for serving and rollback overlap", "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (no unreleased registration holds a value, and rollback floor passes 4267)" },
-          "turn_connection_epoch": { "reason": "retired: a running turn has no owning connection epoch; kept for serving and rollback overlap", "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (no unreleased registration holds a value, and rollback floor passes 4267)" },
-          "turn_transport_id": { "reason": "retired: a running turn has no owning transport; kept for serving and rollback overlap", "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (no unreleased registration holds a value, and rollback floor passes 4267)" }
+          "turn_connection_id": {
+            "reason": "retired: a running turn has no owning connection; kept for serving and rollback overlap",
+            "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (no unreleased registration holds a value, and rollback floor passes 4267)"
+          },
+          "turn_connection_epoch": {
+            "reason": "retired: a running turn has no owning connection epoch; kept for serving and rollback overlap",
+            "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (no unreleased registration holds a value, and rollback floor passes 4267)"
+          },
+          "turn_transport_id": {
+            "reason": "retired: a running turn has no owning transport; kept for serving and rollback overlap",
+            "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (no unreleased registration holds a value, and rollback floor passes 4267)"
+          }
         }
       },
       "agent_grant_policy_revocations": {
@@ -852,7 +880,10 @@
           "size": "existing before the registry; weekly audit reviews",
           "created_at": "existing before the registry; weekly audit reviews",
           "request_id": "existing before the registry; weekly audit reviews",
-          "generation_id": "existing before the registry; weekly audit reviews"
+          "generation_id": {
+            "reason": "Retired queue ownership storage; current requests do not read or write it, retained for preceding serving and rollback images.",
+            "drop": "docs/release-pipeline.md#release-memory - beeline-drop-retired-turn-schema contract release"
+          }
         }
       },
       "agent_schedule_occurrences": {
@@ -948,11 +979,13 @@
           "request_id": "existing before the registry; weekly audit reviews",
           "agent_id": "existing before the registry; weekly audit reviews",
           "status": "existing before the registry; weekly audit reviews",
-          "generation_id": "existing before the registry; weekly audit reviews",
           "started_at": "existing before the registry; weekly audit reviews",
           "created_at": "existing before the registry; weekly audit reviews",
           "failure_reason": "existing before the registry; weekly audit reviews",
-          "completion_kind": "existing before the registry; weekly audit reviews",
+          "completion_kind": {
+            "reason": "Historical no-reply completions remain readable while the prior server drains; new queue items can no longer finish silently.",
+            "drop": "Next release after the queue rollout: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
+          },
           "tool_calls": "existing before the registry; weekly audit reviews",
           "input_tokens": "existing before the registry; weekly audit reviews",
           "output_tokens": "existing before the registry; weekly audit reviews",
@@ -960,6 +993,10 @@
           "startup_outcome": {
             "reason": "Retained without runtime use until the previous server drains during this rolling release.",
             "drop": "Next release after turn-lifecycle cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
+          },
+          "generation_id": {
+            "reason": "Retired queue ownership storage; current requests do not read or write it, retained for preceding serving and rollback images.",
+            "drop": "docs/release-pipeline.md#release-memory - beeline-drop-retired-turn-schema contract release"
           }
         }
       },
@@ -1939,7 +1976,7 @@
         "module": "Rooms and messages",
         "reason": "existing before the registry; weekly audit reviews",
         "columns": {
-          "chat_seq": "Stable per-chat number behind ¶author-N links; it must not shift when older messages are deleted, so row order cannot derive it.",
+          "chat_seq": "Stable per-chat number behind \u00b6author-N links; it must not shift when older messages are deleted, so row order cannot derive it.",
           "id": "existing before the registry; weekly audit reviews",
           "room_id": "existing before the registry; weekly audit reviews",
           "author_id": "existing before the registry; weekly audit reviews",
@@ -2483,14 +2520,15 @@
       },
       "rooms_mcp_idempotency": {
         "module": "Tools and connectors",
-        "reason": "existing before the registry; weekly audit reviews",
+        "reason": "Retired send-claim/result cache retained only while the previous server drains; queue/message IDs own native replay.",
         "columns": {
           "member_id": "existing before the registry; weekly audit reviews",
           "idempotency_key": "existing before the registry; weekly audit reviews",
           "message_id": "existing before the registry; weekly audit reviews",
           "result": "existing before the registry; weekly audit reviews",
           "claimed_at": "existing before the registry; weekly audit reviews"
-        }
+        },
+        "drop": "Next release after https://github.com/Beeline-Work/beeline/pull/4310 drains old servers."
       },
       "rooms_mcp_members": {
         "module": "Tools and connectors",
@@ -3267,15 +3305,6 @@
           "digest": "Rejects conflicting content that attempts to reuse an already accepted source revision."
         }
       },
-      "helper_activation_authority": {
-        "module": "Helper activation context (apps/server/src/helper-activation-schema.ts)",
-        "reason": "Durable Workspace generation/revision tokens distinguish activation authority changes across listener recovery and helper reuse.",
-        "columns": {
-          "workspace_id": "Identifies the Workspace whose machine activation authority projection changed.",
-          "generation": "A durable projection generation prevents authority tokens from being reused across incompatible source histories.",
-          "revision": "The committed monotonic revision orders activation inputs without periodic whole-context reads."
-        }
-      },
       "helper_overlay_demand": {
         "module": "Helper overlays (apps/server/src/helper-overlay.ts)",
         "reason": "A durable aggregate viewing revision gates fresh helper baselines across application sockets and server processes.",
@@ -3307,37 +3336,6 @@
           "result_expires_at": "Bounds full result retention while preserving permanent used identity/digest tombstones."
         }
       },
-      "agent_command_generation_owners": {
-        "module": "Turn ownership (apps/server/src/turn-ownership.ts)",
-        "reason": "Immutable per-command generation bindings prevent a delayed registration from adopting or replaying another execution generation.",
-        "columns": {
-          "command_id": "Identifies the command whose execution generation has an immutable owner binding.",
-          "generation_id": "Preserves each admitted execution generation after the current command advances or is requeued.",
-          "connection_id": { "reason": "retired history: older rows name the registration that first claimed the generation; no longer written and never an owner check", "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (rollback floor passes 4267)" },
-          "connection_epoch": { "reason": "retired history: older rows name the epoch of that first claim; no longer written and never an owner check", "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (rollback floor passes 4267)" }
-        }
-      },
-      "turn_owned_access_checks": {
-        "module": "Turn ownership (apps/server/src/turn-ownership.ts)",
-        "reason": "Transaction-local evidence drives a deferred COMMIT-time Room access check and deletes itself after success; no heartbeat or retained effect history.",
-        "columns": {
-          "transaction_id": "Identifies the exact database transaction whose owned effects re-check Room access at COMMIT.",
-          "agent_id": "Identifies the effect actor whose Room membership must still hold at COMMIT.",
-          "command_id": "Identifies the command authorizing the effect and prevents mixing commands in one transaction.",
-          "generation_id": "Pins the effect to its execution generation and prevents mixing generations in one transaction."
-        }
-      },
-      "agent_command_owner_ends": {
-        "module": "Owned model parking (apps/server/src/owned-model-parking.ts)",
-        "reason": "Immutable causal evidence fences a generation after its owner ends without inventing a provider outcome or allowing a second claim.",
-        "columns": {
-          "command_id": "Identifies the durable command whose generation can no longer claim or perform effects.",
-          "generation_id": "Scopes the immutable end to the exact issued command generation.",
-          "model_request_id": "Records the actual model attempt when known; NULL preserves missing-journal uncertainty.",
-          "ended_at": "Preserves the database time of the causal owner end for durable evidence.",
-          "transaction_id": "Binds owner-end evidence to the transaction that committed its authority change."
-        }
-      },
       "owned_model_credentials": {
         "module": "Owned model credentials (apps/server/src/owned-model-credential.ts)",
         "reason": "Immutable credential bindings survive claim replay and revoke stale provider authority without retaining the bearer token.",
@@ -3350,17 +3348,29 @@
           "workspace_id": "Preserves the admitted Workspace boundary across later membership changes.",
           "room_id": "Pins model authority to the Room that admitted the original command.",
           "command_id": "Identifies the durable command whose claim issued this credential.",
-          "generation_id": "Distinguishes successive command claims and prevents a credential crossing generations.",
+          "generation_id": "Retained column name stores the queue item id for current credentials; it creates no execution generation.",
           "request_id": "Binds model authority to the admitted helper turn request.",
-          "connection_id": { "reason": "Signed history of older credentials only; NULL for new credentials and never compared to a live connection.", "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (LEGACY_CREDENTIAL_BINDINGS_LIVE_SQL in owned-model-credential.ts returns 0)" },
-          "connection_epoch": { "reason": "Signed history of older credentials only; NULL for new credentials and never compared to a live connection.", "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (LEGACY_CREDENTIAL_BINDINGS_LIVE_SQL in owned-model-credential.ts returns 0)" },
-          "instance_id": { "reason": "Signed history of older credentials only; NULL for new credentials and never compared to a server lease.", "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (LEGACY_CREDENTIAL_BINDINGS_LIVE_SQL in owned-model-credential.ts returns 0)" },
+          "connection_id": {
+            "reason": "Signed history of older credentials only; NULL for new credentials and never compared to a live connection.",
+            "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (LEGACY_CREDENTIAL_BINDINGS_LIVE_SQL in owned-model-credential.ts returns 0)"
+          },
+          "connection_epoch": {
+            "reason": "Signed history of older credentials only; NULL for new credentials and never compared to a live connection.",
+            "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (LEGACY_CREDENTIAL_BINDINGS_LIVE_SQL in owned-model-credential.ts returns 0)"
+          },
+          "instance_id": {
+            "reason": "Signed history of older credentials only; NULL for new credentials and never compared to a server lease.",
+            "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (LEGACY_CREDENTIAL_BINDINGS_LIVE_SQL in owned-model-credential.ts returns 0)"
+          },
           "model": "Pins the selected provider model so configuration changes cannot retarget an issued credential.",
           "agent_model": "Retains the explicit agent model selection used when the credential was issued.",
           "model_token_hash": "Detects model-token rotation after issuance without retaining its secret.",
           "expires_ms": "Records the deadline signed into older credentials; new credentials store NULL, live invocation membership bounds their authority, and no time expiry is enforced.",
           "created_at": "Records the issuance boundary independently of later command claim changes.",
-          "revoked_at": "Preserves the credential schema revocation marker checked by authentication; the existing primitive has no current revocation writer."
+          "revoked_at": {
+            "reason": "Retired queue ownership storage; current requests do not read or write it, retained for preceding serving and rollback images.",
+            "drop": "docs/release-pipeline.md#release-memory - beeline-drop-retired-turn-schema contract release"
+          }
         }
       },
       "owned_model_attempts": {
@@ -3485,13 +3495,14 @@
       },
       "diagnostic_command_origins": {
         "module": "Device session diagnostics",
-        "reason": "Durable content-free diagnosis cannot be recovered from volatile application logs.",
+        "reason": "Historical source attribution remains readable while old servers drain; queue admission no longer writes diagnostic records.",
         "columns": {
           "command_id": "Durable command identifier preserves origin across asynchronous execution.",
           "session_id": "Origin activity session, distinct from the helper host.",
           "user_id": "Authenticated initiating person independent of agent ownership.",
           "action_id": "Origin action propagates across child commands."
-        }
+        },
+        "drop": "Next release after https://github.com/Beeline-Work/beeline/pull/4310 drains old servers."
       },
       "diagnostic_actions_default": {
         "module": "Device session diagnostics",
@@ -3552,6 +3563,25 @@
       }
     },
     "jsonb": {
+      "answer_attachments": {
+        "url": "The uploaded answer object reference survives replacement.",
+        "name": "The stored answer keeps its media filename.",
+        "mimeType": "The stored answer keeps its media type.",
+        "size": "The stored answer keeps its media byte length."
+      },
+      "report_address": {
+        "identityId": "The commander recipient is frozen when the request is appended.",
+        "roomId": "The commander return chat is frozen when the request is appended."
+      },
+      "message": {
+        "id": "The queue stores its delivered source independently of mutable transcript context.",
+        "authorId": "The queue stores its delivered source independently of mutable transcript context.",
+        "body": "The queue stores its delivered source independently of mutable transcript context.",
+        "attachments": "The queue stores its delivered source independently of mutable transcript context.",
+        "type": "The queue stores its delivered source independently of mutable transcript context.",
+        "systemEvent": "The queue stores its delivered source independently of mutable transcript context.",
+        "replyToMessageId": "The queue stores its delivered source independently of mutable transcript context."
+      },
       "drawing": {},
       "private_payload": {
         "kind": "existing before the registry; weekly audit reviews",

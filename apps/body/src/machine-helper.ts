@@ -1,3 +1,4 @@
+import { storageOperation } from './helper-storage.js';
 import { waitForProcessExit } from './process-exit.js';
 import { captureHelperError } from './sentry.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -50,9 +51,9 @@ import {
 } from './systemd.js';
 import { squireBrokerMeetsComputerUseMinimum, squireBrokerInstallEntry, squireHostPaths } from './squire-host.js';
 import { readVault } from './connector-squire.js';
-import { StdioSquireMcpClient } from './squire-mcp-client.js';
+import { sharedSquireMcpClient, closeHelperSquireTransports, type SquireMcpConnection } from './squire-mcp-client.js';
 import { pruneDeletedRuntimes, pruneRepositoryCaches, pruneMachineStorage } from './host-disk-retention.js';
-import { AgentProcesses } from './agent-process.js';
+import { HostPlaces } from './agent-process.js';
 import { refreshSystemdHelperUnit } from './native-helper.js';
 import { reclaimArchivedMemberStorage, watchStorageFacts, pruneStoppedAgentStorage, pruneEndedOwnerStorage, pruneArchivedCheckoutStorage, pruneUnusedCheckoutStorage } from './storage-owners.js';
 import { monitorHelperUsage } from './helper-usage.js';
@@ -148,6 +149,7 @@ async function serveMachineHelper(
     })();
   });
   controller.signal.addEventListener('abort', stopStorageFacts, { once: true });
+  controller.signal.addEventListener('abort', closeHelperSquireTransports, { once: true });
   let diskSweepRunning = false;
   let lastRetentionSweepAt = 0;
   const sweepHostDisk = async () => {
@@ -160,16 +162,16 @@ async function serveMachineHelper(
         usage?.cleanup(entry);
         console.log(`[helper] storage deleted ${entry.path}; freed ${entry.freedBytes} bytes`);
       };
-      const options = { log };
+      const options = storageOperation({ log });
       await pruneStoppedAgentStorage(supervisorRoot, options);
       await pruneEndedOwnerStorage(supervisorRoot, options);
       await pruneDeletedRuntimes(supervisorRoot, now, options);
       await pruneArchivedCheckoutStorage(supervisorRoot, options);
       await pruneUnusedCheckoutStorage(supervisorRoot, options);
-      const swept = await AgentProcesses.withIdleHostStorage(async () => {
+      const swept = await HostPlaces.withIdleHostStorage(async () => {
         await pruneRepositoryCaches(supervisorRoot, now, options);
         await pruneMachineStorage(supervisorRoot, options);
-      }, { allowLiveSessions: true });
+      });
       if (swept) lastRetentionSweepAt = now;
     } catch (error) { console.warn('[helper] idle disk sweep deferred:', error); }
     finally { diskSweepRunning = false; }
@@ -307,7 +309,7 @@ async function serveMachineHelper(
     // Close the machine socket before agent teardown can unregister the last agent.
     if (reason === 'update') for (const link of links.values()) link.stop(true);
     lifecycle.stop(reason);
-    // Intake is already quiesced; interrupted turns stay claimed for the next helper. Once
+    // Queued and in-flight items stay on the server for the next helper. Once
     // the machine link closes, exit in this same turn: local broker clients,
     // harness cleanup, or pending discovery must never gate the native restart.
     // The service manager owns the exiting process and its remaining children.
@@ -320,27 +322,20 @@ async function serveMachineHelper(
       loadedRelease,
       env,
       ...(options.runUpdateWorker ? { prepare: options.runUpdateWorker } : {}),
-      idle: () => [...hosted.values()].every((agent) => agent.core.activeTurnCount() === 0),
       changed: () => writeStatus(),
-      handoff: async (desiredRelease, interrupted, signal) => {
+      handoff: async (desiredRelease, signal) => {
         await nativeConfiguration;
         if (signal.aborted || controller.signal.aborted) return;
-        if (!quiesceHostedAgents([...hosted.values()], interrupted))
-          throw new Error('helper could not close intake for release handoff');
-        if (interrupted) for (const agent of hosted.values()) agent.core.interruptForServerMinimum();
-        stoppingStatus = `loaded_release=${loadedRelease}; desired_release=${desiredRelease}; handoff ${interrupted ? 'interrupted' : 'idle'}`;
+        stoppingStatus = `loaded_release=${loadedRelease}; desired_release=${desiredRelease}; handoff`;
         restartHelper('update');
       },
       failed: (error) => {
         console.error('[helper] release transaction failed:', error);
         helperError = String(error).slice(0, 500);
         writeStatus();
-        for (const agent of hosted.values())
-          agent.lifecycle.resumeAfterFailedUpdate(() => agent.core.resumeServing());
       },
     });
   const tickUpdate = () => {
-    update?.idleChanged();
     void sweepHostDisk();
   };
   const requestForceUpdate = (minimum: string) => {
@@ -355,7 +350,7 @@ async function serveMachineHelper(
     machineLink: (baseUrl) => {
       let link = links.get(baseUrl);
       if (!link) {
-        let vaultClient: StdioSquireMcpClient | undefined;
+        let vaultClient: SquireMcpConnection | undefined;
         controller.signal.addEventListener('abort', () => vaultClient?.close(), { once: true });
         const home = env.HOME?.trim() || homedir();
         link = new MachineLink({
@@ -367,7 +362,7 @@ async function serveMachineHelper(
           readVault: async agentId => {
             if (!existsSync(squireBrokerInstallEntry(home)) && !existsSync(squireHostPaths(home).mcpSocket))
               return { connections: [], notAdded: true };
-            vaultClient ??= new StdioSquireMcpClient({ home, scope: { agentId, roomId: 'machine-vault' } });
+            vaultClient ??= sharedSquireMcpClient({ home, scope: { agentId, roomId: 'machine-vault' } });
             return { connections: await readVault(vaultClient) };
           },
           log: message => console.warn(`[helper] ${message}`),
@@ -657,7 +652,7 @@ async function serveMachineHelper(
       layout &&
       (!request.sourceGeneration || request.sourceGeneration === generation)
     ) {
-      void update?.prepared(request.releaseId, request.force === true)
+      void update?.prepared(request.releaseId)
         .catch(error => console.error('[helper] update handoff failed:', error));
     }
     writeStatus();
@@ -699,35 +694,6 @@ async function serveMachineHelper(
     for (const link of links.values()) link.stop();
   }
   return finish(lifecycle.stopReason ?? 'stopped');
-}
-
-/**
- * Close every intake in one synchronous step without cancelling active turns.
- */
-export function quiesceHostedAgents(
-  agents: readonly HostedAgent[],
-  deadlineReached = false,
-): boolean {
-  if (!deadlineReached && agents.some((agent) => agent.core.activeTurnCount() > 0)) return false;
-  if (
-    agents.some(
-      (agent) =>
-        !agent.lifecycle.serving &&
-        !(
-          agent.lifecycle.state.kind === 'quiescing' &&
-          (agent.lifecycle.state.reason === 'update' ||
-            agent.lifecycle.state.reason === 'force-update')
-        ),
-    )
-  )
-    return false;
-  for (const agent of agents) {
-    if (agent.lifecycle.serving) {
-      agent.core.quiesceForUpdate();
-      agent.lifecycle.quiesce('update');
-    }
-  }
-  return true;
 }
 
 export async function runMachineHelper(

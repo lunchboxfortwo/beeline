@@ -1,17 +1,17 @@
-import { type DaemonAttachment, readAgentUsage, usageSummary, usageIsOld, type RoomConversationResult, type CornerRestoreResult, fixCornerText, type ConnectResult } from "@beeline/api-contract/daemon";
-import { withoutImageData, deliverAttachments, attachmentId } from "./attachment-delivery.js";
-import { join } from "node:path";
-import { createHash, randomUUID } from "node:crypto";
-import { beelineManagedSkills, runningBeelineReleaseId } from "./beeline-skill.js";
-import { writeFileSync } from "node:fs";
-import { scratchBudgetMessage, allocatedDirectoryBytes } from "./scratch-lifecycle.js";
 import { normalizeAppContinuation } from "@beeline/api-contract/app-connections";
-import { squireSessionSignedIn } from "./squire-sign-in.js";
-import { JsonObject, readTurnContextFile, daemonExecute, requiredEnv, downloadAttachment, memorySources, activeCommandContext, fetchImage, asObject, stringArg, connectorOfferDepsFromEnv } from './read-only-mcp.js';
-import { agentScheduleRoomId, reactToMessage, postArtifact, bindBriefFiles, agentScheduleDepsFromEnv } from './read-only-mcp-download-attachment.js';
-import { reportFeedback, openCorner, reviseCornerBrief, readCornerBrief, closeCorner, prChecksStatus, approveMerge, targetCornerId, writeScratchFile } from './read-only-mcp-open-corner.js';
-import { shareBrowser, requestGrant, listGrants, workbenchStatus, storeSecret } from './read-only-mcp-agent-grant-deps.js';
+import { fixCornerText,readAgentUsage,usageIsOld,usageSummary,type ConnectResult,type CornerRestoreResult,type DaemonAttachment,type RoomConversationResult } from "@beeline/api-contract/daemon";
+import { createHash,randomUUID } from "node:crypto";
+import { join } from "node:path";
+import { attachmentId,deliverAttachments,withoutImageData } from "./attachment-delivery.js";
+import { beelineManagedSkills,runningBeelineReleaseId } from "./beeline-skill.js";
+import { listGrants,requestGrant,shareBrowser,storeSecret,workbenchStatus } from './read-only-mcp-agent-grant-deps.js';
+import { agentScheduleDepsFromEnv,agentScheduleRoomId,bindBriefFiles,postArtifact,reactToMessage } from './read-only-mcp-download-attachment.js';
+import { approveMerge,closeCorner,openCorner,prChecksStatus,readCornerBrief,reportFeedback,reviseCornerBrief,targetCornerId,writeScratchFile } from './read-only-mcp-open-corner.js';
 import { runGrantedCommand } from './read-only-mcp-open-poll.js';
+import { activeCommandContext,asObject,connectorOfferDepsFromEnv,daemonExecute,downloadAttachment,fetchImage,JsonObject,memorySources,requiredEnv,stringArg } from './read-only-mcp.js';
+import { allocatedDirectoryBytes,scratchBudgetMessage } from "./scratch-lifecycle.js";
+import { sessionToolRequest } from './session-tool-connection.js';
+import { squireSessionSignedIn } from "./squire-sign-in.js";
 
 
 
@@ -21,11 +21,23 @@ import { runGrantedCommand } from './read-only-mcp-open-poll.js';
 
 
 
-export async function executeAgentOperation(
-  name: string, args: JsonObject, toolCallId: string,
-): Promise<string> {
-  if (process.env.BEELINE_TURN_CONTEXT_FILE && (await readTurnContextFile()).terminalReason)
-    throw new Error('turn has ended; further tool calls are refused');
+export async function executeConversationOperation(name:'post'|'order'|'report',args:JsonObject):Promise<string> {
+  if (name === 'order') return JSON.stringify(await daemonExecute('order',{
+    address:String(args.address ?? ''),text:String(args.text ?? ''),agent:typeof args.agent==='string'?args.agent:undefined}));
+  if (name === 'report') return JSON.stringify(await daemonExecute('report',{
+    status:args.status,text:String(args.text ?? ''),ask:typeof args.ask==='string'?args.ask:undefined}));
+  return JSON.stringify(await daemonExecute('postCornerMessage',{
+    cornerId:typeof args.address==='string'?args.address:typeof args.cornerId==='string'?args.cornerId:
+      process.env.BEELINE_DAEMON_CORNER_ID?.trim() || requiredEnv('BEELINE_DAEMON_ROOM_ID'),
+    text:String(args.text ?? ''),replyTo:typeof args.replyTo==='string'?args.replyTo:undefined}));
+}
+
+export async function executeAgentOperation(name:string,args:JsonObject,toolCallId:string):Promise<string> {
+  if (name==='post'||name==='order'||name==='report') return executeConversationOperation(name,args);
+  return executeResourceOperation(name,args,toolCallId);
+}
+
+async function executeResourceOperation(name:string,args:JsonObject,toolCallId:string):Promise<string> {
   switch (name) {
     case 'get_room_message': {
       const message = await daemonExecute('getRoomMessage', {
@@ -374,24 +386,14 @@ export async function executeAgentOperation(
         ...(usage ? { usage, old: usageIsOld(usage) } : {}),
       });
     }
-    case 'order': {
-      const result = await daemonExecute('order', { address: args.address as string, text: args.text as string, agent: args.agent as string | undefined });
-      return JSON.stringify(result);
-    }
     case 'stop':
       return JSON.stringify(await daemonExecute('stopAgentTurn', { address: args.address as string, agent: args.agent as string | undefined }));
     case 'no_reply_needed': {
       await activeCommandContext();
-      const context = await readTurnContextFile();
-      await daemonExecute('markAgentTurnSilent', { ...(args.messageId ? { messageId: args.messageId } : {}) });
-      // The server ends only this request. End the invocation after delivering
-      // its tool result; intake consumes the other wakes seen by this turn.
-      const path = requiredEnv('BEELINE_TURN_CONTEXT_FILE');
-      writeFileSync(path, JSON.stringify({ ...context, terminalReason: 'no-reply' }), { mode: 0o600 });
+      const result = await daemonExecute('markAgentTurnSilent', { ...(args.messageId ? { messageId: args.messageId } : {}) });
+      if (result.answered === false) return JSON.stringify({ acknowledged: false, instruction: 'An answer is still owed. Reply with your own text.' });
       return JSON.stringify({ acknowledged: true });
     }
-    case 'report':
-      return JSON.stringify(await daemonExecute('report', { status: args.status as import('@beeline/api-contract/daemon').AgentReportStatus, text: args.text as string, ask: args.ask as string | undefined }));
     case 'inspect_corner': {
       if (typeof args.cornerId !== 'string' || !args.cornerId)
         throw new Error('cornerId is required');
@@ -629,15 +631,6 @@ export async function executeAgentOperation(
       return JSON.stringify(
         await daemonExecute('readCornerPullRequest', { cornerId: targetCornerId(args) }),
       );
-    case 'post': {
-      const cornerId = typeof args.cornerId === 'string' && args.cornerId
-        ? args.cornerId : process.env.BEELINE_DAEMON_CORNER_ID?.trim() || requiredEnv('BEELINE_DAEMON_ROOM_ID');
-      if (typeof args.text !== 'string' || !args.text.trim() || args.text.length > 16000)
-        throw new Error('text must contain 1 to 16000 characters');
-      return JSON.stringify(
-        await daemonExecute('postCornerMessage', { cornerId, text: args.text, ...(args.replyTo ? { replyTo: args.replyTo } : {}) }),
-      );
-    }
     case 'write_scratch_file':
       return writeScratchFile(args);
     case 'scratch_status': {
@@ -744,7 +737,7 @@ export async function executeAgentOperation(
         || !Number.isSafeInteger(amount) || amount <= 0)
         throw new Error('merchant, merchantUrl, positive amount in cents, and description are required');
       const idempotencyKey = createHash('sha256').update(
-        `link:${context.requestId}:${context.generationId}:${toolCallId || randomUUID()}`).digest('hex');
+        `link:${context.requestId}:${toolCallId || randomUUID()}`).digest('hex');
       return JSON.stringify(await daemonExecute('createLinkSpendRequest', {
         ...context, agentId: requiredEnv('BEELINE_DAEMON_AGENT_ID'),
         merchant, ...(merchantUrl ? { merchantUrl } : {}), amount, description, idempotencyKey,
@@ -831,6 +824,19 @@ export async function executeAgentOperation(
       return storeSecret(args);
     case 'run_granted_command':
       return runGrantedCommand(args);
+    case 'read_session_context':
+    case 'call_session_mcp':
+      return JSON.stringify(await sessionToolRequest('/session', {
+        placeId: process.env.BEELINE_DAEMON_CORNER_ID || requiredEnv('BEELINE_DAEMON_ROOM_ID'),
+        action: name === 'read_session_context' ? 'context' : 'mcp', ...args,
+      }));
+    case 'workspace': {
+      const body = await sessionToolRequest('/workspace', {
+        placeId: process.env.BEELINE_DAEMON_CORNER_ID || requiredEnv('BEELINE_DAEMON_ROOM_ID'),
+        ...(process.env.BEELINE_DAEMON_CORNER_ID ? { parentRoomId: requiredEnv('BEELINE_DAEMON_ROOM_ID') } : {}),
+      }) as { text: string };
+      return body.text;
+    }
     default:
       throw new Error(`tool is not available on the agent surface: ${name}`);
   }

@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import { AcpClient, agentTurnSteps, toolCallEntries, type ToolCallEntry } from './acp.js';
 import { maskCredentialResult } from './mask-credential-result.js';
-import { cornerToolActivity, outputExcerpt } from './monolith-corner-turn.js';
 import { roomReplySteps } from './room-turn-steps.js';
 import { toolCallFailureLine } from './tool-call-failure.js';
 import { TurnTrace, TurnTraceFile } from './turn-trace.js';
@@ -31,7 +30,6 @@ it.each<ToolCallEntry>([
 it('leaves ordinary calls untouched even when their output names fetch_credential', () => {
   const call = { title: `echo ${ordinary}`, rawInput: { command: ordinary }, content: `fetch_credential ${ordinary}` };
   expect(maskCredentialResult(call)).toBe(call);
-  expect(outputExcerpt(call.content)).toBe(call.content);
   expect(toolCallFailureLine({ ...call, status: 'failed' })).toBe(`${call.title} refused: ${call.content}`);
   expect(distillTurnFailureReason(ordinary).text).toBe(ordinary);
   expect(turnErrorDetail(ordinary)).toBe(ordinary);
@@ -47,8 +45,6 @@ it.each(['content', 'rawOutput'] as const)('masks %s in transcripts, step detail
   expect(transcript[0]?.[field]).toBe('[REDACTED]');
   const steps = agentTurnSteps(updates);
   const room = roomReplySteps(steps);
-  const corner = await cornerToolActivity(call, '/unused');
-  expect(corner.output).toBe('[REDACTED]');
   const log = toolCallFailureLine(call);
   expect(log).toContain('[REDACTED]');
   const trace = new TurnTrace({ surface: 'room', agentId: 'agent', roomId: 'room', requestId: 'request' });
@@ -65,7 +61,7 @@ it.each(['content', 'rawOutput'] as const)('masks %s in transcripts, step detail
     await continuation.begin('work');
     await continuation.stopped({ stopReason: 'free-agent-time-limit', agentText: '', updates, toolCalls: [call] });
     expect(continuation.context?.tools[0]).toContain('[REDACTED]');
-    for (const surface of [transcript, steps, room, corner, log, snapshot, trace.replay(), sanitizeTurnReplay(trace.replay()),
+    for (const surface of [transcript, steps, room, log, snapshot, trace.replay(), sanitizeTurnReplay(trace.replay()),
       logs, await readFile(sink.path(), 'utf8'), await readFile(checkpointPath, 'utf8')]) {
       expect(JSON.stringify(surface)).not.toContain(result);
     }
@@ -76,7 +72,6 @@ it.each(['content', 'rawOutput'] as const)('masks %s in transcripts, step detail
 
 it('keeps ordinary tool arguments and output in step details and checkpoints', async () => {
   const call = { title: 'shell', status: 'failed', rawInput: { command: ordinary }, content: ordinary };
-  expect(await cornerToolActivity(call, '/unused')).toMatchObject({ command: ordinary, output: ordinary });
   const checkpoint = new FreeAgentContinuation();
   await checkpoint.begin('work');
   await checkpoint.stopped({ stopReason: 'free-agent-time-limit', agentText: '', updates: [], toolCalls: [call] });
@@ -168,7 +163,7 @@ it.each(['store_secret', 'mcp__beeline_agent__store_secret', 'mcp.beeline-agent.
     await continuation.begin('work');
     await continuation.stopped({ stopReason: 'free-agent-time-limit', agentText: '', updates, toolCalls: [call] });
     const records = [maskCredentialResult(call), toolCallEntries(updates), completed, streamed,
-      roomReplySteps([{ kind: 'tool', call }]), await cornerToolActivity(call, '/unused'),
+      roomReplySteps([{ kind: 'tool', call }]),
       trace.snapshot('done'), trace.replay(), continuation.context];
     expect(JSON.stringify(records)).not.toContain(result);
     expect(call.rawInput.value).toBe(result);

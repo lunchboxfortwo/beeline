@@ -1,10 +1,11 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { afterEach, describe, expect, it, beforeEach, vi } from 'vitest';
 import {
   INSTITUTIONAL_CONTEXT_EMBEDDING_TIMEOUT_MS,
   INSTITUTIONAL_MEMORY_EMBEDDING_DIMENSIONS,
 } from '@beeline/api-contract/daemon';
 import { PgliteDatabase, migratedDatabase } from './test-support.js';
-import { claimAgentCommand, createAgentCommand } from './agent-command.js';
+import { createAgentCommand } from './agent-command.js';
 import { DaemonService } from './daemon-service.js';
 import { LiveHub } from './live.js';
 import { OPENROUTER_EMBEDDINGS_URL, pgvectorLiteral } from './institutional-memory-embeddings.js';
@@ -86,9 +87,9 @@ async function openCommand(requestId: string, generationId: string) {
     agentId: RONNIE,
     sourceMessageId: MESSAGE,
     reason: 'human_tag',
-    turnRequestId: requestId,
+    id: requestId,
   });
-  await claimAgentCommand(database, ROOM, RONNIE, command!.id, generationId);
+  await startQueuedTurn(database, ROOM, RONNIE, command!.id);
   return command!;
 }
 
@@ -136,12 +137,12 @@ describe('getInstitutionalContext hybrid vector snapshot', () => {
       );
     }
     const context = await daemon.execute('getInstitutionalContext',
-      {roomId:ROOM,requestId:'floor-1',generationId:'floor-gen'},RONNIE);
+      { roomId:ROOM, requestId:'floor-1' },RONNIE);
     expect(context.itemIds).toHaveLength(3);
     expect(context.itemIds).not.toContain(ids[4]);
     await database.query(`DELETE FROM institutional_memory_items WHERE id=ANY($1::uuid[])`,[ids]);
     const empty = await daemon.execute('getInstitutionalContext',
-      {roomId:ROOM,requestId:'floor-1',generationId:'floor-gen'},RONNIE);
+      { roomId:ROOM, requestId:'floor-1' },RONNIE);
     expect(empty.itemIds).toEqual([]);
   });
 
@@ -174,7 +175,7 @@ describe('getInstitutionalContext hybrid vector snapshot', () => {
     });
     const daemon = liveDaemon();
     await openCommand('no-tx-1', 'no-tx-gen');
-    const turn = { roomId: ROOM, requestId: 'no-tx-1', generationId: 'no-tx-gen' };
+    const turn = { roomId: ROOM, requestId: 'no-tx-1' };
     const context = await daemon.execute('getInstitutionalContext', turn, RONNIE);
     expect(context.embeddingOutcome).toBe('served');
     await daemon.execute('searchInstitutionalMemory',
@@ -215,19 +216,7 @@ describe('getInstitutionalContext hybrid vector snapshot', () => {
     await openCommand('turn-1', 'gen-1');
     const saved = await daemon.execute(
       'saveInstitutionalMemory',
-      {
-        agentId: RONNIE,
-        roomId: ROOM,
-        requestId: 'turn-1',
-        generationId: 'gen-1',
-        memoryKind: 'human_profile_fact',
-        canonicalKey: 'requester.spouse.daeun_lee.japan_residence',
-        body: "Daeun's Tokyo residence is Motoazabu Hills 3-2-1 #402.",
-        keywords: ['daeun', 'tokyo', 'residence'],
-        sourceMessageIds: [MESSAGE],
-        personAsked: false,
-        confidence: 0.9,
-      },
+      { agentId: RONNIE, roomId: ROOM, requestId: 'turn-1', memoryKind: 'human_profile_fact', canonicalKey: 'requester.spouse.daeun_lee.japan_residence', body: "Daeun's Tokyo residence is Motoazabu Hills 3-2-1 #402.", keywords: ['daeun', 'tokyo', 'residence'], sourceMessageIds: [MESSAGE], personAsked: false, confidence: 0.9 },
       RONNIE,
     );
     await database.query(
@@ -237,7 +226,7 @@ describe('getInstitutionalContext hybrid vector snapshot', () => {
 
     const context = await daemon.execute(
       'getInstitutionalContext',
-      { roomId: ROOM, requestId: 'turn-1', generationId: 'gen-1' },
+      { roomId: ROOM, requestId: 'turn-1' },
       RONNIE,
     );
     expect(context.itemIds).toContain(saved.itemId);
@@ -253,7 +242,7 @@ describe('getInstitutionalContext hybrid vector snapshot', () => {
     await openCommand('turn-budget-served', 'gen-budget-served');
     const context = await daemon.execute(
       'getInstitutionalContext',
-      { roomId: ROOM, requestId: 'turn-budget-served', generationId: 'gen-budget-served' },
+      { roomId: ROOM, requestId: 'turn-budget-served' },
       RONNIE,
     );
     expect(context.embeddingOutcome).toBe('served');
@@ -268,7 +257,7 @@ describe('getInstitutionalContext hybrid vector snapshot', () => {
     await openCommand('turn-3', 'gen-3');
     const context = await daemon.execute(
       'getInstitutionalContext',
-      { roomId: ROOM, requestId: 'turn-3', generationId: 'gen-3' },
+      { roomId: ROOM, requestId: 'turn-3' },
       RONNIE,
     );
     expect(context.embeddingOutcome).toBe('disabled');
@@ -305,7 +294,7 @@ describe('getInstitutionalContext hybrid vector snapshot', () => {
     );
     const context = await daemon.execute(
       'getInstitutionalContext',
-      { roomId: ROOM, requestId: 'turn-4', generationId: 'gen-4' },
+      { roomId: ROOM, requestId: 'turn-4' },
       RONNIE,
     );
     expect(context.text).toContain('gift-shopping');
@@ -339,7 +328,7 @@ describe('getInstitutionalContext hybrid vector snapshot', () => {
     );
     const context = await daemon.execute(
       'getInstitutionalContext',
-      { roomId: ROOM, requestId: 'turn-5', generationId: 'gen-5' },
+      { roomId: ROOM, requestId: 'turn-5' },
       RONNIE,
     );
     expect(context.text).toContain('Workflow gift-approval (app_tool beeline:workflow start)');

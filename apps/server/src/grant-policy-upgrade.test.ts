@@ -38,10 +38,9 @@ describe('withdrawSupersededGrantAsks', () => {
     await database.query(
       `INSERT INTO agent_commands(
          id,room_id,agent_id,source_message_id,turn_request_id,action,reason,
-         root_command_id,root_source_message_id,agent_depth,state,generation_id,lease_expires_at
-       ) VALUES($1,$2,$3,'ask-source',$4,'input','human_tag',$1,'ask-source',0,
-         'claimed',$5,now()+interval '10 minutes')`,
-      [COMMAND, ROOM, AGENT, 'e'.repeat(64), 'f'.repeat(64)],
+         root_command_id,root_source_message_id,agent_depth,state) VALUES($1,$2,$3,'ask-source',$4,'input','human_tag',$1,'ask-source',0,
+         'pending')`,
+      [COMMAND, ROOM, AGENT, 'e'.repeat(64)],
     );
   });
   afterEach(() => database.close());

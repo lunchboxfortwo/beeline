@@ -1,3 +1,4 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { createServer, type Server } from 'node:http';
 import { once } from 'node:events';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -10,7 +11,7 @@ import { LiveHub } from './live.js';
 import { PhoneService } from './phone-service.js';
 import type { TokenAuth } from './auth.js';
 import { systemLine } from './system-line.js';
-import { createAgentCommand, claimAgentCommand } from './agent-command.js';
+import { createAgentCommand } from './agent-command.js';
 import { DaemonService } from './daemon-service.js';
 
 const WORKSPACE = '11111111-1111-4111-8111-111111111111';
@@ -313,17 +314,11 @@ it('posts the value-free agent tool card and wakes its requesting command with s
     agentId: AGENT,
     sourceMessageId: sourceId,
     reason: 'human_tag',
-    turnRequestId: sourceId,
+    id: sourceId,
   });
-  await claimAgentCommand(db, ROOM, AGENT, parent!.id, 'vault-source');
+  await startQueuedTurn(db, ROOM, AGENT, parent!.id);
   const daemon = new DaemonService(db, new LiveHub());
-  const toolInput = {
-    ...metadata,
-    roomId: ROOM,
-    requestId: sourceId,
-    generationId: 'vault-source',
-    taskId: parent!.root_command_id,
-  };
+  const toolInput = { ...metadata, roomId: ROOM, requestId: sourceId, taskId: parent!.root_command_id };
   const posted = await daemon.execute('postVaultSaveCard', toolInput, AGENT);
   cardId = posted.id;
   relay.attach(AGENT, (frame) => {

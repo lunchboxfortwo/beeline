@@ -5,22 +5,9 @@ import type { McpServerWire } from './acp.js';
 
 // Adapters may serialize the entire MCP declaration into harness argv. Keep
 // values in private files and restore them only in the MCP child's environment.
-const LAUNCHER = `
-const { readFileSync } = require('node:fs');
-const { spawn } = require('node:child_process');
-const launch = JSON.parse(readFileSync(process.argv[2], 'utf8'));
-const child = spawn(launch.command, launch.args, {
-  stdio: 'inherit',
-  env: { ...process.env, ...Object.fromEntries(launch.env.map(e => [e.name, e.value])) },
-});
-for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP'])
-  process.on(signal, () => child.kill(signal));
-child.on('error', () => { console.error('MCP process could not start'); process.exitCode = 1; });
-child.on('exit', (code, signal) => {
-  if (signal) { process.removeAllListeners(signal); process.kill(process.pid, signal); }
-  else process.exitCode = code ?? 1;
-});
-`;
+// POSIX quoting keeps descriptor contents literal, including newlines and shell
+// metacharacters. The private script replaces its shell with the server.
+function shellWord(value: string): string { return "'" + value.replaceAll("'", "'\\''") + "'"; }
 
 /** Files live in the session home so the existing sandbox can read them. */
 export class McpLaunchFiles {
@@ -34,12 +21,16 @@ export class McpLaunchFiles {
         const root = home ?? tmpdir();
         mkdirSync(root, { recursive: true });
         this.directory = mkdtempSync(join(root, '.beeline-mcp-'));
-        writeFileSync(join(this.directory, 'launch.cjs'), LAUNCHER, { mode: 0o600, flag: 'wx' });
       }
-      const path = join(this.directory, `${this.sequence++}.json`);
-      writeFileSync(path, JSON.stringify({ command: server.command, args: server.args ?? [], env: server.env }), { mode: 0o600, flag: 'wx' });
-      return { name: server.name, command: process.execPath,
-        args: [join(this.directory, 'launch.cjs'), path], env: [] };
+      const path = join(this.directory, `${this.sequence++}.sh`);
+      const exports = server.env.map(({ name, value }) => {
+        if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) throw new Error('Invalid MCP environment name');
+        return `export ${name}=${shellWord(value)}`;
+      });
+      writeFileSync(path, [...exports,
+        `exec ${[server.command, ...(server.args ?? [])].map(shellWord).join(' ')}`, ''].join('\n'),
+      { mode: 0o600, flag: 'wx' });
+      return { name: server.name, command: '/bin/sh', args: [path], env: [] };
     });
   }
 

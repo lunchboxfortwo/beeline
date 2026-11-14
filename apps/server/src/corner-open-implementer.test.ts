@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { cornerCommissionerSql } from './corner-opening.js';
 import { randomBytes } from 'node:crypto';
 import { cornerOwnerSql } from './corner-worker.js';
@@ -63,21 +64,8 @@ async function input(agent = A) {
   const command = (await daemon.execute('getAgentCommands', { roomId: ROOM }, agent)).commands.at(
     -1,
   )!;
-  await daemon.execute(
-    'claimAgentCommand',
-    { roomId: ROOM, commandId: command.id, generationId: 'g1' },
-    agent,
-  );
-  return {
-    repository: 'owner/widgets',
-    brief: { spec: 'Dispatch this work', approval: { sourceMessageId: command.sourceMessageId } },
-    roomId: ROOM,
-    requestId: command.turnRequestId,
-    generationId: 'g1',
-    idempotencyKey: randomBytes(16).toString('hex'),
-    name: 'Dispatch-work',
-    objective: 'Dispatch this work',
-  };
+  await startQueuedCommand(daemon, { roomId: ROOM, commandId: command.id }, agent);
+  return { repository: 'owner/widgets', brief: { spec: 'Dispatch this work', approval: { sourceMessageId: command.sourceMessageId } }, roomId: ROOM, requestId: command.turnRequestId, idempotencyKey: randomBytes(16).toString('hex'), name: 'Dispatch-work', objective: 'Dispatch this work' };
 }
 
 it('Reproduction O1-1: naming Beta assigns the work to Beta and keeps Alpha as author', async () => {
@@ -98,7 +86,7 @@ it('Reproduction O1-1: naming Beta assigns the work to Beta and keeps Alpha as a
   console.log('Reproduction O1-1:', { fact, commands });
   expect(fact).toEqual({ owner_agent_id: B, commissioned_by: HUMAN });
   expect(commands).toEqual([{ agent_id: B }]);
-  expect((await daemon.execute('getAgentCommands', { roomId: cornerId }, A)).commands).toEqual([]);
+  expect((await daemon.execute('getAgentCommands', { roomId: cornerId }, A)).commands.filter(item => item.roomId === cornerId)).toEqual([]);
   expect((await db.query(`SELECT created_by FROM rooms WHERE id=$1`, [cornerId])).rows).toEqual([
     { created_by: A },
   ]);

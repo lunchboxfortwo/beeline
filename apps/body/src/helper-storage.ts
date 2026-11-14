@@ -335,16 +335,8 @@ export async function reclaimHelperStorage(input: {
   const rooms = resolve(input.runtimeDir, 'rooms');
   if (!await ordinaryDirectory(rooms)) return [];
   const entries: StorageReclaimEntry[] = [];
-  let capturedAt = -Infinity;
-  let capturedUse: (root: string) => boolean = () => true;
   const mounted = observeMountUse();
-  const observedUse = input.inUse ?? (async (root: string) => {
-    if (Date.now() - capturedAt >= 1_000) {
-      capturedUse = await capturePrivateProcessUse(input.progress);
-      capturedAt = Date.now();
-    }
-    return capturedUse(root);
-  });
+  const observedUse = storageProcessUse(input);
   for (const room of await readdir(rooms, { withFileTypes: true })) {
     await input.progress?.();
     if (!room.isDirectory() || !/^[a-zA-Z0-9-]{1,80}$/.test(room.name)) continue;
@@ -480,6 +472,17 @@ export interface WholeStorageOptions {
   landedHeadSha?: string;
 }
 
+/** One captured host index per maintenance operation, shared by nested roots.
+ * The promise also coalesces concurrent checks before the capture completes. */
+export function storageProcessUse(options: Pick<WholeStorageOptions, 'inUse' | 'progress'> = {}): NonNullable<WholeStorageOptions['inUse']> {
+  let snapshot: ReturnType<typeof capturePrivateProcessUse> | undefined;
+  return options.inUse ?? (async path => (await (snapshot ??= capturePrivateProcessUse(options.progress)))(path));
+}
+
+export function storageOperation<T extends WholeStorageOptions>(options: T): T & { inUse: NonNullable<WholeStorageOptions['inUse']> } {
+  return { ...options, inUse: storageProcessUse(options) };
+}
+
 /** An ended owner removes all non-Squire bytes. An idle object is atomic:
  * any recent descendant, process, mount or Squire descendant preserves it. */
 export async function reclaimWholeStorageObject(
@@ -488,13 +491,13 @@ export async function reclaimWholeStorageObject(
   if (isSquirePath(root) || !await ordinaryDirectory(resolve(root, '..'))) return [];
   const info = await lstat(root).catch(() => undefined);
   if (!info || info.isSymbolicLink()) return [];
-  let capturedAt = -Infinity;
+  // A recent object cannot qualify as a whole unused object. Avoid walking
+  // its tree or observing the host before it can be eligible.
+  const lastUsed = Math.max(info.atimeMs, info.mtimeMs);
+  if (!ended && !options.expireFiles && (!Number.isFinite(lastUsed) ||
+      (options.now ?? Date.now()) - lastUsed < STORAGE_ITEM_UNUSED_MS)) return [];
   const mounted = observeMountUse();
-  let processUse: (path: string) => boolean = () => true;
-  const inUse = options.inUse ?? (async (path: string) => {
-    if (Date.now() - capturedAt >= 1_000) { processUse = await capturePrivateProcessUse(options.progress); capturedAt = Date.now(); }
-    return processUse(path);
-  });
+  const inUse = storageProcessUse(options);
   if ((!options.expireFiles && await inUse(root)) || await mounted(root)) return [];
   const tree = await storageTree(root, options.progress).catch(error => {
     options.onError?.(root, error);

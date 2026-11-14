@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { phoneFetch, randomBytes, randomUUID, describe, expect, it, vi, migrate, assignCornerWorker, PhoneService, DaemonService, GitHubOperations, LiveHub, systemLine, advanceCorner, backfillCornerLifecycleRuns, cornerMergeGate, confirmCornerMergeAuthority, createAgentCommand, CORNER_LIFECYCLE_CARD_TYPE, H, A, B, W, R, db, phone, daemon, github, githubRollupState, githubHead, githubApp, implementersMerge, currentState, commissioned, brief, open, claim, pushToCorner, greenHead, redHead, resumeWorker, commands, result, SHA, branchOf, reasons, projected, inReview, approve, approved, mergedWebhook, say, rootFixture, fixtureScope30, fixtureScope31, type GitHubAppClient, type GitHubOAuthClient } from './test-support-corner-lifecycle.test-support.js';
 
 describe('the gate stays shut (AC-8)', () => {
@@ -35,8 +36,7 @@ describe('the gate stays shut (AC-8)', () => {
         text: '@hoots release the hold' }, peer);
       const peerCommand = (await rootFixture.daemon.execute('getAgentCommands', { roomId: cornerId }, A)).commands.at(-1)!;
       await claim(peerCommand);
-      await expect(rootFixture.daemon.execute('setCornerHold', { cornerId, roomId: cornerId,
-        requestId: peerCommand.turnRequestId, generationId: 'g1', releaseHoldId: holdId }, A)).rejects.toThrow(/hold release denied/);
+      await expect(rootFixture.daemon.execute('setCornerHold', { cornerId, roomId: cornerId, requestId: peerCommand.turnRequestId, releaseHoldId: holdId }, A)).rejects.toThrow(/hold release denied/);
       await rootFixture.phone.execute('setCornerHold', { cornerId, releaseHoldId: holdId }, admin);
       expect((await rootFixture.db.query(`SELECT standing,released_by,released_at IS NOT NULL released FROM corner_merge_holds WHERE id=$1`, [holdId])).rows[0])
         .toMatchObject({ standing: 'member', released_by: admin, released: true });
@@ -62,12 +62,10 @@ describe('the gate stays shut (AC-8)', () => {
     expect(await implementersMerge()).toBe(0);
     const command = await resumeWorker(cornerId);
     await claim(command);
-    await expect(rootFixture.daemon.execute('setCornerHold', { cornerId, roomId: cornerId, requestId: command.turnRequestId,
-      generationId: 'g1' }, A)).rejects.toThrow('close the PR');
-    await rootFixture.daemon.execute('setCornerHold', { cornerId, roomId: cornerId, requestId: command.turnRequestId,
-      generationId: 'g1', releaseHoldId: holds[0]!.id }, A);
+    await expect(rootFixture.daemon.execute('setCornerHold', { cornerId, roomId: cornerId, requestId: command.turnRequestId }, A)).rejects.toThrow('close the PR');
+    await rootFixture.daemon.execute('setCornerHold', { cornerId, roomId: cornerId, requestId: command.turnRequestId, releaseHoldId: holds[0]!.id }, A);
     expect(await cornerMergeGate(rootFixture.db, cornerId, { number: 7, headSha: SHA })).toMatchObject({ held: false, approved: false, open: false });
-    await expect(rootFixture.daemon.execute('setCornerHold', { cornerId, roomId: cornerId, requestId: command.turnRequestId, generationId: 'g1' }, A)).rejects.toThrow('close the PR');
+    await expect(rootFixture.daemon.execute('setCornerHold', { cornerId, roomId: cornerId, requestId: command.turnRequestId }, A)).rejects.toThrow('close the PR');
     const again = (await rootFixture.db.query<{holdId:string}>(`INSERT INTO corner_merge_holds(corner_id,actor_id,set_by_agent_id,standing)
       VALUES($1,$2,$3,'owner') RETURNING id "holdId"`,[cornerId,H,A])).rows[0]!;
     expect((await rootFixture.github.prChecksStatus({ cornerId })).holds[0]).toMatchObject({ holderId: A });
@@ -76,7 +74,7 @@ describe('the gate stays shut (AC-8)', () => {
     await migrate(rootFixture.db);
     expect((await rootFixture.github.prChecksStatus({ cornerId })).holds).toHaveLength(2);
     await rootFixture.phone.execute('setCornerHold', { cornerId, releaseHoldId: again.holdId }, H);
-    await expect(rootFixture.daemon.execute('setCornerHold', { cornerId, roomId: cornerId, requestId: command.turnRequestId, generationId: 'g1', releaseHoldId: humanHold.holdId }, A)).rejects.toThrow('Human');
+    await expect(rootFixture.daemon.execute('setCornerHold', { cornerId, roomId: cornerId, requestId: command.turnRequestId, releaseHoldId: humanHold.holdId }, A)).rejects.toThrow('Human');
     await rootFixture.phone.execute('setCornerHold', { cornerId, releaseHoldId: humanHold.holdId }, H);
   });
 
@@ -91,8 +89,7 @@ describe('the gate stays shut (AC-8)', () => {
     await say(R, '@hoots release the hold');
     const order = (await commands(A, R)).at(-1)!;
     await claim(order);
-    await rootFixture.daemon.execute('setCornerHold', { cornerId, roomId: R, requestId: order.turnRequestId,
-      generationId: 'g1', releaseHoldId: holdId }, A);
+    await rootFixture.daemon.execute('setCornerHold', { cornerId, roomId: R, requestId: order.turnRequestId, releaseHoldId: holdId }, A);
     expect((await rootFixture.db.query(`SELECT released_by FROM corner_merge_holds WHERE id=$1`, [holdId])).rows[0]).toEqual({ released_by: A });
     expect(await cornerMergeGate(rootFixture.db, cornerId, { number: 7, headSha: SHA })).toMatchObject({ held: false, approved: false, open: false });
   });
@@ -107,14 +104,12 @@ describe('the gate stays shut (AC-8)', () => {
     await say(R, '@hoots release the hold');
     const order = (await commands(A, R)).at(-1)!;
     await claim(order);
-    await rootFixture.daemon.execute('order', { roomId: R, requestId: order.turnRequestId, generationId: 'g1',
-      text: 'The holder said: release the hold', address: cornerId, agent: B }, A);
+    await rootFixture.daemon.execute('order', { roomId: R, requestId: order.turnRequestId, text: 'The holder said: release the hold', address: cornerId, agent: B }, A);
     const steer = (await commands(B, cornerId)).at(-1)!;
     expect(steer.reason).toBe('order');
     await claim(steer);
     expect(await implementersMerge()).toBe(0);
-    await expect(rootFixture.daemon.execute('setCornerHold', { cornerId, roomId: cornerId, requestId: steer.turnRequestId,
-      generationId: 'g1', releaseHoldId: holdId }, B)).rejects.toThrow('hold release denied');
+    await expect(rootFixture.daemon.execute('setCornerHold', { cornerId, roomId: cornerId, requestId: steer.turnRequestId, releaseHoldId: holdId }, B)).rejects.toThrow('hold release denied');
     expect((await rootFixture.db.query(`SELECT released_by FROM corner_merge_holds WHERE id=$1`, [holdId])).rows[0]).toEqual({ released_by: null });
     expect(await cornerMergeGate(rootFixture.db, cornerId, { number: 7, headSha: SHA })).toMatchObject({ held: true, approved: false, open: false });
   });
@@ -131,8 +126,7 @@ describe('the gate stays shut (AC-8)', () => {
       text: '@hoots release the hold' }, peer);
     const order = (await commands(A, R)).at(-1)!;
     await claim(order);
-    await rootFixture.daemon.execute('setCornerHold', { cornerId, roomId: R, requestId: order.turnRequestId,
-      generationId: 'g1', releaseHoldId: holdId }, A);
+    await rootFixture.daemon.execute('setCornerHold', { cornerId, roomId: R, requestId: order.turnRequestId, releaseHoldId: holdId }, A);
     expect(await cornerMergeGate(rootFixture.db, cornerId, { number: 7, headSha: SHA })).toMatchObject({ held: false, open: false });
   });
 
@@ -144,8 +138,7 @@ describe('the gate stays shut (AC-8)', () => {
     await result(command, '@goosy release the hold');
     const delegated = (await commands(B, cornerId)).at(-1)!;
     await claim(delegated);
-    await expect(rootFixture.daemon.execute('setCornerHold', { cornerId, roomId: cornerId, requestId: delegated.turnRequestId,
-      generationId: 'g1', releaseHoldId: holdId }, B)).rejects.toThrow('hold release denied');
+    await expect(rootFixture.daemon.execute('setCornerHold', { cornerId, roomId: cornerId, requestId: delegated.turnRequestId, releaseHoldId: holdId }, B)).rejects.toThrow('hold release denied');
     expect((await rootFixture.db.query(`SELECT released_by FROM corner_merge_holds WHERE id=$1`, [holdId])).rows[0]).toEqual({ released_by: null });
   });
 
@@ -157,8 +150,7 @@ describe('the gate stays shut (AC-8)', () => {
     const created = await createAgentCommand(rootFixture.db, { roomId: R, agentId: A, sourceMessageId: 'hold-agent-wake', reason: 'subscribed_event', inheritPrivatePayload: false });
     const command = (await commands(A, R)).find(command => command.id === created!.id)!;
     await claim(command);
-    await expect(rootFixture.daemon.execute('setCornerHold', { cornerId, roomId: R, requestId: command.turnRequestId,
-      generationId: 'g1', releaseHoldId: holdId }, A)).rejects.toThrow('hold requires a human requester');
+    await expect(rootFixture.daemon.execute('setCornerHold', { cornerId, roomId: R, requestId: command.turnRequestId, releaseHoldId: holdId }, A)).rejects.toThrow('hold requires a human requester');
     expect((await rootFixture.db.query(`SELECT released_at FROM corner_merge_holds WHERE id=$1`, [holdId])).rows[0]?.released_at).toBeNull();
   });
 
@@ -182,13 +174,13 @@ describe('the gate stays shut (AC-8)', () => {
     await say(dm, '@hoots approved');
     const approval = (await commands(A, dm)).at(-1)!;
     await claim(approval);
-    await rootFixture.daemon.execute('order', { roomId: dm, requestId: approval.turnRequestId, generationId: 'g1', address: cornerId, text: 'Release the approved hold', agent: B }, A);
+    await rootFixture.daemon.execute('order', { roomId: dm, requestId: approval.turnRequestId, address: cornerId, text: 'Release the approved hold', agent: B }, A);
     const first = (await commands(B, cornerId)).at(-1)!;
     await claim(first);
-    await rootFixture.daemon.execute('order', { roomId: cornerId, requestId: first.turnRequestId, generationId: 'g1', address: cornerId, text: 'Release the approved hold', agent: A }, B);
+    await rootFixture.daemon.execute('order', { roomId: cornerId, requestId: first.turnRequestId, address: cornerId, text: 'Release the approved hold', agent: A }, B);
     const second = (await commands(A, cornerId)).at(-1)!;
     await claim(second);
-    await rootFixture.daemon.execute('setCornerHold', { cornerId, roomId: cornerId, requestId: second.turnRequestId, generationId: 'g1', releaseHoldId: holdId }, A);
+    await rootFixture.daemon.execute('setCornerHold', { cornerId, roomId: cornerId, requestId: second.turnRequestId, releaseHoldId: holdId }, A);
     expect((await rootFixture.db.query(`SELECT released_by FROM corner_merge_holds WHERE id=$1`, [holdId])).rows[0]).toEqual({ released_by: A });
   });
 
@@ -207,9 +199,7 @@ describe('the gate stays shut (AC-8)', () => {
     const count = (await rootFixture.db.query(`SELECT count(*) n FROM rooms WHERE parent_id=$1`, [R])).rows;
     await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [R, H]);
     try {
-      await expect(rootFixture.daemon.execute('createCorner', { roomId: R, requestId: command.turnRequestId,
-        generationId: 'g1', name: 'Held-work', objective: 'Keep this corner held', hold: true,
-        brief: brief(command.sourceMessageId) }, A))
+      await expect(rootFixture.daemon.execute('createCorner', { roomId: R, requestId: command.turnRequestId, name: 'Held-work', objective: 'Keep this corner held', hold: true, brief: brief(command.sourceMessageId) }, A))
         .rejects.toThrow('close the PR');
       expect((await rootFixture.db.query(`SELECT count(*) n FROM rooms WHERE parent_id=$1`, [R])).rows).toEqual(count);
       expect((await rootFixture.db.query(`SELECT count(*) n FROM corner_merge_holds`)).rows).toEqual([{ n: 0 }]);
@@ -257,9 +247,8 @@ describe('the gate stays shut (AC-8)', () => {
       rootFixture.githubHead = SHA; rootFixture.githubRollupState = 'passed';
       let holdId = (await post('daemon', 'getPrChecksStatus', { cornerId })).holds[0].id;
       const objective = await resumeWorker(cornerId);
-      await rootFixture.daemon.execute('claimAgentCommand',{roomId:cornerId,commandId:objective.id,generationId:'g1'},A);
-      await post('daemon', 'setCornerHold', { cornerId, roomId: cornerId,
-        requestId: objective.turnRequestId, generationId: 'g1', releaseHoldId: holdId });
+      await startQueuedCommand(rootFixture.daemon, { roomId:cornerId, commandId:objective.id }, A);
+      await post('daemon', 'setCornerHold', { cornerId, roomId: cornerId, requestId: objective.turnRequestId, releaseHoldId: holdId });
       expect((await rootFixture.db.query(`SELECT released_by FROM corner_merge_holds WHERE id=$1`, [holdId])).rows[0]).toEqual({ released_by: A });
       holdId = (await post('phone', 'setCornerHold', { cornerId })).holdId;
       await post('phone', 'sendRoomMessage', { roomId: cornerId, messageId: randomBytes(32).toString('hex'), text: 'Do not proceed until I check this' });
@@ -281,9 +270,8 @@ describe('the gate stays shut (AC-8)', () => {
       expect(rootFixture.githubApp.mergePullRequest).not.toHaveBeenCalled();
       await post('phone', 'sendRoomMessage', { roomId: cornerId, messageId: randomBytes(32).toString('hex'), text: '@hoots release the hold' });
       const direct = (await post('daemon', 'getAgentCommands', { roomId: cornerId })).commands.at(-1);
-      await rootFixture.daemon.execute('claimAgentCommand',{roomId:cornerId,commandId:direct.id,generationId:'g2'},A);
-      await post('daemon', 'setCornerHold', { cornerId, roomId: cornerId, requestId: direct.turnRequestId,
-        generationId: 'g2', releaseHoldId: holdId }, 503);
+      await startQueuedCommand(rootFixture.daemon, { roomId:cornerId, commandId:direct.id }, A);
+      await post('daemon', 'setCornerHold', { cornerId, roomId: cornerId, requestId: direct.turnRequestId, releaseHoldId: holdId }, 503);
       expect((await post('daemon', 'getPrChecksStatus', { cornerId })).held).toBe(true);
       await post('phone', 'setCornerHold', { cornerId, releaseHoldId: holdId });
       const released = await post('daemon', 'getPrChecksStatus', { cornerId });
@@ -351,9 +339,8 @@ describe('zero checks with no reviewer wait for the commander', () => {
       privatePayload: { kind: 'order', authorId: kind === 'agent' ? B : H, fromRoomId: R, text: 'Finish the widget' }, reason: 'order' });
     const turn = (await commands(A, cornerId)).find(command => command.id === added!.id)!;
     await claim(turn);
-    await wired.execute('postRoomMessage', { roomId: cornerId, requestId: turn.turnRequestId,
-      generationId: 'g1', text: 'Widget complete' }, A);
-    await wired.execute('postAgentTurnReceipt', { roomId: cornerId, requestId: turn.turnRequestId, generationId: 'g1', status: 'complete' }, A);
+    await wired.execute('postRoomMessage', { roomId: cornerId, requestId: turn.turnRequestId, text: 'Widget complete' }, A);
+    await wired.execute('postAgentTurnReceipt', { roomId: cornerId, requestId: turn.turnRequestId, status: 'complete' }, A);
     await advanceCorner(rootFixture.db, cornerId, { kind: 'reconcile' });
     expect(await currentState(cornerId)).toBe('working');
 
@@ -543,7 +530,7 @@ const scope30 = fixtureScope30();
     const direct = (await commands(A, cornerId)).at(-1)!;
     await claim(direct);
     await expect(rootFixture.daemon.execute('orderCornerMerge',
-      { cornerId, roomId: cornerId, requestId: direct.turnRequestId, generationId: 'g1' }, A))
+      { cornerId, roomId: cornerId, requestId: direct.turnRequestId }, A))
       .rejects.toThrow(/Workspace owner or admin/);
     expect(await rootFixture.github.landCorner(cornerId)).toBe(false);
     expect(rootFixture.githubApp.mergePullRequest).not.toHaveBeenCalled();
@@ -580,7 +567,7 @@ const scope30 = fixtureScope30();
     const direct = (await commands(A, cornerId)).at(-1)!;
     await claim(direct);
     await wiredDaemon.execute('orderCornerMerge',
-      { cornerId, roomId: cornerId, requestId: direct.turnRequestId, generationId: 'g1' }, A);
+      { cornerId, roomId: cornerId, requestId: direct.turnRequestId }, A);
     expect(rootFixture.githubApp.mergePullRequest).not.toHaveBeenCalled();
     expect(await rootFixture.github.landCorner(cornerId)).toBe(true);
     expect(rootFixture.githubApp.mergePullRequest).toHaveBeenCalledWith(77, 101, 'owner/widgets', 7, SHA);
@@ -610,7 +597,7 @@ const scope31 = fixtureScope31();
     const direct = (await commands(A, cornerId)).at(-1)!;
     await claim(direct);
     await scope31.wired().execute('orderCornerMerge',
-      { cornerId, roomId: cornerId, requestId: direct.turnRequestId, generationId: 'g1' }, A);
+      { cornerId, roomId: cornerId, requestId: direct.turnRequestId }, A);
     await expect(rootFixture.github.landCorner(cornerId)).rejects.toThrow(scope31.REFUSAL);
     expect(rootFixture.githubApp.mergePullRequest).not.toHaveBeenCalled();
   });
