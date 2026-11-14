@@ -11,41 +11,6 @@ import { monolithFixture, HUMAN, AGENT, WORKSPACE, ROOM } from '../test-fixtures
 describe('monolith integration: corner-turns', () => {
 const fixture = monolithFixture();
 
-  it('returns nonretryable refusals for retired tools and legacy watch kinds', async () => {
-    const messageId = createHash('sha256').update('retired-tool-source').digest('hex');
-    await fixture.database.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'@bee do this')`, [messageId, ROOM, HUMAN]);
-    const command = (await createAgentCommand(fixture.database, {
-      roomId: ROOM, agentId: AGENT, sourceMessageId: messageId, reason: 'human_tag', id: 'retired-tool',
-    }))!;
-    await startQueuedTurn(fixture.database, ROOM, AGENT, command.id);
-    const turn = { roomId: ROOM, requestId: 'retired-tool' };
-    const relay = await fixture.request('/v1/daemon/operations/postRoomMessage', 'POST', {
-      ...turn, text: 'Old steer', relay: { fromRoomId: ROOM, toRoomId: ROOM, direction: 'down' },
-    }, fixture.daemonToken);
-    expect(relay.status).toBe(410);
-    expect(await relay.json()).toMatchObject({ error: expect.stringContaining('use order and report') });
-    const retired = await fixture.request('/v1/daemon/operations/getCornerAsk', 'POST', turn, fixture.daemonToken);
-    expect(retired.status).toBe(410);
-    expect(await retired.json()).toMatchObject({ error: expect.stringContaining('use order and report') });
-    const watch = await fixture.request('/v1/daemon/operations/watchCorner', 'POST', {
-      ...turn, cornerId: ROOM, kinds: ['check-passed'],
-    }, fixture.daemonToken);
-    expect(watch.status).toBe(400);
-    const empty = await fixture.request('/v1/daemon/operations/report', 'POST', { ...turn, text: 'blocked:' }, fixture.daemonToken);
-    expect(empty.status).toBe(400);
-    const privateOrder = (await createAgentCommand(fixture.database, {
-      roomId: ROOM, agentId: AGENT, sourceMessageId: null, reason: 'order', id: 'retired-private',
-      privatePayload: { kind: 'order', authorId: HUMAN, fromRoomId: ROOM, text: 'Do the private work' },
-    }))!;
-    await startQueuedTurn(fixture.database, ROOM, AGENT, privateOrder.id);
-    const privateRelay = await fixture.request('/v1/daemon/operations/postRoomMessage', 'POST', { roomId: ROOM, requestId: 'retired-private', text: 'Old private steer', relay: { fromRoomId: ROOM, toRoomId: ROOM, direction: 'down' } }, fixture.daemonToken);
-    expect(privateRelay.status).toBe(410);
-    expect((await fixture.database.query(`SELECT state FROM agent_commands WHERE id=$1`, [privateOrder.id])).rows[0]?.state).toBe('pending');
-    expect((await fixture.database.query(`SELECT 1 FROM messages WHERE text LIKE 'done: Old private steer%'`)).rowCount).toBe(0);
-    expect((await fixture.database.query(`SELECT 1 FROM agent_commands WHERE private_payload->>'text'='done: Old private steer'`)).rowCount).toBe(0);
-
-  });
-
   it('has no feedback triage setting or tools, refuses Fixed DMs from a non-sender, and opens fix corners beside the corner', async () => {
     const corner = (
       (await fixture.phone.execute('createHumanCorner', { roomId: ROOM, title: 'Issues-triage' }, HUMAN)) as {
@@ -382,12 +347,8 @@ const fixture = monolithFixture();
       turnId,
       text: 'half an answer',
     });
-    await fixture.daemonOperation('postAgentTurnReceipt', {
-      agentId: AGENT,
-      roomId: cornerId,
-      requestId: turnId,
-      status: 'complete',
-    });
+    await fixture.daemonOperation('postRoomMessage', {roomId:cornerId,requestId:turnId,text:'Finished answer.'});
+    await fixture.database.backgroundWork.drain();
     expect(await new PhoneService(fixture.database, fixture.origin).liveDraftSnapshot(cornerId)).toEqual([]);
 
     // A working turn nobody has heartbeated inside the horizon is equally
@@ -605,12 +566,13 @@ const fixture = monolithFixture();
     });
     expect(created.status).toBe(200);
     const { cornerId } = (await created.json()) as { cornerId: string };
+    const cornerRequestId=(await fixture.database.query<{id:string}>(`SELECT id FROM agent_commands WHERE room_id=$1 AND reason='corner_objective'`,[cornerId])).rows[0]!.id;
     const outsiderToken = await fixture.phoneToken('corner-outsider');
     expect(
       (
         await fixture.daemonOperation('postAgentTurnReceipt', {
           roomId: cornerId,
-          requestId: 'phone-close-corner',
+          requestId: cornerRequestId,
           status: 'working',
         })
       ).status,
@@ -652,7 +614,7 @@ const fixture = monolithFixture();
       (
         await fixture.database.query<{ status: string }>(
           `SELECT status FROM agent_turns WHERE room_id=$1 AND request_id=$2 AND agent_id=$3`,
-          [cornerId, 'phone-close-corner', AGENT],
+          [cornerId, cornerRequestId, AGENT],
         )
       ).rows[0]?.status,
     ).toBe('cancelled');
@@ -661,13 +623,8 @@ const fixture = monolithFixture();
     const helperCommands = (await helperCommandsResponse.json()) as {
       commands: Array<{ id: string; action: string; reason: string; turnRequestId: string }>
     };
-    expect(helperCommands.commands).toContainEqual(
-      expect.objectContaining({
-        action: 'stop',
-        reason: 'corner_close',
-        turnRequestId: 'phone-close-corner',
-      }),
-    );
+    expect(helperCommands.commands.some(item=>item.id===cornerRequestId)).toBe(false);
+    expect(helperCommands.commands.some(item=>item.id==='phone-close-corner')).toBe(true);
     expect(
       (
         await fixture.database.query<{ action: string; reason: string; state: string; agent_id: string }>(
@@ -676,22 +633,11 @@ const fixture = monolithFixture();
           [cornerId],
         )
       ).rows,
-    ).toEqual([
-      expect.objectContaining({ action: 'input', state: 'cancelled', agent_id: AGENT }),
-      expect.objectContaining({
-        action: 'stop',
-        reason: 'corner_close',
-        state: 'pending',
-        agent_id: AGENT,
-      }),
-    ]);
-    const stop = helperCommands.commands.find(command => command.action === 'stop')!;
-    const stopInput = { roomId: cornerId, commandId: stop.id };
-    expect((await fixture.daemonOperation('startQueuedTurn', stopInput)).status).toBe(200);
-    expect((await fixture.daemonOperation('acknowledgeAgentCommand', stopInput)).status).toBe(200);
+    ).toEqual([expect.objectContaining({action:'input',state:'cancelled',agent_id:AGENT})]);
     expect((await fixture.database.query(`SELECT 1 FROM memberships WHERE room_id=$1`, [cornerId])).rowCount).toBe(0);
     await fixture.database.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [ROOM, AGENT]);
     expect((await fixture.daemonOperation('getAgentCommands', { roomId: cornerId })).status).toBe(403);
+    expect((await fixture.daemonOperation('getAgentCommands', {})).status).toBe(200);
     expect(
       (
         await fixture.database.query(

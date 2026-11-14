@@ -64,8 +64,8 @@ describe.skipIf(!url)('running turns survive answered and superseded sources (Po
     await startQueuedTurn(db, thread, agent, report.id);
     await phone.execute('sendRoomMessage', { roomId:thread,text:'Publish is unblocked now' },human);
     await phone.execute('sendRoomMessage', { roomId:thread,text:'@ruby The blocker is resolved; check the next step' },human);
-    expect((await db.query("SELECT private_payload->>'waitingAnswered' answered,state FROM agent_commands WHERE id=$1",
-      [report.id])).rows).toEqual([{ answered:'true',state:'pending' }]);
+    expect((await db.query("SELECT state FROM agent_commands WHERE id=$1",
+      [report.id])).rows).toEqual([{state:'pending'}]);
     const queued = (await readAgentCommands(db, agent, thread)).commands;
     const next = queued.find(command => command.source.body.includes('The blocker is resolved'))!;
     expect(next).toBeDefined();

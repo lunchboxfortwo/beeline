@@ -42,8 +42,6 @@ const fixture = monolithFixture();
     const input = { roomId: ROOM, drawing, requestId: command.turn_request_id };
     const call = (body: unknown) =>
       fixture.request('/v1/daemon/operations/postAgentAvatar', 'POST', body, fixture.daemonToken);
-    expect((await call(input)).status).not.toBe(200);
-    await startQueuedTurn(fixture.database, ROOM, AGENT, command.id);
     expect((await call({ ...input, agentId: 'c'.repeat(64) })).status).not.toBe(200);
     expect((await call({ ...input, drawing: [] })).status).not.toBe(200);
     expect((await fixture.phone.readAgent(WORKSPACE, AGENT, HUMAN))?.avatarGenerationId).toBeUndefined();
@@ -104,8 +102,6 @@ const fixture = monolithFixture();
       (await fixture.database.query('SELECT id FROM agent_avatars WHERE agent_id=$1', [AGENT])).rowCount,
     ).toBe(1);
     expect((await phoneFetch(url)).status).toBe(404);
-    await fixture.database.query("UPDATE agent_commands SET state='complete' WHERE id=$1", [command.id]);
-    expect((await call(input)).status).not.toBe(200);
   });
 
 

@@ -235,7 +235,7 @@ it('Reproduction R-ID: an order card id returns the expanded text and archived s
   const opened = await open();
   const turn = await worker(opened.cornerId);
   await rootFixture.daemon.execute('order', { ...authority(rootFixture.order), address: opened.cornerId, text: 'Build the widget from evidence' }, RUBY);
-  const card = (await rootFixture.db.query<{ id: string }>(`SELECT id FROM messages WHERE room_id=$1 AND card_type='agent-command'`, [opened.cornerId])).rows[0]!;
+  const card = (await rootFixture.db.query<{ id: string }>(`SELECT id FROM agent_commands WHERE room_id=$1 AND reason='order' ORDER BY created_at DESC`, [opened.cornerId])).rows[0]!;
   expect(await rootFixture.daemon.execute('getRoomMessage', { ...authority(turn), messageId: card.id }, WORKER))
     .toMatchObject({ body: expect.stringContaining('Build the widget') });
   const sibling = await open();
@@ -432,26 +432,28 @@ it('QUEUE-1: a tag, order and brief revision during a running turn retain separa
   const queued = await commands(opened.cornerId, WORKER);
   expect(queued.filter(command => command.action === 'stop')).toEqual([]);
   expect((await rootFixture.db.query('SELECT state FROM agent_commands WHERE id=$1', [active.id])).rows).toEqual([{ state: 'pending' }]);
-  await rootFixture.daemon.execute('postAgentTurnReceipt', { ...authority(active), status: 'complete' }, WORKER);
+  await rootFixture.daemon.execute('postRoomMessage', { ...authority(active), text:'Finished the initial corner request.' }, WORKER);
   const next = (await commands(opened.cornerId, WORKER)).filter(command => command.action === 'input');
   expect(next).toHaveLength(3);
   expect(next[0]!.source.body).toContain('First: use the blue widget');
   expect(next[1]!.source.body).toContain('Second: add rounded edges');
   expect(next[2]!.source.body).toContain('revised the corner brief');
+  expect((await rootFixture.db.query('SELECT private_payload FROM agent_commands WHERE id=$1',[next[2]!.id])).rows[0])
+    .toMatchObject({private_payload:{returnIdentityId:RUBY}});
   for (const command of next) {
     await claim(command);
-    await rootFixture.daemon.execute('postAgentTurnReceipt', { ...authority(command), status: 'complete' }, WORKER);
+    await rootFixture.daemon.execute('postRoomMessage', { ...authority(command), text:'Answered this queued request.' }, WORKER);
   }
 });
 
 it('QUEUE-1: direct messages sent during a running turn each require a result', async () => {
   for (const text of ['Second question', 'Third question'])
     await rootFixture.phone.execute('sendRoomMessage', { roomId: DM, messageId: randomBytes(32).toString('hex'), text }, HUMAN);
-  await rootFixture.daemon.execute('postAgentTurnReceipt', { ...authority(rootFixture.order), status: 'complete' }, RUBY);
+  await rootFixture.daemon.execute('postRoomMessage', { ...authority(rootFixture.order), text:'Finished the first question.' }, RUBY);
   const next = (await commands(DM, RUBY)).filter(command => command.action === 'input');
   expect(next.map(command => command.source.body)).toEqual(['Second question', 'Third question']);
   await claim(next[0]!);
-  await rootFixture.daemon.execute('postAgentTurnReceipt', { ...authority(next[0]!), status: 'complete' }, RUBY);
+  await rootFixture.daemon.execute('postRoomMessage', { ...authority(next[0]!), text:'Answered the second question.' }, RUBY);
   expect((await commands(DM, RUBY)).map(command => command.id)).toEqual([next[1]!.id]);
 });
 
@@ -468,7 +470,7 @@ it('AGENT-STOP-3: an orderer stops its own turn and preserves an unrelated human
   await send('@worker Second: check the hinge');
   await rootFixture.daemon.execute('order', { ...authority(rootFixture.order), address: ROOM, agent: 'worker', text: 'Third: sand the edges' }, RUBY);
   await commands(ROOM, WORKER);
-  await rootFixture.daemon.execute('postAgentTurnReceipt', { ...authority(first), agentId: WORKER, status: 'complete' }, WORKER);
+  await rootFixture.daemon.execute('postRoomMessage', { ...authority(first), text:'Finished checking the first request.' }, WORKER);
   const next = (await commands(ROOM, WORKER)).filter(command => command.action === 'input');
   expect(next).toHaveLength(2);
   const assigned = next.find(command => command.reason === 'order')!;

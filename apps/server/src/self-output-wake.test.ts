@@ -82,9 +82,10 @@ it('SELF-OUTPUT: its own corner assignment queues once; posts and reports queue 
       )
     ).rows,
   ).toEqual([]); // No idle-alert work is manufactured after the report.
-  expect(
-    (await daemon.execute('getAgentCommands', { roomId: ROOM }, AGENT)).commands.map((c) => c.id),
-  ).toContain('self-report-proof');
+  expect((await db.query(`SELECT text FROM messages WHERE id='self-report-proof' AND room_id=$1`,[ROOM])).rows)
+    .toEqual([{text:'done: mock ready'}]);
+  expect((await daemon.execute('getAgentCommands',{roomId:ROOM},AGENT)).commands.map(item=>item.id))
+    .not.toContain('self-report-proof');
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[opening.id])).rows[0]).toEqual({state:'pending'});
 
 });

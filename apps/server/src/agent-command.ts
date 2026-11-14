@@ -384,7 +384,7 @@ export type AgentCommandInput = {
   };
 
 
-export { agentSignInCardId,isTaggedLoginText,parseTaggedAgentLifecycleCommand,TAGGED_AGENT_LIFECYCLE_COMMANDS } from './agent-command-create-agent-command.js';
+export { isTaggedLoginText,parseTaggedAgentLifecycleCommand,TAGGED_AGENT_LIFECYCLE_COMMANDS } from './agent-command-create-agent-command.js';
 export type { TaggedAgentLifecycleCommand } from './agent-command-create-agent-command.js';
 export { dropQueuedOrdersForStop,lockAgentCommandQueue } from './agent-command-queue.js';
 export { commandInbox,queueCornerMergeConflict,readAgentCommands,reconcileCornerMergeBlockers,routeSystemCommand } from './agent-command-read-agent-commands.js';
@@ -657,7 +657,9 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
         ?? chat.members.find(member => member.id === input.agentId)?.owner_id ?? undefined,
   } : undefined;
   let payload: PrivateCommandPayload | undefined = input.privatePayload ?? scheduledReturn ?? (parent?.private_payload && input.inheritPrivatePayload !== false
-    ? { ...parent.private_payload, kind: 'lifecycle', reported: undefined, text: sourceText ?? parent.private_payload.text } : undefined);
+    ? { ...parent.private_payload, kind: 'lifecycle', reported: undefined, text: sourceText ?? parent.private_payload.text }
+    : handover ? { kind:'lifecycle',authorId:handover.author_id,text:sourceText ?? input.reason,
+      fromRoomId:handover.approval_basis.commanderReturnRoomId ?? handover.source_room_id } : undefined);
   const parentReturn=parent?.private_payload?.returnIdentityId ??
     (parent?.private_payload?.kind==='order'?parent.private_payload.authorId:undefined);
   if (payload) payload = { ...payload,

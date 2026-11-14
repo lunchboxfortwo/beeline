@@ -1,3 +1,4 @@
+import { claimAgentConnection } from '../connection-presence.js';
 import { startQueuedTurn } from '../test-fixtures/queued-turn.test-support.js';
 import { createAgentCommand } from '.././agent-command.js';
 import { createHash } from 'node:crypto';
@@ -121,6 +122,8 @@ const fixture = monolithFixture();
 
 
   it('lets an author or Workspace manager delete a message while retaining its transcript record', async () => {
+    await fixture.database.query(`INSERT INTO live_server_instances(instance_id) VALUES('history-helper')`);
+    await claimAgentConnection(fixture.database,fixture.live,AGENT,{}, {connectionId:'history-helper',instanceId:'history-helper'});
     const authorMessageId = 'd'.repeat(64);
     await fixture.phone.execute(
       'sendRoomMessage',

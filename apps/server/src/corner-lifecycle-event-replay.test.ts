@@ -100,11 +100,11 @@ describe('corner lifecycle recorded event sequences', () => {
       // its committed command event already advances the corner.
       await advanceCorner(rootFixture.db, cornerId, { kind: 'reconcile' });
       expect(await machine(cornerId)).toMatchObject({ state: 'working' });
-      const resumes = (await commands(A, cornerId)).filter(command => command.action === 'resume');
+      const resumes = (await commands(A, cornerId)).filter(command => command.action === 'input' && command.reason === 'resume');
       expect(resumes).toHaveLength(1);
       expect(resumes[0]).toMatchObject({ agentId: A, source: { systemEvent: { kind: 'grant-decided' } } });
       await advanceCorner(rootFixture.db, cornerId, { kind: 'reconcile' });
-      expect((await commands(A, cornerId)).filter(command => command.action === 'resume').map(command => command.id))
+      expect((await commands(A, cornerId)).filter(command => command.action === 'input' && command.reason === 'resume').map(command => command.id))
         .toEqual(resumes.map(command => command.id));
       expect(await commands(B, cornerId)).toEqual([]);
     } finally { await unlisten(); }

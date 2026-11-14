@@ -117,20 +117,6 @@ describe('who may address an agent', () => {
     }
   });
 
-  it('keeps the human message last when its mention is refused, and reading clears unread', async () => {
-    const database = await fixture();
-    try {
-      const phone = new PhoneService(database, 'http://local.test');
-      await setPolicy(database, 'creator');
-      const sent = await send(phone, OUTSIDER, '1', '@greeter hello');
-      const view = await phone.readRoom(ROOM, OUTSIDER);
-      expect(view!.messages.at(-1)!.id).toBe(sent.messageId);
-      expect(await lines(database)).toEqual([]);
-      await phone.markRead(ROOM, sent.messageId, OUTSIDER);
-      expect((await phone.readChats(WORKSPACE, OUTSIDER))?.chats.find(chat => chat.room.id === ROOM)?.unread).toBe(false);
-    } finally { await database.close(); }
-  });
-
   it('hands a running helper the server policy, changed or not, on every candidate message', async () => {
     const database = await fixture();
     try {

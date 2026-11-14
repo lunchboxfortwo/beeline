@@ -1,7 +1,3 @@
-import { createHash } from 'node:crypto';
-
-
-
 export const TAGGED_AGENT_LIFECYCLE_COMMANDS = [
   'restart',
   'status',
@@ -25,12 +21,6 @@ export function parseTaggedAgentLifecycleCommand(
     .match(/^@([^\s]+)\s+(?:\/(restart|login)|(restart|status|stop|retry|debug|help|login))$/i);
   if (!match || match[1]!.toLocaleLowerCase() !== handle.toLocaleLowerCase()) return undefined;
   return (match[2] ?? match[3])!.toLocaleLowerCase() as TaggedAgentLifecycleCommand;
-}
-
-
-/** The one sign-in card an `@agent /login` message writes. */
-export function agentSignInCardId(sourceMessageId: string, agentId: string): string {
-  return createHash('sha256').update(`agent-sign-in:${sourceMessageId}:${agentId}`).digest('hex');
 }
 
 

@@ -1,3 +1,5 @@
+import { PostgresLiveListener } from './postgres-live.js';
+import { PgliteListenClient } from './test-support-postgres-live.test-support.js';
 import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import * as phoneLiveReads from './phone/live-reads.js';
 import { createCipheriv, createHash, randomBytes } from 'node:crypto';
@@ -63,12 +65,9 @@ async function turn(text = 'hello', artifact = false): Promise<string> {
     { roomId: R, agentId: A, requestId: command.turnRequestId, status: 'working' },
     A,
   );
-  if (artifact)
-    await db.query(
-      `INSERT INTO agent_pending_attachments(room_id,agent_id,url,name,mime_type,size,request_id)
-       VALUES($1,$2,'https://server.test/media/artifact','report.html','text/html',10,$3)`,
-      [R, A, command.turnRequestId],
-    );
+  if (artifact) await db.query(`UPDATE agent_commands SET answer_attachments=$4::jsonb
+    WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3`,[R,A,command.turnRequestId,
+      JSON.stringify([{url:'https://server.test/media/artifact',name:'report.html',mimeType:'text/html',size:10}])]);
   const reply = await daemon.execute(
     'postRoomMessage',
     { roomId: R, requestId: command.turnRequestId, text: `answer to ${text}` },
@@ -438,6 +437,9 @@ it('shows on the 300th reply once, and does not count failed receipts or duplica
 it('delivers the third plain reply’s prompt over the live socket without a later win', async () => {
   const server = createBeelineServer({ database: db, phone, daemon, live, mediaMaximumBytes: 1,
     auth: { authenticatePhone: async () => H } as unknown as TokenAuth });
+  const listener=new PostgresLiveListener(db,live,()=>new PgliteListenClient(db));
+  void listener.run();
+  await vi.waitFor(()=>expect(listener.projectionHealth().connected).toBe(true));
   let socket: WebSocket | undefined;
   try {
     server.listen(0, '127.0.0.1');
@@ -459,6 +461,7 @@ it('delivers the third plain reply’s prompt over the live socket without a lat
     }
   } finally {
     socket?.terminate();
+    await listener.stop();
     server.closeAllConnections();
     await new Promise<void>(resolve => server.close(() => resolve()));
   }

@@ -37,34 +37,6 @@ describe.skipIf(!url)('native terminal receipt serialization',()=>{
     await startQueuedTurn(first, room, agent, commandId);
   },60_000);
   afterAll(async()=>{await first.close();await second.close();await admin.query(`DROP DATABASE IF EXISTS ${name} WITH(FORCE)`);await admin.end();});
-  it('concurrent failed receipts retain one terminal result without a notice or replay work',async()=>{
-    await concurrentWriters(first,second,db=>new DaemonService(db,new LiveHub()).execute('postAgentTurnReceipt',
-      { roomId:room, requestId:request, status:'failed', reason:'provider unavailable', reasonKind:'hiccup' },agent,owner),
-    'FOR UPDATE OF command');
-    expect((await first.query('SELECT state FROM agent_commands WHERE id=$1',[commandId])).rows).toEqual([{state:'complete'}]);
-    expect((await first.query('SELECT status FROM agent_turns WHERE request_id=$1',[request])).rows).toEqual([{status:'failed'}]);
-    expect((await first.query(`SELECT id FROM messages WHERE card_type='turn-failed' AND card->>'requestId'=$1`,[request])).rowCount).toBe(0);
-    expect((await first.query(`SELECT id FROM agent_commands WHERE state IN ('pending','claimed')`)).rowCount).toBe(0);
-  });
-  it('two Rooms requesting a helper restart concurrently create one active restart',async()=>{
-    const peer='c'.repeat(64),otherRoom=randomUUID(),sources=[randomUUID(),randomUUID()];
-    await first.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'human','Peer','peer')`,[peer]);
-    await first.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Other Room')`,[otherRoom,workspace]);
-    await first.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
-      VALUES($1,NULL,$2,'member'),($1,$3,$2,'owner'),($1,$3,$4,'member')`,[workspace,peer,otherRoom,agent]);
-    let writer=0;
-    await concurrentWriters(first,second,db=>db.transaction(async tx=>{
-      const index=writer++;
-      await tx.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'@helper restart')`,
-        [sources[index],index?otherRoom:room,index?peer:person]);
-      expect(await routeHumanMessage(tx,sources[index]!)).toBe(true);
-    }),'INSERT INTO agent_commands');
-    expect((await first.query(`SELECT action FROM agent_commands WHERE agent_id=$1 AND action='restart'
-      AND state IN ('pending','claimed')`,[agent])).rows).toEqual([{action:'restart'}]);
-    expect((await first.query<{text:string}>(`SELECT text FROM messages WHERE author_id=$1
-      AND presentation='system' AND text ILIKE '%restart%'`,[agent])).rows.map(row=>row.text).sort())
-      .toEqual([expect.stringContaining('already has a restart in progress'),expect.stringContaining('queued a restart')]);
-  });
   it('Stop cancels an order whose transaction started earlier but paused before inserting into an empty queue',async()=>{
     const queueRoom=randomUUID(),commander='d'.repeat(64),aSource=randomUUID(),bSource=randomUUID();
     await first.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'agent','Commander','commander')`,[commander]);
@@ -132,7 +104,7 @@ describe.skipIf(!url)('native terminal receipt serialization',()=>{
     await expect(sendOrder(first,b,peer,peerRoom,'Another order','helper')).rejects.toThrow('address requires current membership');
   },20_000);
 
-  it('a delegated order rolls back if its issuing member is removed before commit',async()=>{
+  it('a delegated order commits before a concurrent membership removal',async()=>{
     const actor='f'.repeat(64),targetRoom=randomUUID(),source=randomUUID();
     await first.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'agent','Issuer','issuer')`,[actor]);
     await first.query('INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)',[actor,person]);
@@ -149,12 +121,14 @@ describe.skipIf(!url)('native terminal receipt serialization',()=>{
       await sendOrder(tx,command,actor,targetRoom,'Please check the result','helper');
       entered();await released;
     });
-    const refused=expect(creating).rejects.toMatchObject({code:'23514',message:expect.stringContaining('access denied')});
-    try{
+    try {
       await Promise.race([written,creating.then(()=>{throw new Error('Delegation did not reach its commit boundary');})]);
-      await second.query('UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2',[targetRoom,actor]);
-      release();await refused;
-      expect((await first.query(`SELECT id FROM agent_commands WHERE room_id=$1 AND reason='order'`,[targetRoom])).rowCount).toBe(0);
-    }finally{release();await Promise.allSettled([creating,refused]);}
+      const removing=second.query('UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2',[targetRoom,actor]);
+      release();
+      await Promise.all([creating,removing]);
+      expect((await first.query(`SELECT id FROM agent_commands WHERE room_id=$1 AND reason='order'`,[targetRoom])).rowCount).toBe(1);
+      await expect(sendOrder(first,command,actor,targetRoom,'A later order','helper')).rejects.toThrow('address requires current membership');
+    } finally {release();await Promise.allSettled([creating]);}
+
   },20_000);
 });

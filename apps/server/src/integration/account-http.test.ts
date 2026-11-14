@@ -188,7 +188,7 @@ const fixture = monolithFixture();
   });
 
 
-  it('stays silent for parentless continuity outside the conversation window', async () => {
+  it('queues a solo-Room request regardless of old conversation history', async () => {
     await fixture.database.query(
       `INSERT INTO messages(id,room_id,author_id,text,created_at)
        VALUES($1,$2,$3,'@owner Aged-out answer.',now()-interval '1 hour')`,
@@ -208,11 +208,14 @@ const fixture = monolithFixture();
       text: 'No active exchange remains.',
     });
     expect(sent.status).toBe(200);
+    await fixture.database.backgroundWork.drain();
     const notices = await fixture.database.query<{ text: string }>(
       `SELECT text FROM messages WHERE room_id=$1 AND presentation='system'`,
       [ROOM],
     );
-    expect(notices.rows).toEqual([]);
+    expect(notices.rows).toEqual([{text:'@bee is offline · connect again'}]);
+    const queued=await fixture.daemonOperation('getAgentCommands',{roomId:ROOM});
+    expect((await queued.json()).commands.some((item:{sourceMessageId:string})=>item.sourceMessageId==='e'.repeat(64))).toBe(true);
   });
 
 

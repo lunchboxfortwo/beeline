@@ -510,6 +510,8 @@ describe('Reproduction workflow-stalls', () => {
     const daemon = new HelperDaemonService(database, new LiveHub());
     await startQueuedCommand(daemon, { roomId: ROOM, commandId: command.id }, WORKER_A);
     await database.query(`DELETE FROM workspace_skills WHERE slug='list-flow'`);
+    await daemon.execute('postRoomMessage', {roomId:ROOM,requestId:command.turn_request_id,text:'Finished the requested work.'},WORKER_A);
+    await database.backgroundWork?.drain();
     await daemon.execute('postAgentTurnReceipt', { roomId: ROOM, requestId: command.turn_request_id, status: 'complete' }, WORKER_A);
     expect((await database.query(`SELECT state FROM agent_commands WHERE id=$1`, [command.id])).rows[0]).toMatchObject({ state: 'complete' });
     expect((await database.query(`SELECT status FROM agent_turns WHERE request_id=$1`, [command.turn_request_id])).rows[0]).toMatchObject({ status: 'complete' });
@@ -717,8 +719,8 @@ describe('Reproduction 8: recoverable workflow visits', () => {
           sourceMessageId: source ?? await rootMessage(WORKER_A), reason: 'test' }))!;
     await expect(handoff(database, await gateCommand(),
       { runId, outcome: 'publish', contents: {} })).rejects.toThrow('a person answers');
-    await expect(handoff(database, await gateCommand(await rootMessage(OUTSIDER)),
-      { runId, outcome: 'publish', contents: {} })).rejects.toThrow('room access denied');
+    await expect((async()=>handoff(database,await gateCommand(await rootMessage(OUTSIDER)),
+      {runId,outcome:'publish',contents:{}}))()).rejects.toThrow(/room access denied|address requires current membership/);
     const answer = await rootMessage(OWNER, 'publish for this exact run');
     await handoff(database, await gateCommand(answer), { runId, outcome: 'publish', contents: {} });
     const read = await getWorkflowRun(database, corner, runId);

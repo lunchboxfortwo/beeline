@@ -87,11 +87,12 @@ it.each(['approved', 'denied', 'expired'] as const)('settles a Link %s at the or
     merchant: 'Bookshop', merchantUrl: 'https://bookshop.example.test', amount: 100,
     description: 'Harmless test purchase', idempotencyKey: 'settlement' }, AGENT);
   expect((await daemon.execute('retrieveLinkSpendRequest', { agentId: AGENT, roomId: ROOM, id: 'lsrq_settlement' }, AGENT)).status).toBe('pending_approval');
-  expect((await database.query(`SELECT 1 FROM agent_commands WHERE action='resume'`)).rowCount).toBe(0);
+  expect((await database.query(`SELECT 1 FROM agent_commands WHERE action='input' AND reason='resume'`)).rowCount).toBe(0);
   providerStatus = status;
   // Retrieval may run elsewhere; only the creating Room and turn receive the decision.
   const otherRoom = '33333333-3333-4333-8333-333333333333';
   await database.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Elsewhere')`, [otherRoom, WORKSPACE]);
+  await database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member'),($1,$2,$4,'owner')`,[WORKSPACE,otherRoom,AGENT,OWNER]);
   const laterRequestId = createHash('sha256').update('link-retrieving-turn').digest('hex');
   await database.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Retrieve the purchase')`, [laterRequestId, otherRoom, SYSTEM_IDENTITY_ID]);
   const laterCommand = await createAgentCommand(database, { roomId: otherRoom, agentId: AGENT,
@@ -104,8 +105,8 @@ it.each(['approved', 'denied', 'expired'] as const)('settles a Link %s at the or
   await retrieving.execute('retrieveLinkSpendRequest', input, AGENT);
   expect((await database.query(`SELECT room_id,card->>'status' status FROM messages WHERE card_type='squire-approval'`)).rows)
     .toEqual([{ room_id: ROOM, status }]);
-  expect((await database.query(`SELECT room_id,turn_request_id FROM agent_commands WHERE action='resume'`)).rows)
-    .toEqual([{ room_id: ROOM, turn_request_id: requestId }]);
+  expect((await database.query(`SELECT room_id,parent_command_id FROM agent_commands WHERE action='input' AND reason='resume'`)).rows)
+    .toEqual([{ room_id: ROOM, parent_command_id: requestId }]);
   expect((await database.query(`SELECT room_id FROM messages WHERE card_type='squire-approval-decision'`)).rows)
     .toEqual([{ room_id: ROOM }]);
   expect(publish).toHaveBeenCalledWith(expect.objectContaining({ type: 'invalidate', roomId: ROOM }));

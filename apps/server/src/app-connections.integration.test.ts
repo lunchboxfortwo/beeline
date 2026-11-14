@@ -260,7 +260,9 @@ const scope2 = fixtureScope2();
     expect((await scope2.database.query("SELECT id FROM messages WHERE card_type='connector-offer'")).rows).toEqual([]);
     await seedSquireMachine(scope2.database, HELPER, { squire_work: {},
       squire_report: { status: 'connected', reportedAt: Date.now() / 1000 } });
-    expect(await connecting).toMatchObject({ status: 'ready', app: 'Trusty Squire' });
+    expect(await connecting).toMatchObject({ status: 'unavailable', app: 'Trusty Squire' });
+    expect(await daemon.execute('connect', {...turn, service:'squire',reason:'Use the reconnected browser',squireAvailable:true},HELPER))
+      .toMatchObject({status:'ready',app:'Trusty Squire'});
     expect((await scope2.database.query("SELECT id FROM messages WHERE card_type IS NOT NULL")).rows).toEqual([]);
   });
 

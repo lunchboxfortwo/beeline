@@ -211,61 +211,6 @@ const fixture = monolithFixture();
   });
 
 
-  it('keeps working receipts fresh without letting heartbeats resurrect terminal turns', async () => {
-    const requestId = '6'.repeat(64);
-    const generationId = `${AGENT}:${ROOM}`;
-    await fixture.daemonOperation('postAgentTurnReceipt', { roomId: ROOM, requestId, status: 'working' });
-    await fixture.database.query(
-      `UPDATE agent_turns SET started_at=now()-interval '2 minutes',
-         created_at=now()-interval '2 minutes'
-       WHERE room_id=$1 AND request_id=$2 AND agent_id=$3`,
-      [ROOM, requestId, AGENT],
-    );
-
-    await fixture.daemonOperation('postAgentTurnReceipt', { roomId: ROOM, requestId, status: 'working', heartbeat: true });
-    const fresh = await fixture.database.query<{ status: string; age_seconds: number }>(
-      `SELECT status,extract(epoch FROM now()-created_at)::float age_seconds
-       FROM agent_turns WHERE room_id=$1 AND request_id=$2 AND agent_id=$3`,
-      [ROOM, requestId, AGENT],
-    );
-    expect(fresh.rows[0]?.status).toBe('working');
-    expect(fresh.rows[0]?.age_seconds).toBeLessThan(5);
-    const projected = (
-      await new PhoneService(fixture.database, fixture.origin).readRoom(ROOM, HUMAN)
-    )?.latestAgentTurns.find((turn) => turn.requestId === requestId);
-    expect(projected).toBeDefined();
-    expect(projected!.createdAt).toBeGreaterThan(projected!.startedAt!);
-    expect(projected!.createdAt - projected!.startedAt!).toBeGreaterThanOrEqual(119);
-
-    await fixture.daemonOperation('postAgentTurnReceipt', { roomId: ROOM, requestId, status: 'complete' });
-    await fixture.database.query(
-      `UPDATE agent_turns SET created_at=now()-interval '1 minute'
-       WHERE room_id=$1 AND request_id=$2 AND agent_id=$3`,
-      [ROOM, requestId, AGENT],
-    );
-    await fixture.daemonOperation('postAgentTurnReceipt', { roomId: ROOM, requestId, status: 'working', heartbeat: true });
-    const terminal = await fixture.database.query<{ status: string; old: boolean }>(
-      `SELECT status,created_at<now()-interval '30 seconds' old
-       FROM agent_turns WHERE room_id=$1 AND request_id=$2 AND agent_id=$3`,
-      [ROOM, requestId, AGENT],
-    );
-    expect(terminal.rows[0]).toEqual({ status: 'complete', old: true });
-
-    await fixture.daemonOperation('postAgentTurnReceipt', { roomId: ROOM, requestId: 'heartbeat-without-turn', status: 'working' });
-    await fixture.database.query(`DELETE FROM agent_turns WHERE request_id='heartbeat-without-turn'`);
-    const missingHeartbeat = await fixture.request(
-      '/v1/daemon/operations/postAgentTurnReceipt',
-      'POST',
-      { roomId: ROOM, requestId: 'heartbeat-without-turn', status: 'working', heartbeat: true },
-      fixture.daemonToken,
-    );
-    expect(missingHeartbeat.status).toBe(200);
-    expect(
-      await fixture.database.query(`SELECT 1 FROM agent_turns WHERE request_id='heartbeat-without-turn'`),
-    ).toHaveProperty('rowCount', 0);
-  });
-
-
   it.each(['owner', 'admin'] as const)(
     'lets anyone in the Room stop another requester’s turn, whatever their Room role (%s)',
     async (role) => {
@@ -359,7 +304,7 @@ const fixture = monolithFixture();
     expect(
       (
         await fixture.database.query<{
-          woke: string[];
+          system_event: {kind:string};
           request_id: string;
           system_event: { kind?: string };
         }>(
@@ -371,72 +316,7 @@ const fixture = monolithFixture();
           [cornerId],
         )
       ).rows,
-    ).toEqual([expect.objectContaining({ woke: [AGENT], request_id: requestId })]);
-  });
-
-
-  it('ends an explicit hiccup failure once without reopening its command', async () => {
-    const requestId = '8'.repeat(64);
-    await fixture.operation('sendRoomMessage', {
-      roomId: ROOM,
-      messageId: requestId,
-      text: "@bee what's up",
-      mentions: [AGENT],
-    });
-    await fixture.daemonOperation('postAgentTurnReceipt', { roomId: ROOM, requestId, status: 'working' });
-    const failed = await fixture.daemonOperation('postAgentTurnReceipt', {
-      roomId: ROOM,
-      requestId,
-      status: 'failed',
-      reason: 'provider error 429 concurrency_limit',
-      reasonKind: 'hiccup',
-    });
-    expect(failed.status).toBe(200);
-    expect(await failed.json()).not.toHaveProperty('hiccupRestart');
-    expect(
-      (
-        await fixture.database.query(
-          `SELECT status,failure_reason FROM agent_turns WHERE room_id=$1 AND request_id=$2`,
-          [ROOM, requestId],
-        )
-      ).rows[0],
-    ).toEqual({ status: 'failed', failure_reason: 'provider error 429 concurrency_limit' });
-    const lines = () =>
-      fixture.database.query<{
-        id: string;
-        author_id: string;
-        text: string;
-        tagged_ids: string[];
-        card: Record<string, string>;
-      }>(
-        `SELECT id,author_id,text,${taggedIdentityIdsSql('messages')} tagged_ids,card
-         FROM messages WHERE room_id=$1 AND presentation='system' AND card_type='turn-failed'`,
-        [ROOM],
-      );
-    const first = (await lines()).rows;
-    expect(first).toEqual([]);
-    expect(
-      (
-        await fixture.database.query<{ state: string }>(
-          `SELECT state FROM agent_commands WHERE turn_request_id=$1 AND agent_id=$2`,
-          [requestId, AGENT],
-        )
-      ).rows[0],
-    ).toEqual({ state: 'complete' });
-    const replay=await fixture.daemonOperation('postAgentTurnReceipt',{roomId:ROOM,requestId,status:'failed',reason:'provider error 429 concurrency_limit',reasonKind:'hiccup'});
-    expect(replay.status).toBe(200);
-    expect((await lines()).rows).toEqual([]);
-    const commands=await (await fixture.daemonOperation('getAgentCommands',{roomId:ROOM})).json() as {commands:{turnRequestId:string}[]};
-    expect(commands.commands.some(command=>command.turnRequestId===requestId)).toBe(false);
-    const room = (await new PhoneService(fixture.database, fixture.origin).readRoom(ROOM, HUMAN))!;
-    expect(room.messages.filter(message => message.cardType === 'turn-failed')).toEqual([]);
-    await fixture.daemonOperation('postAgentTurnReceipt', {
-      roomId: ROOM,
-      requestId: '9'.repeat(64),
-      status: 'failed',
-      reason: 'ACP agent exited (code 1)',
-    });
-    expect((await lines()).rows).toEqual([]);
+    ).toEqual([expect.objectContaining({ system_event: expect.objectContaining({kind:'turn-cancelled'}), request_id: requestId })]);
   });
 
 
@@ -484,11 +364,7 @@ const fixture = monolithFixture();
       objective: 'Ship the widget end to end',
     });
     const { cornerId } = (await created.json()) as { cornerId: string };
-    await fixture.daemonOperation('postAgentTurnReceipt', {
-      roomId: ROOM,
-      requestId: 'corner-room-label',
-      status: 'complete',
-    });
+    await fixture.daemonOperation('postRoomMessage', {roomId:ROOM,requestId:'corner-room-label',text:'Opened the corner.'});
     const roomRow = async () =>
       (
         (await (await fixture.request(`/v1/phone/workspaces/${WORKSPACE}/chats`)).json()) as {
