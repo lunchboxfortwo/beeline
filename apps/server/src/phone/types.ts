@@ -89,7 +89,6 @@ export interface AgentTurnRow {
   status: 'working' | 'complete' | 'failed' | 'cancelled';
   started_at: Date;
   created_at: Date;
-  generation_id: string | null;
   requested_by: string | null;
 }
 

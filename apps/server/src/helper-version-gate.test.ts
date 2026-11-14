@@ -1,6 +1,5 @@
 import { AddressInfo } from 'node:net';
 import WebSocket from 'ws';
-import { HELPER_UPDATE_CLOSE_CODE } from '@beeline/api-contract/daemon';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { TokenAuth } from './auth.js';
 import type { DaemonService } from './daemon-service.js';
@@ -28,7 +27,7 @@ describe('helper minimum version', () => {
     expect(() => gate.raise('v0.0.9')).toThrow(/cannot decrease/);
   });
 
-  it('refuses an old HTTP helper and socket before authentication or Room reads', async () => {
+  it('keeps old and unversioned helpers connected and serving their queues', async () => {
     const authenticateDaemon = vi.fn().mockResolvedValue('agent');
     const canReadRooms = vi.fn();
     const execute = vi.fn().mockResolvedValue({ commandProtocol: 1, commands: [] });
@@ -51,27 +50,25 @@ describe('helper minimum version', () => {
       body: '{}',
     });
     const old = await post('v0.0.9');
-    expect(old.status).toBe(426);
-    expect(await old.json()).toEqual({ error: 'update_required', minVersion: 'v0.0.10' });
-    expect((await post()).status).toBe(426);
-    expect(authenticateDaemon).not.toHaveBeenCalled();
-    expect(execute).not.toHaveBeenCalled();
+    expect(old.status).toBe(200);
+    expect(await old.json()).toEqual({ commandProtocol: 1, commands: [] });
+    expect((await post()).status).toBe(200);
+    expect(authenticateDaemon).toHaveBeenCalled();
+    expect(execute).toHaveBeenCalledTimes(2);
 
     const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/phone/live?helperVersion=v0.0.9`,
       ['bearer.bdt_test']);
     sockets.push(socket);
-    const rejected = new Promise<number>((resolve, reject) => {
-      socket.once('unexpected-response', (_request, response) => resolve(response.statusCode ?? 0));
-      socket.once('error', reject);
+    const helloOld = new Promise<Record<string, unknown>>((resolve, reject) => {
+      socket.once('message', raw => resolve(JSON.parse(String(raw)))); socket.once('error', reject);
     });
-    await expect(rejected).resolves.toBe(426);
-    expect(authenticateDaemon).not.toHaveBeenCalled();
+    expect(await helloOld).toMatchObject({type:'hello'});
     expect(canReadRooms).not.toHaveBeenCalled();
 
     const current = await post('v0.0.10');
     expect(current.status).toBe(200);
-    expect(authenticateDaemon).toHaveBeenCalledOnce();
-    expect(execute).toHaveBeenCalledOnce();
+    expect(authenticateDaemon).toHaveBeenCalledTimes(4);
+    expect(execute).toHaveBeenCalledTimes(3);
 
     const currentSocket = new WebSocket(
       `ws://127.0.0.1:${port}/v1/phone/live?helperVersion=v0.0.10&sourceSha=${'a'.repeat(40)}`,
@@ -86,11 +83,11 @@ describe('helper minimum version', () => {
     expect(canReadRooms).not.toHaveBeenCalled();
     const health = await fetch(`http://127.0.0.1:${port}/health`);
     expect((await health.json()).live.helperMinimum).toEqual({
-      minVersion: 'v0.0.10', refusals: 3, forceUpdates: 0,
+      minVersion: 'v0.0.10', refusals: 0, forceUpdates: 0,
     });
   });
 
-  it('pushes force-update and gates further work as soon as an authorized release raises the minimum', async () => {
+  it('reports a minimum release without disconnecting a busy helper', async () => {
     const gate = new HelperVersionGate();
     const authenticateDaemon = vi.fn().mockResolvedValue('agent');
     const canReadRooms = vi.fn();
@@ -112,13 +109,6 @@ describe('helper minimum version', () => {
     await new Promise<void>((resolve, reject) => {
       socket.once('open', resolve); socket.once('error', reject);
     });
-    const forced = new Promise<Record<string, unknown>>((resolve) => {
-      socket.on('message', (raw) => {
-        const event = JSON.parse(String(raw)) as Record<string, unknown>;
-        if (event.type === 'force-update') resolve(event);
-      });
-    });
-    const closed = new Promise<number>((resolve) => socket.once('close', resolve));
     const update = await fetch(`http://127.0.0.1:${port}/v1/releases/helper-minimum`, {
       method: 'POST', headers: { authorization: 'Bearer release-secret',
         'content-type': 'application/json' },
@@ -126,8 +116,7 @@ describe('helper minimum version', () => {
     });
     expect(update.status).toBe(200);
     expect(await update.json()).toEqual({ minVersion: 'v0.0.10' });
-    await expect(forced).resolves.toEqual({ type: 'force-update', minVersion: 'v0.0.10' });
-    await expect(closed).resolves.toBe(HELPER_UPDATE_CLOSE_CODE);
+    expect(socket.readyState).toBe(WebSocket.OPEN);
     expect(canReadRooms).not.toHaveBeenCalled();
     expect(gate.minimum).toBe('v0.0.10');
     const version = await fetch(`http://127.0.0.1:${port}/version`);

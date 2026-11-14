@@ -80,10 +80,10 @@ it('sends waiting requests once and only dispatches a missing in-flight id after
   for(const frame of operations)sockets[1]!.receive({type:'daemon-operation-result',requestId:frame.requestId,result:{id:'ok'}});
   await Promise.all([first,waiting]);
 });
-it('uses one operation path for activation, usage, and turn control',async()=>{
+it('uses one operation path for answers, usage, and queue reads',async()=>{
   const {api,sockets}=fixture();const ready=api.waitForConnection();sockets[0]!.open();sockets[0]!.register();await ready;
-  const tasks=[api.readCommandActivation({agentId,roomId:'room',workspaceId:'workspace',commandId:'command',generationId:'generation',source:{connectionId:'connection',epoch:1}}),
-    api.execute('claimAgentCommand',{roomId:'room',commandId:'command',generationId:'generation'}),
+  const tasks=[api.execute('postRoomMessage',{roomId:'room',requestId:'request',text:'answer'}),
+    api.execute('getAgentCommands',{}),
     api.execute('publishAgentUsageAccount',{agentId} as never)];
   await flush();const operations=sockets[0]!.frames.filter(frame=>frame.type==='daemon-operation');expect(operations).toHaveLength(3);
   for(const frame of operations)sockets[0]!.receive({type:'daemon-operation-result',requestId:frame.requestId,result:{id:'ok'}});

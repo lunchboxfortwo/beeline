@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import { bootstrapMachine } from './recovery.js';
 import { activeReleaseId, readUpdateState, writeUpdateState } from './self-update.js';
-import { ReleaseTransaction } from './managed-update.js';
 
 vi.mock('./native-helper.js', async original => ({
   ...await original<typeof import('./native-helper.js')>(),
@@ -12,14 +11,9 @@ vi.mock('./native-helper.js', async original => ({
   nativeHelperStatus: async () => ({ MainPID: String(process.pid) }),
 }));
 
-it('boots the staged release after the predecessor remained busy past the update timeout', async () => {
-  vi.useFakeTimers();
-  const root = await mkdtemp(join(tmpdir(), 'beeline-busy-boot-'));
+it('boots a staged release the previous helper left behind', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'beeline-staged-boot-'));
   const layout = { libDir: join(root, 'lib/beeline'), releasesRoot: join(root, 'lib/beeline-releases'), binDir: join(root, 'bin') };
-  const handoff = vi.fn(async () => {});
-  const failed = vi.fn();
-  const update = new ReleaseTransaction({ layout, loadedRelease: 'old', env: {}, idle: () => false,
-    handoff, failed, changed: vi.fn() });
   const env = { HOME: root, XDG_CONFIG_HOME: join(root, 'config'), XDG_STATE_HOME: join(root, 'state'),
     BEELINE_LIB_DIR: layout.libDir, BEELINE_BOOT_LAUNCHER_PID: String(process.pid) };
   try {
@@ -30,17 +24,10 @@ it('boots the staged release after the predecessor remained busy past the update
     }
     await symlink('beeline-releases/old', layout.libDir);
     await writeUpdateState(layout, { stagedReleaseId: 'new' });
-    await update.prepared('new');
-    await update.pending;
-    vi.advanceTimersByTime(30 * 60_000);
-    await update.pending;
-    update.dispose();
     await expect(bootstrapMachine(env)).resolves.toBe(join(layout.releasesRoot, 'new/lib/beeline/beeline-cli.mjs'));
     expect(await activeReleaseId(layout)).toBe('new');
     expect((await readUpdateState(layout)).stagedReleaseId).toBeUndefined();
-    expect(handoff).not.toHaveBeenCalled();
-    expect(failed).not.toHaveBeenCalled();
-  } finally { update.dispose(); vi.useRealTimers(); await rm(root, { recursive: true, force: true }); }
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 it('consumes a staged boot once even when activation fails before the anchor changes', async () => {

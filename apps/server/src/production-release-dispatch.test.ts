@@ -14,7 +14,7 @@ const db = new PgliteDatabase();
 const room = '22222222-2222-4222-8222-222222222222';
 const agent = 'a'.repeat(64);
 const human = 'b'.repeat(64);
-const input = { roomId: room, requestId: 'request', generationId: 'generation', inputs: { release_version: 'v0.1.94', selection: 'server' } };
+const input = { roomId: room, requestId: 'request', inputs: { release_version: 'v0.1.94', selection: 'server' } };
 beforeAll(async () => {
   await migrate(db);
   await db.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'agent','Jellybean','jellybean'),($2,'human','Owner','owner')`, [agent, human]);
@@ -25,8 +25,8 @@ beforeAll(async () => {
     VALUES('11111111-1111-4111-8111-111111111111',NULL,$1,'member'),
       ('11111111-1111-4111-8111-111111111111',$2,$1,'member')`, [agent, room]);
   await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES('human-command',$1,$2,'Release now')`, [room, human]);
-  await db.query(`INSERT INTO agent_commands(id,room_id,agent_id,source_message_id,turn_request_id,action,reason,root_command_id,root_source_message_id,agent_depth,state,generation_id)
-    VALUES('command',$1,$2,'human-command','request','input','human','command','human-command',0,'claimed','generation')`, [room, agent]);
+  await db.query(`INSERT INTO agent_commands(id,room_id,agent_id,source_message_id,turn_request_id,action,reason,root_command_id,root_source_message_id,agent_depth,state)
+    VALUES('command',$1,$2,'human-command','request','input','human','command','human-command',0,'pending')`, [room, agent]);
 });
 afterAll(() => db.close());
 
@@ -92,7 +92,7 @@ it('release-dispatch-attribution: commits readable server provenance before disp
 it('refuses missing agent identity, stale turns, nonhuman provenance and forged attribution before dispatch', async () => {
   const dispatch = vi.fn();
   await expect(productionReleaseDispatch(db, human, input, dispatch)).rejects.toThrow(/agent identity/);
-  await expect(productionReleaseDispatch(db, agent, { ...input, generationId: 'stale' }, dispatch)).rejects.toThrow(/authority rejected/);
+  await expect(productionReleaseDispatch(db, agent, { ...input, requestId: 'missing-command' }, dispatch)).rejects.toThrow(/authority rejected/);
   await expect(productionReleaseDispatch(db, agent, { ...input, inputs: { dispatched_by: 'forged' } }, dispatch)).rejects.toThrow(/Invalid/);
   await db.query(`UPDATE agent_commands SET root_source_message_id='missing' WHERE id='command'`);
   try {
@@ -224,11 +224,10 @@ it.each(['legacy', 'helper'])('R-RELEASE-CARD: built %s MCP tool dispatches thro
   const messages = async () => (await db.query<{ count: number }>(`SELECT count(*)::int count FROM messages`)).rows[0]!.count;
   const before = { grants: await grantCount(), messages: await messages() };
   if (mode === 'helper') await db.query(`INSERT INTO live_server_instances(instance_id) VALUES('built-helper-server');
-    INSERT INTO agent_connections(agent_id,connection_id,epoch,instance_id) VALUES('${agent}','built-helper',1,'built-helper-server');
-    UPDATE agent_commands SET generation_id='built-helper-generation',turn_owner_connection_id='built-helper',turn_owner_epoch=1 WHERE id='command'`);
+    INSERT INTO agent_connections(agent_id,connection_id,epoch,instance_id) VALUES('${agent}','built-helper',1,'built-helper-server')`);
   try {
     const context = join(dir, 'turn.json');
-    await writeFile(context, JSON.stringify({ ...input, generationId: mode === 'helper' ? 'built-helper-generation' : input.generationId }));
+    await writeFile(context, JSON.stringify({ ...input }));
     const port = (server.address() as import('node:net').AddressInfo).port;
     const run = async () => {
       const child = spawn(process.execPath, [executable], {
@@ -261,33 +260,20 @@ it.each(['legacy', 'helper'])('R-RELEASE-CARD: built %s MCP tool dispatches thro
 
     const { AgentScheduleLoop } = await import('./agent-schedules.js');
     const scheduleLoop = new AgentScheduleLoop(db);
-    await expect(service.execute('createAgentSchedule', { title: 'Scheduled check',
-      roomId: room, requestId: input.requestId, generationId: 'stale',
-      prompt: 'Unauthorized schedule', cadence: { kind: 'interval', everyMinutes: 60 },
-    }, agent)).rejects.toThrow(/authority rejected/);
+    await expect(service.execute('createAgentSchedule', { title: 'Scheduled check', roomId: room, requestId: 'missing-command', prompt: 'Unauthorized schedule', cadence: { kind: 'interval', everyMinutes: 60 } }, agent)).rejects.toThrow(/authority rejected/);
     expect((await db.query(`SELECT id FROM agent_schedules WHERE message='Unauthorized schedule'`)).rows).toHaveLength(0);
     const scheduledRun = async (humanRoot: boolean, edited = false, legacy = false) => {
       await db.query(`UPDATE agent_commands SET root_source_message_id=$1 WHERE id='command'`, [humanRoot && !legacy ? 'human-command' : 'missing']);
-      const saved = await service.execute('createAgentSchedule', { title: 'Scheduled check',
-        roomId: room, requestId: input.requestId, generationId: mode === 'helper' ? 'built-helper-generation' : input.generationId,
-        prompt: 'Run the explicitly commanded nightly production release with dispatch_release.',
-        cadence: { kind: 'cron', expression: '0 2 * * *', timeZone: 'America/New_York' }, maxRuns: 1,
-      }, agent);
+      const saved = await service.execute('createAgentSchedule', { title: 'Scheduled check', roomId: room, requestId: input.requestId, prompt: 'Run the explicitly commanded nightly production release with dispatch_release.', cadence: { kind: 'cron', expression: '0 2 * * *', timeZone: 'America/New_York' }, maxRuns: 1 }, agent);
       if (legacy) {
         await db.query(`UPDATE agent_commands SET root_source_message_id='human-command' WHERE id='command'`);
-        await service.execute('updateAgentSchedule', {
-          roomId: room, requestId: input.requestId, generationId: mode === 'helper' ? 'built-helper-generation' : input.generationId,
-          scheduleId: saved.scheduleId, title: 'Nightly release',
-        }, agent);
+        await service.execute('updateAgentSchedule', { roomId: room, requestId: input.requestId, scheduleId: saved.scheduleId, title: 'Nightly release' }, agent);
       }
       if (edited) {
         // A turn with no Workspace admin behind it cannot edit the saved schedule
         // at all, so its human approval survives untouched.
         await db.query(`UPDATE agent_commands SET root_source_message_id='missing' WHERE id='command'`);
-        await expect(service.execute('updateAgentSchedule', {
-          roomId: room, requestId: input.requestId, generationId: mode === 'helper' ? 'built-helper-generation' : input.generationId,
-          scheduleId: saved.scheduleId, prompt: 'Run a different release task.',
-        }, agent)).rejects.toThrow('workspace admins only');
+        await expect(service.execute('updateAgentSchedule', { roomId: room, requestId: input.requestId, scheduleId: saved.scheduleId, prompt: 'Run a different release task.' }, agent)).rejects.toThrow('workspace admins only');
         expect((await db.query(`SELECT message FROM agent_schedules WHERE id=$1`, [saved.scheduleId])).rows[0])
           .toEqual({ message: 'Run the explicitly commanded nightly production release with dispatch_release.' });
         edited = false;
@@ -308,9 +294,8 @@ it.each(['legacy', 'helper'])('R-RELEASE-CARD: built %s MCP tool dispatches thro
       const command = commands[0]!;
       if (humanRoot && !edited) expect(command.root_source_message_id).toBe('human-command');
       else expect(command.root_source_message_id).not.toBe('human-command');
-      await db.query(`UPDATE agent_commands SET state='claimed',generation_id='scheduled-generation' WHERE id=$1`, [command.id]);
       const scheduledContext = (await db.query<{ turn_request_id: string }>(`SELECT turn_request_id FROM agent_commands WHERE id=$1`, [command.id])).rows[0]!;
-      await writeFile(context, JSON.stringify({ roomId: room, requestId: scheduledContext.turn_request_id, generationId: 'scheduled-generation' }));
+      await writeFile(context, JSON.stringify({ roomId: room, requestId: scheduledContext.turn_request_id }));
       const beforeDispatch = await messages();
       const result = await run();
       expect(result.result.isError === true).toBe(!humanRoot || edited);
@@ -332,7 +317,7 @@ it.each(['legacy', 'helper'])('R-RELEASE-CARD: built %s MCP tool dispatches thro
 
     console.log('Demonstrated R-RELEASE-CARD: built dispatch_release → authenticated daemon → committed audit receipt + one stub dispatch, zero grants/cards; scheduled human provenance accepted after schedule expiry; unapproved schedules refused and non-admin schedule edits refused. No production release.');
   } finally {
-    await db.query(`UPDATE agent_commands SET root_source_message_id='human-command',generation_id='generation',turn_owner_connection_id=NULL,turn_owner_epoch=NULL WHERE id='command'; DELETE FROM agent_connections; DELETE FROM live_server_instances`);
+    await db.query(`UPDATE agent_commands SET root_source_message_id='human-command' WHERE id='command'; DELETE FROM agent_connections; DELETE FROM live_server_instances`);
     await rm(dir, { recursive: true, force: true });
     await new Promise<void>(resolve => server.close(() => resolve()));
   }

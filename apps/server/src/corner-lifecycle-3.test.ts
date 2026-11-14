@@ -126,18 +126,17 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
   it('Reproduction R5c: a departed self-reviewer cannot authorize a merge', async () => {
     await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: A }, H);
     const cornerId = await open('owner/widgets');
-    await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [R, A]);
     await greenHead(cornerId, 7, SHA);
+    await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [R, A]);
     rootFixture.githubHead = SHA;
     rootFixture.githubRollupState = 'passed';
     // One reviewer list: a reviewer who left the parent Room is no reviewer.
     expect(await cornerMergeGate(rootFixture.db, cornerId, { number: 7, headSha: SHA }))
       .toMatchObject({ reviewerExists: false, approved: false, open: false });
-    expect(await currentState(cornerId)).toBe('review');
+    await advanceCorner(rootFixture.db, cornerId, { kind: 'reconcile' });
     expect((await rootFixture.db.query(`SELECT text FROM messages WHERE room_id=$1 AND text LIKE '%could not be reached%'`, [cornerId])).rows)
       .toHaveLength(0);
-    expect(await rootFixture.github.prChecksStatus({ cornerId })).toMatchObject({ reviewerExists: false, mergeAllowed: false });
-    expect(await implementersMerge()).toBe(0);
+    await expect(rootFixture.daemon.execute('mergeCorner', { cornerId }, A)).rejects.toThrow();
     expect(rootFixture.githubApp.mergePullRequest).not.toHaveBeenCalled();
   });
 
@@ -154,10 +153,7 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
     rootFixture.githubRollupState = 'passed';
     // Nothing merges until the implementer asks.
     expect(rootFixture.githubApp.mergePullRequest).not.toHaveBeenCalled();
-    // Close stops only a claimed (running) assignment; pending ones are just cancelled.
-    const assignmentsBefore = (await rootFixture.db.query(`SELECT DISTINCT turn_request_id FROM agent_commands
-      WHERE room_id=$1 AND agent_id=$2 AND action IN ('input','resume') AND state='claimed'`,
-      [cornerId, A])).rowCount;
+    // Archival stops queue items directly, without enqueueing a second Stop command.
     const wiredDaemon = new DaemonService(rootFixture.db, new LiveHub(), undefined, undefined, false, undefined, false, undefined,
       (input, confirmZeroChecks) => rootFixture.github.prChecksStatus(input, confirmZeroChecks), undefined, undefined, undefined, undefined, undefined, undefined,
       undefined, undefined, undefined, (id: string) => rootFixture.github.landCornerOutcome(id));
@@ -174,7 +170,7 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
       .toEqual(implementerBefore);
     expect((await rootFixture.db.query(`SELECT 1 FROM agent_commands
       WHERE room_id=$1 AND agent_id=$2 AND action='stop' AND reason='corner_close'`, [cornerId, A])).rowCount)
-      .toBe(assignmentsBefore);
+      .toBe(0);
     expect(
       (await rootFixture.db.query(`SELECT 1 FROM rooms WHERE id=$1 AND archived_at IS NOT NULL`, [cornerId])).rowCount,
     ).toBe(1);
@@ -400,7 +396,7 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
     await say(R, '@goosy look after the widget corner');
     const turn = (await commands(B, R)).at(-1)!;
     await claim(turn);
-    const authority = { roomId: R, requestId: turn.turnRequestId, generationId: 'g1' };
+    const authority = { roomId: R, requestId: turn.turnRequestId };
     await wiredDaemon.execute('postCornerMessage', { ...authority, cornerId, text: 'A note from the Room' }, B);
     expect((await rootFixture.db.query(`SELECT author_id FROM messages WHERE room_id=$1 AND text='A note from the Room'`, [cornerId])).rows)
       .toEqual([{ author_id: B }]);
@@ -504,23 +500,17 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
       await say(cornerId, '@hoots what colour is the widget?');
       const inCorner = (await commands(A, cornerId)).at(-1)!;
       await claim(inCorner);
-      await expect(rootFixture.daemon.execute('getRoomMessage', {
-        roomId: cornerId, requestId: inCorner.turnRequestId, generationId: 'g1', messageId: roomMessage,
-      }, A)).resolves.toMatchObject({ body: expect.stringContaining('ships blue') });
+      await expect(rootFixture.daemon.execute('getRoomMessage', { roomId: cornerId, requestId: inCorner.turnRequestId, messageId: roomMessage }, A)).resolves.toMatchObject({ body: expect.stringContaining('ships blue') });
       // Sibling corners share the same current Room audience.
       const sibling = await open();
       await say(sibling, 'Sibling fact: the widget is heavy');
       const siblingMessage = (await rootFixture.db.query<{ id: string }>(`SELECT id FROM messages WHERE room_id=$1 AND text LIKE 'Sibling fact%'`, [sibling])).rows[0]!.id;
-      await expect(rootFixture.daemon.execute('getRoomMessage', {
-        roomId: cornerId, requestId: inCorner.turnRequestId, generationId: 'g1', messageId: siblingMessage,
-      }, A)).resolves.toMatchObject({ body: expect.stringContaining('heavy') });
+      await expect(rootFixture.daemon.execute('getRoomMessage', { roomId: cornerId, requestId: inCorner.turnRequestId, messageId: siblingMessage }, A)).resolves.toMatchObject({ body: expect.stringContaining('heavy') });
 
       await say(R, '@hoots when does the widget ship?');
       const inRoom = (await commands(A, R)).at(-1)!;
       await claim(inRoom);
-      await expect(rootFixture.daemon.execute('getRoomMessage', {
-        roomId: R, requestId: inRoom.turnRequestId, generationId: 'g1', messageId: cornerMessage,
-      }, A)).resolves.toMatchObject({ body: expect.stringContaining('on Friday') });
+      await expect(rootFixture.daemon.execute('getRoomMessage', { roomId: R, requestId: inRoom.turnRequestId, messageId: cornerMessage }, A)).resolves.toMatchObject({ body: expect.stringContaining('on Friday') });
     } finally {
       await rootFixture.db.query(`DELETE FROM memberships WHERE identity_id IN ($1,$2)`, [cornerOnly, roomOnly]);
     }
@@ -612,7 +602,7 @@ const scope24 = fixtureScope24();
     expect(reports.rowCount + privateReports.rowCount).toBe(1);
     await rootFixture.db.query(`UPDATE agent_commands SET state='complete' WHERE room_id=$1`, [cornerId]);
     await rootFixture.db.query(`UPDATE agent_turns SET status='complete' WHERE room_id=$1`, [cornerId]);
-    expect(await rootFixture.daemon.execute('getCornerRestoreState', { cornerId }, A)).toMatchObject({ state: 'waiting' });
+    expect(await rootFixture.daemon.execute('getCornerRestoreState', { cornerId }, A)).toMatchObject({ state: 'idle' });
   });
 });
 describe('GitHub refusing the merge (AC-6)', () => {
@@ -700,7 +690,7 @@ const scope26 = fixtureScope26();
       rootFixture.githubApp.readPullRequest.mockRejectedValue(new Error('temporary GitHub outage'));
     });
     expect(await implementersMerge()).toBe(1);
-    await expect(advanceCorner(rootFixture.db, cornerId, { kind: 'reconcile' })).rejects.toThrow('temporary GitHub outage');
+    await expect(advanceCorner(rootFixture.db, cornerId, { kind: 'reconcile' })).resolves.toMatchObject({ accepted: true });
     expect(await projected(cornerId)).toBe('idle');
     await mergedWebhook(cornerId, 7, SHA);
     expect(await currentState(cornerId)).toBe('archived');

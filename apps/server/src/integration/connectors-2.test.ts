@@ -1,4 +1,6 @@
-import { createAgentCommand, claimAgentCommand } from '.././agent-command.js';
+import { createAgentCommand } from '../agent-command.js';
+import { startQueuedTurn } from '../test-fixtures/queued-turn.test-support.js';
+
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { ensureSystemIdentity } from '../system-line.js';
@@ -9,6 +11,10 @@ import { monolithFixture, HUMAN, AGENT, WORKSPACE, ROOM, next } from '../test-fi
 
 describe('monolith integration: connectors', () => {
 const fixture = monolithFixture();
+async function request(messageId: string) {
+  return (await fixture.database.query<{id:string}>(`SELECT id FROM agent_commands WHERE source_message_id=$1 AND agent_id=$2 ORDER BY created_at,id`,[messageId,AGENT])).rows[0]!.id;
+}
+
 
 
   it('R1: places a Squire approval in the Room its turn ran in, once, with its page for the owner only', async () => {
@@ -81,7 +87,7 @@ const fixture = monolithFixture();
     expect((await fixture.database.query(`SELECT room_id FROM messages WHERE card_type='squire-approval-decision'`)).rows)
       .toEqual([{ room_id: ROOM }]);
     expect((await fixture.database.query(
-      `SELECT 1 FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3 AND action='resume'`,
+      `SELECT 1 FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND parent_command_id=$3 AND action='input' AND reason='resume'`,
       [ROOM, AGENT, requestId],
     )).rowCount).toBe(1);
   });
@@ -96,7 +102,7 @@ const fixture = monolithFixture();
     const requestId = createHash('sha256').update('cross-room-request').digest('hex');
     await ensureSystemIdentity(fixture.database);
     await fixture.database.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Agent request')`, [requestId, ROOM, SYSTEM_IDENTITY_ID]);
-    const command = await createAgentCommand(fixture.database, { roomId: ROOM, agentId: AGENT, sourceMessageId: requestId, turnRequestId: requestId, reason: 'fixture' });
+    const command = await createAgentCommand(fixture.database, { roomId: ROOM, agentId: AGENT, sourceMessageId: requestId, id: requestId, reason: 'fixture' });
     await fixture.database.query(`UPDATE agent_commands SET root_source_message_id=$2 WHERE id=$1`, [command!.id, root]);
     const payload = { roomId: ROOM, requestId, approvalId: 'cross-room', tool: 'fetch_credential',
       title: 'Credential access approval', detail: 'Reveal harmless test credential',
@@ -111,7 +117,7 @@ const fixture = monolithFixture();
     expect((await fixture.daemonOperation('postSquireApprovalDecision', { ...payload, status })).status).toBe(200);
     expect((await fixture.phone.readRoom(ROOM, HUMAN))?.messages.find(message => message.id === id)?.squireApproval?.status).toBe(status);
     expect(await needs()).toBe(false);
-    expect((await fixture.database.query(`SELECT 1 FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3 AND action='resume'`, [ROOM, AGENT, requestId])).rowCount).toBe(1);
+    expect((await fixture.database.query(`SELECT 1 FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND parent_command_id=$3 AND action='input' AND reason='resume'`, [ROOM, AGENT, requestId])).rowCount).toBe(1);
   });
 
 
@@ -128,8 +134,10 @@ const fixture = monolithFixture();
     await fixture.database.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Agents')`, [agentsOnly, WORKSPACE]);
     await fixture.database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [WORKSPACE, agentsOnly, AGENT]);
     const ask = async (roomId: string, approvalId: string) => {
+      const requestId=createHash('sha256').update(approvalId).digest('hex');
+      await createAgentCommand(fixture.database,{roomId,agentId:AGENT,sourceMessageId:null,id:requestId,reason:'fixture'});
       const response = await fixture.daemonOperation('postSquireApproval', {
-        roomId, requestId: createHash('sha256').update(approvalId).digest('hex'), tool: 'fetch_credential',
+        roomId, requestId, tool: 'fetch_credential',
         title: 'Credential access approval', detail: 'Reveal test', approvalUrl: `https://approve.trustysquire.test/${approvalId}`,
         approvalId, linkKind: 'passkey',
       });
@@ -156,7 +164,7 @@ const fixture = monolithFixture();
     ).json()) as { messageId: string };
     const approved = await fixture.daemonOperation('postSquireApprovalDecision', {
       roomId: ROOM,
-      requestId: asked.messageId,
+      requestId: await request(asked.messageId),
       approvalId: 'purchase-decided-1',
       status: 'approved',
       tool: 'inject_card',
@@ -186,10 +194,10 @@ const fixture = monolithFixture();
       agentId: AGENT,
     });
     const resume = await fixture.database.query<{ action: string; state: string }>(
-      `SELECT action,state FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3 AND action='resume'`,
-      [ROOM, AGENT, asked.messageId],
+      `SELECT action,state FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND parent_command_id=$3 AND action='input' AND reason='resume'`,
+      [ROOM, AGENT, await request(asked.messageId)],
     );
-    expect(resume.rows).toEqual([{ action: 'resume', state: 'pending' }]);
+    expect(resume.rows).toEqual([{ action: 'input', state: 'pending' }]);
 
     // A denial wakes the next paused turn the same way, carrying the denial.
     const askedAgain = (await (
@@ -197,7 +205,7 @@ const fixture = monolithFixture();
     ).json()) as { messageId: string };
     const denied = await fixture.daemonOperation('postSquireApprovalDecision', {
       roomId: ROOM,
-      requestId: askedAgain.messageId,
+      requestId: await request(askedAgain.messageId),
       approvalId: 'purchase-decided-2',
       status: 'denied',
       tool: 'inject_card',
@@ -213,10 +221,10 @@ const fixture = monolithFixture();
     expect(deniedRow.text).toBe('The request to buy A different item was denied');
     expect(deniedRow.card).toMatchObject({ status: 'denied' });
     const resumeDenied = await fixture.database.query<{ action: string }>(
-      `SELECT action FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3 AND action='resume'`,
-      [ROOM, AGENT, askedAgain.messageId],
+      `SELECT action FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND parent_command_id=$3 AND action='input' AND reason='resume'`,
+      [ROOM, AGENT, await request(askedAgain.messageId)],
     );
-    expect(resumeDenied.rows).toEqual([{ action: 'resume' }]);
+    expect(resumeDenied.rows).toEqual([{ action: 'input' }]);
 
     // A vault approval nobody answered wakes the asking turn with its expiry.
     const askedVault = (await (
@@ -224,7 +232,7 @@ const fixture = monolithFixture();
     ).json()) as { messageId: string };
     const expired = await fixture.daemonOperation('postSquireApprovalDecision', {
       roomId: ROOM,
-      requestId: askedVault.messageId,
+      requestId: await request(askedVault.messageId),
       approvalId: 'fetch-expired-1',
       status: 'expired',
       tool: 'fetch_credential',
@@ -240,10 +248,10 @@ const fixture = monolithFixture();
     expect(expiredRow.text).toBe('The request to reveal a key expired');
     expect(expiredRow.card).toMatchObject({ status: 'expired', tool: 'fetch_credential' });
     const resumeExpired = await fixture.database.query<{ action: string }>(
-      `SELECT action FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3 AND action='resume'`,
-      [ROOM, AGENT, askedVault.messageId],
+      `SELECT action FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND parent_command_id=$3 AND action='input' AND reason='resume'`,
+      [ROOM, AGENT, await request(askedVault.messageId)],
     );
-    expect(resumeExpired.rows).toEqual([{ action: 'resume' }]);
+    expect(resumeExpired.rows).toEqual([{ action: 'input' }]);
   });
 
 
@@ -286,7 +294,7 @@ const fixture = monolithFixture();
   it.each(['trusty-squire', 'tailscale'] as const)('HOSTED-SQUIRE: %s reported install failure settles the phone card and allows an explicit retry', async (connectorType) => {
     await fixture.database.query(`UPDATE agents SET machine_id='proof-machine' WHERE agent_id=$1`, [AGENT]);
     const asked = (await (await fixture.operation('sendRoomMessage', { roomId: ROOM, text: '@bee connect Trusty Squire', mentions: [AGENT] })).json()) as { messageId: string };
-    const offered = await fixture.daemonOperation('offerConnector', { roomId: ROOM, requestId: asked.messageId,
+    const offered = await fixture.daemonOperation('offerConnector', { roomId: ROOM, requestId: await request(asked.messageId),
       connectorType, reason: 'make the welcome video' });
     expect(offered.status).toBe(200);
     const { offerId, messageId } = await offered.json() as { offerId: string; messageId: string };
@@ -313,7 +321,7 @@ const fixture = monolithFixture();
     const nextAssignments = await (await fixture.daemonOperation('getConnectorAssignments', { agentId: AGENT })).json() as { assignments: Array<{ pairingGeneration: number }> };
     expect((await fixture.daemonOperation('postConnectorStatus', { connectorId,
       pairingGeneration: nextAssignments.assignments[0]!.pairingGeneration, steps: [], errorMessage: 'Retry failed' })).status).toBe(200);
-    const fresh = await fixture.daemonOperation('offerConnector', { roomId: ROOM, requestId: asked.messageId,
+    const fresh = await fixture.daemonOperation('offerConnector', { roomId: ROOM, requestId: await request(asked.messageId),
       connectorType, reason: 'retry the welcome video' });
     expect(fresh.status).toBe(200);
     const replacement = await fresh.json() as { offerId: string; messageId: string };
@@ -333,13 +341,13 @@ const fixture = monolithFixture();
     const offerId = '99999999-9999-4999-8999-999999999999';
     const messageId = 'e'.repeat(64);
     const asked = (await (await fixture.operation('sendRoomMessage', { roomId: ROOM, text: '@bee add a connector', mentions: [AGENT] })).json()) as { messageId: string };
-    const command = (await fixture.database.query<{ id: string }>(`SELECT id FROM agent_commands WHERE turn_request_id=$1 AND agent_id=$2`, [asked.messageId, AGENT])).rows[0]!;
+    const command = (await fixture.database.query<{ id: string }>(`SELECT id FROM agent_commands WHERE id=$1 AND agent_id=$2`, [await request(asked.messageId), AGENT])).rows[0]!;
     await fixture.database.query(`INSERT INTO connector_offers(id,agent_id,workspace_id,room_id,addressee_id,connector_type,reason,machine_id,status,command_id) VALUES($1,$2,$3,$4,$5,'trusty-squire','Use a test connector','proof-machine','pending',$6)`, [offerId, AGENT, WORKSPACE, ROOM, HUMAN, command.id]);
     await fixture.database.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card) VALUES($1,$2,$3,'Connector ask','card','connector-offer',$4::jsonb)`, [messageId, ROOM, AGENT, JSON.stringify({ offerId, agent: { pubkey: AGENT, kind: 'agent', name: 'Bee' }, addressee: { pubkey: HUMAN, kind: 'human', name: 'Owner' }, connectorName: 'Trusty Squire', connectorType: 'trusty-squire', status: 'pending' })]);
     expect((await fixture.operation('decideApprovalCard', { roomId: ROOM, messageId, decision: 'deny' })).status).toBe(200);
     expect((await fixture.database.query(`SELECT status FROM connector_offers WHERE id=$1`, [offerId])).rows).toEqual([{ status: 'denied' }]);
     expect((await fixture.phone.readRoom(ROOM, HUMAN))?.messages.find(message => message.id === messageId)?.connectorOffer).toMatchObject({ status: 'denied', acceptedBy: { pubkey: HUMAN } });
-    expect((await fixture.database.query(`SELECT action FROM agent_commands WHERE room_id=$1 AND turn_request_id=$2 AND action='resume'`, [ROOM, asked.messageId])).rows).toEqual([{ action: 'resume' }]);
+    expect((await fixture.database.query(`SELECT action FROM agent_commands WHERE room_id=$1 AND parent_command_id=$2 AND action='input' AND reason='resume'`, [ROOM, await request(asked.messageId)])).rows).toEqual([{ action: 'input' }]);
   });
 
 
@@ -454,12 +462,12 @@ const fixture = monolithFixture();
     ).json()) as { messageId: string };
     const parent = (await fixture.database.query<{ id: string }>(
       `SELECT id FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3`,
-      [ROOM, AGENT, asked.messageId],
+      [ROOM, AGENT, await request(asked.messageId)],
     )).rows[0]!;
-    await fixture.database.transaction((tx) => claimAgentCommand(tx, ROOM, AGENT, parent.id, 'live-generation'));
+    await fixture.database.transaction((tx) => startQueuedTurn(tx, ROOM, AGENT, parent.id));
     const decision = {
       roomId: ROOM,
-      requestId: asked.messageId,
+      requestId: await request(asked.messageId),
       approvalId: 'reveal-live-1',
       status: 'approved',
       tool: 'fetch_credential',
@@ -470,50 +478,49 @@ const fixture = monolithFixture();
     // A repeated relay of the same decision never queues a second turn.
     expect((await fixture.daemonOperation('postSquireApprovalDecision', decision)).status).toBe(200);
     const states = await fixture.database.query<{ action: string; state: string }>(
-      `SELECT action,state FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3 ORDER BY created_at`,
-      [ROOM, AGENT, asked.messageId],
+      `SELECT action,state FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND (turn_request_id=$3 OR parent_command_id=$3) ORDER BY created_at`,
+      [ROOM, AGENT, await request(asked.messageId)],
     );
     expect(states.rows).toEqual([
-      { action: 'input', state: 'claimed' },
-      { action: 'resume', state: 'pending' },
+      { action: 'input', state: 'pending' },
+      { action: 'input', state: 'pending' },
     ]);
-    const heartbeat = await fixture.request('/v1/daemon/operations/postAgentTurnReceipt', 'POST', {
-      roomId: ROOM, requestId: asked.messageId, status: 'working', generationId: 'live-generation', heartbeat: true,
-    }, fixture.daemonToken);
+    const heartbeat = await fixture.request('/v1/daemon/operations/postAgentTurnReceipt', 'POST', { roomId: ROOM, requestId: await request(asked.messageId), status: 'working', heartbeat: true }, fixture.daemonToken);
     expect(heartbeat.status).toBe(200);
-    const finished = await fixture.request('/v1/daemon/operations/postAgentTurnReceipt', 'POST', {
-      roomId: ROOM, requestId: asked.messageId, status: 'complete', generationId: 'live-generation',
-    }, fixture.daemonToken);
+    const finished = await fixture.request('/v1/daemon/operations/postRoomMessage', 'POST', { roomId: ROOM, requestId: await request(asked.messageId), text: 'Handled the original request.' }, fixture.daemonToken);
     expect(finished.status).toBe(200);
     const page = (await (await fixture.daemonOperation('getAgentCommands', { roomId: ROOM })).json()) as {
-      commands: { action: string; turnRequestId: string; source: { body: string } }[];
+      commands: { action: string; turnRequestId: string; parentCommandId?:string; source: { body: string } }[];
     };
-    const resume = page.commands.filter((command) => command.turnRequestId === asked.messageId);
+    const originalId=await request(asked.messageId);
+    const resume = page.commands.filter(command=>command.parentCommandId===originalId);
     expect(resume).toHaveLength(1);
-    expect(resume[0]!.action).toBe('resume');
+    expect(resume[0]!.action).toBe('input');
     expect(resume[0]!.source.body).toContain(
       'Squire approval reveal-live-1 for fetch_credential: approved. Call fetch_credential with action "resume" and approval_id "reveal-live-1" now',
     );
   });
 
 
-  it('keeps expiry routing unchanged for an ended Squire asker', async () => {
+  it('queues a late expiry as a separate input without rerunning the completed request', async () => {
     const asked = (await (
       await fixture.operation('sendRoomMessage', { roomId: ROOM, text: '@bee fetch the other login', mentions: [AGENT] })
     ).json()) as { messageId: string };
     await fixture.database.query(
       `UPDATE agent_commands SET state='complete',completed_at=now() WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3`,
-      [ROOM, AGENT, asked.messageId],
+      [ROOM, AGENT, await request(asked.messageId)],
     );
-    const decide = (approvalId: string, status: string) => fixture.daemonOperation('postSquireApprovalDecision', {
-      roomId: ROOM, requestId: asked.messageId, approvalId, status,
+    const decide = async (approvalId: string, status: string) => fixture.daemonOperation('postSquireApprovalDecision', {
+      roomId: ROOM, requestId: await request(asked.messageId), approvalId, status,
       tool: 'fetch_credential', title: 'Reveal a key', detail: 'google.com / default',
     });
     const resumes = async () => (await fixture.database.query<{ state: string; source_message_id: string }>(
-      `SELECT state,source_message_id FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3 AND action='resume'`,
-      [ROOM, AGENT, asked.messageId],
+      `SELECT state,source_message_id FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND parent_command_id=$3 AND action='input' AND reason='resume'`,
+      [ROOM, AGENT, await request(asked.messageId)],
     )).rows;
     expect((await decide('reveal-ended-expired', 'expired')).status).toBe(200);
-    expect(await resumes()).toEqual([]);
+    expect(await resumes()).toEqual([expect.objectContaining({state:'pending'})]);
+    await decide('reveal-ended-expired','expired');
+    expect(await resumes()).toHaveLength(1);
   });
 });

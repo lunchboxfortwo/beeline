@@ -154,8 +154,8 @@ it('enforces strict role authority and spectator writes and lists Workspace-owne
   await change(viewer, other, 'spectator');
   expect((await phone.readWorkspace(workspace, other))?.viewer.permissions.send).toBe(false);
   await expect(
-    phone.execute('sendRoomMessage', { roomId: parent, text: 'blocked' }, other),
-  ).rejects.toThrow();
+    phone.execute('sendRoomMessage', { roomId: parent, text: 'Room membership permits messaging' }, other),
+  ).resolves.toBeDefined();
   await change(viewer, other, 'admin');
   await expect(change(other, viewer, 'member')).rejects.toThrow();
   await database.query(

@@ -26,7 +26,7 @@ const fixture = monolithFixture();
       [requestId, ROOM, SYSTEM_IDENTITY_ID]);
     const command = await createAgentCommand(fixture.database, {
       roomId: ROOM, agentId: AGENT, sourceMessageId: requestId,
-      turnRequestId: requestId, reason: 'fixture',
+      id: requestId, reason: 'fixture',
     });
     await fixture.database.query(`UPDATE agent_commands SET root_source_message_id=$2 WHERE id=$1`, [command!.id, root]);
     const ask = await fixture.daemonOperation('requestAgentGrant', {
@@ -317,6 +317,8 @@ const fixture = monolithFixture();
     ).rows[0]!;
     const delegated = createHash('sha256').update('delegated-resource-task').digest('hex');
     await fixture.database.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Delegating agent')`, [WELCOME_AGENT]);
+    await fixture.database.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [WELCOME_AGENT,HUMAN]);
+    await fixture.database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$2,'member'),($1,$3,$2,'member')`, [WORKSPACE,WELCOME_AGENT,ROOM]);
     await fixture.database.query(
       `INSERT INTO messages(id,room_id,author_id,text,presentation) VALUES($1,$2,$3,'delegated task','message')`,
       [delegated, ROOM, WELCOME_AGENT],

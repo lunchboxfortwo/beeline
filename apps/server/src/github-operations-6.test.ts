@@ -82,7 +82,7 @@ const scope1 = fixtureScope1();
        WHERE room_id=$1 AND system_event->>'kind'='check-failed'`, [corner],
     )).rows[0]?.body).toContain('##[error]TS2345 bad type');
     expect(readJobLog).toHaveBeenCalledWith('room-token', 'owner/widgets', 101);
-    const inbox = await readAgentCommands(scope1.database, corner, REVIEWER);
+    const inbox = await readAgentCommands(scope1.database, REVIEWER, corner);
     expect(inbox.commands[0]?.source.body).toContain('> ##[error]TS2345 bad type');
     expect(inbox.commands[0]?.source.body).toContain('untrusted outside data');
 

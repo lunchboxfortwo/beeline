@@ -1,6 +1,7 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { PgliteDatabase, migratedDatabase } from './test-support.js';
-import { claimAgentCommand, createAgentCommand } from './agent-command.js';
+import { createAgentCommand } from './agent-command.js';
 import { DaemonService } from './daemon-service.js';
 import { LiveHub } from './live.js';
 import { runInstitutionalCuratorCycle } from './institutional-curator.js';
@@ -106,10 +107,10 @@ async function turn(roomId = ROOM, text = 'Please keep memory current.') {
     agentId: AGENT,
     sourceMessageId,
     reason: 'human_tag',
-    turnRequestId: requestId,
+    id: requestId,
   });
-  await claimAgentCommand(database, roomId, AGENT, command!.id, generationId);
-  openTurn = { agentId: AGENT, roomId, requestId, generationId };
+  await startQueuedTurn(database, roomId, AGENT, command!.id);
+  openTurn = { agentId: AGENT, roomId, requestId };
   return { authority: openTurn, sources: [sourceMessageId] };
 }
 
@@ -420,7 +421,7 @@ describe('memory expiry by kind and by real use', () => {
     const { authority } = await turn(ROOM, 'How does the staging deploy work?');
     const snapshot = await daemon().execute(
       'getInstitutionalContext',
-      { roomId: ROOM, requestId: authority.requestId, generationId: authority.generationId },
+      { roomId: ROOM, requestId: authority.requestId },
       AGENT,
     );
     expect(snapshot.itemIds).toContain(loaded.itemId);
@@ -453,7 +454,7 @@ describe('memory expiry by kind and by real use', () => {
     const { authority } = await turn(ROOM, 'How does the staging deploy work?');
     const snapshot = await daemon().execute(
       'getInstitutionalContext',
-      { roomId: ROOM, requestId: authority.requestId, generationId: authority.generationId },
+      { roomId: ROOM, requestId: authority.requestId },
       AGENT,
     );
     expect(snapshot.itemIds).toEqual([fact.itemId]);

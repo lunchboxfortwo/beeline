@@ -1,27 +1,20 @@
-import { MachineRequestResults } from './machine-request-results.js';
-import { helperUsageCodecs } from '@beeline/net/helper-codecs';
-import { helperActivationCodecs } from '@beeline/net/helper-activation-codecs';
-import { helperTurnCodecs } from '@beeline/net/helper-turn-codecs';
-import { helperActivationEnabled,fenceCommandActivationEnqueue } from './helper-activation.js';
 import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
-import { helperUsageEnabled } from './helper-usage.js';
-import { applyHelperOverlay, helperOverlayEnabled, subscribeHelperOverlayDemand } from './helper-overlay.js';
-import { changesDaemonInbox } from './daemon-inbox-cause.js';
+import { helperUsageCodecs } from '@beeline/net/helper-codecs';
 import { randomUUID } from 'node:crypto';
-import type { VaultSaveRelay } from './vault-save-relay.js';
-import { isTransientDatabaseConnectionError } from './database.js';
 import type { TokenAuth } from './auth.js';
 import type { ConnectionPresence } from './connection-presence.js';
-import { DAEMON_OPERATION_NAMES, type DaemonService, type OwnedModelClaimCapability } from './daemon-service.js';
+import { DAEMON_OPERATION_NAMES,type DaemonService,type OwnedModelClaimCapability } from './daemon-service.js';
+import type { SqlDatabase } from './database.js';
+import { isTransientDatabaseConnectionError } from './database.js';
+import { applyHelperOverlay,helperOverlayEnabled,subscribeHelperOverlayDemand } from './helper-overlay.js';
+import { helperUsageEnabled } from './helper-usage.js';
 import type { HelperVersionGate } from './helper-version-gate.js';
-import type { LiveHub, LiveTrace } from './live.js';
+import type { LiveHub } from './live.js';
+import { MachineRequestResults } from './machine-request-results.js';
 import type { PhoneService } from './phone-service.js';
 import type { ReleaseNotifier } from './release-notify.js';
-import type { SqlDatabase } from './database.js';
+import type { VaultSaveRelay } from './vault-save-relay.js';
 
-export const MAX_LIVE_SESSION_QUEUED_BYTES = 2 * 1024 * 1024;
-export const MAX_LIVE_ROOMS_PER_SESSION = 8_192;
-export const MAX_LIVE_SUBSCRIBE_FRAME_ROOMS = 32;
 
 export interface DaemonLiveDependencies {
   readonly vaultSaveRelay?: VaultSaveRelay;
@@ -40,10 +33,6 @@ export interface DaemonLiveDependencies {
   readonly operationErrorStatus?: (error: unknown) => number;
   /** True while this server is shutting down: its connections stay held for the successor. */
   readonly shuttingDown: () => boolean;
-}
-
-function isInboxCursor(value: unknown): value is string {
-  return typeof value === 'string' && /^\d+,[0-9a-f]{64}$/.test(value);
 }
 
 function isRetryableLiveError(error: unknown): boolean {
@@ -96,25 +85,17 @@ export interface DaemonSessionTransport {
   isOpen(): boolean;
   /** Ends this agent's session: an old socket closes; a registration is dropped. */
   drop(code: number, reason: string): void;
-  /** False after the socket refused a frame for its helper version. */
-  admit(item: Record<string, unknown>): boolean;
-  /** Ordinary operations preserve HTTP's per-request token revocation check. */
-  authenticateOperation?: () => Promise<{error: string; status: number} | undefined>;
 }
 
 /**
- * One agent's live session: authorization, Room subscriptions, command intake,
- * wakes and its own bounded task queue. A machine socket holds one per
- * registered agent, so one agent's overload or failure drops only its own.
+ * One agent's live session: authorization, its queue push, wakes and its own
+ * bounded task queue. A machine socket holds one per registered agent, so one
+ * agent's overload or failure drops only its own.
  */
 export class DaemonAgentSession {
   readonly connectionId = randomUUID();
   epoch: number | undefined;
-  turnSource?: { connectionId: string; epoch: number };
-  readonly #releases = new Map<string, () => void>();
-  readonly #subscriptionIntents = new Map<string, Record<string, unknown>>();
   readonly #wakeReleases: Array<() => void> = [];
-  #queuedBytes = 0;
   #tail = Promise.resolve();
   #closed = false;
   readonly #closedSignal = new AbortController();
@@ -127,10 +108,11 @@ export class DaemonAgentSession {
   usageOwnerId:string|undefined;
   get usageAccountV1():boolean{return this.presence.usageAccountV1===true&&helperUsageEnabled()&&this.usageOwnerId!==undefined&&this.epoch!==undefined;}
   get overlayV1():boolean{return this.presence.overlayV1===true&&helperOverlayEnabled()&&this.epoch!==undefined;}
-  get activationContextV1():boolean{return this.presence.activationContextV1===true&&helperActivationEnabled()&&this.epoch!==undefined;}
-  get turnContinuationV1():boolean{return this.presence.turnRuntimeId!==undefined;}
-  get turnOwnershipV1():boolean{return this.turnSource!==undefined&&Number.isSafeInteger(this.epoch)&&Number(this.epoch)>0;}
-  get ownedModelV1():boolean{return this.turnOwnershipV1&&this.#ownedModelCapability!==undefined&&this.deps.daemon.ownedModelReady();}
+  /** Places this agent's queue has named; their room-level wakes reach its helper. */
+  readonly #places = new Set<string>();
+  #queueSubscribed = false;
+  #queuePushing = false;
+  #queueRequested = false;
 
   constructor(
     private readonly deps: DaemonLiveDependencies,
@@ -138,15 +120,12 @@ export class DaemonAgentSession {
     private readonly transport: DaemonSessionTransport,
     private readonly presence: {
       lifecycleId?: string;
-      turnRuntimeId?: string;
       releaseVersion?: string;
       sourceSha?: string;
+      available?: boolean;
       overlayV1?: boolean;
       usageAccountV1?:boolean;
-      activationContextV1?:boolean;
-      turnOwnershipV1?:boolean;
-      ownedModelV1?:boolean;
-      ownedModelUnboundedV1?:boolean;
+      queueV1?:boolean;
       daemonOperationsV1?:boolean;
     } = {},
   ) {
@@ -201,14 +180,15 @@ export class DaemonAgentSession {
           return;
         }
         if (event.reason === 'postgres:agent_commands') {
-          // A command queued for a corner this agent's helper has never
-          // watched (no prior membership push reached it, or it reconnected
-          // and missed one) carries the same parent/opener a membership push
-          // does, so it can start that corner's intake directly. A command
-          // for a top-level Room needs no push: every desired Room starts
-          // eagerly on membership alone.
+          this.#pushQueue();
+          // A command for a corner this helper has not seen carries its parent
+          // and opener, exactly as a membership push does.
           if (!event.parentRoomId) return;
+        } else if (event.reason === 'agent-config') {
+          transport.send({ type: 'config-changed', ...(event.roomId ? { roomId: event.roomId } : {}) });
+          return;
         } else if (event.reason !== 'postgres:memberships') return;
+        if (event.reason === 'postgres:memberships') this.#pushQueue();
         transport.send({
           type: 'rooms-changed',
           ...(event.roomId ? { roomId: event.roomId } : {}),
@@ -218,18 +198,29 @@ export class DaemonAgentSession {
           ...(event.removed ? { removed: true } : {}),
         });
       }),
-      live.subscribeResync(() =>
-        transport.send({ type: 'discovery-wake', reason: 'listener-resync' }),
-      ),
+      // Room-level facts about a place in this agent's queue: a repository
+      // change or a requested corner close.
+      live.subscribeAll((event) => {
+        if (event.type !== 'invalidate' || !event.roomId || !this.#places.has(event.roomId) || !transport.isOpen()) return;
+        if (event.reason === 'postgres:rooms' && event.repositoryChanged)
+          transport.send({ type: 'rooms-changed', roomId: event.roomId, repositoryChanged: true });
+        else if (event.closeRequested && ['postgres:rooms', 'postgres:corner_facts', 'postgres:corner_github_cache'].includes(event.reason ?? ''))
+          transport.send({ type: 'corner-complete', roomId: event.roomId });
+      }),
+      live.subscribeResync(() => {
+        this.#pushQueue();
+        transport.send({ type: 'discovery-wake', reason: 'listener-resync' });
+      }),
     );
-    const recovery = database.onRecovery?.(() =>
-      transport.send({ type: 'discovery-wake', reason: 'database-recovered' }),
-    );
+    const recovery = database.onRecovery?.(() => {
+      this.#pushQueue();
+      transport.send({ type: 'discovery-wake', reason: 'database-recovered' });
+    });
     if (recovery) this.#wakeReleases.push(recovery);
   }
 
   get subscriptions(): number {
-    return this.#releases.size;
+    return this.#queueSubscribed ? 1 : 0;
   }
 
   get closed(): boolean {
@@ -244,9 +235,9 @@ export class DaemonAgentSession {
   }
 
   /**
-   * Record this connection as the agent's newest and hold its presence. A
-   * failed write is logged: intake still works, presence then rides on the
-   * per-Room announcements and HTTP evidence exactly as before.
+   * Record this connection as the agent's newest and hold its presence, from
+   * the registration's own lifecycle and release fields. A failed write is
+   * logged; the queue push still works.
    */
   async claim(): Promise<void> {
     this.deps.registry.claim(this);
@@ -263,13 +254,10 @@ export class DaemonAgentSession {
         return;
       }
       this.epoch = epoch;
-      this.turnSource = {connectionId:this.connectionId,epoch};
-      const model = await this.deps.daemon.negotiateOwnedModel(this.agentId,
-        this.presence.ownedModelV1 === true && this.presence.ownedModelUnboundedV1 === true);
+      const model = await this.deps.daemon.negotiateOwnedModel(this.agentId, this.presence.queueV1 === true);
       this.#ownedModelCapability = model?.capability;
       this.deps.registry.settled(this);
-      if(this.presence.usageAccountV1&&helperUsageEnabled())this.usageOwnerId=(await this.deps.database.query<{owner_id:string|null}>(
-        'SELECT owner_id FROM agents WHERE agent_id=$1',[this.agentId])).rows[0]?.owner_id??undefined;
+
     } catch (error) {
       console.error('[presence] connection claim failed', error instanceof Error ? error.message : String(error));
     }
@@ -283,54 +271,24 @@ export class DaemonAgentSession {
   }
 
   /** Queue one frame behind this agent's earlier frames. */
-  frame(raw: Record<string, unknown>, frameBytes: number): void {
+  frame(raw: Record<string, unknown>, _frameBytes: number): void {
     if (this.#closed) return;
     if (['daemon-operation','request-result','request-ack'].includes(String(raw.type))) {
       // Provider work and waitForCornerWake must not hold the serial intake
       // queue or its database semaphore: Stop/subscriptions still need service.
       // This is the same authenticated service adapter as old HTTP ingress.
-      if (!this.presence.daemonOperationsV1 || !this.transport.admit(raw)) return;
       void this.#operation(raw);
       return;
     }
-    if (this.#queuedBytes + frameBytes > MAX_LIVE_SESSION_QUEUED_BYTES) {
-      this.deps.errors.overload++;
-      this.transport.send({type:'live-refused',reason:'live admission overloaded'});
-      return;
-    }
-    // Cancellation does no database work and must fence an already awaited
-    // projection immediately, rather than queue behind that same projection.
-    if (raw.type === 'unsubscribe' && typeof raw.roomId === 'string') {
-      if (!this.transport.admit(raw)) return;
-      this.#subscriptionIntents.delete(raw.roomId);
-      this.#overlayReleases.get(raw.roomId)?.(); this.#overlayReleases.delete(raw.roomId);
-      this.#releases.get(raw.roomId)?.(); this.#releases.delete(raw.roomId);
-      return;
-    }
-    if (raw.type === 'subscribe') {
-      const rooms = Array.isArray(raw.roomIds) ? raw.roomIds : [raw.roomId];
-      if (rooms.length <= MAX_LIVE_SUBSCRIBE_FRAME_ROOMS)
-        for (const room of rooms) if (typeof room === 'string' && room) this.#subscriptionIntents.set(room, raw);
-    }
-    this.#queuedBytes += frameBytes;
     this.#tail = this.#tail.then(async () => {
       if (this.#closed || !this.transport.isOpen()) return;
-      const releaseDbTask = await this.deps.acquireLiveDbTask();
-      try {
-        if (!this.#closed && this.transport.isOpen()) await this.#process(raw);
-      } finally {
-        releaseDbTask();
-      }
+      if (!this.#closed && this.transport.isOpen()) await this.#process(raw);
     }).catch((error) => {
       const retryable = isRetryableLiveError(error);
       const code = error && typeof error === 'object' ? (error as { code?: unknown }).code : undefined;
       const kind = retryable ? 'database' : code === '22P02' ? 'invalid' : 'internal';
       this.deps.errors[kind]++;
       console.error('[live] message failed', { kind, error });
-    }).finally(() => {
-      for (const [roomId, intent] of this.#subscriptionIntents)
-        if (intent === raw) this.#subscriptionIntents.delete(roomId);
-      this.#queuedBytes -= frameBytes;
     });
   }
 
@@ -341,9 +299,6 @@ export class DaemonAgentSession {
     this.#closedSignal.abort();
     this.#ownedModelCapability = undefined;
     for (const release of this.#wakeReleases.splice(0)) release();
-    for (const release of this.#releases.values()) release();
-    this.#releases.clear();
-    this.#subscriptionIntents.clear();
     for(const release of this.#overlayReleases.values())release();this.#overlayReleases.clear();
     this.deps.registry.release(this);
     void this.#releaseConnection();
@@ -358,7 +313,7 @@ export class DaemonAgentSession {
   }
 
   async #operation(item: Record<string, unknown>): Promise<void> {
-    if (typeof item.requestId !== 'string' || !item.requestId || item.requestId.length > 128) return;
+    if (typeof item.requestId !== 'string' || !item.requestId) return;
     const results = new MachineRequestResults(this.deps.database);
     const requestId = item.requestId;
     const reply = (result:Record<string,unknown>|undefined) => {
@@ -366,89 +321,55 @@ export class DaemonAgentSession {
         ? {type:'daemon-operation-result',requestId,...result} : {type:'request-missing',requestId});
     };
     try {
-      // Re-check credentials on result reads as well as original dispatch.
-      const refusal = this.transport.authenticateOperation ? await this.transport.authenticateOperation()
-        : {error:'daemon_token_required',status:401};
-      if(refusal){reply(refusal);return;}
       if(item.type === 'request-result') { reply(await results.read(this.agentId,requestId,this.#closedSignal.signal));return; }
       if(item.type === 'request-ack') { await results.acknowledge(this.agentId,requestId);return; }
-      reply(await results.execute(this.agentId,requestId,{operation:item.operation,input:item.input},async()=>{
+      const execute = async () => {
         try {
-          if(Object.keys(item).some(key=>!['type','agentId','requestId','operation','input'].includes(key)) ||
-            typeof item.operation!=='string' || !DAEMON_OPERATION_NAMES.has(item.operation as keyof DaemonOperationMap) ||
-            !item.input || typeof item.input!=='object' || Array.isArray(item.input))
-            return {error:'invalid_daemon_operation',status:400};
-          const operation=item.operation as keyof DaemonOperationMap;
-          const input=item.input as never;
-          if(operation==='readCommandActivation'){
-            const parsed=helperActivationCodecs.params.parse(input);
-            if(parsed.agentId!==this.agentId || parsed.source.connectionId!==this.connectionId || parsed.source.epoch!==this.epoch)
-              return {error:'activation_source_mismatch',status:409};
-            return {result:await this.deps.daemon.readCommandActivation(parsed,this.agentId)};
-          }
-          const owned=['claimAgentCommand','claimAgentTurn','acknowledgeAgentCommand','postAgentTurnReceipt','releaseAgentTurn'].includes(operation);
-          return {result:await this.deps.daemon.execute(operation,input,this.agentId,
-            owned ? this.turnSource : undefined,owned ? this.#ownedModelCapability : undefined)};
-        } catch(error) {
-          return {error:error instanceof Error?error.message:'daemon_operation_refused',status:this.deps.operationErrorStatus?.(error)??503};
+          const operation = item.operation as keyof DaemonOperationMap;
+          if (!DAEMON_OPERATION_NAMES.has(operation)) return { error: 'invalid_daemon_operation', status: 400 };
+          const input = operation === 'order' || operation === 'postCornerMessage'
+            ? { ...(item.input as object), transportRequestId: requestId } : item.input;
+          const result = await this.deps.daemon.execute(operation, input as never, this.agentId,
+            operation === 'getModelCredential' ? this.#ownedModelCapability : undefined);
+          return { result };
+        } catch (error) {
+          return { error: error instanceof Error ? error.message : String(error),
+            status: this.deps.operationErrorStatus?.(error) ?? 503 };
         }
-      }));
+      };
+      // Queue/message IDs own conversational replay. The optional-tool RPC ledger
+      // cannot claim, expire, or refuse an answer before its native write.
+      if (['postRoomMessage', 'postCornerMessage', 'order', 'report'].includes(String(item.operation)))
+        reply(await execute());
+      else reply(await results.execute(this.agentId, requestId, {operation:item.operation,input:item.input}, execute));
     } catch(error) {
       // A refused admission or result write must answer the correlated request.
       // Otherwise a finished harness stays working while publication waits forever.
       // Keep the durable request identity: no failed operation is resubmitted here.
       console.error('[live] machine request failed',error);
-      reply({error:'machine_request_failed',status:503});
+      reply({error:error instanceof Error ? error.message : 'machine_request_failed',status:503});
     }
   }
 
   async #process(item: Record<string, unknown>): Promise<void> {
-    await this.deps.connectionPresence?.renewLease();
-    if (!this.transport.admit(item)) return;
-    if (item.type === 'turn-operation') {
-      const operation = item.operation;
-      if (!this.turnOwnershipV1 || this.epoch === undefined || typeof item.requestId !== 'string' ||
-          !item.requestId || item.requestId.length > 128 ||
-          (operation !== 'claimAgentCommand' && operation !== 'postAgentTurnReceipt' && operation !== 'acknowledgeAgentCommand')) return;
-      try {
-        if (Object.keys(item).some(key => !['type', 'agentId', 'requestId', 'operation', 'input'].includes(key)))
-          throw new Error('Turn unknown frame field');
-        const input = helperTurnCodecs(operation).params.parse(item.input);
-        if ('agentId' in input && input.agentId !== this.agentId) throw new Error('Turn registration mismatch');
-        const source = this.turnSource!;
-        const result = helperTurnCodecs(operation).result.parse(await this.deps.daemon.execute(operation, input, this.agentId, source, this.#ownedModelCapability));
-        const reply = { type: 'turn-result', requestId: item.requestId, result };
-        await this.deps.daemon.fenceOwnedTurnReply(this.agentId, input, () => {
-          if (!this.#closed && this.transport.isOpen()) this.transport.send(reply);
-        }, operation === 'claimAgentCommand');
-      } catch (error) {
-        if (!this.#closed && this.transport.isOpen())
-          this.transport.send({ type: 'turn-result', requestId: item.requestId, error: 'turn_operation_unconfirmed',
-            status: this.deps.operationErrorStatus?.(error) ?? 503 });
-      }
+    void this.deps.connectionPresence?.renewLease().catch(error => console.warn('[presence] refresh failed', error));
+    if (item.type === 'subscribe-queue') {
+      this.#queueSubscribed = true;
+      await this.#readQueue();
       return;
     }
-    if(item.type==='activation-context'){
-      if(!this.activationContextV1||typeof item.requestId!=='string'||!item.requestId||item.requestId.length>128)return;
-      try{
-        if(Object.keys(item).some(key=>!['type','requestId','agentId','input'].includes(key)))throw new Error('Activation unknown frame field');
-        const input=helperActivationCodecs.params.parse(item.input);
-        if(input.agentId!==this.agentId||input.source.connectionId!==this.connectionId||input.source.epoch!==this.epoch)
-          throw new Error('Activation registration source mismatch');
-        const snapshot=helperActivationCodecs.result.parse(await this.deps.daemon.readCommandActivation(input,this.agentId));
-        const accepted=await fenceCommandActivationEnqueue(this.deps.database,snapshot,current=>{
-          const reply={type:'activation-context-result',requestId:item.requestId,result:current};
-          if(!this.#closed&&this.transport.isOpen())this.transport.send(reply);
-        });
-        if(!accepted)throw new Error('Activation source changed before enqueue');
-      }catch{
-        if(!this.#closed&&this.transport.isOpen())this.transport.send({type:'activation-context-result',requestId:item.requestId,error:'activation_context_refused'});
-      }
+    if (item.type === 'presence') {
+      await this.deps.connectionPresence?.announce(undefined, this.agentId, {
+        ...(typeof item.lifecycleId === 'string' ? { lifecycleId: item.lifecycleId } : { lifecycleId: this.presence.lifecycleId }),
+        ...(typeof item.releaseVersion === 'string' ? { releaseVersion: item.releaseVersion } : {}),
+        ...(typeof item.sourceSha === 'string' ? { sourceSha: item.sourceSha } : {}),
+        ...(typeof item.available === 'boolean' ? { available: item.available } : {}),
+      });
       return;
     }
     if(item.type==='usage-operation'){
       const names=['publishAgentUsageAccount','attachAgentUsageAccount','postAgentUsage'] as const;
-      if(!this.usageAccountV1||typeof item.requestId!=='string'||!item.requestId||item.requestId.length>128||
+      if(!this.usageAccountV1||typeof item.requestId!=='string'||!item.requestId||
         !names.includes(item.operation as typeof names[number]))return;
       let input:Record<string,unknown>|undefined;
       try{input=helperUsageCodecs(item.operation as typeof names[number]).params.parse(item.input) as unknown as Record<string,unknown>;}catch{
@@ -471,232 +392,53 @@ export class DaemonAgentSession {
       return;
     }
     if(item.type==='overlay-update'){
-      if(!this.overlayV1||typeof item.requestId!=='string'||item.requestId.length>128||this.epoch===undefined)return;
+      if(!this.overlayV1||typeof item.requestId!=='string'||this.epoch===undefined)return;
       const result=await applyHelperOverlay(this.deps.database,this.agentId,{connectionId:this.connectionId,epoch:this.epoch},item.frame);
       if(result.event){const event={...result.event,localOrigin:true as const};this.deps.live.publish(event);}
       if(!this.#closed&&this.transport.isOpen())this.transport.send({type:'overlay-ack',requestId:item.requestId,...result.ack});
       return;
     }
-    if (item.type === 'unsubscribe' && typeof item.roomId === 'string') {
-      this.#overlayReleases.get(item.roomId)?.();this.#overlayReleases.delete(item.roomId);
-      this.#releases.get(item.roomId)?.();
-      this.#releases.delete(item.roomId);
-      return;
-    }
-    if (item.type !== 'subscribe') return;
-    const requestedRoomIds = Array.isArray(item.roomIds)
-      ? [
-          ...new Set(
-            (item.roomIds as unknown[]).filter(
-              (id): id is string => typeof id === 'string' && id.length > 0,
-            ),
-          ),
-        ]
-      : typeof item.roomId === 'string'
-        ? [item.roomId]
-        : [];
-    if (requestedRoomIds.length === 0) return;
-    if (requestedRoomIds.length > MAX_LIVE_SUBSCRIBE_FRAME_ROOMS ||
-        this.#releases.size + requestedRoomIds.filter((id) => !this.#releases.has(id)).length >
-          MAX_LIVE_ROOMS_PER_SESSION) {
-      this.deps.errors.invalid++;
-      this.transport.send({type:'live-refused',reason:'live subscription limit'});
-      return;
-    }
-    const readableRooms = await this.deps.phone.canReadRooms(requestedRoomIds, this.agentId);
-    for (const roomId of requestedRoomIds) {
-      if (!readableRooms.has(roomId) || this.#releases.has(roomId) || this.#closed ||
-          this.#subscriptionIntents.get(roomId) !== item) continue;
-      await this.#subscribe(roomId, item);
-    }
   }
 
-  async #subscribe(roomId: string, item: Record<string, unknown>): Promise<void> {
-    const { live, daemon } = this.deps;
-    const transport = this.transport;
-    const agentId = this.agentId;
-    const requestId = typeof item.requestId === 'string' && item.requestId.length > 0 && item.requestId.length <= 128
-      ? item.requestId : undefined;
-    const correlation = requestId ? { requestId } : {};
-    const wantsInbox = item.inbox !== false;
-    let active = true;
-    if(this.overlayV1&&!this.#overlayReleases.has(roomId)){
-      this.#overlayReleases.set(roomId,subscribeHelperOverlayDemand(this.deps.database,roomId,demand=>{
-        if(!this.#closed&&transport.isOpen())transport.send({type:'overlay-demand',...demand});
-      }));
-    }
-    let cursor = isInboxCursor(item.cursor) ? item.cursor : undefined;
-    let replaying = false;
-    let replayRequested = false;
-    let replayTrigger: { reason: string; trace: LiveTrace } | undefined;
-    let commandsPushing = false;
-    let commandsRequested = false;
-    let commandTrigger: { reason: string; trace: LiveTrace } | undefined;
-    const replay = async (trigger?: { reason: string; trace: LiveTrace }) => {
-      if (!wantsInbox || !active || this.#closed) return;
-      replayRequested = true;
-      if (trigger) replayTrigger = trigger;
-      if (replaying) return;
-      replaying = true;
-      try {
-        while (replayRequested && active && transport.isOpen() && !this.#closed) {
-          replayRequested = false;
-          const inbox = await daemon.execute(
-            'getRoomInbox',
-            {
-              roomId,
-              ...(cursor ? { after: cursor, rewind: true } : { startAtLatest: true }),
-              limit: 200,
-            },
-            agentId,
-          );
-          if (!active || this.#closed || !transport.isOpen()) return;
-          cursor = inbox.cursor ?? cursor;
-          const currentTrigger = replayTrigger;
-          replayTrigger = undefined;
-          transport.send({
-            type: 'inbox',
-            roomId,
-            ...correlation,
-            items: inbox.items,
-            ...(cursor ? { cursor } : {}),
-            ...(currentTrigger ? { trigger: currentTrigger } : {}),
-          });
-        }
-      } catch (error) {
-        if (!active || this.#closed) return;
-        console.error(
-          '[live] daemon replay failed',
-          error instanceof Error ? error.message : String(error),
-        );
+  /** Another read follows any change that lands while one is in flight. */
+  #pushQueue(): void {
+    if (!this.#queueSubscribed || this.#closed) return;
+    this.#queueRequested = true;
+    if (this.#queuePushing) return;
+    void this.#projection(() => this.#readQueue());
+  }
 
-      } finally {
-        replaying = false;
-      }
-    };
-    const pushCommands = async (trigger?: { reason: string; trace: LiveTrace }) => {
-      if (!active || this.#closed) return;
-      commandsRequested = true;
-      if (trigger) commandTrigger = trigger;
-      if (commandsPushing) return;
-      commandsPushing = true;
-      try {
-        while (commandsRequested && active && transport.isOpen() && !this.#closed) {
-          commandsRequested = false;
-          await this.deps.connectionPresence?.renewLease();
-          const page = await daemon.execute('getAgentCommands', { roomId }, agentId,
-            this.turnOwnershipV1 ? this.turnSource : undefined);
-          if (!active || this.#closed || !transport.isOpen()) return;
-          const currentTrigger = commandTrigger;
-          commandTrigger = undefined;
-          transport.send({
-            type: 'commands',
-            roomId,
-            ...correlation,
-            commandProtocol: page.commandProtocol,
-            commands: page.commands,
-            ...(currentTrigger ? { trigger: currentTrigger } : {}),
-          });
+  async #readQueue(): Promise<void> {
+    if (this.#queuePushing) { this.#queueRequested = true; return; }
+    this.#queuePushing = true;
+    try {
+      do {
+        this.#queueRequested = false;
+        if (this.#closed || !this.transport.isOpen()) return;
+        const page = await this.deps.daemon.execute('getAgentCommands', {}, this.agentId);
+        if (this.#closed || !this.transport.isOpen()) return;
+        for (const command of page.commands) {
+          this.#places.add(command.roomId);
+          if (command.parentRoomId) this.#places.add(command.parentRoomId);
+          if (this.overlayV1 && !this.#overlayReleases.has(command.roomId)) {
+            const roomId = command.roomId;
+            this.#overlayReleases.set(roomId, subscribeHelperOverlayDemand(this.deps.database, roomId, demand => {
+              if (!this.#closed && this.transport.isOpen()) this.transport.send({ type: 'overlay-demand', ...demand });
+            }));
+          }
         }
-      } catch (error) {
-        if (!active || this.#closed) return;
-        // This subscription still owes a command snapshot at its next live boundary.
-        commandsRequested = true;
-        console.error(
-          '[live] daemon command push failed',
-          error instanceof Error ? error.message : String(error),
-        );
-        if (transport.isOpen()) transport.send({
-          type: 'commands', roomId, ...correlation,
-          error: error instanceof Error ? error.message : 'daemon_operation_refused',
-          status: this.deps.operationErrorStatus?.(error) ?? 503,
-        });
-      } finally {
-        commandsPushing = false;
-      }
-    };
-    const unsubscribe = live.subscribe(roomId, (event) => {
-        if (!active || this.#closed) return;
-        // Presence and streaming overlays are not durable inbox
-        // invalidations. Replaying for them turns every evidence
-        // refresh into an unrelated Room read on every daemon
-        // listener. Commands have their own targeted projection;
-        // their source message is delivered by its message event.
-        if (event.type !== 'invalidate') return;
-        // Read marks only reconcile the reader's phone devices.
-        if (event.readerId) return;
-        // A child corner's status changed; only corner lists read it.
-        if (event.reason === 'corner-status') return;
-        const trigger = event.trace
-          ? { reason: event.reason, trace: event.trace }
-          : undefined;
-        if (event.reason === 'agent-config') {
-          // A phone-side model/effort selection change for this
-          // agent. No inbox replay: the durable fact is the
-          // agent-model system line, and the daemon needs only the
-          // wake to hot-restart its retained sessions.
-          if (event.targetAgentId === agentId && transport.isOpen())
-            transport.send({ type: 'config-changed', roomId });
-          return;
-        }
-        if (event.reason === 'postgres:agent_commands') {
-          // A review wake is held while another agent in the corner holds a
-          // live lease. That agent's command ending writes no row for this
-          // agent, so its release is the wake.
-          if (event.targetAgentId === agentId || event.commandReleased)
-            void this.#projection(() => pushCommands(trigger));
-          return;
-        }
-        if (commandsRequested && !commandsPushing &&
-            (!event.targetAgentId || event.targetAgentId === agentId))
-          void this.#projection(() => pushCommands(trigger));
-        if (event.reason === 'postgres:rooms' && event.repositoryChanged) {
-          if (transport.isOpen())
-            transport.send({ type: 'rooms-changed', roomId, repositoryChanged: true });
-          return;
-        }
-        if (event.closeRequested && ['postgres:rooms', 'postgres:corner_facts', 'postgres:corner_github_cache'].includes(event.reason ?? '')) {
-          if (transport.isOpen()) transport.send({ type: 'corner-complete', roomId });
-          return;
-        }
-        if (wantsInbox && changesDaemonInbox(event)) void this.#projection(() => replay(trigger));
+        this.transport.send({ type: 'commands', commandProtocol: page.commandProtocol, commands: page.commands });
+      } while (this.#queueRequested);
+    } catch (error) {
+      console.error('[live] queue push failed', error instanceof Error ? error.message : String(error));
+      if (!this.#closed && this.transport.isOpen()) this.transport.send({
+        type: 'commands',
+        error: error instanceof Error ? error.message : 'daemon_operation_refused',
+        status: this.deps.operationErrorStatus?.(error) ?? 503,
       });
-    this.#releases.set(roomId, () => { active = false; unsubscribe(); });
-    const lifecycleId =
-      typeof item.lifecycleId === 'string' && item.lifecycleId.length <= 128
-        ? item.lifecycleId
-        : undefined;
-    if (lifecycleId)
-      try {
-        await this.deps.connectionPresence?.announce(roomId, agentId, {
-          lifecycleId,
-          ...(typeof item.releaseVersion === 'string'
-            ? { releaseVersion: item.releaseVersion }
-            : {}),
-          ...(typeof item.sourceSha === 'string' ? { sourceSha: item.sourceSha } : {}),
-          ...(typeof item.available === 'boolean' ? { available: item.available } : {}),
-        });
-      } catch (error) {
-        console.error('[presence] startup announcement failed', error);
-      }
-    if (!active || !transport.isOpen() || this.#closed) return;
-    // Read under the existing admission slot before certifying subscription
-    // recovery. A successful control frame alone is never a caught-up owner.
-    await replay();
-    await pushCommands();
-    if (!active || !transport.isOpen() || this.#closed) return;
-    transport.send({
-      type: 'subscribed',
-      roomId,
-      ...correlation,
-      capabilities: {
-        initialSnapshotsV1: true,
-        inboxSnapshot: wantsInbox,
-        pushIntake: true,
-        connectionPresence: Boolean(this.deps.connectionPresence),
-        discoveryWake: true,
-      },
-    });
+    } finally {
+      this.#queuePushing = false;
+    }
   }
 }
 

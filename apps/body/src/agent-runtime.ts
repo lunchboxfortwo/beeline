@@ -1,7 +1,7 @@
 import { createUsageRefresh } from './agent-usage-refresh.js';
 import { storeVaultSubmission, type VaultSaveSubmission } from './vault-save.js';
 import { StdioSquireMcpClient } from './squire-mcp-client.js';
-import { requireInstalledAgentProgram } from './agent-command.js';
+import { executableOnPath, requireInstalledAgentProgram } from './agent-command.js';
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { loadBodyConfig } from './config.js';
@@ -17,7 +17,7 @@ import {
 import { ConnectorAssignmentLoop } from './connector-assignments.js';
 import { RegistryMcpHostBroker, registryMcpBrokerSocketPath } from './registry-mcp.js';
 import { BrowserShareHost, browserShareHostPath } from './browser-share-host.js';
-import { ThinDaemonCore } from './thin-core.js';
+import { AgentRunner } from './agent-runner.js';
 import { AgentLifecycle, type AgentExitReason } from './helper-lifecycle.js';
 import { migrateLegacyDaemonTransport } from './legacy-daemon-migration.js';
 import { activateDaemonTransport, DaemonApiError } from './daemon-api-client.js';
@@ -30,11 +30,9 @@ import {
 } from './runtime.js';
 import { retireRemovedAgent } from './agent-retirement.js';
 import { readMachineId } from './connect-command.js';
-import { BUBBLEWRAP_INSTALL_BUDGET_MS, ensureBwrapSandbox } from './bwrap-sandbox.js';
 import type { BeelineInstallLayout } from './self-update.js';
 import type { InstalledBundleIdentity } from './self-update-manifest.js';
 import { clearDaemonStartFailures } from './daemon-failure.js';
-import { extendSystemdStartTimeout } from './systemd.js';
 import type { MachineLink } from './machine-link.js';
 
 /** What the machine helper needs from one agent it hosts. */
@@ -42,7 +40,6 @@ export interface HostedAgent {
   readonly agentId: string;
   readonly runtimeDir: string;
   readonly lifecycle: AgentLifecycle;
-  readonly core: ThinDaemonCore;
 }
 
 /** What one agent runtime needs from the machine helper that hosts it. */
@@ -149,19 +146,9 @@ export async function runAgentRuntime(
   // can exec this bundle's CLI against the exact runtime record — no state-home
   // discovery inside the sandbox, where XDG dirs are deliberately relocated.
   config.runtimeConfigPath = configPath;
-  // OS sandbox for every ACP child (`bwrap-sandbox.ts`). Settled once per
-  // agent start, so an unusable bwrap costs one advisory line rather than a
-  // failed spawn per session. Absent bubblewrap is installed on this pass: a
-  // Room shell is approved only inside that sandbox. That install does not
-  // come out of the unit's own start budget, so the start deadline is
-  // extended first, and only when a package command is really about to run.
-  const sandbox = await ensureBwrapSandbox({
-    ...(runtime.sandbox ? { policy: runtime.sandbox } : {}),
-    stateDir: runtimeDir,
-    beforeInstall: () => extendSystemdStartTimeout(BUBBLEWRAP_INSTALL_BUDGET_MS),
-  });
-  if (sandbox.path) config.bwrapPath = sandbox.path;
-  else if (sandbox.shellDetail) config.shellUnavailableDetail = sandbox.shellDetail;
+  // The session tries the installed sandbox. Missing or failed sandboxing
+  // uses the conversation's restricted native-tool permission handler.
+  config.bwrapPath = runtime.sandbox === 'off' ? undefined : executableOnPath('bwrap');
   // Owner-configured credential masks ride the runtime record; the
   // BEELINE_BODY_SANDBOX_MASK env var is already folded into `config` by
   // loadBodyConfig. Both are unioned at spawn time in Body.sessionSpawnCommand.
@@ -187,7 +174,6 @@ export async function runAgentRuntime(
     `[beeline] agent ${agentId} in workspace ${runtime.communityId} starting with ${runtime.rooms.length} Room binding(s)`,
   );
   console.log(`[body] agent binary: ${formatAgentCommand(agent)}`);
-  console.log(`[body] ${sandbox.advisory}`);
 
   let discoveryReady = false;
   const markEstablished = () => {
@@ -264,12 +250,11 @@ export async function runAgentRuntime(
       // The one per-call gate a Registry route has: the server's existing
       // requester-aware resource approval, asked here because the broker
       // socket — not the harness MCP client — is what every caller reaches.
-      async ({ roomId, requestId, generationId, target, consume, operation }) =>
+      async ({ roomId, requestId, target, consume, operation }) =>
         (
           await daemonApi.execute('authorizeResourceCall', {
             roomId,
             requestId,
-            generationId,
             target,
             consume,
             ...(operation ? { operation } : {}),
@@ -278,24 +263,21 @@ export async function runAgentRuntime(
       // One broker per hosted agent: each authorizes against its own agent.
       registryMcpBrokerSocketPath(config.operatorHome, agentId),
     );
-    await registryMcpBroker.start();
     config.registryMcpBrokerSocket = registryMcpBroker.socketPath;
+    void registryMcpBroker.start().catch(error => console.warn('[body] Registry tools unavailable:', error));
     browserShareHost = new BrowserShareHost(
       browserShareHostPath(process.env.XDG_STATE_HOME ?? config.operatorHome ?? homedir(), agentId),
     );
-    await browserShareHost.start();
     config.browserShareHostSocket = browserShareHost.socketPath;
-    const core = new ThinDaemonCore(runtime, configPath, config, {
+    void browserShareHost.start().catch(error => console.warn('[body] Browser sharing unavailable:', error));
+    const core = new AgentRunner(runtime, configPath, config, {
       daemonApi,
       onConfigChanged: refreshCatalog,
     });
-    leaveHost = host.attach({ agentId, runtimeDir, lifecycle, core });
+    leaveHost = host.attach({ agentId, runtimeDir, lifecycle });
     daemonApi.setForceUpdateListener((minVersion) => host.requestForceUpdate(minVersion));
     daemonApi.setHelperReleaseListener(({ version, sha }) => {
       host.notifyReleaseAvailable(`${version}:${sha}`);
-      host.tickUpdate();
-    });
-    core.setInteractiveIdleListener(() => {
       host.tickUpdate();
     });
     const result = await core.run({

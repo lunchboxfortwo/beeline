@@ -55,12 +55,12 @@ describe('actual owned model endpoint and actual quota adapter', () => {
   });
 
   it('keeps the original claimed invocation usable after the former execution window', async () => {
-    await f.db.query("UPDATE agent_commands SET claimed_at=clock_timestamp()-interval '2 hours'");
+    await f.db.query("UPDATE agent_commands SET created_at=clock_timestamp()-interval '2 hours'");
     const response = await call();
     expect(response.status).toBe(200);
     expect(await response.text()).toContain('SYNTHETIC_PRIVATE_ANSWER');
     expect(calls).toHaveLength(1);
-    expect((await f.db.query('SELECT state FROM agent_commands')).rows).toEqual([{ state: 'claimed' }]);
+    expect((await f.db.query('SELECT state FROM agent_commands')).rows).toEqual([{ state: 'pending' }]);
   });
 
   it('sends N concurrent owner calls directly upstream while retaining the spend refusal', async () => {

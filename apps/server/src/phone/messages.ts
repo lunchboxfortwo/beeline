@@ -1,24 +1,19 @@
-import { messageColumns } from '../message-columns.js';
-import { CommandScopedDatabase } from '../command-scoped-database.js';
-import { isMentionReplyInput } from '../owed-mentions.js';
-import { observeOnboardingMessage } from '../signin-funnel.js';
-import { CommandRefusalError } from '../command-refusal.js';
-import { CornerAccessDatabase } from '../corner-access-database.js';
-import { routeHumanMessage, soloRoomAgentSql } from '../agent-command.js';
 import type { RoomViewMessage } from '@beeline/api-contract/phone';
 import { MESSAGE_REACTION_EMOJIS } from '@beeline/api-contract/phone';
+import { queueMessage } from '../agent-command.js';
+import { CommandRefusalError } from '../command-refusal.js';
+import { CornerAccessDatabase } from '../corner-access-database.js';
 import { recordSystemReportMention } from '../feedback.js';
 import { tombstoneInstitutionalMemoryForMessage } from '../institutional-memory-shadow.js';
+import { messageColumns } from '../message-columns.js';
+import { unreadMessageSql,visibleChatMessageSql } from '../read-cursor.js';
+import { observeOnboardingMessage } from '../signin-funnel.js';
 import { deletedMessageEvent } from '../system-line.js';
-import { unreadMessageSql, visibleChatMessageSql } from '../read-cursor.js';
-import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
+import { phoneRequireWorkspaceMember } from './access.js';
 import type { PhoneContext } from './context.js';
-import { Input, Output } from './types.js';
-import { phoneWithCommandTransaction } from './command-context.js';
-import { messageId, advanceAuthorReadMark } from './values.js';
-import { phoneUnansweredMentionTargets, phoneNoteUnansweredMentions, phonePendingAgentCommandsForMessage, phoneReceiptMessage } from './mention-notices.js';
-import { phoneHasRoomAccess, phoneAssertRoomIsWritable, phoneRequireWorkspaceMember } from './access.js';
-import { phoneReadLiveDelta, phoneLiveStarPrompt } from './live-reads.js';
+import { phoneLiveStarPrompt,phoneReadLiveDelta } from './live-reads.js';
+import { phoneNoteUnansweredMentions } from './mention-notices.js';
+import { Input,Output } from './types.js';
 
 
 
@@ -150,181 +145,33 @@ import { phoneReadLiveDelta, phoneLiveStarPrompt } from './live-reads.js';
   }
 
   export async function phoneSendMessage(ctx: PhoneContext,
-    input: Input<'sendRoomMessage'>,
-    author: string,
-    sourceClient?: { id: string; name: string },
-    familyId?: string,
+    input: Input<'sendRoomMessage'> | Input<'sendRoomReply'>,
+    author: string, sourceClient?: { id: string; name: string }, familyId?: string,
   ): Promise<Output<'sendRoomMessage'>> {
-    if (!ctx.routingTransaction && !(ctx.database as CommandScopedDatabase).active)
-      return ctx.database.transaction(db =>
-        phoneWithCommandTransaction(ctx, db, () => phoneSendMessage(ctx, input, author, sourceClient, familyId)));
-    const id = input.messageId ?? messageId();
-    if (!/^[0-9a-f]{64}$/.test(id)) throw new Error('messageId is invalid');
-    const attachments = JSON.stringify(input.attachments ?? []);
-    let database = ctx.database;
-    const write = (await database.query<{
-      inserted: boolean;
-      retry: boolean;
-      writable: boolean;
-      system_dm: boolean;
-      direct: boolean;
-      corner: boolean;
-      author_kind: 'human' | 'agent';
-      solo_agent: boolean;
-    }>(
-      `WITH access AS (
-         SELECT room.id,room.parent_id,room.direct_participants,identity.kind author_kind,
-           ${soloRoomAgentSql('room', 'identity.id')} IS NOT NULL solo_agent,
-           COALESCE(room.direct_participants ? $6,false) system_dm,
-           COALESCE(workspace_member.role<>'spectator',$3=$6) writable
-         FROM rooms room
-         JOIN memberships room_member ON room_member.room_id=COALESCE(room.parent_id,room.id)
-           AND room_member.identity_id=$3 AND room_member.removed_at IS NULL
-         LEFT JOIN memberships workspace_member ON workspace_member.workspace_id=room.workspace_id
-           AND workspace_member.room_id IS NULL AND workspace_member.identity_id=$3
-           AND workspace_member.removed_at IS NULL
-         JOIN identities identity ON identity.id=$3
-         WHERE room.id=$2 AND room.archived_at IS NULL AND ($3=$6 OR workspace_member.identity_id IS NOT NULL)
-         FOR SHARE OF room_member
-       ), inserted AS (
-         INSERT INTO messages(id,room_id,author_id,text,attachments,source_client)
-         SELECT $1,$2,$3,$4,$5::jsonb,$7::jsonb FROM access
-         WHERE writable AND ($3=$6 OR NOT system_dm)
-         ON CONFLICT(id) DO NOTHING
-         RETURNING id,room_id,created_at
-       ), read_mark AS (
-         INSERT INTO room_read_marks(room_id,identity_id,message_created_at,message_id,updated_at)
-         SELECT room_id,$3,created_at,id,'epoch'::timestamptz FROM inserted
-         ON CONFLICT(room_id,identity_id) DO UPDATE
-           SET message_created_at=EXCLUDED.message_created_at,message_id=EXCLUDED.message_id
-         WHERE (EXCLUDED.message_created_at,EXCLUDED.message_id)>
-           (room_read_marks.message_created_at,room_read_marks.message_id)
-         RETURNING 1
-
-       )
-       SELECT EXISTS(SELECT 1 FROM inserted) inserted,
-         EXISTS(SELECT 1 FROM messages message
-           WHERE message.id=$1 AND message.room_id=$2 AND message.author_id=$3
-             AND message.text=$4 AND message.attachments=$5::jsonb
-             AND message.reply_to_message_id IS NULL) retry,
-         access.writable,access.system_dm,
-         access.direct_participants IS NOT NULL direct,
-         access.parent_id IS NOT NULL corner,access.author_kind,access.solo_agent
-       FROM access`,
-      [id, input.roomId, author, input.text, attachments, SYSTEM_IDENTITY_ID, sourceClient ? JSON.stringify(sourceClient) : null],
-    )).rows[0];
-    if (!write) throw new Error('room access denied');
-    database = new CornerAccessDatabase(database);
-    if (!write.writable) throw new Error('spectator access is read-only (access denied)');
-    if (author !== SYSTEM_IDENTITY_ID && write.system_dm)
-      throw new Error('this is a read-only system thread; only @system may post here (access denied)');
-    const mayRoute = write.direct || write.corner || write.solo_agent || input.text.includes('@');
-    if (!write.inserted && !write.retry) throw new Error('messageId is invalid');
-    if (write.inserted) {
-      const noticeAgentIds = write.author_kind === 'human' && mayRoute
-        ? await phoneUnansweredMentionTargets(ctx, input.roomId, author, input.text, {
-          authorKind: write.author_kind, direct: write.direct, corner: write.corner,
-        })
-        : [];
-      const lifecycleCommand = mayRoute ? await routeHumanMessage(database, id) : undefined;
-      if (!lifecycleCommand)
-        await phoneNoteUnansweredMentions(ctx, input.roomId, author, noticeAgentIds, id);
-      if (input.text.includes('@'))
-        await recordSystemReportMention(database, {
-          roomId: input.roomId,
-          messageId: id,
-          authorId: author,
-          text: input.text,
-          ...(familyId ? { familyId } : {}),
-        });
-    }
-    return {
-      messageId: id,
-      pendingAgentCommands: mayRoute
-        ? await phonePendingAgentCommandsForMessage(ctx, database, input.roomId, id) : [],
-      ...(await phoneReceiptMessage(ctx, input.roomId, author, id, database, mayRoute)),
-    };
-  }
-
-  export async function phoneSendReply(ctx: PhoneContext,
-    input: Input<'sendRoomReply'>,
-    author: string,
-    sourceClient?: { id: string; name: string },
-    familyId?: string,
-  ): Promise<Output<'sendRoomReply'>> {
-    if (!ctx.routingTransaction && !(ctx.database as CommandScopedDatabase).active)
-      return ctx.database.transaction(db =>
-        phoneWithCommandTransaction(ctx, db, () => phoneSendReply(ctx, input, author, sourceClient, familyId)));
-    const parent = await ctx.database.query<{
-      root_message_id: string | null;
-      author_id: string;
-      author_kind: 'human' | 'agent';
-      direct: boolean;
-    }>(
-      `SELECT message.root_message_id,message.author_id,identity.kind author_kind,
-              room.direct_participants IS NOT NULL direct
-       FROM messages message
-       JOIN identities identity ON identity.id=message.author_id
-       JOIN rooms room ON room.id=message.room_id
-       WHERE message.id=$1 AND message.room_id=$2`,
-      [input.parentMessageId, input.roomId],
-    );
-    if (!parent.rows[0] || !(await phoneHasRoomAccess(ctx, input.roomId, author)))
-      throw new Error('reply parent is not in this room');
-    await phoneAssertRoomIsWritable(ctx, input.roomId, author);
-    const id = input.messageId ?? messageId();
-    if (!/^[0-9a-f]{64}$/.test(id)) throw new Error('messageId is invalid');
-    // A reply in a DM addresses the agent it answers without naming it. That
-    // is the DM's own doing, not a tag: `routeHumanMessage` wakes every
-    // participant of a direct Room, so the address survives without a list.
-    const noticeAgentIds = await phoneUnansweredMentionTargets(ctx, input.roomId, author, input.text);
-    const values = [
-      id,
-      input.roomId,
-      author,
-      input.text,
-      JSON.stringify(input.attachments ?? []),
-      input.parentMessageId,
-      parent.rows[0].root_message_id ?? input.parentMessageId,
-    ];
-    const database = ctx.database;
-    const inserted = await database.query(
-      `WITH inserted AS (
-       INSERT INTO messages(id,room_id,author_id,text,attachments,reply_to_message_id,root_message_id,source_client)
-       VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8::jsonb) ON CONFLICT(id) DO NOTHING
-       RETURNING id,room_id
-
-     ) SELECT id FROM inserted`,
-      [...values, sourceClient ? JSON.stringify(sourceClient) : null],
-    );
-    if (!inserted.rowCount) {
-      const retry = await database.query(
-        `SELECT 1 FROM messages
-       WHERE id=$1 AND room_id=$2 AND author_id=$3 AND (text=$4 OR $8::boolean)
-         AND (attachments=$5::jsonb OR $8::boolean)
-         AND reply_to_message_id=$6 AND root_message_id=$7`,
-        [...values, isMentionReplyInput(input)],
-      );
-      if (!retry.rowCount) throw new Error('messageId is invalid');
-    } else {
-      await advanceAuthorReadMark(database, input.roomId, author, id);
-      const lifecycleCommand = await routeHumanMessage(database, id);
-      if (!lifecycleCommand)
-        await phoneNoteUnansweredMentions(ctx, input.roomId, author, noticeAgentIds, id);
-      await recordSystemReportMention(database, {
-        roomId: input.roomId,
-        messageId: id,
-        authorId: author,
-        text: input.text,
+    const saved = await queueMessage(ctx.database, { kind: 'post', roomId: input.roomId,
+      authorId: author, text: input.text, id: input.messageId, attachments: input.attachments,
+      replyTo: 'parentMessageId' in input ? input.parentMessageId : undefined, sourceClient,
+    });
+    const pending = saved.commands.filter(command => command.state === 'pending');
+    // The queue has committed; neither offline presentation nor feedback can hold delivery.
+    const observe = async () => { await Promise.all([
+      phoneNoteUnansweredMentions(ctx, input.roomId, author, pending.map(command => command.agent_id), saved.id),
+      recordSystemReportMention(ctx.database, {
+        roomId: input.roomId, messageId: saved.id, authorId: author, text: input.text,
         ...(familyId ? { familyId } : {}),
-      });
-    }
-    return {
-      messageId: id,
-      pendingAgentCommands: await phonePendingAgentCommandsForMessage(ctx, database, input.roomId, id),
-      ...(await phoneReceiptMessage(ctx, input.roomId, author, id, database)),
-    };
+      }).catch(error => console.warn('[message] feedback observation failed', error)),
+    ]); };
+    const background=CornerAccessDatabase.physical(ctx.database).backgroundWork;
+    if (background) background.run(observe); else void observe();
+    const receipt = await ctx.receiptMessage(input.roomId, author, saved.id, ctx.database)
+      .catch(error => { console.warn('[message] receipt enrichment omitted:', error); return {}; });
+    return { ...receipt, messageId: saved.id, pendingAgentCommands: pending.map(command => ({
+      requestId: command.turn_request_id, agentPubkey: command.agent_id,
+      createdAt: Math.floor(new Date(command.created_at).getTime() / 1000),
+    })) };
   }
+
+  export const phoneSendReply = phoneSendMessage;
 
 
   export async function phoneReactToMessage(ctx: PhoneContext, input: Input<'reactToMessage'>, viewerId: string): Promise<Output<'reactToMessage'>> {

@@ -1,21 +1,23 @@
-import { readdirSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { readdirSync,readFileSync } from 'node:fs';
+import { dirname,join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { claimAgentCommand, createAgentCommand, routeHumanMessage } from './agent-command.js';
-import { computerViewToken, createComputerSession } from './computer-session.js';
+import { afterEach,beforeEach,describe,expect,it } from 'vitest';
+import { createAgentCommand } from './agent-command.js';
+import { computerViewToken,createComputerSession } from './computer-session.js';
 import { announceAgentLifecycle } from './connection-presence.js';
 import { setCornerHold } from './corner-holds.js';
 import { recordPersonMergeYes } from './corner-merge-approval.js';
 import { LiveHub } from './live.js';
 import {
-  AGENT_OWNER_AUTHORITY_MESSAGE,
-  PhoneService,
-  SPENDING_OWNER_AUTHORITY_MESSAGE,
-  WORKSPACE_ADMIN_AUTHORITY_MESSAGE,
+AGENT_OWNER_AUTHORITY_MESSAGE,
+PhoneService,
+SPENDING_OWNER_AUTHORITY_MESSAGE,
+WORKSPACE_ADMIN_AUTHORITY_MESSAGE,
 } from './phone-service.js';
-import { PgliteDatabase, migratedDatabase } from './test-support.js';
-import { humanRoomAdmin, humanRoomMember } from './workflow-admin.js';
+import { routeHumanMessage } from './test-fixtures/queue-routing.test-support.js';
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
+import { migratedDatabase,PgliteDatabase } from './test-support.js';
+import { humanRoomAdmin,humanRoomMember } from './workflow-admin.js';
 
 // Permissions come from three places only: the agent's owner, the Workspace
 // role, or plain presence in the Room. Each person here holds one Workspace
@@ -98,17 +100,6 @@ describe('permissions: agent owner, Workspace admin, or anyone in the Room', () 
     return id;
   }
 
-  async function lifecycleLine(roomId: string) {
-    return (
-      await database.query<{ verb: string; consequence: string | null }>(
-        `SELECT system_event->>'verb' verb,system_event->>'consequence' consequence FROM messages
-         WHERE room_id=$1 AND presentation IN ('system','card') AND author_id=$2
-         ORDER BY created_at DESC,id DESC LIMIT 1`,
-        [roomId, AGENT],
-      )
-    ).rows[0];
-  }
-
   async function startTurn(roomId: string, author: string) {
     const ask = await send(roomId, author, 'hello');
     const command = await createAgentCommand(database, {
@@ -117,8 +108,8 @@ describe('permissions: agent owner, Workspace admin, or anyone in the Room', () 
       sourceMessageId: ask,
       reason: 'human_tag',
     });
-    await claimAgentCommand(database, roomId, AGENT, command!.id, `generation-${ask.slice(-4)}`);
-    return ask;
+    await startQueuedTurn(database, roomId, AGENT, command!.id);
+    return command!.id;
   }
 
   async function errorOf(work: Promise<unknown>): Promise<string | undefined> {
@@ -130,83 +121,30 @@ describe('permissions: agent owner, Workspace admin, or anyone in the Room', () 
     }
   }
 
-  it('anyone in the Room, corner or DM may restart, stop, retry and debug an agent they do not own', async () => {
-    for (const [, roomId] of placesFor(ROOM_ADMIN)) {
-      await send(roomId, ROOM_ADMIN, '@bee debug');
-      expect((await lifecycleLine(roomId))?.verb).toBe('reported diagnostics');
-      await startTurn(roomId, AGENT_OWNER);
-      await send(roomId, ROOM_ADMIN, '@bee stop');
-      expect((await lifecycleLine(roomId))?.verb).toBe('stopped its running turn');
-      const ask = await startTurn(roomId, AGENT_OWNER);
-      await database.query(`UPDATE agent_turns SET status='failed' WHERE room_id=$1 AND request_id=$2`, [roomId, ask]);
-      await send(roomId, ROOM_ADMIN, '@bee retry');
-      expect((await lifecycleLine(roomId))?.verb).toBe('queued a retry for its last failed turn');
-    }
-    // The reported path: a person who does not own the agent sends `@bee /restart`
-    // from the phone in their DM with it.
-    const dm = dms.get(WS_OWNER)!;
-    const restartId = 'f'.repeat(64);
-    await phone.execute(
-      'sendRoomMessage',
-      { roomId: dm, messageId: restartId, text: '@bee /restart', mentions: [AGENT] },
-      WS_OWNER,
-    );
-    await routeHumanMessage(database, restartId);
-    expect((await lifecycleLine(dm))?.verb).toBe('queued a restart');
-    expect((await database.query(`SELECT 1 FROM agent_commands WHERE action='restart'`)).rowCount).toBe(1);
+
+  it('Room, corner and DM members send ordinary control prose without an owner-role gate',async()=>{
+    for(const person of PEOPLE) for(const [,roomId] of placesFor(person))
+      for(const text of ['@bee debug','@bee retry','@bee /restart','@bee login']) {
+        const id=await send(roomId,person,text);
+        expect((await database.query('SELECT action,state,message FROM agent_commands WHERE source_message_id=$1',[id])).rows)
+          .toEqual([{action:'input',state:'pending',message:expect.objectContaining({body:text,authorId:person})}]);
+      }
+    expect((await database.query("SELECT 1 FROM messages WHERE card_type='agent-sign-in' OR presentation='system'")).rowCount).toBe(0);
   });
 
-  it('an access policy that limits who may give the agent work never blocks restart, stop, retry and debug', async () => {
-    // `creator` and an allowlist that leaves out both the sender and the owner
-    // decide who may give the agent work; they never gate these controls.
-    for (const policy of [{ type: 'creator' }, { type: 'allowlist', allow: [WS_ADMIN] }]) {
-      await database.query(`UPDATE agents SET access_policy=$2::jsonb WHERE agent_id=$1`, [
-        AGENT,
-        JSON.stringify(policy),
-      ]);
-      for (const [, roomId] of placesFor(ROOM_ADMIN)) {
-        await database.query(`DELETE FROM agent_commands WHERE action='restart'`);
-        await send(roomId, ROOM_ADMIN, '@bee /restart');
-        expect((await lifecycleLine(roomId))?.verb).toBe('queued a restart');
-        await send(roomId, ROOM_ADMIN, '@bee debug');
-        expect((await lifecycleLine(roomId))?.verb).toBe('reported diagnostics');
-        await startTurn(roomId, AGENT_OWNER);
-        await send(roomId, ROOM_ADMIN, '@bee stop');
-        expect((await lifecycleLine(roomId))?.verb).toBe('stopped its running turn');
-        const ask = await startTurn(roomId, AGENT_OWNER);
-        await database.query(`UPDATE agent_turns SET status='failed' WHERE room_id=$1 AND request_id=$2`, [roomId, ask]);
-        await send(roomId, ROOM_ADMIN, '@bee retry');
-        expect((await lifecycleLine(roomId))?.verb).toBe('queued a retry for its last failed turn');
-        // Sign-in still belongs to the owner alone, and the owner keeps it.
-        const prior = await lifecycleLine(roomId);
-        const priorCards = (await database.query("SELECT 1 FROM messages WHERE room_id=$1 AND card_type='agent-sign-in'",[roomId])).rowCount;
-        await send(roomId, ROOM_ADMIN, '@bee login');
-        expect(await lifecycleLine(roomId)).toEqual(prior);
-        expect((await database.query("SELECT 1 FROM messages WHERE room_id=$1 AND card_type='agent-sign-in'",[roomId])).rowCount).toBe(priorCards);
+  it('creator and allowlist preferences cannot refuse a Room member message',async()=>{
+    for(const policy of [{type:'creator'},{type:'allowlist',allow:[WS_ADMIN]}]) {
+      await database.query('UPDATE agents SET access_policy=$2::jsonb WHERE agent_id=$1',[AGENT,JSON.stringify(policy)]);
+      for(const [,roomId] of placesFor(ROOM_ADMIN)) {
+        const id=await send(roomId,ROOM_ADMIN,'@bee please answer');
+        expect((await database.query("SELECT 1 FROM agent_commands WHERE source_message_id=$1 AND state='pending'",[id])).rowCount).toBe(1);
       }
-      for (const [, roomId] of placesFor(AGENT_OWNER)) {
-        await send(roomId, AGENT_OWNER, '@bee login');
-        expect((await lifecycleLine(roomId))?.verb).toBe('started a Claude sign-in');
-      }
-    }
-  });
-
-  it('only the agent owner may sign it in, in every place, whatever their role', async () => {
-    for (const person of [WS_OWNER, WS_ADMIN, ROOM_ADMIN])
-      for (const [, roomId] of placesFor(person)) {
-        await send(roomId, person, '@bee login');
-        expect(await lifecycleLine(roomId)).toBeUndefined();
-        expect((await database.query("SELECT 1 FROM messages WHERE room_id=$1 AND card_type='agent-sign-in'",[roomId])).rowCount).toBe(0);
-      }
-    for (const [, roomId] of placesFor(AGENT_OWNER)) {
-      await send(roomId, AGENT_OWNER, '@bee login');
-      expect((await lifecycleLine(roomId))?.verb).toBe('started a Claude sign-in');
     }
   });
 
   it('anyone in the Room may stop another person’s turn from the phone', async () => {
     for (const [, roomId] of placesFor(ROOM_ADMIN)) {
-      const ask = await startTurn(roomId, AGENT_OWNER);
+      const ask = await startTurn(roomId, ROOM_ADMIN);
       await expect(
         phone.execute('cancelAgentTurn', { roomId, requestId: ask, agentId: AGENT }, ROOM_ADMIN),
       ).resolves.not.toThrow();

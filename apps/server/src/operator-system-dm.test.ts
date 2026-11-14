@@ -1,3 +1,4 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import type { Pool } from 'pg';
@@ -7,7 +8,7 @@ import * as sentry from './sentry.js';
 import { PgliteDatabase, migratedDatabase } from './test-support.js';
 import { DaemonService } from './daemon-service.js';
 import { LiveHub } from './live.js';
-import { claimAgentCommand, createAgentCommand } from './agent-command.js';
+import { createAgentCommand } from './agent-command.js';
 import { OPERATOR_OWNER_ID as OWNER, flushOperatorSystemDms } from './operator-system-dm.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { PhoneService } from './phone-service.js';
@@ -36,9 +37,9 @@ async function turn(author = OWNER) {
   const id = (++seq).toString(16).padStart(64, '0');
   await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Send the test notice')`, [id, ROOM, author]);
   const requestId = `request-${seq}`, generationId = `generation-${seq}`;
-  const command = await createAgentCommand(db, { roomId: ROOM, agentId: AGENT, sourceMessageId: id, reason: 'human_tag', turnRequestId: requestId });
-  await claimAgentCommand(db, ROOM, AGENT, command!.id, generationId);
-  return { agentId: AGENT, roomId: ROOM, requestId, generationId };
+  const command = await createAgentCommand(db, { roomId: ROOM, agentId: AGENT, sourceMessageId: id, reason: 'human_tag', id: requestId });
+  await startQueuedTurn(db, ROOM, AGENT, command!.id);
+  return { agentId: AGENT, roomId: ROOM, requestId };
 }
 async function send(recipients: string | string[], text = 'Your issue has been fixed.') {
   return daemon.execute('sendOperatorSystemDm', { ...await turn(), recipients, text }, AGENT);
@@ -81,11 +82,11 @@ describe('owner-command operator System DMs', () => {
       warning.mockRestore();
     }
   });
-  it('refuses a missing command, non-owner root, wrong agent owner, and stale generation', async () => {
+  it('refuses a missing command, non-owner root, wrong agent owner, and unknown command', async () => {
     await expect(daemon.execute('sendOperatorSystemDm', { agentId: AGENT, roomId: ROOM, requestId: 'absent', recipients: PERSON, text: 'hello' }, AGENT)).rejects.toThrow();
     await expect(daemon.execute('sendOperatorSystemDm', { ...await turn(OTHER), recipients: PERSON, text: 'hello' }, AGENT)).rejects.toThrow(/operator owner/);
     const current = await turn();
-    await expect(daemon.execute('sendOperatorSystemDm', { ...current, generationId: 'stale', recipients: PERSON, text: 'hello' }, AGENT)).rejects.toThrow();
+    await expect(daemon.execute('sendOperatorSystemDm', { ...current, requestId: 'absent', recipients: PERSON, text: 'hello' }, AGENT)).rejects.toThrow();
     await db.query(`UPDATE agents SET owner_id=$1 WHERE agent_id=$2`, [OTHER, AGENT]);
     await expect(daemon.execute('sendOperatorSystemDm', { ...current, recipients: PERSON, text: 'hello' }, AGENT)).rejects.toThrow(/operator owner/);
     expect((await db.query(`SELECT * FROM operator_system_dm_sends`)).rowCount).toBe(0);

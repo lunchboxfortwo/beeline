@@ -1,25 +1,18 @@
 import { boundToolResponse } from './tool-output-budget.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
-import { createRequire } from 'node:module';
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createConnection, createServer, isIPv4, isIPv6, type Server } from 'node:net';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
-import { fileURLToPath } from 'node:url';
 import type {
   ConnectorAssignment,
   ConnectorStep,
-  RegistryMcpRoute,
 } from '@beeline/api-contract/daemon';
 import {
-  MCP_RESOURCE_GATE_KEY,
-  MCP_RESOURCE_GATE_TRANSPORT,
-  MCP_RESOURCE_TARGET_KEY,
   NON_CONSUMING,
 } from './resource-mcp-facade.js';
-import { MCP_ROUTE_CLASS_KEY, MCP_ROUTE_HOST } from './mcp-route-class.js';
 import { privateSocketPath, preparePrivateSocketDirectory } from './local-socket.js';
 
 export const REGISTRY_MCP_BROKER_FLAG = '--registry-mcp-broker';
@@ -549,77 +542,6 @@ export async function installRegistryMcp(input: {
   }
 }
 
-export function registryMcpBrokerLaunch(
-  connectorId: string,
-  turnContextPath: string,
-  brokerSocket: string | undefined,
-): {
-  command: string;
-  args: string[];
-  env: Record<string, string>;
-} {
-  const socketPath = brokerSocket;
-  if (!socketPath) throw new Error('Registry MCP broker is unavailable');
-  const env = {
-    BEELINE_REGISTRY_MCP_BROKER_SOCKET: socketPath,
-    BEELINE_REGISTRY_MCP_CONNECTOR: connectorId,
-    BEELINE_TURN_CONTEXT_FILE: turnContextPath,
-  };
-  const meta = import.meta.url;
-  if (meta.startsWith('beeline:')) {
-    if (!process.argv[1]) throw new Error('Registry MCP broker entry is unavailable');
-    return { command: process.execPath, args: [process.argv[1], REGISTRY_MCP_BROKER_FLAG], env };
-  }
-  const js = fileURLToPath(new URL('./registry-mcp.js', meta));
-  if (existsSync(js)) return { command: process.execPath, args: [js], env };
-  const ts = fileURLToPath(new URL('./registry-mcp.ts', meta));
-  return {
-    command: process.execPath,
-    args: ['--import', createRequire(meta).resolve('tsx'), ts],
-    env,
-  };
-}
-
-/**
- * A Registry route is mounted behind the resource façade under its stable
- * `registry-mcp:<serverName>` target, exactly like every other host route.
- * `MCP_RESOURCE_GATE_TRANSPORT` says the TRANSPORT spends the grant: the
- * daemon-owned broker holds the only provider grant and is the one place a
- * call can actually reach the provider — including the call a sandbox makes
- * straight at the socket — so it makes the consuming decision, and the façade
- * asks the same gate without spending. One call, one Once grant.
- */
-export function registryMcpHostDeclarations(
-  routes: readonly RegistryMcpRoute[] | undefined,
-  turnContextPath: string,
-  brokerSocket: string | undefined,
-): Record<string, Record<string, unknown>> {
-  return Object.fromEntries(
-    (routes ?? []).map((route) => {
-      const launch = registryMcpBrokerLaunch(route.connectorId, turnContextPath, brokerSocket);
-      return [
-        route.routeName,
-        {
-          command: launch.command,
-          args: launch.args,
-          env: launch.env,
-          [MCP_ROUTE_CLASS_KEY]: MCP_ROUTE_HOST,
-          [MCP_RESOURCE_TARGET_KEY]: route.target,
-          [MCP_RESOURCE_GATE_KEY]: MCP_RESOURCE_GATE_TRANSPORT,
-        },
-      ];
-    }),
-  );
-}
-
-/** The broker socket is the only host path a Registry route needs inside a sandbox. */
-export function registryMcpHostBindPaths(
-  routes: readonly RegistryMcpRoute[] | undefined,
-  brokerSocket: string | undefined,
-): string[] {
-  return routes?.length && brokerSocket ? [dirname(brokerSocket)] : [];
-}
-
 async function refresh(state: ConnectedState, transport: typeof fetch): Promise<ConnectedState> {
   if (!state.refreshToken || !state.tokenEndpoint || !state.clientId) return state;
   if (!state.expiresAt || state.expiresAt > Date.now() + 60_000) return state;
@@ -670,7 +592,6 @@ export async function registryMcpProviderToken(connectorId: string, expectedName
 export type RegistryMcpTurnContext = {
   readonly roomId: string;
   readonly requestId: string;
-  readonly generationId: string;
 };
 
 /** The existing per-call resource gate (`authorizeResourceCall`), nothing new. */
@@ -709,10 +630,8 @@ function readTurnContext(value: unknown): RegistryMcpTurnContext | undefined {
     typeof turn.roomId === 'string' &&
     turn.roomId.length > 0 &&
     typeof turn.requestId === 'string' &&
-    turn.requestId.length > 0 &&
-    typeof turn.generationId === 'string' &&
-    turn.generationId.length > 0
-    ? { roomId: turn.roomId, requestId: turn.requestId, generationId: turn.generationId }
+    turn.requestId.length > 0
+    ? { roomId: turn.roomId, requestId: turn.requestId }
     : undefined;
 }
 
@@ -895,7 +814,7 @@ export class RegistryMcpHostBroker {
   }
 }
 
-async function brokerRequest(socketPath: string, request: BrokerRequest): Promise<string[]> {
+export async function brokerRequest(socketPath: string, request: BrokerRequest): Promise<string[]> {
   return new Promise<string[]>((resolve, reject) => {
     const socket = createConnection(socketPath);
     let output = '';

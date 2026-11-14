@@ -4,21 +4,19 @@ import {
 } from './test-support-corner-review-dispatch.test-support.js';
 
 describe('revision 4 simple corner review model', () => {
-  it('Reproduction REVIEW-EMPTY: ends an empty green review once silently without retry', async () => {
+  it('Reproduction REVIEW-EMPTY: keeps an unanswered green review queued without appending a retry', async () => {
     await rootFixture.phone.execute('updateRoom', {roomId:R,reviewerAgentId:B},H);
     await greenHead(104,'4'.repeat(40));
     const [first] = await commands(B,C);
     await claim(first!);
-    await rootFixture.daemon.execute('postAgentTurnReceipt', {
-      roomId:C,requestId:first!.turnRequestId,generationId:'g1',status:'complete',
-    },B);
+    await rootFixture.daemon.execute('postAgentTurnReceipt', { roomId:C, requestId:first!.turnRequestId, status:'complete' },B);
     for(let replay=0;replay<3;replay++) await reconcileConfiguredCornerReviewers(rootFixture.db,R);
-    expect(await commands(B,C)).toEqual([]);
+    expect((await commands(B,C)).map(item=>item.id)).toEqual([first!.id]);
     const lines = (await rootFixture.db.query<{text:string}>(
       `SELECT text FROM messages WHERE room_id=$1`,[C])).rows;
     expect(lines.some(line=>line.text.includes('reviewer gave no verdict'))).toBe(false);
     expect((await rootFixture.db.query('SELECT status FROM agent_turns WHERE request_id=$1',[first!.turnRequestId])).rows)
-      .toEqual([{status:'complete'}]);
+      .toEqual([{status:'working'}]);
     expect((await rootFixture.db.query(`SELECT id FROM agent_commands WHERE room_id=$1 AND agent_id=$2
       AND reason='corner_review_dispatch'`,[C,B])).rowCount).toBe(1);
   });
@@ -91,9 +89,8 @@ it('Reproduction REVIEW-TARGET: a new head wake uses the newest brief and report
   await greenHead(104,'1'.repeat(40));
   const [review]=await commands(B,C);
   await claim(review!);
-  await rootFixture.daemon.execute('report',{roomId:C,requestId:review!.turnRequestId,generationId:'g1',
-    status:'failed',text:'FAIL: newest reported evidence'},B);
-  await rootFixture.daemon.execute('postAgentTurnReceipt',{roomId:C,requestId:review!.turnRequestId,generationId:'g1',status:'complete'},B);
+  await rootFixture.daemon.execute('report',{ roomId:C, requestId:review!.turnRequestId, status:'failed', text:'FAIL: newest reported evidence' },B);
+  await rootFixture.daemon.execute('postAgentTurnReceipt',{ roomId:C, requestId:review!.turnRequestId, status:'complete' },B);
   await rootFixture.db.query(`INSERT INTO corner_brief_revisions(corner_id,revision,content,spec,author_id,source_room_id)
     VALUES($1,2,'New brief','New brief',$2,$3)`,[C,A,R]);
   await greenHead(104,'2'.repeat(40));
@@ -110,7 +107,7 @@ it('Reproduction REVIEW-ORDER: ordering the listed reviewer works and an archive
     privatePayload:{kind:'order',authorId:H,fromRoomId:R,text:'Implement the fix'}});
   const worker=(await commands(A,C)).find(c=>c.id===current!.id)!;
   await claim(worker);
-  const args={roomId:C,requestId:worker.turnRequestId,generationId:'g1',address:C,agent:'goosy',text:'Review this fix'};
+  const args={ roomId:C, requestId:worker.turnRequestId, address:C, agent:'goosy', text:'Review this fix' };
   await rootFixture.daemon.execute('order',args,A);
   expect((await commands(B,C)).some(c=>c.reason==='order')).toBe(true);
   // Use a reachable archived sibling; the source turn remains live.

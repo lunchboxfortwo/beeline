@@ -107,7 +107,7 @@ it('rejects bad signatures and unsupported input; accepts unresolved events rega
 it('keeps the batch pending if the target corner is archived', async () => {
   await fixture();
   await db.query(`UPDATE rooms SET archived_at=now() WHERE id=$1`,[TRIAGE]);
-  expect((await post(issue())).status).toBe(200);
+  expect((await post(issue())).status).toBe(409);
   expect((await commands()).rowCount).toBe(0);
   expect((await db.query(`SELECT 1 FROM sentry_wake_issues WHERE pending`)).rowCount).toBe(1);
   await db.query(`UPDATE rooms SET archived_at=NULL WHERE id=$1`,[TRIAGE]);

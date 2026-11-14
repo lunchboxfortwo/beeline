@@ -496,7 +496,6 @@ CREATE TABLE IF NOT EXISTS agent_turns (
   request_id text NOT NULL,
   agent_id text NOT NULL REFERENCES identities(id),
   status text NOT NULL CHECK (status IN ('working', 'complete', 'failed', 'cancelled')),
-  generation_id text,
   started_at timestamptz NOT NULL DEFAULT now(),
   created_at timestamptz NOT NULL DEFAULT now(),
   failure_reason text,
@@ -504,6 +503,8 @@ CREATE TABLE IF NOT EXISTS agent_turns (
 );
 ALTER TABLE agent_turns ADD COLUMN IF NOT EXISTS failure_reason text;
 ALTER TABLE agent_turns ADD COLUMN IF NOT EXISTS completion_kind text;
+-- Retained for preceding serving/rollback images; queue turns do not use it.
+ALTER TABLE agent_turns ADD COLUMN IF NOT EXISTS generation_id text;
 -- How much work the turn did, as the harness's own stream counted it. A turn is
 -- the unit mid-close cohorts compare, so the count has to live where both the
 -- served and the unserved cohort can be read from — a serve ledger only ever

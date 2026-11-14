@@ -1,4 +1,4 @@
-import { describe, expect, it, INSTITUTIONAL_CONTEXT_HEADER, tombstoneInstitutionalMemoryForMessage, claimAgentCommand, createAgentCommand, WORKSPACE, OTHER_WORKSPACE, ROOM, DM, OTHER_ROOM, HUMAN, AGENT, OTHER_AGENT, OTHER_HUMAN, MESSAGE, DM_MESSAGE, database, liveDaemon, enrollLive, openTurn, closeTurn, rootFixture } from './test-support-institutional-memory-shadow.test-support.js';
+import { describe, expect, it, INSTITUTIONAL_CONTEXT_HEADER, tombstoneInstitutionalMemoryForMessage, startQueuedTurn, createAgentCommand, WORKSPACE, OTHER_WORKSPACE, ROOM, DM, OTHER_ROOM, HUMAN, AGENT, OTHER_AGENT, OTHER_HUMAN, MESSAGE, DM_MESSAGE, database, liveDaemon, enrollLive, openTurn, closeTurn, rootFixture } from './test-support-institutional-memory-shadow.test-support.js';
 
 describe('institutional memory phase-0 shadow capture', () => {
   it('keeps DM facts out of shared memory but accepts the requester profile exception', async () => {
@@ -116,16 +116,12 @@ describe('institutional memory phase-0 shadow capture', () => {
       agentId: OTHER_AGENT,
       sourceMessageId: nextHumanMessage,
       reason: 'human_tag',
-      turnRequestId: 'next-human-turn',
+      id: 'next-human-turn',
     });
-    await claimAgentCommand(rootFixture.database, ROOM, OTHER_AGENT, humanCommand!.id, 'generation-human');
+    await startQueuedTurn(rootFixture.database, ROOM, OTHER_AGENT, humanCommand!.id);
     const humanContext = await liveDaemon().execute(
       'getInstitutionalContext',
-      {
-        roomId: ROOM,
-        requestId: 'next-human-turn',
-        generationId: 'generation-human',
-      },
+      { roomId: ROOM, requestId: 'next-human-turn' },
       OTHER_AGENT,
     );
     expect(humanContext.text).toMatch(/\n- \[[12]\] Show a mock before implementation begins\./);
@@ -135,13 +131,7 @@ describe('institutional memory phase-0 shadow capture', () => {
     expect(humanContext.totalBytes).toBeLessThanOrEqual(1_000);
     await liveDaemon().execute(
       'postAgentTurnReceipt',
-      {
-        roomId: ROOM,
-        agentId: OTHER_AGENT,
-        requestId: 'next-human-turn',
-        generationId: 'generation-human',
-        status: 'complete',
-      },
+      { roomId: ROOM, agentId: OTHER_AGENT, requestId: 'next-human-turn', status: 'complete' },
       OTHER_AGENT,
     );
 
@@ -150,16 +140,12 @@ describe('institutional memory phase-0 shadow capture', () => {
       agentId: OTHER_AGENT,
       sourceMessageId: otherHumanMessage,
       reason: 'human_tag',
-      turnRequestId: 'other-human-turn',
+      id: 'other-human-turn',
     });
-    await claimAgentCommand(rootFixture.database, ROOM, OTHER_AGENT, otherCommand!.id, 'generation-other');
+    await startQueuedTurn(rootFixture.database, ROOM, OTHER_AGENT, otherCommand!.id);
     const otherContext = await liveDaemon().execute(
       'getInstitutionalContext',
-      {
-        roomId: ROOM,
-        requestId: 'other-human-turn',
-        generationId: 'generation-other',
-      },
+      { roomId: ROOM, requestId: 'other-human-turn' },
       OTHER_AGENT,
     );
     expect(otherContext.text).not.toContain('mock before implementation');
@@ -175,22 +161,12 @@ describe('institutional memory phase-0 shadow capture', () => {
       agentId: OTHER_AGENT,
       sourceMessageId: unauthorizedMessage,
       reason: 'human_tag',
-      turnRequestId: 'unauthorized-turn',
+      id: 'unauthorized-turn',
     });
-    await claimAgentCommand(
-      rootFixture.database,
-      OTHER_ROOM,
-      OTHER_AGENT,
-      unauthorizedCommand!.id,
-      'generation-unauthorized',
-    );
+    await startQueuedTurn(rootFixture.database, OTHER_ROOM, OTHER_AGENT, unauthorizedCommand!.id);
     const unauthorizedContext = await liveDaemon().execute(
       'getInstitutionalContext',
-      {
-        roomId: OTHER_ROOM,
-        requestId: 'unauthorized-turn',
-        generationId: 'generation-unauthorized',
-      },
+      { roomId: OTHER_ROOM, requestId: 'unauthorized-turn' },
       OTHER_AGENT,
     );
     expect(unauthorizedContext.text).toBe('');
@@ -208,16 +184,11 @@ describe('institutional memory phase-0 shadow capture', () => {
       agentId: AGENT,
       sourceMessageId: MESSAGE,
       reason: 'human_tag',
-      turnRequestId: 'proposal-turn',
+      id: 'proposal-turn',
     });
-    await claimAgentCommand(rootFixture.database, ROOM, AGENT, command!.id, 'proposal-generation');
+    await startQueuedTurn(rootFixture.database, ROOM, AGENT, command!.id);
     const daemon = liveDaemon();
-    const turn = {
-      agentId: AGENT,
-      roomId: ROOM,
-      requestId: 'proposal-turn',
-      generationId: 'proposal-generation',
-    } as const;
+    const turn = { agentId: AGENT, roomId: ROOM, requestId: 'proposal-turn' } as const;
     const marker = {
       memoryKind: 'workspace_fact' as const,
       canonicalKey: 'deploy.marker',
@@ -238,11 +209,7 @@ describe('institutional memory phase-0 shadow capture', () => {
     expect(first.version).toBe(1);
     const firstContext = await daemon.execute(
       'getInstitutionalContext',
-      {
-        roomId: ROOM,
-        requestId: 'proposal-turn',
-        generationId: 'proposal-generation',
-      },
+      { roomId: ROOM, requestId: 'proposal-turn' },
       AGENT,
     );
     expect(firstContext.itemIds).toEqual([first.itemId]);
@@ -280,11 +247,7 @@ describe('institutional memory phase-0 shadow capture', () => {
     expect(preference.version).toBe(1);
     const preferenceContext = await daemon.execute(
       'getInstitutionalContext',
-      {
-        roomId: ROOM,
-        requestId: 'proposal-turn',
-        generationId: 'proposal-generation',
-      },
+      { roomId: ROOM, requestId: 'proposal-turn' },
       AGENT,
     );
     expect(preferenceContext.itemIds).toContain(preference.itemId);
@@ -350,11 +313,7 @@ describe('institutional memory phase-0 shadow capture', () => {
     }
     const bounded = await daemon.execute(
       'getInstitutionalContext',
-      {
-        roomId: ROOM,
-        requestId: 'proposal-turn',
-        generationId: 'proposal-generation',
-      },
+      { roomId: ROOM, requestId: 'proposal-turn' },
       AGENT,
     );
     expect(bounded.totalBytes).toBe(Buffer.byteLength(bounded.text, 'utf8'));
@@ -387,19 +346,11 @@ describe('institutional memory phase-0 shadow capture', () => {
       agentId: AGENT,
       sourceMessageId: source,
       reason: 'human_tag',
-      turnRequestId: 'subject-first',
+      id: 'subject-first',
     });
-    await claimAgentCommand(rootFixture.database, ROOM, AGENT, first!.id, 'subject-first-generation');
+    await startQueuedTurn(rootFixture.database, ROOM, AGENT, first!.id);
     const daemon = liveDaemon();
-    const base = {
-      agentId: AGENT,
-      roomId: ROOM,
-      requestId: 'subject-first',
-      generationId: 'subject-first-generation',
-      sourceMessageIds: [source],
-      personAsked: false,
-      confidence: 0.9,
-    } as const;
+    const base = { agentId: AGENT, roomId: ROOM, requestId: 'subject-first', sourceMessageIds: [source], personAsked: false, confidence: 0.9 } as const;
     const self = await daemon.execute(
       'saveInstitutionalMemory',
       {
@@ -440,13 +391,7 @@ describe('institutional memory phase-0 shadow capture', () => {
     });
     await daemon.execute(
       'postAgentTurnReceipt',
-      {
-        roomId: ROOM,
-        agentId: AGENT,
-        requestId: 'subject-first',
-        generationId: 'subject-first-generation',
-        status: 'complete',
-      },
+      { roomId: ROOM, agentId: AGENT, requestId: 'subject-first', status: 'complete' },
       AGENT,
     );
     const next = await createAgentCommand(rootFixture.database, {
@@ -454,42 +399,26 @@ describe('institutional memory phase-0 shadow capture', () => {
       agentId: AGENT,
       sourceMessageId: otherSource,
       reason: 'human_tag',
-      turnRequestId: 'subject-other',
+      id: 'subject-other',
     });
-    await claimAgentCommand(rootFixture.database, ROOM, AGENT, next!.id, 'subject-other-generation');
+    await startQueuedTurn(rootFixture.database, ROOM, AGENT, next!.id);
     const otherContext = await daemon.execute(
       'getInstitutionalContext',
-      {
-        roomId: ROOM,
-        requestId: 'subject-other',
-        generationId: 'subject-other-generation',
-      },
+      { roomId: ROOM, requestId: 'subject-other' },
       AGENT,
     );
     expect(otherContext.text).toContain('Alex receives packages on Thursdays');
     expect(otherContext.text).not.toContain('blue harbor');
     const otherSearch = await daemon.execute(
       'searchInstitutionalMemory',
-      {
-        agentId: AGENT,
-        roomId: ROOM,
-        requestId: 'subject-other',
-        generationId: 'subject-other-generation',
-        query: 'delivery',
-      },
+      { agentId: AGENT, roomId: ROOM, requestId: 'subject-other', query: 'delivery' },
       AGENT,
     );
     expect(otherSearch.results.map((item) => item.id)).toContain(thirdParty.itemId);
     expect(otherSearch.results.map((item) => item.id)).not.toContain(self.itemId);
     await daemon.execute(
       'postAgentTurnReceipt',
-      {
-        roomId: ROOM,
-        agentId: AGENT,
-        requestId: 'subject-other',
-        generationId: 'subject-other-generation',
-        status: 'complete',
-      },
+      { roomId: ROOM, agentId: AGENT, requestId: 'subject-other', status: 'complete' },
       AGENT,
     );
     const ownNext = await createAgentCommand(rootFixture.database, {
@@ -497,28 +426,18 @@ describe('institutional memory phase-0 shadow capture', () => {
       agentId: AGENT,
       sourceMessageId: ownNextSource,
       reason: 'human_tag',
-      turnRequestId: 'subject-own-next',
+      id: 'subject-own-next',
     });
-    await claimAgentCommand(rootFixture.database, ROOM, AGENT, ownNext!.id, 'subject-own-generation');
+    await startQueuedTurn(rootFixture.database, ROOM, AGENT, ownNext!.id);
     const ownContext = await daemon.execute(
       'getInstitutionalContext',
-      {
-        roomId: ROOM,
-        requestId: 'subject-own-next',
-        generationId: 'subject-own-generation',
-      },
+      { roomId: ROOM, requestId: 'subject-own-next' },
       AGENT,
     );
     expect(ownContext.text).toContain('blue harbor');
     const ownSearch = await daemon.execute(
       'searchInstitutionalMemory',
-      {
-        agentId: AGENT,
-        roomId: ROOM,
-        requestId: 'subject-own-next',
-        generationId: 'subject-own-generation',
-        query: 'blue harbor',
-      },
+      { agentId: AGENT, roomId: ROOM, requestId: 'subject-own-next', query: 'blue harbor' },
       AGENT,
     );
     expect(ownSearch.results.map((item) => item.id)).toContain(self.itemId);
@@ -537,11 +456,7 @@ describe('institutional memory phase-0 shadow capture', () => {
     );
     const capped = await daemon.execute(
       'getInstitutionalContext',
-      {
-        roomId: ROOM,
-        requestId: 'subject-own-next',
-        generationId: 'subject-own-generation',
-      },
+      { roomId: ROOM, requestId: 'subject-own-next' },
       AGENT,
     );
     // Neither keyword-less filler nor an item whose keywords miss the request
@@ -551,13 +466,7 @@ describe('institutional memory phase-0 shadow capture', () => {
     // snapshot even though the human request contains none of that item's keywords.
     const beyondSnapshot = await daemon.execute(
       'searchInstitutionalMemory',
-      {
-        agentId: AGENT,
-        roomId: ROOM,
-        requestId: 'subject-own-next',
-        generationId: 'subject-own-generation',
-        query: 'Alex receives packages',
-      },
+      { agentId: AGENT, roomId: ROOM, requestId: 'subject-own-next', query: 'Alex receives packages' },
       AGENT,
     );
     expect(beyondSnapshot.results.map((item) => item.id)).toContain(thirdParty.itemId);
@@ -566,38 +475,20 @@ describe('institutional memory phase-0 shadow capture', () => {
     ]);
     const archived = await daemon.execute(
       'searchInstitutionalMemory',
-      {
-        agentId: AGENT,
-        roomId: ROOM,
-        requestId: 'subject-own-next',
-        generationId: 'subject-own-generation',
-        query: 'Alex receives packages',
-      },
+      { agentId: AGENT, roomId: ROOM, requestId: 'subject-own-next', query: 'Alex receives packages' },
       AGENT,
     );
     expect(archived.results).toEqual([]);
     await rootFixture.database.query(`UPDATE messages SET deleted_at=now() WHERE id=$1`, [source]);
     const deletedSource = await daemon.execute(
       'searchInstitutionalMemory',
-      {
-        agentId: AGENT,
-        roomId: ROOM,
-        requestId: 'subject-own-next',
-        generationId: 'subject-own-generation',
-        query: 'Alex receives packages',
-      },
+      { agentId: AGENT, roomId: ROOM, requestId: 'subject-own-next', query: 'Alex receives packages' },
       AGENT,
     );
     expect(deletedSource.results).toEqual([]);
     await daemon.execute(
       'postAgentTurnReceipt',
-      {
-        roomId: ROOM,
-        agentId: AGENT,
-        requestId: 'subject-own-next',
-        generationId: 'subject-own-generation',
-        status: 'complete',
-      },
+      { roomId: ROOM, agentId: AGENT, requestId: 'subject-own-next', status: 'complete' },
       AGENT,
     );
     const dmCommand = await createAgentCommand(rootFixture.database, {
@@ -605,25 +496,13 @@ describe('institutional memory phase-0 shadow capture', () => {
       agentId: AGENT,
       sourceMessageId: DM_MESSAGE,
       reason: 'human_tag',
-      turnRequestId: 'subject-dm',
+      id: 'subject-dm',
     });
-    await claimAgentCommand(rootFixture.database, DM, AGENT, dmCommand!.id, 'subject-dm-generation');
+    await startQueuedTurn(rootFixture.database, DM, AGENT, dmCommand!.id);
     await expect(
       daemon.execute(
         'saveInstitutionalMemory',
-        {
-          agentId: AGENT,
-          roomId: DM,
-          requestId: 'subject-dm',
-          generationId: 'subject-dm-generation',
-          memoryKind: 'workspace_fact',
-          canonicalKey: 'delivery.private-third-party',
-          body: 'Alex has a private delivery detail.',
-          keywords: ['alex', 'delivery'],
-          sourceMessageIds: [DM_MESSAGE],
-          personAsked: false,
-          confidence: 0.9,
-        },
+        { agentId: AGENT, roomId: DM, requestId: 'subject-dm', memoryKind: 'workspace_fact', canonicalKey: 'delivery.private-third-party', body: 'Alex has a private delivery detail.', keywords: ['alex', 'delivery'], sourceMessageIds: [DM_MESSAGE], personAsked: false, confidence: 0.9 },
         AGENT,
       ),
     ).rejects.toThrow(/direct-message facts/);

@@ -13,7 +13,7 @@ import { RoomRow, MessageRow } from './types.js';
 import { reviveDates, roomHeader } from './read-projection.js';
 import { phoneOptionalEnrichment } from './optional-enrichment.js';
 import { unix } from './values.js';
-import { workingTurnFreshSql } from '../turn-ownership.js';
+import { workingTurnFreshSql } from '../agent-turn-end.js';
 import { phoneProjectAgentTurns } from './message-enrichment.js';
 import type { AgentTurnRow } from './types.js';
 import { projectedMessage, reactionIdentitiesSql } from './read-projection.js';

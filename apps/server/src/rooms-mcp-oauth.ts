@@ -78,12 +78,12 @@ export function mcpJson(response: ServerResponse, status: number, value: unknown
   response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
   response.end(JSON.stringify(value));
 }
-export async function mcpBody(request: IncomingMessage, maxBytes = 32_768, repeated: readonly string[] = []): Promise<Record<string, unknown>> {
+export async function mcpBody(request: IncomingMessage, maxBytes: number | null = 32_768, repeated: readonly string[] = []): Promise<Record<string, unknown>> {
   let size = 0;
   const chunks: Buffer[] = [];
   for await (const chunk of request) {
     size += Buffer.byteLength(chunk);
-    if (size > maxBytes) throw new Refusal('invalid_request', 'body_too_large');
+    if (maxBytes !== null && size > maxBytes) throw new Refusal('invalid_request', 'body_too_large');
     chunks.push(Buffer.from(chunk));
   }
   const raw = Buffer.concat(chunks).toString('utf8');
@@ -258,6 +258,8 @@ export class RoomsMcpOAuth {
   async audit(principal: McpPrincipal, operation: string, outcome: string): Promise<void> {
     await this.database.query(`INSERT INTO rooms_mcp_audit(client_id,identity_id,operation,outcome) VALUES($1,$2,$3,$4)`,
       [principal.client_id, principal.identity_id, operation.slice(0, 100), outcome]);
+    await this.database.query('UPDATE rooms_mcp_connections SET last_used_at=now() WHERE client_id=$1 AND identity_id=$2 AND revoked_at IS NULL',
+      [principal.client_id,principal.identity_id]);
   }
   async principal(raw: string): Promise<McpPrincipal | undefined> {
     return (await this.database.query<McpPrincipal>(`SELECT t.hash,t.client_id,t.identity_id,t.scope,m.member_id FROM rooms_mcp_tokens t
@@ -267,15 +269,6 @@ export class RoomsMcpOAuth {
       JOIN rooms_mcp_connections c ON c.client_id=t.client_id AND c.identity_id=t.identity_id AND c.revoked_at IS NULL
       WHERE t.hash=$1 AND t.revoked_at IS NULL
       AND (t.family_id IS NULL OR (f.id IS NOT NULL AND f.revoked_at IS NULL))`, [tokenHash(raw)])).rows[0];
-  }
-  async take(principal: McpPrincipal): Promise<boolean> {
-    const result = await this.database.query(`UPDATE rooms_mcp_tokens SET
-      calls=CASE WHEN window_at<=now()-interval '1 minute' THEN 1 ELSE calls+1 END,
-      window_at=CASE WHEN window_at<=now()-interval '1 minute' THEN now() ELSE window_at END
-      WHERE hash=$1 AND revoked_at IS NULL
-        AND (window_at<=now()-interval '1 minute' OR calls<60) RETURNING hash`, [principal.hash]);
-    if (result.rowCount) await this.database.query('UPDATE rooms_mcp_connections SET last_used_at=now() WHERE client_id=$1 AND identity_id=$2 AND revoked_at IS NULL', [principal.client_id, principal.identity_id]);
-    return result.rowCount > 0;
   }
   async handle(request: IncomingMessage, response: ServerResponse, url: URL): Promise<boolean> {
     const path = url.pathname;

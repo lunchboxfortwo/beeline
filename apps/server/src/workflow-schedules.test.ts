@@ -1,3 +1,4 @@
+import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { phoneFetch } from '../../../tests/helpers/phone-operation.js';
 import { randomBytes } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
@@ -390,9 +391,8 @@ it('Reproduction ebc844ec744260fdaf5b93010d0ffe549b6e30e1a33efbd47cd8b939ef54f16
   const ask = randomBytes(32).toString('hex');
   await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Rename it')`, [ask, ROOM, ADMIN]);
   const renameCommand = await createAgentCommand(db, { roomId: ROOM, agentId: AGENT, sourceMessageId: ask, reason: 'human_message' });
-  await daemon.execute('claimAgentCommand', { roomId: ROOM, commandId: renameCommand!.id, generationId: 'rename' }, AGENT);
-  await daemon.execute('updateAgentSchedule', { roomId: ROOM, scheduleId: created.scheduleId,
-    title: 'Downloads check', requestId: renameCommand!.turn_request_id, generationId: 'rename' }, AGENT);
+  await startQueuedCommand(daemon, { roomId: ROOM, commandId: renameCommand!.id }, AGENT);
+  await daemon.execute('updateAgentSchedule', { roomId: ROOM, scheduleId: created.scheduleId, title: 'Downloads check', requestId: renameCommand!.turn_request_id }, AGENT);
   rows = (await phone.execute('listRoomSchedules', { roomId: ROOM }, ADMIN)).schedules;
   expect(rows[0]).toMatchObject({ title: 'Downloads check', maxRuns: 1, cadence: input.cadence });
   await expect(daemon.execute('updateAgentSchedule', { roomId: ROOM, scheduleId: created.scheduleId,

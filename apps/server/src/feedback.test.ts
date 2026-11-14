@@ -331,6 +331,7 @@ const scope3 = fixtureScope3();
     const externalId = stored.find((row) => row.trigger_message_id === externalReport.messageId)!.id;
     const browserId = stored.find((row) => row.trigger_message_id === browserReport.messageId)!.id;
     const appId = stored.find((row) => row.trigger_message_id === appReport.messageId)!.id;
+    await rootFixture.database.backgroundWork.drain();
     const rows = (await rootFixture.database.query<{
       id: string;
       app_version: string | null;
@@ -421,6 +422,7 @@ const scope3 = fixtureScope3();
       undefined,
       scope3.OTHER_SESSION,
     );
+    await rootFixture.database.backgroundWork.drain();
     const rows = (await rootFixture.database.query<{
       id: string;
       helper_version: string | null;
@@ -501,6 +503,7 @@ const scope3 = fixtureScope3();
       undefined,
       scope3.OTHER_SESSION,
     );
+    await rootFixture.database.backgroundWork.drain();
     const rows = (await rootFixture.database.query<Record<string, unknown>>(FEEDBACK_TRIAGE_PULL_SQL)).rows;
     const mixedRow = rows.find((item) => item.id === mixed.itemId)!;
     expect(mixedRow).toMatchObject({

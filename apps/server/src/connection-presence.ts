@@ -1,4 +1,3 @@
-import { endAgentTurn } from './agent-turn-end.js';
 import { randomUUID } from 'node:crypto';
 import type { SqlDatabase } from './database.js';
 import { LiveHub } from './live.js';
@@ -21,7 +20,6 @@ interface PresenceMetadata {
   sourceSha?: string;
   available?: boolean;
   lifecycleId?: string;
-  turnRuntimeId?: string;
 }
 
 /** One live helper connection for one agent, held by one server instance. */
@@ -63,7 +61,7 @@ export class ConnectionPresence {
     if (this.stopped) return;
     await releaseAgentConnection(this.database, this.live, agentId, connectionId, forUpdate);
   }
-  async announce(roomId: string, agentId: string, metadata: PresenceMetadata = {}): Promise<void> {
+  async announce(roomId: string | undefined, agentId: string, metadata: PresenceMetadata = {}): Promise<void> {
     if (!this.stopped && metadata.lifecycleId)
       await announceAgentLifecycle(this.database, this.live, roomId, agentId, { ...metadata, lifecycleId: metadata.lifecycleId });
   }
@@ -86,14 +84,13 @@ export class ConnectionPresence {
 export async function announceAgentLifecycle(
   database: SqlDatabase,
   live: LiveHub,
-  roomId: string,
+  roomId: string | undefined,
   agentId: string,
   metadata: PresenceMetadata & { lifecycleId: string },
 ): Promise<void> {
   const announcement = await database.transaction((db) =>
     writeAgentAnnouncement(db, roomId, agentId, metadata),
   );
-  await finishAgentAnnouncement(database, agentId, metadata, announcement);
   if (announcement.changed) await broadcastAgentPresence(database, live, agentId);
 }
 
@@ -110,8 +107,8 @@ export async function claimAgentConnection(
   connection: HeldConnection,
 ): Promise<number> {
   const claimedConnection = await database.transaction(async (db) => {
-    // A connection carries presence only. Running turns stay claimed through
-    // reconnects and helper restarts; the helper resumes them from their record.
+    // A connection carries presence only. Queue items stay pending through
+    // reconnects and helper restarts; the helper receives them again.
     const claimed = await db.query<{ epoch: string | number }>(
       `INSERT INTO agent_connections(agent_id,epoch,connection_id,instance_id,connected_at,released_at)
        VALUES($1,1,$2,$3,clock_timestamp(),NULL)
@@ -127,8 +124,7 @@ export async function claimAgentConnection(
       WHERE agent_id=$1 AND removed_at IS NULL`,[agentId,connection.connectionId]);
     return { epoch: Number(claimed.rows[0]?.epoch ?? 0), announcement };
   });
-  const { epoch, announcement } = claimedConnection;
-  await finishAgentAnnouncement(database, agentId, metadata, announcement);
+  const { epoch } = claimedConnection;
   await notifyAgentConnection(database,agentId,epoch);
   live.publish({ type: 'agent-connection', roomId: '', agentId, epoch });
   await broadcastAgentPresence(database, live, agentId);
@@ -150,7 +146,7 @@ export async function releaseAgentConnection(
       [agentId, connectionId],
     );
     if (!current.rowCount) return undefined;
-    // A dropped socket leaves running turns claimed.
+    // A dropped socket leaves queue items pending.
     await db.query(
       `UPDATE live_outputs SET body=body || ${releasedPresenceSql('$1')} || jsonb_build_object(
          'observedAt',GREATEST($3::bigint,COALESCE((body->>'observedAt')::bigint,0)+1)),
@@ -218,41 +214,6 @@ async function writeAgentAnnouncement(
       RETURNING agent_id
     ) SELECT (SELECT body FROM previous) previous FROM written`, [agentId,presenceRoomId(roomId),JSON.stringify(body)]);
   return {changed:Boolean(written.rowCount),previous:written.rows[0]?.previous??undefined};
-}
-
-/** Command repair and restart receipts can wait on the Workspace journal.
- * Commit presence first so those waits hold neither its row nor its agent lock. */
-async function finishAgentAnnouncement(database: SqlDatabase, agentId: string,
-  metadata: PresenceMetadata, announcement: Announcement): Promise<void> {
-  if (!announcement.changed || !metadata.lifecycleId) return;
-  await database.transaction(async db => {
-    const lifecycle = metadata.lifecycleId;
-    if (!announcement.changed || !lifecycle) return;
-    const restarts = await db.query<{
-      id: string;
-      room_id: string;
-      source_message_id: string;
-      generation_id: string | null;
-      handle: string | null;
-      name: string;
-    }>(
-      `SELECT command.id,command.generation_id,command.room_id,command.source_message_id,beeline_room_handle(identity.id,command.room_id) handle,identity.name
-       FROM agent_commands command JOIN identities identity ON command.agent_id=identity.id
-       WHERE command.agent_id=$1
-         AND command.action='restart' AND (command.state='claimed' OR (command.state='pending'
-           AND EXISTS(SELECT 1 FROM agent_command_generation_owners binding WHERE binding.command_id=command.id)))
-         AND command.lifecycle_before IS DISTINCT FROM $2
-         AND EXISTS (SELECT 1 FROM live_outputs presence WHERE presence.agent_id=$1 AND presence.kind='presence'
-           AND presence.body->>'lifecycleId'=$2)
-       FOR UPDATE OF command`,
-      [agentId, lifecycle],
-    );
-    for (const restart of restarts.rows) {
-      if (!await endAgentTurn(db,restart,'complete')) continue;
-      await db.query('UPDATE agent_commands SET restart_confirmed_at=now() WHERE id=$1',[restart.id]);
-
-    }
-  });
 }
 
 export async function recordAgentEvidence(

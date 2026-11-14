@@ -85,7 +85,7 @@ import { daemonReach } from './corner-messages.js';
                WHERE intent->>'sourceMessageId'=message.id))
            AND EXISTS(SELECT 1 FROM agent_commands command
              WHERE command.room_id=corner.id AND command.agent_id=$2
-               AND command.state IN ('pending','claimed') AND command.review_context IS NOT NULL
+               AND command.state='pending' AND command.review_context IS NOT NULL
                AND command.review_context->>'headSha'=fact.lifecycle->'pr'->>'headSha'
                AND command.review_context->'pullRequest'=fact.lifecycle->'pr'->'number'
                AND command.review_context->>'briefRevision'=brief.revision::text)

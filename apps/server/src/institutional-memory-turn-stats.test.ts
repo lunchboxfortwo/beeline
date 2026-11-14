@@ -1,6 +1,7 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { describe, expect, it, beforeEach } from 'vitest';
 import { PgliteDatabase, migratedDatabase } from './test-support.js';
-import { claimAgentCommand, createAgentCommand } from './agent-command.js';
+import { createAgentCommand } from './agent-command.js';
 import { DaemonService } from './daemon-service.js';
 import { LiveHub } from './live.js';
 
@@ -72,9 +73,9 @@ async function openCommand(requestId: string, generationId: string) {
     agentId: RONNIE,
     sourceMessageId: MESSAGE,
     reason: 'human_tag',
-    turnRequestId: requestId,
+    id: requestId,
   });
-  await claimAgentCommand(database, ROOM, RONNIE, command!.id, generationId);
+  await startQueuedTurn(database, ROOM, RONNIE, command!.id);
 }
 
 describe('getInstitutionalMemoryTurnStats', () => {
@@ -83,31 +84,19 @@ describe('getInstitutionalMemoryTurnStats', () => {
     await openCommand('turn-1', 'gen-1');
     await daemon.execute(
       'saveInstitutionalMemory',
-      {
-        agentId: RONNIE,
-        roomId: ROOM,
-        requestId: 'turn-1',
-        generationId: 'gen-1',
-        memoryKind: 'human_profile_fact',
-        canonicalKey: 'requester.wife.name',
-        body: 'Her name is Daeun.',
-        keywords: ['wife', 'name'],
-        sourceMessageIds: [MESSAGE],
-        personAsked: false,
-        confidence: 0.9,
-      },
+      { agentId: RONNIE, roomId: ROOM, requestId: 'turn-1', memoryKind: 'human_profile_fact', canonicalKey: 'requester.wife.name', body: 'Her name is Daeun.', keywords: ['wife', 'name'], sourceMessageIds: [MESSAGE], personAsked: false, confidence: 0.9 },
       RONNIE,
     );
     // The passive snapshot writes the serve row this turn's stats ride on.
     await daemon.execute(
       'getInstitutionalContext',
-      { roomId: ROOM, requestId: 'turn-1', generationId: 'gen-1' },
+      { roomId: ROOM, requestId: 'turn-1' },
       RONNIE,
     );
     for (const query of ['wife name', 'birthday', 'phone number']) {
       await daemon.execute(
         'searchInstitutionalMemory',
-        { agentId: RONNIE, roomId: ROOM, requestId: 'turn-1', generationId: 'gen-1', query },
+        { agentId: RONNIE, roomId: ROOM, requestId: 'turn-1', query },
         RONNIE,
       );
     }
@@ -126,7 +115,7 @@ describe('getInstitutionalMemoryTurnStats', () => {
     await openCommand('turn-2', 'gen-2');
     await daemon.execute(
       'getInstitutionalContext',
-      { roomId: ROOM, requestId: 'turn-2', generationId: 'gen-2' },
+      { roomId: ROOM, requestId: 'turn-2' },
       RONNIE,
     );
     const stats = await daemon.execute(
@@ -142,12 +131,12 @@ describe('getInstitutionalMemoryTurnStats', () => {
     await openCommand('turn-3', 'gen-3');
     await daemon.execute(
       'getInstitutionalContext',
-      { roomId: ROOM, requestId: 'turn-3', generationId: 'gen-3' },
+      { roomId: ROOM, requestId: 'turn-3' },
       RONNIE,
     );
     await daemon.execute(
       'searchInstitutionalMemory',
-      { agentId: RONNIE, roomId: ROOM, requestId: 'turn-3', generationId: 'gen-3', query: 'wife' },
+      { agentId: RONNIE, roomId: ROOM, requestId: 'turn-3', query: 'wife' },
       RONNIE,
     );
     await expect(
@@ -156,6 +145,6 @@ describe('getInstitutionalMemoryTurnStats', () => {
         { roomId: ROOM, agentId: RONNIE, requestId: 'turn-3' },
         OUTSIDER,
       ),
-    ).rejects.toThrow('daemon token does not own requested agent');
+    ).rejects.toThrow(/daemon (?:token does not own requested agent|room access denied)/);
   });
 });

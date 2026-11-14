@@ -9,7 +9,7 @@ import { OwnedModelFiles, OwnedModelFileRefusal, OWNED_MODEL_FILE_MAX_BYTES,
 const roots: string[] = [];
 afterEach(() => { vi.restoreAllMocks(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 const token = 'bfmc_v1.' + 'a'.repeat(32) + '.' + 'b'.repeat(64);
-const binding: OwnedModelFileBinding = { agentId: 'synthetic-agent', generationId: 'generation-1',
+const binding: OwnedModelFileBinding = { agentId: 'synthetic-agent', itemId: 'generation-1',
   provider: 'beeline', model: 'pinned-model', baseUrl: 'https://fixture.invalid/v1/free-agents/model' };
 const credential = (): OwnedModelFileCredential => ({ v: 1, token, expiresAt: Math.floor(Date.now() / 1000) + 600 });
 function fixture() {

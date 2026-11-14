@@ -234,8 +234,6 @@ export interface LiveNotificationPayload {
   /** A current title/goal also changes the parent transcript's opening-card projection. */
   cornerTextChanged?: boolean;
   pending?: boolean;
-  /** An agent_commands row left `claimed`. */
-  released?: boolean;
   repositoryChanged?: boolean;
   installationId?: string;
   repositoryId?: string;
@@ -720,7 +718,6 @@ export class PostgresLiveListener {
         ? { turnStatus: payload.turnStatus } : {}),
       ...(payload.needsYouCandidate ? { needsYouCandidate: true } : {}),
       ...(['agent_commands','free_agents'].includes(payload.table) ? { targetAgentId: payload.agentId } : {}),
-      ...(payload.table === 'agent_commands' && payload.released ? { commandReleased: true } : {}),
       ...(payload.table === 'memberships' && payload.identityId
         ? { targetAgentId: payload.identityId }
         : {}),

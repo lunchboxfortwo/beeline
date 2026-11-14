@@ -29,7 +29,7 @@ it.each(['v0.1.201', 'v0.1.202-rc.4'])(
     await writeUpdateState(layout, { stagedReleaseId: 'older', previousReleaseId: 'previous' });
     const handoff = vi.fn(async () => {});
     const failed = vi.fn();
-    const update = new ReleaseTransaction({ layout, loadedRelease: 'running', env: {}, idle: () => true,
+    const update = new ReleaseTransaction({ layout, loadedRelease: 'running', env: {},
       handoff, failed, changed: vi.fn() });
     try {
       await update.prepared('older');
@@ -50,7 +50,7 @@ it('discards a failed handoff so another helper cannot retry the rolled-back sel
   await writeUpdateState(layout, { stagedReleaseId: 'broken', previousReleaseId: 'old' });
   const handoff = vi.fn(async () => { throw new Error('successor failed; restored old release'); });
   const failed = vi.fn();
-  const update = new ReleaseTransaction({ layout, loadedRelease: 'old', env: {}, idle: () => true,
+  const update = new ReleaseTransaction({ layout, loadedRelease: 'old', env: {},
     handoff, failed, changed: vi.fn() });
   try {
     await update.prepared('broken');
@@ -58,17 +58,16 @@ it('discards a failed handoff so another helper cannot retry the rolled-back sel
     await update.pending;
     expect(failed).toHaveBeenCalledTimes(1);
     expect((await readUpdateState(layout)).stagedReleaseId).toBeUndefined();
-    update.idleChanged();
     expect(handoff).toHaveBeenCalledTimes(1);
   } finally { update.dispose(); await rm(root, { recursive: true, force: true }); }
 });
 
-function fixture(handoff: (release: string, interrupted: boolean, signal: AbortSignal) => Promise<void>) {
+function fixture(handoff: (release: string, signal: AbortSignal) => Promise<void>) {
   const failed = vi.fn();
   const changed = vi.fn();
   const update = new ReleaseTransaction({
     layout: { libDir: '/isolated/lib', releasesRoot: '/isolated/releases', binDir: '/isolated/bin' },
-    loadedRelease: 'old', env: {}, idle: () => true,
+    loadedRelease: 'old', env: {},
     handoff, failed, changed,
   });
   return { update, failed, changed };
@@ -81,19 +80,13 @@ it('abandons a wedged handoff once and fences its late completion', async () => 
   const entered = new Promise<void>(done => { started = done; });
   const stuck = new Promise<void>(done => { release = done; });
   let signal: AbortSignal | undefined;
-  const handoff = vi.fn(async (_target: string, _interrupted: boolean, attempt: AbortSignal) => {
+  const handoff = vi.fn(async (_target: string, attempt: AbortSignal) => {
     signal = attempt;
     started();
     await stuck;
   });
   const { update, failed } = fixture(handoff);
-  let idle = false;
-  update.options.idle = () => idle;
   await update.prepared('new');
-  vi.advanceTimersByTime(30 * 60_000);
-  expect(failed).not.toHaveBeenCalled();
-  idle = true;
-  update.idleChanged();
   await entered;
   const pending = update.pending;
   vi.advanceTimersByTime(179_999);
@@ -105,7 +98,6 @@ it('abandons a wedged handoff once and fences its late completion', async () => 
   expect(update.desiredRelease).toBeUndefined();
   release();
   await pending;
-  update.idleChanged();
   expect(handoff).toHaveBeenCalledTimes(1);
   await update.prepared('newer');
   await update.pending;
@@ -124,7 +116,7 @@ it('cancels a wedged preparation and does not let it adopt a release after timeo
   const prepare = vi.fn(async () => { started(); await stuck; });
   const update = new ReleaseTransaction({
     layout: { libDir: '/isolated/lib', releasesRoot: '/isolated/releases', binDir: '/isolated/bin' },
-    loadedRelease: 'old', env: {}, idle: () => true,
+    loadedRelease: 'old', env: {},
     prepare,
     handoff, failed, changed: vi.fn(),
   });
@@ -142,63 +134,16 @@ it('cancels a wedged preparation and does not let it adopt a release after timeo
   update.dispose();
 });
 
-it('hands over on the next idle event without pausing active work', async () => {
+it('hands off as soon as a release is prepared, whatever the agents are doing', async () => {
   vi.useFakeTimers();
-  let idle = false;
   const handoff = vi.fn(async () => {});
   const { update, failed } = fixture(handoff);
-  update.options.idle = () => idle;
   await update.prepared('new');
   await update.pending;
-  expect(handoff).not.toHaveBeenCalled();
-  idle = true;
-  update.idleChanged();
-  await update.pending;
   expect(handoff).toHaveBeenCalledTimes(1);
-  expect(handoff).toHaveBeenCalledWith('new', false, expect.any(AbortSignal));
+  expect(handoff).toHaveBeenCalledWith('new', expect.any(AbortSignal));
   expect(failed).not.toHaveBeenCalled();
   expect(vi.getTimerCount()).toBe(0);
-});
-
-it('keeps a prepared release staged throughout a long busy period, then hands off', async () => {
-  vi.useFakeTimers();
-  const root = await mkdtemp(join(tmpdir(), 'beeline-busy-update-'));
-  const layout = { libDir: join(root, 'lib'), releasesRoot: join(root, 'releases'), binDir: join(root, 'bin') };
-  let idle = false;
-  const handoff = vi.fn(async () => {});
-  const failed = vi.fn();
-  const update = new ReleaseTransaction({ layout, loadedRelease: 'old', env: {}, idle: () => idle,
-    prepare: async () => { await writeUpdateState(layout, { stagedReleaseId: 'new', lastCheckResult: 'verified' }); },
-    handoff, failed, changed: vi.fn() });
-  try {
-    update.notify('new');
-    await update.pending;
-    await update.pending;
-    vi.advanceTimersByTime(30 * 60_000);
-    await update.pending;
-    expect(failed).not.toHaveBeenCalled();
-    expect(update.desiredRelease).toBe('new');
-    expect((await readUpdateState(layout)).stagedReleaseId).toBe('new');
-    expect(handoff).not.toHaveBeenCalled();
-    expect(vi.getTimerCount()).toBe(0);
-    idle = true;
-    update.idleChanged();
-    await update.pending;
-    expect(handoff).toHaveBeenCalledWith('new', false, expect.any(AbortSignal));
-    expect(handoff).toHaveBeenCalledTimes(1);
-  } finally { update.dispose(); await rm(root, { recursive: true, force: true }); }
-});
-
-it('hands off a forced update while agents are busy', async () => {
-  const handoff = vi.fn(async () => {});
-  const { update, failed } = fixture(handoff);
-  update.options.idle = () => false;
-  try {
-    await update.prepared('new', true);
-    await update.pending;
-    expect(handoff).toHaveBeenCalledWith('new', true, expect.any(AbortSignal));
-    expect(failed).not.toHaveBeenCalled();
-  } finally { update.dispose(); }
 });
 
 it('preserves a release notification arriving during an earlier preparation', async () => {
@@ -217,7 +162,7 @@ it('preserves a release notification arriving during an earlier preparation', as
   const handoff = vi.fn(async () => {});
   const failed = vi.fn();
   const update = new ReleaseTransaction({
-    layout, loadedRelease: 'old', env: {}, idle: () => true,
+    layout, loadedRelease: 'old', env: {},
     prepare, handoff, failed, changed: vi.fn(),
   });
   update.notify('old');
@@ -230,7 +175,7 @@ it('preserves a release notification arriving during an earlier preparation', as
     expect(prepare).toHaveBeenCalledTimes(2);
     await update.pending;
     await update.pending;
-    expect(handoff).toHaveBeenCalledWith('new', false, expect.any(AbortSignal));
+    expect(handoff).toHaveBeenCalledWith('new', expect.any(AbortSignal));
     expect(failed).not.toHaveBeenCalled();
   } finally {
     release();

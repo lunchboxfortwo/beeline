@@ -8,9 +8,9 @@ import { cornerOwnerSql } from './corner-worker.js';
 /** Release migration: old archived corners cannot have an active assignment. */
 export async function cancelArchivedCornerAssignments(database: SqlDatabase): Promise<void> {
   await database.query(
-    `SELECT (terminal.ended).* FROM (SELECT beeline_end_agent_turn(command.id,command.generation_id,'cancelled',NULL,NULL) ended FROM agent_commands command ,rooms corner WHERE corner.id=command.room_id
+    `SELECT (terminal.ended).* FROM (SELECT beeline_finish_agent_command(command.id,'cancelled',NULL,NULL) ended FROM agent_commands command ,rooms corner WHERE corner.id=command.room_id
        AND corner.parent_id IS NOT NULL AND corner.archived_at IS NOT NULL
-       AND command.state IN ('pending','claimed')) terminal`,
+       AND command.state='pending') terminal`,
   );
 }
 

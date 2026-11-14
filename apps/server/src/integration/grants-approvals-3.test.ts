@@ -488,7 +488,7 @@ const fixture = monolithFixture();
     expect(card).toMatchObject({ status, decidedAt: expect.any(Number) });
     expect(card?.decidedBy).toBeUndefined();
     expect((await fixture.phone.readRoom(ROOM, HUMAN))?.messages.find(message => message.id === id)?.presentation).toBe('card');
-    expect((await fixture.database.query(`SELECT action FROM agent_commands WHERE source_message_id=$1 AND turn_request_id=$2`, [id, asked.messageId])).rows).toEqual([{ action: 'resume' }]);
+    expect((await fixture.database.query(`SELECT action FROM agent_commands WHERE source_message_id=$1 AND agent_id=$2`, [id, AGENT])).rows).toEqual([{ action: 'input' }]);
   });
 
 

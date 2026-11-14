@@ -2,23 +2,21 @@ import { claimAgentConnection } from './connection-presence.js';
 
 import { createServer } from 'node:http';
 
-import type { createHmac, randomUUID } from 'node:crypto';
 
 import type { AddressInfo } from 'node:net';
 
 import { spawn } from 'node:child_process';
 
-import type { existsSync } from 'node:fs';
 
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp,readFile,rm } from 'node:fs/promises';
 
 import { join } from 'node:path';
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll,beforeAll,beforeEach,expect } from 'vitest';
 
-import { WebSocket, type WebSocketServer } from 'ws';
+import { WebSocket } from 'ws';
 
-import { findChromiumPage, shareChromiumPage, waitForComputerHandback } from '../../body/src/browser-share.js';
+import { findChromiumPage } from '../../body/src/browser-share.js';
 
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 
@@ -28,30 +26,19 @@ import { PgliteDatabase } from './test-support.js';
 
 import { LiveHub } from './live.js';
 
-import { systemLine } from './system-line.js';
-
-import { createAgentCommand, claimAgentCommand, readAgentCommands } from './agent-command.js';
-
-import { DaemonService } from './daemon-service.js';
 
 
-import { backfillComputerObservations } from './system-line.js';
+
+
 
 import { PhoneService } from './phone-service.js';
 
-import type { TokenAuth } from './auth.js';
 
-import { createBeelineServer } from './server.js';
 
-import { readRoomViewMessage } from '@beeline/api-contract/phone';
 
-import { CommandExecutionContext, runServerCommandIntake } from '../../body/src/server-command-intake.js';
 
-import { assembleTurnPrompt } from '../../body/src/prompt-assembly.js';
 
-import type { DaemonApiClient } from '../../body/src/daemon-api-client.js';
-
-import { VIEWER_LAYOUT_SCRIPT, computerViewToken, computerViewerHtml, createComputerSession, endComputerSession, getComputerSession, refreshComputerSession, serveComputerSession, serveComputerStatus, trustedComputerShareUpstream, upgradeBodyComputerSource, upgradeComputerSession, upgradeComputerWaiter } from './computer-session.js';
+import { VIEWER_LAYOUT_SCRIPT,serveComputerSession,serveComputerStatus,upgradeBodyComputerSource,upgradeComputerSession,upgradeComputerWaiter } from './computer-session.js';
 
 
 export const HUMAN = 'a'.repeat(64);
@@ -399,29 +386,29 @@ expectViewerGesture,
 viewerLayoutMath,
 };
 }
-export { claimAgentConnection } from './connection-presence.js';
-export { createServer } from 'node:http';
-export { createHmac, randomUUID } from 'node:crypto';
-export { AddressInfo } from 'node:net';
-export { spawn } from 'node:child_process';
-export { existsSync } from 'node:fs';
-export { mkdtemp, readFile, rm } from 'node:fs/promises';
-export { join } from 'node:path';
-export { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-export { WebSocket, WebSocketServer } from 'ws';
-export { findChromiumPage, shareChromiumPage, waitForComputerHandback } from '../../body/src/browser-share.js';
+export { readRoomViewMessage } from '@beeline/api-contract/phone';
 export { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
-export { migrate } from './database.js';
-export { PgliteDatabase } from './test-support.js';
-export { LiveHub } from './live.js';
-export { systemLine, backfillComputerObservations } from './system-line.js';
-export { createAgentCommand, claimAgentCommand, readAgentCommands } from './agent-command.js';
+export { spawn } from 'node:child_process';
+export { createHmac,randomUUID } from 'node:crypto';
+export { existsSync } from 'node:fs';
+export { mkdtemp,readFile,rm } from 'node:fs/promises';
+export { createServer } from 'node:http';
+export { AddressInfo } from 'node:net';
+export { join } from 'node:path';
+export { afterAll,beforeAll,beforeEach,describe,expect,it } from 'vitest';
+export { WebSocket,WebSocketServer } from 'ws';
+export { findChromiumPage,shareChromiumPage,waitForComputerHandback } from '../../body/src/browser-share.js';
+export type { DaemonApiClient } from '../../body/src/daemon-api-client.js';
+export { assembleTurnPrompt } from '../../body/src/prompt-assembly.js';
+export { createAgentCommand,readAgentCommands } from './agent-command.js';
+export type { TokenAuth } from './auth.js';
+export { VIEWER_LAYOUT_SCRIPT,computerViewToken,computerViewerHtml,createComputerSession,endComputerSession,getComputerSession,refreshComputerSession,serveComputerSession,serveComputerStatus,trustedComputerShareUpstream,upgradeBodyComputerSource,upgradeComputerSession,upgradeComputerWaiter } from './computer-session.js';
+export { claimAgentConnection } from './connection-presence.js';
 export { DaemonService } from './daemon-service.js';
+export { migrate } from './database.js';
+export { LiveHub } from './live.js';
 export { PhoneService } from './phone-service.js';
 export { createBeelineServer } from './server.js';
-export { readRoomViewMessage } from '@beeline/api-contract/phone';
-export { CommandExecutionContext, runServerCommandIntake } from '../../body/src/server-command-intake.js';
-export { assembleTurnPrompt } from '../../body/src/prompt-assembly.js';
-export { VIEWER_LAYOUT_SCRIPT, computerViewToken, computerViewerHtml, createComputerSession, endComputerSession, getComputerSession, refreshComputerSession, serveComputerSession, serveComputerStatus, trustedComputerShareUpstream, upgradeBodyComputerSource, upgradeComputerSession, upgradeComputerWaiter } from './computer-session.js';
-export type { TokenAuth } from './auth.js';
-export type { DaemonApiClient } from '../../body/src/daemon-api-client.js';
+export { backfillComputerObservations,systemLine } from './system-line.js';
+export { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
+export { PgliteDatabase } from './test-support.js';

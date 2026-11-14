@@ -158,7 +158,7 @@ it('copies sparse state twice, preserves owed items and read marks, and derives 
     expect((await db.query('SELECT 1 FROM memberships WHERE room_id=$1 AND removed_at IS NULL', [corner])).rowCount).toBe(0);
     await expect(phone.execute('sendRoomMessage', { roomId: corner, text: 'Denied after removal' }, person)).rejects.toThrow();
     await expect(phone.execute('deleteRoomMessage', { roomId: corner, messageId: retainedMessage }, person)).rejects.toThrow();
-    await VoiceService.prototype.recordAnswer.call(voice, corner, outsider, 'Denied voice answer');
+    await expect(VoiceService.prototype.recordAnswer.call(voice, corner, outsider, 'Denied voice answer')).rejects.toThrow('address requires current membership');
     expect((await db.query('SELECT 1 FROM messages WHERE room_id=$1 AND text=$2', [corner, 'Denied voice answer'])).rowCount).toBe(0);
 
     expect(await phone.canReadRoom(corner, person)).toBe(false);

@@ -1,3 +1,4 @@
+import { startQueuedCommand, startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { HelperDaemonService } from './test-fixtures/helper-daemon.js';
 import { normalizeLegacyWorkflowRuns, saveUnsavedWorkflowRunStatus } from './migrations/workflow-cleanup.js';
 import { workflowRunIsLiveSql, workflowRunStatusUnsavedSql } from './workflow-run-saved-status.js';
@@ -10,7 +11,7 @@ import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { migrate, migrateData, type SqlDatabase } from './database.js';
-import { claimAgentCommand, createAgentCommand, readAgentCommands, type CommandRow } from './agent-command.js';
+import { createAgentCommand, readAgentCommands, type CommandRow } from './agent-command.js';
 import { postRoomChoice } from './room-choice.js';
 import { AgentScheduleLoop } from './agent-schedules.js';
 import { PhoneService } from './phone-service.js';
@@ -194,11 +195,11 @@ describe('attempts: stale and repeated handoffs never advance a run twice', () =
       reason: 'corner_brief', privatePayload: { text: 'Unrelated lifecycle head', authorId: REVIEWER, fromRoomId: ROOM, kind: 'lifecycle' } });
     const { runId } = await startedRun();
 
-    const pending = (await readAgentCommands(database, ROOM, IMPLEMENTER)).commands;
+    const pending = (await readAgentCommands(database, IMPLEMENTER, ROOM)).commands;
     const workflowCommand = pending.find(command => command.source.body !== 'Unrelated lifecycle head')!;
     const unrelated = pending.find(command => command.source.body === 'Unrelated lifecycle head')!;
     expect(unrelated).toBeDefined();
-    const claimed = await database.transaction(tx => claimAgentCommand(tx, ROOM, IMPLEMENTER, workflowCommand.id, 'workflow-attempt'));
+    const claimed = await database.transaction(tx => startQueuedTurn(tx, ROOM, IMPLEMENTER, workflowCommand.id));
     await handoff(database, claimed, {
       runId, outcome: 'pushed', contents: { summary: 'Advanced the first step', prUrl: 'https://test/pr/1' }, attempt: 0,
     });
@@ -387,8 +388,8 @@ describe('a result ends its turn without implicitly moving a workflow', () => {
       const command = (await database.query<CommandRow>(
         `SELECT * FROM agent_commands WHERE source_message_id=$1 AND agent_id=$2`, [source, WORKER_A],
       )).rows[0]!;
-      await daemon.execute('claimAgentCommand', { roomId: ROOM, commandId: command.id, generationId }, WORKER_A);
-      return { roomId: ROOM, requestId: command.turn_request_id, generationId };
+      await startQueuedCommand(daemon, { roomId: ROOM, commandId: command.id }, WORKER_A);
+      return { roomId: ROOM, requestId: command.turn_request_id };
     };
     const previous = await claim(runId, 'script-turn');
     await daemon.execute('handoff', { ...previous, runId, outcome: 'done', contents: {}, attempt: 0 }, WORKER_A);
@@ -507,10 +508,11 @@ describe('Reproduction workflow-stalls', () => {
     const command = (await database.query<CommandRow>(`SELECT * FROM agent_commands WHERE source_message_id=$1 AND agent_id=$2`, [runId, WORKER_A])).rows[0]!;
     const generationId = 'workflow-stalls-3';
     const daemon = new HelperDaemonService(database, new LiveHub());
-    await daemon.execute('claimAgentCommand', { roomId: ROOM, commandId: command.id, generationId }, WORKER_A);
+    await startQueuedCommand(daemon, { roomId: ROOM, commandId: command.id }, WORKER_A);
     await database.query(`DELETE FROM workspace_skills WHERE slug='list-flow'`);
-    await daemon.execute('postAgentTurnReceipt', { roomId: ROOM, requestId: command.turn_request_id,
-      generationId, status: 'complete' }, WORKER_A);
+    await daemon.execute('postRoomMessage', {roomId:ROOM,requestId:command.turn_request_id,text:'Finished the requested work.'},WORKER_A);
+    await database.backgroundWork?.drain();
+    await daemon.execute('postAgentTurnReceipt', { roomId: ROOM, requestId: command.turn_request_id, status: 'complete' }, WORKER_A);
     expect((await database.query(`SELECT state FROM agent_commands WHERE id=$1`, [command.id])).rows[0]).toMatchObject({ state: 'complete' });
     expect((await database.query(`SELECT status FROM agent_turns WHERE request_id=$1`, [command.turn_request_id])).rows[0]).toMatchObject({ status: 'complete' });
     console.log('Demonstrated workflow-stalls-3: missing contract did not prevent the completion receipt or command completion');
@@ -717,8 +719,8 @@ describe('Reproduction 8: recoverable workflow visits', () => {
           sourceMessageId: source ?? await rootMessage(WORKER_A), reason: 'test' }))!;
     await expect(handoff(database, await gateCommand(),
       { runId, outcome: 'publish', contents: {} })).rejects.toThrow('a person answers');
-    await expect(handoff(database, await gateCommand(await rootMessage(OUTSIDER)),
-      { runId, outcome: 'publish', contents: {} })).rejects.toThrow('room access denied');
+    await expect((async()=>handoff(database,await gateCommand(await rootMessage(OUTSIDER)),
+      {runId,outcome:'publish',contents:{}}))()).rejects.toThrow(/room access denied|address requires current membership/);
     const answer = await rootMessage(OWNER, 'publish for this exact run');
     await handoff(database, await gateCommand(answer), { runId, outcome: 'publish', contents: {} });
     const read = await getWorkflowRun(database, corner, runId);

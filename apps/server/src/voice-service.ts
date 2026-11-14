@@ -1,25 +1,32 @@
-import { phoneIdentity as identity, type PhoneIdentityRow as IdentityRow } from './phone-identity.js';
-import { systemMessage } from '@beeline/api-contract/system-message-catalog';
-import type { ObjectService } from './object-service.js';
-import { mediaIdFromUrl } from './media-ttl.js';
-import { voiceContextText, type VoiceContextRow } from './voice-context.js';
-import { CornerAccessDatabase } from './corner-access-database.js';
-import { VoiceBudgetStore } from './voice-budget.js';
-import { AgentVoiceService } from './agent-voice.js';
-import { createHash, createHmac, timingSafeEqual, randomBytes, randomUUID } from 'node:crypto';
-import { AccessToken, RoomServiceClient } from 'livekit-server-sdk';
-import { type VoiceIdleState, type VoiceCall, type VoiceJoin, voiceDuration } from '@beeline/api-contract/phone';
+import { parseAgentAccessPolicy,senderMayAddressAgent } from '@beeline/api-contract/agent-access';
+import { voiceDuration,type VoiceCall,type VoiceIdleState,type VoiceJoin } from '@beeline/api-contract/phone';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
-import { parseAgentAccessPolicy, senderMayAddressAgent } from '@beeline/api-contract/agent-access';
+import { systemMessage } from '@beeline/api-contract/system-message-catalog';
+import { AccessToken,RoomServiceClient } from 'livekit-server-sdk';
+import { createHash,createHmac,randomBytes,randomUUID,timingSafeEqual } from 'node:crypto';
+import { queueMessage,type CommandRow } from './agent-command.js';
+import { AgentVoiceService } from './agent-voice.js';
+import { CornerAccessDatabase } from './corner-access-database.js';
 import type { SqlDatabase } from './database.js';
-import type { LiveHub } from './live.js';
-import { systemLine, restateSystemLine, restateSystemLines, ensureSystemIdentity } from './system-line.js';
 import { searchInstitutionalHistory } from './institutional-history.js';
-import { routeAgentResult, routeHumanMessage, type CommandRow } from './agent-command.js';
-import { assignVoiceAgents, type VoiceAgent, type VoiceBrain, type VoiceSearch, type VoiceSpeech, type VoiceSttFactory,
-  OpenRouterVoiceBrain, openRouterWebSearch, AuraSpeech, fluxFactory, VOICE_MODEL, AURA_VOICES, savedAuraVoice } from './voice-providers.js';
-import { VoiceRoomRuntime } from './voice-room-runtime.js';
+import type { LiveHub } from './live.js';
 import type { SpeechMember } from './markdown-to-speech.js';
+import { mediaIdFromUrl } from './media-ttl.js';
+import type { ObjectService } from './object-service.js';
+import { phoneIdentity as identity,type PhoneIdentityRow as IdentityRow } from './phone-identity.js';
+import { ensureSystemIdentity,restateSystemLine,restateSystemLines,systemLine } from './system-line.js';
+import { VoiceBudgetStore } from './voice-budget.js';
+import { voiceContextText,type VoiceContextRow } from './voice-context.js';
+import {
+assignVoiceAgents,
+AuraSpeech,fluxFactory,
+OpenRouterVoiceBrain,openRouterWebSearch,
+savedAuraVoice,
+VOICE_MODEL,
+type VoiceAgent,type VoiceBrain,type VoiceSearch,type VoiceSpeech,type VoiceSttFactory
+} from './voice-providers.js';
+import { voiceDateContext } from './voice-reply.js';
+import { VoiceRoomRuntime } from './voice-room-runtime.js';
 
 export type VoiceConfig = { url: string; apiKey: string; apiSecret: string; brain: VoiceBrain;
   speech: VoiceSpeech; stt: VoiceSttFactory; searchWeb?: (query: string, signal: AbortSignal, currentTime?: number) => Promise<string>; budgetLimitMs?: number; objects?: ObjectService; publicOrigin?: string };
@@ -260,7 +267,7 @@ export class VoiceService {
 
   async callWorkState(callId: string, db = this.db): Promise<{ pending: boolean; finishedAt: number }> {
     const row = (await db.query<{ pending: boolean; finished_at: Date | null }>(`SELECT
-      coalesce(bool_or(c.state IN ('pending','claimed')),false) pending, max(c.completed_at) finished_at
+      coalesce(bool_or(c.state='pending'),false) pending, max(c.completed_at) finished_at
       FROM voice_orders o JOIN agent_commands c
       ON c.source_message_id=o.source_message_id AND c.agent_id=o.agent_id WHERE o.call_id=$1`, [callId])).rows[0];
     return { pending: row?.pending ?? false, finishedAt: row?.finished_at?.getTime() ?? 0 };
@@ -409,13 +416,9 @@ export class VoiceService {
   async recordHuman(callId: string, roomId: string, humanId: string, agent: VoiceAgent, text: string, leaseOwner?: string, requestId?: string) {
     const id = requestId ?? randomBytes(32).toString('hex');
     await this.db.transaction(async db => {
-      await this.access(roomId, humanId, db);
-      const joined = await db.query(`SELECT 1 FROM voice_participants p JOIN voice_calls c ON c.id=p.call_id
-        WHERE p.call_id=$1 AND p.identity_id=$2 AND p.left_at IS NULL AND c.ended_at IS NULL AND ($3::text IS NULL OR (c.runtime_owner=$3 AND c.runtime_until>now())) FOR SHARE OF p,c`, [callId, humanId, leaseOwner ?? null]);
-      if (!joined.rowCount) throw new Error('voice call access denied');
-      await db.query(`WITH message AS (INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,$4) ON CONFLICT(id) DO NOTHING RETURNING id)
-        INSERT INTO voice_messages(message_id,call_id) SELECT id,$5 FROM message`,
-        [id, roomId, humanId, `@${agent.handle} ${text.replace(/@/g, '')}`, callId]);
+      await queueMessage(db, { kind: 'post', id, roomId, authorId: humanId,
+        text: `@${agent.handle} ${text.replace(/@/g, '')}`, agentIds: [] });
+      await db.query('INSERT INTO voice_messages(message_id,call_id) VALUES($1,$2) ON CONFLICT DO NOTHING', [id, callId]);
     });
     this.live.publish({ type: 'invalidate', roomId, reason: 'message', messageId: id, operation: 'INSERT' });
     return id;
@@ -487,19 +490,13 @@ export class VoiceService {
 
   async dispatch(callId: string, sourceId: string, agentId: string) {
     await this.db.transaction(async db => {
-      const row = (await db.query<{ room_id: string; author_id: string; text: string }>(`SELECT m.room_id,m.author_id,m.text FROM messages m
-        JOIN voice_calls c ON c.room_id=m.room_id AND c.id=$2 AND c.ended_at IS NULL
-        JOIN voice_participants p ON p.call_id=c.id AND p.identity_id=m.author_id AND p.left_at IS NULL
-        WHERE m.id=$1 FOR UPDATE OF m FOR SHARE OF c,p`, [sourceId, callId])).rows[0];
+      const row = (await db.query<{ room_id: string; author_id: string; text: string }>(
+        'SELECT room_id,author_id,text FROM messages WHERE id=$1', [sourceId])).rows[0];
       if (!row) throw new Error('Voice request is no longer available');
-      await this.access(row.room_id, row.author_id, db);
-      const target = (await db.query<{ handle: string }>(`SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1 FOR SHARE`, [agentId,row.room_id])).rows[0];
-      if (!target?.handle || !row.text.startsWith(`@${target.handle} `))
-        throw new Error('The agent handle changed; please repeat the order');
-      const inserted = await db.query(`INSERT INTO voice_orders(source_message_id,call_id,agent_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`,
+      await queueMessage(db,{roomId:row.room_id,agentId,sourceMessageId:sourceId,reason:'voice_order',
+        wakeNote:`This input came from a live voice call. ${voiceDateContext(Date.now())} Answer it as a short continuation of the conversation. Never start your reply with your name.`});
+      await db.query(`INSERT INTO voice_orders(source_message_id,call_id,agent_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`,
         [sourceId, callId, agentId]);
-      if (!inserted.rowCount) return;
-      await routeHumanMessage(db, sourceId);
     });
   }
 
@@ -525,23 +522,21 @@ export class VoiceService {
       if (first && rendition(first) === rendition(second)) { text = first; break; }
     }
     if (!text.trim()) return;
-    await this.db.transaction(async database => {
+    const posted=await this.db.transaction(async database => {
       const messageId = options?.replyId
         ? createHash('sha256').update(`voice-reply:${roomId}:${agentId}:${options.replyId}`).digest('hex')
         : randomBytes(32).toString('hex');
-      const inserted = await database.query(`INSERT INTO messages(id,room_id,author_id,text,agent_model)
-        SELECT $1,$2,$3,$4,$5 FROM rooms r JOIN memberships m ON m.room_id=COALESCE(r.parent_id,r.id)
-        WHERE r.id=$2 AND m.identity_id=$3 AND m.removed_at IS NULL AND r.archived_at IS NULL FOR SHARE OF m
-        ON CONFLICT(id) DO NOTHING RETURNING id`,
-        [messageId, roomId, agentId, text, VOICE_MODEL]);
-      if (!inserted.rowCount || options?.routeMentions === false || !text.includes('@')) return;
       const parent = options?.sourceId ? (await database.query<CommandRow>(
         `SELECT command.* FROM voice_orders voice JOIN agent_commands command
           ON command.source_message_id=voice.source_message_id AND command.agent_id=voice.agent_id
          WHERE voice.source_message_id=$1 AND voice.agent_id=$2 AND command.room_id=$3
          ORDER BY command.created_at DESC LIMIT 1`, [options.sourceId, agentId, roomId])).rows[0] : undefined;
-      await routeAgentResult(database, parent, messageId, { roomId, agentId });
+      const saved=await queueMessage(database, { kind: 'post', roomId, authorId: agentId, id: messageId, text,
+        parent, ...(options?.routeMentions === false ? { agentIds: [] } : {}) });
+      return saved.id;
     });
+    void this.db.query('UPDATE messages SET agent_model=$2 WHERE id=$1',[posted,VOICE_MODEL])
+      .catch(error=>console.warn('[voice] optional model attribution omitted:',error));
   }
 
   async close() {

@@ -45,7 +45,8 @@ CREATE TABLE IF NOT EXISTS agent_subscriptions (
 ALTER TABLE agent_subscriptions ALTER COLUMN prompt DROP NOT NULL;
 ALTER TABLE agent_subscriptions ADD COLUMN IF NOT EXISTS inherit_to_corners boolean NOT NULL DEFAULT false;
 DO $$ BEGIN
- IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='agent_subscriptions_room_prompt') THEN
+ IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='agent_subscriptions_room_prompt'
+   AND conrelid='agent_subscriptions'::regclass) THEN
   ALTER TABLE agent_subscriptions ADD CONSTRAINT agent_subscriptions_room_prompt CHECK(prompt IS NOT NULL OR source='room');
  END IF;
 END $$;
@@ -67,11 +68,13 @@ ALTER TABLE agent_subscriptions ADD COLUMN IF NOT EXISTS webhook_token_created_a
 ALTER TABLE agent_subscriptions ADD COLUMN IF NOT EXISTS webhook_owner_id text REFERENCES identities(id) ON DELETE CASCADE;
 CREATE INDEX IF NOT EXISTS agent_subscriptions_webhook_owner ON agent_subscriptions(webhook_owner_id);
 DO $$ BEGIN
- IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='agent_subscriptions_source_v3_check') THEN
+ IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='agent_subscriptions_source_v3_check'
+   AND conrelid='agent_subscriptions'::regclass) THEN
   ALTER TABLE agent_subscriptions ADD CONSTRAINT agent_subscriptions_source_v3_check
    CHECK(source IN ('room','repository','service','webhook'));
  END IF;
- IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='agent_subscriptions_shape_v3_check') THEN
+ IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='agent_subscriptions_shape_v3_check'
+   AND conrelid='agent_subscriptions'::regclass) THEN
   ALTER TABLE agent_subscriptions ADD CONSTRAINT agent_subscriptions_shape_v3_check CHECK (
    (source='room' AND repository IS NULL) OR (source='repository' AND repository IS NOT NULL)
    OR (source='webhook' AND event='webhook.called')

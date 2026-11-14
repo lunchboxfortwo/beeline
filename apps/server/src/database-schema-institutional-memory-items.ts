@@ -487,6 +487,10 @@ CREATE TABLE IF NOT EXISTS agent_connections (
   connected_at timestamptz NOT NULL DEFAULT now(),
   released_at timestamptz
 );
+-- Retired transport fields remain readable during serving/rollback overlap.
+ALTER TABLE agent_connections ADD COLUMN IF NOT EXISTS turn_connection_id text;
+ALTER TABLE agent_connections ADD COLUMN IF NOT EXISTS turn_connection_epoch bigint;
+ALTER TABLE agent_connections ADD COLUMN IF NOT EXISTS turn_transport_id text;
 CREATE INDEX IF NOT EXISTS agent_connections_held ON agent_connections(instance_id) WHERE released_at IS NULL;
 
 -- Each server instance renews its own row; an instance that stops renewing

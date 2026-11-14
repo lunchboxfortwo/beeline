@@ -211,12 +211,3 @@ function repoFromReason(text: string): string {
 export function repositoryCacheDamagedFault(cache: string, machine: string): string {
   return `The repo cache ${cache} on ${machine} is damaged and automatic repair failed. The machine's owner needs to repair it`;
 }
-
-/** Corner-start configuration that cannot recover without a human/config change. */
-export function isStandingWorkspaceConfigurationFault(text: string): boolean {
-  return (
-    /repository state is not verified/i.test(text) ||
-    /incomplete repository binding/i.test(text) ||
-    /no authoritative objective fact/i.test(text)
-  );
-}

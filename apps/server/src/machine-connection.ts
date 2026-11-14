@@ -1,57 +1,9 @@
-import { cachedSentryAccount, noteSentryUser, rememberSentryAccount, withSentryAgent } from './sentry.js';
+import { HELPER_UPDATE_CLOSE_CODE,HELPER_UPDATE_CLOSE_REASON,wall } from '@beeline/api-contract/daemon';
 import type { Socket } from 'node:net';
 import type { WebSocket } from 'ws';
-import { HELPER_UPDATE_CLOSE_CODE, HELPER_UPDATE_CLOSE_REASON } from '@beeline/api-contract/daemon';
-import { helperVersionBelowMinimum } from './helper-version-gate.js';
-import { DaemonAgentSession, type DaemonLiveDependencies } from './daemon-live.js';
-export const MAX_MACHINE_AGENTS = 64;
+import { DaemonAgentSession,type DaemonLiveDependencies } from './daemon-live.js';
+import { cachedSentryAccount,noteSentryUser,rememberSentryAccount,withSentryAgent } from './sentry.js';
 export const MACHINE_SOCKET_PROTOCOL = 'beeline.machine.1';
-/** The helper version a daemon socket reported, and the server minimum it is held to. */
-class HelperVersionGuard {
-  #pushedMinimum: string | undefined;
-  readonly #release: () => void;
-
-  constructor(
-    private readonly deps: DaemonLiveDependencies,
-    private version: string | undefined,
-    private readonly send: (payload: string) => void,
-    private readonly close: (code: number, reason: string) => void,
-  ) {
-    this.#release = deps.helperVersionGate.subscribe((minimum) => {
-      if (this.#forceUpdate(minimum)) close(HELPER_UPDATE_CLOSE_CODE, HELPER_UPDATE_CLOSE_REASON);
-    });
-  }
-
-  learn(version: string): void {
-    this.version ??= version;
-  }
-
-  #forceUpdate(minimum: string): boolean {
-    if (!helperVersionBelowMinimum(this.version, minimum) || this.#pushedMinimum === minimum)
-      return false;
-    this.#pushedMinimum = minimum;
-    this.deps.counters.helperForceUpdates++;
-    this.send(JSON.stringify({ type: 'force-update', minVersion: minimum }));
-    return true;
-  }
-
-  /** False when the socket was closed for its version. */
-  admit(): boolean {
-    const minimum = this.deps.helperVersionGate.minimum;
-    if (!minimum) return true;
-    if (this.#forceUpdate(minimum) || helperVersionBelowMinimum(this.version, minimum)) {
-      this.deps.counters.helperVersionRefusals++;
-      this.close(HELPER_UPDATE_CLOSE_CODE, HELPER_UPDATE_CLOSE_REASON);
-      return false;
-    }
-    return true;
-  }
-
-  dispose(): void {
-    this.#release();
-  }
-}
-
 type SendLive = (payload: string) => void;
 
 function frameBytes(raw: Buffer | ArrayBuffer | Buffer[]): number {
@@ -82,9 +34,6 @@ export function serveAgentSocket(
   sendLive: SendLive,
   trackSubscriptions: (count: () => number) => void,
 ): void {
-  const guard = new HelperVersionGuard(
-    deps, principal.helperVersion, sendLive, (code, reason) => client.close(code, reason),
-  );
   const isOpen = () => client.readyState === client.OPEN;
   const send = (event: Record<string, unknown>) => {
     if (isOpen()) sendLive(JSON.stringify(event));
@@ -108,11 +57,6 @@ export function serveAgentSocket(
       if (code === 4001) client.terminate();
       else if (isOpen()) client.close(code, reason);
     },
-    admit: (item) => {
-      if (item.type === 'subscribe' && typeof item.releaseVersion === 'string')
-        guard.learn(item.releaseVersion);
-      return guard.admit();
-    },
   });
   void session.claim();
   trackSubscriptions(() => session.subscriptions);
@@ -120,7 +64,6 @@ export function serveAgentSocket(
     send({ type: 'helper-release', version: release.version, sha: release.sha }),
   );
   client.on('message', (raw: Buffer | ArrayBuffer | Buffer[]) => {
-    if (!guard.admit()) return;
     const bytes = frameBytes(raw);
     const item = parseFrame(raw);
     if (!item) {
@@ -130,7 +73,6 @@ export function serveAgentSocket(
     withSentryAgent(deps.database, principal.identityId, () => session.frame(item, bytes));
   });
   client.on('close', (code, reason) => {
-    guard.dispose();
     releaseSubscription?.();
     session.close(code === HELPER_UPDATE_CLOSE_CODE && reason.toString() === HELPER_UPDATE_CLOSE_REASON);
   });
@@ -149,10 +91,6 @@ export function serveMachineSocket(
   trackSubscriptions: (count: () => number) => void,
 ): void {
   const sessions = new Map<string, DaemonAgentSession>();
-  const registering = new Set<string>();
-  const guard = new HelperVersionGuard(
-    deps, principal.helperVersion, sendLive, (code, reason) => client.close(code, reason),
-  );
   const isOpen = () => client.readyState === client.OPEN;
   const send = (event: Record<string, unknown>) => {
     if (isOpen()) sendLive(JSON.stringify(event));
@@ -184,30 +122,21 @@ export function serveMachineSocket(
       deps.errors.invalid++;
       return;
     }
-    if (typeof token !== 'string' || !token.startsWith('bdt_')) {
-      reply({ type: 'register-refused', agentId, code: 'daemon_token_required' });
-      return;
-    }
-    if (registering.has(agentId)) return;
-    if (!sessions.has(agentId) && sessions.size + registering.size >= MAX_MACHINE_AGENTS) {
-      deps.errors.overload++;
-      reply({ type: 'register-refused', agentId, code: 'too_many_agents' });
-      return;
-    }
-    registering.add(agentId);
     const registrationStartedAt = Date.now();
     let registrationStage = 'authentication';
     try {
-      const authenticated = await deps.auth.authenticateDaemon(token);
+      const authenticated = typeof token === 'string' && token.startsWith('bdt_')
+        ? await deps.auth.authenticateDaemon(token,true) : undefined;
+      const authenticatedAgent=typeof authenticated==='string' ? authenticated : authenticated?.agentId;
       if (!isOpen()) return;
-      if (authenticated !== agentId) {
+      if (authenticatedAgent !== agentId) {
         // The same two answers HTTP gives: a settled removal, or a token to retry.
         registrationStage = 'retirement-check';
-        const retired = authenticated ? null : await deps.auth.retiredDaemonAgent(token);
+        const retired = authenticatedAgent ? null : typeof token === 'string' ? await deps.auth.retiredDaemonAgent(token) : null;
         reply({
           type: 'register-refused',
           agentId,
-          code: retired ? 'agent_removed' : 'daemon_token_required',
+          code: wall('credentials', retired ? 'agent_removed' : 'daemon_token_required').message,
         });
         return;
       }
@@ -224,37 +153,27 @@ export function serveMachineSocket(
             sessions.delete(agentId);
             unregistered(agentId, reason, code);
           },
-          admit: () => guard.admit(),
-          authenticateOperation: async () => {
-            if (await deps.auth.authenticateDaemon(token) === agentId) return undefined;
-            client.close(4003,'machine login changed');
-            return await deps.auth.retiredDaemonAgent(token)
-              ? {error: 'agent_removed', status: 403} : {error: 'daemon_token_required', status: 401};
-          },
+
         },
         {
-          ...(typeof item.lifecycleId === 'string' && item.lifecycleId.length <= 128
+          ...(typeof item.lifecycleId === 'string'
             ? { lifecycleId: item.lifecycleId } : {}),
           ...(typeof item.releaseVersion === 'string' ? { releaseVersion: item.releaseVersion } : {}),
           ...(typeof item.sourceSha === 'string' ? { sourceSha: item.sourceSha } : {}),
           ...(typeof item.available === 'boolean' ? { available: item.available } : {}),
           ...(item.overlayV1===true?{overlayV1:true}:{}),
           ...(item.usageAccountV1===true?{usageAccountV1:true}:{}),
-          ...(item.activationContextV1===true?{activationContextV1:true}:{}),
-          ...(item.turnOwnershipV1===true?{turnOwnershipV1:true}:{}),
-          ...(item.ownedModelV1===true?{ownedModelV1:true}:{}),
-          ...(item.ownedModelUnboundedV1===true?{ownedModelUnboundedV1:true}:{}),
+          ...(item.queueV1===true?{queueV1:true}:{}),
           ...(item.daemonOperationsV1===true?{daemonOperationsV1:true}:{}),
         },
       );
+      if (authenticated && typeof authenticated!=='string') session.usageOwnerId=authenticated.ownerId ?? undefined;
       sessions.set(agentId, session);
       registrationStage = 'presence-claim';
       await session.claim();
       if (session.closed || sessions.get(agentId) !== session) return;
       // The helper names this account on its own error reports. Telemetry never refuses registration.
-      const ownerId = session.usageOwnerId ?? (cachedSentryAccount(agentId) !== agentId ? cachedSentryAccount(agentId) : undefined) ?? await deps.database.query<{ owner_id: string | null }>(
-        'SELECT owner_id FROM agents WHERE agent_id=$1', [agentId],
-      ).then(result => result.rows[0]?.owner_id ?? undefined, () => undefined);
+      const ownerId = session.usageOwnerId ?? (cachedSentryAccount(agentId) !== agentId ? cachedSentryAccount(agentId) : undefined);
       if (ownerId) { rememberSentryAccount(agentId, ownerId); noteSentryUser(ownerId); }
       if (session.closed || sessions.get(agentId) !== session) return;
       reply({
@@ -262,11 +181,9 @@ export function serveMachineSocket(
         agentId,
         capabilities: { initialSnapshotsV1: true, discoveryWake: true, pushIntake: true,
           ...(item.daemonOperationsV1 === true ? {daemonOperationsV1:true} : {}),
-          ...(session.turnOwnershipV1 ? {turnOwnershipV1:true,turnConnectionId:session.turnSource!.connectionId,turnConnectionEpoch:session.turnSource!.epoch,turnContinuationV1:session.turnContinuationV1} : {}),
-          ...(session.ownedModelV1 ? {ownedModelV1:true} : {}),
+          ...(item.queueV1 === true ? {queueV1:true} : {}),
           ...(ownerId ? {ownerId} : {}),
           ...(session.overlayV1?{overlayV1:true}:{}),
-          ...(session.activationContextV1?{activationContextV1:true,activationConnectionId:session.connectionId,activationConnectionEpoch:session.epoch}:{}),
           ...(session.usageAccountV1?{usageAccountV1:true,usageOwnerId:session.usageOwnerId,usageConnectionId:session.connectionId,usageConnectionEpoch:session.epoch}:{}) },
       });
     } catch (error) {
@@ -276,23 +193,19 @@ export function serveMachineSocket(
         helperSourceSha: principal.helperSourceSha,
       }), error instanceof Error ? error.message : String(error));
       if (isOpen()) reply({ type: 'register-refused', agentId, code: 'registration_failed' });
-    } finally {
-      registering.delete(agentId);
     }
   };
 
   client.on('message', (raw: Buffer | ArrayBuffer | Buffer[]) => {
-    if (!guard.admit()) return;
     const bytes = frameBytes(raw);
     const item = parseFrame(raw);
     if (!item) {
       deps.errors.invalid++;
       return;
     }
-    if (item.type === 'register-machine' && Array.isArray(item.agents) && item.agents.length <= MAX_MACHINE_AGENTS) {
-      const agents: Record<string,unknown>[] = [];
-      void Promise.all(item.agents.map(agent => agent && typeof agent === 'object'
-        ? register(agent, event => { agents.push(event); }) : undefined)).then(() => send({type:'registered-machine',agents}));
+    if (item.type === 'register-machine' && Array.isArray(item.agents)) {
+      for (const agent of item.agents)
+        if (agent && typeof agent === 'object') void register(agent);
       return;
     }
     if (item.type === 'register') {
@@ -313,7 +226,6 @@ export function serveMachineSocket(
     withSentryAgent(deps.database, session.agentId, () => session.frame(item, bytes));
   });
   client.on('close', (code, reason) => {
-    guard.dispose();
     releaseSubscription?.();
     const forUpdate = code === HELPER_UPDATE_CLOSE_CODE && reason.toString() === HELPER_UPDATE_CLOSE_REASON;
     for (const session of sessions.values()) session.close(forUpdate);
@@ -321,13 +233,12 @@ export function serveMachineSocket(
   });
 }
 
-/** The physical machine output owner. Backpressure refuses admission without
- * closing an otherwise live machine. Socket close remains login/version-only. */
-export function machineConnectionOutput(client:WebSocket,limit:number,onOverload:()=>void):(payload:string)=>boolean {
-  return payload=>{
-    if(client.readyState!==client.OPEN)return false;
-    if(client.bufferedAmount+Buffer.byteLength(payload)>limit){onOverload();return false;}
-    client.send(payload);return true;
+/** A live machine receives every queue/result frame. Durable items survive disconnect. */
+export function machineConnectionOutput(client: WebSocket): (payload: string) => boolean {
+  return payload => {
+    const open = client.readyState === client.OPEN;
+    if (open) client.send(payload);
+    return open;
   };
 }
 

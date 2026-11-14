@@ -12,6 +12,7 @@ async function fixture(){
     connectionPresence:{renewLease:async()=>undefined,claimConnection:async()=>1,releaseConnection:async()=>undefined},
     acquireLiveDbTask:async()=>()=>undefined,shuttingDown:()=>false,errors:{database:0,invalid:0,internal:0,overload:0},counters:{helperVersionRefusals:0,helperForceUpdates:0}} as unknown as DaemonLiveDependencies;
   const session=new DaemonAgentSession(deps,agent,{send:reply=>{replies.push(reply);waiters.shift()?.(reply);},isOpen:()=>true,drop:()=>undefined,admit:()=>true},{usageAccountV1:true});
+  session.usageOwnerId=owner;
   sessions.push(session);await session.claim();
   const source={connectionId:session.connectionId,epoch:1};
   const send=(operation:string,input:unknown)=>{

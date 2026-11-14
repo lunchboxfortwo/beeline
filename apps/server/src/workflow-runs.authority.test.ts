@@ -1,3 +1,4 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { ExpectedRefusalError } from './command-refusal.js';
 import { activeWorkflowRunIds } from './workflow-admin.js';
 import { DaemonService } from './daemon-service.js';
@@ -6,7 +7,7 @@ import { describedWorkflow, insertCornerFacts } from './test-support.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import { claimAgentCommand, createAgentCommand, readAgentCommands, type CommandRow } from './agent-command.js';
+import { createAgentCommand, readAgentCommands, type CommandRow } from './agent-command.js';
 import { answerRoomChoice } from './room-choice.js';
 import { AgentScheduleLoop } from './agent-schedules.js';
 import { PhoneService } from './phone-service.js';
@@ -235,14 +236,13 @@ describe('agent workflow run reads and cancellation', () => {
     await expect(getWorkflowRun(database, '30000000-0000-4000-8000-000000000001', runId)).rejects.toThrow('unavailable in this Room');
   });
 
-  it('cancels the wake for an earlier attempt and states the new attempt on the next wake', async () => {
+  it('retains the earlier answer obligation and records the next attempt on its own wake', async () => {
     const { runId } = await startedRun();
     await handoff(database, await commandFor(IMPLEMENTER), { runId, outcome: 'pushed', contents: { summary: 'ready', prUrl: 'test' } });
-    const commands = (await readAgentCommands(database, ROOM, IMPLEMENTER)).commands;
-    expect(commands.find(c => c.sourceMessageId === runId)).toBeUndefined();
-    const wake = commands.find(c => c.source.body.includes(`You are in run ${runId}`));
-    expect(wake?.source.body).toContain('Current state: checks');
-    expect(wake?.source.body).toContain('passing -> review');
+    const commands = (await readAgentCommands(database, IMPLEMENTER, ROOM)).commands;
+    expect(commands.find(c => c.sourceMessageId === runId)).toBeDefined();
+    const wake = commands.find(c => c.source.body.includes('This wake is attempt 1:'));
+    expect(await getWorkflowRun(database, ROOM, runId)).toMatchObject({ state: 'checks', allowedOutcomes: { passing: 'review', failing: 'implement' } });
     expect(wake?.source.body).toContain('This wake is attempt 1: pass "attempt": 1 to app_tool’s beeline:workflow advance action.');
   });
 
@@ -260,11 +260,12 @@ describe('agent workflow run reads and cancellation', () => {
     await expect(cancelWorkflowRun(database, command, { runId, reason: 'Again' })).rejects.toThrow('already ended');
   });
 
-  it('refuses an unrelated requester even when the executing agent holds the run', async () => {
+  it('allows a current Room member to Stop even when they did not request the run', async () => {
+    await database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [WORKSPACE, ROOM, OUTSIDER]);
     const { runId } = await startedRun();
     const command = await commandFor(IMPLEMENTER, await rootMessage(OUTSIDER));
-    await expect(cancelWorkflowRun(database, command, { runId, reason: 'Stop' })).rejects.toMatchObject({ status: 403 });
-    expect((await getWorkflowRun(database, ROOM, runId)).status).toBe('live');
+    await expect(cancelWorkflowRun(database, command, { runId, reason: 'Stop' })).resolves.toMatchObject({ status: 'abandoned' });
+    expect((await getWorkflowRun(database, ROOM, runId)).cancellation?.actorId).toBe(OUTSIDER);
   });
 
   it('allows the recorded human requester through another agent without admin or role ownership', async () => {
@@ -280,6 +281,7 @@ describe('agent workflow run reads and cancellation', () => {
   });
 
   it('allows a bound role owner even when they did not start the run or administer the Room', async () => {
+    await database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [WORKSPACE, ROOM, OUTSIDER]);
     const { runId } = await startedRun();
     await database.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [REVIEWER, OUTSIDER]);
     const command = await commandFor(IMPLEMENTER, await rootMessage(OUTSIDER));

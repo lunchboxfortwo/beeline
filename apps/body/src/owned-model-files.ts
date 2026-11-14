@@ -11,7 +11,7 @@ export const OWNED_MODEL_FILE_MAX_BYTES = 32 * 1024;
  * takes part, so a resumed turn reopens the same files after a restart. */
 export interface OwnedModelFileBinding {
   readonly agentId: string;
-  readonly generationId: string;
+  readonly itemId: string;
   readonly provider: 'beeline';
   readonly model: string;
   readonly baseUrl: string;
@@ -34,8 +34,8 @@ function closed(value: unknown, fields: string): value is Record<string, unknown
   });
 }
 function binding(value: OwnedModelFileBinding): OwnedModelFileBinding {
-  if (!closed(value, 'agentId,baseUrl,generationId,model,provider') ||
-      ![value.agentId, value.generationId, value.model].every(text) || value.provider !== 'beeline' ||
+  if (!closed(value, 'agentId,baseUrl,itemId,model,provider') ||
+      ![value.agentId, value.itemId, value.model].every(text) || value.provider !== 'beeline' ||
       typeof value.baseUrl !== 'string' || value.baseUrl.length > 2048)
     throw new OwnedModelFileRefusal();
   let url: URL;
@@ -43,7 +43,7 @@ function binding(value: OwnedModelFileBinding): OwnedModelFileBinding {
   if (url.username || url.password || url.search || url.hash || url.pathname.replace(/\/$/, '') !== '/v1/free-agents/model' ||
       (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['127.0.0.1', '[::1]', 'localhost'].includes(url.hostname))))
     throw new OwnedModelFileRefusal();
-  return Object.freeze({ agentId: value.agentId, generationId: value.generationId, provider: 'beeline', model: value.model,
+  return Object.freeze({ agentId: value.agentId, itemId: value.itemId, provider: 'beeline', model: value.model,
     baseUrl: url.origin + '/v1/free-agents/model' });
 }
 function credential(value: OwnedModelFileCredential): OwnedModelFileCredential {
@@ -138,9 +138,9 @@ export class OwnedModelFiles {
       if (!isAbsolute(input.root)) throw new OwnedModelFileRefusal();
       const selected = binding(input.binding), granted = credential(input.credential), root = resolve(input.root);
       mkdirSync(root, { recursive: true, mode: 0o700 }); privateDirectory(root);
-      // Model changes cannot create another file for the same claimed
+      // Model changes cannot create another file for the same queued
       // generation. Origin partitions the same principal at distinct servers.
-      const identity = hash(JSON.stringify([new URL(selected.baseUrl).origin, selected.agentId, selected.generationId]));
+      const identity = hash(JSON.stringify([new URL(selected.baseUrl).origin, selected.agentId, selected.itemId]));
       const directory = join(root, 'model-' + identity), authPath = join(directory, 'credential.json'), journalPath = join(directory, 'requests.json');
       const contents = JSON.stringify({ v: 1, binding: selected, credential: granted } satisfies CredentialFile);
       const owner: Owner = { directory, authPath, journalPath, binding: selected, digest: hash(contents), bindingHash: hash(JSON.stringify(selected)) };

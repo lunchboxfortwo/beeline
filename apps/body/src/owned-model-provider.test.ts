@@ -36,7 +36,7 @@ function fixture() {
     root,
     binding: {
       agentId: 'agent',
-      generationId: 'generation',
+      itemId: 'generation',
       provider: 'beeline',
       model: 'server-selected',
       baseUrl,
@@ -46,7 +46,7 @@ function fixture() {
   const path = join(root, 'context.json');
   writeFileSync(
     path,
-    JSON.stringify({ generationId: 'generation', ownedModelDirectory: owner.paths().directory }),
+    JSON.stringify({ itemId: 'generation', ownedModelDirectory: owner.paths().directory }),
     { mode: 0o600 },
   );
   vi.stubEnv('BEELINE_TURN_CONTEXT_FILE', path);
@@ -156,50 +156,4 @@ it('removes the former generated execution budget from a persisted Pi home', asy
   await installOwnedModelProvider(root);
   expect(existsSync(retired)).toBe(false);
   expect(existsSync(join(root,'extensions','beeline-owned-model.js'))).toBe(true);
-});
-
-it('keeps the invocation journal inside the Room’s existing writable harness state', async () => {
-  const {CommandExecutionContext} = await import('./server-command-intake.js');
-  const {roomAgentHomeEnv,harnessStateDirsFromEnv} = await import('./agent-home.js');
-  const {sandboxMountPlan} = await import('./bwrap-sandbox.js');
-  const root=mkdtempSync(join(tmpdir(),'owned-room-')); roots.push(root);
-  const command={id:'command',agentId:'agent',roomId:'room',turnRequestId:'request'} as import('@beeline/api-contract/daemon').AgentCommand;
-  const context=new CommandExecutionContext(root); context.prepareTurn(command.id);
-  context.bindModel(command,{v:1,token,expiresAt:null},baseUrl);
-  await context.enter(command);
-  const active=JSON.parse(readFileSync(context.path,'utf8'));
-  const plan=sandboxMountPlan({mode:'readonly',cwd:root,
-    harnessStateDirs:harnessStateDirsFromEnv(roomAgentHomeEnv(root)).stateDirs});
-  expect(plan.writable.some(path=>active.ownedModelDirectory.startsWith(path+'/'))).toBe(true);
-  const owner=OwnedModelFiles.open(active.ownedModelDirectory);
-  expect(owner.prepareHeaders().requestId).toMatch(/^[a-f0-9-]{36}$/);
-  await context.leave();
-  expect(()=>owner.prepareHeaders()).toThrow();
-});
-
-// A deploy or helper restart interrupts the turn; a replacement helper on the
-// same durable root resumes its generation, through a remaining batch member.
-it('Reproduction TURN-1: a resumed generation reopens its model files and keeps an UNKNOWN request from being sent again', async () => {
-  const {CommandExecutionContext} = await import('./server-command-intake.js');
-  const root=mkdtempSync(join(tmpdir(),'owned-resume-')); roots.push(root);
-  const anchor={id:'anchor',agentId:'agent',roomId:'room',turnRequestId:'request'} as import('@beeline/api-contract/daemon').AgentCommand;
-  const sibling={...anchor,id:'sibling',turnRequestId:'sibling-request'};
-  const first=new CommandExecutionContext(root); first.prepareTurn(anchor.id);
-  first.bindModel(anchor,{v:1,token,expiresAt:null},baseUrl);
-  await first.enter(anchor,[anchor,sibling]);
-  const before=JSON.parse(readFileSync(first.path,'utf8')).ownedModelDirectory as string;
-  const sent=OwnedModelFiles.open(before).prepareHeaders().requestId;
-  await first.leave(true);
-
-  const replacement=new CommandExecutionContext(root); replacement.prepareTurn(sibling.id,first.generationId);
-  replacement.bindModel(sibling,{v:1,token,expiresAt:null},baseUrl);
-  await replacement.enter(sibling,[sibling]);
-  const after=JSON.parse(readFileSync(replacement.path,'utf8')).ownedModelDirectory as string;
-  expect(after).toBe(before);
-  const resumed=OwnedModelFiles.open(after);
-  expect(resumed.snapshot()).toEqual({state:'unknown',requests:[sent]});
-  expect(()=>resumed.prepareHeaders()).toThrow(OwnedModelFileRefusal);
-  await replacement.leave();
-  expect(()=>resumed.prepareHeaders()).toThrow(OwnedModelFileRefusal);
-  expect(()=>OwnedModelFiles.open(after)).toThrow();
 });

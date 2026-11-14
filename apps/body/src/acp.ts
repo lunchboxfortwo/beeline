@@ -1,13 +1,13 @@
+import { AcpRuntimeExitedError,flattenHarnessCause,isPiAcpHarness,killChildProcessGroup,STDERR_TAIL_MAX_CHARS } from './acp-stderr-tail-max-chars.js';
 import { maskCredentialResult } from './mask-credential-result.js';
-import { STDERR_TAIL_MAX_CHARS, flattenHarnessCause, AcpRuntimeExitedError, isPiAcpHarness, killChildProcessGroup } from './acp-stderr-tail-max-chars.js';
 
 
 
 import { piStartupEnvironment } from './pi-startup.js';
 
-import { explainAgentProgramFailure } from './agent-command.js';
-import { delimiter, dirname, isAbsolute } from 'node:path';
 import { realpathSync } from 'node:fs';
+import { delimiter,dirname,isAbsolute } from 'node:path';
+import { explainAgentProgramFailure } from './agent-command.js';
 /**
  * Minimal ACP client over stdio for an ACP coding agent.
  *
@@ -23,21 +23,21 @@ import { realpathSync } from 'node:fs';
  * therefore drives the selected ACP server directly so session modes/MCP mounts
  * stay enforceable and multi-user activity projection remains possible.
  */
-import { spawn } from 'node:child_process';
-import { acpClientPreparePromptDelivery, acpClientPromptDelivery, acpClientHandleChildExit, acpClientFailRuntime, acpClientProcessPid, acpClientSessionCommandsFor, acpClientCanLoadSession, acpClientCanPromptWithImages, acpClientSessionNew, acpClientSessionLoad, acpClientApplySessionMode, acpClientSessionPrompt } from './acp-prepare-prompt-delivery.js';
-import { acpClientSessionSteer, acpClientActiveRunId, acpClientSessionCancel, acpClientSetConfigOption, acpClientSetModel, acpClientOnData, acpClientHandleMessage, acpClientActiveRunIdFromUpdate, acpClientWaitForActiveRun, acpClientHandlePermission, acpClientRequest, acpClientNotify, acpClientWrite } from './acp-session-steer.js';
-import { CodexPromptDelivery } from './codex-prompt-delivery.js';
-import { readUsageWindow, type AgentUsage, type UsageWindow } from '@beeline/api-contract/daemon';
+import { readUsageWindow,type AgentUsage,type UsageWindow } from '@beeline/api-contract/daemon';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { PiSessionInstructions } from './pi-session-instructions.js';
-import { McpLaunchFiles } from './mcp-launch-files.js';
+import { acpClientApplySessionMode,acpClientCanLoadSession,acpClientCanPromptWithImages,acpClientFailRuntime,acpClientHandleChildExit,acpClientPreparePromptDelivery,acpClientProcessPid,acpClientPromptDelivery,acpClientSessionCommandsFor,acpClientSessionLoad,acpClientSessionNew,acpClientSessionPrompt } from './acp-prepare-prompt-delivery.js';
 import { AcpResourceScope } from './acp-resource-scope.js';
+import { acpClientActiveRunId,acpClientActiveRunIdFromUpdate,acpClientHandleMessage,acpClientHandlePermission,acpClientNotify,acpClientOnData,acpClientRequest,acpClientSessionCancel,acpClientSessionSteer,acpClientSetConfigOption,acpClientSetModel,acpClientWaitForActiveRun,acpClientWrite } from './acp-session-steer.js';
+import { AcpAvailableCommand,AcpPermissionAllowlist,AcpPermissionHandler,AcpPermissionRequest,AcpPromptBlock,AcpStreamHandler,AcpTextChunkHandler,McpServerWire,PromptResult,SessionUpdate,SteerResult,ToolCallEntry } from './acp-stderr-tail-max-chars.js';
+import { CodexPromptDelivery } from './codex-prompt-delivery.js';
 import type { SessionMode } from './config.js';
 import { harnessSupportsNativeSessionResume } from './harness-capabilities.js';
-import { cgroupOomKillProbe, OomKillTracker, type OomKillDetector } from './oom-kill.js';
-import { SessionUpdate, ToolCallEntry, AcpPermissionRequest, AcpAvailableCommand, AcpPermissionHandler, AcpPermissionAllowlist, McpServerWire, AcpPromptBlock, AcpTextChunkHandler, AcpStreamHandler, PromptResult, SteerResult } from './acp-stderr-tail-max-chars.js';
-export { STDERR_TAIL_MAX_CHARS, meaningfulHarnessStderr, flattenHarnessCause, AcpRequestError, AcpRuntimeExitedError, AcpResourceLimitError, killChildProcessGroup, type McpServerWire, type SessionUpdate, type ToolCallEntry, type PromptResult, type AcpPromptBlock, type SteerResult, type AcpPermissionOption, type AcpAvailableCommand, parseAvailableCommands, type AcpPermissionRequest, type AcpPermissionDecision, type AcpPermissionHandler, type AcpPermissionAllowlist, type AcpTextChunkHandler, type AcpStreamSnapshot, type AcpStreamHandler, agentMessageChunkText, isPiAcpHarness, agentMessageRuns, isPureRetryNarration, finalAgentMessageText, type AgentTurnStep, agentTurnSteps, describeEmptyTurn, agentStreamSnapshot } from './acp-stderr-tail-max-chars.js';
+import { McpLaunchFiles } from './mcp-launch-files.js';
+import { cgroupOomKillProbe,OomKillTracker,type OomKillDetector } from './oom-kill.js';
+import { PiSessionInstructions } from './pi-session-instructions.js';
+export { AcpRequestError,AcpResourceLimitError,AcpRuntimeExitedError,agentMessageChunkText,agentMessageRuns,agentStreamSnapshot,agentTurnSteps,finalAgentMessageText,flattenHarnessCause,isPiAcpHarness,isPureRetryNarration,killChildProcessGroup,meaningfulHarnessStderr,parseAvailableCommands,STDERR_TAIL_MAX_CHARS,type AcpAvailableCommand,type AcpPermissionAllowlist,type AcpPermissionDecision,type AcpPermissionHandler,type AcpPermissionOption,type AcpPermissionRequest,type AcpPromptBlock,type AcpStreamHandler,type AcpStreamSnapshot,type AcpTextChunkHandler,type AgentTurnStep,type McpServerWire,type PromptResult,type SessionUpdate,type SteerResult,type ToolCallEntry } from './acp-stderr-tail-max-chars.js';
 
 
 
@@ -217,10 +217,9 @@ export class AcpClient extends EventEmitter {
     agentLabel?: string;
     /**
      * The child is wrapped in the daemon's OS sandbox (`bwrap-sandbox.ts`), so
-     * the filesystem rule is held by the kernel and a `readonly` session may
-     * select a harness mode that does not itself cut the network
-     * (`roomModeCandidates`). Defaults to false: an unwrapped child keeps the
-     * harness's own read-only mode.
+     * the filesystem rule is held by the kernel. Such sessions keep their
+     * advertised mode and do not wait for a native mode switch. Defaults to
+     * false: an unwrapped child keeps the harness's own read-only mode.
      */
     osSandbox?: boolean;
     agentEnv: Record<string, string>;

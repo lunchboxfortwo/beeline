@@ -1,21 +1,21 @@
-import { githubProviderKey } from './providers/index.js';
-import { recordXSignup } from './x-ads.js';
-import { recordSigninAttempt } from './signin-attempts.js';
-import {
-  createDecipheriv,
-  createHash,
-  randomBytes,
-  randomUUID,
-  timingSafeEqual,
-} from 'node:crypto';
 import { GITHUB_IDENTITY_AUDIENCE } from '@beeline/auth/github';
+import {
+createDecipheriv,
+createHash,
+randomBytes,
+randomUUID,
+timingSafeEqual,
+} from 'node:crypto';
 import type { SqlDatabase } from './database.js';
+import { githubProviderKey } from './providers/index.js';
 import { ensureReviewWorkspace } from './review-proof-fixture.js';
+import { recordSigninAttempt } from './signin-attempts.js';
+import { recordXSignup } from './x-ads.js';
 
 import {
-  REVIEW_IDENTITY_HANDLE,
-  REVIEW_IDENTITY_ID,
-  REVIEW_IDENTITY_NAME,
+REVIEW_IDENTITY_HANDLE,
+REVIEW_IDENTITY_ID,
+REVIEW_IDENTITY_NAME,
 } from './review-access.js';
 
 const ACCESS_LIFETIME_MS = 15 * 60_000;
@@ -97,7 +97,7 @@ export interface PhoneTokens {
 export class GoogleSignInError extends Error {}
 
 export class TokenAuth {
-  readonly #daemonAuthCache = new Map<string, { agentId: string | null; expiresAt: number }>();
+  readonly #daemonAuthCache = new Map<string, { agentId: string | null; ownerId?: string | null; expiresAt: number }>();
 
   constructor(
     private readonly database: SqlDatabase,
@@ -481,25 +481,29 @@ export class TokenAuth {
     return row.agent_id;
   }
 
-  async authenticateDaemon(token: string): Promise<string | null> {
+  authenticateDaemon(token: string): Promise<string | null>;
+  authenticateDaemon(token: string, account: true): Promise<{agentId:string;ownerId?:string|null} | null>;
+  async authenticateDaemon(token: string, account?: true): Promise<string | {agentId:string;ownerId?:string|null} | null> {
     const hash = tokenHash(token);
     const now = this.now();
     const cached = this.#daemonAuthCache.get(hash);
-    if (cached && cached.expiresAt > now.getTime()) return cached.agentId;
+    if (cached && cached.expiresAt > now.getTime()) return account && cached.agentId
+      ? {agentId:cached.agentId,ownerId:cached.ownerId} : cached.agentId;
     if (cached) this.#daemonAuthCache.delete(hash);
 
-    const result = await this.database.query<{ agent_id: string; token_hash: string }>(
-      `SELECT agent_id, token_hash FROM daemon_tokens
-       WHERE token_hash = $1 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > $2)`,
+    const result = await this.database.query<{ agent_id: string; token_hash: string; owner_id:string|null }>(
+      `SELECT token.agent_id,token.token_hash,agent.owner_id FROM daemon_tokens token
+       LEFT JOIN agents agent ON agent.agent_id=token.agent_id
+       WHERE token.token_hash = $1 AND token.revoked_at IS NULL AND (token.expires_at IS NULL OR token.expires_at > $2)`,
       [hash, now],
     );
     const row = result.rows[0];
     const agentId = row && sameHash(row.token_hash, hash) ? row.agent_id : null;
     this.#daemonAuthCache.set(hash, {
-      agentId,
+      agentId,ownerId:row?.owner_id,
       expiresAt: now.getTime() + DAEMON_AUTH_CACHE_TTL_MS,
     });
-    return agentId;
+    return account && agentId ? {agentId,ownerId:row?.owner_id} : agentId;
   }
 
   /**

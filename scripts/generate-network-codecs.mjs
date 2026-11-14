@@ -136,7 +136,7 @@ function selectInput(id) {
 // Derive the helper consumer projection from its closed literal adapter calls.
 // Preserve the complete input/result graphs; never copy a hand-written schema.
 const helperRoutes = new Set();
-for (const name of ['helper-codecs', 'helper-activation-codecs', 'helper-turn-codecs']) {
+for (const name of ['helper-codecs']) {
   const source = ts.createSourceFile(`${name}.ts`, readFileSync(path.join(root,
     `packages/net/src/${name}.ts`), 'utf8'), ts.ScriptTarget.Latest, true);
   function visit(node) {

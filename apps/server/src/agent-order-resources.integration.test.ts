@@ -1,3 +1,4 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { spawn } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -8,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { ensureSystemIdentity } from './system-line.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { claimAgentCommand, createAgentCommand, type CommandRow } from './agent-command.js';
+import { createAgentCommand, type CommandRow } from './agent-command.js';
 import { DaemonService } from './daemon-service.js';
 import { LiveHub } from './live.js';
 import { resourceRequester } from './resource-requester.js';
@@ -61,8 +62,8 @@ async function order(issuer = ISSUER, parent?: CommandRow, agentId = WORKER) {
     } }))!;
 }
 async function claim(command: CommandRow) {
-  await claimAgentCommand(db, ROOM, command.agent_id, command.id, 'generation');
-  return { roomId: ROOM, requestId: command.turn_request_id, generationId: 'generation' };
+  await startQueuedTurn(db, ROOM, command.agent_id, command.id);
+  return { roomId: ROOM, requestId: command.turn_request_id };
 }
 
 // This uses actual command admission and each resource's ordinary authorization,

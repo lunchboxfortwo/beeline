@@ -48,17 +48,21 @@ import { waitForPathRemoval } from './filesystem-change.js';
  * Pi uses `PI_CODING_AGENT_DIR` and the isolated `$HOME`, preventing its
  * otherwise-implicit reads from the operator's `~/.pi` and `~/.agents` trees.
  */
-import { existsSync, watch, type FSWatcher } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { chmod, lstat, mkdir, readFile, readlink, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { dirname, resolve } from 'node:path';
+import { existsSync,watch,type FSWatcher } from 'node:fs';
+import { chmod,lstat,mkdir,mkdtemp,readFile,readlink,realpath,rename,rm,symlink,writeFile } from 'node:fs/promises';
+import { homedir,tmpdir } from 'node:os';
+import { dirname,resolve } from 'node:path';
+import { parse as parseYaml,stringify as stringifyYaml } from 'yaml';
+import { AGENT_BEHAVIORS,agentBehavior,SHARED_CREDENTIALS,type AgentKind } from './agent-command.js';
+import { assertRealContainedDirectory,isMissingPathError,roomAgentHomeEnv,roomSessionTmpDir,writeIsolatedHarnessFile } from './agent-home-plan-managed-skills.js';
+import { provisionAgentSkillsAndMcp,provisionPiCustomModelConfig } from './agent-home-provision-agent-skills-and-mcp.js';
+import { BEELINE_ONBOARDING_SKILL_NAME,BEELINE_REVIEW_SKILL_NAME,BEELINE_SPEC_SKILL_NAME,BEELINE_TRIAGE_SKILL_NAME,runningBeelineReleaseId,SITUATIONAL_SKILL_NAMES } from './beeline-skill.js';
 import { DRAW_AVATAR_SKILL_NAME } from './draw-avatar-skill.js';
-import { AGENT_BEHAVIORS, SHARED_CREDENTIALS, agentBehavior, type AgentKind } from './agent-command.js';
-import { BEELINE_REVIEW_SKILL_NAME, BEELINE_SPEC_SKILL_NAME, BEELINE_ONBOARDING_SKILL_NAME, BEELINE_TRIAGE_SKILL_NAME, runningBeelineReleaseId, SITUATIONAL_SKILL_NAMES } from './beeline-skill.js';
 import { type OpenRouterRoutingHomeInput } from './openrouter-routing.js';
-import { isMissingPathError, assertRealContainedDirectory, roomSessionTmpDir, roomAgentHomeEnv, writeIsolatedHarnessFile } from './agent-home-plan-managed-skills.js';
-import { provisionAgentSkillsAndMcp } from './agent-home-provision-agent-skills-and-mcp.js';
+export { SHARED_CREDENTIALS } from './agent-command.js';
+export { HARNESS_STATE_ENV_VARS,harnessStateDirsFromEnv,roomAgentHomeEnv,roomSessionTmpDir,writeIsolatedHarnessFile } from './agent-home-plan-managed-skills.js';
+export { hostImportedMcpDeclarations } from './agent-home-provision-agent-skills-and-mcp.js';
 export { AGENT_PRIVATE_STATE_ENV } from './agent-private-state-env.js';
 
 
@@ -147,57 +151,6 @@ export function isSharedSkillName(value: unknown): value is string {
 export class AgentHomeSecurityError extends Error {}
 
 export const agentHomeProvisionQueues = new Map<string, Promise<void>>();
-
-
-export const EXPIRED_LOGIN_PATTERNS = [
-  /\boauth session expired\b/i,
-  /\b(?:oauth|login|session|token)\b.{0,80}\bcould not be refreshed\b/i,
-  /\b(?:failed|unable) to refresh\b.{0,80}\b(?:oauth|login|session|token)\b/i,
-  /\brefresh token\b.{0,80}\b(?:expired|invalid|revoked)\b/i,
-] as const;
-
-
-/** A harness login failed in the one shape a credential re-link can repair. */
-export function isExpiredHarnessLoginError(error: unknown): boolean {
-  const seen = new Set<unknown>();
-  let current = error;
-  for (let depth = 0; depth < 4 && current != null && !seen.has(current); depth += 1) {
-    seen.add(current);
-    const text =
-      current instanceof Error
-        ? current.message
-        : typeof current === 'string'
-          ? current
-          : typeof current === 'object' && 'message' in current
-            ? String((current as { message: unknown }).message)
-            : String(current);
-    if (EXPIRED_LOGIN_PATTERNS.some((pattern) => pattern.test(text))) return true;
-    current =
-      current instanceof Error
-        ? current.cause
-        : typeof current === 'object' && current && 'cause' in current
-          ? (current as { cause: unknown }).cause
-          : undefined;
-  }
-  return false;
-}
-
-
-export const HARNESS_LOGIN_NAMES: Partial<Record<AgentKind, string>> = {
-  claude: 'Claude',
-  codex: 'Codex',
-  grok: 'Grok',
-  pi: 'Pi',
-  cursor: 'Cursor',
-  opencode: 'OpenCode',
-};
-
-
-/** The only user-visible answer after a repaired link proves the source login is stale too. */
-export function freshHarnessLoginLine(kind: AgentKind | undefined, machine: string): string {
-  const harness = (kind && HARNESS_LOGIN_NAMES[kind]) || 'The agent provider';
-  return `${harness} on ${machine.trim() || 'this machine'} needs a fresh login.`;
-}
 
 
 /**
@@ -289,6 +242,7 @@ export const HOME_SUBDIRS = [
 export interface RoomAgentHomeInput {
   /** Per-room agent home root, e.g. `<roomRoot>/agent-home`. */
   root: string;
+  onDiagnostic?: (message: string) => void;
   /** Server-provided identity of the agent and this Room. */
   squireScope?: { readonly agentId: string; readonly roomId: string; readonly relay?: { readonly url: string; readonly token: string; readonly contextFile: string } };
   /** Operator's real home directory; defaults to the daemon's. */
@@ -456,31 +410,22 @@ export async function repairRoomAgentCredentialLinks(input: {
   const operatorHome = input.operatorHome ?? homedir();
   for (const credential of SHARED_CREDENTIALS) {
     const source = resolve(operatorHome, credential.source);
-    if (!existsSync(source)) continue;
-    const target = resolve(root, credential.dir, credential.target);
-    await mkdir(dirname(target), { recursive: true, mode: 0o700 });
-    const stats = await lstat(target).catch((error: unknown) => {
-      if (isMissingPathError(error)) return undefined;
-      throw error;
-    });
-    if (stats?.isSymbolicLink()) {
-      const linked = await readlink(target);
-      if (resolve(dirname(target), linked) === source) continue;
-    }
-    if (stats) {
-      // A successful Claude refresh can replace the isolated symlink. Share
-      // that login with every Room before the old refresh token is spent.
-      // Failure retries use the shared source instead, so a failed detached
-      // refresh cannot trap the session. A busy lock keeps the detached login
-      // here until the next pass.
-      if (input.writeBackNewerClaudeLogin && credential.writeBack && stats.isFile()) {
-        const outcome = await writeBackDetachedClaudeLogin(target, source);
-        if (outcome !== 'not-newer') continue;
+    if (existsSync(source)) {
+      const target = resolve(root, credential.dir, credential.target);
+      await mkdir(dirname(target), { recursive: true, mode: 0o700 });
+      const stats = await lstat(target).catch((error: unknown) => {
+        if (!isMissingPathError(error)) throw error;
+      });
+      const alreadyLinked = stats?.isSymbolicLink() && resolve(dirname(target), await readlink(target)) === source;
+      if (!alreadyLinked) {
+        const keptLogin = stats?.isFile() && input.writeBackNewerClaudeLogin && credential.writeBack &&
+          await writeBackDetachedClaudeLogin(target, source) !== 'not-newer';
+        if (!keptLogin) {
+          if (stats) await rename(target, `${target}.beeline-quarantine-${Date.now()}-${randomUUID()}`);
+          await symlink(source, target);
+        }
       }
-      const quarantine = `${target}.beeline-quarantine-${Date.now()}-${randomUUID()}`;
-      await rename(target, quarantine);
     }
-    await symlink(source, target);
   }
 }
 
@@ -572,11 +517,23 @@ export function sharedClaudeLoginEnv(operatorHome: string): Record<string, strin
 /**
  * Create the room-instance's harness state directories, share the operator's
  * harness login into them, and return the env overlay that points the harness at
- * them. Normally an unwritable or already-populated path degrades to the
- * daemon's ambient state; `failClosed` propagates setup errors for governed
- * credential sessions that may not fall back to ambient state.
+ * them. An unsafe or unavailable private home never falls back to another
+ * credential or ambient harness state.
  */
-export async function prepareRoomAgentHome(
+export async function prepareRoomAgentCredentials(input: RoomAgentHomeInput): Promise<Record<string, string>> {
+  try { return await provisionRoomAgentCredentials(input); }
+  catch (error) {
+    // A broken configured folder never admits ambient credentials or prevents
+    // delivery. A fresh private home starts empty and the session hears why.
+    const root = await mkdtemp(resolve(tmpdir(), 'beeline-agent-private-'));
+    await Promise.all(HOME_SUBDIRS.map(dir => mkdir(resolve(root, dir), { recursive: true, mode: 0o700 })));
+    input.onDiagnostic?.(`Private home setup failed (${error instanceof Error ? error.message : String(error)}). ` +
+      `This session uses a fresh private home at ${root}; saved login and optional tools may be unavailable.`);
+    return { ...roomAgentHomeEnv(root), TMPDIR: resolve(root, 'tmp') };
+  }
+}
+
+async function provisionRoomAgentCredentials(
   input: RoomAgentHomeInput,
 ): Promise<Record<string, string>> {
   const root = resolve(input.root);
@@ -586,7 +543,7 @@ export async function prepareRoomAgentHome(
     await mkdir(root, { recursive: true, mode: 0o700 });
     const rootStats = await lstat(root);
     if (!rootStats.isDirectory() || rootStats.isSymbolicLink()) {
-      throw new AgentHomeSecurityError(`agent home root is not an ordinary directory: ${root}`);
+      throw new Error(`agent home root is not an ordinary directory: ${root}`);
     }
     for (const subdir of HOME_SUBDIRS) {
       const path = resolve(root, subdir);
@@ -612,10 +569,7 @@ export async function prepareRoomAgentHome(
       console.error(`[body] short TMPDIR link unavailable under ${root}:`, error);
     }
   } catch (error) {
-    if (input.failClosed || input.resourceAuthFile || error instanceof AgentHomeSecurityError)
-      throw error;
-    console.error(`[body] per-room agent home unavailable at ${root}; using daemon state:`, error);
-    return {};
+    throw error;
   }
 
   try {
@@ -625,8 +579,40 @@ export async function prepareRoomAgentHome(
       writeBackNewerClaudeLogin: agentBehavior(input.agentKind).sharedLoginWriteBack === true,
     });
   } catch (error) {
-    if (input.failClosed || input.resourceAuthFile) throw error;
-    console.error(`[body] could not repair shared credentials under ${root}:`, error);
+    throw error;
+  }
+
+  const env = tmpLinkReady
+    ? roomAgentHomeEnv(root)
+    : { ...roomAgentHomeEnv(root), TMPDIR: resolve(root, 'tmp') };
+  return {
+    ...env,
+    ...(agentBehavior(input.agentKind).sharedLoginWriteBack === true ? sharedClaudeLoginEnv(operatorHome) : {}),
+  };
+}
+/** Optional skills and MCP setup, separate from the private credential home. */
+export async function prepareRoomAgentHome(input: RoomAgentHomeInput): Promise<Record<string, string>> {
+  const env = await prepareRoomAgentCredentials(input);
+  if (!env.HOME) return env;
+  const root = dirname(env.HOME);
+  const operatorHome = input.operatorHome ?? homedir();
+  // A cold process must not start optional MCP providers from a previous
+  // activation. They remain reachable through session tools once loaded.
+  for (const config of HARNESS_MCP_CONFIGS) await writeIsolatedHarnessFile(
+    resolve(root, config.dir, 'config.toml'),
+    config.roomDefaults ? `${CODEX_ROOM_AGENT_LOCKDOWN_TOML}\n${CODEX_ROOM_WEB_SEARCH_TOML}` : '',
+  );
+  await writeIsolatedHarnessFile(resolve(root, 'claude', '.claude.json'), '{"mcpServers":{}}');
+  await writeIsolatedHarnessFile(resolve(root, 'pi', 'mcp.json'), '{"mcpServers":{}}');
+  await provisionPiCustomModelConfig(root, operatorHome, true, undefined);
+  for (const name of GOOSE_SHARED_CONFIG_FILES) {
+    const source = await readFile(resolve(operatorHome, '.config', 'goose', name), 'utf8').catch(error => {
+      if (!isMissingPathError(error)) throw error;
+    });
+    if (source !== undefined) {
+      const body = name === 'config.yaml' ? stringifyYaml({ ...parseYaml(source), extensions: {} }) : source;
+      await writeIsolatedHarnessFile(resolve(root, 'goose', 'config', name), body);
+    }
   }
 
   const prior = agentHomeProvisionQueues.get(root) ?? Promise.resolve();
@@ -656,22 +642,5 @@ export async function prepareRoomAgentHome(
     if (agentHomeProvisionQueues.get(root) === provision) agentHomeProvisionQueues.delete(root);
   }
 
-  const env = tmpLinkReady
-    ? roomAgentHomeEnv(root)
-    : { ...roomAgentHomeEnv(root), TMPDIR: resolve(root, 'tmp') };
-  return {
-    ...env,
-    ...(agentBehavior(input.agentKind).sharedLoginWriteBack === true ? sharedClaudeLoginEnv(operatorHome) : {}),
-  };
+  return env;
 }
-export { SHARED_CREDENTIALS } from './agent-command.js';
-export { mountedImportedMcpServerNames } from './agent-home-provision-agent-skills-and-mcp.js';
-export { hostImportedMcpDeclarations } from './agent-home-provision-agent-skills-and-mcp.js';
-export { hostImportedMcpServerNames } from './agent-home-provision-agent-skills-and-mcp.js';
-export { grantedSquireHostBindPaths } from './agent-home-provision-agent-skills-and-mcp.js';
-export { expectedMountedImportedMcpServerNames } from './agent-home-provision-agent-skills-and-mcp.js';
-export { writeIsolatedHarnessFile } from './agent-home-plan-managed-skills.js';
-export { roomSessionTmpDir } from './agent-home-plan-managed-skills.js';
-export { roomAgentHomeEnv } from './agent-home-plan-managed-skills.js';
-export { HARNESS_STATE_ENV_VARS } from './agent-home-plan-managed-skills.js';
-export { harnessStateDirsFromEnv } from './agent-home-plan-managed-skills.js';

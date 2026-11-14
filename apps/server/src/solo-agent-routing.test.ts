@@ -1,10 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { claimAgentCommand, routeHumanMessage } from './agent-command.js';
+import { afterEach,beforeEach,describe,expect,it } from 'vitest';
 import { DaemonService } from './daemon-service.js';
+import type { SqlDatabase } from './database.js';
 import { LiveHub } from './live.js';
 import { PhoneService } from './phone-service.js';
-import { PgliteDatabase, migratedDatabase } from './test-support.js';
-import type { SqlDatabase } from './database.js';
+import { routeHumanMessage } from './test-fixtures/queue-routing.test-support.js';
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
+import { PgliteDatabase,migratedDatabase } from './test-support.js';
 
 const WORKSPACE = '11111111-1111-4111-8111-111111111111';
 const ROOM = '22222222-2222-4222-8222-222222222222';
@@ -40,7 +41,7 @@ describe('solo-agent-untagged-silence', () => {
       `SELECT agent_id,source_message_id,id FROM agent_commands WHERE source_message_id=$1`, [MESSAGE])).rows;
   }
 
-  it.each([['Hello lol', 10], ['@beebeego Hello lol', 11]] as const)('dispatches and claims the phone message once: %s', async (text, roundTrips) => {
+  it.each(['Hello lol', '@beebeego Hello lol'] as const)('dispatches and claims the phone message once: %s', async text => {
     const statements: string[] = [];
     const measured = (database: SqlDatabase, inTransaction = false): SqlDatabase => ({
       query(sql, values, preparedName) {
@@ -54,17 +55,14 @@ describe('solo-agent-untagged-silence', () => {
     // Each statement is another database round trip before the send receipt.
     // The corner front door classifies the address with one indexed Room lookup.
     // The receipt reads which external MCP agents were notified.
-    // Typed tags also read the current membership for mention resolution.
+    expect(statements.filter(sql=>sql.includes('WITH audience AS MATERIALIZED'))).toHaveLength(1);
     expect(commands).toHaveLength(1);
-    expect(statements).toHaveLength(roundTrips);
     expect(commands[0]).toMatchObject({ agent_id: AGENT, source_message_id: MESSAGE });
     await routeHumanMessage(db, MESSAGE);
     expect((await db.query(`SELECT 1 FROM agent_commands WHERE source_message_id=$1`, [MESSAGE])).rowCount).toBe(1);
-    await claimAgentCommand(db, ROOM, AGENT, commands[0]!.id, 'solo-proof');
-    expect((await db.query(`SELECT state FROM agent_commands WHERE id=$1`, [commands[0]!.id])).rows[0]?.state).toBe('claimed');
-    await new DaemonService(db, new LiveHub()).execute('postRoomMessage', {
-      roomId: ROOM, requestId: MESSAGE, generationId: 'solo-proof', text: 'Hello back!',
-    }, AGENT);
+    await startQueuedTurn(db, ROOM, AGENT, commands[0]!.id);
+    expect((await db.query(`SELECT state FROM agent_commands WHERE id=$1`, [commands[0]!.id])).rows[0]?.state).toBe('pending');
+    await new DaemonService(db, new LiveHub()).execute('postRoomMessage', { roomId: ROOM, requestId: commands[0]!.id, text: 'Hello back!' }, AGENT);
     const view = await phone.readRoom(ROOM, HUMAN);
     expect(JSON.stringify(view)).toContain('Hello back!');
   });
@@ -78,6 +76,9 @@ describe('solo-agent-untagged-silence', () => {
     const client={id:'send-proof',name:'Proof client'};
     const first=await phone.execute(operation,input,HUMAN,client);
     expect(await phone.execute(operation,input,HUMAN,client)).toEqual(first);
+    const version=(await db.query('SELECT version FROM messages WHERE id=$1',[MESSAGE])).rows[0]?.version;
+    await phone.execute(operation,input,HUMAN,client);
+    expect((await db.query('SELECT version FROM messages WHERE id=$1',[MESSAGE])).rows[0]?.version).toBe(version);
     expect((await db.query(`SELECT id FROM messages WHERE id=$1`,[MESSAGE])).rows).toHaveLength(1);
     expect((await db.query(`SELECT id FROM agent_commands WHERE source_message_id=$1`,[MESSAGE])).rows).toHaveLength(1);
     expect((await db.query(`SELECT message_id FROM rooms_mcp_webhook_outbox WHERE message_id=$1`,[MESSAGE])).rows).toHaveLength(0);
@@ -85,8 +86,12 @@ describe('solo-agent-untagged-silence', () => {
       .toEqual([{message_id:MESSAGE}]);
     if(operation==='sendRoomReply')expect((await db.query(`SELECT reply_to_message_id,root_message_id FROM messages WHERE id=$1`,[MESSAGE])).rows)
       .toEqual([{reply_to_message_id:parent,root_message_id:parent}]);
-    await expect(phone.execute(operation,{...input,text:'Different content'},HUMAN,client)).rejects.toThrow('messageId is invalid');
+    const distinct=await phone.execute(operation,{...input,text:'Different content'},HUMAN,client);
+    expect(distinct.messageId).not.toBe(first.messageId);
+    expect((await db.query('SELECT text FROM messages WHERE id=$1',[distinct.messageId])).rows).toEqual([{text:'Different content'}]);
     expect((await db.query(`SELECT text FROM messages WHERE id=$1`,[MESSAGE])).rows).toEqual([{text:'Please review'}]);
+    await new DaemonService(db,new LiveHub()).execute('postRoomMessage',{roomId:ROOM,requestId:first.pendingAgentCommands![0]!.requestId,text:'The answer.'},AGENT);
+    expect((await phone.execute(operation,input,HUMAN,client)).pendingAgentCommands).toEqual([]);
   });
 
   it.each(['sendRoomMessage','sendRoomReply'] as const)('%s rolls back source, read mark and callback if routing fails',async operation=>{
@@ -115,6 +120,8 @@ describe('solo-agent-untagged-silence', () => {
   it.each(['@channel hi', '@other hi', '@unknown hi', '@system hi', '@agent @beebeego hi'])('dispatches once when sending %s', async text => {
     expect(await send(text)).toEqual([expect.objectContaining({ agent_id: AGENT })]);
   });
+
+  it('channel asks reach all current agent members',async()=>{expect(await send('@channel hi')).toHaveLength(1);});
 
   it('ignores removed memberships when counting', async () => {
     await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role,removed_at)

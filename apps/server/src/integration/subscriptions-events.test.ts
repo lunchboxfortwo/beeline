@@ -342,7 +342,7 @@ const fixture = monolithFixture();
   });
 
 
-  it('emits an agent event with the cause the server read, and refuses one outside a turn', async () => {
+  it('emits agent events without claim admission and preserves the queued source cause', async () => {
     const peer = 'e'.repeat(64);
     await fixture.database.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Bat')`, [peer]);
     await fixture.database.query(
@@ -363,17 +363,11 @@ const fixture = monolithFixture();
     const outsideTurn = await fixture.request(
       '/v1/daemon/operations/postRoomEvent',
       'POST',
-      {
-        roomId: ROOM,
-        requestId: 'event-without-turn',
-        generationId: 'fixture-generation',
-        kind: 'agent:handoff',
-        consequence: 'the branch is ready',
-      },
+      { roomId: ROOM, requestId: 'event-without-turn', kind: 'agent:handoff', consequence: 'the branch is ready' },
       fixture.daemonToken,
     );
-    expect(outsideTurn.status).toBe(400);
-    expect(((await outsideTurn.json()) as { error: string }).error).toMatch(/no turn running/);
+    expect(outsideTurn.status).toBe(200);
+    expect((await outsideTurn.json()).id).toBeDefined();
 
     const trigger = await fixture.operation('sendRoomMessage', {
       roomId: ROOM,

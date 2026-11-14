@@ -244,6 +244,11 @@ const scope1 = fixtureScope1();
        VALUES($1,$2,$3,$4,'Promoted')`,
       [corner, workspace, room, HUMAN],
     );
+    await scope1.database.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Worker')`,[REVIEWER]);
+    await scope1.database.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`,[REVIEWER,HUMAN]);
+    await scope1.database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES
+      ($1,NULL,$2,'owner'),($1,$3,$2,'owner'),($1,NULL,$4,'member'),($1,$3,$4,'member') ON CONFLICT DO NOTHING`,[workspace,HUMAN,room,REVIEWER]);
+    await seedCornerOpening(scope1.database,{cornerId:corner,agentId:REVIEWER,commissionedBy:HUMAN});
     await insertCornerFacts(scope1.database, { cornerId: corner, lifecycle: JSON.stringify({
           checks: 'unknown',
           pr: {
@@ -326,6 +331,11 @@ const scope1 = fixtureScope1();
        ($1,NULL,$2,'owner'),($1,$3,$2,'owner')`,
       [workspace, HUMAN, room],
     );
+    await scope1.database.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Worker')`,[REVIEWER]);
+    await scope1.database.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`,[REVIEWER,HUMAN]);
+    await scope1.database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES
+      ($1,NULL,$2,'owner'),($1,$3,$2,'owner'),($1,NULL,$4,'member'),($1,$3,$4,'member') ON CONFLICT DO NOTHING`,[workspace,HUMAN,room,REVIEWER]);
+    await seedCornerOpening(scope1.database,{cornerId:corner,agentId:REVIEWER,commissionedBy:HUMAN});
     await insertCornerFacts(scope1.database, { cornerId: corner, lifecycle: JSON.stringify({
           lifecycle: 'in-review',
           checks: 'failing',
@@ -338,7 +348,6 @@ const scope1 = fixtureScope1();
             mergeability: 'clean',
           },
         }) });
-    await seedCornerOpening(scope1.database, { cornerId: corner, commissionedBy: HUMAN });
     const app = {
       installationToken: vi.fn(async () => ({ token: 'room-token' })),
       readPullRequest: vi.fn(async () => ({

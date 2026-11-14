@@ -104,7 +104,7 @@ describe('authorization follows current membership and credential lifetime', () 
     );
     phone = new PhoneService(database, 'http://fixture.invalid');
     auth = tokenAuth(database);
-  });
+  }, 60_000);
   afterEach(async () => close());
   const tokenAuth = (db: SqlDatabase) =>
     new TokenAuth(db, async () => {

@@ -1,6 +1,7 @@
+import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { claimAgentCommand, createAgentCommand, readAgentCommands } from './agent-command.js';
+import { createAgentCommand, readAgentCommands } from './agent-command.js';
 import { claimAgentConnection } from './connection-presence.js';
 import { DaemonService } from './daemon-service.js';
 import { LiveHub } from './live.js';
@@ -40,8 +41,8 @@ describe.skipIf(!url)('running turns survive answered and superseded sources (Po
     return { room, corner };
   }
   async function finish(roomId: string, requestId: string, text: string) {
-    await daemon.execute('postRoomMessage', { roomId,requestId,generationId:'running',text },agent);
-    await daemon.execute('postAgentTurnReceipt', { roomId,requestId,generationId:'running',status:'complete' },agent,owner);
+    await daemon.execute('postRoomMessage', { roomId, requestId, text },agent);
+    await daemon.execute('postAgentTurnReceipt', { roomId, requestId, status:'complete' },agent,owner);
     expect((await fixture.database.query(`SELECT status,failure_reason FROM agent_turns
       WHERE room_id=$1 AND request_id=$2 AND agent_id=$3`, [roomId,requestId,agent])).rows)
       .toEqual([{ status:'complete',failure_reason:null }]);
@@ -52,68 +53,64 @@ describe.skipIf(!url)('running turns survive answered and superseded sources (Po
     const db = fixture.database, { room } = await place(), source = randomUUID();
     await db.query("INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Handle the blocker')", [source,room,human]);
     const parent = (await createAgentCommand(db,{ roomId:room,agentId:agent,sourceMessageId:source,reason:'human_tag' }))!;
-    await claimAgentCommand(db,room,agent,parent.id,'opening',{kind:'helper',owner});
-    const opened = await daemon.execute('createCorner',{ roomId:room,requestId:parent.turn_request_id,generationId:'opening',
-      targetRoomId:room,name:'Blocker',objective:'Publish the work',implementer:'worker',
-      brief:{ spec:'Publish the work',repositoryWork:false,approval:{ sourceMessageId:source } } },agent);
-    const assignment = (await readAgentCommands(db,opened.cornerId,worker)).commands[0]!;
-    await claimAgentCommand(db,opened.cornerId,worker,assignment.id,'worker');
-    await daemon.execute('report',{ roomId:opened.cornerId,requestId:assignment.turnRequestId,generationId:'worker',
-      status:'blocked',text:'blocked: publish is pending' },worker);
+    await startQueuedTurn(db, room, agent, parent.id);
+    const opened = await daemon.execute('createCorner',{ roomId:room, requestId:parent.turn_request_id, targetRoomId:room, name:'Blocker', objective:'Publish the work', implementer:'worker', brief:{ spec:'Publish the work',repositoryWork:false,approval:{ sourceMessageId:source } } },agent);
+    const assignment = (await readAgentCommands(db, worker, opened.cornerId)).commands[0]!;
+    await startQueuedTurn(db, opened.cornerId, worker, assignment.id);
+    await daemon.execute('report',{ roomId:opened.cornerId, requestId:assignment.turnRequestId, status:'blocked', text:'blocked: publish is pending' },worker);
     // The blocked report wakes its commander inside the corner it concerns.
     const thread = opened.cornerId;
-    const report = (await readAgentCommands(db,thread,agent)).commands.find(command => command.reason === 'report')!;
-    await claimAgentCommand(db,thread,agent,report.id,'running',{kind:'helper',owner});
+    const report = (await readAgentCommands(db, agent, thread)).commands.find(command => command.reason === 'report')!;
+    await startQueuedTurn(db, thread, agent, report.id);
     await phone.execute('sendRoomMessage', { roomId:thread,text:'Publish is unblocked now' },human);
     await phone.execute('sendRoomMessage', { roomId:thread,text:'@ruby The blocker is resolved; check the next step' },human);
-    expect((await db.query("SELECT private_payload->>'waitingAnswered' answered,state FROM agent_commands WHERE id=$1",
-      [report.id])).rows).toEqual([{ answered:'true',state:'claimed' }]);
-    const queued = (await readAgentCommands(db,thread,agent)).commands;
+    expect((await db.query("SELECT state FROM agent_commands WHERE id=$1",
+      [report.id])).rows).toEqual([{state:'pending'}]);
+    const queued = (await readAgentCommands(db, agent, thread)).commands;
     const next = queued.find(command => command.source.body.includes('The blocker is resolved'))!;
     expect(next).toBeDefined();
-    await claimAgentCommand(db,thread,agent,report.id,'running',{kind:'helper',owner});
+    await startQueuedTurn(db, thread, agent, report.id);
     await finish(thread,report.turnRequestId,'The blocker handling is complete.');
     expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[next.id])).rows).toEqual([{ state:'pending' }]);
-    await claimAgentCommand(db,thread,agent,next.id,'next',{kind:'helper',owner});
-    expect((await db.query('SELECT state,generation_id FROM agent_commands WHERE id=$1',[next.id])).rows)
-      .toEqual([{ state:'claimed',generation_id:'next' }]);
+    await startQueuedTurn(db, thread, agent, next.id);
+    expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[next.id])).rows)
+      .toEqual([{ state:'pending' }]);
   });
-  it.each(['owned','legacy'] as const)('a superseded %s review finishes and the newer head is delivered next', async mode => {
+  it('an accepted review finishes and the newer head remains queued', async () => {
     const db = fixture.database, { corner } = await place(), source = randomUUID();
     await db.query("INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'@ruby Review this head')", [source,corner,human]);
     const running = (await createAgentCommand(db,{ roomId:corner,agentId:agent,sourceMessageId:source,reason:'human_tag' }))!;
     await db.query('UPDATE agent_commands SET review_context=$2::jsonb WHERE id=$1',
       [running.id,JSON.stringify({ cornerId:corner,headSha:'old-head',pullRequest:42,briefRevision:0 })]);
-    const claimOwner = mode === 'owned' ? owner : undefined;
-    await claimAgentCommand(db,corner,agent,running.id,'running',{kind:'helper',owner:claimOwner});
+    await startQueuedTurn(db, corner, agent, running.id);
     await db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{pr,headSha}','"new-head"') WHERE corner_id=$1`, [corner]);
     const event = randomUUID();
     await db.query(`INSERT INTO messages(id,room_id,author_id,text,system_event)
       VALUES($1,$2,$3,'Checks passed on the newer head',$4::jsonb)`,
       [event,corner,human,JSON.stringify({ kind:'check-passed',object:{ headSha:'new-head' } })]);
     const newer = (await createAgentCommand(db,{ roomId:corner,agentId:agent,sourceMessageId:event,reason:'corner_check' }))!;
-    const next = (await readAgentCommands(db,corner,agent)).commands.find(command => command.id === newer.id)!;
+    const next = (await readAgentCommands(db, agent, corner)).commands.find(command => command.id === newer.id)!;
     expect(next).toBeDefined();
     expect(next.source.body).toContain('Checks passed on the newer head');
     // Legacy same-generation claim replays also pass through stale-wake admission.
-    await claimAgentCommand(db,corner,agent,running.id,'running',{kind:'helper',owner:claimOwner});
+    await startQueuedTurn(db, corner, agent, running.id);
     await finish(corner,running.turn_request_id,'Review of the previous head is complete.');
     expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[newer.id])).rows).toEqual([{ state:'pending' }]);
-    await claimAgentCommand(db,corner,agent,next.id,'next',{kind:'helper',owner});
-    expect((await db.query('SELECT state,generation_id FROM agent_commands WHERE id=$1',[newer.id])).rows)
-      .toEqual([{ state:'claimed',generation_id:'next' }]);
+    await startQueuedTurn(db, corner, agent, next.id);
+    expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[newer.id])).rows)
+      .toEqual([{ state:'pending' }]);
   });
-  it('an unstarted superseded review is still dropped and explicit Stop still cancels running work', async () => {
+  it('an unstarted review survives a head change and explicit Stop cancels running work', async () => {
     const db = fixture.database, { room,corner } = await place();
     const stale = (await createAgentCommand(db,{ roomId:corner,agentId:agent,sourceMessageId:null,reason:'system' }))!;
     await db.query('UPDATE agent_commands SET review_context=$2::jsonb WHERE id=$1',
       [stale.id,JSON.stringify({ cornerId:corner,headSha:'obsolete',pullRequest:42,briefRevision:0 })]);
-    await expect(claimAgentCommand(db,corner,agent,stale.id,'stale',{kind:'helper',owner})).rejects.toThrow();
+    await startQueuedTurn(db, corner, agent, stale.id);
     expect((await db.query('SELECT state,cancellation_reason FROM agent_commands WHERE id=$1',[stale.id])).rows)
-      .toEqual([{ state:'cancelled',cancellation_reason:'superseded_wake' }]);
+      .toEqual([{state:'pending',cancellation_reason:null}]);
     const message = await phone.execute('sendRoomMessage',{ roomId:room,text:'@ruby Do some work' },human);
-    const running = (await readAgentCommands(db,room,agent)).commands.find(command => command.sourceMessageId === message.messageId)!;
-    await claimAgentCommand(db,room,agent,running.id,'running',{kind:'helper',owner});
+    const running = (await readAgentCommands(db, agent, room)).commands.find(command => command.sourceMessageId === message.messageId)!;
+    await startQueuedTurn(db, room, agent, running.id);
     await phone.execute('cancelAgentTurn',{ roomId:room,agentId:agent,requestId:running.turnRequestId },human);
     expect((await db.query('SELECT status FROM agent_turns WHERE room_id=$1 AND request_id=$2',
       [room,running.turnRequestId])).rows).toEqual([{ status:'cancelled' }]);

@@ -58,11 +58,10 @@ BEGIN
     SELECT gen_random_uuid(),origin.session_id,COALESCE(origin.user_id,agent.owner_id),'agent',now(),origin.action_id,NEW.id,
       jsonb_build_object('name',CASE WHEN NEW.state IN ('complete','cancelled') THEN 'agent_terminal' ELSE 'agent_command' END,
         'outcome',CASE WHEN NEW.state='cancelled' THEN 'cancelled' WHEN turn.status='failed' THEN 'failed'
-          WHEN NEW.state='claimed' THEN 'started' WHEN turn.completion_kind='no-reply' OR NEW.result_message_id IS NOT NULL THEN 'success' ELSE 'unknown' END,
+          WHEN turn.completion_kind='no-reply' OR NEW.result_message_id IS NOT NULL THEN 'success' ELSE 'unknown' END,
         'hostResult',CASE WHEN turn.completion_kind='no-reply' THEN 'no_reply' WHEN turn.status='failed' THEN 'failed'
           WHEN NEW.result_message_id IS NOT NULL THEN 'reply_recorded' ELSE 'unknown' END,
-        'commandState',NEW.state,'terminalReason',CASE WHEN NEW.state IN ('complete','cancelled') THEN 'recorded' ELSE NULL END,
-        'generationId',NEW.generation_id)
+        'commandState',NEW.state,'terminalReason',CASE WHEN NEW.state IN ('complete','cancelled') THEN 'recorded' ELSE NULL END)
     FROM agents agent LEFT JOIN diagnostic_command_origins origin ON origin.command_id=NEW.id
     LEFT JOIN agent_turns turn ON turn.room_id=NEW.room_id AND turn.request_id=NEW.turn_request_id AND turn.agent_id=NEW.agent_id
     WHERE agent.agent_id=NEW.agent_id;

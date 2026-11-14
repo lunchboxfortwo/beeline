@@ -1,28 +1,12 @@
-import { setAgentWakePaused } from '../agent-wake-pause.js';
-import { OwnedModelCredentials } from '../owned-model-credential.js';
-import { systemMessage } from '@beeline/api-contract/system-message-catalog';
-import { sendOperatorSystemDm, readOperatorSystemDm } from '../operator-system-dm.js';
-import { postRepositoryOnboarding } from '../repository-onboarding.js';
-import { createAgentSubscription, listAgentSubscriptions, deleteAgentSubscription, listServiceSubscriptionEvents } from '../agent-subscriptions.js';
-import { completeProviderWebhookAssignment } from '../provider-webhooks.js';
-import { reportAgentSignIn } from '../agent-sign-in.js';
-import { forgetSquireSignIn } from '../squire-machine.js';
-import { setCornerHold } from '../corner-holds.js';
-import { claimAgentCommand } from '../agent-command.js';
-import { createHash, randomBytes } from 'node:crypto';
-import { endComputerSession, refreshComputerSession } from '../computer-session.js';
-import type { DaemonAttachment, DaemonOperationMap } from '@beeline/api-contract/daemon';
+import { connectionInstallName,interpreterScriptArgument,isCommandGrantScript,type AgentGrantKind,type CommandGrantRule,type CommandGrantScript } from '@beeline/api-contract/agent-grants';
+import type { DaemonAttachment,DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { REPLY_EXCERPT_MAX_LENGTH } from '@beeline/api-contract/daemon';
-import { interpreterScriptArgument, connectionInstallName, isCommandGrantScript, type AgentGrantKind, type CommandGrantRule, type CommandGrantScript } from '@beeline/api-contract/agent-grants';
+import { systemMessage } from '@beeline/api-contract/system-message-catalog';
+import { createHash,randomBytes } from 'node:crypto';
 import { MESSAGE_CURSOR_MS_SQL } from '../database.js';
-import { type SystemPhrase } from '../system-line.js';
 import { mediaIdFromUrl } from '../media-ttl.js';
-import { connectApp } from '../app-connections.js';
-import { deleteInstitutionalMemory, getInstitutionalContext, getInstitutionalMemoryTurnStats, reportInstitutionalMemoryUsed, saveInstitutionalMemory, searchInstitutionalMemory, updateInstitutionalMemory } from '../institutional-memory-shadow.js';
-import { searchInstitutionalHistory } from '../institutional-history.js';
-import { notifyFeedbackFixed } from '../feedback.js';
-import { deleteSkill, loadWorkspaceSkill, saveSkill } from '../institutional-skills.js';
-import { archiveWorkflow, assignWorkflowRole, handoff, getWorkflowRun, cancelWorkflowRun, saveWorkflow, startWorkflow } from '../workflow-runs.js';
+import { OwnedModelCredentials } from '../owned-model-credential.js';
+import { type SystemPhrase } from '../system-line.js';
 
 
 
@@ -57,38 +41,7 @@ export function registryMcpRouteName(serverName: string, connectorId: string): s
 export const seconds = (date: Date) => Math.floor(date.getTime() / 1_000);
 
 
-export const MAX_REPLY_STEPS = 2_000;
-
-export const MAX_REPLY_NOTE_LENGTH = 16_000;
-
-/** The whole stored steps payload; a note longer than one row spans several. */
-export const MAX_REPLY_STEPS_BYTES = 4_000_000;
-
-/**
- * A reply's steps (`PostRoomMessageInput.steps`) as the JSON its `activity`
- * column stores, or null when it has none. Only tool rows and notes belong
- * there; anything else is refused rather than stored.
- */
-// Reserve internal notes beyond the validated helper payload for closing prose.
-export function replySteps(steps: unknown, summaryNotes = 0): string | null {
-  if (steps === undefined) return null;
-  if (!Array.isArray(steps) || steps.length > MAX_REPLY_STEPS + summaryNotes)
-    throw new Error('reply steps are invalid');
-  for (const step of steps as Record<string, unknown>[]) {
-    if (!step || typeof step !== 'object') throw new Error('reply steps are invalid');
-    if (step.kind !== 'tool' && step.kind !== 'note') throw new Error('reply steps are invalid');
-    if (typeof step.title !== 'string' || step.title.length > 240)
-      throw new Error('reply steps are invalid');
-    if (step.kind === 'note' &&
-      (typeof step.text !== 'string' || !step.text || step.text.length > MAX_REPLY_NOTE_LENGTH))
-      throw new Error('reply steps are invalid');
-    if (step.continues !== undefined && (step.kind !== 'note' || step.continues !== true))
-      throw new Error('reply steps are invalid');
-  }
-  const json = JSON.stringify(steps);
-  if (Buffer.byteLength(json) > MAX_REPLY_STEPS_BYTES + summaryNotes * 100_000) throw new Error('reply steps are invalid');
-  return steps.length ? json : null;
-}
+export { MAX_REPLY_NOTE_LENGTH,MAX_REPLY_STEPS,MAX_REPLY_STEPS_BYTES,replySteps } from '../answer-activity.js';
 
 /** Corner reads and merge writes that also admit a current parent Room member. */
 export const CORNER_REACH_OPERATIONS = new Set<string>([
@@ -103,14 +56,9 @@ export const CORNER_REACH_OPERATIONS = new Set<string>([
   'approveCornerMerge',
 ]);
 
-/** Closed corners still deliver stop commands and expose cleanup/history facts. */
+/** Closed corners still expose cleanup/history facts. */
 export const CORNER_CLEANUP_OPERATIONS = new Set<string>([
   'closeCornerPullRequest',
-  'getAgentCommands',
-  'claimAgentCommand',
-  'claimAgentTurn',
-  'acknowledgeAgentCommand',
-  'releaseAgentTurn',
   'getCornerCloseRequests',
   'getRoomInbox',
 ]);
@@ -348,10 +296,8 @@ export const DAEMON_OPERATION_ROUTES: Record<keyof DaemonOperationMap, true> = {
   getAgentPresence: true,
   getRequestCompletion: true,
   getAgentCommands: true,
-  claimAgentCommand: true,
-  claimAgentTurn: true,
-  acknowledgeAgentCommand: true,
-  releaseAgentTurn: true,
+  getModelCredential: true,
+  startAgentTurn: true,
   postRoomMessage: true,
   reactToRoomMessage: true,
   postAgentAttachment: true,
@@ -375,7 +321,6 @@ export const DAEMON_OPERATION_ROUTES: Record<keyof DaemonOperationMap, true> = {
   postAgentAvatar: true,
   postAgentUsage: true,
   publishAgentUsageAccount:true,
-  readCommandActivation:true,
   attachAgentUsageAccount:true,
   getAgentUsage: true,
   answerUsageRefresh: true,

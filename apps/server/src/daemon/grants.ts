@@ -529,7 +529,7 @@ import { daemonWriteResult } from './corner-messages.js';
 
   export async function daemonRepositoryOnboardingRequester(ctx: DaemonContext, agentId: string, roomId?: string, context?: Record<string, unknown>) {
     const command = ctx.authorizedCommand ?? (roomId && typeof context?.requestId === 'string'
-      ? await authorizeCommandOutput(ctx.database, roomId, agentId, context.requestId, context.generationId, false, false)
+      ? await authorizeCommandOutput(ctx.database, roomId, agentId, context.requestId)
       : undefined);
     if (command) {
       // Optional setup guidance cannot require personal-resource authority.

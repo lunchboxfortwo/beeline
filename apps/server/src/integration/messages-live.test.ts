@@ -1,5 +1,9 @@
-import { claimAgentCommand } from '.././agent-command.js';
-import { describe, expect, it } from 'vitest';
+import { startQueuedTurn } from '../test-fixtures/queued-turn.test-support.js';
+
+import { describe, expect, it, vi } from 'vitest';
+import { PostgresLiveListener } from '../postgres-live.js';
+import { PgliteListenClient } from '../test-support-postgres-live.test-support.js';
+import { claimAgentConnection } from '../connection-presence.js';
 import WebSocket from 'ws';
 import { PhoneService } from '.././phone-service.js';
 import { type RoomView } from '@beeline/api-contract/phone';
@@ -8,8 +12,16 @@ import { monolithFixture, HUMAN, AGENT, WORKSPACE, ROOM, next } from '../test-fi
 describe('monolith integration: messages-live', () => {
 const fixture = monolithFixture();
 
+async function onlineHelper() {
+  await fixture.database.query(`INSERT INTO live_server_instances(instance_id) VALUES('live-integration')`);
+  await claimAgentConnection(fixture.database, fixture.live, AGENT, {}, {
+    connectionId: 'live-integration', instanceId: 'live-integration',
+  });
+}
+
 
   it('toggles a fixed reaction and projects its identity roster for the viewer', async () => {
+    await onlineHelper();
     const messageId = '9'.repeat(64);
     expect(
       (await fixture.operation('sendRoomMessage', { roomId: ROOM, messageId, text: 'React here' })).status,
@@ -62,168 +74,50 @@ const fixture = monolithFixture();
   });
 
 
-  it('proves send -> read -> daemon prompt -> reply -> WebSocket delta and overlays', async () => {
-    const socket = new WebSocket(`${fixture.origin.replace('http', 'ws')}/v1/phone/live`, [
-      `bearer.${fixture.accessToken}`,
-    ]);
-    await new Promise<void>((resolve, reject) => {
-      socket.once('open', () => resolve());
-      socket.once('error', reject);
-    });
-    socket.send(JSON.stringify({ type: 'subscribe', roomId: ROOM }));
-    await next(socket, 'subscribed');
-    const sent = await fixture.request('/v1/phone/operations/sendRoomMessage', 'POST', {
-      roomId: ROOM,
-      messageId: 'c'.repeat(64),
-      text: 'Please inspect this',
-    });
-    expect(sent.status).toBe(200);
-    const { messageId } = (await sent.json()) as { messageId: string };
-    expect(messageId).toBe('c'.repeat(64));
-    const room = (await (await fixture.request(`/v1/phone/rooms/${ROOM}`)).json()) as {
-      messages: Array<{ id: string; text: string }>;
-    };
-    expect(room.messages).toContainEqual(
-      expect.objectContaining({ id: messageId, text: 'Please inspect this' }),
-    );
-    const threaded = await fixture.request('/v1/phone/operations/sendRoomReply', 'POST', {
-      roomId: ROOM,
-      messageId: 'd'.repeat(64),
-      parentMessageId: messageId,
-      text: '@bee What is your soul?',
-      mentions: [AGENT],
-    });
-    expect(threaded.status).toBe(200);
-    const { messageId: threadedMessageId } = (await threaded.json()) as { messageId: string };
-    expect(threadedMessageId).toBe('d'.repeat(64));
-    const threadedRoom = (await (await fixture.request(`/v1/phone/rooms/${ROOM}`)).json()) as {
-      messages: Array<{
-        id: string;
-        text: string;
-        reply?: { channelId: string; eventId: string; rootId: string };
-      }>;
-    };
-    expect(threadedRoom.messages).toContainEqual(
-      expect.objectContaining({
-        id: threadedMessageId,
-        text: '@bee What is your soul?',
-        reply: { channelId: ROOM, eventId: messageId, rootId: messageId },
-      }),
-    );
-    const conversation = await fixture.request(
-      '/v1/daemon/operations/getRoomConversation',
-      'POST',
-      { roomId: ROOM },
-      fixture.daemonToken,
-    );
-    // The helper is unreachable right now, but the mention is still durably
-    // queued, so the send writes no premature did-not-answer line. The message
-    // that caused it stands last.
-    const conversationItems = ((await conversation.json()) as { items: Array<{ body: string }> })
-      .items;
-    expect(conversationItems.at(-1)?.body).toBe('@bee What is your soul?');
-    expect(conversationItems.some((item) => item.body.includes('did not answer'))).toBe(false);
-    // Each human input keeps its own pending command.
-    const queued = (await fixture.database.query<{ id: string }>(
-      `SELECT id FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND source_message_id=$3`,
-      [ROOM, AGENT, messageId],
-    )).rows[0];
-    const claimed = await claimAgentCommand(fixture.database, ROOM, AGENT, queued.id, 'fixture-generation');
-    expect(claimed.source_message_id).toBe(messageId);
-    expect((await fixture.database.query('SELECT state FROM agent_commands WHERE source_message_id=$1 AND agent_id=$2', [threadedMessageId, AGENT])).rows).toEqual([{state:'pending'}]);
-    const delivered = next(socket, 'message-delta');
-    const reply = await fixture.daemonOperation(
-      'postRoomMessage',
-      { roomId: ROOM, requestId: messageId, text: 'I am Terra.' },
-      fixture.daemonToken,
-    );
-    expect(reply.status).toBe(200);
-    expect(await delivered).toEqual(
-      expect.objectContaining({
-        type: 'message-delta',
-        roomId: ROOM,
-        message: expect.objectContaining({ requestId: messageId, text: 'I am Terra.' }),
-      }),
-    );
-    const answeredRoom = (await (await fixture.request(`/v1/phone/rooms/${ROOM}`)).json()) as {
-      messages: Array<{ requestId?: string; text: string }>;
-    };
-    expect(answeredRoom.messages).toContainEqual(
-      expect.objectContaining({ requestId: messageId, text: 'I am Terra.' }),
-    );
-    await fixture.daemonOperation(
-      'postAgentDraft',
-      { agentId: AGENT, roomId: ROOM, turnId: 'turn-1', text: 'Working' },
-      fixture.daemonToken,
-    );
-    expect(await new PhoneService(fixture.database, fixture.origin).liveDraftSnapshot(ROOM)).toEqual([]);
-    const toolRequestId = 'tool-request';
-    expect(
-      (
-        await fixture.daemonOperation('postAgentTurnReceipt', {
-          agentId: AGENT,
-          roomId: ROOM,
-          requestId: toolRequestId,
-          status: 'working',
-        })
-      ).status,
-    ).toBe(200);
-    expect(
-      (
-        await fixture.daemonOperation('postAgentActivity', {
-          agentId: AGENT,
-          roomId: ROOM,
-          requestId: toolRequestId,
-          activity: [
-            {
-              kind: 'tool',
-              title: 'Bash',
-              operation: 'execute',
-              command: 'npm test -- ActivityTimeline',
-              status: 'exit 0',
-              output: 'first result line\nlast result line',
-              files: [{ path: 'apps/mobile/sources/components/buzz/ActivityTimeline.tsx' }],
-            },
-          ],
-        })
-      ).status,
-    ).toBe(200);
-    const activityRoom = (await (await fixture.request(`/v1/phone/rooms/${ROOM}`)).json()) as {
-      messages: Array<{ presentation: string; activity?: unknown }>;
-    };
-    expect(activityRoom.messages).toContainEqual(
-      expect.objectContaining({
-        presentation: 'activity',
-        activity: [
-          {
-            kind: 'tool',
-            title: 'Bash',
-            operation: 'execute',
-            command: 'npm test -- ActivityTimeline',
-            status: 'exit 0',
-            output: 'first result line\nlast result line',
-            files: [{ path: 'apps/mobile/sources/components/buzz/ActivityTimeline.tsx' }],
-          },
-        ],
-      }),
-    );
-    socket.close();
+  it('proves queued intake, reply publication and committed phone deltas', async () => {
+    await onlineHelper();
+    const listener = new PostgresLiveListener(fixture.database, fixture.live,
+      () => new PgliteListenClient(fixture.database));
+    void listener.run();
+    await vi.waitFor(() => expect(listener.projectionHealth().connected).toBe(true));
+    const socket = new WebSocket(`${fixture.origin.replace('http', 'ws')}/v1/phone/live`, [`bearer.${fixture.accessToken}`]);
+    try {
+      await new Promise<void>((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });
+      const subscribed = next(socket, 'subscribed');
+      socket.send(JSON.stringify({ type: 'subscribe', roomId: ROOM }));
+      await subscribed;
+      const sent = await fixture.operation('sendRoomMessage', {
+        roomId: ROOM, messageId: 'c'.repeat(64), text: '@bee What is your soul?',
+      });
+      expect(sent.status).toBe(200);
+      const { messageId } = await sent.json() as { messageId: string };
+      const room = await fixture.phone.readRoom(ROOM, HUMAN);
+      expect(room?.messages).toContainEqual(expect.objectContaining({ id: messageId, text: '@bee What is your soul?' }));
+      const queued = await fixture.daemonOperation('getAgentCommands', { roomId: ROOM });
+      const item = (await queued.json()).commands.find((command: {sourceMessageId: string}) => command.sourceMessageId === messageId);
+      expect(item).toBeDefined();
+      expect((await fixture.daemonOperation('startAgentTurn', { roomId: ROOM, requestId: item.id })).status).toBe(200);
+      const delivered = next(socket, 'message-delta');
+      const steps = [{ kind: 'tool', title: 'Bash', operation: 'execute', status: 'exit 0' }];
+      const reply = await fixture.daemonOperation('postRoomMessage', {
+        roomId: ROOM, requestId: item.id, text: 'I am Terra.', steps,
+      });
+      expect(reply.status).toBe(200);
+      expect(await delivered).toMatchObject({ type: 'message-delta', roomId: ROOM,
+        message: { requestId: item.id, text: 'I am Terra.' } });
+      await fixture.database.backgroundWork.drain();
+      const answered = await fixture.phone.readRoom(ROOM, HUMAN);
+      expect(answered?.messages).toContainEqual(expect.objectContaining({ requestId: item.id, text: 'I am Terra.', activity: steps }));
+      expect((await fixture.database.query('SELECT state FROM agent_commands WHERE id=$1', [item.id])).rows).toEqual([{ state: 'complete' }]);
+    } finally {
+      socket.close();
+      await listener.stop();
+    }
   });
 
 
   it('never reports unread for the viewer’s own latest message', async () => {
-    // A live helper is the quiet case: with a fresh presence heartbeat the send
-    // writes no unread-mention notice, so the only rows here are the two the
-    // test is about (`agent-access.test.ts` owns the noisy case).
-    await fixture.database.query(
-      `INSERT INTO live_outputs(room_id,agent_id,turn_id,kind,body)
-       VALUES($1,$2,'presence','presence',$3::jsonb)`,
-      [
-        ROOM,
-        AGENT,
-        JSON.stringify({ status: 'online', observedAt: Math.floor(Date.now() / 1000) }),
-      ],
-    );
+    await onlineHelper();
     const sent = await fixture.operation('sendRoomMessage', {
       roomId: ROOM,
       messageId: 'c'.repeat(64),
@@ -289,6 +183,7 @@ const fixture = monolithFixture();
       ...payload,
       text: 'Different payload',
     });
-    expect(conflicting.status).toBe(400);
+    expect(conflicting.status).toBe(200);
+    expect((await conflicting.json()).messageId).not.toBe(payload.messageId);
   });
 });

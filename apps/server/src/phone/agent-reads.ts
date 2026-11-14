@@ -64,7 +64,7 @@ import { reviveDates, roomSchedule } from './read-projection.js';
         floor(extract(epoch FROM a.updated_at)*1000000)::bigint::text config_version,
         (SELECT id::text FROM agent_avatars WHERE agent_id=a.agent_id) avatar_generation_id,
         EXISTS(SELECT 1 FROM agent_commands c WHERE c.agent_id=a.agent_id
-          AND c.avatar_job AND c.state IN ('pending','claimed')) avatar_generation_pending,
+          AND c.avatar_job AND c.state='pending') avatar_generation_pending,
         CASE WHEN workspace.visibility='public' THEN false ELSE COALESCE(a.yolo_mode,false) END yolo_mode,
         workspace.visibility='public' yolo_forced_off,a.yolo_set_at,
         setter.name yolo_set_by_name,a.access_policy,a.owner_id,

@@ -1,9 +1,8 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, expect, it } from 'vitest';
 import { buildBwrapArgv, sandboxMountPlan } from './bwrap-sandbox.js';
-import { roomRuntimeCoordinatorReportCornerStartFailure } from './room-runtime-refresh-room-checkout.js';
 import { distillTurnFailureReason, redactToolDetail } from './turn-failure-reason.js';
 
 const roots: string[] = [];
@@ -97,23 +96,4 @@ it('keeps multi-line git diagnostics without carrying a JavaScript stack', () =>
     'remote: Invalid username or token. Password authentication is not supported for Git operations.\n' +
     "fatal: Authentication failed for 'https://github.com/Beeline-Work/beeline.git/'";
   expect(distillTurnFailureReason(new Error(message)).text).toBe(message);
-});
-
-it('publishes the complete setup failure on its claimed receipt, with secrets scrubbed', async () => {
-  const execute = vi.fn(async (operation: string) => {
-    if (operation === 'getAgentCommands') return { commands: [{ id: 'input', action: 'input' }] };
-    if (operation === 'claimAgentTurn') return { commands: [{ turnRequestId: 'request' }] };
-    return {};
-  });
-  const message = 'Command failed: git ' + '--long-path '.repeat(50);
-  const stderr = 'remote: Invalid username or token.\nfatal: Authentication failed\nTOKEN=private-value';
-  const error = Object.assign(new Error(message), { stderr });
-  const reported = await roomRuntimeCoordinatorReportCornerStartFailure({
-    options: { daemonApi: { execute } }, agent: { publicKey: 'agent' },
-  } as never, 'corner', error);
-  expect(reported).toBe(true);
-  const receipt = execute.mock.calls.find(call => call[0] === 'postAgentTurnReceipt') as unknown as
-    [string, { reason: string }];
-  expect(receipt[1].reason).toBe(redactToolDetail((message + '\n' + stderr).trim()));
-  expect(receipt[1].reason).not.toContain('private-value');
 });

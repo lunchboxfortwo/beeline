@@ -6,7 +6,7 @@ import { expect, it, vi } from 'vitest';
 import { AcpClient } from './acp.js';
 import { stopAgentProcess } from './agent-process.js';
 import { runMachineHelper } from './machine-helper.js';
-import { runAgentRuntime, type HostedAgent } from './agent-runtime.js';
+import { runAgentRuntime } from './agent-runtime.js';
 import { AgentLifecycle } from './helper-lifecycle.js';
 import { writeUpdateState } from './self-update.js';
 import { identityFromKey, writeRuntimeRecord, type AgentRuntimeRecord } from './runtime.js';
@@ -39,11 +39,9 @@ vi.mock('./daemon-api-client.js', async (original) => {
     },
   };
 });
-vi.mock('./thin-core.js', () => ({
-  ThinDaemonCore: class {
+vi.mock('./agent-runner.js', () => ({
+  AgentRunner: class {
     constructor(private readonly runtime: AgentRuntimeRecord) {}
-    activeTurnCount() { return 0; }
-    setInteractiveIdleListener() {}
     async run(options: { signal: AbortSignal; onEstablished(): Promise<void> }) {
       await options.onEstablished();
       observed.serving.add(this.runtime.agent.publicKey);
@@ -131,8 +129,7 @@ it('serves all seventeen agents without starting a harness during an update succ
     runAgent: (_path, host, signal) => {
       const task = (async () => {
         const detach = host.attach({ agentId: 'predecessor', runtimeDir: root,
-          lifecycle: new AgentLifecycle({ controller: new AbortController() }),
-          core: { activeTurnCount: () => 0, quiesceForUpdate() {} } as HostedAgent['core'] });
+          lifecycle: new AgentLifecycle({ controller: new AbortController() }) });
         host.notifyReleaseAvailable('new');
         await new Promise<void>(done => {
           signal.addEventListener('abort', () => done(), { once: true });

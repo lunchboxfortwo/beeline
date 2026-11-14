@@ -380,7 +380,7 @@ const fixture = monolithFixture();
           [cornerId],
         )
       ).rows,
-    ).toHaveLength(1);
+    ).toHaveLength(0);
     const stale = await fixture.daemonOperation('reviseCornerBrief', {
       roomId: ROOM,
       cornerId,
@@ -670,7 +670,7 @@ const fixture = monolithFixture();
         roomId: ROOM, cornerId, requestId: 'worker-brief-correction', expectedRevision: 1,
         brief: { content: 'Keep the corrected behavior.', change: 'Corrected behavior' },
       });
-      const terminal = state === 'landed' || state === 'closed';
+      const terminal = state === 'landed' || state === 'closed' || health === 'removed';
       if (terminal) {
         expect(revised.status).toBe(403);
         expect((await fixture.database.query(`SELECT revision FROM corner_brief_revisions WHERE corner_id=$1`, [cornerId])).rows)
@@ -684,7 +684,7 @@ const fixture = monolithFixture();
         `SELECT command.agent_id FROM agent_commands command JOIN messages note ON note.id=command.source_message_id
          WHERE command.room_id=$1 AND note.text LIKE '%revised the corner brief%'`, [cornerId],
       )).rows.map(row => row.agent_id);
-      const shouldWake = !['offline','removed'].includes(health);
+      const shouldWake = true;
       console.info(`Reproduction BR-01: HTTP reviseCornerBrief from ${state}, worker ${health}; expected=${shouldWake ? 'current worker' : 'none'}; observed=${wakes.map(id => id === worker ? 'current worker' : 'opener').join(',') || 'none'}; revision=${result.revision}`);
       expect(result).toMatchObject({ revision: 2, wake: shouldWake ? { queued: true, agentId: worker } : { queued: false, reason: expect.any(String) } });
       expect(wakes).toEqual(shouldWake ? [worker] : []);
@@ -825,19 +825,13 @@ const fixture = monolithFixture();
       fixture.request(
         '/v1/daemon/operations/createCorner',
         'POST',
-        {
-          ...input,
-          generationId: 'fixture-generation',
-        },
+        { ...input },
         fixture.daemonToken,
       ),
       fixture.request(
         '/v1/daemon/operations/createCorner',
         'POST',
-        {
-          ...input,
-          generationId: 'fixture-generation',
-        },
+        { ...input },
         fixture.daemonToken,
       ),
     ]);

@@ -23,3 +23,5 @@ export const HELPER_UPDATE_CLOSE_REASON = 'helper-update';
 export * from './agent-usage.js';
 
 export * from './turn-replay.js';
+
+export { wall, WallRefusal, WALL_KINDS, type WallKind } from './walls.js';
