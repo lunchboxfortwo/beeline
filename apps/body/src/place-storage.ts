@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { removeArchivedCornerData } from './archived-corner-cleanup.js';
 import { writePrivateFileAtomically } from './atomic-private-file.js';
 import { DaemonApiError, type DaemonApiClient } from './daemon-api-client.js';
-import { reclaimHelperStorage, type StorageRoomState } from './helper-storage.js';
+import { storageOperation, type WholeStorageOptions, reclaimHelperStorage, type StorageRoomState } from './helper-storage.js';
 import { discoverLegacyStorageOwners, pruneOpenCheckoutObjects, readStorageOwners, reclaimOwnedCheckout, rememberStorageOwner, type StorageOwner } from './storage-owners.js';
 
 /**
@@ -33,8 +33,9 @@ export class PlaceStorage {
       while (this.next) {
         const current = this.next;
         this.next = undefined;
-        await this.sweepCorners().catch(error => console.warn('[body] corner cleanup deferred:', error));
-        await this.sweepRooms(current).catch(error => console.warn('[body] private storage cleanup deferred:', error));
+        const operation = storageOperation({});
+        await this.sweepCorners(operation).catch(error => console.warn('[body] corner cleanup deferred:', error));
+        await this.sweepRooms(current, operation).catch(error => console.warn('[body] private storage cleanup deferred:', error));
       }
     })().finally(() => { this.flight = undefined; });
   }
@@ -59,7 +60,7 @@ export class PlaceStorage {
   }
 
   /** A corner the server reports archived loses its local copies. */
-  async reapCorner(cornerId: string): Promise<void> {
+  async reapCorner(cornerId: string, operation = storageOperation({})): Promise<void> {
     if (this.options.live(cornerId) || await this.wasRefused(cornerId)) return;
     let archived: boolean | undefined;
     try {
@@ -75,14 +76,14 @@ export class PlaceStorage {
     for (const owner of [...owners, { workspaceId, roomId: cornerId, kind: 'corners', itemId: cornerId } as StorageOwner]) {
       const ended: StorageOwner = { ...owner, archived: true, ended: true, endedAt: owner.endedAt ?? Date.now() };
       await rememberStorageOwner(supervisorRoot, ended);
-      await reclaimOwnedCheckout(supervisorRoot, ended, {
+      await reclaimOwnedCheckout(supervisorRoot, ended, { ...operation,
         log: entry => console.log(`[body] archived corner ${entry.roomId} deleted ${entry.path}; freed ${entry.freedBytes} bytes`),
       });
     }
-    await this.reclaim([{ roomId: cornerId, archived: true }]);
+    await this.reclaim([{ roomId: cornerId, archived: true }], operation);
   }
 
-  private async sweepCorners(): Promise<void> {
+  private async sweepCorners(operation: WholeStorageOptions): Promise<void> {
     const root = resolve(this.options.supervisorRoot, 'beeline', 'corners');
     const local = await readdir(root, { withFileTypes: true }).catch(() => []);
     const owners = await readStorageOwners(this.options.supervisorRoot);
@@ -90,16 +91,16 @@ export class PlaceStorage {
       if (!entry.isDirectory()) continue;
       const mapped = owners.find(owner => owner.kind === 'corners' && owner.itemId === entry.name);
       const cornerId = mapped?.roomId ?? (!/^[a-f0-9]{64}$/.test(entry.name) ? entry.name : undefined);
-      if (cornerId) await this.reapCorner(cornerId);
+      if (cornerId) await this.reapCorner(cornerId, storageOperation(operation));
     }
   }
 
-  private reclaim(states: readonly StorageRoomState[]) {
+  private reclaim(states: readonly StorageRoomState[], operation: WholeStorageOptions) {
     const { supervisorRoot, runtimeDir } = this.options;
     return readStorageOwners(supervisorRoot).then(owners => reclaimHelperStorage({
-      runtimeDir,
+      ...operation, runtimeDir,
       removeArchived: roomId => removeArchivedCornerData(supervisorRoot, roomId, resolve(supervisorRoot, 'beeline/corners', roomId), {
-        runtimeDir, log: entry => console.log(`[body] archived private storage deleted ${entry.path}; freed ${entry.freedBytes} bytes`),
+        ...operation, runtimeDir, log: entry => console.log(`[body] archived private storage deleted ${entry.path}; freed ${entry.freedBytes} bytes`),
       }),
       readStates: async () => states,
       relatedRoots: roomId => [resolve(supervisorRoot, 'beeline/corners', roomId),
@@ -114,12 +115,12 @@ export class PlaceStorage {
     }));
   }
 
-  private async sweepRooms(states: readonly StorageRoomState[]): Promise<void> {
+  private async sweepRooms(states: readonly StorageRoomState[], operation: WholeStorageOptions): Promise<void> {
     const { supervisorRoot, workspaceId, agentId } = this.options;
     for (const owner of await discoverLegacyStorageOwners(supervisorRoot, workspaceId, states, async () => undefined))
       await rememberStorageOwner(supervisorRoot, owner);
-    await this.reclaim(states);
-    await pruneOpenCheckoutObjects(supervisorRoot, states, {
+    await this.reclaim(states, operation);
+    await pruneOpenCheckoutObjects(supervisorRoot, states, { ...operation,
       log: entry => console.log(`[body] open checkout storage deleted ${entry.path}; freed ${entry.freedBytes} bytes`),
     });
     const archived = new Set(states.filter(state => state.archived).map(state => state.roomId));
@@ -128,7 +129,7 @@ export class PlaceStorage {
       const state = states.find(entry => entry.roomId === owner.roomId)!;
       const ended = { ...owner, archived: true, ended: true, endedAt: owner.endedAt ?? Date.now(), landedHeadSha: state.landedHeadSha };
       await rememberStorageOwner(supervisorRoot, ended);
-      await reclaimOwnedCheckout(supervisorRoot, ended, {
+      await reclaimOwnedCheckout(supervisorRoot, ended, { ...operation,
         landedHeadSha: state.landedHeadSha,
         log: entry => console.log(`[body] Room ${owner.roomId} checkout deleted ${entry.path}; freed ${entry.freedBytes} bytes`),
       });

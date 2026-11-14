@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
-import { reclaimWholeStorageObject, type WholeStorageOptions } from './helper-storage.js';
+import { storageOperation, reclaimWholeStorageObject, type WholeStorageOptions } from './helper-storage.js';
 import { canonicalStoragePath } from './storage-filesystem.js';
 
 export function isDeletedRuntimeName(name: string): boolean {
@@ -13,6 +13,7 @@ export function isDeletedRuntimeName(name: string): boolean {
 
 /** Tombstone creation already records a settled ended-agent answer. */
 export async function pruneDeletedRuntimes(supervisorRoot: string, _now = Date.now(), options: WholeStorageOptions = {}): Promise<string[]> {
+  options = storageOperation(options);
   const root = resolve(supervisorRoot, 'beeline', 'deleted-runtimes');
   const removed: string[] = [];
   for (const entry of await readdir(root, { withFileTypes: true }).catch(() => [])) {
@@ -24,6 +25,7 @@ export async function pruneDeletedRuntimes(supervisorRoot: string, _now = Date.n
 
 /** Expire an unused bare clone only after git confirms it has no linked worktrees. */
 export async function pruneRepositoryCaches(supervisorRoot: string, now = Date.now(), options: WholeStorageOptions = {}): Promise<string[]> {
+  options = storageOperation(options);
   const root = resolve(supervisorRoot, 'beeline', 'repositories');
   const removed: string[] = [];
   for (const entry of await readdir(root, { withFileTypes: true }).catch(() => [])) {
@@ -53,6 +55,7 @@ export async function pruneRepositoryCaches(supervisorRoot: string, now = Date.n
 /** Machine caches have no credential/session data. Model/tool generations stay
  * whole; npm and turbo expire old files independently of recently used siblings. */
 export async function pruneMachineStorage(supervisorRoot: string, options: WholeStorageOptions = {}): Promise<string[]> {
+  options = storageOperation(options);
   const root = resolve(supervisorRoot, 'beeline');
   const objects = ['npm-cache', 'turbo-cache', 'cargo-target'].map(name => resolve(root, name));
   for (const category of ['node-modules', 'node-modules-mobile', 'model-cache']) {

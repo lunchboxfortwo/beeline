@@ -1,8 +1,8 @@
-import type { StdioSquireMcpClient } from './squire-mcp-client.js';
+import type { SquireMcpConnection } from './squire-mcp-client.js';
 
 export type SquireShareLease = { sessionId: string; upstreamUrl: string; expiresAt: number };
 type Renewal = SquireShareLease & {
-  client: StdioSquireMcpClient;
+  client: SquireMcpConnection;
   pending?: Promise<void>;
 };
 
@@ -22,12 +22,12 @@ export class SquireShareRenewals {
   private readonly shares = new Map<string, Renewal>();
 
   constructor(
-    private readonly owns: (sessionId: string, client: StdioSquireMcpClient) => boolean,
+    private readonly owns: (sessionId: string, client: SquireMcpConnection) => boolean,
     private readonly persist: (lease: SquireShareLease) => Promise<boolean>,
     private readonly reaped: (sessionId: string) => void,
   ) {}
 
-  track(sessionId: string, client: StdioSquireMcpClient, result: unknown): void {
+  track(sessionId: string, client: SquireMcpConnection, result: unknown): void {
     let lease: ReturnType<typeof shareResult>;
     try { lease = shareResult(result); } catch { return; }
     this.stop(sessionId);

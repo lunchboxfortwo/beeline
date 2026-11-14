@@ -21,6 +21,7 @@ import { SquireOperationError } from './squire-outcome.js';
  */
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { homedir } from 'node:os';
+import { resolve } from 'node:path';
 import { squireConnectProcessEnv } from './connector-squire.js';
 import { squireFacadeLaunch, type SquireAgentScope } from './squire-host.js';
 
@@ -180,8 +181,8 @@ export class StdioSquireMcpClient {
       if (exited) return;
       exited = true;
       this.log(`squire mcp exited (${String(code)})`);
-      this.options.onExit?.(child.pid, code);
       if (this.child !== child) return;
+      this.options.onExit?.(child.pid, code);
       this.initialized = undefined;
       this.child = undefined;
       for (const entry of this.pending.values()) {
@@ -256,12 +257,61 @@ export class StdioSquireMcpClient {
   }
 }
 
-/**
- * The one Squire MCP client the helper loop uses. Injectable so tests drive a
- * mock; the real helper gets one lazily-spawned stdio session.
- */
+/** A place identity stays distinct even when its calls share the host wire. */
+export type SquireMcpConnection = Pick<StdioSquireMcpClient, 'call' | 'requestMcp' | 'close' | 'reconnect' | 'pid'>;
+type SharedOptions = Pick<SquireMcpClientOptions, 'scope' | 'home' | 'onSpawn' | 'onExit' | 'onNotification' | 'log'>;
+
+/** One lazy transport per helper/operator home; places retain their own context
+ * and notifications. Releasing a place cannot disconnect another place's browser. */
+export class HelperSquireTransport {
+  private readonly clients = new Set<SharedOptions>();
+  private readonly wire: StdioSquireMcpClient;
+
+  constructor(home: string, makeClient = (options: SquireMcpClientOptions) => new StdioSquireMcpClient(options)) {
+    this.wire = makeClient({ home, scope: { agentId: 'beeline-helper', roomId: 'helper' },
+      onSpawn: pid => { for (const client of this.clients) client.onSpawn?.(pid); },
+      onExit: (pid, code) => { for (const client of this.clients) client.onExit?.(pid, code); },
+      onNotification: message => { for (const client of this.clients) client.onNotification?.(message); },
+      log: message => { for (const client of this.clients) client.log?.(message); },
+    });
+  }
+
+  acquire(options: SharedOptions): SquireMcpConnection {
+    this.clients.add(options);
+    const wire = this.wire;
+    const live = () => {
+      if (!this.clients.has(options)) throw new Error('Squire place connection is closed');
+    };
+    return {
+      get pid() { return wire.pid; },
+      call: async (tool, args) => { live(); return wire.call(tool, args); },
+      requestMcp: async (method, params) => { live(); return wire.requestMcp(method, params); },
+      // Account reconnect belongs to the shared transport, never to a place's
+      // ordinary completion. Pending actions keep the existing unknown outcome.
+      reconnect: () => { live(); wire.reconnect(); },
+      close: () => { this.clients.delete(options); },
+    };
+  }
+
+  close(): void { this.clients.clear(); this.wire.close(); }
+}
+
+const helperTransports = new Map<string, HelperSquireTransport>();
+export function sharedSquireMcpClient(options: SharedOptions): SquireMcpConnection {
+  const home = resolve(options.home ?? homedir());
+  let transport = helperTransports.get(home);
+  if (!transport) { transport = new HelperSquireTransport(home); helperTransports.set(home, transport); }
+  return transport.acquire(options);
+}
+
+/** The helper's shutdown owns the wire and every browser still using it. */
+export function closeHelperSquireTransports(): void {
+  for (const transport of helperTransports.values()) transport.close();
+  helperTransports.clear();
+}
+
 export function defaultSquireMcpClient(scope: SquireAgentScope): SquireMcpClientContract {
-  return new StdioSquireMcpClient({ scope });
+  return sharedSquireMcpClient({ scope });
 }
 
 /** The shape `connector-squire.ts` speaks, re-declared to avoid a cycle. */
