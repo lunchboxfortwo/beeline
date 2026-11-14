@@ -228,7 +228,7 @@ export async function captureRoutes({
   const summary = {
     samplesPerCapture: count,
     method:
-      'Fresh context per sample; browser navigation time origin to explicit visible content plus two frames; driver totals retained separately. Cold clears application storage; warm primes the target route. HTTP caching is disabled in both variants by request routing and the no-store fixture server. Browser process and compiled-code caches are reused. Redirect and unavailable states retain their labels.',
+      'Fresh context per sample; browser navigation time origin to explicit visible content plus two frames; driver totals retained separately. Cold clears application storage; warm primes the target route. HTTP caching is disabled in both variants by request routing and the no-store fixture server. Browser process is reused; compiled-code cache state is uncontrolled. Redirect and unavailable states retain their labels.',
     ...summarize(inventory, captures, { samplesPerCapture: count, budgetMs: 450 }),
     states: Object.fromEntries(routes.map(({ path }) => [path, routeFixture(path, secret).state])),
   };

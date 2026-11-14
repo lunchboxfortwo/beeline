@@ -855,7 +855,7 @@ frames and the pre-click driver dispatch.
 ### Web route coverage
 
 Route discovery excludes extracted hook/support modules and includes browser-share
-and Google callback screens. The current inventory contains 44 routes (88 cold/warm
+and Google callback screens. The current inventory contains 46 routes (92 cold/warm
 variants), rather than the historical 38 missing page loads. Each has an explicit
 content predicate in `web-route-fixtures.mjs`; redirects and terminal unavailable
 states are labelled in `route-summary.json`. Headers and spinners alone do not
@@ -869,8 +869,8 @@ route document sample. Only authentication is copied between contexts; surface,
 outbox and session caches are not. A warm document sample first warms its own
 route, while cold samples clear application storage. HTTP caching is disabled
 in both variants by request interception and the no-store fixture server.
-The browser process and compiled JavaScript caches are reused; neither label
-claims a fresh browser process or cold server/database caches. Each sample records Chromium
+The browser process is reused and compiled-code cache state is uncontrolled;
+neither label claims a fresh browser process or cold server/database caches. Each sample records Chromium
 heap, DOM/listener counts and cumulative task/script/layout seconds before and
 after the timed path, plus host load and available memory. Resource collection
 runs outside the response clock. Browser contexts close even after capture errors.
