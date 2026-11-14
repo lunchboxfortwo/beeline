@@ -73,6 +73,19 @@ WebSocket.prototype.emit = function (event, ...args) {
   return context.run(messageScope, () => socketEmit.call(this, event, ...args));
 };
 
+// A browser receive clock includes time queued behind rendering. Finish the
+// server span when it submits this request's reply, using the same SQL scope.
+const socketSend = WebSocket.prototype.send;
+WebSocket.prototype.send = function (...args) {
+  const scope = context.getStore();
+  const connection = socketScopes.get(this);
+  const frame = phoneFrame(args[0]);
+  const result = socketSend.apply(this, args);
+  if (frame?.t === 'res' && connection && scope?.traceId === socketRequestTrace(connection.traceId, frame.id))
+    emit({ type: 'operation', ...scope, endMs: Date.now(), ok: frame.ok });
+  return result;
+};
+
 const connect = pg.Pool.prototype.connect;
 pg.Pool.prototype.connect = function (...args) {
   const startMs = Date.now();
