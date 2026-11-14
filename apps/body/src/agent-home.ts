@@ -53,7 +53,6 @@ import { existsSync,watch,type FSWatcher } from 'node:fs';
 import { chmod,lstat,mkdir,mkdtemp,readFile,readlink,realpath,rename,rm,symlink,writeFile } from 'node:fs/promises';
 import { homedir,tmpdir } from 'node:os';
 import { dirname,resolve } from 'node:path';
-import { parse as parseYaml,stringify as stringifyYaml } from 'yaml';
 import { AGENT_BEHAVIORS,agentBehavior,SHARED_CREDENTIALS,type AgentKind } from './agent-command.js';
 import { assertRealContainedDirectory,isMissingPathError,roomAgentHomeEnv,roomSessionTmpDir,writeIsolatedHarnessFile } from './agent-home-plan-managed-skills.js';
 import { provisionAgentSkillsAndMcp,provisionPiCustomModelConfig } from './agent-home-provision-agent-skills-and-mcp.js';
@@ -605,15 +604,6 @@ export async function prepareRoomAgentHome(input: RoomAgentHomeInput): Promise<R
   await writeIsolatedHarnessFile(resolve(root, 'claude', '.claude.json'), '{"mcpServers":{}}');
   await writeIsolatedHarnessFile(resolve(root, 'pi', 'mcp.json'), '{"mcpServers":{}}');
   await provisionPiCustomModelConfig(root, operatorHome, true, undefined);
-  for (const name of GOOSE_SHARED_CONFIG_FILES) {
-    const source = await readFile(resolve(operatorHome, '.config', 'goose', name), 'utf8').catch(error => {
-      if (!isMissingPathError(error)) throw error;
-    });
-    if (source !== undefined) {
-      const body = name === 'config.yaml' ? stringifyYaml({ ...parseYaml(source), extensions: {} }) : source;
-      await writeIsolatedHarnessFile(resolve(root, 'goose', 'config', name), body);
-    }
-  }
 
   const prior = agentHomeProvisionQueues.get(root) ?? Promise.resolve();
   const provision = prior
