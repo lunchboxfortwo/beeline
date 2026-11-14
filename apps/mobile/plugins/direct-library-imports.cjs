@@ -63,12 +63,20 @@ module.exports = function directLibraryImports(api) {
     const lazy = ['livekit-client', 'posthog-react-native'].includes(node.source.value);
     if ((!tamagui && !lazy) || node.importKind === 'type' || !node.specifiers.length) return;
     let changed = false;
+    const direct = [];
     node.specifiers = node.specifiers.filter(specifier => {
       if (specifier.importKind === 'type' || t.isImportNamespaceSpecifier(specifier)) return true;
       if (tamagui && !t.isImportSpecifier(specifier)) return true;
       const imported = t.isImportDefaultSpecifier(specifier) ? t.identifier('default') : specifier.imported;
       const source = tamagui ? imports.get(imported.name) : node.source.value;
       if (!source) return true;
+      if (tamagui) {
+        // Keep requested components ready for the first interaction. Only the
+        // unused barrel modules disappear; their setup is still preserved.
+        direct.push(t.importDeclaration([specifier], t.stringLiteral(target(source))));
+        changed = true;
+        return false;
+      }
       const binding = importPath.scope.getBinding(specifier.local.name);
       // A re-export still needs a local binding. Preserve its eager semantics.
       if (!binding || binding.referencePaths.some(reference => !reference.isIdentifier() || reference.parentPath.isExportSpecifier())) return true;
@@ -84,7 +92,7 @@ module.exports = function directLibraryImports(api) {
     });
     if (!changed) return;
     // Preserve the barrel's setup while loading only its requested components.
-    const direct = tamagui ? [t.importDeclaration([], t.stringLiteral(setup))] : [];
+    if (tamagui) direct.unshift(t.importDeclaration([], t.stringLiteral(setup)));
     if (node.specifiers.length) importPath.insertAfter(direct);
     else importPath.replaceWithMultiple(direct);
     } });

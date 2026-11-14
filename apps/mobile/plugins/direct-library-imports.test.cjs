@@ -10,10 +10,10 @@ const transform = (source, platform = 'web') => transformSync(source, {
 test('loads the same core, wrapped components and provider without the whole barrel', () => {
   const result = transform("import { YStack, Button as Action, TamaguiProvider, useTheme, Text, createTamagui } from 'tamagui'; export const values = [YStack, Action, TamaguiProvider, useTheme, Text, createTamagui];");
   assert.match(result, /import .*setup\.mjs/);
-  assert.match(result, /require\("@tamagui\/stacks"\)\.YStack/);
-  assert.match(result, /require\("tamagui\/button"\)\.Button/);
-  assert.match(result, /require\("tamagui\/provider"\)\.TamaguiProvider/);
-  assert.match(result, /require\("@tamagui\/core"\)\.useTheme/);
+  assert.match(result, /import \{ YStack \} from "@tamagui\/stacks"/);
+  assert.match(result, /import \{ Button as Action \} from "tamagui\/button"/);
+  assert.match(result, /import \{ TamaguiProvider \} from "tamagui\/provider"/);
+  assert.match(result, /import \{ useTheme \} from "@tamagui\/core"/);
   assert.match(result, /views\/Text\.mjs/);
   assert.match(result, /createTamagui\.mjs/);
   assert.doesNotMatch(result, /from ['"]tamagui['"]/);
@@ -32,32 +32,9 @@ test('unknown, namespace and side-effect imports preserve the package contract',
   assert.match(result, /import \{ FutureComponent \} from 'tamagui'/);
   assert.match(result, /import \* as UI from 'tamagui'/);
   assert.match(result, /import 'tamagui'/);
-  assert.match(result, /require\("@tamagui\/core"\)\.useTheme/);
+  assert.match(result, /import \{ useTheme \} from "@tamagui\/core"/);
 });
 
-
-test('unused components stay unevaluated even when Metro preserves their side effects', () => {
-  const first = transformSync("import { YStack, Sheet } from 'tamagui'; export function body() { return YStack; } export function modal() { return Sheet; }", {
-    configFile: false, babelrc: false, plugins: [plugin, '@babel/plugin-transform-modules-commonjs'],
-  }).code;
-  const compiled = transformSync(first, {
-    configFile: false, babelrc: false,
-    plugins: [[require('metro-transform-plugins').inlineRequiresPlugin, { ignoredRequires: ['@tamagui/stacks', 'tamagui/sheet', 'livekit-client', 'posthog-react-native'] }]],
-  }).code;
-  const loaded = [];
-  const exports = {};
-  new Function('require', 'exports', compiled)(name => {
-    loaded.push(name);
-    return { YStack: 'stack', Sheet: 'sheet' };
-  }, exports);
-  assert.equal(loaded.length, 1); // The original setup side effect remains eager.
-  assert.match(loaded[0], /setup\.mjs$/);
-  assert.equal(exports.body(), 'stack');
-  assert.equal(loaded.at(-1), '@tamagui/stacks');
-  assert.equal(loaded.includes('tamagui/sheet'), false);
-  assert.equal(exports.modal(), 'sheet');
-  assert.equal(loaded.at(-1), 'tamagui/sheet');
-});
 
 test('voice SDK evaluation stays inside the original audio gesture', () => {
   const first = transformSync("import { Room, RoomEvent } from 'livekit-client'; export async function join() { const room = new Room(); room.startAudio(); return RoomEvent; }", {
@@ -103,6 +80,6 @@ test('transforms JSX value references after TypeScript types are removed', () =>
     configFile: false, babelrc: false, filename: 'screen.tsx',
     plugins: [plugin, ['@babel/plugin-transform-typescript', { isTSX: true }], ['@babel/plugin-transform-react-jsx', { runtime: 'automatic' }]],
   }).code;
-  assert.match(result, /require\("@tamagui\/stacks"\)\.YStack/);
+  assert.match(result, /import \{ YStack \} from "@tamagui\/stacks"/);
   assert.doesNotMatch(result, /from ['"]tamagui['"]|type Props/);
 });
