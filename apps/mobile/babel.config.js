@@ -22,7 +22,7 @@ module.exports = function (api) {
     presets: ['babel-preset-expo'],
     plugins: [
       require.resolve('./plugins/direct-lucide-imports.cjs'),
-      require.resolve('./plugins/direct-tamagui-imports.cjs'),
+      require.resolve('./plugins/direct-library-imports.cjs'),
       ...(process.env.BEELINE_TRANSCRIPT_MEASURE === '1'
         ? [require.resolve('../../scripts/transcript-speed/commits.cjs')]
         : []),

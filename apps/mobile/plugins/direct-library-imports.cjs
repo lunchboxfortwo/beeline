@@ -43,7 +43,7 @@ for (const node of parse(source, { sourceType: 'module' }).program.body) {
   }
 }
 
-module.exports = function directTamaguiImports(api) {
+module.exports = function directLibraryImports(api) {
   const t = api.types;
   const native = api.caller(caller => caller?.platform !== undefined && caller.platform !== 'web');
   const target = source => {
@@ -56,21 +56,25 @@ module.exports = function directTamaguiImports(api) {
   const setup = target('./setup.mjs');
   return { visitor: { ImportDeclaration(importPath) {
     const node = importPath.node;
-    if (node.source.value !== 'tamagui' || node.importKind === 'type' || !node.specifiers.length) return;
+    const tamagui = node.source.value === 'tamagui';
+    const lazy = ['livekit-client', 'posthog-react-native'].includes(node.source.value);
+    if ((!tamagui && !lazy) || node.importKind === 'type' || !node.specifiers.length) return;
     const direct = [];
     node.specifiers = node.specifiers.filter(specifier => {
-      if (!t.isImportSpecifier(specifier) || specifier.importKind === 'type') return true;
-      const source = imports.get(specifier.imported.name);
+      if (specifier.importKind === 'type' || t.isImportNamespaceSpecifier(specifier)) return true;
+      if (tamagui && !t.isImportSpecifier(specifier)) return true;
+      const imported = t.isImportDefaultSpecifier(specifier) ? t.identifier('default') : specifier.imported;
+      const source = tamagui ? imports.get(imported.name) : node.source.value;
       if (!source) return true;
       // Metro's existing inlineRequires transform can then load each component
       // when used, rather than evaluating every component imported by grammar.
       direct.push(t.variableDeclaration('const', [t.variableDeclarator(specifier.local,
-        t.memberExpression(t.callExpression(t.identifier('require'), [t.stringLiteral(target(source))]), specifier.imported))]));
+        t.memberExpression(t.callExpression(t.identifier('require'), [t.stringLiteral(target(source))]), imported))]));
       return false;
     });
     if (!direct.length) return;
     // Preserve the barrel's setup while loading only its requested components.
-    direct.unshift(t.importDeclaration([], t.stringLiteral(setup)));
+    if (tamagui) direct.unshift(t.importDeclaration([], t.stringLiteral(setup)));
     if (node.specifiers.length) importPath.insertAfter(direct);
     else importPath.replaceWithMultiple(direct);
   } } };
