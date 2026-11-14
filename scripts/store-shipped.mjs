@@ -10,7 +10,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { appStoreClient, awaitDelivery } from './ios-store-build.mjs';
 
 const PLAY_API = 'https://androidpublisher.googleapis.com/androidpublisher/v3/applications';
-const MARKER = /^v\d+\.\d+\.\d+@[0-9a-f]{12}$/;
+const MARKER = /^v\d+\.\d+\.\d+(?:-rc\.[1-9]\d*)?@[0-9a-f]{12}$/;
 const BUNDLE_ID = 'app.usebeeline.mobile';
 
 export function releaseMarker(version, sha) {
