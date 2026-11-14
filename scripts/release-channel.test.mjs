@@ -387,12 +387,16 @@ test('durable helper channels retain separately stamped rc and final archives', 
   } } };
   assert.equal(await downloadPagesChannel({ github, repo: {}, channel: 'next', allowMissing: true, directory: join(directory, 'absent') }), null);
   const candidate = join(directory, 'candidate'); const expected = bundle(candidate, 'v0.1.2-rc.3', sha);
-  await publishPagesChannel({ github, repo: {}, channel: 'next', directory: candidate });
+  const r2 = { token: 'fixture-token', accountId: 'a'.repeat(32), fetchImpl: async (_url, request) => {
+    for await (const _chunk of request.body) { /* Consume the streamed fixture upload. */ }
+    return Response.json({ success: true });
+  } };
+  await publishPagesChannel({ github, repo: {}, channel: 'next', directory: candidate, ...r2 });
   const downloaded = join(directory, 'downloaded');
   assert.deepEqual(await downloadPagesChannel({ github, repo: {}, channel: 'next', directory: downloaded }), expected);
   const final = join(directory, 'final');
   bundle(final, 'v0.1.2', sha);
-  await publishPagesChannel({ github, repo: {}, directory: final });
+  await publishPagesChannel({ github, repo: {}, directory: final, ...r2 });
   assert.equal(releases.get(pagesChannelTag()).prerelease, true);
   assert.equal(releases.get(pagesChannelTag()).make_latest, 'false');
   const promoted = join(directory, 'promoted');

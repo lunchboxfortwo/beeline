@@ -1,18 +1,20 @@
 # Helper downloads
 
-`worker.mjs` serves `usebeeline.app/dl/*` from the existing public GitHub Release
-assets. `/dl/manifest.json` uses `helper-update-channel`;
-`/dl/next/manifest.json` uses `helper-update-channel-next`. Archive names,
-checksums and recovery bootstrap paths stay unchanged. `/install` and
+`worker.mjs` serves `usebeeline.app/dl/*` from public R2 objects at
+`https://downloads.usebeeline.app/dl/...`. Latest uses the `dl/` prefix in
+`beeline-downloads`; next uses `dl/next/`. The rolling GitHub Releases
+`helper-update-channel` and `helper-update-channel-next` retain secondary copies.
+Archive names, checksums and recovery bootstrap paths stay unchanged. `/install` and
 `/install.sh` stay on the static website and already fetch these `/dl` paths.
-Desktop installers and application updates keep their existing public GitHub
-Release download URLs.
+Desktop installers and application updates use the same R2 bucket under
+versioned and `latest/` prefixes.
 
 GET and HEAD stream bytes without buffering archives or forwarding caller
-credentials. Range requests remain range requests. GitHub asset redirects are
-followed inside the Worker; clients see no redirect. Mutable channel responses
-and upstream failures are not cached. No token, new storage service, release
-polling loop or additional release gate is required.
+credentials. Range requests remain range requests. Clients see no redirect.
+Mutable channel responses and upstream failures are not cached; a cache-busting
+query makes the next verification read the freshly published bytes. Publication
+uses `CLOUDFLARE_R2_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` through the shared desktop
+R2 client. Downloads need no credentials or additional release gate.
 
 The helper action validates, uploads and verifies the public channel directly.
 Pages receives only the static marketing site and associations. Next helper
@@ -26,7 +28,7 @@ code does not configure Cloudflare. Do not dispatch a release for this setup.
 
 1. Run `node --test scripts/helper-downloads.test.mjs` and
    `npm run test:deploy`. The helper action dry run executes its real
-   publication script against fixture Release assets, reads those bytes through
+   publication script against mocked R2 and GitHub uploads, reads those bytes through
    the Worker, and proves the website artifact has no `dl` directory.
 2. With account Workers Scripts Edit and zone Workers Routes Edit permissions,
    deploy a preview without registering a route:
@@ -36,7 +38,7 @@ code does not configure Cloudflare. Do not dispatch a release for this setup.
 3. Compare `/dl/manifest.json` and `/dl/next/manifest.json` from the preview
    with the current public manifests. Fetch every referenced archive and
    bootstrap; check its byte count, SHA-256 and sidecar. The response must carry
-   `X-Beeline-Downloads: github-release` and have no client redirect. If the
+   `X-Beeline-Downloads: r2` and have no client redirect. If the
    rolling assets name a release that never finished, stop before routing:
    firstmate must repair/select the intended channel, without releasing it here.
 4. On squire, copy only `BEELINE_RELEASE_CHANNEL` and

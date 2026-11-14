@@ -1,11 +1,10 @@
 #!/usr/bin/env node
-import { createReadStream } from 'node:fs';
-import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { createR2Uploader } from './r2-client.mjs';
 
 const ORIGIN = 'https://downloads.usebeeline.app';
-const BUCKET = 'beeline-downloads';
 const INSTALLER = /^Beeline-.*\.(?:dmg|app\.tar\.gz|AppImage|deb|rpm|msi|exe)(?:\.sig)?$/;
 
 // Keep the signed bytes and desktop version when carrying a previous build.
@@ -25,8 +24,7 @@ export function r2Manifest(manifest, tag) {
 export async function publishDesktopR2({ directory, manifestPath, tag, output,
   token = process.env.CLOUDFLARE_R2_TOKEN, accountId = process.env.CLOUDFLARE_ACCOUNT_ID,
   fetchImpl = fetch }) {
-  if (!token) throw new Error('CLOUDFLARE_R2_TOKEN is required for desktop publication');
-  if (!/^[a-f0-9]{32}$/.test(accountId || '')) throw new Error('CLOUDFLARE_ACCOUNT_ID must be a Cloudflare account ID');
+  const put = createR2Uploader({ token, accountId, fetchImpl });
   const manifest = r2Manifest(JSON.parse(await readFile(manifestPath, 'utf8')), tag);
   const files = (await readdir(directory, { withFileTypes: true }))
     .filter(entry => entry.isFile() && INSTALLER.test(entry.name)).map(entry => entry.name).sort();
@@ -37,21 +35,6 @@ export async function publishDesktopR2({ directory, manifestPath, tag, output,
     if (!files.includes(file) || !files.includes(`${file}.sig`)) throw new Error(`Missing desktop payload or signature: ${file}`);
   }
   await writeFile(output, `${JSON.stringify(manifest, null, 2)}\n`);
-  const put = async (prefix, file, path) => {
-    const key = `${prefix}/${encodeURIComponent(file)}`;
-    const body = createReadStream(path);
-    try {
-      const response = await fetchImpl(`https://api.cloudflare.com/client/v4/accounts/${accountId}/r2/buckets/${BUCKET}/objects/${key}`, {
-        method: 'PUT', headers: { Authorization: `Bearer ${token}`,
-          'Content-Type': file.endsWith('.json') ? 'application/json' : 'application/octet-stream',
-          'Content-Length': String((await stat(path)).size) },
-        body, duplex: 'half',
-      });
-      if (!response.ok) throw new Error(`R2 upload failed for ${prefix}/${file}: HTTP ${response.status}`);
-      const result = await response.json();
-      if (result.success !== true) throw new Error(`R2 upload failed for ${prefix}/${file}`);
-    } finally { body.destroy(); }
-  };
   // Finish the immutable set first, then advance latest. The latest manifest
   // is last so an updater never observes a reference to an unfinished upload.
   for (const prefix of [tag, 'latest']) {

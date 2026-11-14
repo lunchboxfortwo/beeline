@@ -1,7 +1,7 @@
 # Beeline helper update channel
 
 > **Download routing:** `infra/helper-downloads/` owns the Cloudflare `/dl/*`
-> route. It streams public GitHub Release assets at the existing URLs. Activate
+> route. It streams public R2 objects at the existing URLs. Activate
 > that route using its [rollout instructions](../infra/helper-downloads/README.md)
 > before the first release using this workflow. The marketing site stays on
 > GitHub Pages; helper publication does not deploy Pages.
@@ -32,8 +32,9 @@ alone does not change an already running service. Firstmate applies this host
 configuration after merge; this PR does not touch the host. Removing both
 settings returns to latest on the next ordinary update reconciliation.
 
-The rolling prereleases `helper-update-channel` (latest) and
-`helper-update-channel-next` retain independently validated helper bytes.
+The R2 prefixes `dl/` (latest) and `dl/next/` retain independently validated
+helper bytes; the rolling GitHub prereleases `helper-update-channel` and
+`helper-update-channel-next` retain secondary copies.
 The route selects the channel from the path, independently of the static
 website deployment. A next release never republishes the stable website.
 Next bundles carry an rc version,
@@ -72,14 +73,17 @@ Its promote phase validates and publishes the exact bundle directory through
 the public download URL. The legacy script names are retained. The helper job
 has no Pages permission, environment, artifact upload or deployment wait.
 
-The rolling `helper-update-channel` and `helper-update-channel-next` releases
-are public prereleases, excluded from GitHub's latest stable selection. They
-hold the archives, checksums, manifest, recovery bootstrap and Mac build inputs.
-The Worker streams their assets without credentials or exposing GitHub's
-redirects to installed clients. It bypasses caches for these mutable channel
-URLs. Helpers retain their existing checksum verification and leave the
-installed version untouched if publication is interrupted; rerunning the
-helper leg repairs a partial upload. The manifest is uploaded last.
+Publication uploads every archive, checksum, recovery bootstrap, Mac build input
+and manifest to the `beeline-downloads` R2 bucket under `dl/` (latest) or
+`dl/next/` (next), using the same client and Cloudflare credentials as desktop
+publication. The Worker streams `https://downloads.usebeeline.app/dl/...`
+without credentials and bypasses caches for these mutable channel URLs.
+The rolling `helper-update-channel` and `helper-update-channel-next` GitHub
+prereleases retain secondary copies for authenticated build carry/downloads;
+public downloads do not depend on GitHub repository visibility. Helpers retain
+their existing checksum verification and leave the installed version untouched
+if publication is interrupted; rerunning the helper leg repairs a partial upload.
+Each destination receives its manifest last, after all other channel files.
 
 The helper job serializes channel publication. The website job separately
 holds `usebeeline-pages` while deploying only static marketing files,
