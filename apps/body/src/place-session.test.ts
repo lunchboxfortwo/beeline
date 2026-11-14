@@ -1,6 +1,6 @@
 import type { AgentCommand } from '@beeline/api-contract/daemon';
 import { EventEmitter } from 'node:events';
-import { mkdtemp,rm,writeFile } from 'node:fs/promises';
+import { mkdir,mkdtemp,readFile,rm,writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname,join } from 'node:path';
 import { afterEach,expect,it,vi } from 'vitest';
@@ -9,6 +9,7 @@ import type { BodyConfig } from './config.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
 import { PlaceSession } from './place-session.js';
 import type { AgentRuntimeRecord } from './runtime.js';
+import { execFileAsync,prepareWorkspace } from './workspace-checkout.js';
 
 // Cache persistence is tested with real files by SessionResources. These
 // prompt tests intentionally finish while optional background work is pending.
@@ -23,7 +24,7 @@ vi.mock('./agent-home.js', async original => ({
 const roots: string[] = [];
 afterEach(async () => { for (const path of roots.splice(0)) await rm(path, { recursive: true, force: true }); });
 
-async function fixture() {
+async function fixture(corner = false) {
   const root = await mkdtemp(join(tmpdir(), 'session-start-')); roots.push(root);
   let delivered = false;
   const prompt = vi.fn(async () => { delivered = true; return { agentText: 'The answer', stopReason: 'end_turn', updates: [], toolCalls: [] }; });
@@ -44,7 +45,7 @@ async function fixture() {
     agent: { publicKey: 'a'.repeat(64), name: 'Agent' },
     runtime: { supervisorRoot: root, agent: { publicKey: 'a'.repeat(64) } } as AgentRuntimeRecord,
     config, api: { execute, connection: () => ({ baseUrl: 'http://localhost', daemonToken: 'fixture', agentId: 'a'.repeat(64), helperVersion: 'test' }) } as unknown as DaemonApiClient,
-    placeId: 'room', workspaceId: 'workspace', onExit() {}, createAcpClient: spawn,
+    placeId: 'room', ...(corner ? { parentRoomId: 'parent' } : {}), workspaceId: 'workspace', onExit() {}, createAcpClient: spawn,
   });
   const item = { id: 'item', roomId: 'room', returnRoomId: 'room', turnRequestId: 'item', reason: 'human_tag',
     agentId: 'a'.repeat(64),
@@ -60,6 +61,96 @@ it('starts and answers before optional reads begin, even if none of them resolve
   expect(f.execute).toHaveBeenCalledWith('getAgentConfiguration', expect.anything());
   expect(f.session.resources.read()).toMatchObject({ status: { configuration: 'loading', grants: 'loading' } });
   expect(f.prompt.mock.calls[0]?.[1]).toContain('the agent default');
+  await f.session.dispose();
+});
+
+it('keeps a cold repository corner able to check out and push after session context loads', async () => {
+  const f = await fixture(true);
+  const source = join(f.config.workspaceRoot!, 'source');
+  await mkdir(source);
+  await execFileAsync('git', ['init', '--initial-branch=main', source]);
+  await writeFile(join(source, 'README.md'), 'repository contents\n');
+  await execFileAsync('git', ['-C', source, 'add', 'README.md']);
+  await execFileAsync('git', ['-C', source, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.com', 'commit', '-m', 'Initial']);
+  const remote = join(f.config.workspaceRoot!, 'remote.git');
+  await execFileAsync('git', ['clone', '--bare', source, remote]);
+  const repository = { resolution: 'repository', key: 'owner/repo', remote: `file://${remote}`, targetBranch: 'main' };
+  const restore = { featureBranch: 'feature/corner-room', lifecycle: {} };
+  f.execute.mockImplementation(name => {
+    if (name === 'getRoomRepositoryState') return Promise.resolve(repository);
+    if (name === 'getCornerRestoreState') return Promise.resolve(restore);
+    if (name === 'postCornerRemoteState') return Promise.resolve({});
+    return new Promise(() => {});
+  });
+  await f.session.start();
+  expect(f.execute).not.toHaveBeenCalled();
+  await f.session.deliver(f.item, []);
+  await vi.waitFor(() => expect(f.session.resources.read()).toMatchObject({ repository, restore }));
+  const systemPrompt = vi.mocked(f.session.client!.sessionNew).mock.calls[0]![0].systemPrompt!;
+  expect(systemPrompt).not.toContain('repo-less corner');
+  expect(systemPrompt).not.toContain('Do not initialize a repository');
+  expect(systemPrompt).toContain('workspace');
+  expect(systemPrompt).toContain('any agent in this corner may commit, push and open a pull request');
+  const ready = await prepareWorkspace({ api: f.session.options.api, config: f.config,
+    supervisorRoot: f.session.options.runtime.supervisorRoot, workspaceId: 'workspace',
+    agent: f.session.options.agent, placeId: 'room', parentRoomId: 'parent' });
+  const checkout = f.session.folder();
+  expect(ready).toContain(`Checkout ready at ${checkout} on branch feature/corner-room`);
+  expect(await readFile(join(checkout, 'README.md'), 'utf8')).toBe('repository contents\n');
+  await writeFile(join(checkout, 'proof.txt'), 'corner edit\n');
+  await execFileAsync('git', ['-C', checkout, 'add', 'proof.txt']);
+  await execFileAsync('git', ['-C', checkout, 'commit', '-m', 'Prove corner edits']);
+  await execFileAsync('git', ['-C', checkout, 'push', 'origin', 'HEAD:refs/heads/proof-corner-checkout']);
+  const pushed = await execFileAsync('git', ['--git-dir', remote, 'rev-parse', 'refs/heads/proof-corner-checkout']);
+  const head = await execFileAsync('git', ['-C', checkout, 'rev-parse', 'HEAD']);
+  expect(pushed.stdout).toBe(head.stdout);
+  await f.session.dispose();
+});
+
+it('does not tell a cold Room that its repository is missing before the read completes', async () => {
+  const f = await fixture();
+  await f.session.start();
+  const systemPrompt = vi.mocked(f.session.client!.sessionNew).mock.calls[0]![0].systemPrompt!;
+  expect(systemPrompt).not.toContain('This Beeline Room has no linked repository');
+  expect(systemPrompt).toContain('workspace');
+  expect(f.execute).not.toHaveBeenCalled();
+  await f.session.dispose();
+});
+
+it.each([false, true])('does not treat an unverified repository as absent (corner=%s)', async corner => {
+  const f = await fixture(corner);
+  f.session.resources.context.repository = { resolution: 'unverified' };
+  await f.session.start();
+  const systemPrompt = vi.mocked(f.session.client!.sessionNew).mock.calls[0]![0].systemPrompt!;
+  expect(systemPrompt).not.toContain('This Beeline Room has no linked repository');
+  expect(systemPrompt).not.toContain('This is a repo-less corner');
+  expect(systemPrompt).toContain('workspace');
+  await f.session.dispose();
+});
+
+it('replaces a native conversation when its repository instructions change', async () => {
+  const f = await fixture(true);
+  f.config.agentBinary = 'codex-acp';
+  const original = f.spawn.getMockImplementation()!;
+  const load = vi.fn(async () => ({ sessionId: 'previous' }));
+  f.spawn.mockImplementation(options => Object.assign(original(options), {
+    canLoadSession: () => true, sessionLoad: load,
+  }));
+  f.session.resources.context.repository = { resolution: 'none' };
+  await f.session.start();
+  expect(f.session.client!.sessionNew).toHaveBeenCalledWith(expect.objectContaining({
+    systemPrompt: expect.stringContaining('This is a repo-less corner'),
+  }));
+  await f.session.stop();
+  await f.session.start();
+  expect(load).toHaveBeenCalledTimes(1);
+  await f.session.stop();
+  f.session.resources.context.repository = { resolution: 'repository', key: 'owner/repo', targetBranch: 'main' };
+  await f.session.start();
+  expect(load).toHaveBeenCalledTimes(1);
+  expect(f.session.client!.sessionNew).toHaveBeenLastCalledWith(expect.objectContaining({
+    systemPrompt: expect.stringContaining('any agent in this corner may commit, push and open a pull request'),
+  }));
   await f.session.dispose();
 });
 
