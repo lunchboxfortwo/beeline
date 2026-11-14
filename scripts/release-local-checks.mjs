@@ -1,4 +1,4 @@
-// Full Checks use four queue slots backed by the existing CI jail budgets;
+// Local release checks use queue slots backed by the existing CI jail budgets;
 // Body's nested sandbox uses an equally bounded host-user scope instead.
 // This transport creates only task-owned transient units, never changes a
 // listener, Docker daemon, slice limit, registration or production lock.
@@ -9,24 +9,27 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { matrixRows } from './release-local-actions.mjs';
 import { appendSummary, privateWrite } from './release-local-process.mjs';
+import { droppedChecks, quickChecks } from './release-local-policy.mjs';
 
 const runnerRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const checksWorkflow = '.github/workflows/checks.yml';
-const readers = new Set(['server-suite-shard', 'server-claim-latency', 'production-corpus-replay', 'app-link-associations', 'auth-image', 'frame-budget', 'state-upgrade']);
+const readers = new Set(['codecs', 'server-suite-shard', 'server-claim-latency', 'production-corpus-replay', 'app-link-associations', 'auth-image', 'frame-budget', 'state-upgrade']);
 export const checkWorkspace = id => readers.has(id) ? 'shared build with private write layer' : 'private copy of build';
 
 export function checkPlan(engine) {
-  const workflow = engine.read(checksWorkflow);
+  const original = engine.read(checksWorkflow), workflow = quickChecks(original);
   return {
-    execution: 'four existing beeline-ci-shard-1..4 jails; Body uses a bounded host-user scope in one of the same four queue slots',
+    execution: 'three independent quick-check jobs in existing isolated CI jails; maximum four slots',
     budget: 'existing parent slices: 3 CPUs / 12 GiB each; Vitest at most 2 workers',
     preparation: 'install and build once on shard 1, before the queue',
+    retained: ['build', 'typecheck', 'dead-code', 'design grammar', 'codecs'],
+    dropped: droppedChecks(original),
     jobs: Object.entries(workflow.jobs).flatMap(([id, job]) => matrixRows(job.strategy?.matrix).map(matrix => ({
       id, matrix, needs: [job.needs ?? []].flat(), if: job.if ?? 'success()', workspace: checkWorkspace(id),
       placement: id === 'body-suite' ? 'bounded host-user scope; one of the four slots' : 'existing isolated CI shard',
     }))),
     isolation: 'private HOME, TMPDIR, cache, Docker config and log per job; isolated database engines and ephemeral ports; shard rootless Docker',
-    delivery: 'release legs remain sequential after the complete Checks verdict',
+    delivery: 'after the quick-check verdict, three bounded local delivery jobs and one remote Mac orchestration job can run together',
   };
 }
 
@@ -98,6 +101,7 @@ export class LocalChecks {
       // files into its own overlay, without granting writes to the lower mount.
       // No credentials are installed in this source tree.
       await this.privileged(['chmod', '-R', 'a+rwX', this.source]);
+      this.engine.preparedWorkspace = this.source;
     } catch (error) { this.finish(); throw error; }
   }
   async execute(slot, job, context, label, workflowEnv = {}, preparation = false) {

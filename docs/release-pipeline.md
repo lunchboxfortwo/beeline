@@ -6,32 +6,53 @@
 ## Local recovery during an Actions outage
 
 `node scripts/release-local.mjs --plan` shows the local recovery path without
-running release commands. The runner reads the committed unified workflow,
-including its complete Checks dependency, release validation, composite steps,
-canary, helper download proof, optional device proof, rollback and finalization.
-The composite shell and github-script bodies live in `scripts/release-steps/`;
-Actions and the local runner call the same files. Full Checks queue on the four
-existing `beeline-ci-shard-1..4` jails, one job per shard. Their existing parent
-slices each enforce 3 CPUs / 12 GiB; Vitest keeps its at-most-two-worker settings.
-The runner changes no listener, Docker daemon or slice configuration. Delivery
-jobs still run sequentially through the existing dependency graph. Cache misses
-rebuild; unknown action types fail.
+running release commands.
+The runner reads the committed unified workflow and its shared composite bodies,
+with the Squire policy applied by `scripts/release-local-policy.mjs`.
+That policy targets routine completion within 30 minutes: roughly five minutes
+for checks, then concurrent delivery and finalization.
+It is a scheduling budget, not a measured end-to-end deployment guarantee;
+explicit native store builds and device proofs can take longer.
 
-Checks install dependencies and build/provenance-verify once on shard 1.
-Server shards, PostgreSQL proofs, corpus replay, app associations and the auth
-image share that build as a read-only lower layer with private writable
-overlays for Vite's compiled configuration and caches. TYPECHECK, shared tests,
-dead-code, Body, mobile, mobile export, fingerprint and actionlint get private
-copies so generated fixtures, compiler state and rebuilds cannot race readers.
-Each job has its own HOME, temporary directory, Vite cache, Docker config and
-log. PGlite instances remain independent; PostgreSQL uses the shard's rootless
-Docker with an ephemeral loopback port. Completed results, artifacts and failure
-logs retain their existing local handoff. `release-checks-timing.json` records
-wall time, sampled host load and shard placement under the private state directory.
-Body instead runs as the operator's unprivileged host user in a private source
-copy, HOME and short temporary directory. Its user scope enforces 3 CPUs / 12 GiB
-and occupies one of the same four queue slots. This preserves its nested bwrap
-user-namespace proofs without granting capabilities or changing a shard jail.
+Local release checks retain one exact-SHA build with provenance verification,
+TYPECHECK (including design grammar and its short policy regressions), DEAD CODE
+and a committed network-codec freshness check.
+The full Body, server, integration/PostgreSQL/corpus and mobile test suites stay
+on PR Checks rather than running again during a local release.
+The other excluded Checks job IDs are `shared-package-tests`,
+`server-claim-latency`, `mobile-export-reachability`, `frame-budget`,
+`state-upgrade`, `native-fingerprint`, `app-link-associations`, `actionlint`
+and `auth-image`.
+The coverage and image-mirroring jobs (`coverage-map-check`, `coverage-map`,
+`mirror-ci-images`) are also absent from this profile; their existing hosted
+conditions already exclude some release dispatches.
+No runtime coverage map is fabricated from static checks.
+Hosted release Checks and all PR check names, commands and selection remain intact.
+
+Checks install dependencies and build once on existing CI shard 1, then run the
+three checks concurrently with private sources, HOME, temporary directories,
+caches, Docker configuration and logs.
+The existing `beeline-ci1..4.slice` parents enforce 3 CPUs / 12 GiB each.
+After the checks verdict, the delivery queue uses at most three local slots
+and one separate capped slot for remote Mac orchestration.
+The Mac compiler runs remotely while server, Linux helper, OTA and web app
+legs use available local slots.
+Each delivery worker runs as the operator in its own source checkout and process,
+so production credentials never enter credential-free CI jails.
+Docker build/run containers share their worker's existing parent slice, including
+Fly local image builds; no daemon, listener, shard service or slice configuration changes.
+Metro uses two workers during local release exports.
+
+All real dependency joins remain: checks precede delivery, helper publication
+waits for both helper builds, proof-selected OTA waits for its proof, and release
+finalization waits for every selected leg.
+The helper's hosted capacity-only wait for `delivery_result` is removed locally.
+Canary, migration, rollback, helper download/update proofs, exact-SHA checks and
+dispatch attribution still run through the existing owners.
+Completed outputs, artifacts and failure logs keep the existing local handoff.
+`release-checks-timing.json` records wall time, sampled host load and shard
+placement under the private state directory.
+Cache misses rebuild; unknown action types fail.
 
 The temporary outage policy is explicit: **website not released** means static
 GitHub Pages is left serving its published site. The selected EAS web app leg
@@ -130,8 +151,8 @@ Local `setup-java` selects an installed JDK matching the requested distribution
 and version, or runs the workflow's official `actions/setup-java` version with
 its inputs and a private tool cache. It exports `JAVA_HOME` and prepends the
 selected JDK's `bin` to subsequent steps. The hosted nightly Checks dispatch is
-reported as unavailable locally; the full local release Checks gate still runs.
-To execute that complete gate without reserving a release identity or delivering
+reported as unavailable locally; the quick local release Checks gate still runs.
+To execute that gate without reserving a release identity or delivering
 anything, use `--execute --leg release_checks --release-sha <full-main-commit>`
 with `--env-file` and a fresh `--state-dir`. This checks-only mode needs no
 dispatch receipt or delivery credentials. It does not acquire the production
@@ -141,6 +162,7 @@ units inside the existing CI slices; it never starts or stops a shard service.
 executing any job; no release credentials are required.
 
 ```sh
+node scripts/release-local.mjs --dry-run --leg release
 node scripts/release-local.mjs --dry-run --leg release_checks
 node scripts/release-local.mjs --execute --leg release_checks \
   --release-sha <full-main-commit> --env-file ~/.config/beeline-release.env \
@@ -162,7 +184,9 @@ Only firstmate runs the first production recovery. `--channel latest` retains
 the successful-next promotion rules. `--run-release-proof` retains the original
 proof-before-promotion gate. Store submission remains `store_track=none`.
 
-`--dry-run` executes build-only commands; `--leg` limits their cost. Server builds
+`--dry-run --leg release` prints the complete dependency, placement and omission
+plan without executing commands.
+Other `--dry-run` legs execute build-only commands; `--leg` limits their cost. Server builds
 an image without pushing, migrating or updating Machines. Helper builds the
 Linux archive and runs the existing installer proof. OTA exports locally;
 the web app exports and checks its worker/identity without uploading maps or
@@ -188,7 +212,7 @@ PRs and checks the source-reader scan against the newest usable map. There
 are no push-to-main jobs, including server-image prebuilds or main-failure
 reporting. The prebuild workflow remains available by manual dispatch.
 
-Before any delivery leg, `release_checks` calls the reusable Checks workflow
+On Actions, before any delivery leg, `release_checks` calls the reusable Checks workflow
 with `suite=all` and the immutable release SHA. Every checkout uses that SHA,
 including latest promotion at an older rc commit. No PR subset is applied:
 all eight server shards, all eight integration batches, the existing

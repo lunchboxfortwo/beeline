@@ -81,8 +81,10 @@ export class LocalActions {
   value(value, context) { return render(value, context, this.options(context)); }
   env(value, context) { return Object.fromEntries(Object.entries(this.value(value ?? {}, context)).map(([k, v]) => [k, String(v ?? '')])); }
   async workflow(file, inputs, inherited, prefix = '') {
-    const workflow = this.read(file), results = {}, pending = new Set(Object.keys(workflow.jobs));
-    const execution = await this.hooks.workflow?.({ file, inputs, inherited, prefix, engine: this }) ?? {};
+    let workflow = this.read(file);
+    const execution = await this.hooks.workflow?.({ file, workflow, inputs, inherited, prefix, engine: this }) ?? {};
+    workflow = execution.workflow ?? workflow;
+    const results = {}, pending = new Set(Object.keys(workflow.jobs));
     const running = new Map();
     const run = async id => {
       const job = workflow.jobs[id], dependencies = [job.needs ?? []].flat();

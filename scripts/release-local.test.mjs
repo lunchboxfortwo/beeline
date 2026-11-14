@@ -252,7 +252,7 @@ test('the four shard queue never overlaps jobs on a shard and drains after failu
   assert.equal((await results).filter(result => result.status === 'rejected').length, 1);
   assert.equal(active.size, 0);
 });
-test('parallel Checks wait for dependencies and every matrix verdict while delivery stays sequential', async () => {
+test('parallel Checks wait for dependencies and every matrix verdict while unconfigured workflows stay sequential', async () => {
   const directory = temporary(), starts = [], releases = new Map();
   try {
     writeFileSync(join(directory, 'checks.yml'), JSON.stringify({ jobs: {
@@ -317,16 +317,17 @@ test('concurrent job logs and temporary files stay private and retain secret mas
     assert.equal(ordinary.result, 'success');
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
-test('the dry Checks plan includes all eight shards, writer isolation, existing budgets and no publication', async () => {
+test('the dry Checks plan keeps the quick release gate and lists omitted PR suites', async () => {
   const messages = [], engine = new LocalActions({ root: repository, directory: tmpdir(), secrets: {}, processes: new Processes({}, message => messages.push(message)) });
   const plan = checkPlan(engine);
-  assert.equal(plan.jobs.filter(job => job.id === 'server-suite-shard').length, 8);
+  assert.deepEqual(plan.jobs.map(job => job.id), ['typecheck', 'dead-code', 'codecs']);
+  for (const dropped of ['body-suite', 'server-suite-shard', 'mobile-suite', 'production-corpus-replay', 'server-claim-latency']) assert.ok(plan.dropped.includes(dropped));
   assert.equal(checkWorkspace('server-suite-shard'), 'shared build with private write layer');
   for (const writer of ['typecheck', 'dead-code', 'mobile-suite', 'mobile-export-reachability', 'native-fingerprint']) assert.equal(checkWorkspace(writer), 'private copy of build');
   engine.job = () => { throw new Error('A dry plan must not execute jobs'); };
   await dryRun({ leg: 'release_checks' }, engine, { github: { sha } });
   assert.deepEqual(JSON.parse(messages[0]), plan);
-  assert.match(plan.execution, /four existing/);
+  assert.match(plan.execution, /three independent quick-check jobs/);
 });
 test('shard transport inherits existing slices and jails without changing their budgets or services', async () => {
   const directory = temporary(), calls = [];

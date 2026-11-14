@@ -15,6 +15,9 @@ const config = getSentryExpoConfig(__dirname, {
   optionsFile: false,
 });
 
+// Local release legs share Squire with other capped workers.
+if (process.env.BEELINE_LOCAL_RELEASE === 'true') config.maxWorkers = 2;
+
 // Babel instrumentation depends on this flag, which Metro does not hash itself.
 if (process.env.BEELINE_TRANSCRIPT_MEASURE === '1') {
   config.cacheVersion += '-transcript-measure';
