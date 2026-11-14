@@ -44,6 +44,7 @@ import { daemonConnectorAssignments, daemonConnectorInstall, daemonConnectorStat
 import { daemonAuthorizeResource, daemonConnectMcpServer, daemonOfferConnector } from './connector-offers.js';
 import { daemonAgentWorkbench, daemonSearchMcpRegistry } from './workbench.js';
 import { daemonConnectAppFrontDoor, daemonConnectService, daemonListAppTools, daemonExecuteAppTool } from './apps.js';
+import { modelText } from '../message-origin.js';
 
 export async function daemonExecuteOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
     switch (name) {
@@ -174,7 +175,7 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
         )) as Output<Name>;
       case 'order':
         return await sendOrder(ctx.database, ctx.authorizedCommand!, authenticatedAgentId,
-          String(candidate.address), String(candidate.text),
+          String(candidate.address), modelText(String(candidate.text)),
           candidate.agent === undefined ? undefined : String(candidate.agent), ctx.afterCommit) as Output<Name>;
       case 'stopAgentTurn':
         return await stopCommandedTurn(ctx.database, ctx.authorizedCommand!, authenticatedAgentId,

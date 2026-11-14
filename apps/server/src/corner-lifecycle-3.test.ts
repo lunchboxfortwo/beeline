@@ -589,7 +589,7 @@ const scope24 = fixtureScope24();
   });
 
 
-  it('reports a failed ready-mark once to the commander and keeps the draft blocked', async () => {
+  it('keeps the draft blocked on a failed ready-mark without a generated report', async () => {
     const cornerId = await approved();
     rootFixture.githubApp.readPullRequest.mockResolvedValue({ number: 7, url: 'https://github.com/owner/widgets/pull/7', headSha: SHA, mergeability: 'draft' });
     rootFixture.githubApp.markPullRequestReadyForReview.mockRejectedValue(new Error('HTTP 403'));
@@ -599,7 +599,7 @@ const scope24 = fixtureScope24();
     expect(rootFixture.githubApp.mergePullRequest).not.toHaveBeenCalled();
     const reports = await rootFixture.db.query(`SELECT 1 FROM messages WHERE text LIKE 'blocked: PR is a draft%'`);
     const privateReports = await rootFixture.db.query(`SELECT 1 FROM agent_commands WHERE private_payload->>'text' LIKE 'blocked: PR is a draft%'`);
-    expect(reports.rowCount + privateReports.rowCount).toBe(1);
+    expect(reports.rowCount + privateReports.rowCount).toBe(0);
     await rootFixture.db.query(`UPDATE agent_commands SET state='complete' WHERE room_id=$1`, [cornerId]);
     await rootFixture.db.query(`UPDATE agent_turns SET status='complete' WHERE room_id=$1`, [cornerId]);
     expect(await rootFixture.daemon.execute('getCornerRestoreState', { cornerId }, A)).toMatchObject({ state: 'idle' });

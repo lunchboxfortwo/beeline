@@ -21,6 +21,7 @@ import { daemonPostRoomMessage } from './messages.js';
 import { daemonExecuteOperation } from './operations.js';
 import { daemonTurnReceipt } from './turn-receipts.js';
 import { AccessDeniedError,CORNER_CLEANUP_OPERATIONS,CORNER_REACH_OPERATIONS,Input,Output,OwnedModelClaimCapability } from './values.js';
+import { modelText } from '../message-origin.js';
 
 
   /** One request from an agent: the membership wall, then the queue item the
@@ -330,7 +331,7 @@ export async function daemonExecute<Name extends keyof DaemonOperationMap>(ctx: 
        ORDER BY created_at DESC,id DESC LIMIT 1`, [String(value.roomId), agentId, value.requestId])).rows[0] : undefined;
     if (name === 'postCornerMessage')
       return daemonPostCornerMessage({ ...ctx, authorizedCommand: parent }, input as Input<'postCornerMessage'>, agentId) as Promise<Output<Name>>;
-    return sendOrder(ctx.database, parent!, agentId, String(value.address), String(value.text ?? ''),
+    return sendOrder(ctx.database, parent!, agentId, String(value.address), modelText(String(value.text ?? '')),
       typeof value.agent === 'string' ? value.agent : undefined, undefined,
       typeof value.transportRequestId === 'string' ? createHash('sha256').update(`order:${agentId}:${value.transportRequestId}`).digest('hex') : undefined) as Promise<Output<Name>>;
   }

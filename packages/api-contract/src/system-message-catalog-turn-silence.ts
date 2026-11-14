@@ -129,4 +129,19 @@ export const SYSTEM_MESSAGE_TURN_SILENCE = {
     parts: ['Retry the connection to continue'],
     variables: [],
   },
+
+  'agent-sign-in.needs-to-sign-in': {
+    parts: ['needs to sign in'],
+    variables: [],
+  },
+
+  'turn-silence.is-out-of-its-limit': {
+    parts: ['is out of its limit'],
+    variables: [],
+  },
+
+  'turn-silence.resets-at': {
+    parts: ['resets at ', ''],
+    variables: ['until'],
+  },
 } as const;

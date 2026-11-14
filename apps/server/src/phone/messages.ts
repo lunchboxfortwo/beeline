@@ -14,6 +14,7 @@ import type { PhoneContext } from './context.js';
 import { phoneLiveStarPrompt,phoneReadLiveDelta } from './live-reads.js';
 import { phoneNoteUnansweredMentions } from './mention-notices.js';
 import { Input,Output } from './types.js';
+import { personText } from '../message-origin.js';
 
 
 
@@ -149,7 +150,7 @@ import { Input,Output } from './types.js';
     author: string, sourceClient?: { id: string; name: string }, familyId?: string,
   ): Promise<Output<'sendRoomMessage'>> {
     const saved = await queueMessage(ctx.database, { kind: 'post', roomId: input.roomId,
-      authorId: author, text: input.text, id: input.messageId, attachments: input.attachments,
+      authorId: author, text: personText(input.text), id: input.messageId, attachments: input.attachments,
       replyTo: 'parentMessageId' in input ? input.parentMessageId : undefined, sourceClient,
     });
     const pending = saved.commands.filter(command => command.state === 'pending');

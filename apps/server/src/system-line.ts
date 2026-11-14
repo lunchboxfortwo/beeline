@@ -1,3 +1,4 @@
+import { SYSTEM_AUTHOR_ID,systemText } from './message-origin.js';
 import { githubProviderKey } from './providers/index.js';
 import { restoreRoomMemberships } from './membership-join.js';
 import { roomEventSubscriptions } from './agent-subscriptions.js';
@@ -459,7 +460,7 @@ export async function systemLine(
           roomId: watch.watcher_room_id,
           agentId: watch.agent_id,
           sourceMessageId: id,
-          privatePayload: { text: `Watched corner ${watched?.name ?? input.subject.name} (${input.card?.cornerId ?? input.roomId}): ${input.kind === 'corner-opened' ? 'opened' : input.kind}${input.kind === 'merged' && watched?.merge_sha ? ` · merge commit ${watched?.merge_sha}` : ''}\n${text}`, authorId: SYSTEM_IDENTITY_ID, fromRoomId: String(input.card?.cornerId ?? input.roomId), kind: 'lifecycle' },
+          privatePayload: { text: systemText(`Watched corner ${watched?.name ?? input.subject.name} (${input.card?.cornerId ?? input.roomId}): ${input.kind === 'corner-opened' ? 'opened' : input.kind}${input.kind === 'merged' && watched?.merge_sha ? ` · merge commit ${watched?.merge_sha}` : ''}\n${text}`), authorId: SYSTEM_AUTHOR_ID, fromRoomId: String(input.card?.cornerId ?? input.roomId), kind: 'lifecycle' },
           reason: 'watched_corner',
           parent: watch.incoming_command ?? undefined, retainDepth: true,
           action: 'input',
@@ -598,7 +599,7 @@ export async function wakeLateCornerWatcher(
       roomId: watcherRoomId,
       agentId,
       sourceMessageId: line.id,
-      privatePayload: { text: `Watched address ${cornerId}: merged`, authorId: SYSTEM_IDENTITY_ID, fromRoomId: cornerId, kind: 'lifecycle' },
+      privatePayload: { text: systemText(`Watched address ${cornerId}: merged`), authorId: SYSTEM_AUTHOR_ID, fromRoomId: cornerId, kind: 'lifecycle' },
       reason: 'watched_corner',
       parent: incoming, retainDepth: true,
       action: 'input',

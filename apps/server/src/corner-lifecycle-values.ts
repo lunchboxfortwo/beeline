@@ -43,7 +43,8 @@ export type CornerEvent =
       command?: AgentCommandInput;
     }
   | { kind: 'push'; headSha: string; contents: Record<string, unknown> }
-  | { kind: 'checks'; result: 'passing' | 'failing'; sourceMessageId: string }
+  /** A failing verdict cites its System line; a passing verdict has no line. */
+  | { kind: 'checks'; result: 'passing' | 'failing'; sourceMessageId?: string }
   | {
       kind: 'brief-revised';
       revision: number;

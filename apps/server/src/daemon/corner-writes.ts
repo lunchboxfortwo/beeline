@@ -23,6 +23,7 @@ import { daemonReach,daemonWriteResult } from './corner-messages.js';
 import { daemonCheckReviewerAuthors } from './corner-reads.js';
 import { daemonBriefAttachmentRooms } from './corner-reports.js';
 import { Input } from './values.js';
+import { modelText } from '../message-origin.js';
 
 
 
@@ -280,7 +281,7 @@ import { Input } from './values.js';
         roomId: cornerId,
         agentId: implementerAgentId,
         sourceMessageId: null,
-        privatePayload: { objective, text: input.brief?.spec ?? objective, authorId: agentId, fromRoomId: commandRoomId, kind: 'order', openKey: idempotencyKey },
+        privatePayload: { objective, text: modelText(input.brief?.spec ?? objective), authorId: agentId, fromRoomId: commandRoomId, kind: 'order', openKey: idempotencyKey },
         reason: 'corner_objective',
         parent: parentCommand,
         retainDepth: true,

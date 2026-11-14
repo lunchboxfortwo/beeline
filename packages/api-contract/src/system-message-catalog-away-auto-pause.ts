@@ -1,9 +1,5 @@
 export const SYSTEM_MESSAGE_AWAY_AUTO_PAUSE = {
 
-  'agent-command.agent-mention': {
-    parts: ['@', ''],
-    variables: ['target_handle'],
-  },
 
 
 
@@ -17,161 +13,10 @@ export const SYSTEM_MESSAGE_AWAY_AUTO_PAUSE = {
 
 
 
-  'agent-command.asked-for-a-new-key': {
-    parts: ['asked for a new key'],
-    variables: [],
-  },
-
-  'agent-command.started-a-sign-in': {
-    parts: ['started a ', ' sign-in'],
-    variables: ['AGENT_SIGN_IN_SERVICE_LABELS'],
-  },
-
-  'agent-command.its-owner-finishes-it-in-this-card': {
-    parts: ['its owner finishes it in this card'],
-    variables: [],
-  },
-
-  'agent-command.supports-lifecycle-commands': {
-    parts: ['supports lifecycle commands'],
-    variables: [],
-  },
-
-  'agent-command.restart-status-stop-retry-debug-help-login': {
-    parts: ['restart · status · stop · retry · debug · help · /login'],
-    variables: [],
-  },
-
-  'agent-command.is-online': {
-    parts: ['is online'],
-    variables: [],
-  },
-
-  'agent-command.is-offline': {
-    parts: ['is offline'],
-    variables: [],
-  },
-
-  'agent-command.one-turn-is-running': {
-    parts: ['one turn is running'],
-    variables: [],
-  },
-
-  'agent-command.no-turn-is-running': {
-    parts: ['no turn is running'],
-    variables: [],
-  },
-
-  'agent-command.lifecycle': {
-    parts: ['lifecycle ', ''],
-    variables: ['target_lifecycle_id_unknown'],
-  },
-
-  'agent-command.unknown': {
-    parts: ['unknown'],
-    variables: [],
-  },
-
-  'agent-command.release': {
-    parts: ['release ', ''],
-    variables: ['target_release_version_unknown'],
-  },
-
-  'agent-command.source': {
-    parts: ['source ', ''],
-    variables: ['target_source_sha_slice_0'],
-  },
-
-  'agent-command.turn': {
-    parts: ['turn ', ''],
-    variables: ['active_request_id'],
-  },
-
-  'agent-command.no-active-turn': {
-    parts: ['no active turn'],
-    variables: [],
-  },
-
-  'agent-command.reported-diagnostics': {
-    parts: ['reported diagnostics'],
-    variables: [],
-  },
-
-  'agent-command.separator': {
-    parts: [' · '],
-    variables: [],
-  },
 
 
 
-  'agent-command.stopped-its-running-turn': {
-    parts: ['stopped its running turn'],
-    variables: [],
-  },
 
-  'agent-command.queued-dropped': {
-    parts: ['', ' queued ', ' dropped'],
-    variables: ['dropped', 'dropped_1_order_orders'],
-  },
-
-  'agent-command.order': {
-    parts: ['order'],
-    variables: [],
-  },
-
-  'agent-command.orders': {
-    parts: ['orders'],
-    variables: [],
-  },
-
-
-
-  'agent-command.queued-a-retry-for-its-last-failed-turn': {
-    parts: ['queued a retry for its last failed turn'],
-    variables: [],
-  },
-
-
-
-  'agent-command.queued-a-restart': {
-    parts: ['queued a restart'],
-    variables: [],
-  },
-
-  'agent-command.running-turn-will-drain-first': {
-    parts: ['running turn will drain first'],
-    variables: [],
-  },
-
-  'agent-command.helper-will-reconnect-to-confirm': {
-    parts: ['helper will reconnect to confirm'],
-    variables: [],
-  },
-
-  'agent-command.failed-queued-dropped-by-a-stop-the-running-turn-was-cancelled': {
-    parts: ['failed: ', ' queued ', ' dropped by a Stop; the running turn was cancelled'],
-    variables: ['dropped_rowCount', 'dropped_rowCount_1_order_was'],
-  },
-
-  'agent-command.order-was': {
-    parts: ['order was'],
-    variables: [],
-  },
-
-  'agent-command.orders-were': {
-    parts: ['orders were'],
-    variables: [],
-  },
-
-  'agent-command.blocked-pr-is-a-draft-marking-it-ready-for-review-failed': {
-    parts: ['blocked: PR is a draft; marking it ready for review failed'],
-    variables: [],
-  },
-
-  'agent-command.found-merge-conflicts-in': {
-    parts: ['found merge conflicts in'],
-    variables: [],
-  },
 
   'agent-sign-in.sign-in-failed-on-the-agent-machine': {
     parts: ['Sign-in failed on the agent machine.'],
@@ -265,16 +110,6 @@ export const SYSTEM_MESSAGE_AWAY_AUTO_PAUSE = {
 
   'commander.orders': {
     parts: ['orders'],
-    variables: [],
-  },
-
-  'commander.ordered': {
-    parts: ['ordered'],
-    variables: [],
-  },
-
-  'commander.reported-to': {
-    parts: ['reported to'],
     variables: [],
   },
 

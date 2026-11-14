@@ -1,5 +1,4 @@
 import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
-import { migrateMembershipSubscriptions } from './agent-subscriptions.js';
 import { STARTER_BANTER_TYPING_MS, StarterOnboardingService } from './starter-onboarding-run.js';
 import { starterHello, postStarterGame } from './starter-onboarding.js';
 import { postRepositoryOnboarding } from './repository-onboarding.js';
@@ -19,7 +18,6 @@ import {
   FREE_AGENT_TEAM_GUIDE,
   FREE_AGENT_CONNECT_GUIDE,
   FREE_AGENT_BROWSER_GUIDE,
-  FREE_AGENT_EXIT_NOTE,
   FREE_AGENT_TURN_GUIDE,
   FREE_AGENT_HELLO,
   FREE_AGENT_JOIN_GREETING,
@@ -144,14 +142,14 @@ async function settle(): Promise<void> {
 
 describe('current starter instructions', () => {
   it('replaces retired hosted policy on an existing soul and keeps its persona', () => {
-    const prior = 'Be curious.\n\nOffer help bringing their own agent when the server 80% warning fires.\n\nWhen they accept, guide them one step at a time with the old warning.\n\nFor Grok/xAI old hosted sign-in guide.\n\nWhen the person picks "Make a welcome video and post it to my YouTube", use old tools.\n\nYou are on a team with another free starter agent. Old rule.';
+    const prior = 'Be curious.\n\nOffer help bringing their own agent when the server 80% warning fires.\n\nWhen they accept, guide them one step at a time with the old warning.\n\nFor Grok/xAI old hosted sign-in guide.\n\nWhen the person picks "Make a welcome video and post it to my YouTube", use old tools.\n\nYou are on a team with another free starter agent. Old rule.\n\nWhen a member leaves #general or is removed (a "left" or "removed" line), always reply with exactly one message:\n{name} left. Their messages stay here.';
     const current = currentFreeAgentInstructions(prior);
     expect(current).toContain('Be curious.');
     expect(current).toContain(FREE_AGENT_BROWSER_GUIDE);
     expect(current).toContain(FREE_AGENT_CONNECT_GUIDE);
     expect(current).not.toContain('80%');
     expect(current).toContain(FREE_AGENT_TEAM_GUIDE);
-    expect(current).not.toMatch(/Trusty Squire|video_preview|welcome-video|old hosted|Old rule/);
+    expect(current).not.toMatch(/Trusty Squire|video_preview|welcome-video|old hosted|Old rule|left\. Their messages stay here/);
     expect(currentFreeAgentInstructions(current)).toBe(current);
   });
   it('uses exactly the requested feedback instruction with no decay or extra directions', () => {
@@ -727,7 +725,7 @@ describe('free starter agents', () => {
     expect((await db.query(`SELECT 1 FROM messages WHERE author_id=$1 AND card_type IS NULL`, [agentId])).rowCount).toBe(1);
   });
 
-  it('hears #general joins and leaves from creation', async () => {
+  it('hears #general joins from creation, never leaves', async () => {
     const { id, roomId } = await createWorkspace();
     await settle();
     const agent = await freeAgentOf(id);
@@ -738,7 +736,7 @@ describe('free starter agents', () => {
           roomId,
         ])
       ).rows,
-    ).toEqual([{ event_subscriptions: ['joined', 'left'] }]);
+    ).toEqual([{ event_subscriptions: ['joined'] }]);
     const wakes = async () =>
       (
         await db.query<{ text: string }>(
@@ -752,26 +750,14 @@ describe('free starter agents', () => {
     await phone.execute('addWorkspaceMember', { workspaceId: id, memberId: FRIEND, role: 'member' }, OWNER);
     expect(await wakes()).toEqual(['@friend joined · invited by @lunchboxfortwo']);
 
-    // Leave producers use the same event dispatch as joins, before any sweep.
+    // A leave or removal is its own System line; it wakes no free agent.
     await phone.execute('leaveRoom', { roomId }, FRIEND);
-    expect((await wakes()).at(-1)).toBe('@friend left');
-    // Each leave is one wake, never repeated.
-    expect(await wakes()).toHaveLength(2);
-    // A removal by an admin is a leave too.
     await phone.execute('addRoomMember', { roomId, memberIds: [FRIEND] }, OWNER);
     await phone.execute('removeRoomMember', { roomId, memberId: FRIEND }, OWNER);
-    expect((await wakes()).at(-1)).toBe('@lunchboxfortwo removed @friend');
-    expect(await wakes()).toHaveLength(4);
-    // A recent unkinded fact from the preceding image retains its owed wake at upgrade.
-    await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card,system_event)
-      VALUES('legacy-leave',$1,$2,'Legacy leave','system','member-left',$3::jsonb,'{"verb":"left"}')`,[roomId,FRIEND,JSON.stringify({identityId:FRIEND})]);
-    await migrateMembershipSubscriptions(db);
-    await migrateMembershipSubscriptions(db);
-    expect((await wakes()).at(-1)).toBe('Legacy leave');
-    expect(await wakes()).toHaveLength(5);
+    expect((await wakes()).filter(text => / left$| removed /.test(text))).toEqual([]);
   });
 
-  it('carries the owner\'s exact join greeting and the exit note in the free agent\'s instructions', async () => {
+  it('carries the owner\'s exact join greeting and no exit note in the free agent\'s instructions', async () => {
     const { id } = await createWorkspace();
     await settle();
     const agent = await freeAgentOf(id);
@@ -784,7 +770,7 @@ describe('free starter agents', () => {
       "what up boss? I'm a pro bono agent for beeline. I can help you set up this workspace, invite other humans and agents, or whatever else you might need",
     );
     expect(soul).toContain(FREE_AGENT_JOIN_GREETING);
-    expect(soul).toContain(FREE_AGENT_EXIT_NOTE);
+    expect(soul).not.toContain('left. Their messages stay here');
     expect(soul).not.toContain('When you first join, greet');
     expect(soul).toContain('The server already posts your first hello');
     expect(soul).toContain('Never greet an agent.');

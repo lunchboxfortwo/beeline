@@ -3,10 +3,10 @@ import { notifySentryWake } from './postgres-live.js';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { quoteOutsideData } from '@beeline/api-contract/phone';
 import { redactDiagnostic } from '@beeline/api-contract/error-reporting';
-import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import type { SqlDatabase } from './database.js';
 import { createAgentCommand } from './agent-command.js';
 import { ensureSystemIdentity } from './system-line.js';
+import { SYSTEM_AUTHOR_ID,systemText } from './message-origin.js';
 
 export function sentryWakeAgentFromEnv(env: NodeJS.ProcessEnv = process.env): string {
   const agentId = env.BEELINE_SENTRY_TRIAGE_AGENT_ID ?? '7eafb2e0cc049a9b3345f4322024b604358af04cb551d1fc71084ca3a99d7877';
@@ -107,8 +107,8 @@ export async function flushSentryWakes(db: SqlDatabase, agentId = sentryWakeAgen
       `${row.level}: ${row.title} ${row.permalink} (${row.event_count} events)`).join('\n');
     const command = await createAgentCommand(tx, {
       roomId: TRIAGE, agentId, sourceMessageId: null, reason: 'subscribed_event',
-      privatePayload: { kind: 'lifecycle', authorId: SYSTEM_IDENTITY_ID, fromRoomId: TRIAGE,
-        text: `${quoteOutsideData('Sentry digest', digest)}\n\nSummarize these Sentry issues and keep for the morning card. Include each Sentry short ID (look it up from the linked issue if needed), its URL, and the observed impact.` },
+      privatePayload: { kind: 'lifecycle', authorId: SYSTEM_AUTHOR_ID, fromRoomId: TRIAGE,
+        text: systemText(`${quoteOutsideData('Sentry digest', digest)}\n\nSummarize these Sentry issues and keep for the morning card. Include each Sentry short ID (look it up from the linked issue if needed), its URL, and the observed impact.`) },
     });
     if (!command) return false;
     await tx.query(`UPDATE sentry_wake_issues SET pending=false WHERE pending`);

@@ -2,7 +2,7 @@ import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { createHash,randomBytes } from 'node:crypto';
 import { dropQueuedOrdersForStop,lockAgentCommandQueue } from './agent-command-queue.js';
-import { queueMessage,type CommandRow,type PrivateCommandPayload } from './agent-command.js';
+import { queueMessage,type CommandRow,type PrivateCommandPayload,type QueuedDelivery } from './agent-command.js';
 import { CommandRefusalError } from './command-refusal.js';
 import { cornerCommanderBriefSql,cornerCommanderIdSql } from './corner-commander.js';
 import { cornerOpenedFromSql,cornerOpeningSql } from './corner-opening.js';
@@ -10,6 +10,7 @@ import { cornerImplementerSql } from './corner-worker.js';
 import type { SqlDatabase } from './database.js';
 import type { AfterCommit } from './institutional-memory-embeddings.js';
 import { systemIdentityMention,systemLine } from './system-line.js';
+import type { AgentVoice,Composed,SystemAuthorId } from './message-origin.js';
 export { CommandRefusalError } from './command-refusal.js';
 
 /** Follow provenance to the order that selects this command's return route. */
@@ -96,7 +97,7 @@ export async function assertCornerCommandTarget(
  * agent DM, or a named/sole other agent at a Room address. An order never fans out.
  */
 export async function sendOrder(
-  db: SqlDatabase, command: CommandRow, agentId: string, address: string, text: string,
+  db: SqlDatabase, command: CommandRow, agentId: string, address: string, text: AgentVoice,
   agent?: string, _afterCommit?: AfterCommit, id?: string,
 ) {
   const queued = await queueMessage(db, { kind: 'order', roomId: address, authorId: agentId,
@@ -210,10 +211,16 @@ export function commanderChainSql(corner: string, asker: string, askedAt: string
 
 type ReportOptions = { orderIssuer?: boolean; automatic?: boolean; wakeInCorner?: boolean; ask?: string; attachments?: PrivateCommandPayload['attachments']; idleSince?: string; afterCommit?: AfterCommit };
 
+type ReportReceipt = { id: string; createdAt: number; delivered?: boolean; receipt?: string };
+/** A worker reports in its model's words; a machine report is System-authored. */
+export function reportToCommander(db: SqlDatabase, roomId: string, agentId: string, text: AgentVoice,
+  command?: CommandRow, reportId?: string, options?: ReportOptions): Promise<ReportReceipt>;
+export function reportToCommander(db: SqlDatabase, roomId: string, agentId: SystemAuthorId, text: Composed<'system'>,
+  command?: CommandRow, reportId?: string, options?: ReportOptions): Promise<ReportReceipt>;
 export async function reportToCommander(
-  db: SqlDatabase, roomId: string, agentId: string, text: string, command?: CommandRow,
+  db: SqlDatabase, roomId: string, agentId: string, text: AgentVoice | Composed<'system'>, command?: CommandRow,
   reportId = randomBytes(32).toString('hex'), options: ReportOptions = {},
-): Promise<{ id: string; createdAt: number; delivered?: boolean; receipt?: string }> {
+): Promise<ReportReceipt> {
   const resolved = command ? undefined : await commanderReportAddress(db, roomId);
   const address = !options.orderIssuer ? command?.report_address ??
     (command?.private_payload?.kind === 'order' ? command.private_payload.escalation : undefined) : undefined;
@@ -228,12 +235,13 @@ export async function reportToCommander(
     sourceRoomId: roomId, sourceItem: source, parent,
     attachments: options.attachments, ask: options.ask,
     automatic: options.automatic, idleSince: options.idleSince,
-  });
+  } as QueuedDelivery);
 }
 
-/** Lifecycle notices select an agent audience; they do not create a human request. */
+/** Lifecycle notices select an agent audience; they do not create a human request.
+ * The machine writes them, so they are System-authored. */
 export async function reportAgentAttention(
-  db: SqlDatabase, roomId: string, agentId: string, text: string, command?: CommandRow,
+  db: SqlDatabase, roomId: string, agentId: SystemAuthorId, text: Composed<'system'>, command?: CommandRow,
   reportId = randomBytes(32).toString('hex'), options: ReportOptions = {},
 ): Promise<void> {
   const route = await commanderReportAddress(db, roomId, command);

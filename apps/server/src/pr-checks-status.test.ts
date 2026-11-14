@@ -140,7 +140,7 @@ describe('PR-scoped check gate', () => {
   });
 
 
-  it('Reproduction R1: an explicit green check read posts the passing result, not a pending check', async () => {
+  it('Reproduction R1: an explicit green check read records passing and asks the reviewer, with no check line', async () => {
     await ownPr();
     await rootFixture.db.query(`UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1`, [R, REVIEWER]);
     await rootFixture.db.query(
@@ -158,17 +158,12 @@ describe('PR-scoped check gate', () => {
       ],
     };
     await rootFixture.operations.prChecksStatus({ cornerId: AUTHOR });
-    const note = (await rootFixture.db.query<{ text: string; event: unknown }>(
-      `SELECT text, system_event event FROM messages
-       WHERE room_id=$1 AND system_event->>'kind'='check-passed'`,
-      [AUTHOR],
-    )).rows[0];
-    expect(note).toBeTruthy();
-    const posted = JSON.stringify({ text: note!.text, event: note!.event });
-    expect(posted).not.toMatch(/started/i);
-    expect(posted).not.toMatch(/"status"\s*:\s*"pending"/);
-    expect(posted).not.toContain('Pull request checks');
-    expect(note!.text).toContain('passed a check');
+    const lines = (await rootFixture.db.query<{ text: string }>(
+      `SELECT text FROM messages WHERE room_id=$1 AND presentation='system'`, [AUTHOR])).rows.map(row => row.text);
+    expect(lines.filter(text => / a check /.test(text))).toEqual([]);
+    expect(lines.some(text => text.includes('requested review of'))).toBe(true);
+    expect((await rootFixture.db.query(`SELECT 1 FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND reason='corner_review_dispatch'`,
+      [AUTHOR, REVIEWER])).rowCount).toBe(1);
   });
 
 

@@ -133,14 +133,14 @@ const scope1 = fixtureScope1();
     });
     expect(
       (
-        await scope1.database.query<{ source_kind: string; agent_id: string }>(
-          `SELECT command.agent_id,message.system_event->>'kind' source_kind
+        await scope1.database.query<{ source_verb: string; agent_id: string }>(
+          `SELECT command.agent_id,message.system_event->>'verb' source_verb
            FROM agent_commands command JOIN messages message ON message.id=command.source_message_id
            WHERE command.room_id=$1`,
           [corner],
         )
       ).rows,
-    ).toEqual([{ agent_id: REVIEWER, source_kind: 'check-passed' }]);
+    ).toEqual([{ agent_id: REVIEWER, source_verb: 'requested review of' }]);
     // A re-run on the same head reopens checks, and its green dispatches the
     // reviewer again even though this head's green note was already written.
     await scope1.database.query(`DELETE FROM agent_commands WHERE room_id=$1`, [corner]);

@@ -27,6 +27,7 @@ type VoiceAgent,type VoiceBrain,type VoiceSearch,type VoiceSpeech,type VoiceSttF
 } from './voice-providers.js';
 import { voiceDateContext } from './voice-reply.js';
 import { VoiceRoomRuntime } from './voice-room-runtime.js';
+import { modelText,personText } from './message-origin.js';
 
 export type VoiceConfig = { url: string; apiKey: string; apiSecret: string; brain: VoiceBrain;
   speech: VoiceSpeech; stt: VoiceSttFactory; searchWeb?: (query: string, signal: AbortSignal, currentTime?: number) => Promise<string>; budgetLimitMs?: number; objects?: ObjectService; publicOrigin?: string };
@@ -417,7 +418,7 @@ export class VoiceService {
     const id = requestId ?? randomBytes(32).toString('hex');
     await this.db.transaction(async db => {
       await queueMessage(db, { kind: 'post', id, roomId, authorId: humanId,
-        text: `@${agent.handle} ${text.replace(/@/g, '')}`, agentIds: [] });
+        text: personText(`@${agent.handle} ${text.replace(/@/g, '')}`), agentIds: [] });
       await db.query('INSERT INTO voice_messages(message_id,call_id) VALUES($1,$2) ON CONFLICT DO NOTHING', [id, callId]);
     });
     this.live.publish({ type: 'invalidate', roomId, reason: 'message', messageId: id, operation: 'INSERT' });
@@ -531,7 +532,8 @@ export class VoiceService {
           ON command.source_message_id=voice.source_message_id AND command.agent_id=voice.agent_id
          WHERE voice.source_message_id=$1 AND voice.agent_id=$2 AND command.room_id=$3
          ORDER BY command.created_at DESC LIMIT 1`, [options.sourceId, agentId, roomId])).rows[0] : undefined;
-      const saved=await queueMessage(database, { kind: 'post', roomId, authorId: agentId, id: messageId, text,
+      // The voice model's own answer.
+      const saved=await queueMessage(database, { kind: 'post', roomId, authorId: agentId, id: messageId, text: modelText(text),
         parent, ...(options?.routeMentions === false ? { agentIds: [] } : {}) });
       return saved.id;
     });

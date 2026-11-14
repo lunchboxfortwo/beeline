@@ -6,6 +6,7 @@ import type { CornerMergeHold } from './phone-operations.js';
 import type { CornerLifecycleView,MessageReactionEmoji } from './phone-types.js';
 import type { SystemEvent } from './system-events.js';
 import type { TurnReplay } from './turn-replay.js';
+import type { TurnReceiptReasonKind } from './turn-silence.js';
 
 
 /**
@@ -480,6 +481,8 @@ export type PostTurnReceiptInput = AgentRoomInput & {
   readonly outcome?: 'answered' | 'silent' | 'stopped' | 'failed';
   /** Failure diagnostic (no stack, secrets scrubbed), for the trace only. */
   readonly reason?: string;
+  /** A failure only the owner can clear: the server shows a sign-in card or a limit line. */
+  readonly reasonKind?: Extract<TurnReceiptReasonKind, 'not-signed-in' | 'allowance-spent'>;
   readonly inputTokens?: number;
   readonly promptBytes?: number;
   readonly totalInputTokens?: number;

@@ -53,7 +53,7 @@ export type MachineWake = {
   key: string;
 };
 
-export type MachineNotification = { kind: 'idle' | 'waiting' | 'draft'; key: string };
+export type MachineNotification = { kind: 'idle' | 'waiting'; key: string };
 
 export type CornerMachineFacts = CornerStateFacts & {
   headSha?: string;
@@ -61,7 +61,6 @@ export type CornerMachineFacts = CornerStateFacts & {
   mergeHeld?: boolean;
   mergeConflictDelivered?: boolean;
   lostEffects?: string[];
-  draftReadyFailure?: boolean;
   waitReason?: 'blocked' | 'user_action' | 'question';
   reviewerConfigured?: boolean;
   /** Actual implementer admission; peer work still owns the Working badge. */
@@ -159,7 +158,6 @@ export function transitionCorner(
     return { state: current, wakes, notifications, suppression: 'stale head' };
   if (event.kind === 'approval' && checks === 'passing' && !effects.includes('approved-on-green'))
     effects.push('approved-on-green');
-  if (f.approved && f.draftReadyFailure && checks === 'passing') notify('draft', `draft:${headSha}`);
   if (event.kind === 'open' && event.command)
     wake('open', `open:${event.command.privatePayload?.openKey ?? ''}`);
   if (event.kind === 'brief-revised') wake('revision', `revision:${event.revision}`);

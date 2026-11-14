@@ -14,7 +14,7 @@ const RECOVERY_INPUTS = new Set([
   'channel', 'release_sha', 'release_version', 'selection', 'store_track', 'run_release_proof', 'allow_pin_restore', 'publish_listing', 'mobile_store_minimum',
 ]);
 
-/** Commit provenance before sending the request; never persist provider credentials. */
+/** Authorize under the Room lock, then send the attributed request; never persist provider credentials. */
 export async function productionReleaseDispatch(
   database: SqlDatabase,
   agentId: string,
@@ -55,16 +55,12 @@ export async function productionReleaseDispatch(
       if (human.role !== 'owner' || !(human.text ?? '').split(/\r?\n/).some(line => listingCommand.test(line.trim())))
         throw new ExpectedRefusalError('Play listing is locked. publish_listing=true requires a workspace owner command with an explicit line such as: Publish the Play listing');
     }
-    const provenance = JSON.stringify({
+    // The workflow run records this attribution in its name and summary; the
+    // Room gets no machine-written line under the agent's name.
+    return JSON.stringify({
       agentId: agent.id, handle: agent.handle, place: input.roomId,
       humanCommandMessageId: human.id, auditMessageId, channel: inputs.channel ?? 'next',
     });
-    await db.query(
-      `INSERT INTO messages(id,room_id,author_id,text,durable_fact)
-       VALUES($1,$2,$3,$4,'action')`,
-      [auditMessageId, input.roomId, agent.id, `Production release dispatch requested: ${provenance}`],
-    );
-    return provenance;
   });
   await dispatch({ ...inputs, dispatched_by: dispatchedBy });
   return { auditMessageId };

@@ -296,12 +296,11 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
         const target = await ctx.roomWorkflowTarget(parent.parent_id);
         await ctx.app.markPullRequestReadyForReview(target.token, target.repository,
           Number(status.pullRequest.split('/').at(-1)), status.headSha);
-        await ctx.database.query(`UPDATE corner_github_cache SET lifecycle=lifecycle-'draftReadyFailure' WHERE corner_id=$1 AND lifecycle->'pr'->>'headSha'=$2`, [cornerId, status.headSha]);
         status = await ctx.prChecksStatus({ cornerId });
         if (status.blockedReason?.includes('PR is a draft')) throw new Error(status.blockedReason);
       } catch (error) {
-        await ctx.database.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(jsonb_set(lifecycle,
-          '{pr,mergeability}','"draft"'::jsonb),'{draftReadyFailure}',jsonb_build_object('headSha',$2::text)) WHERE corner_id=$1 AND lifecycle->'pr'->>'headSha'=$2`,
+        await ctx.database.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,
+          '{pr,mergeability}','"draft"'::jsonb) WHERE corner_id=$1 AND lifecycle->'pr'->>'headSha'=$2`,
           [cornerId, draftHeadSha]);
         await reconcileCornerMergeBlockers(ctx.database, cornerId);
         return notAttempted(`PR is a draft: ${error instanceof Error ? error.message : String(error)}`);

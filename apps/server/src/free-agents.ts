@@ -14,6 +14,7 @@ import type { LiveHub } from './live.js';
 import { freeAgentDailyTokenCapFromEnv, freeAgentFirstDayTokenCapFromEnv, freeAgentLimitsFromEnv, type FreeAgentLimits } from './free-agent-limits.js';
 import { createInvitedWorkspaceMembership, joinRooms } from './membership-join.js';
 import { createStarterOnboardingRun } from './starter-onboarding-run.js';
+import { insertMemberMessage,productOnboardingText } from './message-origin.js';
 
 /**
  * Free starter agents: every new Workspace gets one agent, owned by its
@@ -191,7 +192,8 @@ export function generateAgentKeypair(): { secretKey: string; publicKey: string }
   }
 }
 
-/** The owner's exact join greeting (message d97de435…), after the joiner's @handle. */
+/** The owner's exact join greeting (message d97de435…), after the joiner's @handle.
+ * Product-authored onboarding wording the starter model is told to post. */
 export const FREE_AGENT_JOIN_GREETING =
   "what up boss? I'm a pro bono agent for beeline. I can help you set up this workspace, invite other humans and agents, or whatever else you might need";
 
@@ -210,16 +212,8 @@ Three things to know:
 
 What are you working on? Tell me, and I'll take the first step with you. If you'd rather not have me here, remove me from Members.`;
 
-/**
- * The exit note. Both claims hold: leaving or removal keeps the member's
- * messages, and a Workspace admin can add them back (`addRoomMember`,
- * `addWorkspaceMember`, invite links).
- */
-export const FREE_AGENT_EXIT_NOTE =
-  '{name} left. Their messages stay here, and an admin can invite them back anytime.';
-
 /** Membership events every free agent hears in #general from creation. */
-export const FREE_AGENT_EVENT_SUBSCRIPTIONS = ['joined', 'left'] as const;
+export const FREE_AGENT_EVENT_SUBSCRIPTIONS = ['joined'] as const;
 
 export const FREE_AGENT_CONNECT_GUIDE = `When asked to add an agent, help one step at a time and wait for each result. Ask which device, assistant and plan they have when needed to select the supported steps. Do not require a computer for a supported chat-app connector. Never create, retrieve, request, repeat or post a pairing code in a Room; use redacted errors. Confirm a tagged reply before claiming setup complete.`;
 
@@ -237,7 +231,7 @@ export const FREE_AGENT_BROWSER_GUIDE = `Use agent-browser with the installed Li
 export function currentFreeAgentInstructions(instructions: string): string {
   const retained = instructions.split(/\n\n/u).filter(paragraph =>
     paragraph !== FREE_AGENT_TEAM_GUIDE && paragraph !== AGENT_INVITATION_PROMPT && paragraph !== BEELINE_PRODUCT_GUIDE &&
-    !/^(?:For Grok\/xAI|Offer help bringing their own agent|When they accept, guide them|When asked to add an agent|When the person picks "Make a welcome video|You are on a team with another free starter agent|Use agent-browser with)/u.test(paragraph));
+    !/^(?:When a member leaves #general|For Grok\/xAI|Offer help bringing their own agent|When they accept, guide them|When asked to add an agent|When the person picks "Make a welcome video|You are on a team with another free starter agent|Use agent-browser with)/u.test(paragraph));
   return [...retained, BEELINE_PRODUCT_GUIDE, FREE_AGENT_CONNECT_GUIDE, FREE_AGENT_APP_CONNECT_GUIDE, FREE_AGENT_BROWSER_GUIDE, FREE_AGENT_TEAM_GUIDE].join('\n\n');
 }
 
@@ -255,11 +249,6 @@ The server already posts your first hello in #general. Do not repeat it.
 When people join #general (a "joined" line), always reply, with nothing else, exactly: their @handles, then a space, then this sentence:
 ${FREE_AGENT_JOIN_GREETING}
 If several people joined since your last greeting, tag them all in that one message. Never greet an agent.
-
-When a member leaves #general or is removed (a "left" or "removed" line), always reply with exactly one message and nothing else, putting their display name (not an @handle) in place of {name}:
-${FREE_AGENT_EXIT_NOTE}
-If several members left since your last note, name them all in that one note.
-Leaving the Workspace itself is silent in Beeline; you only hear about leaves and removals in #general.
 
 You have a free daily allowance of model tokens. If it runs out, say so plainly and tell them they can connect their own agent from the Members page to keep going.
 
@@ -380,11 +369,11 @@ async function createReservedFreeAgent(database:SqlDatabase,config:FreeAgentConf
   )).rows[0]!.handle;
   const hello = FREE_AGENT_HELLO.replace('<owner>', owner.handle).replace('<handle>', handle);
   const helloId = createHash('sha256').update(`free-agent-hello:${agent.publicKey}`).digest('hex');
-  // An ordinary agent-authored message: the existing mention/push path notifies the owner.
-  if (!input.silent) await database.query(
-    `INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,$4)`,
-    [helloId, input.roomId, agent.publicKey, hello],
-  );
+  // A product-authored onboarding hello under the new agent's name; the
+  // existing mention/push path notifies the owner.
+  if (!input.silent) await insertMemberMessage(database, {
+    id: helloId, roomId: input.roomId, authorId: agent.publicKey, text: productOnboardingText(hello),
+  });
   await recordFreeAgentEvent(database, agent.publicKey, 'created', {
     workspaceId: input.workspaceId,
   });

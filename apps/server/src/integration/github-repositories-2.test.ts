@@ -324,22 +324,10 @@ const fixture = monolithFixture();
           text: '@GitHub found failing checks on Ship the widget · failing typecheck',
           systemEvent: expect.objectContaining({ verb: 'found failing checks on' }),
         }),
-        expect.objectContaining({
-          text: '@GitHub passed a check Beeline CI check suite',
-          systemEvent: expect.objectContaining({
-            kind: 'check-passed',
-            verb: 'passed a check',
-            object: expect.objectContaining({
-              text: 'Beeline CI check suite',
-              headSha: '1'.repeat(40),
-            }),
-          }),
-        }),
       ]),
     );
-    // B3 retains whole-head green/failure notes and suppresses per-check chatter.
-    expect(cornerBeforeMerge.messages.some(message => message.text.startsWith('@GitHub started a check'))).toBe(false);
-    expect(cornerBeforeMerge.messages.some(message => message.text === '@GitHub passed a check typecheck')).toBe(false);
+    // Only failures print: no started or passed check lines.
+    expect(cornerBeforeMerge.messages.some(message => /^@GitHub (?:started|passed|cancelled) a check/.test(message.text))).toBe(false);
     // No system line carries a colon, an em dash, a trailing period, or a URL.
     for (const message of cornerBeforeMerge.messages.filter((m) => m.presentation === 'system')) {
       expect(message.text).not.toMatch(/[:—]|\.$|https?:\/\//);
@@ -413,20 +401,8 @@ const fixture = monolithFixture();
       lifecycle: 'in-review',
       pr: { url: 'https://github.com/owner/widgets/pull/42', mergeability: 'clean' },
     });
-    expect(
-      (
-        await fixture.database.query<{ text: string }>(
-          `SELECT text FROM messages
-           WHERE room_id=$1 AND system_event->>'kind'='check-passed'
-             AND text='@GitHub passed a check Beeline CI check suite'`,
-          [cornerId],
-        )
-      ).rows,
-    ).toEqual([
-      {
-        text: '@GitHub passed a check Beeline CI check suite',
-      },
-    ]);
+    expect((await fixture.database.query(
+      `SELECT 1 FROM messages WHERE room_id=$1 AND text LIKE '%passed a check%'`, [cornerId])).rowCount).toBe(0);
 
     const duplicateApproval = await fixture.request('/v1/phone/operations/approveCornerMerge', 'POST', {
       cornerId,

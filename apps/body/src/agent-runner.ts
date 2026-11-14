@@ -13,6 +13,7 @@ import { PlaceSession,type Answer } from './place-session.js';
 import { PlaceStorage } from './place-storage.js';
 import { runtimeIdentity,type AgentRuntimeRecord } from './runtime.js';
 import { publishStorageFacts } from './storage-owners.js';
+import { distillTurnFailureReason,redactToolDetail } from './turn-failure-reason.js';
 import { TurnTrace,turnTraceDirectory } from './turn-trace.js';
 import { workspaceAssetRoot } from './workspace-assets.js';
 import { prepareWorkspace } from './workspace-checkout.js';
@@ -207,6 +208,7 @@ export class AgentRunner {
     } catch (error) {
       console.error(`[body] place ${placeId} could not answer ${item.id}:`, error);
       if (this.latest.some(listed => listed.id === item.id) && !this.answered.has(item.id)) {
+        if (!this.stopped) this.reportOwnerBlocker(item, error);
         if (started && !this.stopped) {
           const pending = batch.filter(next => this.latest.some(listed => listed.id === next.id));
           if (pending.length) await this.store({
@@ -226,6 +228,17 @@ export class AgentRunner {
       place.running = undefined;
     }
     if (started) void this.pump(placeId);
+  }
+
+  /** A harness that needs its owner (a sign-in, a spent allowance) names it on
+   * the failed receipt; the server shows it once in the Room. */
+  private reportOwnerBlocker(item: AgentCommand, error: unknown): void {
+    const { text, kind } = distillTurnFailureReason(error);
+    if (kind !== 'not-signed-in' && kind !== 'allowance-spent') return;
+    void this.options.daemonApi.execute('postAgentTurnReceipt', {
+      agentId: this.agent.publicKey, roomId: item.roomId, requestId: item.turnRequestId,
+      outcome: 'failed', reason: redactToolDetail(text).slice(0, 2_000), reasonKind: kind,
+    }).catch(receiptError => console.warn('[body] failed turn receipt not written:', receiptError));
   }
 
   /** Usage and diagnostics follow the answer and never hold it. */

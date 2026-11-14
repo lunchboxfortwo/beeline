@@ -6,13 +6,14 @@ import { CornerAccessDatabase } from '../corner-access-database.js';
 import { type SqlDatabase } from '../database.js';
 import type { DaemonContext } from './context.js';
 import { AccessDeniedError,Input,Output,id } from './values.js';
+import { modelText } from '../message-origin.js';
 
 
 
   /** A public message; tags use the same conversation wake rule as final replies. */
   export async function daemonPostCornerMessage(ctx: DaemonContext, input: Input<'postCornerMessage'>, agentId: string) {
     const saved = await queueMessage(ctx.database, { kind: 'post', roomId: input.cornerId,
-      authorId: agentId, text: input.text, replyTo: input.replyTo,
+      authorId: agentId, text: modelText(input.text), replyTo: input.replyTo,
       id: typeof (input as Record<string,unknown>).transportRequestId === 'string' ? createHash('sha256')
         .update(`post:${agentId}:${(input as Record<string,unknown>).transportRequestId}`).digest('hex') : undefined,
       requestId: input.requestId, commandRoomId: input.roomId,

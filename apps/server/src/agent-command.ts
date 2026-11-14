@@ -23,8 +23,10 @@ import { hasSystemReportMention,isChannelMentionToken,typedMentionHandles } from
 import { mcpCommandWakeSql } from './rooms-mcp-events.js';
 import { recordMcpMemberWebhook,recordMcpMention } from './rooms-mcp-members.js';
 import { cleanVoiceReply } from './voice-reply.js';
+import { modelText,type AgentVoice,type Composed,type MemberText,type SystemAuthorId } from './message-origin.js';
 type Attachment = NonNullable<PrivateCommandPayload['attachments']>[number];
-const pgText=(value:string)=>value.replace(/[\u0000\uD800-\uDFFF]/gu,'\uFFFD');
+/** Sanitizing keeps the text's declared origin. */
+const pgText=<Text extends string>(value:Text)=>value.replace(/[\u0000\uD800-\uDFFF]/gu,'\uFFFD') as Text;
 const json=(value:unknown)=>JSON.stringify(value,(_key,part)=>typeof part==='string'?pgText(part):part);
 
 
@@ -214,15 +216,16 @@ WHERE command.room_id=attachments.room_id AND command.agent_id=attachments.agent
 `;
 
 /** Transport data only: orders and reports never become transcript messages. */
-export type PrivateCommandPayload = {
+/** A private payload's text names its origin: an agent's (or person's) own
+ * words, or System text under the System identity. */
+type PayloadVoice = { text: MemberText; authorId: string } | { text: Composed<'system'>; authorId: SystemAuthorId };
+export type PrivateCommandPayload = PayloadVoice & {
   /** Stable tool-call key on the corner's opening order. */
   openKey?: string;
   ask?: string;
   objective?: string;
   automatic?: boolean;
   idleSince?: string;
-  text: string;
-  authorId: string;
   /** Agent whose work a server-authored report describes; prevents self-wakes. */
   sourceAgentId?: string;
   fromRoomId: string;
@@ -406,7 +409,8 @@ export { queueMessage as createAgentCommand };
 
 /** Transport adapters supply data; this is the only conversational write entry. */
 export type QueuedPost = {
-  kind: 'post'; roomId: string; authorId: string; text: string; id?: string;
+  /** A member posts under its own name: a person's words or its agent's model text. */
+  kind: 'post'; roomId: string; authorId: string; text: MemberText; id?: string;
   replyTo?: string; attachments?: readonly Attachment[]; requestId?: string; commandRoomId?: string;
   sourceClient?: { id: string; name: string }; tags?: unknown; presentation?: 'message' | 'card';
   parent?: CommandRow; card?: unknown; agentIds?: readonly string[];
@@ -415,13 +419,14 @@ export type QueuedPost = {
   stopped?: boolean;
 };
 export type QueuedDelivery = {
-  kind: 'delivery'; roomId: string; authorId: string; recipientId?: string; text: string; id: string;
+  kind: 'delivery'; roomId: string; recipientId?: string; id: string;
   sourceRoomId: string; sourceItem: CommandRow; parent?: CommandRow; stopped?: boolean;
   attachments?: readonly Attachment[]; ask?: string; replyTo?: string; postedReplyId?:string;
   automatic?: boolean; idleSince?: string;
-};
+} & ({ authorId: string; text: AgentVoice } | { authorId: SystemAuthorId; text: Composed<'system'> });
 export type QueuedOrder = {
-  kind: 'order'; roomId: string; authorId: string; agent?: string; text: string;
+  /** Only an agent orders, in its model's words. */
+  kind: 'order'; roomId: string; authorId: string; agent?: string; text: AgentVoice;
   parent?: CommandRow; id?: string;
 };
 type Member = { id: string; kind: 'human' | 'agent'; handle: string | null; name: string;
@@ -446,7 +451,7 @@ export function queueMessage(db: SqlDatabase, input: DeliveryInput): Promise<Com
 export async function queueMessage(database: SqlDatabase, raw: QueuedPost | QueuedOrder | QueuedDelivery | DeliveryInput): Promise<QueuedPostReceipt | CommandRow | OrderFeedback | { id: string; createdAt: number; delivered: boolean; receipt: string } | undefined> {
   // PostgreSQL text/jsonb cannot represent NUL or isolated UTF-16 surrogates.
   raw={...raw,roomId:raw.roomId.toLowerCase()};
-  const input = 'text' in raw ? { ...raw, text: pgText(raw.text) } : raw.privatePayload
+  const input = 'text' in raw ? { ...raw, text: pgText<typeof raw.text>(raw.text) } as typeof raw : raw.privatePayload
     ? { ...raw, privatePayload: { ...raw.privatePayload, text: pgText(raw.privatePayload.text) } } : raw;
   const db = new CornerAccessDatabase(database);
   return db.transaction(async db => {
@@ -534,7 +539,7 @@ export async function queueMessage(database: SqlDatabase, raw: QueuedPost | Queu
         const queued = await insertAgentCommand(db, { id: input.id, roomId: wakeHere ? input.sourceRoomId : chat.id, agentId: target.id,
           sourceMessageId: null, reason: 'report', parent: input.parent, reportSource: input.sourceItem,
           scheduledHumanCommandMessageId: input.sourceItem.root_source_message_id, retainDepth: true,
-          privatePayload: { kind: 'report', text: input.text, authorId: input.authorId, fromRoomId: input.sourceRoomId,
+          privatePayload: { kind: 'report', ...({ text: input.text, authorId: input.authorId } as PayloadVoice), fromRoomId: input.sourceRoomId,
             ask: input.ask, sourceAgentId:input.sourceItem.agent_id, automatic: input.automatic, idleSince: input.idleSince,
             originCornerId: chat.source_parent_id ? input.sourceRoomId : input.sourceItem.private_payload?.originCornerId, attachments: input.attachments ? [...input.attachments] : undefined },
         }, wakeHere ? { ...chat, id: input.sourceRoomId, parent_id: chat.source_parent_id } : chat);
@@ -563,9 +568,11 @@ export async function queueMessage(database: SqlDatabase, raw: QueuedPost | Queu
   });
 }
 
-async function postMessage(db: SqlDatabase, input: QueuedPost, chat: Chat): Promise<QueuedPostReceipt> {
+/** A System-authored report to a person posts here under the System identity. */
+type PublicPost = Omit<QueuedPost, 'text'> & { text: MemberText | Composed<'system'> };
+async function postMessage(db: SqlDatabase, input: PublicPost, chat: Chat): Promise<QueuedPostReceipt> {
   const author = chat.members.find(member => member.id === input.authorId);
-  input = author?.kind === 'agent' ? { ...input, text: repairAgentPost(input.text).text } : input;
+  input = author?.kind === 'agent' ? { ...input, text: modelText(repairAgentPost(input.text).text) } : input;
   if (author?.kind === 'agent' && !input.text.trim()) return {
     id:input.id ?? hash(`empty-reply:${chat.id}:${input.authorId}:${input.requestId ?? ''}`),
     createdAt:Math.floor(Date.now()/1000),commands:[],woken:[],notWoken:[],stopped:false,stored:false,visible:false,
@@ -664,10 +671,11 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
       : chat.parent_source?.author_id ?? (!chat.source?.system_event ? chat.source?.author_id : undefined)
         ?? chat.members.find(member => member.id === input.agentId)?.owner_id ?? undefined,
   } : undefined;
-  let payload: PrivateCommandPayload | undefined = input.privatePayload ?? scheduledReturn ?? (parent?.private_payload && input.inheritPrivatePayload !== false
-    ? { ...parent.private_payload, kind: 'lifecycle', reported: undefined, text: sourceText ?? parent.private_payload.text }
+  // Inherited payloads copy stored rows; their origin was declared when written.
+  let payload: PrivateCommandPayload | undefined = input.privatePayload ?? (scheduledReturn as PrivateCommandPayload | undefined) ?? (parent?.private_payload && input.inheritPrivatePayload !== false
+    ? { ...parent.private_payload, kind: 'lifecycle', reported: undefined, text: sourceText ?? parent.private_payload.text } as PrivateCommandPayload
     : handover ? { kind:'lifecycle',authorId:handover.author_id,text:sourceText ?? input.reason,
-      fromRoomId:handover.approval_basis.commanderReturnRoomId ?? handover.source_room_id } : undefined);
+      fromRoomId:handover.approval_basis.commanderReturnRoomId ?? handover.source_room_id } as PrivateCommandPayload : undefined);
   const parentReturn=parent?.private_payload?.returnIdentityId ??
     (parent?.private_payload?.kind==='order'?parent.private_payload.authorId:undefined);
   // An event wake queued in a corner answers in that corner, as does the same agent's continuation
@@ -675,13 +683,14 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
   const continuesCornerWake = parent?.agent_id === input.agentId && parent.return_room_id === chat.id && !parentReturn;
   const cornerWake = Boolean(chat.parent_id) && (lifecycle || continuesCornerWake)
     && payload?.kind !== 'order' && input.reason !== 'corner_brief_revision';
+  // A wake note is delivery context beside the payload's own text (not new speech).
   if (payload) payload = { ...payload,
     text: payload.text + (input.wakeNote ? `\n${input.wakeNote}` : ''),
     ...(chat.parent_id && payload.kind === 'order' && escalationIdentity && escalationRoom
       ? { escalation: { identityId: escalationIdentity, roomId: escalationRoom } } : {}),
     returnIdentityId: cornerWake ? undefined : handover?.author_id ?? payload.returnIdentityId ?? (payload.kind === 'order' ? payload.authorId
       : (parent?.agent_id === input.agentId && parentReturn!==input.agentId ? parentReturn : undefined) ?? chat.parent_source?.author_id),
-  };
+  } as PrivateCommandPayload;
   const returnRoom = input.reason === 'schedule' || cornerWake ? chat.id : payload?.kind === 'order' ? payload.fromRoomId : payload || lifecycle
     ? handover?.approval_basis.commanderReturnRoomId ?? handover?.source_room_id ??
       (parent?.agent_id === input.agentId ? parent.return_room_id : undefined) ?? chat.parent_source?.room_id ?? parent?.return_room_id ?? chat.id : chat.id;
@@ -818,7 +827,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
       const id = hash(`closing:${item.id}`);
       await queueMessage(db,{kind:'delivery',roomId:item.return_room_id ?? input.roomId,authorId:agentId,
         sourceRoomId:input.roomId,sourceItem:item,id:publicReplyId,postedReplyId:publicReplyId,
-        text:'',attachments:item.answer_attachments,stopped:item.state==='cancelled'});
+        text:modelText(''),attachments:item.answer_attachments,stopped:item.state==='cancelled'});
       await endAgentTurn(db,item,input.report && input.status === 'failed' ? 'failed' : 'complete',null,publicReplyId);
       if (item.public_reply_id && publicText) history = {id,roomId:item.return_room_id ?? input.roomId,text:publicText};
       return {id:publicReplyId,createdAt:Math.floor(Date.now()/1000),delivered:true};
@@ -831,7 +840,8 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
       return { id: item.id, createdAt: Math.floor(Date.now() / 1000) };
     }
     if (!publicText) return { id: item?.id ?? hash(`${agentId}:${input.roomId}`), createdAt: Math.floor(Date.now() / 1000), answered: false };
-    const text = (input.report ? `${status}: ${publicText.replace(/^(?:done|blocked|failed|needs[-_]decision):\s*/, '')}` : publicText).trim();
+    // The agent's own answer; the status word is the agent's report outcome.
+    const text = modelText((input.report ? `${status}: ${publicText.replace(/^(?:done|blocked|failed|needs[-_]decision):\s*/, '')}` : publicText).trim());
     const answerId = input.messageId ?? hash(`answer:${item?.id ?? `${agentId}:${input.roomId}:${input.requestId ?? ''}`}`);
     const attachments = [...new Map([...(payload?.attachments ?? []),...(item?.answer_attachments ?? [])].map(file=>[file.url,file])).values()];
     const sourceItem = item ?? { id: answerId, room_id: input.roomId, agent_id: agentId,

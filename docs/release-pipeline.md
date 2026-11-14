@@ -430,27 +430,26 @@ command-approval card.
 For `next`, pass no inputs. For owner-commanded promotion, pass
 `inputs: { channel: "latest" }`. Helper-owned and other authenticated agent turns
 use this same path. The helper connection and generation must still be current
-when its audit receipt commits; helper ownership is no longer a reason to refuse
+when the dispatch is authorized; helper ownership is no longer a reason to refuse
 a release.
 
 Run inside an authenticated Beeline agent turn citing a human
 release command from a workspace owner or admin. The tool uses the existing
 repository workflow dispatch path on the server. The server derives
 agent id and handle, place, and the root human command message from the active
-turn, and commits a Room message before requesting the dispatch. That message
-is the durable audit receipt and is readable through the ordinary Room read.
-A receipt says "requested"; it does not prove GitHub accepted the request.
-No credentials, tokens or recovery input values are stored in the receipt.
+turn. It posts no Room line under the agent's name. No credentials, tokens or
+recovery input values are part of the attribution.
 
-The server passes `dispatched_by` with these fields and the audit message id.
-The workflow requires that attribution and shows it in its run name and
-summary. Anonymous agent dispatches are refused.
+The server passes `dispatched_by` with these fields and a fresh dispatch id
+(the `auditMessageId` key, kept for workflow compatibility). The workflow
+requires that attribution and records it in its run name and summary, which are
+the durable audit record. Anonymous agent dispatches are refused.
 Recovery operators cannot override the server-supplied attribution.
 
 An explicitly human-commanded recurring release may use the same tool on each
 scheduled turn. Creating or updating the schedule in that human-rooted turn
 stores the authorizing human command message id on the schedule. The scheduler carries the original human command into
-the release turn; the audit receipt cites that command. Agent-only edits clear
+the release turn; the attribution cites that command. Agent-only edits clear
 the authorization. Schedules created before this support need a human-rooted
 update to record the command before they can dispatch releases. The original
 human must still be a workspace owner or admin at dispatch time.
@@ -795,7 +794,8 @@ migration in that later release; this release intentionally contains none.
 The PostgreSQL overlap regression keeps an old notification transaction open
 while deployment finishes, then writes its next notification. The built MCP
 regression runs release dispatch for both legacy and helper-owned commands,
-checks the readable audit receipt and rejects missing human authorization.
+checks the attribution it sends, that no Room line is written, and rejects
+missing human authorization.
 
 The locking cutover also retains `agents.squire_report` and `messages.event_woken`
 without current readers or writers; `beeline-drop-retired-turn-schema` owns

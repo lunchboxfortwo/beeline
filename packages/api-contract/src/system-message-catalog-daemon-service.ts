@@ -190,21 +190,6 @@ export const SYSTEM_MESSAGE_DAEMON_SERVICE = {
     variables: ['head_slice_0_12'],
   },
 
-  'github-operations.passed': {
-    parts: ['passed'],
-    variables: [],
-  },
-
-  'github-operations.started': {
-    parts: ['started'],
-    variables: [],
-  },
-
-  'github-operations.cancelled': {
-    parts: ['cancelled'],
-    variables: [],
-  },
-
   'github-operations.found-failing-checks-on': {
     parts: ['found failing checks on'],
     variables: [],

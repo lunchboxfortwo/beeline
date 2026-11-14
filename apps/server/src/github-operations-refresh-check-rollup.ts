@@ -131,7 +131,7 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
             updatedAt: Math.floor(fetchStartedAt),
             fetchStartedAt,
           };
-          const { sameReportedHead, newAttempt, attempt, reportFailure, storedSummary } =
+          const { sameReportedHead, newAttempt, reportFailure, storedSummary } =
             planCornerCheckObservation({
               headSha: checkHeadSha, previousHeadSha: current.pr?.headSha,
               prior: current.checksSummary, next: summary, settled: rollup.state !== 'pending',
@@ -140,46 +140,27 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
             (current.checks === 'passing' || current.checks === 'failing'));
           const becamePassing = summary.status === 'passing' && (current.checks !== 'passing' || !sameReportedHead || newAttempt);
           const becameFailing = reportFailure;
-          // Pull-request open and the deploy re-read pass a synthetic pending
-          // check named "Pull request checks". A green rollup should name the
-          // suites that passed. The flag is assigned on its own so that
-          // placeholder name stays out of the System line.
-          const nameThePass = becamePassing && providerCheck.status === 'pending';
-          const label = nameThePass
-            ? systemMessage('github-operations.passed')
-            : providerCheck.status === 'pending'
-              ? systemMessage('github-operations.started')
-              : String(providerCheck.conclusion ?? '').toUpperCase() === 'CANCELLED'
-                ? systemMessage('github-operations.cancelled')
-                : providerCheck.status;
-          const named = nameThePass
-            ? {
-                ...providerCheck,
-                name: summary.checks.filter(item => item.status === 'passed').map(item => item.name).join(', ')
-                  || current.pr?.title
-                  || (current.pr?.number ? `pull request #${current.pr.number}` : 'the pull request'),
-              }
-            : providerCheck;
-          const failing = summary.failing.length ? summary.failing : [named.name];
-          const dedupe = becamePassing
-            ? `github:checks:green:${named.headSha}:${attempt}`
-            : becameFailing
-              ? `github:checks:failed:${named.headSha}`
-              : `github:checks:${label}:${named.name}:${named.headSha ?? hash(JSON.stringify(named))}`;
+          // A pass, a start and a cancellation print no line: only a failure
+          // is news. The passing verdict still advances the corner below.
+          const cancelled = String(providerCheck.conclusion ?? '').toUpperCase() === 'CANCELLED';
+          const failing = summary.failing.length ? summary.failing : [providerCheck.name];
+          const dedupe = becameFailing
+            ? `github:checks:failed:${providerCheck.headSha}`
+            : `github:checks:${providerCheck.status}:${providerCheck.name}:${providerCheck.headSha ?? hash(JSON.stringify(providerCheck))}`;
           const phrase: SystemPhrase = {
             subject: GITHUB_SUBJECT,
-            verb: becameFailing ? systemMessage('github-operations.found-failing-checks-on') : systemMessage('github-operations.a-check', label),
-            ...(becamePassing ? { kind: 'check-passed' as const } : becameFailing ? { kind: 'check-failed' as const } : {}),
+            verb: becameFailing ? systemMessage('github-operations.found-failing-checks-on') : systemMessage('github-operations.a-check', providerCheck.status),
+            ...(becameFailing ? { kind: 'check-failed' as const } : {}),
             object: becameFailing
               ? {
                   text: current.pr?.title ?? (current.pr?.number ? systemMessage('github-operations.pull-request-2', current.pr.number) : systemMessage('github-operations.the-pull-request')),
                   ...(current.pr?.url ? { url: current.pr.url } : {}),
-                  ...(named.headSha ? { headSha: named.headSha } : {}),
+                  ...(providerCheck.headSha ? { headSha: providerCheck.headSha } : {}),
                 }
               : {
-                  text: named.name,
-                  ...(named.url ? { url: named.url } : {}),
-                  ...(named.headSha ? { headSha: named.headSha } : {}),
+                  text: providerCheck.name,
+                  ...(providerCheck.url ? { url: providerCheck.url } : {}),
+                  ...(providerCheck.headSha ? { headSha: providerCheck.headSha } : {}),
                 },
             ...(becameFailing
               ? { consequence: systemMessage('github-operations.failing', failing.join(systemMessage('github-operations.list-separator'))) }
@@ -188,14 +169,16 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
                 : {}),
             ...(becameFailing ? { payload: { failedJobs: jobLogs } } : {}),
           };
-          const event: CornerEvent | null = becamePassing || becameFailing
-            ? { kind: 'checks', result: becamePassing ? 'passing' : 'failing', sourceMessageId: hash(`beeline:${target.corner_id}:${dedupe}`) }
-            : checksPending
+          const event: CornerEvent | null = becameFailing
+            ? { kind: 'checks', result: 'failing', sourceMessageId: hash(`beeline:${target.corner_id}:${dedupe}`) }
+            : becamePassing
+              ? { kind: 'checks', result: 'passing' }
+              : checksPending
               ? { kind: 'checks-pending' }
               : summary.status === 'failing' && !becameFailing
                 ? { kind: 'reconcile' }
                 : null;
-          return { summary, storedSummary, event, wantsNote: becamePassing || becameFailing || (providerCheck.status === 'failed' && !options?.quiet), phrase, dedupe };
+          return { summary, storedSummary, event, wantsNote: becameFailing || (providerCheck.status === 'failed' && !cancelled && !options?.quiet), phrase, dedupe };
         };
         // The head check and the machine write share one lock. The idle snapshot
         // and the other lifecycle reads run before that lock.
