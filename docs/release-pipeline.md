@@ -3,6 +3,31 @@
 `Unified production release` is the only workflow that releases current
 `main` to `next`, or promotes its last successful `next` release to `latest`. It is manually dispatched; merging to main starts no workflow.
 
+## GitLab npm publishing during an Actions outage
+
+The private mirror [lunchboxfortwo/beeline](https://gitlab.com/lunchboxfortwo/beeline)
+can publish only the `usebeeline` npm package with the root `.gitlab-ci.yml`
+job `publish-usebeeline`. After the GitHub commit is mirrored, use GitLab's
+**Build → Pipelines → New pipeline**, select that ref and set `RELEASE_VERSION`
+to `vX.Y.Z-rc.N` (or `X.Y.Z-rc.N`). Alternatively push a `usebeeline-vX.Y.Z-rc.N`
+tag to the mirror with a matching `RELEASE_VERSION` CI/CD variable configured.
+Ordinary branch pushes and merge requests do not run this job. RC versions
+publish to `next`; stable `X.Y.Z` versions publish to `latest` and require the
+explicit owner promotion command. Do not run it alongside another npm publisher.
+
+In `usebeeline`'s npm package settings, add a **GitLab CI/CD** trusted publisher:
+namespace `lunchboxfortwo`, project `beeline` (project path
+`lunchboxfortwo/beeline`), top-level CI file `.gitlab-ci.yml`, no environment,
+and allow direct `npm publish`. The job name is `publish-usebeeline`; npm's
+GitLab form binds the CI file, not a job-name field. Use GitLab.com shared
+runners. The job requests `NPM_ID_TOKEN` with audience
+`npm:registry.npmjs.org` and installs npm 11.15 or newer (OIDC needs at least
+11.5.1); no npm token secret is needed. Provenance stays disabled for this
+private mirror. See [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/).
+It builds, packs and locally installs/smokes the exact tarball before publishing;
+an already published version is skipped. It does not release native helpers
+or update the unified release record.
+
 ## Local recovery during an Actions outage
 
 `node scripts/release-local.mjs --plan` shows the local recovery path without

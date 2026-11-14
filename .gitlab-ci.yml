@@ -1,0 +1,38 @@
+publish-usebeeline:
+  image: node:22
+  timeout: 15m
+  resource_group: usebeeline-npm
+  id_tokens:
+    NPM_ID_TOKEN:
+      aud: npm:registry.npmjs.org
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+    - if: '$CI_COMMIT_TAG =~ /^usebeeline-v.+$/'
+    - when: never
+  script:
+    - |
+      set -euo pipefail
+      : "${RELEASE_VERSION:?Set RELEASE_VERSION to the release version, optionally prefixed with v}"
+      version="${RELEASE_VERSION#v}"
+      node -e 'if (!/^\d+\.\d+\.\d+(?:-rc\.\d+)?$/.test(process.argv[1])) throw new Error("Expected X.Y.Z or X.Y.Z-rc.N")' "$version"
+      if [ -n "${CI_COMMIT_TAG:-}" ] && [ "$CI_COMMIT_TAG" != "usebeeline-v$version" ]; then
+        echo 'Tag must match RELEASE_VERSION' >&2
+        exit 1
+      fi
+      bash scripts/npm-ci-timed.sh
+      # Match the helper CLI build in unified-release.yml without building native archives.
+      npm run build -w @beeline/nostr
+      npm run build -w @beeline/api-contract
+      npm run build -w @beeline/buzz-client
+      npm run build -w @beeline/net
+      npm run build -w @beeline/body
+      npm run build -w usebeeline
+      npm version "$version" --allow-same-version --no-git-tag-version --workspace usebeeline
+      package_dir="$(mktemp -d)"
+      npm pack --workspace usebeeline --pack-destination "$package_dir"
+      tarball="$package_dir/usebeeline-$version.tgz"
+      node scripts/smoke-helper-package.mjs "$tarball" "$version"
+      npm install --global npm@^11.15.0
+      publish_args=(--no-provenance)
+      case "$version" in *-rc.*) publish_args+=(--tag next);; esac
+      npm view "usebeeline@$version" version >/dev/null 2>&1 || npm publish "${publish_args[@]}" "$tarball"
