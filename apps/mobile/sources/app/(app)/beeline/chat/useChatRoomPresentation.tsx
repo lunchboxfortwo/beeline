@@ -42,8 +42,6 @@ type Props = [
   desktopWorkRoomId: string,
   roomClient: import("@/sync/transport/room-view-client").RoomViewClient | null,
   cacheViewerPubkey: string,
-  setProfileKind: React.Dispatch<React.SetStateAction<"human" | "agent">>,
-  setProfileAgentId: React.Dispatch<React.SetStateAction<string | null>>,
   transport: BuzzRigTransport | null,
 ];
 
@@ -51,7 +49,7 @@ export function useChatRoomPresentation([
   chatListKey, decodedId, roomSurface, userPubkey, isFocused, isDirectMessage, isArchived, isCorner,
   activeCommunityId, surfaceParentId, roomRepoAccessIssue, setCornerOpenRepoPrompt, parentChannelId,
   resolvedChannelName, routeChannelTitle, commitDesktopWorkPane, desktopExperience,
-  desktopWorkRoomId, roomClient, cacheViewerPubkey, setProfileKind, setProfileAgentId, transport,
+  desktopWorkRoomId, roomClient, cacheViewerPubkey, transport,
 ]: Props): [
   revealTranscriptThrough: (count: number) => void,
   transcriptHistoryStatus: import("@/buzz/room-message-store").TranscriptHistoryStatus,
@@ -360,8 +358,7 @@ export function useChatRoomPresentation([
         return;
       }
       if (!activeCommunityId) return;
-      // A transcript face opens the profile: the right panel on desktop, a
-      // pushed screen on a phone.
+      // A transcript face opens the profile in the main navigation stack.
       openPlace(
         kind === 'human'
           ? { kind: 'person', memberId: agentId, workspaceId: activeCommunityId }

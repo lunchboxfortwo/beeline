@@ -6,17 +6,7 @@
       "DesktopDeepLinkBridge"
     ],
     "components/DesktopRoomInspector.tsx": [
-      "COMPOSER_MAX_HEIGHT",
-      "COMPOSER_MIN_HEIGHT",
-      "CornerCockpit",
-      "DesktopRoomInspector",
-      "HeaderIconControl",
-      "TranscriptGap",
-      "captioned",
-      "control",
-      "node",
-      "renderMessage",
-      "withHoverTitle"
+      "DesktopRoomInspector"
     ],
     "components/KeyboardShortcutsProvider.tsx": [
       "KeyboardShortcutsProvider"
@@ -429,7 +419,9 @@
     "components/buzz/PushLevelSetting.tsx": [
       "PushLevelSetting"
     ],
-    "components/buzz/SelectedRepositoryPill.tsx": ["SelectedRepositoryPill"],
+    "components/buzz/SelectedRepositoryPill.tsx": [
+      "SelectedRepositoryPill"
+    ],
     "components/buzz/RepoList.tsx": [
       "RepoList"
     ],
@@ -631,7 +623,10 @@
     "components/layout.ts": [],
     "components/markdown/parseMarkdown.ts": [],
     "components/markdown/parseMarkdownBlock.ts": [],
-    "components/markdown/parseMarkdownSpans.ts": []
+    "components/markdown/parseMarkdownSpans.ts": [],
+    "components/DesktopViewerPane.tsx": [
+      "DesktopViewerPane"
+    ]
   },
   "legacyControls": {
     "app/(app)/beeline/channels.tsx": {

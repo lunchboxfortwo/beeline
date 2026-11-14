@@ -49,14 +49,13 @@ vi.mock('@/ui/screens/thread/ThreadLine', () => ({ ThreadLine: 'ThreadLine' }));
 vi.mock('@/buzz/room-corner-store', () => ({ useRoomCornerSummary: () => fixture.summary }));
 vi.mock('@/buzz/use-room-corners', () => ({ useRoomCorners: () => fixture.corners }));
 import { ThreadsDropdown, ThreadsDropdownScope } from './ThreadsDropdown';
-import { closePanel, openPlace } from '@/ui/shell/panel';
+import { openPlace } from '@/ui/shell/panel';
 
 const byTestID = (tree: any, testID: string) => tree.root.findAll((node: any) => node.props.testID === testID && typeof node.type === 'string');
 
 beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; fixture.platform = 'web'; });
 
 it.each([false, true])('closes the expanded list when Chat info opens (desktop: %s)', (desktop) => {
-  closePanel();
   fixture.summary = { cornerCount: 1, openCorners: [] };
   fixture.corners = { openRows: [], record: {} };
   let tree: any;
@@ -70,7 +69,6 @@ it.each([false, true])('closes the expanded list when Chat info opens (desktop: 
   expect(byTestID(tree, 'threads-dropdown-trigger')[0].props['aria-expanded']).toBe(false);
   expect(byTestID(tree, 'threads-dropdown-list')).toHaveLength(0);
   act(() => tree.unmount());
-  closePanel();
 });
 
 it.each(['onTouchStart', 'onPointerDown'])('dismisses on outside input without consuming it (%s)', (event) => {

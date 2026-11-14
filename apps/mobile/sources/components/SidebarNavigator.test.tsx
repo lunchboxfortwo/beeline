@@ -33,7 +33,6 @@ vi.mock('@/auth/monolith-session', () => ({ monolithSession: {} }));
 vi.mock('@/sync/client-reset', () => ({ subscribeClientReset: () => () => {} }));
 vi.mock('@/buzz/desktop-workbench-state', () => ({ DESKTOP_NAV_DEFAULT_WIDTH: 260, DESKTOP_NAV_MIN_WIDTH: 200, DESKTOP_TRANSCRIPT_MIN_WIDTH: 400, clampDesktopPaneWidth: (_kind: string, width: number) => width }));
 vi.mock('@/components/SidebarView', () => ({ SidebarView: () => null }));
-vi.mock('@/ui/shell/DesktopPanel', () => ({ DesktopPanel: () => null }));
 import { SidebarNavigator } from './SidebarNavigator';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 it('routes a phone directly to its stack without mounting an invisible drawer navigator', async () => {

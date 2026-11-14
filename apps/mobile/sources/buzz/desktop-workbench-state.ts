@@ -23,7 +23,6 @@ export type DesktopWorkPaneWidthMode = 'wide' | 'narrow';
 
 /** The second pane holds one thing at a time, or nothing. */
 export type DesktopWorkPaneContent =
-  | { kind: 'corner'; cornerId: string }
   | { kind: 'artifact'; artifact: DesktopArtifactSelection }
   | { kind: 'computer'; session: ComputerSessionView };
 
@@ -39,8 +38,7 @@ export type DesktopWorkPaneEvent =
   | { type: 'close' }
   | { type: 'open-corner'; cornerId: string; primary: DesktopWorkPanePrimary }
   | { type: 'open-artifact'; artifact: DesktopArtifactSelection; primary: DesktopWorkPanePrimary }
-  | { type: 'open-computer'; session: ComputerSessionView; primary: DesktopWorkPanePrimary }
-  | { type: 'expand' };
+  | { type: 'open-computer'; session: ComputerSessionView; primary: DesktopWorkPanePrimary };
 
 /**
  * `pane`: the second pane now shows it. `primary`: the caller opens a corner
@@ -103,10 +101,7 @@ export function transitionDesktopWorkPane(
       if (state.widthMode === 'narrow' || event.primary === 'direct-message')
         return { state, placement: 'primary' };
       return { state: { ...state, content: { kind: 'computer', session: event.session } }, placement: 'pane' };
-    case 'expand':
-      // The corner moves to the primary view, so the pane closes and nothing
-      // shows twice.
-      return { state: { ...state, content: null }, placement: 'primary' };
+
   }
 }
 
@@ -185,5 +180,16 @@ export function desktopComposerKeyAction(
 export function desktopDocumentPaneWidth(availableWidth: number, requested = availableWidth * 0.55): number {
   if (!Number.isFinite(availableWidth))
     return Number.isFinite(requested) ? requested : DESKTOP_INSPECTOR_DEFAULT_WIDTH;
-  return Math.max(0, Math.min(requested, availableWidth - DESKTOP_TRANSCRIPT_MIN_WIDTH));
+  return Math.max(0, Math.min(Math.max(DESKTOP_INSPECTOR_MIN_WIDTH, requested), availableWidth - DESKTOP_TRANSCRIPT_MIN_WIDTH));
+}
+
+/** Only explicitly dragged viewer widths are restored; first open stays proportional. */
+const VIEWER_WIDTH_KEY = 'beeline.desktop.viewer-width.v1';
+export async function loadDesktopViewerWidth(): Promise<number | undefined> {
+  const raw = await AsyncStorage.getItem(VIEWER_WIDTH_KEY);
+  const width = raw === null ? NaN : Number(raw);
+  return Number.isFinite(width) ? Math.max(DESKTOP_INSPECTOR_MIN_WIDTH, width) : undefined;
+}
+export async function saveDesktopViewerWidth(width: number): Promise<void> {
+  await AsyncStorage.setItem(VIEWER_WIDTH_KEY, String(Math.round(width)));
 }
