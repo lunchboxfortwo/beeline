@@ -1,6 +1,4 @@
-import { createHash } from 'node:crypto';
-import { systemMessage } from '@beeline/api-contract/system-message-catalog';
-import { commandOrder, reportToCommander } from './commander.js';
+import { commandOrder } from './commander.js';
 import type { CommandRow } from './agent-command.js';
 import type { SqlDatabase } from './database.js';
 import { CornerAccessDatabase } from './corner-access-database.js';
@@ -54,10 +52,5 @@ export async function dropQueuedOrdersForStop(db: SqlDatabase, stopped: CommandR
     [stopped.room_id, stopped.agent_id, order.private_payload.authorId,
       order.private_payload.fromRoomId, stopped.turn_request_id],
   );
-  if (dropped.rowCount) {
-    await reportToCommander(db, stopped.room_id, stopped.agent_id,
-      systemMessage("agent-command.failed-queued-dropped-by-a-stop-the-running-turn-was-cancelled", dropped.rowCount, dropped.rowCount === 1 ? systemMessage("agent-command.order-was") : systemMessage("agent-command.orders-were")),
-      dropped.rows[0], createHash('sha256').update(`stop-orders:${stopped.id}`).digest('hex'), { automatic: true });
-  }
   return dropped.rowCount;
 }

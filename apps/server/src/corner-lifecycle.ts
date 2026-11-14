@@ -342,7 +342,6 @@ async function readCornerAdvance(
       mergeHeld: gate?.held,
       mergeConflictDelivered: active?.conflict,
       lostEffects: receipts.filter(receipt => !active?.retained?.includes(receipt.id)).flatMap(receipt => [receipt.key, receipt.marker]),
-      draftReadyFailure: (corner.lifecycle as CornerLifecycleView & { draftReadyFailure?: { headSha?: string } }).draftReadyFailure?.headSha === head && Boolean(head),
       reviewerConfigured: independentReviewerConfigured(corner),
       ...(waiting ? {waitReason:waiting.wait_reason} : {}),
       ...(review.ended ? {reviewEnded:review.ended} : {}),
@@ -600,10 +599,6 @@ async function writeCornerAdvance(
         effects.push(effect.key);
     }
     for (const notice of plan.notifications) {
-      if (notice.kind === 'draft') await reportAgentAttention(db, cornerId, corner.worker_agent_id ?? SYSTEM_IDENTITY_ID,
-        systemMessage('agent-command.blocked-pr-is-a-draft-marking-it-ready-for-review-failed'), undefined,
-        createHash('sha256').update(`draft-blocked:${cornerId}:${head}`).digest('hex'),
-        {});
       if (notice.kind === 'idle' && row) {
         await reportAgentAttention(
           db,

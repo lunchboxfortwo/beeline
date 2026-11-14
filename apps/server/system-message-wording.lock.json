@@ -1,8 +1,6 @@
 {
   "agent-command.agent-mention": "738dc90b4e303bba6108e6ad829ebf88311c9ddd3e0fa0966a7cd0d0437f5fce",
   "agent-command.asked-for-a-new-key": "550c4b9646a568e452d7659e6e56a9fdf27dbd146aa8df22fad5c3c90e4a8e63",
-  "agent-command.blocked-pr-is-a-draft-marking-it-ready-for-review-failed": "213eae3e73fe476496dc673bd4dd1e483a522b9574c6317e2112e88839896852",
-  "agent-command.failed-queued-dropped-by-a-stop-the-running-turn-was-cancelled": "70c07cff3adf6e853ea534f0063de90f11c51e4aba1d1a60a2ed7e7c10939132",
   "agent-command.found-merge-conflicts-in": "867f4f702a302398be1128f9d6337b34c52d741b49860c85a6b08b08eb70d0ce",
   "agent-command.helper-will-reconnect-to-confirm": "26e4f7f5f104a03b0a382f6cfcba451bc83525f8bff4431f80e12d1c12f12477",
   "agent-command.is-offline": "74b15d0675df94e3974946bdbf2f67b2cb4d23f8fbd10435a545e649e99df52f",
@@ -13,9 +11,7 @@
   "agent-command.no-turn-is-running": "25c57fbe84c632e6f11178943cfee03219418471ae7db96e14e26954fb0de1d1",
   "agent-command.one-turn-is-running": "88930da8c87d83b865f777e504f49ed21e89df50c4cc27d5a46db1154e99503b",
   "agent-command.order": "3a3119cb811187bd3830b295da05d0ce500f82d6f9e77928507061f7d8c93a78",
-  "agent-command.order-was": "1b791a45cd5856604d90131136ba607506d966a41c6a701c9d37af23fcfda3fa",
   "agent-command.orders": "33f7b61c6e0c31edcc17f36ef635acedf22d2d1090feb438931be448243acd14",
-  "agent-command.orders-were": "618e5e4cf1ef4841ddc5bd2b547dd31668767a8555dbd8a0021dd34f3518f626",
   "agent-command.queued-a-restart": "27b7cedd92b95b7c160125f71e5ea33e275bf9d52184126d4e07e16c995acbd0",
   "agent-command.queued-a-retry-for-its-last-failed-turn": "1cd29516db033de7cfeaea2fe627a4a762839bd1ebfadd5cd97772fc682234a0",
   "agent-command.queued-dropped": "21ed92c9275f1f962fc95e179ec48189e05365b3e0e387248618173bcf7bba63",

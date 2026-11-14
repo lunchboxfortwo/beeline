@@ -167,6 +167,10 @@ describe('retired chat notices', () => {
       'turn-silence.send-login-here',
       'turn-silence.if-that-fails-its-owner-can-run-beeline-connect-on-its-machine',
       'turn-silence.the-helper-couldn-t-get-a-working-copy-of-check-the-repository-is',
+      'agent-command.failed-queued-dropped-by-a-stop-the-running-turn-was-cancelled',
+      'agent-command.order-was',
+      'agent-command.orders-were',
+      'agent-command.blocked-pr-is-a-draft-marking-it-ready-for-review-failed',
     ];
     expect(retired.filter((key) => key in SYSTEM_MESSAGE_CATALOG)).toEqual([]);
   });

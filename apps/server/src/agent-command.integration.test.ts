@@ -151,7 +151,7 @@ it('Reproduction cold-beebee-first-reply: shows every queued agent, then only it
 });
 
 
-it('Reproduction stop-queued-orders: Stop drains the queued orders and reports once', async () => {
+it('Reproduction stop-queued-orders: Stop drains the queued orders and wakes no commander', async () => {
   const { queued } = await queueStopOrders();
   await rootFixture.phone.execute('cancelAgentTurn', { roomId: R, agentId: A, requestId: queued[0]!.turnRequestId }, H);
   const remaining = (await commands()).filter(command => command.action === 'input');
@@ -159,15 +159,14 @@ it('Reproduction stop-queued-orders: Stop drains the queued orders and reports o
   for (const command of queued) await expect(claim(command, 'stale-helper')).rejects.toThrow();
   expect((await rootFixture.db.query(`SELECT state FROM agent_commands WHERE id=ANY($1::text[])`,
     [queued.map(command => command.id)])).rows).toEqual(Array(3).fill({ state: 'cancelled' }));
-  const reports = (await commands(B)).filter(command => command.reason === 'report');
-  expect(reports).toHaveLength(1);
-  expect(reports[0]!.source.body).toContain('2 queued orders were dropped by a Stop');
+  // The Stop line below is the record; no generated report is queued under the worker's name.
+  expect((await commands(B)).filter(command => command.reason === 'report')).toHaveLength(0);
   const lines = await rootFixture.db.query<{ text: string }>(
     `SELECT text FROM messages WHERE room_id=$1 AND system_event->>'kind'='turn-cancelled'
      AND request_id=$2`, [R, queued[0]!.turnRequestId]);
   expect(lines.rows).toHaveLength(1);
   expect(lines.rows[0]!.text).toContain('turn cancelled · 2 queued orders dropped');
-  console.log('Demonstrated Reproduction stop-queued-orders: queue 3, claim first, owner Stop → all 3 cancelled, 0 input commands available, all cached claims refused, one count line and one sender report');
+  console.log('Demonstrated Reproduction stop-queued-orders: queue 3, claim first, owner Stop → all 3 cancelled, 0 input commands available, all cached claims refused, one count line and no generated report');
 });
 
 

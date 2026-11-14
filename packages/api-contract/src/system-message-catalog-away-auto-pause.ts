@@ -148,26 +148,6 @@ export const SYSTEM_MESSAGE_AWAY_AUTO_PAUSE = {
     variables: [],
   },
 
-  'agent-command.failed-queued-dropped-by-a-stop-the-running-turn-was-cancelled': {
-    parts: ['failed: ', ' queued ', ' dropped by a Stop; the running turn was cancelled'],
-    variables: ['dropped_rowCount', 'dropped_rowCount_1_order_was'],
-  },
-
-  'agent-command.order-was': {
-    parts: ['order was'],
-    variables: [],
-  },
-
-  'agent-command.orders-were': {
-    parts: ['orders were'],
-    variables: [],
-  },
-
-  'agent-command.blocked-pr-is-a-draft-marking-it-ready-for-review-failed': {
-    parts: ['blocked: PR is a draft; marking it ready for review failed'],
-    variables: [],
-  },
-
   'agent-command.found-merge-conflicts-in': {
     parts: ['found merge conflicts in'],
     variables: [],
