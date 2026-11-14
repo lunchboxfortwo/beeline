@@ -43,23 +43,15 @@ export const scenarios = {
 export function fixture(name) {
   if (!Object.hasOwn(scenarios, name)) throw new Error(`No web fixture: ${name}`);
   // Where the measured action starts.
-  const route = [
-    'switch-workspace',
-    'create-room',
-    'create-corner',
-    'mark-read',
-    'mark-unread',
-  ].includes(name)
+  const route = ['switch-workspace', 'create-room', 'mark-read', 'mark-unread'].includes(name)
     ? '/beeline/channels'
     : ['choose-model', 'change-yolo', 'create-dm'].includes(name)
       ? '/beeline/agent-profile'
       : name === 'answer-approval'
         ? '/beeline/tray'
-        : name === 'open-corner'
-          ? '/beeline/corners/[roomId]'
-          : name === 'leave-room'
-            ? '/beeline/chat-info'
-            : '/beeline/chat/[channelId]';
+        : name === 'leave-room'
+          ? '/beeline/chat-info'
+          : '/beeline/chat/[channelId]';
   return {
     route,
     name,
@@ -137,9 +129,18 @@ export async function seedWebFixtures(db) {
       );
   }
   const artifactRoom = uuid('route-artifact-room');
-  await db.query(`INSERT INTO rooms(id,workspace_id,created_by,name) VALUES($1,$2,$3,'web-route-artifact') ON CONFLICT(id) DO NOTHING`, [artifactRoom, workspace, viewer]);
-  await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) SELECT $1,$2,$3,'owner' WHERE NOT EXISTS(SELECT 1 FROM memberships WHERE room_id=$2 AND identity_id=$3 AND removed_at IS NULL)`, [workspace, artifactRoom, viewer]);
-  await db.query(`INSERT INTO messages(id,room_id,author_id,text,created_at) VALUES($1,$2,$3,$4,'2026-01-01T11:59:00Z') ON CONFLICT(id) DO UPDATE SET room_id=EXCLUDED.room_id`, [hash('route-code'), artifactRoom, viewer, '```text\nlatency route code\n```']);
+  await db.query(
+    `INSERT INTO rooms(id,workspace_id,created_by,name) VALUES($1,$2,$3,'web-route-artifact') ON CONFLICT(id) DO NOTHING`,
+    [artifactRoom, workspace, viewer],
+  );
+  await db.query(
+    `INSERT INTO memberships(workspace_id,room_id,identity_id,role) SELECT $1,$2,$3,'owner' WHERE NOT EXISTS(SELECT 1 FROM memberships WHERE room_id=$2 AND identity_id=$3 AND removed_at IS NULL)`,
+    [workspace, artifactRoom, viewer],
+  );
+  await db.query(
+    `INSERT INTO messages(id,room_id,author_id,text,created_at) VALUES($1,$2,$3,$4,'2026-01-01T11:59:00Z') ON CONFLICT(id) DO UPDATE SET room_id=EXCLUDED.room_id`,
+    [hash('route-code'), artifactRoom, viewer, '```text\nlatency route code\n```'],
+  );
   // Metadata-only connector fixtures: no remote service, account or key is used.
   await db.query(
     `INSERT INTO workspace_connectors(id,workspace_id,owner_identity_id,connector_type,helper_agent_id,status,connected_at)

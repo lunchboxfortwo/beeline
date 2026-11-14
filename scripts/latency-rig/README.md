@@ -725,15 +725,16 @@ Each supported interaction runs twice with twenty samples per capture.
 `captures.json` retains the individual durations and exact setup/action errors.
 `summary.json` contains pooled and per-capture p50/p95, browser/commit/source
 hashes, coverage, `fullInventoryScore`, and `unmeasured[]`. Setup, sign-in and
-fixture reset are outside timing. Timing includes the browser driver's action
-dispatch and observing the visible result followed by two animation frames;
-it is an upper bound on rendered feedback, not physical scanout. Mutations
+fixture reset are outside timing. Browser input events start interaction clocks;
+a MutationObserver freezes the explicit fixture result followed by two animation
+frames. Driver-observed totals are retained separately. These are rendered
+feedback observations, not physical scanout. Mutations
 also check their committed database effect after timing, so cancelling a sheet
 cannot count as forwarding a message. A failed or incomplete pair contributes
 no successful percentile row. Failure screenshots and visible text are retained.
 
 `fullInventoryScore` is the percentage of the **complete** inventory with
-pooled p50 below the existing 150 ms tap target. It is `null` when any item
+pooled p95 below the standing 150 ms interaction budget. It is `null` when any item
 cannot be measured; gaps never count as zero-duration samples or disappear
 from the denominator. Native file selection, external provider consent, live
 GitHub merge gates, internal agent workflow commands, and retired standalone
@@ -866,22 +867,31 @@ provider sign-in, usable credentials, wallet balances or spending.
 `web-run.sh` uses a fresh browser context for every interaction sample and
 route document sample. Only authentication is copied between contexts; surface,
 outbox and session caches are not. A warm document sample first warms its own
-route, while cold samples clear app and HTTP caches. Each sample records Chromium
+route, while cold samples clear application storage. HTTP caching is disabled
+in both variants by request interception and the no-store fixture server.
+The browser process and compiled JavaScript caches are reused; neither label
+claims a fresh browser process or cold server/database caches. Each sample records Chromium
 heap, DOM/listener counts and cumulative task/script/layout seconds before and
 after the timed path, plus host load and available memory. Resource collection
 runs outside the response clock. Browser contexts close even after capture errors.
 
-Room/DM opens, file sends, leaving, closing and approval answers observe the
-fixture's visible result in the browser and retain the original driver-observed
-duration separately. Tap clocks start on pointerdown. File selection and upload prepare the Send
+Supported interactions observe the fixture's visible result in the browser and
+retain the driver-observed duration separately. Tap clocks start on pointerdown
+or keydown; forwarding starts on its browser click. Thread creation uses the
+current New thread prompt and its final Open thread tap; its parent composer
+cannot satisfy the destination result. File selection and upload prepare the Send
 tap, and their preparation duration is retained separately. DOM observation ends after the same two result frames, without
 charging selector-driver observation delay as product latency. These measurements
 remain headless Chromium observations, not physical phone scanout.
 Each route variant has two captures of three document loads; route percentiles
 are coverage observations at a 450 ms budget, not the forty-sample performance
-proof required for the slow-path fixes. Cold document loads clear HTTP and app
-surface caches while preserving authentication; warm loads retain those caches.
-Set `LATENCY_RIG_WEB_ROUTES_ONLY=1` for the independent route lane. For setup
+proof required for the slow-path fixes. Document clocks run from the browser navigation time origin to the explicit
+content plus two frames, without driver round trips. Cold loads clear app
+storage while preserving authentication; warm loads prime only the target route.
+Per-sample cache labels, socket operation spans and navigation/resource timings
+remain in the capture. Fixture sign-in restores only the three session keys.
+Set `LATENCY_RIG_WEB_ROUTES_ONLY=1` for the independent route lane.
+`LATENCY_RIG_WEB_INTERACTION` accepts one name or a comma-separated selection. For setup
 smoke checks, `LATENCY_RIG_ROUTE_SMOKE_SAMPLES=1` runs one incomplete capture;
 its gaps stay explicit and Insights rejects it as a timing series. For isolated
 slow-path proofs, `LATENCY_RIG_ROUTE_SAMPLES_PER_CAPTURE=20` retains both captures

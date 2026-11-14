@@ -83,7 +83,7 @@ export const routeFixtures = {
     state: 'empty-workflows',
   }),
   '/beeline/settings/workspace': content(id('workspace-name-row'), {
-    state: 'workspace-settings-redirect',
+    state: 'workspace-settings',
   }),
   '/beeline/tray': content(id('tray-list'), { absent: id('tray-loader') }),
   '/beeline/workflow': content(id('workflow-steps'), {

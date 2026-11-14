@@ -18,14 +18,14 @@ const first = (value: string | string[] | undefined) => Array.isArray(value) ? v
  * The Settings tab: You and the current Workspace as two pill tabs, each with
  * its mark, a "@handle · role" line, then that scope's sections.
  */
-export function SettingsScreen() {
+export function SettingsScreen({ initialScope = 'you' }: { initialScope?: Scope } = {}) {
     const desktop = useIsDesktop();
     useLatencyRouteFrame('/beeline/settings');
-    const params = useLocalSearchParams<{ tab?: string; workspaceId?: string; githubReconnect?: string; githubConnectionError?: string }>();
+    const params = useLocalSearchParams<{ tab?: string; workspaceId?: string; communityId?: string; githubReconnect?: string; githubConnectionError?: string }>();
     const tab = first(params.tab);
-    const linkedWorkspaceId = first(params.workspaceId);
-    const you = useYouSettings({ linkedWorkspaceId, githubReconnect: first(params.githubReconnect), githubConnectionError: first(params.githubConnectionError) });
-    const [scope, setScope] = useState<Scope>(tab === 'workspace' ? 'workspace' : 'you');
+    const linkedWorkspaceId = first(params.workspaceId) ?? first(params.communityId);
+    const [scope, setScope] = useState<Scope>(tab === 'workspace' ? 'workspace' : initialScope);
+    const you = useYouSettings({ linkedWorkspaceId, showWorkbench: scope === 'you', githubReconnect: first(params.githubReconnect), githubConnectionError: first(params.githubConnectionError) });
     useEffect(() => { if (tab === 'workspace') setScope('workspace'); }, [tab, linkedWorkspaceId]);
     const workspace = you.canManageWorkspace ? you.workspace : undefined;
     const showWorkspace = scope === 'workspace' && workspace;

@@ -40,7 +40,6 @@ export function WorkspaceSettings({ workspaceId }: { workspaceId: string }) {
     const [address, setAddress] = useState<ReturnType<typeof surfaceAddress> | null>(null);
     const view = useSurfaceSnapshot(address, isWorkspaceView);
     const [chatListKey, setChatListKey] = useState<ChatListKey | null>(null);
-    const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [working, setWorking] = useState<string | null>(null);
     const readRef = useRef<(() => Promise<void>) | null>(null);
@@ -69,7 +68,7 @@ export function WorkspaceSettings({ workspaceId }: { workspaceId: string }) {
                 const next = surfaceAddress(relay, identity.publicKey, '/workspace/:id', { workspaceId });
                 setAddress(next);
                 setChatListKey({ relayUrl: relay, viewerPubkey: identity.publicKey, workspaceId });
-                if (await mobileSurfaceCache.read(next, isWorkspaceView)) setLoading(false);
+                await mobileSurfaceCache.read(next, isWorkspaceView);
                 const currentClient = await new BuzzRigTransport(identity).ensureClient();
                 if (cancelled) return;
                 setClient(currentClient);
@@ -78,9 +77,9 @@ export function WorkspaceSettings({ workspaceId }: { workspaceId: string }) {
                     if (cancelled) return;
                     try {
                         await mobileSurfaceCache.fetch(next, isWorkspaceView, () => http.workspace(workspaceId));
-                        if (!cancelled) { setLoading(false); setError(null); }
+                        if (!cancelled) setError(null);
                     } catch (reason) {
-                        if (!cancelled) { setLoading(false); setError(appReadErrorCopy(reason)); }
+                        if (!cancelled) setError(appReadErrorCopy(reason));
                     }
                 };
                 readRef.current = read;
@@ -92,7 +91,7 @@ export function WorkspaceSettings({ workspaceId }: { workspaceId: string }) {
                 stopReconnect = release;
                 await read();
             } catch (caught) {
-                if (!cancelled) { setLoading(false); setError(appErrorCopy(caught, '')); }
+                if (!cancelled) setError(appErrorCopy(caught, ''));
             }
         })();
         return () => { cancelled = true; stopReconnect?.(); readRef.current = null; };
@@ -177,8 +176,8 @@ export function WorkspaceSettings({ workspaceId }: { workspaceId: string }) {
         void Clipboard.setStringAsync(joinUrl).then(() => setCopied(true));
     };
 
-    if (loading) return <YStack alignItems="center" paddingVertical="8"><SurfaceGlyphLoader testID="workspace-settings-loader" /></YStack>;
-    if (!view || !workspace) return error ? <T v="meta" color="removed" testID="workspace-settings-retry">{error}</T> : null;
+    if (!view || !workspace) return error ? <T v="meta" color="removed" testID="workspace-settings-retry">{error}</T>
+        : <YStack alignItems="center" paddingVertical="8"><SurfaceGlyphLoader testID="workspace-settings-loader" /></YStack>;
     const sheetChat = typeof sheet === 'object' && sheet ? chats.find((chat) => chat.id === sheet.room) : undefined;
 
     return (

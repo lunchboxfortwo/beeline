@@ -31,6 +31,7 @@ type Props = [
   isFocusedRef: import("react/index").RefObject<boolean>,
   sessionStartedRef: import("react/index").RefObject<boolean>,
   openingCache: { view: RoomView; scope: string; relayUrl: string; viewerPubkey: string; } | null,
+  openingClients: { viewerPubkey: string; relayUrl: string; transport: BuzzRigTransport; roomClient: RoomViewClient } | null,
   agentPresencesRef: import("react/index").RefObject<Record<string, RoomAgentPresence>>,
   reconnectGraceRef: import("react/index").RefObject<Record<string, number>>,
   setAgentPresences: import("react/index").Dispatch<import("react/index").SetStateAction<Record<string, RoomAgentPresence>>>,
@@ -65,7 +66,7 @@ type Props = [
 export function useRoomSurfaceSubscription([
   liveDraftDrainStore,
   channelId, sessionActivated, isCornerRef, setFirstUnreadMessageId, isFocusedRef,
-  sessionStartedRef, openingCache, agentPresencesRef, reconnectGraceRef, setAgentPresences,
+  sessionStartedRef, openingCache, openingClients, agentPresencesRef, reconnectGraceRef, setAgentPresences,
   setPresenceReconnectGrace, setPresenceResolved, liveOverlaysRef, setLiveOverlays,
   reconciledViewRef, setFailedIds, setOutboxStates, setHydrationFailed, setHydrationError,
   bindingsRef, applyAgentPresence, readCursorRef, messageRecordScopeRef, setRoomSurface,
@@ -598,8 +599,9 @@ export function useRoomSurfaceSubscription([
         }
         if (cancelled) return;
 
-        const nextTransport = new BuzzRigTransport(identity);
-        const nextRoomClient = new RoomViewClient({
+        const clients = openingClients?.viewerPubkey === identity.publicKey && openingClients.relayUrl === relayUrl ? openingClients : null;
+        const nextTransport = clients?.transport ?? new BuzzRigTransport(identity);
+        const nextRoomClient = clients?.roomClient ?? new RoomViewClient({
           baseUrl: relayUrl,
           identity,
           onPhysicalRequest: ({ method, path }) => {

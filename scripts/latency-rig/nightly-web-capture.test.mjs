@@ -35,7 +35,10 @@ test('corner clock follows the source threshold and observes completion before r
       };
       globalThis.window = { __latencyHoldStart: 100, __latencyStart: 80 };
       globalThis.requestAnimationFrame = (callback) => callback();
-      globalThis.performance = { now: () => 100 + threshold + 25, mark: (name, options) => marks.push([name, options.startTime]) };
+      globalThis.performance = {
+        now: () => 100 + threshold + 25,
+        mark: (name, options) => marks.push([name, options.startTime]),
+      };
       try {
         const timing = await fn(value);
         assert.equal(released, false);
@@ -64,7 +67,10 @@ test('corner clock follows the source threshold and observes completion before r
   assert.equal(released, true);
   assert.equal(timing.recognitionStartMs, timing.holdStartMs + threshold);
   assert.equal(timing.postRecognitionMs, 25);
-  assert.deepEqual(marks, [['rig:long-press-recognized', 100 + threshold], ['rig:visible-result', 100 + threshold + 25]]);
+  assert.deepEqual(marks, [
+    ['rig:long-press-recognized', 100 + threshold],
+    ['rig:visible-result', 100 + threshold + 25],
+  ]);
   assert.equal(timing.gestureInclusiveMs, threshold + 45);
 });
 
@@ -128,6 +134,17 @@ test('only two complete captures contribute percentiles and a full score', () =>
   assert.equal(result.rows[0].p50Ms, 109);
   assert.equal(result.rows[0].p95Ms, 118);
 });
+
+test('a fast median cannot pass an over-budget p95', () => {
+  const captures = pair('open-room').map((capture) => ({
+    ...capture,
+    samples: [...Array(17).fill(100), 180, 200, 250],
+  }));
+  const summary = summarize(['open-room'], captures);
+  assert.equal(summary.rows[0].p50Ms, 100);
+  assert.equal(summary.rows[0].p95Ms, 200);
+  assert.equal(summary.fullInventoryScore, 0);
+});
 test('recognition summaries retain separately labelled gesture-inclusive percentiles', () => {
   const captures = pair('create-corner').map((capture) => ({
     ...capture,
@@ -140,9 +157,12 @@ test('recognition summaries retain separately labelled gesture-inclusive percent
 });
 test('missing, partial, failed and nonfinite captures keep score unavailable and retain the exact reason', () => {
   for (const [name, availability] of [
-    ['mark-read', 'unavailable'], ['mark-unread', 'unavailable'],
-    ['start-workflow', 'unavailable'], ['handoff-workflow', 'unavailable'],
-    ['approve-merge', 'external'], ['connect-app', 'external'],
+    ['mark-read', 'unavailable'],
+    ['mark-unread', 'unavailable'],
+    ['start-workflow', 'unavailable'],
+    ['handoff-workflow', 'unavailable'],
+    ['approve-merge', 'external'],
+    ['connect-app', 'external'],
   ]) {
     assert.equal(summarize([name], []).unmeasured[0].availability, availability);
   }
@@ -224,10 +244,7 @@ test('Insights publishes valid paired web cases and gaps independently of native
   assert.equal(output.loops[0].charts[0].series[0].points[0].value, 109);
   assert.match(output.loops[0].charts[0].series[0].key, /case:web\/open-room\/paired:p50/);
   assert.match(output.loops[0].note, /1\/2; full-inventory score unavailable/);
-  assert.match(
-    output.loops[0].log[0].text,
-    /connect-app: external — Capture 1: External consent/,
-  );
+  assert.match(output.loops[0].log[0].text, /connect-app: external — Capture 1: External consent/);
   assert.equal(output.loops[1].note, 'keep');
   assert.deepEqual(current.loops[0].charts, []);
   const stale = latencyLoops(current, { ...verdict, head: 'new-head' });

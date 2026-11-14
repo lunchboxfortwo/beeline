@@ -110,12 +110,12 @@ export function armForwardTiming({ messageText } = {}) {
   };
 }
 
-/** Driver timing remains separate; both clocks start at the original page mark. */
+/** Driver timing remains separate; product timing starts at the browser click. */
 export function readForwardTiming() {
   const timing = window.__forwardTiming;
   if (!timing?.complete) throw new Error('Forward removal frame was not observed');
   const e = timing.events,
-    start = window.__latencyStart;
+    start = e.click;
   const required = [
     'click',
     'send',

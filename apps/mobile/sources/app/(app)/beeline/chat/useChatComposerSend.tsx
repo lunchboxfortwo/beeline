@@ -13,7 +13,6 @@ import { BuzzRigTransport } from '@/sync/transport';
 import { publishViewerConversation, removeViewerConversation } from '@/buzz/viewer-conversation';
 import { type RoomRepository } from '@beeline/buzz-client';
 import { type ChatDisplayMessage } from '@/buzz/room-view-presentation';
-import { yieldToNextPaint } from '@/buzz/host-scheduler';
 import { RoomSendPreview } from '@/buzz/room-send-list';
 import { mentionedAgentPubkey, resolveComposerMentions, selectedMentionAgentPubkey } from '@/buzz/room-participants';
 import { fallbackMemberName } from '@/buzz/member-display';
@@ -170,7 +169,7 @@ export function useChatComposerSend([
       // Text feedback lands in the local overlay in this same turn. Signing,
       // transport startup and outbox persistence can all take longer than a
       // frame on a cold Android device.
-      // Each viewport paints its provisional row before preparation.
+      // Each viewport inserts its provisional row before preparation.
       const provisionalId = `pending:${Date.now()}:${Math.random()}`;
       if (provisionalId) {
         const provisional = {
@@ -202,7 +201,6 @@ export function useChatComposerSend([
         } else {
           addMessages([provisional]);
           landAtOwnSend(provisionalId);
-          await yieldToNextPaint();
         }
       }
       // Repository guidance is optional; the agent must still receive the request.

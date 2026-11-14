@@ -42,8 +42,8 @@ import {
  * account actions. Every value is a server projection or a device setting;
  * nothing is computed here that the server owns.
  */
-export function useYouSettings({ linkedWorkspaceId, githubReconnect, githubConnectionError }: {
-    linkedWorkspaceId?: string; githubReconnect?: string; githubConnectionError?: string;
+export function useYouSettings({ linkedWorkspaceId, githubReconnect, githubConnectionError, showWorkbench = true }: {
+    linkedWorkspaceId?: string; githubReconnect?: string; githubConnectionError?: string; showWorkbench?: boolean;
 }) {
     const [error, setError] = useState<string | null>(null);
     const [notice, setNotice] = useState<string | null>(null);
@@ -55,8 +55,8 @@ export function useYouSettings({ linkedWorkspaceId, githubReconnect, githubConne
     const [pushPermission, setPushPermission] = useState<PushPermissionInfo | null>(null);
     const [pushWorking, setPushWorking] = useState(false);
     const [pushLevel, setPushLevel] = useState<PushLevel>('attention');
-    const [listConfirmed, setListConfirmed] = useState(false);
     const currentWorkspaceId = useActiveCommunityId();
+    const settingsWorkspaceId = linkedWorkspaceId ?? currentWorkspaceId;
     const pubkey = identity?.publicKey ?? null;
 
     const managedAddress = useMemo(() => relay && pubkey ? surfaceAddress(relay, pubkey, '/identity/managed') : null, [relay, pubkey]);
@@ -73,9 +73,9 @@ export function useYouSettings({ linkedWorkspaceId, githubReconnect, githubConne
     const selectedView = useSurfaceSnapshot(selectedAddress, isWorkspaceView);
     const workspace = selected && selectedView?.workspace.id === selected.id ? { ...selected, ...selectedView.workspace } : selected;
     const role = selected?.role ?? null;
-    const canManageWorkspace = listConfirmed && (role === 'owner' || role === 'admin');
+    const canManageWorkspace = role === 'owner' || role === 'admin';
 
-    const workbenchScope = selected && listConfirmed && pubkey ? { workspaceId: selected.id, viewerId: pubkey } : null;
+    const workbenchScope = (showWorkbench || !canManageWorkspace) && selected && pubkey ? { workspaceId: selected.id, viewerId: pubkey } : null;
     const { value: workbenchView } = useSharedWorkbench(workbenchScope);
     const workbench = workbenchView && workbenchScope ? workbenchSummary(workbenchView, workbenchScope.viewerId) : null;
 
@@ -88,9 +88,8 @@ export function useYouSettings({ linkedWorkspaceId, githubReconnect, githubConne
 
     // The profile is read for the current Workspace, again after a switch.
     useEffect(() => {
-        if (currentWorkspaceId === undefined) return;
+        if (settingsWorkspaceId === undefined) return;
         let cancelled = false;
-        setListConfirmed(false);
         void (async () => {
             try {
                 const next = await loadBuzzIdentity();
@@ -103,13 +102,12 @@ export function useYouSettings({ linkedWorkspaceId, githubReconnect, githubConne
                 if (preferred && !cancelled) setProfileName(preferred);
                 setRelay(await getEffectiveRelayUrl());
                 const [settings, enabled, registration, permission] = await Promise.all([
-                    readIdentitySettings(currentWorkspaceId ?? undefined),
+                    readIdentitySettings(settingsWorkspaceId ?? undefined),
                     getBuzzPushEnabled(next.publicKey),
                     getBuzzPushRegistrationState(next.publicKey),
                     getPushPermissionInfo(),
                 ]);
                 if (cancelled) return;
-                setListConfirmed(true);
                 setPushEnabledState(enabled);
                 setPushRegistration(registration);
                 setPushPermission(permission);
@@ -119,7 +117,7 @@ export function useYouSettings({ linkedWorkspaceId, githubReconnect, githubConne
             }
         })();
         return () => { cancelled = true; };
-    }, [currentWorkspaceId]);
+    }, [settingsWorkspaceId]);
 
     useEffect(() => {
         // A change on another device reaches this page through the server's identity subscription.
