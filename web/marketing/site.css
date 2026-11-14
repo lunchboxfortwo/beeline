@@ -1,9 +1,9 @@
 
-/* Light Stone, from stonePalette.light in the app's groknight.ts. */
+/* Light Stone surfaces, with muted ink kept AA on every Stone surface. */
 :root{
   --canvas:#fafaf9;--slab:#fafaf9;--plate:#f5f5f4;--highlight:#e7e5e4;
   --brass:#57534e;--bone:#1c1917;
-  --content:#1c1917;--quiet:#44403c;--chrome:#78716c;--dim:#78716c;
+  --content:#1c1917;--quiet:#44403c;--chrome:#57534e;--dim:#57534e;
   --functional:var(--chrome);--focus:var(--bone);
   --hair:#e7e5e4;--strong-hair:#d6d3d1;--ghost:#e7e5e4;
   --sans:"Space Grotesk",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,monospace;
@@ -100,7 +100,7 @@ a:focus-visible{outline:3px solid var(--focus);outline-offset:3px}
 .wordmark .mark svg{width:100%;height:100%}
 .wordmark .dot{color:var(--brass)}
 .tagline{font-family:var(--display);font-weight:500;font-size:clamp(19px,2.6vw,24px);color:var(--bone)}
-.sub{color:rgba(68,64,60,.6);font-size:15px;max-width:46ch}
+.sub{color:var(--quiet);font-size:15px;max-width:46ch}
 .platform-downloads{width:min(100%,560px);margin-top:8px}
 .platform-row{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
 .platform-tile{position:relative;min-width:0;min-height:82px;padding:10px 7px;border:1px solid var(--hair);border-radius:3px;background:var(--slab);color:var(--functional);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;transition:border-color .2s,background .2s,color .2s}
@@ -120,17 +120,17 @@ a:focus-visible{outline:3px solid var(--focus);outline-offset:3px}
 section.props{padding:72px 0;border-top:1px solid var(--ghost)}
 .props-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:40px 48px}
 .prop h2{font-family:var(--display);font-weight:600;font-size:22px;letter-spacing:-.01em;margin-bottom:8px}
-.prop p{color:rgba(68,64,60,.6);font-size:15px}
+.prop p{color:var(--quiet);font-size:15px}
 section.how{padding:0 0 72px}
 .how h2{font-family:var(--display);font-weight:600;font-size:22px;margin-bottom:22px}
 .steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:24px}
 .step{border-top:1px solid var(--hair);padding-top:14px}
 .step .n{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--brass);margin-bottom:8px}
-.step p{color:rgba(68,64,60,.6);font-size:15px}
+.step p{color:var(--quiet);font-size:15px}
 .step code{font-family:var(--mono);font-size:13px;color:var(--bone);background:var(--plate);border:1px solid var(--hair);border-radius:3px;padding:2px 7px;white-space:nowrap}
 footer{padding:40px 0 56px;text-align:center;font-family:var(--mono);font-size:12px;color:var(--functional);border-top:1px solid var(--ghost)}
 footer a:hover{color:var(--bone)}
-footer .sep{margin:0 8px;opacity:.35}
+footer .sep{margin:0 8px;opacity:1}
 
 @media (max-width:760px){
   .hero{min-height:auto;padding:26px 0 40px;gap:22px}
