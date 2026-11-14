@@ -77,6 +77,8 @@ export interface SessionPromptContext {
   readonly memoryMaxBytes?: number;
   /** A Room's bound repository and branch (read-only checkout). */
   readonly repository?: { readonly name: string; readonly branch: string };
+  /** Optional repository reads have not established whether this place has one. */
+  readonly repositoryPending?: boolean;
   readonly shell?: RoomShellState;
   /** The sandbox home a Room session may write, set only while the OS sandbox wraps it. */
   readonly writableHome?: string;
@@ -295,17 +297,19 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
     budgetBytes: 1_360,
     layer: 'session',
     surfaces: EVERYWHERE,
-    render: ({ surface, machineHost, memoryMaxBytes, repository, shell, writableHome, worktree }) =>
+    render: ({ surface, machineHost, memoryMaxBytes, repository, repositoryPending, shell, writableHome, worktree }) =>
       paragraphs(
         machineHost &&
           `Already running on machine ${JSON.stringify(machineHost.hostname)}${machineHost.tailscaleName ? ` (MagicDNS: ${JSON.stringify(machineHost.tailscaleName)})` : ''}. Run commands locally; do not SSH to this machine.`,
         `Memory cap: ${Number(((memoryMaxBytes ?? ACP_SESSION_MEMORY_MAX_BYTES) / 1024 ** 3).toFixed(2))} GiB per session. Size builds, tests and data jobs to fit it; split heavy work. Exit 137/signal 9 likely means a command hit this cap.`,
         surface === 'room' &&
           [
-            repository
+            repositoryPending
+              ? 'This is a Beeline Room. Repository context loads through read(facet:session). Call workspace to make a read-only copy of its linked repository; the tool returns its path or the reason it is unavailable. Web search is available.'
+              : repository
               ? `This is a Beeline Room. The repository filesystem is read-only here. The Room is bound to ${repository.name} (branch ${repository.branch}); the read-only checkout is at the session root. Web search is available.`
               : 'This Beeline Room has no linked repository. Web search is available.',
-            !repository ? 'When code work comes up, say in your first reply: this Room has no linked repository; use Room header → Repository → Link or Create. Never send them to another Room. For quick snippets or single files, deliver an attachment; mention linking for ongoing code work. If gh is unavailable, consult beeline-connecting-services for repository and organization setup before proposing a personal GitHub connection.' : '',
+            !repository && !repositoryPending ? 'When code work comes up, say in your first reply: this Room has no linked repository; use Room header → Repository → Link or Create. Never send them to another Room. For quick snippets or single files, deliver an attachment; mention linking for ongoing code work. If gh is unavailable, consult beeline-connecting-services for repository and organization setup before proposing a personal GitHub connection.' : '',
             shellLine(shell),
             writableHomeLine(writableHome),
             'To act outside the sandbox, ask with request_grant(kind:command, target, reason, purpose) and run the approved command with run_granted_command in a surface that permits it; never call a host blocker unfixable before asking.',
@@ -324,7 +328,9 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
             .filter(Boolean)
             .join(' '),
         surface === 'code-corner' &&
-          `You are in an isolated git worktree on ${worktree?.featureBranch ?? 'the feature branch'}, targeting ${worktree?.targetBranch ?? 'the target branch'}.`,
+          (repositoryPending
+            ? 'Repository context loads through read(facet:session). Before repository work, call read(facet:session,name:prepare) for GitHub setup and workspace to create your isolated checkout; use the branch and target it returns. If the tool confirms there is no linked repository, create files in this corner and deliver them with post_artifact.'
+            : `You are in an isolated git worktree on ${worktree?.featureBranch ?? 'the feature branch'}, targeting ${worktree?.targetBranch ?? 'the target branch'}.`),
         HOST_EMULATOR_RULE,
         surface === 'repo-less-corner' &&
           "This is a repo-less corner with no repository checkout and no GitHub workflow. Work in this corner's writable workspace: create files with your native tools (or use scratch_io when mounted), then send them with post_artifact.\nDo not initialize a repository, create a branch, commit, push, open a pull request, or wait for GitHub checks.",

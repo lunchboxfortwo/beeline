@@ -230,6 +230,8 @@ export class PlaceSession {
     const featureBranch = restore?.featureBranch ?? `feature/corner-${placeId.replaceAll('-', '').slice(0, 12)}`;
     const targetBranch = repository?.targetBranch || 'main';
     const repositoryBacked = repository?.resolution === 'repository';
+    // Cold context loads after delivery; its absence does not mean no repository.
+    const repositoryPending = !repository || repository.resolution === 'unverified';
     // The wrapper directory is stable; setup may populate it while the
     // session is already answering. Until then a tool receives its own error.
     if (corner && privateHomeRoot) agentEnv.PATH = [resolve(privateHomeRoot, 'beeline-github-bin'),
@@ -319,8 +321,9 @@ export class PlaceSession {
     const brief = restore?.brief;
     const session = assembleSessionPrompt({
       squireAvailable: false,
-      surface: corner ? (repositoryBacked ? 'code-corner' : 'repo-less-corner')
+      surface: corner ? (repository?.resolution === 'none' ? 'repo-less-corner' : 'code-corner')
         : repository?.directParticipants?.length === 2 ? 'dm' : 'room',
+      repositoryPending,
       agentName: self?.name ?? agent.name,
       machineHost: { hostname: hostname() },
       ...(configuration?.soul ? { soul: configuration.soul } : self?.soul ? { soul: self.soul } : {}),
@@ -337,9 +340,10 @@ export class PlaceSession {
           : {}),
     });
     this.turnPrefix = session.turnPrefix;
-    if (corner && repositoryBacked)
+    if (corner && (repositoryBacked || repositoryPending))
       this.notes.push(`Your copy of the repository is made by the workspace tool; call it before repository work. It goes in ${folder}.`);
-    const fingerprint = JSON.stringify([selection, configuration?.soul ?? self?.soul, command, config.agentArgs, folder, sandboxed]);
+    // Native resume retains the old system instructions, including repository bans.
+    const fingerprint = JSON.stringify([selection, configuration?.soul ?? self?.soul, command, config.agentArgs, folder, sandboxed, session.systemPrompt]);
     const mode = editing ? 'edit' : 'readonly';
     const opened = await openAcpConversation({
       client, agentCommand: harnessLabel, resumeSessionId: this.warm.resumeSessionId(fingerprint), cwd: folder,
