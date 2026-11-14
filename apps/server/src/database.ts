@@ -432,9 +432,22 @@ export class PostgresDatabase implements ClosableDatabase {
         const { client, release } = await this.#connectCheckedOut();
         acquired();
         try {
+          // Online index builds/drops wait for old writers and snapshots via
+          // virtual transaction locks while allowing new traffic. The short
+          // DDL lock timeout cancels that normal wait on a busy server. Use
+          // the migration statement timeout to bound these operations instead,
+          // and restore this physical session before returning it to the pool.
+          const onlineIndex = this.#poolMode === 'migration'
+            && /^\s*(?:CREATE\s+(?:UNIQUE\s+)?INDEX|DROP\s+INDEX)\s+CONCURRENTLY\b/i.test(sql);
+          const lockTimeout = onlineIndex
+            ? (await client.query<{ lock_timeout: string }>('SHOW lock_timeout')).rows[0]!.lock_timeout
+            : undefined;
+          if (onlineIndex) await client.query('SET lock_timeout=0');
           const result = await this.#statement(client, sql, () => preparedName
             ? client.query<Row>(preparedQuery(preparedName, sql, values))
             : values.length ? client.query<Row>(sql, values) : client.query<Row>(sql));
+          if (lockTimeout !== undefined)
+            await client.query("SELECT set_config('lock_timeout',$1,false)", [lockTimeout]);
           release();
           return result;
         } catch (error) {
