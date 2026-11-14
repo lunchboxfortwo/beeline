@@ -1,6 +1,6 @@
 import { SquireOperationError, squireOutcome } from './squire-outcome.js';
 /**
- * The helper owns Squire's MCP process for an agent's Room/DM/corner. ACP children
+ * The helper shares Squire's MCP transport across Room/DM/corner contexts. ACP children
  * (including Pi's generated bridge) speak to this loopback relay instead of
  * spawning their own Squire server. Turns and ACP replacements share one
  * connection; each call still requires the current server-command authority.
@@ -11,7 +11,7 @@ import { readFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { homedir } from 'node:os';
 import type { AgentCommand } from '@beeline/api-contract/daemon';
-import { StdioSquireMcpClient } from './squire-mcp-client.js';
+import { sharedSquireMcpClient, type SquireMcpConnection } from './squire-mcp-client.js';
 import { SquireShareRenewals, type SquireShareLease } from './squire-share-renewals.js';
 import { squireApprovalFromMcp } from './resource-mcp-facade.js';
 import { squireSignedOutUrl } from './squire-sign-in.js';
@@ -88,7 +88,7 @@ type TaskConnection = {
   taskId: string;
   lastRequestId: string;
   connectionId: string;
-  client: StdioSquireMcpClient;
+  client: SquireMcpConnection;
   sessions: Set<string>;
   sharedSessionId?: string;
   pendingApprovals: Map<string, PendingApproval>;
@@ -142,8 +142,8 @@ export class SquireTaskRelay {
       onExit: (pid: number | undefined, code: number | null) => void;
       onDiagnostic: (message: string) => void;
       onNotification: (message: Record<string, unknown>) => void;
-    }) => StdioSquireMcpClient = (callbacks) =>
-      new StdioSquireMcpClient({ scope: { agentId, roomId }, home, processGroup: true,
+    }) => SquireMcpConnection = (callbacks) =>
+      sharedSquireMcpClient({ scope: { agentId, roomId }, home,
         onSpawn: callbacks.onSpawn, onExit: callbacks.onExit, log: callbacks.onDiagnostic,
         onNotification: callbacks.onNotification }),
     /**
@@ -353,7 +353,7 @@ export class SquireTaskRelay {
     task: TaskConnection,
     borrowed: readonly string[],
     requestedCount: number,
-  ): StdioSquireMcpClient {
+  ): SquireMcpConnection {
     if (!borrowed.length) return task.client;
     // One MCP call reaches one connection. A mix of owned and borrowed
     // sessions cannot be served by either, so it falls through to the refusal.
@@ -374,7 +374,7 @@ export class SquireTaskRelay {
    * relay stays the one that issues the call.
    */
   private rememberSessions(
-    client: StdioSquireMcpClient,
+    client: SquireMcpConnection,
     ids: Iterable<string>,
     scheduleId?: string,
   ): void {
@@ -386,8 +386,15 @@ export class SquireTaskRelay {
 
   private retire(reason: string): void {
     if (!this.task) return;
+    const retired = this.task;
     this.log('relay-close', this.task, { reason,
       sessionId: redactedSessionId(this.task.sessions.values().next().value) });
+    // Closing a place used to close its broker connection and its browsers.
+    // End only those browsers now; the shared wire may still serve other places.
+    if (!this.task.dead) for (const sessionId of this.task.sessions)
+      void this.task.client.requestMcp('tools/call', {
+        name: 'operate_finish', arguments: { session_id: sessionId },
+      }).catch(() => this.log('relay-cleanup-unknown', retired));
     this.task.client.close();
     forgetSquireSessions(this.task.sessions);
     this.ended(this.task.sessions);
@@ -455,6 +462,13 @@ export class SquireTaskRelay {
     const safeToolName = typeof toolName === 'string' && /^[a-z][a-z0-9_]{0,80}$/i.test(toolName)
       ? toolName : undefined;
     if(safeToolName==='operate_start' && task.uncertainStart)throw task.uncertainStart;
+    // Squire infers an omitted drive session from the wire's sole browser.
+    // On a shared wire that inference belongs to this place, never its peers.
+    const args = params.arguments as Record<string, unknown> | undefined;
+    if (toolName === 'operate_drive' && args?.session_id === undefined && typeof args?.url !== 'string')
+      params = { ...params, arguments: { ...args,
+        session_id: task.sessions.size === 1 ? task.sessions.values().next().value : 'beeline-no-owned-session',
+      } };
     const requestedIds = sessionIds(params.arguments);
     this.log('call-start', task, { method: input.method, tool: safeToolName ?? null,
       sessionId: redactedSessionId(requestedIds[0] ?? task.sessions.values().next().value) });

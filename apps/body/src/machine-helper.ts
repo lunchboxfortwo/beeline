@@ -1,3 +1,4 @@
+import { storageOperation } from './helper-storage.js';
 import { waitForProcessExit } from './process-exit.js';
 import { captureHelperError } from './sentry.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -50,7 +51,7 @@ import {
 } from './systemd.js';
 import { squireBrokerMeetsComputerUseMinimum, squireBrokerInstallEntry, squireHostPaths } from './squire-host.js';
 import { readVault } from './connector-squire.js';
-import { StdioSquireMcpClient } from './squire-mcp-client.js';
+import { sharedSquireMcpClient, closeHelperSquireTransports, type SquireMcpConnection } from './squire-mcp-client.js';
 import { pruneDeletedRuntimes, pruneRepositoryCaches, pruneMachineStorage } from './host-disk-retention.js';
 import { HostPlaces } from './agent-process.js';
 import { refreshSystemdHelperUnit } from './native-helper.js';
@@ -148,6 +149,7 @@ async function serveMachineHelper(
     })();
   });
   controller.signal.addEventListener('abort', stopStorageFacts, { once: true });
+  controller.signal.addEventListener('abort', closeHelperSquireTransports, { once: true });
   let diskSweepRunning = false;
   let lastRetentionSweepAt = 0;
   const sweepHostDisk = async () => {
@@ -160,7 +162,7 @@ async function serveMachineHelper(
         usage?.cleanup(entry);
         console.log(`[helper] storage deleted ${entry.path}; freed ${entry.freedBytes} bytes`);
       };
-      const options = { log };
+      const options = storageOperation({ log });
       await pruneStoppedAgentStorage(supervisorRoot, options);
       await pruneEndedOwnerStorage(supervisorRoot, options);
       await pruneDeletedRuntimes(supervisorRoot, now, options);
@@ -348,7 +350,7 @@ async function serveMachineHelper(
     machineLink: (baseUrl) => {
       let link = links.get(baseUrl);
       if (!link) {
-        let vaultClient: StdioSquireMcpClient | undefined;
+        let vaultClient: SquireMcpConnection | undefined;
         controller.signal.addEventListener('abort', () => vaultClient?.close(), { once: true });
         const home = env.HOME?.trim() || homedir();
         link = new MachineLink({
@@ -360,7 +362,7 @@ async function serveMachineHelper(
           readVault: async agentId => {
             if (!existsSync(squireBrokerInstallEntry(home)) && !existsSync(squireHostPaths(home).mcpSocket))
               return { connections: [], notAdded: true };
-            vaultClient ??= new StdioSquireMcpClient({ home, scope: { agentId, roomId: 'machine-vault' } });
+            vaultClient ??= sharedSquireMcpClient({ home, scope: { agentId, roomId: 'machine-vault' } });
             return { connections: await readVault(vaultClient) };
           },
           log: message => console.warn(`[helper] ${message}`),

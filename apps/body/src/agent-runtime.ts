@@ -1,6 +1,6 @@
 import { createUsageRefresh } from './agent-usage-refresh.js';
 import { storeVaultSubmission, type VaultSaveSubmission } from './vault-save.js';
-import { StdioSquireMcpClient } from './squire-mcp-client.js';
+import { sharedSquireMcpClient } from './squire-mcp-client.js';
 import { executableOnPath, requireInstalledAgentProgram } from './agent-command.js';
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
@@ -208,7 +208,7 @@ export async function runAgentRuntime(
         Array.isArray(frame.values) || savingVaultCards.has(frame.cardId)) return;
     const submission = frame as unknown as VaultSaveSubmission;
     savingVaultCards.add(submission.cardId);
-    const client = new StdioSquireMcpClient({ scope: { agentId, roomId: submission.roomId }, log: () => {} });
+    const client = sharedSquireMcpClient({ home: config.operatorHome, scope: { agentId, roomId: submission.roomId }, log: () => {} });
     void storeVaultSubmission(submission, (tool, args) => client.call(tool, args))
       .then(answer => {
         if (answer.status === 'saved') void daemonApi.refreshMachineVault();

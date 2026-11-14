@@ -112,7 +112,7 @@ export function rewriteHostMcpDeclaration(
   }
   if (gooseShape) next.envs = { ...recordValue(declaration.envs), ...routeEnv };
   else next.env = { ...recordValue(declaration.env), ...routeEnv };
-  if (resourceAuthFile) {
+  if (resourceAuthFile && !(launch && squireScope?.relay)) {
     const target =
       explicitResourceTarget ?? (isSquireDeclaration(name, declaration) ? 'squire' : name);
     const env = {
