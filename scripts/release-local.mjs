@@ -28,7 +28,7 @@ export function parseArguments(argv) {
       args.mode = arg.slice(2); args.explicitMode = true;
     } else if (arg === '--run-release-proof') args.proof = true;
     else if (arg === '--help') args.help = true;
-    else if (['--channel', '--release-sha', '--release-version', '--dispatched-by', '--env-file', '--state-dir', '--leg', '--mac-host', '--remote-job'].includes(arg)) {
+    else if (['--channel', '--release-sha', '--release-version', '--dispatched-by', '--env-file', '--state-dir', '--leg', '--mac-host', '--remote-job', '--store-track'].includes(arg)) {
       if (!argv[i + 1] || argv[i + 1].startsWith('--')) throw new Error(`Missing value for ${arg}`);
       args[arg.slice(2)] = argv[++i];
     } else throw new Error(`Unknown argument: ${arg}`);
@@ -321,7 +321,7 @@ export async function dryRun(args, engine, context) {
     engine.processes.log(`Dry-run build: ${leg}; no publication, migration, channel move or rollout`);
     if (leg === 'initialize') {
       if (!context.github.token) throw new Error('Dry-run initialize requires --env-file with GITHUB_TOKEN or GH_TOKEN');
-      const inputs = { channel: args.channel, release_sha: sha, release_version: args['release-version'] || '', selection: 'auto', store_track: 'none', run_release_proof: false };
+      const inputs = { channel: args.channel, release_sha: sha, release_version: args['release-version'] || '', selection: 'auto', store_track: args['store-track'] || 'none', run_release_proof: false };
       const job = await engine.job(dryInitializeJob(engine.read(WORKFLOW)), { ...context, inputs, matrix: {}, needs: {}, steps: {}, github: { ...context.github, job: 'initialize' } }, 'dry-initialize', engine.read(WORKFLOW).env);
       privateWrite(join(engine.directory, 'dry-initialize.json'), JSON.stringify(job, null, 2));
       if (job.result !== 'success') throw new Error('Dry-run initialize failed; no release was attempted');
@@ -359,7 +359,7 @@ export async function releaseChecks(engine, context) {
 
 async function main(argv) {
   const args = parseArguments(argv);
-  if (args.help) { console.log('node scripts/release-local.mjs [--plan | --dry-run [--leg release_checks|initialize|server|helper|mobile-ota|pages|web-app|eas-cli|require-tools|mac-tools] | --execute [--leg release_checks]] --channel next|latest --release-sha <40-char SHA> --dispatched-by <audited JSON> [--env-file ~/.config/beeline-release.env] [--run-release-proof] [--state-dir /outside/repo]'); return; }
+  if (args.help) { console.log('node scripts/release-local.mjs [--plan | --dry-run [--leg release|release_checks|initialize|server|helper|mobile-ota|pages|web-app|eas-cli|require-tools|mac-tools] | --execute [--leg release_checks]] --channel next|latest --release-sha <40-char SHA> --dispatched-by <audited JSON> [--env-file ~/.config/beeline-release.env] [--run-release-proof] [--store-track none|beta|production] [--state-dir /outside/repo]'); return; }
   if (args['remote-job']) { await remoteJob(args['remote-job']); return; }
   if (process.platform !== 'linux') throw new Error('Run the release controller on Linux squire');
   const sha = args['release-sha'] || execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
@@ -422,7 +422,7 @@ async function main(argv) {
     if (!response.ok) throw new Error(`Cannot verify hosted release inactivity (HTTP ${response.status})`);
     const runs = await response.json();
     if (runs.workflow_runs.some(run => run.status !== 'completed')) throw new Error('A hosted production release is queued or active');
-    const inputs = { channel: args.channel, release_sha: sha, release_version: args['release-version'] || '', dispatched_by: args['dispatched-by'], selection: 'auto', store_track: 'none', run_release_proof: Boolean(args.proof), allow_pin_restore: false, mobile_store_minimum: '', publish_listing: false };
+    const inputs = { channel: args.channel, release_sha: sha, release_version: args['release-version'] || '', dispatched_by: args['dispatched-by'], selection: 'auto', store_track: args['store-track'] || 'none', run_release_proof: Boolean(args.proof), allow_pin_restore: false, mobile_store_minimum: '', publish_listing: false };
     const results = await engine.workflow(WORKFLOW, inputs, context);
     if (results.release_result?.outputs.outcome !== 'success' || results.release_validation?.result !== 'success') throw new Error(`Release failed; inspect private results under ${directory}`);
     console.log(`Local release completed; private results: ${directory}`);
