@@ -109,6 +109,23 @@ describe('person marks', () => {
       node.findAll((child: any) => child.type === 'G' && child.props.testID === 'face-figure').length > 0);
     expect(figure.findAll((node: any) => node.type === 'Rect' && node.props.width === 100 && node.props.height === 100)).toHaveLength(1);
   });
+
+  it.each([22, 28, 40])('keeps a generated portrait and its failed-image fallback in the same %spx tile', async (size) => {
+    const avatarUrl = '/v1/agent-avatars/11111111-1111-4111-8111-111111111111';
+    const tree = await render(<IdentityMark kind="agent" seed="baby" name="Baby" face="fox" avatarUrl={avatarUrl} size={size} alive />);
+    const plate = () => tree.root.find((node: any) => node.type === 'YStack' && node.props.testID === 'identity-face-plate');
+    expect(plate().props).toMatchObject({ position: 'relative', width: size, height: size });
+    const portrait = tree.root.find((node: any) => node.type === 'Image');
+    expect(portrait.props.style).toEqual({ width: '100%', height: '100%' });
+    expect(plate().findAll((node: any) => node.type === 'Svg')).toHaveLength(1);
+    await act(async () => portrait.props.onError());
+    expect(tree.root.findAll((node: any) => node.type === 'Image')).toHaveLength(0);
+    // A single SVG owns both plate and face after failure; there is no floating plate layer.
+    expect(plate().findAll((node: any) => node.type === 'Svg')).toHaveLength(1);
+    expect(plate().findAll((node: any) => node.type === 'YStack' && node.props.position === 'absolute')).toHaveLength(0);
+    expect(plate().findAll((node: any) => node.type === 'G' && node.props.testID === 'face-figure')).toHaveLength(1);
+    await act(async () => tree.unmount());
+  });
 });
 
 describe('initials', () => {

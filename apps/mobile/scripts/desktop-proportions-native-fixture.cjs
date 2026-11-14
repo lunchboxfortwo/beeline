@@ -12,19 +12,21 @@ const viewer = {
   handle: 'reviewer',
 };
 const agent = { pubkey: 'b'.repeat(64), kind: 'agent', name: 'Ruby', handle: 'ruby' };
+// These timestamps are rendered by the real chat list: epoch sentinels read as 56y.
+const nowSeconds = Math.floor(Date.now() / 1000);
 const ws = {
   id: '11111111-1111-4111-8111-111111111111',
   name: 'Beeline',
   role: 'owner',
-  updatedAt: 1,
+  updatedAt: nowSeconds - 60,
 };
 const room = {
   id: '22222222-2222-4222-8222-222222222222',
   workspaceId: ws.id,
   name: 'Desktop layout',
   archived: false,
-  createdAt: 1,
-  updatedAt: 1,
+  createdAt: nowSeconds - 120,
+  updatedAt: nowSeconds - 60,
 };
 const corner = { ...room, id: '33333333-3333-4333-8333-333333333333', name: 'Desktop proportions' };
 const brief = {
@@ -47,7 +49,7 @@ const messages = [
     id: 'c'.repeat(64),
     roomId: room.id,
     author: viewer,
-    createdAt: 1,
+    createdAt: nowSeconds - 120,
     text: 'Let’s keep the conversation readable while we open the project brief beside it.',
     tags: [],
   },
@@ -55,7 +57,7 @@ const messages = [
     id: 'd'.repeat(64),
     roomId: room.id,
     author: agent,
-    createdAt: 2,
+    createdAt: nowSeconds - 60,
     text: 'The reading column gives messages a comfortable measure. Opening a file uses the space beside the conversation, and closing it brings the room list back.',
     tags: [],
     attachments: [attachment],

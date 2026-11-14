@@ -172,13 +172,13 @@ export const ChatRow = React.memo(function ChatRow({ item, viewer, now, first, d
       {first || dividerOutside ? null : <Separator borderColor="stroke" marginBottom={step('3')} />}
       <ListItem
         minHeight={HEIGHT.control}
-        padding="0"
-        paddingLeft={selected ? '2' : '0'}
+        paddingHorizontal="2"
+        paddingVertical="2"
         gap="3"
         alignItems="flex-start"
         justifyContent="flex-start"
         backgroundColor={selected ? 'highlight' : 'transparent'}
-        borderLeftWidth={selected ? 1 : 0}
+        borderLeftWidth={1}
         borderColor={selected ? 'needsYou' : 'transparent'}
         onPressIn={pinHold.onPressIn}
         onPress={pinHold.onPress}
