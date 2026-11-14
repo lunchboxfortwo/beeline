@@ -33,6 +33,7 @@ it.each([[false, false, false], [false, true, false], [true, false, false], [tru
   let send!: ReturnType<typeof useChatComposerSend>[0];
   const draft = { value: 'Hello agent', captureMessage: () => () => { draft.value = ''; return true; } };
   const no = () => undefined;
+  const sendingWrites = vi.fn();
   const reference = { channelId: 'room', eventId: 'parent', rootId: 'parent' };
   const replyTarget = reply ? { messageId: 'parent', authorName: 'Captain', isAgent: false,
     preview: 'Original message', reference } : null;
@@ -47,7 +48,7 @@ it.each([[false, false, false], [false, true, false], [true, false, false], [tru
     const args = [draft, input, replyTarget, { current: withAttachment ? [picked] : [] }, inFlight, false,
       [], { current: new Map() }, () => no, { current: new Map() }, [], true,
       { current: () => outbox }, true, confirmation.setReceivedSteer, confirmation.setPendingAck,
-      setSending, true, setDelivery, null, 'viewer', { remove: no }, { request: no }, no,
+      (next: boolean) => { sendingWrites(next); setSending(next); }, true, setDelivery, null, 'viewer', { remove: no }, { request: no }, no,
       (rows: ChatDisplayMessage[]) => setMessages(current => [...current.filter(message => !rows.some(row => row.id === message.id)), ...rows]), true, null,
       false, null, no, null, [], transport, null, no,
       (id: string) => setMessages(current => current.filter(message => message.id !== id)), uploader, 'room',
@@ -67,7 +68,10 @@ it.each([[false, false, false], [false, true, false], [true, false, false], [tru
   try {
     act(() => { tree = create(<Harness />); });
     let pending!: ReturnType<typeof send>;
-    await act(async () => { pending = send(); });
+    await act(async () => {
+      pending = send();
+      if (ready) expect(sendingWrites).not.toHaveBeenCalled();
+    });
     expect(tree.root.findByType('p').props.children).toBe('Hello agent');
     expect(tree.root.findByType('span').props.children).toBe('sending…');
     if (withAttachment && !ready) {

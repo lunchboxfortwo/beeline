@@ -189,7 +189,8 @@ export default {
             [
                 "expo-router",
                 {
-                    root: "./sources/app"
+                    root: "./sources/app",
+                    asyncRoutes: { web: "production" }
                 }
             ],
             "expo-updates",

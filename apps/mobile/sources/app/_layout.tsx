@@ -439,6 +439,7 @@ function BackgroundEffects() {
   React.useEffect(startDesktopNotifications, []);
   React.useEffect(startIdentityLive, []);
   React.useEffect(() => {
+    if (Platform.OS === 'web') return;
     // The server's push level wins: it is read once per launch, and every
     // later change is stored and announced, so the device copy is only the
     // cold-start hint until the server answers.
