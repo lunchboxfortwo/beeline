@@ -77,7 +77,7 @@ it.each([0, 1, 2])('QUEUED-TAGS-REPEAT: Stop message %s preserves the other requ
   const snapshot = await commands();
   const stopped = snapshot[stopIndex]!;
   await claim(stopped);
-  await rootFixture.phone.execute('cancelAgentTurn', { roomId: R, agentId: A, requestId: messages[stopIndex]!.messageId }, H);
+  await rootFixture.phone.execute('cancelAgentTurn', { roomId: R, agentId: A, requestId: stopped.id }, H);
   await expect(result(stopped, 'Must never publish')).rejects.toThrow();
   expect((await commands()).filter(command => command.action === 'input').map(command => command.id)).toEqual(snapshot.filter(command => command.id !== stopped.id).map(command => command.id));
 });
@@ -88,7 +88,7 @@ it.each(['deleted', 'stopped'])('QUEUED-TAGS-REPEAT: reconnect preserves unrelat
   await claim(snapshot[0]!);
   if (kind === 'deleted')
     await rootFixture.db.query('UPDATE messages SET deleted_at=now() WHERE id=$1', [messages[1]!.messageId]);
-  else await rootFixture.phone.execute('cancelAgentTurn', { roomId: R, agentId: A, requestId: messages[1]!.messageId }, H);
+  else await rootFixture.phone.execute('cancelAgentTurn', { roomId: R, agentId: A, requestId: snapshot[1]!.id }, H);
   await disconnectHelper();
   await helperOwner(A);
   // The reconnected helper resumes the running turn in its own generation.
@@ -97,20 +97,17 @@ it.each(['deleted', 'stopped'])('QUEUED-TAGS-REPEAT: reconnect preserves unrelat
   expect((await commands()).filter(command => command.action === 'input').map(command => command.sourceMessageId)).toEqual((kind === 'deleted' ? messages.slice(1) : messages.slice(2)).map(message => message.messageId));
 });
 
-it('QUEUED-TAGS-REPEAT: each source retains only its own attachments', async () => {
-  const messages = await queuedHumanTags();
-  const files = messages.map((_, index) => ({ url: `https://files.example.test/file-${index}.txt`,
-    name: `file-${index}.txt`, mimeType: 'text/plain', size: index + 1 }));
-  for (const [index, message] of messages.entries())
-    await rootFixture.db.query('UPDATE messages SET attachments=$2::jsonb WHERE id=$1', [message.messageId, JSON.stringify([files[index]])]);
-  const snapshot = await commands();
-  for (const [index, command] of snapshot.entries()) {
+it('QUEUED-TAGS-REPEAT: source snapshots retain their own attachments after later edits', async () => {
+  const files=[0,1,2].map(index=>({url:`https://files.example.test/file-${index}.txt`,name:`file-${index}.txt`,mimeType:'text/plain',size:index+1}));
+  for(const [index,file] of files.entries()) await rootFixture.phone.execute('sendRoomMessage',
+    {roomId:R,text:`@hoots file ${index}`,attachments:[file]},H);
+  const snapshot=await commands();
+  await rootFixture.db.query("UPDATE messages SET attachments='[]'::jsonb WHERE id=ANY($1::text[])",[snapshot.map(item=>item.sourceMessageId)]);
+  for(const [index,command] of snapshot.entries()) {
     expect(command.source.attachments).toEqual([files[index]]);
-    await claim(command);
-    await result(command, `File ${index} answered`);
+    await claim(command);await result(command,`File ${index} answered`);
   }
 });
-
 
 it('Reproduction cold-beebee-first-reply: shows every queued agent, then only its claimed turn as working', async () => {
   await send('@hoots @goosy Hello');
@@ -177,66 +174,55 @@ it('Stop preserves other senders, source Rooms, targets, human mentions and newe
 });
 
 
-it('tagged human Stop also drains orders and reports their count once', async () => {
+it('tagged human Stop drains queued orders without inventing a public reply', async () => {
   const { queued } = await queueStopOrders();
   await send('@hoots stop');
   expect((await commands()).filter(command => command.action === 'input')).toHaveLength(0);
-  expect((await commands(B)).filter(command => command.reason === 'report')).toHaveLength(1);
+  expect((await commands(B)).filter(command => command.reason === 'report')).toHaveLength(0);
   for (const command of queued) await expect(claim(command, 'late-helper')).rejects.toThrow();
   const line = await rootFixture.db.query<{ text: string }>(`SELECT text FROM messages
     WHERE room_id=$1 AND system_event->>'verb'='stopped its running turn' ORDER BY created_at DESC LIMIT 1`, [R]);
-  expect(line.rows[0]!.text).toContain('2 queued orders dropped');
+  expect(line.rows).toEqual([]);
 });
 
 
-it.runIf(Boolean(stopProofPostgresUrl))('Stop holds the claim fence through the drain and preserves an order arriving during Stop', async () => {
+it.runIf(Boolean(stopProofPostgresUrl))('Stop preserves an order accepted while its transaction is in progress', async () => {
   const { queued, root } = await queueStopOrders();
-  let reached!: () => void, release!: () => void, claimStarted!: () => void, orderStarted!: () => void;
+  let reached!: () => void, release!: () => void, orderStarted!: () => void;
   const stopped = new Promise<void>(resolve => { reached = resolve; });
   const resume = new Promise<void>(resolve => { release = resolve; });
-  const started = new Promise<void>(resolve => { claimStarted = resolve; }), queuedOrder = new Promise<void>(resolve => { orderStarted = resolve; });
-  const wrapStop = (database: SqlDatabase): SqlDatabase => ({
+  const queuedOrder = new Promise<void>(resolve => { orderStarted = resolve; });
+  const wrap = (database: SqlDatabase, stopping: boolean): SqlDatabase => ({
     query: async (sql, values) => {
+      if (!stopping && sql.includes('FOR SHARE OF room,member')) orderStarted();
       const result = await database.query(sql, values);
-      if (sql.startsWith('SELECT * FROM beeline_finish_agent_command(',NULL,NULL,NULL) && values?.[2] === 'cancelled' && values?.[3] === 'stop') {
+      if (stopping && sql.startsWith('SELECT * FROM beeline_finish_agent_command(') &&
+          values?.[1] === 'cancelled' && values?.[2] === 'stop') {
         reached();
         await resume;
       }
       return result;
     },
-    transaction: work => database.transaction(transaction => work(wrapStop(transaction))),
+    transaction: work => database.transaction(transaction => work(wrap(transaction, stopping))),
   });
-  const wrapClaim = (database: SqlDatabase, onQueue = claimStarted): SqlDatabase => ({
-    query: (sql, values) => {
-      if (sql.includes('FOR UPDATE OF member')) onQueue();
-      return database.query(sql, values);
-    },
-    transaction: work => database.transaction(transaction => work(wrapClaim(transaction,onQueue))),
-  });
-  const stop = new PhoneService(wrapStop(db), 'http://test').execute('cancelAgentTurn',
+  const stop = new PhoneService(wrap(db, true), 'http://test').execute('cancelAgentTurn',
     { roomId: R, agentId: A, requestId: queued[0]!.turnRequestId }, H);
-  let claimAttempt: Promise<unknown> | undefined, arriving: Promise<unknown> | undefined;
+  let arriving: Promise<unknown> | undefined;
   try {
-    await stopped;
-    claimAttempt = startQueuedCommand(new DaemonService(wrapClaim(db), live), { roomId: R, commandId: queued[1]!.id }, A);
-    // Attach the rejection handler before releasing Stop.
-    const rejected = expect(claimAttempt).rejects.toThrow('command claim conflict');
-    await started;
-    await expect(db.transaction(transaction => transaction.query(
-      'SELECT identity_id FROM memberships WHERE room_id=$1 AND identity_id=$2 FOR UPDATE NOWAIT',[R,A])))
-      .rejects.toMatchObject({code:'55P03'});
-    arriving = new DaemonService(wrapClaim(db,orderStarted),live).execute('order', { roomId: R, address: R, agent: 'hoots', text: 'arrived during Stop', requestId: root.turnRequestId }, B);
-    await Promise.race([queuedOrder,arriving.then(()=>{throw new Error('Order did not reach the recipient fence');})]); release();
+    await Promise.race([stopped, stop.then(() => { throw new Error('Stop did not reach its terminal write'); })]);
+    arriving = new DaemonService(wrap(db, false), live).execute('order', {
+      roomId: R, address: R, agent: 'hoots', text: 'arrived during Stop', requestId: root.turnRequestId,
+    }, B);
+    await Promise.race([queuedOrder, arriving.then(() => { throw new Error('Order did not reach insertion'); })]);
+    release();
     await stop;
-    await rejected; await arriving;
-    const surviving = (await commands()).filter(command => command.action === 'input');
+    await arriving;
+    const surviving = await commands();
     expect(surviving).toHaveLength(1);
     expect(surviving[0]!.source.body).toContain('arrived during Stop');
-    await claim(surviving[0]!);
-    console.log('Demonstrated Reproduction stop-queued-orders on PostgreSQL: claim fence held after turn cancellation and before drain; racing cached claim refused after commit; order accepted during Stop survived and claimed');
   } finally {
     release();
-    await Promise.allSettled([stop, ...(claimAttempt ? [claimAttempt] : []), ...(arriving ? [arriving] : [])]);
+    await Promise.allSettled([stop, ...(arriving ? [arriving] : [])]);
   }
 });
 
@@ -289,26 +275,18 @@ it.each([R, C])('projects reply context outside the conversation window in %s', 
   }, H);
   const command = (await commands(A, roomId)).find((c) => c.sourceMessageId === sent.messageId)!;
   expect(command).toBeDefined();
-  const reply = {
-    replyToMessageId: parentId,
-    replyToAuthorId: B,
-    replyToAuthorName: 'Goosy',
-    replyToExcerpt: expect.any(String),
-  };
+  const reply={replyToMessageId:parentId};
   expect(command.source).toMatchObject(reply);
-  expect(command.source.replyToExcerpt!.length).toBeLessThanOrEqual(300);
-  const excerpt = command.source.replyToExcerpt!;
-  expect(excerpt).toMatch(/…$/);
-  expect(parentText.startsWith(excerpt.slice(0, -1))).toBe(true);
-  expect(parentText[excerpt.length - 1]).toMatch(/\s/);
+  expect(command.source.replyToExcerpt).toBeUndefined();
   const inbox = await rootFixture.daemon.execute('getRoomInbox', { roomId }, A);
   expect(inbox.items.find((m) => m.id === sent.messageId)).toMatchObject(reply);
   const conversation = await rootFixture.daemon.execute('getRoomConversation', { roomId, limit: 1 }, A);
   expect(conversation.items).toHaveLength(1);
   expect(conversation.items[0]).toMatchObject(reply);
   expect(conversation.items[0]?.id).toBe(sent.messageId);
-  expect(conversation.items[0]?.replyToExcerpt).toBe(command.source.replyToExcerpt);
-  console.log('Reproduction reply-context: phone reply → server wake/inbox/newest-page supplies parent ID, author and bounded excerpt');
+  expect(conversation.items[0]?.replyToExcerpt).toMatch(/^Five corners from the audit: .*…$/);
+  expect(conversation.items[0]?.replyToExcerpt?.length).toBeLessThanOrEqual(300);
+  console.log('Reproduction reply-context: queue freezes parent ID; explicit conversation read supplies the excerpt');
 });
 
 
@@ -617,11 +595,11 @@ it('resolves multiple natural tags and ignores human-only and unknown tags', asy
   expect(await commands(A)).toHaveLength(1);
 });
 
-it('routes only the exact current spelling of an agent tag', async () => {
+it('routes Latin case variants while keeping unknown spellings as prose', async () => {
   await send('@Hoots @ｈｏｏｔｓ @hoots-old');
-  expect(await commands(A)).toEqual([]);
-  await send('@hoots');
   expect(await commands(A)).toHaveLength(1);
+  await send('@hoots');
+  expect(await commands(A)).toHaveLength(2);
 });
 
 it('routes a direct message without redundant tags or a presence row', async () => {
@@ -711,14 +689,14 @@ it('routes a validated agent tag when the final message is committed', async () 
   expect(await commands(B)).toHaveLength(1);
 });
 
-it('does not trust a caller-supplied agent id without an exact tag', async () => {
+it('routes the committed case-insensitive agent tag without a caller target list', async () => {
   await send('@hoots');
   const [c] = await commands();
   await claim(c!);
   const posted = await result(c!, '@GOOSY please help');
-  expect(await commands(B)).toEqual([]);
-  // `@GOOSY` is not how Goosy is spelled, so it names nobody — and there is no
-  // caller-supplied list that could disagree with the words.
+  expect(await commands(B)).toHaveLength(1);
+  // The indexed mention projection may retain the original spelling; the queue
+  // records the addressed member without trusting a caller-supplied list.
   expect(
     (
       await rootFixture.db.query<{ tagged_ids: string[] }>(

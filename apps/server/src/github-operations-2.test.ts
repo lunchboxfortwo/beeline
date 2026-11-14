@@ -1,4 +1,4 @@
-import { advanceCorner, describe, expect, it, vi, GitHubAppClient, GitHubOAuthClient, insertCornerFacts, setCornerOwner, GitHubOperations, DaemonService, cornerFactsSql, cornerRowState, LiveHub, readFileSync, runInNewContext, transformSync, HUMAN, REVIEWER, fixtureScope1, type SqlDatabase, type CornerStateRow } from './test-support-github-operations.test-support.js';
+import { advanceCorner, describe, expect, it, vi, GitHubAppClient, GitHubOAuthClient, seedCornerOpening, insertCornerFacts, setCornerOwner, GitHubOperations, DaemonService, cornerFactsSql, cornerRowState, LiveHub, readFileSync, runInNewContext, transformSync, HUMAN, REVIEWER, fixtureScope1, type SqlDatabase, type CornerStateRow } from './test-support-github-operations.test-support.js';
 
 describe('GitHub phone operations', () => {
 const scope1 = fixtureScope1();
@@ -382,6 +382,11 @@ const scope1 = fixtureScope1();
       `INSERT INTO rooms(id,workspace_id,parent_id,created_by,name)
        VALUES($1,$2,$3,$4,'Promoted')`, [corner, workspace, room, HUMAN],
     );
+    await scope1.database.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Worker')`, [REVIEWER]);
+    await scope1.database.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [REVIEWER,HUMAN]);
+    await scope1.database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES
+      ($1,NULL,$2,'owner'),($1,$3,$2,'owner'),($1,NULL,$4,'member'),($1,$3,$4,'member') ON CONFLICT DO NOTHING`, [workspace,HUMAN,room,REVIEWER]);
+    await seedCornerOpening(scope1.database,{cornerId:corner,agentId:REVIEWER,commissionedBy:HUMAN});
     await insertCornerFacts(scope1.database, { cornerId: corner, lifecycle: '{"checks":"unknown"}' });
     const app = {
       installationToken: vi.fn(async () => ({ token: 'room-token' })),

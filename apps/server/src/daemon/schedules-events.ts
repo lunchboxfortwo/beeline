@@ -211,14 +211,8 @@ import { daemonWriteResult } from './corner-messages.js';
         throw new Error(`not an agent member of this Room: ${missing.join(', ')}`);
       wakes = [...resolved];
     }
-    const active = await ctx.database.query<{ request_id: string }>(
-      `SELECT request_id FROM agent_turns
-       WHERE room_id=$1 AND agent_id=$2 AND request_id=$3 AND status='working'
-       ORDER BY created_at DESC LIMIT 1`,
-      [input.roomId, agentId, input.requestId],
-    );
-    const causeId = active.rows[0]?.request_id;
-    if (!causeId) throw new Error('invalid event: this agent has no turn running here');
+    const command=await authorizeCommandOutput(ctx.database,input.roomId,agentId,input.requestId);
+    const causeId=command.source_message_id ?? undefined;
     const self = await ctx.database.query<{ name: string }>(
       `SELECT COALESCE(NULLIF(name,''),$2::text) name FROM identities WHERE id=$1`,
       [agentId, systemMessage("daemon-service.an-agent")],
@@ -232,9 +226,7 @@ import { daemonWriteResult } from './corner-messages.js';
       kind: input.kind,
       wakes,
       causeId,
-      commandId: (
-        await authorizeCommandOutput(ctx.database, input.roomId, agentId, input.requestId)
-      ).id,
+      commandId: command.id,
     });
     return { id: line.id, createdAt: Math.floor(Date.now() / 1_000) };
   }

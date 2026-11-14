@@ -1,3 +1,4 @@
+import { endAgentTurn } from './agent-turn-end.js';
 import { claimRun } from './workflow-runs.js';
 import { CommandRefusalError, ExpectedRefusalError } from './command-refusal.js';
 import { firstHealthyAgent } from './agent-health.js';
@@ -486,6 +487,13 @@ export async function cancelWorkflowRun(
       },
     });
     if (!closed) throw new CommandRefusalError('workflow already advanced; no cancellation was applied',409);
+    // Explicit cancellation is Stop, including the run's outstanding wake items.
+    const wakes = await db.query<{ id: string }>(
+      `SELECT command.id FROM agent_commands command JOIN messages source ON source.id=command.source_message_id
+       WHERE command.state='pending' AND command.room_id=$1 AND source.card->>'runId'=$2`,
+      [command.room_id, input.runId],
+    );
+    for (const wake of wakes.rows) await endAgentTurn(db, wake, 'cancelled', 'stop');
     return { runId: input.runId, state: run.toState, status: 'abandoned', reason };
   });
 }

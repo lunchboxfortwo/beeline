@@ -86,7 +86,7 @@ it('Reproduction O1-1: naming Beta assigns the work to Beta and keeps Alpha as a
   console.log('Reproduction O1-1:', { fact, commands });
   expect(fact).toEqual({ owner_agent_id: B, commissioned_by: HUMAN });
   expect(commands).toEqual([{ agent_id: B }]);
-  expect((await daemon.execute('getAgentCommands', { roomId: cornerId }, A)).commands).toEqual([]);
+  expect((await daemon.execute('getAgentCommands', { roomId: cornerId }, A)).commands.filter(item => item.roomId === cornerId)).toEqual([]);
   expect((await db.query(`SELECT created_by FROM rooms WHERE id=$1`, [cornerId])).rows).toEqual([
     { created_by: A },
   ]);

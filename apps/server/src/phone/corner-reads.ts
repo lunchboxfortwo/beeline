@@ -135,7 +135,7 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
         // The Workspace role: a Room, corner or DM role grants nothing.
         role: room.workspace_role,
         permissions: {
-          send: room.workspace_role !== 'spectator' && !room.archived_at,
+          send: !room.archived_at,
           manage: room.workspace_role === 'owner' || room.workspace_role === 'admin',
         },
       },

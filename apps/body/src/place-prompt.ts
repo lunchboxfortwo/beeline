@@ -148,6 +148,7 @@ export function itemPrompt(item: AgentCommand, options: {
     `Request ${item.turnRequestId} (${item.reason}) from ${author} in ${item.roomId}. ${answerTo}`,
     'Use this requestId with tools that ask for one.',
     `[message id: ${source.id}]`,
+    ...(source.replyToMessageId ? [`Reply to message ${source.replyToMessageId}; read it with session tools if needed.`] : []),
     `${author}: ${body.trim() || '(shared attachments)'}`,
     ...(source.replyToExcerpt ? [`In reply to ${source.replyToAuthorName ?? 'a message'}: ${source.replyToExcerpt}`] : []),
     ...attachmentMarkerLines(source.attachments),

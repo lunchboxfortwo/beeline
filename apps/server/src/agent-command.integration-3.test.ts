@@ -43,7 +43,7 @@ it('binds emitted events to the issuing command when agents share a human reques
 
 
 it.each(['unknown', 'wrong-agent', 'wrong-room', 'cancelled'])(
-  'rejects every output surface for %s authority',
+  'keeps command resources bound to %s authority without blocking member prose',
   async (invalid) => {
     await send('@hoots');
     const [c] = await commands();
@@ -83,7 +83,6 @@ it.each(['unknown', 'wrong-agent', 'wrong-room', 'cancelled'])(
           },
         },
       ],
-      ['postRoomMessage', { text: 'Late final' }],
     ] as const;
     const before = (await rootFixture.db.query(`SELECT count(*)::int n FROM messages`)).rows[0];
     for (const [operation, payload] of writes)
@@ -91,6 +90,12 @@ it.each(['unknown', 'wrong-agent', 'wrong-room', 'cancelled'])(
         rootFixture.daemon.execute(operation, { ...input, ...payload } as never, author),
       ).rejects.toThrow();
     expect((await rootFixture.db.query(`SELECT count(*)::int n FROM messages`)).rows[0]).toEqual(before);
+    const final = rootFixture.daemon.execute('postRoomMessage', { ...input, text: 'Late final' }, author);
+    if (invalid === 'cancelled') await expect(final).rejects.toThrow();
+    else {
+      await expect(final).resolves.toBeDefined();
+      expect((await commands(A)).map(item => item.id)).toContain(c!.id);
+    }
   },
 );
 
@@ -301,15 +306,15 @@ it('keeps drafts until the answer commits despite an early success diagnostic', 
 });
 
 
-it('stores an ambiguous legacy agent tag as prose without dispatching either candidate', async () => {
+it('preserves an ambiguous legacy tag and queues both addressed members', async () => {
   // An overlapping old writer can leave an agent without a workspace reservation.
-  // Its global fallback must still be rejected if it collides with a reserved tag.
+  // A reservation collision cannot silently discard either addressed request.
   await rootFixture.db.query(`DELETE FROM workspace_handles WHERE workspace_id=$1 AND identity_id=$2`, [W, B]);
   await rootFixture.db.query(`UPDATE identities SET handle='hoots' WHERE id=$1`, [B]);
   try {
     const source = await send('@hoots who is this?');
-    expect(await commands(A)).toEqual([]);
-    expect(await commands(B)).toEqual([]);
+    expect(await commands(A)).toHaveLength(1);
+    expect(await commands(B)).toHaveLength(1);
     expect(
       (await rootFixture.db.query(`SELECT text FROM messages WHERE id=$1`, [source.messageId])).rows[0]?.text,
     ).toBe('@hoots who is this?');
@@ -319,18 +324,17 @@ it('stores an ambiguous legacy agent tag as prose without dispatching either can
 });
 
 
-  it('stamps the producing model on an agent reply at generation time', async () => {
+  it('does not infer a producing model from the roster selection', async () => {
     await rootFixture.db.query(`UPDATE agents SET selected_model='grok-4-fast' WHERE agent_id=$1`, [A]);
     await send('@hoots model check');
     const command = (await commands(A))[0]!;
     await claim(command);
     await result(command, 'Stamped answer');
-    // The stamp freezes the selection as of the turn; a later roster change
-    // must not retro-label the row.
+    // Selection is not evidence of the model the live harness actually used.
     await rootFixture.db.query(`UPDATE agents SET selected_model='newer-model' WHERE agent_id=$1`, [A]);
     const view = await rootFixture.phone.readRoom(R, H);
     const reply = view!.messages.find((message) => message.text === 'Stamped answer');
-    expect(reply?.agentModel).toBe('grok-4-fast');
+    expect(reply?.agentModel).toBeUndefined();
     // A human row carries no stamp, and an agent row with no known model
     // stays unstamped rather than guessing.
     expect(

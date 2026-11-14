@@ -63,6 +63,15 @@ it('starts and answers before optional reads begin, even if none of them resolve
   await f.session.dispose();
 });
 
+it('delivers a frozen reply pointer without waiting for a parent-message read', async () => {
+  const f = await fixture();
+  f.item.source.replyToMessageId = 'parent-message';
+  await f.session.start();
+  expect(await f.session.deliver(f.item, [])).toMatchObject({ text: 'The answer' });
+  expect(f.prompt.mock.calls[0]?.[1]).toContain('Reply to message parent-message; read it with session tools if needed.');
+  await f.session.dispose();
+});
+
 it('an optional home/skills setup that never resolves cannot hold the answer', async () => {
   const f = await fixture();
   f.execute.mockImplementation(() => Promise.resolve({ commands: [], yoloMode: false, isReviewer: true }));

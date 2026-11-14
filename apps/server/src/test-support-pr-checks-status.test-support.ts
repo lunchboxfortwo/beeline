@@ -391,6 +391,8 @@ export function fixtureScope2() {
       { roomId: C, requestId: worker!.turnRequestId, text },
       A,
     );
+    // Publication already finished; now inspect the existing optional lifecycle worker's result.
+    await rootFixture.db.backgroundWork.drain();
     const lifecycle = (
       await rootFixture.db.query<{ lifecycle: Record<string, unknown> & { pr: Record<string, unknown> } }>(
         `SELECT lifecycle FROM corner_facts WHERE corner_id=$1`,

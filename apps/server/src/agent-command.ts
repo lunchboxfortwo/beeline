@@ -419,12 +419,12 @@ export type QueuedOrder = {
 };
 type Member = { id: string; kind: 'human' | 'agent'; handle: string | null; name: string;
   callback: string | null; client_id: string | null; client_name: string | null; mcp: boolean; starter: string | null; owner_id: string | null };
-type Chat = { id: string; parent_id: string | null; archived: boolean; direct: boolean;
+type Chat = { id: string; parent_id: string | null; archived: boolean; direct_participants: string[] | null;
   worker: string | null; source_member: boolean; source_archived: boolean; source_parent_id: string | null;
   source_worker: string | null; source_target_member: boolean;
   opening_root: { author_id: string; room_id: string } | null; members: Member[]; opening: CommandRow | null;
   handover: { revision: number; author_id: string; source_room_id: string; approval_basis: { commanderReturnRoomId?: string } } | null;
-  source: { text: string; author_id: string; room_id: string; system_event: AgentCommand['source']['systemEvent']; attachments?: readonly Attachment[]; presentation?: string; card_type?: string; card?: WorkflowWakeCard } | null;
+  source: { text: string; author_id: string; room_id: string; system_event: AgentCommand['source']['systemEvent']; attachments?: readonly Attachment[]; presentation?: string; reply_to_message_id?: string | null; card_type?: string; card?: WorkflowWakeCard } | null;
   parent_source: { author_id: string; room_id: string } | null;
   review: {agentId:string;headSha:string;pullRequest:number;briefRevision:number;checks:unknown;cornerId:string} | null };
 export type QueuedPostReceipt = { id: string; createdAt: number; commands: CommandRow[]; woken: string[];
@@ -463,7 +463,7 @@ export async function queueMessage(database: SqlDatabase, raw: QueuedPost | Queu
          LEFT JOIN free_agents starter ON starter.agent_id=identity.id AND starter.removed_at IS NULL
          WHERE room.id::text=$1 FOR SHARE OF room,member
        ) SELECT room.id,room.parent_id,room.archived_at IS NOT NULL archived,
-         room.direct_participants IS NOT NULL direct,
+         room.direct_participants,
          ($4::text IS NULL OR $5='${SYSTEM_IDENTITY_ID}' OR EXISTS(SELECT 1 FROM rooms source JOIN memberships source_member
            ON source_member.room_id=COALESCE(source.parent_id,source.id)
            AND source_member.identity_id=$5 AND source_member.removed_at IS NULL
@@ -486,7 +486,7 @@ export async function queueMessage(database: SqlDatabase, raw: QueuedPost | Queu
          (SELECT jsonb_build_object('author_id',author_id,'room_id',room_id) FROM messages
            WHERE id=initial.root_source_message_id) opening_root,
          (SELECT to_jsonb(handover) FROM (${cornerCommanderBriefSql('room.id')}) handover) handover,
-         (SELECT jsonb_build_object('text',text,'author_id',author_id,'room_id',room_id,'system_event',system_event,'attachments',attachments,'presentation',presentation,'card_type',card_type,'card',card)
+         (SELECT jsonb_build_object('text',text,'author_id',author_id,'room_id',room_id,'system_event',system_event,'attachments',attachments,'presentation',presentation,'reply_to_message_id',reply_to_message_id,'card_type',card_type,'card',card)
            FROM messages WHERE id=$2) source,
          (SELECT jsonb_build_object('author_id',author_id,'room_id',room_id) FROM messages WHERE id=$3) parent_source
        FROM rooms room LEFT JOIN corner_facts fact ON fact.corner_id=room.id
@@ -571,15 +571,15 @@ async function postMessage(db: SqlDatabase, input: QueuedPost, chat: Chat): Prom
   const id = existing && (existing.author_id !== input.authorId || existing.room_id !== input.roomId ||
       existing.text !== input.text || json(existing.attachments) !== attachments)
     ? hash(`message:${original}:${input.authorId}:${input.roomId}:${input.text}:${attachments}`) : original;
-  const saved = (await db.query<{ id: string; created_at: Date }>(
+  const saved = (await db.query<{ id: string; created_at: Date; reply_to_message_id:string|null }>(
     `INSERT INTO messages(id,room_id,author_id,text,attachments,source_client,presentation,request_id,card,reply_to_message_id,root_message_id,legacy_event)
      SELECT $1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8,$9::jsonb,parent.id,COALESCE(parent.root_message_id,parent.id),$11::jsonb
      FROM (SELECT 1) source LEFT JOIN messages parent ON parent.id=$10 AND parent.room_id=$2 AND parent.deleted_at IS NULL
-     ON CONFLICT(id) DO NOTHING RETURNING id,created_at`,
+     ON CONFLICT(id) DO NOTHING RETURNING id,created_at,reply_to_message_id`,
     [id, chat.id, input.authorId, input.text, attachments, input.sourceClient ? json(input.sourceClient) : author?.client_id ? json({id:author.client_id,name:author.client_name}) : null,
       input.presentation ?? 'message', input.requestId ?? null, input.card ? json(input.card) : null, input.replyTo ?? null, input.tags ? json(input.tags) : null],
-  )).rows[0] ?? (await db.query<{ id:string; created_at:Date }>(
-    'SELECT id,created_at FROM messages WHERE id=$1',[id])).rows[0]!;
+  )).rows[0] ?? (await db.query<{ id:string; created_at:Date; reply_to_message_id:string|null }>(
+    'SELECT id,created_at,reply_to_message_id FROM messages WHERE id=$1',[id])).rows[0]!;
   // A reply tool records the committed answer for this request. Progress in
   // another place and private agent reports do not spend its return obligation.
   if (input.requestId && input.text.trim() && input.presentation !== 'card') await db.query(
@@ -612,20 +612,21 @@ async function postMessage(db: SqlDatabase, input: QueuedPost, chat: Chat): Prom
   const channel = handles.some(isChannelMentionToken);
   const explicit = chat.members.filter(member => channel || handles.some(handle => member.handle?.toLowerCase() === handle.toLowerCase()));
   const agents = chat.members.filter(member => member.kind === 'agent');
-  const solo = !chat.direct && !chat.parent_id && chat.members.filter(member => member.kind === 'human').length === 1 &&
+  const solo = !chat.direct_participants && !chat.parent_id && chat.members.filter(member => member.kind === 'human').length === 1 &&
     (agents.length === 1 ? agents[0] : agents.length === 2 && agents.some(member => member.starter === 'luna')
       ? agents.find(member => member.starter === 'beebee') : undefined);
   const targets = input.presentation === 'card' || stops.length ? [] : input.agentIds ? chat.members.filter(member => input.agentIds!.includes(member.id)) : [...new Map([
     ...explicit,
-    ...(human && !hasSystemReportMention(input.text) && chat.direct ? agents : []),
+    ...(human && !hasSystemReportMention(input.text) && chat.direct_participants ? agents.filter(member=>chat.direct_participants!.includes(member.id)) : []),
     ...(human && !explicit.length && solo ? [solo] : []),
   ].filter(member => member.kind === 'agent' && member.id !== input.authorId && member.id !== SYSTEM_IDENTITY_ID).map(member => [member.id, member])).values()];
   const commands: CommandRow[] = [], woken: string[] = [];
   for (const member of targets) {
     const item = await insertAgentCommand(db, { roomId: chat.id, agentId: member.id, sourceMessageId: id,
-      reason: human ? chat.direct ? 'direct_message' : 'human_tag' : 'agent_tag', parent: input.parent,
+      reason: human ? chat.direct_participants ? 'direct_message' : 'human_tag' : 'agent_tag', parent: input.parent,
       inheritPrivatePayload: false,
-    }, { ...chat, source: { text: input.text, author_id: input.authorId, room_id: chat.id, system_event: undefined, attachments: input.attachments, presentation: 'message' } });
+      avatarJob: human && /^(?:@[^\s]+\s+)?\/draw-avatar(?:\s|$)/i.test(input.text.trim()),
+    }, { ...chat, source: { text: input.text, author_id: input.authorId, room_id: chat.id, system_event: undefined, attachments: input.attachments, presentation: 'message',reply_to_message_id:saved.reply_to_message_id } });
     if (item) commands.push(item);
     woken.push(member.handle ?? member.id);
   }
@@ -699,11 +700,11 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
         authorId: payload?.authorId ?? chat.source?.author_id ?? SYSTEM_IDENTITY_ID,
         body: (payload?.text ?? subscriptionPromptBody(sourceText ?? input.reason, chat.source?.system_event ?? null)) +
           squireDecisionDetail(chat.source?.card_type ?? null,chat.source?.card ?? null) +
-          workflowWakeDetail(chat.source?.card_type ?? null,chat.source?.card ?? null,null,null,null) +
+          (chat.source?.room_id===chat.id ? workflowWakeDetail(chat.source.card_type ?? null,chat.source.card ?? null,null,null,null) : '') +
           (!payload && input.wakeNote ? `\n${input.wakeNote}` : ''),
         attachments: payload?.attachments ?? chat.source?.attachments ?? [],
         type: privateMessage ? 'private' : chat.source?.presentation ?? 'system',
-        systemEvent: chat.source?.system_event }),...wake.params,
+        systemEvent: chat.source?.system_event,replyToMessageId:chat.source?.reply_to_message_id ?? undefined }),...wake.params,
     ],
   )).rows[0] ?? (await db.query<CommandRow>(
     'SELECT * FROM agent_commands WHERE id=$1',[id],
