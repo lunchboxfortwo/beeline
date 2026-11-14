@@ -44,7 +44,7 @@ active release alone. Each identity read fetches tags again, including the rc
 published between the two legs. Version allocation reads release records and
 all versioned OTA branch names, so an orphaned OTA rc cannot be reused.
 
-Store tracks pair automatically: next uses beta, latest uses production.
+`npm run release` never uploads store beta builds: next is the OTA beta only. Latest submits production store builds when a pinned native runtime is not the newest one live in its store (or a store cannot be read); `--no-store` skips them.
 The next leg runs the existing quick local checks. Latest promotes that exact
 successful next SHA without invoking Checks or repeating typecheck, dead-code,
 grammar or codec checks. Neither leg dispatches GitHub CI. Existing delivery

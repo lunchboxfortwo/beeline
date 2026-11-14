@@ -9,9 +9,26 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 export function releaseArguments(argv) {
-  if (!argv.length) return {};
-  if (argv.length === 2 && argv[0] === '--dispatched-by') return { dispatchedBy: JSON.parse(argv[1]) };
-  throw new Error('Usage: node scripts/release.mjs [--dispatched-by <JSON>]');
+  const options = {};
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--no-store') options.noStore = true;
+    else if (argv[i] === '--dispatched-by' && i + 1 < argv.length) options.dispatchedBy = JSON.parse(argv[++i]);
+    else throw new Error('Usage: node scripts/release.mjs [--no-store] [--dispatched-by <JSON>]');
+  }
+  return options;
+}
+
+// Store binaries are needed when a platform's pinned native runtime is not the
+// newest one live in its production store: phones on the store build cannot
+// take an OTA for the new runtime. An unreadable store counts as needed.
+export function pinnedRuntimes(appConfig) {
+  const pin = platform => new RegExp(`\\b${platform}: \\{[^]*?runtimeVersion: runtimeVersionOverride \\|\\| "(\\d+)"`).exec(appConfig)?.[1];
+  return { android: pin('android'), ios: pin('ios') };
+}
+
+export function storeReleaseNeeded(pins, stores) {
+  return ['android', 'ios'].some(platform => stores[platform]?.status !== 'readable'
+    || stores[platform].latestRuntimeVersion !== pins[platform]);
 }
 
 export function localAttribution({ username = userInfo().username || 'firstmate', now = new Date() } = {}) {
@@ -62,11 +79,12 @@ export async function readOtaVersions(env, fetchImpl = fetch) {
   }
 }
 
-export async function releaseSequence({ source, sha, directory, secrets, dispatchedBy, otaVersions }, runLocalRelease) {
+// Next is the OTA beta only; store binaries go to production, with latest.
+export async function releaseSequence({ source, sha, directory, secrets, dispatchedBy, otaVersions, store }, runLocalRelease) {
   for (const channel of ['next', 'latest']) {
     await runLocalRelease({ mode: 'execute', channel, 'release-sha': sha,
       'state-dir': join(directory, channel), 'dispatched-by': JSON.stringify(dispatchedBy),
-      'store-track': channel === 'next' ? 'beta' : 'production', otaVersions,
+      'store-track': channel === 'latest' && store ? 'production' : 'none', otaVersions,
     }, { repository: source, secrets });
   }
 }
@@ -82,8 +100,16 @@ async function main(argv) {
     const secrets = loadEnvironment(join(homedir(), '.config/beeline-release.env'), source);
     const dispatchedBy = attribution(JSON.stringify(options.dispatchedBy ?? localAttribution()));
     const otaVersions = await readOtaVersions(secrets);
-    await releaseSequence({ source, sha, directory, secrets, dispatchedBy, otaVersions }, runLocalRelease);
-    console.log(`Released ${sha} to next and latest. Private results: ${directory}`);
+    let store = false;
+    if (!options.noStore) {
+      const { readStores } = await import(pathToFileURL(join(source, 'scripts/read-store-runtimes.mjs')));
+      const { easBuildInventory } = await import(pathToFileURL(join(source, 'scripts/store-build-runtime.mjs')));
+      const stores = await readStores({ builds: await easBuildInventory(secrets).catch(() => []), env: secrets });
+      store = storeReleaseNeeded(pinnedRuntimes(readFileSync(join(source, 'apps/mobile/app.config.js'), 'utf8')), stores);
+    }
+    console.log(store ? 'Store release: production; a pinned native runtime is not live in its store.' : 'Store release: none.');
+    await releaseSequence({ source, sha, directory, secrets, dispatchedBy, otaVersions, store }, runLocalRelease);
+    console.log(`Released ${sha} to next and latest${store ? ' with production store builds' : ''}. Private results: ${directory}`);
   } finally { unlock(); }
 }
 
