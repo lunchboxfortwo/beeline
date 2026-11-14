@@ -166,6 +166,8 @@ export class LocalActions {
     context.env = {
       ...this.baseEnv, HOME: join(directory, 'home'), XDG_CONFIG_HOME: join(directory, 'home/.config'),
       XDG_STATE_HOME: join(directory, 'home/.local/state'), CI: 'true',
+      // npm publishes only via trusted publishing from hosted CI; a local release skips it.
+      SKIP_HELPER_NPM: 'true',
       NPM_CONFIG_PREFIX: join(directory, 'npm-global'),
       GITHUB_WORKSPACE: this.root, GITHUB_REPOSITORY: context.github.repository,
       GITHUB_SHA: context.github.sha, GITHUB_RUN_ID: context.github.run_id,
