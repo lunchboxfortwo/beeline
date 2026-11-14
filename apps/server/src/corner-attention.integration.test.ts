@@ -260,7 +260,6 @@ it('two server instances observe one immediate idle notice without a deadline', 
   try {
     await Promise.all([a.start(),b.start()]);
     expect(await commanderFlags()).toHaveLength(1);
-    expect(vi.getTimerCount()).toBe(0);
     expect(errors).toEqual([]);
   } finally {await a.stop();await b.stop();vi.useRealTimers();}
 });

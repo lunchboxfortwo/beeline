@@ -30,7 +30,7 @@ describe.skipIf(!url)('canonical machine installation concurrency',()=>{
     await a.query('DELETE FROM workspace_connections');await a.query('DELETE FROM squire_machines');
     await a.query(`UPDATE agents SET squire_work='{}'::jsonb`);
   });
-  afterAll(async()=>{await a.close();await b.close();await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);await admin.end();});
+  afterAll(async()=>{await a.close();await b.close();await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);await admin.end();},60_000);
 
   it.each([['A','B'],['B','A']])('overlapping %s and %s snapshots leave exactly the winning snapshot',async(first,second)=>{
     await ensureSquireMachine(a,owner,machine);
@@ -106,7 +106,7 @@ describe.skipIf(!url)('canonical machine installation concurrency',()=>{
       const room=randomUUID(),offer=randomUUID(),message=randomUUID();
       await a.query(`INSERT INTO rooms(id,workspace_id,created_by,name) VALUES($1,$2,$3,'Connection')`,[room,workspace,owner]);
       await a.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
-        VALUES($1,$2,$3,'member')`,[workspace,room,agent]);
+        VALUES($1,$2,$3,'member'),($1,$2,$4,'owner')`,[workspace,room,agent,owner]);
       await a.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Connect')`,[message,room,owner]);
       const command=await createAgentCommand(a,{roomId:room,agentId:agent,sourceMessageId:message,reason:'human_tag'});
       parents.push(command!.id);

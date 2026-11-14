@@ -61,12 +61,13 @@ it('redeems an invite with historical corners without scanning unrelated message
     );
     // Seed history directly: these rows are unrelated to any owed corner item.
     await db.query('ALTER TABLE messages DISABLE TRIGGER USER');
-    await db.query(
+    const historyRoom=(await db.query(`SELECT id FROM rooms WHERE parent_id=$1 ORDER BY id LIMIT 1`,[room])).rows[0]!.id;
+    for(let first=1;first<=messages;first+=50000) await db.query(
       `INSERT INTO messages(id,room_id,author_id,text,created_at)
-      SELECT 'history-'||n,$1,$2,'Old conversation '||n,
-        CASE WHEN n<=18000 THEN now()-interval '1 hour' ELSE now()-interval '2 days' END
-      FROM generate_series(1,$3::int) n`,
-      [(await db.query(`SELECT id FROM rooms WHERE parent_id=$1 ORDER BY id LIMIT 1`, [room])).rows[0]!.id, owner, messages],
+       SELECT 'history-'||n,$1,$2,'Old conversation '||n,
+         CASE WHEN n<=18000 THEN now()-interval '1 hour' ELSE now()-interval '2 days' END
+       FROM generate_series($3::int,$4::int) n`,
+      [historyRoom,owner,first,Math.min(messages,first+49999)],
     );
     await db.query('ALTER TABLE messages ENABLE TRIGGER USER');
     await db.query('ANALYZE');
