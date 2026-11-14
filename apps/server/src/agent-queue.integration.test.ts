@@ -469,3 +469,20 @@ it('keeps the whole batch queued if one recorded return address cannot receive i
     expect((await db.query("SELECT 1 FROM messages WHERE author_id=$1 AND text='Atomic batch answer'",[A])).rows).toEqual([]);
   } finally { await db.query('UPDATE memberships SET removed_at=NULL WHERE room_id=$1 AND identity_id=$2',[R2,H]); }
 });
+
+it.each(['human_tag', 'order'])('an empty harness completion ends %s without chat or a report wake', async reason => {
+  const first = await ask(R1, 'answer please');
+  const second = (await createAgentCommand(db, { roomId: R1, agentId: A, sourceMessageId: null, reason,
+    privatePayload: { kind: 'order', text: 'work', authorId: A, fromRoomId: R2 } }))!;
+  const before = (await db.query('SELECT count(*)::int n FROM messages')).rows;
+  const input = { roomId: R1, requestId: first.id, queuedRequestIds: [second.id], text: '', harnessEnded: true };
+  await daemon.execute('postRoomMessage', input, A);
+  await daemon.execute('postRoomMessage', input, A);
+  expect(await queue()).toEqual([]);
+  expect((await db.query('SELECT state,result_message_id FROM agent_commands WHERE id=ANY($1::text[])',
+    [[first.id, second.id]])).rows).toEqual([
+      { state: 'complete', result_message_id: null }, { state: 'complete', result_message_id: null },
+    ]);
+  expect((await db.query('SELECT count(*)::int n FROM messages')).rows).toEqual(before);
+  expect((await db.query("SELECT id FROM agent_commands WHERE reason='report'")).rows).toEqual([]);
+});

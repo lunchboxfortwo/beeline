@@ -89,12 +89,12 @@ it('retains a refused stored answer and never runs the agent again on another qu
   expect(harness.deliver).toHaveBeenCalledTimes(1);
 });
 
-it('posts a stopped-answer notice after a running harness exits, with no redelivery', async () => {
+it('durably closes a failed running harness without a public answer or redelivery', async () => {
   const f = await fixture(), item = f.item('exited');
   harness.deliver.mockRejectedValueOnce(new Error('signal SIGKILL'));
   f.changed([item]);
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({
-    text: 'Agent stopped while answering this: signal SIGKILL', requestId: item.turnRequestId,
+    text: '', harnessEnded: true, requestId: item.turnRequestId,
   })));
   f.changed([item]);
   expect(harness.deliver).toHaveBeenCalledTimes(1);
@@ -169,18 +169,17 @@ it('sends empty closing text through the answer exit and retains it while no ans
   expect(harness.deliver).toHaveBeenCalledTimes(1);
 });
 
-it('lets quiet background items in a reconnect batch finish silently while the human tag stays owed', async () => {
+it.each(['end_turn', 'cancelled'])('closes every item in an empty reconnect batch after %s', async stopReason => {
   const f = await fixture(), offlineSeconds = 18 * 3600;
   const tag = { ...f.item('tag'), offlineSeconds };
   const schedule = { ...f.item('schedule'), offlineSeconds, reason: 'schedule', scheduleId: 'errors' };
   const event = { ...f.item('event'), offlineSeconds, reason: 'subscribed_event' };
-  harness.deliver.mockResolvedValueOnce({ text: '', steps: [], stopReason: 'end_turn', toolCalls: [], cleanup: async () => {} });
+  harness.deliver.mockResolvedValueOnce({ text: '', steps: [], stopReason, toolCalls: [], cleanup: async () => {} });
   f.changed([schedule, tag, event]);
-  await vi.waitFor(() => expect(f.execute.mock.calls.filter(call => call[0] === 'postRoomMessage')).toHaveLength(2));
-  expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({
-    requestId: schedule.id, queuedRequestIds: [event.id], text: '' }));
-  expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({ requestId: tag.id,
-    text: 'Agent stopped while answering this: harness ended without a public answer (end_turn)' }));
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({
+    requestId: schedule.id, queuedRequestIds: [tag.id, event.id], text: '', harnessEnded: true })));
+  await vi.waitFor(async () => expect(await new AnswerStore(join(f.root, 'answers')).all()).toEqual([]));
+  f.changed([schedule, tag, event]);
   expect(harness.deliver).toHaveBeenCalledTimes(1);
 });
 
@@ -254,4 +253,29 @@ it('keeps offline batches in their own chat and leaves later live input separate
   expect(harness.deliver).toHaveBeenCalledWith(first,[live],[first]);
   expect(harness.deliver).toHaveBeenCalledWith(second,[],[second]);
   expect(harness.deliver).toHaveBeenCalledWith(live,[],[]);
+});
+
+it('replays a durable empty harness completion without running the agent again', async () => {
+  vi.spyOn(AnswerStore.prototype, 'all').mockResolvedValueOnce([{
+    itemId: 'silent', roomId: 'room', requestId: 'silent', text: '', harnessEnded: true,
+  }]);
+  const f = await fixture();
+  f.changed([f.item('silent')]);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({
+    requestId: 'silent', text: '', harnessEnded: true,
+  })));
+  expect(harness.deliver).not.toHaveBeenCalled();
+});
+
+it('retires a generated failure notice restored from an older helper outbox', async () => {
+  vi.spyOn(AnswerStore.prototype, 'all').mockResolvedValueOnce([{
+    itemId: 'legacy', roomId: 'room', requestId: 'legacy',
+    text: 'Agent stopped while answering this: signal SIGKILL',
+  }]);
+  const f = await fixture();
+  f.changed([f.item('legacy')]);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({
+    requestId: 'legacy', text: '', harnessEnded: true,
+  })));
+  expect(harness.deliver).not.toHaveBeenCalled();
 });
