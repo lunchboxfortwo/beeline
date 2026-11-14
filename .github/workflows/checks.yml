@@ -223,7 +223,7 @@ jobs:
       - name: Select tests in this checkout
         env:
           CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          CI_FRAME_BUDGET: "true"
+          CI_FRAME_BUDGET: ${{ !inputs.release_sha }}
           CI_STATE_UPGRADE: "true"
         run: |-
           node scripts/workspace-test-selection.mjs body --out "$RUNNER_TEMP/workspace-selection.json"
@@ -308,7 +308,8 @@ jobs:
         if: steps.changes.outputs.run == 'true' && (github.event_name == 'pull_request' || github.event_name == 'merge_group' || inputs.suite != 'server-integration')
         working-directory: apps/server
         env:
-          SERVER_HOSTED_TIMING: ${{ github.event_name == 'pull_request' }}
+          # Releases skip wall-clock budgets (captain, 14 Nov); PRs leave them to PRODUCTION-CORPUS REPLAY.
+          SERVER_HOSTED_TIMING: ${{ github.event_name == 'pull_request' || inputs.release_sha != '' }}
         run: node scripts/run-ci-shard.mjs ${{ matrix.shard }}/8
       - name: Run one bounded integration batch
         if: steps.changes.outputs.run == 'true' && (!cancelled() && steps.workspace.outcome == 'success' && (github.event_name == 'pull_request' || github.event_name == 'merge_group' || inputs.suite == 'all' || inputs.suite == 'server-integration'))
@@ -367,7 +368,7 @@ jobs:
     uses: ./.github/workflows/server-coverage-map.yml
   server-claim-latency:
     name: SERVER CLAIM LATENCY
-    if: "!cancelled() && (github.event_name != 'workflow_dispatch' || inputs.suite == 'all' || inputs.suite == 'server-claim-latency')"
+    if: "!cancelled() && !inputs.release_sha && (github.event_name != 'workflow_dispatch' || inputs.suite == 'all' || inputs.suite == 'server-claim-latency')"
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
@@ -460,7 +461,7 @@ jobs:
           if-no-files-found: error
   mobile-suite:
     name: MOBILE SUITE
-    if: "!cancelled() && (github.event_name != 'workflow_dispatch' || inputs.suite == 'all' || inputs.suite == 'mobile-suite')"
+    if: "!cancelled() && !inputs.release_sha && (github.event_name != 'workflow_dispatch' || inputs.suite == 'all' || inputs.suite == 'mobile-suite')"
     runs-on:
       - self-hosted
       - Linux
@@ -500,7 +501,7 @@ jobs:
       - name: Select tests in this checkout
         env:
           CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          CI_FRAME_BUDGET: "true"
+          CI_FRAME_BUDGET: ${{ !inputs.release_sha }}
           CI_STATE_UPGRADE: "true"
         run: |-
           node scripts/workspace-test-selection.mjs mobile --out "$RUNNER_TEMP/workspace-selection.json"
@@ -559,7 +560,7 @@ jobs:
   # wall-clock budgets to this job on PRs (SERVER_HOSTED_TIMING).
   production-corpus-replay:
     name: PRODUCTION-CORPUS REPLAY
-    if: "!cancelled() && (github.event_name != 'workflow_dispatch' || inputs.suite == 'all' || inputs.suite == 'production-corpus-replay')"
+    if: "!cancelled() && !inputs.release_sha && (github.event_name != 'workflow_dispatch' || inputs.suite == 'all' || inputs.suite == 'production-corpus-replay')"
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -631,7 +632,7 @@ jobs:
     name: FRAME-BUDGET
     needs:
       - mobile-suite
-    if: "!cancelled() && (github.event_name != 'workflow_dispatch' || inputs.suite == 'all' || inputs.suite == 'mobile-suite')"
+    if: "!cancelled() && !inputs.release_sha && (github.event_name != 'workflow_dispatch' || inputs.suite == 'all' || inputs.suite == 'mobile-suite')"
     runs-on:
       - self-hosted
       - Linux
@@ -657,7 +658,7 @@ jobs:
     name: STATE-UPGRADE
     needs:
       - mobile-suite
-    if: "!cancelled() && (github.event_name != 'workflow_dispatch' || inputs.suite == 'all' || inputs.suite == 'mobile-suite')"
+    if: "!cancelled() && !inputs.release_sha && (github.event_name != 'workflow_dispatch' || inputs.suite == 'all' || inputs.suite == 'mobile-suite')"
     runs-on:
       - self-hosted
       - Linux
