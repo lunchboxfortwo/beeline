@@ -144,6 +144,8 @@ test('delivery worker round trip has private source, environment, logs, outputs 
     const sha = execFileSync('git', ['-C', source, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
     mkdirSync(join(source, 'packages/fixture/dist'), { recursive: true });
     writeFileSync(join(source, 'packages/fixture/dist/output'), 'built fixture');
+    mkdirSync(join(source, 'apps/mobile/public'), { recursive: true });
+    writeFileSync(join(source, 'apps/mobile/public/canvaskit.wasm'), 'installed wasm');
     const engine = new LocalActions({ root: source, directory: state, processes: new Processes({}, () => {}), secrets: { FIXTURE_SECRET: 'do-not-log-this-secret' } });
     const delivery = new LocalDelivery(engine);
     const command = delivery.command.bind(delivery), units = [];
@@ -156,11 +158,12 @@ test('delivery worker round trip has private source, environment, logs, outputs 
       assert.equal(stdout.includes('do-not-log-this-secret'), false);
       return stdout;
     };
-    const context = { github: { repository: 'Beeline-Work/beeline', job: 'fixture', sha, run_id: '1' }, env: {}, vars: {}, secrets: {}, inputs: {}, needs: {}, steps: {}, job: { status: 'success' } };
+    const context = { github: { repository: 'Beeline-Work/beeline', job: 'website', sha, run_id: '1' }, env: {}, vars: {}, secrets: {}, inputs: {}, needs: {}, steps: {}, job: { status: 'success' } };
     const job = { outputs: { proof: '${{ steps.proof.outputs.value }}' }, steps: [
       { id: 'proof', env: { PRIVATE_SECRET: '${{ secrets.FIXTURE_SECRET }}' }, run: [
         'test "$(cat tracked)" = "immutable source"',
         'test "$(cat packages/fixture/dist/output)" = "built fixture"',
+        'test "$(cat apps/mobile/public/canvaskit.wasm)" = "installed wasm"',
         'test "$BEELINE_LOCAL_RELEASE" = true',
         'test "$TURBO_CONCURRENCY" = 1',
         'test "$TMPDIR" != /tmp',

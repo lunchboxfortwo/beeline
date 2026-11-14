@@ -33,6 +33,7 @@ export function localToolPlan(tool, args, config) {
   ];
 }
 
+/** @public Per-job executable shims load this entry by file URL. */
 export function runLocalTool(tool, args) {
   const config = JSON.parse(readFileSync(process.env.BEELINE_LOCAL_RELEASE_TOOL_CONFIG, 'utf8'));
   for (const call of localToolPlan(tool, args, config)) {
