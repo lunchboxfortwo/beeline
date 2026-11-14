@@ -106,7 +106,7 @@ it('opens a sibling corner in the parent Room from a corner turn', async () => {
 
   // Its own opening objective assigns exactly one work turn.
   const commands = (await daemon.execute('getAgentCommands', { roomId: second.cornerId }, AGENT))
-    .commands;
+    .commands.filter(command => command.roomId === second.cornerId);
   expect(commands.map(c => c.reason)).toEqual(['corner_objective']);
 
   // A retried tool call returns the same corner rather than opening another.

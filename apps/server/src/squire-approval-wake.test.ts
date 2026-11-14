@@ -8,7 +8,7 @@ describe('Squire decision after the asking turn ended', () => {
 
   it.each([['approved', true], ['denied', true], ['approved', false], ['denied', false]] as const)(
     'handles %s with asking turn ended=%s silently', async (status, ended) => {
-      const asked = await (await fixture.operation('sendRoomMessage', {
+      await (await fixture.operation('sendRoomMessage', {
         roomId: ROOM, text: '@bee buy the flowers', mentions: [AGENT],
       })).json() as { messageId: string };
       const [asking] = (await readAgentCommands(fixture.database, AGENT, ROOM)).commands;
@@ -20,7 +20,7 @@ describe('Squire decision after the asking turn ended', () => {
          FROM agent_commands WHERE id=$1`, [asking!.id],
       );
       if (ended) expect((await readAgentCommands(fixture.database, AGENT, ROOM)).commands).toEqual([]);
-      const decision = { roomId: ROOM, requestId: asked.messageId, approvalId: 'flowers',
+      const decision = { roomId: ROOM, requestId: asking!.turnRequestId, approvalId: 'flowers',
         status, tool: 'inject_card', title: 'Purchase approval', detail: 'Flowers' };
       const first = await fixture.daemonOperation('postSquireApprovalDecision', decision);
       expect(first.status).toBe(200);
@@ -28,14 +28,13 @@ describe('Squire decision after the asking turn ended', () => {
       const duplicate = await fixture.daemonOperation('postSquireApprovalDecision', decision);
       expect(duplicate.status).toBe(200);
       expect(await duplicate.json()).toMatchObject({ id: posted.id });
-      // A still-running asking turn is listed only with its generation, for its helper to resume.
-      const waiting = async () => (await readAgentCommands(fixture.database, AGENT, ROOM)).commands.filter(command => !command.generationId);
+      const waiting = async () => (await readAgentCommands(fixture.database, AGENT, ROOM)).commands.filter(command => command.sourceMessageId === posted.id);
       const commands = await waiting();
       expect(commands).toHaveLength(1);
       expect(commands[0]).toMatchObject({ roomId: ROOM, agentId: AGENT,
-        action: ended ? 'input' : 'resume', sourceMessageId: posted.id });
-      if (ended) expect(commands[0]!.turnRequestId).not.toBe(asked.messageId);
-      else expect(commands[0]!.turnRequestId).toBe(asked.messageId);
+        action: 'input', sourceMessageId: posted.id });
+      expect(commands[0]!.turnRequestId).toBe(commands[0]!.id);
+      expect(commands[0]!.turnRequestId).not.toBe(asking!.turnRequestId);
       expect(commands[0]).toMatchObject({ parentCommandId: asking!.id,
         rootCommandId: asking!.rootCommandId, agentDepth: asking!.agentDepth });
       expect(commands[0]!.source.body).toContain(`Squire approval flowers for inject_card: ${status}`);
@@ -51,6 +50,8 @@ describe('Squire decision after the asking turn ended', () => {
       )).rows).toEqual([{ request_id: commands[0]!.turnRequestId, status: 'working' }]);
       const silent = await fixture.daemonOperation('markAgentTurnSilent', { roomId: ROOM, requestId: commands[0]!.turnRequestId });
       expect(silent.status).toBe(200);
+      expect(await waiting()).toHaveLength(1);
+      expect((await fixture.daemonOperation('postRoomMessage', { roomId: ROOM, requestId: commands[0]!.id, text: 'I have the decision.' })).status).toBe(200);
       await fixture.daemonOperation('postSquireApprovalDecision', decision);
       expect(await waiting()).toEqual([]);
     },

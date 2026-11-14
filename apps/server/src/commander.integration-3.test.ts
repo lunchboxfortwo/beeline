@@ -49,7 +49,9 @@ it.each([false, true])('same-place closing keeps a new attachment on the visible
   const messages = (await rootFixture.phone.readRoom(DM, HUMAN))!.messages.filter(m => m.author.pubkey === RUBY && m.presentation === 'message');
   expect(messages.map(m => m.id)).toEqual([posted.id]);
   const message = messages[0]!;
-  expect((await rootFixture.db.query(`SELECT presentation FROM messages WHERE id=$1`, [final.id])).rows[0]?.presentation).toBe('activity');
+  expect(final.id).toBe(posted.id);
+  await rootFixture.db.backgroundWork.drain();
+  expect((await rootFixture.db.query(`SELECT presentation FROM messages WHERE request_id=$1 AND presentation='activity'`, [rootFixture.order.id])).rows).toEqual([{ presentation: 'activity' }]);
   expect(message.presentation).toBe('message');
   await vi.waitFor(async()=>expect((await rootFixture.phone.readRoom(DM,HUMAN))!.messages.find(item=>item.id===message.id)?.attachments).toHaveLength(1));
 });
@@ -65,7 +67,9 @@ it.each([
   const result = await rootFixture.daemon.execute('postRoomMessage', { ...authority(rootFixture.order), text: final }, RUBY);
   const messages = (await rootFixture.phone.readRoom(DM, HUMAN))!.messages.filter(m => m.author.pubkey === RUBY && m.presentation === 'message');
   expect(messages.map(m => m.id)).toEqual([posted.id]);
-  expect((await rootFixture.db.query(`SELECT activity FROM messages WHERE id=$1`, [result.id])).rows[0]?.activity).toContainEqual({ kind: 'note', title: 'Turn summary', text: final });
+  expect(result.id).toBe(posted.id);
+  await rootFixture.db.backgroundWork.drain();
+  expect((await rootFixture.db.query(`SELECT activity FROM messages WHERE request_id=$1 AND presentation='activity'`, [rootFixture.order.id])).rows[0]?.activity).toContainEqual({ kind: 'note', title: 'Turn summary', text: final });
 });
 
 
@@ -174,7 +178,7 @@ it.each(['room', 'corner'] as const)('Reproduction R1: post then a differently w
   if (scope === 'corner') turn = await worker((await open()).cornerId);
   else {
     await rootFixture.phone.execute('sendRoomMessage', { roomId: ROOM, text: '@ruby Check the widget' }, HUMAN);
-    turn = (await rootFixture.daemon.execute('getAgentCommands', { roomId: ROOM }, RUBY)).commands[0]!;
+    turn = (await commands(ROOM, RUBY))[0]!;
     await claim(turn);
   }
   const posted = await rootFixture.daemon.execute('postCornerMessage', { ...authority(turn), cornerId: turn.roomId, text: 'The widget is ready.' }, turn.agentId);
@@ -182,7 +186,9 @@ it.each(['room', 'corner'] as const)('Reproduction R1: post then a differently w
   const final = await rootFixture.daemon.execute('postRoomMessage', { ...authority(turn), text: summary }, turn.agentId);
   const messages = (await rootFixture.phone.readRoom(turn.roomId, HUMAN))!.messages.filter(message => message.author.pubkey === turn.agentId && message.presentation === 'message');
   expect(messages.map(message => message.id)).toEqual([posted.id]);
-  if (scope === 'room') expect((await rootFixture.db.query(`SELECT presentation,activity FROM messages WHERE id=$1`, [final.id])).rows[0])
+  if (scope === 'room') expect(final.id).toBe(posted.id);
+  await rootFixture.db.backgroundWork.drain();
+  if (scope === 'room') expect((await rootFixture.db.query(`SELECT presentation,activity FROM messages WHERE request_id=$1 AND presentation='activity'`, [turn.id])).rows[0])
     .toMatchObject({ presentation: 'activity', activity: [{ kind: 'note', title: 'Turn summary', text: summary }] });
   else expect((await rootFixture.db.query('SELECT state FROM agent_commands WHERE id=$1', [turn.id])).rows).toEqual([{ state: 'complete' }]);
 });

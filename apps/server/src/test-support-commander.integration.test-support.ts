@@ -94,7 +94,7 @@ export const authority = (command: AgentCommand) => ({ roomId: command.roomId, r
 export const commands = async (roomId: string, agentId: string) => {
 
 
-  return (await readAgentCommands(db, agentId, roomId)).commands.filter(command => !command.generationId);
+  return (await readAgentCommands(db, agentId, roomId)).commands.filter(command => command.roomId === roomId);
 };
 
 export async function open() {

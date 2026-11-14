@@ -58,15 +58,15 @@ async function archived(id: string) {
 
 it.each([['machine', 'working'], ['machine', 'complete'], ['http', 'working'], ['http', 'complete']] as const)(
   'closes through %s with parent membership and a %s owned helper turn', async (transport, state) => {
-    const cornerId = await corner(), requestId = randomUUID(), generationId = randomUUID();
+    const cornerId = await corner(), requestId = randomUUID();
     await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Finish this work')`, [requestId, cornerId, person]);
     const command = (await createAgentCommand(db, { roomId: cornerId, agentId: agent, sourceMessageId: requestId, reason: 'human_mention' }))!;
-    await api.execute('startQueuedTurn', { roomId: cornerId, commandId: command.id });
+    await api.execute('startAgentTurn', { roomId: cornerId, requestId: command.id });
     if (state === 'complete') {
       await db.query(`UPDATE agent_commands SET state='complete' WHERE id=$1`, [command.id]);
       await db.query(`UPDATE agent_turns SET status='complete' WHERE room_id=$1 AND agent_id=$2`, [cornerId, agent]);
     }
-    const input = { cornerId, roomId: cornerId, requestId };
+    const input = { cornerId, roomId: cornerId, requestId: command.id };
     if (transport === 'machine') await api.execute('archiveCorner', input);
     else {
       const response = await fetch(`${origin}/v1/daemon/operations/archiveCorner`, {
@@ -77,7 +77,7 @@ it.each([['machine', 'working'], ['machine', 'complete'], ['http', 'working'], [
     expect(await archived(cornerId)).toBe(true);
     expect((await db.query(`SELECT state FROM agent_commands WHERE id=$1`, [command.id])).rows[0]!.state)
       .toBe(state === 'working' ? 'cancelled' : 'complete');
-    expect((await db.query(`SELECT 1 FROM turn_owned_access_checks`)).rowCount).toBe(0);
+    expect((await db.query(`SELECT to_regclass('turn_owned_access_checks') name`)).rows[0]?.name).toBeNull();
   },
 );
 

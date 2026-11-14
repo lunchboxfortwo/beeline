@@ -675,7 +675,8 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
     ['corner_review_dispatch','subscribed_event','agent_tag','order'].includes(input.reason) ? chat.review : undefined;
   const review = selectedReview ? {cornerId:selectedReview.cornerId,headSha:selectedReview.headSha,
     pullRequest:selectedReview.pullRequest,briefRevision:selectedReview.briefRevision,checks:selectedReview.checks,
-    ...(reviewSource?.review_context && input.reason==='order' || reviewSource?.review_context?.purpose==='repair'?{purpose:'repair'}:{})}
+    ...(reviewSource?.review_context && input.reason==='order'?{purpose:'repair'}:{})}
+    : input.reason==='corner_review_needed' && chat.review ? {...chat.review,purpose:'repair'}
     : reviewSource?.review_context && reviewSource.review_context.purpose !== 'repair' ? { ...reviewSource.review_context,
     purpose: input.reason === 'report' ? 'verdict' : 'repair' } : null;
   const commander = chat.handover?.author_id ?? opening?.authorId;

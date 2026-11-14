@@ -10,7 +10,7 @@ const ROOM = '22222222-2222-4222-8222-222222222222';
 const OWNER = 'a'.repeat(64);
 const HELPER = 'b'.repeat(64);
 const COMMAND = 'registry-connect-command';
-const REQUEST = 'registry-connect-request';
+const REQUEST = COMMAND;
 const GENERATION = 'registry-connect-generation';
 
 describe('Registry MCP connection orchestration', () => {
@@ -243,7 +243,7 @@ describe('Registry MCP connection orchestration', () => {
       (
         await database.query(
           `SELECT 1 FROM agent_commands
-       WHERE room_id=$1 AND agent_id=$2 AND action='resume' AND parent_command_id=$3`,
+       WHERE room_id=$1 AND agent_id=$2 AND action='input' AND parent_command_id=$3`,
           [ROOM, HELPER, COMMAND],
         )
       ).rowCount,
@@ -350,7 +350,7 @@ describe('Registry MCP connection orchestration', () => {
     expect(lines.rows[0]!.event_url).toBe('https://mcp.linear.app/authorize?state=resume-one');
     const resume = await database.query(
       `SELECT 1 FROM agent_commands
-       WHERE agent_id=$1 AND action='resume' AND parent_command_id=$2`,
+       WHERE agent_id=$1 AND action='input' AND parent_command_id=$2`,
       [HELPER, COMMAND],
     );
     expect(resume).toHaveProperty('rowCount', 1);
@@ -372,7 +372,7 @@ describe('Registry MCP connection orchestration', () => {
     expect(
       (
         await database.query(
-          `SELECT 1 FROM agent_commands WHERE action='resume' AND parent_command_id=$1`,
+          `SELECT 1 FROM agent_commands WHERE action='input' AND parent_command_id=$1`,
           [COMMAND],
         )
       ).rowCount,

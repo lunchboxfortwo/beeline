@@ -133,7 +133,9 @@ describe('one machine socket for every agent on a helper machine', () => {
       const database={query:vi.fn(async()=>({rows:[{owner_id:owner}],rowCount:1})),transaction:vi.fn()} as unknown as SqlDatabase;
       const presence={instanceId:'synthetic-registration',holdServerConnection:()=>()=>undefined,renewLease:async()=>undefined,
         claimConnection:vi.fn(async()=>7),releaseConnection:vi.fn(async()=>undefined)} as unknown as ConnectionPresence;
-      const {port}=await start({database,connectionPresence:presence,daemon:{execute,negotiateOwnedModel:async()=>({freeAgent:false})} as unknown as DaemonService});
+      const authentication=auth();
+      vi.mocked(authentication.authenticateDaemon).mockImplementation(async token => TOKENS[token] ? {agentId:TOKENS[token]!,ownerId:owner} : null);
+      const {port}=await start({database,auth:authentication,connectionPresence:presence,daemon:{execute,negotiateOwnedModel:async()=>({freeAgent:false})} as unknown as DaemonService});
       const client=await machine(port);
       client.send({type:'register',agentId:AGENT_A,token:'bdt_a',overlayV1:true,usageAccountV1:true});
       const registered=await client.next(frame=>frame.type==='registered'&&frame.agentId===AGENT_A);
