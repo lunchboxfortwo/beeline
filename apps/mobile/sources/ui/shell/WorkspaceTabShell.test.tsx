@@ -7,7 +7,7 @@ const f=vi.hoisted(()=>({path:'/beeline/people',desktop:false,titleRenders:0,ide
 vi.mock('react-native',()=>({Platform:{OS:'ios',select:(choices:any)=>choices.ios??choices.default}}));
 vi.mock('tamagui',async()=> (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
 vi.mock('lucide-react-native',async()=> (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
-vi.mock('react-native-safe-area-context',()=>({useSafeAreaInsets:()=>({top:0,right:0,bottom:0,left:0})}));
+vi.mock('react-native-safe-area-context',()=>({useSafeAreaInsets:()=>({top:24,right:0,bottom:0,left:0})}));
 vi.mock('expo-router',()=>({usePathname:()=>f.path,router:{replace:f.replace,push:vi.fn()}}));
 vi.mock('@/utils/responsive',()=>({useIsDesktop:()=>f.desktop}));
 vi.mock('@/buzz/use-active-community',()=>({useActiveCommunityId:()=> 'ws'}));
@@ -22,6 +22,7 @@ vi.mock('@/ui/grammar',async()=>{
 import {WorkspaceTabShell} from './WorkspaceTabShell';
 import {TabHeader} from './TabHeader';
 import {ChatListHeader} from '@/ui/screens/chats/ChatListHeader';
+import {SafeTop} from '@/ui/grammar';
 
 let tree:any;
 beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;f.path='/beeline/people';f.desktop=false;f.titleRenders=0;
@@ -29,6 +30,60 @@ beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;f.path='/beeli
 afterEach(()=>{if(tree)act(()=>tree.unmount());tree=undefined;});
 function Tab({label}:{label:string}){return <><TabHeader workspaceName={label} scrolled={false}/><span>{label}</span></>;}
 const app=(label:string)=><WorkspaceTabShell><Tab key={f.path} label={label}/></WorkspaceTabShell>;
+
+function headerDisplay() {
+    let node=tree.root.findByType(SafeTop).parent;
+    while(node && node.props.display===undefined)node=node.parent;
+    return node?.props.display;
+}
+
+it.each([
+    '/', '/index', '/beeline', '/beeline/', '/beeline/index',
+    ...['channels','tray','people','settings'].flatMap(tab=>[
+        `/beeline/${tab}`, `/beeline/${tab}/`, `/beeline/${tab}/index`, `/beeline/${tab}/index/`,
+    ]),
+])('shows the pinned header and safe area on the phone tab root %s',async(path)=>{
+    f.path=path;
+    await act(async()=>{tree=create(app('Workspace'));});
+    expect(headerDisplay()).toBe('flex');
+    expect(tree.root.findByType(SafeTop).findByType('YStack').props.height).toBe(24);
+});
+
+it('shows the header on cold launch and when returning to Chats after every other tab',async()=>{
+    f.path='/';
+    await act(async()=>{tree=create(app('Workspace'));});
+    expect(headerDisplay()).toBe('flex');
+    for(const path of ['/beeline/tray','/beeline/channels','/beeline/people','/beeline/channels','/beeline/settings','/beeline/channels','/']){
+        f.path=path;await act(async()=>tree.update(app('Workspace')));
+        expect(headerDisplay()).toBe('flex');
+    }
+});
+
+it('keeps Chats controls above its list and connected on the saved-session landing',async()=>{
+    f.path='/';
+    const onNew=vi.fn();const onSearch=vi.fn();
+    await act(async()=>{tree=create(<WorkspaceTabShell>
+        <TabHeader workspaceName="Workspace" scrolled={false} onNew={onNew}
+            search={{open:false,query:'',chips:[]}} onSearch={onSearch}/>
+        <span>Chat list</span>
+    </WorkspaceTabShell>);});
+    expect(headerDisplay()).toBe('flex');
+    const header=tree.root.findByType(ChatListHeader);
+    expect(header.props.workspaceName).toBe('Tubing Crew');
+    const control=(id:string)=>tree.root.find((node:any)=>typeof node.type==='string'&&node.props.testID===id);
+    act(()=>control('room-search-open').props.onPress());
+    expect(onSearch).toHaveBeenCalledWith({open:true,query:'',chips:[]});
+    act(()=>control('new-chat').props.onPress());
+    expect(onNew).toHaveBeenCalledOnce();
+    expect(tree.root.findByType('span').props.children).toBe('Chat list');
+});
+
+it.each(['/beeline/chat/room','/beeline/settings/workbench','/beeline/members','/beeline/community','/artifact-viewer'])
+('leaves the screen header in charge on %s',async(path)=>{
+    f.path=path;
+    await act(async()=>{tree=create(app('Workspace'));});
+    expect(headerDisplay()).toBe('none');
+});
 
 it('keeps one named header across tab mounts, with no placeholder or repeated cache reads',async()=>{
     await act(async()=>{tree=create(app('Workspace'));});

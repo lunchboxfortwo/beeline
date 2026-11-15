@@ -12,7 +12,7 @@ import {clientResetGeneration,subscribeClientReset} from '@/sync/client-reset';
 import {BuzzCommunityShell} from '@/components/buzz/CommunityRail';
 import {useIsDesktop} from '@/utils/responsive';
 import {TabHeaderHost} from './TabHeader';
-import {TAB_ROUTES,tabForPath} from './tab-routes';
+import {TAB_ROUTES,isTabRootPath,tabForPath} from './tab-routes';
 
 /** Mounted above the phone stack, so changing tabs cannot reload its name. */
 export function WorkspaceTabShell({children}:{children:React.ReactNode}) {
@@ -44,7 +44,7 @@ function PhoneWorkspaceShell({children}:{children:React.ReactNode}) {
         const tab=tabForPath(pathname)??'chats';
         router.replace({pathname:TAB_ROUTES[tab],params:tab==='settings'?{workspaceId:id}:{communityId:id}} as never);
     },[scope,pathname]);
-    const root=Object.values(TAB_ROUTES).includes(pathname)||pathname==='/beeline/settings/index';
+    const root=isTabRootPath(pathname);
     return <BuzzCommunityShell communities={communities} activeCommunityId={active??null} onSelect={select}
         onAdd={()=>router.push('/beeline/community')}>
         <YStack flex={1} minHeight={0}>

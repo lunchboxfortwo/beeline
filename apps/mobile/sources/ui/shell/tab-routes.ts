@@ -6,6 +6,14 @@ export const TAB_ROUTES: Record<Tab, string> = {
     people: '/beeline/people',
     settings: '/beeline/settings',
 };
+
+/** Root aliases share the pinned header; pushed screens own their own header. */
+export function isTabRootPath(pathname: string): boolean {
+    const path = pathname.replace(/\/+$/, '').replace(/\/index$/, '');
+    // Saved-session launch renders Chats directly at / without a redirect.
+    return path === '' || path === '/beeline' || Object.values(TAB_ROUTES).includes(path);
+}
+
 // Places that own the whole screen on a phone: no tab bar under them.
 const BARE = [
     '/beeline/chat/', '/beeline/onboarding', '/beeline/community', '/beeline/create-workspace',
