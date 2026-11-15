@@ -1,4 +1,4 @@
-import { piNoRetrySettings } from './pi-retry-settings.js';
+import { piRetrySettings } from './pi-retry-settings.js';
 /**
  * Per-room-instance harness state directories.
  *
@@ -232,12 +232,12 @@ export async function provisionAgentSkillsAndMcp(
     squireScope,
   );
   await provisionPiCustomModelConfig(root, operatorHome, failClosed, openRouterRouting);
-  // Keep the transport deadline, but never replay failed provider work.
+  // Keep the transport deadline and let Pi retry a temporary model failure twice.
   // Generate isolated settings rather than inheriting operator retry defaults.
   if (appliesToHarness(agentKind, 'pi')) {
     const settings = {
       httpIdleTimeoutMs: 300_000,
-      ...piNoRetrySettings(),
+      ...piRetrySettings(),
     };
     await writeIsolatedHarnessFile(
       resolve(root, 'pi', 'settings.json'),

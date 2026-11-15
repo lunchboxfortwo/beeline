@@ -1,4 +1,4 @@
-/** Disable both Pi conversation retries and provider SDK retries. */
-export function piNoRetrySettings() {
-  return { retry: { enabled: false, maxRetries: 0, provider: { maxRetries: 0 } } } as const;
+/** Let Pi retry a model request that fails with a temporary error (a dropped stream, a 5xx, overload) at most twice. */
+export function piRetrySettings() {
+  return { retry: { enabled: true, maxRetries: 2, provider: { maxRetries: 2 } } } as const;
 }
