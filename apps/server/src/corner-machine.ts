@@ -100,7 +100,9 @@ export function transitionCorner(
   const redKey = `red:${headSha}`;
   const sameTarget = current.headSha === headSha && current.pullRequest === pullRequest;
   // A receipt cannot suppress a wake whose durable command was lost.
-  const effects = (sameTarget ? [...(current.effects ?? [])] : []).filter(
+  // PR movement cannot replenish a person's idle-report budget, including
+  // after old completed queue rows have been retired.
+  const effects = (current.effects ?? []).filter(key => sameTarget || key.startsWith('idle:')).filter(
     (key) =>
       (key !== `merge-conflict:${headSha ?? ''}` || f.mergeConflictDelivered !== false) &&
       !(f.lostEffects ?? []).includes(key),

@@ -281,7 +281,7 @@ describe('corner_owed', () => {
     await step(idle);
   });
 
-  it('keeps a question card owed after a commander reply clears Waiting', async () => {
+  it('keeps a question card waiting until its native answer or close', async () => {
     const question = (status: string) => ({
       mode: 'question',
       status,
@@ -294,7 +294,7 @@ describe('corner_owed', () => {
     });
     await step(blockingToViewer);
     await post('chatter', OWNER, 'Let me think.');
-    await step(owedToViewer);
+    await step(blockingToViewer);
     expect((await database.query(`SELECT card->>'status' status FROM messages WHERE id='question'`)).rows)
       .toEqual([{status:'open'}]);
     await database.query(
@@ -314,7 +314,7 @@ describe('corner_owed', () => {
     await step(idle);
   });
 
-  it('keeps a grant pending and owed after a commander reply clears Waiting', async () => {
+  it('keeps a grant waiting until its native decision', async () => {
     const grantId = '99999999-9999-4999-8999-999999999999';
     await database.query(
       `INSERT INTO agent_grants(id,agent_id,workspace_id,kind,target,reason,requested_by,room_id,status)
@@ -329,7 +329,7 @@ describe('corner_owed', () => {
     });
     await step(blockingToViewer);
     await post('chatter', OWNER, 'Looking.');
-    await step(owedToViewer);
+    await step(blockingToViewer);
     expect((await database.query(`SELECT status FROM agent_grants WHERE id=$1`,[grantId])).rows)
       .toEqual([{status:'pending'}]);
     await database.query(`UPDATE agent_grants SET status='approved' WHERE id=$1`, [grantId]);

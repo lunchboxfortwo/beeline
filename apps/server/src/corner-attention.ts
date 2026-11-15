@@ -4,6 +4,7 @@ import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import type { SqlDatabase } from './database.js';
 import type { LiveHub } from './live.js';
 import { humanReportCornerSql } from './corner-waiting-report.js';
+import { cornerImplementerSql } from './corner-worker.js';
 
 export const CORNER_ATTENTION_SCHEMA = `
 ALTER TABLE needs_you_marks ADD COLUMN IF NOT EXISTS reminder_dismissed_at timestamptz;
@@ -55,17 +56,31 @@ BEGIN
     IF NEW.private_payload->>'kind'='report' THEN
       SELECT id INTO corner FROM rooms WHERE id::text=COALESCE(NEW.private_payload->>'originCornerId',NEW.private_payload->>'fromRoomId');
     END IF;
-  ELSIF TG_TABLE_NAME IN ('agent_turns','agent_schedules','messages') THEN
+  ELSIF TG_TABLE_NAME IN ('agent_turns','agent_schedules','messages','agent_grants') THEN
     corner=COALESCE(NEW.room_id,OLD.room_id);
   ELSE corner=COALESCE(NEW.corner_id,OLD.corner_id); END IF;
   IF TG_TABLE_NAME='messages' THEN
-   IF NEW.card->>'reportToId' IS NOT NULL OR COALESCE(NEW.card_type='agent-command'
+   IF NEW.presentation='card' AND NEW.card->>'decidedAt' IS NOT NULL AND EXISTS (
+    SELECT 1 FROM identities person WHERE person.id=NEW.author_id AND person.kind='human'
+      AND person.id<>'${SYSTEM_IDENTITY_ID}') THEN
+    corner=NEW.room_id;
+   ELSIF (NEW.presentation='activity' OR NEW.presentation='card') AND EXISTS (
+    SELECT 1 FROM rooms activity_corner JOIN corner_facts activity_fact ON activity_fact.corner_id=activity_corner.id
+    WHERE activity_corner.id=NEW.room_id AND NEW.author_id=${cornerImplementerSql('activity_fact','activity_corner')}) THEN
+    corner=NEW.room_id;
+   ELSIF NEW.card->>'reportToId' IS NOT NULL OR COALESCE(NEW.card_type='agent-command'
      AND NEW.card->>'kind'='report' AND NEW.card->>'text' ~ '^(needs-decision|blocked):',false) THEN
     SELECT id INTO corner FROM rooms WHERE id::text=${humanReportCornerSql('NEW')};
    ELSIF TG_OP<>'INSERT' OR NOT (
     NEW.presentation='message' AND NEW.system_event IS NULL
     AND NEW.author_id<>'${SYSTEM_IDENTITY_ID}'
     AND EXISTS(SELECT 1 FROM identities WHERE id=NEW.author_id AND kind='human')) THEN RETURN NULL; END IF;
+   IF corner=NEW.room_id AND NEW.reply_to_message_id IS NOT NULL THEN
+    SELECT origin.id INTO corner FROM messages addressed JOIN rooms origin
+      ON origin.id::text=COALESCE(addressed.card->>'sourceRoomId',addressed.room_id::text)
+      AND origin.parent_id IS NOT NULL WHERE addressed.id=NEW.reply_to_message_id;
+    corner=COALESCE(corner,NEW.room_id);
+   END IF;
   END IF;
   IF NOT EXISTS(SELECT 1 FROM rooms WHERE id=corner AND parent_id IS NOT NULL) THEN RETURN NULL; END IF;
   PERFORM ${notifyCornerStateSql('corner')};
@@ -94,6 +109,9 @@ CREATE TRIGGER corner_activity_owed AFTER INSERT OR UPDATE OR DELETE ON corner_o
  FOR EACH ROW EXECUTE FUNCTION notify_corner_activity();
 DROP TRIGGER IF EXISTS corner_activity_schedule ON agent_schedules;
 CREATE TRIGGER corner_activity_schedule AFTER INSERT OR UPDATE OR DELETE ON agent_schedules
+ FOR EACH ROW EXECUTE FUNCTION notify_corner_activity();
+DROP TRIGGER IF EXISTS corner_activity_grant ON agent_grants;
+CREATE TRIGGER corner_activity_grant AFTER INSERT OR UPDATE OF status,decided_at,expires_at,superseded_at OR DELETE ON agent_grants
  FOR EACH ROW EXECUTE FUNCTION notify_corner_activity();
 
 -- Configuration and reachability changes invalidate affected corners once per

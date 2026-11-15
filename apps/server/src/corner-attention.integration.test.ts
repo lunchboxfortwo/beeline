@@ -129,6 +129,10 @@ it('IDLE-QUEUE: retains the episode metadata and permits an unchanged status to 
   expect((await db.query('SELECT id FROM messages WHERE author_id=$1 AND request_id=$2',
     [COMMANDER, notice!.turnRequestId])).rows).toEqual([]);
   await refreshCornerAttention(db, C);
+  const [second] = await commanderFlags();
+  expect(second).toBeDefined();
+  await daemon.execute('markAgentTurnSilent', { roomId: C, requestId: second!.turnRequestId }, COMMANDER);
+  await refreshCornerAttention(db, C);
   expect(await commanderFlags()).toEqual([]);
 });
 
@@ -353,15 +357,24 @@ it('Reproduction IDLE-1: incidental orders cannot redirect an idle alert from it
   expect((await readAgentCommands(db, WORKER, C)).commands).toHaveLength(0);
 });
 
-it.each(['failed', 'complete'])('Reproduction IDLE-STORM: commander %s does not reopen its own idle episode', async (status) => {
+it.each(['failed', 'complete'])('Reproduction IDLE-STORM: commander %s exhausts the two-notice person budget', async (status) => {
   await ci('passing');
   await refreshCornerAttention(db, C);
-  expect(await commanderFlags()).toHaveLength(1);
-  await turn(COMMANDER);
-  await refreshCornerAttention(db, C);
-  await db.query(`UPDATE agent_turns SET status=$2 WHERE room_id=$1 AND agent_id=$3`, [C,status,COMMANDER]);
-  await refreshCornerAttention(db, C);
-  expect((await db.query(`SELECT id FROM agent_commands WHERE reason='report'`)).rows).toHaveLength(1);
+  const idleSince = (await db.query(cornerIdleSql('$1'), [C])).rows[0]!.idle_since;
+  for (let slot = 0; slot < 2; slot++) {
+    await refreshCornerAttention(db, C);
+    const [notice] = (await commanderFlags()).filter(command => command.source.body.includes(' is idle.'));
+    expect(notice).toBeDefined();
+    await startQueuedCommand(daemon, { roomId: C, commandId: notice!.id }, COMMANDER);
+    await daemon.execute('report', { roomId: C, requestId: notice!.turnRequestId,
+      status: status === 'failed' ? 'failed' : 'done', text: 'Still waiting on secrets.' }, COMMANDER);
+    expect((await db.query('SELECT status FROM agent_turns WHERE request_id=$1', [notice!.turnRequestId])).rows)
+      .toEqual([{ status }]);
+    expect((await db.query(cornerIdleSql('$1'), [C])).rows[0]!.idle_since).toBe(idleSince);
+  }
+  for (let replay = 0; replay < 5; replay++) await refreshCornerAttention(db, C);
+  expect((await db.query(`SELECT id FROM agent_commands WHERE private_payload->>'authorId'=$1
+    AND private_payload->>'text' LIKE 'blocked: Corner % is idle.%'`, [SYSTEM_IDENTITY_ID])).rows).toHaveLength(2);
 });
 
 // Isolated service reads stand in for the production phone and agent surfaces.
@@ -439,18 +452,20 @@ it('Reproduction R1: a worker order waiting on an offline helper stays working',
   expect(await state()).toBe('idle');
 });
 
-it('IDLE-DERIVED: a human-directed report resolves from the message log once answered', async () => {
+it('WORKER-BLOCK: a human answer is input, not worker output that lifts the block', async () => {
   await db.query(`UPDATE agent_commands SET private_payload=jsonb_set(private_payload,'{authorId}',to_jsonb($1::text)) WHERE room_id=$2 AND reason='corner_objective'`,[HUMAN,C]);
-  const { reportToCommander } = await import('./commander.js');
-  const report = await reportToCommander(db,C,WORKER,'blocked: Which scope?');
+  const command = (await wake())!;
+  await startQueuedCommand(daemon, { roomId: C, commandId: command.id }, WORKER);
+  const report = await daemon.execute('report', { roomId:C, requestId:command.turn_request_id,
+    status:'blocked',text:'Which scope?' }, WORKER);
   expect(await cornerReportWaiting(db, C)).toBe(true);
-  const at = new Date(Date.now()-60_000);
-  await db.query('UPDATE messages SET created_at=$2 WHERE id=$1',[report.id,new Date(at.getTime()-60_000)]);
-  await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,created_at,reply_to_message_id)
-    VALUES('human-report-answer',$1,$2,'Narrow scope','message',$3,$4)`,[ROOM,HUMAN,at,report.id]);
-  expect(await cornerReportWaiting(db, C)).toBe(false);
-  const row = (await db.query<{idle_since:string}>(cornerIdleSql('$1'),[C])).rows[0]!;
-  expect(Number(row.idle_since)).toBeCloseTo(at.getTime()/1000,3);
+  await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,reply_to_message_id)
+    VALUES('human-report-answer',$1,$2,'Narrow scope','message',$3)`,[ROOM,HUMAN,report.id]);
+  expect(await cornerReportWaiting(db, C)).toBe(true);
+  const next = (await wake(WORKER, randomUUID()))!;
+  await startQueuedCommand(daemon, { roomId:C,commandId:next.id }, WORKER);
+  await daemon.execute('report', { roomId:C,requestId:next.turn_request_id,status:'done',text:'Finished.' }, WORKER);
+  expect(await cornerReportWaiting(db,C)).toBe(false);
 });
 
 it('IDLE-DERIVED: an owed item in the return Room resolves at its first answering message', async () => {
@@ -461,11 +476,11 @@ it('IDLE-DERIVED: an owed item in the return Room resolves at its first answerin
   await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,created_at)
     VALUES('return-answer',$1,$2,'The narrow scope','message',$3)`,[ROOM,HUMAN,at]);
   expect((await db.query('SELECT 1 FROM corner_owed WHERE corner_id=$1',[C])).rows).toEqual([]);
-  const idleSince = async () => (await db.query<{idle_since:string}>(cornerIdleSql('$1'),[C])).rows[0]!.idle_since;
-  expect(Number(await idleSince())).toBeCloseTo(at.getTime()/1000,3);
+  const answerTime = async () => (await db.query<{at:string}>(`SELECT extract(epoch FROM ended_at)::text at FROM (${cornerOwedAnswerTimesSql('$1')}) answers`,[C])).rows[0]!.at;
+  expect(Number(await answerTime())).toBeCloseTo(at.getTime()/1000,3);
   await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation)
     VALUES('later-return-answer',$1,$2,'More context','message')`,[ROOM,HUMAN]);
-  expect(Number(await idleSince())).toBeCloseTo(at.getTime()/1000,3);
+  expect(Number(await answerTime())).toBeCloseTo(at.getTime()/1000,3);
   await db.query(`UPDATE messages SET deleted_at=now() WHERE id IN ('return-answer','later-return-answer')`);
   expect((await db.query(cornerOwedAnswerTimesSql('$1'),[C])).rows).toEqual([]);
 });

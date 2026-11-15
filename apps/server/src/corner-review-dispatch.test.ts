@@ -1,4 +1,5 @@
 import { cornerRunStateSql, assembleTurnPrompt, cornerReviewerInstruction, describe, expect, it, vi, DaemonService, LiveHub, systemLine, createAgentCommand, reconcileConfiguredCornerReviewers, advanceCorner, H, A, B, W, R, C, db, phone, daemon, commands, claim, result, greenHead, rootFixture, type AgentCommand } from './test-support-corner-review-dispatch.test-support.js';
+import { modelText } from './message-origin.js';
 
 describe('corner message attribution', () => {
   it('REVIEW-SOURCE-1 reads only current brief citations during an assigned review', async () => {
@@ -474,14 +475,20 @@ describe('corner message attribution', () => {
     });
 
 
-  it('Reproduction REVIEW-FAIL-HANDOFF-1: an explicit wait postpones handback without reporting a wake failure', async () => {
+  it('Reproduction REVIEW-FAIL-HANDOFF-1: an explicit block postpones handback until worker output', async () => {
     await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
     await greenHead(82, 'a'.repeat(40));
     const [review] = await commands(B, C);
     await claim(review!);
     await result(review!, 'FAIL: demonstrate the missing user path.');
-    await rootFixture.db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,card)
-      VALUES('explicit-wait',$1,$2,'blocked: waiting for a decision','message',jsonb_build_object('reportToId',$3::text))`, [C, A, H]);
+    const work = async () => {
+      const queued = (await createAgentCommand(rootFixture.db, { roomId: C, agentId: A, sourceMessageId: null,
+        reason: 'order', privatePayload: { kind: 'order', authorId: H, fromRoomId: C, text: modelText('Continue.') } }))!;
+      const command = (await commands(A, C)).find(item => item.id === queued.id)!;
+      await claim(command);
+      return { roomId: C, requestId: command.turnRequestId };
+    };
+    await rootFixture.daemon.execute('report', { ...await work(), status: 'blocked', text: 'Waiting for a decision.' }, A);
     for (let cycle = 0; cycle < 3; cycle++) await reconcileConfiguredCornerReviewers(rootFixture.db, R);
     expect(await commands(B, C)).toHaveLength(0);
     expect(await commands(A, C)).toHaveLength(0);
@@ -489,6 +496,9 @@ describe('corner message attribution', () => {
     await rootFixture.phone.execute('sendRoomMessage', {
       roomId: C, messageId: 'e'.repeat(64), text: 'Proceed with the demonstration.',
     }, H);
+    await reconcileConfiguredCornerReviewers(rootFixture.db, R);
+    expect((await commands(A, C)).filter(c => c.reason === 'corner_review_needed')).toHaveLength(0);
+    await rootFixture.daemon.execute('report', { ...await work(), status: 'done', text: 'The implementation is ready.' }, A);
     await reconcileConfiguredCornerReviewers(rootFixture.db, R);
     expect((await commands(A, C)).filter(c => c.reason === 'corner_review_needed')).toHaveLength(1);
   });

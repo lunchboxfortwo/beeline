@@ -36,8 +36,9 @@ it.each((['Room', 'DM'] as const).flatMap(surface => (['blocked', 'needs_decisio
   const inspection = (await commands(opened.cornerId, RUBY)).find(command => command.sourceMessageId === messageId)!;
   await claim(inspection);
   const result = await rootFixture.daemon.execute('report', { ...authority(inspection), status, text: 'Choose the endpoint' }, RUBY);
-  expect((await rootFixture.db.query(`SELECT room_id,card->>'reportToId' recipient FROM messages WHERE id=$1`, [result.id])).rows)
-    .toEqual([{ room_id: sourceRoom, recipient: ['blocked', 'needs_decision'].includes(status) ? HUMAN : null }]);
+  expect((await rootFixture.db.query(`SELECT room_id,card->>'reportToId' recipient,
+    card->>'reportStatus' status,card->>'sourceRoomId' origin FROM messages WHERE id=$1`, [result.id])).rows)
+    .toEqual([{ room_id: sourceRoom, recipient: HUMAN, status: status.replace('_', '-'), origin: opened.cornerId }]);
   expect((await rootFixture.db.query(`SELECT id FROM messages WHERE room_id=$1 AND text=$2 AND presentation='message'`,
     [opened.cornerId, `${status.replace('_', '-')}: Choose the endpoint`])).rows).toEqual([]);
 });

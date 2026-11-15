@@ -8,7 +8,7 @@ export const cornerRoomColumnsSql = `c.id,c.workspace_id,${repositoryMarkColumns
   (column) => `c.${column}`,
 ).join(',')}`;
 export const CORNER_ROW_FACT_COLUMNS = [
-  'locked', 'machine',
+  'locked', 'machine', 'reviewer_agent_id',
 ] as const;
 /** The GitHub display cache (`gh`, `corner_github_cache`) columns the corner row reads. */
 export const CORNER_ROW_CACHE_COLUMNS = [
@@ -18,7 +18,7 @@ export const CORNER_ROW_CACHE_COLUMNS = [
 export const CORNER_ROW_MESSAGE_COLUMNS = [
   'id', 'room_id', 'author_id', 'text', 'created_at', 'presentation', 'deleted_at', 'card_type', 'card', 'system_event',
   // A human report's originating corner is read through its request (`humanReportCornerSql`).
-  'request_id',
+  'request_id', 'activity',
 ] as const;
 
 /** For a row trigger: the row was inserted or deleted, or one of `columns` changed. */

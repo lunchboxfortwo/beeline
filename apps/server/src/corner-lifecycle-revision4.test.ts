@@ -41,7 +41,7 @@ describe('revision 4 simple corner review model', () => {
     expect(next).toHaveLength(1);
     expect(next[0]!.id).not.toBe(review!.id);
   });
-  it('C-2: peer activity retains Working without suppressing the green-head review', async () => {
+  it('C-2: unrelated peer activity preserves Review and the green-head review dispatch', async () => {
     const peer='d'.repeat(64);
     await rootFixture.db.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'agent','Peer','peer')`,[peer]);
     await rootFixture.db.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`,[peer,H]);
@@ -54,7 +54,7 @@ describe('revision 4 simple corner review model', () => {
     await greenHead(106,'6'.repeat(40));
     expect((await commands(B,C)).filter(command=>command.reason==='corner_review_dispatch')).toHaveLength(1);
     expect((await rootFixture.db.query(`SELECT machine->>'state' state FROM corner_facts WHERE corner_id=$1`,[C])).rows)
-      .toEqual([{state:'working'}]);
+      .toEqual([{state:'review'}]);
   });
 
   it('C-2: a green handoff during same-head repair dispatches after the implementer finishes', async () => {

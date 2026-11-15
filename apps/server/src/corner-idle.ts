@@ -1,4 +1,4 @@
-import { cornerOwedAnswerTimesSql, cornerReportAnswerTimesSql } from './corner-owed.js';
+import { cornerIdleBudgetSql } from './corner-idle-budget.js';
 import { cornerImplementerSql } from './corner-worker.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { cornerBlockerSql, cornerScheduledWaitSql, cornerWorkSql,
@@ -10,6 +10,9 @@ export type CornerIdleRow = CornerStateRow & {
   parent_id: string;
   /** Epoch seconds kept as text to preserve PostgreSQL's microsecond precision. */
   idle_since: string;
+  person_since: string;
+  idle_report_count: number;
+  idle_report_pending: boolean;
   suppressed: boolean;
 };
 
@@ -18,7 +21,7 @@ export type CornerIdleRow = CornerStateRow & {
  * Deleted schedules have no surviving end timestamp; expired schedules alone,
  * without another event, do not open a new idle episode.
  */
-export function cornerIdleSql(cornerId: string, includeCommander = false): string {
+export function cornerIdleSql(cornerId: string): string {
   return `WITH live_corner AS MATERIALIZED (
     SELECT rooms.* FROM rooms WHERE id=${cornerId} AND parent_id IS NOT NULL AND archived_at IS NULL
   ) SELECT snapshot.*,
@@ -26,10 +29,12 @@ export function cornerIdleSql(cornerId: string, includeCommander = false): strin
       AND NOT (worker_active OR reviewer_active OR blocking OR suppressed)) idle_eligible
     FROM (SELECT c.id,c.name,c.parent_id,c.archived_at,gh.lifecycle,f.locked,f.machine,
       activity.worker_active,activity.reviewer_active,NULL::text latest_turn_status,
+      extract(epoch FROM person_epoch.at)::text person_since,
+      idle_budget.report_count idle_report_count,idle_budget.pending idle_report_pending,
       blocker.item_id IS NOT NULL blocking,blocker.item_id waiting_item_id,
       blocker.reason waiting_reason,blocker.kind waiting_kind,blocker.person_id waiting_person_id,
       CASE WHEN ended.status='complete' AND ended.ended_at>=boundary.at THEN ended.ended_at END last_turn_ended_at,
-      extract(epoch FROM GREATEST(c.created_at,ended.ended_at,boundary.at,
+      extract(epoch FROM GREATEST(c.created_at,ended.ended_at,boundary.at,person_epoch.at,
         to_timestamp(COALESCE(gh.lifecycle->'checksSummary'->>'statusChangedAt',
           gh.lifecycle->'checksSummary'->>'updatedAt')::double precision)))::text idle_since,
       (${cornerScheduledWaitSql('c')}
@@ -44,9 +49,10 @@ export function cornerIdleSql(cornerId: string, includeCommander = false): strin
       ) IS TRUE suppressed
       FROM live_corner c JOIN corner_facts f ON f.corner_id=c.id
       LEFT JOIN corner_github_cache gh ON gh.corner_id=c.id
-      ${cornerWorkSql(!includeCommander)} ${cornerBlockerSql()}
+      ${cornerWorkSql()} ${cornerBlockerSql()}
+      ${cornerIdleBudgetSql('c')}
       LEFT JOIN LATERAL (SELECT turn.ended_at,turn.status FROM agent_turns turn
-        WHERE turn.room_id=c.id AND turn.agent_id IS DISTINCT FROM c.created_by
+        WHERE turn.room_id=c.id AND turn.agent_id=${cornerImplementerSql('f', 'c')}
         ORDER BY turn.ended_at DESC NULLS LAST,turn.created_at DESC LIMIT 1) ended ON true
       CROSS JOIN LATERAL (SELECT GREATEST(c.created_at,
         (SELECT max(latest.created_at) FROM identities author CROSS JOIN LATERAL (
@@ -57,9 +63,7 @@ export function cornerIdleSql(cornerId: string, includeCommander = false): strin
         ) latest WHERE author.kind='human' AND author.id<>'${SYSTEM_IDENTITY_ID}'),
         (SELECT max(released_at) FROM corner_merge_holds WHERE corner_id=c.id),
         (SELECT max(expires_at) FROM corner_owed WHERE corner_id=c.id AND expires_at<=now()),
-        -- Local human answers are already bounded by the latest human message above.
-        (SELECT max(ended_at) FROM (${cornerOwedAnswerTimesSql('c.id', true)}) answered_owed),
-        (SELECT max(ended_at) FROM (${cornerReportAnswerTimesSql('c.id')}) answered_report)
+        person_epoch.at
       ) at OFFSET 0) boundary
       ) snapshot`;
 }

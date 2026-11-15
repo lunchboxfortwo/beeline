@@ -64,6 +64,11 @@ it('stores private orders and reports once in the queue without transcript copie
   expect((await commands(opened.cornerId, WORKER)).find(c => c.reason === 'order'))
     .toMatchObject({ private: true, source: { authorId: RUBY, body: 'Use endpoint v2' } });
   expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND card_type='agent-command'`,[opened.cornerId])).rowCount).toBe(0);
+  await advanceCorner(rootFixture.db, opened.cornerId, { kind: 'reconcile' });
+  expect(await rootFixture.daemon.execute('getCornerRestoreState', { cornerId: opened.cornerId }, WORKER))
+    .toMatchObject({ state: 'waiting' });
+  expect((await rootFixture.db.query(`SELECT private_payload->>'reportStatus' status FROM agent_commands WHERE id=$1`, [report.id])).rows)
+    .toEqual([{ status: 'blocked' }]);
   expect((await rootFixture.db.query(`SELECT count(*)::int n FROM messages WHERE room_id=ANY($1::uuid[])`,[[ROOM,DM]])).rows[0]!.n).toBe(before);
   expect(await unread()).toBe(unreadBefore);
 });
@@ -77,7 +82,8 @@ it.each(['needs_decision: choose the product scope', 'needs-decision: choose the
   await rootFixture.daemon.execute('report', { status: text.split(':')[0]!.replace('-', '_') as import('@beeline/api-contract/daemon').AgentReportStatus, ...authority(report), text: inputText, ask: 'Which product scope should we use?' }, RUBY);
   const rows = (await rootFixture.db.query(`SELECT room_id,author_id,text,card FROM messages WHERE text=$1`,
     [text])).rows;
-  expect(rows).toEqual([{ room_id: DM, author_id: RUBY, text, card: { ask: 'Which product scope should we use?', reportToId: HUMAN } }]);
+  expect(rows).toEqual([{ room_id: DM, author_id: RUBY, text, card: { ask: 'Which product scope should we use?', reportToId: HUMAN,
+    reportStatus: 'needs-decision', sourceRoomId: opened.cornerId } }]);
   expect((await rootFixture.phone.readRoom(DM, HUMAN))?.messages.some(m => m.text === rows[0]!.text)).toBe(true);
 });
 
@@ -687,7 +693,7 @@ it('a green head whose reviewer command cannot be queued reports the reason to i
     await rootFixture.daemon.execute('postRoomMessage',{...authority(turn),text:'The work is ready for review.'},WORKER);
     await systemLine(rootFixture.db, { roomId: opened.cornerId, authorId: WORKER, subject: GITHUB_SUBJECT,
       verb: 'passed checks', kind: 'check-passed' });
-    const report=(await commands(opened.cornerId,RUBY)).find(c=>c.reason==='report'&&c.source.body.startsWith('blocked:'));
+    const report=(await commands(opened.cornerId,RUBY)).find(c=>c.reason==='attention_report'&&c.source.body.startsWith('blocked:'));
     expect(report?.source.body).toMatch(/^blocked:.*reviewer/);
     expect(report?.private).toBe(true);
     expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE text LIKE '%restore review dispatch%'`)).rowCount).toBe(0);

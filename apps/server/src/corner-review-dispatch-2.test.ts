@@ -98,7 +98,7 @@ describe('corner message attribution', () => {
     try {
       await reconcileConfiguredCornerReviewers(rootFixture.db, R);
       expect(await commands(B, C)).toHaveLength(0);
-      expect((await commands(A,R)).filter(command=>command.reason==='report')
+      expect((await commands(A,R)).filter(command=>command.reason==='attention_report')
         .some(command => command.private && command.source.body.includes('reviewer command could not be queued'))).toBe(true);
       expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND text LIKE '%review queue denied by trigger%'`, [C])).rowCount).toBe(0);
       const handback = (await commands(A, C)).filter(command => command.reason === 'corner_review_needed');
@@ -287,7 +287,7 @@ describe('corner message attribution', () => {
         )
       ).rows.map((row) => row.text),
     ).toEqual([]);
-    expect((await commands(A,R)).filter(command=>command.reason==='report')
+    expect((await commands(A,R)).filter(command=>command.reason==='attention_report')
       .some(command=>command.private && command.source.body.includes('no reviewer is configured'))).toBe(true);
   });
 

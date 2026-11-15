@@ -3623,6 +3623,7 @@
         "originCornerId": "existing before the registry; weekly audit reviews",
         "attachments": "existing before the registry; weekly audit reviews",
         "reportedOutcome": "existing before the registry; weekly audit reviews",
+        "reportStatus": "The authenticated explicit report operation records blocked, needs-decision, done or failed; ordinary answer prose has no report status.",
         "objective": "existing before the registry; weekly audit reviews",
         "idleSince": "the idle episode a stall alert reports; delivery and claim recompute it and drop a stale alert",
         "publicPostId": "The exact committed public reply lets final private-copy failure preserve its successful result, including cross-address posts.",
@@ -3823,6 +3824,7 @@
         "commandId": "existing before the registry; weekly audit reviews",
         "trigger": "existing before the registry; weekly audit reviews",
         "reportToId": "the person a human-directed worker report addresses; written with the report, it scopes the derived wait",
+        "reportStatus": "The explicit report operation records its outcome independently of presentation text.",
         "owner": "the person who decides a grant-request card; written with the card, it keeps asks with different deciders on separate cards"
       },
       "legacy_event": {

@@ -1,5 +1,7 @@
 import { createHash, describe, expect, it, vi, cornerRunStateSql, generateKeyPair, exportPKCS8, GitHubAppClient, GitHubHttpError, GitHubOAuthClient, seedCornerOpening, setCornerOwner, GitHubOperations, readAgentCommands, DaemonService, LiveHub, PhoneService, readRoomView, HUMAN, REVIEWER, fixtureScope1, type SqlDatabase } from './test-support-github-operations.test-support.js';
 import { readFileSync } from 'node:fs';
+import { createAgentCommand } from './agent-command.js';
+import { modelText } from './message-origin.js';
 import { reconcileConfiguredCornerReviewers } from './agent-command-reconcile-configured-corner-reviewers.js';
 import { runInNewContext } from 'node:vm';
 import { transformSync } from 'esbuild';
@@ -825,12 +827,21 @@ const scope1 = fixtureScope1();
 
 
   it('Reproduction REVIEW-PR-1: a replacement queues its own review without erasing the earlier obligation', async () => {
-    const { corners, headSha, app, payload } = await scope1.checksFixture();
+    const { room, corners, headSha, app, payload } = await scope1.checksFixture();
     const corner = corners[0]!;
     const implementer = 'c'.repeat(64);
     await scope1.database.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Implementer')`, [implementer]);
     await scope1.database.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [implementer, HUMAN]);
     await setCornerOwner(scope1.database, corner, implementer);
+    // Opening provenance is completed history. Seed the pending obligation
+    // this regression promises to preserve instead of relying on an idle notice.
+    await scope1.database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
+      SELECT workspace_id,NULL,$2,'member' FROM rooms WHERE id=$1
+      UNION ALL SELECT workspace_id,id,$2,'member' FROM rooms WHERE id=$1
+      ON CONFLICT DO NOTHING`, [room, HUMAN]);
+    await createAgentCommand(scope1.database, { id: 'earlier-review-obligation', roomId: corner,
+      agentId: REVIEWER, sourceMessageId: null, reason: 'order', privatePayload: { kind: 'order',
+        authorId: HUMAN, fromRoomId: room, text: modelText('Review the earlier request.') } });
     app.readPullRequest.mockImplementation(async (_token, _repository, number) => ({
       number, headSha, url: `https://github.com/owner/widgets/pull/${number}`,
       mergeability: 'clean', state: number === 1 ? 'closed' : 'open', headRef: 'feature/corner-333333330001',
@@ -849,7 +860,7 @@ const scope1 = fixtureScope1();
     const targets = (await scope1.database.query<{ pr: number; state: string }>(
       "SELECT (review_context->>'pullRequest')::int pr,state FROM agent_commands WHERE id=ANY($1::text[]) ORDER BY pr",
       [commands.map(command => command.id)])).rows;
-    expect(targets).toEqual([{ pr: 2, state: 'pending' }, { pr: null, state: 'pending' }]);
+    expect(targets).toEqual([{ pr: 1, state: 'pending' }, { pr: 2, state: 'pending' }]);
   });
 
 

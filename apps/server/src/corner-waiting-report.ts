@@ -1,12 +1,6 @@
 import { cornerImplementerSql } from './corner-worker.js';
 import { tagsKnownIdentitySql } from './message-mentions.js';
 
-/** Forwarding an escalation remains a question, rather than an answer to its source. */
-export function reportAnswerMessageSql(message: string): string {
-  return `${message}.presentation='message' AND ${message}.system_event IS NULL AND ${message}.deleted_at IS NULL
-    AND ${message}.card->>'reportToId' IS NULL`;
-}
-
 /** The report's originating corner, including a human report in its return Room. */
 export function humanReportCornerSql(message: string): string {
   return `COALESCE(${message}.card->>'sourceRoomId',(
@@ -49,35 +43,36 @@ export function reportCardIdSql(id: string): string {
  * The one projection of a worker's explicit waits from a corner: report
  * identity, display target, card, answer targets and delivery boundary. Live,
  * detail and historical reads all consume it. An explicit private report has its
- * existing agent-command card; automatic final prose has no such card and cannot
+ * explicit report status; automatic final prose has no such marker and cannot
  * start a wait even when it says "blocked:". `message_id` is the display target;
- * `card_id` also retains cross-Room report cards so clearing marks both the
- * private command and its visible record answered. `asked_at` is the delivery
+ * `card_id` retains optional historical cross-Room report linkage. `asked_at` is the delivery
  * boundary: the visible card's time, else the report's own time. `latestOnly`
  * keeps one newest row per source so each probe stays on its index.
  */
-export function cornerReportItemsSql(cornerId: string, worker: string, latestOnly = false): string {
+function cornerReportItemsSql(cornerId: string, worker: string, latestOnly = false): string {
   const newest = (table: string) => latestOnly ? `ORDER BY ${table}.created_at DESC,${table}.id DESC LIMIT 1` : '';
   return `SELECT items.*,ARRAY[items.message_id,items.card_id] asked_items FROM (
       (SELECT command.id report_id,
         CASE WHEN command.room_id=${cornerId} THEN visible.id END message_id,
-        visible.id card_id,command.room_id return_room_id,command.created_at,visible.created_at asked_at,
+        visible.id card_id,command.room_id return_room_id,command.created_at,COALESCE(visible.created_at,command.created_at) asked_at,
+        COALESCE(command.private_payload->>'reportStatus',substring(command.private_payload->>'text' FROM '^([^:]+):')) report_status,
         command.agent_id commander_id,command.private_payload->>'text' text,
         command.private_payload->>'waitingAnswered' answered,command.id sort_id
       FROM agent_commands command
-      JOIN messages visible ON visible.id=${reportCardIdSql('command.id')}
+      LEFT JOIN messages visible ON visible.id=${reportCardIdSql('command.id')}
         AND visible.card_type='agent-command' AND visible.card->>'kind'='report'
       WHERE command.private_payload->>'kind'='report'
-        AND command.private_payload->>'text' ~ '^(needs-decision|blocked):'
+        AND (command.private_payload->>'reportStatus' IN ('blocked','needs-decision','done','failed') OR visible.id IS NOT NULL)
         AND command.private_payload->>'fromRoomId'=${cornerId}::text
         AND command.private_payload->>'authorId'=${worker}
       ${newest('command')})
       UNION ALL
       (SELECT NULL::text,message.id,${reportCardIdSql('message.id')},message.room_id,message.created_at,message.created_at,
+        COALESCE(message.card->>'reportStatus',substring(message.text FROM '^([^:]+):')),
         message.card->>'reportToId',message.text,message.card->>'waitingAnswered',message.id
       FROM (${cornerHumanReportsSql(cornerId, worker)}) message
       WHERE message.card->>'reportToId' IS NOT NULL
-        AND message.text ~ '^(needs-decision|blocked):'
+        AND (message.card->>'reportStatus' IN ('blocked','needs-decision','done','failed') OR message.text ~ '^(needs-decision|blocked):')
         AND message.presentation='message' AND message.system_event IS NULL AND message.deleted_at IS NULL
         AND message.author_id=${worker}
         AND ${humanReportCornerSql('message')}=${cornerId}::text
@@ -86,11 +81,11 @@ export function cornerReportItemsSql(cornerId: string, worker: string, latestOnl
 }
 
 /**
- * The newest explicit worker wait, unless it has been answered. The log owns
- * both the return address and the answered marker; no waiting projection is stored.
+ * The newest explicit worker block, unless later implementer output lifted it.
+ * The report log owns its status and return address; conversation never clears it.
  * One row per recipient: the recorded commander and tagged human corner members.
  */
-export function cornerWaitingReportSql(corner: string, includeAnswered = false): string {
+export function cornerWaitingReportSql(corner: string): string {
   const worker = cornerImplementerSql('waiting_fact', corner);
   return `SELECT ${corner}.id corner_id,latest.report_id,latest.message_id,latest.card_id,
     latest.return_room_id,latest.created_at,latest.asked_at,latest.asked_items,
@@ -106,7 +101,23 @@ export function cornerWaitingReportSql(corner: string, includeAnswered = false):
     SELECT 1 FROM room_access member WHERE member.room_id=${corner}.id
       AND member.identity_id=person.id AND member.removed_at IS NULL
   ) AND ${tagsKnownIdentitySql('item', 'person.id', 'person.handle', 'person.kind')})
-  WHERE waiting_fact.corner_id=${corner}.id
-    AND latest.text ~ '^(needs-decision|blocked):'
-    ${includeAnswered ? '' : "AND latest.answered IS DISTINCT FROM 'true'"}`;
+    WHERE waiting_fact.corner_id=${corner}.id AND latest.report_status IN ('blocked','needs-decision')
+    AND NOT EXISTS(SELECT 1 FROM (${workerOutputSql(`${corner}.id`, worker)}) output
+      WHERE output.ended_at>latest.created_at)`;
+}
+
+/** Recorded implementer output lifts its block; receiving input or writing prose does not. */
+function workerOutputSql(corner: string, worker: string): string {
+  return `SELECT message.created_at ended_at FROM messages message
+    WHERE message.room_id=${corner} AND message.author_id=${worker} AND message.deleted_at IS NULL AND (
+      (message.presentation='activity' AND EXISTS (
+        SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(message.activity)='array'
+          THEN message.activity ELSE '[]'::jsonb END) step
+        JOIN agent_grants grant_run ON grant_run.id::text=substring(step->>'title' FROM 'under grant ([0-9a-f-]{36})')
+          AND grant_run.workspace_id=(SELECT workspace_id FROM rooms WHERE id=${corner})
+          AND grant_run.agent_id=${worker} AND grant_run.kind='command'
+        WHERE step->>'operation'='execute'))
+      OR (message.presentation='card' AND (message.card_type IN ('grant-request','permission','vault-save',
+        'connector-offer','agent-sign-in','app-sign-in','squire-approval')
+        OR (message.card_type='choice' AND message.card->>'mode'='question'))))`;
 }

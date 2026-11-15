@@ -84,7 +84,7 @@ describe.skipIf(!url)('production-shaped slow-query regression', () => {
       await writer.query('BEGIN');
       const insert = await explain('message insert with live report triggers', `INSERT INTO messages(id,room_id,author_id,text)
         VALUES(repeat('f',64),$1,repeat('3',64),'Proceed with the reports')`, [room]);
-      expect(insert.Triggers?.find(trigger => trigger['Trigger Name'] === 'corner_report_answer')?.Time).toBeLessThan(200);
+      expect(insert.Triggers?.find(trigger => trigger['Trigger Name'] === 'corner_report_answer')).toBeUndefined();
       await writer.query('ROLLBACK');
       await writer.query('BEGIN');
       await explain('presence update 873e78181a07fa61', `UPDATE live_outputs SET body=$3::jsonb,updated_at=clock_timestamp()

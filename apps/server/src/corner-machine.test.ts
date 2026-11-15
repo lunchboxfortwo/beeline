@@ -107,6 +107,11 @@ describe('corner transition table', () => {
       [],
     );
   });
+  it('retains idle budget receipts across PR target changes', () => {
+    const f = { ...facts, idleEligible: true, idleSince: 'person-epoch:0', headSha: 'new-head' };
+    expect(run(f, observe, { state: 'idle', headSha: 'old-head', effects: ['idle:person-epoch:0'] }).notifications)
+      .toEqual([]);
+  });
   it('hands back findings and a second missing verdict once per exact review', () => {
     for (const findings of [undefined, 'FAIL: attach evidence']) {
       const f = { ...green, reviewRequests: 1, reviewEnded: { id: 'review', findings, emptyCount: findings ? 0 : 2 } };

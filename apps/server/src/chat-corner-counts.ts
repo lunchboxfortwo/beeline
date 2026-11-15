@@ -3,6 +3,8 @@ import { currentCornerCommandTargetSql } from './agent-command.js';
 import type { CornerMachine } from './corner-lifecycle.js';
 import { workingTurnFreshSql } from './agent-turn-end.js';
 import { cornerReviewerSql } from './corner-reviewer.js';
+import { cornerImplementerSql } from './corner-worker.js';
+import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { cornerWaitingReportSql } from './corner-waiting-report.js';
 import { createHash } from 'node:crypto';
 import { deriveCornerState, type DerivedCornerState } from './corner-state.js';
@@ -108,10 +110,11 @@ export function cornerScheduledWaitSql(corner: string): string {
       AND (schedule.max_runs IS NULL OR schedule.run_count<schedule.max_runs))`;
 }
 
-/** Intrinsic execution history; the opening commander is never corner work. */
+/** Intrinsic implementer execution history, independent of who created the corner. */
 export function cornerLastTurnEndSql(corner: string): string {
   return `(SELECT max(turn.ended_at) FROM agent_turns turn WHERE turn.room_id=${corner}.id
-    AND turn.agent_id IS DISTINCT FROM ${corner}.created_by)`;
+    AND turn.agent_id=(SELECT ${cornerImplementerSql('history_fact', corner)}
+      FROM corner_facts history_fact WHERE history_fact.corner_id=${corner}.id))`;
 }
 
 /** Shared corner facts for `FROM rooms c`; `member` checks the viewer's membership. */
@@ -158,7 +161,8 @@ export function deliverableCommandSql(command: string): string {
 }
 
 /** A running turn, or a command still waiting for one, retains the review role recorded by its dispatch. */
-export function cornerWorkSql(ignoreCommander = false): string {
+export function cornerWorkSql(): string {
+  const implementer = cornerImplementerSql('f', 'c');
   const reviewerAgent = `ANY(array_remove(ARRAY[${cornerReviewerSql('c')}],NULL))`;
   const checkPassed = (source: string) =>
     `${source}.system_event->>'kind'='check-passed'
@@ -185,12 +189,15 @@ export function cornerWorkSql(ignoreCommander = false): string {
     LEFT JOIN LATERAL (WITH activity_rows AS (
         SELECT ${reviewerTurn} AS review
         FROM agent_turns t WHERE t.room_id=c.id AND t.status='working' AND ${workingTurnFreshSql('t')}
-          ${ignoreCommander ? 'AND t.agent_id IS DISTINCT FROM c.created_by' : ''}
+          AND (t.agent_id=${implementer} OR ${reviewerTurn})
+          AND NOT EXISTS(SELECT 1 FROM agent_commands notice WHERE notice.room_id=t.room_id
+            AND notice.agent_id=t.agent_id AND notice.turn_request_id=t.request_id
+            AND notice.reason='report' AND notice.private_payload->>'authorId'='${SYSTEM_IDENTITY_ID}')
         UNION ALL
         SELECT ${reviewerCommand}
         FROM agent_commands command
         WHERE command.room_id=c.id AND ${deliverableCommandSql('command')} AND ${currentCornerCommandTargetSql('command')}
-          ${ignoreCommander ? 'AND command.agent_id IS DISTINCT FROM c.created_by' : ''}
+          AND (command.agent_id=${implementer} OR ${reviewerCommand})
           AND ${noLiveTurn}
       )
       SELECT COALESCE(bool_or(NOT review),false) worker_active,

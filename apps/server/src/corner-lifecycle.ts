@@ -6,6 +6,7 @@ import { createAgentCommand,currentCornerCommandTargetSql,hasPendingCornerReview
 import { reportAgentAttention } from './commander.js';
 import { releaseArchivedCornerHolds } from './corner-holds.js';
 import { cornerIdleSql,type CornerIdleRow } from './corner-idle.js';
+import { CORNER_IDLE_REPORT_BUDGET } from './corner-idle-budget.js';
 import { loadCorner,type CornerRow } from './corner-lifecycle-read-state.js';
 import { cornerMergeGate,independentReviewerConfigured,loadCornerReviewState,lockCornerArchivalAuthority,lockCornerLifecycle,noteReviewDispatchFailure,reachableReviewer } from './corner-lifecycle-review-state.js';
 import { OK,reviewChecksSql,type Applied,type CornerAdvance,type CornerEvent,type RevisionWake } from './corner-lifecycle-values.js';
@@ -278,7 +279,7 @@ async function readCornerAdvance(
       facts: { archived: corner.archived, locked: corner.locked, lifecycle: corner.lifecycle,
         headSha: head, turnRunning: false } };
     await ensureSystemIdentity(db);
-    const row = (await db.query<CornerIdleRow>(cornerIdleSql('$1', true), [cornerId])).rows[0];
+    const row = (await db.query<CornerIdleRow>(cornerIdleSql('$1'), [cornerId])).rows[0];
     const sourceHead =
       event.kind === 'checks' && event.sourceMessageId
         ? (
@@ -356,9 +357,10 @@ async function readCornerAdvance(
             ? event.sourceMessageId
             : checkSource?.id ?? (corner.lifecycle.checks === 'failing' && head && (!corner.lifecycle.checksSummary || (corner.lifecycle.checksSummary as {reportedFailing?:string[]}).reportedFailing?.length)
               ? `cache:${head}` : undefined),
-      idleSince: row?.idle_since,
+      idleSince: row ? `${row.person_since}:${row.idle_report_count}` : undefined,
       idleEligible: row
         ? !row.suppressed && !row.worker_active && !row.reviewer_active && !row.blocking
+          && !row.idle_report_pending && row.idle_report_count<CORNER_IDLE_REPORT_BUDGET
         : false,
     };
     if (projected?.before) alignProjectedIdle(row, facts, corner.lifecycle, projected.before);
@@ -389,7 +391,6 @@ function alignProjectedIdle(
   const stamp = summary?.statusChangedAt ?? summary?.updatedAt;
   if (row && typeof stamp === 'number' && Number(row.idle_since) < stamp) {
     row.idle_since = String(stamp);
-    facts.idleSince = row.idle_since;
   }
 }
 
@@ -607,7 +608,7 @@ async function writeCornerAdvance(
           SYSTEM_AUTHOR_ID,
           systemText(`blocked: Corner ${row.name} is idle. Resume it, set a hold, or close it.`),
           undefined,
-          createHash('sha256').update(`idle:${cornerId}:${row.idle_since}`).digest('hex'),
+          createHash('sha256').update(`idle:${cornerId}:${facts.idleSince}`).digest('hex'),
           { automatic: true, idleSince: row.idle_since },
         );
       }

@@ -225,6 +225,8 @@ export type PrivateCommandPayload = PayloadVoice & {
   ask?: string;
   objective?: string;
   automatic?: boolean;
+  /** Status supplied by the explicit report operation; ordinary answers have none. */
+  reportStatus?: 'blocked' | 'needs-decision' | 'done' | 'failed';
   idleSince?: string;
   /** Agent whose work a server-authored report describes; prevents self-wakes. */
   sourceAgentId?: string;
@@ -422,7 +424,7 @@ export type QueuedDelivery = {
   kind: 'delivery'; roomId: string; recipientId?: string; id: string;
   sourceRoomId: string; sourceItem: CommandRow; parent?: CommandRow; stopped?: boolean;
   attachments?: readonly Attachment[]; ask?: string; replyTo?: string; postedReplyId?:string;
-  automatic?: boolean; idleSince?: string;
+  automatic?: boolean; idleSince?: string; reportStatus?: PrivateCommandPayload['reportStatus'];
 } & ({ authorId: string; text: AgentVoice } | { authorId: SystemAuthorId; text: Composed<'system'> });
 export type QueuedOrder = {
   /** Only an agent orders, in its model's words. */
@@ -541,6 +543,7 @@ export async function queueMessage(database: SqlDatabase, raw: QueuedPost | Queu
           scheduledHumanCommandMessageId: input.sourceItem.root_source_message_id, retainDepth: true,
           privatePayload: { kind: 'report', ...({ text: input.text, authorId: input.authorId } as PayloadVoice), fromRoomId: input.sourceRoomId,
             ask: input.ask, sourceAgentId:input.sourceItem.agent_id, automatic: input.automatic, idleSince: input.idleSince,
+            reportStatus: input.reportStatus,
             originCornerId: chat.source_parent_id ? input.sourceRoomId : input.sourceItem.private_payload?.originCornerId, attachments: input.attachments ? [...input.attachments] : undefined },
         }, wakeHere ? { ...chat, id: input.sourceRoomId, parent_id: chat.source_parent_id } : chat);
         return { id: queued!.id, createdAt: new Date(queued!.created_at).getTime() / 1000, delivered: true, receipt: 'Report queued privately; not confirmation of execution.' };
@@ -548,7 +551,9 @@ export async function queueMessage(database: SqlDatabase, raw: QueuedPost | Queu
       const saved = await postMessage(db, { kind: 'post', roomId: chat.id, authorId: input.authorId,
         audienceId: input.recipientId, id: input.id, text: input.text, attachments: input.attachments,
         requestId: input.sourceItem.turn_request_id, parent: input.sourceItem, replyTo: input.replyTo,
-        card: input.ask || /^(?:blocked|needs-decision):/.test(input.text) ? { ...(input.ask ? { ask: input.ask } : {}), reportToId: input.recipientId } : undefined,
+        card: input.ask || input.reportStatus ? { ...(input.ask ? { ask: input.ask } : {}),
+          ...(input.reportStatus ? { reportToId: input.recipientId, reportStatus: input.reportStatus,
+            sourceRoomId: input.sourceRoomId } : {}) } : undefined,
       }, chat);
       return { id: saved.id, createdAt: saved.createdAt, delivered: true, receipt: saved.receipt, woken:saved.woken, notWoken:saved.notWoken };
     }
@@ -853,6 +858,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
     const saved = await queueMessage(db, { kind: 'delivery', roomId, authorId: agentId, recipientId,
       sourceRoomId: input.roomId, sourceItem, parent: item?.root_command_row && item.root_command_row.agent_id === recipientId ? item.root_command_row : item?.parent_row ?? undefined,
       stopped: item?.state === 'cancelled', id: answerId, postedReplyId: input.sharedReplyId, text, attachments, ask: input.ask, replyTo: input.replyToMessageId ?? item?.source_message_id ?? undefined,
+      reportStatus: input.report ? status as PrivateCommandPayload['reportStatus'] : undefined,
     });
     completedNow = true;
     if (item) await endAgentTurn(db, item, input.report && input.status === 'failed' ? 'failed' : 'complete', null, saved.id);

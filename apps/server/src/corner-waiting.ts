@@ -1,36 +1,8 @@
-import { commanderChainSql } from './commander.js';
 import { cornerImplementerSql } from './corner-worker.js';
-import { cornerWaitingReportSql, reportAnswerMessageSql } from './corner-waiting-report.js';
+import { cornerWaitingReportSql } from './corner-waiting-report.js';
 import type { SqlDatabase } from './database.js';
 
-/**
- * The commander's answer resolves every kind of corner wait: a message in the
- * corner, a reply threaded to one of `askedItems` (message ids), or an order.
- */
-export function cornerCommanderInputSql(
-  corner: string,
-  asker: string,
-  askedAt: string,
-  askedItems: string,
-): string {
-  return `SELECT min(input.at) answered_at FROM (${commanderChainSql(corner, asker, askedAt)}) commander
-    CROSS JOIN LATERAL (
-      SELECT message.created_at at FROM messages message
-      WHERE message.room_id=${corner}.id AND message.author_id=commander.id
-        AND ${reportAnswerMessageSql('message')} AND message.created_at>${askedAt}
-      UNION ALL
-      SELECT reply.created_at FROM messages reply
-      WHERE reply.reply_to_message_id=ANY(${askedItems}) AND reply.author_id=commander.id
-        AND ${reportAnswerMessageSql('reply')} AND reply.created_at>${askedAt}
-      UNION ALL
-      SELECT ordered.created_at FROM agent_commands ordered LEFT JOIN messages source ON source.id=ordered.source_message_id
-      WHERE ordered.room_id=${corner}.id AND ordered.agent_id=${asker} AND ordered.created_at>=${askedAt}
-        AND (ordered.private_payload->>'kind'='order' OR ordered.reason='corner_brief_revision')
-        AND COALESCE(ordered.private_payload->>'authorId',source.author_id)=commander.id
-    ) input`;
-}
-
-/** Source labels remain distinct; their waiting and clearing decisions do not. */
+/** Worker blocks end on worker output; native requests keep their own terminal owners. */
 export function cornerWaitingSql(corner: string): string {
   const worker = cornerImplementerSql('waiting_fact', corner);
   return `SELECT waiting.*,CASE WHEN waiting.reason IN ('approve','connect') THEN 'user_action'
@@ -52,13 +24,19 @@ export function cornerWaitingSql(corner: string): string {
       FROM corner_owed owed JOIN messages item ON item.id=owed.message_id
       JOIN memberships member ON member.room_id=${corner}.parent_id AND member.identity_id=owed.person_id AND member.removed_at IS NULL
       WHERE owed.corner_id=${corner}.id AND owed.blocking AND (owed.expires_at IS NULL OR owed.expires_at>now())
+        AND NOT (item.card->>'reportToId' IS NOT NULL AND item.author_id=${worker})
+      UNION ALL
+      SELECT choice.message_id,NULL::text,choice.created_at,item.room_id,item.created_at,
+        'question','message',item.text,false,ARRAY[item.id]
+      FROM room_choices choice JOIN messages item ON item.id=choice.message_id
+      WHERE choice.room_id=${corner}.id AND choice.mode='question' AND choice.status='open' AND item.deleted_at IS NULL
       UNION ALL
       SELECT 'grant:'||pending_grant.id::text,NULL::text,pending_grant.created_at,${corner}.id,pending_grant.created_at,'approve',NULL::text,NULL::text,true,
         ARRAY[]::text[]
       FROM agent_grants pending_grant WHERE pending_grant.room_id=${corner}.id AND pending_grant.status='pending'
         AND pending_grant.superseded_at IS NULL AND (pending_grant.expires_at IS NULL OR pending_grant.expires_at>now())
-    ) waiting CROSS JOIN LATERAL (${cornerCommanderInputSql(corner, worker, 'waiting.asked_at', 'waiting.asked_items')}) answer
-    WHERE waiting_fact.corner_id=${corner}.id AND answer.answered_at IS NULL`;
+    ) waiting
+    WHERE waiting_fact.corner_id=${corner}.id `;
 }
 
 export async function loadCornerWaiting(db: SqlDatabase, cornerId: string) {
