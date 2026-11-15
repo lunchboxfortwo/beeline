@@ -41,16 +41,19 @@ test('execution is explicit and requires immutable identity and complete attribu
 test('one command completes next before promoting the same SHA; store builds go only to production', async () => {
   const calls = [], dispatchedBy = localAttribution();
   const spec = { source: '/fixture/source', sha, directory: '/fixture/state', secrets: {}, dispatchedBy, otaVersions: ['v0.1.2-rc.9'], store: true };
-  await releaseSequence(spec, async (args, options) => calls.push({ args, options }));
+  const refreshed = [];
+  await releaseSequence(spec, async (args, options) => calls.push({ args, options, tagsRefreshed: refreshed.length }), source => refreshed.push(source));
+  assert.deepEqual(refreshed, ['/fixture/source']);
+  assert.deepEqual(calls.map(c => c.tagsRefreshed), [0, 1]);
   assert.deepEqual(calls.map(c => [c.args.channel, c.args['store-track'], c.args['release-sha']]),
     [['next', 'none', sha], ['latest', 'production', sha]]);
   const otaOnly = [];
-  await releaseSequence({ ...spec, store: false }, async args => otaOnly.push(args['store-track']));
+  await releaseSequence({ ...spec, store: false }, async args => otaOnly.push(args['store-track']), () => {});
   assert.deepEqual(otaOnly, ['none', 'none']);
   assert.deepEqual(calls.map(c => c.args['state-dir']), ['/fixture/state/next', '/fixture/state/latest']);
   assert.ok(calls.every(c => c.options.repository === spec.source && c.args['dispatched-by'] === JSON.stringify(dispatchedBy)));
   const failed = [];
-  await assert.rejects(releaseSequence(spec, async args => { failed.push(args.channel); throw new Error('next failed'); }), /next failed/);
+  await assert.rejects(releaseSequence(spec, async args => { failed.push(args.channel); throw new Error('next failed'); }, () => {}), /next failed/);
   assert.deepEqual(failed, ['next']);
 });
 test('a store release is needed only when a pinned runtime is not the newest live store runtime', () => {

@@ -80,8 +80,13 @@ export async function readOtaVersions(env, fetchImpl = fetch) {
 }
 
 // Next is the OTA beta only; store binaries go to production, with latest.
-export async function releaseSequence({ source, sha, directory, secrets, dispatchedBy, otaVersions, store }, runLocalRelease) {
+// The release list is empty during the outage, so each leg finds the previous
+// release through git tags. Latest must see the tag Next just created.
+const fetchTags = source => execFileSync('git', ['fetch', '--tags', 'origin'], { cwd: source, stdio: 'ignore' });
+
+export async function releaseSequence({ source, sha, directory, secrets, dispatchedBy, otaVersions, store }, runLocalRelease, refreshTags = fetchTags) {
   for (const channel of ['next', 'latest']) {
+    if (channel === 'latest') refreshTags(source);
     await runLocalRelease({ mode: 'execute', channel, 'release-sha': sha,
       'state-dir': join(directory, channel), 'dispatched-by': JSON.stringify(dispatchedBy),
       'store-track': channel === 'latest' && store ? 'production' : 'none', otaVersions,
