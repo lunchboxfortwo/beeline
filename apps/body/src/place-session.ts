@@ -373,9 +373,8 @@ export class PlaceSession {
         // an optional harness request. The live catalog owns this verdict.
         void applyAgentModelSelectionWithUpdatedCatalog(client, opened.sessionId, catalog, selection)
           .then(applied => {
-            if (this.client !== client) return;
-            this.resources.rememberModelCatalog(applied.options);
-            const index = sessionNotes.indexOf(configurationNote);
+            if (this.client === client) this.resources.rememberModelCatalog(applied.options);
+            const index = this.client === client ? sessionNotes.indexOf(configurationNote) : -1;
             if (index !== -1 && applied.appliedSelection.model)
               sessionNotes[index] = `This session uses ${applied.appliedSelection.model}; ${configurationNote}`;
           })
