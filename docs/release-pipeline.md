@@ -87,8 +87,8 @@ caches, Docker configuration and logs.
 The existing `beeline-ci1..4.slice` parents enforce 3 CPUs / 12 GiB each.
 After the checks verdict, the delivery queue uses at most three local slots
 and one separate capped slot for remote Mac orchestration.
-The Mac compiler runs remotely while server, Linux helper, OTA and web app
-legs use available local slots.
+iOS store compilation runs remotely while server, Linux helper, carried Mac
+helpers, OTA and web app legs use available local slots.
 Each delivery worker runs as the operator in its own source checkout and process,
 so production credentials never enter credential-free CI jails.
 Docker build/run containers share their worker's existing parent slice, including
@@ -109,11 +109,10 @@ Cache misses rebuild; unknown action types fail.
 The temporary outage policy is explicit: **website not released** means static
 GitHub Pages is left serving its published site. The selected EAS web app leg
 still exports, uploads private source maps when configured, deploys and verifies its canonical
-origin. The published Apple-silicon helper archive is carried byte for byte,
-with its original per-platform commit/version/checksum and a `carriedFrom`
-record; Linux and Intel Mac helpers build and prove their new bytes. The Intel
-job runs over SSH on `dani@100.104.88.126` in a private `/tmp/beeline-release-*`
-build directory. It never uses the host's checkout, Pictures or existing keys.
+origin. Both published Apple helper archives (Apple-silicon and Intel Mac) are
+carried byte for byte until Actions recovers, with their original per-platform
+commit/version/checksum and a `carriedFrom` record. Linux builds and proves its
+new bytes. Both Mac helper jobs use the local queue; they require no SSH build.
 
 The desktop updater manifest has one version for all platforms. Local recovery
 carries the complete published signed desktop installer set, including Windows,
@@ -543,9 +542,10 @@ submits both Android and iOS, even if only one platform's runtime changed. The `
 
 On hosted releases, iOS store binaries build locally on the self-hosted
 `macbook-pro-7` Mac runner. On squire, iOS uses the authorized
-`dani@100.104.88.126` Mac through the same serialized remote queue as the Intel
-helper. The remote job receives its Expo/ASC credentials and existing GitHub
-authority through stdin into a temporary job file removed on exit; other local
+`dani@100.104.88.126` Mac through its serialized remote queue. Both Mac helpers
+are carried in the local queue during the Actions outage. The remote job
+receives its Expo/ASC credentials and existing GitHub authority through stdin
+into a temporary job file removed on exit; other local
 delivery secrets stay on squire. The remote runner uses a private
 HOME, TMPDIR and signing keychain, and restores the prior keychain selection.
 The generated IPA is submitted directly to TestFlight. The iOS leg inspects the

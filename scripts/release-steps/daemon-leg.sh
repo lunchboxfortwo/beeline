@@ -6,15 +6,20 @@ step0)
 linux_dir="${BEELINE_ACTION_VALUE_0}"
 arm64_dir="${BEELINE_ACTION_VALUE_1}"
 x64_dir="${BEELINE_ACTION_VALUE_2}"
-if [ -z "$linux_dir" ] || [ -z "$arm64_dir" ] || [ -z "$x64_dir" ]; then
+if [ -z "$linux_dir" ] || { [ -z "$arm64_dir" ] && [ -z "${BEELINE_RELEASE_CARRIED_ARM64_DIR:-}" ]; } || { [ -z "$x64_dir" ] && [ -z "${BEELINE_RELEASE_CARRIED_X64_DIR:-}" ]; }; then
   echo "A three-platform merge needs linux_bundle_dir, darwin_arm64_bundle_dir and darwin_x64_bundle_dir; the Mac bundles were never built this run." >&2
   exit 1
 fi
 merge_args=(--output-dir "$RUNNER_TEMP/daemon-release" --input-dir "$linux_dir")
 if [ -n "${BEELINE_RELEASE_CARRIED_ARM64_DIR:-}" ]; then
-  merge_args+=(--input-dir "$x64_dir" --carry-arm64-dir "$BEELINE_RELEASE_CARRIED_ARM64_DIR")
+  merge_args+=(--carry-arm64-dir "$BEELINE_RELEASE_CARRIED_ARM64_DIR")
 else
-  merge_args+=(--input-dir "$arm64_dir" --input-dir "$x64_dir")
+  merge_args+=(--input-dir "$arm64_dir")
+fi
+if [ -n "${BEELINE_RELEASE_CARRIED_X64_DIR:-}" ]; then
+  merge_args+=(--carry-x64-dir "$BEELINE_RELEASE_CARRIED_X64_DIR")
+else
+  merge_args+=(--input-dir "$x64_dir")
 fi
 node scripts/merge-beeline-bundles.mjs "${merge_args[@]}"
 if [ -f "$arm64_dir/mac-helper-inputs.json" ]; then

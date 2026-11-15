@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import test from 'node:test';
 import { parse } from 'yaml';
+import { localHooks } from './release-local.mjs';
 import { LocalActions } from './release-local-actions.mjs';
 import { LocalDelivery, writeToolAdapters } from './release-local-delivery.mjs';
 import { localToolPlan } from './release-local-tools.mjs';
@@ -82,7 +83,7 @@ test('local latest promotion has no reusable Checks call or quick gates', async 
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
-test('iOS and Mac helpers share the remote queue while Android stays in a local slot', async () => {
+test('only iOS uses the remote queue while both carried Mac helpers and Android use local slots', async () => {
   const engine = { cancelled: false }, delivery = new LocalDelivery(engine), placements = [];
   let activeMac = 0;
   delivery.execute = async (slot, _job, context) => {
@@ -92,11 +93,42 @@ test('iOS and Mac helpers share the remote queue while Android stays in a local 
     if (slot === 4) activeMac--;
     return { result: 'success', outputs: {} };
   };
-  await Promise.all(['helper_macos', 'mobile_native_ios', 'mobile_native_android'].map(id => delivery.run({}, { github: { job: id } }, id)));
-  assert.deepEqual(placements.filter(([, slot]) => slot === 4).map(([id]) => id), ['helper_macos', 'mobile_native_ios']);
+  await Promise.all([['helper_macos', 'darwin-arm64'], ['helper_macos', 'darwin-x64'], ['mobile_native_ios'], ['mobile_native_android']].map(([id, platform]) => delivery.run({}, { github: { job: id }, matrix: { platform } }, `${id}-${platform}`)));
+  assert.deepEqual(placements.filter(([, slot]) => slot === 4).map(([id]) => id), ['mobile_native_ios']);
+  assert.equal(placements.filter(([id, slot]) => id === 'helper_macos' && slot < 4).length, 2);
   assert.ok(placements.some(([id, slot]) => id === 'mobile_native_android' && slot < 4));
   const plan = releasePlan(read('unified-release.yml'), read('checks.yml'), { channel: 'latest' });
   assert.equal(plan.jobs.find(job => job.id === 'mobile_native_ios').placement, 'remote Mac, separate queue');
+  assert.equal(plan.jobs.find(job => job.id === 'helper_macos').placement, 'bounded local queue');
+  assert.match(plan.jobs.find(job => job.id === 'helper_macos').policy, /Apple-silicon and Intel Mac helpers carried unchanged/);
+});
+
+test('both Mac helper hooks reuse the published directory without invoking build commands', async () => {
+  const directory = temporary(), messages = [];
+  try {
+    const processes = new Processes({}, message => messages.push(message));
+    processes.run = async () => assert.fail('carrying a published helper must not run a build or SSH');
+    const engine = { directory: join(directory, 'worker'), runDirectory: directory, artifacts: new Map(), processes, variables: {}, secrets: {} };
+    const hook = localHooks(directory, processes);
+    for (const arch of ['arm64', 'x64']) {
+      const carried = join(directory, `carried-${arch}`), platform = `darwin-${arch}`;
+      mkdirSync(carried);
+      const manifest = { bundles: { [platform]: { verified: true, version: 'v1.2.2', commit: 'b'.repeat(40) } } };
+      writeFileSync(join(carried, 'manifest.json'), JSON.stringify(manifest));
+      const context = { env: {}, github: { job: 'helper_macos' }, matrix: { platform }, needs: { initialize: { outputs: { release_id: 'release' } } } };
+      assert.deepEqual(await hook.job({ context, engine }), { result: 'success', outputs: { shipped: 'false' } });
+      assert.equal(engine.artifacts.get(`daemon-${platform}-release`), carried);
+      assert.equal(readFileSync(join(carried, 'manifest.json'), 'utf8'), JSON.stringify(manifest));
+      manifest.bundles[platform].verified = false;
+      writeFileSync(join(carried, 'manifest.json'), JSON.stringify(manifest));
+      await assert.rejects(hook.job({ context, engine }), /lacks installation verification/);
+    }
+    const context = { env: {}, github: { job: 'helper' } };
+    await hook.job({ context, engine });
+    assert.equal(context.env.BEELINE_RELEASE_CARRIED_ARM64_DIR, join(directory, 'carried-arm64'));
+    assert.equal(context.env.BEELINE_RELEASE_CARRIED_X64_DIR, join(directory, 'carried-x64'));
+    assert.equal(messages.filter(message => message.includes('carried unchanged')).length, 2);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test('the real release DAG overlaps three local legs with Mac work, carries outputs and waits for final joins', async () => {
@@ -108,7 +140,7 @@ test('the real release DAG overlaps three local legs with Mac work, carries outp
     placement.execute = async (_slot, _job, context) => {
       const id = context.github.job;
       started.add(id); active.add(id); peak = Math.max(peak, active.size);
-      if (active.has('helper_macos') && ['server', 'helper_linux', 'mobile_ota'].every(name => active.has(name))) overlap = true;
+      if (active.has('mobile_native_ios') && ['server', 'mobile_ota', 'website'].every(name => active.has(name))) overlap = true;
       if (id === 'helper') {
         assert.ok(finished.has('helper_linux') && finished.has('helper_macos'));
         helperBeforeDelivery = !finished.has('delivery_result');
@@ -118,10 +150,10 @@ test('the real release DAG overlaps three local legs with Mac work, carries outp
         assert.equal(context.needs.server.outputs.marker, 'server');
       }
       if (id === 'initialize') await new Promise(resolve => setTimeout(resolve, 1));
-      else await new Promise(resolve => setTimeout(resolve, ['server', 'mobile_ota', 'website'].includes(id) ? 80 : 20));
+      else await new Promise(resolve => setTimeout(resolve, id === 'mobile_native_ios' ? 200 : ['server', 'mobile_ota', 'website'].includes(id) ? 80 : 20));
       active.delete(id); finished.add(id);
       return { result: 'success', outputs: id === 'initialize' ? {
-        release_sha: 'a'.repeat(40), run_server: 'true', run_helper: 'true', run_mobile_ota: 'true', run_website: 'true', run_desktop: 'true',
+        run_mobile_native: 'true', native_ios: 'true', release_sha: 'a'.repeat(40), run_server: 'true', run_helper: 'true', run_mobile_ota: 'true', run_website: 'true', run_desktop: 'true',
       } : { marker: id } };
     };
     // Execute the actual dependency/condition graph, substituting only job bodies.
@@ -130,7 +162,7 @@ test('the real release DAG overlaps three local legs with Mac work, carries outp
       workflow: file.endsWith('checks.yml') ? quickChecks(workflow) : localWorkflow(workflow), parallel: true,
       job: (...args) => placement.run(...args),
     });
-    const results = await controller.workflow('.github/workflows/unified-release.yml', { channel: 'next', run_release_proof: false, store_track: 'none' }, {
+    const results = await controller.workflow('.github/workflows/unified-release.yml', { channel: 'next', run_release_proof: false, store_track: 'production' }, {
       github: { repository: 'Beeline-Work/beeline', sha: 'a'.repeat(40), run_id: '1' },
     });
     assert.equal(results.release_result.result, 'success');

@@ -876,27 +876,41 @@ function bundle(directory, platform, commit, version) {
   writeFileSync(join(directory, 'manifest.json'), JSON.stringify({ schemaVersion: 1, version, sourceCommit: commit, bundles: { [platform]: entry } }));
   return entry;
 }
-test('Apple-silicon carry preserves old bytes/identity; corrupt archives and other mismatched platforms fail', async () => {
+for (const [platform, otherPlatform, carryKey] of [
+  ['darwin-arm64', 'darwin-x64', 'carriedArm64Dir'], ['darwin-x64', 'darwin-arm64', 'carriedX64Dir'],
+]) test(`${platform} carry preserves old bytes/identity; corrupt archives and other mismatched platforms fail`, async () => {
   const directory = temporary();
   try {
-    const linux = join(directory, 'linux'), intel = join(directory, 'intel'), arm = join(directory, 'arm'), output = join(directory, 'merged');
-    bundle(linux, 'linux-x64', sha, 'v1.2.3'); bundle(intel, 'darwin-x64', sha, 'v1.2.3');
-    const previous = bundle(arm, 'darwin-arm64', oldSha, 'v1.2.2');
-    const manifest = await mergeBeelineBundles({ outputDir: output, inputDirs: [linux, intel], carriedArm64Dir: arm });
+    const linux = join(directory, 'linux'), other = join(directory, 'other'), carried = join(directory, 'carried'), output = join(directory, 'merged');
+    bundle(linux, 'linux-x64', sha, 'v1.2.3'); bundle(other, otherPlatform, sha, 'v1.2.3');
+    const previous = bundle(carried, platform, oldSha, 'v1.2.2');
+    const options = { outputDir: output, inputDirs: [linux, other], [carryKey]: carried };
+    const manifest = await mergeBeelineBundles(options);
     assert.equal(manifest.sourceCommit, sha);
-    assert.equal(manifest.bundles['darwin-arm64'].commit, oldSha);
-    assert.equal(manifest.bundles['darwin-arm64'].sha256, previous.sha256);
-    assert.deepEqual(readFileSync(join(output, previous.file)), readFileSync(join(arm, previous.file)));
+    assert.equal(manifest.bundles[platform].commit, oldSha);
+    assert.equal(manifest.bundles[platform].version, previous.version);
+    assert.equal(manifest.bundles[platform].sha256, previous.sha256);
+    assert.deepEqual(manifest.bundles[platform].carriedFrom, { commit: oldSha, version: previous.version, sha256: previous.sha256 });
+    for (const name of [previous.file, `${previous.file}.sha256`])
+      assert.deepEqual(readFileSync(join(output, name)), readFileSync(join(carried, name)));
     await validateBundleDirectory(output, { expectedSha: sha, expectedVersion: 'v1.2.3' });
+    manifest.bundles[platform].carriedFrom.commit = sha;
+    writeFileSync(join(output, 'manifest.json'), JSON.stringify(manifest));
+    await assert.rejects(validateBundleDirectory(output), /invalid .* carry provenance/);
+    manifest.bundles[platform].carriedFrom.commit = oldSha;
     manifest.bundles['linux-x64'].commit = oldSha;
     writeFileSync(join(output, 'manifest.json'), JSON.stringify(manifest));
     await assert.rejects(validateBundleDirectory(output), /identity differs/);
-    writeFileSync(join(arm, previous.file), 'tampered');
-    await assert.rejects(mergeBeelineBundles({ outputDir: output, inputDirs: [linux, intel], carriedArm64Dir: arm }), /sha256/);
+    manifest.bundles['linux-x64'].carriedFrom = { commit: oldSha, version: 'v1.2.3', sha256: manifest.bundles['linux-x64'].sha256 };
+    writeFileSync(join(output, 'manifest.json'), JSON.stringify(manifest));
+    await assert.rejects(validateBundleDirectory(output), /invalid linux-x64 carry provenance/);
+    writeFileSync(join(carried, previous.file), 'tampered');
+    await assert.rejects(mergeBeelineBundles(options), /sha256/);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 test('default CLI plan never requires secrets or starts release commands', () => {
   const output = execFileSync(process.execPath, ['scripts/release-local.mjs', '--plan'], { cwd: repository, encoding: 'utf8' });
   assert.match(output, /no release commands executed/);
   assert.match(output, /website not released/);
+  assert.match(output, /Apple-silicon and Intel Mac helpers carried unchanged until Actions recovers/);
 });

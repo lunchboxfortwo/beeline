@@ -86,17 +86,18 @@ export function missingReleaseCredentials(args, secrets, plan = {}) {
   return missing;
 }
 
-async function carryArm64(engine, context) {
-  const directory = join(engine.runDirectory || engine.directory, 'carried-arm64');
+async function carryMacHelper(engine, context) {
+  const platform = context.matrix.platform, arch = platform.slice('darwin-'.length);
+  const directory = join(engine.runDirectory || engine.directory, `carried-${arch}`);
   if (!existsSync(join(directory, 'manifest.json'))) {
     const [owner, repo] = context.github.repository.split('/');
     await downloadPagesChannel({ github: localGithub(context.github.token, undefined, engine.abortController.signal), repo: { owner, repo }, directory, channel: context.inputs.channel });
   }
   const manifest = JSON.parse(readFileSync(join(directory, 'manifest.json'), 'utf8'));
-  const bundle = manifest.bundles['darwin-arm64'];
-  if (!bundle?.verified) throw new Error('Published Apple-silicon helper lacks installation verification');
-  engine.processes.log(`Helper darwin-arm64 carried unchanged: ${bundle.version} ${bundle.commit}`);
-  const name = `daemon-darwin-arm64-${context.needs.initialize.outputs.release_id}`;
+  const bundle = manifest.bundles[platform];
+  if (!bundle?.verified) throw new Error(`Published ${arch === 'arm64' ? 'Apple-silicon' : 'Intel Mac'} helper lacks installation verification`);
+  engine.processes.log(`Helper ${platform} carried unchanged: ${bundle.version} ${bundle.commit}`);
+  const name = `daemon-${platform}-${context.needs.initialize.outputs.release_id}`;
   engine.artifacts.set(name, directory);
   return { result: 'success', outputs: { shipped: 'false' } };
 }
@@ -218,12 +219,12 @@ export function localHooks(directory, processes) {
           [`GIT_CONFIG_VALUE_${index}`]: `AUTHORIZATION: basic ${basic}`, GIT_TERMINAL_PROMPT: '0' });
       }
       if (['helper_linux', 'helper_macos', 'server'].includes(context.github.job)) context.env.CARGO_BUILD_JOBS = '2';
-      if (context.github.job === 'helper_macos') {
-        if (context.matrix.platform === 'darwin-arm64') return carryArm64(engine, context);
-        return macJob(args);
-      }
+      if (context.github.job === 'helper_macos') return carryMacHelper(engine, context);
       if (context.github.job === 'mobile_native_ios') return macJob(args);
-      if (context.github.job === 'helper') context.env.BEELINE_RELEASE_CARRIED_ARM64_DIR = join(directory, 'carried-arm64');
+      if (context.github.job === 'helper') {
+        context.env.BEELINE_RELEASE_CARRIED_ARM64_DIR = join(directory, 'carried-arm64');
+        context.env.BEELINE_RELEASE_CARRIED_X64_DIR = join(directory, 'carried-x64');
+      }
       if (['release_validation', 'bookkeeping'].includes(context.github.job)) {
         context.env.BEELINE_LOCAL_RELEASE_RECORDS = join(directory, 'records.json');
         context.env.BEELINE_LOCAL_RELEASE_ID = basename(directory);
@@ -311,7 +312,7 @@ export function localHooks(directory, processes) {
         const record = JSON.parse(readFileSync(path, 'utf8'));
         delete record.runId;
         record.execution = { kind: 'local', id: basename(directory), dispatchedBy: JSON.parse(context.inputs.dispatched_by) };
-        record.delivery.localExceptions = { staticWebsite: 'not released', helperArm64: 'carried unchanged', desktop: 'published signed updater set carried unchanged, including Windows' };
+        record.delivery.localExceptions = { staticWebsite: 'not released', helperArm64: 'carried unchanged', helperX64: 'carried unchanged', desktop: 'published signed updater set carried unchanged, including Windows' };
         record.delivery.localExceptions.checks = context.inputs.channel === 'latest'
           ? { retained: [], reusedFrom: 'successful next release of this commit', coverage: 'no checks run on promotion' }
           : { retained: ['build', 'typecheck', 'dead-code', 'design grammar', 'codecs'], dropped: droppedChecks(engine.read(checksWorkflow)), coverage: 'not produced by quick release checks' };
@@ -427,8 +428,8 @@ export async function runLocalRelease(args, { repository = root, secrets: provid
     console.log(`Local ${args.channel} release at ${sha}; no release commands executed.`);
     console.log(JSON.stringify(releasePlan(engine.read(WORKFLOW), engine.read(checksWorkflow), args), null, 2));
     console.log('website not released: static Pages is suspended; selected web app leg still runs.');
-    console.log('Apple-silicon helper carried unchanged. Published desktop updater set (including Windows) carried unchanged; its global version is retained.');
-    console.log(`Intel helper builds over SSH on ${MAC}. Canary, helper update proof, optional device proof, rollback and finalization stay enabled. ${args.channel === 'latest' ? 'Promotion reuses the successful next verdict; no checks run.' : 'Quick checks run before next delivery.'}`);
+    console.log('Apple-silicon and Intel Mac helpers carried unchanged until Actions recovers. Published desktop updater set (including Windows) carried unchanged; its global version is retained.');
+    console.log(`iOS store builds use SSH on ${MAC}. Canary, helper update proof, optional device proof, rollback and finalization stay enabled. ${args.channel === 'latest' ? 'Promotion reuses the successful next verdict; no checks run.' : 'Quick checks run before next delivery.'}`);
     return;
   }
   if (args.mode === 'dry-run') { await dryRun(args, engine, context); return; }
@@ -439,7 +440,7 @@ export async function runLocalRelease(args, { repository = root, secrets: provid
     return;
   }
   console.log('website not released: static Pages suspended; the selected EAS web app still runs.');
-  console.log('Local policy: Apple-silicon helper and published desktop updater set are carried unchanged.');
+  console.log('Local policy: Apple-silicon and Intel Mac helpers and the published desktop updater set are carried unchanged until Actions recovers.');
   attribution(args['dispatched-by']);
   if (!args['release-sha']) throw new Error('--execute requires an explicit immutable --release-sha');
   const identityPath = join(directory, 'local-execution.json');

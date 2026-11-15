@@ -104,7 +104,7 @@ export async function validateBundleDirectory(bundleRoot, { expectedSha, expecte
       fail(`helper manifest names an unsafe ${platform} bundle file`);
     }
     if (bundle.verified !== true) fail(`helper manifest marks ${platform} as unverified`);
-    const carried = platform === 'darwin-arm64' &&
+    const carried = ['darwin-arm64', 'darwin-x64'].includes(platform) &&
       bundle.carriedFrom?.commit === bundle.commit && /^[0-9a-f]{40}$/.test(bundle.commit ?? '') &&
       bundle.carriedFrom?.version === bundle.version && /^v\d+\.\d+\.\d+(?:-rc\.\d+)?$/.test(bundle.version ?? '') &&
       bundle.carriedFrom?.sha256 === bundle.sha256;
