@@ -423,7 +423,7 @@ export class PlaceSession {
 
   /**
    * Hand one item to the session and wait for its answer. Throws only when
-   * the harness itself fails; the runner settles unanswered endings visibly.
+   * the harness itself fails; only background work may complete silently.
    */
   async deliver(item: AgentCommand, batch: readonly AgentCommand[] = []): Promise<Answer> {
     // start() ran first; a session that died since fails its prompt.

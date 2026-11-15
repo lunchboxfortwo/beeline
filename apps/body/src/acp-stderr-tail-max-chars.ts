@@ -498,7 +498,7 @@ export function isPureRetryNarration(text: string): boolean {
  *  (a corner may record those runs independently as durable output activity).
  *  Retry/backoff narration can never be the answer either: classify that last
  *  run and return empty when it is pure narration, so a flaked turn selects
- *  nothing (the caller records the unanswered ending's failure reason) while
+ *  nothing (background work settles quietly; an unanswered request stays owed) while
  *  genuine prose — including prose that merely mentions retries — is kept.
  *  Never scan backwards past the last run: an earlier pre-tool progress
  *  sentence is not the answer just because the turn later degraded into

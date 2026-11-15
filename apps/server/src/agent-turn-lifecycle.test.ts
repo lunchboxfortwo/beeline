@@ -32,8 +32,6 @@ async function ask(){
 const receipt=(requestId:string,status:'complete'|'failed')=>daemon.execute('postAgentTurnReceipt',
   { roomId:R, requestId, status, ...(status==='failed'?{reason:'provider unavailable',reasonKind:'hiccup'}:{}) },A,owner);
 const notices=()=>db.query("SELECT id FROM messages WHERE room_id=$1 AND card_type='turn-failed'",[R]);
-const failures=()=>db.query<{text:string}>("SELECT text FROM messages WHERE room_id=$1 AND presentation='system' AND text LIKE '%failed%'",[R]);
-
 it('does not let tool activity authorize no_reply_needed for an unanswered human request',async()=>{
   const c=await ask();
   await daemon.execute('postAgentActivity',{roomId:R,requestId:c.turnRequestId,activity:[{kind:'tool',title:'curl',status:'exit 7',operation:'execute'}]},A);
@@ -42,40 +40,34 @@ it('does not let tool activity authorize no_reply_needed for an unanswered human
   expect((await db.query('SELECT status FROM agent_turns WHERE request_id=$1',[c.turnRequestId])).rows).toEqual([{status:'working'}]);
 });
 
-it.each(['human_tag','schedule'])('shows one failure reason for an unanswered %s harness ending, including replays',async reason=>{
+it.each(['human_tag','schedule'])('quietly ends an unanswered %s harness execution, including replays',async reason=>{
   const c=await ask();
   await db.query('UPDATE agent_commands SET reason=$2 WHERE id=$1',[c.id,reason]);
-  const closing={roomId:R,requestId:c.turnRequestId,text:'',harnessEnded:true,failureReason:'Harness returned cancelled without a public answer'};
+  const closing={roomId:R,requestId:c.turnRequestId,text:'',harnessEnded:true};
   await daemon.execute('postRoomMessage',closing,A);
   await daemon.execute('postRoomMessage',closing,A);
-  await daemon.execute('postAgentTurnReceipt',{roomId:R,requestId:c.turnRequestId,outcome:'silent'},A,owner);
-  expect((await failures()).rows).toEqual([{text:expect.stringContaining(closing.failureReason)}]);
-  expect((await db.query('SELECT status,failure_reason FROM agent_turns WHERE request_id=$1',[c.turnRequestId])).rows)
-    .toEqual([{status:'failed',failure_reason:closing.failureReason}]);
-  expect((await readAgentCommands(db,A,R)).commands).toEqual([]);
+  expect((await db.query("SELECT id FROM messages WHERE room_id=$1 AND presentation='system' AND text LIKE '%failed%'",[R])).rows).toEqual([]);
+  expect((await readAgentCommands(db,A,R)).commands.map(item=>item.id)).toEqual(reason==='human_tag'?[c.id]:[]);
+  expect((await phone.readRoom(R,H))?.latestAgentTurns?.some(turn=>turn.status==='working')).toBe(false);
 });
 
-it('names an explicit background no_reply_needed ending rather than silently losing it',async()=>{
+it('quietly acknowledges background no_reply_needed without inventing a reply',async()=>{
   const c=await ask();
   await db.query("UPDATE agent_commands SET reason='schedule' WHERE id=$1",[c.id]);
   expect(await daemon.execute('markAgentTurnSilent',{roomId:R,requestId:c.turnRequestId},A)).toMatchObject({answered:true});
-  expect((await failures()).rows).toEqual([{text:expect.stringContaining('no_reply_needed')}]);
+  expect((await db.query('SELECT report_outcome,result_message_id FROM agent_commands WHERE id=$1',[c.id])).rows)
+    .toEqual([{report_outcome:'complete',result_message_id:null}]);
+  expect((await db.query('SELECT id FROM messages WHERE room_id=$1 AND author_id<>$2',[R,H])).rows).toEqual([]);
 });
 
-it('does not add a failure when a public reply was committed before the harness cancelled',async()=>{
-  const c=await ask();
-  await daemon.execute('postRoomMessage',{roomId:R,requestId:c.turnRequestId,text:'Here is the answer.'},A);
-  await daemon.execute('postRoomMessage',{roomId:R,requestId:c.turnRequestId,text:'',harnessEnded:true,failureReason:'cancelled'},A);
-  expect((await failures()).rows).toEqual([]);
-});
-
-it('settles every item in an unanswered batch with one failure line and no invented reply receipt',async()=>{
+it('quietly settles an empty batch while leaving its unanswered human item owed',async()=>{
   const first=await ask(),second=await ask();
-  await daemon.execute('postRoomMessage',{roomId:R,requestId:first.id,queuedRequestIds:[second.id],text:'',harnessEnded:true,failureReason:'Harness returned end_turn without a public answer'},A);
-  expect((await db.query('SELECT report_outcome,result_message_id FROM agent_commands ORDER BY created_at')).rows)
-    .toEqual([{report_outcome:'failed',result_message_id:null},{report_outcome:'failed',result_message_id:null}]);
-  expect((await failures()).rows).toEqual([{text:expect.stringContaining('Harness returned end_turn without a public answer')}]);
+  await db.query("UPDATE agent_commands SET reason='schedule' WHERE id=$1",[first.id]);
+  await daemon.execute('postRoomMessage',{roomId:R,requestId:first.id,queuedRequestIds:[second.id],text:'',harnessEnded:true},A);
+  expect((await readAgentCommands(db,A,R)).commands.map(item=>item.id)).toEqual([second.id]);
+  expect((await db.query('SELECT id FROM messages WHERE room_id=$1 AND author_id<>$2',[R,H])).rows).toEqual([]);
 });
+
 it('projects a working turn at claim before any agent activity or model output exists',async()=>{
   const command=await ask();
   const room=await phone.readRoom(R,H);
@@ -107,15 +99,15 @@ it('a failed diagnostic keeps the item pending until its answer is posted',async
   await daemon.execute('postRoomMessage',{roomId:R,requestId:c.turnRequestId,text:'The provider is unavailable.'},A);
   expect((await readAgentCommands(db,A,R)).commands).toEqual([]);
 });
-it('a legacy empty harness exit visibly fails the unanswered human request',async()=>{
+it('a recorded empty harness exit ends execution while preserving the unanswered human request',async()=>{
   const c=await ask();
   await daemon.execute('postRoomMessage',{roomId:R,requestId:c.turnRequestId,text:'',harnessEnded:true},A);
   expect((await db.query('SELECT status,ended_at FROM agent_turns WHERE request_id=$1',[c.turnRequestId])).rows)
-    .toEqual([{status:'failed',ended_at:expect.any(Date)}]);
-  expect((await readAgentCommands(db,A,R)).commands).toEqual([]);
+    .toEqual([{status:'cancelled',ended_at:expect.any(Date)}]);
+  expect((await readAgentCommands(db,A,R)).commands.map(item=>item.id)).toContain(c.id);
   expect((await phone.readRoom(R,H))?.latestAgentTurns?.some(turn=>turn.status==='working')).toBe(false);
   expect((await notices()).rowCount).toBe(0);
-  expect((await failures()).rows).toEqual([{text:expect.stringContaining('Harness ended without a public answer')}]);
+  expect((await db.query("SELECT id FROM messages WHERE room_id=$1 AND presentation='system' AND text LIKE '%failed%'",[R])).rows).toEqual([]);
 });
 it('stores and delivers a complete child-process failure beyond the manual report limit, including stderr',async()=>{
   const commander='c'.repeat(64);
@@ -183,8 +175,8 @@ it('replacement closes the phone running indicator and redelivers the unanswered
   await claimAgentConnection(db,live,A,{lifecycleId:'first-boot'},{connectionId:'second-connection',instanceId:'test-server'});
   expect((await phone.readRoom(R,H))?.latestAgentTurns?.some(turn=>turn.status==='working')).toBe(false);
   expect((await db.query('SELECT status,ended_at FROM agent_turns WHERE request_id=$1',[c.turnRequestId])).rows)
-    .toEqual([{status:'failed',ended_at:expect.any(Date)}]);
-  expect((await failures()).rows).toEqual([{text:expect.stringContaining('Agent connection replaced before a public answer')}]);
+    .toEqual([{status:'cancelled',ended_at:expect.any(Date)}]);
+  expect((await db.query("SELECT id FROM messages WHERE room_id=$1 AND presentation='system' AND text LIKE '%failed%'",[R])).rows).toEqual([]);
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[c.id])).rows)
     .toEqual([{state:'pending'}]);
   const next={connectionId:'third-connection',epoch:await claimAgentConnection(db,live,A,{lifecycleId:'second-boot'},

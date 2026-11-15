@@ -1,6 +1,7 @@
 import { isBeelineGuideName } from '@beeline/api-contract/beeline-guides';
 import { workflowOutputBindingCtes } from '../workflow-step-output.js';
-import { endAgentTurn,failAgentTurn } from '../agent-turn-end.js';
+import { createHash } from 'node:crypto';
+import { endAgentTurn } from '../agent-turn-end.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { clearOwedMention, mentionReplyKey } from '../owed-mentions.js';
 import { postRepositoryOnboarding } from '../repository-onboarding.js';
@@ -157,7 +158,17 @@ export async function startAgentTurnOperation<Name extends keyof DaemonOperation
               await db.query(`INSERT INTO agent_turns(room_id,request_id,agent_id,status)
                 VALUES($1,$2,$3,'working') ON CONFLICT(room_id,request_id,agent_id) DO NOTHING`,
                 [request.roomId, request.requestId, authenticatedAgentId]);
-              await failAgentTurn(db, current, reason);
+              if (!await endAgentTurn(db, current, 'failed', reason)) return;
+              await db.query('SELECT beeline_record_agent_answer($1,true,$2)', [current.id, reason]);
+              const agent = (await db.query<{ name: string }>('SELECT name FROM identities WHERE id=$1', [authenticatedAgentId])).rows[0]!;
+              await systemLine(db, {
+                id: createHash('sha256').update(`failed:${command.id}`).digest('hex'),
+                roomId: command.return_room_id ?? command.room_id,
+                subject: { kind: 'agent', id: authenticatedAgentId, name: agent.name },
+                verb: systemMessage('agent-turn.failed'),
+                consequence: systemMessage('agent-turn.failure-reason', reason),
+                requestId: request.requestId, commandId: command.id, durableFact: 'failure',
+              });
             });
           }
           ctx.live.publish({ type: 'invalidate', roomId: request.roomId, reason: 'message', agentId: authenticatedAgentId });
@@ -215,15 +226,13 @@ export async function markAgentTurnSilentOperation<Name extends keyof DaemonOper
           if (!(await ctx.database.query(`SELECT 1 FROM agent_pending_attachments
             WHERE room_id=$1 AND agent_id=$2 AND request_id=$3 LIMIT 1`,
             [command.room_id, authenticatedAgentId, command.turn_request_id])).rowCount) {
-            const hasReply = Boolean((await ctx.database.query(
+            const answered = command.state === 'complete' || command.action === 'restart'
+              || isBackgroundCommand(command.private_payload?.automatic ? 'attention_report' : command.reason) || Boolean((await ctx.database.query(
               `SELECT 1 FROM messages WHERE room_id=$1 AND author_id=$2 AND request_id=$3
                 AND presentation IN ('message','card') AND deleted_at IS NULL LIMIT 1`,
               [command.return_room_id, authenticatedAgentId, command.turn_request_id])).rowCount);
-            const answered = command.state === 'complete' || command.action === 'restart'
-              || isBackgroundCommand(command.private_payload?.automatic ? 'attention_report' : command.reason) || hasReply;
             if (answered) {
-              if (hasReply) await endAgentTurn(ctx.database, command, 'complete');
-              else await failAgentTurn(ctx.database, command, 'no_reply_needed');
+              await endAgentTurn(ctx.database, command, 'complete');
               if (declinedMessage) await clearOwedMention(ctx.database, authenticatedAgentId, command.room_id, declinedMessage);
             }
             return { ...daemonWriteResult(ctx), answered } as Output<Name>;

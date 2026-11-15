@@ -94,13 +94,13 @@ it('durably closes failed background work without a public answer or redelivery'
   harness.deliver.mockRejectedValueOnce(new Error('signal SIGKILL'));
   f.changed([item]);
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({
-    text: '', harnessEnded: true, failureReason: expect.stringContaining('SIGKILL'), requestId: item.turnRequestId,
+    text: '', harnessEnded: true, requestId: item.turnRequestId,
   })));
   f.changed([item]);
   expect(harness.deliver).toHaveBeenCalledTimes(1);
 });
 
-it('durably carries an unexplained harness cancellation to the existing failure surface', async () => {
+it('persists an empty harness cancellation without a failure notice payload', async () => {
   const f = await fixture(), item = f.item('cancelled-without-answer');
   harness.deliver.mockResolvedValueOnce({text:'',stopReason:'cancelled',steps:[],toolCalls:[],cleanup:async()=>{}});
   f.execute.mockImplementation(async name => {
@@ -109,11 +109,13 @@ it('durably carries an unexplained harness cancellation to the existing failure 
   });
   f.changed([item]);
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({
-    requestId:item.id,text:'',harnessEnded:true,failureReason:'Harness returned cancelled without a public answer',
+    requestId:item.id,text:'',harnessEnded:true,
   })));
-  expect((await new AnswerStore(join(f.root,'answers')).all())[0]).toMatchObject({
-    failureReason:'Harness returned cancelled without a public answer',
-  });
+  const stored=(await new AnswerStore(join(f.root,'answers')).all())[0];
+  expect(stored).toMatchObject({itemId:item.id,text:'',harnessEnded:true});
+  expect(stored).not.toHaveProperty('failureReason');
+  const closing=f.execute.mock.calls.find(call=>call[0]==='postRoomMessage')![1];
+  expect(closing).not.toHaveProperty('failureReason');
 });
 
 it('names a sign-in or spent allowance on the failed receipt and nothing else', async () => {
