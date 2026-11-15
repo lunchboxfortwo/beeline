@@ -11,7 +11,7 @@ import { cornerCommanderIdSql } from '../corner-commander.js';
 import { setCornerHold } from '../corner-holds.js';
 import { advanceCorner,createCornerFacts,lockCornerLifecycle } from '../corner-lifecycle.js';
 import { cornerObjectiveSql,readCornerObjective } from '../corner-objective.js';
-import { cornerKindSql,cornerOpenedFromSql,cornerOpeningSql,cornerRequestSql } from '../corner-opening.js';
+import { cornerKindSql,cornerOpeningSql,cornerRequestSql } from '../corner-opening.js';
 import { setCornerReviewer } from '../corner-reviewer.js';
 import { cornerImplementerSql,cornerOwnerSql } from '../corner-worker.js';
 import { type SqlDatabase } from '../database.js';
@@ -55,18 +55,6 @@ import { modelText } from '../message-origin.js';
       )
     ).rows[0];
     const targetRoomId = input.targetRoomId ?? host?.parent_id ?? commandRoomId;
-    if (host?.parent_id && targetRoomId !== host.parent_id && targetRoomId !== commandRoomId) {
-      const opened = await ctx.database.query(
-        `WITH RECURSIVE descendants AS (
-           SELECT child.id corner_id FROM rooms child WHERE ${cornerOpenedFromSql('child.id')}=$1
-           UNION SELECT child.id FROM rooms child JOIN descendants parent
-             ON ${cornerOpenedFromSql('child.id')}=parent.corner_id
-         ) SELECT 1 FROM descendants WHERE corner_id::text=$2 AND corner_id<>$1 LIMIT 1`,
-        [commandRoomId, targetRoomId],
-      );
-      if (!opened.rowCount)
-        throw new CommandRefusalError('Corners must open work in their parent Room. Report to your commander instead.', 403);
-    }
     const target = (await ctx.database.query<{ parent_id: string | null }>(`SELECT parent_id FROM rooms WHERE id=$1`, [targetRoomId])).rows[0];
     const roomId = target?.parent_id ?? targetRoomId;
     if (roomId !== commandRoomId) await daemonAccess(ctx, roomId, agentId);
