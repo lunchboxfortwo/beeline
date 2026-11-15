@@ -1,3 +1,4 @@
+import { PageLoader } from '@/ui/PageLoader';
 import { appReadErrorCopy } from '@/buzz/app-error-copy';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import React, { useCallback, useEffect, useState } from 'react';
@@ -149,7 +150,7 @@ export default function WalletScreen() {
   if (error && wallet === null) return frame(<ConnectorNote tone="danger">{error}</ConnectorNote>);
 
   if (wallet === null) {
-    return frame(<ConnectorLoading testID="wallet-loading"><SurfaceGlyphLoader testID="wallet-loader" /></ConnectorLoading>);
+    return frame(<ConnectorLoading testID="wallet-loading"><PageLoader testID="wallet-loader" /></ConnectorLoading>);
   }
 
   return frame(

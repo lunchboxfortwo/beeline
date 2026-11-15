@@ -1,3 +1,4 @@
+import { PageLoader } from '@/ui/PageLoader';
 import { RoutineBody } from '@/ui/screens/profiles/RoutineBody';
 import { SettingsRow } from '@/components/buzz/SettingsRow';
 import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
@@ -10,7 +11,6 @@ import { stopSchedule, useScheduledWork } from '@/buzz/scheduled-work';
 import {
   StopScheduledWork,
 } from '@/components/buzz/ScheduledWorkDetail';
-import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
 import { Copy, SafeBottom, SafeTop, ScreenHeader } from '@/ui/grammar';
 
 function first(value: string | string[] | undefined): string | undefined {
@@ -69,7 +69,7 @@ export default function PromptSchedule() {
       ) : null}
       {loading && !work ? (
         <YStack padding="8" alignItems="center" justifyContent="center">
-          <SurfaceGlyphLoader testID="schedule-loader" />
+          <PageLoader testID="schedule-loader" />
         </YStack>
       ) : schedule ? (
         <ScrollView testID="schedule-page">

@@ -1,3 +1,4 @@
+import { PageLoader } from '@/ui/PageLoader';
 import React, { useState } from 'react';
 import { YStack } from 'tamagui';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -8,7 +9,6 @@ import { connectionViewState, useConnectCompanyApp } from '@/buzz/company-connec
 import { ServiceMark } from '@/components/buzz/ServiceMark';
 import { Section, T } from '@/ui/grammar';
 import { ConnectorFrame, ConnectorLoading, ConnectorNote, ConnectorRow, ConnectorSearchField } from '@/ui/screens/settings/connectors/ConnectorParts';
-import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
 import type { WorkbenchCompany } from '@beeline/api-contract/workbench';
 import { ConnectorsSearchSheet } from './workbench/connect-app';
 
@@ -33,7 +33,7 @@ export default function WorkbenchScreen() {
   return <>
     <ConnectorFrame title="Connectors" back={() => router.back()} backLabel="Back to Settings" scroll={Boolean(index)} scrollTestID="workbench-scroll">
       {!index && error ? <YStack padding="4"><ConnectorNote tone="danger">{error}</ConnectorNote></YStack> : !index ?
-        <ConnectorLoading><SurfaceGlyphLoader testID="workbench-loader" /></ConnectorLoading> : <>
+        <ConnectorLoading><PageLoader testID="workbench-loader" /></ConnectorLoading> : <>
           <ConnectorSearchField label="Search apps, keys, and logins" testID="connectors-search" onPress={() => setSearchOpen(true)} />
           {!index.hasConnections ? <YStack gap="3">
             <ConnectorNote>No connections yet. Choose a service to get started.</ConnectorNote>

@@ -1,3 +1,4 @@
+import { PageLoader } from '@/ui/PageLoader';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocalSearchParams } from 'expo-router';
 import { ScrollView, Separator, XStack, YStack } from 'tamagui';
@@ -13,7 +14,6 @@ import { MemberCard, SectionHead } from './PeopleParts';
 import { InvitePeopleSheet } from './InvitePeopleSheet';
 import { AddAgentSheet } from './AddAgentSheet';
 import { useWorkspaceRoster } from './use-workspace-roster';
-import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
 
 const first = (value: string | string[] | undefined) => Array.isArray(value) ? value[0] : value;
 
@@ -63,7 +63,7 @@ export function PeopleTabScreen() {
             ) : (
                 <TabHeader workspaceName={workspaceName || WORKSPACE_LABEL} scrolled={scrolled} />
             )}
-            {!roster.surface && !roster.error ? <SurfaceGlyphLoader /> : <ScrollView flex={1} minHeight={0} {...(desktop ? {} : scrollProps)}>
+            {!roster.surface && !roster.error ? <PageLoader /> : <ScrollView flex={1} minHeight={0} {...(desktop ? {} : scrollProps)}>
                 <YStack padding="4" gap="5" paddingBottom="8" width="100%" maxWidth={760} alignSelf="center">
                     {roster.error ? <Copy small quiet role="alert">{roster.error}</Copy> : null}
                     <YStack gap="2" testID="people-humans">

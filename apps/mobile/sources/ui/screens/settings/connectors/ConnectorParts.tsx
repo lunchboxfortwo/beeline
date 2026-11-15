@@ -1,7 +1,7 @@
 import React from 'react';
-import { Card, ListItem, ScrollView, Separator, XStack, YStack } from 'tamagui';
+import { Card, ListItem, Separator, XStack, YStack } from 'tamagui';
 import { ChevronDown, ChevronRight, ChevronUp, Search } from 'lucide-react-native';
-import { Btn, Copy, Glyph, HEIGHT, SafeBottom, SafeTop, ScreenHeader, T } from '@/ui/grammar';
+import { Btn, Copy, Glyph, GrowScroll, HEIGHT, SafeBottom, SafeTop, ScreenHeader, T } from '@/ui/grammar';
 import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
 import { useIsDesktop } from '@/utils/responsive';
 
@@ -20,9 +20,9 @@ export function ConnectorFrame({ title, back, backLabel = 'Back', testID, scroll
             <YStack flex={1} minHeight={0} width="100%" maxWidth={desktop ? desktopColumnWidths.detail : undefined} alignSelf="center">
                 <ScreenHeader title={title} back={back} backLabel={backLabel} />
                 {scroll
-                    ? <ScrollView flex={1} minHeight={0} keyboardShouldPersistTaps="handled" testID={scrollTestID}>
-                        <YStack padding="4" gap="5" paddingBottom="8">{children}</YStack>
-                    </ScrollView>
+                    ? <GrowScroll flex={1} minHeight={0} keyboardShouldPersistTaps="handled" testID={scrollTestID}>
+                        <YStack flexGrow={1} padding="4" gap="5" paddingBottom="8">{children}</YStack>
+                    </GrowScroll>
                     : <YStack flex={1} minHeight={0}>{children}</YStack>}
                 {footer}
             </YStack>
@@ -132,7 +132,7 @@ export function ConfirmCard({ question, confirmLabel, busy, onCancel, onConfirm,
 /** Loading: the page's loading mark (SurfaceGlyphLoader), centred, with an optional line. */
 export function ConnectorLoading({ children, testID, label }: { children: React.ReactNode; testID?: string; label?: string }) {
     return (
-        <YStack alignItems="center" justifyContent="center" gap="2" paddingVertical="8" testID={testID}>
+        <YStack flex={1} alignSelf="stretch" alignItems="center" justifyContent="center" gap="2" testID={testID}>
             {children}
             {label ? <ConnectorNote>{label}</ConnectorNote> : null}
         </YStack>

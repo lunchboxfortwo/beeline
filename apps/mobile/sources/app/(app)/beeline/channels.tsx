@@ -1,3 +1,4 @@
+import { PageLoader } from '@/ui/PageLoader';
 import { useChannelsRouteState } from './useChannelsRouteState';
 import { useChannelsPresentation } from './useChannelsPresentation';
 import { useChannelsRequestedActions } from './useChannelsRequestedActions';
@@ -15,7 +16,6 @@ import { roomRowName } from '@/buzz/room-list-row';
 import { roomHref } from '@/buzz/corner-navigation';
 import { BuzzCommunityShell } from '@/components/buzz/CommunityRail';
 import { WorkspaceAddAgentSheet } from '@/ui/screens/members/ChatAddSheets';
-import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
 import { WORKSPACE_LABEL } from '@/buzz/vocabulary';
 import { Btn, Copy, Glyph, SafeTop, T } from '@/ui/grammar';
 import { ChatListHeader } from '@/ui/screens/chats/ChatListHeader';
@@ -150,7 +150,7 @@ export default function SavedRoomDeck() {
       key={`${session.identity.publicKey}:${session.relayUrl}:${requestedWorkspaceId ?? session.workspaceId}`}
       session={session}
     />
-  ) : <SurfaceGlyphLoader testID="rooms-loader-gate" />;
+  ) : <PageLoader testID="rooms-loader-gate" />;
 }
 
 const EMPTY_CHATS: readonly ChatListItem[] = [];
@@ -197,7 +197,7 @@ const BuzzChannels = memo(function BuzzChannels({ session }: { session: DeckSess
         {isDesktop ? null : (
           <TabHeader workspaceName={workspaceName} onNew={canCreate ? () => state.setNewChatStep('menu') : undefined} search={search} onSearch={setSearch} scrolled={false} />
         )}
-        <SurfaceGlyphLoader testID="rooms-loader-gate" onLayout={onLayout} />
+        <PageLoader testID="rooms-loader-gate" onLayout={onLayout} />
       </YStack>
     );
   }

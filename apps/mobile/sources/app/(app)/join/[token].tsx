@@ -15,7 +15,7 @@ import { enterWorkspaceRoom } from '@/buzz/enter-workspace';
 import { clearPendingInvite, savePendingInvite } from '@/buzz/pending-invite';
 import { WORKSPACE_LABEL } from '@/buzz/vocabulary';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
-import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
+import { PageLoader } from '@/ui/PageLoader';
 import { Btn, T } from '@/ui/grammar';
 import { Choice, Heading, OnboardingFrame, OrRule, Problem } from '@/ui/screens/onboarding/OnboardingFrame';
 import { Rise } from '@/ui/screens/onboarding/Rise';
@@ -158,10 +158,10 @@ export default function CommunityInviteJoin() {
     return <YouStep onDone={() => { setStep('workspace'); if (joinAfterYou) void handleJoin(); }} />;
 
   return (
-    <OnboardingFrame stage={2} testID="invite-join">
+    <OnboardingFrame stage={2} center={loading || Boolean(preview && joining && joinAfterYou)} testID="invite-join">
       {loading || (preview && joining && joinAfterYou) ? (
-        <YStack alignItems="center" gap="4" paddingTop="8">
-          <SurfaceGlyphLoader compact testID="invite-loader" />
+        <YStack flex={1} alignSelf="stretch" alignItems="center" gap="4">
+          <PageLoader testID="invite-loader" />
           <T v="meta" color="secondary">Checking your invite…</T>
         </YStack>
       ) : preview ? (

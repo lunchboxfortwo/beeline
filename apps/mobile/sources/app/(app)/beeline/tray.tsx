@@ -1,3 +1,4 @@
+import { PageLoader } from '@/ui/PageLoader';
 import { sendWorkReply } from '@/buzz/work-board-reply';
 import { useCallback, useMemo, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -8,7 +9,6 @@ import { navigateToRoom, messageJumpHref } from '@/buzz/corner-navigation';
 import { useIsDesktop } from '@/utils/responsive';
 import { useActiveCommunityId } from '@/buzz/use-active-community';
 import { useWorkBoard, useWorkBoardUnavailable, loadWorkBoard } from '@/buzz/work-board-store';
-import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
 import { prefetchPushRoom } from '@/push/push-room-prefetch';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import { openExternalUrl } from '@/utils/open-external-url';
@@ -162,7 +162,7 @@ export default function TrayScreen() {
       ) : board ? (
         <WorkBoard key={workspaceId} board={board} desktop={desktop} actions={actions} />
       ) : (
-        <SurfaceGlyphLoader />
+        <PageLoader />
       )}
     </YStack>
   );

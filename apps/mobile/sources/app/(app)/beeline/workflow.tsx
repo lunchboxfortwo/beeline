@@ -1,3 +1,4 @@
+import { PageLoader } from '@/ui/PageLoader';
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import { SettingsRow } from '@/components/buzz/SettingsRow';
 import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
@@ -13,7 +14,6 @@ import { workflowDisplayName } from '@/buzz/workflow-graph';
 import { workflowStarterLine } from '@/buzz/workflow-run-copy';
 import { PageHeader } from '@/components/buzz/PageHeader';
 import { DetailSection } from '@/components/buzz/ScheduledWorkDetail';
-import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
 import { WorkflowRunLine } from '@/components/buzz/WorkflowRunLine';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import { SafeBottom, SafeTop, T } from '@/ui/grammar';
@@ -68,7 +68,7 @@ export default function Workflow() {
       {error ? (
         <SettingsRow title={error} />
       ) : null}
-      {!detail && !error ? <SurfaceGlyphLoader /> : null}
+      {!detail && !error ? <PageLoader /> : null}
       {detail ? (
         <ScrollView flex={1}>
           <T v="body" color="secondary" padding="4">

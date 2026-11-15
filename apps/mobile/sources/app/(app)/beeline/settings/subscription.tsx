@@ -1,3 +1,4 @@
+import { PageLoader } from '@/ui/PageLoader';
 import { RoutineBody } from '@/ui/screens/profiles/RoutineBody';
 import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
 import { useIsDesktop as useDesktopPageLayout } from '@/utils/responsive';
@@ -11,7 +12,6 @@ import {
   useScheduledWork,
 } from '@/buzz/scheduled-work';
 import { StopScheduledWork } from '@/components/buzz/ScheduledWorkDetail';
-import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
 import { Copy, SafeBottom, SafeTop, ScreenHeader } from '@/ui/grammar';
 
 function first(value: string | string[] | undefined): string | undefined {
@@ -64,7 +64,7 @@ export default function Subscription() {
           />
       ) : null}
       {loading && !work ? (
-        <YStack padding="8" alignItems="center" justifyContent="center"><SurfaceGlyphLoader testID="subscription-loader" /></YStack>
+        <PageLoader testID="subscription-loader" />
       ) : subscription ? (
         <ScrollView testID="subscription-page">
           <RoutineBody kind="subscription" routine={subscription} work={work!} stop={<StopScheduledWork

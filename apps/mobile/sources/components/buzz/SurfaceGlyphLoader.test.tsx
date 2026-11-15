@@ -189,6 +189,7 @@ vi.mock('react-native-reanimated', async () => {
 });
 
 import { SurfaceGlyphLoader } from './SurfaceGlyphLoader';
+import { PageLoader } from '@/ui/PageLoader';
 
 const originalConsoleError = console.error;
 const SOURCES_ROOT = path.resolve(__dirname, '../..');
@@ -233,7 +234,7 @@ function dots(renderer: ReactTestRenderer) {
   });
 }
 
-const GLYPH_MARKERS = ['SurfaceGlyphLoader', 'BeelineGlyphPaint', 'BeelineMarkSpinner'] as const;
+const GLYPH_MARKERS = ['PageLoader', 'SurfaceGlyphLoader', 'BeelineGlyphPaint', 'BeelineMarkSpinner'] as const;
 
 function walkSourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -276,7 +277,7 @@ describe('SurfaceGlyphLoader', () => {
 
 describe('Page loading boundary', () => {
   it('fills the page on canvas and centres the one glyph', () => {
-    const page = render(React.createElement(SurfaceGlyphLoader, { testID: 'rooms-loader-gate' }));
+    const page = render(React.createElement(PageLoader, { testID: 'rooms-loader-gate' }));
     const gate = page.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'rooms-loader-gate');
     expect(gate.props).toMatchObject({ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'canvas' });
     expect(page.root.findAllByType('Svg')).toHaveLength(1);

@@ -1,3 +1,4 @@
+import { PageLoader } from '@/ui/PageLoader';
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -17,7 +18,6 @@ import {
 } from '@/buzz/workbench';
 import { Btn, Copy, Section, T } from '@/ui/grammar';
 import { ConnectorFooter, ConnectorFrame, ConnectorLoading, ConnectorNote, ConnectorRow } from '@/ui/screens/settings/connectors/ConnectorParts';
-import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
 import { StepBar, StepDot, type ConnectBarPart, type ConnectStepState } from '@/ui/screens/settings/connectors/ConnectSteps';
 
 function firstParam(value: string | string[] | undefined): string | undefined {
@@ -296,7 +296,7 @@ function ConnectToolFlow() {
         )}
       </ConnectorFooter> : undefined}>
       {helpers === null && !helperLoadError && !offerCeremony && !showSteps ? (
-        <ConnectorLoading testID="connect-loading" label="Looking for your machine…"><SurfaceGlyphLoader testID="connect-loader" /></ConnectorLoading>
+        <ConnectorLoading testID="connect-loading" label="Looking for your machine…"><PageLoader testID="connect-loader" /></ConnectorLoading>
       ) : null}
       {noHelpers && !offerCeremony ? (
         <YStack gap="3" testID="connect-no-helper">

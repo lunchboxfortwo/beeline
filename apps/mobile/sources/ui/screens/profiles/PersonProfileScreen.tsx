@@ -1,3 +1,4 @@
+import { PageLoader } from '@/ui/PageLoader';
 import React, { useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import { router, useNavigation } from 'expo-router';
@@ -24,7 +25,6 @@ import {
 import { watchWorkspace } from '@/buzz/workspace-watch';
 import { currentSurfaceStamp } from '@/buzz/surface-clock';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
-import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
 import { openPlace } from '@/ui/shell/panel';
 import { useIsDesktop } from '@/utils/responsive';
 import { Btn, Copy, Glyph, HEIGHT, Row, Screen, Section, SheetFrame, SheetRow, T } from '@/ui/grammar';
@@ -36,7 +36,7 @@ type Role = RoomViewMember['role'];
 export function PersonProfileScreen({ memberId, workspaceId, close }: { memberId: string; workspaceId?: string; close: () => void }) {
     const active = useActiveCommunityId();
     const resolved = workspaceId ?? active ?? undefined;
-    if (!resolved) return <Screen title="Profile" back={close} testID="human-profile"><SurfaceGlyphLoader /></Screen>;
+    if (!resolved) return <Screen title="Profile" back={close} testID="human-profile"><PageLoader /></Screen>;
     return <PersonProfile key={`${resolved}:${memberId}`} workspaceId={resolved} memberId={memberId} close={close} />;
 }
 
@@ -202,7 +202,7 @@ function PersonProfile({ workspaceId, memberId, close }: { workspaceId: string; 
 
     return (
         <Screen title="Profile" back={() => void leave()} testID="human-profile">
-            {loading && !member ? <SurfaceGlyphLoader /> : null}
+            {loading && !member ? <PageLoader /> : null}
             {displayedError ? <T v="meta" color="removed">{displayedError}</T> : null}
             {member ? (
                 <>

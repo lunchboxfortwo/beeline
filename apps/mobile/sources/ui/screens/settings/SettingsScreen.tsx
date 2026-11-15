@@ -1,12 +1,12 @@
+import { PageLoader } from '@/ui/PageLoader';
 import React, { useEffect, useState } from 'react';
 import { useLocalSearchParams } from 'expo-router';
-import { ScrollView, Tabs, YStack } from 'tamagui';
-import { Copy, HEIGHT, T } from '@/ui/grammar';
+import { Tabs, YStack } from 'tamagui';
+import { Copy, GrowScroll, HEIGHT, T } from '@/ui/grammar';
 import { TabHeader, TabRail, useScrolledUnder } from '@/ui/shell/TabHeader';
 import { useIsDesktop } from '@/utils/responsive';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
-import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
 import { WORKSPACE_LABEL } from '@/buzz/vocabulary';
 import { useYouSettings } from './useYouSettings';
 import { YouSettings } from './YouSettings';
@@ -46,8 +46,8 @@ export function SettingsScreen({ initialScope = 'you' }: { initialScope?: Scope 
         <YStack flex={1} minHeight={0} backgroundColor="canvas" testID="settings">
             {/* The header every tab shares; Settings has no buttons of its own. */}
             {desktop ? null : <TabHeader workspaceName={you.workspace?.name ?? WORKSPACE_LABEL} scrolled={scrolled} />}
-            <ScrollView flex={1} minHeight={0} keyboardShouldPersistTaps="handled" {...(desktop ? {} : scrollProps)}>
-                <YStack padding="4" gap="5" paddingTop={desktop ? '8' : '2'} paddingBottom="8" width="100%" maxWidth={720} alignSelf="center" testID="identity-settings">
+            <GrowScroll flex={1} minHeight={0} keyboardShouldPersistTaps="handled" {...(desktop ? {} : scrollProps)}>
+                <YStack flexGrow={1} padding="4" gap="5" paddingTop={desktop ? '8' : '2'} paddingBottom="8" width="100%" maxWidth={720} alignSelf="center" testID="identity-settings">
                     {desktop ? <T v="title">Settings</T> : null}
                     <YStack gap="3">
                         {workspace ? (
@@ -61,10 +61,10 @@ export function SettingsScreen({ initialScope = 'you' }: { initialScope?: Scope 
                         {caption ? <Copy small quiet testID="settings-caption">{caption}</Copy> : null}
                     </YStack>
                     {showWorkspace ? <WorkspaceSettings key={workspace.id} workspaceId={workspace.id} />
-                        : scope === 'workspace' && !you.workspacesReady ? <SurfaceGlyphLoader testID="workspace-settings-loader" />
+                        : scope === 'workspace' && !you.workspacesReady ? <PageLoader testID="workspace-settings-loader" />
                             : <YouSettings you={you} />}
                 </YStack>
-            </ScrollView>
+            </GrowScroll>
         </YStack>
     );
     return desktop ? screen : <TabRail tab="settings" workspaceId={you.workspace?.id}>{screen}</TabRail>;

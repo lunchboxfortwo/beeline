@@ -1,3 +1,4 @@
+import { PageLoader } from '@/ui/PageLoader';
 import React, { useState } from 'react';
 import { XStack, YStack } from 'tamagui';
 import { Plug, Unplug } from 'lucide-react-native';
@@ -7,7 +8,6 @@ import { ServiceMark } from '@/components/buzz/ServiceMark';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
 import { Btn, Glyph, Section, SheetFrame, SheetRow, T } from '@/ui/grammar';
 import { ConnectorCard, ConnectorFrame, ConnectorLoading, ConnectorNote, ConnectorRow } from '@/ui/screens/settings/connectors/ConnectorParts';
-import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
 import { getWorkbenchSource } from '@/buzz/workbench-source';
 import { useSharedWorkbench } from '@/buzz/workbench-surface';
 import { connectionViewState, openCompanyItem, useConnectCompanyApp } from '@/buzz/company-connection-actions';
@@ -137,7 +137,7 @@ export default function ConnectorServiceScreen() {
   const closeAppSheet = () => { setAppOpen(null); setAiOpen(false); };
   return <>
     <ConnectorFrame title={row?.name ?? 'Connectors'} back={() => router.back()} backLabel="Back to Connectors" testID="connector-service-screen">
-      {loadError && !row ? <ConnectorNote tone="danger">{loadError}</ConnectorNote> : !view ? <ConnectorLoading><SurfaceGlyphLoader /></ConnectorLoading> : !row ?
+      {loadError && !row ? <ConnectorNote tone="danger">{loadError}</ConnectorNote> : !view ? <ConnectorLoading><PageLoader /></ConnectorLoading> : !row ?
         <ConnectorNote>This company is no longer connected.</ConnectorNote> : row.roomsClientId ? <>
           <YStack gap="2">
             <ConnectorCard>

@@ -1,3 +1,4 @@
+import { PageLoader } from '@/ui/PageLoader';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import React, { useCallback, useMemo, useState } from 'react';
 import { XStack, YStack } from 'tamagui';
@@ -5,7 +6,6 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { ServiceMark } from '@/components/buzz/ServiceMark';
 import { Btn, Section, T } from '@/ui/grammar';
 import { ConfirmCard, ConnectorFrame, ConnectorLoading, ConnectorNote, ConnectorRow } from '@/ui/screens/settings/connectors/ConnectorParts';
-import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
 import { getWorkbenchSource } from '@/buzz/workbench-source';
 import { publishConnectionDetail, useSharedConnectionDetail } from '@/buzz/workbench-surface';
 import {
@@ -109,7 +109,7 @@ export default function ConnectionDetailScreen() {
   return (
     <ConnectorFrame title={headerTitle} back={() => router.back()} backLabel="Back to Connectors"
       testID="connection-detail-screen" scrollTestID="connection-detail-scroll">
-      {!detail && !error && !loadError ? <ConnectorLoading testID="connection-loading"><SurfaceGlyphLoader testID="connection-loader" /></ConnectorLoading> : null}
+      {!detail && !error && !loadError ? <ConnectorLoading testID="connection-loading"><PageLoader testID="connection-loader" /></ConnectorLoading> : null}
       {detail ? (
         <XStack gap="3" alignItems="center" testID="connection-detail-identity">
           <ServiceMark company={company} domain={detail.connection.faviconDomain} testID="connection-service-mark" />

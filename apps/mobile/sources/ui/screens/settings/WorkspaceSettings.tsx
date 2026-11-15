@@ -1,3 +1,4 @@
+import { PageLoader } from '@/ui/PageLoader';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as Clipboard from 'expo-clipboard';
 import { router, useFocusEffect } from 'expo-router';
@@ -22,7 +23,6 @@ import { BuzzRigTransport } from '@/sync/transport';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import { roomHref } from '@/buzz/corner-navigation';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
-import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
 import { Btn, Copy, Glyph, HEIGHT, Row, Section, SheetFrame, SheetRow, T } from '@/ui/grammar';
 
 export const WORKSPACE_VISIBILITY_LABELS = { public: 'Public', 'invite-only': 'Invite-only' } as const;
@@ -177,7 +177,7 @@ export function WorkspaceSettings({ workspaceId }: { workspaceId: string }) {
     };
 
     if (!view || !workspace) return error ? <T v="meta" color="removed" testID="workspace-settings-retry">{error}</T>
-        : <SurfaceGlyphLoader testID="workspace-settings-loader" />;
+        : <PageLoader testID="workspace-settings-loader" />;
     const sheetChat = typeof sheet === 'object' && sheet ? chats.find((chat) => chat.id === sheet.room) : undefined;
 
     return (

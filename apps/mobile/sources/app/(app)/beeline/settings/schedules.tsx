@@ -1,3 +1,4 @@
+import { PageLoader } from '@/ui/PageLoader';
 import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
 import { useIsDesktop as useDesktopPageLayout } from '@/utils/responsive';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
@@ -15,7 +16,6 @@ import {
   useScheduledWork,
 } from '@/buzz/scheduled-work';
 import { SettingsRow } from '@/components/buzz/SettingsRow';
-import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
 import { Copy, Inked, SafeBottom, SafeTop, ScreenHeader, T, Section, Row, Glyph } from '@/ui/grammar';
 
 function first(value: string | string[] | undefined): string | undefined {
@@ -96,7 +96,7 @@ export default function ScheduledWork() {
           />}
       {loading ? (
         <YStack padding="8" alignItems="center" justifyContent="center">
-          <SurfaceGlyphLoader testID="schedules-loader" />
+          <PageLoader testID="schedules-loader" />
         </YStack>
       ) : (
         <ScrollView

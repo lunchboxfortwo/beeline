@@ -1,3 +1,4 @@
+import { PageLoader } from '@/ui/PageLoader';
 import React, { useState } from 'react';
 import { router } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
@@ -6,7 +7,6 @@ import { MessagesSquare, Pencil, Check } from 'lucide-react-native';
 import { type AgentDetailView } from '@beeline/buzz-client';
 import { AGENT_HANDLE_MAX_LENGTH, MCP_STARTER_ROUTINE, roomTitle, modelChoiceLabel, modelPickerChoiceLabel, type AgentModelConfigOption } from '@beeline/api-contract/phone';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
-import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
 import { displayModel } from '@/buzz/model-display';
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import { filterAgentModelOptions } from '@/buzz/agent-model-picker';
@@ -30,7 +30,7 @@ export function AgentProfileScreen({ agentId, workspaceId, close, roomId }: { ag
     const detail = p.detail;
     return (
         <Screen title="Profile" back={p.close} testID="agent-profile">
-            {p.loading ? <SurfaceGlyphLoader testID="agent-profile-loader" /> : null}
+            {p.loading ? <PageLoader testID="agent-profile-loader" /> : null}
             {p.error ? <T v="meta" color="removed" testID="agent-profile-error">{p.error}</T> : null}
             {detail ? <AgentProfileBody p={p} detail={detail} /> : null}
         </Screen>

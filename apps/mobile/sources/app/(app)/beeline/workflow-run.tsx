@@ -1,3 +1,4 @@
+import { PageLoader } from '@/ui/PageLoader';
 import { SettingsRow } from '@/components/buzz/SettingsRow';
 import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
 import { useIsDesktop as useDesktopPageLayout } from '@/utils/responsive';
@@ -20,7 +21,6 @@ import { workflowDisplayName, workflowStateLabel } from '@/buzz/workflow-graph';
 import { formatRunDuration, runDayLabel, workflowRunHeadline, workflowRunHref, workflowStarterLine } from '@/buzz/workflow-run-copy';
 import { HullLivePulse } from '@/components/buzz/MonoHull';
 import { PageHeader } from '@/components/buzz/PageHeader';
-import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
 import {
   WorkflowRunLine,
   WorkflowStepCircle,
@@ -95,7 +95,7 @@ export default function WorkflowRun() {
           />}
       {loading && !detail ? (
         <YStack padding="8" alignItems="center" justifyContent="center">
-          <SurfaceGlyphLoader testID="workflow-run-loader" />
+          <PageLoader testID="workflow-run-loader" />
         </YStack>
       ) : detail && run ? (
         <ScrollView testID="workflow-run-page">

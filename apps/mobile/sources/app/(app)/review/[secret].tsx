@@ -4,7 +4,7 @@ import { YStack } from 'tamagui';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useURL } from 'expo-linking';
 import { Button } from '@/components/buzz/Button';
-import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
+import { PageLoader } from '@/ui/PageLoader';
 import { signInWithReviewSecret } from '@/auth/review-sign-in';
 import { parseReviewSecret } from '@/buzz/review-link';
 import { T } from '@/ui/grammar';
@@ -59,7 +59,7 @@ export default function ReviewSignIn() {
         </YStack>
       ) : (
         <>
-          <SurfaceGlyphLoader compact testID="review-signin-loader" />
+          <PageLoader testID="review-signin-loader" />
           <T v="meta" color="secondary" marginTop="4">signing in…</T>
         </>
       )}

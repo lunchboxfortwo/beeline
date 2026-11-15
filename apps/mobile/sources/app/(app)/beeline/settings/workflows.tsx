@@ -1,3 +1,4 @@
+import { PageLoader } from '@/ui/PageLoader';
 import { SettingsRow } from '@/components/buzz/SettingsRow';
 import { appErrorCopy, appReadErrorCopy } from '@/buzz/app-error-copy';
 import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
@@ -12,7 +13,6 @@ import {
   type RoomWorkflowView,
 } from '@beeline/api-contract/phone';
 import { getEffectiveRelayUrl, loadBuzzIdentity } from '@/auth/buzz-identity-storage';
-import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
 import { PageHeader } from '@/components/buzz/PageHeader';
 import { RoomViewClient } from '@/sync/transport/room-view-client';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
@@ -112,9 +112,7 @@ export default function RoomWorkflows() {
         title="Workflows"
       />
       {loading ? (
-        <YStack flex={1} alignItems="center" justifyContent="center">
-          <SurfaceGlyphLoader testID="workflows-loader" />
-        </YStack>
+        <PageLoader testID="workflows-loader" />
       ) : (
         <ScrollView>
           <YStack padding="4" gap="2">

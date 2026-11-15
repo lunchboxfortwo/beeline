@@ -1,3 +1,4 @@
+import { PageLoader } from '@/ui/PageLoader';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Input, ListItem, Spinner, XStack, YStack } from 'tamagui';
 import { Bot, Check, Link, Lock, Mail, Sparkles, Terminal, Users } from 'lucide-react-native';
@@ -6,7 +7,6 @@ import * as Crypto from 'expo-crypto';
 import { isWorkspaceListView, type Identity, type WorkspaceListView } from '@beeline/buzz-client';
 import { Btn, Copy, CopyLine, Glyph, T } from '@/ui/grammar';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
-import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import { agentPairingCommand } from '@/buzz/agent-pairing-command';
@@ -194,7 +194,7 @@ export function WorkspaceSetup({ route, entry = 'workspace' }: { route: string; 
     if (!step) {
         return (
             <OnboardingFrame center testID="workspace-choice-loading">
-                <SurfaceGlyphLoader testID="community-loader" />
+                <PageLoader testID="community-loader" />
             </OnboardingFrame>
         );
     }
