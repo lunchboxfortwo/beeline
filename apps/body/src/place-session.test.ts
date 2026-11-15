@@ -70,6 +70,17 @@ it('starts and answers before optional reads begin, even if none of them resolve
   await f.session.dispose();
 });
 
+it('does not restore a streamed preamble after ACP selects no final answer', async () => {
+  const f = await fixture();
+  await f.session.start();
+  f.prompt.mockImplementation(async (_sessionId?: unknown, _prompt?: unknown, onChunk?: unknown) => {
+    (onChunk as (delta: string, full: string, run: string) => void)('Gathering data', 'Gathering data', 'Gathering data');
+    return {agentText:'',stopReason:'end_turn',updates:[],toolCalls:[]};
+  });
+  expect(await f.session.deliver(f.item)).toMatchObject({text:'',stopReason:'end_turn'});
+  await f.session.dispose();
+});
+
 it('discovers and calls Squire in the same cold session without a Registry installation', async () => {
   const requestMcp = vi.fn(async (method: string) => method === 'tools/list'
     ? { tools: [{ name: 'list_credentials', inputSchema: { type: 'object' } }] }

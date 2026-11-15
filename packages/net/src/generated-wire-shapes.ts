@@ -2089,7 +2089,7 @@ export const wireShapes: readonly WireShape[] = [
   shape({"kind":"object","properties":{"kind":{"node":1,"optional":false},"consequence":{"node":1,"optional":false},"mentionAgentIds":{"node":34,"optional":true}}}),
   shape({"kind":"object","properties":{"url":{"node":1,"optional":false},"message":{"node":1,"optional":false},"messageId":{"node":1,"optional":false}}}),
   shape({"kind":"intersection","choices":[1442,1441,2087]}),
-  shape({"kind":"object","properties":{"harnessEnded":{"node":20,"optional":true},"requestId":{"node":5,"optional":true},"queuedRequestIds":{"node":34,"optional":true},"text":{"node":1,"optional":false},"presentation":{"node":2088,"optional":true},"tags":{"node":1577,"optional":true},"replyToMessageId":{"node":5,"optional":true},"triggerMessageId":{"node":5,"optional":true},"steps":{"node":2089,"optional":true}}}),
+  shape({"kind":"object","properties":{"harnessEnded":{"node":20,"optional":true},"failureReason":{"node":5,"optional":true},"requestId":{"node":5,"optional":true},"queuedRequestIds":{"node":34,"optional":true},"text":{"node":1,"optional":false},"presentation":{"node":2088,"optional":true},"tags":{"node":1577,"optional":true},"replyToMessageId":{"node":5,"optional":true},"triggerMessageId":{"node":5,"optional":true},"steps":{"node":2089,"optional":true}}}),
   shape({"kind":"union","choices":[6,227,228]}),
   shape({"kind":"union","choices":[6,1956]}),
   shape({"kind":"intersection","choices":[1445,2091]}),

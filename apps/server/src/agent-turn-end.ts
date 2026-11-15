@@ -1,5 +1,8 @@
 import type { CommandRow } from './agent-command.js';
 import type { SqlDatabase } from './database.js';
+import { createHash } from 'node:crypto';
+import { systemMessage } from '@beeline/api-contract/system-message-catalog';
+import { systemLine } from './system-line.js';
 
 /** Every terminal write to a queue item goes through this database function:
  * the answer was posted (complete), or Stop cancelled it. A terminal replay
@@ -36,7 +39,7 @@ CREATE OR REPLACE FUNCTION beeline_project_agent_turn(
 ) RETURNS SETOF agent_turns LANGUAGE plpgsql AS $$
 BEGIN
   RETURN QUERY UPDATE agent_turns turn SET status=outcome,
-    failure_reason=CASE WHEN working_only THEN turn.failure_reason ELSE reason END,created_at=clock_timestamp()
+    failure_reason=CASE WHEN working_only OR (outcome='failed' AND reason IS NULL) THEN turn.failure_reason ELSE reason END,created_at=clock_timestamp()
     WHERE turn.agent_id=agent AND turn.room_id=room AND turn.request_id=request
       AND (NOT working_only OR turn.status='working')
       AND (before_epoch IS NULL OR turn.connection_epoch IS NULL OR turn.connection_epoch<before_epoch)
@@ -91,8 +94,16 @@ END; $$;
 export async function interruptAgentTurns(db: SqlDatabase, agentId: string, beforeEpoch: number): Promise<string[]> {
   const turns = await db.query<{ room_id: string; request_id: string }>(`SELECT room_id,request_id FROM agent_turns
     WHERE agent_id=$1 AND status='working' AND (connection_epoch IS NULL OR connection_epoch<$2)`, [agentId,beforeEpoch]);
-  for (const turn of turns.rows) await db.query('SELECT * FROM beeline_interrupt_agent_turn($1,$2,$3,$4,NULL)',
-    [agentId,turn.room_id,turn.request_id,beforeEpoch]);
+  for (const turn of turns.rows) {
+    const interrupted = await db.query<{status:string}>('SELECT * FROM beeline_interrupt_agent_turn($1,$2,$3,$4,NULL)',
+      [agentId,turn.room_id,turn.request_id,beforeEpoch]);
+    if (interrupted.rows.some(row => row.status === 'cancelled')) {
+      const item = (await db.query<CommandRow>(`SELECT * FROM agent_commands
+        WHERE agent_id=$1 AND room_id=$2 AND turn_request_id=$3 AND state='pending'`,
+        [agentId,turn.room_id,turn.request_id])).rows[0];
+      if (item) await explainTurnFailure(db, item, 'Agent connection replaced before a public answer');
+    }
+  }
   return [...new Set(turns.rows.map(turn=>turn.room_id))];
 }
 
@@ -106,6 +117,29 @@ export async function endAgentTurn(db: SqlDatabase, command: Pick<CommandRow, 'i
   const ended = await db.query('SELECT * FROM beeline_finish_agent_command($1,$2,$3,$4)',
     [command.id, outcome, reason ?? null, resultMessageId ?? null]);
   return ended.rowCount > 0;
+}
+
+/** Settle an unanswered execution and its explanation in the same transaction. */
+export async function failAgentTurn(db: SqlDatabase, item: CommandRow, reason: string, messageId?: string): Promise<void> {
+  if (await endAgentTurn(db, item, 'failed', reason)) {
+    await db.query('SELECT beeline_record_agent_answer($1,true,$2)', [item.id, reason]);
+    await explainTurnFailure(db, item, reason, messageId);
+  }
+}
+
+/** A replaced connection ends execution while its queue item remains owed. */
+async function explainTurnFailure(db: SqlDatabase, item: CommandRow, reason: string, messageId?: string): Promise<void> {
+  await db.query('SELECT * FROM beeline_project_agent_turn($1,$2,$3,$4,$5,NULL,NULL,false)',
+    [item.agent_id,item.room_id,item.turn_request_id,'failed',reason]);
+  const agent = (await db.query<{name:string}>('SELECT name FROM identities WHERE id=$1', [item.agent_id])).rows[0]!;
+  await systemLine(db, {
+    id: messageId ?? createHash('sha256').update(`failed:${item.id}`).digest('hex'),
+    roomId: item.return_room_id ?? item.room_id,
+    subject: {kind:'agent',id:item.agent_id,name:agent.name},
+    verb: systemMessage('agent-turn.failed'),
+    consequence: systemMessage('agent-turn.failure-reason', reason),
+    requestId: item.turn_request_id, commandId: item.id, durableFact:'failure',
+  });
 }
 
 /** A turn is working only while its queue item is still pending. */

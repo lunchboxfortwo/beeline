@@ -7,7 +7,7 @@ import { AGENT_COMMAND_DELEGATION_SCHEMA } from './agent-command-queue.js';
 import { squireDecisionDetail,workflowWakeDetail,type WorkflowWakeCard } from './agent-input-context.js';
 import { repairAgentPost } from './agent-post-text.js';
 import { subscriptionPromptBody } from './agent-subscriptions.js';
-import { endAgentTurn } from './agent-turn-end.js';
+import { endAgentTurn,failAgentTurn } from './agent-turn-end.js';
 import { closingActivity,replySteps } from './answer-activity.js';
 import { CornerAccessDatabase } from './corner-access-database.js';
 import { cornerCommanderBriefSql } from './corner-commander.js';
@@ -759,6 +759,9 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
   steps?: unknown; messageId?: string; replyToMessageId?: string;
   queuedRequestIds?: readonly string[];
   harnessEnded?: boolean;
+  failureReason?: string;
+  /** One failure line per return address for a combined harness ending. */
+  failureMessageId?: string;
   /** Internal publication receipt shared by items with the same return address. */
   sharedReplyId?: string;
 }): Promise<{ id: string; createdAt: number; delivered?: boolean; receipt?: string; answered?: boolean; woken?: string[]; notWoken?: {handle:string;reason:string}[] }> {
@@ -784,6 +787,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
       const address = JSON.stringify([item.return_room_id ?? input.roomId,item.return_agent_id]);
       const saved = await answerQueuedMessage(db,agentId,{
         ...input,queuedRequestIds:undefined,requestId:item.id,
+        failureMessageId: hash(`failed:${input.requestId}:${address}`),
         sharedReplyId:item.return_agent_id ? undefined : receipts.get(address),
         messageId:hash(`answer:${item.return_agent_id ? item.id : input.requestId}:${address}`),
       });
@@ -846,6 +850,11 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
       await endAgentTurn(db,item,input.report && input.status === 'failed' ? 'failed' : 'complete',null,publicReplyId);
       if (item.public_reply_id && publicText) history = {id,roomId:item.return_room_id ?? input.roomId,text:publicText};
       return {id:publicReplyId,createdAt:Math.floor(Date.now()/1000),delivered:true};
+    }
+    if (!publicText && item?.state === 'pending' && input.harnessEnded) {
+      completedNow = true;
+      await failAgentTurn(db, item, input.failureReason?.trim() || 'Harness ended without a public answer', input.failureMessageId);
+      return { id: item.id, createdAt: Math.floor(Date.now() / 1000) };
     }
     // Background work with nothing to say finishes without a post; an owed answer stays queued.
     if (!publicText && item?.state === 'pending'

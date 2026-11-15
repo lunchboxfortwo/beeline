@@ -192,14 +192,16 @@ export class AgentRunner {
         void this.options.daemonApi.execute('startAgentTurn', { roomId: item.roomId, requestId: item.turnRequestId })
           .catch(error => console.warn('[body] delivery status not written:', error));
         const answer = await place.session.deliver(item, batch);
-        // Empty background work closes quietly; an unanswered request stays owed.
+        // A harness ending without an answer carries its reason through the
+        // durable outbox, so disconnects cannot lose the visible failure.
+        const failure = answer.text ? {} : { failureReason: `Harness returned ${answer.stopReason ?? 'end_turn'} without a public answer` };
         const steps = answer.text && answer.steps.length ? { steps: answer.steps } : {};
         // Stop wall: a stopped item gets no answer.
         const pendingBatch = batch.filter(next => this.latest.some(listed => listed.id === next.id));
         if (pendingBatch.length) {
           await this.store({
             itemId: pendingBatch[0]!.id, roomId: item.roomId, requestId: pendingBatch[0]!.turnRequestId,
-            queuedRequestIds: pendingBatch.slice(1).map(next => next.id), text: answer.text, harnessEnded: true, ...steps,
+            queuedRequestIds: pendingBatch.slice(1).map(next => next.id), text: answer.text, harnessEnded: true, ...failure, ...steps,
           });
         }
         place.waiting = place.waiting.filter(next => !batched.has(next.id));
@@ -221,6 +223,7 @@ export class AgentRunner {
           if (pending.length) await this.store({
             itemId: pending[0]!.id, roomId: item.roomId, requestId: pending[0]!.turnRequestId,
             queuedRequestIds: pending.slice(1).map(next => next.id), text: '', harnessEnded: true,
+            failureReason: redactToolDetail(distillTurnFailureReason(error).text),
           });
         } else {
           place.waiting.unshift(item);
@@ -295,6 +298,7 @@ export class AgentRunner {
       const receipt=await api.execute('postRoomMessage', {
         roomId: answer.roomId, requestId: answer.itemId, text: answer.text, presentation: 'message',
         ...(answer.harnessEnded ? { harnessEnded: true } : {}),
+        ...(answer.failureReason ? { failureReason: answer.failureReason } : {}),
         ...(answer.queuedRequestIds?.length ? { queuedRequestIds: answer.queuedRequestIds } : {}),
         ...(answer.steps ? { steps: answer.steps } : {}),
       });
@@ -323,7 +327,7 @@ export class AgentRunner {
   private sessionExited(placeId: string): void {
     const place = this.places.get(placeId);
     if (!place || this.stopped) return;
-    // deliver() stores closing output; the server retains unanswered requests.
+    // deliver() stores closing output or its failure reason before publication.
     if (!place.running) void place.session.stop().then(() => this.pump(placeId));
   }
 

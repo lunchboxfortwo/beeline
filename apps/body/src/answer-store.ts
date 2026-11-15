@@ -12,8 +12,9 @@ export interface StoredAnswer {
   readonly requestId: string;
   /** Empty text alone does not acknowledge an unanswered queue item. */
   readonly text: string;
-  /** The harness ended; empty output completes the item without a post. */
+  /** The harness ended; the server settles an unanswered ending visibly. */
   readonly harnessEnded?: boolean;
+  readonly failureReason?: string;
   readonly steps?: DaemonOperationMap['postRoomMessage']['input']['steps'];
 }
 

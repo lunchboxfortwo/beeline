@@ -430,8 +430,10 @@ export type ReactToRoomMessageInput = RoomInput & {
 
 export type PostRoomMessageInput = TurnOutputAuthority &
   RoomInput & {
-    /** Helper closing receipt: empty output completes the item without publishing. */
+    /** Helper closing receipt: an unanswered ending records a visible failure. */
     readonly harnessEnded?: boolean;
+    /** Actual harness stop or error reason, scrubbed by the helper. */
+    readonly failureReason?: string;
     readonly requestId?: string;
     /** Other queue items answered by this combined reply, in the same chat. */
     readonly queuedRequestIds?: readonly string[];

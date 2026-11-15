@@ -423,7 +423,7 @@ export class PlaceSession {
 
   /**
    * Hand one item to the session and wait for its answer. Throws only when
-   * the harness itself fails; only background work may complete silently.
+   * the harness itself fails; the runner settles unanswered endings visibly.
    */
   async deliver(item: AgentCommand, batch: readonly AgentCommand[] = []): Promise<Answer> {
     // start() ran first; a session that died since fails its prompt.
@@ -458,7 +458,7 @@ export class PlaceSession {
     if (this.privateHomeRoot && agentBehavior(this.options.config.agentKind).sharedLoginWriteBack)
       void writeBackRoomClaudeLogin({ root: this.privateHomeRoot, operatorHome: this.options.config.operatorHome })
         .catch(error => console.warn('[body] refreshed Claude login not shared:', error));
-    const text = durableReplyText(result.agentText) || durableReplyText(stream.lastRunText);
+    const text = durableReplyText(result.agentText);
     let steps: Answer['steps'] = [];
     try { steps = roomReplySteps(agentTurnSteps(result.updates ?? [])); }
     catch (error) { console.warn('[body] optional answer history omitted:', error); }

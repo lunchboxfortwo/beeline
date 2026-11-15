@@ -498,7 +498,7 @@ export function isPureRetryNarration(text: string): boolean {
  *  (a corner may record those runs independently as durable output activity).
  *  Retry/backoff narration can never be the answer either: classify that last
  *  run and return empty when it is pure narration, so a flaked turn selects
- *  nothing (the caller treats the turn as failed and stays retryable) while
+ *  nothing (the caller records the unanswered ending's failure reason) while
  *  genuine prose — including prose that merely mentions retries — is kept.
  *  Never scan backwards past the last run: an earlier pre-tool progress
  *  sentence is not the answer just because the turn later degraded into
@@ -510,6 +510,12 @@ export function finalAgentMessageText(
   const runs = agentMessageRunSpans(updates, agentLabel);
   const last = runs[finalRunIndex(runs)]?.text;
   if (!last || isPureRetryNarration(last)) return '';
+  // A prompt can end after tools without ever producing closing prose. Its
+  // earlier progress sentence is not an answer. Use the last text delta so
+  // metadata interleaved inside a word and late results for an older tool do
+  // not discard a real closing message.
+  const lastText = updates.reduce((last, {update}, index) => agentMessageChunkText(update).trim() ? index : last, -1);
+  if (toolCallOpenings(updates).some(at => at > lastText)) return '';
   return last;
 }
 
@@ -542,7 +548,7 @@ export function agentTurnSteps(
   agentLabel?: string,
 ): AgentTurnStep[] {
   const runs = agentMessageRunSpans(updates, agentLabel);
-  const final = finalRunIndex(runs);
+  const final = finalAgentMessageText(updates, agentLabel) ? finalRunIndex(runs) : -1;
   const steps: { at: number; step: AgentTurnStep }[] = runs.flatMap((run, index) =>
     index === final || !run.text.trim() || isPureRetryNarration(run.text)
       ? []
