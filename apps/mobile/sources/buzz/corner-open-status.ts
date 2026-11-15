@@ -3,9 +3,9 @@ import { useSyncExternalStore } from 'react';
 /**
  * The one corner create in flight, or the last one that could not reach the
  * server (corner-open network-failure mock). Every entry point — the Room
- * list and sidebar long-press, the Corners page +, the Room's corner door and
+ * list and sidebar long-press, the Room's corner door and
  * forward-to-new-corner — runs through `openRandomNamedCorner`, which writes
- * here; `CornerOpenToast` and the Corners page placeholder row read it.
+ * here; `CornerOpenToast` reads it.
  */
 export type CornerOpenStatus =
   | { status: 'idle' }
@@ -67,27 +67,6 @@ export function cornerOpenUnreachable(roomId: string, timedOut: boolean, retry: 
  */
 export function cornerOpenTappedAgain(): void {
   if (current.status === 'pending') set({ ...current, again: true });
-}
-
-/**
- * Rooms whose Corners page is on screen. That page shows a pending create as
- * its own placeholder row, so the toast stays away for those Rooms.
- */
-const listedRooms = new Map<string, number>();
-
-export function listCornerOpens(roomId: string): () => void {
-  listedRooms.set(roomId, (listedRooms.get(roomId) ?? 0) + 1);
-  set({ ...current });
-  return () => {
-    const count = (listedRooms.get(roomId) ?? 1) - 1;
-    if (count) listedRooms.set(roomId, count);
-    else listedRooms.delete(roomId);
-    set({ ...current });
-  };
-}
-
-export function cornerOpensListed(roomId: string): boolean {
-  return listedRooms.has(roomId);
 }
 
 /** Whether `error` means the server never answered (deadline or network). */

@@ -6,21 +6,14 @@ import {
   cornerHref,
   navigateToRoom,
   resolveMentionDirectMessageAction,
-  roomCornersHref,
   roomHref,
   routeChannelId,
-  routeCornersRoomId,
   type ChatStackRoute,
 } from './corner-navigation';
 
 const chatRoute = (channelId: string): ChatStackRoute => ({
   name: 'beeline/chat/[channelId]',
   params: { channelId },
-});
-
-const cornersRoute = (roomId: string): ChatStackRoute => ({
-  name: 'beeline/corners/[roomId]',
-  params: { roomId },
 });
 
 describe('opening a corner', () => {
@@ -57,17 +50,9 @@ describe('leaving a corner', () => {
     expect(routeChannelId(landedOn)).not.toBe('corner-1');
   });
 
-  it('returns to the screen it was opened from, not its parent Room', () => {
-    // Corner → corner, or a corner opened from the tray or schedules, goes back
-    // one screen rather than skipping ahead to the parent Room.
-    expect(
-      chatBackAction([chatRoute('room-1'), chatRoute('corner-1'), chatRoute('corner-2')], 'room-1'),
-    ).toEqual({
-      type: 'back',
-    });
-    expect(chatBackAction([{ name: 'beeline/tray' }, chatRoute('corner-1')], 'room-1')).toEqual({
-      type: 'back',
-    });
+  it('skips another thread to reach the parent chat', () => {
+    expect(chatBackAction([chatRoute('room-1'), chatRoute('corner-1'), chatRoute('corner-2')], 'room-1'))
+      .toEqual({ type: 'pop', count: 2 });
   });
 
   it('skips copies of itself stacked on top', () => {
@@ -82,59 +67,9 @@ describe('leaving a corner', () => {
     });
   });
 
-  it('returns to the Room list when the Corner was opened there', () => {
-    expect(
-      chatBackAction([{ name: 'beeline/channels' }, chatRoute('corner-1')], 'room-1', 'room-list'),
-    ).toEqual({ type: 'pop', count: 1 });
-    expect(chatBackAction([chatRoute('corner-1')], 'room-1', 'room-list')).toEqual({
-      type: 'room-list',
-    });
-  });
-
-  it('pops to the corners screen when the Corner was opened there', () => {
-    const routes = [
-      { name: 'beeline/channels' },
-      chatRoute('room-1'),
-      cornersRoute('room-1'),
-      chatRoute('corner-1'),
-    ];
-    expect(chatBackAction(routes, 'room-1', 'corners')).toEqual({ type: 'pop', count: 1 });
-    // The parent Room sits beneath the corners screen and is never skipped.
-    const landedOn = routes[routes.length - 2];
-    expect(routeCornersRoomId(landedOn)).toBe('room-1');
-    expect(routeChannelId(landedOn)).toBeUndefined();
-  });
-
-  it('pops past a corner reordered above the corners screen rather than opening its Room', () => {
-    const routes = [
-      { name: 'beeline/channels' },
-      chatRoute('room-1'),
-      cornersRoute('room-1'),
-      chatRoute('corner-1'),
-      chatRoute('corner-2'),
-    ];
-    expect(chatBackAction(routes, 'room-1', 'corners')).toEqual({ type: 'pop', count: 2 });
-  });
-
-  it('opens the corners screen when it was never on the stack', () => {
-    expect(chatBackAction([chatRoute('corner-1')], 'room-1', 'corners')).toEqual({
-      type: 'open-corners',
-      roomId: 'room-1',
-    });
-    expect(
-      chatBackAction([{ name: 'beeline/channels' }, chatRoute('corner-1')], 'room-1', 'corners'),
-    ).toEqual({
-      type: 'open-corners',
-      roomId: 'room-1',
-    });
-  });
-
-  it('ignores a corners screen for a different Room', () => {
-    const routes = [{ name: 'beeline/channels' }, cornersRoute('room-2'), chatRoute('corner-1')];
-    expect(chatBackAction(routes, 'room-1', 'corners')).toEqual({
-      type: 'open-corners',
-      roomId: 'room-1',
-    });
+  it('ignores an old Room-list return hint on a thread', () => {
+    expect(chatBackAction([{ name: 'beeline/channels' }, chatRoute('corner-1')], 'room-1', 'room-list'))
+      .toEqual({ type: 'open-room', channelId: 'room-1' });
   });
 
   it('reads a channel id through URI encoding', () => {
@@ -142,16 +77,6 @@ describe('leaving a corner', () => {
     expect(routeChannelId({ params: { channelId: '100%' } })).toBe('100%');
     expect(routeChannelId({ params: {} })).toBeUndefined();
     expect(routeChannelId(undefined)).toBeUndefined();
-  });
-
-  it('reads a corners-list room id only from the corners route', () => {
-    expect(routeCornersRoomId(cornersRoute('a%2Fb'))).toBe('a/b');
-    expect(routeCornersRoomId(cornersRoute('room-1'))).toBe('room-1');
-    // A chat route carries a roomId param for corners it hosts; only the
-    // corners-list route is the target.
-    expect(routeCornersRoomId(chatRoute('room-1'))).toBeUndefined();
-    expect(routeCornersRoomId({ params: {} })).toBeUndefined();
-    expect(routeCornersRoomId(undefined)).toBeUndefined();
   });
 });
 
@@ -193,14 +118,6 @@ describe('leaving a Room', () => {
 });
 
 describe('leaving a screen opened from a notification', () => {
-  it('sends a corner to its corners list, not the Room underneath', () => {
-    const routes = [{ name: 'beeline/channels' }, chatRoute('room-1'), chatRoute('corner-1')];
-    expect(chatBackAction(routes, 'room-1', 'corners')).toEqual({
-      type: 'open-corners',
-      roomId: 'room-1',
-    });
-  });
-
   it('sends a Room to the Room list, not the screen underneath', () => {
     const routes = [
       { name: 'beeline/channels' },
@@ -230,30 +147,6 @@ describe('corner hrefs', () => {
     });
   });
 
-  it('carries an explicit Room-list return target when opened from that list', () => {
-    expect(cornerHref('corner-1', 'room-1', 'fix-oauth-callback', 'room-list')).toEqual({
-      pathname: '/beeline/chat/[channelId]',
-      params: {
-        channelId: 'corner-1',
-        parent: 'room-1',
-        title: 'fix-oauth-callback',
-        returnTo: 'room-list',
-      },
-    });
-  });
-
-  it('carries the corners-screen return target when opened from that list', () => {
-    expect(cornerHref('corner-1', 'room-1', 'fix-oauth-callback', 'corners')).toEqual({
-      pathname: '/beeline/chat/[channelId]',
-      params: {
-        channelId: 'corner-1',
-        parent: 'room-1',
-        title: 'fix-oauth-callback',
-        returnTo: 'corners',
-      },
-    });
-  });
-
   it('opens a Room with no corner hints attached', () => {
     expect(roomHref('room-1')).toEqual({
       pathname: '/beeline/chat/[channelId]',
@@ -265,13 +158,6 @@ describe('corner hrefs', () => {
     const navigate = vi.fn();
     navigateToRoom({ navigate }, 'room-1');
     expect(navigate).toHaveBeenCalledWith(roomHref('room-1'), { dangerouslySingular: true });
-  });
-
-  it('opens the Room’s dedicated corners list', () => {
-    expect(roomCornersHref('room-1')).toEqual({
-      pathname: '/beeline/corners/[roomId]',
-      params: { roomId: 'room-1' },
-    });
   });
 });
 

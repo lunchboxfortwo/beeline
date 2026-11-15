@@ -1,6 +1,6 @@
 import { useCallback, useRef } from 'react';
 import { router } from 'expo-router';
-import { cornerHref, type CornerReturnTarget } from '@/buzz/corner-navigation';
+import { cornerHref } from '@/buzz/corner-navigation';
 import { cornerOpenTappedAgain } from '@/buzz/corner-open-status';
 import type { CornerOpenAttempt } from '@/buzz/open-random-corner';
 import { openRoomListCorner } from '@/buzz/room-list-new-corner';
@@ -14,7 +14,6 @@ import type { BuzzRigTransport } from '@/sync/transport';
  */
 export function useNewThread(
   transport: () => BuzzRigTransport | null | undefined | Promise<BuzzRigTransport | null | undefined>,
-  returnTo?: CornerReturnTarget,
 ) {
   const resolve = useRef(transport);
   resolve.current = transport;
@@ -30,12 +29,12 @@ export function useNewThread(
         createCorner: client
           ? (id, title, cornerId) => client.createHumanCorner(id, title, undefined, true, cornerId)
           : null,
-        openCorner: (cornerId, title) => router.push(cornerHref(cornerId, roomId, title, returnTo)),
+        openCorner: (cornerId, title) => router.push(cornerHref(cornerId, roomId, title)),
         retry: (failed) => void open(roomId, failed),
       });
     } finally {
       opening.current = false;
     }
-  }, [returnTo]);
+  }, []);
   return open;
 }

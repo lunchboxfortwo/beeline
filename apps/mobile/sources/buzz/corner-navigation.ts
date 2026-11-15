@@ -1,17 +1,4 @@
-/**
- * Leaving a chat screen returns to where the reader came from.
- *
- * A Room and a Corner are the same Expo Router route (`buzz/chat/[channelId]`).
- * Back is a stack pop to the screen underneath, with three exceptions:
- *
- * - a screen opened from a notification carries `returnTo`: a Room returns to
- *   the Room list and a corner to its Room's corners list, never whatever the
- *   notification's `dangerouslySingular` navigate happened to leave beneath it;
- * - a corner opened from the Room list or the corners list carries `returnTo`
- *   for that list, so it lands there even when the list is not on the stack;
- * - a lone screen (a cold start) opens the corner's parent Room or the Room
- *   list, because a bare `router.back()` there is a silent no-op.
- */
+/** Threads always return to their parent chat; Rooms retain their opening history. */
 
 import type { Href, Router } from 'expo-router';
 
@@ -20,7 +7,7 @@ export type ChatStackRoute = {
   params?: Record<string, unknown> | undefined;
 };
 
-export type CornerReturnTarget = 'room-list' | 'corners';
+export type CornerReturnTarget = 'room-list';
 
 export type CornerOpenAction =
   { type: 'open-corner'; cornerId: string } | { type: 'explain'; message: string };
@@ -73,11 +60,6 @@ export function navigateToRoom(router: Pick<Router, 'navigate'>, channelId: stri
   router.navigate(roomHref(channelId), { dangerouslySingular: true });
 }
 
-/** Open the Room's dedicated corners list — the one place archived work is recorded. */
-export function roomCornersHref(roomId: string): Href {
-  return { pathname: '/beeline/corners/[roomId]', params: { roomId } } as unknown as Href;
-}
-
 /** Resolve or create the Workspace-scoped DM behind a tagged member mention. */
 export async function resolveMentionDirectMessageAction(
   resolveDirectMessage: (
@@ -97,14 +79,12 @@ export async function resolveMentionDirectMessageAction(
 /**
  * Open a corner, carrying what the opener already knows about it. `parent` and
  * `title` are pure hints — they make the corner's header correct on the first
- * frame before the screen's own reads land. `returnTo` records an explicit
- * opening surface whose navigation origin cannot be derived from the parent.
+ * frame before the screen's own reads land. Back always opens the parent chat.
  */
 export function cornerHref(
   channelId: string,
   parentChannelId: string,
   title?: string,
-  returnTo?: CornerReturnTarget,
 ): Href {
   return {
     pathname: '/beeline/chat/[channelId]',
@@ -112,7 +92,6 @@ export function cornerHref(
       channelId,
       parent: parentChannelId,
       ...(title ? { title } : {}),
-      ...(returnTo ? { returnTo } : {}),
     },
   } as unknown as Href;
 }
@@ -128,50 +107,27 @@ export function routeChannelId(route: ChatStackRoute | undefined): string | unde
   }
 }
 
-/**
- * The Room a corners-list route is showing, undecorated by URI encoding.
- * Only a corners-list route answers; a chat route is never one.
- */
-export function routeCornersRoomId(route: ChatStackRoute | undefined): string | undefined {
-  if (route?.name !== 'beeline/corners/[roomId]') return undefined;
-  const raw = route?.params?.roomId;
-  if (typeof raw !== 'string' || !raw) return undefined;
-  try {
-    return decodeURIComponent(raw);
-  } catch {
-    return raw;
-  }
-}
-
 export type ChatBackAction =
   | { type: 'pop'; count: number }
   | { type: 'open-room'; channelId: string }
-  | { type: 'open-corners'; roomId: string }
   | { type: 'back' }
   | { type: 'room-list' };
 
-/**
- * What the chat header's back control should do.
- *
- * A screen with an explicit return target goes to that list — popped to if it
- * is on the stack, opened in place if not. Every other screen pops to the one
- * it was opened from, skipping consecutive copies of itself so the first back
- * never lands in the screen the reader just left. A lone screen opens the
- * corner's parent Room, or the Room list for a Room.
- */
+/** Pop to a mounted parent chat, or replace the thread with its parent. */
 export function chatBackAction(
   routes: readonly ChatStackRoute[],
   parentChannelId: string | undefined,
   returnTo?: CornerReturnTarget,
 ): ChatBackAction {
   const top = routes.length - 1;
-  if (returnTo === 'corners' && parentChannelId) {
+  if (parentChannelId) {
     for (let index = top - 1; index >= 0; index -= 1) {
-      if (routeCornersRoomId(routes[index]) === parentChannelId) {
-        return { type: 'pop', count: top - index };
+      if (routes[index]?.name === 'beeline/chat/[channelId]' && routeChannelId(routes[index]) === parentChannelId) {
+        const count = top - index;
+        return count === 1 ? { type: 'back' } : { type: 'pop', count };
       }
     }
-    return { type: 'open-corners', roomId: parentChannelId };
+    return { type: 'open-room', channelId: parentChannelId };
   }
   // Popping to the list rather than replacing keeps a Room that was never
   // visited from flashing a newly mounted transcript during the transition.
@@ -185,7 +141,7 @@ export function chatBackAction(
   if (routes.length > selfCount) {
     return selfCount > 1 ? { type: 'pop', count: selfCount } : { type: 'back' };
   }
-  return parentChannelId ? { type: 'open-room', channelId: parentChannelId } : { type: 'room-list' };
+  return { type: 'room-list' };
 }
 
 /** How many copies of the top channel sit on top of each other. */

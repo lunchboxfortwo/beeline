@@ -57,7 +57,6 @@ export function findStackFor(state: unknown, routeName: string): StackState | un
 function screenIdentity(name: string, params: object | undefined): string {
   const value = (params ?? {}) as Record<string, unknown>;
   if (name === 'beeline/channels') return `${name}:${String(value.communityId ?? '')}`;
-  if (name === 'beeline/corners/[roomId]') return `${name}:${String(value.roomId ?? '')}`;
   if (name === 'beeline/chat/[channelId]') return `${name}:${String(value.channelId ?? '')}`;
   return name;
 }

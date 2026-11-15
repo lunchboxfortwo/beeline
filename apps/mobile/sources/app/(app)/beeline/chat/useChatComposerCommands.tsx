@@ -10,7 +10,7 @@ import { type ChannelReferenceTarget } from '@/buzz/channel-reference';
 import { scheduleAnimationFrame } from '@/buzz/host-scheduler';
 import { openExternalUrl } from '@/utils/open-external-url';
 import { FAST_MODE_COMMAND, insertAgentSlashCommand, type BuiltInSlashVerbId, type FastModeCommandState } from '@/buzz/slash-verbs';
-import { roomCornersHref } from '@/buzz/corner-navigation';
+import { useNewThread } from '@/ui/screens/chats/use-new-thread';
 import { copyEntireTurn } from '@/buzz/message-copy';
 import { storeTempText } from '@/sync/persistence';
 import { useScopedCallbacks } from '@/buzz/use-stable';
@@ -174,13 +174,15 @@ export function useChatComposerCommands([
   );
 
 
+  const openNewThread = useNewThread(() => transport);
+
   const runSlashVerb = useCallback(
     (verb: BuiltInSlashVerbId) => {
       clearSlashComposer();
       void Haptics.selectionAsync();
       switch (verb) {
         case 'build':
-          router.push(roomCornersHref(decodedId));
+          void openNewThread(decodedId);
           return;
         case 'poll':
           setCreatePollVisible(true);
@@ -230,6 +232,7 @@ export function useChatComposerCommands([
       }
     },
     [
+      openNewThread,
       clearSlashComposer,
       openWorkspaceRoster,
       activeCommunityId,

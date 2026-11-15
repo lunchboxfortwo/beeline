@@ -126,3 +126,18 @@ it('claims a cold tap before startup restoration but dispatches only after navig
   ready(); await route;
   expect(openStack).toHaveBeenCalledOnce();
 });
+
+
+it('opens the chat for a retained notification naming the retired Threads page', () => {
+  const target = getBuzzNotificationTargetFromData({
+    type: 'channel-activity', workspaceId: 'workspace', roomId: 'room', channelId: 'room',
+    target: 'corners', route: '/beeline/corners/room', returnTo: 'corners',
+  })!;
+  expect(notificationStackRoutes(target, 'legacy-tap')).toEqual([
+    { name: 'beeline/channels', params: { communityId: 'workspace' } },
+    { name: 'beeline/chat/[channelId]', params: {
+      channelId: 'room', communityId: 'workspace', notificationResponseId: 'legacy-tap',
+      returnTo: 'room-list', notificationTarget: 'message',
+    } },
+  ]);
+});

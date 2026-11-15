@@ -28,7 +28,7 @@ export function useChatRoute([
   notificationMessageId: string | undefined,
   notificationTarget: string | undefined,
   insets: import("react-native-safe-area-context/lib/typescript/src/SafeArea.types").EdgeInsets,
-  cornerReturnTarget: "corners" | "room-list" | undefined,
+  cornerReturnTarget: "room-list" | undefined,
   isDesktop: boolean,
   readOnlyFooterInset: { marginBottom: number; paddingBottom?: undefined; } | { paddingBottom: number; marginBottom?: undefined; },
 ] {
@@ -94,7 +94,7 @@ export function useChatRoute([
   const routeChannelTitle = title?.trim() || undefined;
 
   const cornerReturnTarget =
-    returnTo === 'room-list' || returnTo === 'corners' ? returnTo : undefined;
+    returnTo === 'room-list' ? returnTo : undefined;
 
   const insets = useSafeAreaInsets();
 

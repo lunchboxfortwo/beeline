@@ -1,11 +1,9 @@
-import { IndexRow, InlineRow } from './IndexRow';
+import { InlineRow } from './IndexRow';
 import React, { useEffect, useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { YStack } from 'tamagui';
 import { STEP, T } from '@/ui/grammar';
 import {
-  cornerOpensListed,
-  listCornerOpens,
   useCornerOpenStatus,
   type CornerOpenStatus,
 } from '@/buzz/corner-open-status';
@@ -35,7 +33,7 @@ export function CornerOpenToast() {
   const status = useCornerOpenStatus();
   const seconds = useCornerOpenSeconds(status);
   const insets = useSafeAreaInsets();
-  if (status.status !== 'pending' || cornerOpensListed(status.roomId)) return null;
+  if (status.status !== 'pending') return null;
   return (
     <YStack pointerEvents="box-none" position="absolute" left={STEP['4']} right={STEP['4']} bottom={insets.bottom + STEP['4']}>
       <InlineRow
@@ -61,13 +59,4 @@ export function CornerOpenToast() {
       </InlineRow>
     </YStack>
   );
-}
-
-/** The Corners page shows only its pending create, without a second failure row. */
-export function CornerOpenRow({ roomId }: { roomId: string }) {
-  const status = useCornerOpenStatus();
-  const seconds = useCornerOpenSeconds(status);
-  useEffect(() => listCornerOpens(roomId), [roomId]);
-  if (status.status !== 'pending' || status.roomId !== roomId) return null;
-  return <IndexRow title={`Opening ${CORNER_LABEL}…`} description={cornerOpenWaitLine(status, seconds)} testID="corner-open-row-pending" />;
 }

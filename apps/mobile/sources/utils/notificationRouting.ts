@@ -194,7 +194,7 @@ export async function resolveBuzzNotificationTarget(
 
 /** One screen of the stack a notification opens, named as the app stack names it. */
 export type NotificationStackRoute = {
-  name: 'beeline/channels' | 'beeline/corners/[roomId]' | 'beeline/chat/[channelId]';
+  name: 'beeline/channels' | 'beeline/chat/[channelId]';
   params: Record<string, string>;
 };
 
@@ -208,7 +208,7 @@ export type NotificationNavigator = {
  *
  * A notification is an entry point, so back from it goes up the hierarchy,
  * not into whatever history happened to be on the stack: a Room sits on its
- * Workspace's Room list, and a corner on its Room's corners list above that
+ * Workspace's Room list, and a corner on its parent chat above that
  * Room list. Back never leaves the notified Workspace and the corner is at
  * most three screens from the Room list.
  */
@@ -236,7 +236,7 @@ export function notificationStackRoutes(
       ...(target.workspaceId ? { communityId: target.workspaceId } : {}),
       notificationResponseId,
       ...(isCorner
-        ? { parent: target.roomId, returnTo: 'corners' }
+        ? { parent: target.roomId }
         : { returnTo: 'room-list' }),
       ...(target.messageId
         ? { notificationMessageId: target.messageId }
@@ -245,7 +245,10 @@ export function notificationStackRoutes(
     },
   };
   if (!isCorner) return [roomList, chat];
-  return [roomList, { name: 'beeline/corners/[roomId]', params: { roomId: target.roomId } }, chat];
+  return [roomList, { name: 'beeline/chat/[channelId]', params: {
+    channelId: target.roomId,
+    ...(target.workspaceId ? { communityId: target.workspaceId } : {}),
+  } }, chat];
 }
 
 /** Open the exact push source on top of its fixed ancestry. */

@@ -45,11 +45,6 @@
     "coldDepthMax": 1
   },
   {
-    "path": "/beeline/corners/[roomId]",
-    "coldHttpMax": 1,
-    "coldDepthMax": 1
-  },
-  {
     "path": "/beeline/create-workspace",
     "coldHttpMax": 0,
     "coldDepthMax": 0

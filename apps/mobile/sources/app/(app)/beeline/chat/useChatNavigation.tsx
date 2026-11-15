@@ -1,18 +1,18 @@
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import React, { useEffect, useRef, useCallback } from 'react';
-import { Platform } from 'react-native';
-import { router } from 'expo-router';
+import { BackHandler, Platform } from 'react-native';
+import { router, useFocusEffect } from 'expo-router';
 import { Modal } from '@/modal';
 import { BuzzRigTransport } from '@/sync/transport';
 import { type DesktopWorkPaneEvent } from '@/buzz/desktop-workbench-state';
 import { MAX_MESSAGE_ATTACHMENTS, type PickedChatAttachment } from '@/buzz/chat-attachment';
-import { chatBackAction, cornerOpenAction, cornerHref, roomCornersHref, roomHref, type ChatStackRoute } from '@/buzz/corner-navigation';
+import { chatBackAction, cornerOpenAction, cornerHref, roomHref, type ChatStackRoute } from '@/buzz/corner-navigation';
 
 type Props = [
   liveDraftStore: import("@/buzz/live-draft-drain").LiveDraftDrainStore,
   navigation: Omit<import("@react-navigation/core").NavigationProp<ReactNavigation.RootParamList>, "getState"> & { getState(): import("@react-navigation/routers").NavigationState | undefined; },
   parentChannelId: string | undefined,
-  cornerReturnTarget: "corners" | "room-list" | undefined,
+  cornerReturnTarget: "room-list" | undefined,
   transport: BuzzRigTransport | null,
   decodedId: string,
   readRoom: () => void,
@@ -42,12 +42,7 @@ export function useChatNavigation([
 ] {
 
 
-  /**
-   * Leave this transcript. A screen opened from a notification or a list
-   * returns to that list; otherwise it pops to the screen it was opened from.
-   * See `corner-navigation.ts`. A lone transcript replaces itself instead of
-   * calling a `router.back()` that silently does nothing.
-   */
+  /** Leave a thread for its parent chat, or a Room for its opening surface. */
   const handleBack = useCallback(() => {
     // Stop the live-draft drain before the stack moves. The scheduler otherwise
     // keeps ticking on a still-mounted Room (native-stack does not unmount on
@@ -59,12 +54,19 @@ export function useChatNavigation([
     // A lone corner (for example, an older link without an origin hint) has
     // nothing to pop to, so open its parent Room.
     else if (action.type === 'open-room') router.replace(roomHref(action.channelId));
-    // A corner opened from a Room's corners screen lands back on that screen
-    // even when the list is not on the stack — never the parent Room.
-    else if (action.type === 'open-corners') router.replace(roomCornersHref(action.roomId));
     else if (action.type === 'back') router.back();
     else router.replace('/beeline/channels');
   }, [cornerReturnTarget, liveDraftStore, navigation, parentChannelId]);
+
+
+  useFocusEffect(useCallback(() => {
+    if (Platform.OS !== 'android' || !parentChannelId) return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      handleBack();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [handleBack, parentChannelId]));
 
 
   const closeCornerPending = useRef(false);

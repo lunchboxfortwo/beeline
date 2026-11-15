@@ -184,9 +184,7 @@ const server = http.createServer(async (req, res) => {
         ? 'members'
         : scene === 'settings'
           ? 'settings'
-          : scene === 'corners'
-            ? 'corners/' + room.id
-            : 'chat/' + (scene === 'brief' ? corner.id : room.id);
+          : 'chat/' + (scene === 'brief' ? corner.id : room.id);
     const boot = `<script>(async()=>{
     const scene=${JSON.stringify(scene)};
     const store={'buzzy.monolith.identity.v1':${JSON.stringify(viewer.pubkey)},'buzzy.monolith.refresh.v1':'fixture-refresh','buzzy.monolith.access.v1':JSON.stringify({token:'fixture',expiresAt:Date.now()+86400000,identityId:${JSON.stringify(viewer.pubkey)}})};

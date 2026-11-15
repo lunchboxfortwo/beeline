@@ -33,7 +33,7 @@ export function useChannelsNavigation(
     [activeCommunityId, identity],
   );
 
-  const openNewThread = useNewThread(() => transport, 'room-list');
+  const openNewThread = useNewThread(() => transport);
   // A list update changes one DTO, not every Room's event handlers.
   const rowActions = useScopedCallbacks(
     {
@@ -46,7 +46,7 @@ export function useChannelsNavigation(
         if (roomListGestures.canInteract()) void togglePin(roomId);
       },
       thread: (roomId: string, cornerId: string, name: string) => {
-        if (roomListGestures.canInteract()) router.push(cornerHref(cornerId, roomId, name, 'room-list'));
+        if (roomListGestures.canInteract()) router.push(cornerHref(cornerId, roomId, name));
       },
       newThread: (roomId: string) => {
         if (roomListGestures.canInteract()) void openNewThread(roomId);

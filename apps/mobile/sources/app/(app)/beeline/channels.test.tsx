@@ -756,7 +756,7 @@ describe('Room deck live path', () => {
     act(() => renderer.root.find((node: any) => node.type === 'ListItem' && node.props.testID === 'thread-row-corner-4').props.onPress());
     expect(router.push).toHaveBeenCalledWith({
       pathname: '/beeline/chat/[channelId]',
-      params: { channelId: 'corner-4', parent: 'room-a', title: 'four', returnTo: 'room-list' },
+      params: { channelId: 'corner-4', parent: 'room-a', title: 'four' },
     });
     await act(async () => renderer.unmount());
   });

@@ -26,7 +26,7 @@ import {
 } from './notification-response';
 
 const options = {
-  routeNames: ['index', 'beeline/channels', 'beeline/chat/[channelId]', 'beeline/corners/[roomId]'],
+  routeNames: ['index', 'beeline/channels', 'beeline/chat/[channelId]'],
   routeParamList: {},
   routeGetIdList: {},
 };

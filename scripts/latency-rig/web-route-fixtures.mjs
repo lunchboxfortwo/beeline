@@ -26,9 +26,6 @@ export const routeFixtures = {
   '/beeline/chat-info': content(id('chat-kind'), { params: { roomId: room.roomId } }),
   '/beeline/chat/[channelId]': text(room.text),
   '/beeline/community': content(id('choice-join-input'), { params: { mode: 'join' } }),
-  '/beeline/corners/[roomId]': content(id(`thread-row-${corners.cornerId}`), {
-    params: { roomId: corners.roomId },
-  }),
   '/beeline/create-workspace': content(id('create-workspace-name')),
   '/beeline/github-callback': { ...deck, state: 'callback-redirect' },
   '/beeline/github-installation': text('Continue connecting GitHub', {

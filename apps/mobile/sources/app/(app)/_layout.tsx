@@ -180,12 +180,6 @@ export default function RootLayout() {
           }}
         />
         <Stack.Screen
-          name="beeline/corners/[roomId]"
-          options={{
-            headerShown: false,
-          }}
-        />
-        <Stack.Screen
           name="join/[token]"
           options={{
             headerShown: false,
