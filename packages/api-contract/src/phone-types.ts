@@ -462,8 +462,6 @@ export type NeedsYouItemView = {
    */
   readonly expiresAt?: number;
   readonly author?: RoomViewIdentity;
-  /** An untagged report addressed to this viewer as commander, rather than a text tag. */
-  readonly addressedReport?: true;
   /** Present when the cell is a pending approval card the viewer can decide. */
   readonly approval?: NeedsYouApprovalView;
 };

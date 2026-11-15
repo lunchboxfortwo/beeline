@@ -3565,12 +3565,13 @@
       },
       "work_items": {
         "module": "Rooms and messages",
-        "reason": "Explicit work state, priority and single assignee are user/agent choices, independent of corner execution.",
+        "reason": "Explicit work state, objective and single assignee are user/agent choices, independent of corner execution.",
         "columns": {
           "room_id": "Thread or conversation reference; multiple tasks may refer to one thread.",
           "state": "Explicit board state.",
-          "priority": "Explicit priority selection.",
+          "priority": "Retired; kept unread for rollout and rollback overlap.",
           "title": "Optional task title supplied at creation.",
+          "objective": "What the work must achieve, supplied by an agent; it passes into its thread when the work starts.",
           "assignee_id": "Who has the ball; explicit null means unassigned.",
           "opened_by": "Immutable opening attribution.",
           "created_at": "Creation time.",

@@ -24,12 +24,12 @@ async function labelProps(os: string, label: string) {
     return tree.root.find((node: any) => node.type === 'Text' && node.props.children === label).props;
 }
 
-it.each(['Chats', 'Tags', 'People', 'Settings'])('keeps the %s tab label on one line and shrinks it to fit on Android', async (label) => {
+it.each(['Chats', 'Tasks', 'Team', 'Settings'])('keeps the %s tab label on one line and shrinks it to fit on Android', async (label) => {
     expect(await labelProps('android', label)).toMatchObject({ numberOfLines: 1, adjustsFontSizeToFit: true });
 });
 
 it('leaves web tab labels as they were, with no ellipsis', async () => {
-    const props = await labelProps('web', 'People');
+    const props = await labelProps('web', 'Team');
     expect(props.numberOfLines).toBeUndefined();
     expect(props.adjustsFontSizeToFit).toBeUndefined();
 });
@@ -44,8 +44,8 @@ it.each(['dark', 'light'])('shows the selected tab apart from the others under %
     let tree: any;
     act(() => { tree = create(<TabBar active="people" />); });
     const color = (label: string) => theme[tree.root.find((node: any) => node.type === 'Text' && node.props.children === label).props.color];
-    expect(color('People')).toBe(theme.ink);
-    for (const other of ['Chats', 'Tags', 'Settings']) expect(color(other)).not.toBe(color('People'));
+    expect(color('Team')).toBe(theme.ink);
+    for (const other of ['Chats', 'Tasks', 'Settings']) expect(color(other)).not.toBe(color('Team'));
     const line = (node: any) => node.type === 'YStack' && node.props.testID === 'tab-selected-line';
     expect(tree.root.findAll(line)).toHaveLength(1);
     expect(tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'tab-people').findAll(line)).toHaveLength(1);

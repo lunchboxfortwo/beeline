@@ -6,8 +6,8 @@ import { CountPill, Glyph, HEIGHT, T } from '@/ui/grammar';
 /** The desktop sidebar's places above the chats (build spec → desktop sidebar). */
 export type SidePlace = { key: 'tray' | 'people' | 'settings'; label: string; icon: typeof AtSign };
 export const SIDE_PLACES: SidePlace[] = [
-  { key: 'tray', label: 'Tags', icon: AtSign },
-  { key: 'people', label: 'People', icon: Users },
+  { key: 'tray', label: 'Tasks', icon: AtSign },
+  { key: 'people', label: 'Team', icon: Users },
   { key: 'settings', label: 'Settings', icon: Settings },
 ];
 

@@ -46,15 +46,21 @@ describe('chat corner counts', () => {
       'review',
     ]);
   });
-  it('projects work metadata without changing execution authority', () => {
+  it('projects a stored Backlog or Done and otherwise the live state, without changing execution authority', () => {
     const result = chatCornerCounts([
-      { ...row({}, 'working'), work_state: 'in-review', work_priority: 'urgent' },
+      { ...row({}, 'working'), work_state: 'backlog' as const },
+      { ...row({}, 'working'), work_state: 'in-review' as const },
+      { ...row(), work_state: 'done' as const },
+      row(),
     ]);
-    expect(result.get('room')?.openCorners[0]).toMatchObject({
-      state: 'working',
-      workState: 'in-review',
-      workPriority: 'urgent',
-    });
+    expect(
+      result.get('room')?.openCorners.map((corner) => [corner.state, corner.workState]),
+    ).toEqual([
+      ['working', 'backlog'],
+      ['working', 'in-progress'],
+      ['idle', 'done'],
+      ['idle', 'in-progress'],
+    ]);
   });
   it('marks corners the viewer follows or that owe them something', () => {
     const result = chatCornerCounts([
@@ -115,7 +121,10 @@ describe('chat corner counts', () => {
     const blocked = Array.from({ length: 12 }, (_, i) => ({
       ...row(),
       id: `blocked-${i}`,
-      work_state: 'needs-you' as const,
+      blocking: true,
+      waiting_item_id: `question-${i}`,
+      waiting_reason: 'question' as const,
+      waiting_kind: 'message' as const,
     }));
     const result = chatCornerCounts([
       ...Array.from({ length: 10 }, (_, i) => ({ ...row({}, 'working'), id: `working-${i}` })),
@@ -230,8 +239,7 @@ describe('chat corner counts', () => {
                 id: 'corner',
                 name: 'Corner',
                 state: 'idle',
-                workState: 'backlog',
-                workPriority: 'none',
+                workState: 'in-progress',
               },
             ],
           },

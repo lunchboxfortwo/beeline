@@ -2,7 +2,6 @@ import ts from 'typescript';
 
 /** One glyph per concept. Provider marks and identity/drawing art are separate. */
 export const CONCEPT_ICONS = {
-  workColumns: 'Columns3', workList: 'List', workFilter: 'Filter', workAssignee: 'UserRound',
   thread: 'CornerDownRight', chat: 'Hash', message: 'MessagesSquare',
   warning: 'AlertTriangle', archive: 'Archive', down: 'ArrowDown', back: 'ArrowLeft',
   forward: 'ArrowRight', up: 'ArrowUp', mention: 'AtSign', audio: 'AudioLines',
@@ -40,7 +39,7 @@ const LOCAL_ICONS = {
 
 /** Fixed primary roles; EmptyState's existing secondary description stays meta. */
 export const STATUS_ROLES = {
-  RoomDeckLoadingView: 'meta', ChatOpeningSurface: 'meta', ConnectorLoading: 'meta',
+  ChatOpeningSurface: 'meta', ConnectorLoading: 'meta',
   ConnectorNote: 'meta', ViewerPlaceholder: 'meta', EmptyState: 'body',
 };
 const CONTROLS = new Set(['Btn', 'Button', 'ListItem', 'SheetRow', 'Row']);

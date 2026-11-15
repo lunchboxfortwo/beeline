@@ -16,29 +16,28 @@ import {
 import { PgliteDatabase, migratedDatabase } from './test-support.js';
 
 describe('the Needs-you ask rule', () => {
-  it('asks when the text ends with a question mark or says please, approve or feedback', () => {
-    expect(isNeedsYouAsk('@ada can you look at this?')).toBe(true);
-    expect(isNeedsYouAsk('@ada can you look at this?  ')).toBe(true);
-    expect(isNeedsYouAsk('@ada please look at this')).toBe(true);
-    expect(isNeedsYouAsk('@ada Please look')).toBe(true);
-    expect(isNeedsYouAsk('@ada approve the release')).toBe(true);
-    expect(isNeedsYouAsk('@ada I would love your feedback.')).toBe(true);
-    expect(isNeedsYouAsk('@ada this release train is cursed')).toBe(false);
-    for (const status of ['blocked', 'needs-decision', 'failed'])
+  it('holds only blocked and needs-decision reports, never mentions, questions or keywords', () => {
+    for (const status of ['blocked', 'needs-decision'])
       expect(isNeedsYouAsk(`${status}: pick an endpoint @ada`)).toBe(true);
-    expect(isNeedsYouAsk('done: finished @ada')).toBe(false);
-    // A question in the middle is not the rule: the message must END with it.
-    expect(isNeedsYouAsk('@ada is this ok? I think so.')).toBe(false);
-    // Whole words only: "approved" reports, it does not ask.
-    expect(isNeedsYouAsk('@ada I approved it')).toBe(false);
+    for (const text of [
+      'failed: cannot build @ada',
+      'done: finished @ada',
+      '@ada can you look at this?',
+      '@ada please look at this',
+      '@ada approve the release',
+      '@ada I would love your feedback.',
+      'blocked:',
+    ])
+      expect(isNeedsYouAsk(text)).toBe(false);
   });
 
-  it('picks the asking sentence: the closing question, else the last trigger sentence', () => {
-    expect(needsYouSentence('Build is green. @ada can you ship it?')).toBe('@ada can you ship it?');
-    expect(needsYouSentence('@ada please review the copy. Thanks, it is short.')).toBe(
-      '@ada please review the copy.',
+  it('picks the asking sentence: the closing question, else the first report sentence', () => {
+    expect(needsYouSentence('needs-decision: Build is green. @ada can you ship it?')).toBe(
+      '@ada can you ship it?',
     );
-    expect(needsYouSentence('Line one\n@ada approve the deploy')).toBe('@ada approve the deploy');
+    expect(needsYouSentence('blocked: The emulator needs a sign-in. Then it runs.')).toBe(
+      'The emulator needs a sign-in.',
+    );
   });
 
   it('drops only the reader tag and tidies what it leaves', () => {
@@ -69,8 +68,6 @@ describe('the Needs-you ask rule', () => {
     expect(Array.from(shortenAsk(long)).length).toBeLessThanOrEqual(140);
     expect(needsYouRowText('needs-decision: Turn **Feedback Fixed** notices on or off?\n**Feedback Fixed notices:** off by default. @ada', 'ada'))
       .toBe('Turn Feedback Fixed notices on or off?');
-    expect(needsYouRowText('@ada Please approve merge of PR #2412 once checks pass on 43daa85de52a0705f4bed645147c37d451a27188, and a person uses the merge approval', 'ada'))
-      .toBe('Approve merge of PR #2412?');
     expect(needsYouRowText('@ada approve commit ' + 'a'.repeat(40), 'ada')).toBe('approve commit aaaaaaa');
     expect(needsYouRowText('needs-decision: Details. **Feedback** off by default. @ada', 'ada', 'Turn Feedback Fixed notices on or off?'))
       .toBe('Turn Feedback Fixed notices on or off?');
@@ -142,6 +139,12 @@ describe('PhoneService Needs-you tray', () => {
     );
     return id;
   }
+  /** A blocked or needs-decision report addressed to the reader as commander. */
+  async function report(roomId: string, authorId: string, text: string, ageMinutes = 10): Promise<string> {
+    const id = await post(roomId, authorId, text, ageMinutes);
+    await database.query(`UPDATE messages SET card=$2::jsonb WHERE id=$1`, [id, JSON.stringify({ reportToId: VIEWER })]);
+    return id;
+  }
   const read = () => phone.execute('readNeedsYou', { workspaceId: WORKSPACE }, VIEWER);
   const count = async () =>
     (await phone.execute('countNeedsYou', { workspaceId: WORKSPACE }, VIEWER)).count;
@@ -170,19 +173,17 @@ describe('PhoneService Needs-you tray', () => {
   });
 
   it('Reproduction tray-ask-1: projects full asks for the two screenshot cases', async () => {
-    const merge = await post(ROOM, AGENT, '@ada Please approve merge of PR #2412 once checks pass on 43daa85de52a0705f4bed645147c37d451a27188, and a person uses the merge approval');
-    const feedback = await post(ROOM, AGENT, 'needs-decision: Turn **Feedback Fixed** notices on or off?\n**Feedback Fixed notices:** off by default. @ada');
+    const feedback = await report(ROOM, AGENT, 'needs-decision: Turn **Feedback Fixed** notices on or off?\n**Feedback Fixed notices:** off by default. @ada');
     const items = (await read()).items;
-    expect(items.find(item => item.messageId === merge)?.text).toBe('Approve merge of PR #2412?');
     expect(items.find(item => item.messageId === feedback)?.text).toBe('Turn Feedback Fixed notices on or off?');
     console.log('Reproduction tray-ask-1: Tray > Needs you →', items.map(item => item.text));
-    await database.query(`UPDATE messages SET card=$2::jsonb WHERE id=$1`, [feedback, JSON.stringify({ ask: 'Enable Feedback Fixed notices?' })]);
+    await database.query(`UPDATE messages SET card=$2::jsonb WHERE id=$1`, [feedback, JSON.stringify({ ask: 'Enable Feedback Fixed notices?', reportToId: VIEWER })]);
     expect((await read()).items.find(item => item.messageId === feedback)?.text).toBe('Enable Feedback Fixed notices?');
   });
 
   it('Reproduction 7801081289: reads Needs You rows for a hyphenated viewer', async () => {
     await database.query('UPDATE identities SET handle=$2 WHERE id=$1', [VIEWER, 'a-b']);
-    const messageId = await post(ROOM, AGENT, '@a-b can you ask @c-d to review?');
+    const messageId = await report(ROOM, AGENT, 'needs-decision: @a-b can you ask @c-d to review?');
     expect((await read()).items.find(item => item.messageId === messageId)?.text)
       .toBe('can you ask @c-d to review?');
   });
@@ -224,61 +225,54 @@ describe('PhoneService Needs-you tray', () => {
     expect((await phone.readWorkspaces(VIEWER)).workspaces[0]?.attention).toBe(true);
   });
 
-  it('holds a message only when it both tags the reader and asks', async () => {
-    await post(ROOM, VIEWER, 'my own question @juniper?', 40);
-    const question = await post(ROOM, PEER, '@ada can you confirm the review note?', 30);
-    const please = await post(
-      CORNER,
-      AGENT,
-      'The release check needs a grant — @ada please approve it.',
-      20,
-    );
-    await post(ROOM, PEER, 'lol @ada this release train is cursed', 15);
-    await post(ROOM, PEER, 'Should we ship before Friday?', 12);
-    await post(OTHER_ROOM, PEER, '@ada are you in here?', 5);
+  it('holds a report addressed to the reader, never a mention, question or keyword', async () => {
+    await post(ROOM, PEER, '@ada can you confirm the review note?', 30);
+    await post(CORNER, AGENT, 'The release check needs a grant — @ada please approve it.', 25);
+    await post(ROOM, PEER, 'blocked: an untargeted report @ada', 24);
+    const question = await report(ROOM, PEER, 'needs-decision: Can you confirm the review note?', 22);
+    const blocked = await report(CORNER, AGENT, 'blocked: The release check needs a grant.', 20);
+    await report(OTHER_ROOM, PEER, 'blocked: a Room the reader cannot see.', 5);
 
     const { items } = await read();
     // Oldest first: nothing has started a clock yet.
-    expect(items.map((item) => item.messageId)).toEqual([question, please]);
+    expect(items.map((item) => item.messageId)).toEqual([question, blocked]);
     expect(items[1]).toMatchObject({
       roomId: CORNER,
       roomName: 'release-ios-signing',
       roomKind: 'corner',
       parentRoomName: 'Launch room',
-      text: 'The release check needs a grant — please approve it.',
+      text: 'The release check needs a grant.',
       author: { name: 'Hoots' },
     });
     expect(items[0]).toMatchObject({
       roomKind: 'room',
       roomName: 'Launch room',
-      text: 'can you confirm the review note?',
+      text: 'Can you confirm the review note?',
     });
     expect(items[0]!.approval).toBeUndefined();
   });
 
-  it('TAGS-1: distinguishes addressed reports from tags without inheriting a reply chain', async () => {
-    const report = async (text: string, reportToId: string, ageMinutes: number) => {
+  it('TAGS-1: holds reports addressed to the reader without inheriting a reply chain', async () => {
+    const addressed = async (text: string, reportToId: string, ageMinutes: number) => {
       const id = await post(ROOM, AGENT, text, ageMinutes);
       await database.query(`UPDATE messages SET card=$2::jsonb WHERE id=$1`, [id, JSON.stringify({ reportToId })]);
       return id;
     };
-    const decision = await report('needs-decision: Approve the reviewer-link fetch?', VIEWER, 30);
-    const blocked = await report('blocked: The emulator needs a production sign-in.', VIEWER, 20);
+    const decision = await addressed('needs-decision: Approve the reviewer-link fetch?', VIEWER, 30);
+    const blocked = await addressed('blocked: The emulator needs a production sign-in.', VIEWER, 20);
     const parent = await post(ROOM, PEER, '@hoots please check with Juniper', 19);
     const reply = await post(ROOM, AGENT, '@juniper I asked Hoots to check. This still needs you.', 18);
     await database.query(`UPDATE messages SET reply_to_message_id=$2,root_message_id=$3 WHERE id=$1`, [parent, decision, decision]);
     await database.query(`UPDATE messages SET reply_to_message_id=$2,root_message_id=$3 WHERE id=$1`, [reply, parent, decision]);
-    const tagged = await report('needs-decision: @ada please choose the endpoint', VIEWER, 17);
-    const channel = await report('blocked: @channel please check the endpoint', VIEWER, 16);
-    await report('needs-decision: Pick an endpoint for Juniper?', PEER, 10);
+    const tagged = await addressed('needs-decision: @ada please choose the endpoint', VIEWER, 17);
+    const channel = await addressed('blocked: @channel please check the endpoint', VIEWER, 16);
+    await addressed('needs-decision: Pick an endpoint for Juniper?', PEER, 10);
     await post(ROOM, AGENT, 'needs-decision: No commander recorded on this one?', 5);
 
     const { items } = await read();
     expect(items.map((item) => item.messageId)).toEqual([decision, blocked, tagged, channel]);
-    expect(items[0]).toMatchObject({ text: 'Approve the reviewer-link fetch?', author: { name: 'Hoots' }, addressedReport: true });
-    expect(items[1]).toHaveProperty('addressedReport', true);
-    expect(items[2]).not.toHaveProperty('addressedReport');
-    expect(items[3]).not.toHaveProperty('addressedReport');
+    expect(items[0]).toMatchObject({ text: 'Approve the reviewer-link fetch?', author: { name: 'Hoots' } });
+    expect(items[2]?.text).toBe('please choose the endpoint');
     expect(await count()).toBe(4);
   });
 
@@ -288,7 +282,7 @@ describe('PhoneService Needs-you tray', () => {
       await post(ROOM, VIEWER, 'An ordinary message');
       expect(await phone.liveNeedsYou(ROOM, VIEWER)).toEqual({workspaceId: WORKSPACE, count: 0, items: []});
       expect(cells).not.toHaveBeenCalled();
-      const question = await post(ROOM, PEER, '@ada can you confirm?');
+      const question = await report(ROOM, PEER, 'needs-decision: can you confirm?');
       const value = await phone.liveNeedsYou(ROOM, VIEWER);
       expect(value?.count).toBe(1);
       expect(value?.items.map(item => item.messageId)).toEqual([question]);
@@ -298,8 +292,8 @@ describe('PhoneService Needs-you tray', () => {
   });
 
   it('F04: live projections never start unseen clocks; only painted IDs are marked', async () => {
-    const first = await post(ROOM, PEER, '@ada please review this');
-    const second = await post(ROOM, PEER, '@ada can you confirm?');
+    const first = await report(ROOM, PEER, 'needs-decision: please review this');
+    const second = await report(ROOM, PEER, 'needs-decision: can you confirm?');
     const marks = async () => (await database.query(
       `SELECT * FROM needs_you_marks ORDER BY message_id`,
     )).rows;
@@ -327,7 +321,7 @@ describe('PhoneService Needs-you tray', () => {
   });
 
   it('starts the 24-hour clock on the first read, never on the badge count', async () => {
-    const id = await post(ROOM, PEER, '@ada can you look?');
+    const id = await report(ROOM, PEER, 'needs-decision: can you look?');
     expect(await count()).toBe(1);
     expect(
       (await database.query(`SELECT 1 FROM needs_you_marks WHERE message_id=$1`, [id])).rowCount,
@@ -351,8 +345,8 @@ describe('PhoneService Needs-you tray', () => {
   });
 
   it('TRAY-CACHED-EMPTY-1: badge rows leave unseen asks available 25 hours later; only painted ids start expiry', async () => {
-    const first = await post(ROOM, PEER, '@ada please review this');
-    const second = await post(ROOM, PEER, '@ada can you confirm?');
+    const first = await report(ROOM, PEER, 'needs-decision: please review this');
+    const second = await report(ROOM, PEER, 'needs-decision: can you confirm?');
     const badge = () => phone.execute('readNeedsYou', { workspaceId: WORKSPACE, markSeen: false }, VIEWER);
     expect((await badge()).items.map(item => item.messageId)).toEqual([first, second]);
     expect((await badge()).items.every(item => item.expiresAt === undefined)).toBe(true);
@@ -375,8 +369,8 @@ describe('PhoneService Needs-you tray', () => {
   });
 
   it('acknowledges only available questions belonging to this viewer and Workspace', async () => {
-    const own = await post(ROOM, PEER, '@ada please look');
-    const hidden = await post(OTHER_ROOM, PEER, '@ada please look');
+    const own = await report(ROOM, PEER, 'needs-decision: please look');
+    const hidden = await report(OTHER_ROOM, PEER, 'needs-decision: please look');
     const unrelated = await post(ROOM, PEER, 'hello');
     await phone.execute('clearNeedsYou', { workspaceId: WORKSPACE, messageId: own }, VIEWER);
     const result = await phone.execute('markNeedsYouSeen', {
@@ -388,7 +382,7 @@ describe('PhoneService Needs-you tray', () => {
   });
 
   it('uses one database statement and one pool checkout for each tray read and badge count', async () => {
-    const id = await post(ROOM, PEER, '@ada please review this');
+    const id = await report(ROOM, PEER, 'needs-decision: please review this');
     const query = vi.spyOn(database, 'query');
     expect(await count()).toBe(1);
     expect(query).toHaveBeenCalledTimes(1);
@@ -404,7 +398,7 @@ describe('PhoneService Needs-you tray', () => {
   });
 
   it('rejects a viewer whose Workspace membership was removed even if Room membership remains', async () => {
-    await post(ROOM, PEER, '@ada please review this');
+    await report(ROOM, PEER, 'needs-decision: please review this');
     await database.query(
       `UPDATE memberships SET removed_at=now()
        WHERE workspace_id=$1 AND room_id IS NULL AND identity_id=$2`,
@@ -415,8 +409,8 @@ describe('PhoneService Needs-you tray', () => {
   });
 
   it('clears on tap or dismiss, and when the reader replies in that Room', async () => {
-    const tapped = await post(ROOM, PEER, '@ada please check the build', 30);
-    await post(CORNER, AGENT, '@ada which cohort?', 20);
+    const tapped = await report(ROOM, PEER, 'needs-decision: please check the build', 30);
+    await report(CORNER, AGENT, 'needs-decision: which cohort?', 20);
     expect(await count()).toBe(2);
 
     await phone.execute('clearNeedsYou', { workspaceId: WORKSPACE, messageId: tapped }, VIEWER);
@@ -430,10 +424,14 @@ describe('PhoneService Needs-you tray', () => {
   it('CLEAR removes every question after reading more than 500 in one operation', async () => {
     await database.query(
       `INSERT INTO messages(id,room_id,author_id,text,created_at)
-       SELECT lpad(to_hex(1000000 + series),64,'0'),$1,$2,'@ada please review this',
+       SELECT lpad(to_hex(1000000 + series),64,'0'),$1,$2,'needs-decision: please review this',
          now() - interval '30 minutes' + series * interval '1 millisecond'
        FROM generate_series(1, 505) series`,
       [ROOM, PEER],
+    );
+    await database.query(
+      `UPDATE messages SET card=jsonb_build_object('reportToId',$1::text) WHERE room_id=$2`,
+      [VIEWER, ROOM],
     );
     expect((await read()).items).toHaveLength(505);
     expect(await count()).toBe(505);
@@ -494,12 +492,12 @@ describe('PhoneService Needs-you tray', () => {
   });
 
   it('never lets newer near-miss messages crowd out an older real ask', async () => {
-    const ask = await post(ROOM, PEER, '@ada please review the release notes', 60);
+    const ask = await report(ROOM, PEER, 'needs-decision: please review the release notes', 60);
     // More near-misses than the query's candidate limit, all newer than the ask:
-    // each tags the reader and holds "approved", which is not the word "approve".
+    // each tags the reader and asks, but is not a report addressed to them.
     await database.query(
       `INSERT INTO messages(id,room_id,author_id,text,created_at)
-       SELECT lpad(to_hex(1000000 + series),64,'0'),$1,$2,'@ada I approved it',
+       SELECT lpad(to_hex(1000000 + series),64,'0'),$1,$2,'@ada can you approve it?',
          now() - interval '30 minutes' + series * interval '1 millisecond'
        FROM generate_series(1,600) series`,
       [ROOM, PEER],
@@ -891,7 +889,7 @@ describe('PhoneService Needs-you tray', () => {
       approvalId: 'approval-clear', linkKind: 'passkey', sourceRoomId: CORNER,
       expiresAt: Date.now() + 10 * 60_000,
     });
-    await post(ROOM, PEER, '@ada please look?', 1);
+    await report(ROOM, PEER, 'needs-decision: please look?', 1);
     expect(await count()).toBe(2);
     await phone.execute('clearNeedsYouSection', { workspaceId: WORKSPACE }, VIEWER);
     expect(await count()).toBe(0);
@@ -948,7 +946,7 @@ describe('PhoneService Needs-you tray', () => {
   });
 
   it('lists approvals before questions', async () => {
-    const question = await post(ROOM, PEER, '@ada can you look?', 60);
+    const question = await report(ROOM, PEER, 'needs-decision: can you look?', 60);
     await database.query(
       `INSERT INTO permission_authority(permission_id,room_id,principal_id,request_id,scope,status)
        VALUES('write-2',$1,$2,'request-2','{}','pending')`,

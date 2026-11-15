@@ -122,8 +122,7 @@ export function handleLiveConnection(ctx: LiveConnectionContext, client: WebSock
             const message = delta.message;
             if (message.author.pubkey === principal.identityId ||
                 message.presentation === 'card' || message.presentation === 'system' ||
-                (message.mentionPubkeys?.includes(principal.identityId) &&
-                  isNeedsYouAsk(message.text))) sendNeedsYouDelta(event, event.roomId);
+                isNeedsYouAsk(message.text)) sendNeedsYouDelta(event, event.roomId);
           }).catch(() => undefined);
           return;
         }
@@ -532,8 +531,7 @@ export function handleLiveConnection(ctx: LiveConnectionContext, client: WebSock
                         const message = result.delta.message;
                         if (message.author.pubkey === principal.identityId ||
                             message.presentation === 'card' || message.presentation === 'system' ||
-                            (message.mentionPubkeys?.includes(principal.identityId) &&
-                              isNeedsYouAsk(message.text))) sendNeedsYouDelta(event, roomId);
+                            isNeedsYouAsk(message.text)) sendNeedsYouDelta(event, roomId);
                       }
                     })
                     .catch((error) => {

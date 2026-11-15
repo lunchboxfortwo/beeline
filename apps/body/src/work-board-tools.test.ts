@@ -42,7 +42,7 @@ describe('typed Work board tools', () => {
       }),
     ).toThrow('Shorten options');
   });
-  it('dispatches named create, state, priority and assignment tools through the same authorized work write', async () => {
+  it('dispatches named create, state and assignment tools through the same authorized work write', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'beeline-work-tools-'));
     const context = join(directory, 'turn.json');
     await writeFile(context, JSON.stringify({ roomId: 'source-chat', requestId: 'command' }));
@@ -81,10 +81,11 @@ describe('typed Work board tools', () => {
       expect(written().id).toBe(created.id);
       await callAgentTool(
         'create_work_item',
-        { roomId: 'target-chat', title: 'Wire Milo replies', state: 'in-progress' },
+        { roomId: 'target-chat', title: 'Wire Milo replies', objective: 'Milo answers inline.', state: 'in-progress' },
         'create-2',
       );
       expect(written().state).toBe('in-progress');
+      expect(written().objective).toBe('Milo answers inline.');
       expect(written().id).not.toBe(created.id);
       const target = { roomId: 'target-chat', id: created.id };
       await callAgentTool('set_work_state', { ...target, state: 'backlog' }, 'move');
@@ -94,13 +95,11 @@ describe('typed Work board tools', () => {
         targetRoomId: 'target-chat',
         state: 'backlog',
       });
-      await callAgentTool('set_work_priority', { ...target, priority: 'urgent' }, 'priority');
-      expect(written().priority).toBe('urgent');
       for (const assigneeId of ['agent', 'person', null]) {
         await callAgentTool('assign_work_item', { ...target, assigneeId }, 'assign');
         expect(written().assigneeId).toBe(assigneeId);
       }
-      expect(fetch.mock.calls).toHaveLength(8);
+      expect(fetch.mock.calls).toHaveLength(7);
       expect(
         fetch.mock.calls.every((call) =>
           String(call[0]).endsWith('/v1/daemon/operations/updateWorkItem'),
@@ -109,7 +108,7 @@ describe('typed Work board tools', () => {
       await expect(
         callAgentTool('set_work_state', { ...target, state: 'unknown' }, 'invalid'),
       ).rejects.toThrow('invalid arguments');
-      expect(fetch.mock.calls).toHaveLength(8);
+      expect(fetch.mock.calls).toHaveLength(7);
     } finally {
       vi.unstubAllGlobals();
       vi.unstubAllEnvs();

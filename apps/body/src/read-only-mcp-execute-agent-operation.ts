@@ -43,7 +43,6 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
       return JSON.stringify(await daemonExecute('askOwnerQuestion',{...args,roomId:(await activeCommandContext()).roomId}));
     case 'create_work_item':
     case 'set_work_state':
-    case 'set_work_priority':
     case 'assign_work_item':
     case 'update_work': {
       const context = await activeCommandContext();

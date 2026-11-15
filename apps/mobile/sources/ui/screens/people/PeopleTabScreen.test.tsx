@@ -54,6 +54,8 @@ it('keeps Invite beside the People section and out of the shared phone header', 
     const header = hosts(tree, 'chat-list-header')[0];
     expect(header.findAll((node: any) => node.type === 'Text' && node.props.children === 'Tubing crew')).not.toHaveLength(0);
     expect(tree.root.findAll((node: any) => node.type === 'Text' && node.props.children === 'People')).toHaveLength(0);
+    const copy = tree.root.findAll((node: any) => node.type === 'Text').map((node: any) => String(node.props.children));
+    expect(copy.some((text: string) => text.startsWith('Everyone in') || text.startsWith('Owners and admins'))).toBe(false);
     const invite = hosts(tree, 'people-invite');
     expect(invite).toHaveLength(1);
     expect(header.findAll((node: any) => node.props.testID === 'people-invite' && typeof node.type === 'string')).toHaveLength(0);

@@ -23,7 +23,6 @@ export const OPEN_CORNER_PREVIEW = 8;
 /** The facts every corner row derives its state and Mine flag from. */
 export type CornerStateRow = {
   work_state?: import('@beeline/api-contract/phone').WorkState | null;
-  work_priority?: import('@beeline/api-contract/phone').WorkPriority | null;
   machine?: CornerMachine | null;
   waiting_kind?: 'message' | 'merge-hold' | 'report' | null;
   waiting_person_name?: string | null;
@@ -124,7 +123,7 @@ export function cornerFactsSql(viewerExpr: string): {
   member: string;
 } {
   return {
-    columns: `f.locked,f.machine,gh.lifecycle,work.state work_state,work.priority work_priority,
+    columns: `f.locked,f.machine,gh.lifecycle,work.state work_state,
       activity.worker_active,activity.reviewer_active,
       ${cornerLastTurnEndSql('c')} last_turn_ended_at,
       blocker.item_id IS NOT NULL blocking,blocker.item_id waiting_item_id,blocker.reason waiting_reason,
@@ -134,9 +133,7 @@ export function cornerFactsSql(viewerExpr: string): {
       lm.created_at latest_created_at,
       ${followsCornerSql('c', viewerExpr)} follows_viewer,
       owed.owed_viewer,owed.attention`,
-    joins: `LEFT JOIN LATERAL(SELECT state,priority FROM work_items item WHERE item.room_id=c.id
-      ORDER BY array_position(ARRAY['needs-you','in-review','in-progress','backlog','done'],item.state),
-        array_position(ARRAY['urgent','high','medium','low','none'],item.priority),item.updated_at DESC,item.id LIMIT 1) work ON true
+    joins: `LEFT JOIN work_items work ON work.id=c.id::text
     LEFT JOIN corner_facts f ON f.corner_id=c.id
     LEFT JOIN corner_github_cache gh ON gh.corner_id=c.id
     ${cornerWorkSql()}
@@ -323,16 +320,15 @@ export function chatCornerCounts(
     count.openCorners.push({
       id: row.id,
       name: row.name,
+      // The Work board's rule: only a stored Backlog or Done moves an open thread out of progress.
       workState:
-        row.work_state ??
-        (state === 'working'
-          ? 'in-progress'
+        row.work_state === 'backlog' || row.work_state === 'done'
+          ? row.work_state
           : state === 'review'
             ? 'in-review'
             : state === 'waiting'
               ? 'needs-you'
-              : 'backlog'),
-      workPriority: row.work_priority ?? 'none',
+              : 'in-progress',
       state,
       ...(reason ? { reason } : {}),
       ...(blocker ? { blocker } : {}),

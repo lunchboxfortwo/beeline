@@ -1,30 +1,29 @@
 import {
   cornerShortTitle,
-  WORK_PRIORITIES,
   WORK_STATES,
   type UpdateWorkItemInput,
   type WorkBoardView,
   type WorkItemView,
-  type WorkPriority,
   type WorkState,
 } from '@beeline/api-contract/phone';
 import type { SqlDatabase } from './database.js';
 import { phoneIdentity, type PhoneIdentityRow } from './phone-identity.js';
 import { needsYouItems } from './needs-you.js';
 import { cornerImplementerSql } from './corner-worker.js';
+import { cornerObjectiveSql, writeCornerObjective } from './corner-objective.js';
 import { CommandRefusalError } from './command-refusal.js';
 
 type WorkRow = {
   id: string;
   room_id: string;
   room_kind: 'direct' | 'room' | 'corner';
-  source_message_id: string | null;
   chat_id: string;
   chat_name: string;
   name: string;
   thread_name: string;
   state: WorkState;
-  priority: WorkPriority;
+  idle: boolean;
+  objective: string;
   assignee: PhoneIdentityRow | null;
   opener: PhoneIdentityRow;
   created_at: Date;
@@ -55,34 +54,69 @@ export async function updateWorkItem(
   input: UpdateWorkItemInput,
   actorId: string,
 ): Promise<void> {
-  if (
-    (input.state !== undefined && !WORK_STATES.includes(input.state)) ||
-    (input.priority !== undefined && !WORK_PRIORITIES.includes(input.priority))
-  )
-    throw new Error('invalid work state or priority');
+  if (input.state !== undefined && !WORK_STATES.includes(input.state))
+    throw new Error('invalid work state');
   // Assignment is one field. Null is an intentional unassignment.
-  const changed = await db.query(
-    `INSERT INTO work_items(id,room_id,source_message_id,state,priority,title,assignee_id,opened_by,completed_at)
-    SELECT $8,r.id,(SELECT id FROM messages source WHERE source.id=$8 AND source.room_id=r.id),COALESCE($2,CASE f.machine->>'state' WHEN 'working' THEN 'in-progress' WHEN 'review' THEN 'in-review' WHEN 'waiting' THEN 'needs-you' ELSE 'backlog' END),COALESCE($3,'none'),$4,
-      CASE WHEN $6 THEN $5 ELSE ${cornerImplementerSql('f', 'r')} END,CASE WHEN $8=r.id::text THEN COALESCE(r.created_by,$7) ELSE COALESCE((SELECT author_id FROM messages source WHERE source.id=$8 AND source.room_id=r.id),$7) END,CASE WHEN $2='done' THEN now() END
-    FROM rooms r JOIN room_access member ON member.room_id=r.id AND member.identity_id=$7 AND member.removed_at IS NULL
+  const changed = await db.query<{ state: WorkState; objective: string | null; corner: boolean }>(
+    `INSERT INTO work_items(id,room_id,source_message_id,state,title,objective,assignee_id,opened_by,completed_at)
+    SELECT $7,r.id,(SELECT id FROM messages source WHERE source.id=$7 AND source.room_id=r.id),
+      -- A thread's own item is in progress until set otherwise; new work starts in Backlog.
+      COALESCE($2,CASE WHEN $7=r.id::text AND r.parent_id IS NOT NULL THEN 'in-progress' ELSE 'backlog' END),$3,$8,
+      CASE WHEN $5 THEN $4 ELSE ${cornerImplementerSql('f', 'r')} END,CASE WHEN $7=r.id::text THEN COALESCE(r.created_by,$6) ELSE COALESCE((SELECT author_id FROM messages source WHERE source.id=$7 AND source.room_id=r.id),$6) END,CASE WHEN $2='done' THEN now() END
+    FROM rooms r JOIN room_access member ON member.room_id=r.id AND member.identity_id=$6 AND member.removed_at IS NULL
     LEFT JOIN corner_facts f ON f.corner_id=r.id WHERE r.id=$1
     ON CONFLICT(id) DO UPDATE SET state=COALESCE($2,work_items.state),
-      priority=COALESCE($3,work_items.priority),title=COALESCE($4,work_items.title),
-      assignee_id=CASE WHEN $6 THEN $5 ELSE work_items.assignee_id END,updated_at=now(),
-      completed_at=CASE WHEN COALESCE($2,work_items.state)='done' THEN COALESCE(work_items.completed_at,now()) ELSE NULL END WHERE work_items.room_id=$1`,
+      title=COALESCE($3,work_items.title),objective=COALESCE($8,work_items.objective),
+      assignee_id=CASE WHEN $5 THEN $4 ELSE work_items.assignee_id END,updated_at=now(),
+      completed_at=CASE WHEN COALESCE($2,work_items.state)='done' THEN COALESCE(work_items.completed_at,now()) ELSE NULL END WHERE work_items.room_id=$1
+    RETURNING state,objective,EXISTS(SELECT 1 FROM rooms corner WHERE corner.id=$1 AND corner.parent_id IS NOT NULL) corner`,
     [
       input.roomId,
       input.state ?? null,
-      input.priority ?? null,
       input.title ?? null,
       input.assigneeId ?? null,
       Object.hasOwn(input, 'assigneeId'),
       actorId,
       input.id ?? input.roomId,
+      input.objective ?? null,
     ],
   );
-  if (!changed.rowCount) throw new CommandRefusalError('room access denied', 403);
+  const item = changed.rows[0];
+  if (!item) throw new CommandRefusalError('room access denied', 403);
+  // Started work carries its objective into the thread it runs in, unless the thread has its own.
+  if (item.corner && item.objective && item.state !== 'backlog')
+    await writeCornerObjective(db, input.roomId, item.objective, true);
+}
+
+/**
+ * Board columns for `rooms r` with optional `w` (its work item), `p` (parent) and `f` (corner facts).
+ * A corner's live machine places it in progress; only a stored Backlog or Done moves it.
+ * An open thread with nothing running stays In progress as idle.
+ */
+function workColumnsSql(viewer: string): string {
+  return `r.id room_id,CASE WHEN r.direct_participants IS NOT NULL THEN 'direct' WHEN r.parent_id IS NOT NULL THEN 'corner' ELSE 'room' END room_kind,
+    COALESCE(p.id,r.id) chat_id,COALESCE(p.name,r.name) chat_name,
+    CASE WHEN w.id IS NOT NULL AND w.id<>r.id::text THEN COALESCE(w.title,r.name) ELSE r.name END name,r.name thread_name,
+    CASE WHEN r.archived_at IS NOT NULL OR w.state='done' THEN 'done'
+      WHEN w.state='backlog' OR (r.parent_id IS NULL AND w.state IS NULL) THEN 'backlog'
+      WHEN r.parent_id IS NULL OR w.id<>r.id::text THEN w.state
+      WHEN f.machine->>'state'='waiting' THEN 'needs-you'
+      WHEN f.machine->>'state'='review' THEN 'in-review' ELSE 'in-progress' END state,
+    (r.parent_id IS NOT NULL AND r.archived_at IS NULL AND COALESCE(w.id,r.id::text)=r.id::text
+      AND w.state IS DISTINCT FROM 'backlog' AND w.state IS DISTINCT FROM 'done'
+      AND COALESCE(f.machine->>'state','idle') NOT IN ('working','review','waiting')) idle,
+    COALESCE(NULLIF(CASE WHEN r.parent_id IS NOT NULL AND COALESCE(w.id,r.id::text)=r.id::text
+      THEN ${cornerObjectiveSql('r')} END,''),w.objective,'') objective,
+    row_to_json(assignee) assignee,row_to_json(opener) opener,
+    COALESCE(w.created_at,r.created_at) created_at,
+    GREATEST(w.updated_at,r.archived_at,r.created_at) updated_at
+    FROM work_refs ref JOIN rooms r ON r.id=ref.room_id
+    JOIN room_access a ON a.room_id=COALESCE(r.parent_id,r.id) AND a.identity_id=${viewer} AND a.removed_at IS NULL
+    LEFT JOIN rooms p ON p.id=r.parent_id LEFT JOIN work_items w ON w.id=ref.id
+    LEFT JOIN corner_facts f ON f.corner_id=r.id
+    JOIN identities opener ON opener.id=COALESCE(w.opened_by,r.created_by,${viewer})
+    LEFT JOIN identities assignee ON assignee.id=CASE WHEN w.room_id IS NOT NULL THEN w.assignee_id
+      ELSE ${cornerImplementerSql('f', 'r')} END`;
 }
 
 /** One server projection shared by desktop and phone; no render-time model call. */
@@ -102,26 +136,13 @@ export async function readWorkBoard(
   ).rows[0];
   if (!workspace) throw new CommandRefusalError('workspace membership required', 403);
   const [work, needs, members, chats] = await Promise.all([
+    // Asks are not tasks: an ask-backed item reaches the board only through Needs you.
     db.query<WorkRow>(
       `WITH work_refs AS (
         SELECT room.id::text id,room.id room_id FROM rooms room WHERE room.workspace_id=$1 AND room.parent_id IS NOT NULL
-        UNION SELECT stored.id,stored.room_id FROM work_items stored JOIN rooms room ON room.id=stored.room_id WHERE room.workspace_id=$1
-      ) SELECT ref.id,r.id room_id,CASE WHEN r.direct_participants IS NOT NULL THEN 'direct' WHEN r.parent_id IS NOT NULL THEN 'corner' ELSE 'room' END room_kind,w.source_message_id,COALESCE(p.id,r.id) chat_id,COALESCE(p.name,r.name) chat_name,
-      COALESCE(w.title,q.question,r.name) name,r.name thread_name,
-      CASE WHEN r.archived_at IS NOT NULL THEN 'done' ELSE COALESCE(w.state,CASE
-        WHEN f.machine->>'state'='waiting' THEN 'needs-you'
-        WHEN f.machine->>'state'='review' THEN 'in-review'
-        WHEN f.machine->>'state'='working' THEN 'in-progress' ELSE 'backlog' END) END state,
-      COALESCE(w.priority,'none') priority,row_to_json(assignee) assignee,row_to_json(opener) opener,
-      COALESCE(w.created_at,r.created_at) created_at,
-      GREATEST(w.updated_at,r.archived_at,r.created_at) updated_at
-      FROM work_refs ref JOIN rooms r ON r.id=ref.room_id JOIN room_access a ON a.room_id=COALESCE(r.parent_id,r.id) AND a.identity_id=$2 AND a.removed_at IS NULL
-      LEFT JOIN rooms p ON p.id=r.parent_id LEFT JOIN work_items w ON w.id=ref.id
-      LEFT JOIN work_questions q ON q.message_id=w.source_message_id
-      LEFT JOIN corner_facts f ON f.corner_id=r.id
-      JOIN identities opener ON opener.id=COALESCE(w.opened_by,r.created_by,$2)
-      LEFT JOIN identities assignee ON assignee.id=CASE WHEN w.room_id IS NOT NULL THEN w.assignee_id
-        ELSE ${cornerImplementerSql('f', 'r')} END
+        UNION SELECT stored.id,stored.room_id FROM work_items stored JOIN rooms room ON room.id=stored.room_id
+          WHERE room.workspace_id=$1 AND stored.source_message_id IS NULL
+      ) SELECT ref.id,${workColumnsSql('$2')}
       WHERE r.workspace_id=$1 AND (r.parent_id IS NOT NULL OR w.room_id IS NOT NULL)
         AND (r.archived_at IS NULL OR r.archived_at>=now()-interval '7 days')
         AND (w.state IS DISTINCT FROM 'done' OR w.completed_at>=now()-interval '7 days')`,
@@ -162,18 +183,19 @@ export async function readWorkBoard(
       )
     : { rows: [] };
   const questionById = new Map(questions.rows.map((q) => [q.message_id, q]));
-  const needItems = needs.items;
   const items: WorkItemView[] = work.rows.map((row) => projectWorkRow(row, publicOrigin));
-  const byId = new Map(items.map((item) => [item.id, item]));
-  const byRoom = new Map(
+  const threads = new Map(
     items.filter((item) => item.id === item.roomId).map((item) => [item.roomId, item]),
   );
-  const activeAsks = new Set(needItems.map((ask) => ask.messageId));
-  const asks = needItems.map((ask): WorkItemView => {
-    const task = byId.get(ask.messageId) ?? byRoom.get(ask.roomId);
+  // One Needs you row per thread: the thread itself, carrying its first ask and the count.
+  const asksByRoom = new Map<string, typeof needs.items>();
+  for (const ask of needs.items) asksByRoom.set(ask.roomId, [...(asksByRoom.get(ask.roomId) ?? []), ask]);
+  const asks = [...asksByRoom.values()].map((roomAsks): WorkItemView => {
+    const ask = roomAsks[0]!;
+    const thread = threads.get(ask.roomId);
     const q = questionById.get(ask.messageId);
     return {
-      ...(task ?? {
+      ...(thread ? withoutIdle(thread) : {
         chatId: ask.roomKind === 'corner' ? '' : ask.roomId,
         chatName: ask.parentRoomName ?? ask.roomName,
         title: ask.roomName,
@@ -188,7 +210,6 @@ export async function readWorkBoard(
       roomKind: ask.roomKind,
       state: 'needs-you',
       assignee: viewer,
-      openedBy: byId.get(ask.messageId)?.openedBy ?? ask.author ?? viewer,
       messageId: ask.messageId,
       ask: q
         ? {
@@ -197,13 +218,15 @@ export async function readWorkBoard(
             approval: ask.approval ? { ...ask.approval, subject: q.question } : undefined,
           }
         : ask,
+      askIds: roomAsks.map((each) => each.messageId),
       ...(q?.recommended_option_id ? { recommendedOptionId: q.recommended_option_id } : {}),
     };
   });
-  const all = [...asks, ...items.filter((item) => !activeAsks.has(item.id))];
-  all.sort(
+  const rest = items.filter((item) => !(item.id === item.roomId && asksByRoom.has(item.roomId)));
+  // Active work before idle threads, each newest first.
+  rest.sort(
     (a, b) =>
-      WORK_PRIORITIES.indexOf(a.priority) - WORK_PRIORITIES.indexOf(b.priority) ||
+      Number(Boolean(a.idle)) - Number(Boolean(b.idle)) ||
       b.updatedAt - a.updatedAt ||
       a.id.localeCompare(b.id),
   );
@@ -211,7 +234,7 @@ export async function readWorkBoard(
     workspaceId,
     workspaceName: workspace.name,
     viewerId,
-    items: all,
+    items: [...asks, ...rest],
     chats: chats.rows,
     people: identities,
   };
@@ -226,20 +249,18 @@ export async function readWorkThread(
 ): Promise<WorkItemView[]> {
   const rows = (
     await db.query<WorkRow>(
-      `SELECT COALESCE(w.id,r.id::text) id,r.id room_id,'corner' room_kind,w.source_message_id,p.id chat_id,p.name chat_name,COALESCE(w.title,q.question,r.name) name,r.name thread_name,
-    CASE WHEN r.archived_at IS NOT NULL THEN 'done' ELSE COALESCE(w.state,CASE f.machine->>'state' WHEN 'working' THEN 'in-progress' WHEN 'review' THEN 'in-review'
-      WHEN 'waiting' THEN 'needs-you' ELSE 'backlog' END) END state,COALESCE(w.priority,'none') priority,
-    row_to_json(opener) opener,row_to_json(assignee) assignee,COALESCE(w.created_at,r.created_at) created_at,
-    COALESCE(w.updated_at,r.updated_at) updated_at FROM rooms r JOIN rooms p ON p.id=r.parent_id
-    JOIN room_access a ON a.room_id=COALESCE(r.parent_id,r.id) AND a.identity_id=$2 AND a.removed_at IS NULL
-    LEFT JOIN work_items w ON w.room_id=r.id LEFT JOIN work_questions q ON q.message_id=w.source_message_id LEFT JOIN corner_facts f ON f.corner_id=r.id
-    JOIN identities opener ON opener.id=COALESCE(w.opened_by,r.created_by,$2)
-    LEFT JOIN identities assignee ON assignee.id=CASE WHEN w.room_id IS NOT NULL THEN w.assignee_id
-      ELSE ${cornerImplementerSql('f', 'r')} END WHERE r.id=$1`,
+      `WITH work_refs AS (SELECT thread.id::text id,thread.id room_id FROM rooms thread WHERE thread.id=$1)
+      SELECT ref.id,${workColumnsSql('$2')} WHERE r.parent_id IS NOT NULL`,
       [roomId, viewerId],
     )
   ).rows;
   return rows.map((row) => projectWorkRow(row, publicOrigin));
+}
+
+function withoutIdle(item: WorkItemView): WorkItemView {
+  const copy = { ...item };
+  delete (copy as { idle?: true }).idle;
+  return copy;
 }
 
 function projectWorkRow(row: WorkRow, publicOrigin: string): WorkItemView {
@@ -258,10 +279,11 @@ function projectWorkRow(row: WorkRow, publicOrigin: string): WorkItemView {
         ? cornerShortTitle(row.chat_name, row.thread_name, row.room_id)
         : row.thread_name,
     state: row.state,
-    priority: row.priority,
+    priority: 'none',
+    ...(row.idle ? { idle: true as const } : {}),
+    ...(row.objective ? { objective: row.objective } : {}),
     openedBy: phoneIdentity(row.opener, publicOrigin),
     assignee: row.assignee ? phoneIdentity(row.assignee, publicOrigin) : null,
-    ...(row.source_message_id ? { messageId: row.source_message_id } : {}),
     createdAt: Math.floor(row.created_at.getTime() / 1000),
     updatedAt: Math.floor(row.updated_at.getTime() / 1000),
   };

@@ -1,4 +1,4 @@
-import { WORK_PRIORITIES, WORK_STATES } from '@beeline/api-contract/phone';
+import { WORK_STATES } from '@beeline/api-contract/phone';
 import type { ToolDefinition } from './minimal-tool-surface.js';
 
 const address = {
@@ -6,7 +6,6 @@ const address = {
   id: { type: 'string', description: 'Work item or asking message id; omit for the thread task.' },
 };
 const state = { enum: WORK_STATES };
-const priority = { enum: WORK_PRIORITIES };
 const assigneeId = {
   anyOf: [{ type: 'string' }, { type: 'null' }],
   description: 'Agent or person identity id; null unassigns.',
@@ -17,7 +16,7 @@ export const WORK_BOARD_ACTION_TOOLS: ToolDefinition[] = [
   {
     name: 'create_work_item',
     description:
-      'Create a distinct Work board item in a thread, chat or DM. State is optional and defaults to Backlog; pass a state to put it there immediately. Returns its id for later edits. Any agent with conversation access can create work.',
+      'Create a distinct Work board item in a thread, chat or DM. State is optional and defaults to Backlog; pass a state to put it there immediately. The objective says what done looks like; it becomes the thread objective when the work starts. Returns its id for later edits. Any agent with conversation access can create work.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -25,8 +24,8 @@ export const WORK_BOARD_ACTION_TOOLS: ToolDefinition[] = [
       properties: {
         roomId: address.roomId,
         title: { type: 'string' },
+        objective: { type: 'string', description: 'What the work must achieve.' },
         state,
-        priority,
         assigneeId,
       },
     },
@@ -40,16 +39,6 @@ export const WORK_BOARD_ACTION_TOOLS: ToolDefinition[] = [
       additionalProperties: false,
       required: ['roomId', 'state'],
       properties: { ...address, state },
-    },
-  },
-  {
-    name: 'set_work_priority',
-    description: 'Set a Work board item priority. Any agent with conversation access can edit it.',
-    inputSchema: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['roomId', 'priority'],
-      properties: { ...address, priority },
     },
   },
   {

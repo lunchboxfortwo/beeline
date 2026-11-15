@@ -445,9 +445,6 @@
       "ComposeGlyph",
       "RoomDeckComposeMenu"
     ],
-    "components/buzz/RoomDeckLoadingView.tsx": [
-      "RoomDeckLoadingView"
-    ],
     "components/buzz/RoomListSectionHeader.tsx": [
       "LABEL_LINE",
       "RoomListSectionHeader",

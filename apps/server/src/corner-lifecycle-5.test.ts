@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, PhoneService, backfillArchivedCornerCleanup, deleteArchivedCornerBranch, GitHubHttpError, H, A, W, R, db, phone, daemon, github, githubApp, currentState, open, SHA, branchOf, reasons, inReview, approved, mergedWebhook, rootFixture, fixtureScope34, fixtureScope35, type GitHubAppClient } from './test-support-corner-lifecycle.test-support.js';
+import { describe, expect, it, vi, PhoneService, backfillArchivedCornerCleanup, deleteArchivedCornerBranch, GitHubHttpError, H, A, W, R, db, phone, daemon, github, githubApp, currentState, open, SHA, branchOf, reasons, inReview, approved, mergedWebhook, rootFixture, fixtureScope34, fixtureScope35, advanceCorner, createAgentCommand, SYSTEM_IDENTITY_ID, type GitHubAppClient, type CommandRow } from './test-support-corner-lifecycle.test-support.js';
 
 describe('closed corner branch cleanup (Reproduction BRANCH-CLOSE-1)', () => {
 const scope34 = fixtureScope34();
@@ -287,4 +287,35 @@ it('R1 / A6: a hold dequeues an accepted enqueue whose response and first queue 
   expect(rootFixture.githubApp.dequeuePullRequest).toHaveBeenCalledWith('tok', 'PR_7');
   expect(rootFixture.githubApp.mergePullRequest).toHaveBeenCalledTimes(1);
   console.info('Reproduction A6 Demonstrated: lost enqueue response, then a hold dequeued the live queue entry with no stored claim.');
+});
+
+
+describe('IDLE-WORKING-1: a corner with nothing running is never Working', () => {
+  const finishPending = (cornerId: string) => rootFixture.db.query(
+    `SELECT (terminal.ended).* FROM (SELECT beeline_finish_agent_command(id,'complete',NULL,NULL) ended
+     FROM agent_commands WHERE room_id=$1 AND state='pending') terminal`, [cornerId]);
+
+  it('rests idle when only a computer activity notice is pending', async () => {
+    const cornerId = await open('owner/widgets');
+    expect(await currentState(cornerId)).toBe('working');
+    await finishPending(cornerId);
+    expect(await currentState(cornerId)).toBe('idle');
+    await createAgentCommand(rootFixture.db, {
+      roomId: cornerId, agentId: A, sourceMessageId: null, reason: 'computer_activity',
+      privatePayload: { kind: 'lifecycle', authorId: SYSTEM_IDENTITY_ID, fromRoomId: cornerId, text: 'Computer activity' },
+    });
+    expect(await currentState(cornerId)).toBe('idle');
+  });
+
+  it('rests idle when a wake queued nothing', async () => {
+    const cornerId = await open('owner/widgets');
+    await finishPending(cornerId);
+    // The revision came from the implementer itself, so there is no one else to wake.
+    const command = { agent_id: A } as CommandRow;
+    const advanced = await advanceCorner(rootFixture.db, cornerId,
+      { kind: 'brief-revised', revision: 9, sourceMessageId: 'revision', command });
+    expect(advanced.wake).toMatchObject({ queued: false });
+    expect((await rootFixture.db.query<{ state: string }>(
+      `SELECT machine->>'state' state FROM corner_facts WHERE corner_id=$1`, [cornerId])).rows[0]?.state).toBe('idle');
+  });
 });

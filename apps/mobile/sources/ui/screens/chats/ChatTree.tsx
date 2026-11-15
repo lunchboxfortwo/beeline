@@ -1,4 +1,4 @@
-import { WorkStateMark, WorkPriorityMark } from '@/ui/screens/tags/WorkMarks';
+import { WorkStateMark } from '@/ui/screens/tags/WorkMarks';
 import { RepositoryMark } from '@/components/buzz/RepositoryMark';
 import React, { useRef } from 'react';
 import { ListItem, Separator, XStack, YStack } from 'tamagui';
@@ -20,6 +20,7 @@ import {
   chatTitle,
   joinableTitle,
   threadTitle,
+  threadWorkState,
 } from './chat-tree-model';
 import { threadListLabel } from '@/ui/screens/thread/thread-status';
 
@@ -90,7 +91,7 @@ function ChatMark({ item }: { item: Partial<Pick<ChatListItem, 'directMessage' |
   );
 }
 
-/** One blocked thread under its chat, with the Needs you glyph and priority. */
+/** One thread under its chat: its status glyph first, as on Tasks, then its name. */
 function ThreadLine({
   item,
   corner,
@@ -102,7 +103,7 @@ function ThreadLine({
   viewer: string | undefined;
   onOpen: (roomId: string, cornerId: string, name: string) => void;
 }) {
-  const { word, you: waiting } = threadListLabel(corner, viewer);
+  const { word } = threadListLabel(corner, viewer);
   const title = threadTitle(item, corner);
   const step = useStep();
   return (
@@ -110,8 +111,8 @@ function ThreadLine({
       minHeight={HEIGHT.control}
       padding="0"
       paddingVertical={step('2')}
-      gap={step('2')}
-      alignItems="flex-start"
+      gap={step('3')}
+      alignItems="center"
       justifyContent="flex-start"
       backgroundColor="transparent"
       onPress={() => onOpen(item.room.id, corner.id, corner.name)}
@@ -119,18 +120,10 @@ function ThreadLine({
       accessibilityRole="button"
       testID={`thread-row-${corner.id}`}
     >
-      <XStack paddingTop="0.5" gap="1">
-        <WorkStateMark state="needs-you" />
-        <WorkPriorityMark priority={corner.workPriority ?? 'none'} />
-      </XStack>
-      <YStack flex={1} minWidth={0} gap={step('1')}>
-        <Copy>{title}</Copy>
-        {!corner.workState ? (
-          <Copy small strong={waiting} accent={waiting} quiet={!waiting}>
-            {word}
-          </Copy>
-        ) : null}
-      </YStack>
+      <WorkStateMark state={threadWorkState(corner)} idle={corner.state === 'idle'} />
+      <Copy flex={1} numberOfLines={1}>
+        {title}
+      </Copy>
     </ListItem>
   );
 }
@@ -152,7 +145,7 @@ type ChatRowProps = {
   onNewThread?: (roomId: string) => void;
 };
 
-/** One chat: mark, #name, "Who: last message", age and status, then its blocked threads on a rail. */
+/** One chat: mark, #name, "Who: last message", age and status, then its threads on a rail. */
 export const ChatRow = React.memo(
   function ChatRow({
     item,

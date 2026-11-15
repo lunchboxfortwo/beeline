@@ -177,7 +177,7 @@ export function WorkspaceSettings({ workspaceId }: { workspaceId: string }) {
     };
 
     if (!view || !workspace) return error ? <T v="meta" color="removed" testID="workspace-settings-retry">{error}</T>
-        : <YStack alignItems="center" paddingVertical="8"><SurfaceGlyphLoader testID="workspace-settings-loader" /></YStack>;
+        : <SurfaceGlyphLoader testID="workspace-settings-loader" />;
     const sheetChat = typeof sheet === 'object' && sheet ? chats.find((chat) => chat.id === sheet.room) : undefined;
 
     return (

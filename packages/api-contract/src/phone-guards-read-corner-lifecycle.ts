@@ -314,7 +314,6 @@ export function readRoomView(value: unknown): RoomView | null {
   return {
     room,
     ...field('workItem',readWorkItem(item.workItem)),
-    ...field('workItems',readList(item.workItems,value=>readWorkItem(value)??null)),
     messages,
     ...field(
       'leaveDeletesRoom',

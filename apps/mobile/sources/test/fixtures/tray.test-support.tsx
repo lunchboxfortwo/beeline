@@ -17,6 +17,9 @@ vi.mock('@/ui/grammar', async () => {
     Copy: (p: any) => createElement('Text', p, p.children),
     Glyph: (p: any) => createElement('Glyph', p),
     Btn: (p: any) => createElement('Button', { 'aria-label': p.label, ...p }, p.children),
+    HEIGHT: { control: 44 },
+    SheetFrame: (p: any) =>
+      p.open ? createElement('Sheet', { testID: p.testID, title: p.title }, p.children) : null,
   };
 });
 vi.mock('@/components/buzz/IdentityMark', () => ({
@@ -57,7 +60,7 @@ vi.mock('expo-router', () => ({
   useRouter: () => ({ push: state.push }),
 }));
 vi.mock('@/ui/shell/TabHeader', () => ({
-  TabHeader: (p: any) => React.createElement('Header', p),
+  TabHeader: (p: any) => React.createElement('Header', p, p.actions),
   TabRail: (p: any) => React.createElement('Rail', p, p.children),
   useScrolledUnder: () => ({ scrolled: false }),
 }));
@@ -72,7 +75,6 @@ export function task(p: Partial<WorkItemView> = {}): WorkItemView {
     threadName: 'latency-coverage',
     title: 'Measure phone reply latency',
     state: 'in-progress',
-    priority: 'high',
     openedBy: human,
     assignee: agent,
     createdAt: 1,

@@ -468,11 +468,11 @@ export async function migrate(
      ON messages(${cardExpiresAtSql()})
      WHERE ${EXPIRING_CARD_TYPES} AND deleted_at IS NULL`,
   ));
-  // The v2 predicate includes actionable commander reports. Build it before
-  // retiring the old question-only index, so deployed databases keep indexed reads.
-  await runMigrationStep('needs-you actionable lookback index', () => createIndexConcurrently(
-    database, 'messages_needs_you_actionable_idx',
-    `CREATE INDEX CONCURRENTLY messages_needs_you_actionable_idx
+  // Needs you reads only blocked and needs-decision reports. The broader
+  // actionable index stays for rollout and rollback overlap.
+  await runMigrationStep('needs-you report lookback index', () => createIndexConcurrently(
+    database, 'messages_needs_you_report_idx',
+    `CREATE INDEX CONCURRENTLY messages_needs_you_report_idx
      ON messages(created_at) WHERE ${askingMessageSql()}`,
   ));
   await runMigrationStep('retire needs-you question-only index', async () => {

@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS work_items (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+-- priority is retired and kept only for rollout and rollback overlap.
+ALTER TABLE work_items ADD COLUMN IF NOT EXISTS objective text;
 CREATE INDEX IF NOT EXISTS work_items_room_idx ON work_items(room_id);
 CREATE INDEX IF NOT EXISTS work_items_source_idx ON work_items(source_message_id);
 CREATE INDEX IF NOT EXISTS work_items_assignee_idx ON work_items(assignee_id);

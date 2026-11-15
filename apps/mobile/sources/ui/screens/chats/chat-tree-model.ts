@@ -1,5 +1,5 @@
 import { cornerShortTitle, isConnectorIdentity, roomTitle } from '@beeline/api-contract/phone';
-import type { ChatListCorner } from '@beeline/api-contract/phone';
+import type { ChatListCorner, WorkState } from '@beeline/api-contract/phone';
 import type { ChatListItem } from '@beeline/buzz-client';
 import { roomRowAttentionReason, roomRowName, roomRowPreview } from '@/buzz/room-list-row';
 import type { RepoCandidate } from '@/buzz/room-repo-picker';
@@ -45,15 +45,22 @@ export function threadTitle(item: ChatListItem, corner: ChatListCorner): string 
   return cornerShortTitle(item.room.name, corner.name, corner.id);
 }
 
-/** Chats surface every blocked thread; active work and history stay on Work and Threads. */
+/** A thread's Tasks state; a row without one reads its corner state. */
+export function threadWorkState(corner: ChatListCorner): WorkState {
+  return (
+    corner.workState ??
+    (corner.state === 'waiting' ? 'needs-you' : corner.state === 'review' ? 'in-review' : 'in-progress')
+  );
+}
+
+/** Chats navigate every thread: waiting ones first, the rest in server order. */
 export function chatThreads(
   item: ChatListItem,
   corners: readonly ChatListCorner[] | undefined,
 ): ChatListCorner[] {
   if (item.directMessage || !corners?.length) return [];
-  return corners.filter((corner) =>
-    corner.workState ? corner.workState === 'needs-you' : corner.state === 'waiting',
-  );
+  const waiting = (corner: ChatListCorner) => threadWorkState(corner) === 'needs-you';
+  return [...corners.filter(waiting), ...corners.filter((corner) => !waiting(corner))];
 }
 
 /** Search narrows by chat name, last message and thread titles; each chip narrows further. */

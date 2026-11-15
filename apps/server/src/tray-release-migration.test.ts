@@ -34,7 +34,7 @@ it('reads and clears populated canonical Tray after release migration alone', as
   expect((await read()).saved!.bookmarks[0]!.text).toBe('Edited saved text');
   await db.query(`UPDATE identities SET name='Renamed author' WHERE id=$1`, [author]);
   expect((await read()).saved!.bookmarks[0]!.author?.name).toBe('Renamed author');
-  await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES('question',$1,$2,'@reader please review?')`, [room, author]);
+  await db.query(`INSERT INTO messages(id,room_id,author_id,text,card) VALUES('question',$1,$2,'needs-decision: please review?',jsonb_build_object('reportToId',$3::text))`, [room, author, viewer]);
   expect((await read()).needs!.items.map(item => item.messageId)).toEqual(['question']);
   await new PhoneService(db, 'https://synthetic.invalid').execute('clearNeedsYouSection', {workspaceId:workspace}, viewer);
   expect((await read()).needs!.items).toEqual([]);

@@ -26,7 +26,7 @@ const LOADING_SURFACES: readonly LoadingSurface[] = [
   { id: 'thinking', file: 'components/buzz/TurnProgressLine.tsx', treatment: 'glyph' },
   { id: 'activity-working', file: 'components/buzz/ActivityTimeline.tsx', treatment: 'glyph' },
   { id: 'room-corner-entry', file: 'components/buzz/ChatOpeningSurface.tsx', treatment: 'glyph' },
-  { id: 'room-deck', file: 'components/buzz/RoomDeckLoadingView.tsx', treatment: 'glyph' },
+  { id: 'room-deck', file: 'app/(app)/beeline/channels.tsx', treatment: 'glyph' },
   { id: 'changes-list', file: 'app/(app)/beeline/corners/[roomId].tsx', treatment: 'glyph' },
   { id: 'people', file: 'ui/screens/people/PeopleTabScreen.tsx', treatment: 'glyph' },
   { id: 'workspace-settings', file: 'ui/screens/settings/WorkspaceSettings.tsx', treatment: 'glyph' },
@@ -275,15 +275,12 @@ describe('SurfaceGlyphLoader', () => {
   });
 });
 
-describe('Room loading boundary', () => {
-  it('paints only after the native splash hands off to a loading Room deck', async () => {
-    const { RoomDeckLoadingView } = await import('./RoomDeckLoadingView');
-    const deck = render(React.createElement(RoomDeckLoadingView));
-    expect(deck.root.findByProps({ testID: 'rooms-loader-gate' })).toBeTruthy();
-    expect(deck.root.findByProps({ testID: 'rooms-loader' })).toBeTruthy();
-    expect(deck.root.findAllByType('Svg')).toHaveLength(1);
-    const label = deck.root.findAllByType('Text').find((node: any) => node.props.children === 'Loading chats');
-    expect(label?.props.fontFamily).toBe('SpaceGrotesk-Regular');
+describe('Page loading boundary', () => {
+  it('fills the page on canvas and centres the one glyph', () => {
+    const page = render(React.createElement(SurfaceGlyphLoader, { testID: 'rooms-loader-gate' }));
+    const gate = page.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'rooms-loader-gate');
+    expect(gate.props).toMatchObject({ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'canvas' });
+    expect(page.root.findAllByType('Svg')).toHaveLength(1);
   });
 });
 

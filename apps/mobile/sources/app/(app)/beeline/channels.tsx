@@ -15,7 +15,7 @@ import { roomRowName } from '@/buzz/room-list-row';
 import { roomHref } from '@/buzz/corner-navigation';
 import { BuzzCommunityShell } from '@/components/buzz/CommunityRail';
 import { WorkspaceAddAgentSheet } from '@/ui/screens/members/ChatAddSheets';
-import { RoomDeckLoadingView } from '@/components/buzz/RoomDeckLoadingView';
+import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
 import { WORKSPACE_LABEL } from '@/buzz/vocabulary';
 import { Btn, Copy, Glyph, SafeTop, T } from '@/ui/grammar';
 import { ChatListHeader } from '@/ui/screens/chats/ChatListHeader';
@@ -150,7 +150,7 @@ export default function SavedRoomDeck() {
       key={`${session.identity.publicKey}:${session.relayUrl}:${requestedWorkspaceId ?? session.workspaceId}`}
       session={session}
     />
-  ) : <RoomDeckLoadingView />;
+  ) : <SurfaceGlyphLoader testID="rooms-loader-gate" />;
 }
 
 const EMPTY_CHATS: readonly ChatListItem[] = [];
@@ -191,7 +191,15 @@ const BuzzChannels = memo(function BuzzChannels({ session }: { session: DeckSess
   }
   if (landing.kind !== 'deck' || !chatList) {
     // Other landings navigate above; pins only mark rows, so they never hold the list.
-    return <RoomDeckLoadingView onLayout={onLayout} />;
+    // The header (name, Search, New chat) stays put while the list loads.
+    return (
+      <YStack flex={1} minHeight={0} backgroundColor="canvas">
+        {isDesktop ? null : (
+          <TabHeader workspaceName={workspaceName} onNew={canCreate ? () => state.setNewChatStep('menu') : undefined} search={search} onSearch={setSearch} scrolled={false} />
+        )}
+        <SurfaceGlyphLoader testID="rooms-loader-gate" onLayout={onLayout} />
+      </YStack>
+    );
   }
 
   const empty = (

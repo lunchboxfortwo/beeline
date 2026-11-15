@@ -10,7 +10,8 @@ import { CORNER_IDLE_REPORT_BUDGET } from './corner-idle-budget.js';
 import { loadCorner,type CornerRow } from './corner-lifecycle-read-state.js';
 import { cornerMergeGate,independentReviewerConfigured,loadCornerReviewState,lockCornerArchivalAuthority,lockCornerLifecycle,noteReviewDispatchFailure,reachableReviewer } from './corner-lifecycle-review-state.js';
 import { OK,reviewChecksSql,type Applied,type CornerAdvance,type CornerEvent,type RevisionWake } from './corner-lifecycle-values.js';
-import { transitionCorner,type CornerMachineFacts } from './corner-machine.js';
+import { transitionCorner,type CornerMachine,type CornerMachineFacts } from './corner-machine.js';
+import { deliverableCommandSql } from './chat-corner-counts.js';
 import { loadCornerWaiting } from './corner-waiting.js';
 import { deleteCornerWakeSources } from './corner-wake-cleanup.js';
 import type { SqlDatabase } from './database.js';
@@ -309,8 +310,10 @@ async function readCornerAdvance(
     const active = (
       await db.query<{ worker: boolean; conflict: boolean; retained: string[] | null }>(
         `SELECT
+      -- The pending work corner rows call active (cornerWorkSql): a computer
+      -- activity notice or avatar job alone never makes the corner work.
       EXISTS(SELECT 1 FROM agent_commands WHERE room_id=$1 AND agent_id=$2
-        AND state='pending' AND action='input' AND reason<>'report' AND ${currentCornerCommandTargetSql('agent_commands')}) worker,
+        AND ${deliverableCommandSql('agent_commands')} AND ${currentCornerCommandTargetSql('agent_commands')}) worker,
       EXISTS(SELECT 1 FROM agent_commands delivered JOIN messages source ON source.id=delivered.source_message_id
         WHERE delivered.room_id=$1 AND delivered.reason='corner_merge_conflict'
           AND source.system_event->'object'->>'headSha'=$3) conflict,
@@ -411,6 +414,7 @@ async function writeCornerAdvance(
     if (event.kind === 'closed') await db.query(
       `UPDATE corner_github_cache SET lifecycle=lifecycle||'{"lifecycle":"done","checks":"unknown"}'::jsonb WHERE corner_id=$1`, [cornerId]);
     let wakeResult: RevisionWake | undefined;
+    let queuedWork = false;
     const effects = [...(plan.state.effects ?? [])];
     for (const effect of plan.wakes) {
       let result: Applied = OK;
@@ -597,9 +601,16 @@ async function writeCornerAdvance(
         }
       }
       if (result.wake) wakeResult = result.wake;
+      if (result.wake?.queued) queuedWork = true;
       if (!['review', 'command'].includes(effect.kind) && (result.wake?.queued || !result.wake))
         effects.push(effect.key);
     }
+    // A wake that queued nothing (its command already ran, or no one can take it)
+    // starts no work: the corner rests where it would without that wake.
+    const status = plan.state.state === 'working' && !facts.turnRunning && !queuedWork
+      ? transitionCorner({ ...prior, effects: [...(prior.effects ?? []), ...plan.wakes.map((wake) => wake.key)] },
+        { facts, event }).state
+      : plan.state;
     for (const notice of plan.notifications) {
       if (notice.kind === 'idle' && row) {
         await reportAgentAttention(
@@ -616,7 +627,9 @@ async function writeCornerAdvance(
       // commander. The machine records the wait; it never broadcasts to Room people.
       effects.push(notice.key);
     }
-    const state = { ...plan.state, effects };
+    const state = status === plan.state ? { ...plan.state, effects }
+      : { ...plan.state, state: status.state, ...('phase' in status ? { phase: status.phase } : {}),
+        ...('reason' in status ? { reason: status.reason } : {}), effects } as CornerMachine;
     // Any write here changes the row version, so an event that read before this
     // commit reads again. Only a write-free event leaves the version alone.
     const wrote = archived || event.kind === 'closed' || plan.wakes.length > 0 ||

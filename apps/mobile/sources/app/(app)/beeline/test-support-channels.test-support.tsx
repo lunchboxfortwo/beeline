@@ -182,7 +182,7 @@ vi.mock('react-native', async () => {
 function hostModule(...names: string[]) {
   return Object.fromEntries(
     names.map((name) => [name, (props: any) => {
-      React.useEffect(() => { if (name === 'RoomDeckLoadingView' && !deck.holdLayouts) props.onLayout?.(); }, [props.onLayout]);
+      React.useEffect(() => { if (name === 'SurfaceGlyphLoader' && !deck.holdLayouts) props.onLayout?.(); }, [props.onLayout]);
       return React.createElement(name, props, props?.children);
     }]),
   );
@@ -216,8 +216,6 @@ vi.mock('@/components/buzz/MemberRosterRow', () => hostModule('MemberRosterRow')
 vi.mock('@/ui/screens/members/ChatAddSheets', () => hostModule('WorkspaceAddAgentSheet', 'ChatAddSheet'));
 
 vi.mock('@/components/buzz/Button', () => hostModule('Button'));
-
-vi.mock('@/components/buzz/RoomDeckLoadingView', () => hostModule('RoomDeckLoadingView'));
 
 vi.mock('@/components/buzz/SurfaceGlyphLoader', () => hostModule('SurfaceGlyphLoader'));
 

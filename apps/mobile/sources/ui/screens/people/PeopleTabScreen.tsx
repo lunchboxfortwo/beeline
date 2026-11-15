@@ -56,7 +56,7 @@ export function PeopleTabScreen() {
             {desktop ? (
                 <>
                     <XStack paddingHorizontal="4" paddingTop="4" paddingBottom="3" width="100%" maxWidth={760} alignSelf="center">
-                        <T v="title">People</T>
+                        <T v="title">Team</T>
                     </XStack>
                     <Separator borderColor="stroke" />
                 </>
@@ -65,16 +65,12 @@ export function PeopleTabScreen() {
             )}
             {!roster.surface && !roster.error ? <SurfaceGlyphLoader /> : <ScrollView flex={1} minHeight={0} {...(desktop ? {} : scrollProps)}>
                 <YStack padding="4" gap="5" paddingBottom="8" width="100%" maxWidth={760} alignSelf="center">
-                    {workspace ? (
-                        <Copy small quiet>{`Everyone in ${workspaceName} can join its public chats and talk to its agents. Private chats add people one by one.`}</Copy>
-                    ) : null}
                     {roster.error ? <Copy small quiet role="alert">{roster.error}</Copy> : null}
                     <YStack gap="2" testID="people-humans">
                         <SectionHead title={`People · ${roster.peopleTotal}`} addLabel={`Invite to ${workspaceName}`} testID="people-invite"
                             onAdd={invite} />
                         <MemberCard rows={people} open={openPerson} roleAtEnd />
                         {roster.morePeople ? <Btn kind="quiet" label="Show more people" disabled={roster.loadingMore} onPress={() => void roster.loadMore('human')}>Show more</Btn> : null}
-                        <Copy small quiet>Owners and admins invite people and change roles: open a person to change theirs.</Copy>
                     </YStack>
                     <YStack gap="2" testID="people-agents">
                         <SectionHead title={`Agents · ${roster.agentTotal}`} addLabel={`Add an agent to ${workspaceName}`} testID="people-add-agent"

@@ -3,8 +3,6 @@ import type { NeedsYouItemView, RoomViewIdentity } from './phone-types.js';
 
 export const WORK_STATES = ['needs-you', 'in-progress', 'in-review', 'backlog', 'done'] as const;
 export type WorkState = (typeof WORK_STATES)[number];
-export const WORK_PRIORITIES = ['urgent', 'high', 'medium', 'low', 'none'] as const;
-export type WorkPriority = (typeof WORK_PRIORITIES)[number];
 export type WorkAbout =
   | { readonly kind: 'thread'; readonly roomId: string }
   | { readonly kind: 'pr'; readonly roomId: string }
@@ -18,13 +16,20 @@ export type WorkItemView = {
   readonly title: string;
   readonly threadName: string;
   readonly state: WorkState;
-  readonly priority: WorkPriority;
+  /** Retired. Always 'none': the previous app still requires the field. */
+  readonly priority?: 'none';
+  /** An open thread with nothing running: In progress, drawn as a hollow ring after active work. */
+  readonly idle?: true;
+  /** The latest brief objective, else the opening order or the item's own objective. */
+  readonly objective?: string;
   readonly assignee: RoomViewIdentity | null;
   readonly openedBy: RoomViewIdentity;
   readonly createdAt: number;
   readonly updatedAt: number;
   readonly messageId?: string;
   readonly ask?: NeedsYouItemView;
+  /** Every ask waiting in this thread, oldest first; `ask` is the first. Clearing the row clears all. */
+  readonly askIds?: readonly string[];
   readonly recommendedOptionId?: string;
 };
 export type WorkBoardView = {
@@ -40,7 +45,7 @@ export type UpdateWorkItemInput = {
   readonly roomId: string;
   readonly title?: string;
   readonly state?: WorkState;
-  readonly priority?: WorkPriority;
+  readonly objective?: string;
   readonly assigneeId?: string | null;
 };
 export type AskOwnerQuestionInput = {
@@ -87,7 +92,6 @@ export function readWorkItem(value: unknown): WorkItemView | undefined {
       (key) => typeof v[key] === 'string',
     ) ||
     !WORK_STATES.includes(v.state as WorkState) ||
-    !WORK_PRIORITIES.includes(v.priority as WorkPriority) ||
     typeof v.createdAt !== 'number' ||
     typeof v.updatedAt !== 'number'
   )
@@ -103,7 +107,8 @@ export function readWorkItem(value: unknown): WorkItemView | undefined {
     title: v.title as string,
     threadName: v.threadName as string,
     state: v.state as WorkState,
-    priority: v.priority as WorkPriority,
+    ...(v.idle === true ? { idle: true as const } : {}),
+    ...(typeof v.objective === 'string' && v.objective ? { objective: v.objective } : {}),
     openedBy,
     assignee,
     ...(typeof v.messageId === 'string' ? { messageId: v.messageId } : {}),

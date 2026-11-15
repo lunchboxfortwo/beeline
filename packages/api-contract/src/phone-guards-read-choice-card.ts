@@ -1,4 +1,4 @@
-import { WORK_STATES, WORK_PRIORITIES, type WorkState, type WorkPriority } from './work-board.js';
+import { WORK_STATES, type WorkState } from './work-board.js';
 import { record, readIdentity, readList, readChoiceOption, uuid, hex64, integer, choiceLetter, field, oneOf, readIdentityOnly, nonempty, readHumanApprovalIdentity, githubUrl, readAttachment, readActivity, readGrantRequest, readSquireApproval, readComputerSession, readConnectorOfferCardView, readAppSignInCard, readAgentSignInCard, readHeader, httpUrl } from './phone-guards.js';
 import { readRepositoryOnboardingCard } from './repository-onboarding.js';
 import { readVaultSaveCard } from './vault-save.js';
@@ -599,7 +599,6 @@ function readChatCorner(value: unknown): ChatListCorner | null {
     ...field('blocker', readCornerBlocker(item.blocker)),
     ...field('itemId', nonempty(item.itemId) ? item.itemId : undefined),
     ...field('workState',WORK_STATES.includes(item.workState as WorkState)?item.workState as WorkState:undefined),
-    ...field('workPriority',WORK_PRIORITIES.includes(item.workPriority as WorkPriority)?item.workPriority as WorkPriority:undefined),
     ...field('waitingSince', integer(item.waitingSince) ? item.waitingSince : undefined),
     ...field('lastActivityAt', integer(item.lastActivityAt) ? item.lastActivityAt : undefined),
     ...field('attention', item.attention === true ? (true as const) : undefined),

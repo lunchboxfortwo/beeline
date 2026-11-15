@@ -8,7 +8,6 @@ import { expect, it, vi } from 'vitest';
 
 vi.mock('@/ui/screens/tags/WorkMarks', () => ({
   WorkStateMark: (props: any) => React.createElement('WorkStateMark', props),
-  WorkPriorityMark: (props: any) => React.createElement('WorkPriorityMark', props),
 }));
 vi.mock('@/components/buzz/RepositoryMark', () => ({
   RepositoryMark: (props: any) => React.createElement('RepositoryMark', props),
@@ -27,7 +26,7 @@ vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: () => null }));
 
 import type { ChatListItem } from '@beeline/buzz-client';
 import { ChatRow, ChatRowDivider, NEW_THREAD_HOLD_MS } from './ChatTree';
-import { WorkStateMark, WorkPriorityMark } from '@/ui/screens/tags/WorkMarks';
+import { WorkStateMark } from '@/ui/screens/tags/WorkMarks';
 import { TextSizeContext, type TextSize } from '@/ui/grammar';
 
 (
@@ -103,7 +102,7 @@ it('holding the row toggles its pin instead of opening it, even when both touch 
   ).toHaveLength(0);
 });
 
-it('shows the repository mark on the chat row and Needs you plus priority on its blocked thread row', () => {
+it('shows the repository mark on the chat row and the status glyph first on its thread row', () => {
   let tree!: ReactTestRenderer;
   const marked = {
     ...item,
@@ -118,7 +117,6 @@ it('shows the repository mark on the chat row and Needs you plus priority on its
         name: 'Thread',
         state: 'waiting',
         workState: 'needs-you',
-        workPriority: 'high',
         lifecycle: { lifecycle: 'idle', checks: 'unknown' },
         lastActivityAt: 1_700_000_000,
       },
@@ -145,7 +143,8 @@ it('shows the repository mark on the chat row and Needs you plus priority on its
   const threadRow = tree.root.find((node: any) => node.props?.testID === 'thread-row-thread');
   expect(threadRow.findAll((node: any) => node.type === 'RepositoryMark')).toHaveLength(0);
   expect(threadRow.findByType(WorkStateMark).props.state).toBe('needs-you');
-  expect(threadRow.findByType(WorkPriorityMark).props.priority).toBe('high');
+  const host = threadRow.findAll((node: any) => typeof node.type === 'string')[0]!;
+  expect(host.findAll((node: any) => typeof node.type === 'string')[1]?.type).toBe('WorkStateMark');
   act(() => tree.unmount());
 });
 
@@ -192,7 +191,7 @@ it('with the divider outside, the row spans divider to divider and keeps its spa
   for (const tree of [inside, outside, last, divider]) act(() => tree.unmount());
 });
 
-it('labels the same waiting thread "waiting on you" in semibold for its commander and "waiting on <name>" for another member', () => {
+it('names whom a waiting thread waits on for screen readers, showing only its pause glyph and name', () => {
   const commander = 'c'.repeat(64);
   const member = 'm'.repeat(64);
   const waiting = {
@@ -225,25 +224,25 @@ it('labels the same waiting thread "waiting on you" in semibold for its commande
       );
     });
     const line = byTestID(tree, 'thread-row-corner-w');
-    const text = line.findAll((node: any) => node.type === 'Text').at(-1)!;
+    const texts = line.findAll((node: any) => node.type === 'Text');
     const result = {
       aria: line.props['aria-label'],
-      word: text.props.children,
-      face: text.props.fontFamily,
+      shown: texts.map((text: any) => text.props.children),
+      glyph: line.findByType(WorkStateMark).props.state,
     };
     act(() => tree.unmount());
     return result;
   };
   expect(label(commander)).toEqual({
     aria: 'Thread One durable turn owner, waiting on you',
-    word: 'waiting on you',
-    face: 'SpaceGrotesk-SemiBold',
+    shown: ['One durable turn owner'],
+    glyph: 'needs-you',
   });
   // The other member follows the thread too (`mine`), yet it waits on Claude, not on them.
   expect(label(member)).toEqual({
     aria: 'Thread One durable turn owner, waiting on Claude',
-    word: 'waiting on Claude',
-    face: 'SpaceGrotesk-Regular',
+    shown: ['One durable turn owner'],
+    glyph: 'needs-you',
   });
 });
 
@@ -343,13 +342,12 @@ it('the Desktop layout proof uses recent activity rather than Unix-epoch sentine
   act(() => tree.unmount());
 });
 
-it('renders every blocked thread and no working, review, backlog or done thread rows', () => {
+it('renders every thread, waiting ones first, with idle threads as a hollow ring', () => {
   const blocked = Array.from({ length: 12 }, (_, i) => ({
     id: `blocked-${i}`,
     name: `Needs you ${i}`,
     state: 'waiting',
     workState: 'needs-you',
-    workPriority: 'high',
   }));
   const other = ['in-progress', 'in-review', 'backlog', 'done'].map((workState) => ({
     id: workState,
@@ -357,6 +355,7 @@ it('renders every blocked thread and no working, review, backlog or done thread 
     state: 'working',
     workState,
   }));
+  const idle = { id: 'idle', name: 'idle', state: 'idle', workState: 'in-progress' };
   let tree!: ReactTestRenderer;
   const props = {
     now: 1_700_000_000_000,
@@ -369,21 +368,30 @@ it('renders every blocked thread and no working, review, backlog or done thread 
     tree = create(
       <ChatRow
         {...props}
-        item={{ ...item, openCorners: [...other, ...blocked] } as unknown as ChatListItem}
+        item={{ ...item, openCorners: [...other, idle, ...blocked] } as unknown as ChatListItem}
       />,
     );
   });
-  expect(
-    tree.root.findAll(
-      (n: any) =>
-        typeof n.type === 'string' && String(n.props.testID ?? '').startsWith('thread-row-'),
-    ),
-  ).toHaveLength(12);
+  const rows = tree.root.findAll(
+    (n: any) =>
+      typeof n.type === 'string' && String(n.props.testID ?? '').startsWith('thread-row-'),
+  );
+  expect(rows.map((row: any) => row.props.testID.slice('thread-row-'.length))).toEqual([
+    ...blocked.map((corner) => corner.id),
+    'in-progress',
+    'in-review',
+    'backlog',
+    'done',
+    'idle',
+  ]);
+  const glyph = (id: string) =>
+    rows.find((row: any) => row.props.testID === `thread-row-${id}`).findByType(WorkStateMark).props;
+  expect(glyph('idle')).toMatchObject({ state: 'in-progress', idle: true });
+  expect(glyph('in-progress')).toMatchObject({ state: 'in-progress', idle: false });
+  expect(glyph('backlog').state).toBe('backlog');
   expect(tree.root.findAll((n: any) => n.props.testID === `more-${ROOM}`)).toHaveLength(0);
   act(() => {
-    tree.update(
-      <ChatRow {...props} item={{ ...item, openCorners: other } as unknown as ChatListItem} />,
-    );
+    tree.update(<ChatRow {...props} item={{ ...item, openCorners: [] } as unknown as ChatListItem} />);
   });
   expect(tree.root.findAll((n: any) => n.props.testID === `nest-${ROOM}`)).toHaveLength(0);
   act(() => tree.unmount());

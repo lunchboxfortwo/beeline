@@ -446,7 +446,7 @@ const scope4 = fixtureScope4();
 
   it('sends one server-derived Needs-you room slice to each device', async () => {
     const roomId = 'room-live';
-    const message = { id: 'ask', text: '@viewer please review', createdAt: 1,
+    const message = { id: 'ask', text: 'needs-decision: please review', createdAt: 1,
       author: { pubkey: 'agent', kind: 'agent' as const, name: 'Agent' },
       presentation: 'message' as const, mentionPubkeys: ['viewer'] };
     const batch = vi.fn().mockImplementation(async (_roomId, viewers: string[]) =>

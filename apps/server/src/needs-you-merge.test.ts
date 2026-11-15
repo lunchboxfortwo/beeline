@@ -15,13 +15,14 @@ describe('the Tags merge approval', () => {
   let phone: PhoneService;
   let sequence = 0;
 
+  /** A needs-decision report to the viewer as commander. */
   async function post(roomId: string, text: string, attachments: unknown[] = []): Promise<string> {
     sequence += 1;
     const id = sequence.toString(16).padStart(64, '0');
     await database.query(
-      `INSERT INTO messages(id,room_id,author_id,text,attachments,created_at)
-       VALUES($1,$2,$3,$4,$5::jsonb,now() - interval '5 minutes')`,
-      [id, roomId, AGENT, text, JSON.stringify(attachments)],
+      `INSERT INTO messages(id,room_id,author_id,text,attachments,card,created_at)
+       VALUES($1,$2,$3,$4,$5::jsonb,jsonb_build_object('reportToId',$6::text),now() - interval '5 minutes')`,
+      [id, roomId, AGENT, `needs-decision: ${text}`, JSON.stringify(attachments), VIEWER],
     );
     return id;
   }
@@ -65,13 +66,13 @@ describe('the Tags merge approval', () => {
   });
 
   it('turns a corner ask to approve its own PR into a merge approval for a Workspace owner', async () => {
-    const ask = await post(CORNER, '@ada please approve merge of PR #4181 once checks pass.');
+    const ask = await post(CORNER, 'please approve merge of PR #4181 once checks pass.');
     const { items } = await read();
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({
       messageId: ask,
       roomId: CORNER,
-      text: 'Approve merge of PR #4181?',
+      text: 'please approve merge of PR #4181 once checks pass.',
       approval: {
         kind: 'merge',
         actor: 'Jimmy',
@@ -93,17 +94,17 @@ describe('the Tags merge approval', () => {
 
   it('keeps the ask a plain question for a member who cannot approve, or for another PR number', async () => {
     await database.query(`UPDATE memberships SET role='member' WHERE identity_id=$1 AND room_id IS NULL`, [VIEWER]);
-    await post(CORNER, '@ada please approve merge of PR #4181.');
+    await post(CORNER, 'please approve merge of PR #4181.');
     expect((await read()).items[0]?.approval).toBeUndefined();
     await database.query(`UPDATE memberships SET role='owner' WHERE identity_id=$1 AND room_id IS NULL`, [VIEWER]);
     await database.query(`UPDATE needs_you_marks SET cleared_at=now()`);
     await database.query(`DELETE FROM messages`);
-    await post(CORNER, '@ada please approve merge of PR #41.');
+    await post(CORNER, 'please approve merge of PR #41.');
     expect((await read()).items[0]?.approval).toBeUndefined();
   });
 
   it('leaves the tray and the count once a yes is recorded on the current head', async () => {
-    await post(CORNER, '@ada please approve merge of PR #4181.');
+    await post(CORNER, 'please approve merge of PR #4181.');
     expect(await count()).toBe(1);
     await database.query(
       `INSERT INTO corner_merge_approvals(corner_id,approved_by,pull_request_number,head_sha) VALUES($1,$2,4181,$3)`,
@@ -120,7 +121,7 @@ describe('the Tags merge approval', () => {
   });
 
   it('carries the asking message’s first image, with a relative URL made absolute', async () => {
-    await post(CORNER, '@ada please approve merge of PR #4181, screenshot attached.', [
+    await post(CORNER, 'please approve merge of PR #4181, screenshot attached.', [
       { url: '/media/notes.txt', name: 'notes.txt', mimeType: 'text/plain', size: 3 },
       { url: '/media/shot.png', name: 'shot.png', mimeType: 'image/png', size: 9, width: 390, height: 250 },
     ]);

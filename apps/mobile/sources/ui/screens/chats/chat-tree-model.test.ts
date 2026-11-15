@@ -59,7 +59,7 @@ describe('chat rows', () => {
   const onViewer = { kind: 'report' as const, personId: viewer, personName: 'Vera' };
   const onAlan = { kind: 'report' as const, personId: alan.pubkey, personName: 'Alan' };
 
-  it('shows only Needs you threads, keeping all of them rather than three recent threads', () => {
+  it('lists every thread, Needs you threads first, without an age cutoff', () => {
     const corners = [
       {
         id: 'working',
@@ -79,15 +79,24 @@ describe('chat rows', () => {
         lastActivityAt: ago(8 * 24),
       })),
     ];
-    expect(chatThreads(chat('a'), corners).map((c) => c.id)).toEqual(
-      Array.from({ length: 12 }, (_, i) => `blocked-${i}`),
-    );
+    expect(chatThreads(chat('a'), corners).map((c) => c.id)).toEqual([
+      ...Array.from({ length: 12 }, (_, i) => `blocked-${i}`),
+      'working',
+      'review',
+      'backlog',
+      'done',
+    ]);
     expect(threadWord(corners[4]!, viewer)).toBe('waiting on you');
     expect(chatThreads(chat('dm', { directMessage: { peer: alan } }), corners)).toEqual([]);
-    expect(chatThreads(chat('quiet'), corners.slice(0, 4))).toEqual([]);
+    expect(chatThreads(chat('quiet'), corners.slice(0, 4)).map((c) => c.id)).toEqual([
+      'working',
+      'review',
+      'backlog',
+      'done',
+    ]);
   });
 
-  it('keeps legacy waiting rows without an activity-age cutoff', () => {
+  it('keeps rows without a work state', () => {
     const blocked = { id: 'legacy', name: 'legacy', state: 'waiting' as const, blocker: onAlan };
     expect(chatThreads(chat('a'), [blocked])).toEqual([blocked]);
     expect(threadWord(blocked, viewer)).toBe('waiting on Alan');

@@ -1,7 +1,7 @@
 import { RepositoryMark } from '@/components/buzz/RepositoryMark';
 import React, {useState} from 'react';
 import { WorkAvatar, WorkAssigneePicker } from '@/ui/screens/tags/WorkBoard';
-import { WorkStateMark, WorkPriorityMark } from '@/ui/screens/tags/WorkMarks';
+import { WorkStateMark } from '@/ui/screens/tags/WorkMarks';
 import type { WorkItemView, RoomViewIdentity } from '@beeline/api-contract/phone';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import type { View } from 'react-native';
@@ -132,8 +132,7 @@ export function ThreadTitleBlock({ h, openBrief, openPr, blockRef, onBlockLayout
 function ThreadWorkMetadata({item,people}:{item:WorkItemView;people:readonly RoomViewIdentity[]}) {
   const [open,setOpen]=useState(false);
   return <YStack gap="2"><XStack gap="3" alignItems="center" flexWrap="wrap" testID="thread-work-metadata">
-    <WorkStateMark state={item.state}/><XStack gap="1" alignItems="center"><T v="meta" color="secondary">Opened by</T><WorkAvatar person={item.openedBy} size={20}/></XStack>
+    <WorkStateMark state={item.state} idle={item.idle}/><XStack gap="1" alignItems="center"><T v="meta" color="secondary">Opened by</T><WorkAvatar person={item.openedBy} size={20}/></XStack>
     <XStack gap="1" alignItems="center"><T v="meta" color="secondary">Assignee</T><Btn kind="quiet" label="Change assignee" paddingHorizontal="0" onPress={()=>setOpen(!open)}>{item.assignee?<WorkAvatar person={item.assignee} size={20}/>:null}<T v="meta">{item.assignee?.name??'Unassigned'}</T></Btn></XStack>
-    <XStack gap="1" alignItems="center"><T v="meta" color="secondary">Priority</T><WorkPriorityMark priority={item.priority}/><T v="meta">{item.priority.charAt(0).toUpperCase()+item.priority.slice(1)}</T></XStack>
   </XStack>{open?<WorkAssigneePicker people={people} onPick={person=>{setOpen(false);void monolithPhoneOperation('updateWorkItem',{id:item.id,roomId:item.roomId,assigneeId:person?.pubkey??null});}}/>:null}</YStack>;
 }

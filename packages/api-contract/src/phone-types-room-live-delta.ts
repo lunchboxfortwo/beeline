@@ -32,7 +32,6 @@ export type RoomLiveDelta =
 
 export type RoomView = {
   readonly workItem?: import('./work-board.js').WorkItemView;
-  readonly workItems?: readonly import('./work-board.js').WorkItemView[];
   readonly room: RoomViewHeader;
   /** Leaving as the last Workspace manager in this Room deletes it for everyone. */
   readonly leaveDeletesRoom?: boolean;
@@ -158,7 +157,6 @@ export type RoomHistoryOutlineDay = {
 
 export type ChatListCorner = {
   readonly workState?: import('./work-board.js').WorkState;
-  readonly workPriority?: import('./work-board.js').WorkPriority;
   readonly id: string;
   readonly name: string;
   readonly state: Exclude<CornerState, 'archived'>;

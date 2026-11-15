@@ -70,6 +70,18 @@ export default function TrayScreen() {
           return false;
         }
       },
+      clear: (item) =>
+        execute(async () => {
+          await Promise.all(
+            (item.askIds ?? [item.id]).map((messageId) =>
+              monolithPhoneOperation('clearNeedsYou', { workspaceId, messageId }),
+            ),
+          );
+        }),
+      clearAll: () =>
+        execute(async () => {
+          await monolithPhoneOperation('clearNeedsYouSection', { workspaceId });
+        }),
       assign: (item, assigneeId) =>
         execute(async () => {
           await monolithPhoneOperation('updateWorkItem', {
@@ -118,9 +130,9 @@ export default function TrayScreen() {
   const { scrolled } = useScrolledUnder();
   const screen = (
     <YStack flex={1} minHeight={0} backgroundColor="canvas" testID="tags-screen">
-      {desktop ? null : (
+      {desktop || board ? null : (
         <TabHeader
-          workspaceName={board?.workspaceName || first(params.workspaceName) || WORKSPACE_LABEL}
+          workspaceName={first(params.workspaceName) || WORKSPACE_LABEL}
           scrolled={scrolled}
         />
       )}
@@ -150,9 +162,7 @@ export default function TrayScreen() {
       ) : board ? (
         <WorkBoard key={workspaceId} board={board} desktop={desktop} actions={actions} />
       ) : (
-        <YStack padding="6" alignItems="center">
-          <SurfaceGlyphLoader />
-        </YStack>
+        <SurfaceGlyphLoader />
       )}
     </YStack>
   );

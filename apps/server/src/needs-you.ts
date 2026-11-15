@@ -18,26 +18,22 @@ import {
 } from '@beeline/api-contract/phone';
 import { AGENT_GRANT_VERBS, commandGrantAction, grantPresentation, connectionInstallName, isCommandGrantScript, type AgentGrantKind, type CommandGrantScript } from '@beeline/api-contract/agent-grants';
 import type { SqlDatabase } from './database.js';
-import { tagsKnownIdentitySql } from './message-mentions.js';
 
 /**
  * The "Needs you" tray, owned here and nowhere else.
  *
- * A message needs a person when BOTH hold: it tags them (the ordinary live
- * mention reading, `tagsKnownIdentitySql`) or is a blocked or needs-decision
- * report addressed to them as commander (`card.reportToId`), AND it asks — its text ends with a
- * question mark, or it contains one of the words below. Humans and agents are
- * read by the same rule; nothing is classified and nothing is stored about
- * the message itself. Every pending approval card the person can decide is a
- * cell too (`APPROVAL_QUERIES`), shown as text (`NeedsYouApprovalView`).
+ * Only three things need a person: a question-builder ask assigned to them
+ * (`work_questions`), a blocked or needs-decision report addressed to them as
+ * commander (`card.reportToId`), and a pending approval card they can decide
+ * (`approvalBranches`), shown as text (`NeedsYouApprovalView`). Plain mentions
+ * and wording never qualify.
  *
- * A question leaves the tray when the person taps or dismisses it
+ * A report leaves the tray when the person clears it
  * (`needs_you_marks.cleared_at`), replies anywhere in that Room or corner
  * after it, or 24 hours after they first saw it on any device
- * (`needs_you_marks.first_seen_at`). An approval also leaves when dismissed
- * from the tray, decided, expired or closed; opening it does not clear it.
+ * (`needs_you_marks.first_seen_at`). An ask or approval leaves when cleared,
+ * answered, decided, expired or closed; opening it does not clear it.
  */
-export const NEEDS_YOU_TRIGGER_WORDS = ['please', 'approve', 'feedback'] as const;
 /** A cell's life, counted from the first time the person saw it in the tray. */
 export const NEEDS_YOU_EXPIRY_HOURS = 24;
 /** Card expiry in epoch milliseconds; indexed by `messages_needs_you_expiry_idx`. */
@@ -54,16 +50,10 @@ export function expiringCardForSql(m: string, identity: string): string {
 }
 /** Now, in the epoch milliseconds `cardExpiresAtSql` returns. */
 const NOW_MS = `(extract(epoch FROM now())*1000)::bigint`;
-const TRIGGER_WORD = new RegExp(
-  `(^|[^\\p{L}\\p{N}_])(${NEEDS_YOU_TRIGGER_WORDS.join('|')})(?=$|[^\\p{L}\\p{N}_])`,
-  'iu',
-);
-/** A closing question mark, allowing only ordinary trailing whitespace — `askSql` reads the same. */
-const ENDS_WITH_QUESTION = /\?[ \t\n\r\f\v]*$/;
 
-/** Actionable reports, trailing questions, or please / approve / feedback as a word. */
+/** A blocked or needs-decision report. */
 export function isNeedsYouAsk(text: string): boolean {
-  return /^(blocked|needs-decision|failed):\s*\S/.test(text) || ENDS_WITH_QUESTION.test(text) || TRIGGER_WORD.test(text);
+  return /^(blocked|needs-decision):\s*\S/.test(text);
 }
 
 /**
@@ -71,12 +61,10 @@ export function isNeedsYouAsk(text: string): boolean {
  * the TypeScript twin still re-checks every row the query returns.
  */
 export function askSql(textExpr: string): string {
-  return `(${textExpr} ~ '^(blocked|needs-decision|failed):[[:space:]]*[^[:space:]]'
-    OR ${textExpr} ~ '\\?[ \\t\\n\\r\\f\\v]*$'
-    OR ${textExpr} ~* '(^|[^[:alnum:]_])(${NEEDS_YOU_TRIGGER_WORDS.join('|')})($|[^[:alnum:]_])')`;
+  return `(${textExpr} ~ '^(blocked|needs-decision):[[:space:]]*[^[:space:]]')`;
 }
 
-/** Message `m` (or the bare row) is a live ask; `messages_needs_you_actionable_idx` indexes it. */
+/** Message `m` (or the bare row) is a live report; `messages_needs_you_report_idx` indexes it. */
 export function askingMessageSql(m?: string): string {
   const column = (name: string) => (m ? `${m}.${name}` : name);
   return `${column('presentation')}='message' AND ${column('deleted_at')} IS NULL
@@ -95,14 +83,12 @@ function sentences(text: string): string[] {
  * Prefer a complete question, then the first sentence of an actionable report.
  */
 export function needsYouSentence(text: string): string {
-  const all = sentences(text.replace(/^(?:blocked|needs-decision|failed):\s*/, '')).map(plainAsk).filter(Boolean);
+  const all = sentences(text.replace(/^(?:blocked|needs-decision):\s*/, '')).map(plainAsk).filter(Boolean);
   const question = all.find(sentence => sentence.endsWith('?'));
   if (question) return question;
-  const report = text.match(/^(?:blocked|needs-decision|failed):\s*(.*)/s);
+  const report = text.match(/^(?:blocked|needs-decision):\s*(.*)/s);
   if (report) return plainAsk(sentences(report[1]!)[0] ?? report[1]!);
-  const merge = plainAsk(text).match(/(?:approve|merge approval).*?PR\s*#?(\d+)/i);
-  if (merge) return `Approve merge of PR #${merge[1]}?`;
-  return all.find(sentence => TRIGGER_WORD.test(sentence)) ?? all[0] ?? plainAsk(text);
+  return all[0] ?? plainAsk(text);
 }
 
 function escapeRegExp(text: string): string {
@@ -192,16 +178,11 @@ type Row = {
   author_handle: string | null;
   author_avatar: string | null;
   author_face: string | null;
-  addressed_report: boolean;
 };
 
 const ROW_COLUMNS = `
   ${repositoryMarkColumnsSql('room')},
   m.id message_id,m.room_id,m.text,m.card,m.attachments,m.created_at,mark.first_seen_at,mark.cleared_at,
-  CASE WHEN m.text ~ '^(needs-decision|blocked):' AND m.card->>'reportToId'=$2
-    THEN NOT (SELECT ${tagsKnownIdentitySql('m', 'report_viewer.id', 'report_viewer.handle', 'report_viewer.kind')}
-      FROM identities report_viewer WHERE report_viewer.id=$2)
-    ELSE false END addressed_report,
   CASE WHEN room.direct_participants IS NOT NULL THEN COALESCE((
       SELECT peer.name FROM room_access peer_member
       JOIN identities peer ON peer.id=peer_member.identity_id
@@ -234,18 +215,10 @@ const viewerRoomsSql = (columns='room.*',scoped=false)=>`
   )`;
 const VIEWER_ROOMS=viewerRoomsSql();
 
-/** A question still awaiting `viewer`, ignoring only its clock deadline. */
-export function questionForSql(viewerId: string): string {
+/** A report still awaiting `viewer`, its commander, ignoring only its clock deadline. */
+function questionForSql(viewerId: string): string {
   return `${askingMessageSql('m')} AND m.author_id<>${viewerId}
-  AND mark.cleared_at IS NULL
-  -- Most untagged reports belong to agent commanders. Avoid running the
-  -- quote/code-aware mention parser for text that cannot contain a tag.
-  AND CASE WHEN EXISTS(SELECT 1 FROM work_items assigned WHERE assigned.id=m.id)
-    THEN EXISTS(SELECT 1 FROM work_items assigned WHERE assigned.id=m.id AND assigned.assignee_id=${viewerId})
-    ELSE (CASE WHEN strpos(m.text,'@')>0
-    THEN ${tagsKnownIdentitySql('m', 'viewer.id', 'viewer.handle', 'viewer.kind')} ELSE false END
-    -- A report to a human commander addresses them without a tag.
-    OR (m.text ~ '^(needs-decision|blocked):' AND m.card->>'reportToId'=${viewerId})) END
+  AND mark.cleared_at IS NULL AND m.card->>'reportToId'=${viewerId}
   AND NOT EXISTS (
     SELECT 1 FROM messages reply
     WHERE reply.room_id=m.room_id AND reply.author_id=${viewerId}
@@ -270,10 +243,8 @@ export async function clearNeedsYouQuestions(
      SELECT $2,m.id,$1,now(),now()
      FROM viewer_rooms room
      JOIN messages m ON m.room_id=room.id
-     JOIN identities viewer ON viewer.id=$2
      LEFT JOIN needs_you_marks mark ON mark.identity_id=$2 AND mark.message_id=m.id
      WHERE ${QUESTION_WHERE}
-    AND NOT EXISTS(SELECT 1 FROM work_questions work_question WHERE work_question.message_id=m.id)
      ON CONFLICT(identity_id,message_id)
        DO UPDATE SET cleared_at=COALESCE(needs_you_marks.cleared_at,now()),
          reminder_dismissed_at=COALESCE(needs_you_marks.reminder_dismissed_at,EXCLUDED.reminder_dismissed_at)`,
@@ -313,12 +284,17 @@ const APPROVAL_JOINS = `
  * bounds their life even if a decision never arrives.
  */
 return [
-  `${APPROVAL_FROM('choice')}
+  // A free-text ask; one about a pull request the viewer can approve is a merge.
+  `SELECT ${columns},CASE WHEN work_question.about->>'kind'='pr' AND ${PR_MERGE_APPROVER}
+       THEN 'merge' ELSE 'choice' END approval_kind,NULL::timestamptz approval_expires_at,
+     NULL::text[] pending_grant_ids,NULL::text actor_name
+   FROM viewer_rooms room
    JOIN work_questions work_question ON work_question.room_id=room.id
    JOIN work_items work ON work.id=work_question.message_id AND work.assignee_id=$2
    JOIN messages m ON m.id=work_question.message_id AND m.card_type IS DISTINCT FROM '${CHOICE_CARD_TYPE}'
    ${APPROVAL_JOINS}
-   WHERE m.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM messages reply
+   WHERE m.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM ${mergeYesSql('pr_fact', 'room.id')})
+     AND NOT EXISTS(SELECT 1 FROM messages reply
      WHERE reply.reply_to_message_id=m.id AND reply.deleted_at IS NULL
        AND EXISTS(SELECT 1 FROM identities answerer WHERE answerer.id=reply.author_id AND answerer.kind='human'))`,
   // Driven from the few pending grants rather than from the transcript, so
@@ -450,6 +426,18 @@ const mergeAskFact = (fact: string) => `corner_github_cache ${fact}
  */
 const MERGE_APPROVAL_KIND = `CASE WHEN viewer.kind='human' AND ${VIEWER_MANAGES_WORKSPACE}
     AND EXISTS (SELECT 1 FROM ${mergeAskFact('merge_fact')}) THEN 'merge' END`;
+
+/** A yes already recorded on the corner's current pull request head. */
+function mergeYesSql(fact: string, corner: string): string {
+  return `corner_github_cache ${fact} JOIN corner_merge_approvals ${fact}_yes
+    ON ${fact}_yes.corner_id=${fact}.corner_id AND ${fact}_yes.head_sha=${fact}.lifecycle->'pr'->>'headSha'
+    WHERE ${fact}.corner_id=${corner}`;
+}
+
+/** The viewer may approve a merge of the corner `room` has open: a human Workspace owner or admin. */
+const PR_MERGE_APPROVER = `EXISTS (SELECT 1 FROM identities approver WHERE approver.id=$2 AND approver.kind='human')
+  AND ${VIEWER_MANAGES_WORKSPACE}
+  AND EXISTS (SELECT 1 FROM corner_github_cache pr WHERE pr.corner_id=room.id AND pr.lifecycle->'pr'->>'number' IS NOT NULL)`;
 
 const questionBranch=(projection:CandidateProjection)=>`
   SELECT ${candidateColumns(projection)},${MERGE_APPROVAL_KIND} approval_kind,NULL::timestamptz approval_expires_at,
@@ -644,7 +632,6 @@ export async function needsYouItems(database: SqlDatabase, workspaceId: string, 
         }
       : {}),
     ...(approval ? { approval } : {}),
-    ...(!approval && row.addressed_report ? { addressedReport: true as const } : {}),
   }));
   const nextExpiry=built.reduce((next,{row})=>Math.min(next,
     (row.approval_kind?row.approval_expires_at?.getTime():

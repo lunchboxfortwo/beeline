@@ -103,7 +103,8 @@ it('preserves tags in public prose without changing the recorded report route', 
   await claim(report);
   await rootFixture.daemon.execute('report', { status: 'needs_decision', ...authority(report), text: 'needs-decision: Approve the reviewer-link fetch?' }, RUBY);
   const tray = await rootFixture.phone.execute('readNeedsYou', { workspaceId: WS }, HUMAN);
-  expect(tray.items.map(item => [item.roomId, item.text])).toEqual(expect.arrayContaining([[DM, 'Approve the reviewer-link fetch?'],[opened.cornerId,'Approve the reviewer-link fetch here?'],[opened.cornerId,'approve?']]));
+  // Only the report addressed to the commander needs them; tagged prose never enters Needs you.
+  expect(tray.items.map(item => [item.roomId, item.text])).toEqual([[DM, 'Approve the reviewer-link fetch?']]);
   // The commander's escalation from inside the corner leaves only its collapsed record card there.
   expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND text LIKE '%@captain%'
     AND card_type IS DISTINCT FROM 'agent-command'`, [opened.cornerId])).rowCount).toBe(1);

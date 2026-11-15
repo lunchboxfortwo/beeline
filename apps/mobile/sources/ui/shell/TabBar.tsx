@@ -9,8 +9,8 @@ import { TAB_ROUTES, type Tab } from './tab-routes';
 
 const TABS: { value: Tab; label: string; icon: typeof Hash }[] = [
     { value: 'chats', label: 'Chats', icon: Hash },
-    { value: 'tags', label: 'Tags', icon: AtSign },
-    { value: 'people', label: 'People', icon: Users },
+    { value: 'tags', label: 'Tasks', icon: AtSign },
+    { value: 'people', label: 'Team', icon: Users },
     { value: 'settings', label: 'Settings', icon: Settings },
 ];
 
@@ -18,7 +18,7 @@ const TABS: { value: Tab; label: string; icon: typeof Hash }[] = [
 // Web has no shrink-to-fit (it would cut the label with an ellipsis), and its labels fit already.
 const ONE_LINE = Platform.OS === 'web' ? {} : { numberOfLines: 1, adjustsFontSizeToFit: true, minimumFontScale: 0.5 };
 
-/** The phone's four places. Chats leads; Tags carries the live count. */
+/** The phone's four places. Chats leads; Tasks carries the live count. */
 export const TabBar = React.memo(function TabBar({ active, tagsCount = 0 }: { active: Tab; tagsCount?: number }) {
     const stone = useThemeName().includes('stone');
     // A tab press returns to that place's root, not on top of a pushed page.

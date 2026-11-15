@@ -288,7 +288,6 @@ async function executeResourceTool(name: string, args: JsonObject, toolCallId: s
     case 'ask_owner': return execute('ask_owner');
     case 'create_work_item':
     case 'set_work_state':
-    case 'set_work_priority':
     case 'assign_work_item':
     case 'update_work': return execute(name);
     case 'read': {
