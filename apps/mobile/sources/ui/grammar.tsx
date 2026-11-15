@@ -106,8 +106,8 @@ export function useStep(): (s: Step) => number {
 
 type TextProps = React.ComponentProps<typeof Text>;
 /** The whole type scale. Nothing else may set a font, size or weight. */
-export function T({ v = 'body', children, ...rest }: { v?: Variant; children?: React.ReactNode } & Omit<TextProps, 'fontSize' | 'fontFamily' | 'fontWeight' | 'lineHeight'>) {
-    const style = points(typeStyle(v, useTextSize()));
+export function T({ v = 'body', regular = false, children, ...rest }: { v?: Variant; regular?: boolean; children?: React.ReactNode } & Omit<TextProps, 'fontSize' | 'fontFamily' | 'fontWeight' | 'lineHeight'>) {
+    const style = points({ ...typeStyle(v, useTextSize()), ...(regular ? { fontFamily: REGULAR } : null) });
     return <Text {...style} fontWeight="400" flexShrink={1} color="ink" {...rest}>{children}</Text>;
 }
 
@@ -503,14 +503,15 @@ export const ContainedList = React.forwardRef(function ContainedList<P extends {
  * padded on the grammar's steps: `x`/`y` pad the content; `top` replaces the
  * top pad with a measured inset in points (an inverted transcript's visual
  * tail); `emptyGrow` lets an empty list's content fill it through the
- * wrapper's `emptyContentContainerStyle`. `<ListPad list={FlatList} x="4" … />`.
+ * wrapper's `emptyContentContainerStyle`. `headAligned` aligns a short inverted
+ * thread's oldest block with the top of its viewport. `<ListPad list={FlatList} x="4" … />`.
  */
-export function ListPad<P extends object>({ list: List, x = '0', y = '0', top, emptyGrow = false, ...rest }: {
-    list: React.ComponentType<P>; x?: Step; y?: Step; top?: number; emptyGrow?: boolean;
+export function ListPad<P extends object>({ list: List, x = '0', y = '0', top, emptyGrow = false, headAligned = false, ...rest }: {
+    list: React.ComponentType<P>; x?: Step; y?: Step; top?: number; emptyGrow?: boolean; headAligned?: boolean;
 } & Omit<P, 'contentContainerStyle' | 'emptyContentContainerStyle'>) {
     const content = React.useMemo(
-        () => ({ paddingHorizontal: STEP[x], paddingVertical: STEP[y], ...(top === undefined ? null : { paddingTop: top }) }),
-        [x, y, top],
+        () => ({ paddingHorizontal: STEP[x], paddingVertical: STEP[y], ...(top === undefined ? null : { paddingTop: top }), ...(headAligned ? { flexGrow: 1, justifyContent: 'flex-end' as const } : null) }),
+        [x, y, top, headAligned],
     );
     const pad = { contentContainerStyle: content, ...(emptyGrow ? { emptyContentContainerStyle: LIST_GROW } : null) };
     return <List {...(rest as unknown as P)} {...pad} />;

@@ -122,7 +122,7 @@ export const ChatSurfaceTranscript = React.memo(function ChatSurfaceTranscript({
                     maxWidth={720}
                     alignSelf="center"
                     flexGrow={1}
-                    justifyContent="flex-end"
+                    justifyContent={leadBlock ? "flex-start" : "flex-end"}
                   >
                     {leadBlock}
                     {emptyLedger}
@@ -155,6 +155,7 @@ export const ChatSurfaceTranscript = React.memo(function ChatSurfaceTranscript({
                     turnChromeVisible: Boolean(composerAck || settledTurn),
                   })}
                   emptyGrow
+                  headAligned={Boolean(leadBlock) && transcriptMessages.length > 0}
                   preview={sendPreview}
                   testID="chat-messages"
                   ref={flatListRef}

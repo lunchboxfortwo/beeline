@@ -7,29 +7,29 @@ import { openExternalUrl } from '@/utils/open-external-url';
 import { Modal } from '@/modal';
 import { openPlace } from '@/ui/shell/panel';
 import { ThreadTitleBlock, type ThreadHeaderData } from '@/ui/screens/thread/ThreadHeader';
-import { threadPrLine } from '@/ui/screens/thread/thread-status';
+import { threadPrLine, threadWaitsOnViewer } from '@/ui/screens/thread/thread-status';
 import { useTitleBlockVisibility } from '@/ui/screens/thread/useTitleBlockVisibility';
 import { findRoomCornerRow, useRoomCornerRecord } from '@/buzz/room-corner-store';
 
 /**
- * Header B's data for a corner: the server corner state, the running count
- * (this RoomView's working agent turns), the PR row from `cornerLifecycle`,
+ * Header B's data for a corner: the server corner state, viewer-specific
+ * waiting emphasis, the PR row from `cornerLifecycle`,
  * the objective and the brief. Returns the bar data, whether the title block
  * has scrolled away, the block itself for the transcript's oldest slot, and
  * the full header the bar shows while that block is away.
  */
 export function useChatThreadHeader({
-  isCorner, roomSurface, resolvedChannelName, decodedId, parentChannelId, state, running,
-  objective, isArchived, isDesktop, positions,sourceMessageId,
+  isCorner, roomSurface, resolvedChannelName, decodedId, parentChannelId, state,
+  objective, isArchived, isDesktop, positions,sourceMessageId, viewerPubkey,
 }: {
   isCorner: boolean;
+  viewerPubkey?: string;
   sourceMessageId?:string;
   roomSurface: RoomView | null;
   resolvedChannelName: string | null;
   decodedId: string;
   parentChannelId: string | undefined;
   state: CornerState | undefined;
-  running: number;
   objective: string;
   isArchived: boolean;
   isDesktop: boolean;
@@ -55,13 +55,13 @@ export function useChatThreadHeader({
       repositoryFavicon: roomSurface?.room.favicon,
       title: cornerShortTitle(parentName, title, decodedId),
       ...(threadState ? { state: threadState } : isArchived ? { state: 'archived' as const } : {}),
-      running,
+      waitsOnViewer: threadState ? threadWaitsOnViewer({state: threadState, blocker: openingRow?.blocker ?? openingSummary?.blocker}, viewerPubkey) : false,
       workItem:recordedWorkItem??roomSurface?.workItem,
       people:roomSurface?.members.map(member=>member.identity),
       ...(prLine ? { prLine } : {}),
       ...(objective.trim() ? { objective: objective.trim() } : {}),
     };
-  }, [decodedId, isArchived, isCorner, objective, parentName, title, roomSurface?.cornerLifecycle, roomSurface?.room.avatar, roomSurface?.room.favicon, roomSurface?.workItem, recordedWorkItem, roomSurface?.members, running, threadState]);
+  }, [decodedId, isArchived, isCorner, objective, parentName, title, roomSurface?.cornerLifecycle, roomSurface?.room.avatar, roomSurface?.room.favicon, roomSurface?.workItem, recordedWorkItem, roomSurface?.members, threadState, openingRow?.blocker, openingSummary?.blocker, viewerPubkey]);
 
   const openBrief = useMemo(
     () => (isCorner && hasBrief ? () => openPlace({ kind: 'brief', roomId: decodedId }, isDesktop) : undefined),
@@ -79,7 +79,7 @@ export function useChatThreadHeader({
   // Memoized: the transcript is a memo boundary and must not repaint for a fresh element.
   const { blockRef, onBlockLayout } = visibility;
   const titleBlock = useMemo(() => (thread ? (
-    <ThreadTitleBlock h={thread} openBrief={openBrief} openPr={openPr}
+    <ThreadTitleBlock h={thread} openBrief={openBrief} openPr={openPr} inset={false}
       blockRef={blockRef} onBlockLayout={onBlockLayout} />
   ) : null), [blockRef, onBlockLayout, openBrief, openPr, thread]);
   const expandedBlock = useMemo(() => (thread && visibility.expanded ? (

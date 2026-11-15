@@ -1,5 +1,5 @@
 import { cornerShortTitle, isConnectorIdentity, roomTitle } from '@beeline/api-contract/phone';
-import type { ChatListCorner, WorkState } from '@beeline/api-contract/phone';
+import type { ChatListCorner, CornerState, WorkState } from '@beeline/api-contract/phone';
 import type { ChatListItem } from '@beeline/buzz-client';
 import { roomRowAttentionReason, roomRowName, roomRowPreview } from '@/buzz/room-list-row';
 import type { RepoCandidate } from '@/buzz/room-repo-picker';
@@ -46,9 +46,9 @@ export function threadTitle(item: ChatListItem, corner: ChatListCorner): string 
 }
 
 /** A thread's Tasks state; a row without one reads its corner state. */
-export function threadWorkState(corner: ChatListCorner): WorkState {
+export function threadWorkState(corner: { state: CornerState; workState?: WorkState }): WorkState {
   return (
-    corner.workState ??
+    (corner.state === 'archived' ? 'done' : undefined) ?? corner.workState ??
     (corner.state === 'waiting' ? 'needs-you' : corner.state === 'review' ? 'in-review' : 'in-progress')
   );
 }

@@ -1,25 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { CornerLifecycleView } from '@beeline/api-contract/phone';
-import { threadDotTone, threadListLabel, threadPrLine, threadStatusText } from './thread-status';
+import { threadListLabel, threadPrLine } from './thread-status';
 
 const pr = { number: 4181, url: 'https://github.com/o/r/pull/4181', title: 'Keep place', targetBranch: 'main', headSha: 'abc' };
 const lifecycle = (extra: Partial<CornerLifecycleView>): CornerLifecycleView => ({ lifecycle: 'in-review', checks: 'unknown', pr, ...extra });
 
 describe('thread status (header B)', () => {
-  it('names the state and adds the running count only when something runs', () => {
-    expect(threadStatusText('review', 2)).toBe('In review · 2 running');
-    expect(threadStatusText('waiting', 0)).toBe('Waiting on you');
-    expect(threadStatusText('working', 1)).toBe('Working · 1 running');
-  });
-
-  it('colours the dot brass when it needs you, green while working, stroke otherwise', () => {
-    expect(threadDotTone('waiting')).toBe('needsYou');
-    expect(threadDotTone('review')).toBe('needsYou');
-    expect(threadDotTone('working')).toBe('added');
-    expect(threadDotTone('idle')).toBe('strongStroke');
-    expect(threadDotTone('archived')).toBe('strongStroke');
-  });
-
   it('reads list words as the Chats list does', () => {
     const viewer = 'v'.repeat(64);
     const blocker = { kind: 'report' as const, personId: viewer, personName: 'Vera' };

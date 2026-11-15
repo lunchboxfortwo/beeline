@@ -3,10 +3,13 @@ import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { expect, it, vi } from 'vitest';
 import { TurnProgressLine, TurnSettledLine } from './TurnProgressLine';
-vi.mock('tamagui', () => ({ XStack: 'XStack', YStack: 'YStack', Spinner: 'Spinner' }));
-vi.mock('@/ui/grammar', () => ({ T: (props: any) => React.createElement('T', props) }));
+vi.mock('tamagui', () => ({ XStack: 'XStack', YStack: 'YStack', ListItem: 'ListItem', ScrollView: 'ScrollView', Spinner: 'Spinner' }));
+vi.mock('@/ui/grammar', () => ({ useStep: () => () => 8, T: (props: any) => React.createElement('T', props) }));
 vi.mock('./TurnLineFrame', () => ({ TurnLineBar: (props: any) => React.createElement('Bar', props), TurnBandSlot: 'Slot' }));
 vi.mock('./BeelineMarkSpinner', () => ({ BeelineMarkSpinner: () => React.createElement('Mark') }));
+
+vi.mock('./IdentityMark', () => ({ IdentityMark: 'IdentityMark' }));
+vi.mock('./Button', () => ({ Button: 'Button' }));
 
 const texts = (renderer: any): unknown[] => renderer.root.findAllByType('T').map((node: any) => node.props.children);
 
@@ -71,4 +74,35 @@ it('shows nothing to press for someone who may not stop the turn', () => {
   expect(renderer.root.findAll((node: any) => node.props.testID === 'turn-stop')).toHaveLength(0);
   expect(texts(renderer)).toEqual(['Jimmy · starting…']);
   act(() => renderer.unmount());
+});
+
+const agents = ['Ruby', 'Jellybean', 'Grunt', 'Bee'].map((name, i) => ({pubkey: name, name, startedAt: 100 + i * 20, stop: {agentPubkey: name, requestId: `request-${i}`}}));
+it('overlaps two avatars and exposes each elapsed counter and individual Stop on tap', async () => {
+  vi.useFakeTimers(); vi.setSystemTime(200_000);
+  const stop = vi.fn(async (_stop: {agentPubkey:string;requestId:string}) => true); let tree: any;
+  try {
+    act(() => { tree = create(<TurnProgressLine agents={agents.slice(0,2)} label="Ruby, Jellybean brewing…" startedAt={100} onStopAgent={stop} testID="group"/>); });
+    expect(tree.root.findAllByType('IdentityMark')).toHaveLength(2);
+    expect(tree.root.findByProps({testID:'stop-all-agents'}).props.label).toBe('Stop');
+    act(() => tree.root.findByProps({testID:'working-agents-toggle'}).props.onPress());
+    expect(tree.root.findByProps({testID:'stop-all-agents'}).props.label).toBe('Stop all');
+    const list = tree.root.findByProps({testID:'working-agents-list'});
+    expect(list.findAllByType('T').map((node:any)=>node.props.children)).toEqual(['Ruby','1m 40s','Jellybean','1m 20s']);
+    await act(async () => tree.root.findByProps({testID:'stop-agent-Jellybean'}).props.onPress());
+    expect(stop).toHaveBeenCalledExactlyOnceWith(agents[1].stop);
+    expect(tree.root.findByProps({testID:'stop-agent-Jellybean'}).props.disabled).toBe(true);
+    expect(tree.root.findByProps({testID:'stop-agent-Ruby'}).props.disabled).toBe(false);
+    await act(async () => tree.root.findByProps({testID:'stop-all-agents'}).props.onPress());
+    expect(stop.mock.calls.map(call=>call[0])).toEqual([agents[1].stop,agents[0].stop]);
+  } finally { act(()=>tree?.unmount()); vi.useRealTimers(); }
+});
+it('caps four agents at three avatars, counts the remainder and retries a failed Stop', async () => {
+  const stop = vi.fn(async () => false); let tree:any;
+  act(() => { tree=create(<TurnProgressLine agents={agents} label="4 agents brewing…" onStopAgent={stop}/>); });
+  expect(tree.root.findAllByType('IdentityMark')).toHaveLength(3);
+  expect(texts(tree)).toContainEqual(['+',1]);
+  act(() => tree.root.findByProps({testID:'working-agents-toggle'}).props.onPress());
+  await act(async () => tree.root.findByProps({testID:'stop-agent-Bee'}).props.onPress());
+  expect(tree.root.findByProps({testID:'stop-agent-Bee'}).props.disabled).toBe(false);
+  act(()=>tree.unmount());
 });

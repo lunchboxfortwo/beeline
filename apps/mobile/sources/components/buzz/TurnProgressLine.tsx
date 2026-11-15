@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Spinner, XStack, YStack } from 'tamagui';
+import { ListItem, ScrollView, Spinner, XStack, YStack } from 'tamagui';
 import { T } from '@/ui/grammar';
+import { IdentityMark } from './IdentityMark';
+import { Button } from './Button';
+import type { ComposerWorkingAgent } from '@/buzz/room-indicators';
 import { BeelineMarkSpinner } from './BeelineMarkSpinner';
 import { TURN_LINE_ROW_MIN_HEIGHT } from '@/buzz/room-bottom-chrome';
 import { SPINNER_STEP_MS, elapsedSeconds, formatWorkingCounter } from '@/buzz/turn-clock';
@@ -49,7 +52,11 @@ const TurnProgressLineBody = React.memo(function TurnProgressLineBody({
   stopping = false,
   testID,
   inset = true,
+  agents,
+  onStopAgent,
 }: {
+  agents?: readonly ComposerWorkingAgent[];
+  onStopAgent?: (stop: { agentPubkey: string; requestId: string }) => Promise<boolean>;
   label: string;
   live?: boolean;
   /** Desktop callers already supply the transcript inset around this row. */
@@ -64,6 +71,17 @@ const TurnProgressLineBody = React.memo(function TurnProgressLineBody({
   stopping?: boolean;
   testID?: string;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const [stoppingAgents, setStoppingAgents] = useState<ReadonlySet<string>>(new Set());
+  const stopAgent = async (agent: ComposerWorkingAgent) => {
+    if (!agent.stop || !onStopAgent) return;
+    const key = `${agent.pubkey}:${agent.stop.requestId}`;
+    setStoppingAgents(current => new Set(current).add(key));
+    const success = await onStopAgent(agent.stop);
+    if (!success) setStoppingAgents(current => { const next = new Set(current); next.delete(key); return next; });
+  };
+  const group = agents && agents.length > 1 ? agents : undefined;
+  useEffect(() => { setExpanded(false); setStoppingAgents(new Set()); }, [group?.map(agent => `${agent.pubkey}:${agent.stop?.requestId}`).join(',')]);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (startedAt == null) return;
@@ -84,10 +102,43 @@ const TurnProgressLineBody = React.memo(function TurnProgressLineBody({
       inset={inset}
       accessibilityLabel={stateLabel ? `${label} (${stateLabel})` : label}
       accessibilityLiveRegion="polite"
-      accessibilityRole={live ? 'progressbar' : 'text'}
+      accessibilityRole={group ? undefined : live ? 'progressbar' : 'text'}
       testID={testID}
     >
+      {group && expanded ? (
+        <YStack position="absolute" bottom="100%" left="4" right="4" maxHeight={280}
+          backgroundColor="raised" borderWidth={1} borderColor="stroke" borderRadius="lg" testID="working-agents-list">
+          <ScrollView>
+            {group.map(agent => {
+              const busy = stoppingAgents.has(`${agent.pubkey}:${agent.stop?.requestId}`);
+              return <XStack key={agent.pubkey} paddingHorizontal="3" minHeight={44} gap="2" alignItems="center">
+                <IdentityMark kind="agent" seed={agent.pubkey} name={agent.name} avatarUrl={agent.avatar} face={agent.face} size={24} />
+                <T v="meta" flex={1}>{agent.name}</T>
+                <T v="meta" color="secondary">{formatWorkingCounter(agent.startedAt * 1_000, now, busy ? 'stopping' : 'thinking')}</T>
+                {agent.stop && onStopAgent ? <Button size="inline" variant="quiet" alignSelf="center" label="Stop" disabled={busy}
+                  accessibilityLabel={`Stop ${agent.name}`} onPress={() => void stopAgent(agent)} testID={`stop-agent-${agent.pubkey}`} /> : null}
+              </XStack>;
+            })}
+          </ScrollView>
+        </YStack>
+      ) : null}
       <XStack height={TURN_LINE_ROW_MIN_HEIGHT} minWidth={0} gap="2" alignItems="center">
+        {group ? (
+          <ListItem flex={1} minWidth={0} padding="0" minHeight={0} gap="2" backgroundColor="transparent"
+            justifyContent="flex-start" onPress={() => setExpanded(value => !value)}
+            aria-label={expanded ? 'Hide working agents' : 'Show working agents'} accessibilityRole="button"
+            role="button" aria-expanded={expanded} hitSlop={SLOP} accessibilityState={{ expanded }} testID="working-agents-toggle">
+            <XStack alignItems="center" flexShrink={0}>
+              {group.slice(0, 3).map((agent, index) => <YStack key={agent.pubkey} width={index === Math.min(group.length, 3) - 1 ? 24 : 16} flexShrink={0}
+                borderWidth={2} borderColor="canvas" borderRadius="sm">
+                <IdentityMark kind="agent" seed={agent.pubkey} name={agent.name} avatarUrl={agent.avatar} face={agent.face} size={20} />
+              </YStack>)}
+              {group.length > 3 ? <T v="meta" color="secondary" marginLeft="1">+{group.length - 3}</T> : null}
+            </XStack>
+            <T v="meta" color="secondary" numberOfLines={1} testID={testID ? `${testID}-label` : undefined}>{label}</T>
+            {counter != null ? <T v="meta" color="secondary" flexShrink={0} testID={testID ? `${testID}-elapsed` : undefined}>{counter}</T> : null}
+          </ListItem>
+        ) : <>
         <YStack testID={testID ? `${testID}-glyph` : undefined}>
           {live ? <Spinner size="small" color="needsYou" scale={0.7} /> : <BeelineMarkSpinner />}
         </YStack>
@@ -96,6 +147,12 @@ const TurnProgressLineBody = React.memo(function TurnProgressLineBody({
           {counter != null ? <T v="meta" color="needsYou" marginLeft="1" testID={testID ? `${testID}-elapsed` : undefined}>{counter}</T> : null}
           {received ? <T v="meta" color="needsYou" testID={testID ? `${testID}-received` : undefined}> · received</T> : null}
         </XStack>
+        </>}
+        {group?.some(agent => agent.stop) && onStopAgent ? <Button size="inline" variant="quiet" alignSelf="center"
+          label={expanded ? 'Stop all' : 'Stop'} accessibilityLabel="Stop all working agents"
+          disabled={group.every(agent => !agent.stop || stoppingAgents.has(`${agent.pubkey}:${agent.stop.requestId}`))}
+          onPress={() => { for (const agent of group) if (!stoppingAgents.has(`${agent.pubkey}:${agent.stop?.requestId}`)) void stopAgent(agent); }}
+          testID="stop-all-agents" /> : null}
         {onStop ? (
           <T
             v="meta"

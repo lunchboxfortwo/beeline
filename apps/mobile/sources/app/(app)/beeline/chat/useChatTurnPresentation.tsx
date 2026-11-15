@@ -15,7 +15,7 @@ import { formatTerminalTurnOverlay, type TurnVerb } from '@/buzz/turn-clock';
 import { useScrollFollowOnLayoutChange } from '@/buzz/room-scroll-follow';
 import { composerBottomPadding } from '@/buzz/composer-keyboard';
 import { monolithPhoneOperation, phoneOperationFailureReason } from '@/sync/transport/monolith-operation';
-import { nextAgentPresenceTransitionAt } from '@/buzz/agent-presence';
+import { isAgentTurnActive, nextAgentPresenceTransitionAt } from '@/buzz/agent-presence';
 import { sameMessageRefMap, sameRecordValueMap, sameStringSet, useStable } from '@/buzz/use-stable';
 
 type Props = [
@@ -134,6 +134,7 @@ export function useChatTurnPresentation([
   const composerAck = useMemo((): ComposerAckPresentation | null => {
     return selectComposerAckPresentation({
       isCorner,
+      activeTurns: agentTurnMarkers.filter(isAgentTurnActive),
       viewerCanSend: roomSurface?.viewer.permissions.send,
       pendingAgentCommands: roomSurface?.pendingAgentCommands,
       ...(activeAgentTurn?.agentPubkey ? { activeTurnPubkey: activeAgentTurn.agentPubkey } : {}),
@@ -157,6 +158,7 @@ export function useChatTurnPresentation([
     });
   }, [
     activeAgentTurn,
+    agentTurnMarkers,
     roomSurface?.viewer.permissions.send,
     roomSurface?.pendingAgentCommands,
     agentByPubkey,

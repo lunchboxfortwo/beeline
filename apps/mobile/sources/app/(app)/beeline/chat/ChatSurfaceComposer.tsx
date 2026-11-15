@@ -250,6 +250,8 @@ export const ChatSurfaceComposer = React.memo(function ChatSurfaceComposer({
                   <TurnBandSlot testID="hanging-turn-chrome" onTopInset={setTurnChromeTopInset}>
                     {composerAck ? (
                       <TurnProgressLine
+                        agents={composerAck.agents}
+                        onStopAgent={handleStopTurn}
                         label={composerAck.label}
                         live={composerAck.live}
                         startedAt={composerAck.startedAt}
@@ -421,6 +423,8 @@ export const ChatSurfaceComposer = React.memo(function ChatSurfaceComposer({
                         {composerAck ? (
                           <TurnProgressLine
                             inset={false}
+                            agents={composerAck.agents}
+                            onStopAgent={handleStopTurn}
                             label={composerAck.label}
                             live={composerAck.live}
                             startedAt={composerAck.startedAt}

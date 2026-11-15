@@ -5,17 +5,17 @@ import { WorkStateMark } from '@/ui/screens/tags/WorkMarks';
 import type { WorkItemView, RoomViewIdentity } from '@beeline/api-contract/phone';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import type { View } from 'react-native';
-import { ListItem, XStack, YStack } from 'tamagui';
-import { ArrowLeft, CornerDownRight, GitPullRequest, MoreHorizontal } from 'lucide-react-native';
+import { ListItem, XStack, YStack, useThemeName } from 'tamagui';
+import { ArrowLeft, ArrowRight, Users, CornerDownRight, GitPullRequest, MoreHorizontal } from 'lucide-react-native';
 import type { CornerState } from '@beeline/api-contract/phone';
-import { Btn, Glyph, HEIGHT, SafeTop, T } from '@/ui/grammar';
-import { threadDotTone, threadStatusText } from './thread-status';
+import { Btn, Glyph, HEIGHT, SafeTop, T, typeStyle, useTextSize } from '@/ui/grammar';
+import { threadWorkState } from '../chats/chat-tree-model';
 
 /**
  * Header B (the only thread header). A slim bar keeps Back, the chat (opens
- * it) and ⋯; the title, status, pull request and objective are the first
+ * it) and ⋯; the title, pull request and objective are the first
  * block of the transcript. Once that block scrolls away, the bar takes the
- * title with a status dot. A small scroll up, or a tap on that title, shows
+ * title with the work-state glyph. A small scroll up, or a tap on that title, shows
  * the full header under the bar until the reader scrolls down.
  * There is no driver line.
  */
@@ -29,15 +29,10 @@ export type ThreadHeaderData = {
     repositoryFavicon?: string;
     /** Undefined until the parent Room's corner row lands. */
     state?: CornerState;
-    running: number;
+    waitsOnViewer?: boolean;
     prLine?: string;
     objective?: string;
 };
-
-export function StatusDot({ state }: { state: CornerState }) {
-    const tone = threadDotTone(state);
-    return <YStack width={8} height={8} borderRadius="full" backgroundColor={tone === 'needsYou' ? 'needsYou' : tone === 'added' ? 'added' : 'strongStroke'} testID="thread-status-dot" />;
-}
 
 export function ThreadBar({ h, collapsed, expanded, back, openChat, expand, openActions, safeTop = true, barRef, onBarLayout }: {
     h: ThreadHeaderData; collapsed: boolean;
@@ -47,11 +42,12 @@ export function ThreadBar({ h, collapsed, expanded, back, openChat, expand, open
     expand?: () => void; openActions?: () => void; safeTop?: boolean;
     barRef?: React.Ref<View>; onBarLayout?: () => void;
 }) {
+    const lineHeight = typeStyle('meta', useTextSize()).lineHeight;
     return (
         <YStack backgroundColor="raised" borderBottomWidth={1} borderColor="stroke" testID="corner-session-header">
             <YStack ref={barRef as never} onLayout={onBarLayout}>
                 {safeTop ? <SafeTop /> : null}
-                <XStack paddingHorizontal="2" paddingVertical="1" gap="2" alignItems="center" testID="thread-header">
+                <XStack paddingHorizontal="4" paddingVertical="1" gap="2" alignItems="center" testID="thread-header">
                     {back ? <Btn kind="icon" label="Back" onPress={back} testID="chat-back"><Glyph icon={ArrowLeft} /></Btn> : null}
                     <XStack flex={1} minWidth={0} gap="2" alignItems="center">
                         {h.repositoryAvatar || h.repositoryFavicon ? <RepositoryMark avatarUrl={h.repositoryAvatar} faviconUrl={h.repositoryFavicon} size={28} /> : null}
@@ -61,15 +57,15 @@ export function ThreadBar({ h, collapsed, expanded, back, openChat, expand, open
                                 <ListItem padding="0" minHeight={0} alignSelf="flex-start" width="auto" maxWidth="100%"
                                     backgroundColor="transparent" justifyContent="flex-start" onPress={openChat}
                                     aria-label={`Open chat ${h.chatTag}`} accessibilityRole="button" testID="thread-chat-link">
-                                    <T v="metaStrong" color="needsYou" flexShrink={1}>{h.chatTag}</T>
+                                    <XStack gap="1" alignItems="center"><T v="meta" color="secondary" flexShrink={1}>{h.chatTag}</T><Glyph icon={CornerDownRight} size={16} /></XStack>
                                 </ListItem>
                             ) : null}
                             {collapsed && !expanded ? (
                                 <ListItem padding="0" minHeight={0} gap="2" alignItems="center"
                                     backgroundColor="transparent" justifyContent="flex-start" onPress={expand}
                                     aria-label={h.title} accessibilityRole={expand ? 'button' : 'text'} testID="thread-bar-title">
-                                    {h.state ? <StatusDot state={h.state} /> : null}
-                                    <T v="metaStrong" flexShrink={1}>{h.title}</T>
+                                    {h.state ? <YStack height={lineHeight} alignItems="center" justifyContent="center" testID="thread-bar-state-box"><WorkStateMark state={threadWorkState({ state: h.state })} idle={h.state === 'idle'} /></YStack> : null}
+                                    <T v={h.waitsOnViewer ? "metaStrong" : "meta"} color="ink" flexShrink={1}>{h.title}</T>
                                 </ListItem>
                             ) : null}
                         </YStack>
@@ -86,37 +82,24 @@ export function ThreadBar({ h, collapsed, expanded, back, openChat, expand, open
     );
 }
 
-/** The transcript's first (oldest) block: ↳ title, status, PR row, objective and "Read the brief". */
-export function ThreadTitleBlock({ h, openBrief, openPr, blockRef, onBlockLayout }: {
+/** The transcript's first (oldest) block: state glyph, title, avatars, PR and objective. */
+export function ThreadTitleBlock({ h, openBrief, openPr, blockRef, onBlockLayout, inset = true }: {
     h: ThreadHeaderData; openBrief?: () => void; openPr?: () => void;
-    blockRef?: React.Ref<View>; onBlockLayout?: () => void;
+    blockRef?: React.Ref<View>; onBlockLayout?: () => void; inset?: boolean;
 }) {
+    const lineHeight = typeStyle('title', useTextSize()).lineHeight;
+    const stone = useThemeName().includes('stone');
     return (
         <YStack ref={blockRef as never} onLayout={onBlockLayout} width="100%" maxWidth={720} alignSelf="center"
-            paddingHorizontal="4" paddingTop="4" paddingBottom="3" gap="3" borderBottomWidth={1} borderColor="stroke"
+            paddingHorizontal={inset ? "4" : "0"} paddingTop={inset ? "4" : "0"} paddingBottom="3" gap="2" borderBottomWidth={1} borderColor="stroke"
             testID="thread-title-block">
-            <XStack gap="2" alignItems="flex-start">
-                <YStack paddingTop="1"><Glyph icon={CornerDownRight} accent /></YStack>
-                <YStack flex={1} minWidth={0}><T v="title" testID="thread-title">{h.title}</T></YStack>
+            <XStack gap="2" alignItems="center" testID="thread-title-row">
+                <YStack height={lineHeight} alignItems="center" justifyContent="center" testID="thread-state-box">{h.state ? <WorkStateMark state={threadWorkState({ state: h.state })} idle={h.state === 'idle'} /> : null}</YStack>
+                <YStack flex={1} minWidth={0}><T v="title" regular={!h.waitsOnViewer} testID="thread-title">{h.title}</T></YStack>
             </XStack>
             {h.workItem?<ThreadWorkMetadata item={h.workItem} people={h.people??[]}/>:null}
-            {h.state ? (
-                <XStack gap="2" alignItems="center" testID="thread-status">
-                    <StatusDot state={h.state} />
-                    <T v="metaStrong" color={threadDotTone(h.state) === 'needsYou' ? 'needsYou' : 'secondary'}>
-                        {threadStatusText(h.state, h.running)}
-                    </T>
-                </XStack>
-            ) : null}
-            {h.prLine ? (
-                <ListItem padding="0" minHeight={HEIGHT.control} gap="2" justifyContent="flex-start" backgroundColor="transparent"
-                    onPress={openPr} aria-label={`Open pull request: ${h.prLine}`} accessibilityRole="button" testID="thread-pr">
-                    <Glyph icon={GitPullRequest} size={14} />
-                    <T v="meta">{h.prLine}</T>
-                </ListItem>
-            ) : null}
             {h.objective || openBrief ? (
-                <ListItem padding="0" paddingLeft="3" borderLeftWidth={2} borderColor="needsYou" backgroundColor="transparent"
+                <ListItem padding="0" paddingLeft="3" borderLeftWidth={2} borderColor={stone ? "strongStroke" : "needsYou"} backgroundColor="transparent"
                     justifyContent="flex-start" onPress={openBrief} disabled={!openBrief}
                     aria-label="Read the brief" accessibilityRole="button" testID="thread-brief">
                     <YStack gap="1" flex={1} minWidth={0}>
@@ -125,6 +108,14 @@ export function ThreadTitleBlock({ h, openBrief, openPr, blockRef, onBlockLayout
                     </YStack>
                 </ListItem>
             ) : null}
+            {h.prLine ? (
+                <ListItem padding="0" minHeight={HEIGHT.control} gap="2" justifyContent="flex-start" backgroundColor="transparent"
+                    onPress={openPr} aria-label={`Open pull request: ${h.prLine}`} accessibilityRole="button" testID="thread-pr">
+                    <Glyph icon={GitPullRequest} size={14} />
+                    <T v="meta">{h.prLine}</T>
+                </ListItem>
+            ) : null}
+
         </YStack>
     );
 }
@@ -132,7 +123,7 @@ export function ThreadTitleBlock({ h, openBrief, openPr, blockRef, onBlockLayout
 function ThreadWorkMetadata({item,people}:{item:WorkItemView;people:readonly RoomViewIdentity[]}) {
   const [open,setOpen]=useState(false);
   return <YStack gap="2"><XStack gap="3" alignItems="center" flexWrap="wrap" testID="thread-work-metadata">
-    <WorkStateMark state={item.state} idle={item.idle}/><XStack gap="1" alignItems="center"><T v="meta" color="secondary">Opened by</T><WorkAvatar person={item.openedBy} size={20}/></XStack>
-    <XStack gap="1" alignItems="center"><T v="meta" color="secondary">Assignee</T><Btn kind="quiet" label="Change assignee" paddingHorizontal="0" onPress={()=>setOpen(!open)}>{item.assignee?<WorkAvatar person={item.assignee} size={20}/>:null}<T v="meta">{item.assignee?.name??'Unassigned'}</T></Btn></XStack>
+    <WorkAvatar person={item.openedBy} size={24}/><Glyph icon={ArrowRight} size={16} />
+    <XStack gap="1" alignItems="center"><Btn kind="quiet" label="Change assignee" paddingHorizontal="0" minHeight={0} height={24} hitSlop={10} onPress={()=>setOpen(!open)}>{item.assignee?<WorkAvatar person={item.assignee} size={24}/>:<Glyph icon={Users} />}</Btn></XStack>
   </XStack>{open?<WorkAssigneePicker people={people} onPick={person=>{setOpen(false);void monolithPhoneOperation('updateWorkItem',{id:item.id,roomId:item.roomId,assigneeId:person?.pubkey??null});}}/>:null}</YStack>;
 }

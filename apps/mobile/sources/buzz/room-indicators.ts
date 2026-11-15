@@ -109,7 +109,7 @@ export type ComposerAckInput = TurnProgressInput & {
   now: number;
 };
 
-type AgentDisplaySource = Pick<Agent, 'pubkey' | 'displayName' | 'avatar' | 'soulProfile'>;
+type AgentDisplaySource = Pick<Agent, 'pubkey' | 'displayName' | 'avatar' | 'soulProfile'> & { face?: string };
 
 export type ComposerAckPresentationInput = ComposerAckInput & {
   /**
@@ -123,9 +123,20 @@ export type ComposerAckPresentationInput = ComposerAckInput & {
   /** A human steer the server routed while this exact turn was working. */
   receivedSteer?: { agentPubkey: string; turnRequestId: string };
   pendingAgentCommands?: readonly RoomViewPendingAgentCommand[];
+  activeTurns?: readonly RoomViewAgentTurn[];
+};
+
+export type ComposerWorkingAgent = {
+  pubkey: string;
+  name: string;
+  avatar?: string;
+  face?: string;
+  startedAt: number;
+  stop?: { agentPubkey: string; requestId: string };
 };
 
 export type ComposerAckPresentation = {
+  agents?: readonly ComposerWorkingAgent[];
   label: string;
   /** Storage acknowledgement uses the same line without live motion. */
   live?: false;
@@ -156,6 +167,7 @@ function agentFromConversationIdentity(
     displayName: identity.name,
     ...(identity.handle ? { handle: identity.handle } : {}),
     ...(identity.avatar ? { avatar: identity.avatar } : {}),
+    ...(identity.face ? { face: identity.face } : {}),
   };
 }
 
@@ -210,6 +222,27 @@ export function selectComposerAckState(input: ComposerAckInput): ComposerAckStat
 export function selectComposerAckPresentation(
   input: ComposerAckPresentationInput,
 ): ComposerAckPresentation | null {
+  if (input.activeTurns && input.activeTurns.length > 1) {
+    const agents = input.activeTurns.map((turn): ComposerWorkingAgent => {
+      const identity = input.conversationIdentities?.get(turn.agentPubkey);
+      const detail = agentFromConversationIdentity(identity) ?? input.agentsByPubkey?.get(turn.agentPubkey);
+      const display = resolveAgentDisplayIdentity(turn.agentPubkey, detail);
+      return {
+        pubkey: turn.agentPubkey,
+        name: display.name,
+        avatar: display.avatarUrl,
+        face: display.face,
+        startedAt: turn.startedAt ?? turn.createdAt,
+        ...(viewerMayStopTurn(input.viewerPubkey, input.viewerCanSend)
+          ? { stop: { agentPubkey: turn.agentPubkey, requestId: turn.requestId } } : {}),
+      };
+    });
+    return {
+      agents,
+      label: `${agents.length === 2 ? agents.map(agent => agent.name).join(', ') : `${agents.length} agents`} brewing…`,
+      startedAt: Math.min(...agents.map(agent => agent.startedAt)),
+    };
+  }
   const pending = !input.activeTurnPubkey
     ? input.pendingAgentCommands?.find(command => command.runtimePhase?.phase === 'starting')
     : undefined;

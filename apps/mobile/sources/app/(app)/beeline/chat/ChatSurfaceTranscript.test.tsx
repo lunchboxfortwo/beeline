@@ -250,3 +250,11 @@ it.each(['onWheel', 'onTouchMove'])('pages older history after a narrow web %s g
     Object.assign(Platform, { OS: previous });
   }
 });
+
+it('anchors a short thread at the header instead of leaving blank space above it', () => {
+  const props={desktopTranscript:false,leadBlock:<header>Thread</header>,transcriptMessages:[{id:'one',text:'one',timestamp:1,isUser:false}],scrollController:{},phoneScrollList:{},starPrompt:{prompt:null},renderItem:()=>null} as unknown as Props;
+  act(()=>{renderer=create(<ChatSurfaceTranscript {...props}/>);});
+  expect(renderer.root.findByType('RoomSendList').props.headAligned).toBe(true);
+  act(()=>renderer.update(<ChatSurfaceTranscript {...props} leadBlock={null}/>));
+  expect(renderer.root.findByType('RoomSendList').props.headAligned).toBe(false);
+});

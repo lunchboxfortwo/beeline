@@ -1,30 +1,5 @@
 import type { CornerBlocker, CornerLifecycleView, CornerState, CornerStateReason } from '@beeline/api-contract/phone';
 
-/**
- * The words a thread's server state reads as (header B). The server owns the
- * state; these only name it. A thread waiting on you or in review is brass,
- * a working one green, anything else the strong stroke.
- */
-const STATE_WORD: Record<CornerState, string> = {
-  working: 'Working',
-  waiting: 'Waiting on you',
-  review: 'In review',
-  idle: 'Idle',
-  archived: 'Archived',
-};
-
-export type ThreadDotTone = 'needsYou' | 'added' | 'strongStroke';
-
-export function threadDotTone(state: CornerState): ThreadDotTone {
-  if (state === 'waiting' || state === 'review') return 'needsYou';
-  return state === 'working' ? 'added' : 'strongStroke';
-}
-
-/** "In review · 2 running"; the running count shows only when something runs. */
-export function threadStatusText(state: CornerState, running: number): string {
-  return `${STATE_WORD[state]}${running > 0 ? ` · ${running} running` : ''}`;
-}
-
 /** The facts a list line reads: the server's state and, while waiting, its blocker. */
 export type ThreadWaitFacts = { readonly state: CornerState; readonly blocker?: CornerBlocker; readonly reason?: CornerStateReason };
 

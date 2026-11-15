@@ -26,7 +26,7 @@ it('OPEN-SHELL-1: shows the list title and state before the thread read, then re
     const { titleBlock } = useChatThreadHeader({ isCorner: true, roomSurface: null,
       resolvedChannelName: loaded ? 'beeline/server-title' : null,
       decodedId: 'thread', parentChannelId: 'room', state: loaded ? 'review' : undefined,
-      running: 0, objective: '', isArchived: false, isDesktop: false });
+      objective: '', isArchived: false, isDesktop: false });
     return titleBlock;
   }
   let tree!: ReturnType<typeof create>;
