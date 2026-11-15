@@ -291,6 +291,20 @@ describe('PhoneService Needs-you tray', () => {
     } finally { cells.mockRestore(); }
   });
 
+  it.each(['corner', 'thread'] as const)('REPORT-REPLY: forwarded reports leave the tray on the addressee’s %s reply', async surface => {
+    const id = await report(ROOM, AGENT, 'needs-decision: Use this approach?', 20);
+    await database.query(`UPDATE messages SET card=card||jsonb_build_object('sourceRoomId',$2::text) WHERE id=$1`, [id, CORNER]);
+    await post(CORNER, PEER, 'yes', 10);
+    await post(ROOM, VIEWER, 'Unrelated return-Room conversation.', 10);
+    const system = await post(CORNER, VIEWER, 'System event', 9);
+    await database.query(`UPDATE messages SET system_event='{}'::jsonb WHERE id=$1`, [system]);
+    expect(await count()).toBe(1);
+    const reply = await post(surface === 'corner' ? CORNER : ROOM, VIEWER, 'yes', 5);
+    if (surface === 'thread') await database.query('UPDATE messages SET reply_to_message_id=$2 WHERE id=$1', [reply, id]);
+    expect(await count()).toBe(0);
+    expect((await read()).items).toEqual([]);
+  });
+
   it('F04: live projections never start unseen clocks; only painted IDs are marked', async () => {
     const first = await report(ROOM, PEER, 'needs-decision: please review this');
     const second = await report(ROOM, PEER, 'needs-decision: can you confirm?');

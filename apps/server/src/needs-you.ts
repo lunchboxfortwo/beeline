@@ -1,3 +1,4 @@
+import { humanReportCornerSql } from './corner-waiting-report.js';
 import { repositoryMarkColumnsSql } from './repository-mark.js';
 import { messageColumns } from './message-columns.js';
 import { squireApprovalAction } from '@beeline/api-contract/phone';
@@ -29,8 +30,8 @@ import type { SqlDatabase } from './database.js';
  * and wording never qualify.
  *
  * A report leaves the tray when the person clears it
- * (`needs_you_marks.cleared_at`), replies anywhere in that Room or corner
- * after it, or 24 hours after they first saw it on any device
+ * (`needs_you_marks.cleared_at`), posts in its originating Room/corner or
+ * replies on its thread after it, or 24 hours after they first saw it on any device
  * (`needs_you_marks.first_seen_at`). An ask or approval leaves when cleared,
  * answered, decided, expired or closed; opening it does not clear it.
  */
@@ -221,8 +222,13 @@ function questionForSql(viewerId: string): string {
   AND mark.cleared_at IS NULL AND m.card->>'reportToId'=${viewerId}
   AND NOT EXISTS (
     SELECT 1 FROM messages reply
-    WHERE reply.room_id=m.room_id AND reply.author_id=${viewerId}
-      AND reply.presentation='message' AND reply.deleted_at IS NULL
+    WHERE reply.room_id=(${humanReportCornerSql('m')})::uuid AND reply.author_id=${viewerId}
+      AND reply.presentation='message' AND reply.system_event IS NULL AND reply.deleted_at IS NULL
+      AND reply.created_at>m.created_at
+    UNION ALL
+    SELECT 1 FROM messages reply
+    WHERE reply.reply_to_message_id=m.id AND reply.author_id=${viewerId}
+      AND reply.presentation='message' AND reply.system_event IS NULL AND reply.deleted_at IS NULL
       AND reply.created_at>m.created_at
   )`;
 }

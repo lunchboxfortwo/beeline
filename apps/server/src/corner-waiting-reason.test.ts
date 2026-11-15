@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { HUMAN, RUBY, WORKER, authority, claim, commands, expect, it, open, rootFixture, worker } from './test-support-commander.integration.test-support.js';
+import { HUMAN, ROOM, RUBY, WORKER, authority, claim, commands, expect, it, open, rootFixture, worker } from './test-support-commander.integration.test-support.js';
 import { cornerBlockerSql, cornerRowState, chatCornerCounts } from './chat-corner-counts.js';
 import { cornerWaitingReportSql } from './corner-waiting-report.js';
 
@@ -92,4 +92,43 @@ it('R1: holds rank behind a real private report, and retain their actual message
   expect(cornerRowState({ archived_at: null, lifecycle: null, latest_turn_status: null, blocking: true,
     waiting_item_id: selected.item_id, waiting_reason: selected.reason, waiting_kind: selected.kind }))
     .toMatchObject({ itemId: createHash('sha256').update(`corner-hold:${hold.holdId}`).digest('hex') });
+});
+
+const waitingPeople = async (cornerId: string) => (await rootFixture.db.query<{ person_id: string }>(
+  `SELECT waiting.person_id FROM rooms c CROSS JOIN LATERAL (${cornerWaitingReportSql('c')}) waiting
+    WHERE c.id=$1 ORDER BY waiting.person_id`, [cornerId])).rows.map(row => row.person_id);
+
+it.each((['blocked', 'needs_decision'] as const).flatMap(status => [true, false].map(humanFirst => ({ status, humanFirst }))))('REPORT-REPLY: $status clears separately for the commander and tagged human (humanFirst=$humanFirst)', async ({ status, humanFirst }) => {
+  const { cornerId } = await blocked('@captain choose a scope.', status);
+  await rootFixture.db.query(`INSERT INTO messages(id,room_id,author_id,text)
+    VALUES('first-answer',$1,$2,'yes')`, [cornerId, humanFirst ? HUMAN : RUBY]);
+  expect(await waitingPeople(cornerId)).toEqual([humanFirst ? RUBY : HUMAN]);
+  await rootFixture.db.query(`INSERT INTO messages(id,room_id,author_id,text)
+    VALUES('second-answer',$1,$2,'Acknowledged.')`, [cornerId, humanFirst ? RUBY : HUMAN]);
+  expect(await waitingPeople(cornerId)).toEqual([]);
+});
+
+it('REPORT-REPLY: other people, worker prose, orders and System lines cannot answer for the addressee', async () => {
+  const { cornerId } = await blocked(); // Addressed only to Ruby.
+  await rootFixture.db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,system_event,deleted_at) VALUES
+    ('other-person',$1,$2,'yes','message',NULL,NULL),
+    ('worker-prose',$1,$3,'Still blocked.','message',NULL,NULL),
+    ('commander-system',$1,$4,'System event','message','{}'::jsonb,NULL),
+    ('commander-deleted',$1,$4,'yes','message',NULL,now()),
+    ('commander-activity',$1,$4,'read','activity',NULL,NULL),
+    ('commander-old',$1,$4,'Earlier answer','message',NULL,NULL)`, [cornerId, HUMAN, WORKER, RUBY]);
+  await rootFixture.db.query(`UPDATE messages SET created_at='2026-01-01' WHERE id='commander-old'`);
+  expect(await waitingPeople(cornerId)).toEqual([RUBY]);
+});
+
+it.each(['corner', 'thread'] as const)('REPORT-REPLY: a forwarded human report clears on its addressee’s %s answer', async surface => {
+  const { cornerId } = await open();
+  await rootFixture.db.query(`INSERT INTO messages(id,room_id,author_id,text,card,created_at)
+    VALUES('forwarded-report',$1,$2,'needs-decision: Choose a scope.',
+      jsonb_build_object('reportToId',$3::text,'sourceRoomId',$4::text),now()-interval '1 minute')`, [ROOM, WORKER, HUMAN, cornerId]);
+  expect(await waitingPeople(cornerId)).toEqual([HUMAN]);
+  await rootFixture.db.query(`INSERT INTO messages(id,room_id,author_id,text,reply_to_message_id)
+    VALUES('forwarded-answer',$1,$2,'yes',$3)`, [surface === 'corner' ? cornerId : ROOM, HUMAN,
+      surface === 'thread' ? 'forwarded-report' : null]);
+  expect(await waitingPeople(cornerId)).toEqual([]);
 });

@@ -1,7 +1,7 @@
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 
-/** At most two notices per person-authored epoch; reactions never replenish it. */
-export const CORNER_IDLE_REPORT_BUDGET = 2;
+/** At most one notice per person-authored epoch; reactions never replenish it. */
+export const CORNER_IDLE_REPORT_BUDGET = 1;
 
 /** Both serving instances derive the budget from committed sources under the corner lock. */
 export function cornerIdleBudgetSql(corner: string): string {

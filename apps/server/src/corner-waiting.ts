@@ -2,7 +2,7 @@ import { cornerImplementerSql } from './corner-worker.js';
 import { cornerWaitingReportSql } from './corner-waiting-report.js';
 import type { SqlDatabase } from './database.js';
 
-/** Worker blocks end on worker output; native requests keep their own terminal owners. */
+/** Worker blocks end on recipient replies or worker output; native requests keep their own terminal owners. */
 export function cornerWaitingSql(corner: string): string {
   const worker = cornerImplementerSql('waiting_fact', corner);
   return `SELECT waiting.*,CASE WHEN waiting.reason IN ('approve','connect') THEN 'user_action'

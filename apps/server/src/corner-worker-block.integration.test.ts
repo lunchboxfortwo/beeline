@@ -9,6 +9,8 @@ import { createAgentCommand, readAgentCommands } from './agent-command.js';
 import { refreshCornerAttention, runCornerAttention } from './corner-attention.js';
 import { PhoneService } from './phone-service.js';
 import { LiveHub } from './live.js';
+import { cornerIdleSql } from './corner-idle.js';
+import { loadCornerWaiting } from './corner-waiting.js';
 import { modelText } from './message-origin.js';
 
 const WS = '11111111-1111-4111-8111-111111111111', ROOM = '22222222-2222-4222-8222-222222222222';
@@ -56,20 +58,20 @@ async function reactions(count = 8) {
     await daemon.execute('postRoomMessage', { roomId: C, requestId: report.turnRequestId, text: 'Still waiting on secrets.' }, COMMANDER);
   }
 }
-it('IDLE-BUDGET: commander reactions produce exactly two notices until a person event', async () => {
+it('IDLE-BUDGET: commander reactions produce exactly one notice until a person event', async () => {
   await reactions(); await runCornerAttention(db);
-  expect(await idleReports()).toHaveLength(2);
+  expect(await idleReports()).toHaveLength(1);
   await db.query(`INSERT INTO agent_turns(room_id,request_id,agent_id,status)
     SELECT $1,'legacy-reaction-'||n,$2,'complete' FROM generate_series(1,728) n`, [C, COMMANDER]);
   await runCornerAttention(db);
-  expect(await idleReports()).toHaveLength(2);
+  expect(await idleReports()).toHaveLength(1);
   await daemon.execute('postRoomMessage', { ...await input(), text: 'Worker finished more work.' }, WORKER);
   await reactions();
-  expect(await idleReports()).toHaveLength(2); // Worker output is not a budget reset.
+  expect(await idleReports()).toHaveLength(1); // Worker output is not a budget reset.
   await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation)
     VALUES('person-input',$1,$2,'Use option one.','message')`, [C, HUMAN]);
   await reactions();
-  expect(await idleReports()).toHaveLength(4);
+  expect(await idleReports()).toHaveLength(2);
 });
 it.each(['blocked', 'needs_decision'] as const)('WORKER-BLOCK: real %s report survives orders, turns and prose until worker outcome', async status => {
   const turn = await input();
@@ -110,17 +112,17 @@ it('WORKER-BLOCK: native ask cards replace the block and remain open through com
 });
 
 it('IDLE-BUDGET: only human grant decisions and human hold releases replenish notices', async () => {
-  await reactions(); expect(await idleReports()).toHaveLength(2);
+  await reactions(); expect(await idleReports()).toHaveLength(1);
   const grant = randomUUID();
   await db.query(`INSERT INTO agent_grants(id,agent_id,workspace_id,room_id,kind,target,reason,requested_by,status,decided_by,decided_at)
     VALUES($1,$2,$3,$4,'command','true','Proof',$5,'approved',$6,clock_timestamp())`, [grant, WORKER, WS, C, HUMAN, COMMANDER]);
-  await reactions(); expect(await idleReports()).toHaveLength(2);
+  await reactions(); expect(await idleReports()).toHaveLength(1);
   await db.query('UPDATE agent_grants SET decided_by=$2,decided_at=clock_timestamp() WHERE id=$1', [grant, HUMAN]);
-  await reactions(); expect(await idleReports()).toHaveLength(4);
+  await reactions(); expect(await idleReports()).toHaveLength(2);
   const hold = await phone.execute('setCornerHold', { cornerId: C }, HUMAN);
-  await reactions(); expect(await idleReports()).toHaveLength(4);
+  await reactions(); expect(await idleReports()).toHaveLength(2);
   await phone.execute('setCornerHold', { cornerId: C, releaseHoldId: hold.holdId }, HUMAN);
-  await reactions(); expect(await idleReports()).toHaveLength(6);
+  await reactions(); expect(await idleReports()).toHaveLength(3);
 });
 
 it('WORKER-BLOCK: a granted-run activity row, rather than read/think activity, lifts the block', async () => {
@@ -138,7 +140,7 @@ it('WORKER-BLOCK: a granted-run activity row, rather than read/think activity, l
 
 it('IDLE-BUDGET: moving a PR head cannot rearm receipts after completed notices are retired', async () => {
   await reactions();
-  const reports = await idleReports(); expect(reports).toHaveLength(2);
+  const reports = await idleReports(); expect(reports).toHaveLength(1);
   await db.query('DELETE FROM agent_commands WHERE id=ANY($1::text[])', [reports.map(row => row.id)]);
   await db.query(`UPDATE corner_github_cache SET lifecycle=$2::jsonb WHERE corner_id=$1`, [C, JSON.stringify({
     checks: 'unknown', pr: { number: 1, headSha: 'new-head' },
@@ -148,8 +150,8 @@ it('IDLE-BUDGET: moving a PR head cannot rearm receipts after completed notices 
   expect(await idleReports()).toHaveLength(0);
 });
 
-it('IDLE-BUDGET: a native human permission decision restores two notices', async () => {
-  await reactions(); expect(await idleReports()).toHaveLength(2);
+it('IDLE-BUDGET: a native human permission decision restores one notice', async () => {
+  await reactions(); expect(await idleReports()).toHaveLength(1);
   await db.query(`INSERT INTO permission_authority(permission_id,room_id,principal_id,request_id,scope,status)
     VALUES('permission-proof',$1,$2,'permission-request','{}'::jsonb,'pending')`, [C, HUMAN]);
   await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card)
@@ -158,5 +160,31 @@ it('IDLE-BUDGET: a native human permission decision restores two notices', async
     })]);
   await phone.execute('decideWritePermission', { permissionId: 'permission-proof', roomId: C, agentId: WORKER,
     requestId: 'permission-request', repository: 'owner/widgets', decision: 'allow' }, HUMAN);
-  await reactions(); expect(await idleReports()).toHaveLength(4);
+  await reactions(); expect(await idleReports()).toHaveLength(2);
+});
+
+it.each([false, true])('REPORT-REPLY: owner yes clears Ruby’s report (threaded=%s) and silence spends the sole idle notice', async threaded => {
+  // Retained human-directed report, as in still-river-thread; no new work output follows it.
+  await db.query(`UPDATE identities SET name='Ruby' WHERE id=$1`, [WORKER]);
+  await db.query(`INSERT INTO messages(id,room_id,author_id,text,card,created_at)
+    VALUES('ruby-decision',$1,$2,'needs-decision: Use this approach?',
+      jsonb_build_object('reportToId',$3::text,'reportStatus','needs-decision'),now()-interval '1 minute')`, [C, WORKER, HUMAN]);
+  expect(await state()).toBe('waiting');
+  expect(await loadCornerWaiting(db, C)).toBeDefined();
+  expect((await phone.execute('readNeedsYou', { workspaceId: WS }, HUMAN)).items.map(item => item.messageId)).toContain('ruby-decision');
+  await db.query(`INSERT INTO messages(id,room_id,author_id,text,reply_to_message_id)
+    VALUES('owner-yes',$1,$2,'yes',$3)`, [C, HUMAN, threaded ? 'ruby-decision' : null]);
+  expect(await loadCornerWaiting(db, C)).toBeUndefined();
+  expect((await db.query('SELECT corner_has_explicit_wait($1) waiting', [C])).rows).toEqual([{ waiting: false }]);
+  expect(await state()).toBe('idle');
+  expect((await phone.readCorners(ROOM, HUMAN))!.corners[0]).toMatchObject({ state: 'idle' });
+  expect((await phone.execute('readNeedsYou', { workspaceId: WS }, HUMAN)).items).toEqual([]);
+  expect(await idleReports()).toHaveLength(1);
+  expect((await db.query(cornerIdleSql('$1'), [C])).rows[0]).toMatchObject({ idle_eligible: true, idle_report_count: 1 });
+  const notice = (await readAgentCommands(db, COMMANDER, C)).commands.find(item => item.source.authorId === SYSTEM_IDENTITY_ID)!;
+  await startQueuedCommand(daemon, { roomId: C, commandId: notice.id }, COMMANDER);
+  expect(await daemon.execute('markAgentTurnSilent', { roomId: C, requestId: notice.turnRequestId }, COMMANDER)).toMatchObject({ answered: true });
+  await runCornerAttention(db); await refreshCornerAttention(db, C);
+  expect(await state()).toBe('idle');
+  expect(await idleReports()).toHaveLength(1);
 });

@@ -81,8 +81,8 @@ function cornerReportItemsSql(cornerId: string, worker: string, latestOnly = fal
 }
 
 /**
- * The newest explicit worker block, unless later implementer output lifted it.
- * The report log owns its status and return address; conversation never clears it.
+ * The newest explicit worker block, unless later implementer output lifted it
+ * or its recipient answered in the corner or on the report’s thread.
  * One row per recipient: the recorded commander and tagged human corner members.
  */
 export function cornerWaitingReportSql(corner: string): string {
@@ -102,6 +102,15 @@ export function cornerWaitingReportSql(corner: string): string {
       AND member.identity_id=person.id AND member.removed_at IS NULL
   ) AND ${tagsKnownIdentitySql('item', 'person.id', 'person.handle', 'person.kind')})
     WHERE waiting_fact.corner_id=${corner}.id AND latest.report_status IN ('blocked','needs-decision')
+    AND NOT EXISTS(SELECT 1 FROM messages answer
+      WHERE answer.author_id=person.id AND answer.created_at>latest.created_at
+        AND answer.presentation='message' AND answer.system_event IS NULL AND answer.deleted_at IS NULL
+        AND answer.room_id=${corner}.id
+      UNION ALL
+      SELECT 1 FROM messages answer
+      WHERE answer.author_id=person.id AND answer.created_at>latest.created_at
+        AND answer.presentation='message' AND answer.system_event IS NULL AND answer.deleted_at IS NULL
+        AND answer.reply_to_message_id=ANY(latest.asked_items))
     AND NOT EXISTS(SELECT 1 FROM (${workerOutputSql(`${corner}.id`, worker)}) output
       WHERE output.ended_at>latest.created_at)`;
 }

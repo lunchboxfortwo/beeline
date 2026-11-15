@@ -129,10 +129,7 @@ it('IDLE-QUEUE: retains the episode metadata and permits an unchanged status to 
   expect((await db.query('SELECT id FROM messages WHERE author_id=$1 AND request_id=$2',
     [COMMANDER, notice!.turnRequestId])).rows).toEqual([]);
   await refreshCornerAttention(db, C);
-  const [second] = await commanderFlags();
-  expect(second).toBeDefined();
-  await daemon.execute('markAgentTurnSilent', { roomId: C, requestId: second!.turnRequestId }, COMMANDER);
-  await refreshCornerAttention(db, C);
+  await runCornerAttention(db);
   expect(await commanderFlags()).toEqual([]);
 });
 
@@ -357,11 +354,11 @@ it('Reproduction IDLE-1: incidental orders cannot redirect an idle alert from it
   expect((await readAgentCommands(db, WORKER, C)).commands).toHaveLength(0);
 });
 
-it.each(['failed', 'complete'])('Reproduction IDLE-STORM: commander %s exhausts the two-notice person budget', async (status) => {
+it.each(['failed', 'complete'])('Reproduction IDLE-STORM: commander %s exhausts the one-notice person budget', async (status) => {
   await ci('passing');
   await refreshCornerAttention(db, C);
   const idleSince = (await db.query(cornerIdleSql('$1'), [C])).rows[0]!.idle_since;
-  for (let slot = 0; slot < 2; slot++) {
+  for (let slot = 0; slot < 1; slot++) {
     await refreshCornerAttention(db, C);
     const [notice] = (await commanderFlags()).filter(command => command.source.body.includes(' is idle.'));
     expect(notice).toBeDefined();
@@ -374,7 +371,7 @@ it.each(['failed', 'complete'])('Reproduction IDLE-STORM: commander %s exhausts 
   }
   for (let replay = 0; replay < 5; replay++) await refreshCornerAttention(db, C);
   expect((await db.query(`SELECT id FROM agent_commands WHERE private_payload->>'authorId'=$1
-    AND private_payload->>'text' LIKE 'blocked: Corner % is idle.%'`, [SYSTEM_IDENTITY_ID])).rows).toHaveLength(2);
+    AND private_payload->>'text' LIKE 'blocked: Corner % is idle.%'`, [SYSTEM_IDENTITY_ID])).rows).toHaveLength(1);
 });
 
 // Isolated service reads stand in for the production phone and agent surfaces.
@@ -452,7 +449,7 @@ it('Reproduction R1: a worker order waiting on an offline helper stays working',
   expect(await state()).toBe('idle');
 });
 
-it('WORKER-BLOCK: a human answer is input, not worker output that lifts the block', async () => {
+it('WORKER-BLOCK: the addressee’s threaded answer clears a report in its return Room', async () => {
   await db.query(`UPDATE agent_commands SET private_payload=jsonb_set(private_payload,'{authorId}',to_jsonb($1::text)) WHERE room_id=$2 AND reason='corner_objective'`,[HUMAN,C]);
   const command = (await wake())!;
   await startQueuedCommand(daemon, { roomId: C, commandId: command.id }, WORKER);
@@ -461,11 +458,8 @@ it('WORKER-BLOCK: a human answer is input, not worker output that lifts the bloc
   expect(await cornerReportWaiting(db, C)).toBe(true);
   await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,reply_to_message_id)
     VALUES('human-report-answer',$1,$2,'Narrow scope','message',$3)`,[ROOM,HUMAN,report.id]);
-  expect(await cornerReportWaiting(db, C)).toBe(true);
-  const next = (await wake(WORKER, randomUUID()))!;
-  await startQueuedCommand(daemon, { roomId:C,commandId:next.id }, WORKER);
-  await daemon.execute('report', { roomId:C,requestId:next.turn_request_id,status:'done',text:'Finished.' }, WORKER);
-  expect(await cornerReportWaiting(db,C)).toBe(false);
+  expect(await cornerReportWaiting(db, C)).toBe(false);
+  expect(await state()).toBe('idle');
 });
 
 it('IDLE-DERIVED: an owed item in the return Room resolves at its first answering message', async () => {
