@@ -153,13 +153,13 @@ it('replacement closes the phone running indicator and redelivers the unanswered
   expect((await notices()).rowCount).toBe(0);
 });
 
-it('an initially offline mention waits for connection with only its offline notice',async()=>{
+it('an initially offline mention waits for connection without an offline notice',async()=>{
   await releaseAgentConnection(db,live,A,owner.connectionId);
   const sent=await phone.execute('sendRoomMessage',{roomId:R,text:'@candy A request while offline'},H);
   const queued=(await readAgentCommands(db, A, R)).commands.find(c=>c.sourceMessageId===sent.messageId)!;
   expect(queued).toBeDefined();
   await db.backgroundWork.drain();
-  expect((await db.query("SELECT text FROM messages WHERE room_id=$1 AND presentation='system'",[R])).rows).toEqual([{text:'@candy is offline · connect again'}]);
+  expect((await db.query("SELECT text FROM messages WHERE room_id=$1 AND presentation='system'",[R])).rows).toEqual([]);
   const next={connectionId:'returning',epoch:await claimAgentConnection(db,live,A,{},
     {connectionId:'returning',instanceId:'test-server'})};
   await startQueuedTurn(db, R, A, queued.id);

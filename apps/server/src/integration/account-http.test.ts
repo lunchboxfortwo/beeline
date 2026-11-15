@@ -213,7 +213,7 @@ const fixture = monolithFixture();
       `SELECT text FROM messages WHERE room_id=$1 AND presentation='system'`,
       [ROOM],
     );
-    expect(notices.rows).toEqual([{text:'@bee is offline · connect again'}]);
+    expect(notices.rows).toEqual([]);
     const queued=await fixture.daemonOperation('getAgentCommands',{roomId:ROOM});
     expect((await queued.json()).commands.some((item:{sourceMessageId:string})=>item.sourceMessageId==='e'.repeat(64))).toBe(true);
   });

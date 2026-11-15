@@ -170,14 +170,6 @@ export async function startAgentTurnOperation<Name extends keyof DaemonOperation
                 requestId: request.requestId, commandId: command.id, durableFact: 'failure',
               });
             });
-          } else {
-            const agent = (await ctx.database.query<{ name: string }>('SELECT name FROM identities WHERE id=$1', [authenticatedAgentId])).rows[0]!;
-            await systemLine(ctx.database, {
-              id: createHash('sha256').update(`offline:${command.id}`).digest('hex'),
-              roomId: command.room_id,
-              subject: { kind: 'agent', id: authenticatedAgentId, name: agent.name },
-              verb: systemMessage('phone-service.is-offline'), consequence: systemMessage('phone-service.connect-again'),
-            });
           }
           ctx.live.publish({ type: 'invalidate', roomId: request.roomId, reason: 'message', agentId: authenticatedAgentId });
           ctx.live.publish({ type: 'invalidate', roomId: command.return_room_id ?? request.roomId, reason: 'turn', agentId: authenticatedAgentId });

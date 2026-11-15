@@ -180,12 +180,12 @@ it('drops malformed optional tool history without losing the answer', async () =
     .toEqual([{ text: 'answer without history' }]);
 });
 
-it('shows only the offline connection notice when the harness cannot start, keeping its item queued', async () => {
+it('keeps the item queued without an offline notice when the harness cannot start', async () => {
   const item = await ask(R1, 'waiting for a harness');
   await daemon.execute('startAgentTurn', { roomId: R1, requestId: item.turn_request_id, available: false }, A);
   expect((await queue()).map(entry => entry.id)).toEqual([item.id]);
   const notices = await db.query<{text:string}>(`SELECT text FROM messages WHERE room_id=$1 AND presentation='system'`, [R1]);
-  expect(notices.rows.at(-1)?.text).toMatch(/is offline.*connect again/);
+  expect(notices.rows.map(row => row.text).filter(text => text.includes("offline"))).toEqual([]);
   expect((await db.query('SELECT state,completed_at FROM agent_commands WHERE id=$1', [item.id])).rows[0])
     .toEqual({ state: 'pending', completed_at: null });
 });

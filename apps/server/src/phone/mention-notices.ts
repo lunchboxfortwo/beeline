@@ -5,8 +5,6 @@ import { accessNoticeBucket } from '@beeline/api-contract/agent-access';
 import { resolveCurrentMemberMentions } from '../message-mentions.js';
 import { type SqlDatabase } from '../database.js';
 import { systemLine } from '../system-line.js';
-import { freeAgentReachableSql } from '../free-agents.js';
-import { SERVER_LEASE_EXPIRY_MS } from '../connection-presence.js';
 import type { PhoneContext } from './context.js';
 import { phoneReadLiveDelta } from './live-reads.js';
 import { mentionNoticeId } from './values.js';
@@ -107,12 +105,8 @@ import { phoneProjectPendingAgentCommands } from './message-enrichment.js';
         "SELECT 1 FROM identities WHERE id=$1 AND kind='human'", [senderId],
       );
       if (!human.rowCount) return;
-      const agents = (await ctx.database.query<{ agent_id: string; agent_name: string; external: boolean; connected: boolean }>(
-        `SELECT identity.id agent_id,identity.name agent_name,external.member_id IS NOT NULL external,
-           ${freeAgentReachableSql('identity.id')} OR EXISTS(SELECT 1 FROM agent_connections connection
-             JOIN live_server_instances server ON server.instance_id=connection.instance_id
-               AND server.renewed_at>clock_timestamp()-interval '${SERVER_LEASE_EXPIRY_MS / 1000} seconds'
-             WHERE connection.agent_id=identity.id AND connection.released_at IS NULL) connected
+      const agents = (await ctx.database.query<{ agent_id: string; agent_name: string; external: boolean }>(
+        `SELECT identity.id agent_id,identity.name agent_name,external.member_id IS NOT NULL external
          FROM identities identity
          LEFT JOIN rooms_mcp_members external ON external.member_id=identity.id
          JOIN room_access member ON member.identity_id=identity.id
@@ -125,9 +119,9 @@ import { phoneProjectPendingAgentCommands } from './message-enrichment.js';
       const bucket = accessNoticeBucket(Date.now());
       for (const agent of agents) {
         const delivery = deliveries.get(agent.agent_id);
-        const offline = delivery
-          ? delivery.mechanism ? delivery.state !== 'proved_ready' : delivery.offline
-          : !agent.connected;
+        // Only a recorded delivery route can prove an agent offline.
+        if (!delivery) continue;
+        const offline = delivery.mechanism ? delivery.state !== 'proved_ready' : delivery.offline;
         if (!offline) continue;
         await systemLine(ctx.database, {
           roomId,
