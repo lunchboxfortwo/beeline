@@ -1,3 +1,4 @@
+import { squireApprovalCall, squireApprovalSchemas } from './squire-approval-intent.js';
 import { boundToolResponse } from './tool-output-budget.js';
 import { squireApprovalAction, type SquireApprovalDetails } from '@beeline/api-contract/phone';
 /** Host MCP transport gate. Authorization belongs to each call, not the harness session. */
@@ -350,7 +351,8 @@ export function squireApprovalFromMcp(
         : [{ label: 'Site', value: site ?? 'Current browser session' }, { label: 'Can', value: link.linkKind === 'passkey' ? 'Use your passkey' : link.linkKind === 'vouch' ? 'Confirm your identity' : `Continue ${tool.replace(/_/g, ' ')}` }];
   const action = tool === 'operate_login' || tool === 'operate_fill_credential'
     ? `sign in to ${site ?? 'a site'}` : squireApprovalAction(tool, copy.detail, link.linkKind);
-  return { tool, ...copy, action, facts,
+  return { tool, ...copy, action: stringArg(args, 'action') ?? action,
+    ...(stringArg(args, 'purpose') ? { purpose: stringArg(args, 'purpose') } : {}), facts,
     ...(stringArg(args, 'reason') ? { reason: stringArg(args, 'reason') } : {}),
     ...(reference ? { reference } : {}), ...link,
     ...(expiresAt !== undefined ? { expiresAt } : {}) };
@@ -606,6 +608,7 @@ export function runResourceFacade(env: NodeJS.ProcessEnv = process.env): void {
     const request = squireRequests.get(key);
     squireRequests.delete(key);
     const approval = squireApprovalFromMcp(request?.message, message);
+    if (request?.message.method === 'tools/list') Object.assign(message, squireApprovalSchemas(message));
     if (approval) {
       await postSquireApproval(approval, authFile, request?.drivenUrl).catch(() => {});
       if (request?.drivenUrl && activeSquireBrowserUrl === request.drivenUrl)
@@ -679,6 +682,15 @@ export function runResourceFacade(env: NodeJS.ProcessEnv = process.env): void {
         return;
       }
       try {
+        let upstream = message;
+        if (target === 'squire') {
+          try { upstream = squireApprovalCall(message); }
+          catch (error) {
+            if (message.id !== undefined) process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: message.id, error: { code: -32602, message: error instanceof Error ? error.message : 'Supply action and purpose.' } })}\n`);
+            return;
+          }
+          if (message.method === 'tools/list' && message.id !== undefined) squireRequests.set(JSON.stringify(message.id), { message });
+        }
         if (!(await authorizeResourceMessage(message, target, authFile, spendsGrant, undefined, transport.signal)))
           throw new Error('resource approval required');
         if (target === 'squire' && message.method === 'tools/call') {
@@ -700,7 +712,7 @@ export function runResourceFacade(env: NodeJS.ProcessEnv = process.env): void {
           const started = resourceChild();
           const key = messageIdKey(message.id);
           if (key) authorizedResponseIds.add(key);
-          started.stdin!.write(`${line}\n`);
+          started.stdin!.write(`${JSON.stringify(upstream)}\n`);
           return;
         }
         const response = await fetch(launch.url!, {
@@ -711,7 +723,7 @@ export function runResourceFacade(env: NodeJS.ProcessEnv = process.env): void {
             accept: 'application/json, text/event-stream',
             ...(session ? { 'mcp-session-id': session } : {}),
           },
-          body: line,
+          body: JSON.stringify(upstream),
           signal: transport.signal,
         });
         if (!response.ok) throw new Error('resource transport refused the call');

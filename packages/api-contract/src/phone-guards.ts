@@ -453,6 +453,7 @@ export function readAgentGrantView(value: unknown): AgentGrantView | null {
     kind: item.kind,
     target: item.target,
     ...field('appName', nonempty(item.appName) ? item.appName : undefined),
+    ...field('action', nonempty(item.action) ? item.action : undefined),
     ...field('purpose', nonempty(item.purpose) && item.purpose.length <= 240 ? item.purpose : undefined),
     ...field('touches', nonempty(item.touches) && item.touches.length <= 240 ? item.touches : undefined),
     ...field('capabilities', nonempty(item.capabilities) && item.capabilities.length <= 240 ? item.capabilities : undefined),
@@ -516,7 +517,7 @@ export function readAppSignInCard(value: unknown): NonNullable<RoomViewMessage['
     !item.appKey || typeof item.name !== 'string' || !item.name ||
     !hex64(item.ownerId) || !hex64(item.agentId) ||
     (item.status !== 'pending' && item.status !== 'connected' && item.status !== 'failed')) return null;
-  return { appId: item.appId, appKey: item.appKey, name: item.name,
+  return { ...field('action', nonempty(item.action) ? item.action : undefined), ...field('purpose', nonempty(item.purpose) ? item.purpose : undefined), appId: item.appId, appKey: item.appKey, name: item.name,
     ownerId: item.ownerId, agentId: item.agentId, status: item.status,
     ...field('logo', httpUrl(item.logo) ? item.logo : undefined),
     ...field('domain', nonempty(item.domain) ? item.domain : undefined),
@@ -597,6 +598,7 @@ export function readSquireApproval(value: unknown): NonNullable<RoomViewMessage[
     ...field('status', oneOf(item.status, ['approved', 'denied', 'expired'])),
     ...field('decidedBy', readHumanApprovalIdentity(item.decidedBy)),
     ...field('decidedAt', integer(item.decidedAt) ? item.decidedAt : undefined),
+    ...field('purpose', nonempty(item.purpose) ? item.purpose : undefined),
     ...field('reason', nonempty(item.reason) ? item.reason : undefined),
     ...field('action', nonempty(item.action) ? item.action : undefined),
     ...field('reference', nonempty(item.reference) ? item.reference : undefined),
@@ -622,6 +624,8 @@ export function readComputerSession(value: unknown): NonNullable<RoomViewMessage
 
 
 export const connectorOfferFields = {
+  action: optional(item => nonempty(item.action) ? item.action : undefined),
+  purpose: optional(item => nonempty(item.purpose) ? item.purpose : undefined),
   offerId: required((item) => (uuid(item.offerId) ? item.offerId : undefined)),
   agent: required((item): RoomViewIdentity | undefined => {
     const agent = readIdentity(item.agent);

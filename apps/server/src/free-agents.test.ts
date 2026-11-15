@@ -655,7 +655,7 @@ describe('free starter agents', () => {
     await expect(phone.execute('pairConnector', { helperAgentId: agent.agent_id, connectorType: 'trusty-squire' }, OWNER))
       .rejects.toThrow('Free agents use Lightpanda');
     const daemon = new DaemonService(db, live);
-    await expect(daemon.execute('offerConnector', { roomId, connectorType: 'trusty-squire', reason: 'Sign in' }, agent.agent_id))
+    await expect(daemon.execute('offerConnector', {action: 'Use the requested resource', purpose: 'complete the requested task',  roomId, connectorType: 'trusty-squire', reason: 'Sign in' }, agent.agent_id))
       .rejects.toThrow();
     expect((await db.query('SELECT 1 FROM connector_offers')).rowCount).toBe(0);
   });

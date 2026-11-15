@@ -1,3 +1,4 @@
+import { normalizeApprovalIntent } from '@beeline/api-contract/phone';
 import { type SecretResolver, operatorSecretResolver, storeOperatorSecret } from "./grant-runner.js";
 import { pathGrantAllowsWrite } from '@beeline/api-contract/agent-grants';
 import { type CommandGrantRule, type CommandGrantScript, interpreterScriptArgument, isRequestableAgentGrantKind, REQUESTABLE_AGENT_GRANT_KINDS, AGENT_GRANT_TARGET_MAX_LENGTH, parseCommandGrantTarget, AGENT_GRANT_REASON_MAX_LENGTH, HOST_EMULATOR_TARGET, AGENT_GRANT_VERBS, type AgentGrantEscalation, formatGrantEscalationReason, isSharedAssetCategory, SHARED_ASSET_CATEGORIES, COMMAND_SECRET_NAME } from "@beeline/api-contract/agent-grants";
@@ -126,12 +127,11 @@ export async function requestGrant(
   args: JsonObject,
   deps: AgentGrantDeps = agentGrantDepsFromEnv(),
 ): Promise<string> {
-  const purpose = stringArg(args, 'purpose')?.trim();
-  if (!purpose || purpose.length > 240) throw new Error('purpose is required: explain what you want to do and why in 1–240 characters');
+  const { action, purpose } = normalizeApprovalIntent(args);
   const kind = stringArg(args, 'kind');
   if (kind === 'shared_asset') {
     if (args.ttl !== undefined) throw new Error('shared asset isolation must be standing');
-    return requestSharedAssetIsolation({ category: args.target, reason: args.reason, purpose: args.purpose, touches: args.touches, capabilities: args.capabilities }, deps);
+    return requestSharedAssetIsolation({ category: args.target, reason: args.reason, action, purpose, touches: args.touches, capabilities: args.capabilities }, deps);
   }
   if (!isRequestableAgentGrantKind(kind)) {
     throw new Error(`kind must be one of ${REQUESTABLE_AGENT_GRANT_KINDS.join(', ')}`);
@@ -197,6 +197,7 @@ export async function requestGrant(
     kind,
     target,
     reason,
+    action,
     purpose,
     ...(args.touches !== undefined ? { touches: stringArg(args, 'touches') }
       : installedPath ? { touches: installedPath } : {}),
@@ -264,8 +265,7 @@ export async function requestSharedAssetIsolation(
   args: JsonObject,
   deps: AgentGrantDeps = agentGrantDepsFromEnv(),
 ): Promise<string> {
-  const purpose = stringArg(args, 'purpose')?.trim();
-  if (!purpose || purpose.length > 240) throw new Error('purpose is required: explain what you want to do and why in 1–240 characters');
+  const { action, purpose } = normalizeApprovalIntent(args);
   const category = stringArg(args, 'category');
   if (!isSharedAssetCategory(category))
     throw new Error(`category must be one of ${SHARED_ASSET_CATEGORIES.join(', ')}`);
@@ -273,7 +273,7 @@ export async function requestSharedAssetIsolation(
   if (!reason || reason.length > AGENT_GRANT_REASON_MAX_LENGTH)
     throw new Error('reason must explain the failure in at most 1000 characters');
   const result = await deps.execute('requestAgentGrant', {
-    roomId: deps.roomId, kind: 'shared_asset', target: category, reason, purpose,
+    roomId: deps.roomId, kind: 'shared_asset', target: category, reason, action, purpose,
     ...(args.touches !== undefined ? { touches: stringArg(args, 'touches') } : {}),
     ...(args.capabilities !== undefined ? { capabilities: stringArg(args, 'capabilities') } : {}),
   });
@@ -584,6 +584,7 @@ export async function offerConnector(
   args: JsonObject,
   deps: ConnectorOfferDeps = connectorOfferDepsFromEnv(),
 ): Promise<string> {
+  const intentCopy = normalizeApprovalIntent(args);
   const connectorType = stringArg(args, 'connectorType');
   if (!isOfferableConnectorKind(connectorType)) {
     throw new Error(
@@ -598,6 +599,7 @@ export async function offerConnector(
   const result = await deps.execute('offerConnector', {
     roomId: deps.roomId,
     connectorType,
+    ...intentCopy,
     reason,
     ...(intent ? { intent } : {}),
   });

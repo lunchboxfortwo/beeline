@@ -120,6 +120,7 @@ export class AcpClient extends EventEmitter {
    activePromptSessions = new Set<string>();
 
   /** Tool metadata arrives in session/update just before a sparse permission request. */
+   permissionNarration = new Map<string, string>();
    toolCallMetadata = new Map<string, AcpPermissionRequest['toolCall']>();
 
   /** Latest `available_commands_update` per session, keyed by sessionId. */

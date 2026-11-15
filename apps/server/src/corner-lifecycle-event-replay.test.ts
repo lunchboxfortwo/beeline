@@ -82,7 +82,7 @@ describe('corner lifecycle recorded event sequences', () => {
       if (event.table === 'corner_state') changes.push(event.roomId);
     });
     try {
-      const ask = await rootFixture.daemon.execute('requestAgentGrant', { roomId: cornerId, requestId: repair!.turnRequestId, kind: 'host', target: '127.0.0.1:5037', purpose: 'Capture required phone screenshots', reason: 'Use the owner emulator for the approved visual proof.' }, A);
+      const ask = await rootFixture.daemon.execute('requestAgentGrant', {action: 'Use the requested resource',  roomId: cornerId, requestId: repair!.turnRequestId, kind: 'host', target: '127.0.0.1:5037', purpose: 'Capture required phone screenshots', reason: 'Use the owner emulator for the approved visual proof.' }, A);
       expect(ask).toMatchObject({ status: 'pending', auto: false });
       // The card sits in the corner where the agent asked.
       expect((await rootFixture.db.query('SELECT room_id FROM messages WHERE id=$1', [ask.messageId])).rows[0]!.room_id)

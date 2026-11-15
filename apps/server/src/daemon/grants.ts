@@ -1,3 +1,4 @@
+import { normalizeAgentApprovalIntent } from '../tray-approval-ask.js';
 import { agentGrantAutoApproves, HOST_EMULATOR_TARGET, commandGrantMatches, grantScriptKey } from '@beeline/api-contract/agent-grants';
 import { resourceRequester } from '../resource-requester.js';
 import { cornerReviewerSql } from '../corner-reviewer.js';
@@ -23,8 +24,7 @@ import { daemonWriteResult } from './corner-messages.js';
    * require a person. Budget and repository asks are retired.
    */
   export async function daemonRequestAgentGrant(ctx: DaemonContext, input: Input<'requestAgentGrant'>, agentId: string, requireOwnerApproval = false) {
-    if (typeof input.purpose !== 'string' || !input.purpose.trim() || input.purpose.trim().length > 240)
-      throw new Error('grant purpose is required: explain what you want to do and why in 1–240 characters');
+    const intent = normalizeAgentApprovalIntent(input);
     for (const field of ['touches', 'capabilities'] as const) {
       const maximum = field === 'touches' && input.kind === 'command' ? 4096 : 240;
       if (input[field] !== undefined && (typeof input[field] !== 'string' || !input[field]!.trim() || input[field]!.trim().length > maximum))
@@ -205,7 +205,7 @@ import { daemonWriteResult } from './corner-messages.js';
           input.ttlSeconds ?? null,
           script ? JSON.stringify(script) : null,
           appOwner ? input.appId : null,
-          input.purpose.trim(),
+          intent.purpose,
           input.touches?.trim() ?? null,
           input.capabilities?.trim() ?? null,
         ],
@@ -217,7 +217,7 @@ import { daemonWriteResult } from './corner-messages.js';
         target,
         ...(connectionInstall && appOwner ? { appName: appOwner.display_name } : {}),
         reason,
-        purpose: input.purpose.trim(),
+        ...intent,
         ...(input.touches ? { touches: input.touches.trim() } : {}),
         ...(input.capabilities ? { capabilities: input.capabilities.trim() } : {}),
         ...(context.machine_name ? { machine: context.machine_name } : {}),
@@ -657,7 +657,7 @@ import { daemonWriteResult } from './corner-messages.js';
         kind,
         target,
         reason: 'use this resource',
-        purpose: `Use ${target} to complete the requested task`,
+        action: `Use ${target}`, purpose: `complete the requested task`,
       },
       agentId,
     );

@@ -40,13 +40,13 @@ function render(props: Partial<React.ComponentProps<typeof GrantRequestCard>> = 
 const button = (tree: any, testID: string) => tree.root.find((node: any) => node.type === 'Button' && node.props.testID === testID);
 
 describe('grant request card', () => {
-    it('puts the purpose and host in the title, with argv retained in details',()=>{
+    it('puts action to purpose in the title, with argv retained in details',()=>{
         const target='["/private/node","/private/deploy.mjs"]';
         const updated={...(message as any),grantRequest:{...(message as any).grantRequest,
-            grants:[{...grant,target,purpose:'Deploy the Milo site',machine:'squire'}]}};
+            grants:[{...grant,target,action:'Deploy Milo on squire',purpose:'publish the updated site',machine:'squire'}]}};
         const tree=render({message:updated as any});
         const title=tree.root.find((node:any)=>node.type==='Text'&&node.props.testID==='grant-grant-1-ask');
-        expect(title.props.children).toBe('@Alan wants to deploy the Milo site on squire');
+        expect(title.props.children).toBe('Deploy Milo on squire to publish the updated site');
         expect(JSON.stringify(tree.toJSON())).toContain('/private/deploy.mjs');
     });
     it('is one raised request card with Always, Once and Deny for bash with stdin', () => {
@@ -97,6 +97,6 @@ describe('grant request card', () => {
         expect(tree.root.findAll((node: any) => node.props.testID === 'grant-grant-1')).toHaveLength(0);
         act(() => pill().props.onPress());
         expect(tree.root.findAll((node: any) => node.type === 'Button' && /^grant-grant-1-(always|once|deny)$/.test(node.props.testID))).toHaveLength(0);
-        expect(tree.root.find((node: any) => node.type === 'Text' && node.props.testID === 'grant-grant-1-ask').props.children).toBe('@Alan wants to run a script');
+        expect(tree.root.find((node: any) => node.type === 'Text' && node.props.testID === 'grant-grant-1-ask').props.children).toBe('Run a script to Run the tests');
     });
 });

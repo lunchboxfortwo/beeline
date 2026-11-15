@@ -170,7 +170,7 @@ describe('Registry MCP connection orchestration', () => {
     );
     await daemon.execute(
       'postSquireApproval',
-      { roomId: ROOM, requestId: REQUEST, tool: 'operate_login', title: 'Continue Linear sign-in', detail: 'Approve the provider sign-in in the shared browser session.', approvalUrl: 'https://squire.example/approval/one', approvalId: 'squire-attempt-two', linkKind: 'approval', signInUrl: 'https://mcp.linear.app/authorize?state=opaque-two' },
+      {action: 'Use the requested resource', purpose: 'complete the requested task',  roomId: ROOM, requestId: REQUEST, tool: 'operate_login', title: 'Continue Linear sign-in', detail: 'Approve the provider sign-in in the shared browser session.', approvalUrl: 'https://squire.example/approval/one', approvalId: 'squire-attempt-two', linkKind: 'approval', signInUrl: 'https://mcp.linear.app/authorize?state=opaque-two' },
       HELPER,
     );
     await daemon.execute('connectMcpServer', connectInput(true), HELPER);
@@ -206,7 +206,7 @@ describe('Registry MCP connection orchestration', () => {
     );
     await daemon.execute(
       'postSquireApproval',
-      { roomId: ROOM, requestId: REQUEST, tool: 'fetch_credential', title: 'Credential access approval', detail: 'Reveal an unrelated saved credential.', approvalUrl: 'https://squire.example/approval/two', approvalId: 'squire-unrelated', linkKind: 'approval', signInUrl: 'https://unrelated.example/sign-in' },
+      {action: 'Use the requested resource', purpose: 'complete the requested task',  roomId: ROOM, requestId: REQUEST, tool: 'fetch_credential', title: 'Credential access approval', detail: 'Reveal an unrelated saved credential.', approvalUrl: 'https://squire.example/approval/two', approvalId: 'squire-unrelated', linkKind: 'approval', signInUrl: 'https://unrelated.example/sign-in' },
       HELPER,
     );
     await daemon.execute('connectMcpServer', connectInput(true), HELPER);

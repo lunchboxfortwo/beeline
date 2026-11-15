@@ -532,7 +532,6 @@
       "ActionButton",
       "CardRow",
       "TranscriptCard",
-      "TranscriptCardHandle",
       "content",
       "head",
       "titleLine"

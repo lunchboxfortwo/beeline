@@ -306,6 +306,8 @@ export type ChatDisplayMessage = {
     tool: string;
     repository?: string;
     purpose?: 'squire-spending';
+    action?: string;
+    approvalPurpose?: string;
     reason?: string;
     decider?: RoomViewIdentity;
     requester?: RoomViewIdentity;
@@ -465,6 +467,8 @@ export function displayRoomMessage(
             tool: message.permission.tool,
             status: message.permission.status,
             ...(message.permission.repository ? { repository: message.permission.repository } : {}),
+            ...(message.permission.action ? { action: message.permission.action } : {}),
+            ...(message.permission.approvalPurpose ? { approvalPurpose: message.permission.approvalPurpose } : {}),
             ...(message.permission.purpose ? { purpose: message.permission.purpose } : {}),
             ...(message.permission.ownerId ? { ownerPubkey: message.permission.ownerId } : {}),
             ...(message.permission.cornerId ? { subchannelId: message.permission.cornerId } : {}),

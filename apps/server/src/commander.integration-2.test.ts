@@ -476,7 +476,7 @@ it('closed-corner reports do not wake even the nearest live opening ancestor', a
 
 it('failure visibility: Squire approval proves a current durable wait, not a completed outcome', async () => {
   const { turn } = await privateAssignment();
-  await rootFixture.daemon.execute('postSquireApproval', { ...authority(turn), tool: 'operate_login', title: 'Saved login approval',
+  await rootFixture.daemon.execute('postSquireApproval', {action: 'Use the requested resource', purpose: 'complete the requested task',  ...authority(turn), tool: 'operate_login', title: 'Saved login approval',
     detail: 'Approve the saved login', approvalUrl: 'https://example.com/approval', approvalId: 'login-approval', linkKind: 'approval' }, WORKER);
   await rootFixture.daemon.execute('postAgentTurnReceipt', { ...authority(turn), agentId: WORKER, status: 'complete' }, WORKER);
   expect((await commands(DM, RUBY)).filter(c => c.reason === 'report')).toHaveLength(0);

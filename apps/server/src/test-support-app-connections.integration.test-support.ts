@@ -79,7 +79,7 @@ export const REQUEST = 'app-connect-request';
 export const GENERATION = 'app-connect-generation';
 
 
-export const turn = { roomId: ROOM, requestId: REQUEST };
+export const turn = { roomId: ROOM, requestId: REQUEST, action: 'Connect the requested app', purpose: 'complete the requested task' };
 
 
 export const linearServer = {

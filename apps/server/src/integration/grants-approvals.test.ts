@@ -355,7 +355,7 @@ const fixture = monolithFixture();
       roomId: ROOM, kind: 'command', target: 'git status', reason: 'inspect', purpose,
     });
     expect(result.status).toBe(400);
-    expect(await result.json()).toEqual(expect.objectContaining({ error: expect.stringContaining('grant purpose is required') }));
+    expect(await result.json()).toEqual(expect.objectContaining({ error: expect.stringMatching(/Supply purpose|Shorten purpose/) }));
   });
 
 
@@ -363,16 +363,19 @@ const fixture = monolithFixture();
     await fixture.database.query('UPDATE agents SET machine_name=$2 WHERE agent_id=$1', [AGENT, 'squire']);
     const result = await fixture.daemonOperation('requestAgentGrant', {
       roomId: ROOM, kind: 'shared_asset', target: 'package-cache', reason: 'repair corrupt cache',
-      purpose: 'Use a private cache so dependency installation can finish', touches: 'Package cache', capabilities: 'Isolate this cache',
+      action: 'Isolate the package cache', purpose: 'finish  dependency\ninstallation', touches: 'Package cache', capabilities: 'Isolate this cache',
     });
     expect(result.status).toBe(200);
     const { grantId, messageId, status } = await result.json();
     expect(status).toBe('pending');
-    const facts = { purpose: 'Use a private cache so dependency installation can finish', touches: 'Package cache', capabilities: 'Isolate this cache' };
+    const facts = { purpose: 'finish dependency installation', touches: 'Package cache', capabilities: 'Isolate this cache' };
     expect((await fixture.database.query('SELECT purpose,touches,capabilities FROM agent_grants WHERE id=$1', [grantId])).rows).toEqual([facts]);
     const view = (await (await fixture.request(`/v1/phone/rooms/${ROOM}`)).json()) as RoomView;
     expect(isRoomView(view)).toBe(true);
-    expect(view.messages.find(message => message.id === messageId)?.grantRequest?.grants[0]).toMatchObject({ ...facts, machine: 'squire', status: 'pending' });
+    expect(view.messages.find(message => message.id === messageId)?.grantRequest?.grants[0]).toMatchObject({ ...facts, action: 'Isolate the package cache', machine: 'squire', status: 'pending' });
+    const needsYou = await (await fixture.operation('readNeedsYou', { workspaceId: WORKSPACE })).json();
+    expect(needsYou.items.find((item: { messageId: string }) => item.messageId === messageId)?.text)
+      .toBe('Isolate the package cache to finish dependency installation');
     expect((await fixture.operation('decideAgentGrant', { grantId, decision: 'always' })).status).toBe(200);
     const decided = (await (await fixture.request(`/v1/phone/rooms/${ROOM}`)).json()) as RoomView;
     expect(decided.messages.find(message => message.id === messageId)?.grantRequest?.grants[0]).toMatchObject({ ...facts, status: 'approved', decidedAt: expect.any(Number) });

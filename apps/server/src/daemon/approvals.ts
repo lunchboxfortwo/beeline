@@ -1,3 +1,4 @@
+import { normalizeAgentApprovalIntent } from '../tray-approval-ask.js';
 import { CommandRefusalError } from '../commander.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { squireApprovalAction } from '@beeline/api-contract/phone';
@@ -90,7 +91,7 @@ import type { SqlDatabase } from '../database.js';
           ...(context.agent_handle ? { handle: context.agent_handle } : {}),
           ...(context.agent_avatar ? { avatar: context.agent_avatar } : {}) },
         owner,
-        tool: 'Link', title, detail, approvalUrl, approvalId: requestId,
+        tool: 'Link', title, detail, action: input.action ?? `Pay $${(input.amount / 100).toFixed(2)} to ${input.merchant}`, purpose: input.purpose ?? input.description, approvalUrl, approvalId: requestId,
         ...(ctx.authorizedCommand ? { commandId: ctx.authorizedCommand.id } : {}),
         linkKind: 'approval',
         expiresAt: Date.now() + 24 * 60 * 60_000,
@@ -102,7 +103,8 @@ import type { SqlDatabase } from '../database.js';
 
 
   export async function daemonSquireApproval(ctx: DaemonContext, input: Input<'postSquireApproval'>, agentId: string, database = ctx.database) {
-    for (const key of ['action', 'reason', 'reference'] as const) {
+    const intent = normalizeAgentApprovalIntent(input);
+    for (const key of ['reason', 'reference'] as const) {
       if (input[key] !== undefined && (typeof input[key] !== 'string' || input[key]!.length > 1000)) throw new Error(`Squire ${key} is invalid`);
     }
     if (input.facts !== undefined && (!Array.isArray(input.facts) || input.facts.length > 3 || input.facts.some(fact => !fact || typeof fact.label !== 'string' || fact.label.length > 40 || typeof fact.value !== 'string' || fact.value.length > 500))) throw new Error('Squire facts are invalid');
@@ -194,7 +196,7 @@ import type { SqlDatabase } from '../database.js';
         title: input.title.trim(),
         detail: input.detail.trim(),
         ...(input.reason ? { reason: input.reason.trim().slice(0, 1000) } : {}),
-        ...(input.action ? { action: input.action.trim().slice(0, 240) } : {}),
+        ...intent,
         ...(input.reference ? { reference: input.reference.trim().slice(0, 1000) } : {}),
         ...(input.facts ? { facts: input.facts.slice(0, 3).map(fact => ({ label: fact.label.slice(0, 40), value: fact.value.slice(0, 500) })) } : {}),
         approvalUrl: approvalUrl.toString(),
@@ -420,9 +422,8 @@ import type { SqlDatabase } from '../database.js';
 
 
   export async function daemonPermissionRequest(ctx: DaemonContext, input: Input<'postPermissionRequest'>, agentId: string) {
+    const intent = normalizeAgentApprovalIntent(input);
     await daemonAccess(ctx, input.roomId, agentId);
-    if (input.purpose !== undefined && (typeof input.purpose !== 'string' || !input.purpose.trim() || input.purpose.trim().length > 240))
-      throw new Error('permission purpose must be 1–240 characters');
     const scope = input.scope;
     const repository =
       scope.type === 'room.create'
@@ -506,7 +507,7 @@ import type { SqlDatabase } from '../database.js';
         requestId: input.requestId,
         cardType: 'permission',
         card: {
-          ...(input.purpose ? { reason: input.purpose.trim().slice(0, 240) } : {}),
+          action: intent.action, approvalPurpose: intent.purpose,
           permissionId: input.permissionId,
           requestId: input.requestId,
           agent,

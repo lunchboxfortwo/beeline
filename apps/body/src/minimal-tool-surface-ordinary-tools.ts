@@ -1,3 +1,4 @@
+import { APPROVAL_ACTION_SCHEMA, APPROVAL_PURPOSE_SCHEMA } from '@beeline/api-contract/phone';
 import { WORK_BOARD_ACTION_TOOLS } from './work-board-action-tools.js';
 import { WORK_QUESTION_PATTERN, WORK_OPTION_PATTERN } from '@beeline/api-contract/phone';
 import { COMMAND_SECRET_NAME } from '@beeline/api-contract/agent-grants';
@@ -592,7 +593,8 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
     "inputSchema": {
       "type": "object",
       "properties": {
-        "action": {"type": "string", "enum": ["request", "list"]},
+        "mode": {"type": "string", "enum": ["request", "list"]},
+        "action": APPROVAL_ACTION_SCHEMA,
         "kind": {"type": "string", "enum": ["path", "host", "secret", "device", "command", "mcp", "shared_asset"]},
         "target": {
           "type": "string",
@@ -602,10 +604,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
         },
         "touches": { "type": "string", "minLength": 1, "maxLength": 240, "description": "Files or resources this command touches, in plain language. Omit when unknown." },
         "capabilities": { "type": "string", "minLength": 1, "maxLength": 240, "description": "What this command can do, for example Delete files. Omit when unknown; never invent a scope." },
-        "purpose": {
-          "type": "string", "minLength": 1, "maxLength": 240,
-          "description": "Short purpose, about 12 words or fewer, starting with a verb. Example: Deploy the Milo site. Do not paste the command; target carries its exact argv."
-        },
+        "purpose": APPROVAL_PURPOSE_SCHEMA,
         "reason": {
           "type": "string",
           "minLength": 1,
@@ -618,11 +617,11 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
           "description": "Optional lifetime in seconds after which the grant expires."
         }
       },
-      "required": ["action"],
+      "required": ["mode"],
       "additionalProperties": false,
       "anyOf": [
-        {"properties": {"action": {"const": "request"}}, "required": ["action", "kind", "target", "reason", "purpose"]},
-        {"properties": {"action": {"const": "list"}}, "required": ["action"]}
+        {"properties": {"mode": {"const": "request"}}, "required": ["mode", "kind", "target", "reason", "action", "purpose"]},
+        {"properties": {"mode": {"const": "list"}}, "required": ["mode"]}
       ]
     }
   },
@@ -640,6 +639,8 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
           "maxLength": 200,
           "description": "The app’s product name or website, e.g. \"Linear\" or \"linear.app\"."
         },
+        "action": APPROVAL_ACTION_SCHEMA,
+        "purpose": APPROVAL_PURPOSE_SCHEMA,
         "reason": {"type": "string", "minLength": 1, "maxLength": 500},
         "continuation": {
           "type": "string",
@@ -667,7 +668,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
         {"properties": {"mode": {"const": "status"}}, "required": ["mode"]},
         {
           "properties": {"mode": {"const": "ensure"}},
-          "required": ["mode", "service", "reason", "continuation"]
+          "required": ["mode", "service", "reason", "continuation", "action", "purpose"]
         }
       ]
     }

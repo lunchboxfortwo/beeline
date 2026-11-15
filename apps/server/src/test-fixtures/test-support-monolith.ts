@@ -328,6 +328,10 @@ export function monolithFixture() {
   const daemonOperation = async (name: string, payload: unknown, token = daemonToken) => {
     const input = { ...(payload as Record<string, unknown>) };
     if (name === 'requestAgentGrant' && !Object.hasOwn(input, 'purpose')) input.purpose = input.reason;
+    if (['requestAgentGrant', 'postSquireApproval', 'postPermissionRequest', 'offerConnector', 'connect', 'connectApp', 'createLinkSpendRequest'].includes(name)) {
+      if (!Object.hasOwn(input, 'action')) input.action = 'Use the requested resource';
+      if (!Object.hasOwn(input, 'purpose')) input.purpose = 'complete the requested task';
+    }
     const fixtureOmitBrief = input.fixtureOmitBrief === true;
     delete input.fixtureOmitBrief;
     const writes = new Set([

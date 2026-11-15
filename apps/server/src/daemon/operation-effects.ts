@@ -1,3 +1,4 @@
+import { normalizeAgentApprovalIntent } from '../tray-approval-ask.js';
 import { isBeelineGuideName } from '@beeline/api-contract/beeline-guides';
 import { workflowOutputBindingCtes } from '../workflow-step-output.js';
 import { createHash } from 'node:crypto';
@@ -302,6 +303,7 @@ export async function createLinkSpendRequestOperation<Name extends keyof DaemonO
 
         if (!ctx.linkWallet) throw new Error('Link is not configured');
         const request = input as Input<'createLinkSpendRequest'>;
+        normalizeAgentApprovalIntent(request);
         const owner = (await ctx.database.query<{ owner_id: string }>(
           `SELECT owner_id FROM agents WHERE agent_id=$1`, [authenticatedAgentId])).rows[0];
         if (!owner) throw new Error('agent owner not found');

@@ -6,7 +6,7 @@ const scope24 = fixtureScope24();
 
 
 m26_it.each(['GitHub', 'link my repository', 'connect my repo', 'GitHub repository'])('R-REPO-CARD: routes %s to the repository card before connector search', async service => {
-  const result = JSON.parse(await m26_callAgentTool('connect', {mode:'ensure', service, reason:`Connect ${service}`, continuation:`Connect my ${service} account.`}, 'repo-connect'));
+  const result = JSON.parse(await m26_callAgentTool('connect', {mode:'ensure', action:'Connect the requested service', purpose:'complete the requested task', service, reason:`Connect ${service}`, continuation:`Connect my ${service} account.`}, 'repo-connect'));
   m26_expect(result).toMatchObject({status:'ready', app:'beeline:onboarding'});
   await m26_callAgentTool('app_tool', {app:result.app, tool:'repository', args:{}}, 'repo-card');
   m26_expect(scope24.calls.some(call => call.name === 'postRepositoryOnboarding')).toBe(true);
@@ -26,7 +26,7 @@ m26_it('reports unavailable repo cards without attempting an external connector'
     scope24.calls.push({name:new URL(url).pathname.split('/').pop()!,input:{}});
     return Response.json({repositoryOnboarding:false});
   });
-  const result = JSON.parse(await m26_callAgentTool('connect', {mode:'ensure',service:'link my repository',reason:'Connect the repository',continuation:'Show the repository card.'}, 'connect'));
+  const result = JSON.parse(await m26_callAgentTool('connect', {mode:'ensure', action:'Connect the requested service', purpose:'complete the requested task',service:'link my repository',reason:'Connect the repository',continuation:'Show the repository card.'}, 'connect'));
   m26_expect(result).toMatchObject({status:'unavailable',app:'beeline:onboarding'});
   m26_expect(result.next).toContain('active Room');
   m26_expect(scope24.calls.map(call => call.name)).toEqual(['getRoomRepositoryState']);
@@ -35,7 +35,7 @@ m26_it('reports unavailable repo cards without attempting an external connector'
 
 
 m26_it('keeps ordinary GitHub repository reads on the connector route', async () => {
-  await m26_callAgentTool('connect', {mode:'ensure', service:'GitHub', reason:'List repositories', continuation:'Read the account repositories.'}, 'github');
+  await m26_callAgentTool('connect', {mode:'ensure', action:'Connect the requested service', purpose:'complete the requested task', service:'GitHub', reason:'List repositories', continuation:'Read the account repositories.'}, 'github');
   m26_expect(scope24.calls.map(call => call.name)).toEqual(['connect']);
 });
 
@@ -413,13 +413,13 @@ const scope37 = fixtureScope37();
 mergedDescribe33("request-grant-validation.test.ts", () => {
 const scope38 = fixtureScope38();
 m33_describe('GRANT-VALIDATION-1: advertised request_grant refusals', () => {
-  m33_it('names all missing request fields together', async () => {
+  m33_it('asks the agent to supply missing action before dispatch', async () => {
     const error = await m33_callAgentTool('request_grant', {}, 'empty').catch(error => error as Error);
-    for (const field of Object.keys(scope38.valid)) m33_expect((error as Error).message).toContain(`${field}: expected`);
+    m33_expect((error as Error).message).toContain('Supply action');
   });
 
 
-  m33_it.each([{ action: 'list' }, scope38.valid])('preserves valid dispatch for $action', async args => {
+  m33_it.each([{ mode: 'list' }, scope38.valid])('preserves valid dispatch for $action', async args => {
     m33_vi.stubEnv('BEELINE_DAEMON_ROOM_ID', 'room-1');
     m33_vi.stubEnv('BEELINE_DAEMON_BASE_URL', 'http://localhost:1234');
     m33_vi.stubEnv('BEELINE_DAEMON_TOKEN', 'test-token');
@@ -438,30 +438,30 @@ m33_describe('GRANT-VALIDATION-1: advertised request_grant refusals', () => {
   });
 
 
-  m33_it.each(['action', 'kind', 'target', 'reason', 'purpose'])('names missing %s and its expected value', async field => {
+  m33_it.each(['mode', 'action', 'kind', 'target', 'reason', 'purpose'])('names missing %s and its expected value', async field => {
     const args: Record<string, unknown> = { ...scope38.valid };
     delete args[field];
-    await m33_expect(m33_callAgentTool('request_grant', args, `missing-${field}`)).rejects.toThrow(new RegExp(`${field}: expected`));
+    await m33_expect(m33_callAgentTool('request_grant', args, `missing-${field}`)).rejects.toThrow(new RegExp(field === 'action' || field === 'purpose' ? `Supply ${field}` : `${field}: expected`));
   });
 
 
   m33_it.each([
-    ['action', 'private-marker', 'request, list'],
+    ['mode', 'private-marker', 'request, list'],
     ['kind', 'private-marker', 'host'],
     ['target', 123, 'string'],
     ['target', '', 'at least 1'],
     ['target', 'private-marker'.repeat(100), 'at most 512'],
     ['reason', false, 'string'],
     ['reason', '', 'at least 1'],
-    ['purpose', '', 'at least 1'],
-    ['purpose', 'private-marker'.repeat(100), 'at most 240'],
+    ['purpose', '', 'Supply purpose'],
+    ['purpose', 'private-marker'.repeat(100), 'Shorten purpose'],
     ['ttl', 1, 'at least 60'],
     ['touches', {}, 'string'],
     ['capabilities', [], 'string'],
   ])('explains invalid %s without echoing values', async (field, value, expected) => {
     const error = await m33_callAgentTool('request_grant', { ...scope38.valid, [field]: value }, `invalid-${field}`).catch(error => error as Error);
     m33_expect(error).toBeInstanceOf(Error);
-    m33_expect((error as Error).message).toContain(`${field}: expected`);
+    m33_expect((error as Error).message).toContain(field === 'purpose' ? expected : `${field}: expected`);
     m33_expect((error as Error).message).toContain(expected);
     m33_expect((error as Error).message).not.toContain('private-marker');
   });

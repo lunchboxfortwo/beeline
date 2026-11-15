@@ -7,12 +7,12 @@ import { connectorOfferWaitingLine } from '@/buzz/connector-offer-copy';
 import { AppMark } from '@/components/buzz/AppMark';
 import { INSTAGRAM_SIGN_IN_REQUIREMENT } from '@/buzz/app-sign-in-copy';
 import { ledgerStamp } from '@/buzz/relative-time';
-import { squireApprovalAction } from '@beeline/api-contract/phone';
+import { approvalSentence, squireApprovalAction } from '@beeline/api-contract/phone';
 import { AgentApprovalCard, approvalAudience, approvalDecisionNote } from '@/components/buzz/AgentApprovalCard';
 import { openExternalUrl } from '@/utils/open-external-url';
 import { RequestMedia } from '@/ui/screens/transcript/cards/RequestMedia';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
-import { TranscriptCard, TranscriptCardHandle, type TranscriptCardAction, type TranscriptCardChoice } from '@/components/buzz/TranscriptCard';
+import { TranscriptCard, type TranscriptCardAction, type TranscriptCardChoice } from '@/components/buzz/TranscriptCard';
 import { OrdinaryLedgerMessageProps, ConnectorReceiptCard } from './RoomMessageVariants-attachment-card';
 import { OrdinaryLedgerMessage } from './RoomMessageVariants-ordinary-ledger-message';
 
@@ -97,7 +97,7 @@ export const WritePermissionCard = React.memo(function WritePermissionCard({
     <AgentApprovalCard
       tier={pending ? 'ask' : 'record'} testID={`write-permission-${permission.status}`} wrapTitle
       askingAgent={{ pubkey: permission.agentPubkey, kind: 'agent', name: display.name }} agent={agent}
-      title={<><TranscriptCardHandle>@{display.name.replace(/^@/, '')}</TranscriptCardHandle>{' '}{squireSpending ? 'wants to spend with Trusty Squire' : 'wants to open an edit thread'}</>}
+      title={approvalSentence(permission.action ?? (squireSpending ? 'Spend with Trusty Squire' : 'Open an edit thread'), permission.approvalPurpose ?? permission.reason)}
       subline={`${squireSpending ? roomName ? `#${roomName}` : 'Chat' : permission.repository ?? 'Repository'} · ${approvalAudience(permission.requester, viewerPubkey)}`}
       stamp={ledgerStamp(message.timestamp)} body={permission.reason}
       media={pending ? <RequestMedia message={message} /> : undefined}
@@ -128,8 +128,6 @@ export const SquireApprovalCard = React.memo(function SquireApprovalCard({
   message, agent, viewerPubkey, onOpenSource,
 }: SquireApprovalCardProps) {
   const approval = message.squireApproval!;
-  const display = resolveAgentDisplayIdentity(approval.agent.pubkey, agent);
-  const name = agent ? display.name : approval.agent.name;
   const settled = Boolean(approval.status);
   const reference = approval.reference ?? approval.detail.match(/vault:\/\/[^\s·]+/)?.[0];
   const parts = approval.detail.split(' · ');
@@ -149,7 +147,7 @@ export const SquireApprovalCard = React.memo(function SquireApprovalCard({
     accessibilityRole: 'link', destination: 'external', onPress: () => void openExternalUrl(approvalUrl), testID: 'squire-approval-open' });
   return <AgentApprovalCard tier={settled ? 'record' : 'ask'} testID="squire-approval-card" wrapTitle
     askingAgent={approval.agent} agent={agent}
-    title={`@${name.replace(/^@/, '')} wants to ${approval.action ?? squireApprovalAction(approval.tool, approval.detail, approval.linkKind)}`}
+    title={approvalSentence(approval.action ?? squireApprovalAction(approval.tool, approval.detail, approval.linkKind), approval.purpose ?? approval.reason)}
     subline={`${approval.tool === 'Link' ? 'Link' : 'Trusty Squire'} · ${approvalAudience(approval.owner, viewerPubkey)}`}
     sublineTestID="squire-approval-detail" stamp={ledgerStamp(message.timestamp)}
     body={approval.reason} media={settled ? undefined : <RequestMedia message={message} />} facts={facts} foldCode codeLabel="vault reference" code={reference} codePath={reference ? 'vault reference' : undefined}
@@ -202,7 +200,7 @@ export function AppSignInCard({ message, agentName, canConnect, onConnect, busy 
     <TranscriptCard
       tier="ask"
       wrapTitle
-      title={`Connect ${app.name}`}
+      title={approvalSentence(app.action ?? `Connect ${app.name}`, app.purpose)}
       testID={`app-sign-in-${app.appKey}`}
       body={`Sign in once. ${app.continuation ?? `${agentName} continues the request right after.`}${app.appKey === 'instagram' ? `\n${INSTAGRAM_SIGN_IN_REQUIREMENT}` : ''}`}
       inlineError={app.status === 'failed' ? { title: app.errorMessage ?? 'App sign-in failed. Try again.' } : undefined}
@@ -234,8 +232,6 @@ export const ConnectorOfferCard = React.memo(function ConnectorOfferCard({
   onDecline,
 }: ConnectorOfferCardProps) {
   const offer = message.connectorOffer!;
-  const display = resolveAgentDisplayIdentity(offer.agent.pubkey, agent);
-  const agentName = agent ? display.name : offer.agent.name;
   const pending = offer.status === 'pending';
   const failed = offer.status === 'failed';
   const connecting = offer.status === 'connecting';
@@ -281,7 +277,7 @@ export const ConnectorOfferCard = React.memo(function ConnectorOfferCard({
       tier={pending || connecting ? 'ask' : 'record'}
       testID={`connector-offer-${pending ? 'pending' : connecting ? 'connecting' : 'settled'}`} wrapTitle
       askingAgent={offer.agent} agent={agent}
-      title={`@${agentName.replace(/^@/, '')} wants to ${offer.intent === 'reconnect' ? 'reconnect' : offer.intent === 'switch' ? 'switch' : 'add'} ${offer.connectorName}`}
+      title={approvalSentence(offer.action ?? `${offer.intent === 'reconnect' ? 'Reconnect' : offer.intent === 'switch' ? 'Switch' : 'Connect'} ${offer.connectorName}`, offer.purpose ?? offer.reason)}
       subline={offer.addressee.pubkey === viewerPubkey ? undefined : approvalAudience(offer.addressee, viewerPubkey)}
       sublineTestID={`connector-offer-${offer.offerId}-line`} body={offer.reason}
       facts={offer.connectorType === 'trusty-squire'

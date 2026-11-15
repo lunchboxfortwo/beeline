@@ -3,6 +3,16 @@ import { m45_describe, m45_expect, m45_it, m45_ROOM_VIEW_MESSAGE_LIMIT, m45_read
 mergedDescribe45("phone-guards.tolerance.test.ts", () => {
 const scope1 = fixtureScope1();
 m45_describe('phone surface readers', () => {
+  m45_it('preserves approval intent through connector, permission and Squire phone projections', () => {
+    const intent = { action: 'Connect Gmail', purpose: 'read the renewal notice' };
+    m45_expect(m45_readConnectorOfferCardView({ ...scope1.connectorOffer, ...intent })).toMatchObject(intent);
+    const permission = { permissionId: 'permission', requestId: 'request', agent: scope1.agent, requester: scope1.identity,
+      tool: 'operation.execute', status: 'pending', action: intent.action, approvalPurpose: intent.purpose };
+    m45_expect(m45_readRoomViewMessage({ ...scope1.message, permission })?.permission).toMatchObject(permission);
+    const squireApproval = { agent: scope1.agent, tool: 'connect', title: 'Gmail', detail: 'Sign in', linkKind: 'approval', ...intent };
+    m45_expect(m45_readRoomViewMessage({ ...scope1.message, squireApproval })?.squireApproval).toMatchObject(intent);
+  });
+
   m45_it.each(['agent', 'human', undefined, 'invalid'])('UAR-1 preserves known command recipient kind %s', (kind) => {
     const agentCommand = { kind: 'report', text: 'Choose the scope', recipient: { id: 'recipient', name: 'Recipient', kind } };
     const parsed = m45_readRoomViewMessage({ ...scope1.message, agentCommand });
@@ -18,7 +28,7 @@ m45_describe('phone surface readers', () => {
   });
 
   m45_it('preserves approval purpose and facts while tolerating old or malformed optional metadata', () => {
-    const facts = { purpose: 'Free space so the Android build can finish', machine: 'squire', touches: 'Archived build output', capabilities: 'Delete files' };
+    const facts = { action: 'Delete archived build output', purpose: 'Free space so the Android build can finish', machine: 'squire', touches: 'Archived build output', capabilities: 'Delete files' };
     m45_expect(m45_readAgentGrantView({ ...scope1.grant, ...facts })).toMatchObject(facts);
     m45_expect(m45_readAgentGrantView(scope1.grant)).not.toHaveProperty('purpose');
     const invalid = m45_readAgentGrantView({ ...scope1.grant, purpose: 'x'.repeat(241), touches: 42, capabilities: null });
@@ -168,7 +178,7 @@ m45_describe('phone surface readers', () => {
 
 
   m45_it('retains the pending app sign-in card for the Room and rejects malformed authority', () => {
-    const appSignIn = { appId: scope1.roomId, appKey: 'slack', name: 'Slack',
+    const appSignIn = { action: 'Connect Slack', purpose: 'post the launch notes', appId: scope1.roomId, appKey: 'slack', name: 'Slack',
       ownerId: scope1.identity.pubkey, agentId: scope1.agent.pubkey, status: 'pending' as const,
       continuation: 'Bee posts the notes right after.' };
     m45_expect(m45_readRoomViewMessage({ ...scope1.message, presentation: 'card', appSignIn })?.appSignIn)

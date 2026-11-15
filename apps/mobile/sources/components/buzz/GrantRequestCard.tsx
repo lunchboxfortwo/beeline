@@ -1,11 +1,11 @@
+import { approvalSentence } from '@beeline/api-contract/phone';
 import React, { useMemo } from 'react';
 import { YStack } from 'tamagui';
 import { T } from '@/ui/grammar';
 import { PillRow, type PillFace, type PillItem } from '@/ui/screens/transcript/PillRow';
 import { RequestMedia } from '@/ui/screens/transcript/cards/RequestMedia';
-import { AGENT_GRANT_VERBS, commandGrantAction, grantPresentation } from '@beeline/api-contract/agent-grants';
+import { AGENT_GRANT_VERBS, grantPresentation } from '@beeline/api-contract/agent-grants';
 import type { AgentPresentation, ChatDisplayMessage } from '@/buzz/room-view-presentation';
-import { resolveAgentDisplayIdentity } from '@/buzz/agent-display';
 import { ledgerStamp } from '@/buzz/relative-time';
 import { AgentApprovalCard, approvalAudience, approvalDecisionNote } from './AgentApprovalCard';
 import { type TranscriptCardAction } from './TranscriptCard';
@@ -55,10 +55,6 @@ export const GrantRequestCard = React.memo(function GrantRequestCard({
   onOpenSource,
 }: GrantRequestCardProps) {
   const request = message.grantRequest!;
-  const display = resolveAgentDisplayIdentity(request.agent.pubkey, agent);
-  // The server names the asking agent on the card; a loaded roster presentation
-  // (soul name) wins once it exists, never a fallback placeholder.
-  const agentName = agent ? display.name : request.agent.name;
   const repositoryRequest = request.grants.every((grant) => grant.kind === 'repository');
   const sharedAssetRequest = request.grants.every((grant) => grant.kind === 'shared_asset');
   const canDecide = canDecideGrantRequest(request, viewerPubkey, viewerIsAgent, viewerCanManageWorkspace);
@@ -116,12 +112,12 @@ export const GrantRequestCard = React.memo(function GrantRequestCard({
             wrapTitle
             title={
               <T v="heading" testID={`grant-${grant.grantId}-ask`}>
-                {`@${agentName.replace(/^@/, '')} wants to ${grant.kind === 'command' ? commandGrantAction(grant) : `${grant.kind === 'mcp' && grant.target.startsWith('connection-install:') ? 'connect' : AGENT_GRANT_VERBS[grant.kind]} ${grant.appName ?? grant.target}`}`}
+                {approvalSentence(grant.action ?? (grant.kind === 'command' ? `Run a ${grant.script ? 'script' : 'command'}` : `${grant.kind === 'mcp' && grant.target.startsWith('connection-install:') ? 'Connect' : AGENT_GRANT_VERBS[grant.kind]} ${grant.appName ?? grant.target}`), grant.purpose ?? grant.reason)}
               </T>
             }
             stamp={ledgerStamp(message.timestamp)}
             subline={`${grant.machine ? `${grant.machine} · ` : ''}${approvalAudience(request.owner, viewerPubkey)}`}
-            body={purpose}
+            body={grant.action ? undefined : purpose}
             media={pendingGrant ? <RequestMedia message={message} /> : undefined}
             facts={facts}
             foldCode

@@ -43,7 +43,7 @@ it.each([false, true])('posts the Link approval at its call site only when the o
   const daemon = new DaemonService(database, new LiveHub(), undefined, undefined,
     true, undefined, false, undefined, undefined, undefined, undefined, undefined,
     undefined, undefined, undefined, undefined, client);
-  const result = await daemon.execute('createLinkSpendRequest', { agentId: AGENT, roomId: ROOM,
+  const result = await daemon.execute('createLinkSpendRequest', {action: 'Use the requested resource', purpose: 'complete the requested task',  agentId: AGENT, roomId: ROOM,
     merchant: 'Stripe Press', merchantUrl: 'https://press.stripe.com', amount: 3500,
     description: 'A book', idempotencyKey: 'owner-book-1' }, AGENT);
   expect(result).toMatchObject({ id: 'lsrq_private1', status: 'pending_approval' });
@@ -83,7 +83,7 @@ it.each(['approved', 'denied', 'expired'] as const)('settles a Link %s at the or
   const daemon = new DaemonService(database, live, undefined, undefined,
     true, command!, false, undefined, undefined, undefined, undefined, undefined,
     undefined, undefined, undefined, undefined, client);
-  await daemon.execute('createLinkSpendRequest', { agentId: AGENT, roomId: ROOM,
+  await daemon.execute('createLinkSpendRequest', {action: 'Use the requested resource', purpose: 'complete the requested task',  agentId: AGENT, roomId: ROOM,
     merchant: 'Bookshop', merchantUrl: 'https://bookshop.example.test', amount: 100,
     description: 'Harmless test purchase', idempotencyKey: 'settlement' }, AGENT);
   expect((await daemon.execute('retrieveLinkSpendRequest', { agentId: AGENT, roomId: ROOM, id: 'lsrq_settlement' }, AGENT)).status).toBe('pending_approval');

@@ -60,6 +60,7 @@ import { AcpClient, isPiAcpHarness, flattenHarnessCause, AcpRuntimeExitedError, 
     ctx.activeRunIds.clear();
     ctx.activePromptSessions.clear();
     ctx.toolCallMetadata.clear();
+    ctx.permissionNarration.clear();
     ctx.sessionCommands.clear();
     if (scope) {
       await scope.stop().then(() => {
@@ -344,6 +345,7 @@ import { AcpClient, isPiAcpHarness, flattenHarnessCause, AcpRuntimeExitedError, 
       }
     };
     ctx.on('session/update', onUpdate);
+    ctx.permissionNarration.delete(sessionId);
     ctx.activePromptSessions.add(sessionId);
 
     try {

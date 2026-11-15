@@ -526,6 +526,7 @@ export type DaemonOperationMap = {
     }
   >;
   createLinkSpendRequest: Operation<AgentRoomInput & {
+    action: string; purpose: string;
     merchant: string; merchantUrl?: string; amount: number; description: string;
     test?: boolean; idempotencyKey: string;
     credentialType?: 'card' | 'shared_payment_token'; networkId?: string;

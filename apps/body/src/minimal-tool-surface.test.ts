@@ -12,7 +12,7 @@ const harnesses = ['claude-agent-acp', 'claude-code-acp', 'codex-acp', 'pi-acp',
 const missingOnClaude = ['request_grant', 'connect', 'app_tool', 'wake', 'remember', 'revise_corner', 'create_work_item', 'set_work_state', 'assign_work_item', 'add_work_note', 'attach_to_work_item'];
 const rootCombinators = ['anyOf', 'oneOf', 'allOf'];
 const invalidInputs = [
-  ['request_grant', { action: 'request', kind: 'command' }],
+  ['request_grant', { mode: 'request', action: 'Use the requested resource', kind: 'command' }],
   ['connect', { mode: 'ensure', service: 'Linear' }],
   ['app_tool', { app: 'beeline:workflow', args: {} }],
   ['wake', { action: 'create', trigger: 'schedule', title: 'Reminder', prompt: 'x'.repeat(2001) }],
@@ -39,7 +39,7 @@ describe('Beeline tool surface across harnesses', () => {
   });
 
   it.each(invalidInputs)('still rejects invalid %s arguments before any server call', async (name, args) => {
-    await expect(callAgentTool(name, args, 'invalid-combination')).rejects.toThrow(/invalid arguments/);
+    await expect(callAgentTool(name, args, 'invalid-combination')).rejects.toThrow(name === 'request_grant' || name === 'connect' ? /Supply (action|purpose)/ : /invalid arguments/);
   });
 
   it('names the field and the limit when a value is too long', async () => {
@@ -154,7 +154,7 @@ describe('Beeline tool surface across harnesses', () => {
       for (let index = 0; index < invalidInputs.length; index++) {
         const response = responses.find(response => response.id === index + 2)!;
         expect(response.result.isError).toBe(true);
-        expect(response.result.content?.[0]?.text).toMatch(/invalid arguments/);
+        expect(response.result.content?.[0]?.text).toMatch(['request_grant', 'connect'].includes(invalidInputs[index]![0]) ? /Supply (action|purpose)/ : /invalid arguments/);
       }
     } finally {
       child.kill();

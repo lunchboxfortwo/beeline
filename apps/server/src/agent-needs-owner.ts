@@ -1,3 +1,4 @@
+import { AGENT_SIGN_IN_SERVICE_LABELS } from '@beeline/api-contract/phone';
 import { createHash } from 'node:crypto';
 import { classifyTurnSilence, isAgentSignInHarness } from '@beeline/api-contract/daemon';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
@@ -40,7 +41,7 @@ export async function noteAgentNeedsOwner(db: SqlDatabase, input: {
       id, roomId: input.roomId, authorId: SYSTEM_IDENTITY_ID, subject,
       verb: systemMessage('agent-sign-in.needs-to-sign-in'),
       presentation: 'card', cardType: 'agent-sign-in',
-      card: { agentId: input.agentId, ownerId: agent.owner_id, harness: agent.harness, status: 'starting', sourceMessageId: id },
+      card: { action: `Sign in to ${AGENT_SIGN_IN_SERVICE_LABELS[agent.harness]}`, agentId: input.agentId, ownerId: agent.owner_id, harness: agent.harness, status: 'starting', sourceMessageId: id },
     });
     if (card.inserted) return { signInCardId: id };
     // The same episode reuses its card: a failed or expired start becomes a fresh button in place.

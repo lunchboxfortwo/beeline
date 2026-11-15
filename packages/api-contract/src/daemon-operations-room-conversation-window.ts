@@ -342,6 +342,8 @@ export type ConnectAppInput = TurnOutputAuthority &
   RoomInput & {
     /** The app's name or website, e.g. `Linear` or `linear.app`. */
     readonly app: string;
+    readonly action: string;
+    readonly purpose: string;
     readonly reason: string;
     /** Display-only promise on a managed sign-in card, never a command. */
     readonly continuation?: string;
@@ -502,7 +504,8 @@ export type PostAgentActivityInput = TurnOutputAuthority &
   };
 
 export type PostPermissionRequestInput = RoomPrincipalInput & {
-  readonly purpose?: string;
+  readonly action: string;
+  readonly purpose: string;
   readonly permissionId: string;
   readonly requestId: string;
   readonly scope: DaemonPermissionScope;

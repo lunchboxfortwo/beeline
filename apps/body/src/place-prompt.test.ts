@@ -271,7 +271,7 @@ move1_describe('server-mediated connected app tools', () => {
     for (const corner of [false, true]) {
       move1_expect(move1_agentToolsFor(true, false, corner, corner).some(tool => tool.name === 'connect')).toBe(true);
     }
-    await move1_callAgentTool('connect', { mode:'ensure', continuation:'Finish the requested task.', service: 'Example', reason: 'Finish' }, 'call-1');
+    await move1_callAgentTool('connect', {action: 'Use the requested resource', purpose: 'complete the requested task',  mode:'ensure', continuation:'Finish the requested task.', service: 'Example', reason: 'Finish' }, 'call-1');
     move1_expect(calls).toEqual([{ name: 'connect', input: move1_expect.objectContaining({ squireAvailable: false }) }]);
   });
 
@@ -292,7 +292,7 @@ move1_describe('server-mediated connected app tools', () => {
       return Response.json(name === 'connect' ? { status: 'needs_squire', app: 'Example',
         squire: { url: 'https://example.com', goal: 'Save the login in the vault.' }, next: 'Use your own operate_drive.' } : {});
     });
-    const reply = await move1_callAgentTool('connect', { mode:'ensure', continuation:'Finish the requested task.', service: 'Example', reason: 'Finish' }, 'call-1');
+    const reply = await move1_callAgentTool('connect', {action: 'Use the requested resource', purpose: 'complete the requested task',  mode:'ensure', continuation:'Finish the requested task.', service: 'Example', reason: 'Finish' }, 'call-1');
     move1_expect(JSON.parse(reply))
       .toMatchObject({ status: 'needs_squire', squire: { url: 'https://example.com' } });
     move1_expect(sequence).toEqual(['mcp', 'connect']);
@@ -312,7 +312,7 @@ move1_describe('server-mediated connected app tools', () => {
       return Response.json(name === 'connect' ? { status: 'unavailable', app: 'Example',
         next: 'Trusty Squire is unavailable in this agent session.' } : {});
     });
-    move1_expect(JSON.parse(await move1_callAgentTool('connect', { mode:'ensure', continuation:'Finish the requested task.', service: 'Example', reason: 'Finish' }, 'call-1')))
+    move1_expect(JSON.parse(await move1_callAgentTool('connect', {action: 'Use the requested resource', purpose: 'complete the requested task',  mode:'ensure', continuation:'Finish the requested task.', service: 'Example', reason: 'Finish' }, 'call-1')))
       .toMatchObject({ status: 'unavailable' });
   });
 
@@ -344,7 +344,7 @@ move1_describe('server-mediated connected app tools', () => {
           : { status: 'needs_squire', app: 'Dreamina', appKey: 'dreamina', transport: 'squire-browser',
             squire: { url: 'https://www.google.com/search?q=Dreamina', goal: 'Sign in.' }, next: 'Use your own operate_drive.' });
       });
-      const reply = JSON.parse(await move1_callAgentTool('connect', { mode:'ensure', continuation:'Finish the requested task.', service: 'Dreamina', reason: 'Make a video',
+      const reply = JSON.parse(await move1_callAgentTool('connect', {action: 'Use the requested resource', purpose: 'complete the requested task',  mode:'ensure', continuation:'Finish the requested task.', service: 'Dreamina', reason: 'Make a video',
         noApi: true, ...(signedInUrl ? { signedInUrl } : {}) }, 'call-1'));
       return { reply, sequence, connects };
     };
@@ -391,7 +391,7 @@ move1_describe('server-mediated connected app tools', () => {
 
   move1_it('passes one bounded request-specific promise into connectApp', async () => {
     const continuation = 'I will finish the requested draft after sign-in.';
-    await move1_callAgentTool('connect', { mode:'ensure',  service: 'Example', reason: 'Finish the draft',
+    await move1_callAgentTool('connect', {action: 'Use the requested resource', purpose: 'complete the requested task',  mode:'ensure',  service: 'Example', reason: 'Finish the draft',
       continuation }, 'call-1');
     move1_expect(calls).toEqual([{ name: 'connect', input: move1_expect.objectContaining({
       service: 'Example', reason: 'Finish the draft', continuation,
@@ -408,7 +408,7 @@ move1_describe('server-mediated connected app tools', () => {
       'I will open https://example.com to finish this.',
     ];
     for (const continuation of invalid) {
-      await move1_expect(move1_callAgentTool('connect', { mode:'ensure',  service: 'Example', reason: 'Finish',
+      await move1_expect(move1_callAgentTool('connect', {action: 'Use the requested resource', purpose: 'complete the requested task',  mode:'ensure',  service: 'Example', reason: 'Finish',
         continuation }, 'call-1'))
         .rejects.toThrow(/continuation|invalid arguments/);
     }
@@ -551,7 +551,7 @@ move1_describe('server-mediated connected app tools', () => {
     ]));
     move1_expect(await move1_callAgentTool('connect', {mode:'status'}, 'call-1'))
       .toContain(`X (app:x, id ${appId}) via composio: connecting`);
-    move1_expect(JSON.parse(await move1_callAgentTool('connect', { mode:'ensure',  service: 'X',
+    move1_expect(JSON.parse(await move1_callAgentTool('connect', {action: 'Use the requested resource', purpose: 'complete the requested task',  mode:'ensure',  service: 'X',
       reason: 'Check X posts', continuation: 'I will check the requested posts after sign-in.'
     }, 'call-2'))).toMatchObject({ status: 'needs_sign_in', appId });
     move1_expect(calls.map((call) => [call.name, call.input.roomId]))

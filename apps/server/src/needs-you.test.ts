@@ -195,8 +195,8 @@ describe('PhoneService Needs-you tray', () => {
       subject: { kind: 'agent', id: AGENT, name: 'Hoots' }, verb: 'asked', presentation: 'card', cardType: 'permission',
       card: { permissionId: 'source-ask', requestId: 'request', agent: { pubkey: AGENT, name: 'Hoots' }, repository: 'owner/beeline', status: 'pending' } });
     expect((await database.query(`SELECT card->>'ask' ask FROM messages WHERE id='source-approval'`)).rows[0])
-      .toEqual({ ask: 'Approve write access to owner/beeline?' });
-    expect((await read()).items[0]?.text).toBe('owner/beeline');
+      .toEqual({ ask: 'Open an edit corner for owner/beeline' });
+    expect((await read()).items[0]?.text).toBe('Open an edit corner for owner/beeline');
   });
 
   it('R12e: projects the switcher room count and unread/approval mark', async () => {
@@ -572,7 +572,7 @@ describe('PhoneService Needs-you tray', () => {
     expect(await count()).toBe(1);
     expect(item).toMatchObject({
       messageId: card,
-      text: `${purpose ? 'deploy the Milo site' : 'run a command'} on squire`,
+      text: `Run a command to ${purpose ?? 'watch CI'}`,
       approval: {
         kind: 'grant',
         actor: 'Hoots',
@@ -750,7 +750,7 @@ describe('PhoneService Needs-you tray', () => {
     expect(await approvals()).toEqual([]);
   });
 
-  it('APPROVAL-V3: keeps each tray subject and reason separate for previous clients', async () => {
+  it('APPROVAL-V3: composes row intent while keeping previous clients’ subject and reason separate', async () => {
     await database.query(`INSERT INTO agent_grants(id,agent_id,workspace_id,kind,target,reason,requested_by,room_id,status)
       VALUES($1,$2,$3,'command','python3 cleanup.py','Free disk space',$2,$4,'pending')`, [GRANT, AGENT, WORKSPACE, ROOM]);
     const grant = await card(ROOM, 'grant-request', { agent: hoots,
@@ -761,8 +761,8 @@ describe('PhoneService Needs-you tray', () => {
     const squire = await card(ROOM, 'squire-approval', { agent: hoots, tool: 'fetch_credential', title: 'Credential access approval', detail: 'Reveal a saved credential',
       action: 'reveal a key', reason: 'Sign in the Fly CLI.', sourceRoomId: CORNER, approvalUrl: 'https://squire.example/approve/1', approvalId: 'approval-1', expiresAt: Date.now() + 600000, linkKind: 'passkey' });
     const items = (await read()).items;
-    for (const [id, subject, reason] of [[grant, 'run a command', 'Free disk space'], [connector, 'Gmail', 'Read the release thread.'], [squire, 'reveal a key', 'Sign in the Fly CLI.']]) {
-      expect(items.find(item => item.messageId === id)).toMatchObject({ text: subject, approval: { subject, detail: reason } });
+    for (const [id, subject, reason, sentence] of [[grant, 'run a command', 'Free disk space', 'Run a command to Free disk space'], [connector, 'Gmail', 'Read the release thread.', 'Connect Gmail to Read the release thread'], [squire, 'reveal a key', 'Sign in the Fly CLI.', 'reveal a key to Sign in the Fly CLI']]) {
+      expect(items.find(item => item.messageId === id)).toMatchObject({ text: sentence, approval: { subject, detail: reason } });
     }
   });
 
@@ -820,7 +820,7 @@ describe('PhoneService Needs-you tray', () => {
     expect(await approvals(PEER)).toEqual([]);
   });
 
-  it('Reproduction R1: a sign-in cell names only the service after "needs you to sign in to"', async () => {
+  it('Reproduction R1: a legacy sign-in cell names the action and service', async () => {
     // As systemLine stores it: the card carries its "Sign in to …?" ask.
     await card(
       ROOM,
@@ -838,7 +838,7 @@ describe('PhoneService Needs-you tray', () => {
       VIEWER,
     );
     const items = (await read()).items;
-    expect(items.map((item) => item.text)).toEqual(['Trusty Squire', 'Gmail']);
+    expect(items.map((item) => item.text)).toEqual(['Connect Trusty Squire', 'Connect Gmail']);
     expect(items.map((item) => item.approval)).toEqual([
       { kind: 'sign-in', actor: 'Hoots', ask: 'needs you to sign in to', subject: 'Trusty Squire', literal: false },
       { kind: 'sign-in', actor: 'Hoots', ask: 'needs you to sign in to', subject: 'Gmail', literal: false },

@@ -123,7 +123,7 @@ export function needsYouRowText(message: string, readerHandle: string | null, as
   return shortenAsk(withoutReaderTags(ask || needsYouSentence(message), readerHandle));
 }
 
-type GrantCardEntry = { machine?: string; grantId?: string; kind?: AgentGrantKind; target?: string; appName?: string; reason?: string; purpose?: string; touches?: string; capabilities?: string; script?: CommandGrantScript };
+type GrantCardEntry = { machine?: string; grantId?: string; kind?: AgentGrantKind; target?: string; appName?: string; action?: string; reason?: string; purpose?: string; touches?: string; capabilities?: string; script?: CommandGrantScript };
 
 /** The raw card fields the approval rows read; every kind's card is a subset. */
 type ApprovalCard = {
@@ -134,6 +134,7 @@ type ApprovalCard = {
   repository?: string;
   tool?: string;
   purpose?: string;
+  approvalPurpose?: string;
   action?: string;
   intent?: 'add' | 'switch' | 'reconnect';
   title?: string;
@@ -613,15 +614,11 @@ export async function needsYouItems(database: SqlDatabase, workspaceId: string, 
     ...(row.repository_favicon ? { roomFavicon: row.repository_favicon } : {}),
     roomKind: row.room_kind,
     ...(row.parent_room_name ? { parentRoomName: row.parent_room_name } : {}),
-    // A sign-in's cell already says "needs you to sign in to", so its text is the service alone.
-    // A merge ask keeps its question's own sentence.
-    text: approval && ['grant', 'write-access', 'connector', 'squire', 'sign-in'].includes(approval.kind)
-      ? approval.subject
-      : approval && approval.kind !== 'merge'
+    text: approval && approval.kind !== 'merge'
       ? approvalAsk(approval.kind === 'sign-in' && row.card?.harness ? 'agent-sign-in' : approvalTypes[approval.kind],
           approval.kind === 'grant'
-            ? { ...row.card, ask: undefined, grants: row.card?.grants?.filter(entry => entry.grantId && row.pending_grant_ids?.includes(entry.grantId)) }
-            : row.card ?? {}) ?? shortenAsk(approval.subject)
+            ? { ...row.card, grants: row.card?.grants?.filter(entry => entry.grantId && row.pending_grant_ids?.includes(entry.grantId)) }
+            : row.card ?? {}) ?? approval.subject
       : needsYouRowText(row.text, row.viewer_handle, typeof row.card?.ask === 'string' ? row.card.ask : undefined),
     createdAt: Math.floor(row.created_at.getTime() / 1000),
     ...(expiresAt !== undefined ? { expiresAt } : {}),

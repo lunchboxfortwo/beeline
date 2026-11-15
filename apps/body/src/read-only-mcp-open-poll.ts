@@ -1,3 +1,4 @@
+import { normalizeApprovalIntent } from '@beeline/api-contract/phone';
 import { validateWorkQuestion, type AskOwnerQuestionInput } from '@beeline/api-contract/phone';
 import { INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS,REPOSITORY_SUBSCRIPTION_EVENTS,fixCornerText } from "@beeline/api-contract/daemon";
 import { SUBSCRIBABLE_EVENT_KINDS } from "@beeline/api-contract/phone";
@@ -81,10 +82,10 @@ export async function runGrantedCommand(
   const output = typeof result.output === 'string' && result.output ? result.output : '(no output)';
   const refused =
     result.writeRefused === true
-      ? '\nThis Room is read-only outside your scratch directory. Open a corner with open_corner to change files; for host work there, ask with request_grant(kind:command, target, reason, purpose), then use run_granted_command.'
+      ? '\nThis Room is read-only outside your scratch directory. Open a corner with open_corner to change files; for host work there, ask with request_grant(mode:request, kind:command, target, action, purpose, reason), then use run_granted_command.'
       : '';
   const recovery = result.sandboxFailure === true
-    ? '\nFor host work, open a corner and ask with request_grant(kind:command, target, reason, purpose), then use run_granted_command.'
+    ? '\nFor host work, open a corner and ask with request_grant(mode:request, kind:command, target, action, purpose, reason), then use run_granted_command.'
     : '';
   return `ran under grant ${grantId}: ${verdict}\n${output}${refused}${recovery}`;
 }
@@ -184,6 +185,9 @@ function withAdjustments(result: string, removed: string[]): string {
 
 export function validateToolInput(tool: ToolDefinition, args: JsonObject): void {
   const requestedAction = args.action;
+  const requestedMode = args.mode;
+  if (tool.name === 'link_request') normalizeApprovalIntent(args);
+  if ((tool.name === 'request_grant' && args.mode !== 'list') || (tool.name === 'connect' && args.mode === 'ensure')) normalizeApprovalIntent(args);
   if (tool.name === 'search' && typeof args.query === 'string'
     && [...args.query].length > INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS) {
     throw new Error(`search: query: at most ${INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS} characters`);
@@ -208,7 +212,7 @@ export function validateToolInput(tool: ToolDefinition, args: JsonObject): void 
     if (tool.name === 'request_grant') {
       const properties = asObject(tool.inputSchema.properties);
       const branches = tool.inputSchema.anyOf as JsonObject[];
-      const branch = branches.find(schema => Check(asObject(asObject(schema.properties).action), requestedAction ?? 'request'));
+      const branch = branches.find(schema => Check(asObject(asObject(schema.properties).mode), requestedMode ?? 'request'));
       const required = new Set([
         ...(tool.inputSchema.required as string[]),
         ...((branch?.required as string[] | undefined) ?? []),
@@ -366,8 +370,8 @@ async function executeResourceTool(name: string, args: JsonObject, toolCallId: s
     case 'record_merge_yes': return execute('order_corner_merge', addressed);
     case 'close_corner_pr': return execute('close_pull_request', addressed);
     case 'request_grant':
-      if (args.action === 'list') return execute('list_grants');
-      if (args.action !== undefined && args.action !== 'request') throw new Error('action must be request or list');
+      if (args.mode === 'list') return execute('list_grants');
+      if (args.mode !== undefined && args.mode !== 'request') throw new Error('mode must be request or list');
       return execute(name);
     case 'connect': {
       const builtin = builtinBeelineApp(String(args.service ?? args.query ?? ''),

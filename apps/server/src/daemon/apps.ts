@@ -1,3 +1,4 @@
+import { normalizeAgentApprovalIntent } from '../tray-approval-ask.js';
 import { agentInvitationGuide } from '@beeline/api-contract/agent-invitation-guide';
 import { providerAdapter } from '../providers/index.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
@@ -30,6 +31,7 @@ import { daemonRequestAgentGrant, daemonGrantRequester, daemonConsumeAgentGrant 
 
 
   export async function daemonConnectService(ctx: DaemonContext, input: Input<'connect'>, agentId: string): Promise<Output<'connect'>> {
+    const intent = normalizeAgentApprovalIntent(input);
     const service = typeof input.service === 'string' ? input.service.trim() : '';
     const reason = typeof input.reason === 'string' ? input.reason.trim() : '';
     if (!service || service.length > APP_INPUT_MAX_LENGTH || !reason || reason.length > 500)
@@ -55,7 +57,7 @@ import { daemonRequestAgentGrant, daemonGrantRequester, daemonConsumeAgentGrant 
         await systemLine(database, { roomId: input.roomId,
           subject: { kind: 'agent', id: agentId, name: context.agent.name },
           verb: systemMessage("daemon-service.needs-a-connection-to"), object: card.name, consequence: systemMessage("daemon-service.sign-in-to-continue-the-request"),
-          presentation: 'card', cardType: 'app-sign-in', card: { ...card,
+          presentation: 'card', cardType: 'app-sign-in', card: { ...card, ...intent,
             ownerId: context.owner.pubkey, agentId, commandId, status: 'pending',
             ...(continuation ? { continuation } : {}) } });
       });
@@ -79,7 +81,7 @@ import { daemonRequestAgentGrant, daemonGrantRequester, daemonConsumeAgentGrant 
           return { status: 'ready', app: name, connectorId, next: `${name} is ready.` };
         if (status.status !== 'connected' && !await squireSetupApproved(ctx.database, agentId, context.workspaceId)) {
           const offer = await ctx.offerConnector({ roomId: input.roomId,
-            connectorType: 'trusty-squire', reason }, agentId, true);
+            connectorType: 'trusty-squire', reason, ...intent }, agentId, true);
           if (commandId && !offer.joined) await ctx.database.query(
             'UPDATE connector_offers SET command_id=$2 WHERE id=$1', [offer.offerId, commandId]);
           return { status: 'needs_approval', app: name, connectorId,
@@ -135,7 +137,7 @@ import { daemonRequestAgentGrant, daemonGrantRequester, daemonConsumeAgentGrant 
     if (normalized === 'wallet') {
       if ((await delegationView(ctx.database, context.owner.pubkey)).active)
         return { status: 'ready', app: 'Wallet', next: 'Wallet is ready.' };
-      const offer = await ctx.offerConnector({ roomId: input.roomId, connectorType: 'wallet', reason }, agentId, true);
+      const offer = await ctx.offerConnector({ roomId: input.roomId, connectorType: 'wallet', reason, ...intent }, agentId, true);
       if (commandId) await ctx.database.query('UPDATE connector_offers SET command_id=$2 WHERE id=$1', [offer.offerId, commandId]);
       return { status: 'needs_approval', app: 'Wallet', next: 'Wait for the owner to approve connecting their wallet.' };
     }
@@ -157,7 +159,7 @@ import { daemonRequestAgentGrant, daemonGrantRequester, daemonConsumeAgentGrant 
         // Relevance is not authority: a candidate must also have the app's official publisher.
         if (match && isAppRegistryPublisher(match.name, service)) {
           const installed = await ctx.connectMcpServer({ ...input, serverName: match.name,
-            version: match.version, reason }, agentId);
+            version: match.version, reason, ...intent }, agentId);
           if (installed.status === 'unsupported') return { status: 'unavailable', app: service, next: installed.reason };
           const app = (await ctx.database.query<{ id: string; app_key: string }>(
             'SELECT id,app_key FROM workspace_apps WHERE connector_id=$1 AND owner_identity_id=$2',
@@ -225,14 +227,14 @@ import { daemonRequestAgentGrant, daemonGrantRequester, daemonConsumeAgentGrant 
       [context.owner.pubkey, target, ownAccount, appOwner?.owner_identity_id ?? context.owner.pubkey])).rows[0];
     if (ownAccount && consent?.status !== 'approved') {
       const approved = await ctx.requestAgentGrant({ ...input, kind: 'mcp', target, appId: outcome.appId,
-        purpose: `Connect ${outcome.app} through Trusty Squire for this request`,
+        ...intent,
         reason: `Connect ${outcome.app} through Trusty Squire for this request` }, agentId);
       await ctx.database.query('UPDATE agent_grants SET command_id=$2 WHERE id=$1', [approved.grantId, commandId]);
       consent = { id: approved.grantId, status: approved.status };
     }
     if (!consent || consent.status === 'revoked') {
       const asked = await ctx.requestAgentGrant({ ...input, kind: 'mcp', target, appId: outcome.appId,
-        purpose: `Connect ${outcome.app} through Trusty Squire for this request`,
+        ...intent,
         reason: `Connect ${outcome.app} through Trusty Squire for this request` }, agentId, true);
       await ctx.database.query('UPDATE agent_grants SET command_id=$2 WHERE id=$1', [asked.grantId, commandId]);
       return { ...result, status: 'needs_approval', grantId: asked.grantId,
@@ -263,6 +265,7 @@ import { daemonRequestAgentGrant, daemonGrantRequester, daemonConsumeAgentGrant 
 
   /** Shared app routing for connect and its hidden one-release alias. */
   export async function daemonConnectAppFrontDoor(ctx: DaemonContext, input: Input<'connectApp'>, agentId: string): Promise<Output<'connectApp'>> {
+    const intent = normalizeAgentApprovalIntent(input);
     const app = typeof input.app === 'string' ? input.app.trim() : '';
     const reason = typeof input.reason === 'string' ? input.reason.trim().replace(/\s+/g, ' ') : '';
     if (!app || app.length > APP_INPUT_MAX_LENGTH || !reason || reason.length > 500)
@@ -282,7 +285,7 @@ import { daemonRequestAgentGrant, daemonGrantRequester, daemonConsumeAgentGrant 
           subject: { kind: 'agent', id: agentId, name: context.agent.name },
           verb: systemMessage("daemon-service.needs-a-connection-to"), object: firstParty.name,
           consequence: systemMessage("daemon-service.sign-in-to-continue-the-request"), presentation: 'card', cardType: 'app-sign-in',
-          card: { appId: firstParty.appId, appKey: firstParty.key, name: firstParty.name,
+          card: { ...intent, appId: firstParty.appId, appKey: firstParty.key, name: firstParty.name,
             ownerId: context.owner.pubkey, agentId, status: 'pending',
             commandId: ctx.authorizedCommand?.id ?? null, ...(continuation ? { continuation } : {}) } });
         if (!line.inserted) return;
@@ -320,7 +323,7 @@ import { daemonRequestAgentGrant, daemonGrantRequester, daemonConsumeAgentGrant 
           verb: systemMessage("daemon-service.needs-a-connection-to"), object: outcome.name ?? app,
           consequence: systemMessage("daemon-service.sign-in-to-continue-the-request"),
           presentation: 'card', cardType: 'app-sign-in',
-          card: { appId: outcome.appId, appKey: outcome.appKey,
+          card: { ...intent, appId: outcome.appId, appKey: outcome.appKey,
             name: outcome.name ?? app, ...mark, ownerId: context.owner.pubkey,
             agentId, status: 'pending', commandId: ctx.authorizedCommand?.id ?? null,
             ...(continuation ? { continuation } : {}) },
@@ -462,7 +465,7 @@ import { daemonRequestAgentGrant, daemonGrantRequester, daemonConsumeAgentGrant 
       if (!grant) {
         const asked = await daemonRequestAgentGrant(ctx, { ...input, kind: 'mcp',
           target: appResourceTarget(row.app_key), appId: row.id,
-          purpose: `Use ${row.app_key} to complete the requested task`,
+          action: `Use ${row.app_key}`, purpose: `complete the requested task`,
           reason: `use ${row.app_key} for this request` }, agentId);
         return { status: 'needs_permission' as const, grantId: asked.grantId };
       }

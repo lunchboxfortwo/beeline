@@ -1,3 +1,4 @@
+import { normalizeAgentApprovalIntent } from '../tray-approval-ask.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { machineSquireReport } from '../squire-machine.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -160,6 +161,7 @@ import { daemonOfferContext } from './workbench.js';
    * while the bound session is still valid.
    */
   export async function daemonOfferConnector(ctx: DaemonContext, input: Input<'offerConnector'>, agentId: string, unified = false): Promise<Output<'offerConnector'>> {
+    const intentCopy = normalizeAgentApprovalIntent(input);
     if (typeof input.roomId !== 'string' || !input.roomId) throw new Error('roomId is required');
     if (!isOfferableConnectorKind(input.connectorType))
       throw new Error(
@@ -257,6 +259,7 @@ import { daemonOfferContext } from './workbench.js';
         offerId=created.id;
       }
       const card: ConnectorOfferCardView = {
+        ...intentCopy,
         offerId,
         agent: context.agent,
         addressee: context.addressee,

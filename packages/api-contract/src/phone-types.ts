@@ -286,6 +286,8 @@ export type RoomViewMessage = {
     readonly tool: string;
     readonly repository?: string;
     readonly purpose?: 'squire-spending';
+    readonly action?: string;
+    readonly approvalPurpose?: string;
     readonly reason?: string;
     readonly decidedAt?: number;
     /** Squire spending only: the spending agent's owner, the one person who decides. */
@@ -310,6 +312,8 @@ export type RoomViewMessage = {
   readonly vaultSave?: import('./vault-save.js').VaultSaveCard;
   /** A connected app is needed to finish the Room request. Route details stay server-side. */
   readonly appSignIn?: {
+    readonly action?: string;
+    readonly purpose?: string;
     readonly appId: string;
     readonly appKey: string;
     readonly name: string;
@@ -560,6 +564,7 @@ export type AgentGrantView = {
   /** Product name for a connection-install permission; never an authority target. */
   readonly appName?: string;
   readonly purpose?: string;
+  readonly action?: string;
   readonly touches?: string;
   readonly capabilities?: string;
   readonly machine?: string;

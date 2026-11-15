@@ -5,7 +5,7 @@ import { HOST_EMULATOR_TARGET } from '@beeline/api-contract/agent-grants';
 import { requestGrant, type AgentGrantDeps } from './read-only-mcp.js';
 import { hostEmulatorSerials } from './machine-control.js';
 
-const ask = { kind: 'host', target: HOST_EMULATOR_TARGET, purpose: 'Test the Android app', reason: 'Need the host emulator' };
+const ask = { action: 'Use the requested resource', kind: 'host', target: HOST_EMULATOR_TARGET, purpose: 'Test the Android app', reason: 'Need the host emulator' };
 const grant = { grantId: 'g1', kind: 'host', target: HOST_EMULATOR_TARGET, status: 'approved' };
 const servers: Server[] = [];
 afterEach(async () => {

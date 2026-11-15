@@ -57,6 +57,7 @@ export type AskRoomChoiceResult = {
 export type RequestAgentGrantInput = TurnOutputAuthority &
   RoomInput & {
     readonly kind: AgentGrantKind;
+    readonly action: string;
     readonly target: string;
     readonly purpose: string;
     readonly touches?: string;
@@ -138,7 +139,7 @@ export type ConsumeAgentGrantInput = { readonly grantId: string };
 
 export type AuthorizeSquireCallInput = TurnOutputAuthority & RoomInput;
 
-export type PostSquireApprovalInput = SquireApprovalDetails & TurnOutputAuthority &
+export type PostSquireApprovalInput = SquireApprovalDetails & { readonly action: string; readonly purpose: string } & TurnOutputAuthority &
   RoomInput & {
     readonly tool: string;
     readonly title: string;
@@ -300,6 +301,8 @@ export type AgentWorkbenchView = {
 export type OfferConnectorInput = TurnOutputAuthority &
   RoomInput & {
     readonly connectorType: string;
+    readonly action: string;
+    readonly purpose: string;
     readonly reason: string;
     /** `'switch'`: ask to replace the Google account an already-connected
      *  Trusty Squire is bound to (accepting forces Squire's re-sign-in). */

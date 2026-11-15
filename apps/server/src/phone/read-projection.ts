@@ -317,6 +317,8 @@ export function projectedMessage(
       return {
         ...base,
         appSignIn: {
+          ...(card.action ? { action: card.action } : {}),
+          ...(card.purpose ? { purpose: card.purpose } : {}),
           appId: card.appId,
           appKey: card.appKey,
           name: card.name,

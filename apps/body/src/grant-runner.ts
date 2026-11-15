@@ -413,7 +413,7 @@ function closestCommandGrant(grants: readonly Pick<LiveGrant, 'kind' | 'target' 
     if (grant.status !== 'approved' && grant.status !== 'once') fields.push(`status (${grant.status})`);
     if (!nearest || score > nearest.score) nearest = { id: grant.grantId, score, fields };
   }
-  return nearest ? ` Closest grant ${nearest.id}: ${nearest.fields.join(', ') || 'not live'} does not match.` : ' No live command grants are available on this host; check expiry or revocation with request_grant action=list.';
+  return nearest ? ` Closest grant ${nearest.id}: ${nearest.fields.join(', ') || 'not live'} does not match.` : ' No live command grants are available on this host; check expiry or revocation with request_grant mode=list.';
 }
 
 function scrubSecrets(value: string, secrets: ReadonlyMap<string, string>): string {
@@ -590,7 +590,7 @@ export class GrantCommandRunner {
     const sandboxFailure = !runsOnHost && !sandboxStarted;
     const output = capOutput(
       scrubSecrets(
-        writeRefused ? `${outcome.output.trimEnd()}\n${ROOM_WRITE_REFUSED_NOTE} Call request_grant(${JSON.stringify({ action: 'request', kind: 'path', target: deniedTarget ?? room.cwd, capabilities: 'write', reason: deniedTarget ? 'Write the denied path' : 'Write the command working directory', purpose: 'Complete the blocked host operation' })}).` : outcome.output,
+        writeRefused ? `${outcome.output.trimEnd()}\n${ROOM_WRITE_REFUSED_NOTE} Call request_grant(${JSON.stringify({ mode: 'request', action: 'Write the blocked host path', kind: 'path', target: deniedTarget ?? room.cwd, capabilities: 'write', reason: deniedTarget ? 'Write the denied path' : 'Write the command working directory', purpose: 'Complete the blocked host operation' })}).` : outcome.output,
         secrets,
       ),
       cap,

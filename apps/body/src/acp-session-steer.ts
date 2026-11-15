@@ -1,3 +1,5 @@
+import { harnessApprovalIntent } from '@beeline/api-contract/phone';
+import { agentMessageChunkText } from './acp-stderr-tail-max-chars.js';
 import { AcpClient, flattenHarnessCause, AcpRuntimeExitedError, SessionUpdate, SteerResult, AcpRequestError, parseAcpUsage, parseAvailableCommands, AcpPermissionRequest, AcpPermissionDecision } from './acp.js';
 
 
@@ -180,6 +182,8 @@ import { AcpClient, flattenHarnessCause, AcpRuntimeExitedError, SessionUpdate, S
           ctx.commandsHandler?.(commands);
           ctx.emit('commands', { sessionId: params.sessionId, commands });
         }
+        const narration = agentMessageChunkText(params.update);
+        if (narration) ctx.permissionNarration.set(params.sessionId, (ctx.permissionNarration.get(params.sessionId) ?? '') + narration);
         const toolCallId = params.update.toolCallId;
         const sessionUpdate = params.update.sessionUpdate;
         if (
@@ -195,6 +199,7 @@ import { AcpClient, flattenHarnessCause, AcpRuntimeExitedError, SessionUpdate, S
             ctx.toolCallMetadata.set(metadataKey, {
               ...existing,
               toolCallId,
+              ...harnessApprovalIntent(String(params.update.title ?? existing?.title ?? params.update.name ?? 'Run a command'), ctx.permissionNarration.get(params.sessionId)),
               ...(typeof params.update.name === 'string' ? { name: params.update.name } : {}),
               ...(typeof params.update.title === 'string' ? { title: params.update.title } : {}),
               ...(typeof params.update.kind === 'string' ? { kind: params.update.kind } : {}),
@@ -267,6 +272,9 @@ import { AcpClient, flattenHarnessCause, AcpRuntimeExitedError, SessionUpdate, S
     const metadataKey = p.sessionId && toolCallId ? `${p.sessionId}\0${toolCallId}` : undefined;
     const tracked = metadataKey ? ctx.toolCallMetadata.get(metadataKey) : undefined;
     if (tracked) p.toolCall = { ...tracked, ...p.toolCall };
+    const intent = harnessApprovalIntent(String(p.toolCall?.title ?? 'Run a command'), ctx.permissionNarration.get(p.sessionId ?? ''));
+    p.action = p.toolCall?.action ?? intent.action;
+    p.purpose = p.toolCall?.purpose ?? intent.purpose;
     let decision: AcpPermissionDecision = ctx.autoApprove ? 'allow' : 'reject';
     if (!ctx.autoApprove && ctx.permissionAllowlist) {
       try {

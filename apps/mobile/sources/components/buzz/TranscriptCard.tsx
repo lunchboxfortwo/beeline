@@ -316,8 +316,3 @@ function CardRow({ row, wrapTitle }: { row: TranscriptCardRow; wrapTitle: boolea
     <XStack testID={`transcript-card-row-${row.id}`}>{content}</XStack>
   );
 }
-
-/** Brass inline text for handles embedded in a card title or subline. */
-export function TranscriptCardHandle({ children, meta = false }: { children: ReactNode; meta?: boolean }) {
-  return <T v={meta ? 'metaStrong' : 'heading'} color="needsYou">{children}</T>;
-}

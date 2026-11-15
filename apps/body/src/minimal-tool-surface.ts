@@ -1,3 +1,4 @@
+import { APPROVAL_ACTION_SCHEMA, APPROVAL_PURPOSE_SCHEMA } from '@beeline/api-contract/phone';
 
 
 
@@ -336,8 +337,10 @@ export const CAPABILITY_TOOLS: Record<string, Record<string, ToolDefinition>> = 
       "description": "Create a Link purchase request for the owner of this agent. Link asks the owner to approve the exact merchant and amount. Give merchant name, HTTPS merchant URL, amount in USD cents, and a clear description of what the owner asked to buy. For a seller that accepts a Shared Payment Token, set credentialType=shared_payment_token and provide its networkId; Link resolves the merchant and omits merchant URL in that API call. The owner gets a private Link approval card. No Beeline spending limit or approval is added. Use the returned ID with app_tool(app:beeline:wallet, tool:link_wait, args:...).",
       "inputSchema": {
         "type": "object",
-        "required": ["merchant", "amount", "description"],
+        "required": ["merchant", "amount", "description", "action", "purpose"],
         "properties": {
+          "action": APPROVAL_ACTION_SCHEMA,
+          "purpose": APPROVAL_PURPOSE_SCHEMA,
           "merchant": {"type": "string"},
           "merchantUrl": {"type": "string"},
           "amount": {"type": "integer", "minimum": 1},

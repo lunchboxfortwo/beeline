@@ -36,7 +36,7 @@ export * from './agent-usage.js';
 
 export * from './repository-onboarding.js';
 
-export { squireApprovalAction, type SquireApprovalDetails } from './approval-copy.js';
+export { harnessApprovalIntent, approvalSentence, normalizeApprovalIntent, APPROVAL_ACTION_SCHEMA, APPROVAL_PURPOSE_SCHEMA, squireApprovalAction, type ApprovalIntent, type SquireApprovalDetails } from './approval-copy.js';
 
 export * from './sidebar-preview.js';
 export * from './mcp-starter-routine.js';

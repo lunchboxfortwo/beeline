@@ -98,7 +98,7 @@ const fixture = monolithFixture();
     // addressed by what it IS, and `background.ts` pushes it to that person.
     expect(card.tagged_ids).toEqual([]);
     expect(card.text).toBe(
-      '@bee wants to run cat /home/other/.env and run cat /home/other/.ssh/id_rsa',
+      '@bee wants to publish the preview build and reach the Fly API',
     );
     expect(card.card.owner.pubkey).toBe(HUMAN);
     expect(card.card.requester.pubkey).toBe(memberId);

@@ -368,7 +368,7 @@ m9_describe('beeline-agent request_grant', () => {
 
   m9_it.each(['--debug', '-i -u FOO -C /tmp', '-v', '-iv', '-0', '--null', '--help', '--version', '--', '--list-signal-handling', '--block-signal=PIPE', '--default-signal', '--ignore-signal=PIPE', '-', '-S', '--split-string', '--split-string=/bin/echo', '-S/bin/echo', '-i', '-u PATH', '--unset=PATH', '-C /tmp', '--chdir=/tmp'])('requests a native env %s command without a script binding', async (option) => {
     const ops: Array<{ name: string; input: Record<string, unknown> }> = [];
-    await m9_requestGrant({ kind: 'command', target: `env ${option} /bin/echo approved`,
+    await m9_requestGrant({ action: 'Use the requested resource', kind: 'command', target: `env ${option} /bin/echo approved`,
       purpose: 'Print approved', reason: 'Native command regression' }, {
       ...scope8.deps({ grantId: 'native', status: 'pending', auto: false }, ops),
       scriptRoots: [m9_tmpdir()],
@@ -381,7 +381,7 @@ m9_describe('beeline-agent request_grant', () => {
 
   m9_it.each([undefined, '', '   ', 'x'.repeat(241)])('rejects invalid purpose %s before requesting approval', async (purpose) => {
     const ops: Array<{ name: string; input: Record<string, unknown> }> = [];
-    await m9_expect(m9_requestGrant({ kind: 'command', target: 'git status', reason: 'inspect', purpose }, scope8.deps({}, ops))).rejects.toThrow('purpose is required');
+    await m9_expect(m9_requestGrant({ action: 'Inspect the checkout', kind: 'command', target: 'git status', reason: 'inspect', purpose }, scope8.deps({}, ops))).rejects.toThrow(/Supply purpose|Shorten purpose/);
     m9_expect(ops).toEqual([]);
   });
 
@@ -389,28 +389,28 @@ m9_describe('beeline-agent request_grant', () => {
   m9_it('requires purpose in the validation contract but permits listing without it', () => {
     const schema = m9_agentToolsFor(true, false).find(tool => tool.name === 'request_grant')!.inputSchema;
     m9_expect(schema.properties.purpose).toMatchObject({ minLength: 1, maxLength: 240 });
-    m9_expect(toolValidationSchema('request_grant')!.anyOf).toEqual(m9_expect.arrayContaining([m9_expect.objectContaining({ required: ['action', 'kind', 'target', 'reason', 'purpose'] })]));
+    m9_expect(toolValidationSchema('request_grant')!.anyOf).toEqual(m9_expect.arrayContaining([m9_expect.objectContaining({ required: ['mode', 'kind', 'target', 'reason', 'action', 'purpose'] })]));
   });
 
 
   m9_it('asks for one coarse shared asset category with a reason and a Room card', async () => {
     const ops: Array<{ name: string; input: Record<string, unknown> }> = [];
-    const answer = await m9_requestSharedAssetIsolation({
+    const answer = await m9_requestSharedAssetIsolation({ action: 'Use the requested resource',
       category: 'package-cache', purpose: 'Shared npm tarball is corrupt', reason: 'Shared npm tarball is corrupt',
     }, scope8.deps({ grantId: 'g-7', status: 'pending', auto: false }, ops));
-    m9_expect(ops).toEqual([{ name: 'requestAgentGrant', input: {
+    m9_expect(ops).toEqual([{ name: 'requestAgentGrant', input: { action: 'Use the requested resource',
       roomId: 'room-1', kind: 'shared_asset', target: 'package-cache',
       purpose: 'Shared npm tarball is corrupt', reason: 'Shared npm tarball is corrupt',
     } }]);
     m9_expect(answer).toContain('pending, card posted: isolate package-cache');
-    await m9_expect(m9_requestSharedAssetIsolation({ category: 'cache/file', purpose: 'broken', reason: 'broken' },
+    await m9_expect(m9_requestSharedAssetIsolation({ action: 'Use the requested resource', category: 'cache/file', purpose: 'broken', reason: 'broken' },
       scope8.deps({}, ops))).rejects.toThrow('category must be one of');
     m9_expect(ops).toHaveLength(1);
   });
 
   m9_it.each([
-    { kind: 'budget', target: '$10', purpose: 'more tokens', reason: 'more tokens' },
-    { kind: 'repository', target: 'acme/widgets', purpose: 'edit the repository', reason: 'edit the repository' },
+    { action: 'Use the requested resource', kind: 'budget', target: '$10', purpose: 'more tokens', reason: 'more tokens' },
+    { action: 'Use the requested resource', kind: 'repository', target: 'acme/widgets', purpose: 'edit the repository', reason: 'edit the repository' },
   ])('rejects retired $kind prompts before calling the server', async (ask) => {
     const ops: Array<{ name: string; input: Record<string, unknown> }> = [];
     await m9_expect(m9_requestGrant(ask, scope8.deps({}, ops))).rejects.toThrow('kind must be one of');
@@ -449,7 +449,7 @@ m9_describe('beeline-agent request_grant', () => {
   m9_it('asks for a host MCP route by name and reports it pending, never a yolo approval', async () => {
     const ops: Array<{ name: string; input: Record<string, unknown> }> = [];
     const reply = await m9_requestGrant(
-      { kind: 'mcp', target: ' squire ', purpose: 'vault the provider key', reason: 'vault the provider key' },
+      { action: 'Use the requested resource', kind: 'mcp', target: ' squire ', purpose: 'vault the provider key', reason: 'vault the provider key' },
       scope8.deps(
         {
           grantId: 'g-9',
@@ -464,7 +464,7 @@ m9_describe('beeline-agent request_grant', () => {
     m9_expect(ops).toEqual([
       {
         name: 'requestAgentGrant',
-        input: {
+        input: { action: 'Use the requested resource',
           roomId: 'room-1',
           kind: 'mcp',
           target: 'squire',
@@ -485,7 +485,7 @@ m9_describe('beeline-agent request_grant', () => {
   m9_it('returns "pending, card posted" and tells the agent its turn is paused', async () => {
     const ops: Array<{ name: string; input: Record<string, unknown> }> = [];
     const reply = await m9_requestGrant(
-      {
+      { action: 'Use the requested resource',
         kind: 'command',
         target: 'fly deploy -a beeline-preview --with FLY_TOKEN',
         purpose: 'publish the preview build', reason: 'publish the preview build',
@@ -505,7 +505,7 @@ m9_describe('beeline-agent request_grant', () => {
     m9_expect(ops).toEqual([
       {
         name: 'requestAgentGrant',
-        input: {
+        input: { action: 'Use the requested resource',
           roomId: 'room-1',
           kind: 'command',
           target: 'fly deploy -a beeline-preview --with FLY_TOKEN',
@@ -528,14 +528,14 @@ m9_describe('beeline-agent request_grant', () => {
 
   m9_it('returns approval and, for a command, points at run_granted_command', async () => {
     const command = await m9_requestGrant(
-      { kind: 'command', target: 'npm test', purpose: 'run the suite', reason: 'run the suite' },
+      { action: 'Use the requested resource', kind: 'command', target: 'npm test', purpose: 'run the suite', reason: 'run the suite' },
       scope8.deps({ grantId: 'g-2', status: 'approved', auto: true }),
     );
     m9_expect(command).toBe(
       'approved: run npm test [grant g-2]. Run it now with run_granted_command and the argv.',
     );
     const host = await m9_requestGrant(
-      { kind: 'host', target: ' api.fly.io ', purpose: 'reach the Fly API', reason: 'reach the Fly API' },
+      { action: 'Use the requested resource', kind: 'host', target: ' api.fly.io ', purpose: 'reach the Fly API', reason: 'reach the Fly API' },
       scope8.deps({ grantId: 'g-3', status: 'approved', auto: true }),
     );
     m9_expect(host).toBe(
@@ -546,7 +546,7 @@ m9_describe('beeline-agent request_grant', () => {
 
   m9_it('makes an approved device available to tools without replacing the session', async () => {
     const device = await m9_requestGrant(
-      { kind: 'device', target: '/dev/kvm', purpose: 'run the Android emulator', reason: 'run the Android emulator' },
+      { action: 'Use the requested resource', kind: 'device', target: '/dev/kvm', purpose: 'run the Android emulator', reason: 'run the Android emulator' },
       scope8.deps({ grantId: 'g-4', status: 'approved', auto: true }),
     );
     m9_expect(device).toBe(
@@ -554,7 +554,7 @@ m9_describe('beeline-agent request_grant', () => {
     );
     m9_expect(device).not.toContain('next session');
     const outside = await m9_requestGrant(
-      { kind: 'device', target: 'kvm', purpose: 'run the Android emulator', reason: 'run the Android emulator' },
+      { action: 'Use the requested resource', kind: 'device', target: 'kvm', purpose: 'run the Android emulator', reason: 'run the Android emulator' },
       scope8.deps({ grantId: 'g-5', status: 'approved', auto: true }),
     );
     m9_expect(outside).toBe(
@@ -567,22 +567,22 @@ m9_describe('beeline-agent request_grant', () => {
     const ops: Array<{ name: string; input: Record<string, unknown> }> = [];
     const answer = scope8.deps({ grantId: 'never' }, ops);
     await m9_expect(
-      m9_requestGrant({ kind: 'command', target: 'fly deploy; rm -rf /', purpose: 'x', reason: 'x' }, answer),
+      m9_requestGrant({ action: 'Use the requested resource', kind: 'command', target: 'fly deploy; rm -rf /', purpose: 'x', reason: 'x' }, answer),
     ).rejects.toThrow('shell metacharacters');
     await m9_expect(
-      m9_requestGrant({ kind: 'command', target: 'echo $FLY_TOKEN', purpose: 'x', reason: 'x' }, answer),
+      m9_requestGrant({ action: 'Use the requested resource', kind: 'command', target: 'echo $FLY_TOKEN', purpose: 'x', reason: 'x' }, answer),
     ).rejects.toThrow('shell metacharacters');
-    await m9_expect(m9_requestGrant({ kind: 'wifi', target: 'x', purpose: 'x', reason: 'x' }, answer)).rejects.toThrow(
+    await m9_expect(m9_requestGrant({ action: 'Use the requested resource', kind: 'wifi', target: 'x', purpose: 'x', reason: 'x' }, answer)).rejects.toThrow(
       'kind must be one of',
     );
-    await m9_expect(m9_requestGrant({ kind: 'host', target: '  ', purpose: 'x', reason: 'x' }, answer)).rejects.toThrow(
+    await m9_expect(m9_requestGrant({ action: 'Use the requested resource', kind: 'host', target: '  ', purpose: 'x', reason: 'x' }, answer)).rejects.toThrow(
       'target must be a non-empty string',
     );
     await m9_expect(
-      m9_requestGrant({ kind: 'host', target: 'api.fly.io', purpose: 'Inspect the checkout', reason: ' ' }, answer),
+      m9_requestGrant({ action: 'Use the requested resource', kind: 'host', target: 'api.fly.io', purpose: 'Inspect the checkout', reason: ' ' }, answer),
     ).rejects.toThrow('reason must be a non-empty string');
     await m9_expect(
-      m9_requestGrant({ kind: 'host', target: 'api.fly.io', purpose: 'x', reason: 'x', ttl: 5 }, answer),
+      m9_requestGrant({ action: 'Use the requested resource', kind: 'host', target: 'api.fly.io', purpose: 'x', reason: 'x', ttl: 5 }, answer),
     ).rejects.toThrow('ttl must be');
     m9_expect(ops).toEqual([]);
   });
@@ -593,7 +593,7 @@ m9_describe('beeline-agent request_grant', () => {
     const ask = scope8.deps({ grantId: 'never' }, ops, {});
     await m9_expect(
       m9_requestGrant(
-        {
+        { action: 'Use the requested resource',
           kind: 'command',
           target: 'fly deploy -a preview --with DOOMED_SECRET --with ANOTHER_MISSING',
           purpose: 'publish', reason: 'publish',
@@ -609,7 +609,7 @@ m9_describe('beeline-agent request_grant', () => {
   m9_it('lets a command ask through when every named secret resolves now', async () => {
     const ops: Array<{ name: string; input: Record<string, unknown> }> = [];
     const reply = await m9_requestGrant(
-      {
+      { action: 'Use the requested resource',
         kind: 'command',
         target: 'fly deploy -a preview --with FLY_TOKEN',
         purpose: 'publish', reason: 'publish',
@@ -617,7 +617,7 @@ m9_describe('beeline-agent request_grant', () => {
       scope8.deps({ grantId: 'g-7', status: 'approved', auto: true }, ops),
     );
     m9_expect(ops[0]!.name).toBe('requestAgentGrant');
-    m9_expect(ops[0]!.input).toEqual({
+    m9_expect(ops[0]!.input).toEqual({ action: 'Use the requested resource',
       roomId: 'room-1',
       kind: 'command',
       target: 'fly deploy -a preview --with FLY_TOKEN',
@@ -646,7 +646,7 @@ m9_describe('beeline-agent list_grants and store_secret', () => {
       scope8.deps(
         {
           grants: [
-            {
+            { action: 'Use the requested resource',
               grantId: 'g-1',
               workspaceId: 'w',
               roomId: 'room-1',
@@ -658,7 +658,7 @@ m9_describe('beeline-agent list_grants and store_secret', () => {
               requestedBy: 'c'.repeat(64),
               createdAt: 1,
             },
-            {
+            { action: 'Use the requested resource',
               grantId: 'g-2',
               workspaceId: 'w',
               roomId: 'room-1',
@@ -670,7 +670,7 @@ m9_describe('beeline-agent list_grants and store_secret', () => {
               requestedBy: 'c'.repeat(64),
               createdAt: 2,
             },
-            {
+            { action: 'Use the requested resource',
               grantId: 'g-3',
               workspaceId: 'w',
               roomId: 'room-1',
@@ -788,7 +788,7 @@ const scope12 = fixtureScope12(scope8);
     const contents = '#!/bin/sh\nprintf approved\n';
     const root = scope12.checkout(contents, 'script.sh');
     const ops: Array<{ name: string; input: Record<string, unknown> }> = [];
-    await m9_requestGrant({ kind: 'command', target: `env ${option.replaceAll('CHECKOUT', root)} ./script.sh`,
+    await m9_requestGrant({ action: 'Use the requested resource', kind: 'command', target: `env ${option.replaceAll('CHECKOUT', root)} ./script.sh`,
       purpose: 'Run reviewed script', reason: 'Wrapper hash regression' }, {
       ...scope8.deps({ grantId: 'script', status: 'pending', auto: false }, ops), scriptRoots: [root],
     });

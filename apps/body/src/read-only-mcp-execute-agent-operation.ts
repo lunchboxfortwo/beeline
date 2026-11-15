@@ -1,3 +1,4 @@
+import { normalizeApprovalIntent } from '@beeline/api-contract/phone';
 import { normalizeAppContinuation } from "@beeline/api-contract/app-connections";
 import { fixCornerText,readAgentUsage,usageIsOld,usageSummary,type ConnectResult,type CornerRestoreResult,type DaemonAttachment,type RoomConversationResult } from "@beeline/api-contract/daemon";
 import { createHash,randomUUID } from "node:crypto";
@@ -751,6 +752,7 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
     case 'connectors_status':
       return workbenchStatus();
     case 'create_link_spend_request': {
+      const intent = normalizeApprovalIntent(args);
       const context = await activeCommandContext();
       const merchant = stringArg(args, 'merchant')?.trim();
       const merchantUrl = stringArg(args, 'merchantUrl')?.trim();
@@ -764,7 +766,7 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
         `link:${context.requestId}:${toolCallId || randomUUID()}`).digest('hex');
       return JSON.stringify(await daemonExecute('createLinkSpendRequest', {
         ...context, agentId: requiredEnv('BEELINE_DAEMON_AGENT_ID'),
-        merchant, ...(merchantUrl ? { merchantUrl } : {}), amount, description, idempotencyKey,
+        ...intent, merchant, ...(merchantUrl ? { merchantUrl } : {}), amount, description, idempotencyKey,
         ...(args.test === true ? { test: true } : {}),
         ...(args.credentialType === 'shared_payment_token'
           ? { credentialType: 'shared_payment_token', networkId: stringArg(args, 'networkId') }
@@ -781,6 +783,7 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
         ...context,agentId:requiredEnv('BEELINE_DAEMON_AGENT_ID'),id}));
     }
     case 'connect': {
+      const intent = normalizeApprovalIntent(args);
       const service = stringArg(args, 'service')?.trim();
       const reason = stringArg(args, 'reason')?.trim();
       if (!service || !reason) throw new Error('service and reason are required');
@@ -790,7 +793,7 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
       // Refresh vault metadata before the server decides whether this app is ready.
       const squireAvailable = reach ? (await reach())?.reachable === true : false;
       const input = {
-        ...await activeCommandContext(), service, reason,
+        ...await activeCommandContext(), service, reason, ...intent,
         squireAvailable,
         ...(continuation ? { continuation } : {}),
         ...(args.reconnect === true ? { reconnect: true } : {}),
