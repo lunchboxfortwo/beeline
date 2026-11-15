@@ -18,7 +18,6 @@ vi.mock('@/buzz/use-active-community', () => ({ useActiveCommunityId: () => 'w-a
 vi.mock('@/components/buzz/SurfaceGlyphLoader', () => ({ SurfaceGlyphLoader: (props: any) => React.createElement('SurfaceGlyphLoader', props) }));
 vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: (props: any) => React.createElement('IdentityMark', props) }));
 vi.mock('@/components/buzz/VoicePreviewPlayer', () => ({ VoicePreviewPlayer: () => null }));
-vi.mock('./usage-cell', () => ({ USAGE_REFRESH_CLIENT_TIMEOUT_MS: 25_000, usageCell: () => ({ columns: [], note: 'Claude Code', muted: false }) }));
 vi.mock('@/buzz/scheduled-work', () => ({ scheduleTitle: (s: any) => s.title, scheduleTrigger: () => 'Every hour' }));
 vi.mock('@/buzz/corner-navigation', () => ({ navigateToRoom: vi.fn() }));
 vi.mock('./useAgentProfile', () => ({ useAgentProfile: (...args: unknown[]) => { profile.args = args; return profile.value; } }));
@@ -81,6 +80,22 @@ describe('agent profile', () => {
     expect(byId(tree, 'agent-profile-message')).toBeDefined();
     expect(byId(tree, 'edit-agent-soul')).toBeDefined();
     expect(byId(tree, 'agent-management')).toBeUndefined();
+  });
+
+  it('shows Codex allowance left in the profile and drains the bar', async () => {
+    const snapshot = (utilization: number) => agent({ detail: detail({
+      harness: 'codex',
+      usage: { updatedAt: 1, windows: [{ rateLimitType: 'five_hour', status: 'allowed', utilization, updatedAt: 1 }] },
+    }) });
+    profile.value = snapshot(0.17);
+    const tree = await render();
+    expect(text(tree)).toContain('83% left');
+    const bar = byId(tree, 'agent-usage-bar-5-hour');
+    expect(bar.props.children.props).toMatchObject({ width: '83%', backgroundColor: 'ink' });
+    profile.value = snapshot(0.8);
+    await act(async () => { tree.update(<AgentProfileScreen agentId="alan" close={vi.fn()} />); });
+    expect(text(tree)).toContain('20% left');
+    expect(byId(tree, 'agent-usage-bar-5-hour').props.children.props.backgroundColor).toBe('needsYou');
   });
 
   it('moves agent management into Edit: Answers everyone, Yolo with its copy, Remove from Workspace', async () => {

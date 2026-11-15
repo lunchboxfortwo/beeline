@@ -95,7 +95,7 @@ export function memberRosterUsage(
   const short: Record<string, string> = { five_hour: '5h', seven_day: 'week', seven_day_opus: 'Opus week' };
   return {
     text: hot
-      .map((w) => `${short[w.rateLimitType] ?? w.rateLimitType.replaceAll('_', ' ')} ${Math.round((w.utilization ?? 0) * 100)}%`)
+      .map((w) => `${short[w.rateLimitType] ?? w.rateLimitType.replaceAll('_', ' ')} ${Math.round((1 - (w.utilization ?? 0)) * 100)}% left`)
       .join(' · '),
     tone: 'warning',
   };

@@ -17,7 +17,7 @@ type Tone = 'warning' | 'danger' | undefined;
 export type UsageColumn = {
   label: string;
   value: string;
-  /** Fraction used; absent for a plain figure with no bar. */
+  /** Fraction filled; subscription windows show the allowance left. */
   fill?: number;
   foot?: string;
   tone?: Tone;
@@ -120,14 +120,14 @@ export function usageCell(
             ...(w.resetsAt ? { foot: `back ${usageTime(w.resetsAt)}` } : {}),
             tone: 'danger',
           };
-        const fraction = w.utilization ?? 0;
+        const fraction = 1 - (w.utilization ?? 0);
         return {
           label,
-          value: `${Math.round(fraction * 100)}%`,
+          value: `${Math.round(fraction * 100)}% left`,
           fill: fraction,
           ...(w.resetsAt && w.resetsAt !== sharedReset ? { foot: `resets ${usageTime(w.resetsAt)}` } : {}),
           // Brass marks a number near its limit; an untrusted number is not marked.
-          tone: fraction >= 0.8 && !muted ? 'warning' : undefined,
+          tone: (w.utilization ?? 0) >= 0.8 && !muted ? 'warning' : undefined,
         };
       }), ...credits],
       note: [context, usageHarness(harness), plan].filter(Boolean).join(' · '),

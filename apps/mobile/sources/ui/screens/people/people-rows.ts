@@ -13,7 +13,7 @@ export type PeopleRow = {
     readonly role?: { readonly label: string; readonly accent: boolean };
     /** The quiet second line. */
     readonly detail?: string;
-    /** Brass tail on the second line: an owner's agent under 20% of its limit. */
+    /** Brass tail on the second line: an owner's agent at most 20% of its limit. */
     readonly warn?: string;
 };
 
@@ -46,13 +46,13 @@ export function limitLeft(usage: AgentUsage | undefined): number | undefined {
     return Math.max(0, Math.min(1, ...lefts));
 }
 
-/** “· 8% of limit left”, only when under 20% is left. */
+/** “· 8% of limit left”, only when at most 20% is left. */
 export function limitWarning(usage: AgentUsage | undefined): string | undefined {
     const left = limitLeft(usage);
     if (left === undefined) return undefined;
     // Whole percent first, so 1 − 0.8 reads as 20, not 19.999….
-    const percent = Math.floor(left * 100 + 1e-9);
-    return percent < 20 ? `${percent}% of limit left` : undefined;
+    const percent = Math.round(left * 100);
+    return left <= 0.2 + 1e-9 ? `${percent}% of limit left` : undefined;
 }
 
 /** An agent's second line: its owner and model only (“Yours · Claude Opus 5.5”). */

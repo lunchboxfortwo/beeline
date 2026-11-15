@@ -56,6 +56,11 @@ export function AgentUsage({ usage, harness, onRefresh }: { usage?: AgentUsage; 
                                 aria-label={`${column.label}: ${column.value}${column.foot ? `, ${column.foot}` : ''}`}>
                                 <Copy small quiet numberOfLines={1}>{column.label}</Copy>
                                 <T v="heading" numberOfLines={1} color={column.tone === 'danger' ? 'removed' : column.tone === 'warning' ? 'needsYou' : muted ? 'secondary' : 'ink'}>{column.value}</T>
+                                {!usage?.free && !usage?.spend && column.fill !== undefined ? (
+                                    <YStack height={4} backgroundColor="stroke" overflow="hidden" testID={`agent-usage-bar-${column.label}`}>
+                                        <YStack height="100%" width={`${Math.max(0, Math.min(1, column.fill)) * 100}%`} backgroundColor={column.tone === 'danger' ? 'removed' : column.tone === 'warning' ? 'needsYou' : muted ? 'secondary' : 'ink'} />
+                                    </YStack>
+                                ) : null}
                                 {column.foot ? <T v="meta" numberOfLines={1} color={column.tone === 'danger' ? 'removed' : 'secondary'}>{column.foot}</T> : null}
                             </YStack>
                         ))}

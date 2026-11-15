@@ -16,15 +16,21 @@ describe('agent rows', () => {
         expect(agentDetail({}, VIEWER)).toBeUndefined();
     });
 
-    it('warns in brass only when under 20% of the limit is left', () => {
+    it('warns in brass when at most 20% of the limit is left', () => {
         expect(limitWarning(usage({ windows: [{ rateLimitType: 'five_hour', status: 'allowed_warning', utilization: 0.92, updatedAt: 1 }] })))
             .toBe('8% of limit left');
         expect(limitWarning(usage({ windows: [{ rateLimitType: 'five_hour', status: 'allowed', utilization: 0.8, updatedAt: 1 }] })))
-            .toBeUndefined();
+            .toBe('20% of limit left');
         expect(limitWarning(usage({ free: { used: 95, limit: 100, resetsAt: 0 } }))).toBe('5% of limit left');
         expect(limitWarning(usage({ spend: { limit: 10, remaining: 1 } }))).toBe('10% of limit left');
         expect(limitWarning(usage({ spend: { rejected: true } }))).toBe('0% of limit left');
         expect(limitWarning(undefined)).toBeUndefined();
+    });
+
+    it('rounds subscription percentages consistently and hides healthy warnings', () => {
+        expect(limitLeft(usage({ windows: [{ rateLimitType: 'five_hour', status: 'allowed', utilization: 0.17, updatedAt: 1 }] }))).toBeCloseTo(0.83);
+        expect(limitWarning(usage({ windows: [{ rateLimitType: 'five_hour', status: 'allowed', utilization: 0.17, updatedAt: 1 }] }))).toBeUndefined();
+        expect(limitWarning(usage({ windows: [{ rateLimitType: 'five_hour', status: 'allowed', utilization: 0.926, updatedAt: 1 }] }))).toBe('7% of limit left');
     });
 
     it('takes the tightest limit', () => {
