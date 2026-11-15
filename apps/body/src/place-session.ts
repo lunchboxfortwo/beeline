@@ -86,6 +86,7 @@ export class PlaceSession {
   private privateHomeRoot?: string;
   private claudeLoginWatch?: { close(): void };
   private stopping = false;
+  private model?: OwnedModelFiles;
   readonly resources: SessionResources;
   readonly contextPath: string;
 
@@ -164,9 +165,10 @@ export class PlaceSession {
   private async hostedModel(item: AgentCommand): Promise<OwnedModelFiles | undefined> {
     const env = this.options.config.agentEnv;
     let files: OwnedModelFiles | undefined;
-    if (env?.BEELINE_FREE_AGENT_ID || env?.BEELINE_FREE_AGENT_MODEL_TOKEN) {
-      const { modelCredential } = await this.options.api.execute('getModelCredential', { roomId: item.roomId, requestId: item.turnRequestId });
-      if (modelCredential) files = await OwnedModelFiles.create({
+    if (item.modelCredential || env?.BEELINE_FREE_AGENT_ID || env?.BEELINE_FREE_AGENT_MODEL_TOKEN) {
+      // OwnedModelFiles validates the required hosted credential before ACP starts.
+      const modelCredential = item.modelCredential!;
+      files = await OwnedModelFiles.create({
         root: resolve(dirname(this.contextPath), 'state', `owned-model-${item.id}`), credential: modelCredential,
         binding: { agentId: this.options.agent.publicKey, itemId: item.id, provider: 'beeline', model: 'server-selected',
           baseUrl: new URL('/v1/free-agents/model', this.options.api.baseUrl).href },
@@ -176,7 +178,11 @@ export class PlaceSession {
   }
 
   /** Make sure a live session serves this place; reuse the running one. */
-  async start(): Promise<void> {
+  async start(item?: AgentCommand): Promise<void> {
+    if (item) {
+      this.model = await this.hostedModel(item);
+      await this.writeContext(item, [], this.model?.paths().directory);
+    }
     if (!this.alive || this.stale) await this.startFresh();
   }
 
@@ -188,7 +194,7 @@ export class PlaceSession {
     if (!sandbox) this.notes.push(`The OS sandbox is unavailable. You can read files, edit files only inside ${this.folder()}, and shell commands are refused.`);
     try { await this.activate(sandbox); }
     catch (error) {
-      if (!sandbox) throw error;
+      if (!sandbox || this.model) throw error;
       await this.stop();
       this.notes.push(`The OS sandbox could not start (${error instanceof Error ? error.message : String(error)}). ` +
         `This session runs without it: you can read files, edit files only inside ${this.folder()}, and shell commands are refused.`);
@@ -285,8 +291,8 @@ export class PlaceSession {
       }), undefined);
     if (agentTools) servers.push(agentTools);
     const sessionServers = sessionNewMcpServers<McpServerWire>(harnessLabel, servers, []);
-    if (agentEnv.BEELINE_FREE_AGENT_ID || agentEnv.BEELINE_FREE_AGENT_MODEL_TOKEN)
-      await this.optional('Hosted model binding', () => installOwnedModelProvider(agentEnv.PI_CODING_AGENT_DIR), undefined);
+    if (this.model || agentEnv.BEELINE_FREE_AGENT_ID || agentEnv.BEELINE_FREE_AGENT_MODEL_TOKEN)
+      await installOwnedModelProvider(agentEnv.PI_CODING_AGENT_DIR);
     await installPiMcpBridge({
       agentCommand: harnessLabel, piHome: agentEnv.PI_CODING_AGENT_DIR,
       servers,
@@ -409,7 +415,8 @@ export class PlaceSession {
     const sessionId = this.sessionId!;
     this.current = item;
     if (item.roomId === this.options.placeId) this.squireRelay.activate(item, item.id);
-    const model = await this.optional('Hosted model credential', () => this.hostedModel(item), undefined);
+    const model = this.model ?? await this.hostedModel(item);
+    this.model = undefined;
     await this.optional('Tool context', () => this.writeContext(item, batch.slice(1), model?.paths().directory), undefined);
     const options = { names: this.names, notes: this.notes, turnPrefix: this.turnPrefix };
     const prompt = batch.length > 1 || item.offlineSeconds !== undefined

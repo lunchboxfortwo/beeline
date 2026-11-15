@@ -49,26 +49,46 @@ const config = () =>
 const send = (text: string) =>
   phone.execute('sendRoomMessage', { roomId: MODEL_ROOM, text: `@beebee ${text}` }, MODEL_OWNER);
 
-it.each(['before', 'after'] as const)('connected helper retains owned-model authority when negotiation is %s runtime catch-up', async timing => {
-  const first = await send('original first message'), second = await send('original second message');
+it('queues the first message with its hosted credential before a machine exists and completes it after boot', async () => {
   const daemon = new DaemonService(fixture.db, live);
   daemon.setOwnedModel({ credentials: fixture.credentials, ready: () => true });
+  await fixture.db.query('UPDATE free_agents SET fly_machine_id=NULL,model_token_hash=NULL');
+  const sent = await send('my first message');
+  const queued = await daemon.execute('getAgentCommands', {}, MODEL_AGENT);
+  expect(queued.commands).toHaveLength(1);
+  const item = queued.commands[0]!;
+  const credential = (item as typeof item & { modelCredential?: typeof fixture.issued }).modelCredential;
+  expect(credential).toMatchObject({ v: 1, expiresAt: null });
+  expect((await fixture.db.query('SELECT fly_machine_id FROM free_agents')).rows).toEqual([{ fly_machine_id: null }]);
+  expect((await fixture.credentials.authenticate(fixture.db, credential!.token)).binding.commandId).toBe(item.id);
+  const create = vi.fn(async () => Response.json({ id: 'first-machine' }));
+  const provider = new FlyMachines('synthetic', 'first-boot', async (url, init) =>
+    init?.method === 'POST' ? create() : Response.json(new URL(String(url)).pathname.endsWith('/machines') ? [] : { id: 'first-machine', state: 'started', config: { image } }));
+  await new FreeAgentService(fixture.db, config(), provider, async () => ({ exchangeToken: 'synthetic' })).reconcile(MODEL_AGENT);
+  expect(create).toHaveBeenCalledTimes(1);
+  await daemon.execute('startAgentTurn', { roomId: MODEL_ROOM, requestId: item.turnRequestId }, MODEL_AGENT);
+  await daemon.execute('postRoomMessage', { roomId: MODEL_ROOM, requestId: item.turnRequestId, text: 'First message answered.' }, MODEL_AGENT);
+  expect((await fixture.db.query('SELECT state FROM agent_commands WHERE source_message_id=$1', [sent.messageId])).rows).toEqual([{ state: 'complete' }]);
+  expect((await phone.readRoom(MODEL_ROOM, MODEL_OWNER))?.messages.some(message => message.text === 'First message answered.')).toBe(true);
+});
+
+it('queue credentials retain owned-model authority through runtime catch-up', async () => {
+  const daemon = new DaemonService(fixture.db, live);
+  daemon.setOwnedModel({ credentials: fixture.credentials, ready: () => true });
+  const first = await send('original first message'), second = await send('original second message');
   const source = { connectionId: 'current-image-helper', epoch: await claimAgentConnection(
     fixture.db, live, MODEL_AGENT, {}, { connectionId: 'current-image-helper', instanceId: 'synthetic-server' }) };
   const provider = new FlyMachines('synthetic', 'proof', async (url) => Response.json(String(url).endsWith('/machines') ? [] : {
     id: 'm1', state: 'started', instance_id: 'current', config: { image },
   }));
   const service = new FreeAgentService(fixture.db, config(), provider, async () => ({ exchangeToken: 'synthetic' }));
-  const negotiate = () => daemon.negotiateOwnedModel(MODEL_AGENT, true);
-  const selectedBefore = timing === 'before' ? await negotiate() : undefined;
   // Registration and listener catch-up both admit this acquisition while the
   // original messages are still pending. A serving helper must remain ready.
   await service.reconcileAll();
-  const selected = selectedBefore ?? await negotiate();
   const pending = await daemon.execute('getAgentCommands', { roomId: MODEL_ROOM }, MODEL_AGENT);
   const generationId = 'original-messages';
   await daemon.execute('startAgentTurn',{roomId:MODEL_ROOM,requestId:pending.commands[0]!.turnRequestId},MODEL_AGENT);
-  const {modelCredential}=await daemon.execute('getModelCredential',{roomId:MODEL_ROOM,requestId:pending.commands[0]!.turnRequestId},MODEL_AGENT,selected.capability);
+  const {modelCredential}=await daemon.execute('getModelCredential',{roomId:MODEL_ROOM,requestId:pending.commands[0]!.turnRequestId},MODEL_AGENT);
   const workingRoom = (await phone.readRoom(MODEL_ROOM, MODEL_OWNER))!;
   const working = workingRoom.latestAgentTurns.find(turn => turn.status === 'working')!;
   expect(workingRoom.pendingAgentCommands).toHaveLength(1);
@@ -117,10 +137,10 @@ function lab(initial = 'stopped', oldImage = 'old-release') {
   return {calls,hooks,service,state:()=>state};
 }
 
-it.each(['stopped','suspended','created'])('confirms a replaced %s machine then explicitly starts it once',async initial=>{
+it.each(['stopped','suspended','created'])('confirms Fly launched a replaced %s machine without a second start',async initial=>{
   const runtime=lab(initial);await send('saved message');
-  await Promise.all([runtime.service().reconcile(MODEL_AGENT),runtime.service().reconcile(MODEL_AGENT)]);
-  expect(runtime.calls).toEqual(['POST /m1','GET /m1/wait','POST /m1/start']);expect(runtime.state()).toBe('started');
+  await Promise.all([runtime.service().reconcile(MODEL_AGENT,true),runtime.service().reconcile(MODEL_AGENT,true)]);
+  expect(runtime.calls).toEqual(['POST /m1','GET /m1/wait']);expect(runtime.state()).toBe('started');
   expect((await fixture.db.query(`SELECT state,runtime_owner FROM free_agents`)).rows).toEqual([{state:'sleeping',runtime_owner:null}]);
   expect((await fixture.db.query(`SELECT 1 FROM agent_commands WHERE state='pending'`)).rowCount).toBe(1);
 });
@@ -134,13 +154,13 @@ it('visits old-image idle mappings independently of retired state without provis
 it('registration and release never erase in-flight operation ownership',async()=>{
   const runtime=lab();let unblock!:()=>void;
   const wait=new Promise<void>(resolve=>{unblock=resolve;});runtime.hooks.update=()=>wait;
-  await send('during preparation');const operation=runtime.service().reconcile(MODEL_AGENT);
+  await send('during preparation');const operation=runtime.service().reconcile(MODEL_AGENT,true);
   await vi.waitFor(()=>expect(runtime.calls).toContain('POST /m1'));
   const owner=(await fixture.db.query(`SELECT runtime_owner,runtime_operation_id FROM free_agents`)).rows;
   await claimAgentConnection(fixture.db,live,MODEL_AGENT,{}, {connectionId:'replacement',instanceId:'synthetic-server'});
   await releaseAgentConnection(fixture.db,live,MODEL_AGENT,'replacement');
   expect((await fixture.db.query(`SELECT runtime_owner,runtime_operation_id FROM free_agents`)).rows).toEqual(owner);
-  await runtime.service().reconcile(MODEL_AGENT);unblock();await operation;
+  await runtime.service().reconcile(MODEL_AGENT,true);unblock();await operation;
   expect(runtime.calls.filter(call=>call==='POST /m1')).toHaveLength(1);
 });
 
@@ -153,13 +173,13 @@ it('hands a peer work committed during suspension and resumes the completed snap
   runtime.hooks.suspend=async()=>{await send('while suspending');await peer.reconcile(MODEL_AGENT);};
   await service.reconcile(MODEL_AGENT);
   await vi.waitFor(()=>expect(runtime.state()).toBe('started'));
-  expect(runtime.calls).toEqual(['POST /m1/suspend','GET /m1/wait','POST /m1/start']);
+  expect(runtime.calls).toEqual(['POST /m1/suspend','GET /m1/wait','POST /m1/start','GET /m1/wait']);
   await off();await peer.reconcile(MODEL_AGENT);
 });
 
 it('provider failure preserves pending work and never replays the unknown mutation',async()=>{
   const runtime=lab();runtime.hooks.failUpdate=true;await send('saved');
-  await expect(runtime.service().reconcile(MODEL_AGENT)).rejects.toThrow('HTTP 500');
+  await expect(runtime.service().reconcile(MODEL_AGENT,true)).rejects.toThrow('HTTP 500');
   expect(runtime.calls).toEqual(['POST /m1']);
   expect((await fixture.db.query(`SELECT 1 FROM agent_commands WHERE state='pending'`)).rowCount).toBe(1);
   expect((await fixture.db.query(`SELECT runtime_owner FROM free_agents`)).rows).toEqual([{runtime_owner:null}]);
@@ -197,7 +217,7 @@ it('adopts a lost create result using the original bootstrap without replaying c
 it('Stop during image preparation withdraws the pending command without a synthetic working turn',async()=>{
   const runtime=lab();let unblock!:()=>void;
   const wait=new Promise<void>(resolve=>{unblock=resolve;});runtime.hooks.update=()=>wait;
-  const receipt=await send('please stop');const service=runtime.service();const operation=service.reconcile(MODEL_AGENT);
+  const receipt=await send('please stop');const service=runtime.service();const operation=service.reconcile(MODEL_AGENT,true);
   await vi.waitFor(()=>expect(runtime.calls).toContain('POST /m1'));
   await phone.execute('cancelAgentTurn',{roomId:MODEL_ROOM,agentId:MODEL_AGENT,requestId:receipt.pendingAgentCommands![0]!.requestId},MODEL_OWNER);
   unblock();await operation;
@@ -228,7 +248,40 @@ it('removal during create retains the tombstone, refuses bootstrap and cleans on
 it('replaces a busy snapshot immediately and retains its queued work',async()=>{
   const runtime=lab('suspended');
   await fixture.db.query("UPDATE agent_commands SET state='pending' WHERE id='synthetic-command'");
-  await runtime.service().reconcile(MODEL_AGENT);
-  expect(runtime.calls).toEqual(['POST /m1','GET /m1/wait','POST /m1/start']);expect(runtime.state()).toBe('started');
+  await runtime.service().reconcile(MODEL_AGENT,true);
+  expect(runtime.calls).toEqual(['POST /m1','GET /m1/wait']);expect(runtime.state()).toBe('started');
   expect((await fixture.db.query("SELECT state FROM agent_commands WHERE id='synthetic-command'")).rows).toEqual([{state:'pending'}]);
+});
+
+it('records a hosted startup failure visibly and terminates the item without an offline notice', async () => {
+  const daemon = new DaemonService(fixture.db, live);
+  daemon.setOwnedModel({ credentials: fixture.credentials, ready: () => true });
+  await send('first message');
+  const item = (await daemon.execute('getAgentCommands', {}, MODEL_AGENT)).commands[0]!;
+  const reason = 'ACP error -32000: Authentication required: Configure an API key or log in';
+  await daemon.execute('startAgentTurn', { roomId: MODEL_ROOM, requestId: item.id, available: false, failureReason: reason }, MODEL_AGENT);
+  expect((await daemon.execute('getAgentCommands', {}, MODEL_AGENT)).commands).toEqual([]);
+  const room = (await phone.readRoom(MODEL_ROOM, MODEL_OWNER))!;
+  expect(room.latestAgentTurns.find(turn => turn.requestId === item.id)).toMatchObject({ status: 'failed' });
+  expect(room.messages.some(message => message.systemEvent?.consequence === reason)).toBe(true);
+  expect((await fixture.db.query('SELECT failure_reason FROM agent_turns WHERE request_id=$1', [item.id])).rows).toEqual([{ failure_reason: reason }]);
+  expect(room.messages.some(message => message.text?.includes('connect again'))).toBe(false);
+});
+
+it('does not replace the image on queue or reconnect signals', async () => {
+  const runtime = lab('started');
+  await send('saved work');
+  await runtime.service().reconcile(MODEL_AGENT);
+  await runtime.service().reconcile(MODEL_AGENT);
+  expect(runtime.calls).toEqual([]);
+  await runtime.service().reconcileAll();
+  expect(runtime.calls).toEqual(['POST /m1', 'GET /m1/wait']);
+});
+
+it('observes a just-created machine through concurrent reconciles without starting it again', async () => {
+  const runtime = lab('created', image);
+  await send('first work while Fly is booting');
+  await Promise.all([runtime.service().reconcile(MODEL_AGENT), runtime.service().reconcile(MODEL_AGENT)]);
+  expect(runtime.calls).toEqual(['GET /m1/wait']);
+  expect(runtime.state()).toBe('started');
 });

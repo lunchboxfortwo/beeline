@@ -42,14 +42,14 @@ export interface FreeAgentGrant {
   upstreamModel: string;
 }
 
-/** Pi's private provider uses only the scoped proxy token, resolved from env. */
+/** Pi can open the hosted provider before prompting; actual authority comes from the queue item. */
 export function freeAgentPiConfig(grant: Pick<FreeAgentGrant, 'modelBaseUrl' | 'upstreamModel'>, input: Array<'text' | 'image'> = ['text']): string {
   return JSON.stringify({
     providers: {
       beeline: {
         baseUrl: grant.modelBaseUrl,
         api: 'openai-completions',
-        apiKey: '$BEELINE_FREE_AGENT_MODEL_TOKEN',
+        apiKey: 'beeline-queue-item',
         models: [{
           id: grant.upstreamModel,
           name: grant.upstreamModel,

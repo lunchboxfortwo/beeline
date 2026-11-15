@@ -1,4 +1,6 @@
 export const SYSTEM_MESSAGE_DAEMON_SERVICE = {
+  'agent-turn.failed': { parts: ['failed'], variables: [] },
+  'agent-turn.failure-reason': { parts: ['', ''], variables: ['reason'] },
 
   'daemon-service.needs-a-connection-to': {
     parts: ['needs a connection to'],

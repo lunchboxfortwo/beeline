@@ -19,6 +19,9 @@ if [ "$mode" = prebuild ]; then
 elif [ "$mode" = release ]; then
   [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]] || { echo 'invalid server release version' >&2; exit 1; }
   label="${version#v}-${sha:0:12}"
+  [[ "${IMAGE_REF:-}" == "registry.fly.io/beeline-free-agents:$label@sha256:"* && "${IMAGE_REF##*@}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+    echo 'matching free agent image digest is required' >&2; exit 1;
+  }
   release_image="registry.fly.io/beeline-server:$label"
   if docker pull "$source_image"; then
     actual_sha=$(docker image inspect --format '{{ index .Config.Labels "app.usebeeline.release.sha" }}' "$source_image")
@@ -31,6 +34,9 @@ elif [ "$mode" = release ]; then
     }
     docker build --pull=false --tag "$release_image" --file - . <<EOF
 FROM $source_digest
+USER root
+RUN node -e 'require("node:fs").writeFileSync("/app/apps/server/assets/free-agent-image.json", JSON.stringify({image:"$IMAGE_REF"}))'
+USER node
 ENV BEELINE_RELEASE_VERSION=$version BEELINE_RELEASE_SHA=$sha
 LABEL app.usebeeline.release.version=$version app.usebeeline.release.sha=$sha
 EOF
@@ -40,6 +46,7 @@ EOF
     flyctl deploy . --local-only --config fly.beeline-server.toml \
       --dockerfile apps/server/Dockerfile --app beeline-server \
       --build-arg "BEELINE_RELEASE_VERSION=$version" --build-arg "BEELINE_RELEASE_SHA=$sha" \
+      --build-arg "BEELINE_FREE_AGENT_IMAGE=$IMAGE_REF" \
       --image-label "$label" --build-only --push --yes
   fi
   # Fly's builder can use a separate Docker daemon; pull before migrations.

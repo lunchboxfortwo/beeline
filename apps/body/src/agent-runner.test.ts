@@ -339,3 +339,20 @@ it('retires a generated failure notice restored from an older helper outbox', as
   })));
   expect(harness.deliver).not.toHaveBeenCalled();
 });
+
+it('ends a hosted item with the real startup failure and does not replay it on reconnect', async () => {
+  const f = await fixture();
+  const item = { ...f.item('first-hosted'), modelCredential: {
+    v: 1 as const, token: 'bfmc_v1.' + 'a'.repeat(32) + '.' + 'b'.repeat(64), expiresAt: null,
+  } };
+  harness.start.mockRejectedValueOnce(new Error('ACP error -32000: Authentication required: Configure an API key or log in'));
+  f.changed([item]);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('startAgentTurn', {
+    roomId: item.roomId, requestId: item.id, available: false,
+    failureReason: expect.stringContaining('Authentication required'),
+  }));
+  f.changed([item]);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  expect(harness.start).toHaveBeenCalledTimes(1);
+  expect(harness.deliver).not.toHaveBeenCalled();
+});

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { AGENT_INVITATION_PROMPT, BEELINE_PRODUCT_GUIDE } from '@beeline/api-contract/agent-invitation-guide';
 import { notifyLive } from './postgres-live.js';
 import {FREE_AGENT_CREATION_SCHEMA,reserveStarterAgents,refundStarterAgent} from './free-agent-creation.js';
@@ -28,6 +29,7 @@ export const FREE_AGENTS_SCHEMA = `
 CREATE TABLE IF NOT EXISTS free_agents (
   agent_id text PRIMARY KEY REFERENCES identities(id) ON DELETE CASCADE,
   owner_id text NOT NULL REFERENCES identities(id),
+  -- Compatibility storage only. Drop after preceding serving/rollback readers drain.
   state text NOT NULL DEFAULT 'provisioning'
     CHECK (state IN ('provisioning','waking','running','sleeping','stopped','failed','destroyed')),
   fly_machine_id text,
@@ -118,8 +120,14 @@ export function freeAgentConfigFromEnv(
   publicOrigin: string,
 ): FreeAgentConfig | undefined {
   const sealSecret = env.BEELINE_FREE_AGENT_SEAL_KEY;
-  const image = env.FLY_FREE_AGENT_IMAGE;
-  if (!sealSecret || !image) return undefined;
+  if (!sealSecret) return undefined;
+  const image: string | undefined = env.NODE_ENV === 'production'
+    ? JSON.parse(readFileSync(new URL('../assets/free-agent-image.json', import.meta.url), 'utf8')).image
+    : env.FLY_FREE_AGENT_IMAGE;
+  if (!image) {
+    if (env.NODE_ENV === 'production') throw new Error('Server release is missing its free-agent image');
+    return undefined;
+  }
   const number = (name: string, fallback: number) => {
     const value = Number(env[name]);
     return Number.isFinite(value) && value > 0 ? value : fallback;
@@ -581,6 +589,7 @@ export class FreeAgentService {
           cpus:this.config.cpus,memoryMb:this.config.memoryMb,
           env:{BEELINE_FREE_AGENT_ID:agentId,BEELINE_FREE_AGENT_BOOTSTRAP:bootstrap,BEELINE_SERVER_URL:this.config.publicOrigin} });
         await adopt(created.id);
+        await this.machines.waitFor(created.id,'started',60);
         completedEffect = true;
         await recordFreeAgentEvent(this.database,agentId,'provisioned',{machineId,operationId});
         return;
@@ -588,23 +597,26 @@ export class FreeAgentService {
       if (machine.id !== machineId) await adopt(machine.id);
       if (!['created','stopped','suspended','started'].includes(machine.state)) return;
       // Queued and running items survive a replacement; never replace an in-progress connector install.
-      if (!sameMachineImage(machine.config.image,this.config.image) && !initial.connector) {
+      if (refreshImage && !sameMachineImage(machine.config.image,this.config.image) && !initial.connector) {
         if (!await owns()) return;
-        const before = machine;
         mutationStarted = true;
         machine = await this.machines.update(machine,this.config.image);
         if (!machine.instance_id) throw new Error('Fly update returned no replacement version');
         // Provider completion is version-bound. A timeout leaves the result unknown.
-        await this.machines.waitFor(machine.id,before.state === 'started' ? 'started' : 'stopped',60,machine.instance_id);
+        await this.machines.waitFor(machine.id,'started',60,machine.instance_id);
         const observed = await this.machines.read(machine.id);
-        if (!observed || observed.instance_id !== machine.instance_id) throw new Error('Fly replacement version is unconfirmed');
+        if (!observed || observed.instance_id !== machine.instance_id || observed.state !== 'started') throw new Error('Fly replacement version is unconfirmed');
         machine = observed;
         completedEffect = true;
       }
-      if (machine.state === 'stopped' || machine.state === 'suspended' || machine.state === 'created') {
+      if (machine.state === 'created') {
+        // Fly create already boots it. Observe that launch; never send a second start.
+        await this.machines.waitFor(machine.id,'started',60,machine.instance_id);
+      } else if (machine.state === 'stopped' || machine.state === 'suspended') {
         if ((work || completedEffect) && await owns()) {
           mutationStarted = true;
           await this.machines.start(machine.id);
+          await this.machines.waitFor(machine.id,'started',60,machine.instance_id);
           completedEffect = true;
           await recordFreeAgentEvent(this.database,agentId,'start_requested',{machineId:machine.id,operationId,machineVersion:machine.instance_id});
         }

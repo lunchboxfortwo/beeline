@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS owned_model_credentials (
 );
 DROP INDEX IF EXISTS owned_model_credentials_invocation;
 ALTER TABLE owned_model_credentials ALTER COLUMN expires_ms DROP NOT NULL;
+ALTER TABLE owned_model_credentials ALTER COLUMN model_token_hash DROP NOT NULL;
 -- A credential belongs to its invocation. Older rows keep their recorded
 -- connection only as signed history; new rows record none.
 ALTER TABLE owned_model_credentials ALTER COLUMN connection_id DROP NOT NULL,
@@ -57,18 +58,18 @@ export interface OwnedModelBinding {
   readonly instanceId: string | null;
   readonly model: string;
   readonly agentModel: string | null;
-  readonly modelTokenHash: string;
+  readonly modelTokenHash: string | null;
   readonly expiresMs: number | null;
 }
 interface CredentialRow {
   id: string; key_version: string; token_hash: string; agent_id: string; owner_id: string; workspace_id: string; room_id: string;
   command_id: string; request_id: string; connection_id: string | null; connection_epoch: string | number | null;
-  instance_id: string | null; model: string; agent_model: string | null; model_token_hash: string; expires_ms: string | number | null;
+  instance_id: string | null; model: string; agent_model: string | null; model_token_hash: string | null; expires_ms: string | number | null;
 }
 interface CurrentRow {
   agent_id: string; owner_id: string; workspace_id: string; room_id: string; parent_id: string | null;
   command_id: string; request_id: string;
-  model: string; agent_model: string | null; model_token_hash: string; expires_ms: string | number | null;
+  model: string; agent_model: string | null; model_token_hash: string | null; expires_ms: string | number | null;
 }
 declare const authenticated: unique symbol;
 export type AuthenticatedOwnedModel = Readonly<{ readonly [authenticated]: true; readonly binding: OwnedModelBinding }>;
@@ -89,8 +90,8 @@ function binding(row: CredentialRow): OwnedModelBinding {
     expiresMs: row.expires_ms === null ? null : Number(row.expires_ms) });
   if (!/^[a-f0-9]{32}$/.test(value.id) || !/^[A-Za-z0-9._-]{1,32}$/.test(value.keyVersion) ||
       (value.connectionEpoch !== null && (!Number.isSafeInteger(value.connectionEpoch) || value.connectionEpoch < 1)) || (value.expiresMs !== null && (!Number.isSafeInteger(value.expiresMs) || value.expiresMs < 1)) ||
-      !/^[a-f0-9]{64}$/.test(value.modelTokenHash) || Object.entries(value).some(([key, item]) =>
-        !['expiresMs', 'connectionEpoch', 'agentModel', 'connectionId', 'instanceId'].includes(key) && !scalar(item)) ||
+      (value.modelTokenHash !== null && !/^[a-f0-9]{64}$/.test(value.modelTokenHash)) || Object.entries(value).some(([key, item]) =>
+        !['expiresMs', 'connectionEpoch', 'agentModel', 'connectionId', 'instanceId', 'modelTokenHash'].includes(key) && !scalar(item)) ||
       [value.agentModel, value.connectionId, value.instanceId].some(item => item !== null && !scalar(item))) throw new OwnedModelRefusal();
   return value;
 }
@@ -111,7 +112,7 @@ const CURRENT = `SELECT command.agent_id,starter.owner_id,room.workspace_id,room
  JOIN agents agent ON agent.agent_id=command.agent_id
  JOIN free_agents starter ON starter.agent_id=command.agent_id AND starter.owner_id=agent.owner_id
  WHERE command.id=$1 AND command.agent_id=$2 AND command.action='input' AND command.state='pending'
-   AND starter.removed_at IS NULL AND starter.model_token_hash IS NOT NULL
+   AND starter.removed_at IS NULL
    AND room.archived_at IS NULL AND parent.archived_at IS NULL
    AND EXISTS(SELECT 1 FROM memberships workspace WHERE workspace.workspace_id=room.workspace_id AND workspace.room_id IS NULL
      AND workspace.identity_id=command.agent_id AND workspace.removed_at IS NULL)
@@ -148,7 +149,7 @@ export class OwnedModelCredentials {
         token_hash: '', agent_id: current.agent_id, owner_id: current.owner_id, workspace_id: current.workspace_id, room_id: current.room_id,
         command_id: current.command_id, request_id: current.request_id,
         connection_id: null, connection_epoch: null, instance_id: null,
-        model: current.model, agent_model: current.agent_model, model_token_hash: current.model_token_hash, expires_ms: current.expires_ms };
+        model: current.model, agent_model: current.agent_model, model_token_hash: null, expires_ms: current.expires_ms };
       const value = binding(candidate); candidate.token_hash = hash(this.token(value));
       row = (await database.query<CredentialRow>(`INSERT INTO owned_model_credentials(id,key_version,token_hash,agent_id,owner_id,workspace_id,room_id,
         command_id,generation_id,request_id,model,agent_model,model_token_hash,expires_ms)
@@ -163,10 +164,19 @@ export class OwnedModelCredentials {
     const value = binding(row), token = this.token(value);
     if (value.ownerId !== current.owner_id || value.workspaceId !== current.workspace_id || value.roomId !== current.room_id ||
         value.requestId !== current.request_id || value.model !== current.model ||
-        value.agentModel !== current.agent_model || value.modelTokenHash !== current.model_token_hash ||
+        value.agentModel !== current.agent_model || (value.modelTokenHash !== null && value.modelTokenHash !== current.model_token_hash) ||
         !fixedEqual(Buffer.from(hash(token), 'hex'), Buffer.from(row.token_hash, 'hex')))
       throw new OwnedModelRefusal();
     return Object.freeze({ v: 1, token, expiresAt: null });
+  }
+
+  /** Reconstruct only already-issued credentials in the queue's single batch read. */
+  async forCommands(database: SqlDatabase, commandIds: readonly string[]): Promise<ReadonlyMap<string, OwnedModelCredential>> {
+    if (!commandIds.length) return new Map();
+    const rows = await database.query<CredentialRow>(`SELECT * FROM owned_model_credentials
+      WHERE command_id=ANY($1::text[]) AND generation_id=command_id`, [commandIds]);
+    return new Map(rows.rows.map(row => [row.command_id,
+      Object.freeze({ v: 1 as const, token: this.token(binding(row)), expiresAt: null })]));
   }
 
   async authenticate(database: SqlDatabase, token: string): Promise<AuthenticatedOwnedModel> {
@@ -205,6 +215,6 @@ export class OwnedModelCredentials {
     const current = (await database.query<CurrentRow>(CURRENT, [value.commandId, value.agentId, model])).rows[0];
     if (!current || current.owner_id !== value.ownerId || current.workspace_id !== value.workspaceId || current.room_id !== value.roomId ||
         current.request_id !== value.requestId || current.model !== value.model || current.agent_model !== value.agentModel ||
-        current.model_token_hash !== value.modelTokenHash) throw new OwnedModelRefusal();
+        (value.modelTokenHash !== null && current.model_token_hash !== value.modelTokenHash)) throw new OwnedModelRefusal();
   }
 }

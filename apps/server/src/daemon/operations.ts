@@ -25,7 +25,7 @@ import { notifyFeedbackFixed, reportAgentFeedback } from '../feedback.js';
 import { deleteSkill, saveSkill } from '../institutional-skills.js';
 import { archiveWorkflow, assignWorkflowRole, handoff, getWorkflowRun, cancelWorkflowRun, saveWorkflow, startWorkflow } from '../workflow-runs.js';
 import type { DaemonContext } from './context.js';
-import { Input, OwnedModelClaimCapability, Output, id } from './values.js';
+import { Input, Output, id } from './values.js';
 import { getInstitutionalContextOperation, saveInstitutionalMemoryOperation, searchInstitutionalMemoryOperation, searchInstitutionalHistoryOperation, loadWorkspaceSkillOperation, getModelCredentialOperation, startAgentTurnOperation, getRoomGitHubTokenOperation, markAgentTurnSilentOperation, postBackgroundToolCompletionOperation, endComputerSessionOperation, createLinkSpendRequestOperation, retrieveLinkSpendRequestOperation, postStarterWelcomeOperation, postRepositoryOnboardingOperation, findConnectorsOperation, postVaultSaveCardOperation, setCornerHoldOperation, orderCornerMergeOperation } from './operation-effects.js';
 import { daemonAccess, daemonRoomMembers } from './access.js';
 import { daemonBootstrap, daemonWorkspaceRoster, daemonInbox } from './inbox-roster.js';
@@ -48,7 +48,7 @@ import { daemonAgentWorkbench, daemonSearchMcpRegistry } from './workbench.js';
 import { daemonConnectAppFrontDoor, daemonConnectService, daemonListAppTools, daemonExecuteAppTool } from './apps.js';
 import { modelText } from '../message-origin.js';
 
-export async function daemonExecuteOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
+export async function daemonExecuteOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
     switch (name) {
       case 'askOwnerQuestion':
         return await askOwnerQuestion(ctx.database,input as Input<'askOwnerQuestion'>,authenticatedAgentId) as Output<Name>;
@@ -56,16 +56,16 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
         await updateWorkItem(ctx.database,{...input as Input<'updateWorkItem'>,roomId:(input as Input<'updateWorkItem'>).targetRoomId},authenticatedAgentId);
         return daemonWriteResult(ctx) as Output<Name>;
       case 'getInstitutionalContext':
-        return getInstitutionalContextOperation(ctx, name, input, authenticatedAgentId, modelClaim, candidate, scopedRoom);
+        return getInstitutionalContextOperation(ctx, name, input, authenticatedAgentId, candidate, scopedRoom);
       case 'saveInstitutionalMemory':
       case 'updateInstitutionalMemory':
       case 'deleteInstitutionalMemory':
       case 'reportInstitutionalMemoryUsed':
-        return saveInstitutionalMemoryOperation(ctx, name, input, authenticatedAgentId, modelClaim, candidate, scopedRoom);
+        return saveInstitutionalMemoryOperation(ctx, name, input, authenticatedAgentId, candidate, scopedRoom);
       case 'searchInstitutionalMemory':
-        return searchInstitutionalMemoryOperation(ctx, name, input, authenticatedAgentId, modelClaim, candidate, scopedRoom);
+        return searchInstitutionalMemoryOperation(ctx, name, input, authenticatedAgentId, candidate, scopedRoom);
       case 'searchInstitutionalHistory':
-        return searchInstitutionalHistoryOperation(ctx, name, input, authenticatedAgentId, modelClaim, candidate, scopedRoom);
+        return searchInstitutionalHistoryOperation(ctx, name, input, authenticatedAgentId, candidate, scopedRoom);
       case 'getInstitutionalMemoryTurnStats':
         if (!ctx.institutionalMemoryShadow.live) {
           return { searchCalls: 0, searchMisses: 0 } as Output<Name>;
@@ -76,7 +76,7 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
           input as Input<'getInstitutionalMemoryTurnStats'>,
         )) as Output<Name>;
       case 'loadWorkspaceSkill':
-        return loadWorkspaceSkillOperation(ctx, name, input, authenticatedAgentId, modelClaim, candidate, scopedRoom);
+        return loadWorkspaceSkillOperation(ctx, name, input, authenticatedAgentId, candidate, scopedRoom);
       case 'saveSkill':
         if (!ctx.commandTransaction || !ctx.authorizedCommand) {
           throw new Error('skill save requires an active command');
@@ -155,9 +155,9 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
       case 'getAgentCommands':
         return (await readAgentCommands(ctx.database, authenticatedAgentId)) as Output<Name>;
       case 'getModelCredential':
-        return getModelCredentialOperation(ctx, name, input, authenticatedAgentId, modelClaim, candidate, scopedRoom);
+        return getModelCredentialOperation(ctx, name, input, authenticatedAgentId, candidate, scopedRoom);
       case 'startAgentTurn':
-        return startAgentTurnOperation(ctx, name, input, authenticatedAgentId, modelClaim, candidate, scopedRoom);
+        return startAgentTurnOperation(ctx, name, input, authenticatedAgentId, candidate, scopedRoom);
       case 'getDaemonBootstrap':
         return (await daemonBootstrap(ctx, authenticatedAgentId)) as Output<Name>;
       case 'getWorkspaceRoster':
@@ -375,7 +375,7 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
           inputs => ctx.github!.dispatchProductionRelease(release.roomId, inputs)) as Output<Name>;
       }
       case 'getRoomGitHubToken':
-        return getRoomGitHubTokenOperation(ctx, name, input, authenticatedAgentId, modelClaim, candidate, scopedRoom);
+        return getRoomGitHubTokenOperation(ctx, name, input, authenticatedAgentId, candidate, scopedRoom);
       case 'getRoomTargetBranch':
         return (await daemonTargetBranch(ctx,
           (input as Input<'getRoomTargetBranch'>).roomId,
@@ -403,7 +403,7 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
         )) as Output<Name>;
       case 'markAgentTurnSilent':
       case 'postRoomMessage':
-        return markAgentTurnSilentOperation(ctx, name, input, authenticatedAgentId, modelClaim, candidate, scopedRoom);
+        return markAgentTurnSilentOperation(ctx, name, input, authenticatedAgentId, candidate, scopedRoom);
       case 'reactToRoomMessage':
         return (await daemonReactToRoomMessage(ctx,
           input as Input<'reactToRoomMessage'>,
@@ -437,7 +437,7 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
           authenticatedAgentId,
         )) as Output<Name>;
       case 'postBackgroundToolCompletion':
-        return postBackgroundToolCompletionOperation(ctx, name, input, authenticatedAgentId, modelClaim, candidate, scopedRoom);
+        return postBackgroundToolCompletionOperation(ctx, name, input, authenticatedAgentId, candidate, scopedRoom);
       case 'postAgentActivity':
         return (await daemonActivity(ctx,
           input as Input<'postAgentActivity'>,
@@ -460,7 +460,7 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
         })) as Output<Name>;
       }
       case 'endComputerSession':
-        return endComputerSessionOperation(ctx, name, input, authenticatedAgentId, modelClaim, candidate, scopedRoom);
+        return endComputerSessionOperation(ctx, name, input, authenticatedAgentId, candidate, scopedRoom);
       case 'refreshComputerSession':
         return (await refreshComputerSession(ctx.database, {
           ...input as Input<'refreshComputerSession'>, agentId: authenticatedAgentId,
@@ -564,9 +564,9 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
       case 'getRoomGoogleGrant':
         return { status: 'pending' } as Output<Name>;
       case 'createLinkSpendRequest':
-        return createLinkSpendRequestOperation(ctx, name, input, authenticatedAgentId, modelClaim, candidate, scopedRoom);
+        return createLinkSpendRequestOperation(ctx, name, input, authenticatedAgentId, candidate, scopedRoom);
       case 'retrieveLinkSpendRequest':
-        return retrieveLinkSpendRequestOperation(ctx, name, input, authenticatedAgentId, modelClaim, candidate, scopedRoom);
+        return retrieveLinkSpendRequestOperation(ctx, name, input, authenticatedAgentId, candidate, scopedRoom);
       case 'beginRegistryMcpOAuth': {
         if (!ctx.registryMcpOAuth) throw new Error('Registry MCP OAuth is unavailable');
         return (await ctx.registryMcpOAuth.begin(
@@ -663,7 +663,7 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
         return result as Output<Name>;
       }
       case 'postStarterWelcome':
-        return postStarterWelcomeOperation(ctx, name, input, authenticatedAgentId, modelClaim, candidate, scopedRoom);
+        return postStarterWelcomeOperation(ctx, name, input, authenticatedAgentId, candidate, scopedRoom);
       case 'postRoomInvite': {
         const request = input as Input<'postRoomInvite'>;
         await daemonAccess(ctx, request.roomId, authenticatedAgentId);
@@ -676,7 +676,7 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
         return result as Output<Name>;
       }
       case 'postRepositoryOnboarding':
-        return postRepositoryOnboardingOperation(ctx, name, input, authenticatedAgentId, modelClaim, candidate, scopedRoom);
+        return postRepositoryOnboardingOperation(ctx, name, input, authenticatedAgentId, candidate, scopedRoom);
       case 'askRoomChoice':
         return (await daemonAskRoomChoice(ctx,
           input as Input<'askRoomChoice'>,
@@ -736,7 +736,7 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
       case 'searchMcpRegistry':
         return (await daemonSearchMcpRegistry(ctx, input as Input<'searchMcpRegistry'>)) as Output<Name>;
       case 'findConnectors':
-        return findConnectorsOperation(ctx, name, input, authenticatedAgentId, modelClaim, candidate, scopedRoom);
+        return findConnectorsOperation(ctx, name, input, authenticatedAgentId, candidate, scopedRoom);
       case 'connectMcpServer':
         return (await daemonConnectMcpServer(ctx,
           input as Input<'connectMcpServer'>,
@@ -756,16 +756,16 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
         return (await daemonExecuteAppTool(ctx, input as Input<'executeAppTool'>,
           authenticatedAgentId)) as Output<Name>;
       case 'postVaultSaveCard':
-        return postVaultSaveCardOperation(ctx, name, input, authenticatedAgentId, modelClaim, candidate, scopedRoom);
+        return postVaultSaveCardOperation(ctx, name, input, authenticatedAgentId, candidate, scopedRoom);
       case 'offerConnector':
         return (await daemonOfferConnector(ctx,
           input as Input<'offerConnector'>,
           authenticatedAgentId,
         )) as Output<Name>;
       case 'setCornerHold':
-        return setCornerHoldOperation(ctx, name, input, authenticatedAgentId, modelClaim, candidate, scopedRoom);
+        return setCornerHoldOperation(ctx, name, input, authenticatedAgentId, candidate, scopedRoom);
       case 'orderCornerMerge':
-        return orderCornerMergeOperation(ctx, name, input, authenticatedAgentId, modelClaim, candidate, scopedRoom);
+        return orderCornerMergeOperation(ctx, name, input, authenticatedAgentId, candidate, scopedRoom);
       case 'createCorner':
         return (await daemonCreateCorner(ctx,
           input as Input<'createCorner'>,

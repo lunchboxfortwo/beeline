@@ -1,3 +1,4 @@
+import { OwnedModelCredentials } from '../../apps/server/src/owned-model-credential.js';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it } from 'vitest';
@@ -75,6 +76,14 @@ async function lostReply(kind: DatabaseFailureKind, boundary: 'INSERT' | 'COMMIT
 type MigrationEntry = keyof Pick<typeof import('../../apps/server/src/database.js'),
   'migrate' | 'migrateData' | 'markSchemaCurrent' | 'assertSchemaCurrent'>;
 const cases = {
+  ownedModelCredentials: async () => {
+    const credentials = new OwnedModelCredentials({ currentVersion: 'seam', key: () => Buffer.alloc(32, 7) }, () => 'synthetic/model');
+    database.ownedModelCredentials = credentials;
+    await database.transaction(async tx => {
+      expect(tx.ownedModelCredentials).toBe(credentials);
+      await tx.transaction(async nested => { expect(nested.ownedModelCredentials).toBe(credentials); });
+    });
+  },
   query: async () => {
     expect((await database.query('SELECT $1::text value', ['received'])).rows).toEqual([{ value: 'received' }]);
     await lostReply('08006', 'INSERT');

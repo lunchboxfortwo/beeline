@@ -53,9 +53,6 @@ docker manifest inspect --verbose "$image" > "$RUNNER_TEMP/free-agent-manifest.j
 digest=$(node -e 'const m=require(process.argv[1]); const d=m.Descriptor?.digest; if(!/^sha256:[0-9a-f]{64}$/.test(d)) throw Error("Missing published image digest"); console.log(d)' "$RUNNER_TEMP/free-agent-manifest.json")
 echo "image_ref=$image@$digest" >> "$GITHUB_OUTPUT"
 ;;
-step7)
-flyctl secrets set --app beeline-server --stage "FLY_FREE_AGENT_IMAGE=$IMAGE_REF"
-;;
 step8)
 set -euo pipefail
 image_label="${RELEASE_VERSION#v}-${RELEASE_SHA:0:12}"
@@ -344,12 +341,12 @@ test -s "$RUNNER_TEMP/server-release/free-agent-server-ids"
 machine=$(head -n 1 "$RUNNER_TEMP/server-release/free-agent-server-ids")
 # A rerun must revisit a failed refresh even when the servers shipped.
 if [ -z "$IMAGE_REF" ]; then
-  IMAGE_REF=$(flyctl machine exec "$machine" --app beeline-server 'printenv FLY_FREE_AGENT_IMAGE')
+  IMAGE_REF=$(flyctl machine exec "$machine" --app beeline-server "node -p 'require(\"/app/apps/server/assets/free-agent-image.json\").image'")
 fi
 [[ "$IMAGE_REF" == registry.fly.io/beeline-free-agents:*@sha256:* ]]
 [[ "${IMAGE_REF##*@}" =~ ^sha256:[0-9a-f]{64}$ ]]
 while read -r machine; do
-  actual=$(flyctl machine exec "$machine" --app beeline-server 'printenv FLY_FREE_AGENT_IMAGE')
+  actual=$(flyctl machine exec "$machine" --app beeline-server "node -p 'require(\"/app/apps/server/assets/free-agent-image.json\").image'")
   if [ "$actual" != "$IMAGE_REF" ]; then
     echo "::error::Server $machine still uses an older free-agent image"
     exit 1

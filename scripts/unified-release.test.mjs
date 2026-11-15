@@ -93,7 +93,7 @@ test('explicit recovery selection still controls which components rebuild', () =
 
 // The free-agent image must use the release's existing rollout; publishing
 // after completion used to restart every server a second time and drop phones.
-test('free-agent image publication stages its digest before the sole server rollout', () => {
+test('free-agent image publication bakes its digest into the sole server rollout', () => {
   assert.equal(existsSync('.github/workflows/free-agent-image.yml'), false);
   const workflow = parse(readFileSync('.github/workflows/unified-release.yml', 'utf8'));
   const steps = parse(readFileSync('.github/actions/server-leg/action.yml', 'utf8')).runs.steps;
@@ -105,11 +105,11 @@ test('free-agent image publication stages its digest before the sole server roll
     step.run = body[1];
   }
   const publish = steps.findIndex(step => step.id === 'free_agent_image');
-  const stage = steps.findIndex(step => step.name?.startsWith('Stage the free starter'));
+  const build = steps.findIndex(step => step.name?.startsWith('Build the exact Fly image'));
   const rollout = steps.findIndex(step => step.name?.startsWith('Canary one Machine'));
   const verify = steps.findIndex(step => step.name?.startsWith('Verify the free starter image'));
-  assert.ok(publish < stage && stage < rollout && rollout < verify);
-  for (const index of [publish, stage]) assert.equal(steps[index].if, "steps.fleet.outputs.shipped != 'true'");
+  assert.ok(publish < build && build < rollout && rollout < verify);
+  for (const index of [publish, build]) assert.equal(steps[index].if, "steps.fleet.outputs.shipped != 'true'");
   assert.equal(steps[verify].if, undefined, 'a shipped server must not hide a failed helper refresh on rerun');
   const updates = steps.filter(step => /flyctl machine update/.test(step.run ?? ''));
   assert.equal(updates.length, 1);
@@ -129,7 +129,7 @@ printf '%s\\n' "$*" >> "$CALLS"
 case "$1 $2" in
   'machine list') printf '%s\\n' '[{"id":"one","state":"started"},{"id":"two","state":"started"}]' ;;
   'machine exec')
-    if [ "$6" = 'printenv FLY_FREE_AGENT_IMAGE' ]; then
+    if [ "$6" != '--json' ]; then
       printf '%s\\n' "\${ACTUAL_IMAGE:-$IMAGE_REF}"
     else
       # Model Fly's independent remote and local exit codes, including omitempty.
@@ -144,14 +144,14 @@ esac
       IMAGE_REF: image, EXEC_RESULT: '{"stdout":"refreshed"}', CALLS: join(root, 'calls') };
     execFileSync('bash', ['-c', steps[publish].run], { cwd: root, env });
     assert.equal(readFileSync(output, 'utf8').trim(), `image_ref=${image}`);
-    execFileSync('bash', ['-c', steps[stage].run], { cwd: root, env });
+    assert.equal(steps[build].env.IMAGE_REF, '${{ steps.free_agent_image.outputs.image_ref }}');
     mkdirSync(join(root, 'server-release'));
     execFileSync('bash', ['-c', steps[verify].run], { cwd: root, env });
     const calls = readFileSync(env.CALLS, 'utf8');
-    assert.match(calls, /secrets set --app beeline-server --stage FLY_FREE_AGENT_IMAGE=registry/);
+    assert.equal(calls.includes('secrets set'), false);
     assert.equal(calls.includes('machine update'), false);
-    assert.match(calls, /machine exec one --app beeline-server printenv FLY_FREE_AGENT_IMAGE/);
-    assert.match(calls, /machine exec two --app beeline-server printenv FLY_FREE_AGENT_IMAGE/);
+    assert.match(calls, /machine exec one --app beeline-server node -p.*free-agent-image\.json/);
+    assert.match(calls, /machine exec two --app beeline-server node -p.*free-agent-image\.json/);
     assert.match(calls, /--refresh-free-agents/);
     assert.match(calls, /machine exec one --app beeline-server --json --timeout 120 node \/app\/apps\/server\/dist\/index.js --refresh-free-agents/);
     // The command must work without Docker's /app WORKDIR, and remote failures

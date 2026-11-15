@@ -100,15 +100,8 @@ export class AccessDeniedError extends Error {
 }
 
 
-export declare const ownedModelClaimBrand: unique symbol;
-
-/** Process-local negotiated registration capability. Never a request argument
- * on the wire, bearer, activation snapshot or client held-state record. */
-export type OwnedModelClaimCapability = Readonly<{ readonly [ownedModelClaimBrand]: true }>;
-
 export type OwnedModelConfiguration = Readonly<{ credentials: OwnedModelCredentials; ready(): boolean }>;
 
-export type OwnedModelNegotiation = Readonly<{ freeAgent: boolean; capability?: OwnedModelClaimCapability }>;
 
 
 /**

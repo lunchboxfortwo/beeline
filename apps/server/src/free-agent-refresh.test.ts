@@ -17,7 +17,7 @@ describe('release refresh and committed free-agent sleep events', () => {
   let live: LiveHub;
   let service: FreeAgentService;
   let off: () => void;
-  let failStart: string | undefined;
+  let failUpdate: string | undefined;
   let failRead = false;
   let beforeUpdate: (() => Promise<void>) | undefined;
   const fleet = new Map<string, { state: string; instance_id: string; config: {
@@ -30,7 +30,7 @@ describe('release refresh and committed free-agent sleep events', () => {
   beforeEach(async () => {
     db = await migratedDatabase();
     live = new LiveHub();
-    fleet.clear(); calls.length = 0; logs.length = 0; failStart = undefined; failRead = false; beforeUpdate = undefined;
+    fleet.clear(); calls.length = 0; logs.length = 0; failUpdate = undefined; failRead = false; beforeUpdate = undefined;
     const request = vi.fn<typeof fetch>(async (url, init) => {
       if (new URL(String(url)).pathname.endsWith('/machines')) return Response.json([...fleet].map(([id,machine])=>({id,...machine})));
       const match = new URL(String(url)).pathname.match(/\/machines\/(m\d+)(.*)/)!;
@@ -40,6 +40,7 @@ describe('release refresh and committed free-agent sleep events', () => {
       if (!path && init?.method === 'GET') return failRead ? new Response('rate limited', { status: 429 }) : Response.json({id,...machine});
       if (!path && init?.method === 'POST') {
         await beforeUpdate?.();
+        if (id === failUpdate) return new Response('replacement refused', { status: 500 });
         const update = JSON.parse(String(init.body));
         expect(update.current_version).toBe(machine.instance_id);
         expect(update.skip_launch).toBe(false);
@@ -52,7 +53,6 @@ describe('release refresh and committed free-agent sleep events', () => {
       else if (path === '/wait') machine.state = new URL(String(url)).searchParams.get('state')!;
       else if (path === '/suspend') machine.state = 'suspended';
       else if (path === '/start') {
-        if (id === failStart) return new Response('start refused', { status: 500 });
         machine.state = 'started';
       } else throw new Error(`Unexpected Fly call ${url}`);
       return Response.json({});
@@ -137,10 +137,9 @@ describe('release refresh and committed free-agent sleep events', () => {
     await Promise.all(signals.mock.results.map(result => result.value));
 
     expect((await db.query('SELECT 1 FROM agent_commands')).rowCount).toBe(0);
-    expect(fleet.get('m1')).toMatchObject({ state: 'suspended', config: { image: IMAGE } });
-    expect(calls.filter(call => call.startsWith('POST'))).toEqual([
-      ...(release === 'old' ? ['POST m1'] : []), 'POST m1/suspend',
-    ]);
+    expect(fleet.get('m1')).toMatchObject({ state: 'suspended' });
+    expect(fleet.get('m1')!.config.image === IMAGE).toBe(release === 'current');
+    expect(calls.filter(call => call.startsWith('POST'))).toEqual(['POST m1/suspend']);
   });
 
   it.each(['working', 'connector'] as const)('release visits replace and suspend a connected idle helper while %s work survives image replacement', async work => {
@@ -165,7 +164,7 @@ describe('release refresh and committed free-agent sleep events', () => {
   });
 
   it.each(['startup', 'release', 'connection'].flatMap(signal =>
-    ['old', 'current'].map(binding => ({ signal, binding }))))('$signal replaces and suspends an idle helper with a saved $binding-machine Squire install', async ({ signal, binding }) => {
+    ['old', 'current'].map(binding => ({ signal, binding }))))('$signal reconciles and suspends an idle helper with a saved $binding-machine Squire install', async ({ signal, binding }) => {
     const startup = vi.spyOn(service, 'reconcileAll');
     const signals = vi.spyOn(service, 'reconcile');
     if (signal === 'connection') {
@@ -204,8 +203,9 @@ describe('release refresh and committed free-agent sleep events', () => {
     }
 
     expect((await db.query('SELECT 1 FROM agent_commands')).rowCount).toBe(0);
-    expect(fleet.get('m1')).toMatchObject({ state: 'suspended', config: { image: IMAGE } });
-    expect(calls.filter(call => call.startsWith('POST'))).toEqual(['POST m1', 'POST m1/suspend']);
+    expect(fleet.get('m1')).toMatchObject({ state: 'suspended' });
+    expect(fleet.get('m1')!.config.image === IMAGE).toBe(signal !== 'connection');
+    expect(calls.filter(call => call.startsWith('POST'))).toEqual([...(signal !== 'connection' ? ['POST m1'] : []), 'POST m1/suspend']);
     expect((await db.query(`SELECT squire_work->>'install' install FROM squire_machines`)).rows)
       .toEqual([{ install: 'true' }]);
   });
@@ -230,17 +230,19 @@ describe('release refresh and committed free-agent sleep events', () => {
     for(let n=1;n<=31;n++)expect(fleet.get(`m${n}`)?.config.image).toBe(IMAGE);
     expect(fleet.get('m32')?.config.image).toBe(IMAGE);
     expect((await db.query(`SELECT fly_machine_id FROM free_agents WHERE agent_id=$1`,[agentId(33)])).rows).toEqual([{fly_machine_id:null}]);
-    expect(calls.filter(call=>call.includes('/start'))).toHaveLength(32);
+    expect(calls.filter(call=>call.includes('/start'))).toHaveLength(0);
+    expect(calls.filter(call=>call.endsWith('/wait'))).toHaveLength(32);
     expect(fleet.get('m32')?.state).toBe('started');
     expect((await db.query(`SELECT 1 FROM agent_commands WHERE state='pending'`)).rowCount).toBe(1);
   });
 
   it('reports unknown observations after visiting the rest of the inventory',async()=>{
-    await seed(1);await seed(2);failStart='m1';
+    await seed(1);await seed(2);failUpdate='m1';
     await expect(service.reconcileAll()).rejects.toThrow('observation unavailable for 1');
     expect(fleet.get('m2')?.config.image).toBe(IMAGE);
     expect(fleet.get('m2')?.state).toBe('started');
-    expect(calls.filter(call=>call==='POST m1/start')).toHaveLength(1);
+    expect(calls.filter(call=>call==='POST m1')).toHaveLength(1);
+    expect(calls.filter(call=>call.endsWith('/start'))).toHaveLength(0);
   });
 
   it('accounts for unmapped provider machines without mutating them',async()=>{

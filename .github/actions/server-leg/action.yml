@@ -80,18 +80,13 @@ runs:
         FLY_API_TOKEN: ${{ inputs.free_agent_image_token }}
         RELEASE_SHA: ${{ inputs.release_sha }}
         RELEASE_VERSION: ${{ inputs.release_version }}
-    - name: Stage the free starter image for this server rollout
-      if: steps.fleet.outputs.shipped != 'true'
-      shell: bash
-      env:
-        IMAGE_REF: ${{ steps.free_agent_image.outputs.image_ref }}
-      run: bash "$GITHUB_WORKSPACE/scripts/release-steps/server-leg.sh" step7
     - name: Build the exact Fly image and capture the two-Machine rollback plan
       if: steps.fleet.outputs.shipped != 'true'
       shell: bash
       run: |-
         bash "$GITHUB_WORKSPACE/scripts/release-steps/server-leg.sh" step8
       env:
+        IMAGE_REF: ${{ steps.free_agent_image.outputs.image_ref }}
         RELEASE_SHA: ${{ inputs.release_sha }}
         RELEASE_VERSION: ${{ inputs.release_version }}
 

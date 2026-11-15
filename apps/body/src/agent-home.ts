@@ -581,6 +581,8 @@ async function provisionRoomAgentCredentials(
     throw error;
   }
 
+  if (agentBehavior(input.agentKind).hostedModelConfig === 'model-file') await provisionPiCustomModelConfig(root, operatorHome, true, undefined);
+
   const env = tmpLinkReady
     ? roomAgentHomeEnv(root)
     : { ...roomAgentHomeEnv(root), TMPDIR: resolve(root, 'tmp') };
@@ -603,8 +605,6 @@ export async function prepareRoomAgentHome(input: RoomAgentHomeInput): Promise<R
   );
   await writeIsolatedHarnessFile(resolve(root, 'claude', '.claude.json'), '{"mcpServers":{}}');
   await writeIsolatedHarnessFile(resolve(root, 'pi', 'mcp.json'), '{"mcpServers":{}}');
-  await provisionPiCustomModelConfig(root, operatorHome, true, undefined);
-
   const prior = agentHomeProvisionQueues.get(root) ?? Promise.resolve();
   const provision = prior
     .catch(() => undefined)

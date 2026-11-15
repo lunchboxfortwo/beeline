@@ -27,10 +27,10 @@ import type { daemonBootstrap,daemonInbox,daemonWorkspaceRoster } from './inbox-
 import type { daemonExpiredMediaIds,daemonRoomAttachment,daemonRoomMessage,daemonWithStoredDigests } from './message-reads.js';
 import type { daemonCompletion,daemonLiveOutput,daemonPersistTurnTrace,daemonPostAgentAttachment,daemonPostRoomMessage,daemonRetract } from './messages.js';
 import type { daemonAgentAvatar,daemonCommands,daemonMachineReport,daemonModelCatalog,daemonPostMandate } from './models.js';
-import type { daemonModelClaimCredentials,daemonNegotiateOwnedModel,daemonOwnedModelReady,daemonSetOwnedModel,daemonSetStarterOnboarding } from './owned-model.js';
+import type { daemonSetOwnedModel,daemonSetStarterOnboarding } from './owned-model.js';
 import type { daemonCreateAgentSchedule,daemonDeleteAgentSchedule,daemonListAgentSchedules,daemonListEventSubscriptions,daemonPostRoomEvent,daemonRecordScheduleAuthorization,daemonRequireScheduleAdmin,daemonSetEventSubscriptions,daemonUpdateAgentSchedule } from './schedules-events.js';
 import type { daemonActivity,daemonTurnReceipt } from './turn-receipts.js';
-import type { Input,Output,OwnedModelConfiguration } from './values.js';
+import type { Input,Output } from './values.js';
 import type { daemonAgentWorkbench,daemonAppCardMark,daemonOfferContext,daemonSearchMcpRegistry,daemonWarmConnectorIndex } from './workbench.js';
 
 /** Named service dependencies shared by ordinary and command-scoped handlers. */
@@ -77,15 +77,10 @@ export type CommandArguments<Handler> = Handler extends (ctx: infer _Context, ..
 /** Handler capabilities are derived from their owners, never from the service facade. */
 export interface DaemonContext extends DaemonDependencies {
   readonly dependencies: DaemonDependencies;
-  ownedModel?: OwnedModelConfiguration;
-  readonly modelClaims: WeakMap<object, { agentId: string; configuration: OwnedModelConfiguration }>;
   starterOnboarding?: StarterOnboardingService;
   memoryEmbed: EmbedFn | undefined;
   afterCommit: AfterCommit | undefined;
   setOwnedModel: (...args: CommandArguments<typeof daemonSetOwnedModel>) => ReturnType<typeof daemonSetOwnedModel>;
-  ownedModelReady: (...args: CommandArguments<typeof daemonOwnedModelReady>) => ReturnType<typeof daemonOwnedModelReady>;
-  negotiateOwnedModel: (...args: CommandArguments<typeof daemonNegotiateOwnedModel>) => ReturnType<typeof daemonNegotiateOwnedModel>;
-  modelClaimCredentials: (...args: CommandArguments<typeof daemonModelClaimCredentials>) => ReturnType<typeof daemonModelClaimCredentials>;
   setStarterOnboarding: (...args: CommandArguments<typeof daemonSetStarterOnboarding>) => ReturnType<typeof daemonSetStarterOnboarding>;
   reconcileZeroCheckWorkerCompletion: (...args: CommandArguments<typeof daemonReconcileZeroCheckWorkerCompletion>) => ReturnType<typeof daemonReconcileZeroCheckWorkerCompletion>;
   connectorAssignments: (...args: CommandArguments<typeof daemonConnectorAssignments>) => ReturnType<typeof daemonConnectorAssignments>;

@@ -378,13 +378,34 @@ async function main() {
           : {}),
       }
     : undefined;
-  if (freeAgentModel && freeAgentConfig) {
+  if (freeAgentConfig) {
     const version='free-agent-v1';
     const key=createHash('sha256').update('beeline:owned-model:root:v1\0').update(freeAgentConfig.sealSecret).digest();
     const ownedModel={ credentials:new OwnedModelCredentials({currentVersion:version,key:v=>v===version ? key : undefined},
       ()=>freeAgentConfig.model),ready:()=>true };
-    Object.assign(freeAgentModel,{ownedModel});
+    if (freeAgentModel) Object.assign(freeAgentModel,{ownedModel});
+    // Every queue writer, including background jobs, uses this release's signer.
+    for (const db of [database, jobsDatabase, enrichmentDatabase]) db.ownedModelCredentials = ownedModel.credentials;
     daemon.setOwnedModel(ownedModel);
+    // Upgrade previously accepted items once, before any helper can read them.
+    const pending = await database.query<{ id: string; agent_id: string }>(`SELECT command.id,command.agent_id
+      FROM agent_commands command JOIN free_agents starter ON starter.agent_id=command.agent_id
+      JOIN agents agent ON agent.agent_id=command.agent_id AND agent.owner_id=starter.owner_id
+      JOIN rooms room ON room.id=command.room_id
+      JOIN rooms parent ON parent.id=COALESCE(room.parent_id,room.id)
+      WHERE command.state='pending' AND command.action='input' AND starter.removed_at IS NULL
+        AND room.archived_at IS NULL AND parent.archived_at IS NULL
+        AND EXISTS(SELECT 1 FROM memberships workspace WHERE workspace.workspace_id=room.workspace_id
+          AND workspace.room_id IS NULL AND workspace.identity_id=command.agent_id AND workspace.removed_at IS NULL)
+        AND NOT EXISTS(SELECT 1 FROM owned_model_credentials credential WHERE credential.command_id=command.id)
+        AND EXISTS(SELECT 1 FROM memberships member
+          WHERE member.identity_id=command.agent_id AND member.removed_at IS NULL
+            AND member.room_id=COALESCE(room.parent_id,room.id) AND room.archived_at IS NULL)`);
+    for (const item of pending.rows) await database.transaction(async db => {
+      // A preceding server may answer or stop the item while this server boots.
+      if (!(await db.query(`SELECT 1 FROM agent_commands WHERE id=$1 AND state='pending' FOR UPDATE`, [item.id])).rowCount) return;
+      await ownedModel.credentials.issueInTransaction(db, { agentId: item.agent_id, commandId: item.id });
+    });
   }
   const starterOnboarding = new StarterOnboardingService(database, freeAgentModel);
   phone.setStarterOnboarding(starterOnboarding);

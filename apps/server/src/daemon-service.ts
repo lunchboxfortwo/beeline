@@ -20,10 +20,10 @@ import { daemonBootstrap,daemonInbox,daemonWorkspaceRoster } from './daemon/inbo
 import { daemonExpiredMediaIds,daemonRoomAttachment,daemonRoomMessage,daemonWithStoredDigests } from './daemon/message-reads.js';
 import { daemonCompletion,daemonLiveOutput,daemonPersistTurnTrace,daemonPostAgentAttachment,daemonPostRoomMessage,daemonRetract } from './daemon/messages.js';
 import { daemonAgentAvatar,daemonCommands,daemonMachineReport,daemonModelCatalog,daemonPostMandate } from './daemon/models.js';
-import { daemonModelClaimCredentials,daemonNegotiateOwnedModel,daemonOwnedModelReady,daemonSetOwnedModel,daemonSetStarterOnboarding } from './daemon/owned-model.js';
+import { daemonSetOwnedModel,daemonSetStarterOnboarding } from './daemon/owned-model.js';
 import { daemonCreateAgentSchedule,daemonDeleteAgentSchedule,daemonListAgentSchedules,daemonListEventSubscriptions,daemonPostRoomEvent,daemonRecordScheduleAuthorization,daemonRequireScheduleAdmin,daemonSetEventSubscriptions,daemonUpdateAgentSchedule } from './daemon/schedules-events.js';
 import { daemonActivity,daemonTurnReceipt } from './daemon/turn-receipts.js';
-import { DEFAULT_MEDIA_MAXIMUM_BYTES,OwnedModelConfiguration } from './daemon/values.js';
+import { DEFAULT_MEDIA_MAXIMUM_BYTES } from './daemon/values.js';
 import { daemonAgentWorkbench,daemonAppCardMark,daemonOfferContext,daemonSearchMcpRegistry,daemonWarmConnectorIndex } from './daemon/workbench.js';
 import { feedbackConfigFromEnv } from './feedback.js';
 import type { AfterCommit,EmbedFn } from './institutional-memory-embeddings.js';
@@ -32,7 +32,6 @@ import { githubProviderKey } from './providers/index.js';
 import type { StarterOnboardingService } from './starter-onboarding-run.js';
 
 export { DAEMON_OPERATION_NAMES } from './daemon/operation-names.js';
-export type { OwnedModelClaimCapability,OwnedModelNegotiation } from './daemon/values.js';
 
 export class DaemonService {
   get dependencies(): DaemonDependencies {
@@ -61,13 +60,8 @@ export class DaemonService {
     return service;
   }
 
-   ownedModel?: OwnedModelConfiguration;
 
-   readonly modelClaims = new WeakMap<object, { agentId: string; configuration: OwnedModelConfiguration }>();
   setOwnedModel(...args: CommandArguments<typeof daemonSetOwnedModel>): ReturnType<typeof daemonSetOwnedModel> { return daemonSetOwnedModel(this, ...args); }
-  ownedModelReady(...args: CommandArguments<typeof daemonOwnedModelReady>): ReturnType<typeof daemonOwnedModelReady> { return daemonOwnedModelReady(this, ...args); }
-  async negotiateOwnedModel(...args: CommandArguments<typeof daemonNegotiateOwnedModel>): ReturnType<typeof daemonNegotiateOwnedModel> { return daemonNegotiateOwnedModel(this, ...args); }
-  modelClaimCredentials(...args: CommandArguments<typeof daemonModelClaimCredentials>): ReturnType<typeof daemonModelClaimCredentials> { return daemonModelClaimCredentials(this, ...args); }
 
    cornerPrRegistrationUnavailable?: boolean;
    starterOnboarding?: StarterOnboardingService;

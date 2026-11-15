@@ -22,8 +22,7 @@ import { deleteInstitutionalMemory, getInstitutionalContext, reportInstitutional
 import { searchInstitutionalHistory } from '../institutional-history.js';
 import { loadWorkspaceSkill } from '../institutional-skills.js';
 import type { DaemonContext } from './context.js';
-import { Input, OwnedModelClaimCapability, Output, id, seconds } from './values.js';
-import { daemonOwnedModelReady, daemonModelClaimCredentials } from './owned-model.js';
+import { Input, Output, id, seconds } from './values.js';
 import { daemonWriteResult } from './corner-messages.js';
 import { daemonPostRoomMessage } from './messages.js';
 import { daemonAccess } from './access.js';
@@ -31,7 +30,7 @@ import { daemonLinkSpendApproval, daemonSquireApprovalDecision } from './approva
 import { daemonGrantRequester } from './grants.js';
 import { daemonAgentWorkbench, daemonOfferContext } from './workbench.js';
 
-export async function getInstitutionalContextOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
+export async function getInstitutionalContextOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 if (!ctx.commandTransaction || !ctx.authorizedCommand) {
           throw new Error('institutional context requires an active command');
         }
@@ -51,7 +50,7 @@ if (!ctx.commandTransaction || !ctx.authorizedCommand) {
         )) as Output<Name>;
 }
 
-export async function saveInstitutionalMemoryOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
+export async function saveInstitutionalMemoryOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 
         if (!ctx.commandTransaction || !ctx.authorizedCommand) {
           throw new Error('institutional memory changes require an active command');
@@ -91,7 +90,7 @@ export async function saveInstitutionalMemoryOperation<Name extends keyof Daemon
 
 }
 
-export async function searchInstitutionalMemoryOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
+export async function searchInstitutionalMemoryOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 if (!ctx.commandTransaction || !ctx.authorizedCommand) {
           throw new Error('institutional memory search requires an active command');
         }
@@ -106,7 +105,7 @@ if (!ctx.commandTransaction || !ctx.authorizedCommand) {
         )) as Output<Name>;
 }
 
-export async function searchInstitutionalHistoryOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
+export async function searchInstitutionalHistoryOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 if (!ctx.commandTransaction || !ctx.authorizedCommand) {
           throw new Error('institutional history search requires an active command');
         }
@@ -120,7 +119,7 @@ if (!ctx.commandTransaction || !ctx.authorizedCommand) {
         )) as Output<Name>;
 }
 
-export async function loadWorkspaceSkillOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
+export async function loadWorkspaceSkillOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 if (!ctx.commandTransaction || !ctx.authorizedCommand) {
           throw new Error('workspace skill load requires an active command');
         }
@@ -134,33 +133,54 @@ if (!ctx.commandTransaction || !ctx.authorizedCommand) {
         )) as Output<Name>;
 }
 
-/** A hosted-model credential bound to one pending queue item. */
-export async function getModelCredentialOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
+/** Compatibility read for older installed helpers; never issues or negotiates authority. */
+export async function getModelCredentialOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
         const request = input as Input<'getModelCredential'>;
         return await ctx.database.transaction(async db => {
-          if (!daemonOwnedModelReady(ctx) ||
-              !(await db.query('SELECT 1 FROM free_agents WHERE agent_id=$1', [authenticatedAgentId])).rowCount)
-            return {} as Output<Name>;
           const command = await authorizeCommandOutput(db, request.roomId, authenticatedAgentId, request.requestId);
-          const credentials = daemonModelClaimCredentials(ctx, modelClaim, authenticatedAgentId);
-          return { modelCredential: await credentials.issueInTransaction(db, { agentId: authenticatedAgentId, commandId: command.id }) } as Output<Name>;
+          return { modelCredential: (await db.ownedModelCredentials?.forCommands(db, [command.id]))?.get(command.id) } as Output<Name>;
         });
 }
 
 /** Status only: the helper handed this item to the agent session. */
-export async function startAgentTurnOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
+export async function startAgentTurnOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
         const request = input as Input<'startAgentTurn'>;
         if (request.available === false) {
           const command = await authorizeCommandOutput(ctx.database, request.roomId, authenticatedAgentId, request.requestId);
-          const agent = (await ctx.database.query<{ name: string }>('SELECT name FROM identities WHERE id=$1', [authenticatedAgentId])).rows[0]!;
-          await systemLine(ctx.database, {
-            id: createHash('sha256').update(`offline:${command.id}`).digest('hex'),
-            roomId: command.room_id,
-            subject: { kind: 'agent', id: authenticatedAgentId, name: agent.name },
-            verb: systemMessage('phone-service.is-offline'),
-            consequence: systemMessage('phone-service.connect-again'),
-          });
+          if ((await ctx.database.query('SELECT 1 FROM free_agents WHERE agent_id=$1', [authenticatedAgentId])).rowCount) {
+            const reason = request.failureReason?.trim() || 'Agent harness could not start';
+            await ctx.database.transaction(async db => {
+              const source = ctx.helperConnection;
+              if (source && !(await db.query(`SELECT 1 FROM agent_connections WHERE agent_id=$1
+                AND connection_id=$2 AND epoch=$3 FOR SHARE`, [authenticatedAgentId, source.connectionId, source.epoch])).rowCount) return;
+              const current = await authorizeCommandOutput(db, request.roomId, authenticatedAgentId, request.requestId);
+              if (current.state !== 'pending') return;
+              await db.query(`INSERT INTO agent_turns(room_id,request_id,agent_id,status)
+                VALUES($1,$2,$3,'working') ON CONFLICT(room_id,request_id,agent_id) DO NOTHING`,
+                [request.roomId, request.requestId, authenticatedAgentId]);
+              if (!await endAgentTurn(db, current, 'failed', reason)) return;
+              await db.query('SELECT beeline_record_agent_answer($1,true,$2)', [current.id, reason]);
+              const agent = (await db.query<{ name: string }>('SELECT name FROM identities WHERE id=$1', [authenticatedAgentId])).rows[0]!;
+              await systemLine(db, {
+                id: createHash('sha256').update(`failed:${command.id}`).digest('hex'),
+                roomId: command.return_room_id ?? command.room_id,
+                subject: { kind: 'agent', id: authenticatedAgentId, name: agent.name },
+                verb: systemMessage('agent-turn.failed'),
+                consequence: systemMessage('agent-turn.failure-reason', reason),
+                requestId: request.requestId, commandId: command.id, durableFact: 'failure',
+              });
+            });
+          } else {
+            const agent = (await ctx.database.query<{ name: string }>('SELECT name FROM identities WHERE id=$1', [authenticatedAgentId])).rows[0]!;
+            await systemLine(ctx.database, {
+              id: createHash('sha256').update(`offline:${command.id}`).digest('hex'),
+              roomId: command.room_id,
+              subject: { kind: 'agent', id: authenticatedAgentId, name: agent.name },
+              verb: systemMessage('phone-service.is-offline'), consequence: systemMessage('phone-service.connect-again'),
+            });
+          }
           ctx.live.publish({ type: 'invalidate', roomId: request.roomId, reason: 'message', agentId: authenticatedAgentId });
+          ctx.live.publish({ type: 'invalidate', roomId: command.return_room_id ?? request.roomId, reason: 'turn', agentId: authenticatedAgentId });
         } else {
         await ctx.database.transaction(async db=>{
         const source=ctx.helperConnection;
@@ -183,7 +203,7 @@ export async function startAgentTurnOperation<Name extends keyof DaemonOperation
         return daemonWriteResult(ctx) as Output<Name>;
 }
 
-export async function getRoomGitHubTokenOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
+export async function getRoomGitHubTokenOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 
         if (!ctx.roomGitHubToken) throw new Error('GitHub room token service unavailable');
         const roomId = (input as Input<'getRoomGitHubToken'>).roomId;
@@ -203,7 +223,7 @@ export async function getRoomGitHubTokenOperation<Name extends keyof DaemonOpera
 
 }
 
-export async function markAgentTurnSilentOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
+export async function markAgentTurnSilentOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 
         const declinedMessage = name === 'markAgentTurnSilent' ? (input as Input<'markAgentTurnSilent'>).messageId : undefined;
         if (name === 'markAgentTurnSilent') {
@@ -242,7 +262,7 @@ export async function markAgentTurnSilentOperation<Name extends keyof DaemonOper
 
 }
 
-export async function postBackgroundToolCompletionOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
+export async function postBackgroundToolCompletionOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 
         const completion = input as Input<'postBackgroundToolCompletion'>;
         if (!completion.toolCallId || completion.toolCallId.length > 512 ||
@@ -271,7 +291,7 @@ export async function postBackgroundToolCompletionOperation<Name extends keyof D
 
 }
 
-export async function endComputerSessionOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
+export async function endComputerSessionOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 
         const ending = input as Input<'endComputerSession'>;
         const session = (await ctx.database.query<{ id: string }>(
@@ -286,7 +306,7 @@ export async function endComputerSessionOperation<Name extends keyof DaemonOpera
 
 }
 
-export async function createLinkSpendRequestOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
+export async function createLinkSpendRequestOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 
         if (!ctx.linkWallet) throw new Error('Link is not configured');
         const request = input as Input<'createLinkSpendRequest'>;
@@ -302,7 +322,7 @@ export async function createLinkSpendRequestOperation<Name extends keyof DaemonO
 
 }
 
-export async function retrieveLinkSpendRequestOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
+export async function retrieveLinkSpendRequestOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 
         if (!ctx.linkWallet) throw new Error('Link is not configured');
         const request = input as Input<'retrieveLinkSpendRequest'>;
@@ -350,7 +370,7 @@ export async function retrieveLinkSpendRequestOperation<Name extends keyof Daemo
 
 }
 
-export async function postStarterWelcomeOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
+export async function postStarterWelcomeOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 
         const request = input as Input<'postStarterWelcome'>;
         await daemonAccess(ctx, request.roomId, authenticatedAgentId);
@@ -371,7 +391,7 @@ export async function postStarterWelcomeOperation<Name extends keyof DaemonOpera
 
 }
 
-export async function postRepositoryOnboardingOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
+export async function postRepositoryOnboardingOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 
         const request = input as Input<'postRepositoryOnboarding'>;
         await daemonAccess(ctx, request.roomId, authenticatedAgentId);
@@ -390,7 +410,7 @@ export async function postRepositoryOnboardingOperation<Name extends keyof Daemo
 
 }
 
-export async function findConnectorsOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
+export async function findConnectorsOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 
         const request = input as Input<'findConnectors'>;
         const query = typeof request.query === 'string' ? request.query.trim() : '';
@@ -422,7 +442,7 @@ export async function findConnectorsOperation<Name extends keyof DaemonOperation
 
 }
 
-export async function postVaultSaveCardOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
+export async function postVaultSaveCardOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 
         const cardInput = input as Input<'postVaultSaveCard'>;
         const metadata = vaultSaveRequest(cardInput);
@@ -438,7 +458,7 @@ export async function postVaultSaveCardOperation<Name extends keyof DaemonOperat
 
 }
 
-export async function setCornerHoldOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
+export async function setCornerHoldOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 
         const hold = input as Input<'setCornerHold'>;
         await daemonAccess(ctx, hold.cornerId, authenticatedAgentId);
@@ -461,7 +481,7 @@ export async function setCornerHoldOperation<Name extends keyof DaemonOperationM
 
 }
 
-export async function orderCornerMergeOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
+export async function orderCornerMergeOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 
         const order = input as Input<'orderCornerMerge'>;
         await daemonAccess(ctx, order.cornerId, authenticatedAgentId);

@@ -69,9 +69,9 @@ it('a late registration repair and old transport start cannot interrupt or reviv
   const {source,command}=await claimed('old');
   const current={connectionId:'new',epoch:await presence.claimConnection(AGENT,{connectionId:'new'})};
   const daemon=new DaemonService(database,live);
-  await daemon.execute('startAgentTurn',{roomId:ROOM,requestId:command.turn_request_id},AGENT,undefined,source);
+  await daemon.execute('startAgentTurn',{roomId:ROOM,requestId:command.turn_request_id},AGENT,source);
   expect((await database.query('SELECT status FROM agent_turns WHERE request_id=$1',[command.turn_request_id])).rows).toEqual([{status:'cancelled'}]);
-  await daemon.execute('startAgentTurn',{roomId:ROOM,requestId:command.turn_request_id},AGENT,undefined,current);
+  await daemon.execute('startAgentTurn',{roomId:ROOM,requestId:command.turn_request_id},AGENT,current);
   await interruptAgentTurns(database,AGENT,current.epoch);
   expect((await database.query('SELECT status,connection_epoch FROM agent_turns WHERE request_id=$1',[command.turn_request_id])).rows)
     .toEqual([{status:'working',connection_epoch:current.epoch}]);

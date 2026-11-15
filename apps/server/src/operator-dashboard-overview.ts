@@ -227,13 +227,18 @@ export async function dashboardOverview(
     },
   );
   const fleet = await read(
-    `WITH ${COHORT_SQL} SELECT f.state,count(*) count FROM free_agents f
-    JOIN production_identities pi ON pi.id=f.owner_id
-    WHERE f.removed_at IS NULL AND EXISTS(SELECT 1 FROM memberships member
-      JOIN production_workspaces w ON w.id=member.workspace_id
-      WHERE member.identity_id=f.agent_id AND member.room_id IS NULL) GROUP BY f.state`,
+    `WITH ${COHORT_SQL}, fleet AS (
+      SELECT CASE WHEN connection.released_at IS NULL AND server.renewed_at>now()-interval '90 seconds'
+        THEN 'connected' WHEN f.fly_machine_id IS NOT NULL THEN 'provisioned' ELSE 'unprovisioned' END observation
+      FROM free_agents f JOIN production_identities pi ON pi.id=f.owner_id
+      LEFT JOIN agent_connections connection ON connection.agent_id=f.agent_id
+      LEFT JOIN live_server_instances server ON server.instance_id=connection.instance_id
+      WHERE f.removed_at IS NULL AND EXISTS(SELECT 1 FROM memberships member
+        JOIN production_workspaces w ON w.id=member.workspace_id
+        WHERE member.identity_id=f.agent_id AND member.room_id IS NULL)
+    ) SELECT observation,count(*) count FROM fleet GROUP BY observation`,
     [],
-    (rows) => rows.map((r) => ({ state: String(r.state), count: Number(r.count) })),
+    (rows) => rows.map((r) => ({ state: String(r.observation), count: Number(r.count) })),
   );
   const spend = await read(
     `SELECT day::text date,usd FROM free_agent_budget WHERE day >= $1::date ORDER BY day`,

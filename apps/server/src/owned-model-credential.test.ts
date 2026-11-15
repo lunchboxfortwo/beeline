@@ -73,13 +73,12 @@ describe('opaque immutable owned-model credential primitive', () => {
     await expect(credentials.authenticate(db, issued.token)).rejects.toThrow('authority');
   });
 
-  it.each(['membership', 'workspace', 'archive', 'rotation', 'retired', 'model', 'command', 'stop'])(
+  it.each(['membership', 'workspace', 'archive', 'retired', 'model', 'command', 'stop'])(
     'refuses a previously authenticated actor after actual %s authority changes', async change => {
       const { db, credentials, actor, issued } = fixture;
       if (change === 'membership') await db.query('UPDATE memberships SET removed_at=clock_timestamp() WHERE room_id=$1', [MODEL_ROOM]);
       if (change === 'workspace') await db.query('UPDATE memberships SET removed_at=clock_timestamp() WHERE room_id IS NULL AND identity_id=$1', [MODEL_AGENT]);
       if (change === 'archive') await db.query('UPDATE rooms SET archived_at=clock_timestamp() WHERE id=$1', [MODEL_ROOM]);
-      if (change === 'rotation') await db.query(`UPDATE free_agents SET model_token_hash=$2 WHERE agent_id=$1`, [MODEL_AGENT, 'd'.repeat(64)]);
       if (change === 'retired') await db.query('UPDATE free_agents SET removed_at=clock_timestamp() WHERE agent_id=$1', [MODEL_AGENT]);
       if (change === 'model') await db.query(`UPDATE free_agents SET model='synthetic/other' WHERE agent_id=$1`, [MODEL_AGENT]);
       if (change === 'command') await db.query(`UPDATE agent_commands SET state='cancelled' WHERE id=$1`, [MODEL_CLAIM.commandId]);
@@ -88,6 +87,15 @@ describe('opaque immutable owned-model credential primitive', () => {
       await expect(credentials.authenticate(db, issued.token)).rejects.toThrow('authority');
     },
   );
+
+  it('keeps queue authority through bootstrap token creation and rotation', async () => {
+    const { db, credentials, issued } = fixture;
+    for (const tokenHash of [null, 'd'.repeat(64), 'e'.repeat(64)]) {
+      await db.query('UPDATE free_agents SET model_token_hash=$1 WHERE agent_id=$2', [tokenHash, MODEL_AGENT]);
+      expect((await credentials.forCommands(db, [MODEL_CLAIM.commandId])).get(MODEL_CLAIM.commandId)).toEqual(issued);
+      await credentials.authenticate(db, issued.token);
+    }
+  });
 
   it('does not issue another item’s credential or manufacture a trusted actor from JSON', async () => {
     const { db, credentials, actor } = fixture;

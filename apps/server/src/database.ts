@@ -1,3 +1,4 @@
+import type { OwnedModelCredentials } from './owned-model-credential.js';
 import type { DatabaseLockDiagnostics } from './database-lock-diagnostics.js';
 import { DIAGNOSTICS_SCHEMA } from './diagnostics-schema.js';
 import { recordPostgresStatementError } from './postgres-error.js';
@@ -155,6 +156,7 @@ export interface QueryResult<Row> {
 
 
 export interface SqlDatabase {
+  ownedModelCredentials?: OwnedModelCredentials;
   backgroundWork?: DatabaseBackgroundWork;
   query<Row extends QueryResultRow = QueryResultRow>(
     sql: string,
@@ -260,6 +262,7 @@ export function preparedQuery(name: string, text: string, values: unknown[]) {
 
 
 export class PostgresDatabase implements ClosableDatabase {
+  ownedModelCredentials?: OwnedModelCredentials;
   readonly backgroundWork = new DatabaseBackgroundWork();
   readonly #pool: Pool;
   readonly #lockDiagnostics?: DatabaseLockDiagnostics;
@@ -517,6 +520,7 @@ export class PostgresDatabase implements ClosableDatabase {
     let releaseError: Error | undefined;
     try {
       const database: SqlDatabase = {
+        ownedModelCredentials: this.ownedModelCredentials,
         query: async <Row extends QueryResultRow = QueryResultRow>(
           sql: string,
           values: unknown[] = [],

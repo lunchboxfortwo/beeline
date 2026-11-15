@@ -28,7 +28,7 @@ After reconnecting, each chat’s backlog arrives in one turn with a private not
 Messages that arrive while an agent works stay queued for its next turn. Waiting messages from the same chat receive one combined answer; a stopped turn cannot silently close a new human request. Automatic corner reminders can finish quietly when there is no update, and obsolete idle reminders are discarded. Each corner gets at most two idle reminders between person events. Explicit worker blocks stay waiting through replies and orders until the worker records new work output.
 Repository setup and optional context run through session tools; their errors reach the agent so it can still answer.
 Saved answers survive reconnects and helper updates without another agent turn.
-An unavailable agent leaves its messages queued and shows “agent is offline · connect again”.
+An unavailable personal agent leaves its messages queued and shows “agent is offline · connect again”. Hosted starter agents receive their model credential with each queued request; if their harness cannot start, the turn fails visibly with its actual reason.
 
 Reply quotes preview at most two lines on phone and web/desktop; the reply’s own message text wraps in full. Viewer provenance stays on one line.
 

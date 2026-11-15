@@ -11,6 +11,9 @@ export class CornerAccessDatabase implements SqlDatabase {
     return database instanceof CornerAccessDatabase ? database.database : database;
   }
 
+  get ownedModelCredentials() { return this.database.ownedModelCredentials; }
+  set ownedModelCredentials(value) { this.database.ownedModelCredentials = value; }
+
   get backgroundWork() {
     return this.database.backgroundWork;
   }

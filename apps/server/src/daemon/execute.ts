@@ -20,7 +20,7 @@ import { recordReportedReviewApproval } from './corner-reads.js';
 import { daemonPostRoomMessage } from './messages.js';
 import { daemonExecuteOperation } from './operations.js';
 import { daemonTurnReceipt } from './turn-receipts.js';
-import { AccessDeniedError,CORNER_CLEANUP_OPERATIONS,CORNER_REACH_OPERATIONS,Input,Output,OwnedModelClaimCapability } from './values.js';
+import { AccessDeniedError,CORNER_CLEANUP_OPERATIONS,CORNER_REACH_OPERATIONS,Input,Output } from './values.js';
 import { modelText } from '../message-origin.js';
 
 
@@ -31,7 +31,6 @@ import { modelText } from '../message-origin.js';
     name: Name,
     input: Input<Name>,
     authenticatedAgentId: string,
-    modelClaim?: OwnedModelClaimCapability,
   ): Promise<Output<Name>> {
     // Diagnostics are written after the answer and never change the item.
     if (name === 'postAgentTurnReceipt') {
@@ -296,14 +295,14 @@ import { modelText } from '../message-origin.js';
       if (!permission.allowed)
         return { status: 'permission-required', grantId: permission.grantId } as Output<Name>;
     }
-    return daemonExecuteOperation(ctx, name, input, authenticatedAgentId, modelClaim, candidate, scopedRoom);
+    return daemonExecuteOperation(ctx, name, input, authenticatedAgentId, candidate, scopedRoom);
 
   }
 
 
 /** Conversational operations have one queue entry and one answer exit. */
 export async function daemonExecute<Name extends keyof DaemonOperationMap>(ctx: DaemonContext,
-  name: Name, input: Input<Name>, agentId: string, modelClaim?: OwnedModelClaimCapability,
+  name: Name, input: Input<Name>, agentId: string,
   helperConnection?: { connectionId: string; epoch: number },
 ): Promise<Output<Name>> {
   const value = input as Record<string, unknown>;
@@ -338,5 +337,5 @@ export async function daemonExecute<Name extends keyof DaemonOperationMap>(ctx: 
       typeof value.agent === 'string' ? value.agent : undefined, undefined,
       typeof value.transportRequestId === 'string' ? createHash('sha256').update(`order:${agentId}:${value.transportRequestId}`).digest('hex') : undefined) as Promise<Output<Name>>;
   }
-  return daemonExecuteTool(helperConnection ? {...ctx,helperConnection} : ctx, name, input, agentId, modelClaim);
+  return daemonExecuteTool(helperConnection ? {...ctx,helperConnection} : ctx, name, input, agentId);
 }

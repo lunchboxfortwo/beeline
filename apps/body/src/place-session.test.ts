@@ -7,6 +7,7 @@ import { afterEach,expect,it,vi } from 'vitest';
 import type { AcpClient } from './acp.js';
 import type { BodyConfig } from './config.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
+import { freeAgentPiConfig } from './free-agent-vm.js';
 import { PlaceSession } from './place-session.js';
 import { sharedSquireMcpClient } from './squire-mcp-client.js';
 import type { AgentRuntimeRecord } from './runtime.js';
@@ -49,13 +50,13 @@ async function fixture(corner = false) {
   const session = new PlaceSession({
     agent: { publicKey: 'a'.repeat(64), name: 'Agent' },
     runtime: { supervisorRoot: root, agent: { publicKey: 'a'.repeat(64) } } as AgentRuntimeRecord,
-    config, api: { execute, refreshMachineVault: async () => {}, connection: () => ({ baseUrl: 'http://localhost', daemonToken: 'fixture', agentId: 'a'.repeat(64), helperVersion: 'test' }) } as unknown as DaemonApiClient,
+    config, api: { baseUrl: 'https://synthetic.test', execute, refreshMachineVault: async () => {}, connection: () => ({ baseUrl: 'http://localhost', daemonToken: 'fixture', agentId: 'a'.repeat(64), helperVersion: 'test' }) } as unknown as DaemonApiClient,
     placeId: 'room', ...(corner ? { parentRoomId: 'parent' } : {}), workspaceId: 'workspace', onExit() {}, createAcpClient: spawn,
   });
   const item = { id: 'item', rootCommandId: 'task', roomId: 'room', returnRoomId: 'room', turnRequestId: 'item', reason: 'human_tag',
     agentId: 'a'.repeat(64),
     source: { id: 'message', authorId: 'human', body: 'Please answer', attachments: [], type: 'message' } } as AgentCommand;
-  return { session, item, prompt, execute, config, spawn };
+  return { session, item, prompt, execute, config, spawn, client };
 }
 
 it('starts and answers before optional reads begin, even if none of them resolve', async () => {
@@ -312,5 +313,40 @@ it('delivers an 18-hour offline backlog as one prompt without requiring steering
   expect(prompt.match(/scheduled run/g)).toHaveLength(1);
   expect(prompt).toContain('scheduled run 24');
   expect(prompt).toContain('Answer each asker in one combined reply.');
+  await f.session.dispose();
+});
+
+it('opens a fresh hosted ACP session with provider configuration and the queue credential already present', async () => {
+  const f = await fixture();
+  f.config.agentKind = 'pi';
+  f.config.agentEnv.BEELINE_FREE_AGENT_MODEL_TOKEN = 'legacy-bootstrap-marker';
+  const operatorModels = join(f.config.operatorHome!, '.pi', 'agent');
+  await mkdir(operatorModels, { recursive: true });
+  await writeFile(join(operatorModels, 'models.json'), freeAgentPiConfig({
+    modelBaseUrl: 'https://synthetic.test/v1/free-agents/model', upstreamModel: 'synthetic/model',
+  }));
+  const modelCredential = { v: 1 as const, token: 'bfmc_v1.' + 'a'.repeat(32) + '.' + 'b'.repeat(64), expiresAt: null };
+  f.client.sessionNew.mockImplementation(async () => {
+    const environment = f.spawn.mock.calls[0]![0].agentEnv!;
+    const modelConfig = JSON.parse(await readFile(join(environment.PI_CODING_AGENT_DIR!, 'models.json'), 'utf8'));
+    expect(modelConfig.providers.beeline.apiKey).toBeTruthy();
+    const active = JSON.parse(await readFile(f.session.contextPath, 'utf8'));
+    expect(active.itemId).toBe(f.item.id);
+    const auth = JSON.parse(await readFile(join(active.ownedModelDirectory, 'credential.json'), 'utf8'));
+    expect(auth.credential).toEqual(modelCredential);
+    return { sessionId: 'live', raw: { configOptions: [] } };
+  });
+  try {
+    await f.session.start({ ...f.item, modelCredential });
+    expect(await f.session.deliver({ ...f.item, modelCredential })).toMatchObject({ text: 'The answer' });
+    expect(f.execute.mock.calls.some(([name]) => name === 'getModelCredential')).toBe(false);
+  } finally { await f.session.dispose(); }
+});
+
+it('rejects a hosted item without its credential before launching ACP', async () => {
+  const f = await fixture();
+  f.config.agentEnv.BEELINE_FREE_AGENT_MODEL_TOKEN = 'legacy-bootstrap-marker';
+  await expect(f.session.start(f.item)).rejects.toThrow('Owned model local intent is unavailable');
+  expect(f.spawn).not.toHaveBeenCalled();
   await f.session.dispose();
 });

@@ -152,7 +152,7 @@ export type DaemonOperationMap = {
     { readonly commandProtocol: 2; readonly commands: readonly AgentCommand[] }
   >;
   /** Marks the item's turn as working once its helper hands it to the agent session. Status only. */
-  startAgentTurn: Operation<RoomInput & { readonly requestId: string; readonly available?: boolean }, WriteResult>;
+  startAgentTurn: Operation<RoomInput & { readonly requestId: string; readonly available?: boolean; readonly failureReason?: string }, WriteResult>;
   /** A hosted-model credential bound to one undone queue item (`requestId`). */
   getModelCredential: Operation<RoomInput & { readonly requestId: string }, { readonly modelCredential?: OwnedModelCredential }>;
   getDaemonBootstrap: Operation<DaemonBootstrapInput, DaemonBootstrapResult>;

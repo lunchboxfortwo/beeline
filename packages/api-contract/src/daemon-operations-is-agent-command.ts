@@ -1,3 +1,4 @@
+import { isOwnedModelCredential } from './helper-model.js';
 import { AgentCommand } from './daemon-operations.js';
 
 
@@ -28,6 +29,7 @@ export function isAgentCommand(value: unknown): value is AgentCommand {
     return false;
   if (c.offlineSeconds !== undefined && (typeof c.offlineSeconds !== 'number' ||
       !Number.isFinite(c.offlineSeconds) || c.offlineSeconds < 0)) return false;
+  if (c.modelCredential !== undefined && !isOwnedModelCredential(c.modelCredential)) return false;
   const source = c.source as Record<string, unknown> | undefined;
   return Boolean(
     source &&

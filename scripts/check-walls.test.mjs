@@ -70,7 +70,7 @@ test('a fifth canonical construction requires changing the captain-owned wall do
   const target=copy();
   try {
     const file=resolve(target,'apps/body/src/place-session.ts');
-    writeFileSync(file,"import {wall} from '@beeline/api-contract/daemon';\n"+readFileSync(file,'utf8').replace('  async start(): Promise<void> {',"  async start(): Promise<void> { if(this.stale) throw wall('stop','added refusal');"));
+    writeFileSync(file,"import {wall} from '@beeline/api-contract/daemon';\n"+readFileSync(file,'utf8').replace('  async start(item?: AgentCommand): Promise<void> {',"  async start(item?: AgentCommand): Promise<void> { if(this.stale) throw wall('stop','added refusal');"));
     assert.equal(productionWallSites(target).length,5);
     assert.ok(judgeWalls(target).some(error=>error.includes('maximum 4')));
     plant(target,WALLS_FILE,'Production wall constructions: 4.','Production wall constructions: 5.');

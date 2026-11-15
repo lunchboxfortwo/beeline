@@ -176,7 +176,7 @@ describe.skipIf(!url)('real PostgreSQL owned model primitive contention', () => 
     }
   },20_000);
 
-  it.each(['membership', 'rotation'] as const)('serializes actual %s change through final synchronous handoff, without awaiting provider completion', async change => {
+  it.each(['membership', 'retirement'] as const)('serializes actual %s change through final synchronous handoff, without awaiting provider completion', async change => {
     const f = await fixture(), entered = deferred<void>(), release = deferred<void>(), pid = deferred<number>(), provider = deferred<string>();
     let pause = false, early: unknown, handoff: ReturnType<OwnedModelAttempts['handoff']> | undefined, writer: Promise<unknown> | undefined;
     try {
@@ -192,7 +192,7 @@ describe.skipIf(!url)('real PostgreSQL owned model primitive contention', () => 
       writer = f.right.transaction(async tx => {
         pid.resolve(Number((await tx.query<{ pid: number }>('SELECT pg_backend_pid() pid')).rows[0]!.pid));
         if (change === 'membership') await tx.query('UPDATE memberships SET removed_at=clock_timestamp() WHERE room_id=$1', [MODEL_ROOM]);
-        if (change === 'rotation') await tx.query('UPDATE free_agents SET model_token_hash=$2 WHERE agent_id=$1', [MODEL_AGENT, 'e'.repeat(64)]);
+        if (change === 'retirement') await tx.query('UPDATE free_agents SET removed_at=clock_timestamp() WHERE agent_id=$1', [MODEL_AGENT]);
         written = true;
       });
       await blocked(f.admin, await pid.promise); expect(written).toBe(false); expect(start).not.toHaveBeenCalled();
@@ -267,7 +267,7 @@ describe.skipIf(!url)('real PostgreSQL owned model primitive contention', () => 
     } finally { await f.close(); }
   }, 20_000);
 
-  it('refuses behind the actual bootstrap token-rotation row owner without retrying or blocking its legacy credential completion', async () => {
+  it('refuses behind actual bootstrap row ownership without retrying or invalidating its queue credential', async () => {
     const f = await fixture(), held = deferred<void>(), release = deferred<void>(); let early: unknown;
     let bootstrap: ReturnType<FreeAgentService['bootstrap']> | undefined;
     try {
@@ -288,7 +288,7 @@ describe.skipIf(!url)('real PostgreSQL owned model primitive contention', () => 
       const start = vi.fn(async () => 'must not enter'); await expect(owner.handoff(admitted.permit!, start)).rejects.toMatchObject({ code: '55P03' });
       release.resolve(); expect((await bootstrap)?.daemonExchangeToken).toBe('synthetic-exchange');
       expect(start).not.toHaveBeenCalled(); expect(noMachine).not.toHaveBeenCalled();
-      await expect(f.credentials.authenticate(f.left, f.issued.token)).rejects.toThrow('authority');
+      expect((await f.credentials.authenticate(f.left, f.issued.token)).binding.commandId).toBe(f.actor.binding.commandId);
       expect((await f.left.query('SELECT state FROM owned_model_attempts')).rows).toEqual([{ state: 'unknown' }]);
     } finally { release.resolve(); await Promise.allSettled(bootstrap ? [bootstrap] : []); await f.close(); }
   }, 20_000);

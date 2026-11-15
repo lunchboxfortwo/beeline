@@ -186,8 +186,8 @@ export class AgentRunner {
     const batched = new Set(batch.map(next => next.id));
     let started = false;
     try {
-        // A harness that cannot start leaves the item waiting for the next queue update.
-        await place.session.start();
+        // Required item credentials and provider configuration precede ACP startup.
+        await place.session.start(item);
         started = true;
         void this.options.daemonApi.execute('startAgentTurn', { roomId: item.roomId, requestId: item.turnRequestId })
           .catch(error => console.warn('[body] delivery status not written:', error));
@@ -208,8 +208,15 @@ export class AgentRunner {
     } catch (error) {
       console.error(`[body] place ${placeId} could not answer ${item.id}:`, error);
       if (this.latest.some(listed => listed.id === item.id) && !this.answered.has(item.id)) {
-        if (!this.stopped) this.reportOwnerBlocker(item, error);
-        if (started && !this.stopped) {
+        if (!this.stopped && !item.modelCredential) this.reportOwnerBlocker(item, error);
+        if (!this.stopped && (item.modelCredential || this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN)) {
+          const reason = redactToolDetail(distillTurnFailureReason(error).text).slice(0, 2_000);
+          await this.options.daemonApi.execute('startAgentTurn', {
+            roomId: item.roomId, requestId: item.turnRequestId, available: false, failureReason: reason,
+          });
+          this.answered.add(item.id);
+          started = true;
+        } else if (started && !this.stopped) {
           const pending = batch.filter(next => this.latest.some(listed => listed.id === next.id));
           if (pending.length) await this.store({
             itemId: pending[0]!.id, roomId: item.roomId, requestId: pending[0]!.turnRequestId,

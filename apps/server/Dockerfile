@@ -54,6 +54,9 @@ COPY --from=build /app/packages/net/dist ./packages/net/dist
 COPY --from=build /app/packages/buzz-client/dist ./packages/buzz-client/dist
 # The release identity changes every build, so it comes after every cached
 # layer: a new version or SHA must not reinstall production dependencies.
+ARG BEELINE_FREE_AGENT_IMAGE
+USER root
+RUN BEELINE_FREE_AGENT_IMAGE="$BEELINE_FREE_AGENT_IMAGE" node -e 'require("node:fs").writeFileSync("apps/server/assets/free-agent-image.json", JSON.stringify({image:process.env.BEELINE_FREE_AGENT_IMAGE || null}))'
 ARG BEELINE_RELEASE_VERSION=development
 ARG BEELINE_RELEASE_SHA=unknown
 ENV BEELINE_RELEASE_VERSION=$BEELINE_RELEASE_VERSION \

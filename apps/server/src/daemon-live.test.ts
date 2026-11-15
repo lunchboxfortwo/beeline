@@ -46,7 +46,6 @@ function auth(): TokenAuth {
 
 function daemonStub(): DaemonService {
   return {
-    negotiateOwnedModel:vi.fn(async()=>({freeAgent:false})),
     execute: vi.fn(async (name: string, input: { roomId: string }, agentId: string) =>
       name === 'getAgentCommands'
         ? { commandProtocol: 2, commands: ['room-a', 'room-b', 'corner-a'].map(roomId => ({ id: `${agentId}-${roomId}`, roomId })) }
@@ -135,7 +134,7 @@ describe('one machine socket for every agent on a helper machine', () => {
         claimConnection:vi.fn(async()=>7),releaseConnection:vi.fn(async()=>undefined)} as unknown as ConnectionPresence;
       const authentication=auth();
       vi.mocked(authentication.authenticateDaemon).mockImplementation(async token => TOKENS[token] ? {agentId:TOKENS[token]!,ownerId:owner} : null);
-      const {port}=await start({database,auth:authentication,connectionPresence:presence,daemon:{execute,negotiateOwnedModel:async()=>({freeAgent:false})} as unknown as DaemonService});
+      const {port}=await start({database,auth:authentication,connectionPresence:presence,daemon:{execute} as unknown as DaemonService});
       const client=await machine(port);
       client.send({type:'register',agentId:AGENT_A,token:'bdt_a',overlayV1:true,usageAccountV1:true});
       const registered=await client.next(frame=>frame.type==='registered'&&frame.agentId===AGENT_A);
@@ -609,7 +608,7 @@ it('publishes a final reply over 64 KB without dropping its tool steps', async (
   expect(await client.next(frame => frame.requestId === 'publish')).toMatchObject({
     type:'daemon-operation-result',result:{id:'final-reply'},
   });
-  expect(daemon.execute).toHaveBeenCalledWith('postRoomMessage',input,AGENT_A,undefined);
+  expect(daemon.execute).toHaveBeenCalledWith('postRoomMessage',input,AGENT_A);
 
   client.frames.splice(0);
   client.send({type:'request-result',agentId:AGENT_A,requestId:'publish'});
@@ -662,7 +661,7 @@ it('binds helper credentials once at registration and keeps the established sess
 
 it('dispatches turn controls with the registered machine owner through the ordinary request path',async()=>{
   const database=new PgliteDatabase();await database.query(ROUTER_COMMAND_SCHEMA);
-  const daemon={execute:vi.fn(async()=>({id:'ok',createdAt:1})),negotiateOwnedModel:async()=>({freeAgent:false})} as unknown as DaemonService;
+  const daemon={execute:vi.fn(async()=>({id:'ok',createdAt:1}))} as unknown as DaemonService;
   const presence={instanceId:'operation-owner',renewLease:async()=>undefined,claimConnection:async()=>7,releaseConnection:async()=>{}} as unknown as ConnectionPresence;
   try{
     const {port}=await start({daemon,database,connectionPresence:presence});const client=await machine(port);
@@ -670,7 +669,7 @@ it('dispatches turn controls with the registered machine owner through the ordin
     const registered=await client.next(frame=>frame.type==='registered');
     client.send({type:'daemon-operation',agentId:AGENT_A,requestId:'start',operation:'startAgentTurn',input:{roomId:'room',requestId:'command'}});
     await client.next(frame=>frame.requestId==='start');
-    expect(daemon.execute).toHaveBeenCalledWith('startAgentTurn',{roomId:'room',requestId:'command'},AGENT_A,undefined,
+    expect(daemon.execute).toHaveBeenCalledWith('startAgentTurn',{roomId:'room',requestId:'command'},AGENT_A,
       {connectionId:expect.any(String),epoch:7});
   }finally{await database.close();}
 });

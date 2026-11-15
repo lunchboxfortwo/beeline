@@ -740,6 +740,9 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
   )).rows[0] ?? (await db.query<CommandRow>(
     'SELECT * FROM agent_commands WHERE id=$1',[id],
   )).rows[0];
+  if (saved?.state === 'pending' && saved.action === 'input' && db.ownedModelCredentials &&
+      (await db.query('SELECT 1 FROM free_agents WHERE agent_id=$1 AND removed_at IS NULL', [saved.agent_id])).rowCount)
+    await db.ownedModelCredentials.issueInTransaction(db, { agentId: saved.agent_id, commandId: saved.id });
   if (saved && input.sourceMessageId) await recordMcpMention(db,input.agentId,chat.id,input.sourceMessageId);
   const member = chat.members.find(member => member.id === input.agentId);
   const webhookSource = privateMessage ? null : input.sourceMessageId;

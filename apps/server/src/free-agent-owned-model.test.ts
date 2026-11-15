@@ -335,7 +335,7 @@ describe('actual owned model endpoint and actual quota adapter', () => {
     expect(queries).toEqual([]); expect(calls).toHaveLength(0); expect(freeAgentModelTakesImages).not.toHaveBeenCalled();
   });
 
-  it('rechecks current token rotation after authentication before quota or provider work', async () => {
+  it('rechecks actual retirement after authentication before quota or provider work', async () => {
     const authenticated = deferred<void>(), release = deferred<void>(); let pause = true;
     options.database = { transaction: work => f.db.transaction(work), query: async (sql, values) => {
       const result = await f.db.query(sql, values);
@@ -343,7 +343,7 @@ describe('actual owned model endpoint and actual quota adapter', () => {
       return result;
     } };
     const pending = call(); await authenticated.promise;
-    await f.db.query('UPDATE free_agents SET model_token_hash=$2 WHERE agent_id=$1', [MODEL_AGENT, 'd'.repeat(64)]);
+    await f.db.query('UPDATE free_agents SET removed_at=clock_timestamp() WHERE agent_id=$1', [MODEL_AGENT]);
     release.resolve(); const response = await pending; expect(response.status).toBe(403); await response.text();
     expect(calls).toHaveLength(0); expect(await counters()).toEqual({ usage: [], budget: [], rate: [] });
     expect(freeAgentModelTakesImages).not.toHaveBeenCalled();

@@ -3,7 +3,7 @@ import { helperUsageCodecs } from '@beeline/net/helper-codecs';
 import { randomUUID } from 'node:crypto';
 import type { TokenAuth } from './auth.js';
 import type { ConnectionPresence } from './connection-presence.js';
-import { DAEMON_OPERATION_NAMES,type DaemonService,type OwnedModelClaimCapability } from './daemon-service.js';
+import { DAEMON_OPERATION_NAMES,type DaemonService } from './daemon-service.js';
 import type { SqlDatabase } from './database.js';
 import { isTransientDatabaseConnectionError } from './database.js';
 import { applyHelperOverlay,helperOverlayEnabled,subscribeHelperOverlayDemand } from './helper-overlay.js';
@@ -101,7 +101,6 @@ export class DaemonAgentSession {
   readonly #closedSignal = new AbortController();
   #claimed = false;
   #forUpdate = false;
-  #ownedModelCapability?: OwnedModelClaimCapability;
   readonly #projections = new Set<Promise<unknown>>();
 
   readonly #overlayReleases=new Map<string,()=>void>();
@@ -254,8 +253,6 @@ export class DaemonAgentSession {
         return;
       }
       this.epoch = epoch;
-      const model = await this.deps.daemon.negotiateOwnedModel(this.agentId, this.presence.queueV1 === true);
-      this.#ownedModelCapability = model?.capability;
       this.deps.registry.settled(this);
 
     } catch (error) {
@@ -297,7 +294,6 @@ export class DaemonAgentSession {
     this.#forUpdate = forUpdate;
     this.#closed = true;
     this.#closedSignal.abort();
-    this.#ownedModelCapability = undefined;
     for (const release of this.#wakeReleases.splice(0)) release();
     for(const release of this.#overlayReleases.values())release();this.#overlayReleases.clear();
     this.deps.registry.release(this);
@@ -330,10 +326,9 @@ export class DaemonAgentSession {
           const input = operation === 'order' || operation === 'postCornerMessage'
             ? { ...(item.input as object), transportRequestId: requestId } : item.input;
           const result = operation === 'startAgentTurn'
-            ? await this.deps.daemon.execute(operation, input as never, this.agentId,undefined,
+            ? await this.deps.daemon.execute(operation, input as never, this.agentId,
               this.epoch === undefined ? undefined : {connectionId:this.connectionId,epoch:this.epoch})
-            : await this.deps.daemon.execute(operation, input as never, this.agentId,
-              operation === 'getModelCredential' ? this.#ownedModelCapability : undefined);
+            : await this.deps.daemon.execute(operation, input as never, this.agentId);
           return { result };
         } catch (error) {
           return { error: error instanceof Error ? error.message : String(error),

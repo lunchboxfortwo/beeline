@@ -40,6 +40,7 @@ export async function readAgentCommands(
   roomId?: string,
 ): Promise<{ commandProtocol: 2; commands: AgentCommand[] }> {
   const rows = await readAgentQueueRows(db,agentId,roomId);
+  const credentials = await db.ownedModelCredentials?.forCommands(db, rows.rows.map(item => item.id));
   return {
     commandProtocol: 2,
     commands: rows.rows.map(item => {
@@ -52,6 +53,7 @@ export async function readAgentCommands(
       };
       return {
         ...(item.offline_seconds != null ? { offlineSeconds: Math.max(0, item.offline_seconds) } : {}),
+        ...(credentials?.has(item.id) ? { modelCredential: credentials.get(item.id) } : {}),
         id: item.id, roomId: item.room_id, returnRoomId: item.return_room_id ?? item.room_id,
         ...(item.parent_room_id ? {parentRoomId:item.parent_room_id} : {}),
         agentId: item.agent_id, createdAt, sourceMessageId: source.id,

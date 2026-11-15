@@ -68,15 +68,24 @@ soul. Existing free agents keep their names.
 - **Image replacement and wake.** The owner preserves the full machine config and
   persistent filesystem. A successful image POST does not establish readiness:
   the owner observes completion for the returned Fly version before deciding
-  whether an ordinary start is required. Stopped, suspended and created machines
-  with work start once from that observation. A started machine awaits its real
+  whether an ordinary start is required. Fly launches a created or replaced machine;
+  the owner waits for that launch without sending another start. Only stopped or
+  suspended machines that have not just been replaced receive a start, followed
+  by Fly's completion observation. A started machine awaits its real
   authenticated helper connection. A lost provider reply gets one authoritative
   observation, never a replay of the unknown mutation; saved commands remain
   pending. Recovery after an unobservable provider completion requires another
   actual signal. No external-completion/eventual-recovery guarantee is implied.
   Connection registration manages connection facts only and cannot clear the
-  lifecycle owner's token. Model admission uses current connection and claimed
-  invocation authority, independently of retired lifecycle fields.
+  lifecycle owner's token. Model credentials are issued in the queue-write
+  transaction and delivered on the item, before machine creation or connection.
+  Bootstrap tokens and connection negotiation do not grant model authority. Pi's
+  required provider configuration is prepared before ACP startup. A harness that
+  cannot start completes the item as failed and posts its real reason, without an
+  offline notice. Model admission uses current item and membership authority.
+  The unused state column remains only for serving/rollback compatibility; its
+  dashboard reader now projects connection and machine facts. Drop the column in
+  the next release after the preceding readers drain.
 - **Message display.** An accepted pending human command projects starting in the
   existing thinking line. Only a real claim writes a working turn and starts its
   elapsed counter. Terminal work clears the line. Full reads, send receipts and
@@ -242,7 +251,7 @@ Current instruction reads replace the retired warning-triggered guide while pres
 ## Server configuration
 
 Free agents run when all of these are set:
-`BEELINE_FREE_AGENT_SEAL_KEY`, `FLY_FREE_AGENT_IMAGE`, `FLY_FREE_AGENT_API_TOKEN`
+`BEELINE_FREE_AGENT_SEAL_KEY`, the image bundled with the server, `FLY_FREE_AGENT_API_TOKEN`
 (scoped to the app), and for the model `BEELINE_FREE_AGENT_MODEL_KEY`. Optional:
 `FLY_FREE_AGENT_APP`, `FLY_FREE_AGENT_REGION`, `FLY_FREE_AGENT_CPUS`,
 `FLY_FREE_AGENT_MEMORY_MB` (1 shared CPU, 2048 MB: with 1024 MB a Machine with no swap stalled after its first turn),
@@ -280,10 +289,10 @@ question-count decay or additional directions. Personal agents do not receive it
 
 The server release leg (`.github/actions/server-leg/action.yml`) builds
 `infra/free-agent/Dockerfile` from the release checkout, publishes its immutable
-digest, and stages that digest as `FLY_FREE_AGENT_IMAGE` before the release's
-existing server rollout. Each server receives it during that rollout; no
+digest, and bakes that digest into the matching server image before the
+existing server rollout. Runtime secrets cannot select a different image; no
 post-release job restarts server Machines. Publication failure stops the leg
-before deployment. After rollout, the leg verifies the image setting on each server and
+before deployment. After rollout, the leg verifies the bundled image on each server and
 `--refresh-free-agents` publishes a release signal to the running owners. It does
 not create a second service or claim that a notification is helper readiness.
 Startup/recovery/release inventory visits every mapped machine regardless of the

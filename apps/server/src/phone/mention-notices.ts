@@ -117,7 +117,8 @@ import { phoneProjectPendingAgentCommands } from './message-enrichment.js';
          LEFT JOIN rooms_mcp_members external ON external.member_id=identity.id
          JOIN room_access member ON member.identity_id=identity.id
            AND member.room_id=$2 AND member.removed_at IS NULL
-         WHERE identity.id=ANY($1::text[]) AND identity.kind='agent'`,
+         WHERE identity.id=ANY($1::text[]) AND identity.kind='agent'
+           AND NOT EXISTS(SELECT 1 FROM free_agents free WHERE free.agent_id=identity.id)`,
         [[...agentIds], roomId],
       )).rows;
       const deliveries = await readMemberDeliveries(ctx.database, agents.filter(agent => agent.external).map(agent => agent.agent_id));
