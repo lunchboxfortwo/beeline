@@ -97,6 +97,28 @@ it('keeps the repository mark beside the parent chat in a thread header', () => 
   act(() => tree.unmount());
 });
 
+for (const theme of ['light_stone', 'dark_stone']) {
+  for (const [state, glyph, idle] of [['waiting', 'needs-you', false], ['working', 'in-progress', false], ['idle', 'in-progress', true]] as const) {
+    it.each([
+      { repositoryAvatar: 'https://avatars.githubusercontent.com/u/42', repositoryFavicon: undefined },
+      { repositoryAvatar: undefined, repositoryFavicon: 'https://example.com/favicon.ico' },
+    ])(`keeps the chat image in the collapsed ${state} bar under ${theme}: %j`, (image) => {
+      appearance.name = theme;
+      let tree: any;
+      act(() => { tree = create(<ThreadBar h={{ ...reconnect, ...image, state }} collapsed back={() => {}} openChat={() => {}} />); });
+      expect(tree.root.findByType('RepositoryMark').props).toMatchObject({
+        avatarUrl: image.repositoryAvatar, faviconUrl: image.repositoryFavicon, size: 28,
+      });
+      expect(byTestID(tree, 'chat-back')).toHaveLength(1);
+      expect(byTestID(tree, 'thread-chat-link')[0].findByType('T').props.children).toBe(reconnect.chatTag);
+      const title = byTestID(tree, 'thread-bar-title')[0];
+      expect(title.findByType('T').props.children).toBe(reconnect.title);
+      expect(title.findByType('WorkStateMark').props).toMatchObject({ state: glyph, idle });
+      act(() => tree.unmount());
+    });
+  }
+}
+
 it('shows immutable opening attribution and one editable assignee for the selected task',async()=>{
   const asker={pubkey:'ruby',kind:'agent' as const,name:'Ruby'},person={pubkey:'ada',kind:'human' as const,name:'Ada'};
   const workItem={id:'question',roomId:'thread',chatId:'chat',chatName:'Milo',threadName:'request-inbox',title:'Choose the next surface',state:'needs-you' as const,assignee:person,openedBy:asker,createdAt:1,updatedAt:2};
