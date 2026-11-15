@@ -342,8 +342,8 @@ it('the Desktop layout proof uses recent activity rather than Unix-epoch sentine
   act(() => tree.unmount());
 });
 
-it('renders every thread, waiting ones first, with idle threads as a hollow ring', () => {
-  const blocked = Array.from({ length: 12 }, (_, i) => ({
+it('shows up to three waiting threads, then more opens every thread, waiting first, with idle as a hollow ring', () => {
+  const blocked = Array.from({ length: 5 }, (_, i) => ({
     id: `blocked-${i}`,
     name: `Needs you ${i}`,
     state: 'waiting',
@@ -372,11 +372,17 @@ it('renders every thread, waiting ones first, with idle threads as a hollow ring
       />,
     );
   });
-  const rows = tree.root.findAll(
-    (n: any) =>
-      typeof n.type === 'string' && String(n.props.testID ?? '').startsWith('thread-row-'),
-  );
-  expect(rows.map((row: any) => row.props.testID.slice('thread-row-'.length))).toEqual([
+  const rows = () =>
+    tree.root.findAll(
+      (n: any) =>
+        typeof n.type === 'string' && String(n.props.testID ?? '').startsWith('thread-row-'),
+    );
+  const ids = () => rows().map((row: any) => row.props.testID.slice('thread-row-'.length));
+  expect(ids()).toEqual(['blocked-0', 'blocked-1', 'blocked-2']);
+  const more = byTestID(tree, `more-${ROOM}`);
+  expect(more.props['aria-label']).toBe('Show 7 more threads');
+  act(() => more.props.onPress());
+  expect(ids()).toEqual([
     ...blocked.map((corner) => corner.id),
     'in-progress',
     'in-review',
@@ -384,15 +390,45 @@ it('renders every thread, waiting ones first, with idle threads as a hollow ring
     'done',
     'idle',
   ]);
-  const glyph = (id: string) =>
-    rows.find((row: any) => row.props.testID === `thread-row-${id}`).findByType(WorkStateMark).props;
+  expect(tree.root.findAll((n: any) => n.props.testID === `more-${ROOM}`)).toHaveLength(0);
+  const row = (id: string) => rows().find((each: any) => each.props.testID === `thread-row-${id}`);
+  const glyph = (id: string) => row(id).findByType(WorkStateMark).props;
   expect(glyph('idle')).toMatchObject({ state: 'in-progress', idle: true });
   expect(glyph('in-progress')).toMatchObject({ state: 'in-progress', idle: false });
   expect(glyph('backlog').state).toBe('backlog');
-  expect(tree.root.findAll((n: any) => n.props.testID === `more-${ROOM}`)).toHaveLength(0);
+  // Waiting names are semibold ink; the rest are regular and quieter, both at the meta size.
+  const name = (id: string) => row(id).find((n: any) => n.type === 'Text').props;
+  expect(name('blocked-0')).toMatchObject({ color: 'ink' });
+  expect(name('in-progress')).toMatchObject({ color: 'secondary' });
+  expect(name('blocked-0').fontFamily).not.toBe(name('in-progress').fontFamily);
+  expect(name('blocked-0').fontSize).toBe(name('in-progress').fontSize);
   act(() => {
-    tree.update(<ChatRow {...props} item={{ ...item, openCorners: [] } as unknown as ChatListItem} />);
+    tree.update(
+      <ChatRow {...props} item={{ ...item, openCorners: [...other, idle] } as unknown as ChatListItem} />,
+    );
   });
   expect(tree.root.findAll((n: any) => n.props.testID === `nest-${ROOM}`)).toHaveLength(0);
   act(() => tree.unmount());
 });
+
+it.each(['small', 'medium', 'large'] as const)(
+  'draws thread names at the meta size of Text size %s, below the chat title',
+  (size: TextSize) => {
+    const waiting = {
+      ...item,
+      openCorners: [{ id: 'w', name: 'waiting', state: 'waiting', workState: 'needs-you' }],
+    } as unknown as ChatListItem;
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(
+        <TextSizeContext.Provider value={size}>
+          <ChatRow item={waiting} now={1_700_000_000_000} first onOpen={vi.fn()} onPin={vi.fn()} onOpenThread={vi.fn()} />
+        </TextSizeContext.Provider>,
+      );
+    });
+    const name = byTestID(tree, 'thread-row-w').find((n: any) => n.type === 'Text').props;
+    const preview = byTestID(tree, `room-${ROOM}-preview`).props;
+    expect(name.fontSize).toBe(preview.fontSize);
+    act(() => tree.unmount());
+  },
+);

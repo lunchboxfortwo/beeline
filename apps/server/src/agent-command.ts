@@ -830,6 +830,13 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
       ? String(input.status).replace('_', '-') : 'done';
     const publicText = repairAgentPost(item?.reason==='voice_order' ? cleanVoiceReply(input.text,item.name) : input.text).text.replace(input.report ? /^(?:done|blocked|failed|needs[-_]decision):\s*/ : /^$/, '').trim();
     const publicReplyId = item?.public_reply_id ?? input.sharedReplyId;
+    // A closed return address refuses delivery like Stop, so it ends the item
+    // instead of leaving it owed (and its corner Working) forever.
+    if (item?.state === 'pending' && (await db.query(`SELECT 1 FROM rooms WHERE id::text=$1 AND archived_at IS NOT NULL`,
+      [(publicReplyId ? item.return_room_id ?? input.roomId : roomId).toLowerCase()])).rowCount) {
+      await endAgentTurn(db, item, 'cancelled', 'return_address_archived');
+      return { id: item.id, createdAt: Math.floor(Date.now() / 1000) };
+    }
     if (publicReplyId && item) {
       completedNow = true;
       const id = hash(`closing:${item.id}`);

@@ -83,9 +83,11 @@ export default function RootLayout() {
             contentStyle: { backgroundColor: canvas },
           }}
         />
+        {/* The four tab roots change in place: no slide, the shell's header and bar stay. */}
         <Stack.Screen
           name="beeline/tray"
           options={{
+            animation: 'none',
             headerShown: false,
             contentStyle: { backgroundColor: canvas },
           }}
@@ -105,9 +107,11 @@ export default function RootLayout() {
             headerShown: false,
           }}
         />
+        <Stack.Screen name="beeline/people" options={{ animation: 'none', headerShown: false }} />
         <Stack.Screen
           name="beeline/settings/index"
           options={{
+            animation: 'none',
             headerShown: false,
           }}
         />

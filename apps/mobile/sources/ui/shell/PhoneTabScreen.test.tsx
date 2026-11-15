@@ -8,7 +8,7 @@ vi.mock('@/buzz/needs-you-store', () => ({ useNeedsYouCount: () => 2 }));
 vi.mock('@/buzz/use-active-community', () => ({ useActiveCommunityId: () => 'w1' }));
 vi.mock('./TabBar', () => ({ TabBar: (props: any) => React.createElement('TabBar', props) }));
 
-import { PhoneTabScreen } from './PhoneTabScreen';
+import { PhoneTabScreen, SharedTabBarHeight } from './PhoneTabScreen';
 
 beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; });
 
@@ -32,4 +32,19 @@ it('draws no bar under a chat or thread screen, whatever else is on the stack', 
 it('draws the lit bar under a place screen', () => {
     expect(screen('beeline/channels').findByType('TabBar' as any).props).toMatchObject({ active: 'chats', tagsCount: 2 });
     expect(screen('beeline/tray').findByType('TabBar' as any).props.active).toBe('tags');
+});
+
+it('reserves the shared bar under a tab root and keeps its own bar on a pushed place', () => {
+    const shared = (name: string) => {
+        let tree: any;
+        act(() => { tree = create(<SharedTabBarHeight.Provider value={64}><PhoneTabScreen route={{ name }}><Body /></PhoneTabScreen></SharedTabBarHeight.Provider>); });
+        return tree.root;
+    };
+    for (const name of ['index', 'beeline/channels', 'beeline/tray', 'beeline/people', 'beeline/settings/index']) {
+        const root = shared(name);
+        expect(root.findAllByType('TabBar' as any)).toHaveLength(0);
+        expect(root.findAll((node: any) => node.type === 'YStack' && node.props.height === 64)).toHaveLength(1);
+    }
+    expect(shared('beeline/members').findByType('TabBar' as any).props.active).toBe('chats');
+    expect(shared('beeline/chat/[channelId]').findAllByType('TabBar' as any)).toHaveLength(0);
 });

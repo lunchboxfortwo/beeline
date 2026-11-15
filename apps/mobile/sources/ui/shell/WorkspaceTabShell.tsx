@@ -13,6 +13,7 @@ import {BuzzCommunityShell} from '@/components/buzz/CommunityRail';
 import {useIsDesktop} from '@/utils/responsive';
 import {TabHeaderHost} from './TabHeader';
 import {TAB_ROUTES,isTabRootPath,tabForPath} from './tab-routes';
+import {PhoneTabBar,SharedTabBarHeight} from './PhoneTabScreen';
 
 /** Mounted above the phone stack, so changing tabs cannot reload its name. */
 export function WorkspaceTabShell({children}:{children:React.ReactNode}) {
@@ -45,10 +46,19 @@ function PhoneWorkspaceShell({children}:{children:React.ReactNode}) {
         router.replace({pathname:TAB_ROUTES[tab],params:tab==='settings'?{workspaceId:id}:{communityId:id}} as never);
     },[scope,pathname]);
     const root=isTabRootPath(pathname);
+    // A hidden bar measures zero; the roots under a pushed page keep their space.
+    const [bar,setBar]=useState(0);
     return <BuzzCommunityShell communities={communities} activeCommunityId={active??null} onSelect={select}
         onAdd={()=>router.push('/beeline/community')}>
         <YStack flex={1} minHeight={0}>
-            <TabHeaderHost workspaceName={workspace?.name??''} visible={root}>{children}</TabHeaderHost>
+            <SharedTabBarHeight.Provider value={bar}>
+                <TabHeaderHost workspaceName={workspace?.name??''} visible={root}>{children}</TabHeaderHost>
+            </SharedTabBarHeight.Provider>
+            {/* One bar over the four tab roots: switching tabs never remounts it. */}
+            <YStack position="absolute" left={0} right={0} bottom={0} display={root?'flex':'none'}
+                onLayout={event=>{const height=event.nativeEvent.layout.height;if(height>0)setBar(height);}} testID="shared-tab-bar">
+                <PhoneTabBar active={tabForPath(pathname)??'chats'}/>
+            </YStack>
         </YStack>
     </BuzzCommunityShell>;
 }

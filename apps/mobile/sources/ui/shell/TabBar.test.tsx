@@ -46,7 +46,12 @@ it.each(['dark', 'light'])('shows the selected tab apart from the others under %
     const color = (label: string) => theme[tree.root.find((node: any) => node.type === 'Text' && node.props.children === label).props.color];
     expect(color('Team')).toBe(theme.ink);
     for (const other of ['Chats', 'Tasks', 'Settings']) expect(color(other)).not.toBe(color('Team'));
-    const line = (node: any) => node.type === 'YStack' && node.props.testID === 'tab-selected-line';
-    expect(tree.root.findAll(line)).toHaveLength(1);
-    expect(tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'tab-people').findAll(line)).toHaveLength(1);
+    // Tab bar B: a bold label and a heavier icon, no bar above the tab.
+    const tab = (value: string) => tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === `tab-${value}`);
+    const stroke = (value: string) => tab(value).find((node: any) => node.props.strokeWidth !== undefined).props.strokeWidth;
+    expect(tree.root.findAll((node: any) => node.props.testID === 'tab-selected-line')).toHaveLength(0);
+    expect(stroke('people')).toBeGreaterThan(stroke('chats'));
+    const face = (value: string) => tab(value).find((node: any) => node.type === 'Text').props.fontFamily;
+    expect(face('people')).not.toBe(face('chats'));
+    expect(face('chats')).toBe(face('tags'));
 });

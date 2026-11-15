@@ -3,10 +3,11 @@ import Svg, { Circle, Path, Rect } from 'react-native-svg';
 import { useTheme } from 'tamagui';
 import type { WorkState } from '@beeline/api-contract/phone';
 
-/** One status glyph for Tasks and Chats: pause, half, three-quarter, idle ring, dashed, check. */
+/** One status glyph for Tasks and Chats: pause, half, three-quarter, idle ring, dashed, check.
+ * Waiting (pause) is brass, ring and bars; every other state is ink. */
 export function WorkStateMark({ state, idle = false }: { state: WorkState; idle?: boolean }) {
   const t = useTheme();
-  const ink = t.ink!.val;
+  const ink = state === 'needs-you' ? t.waiting!.val : t.ink!.val;
   const ring = (
     <Circle
       cx={10}

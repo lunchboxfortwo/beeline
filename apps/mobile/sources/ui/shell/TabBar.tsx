@@ -18,7 +18,7 @@ const TABS: { value: Tab; label: string; icon: typeof Hash }[] = [
 // Web has no shrink-to-fit (it would cut the label with an ellipsis), and its labels fit already.
 const ONE_LINE = Platform.OS === 'web' ? {} : { numberOfLines: 1, adjustsFontSizeToFit: true, minimumFontScale: 0.5 };
 
-/** The phone's four places. Chats leads; Tasks carries the live count. */
+/** The phone's four places. Chats leads; Tasks carries the live count. The lit tab has a bold label and a heavier icon. */
 export const TabBar = React.memo(function TabBar({ active, tagsCount = 0 }: { active: Tab; tagsCount?: number }) {
     const stone = useThemeName().includes('stone');
     // A tab press returns to that place's root, not on top of a pushed page.
@@ -33,12 +33,9 @@ export const TabBar = React.memo(function TabBar({ active, tagsCount = 0 }: { ac
                 <Tabs.List justifyContent="space-around" paddingVertical="2" backgroundColor="canvas">
                     {TABS.map((tab) => (
                         <Tabs.Tab key={tab.value} value={tab.value} flex={1} minHeight={HEIGHT.tabBar} flexDirection="column" gap="1" backgroundColor="canvas" aria-label={tab.label} testID={`tab-${tab.value}`}>
-                            <YStack alignItems="center" position="relative" paddingTop="1">
-                                {active === tab.value ? (
-                                    <YStack position="absolute" top={0} alignSelf="center" width={16} height={2} borderRadius="full" backgroundColor={stone ? 'ink' : 'needsYou'} testID="tab-selected-line" />
-                                ) : null}
+                            <YStack alignItems="center" paddingTop="1">
                                 <XStack gap="1" alignItems="center">
-                                    <Glyph icon={tab.icon} color={active === tab.value && stone ? 'ink' : undefined} accent={active === tab.value && !stone} />
+                                    <Glyph icon={tab.icon} color={active === tab.value && stone ? 'ink' : undefined} accent={active === tab.value && !stone} strong={active === tab.value} />
                                     {tab.value === 'tags' && tagsCount ? <CountPill n={tagsCount} /> : null}
                                 </XStack>
                             </YStack>

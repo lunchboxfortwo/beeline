@@ -11,6 +11,7 @@ vi.mock('react-native-safe-area-context',()=>({useSafeAreaInsets:()=>({top:24,ri
 vi.mock('expo-router',()=>({usePathname:()=>f.path,router:{replace:f.replace,push:vi.fn()}}));
 vi.mock('@/utils/responsive',()=>({useIsDesktop:()=>f.desktop}));
 vi.mock('@/buzz/use-active-community',()=>({useActiveCommunityId:()=> 'ws'}));
+vi.mock('@/buzz/needs-you-store',()=>({useNeedsYouCount:()=>0}));
 vi.mock('@/auth/buzz-identity-storage',()=>({loadBuzzIdentity:f.identity,getEffectiveRelayUrl:async()=> 'https://test.invalid'}));
 vi.mock('@/buzz/surface-storage',()=>({mobileSurfaceCache:{read:f.read},surfaceAddress:()=> 'workspaces'}));
 vi.mock('@/buzz/use-shared-surface',()=>({useSurfaceSnapshot:()=>({workspaces:[{id:'ws',name:'Tubing Crew'}]})}));
@@ -100,6 +101,20 @@ it('keeps one named header across tab mounts, with no placeholder or repeated ca
     console.log(`Persistent workspace header: 40 tab changes; title renders=${f.titleRenders}; cache reads=${f.read.mock.calls.length}; max=${Math.max(...times).toFixed(2)}ms (renderer, budget 150ms)`);
     await act(async()=>button.props.onPress());
     expect(tree.root.findAll((node:any)=>typeof node.type==='string'&&node.props.testID==='community-drawer-overlay')).toHaveLength(1);
+});
+
+it('keeps one tab bar mounted across the four tabs and hides it over a pushed chat',async()=>{
+    await act(async()=>{tree=create(app('Workspace'));});
+    const bar=()=>tree.root.find((node:any)=>typeof node.type==='string'&&node.props.testID==='shared-tab-bar');
+    const tabs=bar().find((node:any)=>typeof node.type==='string'&&node.props.testID==='tab-bar');
+    for(const [path,active] of [['/beeline/tray','tags'],['/beeline/people','people'],['/beeline/settings','settings'],['/beeline/channels','chats']] as const){
+        f.path=path;await act(async()=>tree.update(app('Workspace')));
+        expect(bar().find((node:any)=>typeof node.type==='string'&&node.props.testID==='tab-bar')).toBe(tabs);
+        expect(bar().props.display).toBe('flex');
+        expect(tabs.props.value).toBe(active);
+    }
+    f.path='/beeline/chat/room';await act(async()=>tree.update(app('Workspace')));
+    expect(bar().props.display).toBe('none');
 });
 
 it('keeps the navigation stack mounted while hiding its header on a chat route',async()=>{

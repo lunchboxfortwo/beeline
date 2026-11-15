@@ -8,7 +8,7 @@ export const CONCEPT_ICONS = {
   bookmark: 'Bookmark', agent: 'Bot', selected: 'Check', expand: 'ChevronDown',
   previous: 'ChevronLeft', next: 'ChevronRight', contract: 'ChevronUp',
   clipboard: 'Clipboard', copy: 'Copy', reply: 'CornerUpLeft', download: 'Download',
-  external: 'ExternalLink', document: 'FileText', file: 'File', codeFile: 'FileCode', pullRequest: 'GitPullRequest',
+  external: 'ExternalLink', document: 'FileText', file: 'File', codeFile: 'FileCode', filter: 'Filter', pullRequest: 'GitPullRequest',
   public: 'Globe', image: 'Image', keyboard: 'Keyboard', link: 'Link', private: 'Lock',
   signOut: 'LogOut', email: 'Mail', maximize: 'Maximize2', microphone: 'Mic',
   mutedMicrophone: 'MicOff', subtract: 'Minus', overflow: 'MoreHorizontal', edit: 'Pencil',

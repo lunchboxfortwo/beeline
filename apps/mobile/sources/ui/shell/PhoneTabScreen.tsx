@@ -1,31 +1,36 @@
-import React from 'react';
+import React, { createContext, useContext } from 'react';
 import { YStack } from 'tamagui';
 import { useNeedsYouCount } from '@/buzz/needs-you-store';
 import { useActiveCommunityId } from '@/buzz/use-active-community';
 import { TabBar } from './TabBar';
-import { tabForPath, type Tab } from './tab-routes';
+import { isTabRootPath, tabForPath, type Tab } from './tab-routes';
+
+/** The height of the one tab bar the shell keeps mounted over the four tab roots; null without that shell. */
+export const SharedTabBarHeight = createContext<number | null>(null);
 
 /**
- * A phone stack screen with its own tab bar under it, when its route draws
- * one (the stack's `screenLayout`). Every place except a chat or thread (their
- * composer owns the keyboard edge), viewers, the shared browser and setup.
- *
- * Each screen carries its own bar, so pushing a chat never resizes the stack:
- * a bar shared under the stack disappeared only after the chat's first frame,
- * and the composer started one bar height too high, then dropped.
+ * A phone stack screen and the tab bar its route draws. The four tab roots
+ * share the shell's bar, so switching tabs changes only the page; a root
+ * reserves the bar's height. Any other place draws its own bar, and a chat or
+ * thread none (their composer owns the keyboard edge), viewers, the shared
+ * browser and setup. A bar in flow under the stack disappeared only after a
+ * pushed chat's first frame, and the composer started one bar height too
+ * high, then dropped; the shared bar sits over the stack and never resizes it.
  */
 export function PhoneTabScreen({ route, children }: { route: { name: string }; children: React.ReactElement }) {
-    const active = tabForPath(`/${route.name}`);
+    const shared = useContext(SharedTabBarHeight);
+    const path = `/${route.name}`;
+    const active = tabForPath(path);
     if (!active) return children;
     return (
         <YStack flex={1}>
             {children}
-            <PhoneTabBar active={active} />
+            {shared !== null && isTabRootPath(path) ? <YStack height={shared} /> : <PhoneTabBar active={active} />}
         </YStack>
     );
 }
 
-function PhoneTabBar({ active }: { active: Tab }) {
+export function PhoneTabBar({ active }: { active: Tab }) {
     const workspaceId = useActiveCommunityId() ?? undefined;
     const tagsCount = useNeedsYouCount(workspaceId, workspaceId);
     return <TabBar active={active} tagsCount={tagsCount} />;

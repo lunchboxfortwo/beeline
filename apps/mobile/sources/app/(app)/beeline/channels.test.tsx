@@ -727,7 +727,7 @@ describe('Room deck live path', () => {
   });
 
 
-  it('lists every thread, waiting ones first, without the former three-thread limit and opens one', async () => {
+  it('lists three waiting threads, opens every thread from more, waiting first, and opens one', async () => {
     deck.renderRows = true;
     deck.chatsResponse = listOf([
       room('room-a', 10, {
@@ -746,9 +746,13 @@ describe('Room deck live path', () => {
     const threads = () => renderer.root
       .findAll((node: any) => node.type === 'ListItem' && node.props.testID?.startsWith('thread-row-'))
       .map((node: any) => node.props['aria-label']);
+    expect(threads()).toEqual(['four','five','six'].map(name=>`Thread ${name}, waiting on you`));
+    const more = () => renderer.root.findAll((node: any) => node.type === 'ListItem' && node.props.testID === 'more-room-a');
+    expect(more()[0]!.props['aria-label']).toBe('Show 5 more threads');
+    act(() => more()[0]!.props.onPress());
     expect(threads().slice(0, 5)).toEqual(['four','five','six','seven','eight'].map(name=>`Thread ${name}, waiting on you`));
     expect(threads().slice(5).map((label: string) => label.split(',')[0])).toEqual(['Thread one', 'Thread two', 'Thread three']);
-    expect(renderer.root.findAllByProps({testID:'more-room-a'})).toHaveLength(0);
+    expect(more()).toHaveLength(0);
     act(() => renderer.root.find((node: any) => node.type === 'ListItem' && node.props.testID === 'thread-row-corner-4').props.onPress());
     expect(router.push).toHaveBeenCalledWith({
       pathname: '/beeline/chat/[channelId]',

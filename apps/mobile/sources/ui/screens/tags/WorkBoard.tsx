@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { Input, ListItem, ScrollView, XStack, YStack } from 'tamagui';
-import { ChevronRight, X } from 'lucide-react-native';
+import { ChevronDown, ChevronRight, Filter, X } from 'lucide-react-native';
 import type {
   NeedsYouActionView,
   RoomViewIdentity,
@@ -242,7 +242,7 @@ function WorkRow({ item, onPress }: { item: WorkItemView; onPress: () => void })
       testID={`work-item-${item.id}`}
     >
       <WorkStateMark state={item.state} idle={item.idle} />
-      <T flex={1} numberOfLines={1}>
+      <T v="meta" flex={1} numberOfLines={1}>
         {item.title}
       </T>
       {item.assignee ? <WorkAvatar person={item.assignee} /> : null}
@@ -281,13 +281,14 @@ function SectionHead({
       aria-label={`${title} ${count}`}
       testID={testID}
     >
+      {onToggle ? <Glyph icon={open ? ChevronDown : ChevronRight} size={14} /> : null}
       <T v="metaStrong" color="secondary">
         {title}
       </T>
       <T v="meta" color="secondary" flex={1}>
         {note ? `${count} · ${note}` : count}
       </T>
-      {right ?? (onToggle && !open ? <Glyph icon={ChevronRight} size={14} /> : null)}
+      {right}
     </ListItem>
   );
 }
@@ -408,7 +409,10 @@ function WorkSheet({
   );
 }
 type Menu = null | 'filter' | 'chat' | 'assignee';
-/** The Tasks screen: only what needs you on top, then the work in flight. */
+/** A thread's own row opens that thread; Backlog and other stored tasks open the sheet. */
+const hasThread = (item: WorkItemView) => item.roomKind === 'corner' && item.id === item.roomId;
+/** The Tasks screen: only what needs you on top, then the work in flight. On a
+ * phone the other sections start collapsed; desktop columns always stay open. */
 export function WorkBoard({
   board,
   desktop,
@@ -420,7 +424,7 @@ export function WorkBoard({
   actions: WorkBoardActions;
   now?: number;
 }) {
-  const [open, setOpen] = useState({ progress: true, backlog: true, done: false });
+  const [open, setOpen] = useState({ progress: false, backlog: false, done: false });
   const [menu, setMenu] = useState<Menu>(null);
   const [chat, setChat] = useState<string | null>(null);
   const [assignee, setAssignee] = useState<string | null>(null);
@@ -443,15 +447,12 @@ export function WorkBoard({
   const filter = useMemo(
     () => (
       <Btn
-        kind="secondary"
+        kind="icon"
         label="Filter"
-        minHeight={0}
-        paddingHorizontal="3"
-        paddingVertical="1"
         onPress={() => setMenu((current) => (current ? null : 'filter'))}
         testID="work-filter"
       >
-        <T v="meta">Filter</T>
+        <Glyph icon={Filter} />
       </Btn>
     ),
     [],
@@ -491,7 +492,58 @@ export function WorkBoard({
     </Btn>
   );
   const rows = (list: WorkItemView[]) =>
-    list.map((item) => <WorkRow key={item.id} item={item} onPress={() => setDetail(item)} />);
+    list.map((item) => (
+      <WorkRow
+        key={item.id}
+        item={item}
+        onPress={() => (hasThread(item) ? actions.open(item) : setDetail(item))}
+      />
+    ));
+  const sections = [
+    { key: 'progress', title: 'In progress', list: progress, testID: 'work-section-in-progress' },
+    { key: 'backlog', title: 'Backlog', list: backlog, testID: 'work-section-backlog' },
+    { key: 'done', title: 'Done', list: done, note: 'last 7 days', testID: 'work-section-done' },
+  ] as const;
+  const needsHead = (
+    <SectionHead
+      title="Needs you"
+      count={needs.length}
+      testID="work-section-needs-you"
+      right={
+        needs.length ? (
+          <Btn
+            kind="quiet"
+            label="Clear all"
+            minHeight={0}
+            padding="0"
+            hitSlop={12}
+            disabled={clearing}
+            onPress={() => {
+              setClearing(true);
+              void actions.clearAll().finally(() => setClearing(false));
+            }}
+            testID="work-clear-all"
+          >
+            <T v="meta" color="secondary">
+              Clear all
+            </T>
+          </Btn>
+        ) : undefined
+      }
+    />
+  );
+  const needsBody = needs.length ? (
+    needs.map((item) => <AskCard key={item.id} item={item} actions={actions} />)
+  ) : (
+    <YStack paddingHorizontal="6" paddingTop="8" paddingBottom="5" gap="1" alignItems="center" testID="work-calm">
+      <T v="heading" textAlign="center">
+        Nothing needs you now
+      </T>
+      <T color="secondary" textAlign="center">
+        Go do something else.
+      </T>
+    </YStack>
+  );
   return (
     <YStack flex={1} minHeight={0} testID="work-board">
       {desktop ? (
@@ -517,64 +569,45 @@ export function WorkBoard({
         </XStack>
       ) : null}
       <ScrollView flex={1} minHeight={0} keyboardShouldPersistTaps="handled" {...scrollProps}>
-        <YStack width="100%" maxWidth={720} alignSelf="center" paddingBottom="8" testID="work-sections">
-          {needs.length ? (
-            <>
-              <SectionHead
-                title="Needs you"
-                count={needs.length}
-                testID="work-section-needs-you"
-                right={
-                  <Btn
-                    kind="quiet"
-                    label="Clear all"
-                    minHeight={0}
-                    padding="0"
-                    hitSlop={12}
-                    disabled={clearing}
-                    onPress={() => {
-                      setClearing(true);
-                      void actions.clearAll().finally(() => setClearing(false));
-                    }}
-                    testID="work-clear-all"
-                  >
-                    <T v="meta" color="secondary">
-                      Clear all
-                    </T>
-                  </Btn>
-                }
-              />
-              {needs.map((item) => (
-                <AskCard key={item.id} item={item} actions={actions} />
-              ))}
-            </>
-          ) : null}
-          <SectionHead
-            title="In progress"
-            count={progress.length}
-            open={open.progress}
-            onToggle={() => setOpen((current) => ({ ...current, progress: !current.progress }))}
-            testID="work-section-in-progress"
-          />
-          {open.progress ? rows(progress) : null}
-          <SectionHead
-            title="Backlog"
-            count={backlog.length}
-            open={open.backlog}
-            onToggle={() => setOpen((current) => ({ ...current, backlog: !current.backlog }))}
-            testID="work-section-backlog"
-          />
-          {open.backlog ? rows(backlog) : null}
-          <SectionHead
-            title="Done"
-            count={done.length}
-            note="last 7 days"
-            open={open.done}
-            onToggle={() => setOpen((current) => ({ ...current, done: !current.done }))}
-            testID="work-section-done"
-          />
-          {open.done ? rows(done) : null}
-        </YStack>
+        {desktop ? (
+          <XStack width="100%" gap="4" padding="4" alignItems="flex-start" testID="work-sections">
+            <YStack flex={1} minWidth={0}>
+              {needsHead}
+              {needsBody}
+            </YStack>
+            {sections.map((section) => (
+              <YStack key={section.key} flex={1} minWidth={0}>
+                <SectionHead
+                  title={section.title}
+                  count={section.list.length}
+                  note={'note' in section ? section.note : undefined}
+                  testID={section.testID}
+                />
+                {rows(section.list)}
+              </YStack>
+            ))}
+          </XStack>
+        ) : (
+          <YStack width="100%" maxWidth={720} alignSelf="center" paddingBottom="8" testID="work-sections">
+            {needs.length ? needsHead : null}
+            {needsBody}
+            {sections.map((section) => (
+              <React.Fragment key={section.key}>
+                <SectionHead
+                  title={section.title}
+                  count={section.list.length}
+                  note={'note' in section ? section.note : undefined}
+                  open={open[section.key]}
+                  onToggle={() =>
+                    setOpen((current) => ({ ...current, [section.key]: !current[section.key] }))
+                  }
+                  testID={section.testID}
+                />
+                {open[section.key] ? rows(section.list) : null}
+              </React.Fragment>
+            ))}
+          </YStack>
+        )}
       </ScrollView>
       {menu ? (
         <YStack

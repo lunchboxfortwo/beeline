@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatListItem } from '@beeline/buzz-client';
+import type { ChatListCorner } from '@beeline/api-contract/phone';
 import {
   chatNameForRepository,
   chatPreview,
   chatTagged,
   chatThreads,
   filterChats,
+  shownThreads,
   threadWord,
 } from './chat-tree-model';
 
@@ -94,6 +96,20 @@ describe('chat rows', () => {
       'backlog',
       'done',
     ]);
+  });
+
+  it('shows at most three waiting threads, counts the rest, and shows none when none wait', () => {
+    const corner = (id: string, workState: string) =>
+      ({ id, name: id, state: 'working', workState }) as unknown as ChatListCorner;
+    const threads = [
+      ...['a', 'b', 'c', 'd'].map((id) => corner(id, 'needs-you')),
+      corner('e', 'in-progress'),
+    ];
+    expect(shownThreads(threads, false)).toEqual({ shown: threads.slice(0, 3), more: 2 });
+    expect(shownThreads(threads, true)).toEqual({ shown: threads, more: 0 });
+    expect(shownThreads([threads[0]!, threads[4]!], false)).toEqual({ shown: [threads[0]], more: 1 });
+    expect(shownThreads([threads[4]!], false)).toEqual({ shown: [], more: 0 });
+    expect(shownThreads([threads[4]!], true)).toEqual({ shown: [], more: 0 });
   });
 
   it('keeps rows without a work state', () => {

@@ -12,7 +12,7 @@ import {
   textOf,
 } from '@/test/fixtures/tray.test-support';
 describe('Tasks tab', () => {
-  it('shows Needs you, In progress and Backlog open, Done collapsed until tapped, names only', async () => {
+  it('opens only Needs you on a phone; the other sections drop down when tapped, names only', async () => {
     serve([
       ask(),
       task({ objective: 'Measure every reply path on the phone.' }),
@@ -23,22 +23,31 @@ describe('Tasks tab', () => {
     const tree = await renderTags();
     const text = textOf(tree);
     expect(text).toContain('Which surface should Jellybean measure next?');
-    expect(text).toContain('Measure phone reply latency');
-    expect(text).toContain('Expand Milo routing');
     expect(text).toContain('last 7 days');
-    expect(text).not.toContain('Restore saved sessions');
+    for (const hidden of ['Measure phone reply latency', 'Expand Milo routing', 'Restore saved sessions'])
+      expect(text).not.toContain(hidden);
+    const chevron = (label: string) => byLabel(tree, label).findByType('Glyph' as never).props.icon.displayName;
+    for (const [label, row] of [
+      ['In progress 2', 'Measure phone reply latency'],
+      ['Backlog 1', 'Expand Milo routing'],
+      ['Done 1', 'Restore saved sessions'],
+    ] as const) {
+      expect(byLabel(tree, label).props['aria-expanded']).toBe(false);
+      expect(chevron(label)).toBe('Icon.ChevronRight');
+      await press(tree, label);
+      expect(byLabel(tree, label).props['aria-expanded']).toBe(true);
+      expect(chevron(label)).toBe('Icon.ChevronDown');
+      expect(textOf(tree)).toContain(row);
+    }
     // Rows carry only the name; the objective waits for the tap sheet.
-    expect(text).not.toContain('Measure every reply path on the phone.');
-    expect(byLabel(tree, 'Done 1').props['aria-expanded']).toBe(false);
-    await press(tree, 'Done 1');
-    expect(byLabel(tree, 'Done 1').props['aria-expanded']).toBe(true);
-    expect(textOf(tree)).toContain('Restore saved sessions');
+    expect(textOf(tree)).not.toContain('Measure every reply path on the phone.');
     await press(tree, 'In progress 2');
     expect(textOf(tree)).not.toContain('Measure phone reply latency');
   });
   it('draws the status glyph first on each row and the assignee at its right', async () => {
     serve([task(), task({ id: 'idle', title: 'release-corner', idle: true, assignee: null })]);
     const tree = await renderTags();
+    await press(tree, 'In progress 2');
     const row = byLabel(tree, 'Measure phone reply latency');
     const children = row.children.filter((n: any) => typeof n !== 'string');
     expect(children[0].props).toMatchObject({ state: 'in-progress' });
@@ -47,9 +56,18 @@ describe('Tasks tab', () => {
     expect(idle.findAllByType('Avatar')).toHaveLength(0);
     expect(idle.children[0].props).toMatchObject({ state: 'in-progress', idle: true });
   });
-  it('opens the detail sheet on tap with the objective, and opens the thread from it', async () => {
-    serve([task({ roomKind: 'corner', objective: 'Measure every reply path on the phone.' })]);
+  it('opens a thread row straight into its thread, with no sheet in between', async () => {
+    serve([task({ roomKind: 'corner' })]);
     const tree = await renderTags();
+    await press(tree, 'In progress 1');
+    await press(tree, 'Measure phone reply latency');
+    expect(state.push).toHaveBeenCalledWith({ roomId: 'thread' });
+    expect(tree.root.findAll((n: any) => n.type === 'Sheet')).toHaveLength(0);
+  });
+  it('keeps the detail sheet for a Backlog item, with its objective, and opens its place from it', async () => {
+    serve([task({ id: 'later', roomId: 'thread', state: 'backlog', roomKind: 'corner', objective: 'Measure every reply path on the phone.' })]);
+    const tree = await renderTags();
+    await press(tree, 'Backlog 1');
     await press(tree, 'Measure phone reply latency');
     const sheet = tree.root.find((n: any) => n.type === 'Sheet');
     expect(sheet.props.title).toBe('Measure phone reply latency');
@@ -61,6 +79,7 @@ describe('Tasks tab', () => {
   it('assigns to an agent, a human or Unassigned from the sheet', async () => {
     serve([task()]);
     const tree = await renderTags();
+    await press(tree, 'In progress 1');
     for (const [label, id] of [
       ['Assign to Ada', 'person'],
       ['Assign to Jellybean', 'agent'],
@@ -75,6 +94,13 @@ describe('Tasks tab', () => {
         assigneeId: id,
       });
     }
+  });
+  it('says nothing needs you when no ask waits', async () => {
+    serve([task()]);
+    const tree = await renderTags();
+    expect(textOf(tree)).toContain('Nothing needs you now');
+    expect(textOf(tree)).toContain('Go do something else.');
+    expect(tree.root.findAll((n: any) => n.props?.['aria-label'] === 'Clear all')).toHaveLength(0);
   });
   it('shows one Needs you row per thread with its ask count, and clears a row or all', async () => {
     serve([ask({ askIds: ['ask', 'second'] })]);

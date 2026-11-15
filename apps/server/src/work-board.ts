@@ -144,6 +144,8 @@ export async function readWorkBoard(
           WHERE room.workspace_id=$1 AND stored.source_message_id IS NULL
       ) SELECT ref.id,${workColumnsSql('$2')}
       WHERE r.workspace_id=$1 AND (r.parent_id IS NOT NULL OR w.room_id IS NOT NULL)
+        -- A standing (locked) corner is a place, not a task; its asks still reach Needs you.
+        AND NOT (f.locked IS TRUE AND ref.id=r.id::text)
         AND (r.archived_at IS NULL OR r.archived_at>=now()-interval '7 days')
         AND (w.state IS DISTINCT FROM 'done' OR w.completed_at>=now()-interval '7 days')`,
       [workspaceId, viewerId],

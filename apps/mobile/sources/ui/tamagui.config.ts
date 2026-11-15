@@ -8,9 +8,10 @@ import { animations } from '@tamagui/config/animations-css';
 import { beelineThemes, stonePalette as STONE, type BeelineThemeTokens } from '@/buzz/groknight';
 
 /**
- * The one design grammar's colour layer (build spec → The grammar). Ten
+ * The one design grammar's colour layer (build spec → The grammar). Eleven
  * semantic tokens per theme — canvas, raised, highlight, stroke, strongStroke,
- * ink, secondary, needsYou (brass), added, removed — plus the button fills.
+ * ink, secondary, needsYou (brass), waiting (brass in every palette), added,
+ * removed — plus the button fills.
  * Values come from the Beeline token set (`groknight.ts`); the Stone colour
  * set swaps the neutral ladder and keeps every component.
  */
@@ -36,6 +37,8 @@ function themeValues(mode: Mode, palette: Palette): Record<string, string> & { n
         stroke: c.border, strongStroke: c.borderStrong,
         ink: c.textPrimary, secondary: c.textSecondary,
         needsYou: c.accent, added: c.diffAdded, removed: c.diffRemoved,
+        // Brass in every palette, for the one waiting (pause) glyph; Stone keeps everything else ink.
+        waiting: base.accent,
         primaryFill: c.buttonPrimaryFill, primaryInk: c.buttonPrimaryText,
     };
     return theme;

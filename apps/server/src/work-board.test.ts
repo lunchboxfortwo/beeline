@@ -338,6 +338,12 @@ describe('Work board recorded sources and single assignee', () => {
       state: 'in-review',
     });
   });
+  it('leaves a standing (locked) corner off the board while its stored tasks stay', async () => {
+    await machine(thread, 'idle');
+    await db.query('UPDATE corner_facts SET locked=true WHERE corner_id=$1', [thread]);
+    await updateWorkItem(db, { id: 'standing-task', roomId: thread, title: 'youtube-pipeline' }, agent);
+    expect((await read()).items.map((item) => item.id)).toEqual(['standing-task']);
+  });
   it('carries a started item objective into its thread and shows it only in details', async () => {
     await updateWorkItem(
       db,

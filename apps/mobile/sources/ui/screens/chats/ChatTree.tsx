@@ -1,8 +1,8 @@
 import { WorkStateMark } from '@/ui/screens/tags/WorkMarks';
 import { RepositoryMark } from '@/components/buzz/RepositoryMark';
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { ListItem, Separator, XStack, YStack } from 'tamagui';
-import { Pin } from 'lucide-react-native';
+import { ChevronDown, Pin } from 'lucide-react-native';
 import equal from 'fast-deep-equal';
 import { voiceDuration } from '@beeline/api-contract/phone';
 import type { ChatListCorner } from '@beeline/api-contract/phone';
@@ -19,6 +19,7 @@ import {
   chatThreads,
   chatTitle,
   joinableTitle,
+  shownThreads,
   threadTitle,
   threadWorkState,
 } from './chat-tree-model';
@@ -91,7 +92,8 @@ function ChatMark({ item }: { item: Partial<Pick<ChatListItem, 'directMessage' |
   );
 }
 
-/** One thread under its chat: its status glyph first, as on Tasks, then its name. */
+/** One thread under its chat: its status glyph first, as on Tasks, then its name at the
+ * meta size; a waiting thread's name is semibold ink, the others regular and quieter. */
 function ThreadLine({
   item,
   corner,
@@ -105,6 +107,7 @@ function ThreadLine({
 }) {
   const { word } = threadListLabel(corner, viewer);
   const title = threadTitle(item, corner);
+  const state = threadWorkState(corner);
   const step = useStep();
   return (
     <ListItem
@@ -120,10 +123,15 @@ function ThreadLine({
       accessibilityRole="button"
       testID={`thread-row-${corner.id}`}
     >
-      <WorkStateMark state={threadWorkState(corner)} idle={corner.state === 'idle'} />
-      <Copy flex={1} numberOfLines={1}>
+      <WorkStateMark state={state} idle={corner.state === 'idle'} />
+      <T
+        v={state === 'needs-you' ? 'metaStrong' : 'meta'}
+        color={state === 'needs-you' ? 'ink' : 'secondary'}
+        flex={1}
+        numberOfLines={1}
+      >
         {title}
-      </Copy>
+      </T>
     </ListItem>
   );
 }
@@ -163,7 +171,11 @@ export const ChatRow = React.memo(
   }: ChatRowProps) {
     const refused = useRoomOutboxFailure(item.room.id);
     const summary = useRoomCornerSummary(item.room.id);
-    const threads = chatThreads(item, summary?.openCorners ?? item.openCorners);
+    const [expanded, setExpanded] = useState(false);
+    const { shown: threads, more } = shownThreads(
+      chatThreads(item, summary?.openCorners ?? item.openCorners),
+      expanded,
+    );
     const title = chatTitle(item);
     const preview = chatPreview(item, viewer);
     const unread = item.unread === true;
@@ -270,6 +282,24 @@ export const ChatRow = React.memo(
                 onOpen={onOpenThread}
               />
             ))}
+            {more ? (
+              <ListItem
+                minHeight={HEIGHT.control}
+                padding="0"
+                paddingVertical={step('2')}
+                gap="1"
+                alignItems="center"
+                justifyContent="flex-start"
+                backgroundColor="transparent"
+                onPress={() => setExpanded(true)}
+                aria-label={`Show ${more} more ${more === 1 ? 'thread' : 'threads'}`}
+                accessibilityRole="button"
+                testID={`more-${item.room.id}`}
+              >
+                <T v="meta" color="secondary">{`${more} more`}</T>
+                <Glyph icon={ChevronDown} size={14} />
+              </ListItem>
+            ) : null}
           </YStack>
         ) : null}
       </YStack>

@@ -63,6 +63,21 @@ export function chatThreads(
   return [...corners.filter(waiting), ...corners.filter((corner) => !waiting(corner))];
 }
 
+/** How many waiting threads a chat shows before its `more` control. */
+export const WAITING_THREADS_SHOWN = 3;
+
+/** Up to three waiting threads show under a chat and `more` counts the rest;
+ * expanded, every thread shows. With none waiting, no thread shows. */
+export function shownThreads(
+  threads: readonly ChatListCorner[],
+  expanded: boolean,
+): { shown: readonly ChatListCorner[]; more: number } {
+  const waiting = threads.filter((corner) => threadWorkState(corner) === 'needs-you').length;
+  if (!waiting) return { shown: [], more: 0 };
+  const shown = expanded ? threads : threads.slice(0, Math.min(waiting, WAITING_THREADS_SHOWN));
+  return { shown, more: threads.length - shown.length };
+}
+
 /** Search narrows by chat name, last message and thread titles; each chip narrows further. */
 export function filterChats(
   chats: readonly ChatListItem[],
