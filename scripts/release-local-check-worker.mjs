@@ -49,6 +49,9 @@ hooks.step = async args => {
   return originalStep(args);
 };
 const engine = new LocalActions({ root, directory, secrets: spec.delivery ? spec.secrets : { GITHUB_TOKEN: spec.context.github.token }, variables: spec.variables, processes, github: localGithub, hooks, isolateTemporary: !spec.delivery });
+// Desktop's native transport starts inside the job hook, before step env is
+// prepared. Its Docker children must receive the same existing slice adapter.
+if (tools) engine.desktopToolEnv = { ...process.env, ...tools, PATH: `${tools.PATH}:${process.env.PATH}` };
 engine.runDirectory = spec.runDirectory;
 engine.artifacts = new Map(spec.artifacts || []);
 spec.context.secrets = engine.secrets;

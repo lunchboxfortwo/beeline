@@ -12,8 +12,10 @@ export function releaseArguments(argv) {
   const options = {};
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--no-store') options.noStore = true;
+    else if (argv[i] === '--desktop-mode' && ['build', 'carry'].includes(argv[i + 1])) options.desktopMode = argv[++i];
+    else if (argv[i] === '--mac-helpers' && ['build', 'carry'].includes(argv[i + 1])) options.macHelpers = argv[++i];
     else if (argv[i] === '--dispatched-by' && i + 1 < argv.length) options.dispatchedBy = JSON.parse(argv[++i]);
-    else throw new Error('Usage: node scripts/release.mjs [--no-store] [--dispatched-by <JSON>]');
+    else throw new Error('Usage: node scripts/release.mjs [--no-store] [--desktop-mode build|carry] [--mac-helpers build|carry] [--dispatched-by <JSON>]');
   }
   return options;
 }
@@ -84,12 +86,14 @@ export async function readOtaVersions(env, fetchImpl = fetch) {
 // release through git tags. Latest must see the tag Next just created.
 const fetchTags = source => execFileSync('git', ['fetch', '--tags', 'origin'], { cwd: source, stdio: 'ignore' });
 
-export async function releaseSequence({ source, sha, directory, secrets, dispatchedBy, otaVersions, store }, runLocalRelease, refreshTags = fetchTags) {
+export async function releaseSequence({ source, sha, directory, secrets, dispatchedBy, otaVersions, store, desktopMode = 'build', macHelpers = 'build' }, runLocalRelease, refreshTags = fetchTags) {
   for (const channel of ['next', 'latest']) {
     if (channel === 'latest') refreshTags(source);
     await runLocalRelease({ mode: 'execute', channel, 'release-sha': sha,
       'state-dir': join(directory, channel), 'dispatched-by': JSON.stringify(dispatchedBy),
       'store-track': channel === 'latest' && store ? 'production' : 'none', otaVersions,
+      'desktop-mode': desktopMode,
+      'mac-helpers': macHelpers,
     }, { repository: source, secrets });
   }
 }
@@ -120,7 +124,7 @@ async function main(argv) {
       store = storeReleaseNeeded(pinnedRuntimes(readFileSync(join(source, 'apps/mobile/app.config.js'), 'utf8')), stores);
     }
     console.log(store ? 'Store release: production; a pinned native runtime is not live in its store.' : 'Store release: none.');
-    await releaseSequence({ source, sha, directory, secrets, dispatchedBy, otaVersions, store }, runLocalRelease);
+    await releaseSequence({ source, sha, directory, secrets, dispatchedBy, otaVersions, store, desktopMode: options.desktopMode, macHelpers: options.macHelpers }, runLocalRelease);
     console.log(`Released ${sha} to next and latest${store ? ' with production store builds' : ''}. Private results: ${directory}`);
   } finally {
     try { pruneReleaseWorkspaces(directory); } catch { /* leftovers are retried by the next release's own prune */ }

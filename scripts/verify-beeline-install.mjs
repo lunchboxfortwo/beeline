@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process';
+import { helperInstallAgentEnv } from './helper-install-env.mjs';
 import { createServer } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { constants } from 'node:fs';
@@ -254,6 +255,7 @@ async function main() {
       BEELINE_INSTALL_BASE_URL: baseUrl,
       BEELINE_LAB: '1',
       XDG_STATE_HOME: resolve(temporaryRoot, 'state'),
+      XDG_CONFIG_HOME: resolve(temporaryRoot, 'config'),
       BEELINE_INSTALL_PLATFORM: platform,
       BEELINE_INSTALL_DIR: binDir,
       BEELINE_INSTALL_LIB_DIR: libDir,
@@ -411,16 +413,7 @@ async function main() {
     const { startAgentProcess, stopAgentProcess } = await import(resolve(repoRoot, 'apps', 'body', 'dist', 'agent-process.js'));
     const acp = new AcpClient({
       agentBinary: resolve(binDir, 'buzz-agent'),
-      agentEnv: {
-        // The probe must mirror a real host launch (a login shell with node on
-        // PATH): agentEnv is the ACP child's whole environment, and the
-        // beeline-readonly-mcp wrapper execs `node`.
-        PATH: process.env.PATH ?? '',
-        BUZZ_AGENT_PROVIDER: 'openai',
-        OPENAI_COMPAT_API_KEY: 'install-probe',
-        OPENAI_COMPAT_MODEL: 'install-probe',
-        OPENAI_COMPAT_BASE_URL: 'http://127.0.0.1:1/v1',
-      },
+      agentEnv: helperInstallAgentEnv(env),
       autoApprovePermissions: false,
     });
     let acpStderr = '';

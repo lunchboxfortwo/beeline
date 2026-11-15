@@ -3,7 +3,7 @@
 // only plans, builds proofs or executes the checks-only leg. See docs/release-pipeline.md for the outage policy.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +14,7 @@ import { downloadPagesChannel } from './pages-channel.mjs';
 import { checksWorkflow, checkPlan, LocalChecks } from './release-local-checks.mjs';
 import { LocalDelivery } from './release-local-delivery.mjs';
 import { droppedChecks, localWorkflow, quickChecks, releasePlan } from './release-local-policy.mjs';
+import { DesktopBuild, desktopDryRun } from './release-local-desktop.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const WORKFLOW = '.github/workflows/unified-release.yml';
@@ -30,12 +31,14 @@ export function parseArguments(argv) {
       args.mode = arg.slice(2); args.explicitMode = true;
     } else if (arg === '--run-release-proof') args.proof = true;
     else if (arg === '--help') args.help = true;
-    else if (['--channel', '--release-sha', '--env-file', '--state-dir', '--leg', '--mac-host', '--remote-job', '--store-track'].includes(arg)) {
+    else if (['--channel', '--release-sha', '--release-version', '--desktop-mode', '--mac-helpers', '--env-file', '--state-dir', '--leg', '--mac-host', '--remote-job', '--store-track'].includes(arg)) {
       if (!argv[i + 1] || argv[i + 1].startsWith('--')) throw new Error(`Missing value for ${arg}`);
       args[arg.slice(2)] = argv[++i];
     } else throw new Error(`Unknown argument: ${arg}`);
   }
   if (!['next', 'latest'].includes(args.channel)) throw new Error('channel must be next or latest');
+  if (args['desktop-mode'] && !['build', 'carry'].includes(args['desktop-mode'])) throw new Error('desktop-mode must be build or carry');
+  if (args['mac-helpers'] && !['build', 'carry'].includes(args['mac-helpers'])) throw new Error('mac-helpers must be build or carry');
   if (args['release-sha'] && !/^[0-9a-f]{40}$/.test(args['release-sha'])) throw new Error('release-sha must be a full commit SHA');
   if (args['mac-host'] !== MAC) throw new Error(`Only the authorized Mac build host ${MAC} is supported`);
   if (args.leg && args.mode !== 'dry-run' && !(args.mode === 'execute' && args.leg === 'release_checks')) throw new Error('--leg requires --dry-run or --execute --leg release_checks');
@@ -113,7 +116,8 @@ async function macJob({ job, context, label, engine }) {
   ) : {};
   if (secrets.EXPO_ASC_API_KEY_P8?.includes('-----BEGIN')) secrets.EXPO_ASC_API_KEY_P8 = Buffer.from(secrets.EXPO_ASC_API_KEY_P8).toString('base64');
   const spec = {
-    job: context.github.job === 'mobile_native_ios' ? privateIosJob(job) : job,
+    job: context.github.job === 'mobile_native_ios' ? privateIosJob(job)
+      : { ...job, env: { ...job.env, CARGO_BUILD_JOBS: '2', CI_TEST_WORKERS: '2', BEELINE_LOCAL_RELEASE: 'true' } },
     label, secrets, context: { ...context, secrets: {}, github: { ...context.github } },
     variables: engine.variables, workflowEnv: engine.read?.(WORKFLOW)?.env,
   };
@@ -134,6 +138,11 @@ async function macJob({ job, context, label, engine }) {
     engine.artifacts.set(name, destination);
   }
   if (failure) throw failure;
+  try {
+    await engine.processes.run('ssh', ['-o', 'BatchMode=yes', MAC, `rm -rf -- '${remote}' '${dirname(tools)}'`], { env: process.env, timeout: 120_000, quiet: true });
+    rmSync(join(local, 'source.bundle'), { force: true });
+  } catch (error) { engine.processes.log(`Mac artifacts collected; temporary workspace cleanup incomplete: ${error.message}`); }
+  delete engine.macTools;
   return result.job;
 }
 
@@ -198,13 +207,20 @@ export function localHooks(directory, processes) {
       }
       if (file === WORKFLOW) {
         const delivery = new LocalDelivery(engine);
+        engine.localDelivery = delivery;
         process.once('SIGINT', delivery.cancel); process.once('SIGTERM', delivery.cancel);
         return { workflow: localWorkflow(workflow, inputs), parallel: true, job: (...args) => delivery.run(...args),
           finish: () => { process.removeListener('SIGINT', delivery.cancel); process.removeListener('SIGTERM', delivery.cancel); } };
       }
+      if (file === '.github/workflows/desktop.yml') {
+        const delivery = engine.localDelivery || new LocalDelivery(engine);
+        return { workflow, parallel: true, job: (job, context, label, env) => delivery.run(job,
+          { ...context, github: { ...context.github, job: 'desktop_build' } }, label, env) };
+      }
     },
     job: async args => {
       const { context, engine } = args;
+      if (context.github.job === 'desktop_build') return new DesktopBuild(engine).row(args.job, context, args.label);
       context.env.BEELINE_LOCAL_RELEASE = 'true';
       context.env.BEELINE_LOCAL_OTA_VERSIONS = JSON.stringify(engine.variables.otaVersions ?? []);
       if (context.github.token) {
@@ -219,11 +235,16 @@ export function localHooks(directory, processes) {
           [`GIT_CONFIG_VALUE_${index}`]: `AUTHORIZATION: basic ${basic}`, GIT_TERMINAL_PROMPT: '0' });
       }
       if (['helper_linux', 'helper_macos', 'server'].includes(context.github.job)) context.env.CARGO_BUILD_JOBS = '2';
-      if (context.github.job === 'helper_macos') return carryMacHelper(engine, context);
+      if (context.github.job === 'helper_macos') {
+        // The authorized Mac is Intel. ARM archives keep their proven identity
+        // until a native ARM installation probe can actually run.
+        if (engine.variables?.macHelperMode === 'build' && context.matrix.platform === 'darwin-x64') return macJob(args);
+        return carryMacHelper(engine, context);
+      }
       if (context.github.job === 'mobile_native_ios') return macJob(args);
       if (context.github.job === 'helper') {
         context.env.BEELINE_RELEASE_CARRIED_ARM64_DIR = join(directory, 'carried-arm64');
-        context.env.BEELINE_RELEASE_CARRIED_X64_DIR = join(directory, 'carried-x64');
+        if (engine.variables?.macHelperMode !== 'build') context.env.BEELINE_RELEASE_CARRIED_X64_DIR = join(directory, 'carried-x64');
       }
       if (['release_validation', 'bookkeeping'].includes(context.github.job)) {
         context.env.BEELINE_LOCAL_RELEASE_RECORDS = join(directory, 'records.json');
@@ -297,7 +318,7 @@ export function localHooks(directory, processes) {
           !context.secrets?.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON) {
         throw new Error('Native Android store delivery requires GOOGLE_PLAY_SERVICE_ACCOUNT_JSON');
       }
-      if (step.name === 'Produce the inspectable release plan' && result.outputs.run_desktop === 'true') {
+      if (step.name === 'Produce the inspectable release plan' && result.outputs.run_desktop === 'true' && engine?.variables?.desktopMode !== 'build') {
         const previous = JSON.parse(readFileSync(join(context.runner.temp, 'previous/release.json'), 'utf8'));
         const desktop = previous.components.desktop;
         if (!desktop?.desktopVersion) throw new Error('No published desktop updater set to carry');
@@ -312,7 +333,9 @@ export function localHooks(directory, processes) {
         const record = JSON.parse(readFileSync(path, 'utf8'));
         delete record.runId;
         record.execution = { kind: 'local', id: basename(directory), dispatchedBy: JSON.parse(context.inputs.dispatched_by) };
-        record.delivery.localExceptions = { staticWebsite: 'not released', helperArm64: 'carried unchanged', helperX64: 'carried unchanged', desktop: 'published signed updater set carried unchanged, including Windows' };
+        record.delivery.localExceptions = { staticWebsite: 'not released', helperArm64: 'carried unchanged; authorized Mac is Intel',
+          helperX64: engine.variables.macHelperMode === 'build' ? 'built and install-verified on Intel Mac' : 'carried unchanged',
+          desktop: engine.variables.desktopMode === 'build' ? 'native signed updater builds on MacBook, squire and Windows VM' : 'published signed updater set carried unchanged, including Windows' };
         record.delivery.localExceptions.checks = context.inputs.channel === 'latest'
           ? { retained: [], reusedFrom: 'successful next release of this commit', coverage: 'no checks run on promotion' }
           : { retained: ['build', 'typecheck', 'dead-code', 'design grammar', 'codecs'], dropped: droppedChecks(engine.read(checksWorkflow)), coverage: 'not produced by quick release checks' };
@@ -354,6 +377,7 @@ export function dryInitializeJob(workflow) {
 }
 
 export async function dryRun(args, engine, context) {
+  if (args.leg === 'desktop') { await desktopDryRun(engine, context); return; }
   if (args.leg === 'release') {
     engine.processes.log(JSON.stringify(releasePlan(engine.read(WORKFLOW), engine.read(checksWorkflow), args), null, 2));
     return;
@@ -408,7 +432,7 @@ export async function releaseChecks(engine, context) {
 
 export async function runLocalRelease(args, { repository = root, secrets: providedSecrets } = {}) {
   const root = repository;
-  if (args.help) { console.log('node scripts/release-local.mjs [--plan | --dry-run [--leg release|release_checks|initialize|server|helper|mobile-ota|pages|web-app|eas-cli|require-tools|mac-tools] | --execute --leg release_checks] [--channel next|latest] [--release-sha <40-char SHA>] [--env-file ~/.config/beeline-release.env] [--run-release-proof] [--store-track none|beta|production] [--state-dir /outside/repo]'); return; }
+  if (args.help) { console.log('node scripts/release-local.mjs [--plan | --dry-run [--leg release|release_checks|initialize|server|helper|mobile-ota|pages|web-app|eas-cli|require-tools|mac-tools|desktop] | --execute --leg release_checks] [--channel next|latest] [--release-sha <40-char SHA>] [--release-version vX.Y.Z] [--desktop-mode build|carry] [--mac-helpers build|carry] [--env-file ~/.config/beeline-release.env] [--run-release-proof] [--store-track none|beta|production] [--state-dir /outside/repo]'); return; }
   if (args['remote-job']) { await remoteJob(args['remote-job']); return; }
   if (process.platform !== 'linux') throw new Error('Run the release controller on Linux squire');
   const sha = args['release-sha'] || execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
@@ -420,7 +444,8 @@ export async function runLocalRelease(args, { repository = root, secrets: provid
   const secrets = providedSecrets ?? (args.mode === 'execute' || (args.mode === 'dry-run' && args['env-file']) ? loadEnvironment(envFile, root) : {});
   if (!secrets.GITHUB_TOKEN && secrets.GH_TOKEN) secrets.GITHUB_TOKEN = secrets.GH_TOKEN;
   const processes = new Processes(secrets);
-  const variables = { otaVersions: args.otaVersions ?? [], CLOUDFLARE_ACCOUNT_ID: secrets.CLOUDFLARE_ACCOUNT_ID || '', BEELINE_HELPER_SENTRY_DSN: secrets.BEELINE_HELPER_SENTRY_DSN || '', BEELINE_MOBILE_SENTRY_DSN: secrets.BEELINE_MOBILE_SENTRY_DSN || '' };
+  const variables = { otaVersions: args.otaVersions ?? [], desktopMode: args['desktop-mode'] || 'build', desktopReleaseVersion: args['release-version'], macHelperMode: args['mac-helpers'] || 'build',
+    CLOUDFLARE_ACCOUNT_ID: secrets.CLOUDFLARE_ACCOUNT_ID || '', BEELINE_HELPER_SENTRY_DSN: secrets.BEELINE_HELPER_SENTRY_DSN || '', BEELINE_MOBILE_SENTRY_DSN: secrets.BEELINE_MOBILE_SENTRY_DSN || '' };
   const engine = new LocalActions({ root, directory, secrets, variables, processes, github: localGithub, hooks: localHooks(directory, processes) });
   engine.inspect(WORKFLOW);
   const context = { github: { repository: 'Beeline-Work/beeline', sha, run_id: String(Math.floor(Date.now() / 1000)), run_attempt: '1', event_name: 'workflow_dispatch', event: {}, actor: 'local-release', token: secrets.GITHUB_TOKEN || secrets.GH_TOKEN || '' }, runner: {}, job: { status: 'success' } };
@@ -428,7 +453,7 @@ export async function runLocalRelease(args, { repository = root, secrets: provid
     console.log(`Local ${args.channel} release at ${sha}; no release commands executed.`);
     console.log(JSON.stringify(releasePlan(engine.read(WORKFLOW), engine.read(checksWorkflow), args), null, 2));
     console.log('website not released: static Pages is suspended; selected web app leg still runs.');
-    console.log('Apple-silicon and Intel Mac helpers carried unchanged until Actions recovers. Published desktop updater set (including Windows) carried unchanged; its global version is retained.');
+    console.log(`Mac helper mode: ${variables.macHelperMode}; Intel builds on MacBook, ARM carry retains its recorded identity. Desktop mode: ${variables.desktopMode}; builds use MacBook, squire and the Windows VM; carry retains the entire published version.`);
     console.log(`iOS store builds use SSH on ${MAC}. Canary, helper update proof, optional device proof, rollback and finalization stay enabled. ${args.channel === 'latest' ? 'Promotion reuses the successful next verdict; no checks run.' : 'Quick checks run before next delivery.'}`);
     return;
   }
@@ -440,7 +465,7 @@ export async function runLocalRelease(args, { repository = root, secrets: provid
     return;
   }
   console.log('website not released: static Pages suspended; the selected EAS web app still runs.');
-  console.log('Local policy: Apple-silicon and Intel Mac helpers and the published desktop updater set are carried unchanged until Actions recovers.');
+  console.log(`Local desktop policy: ${variables.desktopMode}; installer publication remains in the latest release finalization.`);
   attribution(args['dispatched-by']);
   if (!args['release-sha']) throw new Error('--execute requires an explicit immutable --release-sha');
   const identityPath = join(directory, 'local-execution.json');
@@ -476,6 +501,6 @@ export async function runLocalRelease(args, { repository = root, secrets: provid
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
   runLocalRelease(parseArguments(process.argv.slice(2))).catch(error => { console.error(error.message); process.exitCode = 1; });
 }

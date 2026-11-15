@@ -45,6 +45,8 @@
         "scripts/server-previous-sources.mjs",
         // The local Checks queue launches this worker by path in CI units and Body scopes.
         "scripts/release-local-check-worker.mjs",
+        // Copied to native desktop hosts and invoked by path, outside the module graph.
+        "scripts/release-local-desktop-worker.mjs",
         "scripts/release-local-tools.mjs",
         "scripts/verify-pages-update.mjs",
         "scripts/release-preflight.cjs",

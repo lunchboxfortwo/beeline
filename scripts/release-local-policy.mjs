@@ -42,14 +42,17 @@ export function localWorkflow(workflow, { channel = 'next' } = {}) {
 
 export function releasePlan(workflow, checks, options = {}) {
   const local = localWorkflow(workflow, options);
+  const carryDesktop = (options['desktop-mode'] || options.desktopMode) === 'carry';
+  const carryMac = (options['mac-helpers'] || options.macHelpers) === 'carry';
   return {
     targetSeconds: 1800,
     target: 'routine squire release; check budget ~5 min + concurrent delivery ~20 min + finalization',
     localCapacity: '3 jobs on existing 3-CPU/12-GiB slices, plus 1 capped Mac orchestration job; iOS store compilation runs remotely',
     checks: options.channel === 'latest' ? { retained: [], reusedFrom: 'successful next release of this commit' } : { retained: ['build once', 'typecheck', 'dead-code', 'design grammar', 'network codecs'], dropped: droppedChecks(checks), smoke: 'existing short TYPECHECK policy regressions only' },
     jobs: Object.entries(local.jobs).map(([id, job]) => ({ id, needs: [job.needs ?? []].flat(), if: job.if ?? 'success()',
-      placement: id === 'mobile_native_ios' ? 'remote Mac, separate queue' : 'bounded local queue',
-      policy: id === 'helper_macos' ? 'published Apple-silicon and Intel Mac helpers carried unchanged until Actions recovers' : id === 'desktop_installers' ? 'published signed updater set carried unchanged under the existing local recovery policy' : undefined })),
+      placement: id === 'mobile_native_ios' ? 'remote Mac, separate queue' : id === 'helper_macos' && !carryMac ? 'Intel Mac remote queue; ARM carry local' : id === 'desktop_installers' ? 'native hosts through bounded delivery queues' : 'bounded local queue',
+      policy: id === 'helper_macos' ? carryMac ? 'published Apple-silicon and Intel Mac helpers carried unchanged' : 'Intel helper built on MacBook; ARM helper carried with its recorded identity because a native ARM host is unavailable'
+        : id === 'desktop_installers' ? carryDesktop ? 'published signed updater set carried unchanged under the existing local recovery policy' : 'complete native signed updater set, including Windows, built from the promoted commit' : undefined })),
     coverage: 'no release coverage map is fabricated; PR Checks remain unchanged',
     safety: 'dispatch attribution, exact SHA, quick-check verdict, migrations, canary/rollback, helper proofs and final result joins retained',
     measurement: 'dry plan is not an end-to-end deployment timing; explicit native store/device proofs can extend the routine target',

@@ -2,7 +2,7 @@
 // outputs, matrices and dependency edges continue to belong to its YAML.
 import { createHash } from 'node:crypto';
 import { cpSync, existsSync, globSync, mkdirSync, readFileSync, statSync } from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { delimiter, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { parse } from 'yaml';
 import { condition, readCommandFile, render } from './release-local-expressions.mjs';
 import { appendSummary, privateWrite, readOptional } from './release-local-process.mjs';
@@ -41,7 +41,8 @@ export class LocalActions {
     this.cancelled = false;
     this.abortController = new AbortController();
     // Do not leak the operator's production environment into test jobs.
-    this.baseEnv = Object.fromEntries(Object.entries(baseEnv).filter(([key]) => /^(PATH|LANG|LC_.*|ANDROID_HOME|ANDROID_SDK_ROOT|JAVA_HOME|SHELL|TMPDIR|RUSTUP_HOME|CARGO_HOME|FNM_DIR)$/.test(key)));
+    this.baseEnv = Object.fromEntries(Object.entries(baseEnv).filter(([key]) => /^(PATH|LANG|LC_.*|ANDROID_HOME|ANDROID_SDK_ROOT|JAVA_HOME|SHELL|TMPDIR|RUSTUP_HOME|CARGO_HOME|FNM_DIR)$/.test(key)
+      || (process.platform === 'win32' && /^(SystemRoot|SYSTEMROOT|WINDIR|COMSPEC|ComSpec|PATHEXT|TEMP|TMP|USERPROFILE|APPDATA|LOCALAPPDATA|PROGRAMDATA|ProgramFiles|ProgramFiles\(x86\)|ProgramW6432|PROCESSOR_ARCHITECTURE|NUMBER_OF_PROCESSORS)$/i.test(key))));
     if (baseEnv.HOME) {
       this.baseEnv.RUSTUP_HOME ||= join(baseEnv.HOME, '.rustup');
       this.baseEnv.CARGO_HOME ||= join(baseEnv.HOME, '.cargo');
@@ -59,7 +60,7 @@ export class LocalActions {
     } catch { /* fnm or the preferred installed version is unavailable. */ }
     if (!selected) selected = JSON.parse(await this.processes.run('node', query, options));
     if (Number(selected.version.split('.')[0]) < 22) throw new Error(`Release runner requires Node >=22; found ${selected.version}`);
-    return { ...env, ...options.env, PATH: `${dirname(selected.path)}:${env.PATH}` };
+    return { ...env, ...options.env, PATH: `${dirname(selected.path)}${delimiter}${env.PATH}` };
   }
   read(file) { return parse(readFileSync(resolve(this.root, file), 'utf8')); }
   inspect(file, visited = new Set()) {
@@ -161,7 +162,7 @@ export class LocalActions {
       return result;
     };
     context = structuredClone(context);
-    const runner = { name: 'beeline-ci-squire-local-release', os: process.platform === 'darwin' ? 'macOS' : 'Linux', temp: directory, arch: process.arch === 'x64' ? 'X64' : 'ARM64' };
+    const runner = { name: 'beeline-ci-squire-local-release', os: process.platform === 'darwin' ? 'macOS' : process.platform === 'win32' ? 'Windows' : 'Linux', temp: directory.replaceAll('\\', '/'), arch: process.arch === 'x64' ? 'X64' : 'ARM64' };
     context.runner = runner;
     context.env = {
       ...this.baseEnv, HOME: join(directory, 'home'), XDG_CONFIG_HOME: join(directory, 'home/.config'),
@@ -173,9 +174,12 @@ export class LocalActions {
       GITHUB_SHA: context.github.sha, GITHUB_RUN_ID: context.github.run_id,
       GITHUB_RUN_ATTEMPT: '1', GITHUB_JOB: context.github.job,
       GITHUB_EVENT_NAME: context.github.event_name, RUNNER_TEMP: directory, RUNNER_NAME: runner.name,
-      GITHUB_STEP_SUMMARY: join(directory, 'summary.md'),
+      GITHUB_STEP_SUMMARY: join(directory, 'summary.md'), RUNNER_OS: runner.os,
     };
-    context.env.PATH = `${context.env.NPM_CONFIG_PREFIX}/bin:${context.env.PATH}`;
+    context.env.PATH = `${context.env.NPM_CONFIG_PREFIX}/bin${delimiter}${context.env.PATH}`;
+    if (process.platform === 'win32') {
+      for (const key of ['HOME', 'RUNNER_TEMP', 'GITHUB_WORKSPACE', 'GITHUB_STEP_SUMMARY']) context.env[key] = context.env[key].replaceAll('\\', '/');
+    }
     mkdirSync(context.env.HOME, { recursive: true, mode: 0o700 });
     if (this.isolateTemporary) {
       Object.assign(context.env, { TMPDIR: join(directory, 'tmp'), XDG_CACHE_HOME: join(directory, 'cache'), DOCKER_CONFIG: join(directory, 'docker') });
@@ -229,6 +233,7 @@ export class LocalActions {
         ...context.env, ...this.env(step.env, context),
         GITHUB_OUTPUT: join(commandDirectory, 'output'), GITHUB_ENV: join(commandDirectory, 'env'), GITHUB_PATH: join(commandDirectory, 'path'),
       };
+      if (process.platform === 'win32') for (const key of ['GITHUB_OUTPUT', 'GITHUB_ENV', 'GITHUB_PATH']) env[key] = env[key].replaceAll('\\', '/');
       for (const path of [env.GITHUB_OUTPUT, env.GITHUB_ENV, env.GITHUB_PATH]) privateWrite(path, '');
       const timeout = Math.min((step['timeout-minutes'] ?? 60) * 60_000, context.deadline - Date.now());
       this.processes.log(`  ${step.name ?? step.uses ?? id}`);
@@ -239,7 +244,7 @@ export class LocalActions {
           if (step.run) {
             const body = this.value(step.run, { ...context, env });
             privateWrite(join(commandDirectory, 'run.sh'), body);
-            await this.processes.run('bash', ['--noprofile', '--norc', '-eo', 'pipefail', join(commandDirectory, 'run.sh')], {
+            await this.processes.run('bash', ['--noprofile', '--norc', '-eo', 'pipefail', join(commandDirectory, 'run.sh').replaceAll('\\', '/')], {
               cwd: resolve(this.root, this.value(step['working-directory'] ?? '.', context)), env, timeout,
             });
           } else await this.action(step, context, env, result, timeout);
@@ -254,7 +259,7 @@ export class LocalActions {
       } finally {
         Object.assign(context.env, readCommandFile(readOptional(env.GITHUB_ENV)));
         const paths = readOptional(env.GITHUB_PATH).trim().split('\n').filter(Boolean);
-        if (paths.length) context.env.PATH = `${paths.reverse().join(':')}:${context.env.PATH}`;
+        if (paths.length) context.env.PATH = `${paths.reverse().join(delimiter)}${delimiter}${context.env.PATH}`;
         context.steps[id] = result;
         if (previousStatus === 'failure') context.job.status = 'failure';
       }

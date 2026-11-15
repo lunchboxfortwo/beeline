@@ -97,7 +97,7 @@ test('only iOS uses the remote queue while both carried Mac helpers and Android 
   assert.deepEqual(placements.filter(([, slot]) => slot === 4).map(([id]) => id), ['mobile_native_ios']);
   assert.equal(placements.filter(([id, slot]) => id === 'helper_macos' && slot < 4).length, 2);
   assert.ok(placements.some(([id, slot]) => id === 'mobile_native_android' && slot < 4));
-  const plan = releasePlan(read('unified-release.yml'), read('checks.yml'), { channel: 'latest' });
+  const plan = releasePlan(read('unified-release.yml'), read('checks.yml'), { channel: 'latest', macHelpers: 'carry' });
   assert.equal(plan.jobs.find(job => job.id === 'mobile_native_ios').placement, 'remote Mac, separate queue');
   assert.equal(plan.jobs.find(job => job.id === 'helper_macos').placement, 'bounded local queue');
   assert.match(plan.jobs.find(job => job.id === 'helper_macos').policy, /Apple-silicon and Intel Mac helpers carried unchanged/);

@@ -87,8 +87,9 @@ caches, Docker configuration and logs.
 The existing `beeline-ci1..4.slice` parents enforce 3 CPUs / 12 GiB each.
 After the checks verdict, the delivery queue uses at most three local slots
 and one separate capped slot for remote Mac orchestration.
-iOS store compilation runs remotely while server, Linux helper, carried Mac
-helpers, OTA and web app legs use available local slots.
+iOS store compilation and the Intel Mac helper share the remote orchestration
+slot while server, Linux helper, ARM helper carry, OTA and web app legs use
+available local slots.
 Each delivery worker runs as the operator in its own source checkout and process,
 so production credentials never enter credential-free CI jails.
 Docker build/run containers share their worker's existing parent slice, including
@@ -109,17 +110,49 @@ Cache misses rebuild; unknown action types fail.
 The temporary outage policy is explicit: **website not released** means static
 GitHub Pages is left serving its published site. The selected EAS web app leg
 still exports, uploads private source maps when configured, deploys and verifies its canonical
-origin. Both published Apple helper archives (Apple-silicon and Intel Mac) are
-carried byte for byte until Actions recovers, with their original per-platform
-commit/version/checksum and a `carriedFrom` record. Linux builds and proves its
-new bytes. Both Mac helper jobs use the local queue; they require no SSH build.
+origin. The Intel Mac helper builds and runs its installation proof on the
+MacBook. The authorized MacBook is Intel, so the Apple-silicon helper remains
+carried byte for byte with its original commit/version/checksum and a
+`carriedFrom` record: its native installation proof requires an ARM Mac.
+`--mac-helpers carry` retains both published Apple helper archives instead.
 
-The desktop updater manifest has one version for all platforms. Local recovery
-carries the complete published signed desktop installer set, including Windows,
-and its existing desktop version. This prevents unchanged Windows bytes from
-being offered as a newer desktop version. The normal hosted pipeline retains
-its native builds and Pages deployment. Remove the local exceptions when
-Actions recovers; do not run hosted and local releases together.
+The desktop updater manifest has one version for all platforms. A normal
+`npm run release -- --no-store` builds the complete installer set from the
+promoted commit using `.github/workflows/desktop.yml`: universal macOS (Apple
+silicon and Intel) on `dani@macbook-pro-7`, Linux x86_64 on Squire, and Windows
+x86_64 in Chad's existing `win10` VM through SSH and QEMU Guest Agent.
+Windows builds use the already logged-in user's interactive Scheduled Task
+token for WiX; no new listener or login policy is provisioned. Windows uses
+the workflow's Tauri updater signing, which has no Authenticode step.
+Mac builds use Developer ID signing, DMG notarization and stapling, then the
+workflow's `codesign`, `spctl`, and `stapler` verification. Updater signatures
+are cryptographically verified before local artifacts enter finalization.
+Apple's `security` and `codesign` tools receive the operator's real HOME through
+private executable adapters, with an explicit build/login/System keychain search
+list; Node, Expo, Rust and npm keep the job's private HOME. The original keychain
+search list is restored after the job. Successful Mac jobs remove their own
+temporary source/tool directories after collecting local artifacts, so the
+next and latest builds fit on the laptop. Windows file transfer uses Chad's existing
+Python libvirt bindings and guest agent, with private transport files and no new
+network listener.
+The existing workflow assigns the next desktop version, stages stable names,
+and publishes the complete set and manifest during latest finalization.
+`npm run release -- --no-store --desktop-mode carry` instead carries the
+complete published signed installer set and its version unchanged. Never
+advance a desktop version for a partial set. The hosted pipeline is unchanged;
+do not run hosted and local releases together.
+
+For an installer-only proof with no publication or channel mutation:
+
+```sh
+node scripts/release-local.mjs --dry-run --leg desktop \
+  --release-sha <full-main-SHA> --release-version vX.Y.Z \
+  --env-file ~/.config/beeline-release.env --state-dir /outside/repo/desktop-proof
+```
+
+This reads the live desktop version, builds its successor on all three hosts,
+and writes installers, signatures, `Beeline-latest.json` and `desktop-stage.json`
+under `<state-dir>/desktop-release`. It performs no GitHub or R2 uploads.
 
 Local credentials come only from `~/.config/beeline-release.env` (or an explicit
 `--env-file` outside the checkout), owned by the operator with mode `600`.
@@ -167,8 +200,8 @@ Latest publication copies every installer, signature and `Beeline-latest.json`
 to the `beeline-downloads` R2 bucket under both `v<version>/` and `latest/`;
 GitHub releases retain a second copy. The updater checks R2 first and GitHub
 second, and manifest payload URLs use the versioned R2 prefix. Local recovery
-copies its carried signed set through the same publication step, preserving
-its desktop version and signatures.
+uses the same publication step for either freshly built installers or a carried
+set, preserving the staged desktop version and signatures.
 
 Helper channels use the same R2 client and bucket: every channel file is
 uploaded under `dl/` (latest) or `dl/next/` (next), with the manifest last.
@@ -184,7 +217,15 @@ file. Hosted releases use the `CLOUDFLARE_R2_TOKEN` Actions secret and
 [Cloudflare object upload API](https://developers.cloudflare.com/api/resources/r2/subresources/buckets/subresources/objects/methods/upload/)
 and uploads each manifest after its installers, without additional retries.
 
-The carried desktop set requires no new Apple signing or Tauri private keys.
+Desktop builds read the permanent updater key, password and public key from
+`/home/lunchbox/firstmate2/data/buzzy-desktop` (override with
+`BEELINE_DESKTOP_KEY_DIRECTORY` in the private release env), or the workflow's
+`TAURI_UPDATER_*` variables. They never regenerate that key. Apple signing uses
+the workflow's `APPLE_*` inputs when supplied, otherwise a temporary export of
+the existing Developer ID certificate/key in `/Users/dani/beeline-devid` on the
+MacBook; notarization uses the existing `EXPO_ASC_*` inputs. Remote desktop
+workers receive only signing inputs, never publication or deployment tokens.
+The carried desktop set requires no Apple signing or Tauri private keys.
 Keep vaulted keys vaulted; suitable provider API calls can use Squire's
 `use_credential`. A CLI requiring a raw credential needs a provider-issued
 local credential or approved secure injection, not plaintext vault retrieval.

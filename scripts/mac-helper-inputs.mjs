@@ -26,6 +26,7 @@ export const MAC_HELPER_INPUTS = [
   'scripts/beeline-archive.mjs',
   'scripts/mac-helper-inputs.mjs',
   'scripts/verify-beeline-install.mjs',
+  'scripts/helper-install-env.mjs',
   'scripts/pages-site.mjs',
   'scripts/app-associations.mjs',
   'web/install.sh',
