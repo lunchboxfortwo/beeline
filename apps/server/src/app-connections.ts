@@ -17,14 +17,12 @@ export { officialRegistryApps as OFFICIAL_REGISTRY_APPS } from './providers/inde
 /**
  * The one front door for apps (`@beeline/api-contract/app-connections`).
  *
- * Route selection keeps managed sign-ins and official MCP connections; OAuth
- * takes priority over a stored API route when the app supports it. `connectApp` then
- * installs an official Registry MCP for a new Stripe/Linear connection;
+ * Route selection keeps existing active app routes and vaulted credentials.
+ * `connectApp` installs an official Registry MCP for a new Stripe/Linear connection;
  * `resolveAppRoute` handles Composio, Squire API, then Squire browser.
  * Every decision it makes is written to `workspace_app_routes` and logged.
  * Two rules keep a route from being skipped silently:
- *   - an existing managed sign-in or MCP route stays selected; a stored Squire
- *     API route can become OAuth after a successful support check;
+ *   - an existing active route or vaulted credential stays selected;
  *   - the Squire browser is reached only from the Squire API route, on the
  *     explicit fact that the app has no API.
  * An OAuth support check that fails is `unavailable`, not "unsupported".
@@ -85,9 +83,7 @@ export async function resolveAppRoute(
       return { kind: 'route', route: 'workbench', transport: backing.transport,
         reason: 'use the owner’s vaulted GitHub token', backing };
   }
-  // OAuth routes share the established sign-in decision below, including its wording.
-  if (existing && !(existing.transport === 'squire-api' && !input.noApi &&
-      await probes.composio?.() === 'supported')) {
+  if (existing) {
     if (!input.noApi) return { kind: 'keep', transport: existing.transport };
     if (existing.transport !== 'squire-api')
       return {
@@ -112,7 +108,7 @@ export async function resolveAppRoute(
     };
   }
   const backing = await probes.workbench();
-  if (backing && !(backing.transport === 'squire-api' && await probes.composio?.() === 'supported'))
+  if (backing)
     return {
       kind: 'route',
       route: 'workbench',

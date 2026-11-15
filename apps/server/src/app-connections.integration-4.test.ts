@@ -1,7 +1,66 @@
+import { appIdentity } from '@beeline/api-contract/workbench';
+import { appConnections } from './app-connections.js';
+import { applyVaultList } from './workbench.js';
 import { describe, expect, it, vi, SYSTEM_IDENTITY_ID, SCHEDULE_SCHEDULER_ID, PhoneService, beginComposioAppSignIn, connectApp, readOwnerApps, ComposioApps, WORKSPACE, ROOM, OWNER, HELPER, COMMAND, turn, fakeRegistry, fixtureScope2 } from './test-support-app-connections.integration.test-support.js';
 
 describe('connect_app', () => {
 const scope2 = fixtureScope2();
+
+
+  it.each([false, true])('keeps amazon.co.jp vault credentials with stored app=%s when OAuth is supported', async storedApp => {
+    await scope2.connectSquire();
+    const reference = 'vault:amazon.co.jp:default';
+    await applyVaultList(scope2.database, {
+      owner_identity_id: OWNER, machine_id: 'machine-one', workspace_id: WORKSPACE,
+    }, [{ reference, service: 'amazon.co.jp', label: 'default', fieldNames: ['password'],
+      allowedHosts: [], state: 'active', createdAt: 1 }]);
+    if (storedApp) await scope2.database.query(`INSERT INTO workspace_apps
+      (id,workspace_id,owner_identity_id,app_key,display_name,transport,route)
+      VALUES('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',$1,$2,'amazon','Amazon','squire-api','squire-api')`,
+      [WORKSPACE, OWNER]);
+    const provider = scope2.fakeComposio();
+    provider.supportsOAuth.mockResolvedValue(true);
+    const daemon = scope2.daemonWith(fakeRegistry([]).client, provider);
+    for (const service of ['amazon.co.jp', 'www.amazon.co.jp', 'https://www.amazon.co.jp/orders',
+      'https://amazon.co.jp', 'Amazon']) {
+      const key = appIdentity(service)!.key;
+      expect(key).toBe('amazon');
+      expect(await appConnections(scope2.database, OWNER, key))
+        .toContainEqual(expect.objectContaining({ reference, service: 'amazon.co.jp', state: 'active' }));
+      await expect(daemon.execute('connect', { ...turn, service, reason: 'Read my orders' }, HELPER))
+        .resolves.toMatchObject({ status: 'ready', transport: 'squire-api', connectionReference: reference });
+    }
+    expect((await scope2.database.query('SELECT transport FROM workspace_apps')).rows)
+      .toEqual([{ transport: 'squire-api' }]);
+    expect((await scope2.database.query("SELECT id FROM messages WHERE card_type='app-sign-in'")).rows).toEqual([]);
+    expect(provider.supportsOAuth).not.toHaveBeenCalled();
+    expect(provider.link).not.toHaveBeenCalled();
+  });
+
+
+  it('keeps an active Squire credential committed while a new OAuth route is being checked', async () => {
+    await scope2.connectSquire();
+    const provider = scope2.fakeComposio();
+    provider.supportsOAuth.mockImplementation(async () => {
+      await applyVaultList(scope2.database, {
+        owner_identity_id: OWNER, machine_id: 'machine-one', workspace_id: WORKSPACE,
+      }, [{ reference: 'vault:amazon', service: 'amazon.co.jp', label: 'default',
+        fieldNames: ['password'], allowedHosts: [], state: 'active', createdAt: 1 }]);
+      await scope2.database.query(`INSERT INTO workspace_apps
+        (id,workspace_id,owner_identity_id,app_key,display_name,transport,route)
+        VALUES('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',$1,$2,'amazon','Amazon','squire-api','squire-api')`,
+        [WORKSPACE, OWNER]);
+      return true;
+    });
+    await expect(connectApp(scope2.database, fakeRegistry([]).client, {
+      workspaceId: WORKSPACE, ownerId: OWNER, machineId: 'machine-one', helperAgentId: HELPER,
+      requestedBy: HELPER, app: 'amazon.co.jp', composio: provider,
+    })).resolves.toMatchObject({ status: 'connected', transport: 'squire-api',
+      connectionReference: 'vault:amazon' });
+    expect(provider.supportsOAuth).toHaveBeenCalledTimes(1);
+    expect(provider.link).not.toHaveBeenCalled();
+    expect(await scope2.routes()).toEqual([]);
+  });
 
 
   it('keeps a niche Registry publisher in its own company', async () => {

@@ -7,7 +7,7 @@ describe('the app route order', () => {
 const scope1 = fixtureScope1();
 
 
-  it('reuses a connected API credential when OAuth is unsupported', async () => {
+  it('reuses a connected API credential without probing OAuth', async () => {
     const p = scope1.probes({
       workbench: vi.fn(
         async () => ({ transport: 'squire-api', reference: 'vault:resend' }) as const,
@@ -15,22 +15,24 @@ const scope1 = fixtureScope1();
     });
     const decision = await resolveAppRoute({ reconnect: false, noApi: false }, p);
     expect(decision).toMatchObject({ kind: 'route', route: 'workbench', transport: 'squire-api' });
-    expect(p.composio).toHaveBeenCalledTimes(1);
+    expect(p.composio).not.toHaveBeenCalled();
   });
 
 
 
-  it.each([false, true])('TIKTOK-ROUTE-1: OAuth supersedes a stored API route on reconnect=%s', async reconnect => {
+  it.each([false, true])('keeps an active API route with a credential on reconnect=%s', async reconnect => {
     const p = scope1.probes({ composio: vi.fn(async () => 'supported' as const) });
     await expect(resolveAppRoute({ existing: { transport: 'squire-api', state: 'active', hasCredential: true },
-      reconnect, noApi: false }, p)).resolves.toMatchObject({ kind: 'route', transport: 'composio' });
+      reconnect, noApi: false }, p)).resolves.toEqual({ kind: 'keep', transport: 'squire-api' });
+    expect(p.composio).not.toHaveBeenCalled();
   });
 
-  it('TIKTOK-ROUTE-1: OAuth wins over a discovered vault credential', async () => {
+  it('keeps a discovered vault credential when OAuth is supported', async () => {
     const p = scope1.probes({ workbench: vi.fn(async () => ({ transport: 'squire-api', reference: 'vault:developer' }) as const),
       composio: vi.fn(async () => 'supported' as const) });
     await expect(resolveAppRoute({ reconnect: false, noApi: false }, p))
-      .resolves.toMatchObject({ kind: 'route', transport: 'composio' });
+      .resolves.toMatchObject({ kind: 'route', route: 'workbench', transport: 'squire-api' });
+    expect(p.composio).not.toHaveBeenCalled();
   });
 
 
@@ -69,15 +71,15 @@ const scope1 = fixtureScope1();
   });
 
 
-  it('uses supported OAuth for both new and existing API selections', async () => {
+  it('uses supported OAuth for a new selection and keeps an existing API route', async () => {
     const p = scope1.probes({ composio: vi.fn(async () => 'supported' as const) });
     await expect(resolveAppRoute({ reconnect: false, noApi: false,
       preferredRoute: 'squire-api' }, p)).resolves.toMatchObject({ transport: 'composio' });
     expect(p.composio).toHaveBeenCalledTimes(2);
     await expect(resolveAppRoute({ existing: { transport: 'squire-api', state: 'active',
       hasCredential: true }, reconnect: false, noApi: false, preferredRoute: 'composio' }, p))
-      .resolves.toMatchObject({ kind: 'route', transport: 'composio' });
-    expect(p.composio).toHaveBeenCalledTimes(4);
+      .resolves.toMatchObject({ kind: 'keep', transport: 'squire-api' });
+    expect(p.composio).toHaveBeenCalledTimes(2);
   });
 
 
@@ -306,31 +308,6 @@ const scope2 = fixtureScope2();
       expect(result.app).not.toBe('Beeline Rooms');
       expect(result.next).not.toContain('custom connector');
     }
-  });
-
-
-  it.each(['TikTok', 'Gmail'])('TIKTOK-ROUTE-1: %s vault setup keys do not hide OAuth or require manual completion', async name => {
-    await scope2.connectSquire();
-    const key = name.toLowerCase();
-    await applyVaultList(scope2.database, { owner_identity_id: OWNER, machine_id: 'machine-one', workspace_id: WORKSPACE }, [{
-      reference: `vault:${key}-developer`, service: key, label: 'App setup',
-      fieldNames: ['client_key', 'client_secret'], allowedHosts: [`api.${key}.com`], state: 'active', createdAt: 1,
-    }]);
-    const provider = scope2.fakeComposio(key);
-    provider.supportsOAuth.mockResolvedValue(true);
-    const phone = new PhoneService(scope2.database, 'http://placeholder', undefined, undefined,
-      undefined, false, scope2.database, undefined, undefined, fakeRegistry([]).client, provider);
-    const started = await phone.execute('connectWorkbenchApp', { app: name, helperAgentId: HELPER }, OWNER);
-    expect(started.authorizationUrl).toBe('https://app.composio.dev/connect/fixture');
-    expect(provider.link).toHaveBeenCalledWith(OWNER, key);
-    await phone.execute('completeAppSignIn', { appId: started.appId, sessionUri: 'session-fixture' }, OWNER);
-    expect(provider.completeAuth).toHaveBeenCalledWith('session-fixture', OWNER);
-    expect(await readOwnerApps(scope2.database, OWNER, provider)).toContainEqual(expect.objectContaining({
-      appId: started.appId, transport: 'composio', status: 'connected',
-    }));
-    expect((await scope2.database.query('SELECT reference FROM workspace_connections WHERE owner_identity_id=$1', [OWNER])).rows)
-      .toContainEqual({ reference: `vault:${key}-developer` });
-    console.info(`Reproduction TIKTOK-ROUTE-1: ${name} setup keys → phone Connect → OAuth → authenticated completion → connected; key retained`);
   });
 
 

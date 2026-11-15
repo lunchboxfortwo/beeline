@@ -166,7 +166,6 @@ export async function connectApp(
              sign_in_error=NULL,
              state='active',updated_at=now()
          WHERE workspace_apps.xmin::text=$11
-           OR (workspace_apps.transport='squire-api' AND excluded.transport='composio' AND workspace_apps.state='active')
          RETURNING id,route,transport
        ) INSERT INTO workspace_app_routes(id,app_id,route,transport,reason,requested_by)
          SELECT $12::uuid,id,route,transport,$13,$14 FROM changed RETURNING app_id`,
