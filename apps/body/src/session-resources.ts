@@ -27,6 +27,7 @@ export class SessionResources {
     api: DaemonApiClient; agentId: string; placeId: string; workspaceId: string;
     parentRoomId?: string; cachePath: string; brokerSocket?: string;
     configured(): Promise<void>;
+    squireMcp?(input: { tool?: unknown; args?: unknown }): Promise<unknown>;
   }) {
     // A cache miss or corrupt cache cannot delay the first message. Grants
     // are never restored: the broker and command runner authorize each use.
@@ -74,11 +75,13 @@ export class SessionResources {
 
   read(): unknown {
     return { ...this.context, status: this.status,
-      next: 'read(facet:session,name:prepare) installs optional skills and setup. Unavailable resources are tool errors. Registry MCP uses app_tool(app:"registry-mcp:<serverName>"); approved paths and devices are available to run_granted_command without remounting this session.' };
+      next: 'read(facet:session,name:prepare) installs optional skills and setup. Unavailable resources are tool errors. Trusty Squire uses app_tool(app:"registry-mcp:squire"). Registry MCP uses app_tool(app:"registry-mcp:<serverName>"); approved paths and devices are available to run_granted_command without remounting this session.' };
   }
 
   /** Registry routes join the existing app_tool surface as soon as they load. */
   async mcp(input: { app?: unknown; tool?: unknown; args?: unknown }, turn: { roomId: string; requestId: string }): Promise<unknown> {
+    if (input.app === 'registry-mcp:squire' && this.options.squireMcp)
+      return this.options.squireMcp(input);
     const route = this.context.configuration?.registryMcpRoutes?.find(candidate =>
       input.app === `registry-mcp:${candidate.serverName}` || input.app === candidate.target);
     if (!route || !this.options.brokerSocket) throw new Error('Registry MCP route is not available yet; read(facet:session) shows its load result');

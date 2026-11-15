@@ -662,26 +662,38 @@ export async function downloadAttachment(
 
 
 
+/** The live session owns Squire even before optional Registry routes load. */
+function sessionSquireCall(tool: string, args: Record<string, unknown>): Promise<unknown> {
+  return sessionToolRequest('/session', {
+    placeId: process.env.BEELINE_DAEMON_CORNER_ID || requiredEnv('BEELINE_DAEMON_ROOM_ID'),
+    action: 'mcp', app: 'registry-mcp:squire', tool, args,
+  });
+}
+
 export function connectorOfferDepsFromEnv(): ConnectorOfferDeps {
   const relayUrl = process.env.BEELINE_SQUIRE_RELAY_URL;
   const relayToken = process.env.BEELINE_SQUIRE_RELAY_TOKEN;
-  const squireCall = relayUrl && relayToken ? async (tool: string, args: Record<string, unknown> = {}) => {
-    const context = await activeCommandContext();
-    const response = await fetch(new URL('/mcp', relayUrl), {
-      method: 'POST',
-      headers: { authorization: `Bearer ${relayToken}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ ...context, method: 'tools/call',
-        params: { name: tool, arguments: args } }),
-      signal: undefined,
-    });
-    const body = await response.json().catch((error) => {
-      if (!response.ok) throw new Error(`Squire relay HTTP ${response.status}`);
-      throw error;
-    }) as { error?: string; result?: {
-      isError?: boolean; content?: Array<{ type: string; text?: string }>;
-    } };
-    if (!response.ok) throw new Error(body.error ?? `Squire relay HTTP ${response.status}`);
-    const result = body.result;
+  const squireCall = (relayUrl && relayToken) || process.env.BEELINE_GRANT_RUNNER_URL || process.env.BEELINE_GRANT_RUNNER_FILE ? async (tool: string, args: Record<string, unknown> = {}) => {
+    let result: { isError?: boolean; content?: Array<{ type: string; text?: string }> } | undefined;
+    if (!relayUrl || !relayToken) result = await sessionSquireCall(tool, args) as typeof result;
+    else {
+      const context = await activeCommandContext();
+      const response = await fetch(new URL('/mcp', relayUrl), {
+        method: 'POST',
+        headers: { authorization: `Bearer ${relayToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ ...context, method: 'tools/call',
+          params: { name: tool, arguments: args } }),
+        signal: undefined,
+      });
+      const body = await response.json().catch((error) => {
+        if (!response.ok) throw new Error(`Squire relay HTTP ${response.status}`);
+        throw error;
+      }) as { error?: string; result?: {
+        isError?: boolean; content?: Array<{ type: string; text?: string }>;
+      } };
+      if (!response.ok) throw new Error(body.error ?? `Squire relay HTTP ${response.status}`);
+      result = body.result;
+    }
     const text = result?.content?.find((entry) => entry.type === 'text')?.text;
     if (result?.isError) throw new Error(text ?? 'Squire MCP tool error');
     if (text) return JSON.parse(text);
@@ -693,7 +705,7 @@ export function connectorOfferDepsFromEnv(): ConnectorOfferDeps {
     execute: daemonExecute,
     tailscaleReach: (enabled) => describeTailscaleReach({ enabled, installIfMissing: enabled }),
     // This task relay reaches only the broker on this agent's own machine.
-    squireReach: relayUrl && relayToken ? async () => {
+    squireReach: squireCall ? async () => {
       try {
         await readVault({ call: squireCall! });
       } catch (error) {
@@ -712,23 +724,29 @@ export function connectorOfferDepsFromEnv(): ConnectorOfferDeps {
 
 
 export async function squireShareEndpoint(sessionId: string): Promise<{ url: string; expiresAt: number }> {
-  const relayUrl = requiredEnv('BEELINE_SQUIRE_RELAY_URL');
-  const relayToken = requiredEnv('BEELINE_SQUIRE_RELAY_TOKEN');
-  let response: Response;
+  const relayUrl = process.env.BEELINE_SQUIRE_RELAY_URL;
+  const relayToken = process.env.BEELINE_SQUIRE_RELAY_TOKEN;
+  let response: Pick<Response, 'ok' | 'status'>;
   let body: unknown;
   try {
-    response = await fetch(new URL('/mcp', relayUrl), {
-      method: 'POST',
-      headers: { authorization: `Bearer ${relayToken}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ ...await activeCommandContext(), method: 'tools/call',
-        params: { name: 'operate_share', arguments: { session_id: sessionId } } }),
-      signal: undefined,
-    });
-    // Only an unparseable body is tolerated; a timeout while reading it is not.
-    body = await response.json().catch((error: unknown) => {
-      if (error instanceof SyntaxError) return undefined;
-      throw error;
-    });
+    if (!relayUrl || !relayToken) {
+      body = { result: await sessionSquireCall('operate_share', { session_id: sessionId }) };
+      response = { ok: true, status: 200 };
+    } else {
+      const upstream = await fetch(new URL('/mcp', relayUrl), {
+        method: 'POST',
+        headers: { authorization: `Bearer ${relayToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ ...await activeCommandContext(), method: 'tools/call',
+          params: { name: 'operate_share', arguments: { session_id: sessionId } } }),
+        signal: undefined,
+      });
+      // Only an unparseable body is tolerated; a timeout while reading it is not.
+      response = upstream;
+      body = await upstream.json().catch((error: unknown) => {
+        if (error instanceof SyntaxError) return undefined;
+        throw error;
+      });
+    }
   } catch (error) {
     if (error instanceof Error && error.name === 'TimeoutError')
       throw new Error('Squire share timed out after 30 seconds');

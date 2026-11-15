@@ -134,7 +134,13 @@ export class AgentChannel {
       if (!pending) return;
       this.#requests.delete(event.requestId);
       if (typeof event.error === 'string') pending.reject(Object.assign(new Error(event.error),{status:event.status,code:event.error}));
-      else pending.resolve(event.result);
+      else {
+        const input = pending.frame.input as Record<string, unknown>;
+        if (pending.frame.operation === 'installConnector' &&
+            typeof input.connectorId === 'string' && input.connectorId.startsWith('squire:'))
+          this.machine.squireInstalled();
+        pending.resolve(event.result);
+      }
       this.send({type:'request-ack',requestId:event.requestId});
       return;
     }
@@ -168,7 +174,7 @@ export class MachineLink {
   #identity: { releaseVersion: string; sourceSha?: string } = { releaseVersion: 'v0.0.0' };
   #reconciledOnSocket = false;
   #pendingRelease: Record<string, unknown> | undefined;
-  #lastVaultContent: string | undefined;
+  #vaultSnapshot: { content?: string } = {};
   #vaultRefresh: Promise<void> | undefined;
   #vaultRefreshRequested = false;
   readonly random: () => number;
@@ -232,6 +238,10 @@ export class MachineLink {
     }
   }
 
+  /** Re-pair replaces server state even when the broker's keys are unchanged.
+   * Keep an in-flight observation in its old cache so its ack cannot undo this. */
+  squireInstalled(): void { this.#vaultSnapshot = {}; }
+
   /** One observation at a time for the whole machine, including reconnects. */
   refreshVault(): Promise<void> {
     if (!this.options.readVault) return Promise.resolve();
@@ -252,6 +262,7 @@ export class MachineLink {
   async #reportVault(): Promise<void> {
     const channel = [...this.#channels.values()].find(channel => channel.isOpen());
     if (!channel) return;
+    const snapshot = this.#vaultSnapshot;
     try {
       const report = await this.options.readVault!(channel.agentId);
       // The list and host/field sets have no ordering semantics.
@@ -259,13 +270,13 @@ export class MachineLink {
         ...item, fieldNames: [...item.fieldNames].sort(), allowedHosts: [...item.allowedHosts].sort(),
         ...(item.loginHosts ? { loginHosts: [...item.loginHosts].sort() } : {}),
       })).sort((a, b) => a.reference.localeCompare(b.reference)) });
-      if (content === this.#lastVaultContent) return;
+      if (content === snapshot.content) return;
       const current = [...this.#channels.values()].find(channel => channel.isOpen());
       if (!current) return;
       const sent = current.reportVault(report);
       if (!sent) return;
       await sent;
-      this.#lastVaultContent = content;
+      snapshot.content = content;
     } catch (error) {
       // A failed observation/delivery preserves the last broker verdict.
       this.options.log?.(`Squire machine report unavailable: ${error instanceof Error ? error.message : String(error)}`);

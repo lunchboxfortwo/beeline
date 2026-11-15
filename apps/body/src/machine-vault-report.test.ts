@@ -15,6 +15,7 @@ class Socket extends EventEmitter {
   onmessage?: (event: { data: string }) => void;
   frames: Record<string, any>[] = [];
   refuseReport = false;
+  refuseInstall = false;
   holdVault = false;
   receive(frame: Record<string, unknown>) { this.onmessage?.({ data: JSON.stringify(frame) }); }
   send(raw: string) {
@@ -23,7 +24,8 @@ class Socket extends EventEmitter {
     if(frame.type==='register-machine')for(const agent of frame.agents)this.receive({type:'registered',agentId:agent.agentId,capabilities:{daemonOperationsV1:true}});
     if (frame.type === 'daemon-operation' && !(this.holdVault && frame.operation === 'postConnectorVault')) this.receive({ type: 'daemon-operation-result',
       agentId: frame.agentId, requestId: frame.requestId,
-      ...(this.refuseReport && frame.operation === 'postConnectorVault'
+      ...((this.refuseReport && frame.operation === 'postConnectorVault') ||
+          (this.refuseInstall && frame.operation === 'installConnector')
         ? { error: 'unavailable', status: 503 } : { result: { id: frame.operation, createdAt: 1 } }) });
   }
   open() { this.readyState = 1; this.onopen?.(); }
@@ -100,6 +102,57 @@ describe('machine-owned vault reports', () => {
     readVault.mockResolvedValue({ connections: [] });
     await machine.refreshVault();
     expect(reports()).toHaveLength(4);
+  });
+
+  it('republishes unchanged credentials after unpair and successful Squire installation', async () => {
+    const { machine, agents, reports } = await fixture(2, vi.fn(async () => ({
+      connections: [credential('existing')],
+    })));
+    // Unpair clears the server's keys and commits not-added without changing
+    // the broker's credentials. A successful install clears the setup steps.
+    // The next observation must restore that server state even for the same list.
+    await agents[1]!.execute('installConnector', {
+      agentId: agents[1]!.agentId, connectorId: 'squire:machine', pairingGeneration: 12,
+    });
+    await machine.refreshVault();
+    expect(reports()).toHaveLength(2);
+    expect(reports()[1]!.input.connections).toEqual([credential('existing')]);
+    await machine.refreshVault();
+    expect(reports()).toHaveLength(2);
+  });
+
+  it('does not let an older report acknowledgement suppress the post-install observation', async () => {
+    const { machine, sockets, agents, readVault, reports } = await fixture(2);
+    const socket = sockets[0]!;
+    socket.holdVault = true;
+    readVault.mockResolvedValue({ connections: [credential('existing')] });
+    const oldRefresh = machine.refreshVault();
+    await vi.waitFor(() => expect(reports()).toHaveLength(2));
+    await agents[1]!.execute('installConnector', {
+      agentId: agents[1]!.agentId, connectorId: 'squire:machine', pairingGeneration: 12,
+    });
+    const installedRefresh = machine.refreshVault();
+    socket.holdVault = false;
+    const oldReport = reports()[1]!;
+    socket.receive({ type: 'daemon-operation-result', agentId: oldReport.agentId,
+      requestId: oldReport.requestId, result: { id: 'report', createdAt: 1 } });
+    await Promise.all([oldRefresh, installedRefresh]);
+    expect(reports()).toHaveLength(3);
+    expect(reports()[2]!.input.connections).toEqual([credential('existing')]);
+  });
+
+  it('preserves deduplication after a refused Squire install or an unrelated connector install', async () => {
+    const { machine, agents, sockets, reports } = await fixture(1);
+    sockets[0]!.refuseInstall = true;
+    await expect(agents[0]!.execute('installConnector', {
+      agentId: agents[0]!.agentId, connectorId: 'squire:machine', pairingGeneration: 12,
+    })).rejects.toThrow('unavailable');
+    await machine.refreshVault();
+    expect(reports()).toHaveLength(1);
+    sockets[0]!.refuseInstall = false;
+    await agents[0]!.execute('installConnector', { agentId: agents[0]!.agentId, connectorId: 'other' });
+    await machine.refreshVault();
+    expect(reports()).toHaveLength(1);
   });
 
   it('keeps agent operations independent of a slow vault read and uses a surviving registration', async () => {

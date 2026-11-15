@@ -206,7 +206,7 @@ export class SquireTaskRelay {
             body += chunk;
             if (body.length > 2_000_000) throw new Error('Squire request too large');
           }
-          const result = await this.handle(JSON.parse(body) as RelayRequest);
+          const result = await this.requestMcp(JSON.parse(body) as RelayRequest);
           response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ result }));
         } catch (error) {
           response.writeHead(400, { 'content-type': 'application/json' }).end(
@@ -403,7 +403,8 @@ export class SquireTaskRelay {
     this.task = undefined;
   }
 
-  private handle(input: RelayRequest): Promise<unknown> {
+  /** Native session tools and the loopback facade share this authority boundary. */
+  requestMcp(input: RelayRequest): Promise<unknown> {
     if (input.method === 'beeline/read_operation') {
       const receipt = input.operationId && this.operations.get(input.operationId);
       if (!receipt || ['roomId','requestId','taskId','itemId'].some(key =>

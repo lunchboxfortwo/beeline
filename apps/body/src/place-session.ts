@@ -96,6 +96,7 @@ export class PlaceSession {
       placeId: options.placeId, workspaceId: options.workspaceId, parentRoomId: options.parentRoomId,
       cachePath: resolve(root, 'session-context.json'), brokerSocket: options.config.registryMcpBrokerSocket,
       configured: () => this.prepareOptionalHome(),
+      squireMcp: input => this.requestSquire(input),
     });
     this.warm = new WarmTranscript({ path: resolve(root, 'agent-home', 'warm-transcript.json') });
     const api = options.api;
@@ -318,7 +319,7 @@ export class PlaceSession {
       this.claudeLoginWatch = watchRoomClaudeLogin({ root: privateHomeRoot, operatorHome: config.operatorHome });
     const brief = restore?.brief;
     const session = assembleSessionPrompt({
-      squireAvailable: false,
+      squireAvailable: true,
       surface: corner ? (repository?.resolution === 'none' ? 'repo-less-corner' : 'code-corner')
         : repository?.directParticipants?.length === 2 ? 'dm' : 'room',
       repositoryPending,
@@ -338,6 +339,7 @@ export class PlaceSession {
           : {}),
     });
     this.turnPrefix = session.turnPrefix;
+    this.notes.push('Trusty Squire tools are available through app_tool(app:"registry-mcp:squire"); discover its tools there, then pass tool and args on that same route.');
     if (corner && (repositoryBacked || repositoryPending))
       this.notes.push(`Your copy of the repository is made by the workspace tool; call it before repository work. It goes in ${folder}.`);
     // Native resume retains the old system instructions, including repository bans.
@@ -360,6 +362,17 @@ export class PlaceSession {
     this.notes.push(`This session uses ${runningModel}; persona and reviewer skills use ${configuration ? 'cached configuration' : 'the agent default'}. Optional context and capability status: read(facet:session).`);
     if (agentOpenRouterKey(config.agentKind, selection.model, config.agentEnv))
       console.log(`[body] place ${placeId} uses an OpenRouter key`);
+  }
+
+  /** Squire discovery is lazy; a broker read never holds session startup. */
+  private async requestSquire(input: { tool?: unknown; args?: unknown }): Promise<unknown> {
+    const item = this.current;
+    return this.squireRelay.requestMcp({
+      roomId: item?.roomId ?? this.options.placeId, requestId: item?.turnRequestId ?? '',
+      taskId: item?.rootCommandId ?? '', itemId: item?.id ?? '',
+      method: input.tool === undefined ? 'tools/list' : 'tools/call',
+      params: input.tool === undefined ? {} : { name: input.tool, arguments: input.args ?? {} },
+    });
   }
 
   private async prepareOptionalHome(): Promise<void> {

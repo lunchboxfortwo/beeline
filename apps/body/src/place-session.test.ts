@@ -8,6 +8,7 @@ import type { AcpClient } from './acp.js';
 import type { BodyConfig } from './config.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
 import { PlaceSession } from './place-session.js';
+import { sharedSquireMcpClient } from './squire-mcp-client.js';
 import type { AgentRuntimeRecord } from './runtime.js';
 import { execFileAsync,prepareWorkspace } from './workspace-checkout.js';
 
@@ -20,6 +21,10 @@ vi.mock('./atomic-private-file.js', async original => ({
 vi.mock('./agent-home.js', async original => ({
   ...await original<typeof import('./agent-home.js')>(),
   prepareRoomAgentHome: vi.fn(() => new Promise(() => {})),
+}));
+vi.mock('./squire-mcp-client.js', async original => ({
+  ...await original<typeof import('./squire-mcp-client.js')>(),
+  sharedSquireMcpClient: vi.fn(),
 }));
 const roots: string[] = [];
 afterEach(async () => { for (const path of roots.splice(0)) await rm(path, { recursive: true, force: true }); });
@@ -44,10 +49,10 @@ async function fixture(corner = false) {
   const session = new PlaceSession({
     agent: { publicKey: 'a'.repeat(64), name: 'Agent' },
     runtime: { supervisorRoot: root, agent: { publicKey: 'a'.repeat(64) } } as AgentRuntimeRecord,
-    config, api: { execute, connection: () => ({ baseUrl: 'http://localhost', daemonToken: 'fixture', agentId: 'a'.repeat(64), helperVersion: 'test' }) } as unknown as DaemonApiClient,
+    config, api: { execute, refreshMachineVault: async () => {}, connection: () => ({ baseUrl: 'http://localhost', daemonToken: 'fixture', agentId: 'a'.repeat(64), helperVersion: 'test' }) } as unknown as DaemonApiClient,
     placeId: 'room', ...(corner ? { parentRoomId: 'parent' } : {}), workspaceId: 'workspace', onExit() {}, createAcpClient: spawn,
   });
-  const item = { id: 'item', roomId: 'room', returnRoomId: 'room', turnRequestId: 'item', reason: 'human_tag',
+  const item = { id: 'item', rootCommandId: 'task', roomId: 'room', returnRoomId: 'room', turnRequestId: 'item', reason: 'human_tag',
     agentId: 'a'.repeat(64),
     source: { id: 'message', authorId: 'human', body: 'Please answer', attachments: [], type: 'message' } } as AgentCommand;
   return { session, item, prompt, execute, config, spawn };
@@ -62,6 +67,45 @@ it('starts and answers before optional reads begin, even if none of them resolve
   expect(f.session.resources.read()).toMatchObject({ status: { configuration: 'loading', grants: 'loading' } });
   expect(f.prompt.mock.calls[0]?.[1]).toContain('the agent default');
   await f.session.dispose();
+});
+
+it('discovers and calls Squire in the same cold session without a Registry installation', async () => {
+  const requestMcp = vi.fn(async (method: string) => method === 'tools/list'
+    ? { tools: [{ name: 'list_credentials', inputSchema: { type: 'object' } }] }
+    : { content: [{ type: 'text', text: '{"credentials":[]}' }] });
+  vi.mocked(sharedSquireMcpClient).mockReturnValue({ requestMcp, close() {} } as never);
+  const f = await fixture();
+  try {
+    await f.session.start();
+    expect(sharedSquireMcpClient).not.toHaveBeenCalled();
+    f.execute.mockImplementation((name: string) => name === 'authorizeResourceCall'
+      ? Promise.resolve({ allowed: true }) : new Promise(() => {}));
+    // The live request remains the authority for tools; optional config can
+    // stay pending, including its Registry routes and grants.
+    f.prompt.mockImplementation(async () => {
+      const turn = { roomId: f.item.roomId, requestId: f.item.turnRequestId };
+      expect(await f.session.resources.mcp({ app: 'registry-mcp:squire' }, turn))
+        .toEqual({ tools: [{ name: 'list_credentials', inputSchema: { type: 'object' } }] });
+      expect(await f.session.resources.mcp({ app: 'registry-mcp:squire', tool: 'list_credentials', args: { fields: 'summary' } }, turn))
+        .toEqual({ content: [{ type: 'text', text: '{"credentials":[]}' }] });
+      return { agentText: 'The answer', stopReason: 'end_turn', updates: [], toolCalls: [] };
+    });
+    await f.session.deliver(f.item, []);
+    expect(f.execute).toHaveBeenCalledWith('authorizeResourceCall', expect.objectContaining({ target: 'squire', requestId: f.item.turnRequestId }));
+    expect(requestMcp).toHaveBeenCalledWith('tools/call', { name: 'list_credentials', arguments: { fields: 'summary' } });
+    f.execute.mockImplementation((name: string) => name === 'authorizeResourceCall'
+      ? Promise.resolve({ allowed: false }) : new Promise(() => {}));
+    f.prompt.mockImplementation(async () => {
+      await expect(f.session.resources.mcp({ app: 'registry-mcp:squire', tool: 'list_credentials' },
+        { roomId: f.item.roomId, requestId: f.item.turnRequestId })).rejects.toThrow('not authorized');
+      return { agentText: 'Refused', stopReason: 'end_turn', updates: [], toolCalls: [] };
+    });
+    await f.session.deliver(f.item, []);
+    expect(requestMcp.mock.calls.filter(([method]) => method === 'tools/call')).toHaveLength(1);
+  } finally {
+    await f.session.dispose();
+    vi.mocked(sharedSquireMcpClient).mockClear();
+  }
 });
 
 it('allows an unchanged automatic attention wake to finish without repeating a status', async () => {
