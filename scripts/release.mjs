@@ -94,6 +94,13 @@ export async function releaseSequence({ source, sha, directory, secrets, dispatc
   }
 }
 
+// Every release leaves full source copies, overlay layers and node_modules in its
+// state directory (hundreds of GB over a day). Logs and records stay.
+export function pruneReleaseWorkspaces(directory, run = execFileSync) {
+  run('sudo', ['-n', 'find', directory, '-type', 'd', '(', '-name', 'source', '-o', '-name', 'upper', '-o', '-name', 'overlay-work',
+    '-o', '-name', 'merged', '-o', '-name', 'node_modules', ')', '-prune', '-exec', 'rm', '-rf', '{}', '+'], { stdio: 'ignore' });
+}
+
 async function main(argv) {
   const options = releaseArguments(argv);
   const directory = mkdtempSync(join(tmpdir(), 'beeline-release-'));
@@ -115,7 +122,10 @@ async function main(argv) {
     console.log(store ? 'Store release: production; a pinned native runtime is not live in its store.' : 'Store release: none.');
     await releaseSequence({ source, sha, directory, secrets, dispatchedBy, otaVersions, store }, runLocalRelease);
     console.log(`Released ${sha} to next and latest${store ? ' with production store builds' : ''}. Private results: ${directory}`);
-  } finally { unlock(); }
+  } finally {
+    try { pruneReleaseWorkspaces(directory); } catch { /* leftovers are retried by the next release's own prune */ }
+    unlock();
+  }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

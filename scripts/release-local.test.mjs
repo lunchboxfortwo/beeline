@@ -18,7 +18,7 @@ import { run as bookkeeping } from './release-bookkeeping.mjs';
 import { localGithub } from './release-local-github.mjs';
 import { assignReleaseVersion, latestPublished, recoverTaggedReleases } from './release-record.mjs';
 import { CheckQueue, checkPlan, checkWorkspace, LocalChecks } from './release-local-checks.mjs';
-import { acquireReleaseLock, localAttribution, pinnedRuntimes, prepareReleaseSource, readOtaVersions, releaseArguments, releaseSequence, storeReleaseNeeded } from './release.mjs';
+import { pruneReleaseWorkspaces, acquireReleaseLock, localAttribution, pinnedRuntimes, prepareReleaseSource, readOtaVersions, releaseArguments, releaseSequence, storeReleaseNeeded } from './release.mjs';
 
 const repository = resolve(import.meta.dirname, '..');
 const temporary = () => mkdtempSync(join(tmpdir(), 'beeline-local-test-'));
@@ -55,6 +55,15 @@ test('one command completes next before promoting the same SHA; store builds go 
   const failed = [];
   await assert.rejects(releaseSequence(spec, async args => { failed.push(args.channel); throw new Error('next failed'); }, () => {}), /next failed/);
   assert.deepEqual(failed, ['next']);
+});
+test('the release prunes source copies, overlays and node_modules from its state directory but keeps logs', () => {
+  const calls = [];
+  pruneReleaseWorkspaces('/fixture/state', (command, args) => calls.push([command, args]));
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], 'sudo');
+  assert.deepEqual(calls[0][1].slice(0, 3), ['-n', 'find', '/fixture/state']);
+  for (const name of ['source', 'upper', 'overlay-work', 'merged', 'node_modules']) assert.ok(calls[0][1].includes(name));
+  assert.ok(!calls[0][1].includes('output.log') && !calls[0][1].includes('records.json'));
 });
 test('a store release is needed only when a pinned runtime is not the newest live store runtime', () => {
   const config = 'ios: {\n runtimeVersion: runtimeVersionOverride || "41",\n},\nandroid: {\n runtimeVersion: runtimeVersionOverride || "53",\n}';
