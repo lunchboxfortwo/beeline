@@ -1,3 +1,4 @@
+import { workBoardScope } from './work-board.js';
 import { CommandScopedDatabase } from './command-scoped-database.js';
 import { ConnectorDiscoveryCache } from './connector-discovery-cache.js';
 import { StarterOnboardingService } from './starter-onboarding-run.js';
@@ -183,6 +184,7 @@ export class PhoneService {
   async deleteRoomMessage(...args: PhoneArguments<typeof phoneDeleteRoomMessage>): ReturnType<typeof phoneDeleteRoomMessage> { return phoneDeleteRoomMessage(this, ...args); }
   async setMessageBookmark(...args: PhoneArguments<typeof phoneSetMessageBookmark>): ReturnType<typeof phoneSetMessageBookmark> { return phoneSetMessageBookmark(this, ...args); }
   async clearMessageBookmarks(...args: PhoneArguments<typeof phoneClearMessageBookmarks>): ReturnType<typeof phoneClearMessageBookmarks> { return phoneClearMessageBookmarks(this, ...args); }
+  async workBoardScope(roomId: string, viewerId: string) { return workBoardScope(this.database,roomId,viewerId); }
   async readNeedsYou(...args: PhoneArguments<typeof phoneReadNeedsYou>): ReturnType<typeof phoneReadNeedsYou> { return phoneReadNeedsYou(this, ...args); }
   async readTray(...args: PhoneArguments<typeof phoneReadTray>): ReturnType<typeof phoneReadTray> { return phoneReadTray(this, ...args); }
   async countNeedsYou(...args: PhoneArguments<typeof phoneCountNeedsYou>): ReturnType<typeof phoneCountNeedsYou> { return phoneCountNeedsYou(this, ...args); }

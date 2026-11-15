@@ -280,6 +280,7 @@ import { phoneManagedIdentity } from './repositories.js';
 
       // Rooms and GitHub connections the account created: the artifacts stay,
       // the attribution goes.
+      await database.query(`UPDATE work_items SET opened_by=$2 WHERE opened_by=ANY($1)`,[gone,DELETED_ACCOUNT_IDENTITY_ID]);
       await database.query(`UPDATE rooms SET created_by=NULL WHERE created_by=ANY($1)`, [gone]);
       await database.query(`DELETE FROM github_installations WHERE owner_id=ANY($1)`, [gone]);
       await database.query(

@@ -1,3 +1,5 @@
+import { askOwnerQuestion } from '../work-questions.js';
+import { updateWorkItem } from '../work-board.js';
 import { setAgentWakePaused } from '../agent-wake-pause.js';
 import { attachUsageAccount, helperUsageEnabled, publishUsageAccount } from '../helper-usage.js';
 import { owedMentions } from '../owed-mentions.js';
@@ -48,6 +50,11 @@ import { modelText } from '../message-origin.js';
 
 export async function daemonExecuteOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, modelClaim: OwnedModelClaimCapability | undefined, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
     switch (name) {
+      case 'askOwnerQuestion':
+        return await askOwnerQuestion(ctx.database,input as Input<'askOwnerQuestion'>,authenticatedAgentId) as Output<Name>;
+      case 'updateWorkItem':
+        await updateWorkItem(ctx.database,{...input as Input<'updateWorkItem'>,roomId:(input as Input<'updateWorkItem'>).targetRoomId},authenticatedAgentId);
+        return daemonWriteResult(ctx) as Output<Name>;
       case 'getInstitutionalContext':
         return getInstitutionalContextOperation(ctx, name, input, authenticatedAgentId, modelClaim, candidate, scopedRoom);
       case 'saveInstitutionalMemory':

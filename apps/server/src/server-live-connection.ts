@@ -75,6 +75,7 @@ export function handleLiveConnection(ctx: LiveConnectionContext, client: WebSock
       let phoneViewClosed = false;
       // Workspace membership notifications survive the deletion cascade and
       // reach the affected identity without requiring a readable Room.
+      const watchedWorkspaces=new Set<string>();
       let needsYouDelivery = Promise.resolve();
       // Workspace and identity changes keep their commit order on this socket.
       let identityDelivery = Promise.resolve();
@@ -99,6 +100,13 @@ export function handleLiveConnection(ctx: LiveConnectionContext, client: WebSock
           return;
         }
         if (event.type !== 'invalidate') return;
+        if(event.roomId&&(event.reason==='postgres:work_items'||event.reason==='work-board'))sendNeedsYouDelta(event,event.roomId);
+        if (event.roomId && watchedWorkspaces.size && typeof ctx.options.phone.workBoardScope === 'function') {
+          void ctx.options.phone.workBoardScope(event.roomId,principal.identityId).then(workspaceId=>{
+            if (workspaceId && watchedWorkspaces.has(workspaceId) && client.readyState===client.OPEN) sendLive(JSON.stringify({
+              type:'invalidate',roomId:'',reason:'work-board-gap',workspaceId}));
+          }).catch(()=>undefined);
+        }
         if (event.roomId !== '') {
           if (releases.has(event.roomId)) return;
           if (!event.messageId || !ctx.options.phone.liveNeedsYou) return;
@@ -246,7 +254,8 @@ export function handleLiveConnection(ctx: LiveConnectionContext, client: WebSock
       };
       const handlePhoneRequest = phoneSocketRequests(client, principal.identityId,
         ctx.dispatchPhoneOperation, sendLive, requestErrorStatus, principal.familyId,
-        (_name, _args, result, enqueue) => fenceCommandReceiptEnqueue(ctx.options.database, principal.identityId, result, enqueue));
+        (_name,_args,result,enqueue)=>fenceCommandReceiptEnqueue(ctx.options.database,principal.identityId,result,enqueue),
+        (name,args)=>{if(name==='readWorkBoard'&&typeof args.workspaceId==='string')watchedWorkspaces.add(args.workspaceId);});
       client.on('message', (raw) => withSentryUser(principal.identityId, () => {
         const frameBytes = Array.isArray(raw)
           ? raw.reduce((total, part) => total + part.length, 0)

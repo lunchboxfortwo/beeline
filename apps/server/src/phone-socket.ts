@@ -21,6 +21,7 @@ export function phoneSocketRequests(
    * is held. It must call enqueue at most once and never retain it. */
   fenceReply?: (operation: string, args: Record<string, unknown>, result: unknown,
     enqueue: (safeResult?: unknown) => undefined) => Promise<void>,
+  observeRequest?: (operation:string,args:Record<string,unknown>)=>void,
 ): (message: unknown) => boolean {
   if (!viewerId) throw wall('signed-in', { message: 'phone_token_required', status: 401 });
   const active = new Set<AbortController>();
@@ -54,6 +55,7 @@ export function phoneSocketRequests(
       try { command = request.command === undefined ? undefined : parseRouterCommandIdentity(request.command); }
       catch { fail(id, 'invalid_command_identity', 'Invalid durable command identity'); return true; }
     }
+    observeRequest?.(request.op,request.args as Record<string,unknown>);
     const controller = new AbortController();
     active.add(controller);
     void withDiagnosticContext(viewerId,parseDiagnosticOrigin(request.diagnostic), () => dispatch(request.op!, request.args as Record<string, unknown>, viewerId, controller.signal, familyId, command))

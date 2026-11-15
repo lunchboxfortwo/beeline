@@ -240,10 +240,12 @@ export function questionForSql(viewerId: string): string {
   AND mark.cleared_at IS NULL
   -- Most untagged reports belong to agent commanders. Avoid running the
   -- quote/code-aware mention parser for text that cannot contain a tag.
-  AND (CASE WHEN strpos(m.text,'@')>0
+  AND CASE WHEN EXISTS(SELECT 1 FROM work_items assigned WHERE assigned.id=m.id)
+    THEN EXISTS(SELECT 1 FROM work_items assigned WHERE assigned.id=m.id AND assigned.assignee_id=${viewerId})
+    ELSE (CASE WHEN strpos(m.text,'@')>0
     THEN ${tagsKnownIdentitySql('m', 'viewer.id', 'viewer.handle', 'viewer.kind')} ELSE false END
     -- A report to a human commander addresses them without a tag.
-    OR (m.text ~ '^(needs-decision|blocked):' AND m.card->>'reportToId'=${viewerId}))
+    OR (m.text ~ '^(needs-decision|blocked):' AND m.card->>'reportToId'=${viewerId})) END
   AND NOT EXISTS (
     SELECT 1 FROM messages reply
     WHERE reply.room_id=m.room_id AND reply.author_id=${viewerId}
@@ -271,6 +273,7 @@ export async function clearNeedsYouQuestions(
      JOIN identities viewer ON viewer.id=$2
      LEFT JOIN needs_you_marks mark ON mark.identity_id=$2 AND mark.message_id=m.id
      WHERE ${QUESTION_WHERE}
+    AND NOT EXISTS(SELECT 1 FROM work_questions work_question WHERE work_question.message_id=m.id)
      ON CONFLICT(identity_id,message_id)
        DO UPDATE SET cleared_at=COALESCE(needs_you_marks.cleared_at,now()),
          reminder_dismissed_at=COALESCE(needs_you_marks.reminder_dismissed_at,EXCLUDED.reminder_dismissed_at)`,
@@ -310,6 +313,14 @@ const APPROVAL_JOINS = `
  * bounds their life even if a decision never arrives.
  */
 return [
+  `${APPROVAL_FROM('choice')}
+   JOIN work_questions work_question ON work_question.room_id=room.id
+   JOIN work_items work ON work.id=work_question.message_id AND work.assignee_id=$2
+   JOIN messages m ON m.id=work_question.message_id AND m.card_type IS DISTINCT FROM '${CHOICE_CARD_TYPE}'
+   ${APPROVAL_JOINS}
+   WHERE m.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM messages reply
+     WHERE reply.reply_to_message_id=m.id AND reply.deleted_at IS NULL
+       AND EXISTS(SELECT 1 FROM identities answerer WHERE answerer.id=reply.author_id AND answerer.kind='human'))`,
   // Driven from the few pending grants rather than from the transcript, so
   // an old undecided card costs nothing to find. The decider rule is
   // `requireGrantAuthority`'s: the agent's owner for a personal resource, a
@@ -349,11 +360,13 @@ return [
      AND choice.mode='question' AND (choice.closes_at IS NULL OR choice.closes_at>now())
    JOIN messages m ON m.id=choice.message_id AND m.room_id=room.id AND m.card_type='${CHOICE_CARD_TYPE}'
    ${APPROVAL_JOINS}
+   LEFT JOIN work_questions work_question ON work_question.message_id=m.id
+   LEFT JOIN work_items work ON work.id=m.id
    WHERE m.deleted_at IS NULL
-     AND CASE jsonb_array_length(COALESCE(m.card->'mentionIds','[]'::jsonb))
+     AND CASE WHEN work_question.message_id IS NOT NULL THEN work.assignee_id=$2 ELSE CASE jsonb_array_length(COALESCE(m.card->'mentionIds','[]'::jsonb))
        WHEN 0 THEN m.card->'requester'->>'pubkey'=$2
        ELSE COALESCE(m.card->'mentionIds','[]'::jsonb) ? $2
-     END`,
+     END END`,
   // `acceptConnectorOffer`: the addressee, or a Workspace manager except for
   // a wallet, which only its addressee may accept.
   `${APPROVAL_FROM('connector')}

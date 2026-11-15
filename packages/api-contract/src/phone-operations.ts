@@ -129,6 +129,8 @@ export type PhoneOperationMap = PhoneRouteOperationMap & {
   listMessageBookmarks: { input: WorkspaceInput & { readonly before?: string }; output: MessageBookmarkListResult };
   /** Needs-you rows. Legacy reads mark seen; markSeen:false previews without starting expiry. */
   readNeedsYou: { input: WorkspaceInput & { readonly markSeen?: boolean }; output: NeedsYouListResult };
+  readWorkBoard: { input: WorkspaceInput; output: import('./work-board.js').WorkBoardView };
+  updateWorkItem: { input: import('./work-board.js').UpdateWorkItemInput; output: void };
   readTray: { input: WorkspaceInput & { readonly markSeen?: boolean }; output: {
     readonly needs?: NeedsYouListResult; readonly saved?: MessageBookmarkListResult;
     readonly needsError?: string; readonly savedError?: string;
@@ -320,6 +322,7 @@ export const PHONE_READ_OPERATIONS = [
   'listMessageBookmarks',
   'readNeedsYou',
   'readTray',
+  'readWorkBoard',
   'countNeedsYou',
   'listRoomSchedules',
   'listRoomWorkflowRuns',

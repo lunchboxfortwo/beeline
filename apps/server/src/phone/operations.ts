@@ -1,3 +1,4 @@
+import { readWorkBoard, updateWorkItem } from '../work-board.js';
 import { phoneIdentity as identity } from '../phone-identity.js';
 import { prepareMentionReplyInput } from '../owed-mentions.js';
 import { setMcpMemberWebhook, McpToolError } from '../rooms-mcp-members.js';
@@ -175,6 +176,12 @@ import { phoneReadConnectionDetail, phoneRevokeConnectionGrants } from './connec
         )) as Output<Name>;
       case 'readNeedsYou':
         return (await phoneReadNeedsYou(ctx, input as Input<'readNeedsYou'>, viewerId)) as Output<Name>;
+      case 'readWorkBoard':
+        return await readWorkBoard(ctx.database, (input as Input<'readWorkBoard'>).workspaceId, viewerId, ctx.publicOrigin) as Output<Name>;
+      case 'updateWorkItem':
+        await updateWorkItem(ctx.database, input as Input<'updateWorkItem'>, viewerId);
+        ctx.live?.publish({type:'invalidate',roomId:(input as Input<'updateWorkItem'>).roomId,reason:'work-board'});
+        return undefined as Output<Name>;
       case 'readTray':
         return (await phoneReadTray(ctx, input as Input<'readTray'>, viewerId)) as Output<Name>;
       case 'countNeedsYou':

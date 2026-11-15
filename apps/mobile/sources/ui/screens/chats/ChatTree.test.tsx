@@ -6,21 +6,33 @@ import { runInNewContext } from 'node:vm';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { expect, it, vi } from 'vitest';
 
-vi.mock('@/components/buzz/RepositoryMark', () => ({ RepositoryMark: (props: any) => React.createElement('RepositoryMark', props) }));
+vi.mock('@/ui/screens/tags/WorkMarks', () => ({
+  WorkStateMark: (props: any) => React.createElement('WorkStateMark', props),
+  WorkPriorityMark: (props: any) => React.createElement('WorkPriorityMark', props),
+}));
+vi.mock('@/components/buzz/RepositoryMark', () => ({
+  RepositoryMark: (props: any) => React.createElement('RepositoryMark', props),
+}));
 vi.mock('tamagui', async () => (await import('./tamagui-hosts.test-support')).tamaguiHosts());
-vi.mock('lucide-react-native', async () => (await import('./tamagui-hosts.test-support')).lucideHosts());
+vi.mock('lucide-react-native', async () =>
+  (await import('./tamagui-hosts.test-support')).lucideHosts(),
+);
 vi.mock('react-native-svg', async () => (await import('./tamagui-hosts.test-support')).svgHosts());
-vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
+vi.mock('react-native-safe-area-context', () => ({
+  useSafeAreaInsets: () => ({ top: 0, bottom: 0 }),
+}));
 vi.mock('@/buzz/message-outbox-observer', () => ({ useRoomOutboxFailure: () => null }));
 vi.mock('@/buzz/room-corner-store', () => ({ useRoomCornerSummary: () => null }));
 vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: () => null }));
 
 import type { ChatListItem } from '@beeline/buzz-client';
 import { ChatRow, ChatRowDivider, NEW_THREAD_HOLD_MS } from './ChatTree';
-import { CornerDownRight } from 'lucide-react-native';
+import { WorkStateMark, WorkPriorityMark } from '@/ui/screens/tags/WorkMarks';
 import { TextSizeContext, type TextSize } from '@/ui/grammar';
 
-(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+(
+  globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
 
 const ROOM = 'room-1';
 const item = {
@@ -36,7 +48,9 @@ function row(onNewThread?: (roomId: string) => void) {
   const handlers = { onOpen: vi.fn(), onPin: vi.fn(), onOpenThread: vi.fn() };
   let tree!: ReactTestRenderer;
   act(() => {
-    tree = create(<ChatRow item={item} now={1_700_000_000_000} first {...handlers} onNewThread={onNewThread} />);
+    tree = create(
+      <ChatRow item={item} now={1_700_000_000_000} first {...handlers} onNewThread={onNewThread} />,
+    );
   });
   return { tree, ...handlers };
 }
@@ -84,31 +98,76 @@ it('holding the row toggles its pin instead of opening it, even when both touch 
   });
   expect(onPin).toHaveBeenCalledWith(ROOM);
   expect(onOpen).not.toHaveBeenCalled();
-  expect(tree.root.findAll((node: any) => node.props?.testID === `room-${ROOM}-new-thread`)).toHaveLength(0);
+  expect(
+    tree.root.findAll((node: any) => node.props?.testID === `room-${ROOM}-new-thread`),
+  ).toHaveLength(0);
 });
 
-it('shows the repository mark on the chat row and the ↳ glyph on its thread row', () => {
+it('shows the repository mark on the chat row and Needs you plus priority on its blocked thread row', () => {
   let tree!: ReactTestRenderer;
-  const marked = { ...item, room: {...item.room,avatar:'https://avatars.githubusercontent.com/u/42',favicon:'https://github.githubassets.com/favicons/favicon.png'},
-    openCorners:[{id:'thread',name:'Thread',state:'idle',lifecycle:{lifecycle:'idle',checks:'unknown'},lastActivityAt:1_700_000_000}] } as unknown as ChatListItem;
-  act(() => { tree = create(<ChatRow item={marked} now={1_700_000_000_000} first onOpen={vi.fn()} onPin={vi.fn()} onOpenThread={vi.fn()} />); });
-  const marks = tree.root.findAll((node:any)=>node.type==='RepositoryMark');
+  const marked = {
+    ...item,
+    room: {
+      ...item.room,
+      avatar: 'https://avatars.githubusercontent.com/u/42',
+      favicon: 'https://github.githubassets.com/favicons/favicon.png',
+    },
+    openCorners: [
+      {
+        id: 'thread',
+        name: 'Thread',
+        state: 'waiting',
+        workState: 'needs-you',
+        workPriority: 'high',
+        lifecycle: { lifecycle: 'idle', checks: 'unknown' },
+        lastActivityAt: 1_700_000_000,
+      },
+    ],
+  } as unknown as ChatListItem;
+  act(() => {
+    tree = create(
+      <ChatRow
+        item={marked}
+        now={1_700_000_000_000}
+        first
+        onOpen={vi.fn()}
+        onPin={vi.fn()}
+        onOpenThread={vi.fn()}
+      />,
+    );
+  });
+  const marks = tree.root.findAll((node: any) => node.type === 'RepositoryMark');
   expect(marks).toHaveLength(1);
-  expect(marks[0].props).toMatchObject({avatarUrl:marked.room.avatar,faviconUrl:marked.room.favicon});
-  const threadRow = tree.root.find((node:any)=>node.props?.testID==='thread-row-thread');
-  expect(threadRow.findAll((node:any)=>node.type==='RepositoryMark')).toHaveLength(0);
-  expect(threadRow.findAll((node:any)=>node.props?.icon===CornerDownRight)).not.toHaveLength(0);
+  expect(marks[0].props).toMatchObject({
+    avatarUrl: marked.room.avatar,
+    faviconUrl: marked.room.favicon,
+  });
+  const threadRow = tree.root.find((node: any) => node.props?.testID === 'thread-row-thread');
+  expect(threadRow.findAll((node: any) => node.type === 'RepositoryMark')).toHaveLength(0);
+  expect(threadRow.findByType(WorkStateMark).props.state).toBe('needs-you');
+  expect(threadRow.findByType(WorkPriorityMark).props.priority).toBe('high');
   act(() => tree.unmount());
 });
 
 // A swipeable row must start on its divider and end on the next one, with the
 // same unswiped spacing as a row that draws its own divider.
 it('with the divider outside, the row spans divider to divider and keeps its spacing', () => {
-  const props = { item, now: 1_700_000_000_000, onOpen: vi.fn(), onPin: vi.fn(), onOpenThread: vi.fn() };
+  const props = {
+    item,
+    now: 1_700_000_000_000,
+    onOpen: vi.fn(),
+    onPin: vi.fn(),
+    onOpenThread: vi.fn(),
+  };
   const vertical = (tree: ReactTestRenderer) => {
     const box = byTestID(tree, `chat-${ROOM}`);
     const separator = box.findAll((node: any) => node.type === 'Separator');
-    return { top: box.props.paddingTop, bottom: box.props.paddingBottom, separator, gap: separator[0]?.props.marginBottom };
+    return {
+      top: box.props.paddingTop,
+      bottom: box.props.paddingBottom,
+      separator,
+      gap: separator[0]?.props.marginBottom,
+    };
   };
   let inside!: ReactTestRenderer;
   let outside!: ReactTestRenderer;
@@ -138,50 +197,107 @@ it('labels the same waiting thread "waiting on you" in semibold for its commande
   const member = 'm'.repeat(64);
   const waiting = {
     ...item,
-    openCorners: [{
-      id: 'corner-w', name: 'One durable turn owner', state: 'waiting' as const, reason: 'question' as const, mine: true as const,
-      blocker: { kind: 'report' as const, personId: commander, personName: 'Claude' }, lastActivityAt: 1_700_000_000,
-    }],
+    openCorners: [
+      {
+        id: 'corner-w',
+        name: 'One durable turn owner',
+        state: 'waiting' as const,
+        reason: 'question' as const,
+        mine: true as const,
+        blocker: { kind: 'report' as const, personId: commander, personName: 'Claude' },
+        lastActivityAt: 1_700_000_000,
+      },
+    ],
   } as unknown as ChatListItem;
   const label = (viewer: string) => {
     let tree!: ReactTestRenderer;
     act(() => {
-      tree = create(<ChatRow item={waiting} viewer={viewer} now={1_700_000_000_000} first onOpen={vi.fn()} onPin={vi.fn()} onOpenThread={vi.fn()} />);
+      tree = create(
+        <ChatRow
+          item={waiting}
+          viewer={viewer}
+          now={1_700_000_000_000}
+          first
+          onOpen={vi.fn()}
+          onPin={vi.fn()}
+          onOpenThread={vi.fn()}
+        />,
+      );
     });
     const line = byTestID(tree, 'thread-row-corner-w');
     const text = line.findAll((node: any) => node.type === 'Text').at(-1)!;
-    const result = { aria: line.props['aria-label'], word: text.props.children, face: text.props.fontFamily };
+    const result = {
+      aria: line.props['aria-label'],
+      word: text.props.children,
+      face: text.props.fontFamily,
+    };
     act(() => tree.unmount());
     return result;
   };
   expect(label(commander)).toEqual({
-    aria: 'Thread One durable turn owner, waiting on you', word: 'waiting on you', face: 'SpaceGrotesk-SemiBold',
+    aria: 'Thread One durable turn owner, waiting on you',
+    word: 'waiting on you',
+    face: 'SpaceGrotesk-SemiBold',
   });
   // The other member follows the thread too (`mine`), yet it waits on Claude, not on them.
   expect(label(member)).toEqual({
-    aria: 'Thread One durable turn owner, waiting on Claude', word: 'waiting on Claude', face: 'SpaceGrotesk-Regular',
+    aria: 'Thread One durable turn owner, waiting on Claude',
+    word: 'waiting on Claude',
+    face: 'SpaceGrotesk-Regular',
   });
 });
 
 // Chat list previews stop at two lines at every Text size.
-it.each(['small', 'medium', 'large'] as const)('a long chat preview at Text size %s stops at two lines', (size: TextSize) => {
-  const text = 'A long preview that runs well past two lines on a phone, so a line cap would cut it off. '.repeat(4);
-  const long = { ...item, latestMessage: { id: 'm', text, author: { name: 'Ada' }, createdAt: 1_700_000_000 } } as unknown as ChatListItem;
-  let tree!: ReactTestRenderer;
-  act(() => {
-    tree = create(<TextSizeContext.Provider value={size}><ChatRow item={long} now={1_700_000_000_000} first onOpen={vi.fn()} onPin={vi.fn()} onOpenThread={vi.fn()} /></TextSizeContext.Provider>);
-  });
-  const preview = byTestID(tree, `room-${ROOM}-preview`);
-  expect(preview.props.numberOfLines).toBe(2);
-  expect(preview.props.ellipsizeMode).toBeUndefined();
-  act(() => tree.unmount());
-});
+it.each(['small', 'medium', 'large'] as const)(
+  'a long chat preview at Text size %s stops at two lines',
+  (size: TextSize) => {
+    const text =
+      'A long preview that runs well past two lines on a phone, so a line cap would cut it off. '.repeat(
+        4,
+      );
+    const long = {
+      ...item,
+      latestMessage: { id: 'm', text, author: { name: 'Ada' }, createdAt: 1_700_000_000 },
+    } as unknown as ChatListItem;
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(
+        <TextSizeContext.Provider value={size}>
+          <ChatRow
+            item={long}
+            now={1_700_000_000_000}
+            first
+            onOpen={vi.fn()}
+            onPin={vi.fn()}
+            onOpenThread={vi.fn()}
+          />
+        </TextSizeContext.Provider>,
+      );
+    });
+    const preview = byTestID(tree, `room-${ROOM}-preview`);
+    expect(preview.props.numberOfLines).toBe(2);
+    expect(preview.props.ellipsizeMode).toBeUndefined();
+    act(() => tree.unmount());
+  },
+);
 
 it('selection preserves the content columns and leaves an inset around the mark and age', () => {
   const { tree } = row();
   const frame = () => byTestID(tree, `room-${ROOM}`).props;
   const plain = frame();
-  act(() => tree.update(<ChatRow item={item} now={1_700_000_000_000} first selected onOpen={vi.fn()} onPin={vi.fn()} onOpenThread={vi.fn()} />));
+  act(() =>
+    tree.update(
+      <ChatRow
+        item={item}
+        now={1_700_000_000_000}
+        first
+        selected
+        onOpen={vi.fn()}
+        onPin={vi.fn()}
+        onOpenThread={vi.fn()}
+      />,
+    ),
+  );
   const selected = frame();
   for (const props of [plain, selected]) {
     expect(props.paddingHorizontal).toBe('2');
@@ -196,10 +312,14 @@ it('selection preserves the content columns and leaves an inset around the mark 
 
 it('the Desktop layout proof uses recent activity rather than Unix-epoch sentinels', () => {
   const require = createRequire(import.meta.url);
-  const source = readFileSync(new URL('../../../../scripts/desktop-proportions-native-fixture.cjs', import.meta.url), 'utf8');
+  const source = readFileSync(
+    new URL('../../../../scripts/desktop-proportions-native-fixture.cjs', import.meta.url),
+    'utf8',
+  );
   // Evaluate the fixture's actual data without opening its HTTP listener.
   const fixture = runInNewContext(`${source}\n;({ room, messages })`, {
-    require: (name: string) => name === 'http' ? { createServer: () => ({ listen() {} }) } : require(name),
+    require: (name: string) =>
+      name === 'http' ? { createServer: () => ({ listen() {} }) } : require(name),
     process: { env: {} },
   });
   const now = Date.now();
@@ -208,8 +328,63 @@ it('the Desktop layout proof uses recent activity rather than Unix-epoch sentine
   expect(fixture.room.updatedAt).toBe(latest.createdAt);
   let tree!: ReactTestRenderer;
   act(() => {
-    tree = create(<ChatRow item={{ ...item, room: fixture.room, latestMessage: latest }} now={now} first onOpen={vi.fn()} onPin={vi.fn()} onOpenThread={vi.fn()} />);
+    tree = create(
+      <ChatRow
+        item={{ ...item, room: fixture.room, latestMessage: latest }}
+        now={now}
+        first
+        onOpen={vi.fn()}
+        onPin={vi.fn()}
+        onOpenThread={vi.fn()}
+      />,
+    );
   });
   expect(byTestID(tree, `room-${fixture.room.id}-age`).props.children).toBe('1m');
+  act(() => tree.unmount());
+});
+
+it('renders every blocked thread and no working, review, backlog or done thread rows', () => {
+  const blocked = Array.from({ length: 12 }, (_, i) => ({
+    id: `blocked-${i}`,
+    name: `Needs you ${i}`,
+    state: 'waiting',
+    workState: 'needs-you',
+    workPriority: 'high',
+  }));
+  const other = ['in-progress', 'in-review', 'backlog', 'done'].map((workState) => ({
+    id: workState,
+    name: workState,
+    state: 'working',
+    workState,
+  }));
+  let tree!: ReactTestRenderer;
+  const props = {
+    now: 1_700_000_000_000,
+    first: true,
+    onOpen: vi.fn(),
+    onPin: vi.fn(),
+    onOpenThread: vi.fn(),
+  };
+  act(() => {
+    tree = create(
+      <ChatRow
+        {...props}
+        item={{ ...item, openCorners: [...other, ...blocked] } as unknown as ChatListItem}
+      />,
+    );
+  });
+  expect(
+    tree.root.findAll(
+      (n: any) =>
+        typeof n.type === 'string' && String(n.props.testID ?? '').startsWith('thread-row-'),
+    ),
+  ).toHaveLength(12);
+  expect(tree.root.findAll((n: any) => n.props.testID === `more-${ROOM}`)).toHaveLength(0);
+  act(() => {
+    tree.update(
+      <ChatRow {...props} item={{ ...item, openCorners: other } as unknown as ChatListItem} />,
+    );
+  });
+  expect(tree.root.findAll((n: any) => n.props.testID === `nest-${ROOM}`)).toHaveLength(0);
   act(() => tree.unmount());
 });

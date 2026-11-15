@@ -356,6 +356,8 @@ export const DAEMON_OPERATION_ROUTES: Record<keyof DaemonOperationMap, true> = {
   postStarterWelcome: true,
   postStarterGame: true,
   askRoomChoice: true,
+  askOwnerQuestion: true,
+  updateWorkItem: true,
   openRoomPoll: true,
   listAgentGrants: true,
   listAgentGrantRequests: true,

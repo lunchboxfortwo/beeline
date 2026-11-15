@@ -31,6 +31,8 @@ export type RoomLiveDelta =
 
 
 export type RoomView = {
+  readonly workItem?: import('./work-board.js').WorkItemView;
+  readonly workItems?: readonly import('./work-board.js').WorkItemView[];
   readonly room: RoomViewHeader;
   /** Leaving as the last Workspace manager in this Room deletes it for everyone. */
   readonly leaveDeletesRoom?: boolean;
@@ -155,6 +157,8 @@ export type RoomHistoryOutlineDay = {
 
 
 export type ChatListCorner = {
+  readonly workState?: import('./work-board.js').WorkState;
+  readonly workPriority?: import('./work-board.js').WorkPriority;
   readonly id: string;
   readonly name: string;
   readonly state: Exclude<CornerState, 'archived'>;
@@ -168,8 +172,7 @@ export type ChatListCorner = {
   /** On the viewer's waiting corners: when the corner last spoke (unix
    * seconds), the moment it handed back. It counts as Room activity. */
   readonly waitingSince?: number;
-  /** When the corner last spoke (unix seconds), on every corner. The chat
-   * list shows a thread line only while this is recent. */
+  /** When the corner last spoke (unix seconds), on every corner. */
   readonly lastActivityAt?: number;
   /** The corner owes the viewer something they have not opened it to see
    * since. Only these open the Room's corner dropdown on their own. */

@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { groknight } from '@/buzz/groknight';
 
 /**
  * Host-element stand-ins for Tamagui, lucide and react-native-svg, so screen
@@ -11,7 +12,9 @@ let autoLayout: () => boolean = () => false;
 function host(name: string) {
   const Host = (props: any) => {
     // Like the native host stubs: a mounted view reports its layout once.
-    React.useEffect(() => { if (autoLayout()) props.onLayout?.(); }, [props.onLayout]);
+    React.useEffect(() => {
+      if (autoLayout()) props.onLayout?.();
+    }, [props.onLayout]);
     return React.createElement(name, props, props.children);
   };
   Host.displayName = name;
@@ -24,16 +27,40 @@ function compound(name: string, parts: string[]) {
   return Root;
 }
 
-const CollapsibleState = React.createContext<{ open: boolean; toggle: () => void }>({ open: false, toggle: () => undefined });
+const CollapsibleState = React.createContext<{ open: boolean; toggle: () => void }>({
+  open: false,
+  toggle: () => undefined,
+});
 
-function Collapsible({ open = false, onOpenChange, children }: { open?: boolean; onOpenChange?: (open: boolean) => void; children?: React.ReactNode }) {
-  const value = React.useMemo(() => ({ open, toggle: () => onOpenChange?.(!open) }), [open, onOpenChange]);
-  return React.createElement(CollapsibleState.Provider, { value }, React.createElement('Collapsible', { open }, children));
+function Collapsible({
+  open = false,
+  onOpenChange,
+  children,
+}: {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  children?: React.ReactNode;
+}) {
+  const value = React.useMemo(
+    () => ({ open, toggle: () => onOpenChange?.(!open) }),
+    [open, onOpenChange],
+  );
+  return React.createElement(
+    CollapsibleState.Provider,
+    { value },
+    React.createElement('Collapsible', { open }, children),
+  );
 }
 Collapsible.Content = function CollapsibleContent({ children }: { children?: React.ReactNode }) {
-  return React.useContext(CollapsibleState).open ? React.createElement('Collapsible.Content', null, children) : null;
+  return React.useContext(CollapsibleState).open
+    ? React.createElement('Collapsible.Content', null, children)
+    : null;
 };
-Collapsible.Trigger = function CollapsibleTrigger({ children }: { children: React.ReactElement<any> }) {
+Collapsible.Trigger = function CollapsibleTrigger({
+  children,
+}: {
+  children: React.ReactElement<any>;
+}) {
   const state = React.useContext(CollapsibleState);
   return React.cloneElement(children, { onPress: state.toggle });
 };
@@ -54,13 +81,26 @@ export function tamaguiHosts(layout?: () => boolean) {
     Spinner: host('Spinner'),
     Image: host('Image'),
     Label: host('Label'),
-    Theme: ({ children }: { children?: React.ReactNode }) => React.createElement(React.Fragment, null, children),
+    Theme: ({ children }: { children?: React.ReactNode }) =>
+      React.createElement(React.Fragment, null, children),
     Collapsible,
     ToggleGroup: compound('ToggleGroup', ['Item']),
-    Sheet: compound('Sheet', ['Overlay', 'Handle', 'Container', 'Background', 'ScrollView', 'Frame']),
+    Sheet: compound('Sheet', [
+      'Overlay',
+      'Handle',
+      'Container',
+      'Background',
+      'ScrollView',
+      'Frame',
+    ]),
     Switch: compound('Switch', ['Thumb']),
     Tabs: compound('Tabs', ['List', 'Tab', 'Content']),
-    useTheme: () => ({}),
+    useTheme: () => ({
+      ink: { val: groknight.textPrimary },
+      secondary: { val: groknight.textSecondary },
+      canvas: { val: groknight.bgBase },
+      needsYou: { val: groknight.accent },
+    }),
     useThemeName: () => 'dark_brass',
   };
 }
@@ -68,17 +108,25 @@ export function tamaguiHosts(layout?: () => boolean) {
 /** Every lucide icon renders as a host named after it. */
 export function lucideHosts() {
   const icons = new Map<string, ReturnType<typeof host>>();
-  return new Proxy({}, {
-    has: (_target, key) => typeof key === 'string',
-    get: (_target, key) => {
-      if (typeof key !== 'string' || key === 'then' || key === '__esModule') return undefined;
-      if (!icons.has(key)) icons.set(key, host(`Icon.${key}`));
-      return icons.get(key);
+  return new Proxy(
+    {},
+    {
+      has: (_target, key) => typeof key === 'string',
+      get: (_target, key) => {
+        if (typeof key !== 'string' || key === 'then' || key === '__esModule') return undefined;
+        if (!icons.has(key)) icons.set(key, host(`Icon.${key}`));
+        return icons.get(key);
+      },
     },
-  });
+  );
 }
 
 export function svgHosts() {
-  return { default: host('Svg'), Svg: host('Svg'), Path: host('Path') };
+  return {
+    default: host('Svg'),
+    Svg: host('Svg'),
+    Path: host('Path'),
+    Circle: host('Circle'),
+    Rect: host('Rect'),
+  };
 }
-

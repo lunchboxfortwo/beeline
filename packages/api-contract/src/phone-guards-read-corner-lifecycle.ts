@@ -1,3 +1,4 @@
+import { readWorkItem } from './work-board.js';
 import { isAgentAccessPolicy } from './agent-access.js';
 import { ROOM_VIEW_AGENT_LIMIT, ROOM_VIEW_BRIEFING_LIMIT, ROOM_VIEW_CHAT_LIMIT, ROOM_VIEW_MEMBER_LIMIT, ROOM_VIEW_MESSAGE_LIMIT, ROOM_VIEW_TOOL_ROW_LIMIT, ROOM_VIEW_WORKSPACE_LIMIT, WORKSPACE_MEMBER_PAGE_SIZE, type AgentAccessView, type AgentComposerCommand, type AgentModelConfigOption, type AgentModelSelection, type AgentYoloView, type ChatListUnavailable, type ChatListView, type CornerLifecycleView, type CornerListItem, type CornerListView, type MessageSearchResult, type MessageSearchSnippetPart, type MessageSearchView, type RoomHistoryOutline, type RoomHistoryOutlineDay, type RoomHistoryView, type RoomRepositoryResolution, type RoomRepositoryView, type RoomView, type WorkspaceListView, type WorkspaceManagedRoomView, type WorkspaceMemberListView, type WorkspaceView } from './phone-types.js';
 import { record, oneOf, integer, readList, githubUrl, nonempty, SHA1, field, readHeader, readIdentity, readIdentityOnly, hex64, uuid, requireList, httpUrl, readNewestList, readViewer, readMember, readWatchFilters, readPlan, readWorkspaceAgent, readWorkspaceMemberGrantView } from './phone-guards.js';
@@ -312,6 +313,8 @@ export function readRoomView(value: unknown): RoomView | null {
   const viewer = readViewer(item.viewer);
   return {
     room,
+    ...field('workItem',readWorkItem(item.workItem)),
+    ...field('workItems',readList(item.workItems,value=>readWorkItem(value)??null)),
     messages,
     ...field(
       'leaveDeletesRoom',

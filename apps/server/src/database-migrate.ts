@@ -1,6 +1,7 @@
 import { cleanupConnectHandles } from './migrations/connect-handle-cleanup.js';
 import { repairOrphanedTurns } from './migrations/orphaned-turns.js';
 import { backfillProviderPhotos } from './migrations/provider-photos.js';
+import { WORK_BOARD_SCHEMA } from './work-board-schema.js';
 import { DIAGNOSTIC_COMMAND_SCHEMA } from './diagnostics-schema.js';
 import { SQUIRE_MACHINE_SCHEMA } from './squire-machine.js';
 import { backfillSquireMachines } from './squire-machine.js';
@@ -117,6 +118,7 @@ export async function migrate(
     else await install(database);
   };
   await ddlScript('server schema', SCHEMA);
+  await ddlScript('Work board', WORK_BOARD_SCHEMA);
   await ddlScript('Rooms MCP OAuth', ROOMS_MCP_SCHEMA);
   await ddlScript('historical storage schema', LEGACY_STORAGE_SCHEMA);
   await runMigrationStep('webhook retention index', () => createIndexConcurrently(

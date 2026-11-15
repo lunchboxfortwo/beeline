@@ -229,6 +229,7 @@ export function BuzzChatSurface({
     roomName, firstRoomAgent, startCornerMessage, focusComposer, starterPrompts, starterIntro,
   ]);
   const threadHeader = useChatThreadHeader({
+    sourceMessageId:notificationMessageId??notificationTarget,
     isCorner, roomSurface, resolvedChannelName, decodedId, parentChannelId,
     state: cornerHeaderDisplay?.status, running: activeAgentTurns.length,
     objective: cornerObjectiveText, isArchived, isDesktop, positions: transcriptPositions,

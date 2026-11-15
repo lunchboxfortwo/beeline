@@ -290,6 +290,7 @@ export async function postRoomChoice(
   input: {
     roomId: string;
     agentId: string;
+    requesterId?: string;
     mode: ChoiceMode;
     prompt: unknown;
     ask?: string;
@@ -337,18 +338,10 @@ export async function postRoomChoice(
       );
     }
   }
-  // Sweep ended gates before posting. Only ordinary choices participate in
-  // the per-agent limit; workflow gates have their own run/attempt authority.
+  // Settle ended workflow gates; independent questions may remain open together.
   await closeEndedRunChoices(database, { roomId: input.roomId, agentId: input.agentId });
-  const open = (
-    await database.query<{ id: string }>(
-      `SELECT id FROM room_choices WHERE agent_id=$1 AND room_id=$2 AND status='open' AND workflow_run_id IS NULL LIMIT 1`,
-      [input.agentId, input.roomId],
-    )
-  ).rows[0];
-  if (open && !input.workflowRunId) throw new Error('choice conflict: you already have an open choice in this Room');
   const agent = await loadIdentity(database, input.agentId,input.roomId);
-  const requesterRow = input.workflowRunId && input.workflowOwnerId
+  const requesterRow = input.requesterId ? await loadIdentity(database,input.requesterId,input.roomId) : input.workflowRunId && input.workflowOwnerId
     ? await loadIdentity(database, input.workflowOwnerId,input.roomId)
     : agent.kind === 'agent' ? (await database.query<IdentityRow>(
       `SELECT identity.id,identity.kind,identity.name,beeline_room_handle(identity.id,command.room_id) handle,identity.avatar,identity.face_id
@@ -450,6 +443,7 @@ async function wakeChoice(
   input: {
     roomId: string;
     authorId: string;
+    replyToMessageId?: string;
     agentId: string;
     subject: IdentityRow;
     verb: string;
@@ -462,6 +456,7 @@ async function wakeChoice(
   await systemLine(database, {
     roomId: input.roomId,
     authorId: input.authorId,
+    replyToMessageId: input.replyToMessageId,
     subject: identitySubject({
       id: input.subject.id,
       kind: input.subject.kind,
@@ -676,6 +671,7 @@ export async function answerRoomChoice(
   await wakeChoice(database, {
     roomId: choice.room_id,
     authorId: input.viewerId,
+    replyToMessageId: choice.message_id,
     agentId: choice.agent_id,
     subject: viewer,
     verb: systemMessage("room-choice.picked-2"),

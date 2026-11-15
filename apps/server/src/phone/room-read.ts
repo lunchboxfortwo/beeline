@@ -1,3 +1,4 @@
+import { readWorkThread } from '../work-board.js';
 import { readMemberDeliveries } from '../rooms-mcp-delivery.js';
 import { phoneIdentity as identity } from '../phone-identity.js';
 import { projectCornerBrief } from '../corner-brief.js';
@@ -102,6 +103,8 @@ import { unix, roomFilters, SLOW_ROOM_READ_MS, messageId } from './values.js';
     const { messages, toolRows } = messageResult;
     const plan = facts?.plan;
     const paintedRoom = roomHeader(room, ctx.publicOrigin);
+    const workItems=corner?await readWorkThread(ctx.database,roomId,viewerId,ctx.publicOrigin):undefined;
+    const workItem=workItems?.find(item=>item.id===roomId)??workItems?.[0];
     const briefing = await phoneDecorateCornerOpenCards(ctx, room.parent_id ?? roomId, collapsePermissionCards(
       briefingRows.map((row) => projectedMessage(row, ctx.publicOrigin)).sort(messageOrder),
     ));
@@ -146,6 +149,7 @@ import { unix, roomFilters, SLOW_ROOM_READ_MS, messageId } from './values.js';
       ...(room.direct_participants?.length === 2
         ? { directMessage: { participants: room.direct_participants as [string, string] } }
         : {}),
+      ...(workItem?{workItem,workItems}:{}),
       ...(parent ? { parent: roomHeader(parent, ctx.publicOrigin) } : {}),
       ...(room.parent_id && facts?.owner_agent_id
         ? { cornerOpenerAgentId: facts.owner_agent_id }

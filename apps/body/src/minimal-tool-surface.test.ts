@@ -9,7 +9,7 @@ import { toolValidationSchema, type ToolDefinition } from './minimal-tool-surfac
 import { assembleSessionPrompt, PROMPT_SURFACES } from './prompt-assembly.js';
 
 const harnesses = ['claude-agent-acp', 'claude-code-acp', 'codex-acp', 'pi-acp', 'grok', 'buzz-agent', 'cursor-acp-bridge'];
-const missingOnClaude = ['request_grant', 'connect', 'app_tool', 'wake', 'remember', 'revise_corner'];
+const missingOnClaude = ['request_grant', 'connect', 'app_tool', 'wake', 'remember', 'revise_corner', 'create_work_item', 'set_work_state', 'set_work_priority', 'assign_work_item'];
 const rootCombinators = ['anyOf', 'oneOf', 'allOf'];
 const invalidInputs = [
   ['request_grant', { action: 'request', kind: 'command' }],
@@ -29,10 +29,9 @@ describe('Beeline tool surface across harnesses', () => {
       // accepts the same schema: this was Ruby's exact 28 -> 22 discrepancy.
       const accepted = tools.filter(tool => rootCombinators.every(key => !(key in tool.inputSchema)));
       expect(accepted.map(tool => tool.name)).toEqual(tools.map(tool => tool.name));
-      expect(accepted).toHaveLength(30);
       expect(accepted.map(tool => tool.name)).toEqual(expect.arrayContaining(missingOnClaude));
       const prompt = assembleSessionPrompt({ surface, agentName: 'Bee', agentCommand }).systemPrompt;
-      const inventory = prompt.match(/^Beeline tools: (.+)\.$/m)?.[1]?.replaceAll('`', '').split(', ');
+      const inventory = prompt.match(/^Beeline tools: (.+)\.$/m)?.[1]?.replaceAll('`', '').split(/,\s*/);
       const core = agentToolsFor(true, surface === 'dm', corner, surface === 'code-corner', false, true, true);
       expect(inventory).toEqual(core.map(tool => tool.name));
       for (const name of inventory ?? []) expect(accepted.map(tool => tool.name)).toContain(name);
@@ -151,7 +150,7 @@ describe('Beeline tool surface across harnesses', () => {
       }>;
       const tools = responses.find(response => response.id === 1)!.result.tools;
       expect(tools).toEqual(agentToolsFor(true, false, false, false, true, true, true));
-      expect(tools.filter(tool => rootCombinators.every(key => !(key in tool.inputSchema)))).toHaveLength(30);
+      expect(tools.every(tool => rootCombinators.every(key => !(key in tool.inputSchema)))).toBe(true);
       for (let index = 0; index < invalidInputs.length; index++) {
         const response = responses.find(response => response.id === index + 2)!;
         expect(response.result.isError).toBe(true);

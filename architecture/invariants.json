@@ -792,7 +792,8 @@
           "turn_transport_id": {
             "reason": "retired: a running turn has no owning transport; kept for serving and rollback overlap",
             "drop": "docs/agent-server-surfaces.md#turn-transport-storage-retirement (no unreleased registration holds a value, and rollback floor passes 4267)"
-          }
+          },
+          "offline_since": "Recorded preceding disconnect boundary for the next command catch-up note (existing connection-presence writer)."
         }
       },
       "agent_grant_policy_revocations": {
@@ -3561,6 +3562,34 @@
           "identity_id": "Agent that owns this permanent address.",
           "handle": "Assigned address; never recomputed from names or roster."
         }
+      },
+      "work_items": {
+        "module": "Rooms and messages",
+        "reason": "Explicit work state, priority and single assignee are user/agent choices, independent of corner execution.",
+        "columns": {
+          "room_id": "Thread or conversation reference; multiple tasks may refer to one thread.",
+          "state": "Explicit board state.",
+          "priority": "Explicit priority selection.",
+          "title": "Optional task title supplied at creation.",
+          "assignee_id": "Who has the ball; explicit null means unassigned.",
+          "opened_by": "Immutable opening attribution.",
+          "created_at": "Creation time.",
+          "updated_at": "Last edit time; Done history leaves the board after seven days.",
+          "completed_at": "The last transition into Done; later assignment edits do not extend the seven-day board window.",
+          "id": "Stable task identity, independent of its source thread; questions in the same thread keep separate assignees.",
+          "source_message_id": "Exact asking message for source navigation and independent answer handoff."
+        }
+      },
+      "work_questions": {
+        "module": "Rooms and messages",
+        "reason": "Typed source references and recommendations cannot be recovered from free-text messages.",
+        "columns": {
+          "message_id": "Existing choice or tagged asking message.",
+          "room_id": "Source conversation.",
+          "about": "Typed thread, PR or request reference.",
+          "question": "Agent-authored short question, validated when written.",
+          "recommended_option_id": "Optional recommendation from the asking agent."
+        }
       }
     },
     "jsonb": {
@@ -3884,6 +3913,11 @@
         "text": "Server-created join probe sent only over the selected transport; never parsed from Room text.",
         "next": "Server-created join probe sent only over the selected transport; never parsed from Room text.",
         "receipt": "Server-created join probe sent only over the selected transport; never parsed from Room text."
+      },
+      "about": {
+        "kind": "Typed thread, PR or request.",
+        "roomId": "Referenced source conversation.",
+        "messageId": "Referenced request message."
       }
     }
   }

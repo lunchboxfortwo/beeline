@@ -2,6 +2,7 @@ import ts from 'typescript';
 
 /** One glyph per concept. Provider marks and identity/drawing art are separate. */
 export const CONCEPT_ICONS = {
+  workColumns: 'Columns3', workList: 'List', workFilter: 'Filter', workAssignee: 'UserRound',
   thread: 'CornerDownRight', chat: 'Hash', message: 'MessagesSquare',
   warning: 'AlertTriangle', archive: 'Archive', down: 'ArrowDown', back: 'ArrowLeft',
   forward: 'ArrowRight', up: 'ArrowUp', mention: 'AtSign', audio: 'AudioLines',

@@ -487,7 +487,7 @@ describe('Reproduction workflow-stalls', () => {
     expect((await database.query(`SELECT workflow_run_id FROM room_choices WHERE workflow_run_id=$1`, [runId])).rowCount).toBe(1);
   });
 
-  it('opens gates beside an ask_choice and another workflow gate while preserving the ordinary choice limit', async () => {
+  it('opens workflow gates beside independent ordinary questions', async () => {
     const ordinary = () => postRoomChoice(database, { roomId: ROOM, agentId: APPROVER,
       mode: 'question', prompt: 'Which plan?', options: [{ label: 'First', consequence: 'Use first plan' }, { label: 'Second', consequence: 'Use second plan' }] });
     await ordinary();
@@ -499,8 +499,8 @@ describe('Reproduction workflow-stalls', () => {
     });
     await reachGate(second.runId);
     expect((await database.query(`SELECT id FROM room_choices WHERE status='open' AND agent_id=$1`, [APPROVER])).rowCount).toBe(3);
-    await expect(ordinary()).rejects.toThrow('already have an open choice');
-    console.log('Demonstrated workflow-stalls-2: two gates and one ordinary choice coexist; another ordinary choice is refused');
+    await ordinary();
+    expect((await database.query(`SELECT id FROM room_choices WHERE status='open' AND agent_id=$1`, [APPROVER])).rowCount).toBe(4);
   });
 
   it('commits a completed turn even when its workflow contract is missing', async () => {

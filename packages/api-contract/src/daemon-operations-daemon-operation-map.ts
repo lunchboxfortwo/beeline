@@ -18,6 +18,8 @@ import { ReviseCornerBriefInput, PostSquireApprovalInput, PostSquireLoginWallInp
 
 
 export type DaemonOperationMap = {
+  updateWorkItem: Operation<RoomInput & TurnOutputAuthority & Omit<import('./work-board.js').UpdateWorkItemInput,'roomId'> & { readonly targetRoomId: string }, WriteResult>;
+  askOwnerQuestion: Operation<RoomInput & TurnOutputAuthority & import('./work-board.js').AskOwnerQuestionInput, WriteResult>;
   postVaultSaveCard: Operation<RoomInput & TurnOutputAuthority & import('./vault-save.js').VaultSaveRequest, WriteResult>;
   getInstitutionalContext: Operation<RoomInput & TurnOutputAuthority, InstitutionalContextSnapshot>;
   saveInstitutionalMemory: Operation<SaveInstitutionalMemoryInput, InstitutionalMemoryWriteResult>;

@@ -39,6 +39,24 @@ export async function executeAgentOperation(name:string,args:JsonObject,toolCall
 
 async function executeResourceOperation(name:string,args:JsonObject,toolCallId:string):Promise<string> {
   switch (name) {
+    case 'ask_owner':
+      return JSON.stringify(await daemonExecute('askOwnerQuestion',{...args,roomId:(await activeCommandContext()).roomId}));
+    case 'create_work_item':
+    case 'set_work_state':
+    case 'set_work_priority':
+    case 'assign_work_item':
+    case 'update_work': {
+      const context = await activeCommandContext();
+      const update = name === 'create_work_item' ? {
+        ...args,
+        id: createHash('sha256').update(`work-item:${context.requestId}:${toolCallId}`).digest('hex'),
+        state: args.state ?? 'backlog',
+      } : args;
+      const result = await daemonExecute('updateWorkItem', {
+        ...update, targetRoomId: args.roomId, roomId: context.roomId,
+      });
+      return JSON.stringify({...result, id: update.id ?? args.roomId});
+    }
     case 'get_room_message': {
       const message = await daemonExecute('getRoomMessage', {
         roomId: requiredEnv('BEELINE_DAEMON_ROOM_ID'),

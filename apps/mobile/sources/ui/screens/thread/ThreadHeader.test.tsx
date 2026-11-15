@@ -3,6 +3,10 @@ import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { beforeEach, expect, it, vi } from 'vitest';
 
+const workOperation=vi.hoisted(()=>vi.fn(async()=>undefined));
+vi.mock('@/sync/transport/monolith-operation',()=>({monolithPhoneOperation:workOperation}));
+vi.mock('@/ui/screens/tags/WorkBoard',()=>({WorkAvatar:(props:any)=>React.createElement('WorkAvatar',props),WorkAssigneePicker:(props:any)=>React.createElement('WorkAssigneePicker',props)}));
+vi.mock('@/ui/screens/tags/WorkMarks',()=>({WorkStateMark:'WorkStateMark',WorkPriorityMark:'WorkPriorityMark'}));
 vi.mock('@/components/buzz/RepositoryMark', () => ({ RepositoryMark: (props: any) => React.createElement('RepositoryMark', props) }));
 vi.mock('tamagui', () => ({ ListItem: 'ListItem', XStack: 'XStack', YStack: 'YStack' }));
 vi.mock('lucide-react-native', () => ({ ArrowLeft: 'ArrowLeft', CornerDownRight: 'CornerDownRight', GitPullRequest: 'GitPullRequest', MoreHorizontal: 'MoreHorizontal' }));
@@ -92,4 +96,16 @@ it('keeps the repository mark beside the parent chat in a thread header', () => 
   act(() => { tree = create(<ThreadBar h={{...reconnect,repositoryAvatar:'https://avatars.githubusercontent.com/u/42'}} collapsed={false} openChat={vi.fn()} />); });
   expect(tree.root.findByType('RepositoryMark').props.avatarUrl).toBe('https://avatars.githubusercontent.com/u/42');
   act(() => tree.unmount());
+});
+
+it('shows immutable opening attribution and one editable assignee for the selected task',async()=>{
+  const asker={pubkey:'ruby',kind:'agent' as const,name:'Ruby'},person={pubkey:'ada',kind:'human' as const,name:'Ada'};
+  const workItem={id:'question',roomId:'thread',chatId:'chat',chatName:'Milo',threadName:'request-inbox',title:'Choose the next surface',state:'needs-you' as const,priority:'high' as const,assignee:person,openedBy:asker,createdAt:1,updatedAt:2};
+  let tree:any;await act(async()=>{tree=create(<ThreadTitleBlock h={{...reconnect,workItem,people:[asker,person]}}/>);});
+  expect(byTestID(tree,'thread-work-metadata')).toHaveLength(1);
+  expect(tree.root.findAllByType('WorkAvatar').map((node:any)=>node.props.person.pubkey)).toEqual(['ruby','ada']);
+  await act(async()=>tree.root.findByProps({label:'Change assignee'}).props.onPress());
+  await act(async()=>tree.root.findByType('WorkAssigneePicker').props.onPick(asker));
+  expect(workOperation).toHaveBeenLastCalledWith('updateWorkItem',{id:'question',roomId:'thread',assigneeId:'ruby'});
+  await act(async()=>tree.unmount());
 });

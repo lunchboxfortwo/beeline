@@ -88,6 +88,8 @@ import { modelText } from '../message-origin.js';
       'postStarterWelcome',
       'postStarterGame',
       'askRoomChoice',
+      'askOwnerQuestion',
+      'updateWorkItem',
       'openRoomPoll',
       'renameCorner',
       'getInstitutionalContext',

@@ -5,13 +5,13 @@ import { roomRowAttentionReason, roomRowName, roomRowPreview } from '@/buzz/room
 import type { RepoCandidate } from '@/buzz/room-repo-picker';
 import { threadListLabel } from '@/ui/screens/thread/thread-status';
 
-/** Chats show up to three active threads; the rest wait behind "N more". */
-export const VISIBLE_THREADS = 3;
-
 export type SearchChip = 'unread' | 'pinned';
 
 /** A chat's "Who: last message" line, from the server's latest row. */
-export function chatPreview(item: ChatListItem, viewer: string | undefined): { who?: string; text: string } {
+export function chatPreview(
+  item: ChatListItem,
+  viewer: string | undefined,
+): { who?: string; text: string } {
   const preview = roomRowPreview(item, viewer);
   if (preview.attribution === 'none') return { text: preview.text };
   if (preview.attribution === 'self') return { who: 'You', text: preview.text };
@@ -45,30 +45,15 @@ export function threadTitle(item: ChatListItem, corner: ChatListCorner): string 
   return cornerShortTitle(item.room.name, corner.name, corner.id);
 }
 
-const DAY_SECONDS = 24 * 60 * 60;
-
-/** Waiting and the viewer's own (the server's Mine rule): keeps a thread listed for a week and ranks it first. */
-function waitingAndMine(corner: ChatListCorner): boolean {
-  return corner.state === 'waiting' && corner.mine === true;
-}
-
-/** A thread line stays under its chat for a day after it last spoke, or a week while it is waiting and the viewer's own. */
-function threadIsRecent(corner: ChatListCorner, nowSeconds: number): boolean {
-  const at = corner.lastActivityAt ?? corner.waitingSince;
-  if (at === undefined) return false;
-  return nowSeconds - at <= (waitingAndMine(corner) ? 7 * DAY_SECONDS : DAY_SECONDS);
-}
-
-/** Recent threads, waiting ones of the viewer's own first, then the viewer's own, then the rest in server order. */
-export function chatThreads(item: ChatListItem, corners: readonly ChatListCorner[] | undefined, now: number): ChatListCorner[] {
+/** Chats surface every blocked thread; active work and history stay on Work and Threads. */
+export function chatThreads(
+  item: ChatListItem,
+  corners: readonly ChatListCorner[] | undefined,
+): ChatListCorner[] {
   if (item.directMessage || !corners?.length) return [];
-  const nowSeconds = now / 1000;
-  const rank = (corner: ChatListCorner) => (waitingAndMine(corner) ? 0 : corner.mine ? 1 : 2);
-  return corners
-    .filter((corner) => threadIsRecent(corner, nowSeconds))
-    .map((corner, index) => ({ corner, index }))
-    .sort((left, right) => rank(left.corner) - rank(right.corner) || left.index - right.index)
-    .map(({ corner }) => corner);
+  return corners.filter((corner) =>
+    corner.workState ? corner.workState === 'needs-you' : corner.state === 'waiting',
+  );
 }
 
 /** Search narrows by chat name, last message and thread titles; each chip narrows further. */
@@ -86,7 +71,9 @@ export function filterChats(
     if (chips.includes('unread') && !item.unread) return false;
     if (chips.includes('pinned') && !pinned.includes(item.room.id)) return false;
     if (!needle) return true;
-    const threads = (corners(item.room.id) ?? item.openCorners ?? []).map((corner) => corner.name).join(' ');
+    const threads = (corners(item.room.id) ?? item.openCorners ?? [])
+      .map((corner) => corner.name)
+      .join(' ');
     return `${roomRowName(item).name} ${item.latestMessage?.text ?? ''} ${threads}`
       .toLocaleLowerCase()
       .includes(needle);
@@ -96,5 +83,10 @@ export function filterChats(
 /** A chat name from a repository: its short name as a chat slug. */
 export function chatNameForRepository(candidate: Pick<RepoCandidate, 'name'>): string {
   const short = candidate.name.split('/').at(-1) ?? candidate.name;
-  return short.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48).replace(/-+$/, '');
+  return short
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48)
+    .replace(/-+$/, '');
 }

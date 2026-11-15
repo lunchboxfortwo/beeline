@@ -431,7 +431,7 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
       paragraphs(
         // Native IO and grant-runner tools are optional; this inventory names
         // only the stable tools mounted by every harness.
-        `Beeline tools: ${agentToolsFor(true, surface === 'dm', CORNERS.includes(surface), surface === 'code-corner', false, true, true).map(tool => '`' + tool.name + '`').join(', ')}.`,
+        `Beeline tools: ${agentToolsFor(true, surface === 'dm', CORNERS.includes(surface), surface === 'code-corner', false, true, true).map(tool => tool.name).join(',')}.`,
         "For a 📎 file, call read(facet:attachment, messageId, attachmentId) and read its path. Never fetch media URLs; on failure, say you couldn't open it.",
         'Services: connect(mode:discover) or connect(mode:ensure, service, reason, continuation). GitHub: connect(mode:status). Beeline App writes linked repos; no checkout: Room corner. Personal: lookups, no-App repos, person-scoped.',
         squireAvailable === true &&

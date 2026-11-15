@@ -1,12 +1,2 @@
-// Read-only observations and transient UI intents; committed state lives in the read owner.
-export {
-  loadNeedsYouList,
-  loadTrayList,
-  seedNeedsYouList,
-  forgetTray,
-  removeNeedsYou,
-  subscribeTrayGap,
-  useTrayList,
-  useNeedsYouCount,
-  acknowledgePaintedNeedsYou,
-} from './server-read-owner';
+// The Needs you badge observes committed server reads and deltas.
+export { seedNeedsYouList, useNeedsYouCount } from './server-read-owner';

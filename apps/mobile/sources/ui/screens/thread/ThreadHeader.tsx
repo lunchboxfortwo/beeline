@@ -1,5 +1,9 @@
 import { RepositoryMark } from '@/components/buzz/RepositoryMark';
-import React from 'react';
+import React, {useState} from 'react';
+import { WorkAvatar, WorkAssigneePicker } from '@/ui/screens/tags/WorkBoard';
+import { WorkStateMark, WorkPriorityMark } from '@/ui/screens/tags/WorkMarks';
+import type { WorkItemView, RoomViewIdentity } from '@beeline/api-contract/phone';
+import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import type { View } from 'react-native';
 import { ListItem, XStack, YStack } from 'tamagui';
 import { ArrowLeft, CornerDownRight, GitPullRequest, MoreHorizontal } from 'lucide-react-native';
@@ -17,6 +21,8 @@ import { threadDotTone, threadStatusText } from './thread-status';
  */
 export type ThreadHeaderData = {
     /** `#beeline`, or null while the parent's name has not landed. */
+    workItem?:WorkItemView;
+    people?:readonly RoomViewIdentity[];
     chatTag: string | null;
     title: string;
     repositoryAvatar?: string;
@@ -93,6 +99,7 @@ export function ThreadTitleBlock({ h, openBrief, openPr, blockRef, onBlockLayout
                 <YStack paddingTop="1"><Glyph icon={CornerDownRight} accent /></YStack>
                 <YStack flex={1} minWidth={0}><T v="title" testID="thread-title">{h.title}</T></YStack>
             </XStack>
+            {h.workItem?<ThreadWorkMetadata item={h.workItem} people={h.people??[]}/>:null}
             {h.state ? (
                 <XStack gap="2" alignItems="center" testID="thread-status">
                     <StatusDot state={h.state} />
@@ -120,4 +127,13 @@ export function ThreadTitleBlock({ h, openBrief, openPr, blockRef, onBlockLayout
             ) : null}
         </YStack>
     );
+}
+
+function ThreadWorkMetadata({item,people}:{item:WorkItemView;people:readonly RoomViewIdentity[]}) {
+  const [open,setOpen]=useState(false);
+  return <YStack gap="2"><XStack gap="3" alignItems="center" flexWrap="wrap" testID="thread-work-metadata">
+    <WorkStateMark state={item.state}/><XStack gap="1" alignItems="center"><T v="meta" color="secondary">Opened by</T><WorkAvatar person={item.openedBy} size={20}/></XStack>
+    <XStack gap="1" alignItems="center"><T v="meta" color="secondary">Assignee</T><Btn kind="quiet" label="Change assignee" paddingHorizontal="0" onPress={()=>setOpen(!open)}>{item.assignee?<WorkAvatar person={item.assignee} size={20}/>:null}<T v="meta">{item.assignee?.name??'Unassigned'}</T></Btn></XStack>
+    <XStack gap="1" alignItems="center"><T v="meta" color="secondary">Priority</T><WorkPriorityMark priority={item.priority}/><T v="meta">{item.priority.charAt(0).toUpperCase()+item.priority.slice(1)}</T></XStack>
+  </XStack>{open?<WorkAssigneePicker people={people} onPick={person=>{setOpen(false);void monolithPhoneOperation('updateWorkItem',{id:item.id,roomId:item.roomId,assigneeId:person?.pubkey??null});}}/>:null}</YStack>;
 }

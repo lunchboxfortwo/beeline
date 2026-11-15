@@ -14,6 +14,7 @@ const DATABASE_READS: ReadonlySet<string> = new Set<keyof PhoneOperationMap>([
   'countNeedsYou',
   'readNeedsYou',
   'readTray',
+  'readWorkBoard',
   'listMessageBookmarks',
   'readStarPrompt',
   'readWelcomeCards',
@@ -51,6 +52,7 @@ function repeatableWrite(name: string, input: unknown): boolean {
     case 'updateRoomPushState':
     case 'clearNeedsYou':
     case 'setMessageBookmark':
+    case 'updateWorkItem':
       return true;
     default:
       return false;

@@ -44,6 +44,7 @@ import {
  */
 export interface SystemLineInput {
   readonly roomId: string;
+  readonly replyToMessageId?: string;
   /** The row's author; drives the daemon inbox filter and push exclusions. Defaults to the subject id. */
   readonly authorId?: string;
   /** A deterministic id makes the insert idempotent (`ON CONFLICT DO NOTHING`). */
@@ -414,10 +415,10 @@ export async function systemLine(
     const result = await db.query(
       `INSERT INTO messages(
          id,room_id,author_id,text,presentation,request_id,durable_fact,
-         card_type,card,system_event,event_cause_id,event_root_cause_id,event_depth,created_at
+         card_type,card,system_event,event_cause_id,event_root_cause_id,event_depth,created_at,reply_to_message_id
        ) VALUES(
          $1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13,
-         GREATEST(now(), COALESCE($14::timestamptz, now()))
+         GREATEST(now(), COALESCE($14::timestamptz, now())),$15
        )
        ON CONFLICT DO NOTHING`,
       [
@@ -435,6 +436,7 @@ export async function systemLine(
         cascade?.rootCauseId ?? null,
         cascade?.depth ?? null,
         notBefore,
+        input.replyToMessageId ?? null,
       ],
     );
     if (result.rowCount) {

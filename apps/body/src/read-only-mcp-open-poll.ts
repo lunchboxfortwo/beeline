@@ -1,3 +1,4 @@
+import { validateWorkQuestion, type AskOwnerQuestionInput } from '@beeline/api-contract/phone';
 import { INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS,REPOSITORY_SUBSCRIPTION_EVENTS,fixCornerText } from "@beeline/api-contract/daemon";
 import { SUBSCRIBABLE_EVENT_KINDS } from "@beeline/api-contract/phone";
 import { builtinBeelineApp } from "@beeline/api-contract/workbench";
@@ -100,6 +101,7 @@ export function advertisedAgentTool(name: string): ToolDefinition {
 
 
 export function validateAdvertisedToolInput(tool: ToolDefinition, args: JsonObject): void {
+  if(tool.name==='ask_owner')validateWorkQuestion(args as unknown as AskOwnerQuestionInput);
   if (tool.name==='post'||tool.name==='order'||tool.name==='report') return;
   // Restore root combinations while retaining surface-specific restrictions
   // such as scratch_io without quota. App operations have their own contracts
@@ -283,6 +285,12 @@ async function executeResourceTool(name: string, args: JsonObject, toolCallId: s
     return withAdjustments(result,removed);
   };
   switch (name) {
+    case 'ask_owner': return execute('ask_owner');
+    case 'create_work_item':
+    case 'set_work_state':
+    case 'set_work_priority':
+    case 'assign_work_item':
+    case 'update_work': return execute(name);
     case 'read': {
       const facet = args.facet;
       if (facet === 'procedure' && args.slug === undefined) args.slug = args.name;

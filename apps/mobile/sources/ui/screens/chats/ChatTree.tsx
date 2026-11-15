@@ -1,7 +1,8 @@
+import { WorkStateMark, WorkPriorityMark } from '@/ui/screens/tags/WorkMarks';
 import { RepositoryMark } from '@/components/buzz/RepositoryMark';
-import React, { useRef, useState } from 'react';
-import { Collapsible, ListItem, Separator, XStack, YStack } from 'tamagui';
-import { ChevronDown, ChevronUp, CornerDownRight, Pin } from 'lucide-react-native';
+import React, { useRef } from 'react';
+import { ListItem, Separator, XStack, YStack } from 'tamagui';
+import { Pin } from 'lucide-react-native';
 import equal from 'fast-deep-equal';
 import { voiceDuration } from '@beeline/api-contract/phone';
 import type { ChatListCorner } from '@beeline/api-contract/phone';
@@ -13,7 +14,6 @@ import { voiceCallHumanNames } from '@/buzz/voice-call-members';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
 import { Btn, ChatName, Copy, Glyph, HEIGHT, StatusMark, T, useStep } from '@/ui/grammar';
 import {
-  VISIBLE_THREADS,
   chatPreview,
   chatTagged,
   chatThreads,
@@ -29,7 +29,11 @@ export const NEW_THREAD_HOLD_MS = 450;
 /** Holding the row this long toggles its pin (React Native's default long press). */
 const PIN_HOLD_MS = 500;
 
-type PressEvent = { stopPropagation?: () => void; nativeEvent?: { timestamp?: number }; timeStamp?: number };
+type PressEvent = {
+  stopPropagation?: () => void;
+  nativeEvent?: { timestamp?: number };
+  timeStamp?: number;
+};
 /** When the finger touched or lifted: native touch time, or the DOM event time on web. */
 const touchTime = (event?: PressEvent) => event?.nativeEvent?.timestamp ?? event?.timeStamp;
 
@@ -61,15 +65,43 @@ function useHold(ms: number, onHold: (() => void) | undefined, onTap: () => void
 function ChatMark({ item }: { item: Partial<Pick<ChatListItem, 'directMessage' | 'room'>> }) {
   const peer = item.directMessage?.peer;
   if (peer) {
-    return peer.kind === 'agent'
-      ? <IdentityMark kind="agent" seed={peer.pubkey} name={peer.name} avatarUrl={peer.avatar} face={peer.face} size={MARK} />
-      : <IdentityMark kind="human" seed={peer.pubkey} name={peer.name} avatarUrl={peer.avatar} face={peer.face} size={MARK} />;
+    return peer.kind === 'agent' ? (
+      <IdentityMark
+        kind="agent"
+        seed={peer.pubkey}
+        name={peer.name}
+        avatarUrl={peer.avatar}
+        face={peer.face}
+        size={MARK}
+      />
+    ) : (
+      <IdentityMark
+        kind="human"
+        seed={peer.pubkey}
+        name={peer.name}
+        avatarUrl={peer.avatar}
+        face={peer.face}
+        size={MARK}
+      />
+    );
   }
-  return <RepositoryMark avatarUrl={item.room?.avatar} faviconUrl={item.room?.favicon} size={MARK} />;
+  return (
+    <RepositoryMark avatarUrl={item.room?.avatar} faviconUrl={item.room?.favicon} size={MARK} />
+  );
 }
 
-/** One active thread under its chat: ↳, the short title, and its state ("waiting on you" semibold for the viewer it waits on). */
-function ThreadLine({ item, corner, viewer, onOpen }: { item: ChatListItem; corner: ChatListCorner; viewer: string | undefined; onOpen: (roomId: string, cornerId: string, name: string) => void }) {
+/** One blocked thread under its chat, with the Needs you glyph and priority. */
+function ThreadLine({
+  item,
+  corner,
+  viewer,
+  onOpen,
+}: {
+  item: ChatListItem;
+  corner: ChatListCorner;
+  viewer: string | undefined;
+  onOpen: (roomId: string, cornerId: string, name: string) => void;
+}) {
   const { word, you: waiting } = threadListLabel(corner, viewer);
   const title = threadTitle(item, corner);
   const step = useStep();
@@ -87,43 +119,19 @@ function ThreadLine({ item, corner, viewer, onOpen }: { item: ChatListItem; corn
       accessibilityRole="button"
       testID={`thread-row-${corner.id}`}
     >
-      <YStack paddingTop="0.5"><Glyph icon={CornerDownRight} size={16} accent={waiting} /></YStack>
+      <XStack paddingTop="0.5" gap="1">
+        <WorkStateMark state="needs-you" />
+        <WorkPriorityMark priority={corner.workPriority ?? 'none'} />
+      </XStack>
       <YStack flex={1} minWidth={0} gap={step('1')}>
         <Copy>{title}</Copy>
-        <Copy small strong={waiting} accent={waiting} quiet={!waiting}>{word}</Copy>
+        {!corner.workState ? (
+          <Copy small strong={waiting} accent={waiting} quiet={!waiting}>
+            {word}
+          </Copy>
+        ) : null}
       </YStack>
     </ListItem>
-  );
-}
-
-/** "N more" expands the rest of a chat's active threads in place. */
-function MoreThreads({ item, rest, viewer, onOpen }: { item: ChatListItem; rest: readonly ChatListCorner[]; viewer: string | undefined; onOpen: (roomId: string, cornerId: string, name: string) => void }) {
-  const [shown, setShown] = useState(false);
-  const title = chatTitle(item);
-  return (
-    <Collapsible open={shown} onOpenChange={setShown}>
-      <Collapsible.Content>
-        {rest.map((corner) => <ThreadLine key={corner.id} item={item} corner={corner} viewer={viewer} onOpen={onOpen} />)}
-      </Collapsible.Content>
-      <Collapsible.Trigger asChild>
-        <ListItem
-          minHeight={HEIGHT.control}
-          padding="0"
-          paddingVertical="2"
-          gap="2"
-          justifyContent="flex-start"
-          backgroundColor="transparent"
-          aria-expanded={shown}
-          aria-label={shown ? `Show fewer threads in ${title}` : `${rest.length} more active threads in ${title}`}
-          accessibilityRole="button"
-          testID={`more-${item.room.id}`}
-        >
-          <Glyph icon={CornerDownRight} size={16} />
-          <Copy small quiet>{shown ? 'Show fewer' : `${rest.length} more`}</Copy>
-          <Glyph icon={shown ? ChevronUp : ChevronDown} size={14} />
-        </ListItem>
-      </Collapsible.Trigger>
-    </Collapsible>
   );
 }
 
@@ -144,101 +152,148 @@ type ChatRowProps = {
   onNewThread?: (roomId: string) => void;
 };
 
-/** One chat: mark, #name, "Who: last message", age and status, then its active threads on a rail. */
-export const ChatRow = React.memo(function ChatRow({ item, viewer, now, first, dividerOutside = false, last = false, selected = false, pinned = false, onOpen, onPin, onOpenThread, onNewThread }: ChatRowProps) {
-  const refused = useRoomOutboxFailure(item.room.id);
-  const summary = useRoomCornerSummary(item.room.id);
-  const threads = chatThreads(item, summary?.openCorners ?? item.openCorners, now);
-  const title = chatTitle(item);
-  const preview = chatPreview(item, viewer);
-  const unread = item.unread === true;
-  const tagged = chatTagged(item);
-  const call = item.voiceCall && !item.voiceCall.endedAt ? item.voiceCall : null;
-  const age = call
-    ? voiceDuration(now / 1000 - call.startedAt)
-    : compactRelativeTime(item.latestMessage?.createdAt ?? item.room.updatedAt, now);
-  const open = () => onOpen(item.room.id);
-  const pinHold = useHold(PIN_HOLD_MS, () => onPin(item.room.id), open);
-  const threadHold = useHold(NEW_THREAD_HOLD_MS, onNewThread ? () => onNewThread(item.room.id) : undefined, open, true);
-  const step = useStep();
-  return (
-    <YStack
-      paddingHorizontal="4"
-      paddingTop={step('3')}
-      // With the divider outside, this row also owns the gap above the next divider.
-      paddingBottom={dividerOutside && !last ? step('6') : step('3')}
-      testID={`chat-${item.room.id}`}
-    >
-      {first || dividerOutside ? null : <Separator borderColor="stroke" marginBottom={step('3')} />}
-      <ListItem
-        minHeight={HEIGHT.control}
-        paddingHorizontal="2"
-        paddingVertical="2"
-        gap="3"
-        alignItems="flex-start"
-        justifyContent="flex-start"
-        backgroundColor={selected ? 'highlight' : 'transparent'}
-        borderLeftWidth={1}
-        borderColor={selected ? 'needsYou' : 'transparent'}
-        onPressIn={pinHold.onPressIn}
-        onPress={pinHold.onPress}
-        aria-label={`Open chat ${title}${unread ? ', unread' : ''}${tagged ? ', tagged you' : ''}${pinned ? ', pinned' : ''}`}
-        aria-current={selected ? 'page' : undefined}
-        accessibilityRole="button"
-        accessibilityHint="Long press to toggle this conversation's pin"
-        testID={`room-${item.room.id}`}
+/** One chat: mark, #name, "Who: last message", age and status, then its blocked threads on a rail. */
+export const ChatRow = React.memo(
+  function ChatRow({
+    item,
+    viewer,
+    now,
+    first,
+    dividerOutside = false,
+    last = false,
+    selected = false,
+    pinned = false,
+    onOpen,
+    onPin,
+    onOpenThread,
+    onNewThread,
+  }: ChatRowProps) {
+    const refused = useRoomOutboxFailure(item.room.id);
+    const summary = useRoomCornerSummary(item.room.id);
+    const threads = chatThreads(item, summary?.openCorners ?? item.openCorners);
+    const title = chatTitle(item);
+    const preview = chatPreview(item, viewer);
+    const unread = item.unread === true;
+    const tagged = chatTagged(item);
+    const call = item.voiceCall && !item.voiceCall.endedAt ? item.voiceCall : null;
+    const age = call
+      ? voiceDuration(now / 1000 - call.startedAt)
+      : compactRelativeTime(item.latestMessage?.createdAt ?? item.room.updatedAt, now);
+    const open = () => onOpen(item.room.id);
+    const pinHold = useHold(PIN_HOLD_MS, () => onPin(item.room.id), open);
+    const threadHold = useHold(NEW_THREAD_HOLD_MS, onNewThread ? () => onNewThread(item.room.id) : undefined, open, true);
+    const step = useStep();
+    return (
+      <YStack
+        paddingHorizontal="4"
+        paddingTop={step('3')}
+        // With the divider outside, this row also owns the gap above the next divider.
+        paddingBottom={dividerOutside && !last ? step('6') : step('3')}
+        testID={`chat-${item.room.id}`}
       >
-        {onNewThread ? (
-          <YStack
-            onPressIn={threadHold.onPressIn}
-            onPress={threadHold.onPress}
-            aria-label={`Open chat ${title}`}
-            accessibilityRole="button"
-            accessibilityHint="Long press to open a new thread"
-            accessibilityActions={[{ name: 'longpress', label: 'New thread' }]}
-            onAccessibilityAction={(event: { nativeEvent: { actionName: string } }) => {
-              if (event.nativeEvent.actionName === 'longpress') onNewThread(item.room.id);
-            }}
-            testID={`room-${item.room.id}-new-thread`}
-          >
-            <ChatMark item={item} />
-          </YStack>
-        ) : <ChatMark item={item} />}
-        <YStack flex={1} minWidth={0} gap={step('1')}>
-          <ChatName v="listTitle" name={title} testID={`room-${item.room.id}-title`} />
-          {refused ? (
-            <Copy small numberOfLines={2} color="removed" testID={`room-${item.room.id}-preview`}>Not sent: {refused.row.text}</Copy>
-          ) : call ? (
-            <Copy small numberOfLines={2} accent testID={`room-${item.room.id}-preview`}>Ongoing call: {voiceCallHumanNames(call, viewer)}</Copy>
+        {first || dividerOutside ? null : (
+          <Separator borderColor="stroke" marginBottom={step('3')} />
+        )}
+        <ListItem
+          minHeight={HEIGHT.control}
+          paddingHorizontal="2"
+          paddingVertical="2"
+          gap="3"
+          alignItems="flex-start"
+          justifyContent="flex-start"
+          backgroundColor={selected ? 'highlight' : 'transparent'}
+          borderLeftWidth={1}
+          borderColor={selected ? 'needsYou' : 'transparent'}
+          onPressIn={pinHold.onPressIn}
+          onPress={pinHold.onPress}
+          aria-label={`Open chat ${title}${unread ? ', unread' : ''}${tagged ? ', tagged you' : ''}${pinned ? ', pinned' : ''}`}
+          aria-current={selected ? 'page' : undefined}
+          accessibilityRole="button"
+          accessibilityHint="Long press to toggle this conversation's pin"
+          testID={`room-${item.room.id}`}
+        >
+          {onNewThread ? (
+            <YStack
+              onPressIn={threadHold.onPressIn}
+              onPress={threadHold.onPress}
+              aria-label={`Open chat ${title}`}
+              accessibilityRole="button"
+              accessibilityHint="Long press to open a new thread"
+              accessibilityActions={[{ name: 'longpress', label: 'New thread' }]}
+              onAccessibilityAction={(event: { nativeEvent: { actionName: string } }) => {
+                if (event.nativeEvent.actionName === 'longpress') onNewThread(item.room.id);
+              }}
+              testID={`room-${item.room.id}-new-thread`}
+            >
+              <ChatMark item={item} />
+            </YStack>
           ) : (
-            <Copy small numberOfLines={2} quiet={!unread} testID={`room-${item.room.id}-preview`}>
-              {preview.who ? <T v="metaStrong" color="secondary">{preview.who}: </T> : null}
-              {preview.text}
-            </Copy>
+            <ChatMark item={item} />
           )}
-        </YStack>
-        <YStack alignItems="flex-end" gap="2" paddingTop="0.5">
-          <Copy small quiet testID={`room-${item.room.id}-age`}>{age}</Copy>
-          <StatusMark unread={unread} tagged={tagged} />
-          {pinned ? <Glyph icon={Pin} size={14} /> : null}
-        </YStack>
-      </ListItem>
-      {threads.length ? (
-        <YStack marginLeft="4" marginTop={step('2')} paddingLeft="4" borderLeftWidth={1} borderColor="strongStroke" testID={`nest-${item.room.id}`}>
-          {threads.slice(0, VISIBLE_THREADS).map((corner) => <ThreadLine key={corner.id} item={item} corner={corner} viewer={viewer} onOpen={onOpenThread} />)}
-          {threads.length > VISIBLE_THREADS
-            ? <MoreThreads item={item} rest={threads.slice(VISIBLE_THREADS)} viewer={viewer} onOpen={onOpenThread} />
-            : null}
-        </YStack>
-      ) : null}
-    </YStack>
-  );
-}, (previous, next) => {
-  // Server snapshots can replace unchanged DTOs; compare values, keep every callback.
-  const { item: beforeItem, ...before } = previous;
-  const { item: afterItem, ...after } = next;
-  return equal(beforeItem, afterItem) && Object.keys(before).every((key) => before[key as keyof typeof before] === after[key as keyof typeof after]);
-});
+          <YStack flex={1} minWidth={0} gap={step('1')}>
+            <ChatName v="listTitle" name={title} testID={`room-${item.room.id}-title`} />
+            {refused ? (
+              <Copy small numberOfLines={2} color="removed" testID={`room-${item.room.id}-preview`}>
+                Not sent: {refused.row.text}
+              </Copy>
+            ) : call ? (
+              <Copy small numberOfLines={2} accent testID={`room-${item.room.id}-preview`}>
+                Ongoing call: {voiceCallHumanNames(call, viewer)}
+              </Copy>
+            ) : (
+              <Copy small numberOfLines={2} quiet={!unread} testID={`room-${item.room.id}-preview`}>
+                {preview.who ? (
+                  <T v="metaStrong" color="secondary">
+                    {preview.who}:{' '}
+                  </T>
+                ) : null}
+                {preview.text}
+              </Copy>
+            )}
+          </YStack>
+          <YStack alignItems="flex-end" gap="2" paddingTop="0.5">
+            <Copy small quiet testID={`room-${item.room.id}-age`}>
+              {age}
+            </Copy>
+            <StatusMark unread={unread} tagged={tagged} />
+            {pinned ? <Glyph icon={Pin} size={14} /> : null}
+          </YStack>
+        </ListItem>
+        {threads.length ? (
+          <YStack
+            marginLeft="4"
+            marginTop={step('2')}
+            paddingLeft="4"
+            borderLeftWidth={1}
+            borderColor="strongStroke"
+            testID={`nest-${item.room.id}`}
+          >
+            {threads.map((corner) => (
+              <ThreadLine
+                key={corner.id}
+                item={item}
+                corner={corner}
+                viewer={viewer}
+                onOpen={onOpenThread}
+              />
+            ))}
+          </YStack>
+        ) : null}
+      </YStack>
+    );
+  },
+  (previous, next) => {
+    // Server snapshots can replace unchanged DTOs; compare values, keep every callback.
+    const { item: beforeItem, ...before } = previous;
+    const { item: afterItem, ...after } = next;
+    return (
+      equal(beforeItem, afterItem) &&
+      Object.keys(before).every(
+        (key) => before[key as keyof typeof before] === after[key as keyof typeof after],
+      )
+    );
+  },
+);
 
 /** The divider above a chat row whose swipe must span exactly the row between dividers. */
 export function ChatRowDivider({ roomId }: { roomId: string }) {
@@ -250,7 +305,11 @@ export function ChatRowDivider({ roomId }: { roomId: string }) {
 }
 
 /** Public chats in the Workspace the viewer has not joined, each with Join. */
-export function JoinableChats({ chats, joining, onJoin }: {
+export function JoinableChats({
+  chats,
+  joining,
+  onJoin,
+}: {
   chats: NonNullable<ChatListView['joinable']>;
   joining: string | null;
   onJoin: (roomId: string, name: string) => void;
@@ -259,15 +318,33 @@ export function JoinableChats({ chats, joining, onJoin }: {
   return (
     <YStack paddingHorizontal="4" paddingTop="3" paddingBottom="4" gap="2" testID="public-to-join">
       <Separator borderColor="stroke" marginBottom="2" />
-      <T v="metaStrong" color="secondary">Public chats you can join</T>
+      <T v="metaStrong" color="secondary">
+        Public chats you can join
+      </T>
       {chats.map((chat) => (
-        <XStack key={chat.id} gap="3" alignItems="center" paddingVertical="2" testID={`joinable-${chat.id}`}>
+        <XStack
+          key={chat.id}
+          gap="3"
+          alignItems="center"
+          paddingVertical="2"
+          testID={`joinable-${chat.id}`}
+        >
           <ChatMark item={{}} />
           <YStack flex={1} minWidth={0}>
             <Copy>{joinableTitle(chat.name)}</Copy>
-            <Copy small quiet>{chat.memberCount} {chat.memberCount === 1 ? 'member' : 'members'}</Copy>
+            <Copy small quiet>
+              {chat.memberCount} {chat.memberCount === 1 ? 'member' : 'members'}
+            </Copy>
           </YStack>
-          <Btn kind="accent" label={`Join ${joinableTitle(chat.name)}`} disabled={joining !== null} onPress={() => onJoin(chat.id, chat.name)} testID={`join-${chat.id}`}>Join</Btn>
+          <Btn
+            kind="accent"
+            label={`Join ${joinableTitle(chat.name)}`}
+            disabled={joining !== null}
+            onPress={() => onJoin(chat.id, chat.name)}
+            testID={`join-${chat.id}`}
+          >
+            Join
+          </Btn>
         </XStack>
       ))}
     </YStack>

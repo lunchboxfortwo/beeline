@@ -111,8 +111,8 @@ export async function claimAgentConnection(
     // A connection carries presence only. Queue items stay pending through
     // reconnects and helper restarts; the helper receives them again.
     const claimed = await db.query<{ epoch: string | number }>(
-      `INSERT INTO agent_connections(agent_id,epoch,connection_id,instance_id,connected_at,released_at)
-       VALUES($1,1,$2,$3,clock_timestamp(),NULL)
+      `INSERT INTO agent_connections(agent_id,epoch,connection_id,instance_id,connected_at,released_at,offline_since)
+       VALUES($1,1,$2,$3,clock_timestamp(),NULL,NULL)
        ON CONFLICT(agent_id) DO UPDATE SET epoch=agent_connections.epoch+1,
          connection_id=EXCLUDED.connection_id,instance_id=EXCLUDED.instance_id,
          connected_at=EXCLUDED.connected_at,offline_since=agent_connections.released_at,released_at=NULL

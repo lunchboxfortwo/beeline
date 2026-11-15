@@ -663,13 +663,13 @@ describe('desktop Workspace navigation', () => {
     expect(control('room-dm-a').props['aria-current']).toBeUndefined();
   });
 
-  it('nests the chat threads and opens one in the main pane', () => {
-    expect(control('thread-row-corner-a').props['aria-label']).toBe('Thread Fix fixture, working');
+  it('nests only blocked chat threads and opens one in the main pane', () => {
+    expect(tree.root.findAllByProps({testID:'thread-row-corner-a'})).toHaveLength(0);
     expect(control('thread-row-corner-theirs').props['aria-label']).toBe('Thread Their fix, waiting on a reply');
-    act(() => control('thread-row-corner-a').props.onPress());
+    act(() => control('thread-row-corner-theirs').props.onPress());
     expect(routerPush).toHaveBeenCalledWith({
       pathname: '/beeline/chat/[channelId]',
-      params: { channelId: 'corner-a', parent: 'room-a', title: 'Fix fixture' },
+      params: { channelId: 'corner-theirs', parent: 'room-a', title: 'Their fix' },
     });
   });
 

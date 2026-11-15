@@ -15,11 +15,13 @@ import type {
   CornerStateReason,
 } from '@beeline/api-contract/phone';
 
-/** Open corners a Room row lists beyond the viewer's own; every Mine corner is listed. */
+/** Additional open-corner preview; every Mine and Needs you corner is always included. */
 export const OPEN_CORNER_PREVIEW = 8;
 
 /** The facts every corner row derives its state and Mine flag from. */
 export type CornerStateRow = {
+  work_state?: import('@beeline/api-contract/phone').WorkState | null;
+  work_priority?: import('@beeline/api-contract/phone').WorkPriority | null;
   machine?: CornerMachine | null;
   waiting_kind?: 'message' | 'merge-hold' | 'report' | null;
   waiting_person_name?: string | null;
@@ -78,9 +80,18 @@ export function cornerRowState(row: CornerStateRow): DerivedCornerState {
         }
       : {}),
   });
-  return row.machine ? { state: row.machine.state, ...(row.machine.state === 'waiting' ? {
-    reason: observed.reason, itemId: observed.itemId, blocker: observed.blocker,
-  } : {}) } : observed;
+  return row.machine
+    ? {
+        state: row.machine.state,
+        ...(row.machine.state === 'waiting'
+          ? {
+              reason: observed.reason,
+              itemId: observed.itemId,
+              blocker: observed.blocker,
+            }
+          : {}),
+      }
+    : observed;
 }
 
 /** Mine is followed or owed to this viewer. */
@@ -110,7 +121,7 @@ export function cornerFactsSql(viewerExpr: string): {
   member: string;
 } {
   return {
-    columns: `f.locked,f.machine,gh.lifecycle,
+    columns: `f.locked,f.machine,gh.lifecycle,work.state work_state,work.priority work_priority,
       activity.worker_active,activity.reviewer_active,
       ${cornerLastTurnEndSql('c')} last_turn_ended_at,
       blocker.item_id IS NOT NULL blocking,blocker.item_id waiting_item_id,blocker.reason waiting_reason,
@@ -120,7 +131,10 @@ export function cornerFactsSql(viewerExpr: string): {
       lm.created_at latest_created_at,
       ${followsCornerSql('c', viewerExpr)} follows_viewer,
       owed.owed_viewer,owed.attention`,
-    joins: `LEFT JOIN corner_facts f ON f.corner_id=c.id
+    joins: `LEFT JOIN LATERAL(SELECT state,priority FROM work_items item WHERE item.room_id=c.id
+      ORDER BY array_position(ARRAY['needs-you','in-review','in-progress','backlog','done'],item.state),
+        array_position(ARRAY['urgent','high','medium','low','none'],item.priority),item.updated_at DESC,item.id LIMIT 1) work ON true
+    LEFT JOIN corner_facts f ON f.corner_id=c.id
     LEFT JOIN corner_github_cache gh ON gh.corner_id=c.id
     ${cornerWorkSql()}
     ${cornerBlockerSql()}
@@ -269,7 +283,7 @@ export type ChatCornerSummary = {
   openCorners: ChatListCorner[];
 };
 
-/** Count every corner; preview every Mine corner and the newest others. */
+/** Count every corner; include every Mine and Needs you corner alongside the newest others. */
 export function chatCornerCounts(
   rows: readonly (CornerStateRow & {
     id: string;
@@ -302,6 +316,16 @@ export function chatCornerCounts(
     count.openCorners.push({
       id: row.id,
       name: row.name,
+      workState:
+        row.work_state ??
+        (state === 'working'
+          ? 'in-progress'
+          : state === 'review'
+            ? 'in-review'
+            : state === 'waiting'
+              ? 'needs-you'
+              : 'backlog'),
+      workPriority: row.work_priority ?? 'none',
       state,
       ...(reason ? { reason } : {}),
       ...(blocker ? { blocker } : {}),
@@ -315,7 +339,9 @@ export function chatCornerCounts(
   }
   for (const count of counts.values()) {
     let others = Math.max(0, OPEN_CORNER_PREVIEW - count.mineCornerCount);
-    count.openCorners = count.openCorners.filter((corner) => corner.mine || others-- > 0);
+    count.openCorners = count.openCorners.filter(
+      (corner) => corner.mine || corner.workState === 'needs-you' || others-- > 0,
+    );
   }
   return counts;
 }

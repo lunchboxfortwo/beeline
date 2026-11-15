@@ -769,3 +769,13 @@ export async function notifyAgentConfigChanges(database: Pick<SqlDatabase,'query
     WHERE member.identity_id=ANY($2::text[]) AND ($3::uuid IS NULL OR member.workspace_id=$3)
       AND member.removed_at IS NULL AND room.archived_at IS NULL`,[POSTGRES_LIVE_CHANNEL,agentIds,workspaceId??null]);
 }
+
+/** Work metadata invalidates the existing Room and corner-summary subscriptions. */
+export function workItemNotificationSchema():string {
+  return `CREATE OR REPLACE FUNCTION beeline_work_item_changed() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      PERFORM pg_notify('beeline_live_v1',json_build_object('table','work_items','operation','UPDATE','roomId',NEW.room_id,
+        'cornerParentId',(SELECT parent_id FROM rooms WHERE id=NEW.room_id))::text);
+      RETURN NEW;
+    END $$;`;
+}

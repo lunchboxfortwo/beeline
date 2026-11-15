@@ -1,3 +1,4 @@
+import { useRecordedWorkItem } from '@/buzz/work-board-store';
 import React, { useCallback, useMemo } from 'react';
 import { router } from 'expo-router';
 import { cornerShortTitle, roomTitle, type CornerState, type RoomView } from '@beeline/api-contract/phone';
@@ -19,9 +20,10 @@ import { findRoomCornerRow, useRoomCornerRecord } from '@/buzz/room-corner-store
  */
 export function useChatThreadHeader({
   isCorner, roomSurface, resolvedChannelName, decodedId, parentChannelId, state, running,
-  objective, isArchived, isDesktop, positions,
+  objective, isArchived, isDesktop, positions,sourceMessageId,
 }: {
   isCorner: boolean;
+  sourceMessageId?:string;
   roomSurface: RoomView | null;
   resolvedChannelName: string | null;
   decodedId: string;
@@ -33,6 +35,7 @@ export function useChatThreadHeader({
   isDesktop: boolean;
   positions?: Parameters<typeof useTitleBlockVisibility>[1];
 }) {
+  const recordedWorkItem=useRecordedWorkItem(roomSurface?.room.workspaceId,sourceMessageId);
   const corners = useRoomCornerRecord(isCorner ? parentChannelId : undefined);
   const openingRow = corners ? findRoomCornerRow(corners, decodedId) : undefined;
   const openingSummary = corners?.summary?.openCorners.find((corner) => corner.id === decodedId);
@@ -53,10 +56,12 @@ export function useChatThreadHeader({
       title: cornerShortTitle(parentName, title, decodedId),
       ...(threadState ? { state: threadState } : isArchived ? { state: 'archived' as const } : {}),
       running,
+      workItem:roomSurface?.workItems?.find(item=>item.messageId===sourceMessageId)??recordedWorkItem??roomSurface?.workItem,
+      people:roomSurface?.members.map(member=>member.identity),
       ...(prLine ? { prLine } : {}),
       ...(objective.trim() ? { objective: objective.trim() } : {}),
     };
-  }, [decodedId, isArchived, isCorner, objective, parentName, title, roomSurface?.cornerLifecycle, roomSurface?.room.avatar, roomSurface?.room.favicon, running, threadState]);
+  }, [decodedId, isArchived, isCorner, objective, parentName, title, roomSurface?.cornerLifecycle, roomSurface?.room.avatar, roomSurface?.room.favicon, roomSurface?.workItem, roomSurface?.workItems, sourceMessageId, recordedWorkItem, roomSurface?.members, running, threadState]);
 
   const openBrief = useMemo(
     () => (isCorner && hasBrief ? () => openPlace({ kind: 'brief', roomId: decodedId }, isDesktop) : undefined),

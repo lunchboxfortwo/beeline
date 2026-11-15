@@ -1,13 +1,13 @@
-import { NeedsYouLiveDelta, BookmarkDelta, Entry, Change, Slot, HiddenIntent } from './server-read-owner-types';
+import { NeedsYouLiveDelta, Entry, Change, Slot } from './server-read-owner-types';
 import { useEffect, useSyncExternalStore, useCallback } from 'react';
 import { AppState } from 'react-native';
+import { isChatListView, type ChatListView, type SurfaceCacheAddress } from '@beeline/buzz-client';
+import { type NeedsYouItemView, type NeedsYouListResult } from '@beeline/api-contract/phone';
 import {
-  isChatListView,
-  type ChatListView,
-  type SurfaceCacheAddress,
-} from '@beeline/buzz-client';
-import { type MessageBookmarkListResult, type MessageBookmarkView, type NeedsYouItemView, type NeedsYouListResult } from '@beeline/api-contract/phone';
-import { getEffectiveRelayUrl, loadBuzzIdentity, peekBuzzViewerContext } from '@/auth/buzz-identity-storage';
+  getEffectiveRelayUrl,
+  loadBuzzIdentity,
+  peekBuzzViewerContext,
+} from '@/auth/buzz-identity-storage';
 import { clientResetGeneration, subscribeClientReset } from '@/sync/client-reset';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import { sharedLiveConnection } from '@/sync/transport/live-connection';
@@ -178,12 +178,7 @@ namespace ChatReads {
       if (!value || !value.chats.some((row) => 'cornerCount' in row || 'openCorners' in row))
         return;
       applyChatListCorners(value.chats, -1);
-      mobileSurfaceCache.publish(
-        this.address,
-        withoutCornerFacts(value),
-        isChatListView,
-        0,
-      );
+      mobileSurfaceCache.publish(this.address, withoutCornerFacts(value), isChatListView, 0);
     }
     private persistSoon(): void {
       if (this.durableTimer) return;
@@ -288,12 +283,10 @@ namespace ChatReads {
   subscribeClientReset(resetStores);
 
   export function liveChatList(key: ChatListKey): ChatListView | null {
-
     const store = stores.get(idOf(key));
     return store?.confirmed() ? store.current() : null;
   }
   export function chatListSnapshot(key: ChatListKey): ChatListView | null {
-
     return mobileSurfaceCache.peek(addressOf(key), isChatListView);
   }
   export function refreshChatList(key: ChatListKey): void {
@@ -342,11 +335,10 @@ namespace TrayReads {
     'reconnect',
     'postgres:memberships',
   ]);
-  const EMPTY: Entry = { needs: null, saved: null };
+  const EMPTY: Entry = { needs: null };
   const slots = new Map<string, Slot>();
   const listeners = new Set<() => void>();
   const badgeReaders = new Map<string, number>();
-  const trayReaders = new Map<string, Set<(reason: string) => void>>();
   let viewer: { key: string; relay: string; pubkey: string } | undefined;
   let resolving: Promise<NonNullable<typeof viewer>> | undefined;
   let liveStop: (() => void) | undefined;
@@ -357,7 +349,7 @@ namespace TrayReads {
     listeners.forEach((listener) => listener());
   };
   const active = (slot: Slot) => slots.get(slot.key) === slot;
-  const address = (slot: Slot, kind: 'needs-you' | 'bookmarks') =>
+  const address = (slot: Slot, kind: 'needs-you') =>
     surfaceAddress(slot.relay, slot.pubkey, `/workspace/:id/${kind}`, {
       workspaceId: slot.workspaceId,
     });
@@ -376,20 +368,6 @@ namespace TrayReads {
         typeof item.text === 'string' &&
         typeof item.createdAt === 'number',
     );
-  const savedList = (value: unknown): value is MessageBookmarkListResult =>
-    record(value) &&
-    (value.next === undefined || typeof value.next === 'string') &&
-    Array.isArray(value.bookmarks) &&
-    value.bookmarks.every(
-      (item: unknown) =>
-        record(item) &&
-        typeof item.messageId === 'string' &&
-        typeof item.workspaceId === 'string' &&
-        typeof item.roomId === 'string' &&
-        typeof item.roomName === 'string' &&
-        typeof item.bookmarkedAt === 'number' &&
-        typeof item.available === 'boolean',
-    );
 
   function slotFor(owner: NonNullable<typeof viewer>, workspaceId: string): Slot {
     const key = `${owner.key}\u0000${workspaceId}`;
@@ -403,7 +381,6 @@ namespace TrayReads {
       entry: EMPTY,
       clock: 0,
       needsRead: 0,
-      savedRead: 0,
       reads: new Set(),
       changes: [],
     };
@@ -412,26 +389,13 @@ namespace TrayReads {
   }
   const current = (workspaceId: string) => viewer && slots.get(`${viewer.key}\u0000${workspaceId}`);
   function write(slot: Slot, entry: Entry, persist = true): void {
-    if (
-      (!active(slot) ||
-      entry === slot.entry)
-    )
-      return;
+    if (!active(slot) || entry === slot.entry) return;
     const before = slot.entry;
     slot.entry = entry;
-    reconcileIntents(slot);
     if (persist && slot.pubkey) {
       if (entry.needs && entry.needs !== before.needs)
         void mobileSurfaceCache
           .write(address(slot, 'needs-you'), { items: [...entry.needs] }, needsList)
-          .catch(() => undefined);
-      if (entry.saved && (entry.saved !== before.saved || entry.next !== before.next))
-        void mobileSurfaceCache
-          .write(
-            address(slot, 'bookmarks'),
-            { bookmarks: [...entry.saved], next: entry.next },
-            savedList,
-          )
           .catch(() => undefined);
     }
     notify();
@@ -456,16 +420,9 @@ namespace TrayReads {
     );
   const needsSlice = (items: readonly NeedsYouItemView[], delta: NeedsYouLiveDelta) =>
     orderedNeeds([...items.filter((item) => item.roomId !== delta.sourceRoomId), ...delta.items]);
-  const savedSlice = (items: readonly MessageBookmarkView[], delta: BookmarkDelta) =>
-    [
-      ...items.filter((item) => item.messageId !== delta.messageId),
-      ...(delta.bookmark ? [delta.bookmark] : []),
-    ].sort((a, b) => b.bookmarkedAt - a.bookmarkedAt || a.messageId.localeCompare(b.messageId));
 
   subscribeClientReset(() => {
     slots.clear();
-    needsIntents.clear();
-    savedIntents.clear();
     viewer = undefined;
     resolving = undefined;
     liveStop?.();
@@ -484,17 +441,14 @@ namespace TrayReads {
         if (!('monolithLive' in event)) return;
         const signal = (event as MonolithSurfaceEvent).monolithLive;
         if (signal.type === 'needs-you-delta') applyNeedsYouLiveDelta(signal);
-        else if (signal.type === 'bookmark-delta') applyBookmarkDelta(signal);
         else if (signal.type === 'invalidate' && GAP_REASONS.has(signal.reason)) {
           for (const slot of slots.values())
-            if (signal.reason !== 'bookmark-gap' && !trayReaders.has(slot.workspaceId)) {
+            if (signal.reason !== 'bookmark-gap') {
               slot.clock += 1;
               slot.needsStale = slot.clock;
-              if (badgeReaders.has(slot.workspaceId) && !slot.forgotten)
+              if (badgeReaders.has(slot.workspaceId))
                 void refreshProjection(slot).catch(() => undefined);
             }
-          for (const readers of trayReaders.values())
-            for (const read of readers) read(signal.reason);
         }
       })
       .then(
@@ -541,26 +495,13 @@ namespace TrayReads {
   }
   export function applyNeedsYouLiveDelta(delta: NeedsYouLiveDelta): void {
     const slot = current(delta.workspaceId);
-    if (!slot || slot.forgotten) return;
+    if (!slot) return;
     const apply = (entry: Entry): Entry =>
       entry.needs ? { ...entry, needs: needsSlice(entry.needs, delta) } : entry;
     changed(slot, { at: 0, kind: 'needs', apply });
     write(slot, apply(slot.entry));
   }
-  export function applyBookmarkDelta(
-    delta: BookmarkDelta & { readonly workspaceId: string },
-  ): void {
-    const slot = current(delta.workspaceId);
-    if (!slot || slot.forgotten) return;
-    const apply = (entry: Entry): Entry =>
-      entry.saved ? { ...entry, saved: savedSlice(entry.saved, delta) } : entry;
-    changed(slot, { at: 0, kind: 'saved', apply });
-    write(slot, apply(slot.entry));
-  }
-  export async function loadNeedsYouList(
-    workspaceId: string,
-  ): Promise<readonly NeedsYouItemView[]> {
-
+  async function loadNeedsYouList(workspaceId: string): Promise<readonly NeedsYouItemView[]> {
     const slot = slotFor(await resolveViewer(), workspaceId);
 
     const at = ++slot.clock;
@@ -575,7 +516,6 @@ namespace TrayReads {
       if (active(slot) && at > slot.needsRead) {
         slot.needsRead = at;
         if (at >= (slot.needsStale ?? 0)) slot.needsStale = undefined;
-        slot.forgotten = false;
         write(slot, entry);
       }
       return entry.needs ?? [];
@@ -584,190 +524,17 @@ namespace TrayReads {
       trim(slot);
     }
   }
-  export async function loadSavedList(workspaceId: string, before?: string): Promise<void> {
-
-    const slot = slotFor(await resolveViewer(), workspaceId);
-
-    const at = ++slot.clock;
-    slot.reads.add(at);
-    try {
-      const result = await monolithPhoneOperation('listMessageBookmarks', {
-        workspaceId,
-        ...(before ? { before } : {}),
-      });
-      if (!active(slot) || at <= slot.savedRead) return;
-      if (!savedList(result)) throw new Error('Invalid Saved response.');
-      const items: readonly MessageBookmarkView[] = before
-        ? [
-            ...(slot.entry.saved ?? []),
-            ...result.bookmarks.filter(
-              (item) => !slot.entry.saved?.some((known) => known.messageId === item.messageId),
-            ),
-          ]
-        : [...result.bookmarks];
-      const entry = replay(slot, 'saved', at, { ...slot.entry, saved: items, next: result.next });
-      slot.savedRead = at;
-      slot.forgotten = false;
-      write(slot, entry);
-    } finally {
-      slot.reads.delete(at);
-      trim(slot);
-    }
-  }
-
-  /** One cold tray response seeds both sections; a held pair costs no request. */
-  export async function loadTrayList(
-    workspaceId: string,
-    force = false,
-  ): Promise<{ needsError?: string; savedError?: string }> {
-
-    const slot = slotFor(await resolveViewer(), workspaceId);
-    if (!slot.entry.needs) await seed(workspaceId, 'needs-you');
-    if (!slot.entry.saved) await seed(workspaceId, 'bookmarks');
-
-    if (!force && !slot.forgotten && !slot.needsStale && slot.entry.needs && slot.entry.saved)
-      return {};
-    if (slot.trayRead) return slot.trayRead;
-    const at = ++slot.clock;
-    slot.reads.add(at);
-    const read = monolithPhoneOperation('readTray', { workspaceId, markSeen: false })
-      .then((result) => {
-        if (!active(slot) || (slot.forgotten && at <= Math.max(slot.needsRead, slot.savedRead)))
-          return {};
-        if (
-          (result.needs && !needsList(result.needs)) ||
-          (result.saved && !savedList(result.saved))
-        )
-          throw new Error('Invalid Tray response.');
-        let entry = slot.entry;
-        if (result.needs && at > slot.needsRead) {
-          entry = replay(slot, 'needs', at, { ...entry, needs: result.needs.items });
-          slot.needsRead = at;
-          if (at >= (slot.needsStale ?? 0)) slot.needsStale = undefined;
-        }
-        if (result.saved && at > slot.savedRead) {
-          entry = replay(slot, 'saved', at, {
-            ...entry,
-            saved: result.saved.bookmarks,
-            next: result.saved.next,
-          });
-          slot.savedRead = at;
-        }
-        slot.forgotten = false;
-        write(slot, entry);
-        return { needsError: result.needsError, savedError: result.savedError };
-      })
-      .finally(() => {
-        slot.reads.delete(at);
-        trim(slot);
-        if (slot.trayRead === read) slot.trayRead = undefined;
-      });
-    slot.trayRead = read;
-    return read;
-  }
-  async function seed(workspaceId: string, kind: 'needs-you' | 'bookmarks'): Promise<boolean> {
-
+  export async function seedNeedsYouList(workspaceId: string): Promise<boolean> {
     const slot = slotFor(await resolveViewer(), workspaceId);
     if (!slot.pubkey) return false;
     const at = slot.clock;
-    const saved =
-      kind === 'needs-you'
-        ? await mobileSurfaceCache.read(address(slot, kind), needsList).catch(() => null)
-        : await mobileSurfaceCache.read(address(slot, kind), savedList).catch(() => null);
+    const saved = await mobileSurfaceCache
+      .read(address(slot, 'needs-you'), needsList)
+      .catch(() => null);
     if (!saved) return false;
-    if (at === slot.clock && active(slot)) {
-      if (kind === 'needs-you' && 'items' in saved && !slot.entry.needs)
-        write(slot, { ...slot.entry, needs: saved.items }, false);
-      if (kind === 'bookmarks' && 'bookmarks' in saved && !slot.entry.saved)
-        write(slot, { ...slot.entry, saved: saved.bookmarks, next: saved.next }, false);
-    }
+    if (at === slot.clock && active(slot) && !slot.entry.needs)
+      write(slot, { ...slot.entry, needs: saved.items }, false);
     return true;
-  }
-  export const seedNeedsYouList = (workspaceId: string) => seed(workspaceId, 'needs-you');
-  export function forgetTray(workspaceId: string): void {
-    const slot = current(workspaceId);
-    if (!slot) return;
-    slot.forgotten = true;
-    slot.needsStale = undefined;
-    slot.needsRead = slot.savedRead = ++slot.clock;
-    slot.changes = [];
-    write(slot, { ...slot.entry, needs: [], saved: [], next: undefined }, false);
-    if (slot.pubkey)
-      for (const kind of ['needs-you', 'bookmarks'] as const)
-        void mobileSurfaceCache.remove(address(slot, kind)).catch(() => undefined);
-  }
-  const needsIntents = new Map<string, Set<HiddenIntent>>();
-  const savedIntents = new Map<string, Set<HiddenIntent>>();
-  function reconcileIntents(slot: Slot): void {
-    for (const [kind, map] of [
-      ['needs', needsIntents],
-      ['saved', savedIntents],
-    ] as const) {
-      const items = kind === 'needs' ? slot.entry.needs : slot.entry.saved;
-      if (!items) continue;
-      const present = new Set(items.map((item) => item.messageId));
-      for (const intent of map.get(slot.key) ?? []) {
-        if (!intent.settled) continue;
-        for (const id of intent.ids) if (!present.has(id)) intent.ids.delete(id);
-        if (!intent.ids.size) map.get(slot.key)?.delete(intent);
-      }
-    }
-  }
-  function hide(slot: Slot | undefined, ids: Iterable<string>, kind: 'needs' | 'saved') {
-    if (!slot || slot.forgotten)
-      return { settle: () => {}, cancel: () => false, restore: () => false };
-    const map = kind === 'needs' ? needsIntents : savedIntents;
-    const intents = map.get(slot.key) ?? new Set<HiddenIntent>();
-    const intent = { ids: new Set(ids), settled: false };
-    intents.add(intent);
-    map.set(slot.key, intents);
-    notify();
-    let done = false;
-    const cancel = () => {
-      if (done || !active(slot)) return false;
-      done = true;
-      intents.delete(intent);
-      notify();
-      return true;
-    };
-    return {
-      // Success confirms the intent, not a fabricated DTO. Keep it hidden until
-      // a committed read/delta proves the server removed the row.
-      settle: () => {
-        if (done || intent.settled || !active(slot) || slot.forgotten) return;
-        intent.settled = true;
-        reconcileIntents(slot);
-        notify();
-        void (
-          kind === 'needs' ? loadNeedsYouList(slot.workspaceId) : loadSavedList(slot.workspaceId)
-        ).catch(() => undefined);
-      },
-      cancel,
-      restore: cancel,
-    };
-  }
-  export function removeNeedsYou(workspaceId: string, messageIds: Iterable<string>) {
-    return hide(current(workspaceId), messageIds, 'needs');
-  }
-  function hidden(slot: Slot | undefined, kind: 'needs' | 'saved'): ReadonlySet<string> {
-    const ids = new Set<string>();
-    if (slot)
-      for (const intent of (kind === 'needs' ? needsIntents : savedIntents).get(slot.key) ?? [])
-        for (const id of intent.ids) ids.add(id);
-    return ids;
-  }
-  export function subscribeTrayGap(
-    workspaceId: string,
-    read: (reason: string) => void,
-  ): () => void {
-
-    const readers = trayReaders.get(workspaceId) ?? new Set<(reason: string) => void>();
-    readers.add(read);
-    trayReaders.set(workspaceId, readers);
-    return () => {
-      readers.delete(read);
-      if (!readers.size) trayReaders.delete(workspaceId);
-    };
   }
   const subscribe = (listener: () => void) => {
     listeners.add(listener);
@@ -775,35 +542,6 @@ namespace TrayReads {
       listeners.delete(listener);
     };
   };
-  function useEntry(workspaceId: string | null | undefined, enabled = true): Entry {
-    useEffect(() => {
-      if (enabled) void resolveViewer();
-    }, [enabled]);
-    const observe = useCallback(
-      (listener: () => void) => (enabled ? subscribe(listener) : () => {}),
-      [enabled],
-    );
-    useSyncExternalStore(observe, () => revision);
-    return enabled && workspaceId ? (current(workspaceId)?.entry ?? EMPTY) : EMPTY;
-  }
-  const EMPTY_SAVED: readonly MessageBookmarkView[] = [];
-  const visibleNeeds = (entry: Entry, workspaceId: string) => {
-    const ids = hidden(current(workspaceId), 'needs');
-    return ids.size
-      ? (entry.needs?.filter((item) => !ids.has(item.messageId)) ?? null)
-      : entry.needs;
-  };
-  export function useTrayList(workspaceId: string | null | undefined, enabled = true) {
-    const entry = useEntry(workspaceId, (enabled));
-    const ids = hidden(workspaceId ? current(workspaceId) : undefined, 'saved');
-    return {
-      needs: workspaceId ? visibleNeeds(entry, workspaceId) : null,
-      bookmarks: ids.size
-        ? (entry.saved?.filter((item) => !ids.has(item.messageId)) ?? EMPTY_SAVED)
-        : (entry.saved ?? EMPTY_SAVED),
-      next: entry.next,
-    };
-  }
   function refreshProjection(slot: Slot): Promise<readonly NeedsYouItemView[]> {
     return (slot.projectionRead ??= loadNeedsYouList(slot.workspaceId).then(
       (items) => {
@@ -811,7 +549,6 @@ namespace TrayReads {
         // A second gap during the read needs a newer read, still without blanking.
         if (
           active(slot) &&
-          !slot.forgotten &&
           slot.needsStale &&
           badgeReaders.has(slot.workspaceId)
         )
@@ -829,17 +566,21 @@ namespace TrayReads {
     refreshKey: unknown,
     visible?: () => boolean,
   ) {
-    const subscribeCount = useCallback((listener: () => void) =>
-      workspaceId && refreshKey !== undefined ? subscribe(listener) : () => {},
-    [workspaceId, refreshKey === undefined]);
+    const subscribeCount = useCallback(
+      (listener: () => void) =>
+        workspaceId && refreshKey !== undefined ? subscribe(listener) : () => {},
+      [workspaceId, refreshKey === undefined],
+    );
     const snapshot = useCallback(() => {
       if (!workspaceId) return 0;
       const entry = current(workspaceId)?.entry;
-      return entry ? (visibleNeeds(entry, workspaceId)?.length ?? 0) : 0;
+      return entry ? (entry.needs?.length ?? 0) : 0;
     }, [workspaceId]);
     const count = useSyncExternalStore(subscribeCount, snapshot, () => 0);
     const generation = useSyncExternalStore(subscribeClientReset, clientResetGeneration);
-    useEffect(() => { void resolveViewer(); }, []);
+    useEffect(() => {
+      void resolveViewer();
+    }, []);
     useEffect(() => {
       if (!workspaceId || refreshKey === undefined) return;
       badgeReaders.set(workspaceId, (badgeReaders.get(workspaceId) ?? 0) + 1);
@@ -850,58 +591,22 @@ namespace TrayReads {
       };
     }, [workspaceId, refreshKey]);
     useEffect(() => {
-      if (!workspaceId || refreshKey === undefined || visible && !visible()) return;
+      if (!workspaceId || refreshKey === undefined || (visible && !visible())) return;
       let cancelled = false;
       void (async () => {
         const slot = slotFor(await resolveViewer(), workspaceId);
         if (cancelled || !active(slot) || (slot.entry.needs && !slot.needsStale)) return;
-        try { await refreshProjection(slot); } catch { /* Keep the cached count. */ }
+        try {
+          await refreshProjection(slot);
+        } catch {
+          /* Keep the cached count. */
+        }
       })();
-      return () => { cancelled = true; };
+      return () => {
+        cancelled = true;
+      };
     }, [workspaceId, refreshKey, count, generation]);
     return count;
-  }
-
-  /** Called only for viewable question cells in the focused Tray, after paint. */
-  export async function acknowledgePaintedNeedsYou(
-    workspaceId: string,
-    messageIds: readonly string[],
-  ): Promise<void> {
-
-    const slot = current(workspaceId);
-    if (!slot || slot.forgotten) return;
-    const ids = [...new Set(messageIds)].filter(
-      (id) =>
-        !slot.seen?.has(id) &&
-        !slot.seeing?.has(id) &&
-        slot.entry.needs?.some(
-          (item) => item.messageId === id && !item.approval && item.expiresAt === undefined,
-        ),
-    );
-    if (!ids.length) return;
-    slot.seeing ??= new Set();
-    ids.forEach((id) => slot.seeing!.add(id));
-    try {
-      const { seen } = await monolithPhoneOperation('markNeedsYouSeen', {
-        workspaceId,
-        messageIds: ids,
-      });
-      if (!active(slot) || slot.forgotten) return;
-      slot.seen ??= new Set();
-      seen.forEach((item) => slot.seen!.add(item.messageId));
-      const expiry = new Map(seen.map((item) => [item.messageId, item.expiresAt]));
-      const apply = (entry: Entry): Entry => ({
-        ...entry,
-        needs:
-          entry.needs?.map((item) =>
-            expiry.has(item.messageId) ? { ...item, expiresAt: expiry.get(item.messageId)! } : item,
-          ) ?? null,
-      });
-      changed(slot, { at: 0, kind: 'needs', apply });
-      write(slot, apply(slot.entry));
-    } finally {
-      ids.forEach((id) => slot.seeing?.delete(id));
-    }
   }
 }
 
@@ -910,20 +615,12 @@ export const liveChatList = ChatReads.liveChatList;
 export const chatListSnapshot = ChatReads.chatListSnapshot;
 export const refreshChatList = ChatReads.refreshChatList;
 export const resetChatListStoresForTest = ChatReads.reset;
-export const loadNeedsYouList = TrayReads.loadNeedsYouList;
-export const loadTrayList = TrayReads.loadTrayList;
 /** @public The phone list-store bootstrap imports this owner operation. */
 export const seedNeedsYouList = TrayReads.seedNeedsYouList;
-export const forgetTray = TrayReads.forgetTray;
-export const removeNeedsYou = TrayReads.removeNeedsYou;
-export const subscribeTrayGap = TrayReads.subscribeTrayGap;
-export const useTrayList = TrayReads.useTrayList;
 export const useNeedsYouCount = TrayReads.useNeedsYouCount;
-export const acknowledgePaintedNeedsYou = TrayReads.acknowledgePaintedNeedsYou;
 
 /** Existing Forward gesture only. All other consumers attach observations. */
 export function readChatList(key: ChatListKey): Promise<ChatListView> {
-
   return new Promise((resolve, reject) => {
     let handle: ChatListHandle | undefined;
     let stop: (() => void) | undefined;

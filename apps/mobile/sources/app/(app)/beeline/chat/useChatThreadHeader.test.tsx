@@ -1,3 +1,4 @@
+vi.mock('@/buzz/work-board-store',()=>({useRecordedWorkItem:()=>null}));
 import React from 'react';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create } from 'react-test-renderer';

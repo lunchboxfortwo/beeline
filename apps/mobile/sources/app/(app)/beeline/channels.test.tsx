@@ -575,7 +575,7 @@ const scope5 = fixtureScope5();
     deck.chatsResponse = listOf([
       room('room-a', 10, {
         cornerCount: 1,
-        openCorners: [{ id: 'corner-1', name: 'fix', state: 'working', mine: true, lastActivityAt: Math.floor(Date.now() / 1000) }],
+        openCorners: [{ id: 'corner-1', name: 'fix', state: 'waiting', mine: true, lastActivityAt: Math.floor(Date.now() / 1000) }],
       }),
     ]);
     const renderer = await mountDeck();
@@ -727,17 +727,18 @@ describe('Room deck live path', () => {
   });
 
 
-  it('nests up to three active threads under the chat, expands the rest in place, and opens one', async () => {
+  it('shows every blocked thread without the former three-thread limit and opens one', async () => {
     deck.renderRows = true;
     deck.chatsResponse = listOf([
       room('room-a', 10, {
-        cornerCount: 4,
+        cornerCount: 8,
         openCorners: [
           { id: 'corner-1', name: 'one', state: 'working', lastActivityAt: Math.floor(Date.now() / 1000) },
           { id: 'corner-2', name: 'two', state: 'idle', lastActivityAt: Math.floor(Date.now() / 1000) },
           { id: 'corner-3', name: 'three', state: 'review', mine: true, lastActivityAt: Math.floor(Date.now() / 1000) },
           { id: 'corner-4', name: 'four', state: 'waiting', mine: true, lastActivityAt: Math.floor(Date.now() / 1000),
             blocker: { kind: 'report', personId: 'viewer', personName: 'Captain' } },
+          ...['five','six','seven','eight'].map((name,index)=>({id:`corner-${index+5}`,name,state:'waiting' as const,workState:'needs-you' as const,blocker:{kind:'report' as const,personId:'viewer',personName:'Captain'}})),
         ],
       }),
     ]);
@@ -745,10 +746,8 @@ describe('Room deck live path', () => {
     const threads = () => renderer.root
       .findAll((node: any) => node.type === 'ListItem' && node.props.testID?.startsWith('thread-row-'))
       .map((node: any) => node.props['aria-label']);
-    // Waiting on you first, then the viewer's own, then the rest.
-    expect(threads()).toEqual(['Thread four, waiting on you', 'Thread three, review', 'Thread one, working']);
-    act(() => renderer.root.find((node: any) => node.type === 'ListItem' && node.props.testID === 'more-room-a').props.onPress());
-    expect(threads()).toHaveLength(4);
+    expect(threads()).toEqual(['four','five','six','seven','eight'].map(name=>`Thread ${name}, waiting on you`));
+    expect(renderer.root.findAllByProps({testID:'more-room-a'})).toHaveLength(0);
     act(() => renderer.root.find((node: any) => node.type === 'ListItem' && node.props.testID === 'thread-row-corner-4').props.onPress());
     expect(router.push).toHaveBeenCalledWith({
       pathname: '/beeline/chat/[channelId]',

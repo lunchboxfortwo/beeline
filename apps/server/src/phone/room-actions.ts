@@ -123,9 +123,10 @@ import { PhoneService } from '../phone-service.js';
 
   export async function phoneAnswerChoice(ctx: PhoneContext, input: Input<'answerChoice'>, viewerId: string) {
     return ctx.database.transaction(async database => {
-      return (await settleWorkflowGate(database, {
+      const result = await ((await settleWorkflowGate(database, {
         choiceId: input.choiceId, optionId: input.optionId, viewerId, note: input.note,
-      })) ?? answerRoomChoice(database, { choiceId: input.choiceId, optionId: input.optionId, viewerId, note: input.note });
+      })) ?? answerRoomChoice(database, { choiceId: input.choiceId, optionId: input.optionId, viewerId, note: input.note }));
+      return result;
     });
   }
 

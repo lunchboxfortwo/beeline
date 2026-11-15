@@ -1,267 +1,154 @@
-import * as React from 'react';
+import React from 'react';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { afterAll, afterEach, beforeAll, beforeEach, vi } from 'vitest';
-
-import TrayScreen from '../../app/(app)/beeline/tray';
-import { useNeedsYouCount } from '@/buzz/needs-you-store';
-import { resetClientState } from '@/sync/client-reset';
-
-/**
- * Tags (`/beeline/tray`) under test: Tamagui and lucide render as named hosts
- * (`ui/screens/transcript/grammar-hosts.test-support.ts`), phone operations
- * are answered by name, and the live socket is a set of listeners the test
- * drives. The needs-you store under it is the real one.
- */
-
-vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
-vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
-
-vi.mock('@/buzz/router-chat-list', () => ({
-  acquireRoutedChatList: (_key: unknown, _consumer: unknown, legacy: () => unknown) => legacy(),
-}));
-
-const layout = vi.hoisted(() => ({ desktop: false }));
-export { layout };
-vi.mock('@/utils/responsive', () => ({ useIsDesktop: () => layout.desktop }));
-
-const appState = vi.hoisted(() => ({ current: 'active' }));
-export { appState };
-
-vi.mock('react-native', async () => {
-  const ReactModule = await import('react');
-  const host = (name: string) => (props: any) => ReactModule.createElement(name, props, props.children);
+import { afterEach, beforeEach, vi } from 'vitest';
+import type { WorkBoardView, WorkItemView } from '@beeline/api-contract/phone';
+import TrayScreen from '@/app/(app)/beeline/tray';
+vi.mock('tamagui', async () =>
+  (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts(),
+);
+vi.mock('lucide-react-native', async () =>
+  (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts(),
+);
+vi.mock('@/ui/grammar', async () => {
+  const { createElement } = await import('react');
   return {
-    AccessibilityInfo: { announceForAccessibility: vi.fn() },
-    AppState: {
-      get currentState() {
-        return appState.current;
-      },
-      addEventListener: () => ({ remove: () => undefined }),
-    },
-    // Every item is painted and viewable, as a short list on a phone is.
-    FlatList: (props: any) => {
-      ReactModule.useEffect(() => {
-        props.onViewableItemsChanged?.({
-          viewableItems: (props.data ?? []).map((item: unknown) => ({ item, isViewable: true })),
-        });
-      }, [props.data]);
-      return ReactModule.createElement(
-        'FlatList',
-        props,
-        (props.data ?? []).length ? null : props.ListEmptyComponent,
-        ...(props.data ?? []).map((item: any, index: number) =>
-          ReactModule.createElement(ReactModule.Fragment, { key: props.keyExtractor(item, index) },
-            props.renderItem({ item, index }))),
-      );
-    },
-    Platform: { OS: 'ios', select: (choices: Record<string, unknown>) => choices.ios ?? choices.default },
-    Pressable: host('Pressable'),
-    Text: host('Text'),
-    View: host('View'),
-    StyleSheet: { create: (styles: unknown) => styles, hairlineWidth: 1 },
-    useWindowDimensions: () => ({ width: 390, height: 844 }),
+    T: (p: any) => createElement('Text', p, p.children),
+    Copy: (p: any) => createElement('Text', p, p.children),
+    Glyph: (p: any) => createElement('Glyph', p),
+    Btn: (p: any) => createElement('Button', { 'aria-label': p.label, ...p }, p.children),
   };
 });
-
-const navigation = vi.hoisted(() => ({ back: vi.fn(), push: vi.fn(), replace: vi.fn() }));
-export { navigation };
-
-const route = vi.hoisted(() => ({
-  params: { communityId: 'ws', workspaceName: 'Beeline Work' } as { communityId?: string; workspaceName?: string },
+vi.mock('@/components/buzz/IdentityMark', () => ({
+  IdentityMark: (p: any) => React.createElement('Avatar', p),
 }));
-export { route };
-
+vi.mock('@/components/buzz/SurfaceGlyphLoader', () => ({
+  SurfaceGlyphLoader: () => React.createElement('Loader'),
+}));
+const state = vi.hoisted(() => ({
+  board: null as WorkBoardView | null,
+  desktop: false,
+  workspace: 'ws',
+  push: vi.fn(),
+  operation: vi.fn(async () => undefined),
+  reply: vi.fn(async () => true),
+  load: vi.fn(async () => undefined),
+}));
+export { state };
+vi.mock('@/buzz/work-board-reply', () => ({ sendWorkReply: state.reply }));
+vi.mock('@/buzz/work-board-store', () => ({
+  useWorkBoard: () => state.board,
+  useWorkBoardUnavailable: () => false,
+  loadWorkBoard: state.load,
+}));
+vi.mock('@/utils/responsive', () => ({ useIsDesktop: () => state.desktop }));
+vi.mock('@/buzz/use-active-community', () => ({ useActiveCommunityId: () => state.workspace }));
+vi.mock('@/buzz/latency-route-hook', () => ({ useLatencyRouteFrame: () => undefined }));
+vi.mock('@/buzz/corner-navigation', () => ({
+  messageJumpHref: (roomId: string, messageId: string) => ({ roomId, messageId }),
+  navigateToRoom: (_router: unknown, roomId: string) => state.push({ roomId }),
+}));
+vi.mock('@/push/push-room-prefetch', () => ({ prefetchPushRoom: () => undefined }));
+vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: state.operation }));
+vi.mock('@/buzz/app-error-copy', () => ({ appErrorCopy: (e: Error) => e.message }));
+vi.mock('@/utils/open-external-url', () => ({ openExternalUrl: vi.fn(async () => undefined) }));
 vi.mock('expo-router', () => ({
-  useFocusEffect: (effect: () => void | (() => void)) => React.useEffect(effect, [effect]),
-  useLocalSearchParams: () => route.params,
-  useRouter: () => navigation,
-  router: navigation,
+  useLocalSearchParams: () => ({ communityId: 'ws' }),
+  useRouter: () => ({ push: state.push }),
 }));
-
-vi.mock('react-native-safe-area-context', () => ({
-  useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
+vi.mock('@/ui/shell/TabHeader', () => ({
+  TabHeader: (p: any) => React.createElement('Header', p),
+  TabRail: (p: any) => React.createElement('Rail', p, p.children),
+  useScrolledUnder: () => ({ scrolled: false }),
 }));
-
-const auth = vi.hoisted(() => ({
-  getEffectiveRelayUrl: vi.fn(async () => 'https://relay.test'),
-  loadBuzzIdentity: vi.fn(async () => ({ publicKey: 'viewer' })),
-}));
-export { auth };
-vi.mock('@/auth/buzz-identity-storage', () => auth);
-
-const workspaceSet = vi.hoisted(() => ({ active: null as string | null }));
-export { workspaceSet };
-vi.mock('@/buzz/community-storage', () => ({
-  loadActiveCommunityId: vi.fn(async () => workspaceSet.active),
-  watchActiveCommunityId: vi.fn((_pubkey: string, listener: (id: string | null) => void) => {
-    void Promise.resolve(workspaceSet.active).then(listener);
-    return () => undefined;
-  }),
-}));
-
-vi.mock('@/buzz/surface-storage', () => ({
-  surfaceAddress: (_relay: string, _viewer: string, endpoint: string) => endpoint,
-  mobileSurfaceCache: {
-    read: vi.fn(async () => null),
-    write: vi.fn(async () => undefined),
-    remove: vi.fn(async () => undefined),
-  },
-}));
-
-const phoneOperation = vi.hoisted(() => vi.fn());
-export { phoneOperation };
-vi.mock('@/sync/transport/monolith-operation', () => ({
-  monolithPhoneOperation: phoneOperation,
-  readServerSurface: (_authority: unknown, ...args: unknown[]) => phoneOperation(...args),
-}));
-
-const liveRegistrations = vi.hoisted(() => new Set<(event: unknown) => void>());
-export { liveRegistrations };
-vi.mock('@/sync/transport/live-connection', () => ({
-  sharedLiveConnection: () => ({
-    register: async (_filters: unknown, listener: (event: unknown) => void) => {
-      liveRegistrations.add(listener);
-      return () => liveRegistrations.delete(listener);
-    },
-  }),
-}));
-
-const openExternal = vi.hoisted(() => vi.fn(async () => undefined));
-export { openExternal };
-vi.mock('@/utils/open-external-url', () => ({ openExternalUrl: openExternal }));
-
-const prefetchRoom = vi.hoisted(() => vi.fn());
-export { prefetchRoom };
-vi.mock('@/push/push-room-prefetch', () => ({ prefetchPushRoom: prefetchRoom }));
-
-const viewer = vi.hoisted(() => ({ open: vi.fn() }));
-export { viewer };
-vi.mock('@/components/buzz/ArtifactCard', () => ({ openArtifactViewer: viewer.open }));
-vi.mock('@/buzz/artifact-link', () => ({
-  artifactImageSource: vi.fn(async () => ({ uri: 'blob:shot' })),
-  releaseArtifactImageSource: vi.fn(),
-}));
-
-vi.mock('@/components/buzz/SurfaceGlyphLoader', async () => {
-  const ReactModule = await import('react');
-  return { SurfaceGlyphLoader: (props: any) => ReactModule.createElement('SurfaceGlyphLoader', props) };
-});
-
-export const person = { pubkey: 'person-1', kind: 'human' as const, name: 'Maya', handle: 'maya' };
-
-/** One Needs-you cell as the server projects it. */
-export function need(overrides: Record<string, unknown> = {}) {
+export const human = { pubkey: 'person', kind: 'human' as const, name: 'Ada' };
+export const agent = { pubkey: 'agent', kind: 'agent' as const, name: 'Jellybean' };
+export function task(p: Partial<WorkItemView> = {}): WorkItemView {
   return {
-    messageId: 'ask-1',
-    workspaceId: 'ws',
-    roomId: 'room-1',
-    roomName: 'paperband',
-    roomKind: 'room' as const,
-    text: '@Dan, can you check the snapshot labels?',
-    createdAt: 1_700_000_000,
-    author: person,
-    ...overrides,
+    id: 'thread',
+    roomId: 'thread',
+    chatId: 'chat',
+    chatName: 'beeline',
+    threadName: 'latency-coverage',
+    title: 'Measure phone reply latency',
+    state: 'in-progress',
+    priority: 'high',
+    openedBy: human,
+    assignee: agent,
+    createdAt: 1,
+    updatedAt: 2,
+    ...p,
   };
 }
-
-/** The server: reads see `server.needs`; decisions are recorded and answered. */
-export function serve(server: { needs: unknown[]; refuse?: string }) {
-  phoneOperation.mockImplementation(async (name: string, input: { messageId?: string; messageIds?: string[] }) => {
-    if (name === 'readTray') return { needs: { items: server.needs }, saved: { bookmarks: [] } };
-    if (name === 'readNeedsYou') return { items: server.needs };
-    if (name === 'countNeedsYou') return { count: server.needs.length };
-    // The server starts each painted question's 24-hour clock once.
-    if (name === 'markNeedsYouSeen')
-      return { seen: (input.messageIds ?? []).map((messageId) => ({ messageId, expiresAt: 1_700_086_400 })) };
-    if (server.refuse === name) throw new Error('refused');
-    if (name === 'clearNeedsYou')
-      server.needs = server.needs.filter((item: any) => item.messageId !== input.messageId);
-    return undefined;
+export function ask(p: Partial<WorkItemView> = {}): WorkItemView {
+  return task({
+    id: 'ask',
+    state: 'needs-you',
+    assignee: human,
+    messageId: 'ask',
+    ask: {
+      messageId: 'ask',
+      workspaceId: 'ws',
+      roomId: 'thread',
+      roomName: 'latency-coverage',
+      parentRoomName: 'beeline',
+      roomKind: 'corner',
+      createdAt: 1,
+      text: 'Which surface should Jellybean measure next?',
+      author: agent,
+    },
+    ...p,
   });
-  return server;
 }
-
-export const calls = (name: string) => phoneOperation.mock.calls.filter(([called]) => called === name);
-
-export function deliver(delta: unknown) {
-  for (const listener of [...liveRegistrations]) listener({ monolithLive: delta });
+export function serve(items: WorkItemView[]) {
+  state.board = {
+    workspaceId: 'ws',
+    workspaceName: 'Tubing Crew',
+    viewerId: 'person',
+    items,
+    chats: [
+      { id: 'chat', name: 'beeline' },
+      { id: 'milo', name: 'Milo' },
+    ],
+    people: [agent, human],
+  };
 }
-
-/** Text drawn by `T` hosts, flattened. */
-export function textOf(tree: ReactTestRenderer): string {
-  return tree.root
-    .findAll((node: any) => node.type === 'Text')
-    .flatMap((node: any) => [node.props.children].flat(Infinity))
-    .filter((part: unknown) => typeof part === 'string')
-    .join(' ')
-    .replace(/\s+/g, ' ');
-}
-
-export const byTestId = (tree: ReactTestRenderer, testID: string) =>
-  tree.root.find((node: any) => node.props.testID === testID && typeof node.type === 'string');
-export const hasTestId = (tree: ReactTestRenderer, testID: string) =>
-  tree.root.findAll((node: any) => node.props.testID === testID && typeof node.type === 'string').length > 0;
-
-export async function press(tree: ReactTestRenderer, testID: string) {
-  await act(async () => {
-    await byTestId(tree, testID).props.onPress?.({ stopPropagation() {} });
-  });
-  await act(async () => undefined);
-}
-
-/** The Tags count a list or sidebar paints beside an optionally mounted Tags screen. */
-function BadgeAndTags({ tags }: { tags: boolean }) {
-  const count = useNeedsYouCount('ws', 1);
-  return (
-    <>
-      {React.createElement('Badge', { testID: 'badge', count })}
-      {tags ? <TrayScreen /> : null}
-    </>
-  );
-}
-export const badge = (tree: ReactTestRenderer) => byTestId(tree, 'badge').props.count as number;
-
 const mounted: ReactTestRenderer[] = [];
-
-export async function renderTags(withBadge = false): Promise<ReactTestRenderer> {
+export async function renderTags() {
   let tree!: ReactTestRenderer;
   await act(async () => {
-    tree = create(withBadge ? <BadgeAndTags tags /> : <TrayScreen />);
+    tree = create(<TrayScreen />);
   });
   mounted.push(tree);
-  await act(async () => undefined);
-  await act(async () => undefined);
   return tree;
 }
-
-beforeAll(() => {
-  vi.stubGlobal('requestAnimationFrame', (callback: () => void) => setTimeout(callback, 0));
-  vi.stubGlobal('cancelAnimationFrame', clearTimeout);
-  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  vi.spyOn(console, 'error').mockImplementation(() => undefined);
-});
-
-afterAll(() => vi.restoreAllMocks());
-
+export function byLabel(tree: ReactTestRenderer, label: string) {
+  return tree.root.find((n: any) => typeof n.type === 'string' && n.props['aria-label'] === label);
+}
+export async function press(tree: ReactTestRenderer, label: string) {
+  await act(async () => {
+    await byLabel(tree, label).props.onPress({ stopPropagation() {} });
+  });
+}
+export function textOf(tree: ReactTestRenderer) {
+  return tree.root
+    .findAll((n: any) => n.type === 'Text')
+    .flatMap((n: any) => [n.props.children].flat(Infinity))
+    .filter((v: unknown) => typeof v === 'string' || typeof v === 'number')
+    .join(' ');
+}
 beforeEach(() => {
-  liveRegistrations.clear();
-  resetClientState();
-  auth.loadBuzzIdentity.mockImplementation(async () => ({ publicKey: 'viewer' }));
-  layout.desktop = false;
-  appState.current = 'active';
-  navigation.back.mockReset();
-  navigation.push.mockReset();
-  navigation.replace.mockReset();
-  route.params = { communityId: 'ws', workspaceName: 'Beeline Work' };
-  workspaceSet.active = null;
-  phoneOperation.mockReset();
-  openExternal.mockClear();
-  prefetchRoom.mockReset();
-  viewer.open.mockReset();
-  serve({ needs: [] });
+  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+  state.desktop = false;
+  state.board = null;
+  state.reply.mockReset();
+  state.reply.mockResolvedValue(true);
+  state.operation.mockReset();
+  state.operation.mockResolvedValue(undefined);
+  state.load.mockClear();
+  state.push.mockClear();
 });
-
 afterEach(async () => {
   for (const tree of mounted.splice(0)) await act(async () => tree.unmount());
 });
+export { act };

@@ -1,3 +1,5 @@
+import { WORK_BOARD_ACTION_TOOLS } from './work-board-action-tools.js';
+import { WORK_QUESTION_PATTERN, WORK_OPTION_PATTERN } from '@beeline/api-contract/phone';
 import { COMMAND_SECRET_NAME } from '@beeline/api-contract/agent-grants';
 import { ARTIFACT_MIME_TYPES,INSTITUTIONAL_HISTORY_QUERY_SCHEMA,INSTITUTIONAL_HISTORY_RESULT_MAX,INSTITUTIONAL_HISTORY_RESULT_MIN,INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS } from '@beeline/api-contract/daemon';
 import { HOST_EMULATOR_RULE } from './host-emulator.js';
@@ -5,6 +7,13 @@ import { ToolDefinition } from './minimal-tool-surface.js';
 
 
 export const ORDINARY_TOOLS: ToolDefinition[] = [
+  ...WORK_BOARD_ACTION_TOOLS,
+  {name:'ask_owner',description:'Ask your owner one short question about a typed thread, PR or request. It appears in Needs you; their answer quotes the source in that conversation. Shorten question to 20 words and each option to 3 words. Give 2–4 options (one may be recommended) or freeText:true. The returned messageId is also the question task id for update_work. Never use a choice as merge or spending authority.',inputSchema:{type:'object',additionalProperties:false,required:['about','question'],properties:{
+    about:{type:'object',additionalProperties:false,required:['kind','roomId'],properties:{kind:{enum:['thread','pr','request']},roomId:{type:'string'},messageId:{type:'string'}},oneOf:[{properties:{kind:{const:'request'}},required:['messageId']},{properties:{kind:{enum:['thread','pr']}}}]},
+    question:{type:'string',pattern:WORK_QUESTION_PATTERN},
+    options:{type:'array',minItems:2,maxItems:4,items:{type:'object',additionalProperties:false,required:['label'],properties:{label:{type:'string',pattern:WORK_OPTION_PATTERN},recommended:{type:'boolean'}}}},
+    freeText:{type:'boolean'}},oneOf:[{required:['options'],not:{required:['freeText']}},{required:['freeText'],not:{required:['options']}}]}},
+  {name:'update_work',description:'Create or update a work item for a thread. Pass id to edit a particular task or question; omit it for the thread task. Any member agent may set state, priority or its single assignee (who has the ball); null unassigns. This changes the board, not agent command authority.',inputSchema:{type:'object',additionalProperties:false,required:['roomId'],properties:{id:{type:'string'},roomId:{type:'string'},title:{type:'string'},state:{enum:['needs-you','in-progress','in-review','backlog','done']},priority:{enum:['urgent','high','medium','low','none']},assigneeId:{anyOf:[{type:'string'},{type:'null'}]}}}},
   {
     "name": "read",
     "description": "Discover with facet addresses; read bounded messages with facet messages, address and cursor. Other facets use messageId, attachmentId or slug. attachmentId alone works for a file the caller can see. Message reads default to newest first. Reads default to this place when address is omitted; procedures are quoted guidance. Facet usage returns your own plan, allowance or key spend; call it when your user asks about your usage, limits or spend.",
