@@ -20,6 +20,69 @@ CREATE INDEX IF NOT EXISTS work_items_room_idx ON work_items(room_id);
 CREATE INDEX IF NOT EXISTS work_items_source_idx ON work_items(source_message_id);
 CREATE INDEX IF NOT EXISTS work_items_assignee_idx ON work_items(assignee_id);
 CREATE INDEX IF NOT EXISTS work_items_opener_idx ON work_items(opened_by);
+CREATE TABLE IF NOT EXISTS work_item_attachments (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  work_item_id text NOT NULL REFERENCES work_items(id) ON DELETE CASCADE,
+  kind text NOT NULL CHECK (kind IN ('file','link')),
+  name text NOT NULL,
+  url text,
+  object_id uuid REFERENCES objects(id) ON DELETE CASCADE,
+  added_by text NOT NULL REFERENCES identities(id),
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  CHECK ((kind='file' AND object_id IS NOT NULL AND url IS NULL)
+    OR (kind='link' AND url IS NOT NULL AND object_id IS NULL))
+);
+CREATE INDEX IF NOT EXISTS work_item_attachments_item_idx ON work_item_attachments(work_item_id,created_at DESC,id DESC);
+CREATE INDEX IF NOT EXISTS work_item_attachments_object_idx ON work_item_attachments(object_id);
+CREATE INDEX IF NOT EXISTS work_item_attachments_author_idx ON work_item_attachments(added_by);
+CREATE TABLE IF NOT EXISTS work_item_entries (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  work_item_id text NOT NULL REFERENCES work_items(id) ON DELETE CASCADE,
+  author_id text NOT NULL REFERENCES identities(id),
+  kind text NOT NULL CHECK (kind IN ('note','event')),
+  text text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+CREATE INDEX IF NOT EXISTS work_item_entries_item_idx ON work_item_entries(work_item_id,created_at DESC,id DESC);
+CREATE INDEX IF NOT EXISTS work_item_entries_author_idx ON work_item_entries(author_id);
+-- All server write paths, including answered asks, record actual transitions atomically.
+CREATE OR REPLACE FUNCTION beeline_work_item_entry() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE actor text := COALESCE(NULLIF(current_setting('beeline.work_actor',true),''),NEW.opened_by);
+BEGIN
+  IF TG_OP='INSERT' THEN
+    INSERT INTO work_item_entries(work_item_id,author_id,kind,text)
+      VALUES(NEW.id,actor,'event','created this item in ' || CASE NEW.state
+        WHEN 'backlog' THEN 'Backlog' WHEN 'done' THEN 'Done' WHEN 'needs-you' THEN 'Needs you'
+        WHEN 'in-review' THEN 'In review' ELSE 'In progress' END);
+  ELSIF NEW.state IS DISTINCT FROM OLD.state THEN
+    INSERT INTO work_item_entries(work_item_id,author_id,kind,text)
+      VALUES(NEW.id,actor,'event','moved this to ' || CASE NEW.state
+        WHEN 'backlog' THEN 'Backlog' WHEN 'done' THEN 'Done' WHEN 'needs-you' THEN 'Needs you'
+        WHEN 'in-review' THEN 'In review' ELSE 'In progress' END);
+  END IF;
+  IF (TG_OP='INSERT' AND NEW.assignee_id IS NOT NULL)
+    OR (TG_OP='UPDATE' AND NEW.assignee_id IS DISTINCT FROM OLD.assignee_id) THEN
+    INSERT INTO work_item_entries(work_item_id,author_id,kind,text)
+      VALUES(NEW.id,actor,'event',CASE WHEN NEW.assignee_id IS NULL THEN 'unassigned this item'
+        ELSE 'assigned this to ' || (SELECT name FROM identities WHERE id=NEW.assignee_id) END);
+  END IF;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS work_item_entry ON work_items;
+CREATE TRIGGER work_item_entry AFTER INSERT OR UPDATE OF state,assignee_id ON work_items
+  FOR EACH ROW EXECUTE FUNCTION beeline_work_item_entry();
+-- Detail commits reuse the work item's existing cross-machine invalidation.
+CREATE OR REPLACE FUNCTION beeline_work_detail_changed() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  UPDATE work_items SET updated_at=clock_timestamp() WHERE id=NEW.work_item_id;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS work_attachment_changed ON work_item_attachments;
+CREATE TRIGGER work_attachment_changed AFTER INSERT ON work_item_attachments
+  FOR EACH ROW EXECUTE FUNCTION beeline_work_detail_changed();
+DROP TRIGGER IF EXISTS work_note_changed ON work_item_entries;
+CREATE TRIGGER work_note_changed AFTER INSERT ON work_item_entries
+  FOR EACH ROW WHEN (NEW.kind='note') EXECUTE FUNCTION beeline_work_detail_changed();
 CREATE TABLE IF NOT EXISTS work_questions (
   message_id text PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
   room_id uuid NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,

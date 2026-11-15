@@ -130,6 +130,8 @@ export type PhoneOperationMap = PhoneRouteOperationMap & {
   /** Needs-you rows. Legacy reads mark seen; markSeen:false previews without starting expiry. */
   readNeedsYou: { input: WorkspaceInput & { readonly markSeen?: boolean }; output: NeedsYouListResult };
   readWorkBoard: { input: WorkspaceInput; output: import('./work-board.js').WorkBoardView };
+  addWorkNote: { input: import('./work-board.js').AddWorkNoteInput; output: void };
+  attachToWorkItem: { input: import('./work-board.js').AttachToWorkItemInput; output: void };
   updateWorkItem: { input: import('./work-board.js').UpdateWorkItemInput; output: void };
   readTray: { input: WorkspaceInput & { readonly markSeen?: boolean }; output: {
     readonly needs?: NeedsYouListResult; readonly saved?: MessageBookmarkListResult;

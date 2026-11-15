@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Input, ListItem, ScrollView, XStack, YStack } from 'tamagui';
 import { ChevronDown, ChevronRight, Filter, X } from 'lucide-react-native';
 import type {
@@ -8,9 +8,9 @@ import type {
   WorkItemView,
 } from '@beeline/api-contract/phone';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
-import { compactRelativeTime } from '@/buzz/relative-time';
-import { Btn, Glyph, HEIGHT, SheetFrame, T } from '@/ui/grammar';
+import { Btn, Glyph, HEIGHT, T } from '@/ui/grammar';
 import { TabHeader, useScrolledUnder } from '@/ui/shell/TabHeader';
+import { WorkSheet } from './WorkItemDetail';
 import { WorkStateMark } from './WorkMarks';
 
 export type WorkBoardActions = {
@@ -292,122 +292,6 @@ function SectionHead({
     </ListItem>
   );
 }
-const STATE_LABEL = {
-  'needs-you': 'Waiting',
-  'in-progress': 'In progress',
-  'in-review': 'In review',
-  backlog: 'Backlog',
-  done: 'Done',
-} as const;
-/** The tap sheet: objective and details live here, never on the row. */
-function WorkSheet({
-  item,
-  people,
-  now,
-  close,
-  actions,
-}: {
-  item: WorkItemView | null;
-  people: readonly RoomViewIdentity[];
-  now: number;
-  close: () => void;
-  actions: WorkBoardActions;
-}) {
-  const [assigning, setAssigning] = useState(false);
-  // The sheet keeps its last item while it slides away.
-  const last = useRef(item);
-  if (item) last.current = item;
-  const shown = last.current;
-  const where = shown ? source(shown) : '';
-  const waiting = !shown
-    ? ''
-    : shown.assignee?.name ??
-      (shown.state === 'backlog' ? 'Nothing · not started' : 'Nobody');
-  const facts: [string, string][] = shown
-    ? [
-        ['Added by', shown.openedBy.name],
-        ['Added in', where],
-        ['Age', compactRelativeTime(shown.createdAt, now)],
-      ]
-    : [];
-  return (
-    <SheetFrame
-      open={Boolean(item)}
-      close={() => {
-        setAssigning(false);
-        close();
-      }}
-      title={shown?.title ?? ''}
-      testID="work-sheet"
-    >
-      {shown ? (
-        <YStack gap="3">
-          <XStack gap="2" alignItems="center">
-            <WorkStateMark state={shown.state} idle={shown.idle} />
-            <T v="meta" color="secondary">
-              {shown.idle ? 'Idle' : STATE_LABEL[shown.state]}
-            </T>
-          </XStack>
-          {shown.objective ? <T testID="work-sheet-objective">{shown.objective}</T> : null}
-          <YStack>
-            {facts.map(([label, value]) => (
-              <XStack
-                key={label}
-                minHeight={44}
-                alignItems="center"
-                gap="3"
-                borderTopWidth={1}
-                borderColor="stroke"
-              >
-                <T v="meta" color="secondary" flex={1}>
-                  {label}
-                </T>
-                <T v="meta">{value}</T>
-              </XStack>
-            ))}
-            <ListItem
-              minHeight={44}
-              padding="0"
-              gap="3"
-              borderTopWidth={1}
-              borderColor="stroke"
-              backgroundColor="transparent"
-              onPress={() => setAssigning(!assigning)}
-              accessibilityRole="button"
-              aria-label="Change assignee"
-              testID="work-sheet-assignee"
-            >
-              <T v="meta" color="secondary" flex={1}>
-                Waiting on
-              </T>
-              <T v="meta">{waiting}</T>
-            </ListItem>
-          </YStack>
-          {assigning ? (
-            <WorkAssigneePicker
-              people={people}
-              onPick={(person) => {
-                setAssigning(false);
-                close();
-                void actions.assign(shown, person?.pubkey ?? null);
-              }}
-            />
-          ) : null}
-          <Btn
-            label={`Open ${where}`}
-            onPress={() => {
-              close();
-              actions.open(shown);
-            }}
-            testID="work-sheet-open"
-          >
-            <T v="body">{`Open ${shown.roomKind === 'corner' ? shown.threadName.replace(/^.*? ↳ /, '') : where}`}</T>
-          </Btn>
-        </YStack>
-      ) : null}
-    </SheetFrame>
-  );
-}
 type Menu = null | 'filter' | 'chat' | 'assignee';
 /** A thread's own row opens that thread; Backlog and other stored tasks open the sheet. */
 const hasThread = (item: WorkItemView) => item.roomKind === 'corner' && item.id === item.roomId;
@@ -656,11 +540,12 @@ export function WorkBoard({
         </YStack>
       ) : null}
       <WorkSheet
-        item={detail}
-        people={board.people}
+        item={detail ? board.items.find(item => item.id === detail.id) ?? detail : null}
+        workspaceId={board.workspaceId}
+        viewerId={board.viewerId}
+        desktop={desktop}
         now={now}
         close={() => setDetail(null)}
-        actions={actions}
       />
     </YStack>
   );

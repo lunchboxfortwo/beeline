@@ -1,3 +1,4 @@
+import { addWorkNote, attachToWorkItem } from '../work-item-detail.js';
 import { readWorkBoard, updateWorkItem } from '../work-board.js';
 import { phoneIdentity as identity } from '../phone-identity.js';
 import { prepareMentionReplyInput } from '../owed-mentions.js';
@@ -178,6 +179,14 @@ import { phoneReadConnectionDetail, phoneRevokeConnectionGrants } from './connec
         return (await phoneReadNeedsYou(ctx, input as Input<'readNeedsYou'>, viewerId)) as Output<Name>;
       case 'readWorkBoard':
         return await readWorkBoard(ctx.database, (input as Input<'readWorkBoard'>).workspaceId, viewerId, ctx.publicOrigin) as Output<Name>;
+      case 'addWorkNote':
+        await addWorkNote(ctx.database, input as Input<'addWorkNote'>, viewerId);
+        ctx.live?.publish({type:'invalidate',roomId:(input as Input<'addWorkNote'>).roomId,reason:'work-board'});
+        return undefined as Output<Name>;
+      case 'attachToWorkItem':
+        await attachToWorkItem(ctx.database, input as Input<'attachToWorkItem'>, viewerId);
+        ctx.live?.publish({type:'invalidate',roomId:(input as Input<'attachToWorkItem'>).roomId,reason:'work-board'});
+        return undefined as Output<Name>;
       case 'updateWorkItem':
         await updateWorkItem(ctx.database, input as Input<'updateWorkItem'>, viewerId);
         ctx.live?.publish({type:'invalidate',roomId:(input as Input<'updateWorkItem'>).roomId,reason:'work-board'});

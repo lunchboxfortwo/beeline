@@ -286,6 +286,8 @@ async function executeResourceTool(name: string, args: JsonObject, toolCallId: s
   };
   switch (name) {
     case 'ask_owner': return execute('ask_owner');
+    case 'add_work_note':
+    case 'attach_to_work_item':
     case 'create_work_item':
     case 'set_work_state':
     case 'assign_work_item':

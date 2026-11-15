@@ -14,6 +14,54 @@ const assigneeId = {
 /** Named actions share the existing work-item write and its committed live invalidation. */
 export const WORK_BOARD_ACTION_TOOLS: ToolDefinition[] = [
   {
+    name: 'add_work_note',
+    description:
+      'Add a plain note to a work item activity stream. Does not send a message or start a turn.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['roomId', 'text'],
+      properties: { ...address, text: { type: 'string' } },
+    },
+  },
+  {
+    name: 'attach_to_work_item',
+    description:
+      'Attach a link or an existing uploaded file to a work item. For files, pass the objectId from the existing media or artifact upload.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['roomId', 'attachment'],
+      properties: {
+        ...address,
+        attachment: {
+          oneOf: [
+            {
+              type: 'object',
+              additionalProperties: false,
+              required: ['kind', 'name', 'url'],
+              properties: {
+                kind: { const: 'link' },
+                name: { type: 'string' },
+                url: { type: 'string' },
+              },
+            },
+            {
+              type: 'object',
+              additionalProperties: false,
+              required: ['kind', 'name', 'objectId'],
+              properties: {
+                kind: { const: 'file' },
+                name: { type: 'string' },
+                objectId: { type: 'string' },
+              },
+            },
+          ],
+        },
+      },
+    },
+  },
+  {
     name: 'create_work_item',
     description:
       'Create a distinct Work board item in a thread, chat or DM. State is optional and defaults to Backlog; pass a state to put it there immediately. The objective says what done looks like; it becomes the thread objective when the work starts. Returns its id for later edits. Any agent with conversation access can create work.',

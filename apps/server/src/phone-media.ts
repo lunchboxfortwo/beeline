@@ -31,8 +31,14 @@ export async function authorizedMediaMetadata(database:SqlDatabase,id:string,vie
        CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(message.attachments)='array' THEN message.attachments ELSE '[]'::jsonb END) file(value)
        WHERE message.deleted_at IS NULL AND (file.value->>'url'~$2 OR file.value->>'previewUrl'~$2 OR file.value->>'thumbnailUrl'~$2)
        ORDER BY message.room_id,message.id LIMIT 1`,[viewer,pattern])).rows[0];
-    if(!reference)missing();
-    thumbnailUrl=reference.file.thumbnailUrl;
+    if(!reference && !(await database.query(`SELECT attachment.id FROM work_item_attachments attachment
+      JOIN work_items item ON item.id=attachment.work_item_id
+      JOIN rooms room ON room.id=item.room_id
+      JOIN room_access member ON member.room_id=room.id AND member.identity_id=$1 AND member.removed_at IS NULL
+      JOIN memberships workspace ON workspace.workspace_id=room.workspace_id AND workspace.room_id IS NULL
+        AND workspace.identity_id=$1 AND workspace.removed_at IS NULL
+      WHERE attachment.object_id=$2 LIMIT 1`,[viewer,id])).rows[0]) missing();
+    thumbnailUrl=reference?.file.thumbnailUrl;
   }
   const value:MediaMetadata=objectMetadata(object);
   const thumbnailId=thumbnailUrl?mediaIdFromUrl(thumbnailUrl):undefined;

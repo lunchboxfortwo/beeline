@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { migratedDatabase, type PgliteDatabase } from './test-support.js';
+import { readMediaMetadata } from './phone-media.js';
 import { PhoneService } from './phone-service.js';
 import { askOwnerQuestion } from './work-questions.js';
 import { readWorkBoard, readWorkThread, updateWorkItem } from './work-board.js';
@@ -53,6 +54,84 @@ const machine = (corner: string, state: string) =>
      ON CONFLICT(corner_id) DO UPDATE SET machine=EXCLUDED.machine`,
     [corner, JSON.stringify({ state })],
   );
+
+describe('work item detail', () => {
+  const address = { roomId: chat, id: 'detail-task' };
+  const create = () => updateWorkItem(db, { ...address, title: 'youtube-pipeline', objective: 'Private videos until approved.', assigneeId: null }, agent);
+  it('records real creation, assignment and state changes once, with the actor', async () => {
+    await create();
+    await updateWorkItem(db, { ...address, assigneeId: agent }, person);
+    await updateWorkItem(db, { ...address, state: 'in-progress' }, other);
+    await updateWorkItem(db, { ...address, state: 'in-progress', assigneeId: agent }, person);
+    const item = (await read()).items.find(i => i.id === address.id)!;
+    expect(item.entries?.map(e => [e.kind, e.author.pubkey, e.text])).toEqual([
+      ['event', agent, 'created this item in Backlog'],
+      ['event', person, 'assigned this to Jellybean'],
+      ['event', other, 'moved this to In progress'],
+    ]);
+  });
+  it('lets a human and agent append plain notes without starting a conversation', async () => {
+    await create();
+    await phone.execute('addWorkNote', { ...address, text: '  Hold until approved.  ' }, person);
+    await phone.execute('addWorkNote', { ...address, text: 'Waiting on owner approval.' }, agent);
+    await phone.execute('addWorkNote', { ...address, text: '   ' }, person);
+    await updateWorkItem(db, { ...address, state: 'done' }, agent);
+    const item = (await read()).items.find(i => i.id === address.id)!;
+    expect(item.entries?.filter(e => e.kind === 'note').map(e => [e.author.pubkey, e.text])).toEqual([
+      [person, 'Hold until approved.'], [agent, 'Waiting on owner approval.'],
+    ]);
+    expect((await db.query('SELECT id FROM messages')).rows).toEqual([]);
+    expect((await db.query('SELECT id FROM agent_commands')).rows).toEqual([]);
+  });
+  it('attaches existing file objects and links, and shares file metadata only with current members', async () => {
+    await create();
+    const objectId = '77777777-7777-4777-8777-777777777777';
+    await db.query(`INSERT INTO objects(id,owner_id,kind,key,mime,title,size,sha256,state,expires_at)
+      VALUES($1,$2,'media','detail-proof','application/pdf','channel-plan.pdf',123,$3,'ready',now()+interval '1 day')`,
+      [objectId, person, 'f'.repeat(64)]);
+    await phone.execute('attachToWorkItem', { ...address, attachment: { kind: 'file', name: 'channel-plan.pdf', objectId } }, person);
+    await phone.execute('attachToWorkItem', { ...address, attachment: { kind: 'link', name: 'Plan', url: 'https://example.org/plan' } }, agent);
+    const item = (await read()).items.find(i => i.id === address.id)!;
+    expect(item.attachments).toMatchObject([
+      { kind: 'file', name: 'channel-plan.pdf', addedBy: { pubkey: person }, file: { mimeType: 'application/pdf', size: 123 } },
+      { kind: 'link', url: 'https://example.org/plan', addedBy: { pubkey: agent } },
+    ]);
+    expect(await readMediaMetadata(db, objectId, other)).toMatchObject({ objectId, size: 123 });
+    await db.query('UPDATE memberships SET removed_at=now() WHERE identity_id=$1 AND room_id=$2', [other, chat]);
+    await expect(readMediaMetadata(db, objectId, other)).rejects.toThrow();
+    await expect(phone.execute('addWorkNote', { ...address, text: 'No access' }, other)).rejects.toThrow('room access denied');
+    await expect(phone.execute('attachToWorkItem', { ...address, attachment: { kind: 'link', name: 'No access', url: 'https://example.org' } }, other)).rejects.toThrow('room access denied');
+  });
+  it('rejects cross-conversation ids and unseen objects without adding detail', async () => {
+    await create();
+    await expect(phone.execute('addWorkNote', { roomId: thread, id: address.id, text: 'Wrong place' }, person)).rejects.toThrow('room access denied');
+    const objectId = '77777777-7777-4777-8777-777777777777';
+    await db.query(`INSERT INTO objects(id,owner_id,kind,key,mime,size,sha256,state,expires_at)
+      VALUES($1,$2,'media','private-proof','application/pdf',123,$3,'ready',now()+interval '1 day')`,
+      [objectId, other, 'f'.repeat(64)]);
+    await expect(phone.execute('attachToWorkItem', { ...address, attachment: { kind: 'file', name: 'private.pdf', objectId } }, person)).rejects.toThrow();
+    await expect(phone.execute('attachToWorkItem', { ...address, attachment: { kind: 'link', name: 'Script', url: 'javascript:alert(1)' } }, person)).rejects.toThrow();
+    expect((await read()).items.find(i => i.id === address.id)?.attachments).toEqual([]);
+  });
+  it('keeps asking-item notes on that item rather than the thread task', async () => {
+    const posted = await askOwnerQuestion(db, { about: { kind: 'thread', roomId: thread }, question: 'Which surface?', freeText: true }, agent);
+    await phone.execute('addWorkNote', { roomId: thread, id: posted.messageId, text: 'Phone first.' }, person);
+    const ask = (await read()).items.find(item => item.id === posted.messageId)!;
+    expect(ask.entries?.some(entry => entry.text === 'Phone first.')).toBe(true);
+    expect(ask.ask?.text).toBe('Which surface?');
+    expect((await readWorkThread(db, thread, person))[0]?.entries).toEqual([]);
+  });
+  it('materializes a thread task for notes and returns bounded chronological tails', async () => {
+    await phone.execute('addWorkNote', { roomId: thread, text: 'Thread note' }, person);
+    await db.query(`INSERT INTO work_item_entries(work_item_id,author_id,kind,text,created_at)
+      SELECT $1,$2,'note',n::text,now()+n*interval '1 second' FROM generate_series(1,105) n`, [thread, agent]);
+    const [item] = await readWorkThread(db, thread, person);
+    expect(item?.entries).toHaveLength(100);
+    expect(item?.entries?.[0]?.text).toBe('6');
+    expect(item?.entries?.at(-1)?.text).toBe('105');
+    expect(item).toEqual((await read()).items.find(i => i.id === thread));
+  });
+});
 
 describe('Work board recorded sources and single assignee', () => {
   it('creates typed choices, preserves the recommendation, and quotes a choice answer in its thread', async () => {

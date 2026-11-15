@@ -435,6 +435,17 @@ describe('deleteAccount', () => {
     expect(await auth.authenticatePhone(ownerToken)).toBeNull();
   });
 
+  it('retains work item detail under the deleted author and erases its file attachments', async () => {
+    await phone.execute('updateWorkItem', { roomId: ROOM, id: 'kept-work', title: 'Plan' }, OWNER);
+    await phone.execute('addWorkNote', { roomId: ROOM, id: 'kept-work', text: 'Keep this note.' }, OWNER);
+    await phone.execute('attachToWorkItem', { roomId: ROOM, id: 'kept-work', attachment: { kind: 'link', name: 'Plan', url: 'https://example.org' } }, OWNER);
+    const file = await phone.execute('uploadMedia', { bytes: new TextEncoder().encode('Plan'), mimeType: 'text/plain', name: 'plan.txt' }, OWNER);
+    await phone.execute('attachToWorkItem', { roomId: ROOM, id: 'kept-work', attachment: { kind: 'file', name: 'plan.txt', objectId: file.url.split('/').at(-1)! } }, OWNER);
+    await phone.execute('deleteAccount', {}, OWNER);
+    expect((await database.query('SELECT DISTINCT author_id FROM work_item_entries WHERE work_item_id=$1', ['kept-work'])).rows).toEqual([{ author_id: DELETED_ACCOUNT_IDENTITY_ID }]);
+    expect((await database.query('SELECT kind,added_by FROM work_item_attachments WHERE work_item_id=$1', ['kept-work'])).rows).toEqual([{ kind: 'link', added_by: DELETED_ACCOUNT_IDENTITY_ID }]);
+  });
+
   it('clears every non-cascading reference to identities (R-ACCOUNT-FKS)', async () => {
     // Each foreign key to identities that neither cascades nor sets null must
     // be cleared by deleteAccount before the identity row goes; otherwise the
@@ -460,7 +471,7 @@ describe('deleteAccount', () => {
       'permission_authority.principal_id', 'rooms.created_by', 'rooms.reviewer_agent_id',
       'schedule_receipts.agent_id', 'starter_onboarding_runs.beebee_id',
       'starter_onboarding_runs.luna_id', 'starter_onboarding_runs.user_id',
-      'work_schedules.agent_id',
+      'work_schedules.agent_id', 'work_items.opened_by', 'work_item_entries.author_id', 'work_item_attachments.added_by',
       'workspace_deletions.deleted_by', 'workspace_skills.creator_agent_id',
       'workspace_skills.owner_agent_id',
     ];

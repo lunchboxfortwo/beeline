@@ -9,7 +9,7 @@ import { toolValidationSchema, type ToolDefinition } from './minimal-tool-surfac
 import { assembleSessionPrompt, PROMPT_SURFACES } from './prompt-assembly.js';
 
 const harnesses = ['claude-agent-acp', 'claude-code-acp', 'codex-acp', 'pi-acp', 'grok', 'buzz-agent', 'cursor-acp-bridge'];
-const missingOnClaude = ['request_grant', 'connect', 'app_tool', 'wake', 'remember', 'revise_corner', 'create_work_item', 'set_work_state', 'assign_work_item'];
+const missingOnClaude = ['request_grant', 'connect', 'app_tool', 'wake', 'remember', 'revise_corner', 'create_work_item', 'set_work_state', 'assign_work_item', 'add_work_note', 'attach_to_work_item'];
 const rootCombinators = ['anyOf', 'oneOf', 'allOf'];
 const invalidInputs = [
   ['request_grant', { action: 'request', kind: 'command' }],

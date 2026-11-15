@@ -6,6 +6,7 @@ import {
   type WorkItemView,
   type WorkState,
 } from '@beeline/api-contract/phone';
+import { workDetailColumnsSql, projectWorkDetail, type WorkDetailRow } from './work-item-detail.js';
 import type { SqlDatabase } from './database.js';
 import { phoneIdentity, type PhoneIdentityRow } from './phone-identity.js';
 import { needsYouItems } from './needs-you.js';
@@ -13,7 +14,7 @@ import { cornerImplementerSql } from './corner-worker.js';
 import { cornerObjectiveSql, writeCornerObjective } from './corner-objective.js';
 import { CommandRefusalError } from './command-refusal.js';
 
-type WorkRow = {
+type WorkRow = WorkDetailRow & {
   id: string;
   room_id: string;
   room_kind: 'direct' | 'room' | 'corner';
@@ -56,9 +57,17 @@ export async function updateWorkItem(
 ): Promise<void> {
   if (input.state !== undefined && !WORK_STATES.includes(input.state))
     throw new Error('invalid work state');
-  // Assignment is one field. Null is an intentional unassignment.
-  const changed = await db.query<{ state: WorkState; objective: string | null; corner: boolean }>(
-    `INSERT INTO work_items(id,room_id,source_message_id,state,title,objective,assignee_id,opened_by,completed_at)
+  await db.transaction(async (tx) => {
+    const previous =
+      (
+        await tx.query<{ actor: string | null }>(
+          "SELECT current_setting('beeline.work_actor',true) actor",
+        )
+      ).rows[0]?.actor ?? '';
+    await tx.query("SELECT set_config('beeline.work_actor',$1,true)", [actorId]);
+    // Assignment is one field. Null is an intentional unassignment.
+    const changed = await tx.query<{ state: WorkState; objective: string | null; corner: boolean }>(
+      `INSERT INTO work_items(id,room_id,source_message_id,state,title,objective,assignee_id,opened_by,completed_at)
     SELECT $7,r.id,(SELECT id FROM messages source WHERE source.id=$7 AND source.room_id=r.id),
       -- A thread's own item is in progress until set otherwise; new work starts in Backlog.
       COALESCE($2,CASE WHEN $7=r.id::text AND r.parent_id IS NOT NULL THEN 'in-progress' ELSE 'backlog' END),$3,$8,
@@ -70,22 +79,24 @@ export async function updateWorkItem(
       assignee_id=CASE WHEN $5 THEN $4 ELSE work_items.assignee_id END,updated_at=now(),
       completed_at=CASE WHEN COALESCE($2,work_items.state)='done' THEN COALESCE(work_items.completed_at,now()) ELSE NULL END WHERE work_items.room_id=$1
     RETURNING state,objective,EXISTS(SELECT 1 FROM rooms corner WHERE corner.id=$1 AND corner.parent_id IS NOT NULL) corner`,
-    [
-      input.roomId,
-      input.state ?? null,
-      input.title ?? null,
-      input.assigneeId ?? null,
-      Object.hasOwn(input, 'assigneeId'),
-      actorId,
-      input.id ?? input.roomId,
-      input.objective ?? null,
-    ],
-  );
-  const item = changed.rows[0];
-  if (!item) throw new CommandRefusalError('room access denied', 403);
-  // Started work carries its objective into the thread it runs in, unless the thread has its own.
-  if (item.corner && item.objective && item.state !== 'backlog')
-    await writeCornerObjective(db, input.roomId, item.objective, true);
+      [
+        input.roomId,
+        input.state ?? null,
+        input.title ?? null,
+        input.assigneeId ?? null,
+        Object.hasOwn(input, 'assigneeId'),
+        actorId,
+        input.id ?? input.roomId,
+        input.objective ?? null,
+      ],
+    );
+    const item = changed.rows[0];
+    if (!item) throw new CommandRefusalError('room access denied', 403);
+    // Started work carries its objective into the thread it runs in, unless the thread has its own.
+    if (item.corner && item.objective && item.state !== 'backlog')
+      await writeCornerObjective(tx, input.roomId, item.objective, true);
+    await tx.query("SELECT set_config('beeline.work_actor',$1,true)", [previous]);
+  });
 }
 
 /**
@@ -109,7 +120,7 @@ function workColumnsSql(viewer: string): string {
       THEN ${cornerObjectiveSql('r')} END,''),w.objective,'') objective,
     row_to_json(assignee) assignee,row_to_json(opener) opener,
     COALESCE(w.created_at,r.created_at) created_at,
-    GREATEST(w.updated_at,r.archived_at,r.created_at) updated_at
+    GREATEST(w.updated_at,r.archived_at,r.created_at) updated_at,${workDetailColumnsSql('ref.id')}
     FROM work_refs ref JOIN rooms r ON r.id=ref.room_id
     JOIN room_access a ON a.room_id=COALESCE(r.parent_id,r.id) AND a.identity_id=${viewer} AND a.removed_at IS NULL
     LEFT JOIN rooms p ON p.id=r.parent_id LEFT JOIN work_items w ON w.id=ref.id
@@ -175,12 +186,15 @@ export async function readWorkBoard(
   const identities = members.rows.map((row) => phoneIdentity(row, publicOrigin));
   const viewer = identities.find((person) => person.pubkey === viewerId)!;
   const questions = needs.items.length
-    ? await db.query<{
-        message_id: string;
-        question: string;
-        recommended_option_id: string | null;
-      }>(
-        `SELECT message_id,question,recommended_option_id FROM work_questions WHERE message_id=ANY($1::text[])`,
+    ? await db.query<
+        WorkDetailRow & {
+          message_id: string;
+          question: string | null;
+          recommended_option_id: string | null;
+        }
+      >(
+        `SELECT source.id message_id,q.question,q.recommended_option_id,${workDetailColumnsSql('source.id')}
+         FROM messages source LEFT JOIN work_questions q ON q.message_id=source.id WHERE source.id=ANY($1::text[])`,
         [needs.items.map((item) => item.messageId)],
       )
     : { rows: [] };
@@ -191,29 +205,33 @@ export async function readWorkBoard(
   );
   // One Needs you row per thread: the thread itself, carrying its first ask and the count.
   const asksByRoom = new Map<string, typeof needs.items>();
-  for (const ask of needs.items) asksByRoom.set(ask.roomId, [...(asksByRoom.get(ask.roomId) ?? []), ask]);
+  for (const ask of needs.items)
+    asksByRoom.set(ask.roomId, [...(asksByRoom.get(ask.roomId) ?? []), ask]);
   const asks = [...asksByRoom.values()].map((roomAsks): WorkItemView => {
     const ask = roomAsks[0]!;
     const thread = threads.get(ask.roomId);
     const q = questionById.get(ask.messageId);
     return {
-      ...(thread ? withoutIdle(thread) : {
-        chatId: ask.roomKind === 'corner' ? '' : ask.roomId,
-        chatName: ask.parentRoomName ?? ask.roomName,
-        title: ask.roomName,
-        threadName: ask.roomName,
-        priority: 'none' as const,
-        openedBy: ask.author ?? viewer,
-        createdAt: ask.createdAt,
-        updatedAt: ask.createdAt,
-      }),
+      ...(thread
+        ? withoutIdle(thread)
+        : {
+            chatId: ask.roomKind === 'corner' ? '' : ask.roomId,
+            chatName: ask.parentRoomName ?? ask.roomName,
+            title: ask.roomName,
+            threadName: ask.roomName,
+            priority: 'none' as const,
+            openedBy: ask.author ?? viewer,
+            createdAt: ask.createdAt,
+            updatedAt: ask.createdAt,
+          }),
+      ...(q ? projectWorkDetail(q, publicOrigin) : {}),
       id: ask.messageId,
       roomId: ask.roomId,
       roomKind: ask.roomKind,
       state: 'needs-you',
       assignee: viewer,
       messageId: ask.messageId,
-      ask: q
+      ask: q?.question
         ? {
             ...ask,
             text: q.question,
@@ -267,6 +285,7 @@ function withoutIdle(item: WorkItemView): WorkItemView {
 
 function projectWorkRow(row: WorkRow, publicOrigin: string): WorkItemView {
   return {
+    ...projectWorkDetail(row, publicOrigin),
     id: row.id,
     roomId: row.room_id,
     roomKind: row.room_kind,

@@ -1,3 +1,4 @@
+import { addWorkNote, attachToWorkItem } from '../work-item-detail.js';
 import { askOwnerQuestion } from '../work-questions.js';
 import { updateWorkItem } from '../work-board.js';
 import { setAgentWakePaused } from '../agent-wake-pause.js';
@@ -52,6 +53,12 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
     switch (name) {
       case 'askOwnerQuestion':
         return await askOwnerQuestion(ctx.database,input as Input<'askOwnerQuestion'>,authenticatedAgentId) as Output<Name>;
+      case 'addWorkNote':
+        await addWorkNote(ctx.database,{...input as Input<'addWorkNote'>,roomId:(input as Input<'addWorkNote'>).targetRoomId},authenticatedAgentId);
+        return daemonWriteResult(ctx) as Output<Name>;
+      case 'attachToWorkItem':
+        await attachToWorkItem(ctx.database,{...input as Input<'attachToWorkItem'>,roomId:(input as Input<'attachToWorkItem'>).targetRoomId},authenticatedAgentId);
+        return daemonWriteResult(ctx) as Output<Name>;
       case 'updateWorkItem':
         await updateWorkItem(ctx.database,{...input as Input<'updateWorkItem'>,roomId:(input as Input<'updateWorkItem'>).targetRoomId},authenticatedAgentId);
         return daemonWriteResult(ctx) as Output<Name>;

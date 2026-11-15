@@ -41,6 +41,13 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
   switch (name) {
     case 'ask_owner':
       return JSON.stringify(await daemonExecute('askOwnerQuestion',{...args,roomId:(await activeCommandContext()).roomId}));
+    case 'add_work_note':
+    case 'attach_to_work_item': {
+      const context = await activeCommandContext();
+      return JSON.stringify(await daemonExecute(name === 'add_work_note' ? 'addWorkNote' : 'attachToWorkItem', {
+        ...args, targetRoomId: args.roomId, roomId: context.roomId,
+      }));
+    }
     case 'create_work_item':
     case 'set_work_state':
     case 'assign_work_item':

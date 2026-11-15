@@ -109,6 +109,14 @@ describe('typed Work board tools', () => {
         callAgentTool('set_work_state', { ...target, state: 'unknown' }, 'invalid'),
       ).rejects.toThrow('invalid arguments');
       expect(fetch.mock.calls).toHaveLength(7);
+      await callAgentTool('add_work_note', { ...target, text: 'Hold until approved.' }, 'note');
+      expect(String(fetch.mock.calls.at(-1)![0])).toMatch(/addWorkNote$/);
+      expect(written()).toMatchObject({ roomId: 'source-chat', targetRoomId: 'target-chat', id: created.id, text: 'Hold until approved.' });
+      await callAgentTool('attach_to_work_item', { ...target, attachment: { kind: 'link', name: 'Plan', url: 'https://example.org' } }, 'link');
+      expect(String(fetch.mock.calls.at(-1)![0])).toMatch(/attachToWorkItem$/);
+      expect(written().attachment).toEqual({ kind: 'link', name: 'Plan', url: 'https://example.org' });
+      await callAgentTool('attach_to_work_item', { ...target, attachment: { kind: 'file', name: 'plan.pdf', objectId: 'stored-object' } }, 'file');
+      expect(written().attachment.objectId).toBe('stored-object');
     } finally {
       vi.unstubAllGlobals();
       vi.unstubAllEnvs();

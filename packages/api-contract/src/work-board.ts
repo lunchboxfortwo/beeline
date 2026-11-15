@@ -1,5 +1,5 @@
 import { readIdentity } from './phone-guards.js';
-import type { NeedsYouItemView, RoomViewIdentity } from './phone-types.js';
+import type { AttachmentReference, NeedsYouItemView, RoomViewIdentity } from './phone-types.js';
 
 export const WORK_STATES = ['needs-you', 'in-progress', 'in-review', 'backlog', 'done'] as const;
 export type WorkState = (typeof WORK_STATES)[number];
@@ -7,6 +7,27 @@ export type WorkAbout =
   | { readonly kind: 'thread'; readonly roomId: string }
   | { readonly kind: 'pr'; readonly roomId: string }
   | { readonly kind: 'request'; readonly roomId: string; readonly messageId: string };
+export type WorkItemAddress = { readonly roomId: string; readonly id?: string };
+export type WorkAttachmentInput =
+  | { readonly kind: 'link'; readonly name: string; readonly url: string }
+  | { readonly kind: 'file'; readonly name: string; readonly objectId: string };
+export type AddWorkNoteInput = WorkItemAddress & { readonly text: string };
+export type AttachToWorkItemInput = WorkItemAddress & { readonly attachment: WorkAttachmentInput };
+export type WorkItemEntry = {
+  readonly id: string;
+  readonly author: RoomViewIdentity;
+  readonly kind: 'note' | 'event';
+  readonly text: string;
+  readonly createdAt: number;
+};
+export type WorkItemAttachment = {
+  readonly id: string;
+  readonly addedBy: RoomViewIdentity;
+  readonly createdAt: number;
+} & (
+  | { readonly kind: 'link'; readonly name: string; readonly url: string }
+  | { readonly kind: 'file'; readonly name: string; readonly file: AttachmentReference }
+);
 export type WorkItemView = {
   readonly id: string;
   readonly roomId: string;
@@ -27,6 +48,9 @@ export type WorkItemView = {
   readonly createdAt: number;
   readonly updatedAt: number;
   readonly messageId?: string;
+  /** Bounded recent detail, in chronological order. */
+  readonly entries?: readonly WorkItemEntry[];
+  readonly attachments?: readonly WorkItemAttachment[];
   readonly ask?: NeedsYouItemView;
   /** Every ask waiting in this thread, oldest first; `ask` is the first. Clearing the row clears all. */
   readonly askIds?: readonly string[];
@@ -109,10 +133,60 @@ export function readWorkItem(value: unknown): WorkItemView | undefined {
     state: v.state as WorkState,
     ...(v.idle === true ? { idle: true as const } : {}),
     ...(typeof v.objective === 'string' && v.objective ? { objective: v.objective } : {}),
+    ...(Array.isArray(v.entries) ? { entries: v.entries.flatMap(readWorkEntry) } : {}),
+    ...(Array.isArray(v.attachments)
+      ? { attachments: v.attachments.flatMap(readWorkAttachment) }
+      : {}),
     openedBy,
     assignee,
     ...(typeof v.messageId === 'string' ? { messageId: v.messageId } : {}),
     createdAt: v.createdAt,
     updatedAt: v.updatedAt,
   };
+}
+
+function readWorkEntry(value: unknown): WorkItemEntry[] {
+  if (!value || typeof value !== 'object') return [];
+  const v = value as Record<string, unknown>;
+  const author = readIdentity(v.author);
+  return author &&
+    typeof v.id === 'string' &&
+    (v.kind === 'note' || v.kind === 'event') &&
+    typeof v.text === 'string' &&
+    typeof v.createdAt === 'number'
+    ? [{ id: v.id, author, kind: v.kind, text: v.text, createdAt: v.createdAt }]
+    : [];
+}
+function readWorkAttachment(value: unknown): WorkItemAttachment[] {
+  if (!value || typeof value !== 'object') return [];
+  const v = value as Record<string, unknown>;
+  const addedBy = readIdentity(v.addedBy);
+  if (
+    !addedBy ||
+    typeof v.id !== 'string' ||
+    typeof v.name !== 'string' ||
+    typeof v.createdAt !== 'number'
+  )
+    return [];
+  const base = { id: v.id, name: v.name, addedBy, createdAt: v.createdAt };
+  if (v.kind === 'link' && typeof v.url === 'string' && /^https?:\/\//i.test(v.url))
+    return [{ ...base, kind: 'link', url: v.url }];
+  if (v.kind !== 'file' || !v.file || typeof v.file !== 'object') return [];
+  const f = v.file as Record<string, unknown>;
+  if (typeof f.url !== 'string' || typeof f.mimeType !== 'string' || typeof f.size !== 'number')
+    return [];
+  return [
+    {
+      ...base,
+      kind: 'file',
+      file: {
+        url: f.url,
+        name: v.name,
+        mimeType: f.mimeType,
+        size: f.size,
+        ...(typeof f.sha256 === 'string' ? { sha256: f.sha256 } : {}),
+        ...(f.expired === true ? { expired: true } : {}),
+      },
+    },
+  ];
 }

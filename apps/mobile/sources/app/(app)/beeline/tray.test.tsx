@@ -64,36 +64,44 @@ describe('Tasks tab', () => {
     expect(state.push).toHaveBeenCalledWith({ roomId: 'thread' });
     expect(tree.root.findAll((n: any) => n.type === 'Sheet')).toHaveLength(0);
   });
-  it('keeps the detail sheet for a Backlog item, with its objective, and opens its place from it', async () => {
-    serve([task({ id: 'later', roomId: 'thread', state: 'backlog', roomKind: 'corner', objective: 'Measure every reply path on the phone.' })]);
+  it.each(['backlog', 'in-progress', 'in-review', 'done'] as const)('keeps details on the sheet for a stored %s item', async state => {
+    serve([task({ id: 'later', roomId: 'thread', state, roomKind: 'corner', objective: 'Measure every reply path on the phone.',
+      attachments: [{ id: 'link', kind: 'link', name: 'Plan', url: 'https://example.org', addedBy: { pubkey: 'person', kind: 'human', name: 'Ada' }, createdAt: 1 }],
+      entries: [{ id: 'note', kind: 'note', text: 'Hold until approved.', author: { pubkey: 'person', kind: 'human', name: 'Ada' }, createdAt: 1 }],
+    })]);
     const tree = await renderTags();
-    await press(tree, 'Backlog 1');
+    await press(tree, state === 'backlog' ? 'Backlog 1' : state === 'done' ? 'Done 1' : 'In progress 1');
     await press(tree, 'Measure phone reply latency');
     const sheet = tree.root.find((n: any) => n.type === 'Sheet');
     expect(sheet.props.title).toBe('Measure phone reply latency');
     expect(textOf(tree)).toContain('Measure every reply path on the phone.');
-    expect(textOf(tree)).toContain('Added in');
-    await press(tree, 'Open #beeline ↳ latency-coverage');
-    expect(state.push).toHaveBeenCalledWith({ roomId: 'thread' });
+    expect(textOf(tree)).toContain('Attachments');
+    expect(textOf(tree)).toContain('Activity');
+    expect(textOf(tree)).toContain('Hold until approved.');
+    expect(byLabel(tree, 'Plan')).toBeDefined();
   });
-  it('assigns to an agent, a human or Unassigned from the sheet', async () => {
-    serve([task()]);
+  it('sends a human note through the work operation, then clears the composer', async () => {
+    serve([task({ state: 'backlog' })]);
     const tree = await renderTags();
-    await press(tree, 'In progress 1');
-    for (const [label, id] of [
-      ['Assign to Ada', 'person'],
-      ['Assign to Jellybean', 'agent'],
-      ['Unassigned', null],
-    ]) {
-      await press(tree, 'Measure phone reply latency');
-      await press(tree, 'Change assignee');
-      await press(tree, label!);
-      expect(state.operation).toHaveBeenLastCalledWith('updateWorkItem', {
-        id: 'thread',
-        roomId: 'thread',
-        assigneeId: id,
-      });
-    }
+    await press(tree, 'Backlog 1');
+    await press(tree, 'Measure phone reply latency');
+    await act(async () => byLabel(tree, 'Add a note').props.onChangeText('Hold for approval.'));
+    await press(tree, 'Send');
+    expect(state.operation).toHaveBeenLastCalledWith('addWorkNote', {
+      id: 'thread', roomId: 'thread', text: 'Hold for approval.',
+    });
+    expect(byLabel(tree, 'Add a note').props.value).toBe('');
+    expect(state.load).toHaveBeenCalledWith('ws', true);
+  });
+  it('retains the human draft after a refused note write', async () => {
+    serve([task({ state: 'backlog' })]);
+    const tree = await renderTags();
+    await press(tree, 'Backlog 1');
+    await press(tree, 'Measure phone reply latency');
+    await act(async () => byLabel(tree, 'Add a note').props.onChangeText('Hold for approval.'));
+    state.operation.mockRejectedValueOnce(new Error('room access denied'));
+    await press(tree, 'Send');
+    expect(byLabel(tree, 'Add a note').props.value).toBe('Hold for approval.');
   });
   it('says nothing needs you when no ask waits', async () => {
     serve([task()]);

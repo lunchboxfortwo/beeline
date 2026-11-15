@@ -324,6 +324,13 @@ export function SheetFrame({ open, close, title, testID, children, back }: {
     );
 }
 
+/** Scroll the detail body while its composer stays reachable below it. */
+export function SheetScroll({ children }: { children: React.ReactNode }) {
+    // Load the native hook only when a scrolling sheet is mounted.
+    const { height } = (require('react-native') as typeof import('react-native')).useWindowDimensions();
+    return <ScrollView maxHeight={height * 0.7} keyboardShouldPersistTaps="handled">{children}</ScrollView>;
+}
+
 /** One sheet row: an icon column, a label and an optional quiet line, then a chevron when it opens a step. */
 export function SheetRow({ icon, label, detail, onPress, testID, right, chevron = false }: {
     icon: React.ReactNode; label: string; detail?: string; onPress: () => void; testID?: string; right?: React.ReactNode; chevron?: boolean;
