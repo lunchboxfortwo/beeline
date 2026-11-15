@@ -243,14 +243,43 @@ it('answers from a fresh private home when the configured home is a file', async
   await f.session.dispose();
 });
 
-it('discloses an unavailable cached paid model and uses the advertised agent default', async () => {
+it('discloses a chosen model absent from a cold pi session’s fresh catalog and uses its default', async () => {
   const f = await fixture();
+  f.config.agentKind = 'pi';
+  const setter = vi.fn();
+  Object.assign(f.client, { setConfigOption: setter });
   f.session.resources.context.configuration = { model: 'unavailable-paid-model', commands: [], yoloMode: false, isReviewer: true,
     soul: { name: 'Reviewer', instructions: 'Review carefully.' } };
   await f.session.start();
   await f.session.deliver(f.item, []);
+  expect(setter).not.toHaveBeenCalled();
   expect(f.prompt.mock.calls[0]?.[1]).toContain('Selected model unavailable-paid-model is unavailable at startup; this session runs with default-model');
   expect(f.session.client?.sessionNew).toHaveBeenCalledWith(expect.objectContaining({ systemPrompt: expect.stringContaining('Review carefully.') }));
+  await f.session.dispose();
+});
+
+it('reconciles a cold pi session with its chosen model from the fresh catalog without blocking delivery', async () => {
+  const f = await fixture();
+  f.config.agentKind = 'pi';
+  f.config.modelSelection = { model: 'grunt/grunt' };
+  expect(f.session.resources.context.modelCatalog).toBeUndefined();
+  const models = { id: 'model', category: 'model', currentValue: 'default-model',
+    options: [{ value: 'default-model' }, { value: 'grunt/grunt' }] };
+  f.client.sessionNew.mockResolvedValue({ sessionId: 'live', raw: { configOptions: [models] } });
+  let finish!: () => void;
+  const setter = vi.fn(async () => {
+    await new Promise<void>(resolve => { finish = resolve; });
+    models.currentValue = 'grunt/grunt';
+    return { configOptions: [models] };
+  });
+  Object.assign(f.client, { setConfigOption: setter });
+  await f.session.start();
+  expect(setter).toHaveBeenCalledWith('live', 'model', 'grunt/grunt');
+  expect((await f.session.deliver(f.item, [])).text).toBe('The answer');
+  expect(f.prompt.mock.calls[0]?.[1]).not.toContain('is unavailable at startup');
+  expect(f.prompt.mock.calls[0]?.[1]).not.toContain('This session uses default-model');
+  finish();
+  await vi.waitFor(() => expect(f.session.resources.context.modelCatalog?.find(option => option.category === 'model')?.currentValue).toBe('grunt/grunt'));
   await f.session.dispose();
 });
 

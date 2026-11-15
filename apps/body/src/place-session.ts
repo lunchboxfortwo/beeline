@@ -17,7 +17,7 @@ import type { GrantRunnerEndpoint,GrantRunnerRoom } from './grant-runner.js';
 import { harnessEnforcement,roomShellCapability } from './harness-capabilities.js';
 import { postChangedAgentUsage } from './helper-usage-binding.js';
 import { CODE_OWNED_HOST_MCP_NAMES } from './mcp-route-class.js';
-import { agentArgsWithModelSelection,filterAllowedModelConfigOptions,parseAdvertisedConfigOptions } from './model-config.js';
+import { agentArgsWithModelSelection,applyAgentModelSelectionWithUpdatedCatalog,filterAllowedModelConfigOptions,parseAdvertisedConfigOptions } from './model-config.js';
 import { agentOpenRouterKey } from './openrouter-key-usage.js';
 import { openRouterRoutingInput } from './openrouter-routing.js';
 import { OwnedModelFiles } from './owned-model-files.js';
@@ -363,9 +363,26 @@ export class PlaceSession {
     this.resources.rememberModelCatalog(catalog);
     const advertisedDefault = catalog.find(option => option.category === 'model')?.currentValue;
     const runningModel = advertisedDefault ?? 'the agent default';
-    if (selection.model && selection.model !== runningModel)
-      this.notes.push(`Selected model ${selection.model} is unavailable at startup; this session runs with ${runningModel}.`);
-    this.notes.push(`This session uses ${runningModel}; persona and reviewer skills use ${configuration ? 'cached configuration' : 'the agent default'}. Optional context and capability status: read(facet:session).`);
+    const available = catalog.some(option => option.category === 'model' && option.options.some(value => value.id === selection.model));
+    const reconcilingModel = Boolean(selection.model && selection.model !== runningModel && available);
+    const sessionNotes = this.notes;
+    const configurationNote = `persona and reviewer skills use ${configuration ? 'cached configuration' : 'the agent default'}. Optional context and capability status: read(facet:session).`;
+    if (selection.model && selection.model !== runningModel) {
+      if (available) {
+        // Send the setter before the first prompt, but never hold delivery on
+        // an optional harness request. The live catalog owns this verdict.
+        void applyAgentModelSelectionWithUpdatedCatalog(client, opened.sessionId, catalog, selection)
+          .then(applied => {
+            if (this.client !== client) return;
+            this.resources.rememberModelCatalog(applied.options);
+            const index = sessionNotes.indexOf(configurationNote);
+            if (index !== -1 && applied.appliedSelection.model)
+              sessionNotes[index] = `This session uses ${applied.appliedSelection.model}; ${configurationNote}`;
+          })
+          .catch(error => console.warn('[body] model selection could not be applied:', error));
+      } else this.notes.push(`Selected model ${selection.model} is unavailable at startup; this session runs with ${runningModel}.`);
+    }
+    this.notes.push(`${reconcilingModel ? '' : `This session uses ${runningModel}; `}${configurationNote}`);
     if (agentOpenRouterKey(config.agentKind, selection.model, config.agentEnv))
       console.log(`[body] place ${placeId} uses an OpenRouter key`);
   }
