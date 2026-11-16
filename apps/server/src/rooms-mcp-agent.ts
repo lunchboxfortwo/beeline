@@ -708,7 +708,8 @@ export async function pendingMcpWakes(db: SqlDatabase, member: string) {
   const {rows} = await readAgentQueueRows(db,member);
   return Promise.all(rows.filter(item=>item.reason!=='mcp_call').map(async item=>{
     const route=item.message?.route ?? item.private_payload?.route ?? await recordedMessageRoute(db,item);
-    return {id:item.id,address:item.room_id,from:route.from,
+    return {id:item.id,address:item.room_id,reason:item.reason,
+      ...(item.private_payload ? {kind:item.private_payload.kind} : {}),from:route.from,
       text:legacyMessageBody(item,item.message?.body ?? item.private_payload?.text ?? item.reason),createdAt:item.created_at,
       next:`Reply with reply(${item.id},text). ${mcpWakeNext(item.private_payload?.kind ?? null,item.reason)}`};
   }));

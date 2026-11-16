@@ -136,4 +136,6 @@ it('every independent pending wake is readable beyond the retired 30-command pag
   expect(wakes).toHaveLength(36);
   expect(new Set(wakes.map(wake=>wake.id)).size).toBe(36);
   for(const wake of wakes)expect(wake).not.toHaveProperty('deliveryVersion');
+  // The helper rejects a wake frame without these fields, which stops every delivery to a joined session.
+  for(const wake of wakes){for(const field of ['id','address','reason'] as const)expect(typeof wake[field],field).toBe('string');expect(wake.createdAt).toBeTruthy();}
 });
