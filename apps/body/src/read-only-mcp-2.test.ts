@@ -11,7 +11,7 @@ const scope12 = fixtureScope12(scope8);
     const root = scope12.checkout(body);
     const ops: Array<{ name: string; input: Record<string, unknown> }> = [];
     const reply = await m9_requestGrant(
-      { kind: 'command', target: 'python3 fix.py', purpose: 'clean up', reason: 'clean up' },
+      { mode: 'request', action: 'Run python3 fix.py', kind: 'command', target: 'python3 fix.py', purpose: 'clean up', reason: 'clean up' },
       {
         ...scope8.deps(
           { grantId: 'g-1', status: 'pending', auto: false, escalations: ['unseen-script'] },
@@ -20,6 +20,7 @@ const scope12 = fixtureScope12(scope8);
         scriptRoots: [root],
       },
     );
+    m9_expect(ops[0]!.input).toMatchObject({ action: 'Run python3 fix.py', purpose: 'clean up' });
     m9_expect(ops[0]!.input.script).toEqual({
       path: 'fix.py',
       sha256: m9_createHash('sha256').update(body).digest('hex'),
@@ -38,7 +39,7 @@ const scope12 = fixtureScope12(scope8);
     const root = scope12.checkout(body, 'approved');
     const ops: Array<{ name: string; input: Record<string, unknown> }> = [];
     await m9_requestGrant(
-      { kind: 'command', target: './approved', purpose: 'run approved script', reason: 'run approved script' },
+      { mode: 'request', action: 'Run ./approved', kind: 'command', target: './approved', purpose: 'run approved script', reason: 'run approved script' },
       { ...scope8.deps({ grantId: 'g', status: 'pending', auto: false }, ops), scriptRoots: [root] },
     );
     m9_expect(ops[0]!.input.script).toMatchObject({ path: './approved', contents: body,
@@ -50,7 +51,7 @@ const scope12 = fixtureScope12(scope8);
     const root = scope12.checkout('unused');
     const ops: Array<{ name: string; input: Record<string, unknown> }> = [];
     await m9_requestGrant(
-      { kind: 'command', target: '/bin/true', purpose: 'check execution', reason: 'check execution' },
+      { mode: 'request', action: 'Run /bin/true', kind: 'command', target: '/bin/true', purpose: 'check execution', reason: 'check execution' },
       { ...scope8.deps({ grantId: 'g', status: 'approved', auto: true }, ops), scriptRoots: [root] },
     );
     m9_expect(ops[0]!.input.script).toBeUndefined();
@@ -62,7 +63,7 @@ const scope12 = fixtureScope12(scope8);
     const root = scope12.checkout(body);
     const ops: Array<{ name: string; input: Record<string, unknown> }> = [];
     await m9_requestGrant(
-      { kind: 'command', target: 'python3 fix.py', purpose: 'x', reason: 'x' },
+      { mode: 'request', action: 'Run python3 fix.py', kind: 'command', target: 'python3 fix.py', purpose: 'x', reason: 'x' },
       { ...scope8.deps({ grantId: 'g', status: 'pending', auto: false }, ops), scriptRoots: [root] },
     );
     m9_expect(ops.map(op => op.name)).toEqual(['requestAgentGrant']);
@@ -75,7 +76,7 @@ const scope12 = fixtureScope12(scope8);
     const root = scope12.checkout('print(1)\n');
     await m9_expect(
       m9_requestGrant(
-        { kind: 'command', target: 'python3 /etc/hosts', purpose: 'x', reason: 'x' },
+        { mode: 'request', action: 'Run python3 /etc/hosts', kind: 'command', target: 'python3 /etc/hosts', purpose: 'x', reason: 'x' },
         { ...scope8.deps({ grantId: 'g' }), scriptRoots: [root] },
       ),
     ).rejects.toThrow('cannot be shown on the approval card');
@@ -86,14 +87,14 @@ const scope12 = fixtureScope12(scope8);
     const root = scope12.checkout('print(1)\n');
     const ops: Array<{ name: string; input: Record<string, unknown> }> = [];
     await m9_requestGrant(
-      { kind: 'command', target: 'python3 -V', purpose: 'x', reason: 'x' },
+      { mode: 'request', action: 'Run python3 -V', kind: 'command', target: 'python3 -V', purpose: 'x', reason: 'x' },
       { ...scope8.deps({ grantId: 'g', status: 'pending', auto: false }, ops), scriptRoots: [root] },
     );
     m9_expect(ops[0]!.input.script).toBeUndefined();
   });
 });
-m9_describe('run_granted_command reports the Room boundary', () => {
-  m9_it('names the corner when the read-only filesystem refused a write', async () => {
+m9_describe('run_granted_command reports the write boundary', () => {
+  m9_it('distinguishes Room writes from a broken corner checkout when a write is refused', async () => {
     const reply = await m9_runGrantedCommand(
       { argv: ['cp', 'a', 'b'] },
       {
@@ -107,9 +108,12 @@ m9_describe('run_granted_command reports the Room boundary', () => {
         }),
       },
     );
-    m9_expect(reply).toContain('read-only outside your scratch directory');
+    m9_expect(reply).toContain('A write was refused outside your scratch directory.');
+    m9_expect(reply).toContain('In a Room, open a corner with open_corner to change files');
+    m9_expect(reply).toContain('in a corner, your checkout is broken, so report the refused path as blocked: to your commander');
+    m9_expect(reply).not.toContain('This Room is read-only');
     m9_expect(reply).toContain('open_corner');
-    m9_expect(reply).toContain('request_grant(kind:command, target, reason, purpose)');
+    m9_expect(reply).toContain('request_grant(mode:request, kind:command, target, action, purpose, reason)');
     m9_expect(reply).toContain('run_granted_command');
   });
 
@@ -130,7 +134,7 @@ m9_describe('run_granted_command reports the Room boundary', () => {
     );
     m9_expect(reply).toContain('sandbox failed before command start');
     m9_expect(reply).not.toContain('exit 1');
-    m9_expect(reply).toContain('request_grant(kind:command, target, reason, purpose)');
+    m9_expect(reply).toContain('request_grant(mode:request, kind:command, target, action, purpose, reason)');
     m9_expect(reply).toContain('run_granted_command');
   });
 });
@@ -554,7 +558,7 @@ m14_describe('beeline-agent connectors_status + offer_connector (R5)', () => {
   m14_it('offer_connector posts one offer and tells the agent its turn is paused on the card', async () => {
     const ops: Array<{ name: string; input: Record<string, unknown> }> = [];
     const reply = await m14_offerConnector(
-      { connectorType: 'trusty-squire', reason: '  provision the 1inch API key\n into its vault ' },
+      { action: 'Connect Trusty Squire', purpose: 'Provision the 1inch API key', connectorType: 'trusty-squire', reason: '  provision the 1inch API key\n into its vault ' },
       scope18.deps({ offerId: 'o-1', status: 'pending', messageId: 'm-1', joined: false }, ops),
     );
     m14_expect(ops).toEqual([
@@ -563,6 +567,8 @@ m14_describe('beeline-agent connectors_status + offer_connector (R5)', () => {
         input: {
           roomId: 'room-1',
           connectorType: 'trusty-squire',
+          action: 'Connect Trusty Squire',
+          purpose: 'Provision the 1inch API key',
           reason: 'provision the 1inch API key into its vault',
         },
       },
@@ -571,7 +577,7 @@ m14_describe('beeline-agent connectors_status + offer_connector (R5)', () => {
     m14_expect(reply).toContain('your turn is paused on this offer');
     m14_expect(reply).toContain('Do not ask them to open Settings or the Connectors page');
     const joined = await m14_offerConnector(
-      { connectorType: 'trusty-squire', reason: 'provision the 1inch API key into its vault' },
+      { action: 'Connect Trusty Squire', purpose: 'Provision the 1inch API key', connectorType: 'trusty-squire', reason: 'provision the 1inch API key into its vault' },
       scope18.deps({ offerId: 'o-1', status: 'pending', messageId: 'm-1', joined: true }),
     );
     m14_expect(joined).toMatch(/^already offered, card still open: add trusty-squire \[offer o-1\]/);
@@ -581,7 +587,7 @@ m14_describe('beeline-agent connectors_status + offer_connector (R5)', () => {
   m14_it('offer_connector with intent switch asks to replace the bound Squire account and pauses the turn', async () => {
     const ops: Array<{ name: string; input: Record<string, unknown> }> = [];
     const reply = await m14_offerConnector(
-      { connectorType: 'trusty-squire', reason: 'sign up with your work account', intent: 'switch' },
+      { action: 'Switch Trusty Squire account', purpose: 'Provision the 1inch API key', connectorType: 'trusty-squire', reason: 'sign up with your work account', intent: 'switch' },
       scope18.deps({ offerId: 'o-2', status: 'pending', messageId: 'm-2', joined: false }, ops),
     );
     m14_expect(ops).toEqual([
@@ -590,6 +596,8 @@ m14_describe('beeline-agent connectors_status + offer_connector (R5)', () => {
         input: {
           roomId: 'room-1',
           connectorType: 'trusty-squire',
+          action: 'Switch Trusty Squire account',
+          purpose: 'Provision the 1inch API key',
           reason: 'sign up with your work account',
           intent: 'switch',
         },
@@ -597,11 +605,11 @@ m14_describe('beeline-agent connectors_status + offer_connector (R5)', () => {
     ]);
     m14_expect(reply).toMatch(/^pending, card posted: switch trusty-squire account \[offer o-2\]/);
     const joined = await m14_offerConnector(
-      { connectorType: 'trusty-squire', reason: 'sign up with your work account', intent: 'switch' },
+      { action: 'Switch Trusty Squire account', purpose: 'Provision the 1inch API key', connectorType: 'trusty-squire', reason: 'sign up with your work account', intent: 'switch' },
       scope18.deps({ offerId: 'o-2', status: 'pending', messageId: 'm-2', joined: true }),
     );
     await m14_expect(
-      m14_offerConnector({ connectorType: 'trusty-squire', reason: 'x', intent: 'add' }, scope18.deps({ offerId: 'never' })),
+      m14_offerConnector({ action: 'Switch Trusty Squire account', purpose: 'Provision the 1inch API key', connectorType: 'trusty-squire', reason: 'x', intent: 'add' }, scope18.deps({ offerId: 'never' })),
     ).rejects.toThrow('intent must be "switch" when given');
   });
 
@@ -609,14 +617,14 @@ m14_describe('beeline-agent connectors_status + offer_connector (R5)', () => {
   m14_it('refuses a non-offerable kind and an empty reason before the server is called', async () => {
     const ops: Array<{ name: string; input: Record<string, unknown> }> = [];
     const answer = scope18.deps({ offerId: 'never' }, ops);
-    await m14_expect(m14_offerConnector({ connectorType: 'google-gmail', reason: 'hold funds' }, answer)).rejects.toThrow(
+    await m14_expect(m14_offerConnector({ action: 'Connect Trusty Squire', purpose: 'Provision the 1inch API key', connectorType: 'google-gmail', reason: 'hold funds' }, answer)).rejects.toThrow(
       'connectorType must be one of',
     );
-    await m14_expect(m14_offerConnector({ connectorType: 'trusty-squire', reason: '  ' }, answer)).rejects.toThrow(
+    await m14_expect(m14_offerConnector({ action: 'Connect Trusty Squire', purpose: 'Provision the 1inch API key', connectorType: 'trusty-squire', reason: '  ' }, answer)).rejects.toThrow(
       'reason must be a non-empty string',
     );
     await m14_expect(
-      m14_offerConnector({ connectorType: 'trusty-squire', reason: 'x'.repeat(201) }, answer),
+      m14_offerConnector({ action: 'Connect Trusty Squire', purpose: 'Provision the 1inch API key', connectorType: 'trusty-squire', reason: 'x'.repeat(201) }, answer),
     ).rejects.toThrow('reason is too long');
     m14_expect(ops).toEqual([]);
   });

@@ -200,7 +200,7 @@ it('R1 startup asks the daemon policy and applies broad capabilities before mask
 
 it.each(['/tmp', '/var/tmp'])('R2 a write path grant under %s retains its capability from receipt to sandbox activation', async base => {
   const target = fixture(base); const calls: Record<string, unknown>[] = [];
-  const result = await requestGrant({ kind: 'path', target, capabilities: 'read and write', reason: 'Build', purpose: 'Build project' }, {
+  const result = await requestGrant({ mode: 'request', action: 'Write the project directory', kind: 'path', target, capabilities: 'read and write', reason: 'Build', purpose: 'Build project' }, {
     roomId: 'room', execute: async (_name, input) => { calls.push(input); return { auto: true, grantId: 'write' }; },
   });
   expect(result).toContain('read and write');
