@@ -451,16 +451,6 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
     }
   },
   {
-    "name": "close_thread_pr",
-    "description": "Close only the addressed thread’s PR, retaining its thread and branch.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {"address": {"type": "string"}},
-      "required": ["address"],
-      "additionalProperties": false
-    }
-  },
-  {
     "name": "post",
     "description": "Post a public message at address. Tags wake named members to reply here, with no task assigned; receipt names who woke or why not.",
     "inputSchema": {

@@ -209,12 +209,7 @@ async landCorner(cornerId: string): Promise<boolean> { return gitHubOperationsLa
  * `merge_thread` can report the refusal instead of `merge-started`.
  */
 async landCornerOutcome(cornerId: string, onBlocked?: (reason: string) => void): Promise<LandCornerOutcome> { return gitHubOperationsLandCornerOutcome(this, cornerId, onBlocked); }
-/**
- * Close a corner's own pull request without merging (`close_pull_request`).
- * The branch and its commits stay on GitHub. Clearing the recorded PR keeps
- * active corners open and repairs legacy archived corners without reopening
- * them. The merge gate reads "no pull request" until a new one opens.
- */
+/** Provider cleanup used only by thread closure. */
 async closeCornerPullRequest(cornerId: string): Promise<{
     status: 'closed';
     number: number;

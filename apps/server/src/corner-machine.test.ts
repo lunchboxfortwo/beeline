@@ -48,7 +48,6 @@ describe('corner transition table', () => {
     ['reconcile never initiates landing', { ...green, approved: true }, observe, 'idle', undefined],
     ['approval lands while reviewer is active', { ...green, approved: true, reviewerActive: true }, { kind: 'approval', headSha: head, by: 'reviewer' }, 'review', 'land'],
     ['landing refusal', green, { kind: 'merge-refused', headSha: head, reason: 'base moved' }, 'working', 'merge-refused'],
-    ['PR closes unmerged', facts, { kind: 'pull-request-closed', number: 7 }, 'idle', undefined],
     ['confirmed merge', green, { kind: 'merged', contents: {} }, 'archived', undefined],
     ['authorized close', facts, { kind: 'closed' }, 'archived', undefined],
   ] as const)('%s', (_label, f, event, state, wake) => {

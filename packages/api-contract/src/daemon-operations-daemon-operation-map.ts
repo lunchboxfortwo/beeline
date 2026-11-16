@@ -291,15 +291,6 @@ export type DaemonOperationMap = {
     | { readonly status: 'merge-started' | 'queued'; readonly headSha: string }
     | { readonly status: 'blocked'; readonly blocker: string; readonly holds?: CornerMergeHold[] }
   >;
-  /**
-   * Any corner member closes the corner's own pull request without merging.
-   * The branch stays on GitHub and the corner stays open with no PR.
-   */
-  closeCornerPullRequest: Operation<
-    CornerInput,
-    | { readonly status: 'closed'; readonly pullRequestNumber: number; readonly url: string }
-    | { readonly status: 'blocked'; readonly blocker: string }
-  >;
   /** Current member address discovery across Rooms, corners and DMs. */
   listRooms: Operation<RoomInput, { readonly rooms: readonly { readonly roomId: string; readonly name: string; readonly parentRoomId?: string; readonly directMessage: boolean }[] }>;
   /** Every corner, open and closed, under a member Room; across member Rooms from a DM. */

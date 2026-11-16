@@ -11,7 +11,7 @@ import { daemonConnectionDetail,daemonConnectionGrantRevoke,daemonConnectionUsag
 import type { CommandArguments,DaemonContext,DaemonDependencies } from './daemon/context.js';
 import { daemonReconcileZeroCheckWorkerCompletion } from './daemon/corner-completion.js';
 import { daemonPostCornerMessage,daemonReach,daemonReactToRoomMessage,daemonWriteResult } from './daemon/corner-messages.js';
-import { daemonApproveCornerMerge,daemonCheckReviewerAuthors,daemonCloseCornerPullRequest,daemonCornerRestore,daemonCorners,daemonListCornerBriefRevisions,daemonMergeCorner,daemonRepository,daemonTargetBranch } from './daemon/corner-reads.js';
+import { daemonApproveCornerMerge,daemonCheckReviewerAuthors,daemonCornerRestore,daemonCorners,daemonListCornerBriefRevisions,daemonMergeCorner,daemonRepository,daemonTargetBranch } from './daemon/corner-reads.js';
 import { daemonBriefAttachmentRooms,daemonCornerPlan,daemonCornerRemote,daemonRenameCorner,daemonReport,daemonTargetProposal,daemonWatchCorner } from './daemon/corner-reports.js';
 import { daemonArchiveCorner,daemonCreateCorner,daemonEnsureMembership,daemonReviseCornerBrief } from './daemon/corner-writes.js';
 import { daemonExecute } from './daemon/execute.js';
@@ -90,7 +90,7 @@ export class DaemonService {
      readonly refreshMergeability?: DaemonDependencies['refreshMergeability'],
     /** The merge attempt behind `merge_thread`. */
      readonly landCorner?: DaemonDependencies['landCorner'],
-    /** The GitHub close behind `close_pull_request`. */
+    /** Best-effort GitHub cleanup when closing a thread. */
      readonly closePullRequest?: DaemonDependencies['closePullRequest'],
     /** The GitHub read behind `read_pull_request`. */
      readonly readPullRequest?: DaemonDependencies['readPullRequest'],
@@ -135,7 +135,6 @@ export class DaemonService {
   async cornerRestore(...args: CommandArguments<typeof daemonCornerRestore>): ReturnType<typeof daemonCornerRestore> { return daemonCornerRestore(this, ...args); }
   async listCornerBriefRevisions(...args: CommandArguments<typeof daemonListCornerBriefRevisions>): ReturnType<typeof daemonListCornerBriefRevisions> { return daemonListCornerBriefRevisions(this, ...args); }
   async mergeCorner(...args: CommandArguments<typeof daemonMergeCorner>): ReturnType<typeof daemonMergeCorner> { return daemonMergeCorner(this, ...args); }
-  async closeCornerPullRequest(...args: CommandArguments<typeof daemonCloseCornerPullRequest>): ReturnType<typeof daemonCloseCornerPullRequest> { return daemonCloseCornerPullRequest(this, ...args); }
   async checkReviewerAuthors(...args: CommandArguments<typeof daemonCheckReviewerAuthors>): ReturnType<typeof daemonCheckReviewerAuthors> { return daemonCheckReviewerAuthors(this, ...args); }
   async approveCornerMerge(...args: CommandArguments<typeof daemonApproveCornerMerge>): ReturnType<typeof daemonApproveCornerMerge> { return daemonApproveCornerMerge(this, ...args); }
   async repository(...args: CommandArguments<typeof daemonRepository>): ReturnType<typeof daemonRepository> { return daemonRepository(this, ...args); }

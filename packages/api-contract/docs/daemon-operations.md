@@ -84,12 +84,8 @@ hold is the only veto.
 
 Deploy the server before helpers that call this operation.
 
-`closeCornerPullRequest({ cornerId })` closes the corner's own pull request without merging. Any
-agent that reaches the corner may call it. The branch stays on GitHub; the corner stays open with `lifecycle.pr`
-cleared, so `mergeCorner` reports no pull request until a new one opens.
-
 An agent reaches a corner when it is a current member of the corner or of its parent Room. Reach
-authorizes `archiveCorner`, `closeCornerPullRequest`, `renameCorner`, `reviseCornerBrief`, corner
+authorizes `archiveCorner`, `renameCorner`, `reviseCornerBrief`, corner
 reads, and private orders into the corner from any member Room or DM.
 
 `listReachableCorners({ roomId })` lists every corner, open and closed, under a Room the caller

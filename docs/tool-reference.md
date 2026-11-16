@@ -50,7 +50,6 @@ writable. Corners keep the watcher so edits are reflected as work proceeds.
 | `approve_merge`           | Configured reviewer PASS on the exact head SHA                                                 |
 | `set_thread_hold`         | Set or release a merge hold                                                                    |
 | `close_thread`            | Cancel work and archive a thread                                                               |
-| `close_thread_pr`         | Close only a thread's pull request                                                             |
 | `wake`                    | Manage your own schedules, event subscriptions and thread lifecycle watches                    |
 | `connect`                 | Discover, check or connect an integration                                                      |
 | `app_tool`                | Run a connected app's tool, or a first-party `beeline:*` app action                            |

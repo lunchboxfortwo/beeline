@@ -229,31 +229,6 @@ import { daemonIdentity, daemonAccess } from './access.js';
 
 
   /**
-   * Any corner member closes the corner's own pull request without merging.
-   * Membership is checked by `access` before dispatch; the close itself and
-   * the lifecycle update live in `GitHubOperations.closeCornerPullRequest`.
-   */
-  export async function daemonCloseCornerPullRequest(ctx: DaemonContext,
-    input: Input<'closeCornerPullRequest'>,
-    agentId: string,
-  ): Promise<Output<'closeCornerPullRequest'>> {
-    // The generic gate checks the turn's roomId; the target corner needs its own check.
-    await daemonReach(ctx, input.cornerId, agentId);
-    if (!ctx.closePullRequest)
-      return { status: 'blocked', blocker: 'GitHub is not configured on this server' };
-    const closed = await ctx.closePullRequest(input.cornerId);
-    if (closed.status === 'blocked') return closed;
-    await systemLine(ctx.database, {
-      roomId: input.cornerId,
-      subject: { kind: 'agent', id: agentId, name: (await daemonIdentity(ctx, agentId)).name },
-      verb: systemMessage("daemon-service.closed"),
-      object: { text: closed.title, url: closed.url },
-    });
-    return { status: 'closed', pullRequestNumber: closed.number, url: closed.url };
-  }
-
-
-  /**
    * The reviewer's PASS from any reachable corner turn: nothing
    * here depends on how the reviewer's session booted. The server authorizes
    * the caller and the exact head, records the yes, and reports it to the

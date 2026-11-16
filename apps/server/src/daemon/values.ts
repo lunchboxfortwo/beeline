@@ -58,7 +58,6 @@ export const CORNER_REACH_OPERATIONS = new Set<string>([
 
 /** Closed corners still expose cleanup/history facts. */
 export const CORNER_CLEANUP_OPERATIONS = new Set<string>([
-  'closeCornerPullRequest',
   'getCornerCloseRequests',
   'getRoomInbox',
 ]);
@@ -275,7 +274,6 @@ export const DAEMON_OPERATION_ROUTES: Record<keyof DaemonOperationMap, true> = {
   getPrChecksStatus: true,
   approveCornerMerge: true,
   mergeCorner: true,
-  closeCornerPullRequest: true,
   listRooms: true,
   listReachableCorners: true,
   listRoomMembers: true,

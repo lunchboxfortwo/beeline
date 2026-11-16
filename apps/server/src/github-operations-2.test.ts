@@ -7,6 +7,8 @@ const scope1 = fixtureScope1();
   it.each(['green on reopen', 'green after reopen', 'prior head green'])('R1: close, push, stale reopen — %s dispatches once with current card totals', async timing => {
     const { corners, headSha: oldHead, app, payload } = await scope1.checksFixture();
     const corner = corners[0]!;
+    // Locked standing threads survive PR closure and can associate a reopened PR.
+    await scope1.database.query(`UPDATE corner_facts SET locked=true WHERE corner_id=$1`, [corner]);
     // Reopen dispatch requires a reviewer distinct from the implementer.
     const implementer = 'c'.repeat(64);
     await scope1.database.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Implementer')`, [implementer]);

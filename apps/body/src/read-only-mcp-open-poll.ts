@@ -366,7 +366,6 @@ async function executeResourceTool(name: string, args: JsonObject, toolCallId: s
     case 'approve_merge':
     case 'set_thread_hold':
     case 'close_thread': return execute(name, addressed);
-    case 'close_thread_pr': return execute('close_pull_request', addressed);
     case 'request_grant':
       if ((args.mode ?? args.action) === 'list') return execute('list_grants');
       if (args.mode !== undefined && args.mode !== 'request') throw new Error('mode must be request or list');

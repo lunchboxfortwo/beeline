@@ -218,30 +218,6 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
   });
 
 
-  it('R1 closes a legacy archived corner PR without reopening the corner or waking work', async () => {
-    const cornerId = await inReview();
-    const pr = (await rootFixture.db.query(`SELECT lifecycle->'pr' pr FROM corner_facts WHERE corner_id=$1`, [cornerId])).rows[0]!.pr;
-    // Recreate a corner archived by the old close path, with its PR still recorded.
-    await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=lifecycle-'pr'-'checksSummary' WHERE corner_id=$1`, [cornerId]);
-    await rootFixture.daemon.execute('archiveCorner', { cornerId }, A);
-    await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{pr}',$2::jsonb) WHERE corner_id=$1`, [cornerId, JSON.stringify(pr)]);
-    await rootFixture.db.query(`INSERT INTO corner_merge_approvals(corner_id,approved_by,pull_request_number,head_sha) VALUES($1,$2,7,$3)`, [cornerId, B, SHA]);
-    const before = (await rootFixture.db.query(`SELECT lifecycle-'pr' lifecycle FROM corner_facts WHERE corner_id=$1`, [cornerId])).rows[0]!.lifecycle;
-    const wiredDaemon = new DaemonService(rootFixture.db, new LiveHub(), undefined, undefined, false, undefined, false, undefined,
-      undefined, undefined, undefined, undefined, undefined, undefined, undefined,
-      undefined, undefined, undefined, undefined, (id: string) => rootFixture.github.closeCornerPullRequest(id));
-    await expect(wiredDaemon.execute('closeCornerPullRequest', { cornerId }, A)).resolves.toMatchObject({ status: 'closed', pullRequestNumber: 7 });
-    expect(rootFixture.githubApp.closePullRequest).toHaveBeenCalledWith(77, 101, 'owner/widgets', 7);
-    expect((await rootFixture.db.query(`SELECT lifecycle FROM corner_facts WHERE corner_id=$1`, [cornerId])).rows[0]!.lifecycle).toEqual(before);
-    expect(await currentState(cornerId)).toBe('archived');
-    expect((await rootFixture.db.query(`SELECT archived_at IS NOT NULL archived FROM rooms WHERE id=$1`, [cornerId])).rows[0]!.archived).toBe(true);
-    expect((await rootFixture.db.query(`SELECT 1 FROM corner_merge_approvals WHERE corner_id=$1`, [cornerId])).rowCount).toBe(0);
-    expect((await rootFixture.db.query(`SELECT 1 FROM agent_commands WHERE room_id=$1 AND action IN ('input','resume') AND state IN ('pending','claimed')`, [cornerId])).rowCount).toBe(0);
-    await expect(wiredDaemon.execute('closeCornerPullRequest', { cornerId }, A)).resolves.toMatchObject({ status: 'blocked', blocker: 'the thread has no pull request' });
-    expect(rootFixture.githubApp.closePullRequest).toHaveBeenCalledTimes(1);
-    console.log('R1 Demonstrated: legacy archived PR closed through daemon service; PR and approval cleared; corner stays closed with no pending work.');
-  });
-
 
   it('does not close or alter a merged corner PR', async () => {
     const cornerId = await inReview();
@@ -254,41 +230,8 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
   });
 
 
-  it('lets any thread member close its pull request without merging; the thread stays open with no PR', async () => {
-    const cornerId = await inReview();
-    const wiredDaemon = new DaemonService(rootFixture.db, new LiveHub(), undefined, undefined, false, undefined, false, undefined,
-      (input, confirmZeroChecks) => rootFixture.github.prChecksStatus(input, confirmZeroChecks), undefined, undefined, undefined, undefined, undefined, undefined,
-      undefined, undefined, undefined, (id: string) => rootFixture.github.landCornerOutcome(id),
-      (id: string) => rootFixture.github.closeCornerPullRequest(id));
-    await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id IN ($1,$3) AND identity_id=$2`, [cornerId, B, R]);
-    await expect(wiredDaemon.execute('closeCornerPullRequest', { cornerId }, B)).rejects.toThrow(/access denied/);
-    expect(rootFixture.githubApp.closePullRequest).not.toHaveBeenCalled();
-    await rootFixture.db.query(`UPDATE memberships SET removed_at=NULL WHERE room_id IN ($1,$3) AND identity_id=$2`, [cornerId, B, R]);
-    // B is a member, not the opener or implementer.
-    await expect(wiredDaemon.execute('closeCornerPullRequest', { cornerId }, B)).resolves.toEqual({
-      status: 'closed', pullRequestNumber: 7, url: expect.stringContaining('/pull/7'),
-    });
-    expect(rootFixture.githubApp.closePullRequest).toHaveBeenCalledWith(77, 101, 'owner/widgets', 7);
-    expect(rootFixture.githubApp.deleteBranch).not.toHaveBeenCalled();
-    const fact = (
-      await rootFixture.db.query<{ pr: unknown; archived: boolean }>(
-        `SELECT fact.lifecycle->'pr' pr,corner.archived_at IS NOT NULL archived
-         FROM corner_facts fact JOIN rooms corner ON corner.id=fact.corner_id WHERE fact.corner_id=$1`,
-        [cornerId],
-      )
-    ).rows[0];
-    expect(fact).toEqual({ pr: null, archived: false });
-    expect(await currentState(cornerId)).toBe('idle');
-    expect(await projected(cornerId)).toBe('idle');
-    await expect(wiredDaemon.execute('mergeCorner', { cornerId }, A))
-      .resolves.toEqual({ status: 'blocked', blocker: 'the thread has no pull request' });
-    await expect(wiredDaemon.execute('closeCornerPullRequest', { cornerId }, B))
-      .resolves.toEqual({ status: 'blocked', blocker: 'the thread has no pull request' });
-    expect(rootFixture.githubApp.closePullRequest).toHaveBeenCalledTimes(1);
-  });
 
-
-  it.each(['checks', 'implement'])('closing a PR from %s resets the run and cancels its yes', async state => {
+  it.each(['checks', 'implement'])('closing a PR from %s archives the run and cancels its yes', async state => {
     const cornerId = await inReview();
     await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{checks}',to_jsonb($2::text)) WHERE corner_id=$1`,
       [cornerId, state === 'checks' ? 'pending' : 'failing']);
@@ -299,10 +242,10 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
     await rootFixture.db.query(`INSERT INTO corner_merge_approvals(corner_id,approved_by,pull_request_number,head_sha) VALUES($1,$2,7,$3)`,
       [cornerId, B, SHA]);
     await rootFixture.github.closeCornerPullRequest(cornerId);
-    expect(await currentState(cornerId)).toBe(state === 'checks' ? 'idle' : 'working');
-    expect(await projected(cornerId)).toBe(state === 'checks' ? 'idle' : 'working');
+    expect(await currentState(cornerId)).toBe('archived');
+    expect(await projected(cornerId)).toBe('archived');
     expect((await rootFixture.db.query(`SELECT 1 FROM corner_merge_approvals WHERE corner_id=$1`, [cornerId])).rowCount).toBe(0);
-    expect(rootFixture.githubApp.deleteBranch).not.toHaveBeenCalled();
+    expect(rootFixture.githubApp.deleteBranch).toHaveBeenCalled();
   });
 
 
@@ -317,7 +260,7 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
   });
 
 
-  it('an unmerged GitHub close returns a legacy waiting corner to implement, once', async () => {
+  it('an unmerged GitHub close archives a legacy waiting corner, once', async () => {
     const cornerId = await inReview();
     await rootFixture.db.query(`UPDATE messages SET card=card||'{"toState":"ask_human","outcome":"changes_requested"}'::jsonb
       WHERE id=(SELECT id FROM messages WHERE room_id=$1 AND card_type=$2 ORDER BY (card->>'seq')::int DESC LIMIT 1)`,
@@ -328,14 +271,14 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
         head: { ref: branchOf(cornerId), sha: SHA }, base: { ref: 'main' } },
     };
     await rootFixture.github.processWebhook('pull_request', event);
-    expect(await currentState(cornerId)).toBe('idle');
-    expect(await projected(cornerId)).toBe('idle');
+    expect(await currentState(cornerId)).toBe('archived');
+    expect(await projected(cornerId)).toBe('archived');
     expect((await rootFixture.db.query(`SELECT lifecycle->'pr' pr FROM corner_facts WHERE corner_id=$1`, [cornerId])).rows[0]!.pr).toBeNull();
     const count = (await cards(cornerId)).length;
     await rootFixture.github.processWebhook('pull_request', event);
 
     expect(rootFixture.githubApp.closePullRequest).not.toHaveBeenCalled();
-    expect(rootFixture.githubApp.deleteBranch).not.toHaveBeenCalled();
+    expect(rootFixture.githubApp.deleteBranch).toHaveBeenCalledTimes(1);
   });
 
 
@@ -346,9 +289,9 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
     rootFixture.githubApp.readPullRequest.mockResolvedValue({ number: 7, url: 'https://github.com/owner/widgets/pull/7',
       headSha: SHA, headRef: branchOf(cornerId), merged: false, state: 'closed', mergeability: 'unknown' });
     await rootFixture.github.prChecksStatus({ cornerId, pullRequest: 7 });
-    expect(await currentState(cornerId)).toBe('idle');
+    expect(await currentState(cornerId)).toBe('archived');
     expect((await rootFixture.db.query(`SELECT lifecycle->'pr' pr FROM corner_facts WHERE corner_id=$1`, [cornerId])).rows[0]!.pr).toBeNull();
-    expect(rootFixture.githubApp.deleteBranch).not.toHaveBeenCalled();
+    expect(rootFixture.githubApp.deleteBranch).toHaveBeenCalledTimes(1);
   });
 
 
@@ -387,7 +330,6 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
       ['getRoomConversation', { roomId: cornerId, limit: 5 }],
       ['listRoomMembers', { roomId: cornerId }],
       ['readCornerPullRequest', { cornerId }],
-      ['closeCornerPullRequest', { cornerId }],
       ['archiveCorner', { cornerId }],
     ] as const)
       await expect(wiredDaemon.execute(operation, input as never, outsider)).rejects.toThrow(/access denied/);
@@ -410,8 +352,6 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
       ...authority, cornerId, expectedRevision: 1,
       brief: { ...brief(turn.sourceMessageId), spec: 'Revised from the Room\n\n## Checklist\n- Ship it', change: 'Room revision' },
     }, B)).resolves.toMatchObject({ revision: 2 });
-    await expect(wiredDaemon.execute('closeCornerPullRequest', { cornerId, roomId: R }, B))
-      .resolves.toMatchObject({ status: 'closed', pullRequestNumber: 7 });
     await wiredDaemon.execute('archiveCorner', { cornerId, roomId: R }, B);
     expect((await rootFixture.db.query(`SELECT archived_at IS NOT NULL archived FROM rooms WHERE id=$1`, [cornerId])).rows[0])
       .toEqual({ archived: true });

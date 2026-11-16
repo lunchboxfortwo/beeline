@@ -1,6 +1,6 @@
 # Archived corner GitHub cleanup
 
-Closing a corner attempts to close its unmerged PR once through `GitHubOperations.closeCornerPullRequest` (`closeCornerPullRequestBestEffort`). A provider failure is logged and never blocks archival; `close_corner_pr` repairs a PR left open. There is no retry queue: in production it never held a row. Closing a PR refuses merged PRs and branches used as the base of an open PR. Closing a corner never merges a PR; archival releases its active merge holds.
+Closing a corner attempts to close its unmerged PR once through `GitHubOperations.closeCornerPullRequest` (`closeCornerPullRequestBestEffort`). A provider failure is logged and never blocks archival. There is no retry queue: in production it never held a row. Closing a PR refuses merged PRs and branches used as the base of an open PR. Closing a corner never merges a PR; archival releases its active merge holds.
 
 The archival caller makes one best-effort branch deletion attempt after its transaction commits. Confirmed merge archival uses the same guarded deletion path; a locked corner stays open and skips deletion. There is no branch-deletion queue, lease, retry timer or background scan. Provider failures are logged and never block archival. Repeated close or merge events do not repeat the deletion attempt.
 

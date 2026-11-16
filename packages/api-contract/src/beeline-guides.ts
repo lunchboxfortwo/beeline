@@ -135,7 +135,6 @@ with holds.
 
 ## Closing
 
-- To drop a pull request but keep the thread and branch for another attempt, call close_thread_pr(address).
 - To end the work, post any required artifacts first, then call close_thread(address).
 `,
   );

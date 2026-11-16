@@ -36,7 +36,7 @@ import { daemonReport, daemonWatchCorner, daemonCornerRemote, daemonCornerPlan, 
 import { daemonRoomAuthority, daemonPermissionAuthority, daemonMissionAuthority, daemonScheduleAuthority, daemonMandate, daemonTargetAuthority } from './authority.js';
 import { daemonCreateAgentSchedule, daemonSetEventSubscriptions, daemonListEventSubscriptions, daemonPostRoomEvent, daemonListAgentSchedules, daemonDeleteAgentSchedule, daemonUpdateAgentSchedule } from './schedules-events.js';
 import { daemonWriteResult, daemonReach, daemonPostCornerMessage, daemonReactToRoomMessage } from './corner-messages.js';
-import { daemonCorners, daemonApproveCornerMerge, daemonCloseCornerPullRequest, daemonMergeCorner, daemonCornerRestore, daemonListCornerBriefRevisions, daemonRepository, daemonTargetBranch } from './corner-reads.js';
+import { daemonCorners, daemonApproveCornerMerge, daemonMergeCorner, daemonCornerRestore, daemonListCornerBriefRevisions, daemonRepository, daemonTargetBranch } from './corner-reads.js';
 import { daemonReviseCornerBrief, daemonCreateCorner, daemonArchiveCorner, daemonEnsureMembership } from './corner-writes.js';
 import { daemonRepositoryOnboardingRequester, daemonRequestAgentGrant, daemonGrantRequester, daemonAskRoomChoice, daemonOpenRoomPoll, daemonListAgentGrants, daemonConsumeAgentGrant, daemonListAgentGrantRequests, daemonAuthorizeSquireCall } from './grants.js';
 import { daemonIdentitySuccession, daemonConfiguration, daemonPresence } from './configuration.js';
@@ -344,11 +344,6 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
       case 'approveCornerMerge':
         return (await daemonApproveCornerMerge(ctx,
           input as Input<'approveCornerMerge'>,
-          authenticatedAgentId,
-        )) as Output<Name>;
-      case 'closeCornerPullRequest':
-        return (await daemonCloseCornerPullRequest(ctx,
-          input as Input<'closeCornerPullRequest'>,
           authenticatedAgentId,
         )) as Output<Name>;
       case 'mergeCorner':

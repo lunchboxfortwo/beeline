@@ -60,7 +60,6 @@ export type CornerEvent =
   | { kind: 'approval'; headSha: string; by: 'reviewer' }
   | { kind: 'merge-refused'; headSha: string; reason: string; confirmedUnmerged?: boolean }
   | { kind: 'merged'; contents: Record<string, unknown> }
-  | { kind: 'pull-request-closed'; number: number }
   | { kind: 'closed' }
   | { kind: 'merge-conflict'; sourceMessageId: string }
   | { kind: 'reconcile' };

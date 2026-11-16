@@ -199,7 +199,6 @@ const daemonOperations = {
   beginRegistryMcpOAuth: true,
   cancelWorkflowRun: true,
   claimRegistryMcpOAuthCode: true,
-  closeCornerPullRequest: true,
   completeProviderWebhookAssignment: true,
   connect: true,
   connectApp: true,

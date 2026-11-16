@@ -54,6 +54,7 @@ export const MCP_AGENT_EXCLUSIONS: Readonly<Record<string, string>> = {
 
 /** A retired tool name answers with its replacement, so an agent holding saved instructions corrects itself on its first call. */
 export const MCP_RETIRED_TOOLS: Readonly<Record<string, string>> = {
+  close_thread_pr: 'use close_thread',
   send_message: 'use reply(id,text) for a delivered message, or message(address,to:{agent,place},text) for a new request',
   order: 'use message(address,to:{agent,place},text)',
   report: 'use reply(id,text) to the message that gave you the task',
@@ -199,7 +200,6 @@ export const MCP_AGENT_TOOLS: Tool[] = [
     address: address('Thread id.'), sourceMessageId: { type: 'string' }, releaseHoldId: { type: 'string', format: 'uuid' },
   }, ['address']),
   tool('close_thread', 'Cancel work and archive a thread.', { address: address('Thread id.') }, ['address']),
-  tool('close_thread_pr', 'Close only a thread\'s pull request, keeping the thread and branch.', { address: address('Thread id.') }, ['address']),
   tool('dispatch_release', 'Dispatch a production Beeline release only on an explicit owner or admin command.', {
     address: address(), inputs: { type: 'object', additionalProperties: { type: 'string', maxLength: 256 } },
   }, ['address']),
@@ -436,7 +436,6 @@ export class RoomsMcpAgentTools {
       }
       case 'set_thread_hold': return turn((_, context) => exec('setCornerHold', { ...context, cornerId: addressArg(args.address), releaseHoldId: args.releaseHoldId, sourceMessageId: args.sourceMessageId }));
       case 'close_thread': return exec('archiveCorner', { cornerId: addressArg(args.address) });
-      case 'close_thread_pr': return exec('closeCornerPullRequest', { cornerId: addressArg(args.address) });
       case 'send_operator_system_dm': return turn((_, context) => exec('sendOperatorSystemDm', { ...context, agentId: member, recipients: args.recipients, text: args.text }));
       case 'read_operator_system_dm': return turn((_, context) => exec('readOperatorSystemDm', { ...context, agentId: member, sendId: args.sendId }));
       case 'dispatch_release': return turn((_, context) => exec('dispatchRoomWorkflow', { ...context, inputs: args.inputs }));

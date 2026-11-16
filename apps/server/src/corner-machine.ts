@@ -92,8 +92,7 @@ export function transitionCorner(
     f.lifecycle?.pr?.headSha ??
     (event.kind === 'push'
       ? event.headSha
-      : event.kind !== 'pull-request-closed' &&
-          f.lifecycle?.checksSummary?.status === 'unknown' &&
+      : f.lifecycle?.checksSummary?.status === 'unknown' &&
           f.lifecycle.checksSummary.fetchStartedAt === undefined
         ? current.headSha
         : undefined);

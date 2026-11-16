@@ -20,8 +20,9 @@ move3_describe('R-SURFACE-DRIFT: AGENT_SURFACE_TOOL_NAMES vs the advertised tool
   const aliases = new Set([...Object.values(move3_REPOSITORY_ROUTES), ...Object.values(move3_SCRATCH_ROUTES),
     ...Object.values(move3_CAPABILITY_ROUTES).flatMap(routes => Object.values(routes))]);
   move3_it('lists no new advertised tool as missing', () => {
+    move3_expect(advertised).not.toContain('close_thread_pr');
     move3_expect(advertised.filter(name => !listed(name))).toEqual([
-      'close_thread_pr', 'dispatch_release', 'read_operator_system_dm', 'report_feedback',
+      'dispatch_release', 'read_operator_system_dm', 'report_feedback',
       'repository_io', 'send_operator_system_dm',
     ]);
   });

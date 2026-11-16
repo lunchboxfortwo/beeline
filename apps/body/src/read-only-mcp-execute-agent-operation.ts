@@ -597,10 +597,6 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
         ...await activeCommandContext(),
         ...(args.inputs === undefined ? {} : { inputs: args.inputs }),
       }));
-    case 'close_pull_request':
-      return JSON.stringify(
-        await daemonExecute('closeCornerPullRequest', { cornerId: targetCornerId(args) }),
-      );
     case 'list_chats':
       return JSON.stringify(await daemonExecute('listRooms', { roomId: agentScheduleRoomId() }));
     case 'list_threads':

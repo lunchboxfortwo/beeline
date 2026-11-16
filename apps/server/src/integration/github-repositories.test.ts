@@ -259,12 +259,12 @@ const fixture = monolithFixture();
     expect(
       (
         await fixture.daemonOperation(
-          'closeCornerPullRequest',
+          'closeCornerPullRequest' as never,
           { roomId: elsewhere, cornerId },
           helperToken,
         )
       ).status,
-    ).toBe(403);
+    ).toBe(404);
     await fixture.database.query(
       `UPDATE memberships SET removed_at=NULL WHERE room_id IN ($1,$2) AND identity_id=$3`,
       [cornerId, ROOM, helper],

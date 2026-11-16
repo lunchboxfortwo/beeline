@@ -1,3 +1,5 @@
+import { deleteCornerBranchBestEffort } from './corner-branch-cleanup.js';
+import { closeCornerState } from './corner-close.js';
 import { readRecordedPullRequest } from './github-missing-pull-request.js';
 import { ExpectedRefusalError } from './command-refusal.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
@@ -13,7 +15,7 @@ import type { SqlDatabase } from './database.js';
 import { GITHUB_SUBJECT, systemLine } from './system-line.js';
 import { withdrawPullRequestMergeApprovals } from './corner-merge-approval.js';
 import { moveStoredCornerHead } from './github-operations-begin-identity.js';
-import { advanceCorner, cornerReviewWokenSql, confirmCornerMergeAuthority, lockCornerLifecycle, cornerMergeGate, cornerMergeability } from './corner-lifecycle.js';
+import { advanceCorner, cornerReviewWokenSql, confirmCornerMergeAuthority, lockCornerLifecycle, lockCornerArchivalAuthority, cornerMergeGate, cornerMergeability } from './corner-lifecycle.js';
 import { queueCornerMergeConflict, reconcileCornerMergeBlockers } from './agent-command.js';
 import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, CornerWebhookTarget, record, mergeConflictKey, hash, text } from './github-operations.js';
 
@@ -352,12 +354,7 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
   }
 
 
-  /**
-   * Close a corner's own pull request without merging (`close_pull_request`).
-   * The branch and its commits stay on GitHub. Clearing the recorded PR keeps
-   * active corners open and repairs legacy archived corners without reopening
-   * them. The merge gate reads "no pull request" until a new one opens.
-   */
+  /** Best-effort provider cleanup used by thread closure. */
   export async function gitHubOperationsCloseCornerPullRequest(ctx: GitHubOperations,
     cornerId: string,
   ): Promise<
@@ -408,33 +405,39 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
   }
 
 
-  /** PR association and run state move together for tool calls and GitHub facts. */
+  /** Forget a PR association under the lifecycle lock, without interpreting provider absence as closure. */
+  export async function forgetCornerPullRequest(database: SqlDatabase, cornerId: string, number: number) {
+    const removed = await database.query<{ archived: boolean; locked: boolean }>(
+      `UPDATE corner_github_cache fact SET lifecycle=(fact.lifecycle-'pr'-'mergeQueue'-'checksSummary')||'{"checks":"unknown"}'::jsonb
+       FROM rooms corner,corner_facts state
+       WHERE fact.corner_id=$1 AND corner.id=fact.corner_id AND state.corner_id=fact.corner_id
+         AND ${cornerRunOutcomeSql('fact.corner_id')} IS DISTINCT FROM 'landed'
+         AND (fact.lifecycle->'pr'->>'number')::int=$2
+       RETURNING corner.archived_at IS NOT NULL archived,state.locked`, [cornerId, number],
+    );
+    if (removed.rowCount) await withdrawPullRequestMergeApprovals(database, cornerId, number);
+    return removed.rows[0];
+  }
+
+  /** A confirmed unmerged close ends the linked work unless it is a locked standing thread. */
   export async function gitHubOperationsRecordClosedCornerPullRequest(ctx: GitHubOperations,
-    cornerId: string,
-    number: number,
-    database: SqlDatabase = ctx.database,
+    cornerId: string, number: number, database: SqlDatabase = ctx.database,
   ): Promise<boolean> {
-    let changed = false;
-    await database.transaction(async db => {
+    let archived = false;
+    const changed = await database.transaction(async db => {
+      archived = false;
       await lockCornerLifecycle(db, cornerId);
-      const removed = await db.query<{ archived: boolean }>(
-        `UPDATE corner_github_cache fact SET
-           lifecycle=(lifecycle-'pr'-'mergeQueue'-'checksSummary')||
-             CASE WHEN corner.archived_at IS NULL THEN '{"lifecycle":"working","checks":"unknown"}'::jsonb
-               ELSE '{}'::jsonb END
-         FROM rooms corner WHERE fact.corner_id=$1 AND corner.id=fact.corner_id
-           AND ${cornerRunOutcomeSql('fact.corner_id')} IS DISTINCT FROM 'landed'
-           AND (fact.lifecycle->'pr'->>'number')::int=$2
-         RETURNING corner.archived_at IS NOT NULL archived`,
-        [cornerId, number],
-      );
-      if (!removed.rowCount) return;
-      changed = true;
-      await withdrawPullRequestMergeApprovals(db, cornerId, number);
-      if (!removed.rows[0]!.archived)
-        await advanceCorner(db, cornerId, { kind: 'pull-request-closed', number });
+      await lockCornerArchivalAuthority(db);
+      const removed = await forgetCornerPullRequest(db, cornerId, number);
+      if (!removed) return false;
+      if (!removed.archived) {
+        if (removed.locked) await advanceCorner(db, cornerId, { kind: 'reconcile' });
+        else archived = (await closeCornerState(db, cornerId)).archived;
+      }
+      return true;
     });
     if (changed) ctx.onRoomChanged?.(cornerId);
+    if (archived) await deleteCornerBranchBestEffort(cornerId, id => ctx.deleteCornerBranch(id));
     return changed;
   }
 

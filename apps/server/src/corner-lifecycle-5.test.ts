@@ -46,11 +46,10 @@ const scope34 = fixtureScope34();
   });
 
 
-  it('keeps the branch after close_thread_pr and deletes after the corner closes', async () => {
+  it('cleans the branch when the linked PR closes the thread', async () => {
     const cornerId = await inReview();
     await rootFixture.github.closeCornerPullRequest(cornerId);
-    expect(rootFixture.githubApp.deleteBranch).not.toHaveBeenCalled();
-    await rootFixture.daemon.execute('archiveCorner', { cornerId }, A);
+    expect(await currentState(cornerId)).toBe('archived');
     expect(rootFixture.githubApp.deleteBranch).toHaveBeenCalledWith(77, 101, 'owner/widgets', branchOf(cornerId));
   });
 
@@ -182,14 +181,14 @@ describe('merge queue (Reproduction R1)', () => {
 const scope35 = fixtureScope35();
 
 
-  it('R1: closing a queued PR keeps the corner open without queue state or further GitHub reads', async () => {
+  it('R1: closing a queued PR archives the corner without queue state or further GitHub reads', async () => {
     const cornerId = await scope35.queued();
     await rootFixture.github.closeCornerPullRequest(cornerId);
     const visible = (await rootFixture.phone.readCorners(R, H))!.corners.find(row => row.corner.id === cornerId);
-    expect(visible).toBeDefined();
+    expect(visible).toBeUndefined();
     expect(visible?.lifecycle.pr).toBeUndefined();
     expect(visible?.lifecycle.mergeQueue).toBeUndefined();
-    expect(await currentState(cornerId)).toBe('idle');
+    expect(await currentState(cornerId)).toBe('archived');
     rootFixture.githubApp.readPullRequest.mockClear();
     rootFixture.githubApp.readPullRequestQueue.mockClear();
     await rootFixture.github.reconcileQueuedCorners();
@@ -231,7 +230,7 @@ const scope35 = fixtureScope35();
 
 
   it.each(['agent close', 'GitHub close', 'missed close webhook'] as const)(
-    'R1: %s clears queued state before reconciling the open corner', async path => {
+    'R1: %s clears queued state and archives the corner', async path => {
       const cornerId = await scope35.queued();
       if (path === 'agent close') {
         await rootFixture.github.closeCornerPullRequest(cornerId);
@@ -249,8 +248,8 @@ const scope35 = fixtureScope35();
       const visible = (await rootFixture.phone.readCorners(R, H))!.corners.find(row => row.corner.id === cornerId);
       expect(visible?.lifecycle.pr).toBeUndefined();
       expect(visible?.lifecycle.mergeQueue).toBeUndefined();
-      expect(await currentState(cornerId)).toBe('idle');
-      expect((await rootFixture.db.query(`SELECT archived_at FROM rooms WHERE id=$1`, [cornerId])).rows[0]!.archived_at).toBeNull();
+      expect(await currentState(cornerId)).toBe('archived');
+      expect((await rootFixture.db.query(`SELECT archived_at FROM rooms WHERE id=$1`, [cornerId])).rows[0]!.archived_at).not.toBeNull();
 
       rootFixture.githubApp.readPullRequest.mockClear();
       rootFixture.githubApp.readPullRequestQueue.mockClear();

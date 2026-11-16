@@ -19,7 +19,7 @@ import type { daemonAuthorizeResource,daemonConnectMcpServer,daemonOfferConnecto
 import type { daemonConnectionDetail,daemonConnectionGrantRevoke,daemonConnectionUsage,daemonConnectorAssignments,daemonConnectorInstall,daemonConnectorStatusReport,daemonConnectorStatusView,daemonConnectorVaultList,daemonConnectorVaultReport,daemonNotifyTailscaleSignIn,daemonResumeRegistrySignIn } from './connectors.js';
 import type { daemonReconcileZeroCheckWorkerCompletion } from './corner-completion.js';
 import type { daemonPostCornerMessage,daemonReach,daemonReactToRoomMessage,daemonWriteResult } from './corner-messages.js';
-import type { daemonApproveCornerMerge,daemonCheckReviewerAuthors,daemonCloseCornerPullRequest,daemonCornerRestore,daemonCorners,daemonListCornerBriefRevisions,daemonMergeCorner,daemonRepository,daemonTargetBranch } from './corner-reads.js';
+import type { daemonApproveCornerMerge,daemonCheckReviewerAuthors,daemonCornerRestore,daemonCorners,daemonListCornerBriefRevisions,daemonMergeCorner,daemonRepository,daemonTargetBranch } from './corner-reads.js';
 import type { daemonBriefAttachmentRooms,daemonCornerPlan,daemonCornerRemote,daemonRenameCorner,daemonReport,daemonTargetProposal,daemonWatchCorner } from './corner-reports.js';
 import type { daemonArchiveCorner,daemonCreateCorner,daemonEnsureMembership,daemonReviseCornerBrief } from './corner-writes.js';
 import type { daemonAskRoomChoice,daemonAuthorizeScopedGrant,daemonAuthorizeSquireCall,daemonConsumeAgentGrant,daemonFindGrantRequester,daemonGrantRequester,daemonListAgentGrantRequests,daemonListAgentGrants,daemonOpenRoomPoll,daemonRepositoryOnboardingRequester,daemonRequestAgentGrant,daemonWriteRoomChoice } from './grants.js';
@@ -111,7 +111,6 @@ export interface DaemonContext extends DaemonDependencies {
   cornerRestore: (...args: CommandArguments<typeof daemonCornerRestore>) => ReturnType<typeof daemonCornerRestore>;
   listCornerBriefRevisions: (...args: CommandArguments<typeof daemonListCornerBriefRevisions>) => ReturnType<typeof daemonListCornerBriefRevisions>;
   mergeCorner: (...args: CommandArguments<typeof daemonMergeCorner>) => ReturnType<typeof daemonMergeCorner>;
-  closeCornerPullRequest: (...args: CommandArguments<typeof daemonCloseCornerPullRequest>) => ReturnType<typeof daemonCloseCornerPullRequest>;
   checkReviewerAuthors: (...args: CommandArguments<typeof daemonCheckReviewerAuthors>) => ReturnType<typeof daemonCheckReviewerAuthors>;
   approveCornerMerge: (...args: CommandArguments<typeof daemonApproveCornerMerge>) => ReturnType<typeof daemonApproveCornerMerge>;
   repository: (...args: CommandArguments<typeof daemonRepository>) => ReturnType<typeof daemonRepository>;
