@@ -3,7 +3,7 @@ import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('react-native', () => ({ Share: { share: vi.fn(async () => ({ action: 'sharedAction' })), sharedAction: 'sharedAction' } }));
+vi.mock('react-native', () => ({ useWindowDimensions: () => ({ height: 844, width: 390 }), Share: { share: vi.fn(async () => ({ action: 'sharedAction' })), sharedAction: 'sharedAction' } }));
 vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));

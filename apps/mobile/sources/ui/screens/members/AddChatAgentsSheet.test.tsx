@@ -3,6 +3,7 @@ import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('react-native', () => ({ useWindowDimensions: () => ({ height: 844, width: 390 }) }));
 vi.mock('tamagui', async () => {
     const hosts = (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts();
     const R = await import('react');

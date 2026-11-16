@@ -12,6 +12,7 @@ vi.mock('@/ui/screens/tags/WorkMarks', () => ({
 vi.mock('@/components/buzz/RepositoryMark', () => ({
   RepositoryMark: (props: any) => React.createElement('RepositoryMark', props),
 }));
+vi.mock('react-native', () => ({ useWindowDimensions: () => ({ height: 844, width: 390 }) }));
 vi.mock('tamagui', async () => (await import('./tamagui-hosts.test-support')).tamaguiHosts());
 vi.mock('lucide-react-native', async () =>
   (await import('./tamagui-hosts.test-support')).lucideHosts(),

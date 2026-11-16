@@ -2,8 +2,6 @@ import React from 'react';
 import type * as Native from 'react-native';
 import { View, Text as NativeText, TextInput as NativeTextInput, type ViewProps } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
-import Reanimated, { useAnimatedStyle } from 'react-native-reanimated';
 import { canvasColor } from '@/buzz/groknight';
 import { useTheme } from 'tamagui';
 import { typeStyle, useTextSize, type ColorToken, type TextSize, type Variant } from './grammar';
@@ -27,20 +25,7 @@ export function ListCell(props: ViewProps) {
     return <View {...props} />;
 }
 
-/**
- * A screen's keyboard-avoiding body: fills the space under the header and pads
- * its bottom by the keyboard, on every platform. It never moves, so nothing in
- * it draws over the header or takes the header's taps while the keyboard opens.
- * The padding reads the app-wide keyboard height, which is live even for a
- * screen that mounts while the keyboard is still closing, so no inset from the
- * previous screen is left behind.
- */
-export function KeyboardBody({ children }: { children?: React.ReactNode }) {
-    const { height } = useReanimatedKeyboardAnimation();
-    const pad = useAnimatedStyle(() => ({ paddingBottom: -height.value }));
-    return <Reanimated.View style={[KEYBOARD_BODY, pad]}>{children}</Reanimated.View>;
-}
-const KEYBOARD_BODY = { flex: 1 } as const;
+export { KeyboardBody } from './grammar';
 
 /**
  * A raw React Native text field, and its hidden measuring twin, in one grammar

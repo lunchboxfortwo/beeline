@@ -5,6 +5,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 
 const dismiss = vi.hoisted(() => vi.fn());
 vi.mock('@/ui/lower-keyboard', () => ({ lowerKeyboard: dismiss }));
+vi.mock('react-native', () => ({ useWindowDimensions: () => ({ height: 844, width: 390 }) }));
 vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 const insets = vi.hoisted(() => ({ top: 24, bottom: 48, left: 0, right: 0 }));

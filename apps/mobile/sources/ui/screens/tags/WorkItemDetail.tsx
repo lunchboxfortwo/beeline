@@ -106,7 +106,7 @@ export function WorkItemDetail({
     }
   };
   return (
-    <YStack gap="3">
+    <YStack gap="3" flexShrink={1} minHeight={0}>
       <SheetScroll>
         <YStack gap="3">
           <XStack gap="2" alignItems="center">
@@ -209,7 +209,7 @@ export function WorkItemDetail({
           </YStack>
         </YStack>
       </SheetScroll>
-      <XStack gap="2" alignItems="flex-end">
+      <XStack gap="2" alignItems="flex-end" flexShrink={0}>
         <Input
           flex={1}
           minWidth={0}

@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
+import { useWindowDimensions } from 'react-native';
 import { lowerKeyboard } from '@/ui/lower-keyboard';
 import {
     Button as TButton,
@@ -16,7 +18,7 @@ import {
 } from 'tamagui';
 import { ArrowLeft, Check, ChevronRight, Copy as CopyIcon, Hash } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, { type AnimatedProps, type AnimatedStyle } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, type AnimatedProps, type AnimatedStyle } from 'react-native-reanimated';
 import type { ColorValue, ViewProps, ViewStyle } from 'react-native';
 import { QR_INK, QR_PAPER, SCRIM } from '@/buzz/groknight';
 
@@ -287,6 +289,22 @@ export function Indent({ depth, children }: { depth: number; children: React.Rea
     return <YStack width="100%" paddingLeft={Math.max(0, depth) * step('4')}>{children}</YStack>;
 }
 
+/**
+ * A screen's keyboard-avoiding body: fills the space under the header and pads
+ * its bottom by the keyboard, on every platform. It never moves, so nothing in
+ * it draws over the header or takes the header's taps while the keyboard opens.
+ * The padding reads the app-wide keyboard height, which is live even for a
+ * screen that mounts while the keyboard is still closing, so no inset from the
+ * previous screen is left behind. Pass maxHeight for a content-sized sheet: its
+ * scroll body shrinks when keyboard padding consumes the available height.
+ */
+export function KeyboardBody({ children, maxHeight }: { children?: React.ReactNode; maxHeight?: number }) {
+    const { height } = useReanimatedKeyboardAnimation();
+    const pad = useAnimatedStyle(() => ({ paddingBottom: -height.value }));
+    return <Animated.View style={[maxHeight === undefined ? KEYBOARD_BODY : { maxHeight, flexShrink: 1 }, pad]}>{children}</Animated.View>;
+}
+const KEYBOARD_BODY = { flex: 1 } as const;
+
 /** The one sheet frame: scrim, handle, title, one step deep with Back. */
 export function SheetFrame({ open, close, title, testID, children, back }: {
     open: boolean; close: () => void; title: string; testID?: string; children: React.ReactNode; back?: () => void;
@@ -310,25 +328,34 @@ export function SheetFrame({ open, close, title, testID, children, back }: {
                 <Sheet.Handle backgroundColor="secondary" opacity={0.5} />
                 <Sheet.Container maxWidth={480} width="100%" alignSelf="center" testID={testID}>
                     <Sheet.Background backgroundColor="raised" borderTopLeftRadius="lg" borderTopRightRadius="lg" borderWidth={1} borderColor="stroke" />
-                    {/* Text-size steps, then the device's physical bottom inset. */}
-                    <YStack padding={step('4')} paddingTop={step('3')} paddingBottom={step('6') + insets.bottom} gap={step('2')}>
-                        <XStack gap={step('2')} alignItems="center" paddingBottom={step('2')} minHeight={HEIGHT.control}>
-                            {back ? <Btn kind="icon" label="Back" onPress={back}><Glyph icon={ArrowLeft} /></Btn> : null}
-                            <T v="title" flex={1}>{title}</T>
-                        </XStack>
-                        {children}
-                    </YStack>
+                    <SheetKeyboardBody>
+                        {/* Text-size steps, then the device's physical bottom inset. */}
+                        <YStack flexShrink={1} minHeight={0} padding={step('4')} paddingTop={step('3')} paddingBottom={step('6') + insets.bottom} gap={step('2')}>
+                            <XStack flexShrink={0} gap={step('2')} alignItems="center" paddingBottom={step('2')} minHeight={HEIGHT.control}>
+                                {back ? <Btn kind="icon" label="Back" onPress={back}><Glyph icon={ArrowLeft} /></Btn> : null}
+                                <T v="title" flex={1}>{title}</T>
+                            </XStack>
+                            {children}
+                        </YStack>
+                    </SheetKeyboardBody>
                 </Sheet.Container>
             </Sheet>
         </Theme>
     );
 }
 
+/** Measure a sheet only after opening, alongside its keyboard-aware body. */
+function SheetKeyboardBody({ children }: { children: React.ReactNode }) {
+    const { height } = useWindowDimensions();
+    const insets = useSafeAreaInsets();
+    const step = useStep();
+    return <KeyboardBody maxHeight={height - insets.top - step('6')}>{children}</KeyboardBody>;
+}
+
 /** Scroll the detail body while its composer stays reachable below it. */
 export function SheetScroll({ children }: { children: React.ReactNode }) {
-    // Load the native hook only when a scrolling sheet is mounted.
-    const { height } = (require('react-native') as typeof import('react-native')).useWindowDimensions();
-    return <ScrollView maxHeight={height * 0.7} keyboardShouldPersistTaps="handled">{children}</ScrollView>;
+    const { height } = useWindowDimensions();
+    return <ScrollView flexShrink={1} minHeight={0} maxHeight={height * 0.7} keyboardShouldPersistTaps="handled">{children}</ScrollView>;
 }
 
 /** One sheet row: an icon column, a label and an optional quiet line, then a chevron when it opens a step. */

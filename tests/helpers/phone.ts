@@ -1,4 +1,4 @@
-vi.mock('react-native-keyboard-controller', () => ({ KeyboardAvoidingView: (props: any) => React.createElement('View', props, props.children) }));
+vi.mock('react-native-keyboard-controller', () => ({ useReanimatedKeyboardAnimation: () => ({ height: { value: 0 } }), KeyboardAvoidingView: (props: any) => React.createElement('View', props, props.children) }));
 import React from 'react';
 import { beforeEach, vi } from 'vitest';
 

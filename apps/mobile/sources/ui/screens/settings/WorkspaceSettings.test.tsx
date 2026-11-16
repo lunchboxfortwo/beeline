@@ -1,6 +1,6 @@
 vi.mock('@expo/vector-icons/Ionicons', async () => { const R = await import('react'); return { default: (props: any) => R.createElement('Ionicons', props) }; });
 vi.mock('expo-haptics', () => ({ ImpactFeedbackStyle: { Light: 'Light' }, impactAsync: async () => undefined }));
-vi.mock('react-native-keyboard-controller', async () => { const R = await import('react'); return { KeyboardAvoidingView: (props: any) => R.createElement('View', props, props.children) }; });
+vi.mock('react-native-keyboard-controller', async () => { const R = await import('react'); return { useReanimatedKeyboardAnimation: () => ({ height: { value: 0 } }), KeyboardAvoidingView: (props: any) => R.createElement('View', props, props.children) }; });
 import * as React from 'react';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
@@ -198,6 +198,7 @@ vi.mock('react-native', async () => {
   const host = (name: string) => (props: any) =>
     ReactModule.createElement(name, props, props.children);
   return {
+    useWindowDimensions: () => ({ height: 844, width: 390 }),
     AppState: { addEventListener: () => ({ remove: () => undefined }) },
     Platform: { get OS() { return platform.OS; }, select: (choices: Record<string, unknown>) => choices[platform.OS] ?? choices.default },
     Pressable: host('Pressable'),

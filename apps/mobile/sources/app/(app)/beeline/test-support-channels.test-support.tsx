@@ -54,7 +54,7 @@ vi.mock('@expo/vector-icons/Ionicons', async () => {
 
 vi.mock('react-native-keyboard-controller', async () => {
   const R = await import('react');
-  return { KeyboardAvoidingView: (props: any) => R.createElement('View', props, props.children) };
+  return { useReanimatedKeyboardAnimation: () => ({ height: { value: 0 } }), KeyboardAvoidingView: (props: any) => R.createElement('View', props, props.children) };
 });
 
 
@@ -126,6 +126,7 @@ vi.mock('react-native', async () => {
     return ReactModule.createElement(name, props, props.children);
   };
   return {
+    useWindowDimensions: () => ({ height: 844, width: 390 }),
     StyleSheet: {
       flatten: (style: any): any =>
         Array.isArray(style)

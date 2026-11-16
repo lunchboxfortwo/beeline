@@ -8,7 +8,7 @@ vi.mock('tamagui', async () => (await import('./tamagui-hosts.test-support')).ta
 vi.mock('lucide-react-native', async () => (await import('./tamagui-hosts.test-support')).lucideHosts());
 vi.mock('react-native-svg', async () => ({ ...(await import('./tamagui-hosts.test-support')).svgHosts(), Line: (props: any) => React.createElement('Line', props) }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
-vi.mock('react-native', () => ({
+vi.mock('react-native', () => ({ useWindowDimensions: () => ({ height: 844, width: 390 }),
   Platform: { OS: 'web' },
   FlatList: ({ data, renderItem, ListFooterComponent, ListEmptyComponent, ...props }: any) => React.createElement('FlatList', props,
     data.length ? data.slice(0, 10).map((item: any, index: number) => React.createElement(React.Fragment, { key: item.key }, renderItem({ item, index }))) : ListEmptyComponent,
