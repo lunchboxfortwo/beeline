@@ -3,6 +3,7 @@ import { appReadErrorCopy } from '@/buzz/app-error-copy';
 import { useEffect, type MutableRefObject } from 'react';
 import { AppState } from 'react-native';
 import { router } from 'expo-router';
+import { finishRestoredRoom } from '@/navigation/restored-page';
 import { KIND_AGENT_DRAFT, LiveOverlayDecoder, isRoomView, type LiveOverlay, type RoomView, type RoomViewMessage } from '@beeline/buzz-client';
 import { RoomViewClient, RoomViewHttpError } from '@/sync/transport/room-view-client';
 import { loadBuzzIdentity, loadBuzzViewerPubkey, peekBuzzViewerContext, getEffectiveRelayUrl } from '@/auth/buzz-identity-storage';
@@ -663,6 +664,10 @@ export function useRoomSurfaceSubscription([
             pendingPaintTracesRef.current = traces;
 
             if (cancelled) return;
+            if (finishRestoredRoom(channelId, view.room.archived !== true)) {
+              router.replace('/');
+              return;
+            }
             roomReadStampRef.current = readStamp;
             reading = false;
             setTransport(nextTransport);
@@ -703,6 +708,10 @@ export function useRoomSurfaceSubscription([
             // A failed read waits for the next subscribed frame or foreground.
             // It does not schedule another read.
             if (terminal) {
+              if (finishRestoredRoom(channelId, false)) {
+                router.replace('/');
+                return;
+              }
               setRoomSurface(null);
               for (const overlay of liveOverlaysRef.current) {
                 if (overlay.kind === 'draft') {

@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import { createConsumedNotificationResponseStore, initialNotificationPath } from '@/push/notification-response';
+import { restoreLastPage } from '@/navigation/last-page';
 
 const consumedResponses = createConsumedNotificationResponseStore(AsyncStorage);
 
@@ -10,5 +11,5 @@ export function redirectSystemPath({ path, initial }: { path: string; initial: b
     getLastResponse: Notifications.getLastNotificationResponseAsync,
     defaultActionIdentifier: Notifications.DEFAULT_ACTION_IDENTIFIER,
     consumedResponses,
-  }) : path;
+  }).then(restoreLastPage) : path;
 }

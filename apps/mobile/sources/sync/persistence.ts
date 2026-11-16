@@ -60,6 +60,17 @@ export function saveLocalSettings(settings: LocalSettings): void {
   mmkv.set('local-settings', JSON.stringify(settings));
 }
 
+/** Device-local navigation, partitioned by server and signed-in account. */
+export function loadLastPage(scope: string): string | null {
+  return mmkv.getString(`last-page:${scope}`) ?? null;
+}
+
+export function saveLastPage(scope: string, page: string | null): void {
+  const key = `last-page:${scope}`;
+  if (page === null) mmkv.delete(key);
+  else mmkv.set(key, page);
+}
+
 export function storeTempText(content: string): string {
   const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   mmkv.set(`temp_text_${id}`, content);

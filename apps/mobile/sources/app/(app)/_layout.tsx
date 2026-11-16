@@ -9,6 +9,7 @@ import { CornerOpenToast } from '@/components/buzz/CornerOpenToast';
 import { useIsDesktop } from '@/utils/responsive';
 import { PhoneTabScreen } from '@/ui/shell/PhoneTabScreen';
 import { WorkspaceTabShell } from '@/ui/shell/WorkspaceTabShell';
+import { useRememberLastPage } from '@/navigation/use-remember-last-page';
 
 /** @public Expo Router consumes this named export through its filesystem convention. */
 export const unstable_settings = {
@@ -29,6 +30,7 @@ function SessionRequired() {
 }
 
 export default function RootLayout() {
+  useRememberLastPage();
   const isDesktop = useIsDesktop();
   const t = useTheme();
   const dark = useThemeName().startsWith('dark');
