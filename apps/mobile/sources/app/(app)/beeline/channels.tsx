@@ -38,7 +38,6 @@ import { parseCommunityInviteToken } from '@/buzz/community-invite';
 import { parseReviewSecret } from '@/buzz/review-link';
 import { subscribeClientReset } from '@/sync/client-reset';
 
-export const AGE_TICK_MS = 60_000;
 const ROW_HEIGHT = 64;
 
 /** The first Workspace view: quiet orientation, then two restrained actions. */

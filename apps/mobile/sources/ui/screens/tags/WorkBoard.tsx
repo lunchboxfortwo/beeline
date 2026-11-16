@@ -10,6 +10,7 @@ import type {
 import { IdentityMark } from '@/components/buzz/IdentityMark';
 import { Btn, Glyph, HEIGHT, T } from '@/ui/grammar';
 import { TabHeader, useScrolledUnder } from '@/ui/shell/TabHeader';
+import { compactRelativeTime } from '@/buzz/relative-time';
 import { WorkSheet } from './WorkItemDetail';
 import { WorkStateMark } from './WorkMarks';
 
@@ -91,7 +92,7 @@ function source(item: WorkItemView) {
     : `#${chat}`;
 }
 /** Each Needs you row owns one question and its answer buttons. */
-function AskCard({ item, actions }: { item: WorkItemView; actions: WorkBoardActions }) {
+function AskCard({ item, actions, now }: { item: WorkItemView; actions: WorkBoardActions; now: number }) {
   const [reply, setReply] = useState('');
   const [busy, setBusy] = useState(false);
   const ask = item.ask!;
@@ -127,6 +128,7 @@ function AskCard({ item, actions }: { item: WorkItemView; actions: WorkBoardActi
         <T v="meta" color="secondary" flex={1} numberOfLines={1}>
           {source(item)}
         </T>
+        <T v="meta" color="secondary">{compactRelativeTime(ask.createdAt, now)}</T>
         {count > 1 ? (
           <YStack borderWidth={1} borderColor="stroke" borderRadius="full" paddingHorizontal="2">
             <T v="meta" color="secondary">{`${count} asks`}</T>
@@ -404,7 +406,7 @@ export function WorkBoard({
     />
   );
   const needsBody = needs.length ? (
-    needs.map((item) => <AskCard key={item.id} item={item} actions={actions} />)
+    needs.map((item) => <AskCard key={item.id} item={item} actions={actions} now={now} />)
   ) : (
     <YStack paddingHorizontal="6" paddingTop="8" paddingBottom="5" gap="1" alignItems="center" testID="work-calm">
       <T v="heading" textAlign="center">

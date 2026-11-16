@@ -9,12 +9,10 @@ import { mobileSurfaceCache, surfaceAddress } from '@/buzz/surface-storage';
 import { clientResetGeneration } from '@/sync/client-reset';
 import { RoomViewClient } from '@/sync/transport/room-view-client';
 import { isWorkspaceListView } from '@beeline/buzz-client';
-import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
 import { startTransition, useCallback, useEffect } from 'react';
 import { AppState } from 'react-native';
-import { AGE_TICK_MS } from './channels';
-import { afterFirstFrame } from '@/navigation/initial-landing';
+import { useRelativeTimeRefresh } from '@/buzz/use-relative-time-refresh';
 import type { DeckState } from './useChannelsRouteState';
 
 /** The deck's live watch, covering reads and visit clock; the hook paints nothing itself. */
@@ -209,21 +207,8 @@ export function useChannelsSubscriptions(
   }, [drawn, identity, relayUrl, transport, selectedId, deckVisible, refreshMissed, retryGeneration]);
 
 
-  useFocusEffect(
-    useCallback(() => {
-      deckFocusedRef.current = true;
-      // Back reveals the retained list first; catch-up and age labels must not
-      // rebuild its rows during the navigation commit.
-      const cancelFrame = afterFirstFrame(() => {
-        refreshMissed();
-        setAgeNow(Date.now());
-      });
-      const timer = setInterval(() => setAgeNow(Date.now()), AGE_TICK_MS);
-      return () => {
-        deckFocusedRef.current = false;
-        cancelFrame();
-        clearInterval(timer);
-      };
-    }, [activeCommunityId, refreshMissed]),
-  );
+  useRelativeTimeRefresh(setAgeNow, refreshMissed, useCallback(() => {
+    deckFocusedRef.current = true;
+    return () => { deckFocusedRef.current = false; };
+  }, [activeCommunityId, refreshMissed]));
 }

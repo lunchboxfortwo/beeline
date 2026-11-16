@@ -1,3 +1,4 @@
+import { useRelativeTimeRefresh } from '@/buzz/use-relative-time-refresh';
 import { PageLoader } from '@/ui/PageLoader';
 import { sendWorkReply } from '@/buzz/work-board-reply';
 import { useCallback, useMemo, useState } from 'react';
@@ -35,6 +36,8 @@ export default function TrayScreen() {
   const unavailable = useWorkBoardUnavailable(workspaceId);
   const noWorkspace = unavailable || (!workspaceId && active === null);
   useLatencyRouteFrame('/beeline/tray', Boolean(board), true);
+  const [now, setNow] = useState(() => Date.now());
+  useRelativeTimeRefresh(setNow);
   const [error, setError] = useState<string | null>(null);
   const execute = useCallback(
     async (work: () => Promise<void>) => {
@@ -164,7 +167,7 @@ export default function TrayScreen() {
           </Btn>
         </YStack>
       ) : board ? (
-        <WorkBoard key={workspaceId} board={board} desktop={desktop} actions={actions} />
+        <WorkBoard key={workspaceId} board={board} desktop={desktop} actions={actions} now={now} />
       ) : (
         <PageLoader />
       )}

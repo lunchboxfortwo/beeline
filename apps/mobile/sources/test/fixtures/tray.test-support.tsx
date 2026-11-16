@@ -4,6 +4,7 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, vi } from 'vitest';
 import type { WorkBoardView, WorkItemView } from '@beeline/api-contract/phone';
 import TrayScreen from '@/app/(app)/beeline/tray';
+vi.mock('@/buzz/use-relative-time-refresh', () => ({ useRelativeTimeRefresh: () => undefined }));
 vi.mock('tamagui', async () =>
   (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts(),
 );

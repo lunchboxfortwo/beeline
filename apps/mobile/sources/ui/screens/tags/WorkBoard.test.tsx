@@ -36,3 +36,41 @@ it('expands Done on tap and collapses it on the next tap', () => {
         expect(rows()).toHaveLength(0);
     } finally { act(() => tree.unmount()); }
 });
+
+
+it.each([false, true])('renders each ask kind with its asking time on desktop=%s and refreshes from now', (desktop) => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    const now = 1_800_000_000_000;
+    const person = { pubkey: 'agent', kind: 'agent' as const, name: 'Jellybean' };
+    const approvals = [
+        { kind: 'choice' as const, actor: 'Jellybean', ask: 'asks', subject: 'Which surface?', literal: false,
+          actions: [{ kind: 'choice' as const, label: 'Phone', choiceId: 'choice', optionId: 'phone' }] },
+        undefined,
+        { kind: 'grant' as const, actor: 'Jellybean', ask: 'asks to run', subject: 'npm test', literal: true,
+          actions: [{ kind: 'grant' as const, label: 'Allow once', grantId: 'grant', decision: 'once' as const }] },
+    ];
+    const ages = [120, 3 * 3600, 2 * 86400];
+    const board: WorkBoardView = {
+        workspaceId: 'ws', workspaceName: 'Crew', viewerId: 'viewer', chats: [], people: [],
+        items: approvals.map((approval, index) => ({
+            id: String(index), roomId: 'chat', chatId: 'chat', chatName: 'general', threadName: 'Launch',
+            title: 'Launch', state: 'needs-you', openedBy: person, assignee: null,
+            createdAt: 1, updatedAt: now / 1000,
+            ask: { messageId: String(index), workspaceId: 'ws', roomId: 'chat', roomName: 'general',
+                roomKind: 'room', text: 'Please report progress?', createdAt: now / 1000 - ages[index]!, approval },
+        })),
+    };
+    const actions = { open: vi.fn(), reply: vi.fn(), decide: vi.fn(), assign: vi.fn(), clear: vi.fn(), clearAll: vi.fn() };
+    let tree: any;
+    const render = (at: number) => <WorkBoard board={board} desktop={desktop} actions={actions} now={at} />;
+    act(() => { tree = create(render(now)); });
+    const cardText = (index: number) => tree.root
+        .find((n: any) => typeof n.type === 'string' && n.props.testID === `work-ask-${index}`)
+        .findAll((n: any) => n.type === 'Text')
+        .flatMap((n: any) => [n.props.children].flat(Infinity));
+    try {
+        ['2m', '3h', '2d'].forEach((stamp, index) => expect(cardText(index)).toContain(stamp));
+        act(() => tree.update(render(now + 60_000)));
+        expect(cardText(0)).toContain('3m');
+    } finally { act(() => tree.unmount()); }
+});
