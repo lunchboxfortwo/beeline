@@ -122,16 +122,23 @@ export function readGrantScript(
 
 
 
+/** Legacy action selected the operation; leave display copy to the server. */
+function grantApprovalIntent(args: JsonObject) {
+  const intent = normalizeApprovalIntent(args);
+  return args.mode === undefined && (args.action === 'request' || args.action === 'list')
+    ? { ...intent, action: undefined } : intent;
+}
+
 /** request_grant: one ask, one kind, one target; the server decides yolo vs card. */
 export async function requestGrant(
   args: JsonObject,
   deps: AgentGrantDeps = agentGrantDepsFromEnv(),
 ): Promise<string> {
-  const { action, purpose } = normalizeApprovalIntent(args);
+  const { action, purpose } = grantApprovalIntent(args);
   const kind = stringArg(args, 'kind');
   if (kind === 'shared_asset') {
     if (args.ttl !== undefined) throw new Error('shared asset isolation must be standing');
-    return requestSharedAssetIsolation({ category: args.target, reason: args.reason, action, purpose, touches: args.touches, capabilities: args.capabilities }, deps);
+    return requestSharedAssetIsolation({ ...args, category: args.target }, deps);
   }
   if (!isRequestableAgentGrantKind(kind)) {
     throw new Error(`kind must be one of ${REQUESTABLE_AGENT_GRANT_KINDS.join(', ')}`);
@@ -265,7 +272,7 @@ export async function requestSharedAssetIsolation(
   args: JsonObject,
   deps: AgentGrantDeps = agentGrantDepsFromEnv(),
 ): Promise<string> {
-  const { action, purpose } = normalizeApprovalIntent(args);
+  const { action, purpose } = grantApprovalIntent(args);
   const category = stringArg(args, 'category');
   if (!isSharedAssetCategory(category))
     throw new Error(`category must be one of ${SHARED_ASSET_CATEGORIES.join(', ')}`);

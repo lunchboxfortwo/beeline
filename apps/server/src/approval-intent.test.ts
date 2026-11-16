@@ -23,6 +23,14 @@ describe('approval intent at the posting boundary', () => {
     await expect(operation(ctx, { roomId: 'room', purpose: 'finish the task' } as any, 'agent')).rejects.toThrow('Supply action');
     expect(query).not.toHaveBeenCalled();
   });
+  it.each(['command', 'path', 'host', 'secret', 'device', 'mcp', 'shared_asset'])('accepts omitted grant display action for legacy %s requests', async kind => {
+    const query = vi.fn().mockRejectedValue(new Error('reached database'));
+    const ctx = { database: { query } } as any;
+    await expect(daemonRequestAgentGrant(ctx, { roomId: 'room', kind,
+      target: kind === 'shared_asset' ? 'package-cache' : kind === 'command' ? 'git status' : '/tmp',
+      reason: 'inspect', purpose: 'finish the task' } as any, 'agent')).rejects.toThrow('reached database');
+    expect(query).toHaveBeenCalled();
+  });
   it('returns a plain agent refusal for long copy', () => {
     expect(() => normalizeAgentApprovalIntent({ action: 'word '.repeat(13), purpose: 'finish the task' })).toThrow('Shorten action');
   });

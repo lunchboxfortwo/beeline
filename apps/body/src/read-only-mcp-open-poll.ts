@@ -184,6 +184,8 @@ function withAdjustments(result: string, removed: string[]): string {
 }
 
 export function validateToolInput(tool: ToolDefinition, args: JsonObject): void {
+  if (tool.name === 'request_grant' && args.mode === undefined && (args.action === 'request' || args.action === 'list'))
+    args = { ...args, mode: args.action };
   const requestedAction = args.action;
   const requestedMode = args.mode;
   if (tool.name === 'link_request') normalizeApprovalIntent(args);
@@ -370,7 +372,7 @@ async function executeResourceTool(name: string, args: JsonObject, toolCallId: s
     case 'record_merge_yes': return execute('order_corner_merge', addressed);
     case 'close_corner_pr': return execute('close_pull_request', addressed);
     case 'request_grant':
-      if (args.mode === 'list') return execute('list_grants');
+      if ((args.mode ?? args.action) === 'list') return execute('list_grants');
       if (args.mode !== undefined && args.mode !== 'request') throw new Error('mode must be request or list');
       return execute(name);
     case 'connect': {

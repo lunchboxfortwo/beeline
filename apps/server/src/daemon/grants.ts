@@ -24,7 +24,11 @@ import { daemonWriteResult } from './corner-messages.js';
    * require a person. Budget and repository asks are retired.
    */
   export async function daemonRequestAgentGrant(ctx: DaemonContext, input: Input<'requestAgentGrant'>, agentId: string, requireOwnerApproval = false) {
-    const intent = normalizeAgentApprovalIntent(input);
+    // Legacy request_grant used action as its mode. Keep display action absent
+    // so the existing grant-kind fallback owns the card copy.
+    const legacyIntent = input.action === undefined && isRequestableAgentGrantKind(input.kind);
+    const normalizedIntent = normalizeAgentApprovalIntent({ ...input, action: legacyIntent ? 'request' : input.action });
+    const intent = { ...normalizedIntent, action: legacyIntent ? undefined : normalizedIntent.action };
     for (const field of ['touches', 'capabilities'] as const) {
       const maximum = field === 'touches' && input.kind === 'command' ? 4096 : 240;
       if (input[field] !== undefined && (typeof input[field] !== 'string' || !input[field]!.trim() || input[field]!.trim().length > maximum))

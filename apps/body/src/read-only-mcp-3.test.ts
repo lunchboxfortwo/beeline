@@ -423,12 +423,37 @@ m33_describe('GRANT-VALIDATION-1: advertised request_grant refusals', () => {
     m33_vi.stubEnv('BEELINE_DAEMON_ROOM_ID', 'room-1');
     m33_vi.stubEnv('BEELINE_DAEMON_BASE_URL', 'http://localhost:1234');
     m33_vi.stubEnv('BEELINE_DAEMON_TOKEN', 'test-token');
-    const fetch = m33_vi.fn(async () => Response.json({ grants: [] }));
+    const fetch = m33_vi.fn(async (_url: unknown, _init?: RequestInit) => Response.json({ grants: [] }));
     m33_vi.stubGlobal('fetch', fetch);
     await m33_callAgentTool('request_grant', args, 'valid');
     m33_expect(fetch).toHaveBeenCalledOnce();
   });
 
+
+  m33_it.each(['request', 'list'])('accepts legacy action %s without mode', async action => {
+    m33_vi.stubEnv('BEELINE_DAEMON_ROOM_ID', 'room-1');
+    m33_vi.stubEnv('BEELINE_DAEMON_BASE_URL', 'http://localhost:1234');
+    m33_vi.stubEnv('BEELINE_DAEMON_TOKEN', 'test-token');
+    const fetch = m33_vi.fn(async (_url: unknown, _init?: RequestInit) => Response.json({ grants: [] }));
+    m33_vi.stubGlobal('fetch', fetch);
+    await m33_callAgentTool('request_grant', action === 'list' ? { action } : { ...scope38.valid, mode: undefined, action }, 'legacy');
+    m33_expect(fetch).toHaveBeenCalledOnce();
+    const body = JSON.parse(String(fetch.mock.calls[0]?.[1]?.body));
+    m33_expect(String(fetch.mock.calls[0]?.[0])).toContain(action === 'list' ? 'listAgentGrantRequests' : 'requestAgentGrant');
+    m33_expect(body.action).toBeUndefined();
+  });
+
+  m33_it('preserves the display action when mode is explicit', async () => {
+    m33_vi.stubEnv('BEELINE_DAEMON_ROOM_ID', 'room-1');
+    m33_vi.stubEnv('BEELINE_DAEMON_BASE_URL', 'http://localhost:1234');
+    m33_vi.stubEnv('BEELINE_DAEMON_TOKEN', 'test-token');
+    const fetch = m33_vi.fn(async (_url: unknown, _init?: RequestInit) => Response.json({ grants: [] }));
+    m33_vi.stubGlobal('fetch', fetch);
+    await m33_callAgentTool('request_grant', { ...scope38.valid, mode: 'request', action: 'list' }, 'modern');
+    const body = JSON.parse(String(fetch.mock.calls[0]?.[1]?.body));
+    m33_expect(String(fetch.mock.calls[0]?.[0])).toContain('requestAgentGrant');
+    m33_expect(body.action).toBe('list');
+  });
 
   m33_it('does not echo unknown field names or request values', async () => {
     await m33_expect(m33_callAgentTool('request_grant', { ...scope38.valid, 'private-marker': 'private-value' }, 'unknown'))

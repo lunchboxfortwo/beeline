@@ -684,11 +684,7 @@ export function runResourceFacade(env: NodeJS.ProcessEnv = process.env): void {
       try {
         let upstream = message;
         if (target === 'squire') {
-          try { upstream = squireApprovalCall(message); }
-          catch (error) {
-            if (message.id !== undefined) process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: message.id, error: { code: -32602, message: error instanceof Error ? error.message : 'Supply action and purpose.' } })}\n`);
-            return;
-          }
+          upstream = squireApprovalCall(message);
           if (message.method === 'tools/list' && message.id !== undefined) squireRequests.set(JSON.stringify(message.id), { message });
         }
         if (!(await authorizeResourceMessage(message, target, authFile, spendsGrant, undefined, transport.signal)))

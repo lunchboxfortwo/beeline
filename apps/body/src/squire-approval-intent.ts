@@ -1,4 +1,4 @@
-import { APPROVAL_ACTION_SCHEMA, APPROVAL_PURPOSE_SCHEMA, normalizeApprovalIntent } from '@beeline/api-contract/phone';
+import { APPROVAL_ACTION_SCHEMA, APPROVAL_PURPOSE_SCHEMA } from '@beeline/api-contract/phone';
 
 const APPROVAL_TOOLS = new Set([
   'connect', 'fetch_credential', 'inject_card', 'edit_credential', 'delete_credential',
@@ -17,18 +17,17 @@ export function squireApprovalSchemas(response: Record<string, unknown>): Record
     const schema = object(tool.inputSchema);
     return { ...tool, inputSchema: { ...schema,
       properties: { ...object(schema.properties), action: APPROVAL_ACTION_SCHEMA, purpose: APPROVAL_PURPOSE_SCHEMA },
-      required: [...new Set([...(Array.isArray(schema.required) ? schema.required : []), 'action', 'purpose'])],
+      required: (Array.isArray(schema.required) ? schema.required : []).filter(field => field !== 'action' && field !== 'purpose'),
     } };
   }) } };
 }
 
-/** Validate before executing; keep the original call for the approval relay. */
+/** Strip display intent upstream; keep the original call for the approval relay. */
 export function squireApprovalCall(message: Record<string, unknown>): Record<string, unknown> {
   if (message.method !== 'tools/call') return message;
   const params = object(message.params);
   if (!APPROVAL_TOOLS.has(String(params.name))) return message;
   const args = object(params.arguments);
-  normalizeApprovalIntent(args);
   const { action: _action, purpose: _purpose, ...upstream } = args;
   return { ...message, params: { ...params, arguments: upstream } };
 }
