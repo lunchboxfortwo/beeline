@@ -702,15 +702,15 @@ describe.skipIf(!url)('atomic claims replace advisory serialization', () => {
     await first.query(`INSERT INTO identities(id,kind,name) VALUES($1,'human','Owner'),($2,'agent','First'),($3,'agent','Second')`,[owner,...agents]);
     await first.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$3),($2,$3)`,[...agents,owner]);
     await first.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Something failed')`,[source,room,owner]);
-    const command={room_id:room,source_message_id:source,turn_request_id:'feedback-request'} as CommandRow;
+    const input={roomId:room,requestId:'feedback-request',category:'bug',summary,toolName};
     let writer=0;
     const saved=await overlap(db=>{
       const agent=agents[writer++]!;
-      return db.transaction(tx=>reportAgentFeedback(tx,command,agent,{category:'bug',summary,toolName}));
+      return db.transaction(tx=>reportAgentFeedback(tx,agent,input));
     },'INSERT INTO feedback_items(');
     expect(saved[0]).toEqual({itemId:expect.any(String),duplicate:false});
     expect(saved[1]).toEqual({itemId:saved[0]!.itemId,duplicate:true});
-    expect(await reportAgentFeedback(first,command,agents[0]!,{category:'bug',summary,toolName})).toEqual(saved[1]);
+    expect(await reportAgentFeedback(first,agents[0]!,input)).toEqual(saved[1]);
     const rows=(await first.query<{reporter_identity_id:string;occurrence_count:number;occurrences:{agentId:string}[]}>(
       'SELECT reporter_identity_id,occurrence_count,occurrences FROM feedback_items WHERE id=$1',[saved[0]!.itemId])).rows;
     expect(rows).toHaveLength(1);

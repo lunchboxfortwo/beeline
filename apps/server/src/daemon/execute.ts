@@ -112,7 +112,6 @@ import { sendMessage,replyToMessage } from '../agent-messaging.js';
       'handoff',
       'archiveWorkflow',
       'assignWorkflowRole',
-      'reportFeedback',
       'notifyFeedbackFixed',
       'sendOperatorSystemDm',
       'readOperatorSystemDm',

@@ -15,6 +15,7 @@ import {
   type NotifyFeedbackFixedResult,
   type ReportFeedbackInput,
   type ReportFeedbackResult,
+  type TurnOutputAuthority,
 } from '@beeline/api-contract/daemon';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import type { CommandRow } from './agent-command.js';
@@ -234,15 +235,15 @@ async function roomWorkspace(database: SqlDatabase, roomId: string): Promise<str
 }
 
 /**
- * `report_feedback`, from inside the agent's authorized turn. The same
+ * `report_feedback`, from an agent's Room. Task command context is evidence,
+ * not permission to report a problem with that task. The same
  * category, tool and normalized summary match any open agent item. Every
  * explicit report retains its evidence as an occurrence.
  */
 export async function reportAgentFeedback(
   database: SqlDatabase,
-  command: CommandRow,
   agentId: string,
-  input: ReportFeedbackInput,
+  input: ReportFeedbackInput & TurnOutputAuthority,
 ): Promise<ReportFeedbackResult> {
   if (!(FEEDBACK_AGENT_CATEGORIES as readonly string[]).includes(input.category))
     throw new Error(`category must be one of ${FEEDBACK_AGENT_CATEGORIES.join(', ')}`);
@@ -265,10 +266,15 @@ export async function reportAgentFeedback(
   const versions = await agentReportVersions(database,agentId);
   const owner = (await database.query<{owner_id:string}>(
     'SELECT owner_id FROM agents WHERE agent_id=$1',[agentId])).rows[0]?.owner_id;
-  const workspaceId=await roomWorkspace(database,command.room_id);
-  const messageIds=await evidenceMessageIds(database,command.room_id,command.source_message_id);
-  const occurrence={agentId,roomId:command.room_id,triggerMessageId:command.source_message_id,
-    requestId:command.turn_request_id,messageIds,promptSectionIds,summary,detail:detail??null,errorExcerpt:errorExcerpt??null,
+  const workspaceId=await roomWorkspace(database,input.roomId);
+  const requestId=input.requestId??null;
+  const triggerMessageId=(await database.query<{source_message_id:string|null}>(
+    `SELECT source_message_id FROM agent_commands
+     WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3
+     ORDER BY created_at DESC,id DESC LIMIT 1`,[input.roomId,agentId,requestId])).rows[0]?.source_message_id??null;
+  const messageIds=await evidenceMessageIds(database,input.roomId,triggerMessageId);
+  const occurrence={agentId,roomId:input.roomId,triggerMessageId,
+    requestId,messageIds,promptSectionIds,summary,detail:detail??null,errorExcerpt:errorExcerpt??null,
     helperVersion:versions.helperVersion,harness:versions.harness,harnessVersion:versions.harnessVersion};
   const stored = await database.query<{id:string;occurrence_count:number}>(`INSERT INTO feedback_items(
     id,source_kind,reporter_identity_id,reporter_owner_id,workspace_id,room_id,
@@ -279,8 +285,8 @@ export async function reportAgentFeedback(
       DO UPDATE SET occurrence_count=feedback_items.occurrence_count+1,last_occurrence_at=now(),
         occurrences=feedback_items.occurrences || jsonb_build_array($21::jsonb || jsonb_build_object('createdAt',now()))
     RETURNING id,occurrence_count`,[
-    feedbackItemId(),agentId,owner??null,workspaceId,command.room_id,command.source_message_id,messageIds,
-    command.turn_request_id,input.category,summary,summaryKey,detail??null,toolName??null,errorExcerpt??null,
+    feedbackItemId(),agentId,owner??null,workspaceId,input.roomId,triggerMessageId,messageIds,
+    requestId,input.category,summary,summaryKey,detail??null,toolName??null,errorExcerpt??null,
     promptSectionIds,versions.helperVersion,versions.appVersion,versions.appPlatform,versions.harness,versions.harnessVersion,
     JSON.stringify(occurrence),
   ]);

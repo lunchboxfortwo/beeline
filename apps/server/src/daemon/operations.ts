@@ -854,13 +854,10 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
           input as Input<'walletContractCall'>,
         )) as Output<Name>;
       // The feedback loop (`feedback.ts`). Any agent may report from its own
-      // turn; only a configured System sender's agent may close the loop.
+      // Room; only a configured System sender's agent may close the loop.
       case 'reportFeedback':
-        if (!ctx.commandTransaction || !ctx.authorizedCommand)
-          throw new Error('feedback reports require an active command');
         return (await reportAgentFeedback(
           ctx.database,
-          ctx.authorizedCommand,
           authenticatedAgentId,
           input as Input<'reportFeedback'>,
         )) as Output<Name>;
