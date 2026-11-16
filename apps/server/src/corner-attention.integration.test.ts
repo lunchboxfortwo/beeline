@@ -334,8 +334,8 @@ it('Reproduction CORNER-REVIEW-ROLE: a dispatched reviewer stays Review after Ro
   // The review gap notice now reaches the commander in this corner; no idle alert joins it.
   expect((await commanderFlags()).filter(c=>c.source.body.includes(' is idle.'))).toHaveLength(0);
   await end(REVIEWER,40);
-  // A terminal review without a verdict returns ownership to the implementer.
-  expect(await serviceStates()).toEqual(['working','working']);
+  // With no reviewer configured, the completed turn creates no review handback.
+  expect(await serviceStates()).toEqual(['idle','idle']);
   console.info('Demonstrated CORNER-REVIEW-ROLE: getCornerRestoreState and PhoneService.readCorners preserve Review across reviewer settings changes, then leave Review on turn completion');
 });
 

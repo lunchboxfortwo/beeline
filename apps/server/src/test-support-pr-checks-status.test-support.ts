@@ -261,6 +261,8 @@ beforeEach(async () => {
     throw new Error(`unexpected GitHub request: ${url}`);
   });
   operations = new GitHubOperations(db, {} as GitHubOAuthClient, app, 'secret');
+  // These fixtures exercise reads; server landing has its own provider-flow coverage.
+  vi.spyOn(operations, 'landCorner').mockResolvedValue(false);
   daemon = new DaemonService(
     db,
     new LiveHub(),

@@ -197,7 +197,7 @@ const scope1 = fixtureScope1();
     expect(
       (
         await scope1.database.query<{ reason: string }>(
-          `SELECT reason FROM agent_commands WHERE room_id=$1 AND reason<>'corner_objective'`,
+          `SELECT reason FROM agent_commands WHERE room_id=$1 AND reason='corner_merge_conflict'`,
           [corner],
         )
       ).rows,
@@ -205,13 +205,13 @@ const scope1 = fixtureScope1();
     readPullRequest.mockResolvedValueOnce(confirmDirty);
     await operations.processWebhook('pull_request', dirty);
     expect(
-      (await scope1.database.query(`SELECT 1 FROM agent_commands WHERE room_id=$1 AND reason<>'corner_objective'`, [corner])).rowCount,
+      (await scope1.database.query(`SELECT 1 FROM agent_commands WHERE room_id=$1 AND reason='corner_merge_conflict'`, [corner])).rowCount,
     ).toBe(1);
     await scope1.database.query(`DELETE FROM agent_commands WHERE room_id=$1 AND reason<>'corner_objective'`, [corner]);
     readPullRequest.mockResolvedValueOnce(confirmDirty);
     await operations.processWebhook('pull_request', dirty);
     expect(
-      (await scope1.database.query(`SELECT 1 FROM agent_commands WHERE room_id=$1 AND reason<>'corner_objective'`, [corner])).rowCount,
+      (await scope1.database.query(`SELECT 1 FROM agent_commands WHERE room_id=$1 AND reason='corner_merge_conflict'`, [corner])).rowCount,
     ).toBe(1);
     readCommitCheckRollup.mockResolvedValue({
       state: 'failed',

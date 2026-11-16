@@ -6,7 +6,6 @@ import { createAgentCommand } from './agent-command.js';
 import { computerViewToken,createComputerSession } from './computer-session.js';
 import { announceAgentLifecycle } from './connection-presence.js';
 import { setCornerHold } from './corner-holds.js';
-import { recordPersonMergeYes } from './corner-merge-approval.js';
 import { LiveHub } from './live.js';
 import {
 AGENT_OWNER_AUTHORITY_MESSAGE,
@@ -185,9 +184,7 @@ describe('permissions: agent owner, Workspace admin, or anyone in the chat', () 
     ).not.toMatch(/room access denied|admin/i);
   });
 
-  it('merge yes, holds and thread close follow the Workspace role, never the chat role', async () => {
-    await expect(recordPersonMergeYes(database, corner, ROOM_ADMIN)).rejects.toThrow('owner or admin');
-    await expect(recordPersonMergeYes(database, corner, WS_ADMIN)).resolves.toMatchObject({ recorded: true });
+  it('holds and thread close follow the Workspace role, never the chat role', async () => {
 
     const roomAdminHold = await database.transaction((db) => setCornerHold(db, { cornerId: corner }, ROOM_ADMIN));
     const adminHold = await database.transaction((db) => setCornerHold(db, { cornerId: corner }, WS_ADMIN));

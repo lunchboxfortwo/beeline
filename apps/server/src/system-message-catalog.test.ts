@@ -170,7 +170,6 @@ describe('retired chat notices', () => {
       'agent-command.failed-queued-dropped-by-a-stop-the-running-turn-was-cancelled',
       'agent-command.order-was',
       'agent-command.orders-were',
-      'agent-command.blocked-pr-is-a-draft-marking-it-ready-for-review-failed',
       'github-operations.passed',
       'github-operations.started',
       'github-operations.cancelled',

@@ -4,11 +4,11 @@ import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { PATH, WALLS_FILE, WALL_BUILDER_FILE, judgeWalls, productionWallSites } from './check-walls.mjs';
+import { PATH, MERGE_FILES, WALLS_FILE, WALL_BUILDER_FILE, judgeWalls, productionWallSites } from './check-walls.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 function copy() {
   const target = mkdtempSync(resolve(tmpdir(), 'walls-'));
-  for (const file of [WALLS_FILE, WALL_BUILDER_FILE, ...PATH.map(entry => entry.file)])
+  for (const file of new Set([WALLS_FILE, WALL_BUILDER_FILE, ...PATH.map(entry => entry.file), ...MERGE_FILES]))
     cpSync(resolve(root, file), resolve(target, file), { recursive: true });
   return target;
 }
@@ -27,6 +27,26 @@ function mutation(name, file, find, code) {
   });
 }
 test('the tree passes without a per-line exception list', () => assert.deepEqual(judgeWalls(root), []));
+mutation('a seventh merge condition fails', 'apps/server/src/corner-lifecycle-review-state.ts',
+  'const reasons = [', "const reasons = [input.draft ? 'draft' : '',");
+mutation('a new refusal for an existing condition fails', 'apps/server/src/corner-lifecycle-review-state.ts',
+  'the corner is closed', 'the corner needs more evidence');
+mutation('an extra condition cannot hide behind an approved refusal', 'apps/server/src/corner-lifecycle-review-state.ts',
+  'input.archived ?', '(input.archived || input.draft) ?');
+mutation('a refusal cannot bypass the fixed merge reasons', 'apps/server/src/corner-lifecycle-review-state.ts',
+  'const reasons = [', "if (input.draft) return { mergeAllowed: false, blockedReason: 'draft' }; const reasons = [");
+mutation('a refusal cannot be appended after the fixed merge reasons', 'apps/server/src/corner-lifecycle-review-state.ts',
+  '].filter(Boolean);', "].concat('more evidence');");
+mutation('a new live stage fails', 'apps/server/src/github-operations-read-pr-checks-status.ts',
+  "('checking' as const)", "('awaiting-consent' as const)");
+mutation('a new wire stage fails', 'packages/api-contract/src/daemon-operations-daemon-operation-map.ts',
+  "stage: 'building'", "stage: 'awaiting-consent' | 'building'");
+mutation('a new machine state fails', 'apps/server/src/corner-machine.ts',
+  "state: 'working' | 'idle'", "state: 'awaiting-consent' | 'working' | 'idle'");
+mutation('a new lifecycle fallback state fails', 'apps/server/src/corner-lifecycle.ts',
+  "state: machine?.state ?? 'idle'", "state: machine?.state ?? 'awaiting-consent'");
+mutation('implementer lookup cannot gain an admission gate', 'apps/server/src/corner-worker.ts',
+  '  return `${factAlias}.implementer_agent_id`;', "  if (factAlias === 'blocked') throw new Error('no');\n  return `${factAlias}.implementer_agent_id`;");
 for (const [name, code] of [
   ['refusal', "if (item.reason === 'schedule') throw new Error('paused');"],
   ['aliased refusal', "const denied = new Error('paused'); throw denied;"],

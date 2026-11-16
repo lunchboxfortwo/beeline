@@ -23,7 +23,7 @@ let db: PgliteDatabase, daemon: DaemonService, phone: PhoneService;
 let order: AgentCommand;
 let ready = false;
 let held = false;
-const checks = vi.fn(async () => ({ stage: 'waiting_for_yes' as const, checks: 'passed' as const, checkCount: 1,
+const checks = vi.fn(async () => ({ stage: 'checking' as const, checks: 'passed' as const, checkCount: 1,
   checkStates: { passed: 1, pending: 0, failed: 0, unlisted: 0, pendingNames: [], failedNames: [] },
   pullRequest: 'https://github.com/owner/widgets/pull/42', headSha: '9'.repeat(40), approved: ready,
   reviewer: '@reviewer', reviewerExists: true, reviewerWake: { status: 'dispatched' as const, detail: '' },

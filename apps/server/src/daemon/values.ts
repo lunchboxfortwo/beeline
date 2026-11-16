@@ -375,7 +375,6 @@ export const DAEMON_OPERATION_ROUTES: Record<keyof DaemonOperationMap, true> = {
   postVaultSaveCard: true,
   createCorner: true,
   setCornerHold: true,
-  orderCornerMerge: true,
   archiveCorner: true,
   ensureAgentMembership: true,
   getWalletToolState: true,

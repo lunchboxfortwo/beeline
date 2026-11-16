@@ -97,31 +97,7 @@ const scope2 = fixtureScope2();
   });
 
 
-  it('keeps waiting on a clean verdict GitHub computed against a stale base', async () => {
-    rootFixture.rollupState = null;
-    rootFixture.mergeableState = 'clean';
-    rootFixture.pullBaseSha = 'e'.repeat(40);
-    const after = await scope2.finishPrTurn(rootFixture.mainHead);
-    expect(after.lifecycle.pr).toMatchObject({ mergeability: 'unknown', baseSha: rootFixture.mainHead });
-    expect(after.lifecycle.checks).not.toBe('passing');
-    expect(after.reviewer).toEqual([]);
-  });
-
-
-  it('keeps waiting while GitHub is still computing mergeability', async () => {
-    rootFixture.rollupState = null;
-    rootFixture.mergeableState = 'unknown';
-    rootFixture.pullBaseSha = rootFixture.mainHead;
-    const after = await scope2.finishPrTurn(rootFixture.mainHead);
-    expect(after.lifecycle.pr.mergeability).toBe('unknown');
-    expect(after.lifecycle.checks).not.toBe('passing');
-    expect(after.lifecycle.checksSummary).toBeUndefined();
-    expect(after.reviewer).toEqual([]);
-    expect(after.worker).toEqual([]);
-  });
-
-
-  it('keeps waiting when the mergeability read fails', async () => {
+  it('keeps waiting when the live pull request read fails', async () => {
     rootFixture.rollupState = null;
     rootFixture.mergeableState = 'clean';
     rootFixture.pullBaseSha = rootFixture.mainHead;

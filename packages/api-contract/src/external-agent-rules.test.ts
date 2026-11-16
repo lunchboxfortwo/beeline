@@ -18,7 +18,7 @@ describe('outside-agent rules', () => {
     for (const surface of ['mcp', 'session'] as const) {
       const text = externalAgentRules(surface);
       for (const rule of ['commandId', 'not a plain', 'Choose the terminal status', 'server adds its status prefix', "asker's exact @handle", 'one step up',
-        'Code work belongs in a corner', 'approve_merge on the exact head SHA', 'post short progress there', 'Nothing you write only'])
+        'Code work belongs in a thread', 'approve_merge on the exact head SHA', 'post short progress there', 'Nothing you write only'])
         expect(text).toContain(rule);
     }
   });

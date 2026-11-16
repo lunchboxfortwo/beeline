@@ -298,7 +298,7 @@ const scope1 = fixtureScope1();
     const result = await operations.prChecksStatus({ cornerId: corners[0]! });
     // Repairing the unknown snapshot commits the green transition; the wake
     // reports the resulting dispatch, without a self-review special case.
-    expect(result).toMatchObject({ stage: 'waiting_for_yes', checks: 'passed', reviewerWake: { status: 'dispatched' } });
+    expect(result).toMatchObject({ stage: 'checking', checks: 'passed', reviewerWake: { status: 'dispatched' } });
     expect(result).not.toHaveProperty('recordedChecks');
   });
 
@@ -514,6 +514,7 @@ const scope1 = fixtureScope1();
       `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'owner')`,
       [workspace, room, candy],
     );
+    await scope1.database.query(`UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1`, [room, candy]);
     // Both agents belong to the parent Room; the corner still needs its own
     // recorded PR before any check event can refresh that head.
     await scope1.database.transaction(async (tx) => {

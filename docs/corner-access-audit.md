@@ -25,7 +25,7 @@ The inventory below includes every production query call site referencing physic
 | [corner-follow.ts](../apps/server/src/corner-follow.ts) | `backfillCornerFollows` | — |
 | [corner-holds.ts](../apps/server/src/corner-holds.ts) | `setCornerHold` | — |
 | [corner-lifecycle.ts](../apps/server/src/corner-lifecycle.ts) | `cornerMergeGate`, `loadCorner` | — |
-| [corner-merge-approval.ts](../apps/server/src/corner-merge-approval.ts) | `isZeroCheckCommander`, `recordPersonMergeYes` | — |
+| [corner-merge-approval.ts](../apps/server/src/corner-merge-approval.ts) | `recordCornerMergeApproval` | — |
 | [corner-person-state.ts](../apps/server/src/corner-person-state.ts) | `migrateCornerPersonState` | `setRoomEventSubscriptions` |
 | [corner-reviewer.ts](../apps/server/src/corner-reviewer.ts) | `setCornerReviewer` | — |
 | [daemon-service.ts](../apps/server/src/daemon-service.ts) | `access`, `agentAvatar`, `authorizeScopedGrant`, `bootstrap`, `connectedAppForTool`, `connectorInstall`, `connectorVaultReport`, `corners`, `createCorner`, `deleteAgentSchedule`, `ensureMembership`, `execute`, `linkSpendApproval`, `listAgentSchedules`, `listEventSubscriptions`, `modelCatalog`, `postAddressAccess`, `postRoomEvent`, `reach`, `releaseReadiness`, `report`, `requestAgentGrant`, `reviewSourceAccess`, `reviseCornerBrief`, `roomAuthority`, `roomMembers`, `roomMessage`, `scheduleIndex`, `squireApproval`, `targetAuthority`, `updateAgentSchedule`, `watchCorner`, `workspaceRoster` | `agentAvatar`, `ensureMembership` |

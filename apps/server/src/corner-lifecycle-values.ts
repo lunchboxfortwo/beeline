@@ -29,6 +29,8 @@ export type RevisionWake = { queued: boolean; agentId?: string; reason?: string 
 
 export type CornerAdvance = {
   archived?: boolean;
+  /** Claimed once for this PR head; the caller lands after commit. */
+  land?: boolean;
   state: string | undefined;
   accepted: boolean;
   wake?: RevisionWake;
@@ -53,8 +55,9 @@ export type CornerEvent =
     }
   /** Checks started again on the same head (a re-run); the verdict that follows is reported as `checks`. */
   | { kind: 'checks-pending' }
-  /** A yes on this head: a reviewer's PASS or a person's order, landed by the caller. */
-  | { kind: 'approval'; headSha: string; by: 'reviewer' | 'person' }
+  | { kind: 'hold-released' }
+  /** The configured reviewer's PASS on this head; the server lands after commit. */
+  | { kind: 'approval'; headSha: string; by: 'reviewer' }
   | { kind: 'merge-refused'; headSha: string; reason: string; confirmedUnmerged?: boolean }
   | { kind: 'merged'; contents: Record<string, unknown> }
   | { kind: 'pull-request-closed'; number: number }

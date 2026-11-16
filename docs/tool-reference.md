@@ -2,7 +2,7 @@
 
 For external MCP calls serving an order, pass its delivered `id` as `commandId`
 on tool calls and the final `report`. This preserves that order's requester and
-renews its lease; `record_merge_yes` records that requester's consent. Without
+renews its lease. Without
 it, existing one-call behavior remains. An ambiguous report fallback asks for
 the intended command id.
 
@@ -47,8 +47,7 @@ writable. Corners keep the watcher so edits are reflected as work proceeds.
 | `react_to_message`        | React to a message with a supported emoji                                                      |
 | `no_reply_needed`         | End a wake that needs no message                                                               |
 | `approve_merge`           | Configured reviewer PASS on the exact head SHA                                                 |
-| `record_merge_yes`        | Record an authorized person's explicit merge yes                                               |
-| `merge_thread`            | Land a corner through the live gate                                                            |
+| `merge_thread`            | Land a thread through the live gate                                                            |
 | `set_thread_hold`         | Set or release a merge hold                                                                    |
 | `close_thread`            | Cancel work and archive a corner                                                               |
 | `close_thread_pr`         | Close only a corner's pull request                                                             |

@@ -203,27 +203,4 @@ describe('Tasks tab', () => {
     });
     expect(textOf(tree)).not.toContain('Skip');
   });
-  it('opens the thread at the asking message, and uses Merge for a waiting PR', async () => {
-    const item = ask();
-    serve([
-      {
-        ...item,
-        ask: {
-          ...item.ask!,
-          approval: {
-            kind: 'merge',
-            actor: 'Jellybean',
-            ask: 'asks',
-            subject: 'Merge the reply changes?',
-            literal: false,
-          },
-        },
-      },
-    ]);
-    const tree = await renderTags();
-    await press(tree, 'Open #beeline ↳ latency-coverage');
-    expect(state.push).toHaveBeenCalledWith({ roomId: 'thread', messageId: 'ask' });
-    await press(tree, 'Merge');
-    expect(state.operation).toHaveBeenCalledWith('approveCornerMerge', { cornerId: 'thread' });
-  });
 });

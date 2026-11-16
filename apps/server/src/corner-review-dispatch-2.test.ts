@@ -67,14 +67,14 @@ describe('corner message attribution', () => {
   });
 
 
-  it('returns missing review configuration to the implementer', async () => {
+  it('does not request approval when no reviewer is configured', async () => {
     await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
     await greenHead(24, '8'.repeat(40));
     await rootFixture.db.query(`DELETE FROM agent_commands WHERE room_id=$1 AND agent_id=$2`, [C, B]);
     await rootFixture.db.query(`UPDATE rooms SET reviewer_agent_id=NULL WHERE id=$1`, [R]);
     await reconcileConfiguredCornerReviewers(rootFixture.db, R);
     expect(await commands(B, C)).toHaveLength(0);
-    expect((await commands(A, C)).map(command => command.reason)).toContain('corner_review_needed');
+    expect((await commands(A, C)).map(command => command.reason)).not.toContain('corner_review_needed');
     expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND card_type='corner-merge-yes'`, [C])).rowCount).toBe(0);
   });
 
@@ -246,7 +246,7 @@ describe('corner message attribution', () => {
   });
 
 
-  it('treats a reviewer removed from the parent Room as no reviewer and wakes the implementer', async () => {
+  it('treats a reviewer removed from the parent Room as no reviewer without an approval handback', async () => {
     await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
     await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [
       R,
@@ -276,9 +276,7 @@ describe('corner message attribution', () => {
         [C],
       )
     ).rows;
-    // The commander's report about its own corner wakes it in that corner too.
-    expect(routed.map(row => `${row.agent_id === A}:${row.reason}`).sort()).toEqual(['true:corner_review_needed']);
-    expect((await commands(A, C)).find(command => command.reason === 'corner_review_needed')?.source.body).toContain('no reviewer is configured');
+    expect(routed).toEqual([]);
     expect(
       (
         await rootFixture.db.query<{ text: string }>(
@@ -288,7 +286,7 @@ describe('corner message attribution', () => {
       ).rows.map((row) => row.text),
     ).toEqual([]);
     expect((await commands(A,R)).filter(command=>command.reason==='attention_report')
-      .some(command=>command.private && command.source.body.includes('no reviewer is configured'))).toBe(true);
+      .some(command=>command.private && command.source.body.includes('no reviewer is configured'))).toBe(false);
   });
 
 
@@ -557,71 +555,6 @@ it('Reproduction REVIEW-LOOP: a current member tag reaches a reviewer after an e
   const routed=await routeAgentResult(rootFixture.db,{...parent,agent_id:A,review_context:{...parent.review_context,purpose:'repair'}},'retry-tag',{roomId:C,agentId:A});
   expect(routed).toEqual({woken:['goosy'],notWoken:[]});
 });
-
-
-it.each(['PASS: screenshots are attached here.', 'PASS: no blockers; screenshots attached here.',
-  'PASS: no blockers and screenshots attached here.', 'PASS: no blockers screenshots attached here.',
-  'PASS: please merge screenshots attached here.', 'PASS: screenshots attached here, no blockers.',
-  'PASS: screenshots attached here; please merge.', 'PASS: screenshots attached here; the PR has no blockers.'])(
-  'Reproduction REVIEW-LOOP: absent attachments refuse the claim: %s', async text => {
-  await rootFixture.phone.execute('updateRoom',{roomId:R,reviewerAgentId:B},H);
-  const head='f'.repeat(40);
-  await greenHead(93,head);
-  const [review]=await commands(B,C);
-  await claim(review!);
-  await result(review!,text);
-  await expect(rootFixture.daemon.execute('approveCornerMerge',{cornerId:C,headSha:head},B)).rejects.toThrow(/missing.*attachment/i);
-  // Guard an approval that was recorded before the claiming report arrived.
-  await rootFixture.db.query(`INSERT INTO corner_merge_approvals(corner_id,approved_by,pull_request_number,head_sha)
-    VALUES($1,$2,93,$3)`,[C,B,head]);
-  const {cornerMergeGate}=await import('./corner-lifecycle.js');
-  const gate=await cornerMergeGate(rootFixture.db,C,{number:93,headSha:head});
-  expect(gate.open).toBe(false);
-  expect(gate).toMatchObject({evidenceMissing:true});
-});
-
-
-it.each(['Screenshots in the PR show the result.', 'No screenshots are attached.',
-  'Please attach screenshots before merging.', 'Screenshots should be attached.',
-  'The PR has screenshots attached.', 'Screenshots are not attached.', 'Screenshots are missing; please attach files.',
-  'No screenshots attached, but the checks pass.', 'The attached screenshots in the PR show the result.'])(
-  'Reproduction REVIEW-LOOP: discussing evidence is not a delivery claim: %s', async text => {
-    await rootFixture.phone.execute('updateRoom',{roomId:R,reviewerAgentId:B},H);
-    const head='1'.repeat(40);
-    await greenHead(94,head);
-    const [review]=await commands(B,C);
-    await claim(review!);
-    await result(review!,`PASS: reviewed. ${text}`);
-    await expect(rootFixture.daemon.execute('approveCornerMerge',{cornerId:C,headSha:head},B)).resolves.toMatchObject({status:'approved'});
-  });
-
-
-it.each(['final','report'])(
-  'Reproduction REVIEW-LOOP: %s attachment claims require files on that review', async delivery => {
-    await rootFixture.phone.execute('updateRoom',{roomId:R,reviewerAgentId:B},H);
-    const head='2'.repeat(40);
-    await greenHead(95,head);
-    const [review]=await commands(B,C);
-    await claim(review!);
-    if(delivery==='report') {
-      await rootFixture.daemon.execute('report',{ roomId:C, requestId:review!.turnRequestId, status:'done', text:'done: PASS. Screenshots are attached here.' },B);
-    } else await result(review!,'PASS: screenshots attached.');
-    await expect(rootFixture.daemon.execute('approveCornerMerge',{cornerId:C,headSha:head},B)).rejects.toThrow(/missing.*attachment/i);
-    // A file on an unrelated older message must not satisfy this verdict.
-    await rootFixture.db.query(`INSERT INTO messages(id,room_id,author_id,text,attachments) VALUES
-      ('unrelated-file',$1,$2,'Earlier file','[{"name":"older.png","url":"https://example.test/old.png"}]')`,[C,B]);
-    await expect(rootFixture.daemon.execute('approveCornerMerge',{cornerId:C,headSha:head},B)).rejects.toThrow(/missing.*attachment/i);
-    if(delivery==='final') {
-      await rootFixture.db.query(`UPDATE messages SET attachments='[{"name":"proof.png","url":"https://example.test/proof.png"}]'
-        WHERE request_id=$1`,[review!.turnRequestId]);
-    } else {
-      const reportId=(await rootFixture.db.query<{id:string}>('SELECT result_message_id id FROM agent_commands WHERE id=$1',[review!.id])).rows[0]!.id;
-      await rootFixture.db.query(`UPDATE messages SET attachments='[{"name":"proof.png","url":"https://example.test/proof.png"}]' WHERE id=$1`,[reportId]);
-      await rootFixture.db.query(`UPDATE agent_commands SET private_payload=jsonb_set(private_payload,'{attachments}',
-        '[{"name":"proof.png","url":"https://example.test/proof.png"}]') WHERE id=$1`,[reportId]);
-    }
-    await expect(rootFixture.daemon.execute('approveCornerMerge',{cornerId:C,headSha:head},B)).resolves.toMatchObject({status:'approved'});
-  });
 
 
 it.each(['complete','failed'] as const)('Reproduction review-1: a delivered repair order is a verdict even without a final reply or report (%s)', async status => {

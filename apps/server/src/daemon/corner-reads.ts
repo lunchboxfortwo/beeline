@@ -3,12 +3,11 @@ import { cornerObjectiveSql } from '../corner-objective.js';
 import { cornerFeatureBranch } from '../corner-branch.js';
 import { cornerKindSql, cornerOpenedFromSql, cornerRequestSql } from '../corner-opening.js';
 import { cornerOwnerSql } from '../corner-worker.js';
-import { missingReviewAttachments } from '../review-evidence.js';
-import { assertIndependentCornerReviewer } from '../corner-reviewer.js';
+import { assertIndependentCornerReviewer, cornerReviewerSql } from '../corner-reviewer.js';
 import { CommandRefusalError } from '../commander.js';
 import { activeCornerHolds } from '../corner-holds.js';
 import { cornerFactsSql, cornerRowState, type CornerStateRow } from '../chat-corner-counts.js';
-import { CornerVerdictRejectedError, recordCornerMergeApproval, isZeroCheckCommander } from '../corner-merge-approval.js';
+import { CornerVerdictRejectedError, recordCornerMergeApproval } from '../corner-merge-approval.js';
 import { cornerImplementerSql } from '../corner-worker.js';
 import { CORNER_BRIEF_REVISION_SELECT, type CornerBriefRow, currentCornerBrief, projectCornerBrief } from '../corner-brief.js';
 import { type SqlDatabase } from '../database.js';
@@ -113,6 +112,8 @@ import { daemonIdentity, daemonAccess } from './access.js';
            lm.presentation last_type,left(lm.text,280) last_excerpt
          FROM rooms c ${facts.joins}
          LEFT JOIN corner_merge_approvals approval ON approval.corner_id=c.id
+           AND approval.approved_by=(SELECT ${cornerReviewerSql('c', 'parent')} FROM rooms parent WHERE parent.id=c.parent_id)
+           AND approval.approved_by IS DISTINCT FROM ${cornerImplementerSql('f', 'c')}
          WHERE c.id=$1 AND f.corner_id IS NOT NULL`,
         [cornerId, agentId],
       )
@@ -194,16 +195,14 @@ import { daemonIdentity, daemonAccess } from './access.js';
   }
 
   /**
-   * The implementer starts its own merge through the one merge path
-   * (`landCorner`). Only the corner's implementer may call it; it merges only
+   * Any reachable agent may call the one merge path (`landCorner`); it merges only
    * when `pr_checks_status` reports `mergeAllowed`, and otherwise names the
    * blocker.
    */
   export async function daemonMergeCorner(ctx: DaemonContext, input: Input<'mergeCorner'>, agentId: string): Promise<Output<'mergeCorner'>> {
     const corner = (
-      await ctx.database.query<{ worker_agent_id: string | null; head_sha: string | null; archived: boolean }>(
-        `SELECT ${cornerImplementerSql('fact', 'corner')} worker_agent_id,
-                ${cornerLifecycleSql('fact.corner_id')}->'pr'->>'headSha' head_sha,
+      await ctx.database.query<{ head_sha: string | null; archived: boolean }>(
+        `SELECT ${cornerLifecycleSql('fact.corner_id')}->'pr'->>'headSha' head_sha,
                 corner.archived_at IS NOT NULL archived
          FROM corner_facts fact JOIN rooms corner ON corner.id=fact.corner_id
          WHERE fact.corner_id=$1`,
@@ -216,7 +215,7 @@ import { daemonIdentity, daemonAccess } from './access.js';
     if (!ctx.prChecksStatus)
       return { status: 'blocked', blocker: corner.archived ? 'the thread is closed' : 'GitHub is not configured on this server' };
     const gate = await ctx.prChecksStatus({ cornerId: input.cornerId });
-    if (!gate.mergeAllowed && !(gate.blockedReason === 'PR is a draft' && gate.checks === 'passed' && gate.approved && !gate.held)) {
+    if (!gate.mergeAllowed) {
       return { status: 'blocked', blocker: gate.blockedReason ?? 'the merge gate is closed', holds: gate.holds };
     }
     if (!ctx.landCorner) return { status: 'blocked', blocker: 'GitHub is not configured on this server' };
@@ -225,7 +224,7 @@ import { daemonIdentity, daemonAccess } from './access.js';
     if (landed.status === 'not-attempted')
       return { status: 'blocked', blocker, holds: await activeCornerHolds(ctx.database, input.cornerId) };
     if (landed.status === 'refused') return { status: 'blocked', blocker: landed.reason };
-    return { status: landed.status === 'queued' ? 'queued' : 'merge-started', headSha: corner.head_sha };
+    return { status: landed.status === 'queued' ? 'queued' : 'merge-started', headSha: gate.headSha };
   }
 
 
@@ -255,12 +254,10 @@ import { daemonIdentity, daemonAccess } from './access.js';
 
 
   /**
-   * The reviewer's PASS (or the commander's yes on a completed zero-check head
-   * without a reviewer), from any reachable corner turn: nothing
+   * The reviewer's PASS from any reachable corner turn: nothing
    * here depends on how the reviewer's session booted. The server authorizes
    * the caller and the exact head, records the yes, and reports it to the
-   * corner lifecycle in the same transaction, which wakes the implementer to
-   * merge.
+   * corner lifecycle in the same transaction. The server lands after commit.
    */
   export async function daemonCheckReviewerAuthors(ctx: DaemonContext, db: SqlDatabase, cornerId: string, agentId: string) {
     const pr = (await db.query(`SELECT 1 FROM corner_github_cache WHERE corner_id=$1
@@ -288,11 +285,10 @@ import { daemonIdentity, daemonAccess } from './access.js';
           [input.cornerId],
         )
       ).rows[0];
-      if (!target || (!(await isCornerReviewer(db, input.cornerId, agentId)) &&
-        !(await isZeroCheckCommander(db, input.cornerId, agentId))))
+      if (!target || !(await isCornerReviewer(db, input.cornerId, agentId)))
         throw new CornerVerdictRejectedError(
           'NOT_CONFIGURED_REVIEWER',
-          "only this thread's configured reviewer (or the chat reviewer when unset), or its zero-check commander, can record PASS; set reviewer with revise_thread",
+          "only this thread's configured reviewer (or the chat reviewer when unset) can record PASS; set reviewer with revise_thread",
         );
       if (!target.pull_request_number || !target.head_sha)
         throw new CornerVerdictRejectedError('NO_PULL_REQUEST', 'thread has no pull request');
@@ -303,8 +299,6 @@ import { daemonIdentity, daemonAccess } from './access.js';
         );
       await assertIndependentCornerReviewer(db, input.cornerId, agentId,
         (id, reviewer) => daemonCheckReviewerAuthors(ctx, db, id, reviewer));
-      if (await missingReviewAttachments(db, input.cornerId, {headSha: target.head_sha, number: target.pull_request_number}, agentId))
-        throw new CommandRefusalError('missing review attachments: attach the screenshots or files claimed by the verdict',409);
       await recordCornerMergeApproval(db, {
         cornerId: input.cornerId,
         approvedBy: agentId,
@@ -318,15 +312,18 @@ import { daemonIdentity, daemonAccess } from './access.js';
         status: 'approved' as const,
       };
     });
-    // A reviewer's PASS lands at once through the one merge path, like a
-    // person's yes. The live gate still decides: pending checks, a hold or a
-    // brief without repository work leave the recorded yes waiting.
+    // A reviewer's PASS lands through the same path as the other gate events. Pending checks or a hold leave the PASS recorded until
+    // their next event opens the gate.
     if (ctx.landCorner) {
-      try {
-        await ctx.landCorner(input.cornerId);
-      } catch (error) {
-        console.error(`[server] reviewer PASS on thread ${input.cornerId} did not land:`, error);
-      }
+      const land = async () => {
+        try {
+          await ctx.landCorner!(input.cornerId);
+        } catch (error) {
+          console.error(`[server] reviewer PASS on thread ${input.cornerId} did not land:`, error);
+        }
+      };
+      if (ctx.afterCommit) ctx.afterCommit(land);
+      else await land();
     }
     return approved;
   }

@@ -38,15 +38,13 @@ async function anotherRoom(workspace = W, reviewer = B, archived = false) {
 }
 
 describe.each(removals)('%s clears departed reviewers atomically', (_name, remove) => {
-  it('clears the Room and corner override; a green head takes the existing no-reviewer path', async () => {
+  it('clears the Room and corner override; a green head needs no review handback', async () => {
     const corner = await configureReviewer();
     await remove(rootFixture.db, B);
     expect(await reviewers(corner)).toEqual({ room_reviewer: null, corner_reviewer: null });
     await greenHead(corner, 7, SHA);
     const notices = (await commands(A, corner)).filter(command => command.reason === 'corner_review_needed');
-    expect(notices).toHaveLength(1);
-    expect(notices[0]!.source.body).toContain('no reviewer is configured');
-    expect(notices[0]!.source.body).not.toContain('unreachable');
+    expect(notices).toHaveLength(0);
     expect((await rootFixture.db.query(`SELECT 1 FROM agent_commands WHERE room_id=$1 AND agent_id=$2
       AND reason IN ('corner_review_dispatch','subscribed_event')`, [corner, B])).rowCount).toBe(0);
   });

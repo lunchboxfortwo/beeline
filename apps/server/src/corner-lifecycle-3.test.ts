@@ -86,7 +86,7 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
   });
 
 
-  it('opens the gate only for a yes from the configured reviewer or a Workspace admin, on the current head with no hold', async () => {
+  it('opens the gate only for a yes from the configured reviewer only, on the current head with no hold', async () => {
     const peer = 'f'.repeat(64);
     await rootFixture.db.query(`INSERT INTO identities(id,kind,name) VALUES($1,'human',$1) ON CONFLICT DO NOTHING`, [peer]);
     await rootFixture.db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$2,'member') ON CONFLICT DO NOTHING`, [W, peer]);
@@ -107,23 +107,23 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
     await rootFixture.db.query(`UPDATE corner_merge_approvals SET head_sha=$2 WHERE corner_id=$1`, [staleHead, '9'.repeat(40)]);
     await rootFixture.db.query(`UPDATE corner_merge_approvals SET approved_by=$2 WHERE corner_id=$1`, [authorYes, A]);
     await rootFixture.db.query(`UPDATE corner_merge_approvals SET approved_by=$2 WHERE corner_id=$1`, [memberYes, peer]);
-    const opened = [reviewerYes, briefEdited, workerYoloOff, personYes];
+    const opened = [reviewerYes, briefEdited, workerYoloOff];
     for (const cornerId of [...opened, held, unapproved, staleHead, authorYes, memberYes]) {
       const gate = await cornerMergeGate(rootFixture.db, cornerId, { number: 7, headSha: SHA });
       expect(gate.open).toBe(opened.includes(cornerId));
-      expect(gate.approved).toBe(cornerId !== unapproved && cornerId !== staleHead && cornerId !== authorYes && cornerId !== memberYes);
+      expect(gate.approved).toBe(cornerId !== unapproved && cornerId !== staleHead && cornerId !== authorYes && cornerId !== memberYes && cornerId !== personYes);
       expect(gate).not.toHaveProperty('isWorkerYolo');
       expect(gate).not.toHaveProperty('expressMergeOrdered');
       expect(gate).not.toHaveProperty('approvalPending');
     }
     const status = await rootFixture.github.prChecksStatus({ cornerId: reviewerYes });
-    expect(status).toMatchObject({ stage: 'waiting_for_yes', approved: true, held: false, mergeAllowed: true });
+    expect(status).toMatchObject({ stage: 'checking', approved: true, held: false, mergeAllowed: true });
     expect(status).not.toHaveProperty('rule');
     expect(status).not.toHaveProperty('recordedChecks');
   });
 
 
-  it('Reproduction R5c: a departed self-reviewer cannot authorize a merge', async () => {
+  it('Reproduction R5c: a departed self-reviewer cannot call merge; the gate no longer requires a reviewer', async () => {
     await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: A }, H);
     const cornerId = await open('owner/widgets');
     await greenHead(cornerId, 7, SHA);
@@ -132,7 +132,7 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
     rootFixture.githubRollupState = 'passed';
     // One reviewer list: a reviewer who left the parent Room is no reviewer.
     expect(await cornerMergeGate(rootFixture.db, cornerId, { number: 7, headSha: SHA }))
-      .toMatchObject({ reviewerExists: false, approved: false, open: false });
+      .toMatchObject({ reviewerExists: false, approved: false, open: true });
     await advanceCorner(rootFixture.db, cornerId, { kind: 'reconcile' });
     expect((await rootFixture.db.query(`SELECT text FROM messages WHERE room_id=$1 AND text LIKE '%could not be reached%'`, [cornerId])).rows)
       .toHaveLength(0);
@@ -529,80 +529,9 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
     rootFixture.githubHead = SHA;
     rootFixture.githubRollupState = 'passed';
     expect(await rootFixture.github.prChecksStatus({ cornerId })).toMatchObject({
-      stage: 'waiting_for_yes', approved: false, mergeAllowed: false,
+      stage: 'checking', approved: false, mergeAllowed: false,
     });
     expect(rootFixture.githubApp.mergePullRequest).not.toHaveBeenCalled();
-  });
-});
-describe('Reproduction PR-2960-draft', () => {
-const scope24 = fixtureScope24();
-
-  it('reports a passed green draft as blocked, marks it ready and merges through mergeCorner', async () => {
-    const cornerId = await approved();
-    let draft = true;
-    rootFixture.githubApp.readPullRequest.mockImplementation(async () => ({ number: 7,
-      url: 'https://github.com/owner/widgets/pull/7', headSha: SHA,
-      mergeability: draft ? 'draft' : 'clean' }));
-    rootFixture.githubApp.markPullRequestReadyForReview.mockImplementation(async () => { draft = false; });
-    expect(await rootFixture.github.prChecksStatus({ cornerId })).toMatchObject({ mergeAllowed: false, blockedReason: 'PR is a draft' });
-    expect(await scope24.mergeDaemon().execute('mergeCorner', { cornerId }, A)).toMatchObject({ status: 'merge-started' });
-    expect(rootFixture.githubApp.markPullRequestReadyForReview).toHaveBeenCalledWith('tok', 'owner/widgets', 7, SHA);
-    expect(rootFixture.githubApp.mergePullRequest).toHaveBeenCalledTimes(1);
-    expect(rootFixture.githubApp.markPullRequestReadyForReview.mock.invocationCallOrder[0]).toBeLessThan(rootFixture.githubApp.mergePullRequest.mock.invocationCallOrder[0]!);
-  });
-
-
-  it('waits for checks restarted by marking ready, then merges after they pass', async () => {
-    const cornerId = await approved();
-    let draft = true;
-    rootFixture.githubApp.readPullRequest.mockImplementation(async () => ({ number: 7,
-      url: 'https://github.com/owner/widgets/pull/7', headSha: SHA,
-      mergeability: draft ? 'draft' : 'clean' }));
-    rootFixture.githubApp.markPullRequestReadyForReview.mockImplementation(async () => { draft = false; rootFixture.githubRollupState = 'pending'; });
-    expect(await scope24.mergeDaemon().execute('mergeCorner', { cornerId }, A)).toMatchObject({ status: 'blocked', blocker: 'checks are pending' });
-    expect(rootFixture.githubApp.mergePullRequest).not.toHaveBeenCalled();
-    rootFixture.githubRollupState = 'passed';
-    expect(await scope24.mergeDaemon().execute('mergeCorner', { cornerId }, A)).toMatchObject({ status: 'merge-started' });
-    expect(rootFixture.githubApp.markPullRequestReadyForReview).toHaveBeenCalledTimes(1);
-  });
-
-
-  it.each(['held', 'stale-pass', 'person-yes'])('leaves a draft alone with %s', async condition => {
-    const cornerId = await approved();
-    rootFixture.githubApp.readPullRequest.mockResolvedValue({ number: 7, url: 'https://github.com/owner/widgets/pull/7', headSha: SHA, mergeability: 'draft' });
-    if (condition === 'held') await rootFixture.phone.execute('setCornerHold', { cornerId }, H);
-    if (condition === 'stale-pass') await rootFixture.db.query(`UPDATE corner_merge_approvals SET head_sha=$2 WHERE corner_id=$1`, [cornerId, 'b'.repeat(40)]);
-    if (condition === 'person-yes') await rootFixture.db.query(`UPDATE corner_merge_approvals SET approved_by=$2 WHERE corner_id=$1`, [cornerId, H]);
-    expect(await scope24.mergeDaemon().execute('mergeCorner', { cornerId }, A)).toMatchObject({ status: 'blocked' });
-    expect(rootFixture.githubApp.markPullRequestReadyForReview).not.toHaveBeenCalled();
-  });
-
-
-  it('leaves an unpassed draft alone', async () => {
-    const cornerId = await inReview();
-    rootFixture.githubHead = SHA;
-    rootFixture.githubRollupState = 'passed';
-    rootFixture.githubApp.readPullRequest.mockResolvedValue({ number: 7, url: 'https://github.com/owner/widgets/pull/7', headSha: SHA, mergeability: 'draft' });
-    expect(await scope24.mergeDaemon().execute('mergeCorner', { cornerId }, A)).toMatchObject({ status: 'blocked', blocker: expect.stringContaining('PR is a draft') });
-    expect(rootFixture.githubApp.markPullRequestReadyForReview).not.toHaveBeenCalled();
-    expect(rootFixture.githubApp.mergePullRequest).not.toHaveBeenCalled();
-  });
-
-
-  it('keeps the draft blocked on a failed ready-mark without a generated report', async () => {
-    const cornerId = await approved();
-    rootFixture.githubApp.readPullRequest.mockResolvedValue({ number: 7, url: 'https://github.com/owner/widgets/pull/7', headSha: SHA, mergeability: 'draft' });
-    rootFixture.githubApp.markPullRequestReadyForReview.mockRejectedValue(new Error('HTTP 403'));
-    for (let attempt = 0; attempt < 2; attempt++) {
-      expect(await scope24.mergeDaemon().execute('mergeCorner', { cornerId }, A)).toMatchObject({ status: 'blocked', blocker: 'PR is a draft: HTTP 403' });
-    }
-    expect(rootFixture.githubApp.mergePullRequest).not.toHaveBeenCalled();
-    const reports = await rootFixture.db.query(`SELECT 1 FROM messages WHERE text LIKE 'blocked: PR is a draft%'`);
-    const privateReports = await rootFixture.db.query(`SELECT 1 FROM agent_commands WHERE private_payload->>'text' LIKE 'blocked: PR is a draft%'`);
-    expect(reports.rowCount + privateReports.rowCount).toBe(0);
-    await rootFixture.db.query(`UPDATE agent_commands SET state='complete' WHERE room_id=$1`, [cornerId]);
-    await rootFixture.db.query(`UPDATE agent_turns SET status='complete' WHERE room_id=$1`, [cornerId]);
-    expect(await rootFixture.daemon.execute('getCornerRestoreState', { cornerId }, A)).toMatchObject({ state: 'idle' });
   });
 });
 describe('GitHub refusing the merge (AC-6)', () => {
@@ -621,10 +550,9 @@ describe('GitHub refusing the merge (AC-6)', () => {
     ).rows;
     expect(lines).toEqual([]);
     expect((await rootFixture.db.query(`SELECT private_payload->>'text' text FROM agent_commands WHERE room_id=$1 AND reason='corner_merge_refused'`, [cornerId])).rows).toEqual([{ text: reason }]);
-    // Nothing records the attempt: a fresh merge_thread retries the head live,
-    // and the same refusal is neither repeated in the corner nor re-woken.
+    // The existing head receipt prevents another attempt or repeated refusal wake.
     await implementersMerge();
-    expect(rootFixture.githubApp.mergePullRequest).toHaveBeenCalledTimes(2);
+    expect(rootFixture.githubApp.mergePullRequest).toHaveBeenCalledTimes(1);
     expect(await currentState(cornerId)).toBe('working');
     expect((await reasons(cornerId, A)).filter((r) => r === 'corner_merge_refused')).toHaveLength(1);
     expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND text LIKE '%refused to merge%'`, [cornerId])).rowCount)
@@ -634,26 +562,8 @@ describe('GitHub refusing the merge (AC-6)', () => {
     expect(listed).toMatchObject({ state: 'working' });
   });
 });
-describe('MERGE-LIVE: merges read GitHub live; nothing records an attempt', () => {
+describe('MERGE-LIVE: live facts and one attempt per head', () => {
 const scope26 = fixtureScope26();
-
-
-  it('Reproduction MERGE-RETRY-PROD: confirmed draft refusal, undraft, and merge_thread retry merge the same head once', async () => {
-    const cornerId = await approved();
-    let draft = true;
-    rootFixture.githubApp.readPullRequest.mockResolvedValue(scope26.providerPr(cornerId));
-    const reason = 'GitHub pull request merge failed: HTTP 405: Pull Request is still a draft';
-    rootFixture.githubApp.mergePullRequest.mockImplementation(async () => {
-      if (draft) throw new Error(reason);
-      rootFixture.githubApp.readPullRequest.mockResolvedValue(scope26.providerPr(cornerId, true));
-    });
-    expect(await scope26.mergeDaemon().execute('mergeCorner', { cornerId }, A)).toEqual({ status: 'blocked', blocker: reason });
-    expect(await currentState(cornerId)).toBe('working');
-    draft = false;
-    expect(await scope26.mergeDaemon().execute('mergeCorner', { cornerId }, A)).toEqual({ status: 'merge-started', headSha: SHA });
-    expect(rootFixture.githubApp.mergePullRequest).toHaveBeenCalledTimes(2);
-    expect(await currentState(cornerId)).toBe('archived');
-  });
 
 
   it('a successful gated merge archives without the closed webhook, once', async () => {
@@ -683,7 +593,7 @@ const scope26 = fixtureScope26();
   });
 
 
-  it('an unreadable outcome is settled later by the merge webhook, with no stored claim', async () => {
+  it('an unreadable outcome is settled later by the merge webhook without another attempt', async () => {
     const cornerId = await approved();
     expect(await currentState(cornerId)).toBe('idle');
     rootFixture.githubApp.mergePullRequest.mockImplementationOnce(async () => {

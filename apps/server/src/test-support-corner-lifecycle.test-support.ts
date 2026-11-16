@@ -99,7 +99,6 @@ export let githubApp: {
   branchDeletionSafety: ReturnType<typeof vi.fn>;
   openPullRequestsForBranch: ReturnType<typeof vi.fn>;
   deleteBranch: ReturnType<typeof vi.fn>;
-  markPullRequestReadyForReview: ReturnType<typeof vi.fn>;
   mergePullRequest: ReturnType<typeof vi.fn>;
   readPullRequestQueue: ReturnType<typeof vi.fn>;
   dequeuePullRequest: ReturnType<typeof vi.fn>;
@@ -148,7 +147,6 @@ beforeAll(async () => {
     branchDeletionSafety: vi.fn(async () => ({ defaultBranch: 'main', aheadBy: 0, protected: false, openBasePullRequest: false })),
     openPullRequestsForBranch: vi.fn(async () => []),
     deleteBranch: vi.fn(async () => undefined),
-    markPullRequestReadyForReview: vi.fn(async () => undefined),
     mergePullRequest: vi.fn(async () => undefined),
     readPullRequestQueue: vi.fn(async () => ({ id: 'PR_7', headSha: SHA, entry: null })),
     dequeuePullRequest: vi.fn(async () => undefined),
@@ -229,7 +227,6 @@ beforeEach(async () => {
   githubApp.readPullRequestQueue.mockResolvedValue({ id: 'PR_7', headSha: SHA, entry: null });
   githubApp.dequeuePullRequest.mockReset();
   githubApp.dequeuePullRequest.mockResolvedValue(undefined);
-  githubApp.markPullRequestReadyForReview.mockReset();
   githubApp.mergePullRequest.mockReset();
   githubApp.mergePullRequest.mockResolvedValue(undefined);
   githubApp.deleteBranch.mockReset();
@@ -816,58 +813,6 @@ providerPr,
 landing,
 };
 }
-export function fixtureScope30() {
-
-  /** The corner's human requester orders the merge through its agent's order_thread_merge. */
-  async function order(cornerId: string, service: DaemonService = rootFixture.daemon) {
-    await say(cornerId, '@hoots merge this now');
-    const direct = (await commands(A, cornerId)).at(-1)!;
-    await claim(direct);
-    return service.execute('orderCornerMerge',
-      { cornerId, roomId: cornerId, requestId: direct.turnRequestId }, A);
-  }
-return {
-order,
-};
-}
-export function fixtureScope31() {
-
-  const REFUSAL = /this thread's brief does not assign repository work; revise the brief before merging/;
-
-
-  /** Sets the corner's current brief: none at all, or a revision with this repositoryWork. */
-  async function briefSays(cornerId: string, repositoryWork: boolean | 'none') {
-    if (repositoryWork === 'none') {
-      await rootFixture.db.query(`DELETE FROM corner_brief_revisions WHERE corner_id=$1`, [cornerId]);
-      return;
-    }
-    const command = await commissioned(R);
-    await rootFixture.daemon.execute('reviseCornerBrief', { roomId: R, cornerId, requestId: command.turnRequestId, expectedRevision: 1, brief: { ...brief(command.sourceMessageId), repositoryWork, change: 'Say whether files change' } }, A);
-  }
-
-
-  function wired() {
-    return new DaemonService(rootFixture.db, new LiveHub(), undefined, undefined, false, undefined, false, undefined,
-      (input, confirmZeroChecks) => rootFixture.github.prChecksStatus(input, confirmZeroChecks), undefined, undefined, undefined, undefined, undefined, undefined,
-      undefined, undefined, undefined, (id: string) => rootFixture.github.landCornerOutcome(id));
-  }
-
-
-  /** A green head with no reviewer configured, waiting for a person's yes. */
-  async function waitingForPerson(): Promise<string> {
-    const cornerId = await open('owner/widgets');
-    await greenHead(cornerId, 7, SHA);
-    rootFixture.githubHead = SHA;
-    rootFixture.githubRollupState = 'passed';
-    return cornerId;
-  }
-return {
-REFUSAL,
-briefSays,
-wired,
-waitingForPerson,
-};
-}
 export function fixtureScope34() {
 
   beforeEach(() => { Object.assign(rootFixture.phone, { github: rootFixture.github }); });
@@ -890,6 +835,7 @@ export function fixtureScope35() {
   async function queued() {
     const cornerId = await approved();
     rootFixture.githubApp.readPullRequest.mockResolvedValue({
+      number: 7, url: 'https://github.com/owner/widgets/pull/7', mergeability: 'clean',
       headSha: SHA, headRef: branchOf(cornerId), baseRef: 'main', baseSha: '8'.repeat(40), merged: false,
     });
     rootFixture.githubApp.readPullRequestQueue.mockResolvedValue({ id: 'PR_7', headSha: SHA,

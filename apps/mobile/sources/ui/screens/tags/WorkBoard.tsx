@@ -16,7 +16,7 @@ import { WorkStateMark } from './WorkMarks';
 export type WorkBoardActions = {
   open: (item: WorkItemView) => void;
   reply: (item: WorkItemView, text: string) => Promise<void | boolean>;
-  decide: (item: WorkItemView, action: NeedsYouActionView | 'merge') => Promise<void | boolean>;
+  decide: (item: WorkItemView, action: NeedsYouActionView) => Promise<void | boolean>;
   assign: (item: WorkItemView, identityId: string | null) => Promise<void | boolean>;
   clear: (item: WorkItemView) => Promise<void | boolean>;
   clearAll: () => Promise<void | boolean>;
@@ -148,21 +148,7 @@ function AskCard({ item, actions }: { item: WorkItemView; actions: WorkBoardActi
         </Btn>
       </XStack>
       <T>{question}</T>
-      {ask.approval?.kind === 'merge' ? (
-        <Btn
-          kind="primary"
-          label="Merge"
-          disabled={busy}
-          onPress={(event) => {
-            stop(event);
-            void run(() => actions.decide(item, 'merge'));
-          }}
-        >
-          <T v="meta" color="primaryInk">
-            Merge
-          </T>
-        </Btn>
-      ) : choices.length ? (
+      {choices.length ? (
         <XStack gap="2" alignItems="stretch" flexWrap="wrap">
           {choices.map((action, index) => (
             <Btn

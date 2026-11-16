@@ -58,6 +58,7 @@ export type MachineNotification = { kind: 'idle' | 'waiting'; key: string };
 export type CornerMachineFacts = CornerStateFacts & {
   headSha?: string;
   approved?: boolean;
+  reviewerRequired?: boolean;
   mergeHeld?: boolean;
   mergeConflictDelivered?: boolean;
   lostEffects?: string[];
@@ -158,8 +159,6 @@ export function transitionCorner(
     (event.kind === 'merge-refused' && event.headSha !== headSha)
   )
     return { state: current, wakes, notifications, suppression: 'stale head' };
-  if (event.kind === 'approval' && checks === 'passing' && !effects.includes('approved-on-green'))
-    effects.push('approved-on-green');
   if (event.kind === 'open' && event.command)
     wake('open', `open:${event.command.privatePayload?.openKey ?? ''}`);
   if (event.kind === 'brief-revised') wake('revision', `revision:${event.revision}`);
@@ -199,13 +198,11 @@ export function transitionCorner(
     wake('checks-failed', redKey);
   // Only a live GitHub read emits this event; a stored verdict never wakes.
   if (event.kind === 'merge-conflict' && f.lifecycle?.pr?.mergeability === 'dirty') wake('merge-conflict');
-  if (checks === 'passing' && headSha && f.lifecycle?.pr?.mergeability !== 'dirty') {
-    if (f.approved) {
+  if (checks === 'passing' && headSha) {
+    if (f.approved || f.reviewerRequired === false) {
       if (
         !f.mergeHeld &&
-        !f.reviewerActive &&
-        event.kind !== 'approval' &&
-        !effects.includes('approved-on-green')
+        (event.kind === 'approval' || event.kind === 'checks' || event.kind === 'hold-released')
       )
         wake('land');
     } else if (
@@ -235,7 +232,7 @@ export function transitionCorner(
           : 'blocked');
     state = { ...base, state: 'waiting', reason };
     notify('waiting', `waiting:${f.blocker.itemId ?? reason}`);
-  } else if (f.turnRunning || wakes.some((w) => !['review', 'review-gap'].includes(w.kind)))
+  } else if (f.turnRunning || wakes.some((w) => !['review', 'review-gap', 'land'].includes(w.kind)))
     state = { ...base, state: 'working' };
   else if (
     f.reviewerActive ||
@@ -243,6 +240,7 @@ export function transitionCorner(
     (checks === 'passing' &&
       Boolean(headSha) &&
       f.reviewerConfigured !== undefined &&
+      f.reviewerRequired !== false &&
       !f.reviewEnded &&
       !f.approved)
   )

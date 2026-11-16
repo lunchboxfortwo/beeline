@@ -139,15 +139,6 @@ const scope5 = fixtureScope5();
   });
 
 
-  it('hands a reviewer-approved head to the implementer to merge, unless a human question is open', () => {
-    const land = scope5.turn('corner_land');
-    expect(land).toContain("The reviewer approved this pull request's current head.");
-    expect(land).toContain("call merge_thread when the live merge gate allows it. Report unresolved questions to your commander.");
-    expect(land).not.toContain(scope5.silence);
-    expect(scope5.turn('corner_check')).not.toContain('The reviewer approved');
-  });
-
-
   it('keeps workflow handoff wakes ordinary', () => {
     expect(assembleTurnPrompt({ surface: 'code-corner', task: {
       body: 'Report the workflow result', commandReason: 'subscribed_event', outsideEvent: { kind: 'workflow-handoff', subject: { kind: 'system', name: 'Beeline' }, verb: 'handed off' },
@@ -422,8 +413,8 @@ describe('prompt assembly guards', () => {
       expect(text, name).not.toContain('gh pr merge');
       expect(text, name).not.toMatch(/approved [0-9a-f<][^`]*, merge/);
     }
-    expect(CORNER_CHECKS_NUDGE).toContain("a reviewer's PASS lands the PR; if you are woken to merge, call merge_thread");
-    expect(CORNER_CHECKS_NUDGE).toContain('Use merge_thread for landing.');
+    expect(CORNER_CHECKS_NUDGE).toContain('the server lands when checks are green');
+    expect(CORNER_CHECKS_NUDGE).toContain('any configured reviewer has approved the exact head');
   });
 
 

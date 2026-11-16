@@ -441,7 +441,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   },
   {
     "name": "approve_merge",
-    "description": "Configured reviewer PASS (or eligible zero-check commander yes) on the exact headSha. This records approval; it does not land or release a hold.",
+    "description": "Configured reviewer PASS on the exact headSha. The server lands when checks are green and no hold stands. This never releases a hold.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -458,7 +458,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   },
   {
     "name": "merge_thread",
-    "description": "Land the addressed thread through the live gate: green checks, yes on exact head, no hold.",
+    "description": "Land the addressed thread through the live gate: green checks, approval on the exact head when a reviewer is configured, and no hold.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -487,16 +487,6 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
     "inputSchema": {
       "type": "object", "properties": {"sendId": {"type": "string", "format": "uuid"}},
       "required": ["sendId"], "additionalProperties": false
-    }
-  },
-  {
-    "name": "record_merge_yes",
-    "description": "Record an authorized person’s explicit merge yes at address through command provenance. Does not land or release a hold.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {"address": {"type": "string"}},
-      "required": ["address"],
-      "additionalProperties": false
     }
   },
   {

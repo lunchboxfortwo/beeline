@@ -13,7 +13,6 @@ import { setCornerHold } from '../corner-holds.js';
 import { authorizeCommandOutput } from '../agent-command-route-agent-result.js';
 import { endComputerSession, getComputerSession } from '../computer-session.js';
 import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
-import { recordPersonMergeYes } from '../corner-merge-approval.js';
 import { advanceCorner, lockCornerLifecycle } from '../corner-lifecycle.js';
 import { systemLine } from '../system-line.js';
 import { appIdentity } from '@beeline/api-contract/workbench';
@@ -473,31 +472,12 @@ export async function setCornerHoldOperation<Name extends keyof DaemonOperationM
           if (!actor && hold.releaseHoldId !== undefined) throw new Error('hold requires a human requester');
           return setCornerHold(db, hold, actor?.author_id ?? authenticatedAgentId, authenticatedAgentId);
         });
-        const reconcile = async () => { await ctx.github?.reconcileQueuedCorners(hold.cornerId); };
+        const reconcile = async () => {
+          if (hold.releaseHoldId !== undefined) await ctx.landCorner?.(hold.cornerId);
+          await ctx.github?.reconcileQueuedCorners(hold.cornerId);
+        };
         if (ctx.afterCommit) ctx.afterCommit(reconcile);
         else await reconcile();
         return result as Output<Name>;
-
-}
-
-export async function orderCornerMergeOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
-
-        const order = input as Input<'orderCornerMerge'>;
-        await daemonAccess(ctx, order.cornerId, authenticatedAgentId);
-        const actorId = await ctx.database.transaction(async (db) => {
-          const command = await authorizeCommandOutput(db, order.roomId, authenticatedAgentId, order.requestId);
-          const actor = (await db.query<{ author_id: string }>(
-            `SELECT message.author_id FROM messages message
-             JOIN identities person ON person.id=message.author_id AND person.kind='human'
-             WHERE message.id=$1`,
-            [command.root_source_message_id],
-          )).rows[0];
-          if (!actor) throw new Error('merge order requires a human requester');
-          return actor.author_id;
-        });
-        const yes = await recordPersonMergeYes(ctx.database, order.cornerId, actorId);
-        // Recording consent is a separate action from landing. The caller uses
-        // merge_thread for the single agent-facing landing action.
-        return { roomId: yes.roomId, headSha: yes.headSha } as Output<Name>;
 
 }

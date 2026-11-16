@@ -38,7 +38,6 @@ describe('phone operations over the shared socket', () => {
   it('preserves the special deadlines for external transactions', () => {
     expect(phoneOperationRequestOptions('actOnRepositoryCard', {})).toMatchObject({ timeoutMs: 60_000 });
     expect(phoneOperationRequestOptions('createGitHubRepository', {})).toMatchObject({ timeoutMs: 60_000 });
-    expect(phoneOperationRequestOptions('approveCornerMerge', {})).toMatchObject({ timeoutMs: 540_000 });
     expect(phoneOperationRequestOptions('deleteWorkspace', {})).toMatchObject({ timeoutMs: 20_000 });
   });
   it.each([new PhoneSocketDisconnectedError(), new MonolithRequestTimeoutError()])('parks an ambiguous invite join until a separate explicit action', async failure => {

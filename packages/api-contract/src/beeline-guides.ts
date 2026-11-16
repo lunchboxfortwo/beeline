@@ -123,8 +123,8 @@ For every user-visible frontend change (new or changed component, screen, sheet,
 
 1. Read the gate with read(facet:checks, address): checks, reviewerWake and mergeAllowed.
 2. The configured reviewer records PASS with approve_merge(address, headSha) on the exact head it reviewed.
-3. When an authorized person types an explicit yes to merge, record it with record_merge_yes(address).
-4. Call merge_thread(address) once the gate allows it.
+3. If a reviewer is configured, its PASS on that exact head is required. With no reviewer, no approval is needed.
+4. The server lands automatically when checks are green and no hold stands. Any reachable agent can also call merge_thread(address) through the same gate.
 
 ## Holds
 

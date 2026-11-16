@@ -21,7 +21,7 @@ move3_describe('R-SURFACE-DRIFT: AGENT_SURFACE_TOOL_NAMES vs the advertised tool
     ...Object.values(move3_CAPABILITY_ROUTES).flatMap(routes => Object.values(routes))]);
   move3_it('lists no new advertised tool as missing', () => {
     move3_expect(advertised.filter(name => !listed(name))).toEqual([
-      'close_thread_pr', 'dispatch_release', 'notify_feedback_fixed', 'read_operator_system_dm', 'record_merge_yes', 'report_feedback',
+      'close_thread_pr', 'dispatch_release', 'notify_feedback_fixed', 'read_operator_system_dm', 'report_feedback',
       'repository_io', 'send_operator_system_dm',
     ]);
   });

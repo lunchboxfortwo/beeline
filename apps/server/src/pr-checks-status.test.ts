@@ -14,7 +14,7 @@ describe('PR-scoped check gate', () => {
     'Reproduction PROTECTION-403: plan refusal (%s) lets real checks decide the gate', async message => {
       rootFixture.associatedPulls = [{ state: 'open', base: { ref: 'main' } }];
       rootFixture.protectionForbidden = message;
-      expect(await gate()).toMatchObject({ checks: 'passed', stage: 'waiting_for_yes', mergeAllowed: false });
+      expect(await gate()).toMatchObject({ checks: 'passed', stage: 'checking', mergeAllowed: true });
       rootFixture.rollupState = 'FAILURE';
       expect(await gate()).toMatchObject({ checks: 'failed', mergeAllowed: false });
       rootFixture.rollupState = 'PENDING';
@@ -57,7 +57,7 @@ describe('PR-scoped check gate', () => {
     rootFixture.workflowStatus = status;
     expect(await gate()).toMatchObject({ checks: 'pending', stage: 'checking', mergeAllowed: false });
     rootFixture.workflowStatus = 'completed';
-    expect(await gate()).toMatchObject({ checks: 'passed', stage: 'waiting_for_yes' });
+    expect(await gate()).toMatchObject({ checks: 'passed', stage: 'checking' });
   });
 
 
@@ -110,7 +110,7 @@ describe('PR-scoped check gate', () => {
     );
     expect(stored).toBe('passing');
     expect(commands).toHaveLength(1);
-    expect(await gate(AUTHOR)).toMatchObject({ checks: 'passed', stage: 'waiting_for_yes' });
+    expect(await gate(AUTHOR)).toMatchObject({ checks: 'passed', stage: 'checking' });
   });
 
 
@@ -241,12 +241,12 @@ describe('PR-scoped check gate', () => {
 
   it('uses GitHub statusCheckRollup as the verdict', async () => {
     await expect(gate()).resolves.toMatchObject({
-      stage: 'waiting_for_yes',
+      stage: 'checking',
       checks: 'passed',
       pullRequest: URL,
       headSha: SHA,
       approved: false,
-      mergeAllowed: false,
+      mergeAllowed: true,
       reviewer: null,
       reviewerExists: false,
     });
@@ -562,7 +562,7 @@ describe('PR-scoped check gate', () => {
   });
 
 
-  it('composes a reviewer yes, a person yes, and a hold through the real helper', async () => {
+  it('composes configured reviewer approval, no-reviewer landing, and a hold through the real helper', async () => {
     rootFixture.server = createServer(async (request, response) => {
       try {
         const chunks: Buffer[] = [];
@@ -621,11 +621,11 @@ describe('PR-scoped check gate', () => {
 
     const gate1 = await callGate(1);
     expect(gate1).toMatchObject({
-      stage: 'waiting_for_yes',
+      stage: 'checking',
       checks: 'passed',
       approved: false,
       held: false,
-      mergeAllowed: false,
+      mergeAllowed: true,
       reviewerExists: false,
     });
     expect(gate1).not.toHaveProperty('rule');
@@ -655,17 +655,13 @@ describe('PR-scoped check gate', () => {
       holds: [{ id: holdId, actorId: H, standing: 'owner', setAt: expect.any(String) }],
     });
 
-    // A Workspace owner's yes is the same yes: with no reviewer it opens the
-    // gate, and the standing hold still vetoes it.
+    // With no reviewer, no approval is needed; the hold still vetoes landing.
     await rootFixture.db.query(`UPDATE rooms SET reviewer_agent_id=NULL WHERE id=$1`, [R]);
-    await rootFixture.db.query(
-      `UPDATE corner_merge_approvals SET approved_by=$2,approved_at=now() WHERE corner_id=$1`,
-      [C, H],
-    );
+    await rootFixture.db.query('DELETE FROM corner_merge_approvals WHERE corner_id=$1', [C]);
     const gate4 = await callGate(4);
     expect(gate4).toMatchObject({
       reviewerExists: false,
-      approved: true,
+      approved: false,
       held: true,
       mergeAllowed: false,
     });
@@ -675,7 +671,7 @@ describe('PR-scoped check gate', () => {
       H,
     );
     const gate5 = await callGate(5);
-    expect(gate5).toMatchObject({ approved: true, held: false, mergeAllowed: true });
+    expect(gate5).toMatchObject({ approved: false, held: false, mergeAllowed: true });
     // CHECK-HEAD-1: the shipped helper's checks read follows registration and
     // live verdicts even when restore state still says pending.
     await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=$2::jsonb WHERE corner_id=$1`, [C,
@@ -695,34 +691,6 @@ describe('zero-check worker completion', () => {
 const scope2 = fixtureScope2();
 
 
-  it('does not pass or send to review a conflicting PR that GitHub ran no checks for', async () => {
-    rootFixture.rollupState = null;
-    rootFixture.mergeableState = 'dirty';
-    rootFixture.pullBaseSha = rootFixture.mainHead;
-    const after = await scope2.finishPrTurn(rootFixture.mainHead);
-    expect(after.lifecycle.pr.mergeability).toBe('dirty');
-    expect(after.lifecycle.checks).not.toBe('passing');
-    expect(after.lifecycle.checksSummary).toBeUndefined();
-    expect(after.reviewer).toEqual([]);
-    expect(after.worker).toEqual(['corner_merge_conflict']);
-  });
-
-
-  // Reproduction R1: PR #1957 conflicted with main, GitHub left pull.base.sha
-  // behind main's head and started no workflows; the corner read
-  // "no tests configured", checks passed, and the reviewer was woken.
-  it('records the conflict when GitHub lags the base sha behind the branch head (R1)', async () => {
-    rootFixture.rollupState = null;
-    rootFixture.mergeableState = 'dirty';
-    rootFixture.pullBaseSha = 'e'.repeat(40);
-    const after = await scope2.finishPrTurn(rootFixture.mainHead);
-    expect(after.lifecycle.pr).toMatchObject({ mergeability: 'dirty', baseSha: rootFixture.mainHead });
-    expect(after.lifecycle.checks).not.toBe('passing');
-    expect(after.reviewer).toEqual([]);
-    expect(after.worker).toEqual(['corner_merge_conflict']);
-  });
-
-
   it('still resolves a clean PR with no checks as passing and wakes the reviewer', async () => {
     rootFixture.rollupState = null;
     rootFixture.mergeableState = 'clean';
@@ -731,7 +699,6 @@ const scope2 = fixtureScope2();
     expect(after.lifecycle).toMatchObject({
       checks: 'passing',
       checksSummary: { status: 'passing', total: 0 },
-      pr: { mergeability: 'clean' },
     });
     expect(after.reviewer).toEqual(['corner_review_dispatch']);
     expect(after.worker).toEqual([]);

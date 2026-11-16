@@ -11,8 +11,7 @@ import type { CornerLifecycleView } from '@beeline/api-contract/phone';
 import type { CornerPullRequestResult } from '@beeline/api-contract/daemon';
 import type { SqlDatabase } from './database.js';
 import { GITHUB_SUBJECT, systemLine } from './system-line.js';
-import { recordPersonMergeYes, withdrawPullRequestMergeApprovals } from './corner-merge-approval.js';
-import { assertCornerBriefAllowsMerge } from './corner-brief.js';
+import { withdrawPullRequestMergeApprovals } from './corner-merge-approval.js';
 import { moveStoredCornerHead } from './github-operations-begin-identity.js';
 import { advanceCorner, cornerReviewWokenSql, confirmCornerMergeAuthority, lockCornerLifecycle, cornerMergeGate, cornerMergeability } from './corner-lifecycle.js';
 import { queueCornerMergeConflict, reconcileCornerMergeBlockers } from './agent-command.js';
@@ -161,26 +160,22 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
     const mergeDecision = cornerMergeability({
       checks,
       approved: gate.approved,
-      evidenceMissing: gate.evidenceMissing,
+      reviewerExists: gate.reviewerExists,
       held: gate.held,
       holds: gate.holds,
       archived: corner.archived,
       merged: pr.merged,
-      expectedHeadSha: corner.lifecycle.pr?.headSha,
-      currentHeadSha: pr.headSha,
-      mergeability: pr.mergeability,
+      repositoryMatches: pr.url.toLowerCase() === `https://github.com/${target.repository}/pull/${number}`.toLowerCase(),
     });
     // Where the corner stands, from the live facts above: building ->
-    // checking -> waiting for a yes -> merged (or closed).
+    // checking -> merged (or closed).
     const stage = pr.merged
       ? ('merged' as const)
       : corner.archived
         ? ('closed' as const)
-        : checks === 'passed'
-          ? ('waiting_for_yes' as const)
-          : checks === 'failed'
-            ? ('building' as const)
-            : ('checking' as const);
+        : checks === 'failed'
+          ? ('building' as const)
+          : ('checking' as const);
     return {
       ...(confirmZeroChecks ? { zeroChecksConfirmed } : {}),
       stage,
@@ -214,47 +209,15 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
 
 
   /**
-   * The phone's approve: a Workspace owner or admin's yes on the current head
-   * (`recordPersonMergeYes`), then the one merge path, `landCorner`. Checks
-   * must be green and no hold may stand; a yes given early merges when the
-   * implementer's `merge_thread` runs after green checks.
-   */
-  export async function gitHubOperationsApproveCornerMerge(ctx: GitHubOperations, viewerId: string, input: Input<'approveCornerMerge'>) {
-    const corner = (
-      await ctx.database.query<{ archived: boolean; lifecycle: CornerLifecycleView }>(
-        `SELECT corner.archived_at IS NOT NULL archived,fact.lifecycle
-         FROM rooms corner JOIN corner_github_cache fact ON fact.corner_id=corner.id
-         WHERE corner.id=$1`,
-        [input.cornerId],
-      )
-    ).rows[0];
-    const pullRequest = corner?.lifecycle.pr;
-    if (!corner || !pullRequest) throw new Error('thread has no pull request to merge');
-    if (corner.archived || corner.lifecycle.lifecycle === 'done')
-      return { status: 'already-merged' as const, pullRequestUrl: pullRequest.url };
-    const yes = await recordPersonMergeYes(ctx.database, input.cornerId, viewerId);
-    await ctx.landCorner(input.cornerId);
-    return {
-      status: yes.recorded ? ('merge-requested' as const) : ('already-requested' as const),
-      pullRequestUrl: pullRequest.url,
-    };
-  }
-
-
-  /**
    * The one merge path. Squash-merges a corner at its exact head when
    * `pr_checks_status`'s `mergeAllowed` is true on GitHub's current head:
-   * live checks green, a yes said on that head, and no hold. Called by
-   * the implementer's `merge_thread`, a person's yes (`order_thread_merge` or
-   * the phone's approve). Recovery only confirms or releases an unfinished attempt.
+   * live green checks, any required reviewer approval on that head, and no hold. Called by
+   * any member's `merge_thread`, a reviewer PASS, green checks,
+   * or a hold release. No implementer turn is needed.
    * At most one attempt per head: the attempt is claimed under the run lock
-   * before GitHub is called. Confirmation, the webhook, or recurring recovery
+   * before GitHub is called. Confirmation or the merge webhook
    * then lands the corner; a refusal returns GitHub's reason to the implementer.
    *
-   * The brief gate lives here, for all of those callers: a corner whose
-   * current brief does not assign repository work (no brief, or
-   * `repositoryWork: false`) throws `CornerBriefMergeRefusedError` before
-   * GitHub is read, so every caller reports the same refusal.
    */
   export async function gitHubOperationsLandCorner(ctx: GitHubOperations, cornerId: string): Promise<boolean> {
     return (await ctx.landCornerOutcome(cornerId)).status !== 'not-attempted';
@@ -270,7 +233,6 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
       onBlocked?.(reason);
       return { status: 'not-attempted' } as const;
     };
-    await assertCornerBriefAllowsMerge(ctx.database, cornerId);
     let status: Awaited<ReturnType<GitHubOperations['prChecksStatus']>>;
     try {
       status = await ctx.prChecksStatus({ cornerId });
@@ -280,31 +242,6 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
         error instanceof Error ? error.message : String(error),
       );
       return notAttempted('GitHub merge gate read failed');
-    }
-    if (status.stage === 'waiting_for_yes' && status.blockedReason && status.checks === 'passed' && status.approved && !status.held) {
-      const reviewerPass = await ctx.database.query(`SELECT 1 FROM corner_merge_approvals approval
-        JOIN identities reviewer ON reviewer.id=approval.approved_by AND reviewer.kind='agent'
-        JOIN rooms corner ON corner.id=approval.corner_id
-        JOIN rooms parent ON parent.id=corner.parent_id
-        JOIN corner_facts fact ON fact.corner_id=corner.id
-        WHERE approval.corner_id=$1 AND approval.head_sha=$2
-          AND approval.approved_by=${cornerReviewerSql('corner')}`, [cornerId, status.headSha]);
-      if (!reviewerPass.rowCount) return notAttempted('PR is a draft; waiting for reviewer PASS');
-      const draftHeadSha = status.headSha;
-      try {
-        const parent = (await ctx.database.query<{ parent_id: string }>('SELECT parent_id FROM rooms WHERE id=$1', [cornerId])).rows[0]!;
-        const target = await ctx.roomWorkflowTarget(parent.parent_id);
-        await ctx.app.markPullRequestReadyForReview(target.token, target.repository,
-          Number(status.pullRequest.split('/').at(-1)), status.headSha);
-        status = await ctx.prChecksStatus({ cornerId });
-        if (status.blockedReason?.includes('PR is a draft')) throw new Error(status.blockedReason);
-      } catch (error) {
-        await ctx.database.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,
-          '{pr,mergeability}','"draft"'::jsonb) WHERE corner_id=$1 AND lifecycle->'pr'->>'headSha'=$2`,
-          [cornerId, draftHeadSha]);
-        await reconcileCornerMergeBlockers(ctx.database, cornerId);
-        return notAttempted(`PR is a draft: ${error instanceof Error ? error.message : String(error)}`);
-      }
     }
     if (!status.mergeAllowed) return notAttempted(status.blockedReason ?? 'the merge gate is closed');
     const target = (
@@ -325,12 +262,13 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
              COALESCE(parent.repository_remote,parent.repository_key,''),
              '^(git://|https://)github.com/','','i'), '\\.git$','','i'))
          WHERE corner.id=$1 AND corner.archived_at IS NULL
-           AND fact.lifecycle->'pr'->>'headSha'=$2`,
-        [cornerId, status.headSha],
+           AND lower(fact.lifecycle->'pr'->>'url')=lower($2)
+           AND lower($2)=lower('https://github.com/'||repository.full_name||'/pull/'||(fact.lifecycle->'pr'->>'number'))`,
+        [cornerId, status.pullRequest],
       )
     ).rows[0];
-    if (!target) return notAttempted('the merge target no longer matches the thread head or linked GitHub repository');
-    if (!(await confirmCornerMergeAuthority(ctx.database, cornerId, status.headSha, onBlocked)))
+    if (!target) return notAttempted('the merge target no longer matches the linked GitHub repository');
+    if (!(await confirmCornerMergeAuthority(ctx.database, cornerId, status.headSha, onBlocked, true)))
       return { status: 'not-attempted' };
     try {
       const result = await ctx.app.mergePullRequest(

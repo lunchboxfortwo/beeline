@@ -457,23 +457,4 @@ describe('Work board recorded sources and single assignee', () => {
     expect(header).toEqual((await read()).items.find((item) => item.id === thread));
     expect(await readWorkThread(db, chat, person)).toEqual([]);
   });
-  it('makes a pull request ask a Merge for an owner until a yes is on its head', async () => {
-    await db.query(
-      `INSERT INTO corner_github_cache(corner_id,lifecycle) VALUES($1,$2::jsonb)`,
-      [thread, JSON.stringify({ lifecycle: 'review', checks: 'passing', pr: { number: 7, headSha: 'f'.repeat(40), title: 'Quote replies', url: 'https://github.com/o/r/pull/7' } })],
-    );
-    await askOwnerQuestion(
-      db,
-      { about: { kind: 'pr', roomId: thread }, question: 'The inbox reply changes are ready. Merge them?', freeText: true },
-      agent,
-    );
-    const row = (await read()).items.find((item) => item.ask);
-    expect(row?.ask?.approval?.kind).toBe('merge');
-    expect(row?.ask?.text).toBe('The inbox reply changes are ready. Merge them?');
-    await db.query(
-      `INSERT INTO corner_merge_approvals(corner_id,approved_by,pull_request_number,head_sha) VALUES($1,$2,7,$3)`,
-      [thread, person, 'f'.repeat(40)],
-    );
-    expect((await read()).items.some((item) => item.ask)).toBe(false);
-  });
 });

@@ -65,7 +65,7 @@ async function refusal(operation: 'archiveCorner' | 'approveCornerMerge', messag
 }
 
 it.each([
-  ['NOT_CONFIGURED_REVIEWER', "only this thread's configured reviewer (or the chat reviewer when unset), or its zero-check commander, can record PASS; set reviewer with revise_thread"],
+  ['NOT_CONFIGURED_REVIEWER', "only this thread's configured reviewer (or the chat reviewer when unset) can record PASS; set reviewer with revise_thread"],
   ['NO_PULL_REQUEST', 'thread has no pull request'],
   ['STALE_HEAD', `pull request head is ${head}; review the current head before approving`],
 ] as const)('Reproduction SENTRY-C: %s returns unchanged code and excludes Sentry', async (code, detail) => {

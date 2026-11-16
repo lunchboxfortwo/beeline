@@ -35,6 +35,6 @@ export function replayScenarioResult(testCase, call, skills) {
   // success or an infrastructure exclusion. The unchanged rule grades the
   // actual calls and reply once the model completes this simulated turn.
   return { result: { error: 'Unsupported operation in recorded replay facts; nothing was executed or changed.',
-    operation: call.name, ...(call.name === 'record_merge_yes' ? { recorded: false } : {}) },
+    operation: call.name },
     boundary: 'unsupported-operation', unsupported: true };
 }

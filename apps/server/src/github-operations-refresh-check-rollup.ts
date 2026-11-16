@@ -182,7 +182,7 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
         };
         // The head check and the machine write share one lock. The idle snapshot
         // and the other lifecycle reads run before that lock.
-        await advanceCorner(database, target.corner_id, { kind: 'reconcile' }, {
+        const advanced = await advanceCorner(database, target.corner_id, { kind: 'reconcile' }, {
           project(corner) {
             if (!admits(corner.lifecycle)) return undefined;
             const plan = planCheckRefresh(corner.lifecycle);
@@ -220,6 +220,7 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
             return plan.event ?? false;
           },
         });
+        if (advanced.land) await ctx.landCorner(target.corner_id);
         if (noteInserted) ctx.onRoomChanged?.(target.corner_id);
     } catch (error) {
       if (transientGitHubError(error)) {

@@ -26,7 +26,90 @@ export const PATH = [
   { file: 'apps/server/src/daemon/corner-messages.ts', functions: ['daemonPostCornerMessage'] },
   { file: 'apps/server/src/daemon/execute.ts', functions: ['daemonExecute'] },
   { file: 'apps/server/src/daemon/messages.ts', functions: ['daemonPostRoomMessage'] },
+  { file: 'apps/server/src/corner-worker.ts', functions: ['cornerImplementerSql'] },
 ];
+// Owner-approved product contract. Changing a condition or state requires owner approval.
+export const MERGE_CONDITIONS = [
+  { condition: 'input.merged', reason: 'the pull request is already merged' },
+  { condition: 'input.archived', reason: 'the corner is closed' },
+  { condition: "input.checks !== 'passed'", reason: 'checks are ', template: true },
+  { condition: '!input.reviewerExists || input.approved', reason: 'no yes on this head', inverted: true },
+  { condition: 'input.held', reason: 'a hold stands', template: true },
+  { condition: 'input.repositoryMatches === false', reason: 'the merge target no longer matches the linked GitHub repository' },
+];
+export const THREAD_STATES = ['building', 'checking', 'merged', 'closed', 'working', 'review', 'waiting', 'idle', 'archived'];
+export const MERGE_FILES = [
+  'apps/server/src/corner-lifecycle.ts',
+  'apps/server/src/corner-lifecycle-review-state.ts',
+  'apps/server/src/github-operations-read-pr-checks-status.ts',
+  'apps/server/src/corner-machine.ts',
+  'packages/api-contract/src/daemon-operations-daemon-operation-map.ts',
+];
+
+export function judgeMergeContract(root) {
+  const errors = [], normalize = text => text.replace(/\s+/g, '').replace(/,([}\]])/g, '$1');
+  let gateFound = false, stageFound = false;
+  for (const file of MERGE_FILES) {
+    const tree = ts.createSourceFile(file, readFileSync(resolve(root, file), 'utf8'), ts.ScriptTarget.Latest, true);
+    errors.push(...tree.parseDiagnostics.map(error => `${file}: ${ts.flattenDiagnosticMessageText(error.messageText, ' ')}`));
+    const checkState = node => {
+      if (!node) return;
+      if (ts.isStringLiteral(node) && !THREAD_STATES.includes(node.text))
+        errors.push(`${file}: thread state ${node.text} is outside the owner-approved states`);
+      if (ts.isConditionalExpression(node)) {
+        checkState(node.whenTrue); checkState(node.whenFalse);
+      } else if (ts.isAsExpression(node) || ts.isParenthesizedExpression(node)) checkState(node.expression);
+      else if (ts.isBinaryExpression(node) && [ts.SyntaxKind.QuestionQuestionToken, ts.SyntaxKind.BarBarToken,
+        ts.SyntaxKind.AmpersandAmpersandToken].includes(node.operatorToken.kind)) {
+        checkState(node.left); checkState(node.right);
+      }
+      else if (ts.isParenthesizedTypeNode(node)) checkState(node.type);
+      else if (ts.isLiteralTypeNode(node)) checkState(node.literal);
+      else if (ts.isUnionTypeNode(node)) node.types.forEach(checkState);
+    };
+    const visit = node => {
+      if (ts.isFunctionDeclaration(node) && node.name?.text === 'cornerMergeability') {
+        gateFound = true;
+        const returned = node.body?.statements.find(ts.isReturnStatement)?.expression;
+        const expectedReturn = "{ mergeAllowed: reasons.length === 0, ...(reasons.length ? { blockedReason: reasons.join('; ') } : {}) }";
+        if (node.body?.statements.length !== 2 || !returned || normalize(returned.getText(tree)) !== normalize(expectedReturn))
+          errors.push(`${file}: cornerMergeability may refuse only through its six owner-approved conditions`);
+        const declaration = node.body?.statements.find(statement => ts.isVariableStatement(statement)
+          && statement.declarationList.declarations.some(value => value.name.getText(tree) === 'reasons'));
+        const expression = declaration?.declarationList.declarations.find(value => value.name.getText(tree) === 'reasons')?.initializer;
+        const array = expression && ts.isCallExpression(expression) && ts.isPropertyAccessExpression(expression.expression)
+          && expression.expression.name.text === 'filter' && expression.arguments.length === 1
+          && expression.arguments[0].getText(tree) === 'Boolean' ? expression.expression.expression : undefined;
+        if (!array || !ts.isArrayLiteralExpression(array) || array.elements.length !== MERGE_CONDITIONS.length) {
+          errors.push(`${file}: cornerMergeability must contain exactly the six owner-approved merge conditions`);
+        } else array.elements.forEach((element, index) => {
+          const rule = MERGE_CONDITIONS[index];
+          if (!ts.isConditionalExpression(element) || normalize(element.condition.getText(tree)) !== normalize(rule.condition)) {
+            errors.push(`${file}: merge condition ${index + 1} differs from the owner-approved list`);
+            return;
+          }
+          const reason = rule.inverted ? element.whenFalse : element.whenTrue;
+          const empty = rule.inverted ? element.whenTrue : element.whenFalse;
+          const validReason = rule.template
+            ? ts.isTemplateExpression(reason) && reason.head.text === rule.reason
+            : ts.isStringLiteral(reason) && reason.text === rule.reason;
+          if (!validReason || !ts.isStringLiteral(empty) || empty.text !== '')
+            errors.push(`${file}: merge refusal ${index + 1} differs from the owner-approved list`);
+        });
+      }
+      if ((ts.isVariableDeclaration(node) && node.name.getText(tree) === 'stage') ||
+          ((ts.isPropertySignature(node) || ts.isPropertyAssignment(node)) &&
+            ['stage', 'state'].includes(node.name.getText(tree)))) {
+        if (node.name.getText(tree) === 'stage') stageFound = true;
+        checkState(ts.isPropertySignature(node) ? node.type : node.initializer);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(tree);
+  }
+  if (!gateFound || !stageFound) errors.push('merge gate and stage computation must remain watched by check-walls');
+  return errors;
+}
 export const WALLS_FILE = 'docs/walls.md';
 export const WALL_BUILDER_FILE = 'packages/api-contract/src/walls.ts';
 const CAP = /(?<!re)lease|capacity|quota|admission|admit|budget|throttle|ratelimit|maxattempts|retries|retrycount|maxretr/i;
@@ -169,7 +252,7 @@ export function productionWallSites(root) {
 }
 
 export function judgeWalls(root) {
-  const errors = [], kinds = wallKinds(root);
+  const errors = judgeMergeContract(root), kinds = wallKinds(root);
   const constructions = productionWallSites(root);
   const docs = readFileSync(resolve(root, WALLS_FILE), 'utf8');
   const maximum = Number(docs.match(/^Production wall constructions: (\d+)\.$/m)?.[1]);

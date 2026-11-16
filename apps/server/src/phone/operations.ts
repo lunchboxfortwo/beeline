@@ -289,6 +289,7 @@ import { phoneReadConnectionDetail, phoneRevokeConnectionGrants } from './connec
       case 'setCornerHold': {
         const hold = input as Input<'setCornerHold'>;
         const result = await ctx.database.transaction(db => setCornerHold(db, hold, viewerId));
+        if (hold.releaseHoldId !== undefined) await ctx.github?.landCorner(hold.cornerId);
         await ctx.github?.reconcileQueuedCorners(hold.cornerId);
         return result as Output<Name>;
       }
@@ -526,11 +527,6 @@ import { phoneReadConnectionDetail, phoneRevokeConnectionGrants } from './connec
           (input as Input<'dispatchRoomWorkflow'>).workflowName,
         );
         return undefined as Output<Name>;
-      case 'approveCornerMerge':
-        return (await phoneRequireGitHub(ctx).approveCornerMerge(
-          viewerId,
-          input as Input<'approveCornerMerge'>,
-        )) as Output<Name>;
       case 'getAuthCapabilities':
         return { github: Boolean(ctx.github), repositoryOnboarding: true } as Output<Name>;
       case 'getIdentityRecovery':

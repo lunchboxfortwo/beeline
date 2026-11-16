@@ -12,7 +12,7 @@ import { completeServiceReview, readServiceReviewPage, reserveServiceReviewWorks
 import { reserveAllowance, settleAllowance } from './free-agent-accounting.js';
 import { handoff, saveWorkflow, settleWorkflowGate, startWorkflow } from './workflow-runs.js';
 import { applySkillRevision } from './institutional-skills.js';
-import { advanceCorner, confirmCornerMergeAuthority, createCornerFacts } from './corner-lifecycle.js';
+import { advanceCorner, createCornerFacts } from './corner-lifecycle.js';
 import { systemLine } from './system-line.js';
 import { recordFreeAgentGuideStarted, warnFreeAgentOwner } from './free-agent-warning.js';
 import {createHash} from 'node:crypto';
@@ -578,38 +578,6 @@ describe.skipIf(!url)('atomic claims replace advisory serialization', () => {
     expect((await first.query(`SELECT machine->>'state' state FROM corner_facts WHERE corner_id=$1`,[corner])).rows)
       .toEqual([{state:'archived'}]);
     expect((await first.query(`SELECT id FROM messages WHERE room_id=$1 AND card_type='corner-workflow-handoff'`,[corner])).rowCount).toBe(0);
-  });
-
-  it('merge authority cannot combine an old repository brief with a newly committed yes',async()=>{
-    const corner=randomUUID(),owner=randomUUID().replaceAll('-','').repeat(2),head='f'.repeat(40);
-    await first.query(`INSERT INTO identities(id,kind,name) VALUES($1,'human','Snapshot owner')`,[owner]);
-    await first.query(`INSERT INTO memberships(workspace_id,identity_id,role) VALUES($1,$2,'owner')`,[workspace,owner]);
-    await first.query(`INSERT INTO rooms(id,workspace_id,parent_id,name) VALUES($1,$2,$3,'Snapshot corner')`,[corner,workspace,room]);
-    await createCornerFacts(first,corner);
-    await first.query(`UPDATE corner_github_cache SET lifecycle=$2::jsonb WHERE corner_id=$1`,
-      [corner,JSON.stringify({lifecycle:'working',checks:'passing',pr:{number:1,headSha:head}})]);
-    await first.query(`INSERT INTO corner_brief_revisions(corner_id,revision,content,author_id,source_room_id,approval_basis)
-      VALUES($1,1,'Repository work',$2,$3,'{"repositoryWork":true}')`,[corner,owner,room]);
-    let changed=false;
-    const wrap=(db:SqlDatabase):SqlDatabase=>({
-      ...db,transaction:work=>db.transaction(tx=>work(wrap(tx))),
-      query:async<Row extends QueryResultRow>(sql:string,values?:unknown[])=>{
-        const result=await db.query<Row>(sql,values);
-        if(!changed&&sql.includes('FROM corner_brief_revisions brief')){
-          changed=true;
-          await second.transaction(async tx=>{
-            await tx.query(`INSERT INTO corner_brief_revisions(corner_id,revision,content,author_id,source_room_id,approval_basis)
-              VALUES($1,2,'Local work',$2,$3,'{"repositoryWork":false}')`,[corner,owner,room]);
-            await tx.query(`INSERT INTO corner_merge_approvals(corner_id,approved_by,pull_request_number,head_sha)
-              VALUES($1,$2,1,$3)`,[corner,owner,head]);
-          });
-        }
-        return result;
-      },
-    });
-    expect(await confirmCornerMergeAuthority(wrap(first),corner,head)).toBe(false);
-    expect(changed).toBe(true);
-    await expect(confirmCornerMergeAuthority(first,corner,head)).rejects.toThrow('does not assign repository work');
   });
 
   it('two Add agent commands record one guide start for their historical warning', async () => {

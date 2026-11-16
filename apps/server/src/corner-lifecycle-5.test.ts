@@ -222,7 +222,7 @@ const scope35 = fixtureScope35();
 
   it('R1: combined checks pass and GitHub confirms the merge through the existing close path', async () => {
     const cornerId = await scope35.queued();
-    rootFixture.githubApp.readPullRequest.mockResolvedValue({ headSha: SHA, headRef: branchOf(cornerId),
+    rootFixture.githubApp.readPullRequest.mockResolvedValue({ number: 7, url: 'https://github.com/owner/widgets/pull/7', mergeability: 'clean', headSha: SHA, headRef: branchOf(cornerId),
       baseRef: 'main', merged: true, mergedAt: '2026-10-22T15:00:00Z' });
     await rootFixture.github.reconcileQueuedCorners();
     expect(await currentState(cornerId)).toBe('archived');
@@ -242,7 +242,7 @@ const scope35 = fixtureScope35();
             head: { ref: branchOf(cornerId), sha: SHA }, base: { ref: 'main' } },
         });
       } else {
-        rootFixture.githubApp.readPullRequest.mockResolvedValue({ number: 7, headSha: SHA, headRef: branchOf(cornerId),
+        rootFixture.githubApp.readPullRequest.mockResolvedValue({ number: 7, url: 'https://github.com/owner/widgets/pull/7', mergeability: 'clean', headSha: SHA, headRef: branchOf(cornerId),
           merged: false, state: 'closed' });
         await rootFixture.github.prChecksStatus({ cornerId, pullRequest: 7 });
       }
@@ -274,7 +274,7 @@ const scope35 = fixtureScope35();
 
 it('R1 / A6: a hold dequeues an accepted enqueue whose response and first queue read were lost', async () => {
   const cornerId = await approved();
-  rootFixture.githubApp.readPullRequest.mockResolvedValue({ headSha: SHA, headRef: branchOf(cornerId), baseRef: 'main', merged: false });
+  rootFixture.githubApp.readPullRequest.mockResolvedValue({ number: 7, url: 'https://github.com/owner/widgets/pull/7', mergeability: 'clean', headSha: SHA, headRef: branchOf(cornerId), baseRef: 'main', merged: false });
   rootFixture.githubApp.mergePullRequest.mockRejectedValueOnce(Object.assign(new Error('response lost'), { queueAttempted: true }));
   rootFixture.githubApp.readPullRequestQueue.mockRejectedValueOnce(new Error('queue read unavailable'));
   expect(await rootFixture.github.landCornerOutcome(cornerId)).toEqual({ status: 'refused', reason: 'response lost' });
@@ -286,7 +286,7 @@ it('R1 / A6: a hold dequeues an accepted enqueue whose response and first queue 
   await new PhoneService(rootFixture.db, 'http://test', rootFixture.github).execute('setCornerHold', { cornerId }, H);
   expect(rootFixture.githubApp.dequeuePullRequest).toHaveBeenCalledWith('tok', 'PR_7');
   expect(rootFixture.githubApp.mergePullRequest).toHaveBeenCalledTimes(1);
-  console.info('Reproduction A6 Demonstrated: lost enqueue response, then a hold dequeued the live queue entry with no stored claim.');
+  console.info('Reproduction A6 Demonstrated: lost enqueue response, then a hold dequeued the live queue entry with its head-scoped attempt claim retained.');
 });
 
 

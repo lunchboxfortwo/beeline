@@ -232,20 +232,9 @@ const fixture = monolithFixture();
         url: 'https://github.com/owner/widgets/actions/runs/7',
       },
     });
-    // The owner's yes on a red head is kept, and nothing merges until the
-    // head is green: there is no force past failing checks.
-    const redApproval = await fixture.request('/v1/phone/operations/approveCornerMerge', 'POST', {
-      cornerId,
-    });
-    expect(await redApproval.json()).toEqual({
-      status: 'merge-requested',
-      pullRequestUrl: 'https://github.com/owner/widgets/pull/42',
-    });
-    expect(
-      await (await fixture.daemonOperation('getCornerRestoreState', { cornerId })).json(),
-    ).toMatchObject({
-      mergeApproval: { pullRequestNumber: 42, headSha: '1'.repeat(40) },
-    });
+    // A human hold keeps this head open through the provider reconciliation.
+    const holdResponse = await fixture.request('/v1/phone/operations/setCornerHold', 'POST', { cornerId });
+    const mergeHold = await holdResponse.json() as { holdId: string };
     expect(fixture.githubApp.mergePullRequest).not.toHaveBeenCalled();
     await fixture.database.query(
       `UPDATE corner_facts
@@ -257,7 +246,6 @@ const fixture = monolithFixture();
       await (await fixture.daemonOperation('getCornerRestoreState', { cornerId })).json(),
     ).toMatchObject({
       lifecycle: { pr: { number: 42, headSha: '2'.repeat(40) } },
-      mergeApproval: { pullRequestNumber: 42, headSha: '1'.repeat(40) },
     });
     await fixture.database.query(
       `UPDATE corner_facts
@@ -404,14 +392,11 @@ const fixture = monolithFixture();
     expect((await fixture.database.query(
       `SELECT 1 FROM messages WHERE room_id=$1 AND text LIKE '%passed a check%'`, [cornerId])).rowCount).toBe(0);
 
-    const duplicateApproval = await fixture.request('/v1/phone/operations/approveCornerMerge', 'POST', {
-      cornerId,
+    // Releasing the human hold lands the green head without any approval or agent merge call.
+    const released = await fixture.request('/v1/phone/operations/setCornerHold', 'POST', {
+      cornerId, releaseHoldId: mergeHold.holdId,
     });
-    expect(await duplicateApproval.json()).toEqual({
-      status: 'already-requested',
-      pullRequestUrl: 'https://github.com/owner/widgets/pull/42',
-    });
-    // Green now: the same yes merges the exact head through landCorner.
+    expect(released.status).toBe(200);
     expect(fixture.githubApp.mergePullRequest).toHaveBeenCalledOnce();
     expect(fixture.githubApp.mergePullRequest).toHaveBeenCalledWith(
       77,
@@ -557,30 +542,7 @@ const fixture = monolithFixture();
         )
       ).rows[0]?.archived,
     ).toBe(true);
-    expect(
-      (
-        await fixture.database.query<{
-          approved_by: string;
-          pull_request_number: number;
-          head_sha: string;
-        }>(
-          `SELECT approved_by,pull_request_number,head_sha
-           FROM corner_merge_approvals WHERE corner_id=$1`,
-          [cornerId],
-        )
-      ).rows[0],
-    ).toEqual({
-      approved_by: HUMAN,
-      pull_request_number: 42,
-      head_sha: '1'.repeat(40),
-    });
-    const approvalAfterMerge = await fixture.request('/v1/phone/operations/approveCornerMerge', 'POST', {
-      cornerId,
-    });
-    expect(await approvalAfterMerge.json()).toEqual({
-      status: 'already-merged',
-      pullRequestUrl: 'https://github.com/owner/widgets/pull/42',
-    });
+    expect((await fixture.database.query('SELECT 1 FROM corner_merge_approvals WHERE corner_id=$1', [cornerId])).rowCount).toBe(0);
     expect(fixture.githubApp.deleteBranch).toHaveBeenCalledWith(77, 101, 'owner/widgets', branch);
   });
 

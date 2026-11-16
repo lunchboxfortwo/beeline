@@ -12,7 +12,7 @@ import type { SqlDatabase } from './database.js';
 import { type SystemPhrase } from './system-line.js';
 import { fireRepositorySubscriptions } from './agent-subscriptions.js';
 import { gitHubOperationsBeginIdentity, gitHubOperationsCompleteIdentity, gitHubOperationsBeginInstallation, gitHubOperationsCompleteInstallation, gitHubOperationsRefresh, gitHubOperationsRepositoryStarred, gitHubOperationsStarRepository, gitHubOperationsOnboardingSignals, gitHubOperationsCreateRepository, gitHubOperationsRoomAnchorTarget, gitHubOperationsRoomWorkflowTarget, gitHubOperationsAssertCornerReviewerNotAuthor, gitHubOperationsListRoomWorkflows, gitHubOperationsDispatchRoomWorkflow, gitHubOperationsDispatchProductionRelease, gitHubOperationsResolveUnregisteredCornerPullRequest, gitHubOperationsRefreshCornerReviewHead, gitHubOperationsPrChecksStatus } from './github-operations-begin-identity.js';
-import { gitHubOperationsReadPrChecksStatus, gitHubOperationsApproveCornerMerge, gitHubOperationsLandCorner, gitHubOperationsLandCornerOutcome, gitHubOperationsCloseCornerPullRequest, gitHubOperationsRecordClosedCornerPullRequest, gitHubOperationsReadCornerPullRequest, gitHubOperationsRefreshStaleMergeability } from './github-operations-read-pr-checks-status.js';
+import { gitHubOperationsReadPrChecksStatus, gitHubOperationsLandCorner, gitHubOperationsLandCornerOutcome, gitHubOperationsCloseCornerPullRequest, gitHubOperationsRecordClosedCornerPullRequest, gitHubOperationsReadCornerPullRequest, gitHubOperationsRefreshStaleMergeability } from './github-operations-read-pr-checks-status.js';
 import { gitHubOperationsReconcileQueuedCorners, gitHubOperationsRecordConfirmedCornerMerge, gitHubOperationsProcessBaseBranchPush, gitHubOperationsProcessRepositoryEvent, gitHubOperationsProcessCornerEvent } from './github-operations-reconcile-queued-corners.js';
 import { gitHubOperationsRefreshCheckRollup, gitHubOperationsLifecycle, gitHubOperationsUpdateLifecycle, gitHubOperationsSystemNote, gitHubOperationsMergeCorner, gitHubOperationsDeleteCornerBranch, gitHubOperationsSyncInstallation, gitHubOperationsListAdministeredInstallations, gitHubOperationsUserCanAdministerInstallation, gitHubOperationsAssertInstallationAccess } from './github-operations-refresh-check-rollup.js';
 import { gitHubOperationsUserCredential, gitHubOperationsRotateUserCredential, gitHubOperationsStoreRepository } from './github-operations-user-credential.js';
@@ -193,26 +193,15 @@ async readPrChecksStatus(input: {
     pullRequest?: number | string;
 }, confirmZeroChecks: boolean) { return gitHubOperationsReadPrChecksStatus(this, input, confirmZeroChecks); }
 /**
- * The phone's approve: a Workspace owner or admin's yes on the current head
- * (`recordPersonMergeYes`), then the one merge path, `landCorner`. Checks
- * must be green and no hold may stand; a yes given early merges when the
- * implementer's `merge_thread` runs after green checks.
- */
-async approveCornerMerge(viewerId: string, input: Input<'approveCornerMerge'>) { return gitHubOperationsApproveCornerMerge(this, viewerId, input); }
-/**
  * The one merge path. Squash-merges a corner at its exact head when
  * `pr_checks_status`'s `mergeAllowed` is true on GitHub's current head:
- * live checks green, a yes said on that head, and no hold. Called by
- * the implementer's `merge_thread`, a person's yes (`order_thread_merge` or
- * the phone's approve). Recovery only confirms or releases an unfinished attempt.
+ * live green checks, any required reviewer approval on that head, and no hold. Called by
+ * any member's `merge_thread`, a reviewer PASS, green checks,
+ * or a hold release. No implementer turn is needed.
  * At most one attempt per head: the attempt is claimed under the run lock
- * before GitHub is called. Confirmation, the webhook, or recurring recovery
+ * before GitHub is called. Confirmation or the merge webhook
  * then lands the corner; a refusal returns GitHub's reason to the implementer.
  *
- * The brief gate lives here, for all of those callers: a corner whose
- * current brief does not assign repository work (no brief, or
- * `repositoryWork: false`) throws `CornerBriefMergeRefusedError` before
- * GitHub is read, so every caller reports the same refusal.
  */
 async landCorner(cornerId: string): Promise<boolean> { return gitHubOperationsLandCorner(this, cornerId); }
 /**

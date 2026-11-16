@@ -559,16 +559,6 @@
       }
     ]
   },
-  "agent-command.blocked-pr-is-a-draft-marking-it-ready-for-review-failed": {
-    "source": "apps/server/src/agent-command.ts",
-    "before": "'blocked: PR is a draft; marking it ready for review failed'",
-    "cases": [
-      {
-        "values": [],
-        "output": "blocked: PR is a draft; marking it ready for review failed"
-      }
-    ]
-  },
   "agent-command.found-merge-conflicts-in": {
     "source": "apps/server/src/agent-command.ts",
     "before": "'found merge conflicts in'",

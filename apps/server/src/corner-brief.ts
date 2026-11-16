@@ -616,27 +616,3 @@ export async function currentCornerBrief(
   ).rows[0];
   return row ? projectCornerBrief(cornerId, row) : undefined;
 }
-
-/** What every land attempt answers when the corner's brief does not assign repository work. */
-export const CORNER_BRIEF_MERGE_REFUSAL =
-  "this thread's brief does not assign repository work; revise the brief before merging";
-
-/** Thrown by the one merge path (`GitHubOperations.landCorner`); never swallowed by its callers. */
-export class CornerBriefMergeRefusedError extends Error {
-  constructor() {
-    super(CORNER_BRIEF_MERGE_REFUSAL);
-    this.name = 'CornerBriefMergeRefusedError';
-  }
-}
-
-/**
- * The brief half of the merge gate. A corner lands only when its current brief
- * assigns repository work: a corner with no brief revision, or whose current
- * revision says `repositoryWork: false`, is refused. A revision written before
- * `repositoryWork` existed (undefined) is allowed. Only the land is gated; a
- * reviewer's PASS or a person's yes is still recorded.
- */
-export async function assertCornerBriefAllowsMerge(db: SqlDatabase, cornerId: string): Promise<void> {
-  const brief = await currentCornerBrief(db, cornerId);
-  if (!brief || brief.repositoryWork === false) throw new CornerBriefMergeRefusedError();
-}

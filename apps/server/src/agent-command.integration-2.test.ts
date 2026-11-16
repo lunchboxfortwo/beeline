@@ -55,6 +55,7 @@ it('wakes the opener for failed checks even after a reviewer turn and retries a 
 
 it('Reproduction CONFLICT-LIVE-1: a stored conflict never wakes; only a live-read conflict event does, once per head', async () => {
   const headSha = 'f'.repeat(40);
+  const conflicts = async () => (await commands(B, C)).filter(command => command.reason === 'corner_merge_conflict');
   await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=$2::jsonb WHERE corner_id=$1`, [
     C,
     JSON.stringify({
@@ -65,17 +66,17 @@ it('Reproduction CONFLICT-LIVE-1: a stored conflict never wakes; only a live-rea
   // Reconciliation and other events read only the stored copy, which GitHub may have cleared.
   await expect(reconcileCornerMergeBlockers(rootFixture.db)).resolves.toBe(0);
   await advanceCorner(rootFixture.db, C, { kind: 'push', headSha, contents: { headSha } });
-  console.info(`Reproduction CONFLICT-LIVE-1: wrong=1 wake from the stored verdict; right=0; observed=${(await commands(B, C)).length}`);
-  expect(await commands(B, C)).toHaveLength(0);
+  console.info(`Reproduction CONFLICT-LIVE-1: wrong=1 wake from the stored verdict; right=0; observed=${(await conflicts()).length}`);
+  expect(await conflicts()).toHaveLength(0);
   const conflict = async () => {
     const note = await systemLine(rootFixture.db, { roomId: C, authorId: H, subject: { kind: 'github', name: 'GitHub' },
       verb: 'found merge conflicts in', object: { text: 'Resolve conflict', headSha } });
     return queueCornerMergeConflict(rootFixture.db, C, note.id);
   };
   await expect(conflict()).resolves.toBe(true);
-  expect(await commands(B, C)).toEqual([expect.objectContaining({ reason: 'corner_merge_conflict' })]);
+  expect(await conflicts()).toEqual([expect.objectContaining({ reason: 'corner_merge_conflict' })]);
   await expect(conflict()).resolves.toBe(false);
-  expect(await commands(B, C)).toHaveLength(1);
+  expect(await conflicts()).toHaveLength(1);
 });
 
 
@@ -216,11 +217,11 @@ it('routes subscribed events, grants and changed corner checks through actions',
     verb: 'passed a check',
     kind: 'check-passed',
   });
-  // No reviewer: the implementer owns arranging review or asking for a decision.
-  expect((await commands(B, C)).map(command => command.reason).sort()).toEqual(['attention_report', 'corner_review_needed']);
+  // No reviewer: no review-gap handback or merge turn is needed.
+  expect((await commands(B, C)).map(command => command.reason).sort()).toEqual(['attention_report']);
 });
 
-it('treats a configured reviewer removed from the parent Room as no reviewer and wakes the implementer', async () => {
+it('treats a reviewer removed from the parent Room as no reviewer without a review handback', async () => {
   await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: A }, H);
   await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [
     R,
@@ -238,10 +239,7 @@ it('treats a configured reviewer removed from the parent Room as no reviewer and
   });
   expect((await readAgentCommands(rootFixture.db, A, C)).commands).toHaveLength(0);
   const handback = await commands(B, C);
-  expect(handback.map(command => command.reason).sort()).toEqual(['attention_report', 'corner_review_needed']);
-  const needed = handback.find(command => command.reason === 'corner_review_needed');
-  expect(needed?.source.body).toContain('no reviewer is configured');
-  expect(needed?.source.body).toContain('report the blocker to its commander');
+  expect(handback.map(command => command.reason).sort()).toEqual(['attention_report']);
   expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND text LIKE '%could not be reached%'`, [C])).rowCount).toBe(0);
   await expect(
     rootFixture.daemon.execute('getAgentConfiguration', { agentId: B, roomId: C }, B),

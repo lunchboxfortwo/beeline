@@ -92,10 +92,6 @@ export default function TrayScreen() {
         }),
       decide: (item, action) =>
         execute(async () => {
-          if (action === 'merge') {
-            await monolithPhoneOperation('approveCornerMerge', { cornerId: item.roomId });
-            return;
-          }
           switch (action.kind) {
             case 'choice':
               await monolithPhoneOperation('answerChoice', {

@@ -567,9 +567,9 @@ const scope1 = fixtureScope1();
     app.readPullRequest.mockResolvedValue({ ...clean, mergeability: 'dirty' });
     await operations.processWebhook('check_run', payload);
     expect(await readLine()).toBe('PR #1 · merge conflict');
-    // The gate reads the same live verdict: GitHub would refuse this merge.
+    // The server reports the conflict; GitHub decides whether the merge is accepted.
     expect(await operations.prChecksStatus({ cornerId: corner })).toMatchObject({
-      mergeAllowed: false, blockedReason: expect.stringContaining('merge conflicts') });
+      checks: 'passed', mergeAllowed: false, blockedReason: 'no yes on this head' });
     app.readPullRequest.mockResolvedValue(clean);
     await operations.refreshStaleMergeability(corner);
     expect(await readLine()).toBe('PR #1 · all 1 test passed');

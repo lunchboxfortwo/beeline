@@ -191,7 +191,7 @@
         "apps/server/src/corner-merge-approval.ts"
       ],
       "total": 0,
-      "fix": "Record or withdraw a yes through apps/server/src/corner-merge-approval.ts (recordPersonMergeYes, withdrawAgentMergeApprovals, withdrawPullRequestMergeApprovals, withdrawMergeApprovalsBy). If it lacks the write you need, add a named function there and call it."
+      "fix": "Record or withdraw a yes through apps/server/src/corner-merge-approval.ts (recordCornerMergeApproval, withdrawAgentMergeApprovals, withdrawPullRequestMergeApprovals, withdrawMergeApprovalsBy). If it lacks the write you need, add a named function there and call it."
     },
     {
       "id": "corner.hold-writes",

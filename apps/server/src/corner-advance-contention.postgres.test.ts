@@ -119,8 +119,8 @@ describe.skipIf(!url)('corner advance under one busy corner', () => {
 
   it('a second event that commits between the unlocked read and the locked write makes the write use the newer facts', async () => {
     const { cornerId } = await seedBusyCorner();
-    // A person's yes lands while a push event is still reading the corner.
-    const second: CornerEvent = { kind: 'approval', headSha: head, by: 'person' };
+    // A reviewer PASS lands while a push event is still reading the corner.
+    const second: CornerEvent = { kind: 'approval', headSha: head, by: 'reviewer' };
     const first: CornerEvent = { kind: 'push', headSha: head, contents: {} };
     let snapshots = 0;
     let secondResult: Awaited<ReturnType<typeof advanceCorner>> | undefined;

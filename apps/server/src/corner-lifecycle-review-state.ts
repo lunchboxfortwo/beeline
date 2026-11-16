@@ -2,15 +2,13 @@ import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { createHash } from 'node:crypto';
 import { reportAgentAttention } from './commander.js';
 import { CornerAccessDatabase } from './corner-access-database.js';
-import { assertCornerBriefAllowsMerge } from './corner-brief.js';
 import type { activeCornerHolds } from './corner-holds.js';
-import { isZeroCheckCommander } from './corner-merge-approval.js';
 import { cornerReviewerSql } from './corner-reviewer.js';
 import { cornerImplementerSql } from './corner-worker.js';
 import type { SqlDatabase } from './database.js';
-import { missingReviewAttachments } from './review-evidence.js';
 import { ROUTER_AUTHORITY_LOCK } from './router-authority-lock.js';
 
+import { claimCornerLand } from './corner-lifecycle.js';
 import { CornerRow,loadCorner } from './corner-lifecycle-read-state.js';
 import { CORNER_LIFECYCLE_SLUG,greenReviewRequestSql } from './corner-lifecycle-values.js';
 import { SYSTEM_AUTHOR_ID,systemText } from './message-origin.js';
@@ -124,29 +122,25 @@ export type CornerMergeGate = {
   /** A reviewer is configured. */
   reviewerExists: boolean;
   /**
-   * A yes said on this exact head: a configured reviewer agent's PASS, or a
-   * current Workspace owner or admin's order, or the zero-check commander's yes.
+   * The configured reviewer's PASS on this exact head.
    */
   approved: boolean;
-  evidenceMissing?: boolean;
   held: boolean;
   holds: Awaited<ReturnType<typeof activeCornerHolds>>;
-  /** Everything but checks: a yes on this head and no hold. */
+  /** Everything but checks: any required reviewer PASS and no hold. */
   open: boolean;
 };
 
 
 export type CornerMergeabilityInput = {
   checks: string;
-  evidenceMissing?: boolean;
   approved: boolean;
+  reviewerExists: boolean;
   held: boolean;
   holds: readonly { id: string; holderId?: string; holderName?: string | null }[];
   archived: boolean;
   merged?: boolean;
-  expectedHeadSha?: string | null;
-  currentHeadSha: string;
-  mergeability?: string;
+  repositoryMatches: boolean;
 };
 
 
@@ -155,20 +149,12 @@ export function cornerMergeability(input: CornerMergeabilityInput) {
   const reasons = [
     input.merged ? 'the pull request is already merged' : '',
     input.archived ? 'the corner is closed' : '',
-    input.expectedHeadSha && input.expectedHeadSha !== input.currentHeadSha
-      ? 'PR head changed; checks and approval must match the corner head'
-      : '',
-    input.mergeability === 'draft' ? 'PR is a draft' : '',
-    input.mergeability === 'dirty' ? 'GitHub reports merge conflicts with the base branch' : '',
     input.checks !== 'passed' ? `checks are ${input.checks}` : '',
-    input.evidenceMissing
-      ? 'missing review attachments: attach the screenshots or files claimed by the verdict'
-      : input.approved
-        ? ''
-        : 'no yes on this head',
+    !input.reviewerExists || input.approved ? '' : 'no yes on this head',
     input.held
       ? `a hold stands${input.holds.length ? `: ${input.holds.map((hold) => `${hold.id}${hold.holderName ? ` (${hold.holderName}, ${hold.holderId ?? ''})` : ''}`).join('; ')}` : ''}`
       : '',
+    input.repositoryMatches === false ? 'the merge target no longer matches the linked GitHub repository' : '',
   ].filter(Boolean);
   return {
     mergeAllowed: reasons.length === 0,
@@ -198,21 +184,8 @@ export async function cornerMergeGate(
                 SELECT 1 FROM corner_merge_approvals approval
                 WHERE approval.corner_id=fact.corner_id AND approval.pull_request_number=$2
                   AND approval.head_sha=$3
-                  AND (
-                    -- The corner's reviewer, who is not its implementer.
-                    (approval.approved_by=${cornerReviewerSql()}
-                      AND approval.approved_by IS DISTINCT FROM ${cornerImplementerSql('fact', 'corner')})
-                    -- Or a current Workspace owner or admin.
-                    OR EXISTS (
-                      SELECT 1 FROM memberships workspace_member
-                      JOIN identities person ON person.id=workspace_member.identity_id AND person.kind='human'
-                      WHERE workspace_member.workspace_id=corner.workspace_id
-                        AND workspace_member.room_id IS NULL
-                        AND workspace_member.identity_id=approval.approved_by
-                        AND workspace_member.removed_at IS NULL
-                        AND workspace_member.role IN ('owner','admin')
-                    )
-                  )
+                  AND approval.approved_by=${cornerReviewerSql()}
+                  AND approval.approved_by IS DISTINCT FROM ${cornerImplementerSql('fact', 'corner')}
               ) approved,
               COALESCE((SELECT jsonb_agg(jsonb_build_object('id',hold.id::text,'actorId',hold.actor_id,
                 'holderId',COALESCE(hold.set_by_agent_id,hold.actor_id),'holderName',(SELECT name FROM identities WHERE id=COALESCE(hold.set_by_agent_id,hold.actor_id)),
@@ -229,45 +202,22 @@ export async function cornerMergeGate(
   );
   const corner = rows.rows[0];
   if (!corner) throw new Error('corner not found');
-  if (!corner.approved && !corner.configured_reviewer_id) {
-    const approval = (
-      await db.query<{ approved_by: string }>(
-        `SELECT approved_by FROM corner_merge_approvals
-       WHERE corner_id=$1 AND pull_request_number=$2 AND head_sha=$3`,
-        [cornerId, head.number, head.headSha],
-      )
-    ).rows[0];
-    if (approval) corner.approved = await isZeroCheckCommander(db, cornerId, approval.approved_by);
-  }
-  const approval = (
-    await db.query<{ approved_by: string }>(
-      `SELECT approval.approved_by FROM corner_merge_approvals approval JOIN identities reviewer
-       ON reviewer.id=approval.approved_by AND reviewer.kind='agent'
-     WHERE corner_id=$1 AND pull_request_number=$2 AND head_sha=$3`,
-      [cornerId, head.number, head.headSha],
-    )
-  ).rows[0];
-  const evidenceMissing = Boolean(
-    approval && (await missingReviewAttachments(db, cornerId, head, approval.approved_by)),
-  );
-  if (evidenceMissing) corner.approved = false;
   const held = corner.holds.length > 0;
   return {
-    ...(evidenceMissing ? { evidenceMissing: true } : {}),
     reviewerExists: Boolean(corner.configured_reviewer_id),
     approved: corner.approved,
     held,
     holds: corner.holds,
-    open: corner.approved && !held,
+    open: (!corner.configured_reviewer_id || corner.approved) && !held,
   };
 }
 
 
 /**
  * Rechecks local merge authority under the run lock after the live gate read,
- * immediately before GitHub is asked to merge: the corner is open, the head
- * is unchanged, the brief still assigns repository work, a yes stands on this
- * head and no hold stands. Nothing is stored. GitHub's expected-head merge
+ * immediately before GitHub is asked to merge: the corner is open, any required
+ * reviewer approved this head, and no hold stands. Landing claims the existing
+ * head-scoped land effect. GitHub's expected-head merge
  * merges a pull request at most once; a concurrent second attempt reads the
  * live pull request and confirms the merge instead of reporting a refusal.
  */
@@ -276,30 +226,24 @@ export async function confirmCornerMergeAuthority(
   cornerId: string,
   headSha: string,
   onBlocked?: (reason: string) => void,
+  claim = false,
 ): Promise<boolean> {
   const blocked = (reason: string) => {
     onBlocked?.(reason);
     return false;
   };
   return database.transaction(async (db) => {
-    await db.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
-    const corner = await loadCorner(db, cornerId, false);
+    const corner = await loadCorner(db, cornerId, true);
     const pr = corner?.lifecycle.pr;
     if (!corner) return blocked('the corner no longer exists');
     if (corner.archived) return blocked('the corner is archived');
     if (!pr?.number) return blocked('the corner has no pull request');
-    if (pr.headSha !== headSha) return blocked('the pull request head changed before the merge');
-    // Brief, approval and hold are read from the same committed snapshot.
-    await assertCornerBriefAllowsMerge(db, cornerId);
     const gate = await cornerMergeGate(db, cornerId, { number: pr.number, headSha });
     if (!gate.open)
       return blocked(
-        gate.evidenceMissing
-          ? 'missing review attachments: attach the screenshots or files claimed by the verdict'
-          : gate.held
-            ? 'a hold stands'
-            : 'no yes on this head',
+        gate.held ? 'a hold stands' : 'no yes on this head',
       );
+    if (claim) return claimCornerLand(db, cornerId, headSha, pr.number, corner.machine);
     return true;
   });
 }

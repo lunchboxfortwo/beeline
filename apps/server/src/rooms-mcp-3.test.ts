@@ -813,7 +813,7 @@ const scope3 = fixtureScope3(scope1);
 
     // Reproduction (R-MCP-PROGRESS): an outside agent could only post whole messages, so a corner showed none of
     // its work while it ran; created agents' narration lands as corner activity.
-    it('E1: explicit order preserves requester and generation through merge yes and report', async () => {
+    it('E1: explicit order preserves requester through progress and report', async () => {
       const { client, member } = await scope1.connected();
       const corner = await scope3.reportCorner(member);
       const source = 'e1'.repeat(32), unrelated = 'e2'.repeat(32);
@@ -829,14 +829,8 @@ const scope3 = fixtureScope3(scope1);
       const before = (await scope1.db.query<{ root_source_message_id: string; state: string }>(
         `SELECT root_source_message_id,state FROM agent_commands WHERE id=$1`, [order!.id])).rows[0]!;
       expect(before).toMatchObject({ state: 'pending', root_source_message_id: source });
-      await scope3.ok(client, 'record_merge_yes', { address: corner, commandId: order!.id });
-      expect((await scope1.db.query(`SELECT approved_by,head_sha FROM corner_merge_approvals WHERE corner_id=$1`, [corner])).rows[0])
-        .toMatchObject({ approved_by: USER, head_sha: head });
-      expect((await scope1.db.query(`SELECT state FROM agent_commands WHERE id=$1`, [order!.id])).rows[0])
-        .toEqual({state:'pending'});
       await scope3.ok(client, 'report', { address: corner, commandId: order!.id, status: 'done', text: 'done: order complete' });
       expect((await scope1.db.query(`SELECT state FROM agent_commands WHERE id=$1`, [order!.id])).rows[0]).toEqual({ state: 'complete' });
-      expect((await scope3.call(client, 'record_merge_yes', { address: corner, commandId: order!.id })).error).toBe(true);
     });
 
     it('uses the oldest own queued input and cannot complete another member item',async()=>{

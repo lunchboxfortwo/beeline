@@ -37,7 +37,7 @@ Repeated reads in an authority check are preserved as retry semantics inside the
 | `watchCorner`                                                 | `read-only-mcp.ts` (`watch`); transactional lifecycle snapshot and opened/merged wakes                                                 |
 | `postAgentActivity`, `postCornerPlan`                           | `activity.ts:1014,1030,1060,1088,1561`                                                                                                  |
 | `postPermissionRequest`, `postPermissionExecution`              | `permission-runtime.ts:121,362`; `body.ts:5841,5932,5946,6328`                                                                          |
-| `order`, `report`, `read` | Private command transport and member-address reads from Rooms, corners and DMs; reports require a status (`done`, `blocked`, `failed`, `needs_decision`) matching the display prefix and derive their return address from existing command provenance. Corner worker done requires a live merge-ready or merged PR, unless its brief has `repositoryWork: false`. |
+| `order`, `report`, `read` | Private command transport and member-address reads from Rooms, corners and DMs; reports require a status (`done`, `blocked`, `failed`, `needs_decision`) matching the display prefix and derive their return address from existing command provenance. Corner worker completion reports the result through the recorded return address. |
 | `postRoomMessage`                                               | `events-service.ts:421,422,448`; `body.ts:2447,2509,4320,7940`                                                                          |
 | `postAgentTurnReceipt`                                          | `body.ts:4855` and terminal receipt publication routed through `events-service.ts:448`                                                  |
 | `postAgentDraft`, `postAgentThought`, `retractAgentLiveOutput`  | the four live-output publications at `activity.ts:1014,1030,1060,1088` split by their typed presentation                                |
@@ -64,20 +64,20 @@ Repeated reads in an authority check are preserved as retry semantics inside the
 `getPrChecksStatus({ cornerId, pullRequest? })` is authorized by current corner membership.
 `pullRequest` is a positive PR number in the parent Room repository or its full GitHub URL;
 omitting it selects the corner's own PR. It returns facts only: `stage` (`building` |
-`checking` | `waiting_for_yes` | `merged` | `closed`, derived from the live facts below),
+`checking` | `merged` | `closed`, derived from the live facts below),
 `checks` (`passed`, `failed`, or `pending`, read live from GitHub's rollup for the current head),
 `pullRequest` (URL), `headSha`, `checkCount`, `approved` (a yes said on this exact head: a
-configured reviewer agent's PASS, or a current Workspace owner or admin), `reviewer` (the
+configured reviewer agent's PASS (required only when a reviewer is configured)), `reviewer` (the
 parent Room's currently configured reviewer as `@handle`, or null), `reviewerExists`,
 `reviewerWake` (`unconfigured` | `unreachable` | `waiting` | `dispatched`, plus a `detail`
 sentence), `held`/`holds`, and `mergeAllowed`:
 
-    mergeAllowed = checks === 'passed' && approved && !held
-                   && the live PR head matches the corner head && PR is not a draft
+    mergeAllowed = !merged && !closed && checks === 'passed' && (!reviewerExists || approved) && !held
+                   && the merge target matches the linked repository
 
-The checks read and `mergeCorner` use the same mergeability decision and blocker text. A stale
-head, pending checks, missing yes, hold, closed corner, or draft PR therefore has one verdict and
-reason across both operations.
+The checks read and `mergeCorner` use exactly these six conditions and the same blocker text.
+The server lands once for the head after a reviewer PASS, checks becoming green, or
+a hold release opens the gate. Any reachable agent may also call `mergeCorner`.
 
 A new commit cancels the yes because it is bound to the exact head; a brief edit does not. A
 hold is the only veto.
@@ -98,8 +98,8 @@ or of a corner it reaches. `readCornerPullRequest({ cornerId })` returns a reach
 changed files, reviews, review comments and conversation comments. `postCornerMessage({ cornerId,
 text })` posts a plain message into a reachable corner from the caller's active turn; it wakes nobody.
 
-`mergeCorner({ cornerId })` is the implementer's merge. Only the corner's implementer may call it.
-It goes through the one merge path, `landCorner`, which squash-merges the current head only when
-`getPrChecksStatus` reports `mergeAllowed`; otherwise it attempts nothing and returns
-`{ status: 'blocked', blocker }`. A reviewer's PASS (`approveCornerMerge`) and a person's yes (`orderCornerMerge`, or the phone's `approveCornerMerge`) goes through the same
-`landCorner` at once.
+`mergeCorner({ cornerId })` is available to any reachable agent. It uses the one landing path,
+`landCorner`, which squash-merges the current head only when `getPrChecksStatus` reports
+`mergeAllowed`; otherwise it returns `{ status: 'blocked', blocker }`. The server calls that
+path after a reviewer PASS, green checks, or a hold release opens the gate. Approval is needed
+only when a reviewer is configured; people control merging through holds.

@@ -228,7 +228,7 @@ export type DaemonOperationMap = {
     CornerInput & { pullRequest?: number | string },
     {
       /** Where the corner stands, from live facts: building -> checking -> waiting for a yes -> merged (or closed). */
-      stage: 'building' | 'checking' | 'waiting_for_yes' | 'merged' | 'closed';
+      stage: 'building' | 'checking' | 'merged' | 'closed';
       checks: 'passed' | 'failed' | 'pending';
       /** Number of check-run and commit-status contexts GitHub reports for the current head. */
       checkCount: number;
@@ -571,12 +571,6 @@ export type DaemonOperationMap = {
     CornerHoldInput & TurnOutputAuthority & RoomInput & { requestId: string },
     { holdId: string; roomId: string }
   >;
-  /**
-   * This turn's original human requester's yes on the current head. Only a
-   * current Workspace owner or admin's yes is recorded; it is the same yes as
-   * a reviewer's PASS, and the server merges at once when checks are green
-   * and no hold stands.
-   */
   sendOperatorSystemDm: Operation<
     AgentRoomInput & TurnOutputAuthority & { requestId: string; recipients: string | readonly string[]; text: string },
     { sendId: string; recipients: number; delivered: number; failed: number; pending: number }
@@ -584,10 +578,6 @@ export type DaemonOperationMap = {
   readOperatorSystemDm: Operation<
     AgentRoomInput & TurnOutputAuthority & { requestId: string; sendId: string },
     { sendId: string; recipients: number; delivered: number; failed: number; pending: number }
-  >;
-  orderCornerMerge: Operation<
-    CornerInput & TurnOutputAuthority & RoomInput & { requestId: string },
-    { roomId: string; headSha: string }
   >;
   archiveCorner: Operation<CornerInput & Partial<RoomInput & TurnOutputAuthority>, WriteResult>;
   ensureAgentMembership: Operation<AgentRoomInput, WriteResult>;

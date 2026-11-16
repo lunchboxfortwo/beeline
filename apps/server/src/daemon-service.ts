@@ -88,7 +88,7 @@ export class DaemonService {
      readonly objects?: DaemonDependencies['objects'],
      readonly linkWallet?: DaemonDependencies['linkWallet'],
      readonly refreshMergeability?: DaemonDependencies['refreshMergeability'],
-    /** The merge attempt behind `merge_thread` and `order_thread_merge`. */
+    /** The merge attempt behind `merge_thread`. */
      readonly landCorner?: DaemonDependencies['landCorner'],
     /** The GitHub close behind `close_pull_request`. */
      readonly closePullRequest?: DaemonDependencies['closePullRequest'],

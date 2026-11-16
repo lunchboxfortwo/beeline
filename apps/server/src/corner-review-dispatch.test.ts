@@ -126,7 +126,7 @@ describe('thread message attribution', () => {
   });
 
 
-  it('wakes the configured reviewer for a zero-check PR, privately asks the implementer to report when no reviewer is configured', async () => {
+  it('wakes the configured reviewer for a zero-check PR and asks nobody for approval without one', async () => {
     let headSha = '1'.repeat(40);
     const checkGate = vi.fn(async () => ({
       checks: 'pending' as const,
@@ -212,11 +212,7 @@ describe('thread message attribution', () => {
     await rootFixture.daemon.execute('postAgentTurnReceipt', { roomId: C, requestId: noReviewerWorker!.turnRequestId, status: 'complete' }, A);
     await advanceCorner(rootFixture.db, C, { kind: 'reconcile' });
     expect(checkGate).toHaveBeenCalledTimes(2);
-    const notices = (await commands(A, C)).filter(command => command.reason === 'corner_review_needed');
-    expect(notices).toHaveLength(1);
-    expect(notices[0]).toMatchObject({ private: true, source: {
-      body: expect.stringContaining('This pull request has no checks and no reviewer. Landing needs your commander\'s yes. Ask your commander using your normal report tool.'),
-    } });
+    expect((await commands(A, C)).filter(command => command.reason === 'corner_review_needed')).toHaveLength(0);
     expect((await commands(B, R)).filter(command => command.reason === 'report' && command.source.body.includes('pending your yes'))).toHaveLength(0);
     expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE text LIKE '%ready to land pending your yes%'
       OR text LIKE '%Landing needs your commander%'`)).rowCount).toBe(0);

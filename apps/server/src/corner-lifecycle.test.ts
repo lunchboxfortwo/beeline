@@ -317,13 +317,13 @@ describe('checks dispatch (rows 6-8)', () => {
   });
 
 
-  it('a passing check with no configured reviewer wakes the implementer to arrange review', async () => {
+  it('a passing check with no configured reviewer needs no approval or implementer merge wake', async () => {
     const cornerId = await open('owner/widgets');
     const before = await reasons(cornerId, A);
     await greenHead(cornerId, 1, '1'.repeat(40));
-    expect(await currentState(cornerId)).toBe('working');
+    expect(await currentState(cornerId)).toBe('idle');
 
-    expect(await reasons(cornerId, A)).toEqual([...before, 'corner_review_needed']);
+    expect(await reasons(cornerId, A)).toEqual(before);
     expect(await reasons(cornerId, B)).toEqual([]);
     const waiting = (await rootFixture.db.query<{ text: string; card: unknown }>(
       `SELECT text,card FROM messages WHERE room_id=$1 AND text LIKE '%needs to approve%'`, [cornerId],

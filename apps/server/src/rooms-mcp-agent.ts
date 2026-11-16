@@ -200,8 +200,7 @@ export const MCP_AGENT_TOOLS: Tool[] = [
   tool('approve_merge', 'As the thread\'s configured reviewer, record PASS on the exact head SHA; the server lands the PR at once when checks are green and no hold stands. You cannot review a thread you implement or authored. This never releases a hold.', {
     address: address('Thread id.'), headSha: { type: 'string', pattern: '^[0-9a-fA-F]{40}$' },
   }, ['address', 'headSha']),
-  tool('merge_thread', 'Land a thread through the live gate: green checks, a yes on the exact head, and no hold.', { address: address('Thread id.') }, ['address']),
-  tool('record_merge_yes', 'Record the explicit merge yes of the person who tagged you. Does not land or release a hold.', { address: address('Thread id.') }, ['address']),
+  tool('merge_thread', 'Land a thread through the live gate: green checks, approval on the exact head when a reviewer is configured, and no hold.', { address: address('Thread id.') }, ['address']),
   tool('set_thread_hold', 'Set a merge hold citing a readable person’s request in sourceMessageId, or release releaseHoldId without a citation. Read hold ids with read facet status.', {
     address: address('Thread id.'), sourceMessageId: { type: 'string' }, releaseHoldId: { type: 'string', format: 'uuid' },
   }, ['address']),
@@ -465,7 +464,6 @@ export class RoomsMcpAgentTools {
         return exec('approveCornerMerge', { cornerId: addressArg(args.address), headSha });
       }
       case 'merge_thread': return exec('mergeCorner', { cornerId: addressArg(args.address) });
-      case 'record_merge_yes': return turn((_, context) => exec('orderCornerMerge', { ...context, cornerId: addressArg(args.address) }));
       case 'set_thread_hold': return turn((_, context) => exec('setCornerHold', { ...context, cornerId: addressArg(args.address), releaseHoldId: args.releaseHoldId, sourceMessageId: args.sourceMessageId }));
       case 'close_thread': return exec('archiveCorner', { cornerId: addressArg(args.address) });
       case 'close_thread_pr': return exec('closeCornerPullRequest', { cornerId: addressArg(args.address) });

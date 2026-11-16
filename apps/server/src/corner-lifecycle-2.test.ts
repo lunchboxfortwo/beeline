@@ -63,29 +63,28 @@ describe('Reproduction R5b: authority changes between gate read and merge', () =
 const scope14 = fixtureScope14();
 
 
-  it.each(['hold', 'membership'])('%s stops the merge', async change => {
+  it('a hold stops the merge', async () => {
     const cornerId = await approved();
     scope14.mergesOnceOnGitHub(cornerId);
     let holdId: string | undefined;
     const { state, raced } = scope14.racedWith(async () => {
-      if (change === 'hold') holdId = (await rootFixture.phone.execute('setCornerHold', { cornerId }, H)).holdId;
-      if (change === 'membership') await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [R, B]);
+      holdId = (await rootFixture.phone.execute('setCornerHold', { cornerId }, H)).holdId;
     });
     expect(await raced.landCorner(cornerId)).toBe(false);
     expect(state.injected).toBe(true);
     expect(rootFixture.githubApp.mergePullRequest).not.toHaveBeenCalled();
-    if (change === 'hold') await rootFixture.phone.execute('setCornerHold', { cornerId, releaseHoldId: holdId! }, H);
-    if (change === 'membership') await rootFixture.db.query(`UPDATE memberships SET removed_at=NULL WHERE room_id=$1 AND identity_id=$2`, [R, B]);
+    await rootFixture.phone.execute('setCornerHold', { cornerId, releaseHoldId: holdId! }, H);
     expect(await implementersMerge(raced)).toBe(1);
     expect(await implementersMerge(raced)).toBe(0);
     expect(rootFixture.githubApp.mergePullRequest).toHaveBeenCalledTimes(1);
   });
 
 
-  it.each(['brief', 'yolo'])('%s does not stop the merge (a brief edit keeps the yes; yolo is not part of the gate)', async change => {
+  it.each(['brief', 'yolo', 'membership'])('%s does not stop the merge', async change => {
     const cornerId = await approved();
     scope14.mergesOnceOnGitHub(cornerId);
     const { state, raced } = scope14.racedWith(async () => {
+      if (change === 'membership') await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [R, B]);
       if (change === 'brief') await revise(cornerId);
       if (change === 'yolo') await rootFixture.db.query(`UPDATE agents SET yolo_mode=false WHERE agent_id=$1`, [A]);
     });
@@ -187,7 +186,7 @@ describe('re-runs and pushes out of review (AC-1)', () => {
 describe('each transition wakes the next role exactly once (AC-2)', () => {
 
 
-  it.each(['checks', 'review'])('Reproduction REVIEW-SILENT-2: an unreachable reviewer in %s wakes the implementer', async state => {
+  it.each(['checks', 'review'])('Reproduction REVIEW-SILENT-2: a departed reviewer in %s needs no review handback', async state => {
     const cornerId = state === 'review' ? await inReview() : await open('owner/widgets');
     await rootFixture.db.query(`UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1`, [R, B]);
     await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [R, B]);
@@ -196,8 +195,8 @@ describe('each transition wakes the next role exactly once (AC-2)', () => {
       await rootFixture.db.query(`DELETE FROM agent_commands WHERE room_id=$1 AND agent_id=$2`, [cornerId, B]);
       await advanceCorner(rootFixture.db, cornerId, { kind: 'checks', result: 'passing', sourceMessageId: cornerId });
     }
-    expect(await reasons(cornerId, A)).toContain('corner_review_needed');
-    expect(await currentState(cornerId)).toBe('working');
+    expect(await reasons(cornerId, A)).not.toContain('corner_review_needed');
+    expect(await currentState(cornerId)).toBe('idle');
     expect((await rootFixture.db.query(`SELECT 1 FROM agent_commands WHERE agent_id=$1 AND room_id=$2 AND state='pending'`,[B,cornerId])).rowCount).toBe(0);
   });
 

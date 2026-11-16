@@ -7,7 +7,6 @@ import { TokenAuth } from './auth.js';
 import { PhoneService } from './phone-service.js';
 import { GitHubOperations } from './github-operations.js';
 import { postRepositoryOnboarding } from './repository-onboarding.js';
-import { recordPersonMergeYes } from './corner-merge-approval.js';
 import { REVIEW_IDENTITY_ID } from './review-access.js';
 
 let db: PgliteDatabase, auth: TokenAuth, phone: PhoneService, github: GitHubOperations;
@@ -70,12 +69,6 @@ it('E10: a Google member opens a corner on another manager’s repo and uses its
   expect((await db.query(`SELECT 1 FROM identity_external_links WHERE provider='github' AND identity_id=$1`, [member])).rows).toEqual([]);
 });
 
-it('E11: a Google owner records the merge yes on the current head; a regular member cannot', async () => {
-  const corner = await phone.execute('createHumanCorner', { roomId, title: 'merge-approval' }, owner);
-  await db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{pr}',$2::jsonb) WHERE corner_id=$1`, [corner.id, JSON.stringify({ number: 1, headSha: '1'.repeat(40) })]);
-  await expect(recordPersonMergeYes(db, corner.id, owner)).resolves.toMatchObject({ recorded: true, headSha: '1'.repeat(40) });
-  await expect(recordPersonMergeYes(db, corner.id, member)).rejects.toThrow('owner or admin');
-});
 
 it('E12: a Google admin switching another admin’s repo sees only their own installations', async () => {
   await linkRoom();

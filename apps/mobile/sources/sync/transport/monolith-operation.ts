@@ -74,10 +74,6 @@ export function phoneOperationRequestOptions(
   // Creation can rotate a user grant, mint an installation grant, then create
   // the repository: 3 sequential GitHub calls × 15s, plus local work.
   if (name === 'createGitHubRepository') return { timeoutMs: options?.timeoutMs ?? 60_000 };
-  // The queue/recovery merge path can make 22 sequential GitHub calls (15s
-  // each) and two bounded retry-read backoffs (90s each). Keep 30s for local
-  // work. The call-count table in evidence/operation-deadlines documents it.
-  if (name === 'approveCornerMerge') return { timeoutMs: options?.timeoutMs ?? 540_000 };
   const readDeadline = DATABASE_READS.has(name) || repeatableWrite(name, input);
   if (!readDeadline) return { timeoutMs: options?.timeoutMs ?? 20_000 };
   return { timeoutMs: options?.timeoutMs ?? MONOLITH_REQUEST_TIMEOUT_MS };

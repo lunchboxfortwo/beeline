@@ -6,7 +6,7 @@ import { systemLine, restateSystemLine, ensureSystemIdentity } from './system-li
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import type { CornerHoldInput, CornerMergeHold } from '@beeline/api-contract/phone';
 import type { SqlDatabase } from './database.js';
-import { lockCornerLifecycle } from './corner-lifecycle.js';
+import { advanceCorner, lockCornerLifecycle } from './corner-lifecycle.js';
 
 export async function activeCornerHolds(
   db: SqlDatabase,
@@ -86,6 +86,7 @@ export async function setCornerHold(db: SqlDatabase, input: CornerHoldInput, act
       input.releaseHoldId,
       agentId ?? actorId,
     ]);
+    await advanceCorner(db, input.cornerId, { kind: 'hold-released' });
     return { holdId: input.releaseHoldId, roomId: input.cornerId };
   }
   const row = (

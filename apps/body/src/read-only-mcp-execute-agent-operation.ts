@@ -387,14 +387,6 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
         ...await activeCommandContext(),
         agentId: requiredEnv('BEELINE_DAEMON_AGENT_ID'), sendId: String(args.sendId ?? ''),
       }));
-    case 'order_thread_merge':
-      return JSON.stringify(
-        await daemonExecute('orderCornerMerge', {
-          ...await activeCommandContext(),
-          cornerId: typeof args.cornerId === 'string'
-            ? args.cornerId : requiredEnv('BEELINE_DAEMON_CORNER_ID'),
-        }),
-      );
     case 'become_implementer':
       return JSON.stringify(await daemonExecute('becomeImplementer', await activeCommandContext()));
     case 'open_thread':

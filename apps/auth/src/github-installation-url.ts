@@ -305,21 +305,6 @@ import { GitHubAppClient, GitHubAppConfig, jsonObject, githubHeaders, GitHubInst
   }
 
 
-  export async function gitHubAppClientMarkPullRequestReadyForReview(ctx: { service: GitHubAppClient; config: Required<GitHubAppConfig> }, token: string, fullName: string, number: number, headSha: string): Promise<void> {
-    const [owner, name] = fullName.split('/');
-    const data = await ctx.service.queueGraphql(token, `query($owner:String!,$name:String!,$number:Int!){
-      repository(owner:$owner,name:$name){pullRequest(number:$number){id headRefOid}}
-    }`, { owner, name, number }, 'GitHub draft readiness');
-    const pr = (data.repository as { pullRequest?: { id: string; headRefOid: string } })?.pullRequest;
-    if (!pr?.id || pr.headRefOid !== headSha) throw new Error('PR head changed before marking ready');
-    const result = await ctx.service.queueGraphql(token, `mutation($id:ID!){
-      markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{isDraft}}
-    }`, { id: pr.id }, 'GitHub draft readiness');
-    const ready = result.markPullRequestReadyForReview as { pullRequest?: { isDraft: boolean } } | undefined;
-    if (ready?.pullRequest?.isDraft !== false) throw new Error('PR is still a draft');
-  }
-
-
   /** Bounded, paginated file names for event-triggered prompt replay. No patches or PR text. */
   export async function gitHubAppClientReadPullRequestFiles(ctx: { service: GitHubAppClient; config: Required<GitHubAppConfig> }, accessToken: string, fullName: string, number: number) {
     const files: Array<{ filename: string; previousFilename?: string }> = [];

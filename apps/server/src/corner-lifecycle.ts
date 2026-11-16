@@ -214,6 +214,22 @@ export type CornerAdvanceCommit = {
 };
 
 
+/** Caller holds the lifecycle lock and has checked live merge authority.
+ * Reuse the existing land receipt, including for a legacy corner whose machine
+ * has not observed this PR yet. No second attempt is admitted for this target. */
+export async function claimCornerLand(
+  db: SqlDatabase, cornerId: string, headSha: string, pullRequest: number, machine: CornerMachine | null,
+): Promise<boolean> {
+  const sameTarget = machine?.headSha === headSha && machine.pullRequest === pullRequest;
+  const effects = (machine?.effects ?? []).filter(key => sameTarget || key.startsWith('idle:'));
+  const key = `land:${headSha}`;
+  if (effects.includes(key)) return false;
+  await db.query(`UPDATE corner_facts SET machine=$2::jsonb WHERE corner_id=$1`,
+    [cornerId, JSON.stringify({ ...machine, state: machine?.state ?? 'idle', headSha, pullRequest, effects: [...effects, key] })]);
+  return true;
+}
+
+
 export async function advanceCorner(
   database: SqlDatabase,
   cornerId: string,
@@ -372,6 +388,7 @@ async function readCornerAdvance(
       reviewRequestActive: review.pending,
       reviewRequests: review.requests,
       approved: gate?.approved,
+      reviewerRequired: gate?.reviewerExists,
       mergeHeld: gate?.held,
       mergeConflictDelivered: active?.conflict,
       lostEffects: receipts.filter(receipt => !active?.retained?.includes(receipt.id)).flatMap(receipt => [receipt.key, receipt.marker]),
@@ -588,27 +605,6 @@ async function writeCornerAdvance(
           break;
         }
         case 'land':
-          if (corner.worker_agent_id) {
-            const command = await createAgentCommand(db, {
-              id: createHash('sha256')
-                .update(`corner-land:${cornerId}:${corner.lifecycle.pr?.number}:${head}`)
-                .digest('hex'),
-              roomId: cornerId,
-              agentId: corner.worker_agent_id,
-              sourceMessageId: null,
-              reason: 'corner_land',
-              privatePayload: {
-                kind: 'lifecycle',
-                authorId: SYSTEM_AUTHOR_ID,
-                fromRoomId: cornerId,
-                text: systemText(`A yes is recorded on ${head} and checks passed. Call merge_thread through the normal merge gate.`),
-              },
-            });
-            result = {
-              ok: true,
-              wake: { queued: Boolean(command), ...(command ? { agentId: command.agent_id } : {}) },
-            };
-          }
           break;
         case 'merge-refused': {
           if (event.kind !== 'merge-refused') break;
@@ -630,7 +626,7 @@ async function writeCornerAdvance(
       }
       if (result.wake) wakeResult = result.wake;
       if (result.wake?.queued) queuedWork = true;
-      if (!['review', 'command'].includes(effect.kind) && (result.wake?.queued || !result.wake))
+      if (!['review', 'command', 'land'].includes(effect.kind) && (result.wake?.queued || !result.wake))
         effects.push(effect.key);
     }
     // A wake that queued nothing (its command already ran, or no one can take it)
@@ -670,44 +666,19 @@ async function writeCornerAdvance(
       state: state.state,
       accepted: true,
       ...(archived ? { archived: true } : {}),
+      ...(plan.wakes.some(effect => effect.kind === 'land') ? { land: true } : {}),
       ...(wakeResult ? { wake: wakeResult } : {}),
     };
 }
 
 
-/** Zero checks need the commander's yes; other review gaps retain their handback. */
+/** Every head without a reviewer uses the same review-gap handback. */
 export async function noteMissingReviewer(
   db: SqlDatabase,
   cornerId: string,
   corner: CornerRow,
   headKey: string,
 ): Promise<Applied> {
-  if (corner.lifecycle.checksSummary?.total === 0) {
-    const command = corner.worker_agent_id
-      ? await createAgentCommand(db, {
-          id: createHash('sha256').update(`zero-check-ready:${cornerId}:${headKey}`).digest('hex'),
-          roomId: cornerId,
-          agentId: corner.worker_agent_id,
-          sourceMessageId: null,
-          privatePayload: {
-            text: systemText("This pull request has no checks and no reviewer. Landing needs your commander's yes. Ask your commander using your normal report tool."),
-            authorId: SYSTEM_AUTHOR_ID,
-            fromRoomId: cornerId,
-            kind: 'lifecycle',
-          },
-          reason: 'corner_review_needed',
-        })
-      : undefined;
-    return {
-      ok: true,
-      wake: command
-        ? { queued: true, agentId: corner.worker_agent_id! }
-        : {
-            queued: false,
-            reason: 'The implementer cannot be woken to ask its commander for a merge decision',
-          },
-    };
-  }
   return noteReviewBlocked(
     db,
     cornerId,

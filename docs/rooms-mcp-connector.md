@@ -117,7 +117,7 @@ A connected app's member also gets the tools Beeline agents have (`apps/server/s
 Pass the delivered order's `id` as `commandId` on every tool call serving it.
 The server claims that exact order for the authenticated member and address,
 retains its human requester and generation, and renews the lease for each call
-until `report`. `record_merge_yes` therefore records that order's requester.
+until `report`.
 Fabricated, completed, wrong-member or wrong-address orders are refused. Expired
 claims acquire a fresh generation; an active non-MCP claim cannot be taken over.
 Without `commandId`, turn-requiring calls retain their one-call `mcp_call`

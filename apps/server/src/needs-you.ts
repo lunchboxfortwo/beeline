@@ -10,7 +10,6 @@ import {
   CHOICE_CARD_TYPE,
   type AgentSignInHarness,
   type AttachmentReference,
-  type CornerLifecycleView,
   type NeedsYouApprovalKind,
   type NeedsYouApprovalView,
   type NeedsYouActionView,
@@ -167,7 +166,6 @@ type Row = {
   text: string;
   card: ApprovalCard | null;
   attachments: unknown;
-  merge_lifecycle: CornerLifecycleView | null;
   approval_kind: NeedsYouApprovalKind | null;
   approval_expires_at: Date | null;
   pending_grant_ids: string[] | null;
@@ -291,16 +289,15 @@ const APPROVAL_JOINS = `
  * bounds their life even if a decision never arrives.
  */
 return [
-  // A free-text ask; one about a pull request the viewer can approve is a merge.
-  `SELECT ${columns},CASE WHEN work_question.about->>'kind'='pr' AND ${PR_MERGE_APPROVER}
-       THEN 'merge' ELSE 'choice' END approval_kind,NULL::timestamptz approval_expires_at,
+  // Free-text asks use ordinary reply/choice actions.
+  `SELECT ${columns},'choice' approval_kind,NULL::timestamptz approval_expires_at,
      NULL::text[] pending_grant_ids,NULL::text actor_name
    FROM viewer_rooms room
    JOIN work_questions work_question ON work_question.room_id=room.id
    JOIN work_items work ON work.id=work_question.message_id AND work.assignee_id=$2
    JOIN messages m ON m.id=work_question.message_id AND m.card_type IS DISTINCT FROM '${CHOICE_CARD_TYPE}'
    ${APPROVAL_JOINS}
-   WHERE m.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM ${mergeYesSql('pr_fact', 'room.id')})
+   WHERE m.deleted_at IS NULL
      AND NOT EXISTS(SELECT 1 FROM messages reply
      WHERE reply.reply_to_message_id=m.id AND reply.deleted_at IS NULL
        AND EXISTS(SELECT 1 FROM identities answerer WHERE answerer.id=reply.author_id AND answerer.kind='human'))`,
@@ -417,37 +414,8 @@ export function grantDecidedBySql(grant: string, identityExpr: string): string {
     END`;
 }
 
-/**
- * The corner's cache row when question `m` asks to approve a merge of that
- * corner's own recorded pull request ("approve … PR #N" naming its number).
- * Postgres's overall-shortest match needs the lookahead to read every digit.
- */
-const mergeAskFact = (fact: string) => `corner_github_cache ${fact}
-  WHERE ${fact}.corner_id=m.room_id
-    AND ${fact}.lifecycle->'pr'->>'number'=substring(m.text FROM '(?i)(?:approve|merge approval).*?PR[[:space:]]*#?([0-9]+)(?![0-9])')`;
-
-/**
- * A merge ask the viewer can approve (`recordPersonMergeYes`'s rule: a human
- * Workspace owner or admin who is a member of the corner) is a `merge`
- * approval; anyone else keeps it as a question.
- */
-const MERGE_APPROVAL_KIND = `CASE WHEN viewer.kind='human' AND ${VIEWER_MANAGES_WORKSPACE}
-    AND EXISTS (SELECT 1 FROM ${mergeAskFact('merge_fact')}) THEN 'merge' END`;
-
-/** A yes already recorded on the corner's current pull request head. */
-function mergeYesSql(fact: string, corner: string): string {
-  return `corner_github_cache ${fact} JOIN corner_merge_approvals ${fact}_yes
-    ON ${fact}_yes.corner_id=${fact}.corner_id AND ${fact}_yes.head_sha=${fact}.lifecycle->'pr'->>'headSha'
-    WHERE ${fact}.corner_id=${corner}`;
-}
-
-/** The viewer may approve a merge of the corner `room` has open: a human Workspace owner or admin. */
-const PR_MERGE_APPROVER = `EXISTS (SELECT 1 FROM identities approver WHERE approver.id=$2 AND approver.kind='human')
-  AND ${VIEWER_MANAGES_WORKSPACE}
-  AND EXISTS (SELECT 1 FROM corner_github_cache pr WHERE pr.corner_id=room.id AND pr.lifecycle->'pr'->>'number' IS NOT NULL)`;
-
 const questionBranch=(projection:CandidateProjection)=>`
-  SELECT ${candidateColumns(projection)},${MERGE_APPROVAL_KIND} approval_kind,NULL::timestamptz approval_expires_at,
+  SELECT ${candidateColumns(projection)},NULL::text approval_kind,NULL::timestamptz approval_expires_at,
     NULL::text[] pending_grant_ids,NULL::text actor_name
   FROM viewer_rooms room
   JOIN actionable_asks ask ON ask.room_id=room.id
@@ -456,11 +424,6 @@ const questionBranch=(projection:CandidateProjection)=>`
   ${projection==='cells'?'LEFT JOIN identities author ON author.id=m.author_id':''}
   LEFT JOIN needs_you_marks mark ON mark.identity_id=$2 AND mark.message_id=m.id
   WHERE ${QUESTION_WHERE}
-    -- A yes already given on the asked PR's current head answers the ask, wherever it was given.
-    AND NOT EXISTS (SELECT 1 FROM ${mergeAskFact('answered_fact')}
-      AND EXISTS (SELECT 1 FROM corner_merge_approvals merge_yes
-        WHERE merge_yes.corner_id=answered_fact.corner_id
-          AND merge_yes.head_sha=answered_fact.lifecycle->'pr'->>'headSha'))
 `;
 
 /** The same authorized candidates drive the tray and its badge. */
@@ -568,13 +531,11 @@ export async function needsYouItems(database: SqlDatabase, workspaceId: string, 
      )
      SELECT visible.*,
        COALESCE(started.first_seen_at,visible.first_seen_at) painted_first_seen_at,
-       viewer.handle viewer_handle,access.authorized,merge_fact.lifecycle merge_lifecycle
+       viewer.handle viewer_handle,access.authorized
      FROM (SELECT ${VIEWER_MEMBER} authorized) access
      LEFT JOIN visible ON true
      LEFT JOIN started ON started.message_id=visible.message_id
-     LEFT JOIN identities viewer ON viewer.id=$2
-     LEFT JOIN corner_github_cache merge_fact ON visible.approval_kind='merge'
-       AND merge_fact.corner_id=visible.room_id`,
+     LEFT JOIN identities viewer ON viewer.id=$2`,
     roomIds?[workspaceId, viewerId, markSeen,roomIds]:[workspaceId, viewerId, markSeen], 'phone-tray-needs-0',
   );
   if (!result.rows[0]?.authorized) throw new Error('workspace membership required');
@@ -601,7 +562,7 @@ export async function needsYouItems(database: SqlDatabase, workspaceId: string, 
       left.row.created_at.getTime() - right.row.created_at.getTime() ||
       (left.row.message_id < right.row.message_id ? -1 : 1),
   );
-  const approvalTypes: Record<Exclude<NeedsYouApprovalKind, 'merge'>, string> = {
+  const approvalTypes: Record<NeedsYouApprovalKind, string> = {
     grant: 'grant-request', 'write-access': 'permission', choice: 'choice',
     connector: 'connector-offer', 'sign-in': 'app-sign-in', squire: 'squire-approval',
   };
@@ -614,7 +575,7 @@ export async function needsYouItems(database: SqlDatabase, workspaceId: string, 
     ...(row.repository_favicon ? { roomFavicon: row.repository_favicon } : {}),
     roomKind: row.room_kind,
     ...(row.parent_room_name ? { parentRoomName: row.parent_room_name } : {}),
-    text: approval && approval.kind !== 'merge'
+    text: approval
       ? approvalAsk(approval.kind === 'sign-in' && row.card?.harness ? 'agent-sign-in' : approvalTypes[approval.kind],
           approval.kind === 'grant'
             ? { ...row.card, grants: row.card?.grants?.filter(entry => entry.grantId && row.pending_grant_ids?.includes(entry.grantId)) }
@@ -673,7 +634,7 @@ export function needsYouExpiresAt(firstSeenAt: Date): number {
  * `wants to open an edit corner`), so the row needs no type label.
  */
 function approvalView(
-  row: Pick<Row, 'approval_kind' | 'card' | 'pending_grant_ids' | 'actor_name' | 'author_name' | 'merge_lifecycle'>,
+  row: Pick<Row, 'approval_kind' | 'card' | 'pending_grant_ids' | 'actor_name' | 'author_name'>,
   viewerId: string,
 ): NeedsYouApprovalView | undefined {
   const card = row.card ?? {};
@@ -817,34 +778,6 @@ function approvalView(
       if (url.protocol !== 'https:') return result;
       return { ...result, actions: [{ kind: 'external', url: url.toString(),
         label: card.linkKind === 'passkey' ? 'Use passkey' : card.linkKind === 'vouch' ? 'Vouch' : 'Approve' }] };
-    }
-    case 'merge': {
-      const lifecycle = row.merge_lifecycle;
-      const pr = lifecycle?.pr;
-      if (!pr) return undefined;
-      const count = (value: unknown) => Number.isInteger(value) && (value as number) >= 0 ? value as number : undefined;
-      const recorded = pr as typeof pr & { additions?: unknown; deletions?: unknown; changedFiles?: unknown };
-      const additions = count(recorded.additions);
-      const deletions = count(recorded.deletions);
-      const files = count(recorded.changedFiles);
-      const summary = lifecycle.checksSummary;
-      const result = view('merge', 'asks to merge', text(pr.title) ?? `PR #${pr.number}`, false);
-      return result && {
-        ...result,
-        pullRequest: {
-          number: pr.number,
-          title: text(pr.title) ?? `PR #${pr.number}`,
-          url: pr.url,
-          ...(additions !== undefined ? { additions } : {}),
-          ...(deletions !== undefined ? { deletions } : {}),
-          ...(files !== undefined ? { files } : {}),
-          checks: {
-            status: summary?.status ?? lifecycle.checks ?? 'unknown',
-            ...(count(summary?.total) !== undefined ? { total: summary!.total } : {}),
-            ...(Array.isArray(summary?.failing) ? { failing: summary!.failing.length } : {}),
-          },
-        },
-      };
     }
     default:
       return undefined;

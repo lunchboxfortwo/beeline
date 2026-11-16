@@ -14,10 +14,6 @@ import { Output } from './values.js';
    * merely a race with GitHub registering workflows. Require independent
    * registration evidence even at worker completion. Completion uses the
    * registered PR, regardless of whether the worker's reply contains its URL.
-   * GitHub also runs no workflows for a PR that conflicts with its base, so
-   * the zero-check result resolves only once GitHub has computed mergeability
-   * and found no conflict; a conflict, a verdict still computing, or a failed
-   * read stays pending.
    */
   export async function daemonReconcileZeroCheckWorkerCompletion(ctx: DaemonContext,
     cornerId: string,
@@ -52,14 +48,7 @@ import { Output } from './values.js';
       return;
     }
     if (verdict.checks !== 'pending' || verdict.checkCount !== 0 || !verdict.zeroChecksConfirmed) return;
-    try {
-      await ctx.refreshMergeability?.(cornerId);
-    } catch (error) {
-      console.error(`[server] zero-check mergeability read failed for thread ${cornerId}:`, error);
-      return;
-    }
-
-    await ctx.database.transaction(async (db) => {
+    const advanced = await ctx.database.transaction(async (db) => {
       await lockCornerLifecycle(db, cornerId);
       const current = (
         await db.query<{
@@ -84,8 +73,6 @@ import { Output } from './values.js';
         (current.lifecycle.checksSummary?.total ?? 0) > 0 ||
         ((current.lifecycle.checksSummary as { fetchStartedAt?: number } | undefined)?.fetchStartedAt ??
           current.lifecycle.checksSummary?.updatedAt ?? 0) > fetchStartedAt ||
-        (current.lifecycle.pr.mergeability !== 'clean' &&
-          current.lifecycle.pr.mergeability !== 'other') ||
         current.lifecycle.checks === 'passing'
       )
         return;
@@ -102,6 +89,11 @@ import { Output } from './values.js';
         },
       };
       await writeCornerGithubCache(db, cornerId, lifecycle);
-      await advanceCorner(db, cornerId, { kind: 'reconcile' });
+      return advanceCorner(db, cornerId, { kind: 'checks', result: 'passing' });
     });
+    if (advanced?.land && ctx.landCorner) {
+      const land = async () => { await ctx.landCorner!(cornerId); };
+      if (ctx.afterCommit) ctx.afterCommit(land);
+      else await land();
+    }
   }
