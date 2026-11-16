@@ -82,7 +82,7 @@ export async function runGrantedCommand(
   const output = typeof result.output === 'string' && result.output ? result.output : '(no output)';
   const refused =
     result.writeRefused === true
-      ? '\nA write was refused outside your scratch directory. In a Room, open a corner with open_corner to change files; in a corner, your checkout is broken, so report the refused path as blocked: to your commander. For host work, ask with request_grant(mode:request, kind:command, target, action, purpose, reason), then use run_granted_command.'
+      ? '\nThis Room is read-only outside your scratch directory. Open a corner with open_corner to change files; for host work there, ask with request_grant(mode:request, kind:command, target, action, purpose, reason), then use run_granted_command.'
       : '';
   const recovery = result.sandboxFailure === true
     ? '\nFor host work, open a corner and ask with request_grant(mode:request, kind:command, target, action, purpose, reason), then use run_granted_command.'

@@ -93,8 +93,8 @@ const scope12 = fixtureScope12(scope8);
     m9_expect(ops[0]!.input.script).toBeUndefined();
   });
 });
-m9_describe('run_granted_command reports the write boundary', () => {
-  m9_it('distinguishes Room writes from a broken corner checkout when a write is refused', async () => {
+m9_describe('run_granted_command reports the Room boundary', () => {
+  m9_it('names the corner when the read-only filesystem refused a write', async () => {
     const reply = await m9_runGrantedCommand(
       { argv: ['cp', 'a', 'b'] },
       {
@@ -108,10 +108,7 @@ m9_describe('run_granted_command reports the write boundary', () => {
         }),
       },
     );
-    m9_expect(reply).toContain('A write was refused outside your scratch directory.');
-    m9_expect(reply).toContain('In a Room, open a corner with open_corner to change files');
-    m9_expect(reply).toContain('in a corner, your checkout is broken, so report the refused path as blocked: to your commander');
-    m9_expect(reply).not.toContain('This Room is read-only');
+    m9_expect(reply).toContain('read-only outside your scratch directory');
     m9_expect(reply).toContain('open_corner');
     m9_expect(reply).toContain('request_grant(mode:request, kind:command, target, action, purpose, reason)');
     m9_expect(reply).toContain('run_granted_command');
