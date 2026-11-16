@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { MCP_STARTER_ROUTINE } from '@beeline/api-contract/phone';
 import { migrate } from './database.js';
 import { bundledMcpLogo } from './rooms-mcp-logos.js';
 import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
@@ -492,6 +494,15 @@ const scope1 = fixtureScope1();
       expect(refused.isError).toBe(true);
       expect((refused.content as { text: string }[])[0]!.text).toMatch(new RegExp(`^Request refused: ${name} is retired: .*${replacement.replace(/[()]/g, '\\$&')}`));
     }
+  });
+
+  it('names only live tools on the join and connect pages and in the starter routine', async () => {
+    const { client } = await scope1.connected();
+    const live = new Set((await client.listTools()).tools.map(tool => tool.name));
+    const pages = ['../assets/mcp/join.html', '../../../web/connect/index.html', '../../../web/room/index.html'].map(path => readFileSync(new URL(path, import.meta.url), 'utf8'));
+    const named = [...pages.flatMap(page => [...page.matchAll(/<code>([a-z]+(?:_[a-z]+)+)\b/g)].map(match => match[1]!)), ...(MCP_STARTER_ROUTINE.match(/\b[a-z]+(?:_[a-z]+)+\b/g) ?? [])];
+    // on_demand is a delivery mechanism the starter routine names, not a tool.
+    expect(named.filter(name => !live.has(name) && name !== 'on_demand')).toEqual([]);
   });
 
   it('names the client on an AI-client member profile instead of an animal soul', async () => {
