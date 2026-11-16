@@ -82,9 +82,6 @@ export type AskOwnerQuestionInput = {
   readonly freeText?: boolean;
 };
 
-/** Same word grammar in the advertised schema and the server. */
-export const WORK_QUESTION_PATTERN = '^\\S+(?:[ \t]+\\S+){0,19}$';
-export const WORK_OPTION_PATTERN = '^\\S+(?:[ \t]+\\S+){0,2}$';
 export function validateWorkQuestion(input: AskOwnerQuestionInput): void {
   const short = (value: unknown, words: number) =>
     typeof value === 'string' &&

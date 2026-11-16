@@ -178,10 +178,6 @@ export const CORNER_REVIEWER_SESSION_INSTRUCTION =
 export const CORNER_DELIVERY_NUDGE =
   'Only when you write code in this thread and the brief calls for repository changes, inspect the repository state and finish delivering the work unless a human hold stands: commit and push the intended changes and open the pull request if one does not exist. Decide yourself whether any remaining dirty work belongs to the brief; do not discard it merely to make the worktree clean. The pull request body must carry ## Reproduced and ## Demonstrated; if they are missing, add them before ending the turn. If you wrote no code, deliver with post_artifact.';
 
-/** What the implementer does when a yes given during checks wakes it to land. */
-export const CORNER_LAND_RULE =
-  "The server owns merging. Reply to the task message if a decision is needed.";
-
 export const CORNER_CHECKS_NUDGE =
   'Read current checks with read(facet:checks). Repair failing checks if you are the implementer. Reply to the task message when blocked. End the turn after pushing; committed check and review events resume work.';
 

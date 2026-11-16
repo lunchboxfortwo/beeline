@@ -65,7 +65,7 @@ export function durablePage(pathname: string, params: Record<string, unknown>): 
 function parsePage(raw: string | null): string | null {
   if (!raw || !raw.startsWith('/') || raw.startsWith('//')) return null;
   try {
-    const url = new URL(raw, 'https://local.invalid');
+    const url = new URL(raw, 'beeline://page');
     return durablePage(url.pathname, Object.fromEntries(url.searchParams));
   } catch { return null; }
 }
