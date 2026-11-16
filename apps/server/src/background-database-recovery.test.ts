@@ -38,7 +38,8 @@ it('R-SENTRY-CONNECT: defers one failed operator checkout and recovers on the ne
   expect(vi.mocked(console.warn).mock.calls.filter(([message]) =>
     message === '[background] operator-system-dms deferred until committed delivery or recovery',
   )).toHaveLength(1);
-  expect(console.warn).toHaveBeenCalledWith('[database] connection wait timeout', expect.any(Object));
+  expect(console.warn).toHaveBeenCalledWith('[database] connection wait timeout', expect.any(Object),
+    expect.stringContaining('Error: timeout exceeded when trying to connect'));
   expect(await run()).toEqual({ ok: true, value: 0 });
   expect(client.query).toHaveBeenCalledWith('COMMIT');
   expect(runner.snapshot()['operator-system-dms']?.consecutiveFailures).toBe(0);

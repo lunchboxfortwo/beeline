@@ -3581,6 +3581,32 @@
           "source_message_id": "Exact asking message for source navigation and independent answer handoff."
         }
       },
+      "work_item_attachments": {
+        "module": "Rooms and messages",
+        "reason": "Explicitly attached links and uploaded files are user choices that cannot be recovered from the current work state.",
+        "columns": {
+          "id": "Stable attachment identity for detail projection and ordering.",
+          "work_item_id": "The work item the attachment was explicitly added to.",
+          "kind": "Whether the attachment names a link or an uploaded file.",
+          "name": "The author-supplied attachment label.",
+          "url": "The link destination supplied when the attachment was added.",
+          "object_id": "The existing uploaded object selected as an attachment.",
+          "added_by": "Immutable identity of the member who attached it.",
+          "created_at": "When the attachment was added, preserving detail order."
+        }
+      },
+      "work_item_entries": {
+        "module": "Rooms and messages",
+        "reason": "Authored notes and past state or assignment events cannot be reconstructed from the current work item.",
+        "columns": {
+          "id": "Stable entry identity for chronological detail projection.",
+          "work_item_id": "The work item whose activity contains this entry.",
+          "author_id": "Immutable attribution of the note or state change.",
+          "kind": "Distinguishes authored notes from recorded state-change events.",
+          "text": "The authored note or historical event description.",
+          "created_at": "When the entry occurred, preserving activity order."
+        }
+      },
       "work_questions": {
         "module": "Rooms and messages",
         "reason": "Typed source references and recommendations cannot be recovered from free-text messages.",

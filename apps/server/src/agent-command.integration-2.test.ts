@@ -217,7 +217,7 @@ it('routes subscribed events, grants and changed corner checks through actions',
     kind: 'check-passed',
   });
   // No reviewer: the implementer owns arranging review or asking for a decision.
-  expect((await commands(B, C)).map(command => command.reason).sort()).toEqual(['corner_review_needed', 'report']);
+  expect((await commands(B, C)).map(command => command.reason).sort()).toEqual(['attention_report', 'corner_review_needed']);
 });
 
 it('treats a configured reviewer removed from the parent Room as no reviewer and wakes the implementer', async () => {
@@ -238,7 +238,7 @@ it('treats a configured reviewer removed from the parent Room as no reviewer and
   });
   expect((await readAgentCommands(rootFixture.db, A, C)).commands).toHaveLength(0);
   const handback = await commands(B, C);
-  expect(handback.map(command => command.reason)).toEqual(expect.arrayContaining(['corner_review_needed', 'report']));
+  expect(handback.map(command => command.reason).sort()).toEqual(['attention_report', 'corner_review_needed']);
   const needed = handback.find(command => command.reason === 'corner_review_needed');
   expect(needed?.source.body).toContain('no reviewer is configured');
   expect(needed?.source.body).toContain('report the blocker to its commander');

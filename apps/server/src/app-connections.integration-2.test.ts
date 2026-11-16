@@ -111,6 +111,7 @@ const scope2 = fixtureScope2();
     const before = await daemon.execute('readAgentWorkbench', { roomId: CORNER }, HELPER);
     expect(before.apps).toEqual([]);
     const started = await daemon.execute('connectApp', { ...cornerTurn, app: 'X',
+      action: 'Read the requested X posts', purpose: 'check access to the requested posts',
       reason: 'Check access to X posts',
       continuation: 'I will check the requested posts after sign-in.' }, HELPER);
     expect(started).toMatchObject({ status: 'needs_sign_in', transport: 'composio',

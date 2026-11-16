@@ -539,6 +539,7 @@ it('WORKFLOW-ROLE-REFUSAL / BEELINE-SENTRY-REFUSALS / APP-REFUSAL-5: real agent 
         // browser-refusal-1: Sentry event 42ab67c6e9704070a05b315fb3140e6e.
         // Replay the rejected option through the built daemon HTTP boundary.
         const browserRefusal = await call({...input,service:'Google',reason:'Switch browser account',
+          action:'Switch the Google browser account',purpose:'continue with the selected account',
           continuation:'Continue with the selected account.',switchGoogleAccount:true},'connect');
         console.log('Reproduction browser-refusal-1',JSON.stringify(browserRefusal));
         assert.deepEqual(browserRefusal,{status:400,body:{error:'switchGoogleAccount applies only to Trusty Squire'}});

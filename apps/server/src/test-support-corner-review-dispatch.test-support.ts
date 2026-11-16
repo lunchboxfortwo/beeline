@@ -100,7 +100,9 @@ beforeEach(async () => {
   await db.query(`DELETE FROM corner_merge_approvals`);
   await db.query(`DELETE FROM agent_turns`);
   await db.query(`DELETE FROM live_outputs`);
-  await db.query(`DELETE FROM messages WHERE room_id=$1`, [C]);
+  // Reports return to the parent Room. Retaining one while deleting its
+  // answering corner message would resurrect that wait in the next case.
+  await db.query(`DELETE FROM messages WHERE room_id=ANY($1::uuid[])`, [[C, R]]);
   await db.query(`DELETE FROM corner_brief_revisions WHERE corner_id=$1`, [C]);
   await db.query(`UPDATE agents SET access_policy='{"type":"everyone"}'::jsonb`);
   await db.query(`UPDATE memberships SET removed_at=NULL`);

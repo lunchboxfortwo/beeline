@@ -75,7 +75,7 @@ it('Reproduction corner-ancestor-rule: orders reach member agents in siblings, c
 
 });
 
-it('issues-triage can order and revise fix corners while opening cannot escape its Room', async () => {
+it('issues-triage can order and revise fix corners but cannot open in an inaccessible DM', async () => {
   const opened = await open(), turn = await worker(opened.cornerId);
   await rootFixture.db.query(`UPDATE rooms SET name='issues-triage' WHERE id=$1`, [opened.cornerId]);
   const child = await rootFixture.daemon.execute('createCorner', { ...authority(turn), targetRoomId: ROOM,
@@ -92,7 +92,7 @@ it('issues-triage can order and revise fix corners while opening cannot escape i
   await expect(rootFixture.daemon.execute('createCorner', { ...authority(turn), targetRoomId: DM,
     idempotencyKey: 'escape', name: 'Escape', objective: 'Recruit outside the Room',
     brief: { spec: 'Escape', approval: { sourceMessageId: turn.sourceMessageId } } }, WORKER))
-    .rejects.toThrow('Report to your commander instead.');
+    .rejects.toThrow('daemon room access denied');
 });
 
 it('corner mentions still wake an instance in the same corner', async () => {

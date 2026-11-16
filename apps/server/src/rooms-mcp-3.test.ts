@@ -2,6 +2,7 @@ import { migrate } from './database.js';
 import { bundledMcpLogo } from './rooms-mcp-logos.js';
 import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { AGENT,CORNER,Client,FACE_SOULS,MCP_AGENT_EXCLUSIONS,MCP_APP_ROUTE_OPERATIONS,MCP_ORDER_WAKE_HINT,MCP_REVIEW_WAKE_HINT,OTHER,PREREGISTERED_MCP_CLIENTS,PRIVATE,ROOM,StreamableHTTPClientTransport,USER,WORKSPACE,backfillMcpMemberAvatars,createAgentCommand,createHash,deliverMcpMemberWebhooks,describe,ensureMcpMember,expect,fixtureScope1,fixtureScope2,fixtureScope3,it,opaque,openSecrets,phoneFetch,randomBytes,randomUUID,readFileSync,routeAgentResult,routeHumanMessage,sharp,tokenHash,vi } from './test-support-rooms-mcp.test-support.js';
+import { PUBLIC_CORNER } from './test-support-rooms-mcp.test-support.js';
 
 describe('Rooms connector HTTP OAuth and MCP', () => {
 const scope1 = fixtureScope1();
@@ -650,6 +651,46 @@ const scope3 = fixtureScope3(scope1);
         const missingActions = Object.entries(routes).filter(([action, op]) => !actions.includes(action) && !MCP_AGENT_EXCLUSIONS[op]);
         expect(missingActions, app).toEqual([]);
       }
+    });
+
+    it('serves Work tools through the ordinary member operations and preserves private Room access', async () => {
+      const { client, member } = await scope1.connected();
+      const authority = await scope3.agentTurn('@demo-agent Record the two review tasks');
+      const order = await scope1.daemon.execute('order', { ...authority, address: ROOM,
+        agent: member, text: 'Record the two review tasks' }, AGENT);
+      const pending = () => scope1.db.query(`SELECT id FROM agent_commands WHERE agent_id=$1
+        AND state='pending' AND reason<>'mcp_call' ORDER BY id`, [member]);
+      const before = (await pending()).rows;
+      const created = await scope3.ok(client, 'create_work_item', { roomId: ROOM, title: 'Inspect main', commandId: order.id });
+      const second = await scope3.ok(client, 'create_work_item', { roomId: ROOM, title: 'Inspect body', commandId: order.id });
+      expect(second.id).not.toBe(created.id);
+      expect(created.id).toMatch(/^[0-9a-f]{64}$/);
+      expect((await scope1.db.query('SELECT state FROM work_items WHERE id=$1', [created.id])).rows)
+        .toEqual([{ state: 'backlog' }]);
+      await scope3.ok(client, 'update_work', { roomId: ROOM, id: created.id, objective: 'Prove the current checks' });
+      await scope3.ok(client, 'set_work_state', { roomId: ROOM, id: created.id, state: 'in-review' });
+      await scope3.ok(client, 'assign_work_item', { roomId: ROOM, id: created.id, assigneeId: member });
+      await scope3.ok(client, 'add_work_note', { roomId: ROOM, id: created.id, text: 'The local checks passed.' });
+      await scope3.ok(client, 'attach_to_work_item', { roomId: ROOM, id: created.id,
+        attachment: { kind: 'link', name: 'Check evidence', url: 'https://example.com/checks' } });
+      const board = await scope1.phone.execute('readWorkBoard', { workspaceId: WORKSPACE }, USER);
+      expect(board.items.find(item => item.id === created.id)).toMatchObject({ state: 'in-review',
+        objective: 'Prove the current checks', assignee: { pubkey: member },
+        entries: expect.arrayContaining([expect.objectContaining({ kind: 'note', text: 'The local checks passed.', author: expect.objectContaining({ pubkey: member }) })]),
+        attachments: [expect.objectContaining({ kind: 'link', name: 'Check evidence', url: 'https://example.com/checks', addedBy: expect.objectContaining({ pubkey: member }) })],
+      });
+      expect((await pending()).rows).toEqual(before);
+      const question = await scope3.ok(client, 'ask_owner', { about: { kind: 'thread', roomId: PUBLIC_CORNER },
+        question: 'Which proof should run?', options: [{ label: 'Server suite', recommended: true }, { label: 'Body suite' }] });
+      expect((await scope1.db.query(`SELECT state,assignee_id FROM work_items WHERE id=$1`, [question.messageId])).rows)
+        .toEqual([{ state: 'needs-you', assignee_id: USER }]);
+      expect((await scope1.db.query(`SELECT question FROM work_questions WHERE message_id=$1`, [question.messageId])).rows)
+        .toEqual([{ question: 'Which proof should run?' }]);
+      const refused = await scope3.call(client, 'set_work_state', { roomId: PRIVATE, id: created.id, state: 'done' });
+      expect(refused.error).toBe(true);
+      expect(refused.text).toBe('Request refused: Access denied: you are not a member of that address.');
+      expect((await scope1.db.query('SELECT state FROM work_items WHERE id=$1', [created.id])).rows)
+        .toEqual([{ state: 'in-review' }]);
     });
 
     it('R-MCP-EXCLUDED: refuses wallet spending and host grants with a plain reason', async () => {

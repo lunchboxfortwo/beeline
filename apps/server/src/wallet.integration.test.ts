@@ -295,6 +295,7 @@ const scope1 = fixtureScope1();
   it('a wallet offer card connects the wallet when its addressee accepts', async () => {
     const offered = await scope1.daemonOperation('offerConnector', {
       connectorType: 'wallet',
+      action: 'Connect your wallet', purpose: 'pay the hosting invoice',
       reason: 'pay the hosting invoice',
     });
     expect(offered.status).toBe(200);
@@ -358,6 +359,7 @@ const scope1 = fixtureScope1();
     // A connected wallet is not offered again.
     const again = await scope1.daemonOperation('offerConnector', {
       connectorType: 'wallet',
+      action: 'Connect your wallet', purpose: 'pay the hosting invoice',
       reason: 'pay the hosting invoice',
     });
     expect(again.status).toBe(409);

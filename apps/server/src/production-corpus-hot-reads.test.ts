@@ -45,7 +45,7 @@ const matchers: ReadonlyArray<readonly [HotReadName, (sql: string) => boolean]> 
     (sql) => sql.includes('JOIN messages message ON message.room_id=room.id AND message.id=$2'),
   ],
   ['push-candidates', (sql) => sql.includes('WITH queued_messages AS MATERIALIZED')],
-  ['corner-facts', (sql) => sql.includes('FROM rooms c LEFT JOIN corner_facts f')],
+  ['corner-facts', (sql) => sql.includes('FROM rooms c LEFT JOIN work_items work') && sql.includes('LEFT JOIN corner_facts f')],
   ['history-search', (sql) => sql.includes('authorized_rooms AS') && sql.includes('matched_count')],
 ];
 

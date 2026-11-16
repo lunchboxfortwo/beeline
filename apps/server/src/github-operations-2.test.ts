@@ -484,7 +484,7 @@ const scope1 = fixtureScope1();
     expect(app.openPullRequestsForBranch).not.toHaveBeenCalled();
   });
 
-  it('Reproduction R10-1: records pre-PR checks as the corner opener', async () => {
+  it('Reproduction R10-1: refreshes only a recorded PR head and keeps passing checks quiet', async () => {
     const workspace = '11111111-1111-4111-8111-111111111111';
     const room = '22222222-2222-4222-8222-222222222222';
     const corner = '33333333-3333-4333-8333-333333333333';
@@ -514,9 +514,8 @@ const scope1 = fixtureScope1();
       `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'owner')`,
       [workspace, room, candy],
     );
-    // Opening a corner copies the parent's memberships, roles included, then
-    // adds the opener as owner in the same transaction, so both owners share
-    // one joined_at.
+    // Both agents belong to the parent Room; the corner still needs its own
+    // recorded PR before any check event can refresh that head.
     await scope1.database.transaction(async (tx) => {
       await tx.query(
         `INSERT INTO rooms(id,workspace_id,parent_id,created_by,name) VALUES($1,$2,$3,$4,'Convo chains')`,
@@ -541,27 +540,31 @@ const scope1 = fixtureScope1();
       openPullRequestsForBranch: vi.fn(async () => [4]),
     } as unknown as GitHubAppClient;
     const operations = new GitHubOperations(scope1.database, {} as GitHubOAuthClient, app, 'secret');
-    await operations.processWebhook('check_run', {
+    const checkEvent = {
       action: 'completed', installation: { id: 77 }, repository: { full_name: 'owner/widgets' },
       check_run: {
         name: 'build', status: 'completed', conclusion: 'success', head_sha: headSha,
         check_suite: { head_branch: branch, head_sha: headSha },
       },
-    });
+    };
+    await operations.processWebhook('check_run', checkEvent);
+    expect((await operations.lifecycle(corner)).checks).toBe('unknown');
+    expect(app.installationToken).not.toHaveBeenCalled();
+    expect(app.readCommitCheckRollup).not.toHaveBeenCalled();
+    await scope1.database.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{pr}',$2::jsonb)
+      WHERE corner_id=$1`, [corner, JSON.stringify({ number: 4, headSha, url: 'https://github.com/owner/widgets/pull/4' })]);
+    await operations.processWebhook('check_run', checkEvent);
     const checks = (await scope1.database.query<{ lifecycle: { checks?: string } }>(
       `SELECT lifecycle FROM corner_facts WHERE corner_id=$1`, [corner],
     )).rows[0]?.lifecycle.checks;
     console.log(`Reproduction R10-1: checks=${checks}`);
     expect(checks).toBe('passing');
-    const authors = (await scope1.database.query<{ author_id: string }>(
-      `SELECT DISTINCT author_id FROM messages WHERE room_id=$1 AND card_type='github-corner-note'`,
-      [corner],
-    )).rows.map((row) => row.author_id);
-    expect(authors).toEqual([opener]);
-    expect((await scope1.database.query<{ kind: string }>(
-      `SELECT system_event->>'kind' kind FROM messages WHERE room_id=$1 AND card_type='github-corner-note'`,
-      [corner],
-    )).rows).toEqual([{ kind: 'check-passed' }]);
+    expect(app.readCommitCheckRollup).toHaveBeenCalledTimes(1);
+    expect(app.readCommitCheckRollup).toHaveBeenCalledWith('room-token', 'owner/widgets', headSha);
+    expect(await operations.lifecycle(corner)).toMatchObject({ pr: { number: 4, headSha },
+      checksSummary: { total: 1, checks: [{ name: 'build', status: 'passed' }] } });
+    expect((await scope1.database.query(`SELECT id FROM messages WHERE room_id=$1
+      AND card_type='github-corner-note'`, [corner])).rows).toEqual([]);
   });
 
   it('credits the first agent to speak in an ownerless corner on merge, not a copied parent owner', async () => {

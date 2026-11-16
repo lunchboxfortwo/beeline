@@ -475,7 +475,7 @@ describe('corner message attribution', () => {
     });
 
 
-  it('Reproduction REVIEW-FAIL-HANDOFF-1: an explicit block postpones handback until worker output', async () => {
+  it('Reproduction REVIEW-FAIL-HANDOFF-1: an explicit block postpones handback until its recipient answers', async () => {
     await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
     await greenHead(82, 'a'.repeat(40));
     const [review] = await commands(B, C);
@@ -497,10 +497,15 @@ describe('corner message attribution', () => {
       roomId: C, messageId: 'e'.repeat(64), text: 'Proceed with the demonstration.',
     }, H);
     await reconcileConfiguredCornerReviewers(rootFixture.db, R);
+    const repairs = (await commands(A, C)).filter(c => c.reason === 'corner_review_needed');
+    expect(repairs).toHaveLength(1);
+    expect(repairs[0]?.source.body).toContain('FAIL: demonstrate the missing user path.');
+    await claim(repairs[0]!);
+    await result(repairs[0]!, 'The implementation is ready.');
+    for (let cycle = 0; cycle < 3; cycle++) await reconcileConfiguredCornerReviewers(rootFixture.db, R);
     expect((await commands(A, C)).filter(c => c.reason === 'corner_review_needed')).toHaveLength(0);
-    await rootFixture.daemon.execute('report', { ...await work(), status: 'done', text: 'The implementation is ready.' }, A);
-    await reconcileConfiguredCornerReviewers(rootFixture.db, R);
-    expect((await commands(A, C)).filter(c => c.reason === 'corner_review_needed')).toHaveLength(1);
+    expect((await rootFixture.db.query(`SELECT id FROM agent_commands WHERE room_id=$1
+      AND reason='corner_review_needed'`, [C])).rows).toEqual([{ id: repairs[0]!.id }]);
   });
 
 

@@ -250,7 +250,7 @@ describe('PhoneService.readRoom latency', () => {
       );
     }, 30_000);
 
-    it('reads a corner in one core and one optional statement, with SQL caps', async () => {
+    it('reads a corner and its work item in two core and one optional statements, with SQL caps', async () => {
       const representative = new RepresentativeDatabase(database);
       const enrichment = new RepresentativeDatabase(database);
       const phone = new PhoneService(
@@ -302,20 +302,22 @@ describe('PhoneService.readRoom latency', () => {
       expect(marked?.attachments?.[0]).toMatchObject({ kind: 'artifact', title: 'Evidence' });
       expect(marked?.attachments?.[1]).toMatchObject({ expired: true });
       expect(view?.briefing?.map((message) => message.id)).toContain('reply-message');
-      expect(representative.spans).toHaveLength(1);
+      expect(view?.workItem?.roomId).toBe(CORNER);
+      expect(representative.spans).toHaveLength(2);
+      expect(representative.spans[1]!.text).toContain('WITH work_refs AS');
       expect(enrichment.spans).toHaveLength(1);
       expect(enrichment.spans[0]!.startedAt).toBeGreaterThanOrEqual(
         representative.spans[0]!.endedAt,
       );
       expect(durationMs).toBeLessThan(650);
       expect(enrichment.spans.filter((span) => /tagged_ids/.test(span.text))).toHaveLength(1);
-      expect(largestRead).toBe(1); // Both statements return one aggregate row.
+      expect(largestRead).toBe(1); // Each statement returns one aggregate row.
       expect(view?.messages.length).toBeLessThanOrEqual(30);
       expect(view?.toolRows?.length).toBeLessThanOrEqual(ROOM_VIEW_TOOL_ROW_LIMIT);
       expect(view?.members.length).toBeLessThanOrEqual(200);
     }, 20_000);
 
-    it('keeps optional failure independent and an unbriefed corner at two statements', async () => {
+    it('keeps optional failure independent and an unbriefed corner at three statements', async () => {
       const core = new RepresentativeDatabase(database, POOL_MAX, 0);
       const optional: SqlDatabase = {
         query: vi.fn().mockRejectedValue(new Error('optional read failed')),
@@ -335,7 +337,8 @@ describe('PhoneService.readRoom latency', () => {
       expect(view?.room.id).toBe('33333333-3333-4333-8333-000000000001');
       expect(view?.cornerBrief).toBeUndefined();
       expect(view?.members.every((member) => member.presence === undefined)).toBe(true);
-      expect(core.spans).toHaveLength(1);
+      expect(core.spans).toHaveLength(2);
+      expect(core.spans[1]!.text).toContain('WITH work_refs AS');
       expect(optional.query).toHaveBeenCalledTimes(1);
       warning.mockRestore();
     });
@@ -364,19 +367,23 @@ describe('PhoneService.readRoom latency', () => {
         false,
         optional,
       );
-      const view = await phone.readRoom(crowded, VIEWER);
-      expect(view?.members).toHaveLength(200);
-      expect(view?.viewer.identity.pubkey).toBe(VIEWER);
-      expect(core.spans).toHaveLength(1);
-      expect(optional.spans).toHaveLength(1);
-      await database.query(
-        `DELETE FROM memberships WHERE room_id=$1 AND identity_id IN
-         (SELECT lpad(to_hex(series+1000),64,'0') FROM generate_series(1,210) series)`,
-        [ROOM],
-      );
+      try {
+        const view = await phone.readRoom(crowded, VIEWER);
+        expect(view?.members).toHaveLength(200);
+        expect(view?.viewer.identity.pubkey).toBe(VIEWER);
+        expect(core.spans).toHaveLength(2);
+        expect(core.spans[1]!.text).toContain('WITH work_refs AS');
+        expect(optional.spans).toHaveLength(1);
+      } finally {
+        await database.query(
+          `DELETE FROM memberships WHERE room_id=$1 AND identity_id IN
+           (SELECT lpad(to_hex(series+1000),64,'0') FROM generate_series(1,210) series)`,
+          [ROOM],
+        );
+      }
     });
 
-    it('holds two statements per corner at concurrency four', async () => {
+    it('holds three statements per corner including its work item at concurrency four', async () => {
       const core = new RepresentativeDatabase(database);
       const optional = new RepresentativeDatabase(database);
       const phone = new PhoneService(
@@ -407,7 +414,8 @@ describe('PhoneService.readRoom latency', () => {
           queries: core.spans.length + optional.spans.length,
         }),
       );
-      expect(core.spans).toHaveLength(4);
+      expect(core.spans).toHaveLength(8);
+      expect(core.spans.filter(span => span.text.includes('WITH work_refs AS'))).toHaveLength(4);
       expect(optional.spans).toHaveLength(4);
     }, 20_000);
 

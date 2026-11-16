@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { AGENT_INVITATION_PATHS, AGENT_INVITATION_PROMPT, ASSISTANT_INVITATION_STEPS,
   BEELINE_ROOMS_MCP_URL, BEELINE_INVITATION_GUIDE_URL, AGENT_INVITATION_OTHER_STARTS, agentInvitationJoinLine, agentInvitationPickerGuide, agentInvitationGuide } from '@beeline/api-contract/agent-invitation-guide';
 import { currentFreeAgentInstructions, FREE_AGENT_APP_CONNECT_GUIDE } from './free-agents.js';
+import { beelineConnectSkillMarkdown } from '@beeline/api-contract/beeline-guides';
 
 describe('agent invitation concordance', () => {
   it('replaces saved generic instructions with the same on-demand route used by CLI skills', () => {
@@ -13,8 +14,8 @@ describe('agent invitation concordance', () => {
     expect(current.split(AGENT_INVITATION_PROMPT)).toHaveLength(2);
     expect(currentFreeAgentInstructions(current)).toBe(current);
     expect(FREE_AGENT_APP_CONNECT_GUIDE).toBe(AGENT_INVITATION_PROMPT);
-    const skills = readFileSync(new URL('../../body/src/beeline-skill.ts', import.meta.url), 'utf8');
-    expect(skills.match(/\$\{AGENT_INVITATION_PROMPT\}/g)).toHaveLength(2);
+    for (const freeAgent of [false, true])
+      expect(beelineConnectSkillMarkdown('test', freeAgent).split(AGENT_INVITATION_PROMPT)).toHaveLength(2);
     for (const path of ['free-agents.ts', 'daemon/apps.ts']) {
       const source = readFileSync(new URL(path, import.meta.url), 'utf8');
       expect(source).not.toContain('https://join.usebeeline.app');
