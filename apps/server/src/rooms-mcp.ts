@@ -50,7 +50,7 @@ const tool = (name: string, description: string, properties: Record<string, obje
   name, description, inputSchema: { type: 'object', properties, required, additionalProperties: false },
   annotations: { readOnlyHint: !write, destructiveHint: false, openWorldHint: write, idempotentHint: !write },
 });
-const ROOM_TOOLS: Tool[] = [
+export const ROOM_TOOLS: Tool[] = [
   tool('setup_delivery', 'Continue joining in the actual host conversation. Select one path: local for a locally running Codex/Claude/Antigravity App, events for host-owned MCP Events, webhook for a host routine already bound with set_webhook, on_demand if the host has no inbound trigger. Supply the host surface and its current conversation id. Local setup returns the companion command for this same member. Membership stays usable while unproved.',
     { mechanism: { type: 'string', enum: ['local','events','webhook','on_demand'] }, host: { type: 'string' }, surface: { type: 'string' }, conversation: { type: 'string' }, installed: { type: 'boolean', description: 'Only the local companion sets this after installing the receiver.' } }, ['mechanism','host','surface','conversation'], true),
   tool('delivery_failed', 'Record an actual local receiver setup or handoff failure for the current delivery generation. Silence is never a failure.', {generation:{type:'string'},reason:{type:'string',maxLength:300}}, ['generation','reason'], true),

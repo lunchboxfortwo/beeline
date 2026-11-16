@@ -246,7 +246,11 @@ export async function reportAgentAttention(
   reportId = randomBytes(32).toString('hex'), options: ReportOptions = {},
 ): Promise<void> {
   const route = await commanderReportAddress(db, roomId, command);
-  const agent = (await db.query("SELECT 1 FROM identities identity JOIN rooms place ON place.id=$2 AND place.archived_at IS NULL WHERE identity.id=$1 AND identity.kind='agent'", [route.recipient,route.returnRoom])).rowCount;
+  // A thread's own implementer works in the thread; like a person commander, it gets no notice elsewhere.
+  const agent = (await db.query(`SELECT 1 FROM identities identity JOIN rooms place ON place.id=$2 AND place.archived_at IS NULL
+    WHERE identity.id=$1 AND identity.kind='agent'
+      AND identity.id IS DISTINCT FROM (SELECT implementer_agent_id FROM corner_facts WHERE corner_id=$3)`,
+  [route.recipient,route.returnRoom,roomId])).rowCount;
   // The notice continues the receiving commander's own task. Copy that direct
   // recorded parent tuple now; neither the model nor later activity picks it.
   const senderTask=(await db.query<CommandRow>(

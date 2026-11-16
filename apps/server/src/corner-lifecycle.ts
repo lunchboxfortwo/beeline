@@ -547,7 +547,6 @@ async function writeCornerAdvance(
               corner,
               head!,
               'the configured reviewer is unreachable',
-              false,
             );
             break;
           }
@@ -690,9 +689,9 @@ export async function noteMissingReviewer(
 
 
 /**
- * One handback for every review gap. The implementer owns arranging another
- * review or reporting the blocker up the chain; a passive transcript note
- * alone cannot make that happen. A stable episode key dedupes fact replays.
+ * One handback for every review gap, in the thread. The implementer owns
+ * arranging another review or replying with the blocker to its commander; the
+ * gap never starts a turn outside the thread. A stable episode key dedupes fact replays.
  */
 export async function noteReviewBlocked(
   db: SqlDatabase,
@@ -700,20 +699,8 @@ export async function noteReviewBlocked(
   corner: CornerRow,
   headKey: string,
   reason: string,
-  reportCommander = true,
 ): Promise<Applied> {
   const episode = `${cornerId}:${headKey}:${reason}`;
-  if (reportCommander)
-    await reportAgentAttention(
-      db,
-      cornerId,
-      SYSTEM_AUTHOR_ID,
-      systemText(systemMessage('corner-lifecycle.blocked', reason)),
-      undefined,
-      createHash('sha256').update(`review-gap:${episode}`).digest('hex'),
-      // The review gate is corner work: wake the implementer where its PR lives.
-      { wakeInCorner: true },
-    );
   const command = corner.worker_agent_id
     ? await createAgentCommand(db, {
         id: createHash('sha256').update(`review-needed:${episode}`).digest('hex'),

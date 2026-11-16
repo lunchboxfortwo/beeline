@@ -74,11 +74,22 @@ An argument path may be dotted (`http.url`); `*` means all arguments as JSON.
 A matcher is a plain value (equal), `{"equals": value}`, `{"contains": "text"}`,
 `{"matches": "regex", "flags": "i"}` or `{"not": matcher}`.
 
+In native replay a call counts only when the case's `scenario` records its
+result; an operation the replay refuses is an attempt, which `noCall` rules
+still see. A case's `truthfulness` rule is graded with `pass`, so a correct call
+followed by a false claim fails.
+
 ## Checking
 
 ```
-npm run test:prompt-cases     # rule tests, case validity, one case per section
+npm run test:prompt-cases     # rule tests, case validity, one case per section, surface snapshot
 ```
+
+[`../surface.json`](../surface.json) registers every tool, wake template branch
+and first-party skill an agent can be handed: body tools per session variant
+with their `app_tool` capabilities, external MCP tools and retired names, and
+skills per variant. Regenerate it with `node --import tsx scripts/prompt-surface.ts`
+after changing any of them; the diff names each changed entry.
 
 ## Replay
 

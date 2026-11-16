@@ -217,8 +217,8 @@ it('routes subscribed events, grants and changed corner checks through actions',
     verb: 'passed a check',
     kind: 'check-passed',
   });
-  // No reviewer: no review-gap handback or merge turn is needed.
-  expect((await commands(B, R)).map(command => command.reason).sort()).toEqual(['system']);
+  // No reviewer: no review-gap handback or merge turn is needed, and the implementer takes no turn in the chat.
+  expect((await commands(B, R)).map(command => command.reason).sort()).toEqual([]);
 });
 
 it('treats a reviewer removed from the parent Room as no reviewer without a review handback', async () => {
@@ -238,8 +238,8 @@ it('treats a reviewer removed from the parent Room as no reviewer without a revi
     kind: 'check-passed',
   });
   expect((await readAgentCommands(rootFixture.db, A, C)).commands).toHaveLength(0);
-  const handback=await commands(B,R);
-  expect(handback.map(command => command.reason).sort()).toEqual(['system']);
+  // The implementer takes no turn in the parent chat for this thread.
+  expect((await commands(B,R)).map(command => command.reason).sort()).toEqual([]);
   expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND text LIKE '%could not be reached%'`, [C])).rowCount).toBe(0);
   await expect(
     rootFixture.daemon.execute('getAgentConfiguration', { agentId: B, roomId: C }, B),

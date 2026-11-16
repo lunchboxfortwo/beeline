@@ -17,10 +17,13 @@ export function cornerCommanderIdSql(corner: string): string {
     (SELECT author_id FROM (${cornerCommanderBriefSql(`${corner}.id`)}) commander),${corner}.created_by)`;
 }
 
-/** First task delivery records the thread's commander; tags and brief edits cannot move it. */
+/** The opening, else the first task delivered to the thread's implementer, records
+ * its commander; tags of other agents, later messages and brief edits cannot move it. */
 export function threadTaskSql(cornerId:string):string {
-  return `SELECT task.* FROM agent_commands task WHERE task.room_id=${cornerId}
-    AND task.reason IN ('corner_objective','human_tag') ORDER BY task.inbox_sequence LIMIT 1`;
+  return `SELECT task.* FROM agent_commands task LEFT JOIN corner_facts fact ON fact.corner_id=task.room_id
+    WHERE task.room_id=${cornerId} AND (task.reason='corner_objective'
+      OR task.reason IN ('human_tag','message') AND task.agent_id=fact.implementer_agent_id)
+    ORDER BY task.inbox_sequence LIMIT 1`;
 }
 export function threadCommanderAddressSql(cornerId:string):string {
   return `(SELECT COALESCE(task.message->'replyAddress',task.message->'route'->'from',task.private_payload->'route'->'from',

@@ -46,10 +46,9 @@ export function createStub({ testCase, tools, skills, variant }) {
     }
     const result = replayScenarioResult(testCase, entry, skills);
     trace.results.push({ call: entry, ...result });
-    if (result.invalidSchema) {
-      trace.calls.pop();
-      trace.invalidCalls.push(entry);
-    }
+    // A refused operation is an attempt with no effect; only recorded results count as calls.
+    if (result.invalidSchema || result.unsupported) trace.calls.pop();
+    if (result.invalidSchema) trace.invalidCalls.push(entry);
     if (result.boundary) trace.terminal = result.boundary;
     return result.boundary ? { ...result, instruction: 'Stop at this boundary and end the turn.' } : result.result;
   };

@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { spawn, execFileSync } from 'node:child_process';
 import { loadCases, loadSource, replayPrompt, toolsFor } from './prompt-cases.ts';
-import { evaluateRule, skillPath } from './prompt-case-rules.ts';
+import { evaluateCase, evaluateRule, skillPath } from './prompt-case-rules.ts';
 import { median, needsSquire } from './prompt-nightly.mjs';
 import { deniesAvailableTool } from './prompt-tool-loading.mjs';
 import { findRollout, readTelemetry, completeAccounting } from './prompt-codex-telemetry.mjs';
@@ -66,7 +66,7 @@ export function gradeNative(testCase, trace, events, variant, tools) {
   const failure = violation ?? trace.failure ?? (finished && trace.invalidCalls.length && !trace.calls.length ? 'No valid tool call after validation errors' : undefined) ?? (escaped ? 'Native tool outside simulator' : undefined) ??
     (variant.mode === 'deferred' && deniesAvailableTool(text, tools) ? 'Denied an available tool instead of loading it' : undefined);
   const status = failure ? 'behavior' : infrastructureError || !finished || ['missing', 'call-limit'].includes(trace.terminal) ? 'incomplete' : 'behavior';
-  const verdict = failure ? { pass: false, reason: failure } : status === 'behavior' ? evaluateRule(testCase.pass, transcript) :
+  const verdict = failure ? { pass: false, reason: failure } : status === 'behavior' ? evaluateCase(testCase, transcript) :
     { pass: null, reason: trace.terminal === 'missing' ? 'Missing scenario fact' : 'Codex did not complete the simulated turn' };
   return { ...verdict, status, transcript, terminal: trace.terminal, attemptedCalls: trace.attemptedCalls, invalidCalls: trace.invalidCalls,
     searches: trace.searches, results: trace.results };

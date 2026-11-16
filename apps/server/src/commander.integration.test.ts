@@ -680,7 +680,7 @@ it('opening from a report resumes the original order instead of treating the rep
 });
 
 
-it('a green head whose reviewer command cannot be queued reports the reason to its commander', async () => {
+it('a green head whose reviewer command cannot be queued wakes the implementer in the thread; its blocked reply reaches the commander', async () => {
   const opened = await open();
   await rootFixture.db.query(`UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1`, [ROOM, RUBY]);
   await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=$2::jsonb WHERE corner_id=$1`, [opened.cornerId,
@@ -694,9 +694,14 @@ it('a green head whose reviewer command cannot be queued reports the reason to i
     await rootFixture.daemon.execute('postRoomMessage',{...authority(turn),text:'The work is ready for review.'},WORKER);
     await systemLine(rootFixture.db, { roomId: opened.cornerId, authorId: WORKER, subject: GITHUB_SUBJECT,
       verb: 'passed checks', kind: 'check-passed' });
-    const report=(await commands(DM,RUBY)).find(c=>c.reason==='system'&&c.source.body.startsWith('blocked:'));
-    expect(report?.source.body).toMatch(/^blocked:.*reviewer/);
-    expect(report?.private).toBe(true);
+    // The gap is thread work: no System notice outside the thread.
+    expect((await commands(DM,RUBY)).filter(c=>c.reason==='system')).toEqual([]);
+    const handback=(await commands(opened.cornerId,WORKER)).find(c=>c.reason==='corner_review_needed')!;
+    expect(handback.source.body).toMatch(/reviewer command could not be queued/);
+    await rootFixture.daemon.execute('reply',{id:handback.id,text:'blocked: review dispatch is unavailable'},WORKER);
+    const report=(await commands(DM,RUBY)).find(c=>c.reason==='reply'&&c.source.body.startsWith('blocked:'))!;
+    expect(report.source.body).toMatch(/^blocked:.*review/);
+    expect(report.private).toBe(true);
     expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE text LIKE '%restore review dispatch%'`)).rowCount).toBe(0);
   } finally {
     await rootFixture.db.query(`DROP TRIGGER refuse_review_command ON agent_commands; DROP FUNCTION refuse_review_command()`);
