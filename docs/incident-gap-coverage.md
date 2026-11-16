@@ -28,7 +28,7 @@ The safe stand-ins for historical production events use synthetic identities and
 
 The lifetime case runs the production intake with pushed ordinary commands and a brief-revision command, while a real ACP subprocess owns a loopback development server and the production emulator lease owns its marker. The simulated upstream brief writer updates a file that the working server reads; its response shows the latest revision without ending the turn. Explicit Stop cancels the prompt. Android guest boot and the production brief-write API are outside this narrow lifetime stand-in; the lease, subprocess, server, file reads and intake are real. A turn stop retains the corner-owned lease until fixture cleanup.
 
-The merge cases exercise the production checks event and the live checks read used by a stale landing wake. Both reconcile through the existing idempotent archival path, record the merge, and leave no active corner work or second merge API call. `node --import tsx scripts/prove-review-capacity.mjs`, after building the server, also demonstrates authenticated built HTTP checks read → landed outcome and archived corner → another read with mergeAllowed false. It does not claim a live phone or GitHub merge.
+The merge cases exercise the production checks event and the live checks read used by a stale landing wake. Both reconcile through the existing idempotent archival path, record the merge, and leave no active corner work or second merge API call. `node --import tsx packages/scripts/prove-review-capacity.mjs`, after building the server, also demonstrates authenticated built HTTP checks read → landed outcome and archived corner → another read with mergeAllowed false. It does not claim a live phone or GitHub merge.
 
 The PostgreSQL cases run in the existing SERVER CLAIM LATENCY job's PostgreSQL service via `BEELINE_INCIDENT_TEST_POSTGRES_URL`. Ordinary suites discover the file but skip those cases without the explicit loopback URL. No release workflow or required check name changed.
 
@@ -47,8 +47,8 @@ Root typecheck, workflow-path validation, the complete command-intake file (27 t
 
 ```sh
 npm run build -w @beeline/server
-node --import tsx scripts/prove-review-capacity.mjs
-node --import tsx scripts/prove-review-capacity.mjs --merge-webhook
+node --import tsx packages/scripts/prove-review-capacity.mjs
+node --import tsx packages/scripts/prove-review-capacity.mjs --merge-webhook
 ```
 
 ## Additional merged-PR replay proof

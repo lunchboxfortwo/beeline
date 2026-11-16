@@ -22,7 +22,7 @@ jobs:
         id: changes
         env:
           CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          CI_PATHS: ^apps/(body|server)/|^docs/prompts/|^scripts/(prompt|discovery)
+          CI_PATHS: ^apps/(body|server)/|^docs/prompts/|^packages/scripts/(prompt|discovery)
         run: |-
           run=true
           if [ "$GITHUB_EVENT_NAME" = pull_request ] && git fetch --no-tags --depth=1 origin "$CI_BASE_SHA" && git diff --name-only "$CI_BASE_SHA" HEAD > "$RUNNER_TEMP/changed-files"; then

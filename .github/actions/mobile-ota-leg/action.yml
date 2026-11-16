@@ -45,7 +45,7 @@ runs:
       shell: bash
       working-directory: apps/mobile
       run: |-
-        bash "$GITHUB_WORKSPACE/scripts/release-steps/mobile-ota-leg.sh" step0
+        bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/mobile-ota-leg.sh" step0
     - name: Read the live store runtimes
       shell: bash
       working-directory: apps/mobile
@@ -54,7 +54,7 @@ runs:
         OTA_MEMORY: ${{ inputs.ota_memory }}
         BEELINE_RELEASE_CHANNEL: ${{ inputs.channel }}
       run: |-
-        bash "$GITHUB_WORKSPACE/scripts/release-steps/mobile-ota-leg.sh" step1
+        bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/mobile-ota-leg.sh" step1
     - name: Publish every live runtime and move the requested channel
       id: publish
       shell: bash
@@ -67,10 +67,10 @@ runs:
         BRANCH: ${{ format('release-{0}', inputs.release_version) }}
         CHANNEL: ${{ inputs.channel }}
       run: |-
-        bash "$GITHUB_WORKSPACE/scripts/release-steps/mobile-ota-leg.sh" publish
+        bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/mobile-ota-leg.sh" publish
     - name: Report the delivered branch identity
       id: facts
       shell: bash
       working-directory: apps/mobile
       run: |-
-        bash "$GITHUB_WORKSPACE/scripts/release-steps/mobile-ota-leg.sh" facts
+        bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/mobile-ota-leg.sh" facts

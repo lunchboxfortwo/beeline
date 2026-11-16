@@ -217,7 +217,7 @@ PGlite.
 ## Mobile source maps
 
 Metro adds a debug ID to each bundle and its source map. EAS Update 22.2.0
-exports composed Hermes maps; `scripts/ota-release.mjs` uploads the exact export
+exports composed Hermes maps; `packages/scripts/ota-release.mjs` uploads the exact export
 once per platform before reusing it for older runtimes. Uploads name the full
 release SHA, matching `EXPO_PUBLIC_BEELINE_RELEASE_SHA` in the app. Debug IDs
 distinguish Android, iOS, OTA and embedded bundles even at the same SHA. An OTA

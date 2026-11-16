@@ -1,0 +1,15 @@
+
+> buzzy@0.0.0 lint:referenced-paths
+> node packages/scripts/verify-referenced-paths.mjs && node --test packages/scripts/verify-referenced-paths.test.mjs
+
+Referenced paths: 411 reference(s) in scripts, workflows, units and skills checked, all resolve.
+✔ fails on each kind of reference to a deleted file, then passes once the files exist (295.112175ms)
+✔ ignores runner expressions, outputs, regular expressions and git-ignored artifacts (162.418583ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 506.233881

@@ -41,7 +41,7 @@ account IDs, names, emails, logins, message contents, IP addresses, device names
 codes or tokens are stored in these events. Ordinary sign-in detail lasts 90 days,
 followed by anonymous daily aggregates; onboarding milestones and their minimal
 sign-in context remain for historical cohort measurement. Dev/preview/lab and
-Play Review traffic is excluded. Privacy text: `web/privacy/index.html`.
+Play Review traffic is excluded. Privacy text: `apps/site/privacy/index.html`.
 This declaration is independent of optional PostHog configuration.
 
 ## Conditional analytics declaration

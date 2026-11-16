@@ -100,7 +100,7 @@ The current testing environment is not configured to support act(...)
 .deadline-typecheck.txt
 
 > buzzy@0.0.0 typecheck
-> turbo run typecheck && npm run typecheck --prefix apps/mobile && tsc -p tsconfig.scripts.json
+> turbo run typecheck && npm run typecheck --prefix apps/mobile && tsc -p packages/scripts/tsconfig.scripts.json
 
 • turbo 2.10.8
 
@@ -274,6 +274,6 @@ Cached:    7 cached, 7 total
 
 
 > buzzy@0.0.0 dead-code
-> node scripts/check-dead-code.mjs
+> node packages/scripts/check-dead-code.mjs
 
 Dead-code baseline holds: 4 existing findings, 0 introduced.

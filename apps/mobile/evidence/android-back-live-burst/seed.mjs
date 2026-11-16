@@ -18,7 +18,7 @@ await db.connect();
 try {
   await db.query('BEGIN');
   const existing = await db.query('SELECT id FROM rooms WHERE id=$1 AND workspace_id=$2', [room, workspace]);
-  if (!existing.rowCount) throw new Error('Run scripts/latency-rig/seed-local.mjs first');
+  if (!existing.rowCount) throw new Error('Run packages/scripts/latency-rig/seed-local.mjs first');
   await db.query("DELETE FROM rooms WHERE workspace_id=$1 AND parent_id IS NULL AND left(name,12) > 'Rig room 025' AND direct_participants IS NULL", [workspace]);
   await db.query("UPDATE workspaces SET name='Latency Rig 25' WHERE id=$1", [workspace]);
   await db.query("UPDATE rooms SET name=name||' dddddddddddddddd' WHERE workspace_id=$1 AND parent_id IS NULL AND direct_participants IS NULL AND name<>'Rig room 001' AND name NOT LIKE '%dddddddddddddddd'", [workspace]);

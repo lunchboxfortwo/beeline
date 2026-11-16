@@ -133,7 +133,7 @@ jobs:
           GITHUB_APP_ID: ${{ secrets.BEELINE_GITHUB_APP_ID }}
           GITHUB_APP_PRIVATE_KEY: ${{ secrets.BEELINE_GITHUB_APP_PRIVATE_KEY }}
         run: |
-          token=$(node scripts/github-app-installation-token.mjs)
+          token=$(node packages/scripts/github-app-installation-token.mjs)
           echo "::add-mask::$token"
           echo "token=$token" >> "$GITHUB_OUTPUT"
       - name: Record dispatch clock
@@ -161,7 +161,7 @@ jobs:
           elif [ -n "$REQUESTED_SHA" ]; then
             release_sha=$(git rev-parse --verify "$REQUESTED_SHA^{commit}")
           fi
-          node scripts/release-record.mjs identity --sha "$release_sha" --requested "$REQUESTED_VERSION" \
+          node packages/scripts/release-record.mjs identity --sha "$release_sha" --requested "$REQUESTED_VERSION" \
             --channel "$CHANNEL" --next "$RUNNER_TEMP/next-release.json" \
             --previous "$RUNNER_TEMP/previous/release.json" > "$RUNNER_TEMP/identity.txt"
           release_sha=$(sed -n 's/^release_sha=//p' "$RUNNER_TEMP/identity.txt")
@@ -193,7 +193,7 @@ jobs:
           set -euo pipefail
           previous="$RUNNER_TEMP/previous/release.json"
           if [ -f "$previous" ]; then
-            node scripts/unified-release.mjs component-paths \
+            node packages/scripts/unified-release.mjs component-paths \
               --previous "$previous" --sha "$RELEASE_SHA" \
               --output "$RUNNER_TEMP/release-component-paths.json" \
               --paths-output "$RUNNER_TEMP/release-paths.txt"
@@ -214,14 +214,14 @@ jobs:
             --outputs "$GITHUB_OUTPUT")
           if [ -f "$previous" ]; then args+=(--previous "$previous"); fi
           if [ "$CHANNEL" = latest ]; then args+=(--next "$RUNNER_TEMP/next-release.json"); fi
-          node scripts/unified-release.mjs "${args[@]}"
+          node packages/scripts/unified-release.mjs "${args[@]}"
           tee -a "$GITHUB_STEP_SUMMARY" < "$RUNNER_TEMP/release-plan.json"
       - name: Mint a Play token to read this release's store builds
         id: play_read
         if: steps.plan.outputs.run_mobile_native == 'true' && steps.plan.outputs.native_android == 'true'
         env:
           GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
-        run: node scripts/play-token.mjs
+        run: node packages/scripts/play-token.mjs
       - name: Find this release's store builds
         id: store_shipped
         if: steps.plan.outputs.run_mobile_native == 'true'
@@ -243,7 +243,7 @@ jobs:
           args=(find --marker "$marker" --play-track "$PLAY_TRACK" --outputs "$GITHUB_OUTPUT")
           if [ "$NATIVE_ANDROID" = true ]; then args+=(--android); fi
           if [ "$NATIVE_IOS" = true ] && [ -n "$STORE_TRACK" ] && [ "$STORE_TRACK" != none ]; then args+=(--ios); fi
-          node scripts/store-shipped.mjs "${args[@]}"
+          node packages/scripts/store-shipped.mjs "${args[@]}"
       - name: Resolve the shared native store version before building
         id: native_version
         if: steps.plan.outputs.run_mobile_native == 'true'
@@ -261,7 +261,7 @@ jobs:
             # A platform already shipped this release: the other one must match it.
             version="$SHIPPED_VERSION"
           elif [ "$STORE_TRACK" = production ]; then
-            version=$(node scripts/ios-store-build.mjs resolve-version "$RUNNER_TEMP/mobile-package.json")
+            version=$(node packages/scripts/ios-store-build.mjs resolve-version "$RUNNER_TEMP/mobile-package.json")
           else
             version=$(node -p 'require(process.argv[1]).version' "$RUNNER_TEMP/mobile-package.json")
           fi
@@ -336,7 +336,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PREVIOUS_SHA: ${{ needs.initialize.outputs.previous_sha }}
           RELEASE_SHA: ${{ needs.initialize.outputs.release_sha }}
-        run: node scripts/release-test-report.mjs
+        run: node packages/scripts/release-test-report.mjs
       - name: Block every delivery leg on the full test verdict
         if: "!cancelled() && needs.release_checks.result != 'success'"
         run: |
@@ -424,7 +424,7 @@ jobs:
           echo "shipped=$shipped" | tee -a "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@1.95.0
         if: steps.shipped.outputs.shipped != 'true'
-      - run: bash scripts/npm-ci-timed.sh
+      - run: bash packages/scripts/npm-ci-timed.sh
       - uses: ./.github/actions/buzz-agent-cache
         timeout-minutes: 2
         continue-on-error: true
@@ -460,8 +460,8 @@ jobs:
           cp -a packages/usebeeline/dist/. "$RUNNER_TEMP/helper-linux/cli/"
           if [ "$SHIPPED" != true ]; then
             mkdir -p "$RUNNER_TEMP/helper-linux/bundle"
-            cp web/dl/beeline-linux-x64.tar.gz web/dl/beeline-linux-x64.tar.gz.sha256 \
-              web/dl/manifest.json web/dl/beeline-bootstrap.mjs web/dl/beeline-bootstrap.mjs.sha256 \
+            cp apps/site/dl/beeline-linux-x64.tar.gz apps/site/dl/beeline-linux-x64.tar.gz.sha256 \
+              apps/site/dl/manifest.json apps/site/dl/beeline-bootstrap.mjs apps/site/dl/beeline-bootstrap.mjs.sha256 \
               "$RUNNER_TEMP/helper-linux/bundle/"
           fi
       - uses: actions/upload-artifact@v4
@@ -513,7 +513,7 @@ jobs:
           echo "shipped=$shipped" | tee -a "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@1.95.0
         if: steps.shipped.outputs.shipped != 'true'
-      - run: bash scripts/npm-ci-timed.sh
+      - run: bash packages/scripts/npm-ci-timed.sh
         if: steps.shipped.outputs.shipped != 'true'
       - name: Require the native build architecture
         if: steps.shipped.outputs.shipped != 'true'
@@ -527,7 +527,7 @@ jobs:
           CHANNEL_DIR: ${{ runner.temp }}/previous-mac-bundle
         with:
           script: |
-            const { downloadPagesChannel } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/pages-channel.mjs`);
+            const { downloadPagesChannel } = await import(`${process.env.GITHUB_WORKSPACE}/packages/scripts/pages-channel.mjs`);
             await downloadPagesChannel({ github, repo: context.repo, channel: '${{ needs.initialize.outputs.channel }}', directory: process.env.CHANNEL_DIR });
       - name: Carry the verified Mac payload into this release
         id: carry_bundle
@@ -552,7 +552,7 @@ jobs:
           BEELINE_BUNDLE_VERSION: ${{ needs.initialize.outputs.release_version }}
       - name: Install the candidate Intel Mac archive for acceptance
         if: matrix.platform == 'darwin-x64' && steps.shipped.outputs.shipped != 'true'
-        run: node scripts/verify-beeline-install.mjs --platform darwin-x64
+        run: node packages/scripts/verify-beeline-install.mjs --platform darwin-x64
         env:
           BEELINE_INSTALL_VERIFY_ROOT: ${{ runner.temp }}/beeline-install-${{ github.run_id }}-${{ github.run_attempt }}
       - uses: actions/upload-artifact@v4
@@ -560,12 +560,12 @@ jobs:
         with:
           name: daemon-${{ matrix.platform }}-${{ needs.initialize.outputs.release_id }}
           path: |
-            web/dl/beeline-${{ matrix.platform }}.tar.gz
-            web/dl/beeline-${{ matrix.platform }}.tar.gz.sha256
-            web/dl/manifest.json
-            web/dl/mac-helper-inputs.json
-            web/dl/beeline-bootstrap.mjs
-            web/dl/beeline-bootstrap.mjs.sha256
+            apps/site/dl/beeline-${{ matrix.platform }}.tar.gz
+            apps/site/dl/beeline-${{ matrix.platform }}.tar.gz.sha256
+            apps/site/dl/manifest.json
+            apps/site/dl/mac-helper-inputs.json
+            apps/site/dl/beeline-bootstrap.mjs
+            apps/site/dl/beeline-bootstrap.mjs.sha256
           if-no-files-found: error
           retention-days: 1
   helper:
@@ -599,7 +599,7 @@ jobs:
       - uses: ./.github/actions/require-tools
         with:
           tools: git curl tar
-      - run: bash scripts/npm-ci-timed.sh
+      - run: bash packages/scripts/npm-ci-timed.sh
       - uses: actions/download-artifact@v4
         with:
           name: helper-linux-${{ needs.initialize.outputs.release_id }}
@@ -656,7 +656,7 @@ jobs:
           mkdir -p "$package_dir"
           npm pack --workspace usebeeline --pack-destination "$package_dir"
           tarball="$package_dir/usebeeline-${RELEASE_VERSION#v}.tgz"
-          node scripts/smoke-helper-package.mjs "$tarball" "${RELEASE_VERSION#v}"
+          node packages/scripts/smoke-helper-package.mjs "$tarball" "${RELEASE_VERSION#v}"
           echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
       - name: Publish the exact helper CLI package
         # npm publishes only through trusted publishing from GitHub Actions; a
@@ -862,7 +862,7 @@ jobs:
       - name: Install once and build the shared packages Metro and the Pages build read
         run: |
           set -euo pipefail
-          bash scripts/npm-ci-timed.sh
+          bash packages/scripts/npm-ci-timed.sh
           npm run build -w @beeline/nostr && npm run build -w @beeline/api-contract && npm run build -w @beeline/buzz-client && npm run build -w @beeline/net
       - uses: ./.github/actions/eas-cli
       - uses: ./.github/actions/pages-leg
@@ -943,13 +943,13 @@ jobs:
           export ANDROID_SDK_ROOT="$ANDROID_HOME"
           echo "Android SDK: $ANDROID_HOME on $(hostname)"
           export PATH="$ANDROID_HOME/platform-tools:$PATH"
-          bash ../../scripts/npm-ci-timed.sh
+          bash ../../packages/scripts/npm-ci-timed.sh
           # Keep the committed eas.json (and both native fingerprints) identical
           # to production. Only this build workspace receives the next-ci profile.
-          android_profile=$(node ../../scripts/android-release-channel.mjs eas.json "$RELEASE_CHANNEL")
+          android_profile=$(node ../../packages/scripts/android-release-channel.mjs eas.json "$RELEASE_CHANNEL")
           "$EAS_CLI_PATH" build --local --platform android --profile "$android_profile" --non-interactive --output "$RUNNER_TEMP/beeline.aab"
           test -s "$RUNNER_TEMP/beeline.aab" || { echo 'local EAS build did not produce a non-empty aab' >&2; exit 1; }
-          node ../../scripts/assert-mobile-release-origin.mjs "$RUNNER_TEMP/beeline.aab"
+          node ../../packages/scripts/assert-mobile-release-origin.mjs "$RUNNER_TEMP/beeline.aab"
           unzip -p "$RUNNER_TEMP/beeline.aab" BUNDLE-METADATA/com.android.tools.build.obfuscation/proguard.map > "$RUNNER_TEMP/mapping.txt"
           test -s "$RUNNER_TEMP/mapping.txt" || { echo 'R8 mapping missing from AAB' >&2; exit 1; }
           sha256=$(sha256sum "$RUNNER_TEMP/beeline.aab" | awk '{print $1}')
@@ -979,7 +979,7 @@ jobs:
         id: play-auth
         env:
           GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
-        run: node scripts/play-token.mjs
+        run: node packages/scripts/play-token.mjs
       - name: Publish Android to Play
         id: play-upload
         if: steps.android_build.outcome == 'success'
@@ -997,7 +997,7 @@ jobs:
           test -s "$RUNNER_TEMP/beeline.aab" || { echo 'no local aab to upload' >&2; exit 1; }
           # The release marker in the name lets a rerun find this build on Play.
           AAB_PATH="$RUNNER_TEMP/beeline.aab" RELEASE_NAME="${{ steps.native_version.outputs.version }} (${{ needs.initialize.outputs.release_marker }})" \
-            RELEASE_STATUS=completed bash scripts/play-publish.sh
+            RELEASE_STATUS=completed bash packages/scripts/play-publish.sh
       - name: Enforce the Play listing lock before committing the build
         if: steps.play-upload.outputs.edit_id != ''
         env:
@@ -1006,7 +1006,7 @@ jobs:
           PLAY_EDIT_ID: ${{ steps.play-upload.outputs.edit_id }}
           PLAY_LISTING_BASELINE: ${{ runner.temp }}/play-listing-before-build.json
           PUBLISH_LISTING: ${{ inputs.publish_listing && 'true' || 'false' }}
-        run: bash scripts/play-commit-build.sh
+        run: bash packages/scripts/play-commit-build.sh
       - name: Publish the Play listing only when explicitly requested
         if: inputs.publish_listing
         env:
@@ -1014,7 +1014,7 @@ jobs:
           PACKAGE_NAME: app.usebeeline
           METADATA_DIR: apps/mobile/fastlane/metadata/android
           LANGUAGE: en-US
-        run: bash scripts/play-publish-listing.sh
+        run: bash packages/scripts/play-publish-listing.sh
       - name: Check the Play listing without uploading
         if: ${{ !inputs.publish_listing }}
         env:
@@ -1025,7 +1025,7 @@ jobs:
           PLAY_LISTING_CHECK_ONLY: "1"
         run: |
           status=0
-          bash scripts/play-publish-listing.sh || status=$?
+          bash packages/scripts/play-publish-listing.sh || status=$?
           if [ "$status" -ne 0 ] && [ "$status" -ne 2 ]; then
             echo "::warning::Could not compare the Play listing; listing was not uploaded"
           fi
@@ -1111,7 +1111,7 @@ jobs:
           set -euo pipefail
           PATH="$(dirname "$(command -v node)"):/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"
           export PATH
-          node scripts/store-shipped.mjs ios-evidence --marker "${{ needs.initialize.outputs.release_marker }}" --output "$RUNNER_TEMP/ios-build.json"
+          node packages/scripts/store-shipped.mjs ios-evidence --marker "${{ needs.initialize.outputs.release_marker }}" --output "$RUNNER_TEMP/ios-build.json"
       - name: Build immutable iOS store binary locally
         if: needs.initialize.outputs.ios_shipped != 'true'
         working-directory: apps/mobile
@@ -1122,15 +1122,15 @@ jobs:
           # which would prepend a global eas-cli's bin dir (/usr/local/bin) to PATH.
           PATH="$(dirname "$(command -v node)"):/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"
           export PATH
-          bash ../../scripts/npm-ci-timed.sh
+          bash ../../packages/scripts/npm-ci-timed.sh
           # The IPA's file name carries the release marker. altool sends it with
           # the upload, so a rerun finds an accepted upload even if this job dies
           # before verify marks the build.
-          ipa="$RUNNER_TEMP/$(node ../../scripts/store-shipped.mjs ios-file-name --marker "${{ needs.initialize.outputs.release_marker }}")"
+          ipa="$RUNNER_TEMP/$(node ../../packages/scripts/store-shipped.mjs ios-file-name --marker "${{ needs.initialize.outputs.release_marker }}")"
           echo "IOS_IPA=$ipa" >> "$GITHUB_ENV"
           "$EAS_CLI_PATH" build --local --platform ios --profile production-ci --non-interactive --output "$ipa"
           test -s "$ipa" || { echo 'local EAS build did not produce a non-empty ipa' >&2; exit 1; }
-          python3 ../../scripts/ios-build-evidence.py "$ipa" "$RUNNER_TEMP/ios-build.json"
+          python3 ../../packages/scripts/ios-build-evidence.py "$ipa" "$RUNNER_TEMP/ios-build.json"
           # verify writes this marker into the build's What to Test text.
           node -e 'const fs=require("node:fs");const p=process.argv[1];fs.writeFileSync(p,JSON.stringify({...JSON.parse(fs.readFileSync(p,"utf8")),releaseMarker:process.argv[2]})+"\n")' \
             "$RUNNER_TEMP/ios-build.json" "${{ needs.initialize.outputs.release_marker }}"
@@ -1144,7 +1144,7 @@ jobs:
           export PATH
           # Verify the actual IPA targets this App Store app and a new build
           # number before accepting Apple's transport receipt.
-          node ../../scripts/ios-store-build.mjs prepare "$RUNNER_TEMP/ios-build.json"
+          node ../../packages/scripts/ios-store-build.mjs prepare "$RUNNER_TEMP/ios-build.json"
           # Upload with Apple's own altool, not `eas submit`: EAS Submit is Expo's cloud
           # queue, and on this account its wait grew from 7 min to 54 min and then past
           # the job's 90-minute timeout (run 34863479172: build done in 19 min, then
@@ -1157,14 +1157,14 @@ jobs:
           # altool success only confirms transport. Processing can still fail
           # (90683 rejected build 87 after a successful upload). Require the
           # exact delivery to finish and a new VALID build in our App Store app.
-          node ../../scripts/ios-store-build.mjs verify "$RUNNER_TEMP/ios-build.json" "$RUNNER_TEMP/ios-upload.json"
+          node ../../packages/scripts/ios-store-build.mjs verify "$RUNNER_TEMP/ios-build.json" "$RUNNER_TEMP/ios-upload.json"
       - name: Send production iOS version to App Review
         if: inputs.store_track == 'production'
         run: |
           set -euo pipefail
           PATH="$(dirname "$(command -v node)"):/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"
           export PATH
-          node scripts/ios-store-build.mjs submit "$RUNNER_TEMP/ios-build.json"
+          node packages/scripts/ios-store-build.mjs submit "$RUNNER_TEMP/ios-build.json"
       - name: Report the uploaded iOS build number to the release record
         id: ios_identity
         if: inputs.store_track != 'none'
@@ -1210,7 +1210,7 @@ jobs:
         env:
           NEEDS: ${{ toJSON(needs) }}
           TRIGGER_EPOCH: ${{ needs.initialize.outputs.trigger_epoch }}
-        run: node scripts/release-delivery.mjs measure
+        run: node packages/scripts/release-delivery.mjs measure
   release_result:
     if: "!cancelled() && needs.initialize.result == 'success'"
     needs:
@@ -1249,12 +1249,12 @@ jobs:
         if: needs.initialize.outputs.has_previous == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/release-record.mjs previous --channel "${{ needs.initialize.outputs.channel }}" --output "$RUNNER_TEMP/previous/release.json"
+        run: node packages/scripts/release-record.mjs previous --channel "${{ needs.initialize.outputs.channel }}" --output "$RUNNER_TEMP/previous/release.json"
       - name: Read the next release being promoted
         if: needs.initialize.outputs.channel == 'latest'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/release-record.mjs previous --channel next --rc-only true --output "$RUNNER_TEMP/next-release.json"
+        run: node packages/scripts/release-record.mjs previous --channel next --rc-only true --output "$RUNNER_TEMP/next-release.json"
       - name: Record each component job's result and classify the attempt
         id: result
         env:
@@ -1272,22 +1272,22 @@ jobs:
           state="$RUNNER_TEMP/release/release.json"
           restore=(restore-job-state --state "$state" --previous "$RUNNER_TEMP/previous/release.json")
           if [ '${{ needs.initialize.outputs.channel }}' = latest ]; then restore+=(--next "$RUNNER_TEMP/next-release.json"); fi
-          if ! node scripts/unified-release.mjs "${restore[@]}"; then
+          if ! node packages/scripts/unified-release.mjs "${restore[@]}"; then
             exit 0 # Classified metadata failure; the final reporting step fails the job.
           fi
           printf '%s' "$NEEDS" > "$RUNNER_TEMP/needs.json"
-          node scripts/unified-release.mjs job-checkpoints --needs "$RUNNER_TEMP/needs.json" \
+          node packages/scripts/unified-release.mjs job-checkpoints --needs "$RUNNER_TEMP/needs.json" \
             --version "$RELEASE_VERSION" --sha "$RELEASE_SHA" --release-id "$RELEASE_ID" \
             --output "$RUNNER_TEMP/checkpoints.json"
-          node scripts/unified-release.mjs apply-checkpoints --state "$state" --checkpoints "$RUNNER_TEMP/checkpoints.json" --summary "$RUNNER_TEMP/run-plan.json"
+          node packages/scripts/unified-release.mjs apply-checkpoints --state "$state" --checkpoints "$RUNNER_TEMP/checkpoints.json" --summary "$RUNNER_TEMP/run-plan.json"
           facts=(apply-facts --state "$state" --needs "$RUNNER_TEMP/needs.json" --pins apps/mobile/native-fingerprint.json)
           if [ -f "$RUNNER_TEMP/previous/release.json" ]; then facts+=(--previous "$RUNNER_TEMP/previous/release.json"); fi
-          node scripts/unified-release.mjs "${facts[@]}"
+          node packages/scripts/unified-release.mjs "${facts[@]}"
           incomplete=$(node -e 'const p=require(process.argv[1]);process.stdout.write(Object.entries(p.run).filter(([,v])=>v).map(([k])=>k).join(","))' "$RUNNER_TEMP/run-plan.json")
           now=$(date +%s)
           # A release that shipped every selected component is a success,
           # however long it took. Elapsed times are reported, never judged.
-          node scripts/unified-release.mjs classify-attempt \
+          node packages/scripts/unified-release.mjs classify-attempt \
             --trigger-epoch "$TRIGGER_EPOCH" \
             --finished-epoch "$now" \
             --checkpoints "$RUNNER_TEMP/checkpoints.json" \
@@ -1300,8 +1300,8 @@ jobs:
           whole_run_elapsed=$(node -e 'process.stdout.write(String(require(process.argv[1]).wholeRunElapsedSeconds))' "$RUNNER_TEMP/release-classification.json")
           soft_limit_seconds=$(node -e 'process.stdout.write(String(require(process.argv[1]).softLimitSeconds))' "$RUNNER_TEMP/release-classification.json")
           if [ -n "$failure_class" ]; then
-            node scripts/unified-release.mjs finalize --state "$state" --outcome failure --failure-class "$failure_class"
-            if [ -n "${DELIVERY_REPORT:-}" ]; then node scripts/release-delivery.mjs record "$state"; fi
+            node packages/scripts/unified-release.mjs finalize --state "$state" --outcome failure --failure-class "$failure_class"
+            if [ -n "${DELIVERY_REPORT:-}" ]; then node packages/scripts/release-delivery.mjs record "$state"; fi
             {
               echo "outcome=failure"
               echo "failure_class=$failure_class"
@@ -1358,7 +1358,7 @@ jobs:
           RELEASE_VERSION: ${{ needs.initialize.outputs.release_version }}
         run: |
           mkdir -p "$RUNNER_TEMP/desktop-manifest"
-          node scripts/desktop-update.mjs manifest \
+          node packages/scripts/desktop-update.mjs manifest \
             --directory "$RUNNER_TEMP/desktop-release" \
             --version "$DESKTOP_VERSION" \
             --tag "$RELEASE_VERSION" \
@@ -1375,8 +1375,8 @@ jobs:
           if [ "$RELEASE_PROOF_UNPROVEN" = true ]; then
             args+=(--unproven "mobile OTA promoted without a device proof; proof is opt-in and was not requested")
           fi
-          node scripts/unified-release.mjs finalize "${args[@]}"
-          node scripts/release-delivery.mjs record "$state"
+          node packages/scripts/unified-release.mjs finalize "${args[@]}"
+          node packages/scripts/release-delivery.mjs record "$state"
           node -e 'const fs=require("node:fs");const p=process.argv[1];const r=JSON.parse(fs.readFileSync(p,"utf8"));r.runId=Number(process.env.GITHUB_RUN_ID);fs.writeFileSync(p,JSON.stringify(r,null,2)+"\n")' "$state"
       - name: Publish the one GitHub release record with its release.json and stable desktop downloads
         if: steps.result.outputs.outcome == 'success' && steps.result.outputs.no_op != 'true' && needs.initialize.outputs.channel == 'latest'
@@ -1394,7 +1394,7 @@ jobs:
           # asset-verified wrappers (run 35268976983: a transient GitHub-side
           # HTTP 500 on `gh release upload` failed an otherwise finished
           # release).
-          . scripts/gh-release-retry.sh
+          . packages/scripts/gh-release-retry.sh
           state="$RUNNER_TEMP/release/release.json"
           mkdir -p "$RUNNER_TEMP/desktop-release"
           # A carried desktop re-attaches the installers of the release that
@@ -1423,7 +1423,7 @@ jobs:
           mapfile -t assets < <(find "$RUNNER_TEMP/desktop-release" -maxdepth 1 -type f -name 'Beeline-*' ! -name 'Beeline-latest.json' | sort)
           # Publish the installers before either updater manifest can name them.
           # Local recovery executes this same step with its carried signed set.
-          node scripts/desktop-r2.mjs \
+          node packages/scripts/desktop-r2.mjs \
             --directory "$RUNNER_TEMP/desktop-release" \
             --manifest "$manifest" --tag "$RELEASE_VERSION" \
             --output "$RUNNER_TEMP/desktop-release/Beeline-latest.json"
@@ -1460,7 +1460,7 @@ jobs:
           manifest_url='https://github.com/Beeline-Work/beeline/releases/latest/download/Beeline-latest.json'
           verified=false
           for _ in {1..12}; do
-            if node scripts/desktop-update.mjs verify --url "$manifest_url" --expected "$manifest"; then
+            if node packages/scripts/desktop-update.mjs verify --url "$manifest_url" --expected "$manifest"; then
               verified=true
               break
             fi
@@ -1475,7 +1475,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ needs.initialize.outputs.release_version }}
         run: |
-          . scripts/gh-release-retry.sh
+          . packages/scripts/gh-release-retry.sh
           ghr_upload_verified "$RELEASE_VERSION" "$RUNNER_TEMP/release/release.json"
           gh release edit "$RELEASE_VERSION" --draft=false --prerelease --latest=false --notes 'Next dogfood release; production OTA, desktop and website await owner-commanded latest promotion.'
       - name: Remove drafts this release supersedes
@@ -1485,7 +1485,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ needs.initialize.outputs.release_version }}
         run: |
-          for draft in $(node scripts/release-record.mjs stale-drafts --version "$RELEASE_VERSION"); do
+          for draft in $(node packages/scripts/release-record.mjs stale-drafts --version "$RELEASE_VERSION"); do
             echo "Deleting abandoned draft $draft"
             gh release delete "$draft" --yes || true
           done
@@ -1494,7 +1494,7 @@ jobs:
         env:
           MOBILE_STORE_MINIMUM: ${{ inputs.mobile_store_minimum }}
           BEELINE_RELEASE_NOTIFY_SECRET: ${{ secrets.BEELINE_RELEASE_NOTIFY_SECRET }}
-        run: node scripts/mobile-store-minimum.mjs
+        run: node packages/scripts/mobile-store-minimum.mjs
       - name: Notify clients without changing the authoritative release outcome
         id: notification
         if: "!cancelled() && needs.release_validation.result == 'success' && needs.initialize.outputs.no_op != 'true'"
@@ -1504,7 +1504,7 @@ jobs:
           RELEASE_VERSION: ${{ needs.initialize.outputs.release_version }}
           RELEASE_SHA: ${{ needs.initialize.outputs.release_sha }}
           BEELINE_RELEASE_NOTIFY_SECRET: ${{ secrets.BEELINE_RELEASE_NOTIFY_SECRET }}
-        run: node scripts/unified-release.mjs notify --version "$RELEASE_VERSION" --sha "$RELEASE_SHA" --manifest-url "$MANIFEST_URL" --repository "$GITHUB_REPOSITORY" --output "$RUNNER_TEMP/release-notification.json"
+        run: node packages/scripts/unified-release.mjs notify --version "$RELEASE_VERSION" --sha "$RELEASE_SHA" --manifest-url "$MANIFEST_URL" --repository "$GITHUB_REPOSITORY" --output "$RUNNER_TEMP/release-notification.json"
       - name: Surface release outcome and duration
         if: steps.result.outputs.state_ready != 'false'
         env:
@@ -1599,9 +1599,9 @@ jobs:
           RECEIPT_ORIGIN: ${{ vars.MOBILE_OTA_RECEIPT_ORIGIN || 'https://usebeeline.app/push' }}
         run: |
           printf '%s' "$NEEDS" > "$RUNNER_TEMP/needs.json"
-          node scripts/release-job-output.mjs PREVIOUS_RECORD "$RUNNER_TEMP/previous-release.json"
+          node packages/scripts/release-job-output.mjs PREVIOUS_RECORD "$RUNNER_TEMP/previous-release.json"
           NEEDS_FILE="$RUNNER_TEMP/needs.json" PREVIOUS_RECORD_FILE="$RUNNER_TEMP/previous-release.json" \
-            node scripts/release-bookkeeping.mjs
+            node packages/scripts/release-bookkeeping.mjs
   nightly_checks:
     name: Start nightly checks
     needs: [initialize, release_result]

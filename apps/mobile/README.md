@@ -1,7 +1,7 @@
 # Beeline mobile client
 
 Fork of **[Happy](https://github.com/slopus/happy)**'s Expo/React Native app
-(`packages/happy-app`) as Beeline's client foundation (`spec.md` P1).
+(`packages/happy-app`) as Beeline's client foundation.
 
 ## Attribution / license
 
@@ -9,8 +9,8 @@ Fork of **[Happy](https://github.com/slopus/happy)**'s Expo/React Native app
 - Upstream commit: `2c8ecacc19f14abd81111a4605ac8c7f6bedb7e1`
   (`chore(app): August 7 changelog entry with Community Credits convention`)
 - Upstream package: `packages/happy-app`
-- Happy's MIT license is preserved in [`LICENSE`](./LICENSE)
-- Also see [`UPSTREAM.md`](./UPSTREAM.md) for vendor provenance
+- Happy's MIT license is preserved in [`LICENSE`](LICENSE)
+- Also see [`UPSTREAM.md`](UPSTREAM.md) for vendor provenance
 
 The mobile app ships under one Beeline native identity with governed beta and
 production OTA channels.
@@ -133,7 +133,7 @@ native release build and rejects a release-tagged commit unless the tag is exact
 
 The release keystore lives only in the `ANDROID_SIDELOAD_*` repository
 secrets, not in the tree — see
-[`android-signing/README.md`](./android-signing/README.md) for the secret
+[`android-signing/README.md`](android-signing/README.md) for the secret
 names, the 2026-10-15 key rotation, and how `apk:release` materializes and signs
 with them. A signing-key rotation requires existing sideload installs to be
 uninstalled and reinstalled.

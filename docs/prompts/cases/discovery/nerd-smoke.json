@@ -1,9 +1,9 @@
 {
   "sourceHashes": {
-    "scripts/discovery-live.mjs": "07379ce53308274485c4fd78a9e285e7f997e36cfde114ae58dab3af2e567b27",
-    "scripts/discovery-launch.mjs": "28f357556f2ac40d19bbc7edd31b8b04e817717263e1ab1a67a448951830dcad",
-    "scripts/discovery-mcp.mjs": "5d46366a5f82014d6c8ee07ecaf565b1674cd6f75787c1d221a39321a9deeb61",
-    "scripts/discovery-score.mjs": "573c5953878d00f75042601935f90bbcceeddad38d488404ec360a0467c34e47",
+    "packages/scripts/discovery-live.mjs": "07379ce53308274485c4fd78a9e285e7f997e36cfde114ae58dab3af2e567b27",
+    "packages/scripts/discovery-launch.mjs": "28f357556f2ac40d19bbc7edd31b8b04e817717263e1ab1a67a448951830dcad",
+    "packages/scripts/discovery-mcp.mjs": "5d46366a5f82014d6c8ee07ecaf565b1674cd6f75787c1d221a39321a9deeb61",
+    "packages/scripts/discovery-score.mjs": "573c5953878d00f75042601935f90bbcceeddad38d488404ec360a0467c34e47",
     "docs/prompts/cases/discovery/corpus.json": "077836425b3a061509a617a1cbdb8f9d918ec4629178456a554007272b8a522c",
     "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
     "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",

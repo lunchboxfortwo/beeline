@@ -18,11 +18,11 @@ The complete [reader and writer inventory](corner-access-audit.md) names every p
 
 ## Isolated owner-shaped proof
 
-`scripts/prove-archived-corner-memberships.mjs` starts a loopback HTTP service against an isolated PostgreSQL engine. The generated account has 43 top-level Rooms, 11 active corners, 1,146 archived corners and 36 agents. The owner starts with 1,200 physical surface memberships; after the normal migration only the 43 top-level Room memberships remain (plus its Workspace membership). The same fixture posts into an active corner over authenticated HTTP, receives a real live socket invalidation, retains its implementer/reviewer assignments, and reads archived history. The script measures the three primary Room startup reads (`workspaces`, `workspace`, `chats`), Room-list response bytes, cold load time and seven warm samples. It never uses production data or starts a helper.
+`packages/scripts/prove-archived-corner-memberships.mjs` starts a loopback HTTP service against an isolated PostgreSQL engine. The generated account has 43 top-level Rooms, 11 active corners, 1,146 archived corners and 36 agents. The owner starts with 1,200 physical surface memberships; after the normal migration only the 43 top-level Room memberships remain (plus its Workspace membership). The same fixture posts into an active corner over authenticated HTTP, receives a real live socket invalidation, retains its implementer/reviewer assignments, and reads archived history. The script measures the three primary Room startup reads (`workspaces`, `workspace`, `chats`), Room-list response bytes, cold load time and seven warm samples. It never uses production data or starts a helper.
 
 ```sh
 npm run build -w @beeline/server
-node --import tsx scripts/prove-archived-corner-memberships.mjs
+node --import tsx packages/scripts/prove-archived-corner-memberships.mjs
 ```
 
 For comparison against the original source, export that revision's `apps/server/src` and `apps/server/assets` below `.beeline-proof/`, then pass `--source-root=<export>/apps/server/src`. The proof asserts no archived corner appears in any measured startup response. HTTP fixture timings do not establish Android rendering performance or the ANR's cause; those require the independent device investigation.

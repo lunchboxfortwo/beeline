@@ -58,8 +58,8 @@ Start a separate LiveKit server on TCP 17890 (signalling), TCP 17891 and UDP 178
 with development-only `devkey`/`secret`. Then run:
 
 ```sh
-SILENCE_PROOF_ANDROID_FIRST=1 node --import tsx scripts/prove-voice-call-errors.ts
-python3 scripts/prove-voice-call-errors.py --device emulator-PORT --mode fixed
+SILENCE_PROOF_ANDROID_FIRST=1 node --import tsx packages/scripts/prove-voice-call-errors.ts
+python3 packages/scripts/prove-voice-call-errors.py --device emulator-PORT --mode fixed
 ```
 
 For the before run, materialize the original runtime and provider source from

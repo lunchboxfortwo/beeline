@@ -37,7 +37,7 @@ query, transaction and dedicated checkout timeouts logged no occupancy.
 
 Build shared packages and the server with `npm run corner:prepare` and
 `npm run build --workspace=@beeline/server`. Then run
-`BEELINE_COMMAND_TEST_POSTGRES_URL=<isolated-loopback-url> node --import tsx scripts/prove-database-timeouts.mjs`.
+`BEELINE_COMMAND_TEST_POSTGRES_URL=<isolated-loopback-url> node --import tsx packages/scripts/prove-database-timeouts.mjs`.
 The script creates and drops its own database. It does not use a production URL.
 
 The compiled background corner reconciliation logged the planted holder before

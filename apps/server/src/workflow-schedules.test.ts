@@ -1,5 +1,5 @@
 import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
-import { phoneFetch } from '../../../tests/helpers/phone-operation.js';
+import { phoneFetch } from '../../../packages/test-helpers/helpers/phone-operation.js';
 import { randomBytes } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';

@@ -41,7 +41,7 @@ database is the closest stand-in, using the same paths and phone read projection
 Build the server and run:
 
 ```sh
-node --import tsx scripts/prove-report-post-delivery.mjs
+node --import tsx packages/scripts/prove-report-post-delivery.mjs
 ```
 
 The script submits explicit threaded posts through authenticated built daemon

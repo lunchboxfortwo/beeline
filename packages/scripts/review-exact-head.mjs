@@ -1,0 +1,294 @@
+#!/usr/bin/env node
+/**
+ * Deterministic exact-head review bootstrap.
+ *
+ * Checks one exact commit out into a temporary detached worktree, installs
+ * from the committed lockfile, builds every workspace package export the
+ * server/body/auth tests consume, then runs the requested
+ * non-interactive typechecks and targeted tests and prints a per-step
+ * PASS/FAIL summary. The worktree is removed on exit unless `--keep` is
+ * passed, in which case the removal command is printed instead.
+ *
+ * Usage:
+ *   node packages/scripts/review-exact-head.mjs <sha>
+ *       Prepare the worktree and print its path; run further commands by hand.
+ *   node packages/scripts/review-exact-head.mjs <sha> -- <pkg>:<glob> [<pkg>:<glob> ...]
+ *       Also run `npm test -w <pkg> -- --run <glob>` for each target.
+ *   node packages/scripts/review-exact-head.mjs <sha> --typecheck <pkg> [--typecheck <pkg> ...]
+ *       Also run each package's `npm run typecheck`.
+ *
+ * `@beeline/mobile` is not a root workspace (it is deliberately installed and
+ * run on its own), so a mobile target or typecheck runs `npm` with
+ * `--prefix apps/mobile` and installs the mobile tree before it. Every other
+ * package uses `-w <pkg>` as before.
+ *
+ * <sha> must be a full 40-hex commit id: an exact-head review is pinned to one
+ * commit, never a branch that could move. Targets are package-qualified vitest
+ * files/globs, e.g. `@beeline/server:src/integration.test.ts`.
+ */
+
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, readFileSync, existsSync, mkdirSync, readdirSync, lstatSync, readlinkSync, symlinkSync, cpSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join, resolve, relative, dirname, isAbsolute } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const USAGE = `Usage:
+  node packages/scripts/review-exact-head.mjs <sha> [--typecheck <pkg> ...] [--keep] [--] [<pkg>:<glob> ...]
+`;
+
+/** Packages whose dist/ exports the server/body/auth tests import. */
+export const REVIEW_BUILD_PACKAGES = [
+  '@beeline/nostr',
+  '@beeline/api-contract',
+  '@beeline/buzz-client',
+  '@beeline/net',
+  '@beeline/auth',
+  '@beeline/body',
+];
+
+export const MOBILE_PACKAGE_NAMES = ['@beeline/mobile', 'mobile', 'apps/mobile'];
+
+/** `apps/mobile` is outside the root workspaces, so it needs `--prefix`, never `-w`. */
+export function isMobilePackage(pkg) {
+  return MOBILE_PACKAGE_NAMES.includes(pkg);
+}
+
+export function parseReviewArgs(argv) {
+  const positional = [];
+  const typechecks = [];
+  let keep = false;
+  let afterDash = false;
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (afterDash) {
+      positional.push(arg);
+      continue;
+    }
+    if (arg === '--') {
+      afterDash = true;
+      continue;
+    }
+    if (arg === '--keep') {
+      keep = true;
+      continue;
+    }
+    if (arg === '--typecheck') {
+      const pkg = argv[i + 1];
+      if (!pkg) {
+        throw new Error(`${USAGE}\n--typecheck needs a package name`);
+      }
+      typechecks.push(pkg);
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith('-')) {
+      throw new Error(`${USAGE}\nunknown option: ${arg}`);
+    }
+    positional.push(arg);
+  }
+  const sha = positional.shift();
+  if (!sha) {
+    throw new Error(`${USAGE}\nmissing <sha>`);
+  }
+  if (!/^[0-9a-f]{40}$/.test(sha)) {
+    throw new Error(`<sha> must be a full 40-hex commit id, got: ${sha}`);
+  }
+  for (const target of positional) {
+    if (!target.includes(':')) {
+      throw new Error(`${USAGE}\ntarget must be <pkg>:<glob>, got: ${target}`);
+    }
+  }
+  return { sha, typechecks, targets: positional, keep };
+}
+
+function defaultRun(command, args, opts) {
+  const result = spawnSync(command, args, { cwd: opts.cwd, stdio: 'inherit' });
+  return {
+    status: result.status ?? 1,
+    stdout: result.stdout ?? '',
+    stderr: result.stderr ?? '',
+  };
+}
+
+function defaultGit(args) {
+  const result = spawnSync('git', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  return {
+    status: result.status ?? 1,
+    stdout: (result.stdout ?? '').toString().trim(),
+    stderr: (result.stderr ?? '').toString().trim(),
+  };
+}
+
+/** Reuse only the installed generation for this exact lockfile and runtime. */
+export function reuseReviewDependencies(source, target, sourceRoot = source, targetRoot = target) {
+  try {
+    const lock = readFileSync(join(target, 'package-lock.json'));
+    if (!lock.equals(readFileSync(join(source, 'package-lock.json')))) return false;
+    const marker = JSON.parse(readFileSync(join(source, 'node_modules/.beeline-generation'), 'utf8'));
+    const key = createHash('sha256')
+      .update(`v2\0${process.platform}\0${process.arch}\0${process.versions.modules}\0`)
+      .update(lock).digest('hex').slice(0, 32);
+    if (marker.key !== key) return false;
+    const packages = JSON.parse(lock).packages;
+    const trees = new Set();
+    for (const [path, pkg] of Object.entries(packages)) {
+      const parts = path.split('/'), index = parts.indexOf('node_modules');
+      if (index < 0) continue;
+      if (isAbsolute(path) || parts.includes('..')) return false;
+      if (!pkg.optional && !existsSync(join(source, path))) return false;
+      trees.add(parts.slice(0, index + 1).join('/'));
+    }
+    // Keep package directories on their sealed mounts; recreate workspace links
+    // and executable links against the review tree rather than the source head.
+    const place = (from, to, scope = false) => {
+      mkdirSync(to, { recursive: true });
+      for (const name of readdirSync(from)) {
+        const src = join(from, name), dst = join(to, name);
+        if (name === '.beeline-generation') continue;
+        if (lstatSync(src).isSymbolicLink()) {
+          const dest = resolve(dirname(src), readlinkSync(src));
+          const rel = relative(sourceRoot, dest);
+          symlinkSync(!rel.startsWith('../') && !isAbsolute(rel)
+            ? relative(dirname(dst), join(targetRoot, rel)) : dest, dst);
+        } else if (!scope && name.startsWith('@')) place(src, dst, true);
+        else if (!scope && name === '.bin') cpSync(src, dst, { recursive: true, verbatimSymlinks: true });
+        else if (lstatSync(src).isDirectory()) symlinkSync(src, dst, 'dir');
+        else cpSync(src, dst);
+      }
+    };
+    for (const tree of trees) place(join(source, tree), join(target, tree));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function reviewExactHead(argv, deps = {}) {
+  const {
+    run = defaultRun,
+    git = defaultGit,
+    makeTemp = () => mkdtempSync(join(tmpdir(), 'beeline-review-')),
+    remove = (dir) => rmSync(dir, { recursive: true, force: true }),
+    reuse = reuseReviewDependencies,
+    sourceRoot = process.cwd(),
+    log = (line) => process.stdout.write(`${line}\n`),
+  } = deps;
+
+  const { sha, typechecks, targets, keep } = parseReviewArgs(argv);
+  const verdicts = [];
+  let worktreeDir = null;
+
+  const note = (name, status, detail = '') => {
+    verdicts.push({ name, status, detail });
+    log(`[review] ${status ? 'PASS' : 'FAIL'} ${name}${detail ? ` — ${detail}` : ''}`);
+  };
+
+  const cleanup = () => {
+    if (!worktreeDir) return;
+    if (git(['worktree', 'remove', '--force', worktreeDir]).status === 0) {
+      log('[review] worktree removed');
+      return;
+    }
+    remove(worktreeDir);
+    git(['worktree', 'prune']);
+    log('[review] worktree directory removed and pruned');
+  };
+
+  try {
+    const resolved = git(['rev-parse', '--verify', '--quiet', `${sha}^{commit}`]);
+    if (resolved.status !== 0 || !/^[0-9a-f]{40}$/.test(resolved.stdout)) {
+      throw new Error(`head ${sha} does not resolve to a commit in this repository`);
+    }
+    const head = resolved.stdout;
+    log(`[review] head ${head}`);
+
+    worktreeDir = makeTemp();
+    const add = git(['worktree', 'add', '--detach', worktreeDir, head]);
+    if (add.status !== 0) {
+      throw new Error(`git worktree add failed: ${add.stderr || add.stdout}`);
+    }
+    log(`[review] worktree ${worktreeDir}`);
+
+    const prepare = (part = '') => {
+      const target = join(worktreeDir, part);
+      if (reuse(join(sourceRoot, part), target, sourceRoot, worktreeDir)) {
+        note(`dependencies${part ? ' ' + part : ''}`, true, 'reused matching shared generation');
+        return;
+      }
+      // A failed reuse may have placed partial links. This is a new, private
+      // worktree, so remove those aliases before installing into writable space.
+      const lock = JSON.parse(readFileSync(join(target, 'package-lock.json'), 'utf8'));
+      const trees = new Set(['node_modules']);
+      for (const path of Object.keys(lock.packages ?? {})) {
+        const parts = path.split('/'), index = parts.indexOf('node_modules');
+        if (index < 0) continue;
+        if (isAbsolute(path) || parts.includes('..')) throw new Error('Unsafe dependency lockfile');
+        trees.add(parts.slice(0, index + 1).join('/'));
+      }
+      for (const tree of trees) rmSync(join(target, tree), { recursive: true, force: true });
+      const install = run('npm', ['ci', '--prefix', target], { cwd: worktreeDir });
+      if (install.status !== 0) throw new Error(`Dependencies${part ? ' ' + part : ''}: shared generation unavailable or lockfile differs; writable npm ci failed (exit ${install.status})`);
+      note(`npm ci${part ? ' ' + part : ''}`, true);
+    };
+    prepare();
+    const needsMobile = typechecks.some(isMobilePackage) ||
+      targets.some((target) => isMobilePackage(target.split(':')[0]));
+    if (needsMobile) prepare('apps/mobile');
+
+    const buildArgs = ['run', 'build'];
+    for (const pkg of REVIEW_BUILD_PACKAGES) {
+      buildArgs.push('-w', pkg);
+    }
+    const build = run('npm', buildArgs, { cwd: worktreeDir });
+    note(
+      'build workspace exports',
+      build.status === 0,
+      build.status === 0 ? '' : `exit ${build.status}`,
+    );
+
+    for (const pkg of typechecks) {
+      const step = isMobilePackage(pkg)
+        ? run('npm', ['run', 'typecheck', '--prefix', 'apps/mobile'], { cwd: worktreeDir })
+        : run('npm', ['run', 'typecheck', '-w', pkg], { cwd: worktreeDir });
+      note(`typecheck ${pkg}`, step.status === 0, step.status === 0 ? '' : `exit ${step.status}`);
+    }
+
+    for (const target of targets) {
+      const [pkg, glob] = target.split(':');
+      const step = isMobilePackage(pkg)
+        ? run('npm', ['test', '--prefix', 'apps/mobile', '--', '--run', glob], { cwd: worktreeDir })
+        : run('npm', ['test', '-w', pkg, '--', '--run', glob], { cwd: worktreeDir });
+      note(`test ${pkg} ${glob}`, step.status === 0, step.status === 0 ? '' : `exit ${step.status}`);
+    }
+
+    if (keep) {
+      log(`[review] kept; remove with: git worktree remove --force ${worktreeDir}`);
+    }
+  } catch (err) {
+    note('prepare', false, err.message);
+  } finally {
+    if (!keep) {
+      cleanup();
+    }
+  }
+
+  const failed = verdicts.find((step) => !step.status);
+  if (failed) {
+    log(`[review] summary: FAIL at ${failed.name}`);
+    return { ok: false, verdicts, failed };
+  }
+  log('[review] summary: PASS');
+  return { ok: true, verdicts };
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  try {
+    const result = reviewExactHead(process.argv.slice(2));
+    process.exitCode = result.ok ? 0 : 1;
+  } catch (err) {
+    console.error(err.message);
+    process.exitCode = 1;
+  }
+}

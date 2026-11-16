@@ -85,7 +85,7 @@ type Props = {
 };
 
 /**
- * `@agent /login`: the harness's own login, at the call site (DESIGN.md →
+ * `@agent /login`: the harness's own login, at the call site (docs/DESIGN.md →
  * Transcript cards). The head carries the company's logo; steps use the
  * workflow circles; waiting pulses the one instrument dot (`StateDot`); a code or key is sent once, never
  * posted, drafted, or shown back.

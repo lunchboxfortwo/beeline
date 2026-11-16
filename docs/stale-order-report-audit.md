@@ -25,7 +25,7 @@ The isolated replay uses synthetic text: an implementer orders another member in
 Run after building the server:
 
 ```sh
-node --import tsx scripts/prove-answered-report.mjs --delegate
+node --import tsx packages/scripts/prove-answered-report.mjs --delegate
 ```
 
 The new fence requires exact report-recipient/order-author, report-author/order-recipient, origin-corner and creation-order provenance. It applies only to blocked/needs-decision reports. Completed informational reports and active live claims survive. Digest sources use the existing stale-source rebuild path.

@@ -251,8 +251,8 @@ Duplicate microphone subscriptions and final STT events cannot start a second st
 ## Deployment
 
 The self-hosted Fly app is `beeline-voice-livekit` in `iad`, beside
-`beeline-server`. `fly.beeline-voice-livekit.toml` and
-`infra/voice-livekit/start.sh` define the pinned image and ports: TLS signalling
+`beeline-server`. `apps/infra/fly.beeline-voice-livekit.toml` and
+`apps/infra/voice-livekit/start.sh` define the pinned image and ports: TLS signalling
 443, RTC TCP 7881, UDP mux 7882. Allocate a dedicated IPv4 and set
 `LIVEKIT_NODE_IP` to it. The single shared CPU/256 MB Machine was proved with
 two RTC human participants (about 42 MB idle RSS).
@@ -291,7 +291,7 @@ Verify the built runtime, rather than a host with a preinstalled CA package:
 ```sh
 docker build -f apps/server/Dockerfile -t beeline-voice-tls-proof .
 docker run --rm \
-  -v "$PWD/scripts/prove-voice-tls.mjs:/app/tls-proof.mjs:ro" \
+  -v "$PWD/packages/scripts/prove-voice-tls.mjs:/app/tls-proof.mjs:ro" \
   --entrypoint node beeline-voice-tls-proof /app/tls-proof.mjs
 ```
 
@@ -319,7 +319,7 @@ Aura 2 and Flux both use Workers AI. Billing changes remain an owner decision.
 [Multiparty release-emulator proof](voice-mode-proof/multiparty-fixes/README.md)
 records named switching, full replies, unnamed-speech silence and one reply stream.
 
-`scripts/prove-voice-mode.ts` creates a disposable in-memory Workspace, two
+`packages/scripts/prove-voice-mode.ts` creates a disposable in-memory Workspace, two
 humans and two temporary agents. It runs the authenticated server, actual RTC
 clients and real provider audio, then claims an ordinary agent order, creates
 a greeting file in the ignored proof directory, and submits its report through
@@ -329,10 +329,10 @@ Run with credentials supplied only through the process environment:
 
 ```sh
 VOICE_PROOF_LIVE_FLUX=1 \
-  node --import tsx scripts/prove-voice-mode.ts
+  node --import tsx packages/scripts/prove-voice-mode.ts
 ```
 
-The multiparty regression proof, `scripts/prove-voice-multiparty.ts`, creates
+The multiparty regression proof, `packages/scripts/prove-voice-multiparty.ts`, creates
 another disposable in-memory Workspace and waits for a release emulator's second
 human to Join through the actual call card. It uses live Flux, Luna and Aura 2,
 checks both named agents, complete multi-sentence synthesis, silence for unnamed
@@ -341,7 +341,7 @@ Its scoped `session.json` and raw logs stay in `.beeline-proof/multiparty/`;
 release fixture files under `apps/mobile/.voice-proof/` use a local ignore file.
 
 ```sh
-node --import tsx scripts/prove-voice-multiparty.ts
+node --import tsx packages/scripts/prove-voice-multiparty.ts
 ```
 
 Historical Aura measurements on 2026-10-13: local LiveKit end-of-turn to first

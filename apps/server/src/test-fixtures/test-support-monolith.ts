@@ -1,5 +1,5 @@
 import { startQueuedTurn } from './queued-turn.test-support.js';
-import { phoneFetch } from '../../../../tests/helpers/phone-operation.js';
+import { phoneFetch } from '../../../../packages/test-helpers/helpers/phone-operation.js';
 import { createAgentCommand } from '.././agent-command.js';
 import { createHash, createHmac } from 'node:crypto';
 import type { AddressInfo } from 'node:net';

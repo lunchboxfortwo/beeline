@@ -49,7 +49,7 @@ export default function RootLayout() {
           // light icons over Obsidian, on every platform the stack runs on.
           // Per-screen overrides were dropped — the theme is the one author.
           statusBarStyle: statusBarStyleForTheme({ dark }),
-          // Every screen draws the shared PageHeader itself (DESIGN.md →
+          // Every screen draws the shared PageHeader itself (docs/DESIGN.md →
           // Components); the stack never renders a header of its own.
           headerShown: false,
           contentStyle: { backgroundColor: canvas },

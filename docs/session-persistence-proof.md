@@ -38,7 +38,7 @@ The final candidate also passed an in-place update and continued using the same 
 
 The first lost reply was recovered by an automatic retry before the later sleep. The offline restart therefore held renewed access; the historical checkpoint name `expired-access-offline-cold-start` is not an assertion that this renewed access had expired. Delayed retries beyond the old grace are covered by the four-day legacy server regression and the 24-hour cold-client regression.
 
-The recorded timeline and screenshots are in [session-persistence evidence](../apps/mobile/evidence/session-persistence/). Every passing checkpoint requires one initial sign-in and one retained device family; online checkpoints also verify the Room deck. A separate in-place APK installation verifies that package updates retain the same sign-in.
+The recorded timeline and screenshots are in [session-persistence evidence](../apps/mobile/evidence/session-persistence). Every passing checkpoint requires one initial sign-in and one retained device family; online checkpoints also verify the Room deck. A separate in-place APK installation verifies that package updates retain the same sign-in.
 
 To reproduce in a fresh isolated worktree:
 

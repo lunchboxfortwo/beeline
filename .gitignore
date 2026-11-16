@@ -46,11 +46,11 @@ coverage/
 *.aab
 
 # CLI bundles are built in-tree but published to Pages and GitHub Release assets.
-web/dl/manifest.json
-web/dl/*.tar.gz
-web/dl/*.tar.gz.sha256
-web/dl/beeline-bootstrap.mjs
-web/dl/beeline-bootstrap.mjs.sha256
+apps/site/dl/manifest.json
+apps/site/dl/*.tar.gz
+apps/site/dl/*.tar.gz.sha256
+apps/site/dl/beeline-bootstrap.mjs
+apps/site/dl/beeline-bootstrap.mjs.sha256
 
 # Mac
 .DS_Store
@@ -60,7 +60,7 @@ web/dl/beeline-bootstrap.mjs.sha256
 .scratch/
 .scratch-target/
 .beeline-tools/
-infra/free-agent/helper-bundle/
+apps/infra/free-agent/helper-bundle/
 
 # Expo (apps/mobile isolated install)
 apps/mobile/node_modules/
@@ -89,5 +89,28 @@ agent-home/
 # Exact-head CI build archive metadata
 .beeline-ci-build.json
 
-# Generated from README.md by scripts/build-usebeeline-package.mjs
+# Generated from README.md by packages/scripts/build-usebeeline-package.mjs
 packages/usebeeline/README.md
+
+# Local evidence and tool scratch never belong in the public tree.
+/.artifacts/
+/.cgstack/
+/.lavish/
+/.screenshots/
+/.verification/
+/artifacts/
+/audit-evidence/
+/evidence/
+/proof/
+/data/
+/spec.md
+/.editorconfig
+/.nvmrc
+/.prettierrc
+
+# Keep root dotfiles limited to repository configuration.
+/.*
+!/.gitignore
+!/.github/
+!/.gitlab-ci.yml
+!/.dockerignore

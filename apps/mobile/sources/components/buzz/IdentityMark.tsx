@@ -27,7 +27,7 @@ type IdentityMarkBaseProps = {
    *  community id for a Workspace. Same seed, same mark, forever. */
   seed: string;
   size?: number;
-  /** Workspace-rail selection: the mark's own heavier frame (`DESIGN.md`,
+  /** Workspace-rail selection: the mark's own heavier frame (`docs/DESIGN.md`,
    *  "Index rows" — selection reads three redundant ways, none a box). */
   selected?: boolean;
   name?: string;

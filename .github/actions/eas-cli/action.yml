@@ -1,4 +1,4 @@
-# The release's one eas-cli: installed from tools/eas-cli's lockfile and
+# The release's one eas-cli: installed from apps/mobile/tools/eas-cli's lockfile and
 # exported as EAS_CLI_PATH, which apps/mobile/scripts/ota-release.mjs honors.
 name: Install the pinned eas-cli
 description: npm ci the locked eas-cli and export EAS_CLI_PATH
@@ -7,4 +7,4 @@ runs:
   steps:
     - shell: bash
       run: |-
-        bash "$GITHUB_WORKSPACE/scripts/release-steps/eas-cli.sh" step0
+        bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/eas-cli.sh" step0

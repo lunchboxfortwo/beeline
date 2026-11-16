@@ -261,7 +261,7 @@ describe('feedback-triage workflow', () => {
     const rank = async () => {
       const rows = (await database.query(FEEDBACK_TRIAGE_PULL_SQL)).rows;
       const output = JSON.parse(execFileSync(process.execPath,
-        [fileURLToPath(new URL('../../../scripts/feedback-signals.mjs', import.meta.url))],
+        [fileURLToPath(new URL('../../../packages/scripts/feedback-signals.mjs', import.meta.url))],
         {input:JSON.stringify(rows),encoding:'utf8'}));
       return {
         count:output.groups.reduce((total: number, group: {count: number}) => total+group.count,0),

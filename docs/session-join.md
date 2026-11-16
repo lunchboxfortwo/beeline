@@ -131,15 +131,15 @@ Codex's shared app server can hold several threads. Session discovery reads ever
 
 The adapters are ported from [Reason Network](https://github.com/reason-machines/reason-network) 0.12.17, MIT OR Apache-2.0; `apps/body/src/session-join/NOTICE` keeps its copyright, and the npm bundle ships it as `NOTICE-reason-network`. `UPSTREAM.json` records the copied commit and files. Beeline uses no Reason binary, relay, account or web service; `no-reason-service.test.ts` fails on any.
 
-On explicit audit demand, `.github/workflows/reason-upstream.yml` runs `scripts/reason-upstream-check.mjs --open-issue`. When a recorded file changed upstream, it opens one issue titled `Port Reason adapter changes <from>..<to>`. Ruby's `issue.opened` subscription on `Beeline-Work/beeline`, in #beeline, opens a port corner from it; a title without that prefix wakes Ruby and ends the turn silently. `--compare-file <saved compare>` replays a fixture instead of fetching upstream; its issue ends in `(fixture proof)`, and the subscription opens a proof corner that closes the issue and itself.
+On explicit audit demand, `.github/workflows/reason-upstream.yml` runs `packages/scripts/reason-upstream-check.mjs --open-issue`. When a recorded file changed upstream, it opens one issue titled `Port Reason adapter changes <from>..<to>`. Ruby's `issue.opened` subscription on `Beeline-Work/beeline`, in #beeline, opens a port corner from it; a title without that prefix wakes Ruby and ends the turn silently. `--compare-file <saved compare>` replays a fixture instead of fetching upstream; its issue ends in `(fixture proof)`, and the subscription opens a proof corner that closes the issue and itself.
 
 ## Proof
 
 ```sh
 npx turbo run build --filter=usebeeline... --filter=@beeline/server
-node --import tsx scripts/prove-session-join.mjs
+node --import tsx packages/scripts/prove-session-join.mjs
 ```
 
-`SESSION-JOIN-1` serves the built server on loopback with a synthetic GitHub provider. Paste `Join my Beeline Room: http://127.0.0.1:47123/room` into a running session, open the printed link with `POST /proof/open`, then tag the member with `POST /proof/tag` and read the Room at `/proof/messages`. Unit tests: `npm test -w @beeline/body -- --run src/session-join`, `npm test -w @beeline/server -- --run src/rooms-mcp.test.ts -t SESSION-JOIN`, `node --test scripts/reason-upstream-check.test.mjs`.
+`SESSION-JOIN-1` serves the built server on loopback with a synthetic GitHub provider. Paste `Join my Beeline Room: http://127.0.0.1:47123/room` into a running session, open the printed link with `POST /proof/open`, then tag the member with `POST /proof/tag` and read the Room at `/proof/messages`. Unit tests: `npm test -w @beeline/body -- --run src/session-join`, `npm test -w @beeline/server -- --run src/rooms-mcp.test.ts -t SESSION-JOIN`, `node --test packages/scripts/reason-upstream-check.test.mjs`.
 
-`SESSION-JOIN-INBOUND-1` records the held-message reproduction and live Claude Code/Codex proof in [inbound consent evidence](../evidence/session-join/inbound-consent.md).
+`SESSION-JOIN-INBOUND-1` records the held-message reproduction and live Claude Code/Codex proof in inbound consent evidence.

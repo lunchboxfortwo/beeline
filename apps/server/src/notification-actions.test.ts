@@ -10,9 +10,9 @@ it.each((['android', 'ios'] as const).flatMap(platform =>
   const result = await handleNotificationAction({
     actionIdentifier: GRANT_PUSH_ACTIONS[decision],
     notification: { request: { identifier: 'grant-notification', content: {
-      body: 'Jellybean wants to run node scripts/live-a.mjs',
+      body: 'Jellybean wants to run node packages/scripts/live-a.mjs',
       data: { categoryId: PUSH_ACTION_CATEGORIES.grant, grantId: 'grant-1',
-        agentName: 'Jellybean', grantKind: 'command', grantTarget: 'node scripts/live-a.mjs' },
+        agentName: 'Jellybean', grantKind: 'command', grantTarget: 'node packages/scripts/live-a.mjs' },
     } } },
   }, {
     platform,

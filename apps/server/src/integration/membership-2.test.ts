@@ -1,4 +1,4 @@
-import { phoneFetch } from '../../../../tests/helpers/phone-operation.js';
+import { phoneFetch } from '../../../../packages/test-helpers/helpers/phone-operation.js';
 import { cornerObjectiveSql } from '.././corner-objective.js';
 import { cornerCommissionerSql, cornerKindSql } from '.././corner-opening.js';
 import { createHash } from 'node:crypto';

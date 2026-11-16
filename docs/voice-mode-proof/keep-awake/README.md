@@ -14,7 +14,7 @@ Feature verification, not a defect report.
 
 ## Fixture
 
-`node --import tsx scripts/prove-voice-keep-awake.ts` runs the real server, auth, Room,
+`node --import tsx packages/scripts/prove-voice-keep-awake.ts` runs the real server, auth, Room,
 voice service and RTC over a disposable PGlite database. Brain, STT and speech are silent
 doubles. LiveKit v1.9.12 ran locally in dev mode on port 27940.
 Sign-in used `beeline://review/isolated-keep-awake-proof-only`, then the Room list.

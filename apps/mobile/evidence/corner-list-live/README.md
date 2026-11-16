@@ -110,7 +110,7 @@ claim.
 
 ## Reproduction kit
 
-[proof-kit](proof-kit/) contains the exact local server controller, seed, web
+[proof-kit](proof-kit) contains the exact local server controller, seed, web
 server, and capture paths. Run from the repository root. The controller refuses
 anything except the named loopback fixture database; it never uses production
 keys. Its local reviewer session remains in memory. Install the temporary

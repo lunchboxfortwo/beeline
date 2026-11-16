@@ -118,7 +118,7 @@ export function createPhoneOperationDispatcher(
         }));
       }
       // v142 (98c2a49a) still reads this wire format; the 12-Room compatibility
-      // matrix is in data/network-ops-fixes/room-list-release-compatibility.md.
+      // matrix is documented in the Room-list release compatibility audit.
       // New clients select/dispatch it only inside server-read-owner.ts.
       case 'readChats': return found(await phone.readChats(uuid(input, 'workspaceId'), viewerId));
       case 'readAgent': return found(await phone.readAgent(uuid(input, 'workspaceId'), required(input, 'agentId'), viewerId, optional(input, 'workCursor')));

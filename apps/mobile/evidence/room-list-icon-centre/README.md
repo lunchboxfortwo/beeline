@@ -9,7 +9,7 @@ marks against the right edge.
 
 - Server: the current monolith (`apps/server/src/index.ts`) against a disposable
   pgvector PostgreSQL 16 container on `127.0.0.1:5546`, migrated and seeded as in
-  `../room-list-margins/README.md` (`scripts/latency-rig/seed-local.mjs`, then
+  `../room-list-margins/README.md` (`packages/scripts/latency-rig/seed-local.mjs`, then
   `kit/seed-beeline.mjs` before each capture). `PORT=8790`,
   `BEELINE_WEB_APP_ORIGINS=http://127.0.0.1:8792`.
 - App: `npx expo export --platform web` of `main` (before) and of this branch

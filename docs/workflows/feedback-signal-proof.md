@@ -20,7 +20,7 @@ ORDER BY created_at;
 ```
 
 Only occurrences at or before the cutoff contribute to the replay count and
-last-seen timestamp. Using groupFeedback from scripts/feedback-signals.mjs:
+last-seen timestamp. Using groupFeedback from packages/scripts/feedback-signals.mjs:
 
 | Result | Rows |
 | --- | ---: |

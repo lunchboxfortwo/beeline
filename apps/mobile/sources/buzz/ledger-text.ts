@@ -97,7 +97,7 @@ const FENCE = /^```/;
  * A `git push` rejection dump, a stack trace, an npm error wall: the agent
  * pastes these into its own narration, and they print down the slab as a wall
  * the reader has to scroll past. They collapse to one ghost line instead
- * (`DESIGN.md`, "Machine noise"), while the sentences around them stay exactly
+ * (`docs/DESIGN.md`, "Machine noise"), while the sentences around them stay exactly
  * as written.
  *
  * The unit is a **run of consecutive machine lines**, not a blank-line-delimited

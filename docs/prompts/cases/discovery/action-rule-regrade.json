@@ -1,7 +1,7 @@
 {
   "scope": "Offline regrade of retained Cursor traces, not a new model run; historical source records preserved",
   "gradingSourceHashes": {
-    "scripts/discovery-score.mjs": "278b9a4b9502476d2f2f0df76259f92cc64d1ecb269291853a15d29acf0fd4d6",
+    "packages/scripts/discovery-score.mjs": "278b9a4b9502476d2f2f0df76259f92cc64d1ecb269291853a15d29acf0fd4d6",
     "docs/prompts/cases/discovery/corpus.json": "c24a1b33a6a2c957e173569d42d8734534db14f4df8ad387203f133ebbf84543"
   },
   "results": [

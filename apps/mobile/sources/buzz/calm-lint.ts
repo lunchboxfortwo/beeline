@@ -322,7 +322,7 @@ export type CalmVerdict = {
   /**
    * A baseline row for a file that is neither an explicit decorative
    * exception nor a currently-excused pending-PR file: the zero-tolerance
-   * floor (DESIGN.md → Type) admits no other reason to carry raw literals.
+   * floor (docs/DESIGN.md → Type) admits no other reason to carry raw literals.
    */
   unlisted: { file: string; baseline: number }[];
 };

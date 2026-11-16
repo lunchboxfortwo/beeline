@@ -21,5 +21,5 @@ forwarded if supplied; agent-home preparation does not set it.
 Mobile's `EXPO_PUBLIC_BUZZY_MONOLITH_URL` is a build-time URL, not a fallback,
 and keeps its name.
 
-The [environment audit](../.verification/env-audit/README.md) records the
+The environment audit records the
 names-only Fly inventory from the earlier rename.

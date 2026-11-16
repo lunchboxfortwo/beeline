@@ -156,7 +156,7 @@ join. `VOICE_PIN_PROOF` keeps only the disposable fixture alive during setup.
 Run the measurement driver in small batches, collecting at least twenty turns:
 
 ```sh
-python3 scripts/measure-voice-speed.py EVENTS.jsonl RESULTS.jsonl 8
+python3 packages/scripts/measure-voice-speed.py EVENTS.jsonl RESULTS.jsonl 8
 ```
 
 The monitor runs independently of the service event loop and uses the same

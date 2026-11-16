@@ -1,6 +1,6 @@
 # Service-review provider proof
 
-The corrected `web/subprocessors/index.html` was rendered in Chromium
+The corrected `apps/site/subprocessors/index.html` was rendered in Chromium
 at 390×1100 and 1280×1000. The rendered DOM identifies the review model provider
 as `Anthropic`, contains no generic staff-selected provider category, and reports
 no horizontal document overflow at either size.
@@ -22,7 +22,7 @@ Commands:
 
 ```sh
 npm test -w @beeline/server -- src/identity-live.e2e.test.ts src/feedback-triage-workflow.test.ts --maxWorkers=1 --minWorkers=1
-node --test scripts/pages-site.test.mjs
+node --test packages/scripts/pages-site.test.mjs
 npm run typecheck
 npm run dead-code
 ```

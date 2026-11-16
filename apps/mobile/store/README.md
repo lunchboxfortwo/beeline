@@ -16,12 +16,12 @@ It makes no store API calls. The current app identity is `app.usebeeline`.
 
 The icon and feature graphic are owner-delivered finals. The screenshots are
 captures of the app UI. Preserve the dimensions and RGB PNG format when
-replacing them; `scripts/sync-play-metadata.mjs` validates the Play set.
+replacing them; `packages/scripts/sync-play-metadata.mjs` validates the Play set.
 
 ## Derived Play metadata
 
 `apps/mobile/fastlane/metadata/android/en-US/` is generated from this package
-by `node scripts/sync-play-metadata.mjs` (run from the repository root) and
+by `node packages/scripts/sync-play-metadata.mjs` (run from the repository root) and
 committed; the Play workflows read that directory, never this one. Regenerate
 after any edit here; `--check` reports drift and `npm run test:play` covers it.
 

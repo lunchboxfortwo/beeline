@@ -32,7 +32,7 @@ const shared = {
     centerSide: 40, centerBottom: 64, bareBottom: 152, railRadius: 1, barRadius: 2,
   },
   brandMark: brand.mark,
-  // The one box radius, shared by every theme (DESIGN.md → Shape).
+  // The one box radius, shared by every theme (docs/DESIGN.md → Shape).
   radius: 3,
   // The one floating-surface shadow ink; its density is per theme
   // (`dialogShadowOpacity`).
@@ -92,7 +92,7 @@ const shared = {
 } as const;
 
 /**
- * Borrowing Calm — the type roles (design note 2026-09-03, DESIGN.md → Type).
+ * Borrowing Calm — the type roles (design note 2026-09-03, docs/DESIGN.md → Type).
  *
  * Five sizes, one mono role. A screen sets text through one of these
  * roles, never a raw `fontSize`/`letterSpacing`; `calm-lint.design.test.ts`
@@ -229,12 +229,12 @@ export const beelineThemes = {
     accent: '#b08a4a',
     humanRail: '#b08a4a',
     agentRail: '#3b3048',
-    // Diff green/red is one domain-color exception (DESIGN.md), tuned
+    // Diff green/red is one domain-color exception (docs/DESIGN.md), tuned
     // per canvas like brass is: legible text against near-black here, and
     // against Bone's near-white canvas in that theme's own values below.
     diffAdded: '#3FB950',
     diffRemoved: '#F85149',
-    // Two Inks: the fourth DESIGN.md colour exception (captain 2026-09-19).
+    // Two Inks: the fourth docs/DESIGN.md colour exception (captain 2026-09-19).
     // Three roles, two hues from the canvas family, luminance-laddered so a
     // block still parses in greyscale. Structure is the 2px rule too.
     syntaxStructure: '#6c6c76',
@@ -291,7 +291,7 @@ export const beelineThemes = {
     codeError: '#c98a8a',
   },
   // Bone: Obsidian Refined's light counterpart. Same construction rules as
-  // Obsidian (design note 2026-09-14, DESIGN.md → Appearance) — a warm
+  // Obsidian (design note 2026-09-14, docs/DESIGN.md → Appearance) — a warm
   // canvas rather than a cold white, "content near-black, chrome mid" (the
   // inverse of Obsidian's "content near-white, chrome dim"), and every
   // elevation/border/divider step keeping the same relative position on the

@@ -59,8 +59,8 @@ never committed source. Start local LiveKit on 17890 with development-only
 
 ```sh
 VOICE_DELIVERY_BASELINE=1 VOICE_CONTEXT_BASELINE=1 VOICE_CONTEXT_PROOF=1 \
-  SILENCE_PROOF_ANDROID_FIRST=1 node --import tsx scripts/prove-voice-delivery.ts
-python3 scripts/prove-voice-context.py --mode baseline
+  SILENCE_PROOF_ANDROID_FIRST=1 node --import tsx packages/scripts/prove-voice-delivery.ts
+python3 packages/scripts/prove-voice-context.py --mode baseline
 ```
 
 Restart the fixture without the two baseline variables for the fixed run, then
@@ -77,7 +77,7 @@ inbound native RTC statistics. Generated native configuration is never shipped.
 
 ## Timing
 
-Run `python3 scripts/prove-voice-context.py --mode baseline --latency --round 1`
+Run `python3 packages/scripts/prove-voice-context.py --mode baseline --latency --round 1`
 on a fresh baseline fixture, then repeat fixed on a fresh fixture. Stop builds
 and tests before measuring. For additional confidence, repeat in reverse order. Each sample starts at the
 runtime's recognized end-of-turn boundary and ends at first voiced server audio;

@@ -12,7 +12,7 @@ The direct-card correction is server code; changing the hosted helper does not d
 
 ## Reproduction onboarding-connect-1
 
-The closest isolated stand-in uses the built HTTP service, PGlite storage and fixture providers. Run `npm run build -w @beeline/server`, then `node --import tsx scripts/prove-connect-flow.mjs`.
+The closest isolated stand-in uses the built HTTP service, PGlite storage and fixture providers. Run `npm run build -w @beeline/server`, then `node --import tsx packages/scripts/prove-connect-flow.mjs`.
 
 Before the change, the HTTP `connect` operation for `grok` creates a `squire-api` app and returns unavailable with a Squire instruction. The proof fails because the result's app is `grok`, rather than `Beeline Rooms`.
 
@@ -43,7 +43,7 @@ The image now includes a real systemd user manager, dbus, Chrome, Xvfb, noVNC, c
 
 A disposable Fly VM (`8045e9c66232d8`, one shared CPU, 2048 MiB) started from the production image with no owner/bootstrap environment. Installing the new image dependencies and exact broker unit there, then running a bundle of the modified Beeline `installSquire`, returned `status: installing`, `hasSignIn: true`, `placement: virtual`. The streamed result exposed the provider sign-in in the hosted Chrome page. A local Squire session opened that remote page for human control. This is a real Fly install and browser handoff, but not a fresh Beeline test account or a completed provider login.
 
-Reproducible build: `docker build --target hosted-services -t hosted-squire-proof -f infra/free-agent/Dockerfile .`. Bundle `infra/free-agent/hosted-install-proof.mjs` with esbuild and copy it into a disposable VM/container. Start `/opt/beeline/hosted-services.sh` with the image's runtime environment, then run the bundle with `BEELINE_HOSTED_SERVICES=1`. Docker requires a private writable cgroup namespace; ordinary read-only Docker cgroups do not model Fly. The proof prints only status/step metadata, never the sign-in URL or browser password.
+Reproducible build: `docker build --target hosted-services -t hosted-squire-proof -f apps/infra/free-agent/Dockerfile .`. Bundle `apps/infra/free-agent/hosted-install-proof.mjs` with esbuild and copy it into a disposable VM/container. Start `/opt/beeline/hosted-services.sh` with the image's runtime environment, then run the bundle with `BEELINE_HOSTED_SERVICES=1`. Docker requires a private writable cgroup namespace; ordinary read-only Docker cgroups do not model Fly. The proof prints only status/step metadata, never the sign-in URL or browser password.
 
 ### Isolation and resources
 
@@ -62,7 +62,7 @@ Trusty Squire drove the live web app through Settings > Connectors > Trusty Squi
 - `npm run corner:prepare` passed.
 - Root `npm run typecheck` passed, including mobile and scripts.
 - App connections and Workbench integration suites passed (160 tests; one pre-existing skip).
-- Built `scripts/prove-connect-flow.mjs` passed, including the phone-visible Squire offer.
+- Built `packages/scripts/prove-connect-flow.mjs` passed, including the phone-visible Squire offer.
 - `git diff --check` passed.
 
 - Hosted body connector tests passed (52), including real socket-readiness coverage.

@@ -87,7 +87,7 @@ export async function refuseDaemon(
 
 
 
-// Non-phone consumers: apps/server/scripts/verify-fly-cutover.mjs, infra/free-agent/*.mjs,
+// Non-phone consumers: apps/server/scripts/verify-fly-cutover.mjs, apps/infra/free-agent/*.mjs,
 // and apps/mobile/evidence/corner-list-live/proof-kit/control.mts. Keep this closed list.
 export const NON_PHONE_HTTP_WRITES = ['createWorkspace', 'deleteWorkspace', 'sendRoomMessage', 'requestCornerClose'] as const;
 

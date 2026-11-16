@@ -13,7 +13,7 @@ engine: signal failure: transport connection error: IO error: no native root CA 
 That image had no OS CA bundle. Installing `ca-certificates` made the same
 native Rust connection reach production LiveKit's HTTP 401 for an invalid JWT.
 The complete fixed `apps/server/Dockerfile` image passed
-`scripts/prove-voice-tls.mjs`. Overriding its native CA paths with an empty file
+`packages/scripts/prove-voice-tls.mjs`. Overriding its native CA paths with an empty file
 and directory reproduced the original error again, proving this is an OS trust
 store dependency rather than an Android certificate or LiveKit server problem.
 

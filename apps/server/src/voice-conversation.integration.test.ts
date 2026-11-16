@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { expect, it, vi } from 'vitest';
-import { phoneFetch } from '../../../tests/helpers/phone-operation.js';
+import { phoneFetch } from '../../../packages/test-helpers/helpers/phone-operation.js';
 import { TokenAuth } from './auth.js';
 import { migrate } from './database.js';
 import { LiveHub } from './live.js';

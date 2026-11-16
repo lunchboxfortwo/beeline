@@ -81,7 +81,7 @@ Overage costs stay unknown unless a separate measured source exists.
 | OpenRouter | Free-agent model proxy; voice-service.ts; institutional-memory-embeddings.ts | API `/api/v1/key` usage_monthly + usage_daily for unique configured server keys; metered settled free_agent_events fallback | `/credits` requires management key; `/key` allowance works with inference key |
 | Cloudflare | voice-providers.ts (Deepgram Flux/Aura on Workers AI); hosting | API account billable-usage, Billing Read permission; account-wide variable charges only | No remaining-credit API for direct Workers AI billing |
 | Groq | speech-transcription.ts | Unknown; no persisted billed audio duration yet | No documented balance API |
-| Fly | fly.beeline-server.toml, free-agent machines, self-hosted LiveKit | Unknown; deployment/machines tokens do not provide an invoice | GraphQL organization.creditBalance in cents; verified against live schema |
+| Fly | apps/infra/fly.beeline-server.toml, free-agent machines, self-hosted LiveKit | Unknown; deployment/machines tokens do not provide an invoice | GraphQL organization.creditBalance in cents; verified against live schema |
 | Neon | database.ts (PostgreSQL) | Unknown; consumption API needs Neon management API key, DATABASE_URL cannot authenticate it | No balance with database connection credentials |
 | Tigris | object-storage.ts | Unknown | No balance API with S3 object credentials |
 | Sentry | sentry.ts; release actions | Entered config, currently unknown | DSN only ingests errors; usage needs organization management access |

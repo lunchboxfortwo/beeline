@@ -1,4 +1,4 @@
-import { phoneFetch } from '../../../tests/helpers/phone-operation.js';
+import { phoneFetch } from '../../../packages/test-helpers/helpers/phone-operation.js';
 import { startQueuedCommand,startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 
 import { COMMAND_COMPLETION_CHANNEL,notifyCommandCompletion } from './command-completion.js';
@@ -333,7 +333,7 @@ export type { AddressInfo } from 'node:net';
 export { default as sharp } from 'sharp';
 export { Webhook } from 'standardwebhooks';
 export { afterAll,afterEach,beforeAll,beforeEach,describe,expect,it,vi } from 'vitest';
-export { phoneFetch } from '../../../tests/helpers/phone-operation.js';
+export { phoneFetch } from '../../../packages/test-helpers/helpers/phone-operation.js';
 export { createAgentCommand } from './agent-command.js';
 export { TokenAuth,tokenHash } from './auth.js';
 export { cornerWorkSql } from './chat-corner-counts.js';

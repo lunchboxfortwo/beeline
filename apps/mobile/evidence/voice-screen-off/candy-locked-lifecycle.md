@@ -14,7 +14,7 @@ The 10-minute locked run proves the foreground service, microphone, RTC session 
 
 ## What I ran
 
-Fixture services were already live (Jellybean's): proof server `127.0.0.1:18090`, LiveKit `127.0.0.1:26880`, Metro `8082`. I only read `/proof/metrics` and did not restart them. I installed `pocketsphinx` into `/tmp/voice-proof-python` so the fixture's `scripts/voice-screen-off-stt.py` recognized for real.
+Fixture services were already live (Jellybean's): proof server `127.0.0.1:18090`, LiveKit `127.0.0.1:26880`, Metro `8082`. I only read `/proof/metrics` and did not restart them. I installed `pocketsphinx` into `/tmp/voice-proof-python` so the fixture's `packages/scripts/voice-screen-off-stt.py` recognized for real.
 
 ```bash
 # 1. Emulator with the proven mic-injection backend, launched from the qemu_in.wav directory

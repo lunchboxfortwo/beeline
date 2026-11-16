@@ -36,7 +36,7 @@ const voice = new VoiceService(db, live, {
     for await (const chunk of proc.stdout) { metrics.ttsSamples += chunk.length/2; yield chunk as Buffer; }
   } },
   stt: async onEvent => {
-    const proc = spawn('python3',['scripts/voice-screen-off-stt.py'], {env:{...process.env,PYTHONPATH:'/tmp/voice-proof-python'},stdio:['pipe','pipe','pipe']});
+    const proc = spawn('python3',['packages/scripts/voice-screen-off-stt.py'], {env:{...process.env,PYTHONPATH:'/tmp/voice-proof-python'},stdio:['pipe','pipe','pipe']});
     metrics.opened++; note('STT opened'); let closed=false; let pending='';
     proc.stderr.on('data', () => {});
     proc.stdin.on('error', () => {});

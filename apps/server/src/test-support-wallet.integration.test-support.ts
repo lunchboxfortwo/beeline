@@ -1,4 +1,4 @@
-import { phoneFetch } from '../../../tests/helpers/phone-operation.js';
+import { phoneFetch } from '../../../packages/test-helpers/helpers/phone-operation.js';
 import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 
 import { createAgentCommand } from './agent-command.js';
@@ -246,7 +246,7 @@ export type { TransactionalDatabase } from '@beeline/auth/store';
 export { createHash,createHmac,generateKeyPairSync } from 'node:crypto';
 export { AddressInfo } from 'node:net';
 export { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
-export { phoneFetch } from '../../../tests/helpers/phone-operation.js';
+export { phoneFetch } from '../../../packages/test-helpers/helpers/phone-operation.js';
 export { createAgentCommand } from './agent-command.js';
 export { TokenAuth } from './auth.js';
 export { PushDeliveryLoop } from './background.js';

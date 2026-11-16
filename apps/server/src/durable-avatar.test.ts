@@ -1,4 +1,4 @@
-import { phoneFetch } from '../../../tests/helpers/phone-operation.js';
+import { phoneFetch } from '../../../packages/test-helpers/helpers/phone-operation.js';
 import { createHash } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import sharp from 'sharp';

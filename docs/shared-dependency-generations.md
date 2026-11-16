@@ -16,7 +16,7 @@ This is a dependency-sharing feature, not a defect report. `DEPENDENCY-GENERATIO
 
 ```
 npm run build -w @beeline/body
-node scripts/prove-shared-dependencies.mjs
+node packages/scripts/prove-shared-dependencies.mjs
 ```
 
 The proof creates two consumers, proves matching package inodes, attempts chmod/write through the sandbox, checks the direct-install diagnostic, updates one consumer's lockfile inside the sandbox, prepares the next generation, and builds both consumers. The outputs remain `2.0.0` and `1.0.0`. It then removes each checkout's dependencies and proves reference-based collection preserves the remaining consumer and eventually collects both generations. All temporary fixtures are removed.
@@ -39,7 +39,7 @@ Remaining fleet work: the shared main comparison checkout; cache/target consolid
 
 If the lockfile differs, the generation is stale, or required packages are missing, the helper installs into its fresh private worktree with `npm ci --prefix <path>`. The npm guard allows this only when the explicit target has no root dependencies and does not overlap any sealed dependency path. Existing managed trees remain protected. Installation failure stops preparation with a diagnostic explaining that neither reuse nor private installation succeeded.
 
-Reproduction `REVIEW-DEPS-1`: `node --import tsx scripts/prove-review-dependencies.mjs` exercises the real review helper and npm guard with detached fixture commits, a local npm tarball, workspace builds and tests that load the dependency. The matching lockfile skips installation; a changed lockfile installs privately. This is a stand-in for the production reviewer namespace.
+Reproduction `REVIEW-DEPS-1`: `node --import tsx packages/scripts/prove-review-dependencies.mjs` exercises the real review helper and npm guard with detached fixture commits, a local npm tarball, workspace builds and tests that load the dependency. The matching lockfile skips installation; a changed lockfile installs privately. This is a stand-in for the production reviewer namespace.
 
 ## Room checkout proof
 

@@ -306,7 +306,7 @@ function readStoreState(memory, channel) {
   const input = join(mkdtempSync(join(tmpdir(), 'beeline-store-status-')), 'memory.json');
   writeJson(input, memory);
   const observed = spawnSync(process.execPath, [
-    fileURLToPath(new URL('../../../scripts/read-store-runtimes.mjs', import.meta.url)), input,
+    fileURLToPath(new URL('../../../packages/scripts/read-store-runtimes.mjs', import.meta.url)), input,
   ], { encoding: 'utf8', timeout: 180_000, maxBuffer: 8 * 1024 * 1024,
     env: { ...process.env, BEELINE_RELEASE_CHANNEL: channel } });
   const unavailable = reason => ({ stores: Object.fromEntries(

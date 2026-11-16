@@ -8,7 +8,7 @@ Start the fixture after building the server:
 
 ```sh
 npm run build -w @beeline/server
-MCP_PROOF_PORT=18987 node --import tsx scripts/prove-rooms-mcp.mjs --serve --new-user
+MCP_PROOF_PORT=18987 node --import tsx packages/scripts/prove-rooms-mcp.mjs --serve --new-user
 ```
 
 `--new-user` skips all identity, Workspace, Room and membership seeds. The actual
@@ -25,7 +25,7 @@ and the Codex member byline. `read_messages`, `send_message`, and `read_messages
 then confirmed “Local onboarding proof: Codex joined and posted in general.” was
 persisted under that member's identity.
 
-![Zero-Workspace consent with Allow enabled](evidence/mcp-onboarding/zero-workspace-consent.png)
+
 
 Regression coverage in `apps/server/src/rooms-mcp.test.ts`:
 

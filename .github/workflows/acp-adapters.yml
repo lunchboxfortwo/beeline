@@ -35,7 +35,7 @@ jobs:
       - name: Check latest adapters without the runtime release-age delay
         id: adapter_check
         shell: bash
-        run: node scripts/check-acp-adapters.mjs | tee "$RUNNER_TEMP/acp-adapter-results.json"
+        run: node packages/scripts/check-acp-adapters.mjs | tee "$RUNNER_TEMP/acp-adapter-results.json"
       - name: Send adapter failures to the fix loop
         if: failure() && steps.adapter_check.outcome == 'failure'
         uses: actions/github-script@v7
@@ -44,4 +44,4 @@ jobs:
             const { readFileSync } = require('node:fs');
             const report = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/acp-adapter-results.json`, 'utf8'));
             const programs = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/acp-programs.json`, 'utf8'));
-            await require('./scripts/acp-adapter-issue.cjs').reportAdapterFailures({github, context, report, programs});
+            await require('./packages/scripts/acp-adapter-issue.cjs').reportAdapterFailures({github, context, report, programs});

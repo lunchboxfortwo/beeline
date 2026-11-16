@@ -14,4 +14,4 @@ runs:
       env:
         TOOLS: ${{ inputs.tools }}
       run: |-
-        bash "$GITHUB_WORKSPACE/scripts/release-steps/require-tools.sh" step0
+        bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/require-tools.sh" step0

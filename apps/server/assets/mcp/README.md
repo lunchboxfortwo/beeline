@@ -14,6 +14,6 @@
 - `claude.png`: existing Claude mark from `apps/mobile/sources/assets/images/icon-claude@3x.png`.
 - `openai.svg`: the OpenAI mark, from the approved External agent info pages mock (2026-11-05). Used for ChatGPT in Connectors and as its member default picture.
 
-- `goose.png`, `pi.svg`, `opencode.svg`, `hermes.svg`, `gemini.png`, `zcode.png`: copied from `web/marketing/logos/`, the website-supported agent marks; provenance is recorded in `web/marketing/logos/provenance.json`.
+- `goose.png`, `pi.svg`, `opencode.svg`, `hermes.svg`, `gemini.png`, `zcode.png`: copied from `apps/site/marketing/logos/`, the website-supported agent marks; provenance is recorded in `apps/site/marketing/logos/provenance.json`.
 
 Company marks identify the connected apps, without implying endorsement. Custom member portraits are never replaced by these defaults.

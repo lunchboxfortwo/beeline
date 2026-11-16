@@ -1,7 +1,8 @@
 FROM ghcr.io/beeline-work/ci-node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392 AS build
 WORKDIR /app
 
-COPY package.json package-lock.json tsconfig.base.json ./
+COPY package.json package-lock.json ./
+COPY packages/scripts/tsconfig.base.json ./packages/scripts/tsconfig.base.json
 COPY apps/server/package.json apps/server/tsconfig.json ./apps/server/
 COPY apps/auth/package.json apps/auth/tsconfig.json ./apps/auth/
 COPY apps/body/package.json apps/body/tsconfig.json ./apps/body/
@@ -19,7 +20,7 @@ COPY packages/nostr/src ./packages/nostr/src
 COPY packages/api-contract/src ./packages/api-contract/src
 COPY packages/net/src ./packages/net/src
 COPY packages/buzz-client/src ./packages/buzz-client/src
-COPY scripts/clean-dist.mjs ./scripts/clean-dist.mjs
+COPY packages/scripts/clean-dist.mjs ./packages/scripts/clean-dist.mjs
 RUN npm run build -w @beeline/nostr \
   && npm run build -w @beeline/api-contract \
   && npm run build -w @beeline/net \

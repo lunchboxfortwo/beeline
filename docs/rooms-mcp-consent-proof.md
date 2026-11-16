@@ -18,7 +18,7 @@ With Google Chrome installed, build and start the fixture in one terminal:
 
 ```sh
 npm run build
-MCP_PROOF_PORT=18965 node --import tsx scripts/prove-rooms-mcp.mjs --serve
+MCP_PROOF_PORT=18965 node --import tsx packages/scripts/prove-rooms-mcp.mjs --serve
 ```
 
 Install Playwright outside the checkout, then run the browser proof:
@@ -26,7 +26,7 @@ Install Playwright outside the checkout, then run the browser proof:
 ```sh
 npm install --prefix /tmp/rooms-mcp-browser playwright-core --no-package-lock
 MCP_BROWSER_PLAYWRIGHT=/tmp/rooms-mcp-browser/node_modules/playwright-core/index.mjs \
-  node scripts/prove-rooms-mcp-consent-browser.mjs
+  node packages/scripts/prove-rooms-mcp-consent-browser.mjs
 ```
 
 The proof opens an actual callback listener on loopback port 9876. It exercises

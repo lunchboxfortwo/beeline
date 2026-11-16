@@ -88,14 +88,14 @@ npm run test:prompt-cases     # rule tests, case validity, one case per section,
 [`../surface.json`](../surface.json) registers every tool, wake template branch
 and first-party skill an agent can be handed: body tools per session variant
 with their `app_tool` capabilities, external MCP tools and retired names, and
-skills per variant. Regenerate it with `node --import tsx scripts/prompt-surface.ts`
+skills per variant. Regenerate it with `node --import tsx packages/scripts/prompt-surface.ts`
 after changing any of them; the diff names each changed entry.
 
 ## Replay
 
 Automatic prompt PR replay is paused. A worker may explicitly order one other
 agent to replay the exact pull request head with
-[`scripts/prompt-pr-replay.mjs`](../../../scripts/prompt-pr-replay.mjs). Feedback triage writes
+[`packages/scripts/prompt-pr-replay.mjs`](../../../packages/scripts/prompt-pr-replay.mjs). Feedback triage writes
 this into every prompt-fix brief, and the reviewer does not pass the pull
 request without the posted table. The replaying agent:
 

@@ -1,4 +1,4 @@
-import { phoneFetch } from '../../../../tests/helpers/phone-operation.js';
+import { phoneFetch } from '../../../../packages/test-helpers/helpers/phone-operation.js';
 import { createHmac } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { TokenAuth } from '.././auth.js';

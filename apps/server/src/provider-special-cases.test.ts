@@ -7,7 +7,7 @@ import { expect, it } from 'vitest';
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const scan = () =>
   JSON.parse(
-    execFileSync(process.execPath, ['scripts/provider-special-cases.mjs', '--json'], {
+    execFileSync(process.execPath, ['packages/scripts/provider-special-cases.mjs', '--json'], {
       cwd: root,
       encoding: 'utf8',
     }),

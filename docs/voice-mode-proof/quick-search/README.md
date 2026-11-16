@@ -47,7 +47,7 @@ API references: [OpenRouter web plugin](https://openrouter.ai/docs/guides/featur
 
 ## Repeat
 
-The isolated service fixture is `scripts/prove-voice-search.ts`. It uses a
+The isolated service fixture is `packages/scripts/prove-voice-search.ts`. It uses a
 disposable PGlite database, ordinary command claim and report publication, and
 real LiveKit transport. STT finals, web results and provider SSE/PCM are controlled
 stand-ins. It never touches production identities, helpers or databases.
@@ -59,8 +59,8 @@ and a 4 GiB Gradle heap. Start a dedicated LiveKit v1.9.12 on 17890 (RTC TCP
 17891 and UDP 17892–17902), then run:
 
 ```sh
-SILENCE_PROOF_ANDROID_FIRST=1 node --import tsx scripts/prove-voice-search.ts
-python3 scripts/prove-voice-search.py branch
+SILENCE_PROOF_ANDROID_FIRST=1 node --import tsx packages/scripts/prove-voice-search.ts
+python3 packages/scripts/prove-voice-search.py branch
 ```
 
 The driver uses a Beeline-leased emulator named `emulator-5554`, the real Join

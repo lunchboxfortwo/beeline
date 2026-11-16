@@ -5,14 +5,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   readRepositoryAssociations,
   validateRequiredAssociations,
-} from '../../../scripts/app-associations.mjs';
+} from '../../../packages/scripts/app-associations.mjs';
 
 import {
   APK_DOWNLOAD_URL,
   MONOLITH_ORIGIN,
   resolveInvitePreview,
   startInviteLanding,
-} from '../../../web/join/invite-source.js';
+} from '../../site/join/invite-source.js';
 
 const INVITE_TOKEN = 'inv_cd2f4ae16feb43b42a6566ce72ed437b38d374397b0769307c9bdcc29cfb2b38';
 
@@ -49,7 +49,7 @@ describe('public invite website', () => {
     ['?error=access_denied&redirect=https%3A%2F%2Fevil.test', '?error=access_denied&redirect=https%3A%2F%2Fevil.test'],
     ['', ''],
   ])('sends the Pages TikTok callback %j to the fixed Composio callback', (search, carried) => {
-    const page = repoFile('web/oauth/tiktok/callback/index.html');
+    const page = repoFile('apps/site/oauth/tiktok/callback/index.html');
     expect(page).toContain('<meta name="referrer" content="no-referrer" />');
     expect(page).toContain('<meta name="robots" content="noindex, nofollow" />');
     const script = page.match(/<script>\n([\s\S]*?)\n    <\/script>/)?.[1];
@@ -63,7 +63,7 @@ describe('public invite website', () => {
   });
 
   it('renders one Stone join action without exposing the invite token', () => {
-    const landing = repoFile('web/join/index.html');
+    const landing = repoFile('apps/site/join/index.html');
     const colors = [...landing.matchAll(/#[0-9a-f]{6}/gi)].map(([color]) => color);
 
     expect(landing.match(/<(?:a|button)\b/gi)).toHaveLength(1);
@@ -103,7 +103,7 @@ describe('public invite website', () => {
         init: { headers: { accept: 'application/json' } },
       },
     ]);
-    const source = repoFile('web/join/invite-source.js');
+    const source = repoFile('apps/site/join/invite-source.js');
     expect(source).not.toContain('/query');
     expect(source).not.toContain('createIdentity');
     expect(source).not.toContain('Nostr');
@@ -169,7 +169,7 @@ describe('public invite website', () => {
     const output = buildSync({
       absWorkingDir: new URL('../../..', import.meta.url).pathname,
       bundle: true,
-      entryPoints: ['web/join/invite-source.js'],
+      entryPoints: ['apps/site/join/invite-source.js'],
       format: 'iife',
       minify: true,
       platform: 'browser',
@@ -177,7 +177,7 @@ describe('public invite website', () => {
       write: false,
     }).outputFiles[0]?.text;
 
-    expect(repoFile('web/join/invite.js')).toBe(output);
+    expect(repoFile('apps/site/join/invite.js')).toBe(output);
   });
 });
 

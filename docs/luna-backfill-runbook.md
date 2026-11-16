@@ -7,7 +7,7 @@ The hello is approved exactly as `LUNA_BACKFILL_HELLO`; `{name}` becomes the own
 After merge and release, build the server and run `npm run backfill:luna` using
 an approved DATABASE_URL secret environment. Inspect the read-only inventory,
 then run `npm run backfill:luna -- --apply`. Do not run apply before release.
-The CLI reads `scripts/luna-backfill-approved.json` and restricts this one-time
+The CLI reads `packages/scripts/luna-backfill-approved.json` and restricts this one-time
 run to exactly these workspace/Room pairs. Missing or ineligible approved pairs
 abort before writes; newly created workspaces never expand this approved run.
 Existing Luna rows remain idempotent. Owner limits still apply and are printed.

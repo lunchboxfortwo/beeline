@@ -9,7 +9,7 @@ Run after building the server:
 ```sh
 BEELINE_BACKGROUND_BASELINE_REF=c76fb5b37 \
 BEELINE_BACKGROUND_TEST_POSTGRES_URL=postgresql://localhost:56539/postgres \
-node scripts/prove-background-waste.mjs
+node packages/scripts/prove-background-waste.mjs
 ```
 
 The database must be disposable loopback PostgreSQL with pgvector available. The script creates and drops its own schema. The historical revision supplies the original callback; the current `index.ts` supplies the changed registration and callbacks. Jobs are replaced at their provider/database boundaries for the notification replay. The Room-list proof calls the built `PhoneService.readChats`, including its enrichment, against real PostgreSQL.
@@ -91,7 +91,7 @@ Production writes remain forbidden, and the extension has not been deployed. The
 ```sh
 npm run build -w @beeline/server
 BEELINE_BACKGROUND_TEST_POSTGRES_URL=postgresql://localhost:56539/postgres \
-node scripts/prove-webhook-burst.mjs
+node packages/scripts/prove-webhook-burst.mjs
 ```
 
 The script compiles the original PR’s webhook/commander classes from `7f44162ed` into ignored build output for the negative control. Override `BEELINE_WEBHOOK_BASELINE_REF` if necessary. Both phases use the same five-slot foreground pool, fifteen deliveries over 700 ms and five Needs-you reads. A test-only 80 ms delay per checked-out query models network/statement round-trip occupancy without creating busy SQL; it is not a measured production network latency. Queries are timed by the real `PostgresDatabase` profiler, whose slow threshold is 500 ms. Pool checkout p95 is sampled around the real `pg.Pool.connect`; query delay is excluded from that checkout measurement. Rate is normalized from the observed burst-and-drain window, not extrapolated from a production counter.
@@ -113,7 +113,7 @@ No query crossed the 500 ms slow threshold in this controlled after run. Serial 
 
 The reviewed concurrent admission could finish a later installation deletion before an earlier suspended-installation write. `github-webhook-order.test.ts` reproduced this with unequal database-write durations: `revoked → repositories inactive → suspended`, leaving the installation suspended. A same-duration queue test did not cover that race.
 
-The webhook queue now explicitly admits one delivery at a time. The regression passes with `suspended → revoked → repositories inactive`, leaving the installation revoked. `scripts/prove-webhook-burst.mjs` repeats this path through both built classes and asserts the before/after final state, alongside the fresh burst measurements above. This is serialization within each operations instance; no concurrent queue completion is described as arrival-order preservation.
+The webhook queue now explicitly admits one delivery at a time. The regression passes with `suspended → revoked → repositories inactive`, leaving the installation revoked. `packages/scripts/prove-webhook-burst.mjs` repeats this path through both built classes and asserts the before/after final state, alongside the fresh burst measurements above. This is serialization within each operations instance; no concurrent queue completion is described as arrival-order preservation.
 
 The same delayed suspension was also reproduced through two independent operations instances against real PostgreSQL: a local queue alone cannot order work on different machines. The suspension UPDATE now requires `status<>'revoked'`, so it cannot overwrite a deletion that another instance already committed. The built proof and the separate real-query regression both retain revoked installation status and inactive repositories after that interleaving.
 

@@ -39,7 +39,7 @@ cleanup() {
   local status=$?
   trap - EXIT INT TERM
   if [[ "$status" != 0 ]]; then
-    echo "Android release build failed (exit $status). See the command output above; retain it with scripts/corner-job.mjs for cross-turn builds." >&2
+    echo "Android release build failed (exit $status). See the command output above; retain it with packages/scripts/corner-job.mjs for cross-turn builds." >&2
   fi
   rm -f "$ANDROID_SIDELOAD_KEYSTORE_PATH"
   local teardown_args=("$MOBILE_DIR/android")

@@ -1,6 +1,6 @@
 # Monolith cutover rehearsal — 2026-08-31
 
-The full `scripts/cutover-monolith.sh --rehearse` sequence completed against a local HTTP target and a newly migrated scratch PostgreSQL database. The target origin and database were explicit; the scratch database was removed after the run.
+The full `packages/scripts/cutover-monolith.sh --rehearse` sequence completed against a local HTTP target and a newly migrated scratch PostgreSQL database. The target origin and database were explicit; the scratch database was removed after the run.
 
 Observed gates, in order:
 

@@ -16,7 +16,7 @@ twenty CPUs under that quota. MemoryHigh 48 GiB / MemoryMax 60 GiB are unchanged
 Listeners 08 and 09 must be drained and disabled before activation. The extra
 `beeline-ci-balanced` label prevents older unconverted listeners receiving
 these jobs; the planner rejects unexpected names and role assignments.
-See `infra/ci/README.md` for the host-authorized rollout. Code changes alone
+See `apps/infra/ci/README.md` for the host-authorized rollout. Code changes alone
 are not proof that host limits or labels have been applied.
 
 Detect changes starts on `ubuntu-latest` and snapshots runner availability
@@ -82,7 +82,7 @@ workers, control jobs use one, and timing/integration tests retain one.
 Node test-file concurrency, Turbo tasks, libuv and Metro are also bounded.
 Server setup yields to Node's real event loop between tests: PGlite query
 chains otherwise starve worker IPC long enough to expire Vitest progress
-RPCs under the shared quota. `scripts/ci-shards.test.mjs` exercises this with
+RPCs under the shared quota. `packages/scripts/ci-shards.test.mjs` exercises this with
 microtask-only tests and fake timers; RPC deadlines and error reporting stay
 unchanged.
 
@@ -117,7 +117,7 @@ work and export no longer serialize behind compiler work. Shared-package
 tests also use heavy listeners, leaving control available for preparation and
 verdicts. No concurrent jobs mutate one working tree. Browser entries stay in
 the OS temporary directory, outside compiler globs. Commands remain in
-`scripts/ci-workspace-tasks.sh`; trusted-base architecture/phone/UI checks
+`packages/scripts/ci-workspace-tasks.sh`; trusted-base docs/architecture/phone/UI checks
 remain mandatory, and root typecheck already checks mobile once.
 
 Preparation installs/builds once. Dependencies remain lockfile/manifest keyed.
@@ -129,7 +129,7 @@ executes and checks current inputs. Job-specific cache writes let completed
 typecheck tasks publish after the same head's producer has finished.
 
 Final compiled outputs use the v3 exact-SHA archive, with no foreign-head
-fallback. `scripts/ci-build-provenance.mjs` verifies the checked-out SHA, Node
+fallback. `packages/scripts/ci-build-provenance.mjs` verifies the checked-out SHA, Node
 major and hashes of every compiled file, rejecting missing, extra or changed
 outputs. API exports are checked before publication. Missing exact-head
 archives rebuild with one Turbo task at a time. Consumers require successful
@@ -139,7 +139,7 @@ on squire, retain one install worker and the existing runner/pool limits, and
 propagate installation failures. Warm consumers keep restoring dependencies.
 The selector caches its pinned standalone TypeScript instead of restoring an entire compiled workspace.
 
-`scripts/workspace-test-selection.mjs` discovers the actual Vitest entries
+`packages/scripts/workspace-test-selection.mjs` discovers the actual Vitest entries
 and follows reverse imports across workspace boundaries, including source in
 browser-proof strings. Public workspace exports conservatively depend on
 provider source; source scanners and opaque/dynamic loaders remain selected.
@@ -262,7 +262,7 @@ Whole-host load includes independent Beeline agents, Gradle and emulators;
 record it as context. Abort trials on CI budget violations, sustained memory
 pressure/OOM or a helper watchdog event. Earlier load-15 and load-25 aborts
 were superseded by this CI-pool policy. See
-[`infra/ci/README.md`](../infra/ci/README.md) for activation and measurement.
+[`apps/infra/ci/README.md`](../apps/infra/ci/README.md) for activation and measurement.
 
 ## CI-only host isolation
 

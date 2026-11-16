@@ -264,7 +264,7 @@ mergedDescribe17("extra-dependencies.test.ts", () => {
 
 m17_it('registers disposable copies without installing and replaces the session fingerprint', async () => {
   const root = await m17_mkdtemp(m17_resolve(m17_tmpdir(), 'extra-request-'));
-  const script = m17_resolve('../../scripts/prepare-corner.mjs');
+  const script = m17_resolve('../../packages/scripts/prepare-corner.mjs');
   try {
     const corner = m17_resolve(root, 'corner');
     const home = m17_resolve(root, 'home');

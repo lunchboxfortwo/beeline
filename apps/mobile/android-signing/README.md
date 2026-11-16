@@ -15,7 +15,7 @@ secrets:
 | `ANDROID_SIDELOAD_KEY_PASSWORD`   | key password                    |
 
 Rotate a compromised signing key and replace its fingerprint in both
-app-links files and `scripts/app-associations.mjs`. Keep the Play Store
+app-links files and `packages/scripts/app-associations.mjs`. Keep the Play Store
 fingerprints unchanged. A new key requires existing sideload installs to be
 uninstalled and reinstalled; no sideload APK had been downloaded when this
 rotation was authorized.

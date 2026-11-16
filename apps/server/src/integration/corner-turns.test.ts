@@ -1,5 +1,5 @@
 import { startQueuedTurn } from '../test-fixtures/queued-turn.test-support.js';
-import { phoneFetch } from '../../../../tests/helpers/phone-operation.js';
+import { phoneFetch } from '../../../../packages/test-helpers/helpers/phone-operation.js';
 import { migrateMembershipSubscriptions } from '.././agent-subscriptions.js';
 import { createAgentCommand } from '.././agent-command.js';
 import { createHash } from 'node:crypto';

@@ -1,4 +1,4 @@
-// Generated from helper consumer adapters by scripts/generate-network-codecs.mjs.
+// Generated from helper consumer adapters by packages/scripts/generate-network-codecs.mjs.
 import type { WireShape } from './wire-codec.js';
 const shape = (value: WireShape): WireShape => value;
 export const helperShapes: readonly WireShape[] = [

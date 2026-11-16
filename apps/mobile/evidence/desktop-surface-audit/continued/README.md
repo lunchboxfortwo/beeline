@@ -47,7 +47,7 @@ Command text is masked in the evidence; no command was executed.
 
 ## Per-surface results
 
-Reviewed against DESIGN.md's Bone/Obsidian tokens and existing layout. The two
+Reviewed against docs/DESIGN.md's Bone/Obsidian tokens and existing layout. The two
 issues above are the additional breakages found; no new design was introduced.
 
 | Surface | Result and native screenshots |

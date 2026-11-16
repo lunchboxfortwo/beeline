@@ -11,7 +11,7 @@ import { createBeelineServer } from './server.js';
 // helpers can reconnect together after a deployment, so every helper must be
 // able to record evidence without starving public requests behind that burst.
 const productionConfig = readFileSync(
-  new URL('../../../fly.beeline-server.toml', import.meta.url),
+  new URL('../../infra/fly.beeline-server.toml', import.meta.url),
   'utf8',
 );
 const PRODUCTION_DATABASE_POOL_MAX = Number(

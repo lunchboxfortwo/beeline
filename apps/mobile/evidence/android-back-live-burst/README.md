@@ -55,7 +55,7 @@ The affected chat-list and needs-you store files are byte-identical between the 
 
 ## Repeating the proof
 
-Read `scripts/latency-rig/README.md`. Use separate baseline and PR-head checkouts with dependencies prepared; copy this evidence directory to both. Use one explicitly owned Beeline-leased emulator, one disposable loopback `latency_rig` database and the same server/proxy throughout the comparison. Do not use a production Workspace.
+Read `packages/scripts/latency-rig/README.md`. Use separate baseline and PR-head checkouts with dependencies prepared; copy this evidence directory to both. Use one explicitly owned Beeline-leased emulator, one disposable loopback `latency_rig` database and the same server/proxy throughout the comparison. Do not use a production Workspace.
 
 Start the local server/proxy with a local-only review secret, RTT (100 ms), zero jitter and (10 Mbps). After the standard rig seed, run:
 
@@ -70,7 +70,7 @@ For each local fixture APK, temporarily apply the diagnostic patches before `bui
 ```sh
 git apply apps/mobile/evidence/android-back-live-burst/instrumentation.patch
 git apply apps/mobile/evidence/android-back-live-burst/native-probe.patch
-bash scripts/latency-rig/build-local.sh
+bash packages/scripts/latency-rig/build-local.sh
 git apply -R apps/mobile/evidence/android-back-live-burst/native-probe.patch
 git apply -R apps/mobile/evidence/android-back-live-burst/instrumentation.patch
 ```

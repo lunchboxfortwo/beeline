@@ -36,7 +36,7 @@ The fixture preparation corrects legacy short message IDs to the current phone c
 
 ## Repeating the capture
 
-Read `scripts/latency-rig/README.md`, build the locally signed fixture APK, and start its disposable server/proxy. The attached fixture helpers target only `beeline_latency_rig_jellybean_responsive` on the local PostgreSQL socket. Use the local review sign-in and select Latency Rig 200. Run `node seed-stream.mjs` from this directory to prepare valid marker rows. The Back target is the Room marker; the corner-open target is the corner marker.
+Read `packages/scripts/latency-rig/README.md`, build the locally signed fixture APK, and start its disposable server/proxy. The attached fixture helpers target only `beeline_latency_rig_jellybean_responsive` on the local PostgreSQL socket. Use the local review sign-in and select Latency Rig 200. Run `node seed-stream.mjs` from this directory to prepare valid marker rows. The Back target is the Room marker; the corner-open target is the corner marker.
 
 With the emulator in rig-corner-001, run:
 

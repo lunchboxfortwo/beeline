@@ -8,7 +8,7 @@ Commands:
 
 ```sh
 npm run build -w @beeline/server
-MCP_INSPECTOR_CLIENT=/tmp/emberus-mcp-inspector/node_modules/@modelcontextprotocol/inspector/clients/cli/build/index.js node --import tsx scripts/prove-rooms-mcp.mjs
+MCP_INSPECTOR_CLIENT=/tmp/emberus-mcp-inspector/node_modules/@modelcontextprotocol/inspector/clients/cli/build/index.js node --import tsx packages/scripts/prove-rooms-mcp.mjs
 ```
 
 Inspector was installed separately in the disposable tools directory with lifecycle scripts disabled. The proof imports the installed CLI entry; its path is configurable and is not a repository dependency.
@@ -36,13 +36,13 @@ The public URL is a release target, not live proof. Follow the [reviewer instruc
 
 ## Revision 2 user-path proof
 
-The built service was exercised again with SDK discovery, DCR, PKCE and refresh rotation, then real MCP Inspector list/read/send. The Android build used the production `AiClientsSection`, message ledger, fonts, modal and phone-operation transport inside the disposable `scripts/rooms-mcp-native-proof.tsx` entry. It fetched the synthetic reviewer’s connection list and messages from the local built server. Tapping Grok → Disconnect sent the actual `/v1/phone/operations/disconnectAiClient` request, removed Grok while preserving Muse, and the held MCP access token failed with 401.
+The built service was exercised again with SDK discovery, DCR, PKCE and refresh rotation, then real MCP Inspector list/read/send. The Android build used the production `AiClientsSection`, message ledger, fonts, modal and phone-operation transport inside the disposable `packages/scripts/rooms-mcp-native-proof.tsx` entry. It fetched the synthetic reviewer’s connection list and messages from the local built server. Tapping Grok → Disconnect sent the actual `/v1/phone/operations/disconnectAiClient` request, removed Grok while preserving Muse, and the held MCP access token failed with 401.
 
 This path caught and fixed a missing HTTP operation allowlist entry that direct service tests had missed. The integration regression now sends the phone HTTP request and expects its normal 204 response, then verifies both access and refresh denial. The browser component proof covers successful disconnect and a network failure that keeps the sheet open with a retry message.
 
 The existing live Connectors screen was verified at `https://web.usebeeline.app` before adding the AI clients section. Screenshots use production controls in a focused harness; they do not claim the entire signed-in production app navigation was exercised. Android uses the emulator’s local-host bridge. OAuth login still uses the explicitly synthetic upstream provider.
 
-Evidence in [`apps/mobile/evidence/rooms-mcp`](../apps/mobile/evidence/rooms-mcp/):
+Evidence in [`apps/mobile/evidence/rooms-mcp`](../apps/mobile/evidence/rooms-mcp):
 
 - `web-consent.png`, `android-consent.png`: actual built consent page in desktop Chromium and Android Chrome.
 - `web-clients.png`, `web-sheet.png`, `web-message.png`: production web controls and official client marks.

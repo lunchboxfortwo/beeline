@@ -61,7 +61,7 @@ reads the steps. An agent starts a run with `start_workflow`, binding
 | `notify` | triager | Finds fix pull requests merged since the last `notified` run, plus any an earlier run left unnotified (their body has a `Feedback items:` line), and calls `notify_feedback_fixed` for each. Hands off `notified`, or `skipped` when it cannot send (see below). |
 | `verify` | triager | Checks earlier fixes against their signal after release: not yet released, still occurring, stopped, or not enough evidence yet. Never claims a fix held from a missing or incomplete reading. |
 | `pull` | triager | Reads new `feedback_items` and each report's `message_ids` context through the vaulted database credential, groups them by problem, and ranks the groups. It also reads the other fix-loop inputs (below). It judges which problems are prompt defects (no label marks them) and drafts a saved case for each (`docs/prompts/cases/`). |
-| `adapters` | triager | Runs `scripts/check-acp-adapters.mjs` against the installed harness programs: latest adapters in temp directories, no credentials, ACP initialize/session/new only. |
+| `adapters` | triager | Runs `packages/scripts/check-acp-adapters.mjs` against the installed harness programs: latest adapters in temp directories, no credentials, ACP initialize/session/new only. |
 | `present` | triager | Merges every source into one ranked list with a verdict per group (build, hold, drop) and hands it to the fix loop. Routine fix corners open without per-item pre-approval, outside the run; reviewer PASS plus green checks lands them and the owner keeps a hold as veto, with the brief carrying the group's item ids or signature. |
 | `done` | | The run ends. |
 
@@ -149,7 +149,7 @@ feedback into one ranked list. Server-seeded schedules preserve their assigned
 agent; team-authored workflows and prompts are not overwritten.
 
 Agent feedback is grouped by tool, normalized error and category using
-`scripts/feedback-signals.mjs`. Groups keep every report, including older
+`packages/scripts/feedback-signals.mjs`. Groups keep every report, including older
 versions, plus first and last seen. Ranking and eligibility use the
 latest-version count, not the raw occurrence total. Confirmed distinct humans
 on a latest-version report outrank that count. A single latest agent
@@ -171,7 +171,7 @@ deterministic work on their own schedule, so the run only reads.
 | Nightly Checks | `nightly-checks.yml`, started by the 2 AM next release | open `nightly-checks` issues (failed twice, flaky, unfinished) | closed when the job next passes first time |
 | ACP adapters, latest/latest | `acp-adapters.yml` | open `adapter-compat` issues | until a passing run |
 | ACP adapters, installed programs | this run's `adapters` step | its own results | this run |
-| Production logs | log walk on squire, 06:40 (`scripts/log-walk/README.md`) | `report.md`/`report.json` in the triager's home | `window.to` is this morning |
+| Production logs | log walk on squire, 06:40 (`packages/scripts/log-walk/README.md`) | `report.md`/`report.json` in the triager's home | `window.to` is this morning |
 | Sentry | Sentry webhook wake (`sentry-wake.ts`) and the run's own Sentry read | Sentry issues; existing Sentry fix corners | last 24 hours |
 | Latency | nightly latency rig, 03:00 | the night's verdict and any filed fix order in the latency-rig corner | last night |
 

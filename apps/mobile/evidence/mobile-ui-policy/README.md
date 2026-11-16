@@ -1,6 +1,6 @@
 # Mobile UI policy repair
 
-Reproduction R-UIPOL: on main b82f0f7fb, `node --test scripts/mobile-ui-policy.test.mjs` failed with nine raw-button/custom-row violations in PrLifecycleCard and WelcomeCards (28 passed, 1 failed). The same command now passes (29 tests). `node scripts/check-mobile-ui-components.mjs --base origin/main` also passes without adding legacy exceptions or changing rules.
+Reproduction R-UIPOL: on main b82f0f7fb, `node --test scripts/mobile-ui-policy.test.mjs` failed with nine raw-button/custom-row violations in PrLifecycleCard and WelcomeCards (28 passed, 1 failed). The same command now passes (29 tests). `node packages/scripts/check-mobile-ui-components.mjs --base origin/main` also passes without adding legacy exceptions or changing rules.
 
 TranscriptNavigationRow owns the inline navigation geometry and separate GitHub/corner targets in the existing shared row module. IndexRow's single-line title and reserved trailing column cannot preserve this rich, wrapping transcript copy. InlineRow shares horizontal page compositions; WelcomeCards keeps its existing Button. These registered components preserve the existing visuals and targets.
 

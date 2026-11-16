@@ -96,4 +96,4 @@ Final Fly inventory contains only:
 
 Production Beebee was read only and never started or changed. Raw final samples
 and sanitized cleanup inventory are in
-[`pi-startup-cut-proof.json`](../infra/free-agent/pi-startup-cut-proof.json).
+[`pi-startup-cut-proof.json`](../apps/infra/free-agent/pi-startup-cut-proof.json).

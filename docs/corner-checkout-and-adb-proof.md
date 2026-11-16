@@ -20,7 +20,7 @@ returns `emulator-5574\tdevice`. This assertion failed before changing the polic
 
 The original reports are historical; their exact guest process is not a safe
 live target. The fixed-port regression preserves the reported wiring, and
-`node scripts/prove-corner-adb.mjs` supplies real installed-SDK proof. It boots
+`node packages/scripts/prove-corner-adb.mjs` supplies real installed-SDK proof. It boots
 two throwaway guests through the built helper, captures each real corner grant
 policy, and runs plain `adb devices` through that policy before refreshing the
 turn environment. On squire it returned only emulator-5562 on server 5564 for
@@ -43,7 +43,7 @@ pushed an edit to a file with uncommitted local work, and branch sync returned
 with an uncommitted-work reason and retains the exact input bytes. Clean remote
 fast-forward, rebase and conflict realignment behavior remains covered.
 
-`node scripts/prove-corner-checkout.mjs` exercises the built helper against a
+`node packages/scripts/prove-corner-checkout.mjs` exercises the built helper against a
 throwaway real Git repository. One child process owns the checkout and writes
 an unfinished input; a competing writer is refused. Killing the owner permits
 a successor to enter immediately, and a peer push still cannot overwrite the
@@ -57,10 +57,10 @@ SIGKILL recovery and release after a thrown turn.
 - Body suites: monolith corner turns, checkout lock, branch sync, emulator
   lifetime, emulator leases, kernel locks, grant runner, ACP background tools
   and session scheduler
-- `node scripts/prove-corner-adb.mjs`
-- `node scripts/prove-corner-checkout.mjs`
+- `node packages/scripts/prove-corner-adb.mjs`
+- `node packages/scripts/prove-corner-checkout.mjs`
 - `npm run lint:workflow-paths`
-- `node scripts/check-dead-code.mjs`
+- `node packages/scripts/check-dead-code.mjs`
 
 The checkout lock is local to the canonical worktree path; separate machines'
 independent checkouts continue sharing accepted work through the remote branch.

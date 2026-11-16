@@ -30,7 +30,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT_NAME: workflow_run
-        run: node scripts/nightly-checks.mjs
+        run: node packages/scripts/nightly-checks.mjs
       - name: Publish nightly result
         if: always()
         uses: actions/upload-artifact@v4

@@ -55,7 +55,7 @@ import type { DaemonApiClient as m19_DaemonApiClient } from "./daemon-api-client
 
 import { HarnessQuotaReader as m19_HarnessQuotaReader } from "./harness-quota.js";
 
-import { QUOTA_AXI_CLAUDE_REPORT as m19_QUOTA_AXI_CLAUDE_REPORT } from "../../../tests/helpers/helper.js";
+import { QUOTA_AXI_CLAUDE_REPORT as m19_QUOTA_AXI_CLAUDE_REPORT } from "../../../packages/test-helpers/helpers/helper.js";
 
 import { postChangedAgentUsage, helperUsageBinding as m19_helperUsageBinding } from "./helper-usage-binding.js";
 import { describe as mergedDescribe19 } from 'vitest';

@@ -45,12 +45,12 @@ for (const [file, size] of [
     ['apps/mobile/fastlane/metadata/android/en-US/images/icon.png', 512],
     ['apps/mobile/store/assets/store-icon-512.png', 512],
     ['apps/mobile/store/assets/ios-app-icon-1024.png', 1024],
-    ['web/icon-512.png', 512],
-    ['web/apple-touch-icon.png', 180],
+    ['apps/site/icon-512.png', 512],
+    ['apps/site/apple-touch-icon.png', 180],
 ]) put(file, render(regular, size));
 const scratch = mkdtempSync(join(tmpdir(), 'beeline-stone-icons-'));
 try {
-    for (const [file, source] of [['web/favicon.ico', regular], ['apps/mobile/public/favicon-active.ico', active]]) {
+    for (const [file, source] of [['apps/site/favicon.ico', regular], ['apps/mobile/public/favicon-active.ico', active]]) {
         const png = join(scratch, 'favicon.png');
         writeFileSync(png, render(source, 256));
         put(file, execFileSync('convert', [png, '-define', 'icon:auto-resize=48,32,16', 'ico:-']));

@@ -147,7 +147,7 @@ server regressions cover membership changing while agent access resolves and
 interrupting with a count different from the last announcement.
 
 Repeat with `SILENCE_PROOF_ANDROID_FIRST=1` on the proof service, join from
-Android, then run `python3 scripts/prove-voice-call-mode.py --device <serial>`.
+Android, then run `python3 packages/scripts/prove-voice-call-mode.py --device <serial>`.
 
 ## Routing investigation
 
@@ -171,8 +171,8 @@ timer or buffering stage; the additional reads are in idle and stop handling.
 ## Repeat
 
 The fixture entry is `apps/mobile/scripts/multi-human-silence-native-proof.tsx`;
-the disposable service is `scripts/prove-multi-human-silence.ts` and assertions
-are `scripts/prove-multi-human-silence.py`.
+the disposable service is `packages/scripts/prove-multi-human-silence.ts` and assertions
+are `packages/scripts/prove-multi-human-silence.py`.
 
 Start a dedicated LiveKit dev server with ports 17890 (HTTP), 17891 (TCP RTC)
 and 17892 (UDP RTC), using local-only `devkey`/`secret`. Advertise a host address
@@ -180,11 +180,11 @@ reachable by both the emulator and Node clients. The captured run used
 172.17.0.1. Start the service with:
 
 ```sh
-node --import tsx scripts/prove-multi-human-silence.ts
+node --import tsx packages/scripts/prove-multi-human-silence.ts
 ```
 
 For the native fixture, temporarily make the mobile entry import
-`./sources/unistyles` before `./scripts/multi-human-silence-native-proof`.
+`./sources/unistyles` before `./packages/scripts/multi-human-silence-native-proof`.
 Use Metro aliases for the fixture only: `@/auth/monolith-session` forwards
 `fetch`, `@/sync/transport/live-connection` provides inert register/connected
 subscriptions, and `./client-error-report` provides error formatting with an
@@ -195,7 +195,7 @@ and a 4 GiB Gradle heap. Install only on a task-owned emulator, grant microphone
 permission, open the development client and press Join proof call.
 
 ```sh
-python3 scripts/prove-multi-human-silence.py --phase fixed --output /tmp/fixed.json
+python3 packages/scripts/prove-multi-human-silence.py --phase fixed --output /tmp/fixed.json
 ```
 
 For the old comparison, extract the three source files from the commit above

@@ -162,7 +162,7 @@ Only the configured short hostname (the `RoomsMcpOAuth` constructor option, defa
 arbitrary Host values never become OAuth metadata. Local fixtures inherit the
 configured origin’s protocol and port. The proof fixture accepts `BEELINE_JOIN_HOST=join.localtest.me` for an existing wildcard DNS record pointing to loopback; no hosts-file edit is needed. Production adds no environment setting.
 
-The public instructions are mirrored in `web/room/index.html` and the shipped
+The public instructions are mirrored in `apps/site/room/index.html` and the shipped
 `apps/server/assets/mcp/join.html`; the HTTP regression test enforces equality.
 
 ## OAuth endpoints and revocation
@@ -188,13 +188,13 @@ The repeatable local fixture creates a synthetic **Connector Reviewer** account,
 
 ```sh
 npm run build
-node --import tsx scripts/prove-rooms-mcp.mjs
+node --import tsx packages/scripts/prove-rooms-mcp.mjs
 # Reproduction R1: native redirect and each hosted-client secret method
-node --import tsx scripts/prove-rooms-mcp.mjs --native
-node --import tsx scripts/prove-rooms-mcp.mjs --secret-post
-node --import tsx scripts/prove-rooms-mcp.mjs --secret-basic
+node --import tsx packages/scripts/prove-rooms-mcp.mjs --native
+node --import tsx packages/scripts/prove-rooms-mcp.mjs --secret-post
+node --import tsx packages/scripts/prove-rooms-mcp.mjs --secret-basic
 # Keep the seeded service open for an interactive MCP Inspector session:
-node --import tsx scripts/prove-rooms-mcp.mjs --serve
+node --import tsx packages/scripts/prove-rooms-mcp.mjs --serve
 ```
 
 For an interactive review:
@@ -286,7 +286,7 @@ Local verification (not a defect report):
 
 ```sh
 npm run build -w @beeline/server
-node --import tsx scripts/prove-rooms-mcp-events.mjs
+node --import tsx packages/scripts/prove-rooms-mcp-events.mjs
 npm run test -w @beeline/server -- src/rooms-mcp.test.ts
 ```
 

@@ -101,12 +101,12 @@ back and compared byte for byte. The proof commands are:
 
 ```sh
 npm run build -w @beeline/body
-node scripts/prove-native-shell-cap.mjs
-node scripts/prove-native-shell-cap.mjs .scratch/shell-permission-baseline --permissions --unhooked
-node scripts/prove-native-shell-cap.mjs .scratch/shell-permission-hooked --permissions
-node scripts/prove-native-shell-cap.mjs .scratch/native-shell-failure --fail
-node scripts/prove-codex-shell-cap.mjs
-node scripts/prove-cursor-shell-cap.mjs
+node packages/scripts/prove-native-shell-cap.mjs
+node packages/scripts/prove-native-shell-cap.mjs .scratch/shell-permission-baseline --permissions --unhooked
+node packages/scripts/prove-native-shell-cap.mjs .scratch/shell-permission-hooked --permissions
+node packages/scripts/prove-native-shell-cap.mjs .scratch/native-shell-failure --fail
+node packages/scripts/prove-codex-shell-cap.mjs
+node packages/scripts/prove-cursor-shell-cap.mjs
 ```
 
 Claude and Cursor capture output inside their native
@@ -149,8 +149,8 @@ production sessions or older harness binaries.
 Replay commands (the exchange directory is served by sealed OpenRouter calls):
 
 ```sh
-node --import tsx scripts/prove-fixed-context-baseline.mjs <baseline-output-dir>
-node --import tsx scripts/prove-fixed-context-replay.mjs <candidate-output-dir>
+node --import tsx packages/scripts/prove-fixed-context-baseline.mjs <baseline-output-dir>
+node --import tsx packages/scripts/prove-fixed-context-replay.mjs <candidate-output-dir>
 ```
 
 ## Server CI repair

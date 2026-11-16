@@ -6,7 +6,7 @@ A person who opens the third picture of a grouped message and swipes right sees 
 
 | Obsidian | Bone |
 | --- | --- |
-| ![Obsidian viewer showing Second, Previous, 2 of 3, Next and zoom controls](./obsidian.png) | ![Bone viewer showing Second, Previous, 2 of 3, Next and zoom controls](./bone.png) |
+| ![Obsidian viewer showing Second, Previous, 2 of 3, Next and zoom controls](obsidian.png) | ![Bone viewer showing Second, Previous, 2 of 3, Next and zoom controls](bone.png) |
 
 These are Chrome captures at a 412 × 915 CSS-pixel phone viewport, with the repository fonts and theme tokens. The isolated harness renders the real ArtifactCard, ArtifactViewerScreen, ArtifactImage and ZoomableArtifactImage through React Native Web. Each capture selects Third in the card, opens the viewer, sends a rightward touch swipe, and asserts Second, 2 of 3, both navigation controls and fitted zoom before capture.
 

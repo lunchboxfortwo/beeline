@@ -23,7 +23,7 @@ service account key and the App Store Connect API key outside this repository.
    the file's contents as the secret value. Every Play workflow reads only this
    secret and stops with one plain line when it is missing. The workflows mint
    the access token themselves with the self-signed JWT flow
-   (`scripts/play-token.mjs`, node only): the key's private key signs a JWT that
+   (`packages/scripts/play-token.mjs`, node only): the key's private key signs a JWT that
    `oauth2.googleapis.com/token` exchanges for a token. The IAM Service Account
    Credentials API (`iamcredentials.googleapis.com`, which
    `google-github-actions/auth` requires) is not enabled in the project and is
@@ -81,7 +81,7 @@ sideload keystore is not involved either way.
 
 ### App link fingerprints for the `app.usebeeline` record
 
-Both `assetlinks.json` copies (`web/.well-known/assetlinks.json`
+Both `assetlinks.json` copies (`apps/site/.well-known/assetlinks.json`
 and `apps/mobile/public/.well-known/assetlinks.json`) currently carry only the
 sideload signing certificate. The Play App Signing certificate for the new
 `app.usebeeline` record does not exist until the first AAB is uploaded, so its
@@ -112,13 +112,13 @@ cd apps/mobile && npm run fingerprint:check
 
 ```sh
 # Regenerate the derived Play metadata after editing apps/mobile/store/
-node scripts/sync-play-metadata.mjs
-node scripts/sync-play-metadata.mjs --check     # what the release's store leg runs first
+node packages/scripts/sync-play-metadata.mjs
+node packages/scripts/sync-play-metadata.mjs --check     # what the release's store leg runs first
 
 # Prove the Play API scripts without a service account
 npm run test:play
 PLAY_DRY_RUN=1 PACKAGE_NAME=app.usebeeline METADATA_DIR=apps/mobile/fastlane/metadata/android LANGUAGE=en-US \
-  bash scripts/play-publish-listing.sh
+  bash packages/scripts/play-publish-listing.sh
 
 # Production store publishing is requested through the audited dispatch_release
 # tool under an owner/admin release command, with store_track=production.
@@ -162,7 +162,7 @@ produces the AAB locally, verifies package name, `versionName` and
 `versionCode` with bundletool against the package version and the EAS build
 record and rejects a debug signer, uploads the AAB as a run artifact, mints a
 short-lived Play access token from the service account, then runs
-`scripts/play-publish.sh` (create edit → upload bundle → `tracks.update` with
+`packages/scripts/play-publish.sh` (create edit → upload bundle → `tracks.update` with
 `track: production` by default (explicit beta override), `status: completed`, notes from
 `fastlane/metadata/android/en-US/changelogs/<versionCode>.txt` or `default.txt`
 → commit). Releases upload only the build to Play by default. Listing text and
@@ -190,7 +190,7 @@ See Google's [commit parameters](https://developers.google.com/android-publisher
 and [release status](https://developers.google.com/android-publisher/api-ref/rest/v3/edits.tracks#Status).
 
 The build commit never uploads listing metadata. When explicitly authorized,
-`scripts/play-publish-listing.sh` separately reads the live listing and skips
+`packages/scripts/play-publish-listing.sh` separately reads the live listing and skips
 unchanged text and image hashes. Changed listings clear and re-upload each
 image type in filename order. `publish_listing` permits uploading changes;
 it does not force re-uploading matching assets. That listing operation retains
@@ -242,7 +242,7 @@ TestFlight groups and external-tester review remain separate operations. A missi
 certificate fails the build with one printed command, because eas-cli 22.2.0
 never creates one non-interactively.
 
-`scripts/play-promote-track.sh` remains available for explicitly commanded
+`packages/scripts/play-promote-track.sh` remains available for explicitly commanded
 recovery from beta to production. It enforces completed status and the same
 listing lock and automatic review commit as a new build.
 
@@ -255,7 +255,7 @@ URL, curl arguments, never the bearer token) and answers with a canned body, so
 `apps/mobile/store/` is the human-reviewable package (copy under
 `listing/en-US/`, graphics under `assets/`, `screenshots/`).
 `apps/mobile/fastlane/metadata/android/en-US/` is derived from it by
-`scripts/sync-play-metadata.mjs`, committed, and read verbatim by the Play
+`packages/scripts/sync-play-metadata.mjs`, committed, and read verbatim by the Play
 scripts. The sync validates every asset against the Play rules (512×512 32-bit
 icon, 1024×500 24-bit feature graphic, 2–8 screenshots with sides between 320
 and 3840 px and a long side at most twice the short side, text limits). The
@@ -266,7 +266,7 @@ push exists yet, so listing text there is entered in App Store Connect by hand.
 
 - Approve the listing copy and `store/` graphics in this repository.
 - Deploy and open `https://usebeeline.app/privacy` from the tracked
-  `web/privacy/index.html` page.
+  `apps/site/privacy/index.html` page.
 - Enter the answers in `store/questionnaires/` into the current Play Console
   and App Store Connect forms, then re-check any changed form language.
 - Confirm the PostHog build environment choice. The app sends no analytics

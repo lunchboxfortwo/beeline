@@ -11,11 +11,11 @@ it('generates re-exported operation maps and rejects empty maps without replacin
     writeFileSync(target, source);
   };
   const generate = (...args: string[]) => execFileSync(process.execPath,
-    [path.join(root, 'scripts/generate-network-codecs.mjs'), ...args], { cwd: root, encoding: 'utf8', stdio: 'pipe' });
+    [path.join(root, 'packages/scripts/generate-network-codecs.mjs'), ...args], { cwd: root, encoding: 'utf8', stdio: 'pipe' });
   try {
     write('package.json', JSON.stringify({ type: 'module' }));
-    write('scripts/generate-network-codecs.mjs', readFileSync(
-      new URL('../../../scripts/generate-network-codecs.mjs', import.meta.url), 'utf8'));
+    write('packages/scripts/generate-network-codecs.mjs', readFileSync(
+      new URL('../../scripts/generate-network-codecs.mjs', import.meta.url), 'utf8'));
     write('packages/api-contract/tsconfig.json', JSON.stringify({ compilerOptions: {
       target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', types: [], skipLibCheck: true,
     } }));

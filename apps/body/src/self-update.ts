@@ -133,7 +133,7 @@ export function defaultBeelineInstallLayout(
 
 
 /**
- * Locate the installed bundle the way `web/install.sh` laid it
+ * Locate the installed bundle the way `apps/site/install.sh` laid it
  * out — used when `BEELINE_LIB_DIR` itself is absent, e.g. `npx usebeeline
  * update` runs from a throwaway npm cache, never through the installed
  * `beeline` wrapper that exports it. Honors the installer's own env var

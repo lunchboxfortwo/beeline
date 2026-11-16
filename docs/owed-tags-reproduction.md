@@ -49,7 +49,7 @@ Build the server, then run:
 
 ```sh
 npm run build --workspace=@beeline/server
-node --import tsx scripts/prove-owed-tags.mjs
+node --import tsx packages/scripts/prove-owed-tags.mjs
 ```
 
 This isolated service proof reads the built server's authenticated

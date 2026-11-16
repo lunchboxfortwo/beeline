@@ -10,11 +10,11 @@ The tray exposes the existing grant and permission decisions, question options a
 
 Captured on 2026-10-12 using a task-owned Android emulator launched with `-read-only -port 5580`. Every adb command targeted `emulator-5580`. The shipped `NeedsYouCell` and `Button` rendered inside an Expo Go fixture against the changed server's real `PhoneService`, with an isolated local Workspace named **Beeline Review** and PGlite database. The swipe wrapper and busy loader were stubbed because Expo Go's Worklets version differs from the app's; no swipe, busy animation, full-app routing or production Squire ceremony claim is made. The upper-right Tools control belongs to Expo Go.
 
-- Obsidian: [pending approvals](../evidence/one-system-thread/tray-before.png), [approved once](../evidence/one-system-thread/tray-approved.png), [denied](../evidence/one-system-thread/tray-denied.png).
-- Bone: [pending approvals](../evidence/one-system-thread/tray-bone-before.png), [approved once](../evidence/one-system-thread/tray-bone-approved.png), [denied](../evidence/one-system-thread/tray-bone-denied.png).
-- [Decision trace](../evidence/one-system-thread/decisions.json): `npm test` became `once`; `git status` became `denied`; both disappeared from Needs you without opening a thread.
+- Obsidian: pending approvals, approved once, denied.
+- Bone: pending approvals, approved once, denied.
+- Decision trace: `npm test` became `once`; `git status` became `denied`; both disappeared from Needs you without opening a thread.
 
-Reproduce from the repository root with `node --import tsx scripts/prove-tray-inline.ts` (local fixture port 39197), then run Expo from `apps/mobile/tray-proof` with `../node_modules/.bin/expo start --localhost --port 39198`. Reverse port 39198 on a dedicated emulator and open `exp://127.0.0.1:39198`. Select the theme in `tray-proof/proof-theme.ts`; restart Metro with `--clear` if running with `CI=1`. The fixture is disposable and contains no production data or credentials. No live helper was stopped, restarted or updated.
+Reproduce from the repository root with `node --import tsx packages/scripts/prove-tray-inline.ts` (local fixture port 39197), then run Expo from `apps/mobile/tray-proof` with `../node_modules/.bin/expo start --localhost --port 39198`. Reverse port 39198 on a dedicated emulator and open `exp://127.0.0.1:39198`. Select the theme in `tray-proof/proof-theme.ts`; restart Metro with `--clear` if running with `CI=1`. The fixture is disposable and contains no production data or credentials. No live helper was stopped, restarted or updated.
 
 ## Regression coverage
 

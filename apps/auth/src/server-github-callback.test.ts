@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { app, alphaTenant, database, startCookie, useAuthServerFixture } from '../../../tests/helpers/server.js';
+import { app, alphaTenant, database, startCookie, useAuthServerFixture } from '../../../packages/test-helpers/helpers/server.js';
 
 useAuthServerFixture();
 

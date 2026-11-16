@@ -71,8 +71,8 @@ Install on a Beeline-leased API 36 emulator and grant microphone permission.
 Start local development LiveKit on 17890 with RTC TCP 17891, then run:
 
 ```sh
-VOICE_PIN_PROOF=1 SILENCE_PROOF_ANDROID_FIRST=1 node --import tsx scripts/prove-voice-delivery.ts
-python scripts/prove-voice-pin-android.py --device emulator-PORT
+VOICE_PIN_PROOF=1 SILENCE_PROOF_ANDROID_FIRST=1 node --import tsx packages/scripts/prove-voice-delivery.ts
+python packages/scripts/prove-voice-pin-android.py --device emulator-PORT
 ```
 
 The driver requires Pillow and locates the avatar row from the fixture's face
@@ -115,7 +115,7 @@ before reply cleanup. The final comparison was repeated with the emulator
 settled and without a concurrent build or test suite.
 
 Measure the active fixture with
-`python scripts/measure-voice-pin-latency.py fixed` (or `baseline`). The baseline
+`python packages/scripts/measure-voice-pin-latency.py fixed` (or `baseline`). The baseline
 used the original runtime and provider from `a33ca7b68`, materialized as the
 fixture's temporary `.voice-delivery-baseline.ts` and
 `.voice-context-baseline-providers.ts` modules, with

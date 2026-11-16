@@ -155,7 +155,7 @@ it('demonstrates the operator executable through authenticated daemon dispatch w
     const context = join(dir, 'turn.json');
     await writeFile(context, JSON.stringify(input));
     const port = (server.address() as import('node:net').AddressInfo).port;
-    const script = fileURLToPath(new URL('../../../scripts/dispatch-production-release.mjs', import.meta.url));
+    const script = fileURLToPath(new URL('../../../packages/scripts/dispatch-production-release.mjs', import.meta.url));
     const child = spawn(process.execPath, [script, '-f', 'release_version=v0.1.94', '-f', 'selection=server'], {
       env: { ...process.env, BEELINE_DAEMON_BASE_URL: `http://127.0.0.1:${port}`, BEELINE_DAEMON_TOKEN: 'fixture-token',
         BEELINE_DAEMON_AGENT_ID: agent, BEELINE_TURN_CONTEXT_FILE: context },

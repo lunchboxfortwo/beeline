@@ -24,7 +24,7 @@ module.exports = function (api) {
       require.resolve('./plugins/direct-lucide-imports.cjs'),
       require.resolve('./plugins/direct-library-imports.cjs'),
       ...(process.env.BEELINE_TRANSCRIPT_MEASURE === '1'
-        ? [require.resolve('../../scripts/transcript-speed/commits.cjs')]
+        ? [require.resolve('../../packages/scripts/transcript-speed/commits.cjs')]
         : []),
       workletsPlugin // Must be last - automatically selects correct plugin for version
     ],

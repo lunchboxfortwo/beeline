@@ -10,7 +10,7 @@ Run the messaging catalog with one command after setting `PR_NUMBER` and an
 output directory outside the checkout:
 
 ```sh
-node --import tsx scripts/prompt-pr-replay.mjs --repository Beeline-Work/beeline --number "$PR_NUMBER" --head "$(git rev-parse HEAD)" --only messaging- --out "$TASK_PROOF/prompt-replay"
+node --import tsx packages/scripts/prompt-pr-replay.mjs --repository Beeline-Work/beeline --number "$PR_NUMBER" --head "$(git rev-parse HEAD)" --only messaging- --out "$TASK_PROOF/prompt-replay"
 ```
 
 Omit `--only messaging-` to replay the entire saved library. The runner stamps

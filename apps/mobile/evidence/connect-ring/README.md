@@ -23,4 +23,4 @@ At the horizontal center of the locked button (x=540), the before capture has RG
 4. Reverse port 18889 with adb and open `beeline://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A18889`. Dismiss the development menu. Capture pending reach before the screen's minute timeout; tap the fixture control to capture failed reach. Long press it for the shared audit.
 5. Capture with `adb -s <serial> exec-out screencap -p`. To reproduce the defect, temporarily remove `needsOffscreenAlphaCompositing` from the locked wrapper, restart the fixture, and capture again.
 
-Validation: Android debug build; connect screen suite (25 tests); root `npm run typecheck`; `node scripts/check-mobile-ui-components.mjs`.
+Validation: Android debug build; connect screen suite (25 tests); root `npm run typecheck`; `node packages/scripts/check-mobile-ui-components.mjs`.

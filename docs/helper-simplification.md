@@ -91,7 +91,7 @@ native bundle, unique-label launchd restart/stop, pairing and actual Room replie
 
 ## Reproducible acceptance matrix
 
-`scripts/helper-proof/run-linux.sh` creates a disposable Docker PID namespace
+`packages/scripts/helper-proof/run-linux.sh` creates a disposable Docker PID namespace
 with systemd as PID 1, a dedicated `proof` user, private user bus and isolated
 install/config/state. Its fixture runs the real server routes, database,
 HTTP/WebSocket transport and deterministic ACP harness. It exercises the real
@@ -128,11 +128,11 @@ BEELINE_BUNDLE_VERSION=v0.2.0 \
 BEELINE_BUNDLE_COMMIT=1111111111111111111111111111111111111111 \
 BUZZ_AGENT_BIN=/absolute/path/to/buzz-agent \
 BUZZ_DEV_MCP_BIN=/absolute/path/to/buzz-dev-mcp \
-node scripts/build-beeline-bundle.mjs --platform linux-x64
-node scripts/build-usebeeline-package.mjs
-mkdir -p scripts/helper-proof/artifacts
-npm pack --workspace usebeeline --pack-destination scripts/helper-proof/artifacts
-bash scripts/helper-proof/run-linux.sh
+node packages/scripts/build-beeline-bundle.mjs --platform linux-x64
+node packages/scripts/build-usebeeline-package.mjs
+mkdir -p packages/scripts/helper-proof/artifacts
+npm pack --workspace usebeeline --pack-destination packages/scripts/helper-proof/artifacts
+bash packages/scripts/helper-proof/run-linux.sh
 ```
 
 Body test setup gives every worker a short private HOME/config/state and an

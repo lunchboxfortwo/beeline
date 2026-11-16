@@ -9,7 +9,7 @@ import { afterEach as m13_afterEach, expect as m13_expect, it as m13_it } from '
 
 import { roomPermissionDecision as m13_roomPermissionDecision } from "./room-permissions.js";
 
-import { CLAUDE_ACP_NATIVE_READ_TOOL_CALL as m13_CLAUDE_ACP_NATIVE_READ_TOOL_CALL } from "../../../tests/helpers/helper.js";
+import { CLAUDE_ACP_NATIVE_READ_TOOL_CALL as m13_CLAUDE_ACP_NATIVE_READ_TOOL_CALL } from "../../../packages/test-helpers/helpers/helper.js";
 import { describe as mergedDescribe13 } from 'vitest';
 mergedDescribe13("attachment-permission.test.ts", () => {
 

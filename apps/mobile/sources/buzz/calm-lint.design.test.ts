@@ -15,7 +15,7 @@ import {
 } from './calm-lint';
 
 /**
- * Borrowing Calm, the lint (DESIGN.md → Type). Every `sources/**\/*.ts(x)`
+ * Borrowing Calm, the lint (docs/DESIGN.md → Type). Every `sources/**\/*.ts(x)`
  * screen, component or style module — including a raw value fed through a
  * local per-file constant table, and a computed (arithmetic or ternary)
  * size — is held to its baseline count of raw `fontSize:` /

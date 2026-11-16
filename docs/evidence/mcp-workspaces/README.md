@@ -4,7 +4,7 @@ Feature request, not a defect report. Brief revision 1 requests a checklist of t
 
 ## Rendered proof
 
-The screenshots use the actual consent route, rendered by headless Chrome against the isolated synthetic account in `scripts/prove-rooms-mcp.mjs --serve`. The upstream GitHub provider is a local double; no production account is accessed. Before uses the parent commit's OAuth module transpiled with TypeScript alongside the built server; after uses the patched built OAuth module. Both follow Register → Authorize → Continue with GitHub → consent.
+The screenshots use the actual consent route, rendered by headless Chrome against the isolated synthetic account in `packages/scripts/prove-rooms-mcp.mjs --serve`. The upstream GitHub provider is a local double; no production account is accessed. Before uses the parent commit's OAuth module transpiled with TypeScript alongside the built server; after uses the patched built OAuth module. Both follow Register → Authorize → Continue with GitHub → consent.
 
 Phone viewport: 390 × 1000. Desktop viewport: 1440 × 1000. Full-page captures include the unchanged starter text. Chrome's light and dark color schemes select Bone and Obsidian respectively.
 

@@ -1,6 +1,6 @@
 
 > buzzy@0.0.0 prompt-cases
-> node --import tsx scripts/prompt-cases.ts --grade /tmp/jellybean-tradeoff/removal-candidate
+> node --import tsx packages/scripts/prompt-cases.ts --grade /tmp/jellybean-tradeoff/removal-candidate
 
 **Prompt case replay:** 52/52 passed.
 

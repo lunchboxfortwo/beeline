@@ -5,7 +5,7 @@ import type { SigninAttemptObservation as m4_SigninAttemptObservation } from '@b
 
 import { beforeEach as m4_beforeEach, describe as m4_describe, expect as m4_expect, it as m4_it, vi as m4_vi } from 'vitest';
 
-import { alphaTenant as m4_alphaTenant, betaTenant as m4_betaTenant, app as m4_app, provider as m4_provider, store as m4_store, useAuthServerFixture as m4_useAuthServerFixture } from "../../../tests/helpers/server.js";
+import { alphaTenant as m4_alphaTenant, betaTenant as m4_betaTenant, app as m4_app, provider as m4_provider, store as m4_store, useAuthServerFixture as m4_useAuthServerFixture } from "../../../packages/test-helpers/helpers/server.js";
 import { describe as mergedDescribe4 } from 'vitest';
 mergedDescribe4("server-native-google.test.ts", () => {
 
@@ -102,7 +102,7 @@ import {
   startCookie as m5_startCookie,
   useAuthServerFixture as m5_useAuthServerFixture,
   provider as m5_provider,
-} from "../../../tests/helpers/server.js";
+} from "../../../packages/test-helpers/helpers/server.js";
 import { describe as mergedDescribe5 } from 'vitest';
 mergedDescribe5("server-signin-funnel.test.ts", () => {
 
@@ -206,7 +206,7 @@ import { createHash as move0_createHash } from 'node:crypto';
 
 import { afterEach as move0_afterEach, beforeEach as move0_beforeEach, describe as move0_describe, expect as move0_expect, it as move0_it, vi as move0_vi } from 'vitest';
 
-import { app as move0_app, database as move0_database, store as move0_store, alphaTenant as move0_alphaTenant, useAuthServerFixture as move0_useAuthServerFixture } from "../../../tests/helpers/server.js";
+import { app as move0_app, database as move0_database, store as move0_store, alphaTenant as move0_alphaTenant, useAuthServerFixture as move0_useAuthServerFixture } from "../../../packages/test-helpers/helpers/server.js";
 import { describe as movedDescribe0 } from 'vitest';
 movedDescribe0("server-held-completion.test.ts", () => {
 

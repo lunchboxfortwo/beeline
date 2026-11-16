@@ -53,9 +53,9 @@ the result; the API confirmed deletion.
 
 ## Current regressions
 
-- `node --test infra/free-agent/entrypoint.test.mjs` checks image-owned selection
+- `node --test apps/infra/free-agent/entrypoint.test.mjs` checks image-owned selection
   despite a stale HOME launcher, exit propagation and hosted-service startup.
-- `infra/free-agent/cold-start-proof.mjs` runs the built image and Pi against an
+- `apps/infra/free-agent/cold-start-proof.mjs` runs the built image and Pi against an
   isolated database and two server processes, through cold stop/start, image
   replacement while stopped and concurrent command/release signals. Docker is
   the default Machines stand-in; `PROOF_FLY_APP` selects a separate disposable

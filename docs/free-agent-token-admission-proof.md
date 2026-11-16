@@ -53,7 +53,7 @@ npm run test -w @beeline/server -- src/free-agent-prompt-budget.test.ts src/free
 
 ## Instruction replay
 
-`scripts/prove-free-agent-instructions.ts` runs the real `AcpClient` over stdio
+`packages/scripts/prove-free-agent-instructions.ts` runs the real `AcpClient` over stdio
 with an isolated deterministic harness, current-main Room/free-agent instructions,
 neutral retained context and SUB0ZERO's measured 16-turn / 78-call shape. It counts
 full before/after model-context strings using **tiktoken o200k_base**, not the
@@ -70,7 +70,7 @@ unit regressions. No history-compaction feature is introduced.
 Run (Python needs tiktoken; `TOKENIZER_PYTHONPATH` can select an isolated install):
 
 ```sh
-node --import tsx scripts/prove-free-agent-instructions.ts
+node --import tsx packages/scripts/prove-free-agent-instructions.ts
 ```
 
 | Turn | Call | Before input | After input | Saved |

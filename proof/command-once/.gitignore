@@ -1,8 +1,0 @@
-before.js
-after.js
-index.html
-native/BeforeCard.tsx
-native/.expo/
-native/tsconfig.json
-
-native/node_modules

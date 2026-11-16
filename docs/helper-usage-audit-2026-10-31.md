@@ -118,7 +118,7 @@ idle age, process/mount/lease checks, tracked-file guards and host scheduling
 remain in force. No arbitrary verification directory becomes disposable.
 
 The isolated regression failed for archived=true before the fix and passes
-afterward. `node scripts/prove-archived-output.mjs` exercises the built storage
+afterward. `node packages/scripts/prove-archived-output.mjs` exercises the built storage
 report and host sweep: the report identifies stale output without deleting it,
 the sweep deletes build/index output, and dirty unpublished source survives.
 This stand-in avoids deleting live squire data before fixes land.

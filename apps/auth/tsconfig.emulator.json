@@ -1,9 +1,9 @@
 {
-  "extends": "../../tsconfig.base.json",
+  "extends": "../../packages/scripts/tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
     "rootDir": "../.."
   },
-  "include": ["src/**/*.ts", "scripts/**/*.ts"],
+  "include": ["src/**/*.ts", "packages/scripts/**/*.ts"],
   "exclude": ["src/**/*.test.ts", "dist"]
 }

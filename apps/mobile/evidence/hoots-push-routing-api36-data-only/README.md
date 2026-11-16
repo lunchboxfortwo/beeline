@@ -10,13 +10,13 @@ Cold means HOME then killing the app process before data delivery; background me
 
 | Case | Target | Tag | State | Tap path | Response to navigation | Result |
 |---:|---|---|---|---|---:|---|
-| 1 | Room | channel | cold | trampoline | 1.12s | [exact message](./case1-room-channel-cold-result.png) |
-| 2 | Room | personal | cold | trampoline | 1.05s | [exact message](./case2-room-personal-cold-result.png) |
-| 3 | Room | channel | background | live response | 1.24s | [exact message](./case3-room-channel-background-result.png) |
-| 4 | Room | personal | background | live response | 1.20s | [exact message](./case4-room-personal-background-result.png) |
-| 5 | corner | channel | cold | trampoline | 1.10s | [exact message](./case5-corner-channel-cold-result.png) |
-| 6 | corner | personal | cold | trampoline | 0.80s | [exact message](./case6-corner-personal-cold-result.png) |
-| 7 | corner | channel | background | live response | 1.07s | [exact message](./case7-corner-channel-background-result.png) |
-| 8 | corner | personal | background | live response | 1.24s | [exact message](./case8-corner-personal-background-result.png) |
+| 1 | Room | channel | cold | trampoline | 1.12s | [exact message](case1-room-channel-cold-result.png) |
+| 2 | Room | personal | cold | trampoline | 1.05s | [exact message](case2-room-personal-cold-result.png) |
+| 3 | Room | channel | background | live response | 1.24s | [exact message](case3-room-channel-background-result.png) |
+| 4 | Room | personal | background | live response | 1.20s | [exact message](case4-room-personal-background-result.png) |
+| 5 | corner | channel | cold | trampoline | 1.10s | [exact message](case5-corner-channel-cold-result.png) |
+| 6 | corner | personal | cold | trampoline | 0.80s | [exact message](case6-corner-personal-cold-result.png) |
+| 7 | corner | channel | background | live response | 1.07s | [exact message](case7-corner-channel-background-result.png) |
+| 8 | corner | personal | background | live response | 1.24s | [exact message](case8-corner-personal-background-result.png) |
 
-[Native and JS timing trace](./matrix-trace.txt) records every unique response id. All four cold taps arrived as `notificationResponse` with no `google.message_id` and reached the trampoline with `live=false`; the corrected guard cleared the retained task. Background responses reached the live activity directly. The native guard regression test covers both intent formats; response, initial-landing, and exact-message scrolling tests passed. The measured-row re-centering fixed the earlier clipped JSON landing without moving a transcript after a reader starts dragging. [Case 6’s notification](./case6-corner-personal-cold-notification.png) shows the JSON-shaped body before its exact corner message opened.
+[Native and JS timing trace](matrix-trace.txt) records every unique response id. All four cold taps arrived as `notificationResponse` with no `google.message_id` and reached the trampoline with `live=false`; the corrected guard cleared the retained task. Background responses reached the live activity directly. The native guard regression test covers both intent formats; response, initial-landing, and exact-message scrolling tests passed. The measured-row re-centering fixed the earlier clipped JSON landing without moving a transcript after a reader starts dragging. [Case 6’s notification](case6-corner-personal-cold-notification.png) shows the JSON-shaped body before its exact corner message opened.

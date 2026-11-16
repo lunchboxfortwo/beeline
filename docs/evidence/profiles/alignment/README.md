@@ -1,6 +1,6 @@
 # Profile design-language audit
 
-This pass audited the agent profile, human profile, Settings, and the Members entry point as one system against `DESIGN.md`. The captures below come from this branch's running Expo web client at 390×844, backed by fresh local servers and disposable proof accounts. The owner/admin and ordinary-member states were captured in separate disposable workspaces; no production workspace or static screen mock was used.
+This pass audited the agent profile, human profile, Settings, and the Members entry point as one system against `docs/DESIGN.md`. The captures below come from this branch's running Expo web client at 390×844, backed by fresh local servers and disposable proof accounts. The owner/admin and ordinary-member states were captured in separate disposable workspaces; no production workspace or static screen mock was used.
 
 These captures record the earlier Ban control. For current human removal behavior, see
 [agent and human profiles](../../../agent-profiles.md).

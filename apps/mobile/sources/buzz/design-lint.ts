@@ -4,8 +4,8 @@ import { resolveThemeRootedNames } from './calm-lint';
 import { space } from './groknight';
 
 /**
- * The design lint (DESIGN.md → Enforcement). Each rule names one convention
- * from DESIGN.md and finds the lines that break it. Every file is held to its
+ * The design lint (docs/DESIGN.md → Enforcement). Each rule names one convention
+ * from docs/DESIGN.md and finds the lines that break it. Every file is held to its
  * per-rule count in `apps/mobile/design/design-baseline.json`; a count may only
  * shrink, so a new violation fails CI's mobile suite.
  */
@@ -72,7 +72,7 @@ const SHADOW = /\b(?:shadowOpacity|shadowRadius|shadowOffset|boxShadow|textShado
 const ELEVATION_PROPERTY = /\belevation:\s*/g;
 const ZERO_ELEVATION = /^[-+]?0(?:\.0+)?$/;
 const RETIRED_FONT = /IBMPlexSans|BricolageGrotesque|SpaceGrotesk-Bold\b/g;
-/** Components DESIGN.md retired in favour of Button and PageHeader. */
+/** Components docs/DESIGN.md retired in favour of Button and PageHeader. */
 const RETIRED_COMPONENT =
   /\b(?:MonoButton|BrassButton|OnboardingButton|RoundButton|MobileGlass)\b|components\/navigation\/Header\b/g;
 

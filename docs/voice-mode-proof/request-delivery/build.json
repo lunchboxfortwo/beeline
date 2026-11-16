@@ -14,7 +14,7 @@
     "apps/mobile/sources/buzz/voice-transport.native.ts": "c0c2e8dbcda9e9e127631862dcc308242af67037afa75321a31dee4db332d026",
     "apps/mobile/sources/components/buzz/VoiceBar.tsx": "1ddf7d53385e124aa9cfe950a6927ce98362f076b6afef3ac1fc05616c156231",
     "apps/mobile/sources/components/buzz/VoiceCallCard.tsx": "adacac17693f9b3196a2b73953a9db0c23092047c7ab31c673a8373aa12141ac",
-    "scripts/prove-voice-delivery.ts": "0bc9d1e66596e7f0c1ebf61540d93fc72ae3e6d03b44edc5e8a24ca4689b75f0",
-    "scripts/prove-voice-delivery.py": "acb337852ed1535730117aeb6ec8d72bb04de1ee597a68d808cd85c49cc85c5d"
+    "packages/scripts/prove-voice-delivery.ts": "0bc9d1e66596e7f0c1ebf61540d93fc72ae3e6d03b44edc5e8a24ca4689b75f0",
+    "packages/scripts/prove-voice-delivery.py": "acb337852ed1535730117aeb6ec8d72bb04de1ee597a68d808cd85c49cc85c5d"
   }
 }

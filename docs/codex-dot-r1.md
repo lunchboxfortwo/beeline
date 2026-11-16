@@ -30,7 +30,7 @@ fallback only when events are unavailable. The starter routine and consent/setup
 regressions pass locally. These checks establish instruction delivery, not a
 real dot wake. No screenshot of a successful reply or Room message ids exist yet.
 
-The built-service stand-in `node --import tsx scripts/prove-rooms-mcp.mjs`
+The built-service stand-in `node --import tsx packages/scripts/prove-rooms-mcp.mjs`
 also passes: OAuth sign-in and Allow, Room listing and reading, a Room tag and DM
 delivered to a receiver double, MCP replies visible through the phone Room read,
 and disconnect revocation. It uses a synthetic identity provider and receiver,
@@ -136,7 +136,7 @@ prompt was sent after the tag. The real dot autonomously posted `R1-pong`.
 | Reply cursor timestamp (ms) | `1793483971272` |
 | Observed latency | `27.110 seconds` |
 
-Screenshot: [live owner tag and dot reply](evidence/codex-dot-r1/live-reply.png).
+Screenshot: live owner tag and dot reply.
 Read-only production SQL subsequently confirmed the reply's
 `reply_to_message_id` equals the tag id above and its Room/author ids match.
 The subscription row for member `f37de668…` has callback host

@@ -87,8 +87,8 @@ Start local LiveKit on 17890 (RTC TCP 17891, UDP 17892–17902) with development
 `devkey`/`secret`. Run:
 
 ```sh
-SILENCE_PROOF_ANDROID_FIRST=1 node --import tsx scripts/prove-voice-delivery.ts
-python3 scripts/prove-voice-continuation-android.py --device emulator-PORT --mode fixed
+SILENCE_PROOF_ANDROID_FIRST=1 node --import tsx packages/scripts/prove-voice-delivery.ts
+python3 packages/scripts/prove-voice-continuation-android.py --device emulator-PORT --mode fixed
 ```
 
 For baseline, materialize the pinned runtime above as temporary

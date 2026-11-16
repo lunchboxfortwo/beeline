@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import { app, alphaTenant, betaTenant, database, provider, startCookie, store, useAuthServerFixture } from '../../../tests/helpers/server.js';
+import { app, alphaTenant, betaTenant, database, provider, startCookie, store, useAuthServerFixture } from '../../../packages/test-helpers/helpers/server.js';
 
 useAuthServerFixture();
 

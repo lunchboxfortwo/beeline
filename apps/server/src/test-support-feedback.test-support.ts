@@ -309,7 +309,7 @@ fixedDms,
 }
 export { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 export { afterEach,beforeEach,describe,expect,it } from 'vitest';
-export { groupFeedback } from '../../../scripts/feedback-signals.mjs';
+export { groupFeedback } from '../../../packages/scripts/feedback-signals.mjs';
 export { createAgentCommand } from './agent-command.js';
 export { DAEMON_OPERATION_NAMES,DaemonService } from './daemon-service.js';
 export { FEEDBACK_TRIAGE_PULL_SQL } from './feedback-triage-workflow.js';

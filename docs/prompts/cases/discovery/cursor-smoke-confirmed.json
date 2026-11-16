@@ -1,9 +1,9 @@
 {
   "sourceHashes": {
-    "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-    "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-    "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-    "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+    "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+    "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+    "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+    "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
     "docs/prompts/cases/discovery/corpus.json": "077836425b3a061509a617a1cbdb8f9d918ec4629178456a554007272b8a522c",
     "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
     "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",

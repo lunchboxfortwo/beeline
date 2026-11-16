@@ -373,7 +373,7 @@ Create an assignment a fresh session can execute without the parent transcript. 
   - \`## Acceptance criteria\`: the requester's own rules from \`## Intent\`, quoted verbatim and numbered, each naming the test (existing or to be written) that fails if the rule is broken anywhere. Criteria are the invariant; stories are examples of it. Write "None beyond the stories." when the request states no rule.
   - \`## Non-goals\`: explicit exclusions.
   - \`## Risks\`: what could go wrong, and for whom.
-  - \`## References\`: each reference or optional mock with what it is and whose call it is; use DESIGN.md or existing app styles when there is no mock.
+  - \`## References\`: each reference or optional mock with what it is and whose call it is; use docs/DESIGN.md or existing app styles when there is no mock.
   - \`## Visual scope\` for anything a person sees: list exact allowed visual changes, say "No other visual change.", and list required before/after screenshots for applicable surfaces, Bone and Obsidian themes, and phone and web platforms.
   Add implementation guidance under further headings when it helps.
   For repository bugfixes only, add Reproduction <id>: <real-target steps and observed failure>, or Reproduction not feasible: <reason>; Stand-in: <closest check>; labels may be bold or italic, and Stand-in: may follow on another line in the same Reproduction section. Done repeats that reproduction or stand-in successfully.

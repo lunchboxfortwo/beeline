@@ -91,7 +91,7 @@ jobs:
           mobile: "true"
       - name: Run sequential workspace checks
         id: checks
-        run: node scripts/run-ci-workspace-checks.mjs
+        run: node packages/scripts/run-ci-workspace-checks.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -119,15 +119,15 @@ jobs:
         with:
           mobile: "true"
       - name: Prove corner preparation and iOS capture runner setup
-        run: node --test scripts/prepare-corner.test.mjs scripts/review-exact-head.test.mjs scripts/ios-signin/capture.test.mjs scripts/corner-job.test.mjs scripts/android-build-failure.test.mjs
+        run: node --test packages/scripts/prepare-corner.test.mjs packages/scripts/review-exact-head.test.mjs packages/scripts/ios-signin/capture.test.mjs packages/scripts/corner-job.test.mjs packages/scripts/android-build-failure.test.mjs
       - name: Test feedback grouping and ranking
         run: npm run test:feedback-signals
       - name: Test nightly dispatch and main-failure reporting
-        run: node --test scripts/nightly-checks.test.mjs scripts/report-main-checks.test.mjs
+        run: node --test packages/scripts/nightly-checks.test.mjs packages/scripts/report-main-checks.test.mjs
       - name: Test server coverage records and PR selection
-        run: node --test --test-concurrency=1 scripts/server-test-selection.test.mjs scripts/coverage-map-artifact.test.mjs
+        run: node --test --test-concurrency=1 packages/scripts/server-test-selection.test.mjs packages/scripts/coverage-map-artifact.test.mjs
       - name: Protect nightly latency history and measured Loops publication
-        run: node --test --test-concurrency=1 scripts/latency-rig/nightly-*.test.mjs
+        run: node --test --test-concurrency=1 packages/scripts/latency-rig/nightly-*.test.mjs
       - name: Block unbounded outside requests and waiting-screen regressions
         run: |
           npm test --prefix apps/mobile -- --run sources/sync/transport/monolith-operation.test.ts --maxWorkers="$CI_TEST_WORKERS" --minWorkers=1
@@ -136,7 +136,7 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=4096
         run: |
-          node ../../scripts/generate-network-codecs.mjs --check
+          node ../../packages/scripts/generate-network-codecs.mjs --check
           for suite in src/*.test.ts; do
             npx vitest run "$suite" --maxWorkers="$CI_TEST_WORKERS" --minWorkers=1
           done
@@ -184,7 +184,7 @@ jobs:
           mobile: "true"
         if: steps.changes.outputs.run == 'true'
       - name: Execute dead-code in its own checkout
-        run: timeout 15m bash scripts/ci-workspace-tasks.sh dead-code
+        run: timeout 15m bash packages/scripts/ci-workspace-tasks.sh dead-code
         if: steps.changes.outputs.run == 'true'
   body-suite:
     name: BODY SUITE
@@ -226,7 +226,7 @@ jobs:
           CI_FRAME_BUDGET: ${{ !inputs.release_sha }}
           CI_STATE_UPGRADE: "true"
         run: |-
-          node scripts/workspace-test-selection.mjs body --out "$RUNNER_TEMP/workspace-selection.json"
+          node packages/scripts/workspace-test-selection.mjs body --out "$RUNNER_TEMP/workspace-selection.json"
           echo "WORKSPACE_TEST_SELECTION=$(cat "$RUNNER_TEMP/workspace-selection.json")" >> "$GITHUB_ENV"
         if: steps.changes.outputs.run == 'true'
       - run: sudo ln -sf "$(command -v node)" /usr/bin/node
@@ -238,10 +238,10 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y bubblewrap
         if: steps.changes.outputs.run == 'true'
       - name: Run the hermetic Body suite
-        run: node scripts/run-workspace-tests.mjs body
+        run: node packages/scripts/run-workspace-tests.mjs body
         if: steps.changes.outputs.run == 'true'
       - name: Prove free-agent boot refresh and startup deadlines
-        run: node --test --test-concurrency=1 infra/free-agent/entrypoint.test.mjs
+        run: node --test --test-concurrency=1 apps/infra/free-agent/entrypoint.test.mjs
         if: steps.changes.outputs.run == 'true'
   server-suite-shard:
     name: SERVER SUITE SHARD ${{ matrix.shard }}
@@ -428,7 +428,7 @@ jobs:
           NODE_OPTIONS: --max-old-space-size=4096
           BEELINE_COMMAND_TEST_POSTGRES_URL: postgres://postgres:isolated-proof@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/postgres
         run: |
-          npx vitest run tests/seams/server-db.test.ts --maxWorkers=2 --minWorkers=1
+          npx vitest run packages/test-helpers/seams/server-db.test.ts --maxWorkers=2 --minWorkers=1
           npm test -w @beeline/server -- src/production-deadlocks.postgres.test.ts --maxWorkers=2 --minWorkers=1
           npm test -w @beeline/server -- src/corner-advance-contention.postgres.test.ts --maxWorkers=2 --minWorkers=1
           npm test -w @beeline/server -- src/connection-presence.postgres.test.ts --maxWorkers=2 --minWorkers=1
@@ -503,7 +503,7 @@ jobs:
           CI_FRAME_BUDGET: ${{ !inputs.release_sha }}
           CI_STATE_UPGRADE: "true"
         run: |-
-          node scripts/workspace-test-selection.mjs mobile --out "$RUNNER_TEMP/workspace-selection.json"
+          node packages/scripts/workspace-test-selection.mjs mobile --out "$RUNNER_TEMP/workspace-selection.json"
           echo "WORKSPACE_TEST_SELECTION=$(cat "$RUNNER_TEMP/workspace-selection.json")" >> "$GITHUB_ENV"
         if: steps.changes.outputs.run == 'true'
       - uses: actions/setup-java@v4
@@ -512,7 +512,7 @@ jobs:
           java-version: "17"
         if: steps.changes.outputs.run == 'true'
       - name: Run the mobile suite in its own checkout
-        run: timeout 20m bash scripts/ci-workspace-tasks.sh mobile-suite
+        run: timeout 20m bash packages/scripts/ci-workspace-tasks.sh mobile-suite
         if: steps.changes.outputs.run == 'true'
   mobile-export-reachability:
     name: MOBILE-EXPORT REACHABILITY
@@ -553,7 +553,7 @@ jobs:
           mobile: "true"
         if: steps.changes.outputs.run == 'true'
       - name: Execute mobile-export-reachability in its own checkout
-        run: timeout 30m bash scripts/ci-workspace-tasks.sh mobile-export-reachability
+        run: timeout 30m bash packages/scripts/ci-workspace-tasks.sh mobile-export-reachability
         if: steps.changes.outputs.run == 'true'
   # Required check. Its decision matches the server shards', which leave the
   # wall-clock budgets to this job on PRs (SERVER_HOSTED_TIMING).
@@ -723,14 +723,14 @@ jobs:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           git fetch --no-tags --depth=1 origin "$PR_BASE_SHA"
-          node scripts/pr-store-build.mjs "$PR_BASE_SHA"
+          node packages/scripts/pr-store-build.mjs "$PR_BASE_SHA"
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
         if: steps.changes.outputs.run == 'true'
       - name: Execute native-fingerprint in its own checkout
-        run: timeout 15m bash scripts/ci-workspace-tasks.sh native-fingerprint
+        run: timeout 15m bash packages/scripts/ci-workspace-tasks.sh native-fingerprint
         if: steps.changes.outputs.run == 'true'
   app-link-associations:
     name: APP LINK ASSOCIATIONS
@@ -753,7 +753,7 @@ jobs:
         id: changes
         env:
           CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          CI_PATHS: ^apps/api/|^web/|^packages/
+          CI_PATHS: ^apps/api/|^apps/site/|^packages/
         run: |-
           run=true
           if [ "$GITHUB_EVENT_NAME" = pull_request ] && git fetch --no-tags --depth=1 origin "$CI_BASE_SHA" && git diff --name-only "$CI_BASE_SHA" HEAD > "$RUNNER_TEMP/changed-files"; then
@@ -769,7 +769,7 @@ jobs:
       - uses: ./.github/actions/ci-workspace
         if: steps.changes.outputs.run == 'true'
       - name: Verify the committed app associations, Pages build, and bundle merge
-        run: "node --test --test-concurrency=1    scripts/verify-beeline-install.test.mjs    scripts/verify-web-deployment.test.mjs "
+        run: "node --test --test-concurrency=1    packages/scripts/verify-beeline-install.test.mjs    packages/scripts/verify-web-deployment.test.mjs "
         if: steps.changes.outputs.run == 'true'
   actionlint:
     name: ACTIONLINT
@@ -788,7 +788,7 @@ jobs:
         id: changes
         env:
           CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          CI_PATHS: ^\.github/|^scripts/|\.sh$
+          CI_PATHS: ^\.github/|^packages/scripts/|\.sh$
         run: |-
           run=true
           if [ "$GITHUB_EVENT_NAME" = pull_request ] && git fetch --no-tags --depth=1 origin "$CI_BASE_SHA" && git diff --name-only "$CI_BASE_SHA" HEAD > "$RUNNER_TEMP/changed-files"; then
@@ -824,10 +824,10 @@ jobs:
         run: npm run lint:shell
         if: steps.changes.outputs.run == 'true'
       - name: Test release preflight, failure intake and governor regressions
-        run: node --test --test-concurrency=1 scripts/unified-release.test.mjs scripts/release-channel.test.mjs scripts/helper-downloads.test.mjs scripts/build-beeline-bundle.test.mjs scripts/release-local.test.mjs scripts/release-local-policy.test.mjs scripts/pr-store-build.test.mjs scripts/ota-launch-proof.test.mjs scripts/npm-package-visibility.test.mjs scripts/smoke-helper-package.test.mjs       scripts/release-artifact-allowlist.test.mjs scripts/assert-mobile-release-origin.test.mjs scripts/rollout-schema.test.mjs scripts/release-test-report.test.mjs scripts/ci-release-contract.test.mjs scripts/github-app-installation-token.test.mjs
+        run: node --test --test-concurrency=1 packages/scripts/unified-release.test.mjs packages/scripts/release-channel.test.mjs packages/scripts/helper-downloads.test.mjs packages/scripts/build-beeline-bundle.test.mjs packages/scripts/release-local.test.mjs packages/scripts/release-local-policy.test.mjs packages/scripts/pr-store-build.test.mjs packages/scripts/ota-launch-proof.test.mjs packages/scripts/npm-package-visibility.test.mjs packages/scripts/smoke-helper-package.test.mjs       packages/scripts/release-artifact-allowlist.test.mjs packages/scripts/assert-mobile-release-origin.test.mjs packages/scripts/rollout-schema.test.mjs packages/scripts/release-test-report.test.mjs packages/scripts/ci-release-contract.test.mjs packages/scripts/github-app-installation-token.test.mjs
         if: steps.changes.outputs.run == 'true'
       - name: Refuse release state in artifacts and caches
-        run: node scripts/release-artifact-allowlist.mjs
+        run: node packages/scripts/release-artifact-allowlist.mjs
         if: steps.changes.outputs.run == 'true'
       - name: Check no script, workflow, unit or skill names a deleted file
         run: npm run lint:referenced-paths
@@ -892,4 +892,4 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Mirror the pinned upstream indexes
-        run: ./scripts/mirror-ci-images.sh
+        run: ./packages/scripts/mirror-ci-images.sh

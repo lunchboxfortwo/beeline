@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { evaluateRule, type Transcript } from '../../../../scripts/prompt-case-rules.js';
+import { evaluateRule, type Transcript } from '../../../../packages/scripts/prompt-case-rules.js';
 
 const root = process.argv[2]!;
 const cases = resolve(dirname(process.argv[1]!), '..');

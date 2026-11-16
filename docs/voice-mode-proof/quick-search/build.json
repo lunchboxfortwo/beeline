@@ -7,8 +7,8 @@
     "apps/server/src/voice-room-runtime.ts": "f4afee19151af54c381fa9a15270e2cfd4ebed2b1c2c9052530cdcf9604e62bd",
     "apps/server/src/voice-service.ts": "f9e431c4377f815fbf3c0809c8e57182ad8062d0f60f4ae2dd119df65f30a4af",
     "apps/server/src/agent-command.ts": "9146b3218b752df0ae5c9f3246f17384ac930b04233520348b4345d7831db4d0",
-    "scripts/prove-voice-search.ts": "be4885e1d27c27698ccea43de271bf72b3a3a0f107af380cdfe06cfc6ef0ef14",
-    "scripts/prove-voice-search.py": "24df06c4b80c3ca0b494f0e89cdb3b223edaa56f508097febd4068a23f912fc4"
+    "packages/scripts/prove-voice-search.ts": "be4885e1d27c27698ccea43de271bf72b3a3a0f107af380cdfe06cfc6ef0ef14",
+    "packages/scripts/prove-voice-search.py": "24df06c4b80c3ca0b494f0e89cdb3b223edaa56f508097febd4068a23f912fc4"
   },
   "fixture": "Production Android voice hook and VoiceBar entry, native WebRTC; controlled STT, search and provider SSE/PCM; no physical phone or live-provider call latency measured."
 }

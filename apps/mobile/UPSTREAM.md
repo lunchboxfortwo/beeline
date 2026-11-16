@@ -8,4 +8,4 @@
 - Clone date: 2026-08-08T02:57:43Z
 - License: MIT (see LICENSE)
 
-This directory is a fork of Happy's mobile client for Buzzy (see repo root spec.md).
+This directory is a fork of Happy's mobile client for Buzzy.

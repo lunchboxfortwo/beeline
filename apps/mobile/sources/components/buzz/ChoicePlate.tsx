@@ -29,7 +29,7 @@ export type TranscriptCardChoice = {
 };
 
 /**
- * One lettered option plate (DESIGN.md: choice options are plates). A Room's
+ * One lettered option plate (docs/DESIGN.md: choice options are plates). A Room's
  * choice card and the Tray share it, so a choice reads the same everywhere.
  */
 export function TranscriptCardChoicePlate({

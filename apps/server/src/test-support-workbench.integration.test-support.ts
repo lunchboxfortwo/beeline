@@ -1,4 +1,4 @@
-import { phoneFetch } from '../../../tests/helpers/phone-operation.js';
+import { phoneFetch } from '../../../packages/test-helpers/helpers/phone-operation.js';
 
 import { ensureSystemDirectMessageRoom } from './system-line.js';
 
@@ -238,7 +238,7 @@ connectionReceiptCards,
 pairOwnerConnector,
 };
 }
-export { phoneFetch } from '../../../tests/helpers/phone-operation.js';
+export { phoneFetch } from '../../../packages/test-helpers/helpers/phone-operation.js';
 export { ensureSystemDirectMessageRoom } from './system-line.js';
 export { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 export { createHash, randomUUID } from 'node:crypto';

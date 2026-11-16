@@ -1,25 +1,25 @@
 # Project agent memory
 
-Keep shared safety rules here; read the area guide below before editing that subsystem. Named code and tests hold implementation detail. UI authority: [DESIGN.md](DESIGN.md).
+Keep shared safety rules here; read the area guide below before editing that subsystem. Named code and tests hold implementation detail. UI authority: [DESIGN.md](docs/DESIGN.md).
 
 **Naming:** The product is **Beeline** in prose, docs and UI. Preserve legacy `buzz`/`Buzz` code identifiers, paths and wire tags (`buzz-dm`, `buzz-community-invite`); never rename those tags.
 
 ## Shared safety and authority
 
-- **Isolate lifecycle proofs.** Hand-testing `beeline start`/`pair` in a worktree can drive a real production daemon through shared git runtime pointers. Use isolated `HOME`, `XDG_CONFIG_HOME`, `XDG_STATE_HOME`, a separate native manager, and a throwaway `--repo` for pairing. Real install/start/update proofs: `scripts/helper-proof/run-linux.sh`; guard: `lifecycle-test-guard.ts`. Details: [development guide](docs/agent-development.md).
+- **Isolate lifecycle proofs.** Hand-testing `beeline start`/`pair` in a worktree can drive a real production daemon through shared git runtime pointers. Use isolated `HOME`, `XDG_CONFIG_HOME`, `XDG_STATE_HOME`, a separate native manager, and a throwaway `--repo` for pairing. Real install/start/update proofs: `packages/scripts/helper-proof/run-linux.sh`; guard: `lifecycle-test-guard.ts`. Details: [development guide](docs/agent-development.md).
 - **Merge authority:** live GitHub checks green + configured reviewer approval on the exact PR head (no approval when unconfigured) + no hold. `GitHubOperations.landCorner` is the only merge path. No agent instruction may contain `gh pr merge`; yolo never bypasses the gate. Read [corner authority and lifecycle](docs/agent-corners.md) before changing corners, review or dispatch.
 - **Work authority:** only `agent_commands` authorize turns; membership authorizes Room/corner access. Messages use an (agent, place) tuple; replies follow their recorded sender and place. Conversation history is context. Contracts: [corners](docs/agent-corners.md), [server surfaces](docs/agent-server-surfaces.md).
 - **Read authority:** server-indexed DTOs own durable client state; render validated responses as-is. Live events invalidate or deliver committed deltas; never restore client reducers, snapshots or phone polling. Read [server surfaces and Room reads](docs/agent-server-surfaces.md).
-- **One phone connection:** the phone talks to Beeline over the main live socket (`live-connection.ts`). Every other network call site is listed with its fate in `apps/mobile/network-channels.json`; `scripts/check-phone-network-channels.mjs` (TYPECHECK) fails a new site or a list that grew. Never add an entry to make it pass.
+- **One phone connection:** the phone talks to Beeline over the main live socket (`live-connection.ts`). Every other network call site is listed with its fate in `apps/mobile/network-channels.json`; `packages/scripts/check-phone-network-channels.mjs` (TYPECHECK) fails a new site or a list that grew. Never add an entry to make it pass.
 - **Deleted features stay deleted.** Chat-sentence tombstones: `isRetiredAgentNotice` (`packages/buzz-client/src/retired-agent-notices.ts`, exact set + bounded structural regexes), applied in `room-list-row.ts` and the mobile cache scrub. Repoint here; never restore the feature.
 - **Releases:** merging to `main` never releases. Routine dispatch targets `next`; only an explicit owner command promotes `next` to `latest`. Firstmate calls the first-party `dispatch_release` tool inside a human-commanded agent turn with no release worker and no inputs; the server records dispatch attribution. Overrides are recovery-only. Read [release policy and recovery](docs/release-pipeline.md) before release work. Never suggest `npx beeline`; CLI recovery is `npx usebeeline update` ([bundle runbook](docs/cli-bundle-channel.md)).
 
 ## Development and CI
 
-- `fm/*` branches may stack; inspect live PR bases before assuming work is on `main`. Never stage ignored `web/dl/` bundles. Resolve all merge conflicts and semantic overlaps in one batch before validation ([development guide](docs/agent-development.md)).
+- `fm/*` branches may stack; inspect live PR bases before assuming work is on `main`. Never stage ignored `apps/site/dl/` bundles. Resolve all merge conflicts and semantic overlaps in one batch before validation ([development guide](docs/agent-development.md)).
 - Root `npm run typecheck` includes workspaces, mobile and scripts; `TYPECHECK` and `SHARED PACKAGE TESTS` run on every PR. After a shared row-type change, integrate `origin/main` and rerun typecheck. `checks.yml` job names are required check contexts: never rename them; gates must execute something. Path checks: `npm run lint:referenced-paths` fails a package script, workflow, systemd unit or skill that names a missing file.
-- Code files cap at 1,000 lines (only exact generated paths are exempt). Module sinks stay in their owner files (`architecture/invariants.json`, run by `scripts/check-architecture.mjs` in TYPECHECK). Fix a violation as its message says; candidate invariants must pass CI and the owner reviews rule changes weekly after merging ([architecture/README.md](architecture/README.md)).
-- Dead code is baseline-gated: `npm run dead-code` builds workspace `dist/` then checks Knip. Use `dead-code:baseline` only for an intentional API addition (`knip-baseline.json`, `knip.jsonc`).
+- Code files cap at 1,000 lines (only exact generated paths are exempt). Module sinks stay in their owner files (`docs/architecture/invariants.json`, run by `packages/scripts/check-architecture.mjs` in TYPECHECK). Fix a violation as its message says; candidate invariants must pass CI and the owner reviews rule changes weekly after merging ([docs/architecture/README.md](docs/architecture/README.md)).
+- Dead code is baseline-gated: `npm run dead-code` builds workspace `dist/` then checks Knip. Use `dead-code:baseline` only for an intentional API addition (`packages/scripts/knip-baseline.json`, `packages/scripts/knip.jsonc`).
 - Edit the product documentation in root `README.md` ([Body guide](docs/agent-body.md)).
 
 ## Read before editing an area
@@ -33,7 +33,7 @@ Keep shared safety rules here; read the area guide below before editing that sub
 | Institutional memory and saved workflow runtime | [Memory and workflow invariants](docs/agent-memory-workflows.md); [workflow format and tools](docs/workflows/README.md) |
 | Helper, harness, sandbox, ACP, models, sign-in, connectors | [Body agent invariants](docs/agent-body.md) |
 | System/card grammar, subscriptions, causes, approval resume | [System lines and events](docs/agent-system-events.md) |
-| Mobile identity, storage, transcript, push, components and UI | [Mobile client and UI invariants](docs/agent-mobile.md); [DESIGN.md](DESIGN.md) |
+| Mobile identity, storage, transcript, push, components and UI | [Mobile client and UI invariants](docs/agent-mobile.md); [DESIGN.md](docs/DESIGN.md) |
 | Signing, community, key succession, transport, links | [Client protocol](docs/agent-client-protocol.md) |
 | Helper bundle activation and updates | [CLI bundle runbook](docs/cli-bundle-channel.md) |
 | Server/mobile release, OTA compatibility and store submission | [Release pipeline](docs/release-pipeline.md) |

@@ -29,7 +29,7 @@ export function ownerGrantShareMessage(
  * of an error wall. The Room's binding stays pending server-side and completes
  * automatically once the owner installs (webhook or reconcile), which the Room
  * announces through its normal repository feed. This card is deliberately one
- * of DESIGN.md's sanctioned boxed regions: it is a single, non-repeating state
+ * of docs/DESIGN.md's sanctioned boxed regions: it is a single, non-repeating state
  * the reader must find and act on.
  */
 export const OwnerGrantNeededCard = memo(function OwnerGrantNeededCard({

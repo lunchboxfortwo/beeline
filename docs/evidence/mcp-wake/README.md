@@ -23,7 +23,7 @@ Server regressions cover consent and profile delivery, another Workspace member'
 With the local fixture running:
 
 ```sh
-MCP_PROOF_PORT=18965 BEELINE_MCP_WEBHOOK_KEY=synthetic-browser-sealing-key node --import tsx scripts/prove-rooms-mcp.mjs --serve
+MCP_PROOF_PORT=18965 BEELINE_MCP_WEBHOOK_KEY=synthetic-browser-sealing-key node --import tsx packages/scripts/prove-rooms-mcp.mjs --serve
 npm run prove:rooms-mcp-consent-browser
 ```
 

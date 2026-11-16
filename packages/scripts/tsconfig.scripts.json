@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": true,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "types": ["node"]
+  },
+  "include": ["**/*.ts", "../test-helpers/seams/**/*.ts"]
+}

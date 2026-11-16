@@ -17,7 +17,7 @@ runs:
       shell: bash
       env:
         PLATFORM: ${{ inputs.platform }}
-      run: node scripts/native-agent-cache.mjs "$PLATFORM"
+      run: node packages/scripts/native-agent-cache.mjs "$PLATFORM"
     - id: cache
       uses: actions/cache@v4
       with:

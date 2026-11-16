@@ -41,7 +41,7 @@ were uncommitted JavaScript changes during capture.
 1. Run `npm run corner:prepare`. Lease an emulator with
    `beeline emulator -avd buzzy_api36 -no-window -gpu swiftshader_indirect`.
 2. Create an isolated local database whose name contains `latency_rig`.
-   Start `scripts/latency-rig/run-local.sh` with `LATENCY_RIG_DATABASE_URL`
+   Start `packages/scripts/latency-rig/run-local.sh` with `LATENCY_RIG_DATABASE_URL`
    pointing to it, a disposable `LATENCY_RIG_REVIEW_SECRET`, server port 19463,
    proxy port 19462, and `LATENCY_RIG_RTT_MS=0`. This fixture stays local.
 3. In apps/mobile, set `EXPO_PUBLIC_BUZZY_MONOLITH_URL=http://10.0.2.2:19462`,

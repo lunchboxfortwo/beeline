@@ -178,7 +178,7 @@ export function useScrollFollowOnLayoutChange({
 
 /**
  * Desktop tail-follow (2026-09, superseding eight prior scroll-timing
- * heuristics — see proof/desktop-append-overlap/NOTES.md): React Native
+ * heuristics — see the append-overlap investigation): React Native
  * Web's `scrollToEnd`/`scrollToOffset`/`onContentSizeChange` report RN's own
  * provisional layout accounting, which can race the browser's real commit
  * and land the reader mid-list. The desktop transcript no longer asks RN Web

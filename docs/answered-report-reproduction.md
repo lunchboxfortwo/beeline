@@ -37,7 +37,7 @@ After the fix, the same HTTP path returns HTTP 409 and the report is absent from
 
 ```sh
 npm run build -w @beeline/server
-node --import tsx scripts/prove-answered-report.mjs
+node --import tsx packages/scripts/prove-answered-report.mjs
 npm test -w @beeline/server -- src/commander-wakes.integration.test.ts src/wake-inbox.integration.test.ts src/corner-attention.integration.test.ts --maxWorkers=2 --minWorkers=1
 npm run typecheck
 ```

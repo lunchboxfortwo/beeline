@@ -85,8 +85,8 @@ subscriptions reconcile every 30 seconds while the app is running.
 
 ### CI cannot prove the OS actually renders the banner
 
-`scripts/desktop-notification-proof-macos.sh` and
-`scripts/desktop-notification-proof-windows.ps1` (run from `.github/workflows/desktop.yml`
+The historical macOS notification proof and
+`packages/scripts/desktop-notification-proof-windows.ps1` (run from `.github/workflows/desktop.yml`
 on every PR, `continue-on-error: true`) install the real signed/notarized
 bundle, launch it the way a user would (`open -a` on macOS, the installed
 `.exe` on Windows), fire the same `tauri_plugin_notification` call the app

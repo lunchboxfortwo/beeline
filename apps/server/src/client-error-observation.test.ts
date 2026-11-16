@@ -1,4 +1,4 @@
-import { phoneFetch } from '../../../tests/helpers/phone-operation.js';
+import { phoneFetch } from '../../../packages/test-helpers/helpers/phone-operation.js';
 import { randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { afterEach, expect, it, vi } from 'vitest';

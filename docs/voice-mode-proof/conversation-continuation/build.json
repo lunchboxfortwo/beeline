@@ -10,8 +10,8 @@
     "apps/server/src/voice-request-assembler.ts": "c1300a66ecc152f97bc780ac5c4961b19df1a6cda629b2398e64978126371a40",
     "apps/server/src/voice-service.ts": "cf4f98be9bcbee202d91086285891cf5415c95dbdea4787ec17f124928cde63c",
     "apps/body/src/server-command-intake.ts": "401171e73a965f6da1e3f782342bfebb0d003c1704f8f3435de77006d6778ab2",
-    "scripts/prove-voice-delivery.ts": "3ca9cb0a5e11653d83d615d944d457aefd432b497f3cf467a5c25156473374fd",
-    "scripts/prove-voice-continuation-android.py": "419e49f03302fc44630ecad743140e9b93968351499380fc27d7bbdc9acb1fc6"
+    "packages/scripts/prove-voice-delivery.ts": "3ca9cb0a5e11653d83d615d944d457aefd432b497f3cf467a5c25156473374fd",
+    "packages/scripts/prove-voice-continuation-android.py": "419e49f03302fc44630ecad743140e9b93968351499380fc27d7bbdc9acb1fc6"
   },
   "boundary": "Revision 4 server; release Hermes app predating the mobile mock gate, native WebRTC, LiveKit v1.9.12, disposable database, controlled Flux finals and provider SSE/PCM; actual command dispatch, claim, report and PhoneService reads. No command amendment."
 }

@@ -1,7 +1,7 @@
 /**
  * The Workspace tile, and the one rule that seats a picture inside it.
  *
- * A Workspace picture is the sole photo exception in the product (`DESIGN.md`,
+ * A Workspace picture is the sole photo exception in the product (`docs/DESIGN.md`,
  * "Workspace exception"), so wherever it appears it has to look like the same
  * object: a picture in a frame, not a picture cropped by one. A border eats
  * into the curve, so the radius *inside* the bezel is the tile radius LESS the

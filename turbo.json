@@ -2,8 +2,8 @@
   "$schema": "https://turbo.build/schema.json",
   "ui": "stream",
   "globalDependencies": [
-    "tsconfig*.json",
-    "scripts/build-usebeeline-package.mjs"
+    "packages/scripts/tsconfig*.json",
+    "packages/scripts/build-usebeeline-package.mjs"
   ],
   "tasks": {
     "build": {

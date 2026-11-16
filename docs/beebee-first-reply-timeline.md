@@ -1,6 +1,6 @@
 # Beebee first-reply timeline
 
-`infra/free-agent/timeline-proof.mjs` measures the real mention-to-reply path on
+`apps/infra/free-agent/timeline-proof.mjs` measures the real mention-to-reply path on
 Fly with three fresh Workspaces. Each sample covers first boot with no Machine,
 then a mention immediately after the Machine reaches suspended. The helper,
 Pi/ACP and model are real. A disposable local server/database and Cloudflare

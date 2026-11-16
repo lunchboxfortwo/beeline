@@ -64,7 +64,7 @@ and verifies that the SDK session environment overrides it with `0`, with no
 reminder, internal retry or assistant text. Raw observations are saved beside
 the existing thinking-only proof.
 
-The checked result summary is [native-reminder.json](evidence/quiet-wakes/native-reminder.json).
+The checked result summary is native-reminder.json.
 
 Beeline disables this native reminder for its Claude sessions because the
 native gate cannot distinguish a nonhuman wake from a human waiting for a

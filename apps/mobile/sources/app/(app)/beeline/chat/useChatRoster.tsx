@@ -174,7 +174,7 @@ export function useChatRoster([
       options.set(userPubkey, {
         pubkey: userPubkey,
         // The viewer is named like every other speaker; brass on the name is
-        // the one thing that marks them (DESIGN.md).
+        // the one thing that marks them (docs/DESIGN.md).
         name: selfProfile?.name ?? fallbackMemberName(userPubkey),
         handle: selfProfile?.handle ?? fallbackMemberHandle(userPubkey),
         kind: 'person',

@@ -18,7 +18,7 @@ server promotion checks the self-hosted runner's Fly authentication and runs:
 
 ```bash
 flyctl deploy . \
-  --config fly.beeline-server.toml \
+  --config apps/infra/fly.beeline-server.toml \
   --dockerfile apps/server/Dockerfile \
   --app beeline-server \
   --build-arg "BEELINE_RELEASE_VERSION=$RELEASE_VERSION" \
@@ -45,7 +45,7 @@ the Fly secret configuration.
 Before `reopen`, rollback may re-point daemon runtime records and the phone OTA to the old stack:
 
 ```bash
-scripts/cutover-monolith.sh --rollback --target-origin https://server.usebeeline.app
+packages/scripts/cutover-monolith.sh --rollback --target-origin https://server.usebeeline.app
 ```
 
 Set `CUTOVER_ROLLBACK_DAEMONS_COMMAND`, `CUTOVER_ROLLBACK_OTA_COMMAND`, and `CUTOVER_ROLLBACK_VERIFY_COMMAND` first. The daemon rollback command removes the staged `transport` object; it never invents or reuses a consumed exchange token.

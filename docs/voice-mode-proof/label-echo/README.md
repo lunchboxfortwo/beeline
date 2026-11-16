@@ -49,7 +49,7 @@ does not measure live model generation, physical microphone or speaker latency.
 
 ## Repeat
 
-Use `scripts/prove-voice-delivery.ts` with local LiveKit at port 17890 and its
+Use `packages/scripts/prove-voice-delivery.ts` with local LiveKit at port 17890 and its
 documented development credentials. In an ignored copy of that script, replace
 the conversational fixture `Ready.` with
 `Ruby (@ruby) [#beeline/item/previous]: A small ceramic planter.`.

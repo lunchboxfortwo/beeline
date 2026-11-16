@@ -9,7 +9,7 @@ import { join, resolve } from 'node:path';
 import { waitForProcessExit } from '../process-exit.js';
 import { ensureBridge, refreshJoinedSessionBridge } from './bridge.js';
 import { readState, updateState } from './store.js';
-import { recoveryCliBundleArgs } from '../../../../scripts/recovery-cli-bundle.mjs';
+import { recoveryCliBundleArgs } from '../../../../packages/scripts/recovery-cli-bundle.mjs';
 
 const artifacts = mkdtempSync(join(tmpdir(), 'bridge-resilience-build-'));
 const good = join(artifacts, 'good.mjs'), broken = join(artifacts, 'broken.mjs');

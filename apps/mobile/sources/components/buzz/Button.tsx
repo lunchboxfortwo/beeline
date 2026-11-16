@@ -76,7 +76,7 @@ export type ButtonProps = Omit<PressableProps, 'children' | 'style'> & ButtonLay
 };
 
 /**
- * The one button (DESIGN.md → Buttons). House radius, 44 tall, `heading` label.
+ * The one button (docs/DESIGN.md → Buttons). House radius, 44 tall, `heading` label.
  * Replaces MonoButton, BrassButton, OnboardingButton and RoundButton.
  */
 export function Button(props: ButtonProps) {

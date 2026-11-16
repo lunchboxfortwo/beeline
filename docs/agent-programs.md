@@ -74,7 +74,7 @@ and [Claude adapter implementation](https://github.com/agentclientprotocol/claud
 ## Daily check
 
 The explicitly dispatched GitHub workflow `.github/workflows/acp-adapters.yml` and the
-feedback-triage workflow's `adapters` step run `node scripts/check-acp-adapters.mjs`
+feedback-triage workflow's `adapters` step run `node packages/scripts/check-acp-adapters.mjs`
 after building Body. It installs the three latest adapters into temporary
 prefixes and uses the installed programs. Every check has private
 HOME/XDG/config/cache directories and an explicit environment without provider

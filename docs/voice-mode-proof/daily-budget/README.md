@@ -22,7 +22,7 @@ publishing its mic.
    7881 to 17885, and UDP 7882 to 17886.
 2. Create `.beeline-proof/budget`, then generate the warning:
    `ffmpeg -f lavfi -i "flite=text='Two minutes left today'" -ar 24000 -ac 1 -f s16le .beeline-proof/budget/warning.pcm`.
-3. Run `node --import tsx scripts/prove-voice-budget.ts`. The server listens on
+3. Run `node --import tsx packages/scripts/prove-voice-budget.ts`. The server listens on
    loopback port 38497. Its review secret is synthetic and valid only there.
 4. Prebuild Android with its normal `index.ts` entry. For this local build only,
    disable Expo updates and allow cleartext HTTP in the generated manifest.

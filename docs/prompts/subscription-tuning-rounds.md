@@ -70,7 +70,7 @@ exact median across requests after definitions load. Codex totals remain separat
 Recount saved tune results without calling a model:
 
 ```sh
-node --import tsx scripts/prompt-token-audit.mjs .beeline-proof/token-audit.json \
+node --import tsx packages/scripts/prompt-token-audit.mjs .beeline-proof/token-audit.json \
   .beeline-proof/subscription-round-{0,1,2,3}/{luna,sol,terra}/result.json
 ```
 

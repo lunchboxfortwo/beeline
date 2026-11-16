@@ -82,6 +82,6 @@ when a future native capability demonstrably requires one.
 Run the local contract checks with:
 
 ```sh
-node --test scripts/desktop-signing.test.mjs
+node --test packages/scripts/desktop-signing.test.mjs
 npm run lint:workflows
 ```

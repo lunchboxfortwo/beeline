@@ -8,7 +8,7 @@ The regression stand-in is the actual HTTP OAuth/MCP fixture in `apps/server/src
 
 ## Visible proof
 
-The built server ran with `MCP_PROOF_PORT=4491 node --import tsx scripts/prove-rooms-mcp.mjs --connect-pages`. Its synthetic identity provider reached the real consent page without any production account. The Starter instructions panel displayed the shared prompt. Copy showed Copied, and browser clipboard contents matched the complete shared constant exactly.
+The built server ran with `MCP_PROOF_PORT=4491 node --import tsx packages/scripts/prove-rooms-mcp.mjs --connect-pages`. Its synthetic identity provider reached the real consent page without any production account. The Starter instructions panel displayed the shared prompt. Copy showed Copied, and browser clipboard contents matched the complete shared constant exactly.
 
 The full production `AgentProfileView` and `McpStarterRoutine` were bundled through the existing `render-agent-profile-voice-proof.mjs` React Native Web harness, with a synthetic connected member (`wake: { url: null, keySet: false }`) and a clipboard adapter. The native platform/transport adapters were fixtures. Copy showed Copied and wrote the same complete constant. After asynchronous profile updates, the prompt remained present exactly once.
 

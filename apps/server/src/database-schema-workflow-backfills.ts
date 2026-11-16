@@ -180,7 +180,7 @@ ALTER TABLE service_review_visits ADD COLUMN IF NOT EXISTS receipt jsonb;
 ALTER TABLE service_review_visits ADD COLUMN IF NOT EXISTS completed_at timestamptz;
 
 -- Retained for serving/rollback compatibility after completed class retirement.
--- The reviewed drop is staged in scripts/audit-decisions-drop-columns.sql.
+-- The reviewed drop is staged in packages/scripts/audit-decisions-drop-columns.sql.
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS weight_tier_rules jsonb;
 
 CREATE TABLE IF NOT EXISTS rooms (

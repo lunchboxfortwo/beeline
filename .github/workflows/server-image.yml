@@ -28,4 +28,4 @@ jobs:
       - name: Prebuild this exact checkout SHA without deploying
         env:
           SOURCE_SHA: ${{ github.sha }}
-        run: bash scripts/server-release-image.sh prebuild "$SOURCE_SHA"
+        run: bash packages/scripts/server-release-image.sh prebuild "$SOURCE_SHA"

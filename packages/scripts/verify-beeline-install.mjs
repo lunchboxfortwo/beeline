@@ -1,0 +1,463 @@
+#!/usr/bin/env node
+
+import { spawn } from 'node:child_process';
+import { helperInstallAgentEnv } from './helper-install-env.mjs';
+import { createServer } from 'node:http';
+import { createServer as createNetServer } from 'node:net';
+import { constants } from 'node:fs';
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const webRoot = resolve(repoRoot, 'apps/site');
+
+async function expectedReadonlyTools() {
+  // The bundled MCP server asserts that its registration matches this policy
+  // list. Loading the compiled policy here keeps the install probe in lockstep
+  // with the same source of truth instead of maintaining a third inventory.
+  const { READ_ONLY_TOOL_NAMES } = await import(
+    resolve(repoRoot, 'apps', 'body', 'dist', 'read-only-policy.js')
+  );
+  return [...READ_ONLY_TOOL_NAMES];
+}
+
+function fail(message) {
+  throw new Error(`verify-beeline-install: ${message}`);
+}
+
+function hostPlatform() {
+  const os = process.platform === 'linux' ? 'linux' : process.platform === 'darwin' ? 'darwin' : '';
+  const arch = process.arch === 'x64' ? 'x64' : process.arch === 'arm64' ? 'arm64' : '';
+  return os && arch ? `${os}-${arch}` : '';
+}
+
+function requestedPlatform() {
+  const index = process.argv.indexOf('--platform');
+  return index >= 0 ? process.argv[index + 1] : hostPlatform();
+}
+
+/**
+ * picocolors enables color whenever CI is set, even piped, so CLI output can
+ * carry SGR sequences on a runner. Strip them before matching lines.
+ */
+function stripAnsi(text) {
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/\u001B\[[0-9;]*m/g, '');
+}
+
+export function run(command, args, options = {}) {
+  return new Promise((resolveRun, reject) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      env: options.env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    let inputClosed = false;
+    const closeInput = () => {
+      if (inputClosed) return;
+      inputClosed = true;
+      child.stdin.end();
+    };
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk;
+      if (options.untilAnswered === undefined) return;
+      const completeLines = stdout.endsWith('\n')
+        ? stdout.split('\n')
+        : stdout.split('\n').slice(0, -1);
+      for (const line of completeLines) {
+        if (!line) continue;
+        try {
+          if (JSON.parse(line).id === options.untilAnswered) {
+            closeInput();
+            break;
+          }
+        } catch {
+          // Ignore non-JSON output here; the caller owns response validation.
+        }
+      }
+    });
+    child.stderr.on('data', (chunk) => (stderr += chunk));
+    let timedOut = false;
+    const timer = options.timeoutMs
+      ? setTimeout(() => {
+          timedOut = true;
+          child.kill('SIGKILL');
+        }, options.timeoutMs)
+      : undefined;
+    child.once('error', (error) => {
+      if (timer) clearTimeout(timer);
+      reject(error);
+    });
+    child.once('exit', (code, signal) => {
+      if (timer) clearTimeout(timer);
+      if (timedOut) {
+        reject(
+          new Error(
+            `${command} timed out after ${options.timeoutMs}ms${stderr ? `\n${stderr}` : ''}`,
+          ),
+        );
+        return;
+      }
+      if (code === 0) resolveRun({ stdout, stderr });
+      else {
+        reject(
+          new Error(
+            `${command} exited code=${code} signal=${signal ?? 'none'}${stderr ? `\n${stderr}` : ''}`,
+          ),
+        );
+      }
+    });
+    if (options.input) child.stdin.write(options.input);
+    if (options.untilAnswered === undefined) closeInput();
+  });
+}
+
+async function serveBundle(platform) {
+  const routes = new Map([
+    ['/dl/beeline-bootstrap.mjs', resolve(webRoot, 'dl/beeline-bootstrap.mjs')],
+    ['/dl/beeline-bootstrap.mjs.sha256', resolve(webRoot, 'dl/beeline-bootstrap.mjs.sha256')],
+    ['/dl/beeline-' + platform + '.tar.gz', resolve(webRoot, 'dl', `beeline-${platform}.tar.gz`)],
+    [
+      '/dl/beeline-' + platform + '.tar.gz.sha256',
+      resolve(webRoot, 'dl', `beeline-${platform}.tar.gz.sha256`),
+    ],
+  ]);
+  const server = createServer(async (request, response) => {
+    if (request.url === '/dl/manifest.json') {
+      const archive = resolve(webRoot, 'dl', `beeline-${platform}.tar.gz`);
+      const metadata = JSON.parse(
+        (await run('tar', ['-xOf', archive, 'lib/beeline/bundle.json'])).stdout,
+      );
+      const digest = (await readFile(`${archive}.sha256`, 'utf8')).trim().split(/\s+/)[0];
+      response.end(
+        JSON.stringify({
+          sourceCommit: metadata.commit,
+          version: metadata.version,
+          bundles: { [platform]: { file: `beeline-${platform}.tar.gz`, sha256: digest } },
+        }),
+      );
+      return;
+    }
+    const path = routes.get(request.url ?? '');
+    if (!path) {
+      response.writeHead(404).end('not found');
+      return;
+    }
+    try {
+      response.writeHead(200).end(await readFile(path));
+    } catch {
+      response.writeHead(500).end('read failed');
+    }
+  });
+  await new Promise((resolveListen, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolveListen);
+  });
+  const address = server.address();
+  if (!address || typeof address === 'string') fail('local artifact server did not bind');
+  return { server, baseUrl: `http://127.0.0.1:${address.port}` };
+}
+
+function parseMcpResult(stdout, id) {
+  for (const line of stdout.trim().split('\n')) {
+    if (!line) continue;
+    const message = JSON.parse(line);
+    if (message.id === id) return message.result;
+  }
+  fail(`installed MCP did not answer request ${id}`);
+}
+
+function parseMcpTools(stdout) {
+  return (parseMcpResult(stdout, 2)?.tools ?? []).map((tool) => tool.name);
+}
+
+export function parseSquireAuthentication(received, proxyPath) {
+  const line = received.trim().split('\n')[0] ?? '';
+  if (!line) {
+    fail(`installed Squire proxy ${proxyPath} returned an empty authentication frame`);
+  }
+  try {
+    return JSON.parse(line);
+  } catch (error) {
+    fail(
+      `installed Squire proxy ${proxyPath} returned invalid authentication JSON: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
+async function verifySquireProxy(proxyPath, cwd, env) {
+  const token = 'beeline-install-proxy-token';
+  let received = '';
+  const broker = createNetServer((socket) => {
+    socket.setEncoding('utf8');
+    socket.on('data', (chunk) => {
+      received += chunk;
+      if (!received.includes('\nproxy-request\n')) return;
+      socket.end('proxy-response\n');
+    });
+  });
+  await new Promise((resolveListen, rejectListen) => {
+    broker.once('error', rejectListen);
+    broker.listen(0, '127.0.0.1', resolveListen);
+  });
+  try {
+    const address = broker.address();
+    if (!address || typeof address === 'string') fail('proxy broker did not bind');
+    const result = await run(
+      process.execPath,
+      [proxyPath, '127.0.0.1', String(address.port), token],
+      { cwd, env, input: 'proxy-request\n', timeoutMs: 10_000 },
+    );
+    const lines = received.trim().split('\n');
+    const authentication = parseSquireAuthentication(received, proxyPath);
+    if (authentication.token !== token || lines[1] !== 'proxy-request') {
+      fail('installed Squire proxy did not authenticate and forward stdin');
+    }
+    if (result.stdout !== 'proxy-response\n') {
+      fail(`installed Squire proxy did not forward broker output: ${result.stdout}`);
+    }
+  } finally {
+    await new Promise((resolveClose) => broker.close(resolveClose));
+  }
+}
+
+async function main() {
+  const platform = requestedPlatform();
+  if (!platform) fail('unsupported host platform');
+  const retainedRoot = process.env.BEELINE_INSTALL_VERIFY_ROOT?.trim();
+  const temporaryRoot = retainedRoot
+    ? resolve(retainedRoot)
+    : await mkdtemp(resolve(tmpdir(), 'beeline-bare-install-'));
+  if (retainedRoot) {
+    // Acceptance jobs consume the exact installation after this probe. Refuse
+    // an existing target instead of deleting a caller-selected directory.
+    await mkdir(temporaryRoot);
+  }
+  const binDir = resolve(temporaryRoot, 'prefix', 'bin');
+  const libDir = resolve(temporaryRoot, 'prefix', 'lib', 'beeline');
+  const bareCwd = resolve(temporaryRoot, 'no-repository');
+  await mkdir(bareCwd, { recursive: true });
+  const { server, baseUrl } = await serveBundle(platform);
+
+  try {
+    const env = {
+      ...process.env,
+      HOME: resolve(temporaryRoot, 'home'),
+      PATH: process.env.PATH ?? '',
+      BEELINE_INSTALL_BASE_URL: baseUrl,
+      BEELINE_LAB: '1',
+      XDG_STATE_HOME: resolve(temporaryRoot, 'state'),
+      XDG_CONFIG_HOME: resolve(temporaryRoot, 'config'),
+      BEELINE_INSTALL_PLATFORM: platform,
+      BEELINE_INSTALL_DIR: binDir,
+      BEELINE_INSTALL_LIB_DIR: libDir,
+    };
+    delete env.BEELINE_READONLY_MCP_BIN;
+    delete env.BEELINE_READONLY_MCP_SCRIPT;
+    delete env.BUZZ_DEV_MCP_BIN;
+    delete env.BUZZ_AGENT_BIN;
+    delete env.BEELINE_CODEGRAPH_BIN;
+
+    const installed = await run('sh', [resolve(webRoot, 'install.sh')], {
+      cwd: bareCwd,
+      env,
+    });
+    if (
+      !stripAnsi(installed.stdout).includes(
+        'verified bundle installed for isolated artifact verification',
+      )
+    ) {
+      fail(`installer success line omitted the read-only helper:\n${installed.stdout}`);
+    }
+
+    const runtimeEnv = { ...env, PATH: `${binDir}:${env.PATH}` };
+    delete runtimeEnv.BEELINE_INSTALL_BASE_URL;
+    const version = await run(resolve(binDir, 'beeline'), ['--version'], {
+      cwd: bareCwd,
+      env: runtimeEnv,
+    });
+    if (!stripAnsi(version.stdout).match(/^beeline 0\.0\.0$/m)) {
+      fail(`beeline --version did not report its version:\n${version.stdout}`);
+    }
+
+    // Self-update probes the staged JS entrypoint directly, before the shell
+    // wrapper can export paths for optional block-buzz helpers. Keep this
+    // exact release-blocking path hermetic: no helper overrides, no install
+    // bin directory on PATH, and no host-directory augmentation.
+    const directVersion = await run(
+      process.execPath,
+      [resolve(libDir, 'lib', 'beeline', 'beeline-cli.mjs'), '--version'],
+      {
+        cwd: bareCwd,
+        env: {
+          HOME: env.HOME,
+          PATH: '',
+          BEELINE_HARNESS_PATH_AUGMENT: '0',
+        },
+      },
+    );
+    if (!stripAnsi(directVersion.stdout).match(/^beeline 0\.0\.0$/m)) {
+      fail(`direct bundled beeline --version did not report its version:\n${directVersion.stdout}`);
+    }
+
+    const readonlyMcp = resolve(binDir, 'beeline-readonly-mcp');
+    const codegraph = resolve(binDir, 'codegraph');
+    await access(readonlyMcp, constants.X_OK);
+    await access(codegraph, constants.X_OK);
+    await access(resolve(libDir, 'lib', 'beeline', 'pi-mcp-adapter.mjs'), constants.F_OK);
+
+    const probe = await run(resolve(binDir, 'beeline-readonly-mcp'), [], {
+      cwd: bareCwd,
+      env: { ...runtimeEnv, BEELINE_READONLY_ROOT: bareCwd },
+      untilAnswered: 2,
+      timeoutMs: 30_000,
+      input:
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'initialize',
+          params: {
+            protocolVersion: '2024-11-05',
+            capabilities: {},
+            clientInfo: { name: 'beeline-install-verifier', version: '1.0.0' },
+          },
+        }) +
+        '\n' +
+        JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }) +
+        '\n',
+    });
+    const tools = parseMcpTools(probe.stdout);
+    // The read-only server exposes the repository_io facade (plus legacy names
+    // only where a configuration still mounts them); every exposed name must be
+    // a known read-only policy name.
+    const allowed = new Set(await expectedReadonlyTools());
+    if (!tools.includes('repository_io') || tools.some((tool) => !allowed.has(tool))) {
+      fail(`unexpected installed read-only tool inventory: ${tools.join(', ')}`);
+    }
+
+    // Probe the installed platform bundle, not node_modules: initialize a tiny
+    // repository, discover the MCP tool, and make one real indexed query.
+    const codegraphRepo = resolve(temporaryRoot, 'codegraph-repository');
+    await mkdir(codegraphRepo, { recursive: true });
+    await run('git', ['init', codegraphRepo], { cwd: bareCwd, env: runtimeEnv });
+    await writeFile(
+      resolve(codegraphRepo, 'flow.ts'),
+      'export function inner() { return 7; }\nexport function outer() { return inner(); }\n',
+    );
+    await run(codegraph, ['init', '--yes', codegraphRepo], {
+      cwd: codegraphRepo,
+      env: { ...runtimeEnv, CODEGRAPH_TELEMETRY: '0', CODEGRAPH_NO_DAEMON: '1' },
+      timeoutMs: 60_000,
+    });
+    const codegraphProbe = await run(
+      codegraph,
+      ['serve', '--mcp', '--path', codegraphRepo, '--no-watch'],
+      {
+        cwd: codegraphRepo,
+        env: { ...runtimeEnv, CODEGRAPH_TELEMETRY: '0', CODEGRAPH_NO_DAEMON: '1' },
+        input:
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'initialize',
+            params: {
+              protocolVersion: '2024-11-05',
+              capabilities: {},
+              clientInfo: { name: 'beeline-install-verifier', version: '1.0.0' },
+            },
+          }) +
+          '\n' +
+          JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) +
+          '\n' +
+          JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }) +
+          '\n' +
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: 3,
+            method: 'tools/call',
+            params: {
+              name: 'codegraph_explore',
+              arguments: { query: 'How does outer call inner?', projectPath: codegraphRepo },
+            },
+          }) +
+          '\n',
+        timeoutMs: 60_000,
+        untilAnswered: 3,
+      },
+    );
+    const codegraphTools = parseMcpTools(codegraphProbe.stdout);
+    if (!codegraphTools.includes('codegraph_explore')) {
+      fail(
+        `installed CodeGraph tool inventory omitted codegraph_explore: ${codegraphTools.join(', ')}`,
+      );
+    }
+    const codegraphText = (parseMcpResult(codegraphProbe.stdout, 3)?.content ?? [])
+      .map((entry) => entry.text ?? '')
+      .join('\n');
+    if (!codegraphText.includes('outer') || !codegraphText.includes('inner')) {
+      fail(`installed CodeGraph query did not return indexed symbols:\n${codegraphText}`);
+    }
+
+    // Start a real ACP read-only session using only the installed agent and
+    // installed helper. Dummy provider values are sufficient because
+    // session/new does not make a model request.
+    const { AcpClient } = await import(resolve(repoRoot, 'apps', 'body', 'dist', 'acp.js'));
+    const { startAgentProcess, stopAgentProcess } = await import(resolve(repoRoot, 'apps', 'body', 'dist', 'agent-process.js'));
+    const acp = new AcpClient({
+      agentBinary: resolve(binDir, 'buzz-agent'),
+      agentEnv: helperInstallAgentEnv(env),
+      autoApprovePermissions: false,
+    });
+    let acpStderr = '';
+    acp.on('stderr', (chunk) => {
+      acpStderr = `${acpStderr}${chunk}`.slice(-4_000);
+    });
+    await startAgentProcess(acp);
+    let readonlySession;
+    try {
+      readonlySession = await acp.sessionNew({
+        cwd: bareCwd,
+        mode: 'readonly',
+        mcpServers: [
+          {
+            name: 'beeline-readonly-mcp',
+            command: readonlyMcp,
+            args: [],
+            env: [{ name: 'BEELINE_READONLY_ROOT', value: bareCwd }],
+          },
+        ],
+      });
+    } catch (error) {
+      fail(
+        `installed read-only ACP session did not start: ${error instanceof Error ? error.message : String(error)}${acpStderr ? `\n${acpStderr}` : ''}`,
+      );
+    } finally {
+      await stopAgentProcess(acp);
+    }
+    if (!readonlySession?.sessionId) fail('installed read-only ACP session returned no sessionId');
+
+    console.log(`verify-beeline-install: installed into bare prefix ${dirname(binDir)}`);
+    console.log(`verify-beeline-install: read-only mcp ${readonlyMcp}`);
+    console.log(`verify-beeline-install: tools ${tools.join(', ')}`);
+    console.log(`verify-beeline-install: CodeGraph tools ${codegraphTools.join(', ')}`);
+    console.log(`verify-beeline-install: ACP read-only session ${readonlySession.sessionId}`);
+  } finally {
+    await new Promise((resolveClose) => server.close(resolveClose));
+    if (!retainedRoot) await rm(temporaryRoot, { recursive: true, force: true });
+  }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+}

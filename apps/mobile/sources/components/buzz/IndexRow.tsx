@@ -201,7 +201,7 @@ export type IndexRowProps = {
 /** A page subtitle is one short phrase; a long one stops at two lines. */
 const DESCRIPTION_LINES = 2;
 
-/** The reserved width of a row's trailing column (DESIGN.md → Index rows). */
+/** The reserved width of a row's trailing column (docs/DESIGN.md → Index rows). */
 const TRAILING_COLUMN = 72;
 
 /** The 44 pt tap area a quiet-line action reaches without growing the line. */

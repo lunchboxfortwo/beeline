@@ -15,7 +15,7 @@ Rules evaluate each destination, so a local reply cannot hide a later outside
 send. Unknown fixture context fails closed.
 
 The production MCP process and isolated HTTP service demonstrate the same
-path in `scripts/discovery-service.test.mjs`: post a refusal without an address,
+path in `packages/scripts/discovery-service.test.mjs`: post a refusal without an address,
 post another with the fixture Room explicitly, and read both committed messages
 from the service database. A post to another address stays intercepted and
 creates no message. Schedule cleanup and artifact download still pass through

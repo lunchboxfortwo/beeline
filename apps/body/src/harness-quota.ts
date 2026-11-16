@@ -24,7 +24,7 @@ import {
 } from '@beeline/api-contract/daemon';
 import { agentBehavior, type AgentKind } from './agent-command.js';
 
-/** Bundled next to `beeline-cli.mjs` by `scripts/build-beeline-bundle.mjs`. */
+/** Bundled next to `beeline-cli.mjs` by `packages/scripts/build-beeline-bundle.mjs`. */
 export const QUOTA_AXI_BUNDLE_FILE = 'quota-axi.mjs';
 const READ_TIMEOUT_MS = 30_000;
 /** One vendor read per plan account per interval keeps clear of usage-endpoint limits. */

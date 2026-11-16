@@ -24,7 +24,7 @@ warning packets and transport disconnection.
    TCP 18885 and UDP 18886, mapped to container 7880/7881/7882.
 2. Generate local speech PCM with
    `ffmpeg -f lavfi -i "flite=text='Ready'" -ar 24000 -ac 1 -f s16le .beeline-proof/budget/warning.pcm`.
-3. Run `node --import tsx scripts/prove-voice-budget.ts` (loopback HTTP 38597).
+3. Run `node --import tsx packages/scripts/prove-voice-budget.ts` (loopback HTTP 38597).
 4. Prebuild the ordinary Android entry. Only in ignored generated native files,
    enable cleartext HTTP and disable updates. Build `:app:assembleRelease` for
    x86_64 with two workers, a 5 GiB heap, and

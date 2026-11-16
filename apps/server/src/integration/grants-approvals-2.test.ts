@@ -1,4 +1,4 @@
-import { phoneFetch } from '../../../../tests/helpers/phone-operation.js';
+import { phoneFetch } from '../../../../packages/test-helpers/helpers/phone-operation.js';
 import * as approvalSources from '.././approval-card-source.js';
 import * as serverSentry from '.././sentry.js';
 import { createAgentCommand } from '.././agent-command.js';

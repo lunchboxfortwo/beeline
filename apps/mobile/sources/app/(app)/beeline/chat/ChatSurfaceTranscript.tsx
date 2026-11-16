@@ -102,7 +102,7 @@ export const ChatSurfaceTranscript = React.memo(function ChatSurfaceTranscript({
               {desktopTranscript ? (
                 // A plain scrollable View over real DOM — no FlatList/
                 // VirtualizedList. See `shouldFollowDesktopTail` in
-                // `buzz/room-scroll-follow.ts` and proof/desktop-append-overlap/
+                // `buzz/room-scroll-follow.ts` and the append-overlap investigation
                 // NOTES.md for why RN Web's own list machinery raced the browser's
                 // real layout on this surface.
                 <DesktopScroll

@@ -3,7 +3,7 @@
 Feature delivery under corner brief revision 1; not a defect report.
 
 Run `npm run build -w @beeline/server` followed by
-`node --import tsx scripts/prove-welcome-jobs.mjs`.
+`node --import tsx packages/scripts/prove-welcome-jobs.mjs`.
 The built PhoneService creates isolated Workspaces, displays the welcome card,
 selects A/B/C, and exercises the saved workflow runtime and stored game.
 PGlite and in-memory storage replace production PostgreSQL and Tigris.
@@ -30,7 +30,7 @@ The server container allowlist includes it. Existing viewer open/close funnel
 measurement remains active; game posting records the stored artifact id and Room.
 
 For surface proof, install Playwright outside the checkout and run
-`PLAYWRIGHT_CORE_PATH=/path/to/playwright/index.mjs node scripts/render-welcome-jobs.mjs`.
+`PLAYWRIGHT_CORE_PATH=/path/to/playwright/index.mjs node packages/scripts/render-welcome-jobs.mjs`.
 This paints the real mobile ChoicePlate with the built service's DTO, within a
 fixture card frame, using the app fonts and Bone tokens. It renders and taps
 at phone and wide sizes and plays a move against Luna in the stored HTML.

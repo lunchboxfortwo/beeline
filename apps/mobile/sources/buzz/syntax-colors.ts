@@ -1,5 +1,5 @@
 /**
- * Two Inks — the fourth DESIGN.md colour exception.
+ * Two Inks — the fourth docs/DESIGN.md colour exception.
  *
  * Eleven IDE categories collapse to three roles. Colours live on the theme
  * (`groknight.syntaxStructure` / `syntaxName` / `syntaxValue`), tuned per

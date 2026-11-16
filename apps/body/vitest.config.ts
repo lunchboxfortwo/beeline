@@ -3,7 +3,7 @@ import { defineConfig } from 'vitest/config';
 /** Hermetic unit tests only. */
 export default defineConfig({
   test: {
-    setupFiles: ['../../tests/helpers/helper.ts'],
+    setupFiles: ['../../packages/test-helpers/helpers/helper.ts'],
     include: ['src/**/*.test.ts'],
     exclude: ['src/**/*.live.test.ts', 'node_modules/**', 'dist/**'],
     // Production Git work is intentionally asynchronous and process-group

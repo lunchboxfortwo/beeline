@@ -8,9 +8,9 @@ Obsidian, and measure the ink edges the approved mock names.
 
 - Server: the current monolith (`apps/server/src/index.ts`) against a disposable
   pgvector PostgreSQL 16 container on `127.0.0.1:5544`, migrated, then seeded with
-  `scripts/latency-rig/seed-local.mjs` and `kit/seed-beeline.mjs` (a "Beeline"
+  `packages/scripts/latency-rig/seed-local.mjs` and `kit/seed-beeline.mjs` (a "Beeline"
   workspace with #beeline, #markets, #design and DMs with Ruby and Speedy;
-  #beeline and @speedy unread). Environment as in `scripts/latency-rig/run-local.sh`,
+  #beeline and @speedy unread). Environment as in `packages/scripts/latency-rig/run-local.sh`,
   with `PORT=8790` and `BEELINE_WEB_APP_ORIGINS=http://127.0.0.1:8792`.
 - App: `npx expo export --platform web` of `main` (before) and of this branch
   (after), both built with `EXPO_PUBLIC_BUZZY_MONOLITH_URL=http://127.0.0.1:8790`

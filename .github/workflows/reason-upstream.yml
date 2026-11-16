@@ -28,4 +28,4 @@ jobs:
       - name: Open a port issue when a ported adapter changed
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/reason-upstream-check.mjs --open-issue
+        run: node packages/scripts/reason-upstream-check.mjs --open-issue

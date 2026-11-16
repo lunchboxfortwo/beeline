@@ -58,7 +58,7 @@ import { AcpClient, flattenHarnessCause, AcpRuntimeExitedError, SessionUpdate, S
 
   /**
    * The portable model/effort setter, confirmed round-tripping on pi/codex/
-   * claude (report `data/buzzy-multiagent-runtimes/report.md` §3.2). The
+   * claude (runtime audit §3.2). The
    * param is `configId`, not `optionId`. Harnesses that advertise this shape
    * must use it; `session/set_model` is reserved for the distinct standard
    * `session/new.models` shape. Returns the runtime's updated `configOptions`.

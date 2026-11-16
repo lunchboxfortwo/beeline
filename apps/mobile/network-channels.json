@@ -1,5 +1,5 @@
 {
-  "about": "Every place the phone app opens a network connection, or names a host, besides the main live socket. scripts/check-phone-network-channels.mjs fails CI on any call site or host not listed here, and on any entry that is new or larger than on the base branch. The socket migration shrinks this list to the exceptions and links. packageRoots lists the shared-package sources the phone bundles; every file reachable from a phone import there is scanned too, and that coverage may only grow.",
+  "about": "Every place the phone app opens a network connection, or names a host, besides the main live socket. packages/scripts/check-phone-network-channels.mjs fails CI on any call site or host not listed here, and on any entry that is new or larger than on the base branch. The socket migration shrinks this list to the exceptions and links. packageRoots lists the shared-package sources the phone bundles; every file reachable from a phone import there is scanned too, and that coverage may only grow.",
   "packageRoots": [
     "packages/api-contract/src",
     "packages/buzz-client/src",

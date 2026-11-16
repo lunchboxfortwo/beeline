@@ -5,7 +5,7 @@ export default defineConfig({
   test: {
     globals: false,
     environment: 'node',
-    setupFiles: ['../../tests/helpers/phone.ts'],
+    setupFiles: ['../../packages/test-helpers/helpers/phone.ts'],
     include: ['sources/**/*.{spec,test}.{ts,tsx}'],
     coverage: {
       provider: 'v8',

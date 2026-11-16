@@ -1,5 +1,5 @@
 import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
-import { phoneFetch } from '../../../tests/helpers/phone-operation.js';
+import { phoneFetch } from '../../../packages/test-helpers/helpers/phone-operation.js';
 
 import { cornerKindSql } from './corner-opening.js';
 
@@ -855,7 +855,7 @@ combinedSha,
 queued,
 };
 }
-export { phoneFetch } from '../../../tests/helpers/phone-operation.js';
+export { phoneFetch } from '../../../packages/test-helpers/helpers/phone-operation.js';
 export { cornerKindSql } from './corner-opening.js';
 export { setRoomEventSubscriptions } from './agent-subscriptions.js';
 export { createHash, randomBytes, randomUUID } from 'node:crypto';

@@ -39,6 +39,6 @@ remain inert history during the expand release; no new cards are written.
 Coverage: `corner-machine.test.ts`, `corner-lifecycle-event-replay.test.ts`, `corner-state.test.ts`,
 `corner-state.exhaustive.test.ts`, `corner-state-reference.test.ts`,
 `corner-review-dispatch.test.ts` and `corner-attention.integration.test.ts`.
-`node --test scripts/corner-machine-boundary.test.mjs` plants violations of the
+`node --test packages/scripts/corner-machine-boundary.test.mjs` plants violations of the
 state-write and wake boundary; TYPECHECK runs the same guard through architecture
 checks. The boundary has one owner and no per-call exemption list.

@@ -1,8 +1,8 @@
 # Beeline helper update channel
 
-> **Download routing:** `infra/helper-downloads/` owns the Cloudflare `/dl/*`
+> **Download routing:** `apps/infra/helper-downloads/` owns the Cloudflare `/dl/*`
 > route. It streams public R2 objects at the existing URLs. Activate
-> that route using its [rollout instructions](../infra/helper-downloads/README.md)
+> that route using its [rollout instructions](../apps/infra/helper-downloads/README.md)
 > before the first release using this workflow. The marketing site stays on
 > GitHub Pages; helper publication does not deploy Pages.
 
@@ -62,14 +62,14 @@ Apple-silicon and Intel builds on the existing `macos-15` and `macos-15-intel`
 runner types. The Linux job also compiles the CLI. The final helper job waits
 for all three, combines their verified outputs and publishes once; it performs
 no native compilation. A retry whose exact identity already serves at the download URL
-skips bundle rebuilding and promotion (see [the release pipeline](./release-pipeline.md)).
+skips bundle rebuilding and promotion (see [the release pipeline](release-pipeline.md)).
 Input-keyed native binaries may be restored from Actions cache; a miss builds
 them from the pinned upstream. Full-bundle install proof still runs. Native
 cache entries are never published on the public Releases page.
 Channel policy selects helper rebuilding even when helper source inputs are
 unchanged, so every new identity gets its own version stamp.
 Its promote phase validates and publishes the exact bundle directory through
-`scripts/pages-channel.mjs`, then runs `scripts/verify-pages-update.mjs` against
+`packages/scripts/pages-channel.mjs`, then runs `packages/scripts/verify-pages-update.mjs` against
 the public download URL. The legacy script names are retained. The helper job
 has no Pages permission, environment, artifact upload or deployment wait.
 
@@ -87,7 +87,7 @@ Each destination receives its manifest last, after all other channel files.
 
 The helper job serializes channel publication. The website job separately
 holds `usebeeline-pages` while deploying only static marketing files,
-associations and installers. It ignores checkout `web/dl/` and never downloads
+associations and installers. It ignores checkout `apps/site/dl/` and never downloads
 or republishes helper archives. Website deployment runs when selected even
 when the helper is also selected, since the helper no longer deploys the site.
 
@@ -234,13 +234,13 @@ Never run lifecycle tests against a live user's install or native helper. Body
 tests set private HOME/config/state paths and an unreachable user bus.
 `lifecycle-test-guard.ts` refuses real paths, symlink aliases, and an unmocked
 manager outside the disposable native-proof container. Native Linux proof lives
-in `scripts/helper-proof/`: build the real bundle and npm tarball first, then
-run `bash scripts/helper-proof/run-linux.sh`. It uses its own PID namespace,
+in `packages/scripts/helper-proof/`: build the real bundle and npm tarball first, then
+run `bash packages/scripts/helper-proof/run-linux.sh`. It uses its own PID namespace,
 PID 1, user manager, local HTTP/WebSocket server and deterministic ACP harness.
 The container is removed at completion. See the acceptance evidence in
-[helper simplification](./helper-simplification.md).
+[helper simplification](helper-simplification.md).
 
-Run `bash scripts/helper-proof/run-linux.sh scripts/helper-proof/prove-update-handoff.mjs`
+Run `bash packages/scripts/helper-proof/run-linux.sh packages/scripts/helper-proof/prove-update-handoff.mjs`
 for the update handoff regression. It retains a real local broker client while
 an idle helper stages a verified release, proves the successor answers through
 both agent connections with `WatchdogSec=0`, and proves a successor startup

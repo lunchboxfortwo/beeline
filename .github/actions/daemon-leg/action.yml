@@ -38,7 +38,7 @@ runs:
       if: inputs.phase == 'collect'
       shell: bash
       run: |-
-        bash "$GITHUB_WORKSPACE/scripts/release-steps/daemon-leg.sh" step0
+        bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/daemon-leg.sh" step0
       env:
         BEELINE_ACTION_VALUE_0: ${{ inputs.linux_bundle_dir }}
         BEELINE_ACTION_VALUE_1: ${{ inputs.darwin_arm64_bundle_dir }}
@@ -54,7 +54,7 @@ runs:
         CHANNEL: ${{ inputs.channel }}
       with:
         script: |
-          const { run } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/release-steps/daemon-leg-step1.mjs`);
+          const { run } = await import(`${process.env.GITHUB_WORKSPACE}/packages/scripts/release-steps/daemon-leg-step1.mjs`);
           await run({ github, core, context });
     - name: Prove a real helper update through the download route
       if: inputs.phase == 'promote'
@@ -63,7 +63,7 @@ runs:
         MANIFEST_URL: ${{ inputs.manifest_url }}
         BEELINE_ACTION_VALUE_0: ${{ runner.temp }}
       run: >-
-        bash "$GITHUB_WORKSPACE/scripts/release-steps/daemon-leg.sh" step2
+        bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/daemon-leg.sh" step2
     - name: Record asynchronous fleet uptake without blocking the release
       if: inputs.phase == 'promote'
       shell: bash
@@ -72,4 +72,4 @@ runs:
         RELEASE_SHA: ${{ inputs.release_sha }}
         RELEASE_VERSION: ${{ inputs.release_version }}
       run: |-
-        bash "$GITHUB_WORKSPACE/scripts/release-steps/daemon-leg.sh" step3
+        bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/daemon-leg.sh" step3

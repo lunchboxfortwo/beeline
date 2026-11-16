@@ -87,12 +87,12 @@ runs:
       shell: bash
       env:
         CI_BUILD_SHA: ${{ steps.checkout.outputs.sha }}
-      run: node scripts/ci-build-provenance.mjs write "$CI_BUILD_SHA"
+      run: node packages/scripts/ci-build-provenance.mjs write "$CI_BUILD_SHA"
     - name: Verify exact-head compiled output provenance
       shell: bash
       env:
         CI_BUILD_SHA: ${{ steps.checkout.outputs.sha }}
-      run: node scripts/ci-build-provenance.mjs verify "$CI_BUILD_SHA"
+      run: node packages/scripts/ci-build-provenance.mjs verify "$CI_BUILD_SHA"
     - name: Verify compiled API exports
       id: verify-builds
       shell: bash

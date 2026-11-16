@@ -1,0 +1,13 @@
+{
+  "server-db": {
+    "file": "packages/test-helpers/seams/server-db.test.ts",
+    "contracts": [
+      "apps/server/src/database.ts#ClosableDatabase",
+      "apps/server/src/database.ts#DatabaseFailureKind",
+      "apps/server/src/database.ts#migrate",
+      "apps/server/src/database.ts#migrateData",
+      "apps/server/src/database.ts#markSchemaCurrent",
+      "apps/server/src/database.ts#assertSchemaCurrent"
+    ]
+  }
+}

@@ -92,8 +92,8 @@
   },
   "sourceSha256": {
     "apps/body/src/machine-helper.ts": "cdd04ceaae476f899ec5ed2a8b75ac5b758caccbb775fea5a6d95c56c607ab7f",
-    "infra/free-agent/hosted-services.sh": "5e5c7dedc4bade191096d64e09ce2adc5fc499f713e49fead573f2bcf656880f",
-    "infra/free-agent/hosted-squire-broker.service": "a2e768b4a9252ad13a851a5abbdcf3b66e48e1ede9c34d51cf0e1c24bd230966",
-    "infra/free-agent/Dockerfile": "57a4732f356a906ded748df429f9d9baec1057fb14fda787b657eaa89d3ba41a"
+    "apps/infra/free-agent/hosted-services.sh": "5e5c7dedc4bade191096d64e09ce2adc5fc499f713e49fead573f2bcf656880f",
+    "apps/infra/free-agent/hosted-squire-broker.service": "a2e768b4a9252ad13a851a5abbdcf3b66e48e1ede9c34d51cf0e1c24bd230966",
+    "apps/infra/free-agent/Dockerfile": "57a4732f356a906ded748df429f9d9baec1057fb14fda787b657eaa89d3ba41a"
   }
 }

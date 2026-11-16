@@ -104,10 +104,10 @@ describe('agent invitation concordance', () => {
     const matrix = readFileSync(new URL('../../../docs/agent-invitation-matrix.md', import.meta.url), 'utf8');
     for (const text of [...Object.values(ASSISTANT_INVITATION_STEPS), ...Object.values(AGENT_INVITATION_PATHS)]) expect(matrix).toContain(text);
     const escape = (text: string) => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
-    for (const path of ['../assets/mcp/join.html', '../../../web/connect/index.html']) {
+    for (const path of ['../assets/mcp/join.html', '../../site/connect/index.html']) {
       const html = readFileSync(new URL(path, import.meta.url), 'utf8');
       for (const text of [...Object.values(ASSISTANT_INVITATION_STEPS), ...Object.values(AGENT_INVITATION_PATHS)])
-        expect(html, 'Refresh public copy: node --import tsx scripts/generate-agent-invitation-guides.mjs').toContain(escape(text));
+        expect(html, 'Refresh public copy: node --import tsx packages/scripts/generate-agent-invitation-guides.mjs').toContain(escape(text));
     }
   });
 });

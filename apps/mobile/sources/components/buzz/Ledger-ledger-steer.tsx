@@ -498,7 +498,7 @@ export function withLedgerDayCaption(node: React.ReactNode, label: string | null
  * The dimmest tier, one line over a quiet left rule, with its own disclosure —
  * a `git push` rejection dump, a stack trace, an npm error wall never prints
  * down the slab. The label says what happened and the body stays behind a tap
- * (`DESIGN.md`, "Machine noise").
+ * (`docs/DESIGN.md`, "Machine noise").
  */
 export function LedgerGhostLine({
   label,

@@ -106,7 +106,7 @@ every model call; the agent never pastes request bodies.
    it exits; a foreground call times out after ten minutes:
 
    ```sh
-   node --import tsx scripts/prompt-nightly.mjs \
+   node --import tsx packages/scripts/prompt-nightly.mjs \
      --out "$RUN/result" \
      --history "$HOME/prompt-nightly/history.jsonl" \
      --candidate-patch "$RUN/candidate.patch" \

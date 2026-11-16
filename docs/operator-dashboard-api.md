@@ -381,7 +381,7 @@ window uses raw distinct install counts; retained older daily aggregates contain
 no install IDs and cannot reconstruct cross-day unique installs. Internal status
 learned after raw records expire cannot revise those anonymous historical counts.
 
-Privacy disclosures changed in `web/privacy/index.html`, both checked-in Android
+Privacy disclosures changed in `apps/site/privacy/index.html`, both checked-in Android
 full descriptions (`store/listing` and `fastlane/metadata`), and
 `store/questionnaires/google-play-data-safety.md`. Store-console declaration
 submission remains release-owned. The implementation uses existing JavaScript
@@ -633,7 +633,7 @@ them as current counts. To total a range, require every selected complete date's
 Recorded evidence: `x-site-visits.recorded.json` captures the aggregate GraphQL
 response from October 27 for October 25 (256 X visits). Unit coverage is in
 `x-site-visits.test.ts`. After building, run
-`node --import tsx scripts/prove-x-site-visits.mjs` to demonstrate missing data,
+`node --import tsx packages/scripts/prove-x-site-visits.mjs` to demonstrate missing data,
 recorded counts, and provider failure through the authenticated built HTTP
 `GET /v1/admin/dashboard` path on loopback with isolated PGlite. The proof rebases
 only the recorded date to remain within the rolling window and saves the full

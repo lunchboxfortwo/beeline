@@ -9,7 +9,7 @@ existing nightly runner remains unchanged.
 After normal checkout preparation (`npm run corner:prepare`), run:
 
 ```sh
-node --import tsx scripts/prompt-subscription-replay.mjs \
+node --import tsx packages/scripts/prompt-subscription-replay.mjs \
   --model gpt-6-luna --variants full,r0-deferred --partition tune \
   --out "$HOME/prompt-tool-tuning/round-0/luna"
 ```
@@ -24,7 +24,7 @@ No model substitution or paid fallback is allowed.
 
 ## Frozen split and configs
 
-`scripts/prompt-variants/split.json` fixes tune (54) and held-out (23) cases. The
+`packages/scripts/prompt-variants/split.json` fixes tune (54) and held-out (23) cases. The
 seed is `deferred-tools-v4-2026-10-30`; ordering uses SHA-256 of seed + colon +
 case ID, with the first rounded (70%) assigned to tuning. The same three browser
 cases as nightly remain excluded. Cohort drift fails rather than silently
@@ -111,7 +111,7 @@ For authorized missing-data repairs, preserve the original output and pass its
 result to a fresh output directory:
 
 ```sh
-node --import tsx scripts/prompt-subscription-replay.mjs \
+node --import tsx packages/scripts/prompt-subscription-replay.mjs \
   --model gpt-6-luna --variants full,r0-deferred --partition tune \
   --repair-from <original-round-0-luna>/result.json --out <repaired-round-0-luna>
 ```
@@ -148,7 +148,7 @@ Freeze a final selection file with `phase: "final"` and a `variants` array
 containing full plus the selected frontier configs. Only then run held-out:
 
 ```sh
-node --import tsx scripts/prompt-subscription-replay.mjs \
+node --import tsx packages/scripts/prompt-subscription-replay.mjs \
   --model gpt-6-luna --variants full,<selected-names> --partition heldout \
   --selection <frozen-selection.json> --out <new-heldout-output>
 ```
@@ -160,4 +160,4 @@ calls, and an exact config/prompt diff for a separately authorized production
 change. No live prompt/tool change ships from this replay PR.
 
 Validation without subscription use:
-`node --import tsx --test scripts/prompt-subscription-replay.test.mjs`.
+`node --import tsx --test packages/scripts/prompt-subscription-replay.test.mjs`.

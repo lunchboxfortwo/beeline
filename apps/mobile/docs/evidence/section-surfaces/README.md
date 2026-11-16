@@ -6,7 +6,7 @@ The fix makes ordinary section labels transparent by default. Existing sheet spa
 
 ## Evidence
 
-Every view below has before and after captures on an isolated Android emulator and a desktop browser, in both themes. Names are `<phone|desktop>-<bone|obsidian>-<surface>.png` under [before](before/) and [after](after/).
+Every view below has before and after captures on an isolated Android emulator and a desktop browser, in both themes. Names are `<phone|desktop>-<bone|obsidian>-<surface>.png` under [before](before) and [after](after).
 
 | Surface | Production view exercised |
 | --- | --- |
@@ -50,13 +50,13 @@ JavaScript-only styling; no native module, palette, layout or copy change. Eligi
 
 | View | Theme | Phone before | Phone after | Desktop before | Desktop after |
 | --- | --- | --- | --- | --- | --- |
-| sheet | bone | [before](./before/phone-bone-sheet.png) | [after](./after/phone-bone-sheet.png) | [before](./before/desktop-bone-sheet.png) | [after](./after/desktop-bone-sheet.png) |
-| sheet | obsidian | [before](./before/phone-obsidian-sheet.png) | [after](./after/phone-obsidian-sheet.png) | [before](./before/desktop-obsidian-sheet.png) | [after](./after/desktop-obsidian-sheet.png) |
-| page | bone | [before](./before/phone-bone-page.png) | [after](./after/phone-bone-page.png) | [before](./before/desktop-bone-page.png) | [after](./after/desktop-bone-page.png) |
-| page | obsidian | [before](./before/phone-obsidian-page.png) | [after](./after/phone-obsidian-page.png) | [before](./before/desktop-obsidian-page.png) | [after](./after/desktop-obsidian-page.png) |
-| repos | bone | [before](./before/phone-bone-repos.png) | [after](./after/phone-bone-repos.png) | [before](./before/desktop-bone-repos.png) | [after](./after/desktop-bone-repos.png) |
-| repos | obsidian | [before](./before/phone-obsidian-repos.png) | [after](./after/phone-obsidian-repos.png) | [before](./before/desktop-obsidian-repos.png) | [after](./after/desktop-obsidian-repos.png) |
-| workbench | bone | [before](./before/phone-bone-workbench.png) | [after](./after/phone-bone-workbench.png) | [before](./before/desktop-bone-workbench.png) | [after](./after/desktop-bone-workbench.png) |
-| workbench | obsidian | [before](./before/phone-obsidian-workbench.png) | [after](./after/phone-obsidian-workbench.png) | [before](./before/desktop-obsidian-workbench.png) | [after](./after/desktop-obsidian-workbench.png) |
-| service | bone | [before](./before/phone-bone-service.png) | [after](./after/phone-bone-service.png) | [before](./before/desktop-bone-service.png) | [after](./after/desktop-bone-service.png) |
-| service | obsidian | [before](./before/phone-obsidian-service.png) | [after](./after/phone-obsidian-service.png) | [before](./before/desktop-obsidian-service.png) | [after](./after/desktop-obsidian-service.png) |
+| sheet | bone | [before](before/phone-bone-sheet.png) | [after](after/phone-bone-sheet.png) | [before](before/desktop-bone-sheet.png) | [after](after/desktop-bone-sheet.png) |
+| sheet | obsidian | [before](before/phone-obsidian-sheet.png) | [after](after/phone-obsidian-sheet.png) | [before](before/desktop-obsidian-sheet.png) | [after](after/desktop-obsidian-sheet.png) |
+| page | bone | [before](before/phone-bone-page.png) | [after](after/phone-bone-page.png) | [before](before/desktop-bone-page.png) | [after](after/desktop-bone-page.png) |
+| page | obsidian | [before](before/phone-obsidian-page.png) | [after](after/phone-obsidian-page.png) | [before](before/desktop-obsidian-page.png) | [after](after/desktop-obsidian-page.png) |
+| repos | bone | [before](before/phone-bone-repos.png) | [after](after/phone-bone-repos.png) | [before](before/desktop-bone-repos.png) | [after](after/desktop-bone-repos.png) |
+| repos | obsidian | [before](before/phone-obsidian-repos.png) | [after](after/phone-obsidian-repos.png) | [before](before/desktop-obsidian-repos.png) | [after](after/desktop-obsidian-repos.png) |
+| workbench | bone | [before](before/phone-bone-workbench.png) | [after](after/phone-bone-workbench.png) | [before](before/desktop-bone-workbench.png) | [after](after/desktop-bone-workbench.png) |
+| workbench | obsidian | [before](before/phone-obsidian-workbench.png) | [after](after/phone-obsidian-workbench.png) | [before](before/desktop-obsidian-workbench.png) | [after](after/desktop-obsidian-workbench.png) |
+| service | bone | [before](before/phone-bone-service.png) | [after](after/phone-bone-service.png) | [before](before/desktop-bone-service.png) | [after](after/desktop-bone-service.png) |
+| service | obsidian | [before](before/phone-obsidian-service.png) | [after](after/phone-obsidian-service.png) | [before](before/desktop-obsidian-service.png) | [after](after/desktop-obsidian-service.png) |

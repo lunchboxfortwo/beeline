@@ -69,7 +69,7 @@ Integration discovery verified 245 unique tests across the same eight batches (3
 
 The full ordinary server run passed: 205 files, 3,291 discovered tests, 3,277 passed and 14 existing skips, with no failures. `apps/server/scripts/ci-test-timings.json` records each file's measured duration and the hosted integration-step measurements. The four new runner invocations with `--list` discovered and verified the exact assigned files: 50, 52, 51 and 52 files, disjoint and totaling the same 205. Their summed measured file durations are 722.286, 722.285, 722.285 and 722.284 seconds; these are workload weights, not hosted wall times, and each runner uses two workers. The paired integration batches add measured weights of 172, 148, 141 and 172 seconds respectively.
 
-Local checks: root typecheck, workflow lint, workflow test-path lint, dead-code guard, workflow/filter/shard contract tests, the full ordinary server suite, and the existing integration batch runner. The new runner's execution smoke passed via `node scripts/run-ci-shard.mjs 16/16`: 15 passed files and one existing skipped file, 122 passed tests and three existing skips, in 124.85 seconds. Hosted CI exercises all four production partitions.
+Local checks: root typecheck, workflow lint, workflow test-path lint, dead-code guard, workflow/filter/shard contract tests, the full ordinary server suite, and the existing integration batch runner. The new runner's execution smoke passed via `node packages/scripts/run-ci-shard.mjs 16/16`: 15 passed files and one existing skipped file, 122 passed tests and three existing skips, in 124.85 seconds. Hosted CI exercises all four production partitions.
 
 ## Remaining evidence and authority
 

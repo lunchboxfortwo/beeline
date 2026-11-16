@@ -9,7 +9,7 @@ behavior. Each agent runs on its own small Fly Machine in the `beeline-free-agen
 its work finishes. People who only join an existing Workspace by invite get
 none. Code: `apps/server/src/free-agents.ts`, `free-agent-model-proxy.ts`,
 `fly-machines.ts`; helper `apps/body/src/free-agent-vm.ts`;
-image `infra/free-agent/`.
+image `apps/infra/free-agent/`.
 
 New starter teammates are named **Beebee** and **Luna**, using `@beebee` and
 `@luna` with the existing numeric suffix rule when a handle is taken. They keep their seeded face and
@@ -270,7 +270,7 @@ size, automatic sleep, current invocation authority, owner token allowances and 
 
 Hosted VMs contain agent-browser 0.41.2 (Apache-2.0) and Lightpanda 1.0.3
 (AGPL-3.0), resolved from the latest stable upstream releases and pinned by SHA-256
-in `infra/free-agent/Dockerfile`. Update the version and checksum together when
+in `apps/infra/free-agent/Dockerfile`. Update the version and checksum together when
 adopting a newer release; builds never resolve a mutable latest tag. The native
 agent-browser CLI launches Lightpanda on demand. `free-agent-vm.ts` reconciles its
 engine and executable environment into new and persisted isolated agent homes.
@@ -288,7 +288,7 @@ feedback on your work as much as possible.” `FREE_AGENT_TEAM_GUIDE` contains n
 question-count decay or additional directions. Personal agents do not receive it.
 
 The server release leg (`.github/actions/server-leg/action.yml`) builds
-`infra/free-agent/Dockerfile` from the release checkout, publishes its immutable
+`apps/infra/free-agent/Dockerfile` from the release checkout, publishes its immutable
 digest, and bakes that digest into the matching server image before the
 existing server rollout. Runtime secrets cannot select a different image; no
 post-release job restarts server Machines. Publication failure stops the leg
@@ -304,7 +304,7 @@ test Room answers a fresh message and checks actual image/connection/work facts;
 a successful signal or update POST alone is insufficient.
 `free-agent-refresh.test.ts` covers all retired state values, deferred claimed
 work, partial failures and preserved unmapped machines.
-`scripts/build-free-agent-image.sh` builds the
+`packages/scripts/build-free-agent-image.sh` builds the
 same image by hand.
 `npm run prove:free-agent:docker-machines` stands in for the Machines API with
 Docker for a local end-to-end run (suspend = `docker pause`). `npm run
@@ -316,15 +316,15 @@ mention-to-reply timeline, use the [timeline proof](beebee-first-reply-timeline.
 
 The image's helper build takes `BEELINE_RELEASE_SHA` and
 `BEELINE_RELEASE_VERSION`; the hand-build script supplies the checkout SHA.
-`scripts/stage-free-agent-helper.sh` builds the canonical helper bundle from
+`packages/scripts/stage-free-agent-helper.sh` builds the canonical helper bundle from
 that checkout. Image construction verifies its SHA, version and digest, then
 installs it through the existing recovery installer in an isolated build stage
 under `/opt/beeline/helper`. The entrypoint launches that image-owned helper
 directly, so an older release pointer in persistent HOME cannot select the runtime.
-`node --test infra/free-agent/entrypoint.test.mjs` covers stale-HOME boot selection,
+`node --test apps/infra/free-agent/entrypoint.test.mjs` covers stale-HOME boot selection,
 and helper exit propagation. The [persistent boot recovery proof](free-agent-persistent-boot-proof.md)
 records a disposable Fly Machine cold stop/start and the stale-owner regression.
-After building the server and image, `node infra/free-agent/cold-start-proof.mjs`
+After building the server and image, `node apps/infra/free-agent/cold-start-proof.mjs`
 creates a disposable local database and fresh test Workspace, then drives the
 real server, image and Pi through a mention and reply. Docker substitutes for
 Fly (including HOME persistence), and a deterministic
@@ -378,7 +378,7 @@ Its resolved workspace and explicit-Room label appear in the inventory. A missin
 explicit Room aborts the inventory rather than selecting a replacement.
 The owner approved `LUNA_BACKFILL_HELLO` beside Beebee's hello (approval relayed
 by Ruby, message ae9a4279). The CLI uses only the frozen workspace/Room pairs
-in `scripts/luna-backfill-approved.json`; new signups do not expand this run.
+in `packages/scripts/luna-backfill-approved.json`; new signups do not expand this run.
 A missing approved pair stops before writes and requires a new decision.
 The two additional exclusions are jellybean-beeline-test's team and Methoxine's
 team, both matched by workspace ID. Apply remains an operator action after merge

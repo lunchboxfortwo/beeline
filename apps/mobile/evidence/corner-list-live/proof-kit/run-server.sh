@@ -35,8 +35,8 @@ export BEELINE_AUTH_OIDC_TOKEN_ENDPOINT="${PUBLIC_ORIGIN}/unused-token"
 export BEELINE_AUTH_OIDC_JWKS_URI="${PUBLIC_ORIGIN}/unused-jwks"
 export BEELINE_AUTH_OIDC_CLIENT_ID=latency-rig
 export BEELINE_AUTH_ALLOW_INSECURE_OIDC=true
-export LATENCY_RIG_SQL_LOG="${LATENCY_RIG_SQL_LOG:-$repo_dir/scripts/latency-rig/local-sql.ndjson}"
-export LATENCY_RIG_PROXY_LOG="${LATENCY_RIG_PROXY_LOG:-$repo_dir/scripts/latency-rig/local-proxy.ndjson}"
+export LATENCY_RIG_SQL_LOG="${LATENCY_RIG_SQL_LOG:-$repo_dir/packages/scripts/latency-rig/local-sql.ndjson}"
+export LATENCY_RIG_PROXY_LOG="${LATENCY_RIG_PROXY_LOG:-$repo_dir/packages/scripts/latency-rig/local-proxy.ndjson}"
 export LATENCY_RIG_BACKEND="$PUBLIC_ORIGIN"
 
 cd "$repo_dir"
@@ -45,7 +45,7 @@ if ! psql "$database_url" -Atqc 'SELECT 1' >/dev/null 2>&1; then
 fi
 npx turbo run build --filter=@beeline/server...
 npm run migrate -w @beeline/server
-node scripts/latency-rig/seed-local.mjs
+node packages/scripts/latency-rig/seed-local.mjs
 
 server_pid=""
 proxy_pid=""
@@ -54,7 +54,7 @@ cleanup() {
   [[ -z "$server_pid" ]] || kill "$server_pid" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
-NODE_OPTIONS="--require $repo_dir/scripts/latency-rig/pg-probe.cjs" \
+NODE_OPTIONS="--require $repo_dir/packages/scripts/latency-rig/pg-probe.cjs" \
   node --import tsx apps/mobile/evidence/corner-list-live/proof-kit/control.mts &
 server_pid=$!
 for _ in {1..60}; do
@@ -62,7 +62,7 @@ for _ in {1..60}; do
   sleep 1
 done
 curl -fsS "$PUBLIC_ORIGIN/healthz" >/dev/null
-node scripts/latency-rig/proxy.mjs &
+node packages/scripts/latency-rig/proxy.mjs &
 proxy_pid=$!
 echo "Local rig ready. Point the release app at http://10.0.2.2:${LATENCY_RIG_PORT:-9181}."
 echo 'Use the local-only review link on the device; never use a production Workspace.'

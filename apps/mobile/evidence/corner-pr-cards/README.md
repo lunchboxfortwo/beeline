@@ -45,7 +45,7 @@ stacking, identity/deduplication, checks and design regressions remain covered.
 Validation: 161 tests across `RoomMessageVariants.test.tsx`,
 `pr-accordion.test.ts`, `github-lifecycle-fold.test.ts`, `ci-accordion.test.ts`,
 `calm-lint.design.test.ts`, and `design-lint.design.test.ts`; root
-`npm run typecheck`; `node scripts/check-mobile-ui-components.mjs`.
+`npm run typecheck`; `node packages/scripts/check-mobile-ui-components.mjs`.
 
 ## Repeat Android proof
 

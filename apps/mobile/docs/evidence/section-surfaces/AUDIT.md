@@ -64,4 +64,4 @@ The app uses the same React Native components on phone and web/desktop. Audited 
 - `IndexRow.tsx:481`: ordinary settings/sheet rows have no normal-state fill; press/selection fills are intentional. No fix needed.
 - `HullDialog.tsx:533`: screen-colored scrim belongs to the backdrop, not a label; `floatingSurface` uses `bgRaised` at line 545. No fix needed.
 - Transcript action popovers, scrubber bubbles, mention and slash menus, CommunityRail plates, and reaction chips own their backgrounds rather than painting section labels over another surface. No matching defect found.
-- Static `web/` marketing/legal/invite/review pages: checked header/label/group background rules; no shared app label inside a differently colored sheet or panel. No fix needed.
+- Static `apps/site/` marketing/legal/invite/review pages: checked header/label/group background rules; no shared app label inside a differently colored sheet or panel. No fix needed.

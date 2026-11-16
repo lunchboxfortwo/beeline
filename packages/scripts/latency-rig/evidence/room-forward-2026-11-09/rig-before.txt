@@ -1,0 +1,45 @@
+✔ corner clock follows the source threshold and observes completion before release (4.679099ms)
+✔ a failed gesture cannot become a successful long-press sample (0.507965ms)
+✔ every inventory entry has a seeded scenario and an executable driver decision (1.544566ms)
+✔ a newly added inventory entry cannot silently inherit another fixture (0.186577ms)
+✔ only two complete captures contribute percentiles and a full score (1.40585ms)
+✔ recognition summaries retain separately labelled gesture-inclusive percentiles (0.342277ms)
+✔ missing, partial, failed and nonfinite captures keep score unavailable and retain the exact reason (0.351568ms)
+✔ nightly verdict carries web coverage, timings and every exact gap to the morning card (0.279033ms)
+✔ duplicate capture identity cannot masquerade as a paired capture (0.135392ms)
+✔ Insights publishes valid paired web cases and gaps independently of native capture (1.797644ms)
+✔ paired summary retains corrected completion and the original driver timing separately (0.327899ms)
+✔ unobserved source visibility stays unavailable instead of becoming zero milliseconds (0.201906ms)
+✖ Room-open setup waits for the actual destination row before the action clock (3.889948ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 12
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 68.340219
+
+✖ failing tests:
+
+test at packages/scripts/latency-rig/nightly-web-capture.test.mjs:271:1
+✖ Room-open setup waits for the actual destination row before the action clock (3.889948ms)
+  AssertionError [ERR_ASSERTION]: an absent row is fixture setup, not tap latency
+  + actual - expected
+
+  + {
+  +   act: [Function: act],
+  +   done: [Function: done]
+  + }
+  - undefined
+
+      at TestContext.<anonymous> (file:///home/lunchbox/.local/state/beeline/corners/3b155900f9007458ed563c679b1178522acdafb9eba3ee16d05ad311d9f0d0a8/scripts/latency-rig/nightly-web-capture.test.mjs:280:10)
+      at async Test.run (node:internal/test_runner/test:1313:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:897:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [Object],
+    expected: undefined,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

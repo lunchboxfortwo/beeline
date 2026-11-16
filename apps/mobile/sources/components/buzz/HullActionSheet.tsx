@@ -180,7 +180,7 @@ export function HullActionSheet({
  *   - nothing     for a plain action, which acts the moment it is pressed.
  *
  * A row never invents a fifth mark, and it never wears a box: the sheet is a
- * list, so rows are parted by one hairline and nothing else (DESIGN.md → Shape).
+ * list, so rows are parted by one hairline and nothing else (docs/DESIGN.md → Shape).
  */
 export type HullActionSheetAction = {
   accessibilityLabel?: string;

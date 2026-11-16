@@ -3,7 +3,7 @@
 These are captures of the real Expo web app signed in as the development
 `local:captain` identity against a local `@beeline/server`. They are not fixture
 renders. The local database was migrated by the server and then populated with
-[`seed.sql`](./seed.sql).
+[`seed.sql`](seed.sql).
 
 - `room-list-390x844.png` shows all four server-projected state words in one
   expanded Room row.

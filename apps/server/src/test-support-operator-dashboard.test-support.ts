@@ -1,4 +1,4 @@
-import { phoneFetch } from '../../../tests/helpers/phone-operation.js';
+import { phoneFetch } from '../../../packages/test-helpers/helpers/phone-operation.js';
 
 import type { AddressInfo } from 'node:net';
 
@@ -289,7 +289,7 @@ export { createSigninFunnelClient } from '@beeline/api-contract/signin-funnel-cl
 export { randomUUID } from 'node:crypto';
 export { AddressInfo } from 'node:net';
 export { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
-export { phoneFetch } from '../../../tests/helpers/phone-operation.js';
+export { phoneFetch } from '../../../packages/test-helpers/helpers/phone-operation.js';
 export { createAgentCommand } from './agent-command.js';
 export type { TokenAuth } from './auth.js';
 export { DaemonService } from './daemon-service.js';

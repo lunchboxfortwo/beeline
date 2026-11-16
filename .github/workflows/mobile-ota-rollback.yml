@@ -50,7 +50,7 @@ jobs:
       # or branch command.
       - name: Install mobile dependencies for EAS project context
         working-directory: apps/mobile
-        run: bash ../../scripts/npm-ci-timed.sh
+        run: bash ../../packages/scripts/npm-ci-timed.sh
       - name: Resolve the rollback branch
         id: target
         env:
@@ -62,8 +62,8 @@ jobs:
           test -n "${EXPO_TOKEN:-}" || { echo 'EXPO_TOKEN is unavailable' >&2; exit 2; }
           current=$(cd apps/mobile && node scripts/ota-release.mjs channel-branch --channel production)
           echo "production currently points at: $current"
-          node scripts/release-record.mjs previous --output "$RUNNER_TEMP/record/release.json"
-          node scripts/release-record.mjs ota-rollback-target --record "$RUNNER_TEMP/record/release.json" \
+          node packages/scripts/release-record.mjs previous --output "$RUNNER_TEMP/record/release.json"
+          node packages/scripts/release-record.mjs ota-rollback-target --record "$RUNNER_TEMP/record/release.json" \
             --current "$current" --explicit "$EXPLICIT_BRANCH" | tee "$RUNNER_TEMP/target.txt"
           {
             echo "current=$current"

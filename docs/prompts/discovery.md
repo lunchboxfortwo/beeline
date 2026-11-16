@@ -86,7 +86,7 @@ judgment's `caseId`, `model`, `status`, `reason`, exact short `evidence` quote,
 The judge cannot override tool failures, forbidden actions, effects or cleanup.
 
 ```
-node --import tsx scripts/discovery-grade.mjs --run /path/result.json --judgments /path/judgments.json --out /path/judged.json
+node --import tsx packages/scripts/discovery-grade.mjs --run /path/result.json --judgments /path/judgments.json --out /path/judged.json
 ```
 
 This preserves the original run and records the grading source hashes separately

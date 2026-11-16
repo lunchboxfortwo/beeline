@@ -5,8 +5,8 @@ Reproduction handle-1: creating a workspace after another workspace exists gave 
 Build the server (`npm run corner:prepare`, then `npm run build --workspace=@beeline/server`) and run:
 
 ```
-node --import tsx scripts/prove-workspace-handles.mjs --before
-node --import tsx scripts/prove-workspace-handles.mjs
+node --import tsx packages/scripts/prove-workspace-handles.mjs --before
+node --import tsx packages/scripts/prove-workspace-handles.mjs
 ```
 
 The before mode compiles the starter allocator from baseline `074b6c186` against the isolated current schema. Its second workspace gets `beebee_2` and `luna_2`. The passing mode uses the built service, creates two workspaces, checks both member-list responses for plain handles, sends `@luna hello`, and checks the committed command recipient and phone transcript mention identity. No Fly Machine is provisioned.

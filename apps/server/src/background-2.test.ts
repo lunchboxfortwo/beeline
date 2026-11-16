@@ -751,7 +751,7 @@ describe('background advisory-lock ownership', () => {
       expect(await loop.runOnce()).toBe(0);
       const pending = '55555555-5555-4555-8555-555555555555',
         auto = '66666666-6666-4666-8666-666666666666';
-      const target = `node scripts/check.mjs ${'--workspace apps/server '.repeat(8).trim()}`;
+      const target = `node packages/scripts/check.mjs ${'--workspace apps/server '.repeat(8).trim()}`;
       await db.query(
         `INSERT INTO agent_grants(id,agent_id,workspace_id,kind,target,reason,requested_by,room_id,status,auto)
          VALUES($1,$3,$4,'command',$6,'check',$5,$7,'pending',false),

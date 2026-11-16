@@ -25,7 +25,7 @@ import { QR_INK, QR_PAPER, SCRIM } from '@/buzz/groknight';
 /**
  * The one design grammar (build spec → "The grammar (one page)"). Six type
  * styles, ten colour tokens plus one scrim, eight spacing steps, four radii,
- * fixed control heights and one icon style. `scripts/check-mobile-grammar.mjs`
+ * fixed control heights and one icon style. `packages/scripts/check-mobile-grammar.mjs`
  * fails CI on any value outside it.
  */
 

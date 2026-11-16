@@ -22,7 +22,7 @@ runs:
     - name: Install mobile dependencies
       shell: bash
       working-directory: apps/mobile
-      run: bash "$GITHUB_WORKSPACE/scripts/release-steps/web-app-leg.sh" step0
+      run: bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/web-app-leg.sh" step0
     - name: Export the production web bundle
       shell: bash
       working-directory: apps/mobile
@@ -30,29 +30,29 @@ runs:
         EXPO_PUBLIC_BEELINE_RELEASE_SHA: ${{ inputs.release_sha }}
         EXPO_PUBLIC_BEELINE_RELEASE_VERSION: ${{ inputs.release_version }}
         NODE_ENV: production
-      run: bash "$GITHUB_WORKSPACE/scripts/release-steps/web-app-leg.sh" step1
+      run: bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/web-app-leg.sh" step1
     - name: Upload private source maps and remove them from the hosting export
       shell: bash
       working-directory: apps/mobile
       env:
         SENTRY_AUTH_TOKEN: ${{ inputs.sentry_auth_token }}
         RELEASE_SHA: ${{ inputs.release_sha }}
-      run: bash "$GITHUB_WORKSPACE/scripts/release-steps/web-app-leg.sh" step2
+      run: bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/web-app-leg.sh" step2
     - name: Verify the push worker is in the export
       shell: bash
-      run: bash "$GITHUB_WORKSPACE/scripts/release-steps/web-app-leg.sh" step3
+      run: bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/web-app-leg.sh" step3
     - name: Stamp the immutable release identity
       shell: bash
       env:
         RELEASE_SHA: ${{ inputs.release_sha }}
         RELEASE_VERSION: ${{ inputs.release_version }}
-      run: bash "$GITHUB_WORKSPACE/scripts/release-steps/web-app-leg.sh" step4
+      run: bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/web-app-leg.sh" step4
     - name: Deploy and promote the export to EAS Hosting production
       shell: bash
       working-directory: apps/mobile
       env:
         EXPO_TOKEN: ${{ inputs.expo_token }}
-      run: 'bash "$GITHUB_WORKSPACE/scripts/release-steps/web-app-leg.sh" step5'
+      run: 'bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/web-app-leg.sh" step5'
     - name: Verify the canonical web origin serves this release
       shell: bash
-      run: bash "$GITHUB_WORKSPACE/scripts/release-steps/web-app-leg.sh" step6
+      run: bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/web-app-leg.sh" step6

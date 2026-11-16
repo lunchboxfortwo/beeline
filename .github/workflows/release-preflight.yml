@@ -27,7 +27,7 @@ jobs:
       - uses: actions/github-script@v7
         id: runners
         with:
-          script: core.setOutput('matrix', JSON.stringify(require('./scripts/release-preflight.cjs').runnerMatrix(context.payload.inputs)));
+          script: core.setOutput('matrix', JSON.stringify(require('./packages/scripts/release-preflight.cjs').runnerMatrix(context.payload.inputs)));
   runner:
     needs: select
     if: needs.select.outputs.matrix != '[]'
@@ -42,7 +42,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version-file: .nvmrc
+          node-version-file: package.json
       - run: node -v
   runners_online:
     needs: runner
@@ -53,7 +53,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/github-script@v7
         with:
-          script: await require('./scripts/release-preflight.cjs').validateRunnerResults({github, context, core});
+          script: await require('./packages/scripts/release-preflight.cjs').validateRunnerResults({github, context, core});
   native:
     if: inputs.android || inputs.ios
     runs-on: ubuntu-latest
@@ -72,4 +72,4 @@ jobs:
       - name: Compare against each platform's last released native runtime
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/release-preflight-native.mjs
+        run: node packages/scripts/release-preflight-native.mjs

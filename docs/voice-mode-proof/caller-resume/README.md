@@ -116,7 +116,7 @@ Remove the temporary historical source afterward. `VOICE_CUTIN_RESULTS` optional
 writes JSONL (relative to apps/server); measurement-only mode disables fixed-runtime
 assertions solely for collecting historical comparisons.
 
-For Android use the disposable entry `scripts/voice-delivery-android-proof.tsx`,
+For Android use the disposable entry `packages/scripts/voice-delivery-android-proof.tsx`,
 Metro with EXPO_PUBLIC_BUZZY_MONOLITH_URL pointing to the proof HTTP service,
 and a local LiveKit server. After joining, POST `/cutin` with
 `{"resumeMs":800,"kind":"TurnResumed"}`. Restore the normal mobile entry after

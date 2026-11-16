@@ -1,5 +1,5 @@
 import { seedSquireMachine } from './test-fixtures/squire-machines.js';
-import { phoneFetch } from '../../../tests/helpers/phone-operation.js';
+import { phoneFetch } from '../../../packages/test-helpers/helpers/phone-operation.js';
 
 import { COMMAND_COMPLETION_CHANNEL, notifyCommandCompletion } from './command-completion.js';
 
@@ -451,7 +451,7 @@ VIDEO,
 youtubeRoom,
 };
 }
-export { phoneFetch } from '../../../tests/helpers/phone-operation.js';
+export { phoneFetch } from '../../../packages/test-helpers/helpers/phone-operation.js';
 export { COMMAND_COMPLETION_CHANNEL, notifyCommandCompletion } from './command-completion.js';
 export { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 export { randomBytes, randomUUID } from 'node:crypto';

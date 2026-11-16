@@ -217,10 +217,10 @@ ${FEEDBACK_TRIAGE_PULL_SQL}
 
 Each row carries the versions stored when it was filed. \`helper_version\` and \`harness\` are the helper connection and harness kind for an agent report. \`app_version\` and \`app_platform\` are the Beeline app release and platform of the device session that reported its running update and then filed the human report. A browser, an external client, or a session that has not reported an update leaves them null. Another installation's receipt is never copied. \`harness_version\` is set only when the server knew the harness process version. A field the server did not know is null. \`helper_is_latest\` and \`app_is_latest\` compare those versions with the helper bundle the release pipeline last delivered. True is that version, false is an older or different one, and null means the version or the delivered release was unknown. \`latest_released_version\` is that bundle, or null when none is recorded. A later occurrence on an agent item keeps its own \`helperVersion\` and \`harness\` inside \`occurrences\`.
 
-\`scripts/feedback-signals.mjs\` keeps every pulled row. Older and unknown versions stay in the group with their item ids and version reports. Count, agent count, human count and eligibility use only latest-version evidence. The original agent report counts when \`helper_is_latest\` is true. Each later occurrence counts when its \`helperVersion\` equals \`latest_released_version\`. A human report counts when \`app_is_latest\` is true. A null or older version adds nothing to those counts. Confirmed affected humans count only on a report whose own latest flag is true. One latest agent occurrence cannot open a fix thread. Two or more can. A latest human report can.
+\`packages/scripts/feedback-signals.mjs\` keeps every pulled row. Older and unknown versions stay in the group with their item ids and version reports. Count, agent count, human count and eligibility use only latest-version evidence. The original agent report counts when \`helper_is_latest\` is true. Each later occurrence counts when its \`helperVersion\` equals \`latest_released_version\`. A human report counts when \`app_is_latest\` is true. A null or older version adds nothing to those counts. Confirmed affected humans count only on a report whose own latest flag is true. One latest agent occurrence cannot open a fix thread. Two or more can. A latest human report can.
 
 If the previous run never reached \`done\`, widen the window back to that run's start.
-Run the JSON rows through \`node scripts/feedback-signals.mjs\` on stdin.
+Run the JSON rows through \`node packages/scripts/feedback-signals.mjs\` on stdin.
 Group agents by tool name, normalized error (summary fallback), and category.
 Keep firstSeen, lastSeen and all item ids. Rank by distinct confirmed affected humans
 on latest-version reports first, then latest agent occurrences. Never infer human pain from an agent's owner.
@@ -263,7 +263,7 @@ own words, its report count, and its item ids. Mark each prompt defect with
 ## adapters
 
 Run \`npm run build -w @beeline/body\` and then
-\`node scripts/check-acp-adapters.mjs\` from the repository checkout. Read the script
+\`node packages/scripts/check-acp-adapters.mjs\` from the repository checkout. Read the script
 before executing it. Run once per daily sweep, including when pull found nothing.
 It installs only \`@agentclientprotocol/codex-acp@latest\`,
 \`@agentclientprotocol/claude-agent-acp@latest\` and \`pi-acp@latest\` in disposable
@@ -317,7 +317,7 @@ existing fix thread or propose a scoped follow-up. If the next-day observation
 window after release is complete and there are no matching occurrences, report
 **stopped after release (fixed)**. If the observation window is incomplete or the
 signal cannot be read, say the check is incomplete and fail instead of claiming
-fixed. Use followUp from scripts/feedback-signals.mjs for timestamp classification.
+fixed. Use followUp from packages/scripts/feedback-signals.mjs for timestamp classification.
 Carry forward every unfinished entry; never drop an item because its row resolved.
 Advance checked with signalChecks, including queried window and release evidence.
 

@@ -3,7 +3,7 @@
  * advertises, filter it down to what's safe and reachable, and gate both the
  * `session/set_config_option` and standard `session/set_model` set paths.
  *
- * SECURITY INVARIANT (report `data/buzzy-multiagent-runtimes/report.md` §3.3):
+ * SECURITY INVARIANT (runtime audit §3.3):
  * `configOptions` also carries a `mode` category — Beeline's entire
  * read-only/edit boundary is `session/set_mode` picking `read-only` vs
  * `edit` (`acp.ts`'s `applySessionMode`). If the picker ever surfaced or set

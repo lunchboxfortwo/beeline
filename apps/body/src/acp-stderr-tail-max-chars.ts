@@ -353,7 +353,7 @@ export const CHUNK_CONTINUES_PREVIOUS_WORD = /^[\s'\u2018\u2019\u02bc.,!?;:%)\]}
  * ambiguity outright, since two deltas of one message would then be
  * identifiable as such. Settling whether any installed harness already sends
  * one means capturing raw `session/update` frames per harness — the old
- * `scripts/capture-acp-permissions.mjs` (deleted; see git history) did
+ * `packages/scripts/capture-acp-permissions.mjs` (deleted; see git history) did
  * exactly that and is the shape of the job.
  *
  * Until then do not reach for the text. Capitalization was tried four ways —

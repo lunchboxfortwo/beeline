@@ -15,7 +15,7 @@ import {
 } from './design-lint';
 
 /**
- * The design lint (DESIGN.md → Enforcement). Every `sources/**` module is held
+ * The design lint (docs/DESIGN.md → Enforcement). Every `sources/**` module is held
  * to its per-rule baseline count of colour literals, off-scale spacing,
  * off-scale radii, shadows, retired fonts and retired components. A count may
  * only shrink.
@@ -78,7 +78,7 @@ describe('design lint', () => {
       .join('\n');
     expect(
       verdict.grown,
-      `New design-rule violations (DESIGN.md → Enforcement). Use theme tokens, the spacing ` +
+      `New design-rule violations (docs/DESIGN.md → Enforcement). Use theme tokens, the spacing ` +
         `scale (theme.buzz.space), the house radii, Button/PageHeader:\n${grown}`,
     ).toEqual([]);
     const stale = verdict.stale

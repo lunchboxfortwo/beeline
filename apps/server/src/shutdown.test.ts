@@ -55,7 +55,7 @@ describe('Reproduction DEPLOY-DRAIN-1', () => {
     await proveShutdown('request');
   });
   it('gives Fly longer than both the request drain and the shutdown deadline', () => {
-    const config = readFileSync(new URL('../../../fly.beeline-server.toml', import.meta.url), 'utf8');
+    const config = readFileSync(new URL('../../infra/fly.beeline-server.toml', import.meta.url), 'utf8');
     const timeout = Number(/^kill_timeout = "(\d+)s"$/m.exec(config)?.[1]) * 1_000;
     expect(config).toMatch(/^kill_signal = "SIGTERM"$/m);
     expect(timeout).toBeGreaterThan(SHUTDOWN_DEADLINE_MS);

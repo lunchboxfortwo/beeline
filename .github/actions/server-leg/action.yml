@@ -43,19 +43,19 @@ runs:
   steps:
     - name: Verify Fly.io deployment authority
       shell: bash
-      run: bash "$GITHUB_WORKSPACE/scripts/release-steps/server-leg.sh" step0
+      run: bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/server-leg.sh" step0
     - name: Ask Fly whether this release already runs
       id: fleet
       shell: bash
       run: |-
-        bash "$GITHUB_WORKSPACE/scripts/release-steps/server-leg.sh" fleet
+        bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/server-leg.sh" fleet
       env:
         RELEASE_SHA: ${{ inputs.release_sha }}
         RELEASE_VERSION: ${{ inputs.release_version }}
     - name: This release already runs on every Machine
       if: steps.fleet.outputs.shipped == 'true'
       shell: bash
-      run: bash "$GITHUB_WORKSPACE/scripts/release-steps/server-leg.sh" step2
+      run: bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/server-leg.sh" step2
       env:
         BEELINE_ACTION_VALUE_0: ${{ steps.fleet.outputs.image_ref }}
     # Publish before the existing server rollout: staging a secret must never
@@ -63,7 +63,7 @@ runs:
     - name: Install the free starter agent image build dependencies
       if: steps.fleet.outputs.shipped != 'true'
       shell: bash
-      run: bash "$GITHUB_WORKSPACE/scripts/release-steps/server-leg.sh" step3
+      run: bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/server-leg.sh" step3
     - uses: dtolnay/rust-toolchain@1.95.0
       if: steps.fleet.outputs.shipped != 'true'
     - uses: ./.github/actions/buzz-agent-cache
@@ -75,7 +75,7 @@ runs:
       if: steps.fleet.outputs.shipped != 'true'
       shell: bash
       run: |-
-        bash "$GITHUB_WORKSPACE/scripts/release-steps/server-leg.sh" free_agent_image
+        bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/server-leg.sh" free_agent_image
       env:
         FLY_API_TOKEN: ${{ inputs.free_agent_image_token }}
         RELEASE_SHA: ${{ inputs.release_sha }}
@@ -84,7 +84,7 @@ runs:
       if: steps.fleet.outputs.shipped != 'true'
       shell: bash
       run: |-
-        bash "$GITHUB_WORKSPACE/scripts/release-steps/server-leg.sh" step8
+        bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/server-leg.sh" step8
       env:
         IMAGE_REF: ${{ steps.free_agent_image.outputs.image_ref }}
         RELEASE_SHA: ${{ inputs.release_sha }}
@@ -94,7 +94,7 @@ runs:
       if: steps.fleet.outputs.shipped != 'true' || hashFiles('apps/server/contracts/*.sql') != ''
       shell: bash
       run: |-
-        bash "$GITHUB_WORKSPACE/scripts/release-steps/server-leg.sh" step9
+        bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/server-leg.sh" step9
       env:
         PUBLISHED_SERVER_IMAGE: ${{ inputs.previous_server_image_ref }}
         ROLLBACK_SERVER_IMAGE: ${{ inputs.rollback_server_image_ref }}
@@ -105,7 +105,7 @@ runs:
       if: steps.fleet.outputs.shipped != 'true'
       shell: bash
       run: |-
-        bash "$GITHUB_WORKSPACE/scripts/release-steps/server-leg.sh" migrate
+        bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/server-leg.sh" migrate
       env:
         BEELINE_ACTION_VALUE_0: ${{ steps.fleet.outputs.image_ref }}
 
@@ -113,7 +113,7 @@ runs:
       if: steps.fleet.outputs.shipped != 'true'
       shell: bash
       run: |-
-        bash "$GITHUB_WORKSPACE/scripts/release-steps/server-leg.sh" step11
+        bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/server-leg.sh" step11
       env:
         RELEASE_SHA: ${{ inputs.release_sha }}
         RELEASE_VERSION: ${{ inputs.release_version }}
@@ -122,7 +122,7 @@ runs:
       if: steps.fleet.outputs.shipped != 'true' || hashFiles('apps/server/contracts/*.sql') != ''
       shell: bash
       run: |-
-        bash "$GITHUB_WORKSPACE/scripts/release-steps/server-leg.sh" step12
+        bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/server-leg.sh" step12
       env:
         RELEASE_SHA: ${{ inputs.release_sha }}
         RELEASE_VERSION: ${{ inputs.release_version }}
@@ -133,4 +133,4 @@ runs:
       env:
         IMAGE_REF: ${{ steps.free_agent_image.outputs.image_ref }}
       run: |-
-        bash "$GITHUB_WORKSPACE/scripts/release-steps/server-leg.sh" step13
+        bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/server-leg.sh" step13

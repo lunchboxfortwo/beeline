@@ -57,10 +57,10 @@ execution IDs; the local command does not request a server receipt.
 
 ## Local recovery legs during an Actions outage
 
-`node scripts/release-local.mjs --plan` shows the local recovery path without
+`node packages/scripts/release-local.mjs --plan` shows the local recovery path without
 running release commands.
 The runner reads the committed unified workflow and its shared composite bodies,
-with the Squire policy applied by `scripts/release-local-policy.mjs`.
+with the Squire policy applied by `packages/scripts/release-local-policy.mjs`.
 That policy targets routine completion within 30 minutes: roughly five minutes
 for checks, then concurrent delivery and finalization.
 It is a scheduling budget, not a measured end-to-end deployment guarantee;
@@ -145,7 +145,7 @@ do not run hosted and local releases together.
 For an installer-only proof with no publication or channel mutation:
 
 ```sh
-node scripts/release-local.mjs --dry-run --leg desktop \
+node packages/scripts/release-local.mjs --dry-run --leg desktop \
   --release-sha <full-main-SHA> --release-version vX.Y.Z \
   --env-file ~/.config/beeline-release.env --state-dir /outside/repo/desktop-proof
 ```
@@ -240,7 +240,7 @@ shallow-fetches shared history. It checks for active hosted releases;
 `release.mjs` owns the local lock across both channels and clears dead owners.
 
 When available, fnm selects an installed Node version using a compatible
-`.nvmrc` or `engines.node` preference. Older repository pins cannot lower the
+`package.json` (`volta.node` or `engines.node`) preference. Older repository pins cannot lower the
 runner below Node 22; otherwise an installed Node 22 or newer is accepted.
 The same policy applies to local `setup-node` steps, so squire's Node 24
 does not fail later after passing preflight.
@@ -260,14 +260,14 @@ units inside the existing CI slices; it never starts or stops a shard service.
 executing any job; no release credentials are required.
 
 ```sh
-node scripts/release-local.mjs --dry-run --leg release
-node scripts/release-local.mjs --dry-run --leg release_checks
-node scripts/release-local.mjs --execute --leg release_checks \
+node packages/scripts/release-local.mjs --dry-run --leg release
+node packages/scripts/release-local.mjs --dry-run --leg release_checks
+node packages/scripts/release-local.mjs --execute --leg release_checks \
   --release-sha <full-main-commit> --env-file ~/.config/beeline-release.env \
   --state-dir /private/path/outside-the-checkout
-node scripts/release-local.mjs --dry-run --leg require-tools
-node scripts/release-local.mjs --dry-run --leg pages
-node scripts/release-local.mjs --dry-run --channel next \
+node packages/scripts/release-local.mjs --dry-run --leg require-tools
+node packages/scripts/release-local.mjs --dry-run --leg pages
+node packages/scripts/release-local.mjs --dry-run --channel next \
   --release-sha <full-main-commit> --env-file ~/.config/beeline-release.env \
   --state-dir /private/path/outside-the-checkout
 npm run release
@@ -343,7 +343,7 @@ are unchanged. This workflow change requires no required-check renames.
 Offline validation (no dispatch or delivery):
 
 ```sh
-node --test --test-concurrency=1 scripts/ci-release-contract.test.mjs scripts/github-app-installation-token.test.mjs scripts/server-test-selection.test.mjs scripts/coverage-map-artifact.test.mjs scripts/release-test-report.test.mjs
+node --test --test-concurrency=1 packages/scripts/ci-release-contract.test.mjs packages/scripts/github-app-installation-token.test.mjs packages/scripts/server-test-selection.test.mjs packages/scripts/coverage-map-artifact.test.mjs packages/scripts/release-test-report.test.mjs
 npm run lint:workflows
 ```
 
@@ -355,7 +355,7 @@ The workflow has one channel selector: `channel=next` (default) or
 release candidates, for example `0.1.184-rc.3`; latest promotion publishes
 `0.1.184` from that candidate's commit. GitHub tags and release records retain
 the `v` prefix (`v0.1.184-rc.3` / `v0.1.184`); npm versions omit it.
-`scripts/release-record.mjs` increments the rc counter within the next unreleased
+`packages/scripts/release-record.mjs` increments the rc counter within the next unreleased
 final version. Draft attempts reserve counters; rerunning the same attempt
 reuses its identity. A reserved final draft is also skipped for new source,
 since its npm version may already be published. After final publication, next
@@ -426,7 +426,7 @@ the same application id and next OTA subscription; update the authorized
 Offline plan and channel-selection proof (no external release calls):
 
 ```sh
-node --test scripts/release-channel.test.mjs scripts/unified-release.test.mjs
+node --test packages/scripts/release-channel.test.mjs packages/scripts/unified-release.test.mjs
 npm test -w @beeline/body -- src/self-update-channel.test.ts --maxWorkers=2 --minWorkers=1
 npm test -w @beeline/server -- src/production-release-dispatch.test.ts --maxWorkers=2 --minWorkers=1
 ```
@@ -444,7 +444,7 @@ to `https://server.usebeeline.app`. Native release builds use a fresh Metro temp
 cache; each OTA platform's first export clears Metro's cache. A rig's inlined
 URL must never survive into a production artifact.
 
-Before uploading an Android AAB, `scripts/assert-mobile-release-origin.mjs`
+Before uploading an Android AAB, `packages/scripts/assert-mobile-release-origin.mjs`
 checks both its native `assets/app.config` and the Hermes `loadAppConfig`
 override. A native production URL alone is insufficient: an inlined
 `EXPO_PUBLIC_*` value overrides it at runtime. The check fails closed if it
@@ -503,7 +503,7 @@ run in a concurrency group, so use this tool to avoid stacking dispatches.
 Direct GitHub recovery dispatches also require `dispatched_by` and still
 serialize behind the running release. Use the audited tool for agent work.
 The legacy
-`scripts/dispatch-production-release.mjs` remains available for operator
+`packages/scripts/dispatch-production-release.mjs` remains available for operator
 compatibility in an authenticated agent turn; shell invocation still follows
 the ordinary command-grant rules.
 
@@ -554,7 +554,7 @@ fleet updates.
 The initializer compares the pinned release SHA with every component's own source
 SHA in the newest published GitHub Release's `release.json` (see *Release
 memory* below) and writes `release-plan.json`. Its explicit path map is
-`COMPONENT_PATH_RULES` in `scripts/unified-release.mjs`. The plan selects
+`COMPONENT_PATH_RULES` in `packages/scripts/unified-release.mjs`. The plan selects
 `server`, `helper`, `mobile-ota`, `mobile-native`, `desktop`, and `website`
 independently before applying the channel policy. Every new next identity
 builds helper and OTA to carry its rc version; latest builds helper, OTA,
@@ -569,7 +569,7 @@ owner explicitly commands a listing publish. The pre-commit gate stops on any
 listing change; a passing build edit commits without `changesNotSentForReview`.
 
 On pull requests, NATIVE FINGERPRINT also compares the committed runtime pins
-against the PR base with `scripts/pr-store-build.mjs`. A changed pin adds a
+against the PR base with `packages/scripts/pr-store-build.mjs`. A changed pin adds a
 warning annotation and a Store build required job summary naming the affected
 platforms. This notice is informational and does not block merge; it brings
 the store-track decision into PR review before release planning.
@@ -591,9 +591,9 @@ delivery secrets stay on squire. The remote runner uses a private
 HOME, TMPDIR and signing keychain, and restores the prior keychain selection.
 The generated IPA is submitted directly to TestFlight. The iOS leg inspects the
 IPA's bundle, version, build number, runtime and required photo purpose string
-(`scripts/ios-build-evidence.py`), then verifies the exact Apple delivery UUID
+(`packages/scripts/ios-build-evidence.py`), then verifies the exact Apple delivery UUID
 and a new `VALID` build under App Store app `6803948500`
-(`scripts/ios-store-build.mjs`). Apple processing errors fail immediately;
+(`packages/scripts/ios-store-build.mjs`). Apple processing errors fail immediately;
 missing or unfinished builds fail after 20 minutes. The native build evidence keeps
 the delivery UUID and App Store build ID. Transport success alone does not
 authorize the native component or OTA promotion. Android store binaries
@@ -613,7 +613,7 @@ independently backward-compatible; no fleet-convergence or artificial
 cross-component gate serializes them.
 
 Two path rules identify component input changes. Editing the release workflow or
-`scripts/unified-release.mjs` marks only the fast legs (server, mobile OTA,
+`packages/scripts/unified-release.mjs` marks only the fast legs (server, mobile OTA,
 website) as changed; the channel policy still selects helper/OTA for stamping.
 The desktop app bundles the Expo web
 export, so shared UI and protocol changes rebuild its installers in the same
@@ -633,12 +633,12 @@ Every self-hosted job first checks its runner has the tools it needs
 (`.github/actions/require-tools`) and fails with one clear line if not.
 
 Jobs that compile source set up Node 22 once and install once with
-`scripts/npm-ci-timed.sh`, which prints the install's wall time, cache misses, and slowest registry
-fetches. The pinned eas-cli installs from `tools/eas-cli`'s lockfile.
+`packages/scripts/npm-ci-timed.sh`, which prints the install's wall time, cache misses, and slowest registry
+fetches. The pinned eas-cli installs from `apps/mobile/tools/eas-cli`'s lockfile.
 
 Helper builds cache `buzz-agent` and `buzz-dev-mcp` only in Actions cache,
 keyed by the pinned block/buzz commit, platform, Rust/C/C++ toolchain, SDK and
-build flags. `scripts/native-agent-cache.mjs` owns the shared Cargo recipe and
+build flags. `packages/scripts/native-agent-cache.mjs` owns the shared Cargo recipe and
 cache identity. A miss compiles the pinned upstream. Cache lookup is optional
 and bounded to two minutes; native build/install proofs and publication still
 fail normally. No native cache is published to GitHub Releases.
@@ -683,7 +683,7 @@ the two current Machine image refs and asks the registry for that exact source
 SHA. It verifies the image's source label, pins its digest, adds only the release
 identity metadata, and pushes the release image. An unavailable prebuild falls
 back to the full source build; a mismatched SHA or a failed push fails closed.
-`scripts/server-release-image.sh` owns both paths. The release then chooses the
+`packages/scripts/server-release-image.sh` owns both paths. The release then chooses the
 lexically first Machine as the canary. The Dockerfile stamps the
 release identity after the dependency layers, so a new version reuses the
 cached `npm ci`. The promotion updates only the canary, pinning probes to it
@@ -721,7 +721,7 @@ defaults to `dry_run=true` and shares the release's concurrency group.
 The canary ordering and rollback plan are covered without production by:
 
 ```sh
-node --test scripts/unified-release.test.mjs
+node --test packages/scripts/unified-release.test.mjs
 ```
 
 A failed attempt stores nothing. The release never redispatches itself. A
@@ -796,13 +796,13 @@ attempt, the unfinished component list as its failure class.
 Review the planner without deploying by running:
 
 ```sh
-node --test scripts/unified-release.test.mjs
+node --test packages/scripts/unified-release.test.mjs
 ```
 
 Those fixtures cover canary ordering and window verdicts, rollback selection,
 no-input defaults, per-component published-input drift, shared-path fanout,
 carry-forward, same-identity no-op and reruns, and completion/publication
-checks. `scripts/release-channel.test.mjs` covers channel planning, rc identity
+checks. `packages/scripts/release-channel.test.mjs` covers channel planning, rc identity
 allocation, final stamping, and npm/phone OTA publication against local stubs.
 
 ## Release memory
@@ -847,7 +847,7 @@ release carries one `release.json`, uploaded before the release is published:
 per-component version and source commit, the server image and the image it
 replaced, the phone OTA branch, its targets and the branch before it, the
 desktop updater counter, and the store builds this pipeline uploaded.
-`scripts/release-record.mjs` reads the newest published release; a release
+`packages/scripts/release-record.mjs` reads the newest published release; a release
 published before `release.json` existed is read as a migration record whose
 OTA branch is the legacy `production` branch.
 
@@ -861,7 +861,7 @@ its base64 form in run 41456438656 after secret-mask false positives. No Actions
 artifact or cache carries release state.
 
 Public JSON used by the OTA and observational bookkeeping legs still uses the
-`b64:` transport in `scripts/release-job-output.mjs`; it carries no credentials.
+`b64:` transport in `packages/scripts/release-job-output.mjs`; it carries no credentials.
 A result job never relies on that encoded previous-record output. Reconstruction
 reports `release-plan:invalid`, `previous-record:missing` or
 `previous-record:invalid` and fails closed.
@@ -884,7 +884,7 @@ keeps its old workflow and scripts and cannot pick up this handoff fix.
 No Actions artifact, cache or run lookup carries state between jobs or runs. Artifacts carry build
 outputs only: Mac helper binaries, the Android AAB for the emulator proof,
 desktop installers, the R8 mapping, and proof evidence.
-`scripts/release-artifact-allowlist.mjs` parses every release workflow and the
+`packages/scripts/release-artifact-allowlist.mjs` parses every release workflow and the
 local actions they use, and CI fails on any other upload, download, cache,
 cross-run download or Actions-artifact lookup.
 
@@ -892,7 +892,7 @@ cross-run download or Actions-artifact lookup.
 
 Delivery bookkeeping lives in the Loops/insights data store, not in the
 release path. After each attempt, the `bookkeeping` job runs
-`scripts/release-bookkeeping.mjs`. It writes one file,
+`packages/scripts/release-bookkeeping.mjs`. It writes one file,
 `Beeline-Work/beeline-insights` `releases/<version>.json`, which records:
 
 - the commits since the previous release;
@@ -954,7 +954,7 @@ concurrency group and has a `dry_run` mode.
   store responses retain the existing recorded-target fallback and warnings.
   No retry is added.
 - For a deterministic offline target plan, run
-  `node scripts/ota-release.mjs targets --store-status <stores.json>` from
+  `node packages/scripts/ota-release.mjs targets --store-status <stores.json>` from
   `apps/mobile`. The file holds `stores.android` and `stores.ios`, each with
   `status: "readable"` and `live` platform/runtime records.
 
@@ -964,7 +964,7 @@ concurrency group and has a `dry_run` mode.
 
 `Release preflight` runs at 05:30 UTC and on manual dispatch. PRs use the
 preflight tests and actionlint without depending on live runner availability. It installs
-Node from `.nvmrc` on the production, Android and Intel iOS release runner labels
+Node from `package.json` on the production, Android and Intel iOS release runner labels
 and executes `node -v`. A hosted watchdog cancels unfinished probes after five
 minutes, so offline or busy runners cannot leave a preflight queued indefinitely.
 Its failure identifies queued/running probes for investigation.
@@ -998,7 +998,7 @@ The existing saved `feedback-triage-steps` procedure's pull step includes all op
 issues with that label, without an age cutoff, alongside feedback and Sentry.
 This is the GitHub issue intake path, not a new server endpoint.
 
-Local proofs: `node --test scripts/release-preflight.test.mjs` covers forced
+Local proofs: `node --test packages/scripts/release-preflight.test.mjs` covers forced
 failure/redelivery producing one issue, cancellation, offline runner timeout,
 per-platform released runtime comparisons and setup-before-command ordering.
 A manually dispatched preflight proves the runner and native paths; failure triage activates

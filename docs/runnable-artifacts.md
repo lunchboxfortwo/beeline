@@ -12,7 +12,7 @@ The authenticated app requests `/v1/media/<id>/play`. `ObjectService.runnableLin
 
 The dedicated `https://beeline-games.fly.dev` site serves `/play/<uuid>?expires=…&token=…`. `fly.dev` is a private public suffix; its game and server hostnames have different registrable domains, and the game also differs from `usebeeline.app`. `runnableOrigin` checks this using the public suffix list and rejects an application site or a non-HTTPS origin. `BEELINE_GAME_ORIGIN` can override the dedicated origin, provided its proxy configuration changes with it.
 
-The credential-free game edge in `scripts/runnable-artifact-proxy.mjs` accepts GET game paths only. It forwards no caller cookies, authorization, or other headers; it fixes the backend Host to the game host and reaches `beeline-server.internal:8080`. The server branches before authentication or API routing and rejects every non-game path and WebSocket upgrade on that host. The edge refuses responses missing the sandbox policy, strips any Set-Cookie, follows no redirects, and bounds buffered bodies to the 25 MiB source limit plus base64 envelope overhead.
+The credential-free game edge in `packages/scripts/runnable-artifact-proxy.mjs` accepts GET game paths only. It forwards no caller cookies, authorization, or other headers; it fixes the backend Host to the game host and reaches `beeline-server.internal:8080`. The server branches before authentication or API routing and rejects every non-game path and WebSocket upgrade on that host. The edge refuses responses missing the sandbox policy, strips any Set-Cookie, follows no redirects, and bounds buffered bodies to the 25 MiB source limit plus base64 envelope overhead.
 
 The server checks the capability, object MIME, and expiry before reading bytes from storage. Ordinary signed storage links serve runnable source as `text/plain`; they never provide a second, unsandboxed HTML execution path.
 
@@ -41,7 +41,7 @@ The implementation does not enable Android incognito or clear its global cookie 
 | Threat | Boundary and remaining limits |
 | --- | --- |
 | Session, cookie, or storage theft | No bearer reaches the game. Cross-site and opaque origins block app DOM, cookies, and storage. No native bridge exposes SecureStore. |
-| API fetches or exfiltration through subresources | CSP blocks fetch, XHR, WebSocket, beacon, external scripts/styles/images, child frames, and workers. Data/blob images and inline canvas drawing remain available. |
+| API fetches or exfiltration through subresources | CSP blocks fetch, XHR, WebSocket, beacon, external packages/scripts/styles/images, child frames, and workers. Data/blob images and inline canvas drawing remain available. |
 | Phishing UI | Trusted viewer title and Close stay outside the content. The game cannot enter browser fullscreen, open popups, show sandboxed modal dialogs, or navigate the app. A malicious game can still draw deceptive text inside its own content; no sandbox can make authored text trustworthy. |
 | Navigation | Web sandbox blocks top/parent navigation, popups, forms, and downloads. Mobile callback also rejects external self-navigation. **Web self-navigation can still make an outside request; the parent closes the resulting frame. This residual risk is accepted.** |
 | Mining or infinite loops | CSP denies network pools and workers, but does not prohibit CPU work. Android renderer runs separately; the emulator proof demonstrates a trusted counter and Close remain usable during a real infinite loop. Close unmounts the WebView. This is termination by the user, not a CPU quota. |
@@ -54,7 +54,7 @@ Ruby accepted confined child-frame self-navigation with a parent-owned load guar
 
 The outbound request itself still leaves the frame before its subsequent load closes it. This is accepted residual risk, not a claim that CSP prevents navigation. The opaque frame has no Beeline session, cookies, storage, or user data beyond what the person types into the game. Resource/API fetches and top/parent navigation remain blocked. Mobile rejects the same example.org probe through its navigation callback before committing the outside page.
 
-See [the closed web frame](evidence/runnable-artifacts/web-navigation-closed.png), [the immediate-redirect case](evidence/runnable-artifacts/web-immediate-navigation-closed.png), and [the Android navigation proof](evidence/runnable-artifacts/android-navigation-blocked.png).
+See the closed web frame, the immediate-redirect case, and the Android navigation proof.
 
 ## Hosting
 
@@ -62,8 +62,8 @@ A separate `beeline-games` Fly app was provisioned in the owner's existing organ
 
 The production server must listen on `HOST = "::"` (dual-stack on Fly's Linux Machines). The edge reaches `beeline-server.internal:8080` over Fly private IPv6; an IPv4-only `0.0.0.0` listener refuses that connection and every game returns 503. The dual-stack listener also accepts IPv4 traffic for the public proxy and `/readyz` health checks, including the existing voice/LiveKit HTTP routes. Local development keeps its own HOST default. Listener changes ship through the normal owner-commanded release; after release, an unknown `/play/<id>` on the game domain must return the server's 404 with sandbox CSP, rather than the edge's 503.
 
-Deployment source: `scripts/runnable-artifact-proxy.mjs`, launched by `node /app/game-proxy.mjs`, injected through Fly Machines `config.files.raw_value` from the exact checked-in script. Image: `docker.io/library/node@sha256:2c752226d477b4a886378baa95b9af252be59301b725fdb0b7e15208131505a8`. Ports 80/443 forward to internal 8080, with TLS and HTTP handlers; HTTP redirects to HTTPS. No release pipeline changes are required.
+Deployment source: `packages/scripts/runnable-artifact-proxy.mjs`, launched by `node /app/game-proxy.mjs`, injected through Fly Machines `config.files.raw_value` from the exact checked-in script. Image: `docker.io/library/node@sha256:2c752226d477b4a886378baa95b9af252be59301b725fdb0b7e15208131505a8`. Ports 80/443 forward to internal 8080, with TLS and HTTP handlers; HTTP redirects to HTTPS. No release pipeline changes are required.
 
 ## Proof
 
-See [the evidence record](evidence/runnable-artifacts/README.md). The accepted residual risk and parent guard are part of the review contract. Mark the PR ready only after CI passes.
+See the evidence record. The accepted residual risk and parent guard are part of the review contract. Mark the PR ready only after CI passes.

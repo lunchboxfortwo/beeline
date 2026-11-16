@@ -1,5 +1,5 @@
 /**
- * RigTransport — Buzzy's client↔agent seam (spec.md Appendix).
+ * RigTransport — Buzzy's client↔agent seam.
  *
  * This is the adapter boundary for the follow-up lane that plugs Buzz
  * (channels + buzz-acp + git API) under Happy's session UI.

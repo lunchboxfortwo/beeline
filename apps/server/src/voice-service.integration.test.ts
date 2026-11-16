@@ -3,7 +3,7 @@ import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import type { AddressInfo } from 'node:net';
 import { afterAll,beforeAll,expect,it,vi } from 'vitest';
 import WebSocket from 'ws';
-import { phoneFetch } from '../../../tests/helpers/phone-operation.js';
+import { phoneFetch } from '../../../packages/test-helpers/helpers/phone-operation.js';
 import { type CommandRow } from './agent-command.js';
 import { TokenAuth } from './auth.js';
 import { migrate } from './database.js';

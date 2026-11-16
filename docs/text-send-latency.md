@@ -16,7 +16,7 @@ invariant.
 
 ## Current-head native acceptance
 
-The credential-free [operator evidence index](../scripts/latency-rig/evidence/text-send-2026-11-04/current-head-native/summary.json)
+The credential-free [operator evidence index](../packages/scripts/latency-rig/evidence/text-send-2026-11-04/current-head-native/summary.json)
 records tests on exact code head `3a77888f6b99465e9156efc237cfab7d5a5167e4`,
 using the original Play runtime44/code144 binary on emulator-5626 against
 production142, with the review identity in Beeline Review only. No OTA was
@@ -188,7 +188,7 @@ Production after-deployment handling also remains unmeasured.
 ## Evidence and capture limits
 
 Per-sample evidence and bundle/video hashes are in
-[`scripts/latency-rig/evidence/text-send-2026-11-04`](../scripts/latency-rig/evidence/text-send-2026-11-04/).
+[`packages/scripts/latency-rig/evidence/text-send-2026-11-04`](../packages/scripts/latency-rig/evidence/text-send-2026-11-04).
 Current-head JSON, selected PNGs, capture/analysis harnesses and the controlled
 fault patch are attached under `current-head-native/`. The harnesses are
 historical operator provenance, not portable replay commands: they reference

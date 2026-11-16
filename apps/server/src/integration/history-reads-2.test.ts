@@ -1,4 +1,4 @@
-import { phoneFetch } from '../../../../tests/helpers/phone-operation.js';
+import { phoneFetch } from '../../../../packages/test-helpers/helpers/phone-operation.js';
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { isRoomView, isRoomViewMessage, ROOM_VIEW_MESSAGE_LIMIT, type RoomView } from '@beeline/api-contract/phone';

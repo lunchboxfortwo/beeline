@@ -19,7 +19,7 @@ publish-usebeeline:
         echo 'Tag must match RELEASE_VERSION' >&2
         exit 1
       fi
-      bash scripts/npm-ci-timed.sh
+      bash packages/scripts/npm-ci-timed.sh
       # Match the helper CLI build in unified-release.yml without building native archives.
       npm run build -w @beeline/nostr
       npm run build -w @beeline/api-contract
@@ -31,7 +31,7 @@ publish-usebeeline:
       package_dir="$(mktemp -d)"
       npm pack --workspace usebeeline --pack-destination "$package_dir"
       tarball="$package_dir/usebeeline-$version.tgz"
-      node scripts/smoke-helper-package.mjs "$tarball" "$version"
+      node packages/scripts/smoke-helper-package.mjs "$tarball" "$version"
       npm install --global npm@^11.15.0
       publish_args=(--no-provenance)
       case "$version" in *-rc.*) publish_args+=(--tag next);; esac

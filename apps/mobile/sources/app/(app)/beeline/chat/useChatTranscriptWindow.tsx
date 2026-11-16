@@ -336,7 +336,7 @@ export function useChatTranscriptWindow([
   // plain scrollable View over real DOM (`shouldFollowDesktopTail` in
   // `buzz/room-scroll-follow.ts`), not React Native Web's FlatList/
   // VirtualizedList, whose own provisional layout accounting is the root
-  // cause proof/desktop-append-overlap/NOTES.md traces eight prior scroll-
+  // cause the append-overlap investigation traces eight prior scroll-
   // timing patches back to.
   const desktopScrollNodeRef = useRef<HTMLElement | null>(null);
 

@@ -70,7 +70,7 @@ of unrelated customer attempts.
 | Repeat warm GitHub Home → icon return, 19:05:37 | Same install, funnel attempt `fe82e983` | cancelled at 19:05:39.518; no full sign-in claimed |
 
 The Google recording, challenge screenshot, release/native-activity log and
-matching production rows are retained under `evidence/signup-rerun/` in the
+matching production rows are retained under the historical signup-rerun evidence in the
 corner and posted as artifacts. The GitHub test credential's renewed reveal
 expired without delivery, so four full GitHub sign-ins were not completed.
 Ten wiped-install Google sign-ins, new-user signup and iOS remain unproven.

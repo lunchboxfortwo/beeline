@@ -1,4 +1,4 @@
-import { phoneFetch } from '../../../tests/helpers/phone-operation.js';
+import { phoneFetch } from '../../../packages/test-helpers/helpers/phone-operation.js';
 
 import type { AddressInfo } from 'node:net';
 
@@ -279,7 +279,7 @@ sockets,
 connect,
 };
 }
-export { phoneFetch } from '../../../tests/helpers/phone-operation.js';
+export { phoneFetch } from '../../../packages/test-helpers/helpers/phone-operation.js';
 export { AddressInfo } from 'node:net';
 export { default as WebSocket } from 'ws';
 export { afterEach, describe, expect, it, vi } from 'vitest';

@@ -61,8 +61,8 @@ Start a dedicated local LiveKit server on 17890, with RTC TCP 17891 and UDP
 17892–17902, using development-only `devkey`/`secret`. Run:
 
 ```sh
-SILENCE_PROOF_ANDROID_FIRST=1 node --import tsx scripts/prove-voice-delivery.ts
-python3 scripts/prove-voice-delivery.py --device emulator-PORT --mode fixed
+SILENCE_PROOF_ANDROID_FIRST=1 node --import tsx packages/scripts/prove-voice-delivery.ts
+python3 packages/scripts/prove-voice-delivery.py --device emulator-PORT --mode fixed
 ```
 
 The driver uses the actual Join control and Goosey's avatar at the fixed

@@ -21,7 +21,7 @@ The indicator took 41 seconds; the reply took 87 seconds.
 
 ## Local demonstration
 
-`infra/free-agent/cold-start-proof.mjs` creates a disposable PostgreSQL database
+`apps/infra/free-agent/cold-start-proof.mjs` creates a disposable PostgreSQL database
 and a fresh Workspace. It sends a human mention through the built server's
 phone operation, checks the phone Room response and receives the working turn
 over the authenticated phone live socket. The real free-agent image bootstraps

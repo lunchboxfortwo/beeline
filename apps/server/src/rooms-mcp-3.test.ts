@@ -353,13 +353,13 @@ const scope1 = fixtureScope1();
   });
 
   it('publishes every preregistered client id on the public connect page', () => {
-    const page = readFileSync(new URL('../../../web/connect/index.html', import.meta.url), 'utf8');
+    const page = readFileSync(new URL('../../site/connect/index.html', import.meta.url), 'utf8');
     for (const client of PREREGISTERED_MCP_CLIENTS) {
       expect(page).toContain(client.id);
       expect(page).toContain(client.name);
     }
     expect(page).toContain('https://join.usebeeline.app');
-    expect(readFileSync(new URL('../../../web/sitemap.xml', import.meta.url), 'utf8')).toContain('<loc>https://usebeeline.app/connect/</loc>');
+    expect(readFileSync(new URL('../../site/sitemap.xml', import.meta.url), 'utf8')).toContain('<loc>https://usebeeline.app/connect/</loc>');
   });
 
   it('owner-unknown: identifies the approving owner before and after setup, even without chats', async () => {
@@ -499,7 +499,7 @@ const scope1 = fixtureScope1();
   it('names only live tools on the join and connect pages and in the starter routine', async () => {
     const { client } = await scope1.connected();
     const live = new Set((await client.listTools()).tools.map(tool => tool.name));
-    const pages = ['../assets/mcp/join.html', '../../../web/connect/index.html', '../../../web/room/index.html'].map(path => readFileSync(new URL(path, import.meta.url), 'utf8'));
+    const pages = ['../assets/mcp/join.html', '../../site/connect/index.html', '../../site/room/index.html'].map(path => readFileSync(new URL(path, import.meta.url), 'utf8'));
     const named = [...pages.flatMap(page => [...page.matchAll(/<code>([a-z]+(?:_[a-z]+)+)\b/g)].map(match => match[1]!)), ...(MCP_STARTER_ROUTINE.match(/\b[a-z]+(?:_[a-z]+)+\b/g) ?? [])];
     // on_demand is a delivery mechanism the starter routine names, not a tool.
     expect(named.filter(name => !live.has(name) && name !== 'on_demand')).toEqual([]);

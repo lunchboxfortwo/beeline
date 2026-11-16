@@ -56,8 +56,8 @@ idempotent individual column drops; this does not redesign other migrations.
 Build workspace dependencies and the server, then run:
 
 ```sh
-node --import tsx scripts/prove-rollout-overlap.mjs --baseline
-node --import tsx scripts/prove-rollout-overlap.mjs
+node --import tsx packages/scripts/prove-rollout-overlap.mjs --baseline
+node --import tsx packages/scripts/prove-rollout-overlap.mjs
 ```
 
 The script compiles the exact recorded server and shared-package sources from

@@ -11252,10 +11252,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/full-6/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11272,10 +11272,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/full-5/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11292,10 +11292,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/full-4/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11312,10 +11312,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/full-3/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11332,10 +11332,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/full-2/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11352,10 +11352,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/full-1/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11372,10 +11372,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/restart-8/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11392,10 +11392,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/restart-7/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11412,10 +11412,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/restart-3/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11432,10 +11432,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/workflow-read/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11452,10 +11452,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/workflow/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11472,10 +11472,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/weekly/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11492,10 +11492,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/voice-start/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11512,10 +11512,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/voice-change/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11532,10 +11532,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/voice-ar/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11552,10 +11552,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/usage-spend/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11572,10 +11572,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/usage-reset/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11592,10 +11592,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/usage-alternative/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11612,10 +11612,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/translate/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11632,10 +11632,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/text-file/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11652,10 +11652,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/tag-required/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11672,10 +11672,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/tag-order/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11692,10 +11692,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/system-impersonate/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11712,10 +11712,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/schedule-list/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11732,10 +11732,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/schedule-cleanup/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11752,10 +11752,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/reminder/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11772,10 +11772,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/own-agent-provider/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11792,10 +11792,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/own-agent/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11812,10 +11812,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/open-work/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11832,10 +11832,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/members-read/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11852,10 +11852,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/members/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11872,10 +11872,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/mail-read/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11892,10 +11892,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/leads/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11912,10 +11912,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/html-mock/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11932,10 +11932,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/game-vs-mock/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11952,10 +11952,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/game-phone/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11972,10 +11972,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/game-ar/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -11992,10 +11992,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/earlier-file/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -12012,10 +12012,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/dictation/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -12032,10 +12032,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/connect-notion/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -12052,10 +12052,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/connect-calendar/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -12072,10 +12072,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/code-bug/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -12092,10 +12092,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/code-ar/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -12112,10 +12112,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/caption/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -12132,10 +12132,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/approval-head/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -12152,10 +12152,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/agent-machine/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -12172,10 +12172,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v3/agent-file/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -12192,10 +12192,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v4/workflow-vs-reminder/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -12212,10 +12212,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v4/system-dm-owner/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -12232,10 +12232,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v4/revoke-invite/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -12252,10 +12252,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v4/phone-file/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -12272,10 +12272,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v4/meal/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -12292,10 +12292,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v4/invite-ar/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -12312,10 +12312,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v4/invite/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -12332,10 +12332,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v4/file-ar/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -12352,10 +12352,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v4/desktop-file/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -12372,10 +12372,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v4/computer-access/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -12392,10 +12392,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v4/code-site/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
@@ -12412,10 +12412,10 @@
     {
       "path": "/home/lunchbox/beeline-discovery-20261022-cursor-isolated/remaining-v4/business-plan/result.json",
       "sourceHashes": {
-        "scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
-        "scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
-        "scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
-        "scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
+        "packages/scripts/discovery-live.mjs": "5882e43c82485a8bed161c6ed813ef91299a3a3ed3d670b30236645ad23816e2",
+        "packages/scripts/discovery-launch.mjs": "63e64ea6981c1807150f9e1f3c6fff719b7579f6cfd5c53b6f3087794c179a2a",
+        "packages/scripts/discovery-mcp.mjs": "e6f25de970975104003a17e7bfe156a3aaf6df441d571b6bdefbcf81437e89c6",
+        "packages/scripts/discovery-score.mjs": "115ab5b1bb703f07e289ef960b915519ce4f5e941119e47e565c034ebbc8bcea",
         "docs/prompts/cases/discovery/corpus.json": "efb0e52445ab9a164c984bc770a8a1da293769977795ab14cca86f39e258cf2a",
         "apps/body/src/beeline-skill.ts": "ba0b92d8ee8166fc86fa3048092c7b0e7d515d5ccdd998dd91993e2a499c4009",
         "apps/body/src/prompt-assembly.ts": "2c4ee143d62eb0819ef65061c515200f93397af1c6aa3426c8f45a1106757ea1",
