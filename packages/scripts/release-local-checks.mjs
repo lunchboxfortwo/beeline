@@ -140,7 +140,7 @@ export class LocalChecks {
       '/usr/bin/nsenter', `--target=${shard.pid}`, '--user', '--net', '--setuid=0', '--setgid=0', '--',
       '/usr/bin/setpriv', '--bounding-set=-all', '--inh-caps=-all', '--ambient-caps=-all', '--no-new-privs', '--',
       '/usr/bin/env', '-i', 'PATH=/tool/node/bin:/usr/bin:/bin', 'HOME=/state/home', 'LANG=C.UTF-8', 'DOCKER_HOST=unix:///ci/run/docker.sock',
-      '/tool/node/bin/node', '/runner/scripts/release-local-check-worker.mjs'];
+      '/tool/node/bin/node', '/runner/packages/scripts/release-local-check-worker.mjs'];
     const placement = host ? `bounded host user (queue slot ${slot})` : shard.name;
     this.engine.processes.log(`Check ${label}: ${placement}; ${preparation ? 'shared workspace preparation' : checkWorkspace(context.github.job)}`);
     const startedAt = new Date().toISOString();
