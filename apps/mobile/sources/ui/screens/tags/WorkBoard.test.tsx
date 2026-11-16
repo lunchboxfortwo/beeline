@@ -74,3 +74,25 @@ it.each([false, true])('renders each ask kind with its asking time on desktop=%s
         expect(cardText(0)).toContain('3m');
     } finally { act(() => tree.unmount()); }
 });
+
+it('never disables the Needs you header or Clear all, and Clear all stays pressable while a clear is pending', () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    const board = {
+        workspaceId: 'ws', workspaceName: 'Crew', viewerId: 'viewer', chats: [], people: [],
+        items: [{ id: 'ask', roomId: 'chat', chatId: 'chat', chatName: 'general', threadName: 'Launch', title: 'Launch', state: 'needs-you',
+            openedBy: { pubkey: 'agent', kind: 'agent', name: 'Jellybean' }, assignee: null, createdAt: 1, updatedAt: 2,
+            ask: { messageId: 'ask', workspaceId: 'ws', roomId: 'chat', roomName: 'general', roomKind: 'room', text: 'Which surface?', createdAt: 1 } }],
+    } as unknown as WorkBoardView;
+    const actions = { open: vi.fn(), reply: vi.fn(), decide: vi.fn(), assign: vi.fn(), clear: vi.fn(), clearAll: vi.fn(() => new Promise<void>(() => {})) };
+    let tree: any;
+    act(() => { tree = create(<WorkBoard board={board} desktop={false} actions={actions} />); });
+    const host = (id: string) => tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === id);
+    try {
+        expect(host('work-section-needs-you').props.disabled).toBeFalsy();
+        expect(host('work-clear-all').props.disabled).toBeFalsy();
+        act(() => host('work-clear-all').props.onPress());
+        act(() => host('work-clear-all').props.onPress());
+        expect(actions.clearAll).toHaveBeenCalledTimes(2);
+        expect(host('work-clear-all').props.disabled).toBeFalsy();
+    } finally { act(() => tree.unmount()); }
+});

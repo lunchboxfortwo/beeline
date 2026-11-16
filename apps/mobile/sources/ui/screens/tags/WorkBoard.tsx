@@ -264,14 +264,13 @@ function SectionHead({
       gap="2"
       backgroundColor="transparent"
       onPress={onToggle}
-      disabled={!onToggle}
       accessibilityRole={onToggle ? 'button' : undefined}
       aria-expanded={onToggle ? open : undefined}
       aria-label={`${title} ${count}`}
       testID={testID}
     >
       {onToggle ? <Glyph icon={open ? ChevronDown : ChevronRight} size={14} /> : null}
-      <T v="metaStrong" color="secondary">
+      <T v="metaStrong">
         {title}
       </T>
       <T v="meta" color="secondary" flex={1}>
@@ -302,7 +301,6 @@ export function WorkBoard({
   const [chat, setChat] = useState<string | null>(null);
   const [assignee, setAssignee] = useState<string | null>(null);
   const [detail, setDetail] = useState<WorkItemView | null>(null);
-  const [clearing, setClearing] = useState(false);
   const { scrolled, scrollProps } = useScrolledUnder();
   const visible = board.items.filter(
     (item) =>
@@ -390,16 +388,10 @@ export function WorkBoard({
             minHeight={0}
             padding="0"
             hitSlop={12}
-            disabled={clearing}
-            onPress={() => {
-              setClearing(true);
-              void actions.clearAll().finally(() => setClearing(false));
-            }}
+            onPress={() => void actions.clearAll()}
             testID="work-clear-all"
           >
-            <T v="meta" color="secondary">
-              Clear all
-            </T>
+            <T v="meta">Clear all</T>
           </Btn>
         ) : undefined
       }
