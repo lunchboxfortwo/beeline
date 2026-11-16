@@ -43,11 +43,14 @@ export function ChatRepositoryEditor({ roomId, current, canEditRepository, disab
     useEffect(() => {
         if (!open) return;
         let cancelled = false;
-        void monolithPhoneOperation('listGitHubRepositories', {}).then(result => {
+        let refreshed = false;
+        void monolithPhoneOperation('listGitHubRepositories', { refresh: true }).then(result => {
+            refreshed = true;
             if (!cancelled) setRepositories(result.repositories);
-        }).catch(reason => {
-            if (!cancelled) setEditError(appErrorCopy(reason, 'Could not load repos.'));
-        }).finally(() => { if (!cancelled) setRepositoriesLoading(false); });
+        }).catch(() => undefined).finally(() => { if (!cancelled) setRepositoriesLoading(false); });
+        void monolithPhoneOperation('listGitHubRepositories', { refresh: false }).then(result => {
+            if (!cancelled && !refreshed) setRepositories(result.repositories);
+        }).catch(() => undefined);
         return () => { cancelled = true; };
     }, [open, roomId]);
 

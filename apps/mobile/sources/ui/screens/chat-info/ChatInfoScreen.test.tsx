@@ -100,7 +100,8 @@ describe('Chat info', () => {
         operation.mockResolvedValueOnce({ installations: [], repositories: [{ id: 9, fullName: 'owner/repo', installationId: 77, defaultBranch: 'develop', private: true }] });
         const tree = render();
         await act(async () => pressable(tree, 'chat-repository').props.onPress());
-        expect(operation).toHaveBeenCalledWith('listGitHubRepositories', {});
+        expect(operation).toHaveBeenCalledWith('listGitHubRepositories', { refresh: true });
+        expect(operation).toHaveBeenCalledWith('listGitHubRepositories', { refresh: false });
         const list = tree.root.findByType('RepoList');
         expect(tree.root.findAllByProps({ testID: 'chat-repository-pill' })).toHaveLength(0);
         expect(tree.root.findAllByProps({ testID: 'chat-repository-none' })).toHaveLength(0);
@@ -137,6 +138,42 @@ describe('Chat info', () => {
         act(() => tree.root.findAllByType('Button').find((node: any) => node.props['aria-label'] === 'Cancel').props.onPress());
         expect(tree.root.findAllByType('Sheet')[0].props.open).toBe(false);
         expect(infoReads).not.toHaveBeenCalled();
+    });
+
+    it.each(['success', 'failure'] as const)('shows the stored catalog while refreshing on each opening, then handles GitHub %s', async outcome => {
+        const cached = { repositories: [{ id: 1373962491, fullName: 'bananaman614305/milo', installationId: 77, defaultBranch: 'main' }] };
+        const fresh = { repositories: [{ ...cached.repositories[0], fullName: 'bananaman614305/grunt' }] };
+        let resolve!: (value: typeof fresh) => void;
+        let reject!: (error: Error) => void;
+        operation.mockImplementation((_name, input) => input.refresh
+            ? new Promise((yes, no) => { resolve = yes; reject = no; }) : Promise.resolve(cached));
+        const tree = render();
+        infoReads.mockClear();
+        await act(async () => pressable(tree, 'chat-repository').props.onPress());
+        expect(tree.root.findByType('RepoList').props.candidates).toEqual(cached.repositories);
+        expect(tree.root.findByType('RepoList').props.loading).toBe(true);
+        await act(async () => { if (outcome === 'success') resolve(fresh); else reject(new Error('GitHub unavailable')); });
+        expect(tree.root.findByType('RepoList').props.candidates).toEqual(outcome === 'success' ? fresh.repositories : cached.repositories);
+        expect(flat(tree)).not.toContain('Could not load repos');
+        expect(infoReads).not.toHaveBeenCalled();
+        act(() => tree.root.findAllByType('Button').find((node: any) => node.props['aria-label'] === 'Cancel').props.onPress());
+        await act(async () => pressable(tree, 'chat-repository').props.onPress());
+        expect(operation.mock.calls.filter(([, input]) => input.refresh === true)).toHaveLength(2);
+        await act(async () => resolve(fresh));
+        act(() => tree.unmount());
+    });
+
+    it('keeps a fast fresh picker result when the stored catalog arrives later', async () => {
+        let cached!: (value: unknown) => void;
+        const repositories = [{ id: 1373962491, fullName: 'bananaman614305/grunt', installationId: 77, defaultBranch: 'main' }];
+        operation.mockImplementation((_name, input) => input.refresh
+            ? Promise.resolve({ repositories }) : new Promise(resolve => { cached = resolve; }));
+        const tree = render();
+        await act(async () => pressable(tree, 'chat-repository').props.onPress());
+        expect(tree.root.findByType('RepoList').props.candidates).toEqual(repositories);
+        await act(async () => cached({ repositories: [{ ...repositories[0], fullName: 'bananaman614305/milo' }] }));
+        expect(tree.root.findByType('RepoList').props.candidates).toEqual(repositories);
+        act(() => tree.unmount());
     });
 
     it.each([
@@ -176,7 +213,7 @@ describe('Chat info', () => {
         act(() => list.props.onSelect(list.props.getCandidate(list.props.candidates[0])));
         await act(async () => control(tree, 'chat-repository-save').props.onPress());
         expect(modal.confirm).toHaveBeenCalledWith('Change chat repo?', expect.stringContaining('owner/old'), expect.objectContaining({ confirmText: 'Change anyway' }));
-        expect(operation.mock.calls.map(call => call[0])).toEqual(['listGitHubRepositories']);
+        expect(operation.mock.calls.map(call => call[0])).toEqual(['listGitHubRepositories', 'listGitHubRepositories']);
         expect(refresh).not.toHaveBeenCalled();
     });
 
@@ -190,7 +227,7 @@ describe('Chat info', () => {
         act(() => control(tree, 'chat-repository-clear').props.onPress());
         expect(tree.root.findAllByProps({ testID: 'chat-repository-pill' })).toHaveLength(0);
         expect(control(tree, 'chat-repository-save').props.disabled).toBe(false);
-        expect(operation.mock.calls.map(call => call[0])).toEqual(['listGitHubRepositories']);
+        expect(operation.mock.calls.map(call => call[0])).toEqual(['listGitHubRepositories', 'listGitHubRepositories']);
         await act(async () => control(tree, 'chat-repository-save').props.onPress());
         expect(modal.confirm).toHaveBeenCalledWith('Unlink owner/old?', expect.stringContaining('chat-only'), expect.objectContaining({ destructive: true }));
         expect(operation).toHaveBeenCalledWith('removeRoomRepository', { roomId: ROOM });
@@ -206,7 +243,7 @@ describe('Chat info', () => {
         data.room.viewer.permissions.manage = false;
         act(() => tree.update(<ChatInfoScreen roomId={ROOM} close={vi.fn()} />));
         await act(async () => control(tree, 'chat-repository-save').props.onPress());
-        expect(operation.mock.calls.map(call => call[0])).toEqual(['listGitHubRepositories']);
+        expect(operation.mock.calls.map(call => call[0])).toEqual(['listGitHubRepositories', 'listGitHubRepositories']);
     });
 
     it('lists finished threads (read on open) and opens one', () => {

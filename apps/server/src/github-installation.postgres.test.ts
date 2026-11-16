@@ -62,7 +62,7 @@ describe.skipIf(!url)('GitHub one-use installation claims',()=>{
     let fail=true;
     const wrap=(db:SqlDatabase):SqlDatabase=>({
       ...db,transaction:work=>db.transaction(tx=>work(wrap(tx))),query:async(sql,values)=>{
-        if(fail&&sql.startsWith('INSERT INTO github_repositories(')){fail=false;throw failure;}
+        if(fail&&sql.includes('INSERT INTO github_repositories(')){fail=false;throw failure;}
         return db.query(sql,values);
       },
     });

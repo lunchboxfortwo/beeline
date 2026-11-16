@@ -567,7 +567,7 @@ import { phoneReadConnectionDetail, phoneRevokeConnectionGrants } from './connec
         return (await phoneManagedIdentity(ctx, viewerId)) as Output<Name>;
       case 'listGitHubRepositories': {
         let githubReconnectNeeded = false;
-        if ((input as Input<'listGitHubRepositories'>).refresh) {
+        if ((input as Input<'listGitHubRepositories'>).refresh !== false) {
           try {
             const outcome = await phoneRequireGitHub(ctx).refresh(viewerId);
             githubReconnectNeeded = Boolean(outcome?.githubReconnectNeeded);

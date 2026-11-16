@@ -46,7 +46,7 @@ const scope1 = fixtureScope1();
     const query = scope1.database.query.bind(scope1.database);
     let tokenDuringSync: string | undefined;
     vi.spyOn(scope1.database, 'query').mockImplementation(async (sql, values) => {
-      if (sql.startsWith('INSERT INTO github_repositories(')) {
+      if (sql.includes('INSERT INTO github_repositories(')) {
         tokenDuringSync = (await operations.roomToken(room)).token;
       }
       return query(sql, values);

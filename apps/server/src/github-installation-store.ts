@@ -26,14 +26,21 @@ export async function storeGitHubInstallations(database:SqlDatabase,viewerId:str
       github_installations.account_type,github_installations.account_avatar_url,github_installations.repository_selection,github_installations.status)
       IS DISTINCT FROM (EXCLUDED.owner_id,EXCLUDED.account_id,EXCLUDED.account_login,EXCLUDED.account_type,
         EXCLUDED.account_avatar_url,EXCLUDED.repository_selection,EXCLUDED.status)`,[JSON.stringify(installations),viewerId]);
-  await database.query(`INSERT INTO github_repositories(repository_id,installation_id,full_name,default_branch,private,allow_auto_merge)
+  await database.query(`WITH refreshed AS (
+    INSERT INTO github_repositories(repository_id,installation_id,full_name,default_branch,private,allow_auto_merge)
     SELECT id,installation_id,name,branch,private,auto_merge
     FROM jsonb_to_recordset($1::jsonb) repository(id bigint,installation_id bigint,name text,branch text,private boolean,auto_merge boolean)
     ORDER BY id ON CONFLICT(repository_id) DO UPDATE SET installation_id=EXCLUDED.installation_id,full_name=EXCLUDED.full_name,
       default_branch=EXCLUDED.default_branch,private=EXCLUDED.private,allow_auto_merge=EXCLUDED.allow_auto_merge,active=true,updated_at=now()
     WHERE (github_repositories.installation_id,github_repositories.full_name,github_repositories.default_branch,
       github_repositories.private,github_repositories.allow_auto_merge,github_repositories.active)
-      IS DISTINCT FROM (EXCLUDED.installation_id,EXCLUDED.full_name,EXCLUDED.default_branch,EXCLUDED.private,EXCLUDED.allow_auto_merge,true)`,
+      IS DISTINCT FROM (EXCLUDED.installation_id,EXCLUDED.full_name,EXCLUDED.default_branch,EXCLUDED.private,EXCLUDED.allow_auto_merge,true)
+    RETURNING repository_id,full_name
+  ) UPDATE rooms SET repository_name=refreshed.full_name,repository_remote='git://github.com/' || refreshed.full_name,
+      repository_updated_at=now(),updated_at=now()
+    FROM refreshed WHERE rooms.repository_key='github:' || refreshed.repository_id::text
+      AND (rooms.repository_name,rooms.repository_remote)
+        IS DISTINCT FROM (refreshed.full_name,'git://github.com/' || refreshed.full_name)`,
     [JSON.stringify(repositories)]);
   await database.query(`UPDATE github_repositories SET active=false,updated_at=now()
     WHERE installation_id=ANY($1::bigint[]) AND NOT (repository_id=ANY($2::bigint[])) AND active`,

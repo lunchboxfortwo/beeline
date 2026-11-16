@@ -47,12 +47,26 @@ export async function readGitHubAccess(
 ): Promise<GitHubAccessView> {
   hold(transport, scope);
   const key = address(scope);
+  const generation = clientResetGeneration();
   if (!refresh) {
     const held = await mobileSurfaceCache.read(key, guard);
     if (held) return held;
   }
-  const answer = await mobileSurfaceCache.fetch(key, guard,
-    () => transport.workspaceGitHubAccess({ refresh }));
+  // Start GitHub once per opening. Its latency must not hold the latest
+  // server-stored catalog behind an older device snapshot.
+  let fresh = transport.workspaceGitHubAccess({ refresh });
+  if (refresh) {
+    const cached = transport.workspaceGitHubAccess({ refresh: false });
+    fresh = fresh.catch(() => cached);
+    await mobileSurfaceCache.fetch(key, guard,
+      () => Promise.race([cached, fresh])).catch(() => undefined);
+  }
+  if (generation !== clientResetGeneration()) throw new Error('GitHub access response was superseded');
+  const answer = await mobileSurfaceCache.fetch(key, guard, () => fresh).catch(error => {
+    const held = mobileSurfaceCache.peek(key, guard);
+    if (held) return held;
+    throw error;
+  });
   if (answer) return answer;
   const held = mobileSurfaceCache.peek(key, guard);
   if (held) return held;

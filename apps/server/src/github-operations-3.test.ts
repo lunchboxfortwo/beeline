@@ -745,7 +745,7 @@ const scope1 = fixtureScope1();
     let attempts = 0;
     vi.spyOn(scope1.database, 'query').mockImplementation(async (sql, values) => {
       const target = boundary === 'installation' ? sql.startsWith('INSERT INTO github_installations(')
-        : boundary === 'repository' ? sql.startsWith('INSERT INTO github_repositories(')
+        : boundary === 'repository' ? sql.includes('INSERT INTO github_repositories(')
         : sql.includes('NOT (repository_id=ANY');
       if (target && ++attempts === 1) throw Object.assign(new Error('deadlock detected'), { code: '40P01' });
       return query(sql, values);
@@ -787,7 +787,7 @@ const scope1 = fixtureScope1();
       const query = tx.query.bind(tx);
       tx.query = async (sql, values) => {
         const target = boundary === 'installation' ? sql.startsWith('INSERT INTO github_installations(')
-          : boundary === 'repository' ? sql.startsWith('INSERT INTO github_repositories(')
+          : boundary === 'repository' ? sql.includes('INSERT INTO github_repositories(')
           : sql.includes('NOT (repository_id=ANY');
         if (target) { attempts++; throw failure; }
         return query(sql, values);
