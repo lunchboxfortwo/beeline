@@ -562,7 +562,7 @@ const scope1 = fixtureScope1();
       expect(view?.cornerLifecycle?.pr?.headSha).toBe(payload.check_run.head_sha);
       return checkStatusLine(view!.cornerLifecycle);
     };
-    expect(await readLine()).toBe('PR #1 · no tests configured');
+    expect(await readLine()).toBe('PR #1 · no tests ran');
     const clean = await app.readPullRequest('room-token', 'owner/widgets', 1);
     app.readPullRequest.mockResolvedValue({ ...clean, mergeability: 'dirty' });
     await operations.processWebhook('check_run', payload);

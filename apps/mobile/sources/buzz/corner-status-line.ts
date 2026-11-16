@@ -26,7 +26,7 @@ export function cornerStatusLine(
   const checks = summary?.checks ?? [];
   const total = summary?.total || checks.length;
   const status = summary?.status ?? lifecycle.checks;
-  if (total === 0 && status !== 'pending') return `${prefix}no tests configured`;
+  if (total === 0 && status !== 'pending') return `${prefix}no tests ran`;
 
   switch (status) {
     case 'failing': {
@@ -46,7 +46,7 @@ export function cornerStatusLine(
       return `${prefix}${passed}/${total} ${plural(total, 'test')} passed · running`;
     }
     default:
-      return `${prefix}no tests configured`;
+      return `${prefix}no tests ran`;
   }
 }
 

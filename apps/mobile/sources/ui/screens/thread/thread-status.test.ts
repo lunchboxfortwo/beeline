@@ -35,6 +35,6 @@ describe('thread status (header B)', () => {
     expect(threadPrLine(lifecycle({ pr: { ...pr, mergedAt: '2026-11-11' } }), false)).toBe('#4181 · Merged');
     expect(threadPrLine(lifecycle({}), true)).toBe('#4181 · Closed');
     expect(threadPrLine(lifecycle({ pr: { ...pr, mergeability: 'dirty' } }), false)).toBe('#4181 · Open · Merge conflict');
-    expect(threadPrLine(lifecycle({ pr: { ...pr, mergeability: 'draft' }, checks: 'unknown' }), false)).toBe('#4181 · Draft · No checks configured');
+    expect(threadPrLine(lifecycle({ pr: { ...pr, mergeability: 'draft' }, checks: 'unknown' }), false)).toBe('#4181 · Draft · No checks ran');
   });
 });
