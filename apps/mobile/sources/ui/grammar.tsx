@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
-import { useWindowDimensions } from 'react-native';
+import { useWindowDimensions } from './window-dimensions';
 import { lowerKeyboard } from '@/ui/lower-keyboard';
 import {
     Button as TButton,

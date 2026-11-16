@@ -24,6 +24,7 @@ vi.mock('expo-router', async () => {
   };
 });
 vi.mock('react-native', () => ({ View: 'View' }));
+vi.mock('@/navigation/use-remember-last-page', () => ({ useRememberLastPage: () => {} }));
 vi.mock('tamagui', () => ({ YStack: 'View', useTheme: () => ({ canvas: { val: 'black' } }), useThemeName: () => 'dark' }));
 vi.mock('@/auth/session-required', () => ({ watchSessionRequired: (_onRequired: () => void, _session: unknown, mayRedirect: () => boolean) => { session.mayRedirect = mayRedirect; return () => {}; } }));
 vi.mock('@/components/StatusBarProvider', () => ({ statusBarStyleForTheme: () => 'light' }));

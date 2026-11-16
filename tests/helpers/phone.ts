@@ -1,3 +1,4 @@
+vi.mock('@/ui/window-dimensions', () => ({ useWindowDimensions: () => ({ height: 844, width: 390 }) }));
 vi.mock('react-native-keyboard-controller', () => ({ useReanimatedKeyboardAnimation: () => ({ height: { value: 0 } }), KeyboardAvoidingView: (props: any) => React.createElement('View', props, props.children) }));
 import React from 'react';
 import { beforeEach, vi } from 'vitest';

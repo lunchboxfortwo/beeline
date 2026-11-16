@@ -663,10 +663,11 @@ describe('desktop Workspace navigation', () => {
     expect(control('room-dm-a').props['aria-current']).toBeUndefined();
   });
 
-  it('nests every chat thread, waiting ones first, and opens one in the main pane', () => {
+  it('nests the waiting chat threads first and opens one in the main pane', () => {
     const rows = tree.root.findAll((node: any) => typeof node.type === 'string' && String(node.props.testID ?? '').startsWith('thread-row-'));
     expect(rows[0]?.props.testID).toBe('thread-row-corner-theirs');
-    expect(rows.some((node: any) => node.props.testID === 'thread-row-corner-a')).toBe(true);
+    // Only waiting threads show until the chat is expanded; the other thread stays behind `more`.
+    expect(rows.some((node: any) => node.props.testID === 'thread-row-corner-a')).toBe(false);
     expect(control('thread-row-corner-theirs').props['aria-label']).toBe('Thread Their fix, waiting on a reply');
     act(() => control('thread-row-corner-theirs').props.onPress());
     expect(routerPush).toHaveBeenCalledWith({
