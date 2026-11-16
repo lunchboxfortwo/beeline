@@ -1,3 +1,4 @@
+import { readWorkBoard } from '../work-board.js';
 import { createAgentCommand } from '../agent-command.js';
 import { startQueuedTurn } from '../test-fixtures/queued-turn.test-support.js';
 
@@ -155,6 +156,39 @@ async function request(messageId: string) {
     const fallback = await ask(agentsOnly, 'absent-1');
     expect(fallback.room_id).not.toBe(agentsOnly);
     expect(fallback.direct).toEqual(expect.arrayContaining([HUMAN, SYSTEM_IDENTITY_ID]));
+  });
+
+
+  it('keeps a Squire key-edit approval at its readable origin thread and in Needs you and Tasks', async () => {
+    const thread = '44444444-4444-4444-8444-444444444444';
+    await fixture.database.query(`INSERT INTO rooms(id,workspace_id,parent_id,name,created_by)
+      VALUES($1,$2,$3,'free-source-research',$4)`, [thread, WORKSPACE, ROOM, HUMAN]);
+    // The owner reads the unarchived thread through its parent chat.
+    expect((await fixture.database.query(`SELECT 1 FROM memberships WHERE room_id=$1 AND identity_id=$2`,
+      [thread, HUMAN])).rowCount).toBe(0);
+    expect(await fixture.phone.canReadRoom(thread, HUMAN)).toBe(true);
+    const sourceId = createHash('sha256').update('thread-key-edit-source').digest('hex');
+    await fixture.database.query(`INSERT INTO messages(id,room_id,author_id,text)
+      VALUES($1,$2,$3,'Update the kilo key')`, [sourceId, thread, HUMAN]);
+    const requestId = createHash('sha256').update('thread-key-edit-request').digest('hex');
+    await createAgentCommand(fixture.database, { roomId: thread, agentId: AGENT,
+      sourceMessageId: sourceId, id: requestId, reason: 'fixture' });
+    const response = await fixture.daemonOperation('postSquireApproval', {
+      roomId: thread, requestId, tool: 'edit_credential',
+      title: 'Jellybean wants to edit a key', detail: 'key kilo',
+      approvalUrl: 'https://approve.trustysquire.test/thread-key-edit',
+      approvalId: 'thread-key-edit', linkKind: 'passkey',
+    });
+    expect(response.status).toBe(200);
+    const { id } = await response.json() as { id: string };
+    expect((await fixture.database.query(`SELECT room_id,card->>'sourceRoomId' source_room_id
+      FROM messages WHERE id=$1`, [id])).rows).toEqual([{ room_id: thread, source_room_id: thread }]);
+    const needs = await fixture.phone.execute('readNeedsYou', { workspaceId: WORKSPACE }, HUMAN);
+    expect(needs.items).toEqual(expect.arrayContaining([expect.objectContaining({ messageId: id, roomId: thread })]));
+    const tasks = await readWorkBoard(fixture.database, WORKSPACE, HUMAN);
+    expect(tasks.items).toEqual(expect.arrayContaining([expect.objectContaining({
+      roomId: thread, state: 'needs-you', messageId: id, askIds: [id],
+    })]));
   });
 
 
