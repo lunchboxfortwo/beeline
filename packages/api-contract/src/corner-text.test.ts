@@ -45,6 +45,13 @@ describe('corner text fixes', () => {
       text: 'far-too-many',
       note: 'the name had spaces and was 5 words; saved as far-too-many (first 3 words)',
     });
+    expect(fixCornerText('name', 'grunt-creature-rpg-failure-experiment')).toEqual({
+      text: 'grunt-creature-rpg',
+      note: 'the name had spaces and was 5 words; saved as grunt-creature-rpg (first 3 words)',
+    });
+    expect(fixCornerText('name', 'one-two-three').note).toBeUndefined();
+    expect(cornerTextRefusal('name', 'one-two-three-four')).toBe('the name is 4 words; the limit is 3');
+    expect(cornerTextRefusal('name', 'one-two-three')).toBeUndefined();
     const long = fixCornerText('name', 'a'.repeat(200));
     expect(long.text).toHaveLength(120);
     expect(long.note).toContain('200 characters');

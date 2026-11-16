@@ -40,7 +40,8 @@ export function cornerTextRefusal(field: CornerTextField, value: unknown): strin
   if (normalized.length > limit.characters) {
     return `the ${field} is ${normalized.length} characters; the limit is ${limit.characters}`;
   }
-  const words = normalized.split(' ').length;
+  // A name's words are its hyphen-separated parts, so hyphens cannot hide a fourth word.
+  const words = (field === 'name' ? normalized.split(/[ -]+/).filter(Boolean) : normalized.split(' ')).length;
   if (words > limit.words) {
     return `the ${field} is ${words} words; the limit is ${limit.words}`;
   }
@@ -72,7 +73,7 @@ export function fixCornerText(field: CornerTextField, value: unknown): FixedCorn
   let normalized = normalizeCornerText(value);
   const notes: string[] = [];
   if (field === 'name') {
-    const words = normalized.split(' ');
+    const words = normalized.split(/[ -]+/).filter(Boolean);
     const hyphenated = words.slice(0, limit.words).join('-');
     if (hyphenated !== normalized || /\s/.test(value)) {
       normalized = hyphenated;
