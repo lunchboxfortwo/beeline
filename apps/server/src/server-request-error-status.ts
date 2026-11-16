@@ -22,8 +22,8 @@ export function requestErrorStatus(error: unknown): number {
     error instanceof WorkspaceSkillNotFoundError
       ? error.status
       : institutionalMemoryErrorStatus(message) ??
-        ((message.startsWith('corner brief attachment ') &&
-            message.endsWith('is missing or unavailable in this Room')) ||
+        ((message.startsWith('thread brief attachment ') &&
+            message.endsWith('is missing or unavailable in this chat')) ||
           message.includes('required') ||
           message.includes('invalid') ||
           message.includes('too large') ||

@@ -23,7 +23,7 @@ export function beelineAgentMcpServer(
     /** This corner session belongs to the parent Room's configured reviewer. */
     reviewer?: boolean;
     /** The corner's parent Room has a repository, so this is a code corner.
-     *  A code corner mounts approve_merge and merge_corner on every turn; the server decides
+     *  A code corner mounts approve_merge and merge_thread on every turn; the server decides
      *  whether the caller is the configured reviewer. */
     repositoryBacked?: boolean;
     attachRoot?: string;
@@ -111,7 +111,7 @@ export function readOnlyMcpServer(
 ): McpServerWire {
   if (!config.readonlyMcpCommand) {
     throw new ReadOnlyToolsUnavailableError(
-      'read-only tools unavailable: beeline-readonly-mcp is required for Room sessions',
+      'read-only tools unavailable: beeline-readonly-mcp is required for chat sessions',
     );
   }
   // The one mapping, shared with the provisioner: a session can only be

@@ -141,7 +141,7 @@ async function serveMachineHelper(
           const batch = [...archiveStoragePending.values()];
           archiveStoragePending.clear();
           await reclaimArchivedMemberStorage(supervisorRoot, batch, {
-            log: entry => { usage?.cleanup(entry); console.log(`[helper] Room ${entry.roomId} private storage deleted ${entry.path}; freed ${entry.freedBytes} bytes`); },
+            log: entry => { usage?.cleanup(entry); console.log(`[helper] chat ${entry.roomId} private storage deleted ${entry.path}; freed ${entry.freedBytes} bytes`); },
           });
         }
       } catch (error) { console.warn('[helper] archived member cleanup deferred:', error); }

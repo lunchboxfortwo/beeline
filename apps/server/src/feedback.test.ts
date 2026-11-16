@@ -6,7 +6,7 @@ describe('report_feedback (agent path)', () => {
     const inRoom = await report({
       category: 'tooling_gap',
       summary: 'No tool lists open corners by lane',
-      tool_name: 'inspect_corner',
+      tool_name: 'inspect_thread',
       promptSectionIds: ['core.identity', 'room.place'],
     });
     const inCorner = await report({ category: 'contradiction', summary: 'Rules disagree' }, CORNER);

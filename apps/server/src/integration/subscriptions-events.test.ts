@@ -441,7 +441,7 @@ const fixture = monolithFixture();
       [{ kind: 'agent:x', consequence: '   ' }, /one sentence/],
       [
         { kind: 'agent:x', consequence: 'hi', mentionAgentIds: [stranger] },
-        /not an agent member of this Room/,
+        /not an agent member of this chat/,
       ],
       [
         { kind: 'agent:x', consequence: 'hi', mentionAgentIds: ['1', '2', '3', '4'] },

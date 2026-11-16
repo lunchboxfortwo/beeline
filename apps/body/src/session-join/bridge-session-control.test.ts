@@ -68,7 +68,7 @@ it.each(['short', 'long', 'unicode'])('opens successive joins through a %s state
       const id = init.headers.authorization.slice('Bearer '.length);
       const body = new ReadableStream({ start(controller) {
         controller.enqueue(new TextEncoder().encode(JSON.stringify({ v: 1, type: 'delivery',
-          deliveryId: 'mention:' + id, mentions: [{ id, room_id: 'room', text: 'tag-' + id }],
+          deliveryId: 'mention:' + id, mentions: [{ id, room_id: 'chat', text: 'tag-' + id }],
           wakes: [], mentionCursor: '1' }) + '\\n'));
         init.signal.addEventListener('abort', () => {
           appendFileSync(${JSON.stringify(output)}, 'closed-' + id + '\\n');

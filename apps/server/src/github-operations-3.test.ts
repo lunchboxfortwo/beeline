@@ -448,7 +448,7 @@ const scope1 = fixtureScope1();
     ).toBe(0);
   });
 
-  it('mints a token only for the exact active repository bound to a top-level Room', async () => {
+  it('mints a token only for the exact active repository bound to a top-level chat', async () => {
     const workspace = '11111111-1111-4111-8111-111111111111';
     const room = '22222222-2222-4222-8222-222222222222';
     await scope1.database.query(`INSERT INTO workspaces(id,name) VALUES($1,'Hive')`, [workspace]);
@@ -542,7 +542,7 @@ const scope1 = fixtureScope1();
     `UPDATE github_installations SET status='suspended' WHERE installation_id=77`,
     `UPDATE rooms SET archived_at=now() WHERE parent_id IS NULL`,
     `UPDATE github_repositories SET active=false WHERE repository_id=101`,
-  ])('rechecks access before returning a cached room token: %s', async (revoke) => {
+  ])('rechecks access before returning a cached chat token: %s', async (revoke) => {
     const { room } = await scope1.checksFixture();
     const mint = vi.fn(async () => ({ token: 'scoped', expiresAt: new Date(Date.now() + 3_600_000).toISOString() }));
     const operations = new GitHubOperations(scope1.database, {} as GitHubOAuthClient,
@@ -722,7 +722,7 @@ const scope1 = fixtureScope1();
       expect(mints).toBe(2);
       expect(scopes).toEqual([{ repository_ids: [101] }, { repository_ids: [101] }]);
       await scope1.database.query(`UPDATE github_repositories SET active=false WHERE repository_id=101`);
-      await expect(request()).rejects.toThrow('Room repository access needs the Beeline GitHub App');
+      await expect(request()).rejects.toThrow('chat repository access needs the Beeline GitHub App');
       expect(mints).toBe(2);
     } finally {
       clock.mockRestore();

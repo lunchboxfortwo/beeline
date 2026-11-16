@@ -4,13 +4,13 @@
 Sections: turn.objective 90B, turn.brief 101B, turn.capabilities 122B, turn.transcript 115B, turn.members 80B, turn.task 54B
 
 ```text
-Corner objective (navigation only, not product authority): Fix the release migration order
+Thread objective (navigation only, not product authority): Fix the release migration order
 
 No assigned brief yet. Before any code, report needs-decision: to your commander for the first brief.
 
-Works here (corner): app_tool apps beeline:vault, beeline:workflow, beeline:wallet, beeline:browser_share, beeline:avatar.
+Works here (thread): app_tool apps beeline:vault, beeline:workflow, beeline:wallet, beeline:browser_share, beeline:avatar.
 
-New in the corner since your last turn:
+New in the thread since your last turn:
 [message id: m2]
 lunchboxfortwo [message]: Also keep the marker write last.
 

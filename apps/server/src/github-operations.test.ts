@@ -32,7 +32,7 @@ const scope1 = fixtureScope1();
       try {
         if (path === 'checks event') await operations.processWebhook('check_run', payload);
         else if (path === 'mergeability') await operations.refreshStaleMergeability(corner);
-        else await expect(operations.prChecksStatus({ cornerId: corner })).rejects.toThrow('the corner has no pull request');
+        else await expect(operations.prChecksStatus({ cornerId: corner })).rejects.toThrow('the thread has no pull request');
         expect((await operations.lifecycle(corner)).pr).toBeUndefined();
         await operations.processWebhook('check_run', payload);
         await operations.refreshStaleMergeability(corner);
@@ -657,7 +657,7 @@ const scope1 = fixtureScope1();
     if (!hasPr) await scope1.database.query(`UPDATE corner_github_cache SET lifecycle='{}'::jsonb WHERE corner_id=$1`, [cornerId]);
     const daemon = new DaemonService(scope1.database, new LiveHub());
     expect(await daemon.execute('mergeCorner', { cornerId }, REVIEWER)).toEqual({
-      status: 'blocked', blocker: 'the corner is closed',
+      status: 'blocked', blocker: 'the thread is closed',
     });
   });
 

@@ -41,7 +41,7 @@ import { modelText } from '../message-origin.js';
     if (input.brief) validateCornerBrief(input.brief);
     const idempotencyKey = input.idempotencyKey ?? input.requestId;
     if (!idempotencyKey || idempotencyKey.length > 128) {
-      throw new Error('invalid corner idempotency key');
+      throw new Error('invalid thread idempotency key');
     }
     await daemonAccess(ctx, input.roomId, agentId);
     // A turn inside a corner opens its new corner beside it, in the parent
@@ -75,7 +75,7 @@ import { modelText } from '../message-origin.js';
       parent.repository_resolution === 'repository' ||
       Boolean(parent.repository_key);
     if (repositoryWork && !input.brief)
-      throw new Error('a brief is required for repository corners');
+      throw new Error('a brief is required for repository threads');
     let cornerId: string = randomUUID();
     const opener = await daemonIdentity(ctx, agentId);
     await ctx.database.transaction(async (db) => {
@@ -170,7 +170,7 @@ import { modelText } from '../message-origin.js';
             !sameBrief && 'brief',
           ].filter(Boolean);
           throw new Error(
-            `corner assignment conflict: idempotency key was already used for a different assignment (${mismatches.join(', ')})`,
+            `thread assignment conflict: idempotency key was already used for a different assignment (${mismatches.join(', ')})`,
           );
         }
         cornerId = existing.corner_id;
@@ -186,7 +186,7 @@ import { modelText } from '../message-origin.js';
             [roomId, input.implementer],
           )
         ).rows[0];
-        if (!implementer) throw new ExpectedRefusalError('implementer must be a current member of the parent Room');
+        if (!implementer) throw new ExpectedRefusalError('implementer must be a current member of the parent chat');
         if (implementer.kind !== 'agent') throw new Error('implementer must be an agent');
         implementerAgentId = implementer.id;
       }
@@ -234,7 +234,7 @@ import { modelText } from '../message-origin.js';
             excluding: explicitAttachments.map((attachment) => attachment.objectId),
           })),
         ];
-        if (attachments.length > 16) throw new Error('corner brief has too many attachments');
+        if (attachments.length > 16) throw new Error('thread brief has too many attachments');
         const authority = await resolveCornerBriefApproval(
           db,
           sourceRoomIds,
@@ -326,7 +326,7 @@ import { modelText } from '../message-origin.js';
   export async function daemonReviseCornerBrief(ctx: DaemonContext, input: Input<'reviseCornerBrief'>, agentId: string) {
     let draft = input.brief;
     if (!draft.change?.trim())
-      throw new CommandRefusalError('corner brief revision requires a change description', 400);
+      throw new CommandRefusalError('thread brief revision requires a change description', 400);
     const brief = await ctx.database.transaction(async (db) => {
       await lockCornerLifecycle(db, input.cornerId);
       const corner = (
@@ -347,9 +347,9 @@ import { modelText } from '../message-origin.js';
         )
       ).rows[0];
       // The commander approves directly; other reachable agents need a cited approval.
-      if (!corner?.parent_id) throw new CommandRefusalError('corner brief revision denied', 403);
+      if (!corner?.parent_id) throw new CommandRefusalError('thread brief revision denied', 403);
       await daemonReach(ctx, input.cornerId, agentId, db).catch(() => {
-        throw new CommandRefusalError('corner brief revision denied', 403);
+        throw new CommandRefusalError('thread brief revision denied', 403);
       });
       // Read projections of commander-direct approvals have no message citation.
       // Only normalize that projection against the locked, server-owned approval.
@@ -370,7 +370,7 @@ import { modelText } from '../message-origin.js';
       await assertCornerCommandTarget(db, command.room_id, input.cornerId);
       const current = await currentCornerBrief(db, input.cornerId);
       if ((current?.revision ?? 0) !== input.expectedRevision)
-        throw new CommandRefusalError('corner brief revision changed; read the current assignment', 409);
+        throw new CommandRefusalError('thread brief revision changed; read the current assignment', 409);
       const opening = (
         await db.query<{ source_room_id: string }>(
           `SELECT first.source_room_id FROM (
@@ -401,7 +401,7 @@ import { modelText } from '../message-origin.js';
           excluding: explicitAttachments.map((attachment) => attachment.objectId),
         })),
       ];
-      if (attachments.length > 16) throw new CommandRefusalError('corner brief has too many attachments', 400);
+      if (attachments.length > 16) throw new CommandRefusalError('thread brief has too many attachments', 400);
       const authority = await resolveCornerBriefApproval(
         db,
         sourceRoomIds,
@@ -465,7 +465,7 @@ import { modelText } from '../message-origin.js';
       if ((await database.query(
         `SELECT 1 FROM corner_facts WHERE corner_id=$1 AND locked`, [cornerId],
       )).rowCount) {
-        throw new CommandRefusalError('This corner is locked. A person must unlock it before agents can close it.', 409);
+        throw new CommandRefusalError('This thread is locked. A person must unlock it before agents can close it.', 409);
       }
     };
     await ctx.database.transaction(authorize);
@@ -485,7 +485,7 @@ import { modelText } from '../message-origin.js';
         [input.roomId],
       )
     ).rows[0];
-    if (!room) throw new Error('room not found');
+    if (!room) throw new Error('chat not found');
     if (room.parent_id || room.visibility !== 'public' || room.direct_participants || room.archived_at) {
       await daemonAccess(ctx, input.roomId, agentId);
       return daemonWriteResult(ctx);

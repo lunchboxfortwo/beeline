@@ -73,7 +73,7 @@ describe('MCP workspace consent', () => {
   });
   it('explains first-run creation with no picker and leaves Allow enabled', () => {
     const html = renderMcpWorkspaceSelection([], "Robin's team");
-    expect(html).toContain('Allow will create your Workspace, Robin&#39;s team, with a public #general Room.');
+    expect(html).toContain('Allow will create your Workspace, Robin&#39;s team, with a public #general chat.');
     expect(html).toContain('name="workspace_selection" value="1"');
     expect(html).not.toContain('type="checkbox"');
     expect(html).not.toContain('Select at least one');

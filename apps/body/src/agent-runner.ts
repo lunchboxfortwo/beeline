@@ -352,7 +352,7 @@ export class AgentRunner {
       await place.session.stop();
       this.places.delete(cornerId);
     }
-    await this.storage.reapCorner(cornerId).catch(error => console.warn(`[body] corner ${cornerId} cleanup deferred:`, error));
+    await this.storage.reapCorner(cornerId).catch(error => console.warn(`[body] thread ${cornerId} cleanup deferred:`, error));
   }
 
   /** The `workspace` tool's loopback door, shared with run_granted_command. */

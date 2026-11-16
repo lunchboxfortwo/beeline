@@ -642,7 +642,7 @@ const fixture = monolithFixture();
     expect(missing.status).toBe(400);
     const otherTurn = await fixture.daemonOperation('createCorner', { ...input, requestId: 'other-turn', idempotencyKey: 'other-turn' });
     expect(otherTurn.status).toBe(400);
-    expect(await missing.json()).toMatchObject({ error: expect.stringContaining('missing or unavailable in this Room') });
+    expect(await missing.json()).toMatchObject({ error: expect.stringContaining('missing or unavailable in this chat') });
   });
 
 

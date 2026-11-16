@@ -171,13 +171,13 @@ export async function resolveAppFiles(args: Json, resolve: AppFileResolver): Pro
   const files = new Map<unknown, { file: AppFile; mimetype: string }>();
   for (const reference of fileReferences(args)) {
     if (typeof reference.beelineObjectId !== 'string')
-      throw new Error('beelineObjectId must be a Room object id');
+      throw new Error('beelineObjectId must be a chat object id');
     const file = await resolve(reference.beelineObjectId);
     if (file.size > APP_FILE_MAXIMUM_BYTES)
-      throw new Error(`Room file is larger than the ${APP_FILE_MAXIMUM_BYTES / 1024 / 1024} MB app tool limit`);
+      throw new Error(`chat file is larger than the ${APP_FILE_MAXIMUM_BYTES / 1024 / 1024} MB app tool limit`);
     const mimetype = appFileMimeType(file);
     if (!allowedAppFileType(mimetype))
-      throw new Error(`Room file type ${mimetype} cannot be sent to an app tool`);
+      throw new Error(`chat file type ${mimetype} cannot be sent to an app tool`);
     files.set(reference, { file, mimetype });
   }
   return files;
@@ -216,8 +216,8 @@ function fileSlots(value: unknown, schema: unknown, root: Json, slots: Set<unkno
   if (node.file_uploadable === true) {
     if (typeof value === 'string' && !(value.startsWith('https://') && URL.canParse(value)))
       throw new CommandRefusalError(
-        `App tool parameter ${path} must use a staged Room object: stage the file in the Room ` +
-        'and pass { beelineObjectId: "<Room object id>" } instead of a local path or storage key.', 400);
+        `App tool parameter ${path} must use a staged chat object: stage the file in the chat ` +
+        'and pass { beelineObjectId: "<chat object id>" } instead of a local path or storage key.', 400);
     if (isFileReference(value)) slots.add(value);
     return;
   }
@@ -618,7 +618,7 @@ export class ComposioApps {
   private async stageFile(toolkit: string, tool: string, file: AppFile, mimetype: string,
     hidden: string[]): Promise<Json> {
     const bytes = await file.read();
-    if (bytes.length > APP_FILE_MAXIMUM_BYTES) throw new Error('Room file is too large for app tools');
+    if (bytes.length > APP_FILE_MAXIMUM_BYTES) throw new Error('chat file is too large for app tools');
     const requested = await this.request('/files/upload/request', 'POST', {
       toolkit_slug: toolkit, tool_slug: tool, filename: file.name, mimetype,
       md5: createHash('md5').update(bytes).digest('hex'),
@@ -667,7 +667,7 @@ export class ComposioApps {
     adapter?.validateTool?.(input.tool);
     const files = input.files ?? new Map<unknown, never>();
     if (fileReferences(input.arguments).some((reference) => !files.has(reference)))
-      throw new CommandRefusalError('Room files are unavailable for app tools', 400);
+      throw new CommandRefusalError('chat files are unavailable for app tools', 400);
     if (!(await this.account(input.accountId, input.userId, input.toolkit)))
       throw new CommandRefusalError('App connection is unavailable', 409);
     if (adapter?.handlesTool?.(input.tool)) return adapter.executeTool!({
@@ -704,7 +704,7 @@ export class ComposioApps {
     const slots = new Set<unknown>();
     fileSlots(input.arguments, parameters, parameters, slots);
     if ([...files.keys()].some((reference) => !slots.has(reference)))
-      throw new CommandRefusalError('A Room file was passed for a parameter that does not take a file', 400);
+      throw new CommandRefusalError('A chat file was passed for a parameter that does not take a file', 400);
     const staged = new Map<unknown, Json>();
     for (const [reference, { file, mimetype }] of files)
       staged.set(reference, await this.stageFile(input.toolkit, input.tool, file, mimetype, hidden));

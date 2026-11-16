@@ -376,7 +376,7 @@ async function resolveCascade(
   const row = cause.rows[0];
   if (!row) {
     throw new EventCascadeRefusedError(
-      'the message that caused this turn is no longer in the Room, so this event has nothing to cite; nothing was posted',
+      'the message that caused this turn is no longer in the chat, so this event has nothing to cite; nothing was posted',
     );
   }
   const rootCauseId = row.event_root_cause_id ?? causeId;
@@ -462,7 +462,7 @@ export async function systemLine(
           roomId: watch.watcher_room_id,
           agentId: watch.agent_id,
           sourceMessageId: id,
-          privatePayload: { text: systemText(`Watched corner ${watched?.name ?? input.subject.name} (${input.card?.cornerId ?? input.roomId}): ${input.kind === 'corner-opened' ? 'opened' : input.kind}${input.kind === 'merged' && watched?.merge_sha ? ` · merge commit ${watched?.merge_sha}` : ''}\n${text}`), authorId: SYSTEM_AUTHOR_ID, fromRoomId: String(input.card?.cornerId ?? input.roomId), kind: 'lifecycle' },
+          privatePayload: { text: systemText(`Watched thread ${watched?.name ?? input.subject.name} (${input.card?.cornerId ?? input.roomId}): ${input.kind === 'corner-opened' ? 'opened' : input.kind}${input.kind === 'merged' && watched?.merge_sha ? ` · merge commit ${watched?.merge_sha}` : ''}\n${text}`), authorId: SYSTEM_AUTHOR_ID, fromRoomId: String(input.card?.cornerId ?? input.roomId), kind: 'lifecycle' },
           reason: 'watched_corner',
           parent: watch.incoming_command ?? undefined, retainDepth: true,
           action: 'input',

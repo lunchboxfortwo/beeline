@@ -705,7 +705,7 @@ describe('Reproduction 8: recoverable workflow visits', () => {
     expect(after.attempt).toBe(before.attempt+1);
   });
 
-  it.each(['parent', 'corner'])('settles the exact gate from a parent Room answer in a %s turn and refuses agent answers', async address => {
+  it.each(['parent', 'corner'])('settles the exact gate from a parent chat answer in a %s turn and refuses agent answers', async address => {
     const corner = '20000000-0000-4000-8000-000000000008';
     await database.query(`INSERT INTO rooms(id,workspace_id,created_by,name,parent_id) VALUES($1,$2,$3,'Run corner',$4)`,
       [corner, WORKSPACE, OWNER, ROOM]);

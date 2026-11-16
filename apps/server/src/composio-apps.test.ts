@@ -323,7 +323,7 @@ describe('managed app provider boundary', () => {
     }]);
   });
 
-  describe('Room files for file-upload parameters', () => {
+  describe('chat files for file-upload parameters', () => {
     const OBJECT = '0b1e7c3a-6d2f-4c1a-9e8b-5a4d3c2b1a00';
     const S3KEY = 'uploads/youtube/fixture-s3key.mp4';
     const PRESIGNED = 'https://composio-files.s3.amazonaws.com/uploads/youtube/fixture-s3key.mp4?X-Amz-Signature=sig';
@@ -377,7 +377,7 @@ describe('managed app provider boundary', () => {
         expect(error).toBeInstanceOf(CommandRefusalError);
         expect(error.status).toBe(400);
         expect(error.message).toContain('arguments.videoFile');
-        expect(error.message).toContain('staged Room object');
+        expect(error.message).toContain('staged chat object');
         expect(error.message).toContain('beelineObjectId');
         expect(calls.map(call => call.method)).toEqual(['GET', 'GET']);
     });
@@ -527,16 +527,16 @@ describe('managed app provider boundary', () => {
       }
     });
 
-    it('refuses an oversize or disallowed Room file without reading its bytes', async () => {
+    it('refuses an oversize or disallowed chat file without reading its bytes', async () => {
       const long = video({ name: 'long.mp4', size: APP_FILE_MAXIMUM_BYTES + 1 });
       await expect(resolveAppFiles({ videoFile: { beelineObjectId: OBJECT } }, async () => long))
-        .rejects.toThrow('Room file is larger than the 128 MB app tool limit');
+        .rejects.toThrow('chat file is larger than the 128 MB app tool limit');
       expect(long.read).not.toHaveBeenCalled();
       await expect(resolveAppFiles({ videoFile: { beelineObjectId: OBJECT } },
         async () => video({ name: 'page.html', mimeType: 'text/html' })))
-        .rejects.toThrow('Room file type text/html cannot be sent to an app tool');
+        .rejects.toThrow('chat file type text/html cannot be sent to an app tool');
       await expect(resolveAppFiles({ videoFile: { beelineObjectId: 7 } }, async () => video()))
-        .rejects.toThrow('beelineObjectId must be a Room object id');
+        .rejects.toThrow('beelineObjectId must be a chat object id');
     });
 
     it.each(['wrong toolkit', 'inactive account'])('keeps %s as a typed refusal', async (failure) => {
@@ -565,7 +565,7 @@ describe('managed app provider boundary', () => {
       const provider = new ComposioApps('fixture-only', transport as typeof fetch);
       await expect(provider.execute({ accountId: ACCOUNT, userId: PERSON, toolkit: 'youtube',
         tool: 'YOUTUBE_MULTIPART_UPLOAD_VIDEO', arguments: { videoFile: { beelineObjectId: OBJECT } } }))
-        .rejects.toMatchObject({ status: 400, message: 'Room files are unavailable for app tools' });
+        .rejects.toMatchObject({ status: 400, message: 'chat files are unavailable for app tools' });
       expect(transport).not.toHaveBeenCalled();
     });
 
@@ -576,7 +576,7 @@ describe('managed app provider boundary', () => {
       await expect(provider.execute({ accountId: ACCOUNT, userId: PERSON, toolkit: 'youtube',
         tool: 'YOUTUBE_MULTIPART_UPLOAD_VIDEO', arguments: args,
         files: await resolveAppFiles(args, async () => video()) }))
-        .rejects.toMatchObject({ status: 400, message: 'A Room file was passed for a parameter that does not take a file' });
+        .rejects.toMatchObject({ status: 400, message: 'A chat file was passed for a parameter that does not take a file' });
       expect(calls.map((call) => call.method)).toEqual(['GET', 'GET']);
     });
 

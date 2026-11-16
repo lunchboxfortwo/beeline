@@ -242,7 +242,7 @@ describe('listRoomWorkflowRuns', () => {
     expect(triage).toMatchObject({ runId: live, status: 'live', state: 'pull', });
   });
 
-  it('refuses a viewer who cannot read the Room', async () => {
+  it('refuses a viewer who cannot read the chat', async () => {
     await triageRun();
     await expect(
       phone.execute('listRoomWorkflowRuns', { roomId: ROOM }, OUTSIDER),
@@ -355,7 +355,7 @@ describe('readWorkflowRun', () => {
     expect(detail.run).toMatchObject({ runId, state: 'approve', status: 'live', });
   });
 
-  it('Reproduction C1: a corner lifecycle has no workflow listing or run page, including legacy cards', async () => {
+  it('Reproduction C1: a thread lifecycle has no workflow listing or run page, including legacy cards', async () => {
     await advanceCorner(database, CORNER, {
       kind: 'open',
     });
@@ -374,7 +374,7 @@ describe('readWorkflowRun', () => {
     console.log('Reproduction C1 Demonstrated: open corner → no workflow listing; lifecycle run page unavailable, including legacy cards');
   });
 
-  it('keeps a Workspace workflow saved as corner apart from the corner lifecycle', async () => {
+  it('keeps a Workspace workflow saved as thread apart from the thread lifecycle', async () => {
     const saved = {
       ...TRIAGE,
       name: 'corner',

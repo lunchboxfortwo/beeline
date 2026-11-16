@@ -46,7 +46,7 @@ const scope34 = fixtureScope34();
   });
 
 
-  it('keeps the branch after close_corner_pr and deletes after the corner closes', async () => {
+  it('keeps the branch after close_thread_pr and deletes after the corner closes', async () => {
     const cornerId = await inReview();
     await rootFixture.github.closeCornerPullRequest(cornerId);
     expect(rootFixture.githubApp.deleteBranch).not.toHaveBeenCalled();

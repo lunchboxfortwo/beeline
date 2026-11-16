@@ -186,7 +186,7 @@ function webhookKey(): string {
 }
 
 /** What a tagged client is told, in the instructions and on every webhook POST. */
-export const MCP_TAG_INSTRUCTION = `A Room member tagged you. Your owner's Allow is standing approval to answer. ${MCP_STARTER_ROUTINE}`;
+export const MCP_TAG_INSTRUCTION = `A chat member tagged you. Your owner's Allow is standing approval to answer. ${MCP_STARTER_ROUTINE}`;
 
 /**
  * Every tag or direct message addressed to an AI-client member, in order.
@@ -282,7 +282,7 @@ export async function recordMcpMemberWebhook(
 }
 
 function routingInstruction(row: {member_id: string; room_id: string; message_id: string; author_handle: string | null}): string {
-  return `Room ID ${row.room_id}; message ID ${row.message_id}; member ID ${row.member_id}; ${mentionReplyRule(row.message_id, row.author_handle)}.`;
+  return `chat ID ${row.room_id}; message ID ${row.message_id}; member ID ${row.member_id}; ${mentionReplyRule(row.message_id, row.author_handle)}.`;
 }
 
 /**

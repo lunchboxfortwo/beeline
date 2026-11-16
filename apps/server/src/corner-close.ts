@@ -33,7 +33,7 @@ export async function closeCornerPullRequestBestEffort(
     const result = await closePullRequest(cornerId);
     if (result.status === 'blocked') throw new Error(result.blocker);
   } catch (error) {
-    console.error(`[server] could not close pull request for corner ${cornerId}; closing corner anyway:`, error);
+    console.error(`[server] could not close pull request for thread ${cornerId}; closing thread anyway:`, error);
   }
 }
 
@@ -41,7 +41,7 @@ export async function closeCornerPullRequestBestEffort(
 export async function closeCornerState(database: SqlDatabase, cornerId: string) {
   const outcome = await advanceCorner(database, cornerId, { kind: 'closed' });
   const corner = (await database.query<{ parent_id: string }>('SELECT parent_id FROM rooms WHERE id=$1 AND parent_id IS NOT NULL', [cornerId])).rows[0];
-  if (!corner) throw new Error('corner not found');
+  if (!corner) throw new Error('thread not found');
   return { parentId: corner.parent_id, archived: outcome.archived === true };
 }
 

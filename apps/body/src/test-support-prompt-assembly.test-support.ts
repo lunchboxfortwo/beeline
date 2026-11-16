@@ -250,7 +250,7 @@ export function fixtureScope6() {
     replyToMessageId: 'parent-message-id',
     replyToAuthorId: 'parent-author-id',
     replyToAuthorName: 'Ruby',
-    replyToExcerpt: 'Five corners from the audit.',
+    replyToExcerpt: 'Five threads from the audit.',
   };
 return {
 reply,

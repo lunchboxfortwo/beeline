@@ -6,9 +6,9 @@ Sections: turn.checkout 77B, turn.capabilities 152B, turn.transcript 106B, turn.
 ```text
 Repository checkout: origin/main at commit b1c5baf5, refreshed for this turn.
 
-Works here (Room): app_tool apps beeline:vault, beeline:workflow, beeline:wallet, beeline:browser_share, beeline:avatar. Corner only: repository writes.
+Works here (chat): app_tool apps beeline:vault, beeline:workflow, beeline:wallet, beeline:browser_share, beeline:avatar. Thread only: repository writes.
 
-Room conversation:
+chat conversation:
 [message id: m0]
 Sol [message]: The deploy to production stopped at the migration step.
 

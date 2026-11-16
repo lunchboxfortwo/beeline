@@ -132,7 +132,7 @@ describe('opaque immutable owned-model credential primitive', () => {
     ]);
   });
 
-  it('keeps separate queue-item credentials across Rooms when one item is stopped', async () => {
+  it('keeps separate queue-item credentials across chats when one item is stopped', async () => {
     const { db, credentials, issued } = fixture;
     const otherRoom = '33333333-3333-4333-8333-333333333333';
     await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Other Room')`, [otherRoom, MODEL_WORKSPACE]);

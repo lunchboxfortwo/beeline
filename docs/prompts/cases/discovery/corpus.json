@@ -265,10 +265,10 @@
       "outcome": "Open a repository-free corner with a brief and concise name"
     },
     "capability": {
-      "call": "open_corner"
+      "call": "open_thread"
     },
     "pass": {
-      "call": "open_corner",
+      "call": "open_thread",
       "args": {
         "room": "fixture-room",
         "name": {
@@ -289,7 +289,7 @@
     "language": "en",
     "expected": {
       "kind": "feature",
-      "outcome": "Exact-head independent review, green checks, no hold; then merge_corner"
+      "outcome": "Exact-head independent review, green checks, no hold; then merge_thread"
     },
     "capability": {
       "text": {
@@ -316,7 +316,7 @@
     "fixTarget": "apps/body/src/beeline-skill.ts",
     "forbidden": [
       {
-        "call": "merge_corner"
+        "call": "merge_thread"
       }
     ]
   },
@@ -354,7 +354,7 @@
     "fixTarget": "apps/body/src/beeline-skill.ts",
     "forbidden": [
       {
-        "call": "merge_corner"
+        "call": "merge_thread"
       }
     ]
   },
@@ -1287,7 +1287,7 @@
         }
       },
       {
-        "call": "open_corner"
+        "call": "open_thread"
       }
     ]
   },
@@ -1332,7 +1332,7 @@
         }
       },
       {
-        "call": "open_corner"
+        "call": "open_thread"
       }
     ]
   },
@@ -1377,7 +1377,7 @@
         }
       },
       {
-        "call": "open_corner"
+        "call": "open_thread"
       }
     ]
   },
@@ -1422,7 +1422,7 @@
         }
       },
       {
-        "call": "open_corner"
+        "call": "open_thread"
       }
     ]
   },

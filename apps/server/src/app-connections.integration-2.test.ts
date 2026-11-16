@@ -503,7 +503,7 @@ const scope2 = fixtureScope2();
       }
       for (const operation of ['listAppTools', 'executeAppTool']) {
         const unknown = await call(operation, { appId: 'unknown-key', tool: 'SLACK_POST_MESSAGE', arguments: {} });
-        expect(unknown.body).toEqual({ error: 'Connected app is unavailable in this Room' });
+        expect(unknown.body).toEqual({ error: 'Connected app is unavailable in this chat' });
       }
       const other = 'c'.repeat(64);
       const duplicate = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';

@@ -151,7 +151,7 @@ export const SYSTEM_MESSAGE_VOICE_SERVICE = {
   },
 
   'workflow-runs.not-in-this-room': {
-    parts: ['not in this Room'],
+    parts: ['not in this chat'],
     variables: [],
   },
 
@@ -307,7 +307,7 @@ export const SYSTEM_MESSAGE_VOICE_SERVICE = {
   },
 
   'workflow-runs.as-abandoned-at-because-its-corner-closed': {
-    parts: ['as abandoned at ', ' because its corner closed'],
+    parts: ['as abandoned at ', ' because its thread closed'],
     variables: ['scope_stateName'],
   },
 

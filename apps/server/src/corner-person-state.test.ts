@@ -11,7 +11,7 @@ import { DaemonService } from './daemon-service.js';
 import { LiveHub } from './live.js';
 import { resolveCurrentMemberMentions } from './message-mentions.js';
 
-it('copies sparse state twice, preserves owed items and read marks, and derives every corner access from its Room', async () => {
+it('copies sparse state twice, preserves owed items and read marks, and derives every thread access from its chat', async () => {
   const db = new PgliteDatabase();
   try {
     // Expand only, to seed the shape written by the preceding server image.

@@ -223,7 +223,7 @@ it('Reproduction schedules-12: resolves Start the daily workflow with… and ski
   );
 });
 
-it('Reproduction schedules-13: a Workspace admin lists and deletes each Room schedule only through its Room', async () => {
+it('Reproduction schedules-13: a Workspace admin lists and deletes each chat schedule only through its chat', async () => {
   const input = {
     title: 'Run daily',
     roomId: ROOM,

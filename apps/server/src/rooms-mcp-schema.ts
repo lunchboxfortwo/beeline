@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS rooms_mcp_connections (
 );
 CREATE INDEX IF NOT EXISTS rooms_mcp_connections_identity ON rooms_mcp_connections(identity_id);
 -- One MCP connection acts as one agent-like member owned by the approving person.
--- The member's own Room memberships alone decide what it can read and post in.
+-- The member's own room memberships alone decide what it can read and post in.
 CREATE TABLE IF NOT EXISTS rooms_mcp_members (
   client_id text NOT NULL REFERENCES rooms_mcp_clients(id) ON DELETE CASCADE,
   owner_id text NOT NULL REFERENCES identities(id) ON DELETE CASCADE,
@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS rooms_mcp_members (
 );
 CREATE INDEX IF NOT EXISTS rooms_mcp_members_member ON rooms_mcp_members(member_id);
 -- Each member sets its own inbound webhook, so a shared published client id
--- never routes one person's Room text to another person's receiver.
+-- never routes one person's room text to another person's receiver.
 -- NULL inherits the registration callback; an empty string explicitly disables delivery.
 ALTER TABLE rooms_mcp_members ADD COLUMN IF NOT EXISTS callback_url text;
 -- AES-GCM sealed bearer secret sent on each webhook POST; never returned.

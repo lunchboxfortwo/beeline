@@ -1,7 +1,7 @@
 [
   {
     "server": "beeline-public",
-    "tool": "list_rooms",
+    "tool": "list_chats",
     "arguments": {},
     "status": "completed",
     "error": null,

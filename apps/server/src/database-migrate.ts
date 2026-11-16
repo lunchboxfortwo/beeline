@@ -1,3 +1,4 @@
+import { backfillThreadImplementers } from './corner-lifecycle.js';
 import { cleanupConnectHandles } from './migrations/connect-handle-cleanup.js';
 import { repairOrphanedTurns } from './migrations/orphaned-turns.js';
 import { backfillProviderPhotos } from './migrations/provider-photos.js';
@@ -142,6 +143,7 @@ export async function migrate(
     `ALTER TABLE wallet_bindings ADD COLUMN IF NOT EXISTS delegation_standing boolean NOT NULL DEFAULT false`,
   );
   await ddlScript('agent command schema', AGENT_COMMAND_SCHEMA);
+  await runMigrationStep('record thread implementers', () => backfillThreadImplementers(database));
   await ddlScript('diagnostic command observations', DIAGNOSTIC_COMMAND_SCHEMA);
   await runMigrationStep('one active helper restart', () => createIndexConcurrently(
     database,'agent_commands_one_restart',

@@ -133,7 +133,7 @@ export function rewriteHostMcpDeclaration(
 }
 
 function requiredSquireScope(scope: SquireAgentScope | undefined): SquireAgentScope {
-  if (!scope) throw new Error('Squire agent and Room scope is required');
+  if (!scope) throw new Error('Squire agent and chat scope is required');
   return scope;
 }
 

@@ -93,8 +93,8 @@ const scope12 = fixtureScope12(scope8);
     m9_expect(ops[0]!.input.script).toBeUndefined();
   });
 });
-m9_describe('run_granted_command reports the Room boundary', () => {
-  m9_it('names the corner when the read-only filesystem refused a write', async () => {
+m9_describe('run_granted_command reports the chat boundary', () => {
+  m9_it('names the thread when the read-only filesystem refused a write', async () => {
     const reply = await m9_runGrantedCommand(
       { argv: ['cp', 'a', 'b'] },
       {
@@ -109,13 +109,13 @@ m9_describe('run_granted_command reports the Room boundary', () => {
       },
     );
     m9_expect(reply).toContain('read-only outside your scratch directory');
-    m9_expect(reply).toContain('open_corner');
+    m9_expect(reply).toContain('open_thread');
     m9_expect(reply).toContain('request_grant(mode:request, kind:command, target, action, purpose, reason)');
     m9_expect(reply).toContain('run_granted_command');
   });
 
 
-  m9_it('does not call a corner a Room when a write is refused there', async () => {
+  m9_it('does not call a thread a chat when a write is refused there', async () => {
     const previous = process.env.BEELINE_DAEMON_CORNER_ID;
     process.env.BEELINE_DAEMON_CORNER_ID = 'corner-1';
     try {
@@ -127,8 +127,8 @@ m9_describe('run_granted_command reports the Room boundary', () => {
         },
       );
       m9_expect(reply).toContain('A write was refused outside your scratch directory.');
-      m9_expect(reply).not.toContain('This Room is read-only');
-      m9_expect(reply).not.toContain('open_corner');
+      m9_expect(reply).not.toContain('This chat is read-only');
+      m9_expect(reply).not.toContain('open_thread');
     } finally {
       if (previous === undefined) delete process.env.BEELINE_DAEMON_CORNER_ID;
       else process.env.BEELINE_DAEMON_CORNER_ID = previous;
@@ -174,7 +174,7 @@ mergedDescribe10("agent-reaction-tools.test.ts", () => {m10_describe('beeline-ag
   });
 
 
-  m10_it('reacts as the authenticated agent in the current Room', async () => {
+  m10_it('reacts as the authenticated agent in the current chat', async () => {
     const calls: Array<{ name: string; input: Record<string, unknown> }> = [];
     const deps: m10_AgentScheduleDeps = {
       roomId: 'room-1',
@@ -321,7 +321,7 @@ m11_describe('beeline-agent schedule tools', () => {
         roomId: 'room-1',
         execute: async () => ({ schedules: [] }),
       }),
-    ).toBe('No schedules in this Room.');
+    ).toBe('No schedules in this chat.');
   });
 
 
@@ -347,7 +347,7 @@ m11_describe('beeline-agent schedule tools', () => {
   });
 
 
-  m11_it('delete_schedule calls deleteAgentSchedule scoped to this Room', async () => {
+  m11_it('delete_schedule calls deleteAgentSchedule scoped to this chat', async () => {
     const ops: Array<{ name: string; input: Record<string, unknown> }> = [];
     const result = await m11_deleteSchedule({ scheduleId: 'sched-1' }, scope16.deps(ops));
     m11_expect(ops).toEqual([
@@ -357,7 +357,7 @@ m11_describe('beeline-agent schedule tools', () => {
   });
 
 
-  m11_it('update_schedule sends only the fields given, scoped to this Room', async () => {
+  m11_it('update_schedule sends only the fields given, scoped to this chat', async () => {
     const ops: Array<{ name: string; input: Record<string, unknown> }> = [];
     const result = await m11_updateSchedule(
       {
@@ -405,7 +405,7 @@ m14_describe('beeline-agent connectors_status + offer_connector (R5)', () => {
     } finally { m14_vi.unstubAllEnvs(); }
   });
 
-  m14_it('mounts discovery in every turn while connector offers stay in Rooms and DMs', () => {
+  m14_it('mounts discovery in every turn while connector offers stay in chats and DMs', () => {
     for (const directMessage of [false, true]) {
       const names = m14_agentToolsFor(true, directMessage).map((tool) => tool.name);
       m14_expect(names).not.toContain('connectors_status');
@@ -728,22 +728,22 @@ const scope21 = fixtureScope21(scope20, { corner, surface, commandReason, reposi
     const block = prompt.text.split('\n\n').find(paragraph => paragraph.startsWith('Works here ('));
     m24_expect(block).toBeDefined();
     m24_expect(Buffer.byteLength(block!)).toBeLessThanOrEqual(260);
-    const [works, cornerOnly = ''] = block!.split('Corner only:');
+    const [works, cornerOnly = ''] = block!.split('Thread only:');
     m24_expect(scope20.appsIn(works!)).toEqual(offered);
     m24_expect(scope20.appsIn(cornerOnly)).toEqual([]);
     m24_expect(block!.includes('schedule run')).toBe(commandReason === 'schedule');
   });
 });
 });
-mergedDescribe25("read-only-mcp.corner-message.test.ts", () => {m25_describe('corner-turn get_room_message room targeting', () => {
+mergedDescribe25("read-only-mcp.corner-message.test.ts", () => {m25_describe('thread-turn get_chat_message chat targeting', () => {
 const scope23 = fixtureScope23();
 
 
-  m25_it('reads a transcript message id from the corner Room, not the parent env Room', async () => {
+  m25_it('reads a transcript message id from the thread chat, not the parent env chat', async () => {
     scope23.answer = () =>
       Response.json({
         messageId: 'corner-transcript-id',
-        body: 'The corner message the turn is asked to act on',
+        body: 'The thread message the turn is asked to act on',
         attachments: [],
       });
     const result = JSON.parse(
@@ -752,7 +752,7 @@ const scope23 = fixtureScope23();
         'call-1',
       ),
     );
-    m25_expect(result.body).toBe('The corner message the turn is asked to act on');
+    m25_expect(result.body).toBe('The thread message the turn is asked to act on');
     m25_expect(scope23.calls).toEqual([
       {
         name: 'getRoomMessage',
@@ -767,7 +767,7 @@ const scope23 = fixtureScope23();
   });
 
 
-  m25_it('keeps the offset page on the corner read', async () => {
+  m25_it('keeps the offset page on the thread read', async () => {
     await m25_callAgentTool(
       'read', { facet: "message", ...{ messageId: 'corner-transcript-id', cursor: { offset: 4000 } } },
       'call-2',
@@ -784,7 +784,7 @@ mergedDescribe26("read-only-mcp.onboarding.test.ts", () => {
 const scope24 = fixtureScope24();
 
 
-m26_it('discovers cards and Room invitations without an external connection and binds writes to the active turn',async()=>{
+m26_it('discovers cards and chat invitations without an external connection and binds writes to the active turn',async()=>{
   const discovered=JSON.parse(await m26_callAgentTool('app_tool',{app:'beeline:onboarding'},'discover'));
   m26_expect(discovered.tools.map((t:{name:string})=>t.name)).toEqual(m26_expect.arrayContaining(['welcome','game','invite','repository','starters']));
   scope24.calls.length = 0;

@@ -21,17 +21,17 @@
   },
   "toolResults": {
     "read": "{\"roomAddress\":\"09c40034-77e4-5fe3-8c40-cc637d013185\",\"reviewer\":\"@reviewer-a\",\"procedure\":\"Write a brief and open the corner. Both agents are available.\"}",
-    "open_corner": "{\"address\":\"082f3b91-2d42-5092-aa6c-92f5a2112a5b\",\"ok\":true}"
+    "open_thread": "{\"address\":\"082f3b91-2d42-5092-aa6c-92f5a2112a5b\",\"ok\":true}"
   },
   "pass": {
     "all": [
       {
-        "call": "open_corner"
+        "call": "open_thread"
       },
       {
         "any": [
           {
-            "noCall": "open_corner",
+            "noCall": "open_thread",
             "args": {
               "implementer": {
                 "matches": "reviewer-a",
@@ -42,7 +42,7 @@
           {
             "all": [
               {
-                "call": "open_corner",
+                "call": "open_thread",
                 "args": {
                   "implementer": {
                     "matches": "reviewer-a",
@@ -67,7 +67,7 @@
             ]
           },
           {
-            "call": "open_corner",
+            "call": "open_thread",
             "args": {
               "implementer": {
                 "matches": "^@?reviewer-a$",

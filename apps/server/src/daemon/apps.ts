@@ -46,7 +46,7 @@ import { daemonRequestAgentGrant, daemonGrantRequester, daemonConsumeAgentGrant 
     const commandId = ctx.authorizedCommand?.id;
     const assistant = service.toLowerCase().replace(/[-_\s]+/g, ' ');
     const invitation = agentInvitationGuide(service);
-    if (invitation) return { status: 'ready', app: 'Beeline Rooms', next: invitation };
+    if (invitation) return { status: 'ready', app: 'Beeline chats', next: invitation };
     const unavailable = providerAdapter(appIdentity(service)?.key ?? assistant)?.signInUnavailable;
     if (unavailable) return { status: 'unavailable', app: service, next: unavailable };
     const postCard = async (database: SqlDatabase, card: {
@@ -380,7 +380,7 @@ import { daemonRequestAgentGrant, daemonGrantRequester, daemonConsumeAgentGrant 
     if (rows.length > 1)
       throw new CommandRefusalError(`Connected app key is ambiguous; use an exact app id: ${rows.map(row => row.id).join(', ')}`, 400);
     const row = rows[0];
-    if (!row) throw new ExpectedRefusalError('Connected app is unavailable in this Room');
+    if (!row) throw new ExpectedRefusalError('Connected app is unavailable in this chat');
     if (row.transport !== 'composio') {
       // Only managed-OAuth apps run through app tools; name the route that serves this one.
       if (row.owner_identity_id !== row.agent_owner_id)
@@ -431,10 +431,10 @@ import { daemonRequestAgentGrant, daemonGrantRequester, daemonConsumeAgentGrant 
     // Room files are checked before any provider request, including the account check.
     const files = input.arguments && typeof input.arguments === 'object'
       ? await resolveAppFiles(input.arguments, async (objectId) => {
-        if (!ctx.objects) throw new Error('Room files are unavailable for app tools');
+        if (!ctx.objects) throw new Error('chat files are unavailable for app tools');
         const file = await ctx.objects.readRoomObject(input.roomId, agentId, objectId,
           ctx.database);
-        if (!file) throw new Error(`Room file ${objectId.slice(0, 64)} is not in this Room`);
+        if (!file) throw new Error(`chat file ${objectId.slice(0, 64)} is not in this chat`);
         return file;
       })
       : undefined;

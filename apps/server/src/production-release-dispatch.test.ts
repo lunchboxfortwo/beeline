@@ -115,7 +115,7 @@ it('requires a current workspace owner or admin human command', async () => {
   }
 });
 
-it('posts no Room line under the agent\'s name when GitHub refuses', async () => {
+it('posts no chat line under the agent\'s name when GitHub refuses', async () => {
   await expect(productionReleaseDispatch(db, agent, input, async () => { throw new Error('already queued'); })).rejects.toThrow('already queued');
   expect((await db.query(`SELECT 1 FROM messages WHERE author_id=$1`, [agent])).rowCount).toBe(0);
 });

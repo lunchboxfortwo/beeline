@@ -2,9 +2,9 @@
 
 The replay runs nightly on squire at **04:00 America/New_York** (`0 4 * * *`)
 until the baseline pass rate is at least 90% on both tested models. The Beeline
-scheduler owns DST conversion. Its surviving Room schedule is
+scheduler owns DST conversion. Its surviving chat schedule is
 `ea5594a0-42ec-49dd-8957-5582216ebedd` in #beeline
-(`bb91a1c7-7cad-4fde-aafc-94fccb651ac8`), so archiving an implementation corner
+(`bb91a1c7-7cad-4fde-aafc-94fccb651ac8`), so archiving an implementation thread
 will not cancel it.
 
 lunchboxfortwo asked for this loop: raise the baseline with audited prompt
@@ -60,7 +60,7 @@ baseline is below 90%. Never raise caps silently.
      never more than 10% per run. Fewer tokens is always allowed.
 4. **Propose.** On acceptance the controller writes `candidate.patch` and
    `proposal.md` (per-model before/after pass rates, gains, losses and median
-   tokens). Open a normal repository corner from them, with `audit.md` in the
+   tokens). Open a normal repository thread from them, with `audit.md` in the
    brief. Normal independent review and merge gates apply; nothing auto-merges.
    The reviewer checks that the patch states a general rule, not case text.
    Tomorrow's baseline uses the improved prompt once it merges.
@@ -227,7 +227,7 @@ These numbers are per model; pooling both models doubles the paired samples.
 A removal proposal additionally requires no passing sample to regress, lower
 pooled median tokens per turn, and both models at or above 90%. Safety/authority paragraphs are always protected. The controller
 writes `proposal.md` and candidate source only after these conditions hold.
-Open a normal repository corner/PR for a proposed removal under current work
+Open a normal repository thread/PR for a proposed removal under current work
 authority; normal independent review and merge gates still apply.
 The same paired tests apply to audit patches, pooled over both models, with D1
 replacing the removal-only conditions.
@@ -235,7 +235,7 @@ replacing the removal-only conditions.
 ## Publish and retain
 
 Keep `result.json`, `summary.txt`, and cumulative `history.jsonl` under the session
-home. Post the result and history as artifacts in the schedule’s Room and publish exactly
+home. Post the result and history as artifacts in the schedule’s chat and publish exactly
 one summary line per run on the repository issue **Prompt nightly results**.
 The line names each model's baseline pass rate, the tested change and whether it
 was kept, plus the pooled pass rate, skipped count, median tokens/turn, total
@@ -301,6 +301,6 @@ successful behavior or valid format; class counts retain that distinction.
 
 
 For a measurement repair proof, pass `--label "measurement-repair run"`, post
-result and summary in its implementation corner, and do not publish that run as
+result and summary in its implementation thread, and do not publish that run as
 a nightly score on the results issue. A partial run remains useful evidence when
 its missing data and cost are explicit; it cannot propose a removal.

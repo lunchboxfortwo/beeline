@@ -51,7 +51,7 @@ export function isRepositorySubscriptionEvent(value: unknown): value is typeof R
 /** Trusted saved action followed by the outside event, visibly quoted as data. */
 export function subscriptionActionPrompt(event: Pick<SystemEvent, 'subscriptionPrompt' | 'subscriptionWorkflowSlug' | 'payload'>): string {
   const action = event.subscriptionWorkflowSlug
-    ? `Discover app_tool(app:beeline:workflow), then start the saved workflow ${event.subscriptionWorkflowSlug} in this Room with tool:start.\n${event.subscriptionPrompt ?? ''}`.trim()
+    ? `Discover app_tool(app:beeline:workflow), then start the saved workflow ${event.subscriptionWorkflowSlug} in this chat with tool:start.\n${event.subscriptionPrompt ?? ''}`.trim()
     : event.subscriptionPrompt ?? 'React to this event.';
   return `${action}\n\n${quoteOutsideData('subscription event', event.payload)}`;
 }

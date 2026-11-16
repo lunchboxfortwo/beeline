@@ -150,7 +150,7 @@ it('opens with an independent reviewer and lets another member change it through
   await expect(rootFixture.daemon.execute('renameCorner', { ...authority(turn), cornerId: opened.cornerId, reviewer: 'worker' }, WORKER))
     .rejects.toThrow('implementer cannot review');
   await rootFixture.daemon.execute('renameCorner', { ...authority(turn), cornerId: opened.cornerId, reviewer: 'ruby' }, WORKER);
-  const lines = await rootFixture.db.query(`SELECT text FROM messages WHERE room_id=$1 AND text LIKE '%set the corner reviewer%'`, [opened.cornerId]);
+  const lines = await rootFixture.db.query(`SELECT text FROM messages WHERE room_id=$1 AND text LIKE '%set the thread reviewer%'`, [opened.cornerId]);
   expect(lines.rowCount).toBe(1);
   console.info('Demonstrated corner-reviewer: open assigns an independent reviewer; another member can set it without editing the brief; self review is refused.');
 });

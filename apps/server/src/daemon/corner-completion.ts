@@ -48,14 +48,14 @@ import { Output } from './values.js';
     try {
       verdict = await ctx.prChecksStatus({ cornerId }, true);
     } catch (error) {
-      console.error(`[server] zero-check completion read failed for corner ${cornerId}:`, error);
+      console.error(`[server] zero-check completion read failed for thread ${cornerId}:`, error);
       return;
     }
     if (verdict.checks !== 'pending' || verdict.checkCount !== 0 || !verdict.zeroChecksConfirmed) return;
     try {
       await ctx.refreshMergeability?.(cornerId);
     } catch (error) {
-      console.error(`[server] zero-check mergeability read failed for corner ${cornerId}:`, error);
+      console.error(`[server] zero-check mergeability read failed for thread ${cornerId}:`, error);
       return;
     }
 

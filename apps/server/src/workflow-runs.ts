@@ -296,7 +296,7 @@ export async function resolveWorkflowRunId(db: SqlDatabase, roomId: string, runI
      ORDER BY run_id`,
     [roomId, WORKFLOW_HANDOFF_CARD_TYPE, runId],
   )).rows;
-  if (!matches.length) throw new CommandRefusalError('workflow run is unavailable in this Room', 404);
+  if (!matches.length) throw new CommandRefusalError('workflow run is unavailable in this chat', 404);
   if (matches.length > 1) throw new CommandRefusalError(`workflow run ID prefix is ambiguous: ${matches.map(row => row.run_id).join(', ')}`, 400);
   return matches[0]!.run_id;
 }
@@ -315,12 +315,12 @@ export async function getWorkflowRun(
     [roomId, WORKFLOW_HANDOFF_CARD_TYPE, runId],
   )).rows;
   const run = rows.at(-1)?.card;
-  if (!run) throw new ExpectedRefusalError('workflow run is unavailable in this Room');
+  if (!run) throw new ExpectedRefusalError('workflow run is unavailable in this chat');
   const contract = await loadPinnedContract(db, roomId, run.workflowSlug, run.workflowVersion);
   if (!contract) throw new Error('workflow contract version is unavailable');
   const state = contract.handoffs[run.toState];
   const status = rows.find((row) => row.id === runId)?.card.runStatus;
-  if (!status) throw new Error('workflow run is unavailable in this Room');
+  if (!status) throw new Error('workflow run is unavailable in this chat');
   const activeState = status === 'live' ? state : undefined;
   const role = activeState && 'role' in activeState ? activeState.role : undefined;
   return {
@@ -494,9 +494,9 @@ export async function openRun(db: SqlDatabase, roomId: string, runId: string): P
   const room = (
     await db.query<{ workspace_id: string }>(`SELECT workspace_id FROM rooms WHERE id=$1`, [roomId])
   ).rows[0];
-  if (!room) throw new Error('workflow room not found');
+  if (!room) throw new Error('workflow chat not found');
   const head = await loadRunHead(db, roomId, runId);
-  if (!head) throw new ExpectedRefusalError('workflow run is unavailable in this Room');
+  if (!head) throw new ExpectedRefusalError('workflow run is unavailable in this chat');
   const run = head.card;
   const contract = await loadPinnedContract(db, roomId, run.workflowSlug, run.workflowVersion);
   if (!contract) throw new Error('workflow contract version is unavailable');

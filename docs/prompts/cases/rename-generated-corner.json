@@ -20,7 +20,7 @@
     "reactionTargetId": "m9"
   },
   "pass": {
-    "call": "revise_corner",
+    "call": "revise_thread",
     "args": {
       "action": "install_brief"
     }
@@ -140,7 +140,7 @@
         }
       },
       {
-        "call": "revise_corner",
+        "call": "revise_thread",
         "args": {
           "action": "install_brief"
         },

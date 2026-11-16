@@ -166,7 +166,7 @@ const scope2 = fixtureScope2();
       'chatgpt', 'openai chatgpt', 'claude', 'cursor', 'mcp', 'beeline connector',
       'gemini', 'codex', 'claude code', 'beeline helper', 'opencode', 'pi', 'hermes', 'zcode', 'goose']) {
       const result = await daemon.execute('connect', { ...turn, service, reason: 'Join my Room' }, HELPER);
-      expect(result).toMatchObject({ status: 'ready', app: 'Beeline Rooms' });
+      expect(result).toMatchObject({ status: 'ready', app: 'Beeline chats' });
       expect(result.next).toBe(agentInvitationGuide(service));
       if (service !== 'codex') {
         expect(result.next).toContain(BEELINE_ROOMS_MCP_URL);
@@ -305,7 +305,7 @@ const scope2 = fixtureScope2();
     for (const service of ['openai', 'meta ads', 'instagram', 'facebook', 'youtube', 'gmail', 'stripe']) {
       const result = await daemon.execute('connect', { ...turn, service,
         reason: 'Connect the app', squireAvailable: true }, HELPER);
-      expect(result.app).not.toBe('Beeline Rooms');
+      expect(result.app).not.toBe('Beeline chats');
       expect(result.next).not.toContain('custom connector');
     }
   });

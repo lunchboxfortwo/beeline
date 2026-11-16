@@ -1,5 +1,5 @@
 /** Keep eval writes inside their own fixture Room and reject failed tool results. */
-const blocked = new Set(['merge_corner', 'approve_merge', 'record_merge_yes', 'dispatch_release', 'run_granted_command', 'order', 'send_operator_system_dm', 'notify_feedback_fixed']);
+const blocked = new Set(['merge_thread', 'approve_merge', 'record_merge_yes', 'dispatch_release', 'run_granted_command', 'order', 'send_operator_system_dm', 'notify_feedback_fixed']);
 
 export function isUnsafeDiscoveryCall(name, args, room) {
     if (name === 'post')

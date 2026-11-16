@@ -282,7 +282,7 @@ m17_it('registers disposable copies without installing and replaces the session 
     m17_expect(await m17_extraDependencyRoots(corner, home)).toEqual([m17_resolve(corner, '.verification')]);
     const outside = m17_resolve(root, 'outside'); await m17_mkdir(outside);
     await m17_symlink(outside, m17_resolve(home, 'temp-rig'));
-    await m17_expect(m17_extraDependencyRoots(corner, home)).rejects.toThrow('inside this corner');
+    await m17_expect(m17_extraDependencyRoots(corner, home)).rejects.toThrow('inside this thread');
   } finally { await m17_rm(root, { recursive: true, force: true }); }
 });
 

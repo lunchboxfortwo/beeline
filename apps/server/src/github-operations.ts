@@ -196,14 +196,14 @@ async readPrChecksStatus(input: {
  * The phone's approve: a Workspace owner or admin's yes on the current head
  * (`recordPersonMergeYes`), then the one merge path, `landCorner`. Checks
  * must be green and no hold may stand; a yes given early merges when the
- * implementer's `merge_corner` runs after green checks.
+ * implementer's `merge_thread` runs after green checks.
  */
 async approveCornerMerge(viewerId: string, input: Input<'approveCornerMerge'>) { return gitHubOperationsApproveCornerMerge(this, viewerId, input); }
 /**
  * The one merge path. Squash-merges a corner at its exact head when
  * `pr_checks_status`'s `mergeAllowed` is true on GitHub's current head:
  * live checks green, a yes said on that head, and no hold. Called by
- * the implementer's `merge_corner`, a person's yes (`order_corner_merge` or
+ * the implementer's `merge_thread`, a person's yes (`order_thread_merge` or
  * the phone's approve). Recovery only confirms or releases an unfinished attempt.
  * At most one attempt per head: the attempt is claimed under the run lock
  * before GitHub is called. Confirmation, the webhook, or recurring recovery
@@ -217,7 +217,7 @@ async approveCornerMerge(viewerId: string, input: Input<'approveCornerMerge'>) {
 async landCorner(cornerId: string): Promise<boolean> { return gitHubOperationsLandCorner(this, cornerId); }
 /**
  * `landCorner`, telling a started merge apart from one GitHub refused, so
- * `merge_corner` can report the refusal instead of `merge-started`.
+ * `merge_thread` can report the refusal instead of `merge-started`.
  */
 async landCornerOutcome(cornerId: string, onBlocked?: (reason: string) => void): Promise<LandCornerOutcome> { return gitHubOperationsLandCornerOutcome(this, cornerId, onBlocked); }
 /**

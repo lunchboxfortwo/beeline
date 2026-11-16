@@ -1,16 +1,16 @@
 import { callAgentTool,CAPABILITY_TOOLS,Check,cornerCallText,describe,expect,fixtureScope12,fixtureScope3,fixtureScope6,fixtureScope8,it,m7_agentToolsFor,m7_askChoice,m7_describe,m7_expect,m7_it,m7_openPoll,m8_agentToolsFor,m8_describe,m8_emitEvent,m8_expect,m8_it,m8_listEventSubscriptions,m8_subscribeEvents,m9_agentToolsFor,m9_createHash,m9_describe,m9_expect,m9_it,m9_listGrants,m9_REQUESTABLE_AGENT_GRANT_KINDS,m9_requestGrant,m9_requestSharedAssetIsolation,m9_resolveGrantCommand,m9_runGrantedCommand,m9_storeSecret,m9_tmpdir,mergedDescribe7,mergedDescribe8,mergedDescribe9,schema,toolValidationSchema,type Call,type m9_GrantRunDeps } from './test-support-read-only-mcp.test-support.js';
 
-describe('corner text', () => {
+describe('thread text', () => {
   it('flattens an untidy call instead of refusing it', () => {
     // A grok-shaped call: the brief arrives with its line breaks intact.
     expect(
       cornerCallText({
         name: 'widget-ledger',
-        objective: 'Ship the corner name parameter.\nMake grok able to open a corner.',
+        objective: 'Ship the thread name parameter.\nMake grok able to open a thread.',
       }),
     ).toEqual({
       name: 'widget-ledger',
-      objective: 'Ship the corner name parameter. Make grok able to open a corner.',
+      objective: 'Ship the thread name parameter. Make grok able to open a thread.',
     });
   });
 
@@ -41,16 +41,16 @@ describe('corner text', () => {
 describe('canonical tool contracts', () => {
   it('requires explicit ownership and a complete brief with optional opening approval', () => {
     const input = {room:'11111111-1111-4111-8111-111111111111',implementer:'worker',brief:{spec:'Build the widget',approval:{sourceMessageId:'human-message'}}};
-    expect(Check(schema('open_corner'),input)).toBe(true);
-    expect(Check(schema('open_corner'),{...input,implementer:undefined})).toBe(false);
-    expect(Check(schema('open_corner'),{...input,brief:{spec:'Build the widget'}})).toBe(true);
-    expect(Check(schema('open_corner'),{...input,brief:{...input.brief,spec:''}})).toBe(false);
+    expect(Check(schema('open_thread'),input)).toBe(true);
+    expect(Check(schema('open_thread'),{...input,implementer:undefined})).toBe(false);
+    expect(Check(schema('open_thread'),{...input,brief:{spec:'Build the widget'}})).toBe(true);
+    expect(Check(schema('open_thread'),{...input,brief:{...input.brief,spec:''}})).toBe(false);
     const revision = {address:'child',action:'brief',brief:input.brief,expectedRevision:2,change:'Approved correction'};
-    expect(Check(schema('revise_corner'),revision)).toBe(true);
-    expect(Check(schema('revise_corner'),{...revision,brief:{spec:'Build the widget'}})).toBe(true);
-    expect(Check(schema('revise_corner'),{address:revision.address,action:revision.action,brief:revision.brief,change:revision.change})).toBe(false);
-    expect(Check(schema('revise_corner'),{address:'child',action:'metadata',name:'widget',brief:input.brief})).toBe(false);
-    expect(Check(schema('revise_corner'),{address:'child',action:'install_brief',name:'widget',brief:input.brief})).toBe(true);
+    expect(Check(schema('revise_thread'),revision)).toBe(true);
+    expect(Check(schema('revise_thread'),{...revision,brief:{spec:'Build the widget'}})).toBe(true);
+    expect(Check(schema('revise_thread'),{address:revision.address,action:revision.action,brief:revision.brief,change:revision.change})).toBe(false);
+    expect(Check(schema('revise_thread'),{address:'child',action:'metadata',name:'widget',brief:input.brief})).toBe(false);
+    expect(Check(schema('revise_thread'),{address:'child',action:'install_brief',name:'widget',brief:input.brief})).toBe(true);
   });
 
 
@@ -393,7 +393,7 @@ m9_describe('beeline-agent request_grant', () => {
   });
 
 
-  m9_it('asks for one coarse shared asset category with a reason and a Room card', async () => {
+  m9_it('asks for one coarse shared asset category with a reason and a chat card', async () => {
     const ops: Array<{ name: string; input: Record<string, unknown> }> = [];
     const answer = await m9_requestSharedAssetIsolation({ action: 'Use the requested resource',
       category: 'package-cache', purpose: 'Shared npm tarball is corrupt', reason: 'Shared npm tarball is corrupt',
@@ -418,7 +418,7 @@ m9_describe('beeline-agent request_grant', () => {
   });
 
 
-  m9_it('is mounted in Rooms, corners, and direct messages next to run_granted_command', () => {
+  m9_it('is mounted in chats, threads, and direct messages next to run_granted_command', () => {
     for (const directMessage of [false, true]) {
       const names = m9_agentToolsFor(true, directMessage).map((tool) => tool.name);
       m9_expect(names).toContain('request_grant');
@@ -522,7 +522,7 @@ m9_describe('beeline-agent request_grant', () => {
     m9_expect(reply).toContain(
       "The resource owner must answer Always, Once, or Deny in the resource owner's private @system DM",
     );
-    m9_expect(reply).not.toContain('in this Room');
+    m9_expect(reply).not.toContain('in this chat');
   });
 
 

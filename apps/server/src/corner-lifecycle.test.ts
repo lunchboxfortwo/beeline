@@ -56,11 +56,11 @@ describe('the corner lifecycle contract itself', () => {
 describe.each([
   ['with no stored corner workflow', false],
   ['with a stale stored corner workflow an older server seeded', true],
-])('%s, corners work exactly as before', (_name, stored) => {
+])('%s, threads work exactly as before', (_name, stored) => {
 const scope2 = fixtureScope2(_name, stored);
 
 
-  it('a code corner opens, advances implement -> checks -> review -> landed, without appearing on the workflow run page', async () => {
+  it('a code thread opens, advances implement -> checks -> review -> landed, without appearing on the workflow run page', async () => {
     const cornerId = await open('owner/widgets');
     expect(await currentState(cornerId)).toBe('working');
     expect(await projected(cornerId)).toBe('working');
@@ -100,7 +100,7 @@ const scope2 = fixtureScope2(_name, stored);
   });
 
 
-  it('a corner opens on implement and closes', async () => {
+  it('a thread opens on implement and closes', async () => {
     const cornerId = await open();
     expect(await currentState(cornerId)).toBe('working');
     const opened = await scope2.badge(cornerId);
@@ -112,14 +112,14 @@ const scope2 = fixtureScope2(_name, stored);
       .rejects.toThrow('workflow run not found');
   });
 });
-describe('corner lock', () => {
+describe('thread lock', () => {
   it('persists the human toggle, refuses agent close, and allows close after unlocking', async () => {
     const cornerId = await open();
     expect((await rootFixture.phone.readRoom(cornerId, H))?.cornerLocked).toBe(false);
     await rootFixture.phone.execute('setCornerLocked', { roomId: cornerId, locked: true }, H);
     expect((await rootFixture.phone.readRoom(cornerId, H))?.cornerLocked).toBe(true);
     const before = await commands(A, cornerId);
-    await expect(rootFixture.daemon.execute('archiveCorner', { cornerId }, A)).rejects.toThrow(/corner is locked/);
+    await expect(rootFixture.daemon.execute('archiveCorner', { cornerId }, A)).rejects.toThrow(/thread is locked/);
     expect((await rootFixture.db.query(`SELECT archived_at FROM rooms WHERE id=$1`, [cornerId])).rows[0]?.archived_at).toBeNull();
     expect(await commands(A, cornerId)).toEqual(before);
     await rootFixture.phone.execute('setCornerLocked', { roomId: cornerId, locked: false }, H);
@@ -129,7 +129,7 @@ describe('corner lock', () => {
   });
 
 
-  it('allows a person to close a locked corner and rejects agents changing the lock', async () => {
+  it('allows a person to close a locked thread and rejects agents changing the lock', async () => {
     const cornerId = await open();
     await expect(rootFixture.phone.execute('setCornerLocked', { roomId: cornerId, locked: true }, A)).rejects.toThrow(/access denied/);
     await rootFixture.phone.execute('setCornerLocked', { roomId: cornerId, locked: true }, H);
@@ -220,8 +220,8 @@ describe('a corner opens onto implement (row 1-3)', () => {
 
   });
 });
-describe('a person-opened corner in a repository Room', () => {
-  it('returns the first corner when a timed-out open retries with the same phone id', async () => {
+describe('a person-opened thread in a repository chat', () => {
+  it('returns the first thread when a timed-out open retries with the same phone id', async () => {
     const cornerId = '6f1d8c2a-4b3e-4f5a-9c7d-2e8b1a0f3c4d';
     const open = () =>
       rootFixture.phone.execute('createHumanCorner', { roomId: R, title: 'Retry-safe', cornerId }, H);
@@ -235,7 +235,7 @@ describe('a person-opened corner in a repository Room', () => {
     ).rejects.toThrow('corner id must be a UUID');
   });
 
-  it('NO-SWAP: a person tagging another agent assigns it without stopping the running one', async () => {
+  it('NO-SWAP: a person tagging another agent preserves the recorded implementer', async () => {
     const { id: cornerId } = await rootFixture.phone.execute('createHumanCorner', { roomId: R, title: 'Swap-widget' }, H);
     await say(cornerId, '@hoots fix the widget');
     const [working] = await commands(A, cornerId);
@@ -243,12 +243,12 @@ describe('a person-opened corner in a repository Room', () => {
     await rootFixture.daemon.execute('postAgentTurnReceipt', { roomId: cornerId, requestId: working!.turnRequestId, agentId: A, status: 'working' }, A);
 
     await say(cornerId, '@goosy take this over');
-    expect(await derivedWorker(cornerId)).toBe(B);
+    expect(await derivedWorker(cornerId)).toBe(A);
     expect((await rootFixture.db.query(`SELECT action,reason FROM agent_commands WHERE room_id=$1 AND agent_id=$2
       AND state='pending'`, [cornerId, A])).rows).toEqual([{ action: 'input', reason: 'human_tag' }]);
     expect((await rootFixture.db.query(`SELECT status FROM agent_turns WHERE room_id=$1 AND agent_id=$2 AND request_id=$3`,
       [cornerId, A, working!.turnRequestId])).rows).toEqual([{ status: 'working' }]);
-    console.log('NO-SWAP Demonstrated: the tagged agent became the worker; the running agent kept its turn and got no stop.');
+    console.log('NO-SWAP Demonstrated: the tagged agent left the implementer unchanged; the running agent kept its turn and got no stop.');
   });
 
   it('opens on implement with no lane, and the first tagged agent owns it and drives it to checks', async () => {
@@ -262,7 +262,7 @@ describe('a person-opened corner in a repository Room', () => {
     expect((await rootFixture.db.query(`SELECT ${cornerOwnerSql('$1::uuid')} owner_agent_id,${cornerKindSql('corner_id')} kind FROM corner_facts WHERE corner_id=$1`, [cornerId]))
       .rows[0]).toEqual({ owner_agent_id: null, kind: 'human' });
 
-    // The first agent a person tags owns the corner; a later tag moves only the implementer.
+    // The first agent a person tags owns the corner; later tags leave the implementer unchanged.
     await say(cornerId, '@hoots fix the widget');
     expect((await rootFixture.db.query(`SELECT ${cornerOwnerSql('$1::uuid')} owner_agent_id`, [cornerId]))
       .rows[0]).toEqual({ owner_agent_id: A });
@@ -270,7 +270,7 @@ describe('a person-opened corner in a repository Room', () => {
     await say(cornerId, '@goosy take this over');
     expect((await rootFixture.db.query(`SELECT ${cornerOwnerSql('$1::uuid')} owner_agent_id`, [cornerId]))
       .rows[0]).toEqual({ owner_agent_id: A });
-    expect(await derivedWorker(cornerId)).toBe(B);
+    expect(await derivedWorker(cornerId)).toBe(A);
 
     // A matched push leaves the corner working until its implementing receipts end.
     await rootFixture.github.processWebhook('push', {
@@ -414,7 +414,7 @@ const scope9 = fixtureScope9();
       .resolves.toMatchObject({ status: 'approved' });
     expect(rootFixture.githubApp.mergePullRequest).toHaveBeenCalledTimes(1);
     expect(await reasons(cornerId, A)).not.toContain('corner_land');
-    console.log('PASS-LANDS Demonstrated: the reviewer PASS reached landCorner with no implementer merge_corner turn.');
+    console.log('PASS-LANDS Demonstrated: the reviewer PASS reached landCorner with no implementer merge_thread turn.');
   });
 
 

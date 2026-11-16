@@ -115,7 +115,7 @@ it('parent membership authorizes live corner updates and departure revokes acces
   }
 });
 
-it('active corners open, post and delete through parent access without creating any memberships', async () => {
+it('active threads open, post and delete through parent access without creating any memberships', async () => {
   const id = 'd'.repeat(64);
   await phone.execute(
     'sendRoomMessage',

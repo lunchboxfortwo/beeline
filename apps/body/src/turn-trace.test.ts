@@ -255,7 +255,7 @@ describe('turn phase trace', () => {
     expect(record.attempts[0]!.phases.activation).toBe(9_000);
   });
 
-  it('writes one JSON line per turn under the runtime directory and never returns a Room row', async () => {
+  it('writes one JSON line per turn under the runtime directory and never returns a chat row', async () => {
     const root = await mkdtemp(join(tmpdir(), 'beeline-turn-trace-'));
     roots.push(root);
     const directory = turnTraceDirectory(root);

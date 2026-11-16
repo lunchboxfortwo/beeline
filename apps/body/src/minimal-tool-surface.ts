@@ -8,7 +8,7 @@ export type ToolDefinition = { name: string; description: string; inputSchema: R
 
 export const CAPABILITY_ROUTES: Record<string, Record<string, string>> = {
   vault: { request: 'post_vault_save_card' },
-  "onboarding": {"welcome": "post_starter_welcome", "game": "post_starter_game", "invite": "post_room_invite", "repository": "post_repository_card", "starters": "post_starters_card"},
+  "onboarding": {"welcome": "post_starter_welcome", "game": "post_starter_game", "invite": "post_chat_invite", "repository": "post_repository_card", "starters": "post_starters_card"},
   "workflow": {
     "save": "save_workflow",
     "describe": "load_workspace_skill",
@@ -61,9 +61,9 @@ export const CAPABILITY_TOOLS: Record<string, Record<string, ToolDefinition>> = 
   onboarding: {
     game: { name: 'game', description: 'Start tic-tac-toe with the starter team when the person asks to play.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
     welcome: { name: 'welcome', description: 'Post the signup welcome question in this chat to rerun onboarding. Manual runs are excluded from signup funnel counts.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
-    invite: { name: 'invite', description: 'Create an invite for the requester\'s own Room and print the invite link in this chat. Workspace manager membership is required.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
-    repository: { name: 'repository', description: 'Post the Room repository card: create a private repo, link an installation repo, switch repos or add an organization. Pass repository to pre-select an installation repo by owner/repo or a unique repo name. A name that is not installed is not selected. Returns install_missing, no_repo_linked or repo_linked. Use this instead of settings or CLI instructions.', inputSchema: { type: 'object', additionalProperties: false, properties: { repository: { type: 'string', minLength: 1, maxLength: 200, description: 'Installation repo to pre-select, as owner/repo or a unique repo name.' } } } },
-    starters: { name: 'starters', description: 'Read recent commits, CI and open issues in the linked repository and post 3–4 one-tap tasks. Empty repositories get useful starting tasks. A selection starts work through the normal corner flow.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+    invite: { name: 'invite', description: 'Create an invite for the requester\'s own chat and print the invite link in this chat. Workspace manager membership is required.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+    repository: { name: 'repository', description: 'Post the chat repository card: create a private repo, link an installation repo, switch repos or add an organization. Pass repository to pre-select an installation repo by owner/repo or a unique repo name. A name that is not installed is not selected. Returns install_missing, no_repo_linked or repo_linked. Use this instead of settings or CLI instructions.', inputSchema: { type: 'object', additionalProperties: false, properties: { repository: { type: 'string', minLength: 1, maxLength: 200, description: 'Installation repo to pre-select, as owner/repo or a unique repo name.' } } } },
+    starters: { name: 'starters', description: 'Read recent commits, CI and open issues in the linked repository and post 3–4 one-tap tasks. Empty repositories get useful starting tasks. A selection starts work through the normal thread flow.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
   },
   "workflow": {
     "describe": {
@@ -83,7 +83,7 @@ export const CAPABILITY_TOOLS: Record<string, Record<string, ToolDefinition>> = 
     },
     "start": {
       "name": "start",
-      "description": "Read tool:describe with the workflow slug before starting. Start a run of a saved workflow, binding its named roles to current members of this Room (by agent id, or by a handle from your member list - a word matching a member's handle binds that member, with or without the @). Starting dispatches the first state. Posts one message whose id is the run id and pins the contract version; read the current run before you call app_tool(app:beeline:workflow, tool:advance, args:...) with that runId to move the run forward. Every declared role needs a binding: one current Room member agent, or an ordered list of up to 16 agents. A list role goes to its first available agent when dispatched. Assignments persist across connection loss; a declared handoff, declared step timeout or explicit role rebind changes them. If nobody on the list is available, the run names this in the Room and waits for a human (see app_tool(app:beeline:workflow, tool:rebind, args:...)). Refused while another run of the same workflow is live in this Room; the refusal names that run and its state. How to write and run workflows: https://github.com/Beeline-Work/beeline/blob/main/docs/workflows/README.md",
+      "description": "Read tool:describe with the workflow slug before starting. Start a run of a saved workflow, binding its named roles to current members of this chat (by agent id, or by a handle from your member list - a word matching a member's handle binds that member, with or without the @). Starting dispatches the first state. Posts one message whose id is the run id and pins the contract version; read the current run before you call app_tool(app:beeline:workflow, tool:advance, args:...) with that runId to move the run forward. Every declared role needs a binding: one current chat member agent, or an ordered list of up to 16 agents. A list role goes to its first available agent when dispatched. Assignments persist across connection loss; a declared handoff, declared step timeout or explicit role rebind changes them. If nobody on the list is available, the run names this in the chat and waits for a human (see app_tool(app:beeline:workflow, tool:rebind, args:...)). Refused while another run of the same workflow is live in this chat; the refusal names that run and its state. How to write and run workflows: https://github.com/Beeline-Work/beeline/blob/main/docs/workflows/README.md",
       "inputSchema": {
         "type": "object",
         "required": ["name", "roleBindings"],
@@ -109,12 +109,12 @@ export const CAPABILITY_TOOLS: Record<string, Record<string, ToolDefinition>> = 
     },
     "read": {
       "name": "read",
-      "description": "Read any saved workflow run in this Room by its runId. Returns its pinned contract and version, current state, role and bound agent, allowed outcomes with next states, required fields, receipt hint, and app_tool(app:beeline:workflow, tool:advance, args:...) history. Use this before app_tool(app:beeline:workflow, tool:advance, args:...); the saved workflow or repository copy may have changed since this run started.",
+      "description": "Read any saved workflow run in this chat by its runId. Returns its pinned contract and version, current state, role and bound agent, allowed outcomes with next states, required fields, receipt hint, and app_tool(app:beeline:workflow, tool:advance, args:...) history. Use this before app_tool(app:beeline:workflow, tool:advance, args:...); the saved workflow or repository copy may have changed since this run started.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "runId": {
-            "description": "Full run ID or a unique prefix of at least 8 characters in this Room",
+            "description": "Full run ID or a unique prefix of at least 8 characters in this chat",
             "type": "string"
           }
         },
@@ -130,7 +130,7 @@ export const CAPABILITY_TOOLS: Record<string, Record<string, ToolDefinition>> = 
         "required": ["runId", "outcome", "contents"],
         "properties": {
           "runId": {
-            "description": "Full run ID or a unique prefix of at least 8 characters in this Room",
+            "description": "Full run ID or a unique prefix of at least 8 characters in this chat",
             "type": "string",
             "minLength": 1,
             "maxLength": 128
@@ -165,12 +165,12 @@ export const CAPABILITY_TOOLS: Record<string, Record<string, ToolDefinition>> = 
     },
     "cancel": {
       "name": "cancel",
-      "description": "End an active saved workflow run with a recorded reason and no further wakes. Authorized only on behalf of the active turn requester when they requested the run, own a bound role agent, or administer the Room. Cancels the run timeout, pending workflow wakes and open gate. Archiving a workflow does not cancel its runs.",
+      "description": "End an active saved workflow run with a recorded reason and no further wakes. Authorized only on behalf of the active turn requester when they requested the run, own a bound role agent, or administer the chat. Cancels the run timeout, pending workflow wakes and open gate. Archiving a workflow does not cancel its runs.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "runId": {
-            "description": "Full run ID or a unique prefix of at least 8 characters in this Room",
+            "description": "Full run ID or a unique prefix of at least 8 characters in this chat",
             "type": "string"
           },
           "reason": {"type": "string", "minLength": 1, "maxLength": 4000}
@@ -191,13 +191,13 @@ export const CAPABILITY_TOOLS: Record<string, Record<string, ToolDefinition>> = 
     },
     "rebind": {
       "name": "rebind",
-      "description": "Bind one specific agent to a list-bound role this run is currently on - the human-directed recovery when nobody on the role's list is healthy (report exhausted capability to your commander, who arranges the required role assignment). No health filter applies - an explicit choice overrides \"healthy\". The target can be any agent member of this Room, on the list or not; agent takes an agent id or a handle from your member list. Not for a role bound to one agent; that role never fails over. How to write and run workflows: https://github.com/Beeline-Work/beeline/blob/main/docs/workflows/README.md",
+      "description": "Bind one specific agent to a list-bound role this run is currently on - the human-directed recovery when nobody on the role's list is healthy (report exhausted capability to your commander, who arranges the required role assignment). No health filter applies - an explicit choice overrides \"healthy\". The target can be any agent member of this chat, on the list or not; agent takes an agent id or a handle from your member list. Not for a role bound to one agent; that role never fails over. How to write and run workflows: https://github.com/Beeline-Work/beeline/blob/main/docs/workflows/README.md",
       "inputSchema": {
         "type": "object",
         "required": ["runId", "role", "agent"],
         "properties": {
           "runId": {
-            "description": "Full run ID or a unique prefix of at least 8 characters in this Room",
+            "description": "Full run ID or a unique prefix of at least 8 characters in this chat",
             "type": "string",
             "minLength": 1,
             "maxLength": 128
@@ -366,7 +366,7 @@ export const CAPABILITY_TOOLS: Record<string, Record<string, ToolDefinition>> = 
   "browser_share": {
     "start": {
       "name": "start",
-      "description": "Share an already open browser tab in this Room or corner while you keep using that same browser session. Squire requires an existing operate session id. Chromium attaches to an already running debug port and selects an open tab; it does not launch a browser. The tool returns as soon as the live card is ready. The live browser card is posted in this place. Ask the person to open the card. The result contains no URL. Human browser activity arrives as Room events. End the share explicitly with app_tool(app:beeline:browser_share, tool:end, args:...).",
+      "description": "Share an already open browser tab in this chat or thread while you keep using that same browser session. Squire requires an existing operate session id. Chromium attaches to an already running debug port and selects an open tab; it does not launch a browser. The tool returns as soon as the live card is ready. The live browser card is posted in this place. Ask the person to open the card. The result contains no URL. Human browser activity arrives as chat events. End the share explicitly with app_tool(app:beeline:browser_share, tool:end, args:...).",
       "inputSchema": {
         "type": "object",
         "required": ["source"],
@@ -388,7 +388,7 @@ export const CAPABILITY_TOOLS: Record<string, Record<string, ToolDefinition>> = 
     },
     "end": {
       "name": "end",
-      "description": "Explicitly end one of your live browser shares in this Room. Use the source sessionId returned by app_tool(app:beeline:browser_share, tool:start, args:...). Closing a viewer or handing control back leaves the share live.",
+      "description": "Explicitly end one of your live browser shares in this chat. Use the source sessionId returned by app_tool(app:beeline:browser_share, tool:start, args:...). Closing a viewer or handing control back leaves the share live.",
       "inputSchema": {
         "type": "object",
         "required": ["sessionId"],

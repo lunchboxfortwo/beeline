@@ -47,8 +47,8 @@ import { id,Input,Output } from './values.js';
            AND r.archived_at IS NULL FOR SHARE OF m,r`,
         [input.roomId, agentId],
       );
-      if (!member.rowCount) throw new Error('daemon room access denied');
-      if (input.cornerId === input.roomId) throw new Error('a corner cannot watch itself');
+      if (!member.rowCount) throw new Error('daemon chat access denied');
+      if (input.cornerId === input.roomId) throw new Error('a thread cannot watch itself');
       await daemonReach(ctx, input.cornerId, agentId, db);
       const corner = await db.query<Output<'watchCorner'>['snapshot'] & { archived: boolean; landed: boolean }>(
         `SELECT c.id,c.name,${cornerRunStateSql('c.id')} "workflowState",
@@ -63,7 +63,7 @@ import { id,Input,Output } from './values.js';
         [input.cornerId],
       );
       if (!corner.rowCount)
-        throw new Error('watched address must be a corner');
+        throw new Error('watched address must be a thread');
       const { archived, landed, ...snapshot } = corner.rows[0]!;
       // A closed corner has no further events to watch. A merged one returns
       // its merge now: one wake on its merge line, unless this agent already
@@ -158,8 +158,8 @@ import { id,Input,Output } from './values.js';
           [input.cornerId],
         )
       ).rows[0];
-      if (!corner?.parent_id) throw new Error('corner not found');
-      if (corner.archived_at) throw new Error('corner is archived');
+      if (!corner?.parent_id) throw new Error('thread not found');
+      if (corner.archived_at) throw new Error('thread is archived');
       name ??= corner.name;
       if (input.reviewer !== undefined) await setCornerReviewer(db, input.cornerId, input.reviewer, agentId,
         (id, reviewer) => daemonCheckReviewerAuthors(ctx, db, id, reviewer));
@@ -167,16 +167,16 @@ import { id,Input,Output } from './values.js';
         ? await currentCornerBrief(db, input.cornerId)
         : null;
       if (corner.kind === 'human' && !current && (!objective || !input.brief))
-        throw new Error('naming a human-opened corner requires its objective and first brief');
+        throw new Error('naming a human-opened thread requires its objective and first brief');
       if (objective !== undefined || input.brief) {
         if (corner.kind !== 'human' && input.brief)
-          throw new Error('corner brief already exists; revise the current brief instead');
+          throw new Error('thread brief already exists; revise the current brief instead');
         const command = await authorizeCommandOutput(db, input.roomId ?? input.cornerId, agentId, input.requestId);
         if (current || corner.kind !== 'human') {
           if (current && input.brief && (current.spec !== input.brief.spec.trim() ||
               current.repositoryWork !== input.brief.repositoryWork ||
               current.approval?.sourceMessageId !== input.brief.approval?.sourceMessageId))
-            throw new Error('corner brief already exists; revise the current brief instead');
+            throw new Error('thread brief already exists; revise the current brief instead');
           // The objective is navigation only, not authority; keep the brief and review fences.
           if (objective !== undefined) await writeCornerObjective(db, input.cornerId, objective);
         } else {
@@ -196,7 +196,7 @@ import { id,Input,Output } from './values.js';
               excluding: explicitAttachments.map((attachment) => attachment.objectId),
             })),
           ];
-          if (attachments.length > 16) throw new Error('corner brief has too many attachments');
+          if (attachments.length > 16) throw new Error('thread brief has too many attachments');
           const authority = await resolveCornerBriefApproval(
             db, sourceRoomIds, brief, attachments, command.private_payload ? command.id : command.root_source_message_id,
           );

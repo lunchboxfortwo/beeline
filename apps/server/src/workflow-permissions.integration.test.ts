@@ -311,7 +311,7 @@ describe('Reproduction run-id-prefix: authenticated run lookup and control', () 
       expect(short.status).toBeGreaterThanOrEqual(400);
       expect(JSON.stringify(short.body)).toContain('at least 8 characters');
       const unavailable = await call(SAVER, operation, { ...context, ...extra, runId: hidden.slice(0, 12) });
-      expect(JSON.stringify(unavailable.body)).toContain('unavailable in this Room');
+      expect(JSON.stringify(unavailable.body)).toContain('unavailable in this chat');
       expect(JSON.stringify(unavailable.body)).not.toContain(hidden);
       expect(await runSnapshot(runId)).toEqual(before);
     }
@@ -331,7 +331,7 @@ describe('Reproduction run-id-prefix: authenticated run lookup and control', () 
     expect(longer.status).toBe(200);
     expect(longer.body.runId).toBe(runId);
     const otherRoom = await call(SAVER, 'getWorkflowRun', { roomId: OTHER_ROOM, runId: prefix });
-    expect(JSON.stringify(otherRoom.body)).toContain('unavailable in this Room');
+    expect(JSON.stringify(otherRoom.body)).toContain('unavailable in this chat');
     const deniedRoom = await call(SAVER, 'getWorkflowRun', { roomId: foreignRoom, runId: prefix });
     expect(deniedRoom.status).toBe(403);
     expect(JSON.stringify(deniedRoom.body)).not.toContain(hidden);

@@ -140,7 +140,7 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
     expect(rootFixture.githubApp.mergePullRequest).not.toHaveBeenCalled();
   });
 
-  it('after green checks and PASS, merge_corner merges the exact head, then lands on the merge webhook', async () => {
+  it('after green checks and PASS, merge_thread merges the exact head, then lands on the merge webhook', async () => {
     const cornerId = await inReview();
     const implementerBefore = await reasons(cornerId, A);
     const [review] = await commands(B, cornerId);
@@ -211,7 +211,7 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
       else await new PhoneService(rootFixture.db, 'http://test', rootFixture.github).execute('requestCornerClose', { roomId: cornerId }, H);
       expect((await rootFixture.db.query(`SELECT archived_at IS NOT NULL archived FROM rooms WHERE id=$1`, [cornerId])).rows[0]!.archived).toBe(true);
       expect(await currentState(cornerId)).toBe('archived');
-      expect(log).toHaveBeenCalledWith(expect.stringContaining('closing corner anyway'), expect.any(Error));
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('closing thread anyway'), expect.any(Error));
     } finally {
       log.mockRestore();
     }
@@ -237,7 +237,7 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
     expect((await rootFixture.db.query(`SELECT archived_at IS NOT NULL archived FROM rooms WHERE id=$1`, [cornerId])).rows[0]!.archived).toBe(true);
     expect((await rootFixture.db.query(`SELECT 1 FROM corner_merge_approvals WHERE corner_id=$1`, [cornerId])).rowCount).toBe(0);
     expect((await rootFixture.db.query(`SELECT 1 FROM agent_commands WHERE room_id=$1 AND action IN ('input','resume') AND state IN ('pending','claimed')`, [cornerId])).rowCount).toBe(0);
-    await expect(wiredDaemon.execute('closeCornerPullRequest', { cornerId }, A)).resolves.toMatchObject({ status: 'blocked', blocker: 'the corner has no pull request' });
+    await expect(wiredDaemon.execute('closeCornerPullRequest', { cornerId }, A)).resolves.toMatchObject({ status: 'blocked', blocker: 'the thread has no pull request' });
     expect(rootFixture.githubApp.closePullRequest).toHaveBeenCalledTimes(1);
     console.log('R1 Demonstrated: legacy archived PR closed through daemon service; PR and approval cleared; corner stays closed with no pending work.');
   });
@@ -254,7 +254,7 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
   });
 
 
-  it('lets any corner member close its pull request without merging; the corner stays open with no PR', async () => {
+  it('lets any thread member close its pull request without merging; the thread stays open with no PR', async () => {
     const cornerId = await inReview();
     const wiredDaemon = new DaemonService(rootFixture.db, new LiveHub(), undefined, undefined, false, undefined, false, undefined,
       (input, confirmZeroChecks) => rootFixture.github.prChecksStatus(input, confirmZeroChecks), undefined, undefined, undefined, undefined, undefined, undefined,
@@ -281,9 +281,9 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
     expect(await currentState(cornerId)).toBe('idle');
     expect(await projected(cornerId)).toBe('idle');
     await expect(wiredDaemon.execute('mergeCorner', { cornerId }, A))
-      .resolves.toEqual({ status: 'blocked', blocker: 'the corner has no pull request' });
+      .resolves.toEqual({ status: 'blocked', blocker: 'the thread has no pull request' });
     await expect(wiredDaemon.execute('closeCornerPullRequest', { cornerId }, B))
-      .resolves.toEqual({ status: 'blocked', blocker: 'the corner has no pull request' });
+      .resolves.toEqual({ status: 'blocked', blocker: 'the thread has no pull request' });
     expect(rootFixture.githubApp.closePullRequest).toHaveBeenCalledTimes(1);
   });
 
@@ -352,7 +352,7 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
   });
 
 
-  it('Reproduction REACH-1: a parent Room agent outside the corner closes, renames, steers, reads, revises and posts to it; an outsider cannot', async () => {
+  it('Reproduction REACH-1: a parent chat agent outside the thread closes, renames, steers, reads, revises and posts to it; an outsider cannot', async () => {
     const cornerId = await inReview();
     const wiredDaemon = new DaemonService(rootFixture.db, new LiveHub(), undefined, undefined, false, undefined, false, undefined,
       (input, confirmZeroChecks) => rootFixture.github.prChecksStatus(input, confirmZeroChecks), undefined, undefined, undefined, undefined, undefined, undefined,
@@ -418,7 +418,7 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
   });
 
 
-  it('Reproduction R1: leaving the parent Room removes access to its corners', async () => {
+  it('Reproduction R1: leaving the parent chat removes access to its threads', async () => {
     const cornerId = await inReview();
     const wiredDaemon = new DaemonService(rootFixture.db, new LiveHub(), undefined, undefined, false, undefined, false, undefined,
       (input, confirmZeroChecks) => rootFixture.github.prChecksStatus(input, confirmZeroChecks));
@@ -447,7 +447,7 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
   });
 
 
-  it('Reproduction R4-TARGET-READ: an unrelated roomId never opens a corner read', async () => {
+  it('Reproduction R4-TARGET-READ: an unrelated roomId never opens a thread read', async () => {
     const cornerId = await inReview();
     const wiredDaemon = new DaemonService(rootFixture.db, new LiveHub(), undefined, undefined, false, undefined, false, undefined,
       (input, confirmZeroChecks) => rootFixture.github.prChecksStatus(input, confirmZeroChecks));
@@ -621,7 +621,7 @@ describe('GitHub refusing the merge (AC-6)', () => {
     ).rows;
     expect(lines).toEqual([]);
     expect((await rootFixture.db.query(`SELECT private_payload->>'text' text FROM agent_commands WHERE room_id=$1 AND reason='corner_merge_refused'`, [cornerId])).rows).toEqual([{ text: reason }]);
-    // Nothing records the attempt: a fresh merge_corner retries the head live,
+    // Nothing records the attempt: a fresh merge_thread retries the head live,
     // and the same refusal is neither repeated in the corner nor re-woken.
     await implementersMerge();
     expect(rootFixture.githubApp.mergePullRequest).toHaveBeenCalledTimes(2);
@@ -638,7 +638,7 @@ describe('MERGE-LIVE: merges read GitHub live; nothing records an attempt', () =
 const scope26 = fixtureScope26();
 
 
-  it('Reproduction MERGE-RETRY-PROD: confirmed draft refusal, undraft, and merge_corner retry merge the same head once', async () => {
+  it('Reproduction MERGE-RETRY-PROD: confirmed draft refusal, undraft, and merge_thread retry merge the same head once', async () => {
     const cornerId = await approved();
     let draft = true;
     rootFixture.githubApp.readPullRequest.mockResolvedValue(scope26.providerPr(cornerId));

@@ -151,8 +151,8 @@ import { daemonReach } from './corner-messages.js';
            AND (message.presentation IN ('message','activity') OR message.card_type='agent-command')`,
         [input.messageId],
       );
-      if (elsewhere.rowCount) throw new Error('message access denied from this Room');
-      throw new Error('message not found in this Room');
+      if (elsewhere.rowCount) throw new Error('message access denied from this chat');
+      throw new Error('message not found in this chat');
     }
     if (offset > row.total) throw new Error('offset exceeds message body');
     const nextOffset = offset + [...row.body].length;

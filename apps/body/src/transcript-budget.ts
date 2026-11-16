@@ -68,6 +68,6 @@ function truncateRow(row: string, maxBytes: number): string {
 function fetchPointer(row: string, reason: string): string {
   const id = /^\[message id: ([^\]\n]+)\]/.exec(row)?.[1];
   return id
-    ? `\n[${reason}; call get_room_message with messageId "${id}" and offset 0 for the full text]`
+    ? `\n[${reason}; call get_chat_message with messageId "${id}" and offset 0 for the full text]`
     : `\n[${reason}; read the source conversation for the full text]`;
 }

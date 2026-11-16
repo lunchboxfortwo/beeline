@@ -100,8 +100,9 @@ export function cornerGitHubCommandRefusal(
   targetBranch: string,
   resolvePushBranch: (source?: string) => { branch?: string; tag?: boolean } = () => ({}),
   pushesOrigin: (remote?: string) => boolean = () => true,
+  onWrite: () => void = () => {},
 ): string | undefined {
-  const refusal = `beeline: this corner may push only ${featureBranch}`;
+  const refusal = `beeline: this thread may push only ${featureBranch}`;
   // The branch rule protects every remote except a local fixture a test suite
   // owns. `pushesOrigin` proves locality from the URL git will actually push
   // to; only a local path or file:// skips the restriction.
@@ -112,6 +113,7 @@ export function cornerGitHubCommandRefusal(
   if (launcher === 'gh') {
     const pr = argv.indexOf('pr');
     if (pr < 0 || argv[pr + 1] !== 'create') return undefined;
+    onWrite();
     for (let index = pr + 2; index < argv.length; index += 1) {
       const arg = argv[index]!;
       const head =
@@ -190,6 +192,7 @@ export function cornerGitHubCommandRefusal(
         ? positionals[0]
         : undefined;
   if (!pushesOrigin(remoteName)) return undefined;
+  onWrite();
   if (dangerous) return refusal;
   const refspecs = repositoryOption !== undefined ? positionals : positionals.slice(1);
   const destinations = refspecs.length
@@ -310,7 +313,8 @@ function pushesOrigin(remote) {
   if (!url) return true;
   return !isLocalPushUrl(url);
 }
-const refusal = cornerGitHubCommandRefusal(config.launcher, argv, config.featureBranch, config.targetBranch, resolvePushBranch, pushesOrigin);
+let threadWrite = false;
+const refusal = cornerGitHubCommandRefusal(config.launcher, argv, config.featureBranch, config.targetBranch, resolvePushBranch, pushesOrigin, () => { threadWrite = true; });
 if (refusal) { process.stderr.write(refusal + '\\n'); process.exitCode = 1; }
 function needsToken(args) {
   if (config.launcher === 'gh') return true;
@@ -334,7 +338,8 @@ function needsToken(args) {
   return !local.has(args[index]);
 }
 function token() {
-  const result = spawnSync(config.node, [config.cli, 'corner-read-token', '--config', config.config, '--room', config.room], { encoding: 'utf8' });
+  const result = spawnSync(config.node, [config.cli, 'thread-read-token', '--config', config.config, '--room', config.room,
+    ...(threadWrite ? ['--write'] : [])], { encoding: 'utf8' });
   if (result.status === 0 && result.stdout.trim()) return result.stdout.trim();
   process.stderr.write(result.stderr || 'Beeline could not refresh the repository credential.\\n');
   process.exitCode = result.status || 1;

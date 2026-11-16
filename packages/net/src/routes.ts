@@ -185,6 +185,7 @@ const daemonOperations = {
   answerUsageRefresh: true,
   approveCornerMerge: true,
   archiveCorner: true,
+  becomeImplementer: true,
   archiveWorkflow: true,
   askRoomChoice: true,
   askOwnerQuestion: true,

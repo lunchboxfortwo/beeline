@@ -32,7 +32,7 @@ describe('member stream survives an interrupted release migration', () => {
     try {
       await db.query(`INSERT INTO identities(id,kind,name) VALUES($1,'human','Owner'),($2,'agent','Claude')`, [owner, member]);
       await db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Workspace')`, [workspace]);
-      await db.query(`INSERT INTO rooms(id,workspace_id,name,visibility) VALUES($1,$2,'Room','public')`, [room, workspace]);
+      await db.query(`INSERT INTO rooms(id,workspace_id,name,visibility) VALUES($1,$2,'room','public')`, [room, workspace]);
       await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
         VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')`, [workspace, room, member]);
       await db.query(`INSERT INTO rooms_mcp_clients(id,name,redirects) VALUES('client','Claude','[]');`);

@@ -60,7 +60,7 @@ ORDER BY created_at;
 
 Each row carries the versions stored when it was filed. `helper_version` and `harness` are the helper connection and harness kind for an agent report. `app_version` and `app_platform` are the Beeline app release and platform of the device session that reported its running update and then filed the human report. A browser, an external client, or a session that has not reported an update leaves them null. Another installation's receipt is never copied. `harness_version` is set only when the server knew the harness process version. A field the server did not know is null. `helper_is_latest` and `app_is_latest` compare those versions with the helper bundle the release pipeline last delivered. True is that version, false is an older or different one, and null means the version or the delivered release was unknown. `latest_released_version` is that bundle, or null when none is recorded. A later occurrence on an agent item keeps its own `helperVersion` and `harness` inside `occurrences`.
 
-`scripts/feedback-signals.mjs` keeps every pulled row. Older and unknown versions stay in the group with their item ids and version reports. Count, agent count, human count and eligibility use only latest-version evidence. The original agent report counts when `helper_is_latest` is true. Each later occurrence counts when its `helperVersion` equals `latest_released_version`. A human report counts when `app_is_latest` is true. A null or older version adds nothing to those counts. Confirmed affected humans count only on a report whose own latest flag is true. One latest agent occurrence cannot open a fix corner. Two or more can. A latest human report can.
+`scripts/feedback-signals.mjs` keeps every pulled row. Older and unknown versions stay in the group with their item ids and version reports. Count, agent count, human count and eligibility use only latest-version evidence. The original agent report counts when `helper_is_latest` is true. Each later occurrence counts when its `helperVersion` equals `latest_released_version`. A human report counts when `app_is_latest` is true. A null or older version adds nothing to those counts. Confirmed affected humans count only on a report whose own latest flag is true. One latest agent occurrence cannot open a fix thread. Two or more can. A latest human report can.
 
 If the previous run never reached `done`, widen the window back to that run's start.
 Run the JSON rows through `node scripts/feedback-signals.mjs` on stdin.
@@ -81,21 +81,21 @@ or the skill or tool) and draft its saved case in the format of
 pass rule. Write pass rules on tool calls and their arguments where you can; a
 rule on free text is fragile. The repository is public: describe what the agent
 saw in your own words with invented names. Never quote a report, and never name
-the people, Rooms, Workspaces or emails behind it.
+the people, chats, Workspaces or emails behind it.
 
 Judge each group too: did a Beeline tool refuse the agent, or did the agent not know
 how to do something here? Each such group ends in a skill fix. Name the beeline-*
 skill in `apps/body/src/beeline-skill.ts` whose steps were missing or wrong for that
-session type (Room, DM or corner), and say what the steps must say instead. When
+session type (chat, DM or thread), and say what the steps must say instead. When
 no skill covers the situation, name the skill that should.
 
 Persist every report's assessment in `contents.dispositions`: an array of
 {itemId, disposition, reference, reason}. Use fixed only after
 `report(kind:fixed)` verifies the merged fix; duplicate names the canonical
-item id and merges its occurrences and count; linked names the existing corner
+item id and merges its occurrences and count; linked names the existing thread
 or pull request; dismissed records why no fix is warranted. The handoff saves
 these decisions transactionally. Include every pulled item; use [] when empty.
-Do not leave assessed reports new merely because no new corner is needed.
+Do not leave assessed reports new merely because no new thread is needed.
 
 If nothing is new, hand off `nothing_new`. Otherwise hand off `ranked` with
 `problems`: all groups, each with a one-line description in your
@@ -141,7 +141,7 @@ connection compatibility only, not model availability or a logged-in turn.
 Present feedback and adapter results as one ranked list. Use distinct affected
 humans first, then agent occurrences. Show counts, first/last seen, eligibility,
 build/hold/drop and the traced cause. Check main, open PRs, release status and
-existing corners before proposing work. Record rankedProblems in presented.
+existing threads before proposing work. Record rankedProblems in presented.
 If no eligible build items remain, use nothing_to_build with the same field.
 Do not alter Sentry routing in this workflow.
 
@@ -156,7 +156,7 @@ Check the same signal through now, including resolved items and occurrences on
 old feedback rows. A merged PR alone is not released. If no release containing
 the fix exists, report **not yet released**. If it is released and the signal
 occurs after releasedAt, report **still occurring (reopen)** and attach it to the
-existing fix corner or propose a scoped follow-up. If the next-day observation
+existing fix thread or propose a scoped follow-up. If the next-day observation
 window after release is complete and there are no matching occurrences, report
 **stopped after release (fixed)**. If the observation window is incomplete or the
 signal cannot be read, say the check is incomplete and fail instead of claiming
@@ -167,18 +167,18 @@ Advance checked with signalChecks, including queried window and release evidence
 ## Fix-loop follow-up (outside this workflow)
 
 Present supplies the ranked list to the daily fix loop and ends the run.
-Ruby opens routine fix corners as an existing agent action without per-item
+Ruby opens routine fix threads as an existing agent action without per-item
 pre-approval. A reviewer PASS on the exact head plus green checks lands them;
 the owner's hold remains a veto. Product decisions and destructive operations
-still follow their existing authority. Report opened corners and held decisions
+still follow their existing authority. Report opened threads and held decisions
 on the fix-loop card.
 
-Only repeated agent signals or problems a person actually felt are eligible. Check for an existing corner by signal and item ids and reuse it. For each eligible routine fix, Ruby calls `open_corner` in this Room. Give it a brief that
+Only repeated agent signals or problems a person actually felt are eligible. Check for an existing thread by signal and item ids and reuse it. For each eligible routine fix, Ruby calls `open_thread` in this chat. Give it a brief that
 describes the problem in your own words, lists its item ids, and requires the fix
 pull request body to carry the line `Feedback items: <ids>`. The repository is
 public: the brief and the pull request must never quote a report, and never name
-the people, Rooms or emails behind it. Tag the agent best suited to the work in
-that corner.
+the people, chats or emails behind it. Tag the agent best suited to the work in
+that thread.
 
 For a prompt defect, the brief also carries the drafted case. It requires the
 new case to fail on the old prompt before changing it. This applies to real
@@ -188,7 +188,7 @@ stay passing and the overall pass rate must not drop (see
 `docs/prompts/nightly.md`). It requires the
 pull request to add that case as `docs/prompts/cases/<id>.json` and to pass the
 `PROMPT CASES` check. It also requires a replay: once the pull request is open,
-the worker orders one other agent in the Room to replay every saved case on the
+the worker orders one other agent in the chat to replay every saved case on the
 pull request head with its own model (`docs/prompts/cases/README.md`, Replay).
 That agent posts the pass/fail table on the pull request. The new case must
 fail on the old prompt and pass with the fix, and every other case must pass.

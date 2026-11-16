@@ -336,7 +336,7 @@ describe('start_workflow', () => {
     ).rejects.toMatchObject({ status: 400, message: expect.stringContaining('role binding is missing for approver') });
   });
 
-  it('rejects a role bound to someone who is not a current agent member of this Room (a person or an outsider)', async () => {
+  it('rejects a role bound to someone who is not a current agent member of this chat (a person or an outsider)', async () => {
     const command = await commandFor(IMPLEMENTER);
     await saveWorkflow(database, command, { contract: describedWorkflow(CONTRACT)});
     await expect(
@@ -347,7 +347,7 @@ describe('start_workflow', () => {
     ).rejects.toThrow('current agent member');
   });
 
-  it('binds an @handle role to the current Room member with that handle', async () => {
+  it('binds an @handle role to the current chat member with that handle', async () => {
     await database.query(`UPDATE identities SET handle='ravi' WHERE id=$1`, [REVIEWER]);
     const command = await commandFor(IMPLEMENTER);
     await saveWorkflow(database, command, { contract: describedWorkflow(CONTRACT)});
@@ -405,7 +405,7 @@ describe('start_workflow', () => {
         name: 'corner',
         roleBindings: { implementer: IMPLEMENTER, reviewer: REVIEWER, approver: APPROVER },
       }),
-    ).rejects.toThrow(`corner already has a live run ${runId} in this Room, at implement.`);
+    ).rejects.toThrow(`corner already has a live run ${runId} in this chat, at implement.`);
   });
 
   it('rejects a current role agent after an ordinary human tag', async () => {
@@ -415,7 +415,7 @@ describe('start_workflow', () => {
     await expect(startWorkflow(database, command, {
       name: 'corner',
       roleBindings: { implementer: IMPLEMENTER, reviewer: REVIEWER, approver: APPROVER },
-    })).rejects.toThrow(`corner already has a live run ${runId} in this Room, at implement.`);
+    })).rejects.toThrow(`corner already has a live run ${runId} in this chat, at implement.`);
   });
 
   it('lets an agent not currently in a run start the workflow when no run is active', async () => {
@@ -449,7 +449,7 @@ describe('start_workflow', () => {
         name: 'corner',
         roleBindings: { implementer: IMPLEMENTER, reviewer: REVIEWER, approver: APPROVER },
       }),
-    ).rejects.toThrow(`corner already has a live run ${runId} in this Room, at review.`);
+    ).rejects.toThrow(`corner already has a live run ${runId} in this chat, at review.`);
   });
 });
 
@@ -501,7 +501,7 @@ describe('start_workflow schedule/trigger duplicate-run refusal', () => {
         name: 'corner',
         roleBindings: { implementer: REVIEWER, reviewer: REVIEWER, approver: APPROVER },
       }),
-    ).rejects.toThrow(`corner already has a live run ${started.runId} in this Room, at implement.`);
+    ).rejects.toThrow(`corner already has a live run ${started.runId} in this chat, at implement.`);
   });
 
   it('refuses a human admin start too while the scheduled run is live', async () => {
@@ -517,7 +517,7 @@ describe('start_workflow schedule/trigger duplicate-run refusal', () => {
     await expect(startWorkflow(database, { room_id: ROOM, agent_id: OWNER }, {
       name: 'corner',
       roleBindings: { implementer: IMPLEMENTER, reviewer: REVIEWER, approver: APPROVER },
-    })).rejects.toThrow(`corner already has a live run ${started.runId} in this Room, at implement.`);
+    })).rejects.toThrow(`corner already has a live run ${started.runId} in this chat, at implement.`);
   });
 
   it('refuses a retry from a one-shot schedule after its occurrence is deleted', async () => {

@@ -38,12 +38,12 @@ export const SYSTEM_MESSAGE_DAEMON_SERVICE = {
   },
 
   'daemon-service.opened-a-corner': {
-    parts: ['opened a corner'],
+    parts: ['opened a thread'],
     variables: [],
   },
 
   'daemon-service.revised-the-corner-brief': {
-    parts: ['revised the corner brief'],
+    parts: ['revised the thread brief'],
     variables: [],
   },
 

@@ -42,7 +42,7 @@ export const REPOSITORY_TOOLS: ToolDefinition[] = [
 export const SCRATCH_TOOLS: ToolDefinition[] = [
   {
     "name": "scratch_io",
-    "description": "Fallback session-file writes and bounded image downloads when native IO is unavailable or unproven; repo-less corners also support quota. Paths stay inside the writable session area.",
+    "description": "Fallback session-file writes and bounded image downloads when native IO is unavailable or unproven; repo-less threads also support quota. Paths stay inside the writable session area.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -65,7 +65,7 @@ export const SCRATCH_TOOLS: ToolDefinition[] = [
 
 export const RUNNER_TOOL: ToolDefinition = {
   "name": "run_granted_command",
-  "description": "Run a command under an approved command grant, only when an approved grant is a word-for-word prefix of argv. In a top-level Room it runs on the SAME read-only filesystem the Room promises — you can read anything and write only your own scratch, so open a corner for work that changes files. A corner can do everything a Room can and more: its worktree is writable and a command there may act on the live host, next to the branch and the transcript that explain it. The named secrets are in its environment and never in the output. Ten-minute timeout, capped output, one ledger row per run.",
+  "description": "Run a command under an approved command grant, only when an approved grant is a word-for-word prefix of argv. In a top-level chat it runs on the SAME read-only filesystem the chat promises — you can read anything and write only your own scratch, so open a thread for work that changes files. A thread can do everything a chat can and more: its worktree is writable and a command there may act on the live host, next to the branch and the transcript that explain it. The named secrets are in its environment and never in the output. Ten-minute timeout, capped output, one ledger row per run.",
   "inputSchema": {
     "type": "object",
     "required": ["argv"],
@@ -84,14 +84,14 @@ export const RUNNER_TOOL: ToolDefinition = {
 
 export const WORKSPACE_TOOL: ToolDefinition = {
   "name": "workspace",
-  "description": "Make or refresh your own copy of this place's repository and index it. In a corner it checks out the corner branch where you can commit; in a Room it is a read-only copy of the target branch. Returns the path, or the reason it failed. Run dependency installs yourself in the copy.",
+  "description": "Make or refresh your own copy of this place's repository and index it. In a thread it checks out the thread branch where you can commit; in a chat it is a read-only copy of the target branch. Returns the path, or the reason it failed. Run dependency installs yourself in the copy.",
   "inputSchema": {"type": "object", "properties": {}, "additionalProperties": false}
 };
 
 export const SILENT_TOOL: ToolDefinition = {
   "name": "no_reply_needed",
   "description": "Acknowledge an answer already posted for this request. An unanswered queue item remains pending: provide your own answer. For a tagged message, messageId selects the tag to acknowledge after answering it.",
-  "inputSchema": {"type": "object", "properties": {"messageId": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Explicitly decline this tagged message in the current Room."}}, "additionalProperties": false}
+  "inputSchema": {"type": "object", "properties": {"messageId": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Explicitly decline this tagged message in the current chat."}}, "additionalProperties": false}
 };
 
 /**

@@ -52,7 +52,7 @@ describe('list roles', () => {
     await expect(start([WORKER_A, 'f'.repeat(64)])).rejects.toThrow('current agent member');
   });
 
-  it('rejects a human Room member as a binding, alone or on a list, before any card is written', async () => {
+  it('rejects a human chat member as a binding, alone or on a list, before any card is written', async () => {
     await database.query(`UPDATE identities SET handle='owner' WHERE id=$1`, [OWNER]);
     const command = await commandFor(IMPLEMENTER);
     await saveWorkflow(database, command, { contract: describedWorkflow(LIST_CONTRACT)});
@@ -154,12 +154,12 @@ describe('list roles', () => {
     const { runId } = await startedListRun();
     const command = await commandFor(IMPLEMENTER);
     const refusal = assignWorkflowRole(database, command, { runId, role: 'worker', targetAgentId });
-    await expect(refusal).rejects.toThrow(`${targetAgentId} is not a current agent member of this Room`);
+    await expect(refusal).rejects.toThrow(`${targetAgentId} is not a current agent member of this chat`);
     await expect(refusal).rejects.toBeInstanceOf(ExpectedRefusalError);
     expect((await listRunCard(runId)).roleBindings.worker).toBeUndefined();
   });
 
-  it('assign_workflow_role binds the Room member a handle from the member list names', async () => {
+  it('assign_workflow_role binds the chat member a handle from the member list names', async () => {
     await database.query(`UPDATE identities SET handle='rev' WHERE id=$1`, [REVIEWER]);
     await reportPresence(WORKER_A, 'offline');
     await reportPresence(WORKER_B, 'offline');
@@ -169,7 +169,7 @@ describe('list roles', () => {
     expect((await listRunCard(runId)).roleBindings.worker).toBe(REVIEWER);
     await expect(
       assignWorkflowRole(database, command, { runId, role: 'worker', targetAgentId: 'nobody' }),
-    ).rejects.toThrow('@nobody is not a current member of this Room');
+    ).rejects.toThrow('@nobody is not a current member of this chat');
   });
 
   it('assign_workflow_role also rebinds a role bound to one agent, not only a list role', async () => {
@@ -233,7 +233,7 @@ describe('agent workflow run reads and cancellation', () => {
     expect(read).toMatchObject({ state: 'checks', requiredFields: ['headSha'] });
     expect(read.history).toHaveLength(2);
     expect(read.history[1]).toMatchObject({ fromState: 'implement', outcome: 'pushed', receipt: { line: 'Ready for checks', exit: { actorId: IMPLEMENTER } } });
-    await expect(getWorkflowRun(database, '30000000-0000-4000-8000-000000000001', runId)).rejects.toThrow('unavailable in this Room');
+    await expect(getWorkflowRun(database, '30000000-0000-4000-8000-000000000001', runId)).rejects.toThrow('unavailable in this chat');
   });
 
   it('retains the earlier answer obligation and records the next attempt on its own wake', async () => {
@@ -387,7 +387,7 @@ describe('one live run per workflow per Room', () => {
     ]);
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
     const refused = results.find((result) => result.status === 'rejected') as PromiseRejectedResult;
-    expect(String(refused.reason)).toMatch(/gated already has a live run [0-9a-f]{64} in this Room, at work/);
+    expect(String(refused.reason)).toMatch(/gated already has a live run [0-9a-f]{64} in this chat, at work/);
   });
 
   it('lets exactly one of a scheduled and a direct start succeed', async () => {

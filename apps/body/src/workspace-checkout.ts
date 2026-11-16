@@ -21,7 +21,7 @@ export function githubHttpsRemote(remote: string): string {
     .replace(/^git@github\.com:/i, 'https://github.com/');
   const url = new URL(normalized);
   if (url.protocol !== 'https:' || url.hostname.toLowerCase() !== 'github.com')
-    throw new Error('corner repository must be a GitHub HTTPS identity');
+    throw new Error('thread repository must be a GitHub HTTPS identity');
   url.username = '';
   url.password = '';
   return url.toString().replace(/\/$/, '').replace(/\.git$/i, '') + '.git';
@@ -96,7 +96,7 @@ export async function materializeCornerWorktree(input: {
   await git(['-C', path, 'config', '--worktree', 'user.email', identity.email]);
   const top = (await git(['-C', path, 'rev-parse', '--show-toplevel'])).stdout.toString().trim();
   if ((await realpath(top)) !== (await realpath(path)))
-    throw new Error(`corner worktree escaped its isolated root: ${top}`);
+    throw new Error(`thread worktree escaped its isolated root: ${top}`);
   return { path, gitCommonDir };
 }
 
@@ -160,7 +160,7 @@ export async function prepareWorkspace(input: {
       kind: 'corners', itemId: basename(path), agentId: input.agent.publicKey, ended: false });
     if (!restore.lifecycle?.branch && !restore.lifecycle?.pr)
       await input.api.execute('postCornerRemoteState', { cornerId: input.placeId, branch, state: 'working', checks: 'unknown' })
-        .catch(error => console.warn(`[body] corner ${input.placeId} working state not posted:`, error));
+        .catch(error => console.warn(`[body] thread ${input.placeId} working state not posted:`, error));
   } else {
     path = await materializeRoomCheckout({
       roomId: input.placeId, workspaceId: input.workspaceId, supervisorRoot: input.supervisorRoot,

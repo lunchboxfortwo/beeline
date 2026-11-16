@@ -263,13 +263,13 @@ export function isMountedMcpToolPermissionRequest(
 
 const AGENT_SURFACE_TOOL_NAMES = [
   'ask_owner', 'update_work', 'create_work_item', 'set_work_state', 'assign_work_item', 'add_work_note', 'attach_to_work_item',
-  'read', 'search', 'remember', 'revise_corner', 'order', 'stop', 'report',
-  'approve_merge', 'merge_corner', 'set_corner_hold', 'close_corner',
+  'become_implementer', 'read', 'search', 'remember', 'revise_thread', 'order', 'stop', 'report',
+  'approve_merge', 'merge_thread', 'set_thread_hold', 'close_thread',
   'post', 'request_grant', 'app_tool', 'wake', 'react_to_message',
   'run_granted_command', 'store_secret', 'no_reply_needed', 'scratch_io',
   'get_avatar',
   'set_avatar',
-  'open_corner',
+  'open_thread',
   'pr_checks_status',
   'post_artifact',
   'write_scratch_file',

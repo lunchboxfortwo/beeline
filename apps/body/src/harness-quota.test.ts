@@ -126,7 +126,7 @@ describe('quota-axi plan usage (Reproduction R2)', () => {
     expect(run).toHaveBeenCalledTimes(2);
   });
 
-  it('shares one read per interval across the Room and corner loops of one agent', async () => {
+  it('shares one read per interval across the chat and thread loops of one agent', async () => {
     let clock = 0;
     const slots = new Map();
     const run = vi.fn(async () => JSON.stringify(QUOTA_AXI_CODEX_CURSOR_REPORT));

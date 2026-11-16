@@ -28,14 +28,14 @@ const scope1 = fixtureScope1();
   });
 });
 describe('R2594 repository setup guidance', () => {
-  it('guides repository setup in a Room with no repository and unavailable shell', () => {
+  it('guides repository setup in a chat with no repository and unavailable shell', () => {
     const prompt = assembleSessionPrompt({ surface: 'room', agentName: 'Bee',
       agentCommand: 'claude-agent-acp', shell: { available: false } }).systemPrompt;
-    expect(prompt).toContain('This Beeline Room has no linked repository.');
+    expect(prompt).toContain('This Beeline chat has no linked repository.');
     expect(prompt).not.toContain('The repository filesystem is read-only here.');
     expect(prompt).toContain('in your first reply');
-    expect(prompt).toContain('Room header → Repository → Link or Create');
-    expect(prompt).toContain('Never send them to another Room.');
+    expect(prompt).toContain('chat header → Repository → Link or Create');
+    expect(prompt).toContain('Never send them to another chat.');
     expect(prompt).toContain('mention linking for ongoing code work');
     expect(prompt).toContain('organization setup before proposing a personal GitHub connection');
     expect(prompt).toContain('consult beeline-connecting-services for repository and organization setup');
@@ -44,16 +44,16 @@ describe('R2594 repository setup guidance', () => {
     expect(skill).toContain('not a removable Connectors entry');
   });
 
-  it('does not ask a repository-backed Room to link its repository again', () => {
+  it('does not ask a repository-backed chat to link its repository again', () => {
     const prompt = assembleSessionPrompt({ surface: 'room', agentName: 'Bee',
       agentCommand: 'claude-agent-acp', repository: { name: 'owner/widgets', branch: 'main' } }).systemPrompt;
-    expect(prompt).toContain('The repository filesystem is read-only here. The Room is bound to owner/widgets (branch main); the read-only checkout is at the session root.');
-    expect(prompt).not.toContain('Room header → Repository');
+    expect(prompt).toContain('The repository filesystem is read-only here. The chat is bound to owner/widgets (branch main); the read-only checkout is at the session root.');
+    expect(prompt).not.toContain('chat header → Repository');
     expect(prompt).not.toContain('no linked repository');
   });
 });
 describe('R-PROMPT-GRANTS recovery and outside context', () => {
-  it('shows grant recovery in the assembled Room prompt', () => {
+  it('shows grant recovery in the assembled chat prompt', () => {
     const prompt = assembleSessionPrompt({ surface: 'room', agentName: 'Bee',
       agentCommand: 'claude-agent-acp', shell: { available: true } }).systemPrompt;
     expect(prompt).toContain('request_grant(mode:request, kind:command, target, action, purpose, reason)');
@@ -61,7 +61,7 @@ describe('R-PROMPT-GRANTS recovery and outside context', () => {
     expect(prompt).toContain('ask before calling a host blocker unfixable');
   });
 
-  it('gives every corner one rule for posts outside it', () => {
+  it('gives every thread one rule for posts outside it', () => {
     for (const surface of ['code-corner', 'repo-less-corner'] as const) {
       const prompt = assembleSessionPrompt({ surface, agentName: 'Bee',
         agentCommand: 'claude-agent-acp' }).systemPrompt;
@@ -69,7 +69,7 @@ describe('R-PROMPT-GRANTS recovery and outside context', () => {
     }
   });
 });
-describe('RW1 writable home in the Room primer', () => {
+describe('RW1 writable home in the chat primer', () => {
 const scope4 = fixtureScope4();
 
   it('names the sandbox home and post_artifact only when the sandbox wraps the session', () => {
@@ -84,7 +84,7 @@ const scope4 = fixtureScope4();
     }
   });
 });
-describe('corner wake reporting (Reproduction schedule-silence-4)', () => {
+describe('thread wake reporting (Reproduction schedule-silence-4)', () => {
 const scope5 = fixtureScope5();
 
   it.each(['report', 'order', 'resume', 'watched_corner', 'corner_check', 'schedule', 'subscribed_event', 'system', 'corner_background_tool', 'corner_brief_revision'])('makes a %s wake quiet without a progress nudge', (commandReason) => {
@@ -142,7 +142,7 @@ const scope5 = fixtureScope5();
   it('hands a reviewer-approved head to the implementer to merge, unless a human question is open', () => {
     const land = scope5.turn('corner_land');
     expect(land).toContain("The reviewer approved this pull request's current head.");
-    expect(land).toContain("call merge_corner when the live merge gate allows it. Report unresolved questions to your commander.");
+    expect(land).toContain("call merge_thread when the live merge gate allows it. Report unresolved questions to your commander.");
     expect(land).not.toContain(scope5.silence);
     expect(scope5.turn('corner_check')).not.toContain('The reviewer approved');
   });
@@ -166,9 +166,9 @@ const scope6 = fixtureScope6();
 
 
   it.each(PROMPT_SURFACES)('shows the parent beside the message on %s', (surface) => {
-    const prompt = assembleTurnPrompt({ surface, task: { body: 'Dispatch these five corners', reply: scope6.reply } }).text;
-    expect(prompt).toContain('Dispatch these five corners');
-    expect(prompt).toContain('Reply to message parent-message-id by "Ruby":\n> "Five corners from the audit."');
+    const prompt = assembleTurnPrompt({ surface, task: { body: 'Dispatch these five threads', reply: scope6.reply } }).text;
+    expect(prompt).toContain('Dispatch these five threads');
+    expect(prompt).toContain('Reply to message parent-message-id by "Ruby":\n> "Five threads from the audit."');
   });
 
 
@@ -350,7 +350,7 @@ describe('prompt assembly guards', () => {
   it('uses the existing live merge gate without human escalation or reviewer merge bans', () => {
     for (const name of ['code-corner-reviewed', 'code-corner-reviewer', 'code-corner-no-reviewer']) {
       const text = assembleSessionPrompt(SESSION_VARIANTS[name]!).systemPrompt;
-      expect(text).toContain('merge_corner');
+      expect(text).toContain('merge_thread');
       expect(text).not.toMatch(/never merge|do not merge|only human approval|ask a Workspace owner/i);
     }
     const reviewer = assembleSessionPrompt(SESSION_VARIANTS['code-corner-reviewer']!).systemPrompt;
@@ -422,20 +422,20 @@ describe('prompt assembly guards', () => {
       expect(text, name).not.toContain('gh pr merge');
       expect(text, name).not.toMatch(/approved [0-9a-f<][^`]*, merge/);
     }
-    expect(CORNER_CHECKS_NUDGE).toContain("a reviewer's PASS lands the PR; if you are woken to merge, call merge_corner");
-    expect(CORNER_CHECKS_NUDGE).toContain('Use merge_corner for landing.');
+    expect(CORNER_CHECKS_NUDGE).toContain("a reviewer's PASS lands the PR; if you are woken to merge, call merge_thread");
+    expect(CORNER_CHECKS_NUDGE).toContain('Use merge_thread for landing.');
   });
 
 
-  it('tells a code-corner author that a human opening the corner and prompting inside it is not the outline', () => {
+  it('tells a code-corner author that a human opening the thread and prompting inside it is not the outline', () => {
     const author = assembleSessionPrompt(SESSION_VARIANTS['code-corner-reviewed']!).systemPrompt;
     expect(author).toContain('Before code/build, read the current brief.');
-    expect(author).toContain('Any human in the Room can direct you. If a newer human instruction contradicts an earlier one, follow the newer instruction, revise the brief with that message as approval, and state in the corner what changed.');
+    expect(author).toContain('Any human in the chat can direct you. Follow the newer instruction when humans conflict, revise the brief with that message as approval, and state in the thread what changed.');
     expect(author).not.toContain('Your chain of command');
     expect(author).not.toContain('A higher rank');
     expect(author).not.toContain('Instructions from outside your chain');
     expect(author).not.toContain('ask your commander for an authorized revision');
-    expect(promptRules.CORNER_AUTHOR_CONTRACT).toContain('Any human in the Room can direct you.');
+    expect(promptRules.CORNER_AUTHOR_CONTRACT).toContain('Any human in the chat can direct you.');
     expect(promptRules.CORNER_AUTHOR_CONTRACT).not.toContain('A higher rank');
   });
 
@@ -453,11 +453,11 @@ describe('prompt assembly guards', () => {
   });
 
 
-  it('keeps corner help requests with the commander', () => {
+  it('keeps thread help requests with the commander', () => {
     for (const contract of [promptRules.CORNER_AUTHOR_CONTRACT, promptRules.CORNER_RUNTIME_AUTHOR_CONTRACT]) {
-      expect(contract).toContain('Work in this corner;');
+      expect(contract).toContain('Work in this thread;');
       expect(contract).toContain('report blockers or decisions one step up');
-      expect(contract).toContain('never recruit Room agents.');
+      expect(contract).toContain('never recruit chat agents.');
     }
   });
 
@@ -468,7 +468,7 @@ describe('prompt assembly guards', () => {
     expect(author).toContain('Only when the brief calls for repository changes');
     expect(author).toContain('Non-repo work: post_artifact and report.');
     expect(author).not.toContain('Only repository assignments commit');
-    expect(promptRules.CORNER_DELIVERY_NUDGE).toContain('Only when you write code in this corner and the brief calls for repository changes');
+    expect(promptRules.CORNER_DELIVERY_NUDGE).toContain('Only when you write code in this thread and the brief calls for repository changes');
   });
 
 
@@ -489,7 +489,7 @@ describe('prompt assembly guards', () => {
   it('collects all blockers first and limits re-review failures to prior blockers or new regressions', () => {
     const skill = beelineReviewSkillMarkdown('test');
     expect(skill).toContain('Read the whole diff on every round');
-    expect(skill).toContain('find your latest FAIL for this PR in the corner and its reviewed head in the review context');
+    expect(skill).toContain('find your latest FAIL for this PR in the thread and its reviewed head in the review context');
     expect(skill).toContain('git diff <last-reviewed-head> <assigned-head>');
     expect(skill).toContain('only on unfixed prior blockers or regressions introduced by that delta');
     expect(skill).toContain('Missed issues in unchanged code are non-blocking notes.');
@@ -498,7 +498,7 @@ describe('prompt assembly guards', () => {
 
     const instruction = cornerReviewerInstruction({ isReviewer: true, pullRequestNumber: 7, headSha: 'abc' })!;
     expect(instruction).toContain('list all blockers with concrete fixes, including every blocker on the first round');
-    expect(instruction).toContain('read the entire PR, find your last FAIL for this PR and its reviewed head in this corner');
+    expect(instruction).toContain('read the entire PR, find your last FAIL for this PR and its reviewed head in this thread');
     expect(instruction).toContain('use git diff from that head to the assigned head');
     expect(instruction).toContain('Fail only for unresolved prior blockers or regressions introduced since that review');
     expect(instruction).toContain('newly found issues in unchanged code are notes, not blockers');
@@ -512,11 +512,11 @@ describe('prompt assembly guards', () => {
   it('keeps decisions on the chain of command', () => {
     for (const [name, context] of Object.entries(SESSION_VARIANTS)) {
       const text = assembleSessionPrompt(context).systemPrompt;
-      expect(text, name).toContain('Human-approved brief revisions transfer corner command to their author at their dispatch place; otherwise use the opener. Older orders keep their issuer.');
+      expect(text, name).toContain('Human-approved brief revisions transfer thread command to their author at their dispatch place; otherwise use the opener. Older orders keep their issuer.');
       expect(text, name).not.toContain('If human, tag them');
       expect(text, name).toContain('report(status, text) one step up to your commander.');
       const corner = ['code-corner', 'repo-less-corner'].includes(context.surface);
-      expect(text.includes('In a corner, reply to people here; escalate with report to the current commander.'), name).toBe(corner);
+      expect(text.includes('In a thread, reply to people here; escalate with report to the current commander.'), name).toBe(corner);
     }
   });
 
@@ -537,10 +537,10 @@ describe('prompt assembly guards', () => {
     expect(skill).not.toMatch(/follow the newer instruction/i);
     for (const [name, context] of Object.entries(SESSION_VARIANTS)) {
       const text = assembleSessionPrompt(context).systemPrompt;
-      expect(text, name).toContain('Any human in the Room can direct you.');
+      expect(text, name).toContain('Any human in the chat can direct you.');
       expect(text, name).toMatch(/follow the newer instruction/i);
       expect(text, name).toMatch(/revise the brief (citing that message|with that message as approval)/);
-      expect(text, name).toContain('state in the corner what changed.');
+      expect(text, name).toContain('state in the thread what changed.');
     }
     const covered = new Set(Object.values(SESSION_VARIANTS).map((context) => context.surface));
     expect([...covered].sort()).toEqual([...PROMPT_SURFACES].sort());
@@ -556,7 +556,7 @@ describe('prompt assembly guards', () => {
   });
 
 
-  it('keeps corner rules out of Rooms and DMs, and Room routing out of corners', () => {
+  it('keeps thread rules out of chats and DMs, and chat routing out of threads', () => {
     const room = assembleSessionPrompt(SESSION_VARIANTS.room!).systemPrompt;
     const dm = assembleSessionPrompt(SESSION_VARIANTS.dm!).systemPrompt;
     const corner = assembleSessionPrompt(SESSION_VARIANTS['code-corner-reviewed']!).systemPrompt;
@@ -565,17 +565,17 @@ describe('prompt assembly guards', () => {
       expect(text).not.toContain('Commit and push');
       expect(text).not.toContain('read(facet:checks)');
     }
-    expect(dm).toContain('open_corner');
+    expect(dm).toContain('open_thread');
     // The canonical inventory includes all reachable tools; this guard is
     // about Room routing instructions, not whether corners can open children.
-    expect(corner.replace(/^Beeline tools:.*$/m, '')).not.toContain('open_corner');
-    expect(room).toContain('open_corner');
+    expect(corner.replace(/^Beeline tools:.*$/m, '')).not.toContain('open_thread');
+    expect(room).toContain('open_thread');
   });
 
 
   it('assigns follow-up to a surviving commander and preserves completion without a PR', () => {
     const room = assembleSessionPrompt(SESSION_VARIANTS.room!).systemPrompt;
-    expect(room).toContain('Landing archives a repository corner and cancels its work');
+    expect(room).toContain('Landing archives a repository thread and cancels its work');
     expect(room).toContain('The surviving commander owns follow-up at its own address');
     expect(room).toContain('Repo-less and repositoryWork:false work delivers its artifact/report without a PR');
   });
@@ -607,17 +607,17 @@ describe('prompt assembly guards', () => {
   });
 
 
-  it('treats a corner with no brief as having nothing assigned yet', () => {
+  it('treats a thread with no brief as having nothing assigned yet', () => {
     expect(cornerHasRepositoryWork(undefined)).toBe(false);
     expect(cornerHasRepositoryWork(repositoryBrief)).toBe(true);
   });
 
 
-  it('tells an unbriefed code corner to write the brief before any code', () => {
+  it('tells an unbriefed code thread to write the brief before any code', () => {
     const { brief: _brief, ...unbriefed } = SESSION_VARIANTS['code-corner-reviewed']!;
     const session = assembleSessionPrompt(unbriefed).systemPrompt;
     expect(session).toContain('isolated git worktree on feature/corner-abc');
-    expect(session).toContain('Any human in the Room can direct you. If a newer human instruction contradicts an earlier one, follow the newer instruction, revise the brief with that message as approval, and state in the corner what changed.');
+    expect(session).toContain('Any human in the chat can direct you. Follow the newer instruction when humans conflict, revise the brief with that message as approval, and state in the thread what changed.');
     expect(session).not.toContain('Your chain of command');
     expect(session).not.toContain('A higher rank');
     expect(session).not.toContain('Instructions from outside your chain');
@@ -628,25 +628,25 @@ describe('prompt assembly guards', () => {
     expect(turn).toContain('Before any code, report needs-decision: to your commander for the first brief.');
     const generated = assembleTurnPrompt({
       ...TURN_VARIANTS['code-corner-turn']!,
-      generatedTitle: 'still harbor corner',
+      generatedTitle: 'still harbor thread',
     }).text;
-    expect(generated).toContain('write the first brief from the newest human request with revise_corner(action:install_brief, address, name, brief).');
+    expect(generated).toContain('write the first brief from the newest human request with revise_thread(action:install_brief, address, name, brief).');
     const repoLess = assembleTurnPrompt({ ...TURN_VARIANTS['code-corner-turn']!, surface: 'repo-less-corner' }).text;
-    expect(repoLess).toContain('No assigned brief: the human messages in this corner are the authority');
+    expect(repoLess).toContain('No assigned brief: the human messages in this thread are the authority');
   });
 
 
-  it('asks for a rename only while the corner still has its generated name', () => {
+  it('asks for a rename only while the thread still has its generated name', () => {
     const named = assembleTurnPrompt(TURN_VARIANTS['code-corner-turn']!).text;
     const generated = assembleTurnPrompt({
       ...TURN_VARIANTS['code-corner-turn']!,
-      generatedTitle: 'still harbor corner',
+      generatedTitle: 'still harbor thread',
     }).text;
-    expect(named).not.toContain('revise_corner(action:metadata)');
+    expect(named).not.toContain('revise_thread(action:metadata)');
     expect(generated).toContain(
-      'This human-opened corner still has its generated name, "still harbor corner". If the newest human message states the work, call revise_corner(action:install_brief, address:thisCornerAddress) once before you reply',
+      'This human-opened thread still has its generated name, "still harbor thread". If the newest human message states the work, call revise_thread(action:install_brief, address:thisCornerAddress) once before you reply',
     );
-    expect(generated.indexOf('Corner objective')).toBeLessThan(
+    expect(generated.indexOf('Thread objective')).toBeLessThan(
       generated.indexOf('still has its generated name'),
     );
   });
@@ -658,7 +658,7 @@ describe('prompt assembly guards', () => {
   });
 
 
-  it('gives both corner lanes sibling steer context without Room question instructions', () => {
+  it('gives both thread lanes sibling steer context without chat question instructions', () => {
     for (const surface of ['code-corner', 'repo-less-corner'] as const) {
       const session = assembleSessionPrompt({ surface, agentName: 'Bee' }).systemPrompt;
       expect(session).toContain('order(address, agent, text) assigns privately');
@@ -669,7 +669,7 @@ describe('prompt assembly guards', () => {
         task: { body: 'Steer the sibling' },
       }).text;
       expect(turn).toContain('sibling-id');
-      expect(turn).toContain('read or order across member Rooms');
+      expect(turn).toContain('read or order across member chats');
       expect(turn).not.toContain('ask_corner');
     }
   });
@@ -686,7 +686,7 @@ describe('prompt assembly guards', () => {
     expect(turn.text).not.toContain('to the person who started the chain');
   });
 });
-describe('corner role prompts (PR #2224: a reviewer that opened its corner pushed a fix)', () => {
+describe('thread role prompts (PR #2224: a reviewer that opened its thread pushed a fix)', () => {
 const scope9 = fixtureScope9();
 
 
@@ -696,9 +696,9 @@ const scope9 = fixtureScope9();
       const condition = text.indexOf('Implementer rules:');
       expect(condition, name).toBeGreaterThan(-1);
       expect(text, name).toContain(
-        'Implementer rules: any agent in this corner may commit, push and open a pull request.',
+        'Implementer rules: the rules below',
       );
-      expect(text, name).toContain('apply whenever you write code in this corner.');
+      expect(text, name).toContain('apply whenever you write code.');
       expect(text, name).not.toContain('A hand-over of the work to another agent ends that');
       expect(text, name).not.toContain('Otherwise do not commit, push');
       for (const rule of ['Run npm run corner:prepare first.', 'commit and push only', '## Reproduced', 'Once the pull request exists'])
@@ -747,7 +747,7 @@ const scope9 = fixtureScope9();
       if (name !== 'repo-less-corner') {
         expect(text).toContain('4 pushes to one PR without PASS: stop; report blocked: to commander with the cause.');
         expect(text).toContain('Pushes made only to repair failing checks do not count.');
-        expect(text).not.toContain('unless a human Room member');
+        expect(text).not.toContain('unless a human chat member');
       } else {
         expect(text).not.toContain('Pushes made only to repair failing checks');
       }
@@ -755,11 +755,11 @@ const scope9 = fixtureScope9();
   );
 
 
-  it('appends the reviewer rules only for the Room reviewer, after the implementer rules', () => {
+  it('appends the reviewer rules only for the chat reviewer, after the implementer rules', () => {
     for (const name of ['code-corner-reviewed', 'code-corner-no-reviewer'])
       expect(scope9.prompt(name), name).not.toContain('Reviewer rules:');
     const reviewer = scope9.prompt('code-corner-reviewer');
-    expect(reviewer).toContain('The rules below, up to the reviewer rules, apply whenever you write code');
+    expect(reviewer).toContain('the rules below, up to the reviewer rules, apply whenever you write code');
     expect(reviewer.indexOf('Reviewer rules:')).toBeGreaterThan(
       reviewer.indexOf('Never merge any other pull request.'),
     );
@@ -769,7 +769,7 @@ const scope9 = fixtureScope9();
 
 
   it('makes the reviewer-author merge rule conditional on the reviewer having written the code', () => {
-    expect(CORNER_REVIEWER_AUTHOR_MERGE.startsWith("If you wrote this corner's code,")).toBe(true);
+    expect(CORNER_REVIEWER_AUTHOR_MERGE.startsWith("If you wrote this thread's code,")).toBe(true);
     const reviewer = scope9.prompt('code-corner-reviewer');
     expect(reviewer).toContain(CORNER_REVIEWER_AUTHOR_MERGE);
     // A reviewer that did not write the code gets no line that says it did.
@@ -795,7 +795,7 @@ const scope9 = fixtureScope9();
     const review = turn('Checks are green on PR #7 at abc.');
     expect(review).toContain('Checks are green on PR #7 at abc.');
     expect(review).not.toContain('push a fix');
-    expect(CORNER_CHECKS_NUDGE).toContain('If checks="failed" and you write code in this corner, fix the failure and push.');
+    expect(CORNER_CHECKS_NUDGE).toContain('If checks="failed" and you write code in this thread, fix the failure and push.');
   });
 
 
@@ -812,13 +812,13 @@ const scope9 = fixtureScope9();
   });
 
 
-  it('describes the author when the reviewer opened the corner itself', () => {
+  it('describes the author when the reviewer opened the thread itself', () => {
     const text = cornerReviewerInstruction({ isReviewer: true, pullRequestNumber: 7, headSha: 'abc' })!;
-    expect(text).toContain("FAIL: order the worker at this corner's address to fix all blockers");
+    expect(text).toContain("FAIL: order the worker at this thread's address to fix all blockers");
     expect(text).not.toContain('@author');
   });
 });
-describe('assigned corner brief', () => {
+describe('assigned thread brief', () => {
 const scope10 = fixtureScope10();
 
 
@@ -831,4 +831,15 @@ const scope10 = fixtureScope10();
     expect(text).toContain('Newest message:\nChange brief revision 2 again.');
     expect(text).not.toContain('historical context only');
   });
+});
+
+it('uses chat and thread language across all assembled agent prompt surfaces', () => {
+  for (const surface of PROMPT_SURFACES) {
+    const {systemPrompt}=assembleSessionPrompt({surface,agentName:'Bee',brief:repositoryBrief,
+      worktree:{featureBranch:'feature/task',targetBranch:'main'},cornerPrepareScript:false});
+    expect(systemPrompt).not.toMatch(/\b(?:corner|corners|Room|Rooms)\b/);
+    const turn=assembleTurnPrompt({surface,task:{body:'Proceed.',commandReason:'corner_merge_conflict'}}).text;
+    expect(turn).not.toMatch(/\b(?:corner|corners|Room|Rooms)\b/);
+    if(surface==='code-corner')expect(systemPrompt).toContain('Before pushing or opening a PR for this thread, call become_implementer.');
+  }
 });

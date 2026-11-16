@@ -21,7 +21,7 @@ async function seed(workspaceId: string, name: string, roomId = randomUUID()) {
   return { owner, room };
 }
 
-it('stops when the explicit Room does not resolve', async () => {
+it('stops when the explicit chat does not resolve', async () => {
   await expect(backfillLuna(db, undefined, {})).rejects.toThrow('does not resolve');
 });
 

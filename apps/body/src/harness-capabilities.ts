@@ -78,7 +78,7 @@ const PROFILES: Array<{ match: RegExp; profile: HarnessProfile }> = [
     match: /(^|[/\\])codex-acp(\.[a-z]+)?$/i,
     profile: {
       enforcement: 'sandboxed',
-      note: 'codex-acp asks for every command/file change and enforces an offline read-only OS sandbox in read-only mode; under bubblewrap a Room runs it in agent-full-access and bwrap holds the filesystem rule',
+      note: 'codex-acp asks for every command/file change and enforces an offline read-only OS sandbox in read-only mode; under bubblewrap a chat runs it in agent-full-access and bwrap holds the filesystem rule',
     },
   },
   {

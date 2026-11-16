@@ -14,7 +14,7 @@ const REQUEST = 'd'.repeat(64);
 const STEPS = [
   { kind: 'note', title: 'Note', text: 'Now close the Play declaration corner.' },
   { kind: 'tool', title: 'ToolSearch', operation: 'other', status: 'completed' },
-  { kind: 'tool', title: 'close_corner', operation: 'other', status: 'completed' },
+  { kind: 'tool', title: 'close_thread', operation: 'other', status: 'completed' },
 ] as const;
 
 describe('a Room reply’s steps', () => {

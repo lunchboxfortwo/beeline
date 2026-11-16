@@ -271,7 +271,7 @@ describe('merge-derived restricted Workspace procedures', () => {
 });
 
 describe('load_workspace_skill', () => {
-  it.each(['beeline-corners-and-merging', 'beeline-waiting-and-wakes'])(
+  it.each(['beeline-threads-and-merging', 'beeline-waiting-and-wakes'])(
     'serves built-in %s without a saved Workspace procedure', async slug => {
       const queued = await createAgentCommand(database, { roomId: ROOM, agentId: OTHER_AGENT,
         sourceMessageId: ROOT, reason: 'human_tag' });

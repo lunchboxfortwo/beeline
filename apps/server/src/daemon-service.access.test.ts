@@ -6,7 +6,7 @@ import { LiveHub } from './live.js';
 const ROOM = '11111111-1111-4111-8111-111111111111';
 const AGENT = 'a'.repeat(64);
 
-describe('daemon room access', () => {
+describe('daemon chat access', () => {
   it('offers active-only discovery without changing the historical listing', async () => {
     const query = vi.fn(async <Row>(sql: string): Promise<QueryResult<Row>> => {
       if (sql.includes('JOIN memberships parent_member ON parent_member.room_id=COALESCE(addressed.parent_id,addressed.id)'))
@@ -99,14 +99,14 @@ describe('daemon room access', () => {
       daemon.execute('getCornerRestoreState', { cornerId: ROOM }, AGENT),
     ).resolves.toMatchObject({ held: true });
   });
-  it('denies a malformed Room id before the UUID access query', async () => {
+  it('denies a malformed chat id before the UUID access query', async () => {
     const query = vi.fn(async () => {
       throw Object.assign(new Error('invalid input syntax for type uuid'), { code: '22P02' });
     });
     const daemon = new DaemonService({ query } as unknown as SqlDatabase, new LiveHub());
 
     await expect(daemon.execute('getCornerRestoreState', { cornerId: 'not-a-uuid' }, AGENT))
-      .rejects.toThrow('daemon room access denied');
+      .rejects.toThrow('daemon chat access denied');
     expect(query).not.toHaveBeenCalled();
   });
 });

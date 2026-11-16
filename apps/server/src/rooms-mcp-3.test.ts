@@ -4,7 +4,7 @@ import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js'
 import { AGENT,CORNER,Client,FACE_SOULS,MCP_AGENT_EXCLUSIONS,MCP_APP_ROUTE_OPERATIONS,MCP_ORDER_WAKE_HINT,MCP_REVIEW_WAKE_HINT,OTHER,PREREGISTERED_MCP_CLIENTS,PRIVATE,ROOM,StreamableHTTPClientTransport,USER,WORKSPACE,backfillMcpMemberAvatars,createAgentCommand,createHash,deliverMcpMemberWebhooks,describe,ensureMcpMember,expect,fixtureScope1,fixtureScope2,fixtureScope3,it,opaque,openSecrets,phoneFetch,randomBytes,randomUUID,readFileSync,routeAgentResult,routeHumanMessage,sharp,tokenHash,vi } from './test-support-rooms-mcp.test-support.js';
 import { PUBLIC_CORNER } from './test-support-rooms-mcp.test-support.js';
 
-describe('Rooms connector HTTP OAuth and MCP', () => {
+describe('chats connector HTTP OAuth and MCP', () => {
 const scope1 = fixtureScope1();
 
   it('MCP-WORKSPACE-1: ordinary membership never follows the owner into another Workspace automatically', async () => {
@@ -12,7 +12,7 @@ const scope1 = fixtureScope1();
     const laterWorkspace = randomUUID(), laterRoom = randomUUID();
     await scope1.db.query(`INSERT INTO workspaces(id,name) VALUES($1,'New legacy Workspace')`, [laterWorkspace]);
     await scope1.db.query(`INSERT INTO memberships(workspace_id,identity_id,role) VALUES($1,$2,'owner')`, [laterWorkspace, USER]);
-    await scope1.db.query(`INSERT INTO rooms(id,workspace_id,name,visibility) VALUES($1,$2,'Legacy public Room','public')`, [laterRoom, laterWorkspace]);
+    await scope1.db.query(`INSERT INTO rooms(id,workspace_id,name,visibility) VALUES($1,$2,'Legacy public room','public')`, [laterRoom, laterWorkspace]);
     try {
       const member = await ensureMcpMember(scope1.db, { clientId: grant.clientId, ownerId: USER, modelLabel: 'Local MCP reviewer' });
       expect((await scope1.db.query('SELECT 1 FROM memberships WHERE identity_id=$1 AND room_id=$2 AND removed_at IS NULL', [member, laterRoom])).rowCount).toBe(0);
@@ -45,7 +45,7 @@ const scope1 = fixtureScope1();
     const grant = await scope1.prepareAuthorization(undefined, undefined, undefined, ticket);
     expect((await scope1.db.query('SELECT 1 FROM identities WHERE id=$1', [owner])).rowCount).toBe(1);
     expect((await scope1.db.query('SELECT 1 FROM memberships WHERE identity_id=$1', [owner])).rowCount).toBe(0);
-    expect(grant.consentHtml).toContain('Allow will create your Workspace, Robin&#39;s team, with a public #general Room.');
+    expect(grant.consentHtml).toContain('Allow will create your Workspace, Robin&#39;s team, with a public #general chat.');
     expect(grant.consentHtml).toContain('Joins as');
     expect(grant.consentHtml).toContain('It can');
     expect(grant.consentHtml).not.toContain('Select at least one Workspace');
@@ -72,7 +72,7 @@ const scope1 = fixtureScope1();
     const client = new Client({ name: 'new-person-proof', version: '1' }); scope1.clients.push(client);
     await client.connect(new StreamableHTTPClientTransport(new URL(scope1.origin + '/mcp'), {
       requestInit: { headers: { authorization: `Bearer ${access_token}` } } }));
-    const listed = await client.callTool({ name: 'list_rooms', arguments: {} });
+    const listed = await client.callTool({ name: 'list_chats', arguments: {} });
     expect(JSON.stringify(listed)).toContain(room[0]!.id);
     const text = 'Hello from the newly joined agent';
     const sent = await client.callTool({ name: 'send_message', arguments: { room: room[0]!.id, text } });
@@ -145,13 +145,13 @@ const scope1 = fixtureScope1();
     } finally { await scope1.db.query('DELETE FROM workspaces WHERE id=$1', [secondWorkspace]); }
   });
 
-  it('joins every public top-level Room on Allow, and other Rooms through Members', async () => {
+  it('joins every public top-level chat on Allow, and other chats through Members', async () => {
     const { member, client } = await scope1.connected();
     const rooms = async () => (await scope1.db.query<{ room_id: string }>(
       'SELECT room_id FROM memberships WHERE identity_id=$1 AND room_id IS NOT NULL AND removed_at IS NULL ORDER BY room_id', [member])).rows.map(row => row.room_id);
     // Every public top-level Room, never an invite-only Room or a corner.
     expect(await rooms()).toEqual([ROOM]);
-    expect(JSON.stringify(await client.callTool({ name: 'list_rooms', arguments: {} }))).toContain(ROOM);
+    expect(JSON.stringify(await client.callTool({ name: 'list_chats', arguments: {} }))).toContain(ROOM);
     // A public Room made later includes it, like any agent.
     const later = (await scope1.phone.execute('createRoom', { workspaceId: WORKSPACE, name: `later-${member.slice(0, 6)}` }, USER)).id;
     expect(await rooms()).toContain(later);
@@ -360,9 +360,9 @@ const scope1 = fixtureScope1();
     expect(readFileSync(new URL('../../../web/sitemap.xml', import.meta.url), 'utf8')).toContain('<loc>https://usebeeline.app/connect/</loc>');
   });
 
-  it('owner-unknown: identifies the approving owner before and after setup, even without Rooms', async () => {
+  it('owner-unknown: identifies the approving owner before and after setup, even without chats', async () => {
     const { client, member } = await scope1.connected();
-    const listed = () => client.callTool({ name: 'list_rooms', arguments: {} }).then(scope1.data);
+    const listed = () => client.callTool({ name: 'list_chats', arguments: {} }).then(scope1.data);
     expect((await listed()).owner).toEqual({ name: 'Demo', handle: 'demo' });
     expect((await listed()).setup).toContain('Preserve the approved @handle');
     const profile = await client.callTool({ name: 'set_profile', arguments: { name: 'Existing Bot' } });
@@ -375,30 +375,30 @@ const scope1 = fixtureScope1();
 
   it('keeps delivery setup after set_profile until a proved or explicit on-demand binding', async () => {
     const { client } = await scope1.connected();
-    expect(scope1.data(await client.callTool({ name: 'list_rooms', arguments: {} })).setup).toContain('set_profile');
+    expect(scope1.data(await client.callTool({ name: 'list_chats', arguments: {} })).setup).toContain('set_profile');
     expect(scope1.data(await client.callTool({ name: 'read_messages', arguments: { room: ROOM, limit: 1 } })).setup).toContain('tags your @handle');
     const tools = (await client.listTools()).tools;
-    expect(tools.find(t => t.name === 'list_rooms')!.description).toContain('verify your approved member identity and owner');
-    expect(tools.find(t => t.name === 'set_profile')!.description).toMatch(/^After verifying list_rooms/);
+    expect(tools.find(t => t.name === 'list_chats')!.description).toContain('verify your approved member identity and owner');
+    expect(tools.find(t => t.name === 'set_profile')!.description).toMatch(/^After verifying list_chats/);
     expect(tools.find(t => t.name === 'set_profile')!.description).toContain('display name and profile picture you already use in your own app');
     expect(tools.find(t => t.name === 'set_profile')!.description).toContain('https URL or data URI');
-    expect(client.getInstructions()).toContain('Read the owner field in list_rooms');
+    expect(client.getInstructions()).toContain('Read the owner field in list_chats');
     expect(client.getInstructions()).toContain('display name and profile picture you already use in your own app');
     await client.callTool({ name: 'set_profile', arguments: { name: 'Named', handle: `named_${randomBytes(3).toString('hex')}` } });
-    expect(scope1.data(await client.callTool({ name: 'list_rooms', arguments: {} })).setup).toContain('setup_delivery');
+    expect(scope1.data(await client.callTool({ name: 'list_chats', arguments: {} })).setup).toContain('setup_delivery');
     await client.callTool({name:'setup_delivery',arguments:{mechanism:'on_demand',host:'Claude',surface:'web',conversation:'web-thread'}});
-    expect(scope1.data(await client.callTool({ name: 'list_rooms', arguments: {} })).setup).toBeUndefined();
+    expect(scope1.data(await client.callTool({ name: 'list_chats', arguments: {} })).setup).toBeUndefined();
     expect(scope1.data(await client.callTool({ name: 'read_messages', arguments: { room: ROOM, limit: 1 } })).setup).toBeUndefined();
   });
 
-  it('tells a member in no Rooms how its owner adds it', async () => {
+  it('tells a member in no chats how its owner adds it', async () => {
     const { client, member } = await scope1.connected();
     await scope1.db.query('UPDATE memberships SET removed_at=now() WHERE identity_id=$1 AND room_id IS NOT NULL', [member]);
-    const listed = scope1.data(await client.callTool({ name: 'list_rooms', arguments: {} }));
+    const listed = scope1.data(await client.callTool({ name: 'list_chats', arguments: {} }));
     expect(listed.rooms).toEqual([]); expect(listed.note).toContain('under Members in the Beeline app');
   });
 
-  it('lists the tags owed a reply across Rooms, oldest first, after a cursor', async () => {
+  it('lists the tags owed a reply across chats, oldest first, after a cursor', async () => {
     const { client, member } = await scope1.connected();
     const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
     const second = (await scope1.phone.execute('createRoom', { workspaceId: WORKSPACE, name: `mentions-${member.slice(0, 6)}` }, USER)).id;
@@ -438,7 +438,7 @@ const scope1 = fixtureScope1();
     expect(page.includes('Would you like to run the following command?')).toBe(app === 'Codex');
     expect(page.includes('choose “Yes, proceed”')).toBe(app === 'Codex');
     expect(page).toContain(memberName);
-    expect(page).toContain('Agents and people who tag this session in your Rooms can send it messages');
+    expect(page).toContain('Agents and people who tag this session in your chats can send it messages');
     expect(page.includes('user-level "crossSessionInbound": "accept" setting')).toBe(fallback);
     // Another member in the Workspace holds the plain handle already.
     expect(page).toContain(`@${memberHandle}_2`);
@@ -463,7 +463,7 @@ const scope1 = fixtureScope1();
     expect((await phoneFetch(`${scope1.origin}/mcp/oauth/handoff?state=short&code=x`)).status).toBe(400);
   });
 
-  it('threads a reply in the same Room and drops a foreign optional reply link', async () => {
+  it('threads a reply in the same chat and drops a foreign optional reply link', async () => {
     const { client, member } = await scope1.connected();
     const parent = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: 'thread parent' }, USER);
     const reply = scope1.data(await client.callTool({ name: 'send_message', arguments: { room: ROOM, text: 'threaded answer', replyTo: parent.messageId } }));
@@ -543,7 +543,7 @@ const scope1 = fixtureScope1();
     expect((await scope1.db.query('SELECT 1 FROM agent_commands WHERE source_message_id=$1 AND agent_id=$2', [id, AGENT])).rowCount).toBe(1);
     expect(scope1.data(await client.callTool({ name: 'send_message', arguments: args }))).toEqual(repeated);
   });
-describe('in a Room of 20,000 messages', () => {
+describe('in a chat of 20,000 messages', () => {
 const scope2 = fixtureScope2(scope1);
 
     it('answers send_message in under 3 s and wakes the tagged agent once', async () => {
@@ -736,30 +736,30 @@ const scope3 = fixtureScope3(scope1);
       await scope3.ok(client,'report',{address:ROOM,status:'done',text:'done: nothing was ordered'});
       expect((await scope1.db.query(`SELECT 1 FROM messages WHERE author_id=$1 AND text='done: nothing was ordered'`,[member])).rowCount).toBe(1);
       const turn = await scope3.agentTurn('@demo-agent hand the audit to the app');
-      const sent = await scope1.daemon.execute('order', { ...turn, address: ROOM, agent: handle, text: 'Audit the corner list.' } as never, AGENT) as { id: string };
+      const sent = await scope1.daemon.execute('order', { ...turn, address: ROOM, agent: handle, text: 'Audit the thread list.' } as never, AGENT) as { id: string };
       // The order reaches the app's webhook at once; no helper claims it.
       expect((await scope1.db.query<{ body: string }>('SELECT body FROM rooms_mcp_webhook_outbox WHERE member_id=$1 AND message_id=$2',
-        [member, sent.id])).rows[0]?.body).toContain('Order (order): Audit the corner list.');
+        [member, sent.id])).rows[0]?.body).toContain('Order (order): Audit the thread list.');
       // Reproduction: the delivered body once named the command id as a message to reply to, under tag instructions.
       const delivered: Record<string, unknown>[] = [];
       await deliverMcpMemberWebhooks(scope1.db, async (_url, init) => { delivered.push(JSON.parse(init.body)); return new Response(null, { status: 204 }); });
       const orderBody = delivered.find(body => body.commandId === sent.id)!;
       expect(orderBody).toMatchObject({ memberId: member, roomId: ROOM, address: ROOM, id: sent.id, kind: 'order', reason: 'order',
-        text: expect.stringContaining('Audit the corner list.'), next: MCP_ORDER_WAKE_HINT, cursor: null });
+        text: expect.stringContaining('Audit the thread list.'), next: MCP_ORDER_WAKE_HINT, cursor: null });
       expect(orderBody).not.toHaveProperty('replyRule');
       expect(orderBody).not.toHaveProperty('messageId');
       expect(String(orderBody.instruction)).not.toMatch(/tagged you|replyTo [0-9a-f]{64}|send_message/);
       expect(String(orderBody.instruction)).toContain('call report');
       const wakes = (await scope3.ok(client, 'list_mentions', {})).wakes as { address: string; kind?: string; text?: string }[];
-      expect(wakes).toContainEqual(expect.objectContaining({ address: ROOM, kind: 'order', text: expect.stringContaining('Audit the corner list') }));
+      expect(wakes).toContainEqual(expect.objectContaining({ address: ROOM, kind: 'order', text: expect.stringContaining('Audit the thread list') }));
       // Another call in that Room leaves the order waiting for its report.
       await scope3.ok(client, 'read', { facet: 'members', address: ROOM });
       expect((await scope1.db.query(`SELECT 1 FROM agent_commands WHERE agent_id=$1 AND private_payload->>'kind'='order' AND state='pending'`, [member])).rowCount).toBe(1);
       expect(await scope3.ok(client,'report',{address:ROOM,status:'done',text:''})).toMatchObject({answered:false});
-      await scope3.ok(client, 'report', { address: ROOM, status: 'done', text: 'three corners, all green' });
+      await scope3.ok(client, 'report', { address: ROOM, status: 'done', text: 'three threads, all green' });
       const back = (await scope1.db.query<{ private_payload: { kind: string; text: string } }>(
         `SELECT private_payload FROM agent_commands WHERE agent_id=$1 AND reason='report' ORDER BY created_at DESC LIMIT 1`, [AGENT])).rows[0]!;
-      expect(back.private_payload).toMatchObject({ kind: 'report', text: 'done: three corners, all green' });
+      expect(back.private_payload).toMatchObject({ kind: 'report', text: 'done: three threads, all green' });
       expect((await scope1.db.query(`SELECT 1 FROM agent_commands WHERE agent_id=$1 AND state<>'complete'`, [member])).rowCount).toBe(0);
       // A reviewer dispatch by legacy webhook carries the same review hint as MCP Events and list_mentions.
       const review = await createAgentCommand(scope1.db, {
@@ -771,19 +771,19 @@ const scope3 = fixtureScope3(scope1);
       expect(delivered.find(body => body.commandId === review!.id)).toMatchObject({ reason: 'corner_review_dispatch', next: MCP_REVIEW_WAKE_HINT });
     });
 
-    it.each(['standalone', 'order'] as const)('R-MCP-ARTIFACT: a Room member posts files into its corner without a corner membership (%s)', async mode => {
+    it.each(['standalone', 'order'] as const)('R-MCP-ARTIFACT: a chat member posts files into its thread without a thread membership (%s)', async mode => {
       const { client, member } = await scope1.connected();
       const corner = await scope3.reportCorner(member);
       const order = mode === 'order' ? await createAgentCommand(scope1.db, { roomId: corner, agentId: member,
         sourceMessageId: null, reason: 'order', privatePayload: {
-          kind: 'order', authorId: AGENT, fromRoomId: ROOM, text: 'Post the corner mock.',
+          kind: 'order', authorId: AGENT, fromRoomId: ROOM, text: 'Post the thread mock.',
         } }) : null;
       const command = order ? { commandId: order.id } : {};
       const noCornerMemberships = async () => expect((await scope1.db.query(
         'SELECT 1 FROM memberships WHERE room_id=$1', [corner])).rowCount).toBe(0);
       await noCornerMemberships();
       const posted = await scope3.ok(client, 'post_artifact', { ...command, address: corner, title: 'mock.html',
-        html: '<!doctype html><title>Mock</title><p>Corner mock</p>', text: 'Here is the mock.' });
+        html: '<!doctype html><title>Mock</title><p>Thread mock</p>', text: 'Here is the mock.' });
       expect((await scope1.db.query('SELECT room_id,text,attachments FROM messages WHERE id=$1', [posted.id])).rows[0])
         .toMatchObject({ room_id: corner, text: 'Here is the mock.', attachments: [
           { name: 'mock.html', mimeType: 'text/html', url: expect.stringContaining('/media/') },
@@ -797,7 +797,7 @@ const scope3 = fixtureScope3(scope1);
       await noCornerMemberships();
     });
 
-    it('R-MCP-ARTIFACT: refuses inaccessible and archived corners before uploading', async () => {
+    it('R-MCP-ARTIFACT: refuses inaccessible and archived threads before uploading', async () => {
       const { client, member } = await scope1.connected();
       const corner = await scope3.reportCorner(member);
       const artifact = { title: 'private.html', html: '<p>Private mock</p>' };
@@ -848,7 +848,7 @@ const scope3 = fixtureScope3(scope1);
       await scope3.ok(client,'report',{address:ROOM,status:'done',text:'oldest first'});
       expect((await scope1.db.query('SELECT state FROM agent_commands WHERE id=$1',[orders[0]!.id])).rows[0]).toEqual({state:'complete'});
       await scope1.db.query('UPDATE agent_commands SET agent_id=$2 WHERE id=$1',[orders[1]!.id,AGENT]);
-      await scope3.ok(client,'post',{address:second,commandId:orders[1]!.id,text:'A message in my shared Room'});
+      await scope3.ok(client,'post',{address:second,commandId:orders[1]!.id,text:'A message in my shared chat'});
       expect((await scope1.db.query('SELECT state FROM agent_commands WHERE id=$1',[orders[1]!.id])).rows[0]).toEqual({state:'pending'});
       await scope1.db.query('UPDATE agent_commands SET agent_id=$2 WHERE id=$1',[orders[1]!.id,member]);
       const reply=await scope3.ok(client,'report',{address:second,commandId:orders[1]!.id,status:'done',text:'second'});

@@ -1,7 +1,7 @@
 import { cornerRunStateSql, assembleTurnPrompt, cornerReviewerInstruction, describe, expect, it, vi, DaemonService, LiveHub, systemLine, createAgentCommand, reconcileConfiguredCornerReviewers, advanceCorner, H, A, B, W, R, C, db, phone, daemon, commands, claim, result, greenHead, rootFixture, type AgentCommand } from './test-support-corner-review-dispatch.test-support.js';
 import { modelText } from './message-origin.js';
 
-describe('corner message attribution', () => {
+describe('thread message attribution', () => {
   it('REVIEW-SOURCE-1 reads only current brief citations during an assigned review', async () => {
     const source = '44444444-4444-4444-8444-444444444444';
     await rootFixture.db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Brief source')`, [source,W]);
@@ -730,7 +730,7 @@ describe('corner message attribution', () => {
           VALUES($1,$2,'Brief',$3,$4,$5)`, [C, revision, `Brief at ${revision}`, H, R]);
         if (!queue) return;
         const line = await systemLine(rootFixture.db, { roomId: C,
-          subject: { kind: 'person', id: H, name: 'Ada' }, verb: 'revised the corner brief',
+          subject: { kind: 'person', id: H, name: 'Ada' }, verb: 'revised the thread brief',
           object: { text: `Revision ${revision}`, id: C } });
         await createAgentCommand(rootFixture.db, { roomId: C, agentId: A, sourceMessageId: line.id,
           reason: 'corner_brief_revision' });
@@ -742,7 +742,7 @@ describe('corner message attribution', () => {
       expect((await commands(A, C)).map(c => c.id)).toContain(old!.id);
       const human = await rootFixture.phone.execute('sendRoomMessage', { roomId: C, text: '@hoots keep this instruction' }, H);
       const line = await systemLine(rootFixture.db, { roomId: C,
-        subject: { kind: 'person', id: H, name: 'Ada' }, verb: 'revised the corner brief',
+        subject: { kind: 'person', id: H, name: 'Ada' }, verb: 'revised the thread brief',
         object: { text: 'Revision 2', id: C } });
       const replacement = await createAgentCommand(rootFixture.db, { roomId: C, agentId: A,
         sourceMessageId: line.id, reason: 'corner_brief_revision' });
@@ -776,7 +776,7 @@ describe('corner message attribution', () => {
       const line = await systemLine(rootFixture.db, {
         roomId: C,
         subject: { kind: 'person', id: H, name: 'Ada' },
-        verb: 'revised the corner brief',
+        verb: 'revised the thread brief',
         object: { text: `Revision ${revision}`, id: C },
       });
       await createAgentCommand(rootFixture.db, {

@@ -561,13 +561,16 @@ const scope19 = fixtureScope19();
     expect(wake!.source.body).toContain(SHA);
   });
 });
-describe('a person hands the corner to another agent (the implementer follows the tag)', () => {
+describe('an agent becomes the thread implementer after a person tags it', () => {
 const scope20 = fixtureScope20();
 
 
-  it('a tag in the corner moves the failing-check wake off the opener, leaving owner_agent_id alone', async () => {
+  it('an explicit takeover moves the failing-check wake off the opener, leaving owner_agent_id alone', async () => {
     const cornerId = await open('owner/widgets');
     await say(cornerId, '@goosy take this one');
+    const takeover = (await commands(B, cornerId)).find(command => command.reason === 'human_tag')!;
+    await claim(takeover);
+    await rootFixture.daemon.execute('becomeImplementer', { roomId: cornerId, requestId: takeover.turnRequestId }, B);
     expect(await scope20.workerOf(cornerId)).toBe(B);
     expect(
       (
@@ -583,11 +586,14 @@ const scope20 = fixtureScope20();
   });
 
 
-  it('a refused merge wakes the tagged implementer, not the opener', async () => {
+  it('a refused merge wakes the recorded implementer, not the opener', async () => {
     const cornerId = await open('owner/widgets');
     await scope20.taggableMember(cornerId);
     await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
     await say(cornerId, '@sol take this one');
+    const takeover = (await commands(scope20.D, cornerId)).find(command => command.reason === 'human_tag')!;
+    await claim(takeover);
+    await rootFixture.daemon.execute('becomeImplementer', { roomId: cornerId, requestId: takeover.turnRequestId }, scope20.D);
     await greenHead(cornerId, 7, SHA);
     const [review] = await commands(B, cornerId);
     await claim(review!);
@@ -604,9 +610,12 @@ const scope20 = fixtureScope20();
   });
 
 
-  it('a merge conflict wakes the tagged implementer', async () => {
+  it('a merge conflict wakes the recorded implementer', async () => {
     const cornerId = await open('owner/widgets');
     await say(cornerId, '@goosy take this one');
+    const takeover = (await commands(B, cornerId)).find(command => command.reason === 'human_tag')!;
+    await claim(takeover);
+    await rootFixture.daemon.execute('becomeImplementer', { roomId: cornerId, requestId: takeover.turnRequestId }, B);
     await rootFixture.db.query(
       `UPDATE corner_github_cache SET lifecycle=lifecycle||$2::jsonb WHERE corner_id=$1`,
       [
@@ -633,9 +642,12 @@ const scope20 = fixtureScope20();
   });
 
 
-  it('blocker reconciliation wakes the tagged implementer', async () => {
+  it('blocker reconciliation wakes the recorded implementer', async () => {
     const cornerId = await open('owner/widgets');
     await say(cornerId, '@goosy take this one');
+    const takeover = (await commands(B, cornerId)).find(command => command.reason === 'human_tag')!;
+    await claim(takeover);
+    await rootFixture.daemon.execute('becomeImplementer', { roomId: cornerId, requestId: takeover.turnRequestId }, B);
     await pushToCorner(cornerId, SHA);
     await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=$2::jsonb WHERE corner_id=$1`, [
       cornerId,

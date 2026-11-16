@@ -8,7 +8,7 @@ This is a checks turn about CI or the merge gate. On it, say nothing unless you 
 
 No assigned brief yet. Before any code, report needs-decision: to your commander for the first brief.
 
-Works here (corner): app_tool apps beeline:vault, beeline:workflow, beeline:wallet, beeline:browser_share, beeline:avatar.
+Works here (thread): app_tool apps beeline:vault, beeline:workflow, beeline:wallet, beeline:browser_share, beeline:avatar.
 
 This is a nonhuman wake. Do not post an update merely because time has passed or a reminder asks you to say what you are doing. Post only what someone needs to read, including actual blockers. With nothing to say, call the no_reply_needed tool and end without a reply.
 

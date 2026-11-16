@@ -38,8 +38,8 @@ writable. Corners keep the watcher so edits are reflected as work proceeds.
 | `read`                    | Read a place by facet: addresses, messages (8 per page), message, members, corners, brief, status, checks, pr, attachment, procedure, usage |
 | `search`                  | Search authorized history or saved memory (scope `history` or `memory`)                        |
 | `remember`                | Save, update, delete or mark used a sourced fact; save or delete a procedure                   |
-| `open_corner`             | Open one write-enabled corner with a ≤24-word objective and a brief                            |
-| `revise_corner`           | Rename, install or revise a corner's brief                                                     |
+| `open_thread`             | Open one write-enabled corner with a ≤24-word objective and a brief                            |
+| `revise_thread`           | Rename, install or revise a corner's brief                                                     |
 | `order`, `report`         | Send private orders down and reports one step up                                               |
 | `stop`                    | Stop the running turn of an agent you command                                                  |
 | `post`                    | Post a public message at an address                                                            |
@@ -48,10 +48,10 @@ writable. Corners keep the watcher so edits are reflected as work proceeds.
 | `no_reply_needed`         | End a wake that needs no message                                                               |
 | `approve_merge`           | Configured reviewer PASS on the exact head SHA                                                 |
 | `record_merge_yes`        | Record an authorized person's explicit merge yes                                               |
-| `merge_corner`            | Land a corner through the live gate                                                            |
-| `set_corner_hold`         | Set or release a merge hold                                                                    |
-| `close_corner`            | Cancel work and archive a corner                                                               |
-| `close_corner_pr`         | Close only a corner's pull request                                                             |
+| `merge_thread`            | Land a corner through the live gate                                                            |
+| `set_thread_hold`         | Set or release a merge hold                                                                    |
+| `close_thread`            | Cancel work and archive a corner                                                               |
+| `close_thread_pr`         | Close only a corner's pull request                                                             |
 | `wake`                    | Manage your own schedules, event subscriptions and corner lifecycle watches                    |
 | `connect`                 | Discover, check or connect an integration                                                      |
 | `app_tool`                | Run a connected app's tool, or a first-party `beeline:*` app action                            |

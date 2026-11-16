@@ -64,7 +64,7 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
       });
       return JSON.stringify({...result, id: update.id ?? args.roomId});
     }
-    case 'get_room_message': {
+    case 'get_chat_message': {
       const message = await daemonExecute('getRoomMessage', {
         roomId: requiredEnv('BEELINE_DAEMON_ROOM_ID'),
         messageId: args.messageId,
@@ -366,7 +366,7 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
           message: args.message,
         }),
       );
-    case 'set_corner_hold':
+    case 'set_thread_hold':
       return JSON.stringify(
         await daemonExecute('setCornerHold', {
           ...await activeCommandContext(),
@@ -387,7 +387,7 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
         ...await activeCommandContext(),
         agentId: requiredEnv('BEELINE_DAEMON_AGENT_ID'), sendId: String(args.sendId ?? ''),
       }));
-    case 'order_corner_merge':
+    case 'order_thread_merge':
       return JSON.stringify(
         await daemonExecute('orderCornerMerge', {
           ...await activeCommandContext(),
@@ -395,11 +395,13 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
             ? args.cornerId : requiredEnv('BEELINE_DAEMON_CORNER_ID'),
         }),
       );
-    case 'open_corner':
+    case 'become_implementer':
+      return JSON.stringify(await daemonExecute('becomeImplementer', await activeCommandContext()));
+    case 'open_thread':
       return openCorner(args, toolCallId);
-    case 'revise_corner_brief':
+    case 'revise_thread_brief':
       return reviseCornerBrief(args);
-    case 'read_corner_brief':
+    case 'read_thread_brief':
       return readCornerBrief(args);
     case 'read_agent_usage': {
       // The server answers only for the token's own agent; no provider is called here.
@@ -419,7 +421,7 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
       if (result.answered === false) return JSON.stringify({ acknowledged: false, instruction: 'An answer is still owed. Reply with your own text.' });
       return JSON.stringify({ acknowledged: true });
     }
-    case 'inspect_corner': {
+    case 'inspect_thread': {
       if (typeof args.cornerId !== 'string' || !args.cornerId)
         throw new Error('cornerId is required');
       if (args.after !== undefined && (typeof args.after !== 'string' || !args.after))
@@ -614,7 +616,7 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
     }
     case 'react_to_message':
       return reactToMessage(args);
-    case 'close_corner':
+    case 'close_thread':
       return closeCorner(args);
     case 'pr_checks_status':
       return prChecksStatus(args);
@@ -625,7 +627,7 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
         ...await activeCommandContext(),
         ...(args.inputs === undefined ? {} : { inputs: args.inputs }),
       }));
-    case 'merge_corner':
+    case 'merge_thread':
       return JSON.stringify(
         await daemonExecute('mergeCorner', { cornerId: targetCornerId(args) }),
       );
@@ -633,16 +635,16 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
       return JSON.stringify(
         await daemonExecute('closeCornerPullRequest', { cornerId: targetCornerId(args) }),
       );
-    case 'list_rooms':
+    case 'list_chats':
       return JSON.stringify(await daemonExecute('listRooms', { roomId: agentScheduleRoomId() }));
-    case 'list_corners':
+    case 'list_threads':
       return JSON.stringify(
         await daemonExecute('listReachableCorners', {
           roomId: typeof args.address === 'string' ? args.address : requiredEnv('BEELINE_DAEMON_ROOM_ID'),
           ...(typeof args.activeOnly === 'boolean' ? { activeOnly: args.activeOnly } : {}),
         }),
       );
-    case 'list_room_members':
+    case 'list_chat_members':
       return JSON.stringify(
         await daemonExecute('listRoomMembers', {
           roomId:
@@ -687,7 +689,7 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
       await daemonExecute('endComputerSession', { roomId: agentScheduleRoomId(), sessionId: args.sessionId });
       return 'Browser share ended';
     }
-    case 'rename_corner': {
+    case 'rename_thread': {
       const cornerId = targetCornerId(args);
       const fixedName = args.name === undefined && args.reviewer !== undefined ? undefined : fixCornerText('name', args.name);
       const fixedObjective = args.objective === undefined ? undefined : fixCornerText('objective', args.objective);
@@ -699,14 +701,14 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
         ...(args.brief !== undefined ? { brief: await bindBriefFiles(asObject(args.brief)) } : {}),
       });
       const notes = [fixedName?.note, fixedObjective?.note].filter(Boolean).join('; ');
-      return args.name === undefined ? 'updated the corner reviewer' : `renamed the corner to ${String(result.name)}${notes ? `. ${notes}` : ''}`;
+      return args.name === undefined ? 'updated the thread reviewer' : `renamed the thread to ${String(result.name)}${notes ? `. ${notes}` : ''}`;
     }
     case 'create_subscription': {
       const source = stringArg(args, 'source');
       const event = stringArg(args, 'event');
       const prompt = stringArg(args, 'prompt');
       if (source !== 'room' && source !== 'repository' && source !== 'service' && source !== 'webhook')
-        throw new Error('source must be room, repository, service, or webhook');
+        throw new Error('source must be chat, repository, service, or webhook');
       if (!event) throw new Error('event is required');
       if (!prompt) throw new Error('prompt is required');
       const result = await daemonExecute('createAgentSubscription', {
@@ -737,9 +739,9 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
       const kinds = (result.kinds as string[]).join(', ');
       const headline =
         result.state === 'merged'
-          ? `Corner already merged${result.woken ? '; one merged wake queued now' : '; no new wake (already delivered)'}`
+          ? `Thread already merged${result.woken ? '; one merged wake queued now' : '; no new wake (already delivered)'}`
           : result.state === 'closed'
-            ? 'Corner closed without merging; nothing to watch'
+            ? 'Thread closed without merging; nothing to watch'
             : kinds
               ? `Watching for ${kinds}`
               : 'Watch removed';
@@ -839,7 +841,7 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
       return JSON.stringify(await daemonExecute('postStarterGame', { ...await activeCommandContext() }));
     case 'post_starter_welcome':
       return JSON.stringify(await daemonExecute('postStarterWelcome', { ...await activeCommandContext() }));
-    case 'post_room_invite':
+    case 'post_chat_invite':
       return JSON.stringify(await daemonExecute('postRoomInvite', { ...await activeCommandContext() }));
     case 'post_repository_card':
     case 'post_starters_card':

@@ -27,15 +27,15 @@ export async function openCorner(args: JsonObject, toolCallId: string): Promise<
   const roomId = typeof args.room === 'string' ? args.room : requiredEnv('BEELINE_DAEMON_ROOM_ID');
   const repository = await daemonExecute('getRoomRepositoryState', { roomId });
   if (repository.resolution === 'unverified') {
-    throw new Error('open_corner is waiting for the Room repository state to resolve');
+    throw new Error('open_thread is waiting for the chat repository state to resolve');
   }
   if (repository.resolution === 'repository' && (!repository.key || !repository.remote)) {
-    throw new Error('open_corner requires a complete verified repository binding');
+    throw new Error('open_thread requires a complete verified repository binding');
   }
   const requestId = (await activeCommandContext()).requestId;
   const brief = args.brief ? await bindBriefFiles(asObject(args.brief)) : undefined;
   const idempotencyKey = createHash('sha256')
-    .update(`open_corner\0${requestId}\0${toolCallId}`)
+    .update(`open_thread\0${requestId}\0${toolCallId}`)
     .digest('hex');
   const created = await daemonExecute('createCorner', {
     roomId: (await activeCommandContext()).roomId,
@@ -61,7 +61,7 @@ export async function openCorner(args: JsonObject, toolCallId: string): Promise<
       : {}),
   });
   if (typeof created.cornerId !== 'string' || !created.cornerId) {
-    throw new Error('createCorner returned no corner id');
+    throw new Error('createCorner returned no thread id');
   }
   return JSON.stringify({
     address: created.cornerId,
@@ -125,7 +125,7 @@ export async function readCornerBrief(args: JsonObject): Promise<string> {
 export function targetCornerId(args: JsonObject): string {
   if (typeof args.cornerId === 'string' && args.cornerId) return args.cornerId;
   const active = process.env.BEELINE_DAEMON_CORNER_ID?.trim();
-  if (!active) throw new Error('cornerId is required outside a corner');
+  if (!active) throw new Error('cornerId is required outside a thread');
   return active;
 }
 
@@ -246,8 +246,8 @@ export async function prChecksStatus(args: JsonObject = {}): Promise<string> {
   const reason =
     checks === 'unknown'
       ? pullRequestNumber
-        ? `no checks are recorded for PR #${pullRequestNumber} (head ${headSha ?? 'unknown'}); the PR may have been opened from a branch that is not this corner's, or checks have not reported yet`
-        : 'no pull request or checks are recorded for this corner'
+        ? `no checks are recorded for PR #${pullRequestNumber} (head ${headSha ?? 'unknown'}); the PR may have been opened from a branch that is not this thread's, or checks have not reported yet`
+        : 'no pull request or checks are recorded for this thread'
       : checks === 'passed'
         ? 'all recorded checks passed'
         : checks === 'failed'
@@ -281,7 +281,7 @@ export async function prChecksStatus(args: JsonObject = {}): Promise<string> {
     ...(pullRequest ? { pullRequest } : {}),
     ...(!pullRequest
       ? {
-          next: 'No PR is recorded for this corner yet. Continue the assigned work; when it is ready, push the corner branch and open a PR. If you already opened one, print its actual full URL as your final response so it can be recorded, then end the turn. Do not invent a PR URL or reread checks before a PR exists.',
+          next: 'No PR is recorded for this thread yet. Continue the assigned work; when it is ready, push the thread branch and open a PR. If you already opened one, print its actual full URL as your final response so it can be recorded, then end the turn. Do not invent a PR URL or reread checks before a PR exists.',
         }
       : {}),
   });
@@ -582,7 +582,7 @@ export function messageReadFailure(error: unknown): AttachmentDownloadError {
   const text = error instanceof Error ? error.message : String(error);
   const status = Number(/\((\d{3}):/.exec(text)?.[1]);
   if (status === 403)
-    return new AttachmentDownloadError('forbidden', 'you cannot read that message from this Room');
+    return new AttachmentDownloadError('forbidden', 'you cannot read that message from this chat');
   if (status === 404 || status === 400)
     return new AttachmentDownloadError('not_found', 'no such message');
   return new AttachmentDownloadError('download_failed', `could not read the message (${text})`);

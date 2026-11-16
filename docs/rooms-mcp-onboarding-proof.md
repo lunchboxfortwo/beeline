@@ -20,7 +20,7 @@ client with an S256 verifier, navigate to its authorization URL and choose
 Continue with GitHub. The zero-Workspace consent page retained Joins as and It
 can, displayed “Allow will create your Workspace, Connector's team, with a public
 #general Room.”, had no Workspace checkbox and left Allow enabled. After clicking
-Allow and exchanging the authorization code, `list_rooms` returned only `general`
+Allow and exchanging the authorization code, `list_chats` returned only `general`
 and the Codex member byline. `read_messages`, `send_message`, and `read_messages`
 then confirmed “Local onboarding proof: Codex joined and posted in general.” was
 persisted under that member's identity.

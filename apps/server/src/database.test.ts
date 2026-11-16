@@ -219,7 +219,7 @@ it('excludes existing accounts while new identities inherit welcome eligibility'
     await database.close();
   }
 });
-describe('Room slugs', () => {
+describe('chat slugs', () => {
   it('requires a bounded lowercase slug for new names', () => {
     expect(requireRoomSlug('room-name-2')).toBe('room-name-2');
     for (const value of ['Room Name', 'room--name', '-room', 'room-', '', 'room\n', 'room\r', 'room\u00a0name', 'room\u2003name'])
@@ -227,7 +227,7 @@ describe('Room slugs', () => {
   });
 
 
-  it('refuses a name another top-level Room in the Workspace already uses', async () => {
+  it('refuses a name another top-level chat in the Workspace already uses', async () => {
     const db = await migratedDatabase();
     const workspace = 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa';
     const otherWorkspace = 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaab';

@@ -165,7 +165,7 @@ import { daemonOfferContext } from './workbench.js';
     if (typeof input.roomId !== 'string' || !input.roomId) throw new Error('roomId is required');
     if (!isOfferableConnectorKind(input.connectorType))
       throw new Error(
-        `connector type is invalid: ${String(input.connectorType)} cannot be offered from a Room`,
+        `connector type is invalid: ${String(input.connectorType)} cannot be offered from a chat`,
       );
     if (typeof input.reason !== 'string' || !input.reason.trim())
       throw new Error('offer reason is required');
@@ -188,7 +188,7 @@ import { daemonOfferContext } from './workbench.js';
     const offeredContext = await ctx.offerContext(input.roomId, agentId);
     const context = unified ? { ...offeredContext, addressee: offeredContext.owner, isCorner: false } : offeredContext;
     if (context.isCorner)
-      throw new Error('connector offer is invalid: offer a tool from the Room, not from a corner');
+      throw new Error('connector offer is invalid: offer a tool from the chat, not from a thread');
     const connectorName = connectorDisplayName(connectorType);
     if (switching) {
       const bound = await machineSquireReport(ctx.database, context.addressee.pubkey,

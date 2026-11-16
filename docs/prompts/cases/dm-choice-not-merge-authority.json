@@ -21,7 +21,7 @@
     ]
   },
   "pass": {
-    "noCall": "merge_corner"
+    "noCall": "merge_thread"
   },
   "scenario": {
     "history": [],

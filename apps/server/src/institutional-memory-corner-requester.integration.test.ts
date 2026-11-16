@@ -288,7 +288,7 @@ describe('save_memory requester authority on corner wakes', () => {
     );
     expect(saved.status).toBe(403);
     expect(saved.body.error).toBe(
-      `institutional memory requester authority is unavailable: this turn's root message ${UNLINKED_REPORT} in Room ${UNLINKED} is not from a person, and Room ${UNLINKED} is not a corner with a recorded requester`,
+      `institutional memory requester authority is unavailable: this turn's root message ${UNLINKED_REPORT} in chat ${UNLINKED} is not from a person, and chat ${UNLINKED} is not a thread with a recorded requester`,
     );
     expect(await savedFacts()).toEqual([]);
   });
@@ -297,7 +297,7 @@ describe('save_memory requester authority on corner wakes', () => {
     const turn = await wake(CORNER, CORNER_ASK, 'human_tag');
     const base = fact('taps.rules', 'The tap hangs.', [CORNER_ASK]);
     for (const [patch, error] of [
-      [{ sourceMessageIds: [ROOM_REQUEST] }, /sources must be non-deleted messages in this Room/],
+      [{ sourceMessageIds: [ROOM_REQUEST] }, /sources must be non-deleted messages in this chat/],
       [{ sourceMessageIds: ['missing'] }, /unavailable source/],
       [{ sourceMessageIds: [] }, /1 to 16 source messages/],
       [{ sourceMessageIds: Array(17).fill(CORNER_ASK) }, /1 to 16 source messages/],

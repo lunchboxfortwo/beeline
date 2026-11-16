@@ -562,7 +562,7 @@ describe('authorized institutional history search', () => {
     expect(result.results.map((row) => row.messageId)).toContain('shared-result');
   });
 
-  it('refuses when the root message\'s Room is in another Workspace than the calling Room', async () => {
+  it('refuses when the root message\'s chat is in another Workspace than the calling chat', async () => {
     const crossWorkspaceCommand: CommandRow = {
       ...command,
       id: 'cross-workspace-command',

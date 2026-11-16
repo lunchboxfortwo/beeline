@@ -10,7 +10,7 @@ import { readAgentCommands } from './agent-command.js';
 import type { GitHubAppClient, GitHubOAuthClient } from '@beeline/auth/github';
 
 /**
- * open_corner watches the new corner for `merged` on the opener's behalf, and
+ * open_thread watches the new corner for `merged` on the opener's behalf, and
  * a late watch_corner on a merged corner hands back the merge. Merges drive the
  * real GitHub `pull_request` closed webhook.
  */
@@ -130,7 +130,7 @@ async function clearWakes() {
   );
 }
 
-it('open_corner watches for merged by default and the merge wakes the opener once', async () => {
+it('open_thread watches for merged by default and the merge wakes the opener once', async () => {
   await clearWakes();
   const created = await open();
   expect(created.watch).toEqual({ roomId: R, kinds: ['opened', 'merged'] });
@@ -141,7 +141,7 @@ it('open_corner watches for merged by default and the merge wakes the opener onc
   expect(wakes).toHaveLength(1);
   expect(wakes[0]!.reason).toBe('watched_corner');
   expect(wakes[0]!.source.body).toContain(
-    `Watched corner Step-${pr} (${created.cornerId}): merged · merge commit ${'f'.repeat(40)}`,
+    `Watched thread Step-${pr} (${created.cornerId}): merged · merge commit ${'f'.repeat(40)}`,
   );
 }, 30_000);
 
@@ -201,7 +201,7 @@ it('a watch_corner on a corner closed without merging says so', async () => {
   ).toBe(0);
 }, 30_000);
 
-it('Room merged subscriptions are retired; a corner watch is the merge wake', async () => {
+it('chat merged subscriptions are retired; a thread watch is the merge wake', async () => {
   await expect(daemon.execute('setEventSubscriptions', { roomId: R, kinds: ['merged'] }, A)).rejects.toThrow();
 }, 30_000);
 

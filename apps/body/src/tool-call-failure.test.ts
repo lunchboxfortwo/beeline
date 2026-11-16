@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { isFailedToolCall, isPrivateWorkToolCall, toolCallFailureLine } from './tool-call-failure.js';
 
 describe('toolCallFailureLine', () => {
-  it('says out loud what a refused open_corner was told', () => {
+  it('says out loud what a refused open_thread was told', () => {
     // The exact shape grok reports an MCP refusal in: the sentence is in the
     // call's content, and the journal used to print none of it (C90).
     expect(
@@ -30,7 +30,7 @@ describe('toolCallFailureLine', () => {
         status: 'failed',
         rawOutput: {
           type: 'MCP',
-          tool_name: 'open_corner',
+          tool_name: 'open_thread',
           server_name: 'beeline-agent',
           output: { Error: 'the objective is 43 words; the limit is 24' },
           is_error: true,
@@ -40,13 +40,13 @@ describe('toolCallFailureLine', () => {
   });
 
   it('still names the call when the harness gave no reason', () => {
-    expect(toolCallFailureLine({ id: 'call-2', title: 'open_corner', status: 'failed' })).toBe(
-      'open_corner refused with no reason given',
+    expect(toolCallFailureLine({ id: 'call-2', title: 'open_thread', status: 'failed' })).toBe(
+      'open_thread refused with no reason given',
     );
   });
 
   it('says nothing about a call that did not fail', () => {
-    expect(toolCallFailureLine({ id: 'call-4', title: 'open_corner', status: 'completed' })).toBe(
+    expect(toolCallFailureLine({ id: 'call-4', title: 'open_thread', status: 'completed' })).toBe(
       undefined,
     );
     expect(isFailedToolCall({ id: 'call-4', status: 'completed' })).toBe(false);

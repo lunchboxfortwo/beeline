@@ -206,7 +206,7 @@ describe('free starter agents', () => {
     expect(20_000 + 3 * STARTER_BANTER_TYPING_MS).toBeLessThan(35_000);
   });
 
-  it('reruns welcome in the calling Room and keeps every manual step out of signup counts', async () => {
+  it('reruns welcome in the calling chat and keeps every manual step out of signup counts', async () => {
     const workspace = await phone.execute('createWorkspace', { name: 'Manual welcome', timeZone: 'America/New_York' }, FRIEND);
     await finishWelcome(workspace.roomId!, FRIEND);
     const roomId = workspace.roomId!;

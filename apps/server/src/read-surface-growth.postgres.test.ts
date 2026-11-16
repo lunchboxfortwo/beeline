@@ -26,7 +26,7 @@ describe.skipIf(!url)('complete plain read surfaces (real PostgreSQL)',()=>{
   },120_000);
   afterAll(async()=>{await db?.close();if(name)await admin?.query(`DROP DATABASE ${name}`);await admin?.end();});
 
-  it('reads more than 50 schedules and 100 agent names as an ordinary Room member; management and revocation still apply',async()=>{
+  it('reads more than 50 schedules and 100 agent names as an ordinary chat member; management and revocation still apply',async()=>{
     const agents=Array.from({length:101},(_,n)=>(n+100).toString(16).padStart(64,'0'));
     await db.query(`INSERT INTO identities(id,kind,name) SELECT agent,'agent','Helper '||agent FROM unnest($1::text[]) agent`,[agents]);
     await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) SELECT $1,$2,agent,'member' FROM unnest($3::text[]) agent`,[WS,ROOM,agents]);
@@ -52,7 +52,7 @@ describe.skipIf(!url)('complete plain read surfaces (real PostgreSQL)',()=>{
     await expect(phone.execute('revealWebhookToken',{roomId:ROOM,subscriptionId:id(9001)},VIEWER)).rejects.toThrow('Workspace admin required');
     await db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`,[ROOM,VIEWER]);
     for(const op of ['readScheduledWork','listRoomSchedules','listRoomSubscriptions'] as const)
-      await expect(phone.execute(op,{roomId:ROOM},VIEWER)).rejects.toThrow('room membership required');
+      await expect(phone.execute(op,{roomId:ROOM},VIEWER)).rejects.toThrow('chat membership required');
     await db.query(`UPDATE memberships SET removed_at=NULL WHERE room_id=$1 AND identity_id=$2`,[ROOM,VIEWER]);
   });
 

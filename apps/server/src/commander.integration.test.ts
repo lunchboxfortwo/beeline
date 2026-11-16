@@ -11,7 +11,7 @@ it('opens in an unrelated member Room from a DM and records the caller as comman
 });
 
 it.each(['opening key', 'request fallback'])(
-  'PROVENANCE-REPLAY reuses the active corner through %s', async provenance => {
+  'PROVENANCE-REPLAY reuses the active thread through %s', async provenance => {
     const key = provenance === 'request fallback' ? rootFixture.order.turnRequestId : 'stable-open-key';
     const input = { ...authority(rootFixture.order), targetRoomId: ROOM, idempotencyKey: key,
       name: 'Widget', objective: 'Build the widget', implementer: 'worker',
@@ -463,7 +463,7 @@ it('Reproduction commander-direct: commander revises without a cited approval', 
   expect((await rootFixture.db.query(`SELECT approval_basis FROM corner_brief_revisions WHERE corner_id=$1 AND revision=2`,
     [opened.cornerId])).rows[0]).toMatchObject({ approval_basis: { kind: 'commander-direct', approvedBy: RUBY } });
 });
-describe('a worker records a later waiver in its corner brief', () => {
+describe('a worker records a later waiver in its thread brief', () => {
 const scope1 = fixtureScope1();
 
 
@@ -504,7 +504,7 @@ const scope1 = fixtureScope1();
   });
 
 
-  it('refuses a stored approval when its human author is not a Room member', async () => {
+  it('refuses a stored approval when its human author is not a chat member', async () => {
     const opened = await open(), turn = await worker(opened.cornerId);
     const outside = randomBytes(32).toString('hex');
     await rootFixture.db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Approved')`, [outside, ROOM, scope1.STRANGER]);
@@ -521,11 +521,11 @@ const scope1 = fixtureScope1();
     const waiver = await scope1.directMessage(scope1.STRANGER, scope1.STRANGER, 'Waive the proof.');
     await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`,
       [scope1.rooms.get(waiver), scope1.STRANGER]);
-    await expect(scope1.revise(turn, opened.cornerId, 1, waiver)).rejects.toThrow('current Room member');
+    await expect(scope1.revise(turn, opened.cornerId, 1, waiver)).rejects.toThrow('current chat member');
   });
 
 
-  it('refuses approval from an unrelated Room even when the human belongs to it', async () => {
+  it('refuses approval from an unrelated chat even when the human belongs to it', async () => {
     const opened = await open(), turn = await worker(opened.cornerId);
     const waiver = await scope1.directMessage(scope1.STRANGER, scope1.STRANGER, 'Waive the proof.');
     await rootFixture.db.query(`UPDATE rooms SET direct_participants=NULL WHERE id=$1`, [scope1.rooms.get(waiver)]);
@@ -599,7 +599,7 @@ const scope1 = fixtureScope1();
   });
 
 
-  it('APPROVAL-CITATIONS: refuses an agent-authored parent Room message', async () => {
+  it('APPROVAL-CITATIONS: refuses an agent-authored parent chat message', async () => {
     const opened = await open(), turn = await worker(opened.cornerId);
     const id = randomBytes(32).toString('hex');
     await rootFixture.db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Approved')`, [id, ROOM, RUBY]);
@@ -638,7 +638,7 @@ const scope1 = fixtureScope1();
   });
 
 
-  it('refuses a private order to the corner from an agent that is not its commander', async () => {
+  it('refuses a private order to the thread from an agent that is not its commander', async () => {
     const opened = await open(), turn = await worker(opened.cornerId);
     await rootFixture.db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`,
       [WS, ROOM, scope1.OUTSIDER]);
@@ -716,7 +716,7 @@ it('Reproduction corner-subtree-175524: the reported named parent order succeeds
   const turn = (await commands(cornerId, WORKER)).find(c => c.id === opening!.id)!;
   await claim(turn);
   // Exact production payload retrieved read-only from the 17:55:24 order.
-  const text = "Read-only adversarial implementation review for Jellybean's active truthful-corner-states corner f95aa673-2eb5-491a-930b-51dc1aa2d2ee, brief revision 1. Do not edit, commit, push, open a corner, change implementer, or report to Ruby. Read its brief via inspect_corner; report findings to me through this order. Step 0 file map is posted there. Need concrete smallest implementation plan for PR1 durable idle flags (commander only, once per span, worker schedule/subscription exclusions, excluding commander watch), WAITING blockers and persistent 24h reminders with human dismissal using existing approval/tray authority. Identify exact indexed writer/read paths and tests; avoid per-read messages scans. Also assess executing brief's two separate PRs when first merge archives this corner and only feature/corner-f95aa6732eb5 is authorized: propose compliant sequence. Current corner worktree has uncommitted draft state edits only in packages/api-contract/src/corner-state.ts and apps/server/src/chat-corner-counts.ts; do not treat them as finished. Include problems plus specific solutions. Report back once with findings, not progress.";
+  const text = "Read-only adversarial implementation review for Jellybean's active truthful-corner-states corner f95aa673-2eb5-491a-930b-51dc1aa2d2ee, brief revision 1. Do not edit, commit, push, open a corner, change implementer, or report to Ruby. Read its brief via inspect_thread; report findings to me through this order. Step 0 file map is posted there. Need concrete smallest implementation plan for PR1 durable idle flags (commander only, once per span, worker schedule/subscription exclusions, excluding commander watch), WAITING blockers and persistent 24h reminders with human dismissal using existing approval/tray authority. Identify exact indexed writer/read paths and tests; avoid per-read messages scans. Also assess executing brief's two separate PRs when first merge archives this corner and only feature/corner-f95aa6732eb5 is authorized: propose compliant sequence. Current corner worktree has uncommitted draft state edits only in packages/api-contract/src/corner-state.ts and apps/server/src/chat-corner-counts.ts; do not treat them as finished. Include problems plus specific solutions. Report back once with findings, not progress.";
   // A Room with one other agent has an unambiguous recipient.
   await rootFixture.daemon.execute('order', { ...authority(turn), address: ROOM, text }, WORKER);
   await rootFixture.daemon.execute('order', { ...authority(turn), address: ROOM, agent: RUBY, text }, WORKER);

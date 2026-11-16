@@ -198,8 +198,13 @@ export async function startAgentTurnOperation<Name extends keyof DaemonOperation
 
 export async function getRoomGitHubTokenOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 
-        if (!ctx.roomGitHubToken) throw new Error('GitHub room token service unavailable');
+        if (!ctx.roomGitHubToken) throw new Error('GitHub chat token service unavailable');
         const roomId = (input as Input<'getRoomGitHubToken'>).roomId;
+        if ((input as Input<'getRoomGitHubToken'>).write) {
+          const fact = await ctx.database.query(`SELECT 1 FROM corner_facts WHERE corner_id=$1 AND implementer_agent_id=$2`,
+            [roomId, authenticatedAgentId]);
+          if (!fact.rowCount) throw new CommandRefusalError('Call become_implementer before pushing or opening a PR for this thread.', 409);
+        }
         try {
           return (await ctx.roomGitHubToken(roomId)) as Output<Name>;
         } catch (error) {
@@ -209,7 +214,7 @@ export async function getRoomGitHubTokenOperation<Name extends keyof DaemonOpera
             error instanceof Error &&
             error.message === 'GitHub repository installation not found'
           ) {
-            throw new CommandRefusalError('Room repository access needs the Beeline GitHub App', 409);
+            throw new CommandRefusalError('chat repository access needs the Beeline GitHub App', 409);
           }
           throw error;
         }
@@ -223,7 +228,7 @@ export async function markAgentTurnSilentOperation<Name extends keyof DaemonOper
           const command = ctx.authorizedCommand;
           if (!command) throw new CommandRefusalError('silence requires an active turn', 409);
           if (declinedMessage && !await mentionReplyKey(ctx.database, authenticatedAgentId, command.room_id, declinedMessage))
-            throw new CommandRefusalError('messageId must be a tagged message in this Room', 400);
+            throw new CommandRefusalError('messageId must be a tagged message in this chat', 400);
           if (!(await ctx.database.query(`SELECT 1 FROM agent_pending_attachments
             WHERE room_id=$1 AND agent_id=$2 AND request_id=$3 LIMIT 1`,
             [command.room_id, authenticatedAgentId, command.turn_request_id])).rowCount) {
@@ -492,7 +497,7 @@ export async function orderCornerMergeOperation<Name extends keyof DaemonOperati
         });
         const yes = await recordPersonMergeYes(ctx.database, order.cornerId, actorId);
         // Recording consent is a separate action from landing. The caller uses
-        // merge_corner for the single agent-facing landing action.
+        // merge_thread for the single agent-facing landing action.
         return { roomId: yes.roomId, headSha: yes.headSha } as Output<Name>;
 
 }

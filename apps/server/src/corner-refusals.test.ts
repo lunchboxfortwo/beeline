@@ -65,8 +65,8 @@ async function refusal(operation: 'archiveCorner' | 'approveCornerMerge', messag
 }
 
 it.each([
-  ['NOT_CONFIGURED_REVIEWER', "only this corner's configured reviewer (or the Room reviewer when unset), or its zero-check commander, can record PASS; set reviewer with revise_corner"],
-  ['NO_PULL_REQUEST', 'corner has no pull request'],
+  ['NOT_CONFIGURED_REVIEWER', "only this thread's configured reviewer (or the chat reviewer when unset), or its zero-check commander, can record PASS; set reviewer with revise_thread"],
+  ['NO_PULL_REQUEST', 'thread has no pull request'],
   ['STALE_HEAD', `pull request head is ${head}; review the current head before approving`],
 ] as const)('Reproduction SENTRY-C: %s returns unchanged code and excludes Sentry', async (code, detail) => {
   await db.query('UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1', [parent, code === 'NOT_CONFIGURED_REVIEWER' ? null : agent]);
@@ -96,8 +96,8 @@ it('Reproduction OPEN-1 / SENTRY-D: agent-message opening succeeds without Sentr
 });
 
 it.each([
-  ['listAppTools', { roomId: parent, appId: '44444444-4444-4444-8444-444444444444' }, 503, 'Connected app is unavailable in this Room'],
-  ['createCorner', { roomId: parent, name: 'missing-implementer', objective: 'Prove refusal', implementer: 'absent', brief: { spec: 'Prove refusal' } }, 503, 'implementer must be a current member of the parent Room'],
+  ['listAppTools', { roomId: parent, appId: '44444444-4444-4444-8444-444444444444' }, 503, 'Connected app is unavailable in this chat'],
+  ['createCorner', { roomId: parent, name: 'missing-implementer', objective: 'Prove refusal', implementer: 'absent', brief: { spec: 'Prove refusal' } }, 503, 'implementer must be a current member of the parent chat'],
 ])('Reproduction SENTRY-REMAINING: %s preserves caller message without capture', async (operation, input, status, message) => {
   const source = operation === 'listAppTools' ? '3'.repeat(64) : '4'.repeat(64);
   await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Prove refusal')`, [source, parent, owner]);
@@ -135,7 +135,7 @@ it('Reproduction SENTRY-R: start workflow with missing starter returns aggregate
   expect(captureException).not.toHaveBeenCalled();
 });
 
-it('R1 / SENTRY-B: close_corner still archives when GitHub is not configured', async () => {
+it('R1 / SENTRY-B: close_thread still archives when GitHub is not configured', async () => {
   await db.query(`UPDATE corner_github_cache SET lifecycle=$2::jsonb WHERE corner_id=$1`, [corner, JSON.stringify({ pr: { number: 7, headSha: head } })]);
   vi.mocked(captureException).mockClear();
   const response = await fetch(`${origin}/v1/daemon/operations/archiveCorner`, {

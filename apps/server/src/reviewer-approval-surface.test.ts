@@ -166,13 +166,13 @@ describe('the turn a reconciled reviewer is woken into', () => {
     // Parent departure revokes both configuration and merge access immediately.
     await expect(
       daemon.execute('getAgentConfiguration', { agentId: REVIEWER, roomId: C }, REVIEWER),
-    ).rejects.toThrow('daemon room access denied');
+    ).rejects.toThrow('daemon chat access denied');
     await expect(
       daemon.execute(
         'approveCornerMerge',
         { cornerId: C, headSha: HEAD, briefRevision: 1 },
         REVIEWER,
       ),
-    ).rejects.toThrow('daemon room access denied');
+    ).rejects.toThrow('daemon chat access denied');
   });
 });

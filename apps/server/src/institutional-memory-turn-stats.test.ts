@@ -145,6 +145,6 @@ describe('getInstitutionalMemoryTurnStats', () => {
         { roomId: ROOM, agentId: RONNIE, requestId: 'turn-3' },
         OUTSIDER,
       ),
-    ).rejects.toThrow(/daemon (?:token does not own requested agent|room access denied)/);
+    ).rejects.toThrow(/daemon (?:token does not own requested agent|chat access denied)/);
   });
 });

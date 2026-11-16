@@ -553,7 +553,7 @@ describe('PR-scoped check gate', () => {
 
   it('refuses other repositories and nonmembers before accessing PR data', async () => {
     await expect(gate(C, 'https://github.com/other/private/pull/614')).rejects.toThrow(
-      'Room repository',
+      'chat repository',
     );
     await expect(
       rootFixture.daemon.execute('getPrChecksStatus', { cornerId: C, pullRequest: 614 }, 'e'.repeat(64)),

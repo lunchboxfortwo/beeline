@@ -48,7 +48,7 @@ async function input(agent = WORKER) {
   return { roomId: C, requestId: command.turn_request_id };
 }
 const idleReports = async () => (await db.query(`SELECT id FROM agent_commands WHERE room_id=$1 AND reason='report'
-  AND private_payload->>'authorId'=$2 AND private_payload->>'text' LIKE 'blocked: Corner % is idle.%'`, [C, SYSTEM_IDENTITY_ID])).rows;
+  AND private_payload->>'authorId'=$2 AND private_payload->>'text' LIKE 'blocked: Thread % is idle.%'`, [C, SYSTEM_IDENTITY_ID])).rows;
 async function reactions(count = 8) {
   for (let i = 0; i < count; i++) {
     await refreshCornerAttention(db, C);
@@ -109,6 +109,18 @@ it('WORKER-BLOCK: native ask cards replace the block and remain open through com
   await phone.execute('answerChoice', { choiceId: choice.choiceId, optionId: 'A' }, HUMAN);
   await daemon.execute('postRoomMessage', { ...ask, text: 'Continuing with that choice.' }, WORKER);
   expect(await state()).toBe('working'); // The native decision queued its own continuation.
+});
+
+it('counts a notice sent before the thread wording change against the same idle budget', async () => {
+  await reactions();
+  const [notice] = await idleReports();
+  expect(notice).toBeDefined();
+  await db.query(`UPDATE agent_commands SET private_payload=jsonb_set(private_payload,'{text}',
+    to_jsonb(replace(private_payload->>'text','blocked: Thread ','blocked: Corner '))) WHERE id=$1`, [notice!.id]);
+  expect((await db.query(cornerIdleSql('$1'), [C])).rows[0]).toMatchObject({ idle_report_count: 1 });
+  await runCornerAttention(db); await refreshCornerAttention(db, C);
+  expect((await db.query(`SELECT id FROM agent_commands WHERE room_id=$1 AND reason='report'
+    AND private_payload->>'authorId'=$2`, [C, SYSTEM_IDENTITY_ID])).rows).toHaveLength(1);
 });
 
 it('IDLE-BUDGET: only human grant decisions and human hold releases replenish notices', async () => {

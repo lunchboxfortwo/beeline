@@ -144,15 +144,15 @@ export class DaemonApiClient {
    * It must never register a second execution owner for the parent agent. */
   #repositoryCredentialRoom: string | undefined;
 
-  static async readRepositoryCredential(configPath: string, roomId: string, fetchImpl?: DaemonFetch): Promise<Output<'getRoomGitHubToken'>> {
+  static async readRepositoryCredential(configPath: string, roomId: string, fetchImpl?: DaemonFetch, write = false): Promise<Output<'getRoomGitHubToken'>> {
     const runtime = await readRuntimeRecord(configPath);
     if (resolve(configPath) !== resolve(runtimeDirectory(runtime.supervisorRoot, runtime.agent.publicKey), 'runtime.json'))
       throw new Error('refusing repository credential read outside canonical runtime path');
     const transport = runtime.transport;
-    if (!transport?.daemonToken) throw new Error('corner-read-token requires an activated monolith transport');
+    if (!transport?.daemonToken) throw new Error('thread-read-token requires an activated monolith transport');
     const client = new DaemonApiClient(transport.baseUrl, transport.daemonToken, runtime.agent.publicKey, fetchImpl);
     client.#repositoryCredentialRoom = roomId;
-    return client.execute('getRoomGitHubToken', { roomId });
+    return client.execute('getRoomGitHubToken', { roomId, ...(write ? { write: true } : {}) });
   }
 
   private readonly logUnknownLiveEvent = unknownServerEventLogger('daemon-live');

@@ -48,7 +48,7 @@ export async function extraDependencyRoots(root: string, home?: string): Promise
     if (!allowed.some(parent => {
       const child = relative(parent, canonical);
       return child !== '' && child !== '..' && !child.startsWith('../') && !isAbsolute(child);
-    })) throw new Error('Extra dependencies must be inside this corner or its agent home');
+    })) throw new Error('Extra dependencies must be inside this thread or its agent home');
     roots.add(canonical);
   }
   return [...roots].sort();

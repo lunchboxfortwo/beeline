@@ -35,7 +35,7 @@ export async function productionReleaseDispatch(
     )).rows[0];
     if (!agent?.handle) throw new Error('Production release requires an agent identity');
     if (!await lockRoomAccess(db, [input.roomId], [agentId]))
-      throw new ExpectedRefusalError('Production release requires current Room and Workspace membership');
+      throw new ExpectedRefusalError('Production release requires current chat and Workspace membership');
     const command = await authorizeCommandOutput(db, input.roomId, agentId, input.requestId);
     const human = (await db.query<{ id: string; text: string; role: string }>(
       `SELECT m.id,m.text,manager.role FROM messages m JOIN identities i ON i.id=m.author_id AND i.kind='human'

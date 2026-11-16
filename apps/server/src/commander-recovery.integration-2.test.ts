@@ -37,7 +37,7 @@ it('keeps DM-returned decisions indexed until answered or source membership ends
 });
 
 
-it('R1 carries a closed corner artifact into a successor brief and refuses private archived sources', async () => {
+it('R1 carries a closed thread artifact into a successor brief and refuses private archived sources', async () => {
   const source = (await rootFixture.phone.execute('createHumanCorner', { roomId: ROOM, title: 'Source-evidence' }, HUMAN)) as { id: string };
   await rootFixture.phone.execute('sendRoomMessage', { roomId: source.id, messageId: randomBytes(32).toString('hex'), text: '@worker record evidence' }, HUMAN);
   const turn = await worker(source.id);
@@ -77,19 +77,19 @@ it('R1 carries a closed corner artifact into a successor brief and refuses priva
       approval: { sourceMessageId: rootFixture.order.sourceMessageId },
       attachments: [{ objectId: privateMedia, purpose: 'Private evidence', required: true }] },
   }, RUBY);
-  await expect(tryPrivate()).rejects.toThrow('missing or unavailable in this Room');
+  await expect(tryPrivate()).rejects.toThrow('missing or unavailable in this chat');
   // Even if the commander is a member, a successor audience without access
   // cannot receive the file. The human requester is also checked.
   await rootFixture.db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES
        ($1,$2,$3,'member') `, [WS, privateRoom, RUBY]);
   await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [privateRoom, HUMAN]);
-  await expect(tryPrivate()).rejects.toThrow('missing or unavailable in this Room');
+  await expect(tryPrivate()).rejects.toThrow('missing or unavailable in this chat');
   await rootFixture.db.query(`UPDATE memberships SET removed_at=NULL WHERE room_id=$1 AND identity_id=$2`, [privateRoom, HUMAN]);
   const outsider = 'f'.repeat(64);
   await rootFixture.db.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'human','Reader','reader')`, [outsider]);
   await rootFixture.db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
     VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')`, [WS, ROOM, outsider]);
-  await expect(tryPrivate()).rejects.toThrow('missing or unavailable in this Room');
+  await expect(tryPrivate()).rejects.toThrow('missing or unavailable in this chat');
   await rootFixture.db.query(`DELETE FROM memberships WHERE identity_id=$1`, [outsider]);
   const remoteSuccessor = await tryPrivate();
   const remoteBrief = await rootFixture.daemon.execute('listCornerBriefRevisions', { ...authority(rootFixture.order), cornerId: remoteSuccessor.cornerId, limit: 1 }, RUBY);
@@ -437,7 +437,7 @@ it('QUEUE-1: a tag, order and brief revision during a running turn retain separa
   expect(next).toHaveLength(3);
   expect(next[0]!.source.body).toContain('First: use the blue widget');
   expect(next[1]!.source.body).toContain('Second: add rounded edges');
-  expect(next[2]!.source.body).toContain('revised the corner brief');
+  expect(next[2]!.source.body).toContain('revised the thread brief');
   expect((await rootFixture.db.query('SELECT private_payload FROM agent_commands WHERE id=$1',[next[2]!.id])).rows[0])
     .toMatchObject({private_payload:{returnIdentityId:RUBY}});
   for (const command of next) {
@@ -479,7 +479,7 @@ it('AGENT-STOP-3: an orderer stops its own turn and preserves an unrelated human
   const otherTurn = (await commands(ROOM, OTHER))[0]!;
   await claim(otherTurn);
   await expect(rootFixture.daemon.execute('stopAgentTurn', { ...authority(otherTurn), address: ROOM, agent: 'worker' }, OTHER))
-    .rejects.toThrow(/you did not order this turn and you do not command this corner/);
+    .rejects.toThrow(/you did not order this turn and you do not command this thread/);
   expect((await rootFixture.db.query(`SELECT status FROM agent_turns WHERE room_id=$1 AND request_id=$2`,
     [ROOM, assigned.turnRequestId])).rows[0]?.status).toBe('working');
   const result = await rootFixture.daemon.execute('stopAgentTurn', { ...authority(rootFixture.order), address: ROOM, agent: 'worker' }, RUBY);
@@ -507,7 +507,7 @@ it('AGENT-STOP-2: an agent with no command over the running turn is refused and 
   const otherTurn = (await commands(ROOM, OTHER))[0]!;
   await claim(otherTurn);
   await expect(rootFixture.daemon.execute('stopAgentTurn', { ...authority(otherTurn), address: opened.cornerId, agent: 'worker' }, OTHER))
-    .rejects.toThrow(/you did not order this turn and you do not command this corner/);
+    .rejects.toThrow(/you did not order this turn and you do not command this thread/);
   expect((await rootFixture.db.query(`SELECT status FROM agent_turns WHERE room_id=$1 AND request_id=$2`,
     [opened.cornerId, running.turnRequestId])).rows[0]?.status).toBe('working');
   expect((await rootFixture.db.query(`SELECT count(*)::int n FROM agent_commands WHERE room_id=$1 AND action='stop'`,

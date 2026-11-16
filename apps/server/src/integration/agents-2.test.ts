@@ -320,7 +320,7 @@ const fixture = monolithFixture();
     });
     expect(tooLong.status).not.toBe(200);
     expect(await tooLong.text()).toContain(
-      `corner brief spec must contain 1–${CORNER_BRIEF_SPEC_MAX_LENGTH} characters`,
+      `thread brief spec must contain 1–${CORNER_BRIEF_SPEC_MAX_LENGTH} characters`,
     );
     const atLimit = await fixture.daemonOperation('createCorner', {
       roomId: ROOM,
@@ -516,7 +516,7 @@ const fixture = monolithFixture();
       kinds: ['joined'],
     });
     expect(outside.status).toBe(403);
-    expect(((await outside.json()) as { error: string }).error).toBe('daemon room access denied');
+    expect(((await outside.json()) as { error: string }).error).toBe('daemon chat access denied');
   });
 
 
@@ -582,7 +582,7 @@ const fixture = monolithFixture();
     });
     expect(nonMember.status).toBeGreaterThanOrEqual(400);
     expect(((await nonMember.json()) as { error: string }).error).toBe(
-      'not an agent member of this Room: ghost',
+      'not an agent member of this chat: ghost',
     );
   });
 });

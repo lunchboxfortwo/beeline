@@ -175,7 +175,7 @@ export default function (pi: ExtensionAPI) {
 
 export const HERMES_MANIFEST = `name: beeline
 version: "0.1.0"
-description: "Bring Beeline Room tags into each Hermes conversation that joined Beeline."
+description: "Bring Beeline chat tags into each Hermes conversation that joined Beeline."
 provides_tools:
   - beeline_check_inbox
 provides_hooks:
@@ -221,7 +221,7 @@ def register(ctx):
     def check_inbox(args, session_id=None, **_):
         return _hook("poll", session_id) or "No Beeline messages are waiting."
 
-    schema = {"name": "beeline_check_inbox", "description": "Read Beeline Room messages waiting for this conversation.",
+    schema = {"name": "beeline_check_inbox", "description": "Read Beeline chat messages waiting for this conversation.",
         "parameters": {"type": "object", "properties": {}, "required": [], "additionalProperties": False}}
     ctx.register_tool(name="beeline_check_inbox", toolset="beeline", schema=schema, handler=check_inbox,
         description=schema["description"])

@@ -163,7 +163,7 @@ async function stopDarwinProcesses(roots: string[]): Promise<number> {
 }
 
 export async function removeArchivedCornerData(supervisorRoot: string, cornerId: string, checkout: string, options: WholeStorageOptions & { runtimeDir?: string } = {}): Promise<StorageReclaimEntry[]> {
-  if (!/^[a-zA-Z0-9-]{1,80}$/.test(cornerId)) throw new Error('invalid archived corner id');
+  if (!/^[a-zA-Z0-9-]{1,80}$/.test(cornerId)) throw new Error('invalid archived thread id');
   const base = resolve(supervisorRoot, 'beeline');
   if (resolve(checkout) !== resolve(base, 'corners', basename(checkout))) throw new Error('invalid archived checkout root');
   const roots = [checkout];
@@ -185,18 +185,18 @@ export async function removeArchivedCornerData(supervisorRoot: string, cornerId:
         if (process.platform !== 'linux' && process.platform !== 'darwin') throw new Error('unsupported archived process attribution platform');
         if (process.platform === 'darwin') {
           const stopped = await stopDarwinProcesses(existing);
-          console.log(`[helper] archived corner ${cornerId} stopped ${stopped} attributed processes`);
+          console.log(`[helper] archived thread ${cornerId} stopped ${stopped} attributed processes`);
         } else {
         const result = await exec('/usr/bin/python3', ['-c', STOP, JSON.stringify(existing), String(process.pid)], { timeout: 30_000, maxBuffer: 1024 });
         const { stopped } = JSON.parse(result.stdout) as { stopped: number };
-        console.log(`[helper] archived corner ${cornerId} stopped ${stopped} attributed processes`);
+        console.log(`[helper] archived thread ${cornerId} stopped ${stopped} attributed processes`);
         }
       }
     }
     for (const path of existing) {
       // A remaining mount is an operational failure, never permission
       // to walk into an unrelated mounted filesystem.
-      if (await hasMount(path)) throw new Error(`archived corner mount still present: ${path}`);
+      if (await hasMount(path)) throw new Error(`archived thread mount still present: ${path}`);
       let allocatedBytes = 0, freedBytes = 0;
       const tree = await storageTree(path, options.progress).catch(() => undefined);
       const seen = new Map<string, { bytes: number; links: number; count: number; directory: boolean }>();
@@ -218,7 +218,7 @@ export async function removeArchivedCornerData(supervisorRoot: string, cornerId:
     if (!options.dryRun && await lstat(checkout).catch(() => undefined)) throw new Error('archived checkout survived cleanup');
   } catch (error) {
     // One attempt per caller trigger. A leftover must not stall the host sweep.
-    console.warn(`[helper] archived corner ${cornerId} cleanup failed:`, error);
+    console.warn(`[helper] archived thread ${cornerId} cleanup failed:`, error);
   }
   return entries;
 }

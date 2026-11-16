@@ -81,12 +81,12 @@ it('Reproduction R1 / ask-refusal: corner brief and choice refusals stay out of 
     const stale = await revise();
     await Sentry.flush(2000);
     console.log('R1 evidence', JSON.stringify({ stale, captured: events().length }));
-    expect(stale).toEqual({ status: 409, body: { error: 'corner brief revision changed; read the current assignment' } });
+    expect(stale).toEqual({ status: 409, body: { error: 'thread brief revision changed; read the current assignment' } });
     expect(events()).toHaveLength(0);
     expect(await revise({ brief: { ...brief, change: ' ' } })).toEqual({ status: 400,
-      body: { error: 'corner brief revision requires a change description' } });
+      body: { error: 'thread brief revision requires a change description' } });
     expect(await revise({ cornerId: room })).toEqual({ status: 403,
-      body: { error: 'corner brief revision denied' } });
+      body: { error: 'thread brief revision denied' } });
     await Sentry.flush(2000);
     expect(events()).toHaveLength(0);
     await db.query('DROP TABLE corner_brief_revisions CASCADE');

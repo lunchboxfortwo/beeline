@@ -1,4 +1,4 @@
-import { createCornerFacts, setCornerLockedFact, setCornerReviewerFact } from '../corner-lifecycle.js';
+import { becomeThreadImplementer, createCornerFacts, setCornerLockedFact, setCornerReviewerFact } from '../corner-lifecycle.js';
 import { randomUUID } from 'node:crypto';
 import type { SqlDatabase } from '../database.js';
 
@@ -6,11 +6,11 @@ import type { SqlDatabase } from '../database.js';
 // createAgentCommand (agent-command.ts); these seed completed history.
 
 /**
- * A person's tag that assigned `agentId` in a corner, as `routeHumanMessage`
- * records it. The worker is derived from these commands (`cornerImplementerSql`);
- * the row is complete, so it wakes nobody.
+ * Seed an explicit implementer takeover with completed assignment history.
+ * Real person tags do not transfer the role; this fixture wakes nobody.
  */
 export async function assignCornerWorker(db: SqlDatabase, cornerId: string, agentId: string): Promise<void> {
+  await becomeThreadImplementer(db, cornerId, agentId);
   const id = `assign-${randomUUID()}`;
   await db.query(
     `INSERT INTO agent_commands(id,room_id,agent_id,turn_request_id,action,reason,root_command_id,
@@ -47,6 +47,8 @@ export async function seedCornerOpening(database: SqlDatabase, input: {
      FROM rooms corner WHERE corner.id=$2`,
     [id,input.cornerId,input.agentId ?? null,input.requestId ?? id,root,input.fromRoomId ?? null,input.openKey ?? null],
   );
+  const assigned = (await database.query<{agent_id:string}>('SELECT agent_id FROM agent_commands WHERE id=$1', [id])).rows[0];
+  if (assigned) await becomeThreadImplementer(database, input.cornerId, assigned.agent_id);
   return id;
 }
 
@@ -55,6 +57,10 @@ export async function seedCornerFactsRow(
   db: SqlDatabase, cornerId: string, lifecycle: string | null, locked: boolean, reviewerAgentId: string | null,
 ): Promise<void> {
   await createCornerFacts(db, cornerId);
+  const initial = (await db.query<{created_by:string}>(`SELECT r.created_by FROM rooms r
+    JOIN corner_facts f ON f.corner_id=r.id WHERE r.id=$1 AND f.implementer_agent_id IS NULL
+      AND r.created_by IN (SELECT id FROM identities WHERE kind='agent')`, [cornerId])).rows[0];
+  if (initial) await becomeThreadImplementer(db, cornerId, initial.created_by);
   if (locked) await setCornerLockedFact(db, cornerId, locked);
   if (reviewerAgentId) await setCornerReviewerFact(db, cornerId, reviewerAgentId);
   await db.query(

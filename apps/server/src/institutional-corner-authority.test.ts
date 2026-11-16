@@ -147,7 +147,7 @@ describe('corner turn institutional authority', () => {
   it('serves a corner opened from a corner whose durable root is a human message inside the sibling corner', async () => {
     const daemon = liveDaemon();
     // The dispatch turn inside OTHER_CORNER is woken by the human's
-    // choice-answered line (CARD); open_corner parents the new corner's
+    // choice-answered line (CARD); open_thread parents the new corner's
     // objective command on it.
     const dispatch = await createAgentCommand(database, {
       roomId: OTHER_CORNER,

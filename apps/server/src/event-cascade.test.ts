@@ -104,10 +104,10 @@ describe('an event cascade', () => {
     });
   });
 
-  it('refuses an emit whose cause is no longer in the Room, and writes nothing', async () => {
+  it('refuses an emit whose cause is no longer in the chat, and writes nothing', async () => {
     const before = await rowCount();
     await expect(emit('f'.repeat(64))).rejects.toBeInstanceOf(EventCascadeRefusedError);
-    await expect(emit('f'.repeat(64))).rejects.toThrow(/no longer in the Room/);
+    await expect(emit('f'.repeat(64))).rejects.toThrow(/no longer in the chat/);
     expect(await rowCount()).toBe(before);
   });
 

@@ -46,7 +46,7 @@
         }
       },
       {
-        "noCall": "open_corner"
+        "noCall": "open_thread"
       },
       {
         "noCall": "request_grant"

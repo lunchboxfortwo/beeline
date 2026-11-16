@@ -18,7 +18,7 @@ async function request(messageId: string) {
 
 
 
-  it('R1: places a Squire approval in the Room its turn ran in, once, with its page for the owner only', async () => {
+  it('R1: places a Squire approval in the chat its turn ran in, once, with its page for the owner only', async () => {
     const MEMBER = 'd'.repeat(64);
     await fixture.database.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'human','Member','member')`, [MEMBER]);
     await fixture.database.query(

@@ -191,7 +191,7 @@ afterAll(async () => db?.close());
 
 
 /**
- * Each open corner with a pull request has its implementer call merge_corner
+ * Each open corner with a pull request has its implementer call merge_thread
  * once (`GitHubOperations.landCorner`). Nothing about the run state gates the
  * call: only the merge gate on the exact current head does.
  */
@@ -761,7 +761,7 @@ export function fixtureScope20() {
       [D, H],
     );
     await rootFixture.db.query(
-      `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member') ON CONFLICT DO NOTHING`,
+      `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$3,'member'),($1,$2,$3,'member') ON CONFLICT DO NOTHING`,
       [W, R, D],
     );
   }
@@ -818,7 +818,7 @@ landing,
 }
 export function fixtureScope30() {
 
-  /** The corner's human requester orders the merge through its agent's order_corner_merge. */
+  /** The corner's human requester orders the merge through its agent's order_thread_merge. */
   async function order(cornerId: string, service: DaemonService = rootFixture.daemon) {
     await say(cornerId, '@hoots merge this now');
     const direct = (await commands(A, cornerId)).at(-1)!;
@@ -832,7 +832,7 @@ order,
 }
 export function fixtureScope31() {
 
-  const REFUSAL = /this corner's brief does not assign repository work; revise the brief before merging/;
+  const REFUSAL = /this thread's brief does not assign repository work; revise the brief before merging/;
 
 
   /** Sets the corner's current brief: none at all, or a revision with this repositoryWork. */

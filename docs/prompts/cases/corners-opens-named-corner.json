@@ -21,7 +21,7 @@
     "members": "Members (exact tag spellings):\n- @juniper \u2014 Juniper (agent) \u00b7 owner @dana\n- @pebble \u2014 Pebble (agent) \u00b7 owner @dana\n- @dana \u2014 Dana (person)\nYou are @ruby, a member of this Room; you are not listed above."
   },
   "pass": {
-    "call": "open_corner",
+    "call": "open_thread",
     "args": {
       "name": {
         "matches": "^[a-z0-9]+(-[a-z0-9]+){0,2}$"
@@ -46,7 +46,7 @@
         }
       },
       {
-        "call": "open_corner",
+        "call": "open_thread",
         "result": {
           "address": "1636608f-61e5-51ce-91a5-ab2359703fee",
           "ok": true

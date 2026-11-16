@@ -90,14 +90,14 @@ async function unchanged(reader: SqlDatabase, publish: unknown) {
 
 describe.skipIf(!url)('real PostgreSQL selected Tray decision contention', () => {
 
-  it('observes committed parent-Room revocation and refuses without a decision or compatibility notification', async () => {
+  it('observes committed parent-chat revocation and refuses without a decision or compatibility notification', async () => {
     await rig(async (reader, writer) => {
       await reader.query(`UPDATE messages SET card=card-'runId' WHERE id='choice-card'`);
       await reader.query('UPDATE room_choices SET workflow_run_id=NULL WHERE id=$1', [CHOICE]);
       await reader.query(`DELETE FROM live_journal WHERE event->>'sourceTable'='tray-projection'`);
       await writer.query('UPDATE memberships SET removed_at=clock_timestamp() WHERE identity_id=$1 AND room_id=$2', [A, ROOM]);
       const live = new LiveHub(), publish = vi.spyOn(live, 'publish');
-      await expect(selected(reader, live)('revoked')).rejects.toThrow('room access denied');
+      await expect(selected(reader, live)('revoked')).rejects.toThrow('chat access denied');
       await unchanged(reader, publish);
     });
   });

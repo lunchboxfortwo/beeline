@@ -28,7 +28,7 @@ m26_it('reports unavailable repo cards without attempting an external connector'
   });
   const result = JSON.parse(await m26_callAgentTool('connect', {mode:'ensure', action:'Connect the requested service', purpose:'complete the requested task',service:'link my repository',reason:'Connect the repository',continuation:'Show the repository card.'}, 'connect'));
   m26_expect(result).toMatchObject({status:'unavailable',app:'beeline:onboarding'});
-  m26_expect(result.next).toContain('active Room');
+  m26_expect(result.next).toContain('active chat');
   m26_expect(scope24.calls.map(call => call.name)).toEqual(['getRoomRepositoryState']);
 });
 
@@ -41,7 +41,7 @@ m26_it('keeps ordinary GitHub repository reads on the connector route', async ()
 
 
 
-m26_it('binds an explicitly requested game to the active Room turn', async () => {
+m26_it('binds an explicitly requested game to the active chat turn', async () => {
   await m26_callAgentTool('app_tool',{app:'beeline:onboarding',tool:'game',args:{}});
   m26_expect(scope24.calls.find(call=>call.name==='postStarterGame')!.input).toMatchObject({roomId:'room-1',requestId:'request-1',taskId:'command-1'});
 });
@@ -72,7 +72,7 @@ m27_it('preserves an order refusal without claiming delivery or telling the comm
 
 
 
-m27_it('forwards the one named agent and never describes a Room broadcast', async () => {
+m27_it('forwards the one named agent and never describes a chat broadcast', async () => {
   const fetch = m27_vi.fn(async (_url: URL, _init: RequestInit) => Response.json({ commandIds: ['order-2'] }));
   m27_vi.stubGlobal('fetch', fetch);
   await m27_callAgentTool('order', { address: '11111111-1111-4111-8111-111111111111', agent: '@candy', text: 'Check the build' }, 'call-3');
@@ -140,7 +140,7 @@ m29_describe('daemon network-failure classification', () => {
         }),
       ),
     ).toBe(true);
-    m29_expect(m29_isDaemonNetworkFailure(new Error('corner not found'))).toBe(false);
+    m29_expect(m29_isDaemonNetworkFailure(new Error('thread not found'))).toBe(false);
   });
 });
 m29_describe('daemonOperationIsSafeToRepeat', () => {
@@ -194,7 +194,7 @@ m29_describe('daemon tool-call network retry', () => {
       calls += 1;
       throw scope28.bareFetchFailed();
     });
-    await m29_expect(m29_callAgentTool('close_corner', { address:'corner-1' }, 'call-1')).rejects.toThrow(
+    await m29_expect(m29_callAgentTool('close_thread', { address:'corner-1' }, 'call-1')).rejects.toThrow(
       'daemon operation archiveCorner failed before the server answered; await a new action or recovery boundary; the write outcome is unknown',
     );
     m29_expect(calls).toBe(1);
@@ -250,7 +250,7 @@ const scope34 = fixtureScope34();
 
 
 
-m31_it('calls watchCorner in the current corner and returns readable state and kinds', async () => {
+m31_it('calls watchCorner in the current thread and returns readable state and kinds', async () => {
   const text = await m31_callAgentTool(
     'wake', { action:"create",trigger:"lifecycle", ...{ address: 'sibling' } },
     'watch-1',
@@ -329,7 +329,7 @@ m31_it('offers lifecycle watches in a DM without chatter or schedule events', ()
 
 
 
-m31_it('reports an already merged corner with its merge commit, and a closed one', async () => {
+m31_it('reports an already merged thread with its merge commit, and a closed one', async () => {
   const merged = { ...scope34.snapshot, workflowState: 'done', mergeCommitSha: 'f'.repeat(40) };
   m31_vi.stubGlobal('fetch', async () =>
     Response.json({ kinds: [], state: 'merged', woken: true, snapshot: merged }),
@@ -338,17 +338,17 @@ m31_it('reports an already merged corner with its merge commit, and a closed one
     'wake', { action:"create",trigger:"lifecycle", ...{ address: 'sibling' } },
     'watch-3',
   );
-  m31_expect(text).toContain('Corner already merged; one merged wake queued now');
+  m31_expect(text).toContain('Thread already merged; one merged wake queued now');
   m31_expect(text).toContain('f'.repeat(40));
   m31_vi.stubGlobal('fetch', async () => Response.json({ kinds: [], state: 'closed', snapshot: scope34.snapshot }));
   m31_expect(
     await m31_callAgentTool('wake', { action:"create",trigger:"lifecycle", ...{ address: 'sibling' } }, 'watch-4'),
-  ).toContain('Corner closed without merging');
+  ).toContain('Thread closed without merging');
 });
 
 
 
-m31_it('limits the advertised address to corners, including when called from a Room or DM', () => {
+m31_it('limits the advertised address to threads, including when called from a chat or DM', () => {
   for (const dm of [false, true]) {
     const tool = m31_agentToolsFor(true, dm).find(t => t.name === 'wake')!;
     m31_expect(tool.description).toContain('requires address and watches opened/merged');
@@ -383,17 +383,17 @@ const scope36 = fixtureScope36();
     } }]);
   });
 });
-m32_describe('workflow run tools inside a corner', () => {
+m32_describe('workflow run tools inside a thread', () => {
 const scope37 = fixtureScope37();
 
 
-  m32_it('reads the run stored in the corner, not the parent Room', async () => {
+  m32_it('reads the run stored in the thread, not the parent chat', async () => {
     await m32_callAgentTool('app_tool', { app: 'beeline:workflow', tool: 'read', args: { runId: 'run-1' } }, 'read');
     m32_expect(scope37.calls).toEqual([{ name: 'getWorkflowRun', input: { roomId: 'corner-1', agentId: 'agent-1', runId: 'run-1' } }]);
   });
 
 
-  m32_it('advances a run with handoff scoped to the corner', async () => {
+  m32_it('advances a run with handoff scoped to the thread', async () => {
     await m32_callAgentTool('app_tool', { app:'beeline:workflow', tool:'advance', args:{ runId: 'run-1', outcome: 'done', contents: { note: 'ready' } } });
     m32_expect(scope37.calls).toEqual([{ name: 'handoff', input: {
       roomId: 'corner-1', agentId: 'agent-1', runId: 'run-1', outcome: 'done', contents: { note: 'ready' },
@@ -402,7 +402,7 @@ const scope37 = fixtureScope37();
   });
 
 
-  m32_it('starts, cancels and reassigns a workflow role scoped to the corner', async () => {
+  m32_it('starts, cancels and reassigns a workflow role scoped to the thread', async () => {
     await m32_callAgentTool('app_tool', { app:'beeline:workflow', tool:'start', args:{ name: 'triage', roleBindings: { reviewer: 'agent-1' } } });
     await m32_callAgentTool('app_tool', { app:'beeline:workflow', tool:'cancel', args:{ runId: 'run-1', reason: 'no longer needed' } });
     await m32_callAgentTool('app_tool', { app:'beeline:workflow', tool:'rebind', args:{ runId: 'run-1', role: 'reviewer', agent: 'agent-2' } });
@@ -548,7 +548,7 @@ const scope41 = fixtureScope41();
 mergedDescribe43("wallet-tools.test.ts", () => {
 const scope42 = fixtureScope42();
 m43_describe('wallet MCP identity and signing', () => {
-  m43_it('routes every wallet tool as the actual agent in its active corner', async () => {
+  m43_it('routes every wallet tool as the actual agent in its active thread', async () => {
     m43_vi.stubEnv('BEELINE_DAEMON_AGENT_ID', 'agent-1');
     m43_vi.stubEnv('BEELINE_DAEMON_ROOM_ID', 'parent-room');
     m43_vi.stubEnv('BEELINE_DAEMON_CORNER_ID', 'corner-1');

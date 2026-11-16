@@ -5,7 +5,7 @@ describe('outside-agent starter instructions', () => {
   it('teaches host delivery setup, threaded replies, exact back-tags and failure replies', () => {
     for (const rule of [
       'never ask the person to type tool names or run delivery setup',
-      'call list_rooms and confirm your name, @handle and Rooms',
+      'call list_chats and confirm your name, @handle and Rooms',
       'do not invent a handle',
       'GitHub and Google sign-in can lead to different Beeline accounts',
       'Confirm the returned owner @handle and intended Room',

@@ -211,10 +211,10 @@ import { daemonIdentity, daemonAccess } from './access.js';
       )
     ).rows[0];
     await daemonReach(ctx, input.cornerId, agentId);
-    if (!corner) throw new Error('corner not found');
-    if (!corner.head_sha) return { status: 'blocked', blocker: corner.archived ? 'the corner is closed' : 'the corner has no pull request' };
+    if (!corner) throw new Error('thread not found');
+    if (!corner.head_sha) return { status: 'blocked', blocker: corner.archived ? 'the thread is closed' : 'the thread has no pull request' };
     if (!ctx.prChecksStatus)
-      return { status: 'blocked', blocker: corner.archived ? 'the corner is closed' : 'GitHub is not configured on this server' };
+      return { status: 'blocked', blocker: corner.archived ? 'the thread is closed' : 'GitHub is not configured on this server' };
     const gate = await ctx.prChecksStatus({ cornerId: input.cornerId });
     if (!gate.mergeAllowed && !(gate.blockedReason === 'PR is a draft' && gate.checks === 'passed' && gate.approved && !gate.held)) {
       return { status: 'blocked', blocker: gate.blockedReason ?? 'the merge gate is closed', holds: gate.holds };
@@ -292,10 +292,10 @@ import { daemonIdentity, daemonAccess } from './access.js';
         !(await isZeroCheckCommander(db, input.cornerId, agentId))))
         throw new CornerVerdictRejectedError(
           'NOT_CONFIGURED_REVIEWER',
-          "only this corner's configured reviewer (or the Room reviewer when unset), or its zero-check commander, can record PASS; set reviewer with revise_corner",
+          "only this thread's configured reviewer (or the chat reviewer when unset), or its zero-check commander, can record PASS; set reviewer with revise_thread",
         );
       if (!target.pull_request_number || !target.head_sha)
-        throw new CornerVerdictRejectedError('NO_PULL_REQUEST', 'corner has no pull request');
+        throw new CornerVerdictRejectedError('NO_PULL_REQUEST', 'thread has no pull request');
       if (target.head_sha !== input.headSha)
         throw new CornerVerdictRejectedError(
           'STALE_HEAD',
@@ -325,7 +325,7 @@ import { daemonIdentity, daemonAccess } from './access.js';
       try {
         await ctx.landCorner(input.cornerId);
       } catch (error) {
-        console.error(`[server] reviewer PASS on corner ${input.cornerId} did not land:`, error);
+        console.error(`[server] reviewer PASS on thread ${input.cornerId} did not land:`, error);
       }
     }
     return approved;
@@ -369,7 +369,7 @@ import { daemonIdentity, daemonAccess } from './access.js';
         [roomId],
       )
     ).rows[0];
-    if (!row) throw new Error('room not found');
+    if (!row) throw new Error('chat not found');
     return { targetBranch: row.repository_target_branch, updatedAt: seconds(row.updated_at) };
   }
 

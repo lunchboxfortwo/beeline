@@ -1,3 +1,4 @@
+import { becomeThreadImplementer } from '../corner-lifecycle.js';
 import { addWorkNote, attachToWorkItem } from '../work-item-detail.js';
 import { askOwnerQuestion } from '../work-questions.js';
 import { updateWorkItem } from '../work-board.js';
@@ -380,6 +381,11 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
         const release = input as Input<'dispatchRoomWorkflow'>;
         return await productionReleaseDispatch(ctx.database, authenticatedAgentId, release,
           inputs => ctx.github!.dispatchProductionRelease(release.roomId, inputs)) as Output<Name>;
+      }
+      case 'becomeImplementer': {
+        const roomId = (input as Input<'becomeImplementer'>).roomId;
+        await becomeThreadImplementer(ctx.database, roomId, authenticatedAgentId);
+        return daemonWriteResult(ctx) as Output<Name>;
       }
       case 'getRoomGitHubToken':
         return getRoomGitHubTokenOperation(ctx, name, input, authenticatedAgentId, candidate, scopedRoom);

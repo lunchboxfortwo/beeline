@@ -40,6 +40,7 @@ import { modelText } from '../message-origin.js';
       return daemonWriteResult(ctx) as Output<Name>;
     }
     const turnWrites = new Set([
+      'becomeImplementer',
       'postVaultSaveCard',
       'postAgentAvatar',
       'postAgentAttachment',

@@ -1,6 +1,6 @@
 import { ACP_SESSION_MEMORY_MAX_BYTES, describe, expect, it, PROMPT_SURFACES, assembleSessionPrompt, assembleTurnPrompt, renderAssignedCornerBrief, m23_describe, m23_expect, m23_it, m23_assembleTurnPrompt, m23_renderMention, mergedDescribe23, SESSION_VARIANTS, TURN_VARIANTS, fixtureScope10, fixtureScope12, fixtureScope13, fixtureScope14, fixtureScope16, type CornerBrief } from './test-support-prompt-assembly.test-support.js';
 
-describe('assigned corner brief', () => {
+describe('assigned thread brief', () => {
 const scope10 = fixtureScope10();
 
 
@@ -97,13 +97,13 @@ describe('corner:prepare is gated on the checkout script', () => {
 const scope13 = fixtureScope13();
 
 
-  it('tells a code corner to run the command its checkout defines', () => {
+  it('tells a code thread to run the command its checkout defines', () => {
     const prompt = assembleSessionPrompt({ ...scope13.reviewed, cornerPrepareScript: true }).systemPrompt;
     expect(prompt).toContain('Run npm run corner:prepare first.');
   });
 
 
-  it('does not tell a code corner whose checkout lacks the command', () => {
+  it('does not tell a code thread whose checkout lacks the command', () => {
     const prompt = assembleSessionPrompt({ ...scope13.reviewed, cornerPrepareScript: false }).systemPrompt;
     expect(prompt).not.toContain('corner:prepare');
   });
@@ -123,15 +123,15 @@ const scope13 = fixtureScope13();
     expect(prompt).not.toContain('corner:prepare');
   });
 });
-describe('corner lists render as compact lines without losing a field', () => {
+describe('thread lists render as compact lines without losing a field', () => {
 const scope14 = fixtureScope14();
 
 
-  it('renders each open corner as one line with every field and no JSON', () => {
+  it('renders each open thread as one line with every field and no JSON', () => {
     const text = scope14.corners();
     expect(text).not.toContain('{"cornerId"');
-    expect(text).toContain('- with-pr (open-a), parent Room room-1, created by agent-a, PR #42: Ship the fix.');
-    expect(text).toContain('- no-pr (open-b), parent Room room-1, created by agent-b, archived: Plan the work.');
+    expect(text).toContain('- with-pr (open-a), parent chat room-1, created by agent-a, PR #42: Ship the fix.');
+    expect(text).toContain('- no-pr (open-b), parent chat room-1, created by agent-b, archived: Plan the work.');
     const withPr = text.split('\n').find((line) => line.includes('(open-a)'))!;
     expect(withPr).not.toContain('archived');
     const noPr = text.split('\n').find((line) => line.includes('(open-b)'))!;
@@ -139,7 +139,7 @@ const scope14 = fixtureScope14();
   });
 
 
-  it('renders every closed corner as a short line, PR and merge commit only when present', () => {
+  it('renders every closed thread as a short line, PR and merge commit only when present', () => {
     const text = scope14.corners();
     expect(text).toContain('- merged (closed-a): closed, PR #7, merge commit abc123');
     expect(text).toContain('- abandoned (closed-b): closed\n');
@@ -148,7 +148,7 @@ const scope14 = fixtureScope14();
   });
 
 
-  it('keeps every input corner id', () => {
+  it('keeps every input thread id', () => {
     const text = scope14.corners();
     for (const { cornerId } of [...scope14.open, ...scope14.closed]) expect(text).toContain(`(${cornerId})`);
   });

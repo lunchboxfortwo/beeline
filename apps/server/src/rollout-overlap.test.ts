@@ -32,6 +32,8 @@ it('rollout-0707: the exact released expressions survive both schema overlap dir
     expect((await db.query(query, [C])).rows[0]).toMatchObject({ worker: A });
   }
   await db.query(`UPDATE corner_facts SET owner_agent_id=$1 WHERE corner_id=$2`, [A,C]);
+  // This fixture represents a database before the implementer record migration.
+  await db.query(`DELETE FROM beeline_release_steps WHERE name='thread-implementer-v1'`);
   await migrate(db);
   await migrate(db);
   expect((await db.query(`SELECT owner_agent_id FROM corner_facts WHERE corner_id=$1`, [C])).rows[0]).toEqual({ owner_agent_id: A });

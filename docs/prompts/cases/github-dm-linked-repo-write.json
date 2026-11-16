@@ -41,7 +41,7 @@
       {
         "any": [
           {
-            "call": "open_corner"
+            "call": "open_thread"
           },
           {
             "text": {
@@ -208,7 +208,7 @@
         }
       },
       {
-        "call": "open_corner",
+        "call": "open_thread",
         "args": {
           "room": "b9f02ade-0577-5996-8bd6-c61ead1f6e37"
         },

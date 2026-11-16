@@ -28,7 +28,7 @@ import { installedGrantExecutable,isNativeGrantExecutable,resolveGrantCommand } 
  *
  * Fail-CLOSED, deliberately: with no usable bubblewrap on the host there is no
  * way to keep a Room's promise, so a Room grant is refused outright and the
- * agent is told to open a corner. That is the opposite of the harness spawn
+ * agent is told to open a thread. That is the opposite of the harness spawn
  * path, which fails open so a host without bwrap can still hold a conversation.
  *
  * Two hard stops survive yolo on both surfaces: a credential or environment
@@ -130,9 +130,9 @@ const WRITE_REFUSED = /Read-only file system|EROFS/;
 const SANDBOX_STARTED_SCRIPT = ['printf "%s\\n" "$1" >&2', 'shift', 'exec "$@"'].join('\n');
 
 export const ROOM_SANDBOX_UNAVAILABLE =
-  'this Room cannot run granted commands: a Room promises a read-only filesystem and that ' +
-  'promise is enforced by bubblewrap, which is not usable on this host. Open a corner with ' +
-  'open_corner and run it there, where writes belong.';
+  'this chat cannot run granted commands: a chat promises a read-only filesystem and that ' +
+  'promise is enforced by bubblewrap, which is not usable on this host. Open a thread with ' +
+  'open_thread and run it there, where writes belong.';
 
 export const ROOM_WRITE_REFUSED_NOTE =
   '[beeline] a remaining read-only mount refused this write; request the specific path capability before retrying.';
@@ -454,7 +454,7 @@ export class GrantCommandRunner {
   async run(input: { roomId: unknown; argv: unknown; stdin?: unknown }): Promise<GrantRunResult> {
     if (typeof input.roomId !== 'string' || !input.roomId) throw new Error('roomId is required');
     const room = this.rooms.get(input.roomId);
-    if (!room) throw new Error('this daemon is not serving that Room');
+    if (!room) throw new Error('this daemon is not serving that chat');
     const argv = validateGrantArgv(input.argv);
     if (input.stdin !== undefined && (typeof input.stdin !== 'string' || Buffer.byteLength(input.stdin) > 4096 || input.stdin.includes('\0')))
       throw new Error('stdin must be bounded text');

@@ -70,7 +70,7 @@ it('Reproduction R1/R2: distinct feedback and workflow lookup produce no Sentry 
     expect(additional.body.itemId).not.toBe(cap.body.itemId);
     expect(await post('reportFeedback', { ...turn, category: 'bug', summary: 'Latest excess report' }))
       .toEqual({ status: 200, body: { itemId: additional.body.itemId, duplicate: true } });
-    expect(missing).toEqual({ status: 404, body: { error: 'workflow run is unavailable in this Room' } });
+    expect(missing).toEqual({ status: 404, body: { error: 'workflow run is unavailable in this chat' } });
     // Full IDs skip prefix resolution and reach the read/mutation lookups.
     const fullMissingId = 'deadbeef' + '0'.repeat(56);
     for (const [operation, input] of [
@@ -80,7 +80,7 @@ it('Reproduction R1/R2: distinct feedback and workflow lookup produce no Sentry 
       const result = await post(operation, input);
       console.log('R2 full-ID HTTP evidence', JSON.stringify({ operation, ...result }));
       expect(result).toEqual({ status: 503,
-        body: { error: 'workflow run is unavailable in this Room' } });
+        body: { error: 'workflow run is unavailable in this chat' } });
       await Sentry.flush(2000);
       expect(events()).toHaveLength(0);
     }

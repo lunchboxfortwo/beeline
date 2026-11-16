@@ -155,7 +155,7 @@ it('allows an unchanged automatic attention wake to finish without repeating a s
   await f.session.dispose();
 });
 
-it('keeps a cold repository corner able to check out and push after session context loads', async () => {
+it('keeps a cold repository thread able to check out and push after session context loads', async () => {
   const f = await fixture(true);
   const source = join(f.config.workspaceRoot!, 'source');
   await mkdir(source);
@@ -178,19 +178,19 @@ it('keeps a cold repository corner able to check out and push after session cont
   await f.session.deliver(f.item, []);
   await vi.waitFor(() => expect(f.session.resources.read()).toMatchObject({ repository, restore }));
   const systemPrompt = vi.mocked(f.session.client!.sessionNew).mock.calls[0]![0].systemPrompt!;
-  expect(systemPrompt).not.toContain('repo-less corner');
+  expect(systemPrompt).not.toContain('repo-less thread');
   expect(systemPrompt).not.toContain('Do not initialize a repository');
   expect(systemPrompt).toContain('workspace');
-  expect(systemPrompt).toContain('any agent in this corner may commit, push and open a pull request');
+  expect(systemPrompt).toContain('Implementer rules: the rules below');
   const ready = await prepareWorkspace({ api: f.session.options.api, config: f.config,
     supervisorRoot: f.session.options.runtime.supervisorRoot, workspaceId: 'workspace',
     agent: f.session.options.agent, placeId: 'room', parentRoomId: 'parent' });
   const checkout = f.session.folder();
   expect(ready).toContain(`Checkout ready at ${checkout} on branch feature/corner-room`);
   expect(await readFile(join(checkout, 'README.md'), 'utf8')).toBe('repository contents\n');
-  await writeFile(join(checkout, 'proof.txt'), 'corner edit\n');
+  await writeFile(join(checkout, 'proof.txt'), 'thread edit\n');
   await execFileAsync('git', ['-C', checkout, 'add', 'proof.txt']);
-  await execFileAsync('git', ['-C', checkout, 'commit', '-m', 'Prove corner edits']);
+  await execFileAsync('git', ['-C', checkout, 'commit', '-m', 'Prove thread edits']);
   await execFileAsync('git', ['-C', checkout, 'push', 'origin', 'HEAD:refs/heads/proof-corner-checkout']);
   const pushed = await execFileAsync('git', ['--git-dir', remote, 'rev-parse', 'refs/heads/proof-corner-checkout']);
   const head = await execFileAsync('git', ['-C', checkout, 'rev-parse', 'HEAD']);
@@ -198,23 +198,23 @@ it('keeps a cold repository corner able to check out and push after session cont
   await f.session.dispose();
 });
 
-it('does not tell a cold Room that its repository is missing before the read completes', async () => {
+it('does not tell a cold chat that its repository is missing before the read completes', async () => {
   const f = await fixture();
   await f.session.start();
   const systemPrompt = vi.mocked(f.session.client!.sessionNew).mock.calls[0]![0].systemPrompt!;
-  expect(systemPrompt).not.toContain('This Beeline Room has no linked repository');
+  expect(systemPrompt).not.toContain('This Beeline chat has no linked repository');
   expect(systemPrompt).toContain('workspace');
   expect(f.execute).not.toHaveBeenCalled();
   await f.session.dispose();
 });
 
-it.each([false, true])('does not treat an unverified repository as absent (corner=%s)', async corner => {
+it.each([false, true])('does not treat an unverified repository as absent (thread=%s)', async corner => {
   const f = await fixture(corner);
   f.session.resources.context.repository = { resolution: 'unverified' };
   await f.session.start();
   const systemPrompt = vi.mocked(f.session.client!.sessionNew).mock.calls[0]![0].systemPrompt!;
-  expect(systemPrompt).not.toContain('This Beeline Room has no linked repository');
-  expect(systemPrompt).not.toContain('This is a repo-less corner');
+  expect(systemPrompt).not.toContain('This Beeline chat has no linked repository');
+  expect(systemPrompt).not.toContain('This is a repo-less thread');
   expect(systemPrompt).toContain('workspace');
   await f.session.dispose();
 });
@@ -230,7 +230,7 @@ it('replaces a native conversation when its repository instructions change', asy
   f.session.resources.context.repository = { resolution: 'none' };
   await f.session.start();
   expect(f.session.client!.sessionNew).toHaveBeenCalledWith(expect.objectContaining({
-    systemPrompt: expect.stringContaining('This is a repo-less corner'),
+    systemPrompt: expect.stringContaining('This is a repo-less thread'),
   }));
   await f.session.stop();
   await f.session.start();
@@ -240,7 +240,7 @@ it('replaces a native conversation when its repository instructions change', asy
   await f.session.start();
   expect(load).toHaveBeenCalledTimes(1);
   expect(f.session.client!.sessionNew).toHaveBeenLastCalledWith(expect.objectContaining({
-    systemPrompt: expect.stringContaining('any agent in this corner may commit, push and open a pull request'),
+    systemPrompt: expect.stringContaining('Implementer rules: the rules below'),
   }));
   await f.session.dispose();
 });

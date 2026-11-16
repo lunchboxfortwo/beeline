@@ -20,10 +20,10 @@ function boundedText(value: unknown, maximum: number): value is string {
 }
 
 export function validateCornerBrief(draft: CornerBriefDraft, repositoryBacked = false): readonly string[] {
-  if (!draft || typeof draft !== 'object') throw new Error('corner brief is required');
+  if (!draft || typeof draft !== 'object') throw new Error('thread brief is required');
   if (!boundedText(draft.spec, CORNER_BRIEF_SPEC_MAX_LENGTH))
     throw new Error(
-      `corner brief spec must contain 1–${CORNER_BRIEF_SPEC_MAX_LENGTH} characters of Markdown`,
+      `thread brief spec must contain 1–${CORNER_BRIEF_SPEC_MAX_LENGTH} characters of Markdown`,
     );
   if (draft.approval !== undefined && !boundedText(draft.approval?.sourceMessageId, 256))
     throw new ExpectedRefusalError('brief.approval.sourceMessageId must contain 1–256 characters; cite the approving human message or active private commander order ID');
@@ -31,14 +31,14 @@ export function validateCornerBrief(draft: CornerBriefDraft, repositoryBacked = 
     draft.change !== undefined &&
     (typeof draft.change !== 'string' || draft.change.length > 1_000)
   )
-    throw new Error('corner brief change must be at most 1000 characters');
+    throw new Error('thread brief change must be at most 1000 characters');
   if (draft.repositoryWork !== undefined && typeof draft.repositoryWork !== 'boolean')
-    throw new Error('corner brief repositoryWork must be a boolean');
+    throw new Error('thread brief repositoryWork must be a boolean');
   const attachments = draft.attachments;
   if (!Array.isArray(attachments) && attachments !== undefined)
-    throw new Error('corner brief attachments must be a list');
+    throw new Error('thread brief attachments must be a list');
   if ((attachments?.length ?? 0) > CORNER_BRIEF_ATTACHMENT_LIMIT)
-    throw new Error('corner brief has too many attachments');
+    throw new Error('thread brief has too many attachments');
   const ids = new Set<string>();
   for (const item of attachments ?? []) {
     const normalizedId = item?.objectId?.toLowerCase();
@@ -52,7 +52,7 @@ export function validateCornerBrief(draft: CornerBriefDraft, repositoryBacked = 
       typeof item.required !== 'boolean' ||
       ids.has(normalizedId)
     )
-      throw new Error('invalid corner brief attachment');
+      throw new Error('invalid thread brief attachment');
     ids.add(normalizedId);
   }
   // Repository bugfixes record real-target proof, or why infeasible and the closest stand-in.
@@ -120,7 +120,7 @@ export async function resolveCornerBriefAttachments(
     ).rows[0];
     if (!object)
       throw new Error(
-        `corner brief attachment ${item.objectId} is missing or unavailable in this Room`,
+        `thread brief attachment ${item.objectId} is missing or unavailable in this chat`,
       );
     resolved.push({
       objectId: item.objectId.toLowerCase(),
@@ -182,7 +182,7 @@ export async function resolvePendingCornerBriefAttachments(
 }
 
 /**
- * Identity of one stored revision: what an `open_corner` retry is compared
+ * Identity of one stored revision: what an `open_thread` retry is compared
  * against. Internal only; the contract no longer exposes it.
  */
 export function cornerBriefRevisionHash(
@@ -332,7 +332,7 @@ export async function resolveCornerBriefApproval(
       const revisionHash = cornerBriefRevisionHash(directDraft, attachments);
       return {
         approvalBasis: { kind: 'commander-direct', sourceMessageId: '',
-          snapshot: 'Commander revised the corner brief directly', approvedBy: revision.agentId,
+          snapshot: 'Commander revised the thread brief directly', approvedBy: revision.agentId,
           briefHash: revisionHash,
           ...(draft.repositoryWork !== undefined ? { repositoryWork: draft.repositoryWork } : {}) },
         revisionHash, sourceRoomId: commander.parent_id,
@@ -448,12 +448,12 @@ export async function resolveCornerBriefApproval(
     }
   }
   if (revision && (!message || message.kind !== 'human' && !commanderOrder))
-    throw new CommandRefusalError("brief.approval.sourceMessageId must cite a human message from a current Room member or an active order from this corner's commander; use the delivered order ID or its forwarded root human message ID", 403);
+    throw new CommandRefusalError("brief.approval.sourceMessageId must cite a human message from a current chat member or an active order from this thread's commander; use the delivered order ID or its forwarded root human message ID", 403);
   if (opening && !revision && (!message || message.kind !== 'human' && !commanderOrder)) {
     const revisionHash = cornerBriefRevisionHash(draft, attachments);
     return {
       approvalBasis: { kind: 'agent-initiated', sourceMessageId,
-        snapshot: 'Agent-initiated corner', approvedBy: opening.agentId, briefHash: revisionHash,
+        snapshot: 'Agent-initiated thread', approvedBy: opening.agentId, briefHash: revisionHash,
         ...(draft.repositoryWork !== undefined ? { repositoryWork: draft.repositoryWork } : {}) },
       revisionHash, sourceRoomId: opening.roomId,
     };
@@ -619,7 +619,7 @@ export async function currentCornerBrief(
 
 /** What every land attempt answers when the corner's brief does not assign repository work. */
 export const CORNER_BRIEF_MERGE_REFUSAL =
-  "this corner's brief does not assign repository work; revise the brief before merging";
+  "this thread's brief does not assign repository work; revise the brief before merging";
 
 /** Thrown by the one merge path (`GitHubOperations.landCorner`); never swallowed by its callers. */
 export class CornerBriefMergeRefusedError extends Error {

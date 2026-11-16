@@ -98,7 +98,7 @@ describe('Welcome Workspace retirement', () => {
     });
     expect(preflight.agents?.map((agent) => agent.agent_id)).toEqual([GREETER, HOMED_AGENT, STRAY_AGENT]);
     // The preflight reads only.
-    expect(await count(database, `SELECT 1 FROM beeline_release_steps`)).toBe(0);
+    expect(await count(database, `SELECT 1 FROM beeline_release_steps WHERE name=$1`, [WELCOME_RETIREMENT_STEP])).toBe(0);
 
     const result = await retireWelcomeWorkspace(database, { greeterAgentId: GREETER });
     expect(result).toEqual({
@@ -197,7 +197,7 @@ describe('Welcome Workspace retirement', () => {
       WelcomeRetirementRefusedError,
     );
     expect(await count(database, `SELECT 1 FROM workspaces WHERE id=$1`, [DEFAULT_WORKSPACE_ID])).toBe(1);
-    expect(await count(database, `SELECT 1 FROM beeline_release_steps`)).toBe(0);
+    expect(await count(database, `SELECT 1 FROM beeline_release_steps WHERE name=$1`, [WELCOME_RETIREMENT_STEP])).toBe(0);
     expect(
       await count(database, `SELECT 1 FROM identities WHERE id=$1 AND hidden_from_roster`, [GREETER]),
     ).toBe(0);
@@ -220,7 +220,7 @@ describe('Welcome Workspace retirement', () => {
     expect(
       await count(database, `SELECT 1 FROM daemon_tokens WHERE agent_id=$1 AND revoked_at IS NULL`, [GREETER]),
     ).toBe(1);
-    expect(await count(database, `SELECT 1 FROM beeline_release_steps`)).toBe(0);
+    expect(await count(database, `SELECT 1 FROM beeline_release_steps WHERE name=$1`, [WELCOME_RETIREMENT_STEP])).toBe(0);
     expect(await count(database, `SELECT 1 FROM workspace_deletions`)).toBe(0);
   });
 });

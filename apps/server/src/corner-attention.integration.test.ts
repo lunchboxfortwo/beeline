@@ -371,7 +371,7 @@ it.each(['failed', 'complete'])('Reproduction IDLE-STORM: commander %s exhausts 
   }
   for (let replay = 0; replay < 5; replay++) await refreshCornerAttention(db, C);
   expect((await db.query(`SELECT id FROM agent_commands WHERE private_payload->>'authorId'=$1
-    AND private_payload->>'text' LIKE 'blocked: Corner % is idle.%'`, [SYSTEM_IDENTITY_ID])).rows).toHaveLength(1);
+    AND private_payload->>'text' LIKE 'blocked: Thread % is idle.%'`, [SYSTEM_IDENTITY_ID])).rows).toHaveLength(1);
 });
 
 // Isolated service reads stand in for the production phone and agent surfaces.

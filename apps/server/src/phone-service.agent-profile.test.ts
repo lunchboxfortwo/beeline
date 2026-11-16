@@ -11,7 +11,7 @@ let database: PgliteDatabase;
 afterEach(async () => database?.close());
 
 describe('agent profile recent work', () => {
-  it('shows only merged, attributed work in readable corners, and revokes it with membership', async () => {
+  it('shows only merged, attributed work in readable threads, and revokes it with membership', async () => {
     database = await migratedDatabase();
     await database.query(
       `INSERT INTO identities(id,kind,name) VALUES ($1,'agent','Agent'),($2,'human','Viewer'),($3,'agent','Other')`,

@@ -12,7 +12,7 @@ const git = (args: string[], env?: NodeJS.ProcessEnv) => execFileAsync('git', ar
 /** Private refs let agents check out the same public branch independently. */
 export function agentCornerCheckoutPaths(root: string, cornerId: string, agentId: string) {
   for (const value of [cornerId, agentId]) {
-    if (!/^[a-zA-Z0-9_-]+$/.test(value)) throw new Error('invalid corner checkout identity');
+    if (!/^[a-zA-Z0-9_-]+$/.test(value)) throw new Error('invalid thread checkout identity');
   }
   const key = createHash('sha256').update(`${cornerId}:${agentId}`).digest('hex');
   return {
@@ -161,7 +161,7 @@ export async function materializeAgentCornerCheckout(input: {
     // A pending copy has never been handed to a harness. Rebuilding it also
     // preserves staged deletions, which overlaying a fresh checkout would undo.
     if (source !== legacy || relative(resolve(input.root, 'beeline/corners'), source) !== input.cornerId)
-      throw new Error('legacy corner import source changed');
+      throw new Error('legacy thread import source changed');
     for (const entry of await readdir(paths.path)) {
       if (entry !== '.git') await rm(resolve(paths.path, entry), { recursive: true, force: true });
     }
@@ -173,6 +173,6 @@ export async function materializeAgentCornerCheckout(input: {
   }
   // Git must identify exactly this checkout, including when root is symlinked.
   const top = (await git(['-C', paths.path, 'rev-parse', '--show-toplevel'])).stdout.trim();
-  if (await realpath(top) !== await realpath(paths.path)) throw new Error('agent corner checkout escaped its root');
+  if (await realpath(top) !== await realpath(paths.path)) throw new Error('agent thread checkout escaped its root');
   return paths;
 }

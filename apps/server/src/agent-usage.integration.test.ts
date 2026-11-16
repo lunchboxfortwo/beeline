@@ -97,7 +97,7 @@ describe('daemon → stored usage → owner profile and Members', () => {
     expect(summary).toContain('5-hour 42%');
     expect(summary).toContain('weekly 83%');
     // An agent's usage tool cannot read another agent's usage.
-    await expect(daemon.execute('getAgentUsage', { agentId: agent }, sibling)).rejects.toThrow(/does not own|daemon room access denied/);
+    await expect(daemon.execute('getAgentUsage', { agentId: agent }, sibling)).rejects.toThrow(/does not own|daemon chat access denied/);
     expect(usageSummary()).toBe('Usage: unknown (harness reports none).');
     await expect(
       daemon.execute(
@@ -156,7 +156,7 @@ it('keeps a provider stop without inventing utilization and rejects another agen
   );
   await expect(
     daemon.execute('postAgentUsage', { agentId: agent, usage: stopped }, other),
-  ).rejects.toThrow(/does not own|daemon room access denied/);
+  ).rejects.toThrow(/does not own|daemon chat access denied/);
 });
 
 it('reports the owner-wide free allowance with its UTC reset and keeps it private', async () => {

@@ -82,10 +82,10 @@ export async function runGrantedCommand(
   const output = typeof result.output === 'string' && result.output ? result.output : '(no output)';
   const refused =
     result.writeRefused === true
-      ? (process.env.BEELINE_DAEMON_CORNER_ID ? '\nA write was refused outside your scratch directory.' : '\nThis Room is read-only outside your scratch directory. Open a corner with open_corner to change files;') + ' For host work, ask with request_grant(mode:request, kind:command, target, action, purpose, reason), then use run_granted_command.'
+      ? (process.env.BEELINE_DAEMON_CORNER_ID ? '\nA write was refused outside your scratch directory.' : '\nThis chat is read-only outside your scratch directory. Open a thread with open_thread to change files;') + ' For host work, ask with request_grant(mode:request, kind:command, target, action, purpose, reason), then use run_granted_command.'
       : '';
   const recovery = result.sandboxFailure === true
-    ? '\nFor host work, open a corner and ask with request_grant(mode:request, kind:command, target, action, purpose, reason), then use run_granted_command.'
+    ? '\nFor host work, open a thread and ask with request_grant(mode:request, kind:command, target, action, purpose, reason), then use run_granted_command.'
     : '';
   return `ran under grant ${grantId}: ${verdict}\n${output}${refused}${recovery}`;
 }
@@ -148,7 +148,7 @@ export function normalizeAgentToolArgs(name: string, args: JsonObject): string[]
     delete args.replyTo;
     removed.push('reply link');
   }
-  if (name === 'open_corner') {
+  if (name === 'open_thread') {
     for (const field of ['name', 'objective'] as const) {
       if (args[field] === undefined) continue;
       const fixed = fixCornerText(field, args[field]);
@@ -239,16 +239,16 @@ export function validateToolInput(tool: ToolDefinition, args: JsonObject): void 
     const required = tool.inputSchema.required as string[] | undefined;
     const missing = required?.filter(field => args[field] === undefined);
     const extra = Object.keys(args).filter(field => !(field in asObject(tool.inputSchema.properties)));
-    const branches = tool.name === 'revise_corner'
+    const branches = tool.name === 'revise_thread'
       ? (tool.inputSchema.allOf as JsonObject[]).filter(schema => Check(asObject(schema.if), args)).map(schema => schema.then)
       : tool.inputSchema.anyOf;
-    const diagnosticSchema = tool.name === 'wake' || tool.name === 'revise_corner'
+    const diagnosticSchema = tool.name === 'wake' || tool.name === 'revise_thread'
       ? { ...tool.inputSchema, allOf: undefined, anyOf: (branches as JsonObject[]).filter(schema => {
         const action = asObject(schema.properties).action;
         return !action || Check(action, requestedAction);
       }) }
       : tool.inputSchema;
-    const details = tool.name === 'wake' || tool.name === 'revise_corner' || tool.name === 'search'
+    const details = tool.name === 'wake' || tool.name === 'revise_thread' || tool.name === 'search'
       ? Errors(diagnosticSchema, args).filter(error => error.keyword !== 'anyOf')
         .map(error => `${error.instancePath || 'input'}: ${error.message}`).join('; ')
       : '';
@@ -306,16 +306,16 @@ async function executeResourceTool(name: string, args: JsonObject, toolCallId: s
       const address = args.address ?? (process.env.BEELINE_DAEMON_CORNER_ID?.trim() || process.env.BEELINE_DAEMON_ROOM_ID);
       const input = { ...args, ...asObject(args.cursor), address, cornerId: address };
       switch (facet) {
-        case 'addresses': return execute('list_rooms', input);
-        case 'corners': return execute('list_corners', input);
-        case 'members': return execute('list_room_members', input);
+        case 'addresses': return execute('list_chats', input);
+        case 'threads': return execute('list_threads', input);
+        case 'members': return execute('list_chat_members', input);
         case 'messages':
           // Every message read uses the same bounded cursor contract.
-          return execute('inspect_corner', { ...input, from: args.from ?? (asObject(args.cursor).after || asObject(args.cursor).offset !== undefined ? 'oldest' : 'newest'), mode: 'transcript' });
-        case 'message': return execute('get_room_message', { ...input, messageId: args.messageId });
+          return execute('inspect_thread', { ...input, from: args.from ?? (asObject(args.cursor).after || asObject(args.cursor).offset !== undefined ? 'oldest' : 'newest'), mode: 'transcript' });
+        case 'message': return execute('get_chat_message', { ...input, messageId: args.messageId });
         case 'attachment': return execute('download_attachment', input);
-        case 'brief': return execute('read_corner_brief', input);
-        case 'status': return execute('inspect_corner', { ...input, mode: 'status' });
+        case 'brief': return execute('read_thread_brief', input);
+        case 'status': return execute('inspect_thread', { ...input, mode: 'status' });
         case 'checks': return execute('pr_checks_status', input);
         case 'pr': return execute('read_pull_request', input);
         case 'procedure': return execute('load_workspace_skill', { ...input, slug: args.slug });
@@ -337,8 +337,8 @@ async function executeResourceTool(name: string, args: JsonObject, toolCallId: s
       if (!operation) throw new Error('unknown remember kind/action');
       return execute(operation);
     }
-    case 'revise_corner': {
-      if (args.action === 'metadata') return execute('rename_corner', addressed);
+    case 'revise_thread': {
+      if (args.action === 'metadata') return execute('rename_thread', addressed);
       if (args.action !== 'brief' && args.action !== 'install_brief') throw new Error('action must be metadata, install_brief or brief');
       const copied = asObject(args.brief);
       // Projection metadata is read-only. Keep revision and change from the call,
@@ -356,21 +356,22 @@ async function executeResourceTool(name: string, args: JsonObject, toolCallId: s
       };
       if (args.action === 'install_brief') {
         const { spec, repositoryWork, approval, attachments } = input;
-        return execute('rename_corner', { ...addressed, brief: { spec, repositoryWork, approval, attachments } });
+        return execute('rename_thread', { ...addressed, brief: { spec, repositoryWork, approval, attachments } });
       }
-      return execute('revise_corner_brief', input);
+      return execute('revise_thread_brief', input);
     }
+    case 'become_implementer': return execute(name);
     case 'report_feedback':
     case 'notify_feedback_fixed':
     case 'send_operator_system_dm':
     case 'read_operator_system_dm': return execute(name);
     case 'dispatch_release': return execute(name);
     case 'approve_merge':
-    case 'merge_corner':
-    case 'set_corner_hold':
-    case 'close_corner': return execute(name, addressed);
-    case 'record_merge_yes': return execute('order_corner_merge', addressed);
-    case 'close_corner_pr': return execute('close_pull_request', addressed);
+    case 'merge_thread':
+    case 'set_thread_hold':
+    case 'close_thread': return execute(name, addressed);
+    case 'record_merge_yes': return execute('order_thread_merge', addressed);
+    case 'close_thread_pr': return execute('close_pull_request', addressed);
     case 'request_grant':
       if ((args.mode ?? args.action) === 'list') return execute('list_grants');
       if (args.mode !== undefined && args.mode !== 'request') throw new Error('mode must be request or list');
@@ -381,7 +382,7 @@ async function executeResourceTool(name: string, args: JsonObject, toolCallId: s
       const capabilities = builtin || args.mode === 'discover' || args.mode === 'status'
         ? await availableCapabilities(!builtin || builtin === 'beeline:onboarding') : [];
       if (builtin === 'beeline:onboarding' && !capabilities.includes(builtin))
-        return JSON.stringify({ status: 'unavailable', app: builtin, next: 'Repository cards are unavailable on this surface. Use an active Room with current members and retry the repository card.' });
+        return JSON.stringify({ status: 'unavailable', app: builtin, next: 'Repository cards are unavailable on this surface. Use an active chat with current members and retry the repository card.' });
       if (builtin && capabilities.includes(builtin) && (args.mode === undefined || ['status', 'ensure', 'discover'].includes(String(args.mode))))
         return JSON.stringify({ status: 'ready', app: builtin,
           next: `Use app_tool(app:${builtin}) to discover its tools. Existing tool permissions still apply.` });
@@ -465,7 +466,7 @@ async function executeResourceTool(name: string, args: JsonObject, toolCallId: s
       }
       throw new Error('unknown wake action/trigger');
     }
-    case 'open_corner': {
+    case 'open_thread': {
       try {
         return await execute(name);
       } catch (error) {

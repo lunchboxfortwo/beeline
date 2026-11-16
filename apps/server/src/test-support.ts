@@ -1,3 +1,4 @@
+import { becomeThreadImplementer } from './corner-lifecycle.js';
 import { assignCornerWorker, seedCornerOpening, seedCornerFactsRow } from './test-fixtures/corner-commands.js';
 export { assignCornerWorker, seedCornerOpening };
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
@@ -310,12 +311,14 @@ export async function insertCornerFacts(db: SqlDatabase, input: {
  */
 export async function setCornerOwner(db: SqlDatabase, cornerId: string, agentId: string | null): Promise<void> {
   if (!agentId) {
+    await becomeThreadImplementer(db, cornerId, null);
     await db.query(`DELETE FROM agent_commands WHERE room_id=$1 AND reason IN ('corner_objective','human_tag')`, [cornerId]);
     // An agent creator is how `insertCornerFacts` recorded an owner alone.
     await db.query(`UPDATE rooms SET created_by=NULL WHERE id=$1
       AND created_by IN (SELECT id FROM identities WHERE kind='agent')`, [cornerId]);
     return;
   }
+  await becomeThreadImplementer(db, cornerId, agentId);
   const moved = await db.query(
     `UPDATE agent_commands SET agent_id=$2 WHERE id=(SELECT id FROM agent_commands
        WHERE room_id=$1 AND reason IN ('corner_objective','human_tag') ORDER BY inbox_sequence LIMIT 1)`,

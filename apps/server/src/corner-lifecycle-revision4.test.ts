@@ -101,7 +101,7 @@ it('Reproduction REVIEW-TARGET: a new head wake uses the newest brief and report
   expect(next?.source.body).toContain('FAIL: newest reported evidence');
 });
 
-it('Reproduction REVIEW-ORDER: ordering the listed reviewer works and an archived corner says archived', async () => {
+it('Reproduction REVIEW-ORDER: ordering the listed reviewer works and an archived thread says archived', async () => {
   await rootFixture.phone.execute('updateRoom',{roomId:R,reviewerAgentId:B},H);
   const current=await createAgentCommand(rootFixture.db,{roomId:C,agentId:A,sourceMessageId:null,reason:'order',
     privatePayload:{kind:'order',authorId:H,fromRoomId:R,text:'Implement the fix'}});

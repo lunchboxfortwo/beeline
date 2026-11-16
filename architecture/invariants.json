@@ -1202,6 +1202,7 @@
           "lifecycle": "existing before the registry; weekly audit reviews",
           "locked": "existing before the registry; weekly audit reviews",
           "reviewer_agent_id": "existing before the registry; weekly audit reviews",
+          "implementer_agent_id": "Recorded thread implementer; initialized by the opening assignment and changed only by become_implementer.",
           "owner_agent_id": {
             "reason": "Compatibility for rollout-0707: preceding serving and rollback images read the retired owner column",
             "drop": "Remove only through a reviewed contract migration after serving and rollback images stop reading it."

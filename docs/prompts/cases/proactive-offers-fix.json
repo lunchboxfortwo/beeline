@@ -19,7 +19,7 @@
   "pass": {
     "any": [
       {
-        "call": "open_corner"
+        "call": "open_thread"
       },
       {
         "text": {

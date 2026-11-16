@@ -24,7 +24,7 @@ describe('JOIN-DELIVERY: OAuth is membership, host receipts prove delivery', () 
         host,
       ]);
       await client.callTool({ name: 'set_profile', arguments: { name: host } });
-      const rooms = value(await client.callTool({ name: 'list_rooms', arguments: {} }));
+      const rooms = value(await client.callTool({ name: 'list_chats', arguments: {} }));
       expect(rooms.you.id).toBe(member);
       expect(rooms.delivery.state).toBe('setup_unfinished');
       expect(rooms.setup).toContain('setup_delivery');
@@ -34,12 +34,12 @@ describe('JOIN-DELIVERY: OAuth is membership, host receipts prove delivery', () 
         } });
       }
       if (host === 'Failed local') {
-        const binding = value(await client.callTool({ name: 'list_rooms', arguments: {} }));
+        const binding = value(await client.callTool({ name: 'list_chats', arguments: {} }));
         const failed = value(await client.callTool({ name: 'delivery_failed', arguments: {
           generation: binding.delivery.generation, reason: 'local_receiver_setup_failed',
         } }));
         expect(failed.next).toBe('The local Beeline receiver failed to start. Run npx -y usebeeline@latest join again in the same coding session. If it still fails, check that this computer can create and run its local receiver. Opening the join website cannot repair a local receiver failure.');
-        expect(value(await client.callTool({ name: 'list_rooms', arguments: {} })).setup).toContain(LOCAL_RECEIVER_RECOVERY);
+        expect(value(await client.callTool({ name: 'list_chats', arguments: {} })).setup).toContain(LOCAL_RECEIVER_RECOVERY);
       }
       const tagged = await scope.phone.execute(
         'sendRoomMessage',
@@ -98,7 +98,7 @@ describe('JOIN-DELIVERY transport and credential proofs', () => {
       },
     });
   const state = async (client: any) =>
-    data(await client.callTool({ name: 'list_rooms', arguments: {} })).delivery;
+    data(await client.callTool({ name: 'list_chats', arguments: {} })).delivery;
 
   it('1: the local continuation redeems once and preserves the OAuth member, owner and access', async () => {
     const { client, member, token, grant } = await scope.connected();
@@ -126,7 +126,7 @@ describe('JOIN-DELIVERY transport and credential proofs', () => {
     expect(tokens.clientId).toBe(grant.clientId);
     expect((await scope.post('/mcp/oauth/delivery-attach', { secret })).status).toBe(400);
     const rooms = await scope.eventCall(tokens.access_token, 'tools/call', {
-      name: 'list_rooms',
+      name: 'list_chats',
       arguments: {},
     });
     expect(JSON.parse(rooms.result.content[0].text).data.you.id).toBe(member);
@@ -140,7 +140,7 @@ describe('JOIN-DELIVERY transport and credential proofs', () => {
     expect(await state(client)).toMatchObject({ state: 'setup_unfinished' });
     // The original host's connection remains usable; attach is not another membership or consent.
     expect(
-      (await scope.eventCall(token, 'tools/call', { name: 'list_rooms', arguments: {} })).result
+      (await scope.eventCall(token, 'tools/call', { name: 'list_chats', arguments: {} })).result
         .isError,
     ).not.toBe(true);
   });
@@ -172,7 +172,7 @@ describe('JOIN-DELIVERY transport and credential proofs', () => {
       JSON.stringify(data(await client.callTool({ name: 'list_mentions', arguments: {} }))),
     ).not.toContain(receipt.nonce);
     expect(
-      JSON.stringify(data(await client.callTool({ name: 'list_rooms', arguments: {} }))),
+      JSON.stringify(data(await client.callTool({ name: 'list_chats', arguments: {} }))),
     ).not.toContain(receipt.nonce);
     const other = await scope.connected();
     expect(
@@ -200,7 +200,7 @@ describe('JOIN-DELIVERY transport and credential proofs', () => {
     ).rows[0]!.handle;
     const mention = await scope.phone.execute(
       'sendRoomMessage',
-      { roomId: ROOM, text: `@${handle} answer the Room` },
+      { roomId: ROOM, text: `@${handle} answer the chat` },
       USER,
     );
     const dm = (await scope.phone.execute(
@@ -294,7 +294,7 @@ describe('JOIN-DELIVERY transport and credential proofs', () => {
             jsonrpc: '2.0',
             id: 1,
             method: 'tools/call',
-            params: { name: 'list_rooms', arguments: {} },
+            params: { name: 'list_chats', arguments: {} },
           },
           { authorization: 'Bearer ' + token },
         )
@@ -397,7 +397,7 @@ describe('JOIN-DELIVERY local selected-path proof', () => {
       const probeFrame = reply.frames.find(frame => frame.wakes?.[0]?.kind === 'join_probe');
       expect(probeFrame).toBeDefined();
       expect(
-        data(await client.callTool({ name: 'list_rooms', arguments: {} })).delivery.state,
+        data(await client.callTool({ name: 'list_chats', arguments: {} })).delivery.state,
       ).toBe('setup_unfinished');
       // Legacy timestamps must no longer expire authentication or delivery proof.
       await scope.db.query("UPDATE rooms_mcp_tokens SET expires_at=now()-interval '2 hours',window_at=now()-interval '3 hours' WHERE hash=$1", [principal.hash]);
@@ -415,7 +415,7 @@ describe('JOIN-DELIVERY local selected-path proof', () => {
         'proved_ready',
       );
 
-      const handle = data(await client.callTool({ name: 'list_rooms', arguments: {} })).you.handle;
+      const handle = data(await client.callTool({ name: 'list_chats', arguments: {} })).you.handle;
       const tagged = await scope.phone.execute(
         'sendRoomMessage',
         { roomId: ROOM, text: `@${handle} local mention` },
@@ -519,7 +519,7 @@ describe('JOIN-DELIVERY persistent Events lifecycle', () => {
     });
     expect(attempts).toBe(1);
     expect(
-      data(await client.callTool({ name: 'list_rooms', arguments: {} })).delivery,
+      data(await client.callTool({ name: 'list_chats', arguments: {} })).delivery,
     ).toMatchObject({ state: 'failed', offline: true, failure: 'event_subscription_gone' });
     await scope.phone.execute(
       'sendRoomMessage',
@@ -535,7 +535,7 @@ describe('JOIN-DELIVERY persistent Events lifecycle', () => {
     expect(attempts).toBe(1);
     // Real host resubscription is the recovery event; there is no renewal clock or replay of either message.
     await scope.eventCall(token, 'events/subscribe', { ...params, ttlMs: null });
-    const recovered = data(await client.callTool({ name: 'list_rooms', arguments: {} })).delivery;
+    const recovered = data(await client.callTool({ name: 'list_chats', arguments: {} })).delivery;
     expect(recovered).toMatchObject({ state: 'setup_unfinished', offline: false });
     expect(recovered.generation).not.toBe(first.generation);
     expect(

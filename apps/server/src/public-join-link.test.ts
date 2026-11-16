@@ -30,7 +30,7 @@ async function setup(visibility: 'public' | 'invite-only') {
   ]);
   return new PhoneService(db, 'https://server.example');
 }
-it('seeds once, joins multiple people and default Rooms, and preserves the original token', async () => {
+it('seeds once, joins multiple people and default chats, and preserves the original token', async () => {
   const phone = await setup('public');
   await migrate(db);
   const first = await phone.execute('createInvite', { workspaceId: workspace }, owner);

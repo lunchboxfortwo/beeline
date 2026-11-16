@@ -155,7 +155,7 @@ describe('the gate stays shut (AC-8)', () => {
   });
 
 
-  it('Reproduction hold-room: Room membership suffices without a corner row; a non-member is denied', async () => {
+  it('Reproduction hold-room: chat membership suffices without a thread row; a non-member is denied', async () => {
     const cornerId = await open('owner/widgets');
     await rootFixture.db.query(`DELETE FROM memberships WHERE room_id=$1 AND identity_id=$2`, [cornerId, H]);
     const { holdId } = await rootFixture.phone.execute('setCornerHold', { cornerId }, H);
@@ -194,7 +194,7 @@ describe('the gate stays shut (AC-8)', () => {
   });
 
 
-  it('R4: a failed initial hold rolls back the entire corner', async () => {
+  it('R4: a failed initial hold rolls back the entire thread', async () => {
     const command = await commissioned(R);
     const count = (await rootFixture.db.query(`SELECT count(*) n FROM rooms WHERE parent_id=$1`, [R])).rows;
     await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [R, H]);
@@ -278,7 +278,7 @@ describe('the gate stays shut (AC-8)', () => {
       // The hold is gone; the self-reviewer's corner still waits for a person's yes.
       expect(released).toMatchObject({ held: false, approved: false, mergeAllowed: false, holds: [] });
       expect(await implementersMerge(builtGitHub)).toBe(0);
-      // Reproduction R2199 over HTTP: the implementer's merge_corner is refused and names the missing yes.
+      // Reproduction R2199 over HTTP: the implementer's merge_thread is refused and names the missing yes.
       const refusedMerge = await post('daemon', 'mergeCorner', { cornerId });
       expect(refusedMerge).toMatchObject({ status: 'blocked', blocker: expect.stringContaining('no yes on this head') });
       expect(rootFixture.githubApp.mergePullRequest).not.toHaveBeenCalled();
@@ -389,7 +389,7 @@ describe('zero checks with no reviewer wait for the commander', () => {
     }
   });
 });
-describe("a Workspace owner or admin's yes (order_corner_merge) merges only through the one gate", () => {
+describe("a Workspace owner or admin's yes (order_thread_merge) merges only through the one gate", () => {
 const scope30 = fixtureScope30();
 
 
@@ -579,7 +579,7 @@ describe('the brief gate on landing: only a brief that assigns repository work m
 const scope31 = fixtureScope31();
 
 
-  it.each([false, 'none'] as const)('merge_corner after a reviewer PASS is refused when the brief is %s', async (says) => {
+  it.each([false, 'none'] as const)('merge_thread after a reviewer PASS is refused when the brief is %s', async (says) => {
     const cornerId = await approved();
     await scope31.briefSays(cornerId, says);
     // The reviewer's PASS itself was recorded: only the land is gated.
@@ -676,7 +676,7 @@ describe('a corner opened before the workflow run existed (AC-10)', () => {
     expect(await currentState(cornerId)).toBe('review');
   });
 });
-describe('Reproduction IDLE-1: corner status says whether its agent runs or waits', () => {
+describe('Reproduction IDLE-1: thread status says whether its agent runs or waits', () => {
   it('restores the current implementer so legacy work goes to the assigned agent', async () => {
     const cornerId = await open('owner/widgets');
     expect((await rootFixture.daemon.execute('getCornerRestoreState', { cornerId }, A)).implementerAgentId).toBe(A);

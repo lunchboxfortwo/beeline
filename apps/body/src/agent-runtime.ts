@@ -171,7 +171,7 @@ export async function runAgentRuntime(
   }
 
   console.log(
-    `[beeline] agent ${agentId} in workspace ${runtime.communityId} starting with ${runtime.rooms.length} Room binding(s)`,
+    `[beeline] agent ${agentId} in workspace ${runtime.communityId} starting with ${runtime.rooms.length} chat binding(s)`,
   );
   console.log(`[body] agent binary: ${formatAgentCommand(agent)}`);
 

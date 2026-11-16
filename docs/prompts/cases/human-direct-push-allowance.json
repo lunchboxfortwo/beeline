@@ -201,7 +201,7 @@
         }
       },
       {
-        "noCall": "revise_corner"
+        "noCall": "revise_thread"
       },
       {
         "noCall": "order"

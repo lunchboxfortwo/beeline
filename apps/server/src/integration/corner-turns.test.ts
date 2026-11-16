@@ -163,8 +163,8 @@ const fixture = monolithFixture();
       expect(refused.status).toBe(files.length ? 400 : 403);
       expect(await refused.json()).toMatchObject({
         error: files.length
-          ? expect.stringContaining('missing or unavailable in this Room')
-          : "brief.approval.sourceMessageId must cite a human message from a current Room member or an active order from this corner's commander; use the delivered order ID or its forwarded root human message ID",
+          ? expect.stringContaining('missing or unavailable in this chat')
+          : "brief.approval.sourceMessageId must cite a human message from a current chat member or an active order from this thread's commander; use the delivered order ID or its forwarded root human message ID",
       });
       expect(
         (

@@ -1,7 +1,7 @@
 import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { AGENT,BROWSER_REFUSALS,Client,CORNER,createHash,deliverMcpMemberWebhooks,describe,ensureMcpMember,expect,fixtureScope1,it,MCP_AGENT_TOOLS,MCP_STARTER_ROUTINE,MCP_TAG_INSTRUCTION,opaque,phoneFetch,PRIVATE,PUBLIC_CORNER,randomBytes,readFileSync,ROOM,routeHumanMessage,startQueuedTurn,StreamableHTTPClientTransport,tokenHash,USER,vi,WORKSPACE } from './test-support-rooms-mcp.test-support.js';
 
-describe('Rooms connector HTTP OAuth and MCP', () => {
+describe('chats connector HTTP OAuth and MCP', () => {
 const scope1 = fixtureScope1();
 
   it('logs each refused browser sign-in step with its reason, never parameter values', async () => {
@@ -15,7 +15,7 @@ const scope1 = fixtureScope1();
         expect([step, reason, response.status]).toEqual([step, reason, 400]);
         expect(warn).toHaveBeenCalledTimes(1);
         const [label, line] = warn.mock.calls[0] as [string, string];
-        expect(label).toBe(`[rooms-mcp-oauth] ${step} refused`);
+        expect(label).toBe(`[chats-mcp-oauth] ${step} refused`);
         expect(JSON.parse(line)).toEqual({ error: 'invalid_request', reason, ...(params ? { params } : {}) });
         for (const value of [registered.client_id, challenge, 'state-sentinel-123', 'client.example', 'evil.example', 'flow-sentinel-123', 'cookie-sentinel-123', 'ticket-sentinel-123'])
           expect(line).not.toContain(value);
@@ -248,7 +248,7 @@ const scope1 = fixtureScope1();
         expect([reason, response.status, (await response.json() as { error: string }).error]).toEqual([reason, error === 'invalid_client' ? 401 : 400, error]);
         expect(warn).toHaveBeenCalledTimes(1);
         const [label, line] = warn.mock.calls[0] as [string, string];
-        expect(label).toBe('[rooms-mcp-oauth] token refused');
+        expect(label).toBe('[chats-mcp-oauth] token refused');
         const grantType = ['authorization_code', 'refresh_token'].includes(input.grant_type!) ? input.grant_type : 'other';
         expect(JSON.parse(line)).toMatchObject({ error, reason, grant_type: grantType, params: Object.keys(input).sort(), content_type: 'application/x-www-form-urlencoded' });
         for (const secret of [grant.code!, grant.verifier, 'secret-value-123', 'refresh-value-123', 'grant-sentinel-123', 'password', input.code_verifier!, input.code!].filter(Boolean))
@@ -326,7 +326,7 @@ const scope1 = fixtureScope1();
     for (const line of MCP_STARTER_ROUTINE.split('\n').filter(line => line.trim()))
       expect(page).toContain(`<li>${line.replaceAll("'", '&#39;')}</li>`);
     expect(page).toMatch(/<script nonce="[A-Za-z0-9+/=]+">/);
-    expect(page).toContain('Read public Rooms in selected Workspaces'); expect(page).toContain('It joins their public Rooms'); expect(page).toContain('Post as Grok Bot');
+    expect(page).toContain('Read public chats in selected Workspaces'); expect(page).toContain('It joins their public chats'); expect(page).toContain('Post as Grok Bot');
     // The real Beeline icon, never a letter stand-in.
     expect(page).toContain('<img class="mark" src="data:image/svg+xml;base64,'); expect(page).not.toContain('>b</span>');
     const editPage = await phoneFetch(`${scope1.origin}/mcp/oauth/consent?flow=${flow}&edit=1`, { headers: { cookie } });
@@ -363,7 +363,7 @@ const scope1 = fixtureScope1();
 
   it('repeats the saved starter wake rule in server, setup and webhook instructions', async () => {
     const { client } = await scope1.connected();
-    const setup = scope1.data(await client.callTool({ name: 'list_rooms', arguments: {} })).setup;
+    const setup = scope1.data(await client.callTool({ name: 'list_chats', arguments: {} })).setup;
     const send = (await client.listTools()).tools.find(tool => tool.name === 'send_message')!;
     expect(send.description).toContain("asker's exact @handle to wake them");
     for (const text of [client.getInstructions(), setup, MCP_TAG_INSTRUCTION]) {
@@ -382,7 +382,7 @@ const scope1 = fixtureScope1();
       'replyTo does not wake anyone',
       'When you finish, are blocked, fail, or need a decision on a chat request, tag the agent or person who asked you with the result.',
       'For orders under wakes, pass their id as commandId on tool calls; finish with report at that address, not a plain message.',
-      'Corner reports go one step up to the current commander at its recorded return surface. A human-approved revised brief makes its author commander; later chat requests do not.',
+      'Thread reports go one step up to the current commander at its recorded return surface. A human-approved revised brief makes its author commander; later chat requests do not.',
       'Choose the terminal status',
       'server adds its status prefix',
       'A plain post or send_message without a tag wakes nobody',
@@ -397,7 +397,7 @@ const scope1 = fixtureScope1();
     const reportTool = tools.find(tool => tool.name === 'report')!;
     expect(reportTool.inputSchema.properties?.commandId).toMatchObject({ type: 'string', pattern: '^[0-9a-f]{64}$' });
     const report = reportTool.description;
-    expect(report).toContain('Report a corner outcome to its current commander at the recorded return surface. Human-approved revised briefs transfer command to their author; earlier explicit orders retain their issuer.');
+    expect(report).toContain('Report a thread outcome to its current commander at the recorded return surface. Human-approved revised briefs transfer command to their author; earlier explicit orders retain their issuer.');
     expect(report).toContain('commandId binds the exact order');
     expect(report).toContain('a single pending order elsewhere');
     expect(report).toContain('refuses an ambiguous fallback and lists waiting orders');
@@ -406,34 +406,34 @@ const scope1 = fixtureScope1();
     expect(report).toContain('Later chat requests get ordinary replies here.');
   });
 
-  it('hands finished local code to a corner implementer in every connected-app surface', async () => {
+  it('hands finished local code to a thread implementer in every connected-app surface', async () => {
     const { client } = await scope1.connected();
     const instructions = client.getInstructions();
     for (const rule of [
-      'The implementer pushes the corner branch with the Beeline GitHub App and opens the PR; the reviewer approves, then merge_corner lands it.',
-      'Open a corner with an agent as implementer.',
-      'feature/corner- followed by the first 12 hex characters of the corner id with hyphens removed',
-      'A push or PR on that branch in the same repository links to the corner automatically; fork heads do not link.',
-      'you may push your commits to that corner branch in the same repository',
-      'post the patch into that corner, not the Room, with the base commit and the test commands you ran',
-      "Your owner's approval of the connection covers sharing the patch with that corner.",
+      'The implementer pushes the thread branch with the Beeline GitHub App and opens the PR; the reviewer approves, then merge_thread lands it.',
+      'Open a thread with an agent as implementer.',
+      'feature/corner- followed by the first 12 hex characters of the thread id with hyphens removed',
+      'A push or PR on that branch in the same repository links to the thread automatically; fork heads do not link.',
+      'Call become_implementer before pushing or opening a PR for this thread.',
+      'post the patch into that thread, not the chat, with the base commit and the test commands you ran',
+      "Your owner's approval of the connection covers sharing the patch with that thread.",
     ]) expect(instructions).toContain(rule);
     expect(instructions).not.toContain('you have no checkout');
     expect(instructions).not.toContain('Do not push with your own GitHub connection');
     const tools = (await client.listTools()).tools;
-    const handoff = "Code work goes in a corner with another agent as implementer: use feature/corner- plus the first 12 hex characters of its id with hyphens removed; push existing commits there in the same repository with your own GitHub access, or post the patch in that corner, not the Room, with base commit and test commands for the implementer to apply and push with the Beeline GitHub App; your owner's connection approval covers sharing the patch.";
-    for (const name of ['open_corner', 'post_artifact']) {
+    const handoff = "Code work goes in a thread with another agent as implementer: use feature/corner- plus the first 12 hex characters of its id with hyphens removed; push existing commits there in the same repository with your own GitHub access, or post the patch in that thread, not the chat, with base commit and test commands for the implementer to apply and push with the Beeline GitHub App; your owner's connection approval covers sharing the patch.";
+    for (const name of ['open_thread', 'post_artifact']) {
       expect(tools.find(tool => tool.name === name)?.description).toContain(handoff);
       expect(tools.find(tool => tool.name === name)?.description).not.toContain('you have no checkout');
     }
-    const setup = scope1.data(await client.callTool({ name: 'list_rooms', arguments: {} })).setup;
-    expect(setup).toContain('Repository writes go through a corner implementer.');
+    const setup = scope1.data(await client.callTool({ name: 'list_chats', arguments: {} })).setup;
+    expect(setup).toContain('Repository writes go through a thread implementer.');
   });
 
   it('connects a real SDK client, reads, searches, posts as the member and wakes an agent', async () => {
     const { client, token, grant, member } = await scope1.connected();
     const tools = await client.listTools(); expect(tools.tools).toHaveLength(12 + MCP_AGENT_TOOLS.length);
-    const rooms = await client.callTool({ name: 'list_rooms', arguments: {} });
+    const rooms = await client.callTool({ name: 'list_chats', arguments: {} });
     expect(JSON.stringify(rooms)).toContain(ROOM); expect(JSON.stringify(rooms)).not.toContain(PRIVATE);
     const posted = await client.callTool({ name: 'send_message', arguments: { room: ROOM, text: '@demo-agent report the nebula test' } });
     expect(posted.isError).not.toBe(true);
@@ -447,8 +447,8 @@ const scope1 = fixtureScope1();
     expect(JSON.stringify(await client.callTool({ name: 'read_messages', arguments: { room: ROOM, limit: 1 } }))).toContain('nebula test');
     const searched = JSON.stringify(await client.callTool({ name: 'search_messages', arguments: { query: 'nebula' } }));
     expect(searched).toContain('nebula test'); expect(searched).not.toContain('private nebula');
-    expect(JSON.stringify(await client.callTool({ name: 'list_corners', arguments: { room: ROOM } }))).toContain(PUBLIC_CORNER);
-    expect(JSON.stringify(await client.callTool({ name: 'corner_status', arguments: { corner: PUBLIC_CORNER } }))).toContain('Demo corner');
+    expect(JSON.stringify(await client.callTool({ name: 'list_threads', arguments: { room: ROOM } }))).toContain(PUBLIC_CORNER);
+    expect(JSON.stringify(await client.callTool({ name: 'thread_status', arguments: { corner: PUBLIC_CORNER } }))).toContain('Demo corner');
     expect((await scope1.phone.readRoom(ROOM, USER))!.messages.find(m => m.id === message.id)?.sourceClient).toEqual({ id: grant.clientId, name: 'Local MCP reviewer' });
     // One wake per tagged agent.
     expect((await scope1.db.query('SELECT 1 FROM agent_commands WHERE source_message_id=$1 AND agent_id=$2', [message.id, AGENT])).rowCount).toBe(1);
@@ -627,7 +627,7 @@ const scope1 = fixtureScope1();
     expect((await scope1.db.query('SELECT 1 FROM subscription_webhook_calls WHERE member_id=$1 AND wake_message_id=$2', [member, ownId])).rowCount).toBe(0);
   });
 
-  it('delivers nothing to a member removed from the Room before the drain', async () => {
+  it('delivers nothing to a member removed from the chat before the drain', async () => {
     const { grant, member } = await scope1.connected();
     await scope1.db.query(`UPDATE rooms_mcp_clients SET callback_url='https://hooks.example/removed' WHERE id=$1`, [grant.clientId]);
     // Drain earlier tests' backlog so only this delivery is pending.
@@ -715,11 +715,11 @@ const scope1 = fixtureScope1();
     for (const text of texts) expect(received.filter(body => body.endsWith(text))).toHaveLength(1);
   });
 
-  it('denies cross-user reads, searches, sends and corner reads without exposing private content', async () => {
+  it('denies cross-user reads, searches, sends and thread reads without exposing private content', async () => {
     const { client } = await scope1.connected();
     for (const [name, args] of [
       ['read_messages', { room: PRIVATE }], ['search_messages', { room: PRIVATE, query: 'nebula' }],
-      ['send_message', { room: PRIVATE, text: 'forbidden' }], ['list_corners', { room: PRIVATE }], ['corner_status', { corner: CORNER }],
+      ['send_message', { room: PRIVATE, text: 'forbidden' }], ['list_threads', { room: PRIVATE }], ['thread_status', { corner: CORNER }],
     ] as const) {
       const result = await client.callTool({ name, arguments: args }); expect(result.isError).toBe(true);
       expect(JSON.stringify(result)).not.toContain('private nebula');
@@ -797,7 +797,7 @@ const scope1 = fixtureScope1();
     expect((await scope1.exchange(grant)).status).toBe(400);
   });
 
-  it('pages messages without crossing Room cursors and stores long messages in full', async () => {
+  it('pages messages without crossing chat cursors and stores long messages in full', async () => {
     const { client } = await scope1.connected();
     for (let i=0; i<3; i++) await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: `page ${i}` }, USER);
     const first = await client.callTool({ name: 'read_messages', arguments: { room: ROOM, limit: 1 } });
@@ -817,6 +817,6 @@ const scope1 = fixtureScope1();
     // Removing the member from the Room revokes its next read and post at once.
     await scope1.db.query('UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2', [ROOM, member]);
     expect((await client.callTool({ name: 'read_messages', arguments: { room: ROOM } })).isError).toBe(true);
-    expect(JSON.stringify(await client.callTool({ name: 'list_rooms', arguments: {} }))).not.toContain(ROOM);
+    expect(JSON.stringify(await client.callTool({ name: 'list_chats', arguments: {} }))).not.toContain(ROOM);
   });
 });

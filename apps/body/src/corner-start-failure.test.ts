@@ -12,7 +12,7 @@ afterEach(() => roots.splice(0).forEach(root => {
   rmSync(root, { recursive: true, force: true });
 }));
 
-it.each([false, true])('runs corner commands as the host user without capabilities (overlay: %s)', overlay => {
+it.each([false, true])('runs thread commands as the host user without capabilities (overlay: %s)', overlay => {
   const root = mkdtempSync('/var/tmp/beeline-corner-user-');
   roots.push(root);
   const tree = resolve(root, 'node_modules');
@@ -41,7 +41,7 @@ it.each([false, true])('runs corner commands as the host user without capabiliti
 });
 
 it.each(['missing', 'dangling', 'loop', 'symlink'] as const)(
-  'starts a corner with a %s saved path grant', shape => {
+  'starts a thread with a %s saved path grant', shape => {
     const root = mkdtempSync('/var/tmp/beeline-corner-start-');
     roots.push(root);
     const grant = resolve(root, '.corner-artifacts/threads-refresh');

@@ -202,7 +202,7 @@ function antigravity(context: SetupContext): string[] {
     rmSync(dirname(sidecar), { recursive: true, force: true });
   } else {
     if (writeJson(sidecar, { command: context.node, args: [context.bundle, 'session', 'antigravity-sidecar'], restart_policy: 'on-failure',
-      display_name: 'Beeline', description: 'Deliver Beeline Room tags to your joined conversations' })) lines.push(`updated ${sidecar}`);
+      display_name: 'Beeline', description: 'Deliver Beeline chat tags to your joined conversations' })) lines.push(`updated ${sidecar}`);
     // Keep an explicit choice to disable it.
     sidecars[NAME] ??= { enabled: true };
   }

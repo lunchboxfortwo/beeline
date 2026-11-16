@@ -23,12 +23,12 @@ it('RUBY-16: report files stay in the immutable private queue snapshot', async (
   }, reviewer)).rejects.toThrow('message access denied');
 });
 
-it('RUBY-19: a member reading a Room without a brief gets an empty revision list', async () => {
+it('RUBY-19: a member reading a chat without a brief gets an empty revision list', async () => {
   await expect(rootFixture.daemon.execute('listCornerBriefRevisions', { cornerId: ROOM }, RUBY))
     .resolves.toEqual({ revisions: [] });
   await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [ROOM, RUBY]);
   await expect(rootFixture.daemon.execute('listCornerBriefRevisions', { cornerId: ROOM }, RUBY))
-    .rejects.toThrow('daemon room access denied');
+    .rejects.toThrow('daemon chat access denied');
 });
 
 
@@ -560,7 +560,7 @@ it.each([false, true])('the commander revises from its DM after a check wake (ci
       kind: 'commander-direct',
       approvedBy: RUBY,
       sourceMessageId: '',
-      snapshot: 'Commander revised the corner brief directly',
+      snapshot: 'Commander revised the thread brief directly',
     },
   });
 });

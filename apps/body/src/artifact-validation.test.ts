@@ -65,7 +65,7 @@ describe('post_artifact validation matrix', () => {
       '<!doctype html><html><head><style>body{color:#111}</style></head>' +
         '<body><h1>Mock</h1><img src="data:image/png;base64,AAAA"><a href="#frame-2">next</a></body></html>',
     );
-    expect(() => validateArtifact('text/html', html, 'Room list mock')).not.toThrow();
+    expect(() => validateArtifact('text/html', html, 'chat list mock')).not.toThrow();
   });
 
   it('rejects every forbidden construct by name', () => {

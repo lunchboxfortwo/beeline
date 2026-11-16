@@ -299,7 +299,7 @@ describe('institutional memory authority for agent-started turns', () => {
   });
 
 
-  it('refuses the per-turn snapshot when the root message\'s Room is in another Workspace than the calling Room', async () => {
+  it('refuses the per-turn snapshot when the root message\'s chat is in another Workspace than the calling chat', async () => {
     await enrollLive();
     const crossRoot = 'cross-workspace-root';
     await rootFixture.database.query(

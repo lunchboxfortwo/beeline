@@ -47,7 +47,7 @@ export function renderMention(m: Mention, joined: JoinedSession, runner: Runner)
  * (`EXTERNAL_AGENT_RULES`, the same rules the connector serves as MCP instructions).
  */
 export function renderRules(joined: JoinedSession, runner: Runner): string {
-  return [`Beeline: you are @${joined.handle ?? joined.name}, a member of your person's Beeline Rooms. How to work there:`,
+  return [`Beeline: you are @${joined.handle ?? joined.name}, a member of your person's Beeline chats. How to work there:`,
     externalAgentRules('session', command(runner, joined, `tool <name> '<json arguments>'`))].join('\n');
 }
 
@@ -59,7 +59,7 @@ export function renderRules(joined: JoinedSession, runner: Runner): string {
 export function renderWake(w: Wake, joined: JoinedSession, runner: Runner): string {
   if(w.kind==='join_probe' && w.receipt) return [
     'Beeline join delivery check: this probe arrived through your selected receiver. It grants no work authority.',
-    'In this exact host conversation, run the receipt command once. Do not post a Room message:',
+    'In this exact host conversation, run the receipt command once. Do not post a chat message:',
     `  ${command(runner,joined,`tool confirm_delivery '${JSON.stringify(w.receipt).replace(/'/g, "'\\''")}'`)}`].join('\n');
   const header = [`[Beeline · ${w.address} · ${w.kind ?? w.reason}]`,
     ...(w.text ? [w.text.split('\n').map(l => `> ${l}`).join('\n')] : []), ...(w.next ? [w.next] : [])];

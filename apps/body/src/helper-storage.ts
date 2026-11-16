@@ -400,7 +400,7 @@ export async function reclaimHelperStorage(input: {
       }
     }).catch(error => {
       if (input.onError) input.onError(room.name, error);
-      else console.error(`[body] private storage cleanup deferred for Room ${room.name}:`, error);
+      else console.error(`[body] private storage cleanup deferred for chat ${room.name}:`, error);
     });
   }
   return entries;

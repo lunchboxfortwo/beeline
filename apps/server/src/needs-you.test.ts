@@ -411,7 +411,7 @@ describe('PhoneService Needs-you tray', () => {
     query.mockRestore();
   });
 
-  it('rejects a viewer whose Workspace membership was removed even if Room membership remains', async () => {
+  it('rejects a viewer whose Workspace membership was removed even if chat membership remains', async () => {
     await report(ROOM, PEER, 'needs-decision: please review this');
     await database.query(
       `UPDATE memberships SET removed_at=now()

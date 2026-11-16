@@ -52,7 +52,7 @@ export function createStub({ testCase, tools, skills, variant }) {
       trace.invalidCalls.push(entry);
     }
     if (result.boundary) trace.terminal = result.boundary;
-    if (name === 'merge_corner') trace.terminal ??= name;
+    if (name === 'merge_thread') trace.terminal ??= name;
     return result.boundary ? { ...result, instruction: 'Stop at this boundary and end the turn.' } : result.result;
   };
   return { trace, listing, call };

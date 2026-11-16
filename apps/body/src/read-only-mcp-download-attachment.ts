@@ -234,7 +234,7 @@ export async function postArtifact(
   const objectId = POSTED_MEDIA_ID.exec(uploaded.url)?.[1];
   return (
     `Posted artifact "${title}" (${bytes.length} bytes, ${mime}); it is delivered with your ` +
-    `final reply, or on the existing post or a file-only message if you end silently.${objectId ? ` Object ${objectId} will be included automatically if this turn opens or revises a corner brief.` : ''} Ask for feedback here in the Room.`
+    `final reply, or on the existing post or a file-only message if you end silently.${objectId ? ` Object ${objectId} will be included automatically if this turn opens or revises a thread brief.` : ''} Ask for feedback here in the chat.`
   );
 }
 
@@ -472,7 +472,7 @@ export async function createSchedule(
     : '';
   return (
     `Schedule ${scheduleId} created: ${describe()}` +
-    `; the prompt runs as a mention to you in this Room.` +
+    `; the prompt runs as a mention to you in this chat.` +
     floorNote +
     ' Use wake(action:delete, scheduleId) to remove it.'
   );
@@ -486,7 +486,7 @@ export async function listSchedules(
 ): Promise<string> {
   const result = await deps.execute('listAgentSchedules', { roomId: deps.roomId });
   const schedules = Array.isArray(result.schedules) ? result.schedules : [];
-  if (!schedules.length) return 'No schedules in this Room.';
+  if (!schedules.length) return 'No schedules in this chat.';
   return schedules
     .flatMap((entry) => {
       if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return [];
@@ -567,8 +567,8 @@ export async function listEventSubscriptions(
 export function describeSubscriptions(result: JsonObject, lead: string): string {
   const kinds = (Array.isArray(result.kinds) ? result.kinds : []).map(String);
   return kinds.length
-    ? `${lead} ${kinds.join(', ')} in this Room; each one wakes you for a turn.`
-    : 'You react to no events in this Room; only a message that mentions you wakes you.';
+    ? `${lead} ${kinds.join(', ')} in this chat; each one wakes you for a turn.`
+    : 'You react to no events in this chat; only a message that mentions you wakes you.';
 }
 
 
@@ -615,8 +615,8 @@ export async function emitEvent(
     ...(mentionAgentIds.length ? { mentionAgentIds } : {}),
   });
   return mentionAgentIds.length
-    ? `Posted ${kind} in this Room and woke ${mentionAgentIds.length} agent(s).`
-    : `Posted ${kind} in this Room.`;
+    ? `Posted ${kind} in this chat and woke ${mentionAgentIds.length} agent(s).`
+    : `Posted ${kind} in this chat.`;
 }
 
 

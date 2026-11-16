@@ -197,7 +197,7 @@ beforeEach(async () => {
   await db.query(`DELETE FROM live_outputs WHERE kind<>'presence'`);
   await db.query(`DELETE FROM agent_commands`);
   // Reopen this shared fixture with no effect receipts from the previous case.
-  await db.query(`UPDATE corner_facts SET machine=NULL`);
+  await db.query(`UPDATE corner_facts SET machine=NULL,implementer_agent_id='cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'`);
   await db.query(`DELETE FROM agent_turns`);
   await db.query(`DELETE FROM corner_merge_approvals`);
   await db.query(`DELETE FROM corner_brief_revisions`);

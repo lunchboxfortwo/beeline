@@ -282,7 +282,7 @@ describe('manager schedule phone operations', () => {
     }
   });
 
-  it('allows Room members to read schedules and requires Workspace admin for mutations', async () => {
+  it('allows chat members to read schedules and requires Workspace admin for mutations', async () => {
     const database = await fixture();
     try {
       const phone = new PhoneService(database, 'http://local.test');
@@ -755,7 +755,7 @@ describe('agent tool schedule daemon operations', () => {
           },
           AGENT,
         ),
-      ).rejects.toThrow(/daemon (?:token does not own requested agent|room access denied)/);
+      ).rejects.toThrow(/daemon (?:token does not own requested agent|chat access denied)/);
     } finally {
       await database.close();
     }

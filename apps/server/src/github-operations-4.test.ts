@@ -276,7 +276,7 @@ const scope1 = fixtureScope1();
     )).rows[0]?.full_name).toBe('owner/renamed');
   });
 
-  it('uses the Room exact-repository token to list and dispatch on the stored default branch', async () => {
+  it('uses the chat exact-repository token to list and dispatch on the stored default branch', async () => {
     const workspace = '11111111-1111-4111-8111-111111111111';
     const room = '22222222-2222-4222-8222-222222222222';
     await scope1.database.query(`INSERT INTO workspaces(id,name) VALUES($1,'Hive')`, [workspace]);

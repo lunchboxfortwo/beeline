@@ -4,12 +4,13 @@ export const DATABASE_SCHEMA_CORNER_FACTS = `  PRIMARY KEY (agent_id, room_id)
 CREATE INDEX IF NOT EXISTS agent_mandates_room_idx ON agent_mandates(room_id);
 
 -- A corner stores only what nothing else can derive: whether people locked
--- it, its reviewer override, and a display cache of GitHub facts
+-- it, its implementer, its reviewer override, and a display cache of GitHub facts
 -- (lifecycle). Everything else is read from its commands, cards and Room.
 CREATE TABLE IF NOT EXISTS corner_facts (
   corner_id uuid PRIMARY KEY REFERENCES rooms(id) ON DELETE CASCADE,
   lifecycle jsonb NOT NULL DEFAULT '{"lifecycle":"unknown","checks":"unknown"}'::jsonb
 );
+ALTER TABLE corner_facts ADD COLUMN IF NOT EXISTS implementer_agent_id text REFERENCES identities(id) ON DELETE SET NULL;
 ALTER TABLE corner_facts ADD COLUMN IF NOT EXISTS locked boolean NOT NULL DEFAULT false;
 ALTER TABLE corner_facts ADD COLUMN IF NOT EXISTS reviewer_agent_id text REFERENCES identities(id);
 -- Reproduction rollout-0707: the preceding serving/rollback image reads this

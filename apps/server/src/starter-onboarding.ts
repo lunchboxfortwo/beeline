@@ -41,7 +41,7 @@ async function buildStarterGame(database: SqlDatabase, roomId: string, userId: s
   const agents = members.filter(member => member.kind === 'agent');
   const rival = agents.find(member => member.starter_role === 'luna') ?? agents[1];
   const ally = agents.find(member => member.id !== rival?.id);
-  if (!person || !ally || !rival) throw new Error('Your starter team is no longer in this Room');
+  if (!person || !ally || !rival) throw new Error('Your starter team is no longer in this chat');
   const [userFace, allyFace, rivalFace] = await Promise.all([person, ally, rival].map(identityFaceDataUri));
   const data = { user: { name: person.name, face: userFace }, ally: { name: ally.name, face: allyFace }, rival: { name: rival.name, face: rivalFace } };
   const template = await readFile(new URL('../assets/game.template.html', import.meta.url), 'utf8');

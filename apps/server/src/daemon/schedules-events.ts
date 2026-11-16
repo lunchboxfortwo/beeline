@@ -43,7 +43,7 @@ import { daemonWriteResult } from './corner-messages.js';
       `SELECT workspace_id FROM rooms WHERE id=$1`,
       [input.roomId],
     );
-    if (!room.rows[0]) throw new Error('schedule room not found');
+    if (!room.rows[0]) throw new Error('schedule chat not found');
     const workflowName = await scheduleWorkflowName(
       db,
       input.roomId,
@@ -208,7 +208,7 @@ import { daemonWriteResult } from './corner-messages.js';
         else missing.push(wake);
       }
       if (missing.length)
-        throw new Error(`not an agent member of this Room: ${missing.join(', ')}`);
+        throw new Error(`not an agent member of this chat: ${missing.join(', ')}`);
       wakes = [...resolved];
     }
     const command=await authorizeCommandOutput(ctx.database,input.roomId,agentId,input.requestId);

@@ -11,7 +11,7 @@ import { identityFromKey, writeRuntimeRecord } from './runtime.js';
 
 const exec = promisify(execFile);
 
-it('corner-read-token exits without replacing the helper registration', async () => {
+it('thread-read-token exits without replacing the helper registration', async () => {
   const root = await mkdtemp(join(tmpdir(), 'credential-owner-'));
   const identity = identityFromKey('01'.repeat(32), 'fixture');
   const requests: string[] = [];

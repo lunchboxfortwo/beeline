@@ -497,10 +497,10 @@ describe('feedback-triage workflow', () => {
     expect(FEEDBACK_TRIAGE_STEPS).toContain('No label marks this; decide it yourself.');
     expect(FEEDBACK_TRIAGE_STEPS).toContain('draft its saved case in the format of\n`docs/prompts/cases/README.md`');
     expect(FEEDBACK_TRIAGE_STEPS).toContain('Mark each prompt defect with\n`promptDefect: true`, its section, and its drafted case.');
-    expect(FEEDBACK_TRIAGE_STEPS).toContain('Never quote a report, and never name\nthe people, Rooms, Workspaces or emails behind it.');
+    expect(FEEDBACK_TRIAGE_STEPS).toContain('Never quote a report, and never name\nthe people, chats, Workspaces or emails behind it.');
     expect(FEEDBACK_TRIAGE_STEPS).toContain('For a prompt defect, the brief also carries the drafted case.');
     expect(FEEDBACK_TRIAGE_STEPS).toContain('add that case as `docs/prompts/cases/<id>.json`');
-    expect(FEEDBACK_TRIAGE_STEPS).toContain('the worker orders one other agent in the Room to replay every saved case on the\npull request head with its own model');
+    expect(FEEDBACK_TRIAGE_STEPS).toContain('the worker orders one other agent in the chat to replay every saved case on the\npull request head with its own model');
     expect(FEEDBACK_TRIAGE_STEPS).toContain('The reviewer does not pass the pull request without that table.');
     expect(FEEDBACK_TRIAGE_CONTRACT.handoffs.pull!.requires).toEqual(['problems', 'dispositions']);
   });
@@ -595,7 +595,7 @@ describe('feedback-triage workflow', () => {
       slug: 'feedback-triage-steps',
     });
     expect(steps.markdown).toContain('## Fix-loop follow-up (outside this workflow)');
-    expect(steps.markdown).toContain('Ruby opens routine fix corners as an existing agent action without per-item');
+    expect(steps.markdown).toContain('Ruby opens routine fix threads as an existing agent action without per-item');
     expect(steps.markdown).toContain('A reviewer PASS on the exact head plus green checks lands them;');
     expect(steps.markdown).toContain("the owner's hold remains a veto");
     expect(steps.markdown).not.toContain("After the owner's yes on that card");

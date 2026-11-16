@@ -226,7 +226,7 @@ import { AcpClient, isPiAcpHarness, flattenHarnessCause, AcpRuntimeExitedError, 
       const desired = mode === 'readonly' && !process.env.BEELINE_FREE_AGENT_ID ? 'plan' : 'build';
       if (!axis?.options?.some((option) => option.value === desired)) {
         if (mode === 'readonly' && !ctx.osSandbox) {
-          throw new Error('OpenCode did not advertise plan mode for an unsandboxed Room');
+          throw new Error('OpenCode did not advertise plan mode for an unsandboxed chat');
         }
         return;
       }

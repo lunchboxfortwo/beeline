@@ -9,6 +9,11 @@ import { ToolDefinition } from './minimal-tool-surface.js';
 
 export const ORDINARY_TOOLS: ToolDefinition[] = [
   ...WORK_BOARD_ACTION_TOOLS,
+  {
+    name: 'become_implementer',
+    description: 'Become the recorded implementer of this thread before pushing or opening its PR.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
   {name:'ask_owner',description:'Ask your owner one short question about a typed thread, PR or request. It appears in Needs you; their answer quotes the source in that conversation. Shorten question to 20 words and each option to 3 words. Give 2–4 options (one may be recommended) or freeText:true. The returned messageId is also the question task id for update_work. Never use a choice as merge or spending authority.',inputSchema:{type:'object',additionalProperties:false,required:['about','question'],properties:{
     about:{type:'object',additionalProperties:false,required:['kind','roomId'],properties:{kind:{enum:['thread','pr','request']},roomId:{type:'string'},messageId:{type:'string'}},oneOf:[{properties:{kind:{const:'request'}},required:['messageId']},{properties:{kind:{enum:['thread','pr']}}}]},
     question:{type:'string',pattern:WORK_QUESTION_PATTERN},
@@ -23,13 +28,13 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
       "properties": {
         "address": {
           "type": "string",
-          "description": "Room, corner or DM address; reads default to this place when omitted."
+          "description": "chat, thread or DM address; reads default to this place when omitted."
         },
         "facet": {
           "type": "string",
           "enum": [
             "addresses",
-            "corners",
+            "threads",
             "members",
             "messages",
             "message",
@@ -87,7 +92,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   },
   {
     "name": "remember",
-    "description": "Maintain sourced facts or versioned procedures. Search first; update stale facts, delete disproved ones. Fact writes need 1-16 non-deleted source messages in this Room (reports and cards allowed); the server also attaches this turn’s root message when it is in this Room. Requester-started writes must stay in the root source partition. DM facts cannot enter shared Workspace memory. Profile facts need a requester-started turn and stay private. Fact bodies must be nonempty and at most 200 UTF-8 bytes. person_asked must be a boolean; true requires an explicit human instruction and protects standing orders. Mark only relied-on facts used before ending.",
+    "description": "Maintain sourced facts or versioned procedures. Search first; update stale facts, delete disproved ones. Fact writes need 1-16 non-deleted source messages in this chat (reports and cards allowed); the server also attaches this turn’s root message when it is in this chat. Requester-started writes must stay in the root source partition. DM facts cannot enter shared Workspace memory. Profile facts need a requester-started turn and stay private. Fact bodies must be nonempty and at most 200 UTF-8 bytes. person_asked must be a boolean; true requires an explicit human instruction and protects standing orders. Mark only relied-on facts used before ending.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -165,8 +170,8 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
     }
   },
   {
-    "name": "open_corner",
-    "description": "Create one unit of work in a member Room; the complete brief bounds its scope. Human approval is not required to open. A name of at most 3 words is saved with hyphens, and an objective past 24 words or 2000 characters is cut at a word boundary. The result names that change. Objective is navigation. Opening wakes its worker and watches automatically. Keep the Room's designated reviewer out of implementation unless necessary, then set reviewer to an independent agent handle. A reviewer cannot be the implementer or a commit author. hold:true requires sourceMessageId citing a readable person’s request to hold.",
+    "name": "open_thread",
+    "description": "Create one unit of work in a member chat; the complete brief bounds its scope. Human approval is not required to open. A name of at most 3 words is saved with hyphens, and an objective past 24 words or 2000 characters is cut at a word boundary. The result names that change. Objective is navigation. Opening wakes its worker and watches automatically. Keep the chat's designated reviewer out of implementation unless necessary, then set reviewer to an independent agent handle. A reviewer cannot be the implementer or a commit author. hold:true requires sourceMessageId citing a readable person’s request to hold.",
     "inputSchema": {
       "type": "object",
       "required": ["room", "brief", "implementer"],
@@ -174,13 +179,13 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
         "room": {
           "type": "string",
           "format": "uuid",
-          "description": "Parent Room address; may differ from your active DM, Room or corner."
+          "description": "Parent chat address; may differ from your active DM, chat or thread."
         },
         "name": {
           "type": "string",
           "minLength": 1,
           "maxLength": 120,
-          "description": "The corner's title. Spaces become hyphens, and only the first 3 words are kept."
+          "description": "The thread's title. Spaces become hyphens, and only the first 3 words are kept."
         },
         "objective": {
           "type": "string",
@@ -234,7 +239,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
           "minLength": 1,
           "description": "Required worker handle without @. Opening creates its first assignment; do not send a redundant order."
         },
-        "reviewer": {"type": "string", "minLength": 1, "description": "Independent reviewer handle without @; defaults to the Room reviewer."},
+        "reviewer": {"type": "string", "minLength": 1, "description": "Independent reviewer handle without @; defaults to the chat reviewer."},
         "sourceMessageId": {"type": "string", "description": "Person’s message requesting the hold; required with hold:true."},
         "hold": {
           "type": "boolean",
@@ -245,18 +250,18 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
     }
   },
   {
-    "name": "revise_corner",
+    "name": "revise_thread",
     "description": "Supply address. metadata requires name; install_brief requires name and brief. brief requires top-level expectedRevision and change, plus nested brief: {spec, repositoryWork?, approval?: {sourceMessageId}, attachments?}. A brief copied from read is accepted; returned metadata is ignored and approval is revalidated. Put Reproduction <id>: steps, or Reproduction not feasible: reason; Stand-in: check in spec. Parent and ancestor restrictions remain enforced.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "action": {"type": "string", "enum": ["metadata", "brief", "install_brief"]},
         "address": {"type": "string"},
-        "reviewer": {"type": "string", "minLength": 1, "description": "Set the corner reviewer to an independent agent member handle without @."},
-        "name": {"type": "string", "description": "The corner title, words joined by hyphens with no whitespace."},
+        "reviewer": {"type": "string", "minLength": 1, "description": "Set the thread reviewer to an independent agent member handle without @."},
+        "name": {"type": "string", "description": "The thread title, words joined by hyphens with no whitespace."},
         "objective": {
           "type": "string",
-          "description": "The updated corner goal, at most 24 words. The approved brief still owns work scope."
+          "description": "The updated thread goal, at most 24 words. The approved brief still owns work scope."
         },
         "brief": {
           "type": "object",
@@ -282,7 +287,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
               "type": "object",
               "properties": {"sourceMessageId": {"type": "string"}, "text": {"type": "string"}, "approvedBy": {"type": "string"}, "approverName": {"type": "string"}},
               "additionalProperties": false,
-              "description": "Optional for the corner commander revising directly. A copied approval with an empty or absent sourceMessageId is accepted only for that commander when the stored approval is commander-direct. Other agents must set approval.sourceMessageId to an approving human message or active private order from this corner’s commander. A current commander delivery also accepts its order ID, resume ID, or forwarded root human message ID; unrelated citations do not authorize revisions. The server records the approver."
+              "description": "Optional for the thread commander revising directly. A copied approval with an empty or absent sourceMessageId is accepted only for that commander when the stored approval is commander-direct. Other agents must set approval.sourceMessageId to an approving human message or active private order from this thread’s commander. A current commander delivery also accepts its order ID, resume ID, or forwarded root human message ID; unrelated citations do not authorize revisions. The server records the approver."
             },
             "attachments": {
               "type": "array",
@@ -333,7 +338,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   },
   {
     "name": "order",
-    "description": "Privately assign one agent besides yourself. A Room requires agent; a corner defaults to its implementer. Corners may name any parent-Room agent in the corner or parent Room; DMs, other Rooms and ancestor corners are forbidden. Reports return to the sender. Receipt confirms acceptance, not completion. Local proof paths are refused; attach required files to the target corner brief with revise_corner instead.",
+    "description": "Privately assign one agent besides yourself. A chat requires agent; a thread defaults to its implementer. Threads may name any parent-chat agent in the thread or parent chat; DMs, other chats and ancestor threads are forbidden. Reports return to the sender. Receipt confirms acceptance, not completion. Local proof paths are refused; attach required files to the target thread brief with revise_thread instead.",
     "inputSchema": {
       "type": "object",
       "required": ["address", "text"],
@@ -341,13 +346,13 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
         "address": {
           "type": "string",
           "format": "uuid",
-          "description": "Room or corner address; current membership is required."
+          "description": "chat or thread address; current membership is required."
         },
         "agent": {
           "type": "string",
           "minLength": 1,
           "maxLength": 120,
-          "description": "Handle or id of the one agent to wake. Required at a top-level Room address."
+          "description": "Handle or id of the one agent to wake. Required at a top-level chat address."
         },
         "text": {"type": "string", "minLength": 1, "maxLength": 16000}
       },
@@ -356,7 +361,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   },
   {
     "name": "stop",
-    "description": "Stop the running turn of an agent you command: you ordered the work it is running, or it runs in a corner you opened. Anyone else is refused and nothing stops. A corner defaults to its implementer. Order it again after the stop; that order runs next.",
+    "description": "Stop the running turn of an agent you command: you ordered the work it is running, or it runs in a thread you opened. Anyone else is refused and nothing stops. A thread defaults to its implementer. Order it again after the stop; that order runs next.",
     "inputSchema": {
       "type": "object",
       "required": ["address"],
@@ -364,13 +369,13 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
         "address": {
           "type": "string",
           "format": "uuid",
-          "description": "Room, DM or corner address where the turn runs; current membership is required."
+          "description": "chat, DM or thread address where the turn runs; current membership is required."
         },
         "agent": {
           "type": "string",
           "minLength": 1,
           "maxLength": 120,
-          "description": "Handle or id of the agent to stop. Required at a Room address with several agents."
+          "description": "Handle or id of the agent to stop. Required at a chat address with several agents."
         }
       },
       "additionalProperties": false
@@ -378,7 +383,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   },
   {
     "name": "report",
-    "description": "Report the assigned outcome one step up. In a corner, a human-approved revised brief transfers command to its author at its dispatch place; otherwise the opening route applies. Earlier explicit orders retain their issuer. Choose the terminal status and provide the report body as text; the server adds its status prefix. No address. Feedback is separate from assignment completion. Upload proof files with post_artifact and cite their attachment filenames when the recipient needs to open them.",
+    "description": "Report the assigned outcome one step up. In a thread, a human-approved revised brief transfers command to its author at its dispatch place; otherwise the opening route applies. Earlier explicit orders retain their issuer. Choose the terminal status and provide the report body as text; the server adds its status prefix. No address. Feedback is separate from assignment completion. Upload proof files with post_artifact and cite their attachment filenames when the recipient needs to open them.",
     "inputSchema": {
       "type": "object",
       "required": ["status", "text"],
@@ -402,7 +407,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   },
   {
     "name": "report_feedback",
-    "description": "Report one rough patch in Beeline itself (not in the user's project) to the Beeline team: simpler_path (a simpler way existed), contradiction (instructions, tools, or prompts disagree), tooling_gap (a missing tool would have done the job better), context_gap (missing or discontinuous data, prompts, or memory), or bug. Room, request, trigger message, and this turn's prompt sections are attached for you. Never include secrets, and quote nobody's words: describe the problem. Returns the item id; a failure here never affects your turn.",
+    "description": "Report one rough patch in Beeline itself (not in the user's project) to the Beeline team: simpler_path (a simpler way existed), contradiction (instructions, tools, or prompts disagree), tooling_gap (a missing tool would have done the job better), context_gap (missing or discontinuous data, prompts, or memory), or bug. chat, request, trigger message, and this turn's prompt sections are attached for you. Never include secrets, and quote nobody's words: describe the problem. Returns the item id; a failure here never affects your turn.",
     "inputSchema": {
       "type": "object",
       "required": ["category", "summary"],
@@ -445,21 +450,21 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
           "pattern": "^[0-9a-fA-F]{40}$",
           "description": "The exact 40-character Git head SHA that passed review."
         },
-        "address": {"type": "string", "description": "Explicit target corner address."}
+        "address": {"type": "string", "description": "Explicit target thread address."}
       },
       "required": ["address", "headSha"],
       "additionalProperties": false
     }
   },
   {
-    "name": "merge_corner",
-    "description": "Land the addressed corner through the live gate: green checks, yes on exact head, no hold.",
+    "name": "merge_thread",
+    "description": "Land the addressed thread through the live gate: green checks, yes on exact head, no hold.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "address": {
           "type": "string",
-          "description": "Corner address only; membership in the corner or its parent Room is required."
+          "description": "Thread address only; membership in the thread or its parent chat is required."
         }
       },
       "additionalProperties": false,
@@ -495,28 +500,28 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
     }
   },
   {
-    "name": "set_corner_hold",
+    "name": "set_thread_hold",
     "description": "Read hold IDs from read(facet:status).verdict.holds. Record a person’s merge hold, or release releaseHoldId with existing holder/standing and command-provenance checks. Setting requires sourceMessageId citing a readable person’s request to hold; releasing needs no citation. Does not approve or land.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "sourceMessageId": {"type": "string", "description": "Person’s message requesting the hold; required when setting."},
         "releaseHoldId": {"type": "string", "format": "uuid"},
-        "address": {"type": "string", "description": "Explicit target corner address."}
+        "address": {"type": "string", "description": "Explicit target thread address."}
       },
       "additionalProperties": false,
       "required": ["address"]
     }
   },
   {
-    "name": "close_corner",
-    "description": "Cancel work and archive the addressed corner. Attach required artifacts first.",
+    "name": "close_thread",
+    "description": "Cancel work and archive the addressed thread. Attach required artifacts first.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "address": {
           "type": "string",
-          "description": "Corner address only; membership in the corner or its parent Room is required."
+          "description": "Thread address only; membership in the thread or its parent chat is required."
         }
       },
       "required": ["address"],
@@ -524,8 +529,8 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
     }
   },
   {
-    "name": "close_corner_pr",
-    "description": "Close only the addressed corner’s PR, retaining its corner and branch.",
+    "name": "close_thread_pr",
+    "description": "Close only the addressed thread’s PR, retaining its thread and branch.",
     "inputSchema": {
       "type": "object",
       "properties": {"address": {"type": "string"}},
@@ -540,8 +545,8 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
       "type": "object",
       "properties": {
         "text": {"type": "string"},
-        "address": {"type": "string", "description": "Target Room or corner id; omitted address uses the active corner."},
-        "replyTo": {"type": "string", "description": "Message id to answer in this Room."}
+        "address": {"type": "string", "description": "Target chat or thread id; omitted address uses the active thread."},
+        "replyTo": {"type": "string", "description": "Message id to answer in this chat."}
       },
       "required": ["text"],
       "additionalProperties": false
@@ -563,7 +568,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
           "type": "string",
           "minLength": 1,
           "maxLength": 200,
-          "description": "The artifact title, e.g. \"Room list mock\". Titles the card everywhere. Optional when posting by path (defaults to the file name); required for html/bytes content."
+          "description": "The artifact title, e.g. \"chat list mock\". Titles the card everywhere. Optional when posting by path (defaults to the file name); required for html/bytes content."
         },
         "mime": {
           "type": "string",
@@ -692,7 +697,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   },
   {
     "name": "wake",
-    "description": "Manage your own wake sources. List your schedules across every Room you belong to by scheduleId; update and delete require a turn started by a human Workspace admin of the schedule’s Room, and a scheduled wake cannot do either; lists include roomId and roomName. Creating schedules and managing events stay in this place. Schedules and events reject address. lifecycle requires address and watches opened/merged. Opening a corner already watches it. events discovers the catalog. For an admin-requested incoming webhook use source webhook and event webhook.called; admins copy the link and token from Schedules and subscriptions. pause and resume take exactly one scheduleId or subscriptionId. Resume skips missed schedule runs. After 3 days without app interaction the owner is warned; 1 day later all their agents’ schedules and subscriptions pause. Ask the owner which to resume. Never posts, orders or reports. replace_events replaces your own room-kind subscription list; it does not add subscriptions.",
+    "description": "Manage your own wake sources. List your schedules across every chat you belong to by scheduleId; update and delete require a turn started by a human Workspace admin of the schedule’s chat, and a scheduled wake cannot do either; lists include roomId and roomName. Creating schedules and managing events stay in this place. Schedules and events reject address. lifecycle requires address and watches opened/merged. Opening a thread already watches it. events discovers the catalog. For an admin-requested incoming webhook use source webhook and event webhook.called; admins copy the link and token from Schedules and subscriptions. pause and resume take exactly one scheduleId or subscriptionId. Resume skips missed schedule runs. After 3 days without app interaction the owner is warned; 1 day later all their agents’ schedules and subscriptions pause. Ask the owner which to resume. Never posts, orders or reports. replace_events replaces your own room-kind subscription list; it does not add subscriptions.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -700,10 +705,10 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
         "trigger": {"type": "string", "enum": ["schedule", "event", "lifecycle"]},
         "address": {
           "type": "string",
-          "description": "Required lifecycle corner address; rejected for local schedule/event management."
+          "description": "Required lifecycle thread address; rejected for local schedule/event management."
         },
         "title": {"type": "string", "description": "Required for schedule and event creation: plain name in one to four words.", "maxLength": 80},
-        "when": {"type": "string", "description": "Required for event creation: model-written trigger phrase of one to five words, e.g. On corner checks failing."},
+        "when": {"type": "string", "description": "Required for event creation: model-written trigger phrase of one to five words, e.g. On thread checks failing."},
         "workflowName": {
           "type": "string",
           "description": "Saved workflow targeted by this subscription, if the action starts one."
@@ -741,7 +746,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
         "kinds": {
           "type": "array",
           "items": {"type": "string"},
-          "description": "The complete list of event kinds you want to react to in this Room."
+          "description": "The complete list of event kinds you want to react to in this chat."
         }
       },
       "required": ["action"],
@@ -768,12 +773,12 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   },
   {
     "name": "react_to_message",
-    "description": "React idempotently to a message in this Room with a supported emoji.",
+    "description": "React idempotently to a message in this chat with a supported emoji.",
     "inputSchema": {
       "type": "object",
       "required": ["messageId", "emoji"],
       "properties": {
-        "messageId": {"type": "string", "description": "The message id from the Room transcript."},
+        "messageId": {"type": "string", "description": "The message id from the chat transcript."},
         "emoji": {"type": "string", "enum": ["👍", "❤️", "😂", "🎉", "👀", "✅"]}
       },
       "additionalProperties": false

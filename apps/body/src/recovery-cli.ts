@@ -46,7 +46,7 @@ async function main(): Promise<void> {
     !(await resolveBundleEntrypoint(layout.libDir))
   ) {
     console.log(
-      'usebeeline connect — install Beeline and pair an agent\nusebeeline join — join your Beeline Rooms from a running coding session\nusebeeline update — recover this machine and serve every enabled agent\nusebeeline start [--all|--agent <public key>]\nhttps://usebeeline.app',
+      'usebeeline connect — install Beeline and pair an agent\nusebeeline join — join your Beeline chats from a running coding session\nusebeeline update — recover this machine and serve every enabled agent\nusebeeline start [--all|--agent <public key>]\nhttps://usebeeline.app',
     );
     return;
   }

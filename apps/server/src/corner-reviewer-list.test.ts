@@ -139,7 +139,7 @@ async function setReviewer(id: string | null) {
   await phone.execute('updateRoom', { roomId: R, reviewerAgentId: id }, H);
 }
 
-describe('FALLBACK-GONE: a Room has one reviewer', () => {
+describe('FALLBACK-GONE: a chat has one reviewer', () => {
   it('ignores fallback reviewers an older phone still sends', async () => {
     await phone.execute('updateRoom',
       { roomId: R, reviewerAgentId: REVIEWER_A, reviewerFallbackIds: [REVIEWER_B] } as never, H);

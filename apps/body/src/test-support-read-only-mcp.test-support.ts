@@ -418,10 +418,10 @@ export function fixtureScope20() {
 const PLACES: ReadonlyArray<{ name: string; corner: boolean; surface: m24_PromptSurface; commandReason: string }> = [
   { name: 'Room', corner: false, surface: 'room', commandReason: 'human_tag' },
   { name: 'DM', corner: false, surface: 'dm', commandReason: 'direct_message' },
-  { name: 'code corner', corner: true, surface: 'code-corner', commandReason: 'order' },
-  { name: 'repo-less corner', corner: true, surface: 'repo-less-corner', commandReason: 'order' },
-  { name: 'schedule run in a Room', corner: false, surface: 'room', commandReason: 'schedule' },
-  { name: 'schedule run in a corner', corner: true, surface: 'code-corner', commandReason: 'schedule' },
+  { name: 'code thread', corner: true, surface: 'code-corner', commandReason: 'order' },
+  { name: 'repo-less thread', corner: true, surface: 'repo-less-corner', commandReason: 'order' },
+  { name: 'schedule run in a chat', corner: false, surface: 'room', commandReason: 'schedule' },
+  { name: 'schedule run in a thread', corner: true, surface: 'code-corner', commandReason: 'schedule' },
 ];
 
 

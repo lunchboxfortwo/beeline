@@ -60,7 +60,7 @@ import { runMachineHelper } from './machine-helper.js';
 
 function usage(exitCode = 1): void {
   console.error(`
-${pc.bold('Beeline — thin Room agent.')}
+${pc.bold('Beeline — thin chat agent.')}
 
 ${pc.dim('Usage:')}
   beeline connect [XXXXXXXX-XXXXXXXX] [--subscribe <kinds>] [--access <policy>]
@@ -188,8 +188,14 @@ async function main(): Promise<void> {
     const roomFlag = args.indexOf('--room');
     const configPath = configFlag >= 0 ? args[configFlag + 1] : undefined;
     const roomId = roomFlag >= 0 ? args[roomFlag + 1] : undefined;
-    if (!configPath || !roomId) throw new Error('corner-read-token requires --config and --room');
-    const credential = await DaemonApiClient.readRepositoryCredential(resolve(configPath), roomId);
+    if (!configPath || !roomId) throw new Error('thread-read-token requires --config and --room');
+    const credential = await DaemonApiClient.readRepositoryCredential(resolve(configPath), roomId, undefined, args.includes('--write')).catch(error => {
+      if (error?.code === 'Call become_implementer before pushing or opening a PR for this thread.') {
+        process.stderr.write(`${error.code}\n`);
+        process.exit(1);
+      }
+      throw error;
+    });
     // A caller may close its reader before this short-lived command writes.
     process.stdout.once('error', (error: NodeJS.ErrnoException) => {
       if (error.code !== 'EPIPE') throw error;

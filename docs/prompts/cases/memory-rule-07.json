@@ -41,7 +41,7 @@
             }
           },
           {
-            "call": "open_corner"
+            "call": "open_thread"
           }
         ]
       },
@@ -57,7 +57,7 @@
             }
           },
           {
-            "call": "open_corner"
+            "call": "open_thread"
           }
         ]
       },
@@ -82,7 +82,7 @@
             }
           },
           {
-            "call": "open_corner"
+            "call": "open_thread"
           }
         ]
       },
@@ -107,7 +107,7 @@
             }
           },
           {
-            "call": "open_corner"
+            "call": "open_thread"
           }
         ]
       }
@@ -131,7 +131,7 @@
         }
       },
       {
-        "call": "open_corner",
+        "call": "open_thread",
         "result": {
           "address": "1636608f-61e5-51ce-91a5-ab2359703fee",
           "ok": true

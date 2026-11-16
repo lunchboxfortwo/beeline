@@ -373,7 +373,7 @@ export function scenarioResult(testCase, call, skills) {
   const result = command !== undefined ? { exitCode: 0, stdout: '' }
     : call.name === 'Read' ? '' : call.name === 'read' ? []
     : call.name === 'connect' ? { connected: false, apps: [] }
-    : ['remember', 'stop', 'open_corner'].includes(call.name) ? { acknowledged: true }
+    : ['remember', 'stop', 'open_thread'].includes(call.name) ? { acknowledged: true }
     : {};
   return { result, unrecorded: true };
 }
@@ -473,7 +473,7 @@ export async function replaySample({ prompt, skills, rule, model, request, ledge
         if (answer.calls.at(-1) !== call) return { ...finish('behavior', undefined, 'invalid-sequence'), pass: false, reason: 'Calls after a tool boundary' };
         return finish('behavior', undefined, result.boundary);
       }
-      if (['order', 'report', 'no_reply_needed', 'merge_corner'].includes(call.name)) return finish('behavior', undefined, call.name);
+      if (['order', 'report', 'no_reply_needed', 'merge_thread'].includes(call.name)) return finish('behavior', undefined, call.name);
     }
     messages.push({ role: 'assistant', content: raw });
     messages.push({ role: 'user', content: `Simulated tool results: ${JSON.stringify(trace.results)}\nContinue the same turn. Return only new calls and text as JSON. If finished, return calls:[].` });

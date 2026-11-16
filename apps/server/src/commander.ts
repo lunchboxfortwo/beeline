@@ -72,7 +72,7 @@ export async function assertCornerCommandTarget(
   );
   if (dm.rowCount)
     throw new CommandRefusalError(
-      "Corners can't order DMs. Report to your commander instead.", 403,
+      "Threads can't order DMs. Report to your commander instead.", 403,
     );
   const blocked = await db.query(
     `WITH RECURSIVE ancestors(id) AS (
@@ -88,7 +88,7 @@ export async function assertCornerCommandTarget(
   );
   if (blocked.rowCount)
     throw new CommandRefusalError(
-      "Corners can't order their parent Room. Report to your commander instead.", 403,
+      "Threads can't order their parent chat. Report to your commander instead.", 403,
     );
 }
 
@@ -156,7 +156,7 @@ export async function stopCommandedTurn(
     `SELECT 1 FROM rooms corner WHERE id=$1 AND ${cornerCommanderIdSql('corner')}=$2`, [address, agentId])).rowCount);
   if (!ordered && !commandsCorner)
     throw new CommandRefusalError(
-      'stop refused: you did not order this turn and you do not command this corner; nothing was stopped', 403);
+      'stop refused: you did not order this turn and you do not command this thread; nothing was stopped', 403);
   const dropped = await dropQueuedOrdersForStop(db, running);
   await db.query(
     `SELECT (terminal.ended).* FROM (SELECT beeline_finish_agent_command(agent_commands.id,'cancelled','stop',NULL) ended FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3

@@ -70,7 +70,7 @@ import type { SqlDatabase } from '../database.js';
       `SELECT room.workspace_id,identity.name agent_name,beeline_workspace_handle(identity.id,room.workspace_id) agent_handle,
         identity.avatar agent_avatar FROM rooms room JOIN identities identity ON identity.id=$2
        WHERE room.id=$1`, [input.roomId, agentId])).rows[0];
-    if (!context) throw new Error('Link request Room not found');
+    if (!context) throw new Error('Link request chat not found');
     const member = await ctx.database.query(`SELECT 1 FROM memberships WHERE workspace_id=$1
       AND room_id IS NULL AND identity_id=$2 AND removed_at IS NULL`,
       [context.workspace_id, ownerId]);

@@ -1,3 +1,4 @@
+import { cornerOwnerSql } from './corner-worker.js';
 import { CornerLifecycleView } from '@beeline/api-contract/phone';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
@@ -48,7 +49,7 @@ CREATE TRIGGER corner_github_cache_mirror AFTER INSERT OR UPDATE OF lifecycle ON
 
 /**
  * The corner's own row: created once with the corner, then changed only by
- * this module (its lock and its reviewer). Its GitHub display cache row starts
+ * this module (its lock, implementer and reviewer). Its GitHub display cache row starts
  * with it and is then written only from GitHub (`corner_github_cache`).
  */
 export async function createCornerFacts(db: SqlDatabase, cornerId: string, humanOpen = false): Promise<void> {
@@ -68,6 +69,33 @@ export async function createCornerFacts(db: SqlDatabase, cornerId: string, human
   );
 }
 
+
+/** Initialize once from the opening order or a human thread's first person tag. */
+export async function initializeThreadImplementer(db: SqlDatabase, cornerId: string): Promise<void> {
+  await db.query(`UPDATE corner_facts SET implementer_agent_id=${cornerOwnerSql('$1')}
+    WHERE corner_id=$1 AND implementer_agent_id IS NULL`, [cornerId]);
+}
+
+/** Explicit agent takeover is the only write after initial assignment. */
+export async function becomeThreadImplementer(db: SqlDatabase, cornerId: string, agentId: string | null): Promise<void> {
+  await db.query('UPDATE corner_facts SET implementer_agent_id=$2 WHERE corner_id=$1', [cornerId, agentId]);
+}
+
+/** Freeze the pre-release derivation once, including its opener fallback. */
+export async function backfillThreadImplementers(database: SqlDatabase): Promise<void> {
+  await database.transaction(async db => {
+    const inserted = await db.query(`INSERT INTO beeline_release_steps(name) VALUES('thread-implementer-v1')
+      ON CONFLICT DO NOTHING RETURNING name`);
+    if (!inserted.rowCount) return;
+    await db.query(`UPDATE corner_facts fact SET implementer_agent_id=COALESCE(
+      (SELECT assignment.agent_id FROM agent_commands assignment
+       WHERE assignment.room_id=corner.id AND assignment.reason IN ('corner_objective','human_tag')
+         AND assignment.agent_id IS DISTINCT FROM COALESCE(fact.reviewer_agent_id,
+           (SELECT parent.reviewer_agent_id FROM rooms parent WHERE parent.id=corner.parent_id))
+       ORDER BY assignment.inbox_sequence DESC LIMIT 1),corner.created_by)
+      FROM rooms corner WHERE corner.id=fact.corner_id AND fact.implementer_agent_id IS NULL`);
+  });
+}
 
 /** A person's lock: merges then keep the corner open (`corner lock`). */
 export async function setCornerLockedFact(
@@ -158,7 +186,7 @@ export async function archiveCorner(database: SqlDatabase, cornerId: string): Pr
     await lockCornerLifecycle(database, cornerId);
     await lockCornerArchivalAuthority(database);
     if (!(await database.query(`SELECT 1 FROM rooms WHERE id=$1 AND parent_id IS NOT NULL FOR KEY SHARE`, [cornerId])).rowCount)
-      throw new Error('corner not found');
+      throw new Error('thread not found');
     await cancelCornerAgentCommands(database, cornerId);
     // Match command output: command locks precede the Room archival write lock.
     const changed = await database.query(
@@ -470,8 +498,8 @@ async function writeCornerAdvance(
         }
         case 'checks-failed':
           if (!corner.worker_agent_id) {
-            await noteReviewDispatchFailure(db, cornerId, head ?? 'checks', 'the corner has no implementer');
-            result = { ok: true, wake: { queued: false, reason: 'the corner has no implementer' } };
+            await noteReviewDispatchFailure(db, cornerId, head ?? 'checks', 'the thread has no implementer');
+            result = { ok: true, wake: { queued: false, reason: 'the thread has no implementer' } };
           } else if (facts.checkSourceId && corner.worker_agent_id) {
             const command = await createAgentCommand(db, {
               roomId: cornerId,
@@ -573,7 +601,7 @@ async function writeCornerAdvance(
                 kind: 'lifecycle',
                 authorId: SYSTEM_AUTHOR_ID,
                 fromRoomId: cornerId,
-                text: systemText(`A yes is recorded on ${head} and checks passed. Call merge_corner through the normal merge gate.`),
+                text: systemText(`A yes is recorded on ${head} and checks passed. Call merge_thread through the normal merge gate.`),
               },
             });
             result = {
@@ -617,7 +645,7 @@ async function writeCornerAdvance(
           db,
           cornerId,
           SYSTEM_AUTHOR_ID,
-          systemText(`blocked: Corner ${row.name} is idle. Resume it, set a hold, or close it.`),
+          systemText(`blocked: Thread ${row.name} is idle. Resume it, set a hold, or close it.`),
           undefined,
           createHash('sha256').update(`idle:${cornerId}:${facts.idleSince}`).digest('hex'),
           { automatic: true, idleSince: row.idle_since },

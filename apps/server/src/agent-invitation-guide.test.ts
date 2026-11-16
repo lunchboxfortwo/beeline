@@ -71,7 +71,7 @@ describe('agent invitation concordance', () => {
     expect(ASSISTANT_INVITATION_STEPS['grok cli']).toContain('join --host grok --name my-grok');
     expect(ASSISTANT_INVITATION_STEPS.muse).toContain('only if the form asks');
     expect(AGENT_INVITATION_PATHS.connector).toContain('That agent checks');
-    expect(AGENT_INVITATION_PATHS.connector).not.toContain('list_rooms');
+    expect(AGENT_INVITATION_PATHS.connector).not.toContain('list_chats');
   });
 
   it('gives every phone picker tile the correct path and guide instead of a bare host', () => {

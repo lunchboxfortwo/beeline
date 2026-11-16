@@ -42,7 +42,7 @@
         }
       },
       {
-        "noCall": "open_corner"
+        "noCall": "open_thread"
       },
       {
         "noCall": "Bash",

@@ -704,7 +704,7 @@ describe('retired app storage — SENTRY-22', () => {
 const scope20 = fixtureScope20();
 
 
-  it('lets the prior release list corners after retirement, including repair of already dropped tables', async () => {
+  it('lets the prior release list threads after retirement, including repair of already dropped tables', async () => {
     const database = await migratedDatabase();
     try {
       await scope20.seedCorner(database);

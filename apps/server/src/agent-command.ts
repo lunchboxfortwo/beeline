@@ -1,3 +1,4 @@
+import { initializeThreadImplementer } from './corner-lifecycle.js';
 import type { AgentCommand,AgentCommandAction,RoomInboxResult } from '@beeline/api-contract/daemon';
 import { isBackgroundCommand,wall } from '@beeline/api-contract/daemon';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
@@ -740,6 +741,8 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
   )).rows[0] ?? (await db.query<CommandRow>(
     'SELECT * FROM agent_commands WHERE id=$1',[id],
   )).rows[0];
+  if (saved && chat.parent_id && ['corner_objective','human_tag'].includes(input.reason))
+    await initializeThreadImplementer(db, chat.id);
   if (saved?.state === 'pending' && saved.action === 'input' && db.ownedModelCredentials &&
       (await db.query('SELECT 1 FROM free_agents WHERE agent_id=$1 AND removed_at IS NULL', [saved.agent_id])).rowCount)
     await db.ownedModelCredentials.issueInTransaction(db, { agentId: saved.agent_id, commandId: saved.id });

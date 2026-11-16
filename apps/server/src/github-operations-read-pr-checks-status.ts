@@ -48,7 +48,7 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
         [input.cornerId],
       )
     ).rows[0];
-    if (!corner?.parent_id) throw new Error('corner not found');
+    if (!corner?.parent_id) throw new Error('thread not found');
     const target = await ctx.roomWorkflowTarget(corner.parent_id);
     const requested = input.pullRequest ?? corner.lifecycle.pr?.number;
     let number: number;
@@ -56,7 +56,7 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
     else if (typeof requested === 'string') {
       const match = requested.match(/^https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)\/?$/i);
       if (!match || match[1]!.toLowerCase() !== target.repository.toLowerCase())
-        throw new Error('pull request must belong to the corner Room repository');
+        throw new Error('pull request must belong to the thread chat repository');
       number = Number(match[2]);
     } else throw new Error('specify the pull request number or URL being reviewed');
     if (!Number.isSafeInteger(number) || number <= 0)
@@ -66,7 +66,7 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
       `SELECT extract(epoch FROM clock_timestamp())::double precision started_at`,
     )).rows[0]!.started_at;
     const pr = await readRecordedPullRequest(ctx, input.cornerId, target.token, target.repository, number);
-    if (!pr) throw new ExpectedRefusalError('the corner has no pull request');
+    if (!pr) throw new ExpectedRefusalError('the thread has no pull request');
     // Explicit reconciliation also observes an unmerged close even when the
     // check verdict is unchanged. No clock scans for missed close webhooks.
     if (!corner.archived && pr.state === 'closed' && !pr.merged && corner.lifecycle.pr?.number === number) {
@@ -104,7 +104,7 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
       // Re-read after registration evidence: neither a new head nor a newly
       // registered status context can inherit the earlier empty rollup.
       const latestPr = await readRecordedPullRequest(ctx, input.cornerId, target.token, target.repository, number);
-      if (!latestPr) throw new ExpectedRefusalError('the corner has no pull request');
+      if (!latestPr) throw new ExpectedRefusalError('the thread has no pull request');
       rollup = await ctx.app.readCommitCheckRollup(target.token, target.repository, pr.headSha);
       zeroChecksConfirmed = absent && !rollup.pendingRegistrations && latestPr.headSha === pr.headSha && rollup.total === 0;
     }
@@ -217,7 +217,7 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
    * The phone's approve: a Workspace owner or admin's yes on the current head
    * (`recordPersonMergeYes`), then the one merge path, `landCorner`. Checks
    * must be green and no hold may stand; a yes given early merges when the
-   * implementer's `merge_corner` runs after green checks.
+   * implementer's `merge_thread` runs after green checks.
    */
   export async function gitHubOperationsApproveCornerMerge(ctx: GitHubOperations, viewerId: string, input: Input<'approveCornerMerge'>) {
     const corner = (
@@ -229,7 +229,7 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
       )
     ).rows[0];
     const pullRequest = corner?.lifecycle.pr;
-    if (!corner || !pullRequest) throw new Error('corner has no pull request to merge');
+    if (!corner || !pullRequest) throw new Error('thread has no pull request to merge');
     if (corner.archived || corner.lifecycle.lifecycle === 'done')
       return { status: 'already-merged' as const, pullRequestUrl: pullRequest.url };
     const yes = await recordPersonMergeYes(ctx.database, input.cornerId, viewerId);
@@ -245,7 +245,7 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
    * The one merge path. Squash-merges a corner at its exact head when
    * `pr_checks_status`'s `mergeAllowed` is true on GitHub's current head:
    * live checks green, a yes said on that head, and no hold. Called by
-   * the implementer's `merge_corner`, a person's yes (`order_corner_merge` or
+   * the implementer's `merge_thread`, a person's yes (`order_thread_merge` or
    * the phone's approve). Recovery only confirms or releases an unfinished attempt.
    * At most one attempt per head: the attempt is claimed under the run lock
    * before GitHub is called. Confirmation, the webhook, or recurring recovery
@@ -263,7 +263,7 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
 
   /**
    * `landCorner`, telling a started merge apart from one GitHub refused, so
-   * `merge_corner` can report the refusal instead of `merge-started`.
+   * `merge_thread` can report the refusal instead of `merge-started`.
    */
   export async function gitHubOperationsLandCornerOutcome(ctx: GitHubOperations, cornerId: string, onBlocked?: (reason: string) => void): Promise<LandCornerOutcome> {
     const notAttempted = (reason: string) => {
@@ -276,7 +276,7 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
       status = await ctx.prChecksStatus({ cornerId });
     } catch (error) {
       console.error(
-        `[server] corner ${cornerId} merge gate read failed:`,
+        `[server] thread ${cornerId} merge gate read failed:`,
         error instanceof Error ? error.message : String(error),
       );
       return notAttempted('GitHub merge gate read failed');
@@ -329,7 +329,7 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
         [cornerId, status.headSha],
       )
     ).rows[0];
-    if (!target) return notAttempted('the merge target no longer matches the corner head or linked GitHub repository');
+    if (!target) return notAttempted('the merge target no longer matches the thread head or linked GitHub repository');
     if (!(await confirmCornerMergeAuthority(ctx.database, cornerId, status.headSha, onBlocked)))
       return { status: 'not-attempted' };
     try {
@@ -408,7 +408,7 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
       if (pr.merged && pr.headSha === status.headSha && pr.headRef === target.branch)
         await ctx.recordConfirmedCornerMerge(target, target.full_name, target.number, pr);
     } catch (error) {
-      console.error(`[server] merged corner confirmation deferred for ${cornerId}:`, error);
+      console.error(`[server] merged thread confirmation deferred for ${cornerId}:`, error);
     }
     return { status: 'started' };
   }
@@ -449,9 +449,9 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
         [cornerId],
       )
     ).rows[0];
-    if (!target) return { status: 'blocked', blocker: 'no corner found' };
+    if (!target) return { status: 'blocked', blocker: 'no thread found' };
     if (!target.number || !target.url)
-      return { status: 'blocked', blocker: 'the corner has no pull request' };
+      return { status: 'blocked', blocker: 'the thread has no pull request' };
     if (!target.repository_id || !target.installation_id || !target.full_name)
       return { status: 'blocked', blocker: 'the GitHub app cannot reach this repository' };
     await ctx.app.closePullRequest(
@@ -511,8 +511,8 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
         [cornerId],
       )
     ).rows[0];
-    if (!corner) return { status: 'blocked', blocker: 'corner not found' };
-    if (!corner.number) return { status: 'blocked', blocker: 'the corner has no pull request' };
+    if (!corner) return { status: 'blocked', blocker: 'thread not found' };
+    if (!corner.number) return { status: 'blocked', blocker: 'the thread has no pull request' };
     const target = await ctx.roomWorkflowTarget(corner.parent_id);
     const [pr, discussion] = await Promise.all([
       ctx.app.readPullRequest(target.token, target.repository, corner.number),
@@ -665,7 +665,7 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
           if (note.inserted) ctx.onRoomChanged?.(row.corner_id);
         });
       } catch (error) {
-        console.error(`[server] mergeability refresh failed for corner ${row.corner_id}:`, error);
+        console.error(`[server] mergeability refresh failed for thread ${row.corner_id}:`, error);
       }
     }
   }

@@ -184,7 +184,7 @@ export const SYSTEM_MESSAGE_AWAY_AUTO_PAUSE = {
   },
 
   'corner-reviewer.set-the-corner-reviewer': {
-    parts: ['set the corner reviewer'],
+    parts: ['set the thread reviewer'],
     variables: [],
   },
 

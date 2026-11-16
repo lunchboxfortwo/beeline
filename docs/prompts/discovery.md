@@ -72,7 +72,7 @@ Provider/startup failures, unproved actions and unrun cases remain incomplete;
 the overall rate is null until every case has a supported score.
 
 Output directories must sit outside every Git checkout. The runner rejects a
-nested path so the test agent cannot infer the implementing corner from its
+nested path so the test agent cannot infer the implementing thread from its
 working directory. The local service has an empty, enabled memory store. The
 historical-file case uploads a real CSV attachment, and the workflow-read case
 starts a real paused workflow. Their template identifiers are replaced with

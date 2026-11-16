@@ -22,7 +22,7 @@ const owner = '1'.repeat(64), member = '2'.repeat(64), other = '3'.repeat(64), h
 const workspace = '11111111-1111-4111-8111-111111111111', room = '22222222-2222-4222-8222-222222222222';
 const id = () => randomBytes(32).toString('hex');
 
-describe('owed Room tags', () => {
+describe('owed chat tags', () => {
   let db: PgliteDatabase, phone: PhoneService, mcp: RoomsMcp, daemon: DaemonService, live: LiveHub;
   const principal = (memberId = member): McpPrincipal => ({ hash: '', client_id: 'test', identity_id: owner, member_id: memberId, scope: 'rooms:read rooms:write' });
   const call = (name: string, args: Record<string, unknown> = {}, memberId = member) =>
@@ -185,7 +185,7 @@ describe('owed Room tags', () => {
       await new Promise<void>(resolve => server.close(() => resolve()));
     }
     const tool = (mcp as unknown as { toolResult(p: McpPrincipal, n: string, a: Record<string, unknown>): Promise<{ content: { text: string }[] }> }).toolResult.bind(mcp);
-    for (const result of [await tool(principal(helper), 'list_rooms', {}), await tool(principal(helper), 'send_message', { room, text: '' })])
+    for (const result of [await tool(principal(helper), 'list_chats', {}), await tool(principal(helper), 'send_message', { room, text: '' })])
       expect(result.content.map(item => item.text).join('')).not.toContain('owedMentions');
   });
   it('C7 helper tool context returns only its authenticated member’s owed tags', async () => {

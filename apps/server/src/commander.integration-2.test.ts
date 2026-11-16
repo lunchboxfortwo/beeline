@@ -60,7 +60,7 @@ it('Reproduction corner-ancestor-rule: orders reach member agents in siblings, c
   for (const cornerId of [child.cornerId, opened.cornerId]) {
     await expect(rootFixture.daemon.execute('reviseCornerBrief', { ...authority(grandchildTurn), cornerId, expectedRevision: 1,
       brief: { spec: 'Ancestor work', change: 'Attempt', approval: { sourceMessageId: turn.sourceMessageId } } }, WORKER))
-      .rejects.toThrow("Corners can't order their parent Room. Report to your commander instead.");
+      .rejects.toThrow("Threads can't order their parent chat. Report to your commander instead.");
   }
   console.log('[corner-ancestor-rule] sibling/self/child/parent Room orders delivered; all member chat addresses delivered; identity addresses and nonmembers refused');
   await rootFixture.daemon.execute('reviseCornerBrief', { ...authority(turn), cornerId: grandchild.cornerId, expectedRevision: 1,
@@ -75,7 +75,7 @@ it('Reproduction corner-ancestor-rule: orders reach member agents in siblings, c
 
 });
 
-it('issues-triage can order and revise fix corners but cannot open in an inaccessible DM', async () => {
+it('issues-triage can order and revise fix threads but cannot open in an inaccessible DM', async () => {
   const opened = await open(), turn = await worker(opened.cornerId);
   await rootFixture.db.query(`UPDATE rooms SET name='issues-triage' WHERE id=$1`, [opened.cornerId]);
   const child = await rootFixture.daemon.execute('createCorner', { ...authority(turn), targetRoomId: ROOM,
@@ -92,7 +92,7 @@ it('issues-triage can order and revise fix corners but cannot open in an inacces
   await expect(rootFixture.daemon.execute('createCorner', { ...authority(turn), targetRoomId: DM,
     idempotencyKey: 'escape', name: 'Escape', objective: 'Recruit outside the Room',
     brief: { spec: 'Escape', approval: { sourceMessageId: turn.sourceMessageId } } }, WORKER))
-    .rejects.toThrow('daemon room access denied');
+    .rejects.toThrow('daemon chat access denied');
 });
 
 it('corner mentions still wake an instance in the same corner', async () => {
@@ -324,7 +324,7 @@ it('vocabulary: corner post tags wake conversation in the posted place without a
 });
 
 
-it('vocabulary: forbidden corner orders give a usable report step', async () => {
+it('vocabulary: forbidden thread orders give a usable report step', async () => {
   const opened = await open(), turn = await worker(opened.cornerId);
   await expect(rootFixture.daemon.execute('order', {...authority(turn),address:DM,agent:'ruby',text:'Do parent work'},WORKER)).rejects.toThrow('address requires current membership');
   await rootFixture.daemon.execute('report', {...authority(turn),status:'blocked',text:'blocked: parent work needs the commander'},WORKER);
@@ -642,7 +642,7 @@ it('Reproduction R1: exact original posts do not wake the quoted member', async 
 });
 
 
-// Reproduction OPEN-1: use the same public daemon operation as open_corner.
+// Reproduction OPEN-1: use the same public daemon operation as open_thread.
 it.each([undefined, 'agent-context'])('OPEN-1: opens without human approval (%s)', async (sourceMessageId) => {
   if (sourceMessageId) await rootFixture.db.query(
     `INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Investigate the widget')`,
@@ -654,7 +654,7 @@ it.each([undefined, 'agent-context'])('OPEN-1: opens without human approval (%s)
   }, RUBY);
   expect((await rootFixture.db.query(`SELECT approval_basis FROM corner_brief_revisions WHERE corner_id=$1`,
     [opened.cornerId])).rows[0]).toMatchObject({ approval_basis: {
-      kind: 'agent-initiated', approvedBy: RUBY, snapshot: 'Agent-initiated corner',
+      kind: 'agent-initiated', approvedBy: RUBY, snapshot: 'Agent-initiated thread',
   } });
   expect((await commands(opened.cornerId, WORKER))[0]).toBeDefined();
 });
@@ -672,7 +672,7 @@ it('OPEN-1: refuses a non-member opening without approval', async () => {
   await expect(rootFixture.daemon.execute('createCorner', { ...authority(rootFixture.order), targetRoomId: ROOM,
     name: 'Agent-widget', objective: 'Build the widget', implementer: 'worker',
     brief: { spec: 'Build the widget', repositoryWork: false },
-  }, RUBY)).rejects.toThrow('daemon room access denied');
+  }, RUBY)).rejects.toThrow('daemon chat access denied');
 });
 
 

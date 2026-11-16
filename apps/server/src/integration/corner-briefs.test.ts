@@ -205,7 +205,7 @@ const fixture = monolithFixture();
   });
 
 
-  it('commits a full brief and its Room file before waking the worker, then preserves the bytes', async () => {
+  it('commits a full brief and its chat file before waking the worker, then preserves the bytes', async () => {
     const source = await mkdtemp(join(tmpdir(), 'beeline-brief-source-'));
     await writeFile(join(source, 'approved-mock.txt'), 'approved visual dimensions');
     const bytes = await readFile(join(source, 'approved-mock.txt'));
@@ -449,7 +449,7 @@ const fixture = monolithFixture();
       fixtureOmitBrief: true,
     });
     expect(response.status).toBe(400);
-    expect(await response.text()).toContain('a brief is required for repository corners');
+    expect(await response.text()).toContain('a brief is required for repository threads');
     expect(
       (await fixture.database.query(`SELECT 1 FROM rooms corner WHERE ${cornerRequestSql('corner.id')}='missing-code-brief'`))
         .rows,
@@ -612,7 +612,7 @@ const fixture = monolithFixture();
       for (const roomId of [null, ROOM])
         await fixture.database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [WORKSPACE, roomId, worker]);
       const opened = await fixture.daemonOperation('createCorner', {
-        roomId: ROOM, requestId: 'worker-brief-open', name: 'Worker-brief',
+        roomId: ROOM, requestId: 'worker-brief-open', name: 'Worker-brief', implementer: 'worker',
         objective: 'Keep the approved behavior', repository: 'example/repo',
         brief: { content: 'Keep the approved behavior.' },
       });
@@ -682,13 +682,13 @@ const fixture = monolithFixture();
       const result = await revised.json();
       const wakes = (await fixture.database.query<{ agent_id: string }>(
         `SELECT command.agent_id FROM agent_commands command JOIN messages note ON note.id=command.source_message_id
-         WHERE command.room_id=$1 AND note.text LIKE '%revised the corner brief%'`, [cornerId],
+         WHERE command.room_id=$1 AND note.text LIKE '%revised the thread brief%'`, [cornerId],
       )).rows.map(row => row.agent_id);
       const shouldWake = true;
       console.info(`Reproduction BR-01: HTTP reviseCornerBrief from ${state}, worker ${health}; expected=${shouldWake ? 'current worker' : 'none'}; observed=${wakes.map(id => id === worker ? 'current worker' : 'opener').join(',') || 'none'}; revision=${result.revision}`);
       expect(result).toMatchObject({ revision: 2, wake: shouldWake ? { queued: true, agentId: worker } : { queued: false, reason: expect.any(String) } });
       expect(wakes).toEqual(shouldWake ? [worker] : []);
-      expect((await fixture.database.query(`SELECT 1 FROM messages WHERE room_id=$1 AND text LIKE '%revised the corner brief%'`, [cornerId])).rows).toHaveLength(1);
+      expect((await fixture.database.query(`SELECT 1 FROM messages WHERE room_id=$1 AND text LIKE '%revised the thread brief%'`, [cornerId])).rows).toHaveLength(1);
       expect((await fixture.database.query<{ worker_agent_id: string; workflow_state: string }>(
         `SELECT ${cornerImplementerSql('fact', 'corner')} worker_agent_id,${cornerRunStateSql('fact.corner_id')} workflow_state FROM corner_facts fact
          JOIN rooms corner ON corner.id=fact.corner_id WHERE fact.corner_id=$1`, [cornerId],

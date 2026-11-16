@@ -617,7 +617,7 @@ export type CornerBriefAttachment = {
   readonly size: number;
 };
 
-/** Spec length cap shared by `open_corner`, `revise_corner_brief` and the server. */
+/** Spec length cap shared by `open_thread`, `revise_thread_brief` and the server. */
 export const CORNER_BRIEF_SPEC_MAX_LENGTH = 16_000;
 
 export type CornerBriefDraft = {

@@ -11,7 +11,7 @@ describe('sanitizeAgentReply', () => {
     "Terra, respond to the user's latest message.",
     "respond to the user's actual latest message",
     'Answer the newest message directly.',
-  ])('suppresses empty output and thin Room scaffold echoes: %j', (message) => {
+  ])('suppresses empty output and thin chat scaffold echoes: %j', (message) => {
     expect(sanitizeAgentReply(message)).toBe('');
   });
 

@@ -2,9 +2,9 @@ import { maskCredentialResult } from './mask-credential-result.js';
 /**
  * One journal line for a tool call the harness reports as failed.
  *
- * A refused `open_corner` used to leave the helper journal with the call and
+ * A refused `open_thread` used to leave the helper journal with the call and
  * nothing after it: no status, no reason, nothing an operator could read. The
- * agent said only "the last open_corner call was rejected" and the same turn
+ * agent said only "the last open_thread call was rejected" and the same turn
  * failed twice (C90). The refusal sentence does exist on the wire — in the
  * call's `content`, or, for grok, only in its `rawOutput.output.Error` — so
  * the helper reads whichever one carries it and says it out loud.
@@ -92,7 +92,7 @@ export function isPrChecksRead(call: ToolCallEntry): boolean {
 /** Feedback variants of report never count as private work delivery to a commander. */
 export function isPrivateWorkToolCall(call: ToolCallEntry): boolean {
   if (!isCompletedToolCall(call)) return false;
-  if (/(?:^|[._:/-])(?:order|open_corner)$/i.test(call.title ?? '')) return true;
+  if (/(?:^|[._:/-])(?:order|open_thread)$/i.test(call.title ?? '')) return true;
   if (!/(?:^|[._:/-])report$/i.test(call.title ?? '')) return false;
   const kind = toolCallArguments(call.rawInput)?.kind;
   return kind === undefined || kind === 'commander';

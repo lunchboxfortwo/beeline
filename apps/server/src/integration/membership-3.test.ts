@@ -156,7 +156,7 @@ const fixture = monolithFixture();
   });
 
 
-  it('lists and dispatches Room workflows only for human Workspace managers', async () => {
+  it('lists and dispatches chat workflows only for human Workspace managers', async () => {
     const list = vi.spyOn(fixture.githubOperations, 'listRoomWorkflows').mockResolvedValue({
       defaultBranch: 'main',
       workflows: [{ name: 'Release', lastRunAt: 1_789_214_400, conclusion: 'success' }],

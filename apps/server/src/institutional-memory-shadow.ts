@@ -466,10 +466,10 @@ export async function memoryWriteAuthority(
   if (!requesterIdentityId) {
     const corners =
       authority.root_room_id === command.room_id
-        ? `Room ${command.room_id} is not`
-        : `neither Room ${command.room_id} nor Room ${authority.root_room_id} is`;
+        ? `chat ${command.room_id} is not`
+        : `neither chat ${command.room_id} nor chat ${authority.root_room_id} is`;
     throw new Error(
-      `institutional memory requester authority is unavailable: this turn's root message ${command.root_source_message_id} in Room ${authority.root_room_id} is not from a person, and ${corners} a corner with a recorded requester`,
+      `institutional memory requester authority is unavailable: this turn's root message ${command.root_source_message_id} in chat ${authority.root_room_id} is not from a person, and ${corners} a thread with a recorded requester`,
     );
   }
   const requesterTurn = authority.person_id !== null;
@@ -493,7 +493,7 @@ export async function memoryWriteAuthority(
   );
   if (validSources.rowCount !== new Set(input.sourceMessageIds).size) {
     throw new Error(
-      'institutional memory change cites an unavailable source; sources must be non-deleted messages in this Room',
+      'institutional memory change cites an unavailable source; sources must be non-deleted messages in this chat',
     );
   }
   return {
@@ -586,7 +586,7 @@ export async function insertMemoryItem(
     options.predecessorId??null,command.id,[...proposal.keywords],options.explicitSave,
     proposal.source.messageIds,command.root_source_message_id,command.room_id,
   ])).rows[0]!;
-  if (!result.source_available) throw new Error('institutional memory source room is unavailable');
+  if (!result.source_available) throw new Error('institutional memory source chat is unavailable');
   if (!result.item_id) {
     const current=(await db.query<{id:string;version:number}>(`SELECT id,version FROM institutional_memory_items
       WHERE workspace_id=$1 AND kind=$2 AND subject_identity_id IS NOT DISTINCT FROM $3

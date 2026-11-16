@@ -32,7 +32,7 @@ async function backfillInheritedCornerMemberships(database: SqlDatabase): Promis
   return result.rowCount;
 }
 
-it('rejects the retired predecessor backfill while parent-authorized corners stay readable', async () => {
+it('rejects the retired predecessor backfill while parent-authorized threads stay readable', async () => {
   const db = await migratedDatabase();
   try {
     const workspace = randomUUID(),

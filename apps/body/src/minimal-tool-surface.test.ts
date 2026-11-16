@@ -9,7 +9,7 @@ import { toolValidationSchema, type ToolDefinition } from './minimal-tool-surfac
 import { assembleSessionPrompt, PROMPT_SURFACES } from './prompt-assembly.js';
 
 const harnesses = ['claude-agent-acp', 'claude-code-acp', 'codex-acp', 'pi-acp', 'grok', 'buzz-agent', 'cursor-acp-bridge'];
-const missingOnClaude = ['request_grant', 'connect', 'app_tool', 'wake', 'remember', 'revise_corner', 'create_work_item', 'set_work_state', 'assign_work_item', 'add_work_note', 'attach_to_work_item'];
+const missingOnClaude = ['request_grant', 'connect', 'app_tool', 'wake', 'remember', 'revise_thread', 'create_work_item', 'set_work_state', 'assign_work_item', 'add_work_note', 'attach_to_work_item'];
 const rootCombinators = ['anyOf', 'oneOf', 'allOf'];
 const invalidInputs = [
   ['request_grant', { mode: 'request', action: 'Use the requested resource', kind: 'command' }],
@@ -17,7 +17,7 @@ const invalidInputs = [
   ['app_tool', { app: 'beeline:workflow', args: {} }],
   ['wake', { action: 'create', trigger: 'schedule', title: 'Reminder', prompt: 'x'.repeat(2001) }],
   ['remember', { kind: 'fact', action: 'save', body: 'No sources' }],
-  ['revise_corner', { action: 'brief', address: 'child', brief: { spec: 'Change' } }],
+  ['revise_thread', { action: 'brief', address: 'child', brief: { spec: 'Change' } }],
 ] as const;
 
 describe('Beeline tool surface across harnesses', () => {
@@ -52,7 +52,7 @@ describe('Beeline tool surface across harnesses', () => {
     }, 'too-long-prompt')).rejects.toThrow(/prompt: 2001 characters; the limit is 2000/);
   });
 
-  it('normalizes an oversized corner name and objective before schema validation', async () => {
+  it('normalizes an oversized thread name and objective before schema validation', async () => {
     const objective = 'word '.repeat(401);
     expect(objective).toHaveLength(2005);
     const args = {
@@ -67,7 +67,7 @@ describe('Beeline tool surface across harnesses', () => {
     delete process.env.BEELINE_DAEMON_BASE_URL;
     delete process.env.BEELINE_TURN_CONTEXT_FILE;
     try {
-      await callAgentTool('open_corner', args, 'oversized-corner');
+      await callAgentTool('open_thread', args, 'oversized-corner');
       throw new Error('expected the call to stop before a daemon');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

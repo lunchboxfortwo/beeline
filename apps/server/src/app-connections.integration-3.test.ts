@@ -435,7 +435,7 @@ const scope2 = fixtureScope2();
     ).resolves.toEqual({ allowed: true });
     expect((await scope2.database.query(`SELECT 1 FROM workspace_app_usage`)).rowCount).toBe(0);
   });
-describe('Room files for app tools', () => {
+describe('chat files for app tools', () => {
 const scope3 = fixtureScope3(scope2);
 
 
@@ -477,7 +477,7 @@ const scope3 = fixtureScope3(scope2);
           if (failure === 'Room object') expect(result).toMatchObject({ status: 'executed', data: { id: 'yt-1' } });
           if (failure === 'local path') {
             expect(result.error).toContain('videoFile');
-            expect(result.error).toContain('staged Room object');
+            expect(result.error).toContain('staged chat object');
             expect(transport.mock.calls.some(([url, init]) =>
               init?.method === 'POST' && String(url).includes('/tools/execute/'))).toBe(false);
             expect(calls.some(call => call.method === 'PUT')).toBe(false);
@@ -523,20 +523,20 @@ const scope3 = fixtureScope3(scope2);
     });
 
 
-    it('refuses an oversize Room file with no Composio request', async () => {
+    it('refuses an oversize chat file with no Composio request', async () => {
       const { upload, transport, getObject } = await scope3.youtubeRoom();
-      await expect(upload(scope3.HUGE)).rejects.toThrow('Room file is larger than the 128 MB app tool limit');
+      await expect(upload(scope3.HUGE)).rejects.toThrow('chat file is larger than the 128 MB app tool limit');
       expect(transport).not.toHaveBeenCalled();
       expect(getObject).not.toHaveBeenCalled();
     });
 
 
-    it('refuses a file from another Room or a missing object with no Composio request', async () => {
+    it('refuses a file from another chat or a missing object with no Composio request', async () => {
       const { upload, transport } = await scope3.youtubeRoom();
-      await expect(upload(scope3.ELSEWHERE)).rejects.toThrow(`Room file ${scope3.ELSEWHERE} is not in this Room`);
+      await expect(upload(scope3.ELSEWHERE)).rejects.toThrow(`chat file ${scope3.ELSEWHERE} is not in this chat`);
       await expect(upload('99999999-9999-4999-8999-999999999999'))
-        .rejects.toThrow('is not in this Room');
-      await expect(upload('not-a-uuid')).rejects.toThrow('Room file not-a-uuid is not in this Room');
+        .rejects.toThrow('is not in this chat');
+      await expect(upload('not-a-uuid')).rejects.toThrow('chat file not-a-uuid is not in this chat');
       expect(transport).not.toHaveBeenCalled();
     });
 

@@ -62,7 +62,7 @@ import { Input,id,seconds } from './values.js';
     const key = input.cornerActivityKey;
     if (key !== undefined) {
       if (typeof key !== 'string' || !key || key.length > 200)
-        throw new Error('invalid corner activity key');
+        throw new Error('invalid thread activity key');
     }
     if (key !== undefined || input.activity.some((item) => item.kind === 'output')) {
       const corner = await ctx.database.query(`SELECT 1 FROM corner_facts WHERE corner_id=$1`, [
@@ -71,8 +71,8 @@ import { Input,id,seconds } from './values.js';
       if (!corner.rowCount)
         throw new Error(
           key !== undefined
-            ? 'invalid corner activity key: a corner is required'
-            : 'invalid output activity: a corner is required',
+            ? 'invalid thread activity key: a thread is required'
+            : 'invalid output activity: a thread is required',
         );
     }
     const messageId = key
@@ -114,7 +114,7 @@ import { Input,id,seconds } from './values.js';
             [messageId, input.roomId, agentId, input.requestId, serializedActivity],
           )
         ).rows[0];
-      if (!row) throw new Error('corner activity ID conflicts with another message');
+      if (!row) throw new Error('thread activity ID conflicts with another message');
       if (inserted.rowCount) {
         await database.query(
           `UPDATE agent_turns SET created_at=now()

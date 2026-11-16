@@ -99,7 +99,7 @@ export function readGrantScript(
       throw new Error(
         `${argument.path} is outside your checkout and scratch directory, so its contents ` +
           'cannot be shown on the approval card. Move the script into your checkout or scratch, ' +
-          'or open a corner with open_corner and make the change there.',
+          'or open a thread with open_thread and make the change there.',
       );
     }
     bytes = read(resolved);
@@ -108,7 +108,7 @@ export function readGrantScript(
   if (!Buffer.from(contents, 'utf8').equals(bytes)) {
     throw new Error(
       `${argument.path} is not text, so nobody can read what it does on an approval card. ` +
-        'Open a corner with open_corner and make the change there.',
+        'Open a thread with open_thread and make the change there.',
     );
   }
   return {
@@ -243,7 +243,7 @@ export async function requestGrant(
         : 'An authorized person';
   const destination =
     approval.destination === 'room'
-      ? 'on the card in this Room'
+      ? 'on the card in this chat'
       : approval.destination === 'trusty-squire-dm'
         ? "in the resource owner's private Trusty Squire DM"
         : approval.destination === 'wallet-dm'
@@ -286,7 +286,7 @@ export async function requestSharedAssetIsolation(
   });
   if (result.status !== 'pending' || result.auto !== false)
     throw new Error('shared asset isolation did not open a human approval');
-  return `pending, card posted: isolate ${category} [grant ${String(result.grantId)}]. A Workspace owner, admin, or this agent's owner must answer ALWAYS or NO on the card in this Room. Your turn is paused; end it now. If approved, the category becomes private from your next session.`;
+  return `pending, card posted: isolate ${category} [grant ${String(result.grantId)}]. A Workspace owner, admin, or this agent's owner must answer ALWAYS or NO on the card in this chat. Your turn is paused; end it now. If approved, the category becomes private from your next session.`;
 }
 
 
@@ -563,7 +563,7 @@ export async function workbenchStatus(
     const route = github.transport === 'squire-api'
       ? `call Squire use_credential (${github.connectionReference ? `reference ${JSON.stringify(github.connectionReference)}` : 'service "github"'})`
       : `use app_tool(app:"${github.appId}")`;
-    lines.push('', `GitHub operation identity: in Room, corner and DM sessions, use the Beeline GitHub App for linked-repository code, branch and PR writes, including Git Data API pushes, even when personal GitHub is connected. Without an App checkout, use a corner of the linked Room. This owner's personal GitHub connection (app ${github.appId}, ${github.transport}) serves general lookups, repositories without App access and person-scoped actions; ${route}. Report denials with the exact error and route. Never fall back from App to personal for linked-repository writes or retry person-scoped actions as the App. A mistaken personal-route denial on a linked-repository write does not prevent using the authorized App route. Consult beeline-connecting-services for checkout and merge boundaries.`);
+    lines.push('', `GitHub operation identity: in chat, thread and DM sessions, use the Beeline GitHub App for linked-repository code, branch and PR writes, including Git Data API pushes, even when personal GitHub is connected. Without an App checkout, use a thread of the linked chat. This owner's personal GitHub connection (app ${github.appId}, ${github.transport}) serves general lookups, repositories without App access and person-scoped actions; ${route}. Report denials with the exact error and route. Never fall back from App to personal for linked-repository writes or retry person-scoped actions as the App. A mistaken personal-route denial on a linked-repository write does not prevent using the authorized App route. Consult beeline-connecting-services for checkout and merge boundaries.`);
   }
   if (deps.tailscaleReach) {
     const enabled = Boolean(

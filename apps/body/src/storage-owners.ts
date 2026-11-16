@@ -349,7 +349,7 @@ export async function pruneUnusedCheckoutStorage(supervisorRoot: string, options
   for (const kind of ['corners', 'room-checkouts', 'repositories'] as const) {
     for (const itemId of await readdir(resolve(supervisorRoot, 'beeline', kind)).catch(() => [])) {
       if (kind === 'corners') {
-        if (!recorded.has(`corners/${itemId}`)) console.warn(`[helper] corner copy ${itemId} ownership unknown; retained`);
+        if (!recorded.has(`corners/${itemId}`)) console.warn(`[helper] thread copy ${itemId} ownership unknown; retained`);
         continue;
       }
       if (!/^[a-zA-Z0-9-]{1,80}$/.test(itemId) || recorded.has(`${kind}/${itemId}`)) continue;

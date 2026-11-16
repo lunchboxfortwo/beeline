@@ -95,7 +95,7 @@ export const DEFAULT_MEDIA_MAXIMUM_BYTES = 25 * 1024 * 1024;
  */
 export class AccessDeniedError extends Error {
   constructor() {
-    super('daemon room access denied');
+    super('daemon chat access denied');
   }
 }
 
@@ -283,6 +283,7 @@ export const DAEMON_OPERATION_ROUTES: Record<keyof DaemonOperationMap, true> = {
   listUntrackedCorners: true,
   getRoomRepositoryState: true,
   getRoomGitHubToken: true,
+  becomeImplementer: true,
   dispatchRoomWorkflow: true,
   getRoomTargetBranch: true,
   getIdentitySuccession: true,

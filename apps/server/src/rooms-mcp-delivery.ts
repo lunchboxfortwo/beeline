@@ -153,7 +153,7 @@ export async function setupMemberDelivery(
       kind: 'join_probe',
       createdAt: new Date().toISOString(),
       text: 'Beeline join delivery check. This is a receipt only and authorizes no work.',
-      next: `In this host conversation, call confirm_delivery with ${JSON.stringify(receipt)}. Do not post a Room message.`,
+      next: `In this host conversation, call confirm_delivery with ${JSON.stringify(receipt)}. Do not post a chat message.`,
       receipt,
     };
     await tx.query(
@@ -195,7 +195,7 @@ export async function setupMemberDelivery(
           [principal.member_id],
         )
       ).rows[0]?.room_id;
-      if (!room) throw new ExpectedRefusalError('Join a Room before testing delivery');
+      if (!room) throw new ExpectedRefusalError('Join a chat before testing delivery');
       if (mechanism === 'events')
         await tx.query(
           `INSERT INTO rooms_mcp_event_deliveries(subscription_id,room_id,event_id,body,probe_generation)

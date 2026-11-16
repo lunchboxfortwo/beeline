@@ -32,7 +32,7 @@ const AGENT_OWNER = 'e'.repeat(64); // Workspace member who owns the agent
 const AGENT = 'd'.repeat(64);
 const PEOPLE = [WS_OWNER, WS_ADMIN, ROOM_ADMIN, AGENT_OWNER] as const;
 
-describe('permissions: agent owner, Workspace admin, or anyone in the Room', () => {
+describe('permissions: agent owner, Workspace admin, or anyone in the chat', () => {
   let database: PgliteDatabase;
   let live: LiveHub;
   let phone: PhoneService;
@@ -142,7 +142,7 @@ describe('permissions: agent owner, Workspace admin, or anyone in the Room', () 
     }
   });
 
-  it('anyone in the Room may stop another person’s turn from the phone', async () => {
+  it('anyone in the chat may stop another person’s turn from the phone', async () => {
     for (const [, roomId] of placesFor(ROOM_ADMIN)) {
       const ask = await startTurn(roomId, ROOM_ADMIN);
       await expect(
@@ -185,7 +185,7 @@ describe('permissions: agent owner, Workspace admin, or anyone in the Room', () 
     ).not.toMatch(/room access denied|admin/i);
   });
 
-  it('merge yes, holds and corner close follow the Workspace role, never the Room role', async () => {
+  it('merge yes, holds and thread close follow the Workspace role, never the chat role', async () => {
     await expect(recordPersonMergeYes(database, corner, ROOM_ADMIN)).rejects.toThrow('owner or admin');
     await expect(recordPersonMergeYes(database, corner, WS_ADMIN)).resolves.toMatchObject({ recorded: true });
 

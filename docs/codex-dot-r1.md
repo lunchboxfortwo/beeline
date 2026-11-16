@@ -77,7 +77,7 @@ handoff. No test tag or reply message ids have yet been obtained.
 
 ## R1 owner and member mismatch confirmed
 
-A live Beeline Rooms `list_rooms` read after the owner's failed tag confirms
+A live Beeline Rooms `list_chats` read after the owner's failed tag confirms
 `you.id=67c0f568a77348f6b3ad6946fedef0ad4869929ca1f02b4ed93612d199a4164e`,
 `you.handle=pidoong_dot`, owner `Bento Maker / @lunchboxfortwo2`, and only the
 `#general` Room above. The consent-page handle edit created this profile; it
@@ -107,12 +107,12 @@ The owner's GitHub sign-in is `lunchboxfortwo`; Google with
 `lunchboxfortwo@gmail.com` led to a separate Beeline owner, `lunchboxfortwo2`.
 The browser's other Google session was Methoxine, so it must not be assumed
 to represent either owner. Use the same provider as the existing account and
-verify the owner on consent and in `list_rooms`.
+verify the owner on consent and in `list_chats`.
 
 After reconnect, Pidoong initially reported missing Beeline Rooms tools and
 event source. Completing the installed plugin's Connect dialog with GitHub,
 Allow, OAuth redirect, then reloading the dot restored the tools. Pidoong
-called `list_rooms` and reported:
+called `list_chats` and reported:
 
 - Member `f37de668685a4a3717474da3750f51a24b63159636d1c09bc8c1e486d5dbeb7e`
 - Name ChatGPT, approved handle `@chatgpt`

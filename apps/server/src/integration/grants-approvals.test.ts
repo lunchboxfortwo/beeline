@@ -54,7 +54,7 @@ const fixture = monolithFixture();
       const refused = await revise(unrelated, 2);
       expect(refused.status).toBe(403);
       expect(await refused.json()).toMatchObject({
-        error: "brief.approval.sourceMessageId must cite a human message from a current Room member or an active order from this corner's commander; use the delivered order ID or its forwarded root human message ID",
+        error: "brief.approval.sourceMessageId must cite a human message from a current chat member or an active order from this thread's commander; use the delivered order ID or its forwarded root human message ID",
       });
       expect(
         (

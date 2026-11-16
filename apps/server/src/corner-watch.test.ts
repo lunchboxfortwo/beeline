@@ -86,7 +86,7 @@ it('Reproduction O-2: a watcher receives a named sibling merge in A', async () =
     private: true,
   });
   expect(commands[0]!.sourceMessageId).toBe(commands[0]!.id);
-  expect(commands[0]!.source.body).toContain(`Watched corner B (${B}): merged`);
+  expect(commands[0]!.source.body).toContain(`Watched thread B (${B}): merged`);
 });
 
 it.each(['non-member', 'self', 'room', 'invalid kind', 'closed kind'])(

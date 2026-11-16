@@ -18,7 +18,7 @@ const scope1 = fixtureScope1();
     for (const agentId of ['self', 'f'.repeat(64)]) {
       const result = await scope1.daemonOperation('getWalletToolState', { agentId });
       expect(result.status).toBe(403);
-      expect(result.body.error).toMatch(/does not own|daemon room access denied/);
+      expect(result.body.error).toMatch(/does not own|daemon chat access denied/);
     }
     await scope1.database.query(`UPDATE wallet_bindings SET delegation_standing=false,delegation_expires_at=NULL WHERE identity_id=$1`, [HUMAN]);
     expect((await readCatalog()).find((entry) => entry.connectorType === 'wallet')?.paired).toBeUndefined();

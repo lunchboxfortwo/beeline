@@ -34,7 +34,7 @@ export class PlaceStorage {
         const current = this.next;
         this.next = undefined;
         const operation = storageOperation({});
-        await this.sweepCorners(operation).catch(error => console.warn('[body] corner cleanup deferred:', error));
+        await this.sweepCorners(operation).catch(error => console.warn('[body] thread cleanup deferred:', error));
         await this.sweepRooms(current, operation).catch(error => console.warn('[body] private storage cleanup deferred:', error));
       }
     })().finally(() => { this.flight = undefined; });
@@ -56,7 +56,7 @@ export class PlaceStorage {
   private async refuse(cornerId: string, error: DaemonApiError): Promise<void> {
     this.refused.add(cornerId);
     await writePrivateFileAtomically(this.refusalPath(cornerId), `${JSON.stringify({ cornerId, status: error.status, code: error.code })}\n`);
-    console.warn(`[body] corner ${cornerId} cleanup refused; local work kept`);
+    console.warn(`[body] thread ${cornerId} cleanup refused; local work kept`);
   }
 
   /** A corner the server reports archived loses its local copies. */
@@ -77,7 +77,7 @@ export class PlaceStorage {
       const ended: StorageOwner = { ...owner, archived: true, ended: true, endedAt: owner.endedAt ?? Date.now() };
       await rememberStorageOwner(supervisorRoot, ended);
       await reclaimOwnedCheckout(supervisorRoot, ended, { ...operation,
-        log: entry => console.log(`[body] archived corner ${entry.roomId} deleted ${entry.path}; freed ${entry.freedBytes} bytes`),
+        log: entry => console.log(`[body] archived thread ${entry.roomId} deleted ${entry.path}; freed ${entry.freedBytes} bytes`),
       });
     }
     await this.reclaim([{ roomId: cornerId, archived: true }], operation);
@@ -111,7 +111,7 @@ export class PlaceStorage {
         await task();
         return true;
       },
-      log: entry => console.log(`[body] private storage: Room ${entry.roomId} ${entry.kind} deleted ${entry.path}; freed ${entry.freedBytes} bytes`),
+      log: entry => console.log(`[body] private storage: chat ${entry.roomId} ${entry.kind} deleted ${entry.path}; freed ${entry.freedBytes} bytes`),
     }));
   }
 
@@ -131,7 +131,7 @@ export class PlaceStorage {
       await rememberStorageOwner(supervisorRoot, ended);
       await reclaimOwnedCheckout(supervisorRoot, ended, { ...operation,
         landedHeadSha: state.landedHeadSha,
-        log: entry => console.log(`[body] Room ${owner.roomId} checkout deleted ${entry.path}; freed ${entry.freedBytes} bytes`),
+        log: entry => console.log(`[body] chat ${owner.roomId} checkout deleted ${entry.path}; freed ${entry.freedBytes} bytes`),
       });
     }
   }

@@ -538,7 +538,7 @@ it('DELIVERY-2: stable request IDs deduplicate uncertain recording and delivery,
   } finally { await service.leave(joined.call.id,H); await db.query(`DELETE FROM rooms WHERE id=$1`, [room]); }
 });
 
-it('call history search excludes Rooms another caller cannot read and privately marks dispatched work', async () => {
+it('call history search excludes chats another caller cannot read and privately marks dispatched work', async () => {
   const room = '77777777-7777-4777-8777-777777777777';
   const privateRoom = '88888888-8888-4888-8888-888888888888';
   await db.query(`INSERT INTO institutional_memory_workspace_rollouts(workspace_id,stage) VALUES($1,'live') ON CONFLICT(workspace_id) DO UPDATE SET stage='live'`, [W]);

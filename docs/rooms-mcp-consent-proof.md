@@ -43,7 +43,7 @@ The same Reproduction MCP-CONSENT-ORIGIN passed in headless Google Chrome:
   supplied `access_denied`. State and issuer matched.
 - Edit/Save returned to consent with HTTP 302.
 - Code exchange succeeded, followed by `initialize`, `tools/list`, and
-  `tools/call` for `list_rooms`. The new client has no Room memberships, so its
+  `tools/call` for `list_chats`. The new client has no Room memberships, so its
   bounded Room list is empty.
 - Cross-site and literal `null` Origin POSTs were refused with HTTP 400 even with
   the valid browser cookie and flow. The HTTP suite additionally rejects missing

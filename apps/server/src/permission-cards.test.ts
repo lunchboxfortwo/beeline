@@ -27,7 +27,7 @@ function card(
       ...(status === 'pending'
         ? {}
         : { decider: { pubkey: 'd'.repeat(64), kind: 'human' as const, name: 'Ada' } }),
-      tool: 'open_corner',
+      tool: 'open_thread',
       repository: 'lunchboxfortwo/beeline',
       status,
       ...(cornerId ? { cornerId } : {}),

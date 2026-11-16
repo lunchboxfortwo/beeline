@@ -2,7 +2,7 @@ import { MCP_WEBHOOK_TABLE,POSTGRES_LIVE_CHANNEL } from './postgres-live-notific
 import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { AGENT,backfillMcpMemberAvatars,Client,createAgentCommand,createHash,createServer,deliverMcpMemberWebhooks,describe,ensureMcpMember,expect,fixtureScope1,it,MCP_ORDER_WAKE_HINT,MCP_REVIEW_WAKE_HINT,MCP_WAKE_HINT,opaque,openSecrets,OTHER,pendingMcpWakes,phoneFetch,postMcpWebhook,randomBytes,randomUUID,recordSigninAttempt,ROOM,routeHumanMessage,runMcpWebhookDelivery,StreamableHTTPClientTransport,tokenHash,USER,vi,Webhook,WORKSPACE,type AddressInfo } from './test-support-rooms-mcp.test-support.js';
 
-describe('Rooms connector HTTP OAuth and MCP', () => {
+describe('chats connector HTTP OAuth and MCP', () => {
 const scope1 = fixtureScope1();
 
   // Run the repeated global backfill proof before unrelated HTTP clients accumulate.
@@ -10,7 +10,7 @@ const scope1 = fixtureScope1();
     const secondWorkspace = randomUUID(), secondRoom = randomUUID();
     await scope1.db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Other eligible Workspace')`, [secondWorkspace]);
     await scope1.db.query(`INSERT INTO memberships(workspace_id,identity_id,role) VALUES($1,$2,'owner')`, [secondWorkspace, USER]);
-    await scope1.db.query(`INSERT INTO rooms(id,workspace_id,name,visibility) VALUES($1,$2,'Excluded public Room','public')`, [secondRoom, secondWorkspace]);
+    await scope1.db.query(`INSERT INTO rooms(id,workspace_id,name,visibility) VALUES($1,$2,'Excluded public room','public')`, [secondRoom, secondWorkspace]);
     try {
       const grant = await scope1.authorize();
       expect(grant.consentHtml).toContain('Workspaces');
@@ -26,7 +26,7 @@ const scope1 = fixtureScope1();
       const activeWorkspaces = async () => (await scope1.db.query<{ workspace_id: string }>(
         'SELECT workspace_id FROM memberships WHERE identity_id=$1 AND room_id IS NULL AND removed_at IS NULL ORDER BY workspace_id', [member.member_id])).rows.map(row => row.workspace_id);
       expect(await activeWorkspaces()).toEqual([WORKSPACE]);
-      expect(JSON.stringify(await client.callTool({ name: 'list_rooms', arguments: {} }))).not.toContain(secondRoom);
+      expect(JSON.stringify(await client.callTool({ name: 'list_chats', arguments: {} }))).not.toContain(secondRoom);
       expect((await client.callTool({ name: 'read_messages', arguments: { room: secondRoom } })).isError).toBe(true);
       expect((await client.callTool({ name: 'send_message', arguments: { room: secondRoom, text: 'must not send' } })).isError).toBe(true);
       expect((await scope1.post('/mcp/oauth/token', { grant_type: 'refresh_token', refresh_token: tokens.refresh_token,
@@ -89,7 +89,7 @@ const scope1 = fixtureScope1();
     await client.connect(new StreamableHTTPClientTransport(new URL(endpoint), {
       requestInit: { headers: { authorization: `Bearer ${token}` } },
     }));
-    expect(JSON.stringify(await client.callTool({ name: 'list_rooms', arguments: {} }))).toContain('Demo');
+    expect(JSON.stringify(await client.callTool({ name: 'list_chats', arguments: {} }))).toContain('Demo');
     expect((await client.callTool({ name: 'read_messages', arguments: { room: ROOM } })).isError).not.toBe(true);
     const text = `JOIN-1 synthetic post via ${alias}`;
     expect((await client.callTool({ name: 'send_message', arguments: { room: ROOM, text } })).isError).not.toBe(true);
@@ -387,7 +387,7 @@ const scope1 = fixtureScope1();
     } finally { await unlisten(); }
   });
 
-  it('MCP-WAKE-1: a subscribed member gets one signed wake for an order, a report, and a corner assignment', async () => {
+  it('MCP-WAKE-1: a subscribed member gets one signed wake for an order, a report, and a thread assignment', async () => {
     const fixture = await scope1.eventFixture();
     const { token, params, member, secret, url } = fixture;
     const other = await scope1.connected();
@@ -439,7 +439,7 @@ const scope1 = fixtureScope1();
     expect(await deliverMcpMemberWebhooks(scope1.db, transport)).toBe(0);
     const opened = await scope1.daemon.execute('createCorner', {
       ...authority, requestId: commander.turn_request_id, name: 'Wake-corner', objective: 'Carry the private assignment',
-      implementer: handle, brief: { spec: 'Private corner assignment for the subscribed implementer', repositoryWork: false },
+      implementer: handle, brief: { spec: 'Private thread assignment for the subscribed implementer', repositoryWork: false },
     }, AGENT);
     const cornerCommand = (await scope1.db.query<{ id: string }>(
       `SELECT id FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND reason='corner_objective'`,
@@ -447,7 +447,7 @@ const scope1 = fixtureScope1();
     expect(await queued(cornerCommand.id)).toHaveLength(1);
     expect(JSON.parse((await queued(cornerCommand.id))[0]!.body).data).toMatchObject({
       roomId: opened.cornerId, address: opened.cornerId, commandId: cornerCommand.id, kind: 'order',
-      text: 'Private corner assignment for the subscribed implementer',
+      text: 'Private thread assignment for the subscribed implementer',
       next: MCP_ORDER_WAKE_HINT,
     });
     const report = await createAgentCommand(scope1.db, {
@@ -466,7 +466,7 @@ const scope1 = fixtureScope1();
     expect(await deliverMcpMemberWebhooks(scope1.db, transport)).toBe(2);
     expect(received).toHaveLength(3);
     expect(received.map(item => item.event.data?.text)).toEqual(expect.arrayContaining([
-      text, 'Private corner assignment for the subscribed implementer', 'done: the report reached the commander',
+      text, 'Private thread assignment for the subscribed implementer', 'done: the report reached the commander',
     ]));
     const heard = await place('only the wake subscription hears this', otherHandle);
     const heardRows = await queued(heard.id);
@@ -590,7 +590,7 @@ const scope1 = fixtureScope1();
     for (const elapsed of [0, 60_000, 86_400_000]) {
       const token = await accessToken(Date.now() + elapsed);
       const call = await scope1.post('/mcp', { jsonrpc: '2.0', id: 1, method: 'tools/call',
-        params: { name: 'list_rooms', arguments: {} } },
+        params: { name: 'list_chats', arguments: {} } },
         { authorization: `Bearer ${token}`, 'mcp-protocol-version': '2026-07-28', accept: 'application/json' });
       expect(call.status).toBe(200);
       expect((await call.json() as { result: { isError?: boolean } }).result.isError).not.toBe(true);
@@ -657,7 +657,7 @@ const scope1 = fixtureScope1();
       expect([method.status, await method.json()]).toEqual([400, { error: 'invalid_client_metadata' }]);
       expect(warn).toHaveBeenCalledTimes(1);
       const [label, line] = warn.mock.calls[0] as [string, string];
-      expect(label).toBe('[rooms-mcp-oauth] registration refused');
+      expect(label).toBe('[chats-mcp-oauth] registration refused');
       expect(JSON.parse(line)).toEqual({ error: 'invalid_client_metadata', client_name: 'Hosted bot', redirect_uris: ['https://bot.example'],
         token_endpoint_auth_method: 'private_key_jwt', grant_types: ['authorization_code', 'client_credentials'] });
       expect(line).not.toContain('secret-path');
@@ -682,13 +682,13 @@ const scope1 = fixtureScope1();
       const response = await scope1.post('/mcp/oauth/register', { client_secret: 'never-log-this' });
       expect([response.status, await response.json()]).toEqual([429, { error: 'temporarily_unavailable' }]);
       expect(warn).toHaveBeenCalledTimes(1);
-      expect(warn).toHaveBeenCalledWith('[rooms-mcp-oauth] registration refused', JSON.stringify({ error: 'temporarily_unavailable' }));
+      expect(warn).toHaveBeenCalledWith('[chats-mcp-oauth] registration refused', JSON.stringify({ error: 'temporarily_unavailable' }));
       warn.mockClear();
       const token = await phoneFetch(scope1.origin + '/mcp/oauth/token', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', authorization: 'Basic c2VjcmV0LWlkOnNlY3JldC12YWx1ZQ==' },
         body: 'grant_type=authorization_code&code=code-never-log&code_verifier=verifier-never-log' });
       expect([token.status, await token.json()]).toEqual([429, { error: 'temporarily_unavailable' }]);
       expect(warn).toHaveBeenCalledTimes(1);
-      expect(warn).toHaveBeenCalledWith('[rooms-mcp-oauth] token refused', JSON.stringify({ error: 'temporarily_unavailable', reason: 'rate_limited',
+      expect(warn).toHaveBeenCalledWith('[chats-mcp-oauth] token refused', JSON.stringify({ error: 'temporarily_unavailable', reason: 'rate_limited',
         client_auth: 'basic', content_type: 'application/x-www-form-urlencoded' }));
     } finally { warn.mockRestore(); }
   });
@@ -733,7 +733,7 @@ const scope1 = fixtureScope1();
     const names = (await client.listTools()).tools.map(tool => tool.name);
     expect(names).toContain('send_message');
     expect(names).toContain('order');
-    expect(names).toContain('merge_corner');
+    expect(names).toContain('merge_thread');
     expect(names).toContain('approve_merge');
     const refreshed = await scope1.post('/mcp/oauth/token', { grant_type: 'refresh_token', refresh_token: issued.refresh_token, client_id, resource: scope1.origin + '/mcp' });
     expect(refreshed.status).toBe(200);
@@ -786,7 +786,7 @@ const scope1 = fixtureScope1();
         const { client_id } = await response.json() as { client_id: string };
         const { logo } = (await scope1.db.query<{ logo: string | null }>('SELECT logo FROM rooms_mcp_clients WHERE id=$1', [client_id])).rows[0]!;
         if (stored) expect(logo).toMatch(/^data:image\/png;base64,/); else expect(logo).toBeNull();
-        expect(warn).toHaveBeenCalledWith('[rooms-mcp-oauth] registration logo skipped', expect.stringContaining(name));
+        expect(warn).toHaveBeenCalledWith('[chats-mcp-oauth] registration logo skipped', expect.stringContaining(name));
       }
     } finally { warn.mockRestore(); }
   });

@@ -46,7 +46,7 @@ it('Reproduction SENTRY-3: missing installation refuses with 409 without posting
     const daemon = new DaemonService(db, new LiveHub(), async () => { throw new Error('GitHub repository installation not found'); });
     const failure = await daemon.execute('getRoomGitHubToken', { roomId: room }, agent).catch(error => error);
     expect(failure).toBeInstanceOf(CommandRefusalError);
-    expect(failure).toMatchObject({ status: 409, message: 'Room repository access needs the Beeline GitHub App' });
+    expect(failure).toMatchObject({ status: 409, message: 'chat repository access needs the Beeline GitHub App' });
     const messages = await db.query<{ text: string }>('SELECT text FROM messages WHERE room_id=$1', [room]);
     expect(messages.rows).toEqual([]);
   } finally { await db.close(); }

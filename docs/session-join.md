@@ -43,7 +43,7 @@ is a fallback); Antigravity App seeds its current conversation before starting i
 sidecar, so a future SessionStart is not required.
 
 The server projects `setup_unfinished`, `proved_ready`, `failed`, or
-`host_without_live_delivery` on `list_rooms`, Room member reads and addressed-send
+`host_without_live_delivery` on `list_chats`, Room member reads and addressed-send
 receipts. It includes the selected mechanism, host surface, bound conversation,
 generation and last host proof, without exposing the probe nonce. `set_profile`
 does not finish delivery setup. Only the host turn's authenticated `confirm_delivery`
@@ -125,7 +125,7 @@ Codex's shared app server can hold several threads. Session discovery reads ever
 - Opt-in held handoff requires the existing completion listener to be ready; unavailable coverage returns pending/unavailable without a read. The server bounds waits to 128 total, two per state, and a terminal deadline of 600 seconds. Headers acknowledge immediately; only this exact handoff request and member stream use the owned dispatcher with no idle body timeout. Connect/header deadlines and caller cancellation remain active. Legacy handoff POST still consumes once; replayable opt-in codes still meet the token endpoint's one-use PKCE gate.
 - `member_name` on `/mcp/oauth/authorize` prefills the Allow page.
 - `list_mentions` reads owed mentions and private wakes on demand. Local delivery uses the committed member stream; no polling fallback is installed.
-- `list_rooms` returns `you`: the member's id, name and handle.
+- `list_chats` returns `you`: the member's id, name and handle.
 
 ## Reason Network port
 

@@ -10,7 +10,7 @@ import type { McpPrincipal } from './rooms-mcp-oauth.js';
 
 // Replay stays in list_mentions; event cursors are null so queued events cannot be skipped.
 const MENTION_EVENT = {
-  name: 'mention', description: 'A Room message tags this connected Beeline member, or messages it directly.',
+  name: 'mention', description: 'A chat message tags this connected Beeline member, or messages it directly.',
   delivery: ['webhook'], inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   payloadSchema: { type: 'object', properties: {
     roomId: { type: 'string' }, messageId: { type: 'string' }, memberId: { type: 'string' },
@@ -27,7 +27,7 @@ export function mcpWakeHint(kind: string | null | undefined): string {
 }
 const WAKE_EVENT = {
   name: 'wake',
-  description: 'A private order, report, corner assignment, schedule, or lifecycle wake for this connected member.',
+  description: 'A private order, report, thread assignment, schedule, or lifecycle wake for this connected member.',
   delivery: ['webhook'], inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   payloadSchema: { type: 'object', properties: {
     roomId: { type: 'string' }, address: { type: 'string' }, commandId: { type: 'string' }, id: { type: 'string' },
@@ -298,7 +298,7 @@ export async function deliverMcpEvents(db: SqlDatabase, transport: Transport, si
  * A reviewer dispatch asks for a review, not a plain acknowledgement: its text names the pull request and the
  * head SHA to review. Webhooks, MCP Events and list_mentions all give it this hint.
  */
-export const MCP_REVIEW_WAKE_HINT = 'Review this corner: read its brief, pull request and checks (read facets brief, pr and checks), then call approve_merge with the head SHA named above, or post your findings in the corner. Never approve work you implemented or authored.';
+export const MCP_REVIEW_WAKE_HINT = 'Review this thread: read its brief, pull request and checks (read facets brief, pr and checks), then call approve_merge with the head SHA named above, or post your findings in the thread. Never approve work you implemented or authored.';
 
 /** The hint a wake carries, from its command's reason and private kind. */
 export function mcpWakeNext(kind: string | null | undefined, reason: string | null | undefined): string {

@@ -70,7 +70,7 @@ export async function postRepositoryOnboarding(database: SqlDatabase, github: Gi
      JOIN identities i ON i.id=$2
      WHERE r.id=$1 AND r.parent_id IS NULL AND r.archived_at IS NULL`,
     [input.roomId, input.agentId, input.requesterId])).rows[0];
-  if (!room) throw new Error('repository cards require an active top-level Room and current members');
+  if (!room) throw new Error('repository cards require an active top-level chat and current members');
   const repositories = (await database.query<{ repository_id: string; full_name: string; installation_id: string; default_branch: string }>(
     `SELECT r.* FROM github_repositories r JOIN github_installations i USING(installation_id)
      WHERE i.owner_id=$1 AND i.status='active' AND r.active ORDER BY lower(r.full_name)`, [input.requesterId])).rows;

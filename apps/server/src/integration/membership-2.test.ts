@@ -250,7 +250,7 @@ const fixture = monolithFixture();
   });
 
 
-  it('does not let a Workspace manager delete a message in a Room they cannot access', async () => {
+  it('does not let a Workspace manager delete a message in a chat they cannot access', async () => {
     const firstMember = '1'.repeat(64);
     const secondMember = '2'.repeat(64);
     const directRoomId = '33333333-3333-4333-8333-333333333333';

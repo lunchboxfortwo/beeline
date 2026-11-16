@@ -2,7 +2,7 @@ import { AGENT_INVITATION_PROMPT, BEELINE_PRODUCT_GUIDE } from './agent-invitati
 import { MESSAGE_REACTION_EMOJIS } from './phone.js';
 
 export const BEELINE_FILES_SKILL_NAME = 'beeline-files-and-mocks';
-export const BEELINE_CORNERS_SKILL_NAME = 'beeline-corners-and-merging';
+export const BEELINE_CORNERS_SKILL_NAME = 'beeline-threads-and-merging';
 export const BEELINE_WAKES_SKILL_NAME = 'beeline-waiting-and-wakes';
 export const BEELINE_CONNECT_SKILL_NAME = 'beeline-connecting-services';
 export const BEELINE_MEMORY_SKILL_NAME = 'beeline-memory';
@@ -58,27 +58,27 @@ export function beelineFilesSkillMarkdown(releaseId: string): string {
 
 ## Opening attachments
 
-Files and photos on the current message are already at local paths. For a file on an earlier message, call read(facet:attachment, messageId, attachmentId). For a file in the corner brief manifest, call read(facet:attachment, attachmentId) with the manifest objectId. In a corner, open a private report with read(facet:message, messageId) using the report id. Copy the attachment id from that response, then call read(facet:attachment, messageId, attachmentId) with the same report id and read the returned local path. Order hand-offs use their supplied id the same way. Report a missing download to your commander.
+Files and photos on the current message are already at local paths. For a file on an earlier message, call read(facet:attachment, messageId, attachmentId). For a file in the thread brief manifest, call read(facet:attachment, attachmentId) with the manifest objectId. In a thread, open a private report with read(facet:message, messageId) using the report id. Copy the attachment id from that response, then call read(facet:attachment, messageId, attachmentId) with the same report id and read the returned local path. Order hand-offs use their supplied id the same way. Report a missing download to your commander.
 
 ## Writing a file
 
-1. Write it with your native file tools: in a code corner, inside the worktree; elsewhere, inside your writable session home.
-2. If a native write is refused and scratch_io is mounted, call scratch_io(action:write, path, content) instead; in a repo-less corner, scratch_io(action:quota) when mounted shows the space left.
-3. In a Room, your native write and edit tools work inside the sandbox home the primer names. A path outside that home, a path with \`..\`, or a symlink that leaves it is refused, and the repository checkout stays read-only. When the work belongs beside a repository, or a home write fails and scratch_io is not mounted, do the file work in a repo-less corner, whose workspace is writable.
+1. Write it with your native file tools: in a code thread, inside the worktree; elsewhere, inside your writable session home.
+2. If a native write is refused and scratch_io is mounted, call scratch_io(action:write, path, content) instead; in a repo-less thread, scratch_io(action:quota) when mounted shows the space left.
+3. In a chat, your native write and edit tools work inside the sandbox home the primer names. A path outside that home, a path with \`..\`, or a symlink that leaves it is refused, and the repository checkout stays read-only. When the work belongs beside a repository, or a home write fails and scratch_io is not mounted, do the file work in a repo-less thread, whose workspace is writable.
 
 ## Posting a file
 
-Call post_artifact(path) on a file in your checkout or session home. Set title and mime when the file name does not show them. The artifact rides on your next reply, report or explicit post in the current place, so upload it before sending the message that names it. Name the attachment, never a local path. To hand a file to a worker in another corner, use revise_corner brief.attachments with its path or readable objectId, then order the worker to read that brief. A later successfully queued replacement with the same title (or filename) clears earlier upload failures; an upload or queue failure without a successful replacement still blocks delivery. Plan each batch within the default combined attachment budget of 25 MiB (26,214,400 bytes) per reply. A server override may change this budget; a refusal gives its actual limit and the bytes already queued. If the batch will not fit, reduce file sizes or send the queued files in your next reply or report before uploading the rest.
+Call post_artifact(path) on a file in your checkout or session home. Set title and mime when the file name does not show them. The artifact rides on your next reply, report or explicit post in the current place, so upload it before sending the message that names it. Name the attachment, never a local path. To hand a file to a worker in another thread, use revise_thread brief.attachments with its path or readable objectId, then order the worker to read that brief. A later successfully queued replacement with the same title (or filename) clears earlier upload failures; an upload or queue failure without a successful replacement still blocks delivery. Plan each batch within the default combined attachment budget of 25 MiB (26,214,400 bytes) per reply. A server override may change this budget; a refusal gives its actual limit and the bytes already queued. If the batch will not fit, reduce file sizes or send the queued files in your next reply or report before uploading the rest.
 
 ## Showing a mock
 
-When a design decision needs eyes, show it instead of describing it. Build ONE self-contained HTML page, save it as a session file, and post it with beeline-agent post_artifact(path, mime:"text/html"). Everything is inline: a single <style> element for all CSS and data: URLs for any image - no script, no external dependencies, no network references. The validator refuses every <script>, <link>, <iframe>, <object>, <embed>, <form>, inline event handler, and http(s) URL, so a page that reaches for the network never posts. Use the Obsidian Refined tokens: grayscale surfaces, one brass accent #d7af5f, 3px radii, IBM Plex Sans/Mono type. Lay the user stories out as frames - one bordered, labelled block per story, so each story can be judged on its own. After posting, ask for feedback here in the corner: the artifact is the thing people react to, not your prose.
+When a design decision needs eyes, show it instead of describing it. Build ONE self-contained HTML page, save it as a session file, and post it with beeline-agent post_artifact(path, mime:"text/html"). Everything is inline: a single <style> element for all CSS and data: URLs for any image - no script, no external dependencies, no network references. The validator refuses every <script>, <link>, <iframe>, <object>, <embed>, <form>, inline event handler, and http(s) URL, so a page that reaches for the network never posts. Use the Obsidian Refined tokens: grayscale surfaces, one brass accent #d7af5f, 3px radii, IBM Plex Sans/Mono type. Lay the user stories out as frames - one bordered, labelled block per story, so each story can be judged on its own. After posting, ask for feedback here in the thread: the artifact is the thing people react to, not your prose.
 
 ## Showing a photograph
 
 Use the runnable lane for interactive pages: games, animations, toys, tools. Post a single file with mime:"application/vnd.beeline.game+html". This runnable lane permits inline scripts in an isolated, offline viewer; ordinary text/html mocks stay inert. Inline every asset, include a mobile viewport meta tag, and use touch or pointer controls. No network, forms, other frames, storage, native bridge, or app navigation is available. Only open the interactive viewer on the person’s tap.
 
-When the mock needs a real product photo, do not draw an SVG stand-in. When scratch_io is mounted, call beeline-agent scratch_io(action:image) with the photo's http(s) URL. The daemon downloads it (30 seconds, 25 MB) into your writable session home and returns the path, mime, and size. Without it, download the photo with a shell command into a corner's writable workspace. Read those bytes, base64-encode them, and put them in the HTML as a data: URL (\`<img src="data:image/jpeg;base64,…">\`). Then post_artifact as usual. The validator still refuses every http(s) image reference — the photograph has to be inline. The artifact is a snapshot: it never fetches the network when someone opens it.
+When the mock needs a real product photo, do not draw an SVG stand-in. When scratch_io is mounted, call beeline-agent scratch_io(action:image) with the photo's http(s) URL. The daemon downloads it (30 seconds, 25 MB) into your writable session home and returns the path, mime, and size. Without it, download the photo with a shell command into a thread's writable workspace. Read those bytes, base64-encode them, and put them in the HTML as a data: URL (\`<img src="data:image/jpeg;base64,…">\`). Then post_artifact as usual. The validator still refuses every http(s) image reference — the photograph has to be inline. The artifact is a snapshot: it never fetches the network when someone opens it.
 
 ## Message links
 
@@ -94,23 +94,23 @@ To acknowledge a message without a reply, call react_to_message(messageId, emoji
 export function beelineCornersSkillMarkdown(releaseId: string): string {
   return skillMarkdown(
     BEELINE_CORNERS_SKILL_NAME,
-    'Open, order, revise, hold, approve, land or close a corner; post across places; resolve Beeline feedback.',
+    'Open, order, revise, hold, approve, land or close a thread; post across places; resolve Beeline feedback.',
     releaseId,
-    `# Corners and merging
+    `# Threads and merging
 
-## Opening and steering a corner
+## Opening and steering a thread
 
 1. Run beeline-triage, then write the brief with beeline-spec.
-2. Call open_corner(room, implementer, brief, reviewer?). You become the corner's commander. Do not pick the Room's designated reviewer as implementer; if that agent genuinely must do the work, set reviewer to an independent agent handle on open_corner or revise_corner(action:metadata).
-3. To change scope, read the current brief with read(facet:brief, address), then call revise_corner(action:brief, address) with the complete replacement spec, expectedRevision and change. The corner commander needs no approval citation; other agents must cite a human message or commander order. To rename, call revise_corner(action:metadata, address, name).
-4. To assign the work, call order(address, agent, text). Do not assign implementation to the Room's designated reviewer; if that agent genuinely must do the work, set reviewer to an independent agent handle on open_corner or revise_corner(action:metadata). If the implementer is also the reviewer, the commander must name another reviewer. Opening a corner queues one implementer assignment, including when you implement it yourself. Workflow step assignments likewise start their assignee. Your own orders, reports, brief edits, posts and self-tags never start another turn, including across places. A commander may order the configured reviewer to review at the child corner address by naming it as agent.
-5. To post a public note in another member Room or corner, call post(address, text).
+2. Call open_thread(chat, implementer, brief, reviewer?). You become the thread's commander. Do not pick the chat's designated reviewer as implementer; if that agent genuinely must do the work, set reviewer to an independent agent handle on open_thread or revise_thread(action:metadata).
+3. To change scope, read the current brief with read(facet:brief, address), then call revise_thread(action:brief, address) with the complete replacement spec, expectedRevision and change. The thread commander needs no approval citation; other agents must cite a human message or commander order. To rename, call revise_thread(action:metadata, address, name).
+4. To assign the work, call order(address, agent, text). Do not assign implementation to the chat's designated reviewer; if that agent genuinely must do the work, set reviewer to an independent agent handle on open_thread or revise_thread(action:metadata). If the implementer is also the reviewer, the commander must name another reviewer. Opening a thread queues one implementer assignment, including when you implement it yourself. Workflow step assignments likewise start their assignee. Your own orders, reports, brief edits, posts and self-tags never start another turn, including across places. A commander may order the configured reviewer to review at the child thread address by naming it as agent.
+5. To post a public note in another member chat or thread, call post(address, text).
 
 ## Reports and feedback
 
-- A finished non-corner order may report done without a pull request.
+- A finished non-thread order may report done without a pull request.
 - Agent-to-agent orders and reports stay private.
-- A report, idle or failure notice about a corner wakes you in that corner; answer there. A scheduled run posts in each corner it acts on. Post in a chat only when a person tagged you there or a person must decide, and then in one short message.
+- A report, idle or failure notice about a thread wakes you in that thread; answer there. A scheduled run posts in each thread it acts on. Post in a chat only when a person tagged you there or a person must decide, and then in one short message.
 - For friction in Beeline itself, call report_feedback with tool_name and error_excerpt filled in when a tool failed, so triage can group it.
 - After a fix pull request merges, notify_feedback_fixed(item_ids, title, pr_url) resolves the feedback items it lists. The feedback-triage-steps procedure says when to send Fixed notices.
 - For an operator notice explicitly commanded by lunchboxfortwo, use send_operator_system_dm({recipients,text}) through their own agent. recipients is one exact human id/handle, a list, or all. The server enforces owner-command provenance and audits each send. Keep the returned sendId; pending delivery is not a reason to resend. Read completion counts with read_operator_system_dm({sendId}). Delivered means committed to the System thread, not read by the person. Never substitute an ad-hoc production database write.
@@ -124,24 +124,24 @@ For every user-visible frontend change (new or changed component, screen, sheet,
 1. Read the gate with read(facet:checks, address): checks, reviewerWake and mergeAllowed.
 2. The configured reviewer records PASS with approve_merge(address, headSha) on the exact head it reviewed.
 3. When an authorized person types an explicit yes to merge, record it with record_merge_yes(address).
-4. Call merge_corner(address) once the gate allows it.
+4. Call merge_thread(address) once the gate allows it.
 
 ## Holds
 
-- When a person asks to stop a merge, call set_corner_hold(address). To release it, call set_corner_hold(address, releaseHoldId).
+- When a person asks to stop a merge, call set_thread_hold(address). To release it, call set_thread_hold(address, releaseHoldId).
 - A higher-tier instruction overrides a lower-tier hold. A human at the same standing cannot clear another human's hold; only that holder or someone of higher standing can. Never tell a higher-tier human that a lower-tier hold binds them.
 - If you cannot settle a choice, report one step up.
-- When you explain a hold or go-ahead in the Room, name the person and their standing in ordinary words. Never write field names or field=value syntax such as workspaceRole=member or agentOwner.
+- When you explain a hold or go-ahead in the chat, name the person and their standing in ordinary words. Never write field names or field=value syntax such as workspaceRole=member or agentOwner.
 
 ## Stopping an agent you commanded
 
 - To redirect an agent mid-turn, call stop(address, agent), then send the new order. The new order runs next.
-- stop works only on a turn you ordered or a turn in a corner you opened. New messages never stop a turn by themselves; they queue.
+- stop works only on a turn you ordered or a turn in a thread you opened. New messages never stop a turn by themselves; they queue.
 
 ## Closing
 
-- To drop a pull request but keep the corner and branch for another attempt, call close_corner_pr(address).
-- To end the work, post any required artifacts first, then call close_corner(address).
+- To drop a pull request but keep the thread and branch for another attempt, call close_thread_pr(address).
+- To end the work, post any required artifacts first, then call close_thread(address).
 `,
   );
 }
@@ -149,7 +149,7 @@ For every user-visible frontend change (new or changed component, screen, sheet,
 export function beelineWakesSkillMarkdown(releaseId: string): string {
   return skillMarkdown(
     BEELINE_WAKES_SKILL_NAME,
-    'Wait for a person, an agent, checks or a corner; set a schedule or event wake; end a turn with nothing to say.',
+    'Wait for a person, an agent, checks or a thread; set a schedule or event wake; end a turn with nothing to say.',
     releaseId,
     `# Waiting and wakes
 
@@ -162,7 +162,7 @@ If a background job's process id is missing after a wake, check the job's output
 | An agent you ordered | Its report |
 | A person's answer | Their reply in this place |
 | Checks or review on your pull request | The server, when the gate changes |
-| A corner to open or merge | wake(action:create, trigger:lifecycle, address) on that corner address |
+| A thread to open or merge | wake(action:create, trigger:lifecycle, address) on that thread address |
 | An approval, card or sign-in | Its own resume wake to the requester |
 | A time | wake(action:create, trigger:schedule, title, cadence) |
 | An outside event | wake(action:create, trigger:event, title, when, source, event, prompt) |
@@ -191,7 +191,7 @@ ${BEELINE_PRODUCT_GUIDE}
 
 ${AGENT_INVITATION_PROMPT}
 
-Use connect for supported app connections and app_tool for their actual tools. Follow the returned readiness. When an app needs an unavailable browser or account, explain the limitation. For repository work, use the Room repository card and normal corner workflow.`);
+Use connect for supported app connections and app_tool for their actual tools. Follow the returned readiness. When an app needs an unavailable browser or account, explain the limitation. For repository work, use the chat repository card and normal thread workflow.`);
   return skillMarkdown(
     BEELINE_CONNECT_SKILL_NAME,
     'Reach an app, API, website, GitHub, Tailscale, wallet or host command: connect, app_tool, Squire, grants and keys.',
@@ -212,17 +212,17 @@ Keys belong to the human who provisioned them. Your owner's keys serve whoever a
 
 ## Before you say you can't
 
-**Inspect your own host before answering.** When a question is about a system on the machine you run on, inspect its live state with the tools you have: processes, logs, local endpoints or service status. Say what you checked. Memory and Room history are not evidence of current state.
+**Inspect your own host before answering.** When a question is about a system on the machine you run on, inspect its live state with the tools you have: processes, logs, local endpoints or service status. Say what you checked. Memory and chat history are not evidence of current state.
 
 **Use available tools before reporting a blocker.** Before asking a person for a code, a status or a file, call connect(mode:status) and check whether a tool or connected app you already have can get it, then use it. This includes an emailed verification code in an already-connected inbox. Report blocked: to your commander only when none can, and say why. The key-ownership and grant rules still apply.
 
-**Where you run.** Each agent runs on one owner's machine, with that owner's keys, hosts, and network. Agents in one Room can differ in what they reach. Check your own capabilities with connect(mode:status) and your tools; never infer another agent's. A failure saved from another machine is not proof here. Try it first.
+**Where you run.** Each agent runs on one owner's machine, with that owner's keys, hosts, and network. Agents in one chat can differ in what they reach. Check your own capabilities with connect(mode:status) and your tools; never infer another agent's. A failure saved from another machine is not proof here. Try it first.
 
 ## Connect an app
 
 Search by name, website, or intent with connect(mode:discover) when the service is unclear. Search shows the user nothing. Use the result's name with connect; the server chooses the route; follow its actual readiness or needs_squire response. Connecting is setup, never authority: it does not replace a grant, write permission, target-branch confirmation, or the merge gate, and never needs a raw credential in chat. You never pair a tool yourself and never ask anyone for a key value. Do not provision or pair a route yourself.
 
-For an app that is not connected, call connect(mode:ensure) with its service name, one short reason, and a request-specific \`continuation\`: one sentence stating what you will do right after sign-in. Do not include a link, credential, account identifier, or private data in that sentence. The server returns ready, pending approval, unavailable or needs_squire. For needs_squire, drive the supplied goal locally and recheck connect. Pending approval: end the turn and await its wake. For a different Squire Google account, set switchGoogleAccount; use reconnect to repair a connection, or noApi for a browser route. When a card or Squire approval is pending, end the turn and wait for its connection wake. In a corner, call it from that corner so the sign-in card and connection wake return there. A provider outage is unavailable, not permission to change routes. Without mounted Squire tools, connect reports unavailable. After the person connects, read Connectors again and use the app ID.
+For an app that is not connected, call connect(mode:ensure) with its service name, one short reason, and a request-specific \`continuation\`: one sentence stating what you will do right after sign-in. Do not include a link, credential, account identifier, or private data in that sentence. The server returns ready, pending approval, unavailable or needs_squire. For needs_squire, drive the supplied goal locally and recheck connect. Pending approval: end the turn and await its wake. For a different Squire Google account, set switchGoogleAccount; use reconnect to repair a connection, or noApi for a browser route. When a card or Squire approval is pending, end the turn and wait for its connection wake. In a thread, call it from that thread so the sign-in card and connection wake return there. A provider outage is unavailable, not permission to change routes. Without mounted Squire tools, connect reports unavailable. After the person connects, read Connectors again and use the app ID.
 
 Once connected, the route decides how you call it. Via composio, app_tool(app) returns a compact catalog; app_tool(app, query:<slug or search>) returns matching input schemas. Then call app_tool(app, tool, args) with the selected tool slug and arguments. Via squire-api, call its API with \`use_credential\` (service = the app key); via squire-browser, use the \`operate_*\` tools; via registry-mcp, use its mounted MCP tools. The server executes against that person’s account and decides permission on every call. If tool discovery reports an error, follow its cause; \`needs_connection\` means the account must be reconnected, and \`needs_permission\` means wait for the connected person's decision. Do not switch paths after denial or provider unavailability, except to correct a mistaken personal GitHub route for a linked-repository write as described under GitHub identity. No app token, provider key, or sign-in URL belongs in chat or a model prompt.
 
@@ -230,18 +230,18 @@ Once connected, the route decides how you call it. Via composio, app_tool(app) r
 
 Trusty Squire signs up and signs in to any website hands-off for the person; its vault holds keys when needed. Use operate_drive for a browser goal. If launch settings are required, start one configured session, then drive that same session. On a specific handback, flat steps (operate_click, operate_type, operate_select, operate_press, operate_scroll, operate_wait, operate_navigate, operate_read_inbox, operate_extract, and the rest of its flat operate_* actions) handle one action; then resume drive. Keep saved-login approvals in Squire, save the credential in its vault under the app key, then call connect again.
 
-To show a browser to a person, call app_tool(app:beeline:browser_share, tool:start). After start succeeds, direct the person to this place's live browser card; the result provides identifiers and open-card guidance rather than a URL. It returns when the live card is ready, and you may keep using that same browser session while a person views or controls it. The Room sends you events when the person opens, controls, uses, hands back, or closes the view. End the share explicitly with app_tool(app:beeline:browser_share, tool:end) when it is finished.
+To show a browser to a person, call app_tool(app:beeline:browser_share, tool:start). After start succeeds, direct the person to this place's live browser card; the result provides identifiers and open-card guidance rather than a URL. It returns when the live card is ready, and you may keep using that same browser session while a person views or controls it. The chat sends you events when the person opens, controls, uses, hands back, or closes the view. End the share explicitly with app_tool(app:beeline:browser_share, tool:end) when it is finished.
 
 ## GitHub repositories and identity
 
-**Coding from General.** General may have no repository. If gh cannot work there, check the Room's repository context before proposing a personal GitHub connection. Guide the person to the Room header → Repository → Link or Create; the repository picker’s “Add repositories, accounts, or organizations” opens GitHub installation setup for missing organization or repository access. Once the intended repository is linked, do repository changes in a corner there. The Beeline GitHub App supplies repository access through that setup; it is not a removable Connectors entry.
+**Coding from General.** General may have no repository. If gh cannot work there, check the chat's repository context before proposing a personal GitHub connection. Guide the person to the chat header → Repository → Link or Create; the repository picker’s “Add repositories, accounts, or organizations” opens GitHub installation setup for missing organization or repository access. Once the intended repository is linked, do repository changes in a thread there. The Beeline GitHub App supplies repository access through that setup; it is not a removable Connectors entry.
 
-**GitHub identity.** In Room, corner and DM sessions, use the Beeline GitHub App for code, branch and PR writes on a Room's linked repository, including Git Data API pushes, even when a personal connection exists. If you have no App checkout, do the work in a corner of the linked Room. Never use personal GitHub for linked-repository writes. Use your owner's personal connection for general lookups, repositories without App access, personal issues or notifications, and actions explicitly requested as that person: app_tool for managed tools, or Squire use_credential for a sealed API route. Use another owner's connection only with their approval. Report a denial with the exact error and route; repair that route. Never fall back from the App to personal GitHub for linked-repository writes, or retry a person-scoped action as the App. If a linked-repository write was mistakenly denied on the personal route, report it and use the authorized App route. Keep checkout authentication on its existing path; do not extract tokens to make a native git bridge. Repository membership, selected-repository access, branch restrictions and merge_corner's review gate still apply.
+**GitHub identity.** In chat, thread and DM sessions, use the Beeline GitHub App for code, branch and PR writes on a chat's linked repository, including Git Data API pushes, even when a personal connection exists. If you have no App checkout, do the work in a thread of the linked chat. Never use personal GitHub for linked-repository writes. Use your owner's personal connection for general lookups, repositories without App access, personal issues or notifications, and actions explicitly requested as that person: app_tool for managed tools, or Squire use_credential for a sealed API route. Use another owner's connection only with their approval. Report a denial with the exact error and route; repair that route. Never fall back from the App to personal GitHub for linked-repository writes, or retry a person-scoped action as the App. If a linked-repository write was mistakenly denied on the personal route, report it and use the authorized App route. Keep checkout authentication on its existing path; do not extract tokens to make a native git bridge. Repository membership, selected-repository access, branch restrictions and merge_thread's review gate still apply.
 
 ## Host commands, Tailscale and the wallet
 
 - For a human-commanded Beeline production release, call dispatch_release with no inputs and no release worker; the server verifies the authorizing human command and records dispatch attribution. A scheduled release must retain its human authorization. Merging alone never authorizes a release.
-- When run_granted_command is mounted, it runs a command an approved grant covers word for word. Ask for one with request_grant(action:request, kind, target, reason, purpose); request_grant(action:list) shows what you hold. Purpose is required (1–240 characters): say what you want to do and why, for example “Free about 5 GB of disk by deleting old build files in 3 finished corners, so the Android test build can finish.” Human approvals still govern.
+- When run_granted_command is mounted, it runs a command an approved grant covers word for word. Ask for one with request_grant(action:request, kind, target, reason, purpose); request_grant(action:list) shows what you hold. Purpose is required (1–240 characters): say what you want to do and why, for example “Free about 5 GB of disk by deleting old build files in 3 finished threads, so the Android test build can finish.” Human approvals still govern.
 - After fetch_credential returns a value a granted command needs, call store_secret(name:NAME, value) right away, then run it under a command grant with --with NAME in its target. Pass only executable argv to run_granted_command. Use an UPPER_CASE secret name; keep the value out of command arguments, messages and files.
 - Tailscale installs its CLI on the selected helper and opens Tailscale's own browser sign-in; once connected, use the CLI for tailnet resources and tailscale file cp or tailscale file get for Taildrop.
 - Connecting the wallet keeps its own owner approval rule; its operations are under app_tool(app:beeline:wallet).
@@ -299,7 +299,7 @@ export function beelineManagedSkills(
 export function beelineReviewSkillMarkdown(releaseId: string): string {
   return `---
 name: beeline-review
-description: Review a corner's current green head against its assigned brief and report a concise verdict.
+description: Review a thread's current green head against its assigned brief and report a concise verdict.
 ---
 
 <!-- beeline-release: ${releaseId} -->
@@ -312,7 +312,7 @@ Read the current server-assigned brief and every required file. Its stories, cri
 
 Read the whole diff on every round before creating a checkout. Use \`gh pr view N --json headRefOid,files\` and \`gh pr diff N\`. Review only that exact head; if it moves, start again. If you wrote its code, arrange independent review through your commander rather than reviewing your own work.
 
-For re-review, find your latest FAIL for this PR in the corner and its reviewed head in the review context, then run \`git diff <last-reviewed-head> <assigned-head>\`. Re-review may block only on unfixed prior blockers or regressions introduced by that delta. Missed issues in unchanged code are non-blocking notes. This limit governs every check below.
+For re-review, find your latest FAIL for this PR in the thread and its reviewed head in the review context, then run \`git diff <last-reviewed-head> <assigned-head>\`. Re-review may block only on unfixed prior blockers or regressions introduced by that delta. Missed issues in unchanged code are non-blocking notes. This limit governs every check below.
 
 For commands that need the tree, use a detached temporary worktree; never the worker's active worktree. Install an EXIT trap with \`git worktree remove --force\` and remove it on PASS, FAIL or error. The one-shot helper is \`npm run review:exact-head -- <sha> [--typecheck <pkg> …] [--] <pkg>:<glob> …\`: it installs dependencies, builds package exports, runs named checks and cleans up. Check synchronization with the target branch, types, relevant tests, docs, lint and CI. An empty CI rollup alone proves nothing: \`read(facet:checks)\` with checks="passed" and checkCount=0 is the server-confirmed green path. A missing reviewer PASS can keep mergeAllowed false while you review.
 
@@ -341,7 +341,7 @@ Test one concrete failure sequence for each changed behavior. Confirm every bloc
 
 - List each user-visible behavior the diff adds, removes or brings back.
 - Match each one to a quoted line in the brief's Intent. An item with no match is outside the mandate.
-- For each touched feature, look for an earlier human decision: Search the Room for the feature name together with remove, revert or "don't". Run \`git log -S<symbol>\` on the touched files to find earlier removals and reverts.
+- For each touched feature, look for an earlier human decision: Search the chat for the feature name together with remove, revert or "don't". Run \`git log -S<symbol>\` on the touched files to find earlier removals and reverts.
 - A conflict, or a change much larger than the brief, blocks PASS. Send a FAIL to the worker, quoting the old decision or Intent and the diff line, and order it to restore the approved state. Do not escalate the deviation to the commander or owner.
 - Only when the brief itself orders a change that conflicts with an earlier human decision, report \`needs-decision:\` to your commander, quoting both. The worker cannot restore it without breaking its brief.
 
@@ -352,24 +352,24 @@ Block only on a behavior with no Intent match or a quoted conflicting human deci
 Complete all checks before reporting. Lead with PASS or FAIL and list every eligible blocker at once, each with a concrete next step for the worker. The first review must surface all confirmed blockers. Keep non-blocking notes separate from the verdict. No full outline ledger, message IDs, commit hashes or command transcripts in the posted review; put details behind an evidence link when needed.
 
 PASS: ready to land
-Next: call merge_corner when the live gate allows it
+Next: call merge_thread when the live gate allows it
 
-FAIL: a removed Room member can still read its transcript
+FAIL: a removed chat member can still read its transcript
 Next: fix the membership guard and repeat the authenticated read proof
 
-On FAIL, use \`order(address, text)\` at the corner's address with all blockers and their next steps. On PASS, call \`approve_merge\` with the exact reviewed head SHA as its tool argument, then report done: PASS with the result to your commander. Follow an explicit commander order to land with \`merge_corner\` when the live gate permits it. If a choice or dependency exceeds your authority, report needs-decision: or blocked: one step up. Orders go down; reports go up. Do not start a nested validation pipeline or push the worker's branch.
+On FAIL, use \`order(address, text)\` at the thread's address with all blockers and their next steps. On PASS, call \`approve_merge\` with the exact reviewed head SHA as its tool argument, then report done: PASS with the result to your commander. Follow an explicit commander order to land with \`merge_thread\` when the live gate permits it. If a choice or dependency exceeds your authority, report needs-decision: or blocked: one step up. Orders go down; reports go up. Do not start a nested validation pipeline or push the worker's branch.
 `;
 }
 
 export function beelineSpecSkillMarkdown(releaseId: string): string {
   return `---
 name: beeline-spec
-description: Prepare or revise a durable corner assignment from Room decisions before repository work. Do not use for ordinary conversation or unrelated artifact delivery.
+description: Prepare or revise a durable thread assignment from chat decisions before repository work. Do not use for ordinary conversation or unrelated artifact delivery.
 ---
 
 <!-- beeline-release: ${releaseId} -->
 
-# Durable corner brief
+# Durable thread brief
 
 Create an assignment a fresh session can execute without the parent transcript. Set repositoryWork:false when the assignment excludes repository edits or PRs; deliverable attachments do not require repository work. A brief has three parts:
 
@@ -383,8 +383,8 @@ Create an assignment a fresh session can execute without the parent transcript. 
   - \`## Visual scope\` for anything a person sees: list exact allowed visual changes, say "No other visual change.", and list required before/after screenshots for applicable surfaces, Bone and Obsidian themes, and phone and web platforms.
   Add implementation guidance under further headings when it helps.
   For repository bugfixes only, add Reproduction <id>: <real-target steps and observed failure>, or Reproduction not feasible: <reason>; Stand-in: <closest check>; labels may be bold or italic, and Stand-in: may follow on another line in the same Reproduction section. Done repeats that reproduction or stand-in successfully.
-- files (\`attachments\`): the Room files the worker needs, each with its purpose and whether it is required.
-- \`approval\`: optional when opening; the initiating human message ID or private commander order ID. Without it or with an agent message, the server records the opening agent as agent-initiated. The corner commander may revise directly without a citation; other agents still require a human message or commander order. For a revision, set approval.sourceMessageId to the approving human message ID or active private order ID from this corner’s commander. The current commander delivery also accepts its resume ID or forwarded rootSourceMessageId when that source is a current human member’s message. An unrelated message or another agent’s order is not approval. The server quotes that message's exact text and author; the quote wins any conflict with the spec.
+- files (\`attachments\`): the chat files the worker needs, each with its purpose and whether it is required.
+- \`approval\`: optional when opening; the initiating human message ID or private commander order ID. Without it or with an agent message, the server records the opening agent as agent-initiated. The thread commander may revise directly without a citation; other agents still require a human message or commander order. For a revision, set approval.sourceMessageId to the approving human message ID or active private order ID from this thread’s commander. The current commander delivery also accepts its resume ID or forwarded rootSourceMessageId when that source is a current human member’s message. An unrelated message or another agent’s order is not approval. The server quotes that message's exact text and author; the quote wins any conflict with the spec.
 
 Do not infer approval from silence, assent to different prose, or the mere existence of a plan. Keep agent recommendations labelled as recommendations. Do not promote a plausible UX detail, algorithm, failure message, or extra test into a user story merely because it sounds helpful.
 
@@ -442,30 +442,30 @@ Include "no progress reports" in the brief and any implementing order.
 
 The dispatching message authorizes the work; build against the brief without asking for separate spec or mock approval. Report needs-decision: to your commander for material unresolved intent; when a person asks for a spec or mock, produce it before building. Include a dispatching message as \`approval\` when available; opening on agent judgment needs no human approval. Revisions retain their approval requirement.
 
-Pass the brief as \`open_corner.brief\`. Read the current revision before revising and use \`revise_corner(action:brief)\` with the complete replacement spec, the approving message, and a concise change description. Preserve unaffected intent quotes, user stories, and references. The latest revision governs implementation and review; chat prose alone never changes scope.
+Pass the brief as \`open_thread.brief\`. Read the current revision before revising and use \`revise_thread(action:brief)\` with the complete replacement spec, the approving message, and a concise change description. Preserve unaffected intent quotes, user stories, and references. The latest revision governs implementation and review; chat prose alone never changes scope.
 `;
 }
 
 export function beelineTriageSkillMarkdown(releaseId: string): string {
   return `---
 name: beeline-triage
-description: Clarify and assess a user request before opening a Beeline corner, then bind a bugfix to its recorded reproduction. Use before open_corner and while implementing a bug in a corner.
+description: Clarify and assess a user request before opening a Beeline thread, then bind a bugfix to its recorded reproduction. Use before open_thread and while implementing a bug in a thread.
 ---
 
 <!-- beeline-release: ${releaseId} -->
 
 # Beeline request triage
 
-Run these checks before opening a corner.
+Run these checks before opening a thread.
 
 ## 1. Is it clear?
 
 - Rewrite the request as a concrete outcome and the user stories it enables.
 - State material exclusions (non-goals) and the risks needed to prevent unrequested work or surprise.
-- Keep the corner objective complete and within 24 words.
+- Keep the thread objective complete and within 24 words.
 - Report needs-decision: to your commander for material unresolved intent. When a person asks for a spec or mock, produce it before building.
 - Once it's resolved, say plainly if the request itself is suboptimal and give your own recommendation - you are expected to disagree, not just permitted to.
-- On a judgment call you're still not sure of, order a reachable child or sibling corner for one adversarial second opinion (corners cannot order DMs or ancestor corners); have the chosen agent report back; a Room order wakes only the one agent you name; skip this only when you are the only agent in the Room.
+- On a judgment call you're still not sure of, order a reachable child or sibling thread for one adversarial second opinion (threads cannot order DMs or ancestor threads); have the chosen agent report back; a chat order wakes only the one agent you name; skip this only when you are the only agent in the chat.
 
 ## 2. Is work warranted?
 
@@ -483,7 +483,7 @@ Run these checks before opening a corner.
 
 ## Output
 
-When dispatching work, pass the complete brief to open_corner; approval is optional for opening; no separate outline post or human approval is required. Add applicable warnings to the brief:
+When dispatching work, pass the complete brief to open_thread; approval is optional for opening; no separate outline post or human approval is required. Add applicable warnings to the brief:
 
 \`Triage warning — warranted: <evidence-backed reason>\`
 \`Triage warning — desirable: <evidence-backed reason>\`
@@ -496,7 +496,7 @@ Do not emit a warning merely because evidence is incomplete when the repository 
 
 ## Bugfix execution
 
-Once a corner is open for a reported bug, follow these steps in order. They are instruction, not a server gate. They do not condition the fix on reproduction. Warranted-work and desirability warnings still do not block.
+Once a thread is open for a reported bug, follow these steps in order. They are instruction, not a server gate. They do not condition the fix on reproduction. Warranted-work and desirability warnings still do not block.
 
 ### 1. Attempt to reproduce
 

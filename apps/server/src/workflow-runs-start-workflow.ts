@@ -32,7 +32,7 @@ export async function startWorkflow(
     const live = await liveWorkflowRun(db, command.room_id, input.name);
     if (live) {
       throw new Error(
-        `${input.name} already has a live run ${live.runId} in this Room, at ${live.state}. Continue it or cancel it before starting another.`,
+        `${input.name} already has a live run ${live.runId} in this chat, at ${live.state}. Continue it or cancel it before starting another.`,
       );
     }
     const room = (
@@ -95,7 +95,7 @@ export async function startWorkflow(
       const agentSet = new Set(agents.rows.map((row) => row.identity_id));
       const notAgent = boundIds.find((id) => !agentSet.has(id));
       if (notAgent) {
-        throw new CommandRefusalError(`${notAgent} is not a current agent member of this Room`, 400);
+        throw new CommandRefusalError(`${notAgent} is not a current agent member of this chat`, 400);
       }
     }
     const starter = await loadIdentityRow(db, command.agent_id,command.room_id);
@@ -147,7 +147,7 @@ export async function startWorkflow(
     });
     if (!started.inserted) {
       const current = await liveWorkflowRun(db,command.room_id,input.name);
-      throw new Error(`${input.name} already has a live run ${current?.runId ?? ''} in this Room, at ${current?.state ?? ''}. Continue it or cancel it before starting another.`);
+      throw new Error(`${input.name} already has a live run ${current?.runId ?? ''} in this chat, at ${current?.state ?? ''}. Continue it or cancel it before starting another.`);
     }
     if (command.source_message_id) await db.query(
       `WITH linked AS (
@@ -202,7 +202,7 @@ export async function roomMemberIdForHandle(
 export async function memberIdForHandle(db: SqlDatabase, roomId: string, raw: string): Promise<string> {
   const handle = raw.replace(/^@/, '');
   const id = await roomMemberIdForHandle(db, roomId, handle);
-  if (!id) throw new CommandRefusalError(`@${handle} is not a current member of this Room`, 400);
+  if (!id) throw new CommandRefusalError(`@${handle} is not a current member of this chat`, 400);
   return id;
 }
 
@@ -261,7 +261,7 @@ export async function assignWorkflowRole(
       [command.room_id, targetAgentId],
     );
     if (!member.rowCount) {
-      throw new ExpectedRefusalError(`${targetAgentId} is not a current agent member of this Room`);
+      throw new ExpectedRefusalError(`${targetAgentId} is not a current agent member of this chat`);
     }
     if (resuming && !await claimRun(db, scope))
       throw new CommandRefusalError('workflow already advanced; no resume was applied', 409);

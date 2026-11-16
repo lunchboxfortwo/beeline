@@ -196,7 +196,7 @@ describe('agent sign-in credentials and ordinary queued login text', () => {
         { agentId: AGENT, attemptId, kind: 'paste-code', authorizeUrl: 'https://evil.example/' },
         OTHER_AGENT,
       ),
-    ).rejects.toThrow(/daemon token does not own requested agent|daemon room access denied/);
+    ).rejects.toThrow(/daemon token does not own requested agent|daemon chat access denied/);
     await daemon.execute('reportAgentSignIn', { agentId: AGENT, attemptId, kind: 'paste-code', authorizeUrl: LINK }, AGENT);
     await expect(pending).resolves.toMatchObject({ authorizeUrl: LINK });
   });

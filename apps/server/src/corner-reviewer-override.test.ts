@@ -102,7 +102,7 @@ it('lets any member agent set and change the reviewer without a brief edit', asy
   await set('reviewera');
   expect(await gate()).toMatchObject({ approved: false, open: false });
   await set('reviewera');
-  const lines = await db.query(`SELECT text FROM messages WHERE room_id=$1 AND text LIKE '%set the corner reviewer%'`, [C]);
+  const lines = await db.query(`SELECT text FROM messages WHERE room_id=$1 AND text LIKE '%set the thread reviewer%'`, [C]);
   expect(lines.rowCount).toBe(2);
   expect((await db.query(`SELECT reviewer_agent_id FROM rooms WHERE id=$1`, [R])).rows[0]).toEqual({ reviewer_agent_id: REVIEWER_A });
 });

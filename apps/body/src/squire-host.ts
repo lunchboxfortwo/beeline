@@ -176,7 +176,7 @@ export function squireFacadeLaunch(home: string, scope: SquireAgentScope): {
   args: string[];
   env: Record<string, string>;
 } {
-  if (!scope.agentId || !scope.roomId) throw new Error('Squire agent and Room IDs are required');
+  if (!scope.agentId || !scope.roomId) throw new Error('Squire agent and chat IDs are required');
   const env = scope.relay
     ? {
         BEELINE_SQUIRE_RELAY_URL: scope.relay.url,

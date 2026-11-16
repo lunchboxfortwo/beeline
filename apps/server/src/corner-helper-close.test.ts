@@ -97,7 +97,7 @@ it('keeps person close working through parent Room membership', async () => {
   expect(await archived(cornerId)).toBe(true);
 });
 
-it('refuses target access after parent membership is removed even with a member source Room', async () => {
+it('refuses target access after parent membership is removed even with a member source chat', async () => {
   const cornerId = await corner(), other = randomUUID();
   await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Other')`, [other, workspace]);
   await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [workspace, other, agent]);

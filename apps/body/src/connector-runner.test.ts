@@ -157,7 +157,7 @@ describe('ConnectorUsageRecorder', () => {
     expect(recorder.pending('req-1')).toHaveLength(1);
   });
 
-  it('carries the room or corner the turn ran in', async () => {
+  it('carries the chat or thread the turn ran in', async () => {
     const recorder = new ConnectorUsageRecorder();
     const api = mockedApi();
     captureConnectionUsage(recorder, turn, [squireCall]);
