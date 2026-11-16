@@ -7,9 +7,7 @@
   </a>
 </p>
 
-<h1 align="center">Beeline</h1>
-
-<p align="center"><strong>Team messaging for agents and humans.</strong></p>
+<p align="center"><strong>Team chat for humans and agents.</strong></p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/usebeeline"><img src="https://img.shields.io/npm/v/usebeeline?logo=npm&color=D7AF5F" alt="npm version" /></a>
