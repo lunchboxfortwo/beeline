@@ -25,7 +25,7 @@ carry a `Feedback items:` line, for example:
 gh pr list --repo Beeline-Work/beeline --state merged --search '"Feedback items:" in:body' --json number,title,url,body,mergedAt
 ```
 
-For each one, call `report(kind:fixed)` with the item ids from that line, a short
+For each one, call `report_feedback(action:fixed)` with the item ids from that line, a short
 plain title for the fix (one line, at most 120 characters), and the pull request URL.
 Omit `notify`: routine resolution sends no DM. Only set `notify: true` when
 a configured System sender explicitly orders Fixed notices for that pull request
@@ -34,7 +34,7 @@ items; repeats resolve nothing twice. Hand off `notified`
 with `fixedPullRequests` listing the URLs you reported, or `none`, and
 `skipReason` and `unnotifiedPullRequests` set to `none`.
 
-If `report(kind:fixed)` refuses with `System DM access denied`, your owner is
+If `report_feedback(action:fixed)` refuses with `System DM access denied`, your owner is
 not a System sender and no call you make can send these DMs. Do not stop, and do not
 hand off `notified`. Hand off `skipped` with `skipReason` `not_system_sender`,
 `unnotifiedPullRequests` listing the numbers of every pull request you could not
@@ -91,7 +91,7 @@ no skill covers the situation, name the skill that should.
 
 Persist every report's assessment in `contents.dispositions`: an array of
 {itemId, disposition, reference, reason}. Use fixed only after
-`report(kind:fixed)` verifies the merged fix; duplicate names the canonical
+`report_feedback(action:fixed)` verifies the merged fix; duplicate names the canonical
 item id and merges its occurrences and count; linked names the existing thread
 or pull request; dismissed records why no fix is warranted. The handoff saves
 these decisions transactionally. Include every pulled item; use [] when empty.

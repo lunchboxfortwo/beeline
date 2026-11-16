@@ -10,12 +10,12 @@
     },
     "brief": {
       "repositoryWork": true,
-      "spec": "## Intent\nExplain repository access in this linked corner. No writes are assigned in this proof."
+      "spec": "## Intent\nExplain repository access in this linked thread. No writes are assigned in this proof."
     }
   },
   "turn": {
     "task": {
-      "body": "This corner has working repository App access, and I have no personal GitHub connector. Which credential route should you use for repository work? Do I need to connect personal GitHub? Answer only; do not push anything or open a PR.",
+      "body": "This thread has working repository App access, and I have no personal GitHub connector. Which credential route should you use for repository work? Do I need to connect personal GitHub? Answer only; do not push anything or open a PR.",
       "fromName": "dana",
       "commandReason": "human_tag"
     }
@@ -48,7 +48,7 @@
     "files": {},
     "brief": {
       "repositoryWork": true,
-      "spec": "## Intent\nExplain repository access in this linked corner. No writes are assigned in this proof."
+      "spec": "## Intent\nExplain repository access in this linked thread. No writes are assigned in this proof."
     },
     "connect": {
       "status": {
@@ -90,7 +90,7 @@
       {
         "call": "read",
         "args": {
-          "facet": "corners"
+          "facet": "threads"
         },
         "result": {
           "corners": []
@@ -158,6 +158,13 @@
         "result": {
           "id": "simulated-message",
           "committed": true
+        }
+      },
+      {
+        "call": "reply",
+        "result": {
+          "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "delivered": true
         }
       }
     ]

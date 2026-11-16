@@ -7,40 +7,14 @@ import { agentToolsFor } from './minimal-tool-surface.js';
 import { validateAdvertisedToolInput } from './read-only-mcp-open-poll.js';
 describe('typed Work board tools', () => {
   const tools = agentToolsFor(true, false, true, true);
-  const ask = tools.find((tool) => tool.name === 'ask_owner')!;
-  it('advertises typed about references, short options and free-text questions', () => {
-    expect(ask).toBeDefined();
-    expect(tools.some((tool) => tool.name === 'update_work')).toBe(true);
-    expect(() =>
-      validateAdvertisedToolInput(ask, {
-        about: { kind: 'thread', roomId: 'thread' },
-        question: 'Which surface next?',
-        options: [{ label: 'Web', recommended: true }, { label: 'Phone' }],
-      }),
-    ).not.toThrow();
-    expect(() =>
-      validateAdvertisedToolInput(ask, {
-        about: { kind: 'request', roomId: 'thread', messageId: 'ask' },
-        question: 'Who should receive it?',
-        freeText: true,
-      }),
-    ).not.toThrow();
+  const reply = tools.find(tool=>tool.name==='reply')!;
+  it('advertises short asks on replies and one work update surface',()=>{
+    expect(()=>validateAdvertisedToolInput(reply,{id:'task',text:'Choose output',ask:{question:'Which output?',options:['Web','Phone'],recommended:'Web'}})).not.toThrow();
+    for (const name of ['ask_owner','set_work_state','assign_work_item','add_work_note','attach_to_work_item']) expect(tools.some(tool=>tool.name===name)).toBe(false);
   });
-  it('gives the agent a shortening error before a tool call', () => {
-    expect(() =>
-      validateAdvertisedToolInput(ask, {
-        about: { kind: 'thread', roomId: 'thread' },
-        question: Array(21).fill('word').join(' '),
-        freeText: true,
-      }),
-    ).toThrow('Shorten question');
-    expect(() =>
-      validateAdvertisedToolInput(ask, {
-        about: { kind: 'thread', roomId: 'thread' },
-        question: 'Which surface?',
-        options: [{ label: 'One two three four' }, { label: 'Phone' }],
-      }),
-    ).toThrow('Shorten options');
+  it('returns a plain shortening error before sending an oversized ask',()=>{
+    expect(()=>validateAdvertisedToolInput(reply,{id:'task',text:'Choose output',ask:{question:Array(21).fill('word').join(' '),options:['Web','Phone']}})).toThrow('Shorten question');
+    expect(()=>validateAdvertisedToolInput(reply,{id:'task',text:'Choose output',ask:{question:'Which output?',options:['One two three four','Phone']}})).toThrow('Shorten options');
   });
   it('dispatches named create, state and assignment tools through the same authorized work write', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'beeline-work-tools-'));
@@ -88,7 +62,7 @@ describe('typed Work board tools', () => {
       expect(written().objective).toBe('Milo answers inline.');
       expect(written().id).not.toBe(created.id);
       const target = { roomId: 'target-chat', id: created.id };
-      await callAgentTool('set_work_state', { ...target, state: 'backlog' }, 'move');
+      await callAgentTool('update_work', { ...target, state: 'backlog' }, 'move');
       expect(written()).toMatchObject({
         ...target,
         roomId: 'source-chat',
@@ -96,7 +70,7 @@ describe('typed Work board tools', () => {
         state: 'backlog',
       });
       for (const assigneeId of ['agent', 'person', null]) {
-        await callAgentTool('assign_work_item', { ...target, assigneeId }, 'assign');
+        await callAgentTool('update_work', { ...target, assigneeId }, 'assign');
         expect(written().assigneeId).toBe(assigneeId);
       }
       expect(fetch.mock.calls).toHaveLength(7);
@@ -106,17 +80,17 @@ describe('typed Work board tools', () => {
         ),
       ).toBe(true);
       await expect(
-        callAgentTool('set_work_state', { ...target, state: 'unknown' }, 'invalid'),
+        callAgentTool('update_work', { ...target, state: 'unknown' }, 'invalid'),
       ).rejects.toThrow('invalid arguments');
       expect(fetch.mock.calls).toHaveLength(7);
-      await callAgentTool('add_work_note', { ...target, text: 'Hold until approved.' }, 'note');
-      expect(String(fetch.mock.calls.at(-1)![0])).toMatch(/addWorkNote$/);
-      expect(written()).toMatchObject({ roomId: 'source-chat', targetRoomId: 'target-chat', id: created.id, text: 'Hold until approved.' });
-      await callAgentTool('attach_to_work_item', { ...target, attachment: { kind: 'link', name: 'Plan', url: 'https://example.org' } }, 'link');
-      expect(String(fetch.mock.calls.at(-1)![0])).toMatch(/attachToWorkItem$/);
-      expect(written().attachment).toEqual({ kind: 'link', name: 'Plan', url: 'https://example.org' });
-      await callAgentTool('attach_to_work_item', { ...target, attachment: { kind: 'file', name: 'plan.pdf', objectId: 'stored-object' } }, 'file');
-      expect(written().attachment.objectId).toBe('stored-object');
+      await callAgentTool('update_work', { ...target, note: 'Hold until approved.' }, 'note');
+      expect(String(fetch.mock.calls.at(-1)![0])).toMatch(/updateWorkItem$/);
+      expect(written()).toMatchObject({ roomId: 'source-chat', targetRoomId: 'target-chat', id: created.id, note: 'Hold until approved.' });
+      await callAgentTool('update_work', { ...target, attachments: [ { kind: 'link', name: 'Plan', url: 'https://example.org' }] }, 'link');
+      expect(String(fetch.mock.calls.at(-1)![0])).toMatch(/updateWorkItem$/);
+      expect(written().attachments[0]).toEqual({ kind: 'link', name: 'Plan', url: 'https://example.org' });
+      await callAgentTool('update_work', { ...target, attachments: [ { kind: 'file', name: 'plan.pdf', objectId: 'stored-object' }] }, 'file');
+      expect(written().attachments[0].objectId).toBe('stored-object');
     } finally {
       vi.unstubAllGlobals();
       vi.unstubAllEnvs();

@@ -1,7 +1,7 @@
 {
   "id": "free-agent-login-bug-repository",
   "section": "identity",
-  "summary": "Coding work in an unlinked Room receives the repository card.",
+  "summary": "Coding work in an unlinked chat receives the repository card.",
   "place": "room",
   "session": {
     "agentName": "Beebee",
@@ -17,7 +17,7 @@
       "fromName": "dana",
       "commandReason": "human_tag"
     },
-    "members": "Members (exact tag spellings):\n- @dana \u2014 Dana (person)\nYou are @beebee, the only agent in this Room."
+    "members": "Members (exact tag spellings):\n- @dana — Dana (person)\nYou are @beebee, the only agent in this chat."
   },
   "pass": {
     "call": "app_tool",
@@ -65,7 +65,7 @@
       {
         "call": "read",
         "args": {
-          "facet": "corners"
+          "facet": "threads"
         },
         "result": {
           "corners": []
@@ -77,7 +77,7 @@
           "facet": "members"
         },
         "result": {
-          "members": "Members (exact tag spellings):\n- @dana \u2014 Dana (person)\nYou are @beebee, the only agent in this Room."
+          "members": "Members (exact tag spellings):\n- @dana — Dana (person)\nYou are @beebee, the only agent in this chat."
         }
       },
       {
@@ -88,7 +88,7 @@
         "result": {
           "address": "09c40034-77e4-5fe3-8c40-cc637d013185",
           "name": "free-agent-login-bug-repository",
-          "members": "Members (exact tag spellings):\n- @dana \u2014 Dana (person)\nYou are @beebee, the only agent in this Room.",
+          "members": "Members (exact tag spellings):\n- @dana — Dana (person)\nYou are @beebee, the only agent in this chat.",
           "repository": null,
           "worktree": null,
           "corners": []
@@ -149,6 +149,13 @@
           "state": "pending_repository_selection"
         },
         "boundary": "approval"
+      },
+      {
+        "call": "reply",
+        "result": {
+          "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "delivered": true
+        }
       }
     ],
     "connect": {

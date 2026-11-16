@@ -1,3 +1,4 @@
+import { sendMessage } from './agent-messaging.js';
 import { migrate } from './database.js';
 import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { describe, expect, it, taggedIdentityIdsSql, seedCornerOpening, PhoneService, DaemonService, createAgentCommand, H, A, B, P, R, C, id, stopProofPostgresUrl, db, phone, daemon, live, commands, send, disconnectHelper, helperOwner, queuedHumanTags, queueStopOrders, claim, result, rootFixture, fixtureScope1, type SqlDatabase } from './test-support-agent-command.integration.test-support.js';
@@ -491,6 +492,8 @@ const scope1 = fixtureScope1(room);
     expect(first).toBeDefined();
     await claim(first!);
     await result(first!, 'Tag @goosy and Goosy answers');
+    expect(await commands(B,scope1.room)).toEqual([]);
+    await send('@goosy Goosy answers',scope1.room);
     const [tagged] = await commands(B, scope1.room);
     expect(tagged).toBeDefined();
     await claim(tagged!);
@@ -533,50 +536,29 @@ const scope1 = fixtureScope1(room);
     expect(await commands(B, scope1.room)).toEqual([]);
   });
 
-  it('preserves provenance through the former depth boundary', async () => {
-    await send('@hoots start', scope1.room);
-    let [c] = await commands(A, scope1.room);
-    const root = c!.id;
-    for (let depth = 0; depth <= 3; depth++) {
-      expect(c!.agentDepth).toBe(depth);
-      expect(c!.rootCommandId).toBe(root);
-      await claim(c!);
-      const target = c!.agentId === A ? B : A;
-      await result(c!, `@${target === A ? 'hoots' : 'goosy'} depth ${depth}`);
-      const next = await commands(target, scope1.room);
-      expect(next).toHaveLength(1);
-      expect(next[0]?.agentDepth).toBe(depth + 1);
-      c = next[0];
+  it('preserves provenance through the former depth boundary for explicit tuple messages',async()=>{
+    await send('@hoots ask Goosy',scope1.room);
+    let current=(await commands(A,scope1.room))[0]!;
+    const root=current.rootCommandId;
+    for(let depth=0;depth<5;depth++) {
+      const parent=(await rootFixture.db.query<import('./agent-command.js').CommandRow>('SELECT * FROM agent_commands WHERE id=$1',[current.id])).rows[0]!;
+      const target=current.agentId===A?B:A;
+      const sent=await sendMessage(rootFixture.db,{route:{from:{agent:current.agentId,place:scope1.room},to:{agent:target,place:scope1.room}},text:`depth ${depth}`,parent});
+      current=(await commands(target,scope1.room)).find(item=>item.id===sent.id)!;
+      expect(current.agentDepth).toBe(depth+1);
+      expect(current.rootCommandId).toBe(root);
     }
   });
-
-  it('routes replies only through exact tags', async () => {
-    await send('@hoots start', scope1.room);
-    const [a] = await commands(A, scope1.room);
-    await claim(a!);
-    const posted = await result(a!, '@goosy Delegation');
-    const [b] = await commands(B, scope1.room);
-    await claim(b!);
-    const reply = await result(b!, 'Deliberate reply', 'g1', { replyToMessageId: posted.id });
-    expect(await commands(A, scope1.room)).toEqual([]);
-    await send('@goosy Start a tagged handoff', scope1.room);
-    const fresh = (await commands(B, scope1.room))[0]!;
-    await claim(fresh!);
-    const taggedReply = await result(fresh!, '@hoots Deliberate handoff');
-    expect((await commands(A, scope1.room))[0]?.agentDepth).toBe(1);
-    await rootFixture.db.query(`UPDATE live_outputs SET body='{"status":"offline"}' WHERE agent_id=$1`, [B]);
-    await rootFixture.phone.execute(
-      'sendRoomReply',
-      { roomId: scope1.room, parentMessageId: reply.id, text: 'Continue' },
-      H,
-    );
-    expect(await commands(B, scope1.room)).toEqual([]);
-    await rootFixture.phone.execute(
-      'sendRoomReply',
-      { roomId: scope1.room, parentMessageId: taggedReply.id, text: '@goosy Continue' },
-      H,
-    );
-    expect((await commands(B, scope1.room))[0]?.agentDepth).toBe(0);
+  it('a reply reverses the recorded tuple without a tag and cannot fan out to another agent',async()=>{
+    await send('@hoots start',scope1.room);
+    const first=(await commands(A,scope1.room))[0]!;
+    const parent=(await rootFixture.db.query<import('./agent-command.js').CommandRow>('SELECT * FROM agent_commands WHERE id=$1',[first.id])).rows[0]!;
+    const sent=await sendMessage(rootFixture.db,{route:{from:{agent:A,place:scope1.room},to:{agent:B,place:scope1.room}},text:'Inspect',parent});
+    await claim(first);await result(first,'Delegated');
+    const next=(await commands(B,scope1.room)).find(item=>item.id===sent.id)!;
+    await claim(next);await result(next,'Deliberate reply');
+    expect((await commands(A,scope1.room)).map(item=>item.source.body)).toEqual(['Deliberate reply']);
+    expect(await commands(B,scope1.room)).toEqual([]);
   });
 
   it('wakes no agent whose handle appears only inside code', async () => {
@@ -674,7 +656,7 @@ it('deduplicates human writes, deliveries and final results', async () => {
   const one = await result(c!, '@goosy Done');
   const two = await result(c!, '@goosy Done');
   expect(two.id).toBe(one.id);
-  expect(await commands(B)).toHaveLength(1);
+  expect(await commands(B)).toHaveLength(0);
 });
 
 it('rejects unknown, wrong agent, cross-Room, completed and cancelled turn output without side effects', async () => {
@@ -698,21 +680,21 @@ it('rejects unknown, wrong agent, cross-Room, completed and cancelled turn outpu
   expect(await commands()).toEqual([]);
 });
 
-it('routes a validated agent tag when the final message is committed', async () => {
+it('a final reply does not fan out to a stray agent tag', async () => {
   await send('@hoots');
   const [c] = await commands();
   await claim(c!);
   expect(await commands(B)).toEqual([]);
   await result(c!, '@goosy please help');
-  expect(await commands(B)).toHaveLength(1);
+  expect(await commands(B)).toHaveLength(0);
 });
 
-it('routes the committed case-insensitive agent tag without a caller target list', async () => {
+it('a final reply does not fan out to a case-insensitive stray tag', async () => {
   await send('@hoots');
   const [c] = await commands();
   await claim(c!);
   const posted = await result(c!, '@GOOSY please help');
-  expect(await commands(B)).toHaveLength(1);
+  expect(await commands(B)).toHaveLength(0);
   // The indexed mention projection may retain the original spelling; the queue
   // records the addressed member without trusting a caller-supplied list.
   expect(
@@ -726,7 +708,7 @@ it('routes the committed case-insensitive agent tag without a caller target list
 });
 
 it('rolls final storage back if creating the next command fails', async () => {
-  await send('@hoots');
+  await sendMessage(rootFixture.db,{route:{from:{agent:B,place:R},to:{agent:A,place:R}},text:'Atomic task'});
   const [c] = await commands();
   await claim(c!);
   await rootFixture.db.query(`CREATE FUNCTION refuse_command() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected dispatch failure'; END $$;

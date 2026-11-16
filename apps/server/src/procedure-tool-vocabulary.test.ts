@@ -3,6 +3,7 @@ import { procedureToolVocabulary } from './procedure-tool-vocabulary.js';
 
 it('corrects audited saved instructions without a database write', () => {
   const result = procedureToolVocabulary([
+    'Use order(address,agent,text).',
     'workbench_status then list_app_tools and execute_app_tool; connect_app if needed.',
     'Save with save_skill; workflow save_workflow; fact save_memory.',
     'Use nonexistent handoff(state_check) to inspect state.',
@@ -12,6 +13,7 @@ it('corrects audited saved instructions without a database write', () => {
     'Owner must handle this personally unless delegation is authorized.',
   ].join('\n'));
   expect(result).toContain('Do assigned work yourself');
+  expect(result).toContain('message(to:{agent,place},text,ask?)');
   expect(result).toContain('tool:read,args:{runId}');
   expect(result).toContain('start dispatches its first state');
   expect(result).toContain('Owner must handle this personally');
@@ -21,6 +23,6 @@ it('corrects audited saved instructions without a database write', () => {
 });
 
 it('preserves prose already using the current vocabulary', () => {
-  const text = 'For this task, order(address,agent,text). Use app_tool(app,tool,args).';
+  const text = 'For this task, message(to:{agent,place},text,ask?). Use app_tool(app,tool,args).';
   expect(procedureToolVocabulary(text)).toBe(text);
 });

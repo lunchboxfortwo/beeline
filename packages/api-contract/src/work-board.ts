@@ -48,11 +48,12 @@ export type WorkItemView = {
   readonly createdAt: number;
   readonly updatedAt: number;
   readonly messageId?: string;
+  readonly source?: { readonly roomId: string; readonly messageId?: string; readonly label: string };
   /** Bounded recent detail, in chronological order. */
   readonly entries?: readonly WorkItemEntry[];
   readonly attachments?: readonly WorkItemAttachment[];
   readonly ask?: NeedsYouItemView;
-  /** Every ask waiting in this thread, oldest first; `ask` is the first. Clearing the row clears all. */
+  /** This row owns one ask; answering it never clears another question. */
   readonly askIds?: readonly string[];
   readonly recommendedOptionId?: string;
 };
@@ -65,6 +66,8 @@ export type WorkBoardView = {
   readonly people: readonly RoomViewIdentity[];
 };
 export type UpdateWorkItemInput = {
+  readonly note?: string;
+  readonly attachments?: readonly WorkAttachmentInput[];
   readonly id?: string;
   readonly roomId: string;
   readonly title?: string;
@@ -140,6 +143,7 @@ export function readWorkItem(value: unknown): WorkItemView | undefined {
     openedBy,
     assignee,
     ...(typeof v.messageId === 'string' ? { messageId: v.messageId } : {}),
+    ...(readWorkSource(v.source) ? { source: readWorkSource(v.source) } : {}),
     createdAt: v.createdAt,
     updatedAt: v.updatedAt,
   };
@@ -189,4 +193,12 @@ function readWorkAttachment(value: unknown): WorkItemAttachment[] {
       },
     },
   ];
+}
+
+function readWorkSource(value: unknown): WorkItemView['source'] {
+  if (!value || typeof value!=='object') return undefined;
+  const source=value as Record<string,unknown>;
+  return typeof source.roomId==='string' && typeof source.label==='string'
+    ? {roomId:source.roomId,label:source.label,...(typeof source.messageId==='string'?{messageId:source.messageId}:{})}
+    : undefined;
 }

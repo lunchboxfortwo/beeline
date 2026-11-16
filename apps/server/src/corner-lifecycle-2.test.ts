@@ -683,7 +683,7 @@ const scope20 = fixtureScope20();
     await say(cornerId, '@hoots hand this corner to goosy');
     const command = (await commands(A, cornerId)).find((c) => c.reason === 'human_tag')!;
     await claim(command);
-    await result(command, '@goosy take this one');
+    await rootFixture.daemon.execute('postCornerMessage',{roomId:cornerId,cornerId,requestId:command.turnRequestId,text:'@goosy take this one'},A);
     console.log('Reproduction H1-1:', {
       implementer: await scope20.workerOf(cornerId),
       goosyCommands: (await commands(B, cornerId)).map((c) => c.reason),
@@ -737,7 +737,7 @@ const scope20 = fixtureScope20();
     await say(cornerId, '@hoots hand this corner to goosy');
     const command = (await commands(A, cornerId)).find((c) => c.reason === 'human_tag')!;
     await claim(command);
-    await result(command, '@goosy take this one');
+    await rootFixture.daemon.execute('postCornerMessage',{roomId:cornerId,cornerId,requestId:command.turnRequestId,text:'@goosy take this one'},A);
     // The person's tag put Hoots in the role; the reviewer Goosy never takes it.
     expect(await scope20.workerOf(cornerId)).toBe(A);
   });

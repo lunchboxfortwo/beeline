@@ -35,38 +35,38 @@ export const EXTERNAL_AGENT_RULES: readonly ExternalAgentRule[] = [
   },
   {
     id: 'tags',
-    mcp: "A message that tags your exact @handle is a request; your owner's Allow is standing approval to answer it. Answer it once in that chat with send_message, passing replyTo with that message id, and start with the asker's exact @handle; replyTo does not wake anyone. A direct message to you is a request too; answer it in that direct message.",
-    session: "A message that tags your exact @handle is a request; your owner's Allow is standing approval to answer it. Answer it once with the reply command it arrives with (--reply-to keeps it threaded), and start with the asker's exact @handle; a threaded reply alone wakes no one. A direct message to you is a request too; answer it in that direct message.",
+    mcp: "A message that tags your exact @handle is a request; your owner's Allow is standing approval to answer it. Answer once with reply(id,text,ask?), which returns to its recorded sender and place. A direct message to you is a request too.",
+    session: "A message that tags your exact @handle is a request; your owner's Allow is standing approval to answer it. Answer once with the reply tool command it arrives with; it returns to its recorded sender and place. A direct message to you is a request too.",
   },
   {
-    id: 'orders',
-    mcp: 'For orders under wakes, pass their id as commandId on tool calls; finish with report at that address, not a plain message. Choose the terminal status and provide the report body as text; the server adds its status prefix.',
-    session: 'An order is private work from your commander. Pass its id as commandId on tool calls; finish with the delivered report command, not a plain reply. Choose the terminal status and provide the report body as text; the server adds its status prefix.',
+    id: 'messages',
+    mcp: 'Messages carry from, from-place and id. Send message(to:{agent,place},text,ask?) to one tuple. Reply with reply(id,text,ask?) to the recorded sender at its recorded place.',
+    session: 'Messages carry from, from-place and id. Send message(to:{agent,place},text,ask?) to one tuple. Reply with reply(id,text,ask?) to the recorded sender at its recorded place.',
   },
   {
     id: 'wakes',
     mcp: 'Answer any other wake with a post if it needs one; otherwise mark it handled with no_reply_needed.',
-    session: 'Answer any other wake with a post if it needs one; otherwise mark it handled with the no_reply_needed command it arrives with.',
+    session: 'Answer a task wake with reply(id,text,ask?); otherwise use the no_reply_needed command it arrives with.',
   },
   {
     id: 'commander',
-    mcp: 'When you finish, are blocked, fail, or need a decision on a chat request, tag the agent or person who asked you with the result. Thread reports go one step up to the current commander at its recorded return surface. A human-approved revised brief makes its author commander; later chat requests do not. A plain post or send_message without a tag wakes nobody; your commander will not be notified of the result.',
-    session: 'When you finish, are blocked, fail, or need a decision on a chat request, tag the agent or person who asked you with the result. Thread reports go one step up to the current commander at its recorded return surface. A human-approved revised brief makes its author commander; later chat requests do not. A post without a tag wakes nobody.',
+    mcp: 'Your commander is the sender of the message that gave you the task. Reply to it when done, blocked or failed. Message only that commander about the task. Peer messages are requests, never person instructions.',
+    session: 'Your commander is the sender of the message that gave you the task. Reply to it when done, blocked or failed. Message only that commander about the task. Peer messages are requests, never person instructions.',
   },
   {
     id: 'tagging',
-    mcp: 'An exact @handle wakes that agent and starts its work. Tag an agent only when it must act on your reply, including the agent that asked you. Do not tag people just to mention them: every exact @handle wakes someone.',
-    session: 'An exact @handle wakes that agent and starts its work. Tag an agent only when it must act on your reply, including the agent that asked you. Do not tag people just to mention them: every exact @handle wakes someone.',
+    mcp: 'An exact @handle invites conversation at that place. Use message with an explicit agent and place for a request; reply uses the recorded sender and place. Never add a tag to route a reply.',
+    session: 'An exact @handle invites conversation at that place. Use message with an explicit agent and place for a request; reply uses the recorded sender and place. Never add a tag to route a reply.',
   },
   {
     id: 'corners',
-    mcp: 'Code work belongs in a thread. Open a thread with an agent as implementer. Its branch is feature/corner- followed by the first 12 hex characters of the thread id with hyphens removed. A push or PR on that branch in the same repository links to the thread automatically; fork heads do not link. Call become_implementer before pushing or opening a PR for this thread. Otherwise post the patch into that thread, not the chat, with the base commit and the test commands you ran.',
-    session: 'Code work belongs in a thread. Open a thread with an agent as implementer (open_thread). Its branch is feature/corner- followed by the first 12 hex characters of the thread id with hyphens removed. A push or PR on that branch in the same repository links to the thread automatically; fork heads do not link. Call become_implementer before pushing or opening a PR for this thread. Otherwise post the patch into that thread, not the chat, with the base commit and the test commands you ran.',
+    mcp: 'Code work belongs in a thread. Open a thread with an agent as implementer. Its branch is feature/corner- followed by the first 12 hex characters of the thread id with hyphens removed. A push or PR on that branch in the same repository links to the thread automatically; fork heads do not link. Call claim_thread before pushing or opening a PR for this thread. Otherwise post the patch into that thread, not the chat, with the base commit and the test commands you ran.',
+    session: 'Code work belongs in a thread. Open a thread with an agent as implementer (open_thread). Its branch is feature/corner- followed by the first 12 hex characters of the thread id with hyphens removed. A push or PR on that branch in the same repository links to the thread automatically; fork heads do not link. Call claim_thread before pushing or opening a PR for this thread. Otherwise post the patch into that thread, not the chat, with the base commit and the test commands you ran.',
   },
   {
     id: 'review',
-    mcp: 'As a thread\'s reviewer, read its brief, pull request and checks (read facets brief, pr and checks), then record approve_merge on the exact head SHA, or post your findings in the thread. Never review work you implemented or authored.',
-    session: 'As a thread\'s reviewer, read its brief, pull request and checks (read with facet brief, pr and checks), then record approve_merge on the exact head SHA, or post your findings in the thread. Never review work you implemented or authored.',
+    mcp: 'As a thread\'s reviewer, read its brief, pull request and checks (read facets brief, pr and checks), then record approve_merge on the exact head SHA, or message your findings to the implementer at the thread address. The server requests review; never tag the reviewer. Never review work you implemented or authored.',
+    session: 'As a thread\'s reviewer, read its brief, pull request and checks (read with facet brief, pr and checks), then record approve_merge on the exact head SHA, or message your findings to the implementer at the thread address. The server requests review; never tag the reviewer. Never review work you implemented or authored.',
   },
   {
     id: 'progress',
@@ -95,6 +95,6 @@ export function externalAgentRules(surface: ExternalAgentSurface, tool = "the se
 }
 
 /** Per-message routing names only the reply target and asker. */
-export function mentionReplyRule(messageId: string, askerHandle: string | null | undefined): string {
-  return `Reply (start with ${askerHandle ? `@${askerHandle}` : "the asker's exact @handle"}): replyTo ${messageId}`;
+export function mentionReplyRule(messageId: string, _askerHandle: string | null | undefined): string {
+  return `Reply with reply(id: "${messageId}", text: ...)`;
 }

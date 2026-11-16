@@ -431,7 +431,7 @@ describe('feedback-triage workflow', () => {
     expect(procedure.markdown).not.toContain('notice period');
     expect(procedure.markdown).not.toContain('workspace-browse-sweep');
     expect(procedure.markdown).toContain('app_tool(app:beeline:workflow)');
-    expect(procedure.markdown).toContain('report(kind:fixed)');
+    expect(procedure.markdown).toContain('report_feedback(action:fixed)');
     expect(procedure.markdown).not.toMatch(/start_workflow|notify_feedback_fixed|load_workspace_skill/);
     const after = await schedules();
     expect(after.find((row) => row.id === UNRELATED_SCHEDULE)!.message).toBe(FEEDBACK_TRIAGE_SCHEDULE_PROMPT);

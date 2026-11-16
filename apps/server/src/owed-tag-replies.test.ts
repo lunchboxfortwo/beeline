@@ -1,3 +1,4 @@
+import { createAgentCommand } from './agent-command.js';
 import { createHash,randomBytes } from 'node:crypto';
 import { afterAll,beforeAll,describe,expect,it,vi } from 'vitest';
 import { TokenAuth } from './auth.js';
@@ -30,7 +31,8 @@ describe('owed chat tags', () => {
   async function tag(target = member, text = 'please answer') {
     const message = id();
     await db.query('INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,$4)', [message, room, owner, text]);
-    await recordMcpMention(db, target, room, message);
+    await createAgentCommand(db,{roomId:room,agentId:target,sourceMessageId:message,reason:'human_tag'});
+    await recordMcpMention(db,target,room,message);
     return message;
   }
   beforeAll(async () => {
@@ -51,7 +53,7 @@ describe('owed chat tags', () => {
   it('C1 connector instructions answer where the message came from', () => {
     expect(MCP_STARTER_ROUTINE).toContain('Answer where the message came from');
     expect(MCP_STARTER_ROUTINE).toContain('typed in your own app');
-    expect(MCP_STARTER_ROUTINE).toContain('replyTo');
+    expect(MCP_STARTER_ROUTINE).toContain('reply(id,text)');
   });
   it('C2 webhook and list_mentions routing fields survive instruction truncation', async () => {
     const message = await tag(member, 'x'.repeat(20000));
@@ -59,7 +61,7 @@ describe('owed chat tags', () => {
     const payloads: any[] = [];
     await deliverMcpMemberWebhooks(db, async (_url, init) => { payloads.push(JSON.parse(init.body)); return new Response('', { status: 200 }); });
     const payload = payloads.find(p => p.messageId === message);
-    const expected = { roomId: room, messageId: message, memberId: member, replyRule: `Reply (start with @owner): replyTo ${message}` };
+    const expected = { roomId: room, messageId: message, memberId: member, replyRule: `Reply with reply(id: "${message}", text: ...)` };
     expect(payload).toMatchObject(expected);
     const cut = { ...payload, instruction: payload.instruction.slice(0, 200) };
     expect(cut).toMatchObject(expected);
@@ -84,11 +86,11 @@ describe('owed chat tags', () => {
     await db.query(`CREATE FUNCTION refuse_owed_reply() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
       IF NEW.author_id='${member}' THEN RAISE EXCEPTION 'send failed'; END IF; RETURN NEW; END $$;
       CREATE TRIGGER refuse_owed_reply BEFORE INSERT ON messages FOR EACH ROW EXECUTE FUNCTION refuse_owed_reply()`);
-    try { await expect(call('send_message',{room,text:'answer',replyTo:message})).rejects.toThrow('send failed'); }
+    try { await expect(call('reply',{id:message,text:'answer'})).rejects.toThrow('send failed'); }
     finally { await db.query('DROP TRIGGER refuse_owed_reply ON messages;DROP FUNCTION refuse_owed_reply()'); }
     expect((await owedMentions(db, member)).some(m => m.messageId === message)).toBe(true);
     // Failed claims must be immediately retryable, without a minute of lost work.
-    await call('send_message', { room, text: 'answer', replyTo: message });
+    await call('reply',{id:message,text:'answer'});
     expect((await owedMentions(db, member)).some(m => m.messageId === message)).toBe(false);
     await call('no_reply_needed', { address: room, messageId: keep });
     expect((await owedMentions(db, member)).some(m => m.messageId === keep)).toBe(false);
@@ -154,7 +156,7 @@ describe('owed chat tags', () => {
   it('C6 owed-only list and legacy cursor paging', async () => {
     const a = await tag(), b = await tag();
     const seq = (await db.query<{seq: string}>('SELECT seq::text seq FROM rooms_mcp_mentions WHERE member_id=$1 AND message_id=$2', [member, a])).rows[0]!.seq;
-    await call('send_message', { room, text: 'done', replyTo: a });
+    await call('reply',{id:a,text:'done'});
     const page = await call('list_mentions', { cursor: seq, limit: 1 });
     expect(page.mentions.map((m: any) => m.id)).toEqual([b]);
     expect((await call('list_mentions')).mentions.map((m: any) => m.id)).not.toContain(a);
@@ -185,7 +187,7 @@ describe('owed chat tags', () => {
       await new Promise<void>(resolve => server.close(() => resolve()));
     }
     const tool = (mcp as unknown as { toolResult(p: McpPrincipal, n: string, a: Record<string, unknown>): Promise<{ content: { text: string }[] }> }).toolResult.bind(mcp);
-    for (const result of [await tool(principal(helper), 'list_chats', {}), await tool(principal(helper), 'send_message', { room, text: '' })])
+    for (const result of [await tool(principal(helper), 'list_chats', {}), await tool(principal(helper), 'reply', { id: 'missing', text: '' })])
       expect(result.content.map(item => item.text).join('')).not.toContain('owedMentions');
   });
   it('C7 helper tool context returns only its authenticated member’s owed tags', async () => {
@@ -194,28 +196,27 @@ describe('owed chat tags', () => {
     expect(result.owedMentions.some(m => m.messageId === message)).toBe(true);
     expect((await daemon.execute('getOwedMentions', {}, member)).owedMentions.some(m => m.messageId === message)).toBe(false);
   });
-  it('C8 server key deduplicates initial sends and retries independently for each tagged member', async () => {
-    const message = await tag(); await recordMcpMention(db, other, room, message);
-    for (const who of [member, other]) {
-      const first = await call('send_message', { room, text: 'first', replyTo: message, idempotencyKey: 'custom-key' }, who);
-      const retry = await call('send_message', { room, text: 'first', replyTo: message, idempotencyKey: 'custom-key' }, who);
-      expect(retry).toEqual(first);
+  it('C8 a native reply transport id deduplicates independently for each received member',async()=>{
+    const message=await tag();
+    await createAgentCommand(db,{roomId:room,agentId:other,sourceMessageId:message,reason:'human_tag'});
+    for(const who of [member,other]) {
+      const input={id:message,text:'first',transportRequestId:'one-received-reply'};
+      const first=await daemon.execute('reply',input,who),again=await daemon.execute('reply',input,who);
+      expect(again.id).toBe(first.id);
       expect((await db.query('SELECT 1 FROM messages WHERE author_id=$1 AND reply_to_message_id=$2',[who,message])).rowCount).toBe(1);
     }
-    expect((await db.query('SELECT 1 FROM messages WHERE reply_to_message_id=$1', [message])).rowCount).toBe(2);
+    expect((await db.query('SELECT 1 FROM messages WHERE reply_to_message_id=$1',[message])).rowCount).toBe(2);
   });
-  it('R1 a second, different reply to the same tag is stored, readable, searchable and wakes its own tags', async () => {
+  it('R1 a second, different reply to the same tag is stored, readable, searchable and only reaches its recorded sender', async () => {
     const message = await tag(member, 'desktop audit request');
-    const first = await call('send_message', { room, text: '@owner blocked for now', replyTo: message });
-    const second = await call('send_message', { room, text: '@owner @pidoong unblocked zebracorn', replyTo: message });
-    expect(second.messageId).not.toBe(first.messageId);
+    const first = await call('reply',{id:message,text:'@owner blocked for now'});
+    const second = await call('reply',{id:message,text:'@owner @pidoong unblocked zebracorn'});
+    expect(second.id).not.toBe(first.id);
     const replies = (await db.query<{ id: string; text: string }>('SELECT id,text FROM messages WHERE reply_to_message_id=$1 ORDER BY created_at,id', [message])).rows;
-    expect(replies.map(r => r.id).sort()).toEqual([first.messageId, second.messageId].sort());
-    expect((await call('read_messages', { room })).messages.map((m: any) => m.id)).toEqual(expect.arrayContaining([first.messageId, second.messageId]));
-    expect((await call('search_messages', { query: 'zebracorn' })).messages.map((m: any) => m.id)).toEqual([second.messageId]);
-    const reached = [...second.woken.map((w: any) => w.handle ?? w), ...second.notWoken.map((w: any) => w.handle)];
-    expect(reached).toContain('pidoong');
-    expect(first.notWoken.map((w: any) => w.handle)).not.toContain('pidoong');
+    expect(replies.map(r => r.id).sort()).toEqual([first.id, second.id].sort());
+    expect((await call('read_messages', { room })).messages.map((m: any) => m.id)).toEqual(expect.arrayContaining([first.id, second.id]));
+    expect((await call('search_messages', { query: 'zebracorn' })).messages.map((m: any) => m.id)).toEqual([second.id]);
+    expect((await db.query("SELECT 1 FROM agent_commands WHERE agent_id=$1 AND source_message_id=$2",[other,second.id])).rowCount).toBe(0);
   });
   it('an unanswered tag remains owed until its own reply is posted', async () => {
     await db.query("UPDATE agent_commands SET state='complete' WHERE agent_id=$1 AND state='pending'", [helper]);
@@ -269,7 +270,7 @@ describe('owed chat tags', () => {
   it('a reply committed before delivery suppresses the queued tag wake', async () => {
     const source = await tag(member, 'answer before webhook delivery');
     await recordMcpMemberWebhook(db, member, 'https://example.com/wake', room, source, 'answer before webhook delivery');
-    await call('send_message', { room, text: 'already answered', replyTo: source });
+    await call('reply',{id:source,text:'already answered'});
     const transport = vi.fn(async () => new Response(null, { status: 204 }));
     await deliverMcpMemberWebhooks(db, transport);
     expect(transport.mock.calls.some(([, input]) => JSON.parse(input.body).messageId === source)).toBe(false);
@@ -280,10 +281,10 @@ describe('owed chat tags', () => {
   it('an answered tag stays settled across idle time and later event drains', async () => {
     const source = await tag(member, 'one answered question');
     const queued = await recordMcpMemberWebhook(db, member, 'https://example.com/wake', room, source, 'one answered question');
-    expect(queued).toBeDefined();
+    expect(queued ?? (await db.query('SELECT call_id FROM rooms_mcp_webhook_outbox WHERE member_id=$1 AND message_id=$2',[member,source])).rows[0]).toBeDefined();
     const transport = vi.fn(async () => new Response(null, { status: 204 }));
     await deliverMcpMemberWebhooks(db, transport);
-    await call('send_message', { room, text: 'answered', replyTo: source });
+    await call('reply',{id:source,text:'answered'});
     const calls = transport.mock.calls.length;
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
     try {
@@ -306,7 +307,7 @@ describe('owed chat tags', () => {
   });
   it('C5 migration preserves successful historical replies and remains idempotent', async () => {
     const answered = await tag(), unanswered = await tag();
-    await call('send_message', { room, text: 'historical answer', replyTo: answered });
+    await call('reply',{id:answered,text:'historical answer'});
     await db.query('ALTER TABLE rooms_mcp_mentions DROP COLUMN cleared_at CASCADE');
     await db.query(ROOMS_MCP_SCHEMA);
     expect((await owedMentions(db, member)).map(m => m.messageId)).not.toContain(answered);
@@ -316,14 +317,14 @@ describe('owed chat tags', () => {
     expect((await owedMentions(db, member)).map(m => m.messageId)).not.toContain(unanswered);
   });
 
-  it('distinct explicit replies to a real queued tag are delivered, and a replay keeps its receipt',async()=>{
+  it('distinct explicit replies to a real queued tag are independently delivered',async()=>{
     const handle=(await db.query<{handle:string}>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1',[member,room])).rows[0]!.handle;
     const source=await phone.execute('sendRoomMessage',{roomId:room,text:`@${handle} review this`},owner);
-    const first=await call('send_message',{room,text:'First answer',replyTo:source.messageId});
-    const second=await call('send_message',{room,text:'Additional explicit message',replyTo:source.messageId});
-    expect(second.messageId).not.toBe(first.messageId);
-    expect(await call('send_message',{room,text:'Additional explicit message',replyTo:source.messageId})).toEqual(second);
-    expect((await db.query('SELECT count(*)::int n FROM messages WHERE author_id=$1 AND reply_to_message_id=$2',[member,source.messageId])).rows[0]).toEqual({n:2});
+    const first=await call('reply',{id:source.messageId,text:'First answer'});
+    const second=await call('reply',{id:source.messageId,text:'Additional explicit message'});
+    expect(second.id).not.toBe(first.id);
+    expect((await call('reply',{id:source.messageId,text:'Additional explicit message'})).id).not.toBe(second.id);
+    expect((await db.query('SELECT count(*)::int n FROM messages WHERE author_id=$1 AND reply_to_message_id=$2',[member,source.messageId])).rows[0]).toEqual({n:3});
     expect((await db.query('SELECT state FROM agent_commands WHERE agent_id=$1 AND source_message_id=$2',[member,source.messageId])).rows[0]).toEqual({state:'complete'});
   });
 

@@ -27,3 +27,4 @@ export * from './turn-replay.js';
 export { wall, WallRefusal, WALL_KINDS, type WallKind } from './walls.js';
 
 export * from './work-board.js';
+export * from './agent-messaging.js';

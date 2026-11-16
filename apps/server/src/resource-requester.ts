@@ -27,7 +27,8 @@ export async function resourceRequester(
     `SELECT message.author_id,message.room_id,room.workspace_id,message.text,true message_backed,
             EXISTS(SELECT 1 FROM agent_commands root WHERE root.id=$2
               AND root.root_command_id=root.id AND root.root_source_message_id=message.id
-              AND root.reason IN ('order','agent_tag','mcp_call')) agent_order
+              AND (root.reason IN ('order','agent_tag','mcp_call') OR
+                root.reason IN ('message','reply') AND root.private_payload->'route' IS NOT NULL)) agent_order
      FROM messages message JOIN rooms room ON room.id=message.room_id
      WHERE message.id=$1 AND ($3::boolean OR message.deleted_at IS NULL)`,
     [command.root_source_message_id, command.root_command_id ?? null, options.includeDeletedMessage ?? false],
@@ -42,7 +43,7 @@ export async function resourceRequester(
      WHERE root.id=$1 AND root.id=$2 AND root.root_command_id=root.id
        AND root.root_source_message_id=root.id
        AND root.source_message_id IS NULL AND root.parent_command_id IS NULL
-       AND ((root.reason='order' AND root.private_payload->>'kind'='order'
+       AND ((root.reason IN ('order','message','reply','corner_objective') AND root.private_payload->>'kind' IN ('order','message','reply')
              AND (author.kind='agent' OR author.id=$3))
          OR (root.reason='mcp_call' AND root.private_payload IS NULL AND author.kind='agent')
          OR (root.reason='report' AND root.private_payload->>'kind'='report'

@@ -265,7 +265,7 @@ it('Reproduction SELF-2: own brief revisions and external shell completion bookk
     brief: { spec: 'Continue own work', repositoryWork: false } }, RUBY);
   await db.query(`INSERT INTO live_outputs(room_id,agent_id,turn_id,kind,body) VALUES($1,$2,'presence','presence','{"status":"online"}'::jsonb) ON CONFLICT(agent_id) WHERE kind='presence' DO UPDATE SET room_id=EXCLUDED.room_id,body=EXCLUDED.body,updated_at=now()`, [own.cornerId, RUBY]);
   await daemon.execute('reviseCornerBrief', { ...authority(order), cornerId: own.cornerId, expectedRevision: 1,
-    brief: { spec: 'Build the clarified widget', change: 'Clarify work' } }, RUBY);
+    brief: { spec: 'Build the clarified widget', change: 'Clarify work',approval:{sourceMessageId:order.sourceMessageId} } }, RUBY);
   expect((await commands(own.cornerId,RUBY)).filter(c=>c.reason==='corner_brief_revision')).toEqual([]);
   expect((await db.query(`SELECT state FROM agent_commands WHERE room_id=$1 AND reason='corner_brief_revision'`,[own.cornerId])).rows)
     .toEqual([]);
@@ -535,19 +535,18 @@ it('Reproduction REPLY-ONCE: a direct human reply retried three times stores and
 });
 
 
-it('Reproduction wake-7: a reviewer report wakes the corner implementer in its corner, not the Room it ordered from', async () => {
+it('Reproduction wake-7: review findings message reaches the implementer only at the thread address', async () => {
   // 12 Nov 15:06: Speedy's FAIL on a corner reached its implementer in the parent
   // Room, which has no worktree or PR route for the fix.
   const opened = await daemon.execute('createCorner', { ...authority(order), requestId: order.turnRequestId,
     targetRoomId: ROOM, name: 'Palette', objective: 'Fix the palette', implementer: 'ruby',
     brief: { spec: 'Fix the palette', repositoryWork: false, approval: { sourceMessageId: order.sourceMessageId } },
   }, RUBY);
-  const receipt = await daemon.execute('order', { ...authority(order), address: opened.cornerId, agent: WORKER,
-    text: 'Review the palette PR' }, RUBY);
+  const receipt = await daemon.execute('message', { ...authority(order), to:{agent:WORKER,place:opened.cornerId},text:'Review the palette PR' }, RUBY);
   const review = (await commands(opened.cornerId, WORKER)).find(c => c.id === receipt.id)!;
   await claim(review);
-  await daemon.execute('report', { ...authority(review), status: 'done', text: 'FAIL: the dark tray is missing.' }, WORKER);
-  expect((await commands(opened.cornerId, RUBY)).filter(c => c.reason === 'report').map(c => c.source.body))
+  await daemon.execute('message', { ...authority(review),to:{agent:'implementer',place:opened.cornerId}, text: 'FAIL: the dark tray is missing.' }, WORKER);
+  expect((await commands(opened.cornerId, RUBY)).filter(c => c.reason === 'message').map(c => c.source.body))
     .toEqual([expect.stringContaining('FAIL: the dark tray is missing.')]);
   expect((await commands(DM, RUBY)).filter(c => c.reason === 'report')).toEqual([]);
 });

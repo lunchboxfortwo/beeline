@@ -387,12 +387,12 @@
     {
       "id": "paths.server-parallel",
       "module": "Server",
-      "invariant": "Server code has one path per job: no new legacy, fallback or compatibility variants beside the main one.",
+      "invariant": "Server code has one path per job. The approved queued messaging cutover adapter is temporary and has one removal point; no other legacy, fallback or compatibility variant is added.",
       "pattern": "(?:\\bfunction\\s*\\*?\\s*|\\b(?:const|let|var)\\s+|\\b(?:private|protected|public|static|async)\\s+)\\w*(?:[Ll]egacy|[Ff]allback|[Cc]ompat)\\w*\\b",
       "scope": [
         "apps/server/src"
       ],
-      "owners": [],
+      "owners": ["apps/server/src/messaging-cutover.ts"],
       "total": 16,
       "fix": "Change the main path instead of adding a legacy/fallback/compat variant beside it, or remove an old variant in the same PR."
     },
@@ -1202,7 +1202,7 @@
           "lifecycle": "existing before the registry; weekly audit reviews",
           "locked": "existing before the registry; weekly audit reviews",
           "reviewer_agent_id": "existing before the registry; weekly audit reviews",
-          "implementer_agent_id": "Recorded thread implementer; initialized by the opening assignment and changed only by become_implementer.",
+          "implementer_agent_id": "Recorded thread implementer; initialized by the opening assignment and changed only by claim_thread.",
           "owner_agent_id": {
             "reason": "Compatibility for rollout-0707: preceding serving and rollback images read the retired owner column",
             "drop": "Remove only through a reviewed contract migration after serving and rollback images stop reading it."
@@ -3782,6 +3782,7 @@
         "confirmed": "existing before the registry; weekly audit reviews"
       },
       "card": {
+        "route": "A message freezes its sender and destination tuples at send time; current membership and later tags cannot reconstruct them.",
         "expiresAt": "The recorded sign-in or approval expiry is retained on its card so reads and retries use the original provider deadline.",
         "runStatus": "Workflow run start cards persist the committed live or terminal status so assignment admission cannot wake a finished run.",
         "reason": "The terminal wallet verdict retains its original explanation when later provider observations arrive.",

@@ -53,6 +53,14 @@ export default function TrayScreen() {
   const actions = useMemo<WorkBoardActions>(
     () => ({
       open: (item) => {
+        if(item.source) {
+          if(item.source.messageId) {
+            const responseId=`work-source:${item.id}`;
+            prefetchPushRoom(responseId,item.source.roomId);
+            router.push(messageJumpHref(item.source.roomId,item.source.messageId,responseId,workspaceId));
+          } else navigateToRoom(router,item.source.roomId);
+          return;
+        }
         if (item.messageId) {
           const responseId = `work:${item.messageId}`;
           prefetchPushRoom(responseId, item.roomId);

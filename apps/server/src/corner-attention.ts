@@ -53,7 +53,7 @@ BEGIN
   IF TG_TABLE_NAME='agent_commands' THEN
     -- A worker's explicit report starts or answers a derived wait.
     corner=COALESCE(NEW.room_id,OLD.room_id);
-    IF NEW.private_payload->>'kind'='report' THEN
+    IF NEW.private_payload->>'kind'='report' OR NEW.private_payload->>'automatic'='true' THEN
       SELECT id INTO corner FROM rooms WHERE id::text=COALESCE(NEW.private_payload->>'originCornerId',NEW.private_payload->>'fromRoomId');
     END IF;
   ELSIF TG_TABLE_NAME IN ('agent_turns','agent_schedules','messages','agent_grants') THEN

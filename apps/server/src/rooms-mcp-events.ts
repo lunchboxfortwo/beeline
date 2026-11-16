@@ -20,19 +20,19 @@ const MENTION_EVENT = {
   }, required: ['roomId', 'messageId', 'memberId', 'replyRule', 'idempotencyKey', 'text', 'author'], additionalProperties: false },
 };
 /** Same wording list_mentions returns on a pending wake, so a webhook and a poll agree. */
-export const MCP_ORDER_WAKE_HINT = 'Pass this order id as commandId on tool calls. Do the work, then call report with this address and commandId.';
+export const MCP_ORDER_WAKE_HINT = 'Pass this message id as commandId on task tools. Reply with reply(id,text) when done, blocked or failed.';
 export const MCP_WAKE_HINT = 'Handle it, then call no_reply_needed with this address and this wake\'s id as commandId if nothing needs posting.';
 export function mcpWakeHint(kind: string | null | undefined): string {
-  return kind === 'order' ? MCP_ORDER_WAKE_HINT : MCP_WAKE_HINT;
+  return ['order','message','reply'].includes(kind ?? '') ? MCP_ORDER_WAKE_HINT : MCP_WAKE_HINT;
 }
 const WAKE_EVENT = {
   name: 'wake',
-  description: 'A private order, report, thread assignment, schedule, or lifecycle wake for this connected member.',
+  description: 'A message, reply, thread assignment, schedule, or lifecycle wake for this connected member.',
   delivery: ['webhook'], inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   payloadSchema: { type: 'object', properties: {
     roomId: { type: 'string' }, address: { type: 'string' }, commandId: { type: 'string' }, id: { type: 'string' },
-    reason: { type: 'string' }, kind: { type: ['string', 'null'] }, text: { type: ['string', 'null'] }, next: { type: 'string' },
-  }, required: ['roomId', 'address', 'commandId', 'id', 'reason', 'kind', 'text', 'next'], additionalProperties: false },
+    from: {type:'object',properties:{agent:{type:'string'},place:{type:'string'}},required:['agent','place'],additionalProperties:false}, text: { type: ['string', 'null'] }, next: { type: 'string' },
+  }, required: ['roomId', 'address', 'commandId', 'id', 'from', 'text', 'next'], additionalProperties: false },
 };
 type Transport = typeof postMcpWebhook;
 interface Subscription {
@@ -195,10 +195,12 @@ export function mcpCommandWakeSql(first: number): { cte: string; join: string; p
         jsonb_build_object('eventId','evt_'||s.id||'_cmd_'||command.id,'name','wake','timestamp',command.created_at,
           'data',jsonb_build_object(
             'roomId',command.room_id,'address',command.room_id,'commandId',command.id,'id',command.id,
-            'reason',command.reason,'kind',command.private_payload->>'kind',
+            'from',COALESCE(command.message->'route'->'from',command.private_payload->'route'->'from',
+              jsonb_build_object('agent',COALESCE(command.private_payload->>'authorId',source.author_id),
+                'place',COALESCE(command.private_payload->>'fromRoomId',source.room_id::text,command.room_id::text))),
             'text',left(COALESCE(command.private_payload->>'text',source.text),16000),
-            'next',CASE WHEN command.reason='corner_review_dispatch' THEN ${reviewHint}::text
-              WHEN command.private_payload->>'kind'='order' THEN ${orderHint}::text ELSE ${wakeHint}::text END),
+            'next','Reply with reply(' || command.id || ',text). ' || CASE WHEN command.reason='corner_review_dispatch' THEN ${reviewHint}::text
+              WHEN command.private_payload->>'kind' IN ('order','message','reply') THEN ${orderHint}::text ELSE ${wakeHint}::text END),
           'cursor',NULL)::text
       FROM inserted command
       LEFT JOIN messages source ON source.id=command.source_message_id
@@ -298,7 +300,7 @@ export async function deliverMcpEvents(db: SqlDatabase, transport: Transport, si
  * A reviewer dispatch asks for a review, not a plain acknowledgement: its text names the pull request and the
  * head SHA to review. Webhooks, MCP Events and list_mentions all give it this hint.
  */
-export const MCP_REVIEW_WAKE_HINT = 'Review this thread: read its brief, pull request and checks (read facets brief, pr and checks), then call approve_merge with the head SHA named above, or post your findings in the thread. Never approve work you implemented or authored.';
+export const MCP_REVIEW_WAKE_HINT = 'Review this thread: read its brief, pull request and checks (read facets brief, pr and checks), then call approve_merge with the head SHA named above, or message your findings to the implementer at the thread address. The server requests review; never tag the reviewer. Never approve work you implemented or authored.';
 
 /** The hint a wake carries, from its command's reason and private kind. */
 export function mcpWakeNext(kind: string | null | undefined, reason: string | null | undefined): string {

@@ -36,7 +36,7 @@ it('an existing thread git launcher follows the stable install after its origina
 it('refuses a non-implementer PR open and push, then allows both after takeover',async()=>{
   const root=await mkdtemp(join(tmpdir(),'beeline-implementer-wrapper-'));roots.push(root);
   const role=join(root,'implementer'),calls=join(root,'calls'),cli=join(root,'credential.mjs'),git=join(root,'git'),gh=join(root,'gh');
-  const refusal='Call become_implementer before pushing or opening a PR for this thread.';
+  const refusal='Call claim_thread before pushing or opening a PR for this thread.';
   await writeFile(cli,`import {existsSync} from 'node:fs';
 if(process.argv.includes('--write')&&!existsSync(${JSON.stringify(role)})){
   process.stderr.write(${JSON.stringify(refusal+'\n')});process.exit(1);

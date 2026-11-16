@@ -1,4 +1,5 @@
 import { cornerImplementerSql } from './corner-worker.js';
+import { messageAsksSql } from './message-asks.js';
 import { tagsKnownIdentitySql } from './message-mentions.js';
 
 /** The report's originating corner, including a human report in its return Room. */
@@ -112,7 +113,8 @@ export function cornerWaitingReportSql(corner: string): string {
         AND answer.presentation='message' AND answer.system_event IS NULL AND answer.deleted_at IS NULL
         AND answer.reply_to_message_id=ANY(latest.asked_items))
     AND NOT EXISTS(SELECT 1 FROM (${workerOutputSql(`${corner}.id`, worker)}) output
-      WHERE output.ended_at>latest.created_at)`;
+      WHERE output.ended_at>latest.created_at)
+    UNION ALL ${messageAsksSql(corner)}`;
 }
 
 /** Recorded implementer output lifts its block; receiving input or writing prose does not. */

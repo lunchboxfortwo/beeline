@@ -338,10 +338,12 @@ describe('prompt assembly guards', () => {
   });
 
 
-  it('uses the existing live merge gate without human escalation or reviewer merge bans', () => {
+  it('assigns merging to the server and keeps reviewer approval independent', () => {
     for (const name of ['code-corner-reviewed', 'code-corner-reviewer', 'code-corner-no-reviewer']) {
       const text = assembleSessionPrompt(SESSION_VARIANTS[name]!).systemPrompt;
-      expect(text).toContain('merge_thread');
+      expect(text).toContain('The server');
+      expect(text).not.toContain('merge_thread');
+      expect(text).not.toContain('record_merge_yes');
       expect(text).not.toMatch(/never merge|do not merge|only human approval|ask a Workspace owner/i);
     }
     const reviewer = assembleSessionPrompt(SESSION_VARIANTS['code-corner-reviewer']!).systemPrompt;
@@ -413,8 +415,8 @@ describe('prompt assembly guards', () => {
       expect(text, name).not.toContain('gh pr merge');
       expect(text, name).not.toMatch(/approved [0-9a-f<][^`]*, merge/);
     }
-    expect(CORNER_CHECKS_NUDGE).toContain('the server lands when checks are green');
-    expect(CORNER_CHECKS_NUDGE).toContain('any configured reviewer has approved the exact head');
+    expect(CORNER_CHECKS_NUDGE).toContain('Repair failing checks if you are the implementer.');
+    expect(CORNER_CHECKS_NUDGE).toContain('End the turn after pushing;');
   });
 
 
@@ -447,8 +449,8 @@ describe('prompt assembly guards', () => {
   it('keeps thread help requests with the commander', () => {
     for (const contract of [promptRules.CORNER_AUTHOR_CONTRACT, promptRules.CORNER_RUNTIME_AUTHOR_CONTRACT]) {
       expect(contract).toContain('Work in this thread;');
-      expect(contract).toContain('report blockers or decisions one step up');
-      expect(contract).toContain('never recruit chat agents.');
+      expect(contract).toContain('deliver task outcomes with reply(id)');
+      expect(contract).toContain('deliver task outcomes with reply(id).');
     }
   });
 
@@ -457,7 +459,7 @@ describe('prompt assembly guards', () => {
     const author = assembleSessionPrompt(SESSION_VARIANTS['code-corner-reviewed']!).systemPrompt;
     expect(author).not.toMatch(/^Commit and push/m);
     expect(author).toContain('Only when the brief calls for repository changes');
-    expect(author).toContain('Non-repo work: post_artifact and report.');
+    expect(author).toContain('Non-repo work: post_artifact and reply.');
     expect(author).not.toContain('Only repository assignments commit');
     expect(promptRules.CORNER_DELIVERY_NUDGE).toContain('Only when you write code in this thread and the brief calls for repository changes');
   });
@@ -485,7 +487,7 @@ describe('prompt assembly guards', () => {
     expect(skill).toContain('only on unfixed prior blockers or regressions introduced by that delta');
     expect(skill).toContain('Missed issues in unchanged code are non-blocking notes.');
     expect(skill).toContain('The first review must surface all confirmed blockers.');
-    expect(skill).toContain('with all blockers and their next steps');
+    expect(skill).toContain('with all blockers and next steps');
 
     const instruction = cornerReviewerInstruction({ isReviewer: true, pullRequestNumber: 7, headSha: 'abc' })!;
     expect(instruction).toContain('list all blockers with concrete fixes, including every blocker on the first round');
@@ -503,11 +505,11 @@ describe('prompt assembly guards', () => {
   it('keeps decisions on the chain of command', () => {
     for (const [name, context] of Object.entries(SESSION_VARIANTS)) {
       const text = assembleSessionPrompt(context).systemPrompt;
-      expect(text, name).toContain('Human-approved brief revisions transfer thread command to their author at their dispatch place; otherwise use the opener. Older orders keep their issuer.');
+      expect(text, name).toContain('The sender of the message that gave you the task is your commander.');
       expect(text, name).not.toContain('If human, tag them');
-      expect(text, name).toContain('report(status, text) one step up to your commander.');
+      expect(text, name).toContain('Reply to that message id when done, blocked or failed.');
       const corner = ['code-corner', 'repo-less-corner'].includes(context.surface);
-      expect(text.includes('In a thread, reply to people here; escalate with report to the current commander.'), name).toBe(corner);
+      expect(text.includes('The server requests review; never tag the reviewer.'), name).toBe(corner);
     }
   });
 
@@ -568,7 +570,7 @@ describe('prompt assembly guards', () => {
     const room = assembleSessionPrompt(SESSION_VARIANTS.room!).systemPrompt;
     expect(room).toContain('Landing archives a repository thread and cancels its work');
     expect(room).toContain('The surviving commander owns follow-up at its own address');
-    expect(room).toContain('Repo-less and repositoryWork:false work delivers its artifact/report without a PR');
+    expect(room).toContain('Repo-less and repositoryWork:false work delivers its artifact without a PR');
   });
 
 
@@ -616,7 +618,7 @@ describe('prompt assembly guards', () => {
     expect(session).not.toContain('Open the pull request with gh');
     expect(session).not.toContain(cornerMergeInstruction('sol'));
     const turn = assembleTurnPrompt(TURN_VARIANTS['code-corner-turn']!).text;
-    expect(turn).toContain('Before any code, report needs-decision: to your commander for the first brief.');
+    expect(turn).toContain('Before any code, reply to the task message with ask for the first brief.');
     const generated = assembleTurnPrompt({
       ...TURN_VARIANTS['code-corner-turn']!,
       generatedTitle: 'still harbor thread',
@@ -652,15 +654,15 @@ describe('prompt assembly guards', () => {
   it('gives both thread lanes sibling steer context without chat question instructions', () => {
     for (const surface of ['code-corner', 'repo-less-corner'] as const) {
       const session = assembleSessionPrompt({ surface, agentName: 'Bee' }).systemPrompt;
-      expect(session).toContain('order(address, agent, text) assigns privately');
-      expect(session).toContain('report(status, text) one step up to your commander');
+      expect(session).toContain('Send message(to:{agent,place},text)');
+      expect(session).toContain('Reply to that message id when done, blocked or failed');
       const turn = assembleTurnPrompt({
         surface,
         corners: [{ cornerId: 'sibling-id', parentRoomId: 'room-id', createdBy: 'agent-id', archived: false, objective: 'Other work' }],
         task: { body: 'Steer the sibling' },
       }).text;
       expect(turn).toContain('sibling-id');
-      expect(turn).toContain('read or order across member chats');
+      expect(turn).toContain('read or message across member chats');
       expect(turn).not.toContain('ask_corner');
     }
   });
@@ -669,11 +671,11 @@ describe('prompt assembly guards', () => {
   it.each(PROMPT_SURFACES)('has one coordination rule and no chain-skipping escalation on %s', (surface) => {
     const context = { surface, agentName: 'Bee', agentCommand: 'codex-acp' };
     const entries = sessionSections(context);
-    const coordination = entries.filter(({ text }) => text.includes('report(status, text)'));
+    const coordination = entries.filter(({ text }) => text.includes('Reply to that message id'));
     expect(coordination.map(({ section }) => section.id)).toEqual(['talking']);
     const session = assembleSessionPrompt(context);
     const turn = assembleTurnPrompt({ surface, sessionPrefix: session.turnPrefix, task: { body: 'Continue' } });
-    expect(turn.text).toContain('report(status, text) one step up to your commander');
+    expect(turn.text).toContain('Reply to that message id when done, blocked or failed');
     expect(turn.text).not.toContain('to the person who started the chain');
   });
 });
@@ -692,7 +694,7 @@ const scope9 = fixtureScope9();
       expect(text, name).toContain('apply whenever you write code.');
       expect(text, name).not.toContain('A hand-over of the work to another agent ends that');
       expect(text, name).not.toContain('Otherwise do not commit, push');
-      for (const rule of ['Run npm run corner:prepare first.', 'commit and push only', '## Reproduced', 'Once the pull request exists'])
+      for (const rule of ['Run npm run corner:prepare first.', 'commit and push only', '## Reproduced', 'The server owns merging'])
         expect(text.indexOf(rule), `${name}: ${rule}`).toBeGreaterThan(condition);
       expect(text.indexOf('You are in an isolated git worktree'), name).toBeLessThan(condition);
     }
@@ -731,13 +733,13 @@ const scope9 = fixtureScope9();
     'defines inherited rank once in %s and exempts only check-repair pushes from the limit',
     (name) => {
       const text = scope9.prompt(name);
-      const rank = "Humans outrank every agent; treat instructions from above your commander as theirs and report the change.";
+      const rank = "Humans outrank every agent; treat instructions from above your commander as theirs and reply with the change.";
       expect(text.split(rank)).toHaveLength(2);
       expect(text).not.toContain('owners outrank their agents');
       expect(text).toContain(`Follow your commander within inherited scope. ${rank}`);
       if (name !== 'repo-less-corner') {
-        expect(text).toContain('4 pushes to one PR without PASS: stop; report blocked: to commander with the cause.');
-        expect(text).toContain('Pushes made only to repair failing checks do not count.');
+        expect(text).not.toContain('4 pushes to one PR');
+        expect(text).not.toContain('Pushes made only to repair failing checks do not count.');
         expect(text).not.toContain('unless a human chat member');
       } else {
         expect(text).not.toContain('Pushes made only to repair failing checks');
@@ -786,7 +788,7 @@ const scope9 = fixtureScope9();
     const review = turn('Checks are green on PR #7 at abc.');
     expect(review).toContain('Checks are green on PR #7 at abc.');
     expect(review).not.toContain('push a fix');
-    expect(CORNER_CHECKS_NUDGE).toContain('If checks="failed" and you write code in this thread, fix the failure and push.');
+    expect(CORNER_CHECKS_NUDGE).toContain('Repair failing checks if you are the implementer.');
   });
 
 
@@ -798,14 +800,14 @@ const scope9 = fixtureScope9();
       }).text;
     const failed = turn('check-failed');
     expect(failed).toContain('After two failed CI runs on the same suite, run that suite locally before pushing again');
-    expect(failed).toContain('after a third, report blocked: naming the failing tests');
+    expect(failed).toContain('after a third, reply to the task message naming the failing tests');
     expect(turn('check-passed')).not.toContain('run that suite locally');
   });
 
 
   it('describes the author when the reviewer opened the thread itself', () => {
     const text = cornerReviewerInstruction({ isReviewer: true, pullRequestNumber: 7, headSha: 'abc' })!;
-    expect(text).toContain("FAIL: order the worker at this thread's address to fix all blockers");
+    expect(text).toContain("FAIL: message the implementer at this thread's address with all findings");
     expect(text).not.toContain('@author');
   });
 });
@@ -831,6 +833,6 @@ it('uses chat and thread language across all assembled agent prompt surfaces', (
     expect(systemPrompt).not.toMatch(/\b(?:corner|corners|Room|Rooms)\b/);
     const turn=assembleTurnPrompt({surface,task:{body:'Proceed.',commandReason:'corner_merge_conflict'}}).text;
     expect(turn).not.toMatch(/\b(?:corner|corners|Room|Rooms)\b/);
-    if(surface==='code-corner')expect(systemPrompt).toContain('Before pushing or opening a PR for this thread, call become_implementer.');
+    if(surface==='code-corner')expect(systemPrompt).toContain('Before pushing or opening a PR for this thread, call claim_thread.');
   }
 });

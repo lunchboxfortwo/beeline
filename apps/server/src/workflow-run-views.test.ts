@@ -681,6 +681,7 @@ describe('visit output through daemon completion and phone GET', () => {
       [roomId, TRIAGER, runId],
     )).rows[0]!;
     expect(pending).toBeDefined();
+    expect(pending.message?.route?.from).toEqual({agent:OWNER,place:roomId});
     await new DaemonService(database,new LiveHub()).execute('startAgentTurn',{roomId,requestId:pending.turn_request_id},TRIAGER);
     return pending;
   }

@@ -1,7 +1,15 @@
 {
   "name": "r1-order",
   "mode": "deferred",
-  "core": ["Bash", "report", "read", "app_tool", "open_thread", "no_reply_needed", "order"],
+  "core": [
+    "Bash",
+    "reply",
+    "read",
+    "app_tool",
+    "open_thread",
+    "no_reply_needed",
+    "message"
+  ],
   "indexWords": 14,
   "promptEdits": [],
   "appendRules": ""

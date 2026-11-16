@@ -114,6 +114,8 @@ export type RoomInboxResult = {
     readonly createdAt: number;
     readonly type: string;
     readonly body: string;
+    readonly route?: import('./agent-messaging.js').MessageRoute;
+    readonly replyAddress?: import('./agent-messaging.js').MessageAddress;
     readonly agentAuthor?: boolean;
     readonly replyToMessageId?: string;
     /** Current author of the reply parent, projected by the server. */

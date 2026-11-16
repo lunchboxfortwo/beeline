@@ -1,7 +1,7 @@
 {
   "id": "rename-generated-corner",
   "section": "turn.rename",
-  "summary": "A human-opened corner with a generated name gets named from the first message that states the work.",
+  "summary": "A human-opened thread with a generated name gets named from the first message that states the work.",
   "place": "code-corner",
   "session": {
     "worktree": {
@@ -16,7 +16,7 @@
       "fromName": "dana",
       "commandReason": "human_tag"
     },
-    "members": "Members (exact tag spellings):\n- @juniper \u2014 Juniper (agent) \u00b7 owner @dana\n- @pebble \u2014 Pebble (agent) \u00b7 owner @dana\n- @dana \u2014 Dana (person)\nYou are @ruby, a member of this Room; you are not listed above.",
+    "members": "Members (exact tag spellings):\n- @juniper — Juniper (agent) · owner @dana\n- @pebble — Pebble (agent) · owner @dana\n- @dana — Dana (person)\nYou are @ruby, a member of this chat; you are not listed above.",
     "reactionTargetId": "m9"
   },
   "pass": {
@@ -51,7 +51,7 @@
           "places": [
             {
               "address": "13dd83e5-e17f-599c-8054-c4ce8cdab974",
-              "name": "rename-generated-corner",
+              "name": "rename-generated-thread",
               "kind": "code-corner"
             }
           ]
@@ -60,7 +60,7 @@
       {
         "call": "read",
         "args": {
-          "facet": "corners"
+          "facet": "threads"
         },
         "result": {
           "corners": []
@@ -72,7 +72,7 @@
           "facet": "members"
         },
         "result": {
-          "members": "Members (exact tag spellings):\n- @juniper \u2014 Juniper (agent) \u00b7 owner @dana\n- @pebble \u2014 Pebble (agent) \u00b7 owner @dana\n- @dana \u2014 Dana (person)\nYou are @ruby, a member of this Room; you are not listed above."
+          "members": "Members (exact tag spellings):\n- @juniper — Juniper (agent) · owner @dana\n- @pebble — Pebble (agent) · owner @dana\n- @dana — Dana (person)\nYou are @ruby, a member of this chat; you are not listed above."
         }
       },
       {
@@ -83,7 +83,7 @@
         "result": {
           "address": "13dd83e5-e17f-599c-8054-c4ce8cdab974",
           "name": "corner-7f3a",
-          "members": "Members (exact tag spellings):\n- @juniper \u2014 Juniper (agent) \u00b7 owner @dana\n- @pebble \u2014 Pebble (agent) \u00b7 owner @dana\n- @dana \u2014 Dana (person)\nYou are @ruby, a member of this Room; you are not listed above.",
+          "members": "Members (exact tag spellings):\n- @juniper — Juniper (agent) · owner @dana\n- @pebble — Pebble (agent) · owner @dana\n- @dana — Dana (person)\nYou are @ruby, a member of this chat; you are not listed above.",
           "repository": {
             "linked": true
           },
@@ -148,6 +148,13 @@
           "address": "13dd83e5-e17f-599c-8054-c4ce8cdab974",
           "briefRevision": 1,
           "name": "dark-mode-toggle"
+        }
+      },
+      {
+        "call": "reply",
+        "result": {
+          "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "delivered": true
         }
       }
     ],

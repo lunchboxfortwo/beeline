@@ -1,8 +1,10 @@
+import { legacyMessageBody } from './messaging-cutover.js';
 import { MCP_STARTER_ROUTINE,agentHandleFromName,mentionReplyRule } from '@beeline/api-contract/phone';
 import { createHash,randomUUID } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
 import { Agent,request as httpsRequest } from 'node:https';
 import { isIP } from 'node:net';
+import type { MessageAddress } from '@beeline/api-contract/daemon';
 import { type CommandRow } from './agent-command.js';
 import { publicMcpAddress } from './company-mcp-discovery.js';
 import type { SqlDatabase } from './database.js';
@@ -290,12 +292,12 @@ function routingInstruction(row: {member_id: string; room_id: string; message_id
  * to: its outbox row names the command. The body is the MCP Events `wake`
  * payload (`rooms-mcp-events.ts`), so a webhook, an event and list_mentions agree.
  */
-function wakeBody(row: { member_id: string; room_id: string; command_id: string | null; command_reason: string | null;
+function wakeBody(row: { member_id: string; room_id: string; command_from:MessageAddress; command_id: string | null; command_reason: string | null;
   command_kind: string | null; command_text: string | null; body: string }) {
-  const next = mcpWakeNext(row.command_kind, row.command_reason);
+  const next = `Reply with reply(${row.command_id},text). ${mcpWakeNext(row.command_kind,row.command_reason)}`;
   return { memberId: row.member_id, roomId: row.room_id, address: row.room_id, commandId: row.command_id, id: row.command_id,
-    reason: row.command_reason, kind: row.command_kind, text: row.command_text ?? row.body, next, cursor: null,
-    instruction: `Private ${row.command_kind ?? row.command_reason ?? 'wake'} for you at ${row.room_id}, not a tag: do not reply with replyTo. ${next}` };
+    from:row.command_from,text:legacyMessageBody({reason:row.command_reason ?? ''},row.command_text ?? row.body,row.command_from.agent),next,cursor:null,
+    instruction:`Message ${row.command_id} from (${row.command_from.agent}, ${row.command_from.place}) at ${row.room_id}. ${next}` };
 }
 
 /**
@@ -320,7 +322,7 @@ export async function deliverMcpMemberWebhooks(
       call_id: string; member_id: string; room_id: string; message_id: string;
       body: string; owner_id: string | null; callback_url: string | null; callback_secret: string | null; deliverable: boolean; answered: boolean;
       author_id: string | null; author_handle: string | null; author_name: string | null; author_kind: string | null; cursor: string | null;
-      command_id: string | null; command_reason: string | null; command_kind: string | null; command_text: string | null; probe: object | null; delivery_generation:string|null;
+      command_from:MessageAddress; command_id: string | null; command_reason: string | null; command_kind: string | null; command_text: string | null; probe: object | null; delivery_generation:string|null;
     }>(
       `WITH claimed AS (
          UPDATE rooms_mcp_webhook_outbox outbox SET claimed_at=now(),attempted_at=now()
@@ -334,6 +336,9 @@ export async function deliverMcpMemberWebhooks(
          COALESCE(member.callback_url,client.callback_url) callback_url,
          CASE WHEN member.callback_url IS NOT NULL THEN member.callback_secret END callback_secret,
          message.author_id,beeline_room_handle(author.id,message.room_id) author_handle,author.name author_name,author.kind author_kind,mention.seq::text cursor,mention.cleared_at IS NOT NULL answered,
+         COALESCE(command.message->'route'->'from',command.private_payload->'route'->'from',
+           jsonb_build_object('agent',COALESCE(command.private_payload->>'authorId',command.message->>'authorId'),
+             'place',COALESCE(command.private_payload->>'fromRoomId',command.room_id::text))) command_from,
          delivery.generation delivery_generation,probe.probe,command.id command_id,command.reason command_reason,command.private_payload->>'kind' command_kind,
          left(COALESCE(command.private_payload->>'text',source.text),16000) command_text,(
            room.id IS NOT NULL AND room.archived_at IS NULL AND mention.cleared_at IS NULL

@@ -14,12 +14,13 @@ export const PATH = [
   { file: 'apps/body/src/agent-home.ts', functions: ['prepareRoomAgentCredentials', 'repairRoomAgentCredentialLinks'], startup: true },
   { file: 'apps/server/src/machine-connection.ts', functions: ['machineConnectionOutput', 'serveMachineSocket', 'serveAgentSocket'], transport: true, startup: true },
   { file: 'apps/server/src/daemon-live.ts', functions: ['frame', '#operation', '#readQueue'], transport: true },
-  { file: 'apps/server/src/rooms-mcp.ts', functions: ['call','sendMessage','handle','toolResult'], transport:true, protocol:['handle','toolResult'] },
+  { file: 'apps/server/src/rooms-mcp.ts', functions: ['call','handle','toolResult'], transport:true, protocol:['handle','toolResult'] },
   { file: 'apps/server/src/rooms-mcp-agent.ts', functions: ['call'] },
   { file: 'apps/server/src/phone-socket.ts', functions: ['phoneSocketRequests'], transport: true },
   { file: 'apps/server/src/phone/messages.ts', functions: ['phoneSendMessage'] },
   { file: 'apps/server/src/phone-operations.ts', functions: ['dispatch'] },
-  { file: 'apps/server/src/agent-command.ts', functions: ['queueMessage', 'postMessage', 'insertAgentCommand', 'answerQueuedMessage'] },
+  { file: 'apps/server/src/agent-command.ts', functions: ['queueMessage', 'postMessage', 'insertAgentCommand', 'answerQueuedMessage','refuseMessageMembership'] },
+  { file: 'apps/server/src/agent-messaging.ts', functions: ['messageAddress','sendMessage','replyToMessage'] },
   { file: 'apps/server/src/agent-command-read-agent-commands.ts', functions: ['readAgentCommands','readAgentQueueRows'] },
   { file: 'apps/server/src/commander.ts', functions: ['sendOrder', 'reportToCommander'] },
   { file: 'apps/server/src/daemon/corner-reports.ts', functions: ['daemonReport'] },
@@ -108,6 +109,66 @@ export function judgeMergeContract(root) {
     visit(tree);
   }
   if (!gateFound || !stageFound) errors.push('merge gate and stage computation must remain watched by check-walls');
+  return errors;
+}
+// Owner-approved destinations: messages use their tuple, replies use the recorded
+// sender tuple, repairs use the implementer, review uses the reviewer, and System
+// work replies to the thread commander. No last-tag or ancestor destination exists.
+export const WAKE_DESTINATIONS = {
+  'merge-conflict': 'corner.worker_agent_id',
+  revision: 'agentId',
+  'checks-failed': 'corner.worker_agent_id',
+  review: 'reviewer',
+  'review-findings': 'corner.worker_agent_id',
+  'merge-refused': 'corner.worker_agent_id',
+};
+export const MESSAGE_WAKE_DESTINATIONS = {
+  message: { agent: 'to.agent', place: 'to.place' },
+  reply: { agent: 'route.from.agent', place: 'route.from.place' },
+  system: 'chat.commander',
+  idleNotice: 'senderTask ? (await recordedMessageRoute(db,senderTask)).from : undefined',
+};
+export function judgeWakeDestinations(root) {
+  const errors=[], normalize=text=>text.replace(/\s+/g,'');
+  const file='apps/server/src/corner-lifecycle.ts';
+  const tree=ts.createSourceFile(file,readFileSync(resolve(root,file),'utf8'),ts.ScriptTarget.Latest,true);
+  const found=new Set();
+  const visit=node=>{
+    if (ts.isCaseClause(node) && ts.isStringLiteral(node.expression) && node.expression.text in WAKE_DESTINATIONS) {
+      const effect=node.expression.text;
+      const calls=child=>{
+        if(ts.isCallExpression(child) && ['createAgentCommand','queueReviewerCommand'].includes(child.expression.getText(tree))) {
+          const destination=child.arguments[1];
+          const agent=destination && ts.isObjectLiteralExpression(destination) && destination.properties.find(property=>property.name?.getText(tree)==='agentId');
+          const value=agent && (ts.isPropertyAssignment(agent)?agent.initializer.getText(tree):agent.name.getText(tree));
+          if(value!==WAKE_DESTINATIONS[effect]) errors.push(`${file}: ${effect} must wake ${WAKE_DESTINATIONS[effect]}`);
+          found.add(effect);
+        }
+        ts.forEachChild(child,calls);
+      };
+      node.statements.forEach(calls);
+    }
+    ts.forEachChild(node,visit);
+  };
+  visit(tree);
+  for(const effect of Object.keys(WAKE_DESTINATIONS)) if(!found.has(effect)) errors.push(`${file}: missing fixed ${effect} destination`);
+  for(const [name,expected] of [['agentId','corner.worker_agent_id !== event.command.agent_id ? corner.worker_agent_id : null'],['reviewer','reachableReviewer(corner)']]) {
+    const declaration=[];
+    const find=node=>{if(ts.isVariableDeclaration(node) && node.name.getText(tree)===name && node.initializer) declaration.push(normalize(node.initializer.getText(tree)));ts.forEachChild(node,find);};
+    find(tree);
+    if(!declaration.includes(normalize(expected))) errors.push(`${file}: ${name} must retain its fixed thread role`);
+  }
+  const messaging=readFileSync(resolve(root,'apps/server/src/agent-messaging.ts'),'utf8');
+  if(!normalize(messaging).includes(normalize('roomId: to.place, agentId: to.agent')))
+    errors.push('message delivery must wake its agent and place tuple');
+  const queue=readFileSync(resolve(root,'apps/server/src/agent-command.ts'),'utf8');
+  if(!normalize(queue).includes(normalize('to:route.from')) || !normalize(queue).includes(normalize('replyAddress:chat.commander')))
+    errors.push('reply and System destinations must retain the recorded sender and thread commander');
+  const notices=readFileSync(resolve(root,'apps/server/src/commander.ts'),'utf8');
+  if(!normalize(notices).includes(normalize(`const replyAddress=${MESSAGE_WAKE_DESTINATIONS.idleNotice};`)) ||
+      !normalize(notices).includes(normalize('route.incoming?.parent_command_id ?? route.parent?.id')) ||
+      !normalize(notices).includes(normalize('replyAddress,automatic:true')))
+    errors.push('idle notices must freeze the direct parent task sender and retain System when there is no parent');
   return errors;
 }
 export const WALLS_FILE = 'docs/walls.md';
@@ -252,7 +313,7 @@ export function productionWallSites(root) {
 }
 
 export function judgeWalls(root) {
-  const errors = judgeMergeContract(root), kinds = wallKinds(root);
+  const errors = [...judgeMergeContract(root),...judgeWakeDestinations(root)], kinds = wallKinds(root);
   const constructions = productionWallSites(root);
   const docs = readFileSync(resolve(root, WALLS_FILE), 'utf8');
   const maximum = Number(docs.match(/^Production wall constructions: (\d+)\.$/m)?.[1]);

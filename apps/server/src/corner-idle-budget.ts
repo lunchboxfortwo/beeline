@@ -57,7 +57,7 @@ export function cornerIdleBudgetSql(corner: string): string {
   ) person_event) person_epoch
   LEFT JOIN LATERAL (SELECT count(*)::int report_count,COALESCE(bool_or(report.state='pending'),false) pending
     FROM agent_commands report WHERE report.private_payload->>'authorId'='${SYSTEM_IDENTITY_ID}'
-      AND report.private_payload->>'kind'='report'
+      AND report.private_payload->>'kind' IN ('report','message')
       AND report.private_payload->>'fromRoomId'=${corner}.id::text
       AND report.private_payload->>'text' ~ '^blocked: (Corner|Thread) .+ is idle[.] Resume it, set a hold, or close it[.]$'
       AND report.created_at>=person_epoch.at) idle_budget ON true`;

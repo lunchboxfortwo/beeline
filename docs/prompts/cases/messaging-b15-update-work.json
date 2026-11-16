@@ -1,0 +1,203 @@
+{
+  "id": "messaging-b15-update-work",
+  "section": "tools",
+  "summary": "Set task id \"work\" in chat 22222222-2222-4222-8222-222222222222 to in-progress and assign it to jellybean in one call.",
+  "place": "room",
+  "session": {
+    "agentName": "Jellybean",
+    "shell": {
+      "available": true
+    }
+  },
+  "turn": {
+    "task": {
+      "fromName": "Ruby",
+      "commandReason": "message",
+      "body": "Message id: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\nFrom: Ruby\nFrom-place: 22222222-2222-4222-8222-222222222222\nDestination: (jellybean, 22222222-2222-4222-8222-222222222222)\nReply with reply(id: \"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\", text: ...).\nSet task id \"work\" in chat 22222222-2222-4222-8222-222222222222 to in-progress and assign it to jellybean in one call."
+    },
+    "members": "Members: ruby (Ruby, agent), jellybean (Jellybean, agent), sol (Sol, agent), owner (Owner, person). You are Jellybean."
+  },
+  "pass": {
+    "all": [
+      {
+        "call": "update_work",
+        "args": {
+          "roomId": "22222222-2222-4222-8222-222222222222",
+          "id": "work",
+          "state": "in-progress",
+          "assigneeId": "jellybean"
+        }
+      },
+      {
+        "atMostOnce": "update_work"
+      },
+      {
+        "noCall": "set_work_state"
+      },
+      {
+        "noCall": "assign_work_item"
+      }
+    ]
+  },
+  "scenario": {
+    "history": [],
+    "files": {},
+    "results": [
+      {
+        "call": "read",
+        "args": {
+          "facet": "procedure"
+        },
+        "result": {
+          "markdown": "No additional workspace procedures."
+        }
+      },
+      {
+        "call": "read",
+        "args": {
+          "facet": "members"
+        },
+        "result": {
+          "members": "Members: ruby (Ruby, agent), jellybean (Jellybean, agent), sol (Sol, agent), owner (Owner, person). You are Jellybean."
+        }
+      },
+      {
+        "call": "read",
+        "args": {
+          "facet": "addresses"
+        },
+        "result": {
+          "places": [
+            {
+              "address": "22222222-2222-4222-8222-222222222222",
+              "kind": "chat",
+              "name": "Milo"
+            },
+            {
+              "address": "33333333-3333-4333-8333-333333333333",
+              "kind": "thread",
+              "name": "Widget",
+              "implementer": "jellybean",
+              "reviewer": "sol"
+            }
+          ]
+        }
+      },
+      {
+        "call": "read",
+        "args": {
+          "facet": "brief"
+        },
+        "result": {
+          "revision": 1,
+          "repositoryWork": true,
+          "spec": "Implement the requested widget.",
+          "approval": {
+            "approvedBy": "owner"
+          }
+        }
+      },
+      {
+        "call": "read",
+        "args": {
+          "facet": "checks"
+        },
+        "result": {
+          "headSha": "ffffffffffffffffffffffffffffffffffffffff",
+          "checks": "passing",
+          "implementer": "jellybean",
+          "reviewer": "sol"
+        }
+      },
+      {
+        "call": "read",
+        "args": {
+          "facet": "pr"
+        },
+        "result": {
+          "headSha": "ffffffffffffffffffffffffffffffffffffffff",
+          "number": 59,
+          "author": "jellybean",
+          "state": "open"
+        }
+      },
+      {
+        "call": "report_feedback",
+        "result": {
+          "itemId": "feedback"
+        }
+      },
+      {
+        "call": "claim_thread",
+        "result": {
+          "implementer": "jellybean"
+        }
+      },
+      {
+        "call": "approve_merge",
+        "result": {
+          "recorded": true,
+          "headSha": "ffffffffffffffffffffffffffffffffffffffff"
+        }
+      },
+      {
+        "call": "message",
+        "result": {
+          "id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      },
+      {
+        "call": "update_work",
+        "result": {
+          "id": "work"
+        }
+      },
+      {
+        "call": "connect",
+        "result": {
+          "status": "needs_person",
+          "cardId": "connection",
+          "ownerTaskCreated": true
+        }
+      },
+      {
+        "call": "Bash",
+        "args": {
+          "command": {
+            "matches": "git push"
+          }
+        },
+        "result": {
+          "exitCode": 0,
+          "stdout": "Branch pushed."
+        }
+      },
+      {
+        "call": "Bash",
+        "args": {
+          "command": {
+            "matches": "gh pr create"
+          }
+        },
+        "result": {
+          "exitCode": 0,
+          "stdout": "https://github.com/Beeline-Work/beeline/pull/59"
+        }
+      },
+      {
+        "call": "Bash",
+        "result": {
+          "exitCode": 0,
+          "stdout": "Branch feature/thread-case; HEAD ffffffffffffffffffffffffffffffffffffffff; working tree clean; remote branch up to date; checks green."
+        }
+      },
+      {
+        "call": "reply",
+        "result": {
+          "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "delivered": true
+        }
+      }
+    ]
+  }
+}

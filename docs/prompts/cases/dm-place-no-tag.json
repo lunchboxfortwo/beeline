@@ -1,7 +1,7 @@
 {
   "id": "dm-place-no-tag",
   "section": "place",
-  "summary": "In a DM the agent replies without tagging the person and finds Room addresses itself.",
+  "summary": "In a DM the agent replies without tagging the person and finds chat addresses itself.",
   "place": "dm",
   "turn": {
     "task": {
@@ -72,7 +72,7 @@
       {
         "call": "read",
         "args": {
-          "facet": "corners"
+          "facet": "threads"
         },
         "result": {
           "corners": []
@@ -144,6 +144,13 @@
         },
         "result": {
           "revisions": []
+        }
+      },
+      {
+        "call": "reply",
+        "result": {
+          "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "delivered": true
         }
       }
     ],

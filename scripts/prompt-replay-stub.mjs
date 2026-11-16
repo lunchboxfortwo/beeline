@@ -21,7 +21,6 @@ export function createStub({ testCase, tools, skills, variant }) {
       trace.failure = 'Call after terminal boundary';
       return { error: trace.failure };
     }
-    if (trace.attemptedCalls.length > 24) { trace.terminal = 'call-limit'; return { error: 'Simulation call limit reached; end the turn' }; }
     const tool = listing().find(t => t.name === name);
     if (!tool) {
       trace.invalidCalls.push(entry);
@@ -41,7 +40,7 @@ export function createStub({ testCase, tools, skills, variant }) {
       return { definitions: matches, instruction: 'These definitions are now callable; continue the same turn.' };
     }
     trace.calls.push(entry);
-    if (['order', 'report', 'no_reply_needed'].includes(name)) {
+    if (name === 'no_reply_needed') {
       trace.terminal = name;
       return { instruction: 'The simulated assigned turn has ended. Do not call more tools.' };
     }
@@ -52,7 +51,6 @@ export function createStub({ testCase, tools, skills, variant }) {
       trace.invalidCalls.push(entry);
     }
     if (result.boundary) trace.terminal = result.boundary;
-    if (name === 'merge_thread') trace.terminal ??= name;
     return result.boundary ? { ...result, instruction: 'Stop at this boundary and end the turn.' } : result.result;
   };
   return { trace, listing, call };

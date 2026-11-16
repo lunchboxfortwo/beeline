@@ -69,7 +69,7 @@ export async function loadCornerReviewState(db: SqlDatabase, cornerId: string, h
      JOIN rooms parent ON parent.id=corner.parent_id
      LEFT JOIN LATERAL (
        SELECT repair.private_payload->>'text' text,true delivered FROM agent_commands repair
-       WHERE repair.parent_command_id=command.id AND repair.reason='order'
+       WHERE repair.parent_command_id=command.id AND repair.reason IN ('order','message')
          AND repair.private_payload->>'authorId'=command.agent_id
          AND repair.review_context->>'purpose'='repair' AND repair.private_payload->>'text' ~* $3
        UNION ALL

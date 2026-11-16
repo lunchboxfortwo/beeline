@@ -4,7 +4,8 @@ import { createHash,randomBytes } from 'node:crypto';
 import { dropQueuedOrdersForStop,lockAgentCommandQueue } from './agent-command-queue.js';
 import { queueMessage,type CommandRow,type PrivateCommandPayload,type QueuedDelivery } from './agent-command.js';
 import { CommandRefusalError } from './command-refusal.js';
-import { cornerCommanderBriefSql,cornerCommanderIdSql } from './corner-commander.js';
+import { cornerCommanderBriefSql,cornerCommanderIdSql,threadTaskSql } from './corner-commander.js';
+import { recordedMessageRoute } from './message-route.js';
 import { cornerOpenedFromSql,cornerOpeningSql } from './corner-opening.js';
 import { cornerImplementerSql } from './corner-worker.js';
 import type { SqlDatabase } from './database.js';
@@ -15,7 +16,7 @@ export { CommandRefusalError } from './command-refusal.js';
 
 /** Follow provenance to the order that selects this command's return route. */
 export async function commandOrder(db: SqlDatabase, command: CommandRow): Promise<CommandRow> {
-  if (command.private_payload?.kind === 'order') return command;
+  if (command.private_payload?.route || command.private_payload?.kind === 'order') return command;
   return (
     (
       await db.query<CommandRow>(
@@ -149,9 +150,9 @@ export async function stopCommandedTurn(
      ORDER BY turn.created_at DESC,command.created_at DESC LIMIT 1 FOR UPDATE OF command`,
     [address, worker.id])).rows[0];
   if (!running)
-    return { stopped: false, address, agent: worker.id, receipt: 'No running turn to stop. Send an order; it runs now.' };
+    return { stopped: false, address, agent: worker.id, receipt: 'No running turn to stop.' };
   const order=await commandOrder(db,running);
-  const ordered=order.private_payload?.kind==='order'&&order.private_payload.authorId===agentId;
+  const ordered=order.private_payload?.route?.from.agent===agentId || order.private_payload?.kind==='order'&&order.private_payload.authorId===agentId;
   const commandsCorner = !ordered && Boolean(target.parent_id) && Boolean((await db.query(
     `SELECT 1 FROM rooms corner WHERE id=$1 AND ${cornerCommanderIdSql('corner')}=$2`, [address, agentId])).rowCount);
   if (!ordered && !commandsCorner)
@@ -245,8 +246,21 @@ export async function reportAgentAttention(
   reportId = randomBytes(32).toString('hex'), options: ReportOptions = {},
 ): Promise<void> {
   const route = await commanderReportAddress(db, roomId, command);
-  const agent = (await db.query("SELECT 1 FROM identities WHERE id=$1 AND kind='agent'", [route.recipient])).rowCount;
-  if (agent) await reportToCommander(db, roomId, agentId, text, command, reportId, { ...options, automatic: true });
+  const agent = (await db.query("SELECT 1 FROM identities identity JOIN rooms place ON place.id=$2 AND place.archived_at IS NULL WHERE identity.id=$1 AND identity.kind='agent'", [route.recipient,route.returnRoom])).rowCount;
+  // The notice continues the receiving commander's own task. Copy that direct
+  // recorded parent tuple now; neither the model nor later activity picks it.
+  const senderTask=(await db.query<CommandRow>(
+    'SELECT * FROM agent_commands WHERE id=$1 AND agent_id=$2',
+    [route.incoming?.parent_command_id ?? route.parent?.id,route.recipient])).rows[0];
+  const replyAddress=senderTask ? (await recordedMessageRoute(db,senderTask)).from : undefined;
+  if (agent) await queueMessage(db,{
+    id:reportId,roomId:route.returnRoom!,agentId:route.recipient!,sourceMessageId:null,reason:'system',
+    parent:command ?? route.incoming,
+    privatePayload:{kind:'message',authorId:agentId,text,fromRoomId:roomId,
+      route:{from:{agent:agentId,place:roomId},to:{agent:route.recipient!,place:route.returnRoom!}},
+      replyAddress,automatic:true,idleSince:options.idleSince,
+      attachments:options.attachments ? [...options.attachments] : undefined},
+  });
 }
 
 /** Approved revisions replace the opening route without changing its provenance. */
@@ -273,6 +287,12 @@ async function cornerReportOpening(db: SqlDatabase, roomId: string) {
 
 /** The recorded return route shared by lifecycle reports and commander approvals. */
 export async function commanderReportAddress(db: SqlDatabase, roomId: string, command?: CommandRow, orderIssuer = false) {
+  const task=command?.message?.route || command?.private_payload?.route ? command : (await db.query<CommandRow>(
+    threadTaskSql('$1'),[roomId])).rows[0];
+  if (task?.message?.route || task?.private_payload?.route) {
+    const route=await recordedMessageRoute(db,task!);
+    return {recipient:route.from.agent,returnRoom:route.from.place,parent:task,origin:roomId,incoming:task};
+  }
   const reporter = command?.agent_id;
   const corner = await cornerReportOpening(db, roomId);
   const incoming = command ?? corner?.opening ?? undefined;

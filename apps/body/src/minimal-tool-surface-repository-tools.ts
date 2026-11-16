@@ -150,10 +150,12 @@ export function agentToolsFor(
   institutionalMemoryEnabled = true,
   nativeIoProven = false,
   freeAgent = false,
+  operatorAgent = false,
 ): ToolDefinition[] {
   if (!agentSurface) return repositoryTools();
   const tools = minimalTools(cornerTurn).filter(tool =>
-    institutionalMemoryEnabled || !['search', 'remember'].includes(tool.name));
+    (institutionalMemoryEnabled || !['search', 'remember'].includes(tool.name)) &&
+    (operatorAgent || !['send_operator_system_dm','read_operator_system_dm'].includes(tool.name)));
   if (commandRunnerAvailable) tools.push(invocationTool(RUNNER_TOOL), invocationTool(WORKSPACE_TOOL));
   // Every harness can acknowledge an answer it already posted through tools.
   tools.push(invocationTool(SILENT_TOOL));

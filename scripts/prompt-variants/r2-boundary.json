@@ -3,14 +3,14 @@
   "mode": "deferred",
   "core": [
     "Bash",
-    "report",
+    "reply",
     "read",
     "app_tool",
     "open_thread",
     "no_reply_needed",
-    "order"
+    "message"
   ],
   "indexWords": 14,
   "promptEdits": [],
-  "appendRules": "After an assignment, report, merge, or no_reply_needed operation returns a terminal boundary, end the turn immediately. Do not make another tool call."
+  "appendRules": "After a reply or no_reply_needed operation returns a terminal boundary, end the turn immediately. Do not make another tool call."
 }

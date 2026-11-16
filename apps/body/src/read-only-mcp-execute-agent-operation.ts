@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { attachmentId,deliverAttachments,withoutImageData } from "./attachment-delivery.js";
 import { beelineManagedSkills,runningBeelineReleaseId } from "./beeline-skill.js";
 import { listGrants,requestGrant,shareBrowser,storeSecret,workbenchStatus } from './read-only-mcp-agent-grant-deps.js';
-import { agentScheduleDepsFromEnv,agentScheduleRoomId,bindBriefFiles,postArtifact,reactToMessage } from './read-only-mcp-download-attachment.js';
+import { agentScheduleDepsFromEnv,agentScheduleRoomId,bindBriefFiles,postArtifact } from './read-only-mcp-download-attachment.js';
 import { approveMerge,closeCorner,openCorner,prChecksStatus,readCornerBrief,reportFeedback,reviseCornerBrief,targetCornerId,writeScratchFile } from './read-only-mcp-open-corner.js';
 import { runGrantedCommand } from './read-only-mcp-open-poll.js';
 import { activeCommandContext,asObject,connectorOfferDepsFromEnv,daemonExecute,downloadAttachment,fetchImage,JsonObject,memorySources,requiredEnv,stringArg } from './read-only-mcp.js';
@@ -22,11 +22,8 @@ import { squireSessionSignedIn } from "./squire-sign-in.js";
 
 
 
-export async function executeConversationOperation(name:'post'|'order'|'report',args:JsonObject):Promise<string> {
-  if (name === 'order') return JSON.stringify(await daemonExecute('order',{
-    address:String(args.address ?? ''),text:String(args.text ?? ''),agent:typeof args.agent==='string'?args.agent:undefined}));
-  if (name === 'report') return JSON.stringify(await daemonExecute('report',{
-    status:args.status,text:String(args.text ?? ''),ask:typeof args.ask==='string'?args.ask:undefined}));
+export async function executeConversationOperation(name:'post'|'message'|'reply',args:JsonObject):Promise<string> {
+  if (name==='message' || name==='reply') return JSON.stringify(await daemonExecute(name,args));
   return JSON.stringify(await daemonExecute('postCornerMessage',{
     cornerId:typeof args.address==='string'?args.address:typeof args.cornerId==='string'?args.cornerId:
       process.env.BEELINE_DAEMON_CORNER_ID?.trim() || requiredEnv('BEELINE_DAEMON_ROOM_ID'),
@@ -34,24 +31,13 @@ export async function executeConversationOperation(name:'post'|'order'|'report',
 }
 
 export async function executeAgentOperation(name:string,args:JsonObject,toolCallId:string):Promise<string> {
-  if (name==='post'||name==='order'||name==='report') return executeConversationOperation(name,args);
+  if (name==='post'||name==='message'||name==='reply') return executeConversationOperation(name,args);
   return executeResourceOperation(name,args,toolCallId);
 }
 
 async function executeResourceOperation(name:string,args:JsonObject,toolCallId:string):Promise<string> {
   switch (name) {
-    case 'ask_owner':
-      return JSON.stringify(await daemonExecute('askOwnerQuestion',{...args,roomId:(await activeCommandContext()).roomId}));
-    case 'add_work_note':
-    case 'attach_to_work_item': {
-      const context = await activeCommandContext();
-      return JSON.stringify(await daemonExecute(name === 'add_work_note' ? 'addWorkNote' : 'attachToWorkItem', {
-        ...args, targetRoomId: args.roomId, roomId: context.roomId,
-      }));
-    }
     case 'create_work_item':
-    case 'set_work_state':
-    case 'assign_work_item':
     case 'update_work': {
       const context = await activeCommandContext();
       const update = name === 'create_work_item' ? {
@@ -216,17 +202,11 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
         }),
       );
     case 'report_feedback':
+      if(args.action==='fixed') return JSON.stringify(await daemonExecute('notifyFeedbackFixed',{
+        ...await activeCommandContext(),itemIds:args.item_ids,title:args.title,prUrl:args.pr_url,
+        ...(typeof args.notify==='boolean'?{notify:args.notify}:{}),
+      }));
       return reportFeedback(args);
-    case 'notify_feedback_fixed':
-      return JSON.stringify(
-        await daemonExecute('notifyFeedbackFixed', {
-          roomId: requiredEnv('BEELINE_DAEMON_ROOM_ID'),
-          itemIds: Array.isArray(args.item_ids) ? args.item_ids : [],
-          title: String(args.title ?? ''),
-          prUrl: String(args.pr_url ?? ''),
-          ...(typeof args.notify === 'boolean' ? { notify: args.notify } : {}),
-        }),
-      );
     case 'save_memory':
       return JSON.stringify(
         await daemonExecute('saveInstitutionalMemory', {
@@ -387,7 +367,7 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
         ...await activeCommandContext(),
         agentId: requiredEnv('BEELINE_DAEMON_AGENT_ID'), sendId: String(args.sendId ?? ''),
       }));
-    case 'become_implementer':
+    case 'claim_thread':
       return JSON.stringify(await daemonExecute('becomeImplementer', await activeCommandContext()));
     case 'open_thread':
       return openCorner(args, toolCallId);
@@ -606,8 +586,6 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
         },
       });
     }
-    case 'react_to_message':
-      return reactToMessage(args);
     case 'close_thread':
       return closeCorner(args);
     case 'pr_checks_status':
@@ -619,10 +597,6 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
         ...await activeCommandContext(),
         ...(args.inputs === undefined ? {} : { inputs: args.inputs }),
       }));
-    case 'merge_thread':
-      return JSON.stringify(
-        await daemonExecute('mergeCorner', { cornerId: targetCornerId(args) }),
-      );
     case 'close_pull_request':
       return JSON.stringify(
         await daemonExecute('closeCornerPullRequest', { cornerId: targetCornerId(args) }),

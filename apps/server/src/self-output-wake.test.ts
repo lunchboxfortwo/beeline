@@ -171,8 +171,8 @@ it.each([false, true])(
 it('SELF-OUTPUT: external lifecycle events still wake a self-opening implementer', async () => {
   const corner = (
     await db.query<{ room_id: string }>(
-      `SELECT room_id FROM agent_commands WHERE reason='corner_objective' AND agent_id=$1 AND private_payload->>'authorId'=$1 LIMIT 1`,
-      [AGENT],
+      `SELECT room_id FROM agent_commands WHERE reason='corner_objective' AND agent_id=$1 AND private_payload->'route'->'from'->>'agent'=$2 LIMIT 1`,
+      [AGENT,HUMAN],
     )
   ).rows[0]!.room_id;
   const event = await systemLine(db, {

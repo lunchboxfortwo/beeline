@@ -283,7 +283,7 @@ async function laterBriefApproval(
     await db.query<CommandRow>(
       `SELECT command.* FROM agent_commands command JOIN rooms corner ON corner.id=command.room_id
        WHERE command.room_id=$2 AND command.agent_id=$3 AND command.state='pending'
-         AND command.private_payload->>'kind'='order'
+         AND command.private_payload->>'kind' IN ('order','message')
          AND command.private_payload->>'authorId'=${cornerCommanderIdSql('corner')}
          AND (command.id=$1 OR EXISTS (
            SELECT 1 FROM messages card WHERE card.id=$1 AND card.room_id=command.room_id
@@ -385,7 +385,7 @@ export async function resolveCornerBriefApproval(
       `SELECT 1 FROM rooms corner WHERE id=$1 AND ${cornerCommanderIdSql('corner')}=$2`,
       [revision.cornerId, order.private_payload?.authorId ?? null],
     )).rowCount > 0;
-    if (commander && order.private_payload?.kind === 'order' && sourceRoomIds.includes(order.room_id)) {
+    if (commander && (order.private_payload?.kind === 'order' || order.private_payload?.kind === 'message') && sourceRoomIds.includes(order.room_id)) {
       if (sourceMessageId === delivery.id || sourceMessageId === order.id) {
         sourceMessageId = order.id;
         message = { text: order.private_payload.text, author_id: order.private_payload.authorId,
@@ -411,7 +411,7 @@ export async function resolveCornerBriefApproval(
     // delivered command's recorded order room is a source alongside the turn's.
     const orderRooms = active && order && active.private_payload?.kind === 'report'
       ? [...sourceRoomIds, order.room_id] : sourceRoomIds;
-    if (order?.private_payload?.kind === 'order' && orderRooms.includes(order.room_id)) {
+    if ((order?.private_payload?.kind === 'order' || order?.private_payload?.kind === 'message') && orderRooms.includes(order.room_id)) {
       sourceMessageId = order.id;
       message = { text: order.private_payload.text, author_id: order.private_payload.authorId, room_id: order.room_id, kind: 'agent' };
       commanderOrder = true;

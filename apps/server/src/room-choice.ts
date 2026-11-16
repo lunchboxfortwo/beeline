@@ -1,7 +1,7 @@
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { CornerAccessDatabase } from './corner-access-database.js';
 import { workflowRunIsLiveSql } from './workflow-run-saved-status.js';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { ChoiceCardView, RoomViewIdentity } from '@beeline/api-contract/phone';
 import {
   CHOICE_CARD_TYPE,
@@ -23,6 +23,8 @@ import {
 import type { SqlDatabase } from './database.js';
 import { typedMentionHandles } from './message-mentions.js';
 import { identitySubject, systemLine } from './system-line.js';
+import { queueMessage,type CommandRow } from './agent-command.js';
+import type { AgentVoice } from './message-origin.js';
 
 /**
  * The corner lifecycle's own bookkeeping cards (`corner-lifecycle.ts`) — pure
@@ -215,7 +217,7 @@ async function writeChoiceCard(
   // settlement: the run reads them back to tell a current card from a stale one.
   await database.query(`UPDATE messages SET card=jsonb_strip_nulls(jsonb_build_object(
     'receiptHint',card->'receiptHint','runId',card->'runId','workflowSlug',card->'workflowSlug',
-    'attempt',card->'attempt'
+    'attempt',card->'attempt','route',card->'route','sourceRoomId',card->'sourceRoomId'
   )) || $2::jsonb WHERE id=$1`, [
     messageId,
     JSON.stringify(card),
@@ -288,6 +290,13 @@ async function closeEndedRunChoices(
 export async function postRoomChoice(
   database: SqlDatabase,
   input: {
+    /** A messaging ask is the original model-authored message with a choice card. */
+    messageId?: string;
+    messageText?: AgentVoice;
+    messageAttachments?: readonly import('@beeline/api-contract/daemon').DaemonAttachment[];
+    messageCard?: Record<string, unknown>;
+    messageAudienceId?:string;
+    messageOrigin?:import('@beeline/api-contract/daemon').MessageAddress;
     roomId: string;
     agentId: string;
     requesterId?: string;
@@ -354,8 +363,9 @@ export async function postRoomChoice(
     )).rows[0] : undefined;
   const requester = requesterRow ? cardIdentity(requesterRow) : undefined;
   const mentionIds = await loadMentionIds(database, input.roomId, prompt, constraint);
-  const choiceId = randomUUID();
-  const messageId = randomBytes(32).toString('hex');
+  const digest = input.messageId ? createHash('sha256').update(`message-ask:${input.messageId}`).digest('hex') : undefined;
+  const choiceId = digest ? `${digest.slice(0,8)}-${digest.slice(8,12)}-4${digest.slice(13,16)}-${digest.slice(16,20)}-${digest.slice(20,32)}` : randomUUID();
+  const messageId = input.messageId ?? randomBytes(32).toString('hex');
   const closesAt = ttlSeconds ? new Date(Date.now() + ttlSeconds * 1000) : null;
   const card = buildChoiceCard({
     choiceId,
@@ -372,7 +382,12 @@ export async function postRoomChoice(
     closesAt,
     responses: [],
   });
-  await systemLine(database, {
+  if (input.messageText !== undefined) await queueMessage(database, {
+    kind:'post',id:messageId,roomId:input.roomId,authorId:input.agentId,text:input.messageText,
+    origin:input.messageOrigin,audienceId:input.messageAudienceId,presentation:'card',cardType:CHOICE_CARD_TYPE,card:{...card,...input.messageCard},agentIds:[],requestId:input.requestId,
+    attachments:input.messageAttachments,
+  });
+  else await systemLine(database, {
     id: messageId,
     roomId: input.roomId,
     authorId: input.agentId,
@@ -389,7 +404,7 @@ export async function postRoomChoice(
     `INSERT INTO room_choices(
        id,room_id,workspace_id,agent_id,message_id,mode,prompt,constraint_text,options,
        electorate,closes_at,status,workflow_run_id
-     ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::text[],$11,'open',$12)`,
+     ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::text[],$11,'open',$12) ON CONFLICT(id) DO NOTHING`,
     [
       choiceId,
       input.roomId,
@@ -453,7 +468,10 @@ async function wakeChoice(
     card: Record<string, unknown>;
   },
 ): Promise<void> {
-  await systemLine(database, {
+  const origin=input.replyToMessageId ? (await database.query<{
+    route:import('@beeline/api-contract/daemon').MessageRoute|null;request_id:string|null;
+  }>('SELECT card->\'route\' route,request_id FROM messages WHERE id=$1',[input.replyToMessageId])).rows[0] : undefined;
+  const answer=await systemLine(database, {
     roomId: input.roomId,
     authorId: input.authorId,
     replyToMessageId: input.replyToMessageId,
@@ -466,10 +484,15 @@ async function wakeChoice(
     ...(input.object ? { object: input.object } : {}),
     ...(input.consequence ? { consequence: input.consequence } : {}),
     kind: input.kind,
-    wakes: [input.agentId],
+    wakes: origin?.route ? [] : [input.agentId],
     cardType: input.kind,
     card: input.card,
   });
+  if (origin?.route && !(await database.query('SELECT 1 FROM rooms WHERE id=$1 AND archived_at IS NOT NULL',[origin.route.from.place])).rowCount) {
+    const parent=origin.request_id ? (await database.query<CommandRow>('SELECT * FROM agent_commands WHERE id=$1',[origin.request_id])).rows[0] : undefined;
+    await queueMessage(database,{roomId:origin.route.from.place,agentId:origin.route.from.agent,
+      sourceMessageId:answer.id,reason:'human_tag',parent});
+  }
 }
 
 async function closeOpenPoll(database: SqlDatabase, choice: ChoiceRow): Promise<void> {

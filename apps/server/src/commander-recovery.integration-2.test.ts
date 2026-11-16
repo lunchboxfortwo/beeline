@@ -351,9 +351,9 @@ it.each(['success', 'failure', 'replacement'])('Reproduction ARTIFACT-REPORT: sh
         result = await objects.uploadArtifact(RUBY, body, 'text/plain', 'evidence.txt');
       } else if (request.url === '/v1/daemon/operations/postAgentAttachment') {
         result = await rootFixture.daemon.execute('postAgentAttachment', JSON.parse(body.toString()), RUBY);
-      } else if (request.url === '/v1/daemon/operations/report') {
+      } else if (request.url === '/v1/daemon/operations/reply') {
         reportCalls++;
-        result = await rootFixture.daemon.execute('report', JSON.parse(body.toString()), RUBY);
+        result = await rootFixture.daemon.execute('reply', JSON.parse(body.toString()), RUBY);
       } else throw new Error('unexpected proof route');
       response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(result));
     } catch (error) {
@@ -382,7 +382,7 @@ it.each(['success', 'failure', 'replacement'])('Reproduction ARTIFACT-REPORT: sh
   try {
     const upload = call(1, 'post_artifact', { path: join(scratch, 'evidence.txt') });
     await uploading;
-    const report = call(2, 'report', { status: 'done', text: 'done: evidence attached' });
+    const report = call(2, 'reply', { id:rootFixture.order.id,text: 'done: evidence attached' });
     await new Promise(resolve => setTimeout(resolve, 30));
     const sentEarly = reportCalls > 0;
     release();
@@ -398,7 +398,7 @@ it.each(['success', 'failure', 'replacement'])('Reproduction ARTIFACT-REPORT: sh
       expect(reportCalls).toBe(0);
       const replacement = await call(3, 'post_artifact', { path: join(scratch, 'evidence.txt') });
       expect(replacement.isError).not.toBe(true);
-      const retried = await call(4, 'report', { status: 'done', text: 'done: replacement evidence attached' });
+      const retried = await call(4, 'reply', { id:rootFixture.order.id,text: 'done: replacement evidence attached' });
       expect(retried.isError).not.toBe(true);
       const result = JSON.parse(retried.content[0]!.text);
       const message = await rootFixture.daemon.execute('getRoomMessage', { roomId:rootFixture.order.roomId, messageId: result.id }, RUBY);

@@ -94,6 +94,12 @@ export function memorySources(args: JsonObject): unknown[] {
 
 
 export const agentSurface = process.env.BEELINE_MCP_SURFACE === 'agent';
+export function operatorAgentTools():boolean {
+  try {
+    return Boolean(process.env.BEELINE_TURN_CONTEXT_FILE &&
+      JSON.parse(readFileSync(process.env.BEELINE_TURN_CONTEXT_FILE,'utf8')).operatorAgent===true);
+  } catch { return false; }
+}
 
 
 
@@ -106,6 +112,7 @@ export const TOOLS = agentToolsFor(
   true,
   process.env.BEELINE_NATIVE_IO_PROVEN === '1',
   Boolean(process.env.BEELINE_FREE_AGENT_ID || process.env.BEELINE_FREE_AGENT_MODEL_TOKEN),
+  operatorAgentTools(),
 );
 
 
@@ -486,7 +493,7 @@ export async function daemonExecute(name: string, input: JsonObject): Promise<Js
       : {}),
   });
   try {
-      if (['postRoomMessage','postCornerMessage','order','report'].includes(name) &&
+      if (['postRoomMessage','postCornerMessage','message','reply'].includes(name) &&
           (process.env.BEELINE_GRANT_RUNNER_FILE || process.env.BEELINE_GRANT_RUNNER_URL)) {
         const input = JSON.parse(body) as JsonObject;
         return await sessionToolRequest('session',{placeId:input.roomId ?? process.env.BEELINE_DAEMON_ROOM_ID,
@@ -833,7 +840,7 @@ export let artifactItem: unknown;
 
 
 export async function callCommandTool(name: string, args: JsonObject, toolCallId: string): Promise<string> {
-  if (name !== 'post_artifact' && name !== 'report' && name !== 'post') return executeAgentTool(name, args, toolCallId);
+  if (name !== 'post_artifact' && name !== 'reply' && name !== 'message' && name !== 'post') return executeAgentTool(name, args, toolCallId);
   const contextFile = process.env.BEELINE_TURN_CONTEXT_FILE;
   const context = contextFile ? JSON.parse(readFileSync(contextFile, 'utf8')) as Record<string, unknown> : {};
   const key = JSON.stringify([process.env.BEELINE_DAEMON_BASE_URL, process.env.BEELINE_DAEMON_ROOM_ID,

@@ -1,15 +1,15 @@
 {
   "id": "corners-orders-exact-address",
   "section": "turn.corners",
-  "summary": "The agent orders a corner by the exact address from its corner list.",
+  "summary": "The agent orders a thread by the exact address from its thread list.",
   "place": "room",
   "turn": {
     "task": {
-      "body": "@ruby tell the agent in the billing-fix corner to stop work until Monday.",
+      "body": "@ruby tell the agent in the billing-fix thread to stop work until Monday.",
       "fromName": "dana",
       "commandReason": "human_tag"
     },
-    "members": "Members (exact tag spellings):\n- @juniper \u2014 Juniper (agent) \u00b7 owner @dana\n- @pebble \u2014 Pebble (agent) \u00b7 owner @dana\n- @dana \u2014 Dana (person)\nYou are @ruby, a member of this Room; you are not listed above.",
+    "members": "Members (exact tag spellings):\n- @juniper — Juniper (agent) · owner @dana\n- @pebble — Pebble (agent) · owner @dana\n- @dana — Dana (person)\nYou are @ruby, a member of this chat; you are not listed above.",
     "corners": [
       {
         "cornerId": "69b0d352-37fa-5588-b3df-6a89129c0956",
@@ -21,9 +21,9 @@
     ]
   },
   "pass": {
-    "call": "order",
+    "call": "message",
     "args": {
-      "address": "69b0d352-37fa-5588-b3df-6a89129c0956"
+      "to.place": "69b0d352-37fa-5588-b3df-6a89129c0956"
     }
   },
   "scenario": {
@@ -55,7 +55,7 @@
             {
               "address": "69b0d352-37fa-5588-b3df-6a89129c0956",
               "name": "billing-fix",
-              "kind": "corner",
+              "kind": "thread",
               "parentRoomId": "09c40034-77e4-5fe3-8c40-cc637d013185"
             }
           ]
@@ -64,7 +64,7 @@
       {
         "call": "read",
         "args": {
-          "facet": "corners"
+          "facet": "threads"
         },
         "result": {
           "corners": [
@@ -84,7 +84,7 @@
           "facet": "members"
         },
         "result": {
-          "members": "Members (exact tag spellings):\n- @juniper \u2014 Juniper (agent) \u00b7 owner @dana\n- @pebble \u2014 Pebble (agent) \u00b7 owner @dana\n- @dana \u2014 Dana (person)\nYou are @ruby, a member of this Room; you are not listed above."
+          "members": "Members (exact tag spellings):\n- @juniper — Juniper (agent) · owner @dana\n- @pebble — Pebble (agent) · owner @dana\n- @dana — Dana (person)\nYou are @ruby, a member of this chat; you are not listed above."
         }
       },
       {
@@ -95,7 +95,7 @@
         "result": {
           "address": "09c40034-77e4-5fe3-8c40-cc637d013185",
           "name": "corners-orders-exact-address",
-          "members": "Members (exact tag spellings):\n- @juniper \u2014 Juniper (agent) \u00b7 owner @dana\n- @pebble \u2014 Pebble (agent) \u00b7 owner @dana\n- @dana \u2014 Dana (person)\nYou are @ruby, a member of this Room; you are not listed above.",
+          "members": "Members (exact tag spellings):\n- @juniper — Juniper (agent) · owner @dana\n- @pebble — Pebble (agent) · owner @dana\n- @dana — Dana (person)\nYou are @ruby, a member of this chat; you are not listed above.",
           "repository": null,
           "worktree": null,
           "corners": [
@@ -152,6 +152,13 @@
         },
         "result": {
           "revisions": []
+        }
+      },
+      {
+        "call": "reply",
+        "result": {
+          "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "delivered": true
         }
       }
     ],

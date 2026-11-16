@@ -17,7 +17,7 @@ describe('outside-agent rules', () => {
   it('teaches the command structure, place, review and progress rules on both surfaces', () => {
     for (const surface of ['mcp', 'session'] as const) {
       const text = externalAgentRules(surface);
-      for (const rule of ['commandId', 'not a plain', 'Choose the terminal status', 'server adds its status prefix', "asker's exact @handle", 'one step up',
+      for (const rule of ['Messages carry from, from-place and id', 'Reply with reply(id,text,ask?)', 'Peer messages are requests', 'Never add a tag to route a reply', 'The server requests review; never tag the reviewer.',
         'Code work belongs in a thread', 'approve_merge on the exact head SHA', 'post short progress there', 'Nothing you write only'])
         expect(text).toContain(rule);
     }
@@ -37,8 +37,8 @@ describe('outside-agent rules', () => {
 });
 
 it('keeps the exact asker handle in the per-message rule, with no fabricated tag for a missing handle', () => {
-  expect(mentionReplyRule('message', 'Claude_2')).toBe('Reply (start with @Claude_2): replyTo message');
+  expect(mentionReplyRule('message', 'Claude_2')).toBe('Reply with reply(id: "message", text: ...)' );
   for (const handle of [null, undefined]) {
-    expect(mentionReplyRule('message', handle)).toBe("Reply (start with the asker's exact @handle): replyTo message");
+    expect(mentionReplyRule('message', handle)).toBe('Reply with reply(id: "message", text: ...)' );
   }
 });

@@ -25,7 +25,7 @@
       "body": "Continue the assigned token expiry fix. No pull request has been opened. You just called read(facet:checks); its result is in the transcript. Choose your next action.",
       "commandReason": "order"
     },
-    "members": "Members (exact tag spellings):\n- @juniper \u2014 Juniper (agent) \u00b7 owner @dana\n- @pebble \u2014 Pebble (agent) \u00b7 owner @dana\n- @dana \u2014 Dana (person)\nYou are @ruby, a member of this Room; you are not listed above.",
+    "members": "Members (exact tag spellings):\n- @juniper — Juniper (agent) · owner @dana\n- @pebble — Pebble (agent) · owner @dana\n- @dana — Dana (person)\nYou are @ruby, a member of this chat; you are not listed above.",
     "brief": {
       "fileLines": [
         "apps/server/src/auth.ts"
@@ -53,17 +53,17 @@
     ]
   },
   "messages": [
-    "Tool result \u2014 read(facet:checks): {\"checks\": \"unknown\", \"reason\": \"no pull request or checks are recorded for this corner\", \"approved\": false, \"held\": false, \"mergeAllowed\": false, \"reviewer\": null, \"reviewerExists\": false, \"archived\": false, \"next\": \"No PR is recorded for this corner yet. Continue the assigned work; when it is ready, push the corner branch and open a PR. If you already opened one, print its actual full URL as your final response so it can be recorded, then end the turn. Do not invent a PR URL or reread checks before a PR exists.\"}"
+    "Tool result — read(facet:checks): {\"checks\": \"unknown\", \"reason\": \"no pull request or checks are recorded for this thread\", \"approved\": false, \"held\": false, \"mergeAllowed\": false, \"reviewer\": null, \"reviewerExists\": false, \"archived\": false, \"next\": \"No PR is recorded for this thread yet. Continue the assigned work; when it is ready, push the thread branch and open a PR. If you already opened one, print its actual full URL as your final response so it can be recorded, then end the turn. Do not invent a PR URL or reread checks before a PR exists.\"}"
   ],
   "tools": [
     "Bash"
   ],
   "toolResults": {
-    "read": "{\"checks\": \"unknown\", \"reason\": \"no pull request or checks are recorded for this corner\", \"approved\": false, \"held\": false, \"mergeAllowed\": false, \"reviewer\": null, \"reviewerExists\": false, \"archived\": false, \"next\": \"No PR is recorded for this corner yet. Continue the assigned work; when it is ready, push the corner branch and open a PR. If you already opened one, print its actual full URL as your final response so it can be recorded, then end the turn. Do not invent a PR URL or reread checks before a PR exists.\"}"
+    "read": "{\"checks\": \"unknown\", \"reason\": \"no pull request or checks are recorded for this thread\", \"approved\": false, \"held\": false, \"mergeAllowed\": false, \"reviewer\": null, \"reviewerExists\": false, \"archived\": false, \"next\": \"No PR is recorded for this thread yet. Continue the assigned work; when it is ready, push the thread branch and open a PR. If you already opened one, print its actual full URL as your final response so it can be recorded, then end the turn. Do not invent a PR URL or reread checks before a PR exists.\"}"
   },
   "scenario": {
     "history": [
-      "Tool result \u2014 read(facet:checks): {\"checks\": \"unknown\", \"reason\": \"no pull request or checks are recorded for this corner\", \"approved\": false, \"held\": false, \"mergeAllowed\": false, \"reviewer\": null, \"reviewerExists\": false, \"archived\": false, \"next\": \"No PR is recorded for this corner yet. Continue the assigned work; when it is ready, push the corner branch and open a PR. If you already opened one, print its actual full URL as your final response so it can be recorded, then end the turn. Do not invent a PR URL or reread checks before a PR exists.\"}"
+      "Tool result — read(facet:checks): {\"checks\": \"unknown\", \"reason\": \"no pull request or checks are recorded for this thread\", \"approved\": false, \"held\": false, \"mergeAllowed\": false, \"reviewer\": null, \"reviewerExists\": false, \"archived\": false, \"next\": \"No PR is recorded for this thread yet. Continue the assigned work; when it is ready, push the thread branch and open a PR. If you already opened one, print its actual full URL as your final response so it can be recorded, then end the turn. Do not invent a PR URL or reread checks before a PR exists.\"}"
     ],
     "files": {
       "apps/server/src/auth.ts": "export function status(expiresAt: number, now: number) {\n  return expiresAt < now ? 401 : 200;\n}\n",
@@ -83,14 +83,14 @@
     },
     "checks": {
       "checks": "unknown",
-      "reason": "no pull request or checks are recorded for this corner",
+      "reason": "no pull request or checks are recorded for this thread",
       "approved": false,
       "held": false,
       "mergeAllowed": false,
       "reviewer": null,
       "reviewerExists": false,
       "archived": false,
-      "next": "No PR is recorded for this corner yet. Continue the assigned work; when it is ready, push the corner branch and open a PR. If you already opened one, print its actual full URL as your final response so it can be recorded, then end the turn. Do not invent a PR URL or reread checks before a PR exists."
+      "next": "No PR is recorded for this thread yet. Continue the assigned work; when it is ready, push the thread branch and open a PR. If you already opened one, print its actual full URL as your final response so it can be recorded, then end the turn. Do not invent a PR URL or reread checks before a PR exists."
     },
     "results": [
       {
@@ -121,7 +121,7 @@
       {
         "call": "read",
         "args": {
-          "facet": "corners"
+          "facet": "threads"
         },
         "result": {
           "corners": []
@@ -133,7 +133,7 @@
           "facet": "members"
         },
         "result": {
-          "members": "Members (exact tag spellings):\n- @juniper \u2014 Juniper (agent) \u00b7 owner @dana\n- @pebble \u2014 Pebble (agent) \u00b7 owner @dana\n- @dana \u2014 Dana (person)\nYou are @ruby, a member of this Room; you are not listed above."
+          "members": "Members (exact tag spellings):\n- @juniper — Juniper (agent) · owner @dana\n- @pebble — Pebble (agent) · owner @dana\n- @dana — Dana (person)\nYou are @ruby, a member of this chat; you are not listed above."
         }
       },
       {
@@ -144,7 +144,7 @@
         "result": {
           "address": "13dd83e5-e17f-599c-8054-c4ce8cdab974",
           "name": "checks-no-pr-continues-work",
-          "members": "Members (exact tag spellings):\n- @juniper \u2014 Juniper (agent) \u00b7 owner @dana\n- @pebble \u2014 Pebble (agent) \u00b7 owner @dana\n- @dana \u2014 Dana (person)\nYou are @ruby, a member of this Room; you are not listed above.",
+          "members": "Members (exact tag spellings):\n- @juniper — Juniper (agent) · owner @dana\n- @pebble — Pebble (agent) · owner @dana\n- @dana — Dana (person)\nYou are @ruby, a member of this chat; you are not listed above.",
           "repository": {
             "linked": true
           },
@@ -544,6 +544,13 @@
         "result": {
           "exitCode": 0,
           "stdout": ""
+        }
+      },
+      {
+        "call": "reply",
+        "result": {
+          "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "delivered": true
         }
       }
     ],

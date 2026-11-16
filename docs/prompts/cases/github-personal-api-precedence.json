@@ -15,7 +15,7 @@
   },
   "turn": {
     "task": {
-      "body": "Publish verified commit 1111111111111111111111111111111111111111 to existing feature/corner-proof in this Room's linked repository owner/widgets. Personal GitHub lacks contents write and the repository App checkout is configured. The commit and remote ref are already verified; do not repeat local git checks or open a PR.",
+      "body": "Publish verified commit 1111111111111111111111111111111111111111 to existing feature/corner-proof in this chat's linked repository owner/widgets. Personal GitHub lacks contents write and the repository App checkout is configured. The commit and remote ref are already verified; do not repeat local git checks or open a PR.",
       "fromName": "dana",
       "commandReason": "human_tag"
     }
@@ -24,7 +24,7 @@
     "Bash"
   ],
   "toolResults": {
-    "connect": "{\"status\": \"ready\", \"appId\": \"11111111-1111-4111-8111-111111111111\", \"appKey\": \"github\", \"transport\": \"composio\", \"readiness\": \"Personal GitHub is connected without contents write. The repository App checkout is configured in this corner.\"}",
+    "connect": "{\"status\": \"ready\", \"appId\": \"11111111-1111-4111-8111-111111111111\", \"appKey\": \"github\", \"transport\": \"composio\", \"readiness\": \"Personal GitHub is connected without contents write. The repository App checkout is configured in this thread.\"}",
     "app_tool": "{\"tools\": [{\"name\": \"GITHUB_UPDATE_A_REFERENCE\", \"description\": \"Update the authorized branch to the prepared commit.\", \"inputSchema\": {\"type\": \"object\", \"properties\": {\"owner\": {\"type\": \"string\"}, \"repo\": {\"type\": \"string\"}, \"ref\": {\"type\": \"string\"}, \"sha\": {\"type\": \"string\"}, \"force\": {\"type\": \"boolean\"}}}}], \"status\": \"executed\", \"data\": {\"ref\": \"refs/heads/feature/corner-proof\", \"sha\": \"1111111111111111111111111111111111111111\"}}"
   },
   "pass": {
@@ -64,21 +64,21 @@
         "appId": "11111111-1111-4111-8111-111111111111",
         "appKey": "github",
         "transport": "composio",
-        "readiness": "Personal GitHub is connected without contents write. The repository App checkout is configured in this corner."
+        "readiness": "Personal GitHub is connected without contents write. The repository App checkout is configured in this thread."
       },
       "discover": {
         "status": "ready",
         "appId": "11111111-1111-4111-8111-111111111111",
         "appKey": "github",
         "transport": "composio",
-        "readiness": "Personal GitHub is connected without contents write. The repository App checkout is configured in this corner."
+        "readiness": "Personal GitHub is connected without contents write. The repository App checkout is configured in this thread."
       },
       "ensure": {
         "status": "ready",
         "appId": "11111111-1111-4111-8111-111111111111",
         "appKey": "github",
         "transport": "composio",
-        "readiness": "Personal GitHub is connected without contents write. The repository App checkout is configured in this corner."
+        "readiness": "Personal GitHub is connected without contents write. The repository App checkout is configured in this thread."
       }
     },
     "results": [
@@ -110,7 +110,7 @@
       {
         "call": "read",
         "args": {
-          "facet": "corners"
+          "facet": "threads"
         },
         "result": {
           "corners": []
@@ -206,6 +206,13 @@
         "result": {
           "exitCode": 0,
           "stdout": "1111111 Prepared fix\n1111111111111111111111111111111111111111\n1111111111111111111111111111111111111111\trefs/heads/feature/corner-proof\n"
+        }
+      },
+      {
+        "call": "reply",
+        "result": {
+          "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "delivered": true
         }
       }
     ]

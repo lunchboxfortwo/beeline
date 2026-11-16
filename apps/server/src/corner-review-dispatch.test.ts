@@ -1,4 +1,4 @@
-import { cornerRunStateSql, assembleTurnPrompt, cornerReviewerInstruction, describe, expect, it, vi, DaemonService, LiveHub, systemLine, createAgentCommand, reconcileConfiguredCornerReviewers, advanceCorner, H, A, B, W, R, C, db, phone, daemon, commands, claim, result, greenHead, rootFixture, type AgentCommand } from './test-support-corner-review-dispatch.test-support.js';
+import { cornerRunStateSql, assembleTurnPrompt, cornerReviewerInstruction, describe, expect, it, vi, DaemonService, LiveHub, systemLine, createAgentCommand, reconcileConfiguredCornerReviewers, advanceCorner, H, A, B, W, R, C, db, phone, daemon, commands, claim, result, findings, greenHead, rootFixture, type AgentCommand } from './test-support-corner-review-dispatch.test-support.js';
 import { modelText } from './message-origin.js';
 
 describe('thread message attribution', () => {
@@ -179,7 +179,8 @@ describe('thread message attribution', () => {
     });
     const [worker] = await commands(A, C);
     await claim(worker!);
-    await result(worker!, 'https://github.com/acme/repo/pull/7');
+    await rootFixture.daemon.execute('reply',{id:worker!.id,text:'https://github.com/acme/repo/pull/7'},A);
+    await rootFixture.db.backgroundWork.drain();
 
     expect(checkGate).toHaveBeenCalledOnce();
     expect((await commands(B, C)).map((command) => command.reason)).toEqual(['corner_review_dispatch']);
@@ -208,7 +209,8 @@ describe('thread message attribution', () => {
     });
     const noReviewerWorker = (await commands(A, C)).find(command => command.id === opening!.id);
     await claim(noReviewerWorker!, 'g2');
-    await result(noReviewerWorker!, 'https://github.com/acme/repo/pull/7', 'g2');
+    await rootFixture.daemon.execute('reply',{id:noReviewerWorker!.id,text:'https://github.com/acme/repo/pull/7'},A);
+    await rootFixture.db.backgroundWork.drain();
     await rootFixture.daemon.execute('postAgentTurnReceipt', { roomId: C, requestId: noReviewerWorker!.turnRequestId, status: 'complete' }, A);
     await advanceCorner(rootFixture.db, C, { kind: 'reconcile' });
     expect(checkGate).toHaveBeenCalledTimes(2);
@@ -220,18 +222,18 @@ describe('thread message attribution', () => {
   });
 
 
-  it.each(['final', 'post'] as const)('Reproduction REVIEW-HEAD-1: a late old-head %s preserves its addressed follow-up', async surface => {
+  it.each(['message', 'post'] as const)('Reproduction REVIEW-HEAD-1: a late old-head %s preserves its addressed follow-up', async surface => {
     await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
     await greenHead(81, '1'.repeat(40));
     const [review] = await commands(B, C);
     await claim(review!);
     await greenHead(81, '2'.repeat(40));
-    if (surface === 'final') await result(review!, '@hoots FAIL: repair the old head.');
+    if (surface === 'message') await findings(review!, '@hoots FAIL: repair the old head.');
     else await rootFixture.daemon.execute('postCornerMessage', { roomId: C, cornerId: C, requestId: review!.turnRequestId, text: '@hoots FAIL: repair the old head.' }, B);
     expect((await commands(A, C)).map(item => item.source.body)).toContain('@hoots FAIL: repair the old head.');
-    expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND text LIKE '%repair the old head%'`, [C])).rowCount).toBe(1);
+    expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND text LIKE '%repair the old head%'`, [C])).rowCount).toBe(surface==='post' ? 1 : 0);
     expect((await rootFixture.db.query(`SELECT state FROM agent_commands WHERE id=$1`, [review!.id])).rows)
-      .toEqual([{state:surface === 'final' ? 'complete' : 'pending'}]);
+      .toEqual([{state:surface === 'message' ? 'complete' : 'pending'}]);
   });
 
 
@@ -240,7 +242,7 @@ describe('thread message attribution', () => {
     await greenHead(82, '1'.repeat(40));
     const [review] = await commands(B, C);
     await claim(review!);
-    await result(review!, '@hoots FAIL: repair this head.');
+    await findings(review!, '@hoots FAIL: repair this head.');
     await greenHead(82, '2'.repeat(40));
     expect(await commands(A, C)).toEqual([]);
   });
@@ -274,7 +276,7 @@ describe('thread message attribution', () => {
     await greenHead(83, '1'.repeat(40));
     const [review] = await commands(B, C);
     await claim(review!);
-    await result(review!, '@hoots FAIL: repair this head.');
+    await findings(review!, '@hoots FAIL: repair this head.');
     const [repair] = await commands(A, C);
     await claim(repair!);
     // The committed push is the new handoff target; delivery needs no provider read.
@@ -283,13 +285,14 @@ describe('thread message attribution', () => {
     Object.assign(rootFixture.daemon, { github: { refreshCornerReviewHead: refreshed } });
     await result(repair!, '@goosy The fix is pushed; please review.');
     expect(refreshed).not.toHaveBeenCalled();
-    const next = (await commands(B, C)).find(c => c.reason === 'agent_tag');
+    const next = (await commands(B, C)).find(c => c.reason === 'reply');
     const target = (await rootFixture.db.query<{ context: { headSha: string } }>('SELECT review_context context FROM agent_commands WHERE id=$1', [next!.id])).rows[0]?.context;
-    expect(target?.headSha).toBe('2'.repeat(40));
+    expect(next?.from).toEqual({agent:A,place:C});
+    expect(next?.roomId).toBe(C);
   });
 
 
-  it('stores the REVIEWER as author when the reviewer posts the review into a corner it does not own', async () => {
+  it('stores the REVIEWER as author when the reviewer posts the review into a thread it does not own', async () => {
     // Corner owned by Hoots (A); Goosy (B) is the configured reviewer on the
     // parent Room and a member of parent + corner with a check-passed
     // subscription — the production review flow.
@@ -315,7 +318,8 @@ describe('thread message attribution', () => {
     const [review] = await commands(B, C);
     expect(review?.reason).toBe('corner_review_dispatch');
     await claim(review!);
-    await result(review!, 'Review complete: the race is fixed, approved.');
+    await rootFixture.daemon.execute('postCornerMessage',{roomId:C,cornerId:C,requestId:review!.turnRequestId,text:'Review complete: the race is fixed, approved.'},B);
+    await result(review!,'');
     const rows = (
       await rootFixture.db.query<{ author_id: string; text: string }>(
         `SELECT author_id,text FROM messages WHERE room_id=$1 AND text LIKE 'Review complete%'`,
@@ -336,8 +340,9 @@ describe('thread message attribution', () => {
     await claim(review!);
     // A check event is not a human assignment, even when its fixture author is human.
     // Preserve the agent's prose; a human mention does not wake another agent.
-    const dropped = await result(review!, '@human the reproduction is missing. Fix that and push.');
-    expect(dropped.receipt).toBe('Message stored and visible.');
+    const dropped = await rootFixture.daemon.execute('postCornerMessage',{roomId:C,cornerId:C,requestId:review!.turnRequestId,text:'@human the reproduction is missing. Fix that and push.'},B);
+    await result(review!,'');
+    expect(dropped.receipt).toContain('Message stored and visible.');
     expect((await rootFixture.db.query<{ text: string }>(
       `SELECT text FROM messages WHERE id=$1`, [dropped.id],
     )).rows[0]?.text).toBe('@human the reproduction is missing. Fix that and push.');
@@ -348,16 +353,16 @@ describe('thread message attribution', () => {
   });
 
 
-  it('leaves the reviewer a single turn when its verdict tags the worker itself', async () => {
+  it('delivers one findings request at the implementer thread address', async () => {
     await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
     await greenHead(12, '1'.repeat(40));
     const [review] = await commands(B, C);
     await claim(review!);
-    await result(review!, '@hoots approved, merge it.');
+    await findings(review!, 'The reviewed implementation needs a repair.');
     // The typed tag routes first and keeps the row; the handoff must not add a
     // second turn for the same reply.
     const handoff = await commands(A, C);
-    expect(handoff.map((command) => command.reason)).toEqual(['agent_tag']);
+    expect(handoff.map((command) => command.reason)).toEqual(['message']);
   });
 
 
@@ -582,9 +587,10 @@ describe('thread message attribution', () => {
     const [firstReview] = await commands(B, C);
     await claim(firstReview!);
     const findings = `@hoots FAIL on ${head}: the PR description lacks demonstration evidence.`;
-    await result(firstReview!, findings);
+    await rootFixture.daemon.execute('message',{roomId:C,requestId:firstReview!.turnRequestId,to:{agent:'implementer',place:C},text:findings},B);
+    await result(firstReview!,'');
     const [repair] = await commands(A, C);
-    expect(repair?.reason).toBe('agent_tag');
+    expect(repair?.reason).toBe('message');
     expect(repair?.source.body).toContain(findings);
     expect((await rootFixture.db.query('SELECT review_context->>\'headSha\' head FROM agent_commands WHERE id=$1', [repair!.id])).rows[0]).toEqual({ head });
     await claim(repair!);
@@ -603,7 +609,7 @@ describe('thread message attribution', () => {
   });
 
 
-  it('Reproduction REVIEWER-TAG-1: a blocked worker can tag the reviewer, and the reviewer PASS report records the yes', async () => {
+  it('Reproduction REVIEWER-TAG-1: a blocked worker can message the reviewer at its thread address and approve the exact head', async () => {
     // Production PR #4253, 12 Nov: the worker reported blocked: after a FAIL, then
     // two tags to the reviewer got "agent or place is no longer available".
     const head = '9'.repeat(40);
@@ -620,14 +626,15 @@ describe('thread message attribution', () => {
     await rootFixture.db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES('worker-blocked',$1,$2,'blocked: stuck in review')`, [C, A]);
     await rootFixture.db.query(`INSERT INTO corner_owed(corner_id,person_id,message_id,created_at,answerable,blocking)
       VALUES($1,$2,'worker-blocked',now(),true,true)`, [C, H]);
-    await result(handback!, '@goosy The R1 proof is now in the PR at the same head. Please review again.');
+    await rootFixture.daemon.execute('message',{roomId:C,requestId:handback!.turnRequestId,to:{agent:'reviewer',place:C},text:'The R1 proof is now in the PR at the same head. Please review again.'},A);
+    await result(handback!,'Repair complete.');
     const rereviews = await commands(B, C);
     console.info(`Reproduction REVIEWER-TAG-1: wrong=0 reviewer commands ("no longer available"); right=1; observed=${rereviews.length}`);
     expect(rereviews).toHaveLength(1);
     expect(rereviews[0]?.source.body).toContain('Please review again');
     await claim(rereviews[0]!, 'g2');
-    await rootFixture.daemon.execute('report', { roomId: C, requestId: rereviews[0]!.turnRequestId, generationId: 'g2',
-      status: 'done', text: 'PASS. The R1 proof is attached to the PR description.' }, B);
+    await rootFixture.daemon.execute('approveCornerMerge',{roomId:C,requestId:rereviews[0]!.turnRequestId,cornerId:C,headSha:head},B);
+    await result(rereviews[0]!,'The R1 proof is attached to the PR description.');
     await rootFixture.db.backgroundWork.drain();
     const { cornerMergeGate } = await import('./corner-lifecycle.js');
     expect(await cornerMergeGate(rootFixture.db, C, { number: 29, headSha: head })).toMatchObject({ approved: true });

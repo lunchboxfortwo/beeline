@@ -13,5 +13,18 @@ export function cornerCommanderBriefSql(cornerId: string, at?: string): string {
 
 /** The current commander for authority checks that previously used the creator. */
 export function cornerCommanderIdSql(corner: string): string {
-  return `COALESCE((SELECT author_id FROM (${cornerCommanderBriefSql(`${corner}.id`)}) commander),${corner}.created_by)`;
+  return `COALESCE((${threadCommanderAddressSql(`${corner}.id`)})->>'agent',
+    (SELECT author_id FROM (${cornerCommanderBriefSql(`${corner}.id`)}) commander),${corner}.created_by)`;
+}
+
+/** First task delivery records the thread's commander; tags and brief edits cannot move it. */
+export function threadTaskSql(cornerId:string):string {
+  return `SELECT task.* FROM agent_commands task WHERE task.room_id=${cornerId}
+    AND task.reason IN ('corner_objective','human_tag') ORDER BY task.inbox_sequence LIMIT 1`;
+}
+export function threadCommanderAddressSql(cornerId:string):string {
+  return `(SELECT COALESCE(task.message->'replyAddress',task.message->'route'->'from',task.private_payload->'route'->'from',
+    jsonb_build_object('agent',COALESCE(task.private_payload->>'authorId',task.message->>'authorId'),
+      'place',COALESCE(task.private_payload->>'fromRoomId',task.room_id::text)))
+    FROM (${threadTaskSql(cornerId)}) task)`;
 }

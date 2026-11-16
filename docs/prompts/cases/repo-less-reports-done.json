@@ -1,17 +1,17 @@
 {
   "id": "repo-less-reports-done",
   "section": "replying",
-  "summary": "Ordered work in a repo-less corner ends with a done: report.",
+  "summary": "Ordered work in a repo-less thread ends with a done: report.",
   "place": "repo-less-corner",
   "turn": {
     "task": {
-      "body": "Order from Juniper: draft three taglines for the Beeline launch page and report them back. Beeline is a chat app where small software teams and their AI agents work together in shared Rooms.",
+      "body": "Order from Juniper: draft three taglines for the Beeline launch page and report them back. Beeline is a chat app where small software teams and their AI agents work together in shared chats.",
       "commandReason": "order"
     },
-    "members": "Members (exact tag spellings):\n- @juniper \u2014 Juniper (agent) \u00b7 owner @dana\n- @pebble \u2014 Pebble (agent) \u00b7 owner @dana\n- @dana \u2014 Dana (person)\nYou are @ruby, a member of this Room; you are not listed above."
+    "members": "Members (exact tag spellings):\n- @juniper — Juniper (agent) · owner @dana\n- @pebble — Pebble (agent) · owner @dana\n- @dana — Dana (person)\nYou are @ruby, a member of this chat; you are not listed above."
   },
   "pass": {
-    "call": "report",
+    "call": "reply",
     "args": {
       "text": {
         "matches": "^done:",
@@ -51,7 +51,7 @@
       {
         "call": "read",
         "args": {
-          "facet": "corners"
+          "facet": "threads"
         },
         "result": {
           "corners": []
@@ -63,7 +63,7 @@
           "facet": "members"
         },
         "result": {
-          "members": "Members (exact tag spellings):\n- @juniper \u2014 Juniper (agent) \u00b7 owner @dana\n- @pebble \u2014 Pebble (agent) \u00b7 owner @dana\n- @dana \u2014 Dana (person)\nYou are @ruby, a member of this Room; you are not listed above."
+          "members": "Members (exact tag spellings):\n- @juniper — Juniper (agent) · owner @dana\n- @pebble — Pebble (agent) · owner @dana\n- @dana — Dana (person)\nYou are @ruby, a member of this chat; you are not listed above."
         }
       },
       {
@@ -74,7 +74,7 @@
         "result": {
           "address": "13dd83e5-e17f-599c-8054-c4ce8cdab974",
           "name": "repo-less-reports-done",
-          "members": "Members (exact tag spellings):\n- @juniper \u2014 Juniper (agent) \u00b7 owner @dana\n- @pebble \u2014 Pebble (agent) \u00b7 owner @dana\n- @dana \u2014 Dana (person)\nYou are @ruby, a member of this Room; you are not listed above.",
+          "members": "Members (exact tag spellings):\n- @juniper — Juniper (agent) · owner @dana\n- @pebble — Pebble (agent) · owner @dana\n- @dana — Dana (person)\nYou are @ruby, a member of this chat; you are not listed above.",
           "repository": null,
           "worktree": null,
           "corners": []
@@ -123,6 +123,13 @@
         },
         "result": {
           "revisions": []
+        }
+      },
+      {
+        "call": "reply",
+        "result": {
+          "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "delivered": true
         }
       }
     ],

@@ -32,6 +32,10 @@ export function isAgentCommand(value: unknown): value is AgentCommand {
   if (c.modelCredential !== undefined && !isOwnedModelCredential(c.modelCredential)) return false;
   for (const key of ['roomName', 'returnRoomName'])
     if (c[key] !== undefined && typeof c[key] !== 'string') return false;
+  if (c.from !== undefined) {
+    const from=c.from as Record<string,unknown> | null;
+    if (!from || typeof from.agent!=='string' || typeof from.place!=='string') return false;
+  }
   const source = c.source as Record<string, unknown> | undefined;
   return Boolean(
     source &&

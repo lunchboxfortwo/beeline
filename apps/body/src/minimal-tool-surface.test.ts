@@ -9,7 +9,7 @@ import { toolValidationSchema, type ToolDefinition } from './minimal-tool-surfac
 import { assembleSessionPrompt, PROMPT_SURFACES } from './prompt-assembly.js';
 
 const harnesses = ['claude-agent-acp', 'claude-code-acp', 'codex-acp', 'pi-acp', 'grok', 'buzz-agent', 'cursor-acp-bridge'];
-const missingOnClaude = ['request_grant', 'connect', 'app_tool', 'wake', 'remember', 'revise_thread', 'create_work_item', 'set_work_state', 'assign_work_item', 'add_work_note', 'attach_to_work_item'];
+const missingOnClaude = ['request_grant', 'connect', 'app_tool', 'wake', 'remember', 'revise_thread', 'create_work_item', 'update_work', 'message', 'reply'];
 const rootCombinators = ['anyOf', 'oneOf', 'allOf'];
 const invalidInputs = [
   ['request_grant', { mode: 'request', action: 'Use the requested resource', kind: 'command' }],
@@ -98,6 +98,17 @@ describe('Beeline tool surface across harnesses', () => {
     expect(normalizeAgentToolArgs('post', reply)).toEqual(['reply link']);
     expect(reply).toEqual({ text: 'Still here.' });
     expect(() => validateAdvertisedToolInput(advertisedAgentTool('post'), reply)).not.toThrow();
+  });
+
+  it('folds fixed feedback certification without exposing its retired tool',()=>{
+    const schema=toolValidationSchema('report_feedback')!;
+    expect(Check(schema,{action:'fixed',item_ids:['item'],title:'Fix',pr_url:'https://github.com/Beeline-Work/beeline/pull/59'})).toBe(true);
+    expect(Check(schema,{category:'bug',summary:'A rough patch'})).toBe(true);
+    expect(Check(schema,{action:'fixed'})).toBe(false);
+    expect(agentToolsFor(true,false).map(tool=>tool.name)).not.toContain('notify_feedback_fixed');
+    expect(agentToolsFor(true,false).map(tool=>tool.name)).not.toContain('send_operator_system_dm');
+    expect(agentToolsFor(true,false,false,false,true,true,true,false,true).map(tool=>tool.name))
+      .toEqual(expect.arrayContaining(['send_operator_system_dm','read_operator_system_dm']));
   });
 
   it('retains every field, nested schema and branch rule for Claude without changing the canonical contract', () => {

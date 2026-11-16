@@ -1,7 +1,7 @@
 {
   "id": "routing-answers-source-message",
   "section": "turn.routing",
-  "summary": "A delivered Room tag is answered at its source address with replyTo, rather than only in the app.",
+  "summary": "A delivered chat tag is answered at its source address with replyTo, rather than only in the app.",
   "place": "room",
   "turn": {
     "routing": {
@@ -64,6 +64,13 @@
         "result": {
           "id": "simulated-reply",
           "committed": true
+        }
+      },
+      {
+        "call": "reply",
+        "result": {
+          "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "delivered": true
         }
       }
     ]

@@ -1,4 +1,4 @@
-import { m9_createHash, m9_describe, m9_expect, m9_it, m9_requestGrant, m9_runGrantedCommand, mergedDescribe9, m10_describe, m10_expect, m10_it, m10_MESSAGE_REACTION_EMOJIS, m10_agentToolsFor, m10_reactToMessage, mergedDescribe10, m11_describe, m11_expect, m11_it, m11_createSchedule, m11_deleteSchedule, m11_listSchedules, m11_updateSchedule, mergedDescribe11, m14_describe, m14_expect, m14_it, m14_vi, m14_agentToolsFor, m14_connectorOfferDepsFromEnv, m14_offerConnector, m14_workbenchStatus, m14_resumePrompt, mergedDescribe14, m24_describe, m24_expect, m24_it, m24_callAgentTool, m24_assembleTurnPrompt, mergedDescribe24, m25_describe, m25_expect, m25_it, m25_callAgentTool, mergedDescribe25, m26_expect, m26_it, m26_vi, m26_callAgentTool, mergedDescribe26, fixtureScope8, fixtureScope12, fixtureScope16, fixtureScope18, fixtureScope20, fixtureScope21, fixtureScope23, fixtureScope24, type m10_AgentScheduleDeps } from './test-support-read-only-mcp.test-support.js';
+import { m9_createHash, m9_describe, m9_expect, m9_it, m9_requestGrant, m9_runGrantedCommand, mergedDescribe9, m10_describe, m10_expect, m10_it, m10_agentToolsFor, m10_reactToMessage, mergedDescribe10, m11_describe, m11_expect, m11_it, m11_createSchedule, m11_deleteSchedule, m11_listSchedules, m11_updateSchedule, mergedDescribe11, m14_describe, m14_expect, m14_it, m14_vi, m14_agentToolsFor, m14_connectorOfferDepsFromEnv, m14_offerConnector, m14_workbenchStatus, m14_resumePrompt, mergedDescribe14, m24_describe, m24_expect, m24_it, m24_callAgentTool, m24_assembleTurnPrompt, mergedDescribe24, m25_describe, m25_expect, m25_it, m25_callAgentTool, mergedDescribe25, m26_expect, m26_it, m26_vi, m26_callAgentTool, mergedDescribe26, fixtureScope8, fixtureScope12, fixtureScope16, fixtureScope18, fixtureScope20, fixtureScope21, fixtureScope23, fixtureScope24, type m10_AgentScheduleDeps } from './test-support-read-only-mcp.test-support.js';
 
 mergedDescribe9("agent-grant-tools.test.ts", () => {
 const scope8 = fixtureScope8();
@@ -158,19 +158,9 @@ m9_describe('run_granted_command reports the chat boundary', () => {
 });
 });
 mergedDescribe10("agent-reaction-tools.test.ts", () => {m10_describe('beeline-agent reaction tool', () => {
-  m10_it('declares the supported emoji and is available on every agent conversation surface', () => {
-    for (const tools of [
-      m10_agentToolsFor(true, false),
-      m10_agentToolsFor(true, true),
-      m10_agentToolsFor(true, false, true),
-    ]) {
-      const tool = tools.find((entry) => entry.name === 'react_to_message');
-      m10_expect(tool?.inputSchema).toMatchObject({
-        required: ['messageId', 'emoji'],
-        properties: { emoji: { enum: [...m10_MESSAGE_REACTION_EMOJIS] } },
-      });
-    }
-    m10_expect(m10_agentToolsFor(false, false).map((tool) => tool.name)).not.toContain('react_to_message');
+  m10_it('keeps the retired reaction tool out of every conversation surface',()=>{
+    for(const tools of [m10_agentToolsFor(true,false),m10_agentToolsFor(true,true),m10_agentToolsFor(true,false,true)])
+      m10_expect(tools.map(tool=>tool.name)).not.toContain('react_to_message');
   });
 
 

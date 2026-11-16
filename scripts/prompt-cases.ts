@@ -44,8 +44,7 @@ const option = (name: string): string | undefined => {
 };
 
 const SAMPLES = 3;
-const NEED = 2;
-const MAX_STEPS = 6;
+const NEED = 3;
 const SILENT_TOOL_NAME = 'no_reply_needed';
 // Fixed so a case's prompt does not change with the runner's own host.
 const FIXED_MEMORY_MAX_BYTES = 32 * 1024 ** 3;
@@ -112,10 +111,8 @@ const NATIVE_TOOLS: Record<(typeof NATIVE_TOOL_NAMES)[number], ToolDefinition> =
 export function toolsFor(source: PromptSource, testCase: PromptCase): ToolDefinition[] {
   const extras = testCase.tools ?? [];
   return [
-    ...source.tools.minimalTools(testCase.place.endsWith('corner')),
-    source.tools.RUNNER_TOOL,
+    ...source.tools.agentToolsFor(true,testCase.place==='dm',testCase.place.endsWith('corner'),testCase.place==='code-corner',true,true,true),
     { name: 'Read', description: 'Read a file by its absolute path, including a listed skill.', inputSchema: { type: 'object', properties: { file_path: { type: 'string' } }, required: ['file_path'] } },
-    ...(extras.includes(SILENT_TOOL_NAME) ? [source.tools.SILENT_TOOL] : []),
     ...NATIVE_TOOL_NAMES.filter((name) => extras.includes(name)).map((name) => NATIVE_TOOLS[name]),
   ];
 }
@@ -218,7 +215,7 @@ export function replayPrompt(source: PromptSource, testCase: PromptCase, withMem
     '',
     'You are the agent described below, on exactly one turn. Do not run anything. Decide what you would do on this turn with the tools listed.',
     'Return only the next batch of independent tool calls. Stop and wait for their results before choosing dependent calls. The controller supplies factual scenario results; never assume a successful default.',
-    `The same simulated turn can continue for up to ${MAX_STEPS} rounds. Return calls:[] when the turn is finished, including a silent final reply.`,
+    'Return calls:[] when the simulated turn is finished, including a silent final reply.',
     'When a tool requests approval or reports a blocked boundary, stop there. Never guess unread skill content.',
     'Reply with only one JSON object and nothing else:',
     '{"calls":[{"name":"<tool name>","args":{...}}],"text":"<everything you would post as your reply, or an empty string>"}',

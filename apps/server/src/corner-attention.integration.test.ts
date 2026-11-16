@@ -114,7 +114,7 @@ const post = async (id: string, text: string, author = WORKER, age = '0 hours') 
   );
 // The idle alert now wakes its opening commander inside the corner whenever
 // the commander has effective access (inherited parent-roster access counts).
-const commanderFlags = async () => (await readAgentCommands(db, COMMANDER, C)).commands;
+const commanderFlags = async () => (await readAgentCommands(db, COMMANDER, ROOM)).commands;
 
 it('IDLE-QUEUE: retains the episode metadata and permits an unchanged status to finish silently', async () => {
   await turn(); await end();
@@ -122,9 +122,9 @@ it('IDLE-QUEUE: retains the episode metadata and permits an unchanged status to 
   const [notice] = await commanderFlags();
   expect(notice).toBeDefined();
   const row = (await db.query('SELECT private_payload FROM agent_commands WHERE id=$1', [notice!.id])).rows[0]!;
-  expect(row.private_payload).toMatchObject({ automatic: true, originCornerId: C,
+  expect(row.private_payload).toMatchObject({ automatic:true,fromRoomId:C,
     idleSince: expect.any(String) });
-  expect(await daemon.execute('markAgentTurnSilent', { roomId: C, requestId: notice!.turnRequestId }, COMMANDER))
+  expect(await daemon.execute('markAgentTurnSilent', { roomId:notice!.roomId,requestId:notice!.turnRequestId }, COMMANDER))
     .toMatchObject({ answered: true });
   expect((await db.query('SELECT id FROM messages WHERE author_id=$1 AND request_id=$2',
     [COMMANDER, notice!.turnRequestId])).rows).toEqual([]);
@@ -141,11 +141,12 @@ it('IDLE-QUEUE: drops superseded idle wakes while preserving a human instruction
   await post('resume-instruction', '@commander resume the work', HUMAN);
   const instruction = (await createAgentCommand(db, { roomId: C, agentId: COMMANDER,
     sourceMessageId: 'resume-instruction', reason: 'human_tag' }))!;
-  expect((await commanderFlags()).map(item => item.id)).toEqual([instruction.id]);
+  expect(await commanderFlags()).toEqual([]);
+  expect((await readAgentCommands(db,COMMANDER,C)).commands.map(item=>item.id)).toEqual([instruction.id]);
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [notice!.id])).rows)
     .toEqual([{ state: 'complete' }]);
   // A late answer from a turn already in flight cannot repeat the obsolete status.
-  await daemon.execute('postRoomMessage', { roomId: C, requestId: notice!.id, text: 'Still waiting to resume.' }, COMMANDER);
+  await daemon.execute('postRoomMessage', { roomId: notice!.roomId, requestId: notice!.id, text: 'Still waiting to resume.' }, COMMANDER);
   expect((await db.query('SELECT id FROM messages WHERE author_id=$1 AND request_id=$2',
     [COMMANDER, notice!.turnRequestId])).rows).toEqual([]);
 });
@@ -252,6 +253,7 @@ it('Reproduction CORNER-STATE: the Room list and corner inspection agree that CI
   expect(await state()).toBe('review');
   await end(REVIEWER, 40);
   await ci('pending');
+  for(const notice of await commanderFlags()) await daemon.execute('markAgentTurnSilent',{roomId:notice.roomId,requestId:notice.turnRequestId},COMMANDER);
   expect(await state()).toBe('review');
   const row = (await phone.readCorners(ROOM, HUMAN))!.corners[0]!;
   expect(row).toMatchObject({
@@ -363,7 +365,7 @@ it.each(['failed', 'complete'])('Reproduction IDLE-STORM: commander %s exhausts 
     const [notice] = (await commanderFlags()).filter(command => command.source.body.includes(' is idle.'));
     expect(notice).toBeDefined();
     await startQueuedCommand(daemon, { roomId: C, commandId: notice!.id }, COMMANDER);
-    await daemon.execute('report', { roomId: C, requestId: notice!.turnRequestId,
+    await daemon.execute('report', { roomId:notice!.roomId,requestId:notice!.turnRequestId,
       status: status === 'failed' ? 'failed' : 'done', text: 'Still waiting on secrets.' }, COMMANDER);
     expect((await db.query('SELECT status FROM agent_turns WHERE request_id=$1', [notice!.turnRequestId])).rows)
       .toEqual([{ status }]);

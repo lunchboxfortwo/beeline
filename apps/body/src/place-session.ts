@@ -504,11 +504,12 @@ export class PlaceSession {
 }
 
 /** The file the agent's tools read to learn which item they serve. */
-export async function writeTurnContext(path: string, item: Pick<AgentCommand, 'id' | 'roomId' | 'turnRequestId' | 'rootCommandId' | 'reason'> | undefined,
+export async function writeTurnContext(path: string, item: Pick<AgentCommand, 'id' | 'roomId' | 'turnRequestId' | 'rootCommandId' | 'reason' | 'operatorAgent'> | undefined,
   queued: readonly Pick<AgentCommand, 'turnRequestId' | 'rootCommandId' | 'reason'>[] = [], ownedModelDirectory?: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   await writeFile(path, JSON.stringify(item ? {
     roomId: item.roomId, requestId: item.turnRequestId, taskId: item.rootCommandId, commandReason: item.reason, itemId: item.id,
+    ...(item.operatorAgent ? {operatorAgent:true} : {}),
     commands: queued.map(command => ({ requestId: command.turnRequestId, commandReason: command.reason, taskId: command.rootCommandId })),
     startedAt: Date.now(),
     ...(ownedModelDirectory ? { ownedModelDirectory } : {}),

@@ -202,7 +202,7 @@ export async function getRoomGitHubTokenOperation<Name extends keyof DaemonOpera
         if ((input as Input<'getRoomGitHubToken'>).write) {
           const fact = await ctx.database.query(`SELECT 1 FROM corner_facts WHERE corner_id=$1 AND implementer_agent_id=$2`,
             [roomId, authenticatedAgentId]);
-          if (!fact.rowCount) throw new CommandRefusalError('Call become_implementer before pushing or opening a PR for this thread.', 409);
+          if (!fact.rowCount) throw new CommandRefusalError('Call claim_thread before pushing or opening a PR for this thread.', 409);
         }
         try {
           return (await ctx.roomGitHubToken(roomId)) as Output<Name>;

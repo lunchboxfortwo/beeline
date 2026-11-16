@@ -191,7 +191,7 @@ export const CAPABILITY_TOOLS: Record<string, Record<string, ToolDefinition>> = 
     },
     "rebind": {
       "name": "rebind",
-      "description": "Bind one specific agent to a list-bound role this run is currently on - the human-directed recovery when nobody on the role's list is healthy (report exhausted capability to your commander, who arranges the required role assignment). No health filter applies - an explicit choice overrides \"healthy\". The target can be any agent member of this chat, on the list or not; agent takes an agent id or a handle from your member list. Not for a role bound to one agent; that role never fails over. How to write and run workflows: https://github.com/Beeline-Work/beeline/blob/main/docs/workflows/README.md",
+      "description": "Bind one specific agent to a list-bound role this run is currently on - the human-directed recovery when nobody on the role's list is healthy (reply to your commander about exhausted capability, who arranges the required role assignment). No health filter applies - an explicit choice overrides \"healthy\". The target can be any agent member of this chat, on the list or not; agent takes an agent id or a handle from your member list. Not for a role bound to one agent; that role never fails over. How to write and run workflows: https://github.com/Beeline-Work/beeline/blob/main/docs/workflows/README.md",
       "inputSchema": {
         "type": "object",
         "required": ["runId", "role", "agent"],

@@ -1,5 +1,9 @@
+import { legacyCommandPayload } from './messaging-cutover.js';
 import { initializeThreadImplementer } from './corner-lifecycle.js';
-import type { AgentCommand,AgentCommandAction,RoomInboxResult } from '@beeline/api-contract/daemon';
+import { sendMessage } from './agent-messaging.js';
+import { recordedMessageRoute } from './message-route.js';
+import { ensureSystemIdentity } from './system-line.js';
+import type { AgentCommand,AgentCommandAction,RoomInboxResult,MessageRoute,MessageAsk } from '@beeline/api-contract/daemon';
 import { isBackgroundCommand,wall } from '@beeline/api-contract/daemon';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { createHash,randomBytes } from 'node:crypto';
@@ -11,7 +15,7 @@ import { subscriptionPromptBody } from './agent-subscriptions.js';
 import { endAgentTurn } from './agent-turn-end.js';
 import { closingActivity,replySteps } from './answer-activity.js';
 import { CornerAccessDatabase } from './corner-access-database.js';
-import { cornerCommanderBriefSql } from './corner-commander.js';
+import { cornerCommanderBriefSql,threadCommanderAddressSql } from './corner-commander.js';
 import { cornerLifecycleSql } from './corner-github-cache.js';
 import { currentIdleReportSql } from './corner-idle.js';
 import { greenReviewRequestSql,reviewChecksSql } from './corner-lifecycle-values.js';
@@ -24,7 +28,7 @@ import { hasSystemReportMention,isChannelMentionToken,typedMentionHandles } from
 import { mcpCommandWakeSql } from './rooms-mcp-events.js';
 import { recordMcpMemberWebhook,recordMcpMention } from './rooms-mcp-members.js';
 import { cleanVoiceReply } from './voice-reply.js';
-import { modelText,type AgentVoice,type Composed,type MemberText,type SystemAuthorId } from './message-origin.js';
+import { modelText,systemText,type AgentVoice,type Composed,type MemberText,type SystemAuthorId } from './message-origin.js';
 type Attachment = NonNullable<PrivateCommandPayload['attachments']>[number];
 /** Sanitizing keeps the text's declared origin. */
 const pgText=<Text extends string>(value:Text)=>value.replace(/[\u0000\uD800-\uDFFF]/gu,'\uFFFD') as Text;
@@ -221,6 +225,12 @@ WHERE command.room_id=attachments.room_id AND command.agent_id=attachments.agent
  * words, or System text under the System identity. */
 type PayloadVoice = { text: MemberText; authorId: string } | { text: Composed<'system'>; authorId: SystemAuthorId };
 export type PrivateCommandPayload = PayloadVoice & {
+  /** Explicit message protocol: immutable sender and destination, without ancestry routing. */
+  route?: MessageRoute;
+  messageAsk?: MessageAsk;
+  inReplyTo?: string;
+  /** A System wake continues the thread task; it never makes System the commander. */
+  replyAddress?: MessageRoute['from'];
   /** Stable tool-call key on the corner's opening order. */
   openKey?: string;
   ask?: string;
@@ -236,7 +246,7 @@ export type PrivateCommandPayload = PayloadVoice & {
   returnIdentityId?: string;
   /** Frozen corner escalation route, distinct from an explicit order issuer. */
   escalation?: { identityId: string; roomId: string };
-  kind: 'order' | 'report' | 'lifecycle';
+  kind: 'order' | 'report' | 'lifecycle' | 'message' | 'reply';
   attachments?: RoomInboxResult['items'][number]['attachments'];
   /** This item already delivered an explicit report. */
   reported?: boolean;
@@ -401,7 +411,7 @@ export type { TaggedAgentLifecycleCommand } from './agent-command-create-agent-c
 export { dropQueuedOrdersForStop,lockAgentCommandQueue } from './agent-command-queue.js';
 export { commandInbox,queueCornerMergeConflict,readAgentCommands,reconcileCornerMergeBlockers,routeSystemCommand } from './agent-command-read-agent-commands.js';
 export { reconcileConfiguredCornerReviewers } from './agent-command-reconcile-configured-corner-reviewers.js';
-export { authorizeCommandOutput,CORNER_AGENT_UNREACHABLE_CARD_TYPE,CORNER_CHECKS_BLOCKED_CARD_TYPE,CORNER_MERGE_YES_CARD_TYPE,CORNER_REVIEW_DEADLOCK_CARD_TYPE,dismissAgentCommandWakes,selectMcpOrder } from './agent-command-route-agent-result.js';
+export { authorizeCommandOutput,CORNER_AGENT_UNREACHABLE_CARD_TYPE,CORNER_CHECKS_BLOCKED_CARD_TYPE,CORNER_MERGE_YES_CARD_TYPE,CORNER_REVIEW_DEADLOCK_CARD_TYPE,dismissAgentCommandWakes,selectMcpMessage } from './agent-command-route-agent-result.js';
 
 
 
@@ -415,10 +425,11 @@ export type QueuedPost = {
   /** A member posts under its own name: a person's words or its agent's model text. */
   kind: 'post'; roomId: string; authorId: string; text: MemberText; id?: string;
   replyTo?: string; attachments?: readonly Attachment[]; requestId?: string; commandRoomId?: string;
-  sourceClient?: { id: string; name: string }; tags?: unknown; presentation?: 'message' | 'card';
+  sourceClient?: { id: string; name: string }; tags?: unknown; presentation?: 'message' | 'card'; cardType?: string;
   parent?: CommandRow; card?: unknown; agentIds?: readonly string[];
   /** Only the answer exit supplies a recorded audience outside the execution chat. */
   audienceId?: string;
+  origin?:MessageRoute['from'];
   stopped?: boolean;
 };
 export type QueuedDelivery = {
@@ -435,6 +446,8 @@ export type QueuedOrder = {
 type Member = { id: string; kind: 'human' | 'agent'; handle: string | null; name: string;
   callback: string | null; client_id: string | null; client_name: string | null; mcp: boolean; starter: string | null; owner_id: string | null };
 type Chat = { id: string; parent_id: string | null; archived: boolean; direct_participants: string[] | null;
+  commander: MessageRoute['from'] | null;
+  workflow_owner_id:string|null;
   worker: string | null; source_member: boolean; source_archived: boolean; source_parent_id: string | null;
   source_worker: string | null; source_target_member: boolean;
   opening_root: { author_id: string; room_id: string } | null; members: Member[]; opening: CommandRow | null;
@@ -463,6 +476,7 @@ export async function queueMessage(database: SqlDatabase, raw: QueuedPost | Queu
     const delivery = 'kind' in input && input.kind === 'delivery';
     const command = !post && !order && !delivery ? input as DeliveryInput : undefined;
     const parent = input.parent;
+    const origin=post ? input.origin : command?.privatePayload?.route?.from;
     const chat = (await db.query<Chat>(
       `WITH audience AS MATERIALIZED (
          SELECT member.identity_id id,identity.kind,identity.name,
@@ -498,6 +512,10 @@ export async function queueMessage(database: SqlDatabase, raw: QueuedPost | Queu
           WHERE gh.corner_id=room.id) review,
          COALESCE((SELECT jsonb_agg(audience) FROM audience),'[]'::jsonb) members,
          to_jsonb(initial) opening,
+         ${threadCommanderAddressSql('room.id')} commander,
+         (SELECT owner.id FROM messages workflow JOIN messages start ON start.id=workflow.card->>'runId'
+           AND start.room_id=workflow.room_id JOIN identities owner ON owner.id=start.card->>'ownerId'
+           AND owner.kind='human' WHERE workflow.id=$2 AND workflow.card_type='workflow-handoff') workflow_owner_id,
          (SELECT jsonb_build_object('author_id',author_id,'room_id',room_id) FROM messages
            WHERE id=initial.root_source_message_id) opening_root,
          (SELECT to_jsonb(handover) FROM (${cornerCommanderBriefSql('room.id')}) handover) handover,
@@ -508,11 +526,11 @@ export async function queueMessage(database: SqlDatabase, raw: QueuedPost | Queu
        LEFT JOIN LATERAL (${cornerOpeningSql('room.id')}) initial ON true WHERE room.id::text=$1`,
       [input.roomId, command?.sourceMessageId ?? null,
         parent?.source_message_id ?? parent?.root_source_message_id ?? command?.reportSource?.root_source_message_id ?? command?.scheduledHumanCommandMessageId ?? null,
-        delivery ? input.sourceRoomId : null, delivery ? input.authorId : null, delivery ? input.recipientId : null],
+        delivery ? input.sourceRoomId : origin?.place ?? null, delivery ? input.authorId : origin?.agent ?? null, delivery ? input.recipientId : null],
     )).rows[0];
     const audience = chat?.members ?? [];
     const actor = delivery ? input.recipientId ?? input.authorId : post ? input.audienceId ?? input.authorId : order ? input.authorId
-      : command?.audienceId ?? (command?.privatePayload?.kind === 'order' ? command.privatePayload.authorId
+      : command?.audienceId ?? command?.privatePayload?.route?.from.agent ?? (command?.privatePayload?.kind === 'order' ? command.privatePayload.authorId
         : chat?.source?.room_id === input.roomId && !chat.source.system_event ? chat.source.author_id : undefined);
     const recipient = command?.agentId;
     const named = order ? input.agent?.trim().replace(/^@/, '').toLowerCase() : undefined;
@@ -521,9 +539,9 @@ export async function queueMessage(database: SqlDatabase, raw: QueuedPost | Queu
       : chat?.parent_id ? member.id === chat.worker : member.id !== input.authorId)) : [];
     if (!chat || !chat.source_member || order && named && !candidates.length || actor && actor !== SYSTEM_IDENTITY_ID && !audience.some(member => member.id === actor) ||
         recipient && !audience.some(member => member.id === recipient && member.kind === 'agent'))
-      throw wall('membership', delivery ? 'commander is no longer a member of the return address' : 'address requires current membership');
-    if (chat.archived || delivery && chat.source_archived || 'stopped' in input && input.stopped)
-      throw wall('stop', chat.archived || delivery && chat.source_archived
+      refuseMessageMembership(delivery ? 'commander is no longer a member of the return address' : undefined);
+    if (chat.archived || (delivery || origin) && chat.source_archived || 'stopped' in input && input.stopped)
+      throw wall('stop', chat.archived || (delivery || origin) && chat.source_archived
         ? {message:'address is archived',status:409} : 'command turn cancelled');
     if (delivery) {
       if (input.postedReplyId) {
@@ -537,6 +555,7 @@ export async function queueMessage(database: SqlDatabase, raw: QueuedPost | Queu
       }
       const target = audience.find(member => member.id === input.recipientId);
       if (target?.kind === 'agent') {
+        // Cutover only: old helper reports retain their queued wake/return plumbing.
         const wakeHere = chat.source_parent_id && chat.source_target_member && !target.mcp &&
           (chat.source_worker !== target.id || input.sourceItem.agent_id !== target.id && input.sourceItem.private_payload?.kind !== 'report');
         const queued = await insertAgentCommand(db, { id: input.id, roomId: wakeHere ? input.sourceRoomId : chat.id, agentId: target.id,
@@ -546,7 +565,7 @@ export async function queueMessage(database: SqlDatabase, raw: QueuedPost | Queu
             ask: input.ask, sourceAgentId:input.sourceItem.agent_id, automatic: input.automatic, idleSince: input.idleSince,
             reportStatus: input.reportStatus,
             originCornerId: chat.source_parent_id ? input.sourceRoomId : input.sourceItem.private_payload?.originCornerId, attachments: input.attachments ? [...input.attachments] : undefined },
-        }, wakeHere ? { ...chat, id: input.sourceRoomId, parent_id: chat.source_parent_id } : chat);
+        }, wakeHere ? {...chat,id:input.sourceRoomId,parent_id:chat.source_parent_id} : chat);
         return { id: queued!.id, createdAt: new Date(queued!.created_at).getTime() / 1000, delivered: true, receipt: 'Report queued privately; not confirmation of execution.' };
       }
       const saved = await postMessage(db, { kind: 'post', roomId: chat.id, authorId: input.authorId,
@@ -593,12 +612,12 @@ async function postMessage(db: SqlDatabase, input: PublicPost, chat: Chat): Prom
       existing.text !== input.text || json(existing.attachments) !== attachments)
     ? hash(`message:${original}:${input.authorId}:${input.roomId}:${input.text}:${attachments}`) : original;
   const saved = (await db.query<{ id: string; created_at: Date; reply_to_message_id:string|null }>(
-    `INSERT INTO messages(id,room_id,author_id,text,attachments,source_client,presentation,request_id,card,reply_to_message_id,root_message_id,legacy_event)
-     SELECT $1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8,$9::jsonb,parent.id,COALESCE(parent.root_message_id,parent.id),$11::jsonb
+     `INSERT INTO messages(id,room_id,author_id,text,attachments,source_client,presentation,request_id,card,reply_to_message_id,root_message_id,legacy_event,card_type)
+     SELECT $1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8,$9::jsonb,parent.id,COALESCE(parent.root_message_id,parent.id),$11::jsonb,$12
      FROM (SELECT 1) source LEFT JOIN messages parent ON parent.id=$10 AND parent.room_id=$2 AND parent.deleted_at IS NULL
      ON CONFLICT(id) DO NOTHING RETURNING id,created_at,reply_to_message_id`,
     [id, chat.id, input.authorId, input.text, attachments, input.sourceClient ? json(input.sourceClient) : author?.client_id ? json({id:author.client_id,name:author.client_name}) : null,
-      input.presentation ?? 'message', input.requestId ?? null, input.card ? json(input.card) : null, input.replyTo ?? null, input.tags ? json(input.tags) : null],
+      input.presentation ?? 'message', input.requestId ?? null, input.card ? json(input.card) : null, input.replyTo ?? null, input.tags ? json(input.tags) : null,input.cardType ?? null],
   )).rows[0] ?? (await db.query<{ id:string; created_at:Date; reply_to_message_id:string|null }>(
     'SELECT id,created_at,reply_to_message_id FROM messages WHERE id=$1',[id])).rows[0]!;
   // A reply tool records the committed answer for this request. Progress in
@@ -670,6 +689,8 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
   const escalationRoom = chat.handover?.approval_basis.commanderReturnRoomId ?? chat.handover?.source_room_id ?? opening?.fromRoomId;
   const sourceText = chat.source?.text;
   const scheduleOwner = (chat.source?.card as { ownerId?: unknown } | null)?.ownerId;
+  const workflowOwner=chat.workflow_owner_id ?? (input.reason==='resume' && parent?.message?.systemEvent?.kind==='workflow-handoff'
+    ? parent.message.route?.from.agent : undefined);
   const scheduledReturn = input.reason === 'schedule' ? {
     kind: 'lifecycle' as const, authorId: chat.source?.author_id ?? SYSTEM_IDENTITY_ID,
     text: sourceText ?? input.reason, fromRoomId: chat.id,
@@ -682,6 +703,17 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
     ? { ...parent.private_payload, kind: 'lifecycle', reported: undefined, text: sourceText ?? parent.private_payload.text } as PrivateCommandPayload
     : handover ? { kind:'lifecycle',authorId:handover.author_id,text:sourceText ?? input.reason,
       fromRoomId:handover.approval_basis.commanderReturnRoomId ?? handover.source_room_id } as PrivateCommandPayload : undefined);
+  if (lifecycle && input.reason!=='corner_objective' && !workflowOwner) {
+    const from={agent:input.privatePayload?.authorId ?? (chat.source?.system_event ? SYSTEM_IDENTITY_ID : chat.source?.author_id) ?? SYSTEM_IDENTITY_ID,
+      place:input.privatePayload?.fromRoomId ?? chat.source?.room_id ?? chat.id};
+    payload={...payload,kind:'lifecycle',authorId:from.agent,
+      text:input.privatePayload?.text ?? systemText(sourceText ?? input.reason),fromRoomId:from.place,
+      route:{from,to:{agent:input.agentId,place:chat.id}},
+      ...(from.agent===SYSTEM_IDENTITY_ID && chat.commander ? {replyAddress:chat.commander} : {}),
+    } as PrivateCommandPayload;
+  }
+  const scheduleSender=scheduledReturn ? {agent:scheduledReturn.returnIdentityId ?? SYSTEM_IDENTITY_ID,place:chat.id} : undefined;
+  if (scheduleSender?.agent===SYSTEM_IDENTITY_ID) await ensureSystemIdentity(db);
   const parentReturn=parent?.private_payload?.returnIdentityId ??
     (parent?.private_payload?.kind==='order'?parent.private_payload.authorId:undefined);
   // An event wake queued in a corner answers in that corner, as does the same agent's continuation
@@ -694,18 +726,18 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
     text: payload.text + (input.wakeNote ? `\n${input.wakeNote}` : ''),
     ...(chat.parent_id && payload.kind === 'order' && escalationIdentity && escalationRoom
       ? { escalation: { identityId: escalationIdentity, roomId: escalationRoom } } : {}),
-    returnIdentityId: cornerWake ? undefined : handover?.author_id ?? payload.returnIdentityId ?? (payload.kind === 'order' ? payload.authorId
-      : (parent?.agent_id === input.agentId && parentReturn!==input.agentId ? parentReturn : undefined) ?? chat.parent_source?.author_id),
+    returnIdentityId: payload.replyAddress?.agent ?? payload.route?.from.agent ?? (cornerWake ? undefined : handover?.author_id ?? payload.returnIdentityId ?? (payload.kind === 'order' ? payload.authorId
+      : (parent?.agent_id === input.agentId && parentReturn!==input.agentId ? parentReturn : undefined) ?? chat.parent_source?.author_id)),
   } as PrivateCommandPayload;
-  const returnRoom = input.reason === 'schedule' || cornerWake ? chat.id : payload?.kind === 'order' ? payload.fromRoomId : payload || lifecycle
+  const returnRoom = workflowOwner ? chat.id : payload?.replyAddress?.place ?? payload?.route?.from.place ?? (input.reason === 'schedule' || cornerWake ? chat.id : payload?.kind === 'order' ? payload.fromRoomId : payload || lifecycle
     ? handover?.approval_basis.commanderReturnRoomId ?? handover?.source_room_id ??
-      (parent?.agent_id === input.agentId ? parent.return_room_id : undefined) ?? chat.parent_source?.room_id ?? parent?.return_room_id ?? chat.id : chat.id;
+      (parent?.agent_id === input.agentId ? parent.return_room_id : undefined) ?? chat.parent_source?.room_id ?? parent?.return_room_id ?? chat.id : chat.id);
   const reviewSource = input.reason === 'report' ? input.reportSource ?? input.parent : input.parent;
   const selectedReview=chat.review?.agentId===input.agentId && chat.review.headSha &&
-    ['corner_review_dispatch','subscribed_event','agent_tag','order'].includes(input.reason) ? chat.review : undefined;
+    ['corner_review_dispatch','subscribed_event','agent_tag','order','message'].includes(input.reason) ? chat.review : undefined;
   const review = selectedReview ? {cornerId:selectedReview.cornerId,headSha:selectedReview.headSha,
     pullRequest:selectedReview.pullRequest,briefRevision:selectedReview.briefRevision,checks:selectedReview.checks,
-    ...(reviewSource?.review_context && input.reason==='order'?{purpose:'repair'}:{})}
+    ...(reviewSource?.review_context && ['order','message'].includes(input.reason)?{purpose:'repair'}:{})}
     : input.reason==='corner_review_needed' && chat.review ? {...chat.review,purpose:'repair'}
     : reviewSource?.review_context && reviewSource.review_context.purpose !== 'repair' ? { ...reviewSource.review_context,
     purpose: input.reason === 'report' ? 'verdict' : 'repair' } : null;
@@ -714,6 +746,8 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
   const reportAddress = chat.parent_id && commander ? commander === input.agentId && openingOrigin
     ? { identityId: openingOrigin.author_id, roomId: openingOrigin.room_id }
     : { identityId: commander, roomId: escalationRoom ?? chat.id } : null;
+  // The workflow engine records its human owner as the assignment sender.
+  // A resume keeps that same stored sender; later card actors do not transfer it.
   const privateMessage = Boolean(payload) && input.reason !== 'schedule';
   const wake = mcpCommandWakeSql(19);
   const saved = (await db.query<CommandRow>(
@@ -729,7 +763,17 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
       input.avatarJob ?? false, payload ? json(payload) : null, returnRoom, review ? json(review) : null, input.reason === 'corner_brief_revision' ?
         json({briefRevision: chat.handover?.revision ?? 0}) : null, reportAddress ? json(reportAddress) : null,
       json({ id: privateMessage ? id : input.sourceMessageId ?? id,
-        authorId: payload?.authorId ?? chat.source?.author_id ?? SYSTEM_IDENTITY_ID,
+        // Cutover only: legacy helper writes keep their existing routing plumbing.
+        route:scheduleSender ? {from:scheduleSender,to:{agent:input.agentId,place:chat.id}} : workflowOwner ? {from:{agent:workflowOwner,place:chat.id},to:{agent:input.agentId,place:chat.id}} :
+          input.reason==='mcp_call' && parent?.agent_id===input.agentId && parent.message?.route ? parent.message.route :
+          legacyCommandPayload(payload) ? undefined : payload?.route ??
+          {from:{agent:workflowOwner ?? payload?.authorId ?? chat.source?.author_id ?? SYSTEM_IDENTITY_ID,
+            place:payload?.fromRoomId ?? chat.source?.room_id ?? chat.id},to:{agent:input.agentId,place:chat.id}},
+        replyAddress:workflowOwner ? {agent:workflowOwner,place:chat.id} :
+          input.reason==='mcp_call' && parent?.agent_id===input.agentId && parent.message?.route ? parent.message.replyAddress :
+          payload?.replyAddress ?? (!payload?.route && (payload?.authorId ?? chat.source?.author_id)===SYSTEM_IDENTITY_ID
+            ? chat.commander ?? (payload?.returnIdentityId ? {agent:payload.returnIdentityId,place:returnRoom} : undefined) : undefined),
+        authorId: scheduleSender?.agent ?? workflowOwner ?? payload?.authorId ?? chat.source?.author_id ?? SYSTEM_IDENTITY_ID,
         body: (payload?.text ?? subscriptionPromptBody(sourceText ?? input.reason, chat.source?.system_event ?? null)) +
           squireDecisionDetail(chat.source?.card_type ?? null,chat.source?.card ?? null) +
           (chat.source?.room_id===chat.id ? workflowWakeDetail(chat.source.card_type ?? null,chat.source.card ?? null,null,null,null) : '') +
@@ -755,10 +799,16 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
 }
 
 const hash = (text: string) => createHash('sha256').update(text).digest('hex');
+/** Every message adapter shares the queue owner's existing membership refusal. */
+export function refuseMessageMembership(message='address requires current membership'):never {
+  throw wall('membership',message);
+}
 
 /** The only queue-answer exit. Publication and completion share its transaction. */
 export async function answerQueuedMessage(database: SqlDatabase, agentId: string, input: {
   roomId: string; requestId?: string; text: string; report?: boolean; status?: unknown; ask?: string;
+  messageAsk?: MessageAsk; explicitReply?: boolean;
+  replyFromPlace?: string;
   steps?: unknown; messageId?: string; replyToMessageId?: string;
   queuedRequestIds?: readonly string[];
   harnessEnded?: boolean;
@@ -769,7 +819,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
     const ids = [...new Set([input.requestId, ...(input.queuedRequestIds ?? [])].filter((id): id is string => Boolean(id)))];
     const items = (await db.query<CommandRow & { return_agent_id: string | null; batch_reply_id: string | null }>(`SELECT item.*,recipient.id return_agent_id,posted.id batch_reply_id
       FROM agent_commands item LEFT JOIN identities recipient ON recipient.kind='agent'
-        AND recipient.id=COALESCE(item.private_payload->>'returnIdentityId',
+        AND recipient.id=COALESCE(item.message->'replyAddress'->>'agent',item.message->'route'->'from'->>'agent',item.private_payload->>'returnIdentityId',
           CASE WHEN item.private_payload->>'kind'='order' THEN item.private_payload->>'authorId' END)
       LEFT JOIN messages posted ON posted.id=COALESCE(item.posted_reply_id,item.result_message_id)
         AND posted.author_id=item.agent_id AND posted.room_id=item.return_room_id AND posted.deleted_at IS NULL
@@ -815,7 +865,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
       [agentId, input.roomId, input.requestId ?? null],
     )).rows[0];
     // A terminal item never publishes again, including a silent harness exit.
-    if (item?.state === 'complete')
+    if (item?.state === 'complete' && !input.explicitReply)
       return { id: item.result_message_id ?? item.id, createdAt: Math.floor(new Date(item.created_at).getTime() / 1000), delivered: true };
     if (item?.state === 'pending' && item.private_payload?.automatic && item.private_payload.idleSince
       && item.private_payload.authorId === SYSTEM_IDENTITY_ID
@@ -825,6 +875,34 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
       return { id: item.id, createdAt: Math.floor(Date.now() / 1000) };
     }
     const payload = item?.private_payload;
+    if (item && item.state!=='cancelled' && !input.report && (!item.public_reply_id || input.explicitReply) && (item.message?.route || payload?.route || input.explicitReply)) {
+      const route = await recordedMessageRoute(db,item);
+      const messageText=repairAgentPost(item.reason==='voice_order' ? cleanVoiceReply(input.text,item.name) : input.text).text.trim();
+      if (!messageText && !item.answer_attachments?.length && !input.sharedReplyId && (payload?.automatic || isBackgroundCommand(item.reason))) {
+        completedNow=true;
+        await endAgentTurn(db,item,'complete');
+        return {id:item.id,createdAt:Math.floor(Date.now()/1000)};
+      }
+      if ((await db.query('SELECT 1 FROM rooms WHERE id=$1 AND archived_at IS NOT NULL',[route.from.place])).rowCount) {
+        if (item.state==='pending') await endAgentTurn(db,item,'cancelled','return_address_archived');
+        return {id:item.id,createdAt:Math.floor(Date.now()/1000)};
+      }
+      if (!messageText && !input.sharedReplyId) {
+        if(input.harnessEnded) await db.query('SELECT * FROM beeline_interrupt_agent_turn($1,$2,$3,NULL,NULL)',[agentId,item.room_id,item.turn_request_id]);
+        return {id:item.id,createdAt:Math.floor(Date.now()/1000),answered:false};
+      }
+      const saved = input.sharedReplyId ? await queueMessage(db,{kind:'delivery',roomId:route.from.place,
+        authorId:agentId,recipientId:route.from.agent,sourceRoomId:input.roomId,sourceItem:item,
+        id:input.sharedReplyId,postedReplyId:input.sharedReplyId,text:modelText(''),attachments:item.answer_attachments}) : await sendMessage(db,{
+        route:{from:{agent:agentId,place:input.replyFromPlace ?? input.roomId},to:route.from},text:messageText,
+        ask:input.messageAsk,id:input.messageId ?? (input.explicitReply ? undefined : hash(`answer:${item.id}`)),parent:item,
+        replyTo:item.id,attachments:[...new Map([...(payload?.attachments ?? []),...(item.answer_attachments ?? [])].map(file=>[file.url,file])).values()],
+      });
+      completedNow=true;
+      if (item.state==='pending') await endAgentTurn(db,item,'complete',null,saved.id);
+      return {...saved,delivered:true};
+    }
+    // Cutover only: serving old helper builds keep their original report plumbing.
     const escalation = input.report ? item?.report_address ?? (payload?.kind === 'order' ? payload.escalation : undefined) : undefined;
     const roomId = escalation?.roomId ?? item?.return_room_id ?? payload?.fromRoomId ?? input.roomId;
     const recipientId = escalation?.identityId ?? (payload ? payload.returnIdentityId ??

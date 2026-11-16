@@ -1,22 +1,22 @@
 {
   "id": "corner-explains-outside-context",
   "section": "talking",
-  "summary": "Outside a corner, explain the original problem, blocker and decision.",
+  "summary": "Outside a thread, explain the original problem, blocker and decision.",
   "place": "code-corner",
   "turn": {
     "task": {
-      "body": "Report the blocker to your commander Juniper, who will relay it to Dana in 4aad6a5a-e5d3-55e4-a9b7-65edc69b23a1. Dana has not read this corner.",
+      "body": "Report the blocker to your commander Juniper, who will relay it to Dana in 4aad6a5a-e5d3-55e4-a9b7-65edc69b23a1. Dana has not read this thread.",
       "commandReason": "order",
       "fromName": "juniper"
     }
   },
   "messages": [
-    "Task: restore spoken replies. Device playback proof needs microphone access. Decision: approve microphone access or accept desktop playback proof. Dana has not read this corner."
+    "Task: restore spoken replies. Device playback proof needs microphone access. Decision: approve microphone access or accept desktop playback proof. Dana has not read this thread."
   ],
   "pass": {
     "all": [
       {
-        "call": "report",
+        "call": "reply",
         "args": {
           "text": {
             "matches": "spoken|voice|audio",
@@ -25,7 +25,7 @@
         }
       },
       {
-        "call": "report",
+        "call": "reply",
         "args": {
           "text": {
             "matches": "microphone",
@@ -34,7 +34,7 @@
         }
       },
       {
-        "call": "report",
+        "call": "reply",
         "args": {
           "text": {
             "matches": "desktop|approve|grant",
@@ -52,7 +52,7 @@
   },
   "scenario": {
     "history": [
-      "Task: restore spoken replies. Device playback proof needs microphone access. Decision: approve microphone access or accept desktop playback proof. Dana has not read this corner."
+      "Task: restore spoken replies. Device playback proof needs microphone access. Decision: approve microphone access or accept desktop playback proof. Dana has not read this thread."
     ],
     "files": {},
     "results": [
@@ -84,7 +84,7 @@
       {
         "call": "read",
         "args": {
-          "facet": "corners"
+          "facet": "threads"
         },
         "result": {
           "corners": []
@@ -156,6 +156,13 @@
         },
         "result": {
           "revisions": []
+        }
+      },
+      {
+        "call": "reply",
+        "result": {
+          "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "delivered": true
         }
       }
     ],

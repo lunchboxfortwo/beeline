@@ -20,8 +20,8 @@ export async function applyFeedbackDispositions(db: SqlDatabase, command: Comman
     const item = (await db.query<{ status: string; workspace_id: string }>(
       'SELECT status,workspace_id FROM feedback_items WHERE id=$1 FOR UPDATE', [itemId])).rows[0];
     if (!item || (!global && item.workspace_id !== workspace)) throw new Error('feedback item is unavailable in this workspace');
-    // Fixed is certified by notify_feedback_fixed, which verifies the merged PR.
-    if (disposition === 'fixed' && item.status !== 'resolved') throw new Error('verify the merged fix with notify_feedback_fixed before marking fixed');
+    // Fixed is certified by report_feedback(action:fixed), which verifies the merged PR.
+    if (disposition === 'fixed' && item.status !== 'resolved') throw new Error('verify the merged fix with report_feedback(action:fixed) before marking fixed');
     if (disposition === 'linked' && (typeof reference !== 'string' || !reference.trim())) throw new Error('linked needs a corner or pull request reference');
     if (disposition === 'duplicate') {
       if (typeof reference !== 'string' || reference === itemId) throw new Error('duplicate needs a different canonical item');

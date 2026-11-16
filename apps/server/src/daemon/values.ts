@@ -243,6 +243,8 @@ export const DAEMON_OPERATION_ROUTES: Record<keyof DaemonOperationMap, true> = {
   getRoomConversation: true,
   getRoomMessage: true,
   order: true,
+  message: true,
+  reply: true,
   stopAgentTurn: true,
   report: true,
   read: true,

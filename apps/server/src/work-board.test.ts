@@ -343,10 +343,10 @@ describe('Work board recorded sources and single assignee', () => {
     const first = await askOwnerQuestion(db, input, agent),
       second = await askOwnerQuestion(db, input, agent);
     const before = await read();
-    // One row per thread: the thread itself, carrying both asks.
+    // Each question owns its own card and answer.
     const row = before.items.filter((item) => item.ask);
-    expect(row).toHaveLength(1);
-    expect(row[0]).toMatchObject({ roomId: thread, askIds: [first.messageId, second.messageId] });
+    expect(row).toHaveLength(2);
+    expect(row.map(item=>item.askIds)).toEqual([[first.messageId],[second.messageId]]);
     expect(before.items.some((item) => item.id === thread)).toBe(false);
     const option = row[0]!.ask!.approval!.actions![0]!;
     if (option.kind !== 'choice') throw new Error('choice missing');
@@ -389,7 +389,7 @@ describe('Work board recorded sources and single assignee', () => {
     };
     await askOwnerQuestion(db, input, agent);
     await askOwnerQuestion(db, input, agent);
-    expect((await read()).items.find((item) => item.ask)?.askIds).toHaveLength(2);
+    expect((await read()).items.filter(item=>item.ask).map(item=>item.askIds)).toHaveLength(2);
     await phone.execute('clearNeedsYouSection', { workspaceId: workspace }, person);
     expect((await read()).items.some((item) => item.ask)).toBe(false);
   });

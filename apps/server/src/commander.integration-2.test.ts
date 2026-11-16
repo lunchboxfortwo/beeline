@@ -97,7 +97,7 @@ it('issues-triage can order and revise fix threads but cannot open in an inacces
 
 it('corner mentions still wake an instance in the same corner', async () => {
   const opened = await open(), turn = await worker(opened.cornerId);
-  await rootFixture.daemon.execute('postRoomMessage', { ...authority(turn), text: '@ruby review this here' }, WORKER);
+  await rootFixture.daemon.execute('postCornerMessage', { ...authority(turn), cornerId:opened.cornerId, text: '@ruby review this here' }, WORKER);
   expect((await commands(opened.cornerId, RUBY)).length).toBeGreaterThan(0);
   expect((await commands(ROOM, RUBY))).toEqual([]);
 });
@@ -319,7 +319,7 @@ it('vocabulary: corner post tags wake conversation in the posted place without a
   expect(reply.private).toBeFalsy();
   await claim(reply);
   await rootFixture.daemon.execute('postRoomMessage', {...authority(reply),text:'Here is my wording suggestion.'},RUBY);
-  expect((await rootFixture.db.query(`SELECT room_id FROM messages WHERE text='Here is my wording suggestion.'`)).rows[0]?.room_id).toBe(opened.cornerId);
+  expect((await commands(opened.cornerId,WORKER)).find(item=>item.source.body==='Here is my wording suggestion.')).toMatchObject({reason:'reply',from:{agent:RUBY,place:opened.cornerId}});
   expect((await commands(DM,RUBY)).some(command => command.reason === 'report')).toBe(false);
 });
 

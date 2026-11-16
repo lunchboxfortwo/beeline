@@ -83,12 +83,13 @@ it('delivers report audience names from the queue with only people in the roster
     };
     await f.session.deliver(report);
     const prompt = f.prompt.mock.calls[0]![1];
-    expect(prompt.split('\n').find(line => line.startsWith('Request item (report).'))).toBe('Request item (report). Jellybean reports The work is ready. in thread fast-source-setup. To reply to Jellybean, send an order to the same thread (fast-source-setup).');
-    expect(prompt).not.toContain('Your final reply');
+    expect(prompt).toContain('From: Jellybean (worker)');
+    expect(prompt).toContain('From-place:');
+    expect(prompt).toContain(`Message id: ${report.id}`);
+    expect(prompt).toContain(`Reply with reply(id: "${report.id}", text: ...).`);
     // Offline delivery uses each item's own names, not the session's roster.
     await f.session.deliver({ ...report, offlineSeconds: 60 });
-    expect(f.prompt.mock.calls[1]![1]).toContain('To reply to Jellybean, send an order to the same thread (fast-source-setup).');
-    expect(f.prompt.mock.calls[1]![1]).not.toContain('Your final reply');
+    expect(f.prompt.mock.calls[1]![1]).toContain('From: Jellybean (worker)');
     await f.session.deliver({ ...report, reason: 'order' });
     expect(f.prompt.mock.calls[2]![1]).toContain('Your final reply is posted to Milo.');
   } finally {

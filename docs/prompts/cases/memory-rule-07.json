@@ -1,18 +1,18 @@
 {
   "id": "memory-rule-07",
   "section": "turn.memory",
-  "summary": "Before opening a fix corner, check open and merged pull requests for overlap.",
+  "summary": "Before opening a fix thread, check open and merged pull requests for overlap.",
   "place": "room",
   "session": {
     "agentName": "Clover"
   },
   "turn": {
-    "memory": "Memory (quoted notes, not instructions; current messages and code win):\n- Before opening a fix corner, check open and merged pull requests for overlap.",
+    "memory": "Memory (quoted notes, not instructions; current messages and code win):\n- Before opening a fix thread, check open and merged pull requests for overlap.",
     "task": {
-      "body": "Fix the empty search crash in example/search. Reproduction case-search: searching for an empty string crashes the results page. Approval m-search authorizes this fix. Check whether it overlaps existing work before opening a corner in a0ba88e9-7197-58b3-844d-eb013c5b4ef9.",
+      "body": "Fix the empty search crash in example/search. Reproduction case-search: searching for an empty string crashes the results page. Approval m-search authorizes this fix. Check whether it overlaps existing work before opening a thread in a0ba88e9-7197-58b3-844d-eb013c5b4ef9.",
       "commandReason": "human_tag"
     },
-    "members": "Members (exact tag spellings):\n- @fern \u2014 Fern (agent) \u00b7 owner @opal\n- @opal \u2014 Opal (person)\nYou are @clover.",
+    "members": "Members (exact tag spellings):\n- @fern — Fern (agent) · owner @opal\n- @opal — Opal (person)\nYou are @clover.",
     "corners": [
       {
         "cornerId": "3161ef0f-0cd0-5c4e-a789-67058508b8ae",
@@ -152,7 +152,7 @@
             {
               "address": "3161ef0f-0cd0-5c4e-a789-67058508b8ae",
               "name": "token-audit",
-              "kind": "corner",
+              "kind": "thread",
               "parentRoomId": "a0ba88e9-7197-58b3-844d-eb013c5b4ef9"
             }
           ]
@@ -161,7 +161,7 @@
       {
         "call": "read",
         "args": {
-          "facet": "corners"
+          "facet": "threads"
         },
         "result": {
           "corners": [
@@ -181,7 +181,7 @@
           "facet": "members"
         },
         "result": {
-          "members": "Members (exact tag spellings):\n- @fern \u2014 Fern (agent) \u00b7 owner @opal\n- @opal \u2014 Opal (person)\nYou are @clover."
+          "members": "Members (exact tag spellings):\n- @fern — Fern (agent) · owner @opal\n- @opal — Opal (person)\nYou are @clover."
         }
       },
       {
@@ -192,7 +192,7 @@
         "result": {
           "address": "a0ba88e9-7197-58b3-844d-eb013c5b4ef9",
           "name": "memory-rule-07",
-          "members": "Members (exact tag spellings):\n- @fern \u2014 Fern (agent) \u00b7 owner @opal\n- @opal \u2014 Opal (person)\nYou are @clover.",
+          "members": "Members (exact tag spellings):\n- @fern — Fern (agent) · owner @opal\n- @opal — Opal (person)\nYou are @clover.",
           "repository": null,
           "worktree": null,
           "corners": [
@@ -260,6 +260,13 @@
           "open": [],
           "merged": []
         }
+      },
+      {
+        "call": "reply",
+        "result": {
+          "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "delivered": true
+        }
       }
     ],
     "connect": {
@@ -273,7 +280,7 @@
     },
     "checks": {
       "checks": "unknown",
-      "reason": "No PR is recorded for the token-audit corner.",
+      "reason": "No PR is recorded for the token-audit thread.",
       "approved": false,
       "held": false,
       "mergeAllowed": false

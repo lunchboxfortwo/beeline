@@ -285,6 +285,8 @@ const daemonOperations = {
   offerConnector: true,
   openRoomPoll: true,
   order: true,
+  message: true,
+  reply: true,
   postAgentActivity: true,
   postAgentAttachment: true,
   postAgentAvatar: true,

@@ -51,7 +51,7 @@
       {
         "call": "read",
         "args": {
-          "facet": "corners"
+          "facet": "threads"
         },
         "result": {
           "corners": []
@@ -156,6 +156,13 @@
           "error": "path outside allowed roots; a path grant is required"
         },
         "boundary": "error"
+      },
+      {
+        "call": "reply",
+        "result": {
+          "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "delivered": true
+        }
       }
     ],
     "connect": {

@@ -60,9 +60,11 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
       case 'attachToWorkItem':
         await attachToWorkItem(ctx.database,{...input as Input<'attachToWorkItem'>,roomId:(input as Input<'attachToWorkItem'>).targetRoomId},authenticatedAgentId);
         return daemonWriteResult(ctx) as Output<Name>;
-      case 'updateWorkItem':
-        await updateWorkItem(ctx.database,{...input as Input<'updateWorkItem'>,roomId:(input as Input<'updateWorkItem'>).targetRoomId},authenticatedAgentId);
+      case 'updateWorkItem': {
+        const update={...input as Input<'updateWorkItem'>,roomId:(input as Input<'updateWorkItem'>).targetRoomId};
+        await updateWorkItem(ctx.database,update,authenticatedAgentId);
         return daemonWriteResult(ctx) as Output<Name>;
+      }
       case 'getInstitutionalContext':
         return getInstitutionalContextOperation(ctx, name, input, authenticatedAgentId, candidate, scopedRoom);
       case 'saveInstitutionalMemory':
@@ -877,6 +879,6 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
           input as Input<'notifyFeedbackFixed'>,
         )) as Output<Name>;
       default:
-        throw new CommandRefusalError(`unsupported daemon operation: ${String(name)}; use order and report`, 410);
+        throw new CommandRefusalError(`unsupported daemon operation: ${String(name)}; use message and reply`, 410);
     }
 }

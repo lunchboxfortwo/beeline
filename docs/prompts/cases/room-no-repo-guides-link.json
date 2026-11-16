@@ -1,7 +1,7 @@
 {
   "id": "room-no-repo-guides-link",
   "section": "place",
-  "summary": "Code work in a Room without a repository gets the Link or Create path in the first reply.",
+  "summary": "Code work in a chat without a repository gets the Link or Create path in the first reply.",
   "place": "room",
   "session": {
     "agentCommand": "pi-acp",
@@ -11,7 +11,7 @@
   },
   "turn": {
     "task": {
-      "body": "@ruby can you write code here in this Room?",
+      "body": "@ruby can you write code here in this chat?",
       "fromName": "dana",
       "commandReason": "human_tag"
     }
@@ -20,7 +20,7 @@
     "all": [
       {
         "text": {
-          "matches": "Room.{0,30}header",
+          "matches": "chat.{0,30}header",
           "flags": "is"
         }
       },
@@ -39,7 +39,7 @@
       {
         "text": {
           "not": {
-            "matches": "(?<!\\b(?:never|not|won't|don't)\\s)\\b(?:go|switch|move|use|try|open|find|send)\\b.{0,20}\\b(?:another|different|other)\\s+Room|\\b(?:point|direct|send)\\b.{0,50}Room\\b(?!\\s+header).{0,40}(?:linked|repository)|\\b(?:go|switch|move|find|use)\\b.{0,30}Room\\b(?!\\s+header).{0,40}(?:linked|repository)|create\\s+(?:a\\s+)?repository-backed\\s+Room|point.{0,50}repository-backed\\s+Room",
+            "matches": "(?<!\\b(?:never|not|won't|don't)\\s)\\b(?:go|switch|move|use|try|open|find|send)\\b.{0,20}\\b(?:another|different|other)\\s+chat|\\b(?:point|direct|send)\\b.{0,50}chat\\b(?!\\s+header).{0,40}(?:linked|repository)|\\b(?:go|switch|move|find|use)\\b.{0,30}chat\\b(?!\\s+header).{0,40}(?:linked|repository)|create\\s+(?:a\\s+)?repository-backed\\s+chat|point.{0,50}repository-backed\\s+chat",
             "flags": "is"
           }
         }
@@ -47,7 +47,7 @@
       {
         "text": {
           "not": {
-            "matches": "(?:repository|Room).{0,60}(?:filesystem|checkout).{0,30}read.only",
+            "matches": "(?:repository|chat).{0,60}(?:filesystem|checkout).{0,30}read.only",
             "flags": "is"
           }
         }
@@ -86,7 +86,7 @@
       {
         "call": "read",
         "args": {
-          "facet": "corners"
+          "facet": "threads"
         },
         "result": {
           "corners": []
@@ -158,6 +158,13 @@
         },
         "result": {
           "revisions": []
+        }
+      },
+      {
+        "call": "reply",
+        "result": {
+          "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "delivered": true
         }
       }
     ],

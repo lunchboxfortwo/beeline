@@ -8,21 +8,23 @@ import { executeSample } from './prompt-subscription-replay.mjs';
 import { needsSquire } from './prompt-nightly.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
-const MODELS = { baby: 'gpt-6-luna', terra: 'gpt-5.6-terra', speedy: 'gpt-6.1-sol' };
+export const MODEL_PINS = { small: 'gpt-6-luna', large: 'gpt-6.1-sol' };
+export const SAMPLES = 3;
 const variant = { name: 'full', mode: 'full', core: [], promptEdits: [], appendRules: '' };
 const cell = value => String(value ?? '').replace(/[|\r\n]/g, ' ').slice(0, 250);
 export function verdict(result) {
   const eligible = result.rows.filter(row => row.status !== 'skipped:squire');
-  return eligible.length > 0 && eligible.length === result.expected && eligible.every(row => row.pass === true) && !result.error;
+  return eligible.length > 0 && eligible.length === result.expected && eligible.every(row => row.pass === true &&
+    row.samples?.length===SAMPLES && row.samples.every(sample=>sample.pass===true)) && !result.error;
 }
 export function markdown(result) {
   return [`<!-- beeline-prompt-replay:${result.head} -->`,
     `**Prompt replay: ${verdict(result) ? 'PASS' : 'FAIL'}**`, '',
-    `Head: \`${result.head}\` · Beeline agent: ${result.agent} · subscription: \`${result.model}\``,
-    'One fresh sample per case; simulated tools only. Browser-session cases are explicitly excluded, as in the nightly cohort.',
+    `Head: \`${result.head}\` · subscription pins: ${Object.entries(MODEL_PINS).map(([size,model])=>`${size}=\`${model}\``).join(', ')}`,
+    'Three fresh samples per case per model; all three must pass. Assertions use tool calls and plain text checks, with no model grader. Simulated tools only.',
     ...(result.error ? ['', `Replay error: ${cell(result.error)}`] : []), '',
-    '| Case | Result | Detail |', '| --- | --- | --- |',
-    ...result.rows.map(row => `| ${cell(row.id)} | ${row.status === 'skipped:squire' ? 'SKIP' : row.pass ? 'PASS' : 'FAIL'} | ${cell(row.reason)} |`), '',
+    '| Case | Model | Samples | Result | Detail |', '| --- | --- | --- | --- | --- |',
+    ...result.rows.map(row => `| ${cell(row.id)} | ${cell(row.model)} | ${row.samples?.filter(sample=>sample.pass).length ?? 0}/3 | ${row.status === 'skipped:squire' ? 'SKIP' : row.pass ? 'PASS' : 'FAIL'} | ${cell(row.reason)} |`), '',
     `${result.rows.filter(row => row.pass).length}/${result.expected} eligible cases passed; ${result.rows.filter(row => row.status === 'skipped:squire').length} browser cases skipped.`,
   ].join('\n');
 }
@@ -35,17 +37,17 @@ export function liveHead(repository, number) {
   if (!match) throw new Error('Could not read live PR head');
   return { state: match[1], head: match[2] };
 }
-export async function replay({ repository, number, head, agent, out, sourceRoot = ROOT }, dependencies = {}) {
+export async function replay({ repository, number, head, agent = 'subscription', out, sourceRoot = ROOT, only }, dependencies = {}) {
   if (repository !== 'Beeline-Work/beeline' || !Number.isSafeInteger(number) || number < 1 ||
-      !/^[a-f0-9]{40}$/.test(head) || !Object.hasOwn(MODELS, agent)) throw new Error('Expected Beeline PR, exact head and baby/terra/speedy agent');
+      !/^[a-f0-9]{40}$/.test(head)) throw new Error('Expected Beeline PR and exact head');
   const current = dependencies.liveHead ?? liveHead;
   const isCurrent = () => { const live = current(repository, number); return live.state === 'open' && live.head === head; };
   if (!isCurrent()) return { status: 'superseded' };
   const checkout = dependencies.checkout ?? (() => execFileSync('git', ['rev-parse', 'HEAD'], { cwd: sourceRoot, encoding: 'utf8' }).trim());
   if (checkout() !== head) throw new Error('Checkout is not the requested PR head');
   mkdirSync(out, { recursive: true });
-  const cases = (dependencies.loadCases ?? loadCases)();
-  const result = { repository, number, head, agent, model: MODELS[agent], expected: cases.filter(c => !needsSquire(c)).length, rows: [] };
+  const cases = (dependencies.loadCases ?? loadCases)().filter(testCase=>!only || testCase.id.startsWith(only));
+  const result = { repository, number, head, agent, models: MODEL_PINS, expected: cases.filter(c => !needsSquire(c)).length * Object.keys(MODEL_PINS).length, rows: [] };
   const save = () => {
     writeFileSync(join(out, 'result.json'), JSON.stringify(result, null, 2) + '\n');
     writeFileSync(join(out, 'verdict.md'), markdown(result) + '\n');
@@ -53,29 +55,29 @@ export async function replay({ repository, number, head, agent, out, sourceRoot 
   save();
   try {
     const source = await (dependencies.loadSource ?? loadSource)(sourceRoot);
-    let stopped;
-    for (const testCase of cases) {
-      if (needsSquire(testCase)) result.rows.push({ id: testCase.id, status: 'skipped:squire', reason: 'Requires a real browser session' });
-      else if (stopped) result.rows.push({ id: testCase.id, status: 'incomplete', pass: false, reason: stopped });
+    for (const model of Object.values(MODEL_PINS)) for (const testCase of cases) {
+      if (needsSquire(testCase)) result.rows.push({ id: testCase.id, model, status: 'skipped:squire', reason: 'Requires a real browser session' });
       else {
-        try {
-          const sample = await (dependencies.executeSample ?? executeSample)({ source, testCase, variant,
-            model: result.model, directory: join(out, testCase.id), timeoutMs: 180000 });
-          const pass = sample.status === 'behavior' && sample.pass === true && !sample.timedOut && sample.exitCode === 0;
-          result.rows.push({ id: testCase.id, status: sample.status, pass,
-            reason: sample.error || sample.reason || (pass ? '' : 'Incomplete model sample') });
-          if (sample.modelStopped) stopped = sample.error || 'Subscription unavailable';
-        } catch (error) {
-          stopped = error.message;
-          result.rows.push({ id: testCase.id, status: 'incomplete', pass: false, reason: stopped });
+        const samples=[];
+        for (let sampleIndex=0;sampleIndex<SAMPLES;sampleIndex++) {
+          try {
+            const sample=await (dependencies.executeSample ?? executeSample)({source,testCase,variant,model,
+              seed:1000+sampleIndex,directory:join(out,model,testCase.id,String(sampleIndex+1))});
+            const pass=sample.status==='behavior' && sample.pass===true && !sample.timedOut && sample.exitCode===0;
+            samples.push({pass,status:sample.status,reason:sample.error || sample.reason || (pass?'':'Incomplete model sample')});
+          } catch(error) { samples.push({pass:false,status:'incomplete',reason:error.message}); }
+          save();
         }
+        result.rows.push({id:testCase.id,model,samples,status:'behavior',pass:samples.every(sample=>sample.pass),
+          reason:samples.flatMap((sample,index)=>sample.pass?[]:[`sample ${index+1}: ${sample.reason}`]).join('; ')});
       }
       save();
     }
   } catch (error) { result.error = error.message; }
-  // Infrastructure failures must still produce one explicit row per case.
-  for (const testCase of cases) if (!result.rows.some(row => row.id === testCase.id))
-    result.rows.push({ id: testCase.id, pass: false, status: 'incomplete', reason: result.error });
+  // Every model/case pair has an explicit row, including infrastructure failures.
+  for (const model of Object.values(MODEL_PINS)) for (const testCase of cases)
+    if (!result.rows.some(row=>row.id===testCase.id && row.model===model))
+      result.rows.push({id:testCase.id,model,pass:false,status:'incomplete',reason:result.error});
   save();
   if (!isCurrent()) return { status: 'superseded', result };
   const publish = dependencies.publish ?? (() => execFileSync('gh-axi', ['pr', 'comment', String(number),
@@ -87,7 +89,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   const args = process.argv.slice(2);
   const option = name => { const index = args.indexOf(name); return index < 0 ? undefined : args[index + 1]; };
   replay({ repository: option('--repository'), number: Number(option('--number')), head: option('--head'),
-    agent: option('--agent'), out: resolve(option('--out') ?? '.beeline-proof/prompt-pr-replay') })
+    agent: option('--agent'), only:option('--only'), out: resolve(option('--out') ?? '.beeline-proof/prompt-pr-replay') })
     .then(result => { console.log(result.status); process.exitCode = result.status === 'fail' ? 1 : 0; })
     .catch(error => { console.error(error.message); process.exitCode = 1; });
 }

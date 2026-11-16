@@ -1,4 +1,6 @@
+import { legacyMessageBody } from './messaging-cutover.js';
 import type { AgentCommand,RoomInboxResult } from '@beeline/api-contract/daemon';
+import { OPERATOR_OWNER_ID } from '@beeline/api-contract/daemon';
 import { isResumeKind } from '@beeline/api-contract/phone';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { CommandRow,checkFailureLogBody,createAgentCommand,reportedHeadBody } from './agent-command.js';
@@ -13,7 +15,7 @@ export async function readAgentQueueRows(db:SqlDatabase,agentId:string,roomId?:s
   // Idle notices describe one episode, unlike accepted human work. Retire an
   // obsolete episode through the terminal owner before delivering the queue.
   return db.query<CommandRow & { parent_room_id: string | null; room_name: string | null;
-    return_room_name: string | null; offline_seconds: number | null }>(
+    return_room_name: string | null; offline_seconds: number | null; operator_agent:boolean }>(
     `WITH queued AS MATERIALIZED (
        SELECT * FROM agent_commands WHERE agent_id=$1 AND ($2::text IS NULL OR room_id::text=$2) AND state='pending'
      ), obsolete AS MATERIALIZED (
@@ -24,12 +26,14 @@ export async function readAgentQueueRows(db:SqlDatabase,agentId:string,roomId?:s
        SELECT obsolete.id FROM obsolete LEFT JOIN LATERAL
          beeline_finish_agent_command(obsolete.id,'complete',NULL,NULL) ended ON true
      ) SELECT item.*,room.parent_id parent_room_id,room.name room_name,return_room.name return_room_name,
+       agent.owner_id='${OPERATOR_OWNER_ID}' operator_agent,
        CASE WHEN item.created_at<=connection.connected_at THEN
          EXTRACT(EPOCH FROM connection.connected_at-connection.offline_since)::double precision END offline_seconds
      FROM queued item
      LEFT JOIN rooms room ON room.id=item.room_id
      LEFT JOIN rooms return_room ON return_room.id=COALESCE(item.return_room_id,item.room_id)
      LEFT JOIN agent_connections connection ON connection.agent_id=item.agent_id
+     LEFT JOIN agents agent ON agent.agent_id=item.agent_id
      WHERE NOT EXISTS(SELECT 1 FROM retired WHERE retired.id=item.id)
      ORDER BY item.inbox_sequence,item.created_at,item.id`, [agentId, roomId ?? null]);
  }
@@ -61,13 +65,16 @@ export async function readAgentCommands(
         ...(item.return_room_name ? { returnRoomName: item.return_room_name } : {}),
         ...(item.parent_room_id ? {parentRoomId:item.parent_room_id} : {}),
         agentId: item.agent_id, createdAt, sourceMessageId: source.id,
+        from: source.route?.from ?? item.private_payload?.route?.from ?? {agent:source.authorId,
+          place:item.private_payload?.fromRoomId ?? item.room_id},
+        ...(item.operator_agent ? {operatorAgent:true} : {}),
         turnRequestId: item.turn_request_id, action: item.action,
         reason: item.reason === 'report' && item.private_payload?.automatic ? 'attention_report' : item.reason,
         rootCommandId: item.root_command_id, rootSourceMessageId: item.root_source_message_id,
         ...(item.parent_command_id ? {parentCommandId:item.parent_command_id} : {}),
         agentDepth: item.agent_depth, ...(source.type === 'private' ? {private:true} : {}),
         ...(source.systemEvent?.scheduleId ? {scheduleId:source.systemEvent.scheduleId} : {}),
-        source: { ...source, createdAt, body: source.body + checkFailureLogBody(source.systemEvent ?? null) + reportedHeadBody(source.systemEvent ?? null) },
+        source: { ...source, createdAt, body: legacyMessageBody(item,source.body) + checkFailureLogBody(source.systemEvent ?? null) + reportedHeadBody(source.systemEvent ?? null) },
       };
     }),
   };

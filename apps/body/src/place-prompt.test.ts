@@ -577,34 +577,24 @@ describe('queue item reply audience', () => {
   };
   const names = new Map([['worker', 'Jellybean']]);
 
-  it('shows the report once and explains how to reply in its named thread', () => {
-    const prompt = itemPrompt(report, { names });
-    expect(prompt.split('\n')[0]).toBe('Request request (report). Jellybean reports The work is ready. in thread Fix the bug. To reply to Jellybean, send an order to the same thread (Fix the bug).');
-    expect(prompt).not.toContain('Your final reply');
-    expect(prompt).not.toContain('Jellybean: The work is ready.');
-    expect(prompt).not.toContain('To ask the owner');
-  });
-
-  it('falls back to chat IDs when names are unavailable, including in offline batches', () => {
-    const prompt = offlineBatchPrompt([{ ...report, roomName: undefined, returnRoomName: undefined }], { names });
-    expect(prompt).toContain('Jellybean reports The work is ready. in thread worker-thread.');
-    expect(prompt).toContain('To reply to Jellybean, send an order to the same thread (worker-thread).');
-    expect(prompt).not.toContain('Your final reply');
-  });
-
-  it.each(['report', 'order', 'corner_review_needed'])('keeps the same-room line unchanged for %s', reason => {
-    const prompt = itemPrompt({ ...report, returnRoomId: report.roomId, reason }, { names });
-    expect(prompt.split('\n')[0]).toBe(
-      `Request request (${reason}) from Jellybean in worker-thread. Your final reply is posted here (worker-thread).`,
-    );
-    expect(prompt).not.toContain('does not see');
-  });
-
-  it.each(['order', 'corner_review_needed'])('keeps the original cross-room wording for %s with names', reason => {
-    const prompt = itemPrompt({ ...report, reason }, { names });
-    expect(prompt.split('\n')[0]).toBe(`Request request (${reason}) from Jellybean in Fix the bug. Your final reply is posted to #Milo.`);
-    expect(prompt).toContain('Jellybean: The work is ready.');
+  it('shows immutable origin, current destination and reply id without asking the agent to route the answer',()=>{
+    const prompt=itemPrompt({...report,from:{agent:'worker',place:'origin-thread'}},{names});
+    expect(prompt).toContain('From: Jellybean (worker)');
+    expect(prompt).toContain('From-place: origin-thread');
+    expect(prompt).toContain('Destination: (commander, worker-thread)');
+    expect(prompt).toContain('Reply with reply(id: "request", text: ...).');
+    expect(prompt.split('Jellybean: The work is ready.')).toHaveLength(2);
     expect(prompt).not.toContain('send an order');
-    if (reason === 'corner_review_needed') expect(prompt).toContain('finish without a public reply');
+  });
+  it('keeps origin and destination distinct in an offline batch when display names are unavailable',()=>{
+    const prompt=offlineBatchPrompt([{...report,from:{agent:'worker',place:'origin-thread'},roomName:undefined,returnRoomName:undefined}],{names});
+    expect(prompt).toContain('From-place: origin-thread');
+    expect(prompt).toContain('Current place: worker-thread');
+    expect(prompt).toContain('Reply with reply(id: "request"');
+  });
+  it.each(['message','reply','corner_review_needed'])('gives %s the same recorded-id reply interface',reason=>{
+    const prompt=itemPrompt({...report,returnRoomId:report.roomId,reason},{names});
+    expect(prompt).toContain('Your final reply is posted here (worker-thread).');
+    expect(prompt).toContain('Reply with reply(id: "request"');
   });
 });

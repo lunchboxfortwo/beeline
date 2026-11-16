@@ -1,7 +1,7 @@
 {
   "id": "land-merges-after-pass",
-  "section": "turn.land",
-  "summary": "A reviewer PASS wake makes the implementer land with merge_thread.",
+  "section": "corner",
+  "summary": "A retained approval wake ends without an agent merge tool; the server owns merging.",
   "place": "code-corner",
   "session": {
     "worktree": {
@@ -25,7 +25,7 @@
       "body": "Juniper approved PR 88 at head 5d6e7f8.",
       "commandReason": "corner_land"
     },
-    "members": "Members (exact tag spellings):\n- @juniper \u2014 Juniper (agent) \u00b7 owner @dana\n- @pebble \u2014 Pebble (agent) \u00b7 owner @dana\n- @dana \u2014 Dana (person)\nYou are @ruby, a member of this Room; you are not listed above.",
+    "members": "Members (exact tag spellings):\n- @juniper — Juniper (agent) · owner @dana\n- @pebble — Pebble (agent) · owner @dana\n- @dana — Dana (person)\nYou are @ruby, a member of this chat; you are not listed above.",
     "brief": {
       "fileLines": [
         "apps/server/src/auth.ts"
@@ -33,11 +33,20 @@
     }
   },
   "pass": {
-    "call": "merge_thread"
+    "all": [
+      {
+        "noCall": "merge_thread"
+      },
+      {
+        "noCall": "merge_corner"
+      },
+      {
+        "call": "no_reply_needed"
+      }
+    ]
   },
   "toolResults": {
-    "read": "{\"address\": \"13dd83e5-e17f-599c-8054-c4ce8cdab974\", \"stage\": \"review\", \"checks\": {\"state\": \"success\", \"headSha\": \"5d6e7f8000000000000000000000000000000000\"}, \"approved\": true, \"held\": false, \"mergeAllowed\": true, \"brief\": {\"repositoryWork\": true, \"spec\": \"## Intent\\nFix the token expiry check so expired tokens are refused.\\n## Acceptance criteria\\n1. An expired token gets 401.\\n## Assigned files\\napps/server/src/auth.ts\", \"approval\": {\"sourceMessageId\": \"m1\", \"text\": \"Go ahead.\", \"approvedBy\": \"dana-id\", \"approverName\": \"dana\"}}}",
-    "merge_thread": "{\"ok\": true, \"merged\": true, \"pullRequest\": 88, \"headSha\": \"5d6e7f8000000000000000000000000000000000\"}"
+    "read": "{\"address\": \"13dd83e5-e17f-599c-8054-c4ce8cdab974\", \"stage\": \"review\", \"checks\": {\"state\": \"success\", \"headSha\": \"5d6e7f8000000000000000000000000000000000\"}, \"approved\": true, \"held\": false, \"mergeAllowed\": true, \"brief\": {\"repositoryWork\": true, \"spec\": \"## Intent\\nFix the token expiry check so expired tokens are refused.\\n## Acceptance criteria\\n1. An expired token gets 401.\\n## Assigned files\\napps/server/src/auth.ts\", \"approval\": {\"sourceMessageId\": \"m1\", \"text\": \"Go ahead.\", \"approvedBy\": \"dana-id\", \"approverName\": \"dana\"}}}"
   },
   "scenario": {
     "history": [],
@@ -102,7 +111,7 @@
       {
         "call": "read",
         "args": {
-          "facet": "corners"
+          "facet": "threads"
         },
         "result": {
           "corners": []
@@ -114,7 +123,7 @@
           "facet": "members"
         },
         "result": {
-          "members": "Members (exact tag spellings):\n- @juniper \u2014 Juniper (agent) \u00b7 owner @dana\n- @pebble \u2014 Pebble (agent) \u00b7 owner @dana\n- @dana \u2014 Dana (person)\nYou are @ruby, a member of this Room; you are not listed above."
+          "members": "Members (exact tag spellings):\n- @juniper — Juniper (agent) · owner @dana\n- @pebble — Pebble (agent) · owner @dana\n- @dana — Dana (person)\nYou are @ruby, a member of this chat; you are not listed above."
         }
       },
       {
@@ -125,7 +134,7 @@
         "result": {
           "address": "13dd83e5-e17f-599c-8054-c4ce8cdab974",
           "name": "land-merges-after-pass",
-          "members": "Members (exact tag spellings):\n- @juniper \u2014 Juniper (agent) \u00b7 owner @dana\n- @pebble \u2014 Pebble (agent) \u00b7 owner @dana\n- @dana \u2014 Dana (person)\nYou are @ruby, a member of this Room; you are not listed above.",
+          "members": "Members (exact tag spellings):\n- @juniper — Juniper (agent) · owner @dana\n- @pebble — Pebble (agent) · owner @dana\n- @dana — Dana (person)\nYou are @ruby, a member of this chat; you are not listed above.",
           "repository": {
             "linked": true
           },
@@ -170,6 +179,13 @@
         "result": {
           "id": "simulated-message",
           "committed": true
+        }
+      },
+      {
+        "call": "reply",
+        "result": {
+          "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "delivered": true
         }
       }
     ],

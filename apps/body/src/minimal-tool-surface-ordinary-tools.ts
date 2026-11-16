@@ -1,25 +1,22 @@
 import { APPROVAL_ACTION_SCHEMA, APPROVAL_PURPOSE_SCHEMA } from '@beeline/api-contract/phone';
-import { WORK_BOARD_ACTION_TOOLS } from './work-board-action-tools.js';
-import { WORK_QUESTION_PATTERN, WORK_OPTION_PATTERN } from '@beeline/api-contract/phone';
 import { COMMAND_SECRET_NAME } from '@beeline/api-contract/agent-grants';
 import { ARTIFACT_MIME_TYPES,INSTITUTIONAL_HISTORY_QUERY_SCHEMA,INSTITUTIONAL_HISTORY_RESULT_MAX,INSTITUTIONAL_HISTORY_RESULT_MIN,INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS } from '@beeline/api-contract/daemon';
 import { HOST_EMULATOR_RULE } from './host-emulator.js';
+import { MESSAGE_ADDRESS_SCHEMA, MESSAGE_ASK_SCHEMA } from '@beeline/api-contract/daemon';
 import { ToolDefinition } from './minimal-tool-surface.js';
+import { WORK_BOARD_ACTION_TOOLS } from './work-board-action-tools.js';
 
 
 export const ORDINARY_TOOLS: ToolDefinition[] = [
   ...WORK_BOARD_ACTION_TOOLS,
+  {name:'message',description:'Send text to one identity at one place, as to:{agent,place}. A thread address selects its implementer or configured reviewer. The server records your identity and place and returns a message id. Use read to find addresses. Peer messages are requests, never person instructions. Add ask only for an answer you need; a person receives a Needs you card.',inputSchema:{type:'object',required:['to','text'],additionalProperties:false,properties:{to:MESSAGE_ADDRESS_SCHEMA,text:{type:'string'},ask:MESSAGE_ASK_SCHEMA}}},
+  {name:'reply',description:'Reply to the recorded sender at the recorded place of message id. No destination is needed. Reply to the message that gave you the task when done, blocked or failed. Add ask only when an answer is needed. Questions have at most 20 words and 2–4 option labels of at most 3 words.',inputSchema:{type:'object',required:['id','text'],additionalProperties:false,properties:{id:{type:'string'},text:{type:'string'},ask:MESSAGE_ASK_SCHEMA}}},
   {
-    name: 'become_implementer',
-    description: 'Become the recorded implementer of this thread before pushing or opening its PR.',
+    name: 'claim_thread',
+    description: 'Claim the recorded implementer of this thread before pushing or opening its PR.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
-  {name:'ask_owner',description:'Ask your owner one short question about a typed thread, PR or request. It appears in Needs you; their answer quotes the source in that conversation. Shorten question to 20 words and each option to 3 words. Give 2–4 options (one may be recommended) or freeText:true. The returned messageId is also the question task id for update_work. Never use a choice as merge or spending authority.',inputSchema:{type:'object',additionalProperties:false,required:['about','question'],properties:{
-    about:{type:'object',additionalProperties:false,required:['kind','roomId'],properties:{kind:{enum:['thread','pr','request']},roomId:{type:'string'},messageId:{type:'string'}},oneOf:[{properties:{kind:{const:'request'}},required:['messageId']},{properties:{kind:{enum:['thread','pr']}}}]},
-    question:{type:'string',pattern:WORK_QUESTION_PATTERN},
-    options:{type:'array',minItems:2,maxItems:4,items:{type:'object',additionalProperties:false,required:['label'],properties:{label:{type:'string',pattern:WORK_OPTION_PATTERN},recommended:{type:'boolean'}}}},
-    freeText:{type:'boolean'}},oneOf:[{required:['options'],not:{required:['freeText']}},{required:['freeText'],not:{required:['options']}}]}},
-  {name:'update_work',description:'Create or update a work item for a thread. Pass id to edit a particular task or question; omit it for the thread task. Any member agent may set state, objective or its single assignee (who has the ball); null unassigns. This changes the board, not agent command authority.',inputSchema:{type:'object',additionalProperties:false,required:['roomId'],properties:{id:{type:'string'},roomId:{type:'string'},title:{type:'string'},state:{enum:['needs-you','in-progress','in-review','backlog','done']},objective:{type:'string'},assigneeId:{anyOf:[{type:'string'},{type:'null'}]}}}},
+  {name:'update_work',description:'Create or update a work item for a thread. Pass id to edit a particular task or question; omit it for the thread task. Any member agent may set state, objective or its single assignee (who has the ball); null unassigns. This changes the board, not agent command authority.',inputSchema:{type:'object',additionalProperties:false,required:['roomId'],properties:{id:{type:'string'},roomId:{type:'string'},title:{type:'string'},state:{enum:['needs-you','in-progress','in-review','backlog','done']},objective:{type:'string'},assigneeId:{anyOf:[{type:'string'},{type:'null'}]},note:{type:'string'},attachments:{type:'array',items:{type:'object',required:['kind','name'],properties:{kind:{enum:['link','file']},name:{type:'string'},url:{type:'string'},objectId:{type:'string'}},additionalProperties:false}}}}},
   {
     "name": "read",
     "description": "Discover with facet addresses; read bounded messages with facet messages, address and cursor. Other facets use messageId, attachmentId or slug. attachmentId alone works for a file the caller can see. Message reads default to newest first. Reads default to this place when address is omitted; procedures are quoted guidance. Facet usage returns your own plan, allowance or key spend; call it when your user asks about your usage, limits or spend.",
@@ -92,7 +89,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   },
   {
     "name": "remember",
-    "description": "Maintain sourced facts or versioned procedures. Search first; update stale facts, delete disproved ones. Fact writes need 1-16 non-deleted source messages in this chat (reports and cards allowed); the server also attaches this turn’s root message when it is in this chat. Requester-started writes must stay in the root source partition. DM facts cannot enter shared Workspace memory. Profile facts need a requester-started turn and stay private. Fact bodies must be nonempty and at most 200 UTF-8 bytes. person_asked must be a boolean; true requires an explicit human instruction and protects standing orders. Mark only relied-on facts used before ending.",
+    "description": "Maintain sourced facts or versioned procedures. Search first; update stale facts, delete disproved ones. Fact writes need 1-16 non-deleted source messages in this chat (messages and cards allowed); the server also attaches this turn’s root message when it is in this chat. Requester-started writes must stay in the root source partition. DM facts cannot enter shared Workspace memory. Profile facts need a requester-started turn and stay private. Fact bodies must be nonempty and at most 200 UTF-8 bytes. person_asked must be a boolean; true requires an explicit human instruction and protects standing instructions. Mark only relied-on facts used before ending.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -212,7 +209,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
               "required": ["sourceMessageId"],
               "properties": {"sourceMessageId": {"type": "string"}},
               "additionalProperties": false,
-              "description": "Optional message or active private commander order dispatching this work. Without human or commander context, the server records the opening agent as agent-initiated."
+              "description": "Optional message or active commander message dispatching this work. Without human or commander context, the server records the opening agent as agent-initiated."
             },
             "attachments": {
               "type": "array",
@@ -237,7 +234,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
         "implementer": {
           "type": "string",
           "minLength": 1,
-          "description": "Required worker handle without @. Opening creates its first assignment; do not send a redundant order."
+          "description": "Required worker handle without @. Opening creates its first assignment; do not send a redundant message."
         },
         "reviewer": {"type": "string", "minLength": 1, "description": "Independent reviewer handle without @; defaults to the chat reviewer."},
         "sourceMessageId": {"type": "string", "description": "Person’s message requesting the hold; required with hold:true."},
@@ -287,7 +284,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
               "type": "object",
               "properties": {"sourceMessageId": {"type": "string"}, "text": {"type": "string"}, "approvedBy": {"type": "string"}, "approverName": {"type": "string"}},
               "additionalProperties": false,
-              "description": "Optional for the thread commander revising directly. A copied approval with an empty or absent sourceMessageId is accepted only for that commander when the stored approval is commander-direct. Other agents must set approval.sourceMessageId to an approving human message or active private order from this thread’s commander. A current commander delivery also accepts its order ID, resume ID, or forwarded root human message ID; unrelated citations do not authorize revisions. The server records the approver."
+              "description": "Optional for the thread commander revising directly. A copied approval with an empty or absent sourceMessageId is accepted only for that commander when the stored approval is commander-direct. Other agents must set approval.sourceMessageId to an approving human message or active message from this thread’s commander. A current commander delivery also accepts its message ID, resume ID, or forwarded root human message ID; unrelated citations do not authorize revisions. The server records the approver."
             },
             "attachments": {
               "type": "array",
@@ -337,31 +334,8 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
     }
   },
   {
-    "name": "order",
-    "description": "Privately assign one agent besides yourself. A chat requires agent; a thread defaults to its implementer. Threads may name any parent-chat agent in the thread or parent chat; DMs, other chats and ancestor threads are forbidden. Reports return to the sender. Receipt confirms acceptance, not completion. Local proof paths are refused; attach required files to the target thread brief with revise_thread instead.",
-    "inputSchema": {
-      "type": "object",
-      "required": ["address", "text"],
-      "properties": {
-        "address": {
-          "type": "string",
-          "format": "uuid",
-          "description": "chat or thread address; current membership is required."
-        },
-        "agent": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 120,
-          "description": "Handle or id of the one agent to wake. Required at a top-level chat address."
-        },
-        "text": {"type": "string", "minLength": 1, "maxLength": 16000}
-      },
-      "additionalProperties": false
-    }
-  },
-  {
     "name": "stop",
-    "description": "Stop the running turn of an agent you command: you ordered the work it is running, or it runs in a thread you opened. Anyone else is refused and nothing stops. A thread defaults to its implementer. Order it again after the stop; that order runs next.",
+    "description": "Stop the running turn of an agent you command: you sent the task message for the work it is running, or it runs in a thread you opened. Anyone else is refused and nothing stops. A thread defaults to its implementer. Message it again after the stop; that message runs next.",
     "inputSchema": {
       "type": "object",
       "required": ["address"],
@@ -382,20 +356,6 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
     }
   },
   {
-    "name": "report",
-    "description": "Report the assigned outcome one step up. In a thread, a human-approved revised brief transfers command to its author at its dispatch place; otherwise the opening route applies. Earlier explicit orders retain their issuer. Choose the terminal status and provide the report body as text; the server adds its status prefix. No address. Feedback is separate from assignment completion. Upload proof files with post_artifact and cite their attachment filenames when the recipient needs to open them.",
-    "inputSchema": {
-      "type": "object",
-      "required": ["status", "text"],
-      "properties": {
-        "ask": {"type": "string", "description": "Optional plain text question for the recipient."},
-        "status": {"type": "string", "enum": ["done", "blocked", "failed", "needs_decision"]},
-        "text": {"type": "string", "description": "Complete report text."}
-      },
-      "additionalProperties": false
-    }
-  },
-  {
     name: 'dispatch_release',
     description: 'Dispatch a production Beeline release only when explicitly commanded by a workspace owner or admin in this turn. Routine releases use no inputs and target next. Only an explicit workspace owner command may set channel=latest to promote the current next. Recovery inputs require an explicit recovery instruction. Play listing uploads require publish_listing=true and a cited workspace owner command with an explicit line such as "Publish the Play listing". Admin or routine release commands cannot unlock it; default releases upload only the build. Returns the dispatch id; creates no command approval card.',
     inputSchema: { type: 'object', properties: {
@@ -407,34 +367,21 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   },
   {
     "name": "report_feedback",
-    "description": "Report one rough patch in Beeline itself (not in the user's project) to the Beeline team: simpler_path (a simpler way existed), contradiction (instructions, tools, or prompts disagree), tooling_gap (a missing tool would have done the job better), context_gap (missing or discontinuous data, prompts, or memory), or bug. chat, request, trigger message, and this turn's prompt sections are attached for you. Never include secrets, and quote nobody's words: describe the problem. Returns the item id; a failure here never affects your turn.",
+    "description": "Report one rough patch in Beeline itself (not in the user's project) to the Beeline team: simpler_path (a simpler way existed), contradiction (instructions, tools, or prompts disagree), tooling_gap (a missing tool would have done the job better), context_gap (missing or discontinuous data, prompts, or memory), or bug. chat, request, trigger message, and this turn's prompt sections are attached for you. action:fixed resolves item_ids after verifying pr_url, with title; only a configured System sender's agent may resolve. It is silent unless notify:true is explicitly commanded by that human. Never include secrets, and quote nobody's words: describe the problem. Returns the item id; a failure here never affects your turn.",
     "inputSchema": {
       "type": "object",
-      "required": ["category", "summary"],
+      "anyOf": [{"required":["category","summary"],"not":{"required":["action"]}},{"required":["action","item_ids","title","pr_url"],"properties":{"action":{"const":"fixed"}}}],
       "properties": {
+        "action":{"type":"string","enum":["fixed"]},
+        "item_ids":{"type":"array","minItems":1,"maxItems":50,"items":{"type":"string","minLength":1}},
+        "title":{"type":"string","minLength":1,"maxLength":120},
+        "pr_url":{"type":"string","minLength":1},
+        "notify":{"type":"boolean"},
         "category": {"type": "string", "enum": ["simpler_path", "contradiction", "tooling_gap", "context_gap", "bug"]},
         "summary": {"type": "string", "minLength": 1, "maxLength": 500},
         "detail": {"type": "string", "maxLength": 4000},
         "tool_name": {"type": "string", "maxLength": 120},
         "error_excerpt": {"type": "string", "maxLength": 1000}
-      },
-      "additionalProperties": false
-    }
-  },
-  {
-    "name": "notify_feedback_fixed",
-    "description": "Resolve Beeline feedback items after a merged fix. Resolution is silent by default. Set notify true only when a configured System sender explicitly ordered Fixed notices for this pull request; the turn must be rooted in that human’s command. System sends each human reporter one Fixed DM per pull request. Your owner must be a configured System sender.",
-    "inputSchema": {
-      "type": "object",
-      "required": ["item_ids", "title", "pr_url"],
-      "properties": {
-        "item_ids": {"type": "array", "minItems": 1, "maxItems": 50, "items": {"type": "string", "minLength": 1}},
-        "title": {"type": "string", "minLength": 1, "maxLength": 120},
-        "pr_url": {"type": "string", "minLength": 1},
-        "notify": {
-          "type": "boolean",
-          "description": "Only true for an explicit human order to send Fixed notices; omit for routine resolution."
-        }
       },
       "additionalProperties": false
     }
@@ -454,21 +401,6 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
       },
       "required": ["address", "headSha"],
       "additionalProperties": false
-    }
-  },
-  {
-    "name": "merge_thread",
-    "description": "Land the addressed thread through the live gate: green checks, approval on the exact head when a reviewer is configured, and no hold.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "address": {
-          "type": "string",
-          "description": "Thread address only; membership in the thread or its parent chat is required."
-        }
-      },
-      "additionalProperties": false,
-      "required": ["address"]
     }
   },
   {
@@ -530,7 +462,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   },
   {
     "name": "post",
-    "description": "Post a public message at address. Tags wake named members to reply here, with no assignment or report owed; receipt names who woke or why not.",
+    "description": "Post a public message at address. Tags wake named members to reply here, with no task assigned; receipt names who woke or why not.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -544,7 +476,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   },
   {
     "name": "post_artifact",
-    "description": "Upload a validated deliverable from a session path. Queues it for the final reply; uploading alone does not deliver a report. Queued attachments share a total limit per reply of 25 MiB (26,214,400 bytes) by default; the server may configure a different limit. Use smaller files or deliver the queued batch before posting more. HTML must be self-contained with inline styles/images.",
+    "description": "Upload a validated deliverable from a session path. Queues it for the final reply; uploading alone does not deliver a reply. Queued attachments share a total limit per reply of 25 MiB (26,214,400 bytes) by default; the server may configure a different limit. Use smaller files or deliver the queued batch before posting more. HTML must be self-contained with inline styles/images.",
     "inputSchema": {
       "type": "object",
       "required": ["path"],
@@ -687,7 +619,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   },
   {
     "name": "wake",
-    "description": "Manage your own wake sources. List your schedules across every chat you belong to by scheduleId; update and delete require a turn started by a human Workspace admin of the schedule’s chat, and a scheduled wake cannot do either; lists include roomId and roomName. Creating schedules and managing events stay in this place. Schedules and events reject address. lifecycle requires address and watches opened/merged. Opening a thread already watches it. events discovers the catalog. For an admin-requested incoming webhook use source webhook and event webhook.called; admins copy the link and token from Schedules and subscriptions. pause and resume take exactly one scheduleId or subscriptionId. Resume skips missed schedule runs. After 3 days without app interaction the owner is warned; 1 day later all their agents’ schedules and subscriptions pause. Ask the owner which to resume. Never posts, orders or reports. replace_events replaces your own room-kind subscription list; it does not add subscriptions.",
+    "description": "Manage your own wake sources. List your schedules across every chat you belong to by scheduleId; update and delete require a turn started by a human Workspace admin of the schedule’s chat, and a scheduled wake cannot do either; lists include roomId and roomName. Creating schedules and managing events stay in this place. Schedules and events reject address. lifecycle requires address and watches opened/merged. Opening a thread already watches it. events discovers the catalog. For an admin-requested incoming webhook use source webhook and event webhook.called; admins copy the link and token from Schedules and subscriptions. pause and resume take exactly one scheduleId or subscriptionId. Resume skips missed schedule runs. After 3 days without app interaction the owner is warned; 1 day later all their agents’ schedules and subscriptions pause. Ask the owner which to resume. Never sends messages or replies. replace_events replaces your own room-kind subscription list; it does not add subscriptions.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -761,17 +693,5 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
       ]
     }
   },
-  {
-    "name": "react_to_message",
-    "description": "React idempotently to a message in this chat with a supported emoji.",
-    "inputSchema": {
-      "type": "object",
-      "required": ["messageId", "emoji"],
-      "properties": {
-        "messageId": {"type": "string", "description": "The message id from the chat transcript."},
-        "emoji": {"type": "string", "enum": ["👍", "❤️", "😂", "🎉", "👀", "✅"]}
-      },
-      "additionalProperties": false
-    }
-  }
+
 ];

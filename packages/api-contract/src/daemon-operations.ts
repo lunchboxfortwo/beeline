@@ -130,6 +130,9 @@ export type AgentCommand = {
   readonly parentRoomId?: string;
   readonly agentId: string;
   readonly sourceMessageId: string;
+  /** Immutable message origin, independent of the place where this item runs. */
+  readonly from?: import('./agent-messaging.js').MessageAddress;
+  readonly operatorAgent?: boolean;
   /** The queue item id, carried as `requestId` by every tool call for it. */
   readonly turnRequestId: string;
   readonly action: AgentCommandAction;

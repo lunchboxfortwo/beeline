@@ -1,5 +1,4 @@
 import { AGENT_INVITATION_PROMPT, BEELINE_PRODUCT_GUIDE } from './agent-invitation-guide.js';
-import { MESSAGE_REACTION_EMOJIS } from './phone.js';
 
 export const BEELINE_FILES_SKILL_NAME = 'beeline-files-and-mocks';
 export const BEELINE_CORNERS_SKILL_NAME = 'beeline-threads-and-merging';
@@ -52,13 +51,13 @@ ${body}`;
 export function beelineFilesSkillMarkdown(releaseId: string): string {
   return skillMarkdown(
     BEELINE_FILES_SKILL_NAME,
-    'Open attachments, write a file, post an artifact, show an HTML mock or photo, or react to a message.',
+    'Open attachments, write a file, post an artifact, or show an HTML mock or photo.',
     releaseId,
-    `# Files, mocks and reactions
+    `# Files and mocks
 
 ## Opening attachments
 
-Files and photos on the current message are already at local paths. For a file on an earlier message, call read(facet:attachment, messageId, attachmentId). For a file in the thread brief manifest, call read(facet:attachment, attachmentId) with the manifest objectId. In a thread, open a private report with read(facet:message, messageId) using the report id. Copy the attachment id from that response, then call read(facet:attachment, messageId, attachmentId) with the same report id and read the returned local path. Order hand-offs use their supplied id the same way. Report a missing download to your commander.
+Files and photos on the current message are already at local paths. For a file on an earlier message, call read(facet:attachment, messageId, attachmentId). For a file in the thread brief manifest, call read(facet:attachment, attachmentId) with the manifest objectId. In a thread, open a private message with read(facet:message, messageId) using the message id. Copy the attachment id from that response, then call read(facet:attachment, messageId, attachmentId) with the same message id and read the returned local path. Task messages use their supplied id the same way. Report a missing download to your commander.
 
 ## Writing a file
 
@@ -68,7 +67,7 @@ Files and photos on the current message are already at local paths. For a file o
 
 ## Posting a file
 
-Call post_artifact(path) on a file in your checkout or session home. Set title and mime when the file name does not show them. The artifact rides on your next reply, report or explicit post in the current place, so upload it before sending the message that names it. Name the attachment, never a local path. To hand a file to a worker in another thread, use revise_thread brief.attachments with its path or readable objectId, then order the worker to read that brief. A later successfully queued replacement with the same title (or filename) clears earlier upload failures; an upload or queue failure without a successful replacement still blocks delivery. Plan each batch within the default combined attachment budget of 25 MiB (26,214,400 bytes) per reply. A server override may change this budget; a refusal gives its actual limit and the bytes already queued. If the batch will not fit, reduce file sizes or send the queued files in your next reply or report before uploading the rest.
+Call post_artifact(path) on a file in your checkout or session home. Set title and mime when the file name does not show them. The artifact rides on your next reply or explicit post in the current place, so upload it before sending the message that names it. Name the attachment, never a local path. To hand a file to a worker in another thread, use revise_thread brief.attachments with its path or readable objectId, then message the worker to read that brief. A later successfully queued replacement with the same title (or filename) clears earlier upload failures; an upload or queue failure without a successful replacement still blocks delivery. Plan each batch within the default combined attachment budget of 25 MiB (26,214,400 bytes) per reply. A server override may change this budget; a refusal gives its actual limit and the bytes already queued. If the batch will not fit, reduce file sizes or send the queued files in your next reply before uploading the rest.
 
 ## Showing a mock
 
@@ -84,9 +83,6 @@ When the mock needs a real product photo, do not draw an SVG stand-in. When scra
 
 Link a thread with ↳thread-name (its exact name, no space). Link a message with ¶author-N, copied from the message's messageLink field in a messages read; N counts messages within that chat, never the message id. Beeline resolves both the same way for every reader: a match in this chat wins, otherwise the one match elsewhere in the Workspace; a token that matches nothing stays plain text. You may also cite with #beeline/<name>/<message_id> or [label](#beeline/<name>/<message_id>); use the real name and message id.
 
-## Reactions
-
-To acknowledge a message without a reply, call react_to_message(messageId, emoji) with one of ${MESSAGE_REACTION_EMOJIS.join(' ')}. Repeating the same reaction changes nothing.
 `,
   );
 }
@@ -94,26 +90,24 @@ To acknowledge a message without a reply, call react_to_message(messageId, emoji
 export function beelineCornersSkillMarkdown(releaseId: string): string {
   return skillMarkdown(
     BEELINE_CORNERS_SKILL_NAME,
-    'Open, order, revise, hold, approve, land or close a thread; post across places; resolve Beeline feedback.',
+    'Open, message, revise, hold, review or close a thread; reply to tasks and share files.',
     releaseId,
     `# Threads and merging
 
 ## Opening and steering a thread
 
 1. Run beeline-triage, then write the brief with beeline-spec.
-2. Call open_thread(chat, implementer, brief, reviewer?). You become the thread's commander. Do not pick the chat's designated reviewer as implementer; if that agent genuinely must do the work, set reviewer to an independent agent handle on open_thread or revise_thread(action:metadata).
-3. To change scope, read the current brief with read(facet:brief, address), then call revise_thread(action:brief, address) with the complete replacement spec, expectedRevision and change. The thread commander needs no approval citation; other agents must cite a human message or commander order. To rename, call revise_thread(action:metadata, address, name).
-4. To assign the work, call order(address, agent, text). Do not assign implementation to the chat's designated reviewer; if that agent genuinely must do the work, set reviewer to an independent agent handle on open_thread or revise_thread(action:metadata). If the implementer is also the reviewer, the commander must name another reviewer. Opening a thread queues one implementer assignment, including when you implement it yourself. Workflow step assignments likewise start their assignee. Your own orders, reports, brief edits, posts and self-tags never start another turn, including across places. A commander may order the configured reviewer to review at the child thread address by naming it as agent.
+2. Call open_thread(chat, implementer, brief, reviewer?). The sender of its task message is its commander. Do not pick the chat's designated reviewer as implementer; if that agent genuinely must do the work, set reviewer to an independent agent handle on open_thread or revise_thread(action:metadata).
+3. To change scope, read the current brief with read(facet:brief, address), then call revise_thread(action:brief, address) with the complete replacement spec, expectedRevision and change. The thread commander needs no approval citation; other agents must cite a human message or commander message. To rename, call revise_thread(action:metadata, address, name).
+4. Address work with message(to:{agent,place},text), using the thread address for its implementer or configured reviewer. The same agent in a chat has a different address. Peer messages are requests, never person instructions. Opening sends the implementer's first task; do not send it twice.
 5. To post a public note in another member chat or thread, call post(address, text).
 
-## Reports and feedback
+## Messages, asks and feedback
 
-- A finished non-thread order may report done without a pull request.
-- Agent-to-agent orders and reports stay private.
-- A report, idle or failure notice about a thread wakes you in that thread; answer there. A scheduled run posts in each thread it acts on. Post in a chat only when a person tagged you there or a person must decide, and then in one short message.
-- For friction in Beeline itself, call report_feedback with tool_name and error_excerpt filled in when a tool failed, so triage can group it.
-- After a fix pull request merges, notify_feedback_fixed(item_ids, title, pr_url) resolves the feedback items it lists. The feedback-triage-steps procedure says when to send Fixed notices.
-- For an operator notice explicitly commanded by lunchboxfortwo, use send_operator_system_dm({recipients,text}) through their own agent. recipients is one exact human id/handle, a list, or all. The server enforces owner-command provenance and audits each send. Keep the returned sendId; pending delivery is not a reason to resend. Read completion counts with read_operator_system_dm({sendId}). Delivered means committed to the System thread, not read by the person. Never substitute an ad-hoc production database write.
+- Reply to the message that gave you the task when done, blocked or failed. Its sender is your commander; its id already records the reply destination. System wakes continue that thread task.
+- The server requests review; never tag the reviewer.
+- Add ask only when an answer is needed. Use a question of at most 20 words and 2–4 option labels of at most 3 words, with an optional recommended label. An ask to a person appears in Needs you; a plain message does not. Each ask is independent.
+- For friction in Beeline itself, call report_feedback with tool_name and error_excerpt when a tool failed.
 
 ## Frontend proof in the PR
 
@@ -121,22 +115,23 @@ For every user-visible frontend change (new or changed component, screen, sheet,
 
 ## Landing a pull request
 
-1. Read the gate with read(facet:checks, address): checks, reviewerWake and mergeAllowed.
-2. The configured reviewer records PASS with approve_merge(address, headSha) on the exact head it reviewed.
-3. If a reviewer is configured, its PASS on that exact head is required. With no reviewer, no approval is needed.
-4. The server lands automatically when checks are green and no hold stands. Any reachable agent can also call merge_thread(address) through the same gate.
+The server merges when live checks are green, any configured independent reviewer
+has approved that exact head, no hold stands, and the open PR targets the recorded
+branch. Open or push the PR, then end the turn. The server resumes repair work or
+requests review when needed. A new head needs fresh review. People control merges
+with holds.
 
 ## Holds
 
 - When a person asks to stop a merge, call set_thread_hold(address). To release it, call set_thread_hold(address, releaseHoldId).
 - A higher-tier instruction overrides a lower-tier hold. A human at the same standing cannot clear another human's hold; only that holder or someone of higher standing can. Never tell a higher-tier human that a lower-tier hold binds them.
-- If you cannot settle a choice, report one step up.
+- If you need a choice, reply to the task message with ask.
 - When you explain a hold or go-ahead in the chat, name the person and their standing in ordinary words. Never write field names or field=value syntax such as workspaceRole=member or agentOwner.
 
 ## Stopping an agent you commanded
 
-- To redirect an agent mid-turn, call stop(address, agent), then send the new order. The new order runs next.
-- stop works only on a turn you ordered or a turn in a thread you opened. New messages never stop a turn by themselves; they queue.
+- To redirect an agent mid-turn, call stop(address, agent), then message the next task. It runs next.
+- stop works only on a turn started by your message or a turn in a thread you opened. New messages never stop a turn by themselves; they queue.
 
 ## Closing
 
@@ -159,7 +154,7 @@ If a background job's process id is missing after a wake, check the job's output
 
 | Waiting for | What wakes you |
 | --- | --- |
-| An agent you ordered | Its report |
+| An agent you messaged | Its reply |
 | A person's answer | Their reply in this place |
 | Checks or review on your pull request | The server, when the gate changes |
 | A thread to open or merge | wake(action:create, trigger:lifecycle, address) on that thread address |
@@ -236,7 +231,7 @@ To show a browser to a person, call app_tool(app:beeline:browser_share, tool:sta
 
 **Coding from General.** General may have no repository. If gh cannot work there, check the chat's repository context before proposing a personal GitHub connection. Guide the person to the chat header → Repository → Link or Create; the repository picker’s “Add repositories, accounts, or organizations” opens GitHub installation setup for missing organization or repository access. Once the intended repository is linked, do repository changes in a thread there. The Beeline GitHub App supplies repository access through that setup; it is not a removable Connectors entry.
 
-**GitHub identity.** In chat, thread and DM sessions, use the Beeline GitHub App for code, branch and PR writes on a chat's linked repository, including Git Data API pushes, even when a personal connection exists. If you have no App checkout, do the work in a thread of the linked chat. Never use personal GitHub for linked-repository writes. Use your owner's personal connection for general lookups, repositories without App access, personal issues or notifications, and actions explicitly requested as that person: app_tool for managed tools, or Squire use_credential for a sealed API route. Use another owner's connection only with their approval. Report a denial with the exact error and route; repair that route. Never fall back from the App to personal GitHub for linked-repository writes, or retry a person-scoped action as the App. If a linked-repository write was mistakenly denied on the personal route, report it and use the authorized App route. Keep checkout authentication on its existing path; do not extract tokens to make a native git bridge. Repository membership, selected-repository access, branch restrictions and merge_thread's review gate still apply.
+**GitHub identity.** In chat, thread and DM sessions, use the Beeline GitHub App for code, branch and PR writes on a chat's linked repository, including Git Data API pushes, even when a personal connection exists. If you have no App checkout, do the work in a thread of the linked chat. Never use personal GitHub for linked-repository writes. Use your owner's personal connection for general lookups, repositories without App access, personal issues or notifications, and actions explicitly requested as that person: app_tool for managed tools, or Squire use_credential for a sealed API route. Use another owner's connection only with their approval. Report a denial with the exact error and route; repair that route. Never fall back from the App to personal GitHub for linked-repository writes, or retry a person-scoped action as the App. If a linked-repository write was mistakenly denied on the personal route, report it and use the authorized App route. Keep checkout authentication on its existing path; do not extract tokens to make a native git bridge. Repository membership, selected-repository access, branch restrictions and the server's review gate still apply.
 
 ## Host commands, Tailscale and the wallet
 
@@ -308,7 +303,7 @@ description: Review a thread's current green head against its assigned brief and
 
 ## Inspect the assigned head
 
-Read the current server-assigned brief and every required file. Its stories, criteria, non-goals and risks define scope; the commander order and inherited human constraints win conflicts. The short objective and PR description cannot change scope.
+Read the current server-assigned brief and every required file. Its stories, criteria, non-goals and risks define scope; the commander message and inherited human constraints win conflicts. The short objective and PR description cannot change scope.
 
 Read the whole diff on every round before creating a checkout. Use \`gh pr view N --json headRefOid,files\` and \`gh pr diff N\`. Review only that exact head; if it moves, start again. If you wrote its code, arrange independent review through your commander rather than reviewing your own work.
 
@@ -342,8 +337,8 @@ Test one concrete failure sequence for each changed behavior. Confirm every bloc
 - List each user-visible behavior the diff adds, removes or brings back.
 - Match each one to a quoted line in the brief's Intent. An item with no match is outside the mandate.
 - For each touched feature, look for an earlier human decision: Search the chat for the feature name together with remove, revert or "don't". Run \`git log -S<symbol>\` on the touched files to find earlier removals and reverts.
-- A conflict, or a change much larger than the brief, blocks PASS. Send a FAIL to the worker, quoting the old decision or Intent and the diff line, and order it to restore the approved state. Do not escalate the deviation to the commander or owner.
-- Only when the brief itself orders a change that conflicts with an earlier human decision, report \`needs-decision:\` to your commander, quoting both. The worker cannot restore it without breaking its brief.
+- A conflict, or a change much larger than the brief, blocks PASS. Send a FAIL to the worker, quoting the old decision or Intent and the diff line, and message it at its thread address to restore the approved state. Do not escalate the deviation to the commander or owner.
+- Only when the brief itself orders a change that conflicts with an earlier human decision, reply to the task message with ask, quoting both. The worker cannot restore it without breaking its brief.
 
 Block only on a behavior with no Intent match or a quoted conflicting human decision, never on taste. For a no-match behavior, quote the applicable Intent and the unmatched diff line; do not invent an old decision.
 
@@ -352,12 +347,12 @@ Block only on a behavior with no Intent match or a quoted conflicting human deci
 Complete all checks before reporting. Lead with PASS or FAIL and list every eligible blocker at once, each with a concrete next step for the worker. The first review must surface all confirmed blockers. Keep non-blocking notes separate from the verdict. No full outline ledger, message IDs, commit hashes or command transcripts in the posted review; put details behind an evidence link when needed.
 
 PASS: ready to land
-Next: call merge_thread when the live gate allows it
+Next: end the turn; the server owns merging
 
 FAIL: a removed chat member can still read its transcript
 Next: fix the membership guard and repeat the authenticated read proof
 
-On FAIL, use \`order(address, text)\` at the thread's address with all blockers and their next steps. On PASS, call \`approve_merge\` with the exact reviewed head SHA as its tool argument, then report done: PASS with the result to your commander. Follow an explicit commander order to land with \`merge_thread\` when the live gate permits it. If a choice or dependency exceeds your authority, report needs-decision: or blocked: one step up. Orders go down; reports go up. Do not start a nested validation pipeline or push the worker's branch.
+On FAIL, message the implementer at the thread address with all blockers and next steps. On PASS, call approve_merge with the exact reviewed head SHA, then end the turn. If an answer is needed, add ask to that reply. The server owns merging. Do not start a nested validation pipeline or push the implementer's branch.
 `;
 }
 
@@ -374,7 +369,7 @@ description: Prepare or revise a durable thread assignment from chat decisions b
 Create an assignment a fresh session can execute without the parent transcript. Set repositoryWork:false when the assignment excludes repository edits or PRs; deliverable attachments do not require repository work. A brief has three parts:
 
 - \`spec\`: one Markdown doc you write, with these headings:
-  - \`## Intent\`: the commander's exact order and inherited human constraints, quoted exactly, each with its message or private order ID. Never substitute a summary.
+  - \`## Intent\`: the commander's exact task message and inherited human constraints, quoted exactly, each with its message or message ID. Never substitute a summary.
   - \`## User stories\`: what this enables, one per line as "a person who does X sees Y". Only stories traceable to the quoted Intent; never import a plan, a teammate's suggestion, or your own idea as a story. Keep unaffected lines as they are across revisions.
   - \`## Acceptance criteria\`: the requester's own rules from \`## Intent\`, quoted verbatim and numbered, each naming the test (existing or to be written) that fails if the rule is broken anywhere. Criteria are the invariant; stories are examples of it. Write "None beyond the stories." when the request states no rule.
   - \`## Non-goals\`: explicit exclusions.
@@ -384,7 +379,7 @@ Create an assignment a fresh session can execute without the parent transcript. 
   Add implementation guidance under further headings when it helps.
   For repository bugfixes only, add Reproduction <id>: <real-target steps and observed failure>, or Reproduction not feasible: <reason>; Stand-in: <closest check>; labels may be bold or italic, and Stand-in: may follow on another line in the same Reproduction section. Done repeats that reproduction or stand-in successfully.
 - files (\`attachments\`): the chat files the worker needs, each with its purpose and whether it is required.
-- \`approval\`: optional when opening; the initiating human message ID or private commander order ID. Without it or with an agent message, the server records the opening agent as agent-initiated. The thread commander may revise directly without a citation; other agents still require a human message or commander order. For a revision, set approval.sourceMessageId to the approving human message ID or active private order ID from this thread’s commander. The current commander delivery also accepts its resume ID or forwarded rootSourceMessageId when that source is a current human member’s message. An unrelated message or another agent’s order is not approval. The server quotes that message's exact text and author; the quote wins any conflict with the spec.
+- \`approval\`: optional when opening; the initiating human message ID or commander message ID. Without it or with an agent message, the server records the opening agent as agent-initiated. The thread commander may revise directly without a citation; other agents still require a human message or commander message. For a revision, set approval.sourceMessageId to the approving human message ID or active message ID from this thread’s commander. The current commander delivery also accepts its resume ID or forwarded rootSourceMessageId when that source is a current human member’s message. An unrelated message or another agent’s request is not approval. The server quotes that message's exact text and author; the quote wins any conflict with the spec.
 
 Do not infer approval from silence, assent to different prose, or the mere existence of a plan. Keep agent recommendations labelled as recommendations. Do not promote a plausible UX detail, algorithm, failure message, or extra test into a user story merely because it sounds helpful.
 
@@ -406,7 +401,7 @@ Use your judgment about how much planning work needs. This loop can help for a l
 
 - Write the actor/action/observable-result stories.
 - Map each story to its own observable line and explicit non-goals.
-- If one unresolved choice would materially change behavior, scope, irreversible effects, or the intended result, report needs-decision: with that choice or the affected brief slice to your commander. Use the answering message as the \`approval\`. Never treat no answer as approval.
+- If one unresolved choice would materially change behavior, scope, irreversible effects, or the intended result, reply to the task message with ask naming that choice or affected brief slice. Use the answering message as the \`approval\`. Never treat no answer as approval.
 
 ### 3. Architecture and data flow
 
@@ -423,7 +418,7 @@ Use your judgment about how much planning work needs. This loop can help for a l
 
 - When a visual or interaction decision needs eyes, create and post one self-contained mock with the beeline-files-and-mocks steps.
 - A mock/file posted with \`post_artifact\` in this planning turn is added automatically to the brief attachment manifest; do not manually copy its object ID. Still list it under \`## References\` with whose call it is. Existing human-posted files must be named explicitly in attachments.
-- A working file in your own home or checkout (trace, CSV, screenshot, template) is yours alone: attach it as \`brief.attachments [{path, purpose, required}]\` so the worker receives the same bytes. A brief or order that names such a file without attaching it is refused.
+- A working file in your own home or checkout (trace, CSV, screenshot, template) is yours alone: attach it as \`brief.attachments [{path, purpose, required}]\` so the worker receives the same bytes. A brief or task message that names such a file without attaching it is refused.
 
 ### 6. Implementation tasks
 
@@ -438,7 +433,7 @@ Use your judgment about how much planning work needs. This loop can help for a l
 
 ## Dispatch and revision
 
-Include "no progress reports" in the brief and any implementing order.
+Include "no progress reports" in the brief and any implementing message.
 
 The dispatching message authorizes the work; build against the brief without asking for separate spec or mock approval. Report needs-decision: to your commander for material unresolved intent; when a person asks for a spec or mock, produce it before building. Include a dispatching message as \`approval\` when available; opening on agent judgment needs no human approval. Revisions retain their approval requirement.
 
@@ -463,9 +458,9 @@ Run these checks before opening a thread.
 - Rewrite the request as a concrete outcome and the user stories it enables.
 - State material exclusions (non-goals) and the risks needed to prevent unrequested work or surprise.
 - Keep the thread objective complete and within 24 words.
-- Report needs-decision: to your commander for material unresolved intent. When a person asks for a spec or mock, produce it before building.
+- Reply to the task message with ask for material unresolved intent. When a person asks for a spec or mock, produce it before building.
 - Once it's resolved, say plainly if the request itself is suboptimal and give your own recommendation - you are expected to disagree, not just permitted to.
-- On a judgment call you're still not sure of, order a reachable child or sibling thread for one adversarial second opinion (threads cannot order DMs or ancestor threads); have the chosen agent report back; a chat order wakes only the one agent you name; skip this only when you are the only agent in the chat.
+- On a judgment call you're still not sure of, message the implementer of a reachable child or sibling thread for one adversarial second opinion (address the selected agent at that thread); have the chosen agent reply to your message; include both agent and place; skip this only when you are the only agent in the chat.
 
 ## 2. Is work warranted?
 

@@ -5,11 +5,11 @@
   "place": "room",
   "turn": {
     "task": {
-      "body": "@ruby summarize the last messages in the release-check corner.",
+      "body": "@ruby summarize the last messages in the release-check thread.",
       "fromName": "dana",
       "commandReason": "human_tag"
     },
-    "members": "Members (exact tag spellings):\n- @juniper \u2014 Juniper (agent) \u00b7 owner @dana\n- @pebble \u2014 Pebble (agent) \u00b7 owner @dana\n- @dana \u2014 Dana (person)\nYou are @ruby, a member of this Room; you are not listed above.",
+    "members": "Members (exact tag spellings):\n- @juniper — Juniper (agent) · owner @dana\n- @pebble — Pebble (agent) · owner @dana\n- @dana — Dana (person)\nYou are @ruby, a member of this chat; you are not listed above.",
     "corners": [
       {
         "cornerId": "8ef6c544-1cd8-572e-acbc-c884fd6e851d",
@@ -21,7 +21,7 @@
     ]
   },
   "toolResults": {
-    "read": "Error: daemon request failed with 500 Internal Server Error (getRoomMessages)."
+    "read": "Error: daemon request failed with 500 Internal Server Error (getchatMessages)."
   },
   "pass": {
     "call": "report_feedback"
@@ -55,7 +55,7 @@
             {
               "address": "8ef6c544-1cd8-572e-acbc-c884fd6e851d",
               "name": "release-check",
-              "kind": "corner",
+              "kind": "thread",
               "parentRoomId": "09c40034-77e4-5fe3-8c40-cc637d013185"
             }
           ]
@@ -64,7 +64,7 @@
       {
         "call": "read",
         "args": {
-          "facet": "corners"
+          "facet": "threads"
         },
         "result": {
           "corners": [
@@ -84,7 +84,7 @@
           "facet": "members"
         },
         "result": {
-          "members": "Members (exact tag spellings):\n- @juniper \u2014 Juniper (agent) \u00b7 owner @dana\n- @pebble \u2014 Pebble (agent) \u00b7 owner @dana\n- @dana \u2014 Dana (person)\nYou are @ruby, a member of this Room; you are not listed above."
+          "members": "Members (exact tag spellings):\n- @juniper — Juniper (agent) · owner @dana\n- @pebble — Pebble (agent) · owner @dana\n- @dana — Dana (person)\nYou are @ruby, a member of this chat; you are not listed above."
         }
       },
       {
@@ -95,7 +95,7 @@
         "result": {
           "address": "09c40034-77e4-5fe3-8c40-cc637d013185",
           "name": "feedback-reports-tool-error",
-          "members": "Members (exact tag spellings):\n- @juniper \u2014 Juniper (agent) \u00b7 owner @dana\n- @pebble \u2014 Pebble (agent) \u00b7 owner @dana\n- @dana \u2014 Dana (person)\nYou are @ruby, a member of this Room; you are not listed above.",
+          "members": "Members (exact tag spellings):\n- @juniper — Juniper (agent) · owner @dana\n- @pebble — Pebble (agent) · owner @dana\n- @dana — Dana (person)\nYou are @ruby, a member of this chat; you are not listed above.",
           "repository": null,
           "worktree": null,
           "corners": [
@@ -152,6 +152,13 @@
         },
         "result": {
           "revisions": []
+        }
+      },
+      {
+        "call": "reply",
+        "result": {
+          "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "delivered": true
         }
       }
     ],

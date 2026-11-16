@@ -42,7 +42,7 @@ it('wakes the opener for failed checks even after a reviewer turn and retries a 
     object: { text: 'typecheck', headSha },
   });
   expect(await commands(B, C)).toEqual([
-    expect.objectContaining({ reason: 'corner_check', sourceMessageId: note.id }),
+    expect.objectContaining({reason:'corner_check',source:expect.objectContaining({systemEvent:expect.objectContaining({kind:'check-failed'})})}),
   ]);
   expect((await readAgentCommands(rootFixture.db, A, C)).commands).toHaveLength(0);
   // A deleted wake is recovered from the recorded checks despite its effect receipt.
@@ -218,7 +218,7 @@ it('routes subscribed events, grants and changed corner checks through actions',
     kind: 'check-passed',
   });
   // No reviewer: no review-gap handback or merge turn is needed.
-  expect((await commands(B, C)).map(command => command.reason).sort()).toEqual(['attention_report']);
+  expect((await commands(B, R)).map(command => command.reason).sort()).toEqual(['system']);
 });
 
 it('treats a reviewer removed from the parent Room as no reviewer without a review handback', async () => {
@@ -238,8 +238,8 @@ it('treats a reviewer removed from the parent Room as no reviewer without a revi
     kind: 'check-passed',
   });
   expect((await readAgentCommands(rootFixture.db, A, C)).commands).toHaveLength(0);
-  const handback = await commands(B, C);
-  expect(handback.map(command => command.reason).sort()).toEqual(['attention_report']);
+  const handback=await commands(B,R);
+  expect(handback.map(command => command.reason).sort()).toEqual(['system']);
   expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND text LIKE '%could not be reached%'`, [C])).rowCount).toBe(0);
   await expect(
     rootFixture.daemon.execute('getAgentConfiguration', { agentId: B, roomId: C }, B),

@@ -62,10 +62,9 @@ it.each(['approved', 'legacy', 'agent-order', 'different-dispatch', 'same-issuer
       agent: 'ruby', text: 'Refine the brief without transferring command' }, BOSS);
     const reviser = (await commands(opened.cornerId, RUBY)).find(c => c.id === ordered.id)!;
     await claim(reviser);
-    const revised = await daemon.execute('reviseCornerBrief', { ...authority(reviser), cornerId: opened.cornerId,
+    await expect(daemon.execute('reviseCornerBrief', { ...authority(reviser), cornerId: opened.cornerId,
       expectedRevision: 2, brief: { spec: 'Build widget with refined details', repositoryWork: false,
-        change: 'Agent-only refinement', approval: { sourceMessageId: ordered.id } } }, RUBY);
-    expect(revised.approval?.kind).toBe('commander-order');
+        change: 'Agent-only refinement', approval: { sourceMessageId: ordered.id } } }, RUBY)).rejects.toThrow('commander');
   }
   if (mode === 'legacy') await db.query(`UPDATE corner_brief_revisions
     SET approval_basis=approval_basis-'commanderCommandId'-'commanderReturnRoomId' WHERE corner_id=$1 AND revision=2`, [opened.cornerId]);

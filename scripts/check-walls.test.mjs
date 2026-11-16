@@ -27,6 +27,16 @@ function mutation(name, file, find, code) {
   });
 }
 test('the tree passes without a per-line exception list', () => assert.deepEqual(judgeWalls(root), []));
+mutation('a repair wake cannot follow another tagged agent', 'apps/server/src/corner-lifecycle.ts',
+  'agentId: corner.worker_agent_id,', 'agentId: corner.latest_tagged_agent_id,');
+mutation('a message cannot wake an agent at its origin place', 'apps/server/src/agent-messaging.ts',
+  'roomId: to.place, agentId: to.agent', 'roomId: route.from.place, agentId: to.agent');
+mutation('a System wake cannot change commander on a tag', 'apps/server/src/agent-command.ts',
+  'replyAddress:chat.commander', 'replyAddress:chat.last_tag');
+mutation('an idle notice cannot reply to the same commander who receives it', 'apps/server/src/commander.ts',
+  'replyAddress,automatic:true', 'replyAddress:{agent:route.recipient,place:route.returnRoom},automatic:true');
+mutation('an orphan idle notice cannot invent an owner destination', 'apps/server/src/commander.ts',
+  '(await recordedMessageRoute(db,senderTask)).from : undefined', '(await recordedMessageRoute(db,senderTask)).from : route.owner');
 mutation('a seventh merge condition fails', 'apps/server/src/corner-lifecycle-review-state.ts',
   'const reasons = [', "const reasons = [input.draft ? 'draft' : '',");
 mutation('a new refusal for an existing condition fails', 'apps/server/src/corner-lifecycle-review-state.ts',
@@ -45,7 +55,7 @@ mutation('a new machine state fails', 'apps/server/src/corner-machine.ts',
   "state: 'working' | 'idle'", "state: 'awaiting-consent' | 'working' | 'idle'");
 mutation('a new lifecycle fallback state fails', 'apps/server/src/corner-lifecycle.ts',
   "state: machine?.state ?? 'idle'", "state: machine?.state ?? 'awaiting-consent'");
-mutation('implementer lookup cannot gain an admission gate', 'apps/server/src/corner-worker.ts',
+mutation('implementer derivation cannot gain an admission gate', 'apps/server/src/corner-worker.ts',
   '  return `${factAlias}.implementer_agent_id`;', "  if (factAlias === 'blocked') throw new Error('no');\n  return `${factAlias}.implementer_agent_id`;");
 for (const [name, code] of [
   ['refusal', "if (item.reason === 'schedule') throw new Error('paused');"],

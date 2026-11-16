@@ -192,7 +192,7 @@ it('keeps approval resume provenance and posts progress only in the corner', asy
       (c) => c.reason === 'report' && c.source.body === 'done: PRIVATE COORDINATION LEAK',
     ),
   ).toBe(false);
-  expect((await commands(opened.cornerId,RUBY)).some(item=>item.source.body==='PRIVATE COORDINATION LEAK')).toBe(true);
+  expect((await commands(DM,RUBY)).some(item=>item.source.body==='PRIVATE COORDINATION LEAK')).toBe(true);
 });
 
 it('keeps private work across connection close and a new helper process resumes it without a failure report', async () => {
@@ -775,6 +775,6 @@ it('ignores retired relay metadata and answers at the recorded return address',a
   await rootFixture.daemon.execute('postRoomMessage',{...authority(turn),text:'Old steer',
     relay:{fromRoomId:opened.cornerId,toRoomId:ROOM,direction:'down'}} as any,WORKER);
   expect((await rootFixture.db.query('SELECT state FROM agent_commands WHERE id=$1',[turn.id])).rows[0]).toEqual({state:'complete'});
-  expect((await commands(opened.cornerId,RUBY)).find(item=>item.reason==='report')?.source.body).toBe('Old steer');
+  expect((await commands(DM,RUBY)).find(item=>item.reason==='reply')?.source.body).toBe('Old steer');
   expect((await rootFixture.db.query('SELECT 1 FROM messages WHERE room_id=$1 AND text=$2',[ROOM,'Old steer'])).rowCount).toBe(0);
 });

@@ -31,6 +31,15 @@ describe('assembled prompts', () => {
     }
   });
 
+  it('keeps retired routing concepts and place wording out of generated prompts',()=>{
+    for(const context of Object.values(SESSION_VARIANTS)) {
+      const prompt=assembleSessionPrompt(context).systemPrompt
+        .replaceAll('feature/corner-','feature/thread-').replaceAll('corner:prepare','thread:prepare');
+      expect(prompt).not.toMatch(/\bcorner\b|\bRoom\b/);
+      expect(prompt).not.toMatch(/\b(?:order|report|attention_report|ask_owner|merge_corner|merge_thread)\s*\(/);
+    }
+  });
+
   for (const [name, context] of Object.entries(SESSION_VARIANTS)) {
     it(`snapshots the ${name} session prompt`, async () => {
       const { systemPrompt, report } = assembleSessionPrompt({ ...context, memoryMaxBytes: 8 * 1024 ** 3 });
@@ -81,7 +90,7 @@ const scope12 = fixtureScope12();
       else if (coding) expect(assembled.systemPrompt).toContain('Open the pull request with gh');
       else expect(assembled.systemPrompt).not.toContain(rule);
     }
-    expect(assembled.systemPrompt).toContain("approving order, non-goals and inherited human constraints bound the work");
+    expect(assembled.systemPrompt).toContain("approving message, non-goals and inherited human constraints bound the work");
     expect(assembled.systemPrompt).toContain('respect risks');
     expect(assembled.systemPrompt).toContain('post_artifact');
     const turn = assembleTurnPrompt({ surface: 'code-corner', sessionPrefix: assembled.systemPrompt, brief: { brief, fileLines: [] }, task: { body: 'How is the desk doing?' } }).text;
@@ -158,8 +167,8 @@ const scope14 = fixtureScope14();
 it('releases delegated turns on every surface so reports can wake a new turn', () => {
   for (const context of Object.values(SESSION_VARIANTS)) {
     const text = assembleSessionPrompt(context).systemPrompt;
-    expect(text).toContain('After ordering another agent, end the turn');
-    expect(text).toContain('its report wakes a new turn');
+    expect(text).toContain('After messaging another agent, end the turn');
+    expect(text).toContain('its reply wakes a new turn');
     expect(text).toContain('do not sleep or poll');
   }
 });
@@ -174,14 +183,14 @@ const scope16 = fixtureScope16();
     m23_expect(text).toBe([
       '[Beeline · #Design · @ruby_2 tagged you]',
       '> ' + 'x'.repeat(30000),
-      'Reply (start with @ruby_2): /node /bundle session reply --room room-id --reply-to message-id "<your answer>" --as joined',
+      "Reply: /node /bundle session tool reply '{\"id\":\"message-id\",\"text\":\"<your answer>\"}' --as joined",
       'Context: /node /bundle session read --room room-id --as joined',
     ].join('\n'));
   });
 
   m23_it('C2 managed helper prompt routing survives a truncated long instruction', () => {
     const result = m23_assembleTurnPrompt({ surface: 'room', routing: scope16.routing, sessionPrefix: 'x'.repeat(10000), task: { body: 'long task' } });
-    for (const value of [scope16.routing.roomId, scope16.routing.messageId, scope16.routing.memberId, 'Reply (start with @ruby_2): replyTo message-id']) m23_expect(result.text.slice(0,400)).toContain(value);
+    for (const value of [scope16.routing.roomId, scope16.routing.messageId, scope16.routing.memberId, 'Reply with reply(id: "message-id", text: ...)']) m23_expect(result.text.slice(0,400)).toContain(value);
   });
 });
 });

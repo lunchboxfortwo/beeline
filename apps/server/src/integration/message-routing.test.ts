@@ -456,16 +456,16 @@ const fixture = monolithFixture();
     const peerExchange = await fixture.auth.createDaemonExchange(peer);
     const peerToken = (await fixture.auth.exchangeDaemonToken(peerExchange.exchangeToken))!.daemonToken;
     await fixture.database.query(`UPDATE identities SET handle='fuckface' WHERE id=$1`, [peer]);
-    const spoofed = await fixture.daemonOperation('postRoomMessage', {
-      roomId: ROOM,
+    const spoofed = await fixture.daemonOperation('postCornerMessage', {
+      roomId: ROOM,cornerId:ROOM,
       text: 'Peer should not receive this untagged message.',
     });
     expect(spoofed.status).toBe(200);
     const spoofedBody = (await spoofed.json()) as { id: string };
     // Untagged words name nobody, whatever the caller hoped.
     expect(await taggedBy(fixture.database, spoofedBody.id)).toEqual([]);
-    const reply = await fixture.daemonOperation('postRoomMessage', {
-      roomId: ROOM,
+    const reply = await fixture.daemonOperation('postCornerMessage', {
+      roomId: ROOM,cornerId:ROOM,
       text: '@bee cannot self-route. @retired-peer and @FUCKFACE are stale. @fuckface investigate the failed build.',
     });
     expect(reply.status).toBe(200);
@@ -520,8 +520,8 @@ const fixture = monolithFixture();
       mentions: [AGENT],
     });
     expect(sent.status).toBe(200);
-    const reply = await fixture.daemonOperation('postRoomMessage', {
-      roomId: ROOM,
+    const reply = await fixture.daemonOperation('postCornerMessage', {
+      roomId: ROOM,cornerId:ROOM,
       requestId: 'two-human-tags-turn',
       triggerMessageId: '5'.repeat(64),
       text: '@owner here is where things stand.\n@bananaman614305 you are up next.',

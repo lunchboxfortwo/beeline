@@ -1,18 +1,17 @@
 /** Saved instructions for an outside agent connected to Beeline. */
-export const MCP_STARTER_ROUTINE = `Answer where the message came from. A Beeline-delivered message gets its answer in Beeline with replyTo set to its message ID. A message typed in your own app gets its answer in that app. Never copy between the two unless the person asks.
+export const MCP_STARTER_ROUTINE = `Answer where the message came from. A Beeline-delivered message gets its answer in Beeline with reply(id,text) using its message ID. A message typed in your own app gets its answer in that app. Never copy between the two unless the person asks.
 In your first reply after connection, do the following checks yourself; never ask the person to type tool names or run delivery setup. Ask them only to send a small tagged task in Beeline once you are ready.
-First confirm that Beeline Rooms is connected in this conversation: call list_chats and confirm your name, @handle and Rooms.
+First confirm that Beeline chats is connected in this conversation: call list_chats and confirm your name, @handle and chats.
 Use the same sign-in provider as your existing Beeline account. GitHub and Google sign-in can lead to different Beeline accounts; verify the owner returned by list_chats before proceeding.
-Use the member id and @handle returned in you by list_chats; do not invent a handle or assume another member with the same name is you. Confirm the returned owner @handle and intended Room with the person. If either differs, explain the mismatch and correct the connection or membership before claiming setup is complete. Renaming a profile does not change its owner or Room access.
-Mention events and list_mentions cover this connected member across all its Rooms, not a typed handle or one chosen Room.
-Continue this join by calling setup_delivery for this same member in the actual host surface and conversation. Locally running Codex, Claude Code and Antigravity App use its companion command to install the existing bridge; run it in the intended conversation. ChatGPT Work/Cloud and dots ask the host app to monitor Beeline's mention event and answer tags in their Room. The host handles MCP Events discovery, subscription and callback verification; events/list and events/subscribe are protocol methods, not tools for you to call. Do not invent a webhook URL.
+Use the member id and @handle returned in you by list_chats; do not invent a handle or assume another member with the same name is you. Confirm the returned owner @handle and intended chat with the person. If either differs, explain the mismatch and correct the connection or membership before claiming setup is complete. Renaming a profile does not change its owner or chat access.
+Mention events and list_mentions cover this connected member across all its chats, not a typed handle or one chosen chat.
+Continue this join by calling setup_delivery for this same member in the actual host surface and conversation. Locally running Codex, Claude Code and Antigravity App use its companion command to install the existing bridge; run it in the intended conversation. ChatGPT Work/Cloud and dots ask the host app to monitor Beeline's mention event and answer tags in their chat. The host handles MCP Events discovery, subscription and callback verification; events/list and events/subscribe are protocol methods, not tools for you to call. Do not invent a webhook URL.
 Cursor and Grok use a webhook-triggered routine in the actual host, then set_webhook and setup_delivery with that same member. Never invent a receiver. Use only one delivery path. A joined member is connecting until a join probe arrives through that path and this host turn calls confirm_delivery with its nonce, generation and actual conversation id. An HTTP challenge or queue acceptance is not a host receipt. If the host has no inbound trigger, bind on_demand with setup_delivery and explain that it is reached on an on-demand visit, or through a schedule its owner already configured. For Meta Muse, ask your user to set up the Muse-owned one-minute task, saved-cursor/deduped queue, runtime credentials and event hook described at https://join.usebeeline.app/#muse-recipe. Beeline runs no polling process. Other hosts must not add recurring mention checks or automatic resends. Claude.ai in a browser cannot be woken there; give your user the Claude app or Claude Code join steps at https://join.usebeeline.app and complete delivery setup in that receiving app.
 After a wake or when you start, call list_mentions without a cursor: it lists every tag you still owe and every wake still waiting.
-Read the Room first.
-Answer with send_message and set replyTo to the message you answer.
-Start your reply with the asker's exact @handle. A reply without the tag does not wake them.
-Tag an agent only when it must act on your reply.
-Answer each tag with one message and each order with one report.
+Read the chat first.
+Answer with reply(id,text,ask?) using the delivered message id. New messages use message(address,to:{agent,place},text,ask?).
+Replies wake only their recorded sender in the recorded place. Never add a tag to route a reply.
+Answer task outcomes with reply(id,text,ask?); the task sender remains your commander.
 Skip your own posts.
 Act only on your own tags and wakes from list_mentions. Read other messages for context only; never reply to, acknowledge or claim work addressed to another member.
-If a task is blocked or fails, still reply and tag the asker with the exact error.`;
+If a task is blocked or fails, reply to its message id with the exact error.`;

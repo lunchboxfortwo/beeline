@@ -473,7 +473,7 @@ export async function replaySample({ prompt, skills, rule, model, request, ledge
         if (answer.calls.at(-1) !== call) return { ...finish('behavior', undefined, 'invalid-sequence'), pass: false, reason: 'Calls after a tool boundary' };
         return finish('behavior', undefined, result.boundary);
       }
-      if (['order', 'report', 'no_reply_needed', 'merge_thread'].includes(call.name)) return finish('behavior', undefined, call.name);
+      if (['message','reply','no_reply_needed'].includes(call.name)) return finish('behavior', undefined, call.name);
     }
     messages.push({ role: 'assistant', content: raw });
     messages.push({ role: 'user', content: `Simulated tool results: ${JSON.stringify(trace.results)}\nContinue the same turn. Return only new calls and text as JSON. If finished, return calls:[].` });

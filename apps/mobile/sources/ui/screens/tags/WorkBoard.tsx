@@ -80,6 +80,7 @@ export function WorkAssigneePicker({
 const stop = (event?: { stopPropagation?: () => void }) => event?.stopPropagation?.();
 /** `#chat ↳ thread` for a thread, `#chat` for a chat, `@agent` for a DM. */
 function source(item: WorkItemView) {
+  if(item.source) return item.source.label;
   if ((item.ask?.roomKind ?? item.roomKind) === 'direct') {
     const agent = item.ask?.author ?? item.openedBy;
     return `@${agent.handle?.replace(/^@/, '') ?? agent.name}`;
@@ -89,7 +90,7 @@ function source(item: WorkItemView) {
     ? `#${chat} ↳ ${item.threadName.replace(/^.*? ↳ /, '')}`
     : `#${chat}`;
 }
-/** One Needs you row: the thread itself, with its first ask and how many wait there. */
+/** Each Needs you row owns one question and its answer buttons. */
 function AskCard({ item, actions }: { item: WorkItemView; actions: WorkBoardActions }) {
   const [reply, setReply] = useState('');
   const [busy, setBusy] = useState(false);

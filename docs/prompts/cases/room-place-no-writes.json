@@ -1,7 +1,7 @@
 {
   "id": "room-place-no-writes",
   "section": "place",
-  "summary": "In a Room the agent does not edit or commit files; repository changes go to a corner.",
+  "summary": "In a chat the agent does not edit or commit files; repository changes go to a thread.",
   "place": "room",
   "session": {
     "repository": {
@@ -18,7 +18,7 @@
       "fromName": "dana",
       "commandReason": "human_tag"
     },
-    "members": "Members (exact tag spellings):\n- @juniper \u2014 Juniper (agent) \u00b7 owner @dana\n- @pebble \u2014 Pebble (agent) \u00b7 owner @dana\n- @dana \u2014 Dana (person)\nYou are @ruby, a member of this Room; you are not listed above."
+    "members": "Members (exact tag spellings):\n- @juniper — Juniper (agent) · owner @dana\n- @pebble — Pebble (agent) · owner @dana\n- @dana — Dana (person)\nYou are @ruby, a member of this chat; you are not listed above."
   },
   "tools": [
     "Bash"
@@ -40,7 +40,7 @@
           },
           {
             "text": {
-              "matches": "corner",
+              "matches": "thread",
               "flags": "i"
             }
           }
@@ -89,7 +89,7 @@
       {
         "call": "read",
         "args": {
-          "facet": "corners"
+          "facet": "threads"
         },
         "result": {
           "corners": []
@@ -101,7 +101,7 @@
           "facet": "members"
         },
         "result": {
-          "members": "Members (exact tag spellings):\n- @juniper \u2014 Juniper (agent) \u00b7 owner @dana\n- @pebble \u2014 Pebble (agent) \u00b7 owner @dana\n- @dana \u2014 Dana (person)\nYou are @ruby, a member of this Room; you are not listed above."
+          "members": "Members (exact tag spellings):\n- @juniper — Juniper (agent) · owner @dana\n- @pebble — Pebble (agent) · owner @dana\n- @dana — Dana (person)\nYou are @ruby, a member of this chat; you are not listed above."
         }
       },
       {
@@ -112,7 +112,7 @@
         "result": {
           "address": "09c40034-77e4-5fe3-8c40-cc637d013185",
           "name": "room-place-no-writes",
-          "members": "Members (exact tag spellings):\n- @juniper \u2014 Juniper (agent) \u00b7 owner @dana\n- @pebble \u2014 Pebble (agent) \u00b7 owner @dana\n- @dana \u2014 Dana (person)\nYou are @ruby, a member of this Room; you are not listed above.",
+          "members": "Members (exact tag spellings):\n- @juniper — Juniper (agent) · owner @dana\n- @pebble — Pebble (agent) · owner @dana\n- @dana — Dana (person)\nYou are @ruby, a member of this chat; you are not listed above.",
           "repository": {
             "name": "acme/app",
             "branch": "main"
@@ -186,6 +186,13 @@
         "result": {
           "exitCode": 0,
           "stdout": "/replay/repo/README.md:3:You will recieve a notification."
+        }
+      },
+      {
+        "call": "reply",
+        "result": {
+          "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "delivered": true
         }
       }
     ],

@@ -19,40 +19,36 @@ beforeEach(async () => {
     WHERE room_id=$1 AND reason='corner_objective'`, [C, ROOT, R, H]);
 });
 
-async function answeredInCorner(agentId: string, reason: string) {
+async function answeredAtCommander(agentId: string, reason: string) {
   const [wake] = await commands(agentId, C);
-  expect(wake).toMatchObject({ reason, roomId: C, returnRoomId: C });
+  expect(wake).toMatchObject({ reason, roomId: C, returnRoomId:R });
   const posted = await result(wake!, `Handled ${reason}.`);
-  expect((await rootFixture.db.query('SELECT room_id FROM messages WHERE id=$1', [posted.id])).rows).toEqual([{ room_id: C }]);
-  expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND author_id=$2 AND created_at>(SELECT created_at FROM messages WHERE id=$3)`,
-    [R, agentId, ROOT])).rows).toEqual([]);
-  // Answering wakes no commander; any other wake the machine queued stays in the corner too.
-  expect((await rootFixture.db.query<{ room_id: string; return_room_id: string }>(
-    `SELECT room_id,return_room_id FROM agent_commands WHERE state='pending'`)).rows
-    .every(item => item.room_id === C && item.return_room_id === C)).toBe(true);
+  expect((await rootFixture.db.query('SELECT room_id FROM messages WHERE id=$1', [posted.id])).rows).toEqual([{room_id:R}]);
+  expect((await rootFixture.db.query('SELECT 1 FROM messages WHERE room_id=$1 AND id=$2',[C,posted.id])).rowCount).toBe(0);
+
 }
 
-it('a passing-check review wake answers in its corner, not the commissioning chat', async () => {
+it('a passing-check review wake replies to the commissioning sender at its recorded chat', async () => {
   await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
   await lifecycle('passing');
   await github('passed a check', 'check-passed');
-  await answeredInCorner(B, 'corner_review_dispatch');
+  await answeredAtCommander(B, 'corner_review_dispatch');
 });
 
-it('a failing-check wake answers in its corner', async () => {
+it('a failing-check wake replies to its thread commander', async () => {
   await lifecycle('failing');
   await github('failed a check', 'check-failed');
-  await answeredInCorner(A, 'corner_check');
+  await answeredAtCommander(A, 'corner_check');
 });
 
-it('a merge-conflict wake answers in its corner', async () => {
+it('a merge-conflict wake replies to its thread commander', async () => {
   await lifecycle('passing', { mergeability: 'dirty' });
   await expect(queueCornerMergeConflict(rootFixture.db, C, (await github('found merge conflicts in')).id)).resolves.toBe(true);
-  await answeredInCorner(A, 'corner_merge_conflict');
+  await answeredAtCommander(A, 'corner_merge_conflict');
 });
 
-it('a merge-refused wake answers in its corner', async () => {
+it('a merge-refused wake replies to its thread commander', async () => {
   await lifecycle('passing');
   await advanceCorner(rootFixture.db, C, { kind: 'merge-refused', headSha: head, reason: 'base moved' });
-  await answeredInCorner(A, 'corner_merge_refused');
+  await answeredAtCommander(A, 'corner_merge_refused');
 });

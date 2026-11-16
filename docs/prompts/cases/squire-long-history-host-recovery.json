@@ -65,9 +65,8 @@
         "skill": "beeline-connecting-services"
       },
       {
-        "call": "report",
+        "call": "reply",
         "args": {
-          "status": "blocked",
           "text": {
             "matches": "^blocked:.*(host|browser|process|unsandboxed|shell|grant|access)",
             "flags": "is"
@@ -152,7 +151,7 @@
       {
         "call": "read",
         "args": {
-          "facet": "corners"
+          "facet": "threads"
         },
         "result": {
           "corners": []
@@ -224,6 +223,13 @@
         },
         "result": {
           "revisions": []
+        }
+      },
+      {
+        "call": "reply",
+        "result": {
+          "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "delivered": true
         }
       }
     ],

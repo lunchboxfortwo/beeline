@@ -28,7 +28,7 @@ it('records the agent assigned by an opening order rather than its opener', asyn
     .toEqual({implementer_agent_id:A});
 });
 
-it('initializes a human thread from its first person tag and changes only on become_implementer', async () => {
+it('initializes a human thread from its first person tag and changes only on claim_thread', async () => {
   await rootFixture.db.query(`UPDATE corner_facts SET implementer_agent_id=NULL WHERE corner_id=$1`,[C]);
   await send('@hoots First assignment', C);
   await send('@goosy A question', C);
@@ -47,7 +47,7 @@ it('refuses PR/push credentials for another agent and permits them immediately a
   await rootFixture.db.query('UPDATE corner_facts SET implementer_agent_id=$2 WHERE corner_id=$1',[C,B]);
   const service=new DaemonService(rootFixture.db,rootFixture.live,async()=>({token:'fixture-token',expiresAt:9999999999}));
   await expect(service.execute('getRoomGitHubToken',{roomId:C,write:true},A))
-    .rejects.toThrow('Call become_implementer before pushing or opening a PR for this thread.');
+    .rejects.toThrow('Call claim_thread before pushing or opening a PR for this thread.');
   await expect(service.execute('getRoomGitHubToken',{roomId:C},A)).resolves.toEqual({token:'fixture-token',expiresAt:9999999999});
   await send('@hoots Take over',C);
   const item=(await commands(A,C))[0]!;

@@ -6,7 +6,7 @@ import {
   type WorkItemView,
   type WorkState,
 } from '@beeline/api-contract/phone';
-import { workDetailColumnsSql, projectWorkDetail, type WorkDetailRow } from './work-item-detail.js';
+import { workDetailColumnsSql, projectWorkDetail, addWorkNote,attachToWorkItem,type WorkDetailRow } from './work-item-detail.js';
 import type { SqlDatabase } from './database.js';
 import { phoneIdentity, type PhoneIdentityRow } from './phone-identity.js';
 import { needsYouItems } from './needs-you.js';
@@ -54,6 +54,7 @@ export async function updateWorkItem(
   db: SqlDatabase,
   input: UpdateWorkItemInput,
   actorId: string,
+  accessIdentityId=actorId,
 ): Promise<void> {
   if (input.state !== undefined && !WORK_STATES.includes(input.state))
     throw new Error('invalid work state');
@@ -72,7 +73,7 @@ export async function updateWorkItem(
       -- A thread's own item is in progress until set otherwise; new work starts in Backlog.
       COALESCE($2,CASE WHEN $7=r.id::text AND r.parent_id IS NOT NULL THEN 'in-progress' ELSE 'backlog' END),$3,$8,
       CASE WHEN $5 THEN $4 ELSE ${cornerImplementerSql('f', 'r')} END,CASE WHEN $7=r.id::text THEN COALESCE(r.created_by,$6) ELSE COALESCE((SELECT author_id FROM messages source WHERE source.id=$7 AND source.room_id=r.id),$6) END,CASE WHEN $2='done' THEN now() END
-    FROM rooms r JOIN room_access member ON member.room_id=r.id AND member.identity_id=$6 AND member.removed_at IS NULL
+    FROM rooms r JOIN room_access member ON member.room_id=r.id AND member.identity_id=$9 AND member.removed_at IS NULL
     LEFT JOIN corner_facts f ON f.corner_id=r.id WHERE r.id=$1
     ON CONFLICT(id) DO UPDATE SET state=COALESCE($2,work_items.state),
       title=COALESCE($3,work_items.title),objective=COALESCE($8,work_items.objective),
@@ -88,6 +89,7 @@ export async function updateWorkItem(
         actorId,
         input.id ?? input.roomId,
         input.objective ?? null,
+        accessIdentityId,
       ],
     );
     const item = changed.rows[0];
@@ -95,6 +97,8 @@ export async function updateWorkItem(
     // Started work carries its objective into the thread it runs in, unless the thread has its own.
     if (item.corner && item.objective && item.state !== 'backlog')
       await writeCornerObjective(tx, input.roomId, item.objective, true);
+    if (input.note!==undefined) await addWorkNote(tx,{...input,text:input.note},actorId);
+    for (const attachment of input.attachments ?? []) await attachToWorkItem(tx,{...input,attachment},actorId);
     await tx.query("SELECT set_config('beeline.work_actor',$1,true)", [previous]);
   });
 }
@@ -190,11 +194,19 @@ export async function readWorkBoard(
         WorkDetailRow & {
           message_id: string;
           question: string | null;
+          source: WorkItemView['source'] | null;
           recommended_option_id: string | null;
         }
       >(
-        `SELECT source.id message_id,q.question,q.recommended_option_id,${workDetailColumnsSql('source.id')}
-         FROM messages source LEFT JOIN work_questions q ON q.message_id=source.id WHERE source.id=ANY($1::text[])`,
+        `SELECT source.id message_id,q.question,q.recommended_option_id,${workDetailColumnsSql('source.id')},
+           CASE WHEN source.card->'route' IS NOT NULL THEN jsonb_strip_nulls(jsonb_build_object(
+             'roomId',origin.id,'messageId',CASE WHEN q.about->>'kind'='request' AND EXISTS(SELECT 1 FROM messages task
+               WHERE task.id=q.about->>'messageId' AND task.room_id=origin.id) THEN q.about->>'messageId' END,
+             'label',CASE WHEN origin.parent_id IS NOT NULL THEN '#' || parent.name || ' ↳ ' || origin.name
+               WHEN origin.direct_participants IS NOT NULL THEN 'DM' ELSE '#' || origin.name END)) END source
+         FROM messages source LEFT JOIN work_questions q ON q.message_id=source.id
+         LEFT JOIN rooms origin ON origin.id::text=q.about->>'roomId'
+         LEFT JOIN rooms parent ON parent.id=origin.parent_id WHERE source.id=ANY($1::text[])`,
         [needs.items.map((item) => item.messageId)],
       )
     : { rows: [] };
@@ -204,11 +216,8 @@ export async function readWorkBoard(
     items.filter((item) => item.id === item.roomId).map((item) => [item.roomId, item]),
   );
   // One Needs you row per thread: the thread itself, carrying its first ask and the count.
-  const asksByRoom = new Map<string, typeof needs.items>();
-  for (const ask of needs.items)
-    asksByRoom.set(ask.roomId, [...(asksByRoom.get(ask.roomId) ?? []), ask]);
-  const asks = [...asksByRoom.values()].map((roomAsks): WorkItemView => {
-    const ask = roomAsks[0]!;
+  const askingRooms=new Set(needs.items.map(ask=>ask.roomId));
+  const asks = needs.items.map((ask): WorkItemView => {
     const thread = threads.get(ask.roomId);
     const q = questionById.get(ask.messageId);
     return {
@@ -238,11 +247,12 @@ export async function readWorkBoard(
             approval: ask.approval ? { ...ask.approval, subject: q.question } : undefined,
           }
         : ask,
-      askIds: roomAsks.map((each) => each.messageId),
+      askIds: [ask.messageId],
+      ...(q?.source ? {source:q.source} : {}),
       ...(q?.recommended_option_id ? { recommendedOptionId: q.recommended_option_id } : {}),
     };
   });
-  const rest = items.filter((item) => !(item.id === item.roomId && asksByRoom.has(item.roomId)));
+  const rest = items.filter((item) => !(item.id === item.roomId && askingRooms.has(item.roomId)));
   // Active work before idle threads, each newest first.
   rest.sort(
     (a, b) =>

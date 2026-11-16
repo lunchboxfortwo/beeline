@@ -28,7 +28,7 @@ const scope1 = fixtureScope1();
       expect(await activeWorkspaces()).toEqual([WORKSPACE]);
       expect(JSON.stringify(await client.callTool({ name: 'list_chats', arguments: {} }))).not.toContain(secondRoom);
       expect((await client.callTool({ name: 'read_messages', arguments: { room: secondRoom } })).isError).toBe(true);
-      expect((await client.callTool({ name: 'send_message', arguments: { room: secondRoom, text: 'must not send' } })).isError).toBe(true);
+      expect((await client.callTool({ name: 'message', arguments: { address: secondRoom, to:{agent:USER,place:secondRoom}, text: 'must not send' } })).isError).toBe(true);
       expect((await scope1.post('/mcp/oauth/token', { grant_type: 'refresh_token', refresh_token: tokens.refresh_token,
         client_id: grant.clientId, resource: scope1.origin + '/mcp' })).status).toBe(200);
       await ensureMcpMember(scope1.db, { clientId: grant.clientId, ownerId: USER, modelLabel: 'Local MCP reviewer' });
@@ -92,7 +92,7 @@ const scope1 = fixtureScope1();
     expect(JSON.stringify(await client.callTool({ name: 'list_chats', arguments: {} }))).toContain('Demo');
     expect((await client.callTool({ name: 'read_messages', arguments: { room: ROOM } })).isError).not.toBe(true);
     const text = `JOIN-1 synthetic post via ${alias}`;
-    expect((await client.callTool({ name: 'send_message', arguments: { room: ROOM, text } })).isError).not.toBe(true);
+    expect((await client.callTool({ name: 'message', arguments: { address:ROOM,to:{agent:USER,place:ROOM},text } })).isError).not.toBe(true);
     expect(JSON.stringify(await scope1.phone.readRoom(ROOM, USER))).toContain(text);
   }, 60_000);
 
@@ -111,11 +111,11 @@ const scope1 = fixtureScope1();
       await scope1.db.query(`UPDATE rooms_mcp_connections SET last_used_at=
         CASE WHEN $3::boolean THEN NULL ELSE now()-$4::interval END
         WHERE client_id=$1 AND identity_id=$2`, [grant.clientId, USER, route === 'never polled', age]);
-      const response = await sender.client.callTool({ name: 'send_message', arguments: { room: ROOM, text: `@${handle} check this tag` } }) as { content: { text: string }[] };
+      const response = await sender.client.callTool({ name:'post',arguments:{address:ROOM,text:`@${handle} check this tag`} }) as { content: { text: string }[] };
       const receipt = JSON.parse(response.content[0]!.text).data;
       expect(receipt.woken).toEqual([handle]);
       expect(receipt.notWoken).toEqual([]);
-      expect((await scope1.db.query('SELECT 1 FROM rooms_mcp_mentions WHERE member_id=$1 AND message_id=$2', [member, receipt.messageId])).rowCount).toBe(1);
+      expect((await scope1.db.query('SELECT 1 FROM rooms_mcp_mentions WHERE member_id=$1 AND message_id=$2', [member, receipt.id])).rowCount).toBe(1);
     }, 60_000);
 
   it('MCP-EVENTS-1: discovers, verifies, refreshes and unsubscribes on the authenticated MCP endpoint', async () => {
@@ -226,9 +226,9 @@ const scope1 = fixtureScope1();
       expect(bearerCalls).toBe(0);
       expect(received).toHaveLength(3);
       expect(received.find(event=>event.data?.messageId===sent.messageId)).toMatchObject({ name: 'mention', cursor: null,
-        data: { roomId: ROOM, messageId: sent.messageId, memberId: member, replyRule: `Reply (start with @demo): replyTo ${sent.messageId}`, idempotencyKey: `mention:${member}:${sent.messageId}`, author: { id: USER }, text: '@' + handle + ' reply here' } });
+        data: { roomId: ROOM, messageId: sent.messageId, memberId: member, replyRule: `Reply with reply(id: "${sent.messageId}", text: ...)`, idempotencyKey: `mention:${member}:${sent.messageId}`, author: { id: USER }, text: '@' + handle + ' reply here' } });
       expect(await deliverMcpMemberWebhooks(scope1.db, deliveryTransport)).toBe(0);
-      const reply = await client.callTool({ name: 'send_message', arguments: { room: ROOM, text: 'Event received.', replyTo: sent.messageId } });
+      const reply = await client.callTool({ name:'reply',arguments:{id:sent.messageId,text:'Event received.'} });
       expect(reply.isError).not.toBe(true);
       const view = await scope1.phone.readRoom(ROOM, USER);
       expect(JSON.stringify(view)).toContain('Event received.');
@@ -354,10 +354,10 @@ const scope1 = fixtureScope1();
         return new Response(null, { status: 204 });
       })).toBe(1);
       expect(route === 'webhook' ? received[0] : received[0]!.data).toMatchObject({
-        commandId: sent.id, address: ROOM, kind: 'order', text: args.text, next: MCP_ORDER_WAKE_HINT,
+        commandId:sent.id,address:ROOM,from:{agent:AGENT,place:ROOM},text:args.text,next:expect.stringContaining(MCP_ORDER_WAKE_HINT),
       });
       expect(scope1.data(await client.callTool({ name: 'list_mentions', arguments: {} })).wakes)
-        .toContainEqual(expect.objectContaining({ id: sent.id, kind: 'order' }));
+        .toContainEqual(expect.objectContaining({ id:sent.id,from:{agent:AGENT,place:ROOM} }));
       notices.length = 0;
       expect(await scope1.daemon.execute('order', args, AGENT)).toMatchObject({ id: sent.id });
       expect(notices).toEqual([]);
@@ -378,8 +378,8 @@ const scope1 = fixtureScope1();
       expect(pickup.isError, JSON.stringify(pickup)).not.toBe(true);
       expect((await scope1.db.query('SELECT state FROM agent_commands WHERE id=$1', [sent.id])).rows[0])
         .toMatchObject({ state:'pending' });
-      const report = await client.callTool({ name: 'report', arguments: {
-        address: ROOM, commandId: sent.id, status: 'done', text: 'Delivery checked.',
+      const report = await client.callTool({ name:'reply',arguments:{
+        id:sent.id,text:'Delivery checked.',
       } });
       expect(report.isError).not.toBe(true);
       expect((await scope1.db.query('SELECT state FROM agent_commands WHERE id=$1', [sent.id])).rows)
@@ -420,7 +420,7 @@ const scope1 = fixtureScope1();
     expect(rows).toHaveLength(1);
     expect(rows[0]!.subscription_id).toBe(mention.id);
     expect(JSON.parse(rows[0]!.body)).toMatchObject({ name: 'wake', cursor: null, data: {
-      roomId: ROOM, address: ROOM, commandId: ordered.id, id: ordered.id, reason: 'order', kind: 'order', text,
+      roomId: ROOM, address: ROOM, commandId: ordered.id, id:ordered.id,from:{agent:AGENT,place:ROOM},text,
       next: (await pendingMcpWakes(scope1.db, member)).find(item => item.id === ordered.id)!.next,
     } });
     expect((await scope1.db.query(`SELECT 1 FROM rooms_mcp_event_deliveries WHERE subscription_id=$1`, [wake.id])).rowCount).toBe(0);
@@ -446,9 +446,9 @@ const scope1 = fixtureScope1();
       [opened.cornerId, member])).rows[0]!;
     expect(await queued(cornerCommand.id)).toHaveLength(1);
     expect(JSON.parse((await queued(cornerCommand.id))[0]!.body).data).toMatchObject({
-      roomId: opened.cornerId, address: opened.cornerId, commandId: cornerCommand.id, kind: 'order',
+      roomId: opened.cornerId, address: opened.cornerId, commandId: cornerCommand.id,
       text: 'Private thread assignment for the subscribed implementer',
-      next: MCP_ORDER_WAKE_HINT,
+      next:expect.stringContaining(MCP_ORDER_WAKE_HINT),
     });
     const report = await createAgentCommand(scope1.db, {
       roomId: ROOM, agentId: member, sourceMessageId: null, reason: 'report',
@@ -460,8 +460,8 @@ const scope1 = fixtureScope1();
       turn => turn.agentPubkey === member && turn.status === 'working',
     )).toEqual([]);
     expect(JSON.parse((await queued(report!.id))[0]!.body).data).toMatchObject({
-      kind: 'report', reason: 'report', text: 'done: the report reached the commander',
-      next: MCP_WAKE_HINT,
+      text: 'done: the report reached the commander',
+      next:expect.stringContaining(MCP_WAKE_HINT),
     });
     expect(await deliverMcpMemberWebhooks(scope1.db, transport)).toBe(2);
     expect(received).toHaveLength(3);
@@ -497,8 +497,8 @@ const scope1 = fixtureScope1();
       roomId: ROOM, agentId: member, sourceMessageId: null, reason: 'corner_review_dispatch',
       privatePayload: { text: `Current handoff target: PR #7 at ${'a'.repeat(40)}.`, authorId: AGENT, fromRoomId: ROOM, kind: 'lifecycle' },
     });
-    expect(JSON.parse((await queued(review!.id))[0]!.body).data).toMatchObject({ reason: 'corner_review_dispatch', next: MCP_REVIEW_WAKE_HINT });
-    expect((await pendingMcpWakes(scope1.db, member)).find(item => item.id === review!.id)).toMatchObject({ next: MCP_REVIEW_WAKE_HINT });
+    expect(JSON.parse((await queued(review!.id))[0]!.body).data).toMatchObject({next:expect.stringContaining(MCP_REVIEW_WAKE_HINT)});
+    expect((await pendingMcpWakes(scope1.db, member)).find(item => item.id === review!.id)).toMatchObject({next:expect.stringContaining(MCP_REVIEW_WAKE_HINT)});
     expect(MCP_REVIEW_WAKE_HINT).toContain('approve_merge with the head SHA');
   });
 
@@ -731,9 +731,9 @@ const scope1 = fixtureScope1();
     const client = new Client({ name: 'fake-claude', version: '1.0.0' }); scope1.clients.push(client);
     await client.connect(new StreamableHTTPClientTransport(new URL(scope1.origin + '/mcp'), { requestInit: { headers: { authorization: `Bearer ${issued.access_token}` } } }));
     const names = (await client.listTools()).tools.map(tool => tool.name);
-    expect(names).toContain('send_message');
-    expect(names).toContain('order');
-    expect(names).toContain('merge_thread');
+    expect(names).toContain('message');
+    expect(names).toContain('reply');
+    expect(names).not.toContain('merge_thread');
     expect(names).toContain('approve_merge');
     const refreshed = await scope1.post('/mcp/oauth/token', { grant_type: 'refresh_token', refresh_token: issued.refresh_token, client_id, resource: scope1.origin + '/mcp' });
     expect(refreshed.status).toBe(200);

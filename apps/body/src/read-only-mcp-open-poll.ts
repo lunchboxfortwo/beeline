@@ -1,5 +1,5 @@
 import { normalizeApprovalIntent } from '@beeline/api-contract/phone';
-import { validateWorkQuestion, type AskOwnerQuestionInput } from '@beeline/api-contract/phone';
+import { validateMessageAsk,type MessageAsk } from '@beeline/api-contract/daemon';
 import { INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS,REPOSITORY_SUBSCRIPTION_EVENTS,fixCornerText } from "@beeline/api-contract/daemon";
 import { SUBSCRIBABLE_EVENT_KINDS } from "@beeline/api-contract/phone";
 import { builtinBeelineApp } from "@beeline/api-contract/workbench";
@@ -8,7 +8,7 @@ import { CAPABILITY_ROUTES,CAPABILITY_TOOLS,SCRATCH_ROUTES,agentToolsFor,placeBe
 import { AgentGrantDeps,agentGrantDepsFromEnv,choiceOptionArgs } from './read-only-mcp-agent-grant-deps.js';
 import { agentScheduleDepsFromEnv,agentScheduleRoomId,createSchedule,deleteSchedule,subscribeEvents,updateSchedule } from './read-only-mcp-download-attachment.js';
 import { executeAgentOperation,executeConversationOperation } from './read-only-mcp-execute-agent-operation.js';
-import { JsonObject,ToolDefinition,asObject,callCommandTool,commandRequest,daemonExecute,grantRunDepsFromEnv,requiredEnv } from './read-only-mcp.js';
+import { JsonObject,ToolDefinition,asObject,callCommandTool,commandRequest,daemonExecute,grantRunDepsFromEnv,requiredEnv,operatorAgentTools } from './read-only-mcp.js';
 
 
 
@@ -94,7 +94,7 @@ export async function runGrantedCommand(
 
 
 export function advertisedAgentTool(name: string): ToolDefinition {
-  const tool = agentToolsFor(true, process.env.BEELINE_AGENT_DM === '1', Boolean(process.env.BEELINE_DAEMON_CORNER_ID), process.env.BEELINE_CORNER_REPOSITORY === '1', Boolean(process.env.BEELINE_GRANT_RUNNER_URL), true, process.env.BEELINE_NATIVE_IO_PROVEN === '1').find(tool => tool.name === name);
+  const tool = agentToolsFor(true, process.env.BEELINE_AGENT_DM === '1', Boolean(process.env.BEELINE_DAEMON_CORNER_ID), process.env.BEELINE_CORNER_REPOSITORY === '1', Boolean(process.env.BEELINE_GRANT_RUNNER_URL), true, process.env.BEELINE_NATIVE_IO_PROVEN === '1',false,operatorAgentTools()).find(tool => tool.name === name);
   if (!tool) throw new Error(`unknown or unavailable tool: ${name}; use only advertised tools`);
   return tool;
 }
@@ -102,8 +102,9 @@ export function advertisedAgentTool(name: string): ToolDefinition {
 
 
 export function validateAdvertisedToolInput(tool: ToolDefinition, args: JsonObject): void {
-  if(tool.name==='ask_owner')validateWorkQuestion(args as unknown as AskOwnerQuestionInput);
-  if (tool.name==='post'||tool.name==='order'||tool.name==='report') return;
+  if ((tool.name==='message'||tool.name==='reply') && args.ask!==undefined)
+    validateMessageAsk(args.ask as MessageAsk);
+  if (tool.name==='post') return;
   // Restore root combinations while retaining surface-specific restrictions
   // such as scratch_io without quota. App operations have their own contracts
   // and may share a name (e.g. workflow read) with an ordinary tool.
@@ -275,7 +276,7 @@ export async function callAgentTool(name: string, args: JsonObject, toolCallId: 
 
 /** Execute only the advertised vocabulary; internal operations retain server authority. */
 export async function executeAgentTool(name:string,args:JsonObject,toolCallId:string,_attachmentNames:string[]=[]):Promise<string> {
-  if (name==='post'||name==='order'||name==='report') return executeConversationOperation(name,args);
+  if (name==='post') return executeConversationOperation(name,args);
   return executeResourceTool(name,args,toolCallId);
 }
 
@@ -291,12 +292,9 @@ async function executeResourceTool(name: string, args: JsonObject, toolCallId: s
     return withAdjustments(result,removed);
   };
   switch (name) {
-    case 'ask_owner': return execute('ask_owner');
-    case 'add_work_note':
-    case 'attach_to_work_item':
+    case 'message':
+    case 'reply': return execute(name);
     case 'create_work_item':
-    case 'set_work_state':
-    case 'assign_work_item':
     case 'update_work': return execute(name);
     case 'read': {
       const facet = args.facet;
@@ -360,14 +358,12 @@ async function executeResourceTool(name: string, args: JsonObject, toolCallId: s
       }
       return execute('revise_thread_brief', input);
     }
-    case 'become_implementer': return execute(name);
+    case 'claim_thread': return execute(name);
     case 'report_feedback':
-    case 'notify_feedback_fixed':
     case 'send_operator_system_dm':
     case 'read_operator_system_dm': return execute(name);
     case 'dispatch_release': return execute(name);
     case 'approve_merge':
-    case 'merge_thread':
     case 'set_thread_hold':
     case 'close_thread': return execute(name, addressed);
     case 'close_thread_pr': return execute('close_pull_request', addressed);
@@ -477,7 +473,6 @@ async function executeResourceTool(name: string, args: JsonObject, toolCallId: s
     }
     case 'stop':
     case 'post_artifact':
-    case 'react_to_message':
     case 'run_granted_command':
     case 'workspace':
     case 'store_secret':

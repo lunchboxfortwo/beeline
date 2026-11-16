@@ -30,13 +30,12 @@ export const CORNER_AGENT_UNREACHABLE_CARD_TYPE = 'corner-agent-unreachable';
 export const CORNER_MERGE_YES_CARD_TYPE = 'corner-merge-yes';
 
 
-/** A connected app answers its orders through the queue: the order it names,
- * or its oldest pending order (this Room first). */
-export async function selectMcpOrder(db: SqlDatabase, agentId: string, target: string,
+/** A connected app binds its tools to a received message in the queue. */
+export async function selectMcpMessage(db: SqlDatabase, agentId: string, target: string,
   commandId?: string): Promise<CommandRow | undefined> {
   const waiting = (await db.query<CommandRow>(
     `SELECT * FROM agent_commands WHERE agent_id=$1 AND state='pending'
-       AND private_payload->>'kind'='order' AND ($3::text IS NULL OR id=$3)
+       AND action='input' AND reason<>'mcp_call' AND ($3::text IS NULL OR id=$3)
      ORDER BY (room_id::text=$2) DESC,created_at,id LIMIT 1`, [agentId,target,commandId ?? null])).rows;
   return waiting[0];
 }

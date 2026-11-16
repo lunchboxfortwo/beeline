@@ -13,6 +13,7 @@ import {
 import { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
 import { LiveHub } from './live.js';
 import { PhoneService } from './phone-service.js';
+import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { SCHEDULE_RAN_VERB, SCHEDULE_SCHEDULER_ID } from '@beeline/api-contract/scheduled-prompts';
 
 const OWNER = 'a'.repeat(64);
@@ -79,6 +80,7 @@ it.each([OWNER, OTHER_AGENT, null, AGENT])('Reproduction schedule-report-owner: 
     expect(await new AgentScheduleLoop(database).runOnce()).toBe(1);
     const [command] = (await daemon.execute('getAgentCommands', { roomId: ROOM }, AGENT)).commands;
     await startQueuedCommand(daemon, { roomId: ROOM, commandId: command!.id }, AGENT);
+    expect(command!.from).toEqual({agent:owner===OTHER_AGENT?OTHER_AGENT:OWNER,place:ROOM});
     await database.query("UPDATE messages SET card=jsonb_set(card,'{ownerId}',to_jsonb($2::text)) WHERE id=$1",[command!.sourceMessageId,MEMBER]);
     const authority = { roomId: ROOM, requestId: command!.turnRequestId };
     await daemon.execute('postCornerMessage', { ...authority, cornerId: ROOM, text: 'Work posted' }, AGENT);
@@ -561,6 +563,8 @@ describe('agent schedule background posting', () => {
       ).toEqual({ hidden_from_roster: true });
       // The agent's daemon inbox contains the scheduled prompt (the own-author
       // drop would have hidden a self-authored row) and a simulated turn reply.
+      expect((await daemon.execute('getAgentCommands',{roomId:ROOM},AGENT)).commands.map(item=>item.from))
+        .toEqual(Array.from({length:maxRuns},()=>({agent:SYSTEM_IDENTITY_ID,place:ROOM})));
       const inbox = await daemon.execute('getRoomInbox', { roomId: ROOM, limit: 50 }, AGENT);
       // An inbox item is already addressed to this agent by the fact it was
       // delivered here, so there is nothing on the row left to check it against.

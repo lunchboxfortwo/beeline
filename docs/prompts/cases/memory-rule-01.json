@@ -12,7 +12,7 @@
       "body": "Hourly check: answer unanswered questions. All questions have been answered and no work is pending.",
       "commandReason": "schedule"
     },
-    "members": "Members (exact tag spellings):\n- @fern \u2014 Fern (agent) \u00b7 owner @opal\n- @opal \u2014 Opal (person)\nYou are @clover.",
+    "members": "Members (exact tag spellings):\n- @fern — Fern (agent) · owner @opal\n- @opal — Opal (person)\nYou are @clover.",
     "corners": [
       {
         "cornerId": "3161ef0f-0cd0-5c4e-a789-67058508b8ae",
@@ -38,7 +38,7 @@
         "noCall": "post"
       },
       {
-        "noCall": "report"
+        "noCall": "reply"
       },
       {
         "noCall": "post_artifact"
@@ -87,7 +87,7 @@
             {
               "address": "3161ef0f-0cd0-5c4e-a789-67058508b8ae",
               "name": "token-audit",
-              "kind": "corner",
+              "kind": "thread",
               "parentRoomId": "a0ba88e9-7197-58b3-844d-eb013c5b4ef9"
             }
           ]
@@ -96,7 +96,7 @@
       {
         "call": "read",
         "args": {
-          "facet": "corners"
+          "facet": "threads"
         },
         "result": {
           "corners": [
@@ -116,7 +116,7 @@
           "facet": "members"
         },
         "result": {
-          "members": "Members (exact tag spellings):\n- @fern \u2014 Fern (agent) \u00b7 owner @opal\n- @opal \u2014 Opal (person)\nYou are @clover."
+          "members": "Members (exact tag spellings):\n- @fern — Fern (agent) · owner @opal\n- @opal — Opal (person)\nYou are @clover."
         }
       },
       {
@@ -127,7 +127,7 @@
         "result": {
           "address": "a0ba88e9-7197-58b3-844d-eb013c5b4ef9",
           "name": "memory-rule-01",
-          "members": "Members (exact tag spellings):\n- @fern \u2014 Fern (agent) \u00b7 owner @opal\n- @opal \u2014 Opal (person)\nYou are @clover.",
+          "members": "Members (exact tag spellings):\n- @fern — Fern (agent) · owner @opal\n- @opal — Opal (person)\nYou are @clover.",
           "repository": null,
           "worktree": null,
           "corners": [
@@ -185,6 +185,13 @@
         "result": {
           "revisions": []
         }
+      },
+      {
+        "call": "reply",
+        "result": {
+          "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "delivered": true
+        }
       }
     ],
     "connect": {
@@ -198,7 +205,7 @@
     },
     "checks": {
       "checks": "unknown",
-      "reason": "No PR is recorded for the token-audit corner.",
+      "reason": "No PR is recorded for the token-audit thread.",
       "approved": false,
       "held": false,
       "mergeAllowed": false

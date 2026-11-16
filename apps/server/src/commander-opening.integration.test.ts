@@ -64,7 +64,7 @@ it('later human orders get ordinary replies here while escalations still go to t
     .toEqual([expect.objectContaining({ source: expect.objectContaining({ authorId: WORKER, body: 'blocked: Choose the endpoint' }) })]);
   const saved = (await rootFixture.db.query<CommandRow>(`SELECT * FROM agent_commands WHERE id=$1`, [turn.id])).rows[0];
   expect(await commanderReportAddress(rootFixture.db, opened.cornerId, saved))
-    .toMatchObject({ recipient: RUBY, returnRoom: DM });
+    .toMatchObject({ recipient: HUMAN, returnRoom: opened.cornerId });
   expect(await commanderReportAddress(rootFixture.db, opened.cornerId))
     .toMatchObject({ recipient: RUBY, returnRoom: DM });
 });
@@ -115,15 +115,15 @@ it('a stale recipient field cannot redirect a worker report into the corner', as
   expect((await rootFixture.db.query(`SELECT id FROM messages WHERE id=$1 AND presentation='message'`, [result.id])).rows).toEqual([]);
 });
 
-it('server reports to a self-opening agent stay private while that agent escalates to its opening human', async () => {
+it('a self-opened thread keeps the task sender as commander and never wakes itself', async () => {
   const opened = await rootFixture.daemon.execute('createCorner', { ...authority(rootFixture.order), targetRoomId: ROOM,
     name: 'Self-opened', objective: 'Check self-opened reports', implementer: 'ruby',
     brief: { spec: 'Check self-opened reports', repositoryWork: false,
       approval: { sourceMessageId: rootFixture.order.sourceMessageId } } }, RUBY);
-  expect(await commanderReportAddress(rootFixture.db, opened.cornerId)).toMatchObject({ recipient: RUBY, returnRoom: DM });
+  expect(await commanderReportAddress(rootFixture.db, opened.cornerId)).toMatchObject({ recipient: HUMAN, returnRoom: DM });
   const report = await reportToCommander(rootFixture.db, opened.cornerId, WORKER, 'blocked: reviewer unavailable');
-  expect((await commands(DM, RUBY)).find(command => command.id === report.id))
-    .toMatchObject({ private: true, source: { authorId: WORKER, body: 'blocked: reviewer unavailable' } });
+  expect((await commands(DM, RUBY)).find(command => command.id === report.id)).toBeUndefined();
+  expect((await rootFixture.db.query('SELECT room_id,author_id FROM messages WHERE id=$1',[report.id])).rows).toEqual([{room_id:DM,author_id:WORKER}]);
   const opening = (await rootFixture.db.query<CommandRow>(`SELECT * FROM agent_commands
     WHERE room_id=$1 AND reason='corner_objective'`, [opened.cornerId])).rows[0]!;
   expect(await commanderReportAddress(rootFixture.db, opened.cornerId, opening)).toMatchObject({ recipient: HUMAN, returnRoom: DM });

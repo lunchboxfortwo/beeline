@@ -178,11 +178,11 @@ describe.each(['pglite',...(postgresUrl?['postgres']:[])])('P12 MCP committed me
       await until(()=>!!readState(stateDir).sessions[0]?.streamCursor);
       await db.query(`INSERT INTO rooms_mcp_mentions(member_id,room_id,message_id) VALUES('member',$1,'before-expiry')`,[room]);
       await until(()=>messages.length===1&&readState(stateDir).sessions[0]?.cursor!=='1');
-      expect(messages[0]).toContain('--reply-to before-expiry');
+      expect(messages[0]).toContain('tool reply');expect(messages[0]).toContain('\"id\":\"before-expiry\"');
       await db.query(`UPDATE rooms_mcp_tokens SET expires_at=now()-interval '2 hours' WHERE hash='synthetic-token'`);
       await db.query(`INSERT INTO rooms_mcp_mentions(member_id,room_id,message_id) VALUES('member',$1,'during-expiry')`,[room]);
       await until(()=>messages.length===2);
-      expect(messages[1]).toContain('--reply-to during-expiry');
+      expect(messages[1]).toContain('"id":"during-expiry"');
       expect(connections).toHaveLength(1);expect(refreshes).toHaveLength(0);
       expect(readState(stateDir).sessions[0]?.accessToken).toBe(principal.hash);
       const revoked=once(connections[0]!.output,'close');

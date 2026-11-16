@@ -19,11 +19,11 @@ it('two connections acknowledge the same committed answer',async()=>{
   expect((await rootFixture.phone.readRoom(R,H))!.messages.filter(message=>/^Answer [AB]$/.test(message.text))).toHaveLength(1);
 });
 
-it('an invalid optional reply link is dropped while its answer is posted',async()=>{
+it('a final reply ignores an invalid optional link and keeps its recorded source message',async()=>{
   await send('@hoots answer');const [command]=await commands();await claim(command!);
   await result(command!,'Reply without the missing link','unused',{replyToMessageId:'f'.repeat(64)});
   expect((await rootFixture.db.query('SELECT text,reply_to_message_id FROM messages WHERE request_id=$1',[command!.turnRequestId])).rows)
-    .toEqual([{text:'Reply without the missing link',reply_to_message_id:null}]);
+    .toEqual([{text:'Reply without the missing link',reply_to_message_id:command!.sourceMessageId}]);
   expect(await commands()).toEqual([]);
 });
 

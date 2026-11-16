@@ -135,7 +135,7 @@ describe('the gate stays shut (AC-8)', () => {
     const cornerId = await approved();
     const { holdId } = await rootFixture.phone.execute('setCornerHold', { cornerId }, H);
     const command = await commissioned(cornerId);
-    await result(command, '@goosy release the hold');
+    await rootFixture.daemon.execute('message',{roomId:cornerId,requestId:command.turnRequestId,to:{agent:B,place:cornerId},text:'release the hold'},A);
     const delegated = (await commands(B, cornerId)).at(-1)!;
     await claim(delegated);
     await expect(rootFixture.daemon.execute('setCornerHold', { cornerId, roomId: cornerId, requestId: delegated.turnRequestId, releaseHoldId: holdId }, B)).rejects.toThrow('hold release denied');

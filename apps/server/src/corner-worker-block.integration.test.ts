@@ -47,15 +47,15 @@ async function input(agent = WORKER) {
   await startQueuedCommand(daemon, { roomId: C, commandId: command.id }, agent);
   return { roomId: C, requestId: command.turn_request_id };
 }
-const idleReports = async () => (await db.query(`SELECT id FROM agent_commands WHERE room_id=$1 AND reason='report'
-  AND private_payload->>'authorId'=$2 AND private_payload->>'text' LIKE 'blocked: Thread % is idle.%'`, [C, SYSTEM_IDENTITY_ID])).rows;
+const idleReports = async () => (await db.query(`SELECT id FROM agent_commands WHERE COALESCE(private_payload->>'originCornerId',private_payload->>'fromRoomId')=$1::text AND private_payload->>'automatic'='true'
+  AND private_payload->>'authorId'=$2 AND private_payload->>'text' ~ '^blocked: (Thread|Corner) .* is idle\.'`, [C, SYSTEM_IDENTITY_ID])).rows;
 async function reactions(count = 8) {
   for (let i = 0; i < count; i++) {
     await refreshCornerAttention(db, C);
-    const report = (await readAgentCommands(db, COMMANDER, C)).commands.find(c => c.source.authorId === SYSTEM_IDENTITY_ID && c.source.body.includes(' is idle.'));
+    const report = (await readAgentCommands(db, COMMANDER, ROOM)).commands.find(c => c.source.authorId === SYSTEM_IDENTITY_ID && c.source.body.includes(' is idle.'));
     if (!report) break;
-    await startQueuedCommand(daemon, { roomId: C, commandId: report.id }, COMMANDER);
-    await daemon.execute('postRoomMessage', { roomId: C, requestId: report.turnRequestId, text: 'Still waiting on secrets.' }, COMMANDER);
+    await startQueuedCommand(daemon, { roomId:report.roomId,commandId:report.id }, COMMANDER);
+    await daemon.execute('postRoomMessage', { roomId:report.roomId,requestId:report.turnRequestId, text: 'Still waiting on secrets.' }, COMMANDER);
   }
 }
 it('IDLE-BUDGET: commander reactions produce exactly one notice until a person event', async () => {
@@ -119,8 +119,7 @@ it('counts a notice sent before the thread wording change against the same idle 
     to_jsonb(replace(private_payload->>'text','blocked: Thread ','blocked: Corner '))) WHERE id=$1`, [notice!.id]);
   expect((await db.query(cornerIdleSql('$1'), [C])).rows[0]).toMatchObject({ idle_report_count: 1 });
   await runCornerAttention(db); await refreshCornerAttention(db, C);
-  expect((await db.query(`SELECT id FROM agent_commands WHERE room_id=$1 AND reason='report'
-    AND private_payload->>'authorId'=$2`, [C, SYSTEM_IDENTITY_ID])).rows).toHaveLength(1);
+  expect(await idleReports()).toHaveLength(1);
 });
 
 it('IDLE-BUDGET: only human grant decisions and human hold releases replenish notices', async () => {
@@ -193,9 +192,9 @@ it.each([false, true])('REPORT-REPLY: owner yes clears Ruby’s report (threaded
   expect((await phone.execute('readNeedsYou', { workspaceId: WS }, HUMAN)).items).toEqual([]);
   expect(await idleReports()).toHaveLength(1);
   expect((await db.query(cornerIdleSql('$1'), [C])).rows[0]).toMatchObject({ idle_eligible: true, idle_report_count: 1 });
-  const notice = (await readAgentCommands(db, COMMANDER, C)).commands.find(item => item.source.authorId === SYSTEM_IDENTITY_ID)!;
-  await startQueuedCommand(daemon, { roomId: C, commandId: notice.id }, COMMANDER);
-  expect(await daemon.execute('markAgentTurnSilent', { roomId: C, requestId: notice.turnRequestId }, COMMANDER)).toMatchObject({ answered: true });
+  const notice = (await readAgentCommands(db, COMMANDER, ROOM)).commands.find(item => item.source.authorId === SYSTEM_IDENTITY_ID)!;
+  await startQueuedCommand(daemon, { roomId: notice.roomId, commandId: notice.id }, COMMANDER);
+  expect(await daemon.execute('markAgentTurnSilent', { roomId: notice.roomId, requestId: notice.turnRequestId }, COMMANDER)).toMatchObject({ answered: true });
   await runCornerAttention(db); await refreshCornerAttention(db, C);
   expect(await state()).toBe('idle');
   expect(await idleReports()).toHaveLength(1);

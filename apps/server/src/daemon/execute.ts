@@ -22,6 +22,7 @@ import { daemonExecuteOperation } from './operations.js';
 import { daemonTurnReceipt } from './turn-receipts.js';
 import { AccessDeniedError,CORNER_CLEANUP_OPERATIONS,CORNER_REACH_OPERATIONS,Input,Output } from './values.js';
 import { modelText } from '../message-origin.js';
+import { sendMessage,replyToMessage } from '../agent-messaging.js';
 
 
   /** One request from an agent: the membership wall, then the queue item the
@@ -309,6 +310,23 @@ export async function daemonExecute<Name extends keyof DaemonOperationMap>(ctx: 
   helperConnection?: { connectionId: string; epoch: number },
 ): Promise<Output<Name>> {
   const value = input as Record<string, unknown>;
+  if (name==='message' || name==='reply') {
+    const messageId=typeof value.transportRequestId==='string'
+      ? createHash('sha256').update(`message:${agentId}:${value.transportRequestId}`).digest('hex') : undefined;
+    if (name==='reply') {
+      const request=input as Input<'reply'>;
+      return replyToMessage(ctx.database,agentId,{...request,messageId},roomId=>{
+        const refresh=()=>ctx.reconcileZeroCheckWorkerCompletion(roomId,agentId)
+          .catch(error=>console.warn('[answer] optional lifecycle refresh omitted:',error));
+        const background=CornerAccessDatabase.physical(ctx.database).backgroundWork;
+        if (background) background.run(refresh); else void refresh();
+      }) as Promise<Output<Name>>;
+    }
+    const request=input as Input<'message'>;
+    const parent=request.requestId ? await authorizeCommandOutput(ctx.database,request.roomId,agentId,request.requestId) : undefined;
+    return sendMessage(ctx.database,{route:{from:{agent:agentId,place:request.roomId},to:request.to},
+      text:request.text,ask:request.ask,id:messageId,parent}) as Promise<Output<Name>>;
+  }
   if (name === 'postRoomMessage' || name === 'report') {
     const saved=name==='postRoomMessage' ? await daemonPostRoomMessage(ctx,input as Input<'postRoomMessage'>,agentId) : await answerQueuedMessage(ctx.database, agentId, { roomId: String(value.roomId),
       requestId: typeof value.requestId === 'string' ? value.requestId : undefined,

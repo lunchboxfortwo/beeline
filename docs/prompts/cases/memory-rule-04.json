@@ -12,7 +12,7 @@
       "body": "Worker report: the requested audit is complete. Attachment audit.txt is already available to the owner at artifact-case-4. Report the outcome.",
       "commandReason": "order"
     },
-    "members": "Members (exact tag spellings):\n- @fern \u2014 Fern (agent) \u00b7 owner @opal\n- @opal \u2014 Opal (person)\nYou are @clover.",
+    "members": "Members (exact tag spellings):\n- @fern — Fern (agent) · owner @opal\n- @opal — Opal (person)\nYou are @clover.",
     "corners": [
       {
         "cornerId": "3161ef0f-0cd0-5c4e-a789-67058508b8ae",
@@ -35,10 +35,8 @@
       {
         "any": [
           {
-            "call": "report",
-            "args": {
-              "status": "done"
-            }
+            "call": "reply",
+            "args": {}
           },
           {
             "text": {
@@ -81,7 +79,7 @@
             {
               "address": "3161ef0f-0cd0-5c4e-a789-67058508b8ae",
               "name": "token-audit",
-              "kind": "corner",
+              "kind": "thread",
               "parentRoomId": "a0ba88e9-7197-58b3-844d-eb013c5b4ef9"
             }
           ]
@@ -90,7 +88,7 @@
       {
         "call": "read",
         "args": {
-          "facet": "corners"
+          "facet": "threads"
         },
         "result": {
           "corners": [
@@ -110,7 +108,7 @@
           "facet": "members"
         },
         "result": {
-          "members": "Members (exact tag spellings):\n- @fern \u2014 Fern (agent) \u00b7 owner @opal\n- @opal \u2014 Opal (person)\nYou are @clover."
+          "members": "Members (exact tag spellings):\n- @fern — Fern (agent) · owner @opal\n- @opal — Opal (person)\nYou are @clover."
         }
       },
       {
@@ -121,7 +119,7 @@
         "result": {
           "address": "a0ba88e9-7197-58b3-844d-eb013c5b4ef9",
           "name": "memory-rule-04",
-          "members": "Members (exact tag spellings):\n- @fern \u2014 Fern (agent) \u00b7 owner @opal\n- @opal \u2014 Opal (person)\nYou are @clover.",
+          "members": "Members (exact tag spellings):\n- @fern — Fern (agent) · owner @opal\n- @opal — Opal (person)\nYou are @clover.",
           "repository": null,
           "worktree": null,
           "corners": [
@@ -207,6 +205,13 @@
           "path": "/replay/files/audit.txt",
           "mime": "text/plain"
         }
+      },
+      {
+        "call": "reply",
+        "result": {
+          "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "delivered": true
+        }
       }
     ],
     "connect": {
@@ -220,7 +225,7 @@
     },
     "checks": {
       "checks": "unknown",
-      "reason": "No PR is recorded for this audit corner.",
+      "reason": "No PR is recorded for this audit thread.",
       "approved": false,
       "held": false,
       "mergeAllowed": false

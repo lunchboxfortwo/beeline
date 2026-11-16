@@ -3,7 +3,7 @@
   "mode": "deferred",
   "core": [
     "Bash",
-    "report",
+    "reply",
     "read",
     "app_tool",
     "open_thread",

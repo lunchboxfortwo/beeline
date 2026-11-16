@@ -10,7 +10,8 @@ import { subscribeCommandCompletion } from './command-completion.js';
 const DELIVERY_WAKE={principal:'system-dm',operation:'deliver',commandId:'pending'} as const;
 
 // Immutable operator identity; handles may change or be reassigned.
-export const OPERATOR_OWNER_ID = '34cf4160723acd12d205dfbe292614bfec9489b78812d1cd9846c00346903334';
+import { OPERATOR_OWNER_ID } from '@beeline/api-contract/daemon';
+export { OPERATOR_OWNER_ID } from '@beeline/api-contract/daemon';
 export const OPERATOR_SYSTEM_DM_SCHEMA = `
 ${committedCommandNotificationSchema()}
 CREATE TABLE IF NOT EXISTS operator_system_dm_sends (

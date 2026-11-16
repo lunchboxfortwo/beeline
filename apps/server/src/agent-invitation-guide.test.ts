@@ -63,7 +63,7 @@ describe('agent invitation concordance', () => {
     expect(chatgpt).toContain('that existing connection can reply');
     expect(chatgpt).toContain('proves neither fresh creation eligibility nor automatic wakes');
     expect(AGENT_INVITATION_OTHER_STARTS).not.toContain('cannot reply here');
-    expect(AGENT_INVITATION_OTHER_STARTS).toContain('Existing integrations may reply when send_message is exposed and proved');
+    expect(AGENT_INVITATION_OTHER_STARTS).toContain('Existing integrations may reply when reply is exposed and proved');
     expect(chatgpt.indexOf('not available on your plan')).toBeLessThan(chatgpt.indexOf('Plugins →'));
     expect(ASSISTANT_INVITATION_STEPS.gemini).toContain('US, English, personal Google account');
     expect(ASSISTANT_INVITATION_STEPS.gemini).toContain('Native iPhone/Android creation: no route');

@@ -24,6 +24,7 @@ import { daemonCheckReviewerAuthors } from './corner-reads.js';
 import { daemonBriefAttachmentRooms } from './corner-reports.js';
 import { Input } from './values.js';
 import { modelText } from '../message-origin.js';
+import { recordedMessageRoute } from '../message-route.js';
 
 
 
@@ -263,13 +264,19 @@ import { modelText } from '../message-origin.js';
           ],
         );
       }
+      const from=implementerAgentId===agentId
+        ? (await recordedMessageRoute(db,parentCommand)).from : {agent:agentId,place:commandRoomId};
+      const taskText=implementerAgentId===agentId
+        ? parentCommand.message?.body ?? parentCommand.private_payload?.text ?? input.brief?.spec ?? objective
+        : input.brief?.spec ?? objective;
       await advanceCorner(db, cornerId, {
         kind: 'open',
         command: {
         roomId: cornerId,
         agentId: implementerAgentId,
         sourceMessageId: null,
-        privatePayload: { objective, text: modelText(input.brief?.spec ?? objective), authorId: agentId, fromRoomId: commandRoomId, kind: 'order', openKey: idempotencyKey },
+        privatePayload: { objective, text: modelText(taskText),authorId:from.agent,fromRoomId:from.place,
+          kind:'message',route:{from,to:{agent:implementerAgentId,place:cornerId}},openKey:idempotencyKey },
         reason: 'corner_objective',
         parent: parentCommand,
         retainDepth: true,

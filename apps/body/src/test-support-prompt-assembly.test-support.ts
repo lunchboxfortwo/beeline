@@ -295,7 +295,7 @@ export function fixtureScope12() {
 
   const base = { id: 'corner', revision: 2, authorId: 'author', sourceRoomId: 'room', attachments: [] };
 
-  const forbidden = ['corner:prepare', '## Reproduced', '## Demonstrated', 'The PR body needs', 'gh pr create', 'Once the pull request exists', 'read(facet:checks)'];
+  const forbidden = ['corner:prepare', '## Reproduced', '## Demonstrated', 'The PR body needs', 'gh pr create', 'After opening or updating the PR', 'read(facet:checks)'];
 return {
 base,
 forbidden,

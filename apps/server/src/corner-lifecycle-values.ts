@@ -20,7 +20,7 @@ export const reviewChecksSql = `jsonb_build_object('status',lifecycle->>'checks'
 
 
 export function greenReviewRequestSql(command: string): string {
-  return `${command}.action='input' AND ${command}.reason IN ('corner_review_dispatch','agent_tag','order')
+  return `${command}.action='input' AND ${command}.reason IN ('corner_review_dispatch','agent_tag','order','message')
     AND ${command}.review_context->>'purpose' IS NULL
     AND ${command}.review_context->'checks'->>'status'='passing'`;
 }

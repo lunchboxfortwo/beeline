@@ -55,18 +55,18 @@ const scope25 = fixtureScope25();
 m27_it('returns the delivery receipt without restating the end-the-turn rule', async () => {
   const fetch = m27_vi.fn(async (_url: URL, _init: RequestInit) => Response.json({ commandIds: ['order-1'] }));
   m27_vi.stubGlobal('fetch', fetch);
-  const result = await m27_callAgentTool('order', { address: '11111111-1111-4111-8111-111111111111', text: 'Compute 17 + 25' }, 'call-1');
+  const result = await m27_callAgentTool('message', { to:{place:'11111111-1111-4111-8111-111111111111',agent:'candy'}, text: 'Compute 17 + 25' }, 'call-1');
   m27_expect(fetch).toHaveBeenCalledTimes(1);
-  m27_expect(JSON.parse(String(fetch.mock.calls[0]![1]!.body))).toEqual({ address: '11111111-1111-4111-8111-111111111111', text: 'Compute 17 + 25' });
+  m27_expect(JSON.parse(String(fetch.mock.calls[0]![1]!.body))).toEqual({ to:{place:'11111111-1111-4111-8111-111111111111',agent:'candy'}, text: 'Compute 17 + 25' });
   m27_expect(JSON.parse(result as string)).toEqual({ commandIds: ['order-1'] });
-  m27_expect(m27_agentToolsFor(true, true).find(t => t.name === 'order')!.description).not.toMatch(/end this turn|never poll/i);
+  m27_expect(m27_agentToolsFor(true, true).find(t => t.name === 'message')!.description).not.toMatch(/end this turn|never poll/i);
 });
 
 
 
 m27_it('preserves an order refusal without claiming delivery or telling the commander to wait', async () => {
   m27_vi.stubGlobal('fetch', async () => Response.json({ error: 'forbidden' }, { status: 403 }));
-  await m27_expect(m27_callAgentTool('order', { address: '11111111-1111-4111-8111-111111111111', text: 'Compute 17 + 25' }, 'call-2'))
+  await m27_expect(m27_callAgentTool('message', { to:{place:'11111111-1111-4111-8111-111111111111',agent:'candy'}, text: 'Compute 17 + 25' }, 'call-2'))
     .rejects.toThrow('403');
 });
 
@@ -75,12 +75,12 @@ m27_it('preserves an order refusal without claiming delivery or telling the comm
 m27_it('forwards the one named agent and never describes a chat broadcast', async () => {
   const fetch = m27_vi.fn(async (_url: URL, _init: RequestInit) => Response.json({ commandIds: ['order-2'] }));
   m27_vi.stubGlobal('fetch', fetch);
-  await m27_callAgentTool('order', { address: '11111111-1111-4111-8111-111111111111', agent: '@candy', text: 'Check the build' }, 'call-3');
-  m27_expect(JSON.parse(String(fetch.mock.calls[0]![1]!.body))).toEqual({ address: '11111111-1111-4111-8111-111111111111', agent: '@candy', text: 'Check the build' });
-  const tool = m27_agentToolsFor(true, true).find(t => t.name === 'order')!;
+  await m27_callAgentTool('message', { to:{place:'11111111-1111-4111-8111-111111111111',agent:'@candy'}, text: 'Check the build' }, 'call-3');
+  m27_expect(JSON.parse(String(fetch.mock.calls[0]![1]!.body))).toEqual({ to:{place:'11111111-1111-4111-8111-111111111111',agent:'@candy'}, text: 'Check the build' });
+  const tool = m27_agentToolsFor(true, true).find(t => t.name === 'message')!;
   m27_expect(tool.description).not.toMatch(/broadcast/i);
-  m27_expect(tool.description).toContain('one agent');
-  m27_expect(Object.keys((tool.inputSchema as { properties: object }).properties)).toContain('agent');
+  m27_expect(tool.description).toContain('one identity');
+  m27_expect(Object.keys((tool.inputSchema as { properties: object }).properties)).toContain('to');
 });
 });
 mergedDescribe28("read-only-mcp.procedure.test.ts", () => {m28_describe('read procedure built-in skills (R1)', () => {

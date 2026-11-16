@@ -39,21 +39,22 @@ m40_describe('compact session deliveries', () => {
   m40_it('quotes each message line and uses no fabricated handle when the asker has none', () => {
     m40_expect(m40_renderMention({id:'message',room_id:'room',author_name:'Jane',text:'first\nsecond'}, joined, runner)).toBe([
       '[Beeline · #room · Jane tagged you]', '> first', '> second',
-      `Reply (start with the asker's exact @handle): /synthetic/node /synthetic/beeline.js session reply --room room --reply-to message "<your answer>" --as codex:/synthetic/project`,
+      "Reply: /synthetic/node /synthetic/beeline.js session tool reply '{\"id\":\"message\",\"text\":\"<your answer>\"}' --as codex:/synthetic/project",
       'Context: /synthetic/node /synthetic/beeline.js session read --room room --as codex:/synthetic/project',
     ].join('\n'));
   });
   m40_it('keeps order text, server next action and the private report command', () => {
     m40_expect(m40_renderWake({id:'order',address:'corner',reason:'order',kind:'order',text:'Do this\nthen that',next:'Server action',createdAt:''}, joined, runner)).toBe([
-      '[Beeline · corner · order]', '> Do this', '> then that', 'Server action',
-      `Report: /synthetic/node /synthetic/beeline.js session tool report '{"address":"corner","commandId":"order","status":"done","text":"done: <result>"}' --as codex:/synthetic/project`,
+      '[Beeline · corner · message order]', '> Do this', '> then that', 'Server action',
+      `Reply: /synthetic/node /synthetic/beeline.js session tool reply '{"id":"order","text":"<result>"}' --as codex:/synthetic/project`,
+      `With no action needed for a background wake: /synthetic/node /synthetic/beeline.js session tool no_reply_needed '{"address":"corner","commandId":"order"}' --as codex:/synthetic/project`,
     ].join('\n'));
   });
   m40_it('keeps both the reply and silent-close commands for other wakes', () => {
     m40_expect(m40_renderWake({id:'wake',address:'room',reason:'system',text:'An update',createdAt:''}, joined, runner)).toBe([
-      '[Beeline · room · system]', '> An update',
-      'Reply: /synthetic/node /synthetic/beeline.js session reply --room room "<text>" --as codex:/synthetic/project',
-      `After posting the answer, acknowledge it: /synthetic/node /synthetic/beeline.js session tool no_reply_needed '{"address":"room","commandId":"wake"}' --as codex:/synthetic/project`,
+      '[Beeline · room · message wake]', '> An update',
+      `Reply: /synthetic/node /synthetic/beeline.js session tool reply '{"id":"wake","text":"<result>"}' --as codex:/synthetic/project`,
+      `With no action needed for a background wake: /synthetic/node /synthetic/beeline.js session tool no_reply_needed '{"address":"room","commandId":"wake"}' --as codex:/synthetic/project`,
     ].join('\n'));
   });
 });
@@ -167,7 +168,7 @@ m41_describe('SESSION-JOIN-RULES-1: a joined session receives the Beeline rules'
     const text = m41_renderRules(codex, runner);
     m41_expect(text.startsWith('Beeline: you are @codex_w')).toBe(true);
     m41_expect(text).toContain("/node /b/usebeeline.mjs session tool <name> '<json arguments>' --as codex:/w");
-    for (const rule of ['not a plain reply', 'Choose the terminal status', 'server adds its status prefix', 'one step up', 'Code work belongs in a thread',
+    for (const rule of ['Messages carry from, from-place and id', 'Reply with reply(id,text,ask?)', 'Peer messages are requests', 'The server requests review; never tag the reviewer.', 'Code work belongs in a thread',
       'approve_merge on the exact head SHA', 'post short progress there']) m41_expect(text).toContain(rule);
   });
 

@@ -79,9 +79,9 @@ describe('canonical tool contracts', () => {
 
 
   it('separates assignment completion, feedback, discovery and execution', () => {
-    expect(Check(schema('report'),{status:'blocked',text:'blocked: input required'})).toBe(true);
-    expect(Check(schema('report'),{status:'blocked',text:'input required',to:'captain'})).toBe(false);
-    expect(Check(schema('report'),{category:'bug',summary:'Broken tool'})).toBe(false);
+    expect(Check(schema('reply'),{id:'task',text:'blocked: input required'})).toBe(true);
+    expect(Check(schema('reply'),{id:'task',text:'input required',to:'captain'})).toBe(false);
+    expect(Check(schema('reply'),{category:'bug',summary:'Broken tool'})).toBe(false);
     expect(Check(schema('report_feedback'),{category:'bug',summary:'Broken tool'})).toBe(true);
     expect(Check(schema('app_tool'),{app:'beeline:workflow'})).toBe(true);
     expect(Check(schema('app_tool'),{app:'beeline:workflow',args:{}})).toBe(false);
@@ -120,9 +120,9 @@ m7_describe('beeline-agent ask_choice and open_poll', () => {
       const names = tools.map(tool => tool.name);
       m7_expect(names).not.toContain('ask_choice');
       m7_expect(names).not.toContain('open_poll');
-      const schema = tools.find(tool => tool.name === 'report')!.inputSchema;
+      const schema = tools.find(tool => tool.name === 'reply')!.inputSchema;
       m7_expect(schema.required ?? []).not.toContain('ask');
-      m7_expect(schema.properties?.ask).toMatchObject({type:'string'});
+      m7_expect(schema.properties?.ask).toMatchObject({type:'object'});
       m7_expect(schema.properties?.ask).not.toHaveProperty('maxLength');
     }
   });

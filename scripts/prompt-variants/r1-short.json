@@ -1,7 +1,14 @@
 {
   "name": "r1-short",
   "mode": "deferred",
-  "core": ["Bash", "report", "read", "app_tool", "open_thread", "no_reply_needed"],
+  "core": [
+    "Bash",
+    "reply",
+    "read",
+    "app_tool",
+    "open_thread",
+    "no_reply_needed"
+  ],
   "indexWords": 14,
   "descriptionWords": 40,
   "promptEdits": [],

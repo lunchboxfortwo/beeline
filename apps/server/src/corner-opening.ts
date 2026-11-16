@@ -26,9 +26,10 @@ export function cornerCommissionerSql(cornerId: string): string {
 
 export function cornerOpenedFromSql(cornerId: string): string {
   return `(SELECT origin.id FROM (${cornerOpeningSql(cornerId)}) opening
-    JOIN rooms origin ON origin.id=CASE WHEN opening.private_payload->>'fromRoomId'
+    JOIN rooms origin ON origin.id=COALESCE(CASE WHEN opening.private_payload->'route' IS NOT NULL THEN
+      (SELECT parent.room_id FROM agent_commands parent WHERE parent.id=opening.parent_command_id) END,CASE WHEN opening.private_payload->>'fromRoomId'
       ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-      THEN (opening.private_payload->>'fromRoomId')::uuid END
+      THEN (opening.private_payload->>'fromRoomId')::uuid END)
     WHERE origin.parent_id IS NOT NULL)`;
 }
 

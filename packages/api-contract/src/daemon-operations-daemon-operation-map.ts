@@ -178,6 +178,9 @@ export type DaemonOperationMap = {
       readonly attachments: readonly DaemonAttachment[];
     }
   >;
+  message: Operation<RoomInput & TurnOutputAuthority & { readonly to: import('./agent-messaging.js').MessageAddress; readonly text: string; readonly ask?: import('./agent-messaging.js').MessageAsk }, WriteResult>;
+  reply: Operation<RoomInput & TurnOutputAuthority & { readonly id: string; readonly text: string; readonly ask?: import('./agent-messaging.js').MessageAsk }, WriteResult>;
+  /** Cutover only: calls serving queued legacy items. Remove with messaging-cutover.ts. */
   order: Operation<RoomInput & TurnOutputAuthority & { readonly address: string; readonly text: string; readonly agent?: string }, WriteResult>;
   stopAgentTurn: Operation<RoomInput & TurnOutputAuthority & { readonly address: string; readonly agent?: string }, StopAgentTurnResult>;
   report: Operation<RoomInput & TurnOutputAuthority & { readonly status: AgentReportStatus; readonly text: string; readonly ask?: string }, WriteResult>;
