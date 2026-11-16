@@ -325,7 +325,7 @@ docker image inspect "$image_ref" >/dev/null 2>&1 || docker pull "$image_ref"
 flyctl machine list --app beeline-server --json > "$RUNNER_TEMP/server-release/machines-drained.json"
 while IFS= read -r previous; do
   docker run --rm --env MIGRATION_DATABASE_URL \
-    -v "$PWD/scripts:/app/scripts:ro" \
+    -v "$PWD/packages/scripts:/app/packages/scripts:ro" \
     -v "$PWD/apps/server/contracts:/app/apps/server/contracts:ro" \
     -v "$RUNNER_TEMP/server-release:/proof:ro" \
     --entrypoint node "$image_ref" packages/scripts/run-contract-migrations.mjs \

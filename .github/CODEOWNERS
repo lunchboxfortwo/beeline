@@ -1,5 +1,5 @@
 # lunchboxfortwo reviews every change to the walls on the request -> agent -> answer path.
 /docs/walls.md @lunchboxfortwo
-/scripts/check-walls.mjs @lunchboxfortwo
-/scripts/check-walls.test.mjs @lunchboxfortwo
+/packages/scripts/check-walls.mjs @lunchboxfortwo
+/packages/scripts/check-walls.test.mjs @lunchboxfortwo
 /packages/api-contract/src/walls.ts @lunchboxfortwo
