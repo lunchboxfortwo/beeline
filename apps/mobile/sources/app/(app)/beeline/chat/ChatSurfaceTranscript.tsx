@@ -151,7 +151,9 @@ export const ChatSurfaceTranscript = React.memo(function ChatSurfaceTranscript({
                   // Inverted list: the top pad is the visual tail, measured
                   // from the whole newest row (including reaction chips).
                   // The absolute turn canvas fits inside this fixed inset.
-                  top={isArchived ? undefined : phoneTranscriptTailPadding({
+                  // An empty thread is not inverted: its title needs the
+                  // ordinary head gutter, not the composer-facing tail inset.
+                  top={isArchived || (leadBlock && transcriptMessages.length === 0) ? undefined : phoneTranscriptTailPadding({
                     turnChromeVisible: Boolean(composerAck || settledTurn),
                   })}
                   emptyGrow

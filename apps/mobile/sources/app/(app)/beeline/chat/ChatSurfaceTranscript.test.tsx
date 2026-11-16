@@ -15,7 +15,7 @@ vi.mock('@/ui/grammar', async () => {
   const { createElement } = await import('react');
   return {
     DesktopScroll: 'DesktopScroll',
-    ListPad: ({ list, x: _x, y: _y, top: _top, emptyGrow: _grow, ...rest }: any) => createElement(list, rest),
+    ListPad: ({ list, x: _x, y: _y, emptyGrow: _grow, ...rest }: any) => createElement(list, rest),
   };
 });
 vi.mock('@/buzz/activity-timeline', () => ({ buildTurnActivity: vi.fn() }));
@@ -257,4 +257,29 @@ it('anchors a short thread at the header instead of leaving blank space above it
   expect(renderer.root.findByType('RoomSendList').props.headAligned).toBe(true);
   act(()=>renderer.update(<ChatSurfaceTranscript {...props} leadBlock={null}/>));
   expect(renderer.root.findByType('RoomSendList').props.headAligned).toBe(false);
+});
+
+
+it('uses the same head gutter before an empty thread and the oldest block of a filled thread', () => {
+  const props = {
+    desktopTranscript: false, leadBlock: <header>Thread</header>, transcriptMessages: [],
+    scrollController: {}, phoneScrollList: {}, starPrompt: { prompt: null },
+    emptyLedger: <aside>Start this thread</aside>, renderItem: () => null,
+  } as unknown as Props;
+  act(() => { renderer = create(<ChatSurfaceTranscript {...props} />); });
+  const empty = renderer.root.findByType('RoomSendList').props;
+  // No top override on a non-inverted empty thread: ListPad's y="4" is
+  // the same 16pt gutter as the visual top (paddingBottom) when inverted.
+  expect(empty.inverted).toBe(false);
+  expect(empty.top).toBeUndefined();
+  act(() => renderer.update(<ChatSurfaceTranscript {...props} transcriptMessages={[
+    { id: 'one', text: 'one', timestamp: 1, isUser: false },
+  ]} />));
+  const filled = renderer.root.findByType('RoomSendList').props;
+  expect(filled.inverted).toBe(true);
+  expect(filled.top).toBe(40); // remains at the visual tail, away from the title
+  expect(filled.headAligned).toBe(true);
+  act(() => renderer.update(<ChatSurfaceTranscript {...props} leadBlock={null} />));
+  // Ordinary empty chats keep their composer-facing inset.
+  expect(renderer.root.findByType('RoomSendList').props.top).toBe(40);
 });

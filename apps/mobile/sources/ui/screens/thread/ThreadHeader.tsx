@@ -6,7 +6,7 @@ import type { WorkItemView, RoomViewIdentity } from '@beeline/api-contract/phone
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import type { View } from 'react-native';
 import { ListItem, XStack, YStack, useThemeName } from 'tamagui';
-import { ArrowLeft, ArrowRight, Users, CornerDownRight, GitPullRequest, MoreHorizontal } from 'lucide-react-native';
+import { ArrowLeft, Users, CornerDownRight, GitPullRequest, MoreHorizontal } from 'lucide-react-native';
 import type { CornerState } from '@beeline/api-contract/phone';
 import { Btn, Glyph, HEIGHT, SafeTop, T, typeStyle, useTextSize } from '@/ui/grammar';
 import { threadWorkState } from '../chats/chat-tree-model';
@@ -57,13 +57,14 @@ export function ThreadBar({ h, collapsed, expanded, back, openChat, expand, open
                                 <ListItem padding="0" minHeight={0} alignSelf="flex-start" width="auto" maxWidth="100%"
                                     backgroundColor="transparent" justifyContent="flex-start" onPress={openChat}
                                     aria-label={`Open chat ${h.chatTag}`} accessibilityRole="button" testID="thread-chat-link">
-                                    <XStack gap="1" alignItems="center"><T v="meta" color="secondary" flexShrink={1}>{h.chatTag}</T><Glyph icon={CornerDownRight} size={16} /></XStack>
+                                    <T v="meta" color="secondary" flexShrink={1}>{h.chatTag}</T>
                                 </ListItem>
                             ) : null}
                             {collapsed && !expanded ? (
                                 <ListItem padding="0" minHeight={0} gap="2" alignItems="center"
                                     backgroundColor="transparent" justifyContent="flex-start" onPress={expand}
                                     aria-label={h.title} accessibilityRole={expand ? 'button' : 'text'} testID="thread-bar-title">
+                                    <Glyph icon={CornerDownRight} size={16} />
                                     {h.state ? <YStack height={lineHeight} alignItems="center" justifyContent="center" testID="thread-bar-state-box"><WorkStateMark state={threadWorkState({ state: h.state })} idle={h.state === 'idle'} /></YStack> : null}
                                     <T v={h.waitsOnViewer ? "metaStrong" : "meta"} color="ink" flexShrink={1}>{h.title}</T>
                                 </ListItem>
@@ -88,22 +89,28 @@ export function ThreadTitleBlock({ h, openBrief, openPr, blockRef, onBlockLayout
     blockRef?: React.Ref<View>; onBlockLayout?: () => void; inset?: boolean;
 }) {
     const lineHeight = typeStyle('title', useTextSize()).lineHeight;
+    const [assigneeOpen, setAssigneeOpen] = useState(false);
     const stone = useThemeName().includes('stone');
     return (
         <YStack ref={blockRef as never} onLayout={onBlockLayout} width="100%" maxWidth={720} alignSelf="center"
             paddingHorizontal={inset ? "4" : "0"} paddingTop={inset ? "4" : "0"} paddingBottom="3" gap="2" borderBottomWidth={1} borderColor="stroke"
             testID="thread-title-block">
             <XStack gap="2" alignItems="center" testID="thread-title-row">
+                <Glyph icon={CornerDownRight} size={18} />
                 <YStack height={lineHeight} alignItems="center" justifyContent="center" testID="thread-state-box">{h.state ? <WorkStateMark state={threadWorkState({ state: h.state })} idle={h.state === 'idle'} /> : null}</YStack>
                 <YStack flex={1} minWidth={0}><T v="title" regular={!h.waitsOnViewer} testID="thread-title">{h.title}</T></YStack>
+                {h.workItem ? <Btn kind="quiet" label="Change assignee" paddingHorizontal="0" minHeight={0} height={26} hitSlop={10} onPress={() => setAssigneeOpen(!assigneeOpen)}>{h.workItem.assignee ? <WorkAvatar person={h.workItem.assignee} size={26} /> : <Glyph icon={Users} />}</Btn> : null}
             </XStack>
-            {h.workItem?<ThreadWorkMetadata item={h.workItem} people={h.people??[]}/>:null}
+            {h.workItem && assigneeOpen ? <WorkAssigneePicker people={h.people ?? []} onPick={person => {
+                setAssigneeOpen(false);
+                void monolithPhoneOperation('updateWorkItem', { id: h.workItem!.id, roomId: h.workItem!.roomId, assigneeId: person?.pubkey ?? null });
+            }} /> : null}
             {h.objective || openBrief ? (
                 <ListItem padding="0" paddingLeft="3" borderLeftWidth={2} borderColor={stone ? "strongStroke" : "needsYou"} backgroundColor="transparent"
                     justifyContent="flex-start" onPress={openBrief} disabled={!openBrief}
                     aria-label="Read the brief" accessibilityRole="button" testID="thread-brief">
                     <YStack gap="1" flex={1} minWidth={0}>
-                        {h.objective ? <T v="body" numberOfLines={3} testID="thread-objective">{h.objective}</T> : null}
+                        {h.objective ? <T v="meta" testID="thread-objective">{h.objective}</T> : null}
                         {openBrief ? <T v="metaStrong" color="needsYou">Read the brief</T> : null}
                     </YStack>
                 </ListItem>
@@ -118,12 +125,4 @@ export function ThreadTitleBlock({ h, openBrief, openPr, blockRef, onBlockLayout
 
         </YStack>
     );
-}
-
-function ThreadWorkMetadata({item,people}:{item:WorkItemView;people:readonly RoomViewIdentity[]}) {
-  const [open,setOpen]=useState(false);
-  return <YStack gap="2"><XStack gap="3" alignItems="center" flexWrap="wrap" testID="thread-work-metadata">
-    <WorkAvatar person={item.openedBy} size={24}/><Glyph icon={ArrowRight} size={16} />
-    <XStack gap="1" alignItems="center"><Btn kind="quiet" label="Change assignee" paddingHorizontal="0" minHeight={0} height={24} hitSlop={10} onPress={()=>setOpen(!open)}>{item.assignee?<WorkAvatar person={item.assignee} size={24}/>:<Glyph icon={Users} />}</Btn></XStack>
-  </XStack>{open?<WorkAssigneePicker people={people} onPick={person=>{setOpen(false);void monolithPhoneOperation('updateWorkItem',{id:item.id,roomId:item.roomId,assigneeId:person?.pubkey??null});}}/>:null}</YStack>;
 }

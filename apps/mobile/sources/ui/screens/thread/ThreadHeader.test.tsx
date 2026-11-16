@@ -59,6 +59,7 @@ it('keeps the bar slim, and gives it the title with a work-state glyph once the 
   const chat = byTestID(tree, 'thread-chat-link')[0];
   expect(chat.findByType('T').props.children).toBe('#beeline');
   expect(chat.findByType('T').props.color).toBe('secondary');
+  expect(chat.findAllByType('Glyph')).toHaveLength(0);
   act(() => chat.props.onPress());
   expect(openChat).toHaveBeenCalledTimes(1);
   expect(byTestID(tree, 'thread-bar-title')).toHaveLength(0);
@@ -67,6 +68,8 @@ it('keeps the bar slim, and gives it the title with a work-state glyph once the 
   act(() => tree.update(<ThreadBar h={{ ...reconnect, state: 'working' }} collapsed back={back} openChat={openChat} openActions={openActions} />));
   const title = byTestID(tree, 'thread-bar-title')[0];
   expect(title.findByType('T').props.children).toBe('Reconnect keeps place');
+  expect(title.findByType('Glyph').props.icon).toBe('CornerDownRight');
+  expect(title.props.gap).toBe('2');
   expect(title.findByType('WorkStateMark').props).toMatchObject({state: 'in-progress', idle: false});
   // A long chat name must not starve the title: both stack and wrap, never a fixed-width chat link.
   const names = byTestID(tree, 'thread-bar-names')[0];
@@ -119,12 +122,14 @@ for (const theme of ['light_stone', 'dark_stone']) {
   }
 }
 
-it('shows immutable opening attribution and one editable assignee for the selected task',async()=>{
+it('shows only a title-row assignee and preserves the existing picker',async()=>{
   const asker={pubkey:'ruby',kind:'agent' as const,name:'Ruby'},person={pubkey:'ada',kind:'human' as const,name:'Ada'};
   const workItem={id:'question',roomId:'thread',chatId:'chat',chatName:'Milo',threadName:'request-inbox',title:'Choose the next surface',state:'needs-you' as const,assignee:person,openedBy:asker,createdAt:1,updatedAt:2};
   let tree:any;await act(async()=>{tree=create(<ThreadTitleBlock h={{...reconnect,workItem,people:[asker,person]}}/>);});
-  expect(byTestID(tree,'thread-work-metadata')).toHaveLength(1);
-  expect(tree.root.findAllByType('WorkAvatar').map((node:any)=>node.props.person.pubkey)).toEqual(['ruby','ada']);
+  expect(byTestID(tree,'thread-work-metadata')).toHaveLength(0);
+  expect(byTestID(tree,'thread-title-row')[0].findByProps({label:'Change assignee'})).toBeTruthy();
+  expect(tree.root.findAllByType('WorkAvatar').map((node:any)=>node.props.person.pubkey)).toEqual(['ada']);
+  expect(tree.root.findByType('WorkAvatar').props.size).toBe(26);
   await act(async()=>tree.root.findByProps({label:'Change assignee'}).props.onPress());
   await act(async()=>tree.root.findByType('WorkAssigneePicker').props.onPick(asker));
   expect(workOperation).toHaveBeenLastCalledWith('updateWorkItem',{id:'question',roomId:'thread',assigneeId:'ruby'});
@@ -137,7 +142,8 @@ for (const [state, glyph, idle] of [['waiting', 'needs-you', false], ['working',
     act(() => { tree = create(<><ThreadTitleBlock h={{...reconnect,state,waitsOnViewer:state === 'waiting'}}/><ThreadBar h={{...reconnect,state}} collapsed openChat={() => undefined}/></>); });
     expect(tree.root.findAllByType('WorkStateMark').map((node:any) => node.props)).toEqual([{state:glyph,idle},{state:glyph,idle}]);
     expect(byTestID(tree,'thread-title')[0].props.regular).toBe(state !== 'waiting');
-    expect(byTestID(tree,'thread-objective')[0].props).toMatchObject({numberOfLines:3});
+    expect(byTestID(tree,'thread-objective')[0].props.v).toBe('meta');
+    expect(byTestID(tree,'thread-objective')[0].props.numberOfLines).toBeUndefined();
     expect(byTestID(tree,'thread-title-block')[0].props.paddingHorizontal).toBe('4');
     act(() => tree.unmount());
   });
@@ -157,7 +163,7 @@ for (const theme of ['light_stone','dark_stone','light_brass','dark_brass']) {
     appearance.name=theme;let tree:any;
     act(()=>{tree=create(<ThreadTitleBlock h={reconnect} openBrief={()=>{}}/>);});
     expect(byTestID(tree,'thread-brief')[0].props.borderColor).toBe(theme.includes('stone')?'strongStroke':'needsYou');
-    expect(byTestID(tree,'thread-objective')[0].props.numberOfLines).toBe(3);
+    expect(byTestID(tree,'thread-objective')[0].props.numberOfLines).toBeUndefined();
     act(()=>tree.unmount());
   });
 }

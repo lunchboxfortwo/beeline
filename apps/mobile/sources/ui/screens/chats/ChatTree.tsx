@@ -2,7 +2,7 @@ import { WorkStateMark } from '@/ui/screens/tags/WorkMarks';
 import { RepositoryMark } from '@/components/buzz/RepositoryMark';
 import React, { useRef, useState } from 'react';
 import { ListItem, Separator, XStack, YStack } from 'tamagui';
-import { ChevronDown, Pin } from 'lucide-react-native';
+import { ChevronDown, CornerDownRight, Pin } from 'lucide-react-native';
 import equal from 'fast-deep-equal';
 import { voiceDuration } from '@beeline/api-contract/phone';
 import type { ChatListCorner } from '@beeline/api-contract/phone';
@@ -64,7 +64,7 @@ function useHold(ms: number, onHold: (() => void) | undefined, onTap: () => void
 }
 
 /** A chat's mark: the peer's identity for a direct message, the repository mark or chat glyph otherwise. */
-function ChatMark({ item }: { item: Partial<Pick<ChatListItem, 'directMessage' | 'room'>> }) {
+function ChatMark({ item, size = MARK }: { size?: number; item: Partial<Pick<ChatListItem, 'directMessage' | 'room'>> }) {
   const peer = item.directMessage?.peer;
   if (peer) {
     return peer.kind === 'agent' ? (
@@ -74,7 +74,7 @@ function ChatMark({ item }: { item: Partial<Pick<ChatListItem, 'directMessage' |
         name={peer.name}
         avatarUrl={peer.avatar}
         face={peer.face}
-        size={MARK}
+        size={size}
       />
     ) : (
       <IdentityMark
@@ -83,12 +83,12 @@ function ChatMark({ item }: { item: Partial<Pick<ChatListItem, 'directMessage' |
         name={peer.name}
         avatarUrl={peer.avatar}
         face={peer.face}
-        size={MARK}
+        size={size}
       />
     );
   }
   return (
-    <RepositoryMark avatarUrl={item.room?.avatar} faviconUrl={item.room?.favicon} size={MARK} />
+    <RepositoryMark avatarUrl={item.room?.avatar} faviconUrl={item.room?.favicon} size={size} />
   );
 }
 
@@ -99,7 +99,9 @@ function ThreadLine({
   corner,
   viewer,
   onOpen,
+  layout,
 }: {
+  layout: 'B' | 'C';
   item: ChatListItem;
   corner: ChatListCorner;
   viewer: string | undefined;
@@ -114,7 +116,7 @@ function ThreadLine({
       minHeight={HEIGHT.control}
       padding="0"
       paddingVertical={step('2')}
-      gap={step('3')}
+      gap={layout === 'C' ? '3' : step('3')}
       alignItems="center"
       justifyContent="flex-start"
       backgroundColor="transparent"
@@ -123,7 +125,12 @@ function ThreadLine({
       accessibilityRole="button"
       testID={`thread-row-${corner.id}`}
     >
-      <WorkStateMark state={state} idle={corner.state === 'idle'} />
+      {layout === 'C' ? (
+        <XStack width={40} flexShrink={0} alignItems="center" justifyContent="space-between">
+          <Glyph icon={CornerDownRight} size={16} />
+          <WorkStateMark state={state} idle={corner.state === 'idle'} />
+        </XStack>
+      ) : <WorkStateMark state={state} idle={corner.state === 'idle'} />}
       <T
         v={state === 'needs-you' ? 'metaStrong' : 'meta'}
         color={state === 'needs-you' ? 'ink' : 'secondary'}
@@ -146,6 +153,8 @@ type ChatRowProps = {
   last?: boolean;
   selected?: boolean;
   pinned?: boolean;
+  /** Local design comparison only; the shipped status-only layout remains B. */
+  threadLayout?: 'B' | 'C';
   onOpen: (roomId: string) => void;
   onPin: (roomId: string) => void;
   onOpenThread: (roomId: string, cornerId: string, name: string) => void;
@@ -164,6 +173,7 @@ export const ChatRow = React.memo(
     last = false,
     selected = false,
     pinned = false,
+    threadLayout = 'B',
     onOpen,
     onPin,
     onOpenThread,
@@ -230,10 +240,10 @@ export const ChatRow = React.memo(
               }}
               testID={`room-${item.room.id}-new-thread`}
             >
-              <ChatMark item={item} />
+              <ChatMark item={item} size={threadLayout === 'C' ? 40 : MARK} />
             </YStack>
           ) : (
-            <ChatMark item={item} />
+            <ChatMark item={item} size={threadLayout === 'C' ? 40 : MARK} />
           )}
           <YStack flex={1} minWidth={0} gap={step('1')}>
             <ChatName v="listTitle" name={title} testID={`room-${item.room.id}-title`} />
@@ -266,9 +276,9 @@ export const ChatRow = React.memo(
         </ListItem>
         {threads.length ? (
           <YStack
-            marginLeft="4"
+            marginLeft={threadLayout === 'C' ? "0" : "4"}
             marginTop={step('2')}
-            paddingLeft="4"
+            paddingLeft={threadLayout === 'C' ? "2" : "4"}
             borderLeftWidth={1}
             borderColor="strongStroke"
             testID={`nest-${item.room.id}`}
@@ -280,6 +290,7 @@ export const ChatRow = React.memo(
                 corner={corner}
                 viewer={viewer}
                 onOpen={onOpenThread}
+                layout={threadLayout}
               />
             ))}
             {more ? (
@@ -306,6 +317,7 @@ export const ChatRow = React.memo(
     );
   },
   (previous, next) => {
+    if (previous.threadLayout !== next.threadLayout) return false;
     // Server snapshots can replace unchanged DTOs; compare values, keep every callback.
     const { item: beforeItem, ...before } = previous;
     const { item: afterItem, ...after } = next;

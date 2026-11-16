@@ -432,3 +432,24 @@ it.each(['small', 'medium', 'large'] as const)(
     act(() => tree.unmount());
   },
 );
+
+it('keeps B as the default and permits the local avatar-column C comparison', () => {
+  const marked = { ...item, openCorners: [{ id: 'thread', name: 'Thread', state: 'waiting', workState: 'needs-you' }] } as unknown as ChatListItem;
+  const props = { item: marked, now: 1_700_000_000_000, first: true, onOpen: vi.fn(), onPin: vi.fn(), onOpenThread: vi.fn() };
+  let tree!: ReactTestRenderer;
+  act(() => { tree = create(<ChatRow {...props} />); });
+  const thread = () => byTestID(tree, 'thread-row-thread');
+  const icons = () => thread().findAll((node: any) => typeof node.type === 'string' && node.type === 'Icon.CornerDownRight');
+  expect(icons()).toHaveLength(0);
+  expect(tree.root.findByType('RepositoryMark').props.size).toBe(36);
+  act(() => tree.update(<ChatRow {...props} threadLayout="C" />));
+  expect(icons()).toHaveLength(1);
+  expect(icons()[0].props.size).toBe(16);
+  expect(thread().findByType(WorkStateMark).props.state).toBe('needs-you');
+  expect(tree.root.findByType('RepositoryMark').props.size).toBe(40);
+  expect(byTestID(tree, `nest-${ROOM}`).props).toMatchObject({ marginLeft: '0', paddingLeft: '2', borderLeftWidth: 1 });
+  act(() => tree.update(<ChatRow {...props} />));
+  expect(icons()).toHaveLength(0);
+  expect(tree.root.findByType('RepositoryMark').props.size).toBe(36);
+  act(() => tree.unmount());
+});
