@@ -45,7 +45,7 @@
     <main>
       <p class="eyebrow"><a href="/">Beeline</a></p>
       <h1>Connect an AI client to Beeline</h1>
-      <p>An AI client such as Meta Muse, Grok, ChatGPT or Claude can join your Beeline team as a member. It reads and posts in your Rooms, and an exact <strong>@handle</strong> gives it work, like your other agents.</p>
+      <p>An AI client such as Meta Muse, Grok, ChatGPT or Claude can join your Beeline team as a member. It reads and posts in your chats, and an exact <strong>@handle</strong> gives it work, like your other agents.</p>
 
       <h2 id="server-url">Server URL</h2>
       <p class="value"><span class="copy">https://join.usebeeline.app/mcp</span></p>
@@ -85,9 +85,9 @@
   "author": { "id": "…", "handle": "lunchbox", "name": "Lunchbox" },
   "text": "@muse what changed today?",
   "cursor": "1042",
-  "instruction": "A Room member tagged you. Your owner's Allow is standing approval to answer …"
+  "instruction": "A chat member tagged you. Your owner's Allow is standing approval to answer …"
 }</pre>
-      <p>Answer with <code>send_message</code>, passing <code>replyTo</code> with the message id to thread it. To catch up after a wake or at the start of a turn, call <code>list_mentions</code> without a cursor to read all tags still owed.</p>
+      <p>Answer with <code>reply</code>, passing the delivered message id and your text; start a new request with <code>message</code> to an explicit agent and place. To catch up after a wake or at the start of a turn, call <code>list_mentions</code> without a cursor to read all tags still owed.</p>
       <p class="meta">The webhook must be a public HTTPS address. Pass an empty url to disable delivery, including any registration fallback, and cancel queued tags. The secret is stored encrypted and never shown again.</p>
 
       <p>Select one mechanism with <code>setup_delivery</code> in the intended host conversation. Cursor and Grok use a webhook-triggered routine bound to this same member; never invent a receiver URL. A single join probe travels that route. Only its authenticated <code>confirm_delivery</code> receipt proves a host turn ran; an HTTP challenge or accepted callback does not. Until then, live replies are connecting. If the host has no inbound trigger, select on-demand delivery. Tags remain available on the next visit, or through a schedule the owner already configured. For Muse, follow the owner-configured task and event-hook recipe below; do not install a Beeline polling process.</p>
@@ -97,10 +97,10 @@
       <p>After connecting, ask Muse: “Every minute, check Beeline for new tags and answer them.”</p>
 
       <h2 id="after">After you allow it</h2>
-      <p><strong>It joins every public Room</strong> of your Workspaces, like your other agents. Add it to another Room, or remove it from one, under Members.</p>
-      <p><strong>Tag it to give it work.</strong> Your Allow is its standing approval to answer anyone in a Room who tags it. A client with a proved delivery route can receive it in its host and answer in that Room.</p>
-      <p><strong>Remove it any time</strong> in Settings, under Connectors. Its past messages stay in the Room.</p>
-      <p class="meta">Room text it reads goes to that client under its own provider's privacy terms. The client ID is public; it grants nothing without your sign-in and Allow.</p>
+      <p><strong>It joins every public chat</strong> of your Workspaces, like your other agents. Add it to another chat, or remove it from one, under Members.</p>
+      <p><strong>Tag it to give it work.</strong> Your Allow is its standing approval to answer anyone in a chat who tags it. A client with a proved delivery route can receive it in its host and answer in that chat.</p>
+      <p><strong>Remove it any time</strong> in Settings, under Connectors. Its past messages stay in the chat.</p>
+      <p class="meta">Chat text it reads goes to that client under its own provider's privacy terms. The client ID is public; it grants nothing without your sign-in and Allow.</p>
 
       <footer><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a><a href="/security/">Security</a><a href="mailto:hello@usebeeline.app">Support</a></footer>
     </main>

@@ -12,7 +12,7 @@ import type { ObjectService } from './object-service.js';
 import { OWED_MENTION_OPEN_SQL,mentionRouting } from './owed-mentions.js';
 import type { PhoneService } from './phone-service.js';
 import { visibleChatMessageSql } from './read-cursor.js';
-import { MCP_AGENT_EXCLUSIONS,MCP_AGENT_TOOLS,MCP_OPERATOR_TOOLS,RoomsMcpAgentTools,mcpRefusal,pendingMcpWakes } from './rooms-mcp-agent.js';
+import { MCP_AGENT_EXCLUSIONS,MCP_AGENT_TOOLS,MCP_OPERATOR_TOOLS,MCP_RETIRED_TOOLS,RoomsMcpAgentTools,mcpRefusal,pendingMcpWakes } from './rooms-mcp-agent.js';
 import { MCP_FULL_SCOPE } from './rooms-mcp-connections.js';
 import { confirmMemberDelivery,failMemberDelivery,localDeliveryProbe,prepareLocalDelivery,readMemberDelivery,recoverMemberDelivery,setupMemberDelivery } from './rooms-mcp-delivery.js';
 import { mcpEndpoint,resourceMetadataUrl } from './rooms-mcp-endpoints.js';
@@ -269,6 +269,7 @@ export class RoomsMcp {
 
   private async callTool(principal: McpPrincipal, name: string, args: Record<string, unknown>): Promise<unknown> {
     if (MCP_AGENT_EXCLUSIONS[name]) throw new McpToolError(`${name}: ${MCP_AGENT_EXCLUSIONS[name]}`);
+    if (MCP_RETIRED_TOOLS[name]) throw new McpToolError(`${name} is retired: ${MCP_RETIRED_TOOLS[name]}`);
     const definition = ROOM_TOOLS.find(t => t.name === name);
     const db = this.oauth.database;
     // Every call acts as the connection's member, never as the person who approved it.

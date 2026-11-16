@@ -358,9 +358,10 @@ async function session(args: string[], env: NodeJS.ProcessEnv): Promise<void> {
     const text = words(rest, VALUED).join(' ').trim();
     if (!room || !text) throw new Error('Usage: usebeeline session reply --room <chat id> [--reply-to <message id>] "<text>"');
     const replyTo = flag(rest, '--reply-to');
-    const result = await ownTool(dir, joined, 'send_message',
-      { room, text, ...(replyTo ? { replyTo } : {}), idempotencyKey: randomUUID() }) as { messageId: string; woken?: string[] };
-    console.log(`Posted to Beeline as @${joined.handle ?? joined.name} (message ${result.messageId.slice(0, 12)}).`);
+    // A reply answers the sender of the message it names; otherwise the text posts to the chat.
+    const result = await ownTool(dir, joined, replyTo ? 'reply' : 'post', replyTo ? { id: replyTo, text } : { address: room, text }) as { id?: string; messageId?: string };
+    const id = result?.messageId ?? result?.id;
+    console.log(`Posted to Beeline as @${joined.handle ?? joined.name}${id ? ` (message ${id.slice(0, 12)})` : ''}.`);
     return;
   }
   if (sub === 'read') {

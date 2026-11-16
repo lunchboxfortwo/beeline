@@ -52,6 +52,25 @@ export const MCP_AGENT_EXCLUSIONS: Readonly<Record<string, string>> = {
   end_browser_share: MACHINE,
 };
 
+/** A retired tool name answers with its replacement, so an agent holding saved instructions corrects itself on its first call. */
+export const MCP_RETIRED_TOOLS: Readonly<Record<string, string>> = {
+  send_message: 'use reply(id,text) for a delivered message, or message(address,to:{agent,place},text) for a new request',
+  order: 'use message(address,to:{agent,place},text)',
+  report: 'use reply(id,text) to the message that gave you the task',
+  attention_report: 'use reply(id,text,ask?) to the message that gave you the task',
+  ask_owner: 'use reply or message with ask:{question,options} to ask a person',
+  become_implementer: 'use claim_thread',
+  record_merge_yes: 'the server merges when checks are green and any reviewer has approved; a reviewer uses approve_merge',
+  merge_corner: 'the server merges when checks are green and any reviewer has approved; set_thread_hold holds it',
+  merge_thread: 'the server merges when checks are green and any reviewer has approved; set_thread_hold holds it',
+  order_corner_merge: 'the server merges when checks are green and any reviewer has approved; set_thread_hold holds it',
+  list_rooms: 'use list_chats',
+  set_work_state: 'use update_work',
+  assign_work_item: 'use update_work',
+  add_work_note: 'use update_work',
+  attach_to_work_item: 'use update_work',
+};
+
 type Args = Record<string, unknown>;
 type Route = { op: string; required: string[]; description: string };
 

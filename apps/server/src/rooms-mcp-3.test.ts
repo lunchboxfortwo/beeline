@@ -485,6 +485,15 @@ const scope1 = fixtureScope1();
     }
   });
 
+  it('answers a retired tool name with its replacement', async () => {
+    const { client } = await scope1.connected();
+    for (const [name, replacement] of [['send_message', 'reply(id,text)'], ['list_rooms', 'list_chats'], ['order', 'message(']] as const) {
+      const refused = await client.callTool({ name, arguments: {} });
+      expect(refused.isError).toBe(true);
+      expect((refused.content as { text: string }[])[0]!.text).toMatch(new RegExp(`^Request refused: ${name} is retired: .*${replacement.replace(/[()]/g, '\\$&')}`));
+    }
+  });
+
   it('names the client on an AI-client member profile instead of an animal soul', async () => {
     const { member } = await scope1.connected();
     const profile = (await scope1.phone.readAgent(WORKSPACE, member, USER))!;
