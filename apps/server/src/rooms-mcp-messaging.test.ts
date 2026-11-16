@@ -19,8 +19,8 @@ describe('connected agent message protocol',()=>{
     await scope.daemon.execute('reply',{id:sent.id,text:'Checked'},AGENT);
     const page=await tools.ok(client,'list_mentions',{});
     expect(page.wakes).toEqual([expect.objectContaining({address:ROOM,from:{agent:AGENT,place:ROOM},text:'Checked'})]);
-    expect(page.wakes[0]).not.toHaveProperty('kind');
-    expect(page.wakes[0]).not.toHaveProperty('reason');
+    // The session helper rejects a wake frame without a string reason.
+    expect(typeof page.wakes[0]!.reason).toBe('string');
     expect(page.wakes[0].next).toContain('reply(');
   });
   it('replies to a received public message id under its own byline without a tag or a card',async()=>{
