@@ -10,6 +10,8 @@ const ROOTS = ['apps/server/src', 'apps/body/src', 'apps/api/src', 'apps/auth/sr
   'apps/mobile/index.ts', 'apps/mobile/src-tauri/src', 'packages'];
 const PUBLIC_ENTRIES = ['packages/net/src/index.ts', 'packages/net/src/helper-codecs.ts', 'packages/net/src/helper-activation-codecs.ts', 'packages/net/src/helper-turn-codecs.ts'];
 const SKIP = new Set(['node_modules', 'dist', 'build', '.git', 'target', 'Pods', '__tests__', 'fixtures']);
+// Tooling and test helpers sit under packages/ but, like scripts/ and tests/ before the move, are not product network paths.
+const SKIP_PATHS = new Set(['packages/scripts', 'packages/test-helpers']);
 const SOURCE = /\.(?:[cm]?[jt]sx?|swift|kt|java|m|mm|rs)$/;
 const TEST = /\.(?:test|spec|typecheck)\.[^.]+$|\.d\.ts$|\/test-support[^/]*\.[^.]+$/;
 const LIBRARIES = [...NETWORK_LIBRARIES, 'node:http', 'node:https', 'node:http2', 'node:net',
@@ -300,7 +302,7 @@ export function sourceFiles(root) {
     }
     for (const entry of entries) {
       const file = `${relative}/${entry.name}`;
-      if (entry.isDirectory()) { if (!SKIP.has(entry.name)) walk(file); }
+      if (entry.isDirectory()) { if (!SKIP.has(entry.name) && !SKIP_PATHS.has(file)) walk(file); }
       else if (SOURCE.test(file) && !TEST.test(file)) files.add(file);
     }
   }
