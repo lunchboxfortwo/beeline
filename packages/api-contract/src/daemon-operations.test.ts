@@ -47,4 +47,10 @@ move7_it('accepts a reconnect batch and rejects malformed offline durations', ()
     move7_expect(move7_isAgentCommand({...command,offlineSeconds})).toBe(false);
 });
 
+move7_it('accepts optional Room names from newer servers and rejects malformed names', () => {
+  move7_expect(move7_isAgentCommand({ ...command, roomName: 'worker thread', returnRoomName: 'Milo' })).toBe(true);
+  for (const key of ['roomName', 'returnRoomName']) for (const value of [null, 42, {}])
+    move7_expect(move7_isAgentCommand({ ...command, [key]: value })).toBe(false);
+});
+
 });

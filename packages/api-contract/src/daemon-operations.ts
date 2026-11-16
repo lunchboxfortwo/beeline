@@ -120,8 +120,12 @@ export type AgentCommand = {
   readonly id: string;
   /** Where the request came from. */
   readonly roomId: string;
+  /** Current display name, when the source Room/thread still exists. */
+  readonly roomName?: string;
   /** Where the answer goes. */
   readonly returnRoomId: string;
+  /** Current display name of the recorded answer destination. */
+  readonly returnRoomName?: string;
   /** Set when `roomId` is a corner: that corner's parent Room. */
   readonly parentRoomId?: string;
   readonly agentId: string;

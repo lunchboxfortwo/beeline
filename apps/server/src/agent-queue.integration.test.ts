@@ -136,7 +136,9 @@ it('empty output and silence acknowledgements leave an unanswered request queued
 it('posts a private answer to the return address fixed at insertion, then completes the item', async () => {
   const item = await createAgentCommand(db, { roomId: R1, agentId: A, sourceMessageId: null, reason: 'order',
     privatePayload: { kind: 'order', text: 'answer in Two', authorId: H, fromRoomId: R2 } });
-  expect((await queue()).find(entry => entry.id === item!.id)?.returnRoomId).toBe(R2);
+  expect((await queue()).find(entry => entry.id === item!.id)).toMatchObject({
+    roomId: R1, roomName: 'One', returnRoomId: R2, returnRoomName: 'Two',
+  });
   // A later mutable context must not move the committed return address.
   await db.query(`UPDATE agent_commands SET private_payload=jsonb_set(jsonb_set(private_payload,'{fromRoomId}',to_jsonb($2::text)),'{authorId}',to_jsonb($3::text))
     WHERE id=$1`, [item!.id, R1, A]);

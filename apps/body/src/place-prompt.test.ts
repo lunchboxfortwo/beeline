@@ -560,3 +560,51 @@ move1_describe('server-mediated connected app tools', () => {
   });
 });
 });
+
+import type { AgentCommand } from '@beeline/api-contract/daemon';
+import { describe, expect, it } from 'vitest';
+import { itemPrompt, offlineBatchPrompt } from './place-prompt.js';
+
+describe('queue item reply audience', () => {
+  const report: AgentCommand = {
+    id: 'request', turnRequestId: 'request', rootCommandId: 'root',
+    rootSourceMessageId: 'opening', sourceMessageId: 'message',
+    roomId: 'worker-thread', roomName: 'Fix the bug',
+    returnRoomId: 'owner-room', returnRoomName: '#Milo', agentId: 'commander',
+    action: 'input', reason: 'report', agentDepth: 0, createdAt: 0,
+    source: { id: 'message', authorId: 'worker', type: 'message',
+      body: 'The work is ready.', attachments: [], createdAt: 0 },
+  };
+  const names = new Map([['worker', 'Jellybean']]);
+
+  it('shows the report once and explains how to reply in its named thread', () => {
+    const prompt = itemPrompt(report, { names });
+    expect(prompt.split('\n')[0]).toBe('Request request (report). Jellybean reports The work is ready. in thread Fix the bug. To reply to Jellybean, send an order to the same thread (Fix the bug).');
+    expect(prompt).not.toContain('Your final reply');
+    expect(prompt).not.toContain('Jellybean: The work is ready.');
+    expect(prompt).not.toContain('To ask the owner');
+  });
+
+  it('falls back to room IDs when names are unavailable, including in offline batches', () => {
+    const prompt = offlineBatchPrompt([{ ...report, roomName: undefined, returnRoomName: undefined }], { names });
+    expect(prompt).toContain('Jellybean reports The work is ready. in thread worker-thread.');
+    expect(prompt).toContain('To reply to Jellybean, send an order to the same thread (worker-thread).');
+    expect(prompt).not.toContain('Your final reply');
+  });
+
+  it.each(['report', 'order', 'corner_review_needed'])('keeps the same-room line unchanged for %s', reason => {
+    const prompt = itemPrompt({ ...report, returnRoomId: report.roomId, reason }, { names });
+    expect(prompt.split('\n')[0]).toBe(
+      `Request request (${reason}) from Jellybean in worker-thread. Your final reply is posted here (worker-thread).`,
+    );
+    expect(prompt).not.toContain('does not see');
+  });
+
+  it.each(['order', 'corner_review_needed'])('keeps the original cross-room wording for %s with names', reason => {
+    const prompt = itemPrompt({ ...report, reason }, { names });
+    expect(prompt.split('\n')[0]).toBe(`Request request (${reason}) from Jellybean in Fix the bug. Your final reply is posted to #Milo.`);
+    expect(prompt).toContain('Jellybean: The work is ready.');
+    expect(prompt).not.toContain('send an order');
+    if (reason === 'corner_review_needed') expect(prompt).toContain('finish without a public reply');
+  });
+});

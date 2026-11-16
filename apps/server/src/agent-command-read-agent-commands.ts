@@ -12,7 +12,8 @@ import type { SqlDatabase } from './database.js';
 export async function readAgentQueueRows(db:SqlDatabase,agentId:string,roomId?:string) {
   // Idle notices describe one episode, unlike accepted human work. Retire an
   // obsolete episode through the terminal owner before delivering the queue.
-  return db.query<CommandRow & { parent_room_id: string | null; offline_seconds: number | null }>(
+  return db.query<CommandRow & { parent_room_id: string | null; room_name: string | null;
+    return_room_name: string | null; offline_seconds: number | null }>(
     `WITH queued AS MATERIALIZED (
        SELECT * FROM agent_commands WHERE agent_id=$1 AND ($2::text IS NULL OR room_id::text=$2) AND state='pending'
      ), obsolete AS MATERIALIZED (
@@ -22,11 +23,12 @@ export async function readAgentQueueRows(db:SqlDatabase,agentId:string,roomId?:s
      ), retired AS MATERIALIZED (
        SELECT obsolete.id FROM obsolete LEFT JOIN LATERAL
          beeline_finish_agent_command(obsolete.id,'complete',NULL,NULL) ended ON true
-     ) SELECT item.*,room.parent_id parent_room_id,
+     ) SELECT item.*,room.parent_id parent_room_id,room.name room_name,return_room.name return_room_name,
        CASE WHEN item.created_at<=connection.connected_at THEN
          EXTRACT(EPOCH FROM connection.connected_at-connection.offline_since)::double precision END offline_seconds
      FROM queued item
      LEFT JOIN rooms room ON room.id=item.room_id
+     LEFT JOIN rooms return_room ON return_room.id=COALESCE(item.return_room_id,item.room_id)
      LEFT JOIN agent_connections connection ON connection.agent_id=item.agent_id
      WHERE NOT EXISTS(SELECT 1 FROM retired WHERE retired.id=item.id)
      ORDER BY item.inbox_sequence,item.created_at,item.id`, [agentId, roomId ?? null]);
@@ -55,6 +57,8 @@ export async function readAgentCommands(
         ...(item.offline_seconds != null ? { offlineSeconds: Math.max(0, item.offline_seconds) } : {}),
         ...(credentials?.has(item.id) ? { modelCredential: credentials.get(item.id) } : {}),
         id: item.id, roomId: item.room_id, returnRoomId: item.return_room_id ?? item.room_id,
+        ...(item.room_name ? { roomName: item.room_name } : {}),
+        ...(item.return_room_name ? { returnRoomName: item.return_room_name } : {}),
         ...(item.parent_room_id ? {parentRoomId:item.parent_room_id} : {}),
         agentId: item.agent_id, createdAt, sourceMessageId: source.id,
         turnRequestId: item.turn_request_id, action: item.action,

@@ -139,19 +139,27 @@ export function itemPrompt(item: AgentCommand, options: {
   const author = inboxItemAuthorName(source, options.names);
   const body = source.systemEvent && RESUME_KINDS.has(source.systemEvent.kind ?? '')
     ? resumePrompt(source) : inboxItemPromptBody(source);
-  const answerTo = item.returnRoomId === item.roomId
+  const threadName = item.roomName ?? options.names.get(item.roomId) ?? item.roomId;
+  const returnRoomName = item.returnRoomName ?? options.names.get(item.returnRoomId) ?? item.returnRoomId;
+  const sameRoom = item.returnRoomId === item.roomId;
+  const report = item.reason === 'report' && !sameRoom;
+  const text = body.trim() || '(shared attachments)';
+  const answerTo = sameRoom
     ? `Your final reply is posted here (${item.roomId}).`
-    : `Your final reply is posted to ${item.returnRoomId}.`;
+    : `Your final reply is posted to ${returnRoomName}.`;
+  const request = report
+    ? `Request ${item.turnRequestId} (report). ${author} reports ${text} in thread ${threadName}. To reply to ${author}, send an order to the same thread (${threadName}).`
+    : `Request ${item.turnRequestId} (${item.reason}) from ${author} in ${sameRoom ? item.roomId : threadName}. ${answerTo}`;
   return [
     ...(options.turnPrefix ? [options.turnPrefix] : []),
     ...(options.notes?.length ? ['Session setup notes:', ...options.notes.map(note => `- ${note}`)] : []),
-    `Request ${item.turnRequestId} (${item.reason}) from ${author} in ${item.roomId}. ${answerTo}`,
+    request,
     'Use this requestId with tools that ask for one.',
     ...(isBackgroundCommand(item.reason)
       ? ['This is background context. If nothing has changed or needs action, call no_reply_needed and finish without a public reply. Human requests in this batch still need an answer.'] : []),
     `[message id: ${source.id}]`,
     ...(source.replyToMessageId ? [`Reply to message ${source.replyToMessageId}; read it with session tools if needed.`] : []),
-    `${author}: ${body.trim() || '(shared attachments)'}`,
+    ...(!report ? [`${author}: ${text}`] : []),
     ...(source.replyToExcerpt ? [`In reply to ${source.replyToAuthorName ?? 'a message'}: ${source.replyToExcerpt}`] : []),
     ...attachmentMarkerLines(source.attachments),
   ].join('\n');
