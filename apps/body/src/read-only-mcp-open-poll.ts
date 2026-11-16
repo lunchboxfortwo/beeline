@@ -82,7 +82,7 @@ export async function runGrantedCommand(
   const output = typeof result.output === 'string' && result.output ? result.output : '(no output)';
   const refused =
     result.writeRefused === true
-      ? '\nThis Room is read-only outside your scratch directory. Open a corner with open_corner to change files; for host work there, ask with request_grant(mode:request, kind:command, target, action, purpose, reason), then use run_granted_command.'
+      ? (process.env.BEELINE_DAEMON_CORNER_ID ? '\nA write was refused outside your scratch directory.' : '\nThis Room is read-only outside your scratch directory. Open a corner with open_corner to change files;') + ' For host work, ask with request_grant(mode:request, kind:command, target, action, purpose, reason), then use run_granted_command.'
       : '';
   const recovery = result.sandboxFailure === true
     ? '\nFor host work, open a corner and ask with request_grant(mode:request, kind:command, target, action, purpose, reason), then use run_granted_command.'

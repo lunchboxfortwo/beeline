@@ -115,6 +115,27 @@ m9_describe('run_granted_command reports the Room boundary', () => {
   });
 
 
+  m9_it('does not call a corner a Room when a write is refused there', async () => {
+    const previous = process.env.BEELINE_DAEMON_CORNER_ID;
+    process.env.BEELINE_DAEMON_CORNER_ID = 'corner-1';
+    try {
+      const reply = await m9_runGrantedCommand(
+        { argv: ['cp', 'a', 'b'] },
+        {
+          roomId: 'corner-1',
+          run: async () => ({ grantId: 'g-1', exitCode: 1, timedOut: false, output: "cp: cannot create 'b': Read-only file system", writeRefused: true }),
+        },
+      );
+      m9_expect(reply).toContain('A write was refused outside your scratch directory.');
+      m9_expect(reply).not.toContain('This Room is read-only');
+      m9_expect(reply).not.toContain('open_corner');
+    } finally {
+      if (previous === undefined) delete process.env.BEELINE_DAEMON_CORNER_ID;
+      else process.env.BEELINE_DAEMON_CORNER_ID = previous;
+    }
+  });
+
+
   m9_it('distinguishes a sandbox startup failure from the command exit status', async () => {
     const reply = await m9_runGrantedCommand(
       { argv: ['git', 'status'] },
