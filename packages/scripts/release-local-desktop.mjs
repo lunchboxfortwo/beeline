@@ -171,7 +171,15 @@ node '${remote}/runtime/release-local-desktop-worker.mjs' '${remote}/job.json'
     } catch (error) { if (!failure) throw error; }
     if (failure) throw failure;
   }
+  // The guest's disk is small: earlier attempts' work folders filled it and crashed npm (2026-11-16), so every
+  // attempt starts from, and returns to, no leftover release folders.
   async windows(input, local, remote, sha) {
+    const vm = new WindowsGuest(this.processes, local);
+    const clean = keep => vm.powershell(`Get-ChildItem 'C:/' -Directory -Filter 'beeline-release-*' | Where-Object { $_.FullName.Replace('\\', '/') -ne '${keep}' } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue`, { timeout: 15 * 60_000 }).catch(() => {});
+    await clean(remote);
+    try { await this.windowsBuild(input, local, remote, sha); } finally { await clean(''); }
+  }
+  async windowsBuild(input, local, remote, sha) {
     const vm = new WindowsGuest(this.processes, local);
     await vm.powershell(`$ErrorActionPreference='Stop'
 New-Item -ItemType Directory -Force '${remote}/source' | Out-Null
