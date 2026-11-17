@@ -18,6 +18,7 @@ import { harnessIdentityLabel,sessionNewMcpServers } from './cursor-acp-bridge.j
 import type { DaemonApiClient } from './daemon-api-client.js';
 import type { GrantRunnerEndpoint,GrantRunnerRoom } from './grant-runner.js';
 import { harnessEnforcement,roomShellCapability } from './harness-capabilities.js';
+import { harnessLoginWritablePaths } from './harness-login-mounts.js';
 import { postChangedAgentUsage } from './helper-usage-binding.js';
 import { grantedHostRouteWires,grantedSquireHostRouteNames } from './host-mcp-route.js';
 import { CODE_OWNED_HOST_MCP_NAMES } from './mcp-route-class.js';
@@ -277,6 +278,7 @@ export class PlaceSession {
       harnessHomeStateDirs: homeStateDirs,
       ...(tmpDir ? { tmpDir } : {}),
       additionalWritablePaths: [
+        ...harnessLoginWritablePaths(config.agentKind, operatorHome),
         ...(corner && config.workspaceRoot ? [config.workspaceRoot] : []),
         ...(attachScratchRoot ? [attachScratchRoot] : []),
       ],

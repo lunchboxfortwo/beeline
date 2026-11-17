@@ -78,6 +78,37 @@ it('starts and answers before optional reads begin, even if none of them resolve
   await f.session.dispose();
 });
 
+it.each([false, true])('mounts the selected harness login fallback through the live session (thread=%s)', async corner => {
+  const f = await fixture(corner);
+  f.config.operatorHome = await mkdtemp('/var/tmp/session-login-operator-'); roots.push(f.config.operatorHome);
+  const loginDir = join(f.config.operatorHome!, '.pi', 'agent');
+  await mkdir(loginDir, { recursive: true });
+  await writeFile(join(loginDir, 'auth.json'), '{}');
+  const outside = join(f.config.operatorHome!, 'operator-settings.json');
+  await writeFile(outside, 'protected');
+  f.config.agentKind = 'pi';
+  f.config.bwrapPath = '/usr/bin/bwrap';
+  try {
+    await f.session.start();
+    const launch = f.spawn.mock.calls[0]![0];
+    const commandIndex = launch.agentArgs!.lastIndexOf(launch.harnessCommand!);
+    expect(commandIndex).toBeGreaterThan(0);
+    await execFileAsync(launch.agentCommand, [...launch.agentArgs!.slice(0, commandIndex), process.execPath, '-e', `
+      const fs = require('node:fs');
+      const assert = require('node:assert/strict');
+      const auth = process.env.PI_CODING_AGENT_DIR + '/auth.json';
+      const target = fs.realpathSync(auth);
+      fs.writeFileSync(target + '.lock', 'lock');
+      fs.writeFileSync(target + '.next', 'refreshed');
+      fs.renameSync(target + '.next', target);
+      fs.unlinkSync(target + '.lock');
+      assert.throws(() => fs.writeFileSync(${JSON.stringify(outside)}, 'escape'), { code: 'EROFS' });
+    `], { env: { ...process.env, ...launch.agentEnv } });
+    expect(await readFile(join(loginDir, 'auth.json'), 'utf8')).toBe('refreshed');
+    expect(await readFile(outside, 'utf8')).toBe('protected');
+  } finally { await f.session.dispose(); }
+});
+
 it('delivers report audience names from the queue with only people in the roster', async () => {
   const f = await fixture();
   f.session.resources.context.roster = { members: [

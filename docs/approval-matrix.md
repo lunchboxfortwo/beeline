@@ -41,6 +41,23 @@ Server migrations no longer revoke approved or Once grants for missing legacy re
 
 Resource ownership is the helper owner's host/tool inventory; wallet and Squire retain their existing owner-bound account resolution. The agent owner's approval is not permission to route another person's Workbench connection through that helper. Generic imported tools must be provisioned for that helper owner. Filesystem confinement is still the documented hygiene boundary, not a new security sandbox; another owner’s app is refused rather than being treated as this helper’s own connection; that person must connect a route on a helper they own before it can be used. Credential-file and unread-script hard stops remain enforced by the granted-command runner, and payment delegation, funds, and merge/review rules remain independent.
 
+### Harness login write exceptions
+
+Sign-in runs in the helper; private harness state remains writable in both session modes. Operator state is read-only except for these login directories, selected only for the running harness by `harness-login-mounts.ts`:
+
+| Harness | Operator state policy | Reason |
+| --- | --- | --- |
+| Claude | `.claude` read-only | Private credential replacement plus helper credential-only write-back preserves refresh; `/login` atomically saves from the helper. |
+| Goose | `.config/goose` read-only | Config and secrets are private copies; the helper saves provider keys. |
+| Codex | `.codex` writable | The file credential backend resolves symlinks and stages an atomic replacement beside `auth.json`; a single-file mount breaks rename. |
+| Pi | `.pi/agent` writable | Complete login writer not proved with narrower mounts; retain credential, lock and temporary-file writes. |
+| Grok | `.grok` writable | Native login/refresh not proved with narrower mounts. |
+| Cursor Agent | `.cursor` and `.config/cursor` writable | Native login maintains both CLI state and auth; complete login/refresh not proved with narrower mounts. |
+| OpenCode | `.local/share/opencode` writable | Helper sign-in atomically replaces `auth.json`; native refresh not proved with narrower mounts. |
+| Custom/reference | No additional known operator store | Existing explicitly configured harness state remains writable where login behavior is unknown. |
+
+The writable-directory exceptions permit changes to non-credential files inside those directories. They are deliberate sign-in fallbacks, not claims of credential-only isolation. No credential file is pinned to a writable single-file mount. Missing login stores are skipped until helper sign-in creates them and a new session mounts them. Legacy sessions without a private home retain their configured writable state directories because their login behavior has not been proved safe with narrower mounts. These exceptions do not make the rest of operator HOME writable. Sandbox tests prove mount/write contracts; they do not claim live authentication with every provider.
+
 The allow-only compatibility routes let old and new helpers run through either deploy order. No claim of spending caps is made.
 
 ## Post-merge evidence

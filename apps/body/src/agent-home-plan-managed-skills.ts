@@ -406,12 +406,9 @@ export function roomAgentHomeEnv(root: string): Record<string, string> {
 
 
 /**
- * Harness state/credential directories in a prepared env, and the temp
- * directory, split apart because the OS sandbox treats them differently: a
- * Room keeps the state dirs read-only but still needs a writable temp
- * (`bwrap-sandbox.ts`). Reads whatever the env actually carries, so it is
- * correct both for a Room with its own agent home and for one still on the
- * daemon's ambient state.
+ * Harness state/credential roots and the optional temp directory from a
+ * prepared env. The sandbox keeps both writable. Reading the env as supplied
+ * supports both private homes and legacy sessions using ambient state.
  */
 export const HARNESS_STATE_ENV_VARS = [
   'CLAUDE_CONFIG_DIR',

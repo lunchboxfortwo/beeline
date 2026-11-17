@@ -145,7 +145,7 @@ describe('@agent login on the agent machine', () => {
     expect(results).toEqual([]);
   });
 
-  it('verifies and saves a Pi provider key into its env file, live env and sessions', async () => {
+  it.each(['pi', 'goose'] as const)('verifies and saves a %s provider key into its env file, live env and sessions', async harness => {
     const envFile = join(home, 'connect', 'agent.env');
     await mkdir(join(home, 'connect'), { recursive: true });
     await writeFile(envFile, 'OPENROUTER_API_KEY="sk-or-old"\nOTHER="kept"\n', { mode: 0o600 });
@@ -153,7 +153,7 @@ describe('@agent login on the agent machine', () => {
     const saved = vi.fn();
     const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
     const pi = signIn({
-      harness: 'pi',
+      harness,
       agentEnv,
       llmEnvFile: envFile,
       onSignedIn: saved,
