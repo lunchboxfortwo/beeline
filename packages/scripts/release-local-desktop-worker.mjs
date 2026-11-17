@@ -9,12 +9,31 @@ export function desktopBuildEnvironment({ directory, cargoHome, home }) {
     RUSTUP_HOME: join(directory, 'tools/rustup'), NPM_CONFIG_USERCONFIG: join(home, '.npmrc') };
 }
 
-export function macSigningTools(directory, commands = { security: '/usr/bin/security', codesign: '/usr/bin/codesign' }) {
+export function macSigningTools(directory, commands = {
+  security: '/usr/bin/security', codesign: '/usr/bin/codesign',
+  xcodebuild: '/usr/bin/xcodebuild', xcrun: '/usr/bin/xcrun', fastlane: 'fastlane',
+}) {
   for (const [name, command] of Object.entries(commands)) {
     const path = join(directory, name);
     // Apple Security.framework resolves identities through the operator's HOME.
-    // Only these OS tools receive it; the build and npm keep their private HOME.
-    privateWrite(path, `#!${process.execPath}\nconst {spawnSync}=require('node:child_process');\nconst result=spawnSync(${JSON.stringify(command)},process.argv.slice(2),{env:{...process.env,HOME:process.env.BEELINE_OPERATOR_HOME},stdio:'inherit'});\nif(result.error){console.error(result.error.message);process.exit(1);}\nprocess.exit(result.status??1);\n`);
+    // Enter this environment at the launcher too: Xcode and its absolute-path
+    // codesign children read Security.framework themselves. npm/EAS stay private.
+    // Remove the adapters from the child PATH so a PATH-resolved launcher such
+    // as fastlane cannot recurse; all its descendants already inherit this HOME.
+    privateWrite(path, `#!${process.execPath}
+const {spawnSync}=require('node:child_process');
+const {delimiter,join}=require('node:path');
+const {realpathSync}=require('node:fs');
+const env={...process.env,HOME:process.env.BEELINE_OPERATOR_HOME};
+env.NPM_CONFIG_CACHE||=join(process.env.HOME,'.npm');
+env.NPM_CONFIG_USERCONFIG||=join(process.env.HOME,'.npmrc');
+env.PATH=(env.PATH||'').split(delimiter).filter(path=>{
+  try{return realpathSync(path||'.')!==__dirname;}catch{return true;}
+}).join(delimiter);
+const result=spawnSync(${JSON.stringify(command)},process.argv.slice(2),{env,stdio:'inherit'});
+if(result.error){console.error(result.error.message);process.exit(1);}
+process.exit(result.status??1);
+`);
     chmodSync(path, 0o700);
   }
   return directory;

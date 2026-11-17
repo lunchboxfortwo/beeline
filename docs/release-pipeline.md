@@ -127,11 +127,16 @@ the workflow's Tauri updater signing, which has no Authenticode step.
 Mac builds use Developer ID signing, DMG notarization and stapling, then the
 workflow's `codesign`, `spctl`, and `stapler` verification. Updater signatures
 are cryptographically verified before local artifacts enter finalization.
-Apple's `security` and `codesign` tools receive the operator's real HOME through
-private executable adapters, with an explicit build/login/System keychain search
-list; Node, Expo, Rust and npm keep the job's private HOME. The original keychain
-search list is restored after the job. Successful Mac jobs remove their own
-temporary source/tool directories after collecting local artifacts, so the
+Apple's `security`, `codesign`, `xcodebuild`, `xcrun` and Fastlane launchers
+receive the operator's real HOME through private executable adapters. Their
+native children inherit that HOME, including absolute-path Xcode tools and
+`altool`, with an explicit build/login/System keychain search list. The calling
+npm/EAS processes keep the job's private HOME and caches; npm children of Apple
+tools also retain private cache/config paths. For iOS, the private
+provisioning-profile directory links to the operator's profile directory so
+EAS's temporary profiles and Xcode's identity discovery use the same home.
+The original keychain search list is restored after the job. Successful Mac jobs
+remove their own temporary source/tool directories after collecting local artifacts, so the
 next and latest builds fit on the laptop. Windows file transfer uses Chad's existing
 Python libvirt bindings and guest agent, with private transport files and no new
 network listener.

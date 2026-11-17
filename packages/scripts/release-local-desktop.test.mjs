@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash, generateKeyPairSync, randomBytes, sign } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -173,4 +173,33 @@ test('guest-agent failures report the provider reason without leaking release cr
   processes.run = async () => JSON.stringify({ transport_error: 'guest synchronization failed private-test-token' });
   const guest = new WindowsGuest(processes, '/task/windows');
   await assert.rejects(guest.request({ command: 'guest-ping' }), error => /guest synchronization failed \*\*\*/.test(error.message) && !error.message.includes('private-test-token'));
+});
+
+test('Apple build launchers share signing HOME with native children and avoid adapter recursion', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'apple-build-home-'));
+  try {
+    const bin = macSigningTools(join(directory, 'bin'));
+    for (const name of ['security', 'codesign', 'xcodebuild', 'xcrun', 'fastlane']) {
+      assert.ok(existsSync(join(bin, name)), `${name} must enter the operator signing environment`);
+    }
+    const native = join(directory, 'native');
+    mkdirSync(native);
+    const command = join(native, 'fastlane');
+    writeFileSync(command, `#!${process.execPath}
+const {execFileSync}=require('node:child_process');
+console.log(JSON.stringify({home:process.env.HOME,path:process.env.PATH,cache:process.env.NPM_CONFIG_CACHE,config:process.env.NPM_CONFIG_USERCONFIG,args:process.argv.slice(2),child:execFileSync(process.execPath,['-e','process.stdout.write(process.env.HOME)'],{encoding:'utf8'})}));
+`, { mode: 0o700 });
+    macSigningTools(bin, { fastlane: 'fastlane' });
+    const alias = join(directory, 'alias');
+    symlinkSync(bin, alias);
+    const env = { ...process.env, HOME: '/private-build-home', BEELINE_OPERATOR_HOME: '/operator-home', NPM_CONFIG_CACHE: '', NPM_CONFIG_USERCONFIG: '', PATH: `${alias}:${bin}:${native}:${process.env.PATH}` };
+    const result = JSON.parse(execFileSync(join(bin, 'fastlane'), ['gym', 'identity with spaces'], { env, encoding: 'utf8', timeout: 5000 }));
+    assert.equal(result.home, '/operator-home');
+    assert.equal(result.child, '/operator-home');
+    assert.equal(result.cache, '/private-build-home/.npm');
+    assert.equal(result.config, '/private-build-home/.npmrc');
+    assert.deepEqual(result.args, ['gym', 'identity with spaces']);
+    assert.equal(result.path, `${native}:${process.env.PATH}`);
+    assert.equal(env.HOME, '/private-build-home');
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });

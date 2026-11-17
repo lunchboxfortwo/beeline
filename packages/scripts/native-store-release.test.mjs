@@ -105,6 +105,10 @@ async function keychainProof({ priorDefault = null, failBuild = false, setupErro
   const directory = temporary();
   try {
     const stateFile = join(directory, 'keychains.json');
+    const operatorHome = join(directory, 'operator-home');
+    const profiles = join(operatorHome, 'Library/MobileDevice/Provisioning Profiles');
+    mkdirSync(profiles, { recursive: true });
+    writeFileSync(join(profiles, 'existing.mobileprovision'), 'existing profile');
     const original = { default: priorDefault, search: priorDefault ? [priorDefault, '/Library/Keychains/System.keychain'] : [] };
     writeFileSync(stateFile, JSON.stringify({ ...original, calls: [] }));
     mkdirSync(join(directory, 'bin'));
@@ -115,22 +119,29 @@ async function keychainProof({ priorDefault = null, failBuild = false, setupErro
     const engine = new LocalActions({ root, directory, processes: new Processes({}, () => {}), secrets: {},
       baseEnv: { ...process.env, PATH: `${join(directory, 'bin')}:${process.env.PATH}` } });
     const result = await engine.job({ env: { KEYCHAIN_STATE: stateFile,
-      BEELINE_SIGNING_TOOLS: join(directory, 'bin'), BEELINE_OPERATOR_HOME: '/Users/fixture',
+      BEELINE_SIGNING_TOOLS: join(directory, 'bin'), BEELINE_OPERATOR_HOME: operatorHome,
       KEYCHAIN_SETUP_ERROR: setupError ? 'true' : '', KEYCHAIN_QUERY_ERROR: queryError ? 'true' : '' }, steps: [
       step('Isolate the iOS signing keychain'),
       { run: failBuild ? 'exit 1' : `test -f "$HOME/Library/Keychains/login.keychain-db"
-security list-keychains -d user > "$RUNNER_TEMP/during-build.json"` },
+security list-keychains -d user > "$RUNNER_TEMP/during-build.json"
+# EAS installs/removes its profile from the private HOME; Apple sees it from
+# the operator HOME, without replacing or deleting existing profiles.
+printf temporary > "$HOME/Library/MobileDevice/Provisioning Profiles/temporary.mobileprovision"
+test "$(cat "$BEELINE_OPERATOR_HOME/Library/MobileDevice/Provisioning Profiles/temporary.mobileprovision")" = temporary
+rm "$HOME/Library/MobileDevice/Provisioning Profiles/temporary.mobileprovision"
+test ! -e "$BEELINE_OPERATOR_HOME/Library/MobileDevice/Provisioning Profiles/temporary.mobileprovision"` },
       step('Restore the runner user keychains'),
     ] }, { github: { repository: 'fixture/repo', sha: 'a'.repeat(40), job: 'mobile_native_ios' }, inputs: {}, needs: {}, steps: {}, matrix: {}, job: { status: 'success' } }, 'ios-keychain-proof');
     assert.equal(result.result, failBuild || setupError || queryError ? 'failure' : 'success');
     const state = JSON.parse(readFileSync(stateFile, 'utf8'));
     assert.equal(state.default, original.default);
+    assert.equal(readFileSync(join(profiles, 'existing.mobileprovision'), 'utf8'), 'existing profile');
     assert.deepEqual(state.search, original.search);
     assert.equal(state.calls.filter(args => args[0] === 'create-keychain').length, queryError ? 0 : 1);
     assert.equal(state.calls.filter(args => args[0] === 'delete-keychain').length, queryError ? 0 : 1);
     if (!failBuild && !setupError && !queryError) {
       const search = readFileSync(join(directory, 'jobs/ios-keychain-proof/during-build.json'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
-      assert.deepEqual(search, [join(directory, 'jobs/ios-keychain-proof/home/Library/Keychains/login.keychain-db'), '/Users/fixture/Library/Keychains/login.keychain-db']);
+      assert.deepEqual(search, [join(directory, 'jobs/ios-keychain-proof/home/Library/Keychains/login.keychain-db'), join(operatorHome, 'Library/Keychains/login.keychain-db')]);
     }
     // Never invoke default-keychain -s without an explicit prior path.
     assert.ok(state.calls.filter(args => args[0] === 'default-keychain' && args.includes('-s')).every(args => args[4]));

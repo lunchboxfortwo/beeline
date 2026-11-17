@@ -151,7 +151,7 @@ export function privateIosJob(job) {
   const local = structuredClone(job);
   for (const step of local.steps) {
     // The workflow deliberately resets PATH for Apple's rsync. Keep the scoped
-    // security/codesign wrappers ahead of OS tools after each reset as well.
+    // Apple tool launchers ahead of OS tools after each reset as well.
     if (step.run) step.run = step.run.replaceAll('export PATH', 'export PATH="$BEELINE_SIGNING_TOOLS:$PATH"');
     if (step.name === 'Isolate the iOS signing keychain') step.run = `set -euo pipefail
 security list-keychains -d user > "$RUNNER_TEMP/user-keychains.txt"
@@ -161,6 +161,11 @@ if ! security default-keychain -d user > "$RUNNER_TEMP/user-default-keychain.txt
   : > "$RUNNER_TEMP/user-default-keychain.txt"
 fi
 mkdir -p "$HOME/Library/Keychains"
+# EAS writes UUID-named profiles relative to its private HOME. Apple tools use
+# the operator HOME for Security.framework, so both must see the same profiles.
+profiles="$BEELINE_OPERATOR_HOME/Library/MobileDevice/Provisioning Profiles"
+mkdir -p "$HOME/Library/MobileDevice" "$profiles"
+ln -s "$profiles" "$HOME/Library/MobileDevice/Provisioning Profiles"
 keychain="$HOME/Library/Keychains/login.keychain-db"
 password=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(24).toString("hex"))')
 security create-keychain -p "$password" "$keychain"
@@ -379,8 +384,8 @@ export async function remoteJob(path, { platform = process.platform, arch = proc
   const hooks = { job: async ({ context }) => {
     if (spec.context.github.job !== 'mobile_native_ios') return;
     // Security.framework preferences do not persist reliably under a synthetic
-    // HOME over SSH. Only the Apple tools see the runner HOME; npm/EAS retain
-    // their private HOME, caches and provisioning profiles.
+    // HOME over SSH. Apple launchers and their native children share the runner
+    // HOME; npm/EAS retain private HOME and caches, with a scoped profile link.
     context.env.BEELINE_OPERATOR_HOME = homedir();
     context.env.BEELINE_SIGNING_TOOLS = macSigningTools(join(directory, 'signing-tools'));
     context.env.PATH = `${context.env.BEELINE_SIGNING_TOOLS}:${context.env.PATH}`;
