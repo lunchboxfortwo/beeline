@@ -135,9 +135,9 @@ describe('saved skill index pushed with queued turns', () => {
     vi.stubGlobal('fetch', (url: Parameters<typeof fetch>[0], init?: RequestInit) => String(url) === OPENROUTER_EMBEDDINGS_URL
       ? Promise.resolve(Response.json({ data: [{ index: 0, embedding: [1, ...new Array(1023).fill(0)] }] }))
       : originalFetch(url, init));
-    const original = queuedContext.attachQueuedInstitutionalContext;
+    const original = queuedContext.attachQueuedContext;
     const samples: number[] = [];
-    vi.spyOn(queuedContext, 'attachQueuedInstitutionalContext').mockImplementation(async (...args) => {
+    vi.spyOn(queuedContext, 'attachQueuedContext').mockImplementation(async (...args) => {
       const started = performance.now();
       try { return await original(...args); }
       finally { samples.push(performance.now() - started); }

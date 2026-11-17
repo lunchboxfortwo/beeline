@@ -8,9 +8,33 @@ import { getInstitutionalContext } from './institutional-memory-shadow.js';
 export const INSTITUTIONAL_CONTEXT_MISSED_TEXT =
   'institutional memory did not load this turn; use search(scope:memory) before concluding anything is not stored.';
 
+/** Build every queued turn's private context before its transaction publishes.
+ * Schedules, subscriptions and direct requests all enter through this boundary. */
+export async function attachQueuedContext(
+  db: SqlDatabase,
+  command: CommandRow,
+  members: readonly { id: string; kind: string; name: string; handle: string | null }[],
+): Promise<CommandRow> {
+  if (command.reason === 'mcp_call') return command;
+  const contextual = await attachQueuedConversation(
+    db, await attachQueuedInstitutionalContext(db, command), members,
+  );
+  // Persist one snapshot for both native queue reads and external deliveries.
+  const text = queuedContextText(contextual.message);
+  await db.query(
+    `WITH updated AS (
+      UPDATE agent_commands SET message=$2::jsonb WHERE id=$1 RETURNING id
+    ) UPDATE rooms_mcp_event_deliveries
+      SET body=jsonb_set(body::jsonb,'{data,institutionalContext}',to_jsonb($3::text))::text
+      WHERE command_id IN (SELECT id FROM updated)`,
+    [command.id, JSON.stringify(contextual.message), text],
+  );
+  return contextual;
+}
+
 /** Freeze the old fact/profile/skill snapshot before commit publishes the queue
  * or an external wake. Private command metadata, never public message text. */
-export async function attachQueuedInstitutionalContext(
+async function attachQueuedInstitutionalContext(
   db: SqlDatabase,
   command: CommandRow,
   embed: EmbedFn = createDefaultEmbedFn(),
@@ -40,13 +64,6 @@ export async function attachQueuedInstitutionalContext(
     );
   }
   const message = { ...command.message!, institutionalContext: text };
-  await db.query(
-    `WITH updated AS (
-    UPDATE agent_commands SET message=$2::jsonb WHERE id=$1 RETURNING id
-  ) UPDATE rooms_mcp_event_deliveries SET body=jsonb_set(body::jsonb,'{data,institutionalContext}',to_jsonb($3::text))::text
-    WHERE command_id IN (SELECT id FROM updated) AND $3::text<>''`,
-    [command.id, JSON.stringify(message), text],
-  );
   return { ...command, message };
 }
 
@@ -63,7 +80,7 @@ type Seen = NonNullable<NonNullable<CommandRow['message']>['contextSeen']>;
  * fresh session instead renders `conversationWindow`, the bounded recent
  * window, stored only when it differs from the delta.
  */
-export async function attachQueuedConversation(
+async function attachQueuedConversation(
   db: SqlDatabase,
   command: CommandRow,
   members: readonly { id: string; kind: string; name: string; handle: string | null }[],
@@ -170,17 +187,13 @@ export async function attachQueuedConversation(
     ...(delta ? { conversationContext: delta } : {}),
     ...(full !== delta ? { conversationWindow: full } : {}),
   };
-  await db.query(
-    `WITH updated AS (UPDATE agent_commands SET message=$2::jsonb WHERE id=$1 RETURNING id)
-    UPDATE rooms_mcp_event_deliveries SET body=jsonb_set(body::jsonb,'{data,institutionalContext}',
-      to_jsonb(concat_ws(E'\n\n',NULLIF(body::jsonb#>>'{data,institutionalContext}',''),$3::text)))::text
-    WHERE command_id IN (SELECT id FROM updated) AND $3::text<>''`,
-    [command.id, JSON.stringify(message), delta],
-  );
   return { ...command, message };
 }
 
 /** The queue-time context text an external wake or mention carries: the
  * institutional snapshot, then the conversation delta. */
+export const queuedContextText = (message: CommandRow['message']) =>
+  [message?.institutionalContext, message?.conversationContext].filter(Boolean).join('\n\n');
+
 export const queuedContextSql = (alias: string) =>
   `NULLIF(concat_ws(E'\\n\\n',NULLIF(${alias}.message->>'institutionalContext',''),${alias}.message->>'conversationContext'),'')`;

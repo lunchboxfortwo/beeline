@@ -146,7 +146,8 @@ export async function precomputeInstitutionalQueryEmbedding(
   const text = input.kind === 'search'
     ? input.query.trim()
     : (await database.query<{ text: string }>(
-      `SELECT root.text FROM agent_commands command
+      `SELECT CASE WHEN command.reason IN ('schedule','subscribed_event')
+         THEN COALESCE(command.message->>'body',root.text) ELSE root.text END text FROM agent_commands command
        JOIN messages root ON root.id=command.root_source_message_id AND root.deleted_at IS NULL
        WHERE command.room_id=$1 AND command.agent_id=$2 AND command.turn_request_id=$3
        ORDER BY command.created_at DESC LIMIT 1`,
@@ -164,8 +165,12 @@ export async function getInstitutionalContext(
   embed: EmbedFn = createDefaultEmbedFn(),
 ): Promise<InstitutionalContextSnapshot> {
   const read = await resourceReadAuthority(database, command);
-  const requestText = read?.source.text;
-  if (requestText === undefined) throw new Error('institutional memory requester authority is unavailable');
+  if (!read) throw new Error('institutional memory requester authority is unavailable');
+  // Background sources carry the trusted action beside a generic System line.
+  // Match that action while keeping the stored root as the authority boundary.
+  const requestText = ['schedule', 'subscribed_event'].includes(command.reason)
+    ? command.message?.body ?? read.source.text
+    : read.source.text;
   const queryEmbedding = await embed(
     requestText, 'query');
   return database.transaction(async (db) => {

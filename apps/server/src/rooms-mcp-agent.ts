@@ -1,3 +1,4 @@
+import { queuedContextText } from './agent-command-context.js';
 import { legacyMessageBody } from './messaging-cutover.js';
 import { recordedMessageRoute } from './message-route.js';
 import { MESSAGE_ADDRESS_SCHEMA,MESSAGE_ASK_SCHEMA,OPERATOR_OWNER_ID } from '@beeline/api-contract/daemon';
@@ -711,7 +712,7 @@ export async function pendingMcpWakes(db: SqlDatabase, member: string) {
     return {id:item.id,address:item.room_id,reason:item.reason,
       ...(item.private_payload ? {kind:item.private_payload.kind} : {}),from:route.from,
       text:legacyMessageBody(item,item.message?.body ?? item.private_payload?.text ?? item.reason),createdAt:item.created_at,
-      ...(item.message?.institutionalContext || item.message?.conversationContext ? {institutionalContext:[item.message.institutionalContext,item.message.conversationContext].filter(Boolean).join('\n\n')} : {}),
+      ...(item.message?.institutionalContext || item.message?.conversationContext ? {institutionalContext:queuedContextText(item.message)} : {}),
       attachments:item.message?.attachments ?? item.private_payload?.attachments ?? [],
       next:`Reply with reply(${item.id},text). ${mcpWakeNext(item.private_payload?.kind ?? null,item.reason)}`};
   }));

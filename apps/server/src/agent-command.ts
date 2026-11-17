@@ -1,6 +1,6 @@
 import { legacyCommandPayload } from './messaging-cutover.js';
 import { parseAgentAccessPolicy,senderMayAddressAgent } from '@beeline/api-contract/agent-access';
-import { attachQueuedConversation,attachQueuedInstitutionalContext } from './agent-command-context.js';
+import { attachQueuedContext } from './agent-command-context.js';
 import { initializeThreadImplementer } from './corner-lifecycle.js';
 import { sendMessage } from './agent-messaging.js';
 import { recordedMessageRoute } from './message-route.js';
@@ -794,7 +794,7 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
   )).rows[0] ?? (await db.query<CommandRow>(
     'SELECT * FROM agent_commands WHERE id=$1',[id],
   )).rows[0];
-  if (saved) saved = await attachQueuedConversation(db, await attachQueuedInstitutionalContext(db, saved), chat.members);
+  if (saved) saved = await attachQueuedContext(db, saved, chat.members);
   if (saved && chat.parent_id && ['corner_objective','human_tag'].includes(input.reason))
     await initializeThreadImplementer(db, chat.id);
   if (saved?.state === 'pending' && saved.action === 'input' && db.ownedModelCredentials &&
