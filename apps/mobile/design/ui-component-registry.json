@@ -565,7 +565,8 @@
       "TurnBandSlot",
       "TurnProgressLine",
       "TurnProgressLineBody",
-      "TurnSettledLine"
+      "TurnSettledLine",
+      "workingAvatars"
     ],
     "components/buzz/UiSizeSetting.tsx": [
       "UiSizeSetting"
