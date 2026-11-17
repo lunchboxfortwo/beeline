@@ -179,6 +179,9 @@ test('remote native runner receives scoped secrets and keeps HOME and temporary 
         'test "$EXPO_PUBLIC_SENTRY_DSN" = fixture-dsn',
         'test "$HOME" = "$RUNNER_TEMP/home"',
         'test "$TMPDIR" = "$RUNNER_TEMP/tmp"',
+        'test "$BEELINE_OPERATOR_HOME" != "$HOME"',
+        'test -x "$BEELINE_SIGNING_TOOLS/security"',
+        'test "$(command -v security)" = "$BEELINE_SIGNING_TOOLS/security"',
         'echo build_number=109 >> "$GITHUB_OUTPUT"',
       ].join('\n') }], outputs: { build_number: '${{ steps.upload.outputs.build_number }}' } },
     }));

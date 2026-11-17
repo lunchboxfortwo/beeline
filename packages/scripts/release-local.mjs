@@ -15,6 +15,7 @@ import { checksWorkflow, checkPlan, LocalChecks } from './release-local-checks.m
 import { LocalDelivery } from './release-local-delivery.mjs';
 import { droppedChecks, localWorkflow, quickChecks, releasePlan } from './release-local-policy.mjs';
 import { DesktopBuild, desktopDryRun } from './release-local-desktop.mjs';
+import { macSigningTools } from './release-local-desktop-worker.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const WORKFLOW = '.github/workflows/unified-release.yml';
@@ -149,6 +150,9 @@ async function macJob({ job, context, label, engine }) {
 export function privateIosJob(job) {
   const local = structuredClone(job);
   for (const step of local.steps) {
+    // The workflow deliberately resets PATH for Apple's rsync. Keep the scoped
+    // security/codesign wrappers ahead of OS tools after each reset as well.
+    if (step.run) step.run = step.run.replaceAll('export PATH', 'export PATH="$BEELINE_SIGNING_TOOLS:$PATH"');
     if (step.name === 'Isolate the iOS signing keychain') step.run = `set -euo pipefail
 security list-keychains -d user > "$RUNNER_TEMP/user-keychains.txt"
 # A private HOME in an SSH session can have no default keychain yet.
@@ -162,7 +166,9 @@ password=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(24).
 security create-keychain -p "$password" "$keychain"
 security set-keychain-settings -lut 21600 "$keychain"
 security unlock-keychain -p "$password" "$keychain"
-security list-keychains -d user -s "$keychain"
+# Retain the runner login's public WWDR intermediates, as the Actions job does.
+# EAS creates its own temporary signing keychain and adds it to this list.
+security list-keychains -d user -s "$keychain" "$BEELINE_OPERATOR_HOME/Library/Keychains/login.keychain-db"
 security default-keychain -d user -s "$keychain"`;
     if (step.name === 'Restore the runner user keychains') step.run = `set -euo pipefail
 if [ -f "$RUNNER_TEMP/user-keychains.txt" ]; then
@@ -370,7 +376,16 @@ export async function remoteJob(path, { platform = process.platform, arch = proc
   if (platform !== 'darwin' || arch !== 'x64') throw new Error('Remote job requires the authorized Intel Mac');
   const spec = JSON.parse(readFileSync(path, 'utf8')), directory = join(dirname(path), 'state');
   const secrets = spec.secrets ?? {}, processes = new Processes({ ...secrets, token: spec.context.github.token });
-  const engine = new LocalActions({ root, directory, secrets, variables: spec.variables, processes, github: localGithub, isolateTemporary: true });
+  const hooks = { job: async ({ context }) => {
+    if (spec.context.github.job !== 'mobile_native_ios') return;
+    // Security.framework preferences do not persist reliably under a synthetic
+    // HOME over SSH. Only the Apple tools see the runner HOME; npm/EAS retain
+    // their private HOME, caches and provisioning profiles.
+    context.env.BEELINE_OPERATOR_HOME = homedir();
+    context.env.BEELINE_SIGNING_TOOLS = macSigningTools(join(directory, 'signing-tools'));
+    context.env.PATH = `${context.env.BEELINE_SIGNING_TOOLS}:${context.env.PATH}`;
+  } };
+  const engine = new LocalActions({ root, directory, secrets, variables: spec.variables, processes, github: localGithub, isolateTemporary: true, hooks });
   Object.assign(spec.context, { secrets, vars: engine.variables });
   const job = await engine.job(spec.job, spec.context, spec.label || 'helper-darwin-x64', spec.workflowEnv);
   privateWrite(join(dirname(path), 'result.json'), JSON.stringify({ job, artifacts: [...engine.artifacts] }));
