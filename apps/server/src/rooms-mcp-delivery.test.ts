@@ -561,3 +561,16 @@ describe('JOIN-DELIVERY persistent Events lifecycle', () => {
     ).toBe(2);
   });
 });
+
+describe('JOIN-DELIVERY on-demand hosts are not reported offline', () => {
+  const scope = fixtureScope1();
+  it('a member that declared on-demand delivery gets no offline notice when a person tags it', async () => {
+    const { client, member } = await scope.connected();
+    await client.callTool({ name: 'setup_delivery', arguments: { mechanism: 'on_demand', host: 'Meta Muse', surface: 'Muse app', conversation: 'routine', installed: true } });
+    const handle = (await scope.db.query<{ handle: string }>('SELECT handle FROM identities WHERE id=$1', [member])).rows[0]!.handle;
+    await scope.phone.execute('sendRoomMessage', { roomId: ROOM, text: `@${handle} are you there?` }, USER);
+    await scope.db.backgroundWork.drain();
+    expect((await scope.db.query("SELECT text FROM messages WHERE room_id=$1 AND presentation='system' AND author_id=$2", [ROOM, member])).rows).toEqual([]);
+    expect((await scope.db.query('SELECT 1 FROM rooms_mcp_mentions WHERE member_id=$1 AND cleared_at IS NULL', [member])).rowCount).toBe(1);
+  });
+});

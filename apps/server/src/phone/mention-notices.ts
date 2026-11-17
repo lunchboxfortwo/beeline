@@ -119,10 +119,9 @@ import { phoneProjectPendingAgentCommands } from './message-enrichment.js';
       const bucket = accessNoticeBucket(Date.now());
       for (const agent of agents) {
         const delivery = deliveries.get(agent.agent_id);
-        // Only a recorded delivery route can prove an agent offline.
-        if (!delivery) continue;
-        const offline = delivery.mechanism ? delivery.state !== 'proved_ready' : delivery.offline;
-        if (!offline) continue;
+        // Offline is a recorded failure or a dead credential. A host that declared on-demand delivery, or has
+        // not yet proved its route, is not offline: it polls or has not been asked yet.
+        if (!delivery?.offline) continue;
         await systemLine(ctx.database, {
           roomId,
           id: mentionNoticeId(roomId, agent.agent_id, senderId, 'no-live-route', bucket),
