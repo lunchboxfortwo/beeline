@@ -37,6 +37,21 @@ it('waits for registration before bootstrap or any ordinary request',async()=>{
   sockets[0]!.receive({type:'daemon-operation-result',requestId:frame.requestId,result:{id:'bootstrap'}});
   await expect(request).resolves.toEqual({id:'bootstrap'});expect(fetcher).not.toHaveBeenCalled();
 });
+it('delivers committed reply ids and carries the last queue into a reconnect subscription',async()=>{
+  const {api,sockets}=fixture(), listener=vi.fn();
+  api.setQueueListener(listener);api.subscribeQueue();
+  sockets[0]!.open();sockets[0]!.register();await flush();
+  const item={id:'command',agentId,roomId:'room',turnRequestId:'command',sourceMessageId:'source',
+    rootCommandId:'command',rootSourceMessageId:'source',reason:'human_tag',action:'input',agentDepth:0,
+    source:{id:'source',authorId:'human',body:'hello',createdAt:1,attachments:[]}};
+  sockets[0]!.receive({type:'commands',commandProtocol:2,commands:[item],completedCommandIds:[]});
+  expect(listener).toHaveBeenLastCalledWith([item],[]);
+  sockets[0]!.close();await flush();
+  sockets[1]!.open();sockets[1]!.register(2);await flush();
+  expect(sockets[1]!.frames).toContainEqual({type:'subscribe-queue',agentId,knownCommandIds:['command']});
+  sockets[1]!.receive({type:'commands',commandProtocol:2,commands:[],completedCommandIds:['command']});
+  expect(listener).toHaveBeenLastCalledWith([],['command']);
+});
 it('registration refusal leaves requests waiting without another socket or a timer',async()=>{
   vi.useFakeTimers();const {api,sockets,machine}=fixture();let settled=false;
   const request=api.execute('getAgentConfiguration',{agentId}).finally(()=>{settled=true;});

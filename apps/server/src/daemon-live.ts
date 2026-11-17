@@ -112,6 +112,7 @@ export class DaemonAgentSession {
   #queueSubscribed = false;
   #queuePushing = false;
   #queueRequested = false;
+  #queueCommandIds = new Set<string>();
 
   constructor(
     private readonly deps: DaemonLiveDependencies,
@@ -352,6 +353,8 @@ export class DaemonAgentSession {
   async #process(item: Record<string, unknown>): Promise<void> {
     void this.deps.connectionPresence?.renewLease().catch(error => console.warn('[presence] refresh failed', error));
     if (item.type === 'subscribe-queue') {
+      if (Array.isArray(item.knownCommandIds))
+        for (const id of item.knownCommandIds) if (typeof id === 'string') this.#queueCommandIds.add(id);
       this.#queueSubscribed = true;
       await this.#readQueue();
       return;
@@ -414,6 +417,14 @@ export class DaemonAgentSession {
         this.#queueRequested = false;
         if (this.#closed || !this.transport.isOpen()) return;
         const page = await this.deps.daemon.execute('getAgentCommands', {}, this.agentId);
+        const current = new Set(page.commands.map(command => command.id));
+        const removed = [...this.#queueCommandIds].filter(id => !current.has(id));
+        // Queue absence also means a reply completed. Project that committed
+        // fact before the helper decides whether to cancel its live harness.
+        const completedCommandIds = removed.length ? (await this.deps.database.query<{ id: string }>(
+          `SELECT id FROM agent_commands WHERE agent_id=$1 AND id=ANY($2::text[]) AND state='complete'`,
+          [this.agentId, removed],
+        )).rows.map(row => row.id) : [];
         if (this.#closed || !this.transport.isOpen()) return;
         for (const command of page.commands) {
           this.#places.add(command.roomId);
@@ -425,7 +436,8 @@ export class DaemonAgentSession {
             }));
           }
         }
-        this.transport.send({ type: 'commands', commandProtocol: page.commandProtocol, commands: page.commands });
+        this.transport.send({ type: 'commands', commandProtocol: page.commandProtocol, commands: page.commands, completedCommandIds });
+        this.#queueCommandIds = current;
       } while (this.#queueRequested);
     } catch (error) {
       console.error('[live] queue push failed', error instanceof Error ? error.message : String(error));

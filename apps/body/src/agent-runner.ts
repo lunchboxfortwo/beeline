@@ -37,6 +37,8 @@ export class AgentRunner {
   private readonly places = new Map<string, Place>();
   /** Items with an answer on disk or on the wire; never handed to the agent again. */
   private readonly answered = new Set<string>();
+  /** Server-confirmed tool replies can finish an item before the harness ends. */
+  private readonly completed = new Set<string>();
   private readonly answers: AnswerStore;
   private readonly stored = new Map<string, StoredAnswer>();
   private readonly posting = new Set<string>();
@@ -95,7 +97,7 @@ export class AgentRunner {
       agentId: this.agent.publicKey, operatorHome: baseConfig.operatorHome, api: options.daemonApi,
       live: placeId => this.places.get(placeId)?.session.alive === true,
     });
-    options.daemonApi.setQueueListener(commands => this.queueChanged(commands));
+    options.daemonApi.setQueueListener((commands, completed) => this.queueChanged(commands, completed));
     options.daemonApi.setConfigChangedListener(() => this.configChanged());
     options.daemonApi.setRoomsChangedListener(() => { this.pendingBootstrap = true; this.wake?.(); });
     options.daemonApi.setCornerCompleteListener(cornerId => void this.cornerComplete(cornerId));
@@ -136,7 +138,8 @@ export class AgentRunner {
   }
 
   /** The server's whole list of this agent's undone items, oldest first. */
-  private queueChanged(commands: readonly AgentCommand[]): void {
+  private queueChanged(commands: readonly AgentCommand[], completed: readonly string[] = []): void {
+    for (const id of completed) this.completed.add(id);
     this.latest = commands;
     void this.restored.then(() => this.reconcileQueue()).catch(error => console.error('[body] queue delivery failed:', error));
   }
@@ -144,11 +147,15 @@ export class AgentRunner {
   private reconcileQueue(): void {
     const commands = this.latest;
     const listed = new Set(commands.map(item => item.id));
+    const running = new Set([...this.places.values()].map(place => place.running?.id));
+    for (const id of this.completed) if (!running.has(id)) this.completed.delete(id);
     for (const id of this.answered) if (!listed.has(id) && !this.stored.has(id)) this.answered.delete(id);
     void this.resendStoredAnswers(listed);
     for (const place of this.places.values()) {
-      // Stop wall: the running item left the queue without an answer from us.
-      if (place.running && !listed.has(place.running.id) && !this.answered.has(place.running.id)) place.session.cancel();
+      // A reply tool completes the queue item while its harness is still
+      // running. Only disappearance without a committed answer means Stop.
+      if (place.running && !listed.has(place.running.id) && !this.answered.has(place.running.id)
+        && !this.completed.has(place.running.id)) place.session.cancel();
       place.waiting = place.waiting.filter(item => listed.has(item.id));
     }
     const known = (item: AgentCommand) => this.answered.has(item.id) || [...this.places.values()]

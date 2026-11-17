@@ -528,6 +528,39 @@ it('F14 unrelated turn/activity/usage changes make zero daemon inbox reads', asy
   expect(vi.mocked(daemon.execute).mock.calls.filter(([name])=>name==='getAgentCommands')).toHaveLength(1);
 });
 
+it('projects completed queue removals separately from Stop before the reply operation returns', async () => {
+  const database = new PgliteDatabase(); requestDatabases.push(database);
+  await database.query(ROUTER_COMMAND_SCHEMA);
+  await database.query('CREATE TABLE agent_commands(id text PRIMARY KEY,agent_id text,state text)');
+  await database.query(`INSERT INTO agent_commands VALUES ('reply',$1,'pending'),('stop',$1,'pending')`, [AGENT_A]);
+  const live = new LiveHub(), daemon = daemonStub();
+  let commands = ['reply', 'stop'].map(id => ({id, roomId:'room-a'}));
+  vi.mocked(daemon.execute).mockImplementation(async () => ({commandProtocol:2,commands}) as never);
+  const {port} = await start({database,live,daemon}), client = await machine(port);
+  await register(client,AGENT_A,'bdt_a');
+  client.send({type:'subscribe-queue',agentId:AGENT_A});
+  await client.next(frame => frame.type === 'commands');
+  await database.query(`UPDATE agent_commands SET state=CASE WHEN id='reply' THEN 'complete' ELSE 'cancelled' END`);
+  commands = [];
+  const after = client.frames.length;
+  live.publish({type:'invalidate',roomId:'room-a',reason:'postgres:agent_commands',targetAgentId:AGENT_A});
+  const frame = await client.next(frame => client.frames.indexOf(frame) >= after && frame.type === 'commands');
+  expect(frame).toMatchObject({commands:[],completedCommandIds:['reply']});
+});
+
+it('projects replies completed during disconnection from the reconnect subscription, scoped to the registered agent', async () => {
+  const database = new PgliteDatabase(); requestDatabases.push(database);
+  await database.query(ROUTER_COMMAND_SCHEMA);
+  await database.query('CREATE TABLE agent_commands(id text PRIMARY KEY,agent_id text,state text)');
+  await database.query(`INSERT INTO agent_commands VALUES ('reply',$1,'complete'),('foreign',$2,'complete'),('stop',$1,'cancelled')`, [AGENT_A,AGENT_B]);
+  const daemon = daemonStub();
+  vi.mocked(daemon.execute).mockResolvedValue({commandProtocol:2,commands:[]} as never);
+  const {port} = await start({database,daemon}), client = await machine(port);
+  await register(client,AGENT_A,'bdt_a');
+  client.send({type:'subscribe-queue',agentId:AGENT_A,knownCommandIds:['reply','foreign','stop']});
+  expect(await client.next(frame => frame.type === 'commands')).toMatchObject({commands:[],completedCommandIds:['reply']});
+});
+
 it('carries ordinary daemon families through the registered machine owner with no HTTP, sharing old-wire service behavior', async () => {
   const {DaemonApiClient} = await import('../../body/src/daemon-api-client.js');
   const daemon = daemonStub();

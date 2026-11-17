@@ -8,7 +8,7 @@ import { AnswerStore } from './answer-store.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
 import { identityFromKey,type AgentRuntimeRecord } from './runtime.js';
 
-const harness = vi.hoisted(() => ({ start: vi.fn(), deliver: vi.fn(), stop: vi.fn(), steer: vi.fn() }));
+const harness = vi.hoisted(() => ({ start: vi.fn(), deliver: vi.fn(), stop: vi.fn(), steer: vi.fn(), cancel: vi.fn() }));
 vi.mock('./place-session.js', () => ({ PlaceSession: class {
   alive = false;
   stale = false;
@@ -16,7 +16,7 @@ vi.mock('./place-session.js', () => ({ PlaceSession: class {
   deliver = harness.deliver;
   followUp = harness.steer;
   stop = harness.stop;
-  cancel() {}
+  cancel = harness.cancel;
   grantPlace() { return {}; }
   async writeContext() {}
 } }));
@@ -27,6 +27,7 @@ beforeEach(() => {
   harness.deliver.mockReset().mockResolvedValue({ text: 'answer', steps: [], toolCalls: [], cleanup: async () => {} });
   harness.stop.mockReset().mockResolvedValue(undefined);
   harness.steer.mockReset().mockResolvedValue(undefined);
+  harness.cancel.mockReset();
 });
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 
@@ -41,7 +42,7 @@ async function fixture() {
   const identity = identityFromKey(secretKeyHex, 'Agent');
   const agent = { publicKey: identity.publicKey, secretKeyHex, name: identity.name };
   const runtime = { agent, communityId: 'workspace', rooms: [], supervisorRoot: root } as unknown as AgentRuntimeRecord;
-  let changed!: (commands: readonly AgentCommand[]) => void;
+  let changed!: (commands: readonly AgentCommand[], completed: readonly string[]) => void;
   const execute = vi.fn(async (_name: string, _input: Record<string, unknown>) => ({ id: 'posted', createdAt: 1 }));
   const api = { execute,
     setQueueListener: (listener: typeof changed) => { changed = listener; },
@@ -55,8 +56,35 @@ async function fixture() {
     rootSourceMessageId: id, sourceMessageId: id, agentDepth: 0,
     source: { id, authorId: 'human', body: id, attachments: [], createdAt: 1, type: 'message' },
   });
-  return { root, execute, changed: (commands: AgentCommand[]) => changed(commands), item };
+  return { root, execute, changed: (commands: AgentCommand[], completed: readonly string[] = []) => changed(commands, completed), item };
 }
+
+it('lets a committed reply finish returning while its harness continues, across later queue pushes', async () => {
+  const f = await fixture(), item = f.item('reply-in-progress');
+  const answering = deferred<Record<string, unknown>>();
+  harness.deliver.mockReturnValueOnce(answering.promise);
+  f.changed([item]);
+  await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(1));
+  f.changed([], [item.id]);
+  await Promise.resolve();
+  f.changed([]);
+  await Promise.resolve();
+  expect(harness.cancel).not.toHaveBeenCalled();
+  answering.resolve({text:'',steps:[],toolCalls:[],cleanup:async()=>{}});
+  await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(1));
+  expect(f.execute.mock.calls.filter(([name]) => name === 'postRoomMessage')).toEqual([]);
+});
+
+it('still cancels Stop while a tool call is running, without mistaking another completed item for its reply', async () => {
+  const f = await fixture(), item = f.item('stopped');
+  const answering = deferred<Record<string, unknown>>();
+  harness.deliver.mockReturnValueOnce(answering.promise);
+  f.changed([item]);
+  await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(1));
+  f.changed([], ['another-item']);
+  await vi.waitFor(() => expect(harness.cancel).toHaveBeenCalledTimes(1));
+  answering.resolve({text:'',steps:[],toolCalls:[],cleanup:async()=>{}});
+});
 
 it('loads stored answers before delivering a reconnect snapshot to the harness', async () => {
   const loaded = deferred<Awaited<ReturnType<AnswerStore['all']>>>();

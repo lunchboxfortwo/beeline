@@ -168,7 +168,8 @@ export class DaemonApiClient {
   private channelStateListener?: (connected: boolean, refusal?: string) => void;
   private inFlight = 0;
   private requestCount = 0;
-  private queueListener?: (commands: readonly AgentCommand[]) => void;
+  private queueListener?: (commands: readonly AgentCommand[], completedCommandIds: readonly string[]) => void;
+  private queueCommandIds: readonly string[] = [];
   private queueDemanded = false;
   private roomsChangedListener?: (event?: RoomMembershipChange) => void;
   private configChangedListener?: () => void;
@@ -289,7 +290,7 @@ export class DaemonApiClient {
   }
 
   /** The one listener for this agent's queue: every undone item, oldest first. */
-  setQueueListener(listener: (commands: readonly AgentCommand[]) => void): void {
+  setQueueListener(listener: (commands: readonly AgentCommand[], completedCommandIds: readonly string[]) => void): void {
     this.queueListener = listener;
   }
 
@@ -297,7 +298,7 @@ export class DaemonApiClient {
   subscribeQueue(): void {
     this.queueDemanded = true;
     this.ensureLiveSocket();
-    if (this.#channel.isOpen()) this.#channel.send({ type: 'subscribe-queue' });
+    if (this.#channel.isOpen()) this.#channel.send({ type: 'subscribe-queue', knownCommandIds: this.queueCommandIds });
   }
 
   /** Register the one listener invoked when the server reports this agent's
@@ -439,7 +440,7 @@ export class DaemonApiClient {
   }
 
   private liveOpened(): void {
-    if (this.queueDemanded) this.#channel.send({ type: 'subscribe-queue' });
+    if (this.queueDemanded) this.#channel.send({ type: 'subscribe-queue', knownCommandIds: this.queueCommandIds });
     // Every wake on this socket is fire-and-forget: a membership written, or
     // a Connect tapped, while this socket was connecting (or between
     // reconnects) never replays its frame. Treat every open as both wakes,
@@ -505,9 +506,13 @@ export class DaemonApiClient {
     }
     if (event.type === 'commands' && event.commandProtocol === 2 && Array.isArray(event.commands)) {
       if (typeof event.agentId === 'string' && event.agentId !== this.agentId) return;
-      this.queueListener?.(event.commands.filter(
+      const commands = event.commands.filter(
         (command): command is AgentCommand => isAgentCommand(command) && command.agentId === this.agentId,
-      ));
+      );
+      const completed = Array.isArray(event.completedCommandIds)
+        ? event.completedCommandIds.filter((id): id is string => typeof id === 'string') : [];
+      this.queueCommandIds = commands.map(command => command.id);
+      this.queueListener?.(commands, completed);
       return;
     }
     if (!DAEMON_LIVE_EVENT_TYPES.has(event.type)) this.logUnknownLiveEvent(event.type);
