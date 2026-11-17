@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { YStack } from 'tamagui';
 import { NotificationLifecycleCard } from '@/components/buzz/PrLifecycleCard';
 import { CHOICE_NOTE_MAX_LENGTH, formatChoiceClock } from '@beeline/api-contract/phone';
 import type { AgentPresentation, ChatDisplayMessage } from '@/buzz/room-view-presentation';
@@ -405,45 +406,47 @@ export const ChoiceCard = React.memo(function ChoiceCard({
         ]
       : [];
   return (
-    <TranscriptCard
-      tier={open ? 'ask' : 'record'}
-      testID={`choice-${card.choiceId}`}
-      identity={
-        <IdentityMark
-          kind={card.agent.kind}
-          seed={display?.avatarSeed ?? card.agent.pubkey}
-          avatarUrl={display?.avatarUrl ?? card.agent.avatar}
-          face={display?.face ?? card.agent.face}
-          name={agentName}
-          size={26}
-        />
-      }
-      title={card.prompt}
-      wrapTitle
-      subline={subline}
-      sublineTestID={`choice-${card.choiceId}-subline`}
-      stamp={ledgerStamp(message.timestamp)}
-      choices={choices}
-      noteInput={
-        takesNote
-          ? {
-              value: note,
-              onChangeText: setNote,
-              placeholder: 'Add a note (optional)',
-              maxLength: CHOICE_NOTE_MAX_LENGTH,
-              editable: !busy,
-              testID: `choice-${card.choiceId}-note`,
-            }
-          : undefined
-      }
-      footerNote={
-        open
-          ? busy ? 'Sending decision…' : undefined
-          : footer
-      }
-      footerNoteTestID={`choice-${card.choiceId}-footer`}
-      actions={actions}
-    />
+    <YStack marginTop="5">
+      <TranscriptCard
+        tier={open ? 'ask' : 'record'}
+        testID={`choice-${card.choiceId}`}
+        identity={
+          <IdentityMark
+            kind={card.agent.kind}
+            seed={display?.avatarSeed ?? card.agent.pubkey}
+            avatarUrl={display?.avatarUrl ?? card.agent.avatar}
+            face={display?.face ?? card.agent.face}
+            name={agentName}
+            size={26}
+          />
+        }
+        title={card.prompt}
+        wrapTitle
+        subline={subline}
+        sublineTestID={`choice-${card.choiceId}-subline`}
+        stamp={ledgerStamp(message.timestamp)}
+        choices={choices}
+        noteInput={
+          takesNote
+            ? {
+                value: note,
+                onChangeText: setNote,
+                placeholder: 'Add a note (optional)',
+                maxLength: CHOICE_NOTE_MAX_LENGTH,
+                editable: !busy,
+                testID: `choice-${card.choiceId}-note`,
+              }
+            : undefined
+        }
+        footerNote={
+          open
+            ? busy ? 'Sending decision…' : undefined
+            : footer
+        }
+        footerNoteTestID={`choice-${card.choiceId}-footer`}
+        actions={actions}
+      />
+    </YStack>
   );
 });
 
