@@ -418,8 +418,7 @@ const questionBranch=(projection:CandidateProjection)=>`
   SELECT ${candidateColumns(projection)},NULL::text approval_kind,NULL::timestamptz approval_expires_at,
     NULL::text[] pending_grant_ids,NULL::text actor_name
   FROM viewer_rooms room
-  JOIN actionable_asks ask ON ask.room_id=room.id
-  JOIN messages m ON m.id=ask.id
+  JOIN actionable_asks m ON m.room_id=room.id
   JOIN identities viewer ON viewer.id=$2
   ${projection==='cells'?'LEFT JOIN identities author ON author.id=m.author_id':''}
   LEFT JOIN needs_you_marks mark ON mark.identity_id=$2 AND mark.message_id=m.id
@@ -429,7 +428,10 @@ const questionBranch=(projection:CandidateProjection)=>`
 /** The same authorized candidates drive the tray and its badge. */
 const needsYouCandidates=(projection:CandidateProjection,scoped=false)=>`WITH ${viewerRoomsSql(projection==='cells'?'room.*':'room.id',scoped)},
   actionable_asks AS MATERIALIZED (
-    SELECT m.id,m.room_id FROM messages m
+    -- Retain the report body: joining messages again lets a low report estimate
+    -- choose a full report-index scan (and answer lookups) for every candidate.
+    SELECT m.id,m.room_id,m.author_id,m.text,m.presentation,m.card,m.attachments,
+      m.created_at,m.deleted_at,m.request_id FROM messages m
     WHERE ${askingMessageSql('m')}
   ),
   decidable AS (
