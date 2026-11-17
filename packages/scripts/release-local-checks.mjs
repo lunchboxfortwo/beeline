@@ -16,20 +16,20 @@ export const checksWorkflow = '.github/workflows/checks.yml';
 const readers = new Set(['codecs', 'server-suite-shard', 'server-claim-latency', 'production-corpus-replay', 'app-link-associations', 'auth-image', 'frame-budget', 'state-upgrade']);
 export const checkWorkspace = id => readers.has(id) ? 'shared build with private write layer' : 'private copy of build';
 
-export function checkPlan(engine) {
-  const original = engine.read(checksWorkflow), workflow = quickChecks(original);
+export function checkPlan(engine, { fullChecks = false } = {}) {
+  const original = engine.read(checksWorkflow), workflow = fullChecks ? original : quickChecks(original);
   return {
-    execution: 'three independent quick-check jobs in existing isolated CI jails; maximum four slots',
-    budget: 'existing parent slices: 3 CPUs / 12 GiB each; Vitest at most 2 workers',
+    execution: fullChecks ? 'full nightly Checks in existing isolated CI jails; maximum two slots' : 'three independent quick-check jobs in existing isolated CI jails; maximum four slots',
+    budget: fullChecks ? 'two slots: at most 24 GiB; 3 CPUs / 12 GiB each; Vitest at most 2 workers' : 'existing parent slices: 3 CPUs / 12 GiB each; Vitest at most 2 workers',
     preparation: 'install and build once on shard 1, before the queue',
-    retained: ['build', 'typecheck', 'dead-code', 'design grammar', 'codecs'],
-    dropped: droppedChecks(original),
+    retained: fullChecks ? Object.keys(original.jobs) : ['build', 'typecheck', 'dead-code', 'design grammar', 'codecs'],
+    dropped: fullChecks ? [] : droppedChecks(original),
     jobs: Object.entries(workflow.jobs).flatMap(([id, job]) => matrixRows(job.strategy?.matrix).map(matrix => ({
       id, matrix, needs: [job.needs ?? []].flat(), if: job.if ?? 'success()', workspace: checkWorkspace(id),
-      placement: id === 'body-suite' ? 'bounded host-user scope; one of the four slots' : 'existing isolated CI shard',
+      placement: id === 'body-suite' ? `bounded host-user scope; one of the ${fullChecks ? 'two' : 'four'} slots` : 'existing isolated CI shard',
     }))),
     isolation: 'private HOME, TMPDIR, cache, Docker config and log per job; isolated database engines and ephemeral ports; shard rootless Docker',
-    delivery: 'after the quick-check verdict, three bounded local delivery jobs and one remote Mac orchestration job can run together',
+    delivery: fullChecks ? 'checks only; no release identity or delivery' : 'after the quick-check verdict, three bounded local delivery jobs and one remote Mac orchestration job can run together',
   };
 }
 
@@ -47,13 +47,13 @@ export class CheckQueue {
 }
 
 export class LocalChecks {
-  constructor(engine) {
+  constructor(engine, { slots } = {}) {
     this.engine = engine;
     this.directory = join(engine.directory, 'checks');
     this.source = join(this.directory, 'source');
     this.active = new Map();
     this.shards = new Map();
-    this.queue = new CheckQueue({ execute: (...args) => this.execute(...args) });
+    this.queue = new CheckQueue({ slots, execute: (...args) => this.execute(...args) });
   }
   async command(command, args, options = {}) {
     return this.engine.processes.run(command, args, { env: process.env, quiet: true, ...options });

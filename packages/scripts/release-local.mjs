@@ -220,14 +220,14 @@ rustup run 1.95.0 rustc --version
   return directory;
 }
 
-export function localHooks(directory, processes) {
+export function localHooks(directory, processes, { fullChecks = false } = {}) {
   return {
     workflow: async ({ file, workflow, inputs, inherited, engine }) => {
       file = file.replace(/^\.\//, '');
       if (file === checksWorkflow) {
-        const checks = new LocalChecks(engine);
+        const checks = new LocalChecks(engine, { slots: fullChecks ? [1, 2] : undefined });
         await checks.prepare(inherited);
-        return { workflow: quickChecks(workflow), parallel: true, job: (...args) => checks.queue.run(...args), finish: () => checks.finish() };
+        return { workflow: fullChecks ? workflow : quickChecks(workflow), parallel: true, job: (...args) => checks.queue.run(...args), finish: () => checks.finish() };
       }
       if (file === WORKFLOW) {
         const delivery = new LocalDelivery(engine);
@@ -416,7 +416,7 @@ export async function dryRun(args, engine, context) {
     return;
   }
   if (args.leg === 'release_checks') {
-    engine.processes.log(JSON.stringify(checkPlan(engine), null, 2));
+    engine.processes.log(JSON.stringify(checkPlan(engine, { fullChecks: true }), null, 2));
     return;
   }
   context = { ...context, vars: engine.variables || {}, secrets: engine.secrets || {}, env: {} };
@@ -455,7 +455,8 @@ export async function dryRun(args, engine, context) {
 
 export async function releaseChecks(engine, context) {
   const call = engine.read(WORKFLOW).jobs.release_checks;
-  const inputs = engine.value(call.with, { ...context, needs: { initialize: { outputs: { release_sha: context.github.sha } } } });
+  // A nightly run must include suites excluded from the pre-delivery release gate.
+  const inputs = { suite: 'all', release_sha: '', pinned_sha: context.github.sha };
   const results = await engine.workflow(call.uses, inputs, context, 'release_checks/');
   privateWrite(join(engine.directory, 'release-checks.json'), JSON.stringify(results, null, 2));
   if (Object.values(results).some(result => ['failure', 'cancelled'].includes(result.result))) throw new Error(`Release checks failed; inspect private results under ${engine.directory}`);
@@ -479,7 +480,7 @@ export async function runLocalRelease(args, { repository = root, secrets: provid
   const processes = new Processes(secrets);
   const variables = { otaVersions: args.otaVersions ?? [], desktopMode: args['desktop-mode'] || 'build', desktopReleaseVersion: args['release-version'], macHelperMode: args['mac-helpers'] || 'build',
     CLOUDFLARE_ACCOUNT_ID: secrets.CLOUDFLARE_ACCOUNT_ID || '', BEELINE_HELPER_SENTRY_DSN: secrets.BEELINE_HELPER_SENTRY_DSN || '', BEELINE_MOBILE_SENTRY_DSN: secrets.BEELINE_MOBILE_SENTRY_DSN || '' };
-  const engine = new LocalActions({ root, directory, secrets, variables, processes, github: localGithub, hooks: localHooks(directory, processes) });
+  const engine = new LocalActions({ root, directory, secrets, variables, processes, github: localGithub, hooks: localHooks(directory, processes, { fullChecks: args.leg === 'release_checks' }) });
   engine.inspect(WORKFLOW);
   const context = { github: { repository: 'Beeline-Work/beeline', sha, run_id: String(Math.floor(Date.now() / 1000)), run_attempt: '1', event_name: 'workflow_dispatch', event: {}, actor: 'local-release', token: secrets.GITHUB_TOKEN || secrets.GH_TOKEN || '' }, runner: {}, job: { status: 'success' } };
   if (args.mode === 'plan') {

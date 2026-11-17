@@ -55,6 +55,21 @@ place `squire`, and local command/audit IDs `squire-release-<UTC timestamp>`.
 `--dispatched-by '<JSON>'` is an optional attribution override. These are local
 execution IDs; the local command does not request a server receipt.
 
+## Nightly full checks on squire
+
+The nightly release uses `npm run release -- --full-checks`. After next and
+latest both succeed, it runs the checks-only `release-local --leg release_checks`
+path against that same immutable SHA, under the existing release lock. Ordinary
+releases retain their quick gate. A failed release stops before full checks;
+a failed check fails the command and leaves private results in `full-checks/`.
+
+The checks-only leg runs the complete Checks workflow with `suite: all` and
+`pinned_sha`, leaving `release_sha` empty so the mobile, corpus and latency suites
+are included. It uses two existing queue slots (at most 24 GiB), retaining the
+private CI jails, shared build and per-job logs. It never dispatches Actions or
+reserves a release identity. The obsolete agent schedule for dispatching
+`nightly-checks.yml` is removed independently of the nightly release schedule.
+
 ## Local recovery legs during an Actions outage
 
 `node packages/scripts/release-local.mjs --plan` shows the local recovery path without

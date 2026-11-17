@@ -56,6 +56,23 @@ test('one command completes next before promoting the same SHA; store builds go 
   await assert.rejects(releaseSequence(spec, async args => { failed.push(args.channel); throw new Error('next failed'); }, () => {}), /next failed/);
   assert.deepEqual(failed, ['next']);
 });
+test('nightly checks wait for both releases, pin their SHA and propagate failures', async () => {
+  assert.deepEqual(releaseArguments(['--full-checks']), { fullChecks: true });
+  const spec = { source: '/source', sha, directory: '/state', fullChecks: true };
+  const calls = [];
+  await releaseSequence(spec, async (args, options) => calls.push({ args, options }), () => {});
+  assert.deepEqual(calls.map(({ args }) => args.leg || args.channel), ['next', 'latest', 'release_checks']);
+  assert.deepEqual(calls[2], { args: { mode: 'execute', leg: 'release_checks', channel: 'latest',
+    'release-sha': sha, 'state-dir': '/state/full-checks' }, options: { repository: '/source', secrets: undefined } });
+  for (const failing of ['latest', 'release_checks']) {
+    const started = [];
+    await assert.rejects(releaseSequence(spec, async args => {
+      started.push(args.leg || args.channel);
+      if ((args.leg || args.channel) === failing) throw new Error('fixture failure');
+    }, () => {}), /fixture failure/);
+    assert.deepEqual(started, failing === 'latest' ? ['next', 'latest'] : ['next', 'latest', 'release_checks']);
+  }
+});
 test('the release prunes source copies, overlays and node_modules from its state directory but keeps logs', () => {
   const calls = [];
   pruneReleaseWorkspaces('/fixture/state', (command, args) => calls.push([command, args]));
@@ -386,11 +403,32 @@ test('checks-only execution uses the complete reusable release gate without init
       workflow: async (...args) => { calls.push(args); return { mobile: { result: 'success' }, optional: { result: 'skipped' } }; },
     };
     await releaseChecks(engine, { github: { sha } });
-    assert.deepEqual(calls[0], [workflow.jobs.release_checks.uses, { suite: 'all', release_sha: sha }, { github: { sha } }, 'release_checks/']);
+    assert.deepEqual(calls[0], [workflow.jobs.release_checks.uses, { suite: 'all', release_sha: '', pinned_sha: sha }, { github: { sha } }, 'release_checks/']);
     assert.equal(JSON.parse(readFileSync(join(directory, 'release-checks.json'), 'utf8')).mobile.result, 'success');
     engine.workflow = async () => ({ mobile: { result: 'failure' } });
     await assert.rejects(releaseChecks(engine, { github: { sha } }), /Release checks failed/);
   } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+test('checks-only hooks retain the full workflow and cap memory at two existing slots', async () => {
+  const workflow = parse(readFileSync(join(repository, '.github/workflows/checks.yml'), 'utf8'));
+  const prepare = LocalChecks.prototype.prepare;
+  const execute = LocalChecks.prototype.execute;
+  let slots;
+  LocalChecks.prototype.prepare = async function () { slots = [...this.queue.slots]; };
+  LocalChecks.prototype.execute = async () => ({ result: 'success' });
+  try {
+    const engine = { directory: '/fixture' };
+    const execution = await localHooks('/fixture', {}, { fullChecks: true }).workflow({
+      file: '.github/workflows/checks.yml', workflow, inherited: {}, engine,
+    });
+    assert.deepEqual(slots, [1, 2]);
+    assert.deepEqual(execution.workflow, workflow);
+    const inputs = { suite: 'all', release_sha: '', pinned_sha: sha };
+    for (const id of ['body-suite', 'server-suite-shard', 'mobile-suite', 'production-corpus-replay', 'server-claim-latency']) {
+      assert.equal(condition(execution.workflow.jobs[id].if, { inputs, github: { event_name: 'workflow_dispatch' } }), true, id);
+    }
+    assert.equal((await execution.job({}, {})).result, 'success');
+  } finally { LocalChecks.prototype.prepare = prepare; LocalChecks.prototype.execute = execute; }
 });
 test('the four shard queue never overlaps jobs on a shard and drains after failures', async () => {
   const active = new Set(), completed = [], starts = [], releases = [];
@@ -489,7 +527,11 @@ test('the dry Checks plan keeps the quick release gate and lists omitted PR suit
   for (const writer of ['typecheck', 'dead-code', 'mobile-suite', 'mobile-export-reachability', 'native-fingerprint']) assert.equal(checkWorkspace(writer), 'private copy of build');
   engine.job = () => { throw new Error('A dry plan must not execute jobs'); };
   await dryRun({ leg: 'release_checks' }, engine, { github: { sha } });
-  assert.deepEqual(JSON.parse(messages[0]), plan);
+  const full = checkPlan(engine, { fullChecks: true });
+  assert.deepEqual(JSON.parse(messages[0]), full);
+  assert.deepEqual(full.dropped, []);
+  assert.ok(full.jobs.some(job => job.id === 'mobile-suite'));
+  assert.match(full.budget, /24 GiB/);
   assert.match(plan.execution, /three independent quick-check jobs/);
 });
 test('shard transport inherits existing slices and jails without changing their budgets or services', async () => {
