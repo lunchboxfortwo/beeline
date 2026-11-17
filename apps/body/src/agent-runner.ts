@@ -8,6 +8,7 @@ import type { BodyConfig } from './config.js';
 import { captureConnectionUsage,ConnectorUsageRecorder } from './connector-runner.js';
 import { isAgentRemovedError,type DaemonApiClient } from './daemon-api-client.js';
 import { GrantCommandRunner,GrantRunnerServer,type GrantRunnerEndpoint } from './grant-runner.js';
+import { mergeHarnessTurnMetrics } from './harness-turn-tokens.js';
 import { openRouterRoutingCacheDir } from './openrouter-routing.js';
 import { PlaceSession,type Answer } from './place-session.js';
 import { PlaceStorage } from './place-storage.js';
@@ -130,6 +131,7 @@ export class AgentRunner {
         placeId, ...(item.parentRoomId ? { parentRoomId: item.parentRoomId } : {}), workspaceId: this.runtime.communityId,
         ...(this.endpoint ? { grantRunner: this.endpoint } : {}),
         onExit: () => this.sessionExited(placeId),
+        cancelGrantedCommands: () => this.grantRunner.cancel(placeId),
       }),
     };
     this.places.set(placeId, created);
@@ -271,6 +273,7 @@ export class AgentRunner {
     void this.options.daemonApi.execute('postAgentTurnReceipt', {
       agentId: this.agent.publicKey, roomId: item.roomId, requestId: item.turnRequestId,
       outcome: answer.text ? 'answered' : 'silent', toolCalls: answer.toolCalls.length,
+      ...mergeHarnessTurnMetrics(undefined, answer.tokenUsage),
       ...(replay ? { trace: replay } : {}),
     }).catch(error => console.warn('[body] turn diagnostics not written:', error));
 

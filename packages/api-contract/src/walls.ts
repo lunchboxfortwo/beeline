@@ -1,5 +1,5 @@
 /** The only kinds of refusal on the request -> agent -> answer path. */
-export const WALL_KINDS = ['signed-in', 'membership', 'credentials', 'sandbox', 'stop'] as const;
+export const WALL_KINDS = ['signed-in', 'membership', 'access', 'credentials', 'sandbox', 'stop'] as const;
 export type WallKind = typeof WALL_KINDS[number];
 
 type WallReason = string | Error | Readonly<{ message: string; status?: number; cause?: Error }>;

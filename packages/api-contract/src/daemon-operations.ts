@@ -149,6 +149,12 @@ export type AgentCommand = {
   readonly source: RoomInboxResult['items'][number] & {
     /** Bounded facts and skill index compiled by getInstitutionalContext before queue publication. */
     readonly institutionalContext?: string;
+    /** What this agent has not seen in this place since its previous command: new messages, a changed brief, a changed member list. */
+    readonly conversationContext?: string;
+    /** The bounded recent window, brief and member list a fresh session renders once; present only when it differs from conversationContext. */
+    readonly conversationWindow?: string;
+    /** Server-side record of what this command's context covered, read by the next command's delta. */
+    readonly contextSeen?: { readonly messageId?: string; readonly createdAt?: string; readonly briefRevision?: number; readonly memberVersion?: string };
   };
   readonly createdAt: number;
 };

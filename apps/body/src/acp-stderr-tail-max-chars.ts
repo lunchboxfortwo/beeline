@@ -91,7 +91,7 @@ export class AcpResourceLimitError extends Error {
 
 
 export function killChildProcessGroup(
-  child: ChildProcessWithoutNullStreams,
+  child: Pick<ChildProcessWithoutNullStreams, 'pid' | 'kill'>,
   signal: NodeJS.Signals,
 ): void {
   if (!child.pid) return;

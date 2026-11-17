@@ -3646,7 +3646,8 @@
         "attachments": "The queue stores its delivered source independently of mutable transcript context.",
         "type": "The queue stores its delivered source independently of mutable transcript context.",
         "systemEvent": "The queue stores its delivered source independently of mutable transcript context.",
-        "replyToMessageId": "The queue stores its delivered source independently of mutable transcript context."
+        "replyToMessageId": "The queue stores its delivered source independently of mutable transcript context.",
+        "contextSeen": "What this command's queue-time context covered (newest message, brief revision, member list version); the next delta cannot be derived once the transcript, brief and membership have moved on."
       },
       "drawing": {},
       "private_payload": {

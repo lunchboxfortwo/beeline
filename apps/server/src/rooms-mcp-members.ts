@@ -1,3 +1,4 @@
+import { queuedContextSql } from './agent-command-context.js';
 import { legacyMessageBody } from './messaging-cutover.js';
 import { MCP_STARTER_ROUTINE,agentHandleFromName,mentionReplyRule } from '@beeline/api-contract/phone';
 import { createHash,randomUUID } from 'node:crypto';
@@ -339,7 +340,7 @@ export async function deliverMcpMemberWebhooks(
          CASE WHEN member.callback_url IS NOT NULL THEN member.callback_secret END callback_secret,
          message.author_id,beeline_room_handle(author.id,message.room_id) author_handle,author.name author_name,author.kind author_kind,mention.seq::text cursor,mention.cleared_at IS NOT NULL answered,
          message.attachments,COALESCE(command.message->'attachments',command.private_payload->'attachments',source.attachments,'[]'::jsonb) command_attachments,
-         COALESCE(command.message->>'institutionalContext',(SELECT queued.message->>'institutionalContext' FROM agent_commands queued
+         COALESCE(${queuedContextSql('command')},(SELECT ${queuedContextSql('queued')} FROM agent_commands queued
            WHERE queued.agent_id=claimed.member_id AND queued.source_message_id=claimed.message_id ORDER BY queued.created_at DESC LIMIT 1)) institutional_context,
          COALESCE(command.message->'route'->'from',command.private_payload->'route'->'from',
            jsonb_build_object('agent',COALESCE(command.private_payload->>'authorId',command.message->>'authorId'),

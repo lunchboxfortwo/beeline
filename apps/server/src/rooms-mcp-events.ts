@@ -1,3 +1,4 @@
+import { queuedContextSql } from './agent-command-context.js';
 import { mentionReplyRule } from '@beeline/api-contract/phone';
 import { createHash,createHmac,randomBytes,randomUUID,timingSafeEqual } from 'node:crypto';
 import type { SqlDatabase } from './database.js';
@@ -162,7 +163,7 @@ export async function queueMcpMentionEvents(db: SqlDatabase, member: string, roo
         'data',jsonb_build_object('roomId',m.room_id,'messageId',m.id,'memberId',s.member_id,'replyRule',CASE WHEN beeline_room_handle(i.id,m.room_id) IS NULL THEN format($5::text,m.id) ELSE format($4::text,m.id,beeline_room_handle(i.id,m.room_id)) END,
           'idempotencyKey','mention:'||s.member_id||':'||m.id,'text',left(m.text,16000),'attachments',m.attachments,
           'author',json_build_object('id',m.author_id,'handle',beeline_room_handle(i.id,m.room_id),'name',i.name)) ||
-          jsonb_strip_nulls(jsonb_build_object('institutionalContext',(SELECT NULLIF(command.message->>'institutionalContext','') FROM agent_commands command
+          jsonb_strip_nulls(jsonb_build_object('institutionalContext',(SELECT ${queuedContextSql('command')} FROM agent_commands command
             WHERE command.agent_id=s.member_id AND command.source_message_id=m.id ORDER BY command.created_at DESC LIMIT 1))), 'cursor',NULL)::text
     FROM rooms_mcp_event_subscriptions s
     JOIN rooms_mcp_connections c ON c.client_id=s.client_id AND c.identity_id=s.owner_id AND c.revoked_at IS NULL

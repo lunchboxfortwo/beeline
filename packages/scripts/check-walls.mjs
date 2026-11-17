@@ -182,7 +182,10 @@ const SESSION_OPERATIONS = new Set(['this.repairCredentialLinks', 'this.startFre
   'openAcpConversation', 'applyAgentModelSelection', 'answering', 'client.startProcess', 'client.stopProcess',
   'repairRoomAgentCredentialLinks', 'lstat', 'assertRealContainedDirectory', 'writeIsolatedHarnessFile',
   'readlink', 'rm', 'symlink', 'rename', 'writeBackDetachedClaudeLogin', 'readFile', 'provisionPiCustomModelConfig',
-  'deps.auth.authenticateDaemon', 'deps.auth.retiredDaemonAgent', 'session.claim', 'read', 'this.hostedModel', 'this.writeContext', 'OwnedModelFiles.create', 'readOnlyMcpServer', 'beelineAgentMcpServer', 'installOwnedModelProvider']);
+  'deps.auth.authenticateDaemon', 'deps.auth.retiredDaemonAgent', 'session.claim', 'read', 'this.hostedModel', 'this.writeContext', 'OwnedModelFiles.create', 'readOnlyMcpServer', 'beelineAgentMcpServer', 'installOwnedModelProvider',
+  // Owner-requested pre-turn steps: a thread checkout picks up the feature
+  // branch before its turn, and received pictures ride inline as before.
+  'this.refreshFeatureBranch', 'deliverAttachments']);
 
 export function wallKinds(root) {
   const source = ts.createSourceFile(WALL_BUILDER_FILE, readFileSync(resolve(root, WALL_BUILDER_FILE), 'utf8'), ts.ScriptTarget.Latest, true);

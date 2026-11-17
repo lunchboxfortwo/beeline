@@ -1,14 +1,17 @@
 import type { AgentCommand,DaemonOperationMap } from '@beeline/api-contract/daemon';
+import { existsSync } from 'node:fs';
 import { mkdir,rm,writeFile } from 'node:fs/promises';
 import { homedir,hostname } from 'node:os';
 import { delimiter,dirname,join,resolve } from 'node:path';
-import { AcpClient,agentTurnSteps,openAcpConversation,type McpServerWire,type PromptResult,type ToolCallEntry } from './acp.js';
+import { AcpClient,agentTurnSteps,openAcpConversation,type AcpPromptBlock,type McpServerWire,type PromptResult,type ToolCallEntry } from './acp.js';
 import { agentCommandCatalogPublisher } from './agent-command-catalog.js';
+import { deliverAttachments } from './attachment-delivery.js';
 import { agentBehavior } from './agent-command.js';
 import { agentGitIdentityEnv } from './agent-git-identity.js';
-import { harnessStateDirsFromEnv,prepareRoomAgentCredentials,prepareRoomAgentHome,watchRoomClaudeLogin,writeBackRoomClaudeLogin } from './agent-home.js';
+import { harnessStateDirsFromEnv,hostImportedMcpDeclarations,prepareRoomAgentCredentials,prepareRoomAgentHome,watchRoomClaudeLogin,writeBackRoomClaudeLogin } from './agent-home.js';
 import { HostPlaces,startAgentProcess,stopAgentProcess } from './agent-process.js';
 import { credentialMaskPaths,harnessHomeStateDirs,sandboxMountPlan,siblingAgentMaskPaths,wrapAgentCommand,type SandboxSessionSpec } from './bwrap-sandbox.js';
+import { codegraphMcpServer } from './codegraph.js';
 import { bodyAgentCommand,type BodyConfig } from './config.js';
 import { installCornerGitHubWrappers } from './corner-github-auth.js';
 import { harnessIdentityLabel,sessionNewMcpServers } from './cursor-acp-bridge.js';
@@ -16,6 +19,7 @@ import type { DaemonApiClient } from './daemon-api-client.js';
 import type { GrantRunnerEndpoint,GrantRunnerRoom } from './grant-runner.js';
 import { harnessEnforcement,roomShellCapability } from './harness-capabilities.js';
 import { postChangedAgentUsage } from './helper-usage-binding.js';
+import { grantedHostRouteWires,grantedSquireHostRouteNames } from './host-mcp-route.js';
 import { CODE_OWNED_HOST_MCP_NAMES } from './mcp-route-class.js';
 import { agentArgsWithModelSelection,applyAgentModelSelectionWithUpdatedCatalog,filterAllowedModelConfigOptions,parseAdvertisedConfigOptions } from './model-config.js';
 import { agentOpenRouterKey } from './openrouter-key-usage.js';
@@ -35,7 +39,8 @@ import { SessionResources } from './session-resources.js';
 import { SquireTaskRelay } from './squire-task-relay.js';
 import { AgentTurnStream,durableReplyText } from './turn-stream.js';
 import { WarmTranscript } from './warm-transcript.js';
-import { cornerCheckoutFolders } from './workspace-checkout.js';
+import { cornerCheckoutFolders,execFileAsync,githubGitEnv,roomCheckoutPath } from './workspace-checkout.js';
+import { syncCornerBranch } from './corner-branch-sync.js';
 
 
 export interface PlaceSessionOptions {
@@ -53,6 +58,7 @@ export interface PlaceSessionOptions {
   createAcpClient?: (options: ConstructorParameters<typeof AcpClient>[0]) => AcpClient;
   /** The harness exited on its own. */
   onExit(): void;
+  cancelGrantedCommands?(): void;
 }
 
 export interface Answer {
@@ -60,6 +66,8 @@ export interface Answer {
   readonly steps: NonNullable<DaemonOperationMap['postRoomMessage']['input']['steps']>;
   readonly stopReason: string;
   readonly toolCalls: readonly ToolCallEntry[];
+  /** Tokens the harness reported for this turn, when it said. */
+  readonly tokenUsage?: PromptResult['tokenUsage'];
   /** Remove the live draft; called once the answer is posted. */
   readonly cleanup: () => Promise<void>;
 }
@@ -76,6 +84,8 @@ export class PlaceSession {
   /** Configuration changed; start fresh before the next item. */
   stale = false;
   private notes: string[] = [];
+  /** This session has received the bounded recent window. */
+  private windowDelivered = false;
   private turnPrefix = '';
   private names = new Map<string, string>();
   private readonly warm: WarmTranscript;
@@ -83,6 +93,8 @@ export class PlaceSession {
   /** The item being answered, for run_granted_command. */
   current?: AgentCommand;
   private scratch?: string;
+  /** Where received pictures are downloaded for an image-capable harness. */
+  private attachmentDir?: string;
   private privateHomeRoot?: string;
   private claudeLoginWatch?: { close(): void };
   private stopping = false;
@@ -156,9 +168,12 @@ export class PlaceSession {
     }
   }
 
-  /** Bind the tools to the item this session is answering. */
-  writeContext(item: AgentCommand | undefined, queued: readonly AgentCommand[], ownedModelDirectory?: string): Promise<void> {
-    return writeTurnContext(this.contextPath, item, queued, ownedModelDirectory);
+  /** Bind the tools to the item this session is answering; host MCP routes
+   * authorize each call through the resource façade with this connection. */
+  async writeContext(item: AgentCommand | undefined, queued: readonly AgentCommand[], ownedModelDirectory?: string): Promise<void> {
+    await writeTurnContext(this.contextPath, item, queued, ownedModelDirectory);
+    await writeFile(`${this.contextPath}.resource-auth.json`,
+      JSON.stringify({ ...this.options.api.connection(), turnContextPath: this.contextPath }), { mode: 0o600 });
   }
 
   /** A free agent's hosted model is reachable only with a credential bound to this item. */
@@ -190,6 +205,7 @@ export class PlaceSession {
     await this.stop();
     this.stale = false;
     this.notes = [];
+    this.windowDelivered = false;
     const sandbox = Boolean(this.options.config.bwrapPath);
     if (!sandbox) this.notes.push(`The OS sandbox is unavailable. You can read files, edit files only inside ${this.folder()}, and shell commands are refused.`);
     try { await this.activate(sandbox); }
@@ -250,6 +266,7 @@ export class PlaceSession {
     await Promise.all(homeStateDirs.map(dir => mkdir(dir, { recursive: true })));
     const attachScratchRoot = homeOverlay.HOME ? dirname(homeOverlay.HOME) : tmpDir;
     if (attachScratchRoot) await mkdir(attachScratchRoot, { recursive: true });
+    this.attachmentDir = attachScratchRoot ? join(attachScratchRoot, 'attachments') : undefined;
     const sandboxSpec: SandboxSessionSpec = {
       operatorHome,
       userRuntimeDir: `/run/user/${process.getuid?.() ?? 0}`,
@@ -290,6 +307,17 @@ export class PlaceSession {
         ...(this.options.grantRunnerFile ? { grantRunnerFile: this.options.grantRunnerFile } : {}),
       }), undefined);
     if (agentTools) servers.push(agentTools);
+    const codegraphFolder = !corner && repository?.resolution === 'repository' && repository.remote
+      ? roomCheckoutPath({ roomId: placeId, supervisorRoot: runtime.supervisorRoot,
+        remote: repository.remote, targetBranch: repository.targetBranch || 'main' }) : folder;
+    const codegraph = codegraphMcpServer(config, codegraphFolder, { readonly: !corner });
+    if (codegraph) servers.push(codegraph);
+    // Operator-imported host MCP servers join as routes; the resource façade
+    // authorizes every call. Squire has its own registry-mcp:squire route.
+    const hostDeclarations = hostImportedMcpDeclarations({ operatorHome, agentKind: config.agentKind });
+    const squireRoutes = grantedSquireHostRouteNames(Object.keys(hostDeclarations), hostDeclarations);
+    const hostRoutes = Object.keys(hostDeclarations).filter(name => !squireRoutes.includes(name));
+    if (hostRoutes.length) servers.push(...grantedHostRouteWires(hostRoutes, operatorHome, hostDeclarations, `${this.contextPath}.resource-auth.json`));
     const sessionServers = sessionNewMcpServers<McpServerWire>(harnessLabel, servers, []);
     if (this.model || agentEnv.BEELINE_FREE_AGENT_ID || agentEnv.BEELINE_FREE_AGENT_MODEL_TOKEN)
       await installOwnedModelProvider(agentEnv.PI_CODING_AGENT_DIR);
@@ -367,11 +395,18 @@ export class PlaceSession {
     const reconcilingModel = Boolean(selection.model && selection.model !== runningModel && available);
     const sessionNotes = this.notes;
     const configurationNote = `persona and reviewer skills use ${configuration ? 'cached configuration' : 'the agent default'}. Optional context and capability status: read(facet:session).`;
-    if (selection.model && selection.model !== runningModel) {
-      if (available) {
+    const effortAxis = catalog.find(option => ['thought_level', 'effort', 'reasoning_effort'].includes(option.category));
+    const fastAxis = catalog.find(option => option.id === 'fast-mode');
+    // Effort and Fast Mode apply on their own when the model already runs.
+    const axesDiffer = Boolean(selection.effort && effortAxis && effortAxis.currentValue !== selection.effort)
+      || Boolean(selection.fastMode !== undefined && fastAxis && fastAxis.currentValue !== (selection.fastMode ? 'on' : 'off'));
+    const modelChange = Boolean(selection.model && selection.model !== runningModel);
+    if (modelChange || axesDiffer) {
+      if (!modelChange || available) {
         // Send the setter before the first prompt, but never hold delivery on
         // an optional harness request. The live catalog owns this verdict.
-        void applyAgentModelSelectionWithUpdatedCatalog(client, opened.sessionId, catalog, selection)
+        void applyAgentModelSelectionWithUpdatedCatalog(client, opened.sessionId, catalog,
+          modelChange ? selection : { effort: selection.effort, fastMode: selection.fastMode })
           .then(applied => {
             if (this.client === client) this.resources.rememberModelCatalog(applied.options);
             const index = this.client === client ? sessionNotes.indexOf(configurationNote) : -1;
@@ -434,17 +469,26 @@ export class PlaceSession {
     const model = this.model ?? await this.hostedModel(item);
     this.model = undefined;
     await this.optional('Tool context', () => this.writeContext(item, batch.slice(1), model?.paths().directory), undefined);
-    const options = { names: this.names, notes: this.notes, turnPrefix: this.turnPrefix };
+    await this.refreshFeatureBranch();
+    const options = { names: this.names, notes: this.notes, turnPrefix: this.turnPrefix, fresh: !this.windowDelivered };
+    this.windowDelivered = true;
     const prompt = batch.length > 1 || item.offlineSeconds !== undefined
       ? offlineBatchPrompt(batch.length ? batch : [item], options) : itemPrompt(item, options);
     this.notes = [];
+    // A received picture rides inline as before, within MAX_INLINE_IMAGE_BYTES each.
+    const pictures = (batch.length ? batch : [item]).flatMap(next => next.source.attachments ?? [])
+      .filter(attachment => attachment.mimeType?.startsWith('image/'));
+    const images: AcpPromptBlock[] = this.attachmentDir && pictures.length && client.canPromptWithImages()
+      ? (await deliverAttachments(pictures, join(this.attachmentDir, item.id.replace(/[^\w-]/g, '_'))))
+        .flatMap(entry => entry.image ? [{ type: 'image' as const, data: entry.image.data, mimeType: entry.image.mimeType }] : [])
+      : [];
     const stream = new AgentTurnStream({
       api: this.options.api, agentId: this.options.agent.publicKey, roomId: item.roomId,
       requestId: item.turnRequestId, commandId: item.id, label: `place ${item.roomId}`,
     });
     let result: PromptResult;
     try {
-      const answering = client.sessionPrompt(sessionId, prompt, stream.onChunk);
+      const answering = client.sessionPrompt(sessionId, images.length ? [{ type: 'text', text: prompt }, ...images] : prompt, stream.onChunk);
       this.resources.refresh();
       result = await answering;
     } catch (error) {
@@ -467,6 +511,7 @@ export class PlaceSession {
       steps,
       stopReason: result.stopReason,
       toolCalls: result.toolCalls,
+      ...(result.tokenUsage ? { tokenUsage: result.tokenUsage } : {}),
       cleanup: async () => {
         model?.revoke();
         return stream.retract();
@@ -474,9 +519,31 @@ export class PlaceSession {
     };
   }
 
-  /** Stop: end the running prompt now. */
+  /** Another agent may have pushed this thread's branch; bring an existing
+   * checkout onto it. A failure delivers anyway, with one line saying so. */
+  private async refreshFeatureBranch(): Promise<void> {
+    const { parentRoomId, placeId, api } = this.options;
+    const folder = this.folder();
+    if (!parentRoomId || !existsSync(resolve(folder, '.git'))) return;
+    const branch = this.resources.context.restore?.featureBranch ?? `feature/corner-${placeId.replaceAll('-', '').slice(0, 12)}`;
+    try {
+      const remote = (await execFileAsync('git', ['-C', folder, 'remote', 'get-url', 'origin'])).stdout.toString().trim();
+      const env = remote.startsWith('file://') ? undefined
+        : githubGitEnv((await api.execute('getRoomGitHubToken', { roomId: parentRoomId })).token);
+      await syncCornerBranch({ worktreePath: folder, featureBranch: branch, ...(env ? { env } : {}) });
+    } catch (error) {
+      this.notes.push(`Your branch ${branch} could not be refreshed from origin (${error instanceof Error ? error.message.split('\n')[0] : String(error)}); fetch and sync it yourself before relying on it.`);
+    }
+  }
+
+  /** Stop: end the running prompt now. A harness may ignore session/cancel,
+   * so the process tree, its MCP servers and tools end too; the next item
+   * starts a fresh session. */
   cancel(): void {
+    this.options.cancelGrantedCommands?.();
     if (this.client && this.sessionId) this.client.sessionCancel(this.sessionId);
+    if (this.current) this.squireRelay.cancel(this.current.turnRequestId);
+    void this.stop().catch(error => console.error('[body] stopped session cleanup failed:', error));
   }
 
   /** The helper is stopping: end the session and its Squire relay. */

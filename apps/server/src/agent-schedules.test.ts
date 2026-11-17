@@ -927,3 +927,24 @@ describe('agent tool schedule daemon operations', () => {
     }
   });
 });
+
+it.each(['creator', 'allowlist'])('refuses a human schedule after %s access is revoked', async policy => {
+  const database = await fixture();
+  try {
+    await database.query(`INSERT INTO agents(agent_id,owner_id,access_policy) VALUES($1,$2,'{"type":"allowlist","allow":["${MEMBER}"]}')`, [AGENT, OWNER]);
+    const scheduleId = randomUUID();
+    await database.query(`INSERT INTO agent_schedules(id,workspace_id,room_id,agent_id,creator_id,cadence,message,next_run_at)
+      VALUES($1,$2,$3,$4,$5,'{"kind":"interval","everyMinutes":1}','Scheduled request',now()-interval '1 second')`,
+      [scheduleId, WORKSPACE, ROOM, AGENT, MEMBER]);
+    const loop = new AgentScheduleLoop(database);
+    expect(await loop.runOnce()).toBe(1);
+    expect((await database.query(`SELECT id FROM agent_commands WHERE agent_id=$1`, [AGENT])).rowCount).toBe(1);
+    await database.query('UPDATE agents SET access_policy=$2::jsonb WHERE agent_id=$1',
+      [AGENT, JSON.stringify(policy === 'creator' ? { type: 'creator' } : { type: 'allowlist', allow: [] })]);
+    await database.query(`UPDATE agent_schedules SET next_run_at=now()-interval '1 second' WHERE id=$1`, [scheduleId]);
+    // The refused run meets the access wall: nothing is queued or posted for it.
+    expect(await loop.runOnce()).toBe(0);
+    expect((await database.query(`SELECT id FROM agent_commands WHERE agent_id=$1`, [AGENT])).rowCount).toBe(1);
+    expect((await database.query(`SELECT id FROM messages WHERE author_id=$1 AND text='Scheduled request'`, [MEMBER])).rowCount).toBe(1);
+  } finally { await database.close(); }
+});

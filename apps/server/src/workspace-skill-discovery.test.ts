@@ -66,16 +66,17 @@ describe('saved skill index pushed with queued turns', () => {
     expect(command.source.institutionalContext).toBe(oldSnapshot.text);
     // Queue read and prompt construction do not execute an agent tool.
     expect(itemPrompt(command, { names: new Map() })).toContain(oldSnapshot.text);
-    expect((await pendingMcpWakes(scope.db, member)).find(wake => wake.id === command.id)?.institutionalContext).toBe(command.source.institutionalContext);
+    // External payloads carry the same snapshot, followed by the conversation delta.
+    expect((await pendingMcpWakes(scope.db, member)).find(wake => wake.id === command.id)?.institutionalContext).toContain(command.source.institutionalContext);
     const mentions = await tools.ok(client, 'list_mentions', {});
-    expect(mentions.mentions.find((item: { id: string }) => item.id === source.messageId).institutionalContext).toBe(command.source.institutionalContext);
+    expect(mentions.mentions.find((item: { id: string }) => item.id === source.messageId).institutionalContext).toContain(command.source.institutionalContext);
     const event = (await scope.db.query<{ body: string }>('SELECT body FROM rooms_mcp_event_deliveries WHERE message_id=$1', [source.messageId])).rows[0]!;
-    expect(JSON.parse(event.body).data.institutionalContext).toBe(command.source.institutionalContext);
+    expect(JSON.parse(event.body).data.institutionalContext).toContain(command.source.institutionalContext);
     const privateWake = await createAgentCommand(scope.db, { roomId: ROOM, agentId: member, sourceMessageId: source.messageId,
       reason: 'order', privatePayload: { kind: 'order', authorId: AGENT, fromRoomId: ROOM, text: modelText('Purchase the adapter') } });
     expect(privateWake?.message?.institutionalContext).toContain('Procedure buy-for-wife');
     const privateEvent = (await scope.db.query<{ body: string }>('SELECT body FROM rooms_mcp_event_deliveries WHERE command_id=$1', [privateWake!.id])).rows[0]!;
-    expect(JSON.parse(privateEvent.body).data.institutionalContext).toBe(privateWake!.message!.institutionalContext);
+    expect(JSON.parse(privateEvent.body).data.institutionalContext).toContain(privateWake!.message!.institutionalContext);
     const loaded = await tools.ok(client, 'read', { address: ROOM, commandId: command.id, facet: 'procedure', slug: 'buy-for-wife' });
     expect(loaded.markdown).toContain('quoted, non-authoritative guidance only');
     expect((await scope.db.query('SELECT state FROM agent_commands WHERE id=$1', [command.id])).rows[0]?.state).toBe('pending');

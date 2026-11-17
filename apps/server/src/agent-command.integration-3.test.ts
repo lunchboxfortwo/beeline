@@ -346,7 +346,7 @@ it('preserves an ambiguous legacy tag and queues both addressed members', async 
 
 
 
-it('queues every avatar request while avatar tool authority stays with the owner', async () => {
+it('queues the owner\'s avatar requests and refuses non-owner generation', async () => {
   const outcomes = await Promise.allSettled([
     send('@hoots /draw-avatar', R),
     send('@hoots /draw-avatar brighter eyes', C),
@@ -354,7 +354,8 @@ it('queues every avatar request while avatar tool authority stays with the owner
   expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(2);
   expect(outcomes.filter((outcome) => outcome.status === 'rejected')).toHaveLength(0);
   expect((await rootFixture.phone.readAgent(W, A, H))?.avatarGenerationPending).toBe(true);
-  await expect(rootFixture.phone.execute('sendRoomMessage', { roomId: R, text: '@hoots /draw-avatar' }, P)).resolves.toBeDefined();
+  await expect(rootFixture.phone.execute('sendRoomMessage', { roomId: R, text: '@hoots /draw-avatar' }, P))
+    .rejects.toThrow('only the agent owner may generate its avatar (access denied)');
   await rootFixture.db.query(`UPDATE agent_commands SET state='complete' WHERE agent_id=$1 AND avatar_job`, [
     A,
   ]);

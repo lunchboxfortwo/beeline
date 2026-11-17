@@ -2,12 +2,26 @@ import { execFile } from 'node:child_process';
 import { access,appendFile,mkdir,readFile } from 'node:fs/promises';
 import { dirname,isAbsolute,resolve } from 'node:path';
 import { promisify } from 'node:util';
+import type { McpServerWire } from './acp.js';
 import type { BodyConfig } from './config.js';
 
 const execFileAsync = promisify(execFile);
 
 const CODEGRAPH_INDEX_PATH = '.codegraph/codegraph.db';
 const CODEGRAPH_PREPARE_TIMEOUT_MS = 120_000;
+
+/** Release-owned, repository-scoped CodeGraph MCP server. */
+export function codegraphMcpServer(config: BodyConfig, cwd: string, options: { readonly: boolean }): McpServerWire | undefined {
+  if (!config.codegraphCommand) return undefined;
+  return {
+    name: 'codegraph',
+    command: config.codegraphCommand,
+    args: ['serve', '--mcp', '--path', resolve(cwd), ...(options.readonly ? ['--no-watch'] : [])],
+    // One MCP child per harness session is easier to contain than a daemon
+    // that can outlive the place whose index and permissions it used.
+    env: [{ name: 'CODEGRAPH_TELEMETRY', value: '0' }, { name: 'CODEGRAPH_NO_DAEMON', value: '1' }],
+  };
+}
 
 async function isGitWorktree(cwd: string): Promise<boolean> {
   try {

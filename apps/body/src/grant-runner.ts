@@ -1,5 +1,9 @@
 import { waitForPathRemoval } from './filesystem-change.js';
-import { installedGrantExecutable,isNativeGrantExecutable,resolveGrantCommand } from './grant-script.js';
+import {
+  installedGrantExecutable,
+  isNativeGrantExecutable,
+  resolveGrantCommand,
+} from './grant-script.js';
 /**
  * The command-kind grant runner (Agent Grants, slice 2).
  *
@@ -49,27 +53,44 @@ import { installedGrantExecutable,isNativeGrantExecutable,resolveGrantCommand } 
  * from its output; they never reach the transcript, the ledger, or the model.
  */
 import {
-commandGrantMatches,
-grantScriptKey,
-interpreterScriptArgument,
-parseCommandGrantTarget,
-type CommandGrantRule,
+  commandGrantMatches,
+  grantScriptKey,
+  interpreterScriptArgument,
+  parseCommandGrantTarget,
+  type CommandGrantRule,
 } from '@beeline/api-contract/agent-grants';
 import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
-import { surfaceAllows,type AgentSurface } from '@beeline/api-contract/surface-capabilities';
-import { execFile,spawnSync } from 'node:child_process';
-import { createHash,randomBytes,randomUUID } from 'node:crypto';
-import { chmod,mkdir,readFile,readdir,rename,rm,rmdir,stat,writeFile } from 'node:fs/promises';
-import { createServer,type Server } from 'node:http';
+import { killChildProcessGroup } from './acp-stderr-tail-max-chars.js';
+import { surfaceAllows, type AgentSurface } from '@beeline/api-contract/surface-capabilities';
+import { spawn as spawnCommand, spawnSync, type ChildProcess } from 'node:child_process';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import {
+  chmod,
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  rmdir,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
+import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { dirname,isAbsolute,resolve } from 'node:path';
-import { grantedSandboxDevices,grantedSandboxPaths,wrapAgentCommand,type MaskedPath,type SandboxSessionSpec } from './bwrap-sandbox.js';
+import { dirname, isAbsolute, resolve } from 'node:path';
+import {
+  grantedSandboxDevices,
+  grantedSandboxPaths,
+  wrapAgentCommand,
+  type MaskedPath,
+  type SandboxSessionSpec,
+} from './bwrap-sandbox.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
 import {
-PROVIDER_KEY_ENV_VARS,
-providerKeyStorePath,
-readProviderKeyStore,
-type ProviderKeyProvider,
+  PROVIDER_KEY_ENV_VARS,
+  providerKeyStorePath,
+  readProviderKeyStore,
+  type ProviderKeyProvider,
 } from './provider-key-store.js';
 
 export const GRANT_COMMAND_TIMEOUT_MS = 10 * 60_000;
@@ -109,8 +130,7 @@ export interface GrantRunnerRoom {
   /** Read at each run, because a Room's scratch is only known once its session starts. */
   writePolicy: () => GrantWritePolicy;
   /** The turn in flight, if any: its request id and the identity whose message started it. */
-  turn: () =>
-    { requestId: string; requester?: GrantRunRequester } | undefined;
+  turn: () => { requestId: string; requester?: GrantRunRequester } | undefined;
 }
 
 export interface GrantRunResult {
@@ -155,8 +175,7 @@ async function readOperatorSecrets(
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
     return Object.fromEntries(
       Object.entries(parsed as Record<string, unknown>).filter(
-        (entry): entry is [string, string] =>
-          typeof entry[1] === 'string' && entry[1].length > 0,
+        (entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].length > 0,
       ),
     );
   } catch {
@@ -254,9 +273,7 @@ function joinDirSafe(dir: string, name: string): string {
  * crashed holder leaves a stale lock that any waiter takes over after
  * `SECRETS_LOCK_STALE_MS`.
  */
-export async function acquireOperatorSecretStoreLock(
-  path: string,
-): Promise<() => Promise<void>> {
+export async function acquireOperatorSecretStoreLock(path: string): Promise<() => Promise<void>> {
   const lockDir = `${path}.lock`;
   const owner = operatorSecretsLockToken();
   const deadline = Date.now() + SECRETS_LOCK_TIMEOUT_MS;
@@ -391,16 +408,31 @@ function capOutput(value: string, cap: number): string {
 }
 
 /** Name a rule and mismatch positions without echoing argument or secret values. */
-function closestCommandGrant(grants: readonly Pick<LiveGrant, 'kind' | 'target' | 'grantId' | 'workspaceId' | 'expiresAt' | 'status'>[], workspaceId: string, argv: readonly string[]): string {
+function closestCommandGrant(
+  grants: readonly Pick<
+    LiveGrant,
+    'kind' | 'target' | 'grantId' | 'workspaceId' | 'expiresAt' | 'status'
+  >[],
+  workspaceId: string,
+  argv: readonly string[],
+): string {
   let nearest: { id: string; score: number; fields: string[] } | undefined;
   for (const grant of grants) {
     if (grant.kind !== 'command') {
-      if (grant.workspaceId === workspaceId && (grant.status === 'approved' || grant.status === 'once') && !nearest)
+      if (
+        grant.workspaceId === workspaceId &&
+        (grant.status === 'approved' || grant.status === 'once') &&
+        !nearest
+      )
         nearest = { id: grant.grantId, score: -1, fields: [`kind ${grant.kind}`] };
       continue;
     }
     let rule: CommandGrantRule;
-    try { rule = parseCommandGrantTarget(grant.target); } catch { continue; }
+    try {
+      rule = parseCommandGrantTarget(grant.target);
+    } catch {
+      continue;
+    }
     const fields: string[] = [];
     let score = 0;
     rule.argv.forEach((word, index) => {
@@ -410,10 +442,13 @@ function closestCommandGrant(grants: readonly Pick<LiveGrant, 'kind' | 'target' 
     if (rule.argv.length !== argv.length) fields.push('word count');
     if (grant.workspaceId !== workspaceId) fields.push('workspace');
     if (grant.expiresAt && grant.expiresAt <= Date.now() / 1000) fields.push('expiry');
-    if (grant.status !== 'approved' && grant.status !== 'once') fields.push(`status (${grant.status})`);
+    if (grant.status !== 'approved' && grant.status !== 'once')
+      fields.push(`status (${grant.status})`);
     if (!nearest || score > nearest.score) nearest = { id: grant.grantId, score, fields };
   }
-  return nearest ? ` Closest grant ${nearest.id}: ${nearest.fields.join(', ') || 'not live'} does not match.` : ' No live command grants are available on this host; check expiry or revocation with request_grant mode=list.';
+  return nearest
+    ? ` Closest grant ${nearest.id}: ${nearest.fields.join(', ') || 'not live'} does not match.`
+    : ' No live command grants are available on this host; check expiry or revocation with request_grant mode=list.';
 }
 
 function scrubSecrets(value: string, secrets: ReadonlyMap<string, string>): string {
@@ -436,6 +471,8 @@ export interface GrantCommandRunnerOptions {
 
 export class GrantCommandRunner {
   private readonly rooms = new Map<string, GrantRunnerRoom>();
+  private readonly children = new Map<ChildProcess, string>();
+  private readonly cancelledChildren = new WeakSet<ChildProcess>();
   private readonly resolveSecret: SecretResolver;
 
   constructor(private readonly options: GrantCommandRunnerOptions) {
@@ -451,12 +488,25 @@ export class GrantCommandRunner {
     this.rooms.delete(roomId);
   }
 
+  cancel(roomId: string): void {
+    for (const [child, placeId] of this.children) {
+      if (placeId !== roomId) continue;
+      this.cancelledChildren.add(child);
+      killChildProcessGroup(child, 'SIGKILL');
+    }
+  }
+
   async run(input: { roomId: unknown; argv: unknown; stdin?: unknown }): Promise<GrantRunResult> {
     if (typeof input.roomId !== 'string' || !input.roomId) throw new Error('roomId is required');
     const room = this.rooms.get(input.roomId);
     if (!room) throw new Error('this daemon is not serving that chat');
     const argv = validateGrantArgv(input.argv);
-    if (input.stdin !== undefined && (typeof input.stdin !== 'string' || Buffer.byteLength(input.stdin) > 4096 || input.stdin.includes('\0')))
+    if (
+      input.stdin !== undefined &&
+      (typeof input.stdin !== 'string' ||
+        Buffer.byteLength(input.stdin) > 4096 ||
+        input.stdin.includes('\0'))
+    )
       throw new Error('stdin must be bounded text');
     const stdin = input.stdin as string | undefined;
     const turn = room.turn();
@@ -473,11 +523,24 @@ export class GrantCommandRunner {
     for (const candidate of live.grants) {
       const possible = matchCommandGrant([candidate], room.workspaceId, argv);
       if (!possible) continue;
-      try { await this.checkScriptBinding(candidate, room.cwd, checkEnv, argv, stdin); }
-      catch (error) { bindingFailure ??= error as Error; continue; }
+      try {
+        await this.checkScriptBinding(candidate, room.cwd, checkEnv, argv, stdin);
+      } catch (error) {
+        bindingFailure ??= error as Error;
+        continue;
+      }
       // The probe runs only an installed git: a writable one on PATH could create files before the refusal.
-      if (gitShowPrintsFileContents(room.cwd, checkEnv, argv, installedGrantExecutable(argv[0], room.cwd, checkEnv))) {
-        bindingFailure ??= new Error(`Closest grant ${candidate.grantId}: this command can print file contents or a full patch; it needs its own approval.`);
+      if (
+        gitShowPrintsFileContents(
+          room.cwd,
+          checkEnv,
+          argv,
+          installedGrantExecutable(argv[0], room.cwd, checkEnv),
+        )
+      ) {
+        bindingFailure ??= new Error(
+          `Closest grant ${candidate.grantId}: this command can print file contents or a full patch; it needs its own approval.`,
+        );
         continue;
       }
       match = possible;
@@ -485,7 +548,10 @@ export class GrantCommandRunner {
     }
     if (!match) {
       if (bindingFailure) throw bindingFailure;
-      const history = await this.options.api.execute('listAgentGrantRequests', { agentId: this.options.agentId, roomId: input.roomId });
+      const history = await this.options.api.execute('listAgentGrantRequests', {
+        agentId: this.options.agentId,
+        roomId: input.roomId,
+      });
       const nearest = closestCommandGrant(history.grants ?? live.grants, room.workspaceId, argv);
       throw new Error(
         `no approved command grant matches.${nearest} Check the named mismatch before asking again with request_grant kind=command for this argv.`,
@@ -510,7 +576,8 @@ export class GrantCommandRunner {
       ...(source.PATH ? { PATH: source.PATH } : {}),
       ...(source.HOME ? { HOME: source.HOME } : {}),
       XDG_RUNTIME_DIR: source.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid?.() ?? 0}`,
-      DBUS_SESSION_BUS_ADDRESS: source.DBUS_SESSION_BUS_ADDRESS ?? `unix:path=/run/user/${process.getuid?.() ?? 0}/bus`,
+      DBUS_SESSION_BUS_ADDRESS:
+        source.DBUS_SESSION_BUS_ADDRESS ?? `unix:path=/run/user/${process.getuid?.() ?? 0}/bus`,
       ...(policy.toolEnv ?? {}),
       ...Object.fromEntries(secrets),
     };
@@ -525,8 +592,15 @@ export class GrantCommandRunner {
       : `[beeline-sandbox-started:${randomBytes(16).toString('hex')}]`;
     const spawn = runsOnHost
       ? { command: argv[0]!, args: argv.slice(1) }
-      : roomSandboxCommand(policy, room.cwd, argv, sandboxMarker!, env.XDG_RUNTIME_DIR!,
-          grantedSandboxPaths(live), grantedSandboxDevices(live));
+      : roomSandboxCommand(
+          policy,
+          room.cwd,
+          argv,
+          sandboxMarker!,
+          env.XDG_RUNTIME_DIR!,
+          grantedSandboxPaths(live),
+          grantedSandboxDevices(live),
+        );
     // Re-check after secret resolution and Once consumption, immediately before exec.
     await this.checkScriptBinding(grant, room.cwd, env, argv, stdin);
     const outcome = await new Promise<{
@@ -535,34 +609,51 @@ export class GrantCommandRunner {
       timedOut: boolean;
       output: string;
     }>((resolveRun) => {
-      const child = execFile(
-        spawn.command,
-        spawn.args,
-        {
-          cwd: room.cwd,
-          env,
-          timeout: this.options.timeoutMs ?? GRANT_COMMAND_TIMEOUT_MS,
-          killSignal: 'SIGKILL',
-          maxBuffer: cap * 4,
-          encoding: 'utf8',
-        },
-        (error, stdout, stderr) => {
-          const combined = [stdout, stderr].filter(Boolean).join(stderr && stdout ? '\n' : '');
-          const failure = error as
-            (NodeJS.ErrnoException & { killed?: boolean; signal?: string }) | null;
-          const spawnFailure = Boolean(failure && typeof failure.code === 'string');
-          resolveRun({
-            exitCode: spawnFailure
-              ? null
-              : (child.exitCode ?? (typeof failure?.code === 'number' ? failure.code : 0)),
-            ...(failure?.signal ? { signal: failure.signal } : {}),
-            timedOut: Boolean(failure?.killed && failure?.signal === 'SIGKILL'),
-            output: spawnFailure
-              ? `${combined}${combined ? '\n' : ''}${failure!.message}`
-              : combined,
-          });
-        },
-      );
+      const child = spawnCommand(spawn.command, spawn.args, {
+        cwd: room.cwd,
+        detached: process.platform !== 'win32',
+        timeout: this.options.timeoutMs ?? GRANT_COMMAND_TIMEOUT_MS,
+        killSignal: 'SIGKILL',
+        env,
+        stdio: 'pipe',
+      });
+      const stdout: Buffer[] = [];
+      const stderr: Buffer[] = [];
+      let failure: Error | undefined;
+      const capture = (stream: NodeJS.ReadableStream, chunks: Buffer[], name: string) => {
+        let bytes = 0;
+        stream.on('data', (chunk: Buffer) => {
+          const remaining = Math.max(0, cap * 4 - bytes);
+          if (remaining > 0) chunks.push(chunk.subarray(0, remaining));
+          bytes += chunk.length;
+          if (bytes > cap * 4) {
+            failure ??= new Error(`${name} maxBuffer length exceeded`);
+            killChildProcessGroup(child, 'SIGKILL');
+          }
+        });
+      };
+      capture(child.stdout, stdout, 'stdout');
+      capture(child.stderr, stderr, 'stderr');
+      child.on('error', (error) => {
+        failure = error;
+      });
+      child.on('close', (exitCode, signal) => {
+        this.children.delete(child);
+        const combined = [
+          Buffer.concat(stdout).toString('utf8'),
+          Buffer.concat(stderr).toString('utf8'),
+        ]
+          .filter(Boolean)
+          .join(stdout.length && stderr.length ? '\n' : '');
+        resolveRun({
+          exitCode,
+          ...(signal ? { signal } : {}),
+          timedOut:
+            signal === 'SIGKILL' && child.killed && !this.cancelledChildren.has(child) && !failure,
+          output: failure ? `${combined}${combined ? '\n' : ''}${failure.message}` : combined,
+        });
+      });
+      this.children.set(child, input.roomId as string);
       child.stdin?.end(stdin);
     });
     // The record says what happened: a refused write is the Room boundary doing
@@ -571,13 +662,16 @@ export class GrantCommandRunner {
     if (sandboxMarker && sandboxStarted) {
       outcome.output = outcome.output.replace(`${sandboxMarker}\n`, '').replace(sandboxMarker, '');
     }
-    const deniedPath = outcome.output.match(/['‘“`]([^'’”`\n]+)['’”`][^\n]*(?:Read-only file system|EROFS)/)?.[1]
-      ?? outcome.output.match(/(?:Read-only file system|EROFS)[^\n]*[, :]\s*['‘“`]([^'’”`\n]+)['’”`]/)?.[1];
+    const deniedPath =
+      outcome.output.match(/['‘“`]([^'’”`\n]+)['’”`][^\n]*(?:Read-only file system|EROFS)/)?.[1] ??
+      outcome.output.match(
+        /(?:Read-only file system|EROFS)[^\n]*[, :]\s*['‘“`]([^'’”`\n]+)['’”`]/,
+      )?.[1];
     let deniedTarget = deniedPath ? resolve(room.cwd, deniedPath) : undefined;
     if (deniedTarget) {
       // New files cannot be bind-mounted. Grant the existing parent needed to
       // create them, so the suggested call is sufficient on its own.
-      while (!await stat(deniedTarget).catch(() => undefined)) {
+      while (!(await stat(deniedTarget).catch(() => undefined))) {
         const parent = dirname(deniedTarget);
         if (parent === deniedTarget) break;
         deniedTarget = parent;
@@ -590,7 +684,9 @@ export class GrantCommandRunner {
     const sandboxFailure = !runsOnHost && !sandboxStarted;
     const output = capOutput(
       scrubSecrets(
-        writeRefused ? `${outcome.output.trimEnd()}\n${ROOM_WRITE_REFUSED_NOTE} Call request_grant(${JSON.stringify({ mode: 'request', action: 'Write the blocked host path', kind: 'path', target: deniedTarget ?? room.cwd, capabilities: 'write', reason: deniedTarget ? 'Write the denied path' : 'Write the command working directory', purpose: 'Complete the blocked host operation' })}).` : outcome.output,
+        writeRefused
+          ? `${outcome.output.trimEnd()}\n${ROOM_WRITE_REFUSED_NOTE} Call request_grant(${JSON.stringify({ mode: 'request', action: 'Write the blocked host path', kind: 'path', target: deniedTarget ?? room.cwd, capabilities: 'write', reason: deniedTarget ? 'Write the denied path' : 'Write the command working directory', purpose: 'Complete the blocked host operation' })}).`
+          : outcome.output,
         secrets,
       ),
       cap,
@@ -654,12 +750,23 @@ export class GrantCommandRunner {
     const argument = interpreterScriptArgument(context.argv);
     if (!argument) return;
     const note = ` Closest grant ${grant.grantId}:`;
-    if (stdin !== undefined && !argument.stdin) throw new Error(`${note} stdin is only supported when the interpreter reads its approved code from stdin.`);
-    if (argument.stdin && stdin === undefined) throw new Error(`${note} stdin bytes are unavailable; save them as a script file or approve exact stdin code.`);
-    const bytes = argument.stdin ? Buffer.from(stdin!) : argument.inline !== undefined ? Buffer.from(argument.inline)
-      : await readFile(resolve(context.cwd, argument.path)).catch(() => undefined);
+    if (stdin !== undefined && !argument.stdin)
+      throw new Error(
+        `${note} stdin is only supported when the interpreter reads its approved code from stdin.`,
+      );
+    if (argument.stdin && stdin === undefined)
+      throw new Error(
+        `${note} stdin bytes are unavailable; save them as a script file or approve exact stdin code.`,
+      );
+    const bytes = argument.stdin
+      ? Buffer.from(stdin!)
+      : argument.inline !== undefined
+        ? Buffer.from(argument.inline)
+        : await readFile(resolve(context.cwd, argument.path)).catch(() => undefined);
     if (!bytes) {
-      throw new Error(`${note} script cannot be read at execution cwd ${context.cwd}; check cwd and script path. Ask with request_grant kind=command again.`);
+      throw new Error(
+        `${note} script cannot be read at execution cwd ${context.cwd}; check cwd and script path. Ask with request_grant kind=command again.`,
+      );
     }
     if (!grant.script && argument.direct && isNativeGrantExecutable(bytes)) return;
     if (!grant.script || grant.script.path !== argument.path) {
@@ -695,7 +802,11 @@ function gitShowPrintsFileContents(
   if (objects.length === 0) return false;
   if (!executable || !isAbsolute(executable)) return true;
   for (const word of objects) {
-    const probe = spawnSync(executable, ['cat-file', '-t', '--', word], { cwd, env, encoding: 'utf8' });
+    const probe = spawnSync(executable, ['cat-file', '-t', '--', word], {
+      cwd,
+      env,
+      encoding: 'utf8',
+    });
     if ((probe.stdout ?? '').trim() !== 'commit') return true;
   }
   return false;
@@ -752,7 +863,18 @@ export class GrantRunnerServer {
     private readonly runner: GrantCommandRunner,
     /** The `workspace` tool: the agent's own checkout, made only when it asks. */
     private readonly workspace?: (placeId: string, parentRoomId?: string) => Promise<string>,
-    private readonly session?: (placeId: string, input: { action?: unknown; prepare?: unknown; app?: unknown; tool?: unknown; args?: unknown; operation?: unknown; input?: unknown }) => Promise<unknown>,
+    private readonly session?: (
+      placeId: string,
+      input: {
+        action?: unknown;
+        prepare?: unknown;
+        app?: unknown;
+        tool?: unknown;
+        args?: unknown;
+        operation?: unknown;
+        input?: unknown;
+      },
+    ) => Promise<unknown>,
   ) {}
 
   async start(): Promise<GrantRunnerEndpoint> {
@@ -793,7 +915,10 @@ export class GrantRunnerServer {
       send(401, { error: 'grant runner token required' });
       return;
     }
-    if (request.method !== 'POST' || !['/run', '/workspace', '/session'].includes(request.url ?? '')) {
+    if (
+      request.method !== 'POST' ||
+      !['/run', '/workspace', '/session'].includes(request.url ?? '')
+    ) {
       send(404, { error: 'not found' });
       return;
     }
@@ -802,19 +927,33 @@ export class GrantRunnerServer {
     if (request.url === '/session') {
       try {
         const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-        if (!this.session || typeof body.placeId !== 'string') throw new Error('Session tools unavailable');
+        if (!this.session || typeof body.placeId !== 'string')
+          throw new Error('Session tools unavailable');
         send(200, await this.session(body.placeId, body));
-      } catch (error) { send(400, { error: error instanceof Error ? error.message : String(error) }); }
+      } catch (error) {
+        send(400, { error: error instanceof Error ? error.message : String(error) });
+      }
       return;
     }
     if (request.url === '/workspace') {
       // Every failure is the agent's to read and work around.
       try {
-        const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { placeId?: unknown; parentRoomId?: unknown };
-        if (!this.workspace || typeof body.placeId !== 'string') throw new Error('workspace is unavailable here');
-        send(200, { text: await this.workspace(body.placeId, typeof body.parentRoomId === 'string' ? body.parentRoomId : undefined) });
+        const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
+          placeId?: unknown;
+          parentRoomId?: unknown;
+        };
+        if (!this.workspace || typeof body.placeId !== 'string')
+          throw new Error('workspace is unavailable here');
+        send(200, {
+          text: await this.workspace(
+            body.placeId,
+            typeof body.parentRoomId === 'string' ? body.parentRoomId : undefined,
+          ),
+        });
       } catch (error) {
-        send(200, { text: `The checkout could not be made: ${error instanceof Error ? error.message : String(error)}` });
+        send(200, {
+          text: `The checkout could not be made: ${error instanceof Error ? error.message : String(error)}`,
+        });
       }
       return;
     }

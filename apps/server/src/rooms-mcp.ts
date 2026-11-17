@@ -1,3 +1,4 @@
+import { queuedContextSql } from './agent-command-context.js';
 import { OPERATOR_OWNER_ID } from '@beeline/api-contract/daemon';
 import { LOCAL_RECEIVER_RECOVERY,MCP_STARTER_ROUTINE,MUSE_SETUP_RECIPE,externalAgentRules,messageSearchTerms } from '@beeline/api-contract/phone';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -252,7 +253,7 @@ export class RoomsMcp {
       `WITH readable AS (${READABLE})
        SELECT mention.seq::text seq,m.id,m.room_id,r.name room_name,m.author_id,beeline_room_handle(i.id,m.room_id) author_handle,i.name author_name,
          m.created_at,left(m.text,16000) text,length(m.text)>16000 truncated,m.attachments,
-         (SELECT command.message->>'institutionalContext' FROM agent_commands command WHERE command.agent_id=$1
+         (SELECT ${queuedContextSql('command')} FROM agent_commands command WHERE command.agent_id=$1
            AND command.source_message_id=m.id ORDER BY command.created_at DESC LIMIT 1) "institutionalContext"
        FROM rooms_mcp_mentions mention
        JOIN readable r ON r.id=mention.room_id

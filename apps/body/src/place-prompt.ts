@@ -125,8 +125,9 @@ const RESUME_KINDS = new Set(['grant-decided', 'connector-offer-decided', 'squir
 
 /**
  * What the session is told for one queue item: who asked, where it came from,
- * where the answer goes, and the message itself. Anything else the agent needs
- * (the conversation, the brief, members, memory) it reads with its own tools.
+ * where the answer goes, and the message itself, with the queue-time context:
+ * memory, then what this session has not seen (the bounded window once for a
+ * fresh session, otherwise only new messages and a changed brief or member list).
  */
 export function itemPrompt(item: AgentCommand, options: {
   names: ReadonlyMap<string, string>;
@@ -134,6 +135,8 @@ export function itemPrompt(item: AgentCommand, options: {
   notes?: readonly string[];
   /** Session rules for a harness that does not keep a system prompt. */
   turnPrefix?: string;
+  /** The session has not received the recent window yet. */
+  fresh?: boolean;
 }): string {
   const source = item.source;
   const author = inboxItemAuthorName(source, options.names);
@@ -143,6 +146,7 @@ export function itemPrompt(item: AgentCommand, options: {
   const returnRoomName = item.returnRoomName ?? options.names.get(item.returnRoomId) ?? item.returnRoomId;
   const sameRoom = item.returnRoomId === item.roomId;
   const text = body.trim() || '(shared attachments)';
+  const context = options.fresh ? source.conversationWindow ?? source.conversationContext : source.conversationContext;
   const answerTo = sameRoom
     ? `Your final reply is posted here (${item.roomId}).`
     : `Your final reply is posted to ${returnRoomName}.`;
@@ -154,6 +158,7 @@ export function itemPrompt(item: AgentCommand, options: {
     request,
     'Use this requestId with tools that ask for one.',
     ...(source.institutionalContext ? [source.institutionalContext] : []),
+    ...(context ? [context] : []),
     ...(isBackgroundCommand(item.reason)
       ? ['This is background context. If nothing has changed or needs action, call no_reply_needed and finish without a public reply. Human requests in this batch still need an answer.'] : []),
     `[message id: ${source.id}]`,
@@ -178,6 +183,6 @@ export function offlineBatchPrompt(items: readonly AgentCommand[], options: Para
     'Answer each asker in one combined reply. Follow the newest instructions when earlier discussion has moved on.',
     'The offline note, when present, is private context for you.',
     ...(options.notes?.length ? ['Session setup notes:', ...options.notes.map(note => `- ${note}`)] : []),
-    ...visible.map(item => itemPrompt(item, { names: options.names })),
+    ...visible.map((item, index) => itemPrompt(item, { names: options.names, fresh: index === 0 && options.fresh })),
   ].join('\n\n');
 }

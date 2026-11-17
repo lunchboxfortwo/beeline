@@ -165,6 +165,25 @@ export function rewriteGrantedHostRoutes(
   return rewritten;
 }
 
+/** Session MCP wires for granted host routes. */
+export function grantedHostRouteWires(
+  granted: readonly string[],
+  hostHome: string,
+  declarations: Record<string, Record<string, unknown>> = {},
+  resourceAuthFile?: string,
+): Array<{ name: string; command: string; args: string[]; env?: Array<{ name: string; value: string }> }> {
+  const routes = rewriteGrantedHostRoutes(declarations, granted, hostHome, resourceAuthFile);
+  return Object.entries(routes).flatMap(([name, declaration]) => {
+    const command = (typeof declaration.command === 'string' && declaration.command) ||
+      (typeof declaration.cmd === 'string' && declaration.cmd) || '';
+    if (!command) return [];
+    const envRecord = recordValue(declaration.env) ?? recordValue(declaration.envs) ?? {};
+    const env = Object.entries(envRecord).flatMap(([envName, value]) =>
+      typeof value === 'string' ? [{ name: envName, value }] : []);
+    return [{ name, command, args: stringArray(declaration.args), ...(env.length ? { env } : {}) }];
+  });
+}
+
 export function mergeTomlHostRoutes(
   existing: string | undefined,
   routes: Record<string, Record<string, unknown>>,

@@ -7,6 +7,9 @@ import { afterEach,expect,it,vi } from 'vitest';
 import type { AcpClient } from './acp.js';
 import type { BodyConfig } from './config.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
+import { GrantCommandRunner } from './grant-runner.js';
+import { readGrantScript } from './read-only-mcp-agent-grant-deps.js';
+import { parseCommandGrantTarget } from '@beeline/api-contract/agent-grants';
 import { freeAgentPiConfig } from './free-agent-vm.js';
 import { PlaceSession } from './place-session.js';
 import { sharedSquireMcpClient } from './squire-mcp-client.js';
@@ -38,7 +41,7 @@ async function fixture(corner = false) {
     isAlive: true, startProcess: vi.fn(async () => {}), stopProcess: vi.fn(async () => {}),
     sessionNew: vi.fn(async () => ({ sessionId: 'live', raw: { configOptions: [
       { id: 'model', category: 'model', currentValue: 'default-model', options: [{ value: 'default-model' }] },
-    ] } })), sessionPrompt: prompt, canLoadSession: () => false,
+    ] } })), sessionPrompt: prompt, canLoadSession: () => false, canPromptWithImages: () => false,
   });
   const execute = vi.fn((name: string) => {
     if (name.startsWith('get') || name === 'listAgentGrants') expect(delivered).toBe(true);
@@ -65,7 +68,9 @@ it('starts and answers before optional reads begin, even if none of them resolve
   expect(f.execute).not.toHaveBeenCalled();
   const item = { ...f.item, source: { ...f.item.source,
     institutionalContext: '- Procedure buy-for-wife (read facet:procedure): Buy through the Japanese proxy' } };
-  expect(await f.session.deliver(item, [])).toMatchObject({ text: 'The answer' });
+  f.prompt.mockResolvedValueOnce({ agentText: 'The answer', stopReason: 'end_turn', updates: [], toolCalls: [],
+    tokenUsage: { inputTokens: 9, outputTokens: 2 } } as never);
+  expect(await f.session.deliver(item, [])).toMatchObject({ text: 'The answer', tokenUsage: { inputTokens: 9, outputTokens: 2 } });
   expect(f.prompt.mock.calls[0]?.[1]).toContain('Procedure buy-for-wife');
   expect(f.execute).toHaveBeenCalledWith('getAgentConfiguration', expect.anything());
   expect(f.session.resources.read()).toMatchObject({ status: { configuration: 'loading', grants: 'loading' } });
@@ -365,6 +370,146 @@ it('starts and answers without awaiting an optional model setter', async () => {
   await f.session.dispose();
 });
 
+it('Stop ends a harness that ignores session/cancel, with the tool it started, and the next item starts fresh', async () => {
+  const f = await fixture();
+  const pidFile = join(f.config.workspaceRoot!, 'tool.pid');
+  // Answers setup, ignores session/cancel, and holds a long-running child tool.
+  const harness = `
+const { spawn } = require('node:child_process');
+const fs = require('node:fs');
+require('node:readline').createInterface({ input: process.stdin }).on('line', line => {
+  const request = JSON.parse(line);
+  const reply = result => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }) + '\\n');
+  if (request.method === 'initialize') reply({ protocolVersion: 1, agentCapabilities: {} });
+  if (request.method === 'session/new') reply({ sessionId: 'fixture' });
+  if (request.method === 'session/prompt') fs.writeFileSync(${JSON.stringify(pidFile)}, String(spawn('sleep', ['300']).pid));
+});`;
+  const { AcpClient: RealAcpClient } = await import('./acp.js');
+  const clients: AcpClient[] = [];
+  f.spawn.mockImplementation((options => {
+    const client = new RealAcpClient({ ...options, agentCommand: process.execPath, agentArgs: ['-e', harness],
+      inheritProcessEnv: false, resourceScope: 'none' });
+    clients.push(client);
+    return client;
+  }) as never);
+  await f.session.start(f.item);
+  const answering = f.session.deliver(f.item, []);
+  const settled = answering.then(() => 'answered', () => 'ended');
+  await vi.waitFor(async () => expect(await readFile(pidFile, 'utf8').catch(() => '')).not.toBe(''));
+  const toolPid = Number(await readFile(pidFile, 'utf8'));
+  f.session.cancel();
+  expect(await settled).toBe('ended');
+  await vi.waitFor(() => expect(() => process.kill(toolPid, 0)).toThrow());
+  expect(clients[0]!.isAlive).toBe(false);
+  await f.session.start(f.item);
+  expect(clients).toHaveLength(2);
+  expect(f.session.alive).toBe(true);
+  await f.session.dispose();
+});
+
+it('brings another agent\'s push into an existing thread checkout before the next turn', async () => {
+  const f = await fixture(true);
+  const root = f.config.workspaceRoot!;
+  const git = (cwd: string, ...args: string[]) => execFileAsync('git', ['-C', cwd, '-c', 'user.name=T', '-c', 'user.email=t@t', ...args]);
+  const origin = join(root, 'origin.git'), other = join(root, 'other');
+  const branch = 'feature/corner-room';
+  await execFileAsync('git', ['init', '--bare', '-b', branch, origin]);
+  await execFileAsync('git', ['clone', `file://${origin}`, other]);
+  await git(other, 'checkout', '-b', branch);
+  await git(other, 'commit', '--allow-empty', '-m', 'first');
+  await git(other, 'push', 'origin', branch);
+  const folder = f.session.folder();
+  await mkdir(dirname(folder), { recursive: true });
+  await execFileAsync('git', ['clone', '-b', branch, `file://${origin}`, folder]);
+  await git(other, 'commit', '--allow-empty', '-m', 'second agent push');
+  await git(other, 'push', 'origin', branch);
+  await f.session.start(f.item);
+  await f.session.deliver(f.item, []);
+  expect((await git(folder, 'log', '-1', '--format=%s')).stdout.trim()).toBe('second agent push');
+  // A failed refresh still delivers, with one line saying so.
+  await git(folder, 'remote', 'set-url', 'origin', `file://${join(root, 'missing.git')}`);
+  await f.session.deliver(f.item, []);
+  expect(f.prompt.mock.calls[1]?.[1]).toContain(`Your branch ${branch} could not be refreshed from origin`);
+  await f.session.dispose();
+});
+
+it('sends a received picture to an image-capable harness as image content, bounded per image', async () => {
+  const f = await fixture();
+  Object.assign(f.client, { canPromptWithImages: () => true });
+  const small = Buffer.from('small-png'), large = Buffer.alloc(5 * 1024 * 1024 + 1);
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(url.endsWith('large') ? large : small,
+    { headers: { 'content-type': 'image/png' } })));
+  try {
+    await f.session.start(f.item);
+    const attachments = [
+      { url: 'https://synthetic.test/v1/media/small', name: 'keyboard.png', mimeType: 'image/png' },
+      { url: 'https://synthetic.test/v1/media/large', name: 'scan.png', mimeType: 'image/png' },
+    ];
+    await f.session.deliver({ ...f.item, source: { ...f.item.source, attachments } } as AgentCommand, []);
+    const sent = f.prompt.mock.calls[0]?.[1] as unknown as { type: string; text?: string; data?: string }[];
+    expect(sent[0]).toMatchObject({ type: 'text', text: expect.stringContaining('keyboard.png') });
+    expect(sent.slice(1)).toEqual([{ type: 'image', data: small.toString('base64'), mimeType: 'image/png' }]);
+  } finally {
+    vi.unstubAllGlobals();
+    await f.session.dispose();
+  }
+});
+
+it('mounts the CodeGraph tools and the operator host MCP routes into the session', async () => {
+  const f = await fixture(true);
+  f.config.agentKind = 'claude';
+  f.config.codegraphCommand = '/opt/codegraph';
+  await writeFile(join(f.config.operatorHome!, '.claude.json'), JSON.stringify({ mcpServers: {
+    linear: { command: 'linear-mcp', args: ['--stdio'] },
+  } }));
+  await f.session.start(f.item);
+  const servers = (f.client.sessionNew.mock.calls[0] as unknown as [{ mcpServers: { name: string; command: string; args?: string[]; env?: { name: string; value: string }[] }[] }])[0].mcpServers;
+  expect(servers.find(server => server.name === 'codegraph')).toMatchObject({ command: '/opt/codegraph',
+    args: ['serve', '--mcp', '--path', f.session.folder()] });
+  const linear = servers.find(server => server.name === 'linear');
+  expect(linear?.env).toEqual(expect.arrayContaining([{ name: 'BEELINE_RESOURCE_TARGET', value: 'linear' }]));
+  await f.session.dispose();
+});
+
+it('gives a fresh session the recent window once, then only what it has not seen', async () => {
+  const f = await fixture();
+  const item = (id: string, delta?: string) => ({ ...f.item, id, turnRequestId: id, source: { ...f.item.source, id,
+    ...(delta ? { conversationContext: delta } : {}), conversationWindow: `Window before ${id}` } }) as AgentCommand;
+  await f.session.start(f.item);
+  await f.session.deliver(item('one', 'Delta before one'));
+  await f.session.deliver(item('two', 'Delta before two'));
+  await f.session.deliver(item('three'));
+  const sent = f.prompt.mock.calls.map(call => String((call as unknown[])[1]));
+  expect(sent[0]).toContain('Window before one');
+  expect(sent[0]).not.toContain('Delta before one');
+  expect(sent[1]).toContain('Delta before two');
+  expect(sent[1]).not.toContain('Window before');
+  expect(sent[2]).not.toContain('Window before');
+  f.session.stale = true;
+  await f.session.start(f.item);
+  await f.session.deliver(item('four', 'Delta before four'));
+  expect(String((f.prompt.mock.calls[3] as unknown[])[1])).toContain('Window before four');
+  await f.session.dispose();
+});
+
+it('applies a changed effort and Fast Mode when the selected model already runs', async () => {
+  const f = await fixture();
+  f.config.agentKind = 'claude';
+  f.session.resources.context.configuration = { model: 'default-model', effort: 'high', fastMode: true, commands: [], yoloMode: false };
+  f.client.sessionNew.mockResolvedValue({ sessionId: 'live', raw: { configOptions: [
+    { id: 'model', category: 'model', currentValue: 'default-model', options: [{ value: 'default-model' }] },
+    { id: 'effort', category: 'effort', currentValue: 'low', options: [{ value: 'low' }, { value: 'high' }] },
+    { id: 'fast-mode', category: 'model_config', currentValue: 'off', options: [{ value: 'off' }, { value: 'on' }] },
+  ] } });
+  const setter = vi.fn(async () => ({}));
+  Object.assign(f.client, { setConfigOption: setter });
+  await f.session.start();
+  await vi.waitFor(() => expect(setter).toHaveBeenCalledWith('live', 'fast-mode', 'on'));
+  expect(setter).toHaveBeenCalledWith('live', 'effort', 'high');
+  expect(setter).not.toHaveBeenCalledWith('live', 'model', expect.anything());
+  await f.session.dispose();
+});
+
 it('delivers an 18-hour offline backlog as one prompt without requiring steering', async () => {
   const f = await fixture();
   const offlineSeconds = 18 * 3600;
@@ -419,4 +564,99 @@ it('rejects a hosted item without its credential before launching ACP', async ()
   await expect(f.session.start(f.item)).rejects.toThrow('Owned model local intent is unavailable');
   expect(f.spawn).not.toHaveBeenCalled();
   await f.session.dispose();
+});
+
+it('mounts Room CodeGraph at the cached workspace checkout', async () => {
+  const f = await fixture();
+  const root = f.config.workspaceRoot!;
+  const source = join(root, 'source');
+  await execFileAsync('git', ['init', '--initial-branch=main', source]);
+  await writeFile(join(source, 'README.md'), 'Room repository contents');
+  await execFileAsync('git', ['-C', source, 'add', 'README.md']);
+  await execFileAsync('git', ['-C', source, '-c', 'user.name=T', '-c', 'user.email=t@t', 'commit', '-m', 'initial']);
+  const repository = { resolution: 'repository', key: 'owner/repo', remote: `file://${source}`, targetBranch: 'main' };
+  f.execute.mockImplementation(name => name === 'getRoomRepositoryState' ? Promise.resolve(repository) : new Promise(() => {}));
+  f.session.resources.context.repository = repository;
+  const ready = await prepareWorkspace({ api: f.session.options.api, config: f.config,
+    supervisorRoot: root, workspaceId: 'workspace', agent: f.session.options.agent, placeId: 'room' });
+  f.config.codegraphCommand = '/opt/codegraph';
+  await f.session.start(f.item);
+  const servers = (f.client.sessionNew.mock.calls[0] as unknown as [{ mcpServers: { name: string; args: string[] }[] }])[0].mcpServers;
+  const args = servers.find(server => server.name === 'codegraph')!.args;
+  const path = args[args.indexOf('--path') + 1]!;
+  expect(ready).toContain(`Checkout ready at ${path} on main (read-only)`);
+  expect(path).not.toBe(f.session.folder());
+  expect(await readFile(join(path, 'README.md'), 'utf8')).toBe('Room repository contents');
+  expect(args).toContain('--no-watch');
+  await f.session.dispose();
+});
+
+it('delivers a cold Room with CodeGraph before optional repository reads resolve', async () => {
+  const f = await fixture();
+  f.config.codegraphCommand = '/opt/codegraph';
+  await f.session.start(f.item);
+  expect(f.execute).not.toHaveBeenCalled();
+  const servers = (f.client.sessionNew.mock.calls[0] as unknown as [{ mcpServers: { name: string; args: string[] }[] }])[0].mcpServers;
+  expect(servers.find(server => server.name === 'codegraph')!.args).toEqual([
+    'serve', '--mcp', '--path', f.session.folder(), '--no-watch',
+  ]);
+  expect(await f.session.deliver(f.item)).toMatchObject({ text: 'The answer' });
+  expect(f.session.resources.read()).toMatchObject({ status: { repository: 'loading' } });
+  await f.session.dispose();
+});
+
+it.runIf(process.platform !== 'win32')('Stop kills granted commands and descendants for its place and preserves another place', async () => {
+  const f = await fixture(true);
+  const root = f.config.workspaceRoot!;
+  const worker = 'require("node:fs").writeFileSync("worker.pid", String(process.pid)); setInterval(() => {}, 1000)';
+  const command = `require("node:fs").writeFileSync(process.argv[1], String(process.pid)); require("node:child_process").spawn(process.execPath, ['-e', ${JSON.stringify(worker)}], { stdio: 'ignore' }); setInterval(() => {}, 1000)`;
+  const argv = ['node', '-e', command, 'running.pid'];
+  const script = readGrantScript(parseCommandGrantTarget(JSON.stringify(argv)), {
+    roomId: 'room', scriptRoots: [root], scriptEnv: { PATH: process.env.PATH }, execute: async () => ({}),
+  });
+  const grants = [{ grantId: 'approved', workspaceId: 'workspace', kind: 'command',
+    target: JSON.stringify(argv), status: 'approved', requestedBy: 'owner', script }];
+  const runner = new GrantCommandRunner({ agentId: 'agent', env: { PATH: process.env.PATH, HOME: root },
+    api: { execute: async (operation: string) => operation === 'listTurnAgentGrants' ? { grants } : {} } as never });
+  f.session.options.cancelGrantedCommands = () => runner.cancel('room');
+  Object.assign(f.client, { sessionCancel: vi.fn() });
+  await f.session.start(f.item);
+  const runs: Promise<unknown>[] = [];
+  const pids: number[] = [];
+  const workers: number[] = [];
+  const running = async (pid: number) => {
+    try {
+      const { stdout } = await execFileAsync('ps', ['-o', 'stat=', '-p', String(pid)]);
+      return stdout.trim() !== '' && !stdout.trim().startsWith('Z');
+    } catch (error) {
+      if ((error as { code?: unknown }).code === 1) return false;
+      throw error;
+    }
+  };
+  try {
+    for (const place of ['room', 'room', 'other']) {
+      const cwd = join(root, `command-${runs.length}`);
+      await mkdir(cwd);
+      runner.register(place, { workspaceId: 'workspace', cwd,
+        writePolicy: () => ({ surface: 'corner' }), turn: () => ({ requestId: 'request' }) });
+      runs.push(runner.run({ roomId: place, argv }));
+      await vi.waitFor(async () => expect(await readFile(join(cwd, 'running.pid'), 'utf8').catch(() => '')).not.toBe(''));
+      pids.push(Number(await readFile(join(cwd, 'running.pid'), 'utf8')));
+      await vi.waitFor(async () => expect(await readFile(join(cwd, 'worker.pid'), 'utf8').catch(() => '')).not.toBe(''));
+      workers.push(Number(await readFile(join(cwd, 'worker.pid'), 'utf8')));
+    }
+    for (const pid of [...pids, ...workers]) expect(await running(pid)).toBe(true);
+    f.session.cancel();
+    await vi.waitFor(async () => {
+      for (const pid of [...pids.slice(0, 2), ...workers.slice(0, 2)]) expect(await running(pid)).toBe(false);
+    });
+    const stopped = await Promise.all(runs.slice(0, 2));
+    expect(stopped).toEqual([expect.objectContaining({ signal: 'SIGKILL' }), expect.objectContaining({ signal: 'SIGKILL' })]);
+    expect(await running(pids[2]!)).toBe(true);
+    expect(await running(workers[2]!)).toBe(true);
+  } finally {
+    for (const pid of [...pids, ...workers]) { try { process.kill(pid, 'SIGKILL'); } catch {} }
+    await Promise.allSettled(runs);
+    await f.session.dispose();
+  }
 });

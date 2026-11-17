@@ -1,5 +1,6 @@
 import { legacyCommandPayload } from './messaging-cutover.js';
-import { attachQueuedInstitutionalContext } from './agent-command-context.js';
+import { parseAgentAccessPolicy,senderMayAddressAgent } from '@beeline/api-contract/agent-access';
+import { attachQueuedConversation,attachQueuedInstitutionalContext } from './agent-command-context.js';
 import { initializeThreadImplementer } from './corner-lifecycle.js';
 import { sendMessage } from './agent-messaging.js';
 import { recordedMessageRoute } from './message-route.js';
@@ -414,10 +415,6 @@ export { commandInbox,queueCornerMergeConflict,readAgentCommands,reconcileCorner
 export { reconcileConfiguredCornerReviewers } from './agent-command-reconcile-configured-corner-reviewers.js';
 export { authorizeCommandOutput,CORNER_AGENT_UNREACHABLE_CARD_TYPE,CORNER_CHECKS_BLOCKED_CARD_TYPE,CORNER_MERGE_YES_CARD_TYPE,CORNER_REVIEW_DEADLOCK_CARD_TYPE,dismissAgentCommandWakes,selectMcpMessage } from './agent-command-route-agent-result.js';
 
-
-
-
-
 export { queueMessage as createAgentCommand };
 
 
@@ -445,7 +442,7 @@ export type QueuedOrder = {
   parent?: CommandRow; id?: string;
 };
 type Member = { id: string; kind: 'human' | 'agent'; handle: string | null; name: string;
-  callback: string | null; client_id: string | null; client_name: string | null; mcp: boolean; starter: string | null; owner_id: string | null };
+  callback: string | null; client_id: string | null; client_name: string | null; mcp: boolean; starter: string | null; owner_id: string | null; access_policy: unknown };
 type Chat = { id: string; parent_id: string | null; archived: boolean; direct_participants: string[] | null;
   commander: MessageRoute['from'] | null;
   workflow_owner_id:string|null;
@@ -483,7 +480,7 @@ export async function queueMessage(database: SqlDatabase, raw: QueuedPost | Queu
          SELECT member.identity_id id,identity.kind,identity.name,
            beeline_workspace_handle(identity.id,member.workspace_id) handle,
            COALESCE(app.callback_url,client.callback_url) callback,client.id client_id,client.name client_name,app.member_id IS NOT NULL mcp,
-           starter.starter_role starter,worker.owner_id
+           starter.starter_role starter,worker.owner_id,worker.access_policy
          FROM rooms room JOIN memberships member ON member.room_id=COALESCE(room.parent_id,room.id)
            AND member.removed_at IS NULL
          JOIN identities identity ON identity.id=member.identity_id
@@ -663,11 +660,14 @@ async function postMessage(db: SqlDatabase, input: PublicPost, chat: Chat): Prom
     ...(human && !explicit.length && solo ? [solo] : []),
   ].filter(member => member.kind === 'agent' && member.id !== input.authorId && member.id !== SYSTEM_IDENTITY_ID).map(member => [member.id, member])).values()];
   const commands: CommandRow[] = [], woken: string[] = [];
-  for (const member of targets) {
+  const avatarJob = human && /^(?:@[^\s]+\s+)?\/draw-avatar(?:\s|$)/i.test(input.text.trim());
+  // The owner's creator/allowlist setting decides which people address a hosted agent; others are not its targets.
+  for (const member of targets.filter(member => !human || member.access_policy == null ||
+    senderMayAddressAgent(parseAgentAccessPolicy(member.access_policy), input.authorId, member.owner_id ?? undefined))) {
     const item = await insertAgentCommand(db, { roomId: chat.id, agentId: member.id, sourceMessageId: id,
       reason: human ? chat.direct_participants ? 'direct_message' : 'human_tag' : 'agent_tag', parent: input.parent,
       inheritPrivatePayload: false,
-      avatarJob: human && /^(?:@[^\s]+\s+)?\/draw-avatar(?:\s|$)/i.test(input.text.trim()),
+      avatarJob,
     }, { ...chat, source: { text: input.text, author_id: input.authorId, room_id: chat.id, system_event: undefined, attachments: input.attachments, presentation: 'message',reply_to_message_id:saved.reply_to_message_id } });
     if (item) commands.push(item);
     woken.push(member.handle ?? member.id);
@@ -680,6 +680,13 @@ async function postMessage(db: SqlDatabase, input: PublicPost, chat: Chat): Prom
 
 /** Appending is private to the entry above; it never checks membership again. */
 async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, chat: Chat): Promise<CommandRow | undefined> {
+  const sender = chat.members.find(member => member.id === (input.privatePayload?.authorId ?? chat.source?.author_id));
+  const target = chat.members.find(member => member.id === input.agentId);
+  if (sender?.kind === 'human' && target?.access_policy != null &&
+    !senderMayAddressAgent(parseAgentAccessPolicy(target.access_policy), sender.id, target.owner_id ?? undefined))
+    throw wall('access', 'the agent owner’s creator-only or people-allowlist policy does not allow this sender to address the agent');
+  if (input.avatarJob && sender?.kind === 'human' && target?.access_policy != null && target.owner_id !== sender.id)
+    throw wall('membership', 'only the agent owner may generate its avatar (access denied)');
   const id = input.id ?? (input.sourceMessageId
     ? hash(`queue:${chat.id}:${input.agentId}:${input.sourceMessageId}:${input.reason}`)
     : randomBytes(32).toString('hex'));
@@ -792,7 +799,7 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
   )).rows[0] ?? (await db.query<CommandRow>(
     'SELECT * FROM agent_commands WHERE id=$1',[id],
   )).rows[0];
-  if (saved) saved = await attachQueuedInstitutionalContext(db, saved);
+  if (saved) saved = await attachQueuedConversation(db, await attachQueuedInstitutionalContext(db, saved), chat.members);
   if (saved && chat.parent_id && ['corner_objective','human_tag'].includes(input.reason))
     await initializeThreadImplementer(db, chat.id);
   if (saved?.state === 'pending' && saved.action === 'input' && db.ownedModelCredentials &&

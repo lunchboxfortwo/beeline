@@ -75,6 +75,15 @@ it('lets a committed reply finish returning while its harness continues, across 
   expect(f.execute.mock.calls.filter(([name]) => name === 'postRoomMessage')).toEqual([]);
 });
 
+it('writes the harness-reported token usage on the turn receipt after the answer', async () => {
+  const f = await fixture(), item = f.item('tokens');
+  harness.deliver.mockResolvedValueOnce({ text: 'answer', steps: [], toolCalls: [], cleanup: async () => {},
+    tokenUsage: { inputTokens: 1200, outputTokens: 80 } });
+  f.changed([item]);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postAgentTurnReceipt', expect.objectContaining({
+    requestId: 'tokens', inputTokens: 1200, totalInputTokens: 1200, outputTokens: 80 })));
+});
+
 it('still cancels Stop while a tool call is running, without mistaking another completed item for its reply', async () => {
   const f = await fixture(), item = f.item('stopped');
   const answering = deferred<Record<string, unknown>>();

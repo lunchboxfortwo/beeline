@@ -100,13 +100,19 @@ export async function materializeCornerWorktree(input: {
   return { path, gitCommonDir };
 }
 
+export function roomCheckoutPath(input: { roomId: string; supervisorRoot: string; remote: string; targetBranch: string }): string {
+  const remote = roomCheckoutRemote(input.remote);
+  const checkoutId = createHash('sha256').update(`${input.roomId}\0${remote}\0${input.targetBranch}`).digest('hex').slice(0, 24);
+  return resolve(input.supervisorRoot, 'beeline', 'room-checkouts', checkoutId);
+}
+
 /** A read-only copy of a Room's repository at its target branch. */
 export async function materializeRoomCheckout(input: {
   roomId: string; workspaceId: string; supervisorRoot: string; remote: string; targetBranch: string; token?: string;
 }): Promise<string> {
   const remote = roomCheckoutRemote(input.remote);
-  const checkoutId = createHash('sha256').update(`${input.roomId}\0${remote}\0${input.targetBranch}`).digest('hex').slice(0, 24);
-  const path = resolve(input.supervisorRoot, 'beeline', 'room-checkouts', checkoutId);
+  const path = roomCheckoutPath(input);
+  const checkoutId = basename(path);
   await rememberStorageOwner(input.supervisorRoot, {
     workspaceId: input.workspaceId, roomId: input.roomId, kind: 'room-checkouts', itemId: checkoutId,
   });

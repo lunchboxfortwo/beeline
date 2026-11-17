@@ -626,7 +626,7 @@ it('routes a direct message without redundant tags or a presence row', async () 
   }
 });
 
-it('routes member requests regardless of creator policy while removed targets remain inaccessible', async () => {
+it('does not route a removed target or a human the agent access policy refuses', async () => {
   await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [
     R,
     B,
@@ -639,7 +639,14 @@ it('routes member requests regardless of creator policy while removed targets re
     A,
   ]);
   await rootFixture.phone.execute('sendRoomMessage', { roomId: R, text: '@hoots' }, P);
+  expect(await commands(A)).toEqual([]);
+  await rootFixture.phone.execute('sendRoomMessage', { roomId: R, text: '@hoots' }, H);
   expect(await commands(A)).toHaveLength(1);
+  await rootFixture.db.query(`UPDATE agents SET access_policy=$2::jsonb WHERE agent_id=$1`, [
+    A, JSON.stringify({ type: 'allowlist', allow: [P] }),
+  ]);
+  await rootFixture.phone.execute('sendRoomMessage', { roomId: R, text: '@hoots again' }, P);
+  expect(await commands(A)).toHaveLength(2);
 });
 
 it('deduplicates human writes, deliveries and final results', async () => {
