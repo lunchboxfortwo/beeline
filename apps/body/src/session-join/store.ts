@@ -6,6 +6,7 @@ import { chmodSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, st
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentId } from './agents.js';
+import { sessionAgentBehavior } from '../agent-command.js';
 
 /** One joined session: the Beeline member it acts as, and how it is reached on this machine. */
 export interface JoinedSession {
@@ -126,7 +127,7 @@ export function updateState<T>(dir: string, change: (state: State) => T): Promis
 }
 
 export function sessionKey(agent: AgentId, cwd: string, sessionId?: string): string {
-  return `${agent}:${agent === 'codex' && sessionId ? sessionId : cwd}`;
+  return `${agent}:${sessionAgentBehavior(agent).memberPerSession && sessionId ? sessionId : cwd}`;
 }
 
 function safe(value: string): string {

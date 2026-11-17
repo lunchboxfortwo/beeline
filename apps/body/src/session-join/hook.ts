@@ -52,7 +52,7 @@ export interface HookInput {
 
 /** The joined record this hook's session acts as: its own conversation first, else its folder's. */
 export function joinedFor(sessions: JoinedSession[], agent: AgentId, sessionId: string, cwd: string): JoinedSession | undefined {
-  return sessions.find(s => s.agent === agent && s.sessionId === sessionId) ?? sessions.find(s => s.agent === agent && (agent === 'codex' ? s.key === sessionKey(agent, cwd, sessionId) : s.cwd === cwd));
+  return sessions.find(s => s.agent === agent && s.sessionId === sessionId) ?? sessions.find(s => s.agent === agent && (sessionAgentBehavior(agent).memberPerSession ? s.key === sessionKey(agent, cwd, sessionId) : s.cwd === cwd));
 }
 
 /** Records the hook and returns what to print, or '' to print nothing. */

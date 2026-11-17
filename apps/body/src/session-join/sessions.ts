@@ -54,7 +54,7 @@ export function liveSessions(sources: Sources): LiveSession[] {
 export function findSession(joined: JoinedSession, live: LiveSession[], others: JoinedSession[] = []): LiveSession | undefined {
   const exact = live.find(s => s.agent === joined.agent && s.sessionId === joined.sessionId);
   if (exact) return exact;
-  if (joined.agent === 'codex' && joined.sessionId && joined.key === sessionKey(joined.agent, joined.cwd, joined.sessionId)) return undefined;
+  if (sessionAgentBehavior(joined.agent).memberPerSession && joined.sessionId && joined.key === sessionKey(joined.agent, joined.cwd, joined.sessionId)) return undefined;
   const claimed = (s: LiveSession) => others.some(o => o.key !== joined.key && o.agent === s.agent && o.sessionId === s.sessionId);
   return live
     .filter(s => s.agent === joined.agent && s.cwd === joined.cwd && !claimed(s))

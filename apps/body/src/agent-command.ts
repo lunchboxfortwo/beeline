@@ -55,6 +55,8 @@ interface SessionAgentBehavior {
   mailEvents?: readonly string[];
   hookOutput?: Partial<Record<'start' | 'prompt' | 'tool' | 'stop', string>>;
   pollText?: boolean;
+  /** Each session of this harness is its own Beeline member, keyed by its session id. */
+  memberPerSession?: boolean;
 }
 
 export const CURSOR_ACP_BRIDGE_LABEL = 'cursor-acp-bridge';
@@ -86,7 +88,7 @@ export const AGENT_BEHAVIORS: Readonly<Record<AgentKind, AgentBehavior>> = {
     label: 'Codex', cliSignIn: 'codex', roomTomlDefaults: true, codexCacheBindings: true, fastMode: true,
     quotaCredential: { homeEnv: 'CODEX_HOME', directory: '.codex', file: 'auth.json' },
     importedMcp: { format: 'toml', source: '.codex/config.toml', homeEnv: 'CODEX_HOME', file: 'config.toml' },
-    session: { joinDelivery:'local', delivery: 'queue', processNames: ['codex', 'codex-tui'], clientNames: ['codex'],
+    session: { joinDelivery:'local', delivery: 'queue', memberPerSession: true, processNames: ['codex', 'codex-tui'], clientNames: ['codex'],
       hookOutput: { start: 'SessionStart', prompt: 'UserPromptSubmit', tool: 'PostToolUse', stop: 'block' } },
   },
   claude: {
