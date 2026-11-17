@@ -187,7 +187,9 @@ import { personText } from '../message-origin.js';
            JOIN memberships workspace_member ON workspace_member.workspace_id=membership.workspace_id
              AND workspace_member.room_id IS NULL AND workspace_member.identity_id=$3
              AND workspace_member.removed_at IS NULL
-           WHERE message.id=$1 AND message.room_id=$2 AND message.presentation='message'
+           WHERE message.id=$1 AND message.room_id=$2
+             AND (message.presentation='message'
+               OR (message.presentation='card' AND message.card_type='choice'))
              AND message.deleted_at IS NULL
            FOR UPDATE OF message`,
           [input.messageId, input.roomId, viewerId],

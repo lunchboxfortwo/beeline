@@ -59,7 +59,7 @@ vi.mock('@/components/buzz/TranscriptCard', () => ({
   TranscriptCardHandle: 'Text',
 }));
 
-import { ChoiceCard } from './RoomMessageVariants';
+import { ChoiceCard, SwipeToReply } from './RoomMessageVariants';
 import { OrdinaryLedgerMessage } from './RoomMessageVariants-ordinary-ledger-message';
 import { ArtifactCard } from '@/components/buzz/ArtifactCard';
 import { LedgerEntry, LedgerSteer } from '@/components/buzz/Ledger';
@@ -207,6 +207,7 @@ it.each([
   { name: 'rejected status', images: false, card: { status: 'unknown' }, fallback: true },
   { name: 'rejected counts', images: false, card: { votedCount: 'unknown' }, fallback: true },
 ])('renders a synthetic choice with $name and starts a swipe reply', scenario => {
+  ordinaryProps();
   const stored = {
     ...syntheticImageChoice,
     card: { ...syntheticImageChoice.card, ...scenario.card },
@@ -249,10 +250,9 @@ it.each([
       selectedOptionId: undefined, answeredBy: undefined,
     } }, VIEWER);
     act(() => { renderer = create(<Fixture messageRow={open} />); });
-    expect(cardProps().tier).toBe('ask');
+    expect(renderer.root.findAllByType('TranscriptCard')).toHaveLength(0);
     act(() => renderer.update(<Fixture messageRow={row} />));
-    expect(cardProps().tier).toBe('record');
-    expect(cardProps().footerNote).toBe('A · picked A · @sample.person');
+    expect(renderer.root.findAllByType('TranscriptCard')).toHaveLength(0);
   } else {
     act(() => { renderer = create(<Fixture />); });
   }
@@ -261,11 +261,14 @@ it.each([
     expect(renderer.root.findAllByType('TranscriptCard')).toHaveLength(0);
   } else {
     expect(row.choice?.choiceId).toBe(stored.card.choiceId);
-    expect(cardProps().testID).toBe(`choice-${stored.card.choiceId}`);
-    expect(cardProps().title).toBe(stored.card.prompt);
-    expect(cardProps().choices.map((option: any) => option.id)).toEqual(
-      stored.card.status === 'open' ? ['A', 'B', 'C'] : []);
-    expect(renderer.root.findAllByType(ArtifactCard).map((node: any) => node.props.attachment))
+    expect(renderer.root.findAllByType('TranscriptCard')).toHaveLength(0);
+    expect(plates()).toHaveLength(0);
+    expect(vi.mocked(LedgerEntry).mock.calls.at(-1)?.[0]).toMatchObject({
+      bodyText: `${stored.card.prompt}\n\n${stored.text}`,
+      byline: expect.objectContaining({ name: stored.card.agent.name }),
+    });
+    expect(React.Children.toArray(vi.mocked(LedgerEntry).mock.calls.at(-1)?.[0].attachments)
+      .flatMap((node: any) => node.props.groupAttachments ?? [node.props.attachment]))
       .toEqual(stored.attachments);
   }
   const swipe = vi.mocked(TranscriptSwipeable).mock.calls.at(-1)?.[0];
@@ -345,7 +348,7 @@ const cardRendererCases: Array<{ name: string; patch: Record<string, unknown> }>
   } } },
   { name: 'computer session', patch: { computerSession: { title: 'Synthetic browser' } } },
   { name: 'onboarding', patch: { onboarding: { title: 'Synthetic onboarding' } } },
-  { name: 'choice', patch: { choice } },
+  { name: 'poll', patch: { choice: { ...choice, mode: 'poll' } } },
   { name: 'app sign-in', patch: { appSignIn: {
     agentId: 'b'.repeat(64), ownerId: VIEWER, name: 'Sample App', appKey: 'sample', appId: 'sample',
   } } },
@@ -503,6 +506,37 @@ function ordinaryProps(): React.ComponentProps<typeof OrdinaryLedgerMessage> {
     deliveryFailed: false, onChannelReference() {}, onReply() {}, onCopy() {}, onDismiss() {},
   };
 }
+
+it.each([
+  { text: '', suffix: '' },
+  { text: choice.prompt, suffix: '' },
+  { text: 'Supporting details: https://example.invalid/launch', suffix: '\n\nSupporting details: https://example.invalid/launch' },
+])('renders the ask and supporting text once with ordinary message actions ($text)', ({ text, suffix }) => {
+  const props = ordinaryProps();
+  const row: ChatDisplayMessage = { ...props.message, isUser: false,
+    pubkey: choice.agent.pubkey, authorIdentity: choice.agent, presentation: 'card', choice,
+    text, reference: { channelId: 'room', eventId: 'ask', rootId: 'ask' },
+    reactions: [{ emoji: '👍', count: 1, reacted: false, members: [] }],
+  };
+  const onCopy = vi.fn(), onReply = vi.fn(), onReact = vi.fn(), onMessageActions = vi.fn();
+  act(() => { renderer = create(<OrdinaryLedgerMessage {...props} message={row}
+    onCopy={onCopy} onReply={onReply} onReact={onReact} onMessageActions={onMessageActions} />); });
+  expect(renderer.root.findAllByType('TranscriptCard')).toHaveLength(0);
+  expect(vi.mocked(LedgerEntry).mock.calls.at(-1)?.[0].bodyText).toBe(choice.prompt + suffix);
+  const swipe = renderer.root.findByType(SwipeToReply).props;
+  expect(vi.mocked(TranscriptSwipeable).mock.calls).toHaveLength(1);
+  act(() => {
+    swipe.onLongPress();
+    swipe.onReply();
+    swipe.onActions();
+    swipe.onReact('👍');
+  });
+  expect(onCopy).toHaveBeenCalledWith(choice.prompt + suffix);
+  expect(onReply).toHaveBeenCalledWith(row);
+  expect(onMessageActions).toHaveBeenCalledWith(row);
+  expect(onReact).toHaveBeenCalledWith(row, '👍');
+  expect(renderer.root.findAllByProps({ testID: `reaction-chips-${row.id}` }).length).toBeGreaterThan(0);
+});
 
 it('SEND-PENDING greys only pending text, then restores committed text without a glyph or status line', () => {
   const props = ordinaryProps();

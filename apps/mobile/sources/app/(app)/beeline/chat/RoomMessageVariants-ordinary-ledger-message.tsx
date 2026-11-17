@@ -311,7 +311,13 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
       {referencedTarget?.preview ?? 'Message not loaded'}
     </TranscriptReference>
   ) : null;
-  const forwarded = forwardedMessageParts(message.text);
+  // An ask keeps its stored card shape; only the transcript reads it as prose.
+  // Preserve the separate question when the agent supplied supporting text.
+  const question = message.choice?.mode === 'question' ? message.choice.prompt : undefined;
+  const messageText = question && !message.text.includes(question)
+    ? [question, message.text].filter(Boolean).join('\n\n')
+    : message.text;
+  const forwarded = forwardedMessageParts(messageText);
   const forwardSource = forwarded.source;
   const forwardBodyAction =
     forwardSource && onOpenSource
@@ -581,11 +587,11 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
     </NewMessageMaterialize>
   );
   // Card rows use the transcript's shared wrapper, including parser fallbacks.
-  if (announcementFeed || message.presentation === 'card') return content;
+  if (announcementFeed || (message.presentation === 'card' && !question)) return content;
   return (
     <SwipeToReply
       messageId={message.id}
-      onLongPress={() => onCopy(message.text)}
+      onLongPress={() => onCopy(messageText)}
       onActions={onMessageActions ? () => onMessageActions(message) : undefined}
       {...(sendState && onMessageActions
         ? { onPress: () => onMessageActions(message) }

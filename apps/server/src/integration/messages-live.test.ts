@@ -1,3 +1,4 @@
+import { postRoomChoice } from '../room-choice.js';
 import { startQueuedTurn } from '../test-fixtures/queued-turn.test-support.js';
 
 import { describe, expect, it, vi } from 'vitest';
@@ -71,6 +72,37 @@ async function onlineHelper() {
     ).toBe(200);
     const cleared = (await (await fixture.request(`/v1/phone/rooms/${ROOM}`, 'GET')).json()) as RoomView;
     expect(cleared.messages.find((message) => message.id === messageId)?.reactions).toBeUndefined();
+  });
+
+
+  it('toggles reactions on choice asks without settling them and preserves message access checks', async () => {
+    const { messageId } = await fixture.database.transaction(tx => postRoomChoice(tx, {
+      roomId: ROOM, agentId: AGENT, requesterId: HUMAN, mode: 'question',
+      prompt: 'Which synthetic direction?',
+      options: [{ label: 'Editorial', consequence: 'Use editorial' }, { label: 'Minimal', consequence: 'Use minimal' }],
+    }));
+    const react = () => fixture.phone.reactToMessage({ roomId: ROOM, messageId, emoji: '👍' }, HUMAN);
+    const reaction = { emoji: '👍', count: 1, reacted: true,
+      members: [{ pubkey: HUMAN, kind: 'human', name: 'Owner', handle: 'owner' }] };
+    expect(await react()).toMatchObject({ id: messageId, presentation: 'card', reactions: [reaction] });
+    expect((await fixture.phone.readRoom(ROOM, HUMAN))?.messages.find(message => message.id === messageId))
+      .toMatchObject({ choice: { status: 'open' }, reactions: [reaction] });
+    expect((await fixture.database.query('SELECT status FROM room_choices WHERE message_id=$1', [messageId])).rows)
+      .toEqual([{ status: 'open' }]);
+    expect((await react())?.reactions).toBeUndefined();
+    const unavailable = () => expect(react()).rejects.toThrow('message is not available for reaction');
+    await fixture.database.query("UPDATE messages SET card_type='permission' WHERE id=$1", [messageId]);
+    await unavailable();
+    await fixture.database.query("UPDATE messages SET card_type='choice',deleted_at=now() WHERE id=$1", [messageId]);
+    await unavailable();
+    await fixture.database.query('UPDATE messages SET deleted_at=NULL WHERE id=$1', [messageId]);
+    await fixture.database.query('UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2', [ROOM, HUMAN]);
+    await unavailable();
+    await fixture.database.query('UPDATE memberships SET removed_at=NULL WHERE room_id=$1 AND identity_id=$2', [ROOM, HUMAN]);
+    await fixture.database.query('UPDATE memberships SET removed_at=now() WHERE workspace_id=$1 AND room_id IS NULL AND identity_id=$2', [WORKSPACE, HUMAN]);
+    await unavailable();
+    expect((await fixture.database.query('SELECT reactions FROM messages WHERE id=$1', [messageId])).rows)
+      .toEqual([{ reactions: {} }]);
   });
 
 

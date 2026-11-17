@@ -313,7 +313,7 @@ export function useChatTranscriptRenderer([
       // The active call lives below the Room header; ended calls use LedgerSystemLine.
       if (item.voiceCall && !item.voiceCall.endedAt) return null;
       if (item.onboarding) return <RepositoryOnboardingCard card={item.onboarding} viewerId={cacheViewerPubkey} author={item.authorIdentity} />;
-      if (item.choice) {
+      if (item.choice?.mode === 'poll') {
         return (
           <ChoiceCard
             message={item}
@@ -571,7 +571,7 @@ export function useChatTranscriptRenderer([
           onDismiss={dismissOutboxMessage}
         />
       );
-      ownsReplyGesture = item.presentation !== 'card';
+      ownsReplyGesture = item.presentation !== 'card' || item.choice?.mode === 'question';
       return item.cornerMarkers?.length ? (
         <YStack>
           {ledgerMessage}
