@@ -30,6 +30,7 @@ import type { SqlDatabase } from './database.js';
 import { ARTIFACT_TTL_HOURS, mediaTtlHours } from './media-ttl.js';
 import type { ObjectStorage } from './object-storage.js';
 import { RUNNABLE_MIME } from './runnable-artifact.js';
+import { artifactByteMetadata } from './artifact-byte-metadata.js';
 
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 
@@ -145,7 +146,8 @@ export class ObjectService {
     if (!bytes.length || bytes.length > ARTIFACT_MAXIMUM_BYTES)
       throw new Error(`artifact size must be between 1 and ${ARTIFACT_MAXIMUM_BYTES} bytes`);
     if (!title.trim()) throw new Error('artifact title is required');
-    return this.#putReadyObject(agentId, bytes, mimeType, title.slice(0, 200), 'artifact', database);
+    const metadata = artifactByteMetadata(bytes, mimeType, title);
+    return this.#putReadyObject(agentId, bytes, metadata.mimeType, metadata.title, 'artifact', database);
   }
 
   /**
@@ -427,7 +429,7 @@ export class ObjectService {
     if (row.state !== 'ready') return { kind: 'pending' };
     const location = await this.#requireStorage().presignGet(row.key, {
       expiresIn: 600,
-      ...(row.mime === RUNNABLE_MIME ? { responseContentType: 'text/plain' } : {}),
+      responseContentType: row.mime === RUNNABLE_MIME ? 'text/plain' : row.mime,
     });
     return { kind: 'redirect', location };
   }

@@ -22,6 +22,7 @@ import { sentryTelegramFromEnv } from './sentry-telegram.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { assertSchemaCurrent, markSchemaCurrent, migrate, migrateData, PostgresDatabase } from './database.js';
 import { runMigrationStep } from './migration-steps.js';
+import { backfillArtifactByteMetadata } from './migrations/artifact-byte-metadata.js';
 import { databaseConnectionBudget } from './database-budget.js';
 import { AuthStore, type TransactionalDatabase } from '@beeline/auth/store';
 import { TokenAuth, verifierFromEnvironment } from './auth.js';
@@ -89,6 +90,8 @@ async function runReleaseMigration(): Promise<void> {
       await new AuthStore(database as unknown as TransactionalDatabase).migrate();
     });
     await migrateData(database);
+    await runMigrationStep('artifact byte metadata', () =>
+      backfillArtifactByteMetadata(database, objectStorageFromEnv()));
     // Armed only by the release owner, once the create-or-join onboarding is
     // live on every supported client (docs/welcome-retirement.md).
     const greeterAgentId = process.env.BEELINE_RETIRE_WELCOME_GREETER_ID?.trim();

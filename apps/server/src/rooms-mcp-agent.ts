@@ -601,7 +601,7 @@ export class RoomsMcpAgentTools {
     const turn = bound ?? await this.begin(member, at);
     const context = { roomId: turn.roomId, requestId: turn.requestId };
     try {
-      await exec('postAgentAttachment', { ...context, attachment: { url: uploaded.url, name: title, mimeType: uploaded.mimeType, size: bytes.length } });
+      await exec('postAgentAttachment', { ...context, attachment: { url: uploaded.url, name: uploaded.title, mimeType: uploaded.mimeType, size: bytes.length } });
       return await exec('postCornerMessage', { ...context, cornerId: at, text: text(args.text) ?? title });
     } finally {
       if (!bound) await this.end(turn,member);

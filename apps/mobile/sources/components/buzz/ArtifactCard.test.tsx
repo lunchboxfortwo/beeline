@@ -168,17 +168,27 @@ describe('artifact card chrome', () => {
     act(() => { tree.root.findByProps({ testID: 'artifact-open' }).props.onPress(); });
     expect(Modal.show).toHaveBeenCalledWith(expect.objectContaining({ placement: 'fill' }));
   });
-  it('draws a file with no preview as one row that opens the viewer', async () => {
-    const zip = { ...attachment, name: 'quotas.zip', mimeType: 'application/zip' };
+  it.each(['application/zip', 'application/octet-stream'])('draws %s as a file row that opens the viewer', async mimeType => {
+    const zip = { ...attachment, name: 'quotas.zip', mimeType };
     let tree!: ReactTestRenderer;
     await act(async () => { tree = create(<ArtifactCard attachment={zip} />); });
     renderers.push(tree);
     const row = tree.root.find((node: any) => node.type === 'ListItem' && node.props.testID === 'artifact-document-quotas.zip');
     expect(row.props['aria-label']).toBe('Open quotas.zip');
-    expect(tree.root.findByProps({ testID: 'artifact-kind-line' }).props.children).toBe(`@agent · APPLICATION/ZIP · ${Math.ceil(attachment.size / 1024)} KB`);
+    expect(tree.root.findByProps({ testID: 'artifact-kind-line' }).props.children).toBe(`@agent · ${mimeType.toUpperCase()} · ${Math.ceil(attachment.size / 1024)} KB`);
     act(() => { row.props.onPress(); });
     expect(Modal.show).toHaveBeenCalled();
     expect(host.operation).not.toHaveBeenCalled();
+  });
+  it.each(['image/jpeg', 'image/png'])('renders a posted %s as an inline transcript image', async mimeType => {
+    const image = { ...attachment, name: 'Frame.jpg', mimeType };
+    let tree!: ReactTestRenderer;
+    await act(async () => { tree = create(<ArtifactCard attachment={image} />); });
+    renderers.push(tree);
+    expect(tree.root.findByType('ArtifactImage').props).toMatchObject({
+      attachment: image, testID: 'artifact-preview-image',
+    });
+    expect(tree.root.findAllByProps({ testID: 'artifact-document-Frame.jpg' })).toHaveLength(0);
   });
   it.each([
     ['image/png', 'image', 'PNG'], ['application/pdf', 'pdf', 'PDF'], ['text/plain', 'text', 'TEXT'],
