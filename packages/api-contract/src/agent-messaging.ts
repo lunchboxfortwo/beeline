@@ -29,6 +29,11 @@ export const MESSAGE_ASK_SCHEMA = {
   },
 } as const;
 
+/** Replies without a question are information, not another request. */
+export function isInformationalReply(reason: string | null | undefined, ask: unknown): boolean {
+  return reason === 'reply' && !ask;
+}
+
 /** The plain shortening error is shared by the tool validator and server. */
 export function validateMessageAsk(ask: MessageAsk): void {
   const short = (text: unknown, words: number) => typeof text === 'string' &&

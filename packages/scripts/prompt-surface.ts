@@ -47,8 +47,8 @@ const RESUME_BRANCHES: Record<string, Parameters<typeof resumePrompt>[0]> = {
   'mcp-grant': { body: '<person> approved mcp <route>' },
   'command-grant': { body: '<person> approved command <argv>' },
 };
-const MCP_WAKE_BRANCHES: Record<string, [string | null, string | null]> = {
-  message: ['message', 'message'], reply: ['reply', 'reply'], order: ['order', 'order'],
+const MCP_WAKE_BRANCHES: Record<string, Parameters<typeof mcpWakeNext>> = {
+  message: ['message', 'message'], reply: ['reply', 'reply'], 'reply-with-ask': ['reply', 'reply', {question:'<question>',options:['<option>','<option>']}], order: ['order', 'order'],
   review: ['lifecycle', 'corner_review_dispatch'], lifecycle: ['lifecycle', 'corner_check'], event: [null, 'subscribed_event'],
 };
 
@@ -67,7 +67,7 @@ export function extractSurface() {
     mcp: { chat: byName(ROOM_TOOLS), agent: byName(MCP_AGENT_TOOLS), operator: byName(MCP_OPERATOR_TOOLS),
       retired: Object.fromEntries(Object.entries(MCP_RETIRED_TOOLS).sort(([a], [b]) => a.localeCompare(b))) },
     wakes: {
-      'mcp-next': Object.fromEntries(Object.entries(MCP_WAKE_BRANCHES).map(([branch, [kind, reason]]) => [branch, mcpWakeNext(kind, reason)])),
+      'mcp-next': Object.fromEntries(Object.entries(MCP_WAKE_BRANCHES).map(([branch, args]) => [branch, mcpWakeNext(...args)])),
       'body-resume': Object.fromEntries(Object.entries(RESUME_BRANCHES).map(([branch, item]) => [branch, resumePrompt(item)])),
     },
     guides: {

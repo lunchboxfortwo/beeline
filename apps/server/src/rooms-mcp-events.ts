@@ -1,3 +1,4 @@
+import { isInformationalReply } from '@beeline/api-contract/daemon';
 import { queuedContextSql } from './agent-command-context.js';
 import { mentionReplyRule } from '@beeline/api-contract/phone';
 import { createHash,createHmac,randomBytes,randomUUID,timingSafeEqual } from 'node:crypto';
@@ -25,6 +26,7 @@ const MENTION_EVENT = {
 /** Same wording list_mentions returns on a pending wake, so a webhook and a poll agree. */
 export const MCP_ORDER_WAKE_HINT = 'Pass this message id as commandId on task tools. Reply with reply(id,text) when done, blocked or failed.';
 export const MCP_WAKE_HINT = 'Handle it, then call no_reply_needed with this address and this wake\'s id as commandId if nothing needs posting.';
+const MCP_REPLY_INFORMATION_HINT = 'This reply is information. Call no_reply_needed with this address and this wake\'s id as commandId. Use message(to:{agent,place},text,ask?) for a genuinely new request.';
 export function mcpWakeHint(kind: string | null | undefined): string {
   return ['order','message','reply'].includes(kind ?? '') ? MCP_ORDER_WAKE_HINT : MCP_WAKE_HINT;
 }
@@ -193,8 +195,9 @@ export function mcpCommandWakeSql(first: number): { cte: string; join: string; p
   const orderHint = `$${first + 1}`;
   const wakeHint = `$${first + 2}`;
   const reviewHint = `$${first + 3}`;
+  const informationHint = `$${first + 4}`;
   return {
-    params: [POSTGRES_LIVE_CHANNEL, MCP_ORDER_WAKE_HINT, MCP_WAKE_HINT, MCP_REVIEW_WAKE_HINT],
+    params: [POSTGRES_LIVE_CHANNEL, MCP_ORDER_WAKE_HINT, MCP_WAKE_HINT, MCP_REVIEW_WAKE_HINT, MCP_REPLY_INFORMATION_HINT],
     cte: `queued_mcp_wakes AS (
       INSERT INTO rooms_mcp_event_deliveries(subscription_id,command_id,room_id,event_id,body)
       SELECT s.id,command.id,command.room_id,'evt_'||s.id||'_cmd_'||command.id,
@@ -206,8 +209,9 @@ export function mcpCommandWakeSql(first: number): { cte: string; join: string; p
                 'place',COALESCE(command.private_payload->>'fromRoomId',source.room_id::text,command.room_id::text))),
             'text',left(COALESCE(command.private_payload->>'text',source.text),16000),
             'attachments',COALESCE(command.message->'attachments',command.private_payload->'attachments',source.attachments,'[]'::jsonb),
-            'next','Reply with reply(' || command.id || ',text). ' || CASE WHEN command.reason='corner_review_dispatch' THEN ${reviewHint}::text
-              WHEN command.private_payload->>'kind' IN ('order','message','reply') THEN ${orderHint}::text ELSE ${wakeHint}::text END),
+            'next',CASE WHEN command.reason='reply' AND command.private_payload->>'messageAsk' IS NULL THEN ${informationHint}::text
+              ELSE 'Reply with reply(' || command.id || ',text). ' || CASE WHEN command.reason='corner_review_dispatch' THEN ${reviewHint}::text
+              WHEN command.private_payload->>'kind' IN ('order','message','reply') THEN ${orderHint}::text ELSE ${wakeHint}::text END END),
           'cursor',NULL)::text
       FROM inserted command
       LEFT JOIN messages source ON source.id=command.source_message_id
@@ -310,6 +314,7 @@ export async function deliverMcpEvents(db: SqlDatabase, transport: Transport, si
 export const MCP_REVIEW_WAKE_HINT = 'Review this thread: read its brief, pull request and checks (read facets brief, pr and checks), then call approve_merge with the head SHA named above, or message your findings to the implementer at the thread address. The server requests review; never tag the reviewer. Never approve work you implemented or authored.';
 
 /** The hint a wake carries, from its command's reason and private kind. */
-export function mcpWakeNext(kind: string | null | undefined, reason: string | null | undefined): string {
+export function mcpWakeNext(kind: string | null | undefined, reason: string | null | undefined, ask?: unknown): string {
+  if (isInformationalReply(reason,ask)) return MCP_REPLY_INFORMATION_HINT;
   return reason === 'corner_review_dispatch' ? MCP_REVIEW_WAKE_HINT : mcpWakeHint(kind);
 }

@@ -71,6 +71,7 @@ export async function readAgentCommands(
         ...(item.operator_agent ? {operatorAgent:true} : {}),
         turnRequestId: item.turn_request_id, action: item.action,
         reason: item.reason === 'report' && item.private_payload?.automatic ? 'attention_report' : item.reason,
+        ...(item.private_payload?.messageAsk ? {ask:item.private_payload.messageAsk} : {}),
         rootCommandId: item.root_command_id, rootSourceMessageId: item.root_source_message_id,
         ...(item.parent_command_id ? {parentCommandId:item.parent_command_id} : {}),
         agentDepth: item.agent_depth, ...(source.type === 'private' ? {private:true} : {}),

@@ -1,6 +1,7 @@
 // The machine's one session bridge: for every joined session it waits on Beeline for tags and wakes, and hands each
 // to the session's app by the fastest way the app has. It needs no public address: it only calls out to Beeline.
 import { sessionAgentBehavior } from '../agent-command.js';
+import { isInformationalReply, type MessageAsk } from '@beeline/api-contract/daemon';
 import type { DaemonAttachment } from '@beeline/api-contract/daemon';
 import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync, watch } from 'node:fs';
 import { createConnection, createServer } from 'node:net';
@@ -19,7 +20,7 @@ import { bundleDigest } from './bridge-launch.js';
 import { pidAlive, queueInbox, queueInboxOnce, readState, takeInbox, updateState, type JoinedSession, hasLocalDelivery } from './store.js';
 
 export interface Mention { memberId?: string; replyRule?: string; id: string; room_id: string; room_name?: string; author_handle?: string | null; author_name?: string | null; text: string; institutionalContext?: string; attachments?: readonly DaemonAttachment[] }
-export interface Wake { id: string; address: string; from?:{agent:string;place:string}; reason?: string; kind?: string; text?: string; institutionalContext?: string; attachments?: readonly DaemonAttachment[]; createdAt: string; next?: string; receipt?: {generation:string;nonce:string;conversation:string} }
+export interface Wake { id: string; address: string; from?:{agent:string;place:string}; reason?: string; kind?: string; ask?: MessageAsk; text?: string; institutionalContext?: string; attachments?: readonly DaemonAttachment[]; createdAt: string; next?: string; receipt?: {generation:string;nonce:string;conversation:string} }
 
 /** How the session runs Beeline commands: the stable bundle copy and this member's id. */
 export interface Runner {
@@ -66,8 +67,10 @@ export function renderWake(w: Wake, joined: JoinedSession, runner: Runner): stri
     ...(w.institutionalContext ? [w.institutionalContext] : []),
     ...(w.from ? [`From: (${w.from.agent}, ${w.from.place})`] : []),
     ...(w.text ? [w.text.split('\n').map(l => `> ${l}`).join('\n')] : []), ...renderAttachments(w.attachments), ...(w.next ? [w.next] : [])];
+  const information = isInformationalReply(w.reason,w.ask);
   return [...header,
-    `Reply: ${command(runner, joined, `tool reply '${JSON.stringify({id:w.id,text:'<result>'})}'`)}`,
+    ...(information ? ['This reply is information. Use message(to:{agent,place},text,ask?) for a genuinely new request.'] : [
+    `Reply: ${command(runner, joined, `tool reply '${JSON.stringify({id:w.id,text:'<result>'})}'`)}`]),
     `With no action needed for a background wake: ${command(runner, joined, `tool no_reply_needed '${JSON.stringify({address:w.address,commandId:w.id})}'`)}`].join('\n');
 }
 

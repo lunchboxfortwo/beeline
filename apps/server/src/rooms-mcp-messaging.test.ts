@@ -56,7 +56,8 @@ describe('connected agent message protocol',()=>{
     expect(page.wakes).toEqual([expect.objectContaining({address:ROOM,from:{agent:AGENT,place:ROOM},text:'Checked'})]);
     // The session helper rejects a wake frame without a string reason.
     expect(typeof page.wakes[0]!.reason).toBe('string');
-    expect(page.wakes[0].next).toContain('reply(');
+    expect(page.wakes[0].next).toContain('no_reply_needed');
+    expect(page.wakes[0].next).not.toContain('reply(');
   });
   it('replies to a received public message id under its own byline without a tag or a card',async()=>{
     const {client,member}=await scope.connected();

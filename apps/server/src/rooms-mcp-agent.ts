@@ -1,7 +1,7 @@
 import { queuedContextText } from './agent-command-context.js';
 import { legacyMessageBody } from './messaging-cutover.js';
 import { recordedMessageRoute } from './message-route.js';
-import { MESSAGE_ADDRESS_SCHEMA,MESSAGE_ASK_SCHEMA,OPERATOR_OWNER_ID } from '@beeline/api-contract/daemon';
+import { MESSAGE_ADDRESS_SCHEMA,MESSAGE_ASK_SCHEMA,OPERATOR_OWNER_ID,isInformationalReply } from '@beeline/api-contract/daemon';
 import { INSTITUTIONAL_HISTORY_RESULT_MAX,INSTITUTIONAL_MEMORY_SEARCH_RESULT_MAX,REPOSITORY_SUBSCRIPTION_EVENTS,WallRefusal } from '@beeline/api-contract/daemon';
 import { SUBSCRIBABLE_EVENT_KINDS } from '@beeline/api-contract/phone';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
@@ -714,6 +714,7 @@ export async function pendingMcpWakes(db: SqlDatabase, member: string) {
       text:legacyMessageBody(item,item.message?.body ?? item.private_payload?.text ?? item.reason),createdAt:item.created_at,
       ...(item.message?.institutionalContext || item.message?.conversationContext ? {institutionalContext:queuedContextText(item.message)} : {}),
       attachments:item.message?.attachments ?? item.private_payload?.attachments ?? [],
-      next:`Reply with reply(${item.id},text). ${mcpWakeNext(item.private_payload?.kind ?? null,item.reason)}`};
+      ...(item.private_payload?.messageAsk ? {ask:item.private_payload.messageAsk} : {}),
+      next:`${isInformationalReply(item.reason,item.private_payload?.messageAsk) ? '' : `Reply with reply(${item.id},text). `}${mcpWakeNext(item.private_payload?.kind ?? null,item.reason,item.private_payload?.messageAsk)}`};
   }));
 }

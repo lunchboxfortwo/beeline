@@ -1,3 +1,4 @@
+import { isInformationalReply } from '@beeline/api-contract/daemon';
 import { queuedContextSql } from './agent-command-context.js';
 import { legacyMessageBody } from './messaging-cutover.js';
 import { MCP_STARTER_ROUTINE,agentHandleFromName,mentionReplyRule } from '@beeline/api-contract/phone';
@@ -294,8 +295,8 @@ function routingInstruction(row: {member_id: string; room_id: string; message_id
  * payload (`rooms-mcp-events.ts`), so a webhook, an event and list_mentions agree.
  */
 function wakeBody(row: { member_id: string; room_id: string; command_from:MessageAddress; command_id: string | null; command_reason: string | null;
-  command_kind: string | null; command_text: string | null; command_attachments: DaemonAttachment[]; body: string; institutional_context: string | null }) {
-  const next = `Reply with reply(${row.command_id},text). ${mcpWakeNext(row.command_kind,row.command_reason)}`;
+  command_kind: string | null; command_ask: unknown; command_text: string | null; command_attachments: DaemonAttachment[]; body: string; institutional_context: string | null }) {
+  const next = `${isInformationalReply(row.command_reason,row.command_ask) ? '' : `Reply with reply(${row.command_id},text). `}${mcpWakeNext(row.command_kind,row.command_reason,row.command_ask)}`;
   return { memberId: row.member_id, roomId: row.room_id, address: row.room_id, commandId: row.command_id, id: row.command_id,
     from:row.command_from,text:legacyMessageBody({reason:row.command_reason ?? ''},row.command_text ?? row.body,row.command_from.agent),attachments:row.command_attachments,next,cursor:null,
     ...(row.institutional_context ? {institutionalContext:row.institutional_context} : {}),
@@ -324,7 +325,7 @@ export async function deliverMcpMemberWebhooks(
       call_id: string; member_id: string; room_id: string; message_id: string;
       body: string; owner_id: string | null; callback_url: string | null; callback_secret: string | null; deliverable: boolean; answered: boolean;
       author_id: string | null; author_handle: string | null; author_name: string | null; author_kind: string | null; cursor: string | null;
-      command_from:MessageAddress; command_id: string | null; command_reason: string | null; command_kind: string | null; command_text: string | null; probe: object | null; delivery_generation:string|null;
+      command_from:MessageAddress; command_id: string | null; command_reason: string | null; command_kind: string | null; command_ask: unknown; command_text: string | null; probe: object | null; delivery_generation:string|null;
       attachments: DaemonAttachment[]; command_attachments: DaemonAttachment[]; institutional_context: string | null;
     }>(
       `WITH claimed AS (
@@ -345,7 +346,7 @@ export async function deliverMcpMemberWebhooks(
          COALESCE(command.message->'route'->'from',command.private_payload->'route'->'from',
            jsonb_build_object('agent',COALESCE(command.private_payload->>'authorId',command.message->>'authorId'),
              'place',COALESCE(command.private_payload->>'fromRoomId',command.room_id::text))) command_from,
-         delivery.generation delivery_generation,probe.probe,command.id command_id,command.reason command_reason,command.private_payload->>'kind' command_kind,
+         delivery.generation delivery_generation,probe.probe,command.id command_id,command.reason command_reason,command.private_payload->>'kind' command_kind,command.private_payload->'messageAsk' command_ask,
          left(COALESCE(command.private_payload->>'text',source.text),16000) command_text,(
            room.id IS NOT NULL AND room.archived_at IS NULL AND mention.cleared_at IS NULL
            AND beeline_mcp_delivery_owner(claimed.member_id,'webhook')
@@ -361,7 +362,7 @@ export async function deliverMcpMemberWebhooks(
        LEFT JOIN rooms_mcp_members member ON member.member_id=claimed.member_id
        LEFT JOIN rooms_mcp_clients client ON client.id=member.client_id
        LEFT JOIN rooms room ON room.id=claimed.room_id
-       LEFT JOIN messages message ON message.id=claimed.message_id
+       LEFT JOIN messages message ON message.id=claimed.message_id AND message.card_type IS DISTINCT FROM 'agent-command'
        LEFT JOIN identities author ON author.id=message.author_id
        LEFT JOIN rooms_mcp_mentions mention ON mention.member_id=claimed.member_id AND mention.message_id=claimed.message_id
        LEFT JOIN agent_commands command ON message.id IS NULL AND command.id=claimed.message_id AND command.agent_id=claimed.member_id

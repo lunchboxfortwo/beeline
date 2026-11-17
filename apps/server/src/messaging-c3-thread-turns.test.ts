@@ -10,8 +10,8 @@ async function outsideThread(thread: string, before: string[]) {
        AND NOT (id=ANY($3::text[])) ORDER BY created_at,id`, [[A, B], thread, before])).rows;
 }
 const ids = async () => (await rootFixture.db.query<{ id: string }>('SELECT id FROM agent_commands')).rows.map(row => row.id);
-const pendingFor = async (thread: string, agent: string) => (await rootFixture.db.query<{ id: string; reason: string }>(
-  "SELECT id,reason FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND state='pending' ORDER BY created_at,id", [thread, agent])).rows;
+const pendingFor = async (thread: string, agent: string) => (await rootFixture.db.query<{ id: string; reason: string; ask: unknown }>(
+  "SELECT id,reason,private_payload->'messageAsk' ask FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND state='pending' ORDER BY created_at,id", [thread, agent])).rows;
 const settle = () => rootFixture.db.query("UPDATE agent_commands SET state='complete' WHERE state='pending'");
 
 /** Condition 3: no implementer or reviewer work takes a turn in the chat. */
@@ -33,8 +33,8 @@ describe('C3: thread work never takes a turn in the parent chat', () => {
     for (const wake of await pendingFor(thread, A))
       await rootFixture.daemon.execute('reply', { id: wake.id, text: 'blocked: need build access', ask: { question: 'Grant access?', options: ['Yes', 'No'] } }, A);
     // An agent commander answers in its own place; the answer wakes the implementer in the thread.
-    const asked = (await pendingFor(R, F)).filter(row => row.reason === 'reply');
-    expect(asked.length).toBe(opener === 'another agent' ? 2 : 0);
+    const asked = (await pendingFor(R, F)).filter(row => row.reason === 'reply' && row.ask);
+    expect(asked.length).toBe(opener === 'another agent' ? 1 : 0);
     for (const row of asked) await rootFixture.daemon.execute('reply', { id: row.id, text: 'Access granted' }, F);
     expect((await pendingFor(thread, A)).map(row => row.reason)).toEqual(asked.map(() => 'reply'));
     await settle();

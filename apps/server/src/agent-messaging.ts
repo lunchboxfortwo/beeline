@@ -1,5 +1,5 @@
 import { Check, Errors } from 'typebox/value';
-import { MESSAGE_ASK_SCHEMA, validateMessageAsk, type MessageAddress, type MessageAsk, type MessageRoute } from '@beeline/api-contract/daemon';
+import { isInformationalReply, MESSAGE_ASK_SCHEMA, validateMessageAsk, type MessageAddress, type MessageAsk, type MessageRoute } from '@beeline/api-contract/daemon';
 import { randomBytes } from 'node:crypto';
 import { answerQueuedMessage, queueMessage, refuseMessageMembership, type CommandRow } from './agent-command.js';
 import { commandAddress } from './commander.js';
@@ -44,7 +44,15 @@ export async function sendMessage(db: SqlDatabase, input: {
     const id = input.id ?? randomBytes(32).toString('hex');
     const human = (await tx.query("SELECT 1 FROM identities WHERE id=$1 AND kind='human'",[to.agent])).rowCount > 0;
     if (!human) {
-      const command = await queueMessage(tx, {
+      // Self-addressed speech and acknowledgements of informational replies
+      // stay in the transcript without authorizing another agent turn.
+      const transcriptOnly = to.agent === route.from.agent || Boolean(input.replyTo && !input.ask &&
+        isInformationalReply(input.parent?.reason, input.parent?.private_payload?.messageAsk));
+      if (transcriptOnly && !(await tx.query(`SELECT 1 FROM room_access member
+        JOIN rooms room ON room.id=member.room_id AND room.archived_at IS NULL
+        WHERE member.room_id=$1 AND member.identity_id=$2 AND member.removed_at IS NULL`,[to.place,to.agent])).rowCount)
+        refuseMessageMembership();
+      const command = transcriptOnly ? undefined : await queueMessage(tx, {
         id, roomId: to.place, agentId: to.agent,sourceMessageId:null,
         audienceId:input.replyTo ? to.agent : undefined,
         reason:input.replyTo ? 'reply' : 'message',parent:input.parent,
@@ -52,18 +60,20 @@ export async function sendMessage(db: SqlDatabase, input: {
           text:modelText(input.text),authorId:route.from.agent,fromRoomId:route.from.place,
           returnIdentityId:route.from.agent,attachments:input.attachments},
       });
-      // A transcript reference shares the committed command's identity, but is
+      // A transcript reference shares a delivered command's identity, but is
       // never a source message or another wake. Room reads enforce place access;
       // card presentation keeps this reference out of agent conversation context.
-      await tx.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card,created_at)
+      const recorded = await tx.query<{id:string;created_at:Date}>(`INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card,created_at)
         SELECT $1,$2,$3,$4,'card','agent-command',jsonb_build_object(
           'kind',$5::text,'text',$4::text,'recipient',jsonb_build_object(
             'id',recipient.id,'name',recipient.name,'kind',recipient.kind,
-            'handle',beeline_room_handle(recipient.id,$2))),$6
+            'handle',beeline_room_handle(recipient.id,$2))),COALESCE($6::timestamptz,now())
         FROM identities recipient WHERE recipient.id=$7
-        ON CONFLICT(id) DO NOTHING`,
-      [command!.id,to.place,route.from.agent,input.text,input.replyTo ? 'reply' : 'message',command!.created_at,to.agent]);
-      return { id:command!.id,createdAt:Math.floor(new Date(command!.created_at).getTime()/1000) };
+        ON CONFLICT(id) DO NOTHING RETURNING id,created_at`,
+      [command?.id ?? id,to.place,route.from.agent,input.text,input.replyTo ? 'reply' : 'message',command?.created_at ?? null,to.agent]);
+      const saved = recorded.rows[0] ?? (await tx.query<{id:string;created_at:Date}>(
+        'SELECT id,created_at FROM messages WHERE id=$1',[command?.id ?? id])).rows[0]!;
+      return { id:saved.id,createdAt:Math.floor(new Date(saved.created_at).getTime()/1000) };
     }
     if (input.ask) {
       const choice = await postRoomChoice(tx, {

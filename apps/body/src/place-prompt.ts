@@ -1,4 +1,4 @@
-import { isBackgroundCommand, subscriptionActionPrompt, type AgentCommand, type SystemEvent } from '@beeline/api-contract/daemon';
+import { isInformationalReply, isBackgroundCommand, subscriptionActionPrompt, type AgentCommand, type SystemEvent } from '@beeline/api-contract/daemon';
 import { parseGrantDecisionLine } from '@beeline/api-contract/agent-grants';
 import { SCHEDULE_RAN_VERB, SCHEDULE_SCHEDULER_NAME } from '@beeline/api-contract/scheduled-prompts';
 import { attachmentMarkerLines } from './attachment-delivery.js';
@@ -151,7 +151,11 @@ export function itemPrompt(item: AgentCommand, options: {
     ? `Your final reply is posted here (${item.roomId}).`
     : `Your final reply is posted to ${returnRoomName}.`;
   const from=item.from ?? {agent:source.authorId,place:item.roomId};
-  const request = `Message id: ${item.id}\nFrom: ${author} (${from.agent})\nFrom-place: ${from.place}\nDestination: (${item.agentId}, ${item.roomId})\nCurrent place: ${threadName}\n${answerTo}\nReply with reply(id: "${item.id}", text: ...).`;
+  const information = isInformationalReply(item.reason, item.ask);
+  const response = information
+    ? 'This reply is information. Call no_reply_needed to finish. Use message(to:{agent,place},text,ask?) for a genuinely new request.'
+    : `${answerTo}\nReply with reply(id: "${item.id}", text: ...).`;
+  const request = `Message id: ${item.id}\nFrom: ${author} (${from.agent})\nFrom-place: ${from.place}\nDestination: (${item.agentId}, ${item.roomId})\nCurrent place: ${threadName}\n${response}`;
   return [
     ...(options.turnPrefix ? [options.turnPrefix] : []),
     ...(options.notes?.length ? ['Session setup notes:', ...options.notes.map(note => `- ${note}`)] : []),
@@ -180,7 +184,7 @@ export function offlineBatchPrompt(items: readonly AgentCommand[], options: Para
     ...(options.turnPrefix ? [options.turnPrefix] : []),
     ...(items[0]?.offlineSeconds !== undefined
       ? [`> You were offline for ${hours} h. These arrived while you were away and may be outdated.`] : []),
-    'Answer each asker in one combined reply. Follow the newest instructions when earlier discussion has moved on.',
+    'Answer each asker in one combined reply. Informational replies need no answer. Follow the newest instructions when earlier discussion has moved on.',
     'The offline note, when present, is private context for you.',
     ...(options.notes?.length ? ['Session setup notes:', ...options.notes.map(note => `- ${note}`)] : []),
     ...visible.map((item, index) => itemPrompt(item, { names: options.names, fresh: index === 0 && options.fresh })),

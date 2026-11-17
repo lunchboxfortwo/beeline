@@ -6,7 +6,7 @@ import { sendMessage } from './agent-messaging.js';
 import { recordedMessageRoute } from './message-route.js';
 import { ensureSystemIdentity } from './system-line.js';
 import type { AgentCommand,AgentCommandAction,RoomInboxResult,MessageRoute,MessageAsk } from '@beeline/api-contract/daemon';
-import { boundReplyExcerpt,isBackgroundCommand,wall } from '@beeline/api-contract/daemon';
+import { boundReplyExcerpt,isInformationalReply,isBackgroundCommand,wall } from '@beeline/api-contract/daemon';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { createHash,randomBytes } from 'node:crypto';
 import { parseTaggedAgentLifecycleCommand,routeTaggedLifecycleCommand } from './agent-command-create-agent-command.js';
@@ -892,7 +892,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
     if (item && item.state!=='cancelled' && !input.report && (!item.public_reply_id || input.explicitReply) && (item.message?.route || payload?.route || input.explicitReply)) {
       const route = await recordedMessageRoute(db,item);
       const messageText=repairAgentPost(item.reason==='voice_order' ? cleanVoiceReply(input.text,item.name) : input.text).text.trim();
-      if (!messageText && !item.answer_attachments?.length && !input.sharedReplyId && (payload?.automatic || isBackgroundCommand(item.reason))) {
+      if (!messageText && !item.answer_attachments?.length && !input.sharedReplyId && (payload?.automatic || isBackgroundCommand(item.reason) || isInformationalReply(item.reason,payload?.messageAsk))) {
         completedNow=true;
         await endAgentTurn(db,item,'complete');
         return {id:item.id,createdAt:Math.floor(Date.now()/1000)};

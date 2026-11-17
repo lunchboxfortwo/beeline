@@ -592,8 +592,17 @@ describe('queue item reply audience', () => {
     expect(prompt).toContain('Current place: worker-thread');
     expect(prompt).toContain('Reply with reply(id: "request"');
   });
+  it('treats a reply without an ask as information in both live and offline delivery',()=>{
+    const item={...report,reason:'reply'};
+    for(const prompt of [itemPrompt(item,{names}),offlineBatchPrompt([item],{names})]) {
+      expect(prompt).toContain('no_reply_needed');
+      expect(prompt).toContain('message(to:');
+      expect(prompt).not.toContain('reply(');
+    }
+  });
   it.each(['message','reply','corner_review_needed'])('gives %s the same recorded-id reply interface',reason=>{
-    const prompt=itemPrompt({...report,returnRoomId:report.roomId,reason},{names});
+    const prompt=itemPrompt({...report,returnRoomId:report.roomId,reason,
+      ...(reason==='reply' ? {ask:{question:'Which output?',options:['Web','Phone']}} : {})},{names});
     expect(prompt).toContain('Your final reply is posted here (worker-thread).');
     expect(prompt).toContain('Reply with reply(id: "request"');
   });
