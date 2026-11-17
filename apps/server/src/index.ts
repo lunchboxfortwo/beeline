@@ -90,8 +90,6 @@ async function runReleaseMigration(): Promise<void> {
       await new AuthStore(database as unknown as TransactionalDatabase).migrate();
     });
     await migrateData(database);
-    await runMigrationStep('artifact byte metadata', () =>
-      backfillArtifactByteMetadata(database, objectStorageFromEnv()));
     // Armed only by the release owner, once the create-or-join onboarding is
     // live on every supported client (docs/welcome-retirement.md).
     const greeterAgentId = process.env.BEELINE_RETIRE_WELCOME_GREETER_ID?.trim();
@@ -273,6 +271,10 @@ async function main() {
     process.env.MEDIA_MAX_BYTES ?? String(DEFAULT_MEDIA_MAXIMUM_BYTES),
   );
   const objectStorage = objectStorageFromEnv();
+  // The release migration runs without object storage; the server that owns
+  // the bucket repairs octet-stream image metadata once, after it starts.
+  void backfillArtifactByteMetadata(database, objectStorage).catch(error =>
+    console.error('artifact byte metadata backfill failed', error));
   const objectService = new ObjectService(
     database,
     objectStorage,
