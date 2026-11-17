@@ -82,3 +82,61 @@ test('current server has no dependency on the approved retired turn columns', ()
   `;
   assert.deepEqual(schemaProblems(current, {}), []);
 });
+
+const retiredContract = {
+  'apps/server/contracts/retired-turn-probe.sql': `
+    ALTER TABLE agents DROP COLUMN squire_report;
+    ALTER TABLE messages DROP COLUMN event_woken;
+  `,
+};
+
+test('unrelated CTE and recordset wildcards do not read retired columns', () => {
+  const source = `
+    const queue = \`WITH queued AS (SELECT * FROM agent_commands)
+      SELECT item.*,agent.owner_id FROM queued item
+      LEFT JOIN agents agent ON agent.agent_id=item.agent_id\`;
+    const repair = \`WITH repairs AS (SELECT * FROM jsonb_to_recordset($1::jsonb)
+      AS r(id text,mime text,title text))
+      UPDATE messages m SET attachments=(SELECT jsonb_agg(r.mime) FROM repairs r)
+      WHERE m.id=$2\`;
+  `;
+  for (const revision of ['candidate', 'previous release']) {
+    const tree = { 'apps/server/src/probe.ts': source };
+    assert.deepEqual(schemaProblems(
+      { ...retiredContract, ...(revision === 'candidate' ? tree : {}) },
+      revision === 'previous release' ? tree : {},
+    ), []);
+  }
+});
+
+test('real retired-column readers and writers still block candidate and rollback contracts', () => {
+  const readers = [
+    ['agents.squire_report', 'SELECT * FROM agents'],
+    ['agents.squire_report', 'SELECT * FROM ONLY agents'],
+    ['agents.squire_report', 'SELECT * FROM ONLY (agents)'],
+    ['agents.squire_report', 'SELECT DISTINCT * FROM public."agents"'],
+    ['agents.squire_report', 'SELECT DISTINCT ON (agent_id) * FROM agents'],
+    ['agents.squire_report', 'SELECT *, 1 AS extra FROM identities JOIN agents ON true'],
+    ['agents.squire_report', 'SELECT * FROM (agents a JOIN identities i ON a.agent_id=i.id)'],
+    ['agents.squire_report', 'SELECT * FROM (identities i JOIN agents a ON a.agent_id=i.id)'],
+    ['agents.squire_report', 'SELECT id, * FROM identities, agents'],
+    ['agents.squire_report', 'WITH queued AS (SELECT * FROM agents) SELECT id FROM queued'],
+    ['agents.squire_report', 'SELECT * FROM (SELECT * FROM agents) agent'],
+    ['agents.squire_report', 'SELECT agent.* FROM agents agent'],
+    ['agents.squire_report', 'SELECT agent.squire_report FROM agents agent'],
+    ['agents.squire_report', 'SELECT squire_report FROM agents'],
+    ['agents.squire_report', 'UPDATE agents SET squire_report=$1'],
+    ['messages.event_woken', 'SELECT * FROM messages'],
+    ['messages.event_woken', 'WITH repairs AS (SELECT * FROM jsonb_to_recordset($1)) SELECT * FROM messages'],
+    ['messages.event_woken', 'INSERT INTO messages(id,event_woken) VALUES($1,$2)'],
+  ];
+  for (const [column, query] of readers) {
+    const tree = { 'apps/server/src/probe.ts': `const query = \`${query}\`;` };
+    for (const revision of ['candidate', 'previous release']) {
+      assert.deepEqual(schemaProblems(
+        { ...retiredContract, ...(revision === 'candidate' ? tree : {}) },
+        revision === 'previous release' ? tree : {},
+      ), [`${column}: ${revision} still reads or writes it (apps/server/src/probe.ts)`], query);
+    }
+  }
+});

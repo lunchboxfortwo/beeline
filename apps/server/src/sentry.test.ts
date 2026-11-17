@@ -109,9 +109,9 @@ it('GH-CHECK-REFUSAL: check refresh preserves permission diagnostics and blocks 
     const source = `
       import assert from 'node:assert/strict';
       import { PgliteDatabase } from './src/test-support.ts';
-      import { migrate } from './dist/database.js';
-      import { GitHubOperations } from './dist/github-operations.js';
-      import { captureServerError, flushServerErrors } from './dist/sentry.js';
+      import { migrate } from './src/database.ts';
+      import { GitHubOperations } from './src/github-operations.ts';
+      import { captureServerError, flushServerErrors } from './src/sentry.ts';
       import { GitHubAppClient, GitHubHttpError } from '@beeline/auth/github';
       const db = new PgliteDatabase();
       await migrate(db);
@@ -468,18 +468,18 @@ it('WORKFLOW-ROLE-REFUSAL / BEELINE-SENTRY-REFUSALS / APP-REFUSAL-5: real agent 
     const source = `
       import assert from 'node:assert/strict';
       import { createServer } from 'node:http';
-      import { reserveServiceReviewWorkspaces } from './dist/service-review.js';
-      import { postRoomChoice } from './dist/room-choice.js';
-      import { saveWorkflow, startWorkflow } from './dist/workflow-runs.js';
-      import { ComposioApps } from './dist/composio-apps.js';
+      import { reserveServiceReviewWorkspaces } from './src/service-review.ts';
+      import { postRoomChoice } from './src/room-choice.ts';
+      import { saveWorkflow, startWorkflow } from './src/workflow-runs.ts';
+      import { ComposioApps } from './src/composio-apps.ts';
       import { describedWorkflow } from './src/test-support.ts';
       import { PgliteDatabase } from './src/test-support.ts';
-      import { migrate } from './dist/database.js';
-      import { HelperDaemonService as DaemonService } from './dist/test-fixtures/helper-daemon.js';
-      import { LiveHub } from './dist/live.js';
-      import { createAgentCommand } from './dist/agent-command.js';
-      import { createBeelineServer } from './dist/server.js';
-      import { flushServerErrors } from './dist/sentry.js';
+      import { migrate } from './src/database.ts';
+      import { HelperDaemonService as DaemonService } from './src/test-fixtures/helper-daemon.ts';
+      import { LiveHub } from './src/live.ts';
+      import { createAgentCommand } from './src/agent-command.ts';
+      import { createBeelineServer } from './src/server.ts';
+      import { flushServerErrors } from './src/sentry.ts';
       const db = new PgliteDatabase();
       await migrate(db);
       const agent = 'c'.repeat(64), human = 'a'.repeat(64);
@@ -537,7 +537,7 @@ it('WORKFLOW-ROLE-REFUSAL / BEELINE-SENTRY-REFUSALS / APP-REFUSAL-5: real agent 
       const queue = async () => (await db.query('SELECT * FROM agent_pending_attachments ORDER BY id')).rows;
       try {
         // browser-refusal-1: Sentry event 42ab67c6e9704070a05b315fb3140e6e.
-        // Replay the rejected option through the built daemon HTTP boundary.
+        // Replay the rejected option through the real daemon HTTP boundary.
         const browserRefusal = await call({...input,service:'Google',reason:'Switch browser account',
           action:'Switch the Google browser account',purpose:'continue with the selected account',
           continuation:'Continue with the selected account.',switchGoogleAccount:true},'connect');

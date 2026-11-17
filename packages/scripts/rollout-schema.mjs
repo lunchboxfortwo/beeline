@@ -26,6 +26,31 @@ export function runtimeSql(source) {
     .replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
 }
 
+/** A wildcard reads only relations in its SELECT, not neighboring CTEs. */
+function selectsAllColumns(query, table) {
+  query = query.replace(/\bONLY\s*\(\s*((?:"?\w+"?\.)?"?\w+"?)\s*\)/gi, 'ONLY $1');
+  const scopes = [''];
+  const parents = [0];
+  for (const character of query) {
+    if (character === '(') {
+      parents.push(scopes.length);
+      scopes.push('');
+    } else if (character === ')' && parents.length > 1) {
+      const child = scopes[parents.pop()];
+      // A parenthesized join is still in the outer FROM, unlike a subquery.
+      scopes[parents.at(-1)] += /\bJOIN\b/i.test(child) && !/\bSELECT\b/i.test(child) ? `(${child})` : '()';
+    } else scopes[parents.at(-1)] += character;
+  }
+  return scopes.some(scope => scope.split(/\bSELECT\b/i).slice(1).some(select => {
+    const from = /\bFROM\b/i.exec(select);
+    if (!from) return false;
+    const projection = select.slice(0, from.index).replace(/^\s*(?:ALL|DISTINCT(?:\s+ON\s*\(\))?)\s+/i, '');
+    if (!/(?:^|,)\s*\*\s*(?:,|$)/.test(projection)) return false;
+    const relations = select.slice(from.index).split(/\b(?:WHERE|GROUP|HAVING|ORDER|LIMIT|UNION|EXCEPT|INTERSECT)\b|;/i)[0];
+    return new RegExp(`(?:\\b(?:FROM|JOIN)\\s+|,\\s*)\\(*\\s*(?:ONLY\\s+)?(?:"?\\w+"?\\.)?"?${table}"?(?!\\w)`, 'i').test(relations);
+  }));
+}
+
 function readsColumn(source, table, column) {
   const hasTable = new RegExp(`\\b${table}\\b`, 'i');
   for (const fragment of source.split('`')) {
@@ -33,7 +58,7 @@ function readsColumn(source, table, column) {
     if (!hasTable.test(query)) continue;
     const aliases = [...query.matchAll(new RegExp(`\\b(?:FROM|JOIN|UPDATE|INTO)\\s+(?:"?\\w+"?\\.)?"?${table}"?\\s+(?:AS\\s+)?(\\w+)`, 'gi'))]
       .map(m => m[1]).filter(alias => !/^(WHERE|SET|ON|LEFT|RIGHT|INNER|JOIN|ORDER|GROUP|LIMIT|RETURNING)$/i.test(alias));
-    if (/(?:SELECT|,)\s*\*\s*(?:,|FROM)/i.test(query) ||
+    if (selectsAllColumns(query, table) ||
         [table, ...aliases].some(alias => new RegExp(`\\b${alias}\\.\\*`).test(query))) return true;
     if ([table, ...aliases].some(alias => new RegExp(`\\b${alias}\\.${column}\\b`, 'i').test(query))) return true;
     // Unqualified SQL columns and INSERT column lists are conservatively reads.

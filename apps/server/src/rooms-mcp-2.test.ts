@@ -475,7 +475,6 @@ const scope1 = fixtureScope1();
     const command = (await scope1.db.query<{ id: string; turn_request_id: string }>(
       "UPDATE agent_commands SET agent_depth=3,reason='report' WHERE source_message_id=$1 AND agent_id=$2 RETURNING id,turn_request_id",
       [source.messageId, AGENT])).rows[0]!;
-    const generationId = `depth-three-${callback}`;
     await startQueuedCommand(scope1.daemon, { roomId: ROOM, commandId: command.id }, AGENT);
     await scope1.daemon.execute('postAgentTurnReceipt', { roomId: ROOM, agentId: AGENT, requestId: command.turn_request_id, status: 'working' }, AGENT);
     const result = await scope1.daemon.execute('message', { roomId:ROOM,requestId:command.turn_request_id,to:{agent:handle,place:ROOM},text:'the work is finished' }, AGENT);
@@ -487,7 +486,11 @@ const scope1 = fixtureScope1();
       return new Response('', { status: 200 });
     });
     expect(posts.filter(post => post.body.memberId === member)).toEqual(callback === 'none' ? [] : [
-      { url, body: expect.objectContaining({ commandId: result.id, memberId: member }) },
+      { url, body: expect.objectContaining({
+        messageId: result.id, memberId: member, roomId: ROOM,
+        author: { id: AGENT, handle: 'demo-agent', name: 'Demo Agent' },
+        text: 'Wake (message): the work is finished',
+      }) },
     ]);
     const mentions = await client.callTool({ name: 'list_mentions', arguments: {} });
     expect(JSON.stringify(mentions)).toContain(result.id);
