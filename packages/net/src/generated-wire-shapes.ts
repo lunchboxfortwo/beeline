@@ -746,7 +746,7 @@ export const wireShapes: readonly WireShape[] = [
   shape({"kind":"object","properties":{"mentionsViewer":{"node":504,"optional":true}}}),
   shape({"kind":"union","choices":[6,743]}),
   shape({"kind":"array","item":744}),
-  shape({"kind":"object","properties":{"requestId":{"node":1,"optional":false},"agentPubkey":{"node":1,"optional":false},"status":{"node":745,"optional":false},"startedAt":{"node":17,"optional":true},"createdAt":{"node":18,"optional":false},"generationId":{"node":5,"optional":true},"requestedBy":{"node":5,"optional":true}}}),
+  shape({"kind":"object","properties":{"requestId":{"node":1,"optional":false},"agentPubkey":{"node":1,"optional":false},"status":{"node":745,"optional":false},"version":{"node":17,"optional":true},"startedAt":{"node":17,"optional":true},"createdAt":{"node":18,"optional":false},"generationId":{"node":5,"optional":true},"requestedBy":{"node":5,"optional":true}}}),
   shape({"kind":"union","choices":[322,746,313,747]}),
   shape({"kind":"literal","value":"cancelled"}),
   shape({"kind":"literal","value":"complete"}),

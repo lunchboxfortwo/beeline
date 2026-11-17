@@ -468,7 +468,7 @@ export function handleLiveConnection(ctx: LiveConnectionContext, client: WebSock
                   if (committedRow?.type === 'message' && committedRow.row.room_id !== roomId) return;
                   const rowKey = target.type === 'message'
                     ? `${roomId}:message:${target.messageId}`
-                    : `${roomId}:turn:${target.agentId}:${target.requestId}`;
+                    : `${roomId}:turn:${target.agentId}`;
                   beginRowRead(rowKey);
                   const pendingDelta = (async () => committedRow?.type === 'message'
                     ? ctx.options.phone.projectCommittedLiveDelta(
@@ -512,7 +512,9 @@ export function handleLiveConnection(ctx: LiveConnectionContext, client: WebSock
                       // Never roll a row back after a newer projection.
                       if (!admitRow(rowKey,
                         publicDelta.type === 'message-delta' && publicDelta.version !== undefined
-                          ? { version: publicDelta.version } : undefined,
+                          ? { version: publicDelta.version }
+                          : publicDelta.type === 'turn-delta' && publicDelta.turn.version !== undefined
+                            ? { version: publicDelta.turn.version } : undefined,
                         createHash('sha256').update(JSON.stringify(publicDelta)).digest('hex')))
                         return;
                       rememberPaintTrace(wireTrace, target.type);

@@ -999,6 +999,7 @@
           "input_tokens": "existing before the registry; weekly audit reviews",
           "output_tokens": "existing before the registry; weekly audit reviews",
           "connection_epoch": "Recorded helper connection epoch at start; replacements interrupt only earlier executions.",
+          "version": "Database write sequence orders committed turn projections across live delivery and covering reads; arrival order cannot recover it.",
           "ended_at": "when a turn ended; set by the turn's own status change, so idle timing never reads a mutable corner span",
           "startup_outcome": {
             "reason": "Retained without runtime use until the previous server drains during this rolling release.",

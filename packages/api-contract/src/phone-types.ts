@@ -665,6 +665,8 @@ export type RoomViewAgentTurn = {
   readonly requestId: string;
   readonly agentPubkey: string;
   readonly status: 'working' | 'complete' | 'failed' | 'cancelled';
+  /** Database write sequence for turn projections; absent on older servers. */
+  readonly version?: number;
   /** Immutable turn start time in Unix seconds. */
   readonly startedAt?: number;
   /** Relay event time in Unix seconds. */

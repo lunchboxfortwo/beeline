@@ -279,6 +279,31 @@ const scope4 = fixtureScope4();
   });
 
 
+  it('never revives a completed turn when its working read finishes last', async () => {
+    const roomId = 'room-live';
+    const turn = { agentPubkey: 'b'.repeat(64), requestId: 'a0ca7bfd',
+      status: 'working' as const, startedAt: 1794928215, createdAt: 1794928215, version: 0 };
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const batch = vi.fn()
+      .mockImplementationOnce(async (_roomId, viewers: string[]) => {
+        await held;
+        return new Map(viewers.map(viewer => [viewer, { type: 'turn-delta', roomId, turn }]));
+      })
+      .mockImplementationOnce(async (_roomId, viewers: string[]) => new Map(viewers.map(viewer => [viewer,
+        { type: 'turn-delta', roomId, turn: { ...turn, status: 'complete', createdAt: 1794928320, version: 1 } }])));
+    const { live, socket } = await scope4.connect(vi.fn() as PhoneService['readLiveDelta'],
+      undefined, undefined, false, undefined, undefined, batch as PhoneService['readLiveDeltas']);
+    const complete = nextSocketMessage(socket, 'turn-delta');
+    live.publish({ type: 'invalidate', roomId, reason: 'postgres:agent_turns', agentId: turn.agentPubkey, requestId: turn.requestId });
+    live.publish({ type: 'invalidate', roomId, reason: 'turn', agentId: turn.agentPubkey, requestId: turn.requestId });
+    await expect(complete).resolves.toMatchObject({ turn: { status: 'complete' } });
+    const noRevival = expectNoSocketMessageOfType(socket, 'turn-delta', 100);
+    release();
+    await noRevival;
+    expect(batch).toHaveBeenCalledTimes(2);
+  });
+
   it('never sends an older projection of a message after a newer one', async () => {
     const roomId = 'room-live';
     const delta = (text: string, version: number) => ({ type: 'message-delta' as const, roomId,

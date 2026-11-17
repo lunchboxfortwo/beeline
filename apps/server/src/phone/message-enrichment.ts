@@ -136,6 +136,7 @@ import { projectedMessage, messageOrder } from './read-projection.js';
         requestId: turn.request_id,
         agentPubkey: turn.agent_id,
         status: turn.status,
+        ...(turn.version !== undefined ? { version: Number(turn.version) } : {}),
         startedAt: unix(turn.started_at),
         createdAt: unix(turn.created_at),
         ...(turn.requested_by ? { requestedBy: turn.requested_by } : {}),

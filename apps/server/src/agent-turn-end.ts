@@ -8,6 +8,21 @@ import type { SqlDatabase } from './database.js';
  */
 export const AGENT_TURN_END_SCHEMA = `
 ALTER TABLE agent_turns ADD COLUMN IF NOT EXISTS connection_epoch bigint;
+-- Lifecycle projections may finish their reads in a different order. Keep a
+-- revision even when two executions start in one second. The constant column
+-- default avoids rewriting turn history during rollout; new writes use the
+-- sequence so different requests for an agent are comparable too.
+CREATE SEQUENCE IF NOT EXISTS agent_turns_version_seq;
+ALTER TABLE agent_turns ADD COLUMN IF NOT EXISTS version bigint NOT NULL DEFAULT 0;
+CREATE OR REPLACE FUNCTION agent_turns_bump_version() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  NEW.version := nextval('agent_turns_version_seq');
+  RETURN NEW;
+END; $$;
+DROP TRIGGER IF EXISTS agent_turns_bump_version ON agent_turns;
+CREATE TRIGGER agent_turns_bump_version BEFORE INSERT OR UPDATE ON agent_turns
+  FOR EACH ROW EXECUTE FUNCTION agent_turns_bump_version();
 CREATE OR REPLACE FUNCTION beeline_finish_agent_command(
   command_id text, outcome text, terminal_reason text, result_id text
 ) RETURNS SETOF agent_commands LANGUAGE plpgsql AS $$

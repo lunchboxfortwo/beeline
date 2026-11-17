@@ -93,7 +93,9 @@ export function offerRoomTurns(scope: string | null, roomId: string, turns: read
   }
   for (const turn of turns) {
     const held = room.turns.get(turn.agentPubkey);
-    if (held && (held.stamp > stamp || (stamp === 0 && held.row.requestId === turn.requestId &&
+    if (held?.row.version !== undefined && turn.version !== undefined) {
+      if (held.row.version > turn.version) continue;
+    } else if (held && (held.stamp > stamp || (stamp === 0 && held.row.requestId === turn.requestId &&
       held.row.generationId === turn.generationId && held.row.status !== 'working' && turn.status === 'working'))) continue;
     if (held?.row !== turn) changed = true;
     room.turns.set(turn.agentPubkey, { row: turn, stamp });
@@ -104,6 +106,8 @@ export function offerRoomTurns(scope: string | null, roomId: string, turns: read
 export function writeRoomTurn(scope: string | null, roomId: string, turn: RoomViewAgentTurn): void {
   if (!scope) return;
   const room = records(keyOf(scope, roomId));
+  const held = room.turns.get(turn.agentPubkey)?.row;
+  if (held?.version !== undefined && turn.version !== undefined && held.version > turn.version) return;
   room.turns.set(turn.agentPubkey, { row: turn, stamp: nextSurfaceStamp() });
   notify(room);
 }

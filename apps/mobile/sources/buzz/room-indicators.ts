@@ -45,11 +45,9 @@ export type TurnProgressInput = {
  * The channel-local agent whose active turn should light the thinking line.
  *
  * The server-indexed latest WORKING receipt is the only proof, and the only
- * vetoes are the receipt's own: the 90-second freshness horizon and — applied
- * upstream, in `isAgentTurnActive` — an explicit offline marker or a different
- * daemon generation for claimed receipts. Dispatch receipts have a reserved
- * `pending:` generation and remain visible before claim. A missing availability
- * record is never a veto (C77). Draft
+ * terminal state is the matching committed lifecycle projection, ordered by
+ * its database revision upstream. Availability and elapsed time cannot start
+ * or end a turn. Draft
  * streams are content overlays, not lifecycle: they can start late and a lost
  * retract can leave one open forever.
  */

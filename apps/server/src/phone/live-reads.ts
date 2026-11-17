@@ -98,7 +98,7 @@ import { phoneListRoomWorkflowRuns } from './schedules.js';
                AND workspace_member.removed_at IS NULL
              WHERE room.id=$1
            )
-           SELECT turn.request_id,turn.agent_id,turn.status,turn.started_at,turn.created_at,
+           SELECT turn.request_id,turn.agent_id,turn.status,turn.started_at,turn.created_at,turn.version,
              requester.id requested_by,
              ARRAY(SELECT identity_id FROM authorized) authorized_viewers,
              ${roomNeedsYouSql('room')} deck_needs_you,

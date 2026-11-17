@@ -74,6 +74,23 @@ it('projects a working turn at claim before any agent activity or model output e
   expect(room?.latestAgentTurns).toEqual([expect.objectContaining({ agentPubkey:A, requestId:command.turnRequestId, status:'working', startedAt:expect.any(Number) })]);
   expect((await db.query('SELECT id FROM messages WHERE room_id=$1 AND author_id=$2',[R,A])).rows).toEqual([]);
 });
+it('orders an interrupted and restarted execution of an unanswered item by committed revision',async()=>{
+  const command=await ask();
+  const read=async()=> (await phone.readRoom(R,H))!.latestAgentTurns[0]!;
+  const working=await read();
+  expect(working.version).toBeGreaterThan(0);
+  await daemon.execute('postRoomMessage',{roomId:R,requestId:command.turnRequestId,text:'',harnessEnded:true},A);
+  const ended=await read();
+  expect(ended.status).toBe('cancelled');
+  expect(ended.version).toBeGreaterThan(working.version!);
+  await daemon.execute('startAgentTurn',{roomId:R,requestId:command.turnRequestId},A,undefined,owner);
+  const resumed=await read();
+  expect(resumed.status).toBe('working');
+  expect(resumed.requestId).toBe(ended.requestId);
+  expect(resumed.version).toBeGreaterThan(ended.version!);
+  const liveTurn=(await phone.readLiveDeltas(R,[H],{type:'turn',agentId:A,requestId:command.turnRequestId})).get(H);
+  expect(liveTurn).toMatchObject({type:'turn-delta',turn:{version:resumed.version,status:'working'}});
+});
 it('an answered tag stays complete through elapsed time, duplicate receipts and queue reads',async()=>{
   const c=await ask();
   await daemon.execute('postRoomMessage',{ roomId:R, requestId:c.turnRequestId, text:'Here is the answer.' },A);

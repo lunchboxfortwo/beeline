@@ -193,7 +193,7 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
            ORDER BY (i.id<>$2),i.id LIMIT (SELECT CASE WHEN parent_id IS NULL THEN 2147483647
              ELSE ${ROOM_VIEW_MEMBER_LIMIT} END FROM authorized_room)
          ), turn_rows AS (
-           SELECT turn.request_id,turn.agent_id,turn.status,turn.started_at,turn.created_at,
+           SELECT turn.request_id,turn.agent_id,turn.status,turn.started_at,turn.created_at,turn.version,
              requester.id requested_by
            FROM authorized_room room
            CROSS JOIN LATERAL (

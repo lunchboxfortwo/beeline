@@ -510,6 +510,7 @@ export function readAgentTurn(value: unknown): RoomViewAgentTurn | null {
     agentPubkey: item.agentPubkey,
     status: item.status,
     createdAt: item.createdAt,
+    ...field('version', integer(item.version) ? item.version : undefined),
     ...field('startedAt', integer(item.startedAt) ? item.startedAt : undefined),
     ...field('generationId', typeof item.generationId === 'string' ? item.generationId : undefined),
     ...field('requestedBy', typeof item.requestedBy === 'string' ? item.requestedBy : undefined),
