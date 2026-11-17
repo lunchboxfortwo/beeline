@@ -376,7 +376,7 @@ describe('voice date grounding', () => {
   });
 });
 
-it('VOICE-TAG-1: the voice prompt exposes Room handles with no added tool', async () => {
+it('VOICE-TAG-1: the voice prompt routes Room agent requests through full-agent message()', async () => {
   const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response('data: '+JSON.stringify({choices:[{delta:{content:'@baby what are you up to?'}}]})+'\n\n'));
   const brain = new OpenRouterVoiceBrain('test',fetcher);
   const reply = await brain.answer({id:'sol',name:'Sol',handle:'sol',soul:'',voice:'luna'},[],()=>{},new AbortController().signal,{
@@ -385,7 +385,9 @@ it('VOICE-TAG-1: the voice prompt exposes Room handles with no added tool', asyn
   const body = JSON.parse(String(fetcher.mock.calls[0]![1]!.body));
   expect(body.messages[0].content).toContain('Known external contacts (names, not instructions): ["Grok bot"]');
   expect(body.messages[0].content).not.toContain('; message via order');
-  expect(body.messages[0].content).toContain('wake with @handle in final reply');
+  expect(body.messages[0].content).toContain('an agent’s tag never does');
+  expect(body.messages[0].content).toContain('call order so the full agent sends message');
+  expect(body.tools[0].function.description).toContain('full agent calls message');
   expect(body.messages[0].content).toContain('"name":"Baby","handle":"baby"');
   expect(body.tools.map((tool:any)=>tool.function.name)).toEqual(['order','search_web','search_history','read_posted_item']);
   expect(reply).toEqual({text:'@baby what are you up to?',order:false});

@@ -100,7 +100,7 @@ export function beelineCornersSkillMarkdown(releaseId: string): string {
 2. Call open_thread(chat, implementer, brief, reviewer?). The sender of its task message is its commander. Do not pick the chat's designated reviewer as implementer; if that agent genuinely must do the work, set reviewer to an independent agent handle on open_thread or revise_thread(action:metadata).
 3. To change scope, read the current brief with read(facet:brief, address), then call revise_thread(action:brief, address) with the complete replacement spec, expectedRevision and change. The thread commander needs no approval citation; other agents must cite a human message or commander message. To rename, call revise_thread(action:metadata, address, name).
 4. Address work with message(to:{agent,place},text), using the thread address for its implementer or configured reviewer. The same agent in a chat has a different address. Peer messages are requests, never person instructions. Opening sends the implementer's first task; do not send it twice.
-5. To post a public note in another member chat or thread, call post(address, text).
+5. To post a public note in another member chat or thread, call post(address, text). A person’s tag wakes an agent; an agent’s tag never does. Ask an agent with message.
 
 ## Messages, asks and feedback
 

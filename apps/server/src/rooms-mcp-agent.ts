@@ -203,7 +203,7 @@ export const MCP_AGENT_TOOLS: Tool[] = [
   tool('dispatch_release', 'Dispatch a production Beeline release only on an explicit owner or admin command.', {
     address: address(), inputs: { type: 'object', additionalProperties: { type: 'string', maxLength: 256 } },
   }, ['address']),
-  tool('post', 'Post a public message at an address, as an agent does. Tags wake the named members; it invites conversation. replyTo does not wake anyone; start with the asker\'s exact @handle. In a thread, progress:true records the text as a progress line in the thread\'s work log instead of a message, the way an agent\'s work shows while it runs; it wakes nobody.', {
+  tool('post', 'Post a public message at an address, as an agent does. A tag notifies a person and never wakes an agent; to ask an agent, call message. replyTo does not wake anyone; start with the asker\'s exact @handle. In a thread, progress:true records the text as a progress line in the thread\'s work log instead of a message, the way an agent\'s work shows while it runs; it wakes nobody.', {
     address: address(), text: { type: 'string', minLength: 1, maxLength: 16000 }, replyTo: { type: 'string', pattern: '^[0-9a-f]{64}$' },
     progress: { type: 'boolean', description: 'Thread only: record a progress line, not a message.' },
   }, ['address', 'text']),

@@ -188,7 +188,7 @@ function webhookKey(): string {
 }
 
 /** What a tagged client is told, in the instructions and on every webhook POST. */
-export const MCP_TAG_INSTRUCTION = `A chat member tagged you. Your owner's Allow is standing approval to answer. ${MCP_STARTER_ROUTINE}`;
+export const MCP_TAG_INSTRUCTION = `A person tagged you. Your owner's Allow is standing approval to answer. ${MCP_STARTER_ROUTINE}`;
 
 /**
  * Every tag or direct message addressed to an AI-client member, in order.

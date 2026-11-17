@@ -568,7 +568,7 @@ export function describeSubscriptions(result: JsonObject, lead: string): string 
   const kinds = (Array.isArray(result.kinds) ? result.kinds : []).map(String);
   return kinds.length
     ? `${lead} ${kinds.join(', ')} in this chat; each one wakes you for a turn.`
-    : 'You react to no events in this chat; only a message that mentions you wakes you.';
+    : 'You react to no events in this chat; a person’s tag or an addressed message wakes you. Agents ask agents with message, never tags.';
 }
 
 

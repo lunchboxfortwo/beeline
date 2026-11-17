@@ -95,10 +95,13 @@ it('issues-triage can order and revise fix threads but cannot open in an inacces
     .rejects.toThrow('daemon chat access denied');
 });
 
-it('corner mentions still wake an instance in the same corner', async () => {
+it('corner message wakes an instance in the same corner while a tag stays quiet', async () => {
   const opened = await open(), turn = await worker(opened.cornerId);
-  await rootFixture.daemon.execute('postCornerMessage', { ...authority(turn), cornerId:opened.cornerId, text: '@ruby review this here' }, WORKER);
-  expect((await commands(opened.cornerId, RUBY)).length).toBeGreaterThan(0);
+  const tag = await rootFixture.daemon.execute('postCornerMessage', { ...authority(turn), cornerId:opened.cornerId, text: '@ruby review this here' }, WORKER);
+  expect(tag.woken).toEqual([]);
+  expect(await commands(opened.cornerId, RUBY)).toEqual([]);
+  await rootFixture.daemon.execute('message', { ...authority(turn), to:{agent:RUBY,place:opened.cornerId}, text:'review this here' }, WORKER);
+  expect((await commands(opened.cornerId, RUBY)).map(item=>item.reason)).toEqual(['message']);
   expect((await commands(ROOM, RUBY))).toEqual([]);
 });
 
@@ -309,14 +312,16 @@ it('vocabulary: commander orders the child reviewer and its report returns priva
 });
 
 
-it('vocabulary: corner post tags wake conversation in the posted place without an assignment', async () => {
+it('vocabulary: corner message starts conversation in the addressed place without an assignment', async () => {
   const opened = await open();
   const turn = await worker(opened.cornerId);
   const posted = await rootFixture.daemon.execute('postCornerMessage', { ...authority(turn), cornerId:opened.cornerId, text:'@ruby discuss the wording; @absent can you join?' }, WORKER);
-  expect(posted.woken).toEqual(['ruby']);
+  expect(posted.woken).toEqual([]);
   expect(posted.notWoken).toContainEqual({handle:'absent',reason:expect.stringContaining('member')});
-  const reply = (await commands(opened.cornerId,RUBY)).find(command => command.reason === 'agent_tag')!;
-  expect(reply.private).toBeFalsy();
+  expect(await commands(opened.cornerId,RUBY)).toEqual([]);
+  await rootFixture.daemon.execute('message',{...authority(turn),to:{agent:RUBY,place:opened.cornerId},text:'discuss the wording'},WORKER);
+  const reply = (await commands(opened.cornerId,RUBY)).find(command => command.reason === 'message')!;
+  expect(reply.from).toEqual({agent:WORKER,place:opened.cornerId});
   await claim(reply);
   await rootFixture.daemon.execute('postRoomMessage', {...authority(reply),text:'Here is my wording suggestion.'},RUBY);
   expect((await commands(opened.cornerId,WORKER)).find(item=>item.source.body==='Here is my wording suggestion.')).toMatchObject({reason:'reply',from:{agent:RUBY,place:opened.cornerId}});
@@ -332,13 +337,17 @@ it('vocabulary: forbidden thread orders give a usable report step', async () => 
 });
 
 
-it('public-note tags retain provenance beyond the former depth bound', async () => {
+it('public-note tags stay quiet at depth while messages retain provenance', async () => {
   const opened = await open(), turn = await worker(opened.cornerId);
   await rootFixture.db.query(`UPDATE agent_commands SET agent_depth=3 WHERE id=$1`,[turn.id]);
   const posted = await rootFixture.daemon.execute('postCornerMessage', {...authority(turn),cornerId:opened.cornerId,text:'@ruby discuss this at the depth bound'},WORKER);
-  expect(posted.woken).toEqual(['ruby']);
+  expect(posted.woken).toEqual([]);
   expect(posted.notWoken).toEqual([]);
   expect((await rootFixture.db.query(`SELECT text FROM messages WHERE id=$1`,[posted.id])).rows[0]?.text).toContain('@ruby');
+  expect(await commands(opened.cornerId,RUBY)).toEqual([]);
+  const message=await rootFixture.daemon.execute('message',{...authority(turn),to:{agent:RUBY,place:opened.cornerId},text:'discuss this at the depth bound'},WORKER);
+  expect((await rootFixture.db.query('SELECT agent_depth,parent_command_id FROM agent_commands WHERE id=$1',[message.id])).rows[0])
+    .toEqual({agent_depth:4,parent_command_id:turn.id});
 });
 
 
@@ -485,7 +494,7 @@ it('failure visibility: Squire approval proves a current durable wait, not a com
 it('failure visibility: post acknowledges stored visible text and cannot discharge an order', async () => {
   const opened = await open();
   const result = await rootFixture.daemon.execute('postCornerMessage', { ...authority(rootFixture.order), cornerId: opened.cornerId, text: 'Work remains to be done' }, RUBY);
-  expect(result).toMatchObject({ stored: true, visible: true, receipt: 'Message stored and visible.' });
+  expect(result).toMatchObject({ stored: true, visible: true, receipt: 'Message stored and visible. No agents woken.' });
   expect((await commands(DM, RUBY)).filter(c => c.reason === 'report')).toHaveLength(0);
 });
 
@@ -578,7 +587,7 @@ it('Reproduction unreported-order-false: a later report(done) closes the open or
 
 it('R1: a member posts a public message to a top-level Room', async () => {
   const posted = await rootFixture.daemon.execute('postCornerMessage', { ...authority(rootFixture.order), cornerId: ROOM, text: 'Room posting proof' }, RUBY);
-  expect(posted).toMatchObject({ address: ROOM, stored: true, visible: true, receipt: 'Message stored and visible.' });
+  expect(posted).toMatchObject({ address: ROOM, stored: true, visible: true, receipt: 'Message stored and visible. No agents woken.' });
   expect((await rootFixture.phone.readRoom(ROOM, HUMAN))?.messages.some(message => message.id === posted.id && message.text === 'Room posting proof')).toBe(true);
 });
 
@@ -597,16 +606,17 @@ it('R1: post refuses removed membership, archived and unknown addresses clearly'
 
 
 
-it('Reproduction R1: each post receipt lists only that post tags', async () => {
+it('Reproduction R1: each agent post receipt truthfully reports no wake', async () => {
   const opened = await open(), turn = await worker(opened.cornerId);
   const post = (text: string) => rootFixture.daemon.execute('postCornerMessage', { ...authority(turn), cornerId: opened.cornerId, text }, WORKER);
   const first = await post('@ruby discuss this');
-  expect(first.woken).toEqual(['ruby']);
+  expect(first.woken).toEqual([]);
+  expect(first.receipt).toContain('No agents woken.');
   const other = '7'.repeat(64);
   await rootFixture.db.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'agent','Other','other') ON CONFLICT DO NOTHING`, [other]);
   await rootFixture.db.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, [other,HUMAN]);
   await rootFixture.db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$2,'member'),($1,$3,$2,'member')`, [WS,other,ROOM]);
-  expect((await post('@other this post is for you')).woken).toEqual(['other']);
+  expect((await post('@other this post is for you')).woken).toEqual([]);
   const second = await post('No tag in this next post.');
   expect(second.woken).toEqual([]);
   const skipped = await post('@captain see this');
@@ -617,8 +627,8 @@ it('Reproduction R1: each post receipt lists only that post tags', async () => {
   expect(quoted.woken).toEqual([]);
   expect((await post('Correction: my quote of "@ruby" in that reply woke Ruby. That was my error. Ruby has no task here.')).woken).toEqual([]);
   expect((await post('The next post has no tag.')).woken).toEqual([]);
-  expect((await post('@ruby fresh tag')).woken).toEqual(['ruby']);
-  expect((await post('"start ```\ncode\n``` @ruby"')).woken).toEqual(['ruby']);
+  expect((await post('@ruby fresh tag')).woken).toEqual([]);
+  expect((await post('"start ```\ncode\n``` @ruby"')).woken).toEqual([]);
 });
 
 
@@ -762,13 +772,14 @@ it('dedupe retains activity and accepts an identical final retry', async () => {
 });
 
 
-it('dedupe does not wake a tagged agent again for the collapsed final', async () => {
+it('neither an agent tag nor its collapsed final wakes another agent', async () => {
   await rootFixture.db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [WS, DM, WORKER]);
   const text = '@worker Google sign-in is merged.';
   const posted = await rootFixture.daemon.execute('postCornerMessage', { ...authority(rootFixture.order), cornerId: DM, text }, RUBY);
   await rootFixture.daemon.execute('postRoomMessage', { ...authority(rootFixture.order), text }, RUBY);
   expect((await rootFixture.db.query(`SELECT source_message_id FROM agent_commands WHERE agent_id=$1 AND reason='agent_tag'`, [WORKER])).rows)
-    .toEqual([{ source_message_id: posted.id }]);
+    .toEqual([]);
+  expect(posted.woken).toEqual([]);
 });
 
 

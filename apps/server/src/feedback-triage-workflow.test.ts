@@ -17,6 +17,8 @@ import {
   WORKSPACE_WALK_STEPS,
   FEEDBACK_TRIAGE_SCHEDULE_PROMPT,
   FEEDBACK_TRIAGE_STEPS,
+  FEEDBACK_TRIAGE_STEPS_SLUG,
+  backfillFeedbackMessageGuidance,
   backfillFeedbackTriageWorkflow,
 } from './feedback-triage-workflow.js';
 import { getInstitutionalContext } from './institutional-memory-shadow.js';
@@ -164,6 +166,26 @@ describe('feedback-triage workflow', () => {
       WHERE skill_id IN(SELECT id FROM workspace_skills WHERE slug='workspace-browse-sweep')`);
     await backfillWorkspaceWalkHistory(database);
     expect(await current()).toBe('Team procedure');
+  });
+
+  it('refreshes installed triage tag handoff guidance once while preserving team edits', async () => {
+    await backfillFeedbackTriageWorkflow(database);
+    await database.query(`UPDATE workspace_skill_versions SET markdown='Tag the agent best suited to the work',content_hash=repeat('0',64)
+      WHERE skill_id IN(SELECT id FROM workspace_skills WHERE slug=$1)`,[FEEDBACK_TRIAGE_STEPS_SLUG]);
+    const current=async()=> (await database.query<{markdown:string;current_version:number}>(`SELECT v.markdown,s.current_version
+      FROM workspace_skills s JOIN workspace_skill_versions v ON v.skill_id=s.id AND v.version=s.current_version
+      WHERE s.workspace_id=$1 AND s.slug=$2`,[WORKSPACE,FEEDBACK_TRIAGE_STEPS_SLUG])).rows[0]!;
+    await backfillFeedbackMessageGuidance(database);
+    const updated=await current();
+    expect(updated.markdown).toBe(FEEDBACK_TRIAGE_STEPS);
+    expect(updated.markdown).toContain('call message to that agent at the thread address');
+    expect(updated.markdown).not.toContain('Tag the agent best suited');
+    await backfillFeedbackMessageGuidance(database);
+    expect(await current()).toEqual(updated);
+    await database.query(`UPDATE workspace_skill_versions SET markdown='Team procedure',extractor_version='team'
+      WHERE skill_id IN(SELECT id FROM workspace_skills WHERE slug=$1)`,[FEEDBACK_TRIAGE_STEPS_SLUG]);
+    await backfillFeedbackMessageGuidance(database);
+    expect((await current()).markdown).toBe('Team procedure');
   });
 
   it('has no approval gate or dispatch state in the seeded contract', () => {

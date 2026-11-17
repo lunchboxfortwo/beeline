@@ -448,7 +448,7 @@ const scope1 = fixtureScope1();
 
 
 
-  it.each(['member', 'client', 'none'])('MCP-TAG-DEPTH: depth-three report preserves the tag with %s webhook', async callback => {
+  it.each(['member', 'client', 'none'])('MCP-MESSAGE-DEPTH: depth-three report delivers a message with %s webhook', async callback => {
     await deliverMcpMemberWebhooks(scope1.db, async () => new Response('', { status: 200 }));
     const { client, grant, member } = await scope1.connected();
     const url = 'https://hooks.example/depth-three';
@@ -464,8 +464,8 @@ const scope1 = fixtureScope1();
     const generationId = `depth-three-${callback}`;
     await startQueuedCommand(scope1.daemon, { roomId: ROOM, commandId: command.id }, AGENT);
     await scope1.daemon.execute('postAgentTurnReceipt', { roomId: ROOM, agentId: AGENT, requestId: command.turn_request_id, status: 'working' }, AGENT);
-    const result = await scope1.daemon.execute('postCornerMessage', { roomId:ROOM,cornerId:ROOM,requestId:command.turn_request_id,text:`@${handle} the work is finished` }, AGENT);
-    expect((await scope1.db.query('SELECT 1 FROM rooms_mcp_mentions WHERE member_id=$1 AND message_id=$2', [member, result.id])).rowCount).toBe(1);
+    const result = await scope1.daemon.execute('message', { roomId:ROOM,requestId:command.turn_request_id,to:{agent:handle,place:ROOM},text:'the work is finished' }, AGENT);
+    expect((await scope1.db.query("SELECT agent_depth FROM agent_commands WHERE id=$1 AND agent_id=$2 AND reason='message'", [result.id,member])).rows[0]).toEqual({agent_depth:4});
     expect((await scope1.db.query('SELECT 1 FROM agent_commands WHERE agent_id=$1', [member])).rowCount).toBe(1);
     const posts: { url: string; body: { messageId: string; memberId: string } }[] = [];
     await deliverMcpMemberWebhooks(scope1.db, async (url, init) => {
@@ -473,7 +473,7 @@ const scope1 = fixtureScope1();
       return new Response('', { status: 200 });
     });
     expect(posts.filter(post => post.body.memberId === member)).toEqual(callback === 'none' ? [] : [
-      { url, body: expect.objectContaining({ messageId: result.id, memberId: member }) },
+      { url, body: expect.objectContaining({ commandId: result.id, memberId: member }) },
     ]);
     const mentions = await client.callTool({ name: 'list_mentions', arguments: {} });
     expect(JSON.stringify(mentions)).toContain(result.id);

@@ -677,19 +677,19 @@ const scope20 = fixtureScope20();
   });
 
 
-  it('an agent tag invites conversation without handing the corner on', async () => {
+  it('an agent message invites conversation without handing the corner on', async () => {
     const cornerId = await open('owner/widgets');
     // The person asks the agent working the corner to give the work to Goosy.
     await say(cornerId, '@hoots hand this corner to goosy');
-    const command = (await commands(A, cornerId)).find((c) => c.reason === 'human_tag')!;
+    const command = (await commands(A, cornerId)).find((c) => c.roomId === cornerId && c.reason === 'human_tag')!;
     await claim(command);
-    await rootFixture.daemon.execute('postCornerMessage',{roomId:cornerId,cornerId,requestId:command.turnRequestId,text:'@goosy take this one'},A);
+    await rootFixture.daemon.execute('message',{roomId:cornerId,requestId:command.turnRequestId,to:{agent:B,place:cornerId},text:'take this one'},A);
     console.log('Reproduction H1-1:', {
       implementer: await scope20.workerOf(cornerId),
       goosyCommands: (await commands(B, cornerId)).map((c) => c.reason),
     });
     expect(await scope20.workerOf(cornerId)).toBe(A);
-    expect((await commands(B, cornerId)).some((c) => c.reason === 'agent_tag')).toBe(true);
+    expect((await commands(B, cornerId)).some((c) => c.reason === 'message')).toBe(true);
   });
 
 
@@ -700,7 +700,8 @@ const scope20 = fixtureScope20();
     const command = (await commands(A, cornerId)).find((c) => c.reason === 'human_tag')!;
     await claim(command);
     await result(command, 'Blocked on the API shape. @goosy can you confirm it?');
-    // The tag asks a peer for input; the implementer stays with Hoots.
+    // The tag is a public note; the implementer stays with Hoots.
+    expect(await commands(B, cornerId)).toEqual([]);
     expect(await scope20.workerOf(cornerId)).toBe(A);
   });
 
@@ -735,9 +736,9 @@ const scope20 = fixtureScope20();
     const cornerId = await open('owner/widgets');
     await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
     await say(cornerId, '@hoots hand this corner to goosy');
-    const command = (await commands(A, cornerId)).find((c) => c.reason === 'human_tag')!;
+    const command = (await commands(A, cornerId)).find((c) => c.roomId === cornerId && c.reason === 'human_tag')!;
     await claim(command);
-    await rootFixture.daemon.execute('postCornerMessage',{roomId:cornerId,cornerId,requestId:command.turnRequestId,text:'@goosy take this one'},A);
+    await rootFixture.daemon.execute('message',{roomId:cornerId,requestId:command.turnRequestId,to:{agent:B,place:cornerId},text:'take this one'},A);
     // The person's tag put Hoots in the role; the reviewer Goosy never takes it.
     expect(await scope20.workerOf(cornerId)).toBe(A);
   });

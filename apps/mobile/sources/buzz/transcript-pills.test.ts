@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatDisplayMessage } from './room-view-presentation';
 import { SYSTEM_IDENTITY_PUBKEY } from './system-identity';
-import { foldPillRuns, isAgentToAgentMessage, isPillMessage } from './transcript-pills';
+import { foldPillRuns, isPillMessage } from './transcript-pills';
 import { ledgerSpeakerKey } from './ledger-attribution';
 import { transcriptBylineOpeners } from './message-dates';
 
@@ -26,7 +26,6 @@ describe('transcript pills', () => {
       mentionPubkeys: ['jimmy'],
       agentCommand: { kind: 'report', recipient: { id: 'person', name: 'Person', kind }, text: 'Please choose the scope' } });
     expect(isPillMessage(report)).toBe(false);
-    expect(isAgentToAgentMessage(report, AGENTS)).toBe(false);
     const rows = foldPillRuns([system('before1'), system('before2'), report, system('after1'), system('after2')]);
     expect(rows.map(message => message.id)).toEqual(['before1', 'report', 'after1']);
     expect(rows[0]!.foldedReadBoundaries?.map(boundary => boundary.id)).toEqual(['before1', 'before2']);
@@ -46,12 +45,14 @@ describe('transcript pills', () => {
     expect(isPillMessage(row('d', { deleted: true, notificationLifecycleRun: run }))).toBe(false);
   });
 
-  it('reads an agent message that mentions only agents as agent-to-agent', () => {
-    const toJimmy = row('a2a', { pubkey: 'alan', isAgentAuthor: true, mentionPubkeys: ['jimmy'] });
-    expect(isAgentToAgentMessage(toJimmy, AGENTS)).toBe(true);
-    expect(isAgentToAgentMessage({ ...toJimmy, mentionPubkeys: ['jimmy', 'dan'] }, AGENTS)).toBe(false);
-    expect(isAgentToAgentMessage({ ...toJimmy, mentionPubkeys: [] }, AGENTS)).toBe(false);
-    expect(isAgentToAgentMessage(row('p', { pubkey: 'dan', mentionPubkeys: ['jimmy'] }), AGENTS)).toBe(false);
+  it('keeps a plain tag of another agent a message, and draws message() to an agent as a pill', () => {
+    const tag = row('tag', { text: '@jimmy please review', pubkey: 'alan', isAgentAuthor: true, mentionPubkeys: ['jimmy'] });
+    expect(isPillMessage(tag)).toBe(false);
+    const rows = foldPillRuns([system('before'), tag, system('after')]);
+    expect(rows.map(message => message.id)).toEqual(['before', 'tag', 'after']);
+    expect(rows[1]!.pillRun).toBeUndefined();
+    const sent = row('sent', { pubkey: 'alan', agentCommand: { kind: 'message', recipient: { id: 'jimmy', name: 'Jimmy', kind: 'agent' }, text: 'Please review' } as never });
+    expect(isPillMessage(sent)).toBe(true);
   });
 
   it('folds consecutive pills into one row that keeps every folded id', () => {
@@ -77,7 +78,7 @@ describe('transcript pills', () => {
       pubkey: 'alan', isAgentAuthor: true,
       agentCommand: { kind: 'order', recipient: { id: 'jimmy', name: 'Jimmy', kind: 'agent' }, text: 'Go' },
     }), AGENTS)).toBeNull();
-    expect(ledgerSpeakerKey(row('a2a', { pubkey: 'alan', isAgentAuthor: true, mentionPubkeys: ['jimmy'] }), AGENTS)).toBeNull();
+    expect(ledgerSpeakerKey(row('tag', { pubkey: 'alan', isAgentAuthor: true, mentionPubkeys: ['jimmy'] }), AGENTS)).toBe('agent:alan');
     expect(ledgerSpeakerKey(row('reply', { pubkey: 'alan', isAgentAuthor: true }), AGENTS)).toBe('agent:alan');
     expect(transcriptBylineOpeners([system('s1'), row('m', { pubkey: 'dan' })])).toEqual(new Set(['m']));
   });

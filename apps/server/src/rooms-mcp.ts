@@ -37,7 +37,7 @@ Messages and wakes:
 ${externalAgentRules('mcp')}
 
 Webhook and profile:
-- set_webhook registers an HTTPS URL that Beeline POSTs to the moment you are tagged. Beeline never polls you.
+- set_webhook registers an HTTPS URL that Beeline POSTs to when a person tags you or a message is addressed to you. Beeline never polls you.
 - After verifying list_chats, use set_profile only if the person requests a profile change, with the display name and profile picture you already use in your own app, passing the picture as an https URL or data URI, and preserve the @handle approved on the consent page unless the person requests a change. Your model label comes from the app registration and never changes here.
 
 Agent tools:
@@ -74,14 +74,14 @@ export const ROOM_TOOLS: Tool[] = [
     { thread: { type: 'string', format: 'uuid' } }, ['thread']),
   tool('set_profile', 'After verifying list_chats, change your profile only when the person requests it: use the display name and profile picture you already use in your own app, passing the picture as an https URL or data URI. Preserve your approved @handle unless the person requests a change. This does not change your member identity, owner or chat access. The model label shown in Beeline comes from the app registration, never from this call.',
     { name: { type: 'string', minLength: 1, maxLength: 60 }, handle: { type: 'string', minLength: 1, maxLength: 40, description: 'Lower-case letters, digits and underscores.' }, avatar: { type: 'string', maxLength: MCP_AVATAR_MAX_CHARS, description: 'A data:image/png, data:image/jpeg or data:image/webp base64 URI (up to about 200 KB), or an https URL of one. Beeline stores a 256 px copy and returns its URL.' } }, [], true),
-  tool('set_webhook', 'Set the HTTPS URL Beeline POSTs to the moment someone tags you, so you can answer at once. The JSON body names roomId, messageId and text. Pass an empty url to remove it. An optional secret is sent as "Authorization: Bearer <secret>" and is never shown again. A pasted Bearer prefix is accepted.',
+  tool('set_webhook', 'Set the HTTPS URL Beeline POSTs to when a person tags you or a message is addressed to you, so you can answer at once. The JSON body names roomId, messageId and text. Pass an empty url to remove it. An optional secret is sent as "Authorization: Bearer <secret>" and is never shown again. A pasted Bearer prefix is accepted.',
     { url: { type: 'string', maxLength: 2048, description: 'An https:// URL, or empty to remove the webhook.' }, secret: { type: 'string', minLength: 1, maxLength: 512 } }, ['url'], true),
 ];
 const TOOLS: Tool[] = [...ROOM_TOOLS, ...MCP_AGENT_TOOLS];
 const toolsFor=(principal:McpPrincipal,enabled:boolean)=>enabled
   ? [...TOOLS,...(principal.identity_id===OPERATOR_OWNER_ID?MCP_OPERATOR_TOOLS:[])] : ROOM_TOOLS;
 /** Repeated until delivery is proved or explicitly on demand, including hosts that drop server instructions. */
-const SETUP_NOTE = `Setup: call list_chats first to verify you, owner and the intended chats. Preserve the approved @handle; use set_profile only for a profile change requested by the person. Your owner's Allow is standing approval to answer when a chat member tags your @handle. ${MCP_STARTER_ROUTINE} Repository writes go through a thread implementer. Continue with setup_delivery in the actual host surface. This note stops only after proved delivery or an explicit on-demand binding.`;
+const SETUP_NOTE = `Setup: call list_chats first to verify you, owner and the intended chats. Preserve the approved @handle; use set_profile only for a profile change requested by the person. Your owner's Allow is standing approval to answer when a person tags your @handle. Agents ask agents with message, never tags. ${MCP_STARTER_ROUTINE} Repository writes go through a thread implementer. Continue with setup_delivery in the actual host surface. This note stops only after proved delivery or an explicit on-demand binding.`;
 const READABLE = `SELECT r.id,r.name,r.parent_id,r.workspace_id FROM rooms r
   JOIN room_access rm ON rm.room_id=r.id AND rm.identity_id=$1 AND rm.removed_at IS NULL
   JOIN memberships wm ON wm.workspace_id=r.workspace_id AND wm.room_id IS NULL AND wm.identity_id=$1 AND wm.removed_at IS NULL`;

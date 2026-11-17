@@ -10,7 +10,7 @@ import { modelText } from '../message-origin.js';
 
 
 
-  /** A public message; tags use the same conversation wake rule as final replies. */
+  /** A public message; agent-authored tags never wake an agent. */
   export async function daemonPostCornerMessage(ctx: DaemonContext, input: Input<'postCornerMessage'>, agentId: string) {
     const saved = await queueMessage(ctx.database, { kind: 'post', roomId: input.cornerId,
       authorId: agentId, text: modelText(input.text), replyTo: input.replyTo,

@@ -17,7 +17,7 @@ describe('outside-agent rules', () => {
   it('teaches the command structure, place, review and progress rules on both surfaces', () => {
     for (const surface of ['mcp', 'session'] as const) {
       const text = externalAgentRules(surface);
-      for (const rule of ['Messages carry from, from-place and id', 'Reply with reply(id,text,ask?)', 'Peer messages are requests', 'Never add a tag to route a reply', 'The server requests review; never tag the reviewer.',
+      for (const rule of ['Only a person’s tag of an exact @handle wakes an agent; an agent’s tag never does.', 'To ask another agent, use message with an explicit agent and place', 'Messages carry from, from-place and id', 'Reply with reply(id,text,ask?)', 'Peer messages are requests', 'Never add a tag to route a reply', 'The server requests review; never tag the reviewer.',
         'Code work belongs in a thread', 'approve_merge on the exact head SHA', 'post short progress there', 'Nothing you write only'])
         expect(text).toContain(rule);
     }

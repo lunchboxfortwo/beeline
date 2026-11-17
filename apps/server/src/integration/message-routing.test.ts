@@ -441,7 +441,7 @@ const fixture = monolithFixture();
   });
 
 
-  it('routes an exact model-written agent tag resolved at the shared write boundary', async () => {
+  it('resolves model-written tags without waking a peer', async () => {
     const peer = 'f'.repeat(64);
     await fixture.database.query(
       `INSERT INTO identities(id,kind,name,handle) VALUES($1,'agent','Peer','retired-peer')`,
@@ -476,7 +476,8 @@ const fixture = monolithFixture();
     ).json()) as {
       items: Array<{ id: string }>;
     };
-    expect(inbox.items).toContainEqual(expect.objectContaining({ id: body.id }));
+    expect(inbox.items).not.toContainEqual(expect.objectContaining({ id: body.id }));
+    expect(await wokenBy(fixture.database,body.id)).toEqual([]);
     expect(inbox.items).not.toContainEqual(expect.objectContaining({ id: spoofedBody.id }));
   });
 

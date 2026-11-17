@@ -131,7 +131,7 @@ it.each(['dm', 'room', 'corner', 'parent-room'] as const)('post receipt identifi
     target = place === 'corner' ? opened.cornerId : ROOM;
   }
   const posted = await rootFixture.daemon.execute('postCornerMessage', { ...authority(command), cornerId: target, text: 'Receipt path proof' }, agent);
-  expect(posted.receipt).toBe('Message stored and visible.' + (place === 'parent-room' ? '' : '\n' + currentPlaceReminder));
+  expect(posted.receipt).toBe('Message stored and visible. No agents woken.' + (place === 'parent-room' ? '' : '\n' + currentPlaceReminder));
   expect((await rootFixture.phone.readRoom(target, HUMAN))?.messages.some(message => message.id === posted.id && message.text === 'Receipt path proof')).toBe(true);
 });
 

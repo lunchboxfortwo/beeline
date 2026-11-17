@@ -54,7 +54,7 @@ import { AGENT_COMMAND_SCHEMA } from './agent-command.js';
 import { GITHUB_STAR_PROMPT_SCHEMA } from './github-star-prompt.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { backfillCornerLifecycleRuns, deleteStoredCornerWorkflows } from './corner-lifecycle.js';
-import { backfillFeedbackTriageWorkflow, backfillFeedbackSignalWalk, backfillWorkspaceWalkHistory } from './feedback-triage-workflow.js';
+import { backfillFeedbackTriageWorkflow, backfillFeedbackSignalWalk, backfillWorkspaceWalkHistory, backfillFeedbackMessageGuidance } from './feedback-triage-workflow.js';
 import { backfillWorkflowSkillDescriptions, closeStaleWorkflowGateChoices } from './workflow-runs.js';
 import { withdrawSupersededGrantAsks } from './grant-policy-upgrade.js';
 import { restoreOwnerApprovedGrants } from './migrations/owner-approved-grants.js';
@@ -654,6 +654,8 @@ export async function migrateData(database: SqlDatabase): Promise<void> {
     workflowBackfillOnce(database, 'feedback-triage-latest-count-v1', backfillFeedbackTriageWorkflow));
   await dataStep('feedback signal walk', () =>
     workflowBackfillOnce(database, 'feedback-signal-walk-v1', backfillFeedbackSignalWalk));
+  await dataStep('feedback agent messages', () =>
+    workflowBackfillOnce(database, 'feedback-agent-messages-v1', backfillFeedbackMessageGuidance));
   await dataStep('workspace walk history', () =>
     workflowBackfillOnce(database, 'workspace-walk-history-v1', backfillWorkspaceWalkHistory));
   await dataStep('workflow skill summary/does', () =>

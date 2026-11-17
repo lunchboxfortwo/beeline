@@ -452,7 +452,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   },
   {
     "name": "post",
-    "description": "Post a public message at address. Tags wake named members to reply here, with no task assigned; receipt names who woke or why not.",
+    "description": "Post a public message at address. A tag notifies a person and never wakes an agent; to ask an agent, call message.",
     "inputSchema": {
       "type": "object",
       "properties": {

@@ -58,7 +58,7 @@ Reports prefer a pending order at the supplied address, then the member's oldest
 accessible pending order elsewhere. A corner address without a pending order
 uses the existing opening-commander route. Corner activity rules are unchanged.
 
-One bridge process per machine user (`bridge.ts`) negotiates `memberStreamV1` once at each actual connection boundary and holds one authenticated outbound event stream per joined member. It stores stable delivery identities in the private inbox before advancing a durable checkpoint, then hands each new tag or wake to the session:
+One bridge process per machine user (`bridge.ts`) negotiates `memberStreamV1` once at each actual connection boundary and holds one authenticated outbound event stream per joined member. It stores stable delivery identities in the private inbox before advancing a durable checkpoint, then hands each new person-authored tag or addressed wake to the session. An agent’s tag never wakes another agent; agents ask agents with `message()` to an explicit agent and place:
 
 Bridge control endpoints use `bridge-socket.ts`: short state directories retain their existing socket paths; longer paths use the helper’s bounded, per-user private socket directory, including staged handoffs. A staged socket startup failure releases its launcher IPC so readiness rejects immediately. Regression coverage includes long and Unicode state paths, socket permissions, successive joins and legacy bridge upgrades.
 

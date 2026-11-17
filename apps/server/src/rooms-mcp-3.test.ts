@@ -264,7 +264,7 @@ const scope1 = fixtureScope1();
     expect(pictures[2]!.equals(pictures[3]!)).toBe(true);
     expect(pictures[0]!.equals(pictures[1]!) || pictures[0]!.equals(pictures[2]!) || pictures[1]!.equals(pictures[2]!)).toBe(false);
   });
-  it('R1: pushes the asking agent’s exact back-tag instructions per tag to the webhook a member set, with its sealed bearer secret', async () => {
+  it('R1: pushes the asking person’s exact reply instructions per tag to the webhook a member set, with its sealed bearer secret', async () => {
     await deliverMcpMemberWebhooks(scope1.db, async () => new Response('', { status: 200 }));
     const { client, member } = await scope1.connected();
     const previous = process.env.BEELINE_MCP_WEBHOOK_KEY;
@@ -280,8 +280,8 @@ const scope1 = fixtureScope1();
       const stored = (await scope1.db.query<{ callback_url: string; callback_secret: string }>('SELECT callback_url,callback_secret FROM rooms_mcp_members WHERE member_id=$1', [member])).rows[0]!;
       expect(stored.callback_url).toBe('https://hooks.example/muse'); expect(stored.callback_secret).not.toContain('tag-secret');
       const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
-      const sent = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: `@${handle} please answer` }, AGENT);
-      await routeAgentResult(scope1.db, undefined, sent.messageId, { roomId: ROOM, agentId: AGENT });
+      const sent = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: `@${handle} please answer` }, USER);
+      await routeHumanMessage(scope1.db, sent.messageId);
       const posts: { url: string; authorization: string | null; body: Record<string, unknown> }[] = [];
       await deliverMcpMemberWebhooks(scope1.db, async (url, init) => {
         posts.push({ url: String(url), authorization: new Headers(init?.headers).get('authorization'), body: JSON.parse(String(init?.body)) });
@@ -519,7 +519,7 @@ const scope1 = fixtureScope1();
 describe('in a chat of 20,000 messages', () => {
 const scope2 = fixtureScope2(scope1);
 
-    it('answers send_message in under 3 s and wakes the tagged agent once', async () => {
+    it('answers message in under 3 s and wakes the addressed agent once', async () => {
       const { client } = await scope1.connected(undefined, [WORKSPACE, scope2.bigWorkspace]);
       const started = Date.now();
       const sent = scope1.data(await client.callTool({ name:'message',arguments:{address:scope2.BIG,to:{agent:AGENT,place:scope2.BIG},text:'Please review the plan'} }));
@@ -530,7 +530,7 @@ const scope2 = fixtureScope2(scope1);
 
 
 
-    it('still wakes the tagged agent when the provenance read fails', async () => {
+    it('still wakes the addressed agent when the provenance read fails', async () => {
       const { client } = await scope1.connected(undefined, [WORKSPACE, scope2.bigWorkspace]);
       const transaction = scope1.db.transaction.bind(scope1.db);
       const fault = vi.spyOn(scope1.db, 'transaction').mockImplementation(work => transaction(async tx => {

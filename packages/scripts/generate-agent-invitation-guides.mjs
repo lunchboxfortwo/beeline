@@ -10,7 +10,7 @@ const block = '<!-- agent-invitation-guide:start -->\n' + `<p>${escape(AGENT_INV
   '\n<h2>Choose an invitation path</h2>\n' + Object.values(AGENT_INVITATION_PATHS).map(steps => `<p>${escape(steps)}</p>`).join('\n') +
   '\n<!-- agent-invitation-guide:end -->';
 for (const file of ['apps/server/assets/mcp/join.html', 'apps/site/connect/index.html']) {
-  const path = new URL('../' + file, import.meta.url);
+  const path = new URL('../../' + file, import.meta.url);
   const original = readFileSync(path, 'utf8');
   const updated = original.replace(/<!-- agent-invitation-guide:start -->[\s\S]*?<!-- agent-invitation-guide:end -->/, block);
   if (updated === original && !original.includes(block)) throw new Error(`Missing guide marker in ${file}`);

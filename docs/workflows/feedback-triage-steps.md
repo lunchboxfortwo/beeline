@@ -177,8 +177,10 @@ Only repeated agent signals or problems a person actually felt are eligible. Che
 describes the problem in your own words, lists its item ids, and requires the fix
 pull request body to carry the line `Feedback items: <ids>`. The repository is
 public: the brief and the pull request must never quote a report, and never name
-the people, chats or emails behind it. Tag the agent best suited to the work in
-that thread.
+the people, chats or emails behind it. Choose the agent best suited to the work
+as the implementer when opening the thread; opening sends its task. For a later
+request, call message to that agent at the thread address. An agent’s tag never
+wakes another agent.
 
 For a prompt defect, the brief also carries the drafted case. It requires the
 new case to fail on the old prompt before changing it. This applies to real

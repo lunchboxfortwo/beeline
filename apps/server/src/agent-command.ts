@@ -656,7 +656,8 @@ async function postMessage(db: SqlDatabase, input: PublicPost, chat: Chat): Prom
     (agents.length === 1 ? agents[0] : agents.length === 2 && agents.some(member => member.starter === 'luna')
       ? agents.find(member => member.starter === 'beebee') : undefined);
   const targets = input.presentation === 'card' || stops.length ? [] : input.agentIds ? chat.members.filter(member => input.agentIds!.includes(member.id)) : [...new Map([
-    ...explicit,
+    // Only a person's tag wakes an agent; an agent reaches another agent through message().
+    ...(human ? explicit : []),
     ...(human && !hasSystemReportMention(input.text) && chat.direct_participants ? agents.filter(member=>chat.direct_participants!.includes(member.id)) : []),
     ...(human && !explicit.length && solo ? [solo] : []),
   ].filter(member => member.kind === 'agent' && member.id !== input.authorId && member.id !== SYSTEM_IDENTITY_ID).map(member => [member.id, member])).values()];
@@ -673,7 +674,7 @@ async function postMessage(db: SqlDatabase, input: PublicPost, chat: Chat): Prom
   return { id, createdAt: Math.floor(new Date(saved.created_at).getTime() / 1000), commands, woken, stopped: stops.length > 0,
     notWoken: handles.filter(handle => !isChannelMentionToken(handle) && !explicit.some(member => member.handle === handle))
       .map(handle => ({ handle, reason: 'not a current member' })),
-    stored: true, visible: true, receipt: 'Message stored and visible.' };
+    stored: true, visible: true, receipt: 'Message stored and visible.' + (author?.kind === 'agent' && !woken.length ? ' No agents woken.' : '') };
 }
 
 /** Appending is private to the entry above; it never checks membership again. */

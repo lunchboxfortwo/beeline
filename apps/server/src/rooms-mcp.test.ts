@@ -100,7 +100,7 @@ const scope1 = fixtureScope1();
   }, 60_000);
 
   it.each(['webhook', 'events', 'none', 'expired events', 'recent poll', 'stale poll', 'never polled'])(
-    'R2: tag receipt accounts for connected member route %s', async route => {
+    'R2: agent tag receipt reports no wake for connected member route %s', async route => {
       const fixture = await scope1.eventFixture();
       const { member, token, params, grant, client } = fixture;
       const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
@@ -116,9 +116,12 @@ const scope1 = fixtureScope1();
         WHERE client_id=$1 AND identity_id=$2`, [grant.clientId, USER, route === 'never polled', age]);
       const response = await sender.client.callTool({ name:'post',arguments:{address:ROOM,text:`@${handle} check this tag`} }) as { content: { text: string }[] };
       const receipt = JSON.parse(response.content[0]!.text).data;
-      expect(receipt.woken).toEqual([handle]);
+      expect(receipt.woken).toEqual([]);
+      expect(receipt.receipt).toContain('No agents woken.');
       expect(receipt.notWoken).toEqual([]);
-      expect((await scope1.db.query('SELECT 1 FROM rooms_mcp_mentions WHERE member_id=$1 AND message_id=$2', [member, receipt.id])).rowCount).toBe(1);
+      expect((await scope1.db.query('SELECT 1 FROM rooms_mcp_mentions WHERE member_id=$1 AND message_id=$2', [member, receipt.id])).rowCount).toBe(0);
+      const sent = scope1.data(await sender.client.callTool({name:'message', arguments:{address:ROOM,to:{agent:member,place:ROOM},text:'check this request'}}));
+      expect((await scope1.db.query("SELECT 1 FROM agent_commands WHERE id=$1 AND agent_id=$2 AND reason='message'",[sent.id,member])).rowCount).toBe(1);
     }, 60_000);
 
   it('MCP-EVENTS-1: discovers, verifies, refreshes and unsubscribes on the authenticated MCP endpoint', async () => {

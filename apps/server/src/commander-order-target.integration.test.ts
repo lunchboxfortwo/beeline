@@ -143,7 +143,9 @@ it('RUBY-18: an explicit re-review reaches the configured reviewer at the chain 
   expect((await db.query<{ agent_depth: number }>(`SELECT agent_depth FROM agent_commands WHERE id=$1`, [review.id])).rows[0]!.agent_depth).toBe(4);
   await db.query(`UPDATE agent_commands SET state='complete',completed_at=now() WHERE id=$1`, [review.id]);
   const tagged = await daemon.execute('postCornerMessage', { roomId: incoming.roomId, requestId: incoming.turnRequestId, cornerId: incoming.roomId, text: '@baby Re-review the restored evidence' }, CANDY);
-  expect(tagged.woken).toContain('baby');
+  expect(tagged.woken).toEqual([]);
+  const message=await daemon.execute('message',{roomId:incoming.roomId,requestId:incoming.turnRequestId,to:{agent:'reviewer',place:incoming.roomId},text:'Re-review the restored evidence'},CANDY);
+  expect((await daemon.execute('getAgentCommands',{roomId:incoming.roomId},BABY)).commands.some(command=>command.id===message.id && command.reason==='message')).toBe(true);
   await db.query(`UPDATE agent_commands SET state='complete',completed_at=now() WHERE room_id=$1 AND agent_id=$2`, [incoming.roomId, BABY]);
   await db.query(`UPDATE agent_commands SET review_context=jsonb_set(review_context,'{purpose}','"repair"') WHERE id=$1`, [incoming.id]);
   const rereview = await daemon.execute('order', { roomId: incoming.roomId, requestId: incoming.turnRequestId, address: incoming.roomId, agent: 'baby', text: 'Re-review after the evidence-only repair' }, CANDY);

@@ -644,35 +644,35 @@ it('Reproduction R1/R2: a handed-off voice request carries today and posts its h
 });
 
 
-it('Reproduction VOICE-TAG-1: final call reply wakes another agent once and sees its answer', async () => {
+it('Reproduction VOICE-TAG-1: final call tags stay quiet; the full agent messages its peer', async () => {
   const room = '31313131-3131-4131-8131-313131313131';
-  await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Voice tag proof')`, [room,W]);
+  await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Voice message proof')`, [room,W]);
   for (const id of [H,A,B]) await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [W,room,id]);
+  const joined=await service.join(room,H);
   try {
-    await service.recordAnswer(room,A,'@sol let me look.', {routeMentions:false});
-    await service.recordAnswer(room,A,'@ruby @missing hello.', {replyId:'self-and-missing'});
+    for (const text of ['@sol let me look.','@ruby @missing hello.','@sol what are you up to?']) {
+      await service.recordAnswer(room,A,text,{replyId:text});
+      await service.recordAnswer(room,A,text,{replyId:text});
+    }
     expect((await db.query(`SELECT * FROM agent_commands WHERE room_id=$1`,[room])).rows).toHaveLength(0);
-    await service.recordAnswer(room,A,'@sol what are you up to?',{replyId:'final-answer'});
-    await service.recordAnswer(room,A,'@sol what are you up to?',{replyId:'final-answer'});
-    const commands = (await db.query<CommandRow>(`SELECT * FROM agent_commands WHERE room_id=$1`,[room])).rows;
-    expect(commands).toHaveLength(1);
-    expect(commands[0]).toMatchObject({agent_id:B,reason:'agent_tag',agent_depth:0,private_payload:null});
-    expect((await db.query(`SELECT text,author_id FROM messages WHERE id=$1`,[commands[0]!.source_message_id])).rows[0])
-      .toEqual({text:'@sol what are you up to?',author_id:A});
-    await db.transaction(tx=>routeAgentResult(tx,undefined,commands[0]!.source_message_id!,{roomId:room,agentId:A}));
-    expect((await db.query(`SELECT * FROM agent_commands WHERE room_id=$1`,[room])).rows).toHaveLength(1);
-    await service.recordAnswer(room,B,'I am checking the call history.');
-    expect(JSON.stringify(await readVoiceContext(db,room,'next-turn',A))).toContain('I am checking the call history.');
-    await db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`,[room,B]);
-    await service.recordAnswer(room,A,'@sol are you still here?',{replyId:'removed-member'});
-    expect((await db.query(`SELECT * FROM agent_commands WHERE room_id=$1`,[room])).rows).toHaveLength(1);
-    console.log('VOICE-TAG-1: final post -> one agent_tag -> reply in next voice history; replay, acknowledgements, self and nonmembers bounded. Pglite service stand-in; RTC and model not live.');
-  } finally {
-    await db.query(`DELETE FROM rooms WHERE id=$1`,[room]);
-  }
+    // The voice router orders the full agent; only its message() addresses Sol.
+    const source=await service.recordHuman(joined.call.id,room,H,(await service.agents(room,H))[0]!, 'Ask Sol what he is doing');
+    await service.dispatch(joined.call.id,source,A);
+    const daemon=new DaemonService(db,live);
+    const parent=(await daemon.execute('getAgentCommands',{roomId:room},A)).commands.find(item=>item.roomId===room)!;
+    await startQueuedCommand(daemon,{roomId:room,commandId:parent.id},A);
+    const sent=await daemon.execute('message',{roomId:room,requestId:parent.turnRequestId,to:{agent:B,place:room},text:'what are you up to?'},A);
+    const child=(await daemon.execute('getAgentCommands',{roomId:room},B)).commands.find(item=>item.id===sent.id)!;
+    expect(child).toMatchObject({reason:'message',from:{agent:A,place:room}});
+    await startQueuedCommand(daemon,{roomId:room,commandId:child.id},B);
+    await daemon.execute('reply',{id:child.id,text:'I am checking the call history.'},B);
+    expect((await daemon.execute('getAgentCommands',{roomId:room},A)).commands.some(item=>item.reason==='reply' && item.source.body==='I am checking the call history.')).toBe(true);
+    await service.recordAnswer(room,A,'Sol is checking the call history.');
+    expect(JSON.stringify(await readVoiceContext(db,room,'next-turn',A))).toContain('Sol is checking the call history.');
+  } finally {await service.leave(joined.call.id,H);await db.query(`DELETE FROM rooms WHERE id=$1`,[room]);}
 });
 
-it('VOICE-TAG-1: voice orders preserve chain depth and keep every explicit tag without a depth cap', async () => {
+it('VOICE-TAG-1: voice orders retain provenance for message() beyond the former depth bound', async () => {
   const room = '32323232-3232-4232-8232-323232323232';
   await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Voice depth proof')`, [room,W]);
   for (const id of [H,A,B]) await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [W,room,id]);
@@ -680,14 +680,15 @@ it('VOICE-TAG-1: voice orders preserve chain depth and keep every explicit tag w
   try {
     const source = await service.recordHuman(joined.call.id,room,H,(await service.agents(room,H))[0]!, 'Ask Sol');
     await service.dispatch(joined.call.id,source,A);
-    await db.query(`UPDATE agent_commands SET private_payload=$2::jsonb WHERE source_message_id=$1 AND agent_id=$3`,
-      [source,JSON.stringify({kind:'order',text:'private assignment',authorId:H,fromRoomId:room}),A]);
+    const daemon=new DaemonService(db,live);
+    const parent=(await daemon.execute('getAgentCommands',{roomId:room},A)).commands.find(item=>item.roomId===room)!;
+    await startQueuedCommand(daemon,{roomId:room,commandId:parent.id},A);
+    await db.query(`UPDATE agent_commands SET agent_depth=3 WHERE id=$1`,[parent.id]);
     await service.recordAnswer(room,A,'@sol what are you doing?',{replyId:'ordered',sourceId:source});
-    const child = (await db.query<CommandRow>(`SELECT * FROM agent_commands WHERE room_id=$1 AND reason='agent_tag'`,[room])).rows[0]!;
-    expect(child).toMatchObject({agent_id:B,agent_depth:1,private_payload:null,root_source_message_id:source});
-    await db.query(`UPDATE agent_commands SET agent_depth=3 WHERE source_message_id=$1 AND agent_id=$2`,[source,A]);
-    await service.recordAnswer(room,A,'@sol ping again?',{replyId:'at-limit',sourceId:source});
-    expect((await db.query(`SELECT * FROM agent_commands WHERE room_id=$1 AND reason='agent_tag'`,[room])).rows).toHaveLength(2);
+    expect((await db.query(`SELECT 1 FROM agent_commands WHERE room_id=$1 AND agent_id=$2`,[room,B])).rowCount).toBe(0);
+    const sent=await daemon.execute('message',{roomId:room,requestId:parent.turnRequestId,to:{agent:B,place:room},text:'what are you doing?'},A);
+    expect((await db.query(`SELECT agent_id,agent_depth,root_source_message_id,reason FROM agent_commands WHERE id=$1`,[sent.id])).rows[0])
+      .toEqual({agent_id:B,agent_depth:4,root_source_message_id:source,reason:'message'});
   } finally { await service.leave(joined.call.id,H); await db.query(`DELETE FROM rooms WHERE id=$1`,[room]); }
 });
 

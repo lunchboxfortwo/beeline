@@ -2,8 +2,9 @@ import { SYSTEM_IDENTITY_PUBKEY } from '@/buzz/system-identity';
 import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
 
 /**
- * Pills (build spec, decision 15): system messages and agent-to-agent messages
- * render as avatar-only pills (from face → to face); a tap reads the message.
+ * Pills (build spec, decision 15): system messages and an agent's message() to another
+ * agent render as avatar-only pills (from face → to face); a tap reads the message.
+ * A plain tag stays a message.
  * Consecutive pills share one wrapping row, so the transcript folds a run of
  * them into one host row. PR lifecycle runs keep their own counted disclosure.
  */
@@ -15,7 +16,7 @@ type PillFields = Pick<
   | 'vaultSave' | 'roomUpdate' | 'writePermission' | 'grantRequest' | 'squireApproval' | 'computerSession'
   | 'voiceCall' | 'onboarding' | 'choice' | 'appSignIn' | 'agentSignIn' | 'connectorOffer'
   | 'notificationLifecycleRun' | 'walletTx' | 'walletInsufficient' | 'walletDelegation'
-  | 'targetBranchProposal' | 'corner' | 'githubEvent' | 'daemonFact' | 'mentionPubkeys' | 'isAgentAuthor'
+  | 'targetBranchProposal' | 'corner' | 'githubEvent' | 'daemonFact'
 >;
 
 /** A row that the transcript draws as a card or nothing, never as a pill. */
@@ -43,17 +44,6 @@ export function isPillMessage(message: PillFields): boolean {
   if (message.agentCommand) return message.agentCommand.recipient.kind === 'agent';
   if (message.isSystemNotice) return true;
   return (message.authorIdentity?.pubkey ?? message.pubkey) === SYSTEM_IDENTITY_PUBKEY;
-}
-
-/** An agent author whose message mentions only agents. */
-export function isAgentToAgentMessage(message: PillFields, knownAgentPubkeys: ReadonlySet<string>): boolean {
-  if (ownsCard(message)) return false;
-  if (message.agentCommand) return message.agentCommand.recipient.kind === 'agent';
-  const author = message.authorIdentity?.pubkey ?? message.pubkey;
-  const agentAuthor = message.authorIdentity?.kind === 'agent' ||
-    Boolean(message.isAgentAuthor) || Boolean(author && knownAgentPubkeys.has(author));
-  const mentions = message.mentionPubkeys ?? [];
-  return agentAuthor && mentions.length > 0 && mentions.every((pubkey) => pubkey !== author && knownAgentPubkeys.has(pubkey));
 }
 
 /** Fold consecutive avatar pills into `pillRun`; lifecycle disclosures and lone pills stay separate. */

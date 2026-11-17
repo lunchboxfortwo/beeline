@@ -1,4 +1,4 @@
-import { isAgentToAgentMessage, isPillMessage } from './transcript-pills';
+import { isPillMessage } from './transcript-pills';
 /**
  * A voice announces itself once per run, not once per paragraph.
  *
@@ -125,7 +125,7 @@ export function ledgerSpeakerKey(
   // A pill (system line, agent-to-agent message) is not a voice: the speaker
   // after it opens a new sender group. Callers pass full transcript rows.
   const row = message as Parameters<typeof isPillMessage>[0];
-  if (message.pillRun || isPillMessage(row) || isAgentToAgentMessage(row, knownAgentPubkeys)) return null;
+  if (message.pillRun || isPillMessage(row)) return null;
   const isAgent =
     message.isAgentAuthor ||
     message.isAgentActivity ||

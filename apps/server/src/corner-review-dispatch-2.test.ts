@@ -544,17 +544,14 @@ it.each(['empty','status','failed'])('a %s review result ends silently without r
 });
 
 
-it('Reproduction REVIEW-LOOP: a current member tag reaches a reviewer after an empty completion', async () => {
+it('Reproduction REVIEW-LOOP: a member messages a reviewer after an empty completion', async () => {
   await rootFixture.phone.execute('updateRoom', {roomId:R,reviewerAgentId:B},H);
   await greenHead(92,'e'.repeat(40));
   const [review]=await commands(B,C);
   await claim(review!);
   await rootFixture.daemon.execute('postAgentTurnReceipt',{ roomId:C, requestId:review!.turnRequestId, status:'complete' },B);
-  await rootFixture.db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES('retry-tag',$1,$2,'@goosy please review this head')`,[C,A]);
-  const {routeAgentResult}=await import('./test-fixtures/queue-routing.test-support.js');
-  const parent=(await rootFixture.db.query(`SELECT * FROM agent_commands WHERE id=$1`,[review!.id])).rows[0];
-  const routed=await routeAgentResult(rootFixture.db,{...parent,agent_id:A,review_context:{...parent.review_context,purpose:'repair'}},'retry-tag',{roomId:C,agentId:A});
-  expect(routed).toEqual({woken:['goosy'],notWoken:[]});
+  const sent=await rootFixture.daemon.execute('message',{roomId:C,to:{agent:B,place:C},text:'please review this head'},A);
+  expect((await commands(B,C)).find(item=>item.id===sent.id)).toMatchObject({reason:'message',from:{agent:A,place:C}});
 });
 
 

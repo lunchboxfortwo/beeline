@@ -222,7 +222,7 @@ describe('thread message attribution', () => {
   });
 
 
-  it.each(['message', 'post'] as const)('Reproduction REVIEW-HEAD-1: a late old-head %s preserves its addressed follow-up', async surface => {
+  it.each(['message', 'post'] as const)('Reproduction REVIEW-HEAD-1: a late old-head %s wakes only through message', async surface => {
     await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
     await greenHead(81, '1'.repeat(40));
     const [review] = await commands(B, C);
@@ -230,7 +230,7 @@ describe('thread message attribution', () => {
     await greenHead(81, '2'.repeat(40));
     if (surface === 'message') await findings(review!, '@hoots FAIL: repair the old head.');
     else await rootFixture.daemon.execute('postCornerMessage', { roomId: C, cornerId: C, requestId: review!.turnRequestId, text: '@hoots FAIL: repair the old head.' }, B);
-    expect((await commands(A, C)).map(item => item.source.body)).toContain('@hoots FAIL: repair the old head.');
+    expect((await commands(A, C)).map(item => item.source.body)).toEqual(surface==='message' ? ['@hoots FAIL: repair the old head.'] : []);
     expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND text LIKE '%repair the old head%'`, [C])).rowCount).toBe(surface==='post' ? 1 : 0);
     expect((await rootFixture.db.query(`SELECT state FROM agent_commands WHERE id=$1`, [review!.id])).rows)
       .toEqual([{state:surface === 'message' ? 'complete' : 'pending'}]);
@@ -359,8 +359,7 @@ describe('thread message attribution', () => {
     const [review] = await commands(B, C);
     await claim(review!);
     await findings(review!, 'The reviewed implementation needs a repair.');
-    // The typed tag routes first and keeps the row; the handoff must not add a
-    // second turn for the same reply.
+    // The explicit message delivers one findings request at the thread address.
     const handoff = await commands(A, C);
     expect(handoff.map((command) => command.reason)).toEqual(['message']);
   });

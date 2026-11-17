@@ -334,8 +334,10 @@ Only repeated agent signals or problems a person actually felt are eligible. Che
 describes the problem in your own words, lists its item ids, and requires the fix
 pull request body to carry the line \`Feedback items: <ids>\`. The repository is
 public: the brief and the pull request must never quote a report, and never name
-the people, chats or emails behind it. Tag the agent best suited to the work in
-that thread.
+the people, chats or emails behind it. Choose the agent best suited to the work
+as the implementer when opening the thread; opening sends its task. For a later
+request, call message to that agent at the thread address. An agent’s tag never
+wakes another agent.
 
 For a prompt defect, the brief also carries the drafted case. It requires the
 new case to fail on the old prompt before changing it. This applies to real
@@ -591,4 +593,15 @@ export async function backfillWorkspaceWalkHistory(database: SqlDatabase): Promi
       ]) await seedSkill(db,{...input,workspaceId:workspace.workspace_id,sourceRoomId:workspace.source_room_id});
     });
   }
+}
+
+/** Refresh installed server-seeded triage guidance without changing team procedures. */
+export async function backfillFeedbackMessageGuidance(database: SqlDatabase): Promise<void> {
+  const copies=await database.query<{workspace_id:string;source_room_id:string}>(`
+    SELECT workspace_id,source_room_id FROM workspace_skills
+    WHERE slug=$1 AND kind='procedure' AND state='active'`,[FEEDBACK_TRIAGE_STEPS_SLUG]);
+  for (const copy of copies.rows) await database.transaction(db=>seedSkill(db,{
+    workspaceId:copy.workspace_id,sourceRoomId:copy.source_room_id,slug:FEEDBACK_TRIAGE_STEPS_SLUG,
+    description:FEEDBACK_TRIAGE_STEPS_DESCRIPTION,markdown:FEEDBACK_TRIAGE_STEPS,kind:'procedure',
+  }));
 }
