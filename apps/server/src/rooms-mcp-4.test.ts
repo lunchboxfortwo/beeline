@@ -63,7 +63,7 @@ const scope3 = fixtureScope3(scope1);
       const { client } = await scope1.connected();
       const opened = await scope3.ok(client, 'open_thread', { room: ROOM, name: 'nebula-check', objective: 'Check the nebula numbers',
         implementer: 'demo-agent', brief: { spec: '## Intent\nCheck the nebula numbers.', repositoryWork: false } });
-      expect(opened.status).toBe('starting');
+      expect(opened.status).toBe('created');
       const corner = opened.address as string;
       expect((await scope1.db.query<{ owner_agent_id: string }>(`SELECT ${cornerOwnerSql('$1::uuid')} owner_agent_id`, [corner])).rows[0]?.owner_agent_id).toBeDefined();
       const posted = await scope3.ok(client, 'post', { address: corner, text: 'Numbers attached below.' });

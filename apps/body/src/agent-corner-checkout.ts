@@ -144,7 +144,17 @@ export async function materializeAgentCornerCheckout(input: {
       await prune;
 
       if (legacy) await writeFile(resolve(staging, 'beeline-legacy-pending'), legacy);
-      await rename(staging, paths.gitCommonDir);
+      // PlaceSession may already bind this directory into a live sandbox.
+      // Replacing its inode loses that writable mount, exposing the new Git
+      // storage through the read-only parent instead. Populate it in place;
+      // HEAD is the completion marker, so interrupted installs rebuild here.
+      await mkdir(paths.gitCommonDir, { recursive: true });
+      for (const entry of await readdir(paths.gitCommonDir))
+        await rm(resolve(paths.gitCommonDir, entry), { recursive: true, force: true });
+      for (const entry of await readdir(staging)) {
+        if (entry !== 'HEAD') await rename(resolve(staging, entry), resolve(paths.gitCommonDir, entry));
+      }
+      await rename(resolve(staging, 'HEAD'), resolve(paths.gitCommonDir, 'HEAD'));
     } finally { await rm(staging, { recursive: true, force: true }); }
   }
   await git([`--git-dir=${paths.gitCommonDir}`, 'config', '--replace-all', 'remote.origin.fetch', '+refs/heads/*:refs/remotes/origin/*']);

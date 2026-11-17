@@ -71,7 +71,8 @@ export async function openCorner(args: JsonObject, toolCallId: string): Promise<
     ...(args.brief ? { briefRevision: 1 } : {}),
     ...(created.watch ? { watch: created.watch } : {}),
     ...(Array.isArray(created.warnings) ? { warnings: created.warnings } : {}),
-    status: 'starting',
+    // Creation is a receipt, not evidence that a helper or checkout started.
+    status: 'created',
   });
 }
 

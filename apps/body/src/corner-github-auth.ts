@@ -338,7 +338,7 @@ function needsToken(args) {
   return !local.has(args[index]);
 }
 function token() {
-  const result = spawnSync(config.node, [config.cli, 'thread-read-token', '--config', config.config, '--room', config.room,
+  const result = spawnSync(config.node, [config.cli, 'corner-read-token', '--config', config.config, '--room', config.room,
     ...(threadWrite ? ['--write'] : [])], { encoding: 'utf8' });
   if (result.status === 0 && result.stdout.trim()) return result.stdout.trim();
   process.stderr.write(result.stderr || 'Beeline could not refresh the repository credential.\\n');

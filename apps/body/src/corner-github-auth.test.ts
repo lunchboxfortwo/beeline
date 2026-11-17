@@ -4,6 +4,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
+import {createRequire} from 'node:module';
 import {installCornerGitHubWrappers} from './corner-github-auth.js';
 
 const roots:string[]=[];
@@ -65,4 +66,26 @@ echo https://github.com/acme/repo/pull/1
   expect((await run('gh',['pr','create'])).stdout).toContain('https://github.com/acme/repo/pull/1');
   await run('git',['push','origin','feature/test']);
   expect(await readFile(calls,'utf8')).toBe('pr\npush\n');
+});
+
+it('routes launcher credentials through the real CLI command parser', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'beeline-wrapper-cli-')); roots.push(root);
+  const cli = join(root, 'credential.mjs'), binary = join(root, 'git');
+  // Use the real CLI routing, replacing only its network credential reader.
+  await writeFile(cli, `
+    import { DaemonApiClient } from ${JSON.stringify(new URL('./daemon-api-client.ts', import.meta.url).href)};
+    DaemonApiClient.readRepositoryCredential = async (config, room, unused, write) => {
+      if (room !== 'thread' || !write) throw new Error('wrong credential request');
+      return { token: 'fixture-token' };
+    };
+    await import(${JSON.stringify(new URL('./cli.ts', import.meta.url).href)});
+  `);
+  await writeFile(binary, '#!/bin/sh\ncase "$*" in *show-ref*) exit 1;; *symbolic-ref*) echo feature/test;; *) printf "%s" "$GH_TOKEN";; esac\n'); await chmod(binary, 0o755);
+  await installCornerGitHubWrappers({ root, runtimeConfigPath: join(root, 'runtime.json'), roomId: 'thread',
+    cliEntrypoint: cli, gitBinary: binary, featureBranch: 'feature/test', targetBranch: 'main' });
+  const result = await promisify(execFile)(process.execPath, [join(root, 'beeline-github-bin/git'), 'push', 'origin', 'feature/test'], {
+    env: { ...process.env, NODE_OPTIONS: `--import ${createRequire(import.meta.url).resolve('tsx')}`,
+      HOME: root, XDG_CONFIG_HOME: join(root, 'config'), XDG_STATE_HOME: join(root, 'state') },
+  });
+  expect(result.stdout).toBe('fixture-token');
 });
