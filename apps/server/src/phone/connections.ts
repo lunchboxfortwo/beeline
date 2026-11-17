@@ -1,3 +1,4 @@
+import { CommandRefusalError } from '../command-refusal.js';
 import { unpairSquireMachine } from '../squire-machine.js';
 import { selectRegistryApp } from '../app-connections.js';
 import { phoneIdentity as identity } from '../phone-identity.js';
@@ -305,7 +306,7 @@ import { phoneSendMessage } from './messages.js';
     }
     if (input.connectorType === 'trusty-squire') {
       if ((await database.query('SELECT 1 FROM free_agents WHERE agent_id=$1', [input.helperAgentId])).rowCount)
-        throw new Error('Free agents use Lightpanda. Open the site yourself or connect your own agent for sign-in or signup.');
+        throw new CommandRefusalError('Free agents use Lightpanda. Open the site yourself or connect your own agent for sign-in or signup.', 400);
       await queueSquireWork(database, input.helperAgentId, { install: true, forceReloginProvider: input.forceReloginProvider });
       await grantSquireToOwnerMachineAgents(database, { workspaceId: input.workspaceId,
         ownerIdentityId: input.ownerIdentityId, machineId: input.machineId });

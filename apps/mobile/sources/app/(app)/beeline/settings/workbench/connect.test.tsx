@@ -262,6 +262,27 @@ describe('Connect Trusty Squire flow — ONE connect path', () => {
     ).toHaveLength(0);
   });
 
+  it.each([false, true])('never offers or pairs an online free helper (personal helper present: %s)', async (hasPersonalHelper) => {
+    const source = new MockWorkbenchSource();
+    const read = source.readWorkbench.bind(source);
+    source.readWorkbench = async (input) => ({ ...await read(input), helpers: [
+      { id: 'free-helper', name: 'Free helper', online: true, squireEligible: false },
+      ...(hasPersonalHelper ? [{ id: 'personal-helper', name: 'Laptop', online: true, squireEligible: true }] : []),
+    ] });
+    const pairing = vi.spyOn(source, 'pairConnector');
+    setWorkbenchSource(source);
+    const renderer = await render();
+    expect(renderer.root.findAllByProps({ testID: 'connect-machine-free-helper' })).toHaveLength(0);
+    if (hasPersonalHelper) {
+      expect(pairing).toHaveBeenCalledExactlyOnceWith({
+        workspaceId: 'workspace-1', connectorId: 'trusty-squire', helperId: 'personal-helper',
+      });
+    } else {
+      expect(pairing).not.toHaveBeenCalled();
+      expect(renderer.root.findByProps({ testID: 'connect-no-helper' })).toBeDefined();
+    }
+  });
+
   it('with exactly one online helper, pairs without asking for a choice', async () => {
     const source = new MockWorkbenchSource();
     const read = source.readWorkbench.bind(source);

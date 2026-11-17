@@ -1,7 +1,7 @@
 import { PageLoader } from '@/ui/PageLoader';
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Card, XStack, YStack } from 'tamagui';
 import * as WebBrowser from 'expo-web-browser';
 import { router, useLocalSearchParams, type Href } from 'expo-router';
@@ -136,7 +136,11 @@ function ConnectToolFlow() {
   const squire = connectorId === 'trusty-squire';
   const { value: workbench, error: helperLoadError } = useSharedWorkbench(
     offerCeremony ? null : { workspaceId, viewerId });
-  const helpers = workbench?.helpers ?? null;
+  const helpers = useMemo(() => {
+    const candidates = workbench?.helpers;
+    if (!candidates) return null;
+    return squire ? candidates.filter((helper) => helper.squireEligible !== false) : candidates;
+  }, [squire, workbench?.helpers]);
   const [install, setInstall] = useState<ConnectorInstallState | null>(null);
   const [selectedHelperName, setSelectedHelperName] = useState<string | null>(null);
   const [errorCause, setError] = useState<string | null>(null);

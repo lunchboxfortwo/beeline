@@ -9,6 +9,21 @@ import { monolithFixture, HUMAN, AGENT, WORKSPACE, ROOM } from '../test-fixtures
 describe('monolith integration: connectors', () => {
 const fixture = monolithFixture();
 
+  it('refuses stale Squire pairing requests for free helpers without arming an install', async () => {
+    await fixture.database.query(
+      "INSERT INTO free_agents(agent_id,owner_id,sealed_keys,state) VALUES($1,$2,'sealed','sleeping')",
+      [AGENT, HUMAN],
+    );
+    const response = await fixture.operation('pairConnector', {
+      workspaceId: WORKSPACE, connectorType: 'trusty-squire', helperAgentId: AGENT,
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: expect.stringMatching(/^Free agents use Lightpanda\./) });
+    expect((await fixture.database.query(
+      'SELECT 1 FROM squire_machines WHERE helper_agent_id=$1', [AGENT],
+    )).rows).toEqual([]);
+  });
+
 
   it.each(['pending', 'connecting'] as const)(
     'CONNECTOR-OFFER-1: reuses a %s offer and preserves agent and intent boundaries', async (status) => {

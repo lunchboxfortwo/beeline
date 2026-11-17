@@ -27,7 +27,7 @@ const fakeServer = vi.hoisted(() => {
         signIn: { method: string; url: string } | null;
       };
     }>,
-    helpers: [] as Array<{ id: string; name: string; online: boolean; squire: { status: 'connected' | 'error' | 'not-added'; errorMessage?: string; reportedAt: number } }>,
+    helpers: [] as Array<{ id: string; name: string; online: boolean; squireEligible?: boolean; squire?: { status: 'connected' | 'error' | 'not-added'; errorMessage?: string; reportedAt: number } }>,
     wallet: false as
       | false
       | { createdAt: number; delegationActive: boolean; delegationExpiresAt: number | null },
@@ -92,6 +92,16 @@ describe('real monolith Workbench source — install-state row resolution', () =
     fakeServer.rows = [];
     fakeServer.helpers = [];
     fakeServer.wallet = false;
+  });
+
+  it('preserves the server’s Squire eligibility flag in the shared Workbench projection', async () => {
+    fakeServer.helpers = [
+      { id: 'free-helper', name: 'Free helper', online: true, squireEligible: false },
+      { id: 'personal-helper', name: 'Laptop', online: true, squireEligible: true },
+    ];
+    const source = new MonolithWorkbenchSource();
+    expect((await source.readWorkbench({ workspaceId: 'ws', viewerId: MEMBER_A })).helpers)
+      .toEqual(fakeServer.helpers);
   });
 
   it('follows the row id pairConnector returned (the connect-screen stall regression)', async () => {

@@ -134,6 +134,7 @@ export type WorkbenchHelper = {
   id: string;
   name: string;
   online: boolean;
+  squireEligible?: boolean;
   squire?: { status: 'connected' | 'error' | 'not-added'; errorMessage?: string; reportedAt: number };
 };
 

@@ -121,6 +121,7 @@ export type WorkbenchDisplayHelper = {
   id: string;
   name: string;
   online: boolean;
+  squireEligible?: boolean;
   squire?: { status: 'connected' | 'error' | 'not-added'; errorMessage?: string; reportedAt: number };
 };
 
@@ -201,6 +202,7 @@ return {
         id: helper.id,
         name: helper.name,
         online: helper.online,
+        ...(helper.squireEligible !== undefined ? { squireEligible: helper.squireEligible } : {}),
         ...(helper.squire ? { squire: helper.squire } : {}),
       })),
       connectors: [
