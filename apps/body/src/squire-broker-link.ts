@@ -29,13 +29,16 @@
  * the broker's shared MCP socket expects (`bot/broker/mcp-socket.js`
  * `listenSharedMcp`: one identity line, then newline-delimited JSON-RPC) and
  * retaining framing and pending-request bookkeeping without timed retries.
- * An established connection loss admits one immediate replacement for this
- * facade. A refused initial connection, failed replacement or second loss
- * stops it. Only MCP initialization is replayed; pending tool calls fail
- * with an unknown outcome and are never replayed. No path launches a broker.
+ * An established connection loss admits an immediate replacement. If the
+ * broker is still restarting, publication of its Unix socket admits the next
+ * attempt, without a retry timer. Initialization and one tool inventory read
+ * reconcile each replacement; pending tool calls retain an unknown outcome
+ * and are never replayed. No path launches a broker.
  */
 import { randomUUID } from 'node:crypto';
+import { watch, type FSWatcher } from 'node:fs';
 import { createConnection, type Socket } from 'node:net';
+import { basename, dirname } from 'node:path';
 import { SQUIRE_BROKER_UNAVAILABLE, TRUSTY_SQUIRE_BROKER_UNIT_NAME } from './squire-host.js';
 
 type JsonRpcFrame = { id?: string | number; method?: string; error?: unknown };
@@ -67,7 +70,9 @@ export type SquireBrokerLinkOptions = {
 };
 
 /** Keep the agent's stdio MCP connection alive across broker restarts, connect-only. */
-export async function runSquireBrokerLink(options: SquireBrokerLinkOptions): Promise<{ ok: boolean }> {
+export async function runSquireBrokerLink(
+  options: SquireBrokerLinkOptions,
+): Promise<{ ok: boolean }> {
   const {
     agentId,
     socketPath,
@@ -83,12 +88,14 @@ export async function runSquireBrokerLink(options: SquireBrokerLinkOptions): Pro
   } = options;
 
   let socket: Socket | undefined;
-  let replacementUsed = false;
+  let watcher: FSWatcher | undefined;
+  let socketChanged = false;
   let inBuffer: Buffer<ArrayBufferLike> = Buffer.alloc(0);
   let outBuffer: Buffer<ArrayBufferLike> = Buffer.alloc(0);
   let initializeLine: string | undefined;
   let initializedLine: string | undefined;
   let replayId: string | undefined;
+  let inventoryId: string | undefined;
   let stopped = false;
   let gaveUp = false;
   let connectedOnce = false;
@@ -101,11 +108,19 @@ export async function runSquireBrokerLink(options: SquireBrokerLinkOptions): Pro
     resolveDone = resolve;
   });
 
-  const failResponse = (id: string | number, outcome: 'unknown' | 'not-sent', reconnect: 'in-progress' | 'failed' = 'failed') =>
+  const failResponse = (
+    id: string | number,
+    outcome: 'unknown' | 'not-sent',
+    reconnect: 'in-progress' | 'failed' = 'failed',
+  ) =>
     `${JSON.stringify({
       jsonrpc: '2.0',
       id,
-      error: { code: -32000, message: 'Trusty Squire broker connection lost', data: { outcome,reconnect } },
+      error: {
+        code: -32000,
+        message: 'Trusty Squire broker connection lost',
+        data: { outcome, reconnect },
+      },
     })}\n`;
 
   const flush = () => {
@@ -120,6 +135,7 @@ export async function runSquireBrokerLink(options: SquireBrokerLinkOptions): Pro
   function stop(ok: boolean): void {
     if (stopped) return;
     stopped = true;
+    watcher?.close();
     socket?.destroy();
     resolveDone(ok);
   }
@@ -127,7 +143,9 @@ export async function runSquireBrokerLink(options: SquireBrokerLinkOptions): Pro
   const giveUp = () => {
     if (gaveUp) return;
     gaveUp = true;
-    logError(`${SQUIRE_BROKER_UNAVAILABLE}: ${TRUSTY_SQUIRE_BROKER_UNIT_NAME} is not reachable at ${socketPath}`);
+    logError(
+      `${SQUIRE_BROKER_UNAVAILABLE}: ${TRUSTY_SQUIRE_BROKER_UNIT_NAME} is not reachable at ${socketPath}`,
+    );
     for (const id of pending.values()) output.write(failResponse(id, 'unknown'));
     pending.clear();
     // A request that arrived before any successful connect was never
@@ -146,9 +164,11 @@ export async function runSquireBrokerLink(options: SquireBrokerLinkOptions): Pro
       return;
     }
     socket = peer;
+    let connected = false;
     outBuffer = Buffer.alloc(0);
     peer.once('connect', () => {
       if (socket !== peer || stopped) return;
+      connected = true;
       peer.write(`${agentId}\n`);
       if (connectedOnce && initializeLine) {
         replayId = `beeline-squire-relay-${randomUUID()}`;
@@ -169,11 +189,26 @@ export async function runSquireBrokerLink(options: SquireBrokerLinkOptions): Pro
         if (replayId !== undefined && frame.id === replayId) {
           replayId = undefined;
           if (frame.error) {
-            peer.destroy(new Error('broker rejected relay initialization'));
+            giveUp();
             return;
           }
           if (initializedLine) peer.write(`${initializedLine}\n`);
+          inventoryId = `beeline-squire-inventory-${randomUUID()}`;
+          peer.write(
+            `${JSON.stringify({ jsonrpc: '2.0', id: inventoryId, method: 'tools/list', params: {} })}\n`,
+          );
+          return;
+        }
+        if (inventoryId !== undefined && frame.id === inventoryId) {
+          inventoryId = undefined;
+          if (frame.error) {
+            giveUp();
+            return;
+          }
           ready = true;
+          output.write(
+            `${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' })}\n`,
+          );
           flush();
           return;
         }
@@ -182,27 +217,32 @@ export async function runSquireBrokerLink(options: SquireBrokerLinkOptions): Pro
       });
     });
     peer.on('error', (error) => {
-      if (!stopped) logError(`squire relay: ${error instanceof Error ? error.message : String(error)}`);
+      if (!stopped)
+        logError(`squire relay: ${error instanceof Error ? error.message : String(error)}`);
     });
     peer.once('close', () => {
       if (socket !== peer || stopped) return;
       socket = undefined;
       ready = false;
       replayId = undefined;
-      const replace=connectedOnce && !replacementUsed;
-      if(replace)replacementUsed=true;
-      for(const id of pending.values())output.write(failResponse(id,'unknown',replace?'in-progress':'failed'));
+      inventoryId = undefined;
+      const replace = connectedOnce;
+      for (const id of pending.values())
+        output.write(failResponse(id, 'unknown', replace ? 'in-progress' : 'failed'));
       pending.clear();
-      if(replace)doConnect();else giveUp();
+      if (!replace) giveUp();
+      else if (connected || socketChanged) doConnect();
+      // A refused successor waits for the host broker to publish its socket.
     });
   };
 
   const doConnect = () => {
     if (stopped) return;
+    socketChanged = false;
     try {
       attach(connect(socketPath));
     } catch {
-      giveUp();
+      if (!connectedOnce) giveUp();
     }
   };
 
@@ -213,7 +253,8 @@ export async function runSquireBrokerLink(options: SquireBrokerLinkOptions): Pro
         // Given up already stops the process in production, but a caller
         // that keeps writing after that (as the injected-stream tests do)
         // gets a clean, immediate failure rather than silence.
-        if (frame.id !== undefined && frame.method) output.write(failResponse(frame.id, 'not-sent'));
+        if (frame.id !== undefined && frame.method)
+          output.write(failResponse(frame.id, 'not-sent'));
         return;
       }
       if (frame.method === 'initialize') initializeLine = line;
@@ -228,7 +269,19 @@ export async function runSquireBrokerLink(options: SquireBrokerLinkOptions): Pro
   input.once('close', close);
   onShutdownSignal(close);
 
-  doConnect();
+  // Watch the directory, not the socket inode that a restart unlinks. Start
+  // before connecting so publication during a failing attempt is not lost.
+  try {
+    watcher = watch(dirname(socketPath), (event, filename) => {
+      if (event !== 'rename' || filename !== basename(socketPath) || stopped) return;
+      socketChanged = true;
+      if (connectedOnce && !socket) doConnect();
+    });
+    watcher.on('error', giveUp);
+    doConnect();
+  } catch {
+    giveUp();
+  }
   const ok = await done;
   return { ok };
 }
