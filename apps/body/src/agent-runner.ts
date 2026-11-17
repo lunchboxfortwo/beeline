@@ -45,6 +45,7 @@ export class AgentRunner {
   private readonly posting = new Set<string>();
   private readonly durable = new Set<string>();
   private readonly restored: Promise<void>;
+  private readonly releaseLiveOpen: () => void;
   private readonly connectionUsage = new ConnectorUsageRecorder();
   private readonly storage: PlaceStorage;
   private readonly agent: ReturnType<typeof runtimeIdentity>;
@@ -102,6 +103,12 @@ export class AgentRunner {
     options.daemonApi.setConfigChangedListener(() => this.configChanged());
     options.daemonApi.setRoomsChangedListener(() => { this.pendingBootstrap = true; this.wake?.(); });
     options.daemonApi.setCornerCompleteListener(cornerId => void this.cornerComplete(cornerId));
+    this.releaseLiveOpen = options.daemonApi.onLiveOpen(() => {
+      // Registration interrupts the old connection's turn projections, while
+      // these harnesses keep working. Reassert only their active invocations.
+      for (const place of this.places.values())
+        if (place.session.current) this.recordTurnStart(place.session.current);
+    });
   }
 
   private placeConfig(placeId: string): BodyConfig {
@@ -198,8 +205,7 @@ export class AgentRunner {
         // Required item credentials and provider configuration precede ACP startup.
         await place.session.start(item);
         started = true;
-        void this.options.daemonApi.execute('startAgentTurn', { roomId: item.roomId, requestId: item.turnRequestId })
-          .catch(error => console.warn('[body] delivery status not written:', error));
+        this.recordTurnStart(item);
         const answer = await place.session.deliver(item, batch);
         // Empty background work closes quietly; an unanswered request stays owed.
         const steps = answer.text && answer.steps.length ? { steps: answer.steps } : {};
@@ -244,6 +250,11 @@ export class AgentRunner {
       place.running = undefined;
     }
     if (started) void this.pump(placeId);
+  }
+
+  private recordTurnStart(item: AgentCommand): void {
+    void this.options.daemonApi.execute('startAgentTurn', { roomId: item.roomId, requestId: item.turnRequestId })
+      .catch(error => console.warn('[body] delivery status not written:', error));
   }
 
   /** A harness that needs its owner (a sign-in, a spent allowance) names it on
@@ -423,6 +434,7 @@ export class AgentRunner {
       return 'aborted';
     } finally {
       this.stopped = true;
+      this.releaseLiveOpen();
       for (const place of this.places.values()) clearTimeout(place.idleTimer);
       await Promise.all([...this.places.values()].map(place => place.session.dispose().catch(() => undefined)));
       await this.grantRunnerServer.close();

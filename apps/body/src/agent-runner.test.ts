@@ -13,7 +13,12 @@ vi.mock('./place-session.js', () => ({ PlaceSession: class {
   alive = false;
   stale = false;
   start = harness.start;
-  deliver = harness.deliver;
+  current?: AgentCommand;
+  async deliver(item: AgentCommand, batch: readonly AgentCommand[]) {
+    this.current = item;
+    try { return await harness.deliver(item, batch); }
+    finally { this.current = undefined; }
+  }
   followUp = harness.steer;
   stop = harness.stop;
   cancel = harness.cancel;
@@ -43,10 +48,12 @@ async function fixture() {
   const agent = { publicKey: identity.publicKey, secretKeyHex, name: identity.name };
   const runtime = { agent, communityId: 'workspace', rooms: [], supervisorRoot: root } as unknown as AgentRuntimeRecord;
   let changed!: (commands: readonly AgentCommand[], completed: readonly string[]) => void;
+  let opened!: () => void;
   const execute = vi.fn(async (_name: string, _input: Record<string, unknown>) => ({ id: 'posted', createdAt: 1 }));
   const api = { execute,
     setQueueListener: (listener: typeof changed) => { changed = listener; },
     setConfigChangedListener() {}, setRoomsChangedListener() {}, setCornerCompleteListener() {},
+    onLiveOpen: (listener: () => void) => { opened = listener; return () => {}; },
   } as unknown as DaemonApiClient;
   new AgentRunner(runtime, join(root, 'runtime.json'), {
     workspaceRoot: root, agentBinary: 'fixture', mcpBinary: 'fixture', agentEnv: {},
@@ -56,8 +63,26 @@ async function fixture() {
     rootSourceMessageId: id, sourceMessageId: id, agentDepth: 0,
     source: { id, authorId: 'human', body: id, attachments: [], createdAt: 1, type: 'message' },
   });
-  return { root, execute, changed: (commands: AgentCommand[], completed: readonly string[] = []) => changed(commands, completed), item };
+  return { root, execute, opened: () => opened(), changed: (commands: AgentCommand[], completed: readonly string[] = []) => changed(commands, completed), item };
 }
+
+it('reannounces an active turn after registration without delivering its prompt again', async () => {
+  const f = await fixture(), item = f.item('still-working');
+  const held = deferred<Record<string, unknown>>();
+  harness.deliver.mockReturnValueOnce(held.promise);
+  f.changed([item]);
+  await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(1));
+  f.opened();
+  expect(f.execute.mock.calls.filter(([name]) => name === 'startAgentTurn')).toEqual([
+    ['startAgentTurn',{roomId:item.roomId,requestId:item.turnRequestId}],
+    ['startAgentTurn',{roomId:item.roomId,requestId:item.turnRequestId}],
+  ]);
+  expect(harness.deliver).toHaveBeenCalledTimes(1);
+  held.resolve({text:'answer',steps:[],toolCalls:[],cleanup:async()=>{}});
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postAgentTurnReceipt',expect.anything()));
+  f.opened();
+  expect(f.execute.mock.calls.filter(([name]) => name === 'startAgentTurn')).toHaveLength(2);
+});
 
 it('lets a committed reply finish returning while its harness continues, across later queue pushes', async () => {
   const f = await fixture(), item = f.item('reply-in-progress');

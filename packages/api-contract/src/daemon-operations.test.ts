@@ -36,10 +36,14 @@ move7_describe('server command protocol 1', () => {
     { ...command, action: 'message' },
     { ...command, action: 'stop' },
     { ...command, agentDepth: -1 },
-    { ...command, agentDepth: 4 },
+    { ...command, agentDepth: 1.5 },
+    { ...command, agentDepth: '4' },
     { ...command, source: {} },
     { ...command, agentId: '' },
   ])('rejects malformed command %#', (value) => move7_expect(move7_isAgentCommand(value)).toBe(false));
+});
+move7_it.each([0, 3, 4, 10, 2147483647])('accepts stored command depth %i', (agentDepth) => {
+  move7_expect(move7_isAgentCommand({ ...command, agentDepth })).toBe(true);
 });
 move7_it('accepts a reconnect batch and rejects malformed offline durations', () => {
   move7_expect(move7_isAgentCommand({...command,offlineSeconds:18*3600})).toBe(true);
