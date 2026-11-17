@@ -409,15 +409,12 @@ CREATE TABLE IF NOT EXISTS message_bookmarks (
 );
 CREATE INDEX IF NOT EXISTS message_bookmarks_workspace_viewer_page_idx
   ON message_bookmarks(workspace_id,identity_id,created_at DESC,message_id);
--- The Needs-you tray's only stored facts, per person: when they first saw a
--- cell (its 24-hour clock, shared by every device) and when they cleared it
--- by tapping or dismissing. Which messages are cells is read live
--- (needs-you.ts), never stored.
+-- Needs-you open items and their first-seen/dismissal state, shared by devices.
 CREATE TABLE IF NOT EXISTS needs_you_marks (
   identity_id text NOT NULL REFERENCES identities(id) ON DELETE CASCADE,
   message_id text NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
   workspace_id uuid NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  first_seen_at timestamptz NOT NULL DEFAULT now(),
+  first_seen_at timestamptz DEFAULT now(),
   cleared_at timestamptz,
   PRIMARY KEY(identity_id,message_id)
 );

@@ -124,7 +124,10 @@ function AskCard({ item, actions, now }: { item: WorkItemView; actions: WorkBoar
       testID={`work-ask-${item.id}`}
     >
       <XStack gap="2" alignItems="center">
-        <WorkStateMark state="needs-you" />
+        <WorkAvatar person={ask.author ?? item.openedBy} />
+        <T v="metaStrong" flexShrink={1} numberOfLines={1}>
+          {(ask.author ?? item.openedBy).name}
+        </T>
         <T v="meta" color="secondary" flex={1} numberOfLines={1}>
           {source(item)}
         </T>

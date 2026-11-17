@@ -1,3 +1,4 @@
+import { needsYouMarksSchema } from './needs-you-marks.js';
 import { backfillThreadImplementers } from './corner-lifecycle.js';
 import { cleanupConnectHandles } from './migrations/connect-handle-cleanup.js';
 import { repairOrphanedTurns } from './migrations/orphaned-turns.js';
@@ -573,6 +574,7 @@ export async function migrate(
   await ddlScript('Helper overlay demand', HELPER_OVERLAY_SCHEMA);
   await ddlScript('Helper usage ownership', HELPER_USAGE_SCHEMA);
   await ddlScript('push outbox', PUSH_OUTBOX_SCHEMA);
+  await ddlScript('Needs you open items', needsYouMarksSchema(), true);
   await ddlScript('Background obligation sources', BACKGROUND_DUE_SOURCE_SCHEMA);
   // Retired Tray clock and background storage remains through the serving and
   // rollback overlap. A later release owns its contract, after its readers drain.

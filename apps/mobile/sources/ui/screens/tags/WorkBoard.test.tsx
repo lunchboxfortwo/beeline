@@ -8,7 +8,7 @@ vi.mock('react-native', () => ({ Platform: { OS: 'ios', select: (choices: any) =
 vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
-vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: () => null }));
+vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: (props: any) => React.createElement('IdentityMark', props) }));
 vi.mock('@/ui/shell/TabHeader', () => ({ TabHeader: () => null, useScrolledUnder: () => ({ scrolled: false, scrollProps: {} }) }));
 vi.mock('./WorkItemDetail', () => ({ WorkSheet: () => null }));
 
@@ -57,7 +57,7 @@ it.each([false, true])('renders each ask kind with its asking time on desktop=%s
             title: 'Launch', state: 'needs-you', openedBy: person, assignee: null,
             createdAt: 1, updatedAt: now / 1000,
             ask: { messageId: String(index), workspaceId: 'ws', roomId: 'chat', roomName: 'general',
-                roomKind: 'room', text: 'Please report progress?', createdAt: now / 1000 - ages[index]!, approval },
+                roomKind: 'room', author: index === 1 ? { pubkey: 'human', kind: 'human', name: 'Juniper' } : person, text: 'Please report progress?', createdAt: now / 1000 - ages[index]!, approval },
         })),
     };
     const actions = { open: vi.fn(), reply: vi.fn(), decide: vi.fn(), assign: vi.fn(), clear: vi.fn(), clearAll: vi.fn() };
@@ -69,7 +69,12 @@ it.each([false, true])('renders each ask kind with its asking time on desktop=%s
         .findAll((n: any) => n.type === 'Text')
         .flatMap((n: any) => [n.props.children].flat(Infinity));
     try {
-        ['2m', '3h', '2d'].forEach((stamp, index) => expect(cardText(index)).toContain(stamp));
+        ['2m', '3h', '2d'].forEach((stamp, index) => {
+            expect(cardText(index)).toContain(stamp);
+            expect(cardText(index)).toContain(index === 1 ? 'Juniper' : 'Jellybean');
+        });
+        expect(tree.root.findAll((n: any) => n.type === 'IdentityMark' && n.props.seed === 'agent')).toHaveLength(2);
+        expect(tree.root.findAll((n: any) => n.type === 'IdentityMark' && n.props.seed === 'human' && n.props.kind === 'human')).toHaveLength(1);
         act(() => tree.update(render(now + 60_000)));
         expect(cardText(0)).toContain('3m');
     } finally { act(() => tree.unmount()); }

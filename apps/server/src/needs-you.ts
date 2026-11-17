@@ -22,13 +22,15 @@ import type { SqlDatabase } from './database.js';
 /**
  * The "Needs you" tray, owned here and nowhere else.
  *
- * Only three things need a person: a question-builder ask assigned to them
- * (`work_questions`), a blocked or needs-decision report addressed to them as
+ * Needs you holds an exact personal tag from another person, a question-builder
+ * ask assigned to them (`work_questions`), a blocked or needs-decision report
+ * addressed to them as
  * commander (`card.reportToId`), and a pending approval card they can decide
- * (`approvalBranches`), shown as text (`NeedsYouApprovalView`). Plain mentions
- * and wording never qualify.
+ * (`approvalBranches`), shown as text (`NeedsYouApprovalView`). Agent mentions
+ * and untargeted wording never qualify.
  *
- * A report leaves the tray when the person clears it
+ * Open report/person-tag records are written with the message; reads join
+ * only the viewer’s uncleared marks. A record leaves when the person clears it
  * (`needs_you_marks.cleared_at`), posts in its originating Room/corner or
  * replies on its thread after it, or 24 hours after they first saw it on any device
  * (`needs_you_marks.first_seen_at`). An ask or approval leaves when cleared,
@@ -57,8 +59,8 @@ export function isNeedsYouAsk(text: string): boolean {
 }
 
 /**
- * `isNeedsYouAsk` in SQL. The two readings must agree (`needs-you.test.ts`);
- * the TypeScript twin still re-checks every row the query returns.
+ * `isNeedsYouAsk` in SQL. TypeScript report parsing and the write/backfill
+ * SQL must agree (`needs-you.test.ts`).
  */
 export function askSql(textExpr: string): string {
   return `(${textExpr} ~ '^(blocked|needs-decision):[[:space:]]*[^[:space:]]')`;
@@ -215,25 +217,30 @@ const viewerRoomsSql = (columns='room.*',scoped=false)=>`
   )`;
 const VIEWER_ROOMS=viewerRoomsSql();
 
-/** A report still awaiting `viewer`, its commander, ignoring only its clock deadline. */
-function questionForSql(viewerId: string): string {
+/** The legacy report rule, used once to backfill the open-item records. */
+export function questionForSql(viewerId: string): string {
   return `${askingMessageSql('m')} AND m.author_id<>${viewerId}
-  AND mark.cleared_at IS NULL AND m.card->>'reportToId'=${viewerId}
-  AND NOT EXISTS (
+    AND m.card->>'reportToId'=${viewerId} AND mark.cleared_at IS NULL
+    AND NOT (${needsYouAnsweredSql('m', viewerId)})`;
+}
+
+/** One answer rule for write-time clearing and the legacy backfill. */
+export function needsYouAnsweredSql(message: string, viewerId: string): string {
+  return `EXISTS (
     SELECT 1 FROM messages reply
-    WHERE reply.room_id=(${humanReportCornerSql('m')})::uuid AND reply.author_id=${viewerId}
+    WHERE reply.room_id=(${humanReportCornerSql(message)})::uuid AND reply.author_id=${viewerId}
       AND reply.presentation='message' AND reply.system_event IS NULL AND reply.deleted_at IS NULL
-      AND reply.created_at>m.created_at
+      AND reply.created_at>${message}.created_at
     UNION ALL
     SELECT 1 FROM messages reply
-    WHERE reply.reply_to_message_id=m.id AND reply.author_id=${viewerId}
+    WHERE reply.reply_to_message_id=${message}.id AND reply.author_id=${viewerId}
       AND reply.presentation='message' AND reply.system_event IS NULL AND reply.deleted_at IS NULL
-      AND reply.created_at>m.created_at
+      AND reply.created_at>${message}.created_at
   )`;
 }
 
-/** Unanswered questions expire only after the viewer first sees them. */
-const QUESTION_WHERE = `${questionForSql('$2')}
+/** Open records expire only after the viewer first sees them. */
+const QUESTION_WHERE = `mark.cleared_at IS NULL AND m.presentation='message' AND m.deleted_at IS NULL
   AND (mark.first_seen_at IS NULL OR mark.first_seen_at+interval '${NEEDS_YOU_EXPIRY_HOURS} hours'>now())`;
 
 /** Clear every current question. */
@@ -244,15 +251,11 @@ export async function clearNeedsYouQuestions(
 ): Promise<void> {
   await database.query(
     `WITH ${VIEWER_ROOMS}
-     INSERT INTO needs_you_marks(identity_id,message_id,workspace_id,cleared_at,reminder_dismissed_at)
-     SELECT $2,m.id,$1,now(),now()
-     FROM viewer_rooms room
-     JOIN messages m ON m.room_id=room.id
-     LEFT JOIN needs_you_marks mark ON mark.identity_id=$2 AND mark.message_id=m.id
-     WHERE ${QUESTION_WHERE}
-     ON CONFLICT(identity_id,message_id)
-       DO UPDATE SET cleared_at=COALESCE(needs_you_marks.cleared_at,now()),
-         reminder_dismissed_at=COALESCE(needs_you_marks.reminder_dismissed_at,EXCLUDED.reminder_dismissed_at)`,
+     UPDATE needs_you_marks mark SET cleared_at=now(),
+       reminder_dismissed_at=COALESCE(mark.reminder_dismissed_at,now())
+     FROM messages m JOIN viewer_rooms room ON room.id=m.room_id
+     WHERE mark.identity_id=$2 AND mark.workspace_id=$1 AND mark.message_id=m.id
+       AND ${QUESTION_WHERE}`,
     [workspaceId, viewerId],
   );
 }
@@ -417,22 +420,18 @@ export function grantDecidedBySql(grant: string, identityExpr: string): string {
 const questionBranch=(projection:CandidateProjection)=>`
   SELECT ${candidateColumns(projection)},NULL::text approval_kind,NULL::timestamptz approval_expires_at,
     NULL::text[] pending_grant_ids,NULL::text actor_name
-  FROM viewer_rooms room
-  JOIN actionable_asks m ON m.room_id=room.id
-  JOIN identities viewer ON viewer.id=$2
+  FROM open_marks mark
+  JOIN messages m ON m.id=mark.message_id
+  JOIN viewer_rooms room ON room.id=m.room_id
   ${projection==='cells'?'LEFT JOIN identities author ON author.id=m.author_id':''}
-  LEFT JOIN needs_you_marks mark ON mark.identity_id=$2 AND mark.message_id=m.id
   WHERE ${QUESTION_WHERE}
 `;
 
 /** The same authorized candidates drive the tray and its badge. */
 const needsYouCandidates=(projection:CandidateProjection,scoped=false)=>`WITH ${viewerRoomsSql(projection==='cells'?'room.*':'room.id',scoped)},
-  actionable_asks AS MATERIALIZED (
-    -- Retain the report body: joining messages again lets a low report estimate
-    -- choose a full report-index scan (and answer lookups) for every candidate.
-    SELECT m.id,m.room_id,m.author_id,m.text,m.presentation,m.card,m.attachments,
-      m.created_at,m.deleted_at,m.request_id FROM messages m
-    WHERE ${askingMessageSql('m')}
+  open_marks AS MATERIALIZED (
+    SELECT * FROM needs_you_marks WHERE identity_id=$2 AND workspace_id=$1 AND cleared_at IS NULL
+      AND (first_seen_at IS NULL OR first_seen_at+interval '${NEEDS_YOU_EXPIRY_HOURS} hours'>now())
   ),
   decidable AS (
     SELECT grant_row.id::text grant_id FROM agent_grants grant_row
@@ -528,7 +527,7 @@ export async function needsYouItems(database: SqlDatabase, workspaceId: string, 
        SELECT $2,message_id,$1 FROM visible
        WHERE approval_kind IS NULL AND first_seen_at IS NULL AND $3::boolean
        ON CONFLICT(identity_id,message_id)
-         DO UPDATE SET first_seen_at=needs_you_marks.first_seen_at
+         DO UPDATE SET first_seen_at=COALESCE(needs_you_marks.first_seen_at,EXCLUDED.first_seen_at)
        RETURNING message_id,first_seen_at` : `SELECT message_id,first_seen_at FROM visible WHERE false AND $3::boolean`}
      )
      SELECT visible.*,
@@ -541,8 +540,7 @@ export async function needsYouItems(database: SqlDatabase, workspaceId: string, 
     roomIds?[workspaceId, viewerId, markSeen,roomIds]:[workspaceId, viewerId, markSeen], 'phone-tray-needs-0',
   );
   if (!result.rows[0]?.authorized) throw new Error('workspace membership required');
-  const built = result.rows.filter((row) => row.message_id &&
-    (!!row.approval_kind || isNeedsYouAsk(row.text))).flatMap((row) => {
+  const built = result.rows.filter((row) => row.message_id).flatMap((row) => {
     const view = row.approval_kind ? approvalView(row, viewerId) : undefined;
     const image = view ? askingImage(row.attachments, publicOrigin) : undefined;
     const approval = view && image ? { ...view, image } : view;
@@ -808,7 +806,7 @@ export async function markNeedsYouSeen(database: SqlDatabase, workspaceId: strin
        INSERT INTO needs_you_marks(identity_id,message_id,workspace_id)
        SELECT $2,message_id,$1 FROM candidates
        WHERE approval_kind IS NULL AND message_id=ANY($3::text[]) AND ${VIEWER_MEMBER}
-       ON CONFLICT(identity_id,message_id) DO UPDATE SET first_seen_at=needs_you_marks.first_seen_at
+       ON CONFLICT(identity_id,message_id) DO UPDATE SET first_seen_at=COALESCE(needs_you_marks.first_seen_at,EXCLUDED.first_seen_at)
        RETURNING message_id,first_seen_at
      )
      SELECT started.*,access.authorized FROM (SELECT ${VIEWER_MEMBER} authorized) access

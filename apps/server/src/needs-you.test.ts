@@ -225,18 +225,18 @@ describe('PhoneService Needs-you tray', () => {
     expect((await phone.readWorkspaces(VIEWER)).workspaces[0]?.attention).toBe(true);
   });
 
-  it('holds a report addressed to the reader, never a mention, question or keyword', async () => {
-    await post(ROOM, PEER, '@ada can you confirm the review note?', 30);
+  it('holds person tags and addressed reports, never plain agent mentions', async () => {
+    const personTag = await post(ROOM, PEER, '@ada can you confirm the review note?', 30);
     await post(CORNER, AGENT, 'The release check needs a grant — @ada please approve it.', 25);
-    await post(ROOM, PEER, 'blocked: an untargeted report @ada', 24);
+    const taggedReport = await post(ROOM, PEER, 'blocked: an untargeted report @ada', 24);
     const question = await report(ROOM, PEER, 'needs-decision: Can you confirm the review note?', 22);
     const blocked = await report(CORNER, AGENT, 'blocked: The release check needs a grant.', 20);
     await report(OTHER_ROOM, PEER, 'blocked: a Room the reader cannot see.', 5);
 
     const { items } = await read();
     // Oldest first: nothing has started a clock yet.
-    expect(items.map((item) => item.messageId)).toEqual([question, blocked]);
-    expect(items[1]).toMatchObject({
+    expect(items.map((item) => item.messageId)).toEqual([personTag, taggedReport, question, blocked]);
+    expect(items[3]).toMatchObject({
       roomId: CORNER,
       roomName: 'release-ios-signing',
       roomKind: 'corner',
@@ -244,7 +244,7 @@ describe('PhoneService Needs-you tray', () => {
       text: 'The release check needs a grant.',
       author: { name: 'Hoots' },
     });
-    expect(items[0]).toMatchObject({
+    expect(items[2]).toMatchObject({
       roomKind: 'room',
       roomName: 'Launch room',
       text: 'Can you confirm the review note?',
@@ -287,7 +287,7 @@ describe('PhoneService Needs-you tray', () => {
       expect(value?.count).toBe(1);
       expect(value?.items.map(item => item.messageId)).toEqual([question]);
       expect(cells).toHaveBeenCalledTimes(1);
-      expect((await database.query('SELECT * FROM needs_you_marks')).rows).toEqual([]);
+      expect((await database.query('SELECT * FROM needs_you_marks WHERE first_seen_at IS NOT NULL')).rows).toEqual([]);
     } finally { cells.mockRestore(); }
   });
 
@@ -296,8 +296,8 @@ describe('PhoneService Needs-you tray', () => {
     await database.query(`UPDATE messages SET card=card||jsonb_build_object('sourceRoomId',$2::text) WHERE id=$1`, [id, CORNER]);
     await post(CORNER, PEER, 'yes', 10);
     await post(ROOM, VIEWER, 'Unrelated return-Room conversation.', 10);
-    const system = await post(CORNER, VIEWER, 'System event', 9);
-    await database.query(`UPDATE messages SET system_event='{}'::jsonb WHERE id=$1`, [system]);
+    await database.query(`INSERT INTO messages(id,room_id,author_id,text,system_event,created_at)
+      VALUES('system-event',$1,$2,'System event','{}'::jsonb,now()-interval '9 minutes')`, [CORNER, VIEWER]);
     expect(await count()).toBe(1);
     const reply = await post(surface === 'corner' ? CORNER : ROOM, VIEWER, 'yes', 5);
     if (surface === 'thread') await database.query('UPDATE messages SET reply_to_message_id=$2 WHERE id=$1', [reply, id]);
@@ -309,7 +309,7 @@ describe('PhoneService Needs-you tray', () => {
     const first = await report(ROOM, PEER, 'needs-decision: please review this');
     const second = await report(ROOM, PEER, 'needs-decision: can you confirm?');
     const marks = async () => (await database.query(
-      `SELECT * FROM needs_you_marks ORDER BY message_id`,
+      `SELECT * FROM needs_you_marks WHERE first_seen_at IS NOT NULL ORDER BY message_id`,
     )).rows;
     const live = () => phone.liveNeedsYou(ROOM, VIEWER);
     for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -338,7 +338,7 @@ describe('PhoneService Needs-you tray', () => {
     const id = await report(ROOM, PEER, 'needs-decision: can you look?');
     expect(await count()).toBe(1);
     expect(
-      (await database.query(`SELECT 1 FROM needs_you_marks WHERE message_id=$1`, [id])).rowCount,
+      (await database.query(`SELECT 1 FROM needs_you_marks WHERE message_id=$1 AND first_seen_at IS NOT NULL`, [id])).rowCount,
     ).toBe(0);
 
     const firstRead=await read();
@@ -366,7 +366,7 @@ describe('PhoneService Needs-you tray', () => {
     expect((await badge()).items.every(item => item.expiresAt === undefined)).toBe(true);
     const trayPreview = await phone.execute('readTray', { workspaceId: WORKSPACE, markSeen: false }, VIEWER);
     expect(trayPreview.needs?.items.every(item => item.expiresAt === undefined)).toBe(true);
-    expect((await database.query(`SELECT * FROM needs_you_marks`)).rowCount).toBe(0);
+    expect((await database.query(`SELECT * FROM needs_you_marks WHERE first_seen_at IS NOT NULL`)).rowCount).toBe(0);
     // Advancing an unseen ask never starts its first-seen expiry.
     await database.query(`UPDATE messages SET created_at=created_at-interval '25 hours' WHERE id=ANY($1::text[])`, [[first, second]]);
     expect((await badge()).items.map(item => item.messageId)).toEqual([first, second]);
@@ -508,13 +508,13 @@ describe('PhoneService Needs-you tray', () => {
   it('never lets newer near-miss messages crowd out an older real ask', async () => {
     const ask = await report(ROOM, PEER, 'needs-decision: please review the release notes', 60);
     // More near-misses than the query's candidate limit, all newer than the ask:
-    // each tags the reader and asks, but is not a report addressed to them.
+    // each is an agent tag, not a report addressed to the reader.
     await database.query(
       `INSERT INTO messages(id,room_id,author_id,text,created_at)
        SELECT lpad(to_hex(1000000 + series),64,'0'),$1,$2,'@ada can you approve it?',
          now() - interval '30 minutes' + series * interval '1 millisecond'
        FROM generate_series(1,600) series`,
-      [ROOM, PEER],
+      [ROOM, AGENT],
     );
     expect((await read()).items.map((item) => item.messageId)).toEqual([ask]);
     expect(await count()).toBe(1);

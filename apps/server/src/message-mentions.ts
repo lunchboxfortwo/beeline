@@ -348,12 +348,14 @@ export function taggedIdentityIdsSql(message: string): string {
  * `identityKindExpr` gates the `@channel` branch: only a `'human'` identity
  * can be reached by the broadcast token, so an agent recipient (pass the
  * literal `'agent'`) never matches it and is never woken by `@channel`.
+ * Pass `includeChannel=false` when only an exact personal handle qualifies.
  */
 export function tagsKnownIdentitySql(
   message: string,
   identityIdExpr: string,
   identityHandleExpr: string,
   identityKindExpr: string,
+  includeChannel = true,
 ): string {
   // Human handles remain global. Keep their existing expression so common
   // human-only Tray reads do not resolve the same workspace address per row.
@@ -375,7 +377,7 @@ export function tagsKnownIdentitySql(
             AND btrim(ltrim(CASE WHEN rival.kind='agent' THEN COALESCE(rival_address.handle,rival.handle) ELSE rival.handle END,'@'))=btrim(ltrim(${identityHandleExpr},'@'))
         )
       )
-      OR (
+      ${includeChannel ? `OR (
         ${identityKindExpr}='human'
         AND ${identityIdExpr}<>${message}.author_id
         AND ${channelMentionWrittenSql(`${message}.text`)}
@@ -387,7 +389,7 @@ export function tagsKnownIdentitySql(
            AND channel_member.removed_at IS NULL
           WHERE channel_room.id=${message}.room_id
         )
-      )
+      )` : ''}
     )
   )`;
 }
