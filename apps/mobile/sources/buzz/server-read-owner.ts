@@ -1,5 +1,5 @@
 import { NeedsYouLiveDelta, Entry, Change, Slot } from './server-read-owner-types';
-import { useEffect, useSyncExternalStore, useCallback } from 'react';
+import { useEffect, useReducer, useSyncExternalStore, useCallback } from 'react';
 import { AppState } from 'react-native';
 import { isChatListView, type ChatListView, type SurfaceCacheAddress } from '@beeline/buzz-client';
 import { type NeedsYouItemView, type NeedsYouListResult } from '@beeline/api-contract/phone';
@@ -15,6 +15,7 @@ import { isDraftFrame } from '@/sync/transport/live-frames';
 import { RoomViewClient } from '@/sync/transport/room-view-client';
 import type { MonolithSurfaceEvent } from '@/sync/transport/monolith-rig-transport';
 import { mobileSurfaceCache, surfaceAddress } from './surface-storage';
+import { nextExpiry, stillOwed } from './needs-you-expiry';
 import {
   chatWatchFiltersKey,
   withoutCornerFacts,
@@ -574,9 +575,18 @@ namespace TrayReads {
     const snapshot = useCallback(() => {
       if (!workspaceId) return 0;
       const entry = current(workspaceId)?.entry;
-      return entry ? (entry.needs?.length ?? 0) : 0;
+      // The server stops counting an item at its expiry without sending a delta.
+      return entry?.needs ? stillOwed(entry.needs, Date.now()).length : 0;
     }, [workspaceId]);
     const count = useSyncExternalStore(subscribeCount, snapshot, () => 0);
+    const [, recount] = useReducer((turn: number) => turn + 1, 0);
+    const needs = workspaceId ? current(workspaceId)?.entry.needs : undefined;
+    useEffect(() => {
+      const next = needs ? nextExpiry(needs, Date.now()) : null;
+      if (next === null) return;
+      const timer = setTimeout(recount, next - Date.now() + 50);
+      return () => clearTimeout(timer);
+    }, [needs, count]);
     const generation = useSyncExternalStore(subscribeClientReset, clientResetGeneration);
     useEffect(() => {
       void resolveViewer();
