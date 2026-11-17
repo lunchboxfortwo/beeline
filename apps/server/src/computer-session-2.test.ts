@@ -175,7 +175,7 @@ const scope1 = fixtureScope1();
       response.writeHead(200, { 'content-type': 'text/html' });
       response.end(`<!doctype html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>
         html,body{margin:0;width:100%;height:100%}body{display:flex;flex-direction:column}#screen{flex:1;min-height:0}</style></head><body>
-        <div id="bar"><span id="state"></span><button id="focus"></button></div>
+        <div id="bar"><span id="state"></span><button id="focus">Keyboard</button></div>
         <div id="screen"><canvas id="canvas" tabindex="0" width="1279" height="936"></canvas></div>
         <input id="keyboard" type="text">
         <script>const canvas=document.getElementById('canvas');const socket = new WebSocket(new URL("stream", location.href));
@@ -311,6 +311,30 @@ const scope1 = fixtureScope1();
       // the page off the screen.
       await command('Emulation.setDeviceMetricsOverride', { width: 390, height: 750, deviceScaleFactor: 1, mobile: true });
       await command('Emulation.setTouchEmulationEnabled', { enabled: true });
+      // The real upstream label remains in the button at font-size:0. It
+      // must not create a second grid row that lifts the keyboard glyph.
+      // Measure an equivalent 20px glyph box because pseudo-elements do not
+      // expose getBoundingClientRect(). Keep the hidden label in the layout.
+      const keyboardGeometry = await evaluate<{ width: number; height: number; dx: number; dy: number }>(`(() => {
+        const button = document.getElementById('focus');
+        const style = document.createElement('style');
+        style.textContent = '#focus::before{display:none}';
+        document.head.appendChild(style);
+        const glyph = document.createElement('span');
+        glyph.style.cssText = 'width:20px;height:20px;flex-shrink:0';
+        button.prepend(glyph);
+        const box = button.getBoundingClientRect(), ink = glyph.getBoundingClientRect();
+        const result = { width: box.width, height: box.height,
+          dx: ink.left + ink.width / 2 - box.left - box.width / 2,
+          dy: ink.top + ink.height / 2 - box.top - box.height / 2 };
+        glyph.remove(); style.remove();
+        return result;
+      })()`);
+      // Match the app conversation toggle's 44px outer footprint above it.
+      expect(keyboardGeometry.width).toBe(44);
+      expect(keyboardGeometry.height).toBe(44);
+      expect(Math.abs(keyboardGeometry.dx)).toBeLessThan(0.5);
+      expect(Math.abs(keyboardGeometry.dy)).toBeLessThan(0.5);
       expect(await evaluate<boolean>(`document.getElementById('beeline-paste') === null`)).toBe(true);
       await evaluate(`socket.dispatchEvent(new MessageEvent('message', {data:JSON.stringify({type:'navigation',url:'https://login.example/vnc.html'})}))`);
       expect(await evaluate<string>(`getComputedStyle(document.getElementById('bar')).display`)).not.toBe('none');

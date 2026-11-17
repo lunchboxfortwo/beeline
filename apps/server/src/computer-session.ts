@@ -454,8 +454,8 @@ export async function serveComputerSession(
       body.beeline-embedded #bar{bottom:12px!important}
       body.beeline-keyboard #screen{flex:none!important;height:var(--beeline-visible-height)!important;max-height:var(--beeline-visible-height)!important;margin-top:var(--beeline-visible-top)!important}
       body.beeline-keyboard #bar{bottom:auto!important;top:var(--beeline-button-top)!important}
-      #focus{width:42px;height:42px;margin:0!important;padding:0;border:1px solid var(--beeline-strongStroke,ButtonBorder);border-radius:14px;background:var(--beeline-canvas,Canvas);color:var(--beeline-ink,CanvasText);font-size:0}
-      #focus{display:grid;place-items:center}
+      #focus{box-sizing:border-box;width:44px;height:44px;margin:0!important;padding:0;border:1px solid var(--beeline-strongStroke,ButtonBorder);border-radius:14px;background:var(--beeline-canvas,Canvas);color:var(--beeline-ink,CanvasText);font-size:0}
+      #focus{display:flex;align-items:center;justify-content:center}
       #focus::before{content:'';width:20px;height:20px;background:currentColor;mask:url('data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%222%22%20y%3D%224%22%20width%3D%2220%22%20height%3D%2216%22%20rx%3D%222%22%2F%3E%3Cpath%20d%3D%22M10%208h.01%20M12%2012h.01%20M14%208h.01%20M16%2012h.01%20M18%208h.01%20M6%208h.01%20M7%2016h10%20M8%2012h.01%22%2F%3E%3C%2Fsvg%3E') center/contain no-repeat}
       @media(pointer:fine){#bar{display:none!important}}
     </style>`;
