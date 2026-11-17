@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 def record(ipa_path, output_path):
-    root = Path(__file__).resolve().parent.parent
+    root = Path(__file__).resolve().parents[2]
     version = json.loads((root / "apps/mobile/package.json").read_text())["version"]
     runtime = json.loads((root / "apps/mobile/native-fingerprint.json").read_text())["ios"]["runtimeVersion"]
     with zipfile.ZipFile(ipa_path) as archive:
