@@ -1,6 +1,7 @@
 // The machine's one session bridge: for every joined session it waits on Beeline for tags and wakes, and hands each
 // to the session's app by the fastest way the app has. It needs no public address: it only calls out to Beeline.
 import { sessionAgentBehavior } from '../agent-command.js';
+import type { DaemonAttachment } from '@beeline/api-contract/daemon';
 import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync, watch } from 'node:fs';
 import { createConnection, createServer } from 'node:net';
 import { dirname, join } from 'node:path';
@@ -17,8 +18,8 @@ import { findSession, liveSessions, machineSources, type LiveSession, type Sourc
 import { bundleDigest } from './bridge-launch.js';
 import { pidAlive, queueInbox, queueInboxOnce, readState, takeInbox, updateState, type JoinedSession, hasLocalDelivery } from './store.js';
 
-export interface Mention { memberId?: string; replyRule?: string; id: string; room_id: string; room_name?: string; author_handle?: string | null; author_name?: string | null; text: string }
-export interface Wake { id: string; address: string; from?:{agent:string;place:string}; reason?: string; kind?: string; text?: string; createdAt: string; next?: string; receipt?: {generation:string;nonce:string;conversation:string} }
+export interface Mention { memberId?: string; replyRule?: string; id: string; room_id: string; room_name?: string; author_handle?: string | null; author_name?: string | null; text: string; attachments?: readonly DaemonAttachment[] }
+export interface Wake { id: string; address: string; from?:{agent:string;place:string}; reason?: string; kind?: string; text?: string; attachments?: readonly DaemonAttachment[]; createdAt: string; next?: string; receipt?: {generation:string;nonce:string;conversation:string} }
 
 /** How the session runs Beeline commands: the stable bundle copy and this member's id. */
 export interface Runner {
@@ -34,10 +35,14 @@ function command(runner: Runner, joined: JoinedSession, args: string): string {
 }
 
 /** What the session reads: who tagged it, where, the exact text as data, and the command that answers. */
+export function renderAttachments(attachments: readonly DaemonAttachment[] = []): string[] {
+  return attachments.map(attachment => `Attachment: ${JSON.stringify(attachment)}`);
+}
+
 export function renderMention(m: Mention, joined: JoinedSession, runner: Runner): string {
   const who = m.author_handle ? `@${m.author_handle}` : m.author_name ?? 'Someone';
   const quoted = m.text.split('\n').map(line => `> ${line}`).join('\n');
-  return [`[Beeline · #${m.room_name ?? m.room_id} · ${who} tagged you]`, quoted,
+  return [`[Beeline · #${m.room_name ?? m.room_id} · ${who} tagged you]`, quoted, ...renderAttachments(m.attachments),
     `Reply: ${command(runner, joined, `tool reply '${JSON.stringify({id:m.id,text:'<your answer>'})}'`)}`,
     `Context: ${command(runner, joined, `read --room ${m.room_id}`)}`].join('\n');
 }
@@ -59,7 +64,7 @@ export function renderWake(w: Wake, joined: JoinedSession, runner: Runner): stri
     `  ${command(runner,joined,`tool confirm_delivery '${JSON.stringify(w.receipt).replace(/'/g, "'\\''")}'`)}`].join('\n');
   const header = [`[Beeline · ${w.address} · message ${w.id}]`,
     ...(w.from ? [`From: (${w.from.agent}, ${w.from.place})`] : []),
-    ...(w.text ? [w.text.split('\n').map(l => `> ${l}`).join('\n')] : []), ...(w.next ? [w.next] : [])];
+    ...(w.text ? [w.text.split('\n').map(l => `> ${l}`).join('\n')] : []), ...renderAttachments(w.attachments), ...(w.next ? [w.next] : [])];
   return [...header,
     `Reply: ${command(runner, joined, `tool reply '${JSON.stringify({id:w.id,text:'<result>'})}'`)}`,
     `With no action needed for a background wake: ${command(runner, joined, `tool no_reply_needed '${JSON.stringify({address:w.address,commandId:w.id})}'`)}`].join('\n');

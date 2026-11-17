@@ -216,7 +216,8 @@ const scope1 = fixtureScope1();
       await client.callTool({ name: 'set_webhook', arguments: { url: 'https://hooks.example/bearer', secret: 'legacy-bearer' } });
       await client.callTool({name:'setup_delivery',arguments:{mechanism:'events',host:'ChatGPT',surface:'Work',conversation:'event-test'}});
       const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
-      const sent = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: '@' + handle + ' reply here' }, USER);
+      const image={url:'https://files.example.test/browser-screen.jpg',name:'browser-screen.jpg',mimeType:'image/jpeg',size:176684};
+      const sent = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: '@' + handle + ' reply here',attachments:[image] }, USER);
       await routeHumanMessage(scope1.db, sent.messageId);
       expect((await scope1.db.query('SELECT subscription_id FROM rooms_mcp_event_deliveries WHERE message_id=$1', [sent.messageId])).rows).toEqual([{ subscription_id: subscription.id }]);
       let bearerCalls = 0;
@@ -232,7 +233,7 @@ const scope1 = fixtureScope1();
       expect(bearerCalls).toBe(0);
       expect(received).toHaveLength(3);
       expect(received.find(event=>event.data?.messageId===sent.messageId)).toMatchObject({ name: 'mention', cursor: null,
-        data: { roomId: ROOM, messageId: sent.messageId, memberId: member, replyRule: `Reply with reply(id: "${sent.messageId}", text: ...)`, idempotencyKey: `mention:${member}:${sent.messageId}`, author: { id: USER }, text: '@' + handle + ' reply here' } });
+        data: { roomId: ROOM, messageId: sent.messageId, memberId: member, replyRule: `Reply with reply(id: "${sent.messageId}", text: ...)`, idempotencyKey: `mention:${member}:${sent.messageId}`, author: { id: USER }, text: '@' + handle + ' reply here',attachments:[image] } });
       expect(await deliverMcpMemberWebhooks(scope1.db, deliveryTransport)).toBe(0);
       const reply = await client.callTool({ name:'reply',arguments:{id:sent.messageId,text:'Event received.'} });
       expect(reply.isError).not.toBe(true);
@@ -540,11 +541,15 @@ const scope1 = fixtureScope1();
       expect(JSON.stringify(profile)).not.toContain(secret);
       expect((await scope1.phone.readAgent(WORKSPACE, member, OTHER))?.wake).toBeUndefined();
       const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
-      const sent = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: '@' + handle + ' hello' }, USER);
+      const image={url:'https://files.example.test/browser-screen.jpg',name:'browser-screen.jpg',mimeType:'image/jpeg',size:176684};
+      const sent = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: '@' + handle + ' hello',attachments:[image] }, USER);
       expect((await scope1.db.query('SELECT 1 FROM rooms_mcp_webhook_outbox WHERE member_id=$1 AND message_id=$2', [member, sent.messageId])).rowCount).toBe(1);
       const received: Array<{ url: string; authorization: string | null }> = [];
       await deliverMcpMemberWebhooks(scope1.db, async (url, init) => {
-        if (url === 'https://hooks.example/wake') received.push({ url, authorization: new Headers(init.headers).get('authorization') });
+        if (url === 'https://hooks.example/wake') {
+          expect(JSON.parse(init.body).attachments).toEqual([image]);
+          received.push({ url, authorization: new Headers(init.headers).get('authorization') });
+        }
         return new Response('', { status: 200 });
       });
       expect(received).toEqual([{ url: 'https://hooks.example/wake', authorization: 'Bearer ' + secret }]);

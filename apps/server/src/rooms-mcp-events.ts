@@ -9,12 +9,14 @@ import { postMcpWebhook } from './rooms-mcp-members.js';
 import type { McpPrincipal } from './rooms-mcp-oauth.js';
 
 // Replay stays in list_mentions; event cursors are null so queued events cannot be skipped.
+const ATTACHMENTS = { type: 'array', items: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } };
 const MENTION_EVENT = {
   name: 'mention', description: 'A chat message tags this connected Beeline member, or messages it directly.',
   delivery: ['webhook'], inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   payloadSchema: { type: 'object', properties: {
     roomId: { type: 'string' }, messageId: { type: 'string' }, memberId: { type: 'string' },
     replyRule: { type: 'string' }, idempotencyKey: { type: 'string' }, text: { type: 'string' },
+    attachments: ATTACHMENTS,
     author: { type: 'object', properties: { id: { type: 'string' }, handle: { type: ['string', 'null'] },
       name: { type: ['string', 'null'] } }, required: ['id', 'handle', 'name'], additionalProperties: false },
   }, required: ['roomId', 'messageId', 'memberId', 'replyRule', 'idempotencyKey', 'text', 'author'], additionalProperties: false },
@@ -32,6 +34,7 @@ const WAKE_EVENT = {
   payloadSchema: { type: 'object', properties: {
     roomId: { type: 'string' }, address: { type: 'string' }, commandId: { type: 'string' }, id: { type: 'string' },
     from: {type:'object',properties:{agent:{type:'string'},place:{type:'string'}},required:['agent','place'],additionalProperties:false}, text: { type: ['string', 'null'] }, next: { type: 'string' },
+    attachments: ATTACHMENTS,
   }, required: ['roomId', 'address', 'commandId', 'id', 'from', 'text', 'next'], additionalProperties: false },
 };
 type Transport = typeof postMcpWebhook;
@@ -157,7 +160,7 @@ export async function queueMcpMentionEvents(db: SqlDatabase, member: string, roo
     SELECT s.id,m.id,m.room_id,'evt_'||s.id||'_'||m.id||'_'||'0',
       json_build_object('eventId','evt_'||s.id||'_'||m.id||'_'||'0','name','mention','timestamp',m.created_at,
         'data',json_build_object('roomId',m.room_id,'messageId',m.id,'memberId',s.member_id,'replyRule',CASE WHEN beeline_room_handle(i.id,m.room_id) IS NULL THEN format($5::text,m.id) ELSE format($4::text,m.id,beeline_room_handle(i.id,m.room_id)) END,
-          'idempotencyKey','mention:'||s.member_id||':'||m.id,'text',left(m.text,16000),
+          'idempotencyKey','mention:'||s.member_id||':'||m.id,'text',left(m.text,16000),'attachments',m.attachments,
           'author',json_build_object('id',m.author_id,'handle',beeline_room_handle(i.id,m.room_id),'name',i.name)), 'cursor',NULL)::text
     FROM rooms_mcp_event_subscriptions s
     JOIN rooms_mcp_connections c ON c.client_id=s.client_id AND c.identity_id=s.owner_id AND c.revoked_at IS NULL
@@ -199,6 +202,7 @@ export function mcpCommandWakeSql(first: number): { cte: string; join: string; p
               jsonb_build_object('agent',COALESCE(command.private_payload->>'authorId',source.author_id),
                 'place',COALESCE(command.private_payload->>'fromRoomId',source.room_id::text,command.room_id::text))),
             'text',left(COALESCE(command.private_payload->>'text',source.text),16000),
+            'attachments',COALESCE(command.message->'attachments',command.private_payload->'attachments',source.attachments,'[]'::jsonb),
             'next','Reply with reply(' || command.id || ',text). ' || CASE WHEN command.reason='corner_review_dispatch' THEN ${reviewHint}::text
               WHEN command.private_payload->>'kind' IN ('order','message','reply') THEN ${orderHint}::text ELSE ${wakeHint}::text END),
           'cursor',NULL)::text

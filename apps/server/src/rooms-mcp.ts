@@ -248,10 +248,10 @@ export class RoomsMcp {
       ...(!['proved_ready','host_without_live_delivery'].includes(delivery.state) ? { setup: SETUP_NOTE+(/muse/i.test(row.model_label)?'\n'+MUSE_SETUP_RECIPE:'')+(delivery.mechanism==='local'&&delivery.failure==='local_receiver_setup_failed'?'\n'+LOCAL_RECEIVER_RECOVERY:'') } : {}) } : {delivery};
   }
   private async mentionsPage(member: string, cursor: string, limit: number, db: SqlDatabase = this.oauth.database, stream = false) {
-    const rows = (await db.query<{ seq: string; id: string; room_id: string; room_name: string; author_id: string; author_handle: string | null; author_name: string | null; created_at: Date; text: string; truncated: boolean }>(
+    const rows = (await db.query<{ seq: string; id: string; room_id: string; room_name: string; author_id: string; author_handle: string | null; author_name: string | null; created_at: Date; text: string; truncated: boolean; attachments: import('@beeline/api-contract/daemon').DaemonAttachment[] }>(
       `WITH readable AS (${READABLE})
        SELECT mention.seq::text seq,m.id,m.room_id,r.name room_name,m.author_id,beeline_room_handle(i.id,m.room_id) author_handle,i.name author_name,
-         m.created_at,left(m.text,16000) text,length(m.text)>16000 truncated
+         m.created_at,left(m.text,16000) text,length(m.text)>16000 truncated,m.attachments
        FROM rooms_mcp_mentions mention
        JOIN readable r ON r.id=mention.room_id
        JOIN messages m ON m.id=mention.message_id AND m.deleted_at IS NULL
@@ -323,7 +323,7 @@ export class RoomsMcp {
         return (await tx.query(`WITH readable AS (${READABLE}), cursor AS (
             SELECT m.created_at,m.id FROM messages m JOIN readable r ON r.id=m.room_id WHERE m.id=$3 AND m.room_id=$2
           ) SELECT m.id,m.room_id,m.author_id,beeline_room_handle(i.id,m.room_id) author_handle,m.created_at,left(m.text,16000) text,
-            length(m.text)>16000 truncated
+            length(m.text)>16000 truncated,m.attachments
           FROM messages m JOIN readable r ON r.id=m.room_id LEFT JOIN identities i ON i.id=m.author_id
           WHERE ($2::uuid IS NULL OR m.room_id=$2) AND ${visibleChatMessageSql('m')}
             AND ($3::text IS NULL OR (m.created_at,m.id)<(SELECT created_at,id FROM cursor))

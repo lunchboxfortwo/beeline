@@ -1,4 +1,11 @@
 import { sendMessage } from './agent-messaging.js';
+import { readAgentCommands } from './agent-command-read-agent-commands.js';
+import { mkdtemp,rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { acceptMemberDelivery } from '../../body/src/session-join/bridge.js';
+import { takeInbox,updateState,type JoinedSession } from '../../body/src/session-join/store.js';
+import { itemPrompt } from '../../body/src/place-prompt.js';
 import { AGENT,PRIVATE,PUBLIC_CORNER,ROOM,USER,describe,expect,fixtureScope1,fixtureScope3,it } from './test-support-rooms-mcp.test-support.js';
 
 describe('connected agent message protocol',()=>{
@@ -10,6 +17,34 @@ describe('connected agent message protocol',()=>{
     const task=(await scope.db.query<{id:string}>('SELECT id FROM agent_commands WHERE agent_id=$1 AND source_message_id=$2',[member,source.messageId])).rows[0]!;
     return {...source,id:task.id};
   };
+  it('keeps a tagged image on message reads and the session-helper wake',async()=>{
+    const {client,member}=await scope.connected();
+    const image={url:'https://files.example.test/browser-screen.jpg',name:'browser-screen.jpg',mimeType:'image/jpeg',size:176684,width:1080,height:2340};
+    const source=await scope.phone.execute('sendRoomMessage',{
+      roomId:ROOM,text:`@${await handle(member)} keyboard not centered in its button`,attachments:[image],
+    },USER);
+    const direct=await tools.ok(client,'read',{address:ROOM,facet:'message',messageId:source.messageId});
+    const page=await tools.ok(client,'read_messages',{room:ROOM});
+    const delivery=await tools.ok(client,'list_mentions',{});
+    const command=(await readAgentCommands(scope.db,member)).commands.find(item=>item.sourceMessageId===source.messageId)!;
+    expect(direct.attachments).toEqual([image]);
+    expect(command.source.attachments).toEqual([image]);
+    expect(itemPrompt(command,{names:new Map()})).toContain('📎 browser-screen.jpg (image/jpeg, 173 KB)');
+    expect(page.messages.find((item:{id:string})=>item.id===source.messageId)).toMatchObject({attachments:[image]});
+    expect(delivery.mentions.find((item:{id:string})=>item.id===source.messageId)).toMatchObject({attachments:[image]});
+    expect(delivery.wakes.find((item:{id:string})=>item.id===command.id)).toMatchObject({attachments:[image]});
+    const dir=await mkdtemp(join(tmpdir(),'tagged-image-session-'));
+    try {
+      const joined:JoinedSession={key:'codex:/image-proof',agent:'codex',cwd:'/image-proof',name:'Image proof',server:scope.origin,
+        clientId:'fixture',cursor:'0',deliveredWakes:[],joinedAt:''};
+      await updateState(dir,state=>state.sessions.push(joined));
+      const mention=delivery.mentions.find((item:{id:string})=>item.id===source.messageId);
+      await acceptMemberDelivery(dir,joined.key,{node:'/proof/node',bundle:'/proof/beeline.mjs'},
+        {v:1,type:'delivery',deliveryId:`mention:${source.messageId}`,mentionCursor:delivery.nextCursor,mentions:[mention],wakes:[]});
+      const inbox=takeInbox(dir,joined.key);
+      expect(inbox).toContain(image.name);expect(inbox).toContain(image.url);expect(inbox).toContain(image.mimeType);
+    } finally {await rm(dir,{recursive:true,force:true});}
+  });
   it('the SDK sends privately to one tuple and receives a reply at its sending place',async()=>{
     const {client,member}=await scope.connected();
     const sent=await tools.ok(client,'message',{address:ROOM,to:{agent:AGENT,place:ROOM},text:'Check the widget'});

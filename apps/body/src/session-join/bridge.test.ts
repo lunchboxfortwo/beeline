@@ -36,6 +36,18 @@ m40_afterEach(()=>{m40_vi.useRealTimers();m40_vi.restoreAllMocks();m40_vi.unstub
 
 
 m40_describe('compact session deliveries', () => {
+  m40_it('keeps an attached screenshot in the durable session inbox for mentions and wakes', async () => {
+    const dir=scratch();await m40_updateState(dir,state=>state.sessions.push({...joined,deliveredWakes:[]}));
+    const image={url:'https://files.example.test/browser-screen.jpg',name:'browser-screen.jpg',mimeType:'image/jpeg',size:176684};
+    await m40_acceptMemberDelivery(dir,joined.key,runner,{v:1,type:'delivery',deliveryId:'image-tag',mentionCursor:'1',
+      mentions:[{id:'image-message',room_id:'room',text:'keyboard not centered',attachments:[image]}],wakes:[]});
+    const mention=m40_takeInbox(dir,joined.key);
+    m40_expect(mention).toContain(image.name);m40_expect(mention).toContain(image.url);m40_expect(mention).toContain(image.mimeType);
+    await m40_acceptMemberDelivery(dir,joined.key,runner,{v:1,type:'delivery',deliveryId:'image-wake',mentionCursor:'1',mentions:[],
+      wakes:[{id:'image-command',address:'room',reason:'message',text:'keyboard not centered',createdAt:'2026-11-17T00:15:53Z',attachments:[image]}]});
+    const wake=m40_takeInbox(dir,joined.key);
+    m40_expect(wake).toContain(image.name);m40_expect(wake).toContain(image.url);m40_expect(wake).toContain(image.mimeType);
+  });
   m40_it('quotes each message line and uses no fabricated handle when the asker has none', () => {
     m40_expect(m40_renderMention({id:'message',room_id:'room',author_name:'Jane',text:'first\nsecond'}, joined, runner)).toBe([
       '[Beeline · #room · Jane tagged you]', '> first', '> second',
