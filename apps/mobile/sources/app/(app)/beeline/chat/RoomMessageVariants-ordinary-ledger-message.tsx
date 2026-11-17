@@ -312,10 +312,10 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
     </TranscriptReference>
   ) : null;
   // An ask keeps its stored card shape; only the transcript reads it as prose.
-  // Preserve the separate question when the agent supplied supporting text.
+  // Preserve the separate question after the agent's supporting text.
   const question = message.choice?.mode === 'question' ? message.choice.prompt : undefined;
   const messageText = question && !message.text.includes(question)
-    ? [question, message.text].filter(Boolean).join('\n\n')
+    ? [message.text, question].filter(Boolean).join('\n\n')
     : message.text;
   const forwarded = forwardedMessageParts(messageText);
   const forwardSource = forwarded.source;

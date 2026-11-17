@@ -264,7 +264,7 @@ it.each([
     expect(renderer.root.findAllByType('TranscriptCard')).toHaveLength(0);
     expect(plates()).toHaveLength(0);
     expect(vi.mocked(LedgerEntry).mock.calls.at(-1)?.[0]).toMatchObject({
-      bodyText: `${stored.card.prompt}\n\n${stored.text}`,
+      bodyText: `${stored.text}\n\n${stored.card.prompt}`,
       byline: expect.objectContaining({ name: stored.card.agent.name }),
     });
     expect(React.Children.toArray(vi.mocked(LedgerEntry).mock.calls.at(-1)?.[0].attachments)
@@ -508,10 +508,10 @@ function ordinaryProps(): React.ComponentProps<typeof OrdinaryLedgerMessage> {
 }
 
 it.each([
-  { text: '', suffix: '' },
-  { text: choice.prompt, suffix: '' },
-  { text: 'Supporting details: https://example.invalid/launch', suffix: '\n\nSupporting details: https://example.invalid/launch' },
-])('renders the ask and supporting text once with ordinary message actions ($text)', ({ text, suffix }) => {
+  { text: '', prefix: '' },
+  { text: choice.prompt, prefix: '' },
+  { text: 'Supporting details: https://example.invalid/launch', prefix: 'Supporting details: https://example.invalid/launch\n\n' },
+])('renders the ask and supporting text once with ordinary message actions ($text)', ({ text, prefix }) => {
   const props = ordinaryProps();
   const row: ChatDisplayMessage = { ...props.message, isUser: false,
     pubkey: choice.agent.pubkey, authorIdentity: choice.agent, presentation: 'card', choice,
@@ -522,7 +522,7 @@ it.each([
   act(() => { renderer = create(<OrdinaryLedgerMessage {...props} message={row}
     onCopy={onCopy} onReply={onReply} onReact={onReact} onMessageActions={onMessageActions} />); });
   expect(renderer.root.findAllByType('TranscriptCard')).toHaveLength(0);
-  expect(vi.mocked(LedgerEntry).mock.calls.at(-1)?.[0].bodyText).toBe(choice.prompt + suffix);
+  expect(vi.mocked(LedgerEntry).mock.calls.at(-1)?.[0].bodyText).toBe(prefix + choice.prompt);
   const swipe = renderer.root.findByType(SwipeToReply).props;
   expect(vi.mocked(TranscriptSwipeable).mock.calls).toHaveLength(1);
   act(() => {
@@ -531,7 +531,7 @@ it.each([
     swipe.onActions();
     swipe.onReact('👍');
   });
-  expect(onCopy).toHaveBeenCalledWith(choice.prompt + suffix);
+  expect(onCopy).toHaveBeenCalledWith(prefix + choice.prompt);
   expect(onReply).toHaveBeenCalledWith(row);
   expect(onMessageActions).toHaveBeenCalledWith(row);
   expect(onReact).toHaveBeenCalledWith(row, '👍');
