@@ -173,27 +173,44 @@ import { turnRootMessageSql } from '../agent-command.js';
           peer_presence_updated_at: Date | null; peer_activity_at: Date | null; agents_offline: boolean }>;
         cursors: Array<{ room_id: string; unread: boolean }>;
         corner_rows: OpenCornerFactsRow[];
-      }>(`WITH presence AS (
-          SELECT room.id room_id,presence.body peer_presence_body,
-            presence.updated_at peer_presence_updated_at,
-            GREATEST(
-              CASE WHEN peer.id IS NOT NULL THEN
-                (SELECT max(message.created_at) FROM messages message
-                 WHERE message.room_id=room.id AND message.author_id=peer.id) END,
-              (SELECT max(mark.updated_at) FROM room_read_marks mark
-               WHERE mark.room_id=room.id AND mark.identity_id=peer.id)
-            ) peer_activity_at,
-            agent_presence.agent_count > 0
-              AND agent_presence.known_presence_count = agent_presence.agent_count
-              AND agent_presence.online_agent_count = 0 agents_offline
+      }>(`WITH listed AS MATERIALIZED (
+          SELECT room.id room_id,COALESCE(room.parent_id,room.id) member_room_id,peer.id peer_id,peer.kind peer_kind
           FROM rooms room
           LEFT JOIN identities peer ON peer.id=(SELECT participant FROM jsonb_array_elements_text(
             CASE WHEN jsonb_typeof(room.direct_participants)='array'
               THEN room.direct_participants ELSE '[]'::jsonb END
           ) participant WHERE participant<>$2 LIMIT 1)
+          WHERE room.id=ANY($1::uuid[])
+        ), listed_agent AS MATERIALIZED (
+          -- Many chats share the same agents. Collect each agent once so its
+          -- presence is read once per list, not once per chat it belongs to.
+          SELECT peer_id agent_id FROM listed WHERE peer_kind='agent'
+          UNION
+          SELECT member.identity_id FROM memberships member
+          JOIN identities agent ON agent.id=member.identity_id
+            AND agent.kind='agent' AND agent.hidden_from_roster=false
+          WHERE member.room_id IN (SELECT member_room_id FROM listed) AND member.removed_at IS NULL
+        ), agent_status AS MATERIALIZED (
+          SELECT listed_agent.agent_id,status.body,status.updated_at
+          FROM listed_agent
           LEFT JOIN LATERAL(
-            ${memberPresenceSql('peer.id')}
-          ) presence ON peer.kind='agent'
+            ${memberPresenceSql('listed_agent.agent_id')}
+          ) status ON true
+        ), presence AS (
+          SELECT listed.room_id,presence.body peer_presence_body,
+            presence.updated_at peer_presence_updated_at,
+            GREATEST(
+              CASE WHEN listed.peer_id IS NOT NULL THEN
+                (SELECT max(message.created_at) FROM messages message
+                 WHERE message.room_id=listed.room_id AND message.author_id=listed.peer_id) END,
+              (SELECT max(mark.updated_at) FROM room_read_marks mark
+               WHERE mark.room_id=listed.room_id AND mark.identity_id=listed.peer_id)
+            ) peer_activity_at,
+            agent_presence.agent_count > 0
+              AND agent_presence.known_presence_count = agent_presence.agent_count
+              AND agent_presence.online_agent_count = 0 agents_offline
+          FROM listed
+          LEFT JOIN agent_status presence ON listed.peer_kind='agent' AND presence.agent_id=listed.peer_id
           LEFT JOIN LATERAL(
             SELECT count(*)::int agent_count,
               count(agent_status.body)::int known_presence_count,
@@ -204,12 +221,9 @@ import { turnRootMessageSql } from '../agent-command.js';
             FROM memberships member
             JOIN identities agent ON agent.id=member.identity_id
               AND agent.kind='agent' AND agent.hidden_from_roster=false
-            LEFT JOIN LATERAL(
-              ${memberPresenceSql('member.identity_id')}
-            ) agent_status ON true
-            WHERE member.room_id=COALESCE(room.parent_id,room.id) AND member.removed_at IS NULL
+            JOIN agent_status ON agent_status.agent_id=member.identity_id
+            WHERE member.room_id=listed.member_room_id AND member.removed_at IS NULL
           ) agent_presence ON true
-          WHERE room.id=ANY($1::uuid[])
         ), cursors AS (
           SELECT room.id room_id,(latest.id IS NOT NULL AND (
             mark.message_created_at IS NULL OR latest.id<>mark.message_id AND
