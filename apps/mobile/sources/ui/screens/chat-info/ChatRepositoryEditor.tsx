@@ -95,7 +95,7 @@ export function ChatRepositoryEditor({ roomId, current, canEditRepository, disab
             <RepoList candidates={repositories} getCandidate={repositoryCandidate} currentKey={repositoryDraft?.key ?? null} loading={repositoriesLoading}
                 onSelect={candidate => { if (!busy) setRepositoryDraft(candidate); }} draftContext={roomId} testIDPrefix="chat-repository-list" />
             {editError ? <Copy small quiet role="alert">{editError}</Copy> : null}
-            <XStack gap="2" justifyContent="flex-end">
+            <XStack flexShrink={0} gap="2" justifyContent="flex-end">
                 <Btn kind="quiet" label="Cancel" disabled={busy} onPress={() => setOpen(false)}>Cancel</Btn>
                 <Btn kind="primary" label="Save" disabled={busy || (repositoryDraft?.key ?? null) === (current?.key ?? null)}
                     onPress={() => void saveRepository()} testID="chat-repository-save">{saving ? 'Saving…' : 'Save'}</Btn>

@@ -62,7 +62,12 @@ export function RepoList<T = RepoCandidate>({
         testID={`${testIDPrefix}-search`}
         value={query}
       />
-      <YStack height={data.length ? Math.min(data.length * HULL_SHEET_ROW_HEIGHT, LIST_MAX_HEIGHT) : undefined}>
+      <YStack
+        flexShrink={1}
+        minHeight={0}
+        overflow="hidden"
+        height={data.length ? Math.min(data.length * HULL_SHEET_ROW_HEIGHT, LIST_MAX_HEIGHT) : undefined}
+      >
         <VirtualizedList<RepoCandidate>
           data={data}
           getItem={(items: readonly T[], index: number) => getCandidate(items[index])}

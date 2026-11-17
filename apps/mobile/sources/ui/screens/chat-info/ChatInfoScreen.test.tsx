@@ -140,6 +140,23 @@ describe('Chat info', () => {
         expect(flat(tree)).toContain('owner/repo');
     });
 
+    it('keeps the full multi-page repository catalog available through selection and Save', async () => {
+        const repositories = Array.from({ length: 237 }, (_, index) => ({
+            id: index + 1, fullName: `owner/repo-${index}`, installationId: 77, defaultBranch: 'main',
+        }));
+        operation.mockResolvedValue({ repositories });
+        const tree = render();
+        await act(async () => pressable(tree, 'chat-repository').props.onPress());
+        const list = tree.root.findByType('RepoList');
+        expect(list.props.candidates).toBe(repositories);
+        act(() => list.props.onSelect(list.props.getCandidate(list.props.candidates[236])));
+        await act(async () => control(tree, 'chat-repository-save').props.onPress());
+        expect(operation).toHaveBeenCalledWith('setRoomRepository', expect.objectContaining({
+            key: 'github:237', name: 'owner/repo-236',
+        }));
+        act(() => tree.unmount());
+    });
+
     it.each([1, 1000])('CHAT-REPO-1: opens and selects without rerendering Chat info or mapping %i repositories', async (count) => {
         let resolve!: (result: unknown) => void;
         operation.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
