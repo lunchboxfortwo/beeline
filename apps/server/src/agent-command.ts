@@ -91,7 +91,6 @@ ALTER TABLE agent_commands ALTER COLUMN source_message_id DROP NOT NULL;
 ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS private_payload jsonb;
 ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS posted_reply_id text;
 ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS message jsonb;
-
 ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS report_address jsonb;
 ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS answer_attachments jsonb NOT NULL DEFAULT '[]'::jsonb;
 
