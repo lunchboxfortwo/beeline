@@ -47,7 +47,7 @@ export function ViewerHeader({ title, detail, leading, children, onClose, closeL
 }
 
 /** A small secondary header action: Copy, Share, Reopen, Open in browser. */
-export function ViewerAction({ label, title, icon, onPress, testID, disabled, compact = false }: {
+export function ViewerAction({ label, title, icon, onPress, testID, disabled, compact = false, iconOnly = false }: {
     /** The accessible name. */
     label: string;
     /** The visible word. */
@@ -58,9 +58,11 @@ export function ViewerAction({ label, title, icon, onPress, testID, disabled, co
     disabled?: boolean;
     /** Icon only: a paged viewer's header also carries “2 of 5”, so the title keeps its room. */
     compact?: boolean;
+    /** Hide the visible word while retaining the accessible name and glyph size. */
+    iconOnly?: boolean;
 }) {
-    if (compact && icon) {
-        return <Btn kind="icon" label={label} onPress={onPress} testID={testID} disabled={disabled}><Glyph icon={icon} color="ink" /></Btn>;
+    if ((compact || iconOnly) && icon) {
+        return <Btn kind="icon" label={label} onPress={onPress} testID={testID} disabled={disabled}><Glyph icon={icon} size={compact ? 20 : 16} color="ink" /></Btn>;
     }
     return (
         <Btn kind="secondary" label={label} onPress={onPress} testID={testID} disabled={disabled} paddingHorizontal="3">

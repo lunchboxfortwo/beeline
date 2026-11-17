@@ -100,7 +100,7 @@ export function ArtifactViewerScreen({
           <ViewerAction compact={paging.paged} label="Reopen" title="Reopen" icon={RefreshCw}
             onPress={() => setRunKey((key) => key + 1)} testID="artifact-viewer-reopen" />
         ) : format === 'code' && document ? (
-          <ViewerAction compact={paging.paged}
+          <ViewerAction iconOnly compact={paging.paged}
             label="Copy code"
             title="Copy"
             icon={CopyIcon}
@@ -115,7 +115,7 @@ export function ArtifactViewerScreen({
           />
         ) : format === 'image' ? (
           <>
-            <ViewerAction compact={paging.paged}
+            <ViewerAction iconOnly compact={paging.paged}
               label="Copy image"
               title="Copy"
               icon={CopyIcon}
@@ -126,7 +126,7 @@ export function ArtifactViewerScreen({
               }
               testID="artifact-viewer-copy"
             />
-            <ViewerAction compact={paging.paged} label="Share image" title="Share" icon={Share2}
+            <ViewerAction iconOnly compact={paging.paged} label="Share image" title="Share" icon={Share2}
               onPress={() => void sharePicture(attachment!)} testID="artifact-viewer-share" />
           </>
         ) : null}

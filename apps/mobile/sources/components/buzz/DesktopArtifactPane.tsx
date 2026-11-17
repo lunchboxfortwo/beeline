@@ -78,7 +78,7 @@ export function DesktopArtifactPane({
         ) : null}
         {attachment && format === 'image' ? (
           <>
-            <ViewerAction
+            <ViewerAction iconOnly
               label="Copy image"
               title="Copy"
               icon={CopyIcon}
@@ -89,7 +89,7 @@ export function DesktopArtifactPane({
               }
               testID="desktop-artifact-copy"
             />
-            <ViewerAction label="Share image" title="Share" icon={Share2}
+            <ViewerAction iconOnly label="Share image" title="Share" icon={Share2}
               onPress={() => void sharePicture(attachment)} testID="desktop-artifact-share" />
           </>
         ) : null}
