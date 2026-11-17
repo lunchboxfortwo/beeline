@@ -93,7 +93,6 @@ ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS posted_reply_id text;
 ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS message jsonb;
 ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS report_address jsonb;
 ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS answer_attachments jsonb NOT NULL DEFAULT '[]'::jsonb;
-
 -- Retired: a production-only column that held only its '[]' default (2026-11-02).
 ALTER TABLE corner_watches ADD COLUMN IF NOT EXISTS incoming_command_id text REFERENCES agent_commands(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS corner_watches_incoming_command_idx ON corner_watches(incoming_command_id);
