@@ -18,8 +18,8 @@ import { findSession, liveSessions, machineSources, type LiveSession, type Sourc
 import { bundleDigest } from './bridge-launch.js';
 import { pidAlive, queueInbox, queueInboxOnce, readState, takeInbox, updateState, type JoinedSession, hasLocalDelivery } from './store.js';
 
-export interface Mention { memberId?: string; replyRule?: string; id: string; room_id: string; room_name?: string; author_handle?: string | null; author_name?: string | null; text: string; attachments?: readonly DaemonAttachment[] }
-export interface Wake { id: string; address: string; from?:{agent:string;place:string}; reason?: string; kind?: string; text?: string; attachments?: readonly DaemonAttachment[]; createdAt: string; next?: string; receipt?: {generation:string;nonce:string;conversation:string} }
+export interface Mention { memberId?: string; replyRule?: string; id: string; room_id: string; room_name?: string; author_handle?: string | null; author_name?: string | null; text: string; institutionalContext?: string; attachments?: readonly DaemonAttachment[] }
+export interface Wake { id: string; address: string; from?:{agent:string;place:string}; reason?: string; kind?: string; text?: string; institutionalContext?: string; attachments?: readonly DaemonAttachment[]; createdAt: string; next?: string; receipt?: {generation:string;nonce:string;conversation:string} }
 
 /** How the session runs Beeline commands: the stable bundle copy and this member's id. */
 export interface Runner {
@@ -42,7 +42,7 @@ export function renderAttachments(attachments: readonly DaemonAttachment[] = [])
 export function renderMention(m: Mention, joined: JoinedSession, runner: Runner): string {
   const who = m.author_handle ? `@${m.author_handle}` : m.author_name ?? 'Someone';
   const quoted = m.text.split('\n').map(line => `> ${line}`).join('\n');
-  return [`[Beeline · #${m.room_name ?? m.room_id} · ${who} tagged you]`, quoted, ...renderAttachments(m.attachments),
+  return [`[Beeline · #${m.room_name ?? m.room_id} · ${who} tagged you]`, quoted, ...(m.institutionalContext ? [m.institutionalContext] : []), ...renderAttachments(m.attachments),
     `Reply: ${command(runner, joined, `tool reply '${JSON.stringify({id:m.id,text:'<your answer>'})}'`)}`,
     `Context: ${command(runner, joined, `read --room ${m.room_id}`)}`].join('\n');
 }
@@ -63,6 +63,7 @@ export function renderWake(w: Wake, joined: JoinedSession, runner: Runner): stri
     'In this exact host conversation, run the receipt command once. Do not post a chat message:',
     `  ${command(runner,joined,`tool confirm_delivery '${JSON.stringify(w.receipt).replace(/'/g, "'\\''")}'`)}`].join('\n');
   const header = [`[Beeline · ${w.address} · message ${w.id}]`,
+    ...(w.institutionalContext ? [w.institutionalContext] : []),
     ...(w.from ? [`From: (${w.from.agent}, ${w.from.place})`] : []),
     ...(w.text ? [w.text.split('\n').map(l => `> ${l}`).join('\n')] : []), ...renderAttachments(w.attachments), ...(w.next ? [w.next] : [])];
   return [...header,

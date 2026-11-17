@@ -63,7 +63,10 @@ it('starts and answers before optional reads begin, even if none of them resolve
   const f = await fixture();
   await f.session.start();
   expect(f.execute).not.toHaveBeenCalled();
-  expect(await f.session.deliver(f.item, [])).toMatchObject({ text: 'The answer' });
+  const item = { ...f.item, source: { ...f.item.source,
+    institutionalContext: '- Procedure buy-for-wife (read facet:procedure): Buy through the Japanese proxy' } };
+  expect(await f.session.deliver(item, [])).toMatchObject({ text: 'The answer' });
+  expect(f.prompt.mock.calls[0]?.[1]).toContain('Procedure buy-for-wife');
   expect(f.execute).toHaveBeenCalledWith('getAgentConfiguration', expect.anything());
   expect(f.session.resources.read()).toMatchObject({ status: { configuration: 'loading', grants: 'loading' } });
   expect(f.prompt.mock.calls[0]?.[1]).toContain('the agent default');

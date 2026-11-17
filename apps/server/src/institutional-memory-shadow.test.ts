@@ -129,6 +129,7 @@ describe('institutional memory phase-0 shadow capture', () => {
       /\n- \[[12]\] The release migration writes its schema marker last\./,
     );
     expect(humanContext.totalBytes).toBeLessThanOrEqual(1_000);
+    expect(humanCommand!.message?.institutionalContext).toBe(humanContext.text);
     await liveDaemon().execute(
       'postAgentTurnReceipt',
       { roomId: ROOM, agentId: OTHER_AGENT, requestId: 'next-human-turn', status: 'complete' },
@@ -150,6 +151,7 @@ describe('institutional memory phase-0 shadow capture', () => {
     );
     expect(otherContext.text).not.toContain('mock before implementation');
     expect(otherContext.text).toContain('schema marker last');
+    expect(otherCommand!.message?.institutionalContext).toBe(otherContext.text);
 
     const unauthorizedMessage = '3'.repeat(64);
     await rootFixture.database.query(
@@ -173,7 +175,8 @@ describe('institutional memory phase-0 shadow capture', () => {
     expect(
       (await rootFixture.database.query(`SELECT 1 FROM institutional_context_serves WHERE mode='live'`))
         .rowCount,
-    ).toBe(3);
+    // Three enqueue-time snapshots now precede the three explicit reads.
+    ).toBe(6);
   });
 
 

@@ -153,6 +153,7 @@ export function itemPrompt(item: AgentCommand, options: {
     ...(options.notes?.length ? ['Session setup notes:', ...options.notes.map(note => `- ${note}`)] : []),
     request,
     'Use this requestId with tools that ask for one.',
+    ...(source.institutionalContext ? [source.institutionalContext] : []),
     ...(isBackgroundCommand(item.reason)
       ? ['This is background context. If nothing has changed or needs action, call no_reply_needed and finish without a public reply. Human requests in this batch still need an answer.'] : []),
     `[message id: ${source.id}]`,

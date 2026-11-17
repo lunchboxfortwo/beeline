@@ -1,4 +1,5 @@
 import { legacyCommandPayload } from './messaging-cutover.js';
+import { attachQueuedInstitutionalContext } from './agent-command-context.js';
 import { initializeThreadImplementer } from './corner-lifecycle.js';
 import { sendMessage } from './agent-messaging.js';
 import { recordedMessageRoute } from './message-route.js';
@@ -755,7 +756,7 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
   // A resume keeps that same stored sender; later card actors do not transfer it.
   const privateMessage = Boolean(payload) && input.reason !== 'schedule';
   const wake = mcpCommandWakeSql(19);
-  const saved = (await db.query<CommandRow>(
+  let saved = (await db.query<CommandRow>(
     `WITH inserted AS (INSERT INTO agent_commands(id,room_id,agent_id,source_message_id,turn_request_id,action,reason,
        root_command_id,parent_command_id,root_source_message_id,agent_depth,avatar_job,private_payload,state,return_room_id,review_context,wake_context,report_address,message)
      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,'pending',$14,$15::jsonb,$16::jsonb,$17::jsonb,$18::jsonb)
@@ -791,6 +792,7 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
   )).rows[0] ?? (await db.query<CommandRow>(
     'SELECT * FROM agent_commands WHERE id=$1',[id],
   )).rows[0];
+  if (saved) saved = await attachQueuedInstitutionalContext(db, saved);
   if (saved && chat.parent_id && ['corner_objective','human_tag'].includes(input.reason))
     await initializeThreadImplementer(db, chat.id);
   if (saved?.state === 'pending' && saved.action === 'input' && db.ownedModelCredentials &&

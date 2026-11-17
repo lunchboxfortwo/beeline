@@ -293,10 +293,11 @@ function routingInstruction(row: {member_id: string; room_id: string; message_id
  * payload (`rooms-mcp-events.ts`), so a webhook, an event and list_mentions agree.
  */
 function wakeBody(row: { member_id: string; room_id: string; command_from:MessageAddress; command_id: string | null; command_reason: string | null;
-  command_kind: string | null; command_text: string | null; command_attachments: DaemonAttachment[]; body: string }) {
+  command_kind: string | null; command_text: string | null; command_attachments: DaemonAttachment[]; body: string; institutional_context: string | null }) {
   const next = `Reply with reply(${row.command_id},text). ${mcpWakeNext(row.command_kind,row.command_reason)}`;
   return { memberId: row.member_id, roomId: row.room_id, address: row.room_id, commandId: row.command_id, id: row.command_id,
     from:row.command_from,text:legacyMessageBody({reason:row.command_reason ?? ''},row.command_text ?? row.body,row.command_from.agent),attachments:row.command_attachments,next,cursor:null,
+    ...(row.institutional_context ? {institutionalContext:row.institutional_context} : {}),
     instruction:`Message ${row.command_id} from (${row.command_from.agent}, ${row.command_from.place}) at ${row.room_id}. ${next}` };
 }
 
@@ -323,7 +324,7 @@ export async function deliverMcpMemberWebhooks(
       body: string; owner_id: string | null; callback_url: string | null; callback_secret: string | null; deliverable: boolean; answered: boolean;
       author_id: string | null; author_handle: string | null; author_name: string | null; author_kind: string | null; cursor: string | null;
       command_from:MessageAddress; command_id: string | null; command_reason: string | null; command_kind: string | null; command_text: string | null; probe: object | null; delivery_generation:string|null;
-      attachments: DaemonAttachment[]; command_attachments: DaemonAttachment[];
+      attachments: DaemonAttachment[]; command_attachments: DaemonAttachment[]; institutional_context: string | null;
     }>(
       `WITH claimed AS (
          UPDATE rooms_mcp_webhook_outbox outbox SET claimed_at=now(),attempted_at=now()
@@ -338,6 +339,8 @@ export async function deliverMcpMemberWebhooks(
          CASE WHEN member.callback_url IS NOT NULL THEN member.callback_secret END callback_secret,
          message.author_id,beeline_room_handle(author.id,message.room_id) author_handle,author.name author_name,author.kind author_kind,mention.seq::text cursor,mention.cleared_at IS NOT NULL answered,
          message.attachments,COALESCE(command.message->'attachments',command.private_payload->'attachments',source.attachments,'[]'::jsonb) command_attachments,
+         COALESCE(command.message->>'institutionalContext',(SELECT queued.message->>'institutionalContext' FROM agent_commands queued
+           WHERE queued.agent_id=claimed.member_id AND queued.source_message_id=claimed.message_id ORDER BY queued.created_at DESC LIMIT 1)) institutional_context,
          COALESCE(command.message->'route'->'from',command.private_payload->'route'->'from',
            jsonb_build_object('agent',COALESCE(command.private_payload->>'authorId',command.message->>'authorId'),
              'place',COALESCE(command.private_payload->>'fromRoomId',command.room_id::text))) command_from,
@@ -386,7 +389,7 @@ export async function deliverMcpMemberWebhooks(
           ...(row.callback_secret ? { authorization: `Bearer ${openSecrets<string>(webhookKey(), row.callback_secret)}` } : {}) },
         body: JSON.stringify(row.probe ?? (row.command_id ? wakeBody(row) : { ...mentionRouting(row.member_id, row.room_id, row.message_id, row.author_handle),
           author: row.author_id ? { id: row.author_id, handle: row.author_handle, name: row.author_name } : null,
-          text: row.body, attachments: row.attachments, cursor: row.cursor, instruction: `${routingInstruction(row)} ${MCP_TAG_INSTRUCTION}` })),
+          text: row.body, ...(row.institutional_context ? {institutionalContext:row.institutional_context} : {}), attachments: row.attachments, cursor: row.cursor, instruction: `${routingInstruction(row)} ${MCP_TAG_INSTRUCTION}` })),
       });
       accepted = response.ok;
       httpStatus=response.status;

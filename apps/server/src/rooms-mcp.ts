@@ -248,10 +248,12 @@ export class RoomsMcp {
       ...(!['proved_ready','host_without_live_delivery'].includes(delivery.state) ? { setup: SETUP_NOTE+(/muse/i.test(row.model_label)?'\n'+MUSE_SETUP_RECIPE:'')+(delivery.mechanism==='local'&&delivery.failure==='local_receiver_setup_failed'?'\n'+LOCAL_RECEIVER_RECOVERY:'') } : {}) } : {delivery};
   }
   private async mentionsPage(member: string, cursor: string, limit: number, db: SqlDatabase = this.oauth.database, stream = false) {
-    const rows = (await db.query<{ seq: string; id: string; room_id: string; room_name: string; author_id: string; author_handle: string | null; author_name: string | null; created_at: Date; text: string; truncated: boolean; attachments: import('@beeline/api-contract/daemon').DaemonAttachment[] }>(
+    const rows = (await db.query<{ seq: string; id: string; room_id: string; room_name: string; author_id: string; author_handle: string | null; author_name: string | null; created_at: Date; text: string; institutionalContext: string | null; truncated: boolean; attachments: import('@beeline/api-contract/daemon').DaemonAttachment[] }>(
       `WITH readable AS (${READABLE})
        SELECT mention.seq::text seq,m.id,m.room_id,r.name room_name,m.author_id,beeline_room_handle(i.id,m.room_id) author_handle,i.name author_name,
-         m.created_at,left(m.text,16000) text,length(m.text)>16000 truncated,m.attachments
+         m.created_at,left(m.text,16000) text,length(m.text)>16000 truncated,m.attachments,
+         (SELECT command.message->>'institutionalContext' FROM agent_commands command WHERE command.agent_id=$1
+           AND command.source_message_id=m.id ORDER BY command.created_at DESC LIMIT 1) "institutionalContext"
        FROM rooms_mcp_mentions mention
        JOIN readable r ON r.id=mention.room_id
        JOIN messages m ON m.id=mention.message_id AND m.deleted_at IS NULL
@@ -262,7 +264,7 @@ export class RoomsMcp {
        ORDER BY mention.seq LIMIT $3`, [member, cursor, limit + 1])).rows;
     const page = rows.slice(0, limit);
     return {
-      mentions: page.map(({ seq, ...row }) => ({ ...mentionRouting(member, row.room_id, row.id, row.author_handle), ...row, deliveryCursor: seq })),
+      mentions: page.map(({ seq, institutionalContext, ...row }) => ({ ...mentionRouting(member, row.room_id, row.id, row.author_handle), ...row, ...(institutionalContext ? {institutionalContext} : {}), deliveryCursor: seq })),
       nextCursor: page.at(-1)?.seq ?? cursor,
       more: rows.length > limit,
       wakes: [...await pendingMcpWakes(db, member), ...(stream ? await localDeliveryProbe(db,member) : [])],

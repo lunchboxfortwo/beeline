@@ -146,7 +146,10 @@ export type AgentCommand = {
   readonly rootSourceMessageId: string;
   readonly agentDepth: number;
   readonly private?: boolean;
-  readonly source: RoomInboxResult['items'][number];
+  readonly source: RoomInboxResult['items'][number] & {
+    /** Bounded facts and skill index compiled by getInstitutionalContext before queue publication. */
+    readonly institutionalContext?: string;
+  };
   readonly createdAt: number;
 };
 
