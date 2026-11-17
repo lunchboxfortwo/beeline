@@ -12,6 +12,7 @@ vi.mock('react-native', () => ({ Text: 'Text', View: 'View' }));
 vi.mock('tamagui', () => ({ XStack: 'XStack', YStack: 'YStack', Spinner: 'Spinner' }));
 vi.mock('@/ui/grammar', () => ({ T: 'Text' }));
 vi.mock('@/components/buzz/TurnLineFrame', () => ({ TurnLineBar: 'Bar', TurnBandSlot: 'Slot' }));
+vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: 'IdentityMark' }));
 vi.mock('@/components/buzz/BeelineMarkSpinner', () => ({ BeelineMarkSpinner: 'BeelineMarkSpinner', MARK_CELL: 18 }));
 const current = vi.hoisted(() => ({ theme: 'obsidian' as 'obsidian' | 'bone' }));
 import { TurnProgressLine } from '@/components/buzz/TurnProgressLine';
