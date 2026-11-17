@@ -45,7 +45,6 @@ export async function openCorner(args: JsonObject, toolCallId: string): Promise<
     name,
     objective,
     ...(args.implementer !== undefined ? { implementer: args.implementer as string } : {}),
-    ...(args.reviewer !== undefined ? { reviewer: args.reviewer as string } : {}),
     ...(brief
       ? { brief: brief as unknown as import('@beeline/api-contract/daemon').CornerBriefDraft }
       : {}),

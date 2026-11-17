@@ -92,7 +92,6 @@ import { recordedMessageRoute } from '../message-route.js';
           name: string;
           objective: string;
           owner_agent_id: string;
-          reviewer_handle: string | null;
           created_by: string;
           request_id: string;
           repository_key: string | null;
@@ -104,7 +103,6 @@ import { recordedMessageRoute } from '../message-route.js';
         }>(
           `SELECT child.id::text corner_id,child.name,${cornerObjectiveSql('child')} objective,${cornerOwnerSql('child.id')} owner_agent_id,child.created_by,
                   ${cornerRequestSql('child.id')} request_id,child.repository_key,child.repository_target_branch,
-                  beeline_room_handle(fact.reviewer_agent_id,child.id) reviewer_handle,
                   initial.revision brief_revision,
                   initial.revision_hash brief_revision_hash,initial.change brief_change,
                   initial.attachments brief_attachments
@@ -152,7 +150,6 @@ import { recordedMessageRoute } from '../message-route.js';
         if (
           existing.owner_agent_id !== implementerAgentId ||
           existing.created_by !== agentId ||
-          existing.reviewer_handle !== (input.reviewer ?? null) ||
           existing.request_id !== input.requestId ||
           existing.name !== name ||
           existing.objective !== objective ||
@@ -282,9 +279,6 @@ import { recordedMessageRoute } from '../message-route.js';
         retainDepth: true,
       },
       });
-      // After the opening order: the reviewer must be independent of the agent it assigns.
-      if (input.reviewer !== undefined) await setCornerReviewer(db, cornerId, input.reviewer, agentId,
-        (id, reviewer) => daemonCheckReviewerAuthors(ctx, db, id, reviewer));
       // Opening watches lifecycle events where the commander opened the corner.
       await db.query(
           `INSERT INTO corner_watches(watcher_room_id,agent_id,corner_id,kinds,incoming_command_id) VALUES($1,$2,$3,'["opened","merged"]'::jsonb,$4)

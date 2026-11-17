@@ -592,7 +592,6 @@ export type CreateCornerInput = TurnOutputAuthority &
   RoomInput & {
     /** Exact handle, without @, of an agent member of the parent Room; defaults to the caller. */
     readonly implementer?: string;
-    readonly reviewer?: string;
     readonly hold?: boolean;
     readonly sourceMessageId?: string;
     /** Target parent Room; the active command may be in a DM or another Room. */

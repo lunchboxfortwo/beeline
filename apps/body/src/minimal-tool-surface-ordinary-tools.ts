@@ -168,7 +168,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   },
   {
     "name": "open_thread",
-    "description": "Create one unit of work in a member chat; the complete brief bounds its scope. Human approval is not required to open. A name of at most 3 words is saved with hyphens, and an objective past 24 words or 2000 characters is cut at a word boundary. The result names that change. Objective is navigation. Opening wakes its worker and watches automatically. Keep the chat's designated reviewer out of implementation unless necessary, then set reviewer to an independent agent handle. A reviewer cannot be the implementer or a commit author. hold:true requires sourceMessageId citing a readable person’s request to hold.",
+    "description": "Create one unit of work in a member chat; the complete brief bounds its scope. Human approval is not required to open. A name of at most 3 words is saved with hyphens, and an objective past 24 words or 2000 characters is cut at a word boundary. The result names that change. Objective is navigation. Opening wakes its worker and watches automatically. Keep the chat's designated reviewer out of implementation unless necessary, then set reviewer to an independent agent handle with revise_thread(action:metadata). A reviewer cannot be the implementer or a commit author. hold:true requires sourceMessageId citing a readable person’s request to hold.",
     "inputSchema": {
       "type": "object",
       "required": ["room", "brief", "implementer"],
@@ -236,7 +236,6 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
           "minLength": 1,
           "description": "Required worker handle without @. Opening creates its first assignment; do not send a redundant message."
         },
-        "reviewer": {"type": "string", "minLength": 1, "description": "Independent reviewer handle without @; defaults to the chat reviewer."},
         "sourceMessageId": {"type": "string", "description": "Person’s message requesting the hold; required with hold:true."},
         "hold": {
           "type": "boolean",

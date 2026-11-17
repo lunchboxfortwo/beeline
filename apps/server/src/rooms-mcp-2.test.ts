@@ -398,6 +398,8 @@ const scope1 = fixtureScope1();
     expect(instructions).not.toContain('you have no checkout');
     expect(instructions).not.toContain('Do not push with your own GitHub connection');
     const tools = (await client.listTools()).tools;
+    expect(tools.find(tool => tool.name === 'open_thread')?.inputSchema.properties).not.toHaveProperty('reviewer');
+    expect(tools.find(tool => tool.name === 'revise_thread')?.inputSchema.properties).toHaveProperty('reviewer');
     const handoff = "Code work goes in a thread with another agent as implementer: use feature/corner- plus the first 12 hex characters of its id with hyphens removed; push existing commits there in the same repository with your own GitHub access, or post the patch in that thread, not the chat, with base commit and test commands for the implementer to apply and push with the Beeline GitHub App; your owner's connection approval covers sharing the patch.";
     for (const name of ['open_thread', 'post_artifact']) {
       expect(tools.find(tool => tool.name === name)?.description).toContain(handoff);

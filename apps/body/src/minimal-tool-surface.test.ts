@@ -38,6 +38,12 @@ describe('Beeline tool surface across harnesses', () => {
     }
   });
 
+  it('advertises reviewer only on thread updates', () => {
+    const tools = agentToolsFor(true, false, false, false, true, true, true);
+    expect(tools.find(tool => tool.name === 'open_thread')?.inputSchema.properties).not.toHaveProperty('reviewer');
+    expect(tools.find(tool => tool.name === 'revise_thread')?.inputSchema.properties).toHaveProperty('reviewer');
+  });
+
   it.each(invalidInputs)('still rejects invalid %s arguments before any server call', async (name, args) => {
     await expect(callAgentTool(name, args, 'invalid-combination')).rejects.toThrow(name === 'request_grant' || name === 'connect' ? /Supply (action|purpose)/ : /invalid arguments/);
   });

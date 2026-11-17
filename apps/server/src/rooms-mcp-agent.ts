@@ -162,7 +162,7 @@ export const MCP_AGENT_TOOLS: Tool[] = [
     room: address('Parent chat id.'), name: { type: 'string', maxLength: 120, description: 'At most 3 words joined by hyphens.' },
     objective: { type: 'string', maxLength: 2000, description: 'At most 24 words.' }, brief,
     implementer: { type: 'string', minLength: 1, description: 'Worker handle without @.' },
-    reviewer: { type: 'string', minLength: 1, description: 'Independent reviewer handle without @.' }, hold: { type: 'boolean' }, sourceMessageId: { type: 'string' },
+    hold: { type: 'boolean' }, sourceMessageId: { type: 'string' },
   }, ['room', 'brief', 'implementer']),
   tool('revise_thread', 'Revise a thread. metadata needs name; install_brief needs name and brief; brief needs brief, expectedRevision and change. Except for commander-direct revisions, brief.approval.sourceMessageId must cite an approving human message or active commander message; the current commander delivery can supply its message/resume ID or forwarded root human message ID.', {
     address: address('Thread id.'), action: { type: 'string', enum: ['metadata', 'brief', 'install_brief'] }, reviewer: { type: 'string' },
@@ -550,7 +550,7 @@ export class RoomsMcpAgentTools {
         idempotencyKey: createHash('sha256').update(`open_thread\0${turn.requestId}`).digest('hex'),
         name: args.name ?? (words.slice(0, 3).join('-') || 'Work'),
         objective: args.objective ?? (words.slice(0, 24).join(' ') || 'Carry out the brief'),
-        implementer, reviewer: args.reviewer, sourceMessageId: args.sourceMessageId, hold: args.hold === true ? true : undefined, brief: briefDraft(args.brief),
+        implementer, sourceMessageId: args.sourceMessageId, hold: args.hold === true ? true : undefined, brief: briefDraft(args.brief),
         ...(repository.resolution === 'repository' ? { repository: repository.key, targetBranch: repository.targetBranch } : {}),
       }) as { cornerId?: string; watch?: unknown; warnings?: unknown };
       // Creation is a receipt, not evidence that a helper or checkout started.

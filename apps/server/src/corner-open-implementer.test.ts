@@ -1,6 +1,7 @@
 import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { cornerCommissionerSql } from './corner-opening.js';
 import { randomBytes } from 'node:crypto';
+import { cornerReviewerSql, setCornerReviewer } from './corner-reviewer.js';
 import { cornerOwnerSql } from './corner-worker.js';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { PgliteDatabase, migratedDatabase } from './test-support.js';
@@ -250,6 +251,38 @@ it('OPENER-OWNER: a corner its Room reviewer opens is owned by that reviewer', a
     }, A);
     expect((await db.query(`SELECT ${cornerOwnerSql('$1::uuid')} owner_agent_id`, [cornerId])).rows)
       .toEqual([{ owner_agent_id: A }]);
+  } finally {
+    await db.query(`UPDATE rooms SET reviewer_agent_id=NULL WHERE id=$1`, [ROOM]);
+  }
+});
+
+it('OPEN-NO-REVIEWER: a chat with only its implementer opens a thread', async () => {
+  await db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [ROOM, B]);
+  try {
+    const request = { ...(await input()), implementer: 'alpha' };
+    // An older helper may still send the removed optional field. Creation ignores it.
+    const { cornerId } = await daemon.execute('createCorner', { ...request, reviewer: 'alpha' } as typeof request, A);
+    expect((await db.query(`SELECT reviewer_agent_id FROM corner_facts WHERE corner_id=$1`, [cornerId])).rows)
+      .toEqual([{ reviewer_agent_id: null }]);
+    expect((await db.query(`SELECT agent_id FROM agent_commands WHERE room_id=$1 AND reason='corner_objective'`, [cornerId])).rows)
+      .toEqual([{ agent_id: A }]);
+  } finally {
+    await db.query(`UPDATE memberships SET removed_at=NULL WHERE room_id=$1 AND identity_id=$2`, [ROOM, B]);
+  }
+});
+
+it('OPEN-INHERIT-REVIEWER: creation follows the chat reviewer and retries survive a later override', async () => {
+  await db.query(`UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1`, [ROOM, B]);
+  try {
+    const request = { ...(await input()), implementer: 'alpha' };
+    const opened = await daemon.execute('createCorner', request, A);
+    const reviewer = () => db.query(`SELECT fact.reviewer_agent_id override,${cornerReviewerSql()} reviewer
+      FROM rooms corner JOIN rooms parent ON parent.id=corner.parent_id
+      JOIN corner_facts fact ON fact.corner_id=corner.id WHERE corner.id=$1`, [opened.cornerId]);
+    expect((await reviewer()).rows).toEqual([{ override: null, reviewer: B }]);
+    await setCornerReviewer(db, opened.cornerId, 'beta', A, async () => {});
+    expect((await reviewer()).rows).toEqual([{ override: B, reviewer: B }]);
+    expect(await daemon.execute('createCorner', request, A)).toEqual(opened);
   } finally {
     await db.query(`UPDATE rooms SET reviewer_agent_id=NULL WHERE id=$1`, [ROOM]);
   }

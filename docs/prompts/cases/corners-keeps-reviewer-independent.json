@@ -45,39 +45,23 @@
                 "call": "open_thread",
                 "args": {
                   "implementer": {
-                    "matches": "reviewer-a",
+                    "matches": "^@?reviewer-a$",
                     "flags": "i"
                   }
                 }
               },
               {
-                "call": "message",
+                "call": "revise_thread",
                 "args": {
-                  "text": {
-                    "matches": "review",
-                    "flags": "i"
-                  },
-                  "to.place": "082f3b91-2d42-5092-aa6c-92f5a2112a5b",
-                  "to.agent": {
+                  "action": "metadata",
+                  "address": "082f3b91-2d42-5092-aa6c-92f5a2112a5b",
+                  "reviewer": {
                     "matches": "^@?worker-b$",
                     "flags": "i"
                   }
                 }
               }
             ]
-          },
-          {
-            "call": "open_thread",
-            "args": {
-              "implementer": {
-                "matches": "^@?reviewer-a$",
-                "flags": "i"
-              },
-              "reviewer": {
-                "matches": "^@?worker-b$",
-                "flags": "i"
-              }
-            }
           }
         ]
       }
