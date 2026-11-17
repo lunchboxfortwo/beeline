@@ -198,10 +198,17 @@ export class AgentRunner {
     place.running = item;
     // Input arriving during a prompt belongs to the next prompt. Steering
     // acceptance does not prove the running answer covered that new request.
-    const batch = [item, ...place.waiting];
+    // Controls form a boundary: a restart never becomes harness input or consumes later work.
+    const restartIndex = place.waiting.findIndex(next => next.action === 'restart');
+    const batch = item.action === 'restart' ? [item] : [item, ...place.waiting.slice(0, restartIndex < 0 ? undefined : restartIndex)];
     const batched = new Set(batch.map(next => next.id));
     let started = false;
     try {
+      if (item.action === 'restart') {
+        await place.session.stop();
+        started = true;
+        await this.store({ itemId: item.id, roomId: item.roomId, requestId: item.turnRequestId, text: '' });
+      } else {
         // Required item credentials and provider configuration precede ACP startup.
         await place.session.start(item);
         started = true;
@@ -220,6 +227,7 @@ export class AgentRunner {
         place.waiting = place.waiting.filter(next => !batched.has(next.id));
         void Promise.resolve().then(() => this.afterAnswer(item, answer))
           .catch(error => console.warn('[body] answer diagnostics failed:', error));
+      }
     } catch (error) {
       console.error(`[body] place ${placeId} could not answer ${item.id}:`, error);
       if (this.latest.some(listed => listed.id === item.id) && !this.answered.has(item.id)) {
@@ -313,7 +321,10 @@ export class AgentRunner {
         await this.answers.save(answer);
         this.durable.add(answer.itemId);
       }
-      const receipt=await api.execute('postRoomMessage', {
+      const restart = this.latest.find(item => item.id === answer.itemId)?.action === 'restart';
+      const receipt = restart ? await api.execute('markAgentTurnSilent', {
+        roomId: answer.roomId, requestId: answer.itemId,
+      }) : await api.execute('postRoomMessage', {
         roomId: answer.roomId, requestId: answer.itemId, text: answer.text, presentation: 'message',
         ...(answer.harnessEnded ? { harnessEnded: true } : {}),
         ...(answer.queuedRequestIds?.length ? { queuedRequestIds: answer.queuedRequestIds } : {}),

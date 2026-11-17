@@ -66,7 +66,7 @@ async function persistedAnywhere(database: PgliteDatabase, needle: string): Prom
   return hits;
 }
 
-describe('agent sign-in credentials and ordinary queued login text', () => {
+describe('agent sign-in credentials and tagged login', () => {
   let database: PgliteDatabase;
   let live: LiveHub;
   let listener: PostgresLiveListener;
@@ -157,11 +157,22 @@ describe('agent sign-in credentials and ordinary queued login text', () => {
     return messageId;
   }
 
-  it('queues login text from any current member without starting a credential flow', async () => {
-    await send(OWNER, '@clara /login');
-    await send(MEMBER, '@clara login');
-    expect((await database.query(`SELECT message->>'body' body,state FROM agent_commands ORDER BY created_at,id`)).rows)
-      .toEqual([{ body: '@clara /login', state: 'pending' }, { body: '@clara login', state: 'pending' }]);
+  it.each(['/login', 'login'])('starts the owner’s tagged %s card without queueing a prompt', async command => {
+    helper(event => event.step === 'start' ? { kind: 'paste-code', authorizeUrl: LINK } : undefined);
+    const sourceMessageId = await send(OWNER, `@clara ${command}`);
+    await vi.waitFor(async () => {
+      expect((await database.query("SELECT card FROM messages WHERE card_type='agent-sign-in'")).rows)
+        .toEqual([{ card: expect.objectContaining({ agentId: AGENT, ownerId: OWNER,
+          harness: 'claude', sourceMessageId, status: 'pending', authorizeUrl: LINK }) }]);
+    });
+    expect((await database.query('SELECT 1 FROM agent_commands')).rowCount).toBe(0);
+    expect(helperFrames.map(frame => frame.step)).toEqual(['start']);
+  });
+
+  it('consumes a non-owner login without starting credentials or queueing it', async () => {
+    await send(MEMBER, '@clara /login');
+    expect((await database.query('SELECT 1 FROM agent_commands')).rowCount).toBe(0);
+    expect((await database.query("SELECT 1 FROM messages WHERE card_type='agent-sign-in'")).rowCount).toBe(0);
     expect(helperFrames).toEqual([]);
   });
 

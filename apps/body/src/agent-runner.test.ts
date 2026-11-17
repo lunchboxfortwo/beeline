@@ -436,3 +436,33 @@ it('ends a hosted item with the real startup failure and does not replay it on r
   expect(harness.start).toHaveBeenCalledTimes(1);
   expect(harness.deliver).not.toHaveBeenCalled();
 });
+
+
+it('handles a restart control without starting the harness and acknowledges it silently', async () => {
+  const f = await fixture();
+  const restart = { ...f.item('restart'), action: 'restart' as const, reason: 'tagged_lifecycle_restart' };
+  f.changed([restart]);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('markAgentTurnSilent', {
+    roomId: 'room', requestId: 'restart',
+  }));
+  expect(harness.stop).toHaveBeenCalledTimes(1);
+  expect(harness.start).not.toHaveBeenCalled();
+  expect(harness.deliver).not.toHaveBeenCalled();
+  expect(f.execute.mock.calls.filter(([name]) => name === 'postRoomMessage')).toEqual([]);
+});
+
+it('keeps restart out of input batches and delivers subsequent work after restarting', async () => {
+  const f = await fixture();
+  const running = f.item('running'), next = f.item('next');
+  const restart = { ...f.item('restart'), action: 'restart' as const, reason: 'tagged_lifecycle_restart' };
+  const held = deferred<Record<string, unknown>>();
+  harness.deliver.mockReturnValueOnce(held.promise);
+  f.changed([running, restart, next]);
+  await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(1));
+  expect(harness.deliver.mock.calls[0]).toEqual([running, [running]]);
+  held.resolve({ text: 'done', steps: [], toolCalls: [], cleanup: async () => {} });
+  await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(2));
+  expect(harness.stop).toHaveBeenCalledTimes(1);
+  expect(harness.deliver.mock.calls[1]).toEqual([next, [next]]);
+  expect(f.execute).toHaveBeenCalledWith('markAgentTurnSilent', { roomId: 'room', requestId: 'restart' });
+});
