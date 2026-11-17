@@ -43,17 +43,55 @@ it('initializes a human thread from its first person tag and changes only on cla
   expect(await recorded()).toBe(B);
 });
 
-it('refuses PR/push credentials for another agent and permits them immediately after becoming implementer', async () => {
+it('P1: grants claimed thread pushes against the parent repository, including legacy chat requests', async () => {
+  // Earlier cases can leave other threads; isolate this claim's authority.
+  await rootFixture.db.query('UPDATE corner_facts SET implementer_agent_id=NULL');
   await rootFixture.db.query('UPDATE corner_facts SET implementer_agent_id=$2 WHERE corner_id=$1',[C,B]);
-  const service=new DaemonService(rootFixture.db,rootFixture.live,async()=>({token:'fixture-token',expiresAt:9999999999}));
-  await expect(service.execute('getRoomGitHubToken',{roomId:C,write:true},A))
-    .rejects.toThrow('Call claim_thread before pushing or opening a PR for this thread.');
-  await expect(service.execute('getRoomGitHubToken',{roomId:C},A)).resolves.toEqual({token:'fixture-token',expiresAt:9999999999});
+  const tokenRooms: string[] = [];
+  const credential = {token:'fixture-token',expiresAt:9999999999};
+  const service=new DaemonService(rootFixture.db,rootFixture.live,async roomId=>{
+    tokenRooms.push(roomId);
+    return credential;
+  });
+  for (const roomId of [C, R]) {
+    await expect(service.execute('getRoomGitHubToken',{roomId,write:true},A))
+      .rejects.toThrow('Call claim_thread before pushing or opening a PR for this thread.');
+  }
+  expect(tokenRooms).toEqual([]);
+  // Read requests retain their existing address and do not require a claim.
+  for (const roomId of [C, R]) {
+    await expect(service.execute('getRoomGitHubToken',{roomId},A)).resolves.toEqual(credential);
+  }
+  expect(tokenRooms.splice(0)).toEqual([C, R]);
   await send('@hoots Take over',C);
   const item=(await commands(A,C))[0]!;
   await claim(item);
   await service.execute('becomeImplementer',{roomId:C,requestId:item.turnRequestId},A);
-  await expect(service.execute('getRoomGitHubToken',{roomId:C,write:true},A)).resolves.toEqual({token:'fixture-token',expiresAt:9999999999});
+  for (const roomId of [C, R]) {
+    await expect(service.execute('getRoomGitHubToken',{roomId,write:true},A)).resolves.toEqual(credential);
+  }
+  expect(tokenRooms.splice(0)).toEqual([R, R]);
+  for (const roomId of [C, R]) {
+    await expect(service.execute('getRoomGitHubToken',{roomId,write:true},B)).rejects.toThrow('Call claim_thread');
+  }
+  // An open claim in another chat does not authorize this chat's repository.
+  const otherChat = '55555555-5555-4555-8555-555555555555';
+  await rootFixture.db.query(`INSERT INTO rooms(id,workspace_id,name)
+    SELECT $1,workspace_id,'Other chat' FROM rooms WHERE id=$2`,[otherChat,R]);
+  await rootFixture.db.query('UPDATE rooms SET parent_id=$2 WHERE id=$1',[C,otherChat]);
+  await expect(service.execute('getRoomGitHubToken',{roomId:R,write:true},A)).rejects.toThrow('Call claim_thread');
+  await rootFixture.db.query('UPDATE rooms SET parent_id=$2 WHERE id=$1',[C,R]);
+  // A sibling's implementer cannot use that claim for this specific thread.
+  const sibling = '44444444-4444-4444-8444-444444444444';
+  await rootFixture.db.query(`INSERT INTO rooms(id,workspace_id,parent_id,name)
+    SELECT $1,workspace_id,parent_id,'Sibling' FROM rooms WHERE id=$2`,[sibling,C]);
+  await expect(service.execute('getRoomGitHubToken',{roomId:sibling,write:true},A))
+    .rejects.toThrow('Call claim_thread');
+  await rootFixture.db.query('UPDATE rooms SET archived_at=now() WHERE id=$1',[C]);
+  for (const roomId of [C, R]) {
+    await expect(service.execute('getRoomGitHubToken',{roomId,write:true},A)).rejects.toThrow('Call claim_thread');
+  }
+  expect(tokenRooms).toEqual([]);
 });
 
 it('backfills the old latest-tag derivation once and never overwrites an explicit takeover', async () => {

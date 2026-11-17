@@ -194,11 +194,20 @@ export async function startAgentTurnOperation<Name extends keyof DaemonOperation
 export async function getRoomGitHubTokenOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 
         if (!ctx.roomGitHubToken) throw new Error('GitHub chat token service unavailable');
-        const roomId = (input as Input<'getRoomGitHubToken'>).roomId;
+        let roomId = (input as Input<'getRoomGitHubToken'>).roomId;
         if ((input as Input<'getRoomGitHubToken'>).write) {
-          const fact = await ctx.database.query(`SELECT 1 FROM corner_facts WHERE corner_id=$1 AND implementer_agent_id=$2`,
-            [roomId, authenticatedAgentId]);
+          // Old helpers send the chat ID. Their write authority still requires
+          // a recorded implementer of an open thread in that exact chat.
+          const fact = await ctx.database.query<{ parent_id: string }>(`SELECT corner.parent_id
+            FROM rooms addressed
+            JOIN rooms corner ON corner.id=addressed.id
+              OR (addressed.parent_id IS NULL AND corner.parent_id=addressed.id)
+            JOIN corner_facts fact ON fact.corner_id=corner.id AND fact.implementer_agent_id=$2
+            WHERE addressed.id=$1 AND addressed.archived_at IS NULL
+              AND corner.parent_id IS NOT NULL AND corner.archived_at IS NULL
+            LIMIT 1`, [roomId, authenticatedAgentId]);
           if (!fact.rowCount) throw new CommandRefusalError('Call claim_thread before pushing or opening a PR for this thread.', 409);
+          roomId = fact.rows[0]!.parent_id;
         }
         try {
           return (await ctx.roomGitHubToken(roomId)) as Output<Name>;

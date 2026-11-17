@@ -31,6 +31,8 @@ export async function installCornerGitHubWrappers(input: {
   root: string;
   runtimeConfigPath: string;
   roomId: string;
+  /** Thread authority for writes; reads keep using the parent chat. */
+  cornerId?: string;
   cliEntrypoint: string;
   gitBinary: string;
   ghBinary?: string;
@@ -56,6 +58,7 @@ export async function installCornerGitHubWrappers(input: {
       : input.cliEntrypoint,
     config: input.runtimeConfigPath,
     room: input.roomId,
+    corner: input.cornerId ?? input.roomId,
     featureBranch: input.featureBranch,
     targetBranch: input.targetBranch,
     gitCommand: input.gitBinary,
@@ -338,7 +341,7 @@ function needsToken(args) {
   return !local.has(args[index]);
 }
 function token() {
-  const result = spawnSync(config.node, [config.cli, 'corner-read-token', '--config', config.config, '--room', config.room,
+  const result = spawnSync(config.node, [config.cli, 'corner-read-token', '--config', config.config, '--room', threadWrite ? config.corner : config.room,
     ...(threadWrite ? ['--write'] : [])], { encoding: 'utf8' });
   if (result.status === 0 && result.stdout.trim()) return result.stdout.trim();
   process.stderr.write(result.stderr || 'Beeline could not refresh the repository credential.\\n');

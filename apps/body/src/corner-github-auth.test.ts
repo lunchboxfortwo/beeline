@@ -39,6 +39,8 @@ it('refuses a non-implementer PR open and push, then allows both after takeover'
   const role=join(root,'implementer'),calls=join(root,'calls'),cli=join(root,'credential.mjs'),git=join(root,'git'),gh=join(root,'gh');
   const refusal='Call claim_thread before pushing or opening a PR for this thread.';
   await writeFile(cli,`import {existsSync} from 'node:fs';
+const expectedRoom = process.argv.includes('--write') ? 'thread' : 'chat';
+if (process.argv[process.argv.indexOf('--room') + 1] !== expectedRoom) throw new Error('wrong credential room');
 if(process.argv.includes('--write')&&!existsSync(${JSON.stringify(role)})){
   process.stderr.write(${JSON.stringify(refusal+'\n')});process.exit(1);
 }process.stdout.write('fixture-token');`);
@@ -54,13 +56,14 @@ esac
 echo pr >> '${calls}'
 echo https://github.com/acme/repo/pull/1
 `);await chmod(gh,0o755);
-  await installCornerGitHubWrappers({root,runtimeConfigPath:join(root,'runtime.json'),roomId:'thread',
+  await installCornerGitHubWrappers({root,runtimeConfigPath:join(root,'runtime.json'),roomId:'chat',cornerId:'thread',
     cliEntrypoint:cli,gitBinary:git,ghBinary:gh,featureBranch:'feature/test',targetBranch:'main',originUrl:'https://github.com/acme/repo.git'});
   const run=(command:string,args:string[])=>promisify(execFile)(process.execPath,[join(root,'beeline-github-bin',command),...args],{
     env:{...process.env,HOME:root,XDG_CONFIG_HOME:join(root,'config'),XDG_STATE_HOME:join(root,'state')}});
   for(const [command,args] of [['gh',['pr','create']],['git',['push','origin','feature/test']]] as const)
     await expect(run(command,[...args])).rejects.toMatchObject({stderr:refusal+'\n'});
   await expect(readFile(calls,'utf8')).rejects.toMatchObject({code:'ENOENT'});
+  await run('git',['fetch','origin']);
   // The credential path reads current server authority on each invocation.
   await writeFile(role,'this-agent');
   expect((await run('gh',['pr','create'])).stdout).toContain('https://github.com/acme/repo/pull/1');
@@ -81,7 +84,7 @@ it('routes launcher credentials through the real CLI command parser', async () =
     await import(${JSON.stringify(new URL('./cli.ts', import.meta.url).href)});
   `);
   await writeFile(binary, '#!/bin/sh\ncase "$*" in *show-ref*) exit 1;; *symbolic-ref*) echo feature/test;; *) printf "%s" "$GH_TOKEN";; esac\n'); await chmod(binary, 0o755);
-  await installCornerGitHubWrappers({ root, runtimeConfigPath: join(root, 'runtime.json'), roomId: 'thread',
+  await installCornerGitHubWrappers({ root, runtimeConfigPath: join(root, 'runtime.json'), roomId: 'chat', cornerId: 'thread',
     cliEntrypoint: cli, gitBinary: binary, featureBranch: 'feature/test', targetBranch: 'main' });
   const result = await promisify(execFile)(process.execPath, [join(root, 'beeline-github-bin/git'), 'push', 'origin', 'feature/test'], {
     env: { ...process.env, NODE_OPTIONS: `--import ${createRequire(import.meta.url).resolve('tsx')}`,

@@ -448,7 +448,7 @@ export class PlaceSession {
       const gitBinary = await which('git');
       if (!gitBinary) throw new Error('git is not installed');
       await installCornerGitHubWrappers({ root: homeRoot, runtimeConfigPath: config.runtimeConfigPath,
-        roomId: parentRoomId, cliEntrypoint: process.argv[1]!, gitBinary, ghBinary: await which('gh'),
+        roomId: parentRoomId, cornerId: placeId, cliEntrypoint: process.argv[1]!, gitBinary, ghBinary: await which('gh'),
         featureBranch: this.resources.context.restore?.featureBranch ?? `feature/corner-${placeId.replaceAll('-', '').slice(0, 12)}`,
         targetBranch: this.resources.context.repository?.targetBranch || 'main',
         inheritedPath: config.agentEnv.PATH ?? process.env.PATH,
