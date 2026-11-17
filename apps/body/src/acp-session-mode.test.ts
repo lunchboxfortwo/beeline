@@ -1,5 +1,41 @@
 import { expect, it } from 'vitest';
 import { AcpClient } from './acp.js';
+import { startAgentProcess, stopAgentProcess } from './agent-process.js';
+
+// Model the adapter's documented INITIAL_AGENT_MODE policy across both open
+// paths, using a child process so this covers the actual spawn environment.
+const modeFixture = `
+require('node:readline').createInterface({input:process.stdin}).on('line', line => {
+  const request = JSON.parse(line);
+  if (!request.id) return;
+  const result = request.method === 'initialize'
+    ? {protocolVersion:1,agentCapabilities:{loadSession:true}}
+    : {sessionId:'live',modes:{currentModeId:process.env.INITIAL_AGENT_MODE,
+        availableModes:[{id:'read-only'},{id:'agent-full-access'}]}};
+  const response = ['initialize','session/new','session/load'].includes(request.method)
+    ? {result} : {error:{code:-32601,message:'Unexpected startup RPC: '+request.method}};
+  process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,...response})+'\\n');
+});`;
+
+it.each([
+  { label: '/adapter/codex-acp', osSandbox: true, expected: 'agent-full-access' },
+  { label: '/adapter/codex-acp', osSandbox: false, expected: 'read-only' },
+  { label: 'opencode', osSandbox: true, expected: 'read-only' },
+])('starts $label with sandbox=$osSandbox in $expected for create and reload', async ({label,osSandbox,expected}) => {
+  for (const operation of ['new','load'] as const) {
+    const agentEnv = { INITIAL_AGENT_MODE: 'read-only' };
+    const client = new AcpClient({agentCommand:process.execPath,agentArgs:['-e',modeFixture],
+      agentLabel:label,osSandbox,agentEnv,resourceScope:'none'});
+    try {
+      await startAgentProcess(client);
+      const session = operation === 'new'
+        ? await client.sessionNew({cwd:process.cwd(),mode:'readonly'})
+        : await client.sessionLoad({cwd:process.cwd(),sessionId:'live',mode:'readonly'});
+      expect(session.raw).toMatchObject({modes:{currentModeId:expected}});
+      expect(agentEnv.INITIAL_AGENT_MODE).toBe('read-only');
+    } finally { await stopAgentProcess(client); }
+  }
+});
 
 it('does not promote a pre-tool preamble when the harness ends without closing text', async () => {
   const client = new AcpClient({agentCommand:'pi-acp',agentEnv:{},resourceScope:'none'});

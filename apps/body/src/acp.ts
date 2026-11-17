@@ -218,9 +218,10 @@ export class AcpClient extends EventEmitter {
     agentLabel?: string;
     /**
      * The child is wrapped in the daemon's OS sandbox (`bwrap-sandbox.ts`), so
-     * the filesystem rule is held by the kernel. Such sessions keep their
-     * advertised mode and do not wait for a native mode switch. Defaults to
-     * false: an unwrapped child keeps the harness's own read-only mode.
+     * the filesystem rule is held by the kernel. Codex starts in full-access
+     * mode inside that boundary; other harnesses keep their native defaults.
+     * No sandboxed session waits for a native mode switch. Defaults to false:
+     * an unwrapped child keeps the harness's own read-only mode.
      */
     osSandbox?: boolean;
     agentEnv: Record<string, string>;
@@ -295,6 +296,12 @@ export class AcpClient extends EventEmitter {
       this.agentLabel,
       this.inheritProcessEnv ? { ...process.env, ...this.agentEnv } : this.agentEnv,
     );
+    // Codex reads this policy for both session/new and session/load. Select it
+    // before launch so its nested sandbox cannot break native shell execution
+    // inside Beeline's OS boundary. Do not restore a startup-blocking mode RPC.
+    if (this.osSandbox && /(^|[/\\])codex-acp(\.[a-z]+)?$/i.test(this.agentLabel)) {
+      childEnv = { ...childEnv, INITIAL_AGENT_MODE: 'agent-full-access' };
+    }
     if (isAbsolute(this.harnessCommand) &&
         !childEnv.BEELINE_FREE_AGENT_ID && !childEnv.BEELINE_FREE_AGENT_MODEL_TOKEN) {
       try {

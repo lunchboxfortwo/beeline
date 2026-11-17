@@ -3,8 +3,9 @@
  * adapters, not assumed from the protocol.
  *
  * Beeline's Room read-only callback and its corner hygiene-denylist callback
- * live in `session-sandbox.ts`. Sandboxed sessions retain the adapter's native
- * defaults; bubblewrap supplies the filesystem mount policy underneath.
+ * live in `session-sandbox.ts`. Sandboxed Codex sessions use its full-access
+ * startup policy; other adapters retain their native defaults. Bubblewrap
+ * supplies the filesystem mount policy underneath.
  * The callback only binds a harness that *asks*. Two adapters do; one does not:
  *
  *   - `codex-acp` (@agentclientprotocol/codex-acp): routes every command
@@ -14,8 +15,10 @@
  *     (`sandboxPolicy: { type: 'readOnly', networkAccess: false }`). That mode
  *     is offline as well as read-only, so Beeline selects it for a Room ONLY
  *     when the daemon's own OS sandbox is not wrapping the child. Under
- *     bubblewrap, the namespace and permission callback own the boundary;
- *     startup sends no native mode-selection RPC. See `roomModeCandidates`.
+ *     bubblewrap, `INITIAL_AGENT_MODE=agent-full-access` restores native shell
+ *     execution for both new and loaded sessions. The namespace owns the
+ *     filesystem boundary; startup sends no native mode-selection RPC.
+ *     See `roomModeCandidates`.
  *   - `claude-agent-acp` (@agentclientprotocol/claude-agent-acp): routes every
  *     tool through the SDK's `canUseTool` -> `session/request_permission`. It
  *     advertises no read-only mode, so a Room stays in `default`, which asks —
