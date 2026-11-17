@@ -1,3 +1,4 @@
+import { IdentityMark } from '@/components/buzz/IdentityMark';
 import { RepositoryMark } from '@/components/buzz/RepositoryMark';
 import React, { useEffect, useMemo, useState } from 'react';
 import { router, type Href } from 'expo-router';
@@ -230,11 +231,13 @@ export function ChatInfoScreen({ roomId, close }: { roomId: string; close: () =>
                 </Card>
             )}
 
-            <SheetFrame open={reviewerOpen} close={() => setReviewerOpen(false)} title="Reviewer" testID="sheet-reviewer">
-                <SheetRow icon={reviewer ? null : <Glyph icon={Check} accent />} label="None" onPress={() => void chooseReviewer(null)} testID="reviewer-none" />
+            <SheetFrame open={reviewerOpen} close={() => setReviewerOpen(false)} title="Reviewer" testID="sheet-reviewer" scrollable>
+                <SheetRow icon={null} right={reviewer ? null : <Glyph icon={Check} accent />} selected={!reviewer} label="None" onPress={() => void chooseReviewer(null)} testID="reviewer-none" />
                 {agents.map((agent) => (
-                    <SheetRow key={agent.identity.pubkey} icon={agent === reviewer ? <Glyph icon={Check} accent /> : null}
-                        label={handleOf(agent.identity)} onPress={() => void chooseReviewer(agent.identity.pubkey)} testID={`reviewer-${agent.identity.pubkey}`} />
+                    <SheetRow key={agent.identity.pubkey}
+                        icon={<IdentityMark kind="agent" seed={agent.identity.pubkey} face={agent.identity.face} name={agent.identity.name} handle={agent.identity.handle} avatarUrl={agent.identity.avatar} size={28} />}
+                        selected={agent === reviewer} right={agent === reviewer ? <Glyph icon={Check} accent /> : null}
+                        label={agent.identity.name || handleOf(agent.identity)} detail={handleOf(agent.identity)} onPress={() => void chooseReviewer(agent.identity.pubkey)} testID={`reviewer-${agent.identity.pubkey}`} />
                 ))}
             </SheetFrame>
         </Screen>

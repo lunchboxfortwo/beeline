@@ -85,6 +85,31 @@ describe('Chat info', () => {
         expect(panel.openPlace).toHaveBeenCalledWith({ kind: 'members', roomId: ROOM }, false);
     });
 
+    it('keeps all 25 reviewers in the sheet scroll body and selects the last agent or None', async () => {
+        data.room.repository = { name: 'owner/repo' };
+        data.room.members = Array.from({ length: 25 }, (_, index) => ({
+            identity: { pubkey: `agent-${index}`, kind: 'agent', name: `Agent ${index}`, handle: `agent${index}`, face: 'fox' }, role: 'member',
+        }));
+        data.room.room.reviewerAgentId = 'agent-0';
+        const tree = render();
+        act(() => pressable(tree, 'chat-reviewer').props.onPress());
+        const scroll = tree.root.findByType('Sheet.ScrollView');
+        const rows = scroll.findAll((node: any) => node.type === 'ListItem');
+        expect(rows).toHaveLength(26);
+        expect(rows[0].props.testID).toBe('reviewer-none');
+        expect(rows[1].props['aria-checked']).toBe(true);
+        expect(rows[25].props['aria-label']).toBe('Agent 24, @agent24');
+        expect(rows.every((row: any) => row.props.minHeight >= 44)).toBe(true);
+        expect(flat(tree)).toContain('Agent 24');
+        await act(async () => rows[25].props.onPress());
+        expect(operation).toHaveBeenLastCalledWith('updateRoom', { roomId: ROOM, reviewerAgentId: 'agent-24' });
+        expect(refresh).toHaveBeenCalled();
+        act(() => pressable(tree, 'chat-reviewer').props.onPress());
+        await act(async () => pressable(tree, 'reviewer-none').props.onPress());
+        expect(operation).toHaveBeenLastCalledWith('updateRoom', { roomId: ROOM, reviewerAgentId: null });
+        act(() => tree.unmount());
+    });
+
     it('renames a chat from Chat info with the existing update operation', async () => {
         const tree = render();
         act(() => pressable(tree, 'chat-name').props.onPress());

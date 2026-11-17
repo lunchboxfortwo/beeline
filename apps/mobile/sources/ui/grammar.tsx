@@ -306,8 +306,8 @@ export function KeyboardBody({ children, maxHeight }: { children?: React.ReactNo
 const KEYBOARD_BODY = { flex: 1 } as const;
 
 /** The one sheet frame: scrim, handle, title, one step deep with Back. */
-export function SheetFrame({ open, close, title, testID, children, back }: {
-    open: boolean; close: () => void; title: string; testID?: string; children: React.ReactNode; back?: () => void;
+export function SheetFrame({ open, close, title, testID, children, back, scrollable = false }: {
+    open: boolean; close: () => void; title: string; testID?: string; children: React.ReactNode; back?: () => void; scrollable?: boolean;
 }) {
     const theme = useThemeName();
     // Android's 3-button bar and the iOS home indicator sit over the sheet's foot.
@@ -335,7 +335,11 @@ export function SheetFrame({ open, close, title, testID, children, back }: {
                                 {back ? <Btn kind="icon" label="Back" onPress={back}><Glyph icon={ArrowLeft} /></Btn> : null}
                                 <T v="title" flex={1}>{title}</T>
                             </XStack>
-                            {children}
+                            {scrollable ? (
+                                <Sheet.ScrollView flexShrink={1} minHeight={0} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+                                    {children}
+                                </Sheet.ScrollView>
+                            ) : children}
                         </YStack>
                     </SheetKeyboardBody>
                 </Sheet.Container>
@@ -359,14 +363,14 @@ export function SheetScroll({ children }: { children: React.ReactNode }) {
 }
 
 /** One sheet row: an icon column, a label and an optional quiet line, then a chevron when it opens a step. */
-export function SheetRow({ icon, label, detail, onPress, testID, right, chevron = false }: {
-    icon: React.ReactNode; label: string; detail?: string; onPress: () => void; testID?: string; right?: React.ReactNode; chevron?: boolean;
+export function SheetRow({ icon, label, detail, onPress, testID, right, chevron = false, selected }: {
+    icon: React.ReactNode; label: string; detail?: string; onPress: () => void; testID?: string; right?: React.ReactNode; chevron?: boolean; selected?: boolean;
 }) {
     const step = useStep();
     return (
-        <ListItem minHeight={HEIGHT.sheetRow} paddingHorizontal="0" paddingVertical={step('2')} gap={step('3')} justifyContent="flex-start" backgroundColor="raised" onPress={onPress} aria-label={label} accessibilityRole="button" testID={testID}>
+        <ListItem minHeight={HEIGHT.sheetRow} paddingHorizontal="0" paddingVertical={step('2')} gap={step('3')} justifyContent="flex-start" backgroundColor="raised" onPress={onPress} aria-label={selected !== undefined && detail ? `${label}, ${detail}` : label} accessibilityRole={selected === undefined ? "button" : "radio"} role={selected === undefined ? "button" : "radio"} aria-checked={selected} testID={testID}>
             <YStack width={28} alignItems="center">{icon}</YStack>
-            <YStack flex={1} minWidth={0} gap={step('1')}>
+            <YStack flex={1} minWidth={0} gap={step(selected === undefined ? '1' : '0')}>
                 <Copy>{label}</Copy>
                 {detail ? <Copy small quiet>{detail}</Copy> : null}
             </YStack>

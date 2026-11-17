@@ -152,3 +152,17 @@ it('preserves the inset viewer face inside its existing bordered target', () => 
     act(() => { tree.update(<Btn kind="icon" label="Close" />); });
     expect(tree.root.findByType('Button').props.minHeight).toBe(44);
 });
+
+it('bounds a scrolling sheet below the safe top and keeps its header outside the scroll body', () => {
+    const tree = at('medium', <SheetFrame open close={vi.fn()} title="Reviewer" scrollable><T>Last agent</T></SheetFrame>);
+    const scroll = tree.root.findByType('Sheet.ScrollView');
+    expect(scroll.props.flexShrink).toBe(1);
+    expect(scroll.props.minHeight).toBe(0);
+    expect(scroll.props.nestedScrollEnabled).toBe(true);
+    const texts = scroll.findAll((node: any) => node.type === 'Text').map((node: any) => node.props.children);
+    expect(texts).toContain('Last agent');
+    expect(texts).not.toContain('Reviewer');
+    const body = tree.root.findAll((node: any) => node.type === 'View' && Array.isArray(node.props.style))
+        .find((node: any) => node.props.style.some((style: any) => style?.maxHeight !== undefined));
+    expect(body.props.style[0].maxHeight).toBe(844 - insets.top - scaled('6', 'medium'));
+});
