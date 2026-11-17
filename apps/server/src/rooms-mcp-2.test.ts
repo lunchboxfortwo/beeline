@@ -214,6 +214,18 @@ const scope1 = fixtureScope1();
     expect((await scope1.exchange(grant)).status).toBe(200);
   });
 
+  it('accepts a loopback callback on a new port and refuses a different path or host', async () => {
+    const registered = await (await scope1.post('/mcp/oauth/register', { client_name: 'Codex', redirect_uris: ['http://127.0.0.1:18743/callback'], token_endpoint_auth_method: 'none' })).json() as { client_id: string };
+    const challenge = createHash('sha256').update(opaque()).digest('base64url');
+    const authorize = (redirect: string) => phoneFetch(scope1.origin + '/mcp/oauth/authorize?' + new URLSearchParams({
+      client_id: registered.client_id, redirect_uri: redirect, response_type: 'code', code_challenge_method: 'S256',
+      code_challenge: challenge, state: 'review-state', resource: scope1.origin + '/mcp', scope: 'rooms:read rooms:write',
+    }), { redirect: 'manual' });
+    expect((await authorize('http://127.0.0.1:53222/callback')).status).toBe(302);
+    expect((await authorize('http://127.0.0.1:53222/other')).status).toBe(400);
+    expect((await authorize('http://localhost:53222/callback')).status).toBe(400);
+  });
+
   it('keeps an authorization code valid for ten minutes', async () => {
     const grant = await scope1.authorize();
     await scope1.db.query("UPDATE rooms_mcp_codes SET expires_at=expires_at-interval '5 minutes' WHERE hash=$1", [tokenHash(grant.code!)]);

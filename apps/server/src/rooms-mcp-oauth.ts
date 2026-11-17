@@ -126,6 +126,29 @@ function redirectUri(value: unknown): string {
     throw new Error('invalid_redirect_uri');
   return raw;
 }
+/**
+ * A private-bridge reconnect binds a new loopback port. RFC 8252 section 7.3
+ * requires any port when the scheme, host, and path match a registered URI.
+ * https callbacks stay an exact string match.
+ */
+function redirectRegistered(registered: readonly string[], requested: string): boolean {
+  if (registered.includes(requested)) return true;
+  let incoming: string;
+  try { incoming = redirectUri(requested); } catch { return false; }
+  const wanted = loopbackRedirect(incoming);
+  if (!wanted) return false;
+  return registered.some(stored => {
+    const known = loopbackRedirect(stored);
+    return !!known && known.hostname === wanted.hostname && known.pathname === wanted.pathname && known.search === wanted.search;
+  });
+}
+function loopbackRedirect(value: string): URL | undefined {
+  try {
+    const url = new URL(value);
+    if (url.protocol === 'http:' && ['127.0.0.1', '[::1]', 'localhost'].includes(url.hostname)) return url;
+  } catch { /* the exact comparison already failed */ }
+  return undefined;
+}
 /** Non-secret registration metadata, so a refused client can be diagnosed from the log. */
 function registrationSummary(input: Record<string, unknown> | undefined) {
   const list = (value: unknown) => Array.isArray(value) ? value.slice(0, 10).map(item => String(item).slice(0, 60)) : value === undefined ? undefined : typeof value;
@@ -358,7 +381,7 @@ export class RoomsMcpOAuth {
         if (!this.isResource(q.get('resource') ?? undefined)) throw new Refusal('invalid_request', 'resource_mismatch');
         const client = (await this.database.query<{ redirects: string[] }>('SELECT redirects FROM rooms_mcp_clients WHERE id=$1', [q.get('client_id')])).rows[0];
         if (!client) throw new Refusal('invalid_request', 'client_unknown');
-        if (!client.redirects.includes(q.get('redirect_uri') ?? '')) throw new Refusal('invalid_request', 'redirect_uri_unregistered');
+        if (!redirectRegistered(client.redirects, q.get('redirect_uri') ?? '')) throw new Refusal('invalid_request', 'redirect_uri_unregistered');
         const scopes = [...new Set((q.get('scope') ?? MCP_READ).split(' '))];
         if (!scopes.length || scopes.some(scope => ![MCP_READ, MCP_WRITE].includes(scope))) throw new Refusal('invalid_scope', 'scope_invalid');
         const id = opaque(), browser = opaque();
