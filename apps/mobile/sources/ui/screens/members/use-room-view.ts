@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { isRoomView, type Identity } from '@beeline/buzz-client';
+import { isRoomView, type RoomView, type Identity } from '@beeline/buzz-client';
 import { getEffectiveRelayUrl, loadBuzzIdentity } from '@/auth/buzz-identity-storage';
 import { appReadErrorCopy } from '@/buzz/app-error-copy';
 import { mobileSurfaceCache, surfaceAddress } from '@/buzz/surface-storage';
@@ -32,6 +32,10 @@ export function useRoomView(roomId: string | undefined) {
     const room = useSurfaceSnapshot(address, isRoomView);
     const addressRef = useRef(address);
     addressRef.current = address;
+    useEffect(() => {
+        addressRef.current = address;
+        return () => { addressRef.current = null; };
+    }, [address]);
 
     const refresh = useCallback(async () => {
         const current = addressRef.current;
@@ -44,6 +48,14 @@ export function useRoomView(roomId: string | undefined) {
             setError(appReadErrorCopy(reason));
         }
     }, [viewer, roomId]);
+
+    const accept = useCallback((view: RoomView) => {
+        if (!address || addressRef.current !== address || view.room.id !== roomId) return;
+        // A live response received during this write already owns the surface.
+        if (mobileSurfaceCache.peek(address, isRoomView) !== room) return;
+        void mobileSurfaceCache.write(address, view, isRoomView);
+        setError(null);
+    }, [address, roomId, room]);
 
     useEffect(() => {
         if (!address || !roomId) return;
@@ -62,5 +74,5 @@ export function useRoomView(roomId: string | undefined) {
         return () => { cancelled = true; stop?.(); };
     }, [address, roomId, refresh]);
 
-    return { room, viewerPubkey: viewer?.identity.publicKey, error, refresh };
+    return { room, viewerPubkey: viewer?.identity.publicKey, error, refresh, accept };
 }

@@ -203,11 +203,12 @@ const fixture = monolithFixture();
 
 
   it('adds several current Workspace members with one phone write', async () => {
-    const memberIds = ['batch-room-0', 'batch-room-1'].map((name) =>
+    const memberIds = Array.from({ length: 10 }, (_, i) => `batch-room-${i}`).map((name) =>
       createHash('sha256').update(`github:${name}`).digest('hex'),
     );
     for (const [index, memberId] of memberIds.entries()) {
-      await fixture.phoneToken(`batch-room-${index}`);
+      await fixture.database.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'agent',$2,$2)`, [memberId, `batch-room-${index}`]);
+      await fixture.database.query('INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)', [memberId, HUMAN]);
       await fixture.operation('addWorkspaceMember', { workspaceId: WORKSPACE, memberId, role: 'member' });
     }
     const room = (await (
@@ -217,8 +218,17 @@ const fixture = monolithFixture();
         visibility: 'invite-only',
       })
     ).json()) as { id: string };
+    const result = await (await fixture.operation('addRoomMember', {
+      roomId: room.id, memberIds, includeRoomView: true,
+    })).json() as { joined: boolean; joinedIds: string[]; roomView: RoomView };
+    expect(result).toMatchObject({ joined: true, joinedIds: memberIds, roomView: { room: { id: room.id } } });
+    expect(result.roomView.members.filter(member => member.identity.kind === 'agent').map(member => member.identity.pubkey)).toEqual(expect.arrayContaining(memberIds));
+    expect((await fixture.database.query<{ count: number }>(
+      `SELECT count(*)::int count FROM workspace_join_notifications WHERE room_id=$1 AND joining_identity_id=ANY($2::text[])`,
+      [room.id, memberIds],
+    )).rows[0]?.count).toBe(memberIds.length);
     expect(await (await fixture.operation('addRoomMember', { roomId: room.id, memberIds })).json())
-      .toEqual({ joined: true, joinedIds: memberIds });
+      .toEqual({ joined: false, joinedIds: [] });
     expect((await fixture.database.query<{ identity_id: string }>(
       `SELECT identity_id FROM memberships WHERE room_id=$1 AND identity_id=ANY($2::text[])
          AND removed_at IS NULL ORDER BY identity_id`,

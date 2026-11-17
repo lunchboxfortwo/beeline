@@ -1,3 +1,4 @@
+import type { RoomView } from '@beeline/api-contract/phone';
 import React, { useState } from 'react';
 import { Card, Checkbox, ListItem, Separator, YStack } from 'tamagui';
 import { Check } from 'lucide-react-native';
@@ -13,12 +14,12 @@ export function addLabel(count: number): string {
 
 /**
  * Agents + in a chat: just the workspace agents not in it yet, ticked and
- * added with one primary action (today's `addRoomMember`). No options
+ * added with one `addRoomMember` request. The sheet dismisses on submission. No options
  * (build spec decision 7); outside agents are added from People.
  */
 export function AddChatAgentsSheet({ open, close, roomId, roomTag, workspaceName, candidates, onAdded }: {
     open: boolean; close: () => void; roomId: string; roomTag: string; workspaceName: string;
-    candidates: readonly PeopleRow[]; onAdded: () => void;
+    candidates: readonly PeopleRow[]; onAdded: (roomView?: RoomView) => void;
 }) {
     const [picked, setPicked] = useState<readonly string[]>([]);
     const [adding, setAdding] = useState(false);
@@ -31,8 +32,8 @@ export function AddChatAgentsSheet({ open, close, roomId, roomTag, workspaceName
         setAdding(true);
         setError(null);
         try {
-            await monolithPhoneOperation('addRoomMember', { roomId, memberIds: chosen });
-            onAdded();
+            const result = await monolithPhoneOperation('addRoomMember', { roomId, memberIds: chosen, includeRoomView: true });
+            onAdded(result.roomView);
             shut();
         } catch (reason) {
             setError(appErrorCopy(reason, 'Could not add chat members.'));
@@ -41,8 +42,12 @@ export function AddChatAgentsSheet({ open, close, roomId, roomTag, workspaceName
         }
     };
 
+    // Remove the modal and its scrim on this render, without waiting for the
+    // sheet's dismissal animation or the server. Keep the selection for refusal.
+    if (adding) return null;
+
     return (
-        <SheetFrame open={open} close={shut} title="Add agents" testID="sheet-add-agent-member">
+        <SheetFrame open={open} close={shut} title="Add agents" testID="sheet-add-agent-member" scrollable>
             {candidates.length ? (
                 <YStack gap="3">
                     <Copy small quiet>{`Agents in ${workspaceName} that are not in ${roomTag} yet.`}</Copy>

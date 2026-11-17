@@ -135,116 +135,167 @@ export async function joinRooms(
 
     if (!input.workspaceJoined && !roomIds.length) return { roomIds };
 
-    const context = (
-      await transaction.query<{
-        identity_name: string;
-        identity_handle: string | null;
-        kind: 'human' | 'agent';
-        workspace_name: string;
-        room_name: string | null;
-        inviter_id: string | null;
-        inviter_kind: 'human' | 'agent' | null;
-        inviter_name: string | null;
-        inviter_handle: string | null;
-      }>(
-        `SELECT identity.name identity_name,beeline_workspace_handle(identity.id,workspace.id) identity_handle,identity.kind,
-                workspace.name workspace_name,
-                (SELECT name FROM rooms WHERE id=$3) room_name,
-                inviter.id inviter_id,inviter.kind inviter_kind,inviter.name inviter_name,
-                inviter.handle inviter_handle
-         FROM identities identity CROSS JOIN workspaces workspace
-         LEFT JOIN identities inviter ON inviter.id=$4
-         WHERE identity.id=$1 AND workspace.id=$2`,
-        [input.identityId, input.workspaceId, roomIds[0] ?? null, input.invitedById ?? null],
-      )
-    ).rows[0];
-    if (!context) throw new Error('join context not found');
-    const joiningMention = systemIdentityMention({
+    return announceRoomJoin(transaction, input, roomIds);
+  });
+}
+
+type JoinContext = {
+  identity_name: string;
+  identity_handle: string | null;
+  kind: 'human' | 'agent';
+  workspace_name: string;
+  room_name: string | null;
+  inviter_id: string | null;
+  inviter_kind: 'human' | 'agent' | null;
+  inviter_name: string | null;
+  inviter_handle: string | null;
+  identity_id: string;
+};
+type JoinNotification = { id: string; workspace_id: string; room_id: string | null; joining_identity_id: string; text: string };
+
+async function joinContexts(transaction: SqlDatabase, workspaceId: string, identityIds: readonly string[], roomId: string | null, invitedById?: string) {
+  return (await transaction.query<JoinContext>(
+    `SELECT identity.id identity_id,identity.name identity_name,beeline_workspace_handle(identity.id,workspace.id) identity_handle,identity.kind,
+            workspace.name workspace_name,(SELECT name FROM rooms WHERE id=$3) room_name,
+            inviter.id inviter_id,inviter.kind inviter_kind,inviter.name inviter_name,inviter.handle inviter_handle
+     FROM identities identity CROSS JOIN workspaces workspace
+     LEFT JOIN identities inviter ON inviter.id=$4
+     WHERE identity.id=ANY($1::text[]) AND workspace.id=$2`,
+    [identityIds, workspaceId, roomId, invitedById ?? null],
+  )).rows;
+}
+
+async function writeJoinNotifications(transaction: SqlDatabase, notifications: readonly JoinNotification[]) {
+  if (!notifications.length) return;
+  await transaction.query(
+    `WITH notices AS (
+       INSERT INTO workspace_join_notifications(id,workspace_id,room_id,joining_identity_id,text)
+       SELECT id,workspace_id,room_id,joining_identity_id,text
+       FROM jsonb_to_recordset($1::jsonb) AS notice(id text,workspace_id uuid,room_id uuid,joining_identity_id text,text text)
+       RETURNING id,workspace_id,joining_identity_id
+     ) INSERT INTO workspace_join_notification_devices(notification_id,device_token)
+     SELECT notices.id,device.token FROM notices
+     JOIN memberships member ON member.workspace_id=notices.workspace_id AND member.room_id IS NULL
+       AND member.removed_at IS NULL AND member.identity_id<>notices.joining_identity_id
+     JOIN identities identity ON identity.id=member.identity_id AND identity.kind='human'
+     JOIN push_devices device ON device.identity_id=member.identity_id
+     ON CONFLICT DO NOTHING`, [JSON.stringify(notifications)],
+  );
+}
+
+async function announceRoomJoin(transaction: SqlDatabase, input: JoinRoomsInput, roomIds: string[], prepared?: {
+  context: JoinContext; notifications: JoinNotification[];
+}): Promise<JoinRoomsResult> {
+  const context = prepared?.context ?? (await joinContexts(transaction, input.workspaceId, [input.identityId], roomIds[0] ?? null, input.invitedById))[0];
+  if (!context) throw new Error('join context not found');
+  const joiningMention = systemIdentityMention({
+    id: input.identityId,
+    kind: context.kind,
+    name: context.identity_name,
+    handle: context.identity_handle,
+  });
+
+  const line = {
+    subject: {
+      kind: context.kind === 'agent' ? ('agent' as const) : ('person' as const),
       id: input.identityId,
-      kind: context.kind,
-      name: context.identity_name,
-      handle: context.identity_handle,
+      name: joiningMention,
+    },
+    verb: systemMessage("membership-join.joined"),
+    ...(context.inviter_id &&
+    context.inviter_kind &&
+    context.inviter_name &&
+    context.inviter_handle
+      ? {
+          attribution: {
+            verb: systemMessage("membership-join.invited-by"),
+            actor: {
+              kind: context.inviter_kind === 'agent' ? ('agent' as const) : ('person' as const),
+              id: context.inviter_id,
+              name: systemIdentityMention({
+                id: context.inviter_id,
+                kind: context.inviter_kind,
+                name: context.inviter_name,
+                handle: context.inviter_handle,
+              }),
+            },
+          },
+        }
+      : {}),
+    kind: 'joined' as const,
+    cardType: 'member-joined',
+    card: { identityId: input.identityId },
+  };
+
+  // Auto-joining public Rooms is only a membership projection of the
+  // Workspace arrival. In an ordinary Room that arrival stays silent: it is
+  // retained in memberships without a System DM. System events are
+  // SUBSCRIBABLE per Room, so the
+  // projection emits its `joined` event exactly where someone subscribed:
+  // any agent member of a projected Room that subscribed to `joined` wakes
+  // on it, in any Workspace, with no workspace special case — that is how a
+  // greeter hears about every newcomer. An explicit Room join always belongs
+  // in that Room and keeps its subscribed `joined` event.
+  const announced =
+    input.rooms.type !== 'all-live-top-level'
+      ? roomIds
+      : await subscriberRooms(transaction, roomIds, 'joined');
+  for (const roomId of announced)
+    await systemLine(transaction, {
+      roomId,
+      ...line,
     });
 
-    const line = {
-      subject: {
-        kind: context.kind === 'agent' ? ('agent' as const) : ('person' as const),
-        id: input.identityId,
-        name: joiningMention,
-      },
-      verb: systemMessage("membership-join.joined"),
-      ...(context.inviter_id &&
-      context.inviter_kind &&
-      context.inviter_name &&
-      context.inviter_handle
-        ? {
-            attribution: {
-              verb: systemMessage("membership-join.invited-by"),
-              actor: {
-                kind: context.inviter_kind === 'agent' ? ('agent' as const) : ('person' as const),
-                id: context.inviter_id,
-                name: systemIdentityMention({
-                  id: context.inviter_id,
-                  kind: context.inviter_kind,
-                  name: context.inviter_name,
-                  handle: context.inviter_handle,
-                }),
-              },
-            },
-          }
-        : {}),
-      kind: 'joined' as const,
-      cardType: 'member-joined',
-      card: { identityId: input.identityId },
-    };
+  // Workspace arrivals are retained in memberships without a broadcast push.
+  if (input.workspaceJoined) return { roomIds };
 
-    // Auto-joining public Rooms is only a membership projection of the
-    // Workspace arrival. In an ordinary Room that arrival stays silent: it is
-    // retained in memberships without a System DM. System events are
-    // SUBSCRIBABLE per Room, so the
-    // projection emits its `joined` event exactly where someone subscribed:
-    // any agent member of a projected Room that subscribed to `joined` wakes
-    // on it, in any Workspace, with no workspace special case — that is how a
-    // greeter hears about every newcomer. An explicit Room join always belongs
-    // in that Room and keeps its subscribed `joined` event.
-    const announced =
-      input.rooms.type !== 'all-live-top-level'
-        ? roomIds
-        : await subscriberRooms(transaction, roomIds, 'joined');
-    for (const roomId of announced)
-      await systemLine(transaction, {
-        roomId,
-        ...line,
-      });
+  const notificationId = `workspace-join:${randomUUID()}`;
+  const notification = {
+    id: notificationId, workspace_id: input.workspaceId, room_id: roomIds[0] ?? null,
+    joining_identity_id: input.identityId,
+    text: `${joiningMention} joined ${context.room_name}`,
+  };
+  if (prepared) prepared.notifications.push(notification);
+  else await writeJoinNotifications(transaction, [notification]);
+  return { roomIds, notificationId };
+}
 
-    // Workspace arrivals are retained in memberships without a broadcast push.
-    if (input.workspaceJoined) return { roomIds };
-
-    const notificationId = `workspace-join:${randomUUID()}`;
-    await transaction.query(
-      `INSERT INTO workspace_join_notifications(
-         id,workspace_id,room_id,joining_identity_id,text
-       ) VALUES($1,$2,$3,$4,$5)`,
-      [
-        notificationId,
-        input.workspaceId,
-        roomIds[0] ?? null,
-        input.identityId,
-        `${joiningMention} joined ${input.workspaceJoined ? context.workspace_name : context.room_name}`,
-      ],
+/** Add a selection in one membership statement, retaining each join's events and push. */
+export async function joinRoomMembers(database: SqlDatabase, input: {
+  workspaceId: string; roomId: string; identityIds: readonly string[]; invitedById: string;
+}): Promise<string[]> {
+  return database.transaction(async (transaction) => {
+    await transaction.query('SELECT id FROM workspaces WHERE id=$1 FOR UPDATE', [input.workspaceId]);
+    const joined = await transaction.query<{ identity_id: string }>(
+      `INSERT INTO memberships(workspace_id,room_id,identity_id,role,invited_by)
+       SELECT room.workspace_id,room.id,member.identity_id,member.role,$4
+       FROM rooms room JOIN memberships member ON member.workspace_id=room.workspace_id
+         AND member.room_id IS NULL AND member.removed_at IS NULL
+       WHERE room.id=$2 AND room.workspace_id=$1 AND room.parent_id IS NULL
+         AND room.direct_participants IS NULL AND room.archived_at IS NULL
+         AND member.identity_id=ANY($3::text[])
+       ON CONFLICT (room_id,identity_id) WHERE room_id IS NOT NULL
+       DO UPDATE SET role=EXCLUDED.role,removed_at=NULL,invited_by=EXCLUDED.invited_by
+         WHERE memberships.removed_at IS NOT NULL
+       RETURNING identity_id`,
+      [input.workspaceId, input.roomId, input.identityIds, input.invitedById],
     );
-    await transaction.query(
-      `INSERT INTO workspace_join_notification_devices(notification_id,device_token)
-       SELECT $1,device.token
-       FROM memberships member
-       JOIN identities identity ON identity.id=member.identity_id AND identity.kind='human'
-       JOIN push_devices device ON device.identity_id=member.identity_id
-       WHERE member.workspace_id=$2 AND member.room_id IS NULL
-         AND member.removed_at IS NULL AND member.identity_id<>$3
-       ON CONFLICT DO NOTHING`,
-      [notificationId, input.workspaceId, input.identityId],
-    );
-    return { roomIds, notificationId };
+    const changed = new Set(joined.rows.map(row => row.identity_id));
+    const joinedIds = input.identityIds.filter(id => changed.has(id));
+    if (!joinedIds.length) return joinedIds;
+    const contexts = new Map((await joinContexts(transaction, input.workspaceId, joinedIds, input.roomId, input.invitedById))
+      .map(context => [context.identity_id, context]));
+    const notifications: JoinNotification[] = [];
+    for (const identityId of joinedIds) {
+      const context = contexts.get(identityId);
+      if (!context) throw new Error('join context not found');
+      await announceRoomJoin(transaction, {
+        workspaceId: input.workspaceId, identityId, invitedById: input.invitedById,
+        rooms: { type: 'rooms', roomIds: [input.roomId] },
+      }, [input.roomId], { context, notifications });
+    }
+    await writeJoinNotifications(transaction, notifications);
+    return joinedIds;
   });
 }
 

@@ -13,7 +13,7 @@ import { useRoomView } from './use-room-view';
  * only while open: it reads the chat and its workspace roster like Members.
  */
 export function ChatAddSheet({ roomId, sheet, close }: { roomId: string; sheet: 'people' | 'agents'; close: () => void }) {
-    const { room, viewerPubkey, refresh } = useRoomView(roomId);
+    const { room, viewerPubkey, refresh, accept } = useRoomView(roomId);
     const workspaceId = room?.room.workspaceId;
     const roster = useWorkspaceRoster(workspaceId);
     const workspaceName = roster.surface?.workspace.name ?? '';
@@ -27,7 +27,7 @@ export function ChatAddSheet({ roomId, sheet, close }: { roomId: string; sheet: 
         <InvitePeopleSheet open close={close} workspaceId={workspaceId} workspaceName={workspaceName} roomId={roomId} roomTag={tag} />
     ) : (
         <AddChatAgentsSheet open close={close} roomId={roomId} roomTag={tag} workspaceName={workspaceName}
-            candidates={candidates} onAdded={() => void refresh()} />
+            candidates={candidates} onAdded={(view) => { if (view) accept(view); else void refresh(); }} />
     );
 }
 

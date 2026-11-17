@@ -20,12 +20,13 @@ const panel = vi.hoisted(() => ({ openPlace: vi.fn() }));
 vi.mock('@/ui/shell/panel', () => panel);
 vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: vi.fn() }));
 vi.mock('@/ui/screens/people/InvitePeopleSheet', () => ({ InvitePeopleSheet: (props: Record<string, unknown>) => React.createElement('InvitePeopleSheet', props) }));
-const data = vi.hoisted(() => ({ room: null as any, roster: null as any, records: new Map<string, any>() }));
-vi.mock('./use-room-view', () => ({ useRoomView: () => ({ room: data.room, viewerPubkey: 'a'.repeat(64), error: null, refresh: vi.fn() }) }));
+const data = vi.hoisted(() => ({ room: null as any, roster: null as any, records: new Map<string, any>(), accept: vi.fn(), refresh: vi.fn() }));
+vi.mock('./use-room-view', () => ({ useRoomView: () => ({ room: data.room, viewerPubkey: 'a'.repeat(64), error: null, refresh: data.refresh, accept: data.accept }) }));
 vi.mock('@/ui/screens/people/use-workspace-roster', () => ({ useWorkspaceRoster: () => data.roster }));
 vi.mock('@/buzz/workspace-records', () => ({ workspaceRecord: (_scope: unknown, id: string) => data.records.get(id) }));
 
 import { MembersScreen } from './MembersScreen';
+import { AddChatAgentsSheet } from './AddChatAgentsSheet';
 
 const VIEWER = 'a'.repeat(64);
 const ADMIN = 'b'.repeat(64);
@@ -43,6 +44,8 @@ const flat = (tree: any) => text(tree).flat(3).filter((value: unknown) => typeof
 beforeEach(() => {
     panel.openPlace.mockClear();
     data.records.clear();
+    data.accept.mockClear();
+    data.refresh.mockClear();
     data.room = {
         room: { id: ROOM, workspaceId: WORKSPACE, name: 'beeline', visibility: 'public', reviewerAgentId: JIMMY },
         members: [person(VIEWER, 'lunchboxfortwo', 'owner'), person(ADMIN, 'bananaman614305', 'admin'), agent(ALAN, 'alan'), agent(JIMMY, 'jimmy')],
@@ -70,6 +73,14 @@ describe('chat Members', () => {
         expect(all).toContain('Reviewer');
         expect(all).toContain('8% of limit left');
         expect(tree.root.findAll((node: any) => node.type === 'Button' && ['add-people', 'add-agents'].includes(node.props.testID))).toHaveLength(2);
+    });
+
+    it('accepts the committed Room answer without a follow-up read', () => {
+        let tree: any;
+        act(() => { tree = create(<MembersScreen roomId={ROOM} close={vi.fn()} />); });
+        act(() => tree.root.findByType(AddChatAgentsSheet).props.onAdded(data.room));
+        expect(data.accept).toHaveBeenCalledWith(data.room);
+        expect(data.refresh).not.toHaveBeenCalled();
     });
 
     it('opens profiles from rows, not for the viewer', () => {

@@ -21,7 +21,7 @@ import { useRoomView } from './use-room-view';
 export function MembersScreen({ roomId, close }: { roomId: string; close: () => void }) {
     useLatencyRouteFrame('/beeline/members');
     const desktop = useIsDesktop();
-    const { room, viewerPubkey, error, refresh } = useRoomView(roomId);
+    const { room, viewerPubkey, error, refresh, accept } = useRoomView(roomId);
     const workspaceId = room?.room.workspaceId;
     const roster = useWorkspaceRoster(workspaceId);
     const [sheet, setSheet] = useState<'people' | 'agents' | null>(null);
@@ -69,7 +69,7 @@ export function MembersScreen({ roomId, close }: { roomId: string; close: () => 
                     <InvitePeopleSheet open={sheet === 'people'} close={() => setSheet(null)} workspaceId={workspaceId}
                         workspaceName={workspaceName} roomId={roomId} roomTag={tag} />
                     <AddChatAgentsSheet open={sheet === 'agents'} close={() => setSheet(null)} roomId={roomId} roomTag={tag}
-                        workspaceName={workspaceName} candidates={candidates} onAdded={() => void refresh()} />
+                        workspaceName={workspaceName} candidates={candidates} onAdded={(view) => { if (view) accept(view); else void refresh(); }} />
                 </>
             ) : null}
         </Screen>

@@ -6,7 +6,7 @@ import { requireRoomSlug, reserveRoomName } from '../room-names.js';
 import { ROOM_VIEW_MEMBER_LIMIT } from '@beeline/api-contract/phone';
 import { type SqlDatabase } from '../database.js';
 import { createCornerFacts } from '../corner-lifecycle.js';
-import { joinRoomCreator, removeRoomMembership, joinRooms, joinWorkspaceMembersToPublicRoom } from '../membership-join.js';
+import { joinRoomCreator, removeRoomMembership, joinRooms, joinRoomMembers, joinWorkspaceMembersToPublicRoom } from '../membership-join.js';
 import { identitySubject, systemLine } from '../system-line.js';
 import { writeCornerTitle } from '../corner-title.js';
 import type { PhoneContext } from './context.js';
@@ -350,7 +350,7 @@ import { normalizeHumanCornerTitle, UUID_PATTERN } from './values.js';
     if (!memberIds.length || memberIds.length > ROOM_VIEW_MEMBER_LIMIT)
       throw new Error('invalid Room member list');
     const room = await phoneRequireTopLevelRoom(ctx, input.roomId);
-    return ctx.database.transaction(async (database) => {
+    const result = await ctx.database.transaction(async (database) => {
       await database.query('SELECT id FROM workspaces WHERE id=$1 FOR UPDATE', [room.workspace_id]);
       const current = (await database.query<{visibility:string;archived_at:Date|null}>(
         'SELECT visibility,archived_at FROM rooms WHERE id=$1 FOR UPDATE', [input.roomId])).rows[0];
@@ -367,18 +367,13 @@ import { normalizeHumanCornerTitle, UUID_PATTERN } from './values.js';
     );
       if (workspaceMembers.rowCount !== memberIds.length)
         throw new Error('workspace membership required');
-      const joinedIds: string[] = [];
-      for (const memberId of memberIds) {
-        const result = await joinRooms(database, {
-          workspaceId: room.workspace_id,
-          identityId: memberId,
-          invitedById: viewerId,
-          rooms: { type: 'rooms', roomIds: [input.roomId] },
-        });
-        if (result.roomIds.length) joinedIds.push(memberId);
-      }
+      const joinedIds = await joinRoomMembers(database, {
+        workspaceId: room.workspace_id, roomId: input.roomId, identityIds: memberIds, invitedById: viewerId,
+      });
       return { joined: joinedIds.length > 0, ...(input.memberIds ? { joinedIds } : {}) };
     });
+    const roomView = input.includeRoomView ? await ctx.readRoom(input.roomId, viewerId) : null;
+    return { ...result, ...(roomView ? { roomView } : {}) };
   }
 
   export async function phoneRemoveRoomMember(ctx: PhoneContext, input: Input<'removeRoomMember'>, viewerId: string) {

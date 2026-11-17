@@ -663,7 +663,7 @@
       "apps/auth/src"
     ],
     "bootstrapTotal": 1647,
-    "unusedTotal": 172,
+    "unusedTotal": 171,
     "tables": {
       "agent_avatars": {
         "module": "Agent types",

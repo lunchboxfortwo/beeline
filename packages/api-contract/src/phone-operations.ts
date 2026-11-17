@@ -28,6 +28,7 @@ import type {
   InviteView,
   MessageBookmarkView,
   MessageReactionEmoji,
+  RoomView,
   RoomViewMessage,
   RoomViewPendingAgentCommand,
   NeedsYouItemView,
@@ -195,7 +196,7 @@ export type PhoneOperationMap = PhoneRouteOperationMap & {
   leaveRoom: { input: RoomInput & { readonly confirmDelete?: true }; output: void };
   closeChat: { input: RoomInput; output: void };
   reopenChat: { input: RoomInput; output: void };
-  addRoomMember: { input: AddRoomMembersInput; output: MembershipResult & { readonly joinedIds?: readonly string[] } };
+  addRoomMember: { input: AddRoomMembersInput; output: MembershipResult & { readonly joinedIds?: readonly string[]; readonly roomView?: RoomView } };
   removeRoomMember: { input: RoomMemberInput; output: void };
   resolveDirectMessage: { input: ResolveDirectMessageInput; output: DirectMessageResult };
   createInvite: { input: WorkspaceInput; output: InviteTokenResult };
@@ -402,7 +403,7 @@ export type RoomWorkflowListResult = {
 export type DispatchRoomWorkflowInput = RoomInput & { readonly workflowName: string };
 export type WorkspaceAgentInput = WorkspaceInput & { readonly agentId: string };
 export type RoomMemberInput = RoomInput & { readonly memberId: string };
-export type AddRoomMembersInput = RoomInput & (
+export type AddRoomMembersInput = RoomInput & { readonly includeRoomView?: boolean } & (
   | { readonly memberId: string; readonly memberIds?: never }
   | { readonly memberIds: readonly string[]; readonly memberId?: never }
 );

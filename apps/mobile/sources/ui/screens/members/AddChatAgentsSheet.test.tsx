@@ -37,7 +37,7 @@ function render(candidates: PeopleRow[], onAdded = vi.fn(), close = vi.fn()) {
     return tree;
 }
 
-beforeEach(() => operation.mockReset());
+beforeEach(() => { operation.mockReset(); });
 
 describe('Agents + in a chat', () => {
     it('lists only the candidates, ticks them, and adds them in one addRoomMember', async () => {
@@ -52,9 +52,57 @@ describe('Agents + in a chat', () => {
         await act(async () => { tree.root.find((node: any) => node.props.testID === `pick-${'b'.repeat(64)}` && node.type === 'ListItem').props.onPress(); });
         expect(primary(tree).props['aria-label']).toBe('Add 2 agents');
         await act(async () => { await primary(tree).props.onPress(); });
-        expect(operation).toHaveBeenCalledWith('addRoomMember', { roomId: ROOM, memberIds: ['a'.repeat(64), 'b'.repeat(64)] });
+        expect(operation).toHaveBeenCalledTimes(1);
+        expect(operation).toHaveBeenCalledWith('addRoomMember', { roomId: ROOM, memberIds: ['a'.repeat(64), 'b'.repeat(64)], includeRoomView: true });
         expect(onAdded).toHaveBeenCalledTimes(1);
         expect(close).toHaveBeenCalledTimes(1);
+    });
+
+    it('dismisses immediately while the single write is pending, then uses its Room answer', async () => {
+        let finish!: (result: unknown) => void;
+        operation.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+        const close = vi.fn();
+        const onAdded = vi.fn();
+        const tree = render([row('a'.repeat(64), 'beebee')], onAdded, close);
+        act(() => tree.root.findByType('ListItem').props.onPress());
+        const started = performance.now();
+        act(() => primary(tree).props.onPress());
+        expect(tree.root.findAllByType('Sheet')).toHaveLength(0);
+        expect(close).not.toHaveBeenCalled();
+        const interactionMs = performance.now() - started;
+        expect(interactionMs).toBeLessThan(150);
+        expect(onAdded).not.toHaveBeenCalled();
+        expect(operation).toHaveBeenCalledTimes(1);
+        const roomView = { room: { id: ROOM }, members: [] };
+        await act(async () => finish({ joined: true, roomView }));
+        expect(onAdded).toHaveBeenCalledWith(roomView);
+        expect(close).toHaveBeenCalledTimes(1);
+    });
+
+    it('restores the selection and existing error after a refused add', async () => {
+        let refuse!: (reason: Error) => void;
+        operation.mockImplementation(() => new Promise((_resolve, reject) => { refuse = reject; }));
+        const close = vi.fn();
+        const onAdded = vi.fn();
+        const tree = render([row('a'.repeat(64), 'beebee')], onAdded, close);
+        act(() => tree.root.findByType('ListItem').props.onPress());
+        act(() => primary(tree).props.onPress());
+        expect(tree.root.findAllByType('Sheet')).toHaveLength(0);
+        await act(async () => refuse(new Error('workspace membership required')));
+        expect(tree.root.findByType('Sheet').props.open).toBe(true);
+        expect(tree.root.findByType('ListItem').props['aria-checked']).toBe(true);
+        expect(text(tree)).toContain('workspace membership required');
+        expect(onAdded).not.toHaveBeenCalled();
+        expect(close).not.toHaveBeenCalled();
+    });
+
+    it('puts a long candidate list inside the bounded Astryx sheet scroll view', () => {
+        const tree = render(Array.from({ length: 60 }, (_, i) => row(String(i), `agent-${i}`)));
+        const scroll = tree.root.findByType('Sheet.ScrollView');
+        expect(scroll.props.flexShrink).toBe(1);
+        expect(scroll.props.minHeight).toBe(0);
+        expect(scroll.props.nestedScrollEnabled).toBe(true);
+        expect(scroll.findAllByType('ListItem')).toHaveLength(60);
     });
 
     it('says so and points to People when every agent is already in', () => {
