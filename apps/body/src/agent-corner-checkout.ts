@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { constants, existsSync } from 'node:fs';
-import { copyFile, cp, link, lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { copyFile, cp, link, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { CRASH_SAFE_CLONE_ARGS, fetchRepositoryCache } from './repository-cache-repair.js';
@@ -160,11 +160,47 @@ export async function materializeAgentCornerCheckout(input: {
   await git([`--git-dir=${paths.gitCommonDir}`, 'config', '--replace-all', 'remote.origin.fetch', '+refs/heads/*:refs/remotes/origin/*']);
   if (!creating && input.targetBranch) await fetchRepositoryCache({ gitDir: paths.gitCommonDir, label,
     args: ['origin', `+refs/heads/${input.targetBranch}:refs/remotes/origin/${input.targetBranch}`], env: input.env });
-  if (!existsSync(resolve(paths.path, '.git'))) {
-    await mkdir(dirname(paths.path), { recursive: true });
-    await git([`--git-dir=${paths.gitCommonDir}`, 'worktree', 'add', paths.path, input.branch]);
-  }
   await git([`--git-dir=${paths.gitCommonDir}`, 'config', 'extensions.worktreeConfig', 'true']);
+  const gitFile = resolve(paths.path, '.git');
+  const attached = existsSync(gitFile) && await git(['-C', paths.path, 'rev-parse', '--absolute-git-dir'])
+    .then(() => true, () => false);
+  if (!attached) {
+    await mkdir(paths.path, { recursive: true });
+    const marker = await lstat(gitFile).catch(() => undefined);
+    if (marker && !marker.isFile()) throw new Error('refusing invalid agent checkout Git marker');
+    const hasFiles = (await readdir(paths.path)).some(entry => entry !== '.git');
+    // A lost .git file need not lose the index (including staged work). Reuse
+    // only the registration that names this exact checkout, never another one.
+    const registrations = resolve(paths.gitCommonDir, 'worktrees');
+    let registration: string | undefined;
+    for (const entry of await readdir(registrations).catch(() => [] as string[])) {
+      const candidate = resolve(registrations, entry);
+      const target = await readFile(resolve(candidate, 'gitdir'), 'utf8').catch(() => '');
+      if (resolve(target.trim()) === gitFile) {
+        registration = candidate;
+        break;
+      }
+    }
+    if (registration) {
+      await writeFile(gitFile, `gitdir: ${registration}\n`);
+      await git([`--git-dir=${paths.gitCommonDir}`, 'worktree', 'repair', paths.path]);
+    } else {
+      // Register at an empty temporary path, then move only the Git marker.
+      // Bound checkout folders keep their inode and surviving files in place.
+      const temporary = await mkdtemp(resolve(dirname(paths.path), '.reattach-'));
+      try {
+        const worktree = resolve(temporary, 'worktree');
+        await git([`--git-dir=${paths.gitCommonDir}`, 'worktree', 'add', '--no-checkout', worktree, input.branch]);
+        await rename(resolve(worktree, '.git'), gitFile);
+        await git([`--git-dir=${paths.gitCommonDir}`, 'worktree', 'repair', paths.path]);
+        await git(['-C', paths.path, 'config', '--worktree', 'core.bare', 'false']);
+        await git(['-C', paths.path, 'reset', '--mixed', 'HEAD']);
+      } finally { await rm(temporary, { recursive: true, force: true }); }
+    }
+    // An emptied bound folder needs its files back. Never overwrite surviving
+    // files; for a populated folder the existing bytes become local changes.
+    if (!hasFiles) await git(['-C', paths.path, 'checkout-index', '--all']);
+  }
   await git(['-C', paths.path, 'config', '--worktree', 'core.bare', 'false']);
   const source = await readFile(pending, 'utf8').catch(() => undefined);
   if (source) {
