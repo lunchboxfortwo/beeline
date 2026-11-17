@@ -45,7 +45,7 @@ export interface BuzzClient {
   addMember(
     channelId: string,
     targetPubkey: string,
-    role?: 'owner' | 'admin' | 'member' | 'spectator',
+    role?: 'owner' | 'admin' | 'member',
   ): Promise<PublishResult>;
   /** Remove a member (kind:9001). Publish ok is followed by projection checks by callers. */
   removeMember(channelId: string, targetPubkey: string): Promise<PublishResult>;

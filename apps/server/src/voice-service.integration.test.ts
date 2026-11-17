@@ -229,11 +229,11 @@ it('coalesces concurrent runtime claims before their database lease resolves', a
   }
 });
 
-it('refuses a removed member and a spectator, including stale call tokens', async () => {
+it('refuses removed Room and Workspace members, including stale call tokens', async () => {
   await db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [R, SECOND]);
   await expect(service.join(R, SECOND)).rejects.toThrow('access denied');
   await db.query(`UPDATE memberships SET removed_at=NULL WHERE room_id=$1 AND identity_id=$2`, [R, SECOND]);
-  await db.query(`UPDATE memberships SET role='spectator' WHERE room_id IS NULL AND identity_id=$1`, [SECOND]);
+  await db.query(`UPDATE memberships SET removed_at=now() WHERE room_id IS NULL AND identity_id=$1`, [SECOND]);
   await expect(service.join(R, SECOND)).rejects.toThrow('access denied');
 });
 
@@ -296,8 +296,8 @@ it('call-wide-end-3: idle is a no-op in solo calls even while call work is pendi
 
 it('multi-human-silence-1: an old client idle deadline keeps both participants active', async () => {
   const joined = await service.join(R, H);
-  // Earlier access tests deliberately leave SECOND a spectator.
-  await db.query(`UPDATE memberships SET role='owner' WHERE room_id IS NULL AND identity_id=$1`, [SECOND]);
+  // Earlier access tests deliberately remove SECOND from the Workspace.
+  await db.query(`UPDATE memberships SET role='owner',removed_at=NULL WHERE room_id IS NULL AND identity_id=$1`, [SECOND]);
   await service.join(R, SECOND);
   try {
     expect(await service.idle(joined.call.id, H, joined.sessionId)).toEqual({ state: 'ready' });

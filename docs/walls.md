@@ -6,7 +6,7 @@ refusals use `wall(kind, reason)` from `@beeline/api-contract/daemon`.
 `packages/api-contract/src/walls.ts` owns the kinds and error shape.
 `packages/scripts/check-walls.mjs` rejects other refusals, gates, skips, waits and caps
 on that path.
-Production wall constructions: 6.
+Production wall constructions: 7.
 Any additional construction requires lunchboxfortwo's review of a change here.
 
 ## `signed-in` The person must be signed in
@@ -23,7 +23,7 @@ Why: the owner's creator-only or people-allowlist setting decides who may addres
 
 ## `credentials` Each agent's credentials stay its own
 
-Why: sessions, model use and answers must stay bound to their own identity and private state.
+Why: sessions, model use and answers must stay bound to their own identity and private state. The System DM accepts only System-authored posts; people cannot post or reply there. The captain approved restoring this read-only rule on 2026-11-17.
 
 ## `sandbox` The sandbox walls around the agent's session
 

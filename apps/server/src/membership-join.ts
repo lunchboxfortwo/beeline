@@ -493,3 +493,10 @@ export async function retireOrphanRoomMemberships(db: SqlDatabase): Promise<void
   );
   for (const row of orphans.rows) await removeRoomMembership(db, [row.room_id, row.identity_id]);
 }
+
+/** Upgrade every legacy role before installing the current role constraint. */
+export const MEMBERSHIP_ROLE_SCHEMA = `
+ALTER TABLE memberships DROP CONSTRAINT IF EXISTS memberships_role_check;
+UPDATE memberships SET role='member' WHERE role='spectator';
+ALTER TABLE memberships ADD CONSTRAINT memberships_role_check CHECK(role IN ('owner','admin','member'));
+`;

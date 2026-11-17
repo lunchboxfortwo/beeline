@@ -271,7 +271,7 @@ export type ChatListWorkspace = {
   readonly avatar?: string;
   /** Absent when the server omitted it or named a value this bundle does not know. */
   readonly visibility?: 'public' | 'invite-only';
-  readonly role: 'owner' | 'admin' | 'member' | 'spectator';
+  readonly role: 'owner' | 'admin' | 'member';
   readonly updatedAt: number;
 };
 
@@ -517,7 +517,7 @@ export type InviteInviterView = {
   readonly name: string;
   readonly handle?: string;
   readonly face?: string;
-  readonly role?: 'owner' | 'admin' | 'member' | 'spectator';
+  readonly role?: 'owner' | 'admin' | 'member';
 };
 
 

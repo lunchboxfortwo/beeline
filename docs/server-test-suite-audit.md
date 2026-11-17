@@ -94,7 +94,7 @@ This inventory covers every current `apps/server/src/**/*.test.ts` file after th
 | `phone-operation-names.test.ts` | PHONE_OPERATION_NAMES | retained |
 | `phone-read-limit.test.ts` | phone history and outline reads; identity rate limit; history outline cache | retained |
 | `phone-service.agent-connect.test.ts` | pairing claims, seeded agent identity, machine grouping, and Workbench read projection | retained |
-| `phone-service.agent-profile.test.ts` | agent profile recent work; removing a human from the Workspace; enforces strict role authority and spectator writes and lists Workspace-owned agents; related cases | retained |
+| `phone-service.agent-profile.test.ts` | agent profile recent work; removing a human from the Workspace; enforces strict role authority and member writes and lists Workspace-owned agents; related cases | retained |
 | `phone-service.archived-corners.test.ts` | readCorners | retained |
 | `phone-service.message-search.test.ts` | searchMessages | retained |
 | `phone-service.model-change-wake.test.ts` | a model/effort selection change wakes the agent daemon | retained |

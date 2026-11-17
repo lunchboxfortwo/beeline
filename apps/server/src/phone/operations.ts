@@ -27,7 +27,7 @@ import { listRoomWorkflowRuns } from '../workflow-run-views.js';
 import { answerStarPrompt, readStarPrompt } from '../github-star-prompt.js';
 import type { PhoneContext } from './context.js';
 import { Input, Output } from './types.js';
-import { REVIEW_LOCKED_OPERATIONS, SPECTATOR_READ_OPERATIONS } from './operation-names.js';
+import { REVIEW_LOCKED_OPERATIONS } from './operation-names.js';
 import { REVIEW_IDENTITY_MESSAGE, messageId, token, AGENT_OWNER_AUTHORITY_MESSAGE } from './values.js';
 import { phoneReadScheduledWork, phoneListRoomSchedules, phoneDeleteRoomSchedule, phoneListRoomWorkflowRuns, phoneReadWorkflowRun } from './schedules.js';
 import { phoneReadWelcomeCards, phoneCompleteWelcomeCards } from './live-reads.js';
@@ -82,8 +82,6 @@ import { phoneReadConnectionDetail, phoneRevokeConnectionGrants } from './connec
       return undefined as Output<Name>;
     }
     const scope = input as { workspaceId?: string; roomId?: string };
-    // The spectator guard below casts nonempty scope ids to uuid. Wallet
-    // grants need a plain input error before that generic SQL gate runs.
     if (
       name === 'grantWalletDelegation' &&
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
@@ -91,14 +89,6 @@ import { phoneReadConnectionDetail, phoneRevokeConnectionGrants } from './connec
       )
     )
       throw new Error('valid Workspace ID required');
-    if ((scope.workspaceId || scope.roomId) && !SPECTATOR_READ_OPERATIONS.has(name) && name !== 'sendRoomMessage') {
-      const spectator = await ctx.database.query(
-        `SELECT 1 FROM memberships m WHERE m.identity_id=$1 AND m.room_id IS NULL AND m.removed_at IS NULL
-         AND m.role='spectator' AND (m.workspace_id=$2::uuid OR m.workspace_id=(SELECT workspace_id FROM rooms WHERE id=$3::uuid))`,
-        [viewerId, scope.workspaceId ?? null, scope.roomId ?? null],
-      );
-      if (spectator.rowCount) throw new Error('spectator access is read-only (access denied)');
-    }
     switch (name) {
       case 'revealWebhookToken':
       case 'rotateWebhookToken': {

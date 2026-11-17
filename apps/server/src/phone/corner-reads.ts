@@ -77,7 +77,7 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
     const cornerQuery = phoneCornerRowsSql(ctx, roomViewFamilyOrder, archived, before);
     const result = await ctx.database.query<{
       room_row: RoomRow & {
-        workspace_role: 'owner' | 'admin' | 'member' | 'spectator';
+        workspace_role: 'owner' | 'admin' | 'member';
       };
       corner_rows: CornerRow[];
       viewer_row: IdentityRow;

@@ -79,7 +79,7 @@ export class VoiceService {
       `SELECT r.id FROM rooms r JOIN memberships rm ON rm.room_id=COALESCE(r.parent_id,r.id) AND rm.identity_id=$2 AND rm.removed_at IS NULL
        JOIN memberships wm ON wm.workspace_id=r.workspace_id AND wm.room_id IS NULL AND wm.identity_id=$2 AND wm.removed_at IS NULL
        JOIN identities i ON i.id=$2 AND i.kind='human'
-       WHERE r.id=$1 AND r.archived_at IS NULL AND wm.role<>'spectator'
+       WHERE r.id=$1 AND r.archived_at IS NULL
          AND NOT COALESCE(r.direct_participants ? $3,false) FOR SHARE OF r,rm,wm`,
       [roomId, humanId, SYSTEM_IDENTITY_ID])).rows[0];
     if (!row) throw new Error('voice call access denied');

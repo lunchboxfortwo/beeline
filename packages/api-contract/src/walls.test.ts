@@ -1,8 +1,8 @@
 import { expect, it } from 'vitest';
 import { wall, WallRefusal, WALL_KINDS } from './walls.js';
 
-it('names the five walls and preserves the original refusal through propagation', () => {
-  expect(WALL_KINDS).toEqual(['signed-in', 'membership', 'credentials', 'sandbox', 'stop']);
+it('names the six walls and preserves the original refusal through propagation', () => {
+  expect(WALL_KINDS).toEqual(['signed-in', 'membership', 'access', 'credentials', 'sandbox', 'stop']);
   const refusal = wall('credentials', 'another agent owns this credential');
   expect(refusal).toBeInstanceOf(WallRefusal);
   expect(wall('membership', refusal)).toBe(refusal);

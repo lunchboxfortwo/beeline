@@ -522,6 +522,8 @@ export async function queueMessage(database: SqlDatabase, raw: QueuedPost | Queu
     if (!chat || !chat.source_member || order && named && !candidates.length || actor && actor !== SYSTEM_IDENTITY_ID && !audience.some(member => member.id === actor) ||
         recipient && !audience.some(member => member.id === recipient && member.kind === 'agent'))
       refuseMessageMembership(delivery ? 'commander is no longer a member of the return address' : undefined);
+    if (post && input.authorId !== SYSTEM_IDENTITY_ID && chat.direct_participants?.includes(SYSTEM_IDENTITY_ID))
+      throw wall('credentials', 'this is a read-only system thread; only @system may post here (access denied)');
     if (chat.archived || (delivery || origin) && chat.source_archived || 'stopped' in input && input.stopped)
       throw wall('stop', chat.archived || (delivery || origin) && chat.source_archived
         ? {message:'address is archived',status:409} : 'command turn cancelled');

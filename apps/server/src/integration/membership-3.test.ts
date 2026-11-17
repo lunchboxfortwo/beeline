@@ -7,7 +7,7 @@ describe('monolith integration: membership', () => {
 const fixture = monolithFixture();
 
 
-  it("stops a running turn at a Room member's word, but not a spectator's", async () => {
+  it("stops a running turn at a Room member's word, but not a removed member's", async () => {
     const requestId = '9'.repeat(64);
     await fixture.operation('sendRoomMessage', {
       roomId: ROOM,
@@ -24,7 +24,7 @@ const fixture = monolithFixture();
       expect.objectContaining({ requestId, status: 'working', requestedBy: HUMAN }),
     );
 
-    // A Workspace spectator is refused, and the turn keeps running.
+    // A removed Room member is refused, and the turn keeps running.
     const aliceToken = await fixture.phoneToken('alice');
     const aliceId = createHash('sha256').update('github:alice').digest('hex');
     await fixture.operation('addWorkspaceMember', {
@@ -34,8 +34,8 @@ const fixture = monolithFixture();
     });
     await fixture.operation('addRoomMember', { roomId: ROOM, memberId: aliceId });
     await fixture.database.query(
-      `UPDATE memberships SET role='spectator' WHERE workspace_id=$1 AND room_id IS NULL AND identity_id=$2`,
-      [WORKSPACE, aliceId],
+      `UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`,
+      [ROOM, aliceId],
     );
     const refused = await fixture.operation(
       'cancelAgentTurn',

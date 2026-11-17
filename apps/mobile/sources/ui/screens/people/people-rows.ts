@@ -22,7 +22,7 @@ export function handleOf(identity: Pick<RoomViewIdentity, 'handle' | 'pubkey'>):
 }
 
 const ROLE: Record<RoomViewMember['role'], string> = {
-    owner: 'Owner', admin: 'Admin', member: 'Member', spectator: 'Member',
+    owner: 'Owner', admin: 'Admin', member: 'Member',
 };
 
 /**

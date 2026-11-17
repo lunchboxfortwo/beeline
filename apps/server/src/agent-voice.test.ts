@@ -112,14 +112,14 @@ it('bounds synthesized provider previews and returns valid 24kHz WAV data', asyn
   }
 });
 
-it('denies an agent owner who is now a spectator', async () => {
+it('allows an agent owner with an ordinary member role', async () => {
   await db.query(
-    `UPDATE memberships SET role='spectator' WHERE workspace_id=$1 AND room_id IS NULL AND identity_id=$2`,
+    `UPDATE memberships SET role='member' WHERE workspace_id=$1 AND room_id IS NULL AND identity_id=$2`,
     [w, h],
   );
   try {
-    expect((await profiles.catalog(w, a, h)).canChange).toBe(false);
-    await expect(profiles.save(w, a, h, ids[1]!)).rejects.toThrow('owner');
+    expect((await profiles.catalog(w, a, h)).canChange).toBe(true);
+    await expect(profiles.save(w, a, h, ids[1]!)).resolves.toMatchObject({ canChange: true });
   } finally {
     await db.query(
       `UPDATE memberships SET role='admin' WHERE workspace_id=$1 AND room_id IS NULL AND identity_id=$2`,

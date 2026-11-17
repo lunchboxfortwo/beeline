@@ -285,10 +285,10 @@ const scope1 = fixtureScope1();
       const revoked = new WebSocket(`${scope1.origin.replace('http:', 'ws:')}/s/${share.id}/ws?access=${access}`);
       await new Promise<void>((resolve) => { revoked.once('error', () => resolve()); });
       await scope1.database.query(`UPDATE agents SET access_policy='{"type":"everyone"}'::jsonb WHERE agent_id=$1`, [AGENT]);
-      await scope1.database.query(`UPDATE memberships SET role='spectator' WHERE room_id IS NULL AND identity_id=$1`, [OTHER]);
+      await scope1.database.query(`UPDATE memberships SET removed_at=now() WHERE room_id IS NULL AND identity_id=$1`, [OTHER]);
       expect(await computerViewToken(scope1.database, share.id, OTHER)).toBeNull();
     } finally {
-      await scope1.database.query(`UPDATE memberships SET role='member' WHERE room_id IS NULL AND identity_id=$1`, [OTHER]);
+      await scope1.database.query(`UPDATE memberships SET removed_at=NULL WHERE room_id IS NULL AND identity_id=$1`, [OTHER]);
       await scope1.database.query(`UPDATE agents SET access_policy='{"type":"everyone"}'::jsonb WHERE agent_id=$1`, [AGENT]);
       await endComputerSession(scope1.database, scope1.live, (await getComputerSession(scope1.database, share.id))!);
     }

@@ -270,7 +270,7 @@ import { normalizeHumanCornerTitle, UUID_PATTERN } from './values.js';
       // either departure destroys it.
       await database.query(`SELECT id FROM rooms WHERE id=$1 FOR UPDATE`, [roomId]);
       const membership = (
-        await database.query<{ workspace_role: 'owner' | 'admin' | 'member' | 'spectator' }>(
+        await database.query<{ workspace_role: 'owner' | 'admin' | 'member' }>(
           `SELECT workspace_member.role workspace_role
            FROM memberships room_member
            JOIN memberships workspace_member

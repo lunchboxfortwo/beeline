@@ -127,7 +127,7 @@ describe('removing a human from the Workspace', () => {
   });
 });
 
-it('enforces strict role authority and spectator writes and lists Workspace-owned agents', async () => {
+it('enforces strict role authority and member writes and lists Workspace-owned agents', async () => {
   database = await migratedDatabase();
   await database.query(
     `INSERT INTO identities(id,kind,name) VALUES ($1,'human','Owner'),($2,'human','Person'),($3,'agent','Agent')`,
@@ -148,11 +148,11 @@ it('enforces strict role authority and spectator writes and lists Workspace-owne
     [workspace, parent, other],
   );
   const phone = new PhoneService(database, 'https://server.example');
-  const change = (actor: string, memberId: string, role: 'admin' | 'member' | 'spectator') =>
+  const change = (actor: string, memberId: string, role: 'admin' | 'member') =>
     phone.execute('addWorkspaceMember', { workspaceId: workspace, memberId, role }, actor);
   await expect(change(other, viewer, 'member')).rejects.toThrow();
-  await change(viewer, other, 'spectator');
-  expect((await phone.readWorkspace(workspace, other))?.viewer.permissions.send).toBe(false);
+  await change(viewer, other, 'member');
+  expect((await phone.readWorkspace(workspace, other))?.viewer.permissions.send).toBe(true);
   await expect(
     phone.execute('sendRoomMessage', { roomId: parent, text: 'Room membership permits messaging' }, other),
   ).resolves.toBeDefined();

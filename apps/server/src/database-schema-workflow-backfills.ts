@@ -230,8 +230,6 @@ CREATE TABLE IF NOT EXISTS memberships (
 -- not apply them again to people who have since received a fresh invite.
 DROP TRIGGER IF EXISTS membership_workspace_ban ON memberships;
 DROP FUNCTION IF EXISTS enforce_workspace_ban();
-ALTER TABLE memberships DROP CONSTRAINT IF EXISTS memberships_role_check;
-ALTER TABLE memberships ADD CONSTRAINT memberships_role_check CHECK(role IN ('owner','admin','member','spectator'));
 ALTER TABLE memberships ADD COLUMN IF NOT EXISTS identity_profile jsonb;
 ALTER TABLE memberships ADD COLUMN IF NOT EXISTS invited_by text;
 ALTER TABLE memberships DROP CONSTRAINT IF EXISTS memberships_invited_by_fkey;

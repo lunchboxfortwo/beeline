@@ -112,7 +112,7 @@ function PersonProfile({ workspaceId, memberId, close }: { workspaceId: string; 
     const self = viewer?.identity.pubkey === memberId;
     const canEditRole = !self && Boolean(viewer?.permissions.manage) && Boolean(member) &&
         ((viewer?.role === 'owner' && member?.role !== 'owner') ||
-            (viewer?.role === 'admin' && (member?.role === 'member' || member?.role === 'spectator')));
+            (viewer?.role === 'admin' && member?.role === 'member'));
     const perform = async (action: () => Promise<void>) => {
         if (mutation.current) return;
         mutation.current = true;

@@ -11,7 +11,7 @@ export interface ChannelOpsContext {
 }
 
 /** @public The isolated phone dependency tree consumes this client contract. */
-export type ChannelRole = 'owner' | 'admin' | 'member' | 'spectator';
+export type ChannelRole = 'owner' | 'admin' | 'member';
 
 async function latestRoleProjection(
   ctx: ChannelOpsContext,

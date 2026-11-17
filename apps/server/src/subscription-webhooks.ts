@@ -105,14 +105,9 @@ export async function requireScheduledWorkManager(db: SqlDatabase, roomId: strin
   if (!allowed.rowCount) throw new Error(denialMessage);
 }
 
-/** A DM participant's Workspace role still controls its read-only policy. */
+/** Keep stop management under the same locked authority as schedule writes. */
 export async function requireScheduledStopManager(db:SqlDatabase,roomId:string,viewerId:string):Promise<void>{
   await requireScheduledWorkManager(db,roomId,viewerId,false,'workspace admins only',true);
-  const roles=await db.query<{role:string}>(`SELECT member.role FROM memberships member
-    WHERE member.identity_id=$1 AND member.room_id IS NULL AND member.removed_at IS NULL
-      AND member.workspace_id=(SELECT workspace_id FROM rooms WHERE id=$2)
-    FOR SHARE OF member NOWAIT`,[viewerId,roomId]);
-  if(roles.rows.some(member=>member.role==='spectator'))throw new Error('spectator access is read-only (access denied)');
 }
 
 /** One authority check for both the commanding human and phone operations. */

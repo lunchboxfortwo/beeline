@@ -123,7 +123,7 @@ function readInviteInviter(value: unknown): InviteView['inviter'] {
   if (!item || typeof item.name !== 'string') return undefined;
   const role = item.role;
   const roleValue: NonNullable<InviteView['inviter']>['role'] =
-    role === 'owner' || role === 'admin' || role === 'member' || role === 'spectator'
+    role === 'owner' || role === 'admin' || role === 'member'
       ? role
       : undefined;
   return {

@@ -21,7 +21,7 @@ import { WORKSPACE_ADMIN_AUTHORITY_MESSAGE, token, hash } from './values.js';
     return ctx.database.transaction(async (database) => {
       const roles = await database.query<{
         identity_id: string;
-        role: 'owner' | 'admin' | 'member' | 'spectator';
+        role: 'owner' | 'admin' | 'member';
         removed_at: Date | null;
       }>(
         `SELECT identity_id,role,removed_at FROM memberships
@@ -81,7 +81,7 @@ import { WORKSPACE_ADMIN_AUTHORITY_MESSAGE, token, hash } from './values.js';
       await database.query(`SELECT 1 FROM workspaces WHERE id=$1 FOR UPDATE`, [input.workspaceId]);
       const roles = await database.query<{
         identity_id: string;
-        role: 'owner' | 'admin' | 'member' | 'spectator';
+        role: 'owner' | 'admin' | 'member';
       }>(
         `SELECT identity_id,role FROM memberships
          WHERE workspace_id=$1 AND room_id IS NULL AND identity_id IN ($2,$3) AND removed_at IS NULL

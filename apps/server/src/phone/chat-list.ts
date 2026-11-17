@@ -32,7 +32,7 @@ import { turnRootMessageSql } from '../agent-command.js';
         name: string;
         avatar: string | null;
         visibility: 'public' | 'invite-only';
-        role: 'owner' | 'admin' | 'member' | 'spectator';
+        role: 'owner' | 'admin' | 'member';
         updated_at: Date;
       };
       joinable_rows: { id: string; name: string; memberCount: number }[];

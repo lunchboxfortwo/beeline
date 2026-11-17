@@ -4,7 +4,7 @@ import { SYSTEM_IDENTITY_ID, DELETED_ACCOUNT_IDENTITY_ID } from '@beeline/api-co
 import { CONNECTOR_KINDS } from '@beeline/api-contract/workbench';
 import { migrate, migrateData } from './database.js';
 import { PgliteDatabase } from './test-support.js';
-import { directMessageRoomId, ensureSystemDirectMessageRoom } from './system-line.js';
+import { directMessageRoomId, ensureSystemDirectMessageRoom, systemLine } from './system-line.js';
 import { PhoneService } from './phone-service.js';
 import { TokenAuth } from './auth.js';
 
@@ -71,6 +71,16 @@ describe('one System thread migration', () => {
       expect((await db.query('SELECT id FROM rooms ORDER BY id')).rows.map(row => row.id).sort())
         .toEqual([system, normal.id, deletedConversation].sort());
       expect((await phone.readRoom(system, OWNER))?.viewer.permissions.send).toBe(false);
+      const refusal = 'this is a read-only system thread; only @system may post here (access denied)';
+      await expect(phone.execute('sendRoomMessage', { roomId: system, text: 'Hello' }, OWNER))
+        .rejects.toThrow(refusal);
+      await systemLine(db, { roomId: system, id: 'system-notice',
+        subject: { id: SYSTEM_IDENTITY_ID, kind: 'human', name: 'System' }, verb: 'Notice' });
+      await expect(phone.execute('sendRoomReply', {
+        roomId: system, parentMessageId: 'system-notice', text: 'Reply',
+      }, OWNER)).rejects.toThrow(refusal);
+      expect((await db.query(`SELECT author_id FROM messages WHERE room_id=$1`, [system])).rows)
+        .toEqual([{ author_id: SYSTEM_IDENTITY_ID }]);
       await migrateData(db);
       expect((await db.query('SELECT 1 FROM rooms')).rowCount).toBe(3);
       expect((await db.query('SELECT * FROM phone_sessions')).rows).toEqual(sessionsBefore);

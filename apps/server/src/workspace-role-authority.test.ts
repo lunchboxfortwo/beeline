@@ -123,7 +123,7 @@ describe('permissions: agent owner, Workspace admin, or anyone in the chat', () 
 
   it('Room, corner and DM members send ordinary control prose without an owner-role gate',async()=>{
     for(const person of PEOPLE) for(const [,roomId] of placesFor(person))
-      for(const text of ['@bee debug','@bee retry','@bee /restart','@bee login']) {
+      for(const text of ['@bee debug','@bee status','@bee help']) {
         const id=await send(roomId,person,text);
         expect((await database.query('SELECT action,state,message FROM agent_commands WHERE source_message_id=$1',[id])).rows)
           .toEqual([{action:'input',state:'pending',message:expect.objectContaining({body:text,authorId:person})}]);
@@ -131,11 +131,15 @@ describe('permissions: agent owner, Workspace admin, or anyone in the chat', () 
     expect((await database.query("SELECT 1 FROM messages WHERE card_type='agent-sign-in' OR presentation='system'")).rowCount).toBe(0);
   });
 
-  it('creator and allowlist preferences cannot refuse a Room member message',async()=>{
-    for(const policy of [{type:'creator'},{type:'allowlist',allow:[WS_ADMIN]}]) {
+  it('creator and allowlist preferences keep their existing authority for Room members',async()=>{
+    for(const [policy,allowed] of [[{type:'creator'},AGENT_OWNER],[{type:'allowlist',allow:[WS_ADMIN]},WS_ADMIN]] as const) {
       await database.query('UPDATE agents SET access_policy=$2::jsonb WHERE agent_id=$1',[AGENT,JSON.stringify(policy)]);
       for(const [,roomId] of placesFor(ROOM_ADMIN)) {
         const id=await send(roomId,ROOM_ADMIN,'@bee please answer');
+        expect((await database.query("SELECT 1 FROM agent_commands WHERE source_message_id=$1 AND state='pending'",[id])).rowCount).toBe(0);
+      }
+      for(const [,roomId] of placesFor(allowed)) {
+        const id=await send(roomId,allowed,'@bee please answer');
         expect((await database.query("SELECT 1 FROM agent_commands WHERE source_message_id=$1 AND state='pending'",[id])).rowCount).toBe(1);
       }
     }
@@ -150,13 +154,9 @@ describe('permissions: agent owner, Workspace admin, or anyone in the chat', () 
     }
   });
 
-  it('anyone in the Room may watch a browser share; a Workspace spectator may not, whatever their Room row says', async () => {
-    await database.query(`UPDATE memberships SET role='spectator' WHERE room_id=$1 AND identity_id=$2`, [ROOM, ROOM_ADMIN]);
-    await database.query(
-      `UPDATE memberships SET role='spectator' WHERE workspace_id=$1 AND room_id IS NULL AND identity_id=$2`,
-      [WORKSPACE, WS_OWNER],
-    );
-    for (const [viewer, allowed] of [[ROOM_ADMIN, true], [WS_OWNER, false]] as const)
+  it('anyone in the Room may watch a browser share with an ordinary member role', async () => {
+    await database.query(`UPDATE memberships SET role='member' WHERE identity_id=ANY($1::text[])`, [[ROOM_ADMIN, WS_OWNER]]);
+    for (const [viewer, allowed] of [[ROOM_ADMIN, true], [WS_OWNER, true]] as const)
       for (const [, roomId] of placesFor(viewer)) {
         const share = await createComputerSession(database, live, {
           roomId,

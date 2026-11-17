@@ -72,7 +72,7 @@ import { CORNER_ATTENTION_SCHEMA } from './corner-attention.js';
 import { backfillCornerFollows, cornerFollowsSchemaSql } from './corner-follow.js';
 import { alreadyNoOp, alreadySatisfied, triggerAlreadyCurrent, runMigrationStep, splitMigrationStatements } from './migration-steps.js';
 import { SqlDatabase, SCHEMA, MESSAGE_CURSOR_MS_SQL } from './database.js';
-import { retireOrphanRoomMemberships } from './membership-join.js';
+import { MEMBERSHIP_ROLE_SCHEMA, retireOrphanRoomMemberships } from './membership-join.js';
 import { createIndexConcurrently, backfillMessageSearchDocuments, backfillSquireApprovalExpiry, compactWebhookDeliveries, compactPushClaims, backfillCornerOwed, backfillSystemEventKinds, backfillPerItemEventSubscriptions, backfillInstitutionalMemoryRollout, retireStandingPreferences, backfillConnectorMachineId } from './database-backfill-squire-approval-expiry.js';
 
 
@@ -120,6 +120,7 @@ export async function migrate(
     else await install(database);
   };
   await ddlScript('server schema', SCHEMA);
+  await ddlScript('membership roles', MEMBERSHIP_ROLE_SCHEMA, true);
   await ddlScript('Work board', WORK_BOARD_SCHEMA);
   await ddlScript('Rooms MCP OAuth', ROOMS_MCP_SCHEMA);
   await ddlScript('historical storage schema', LEGACY_STORAGE_SCHEMA);

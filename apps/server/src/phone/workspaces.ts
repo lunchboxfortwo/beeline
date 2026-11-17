@@ -20,7 +20,7 @@ import { phoneProjectMemberGrantRows } from './agent-reads.js';
       name: string | null;
       avatar: string | null;
       visibility: 'public' | 'invite-only' | null;
-      role: 'owner' | 'admin' | 'member' | 'spectator' | null;
+      role: 'owner' | 'admin' | 'member' | null;
       updated_at: Date | null;
       room_count: string | null;
       attention: boolean | null;
@@ -119,7 +119,7 @@ import { phoneProjectMemberGrantRows } from './agent-reads.js';
       membersTruncated: roster.membersTruncated,agentsTruncated: roster.agentsTruncated,
       viewer: {
         identity: roster.viewerIdentity,role: row.role,
-        permissions: { send: row.role !== 'spectator',
+        permissions: { send: true,
           manage: row.role === 'owner' || row.role === 'admin' },
       },
       watchFilters: [],
@@ -139,7 +139,7 @@ import { phoneProjectMemberGrantRows } from './agent-reads.js';
     }
     // One profile read: the person, their grants and the agents they own.
     const detail = await ctx.database.query<{
-      role: 'owner' | 'admin' | 'member' | 'spectator';
+      role: 'owner' | 'admin' | 'member';
       viewer_row: IdentityRow;
       member_row: MemberRow | null;
       grant_rows: MemberGrantRow[];
@@ -212,7 +212,7 @@ import { phoneProjectMemberGrantRows } from './agent-reads.js';
     const role = row.role;
     return {
       viewer: { identity: identity(row.viewer_row, ctx.publicOrigin), role,
-        permissions: { send: role !== 'spectator', manage: role === 'owner' || role === 'admin' } },
+        permissions: { send: true, manage: role === 'owner' || role === 'admin' } },
       members: member ? ctx.projectMembers([member], null) : [],
       agents: ctx.projectWorkspaceAgents(ownedRows, ownedRows),
       grants: ctx.projectMemberGrantRows(row.grant_rows.map((grant) =>

@@ -645,7 +645,7 @@ export type RoomViewer = {
     readonly unreadCount?: number;
   };
   readonly identity: RoomViewIdentity;
-  readonly role: 'owner' | 'admin' | 'member' | 'spectator';
+  readonly role: 'owner' | 'admin' | 'member';
   readonly permissions: {
     readonly send: boolean;
     readonly manage: boolean;

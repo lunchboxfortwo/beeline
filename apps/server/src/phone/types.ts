@@ -97,7 +97,7 @@ export interface MemberRow extends IdentityRow {
   selected_model?: string | null;
   model_catalog?: AgentDetailView['catalog'] | null;
   mcp_client?: McpClientIdentity | null;
-  role: 'owner' | 'admin' | 'member' | 'spectator';
+  role: 'owner' | 'admin' | 'member';
   presence_body: { status: 'online' | 'offline'; observedAt: number; held?: unknown } | null;
   presence_updated_at: Date | null;
 }
@@ -187,7 +187,7 @@ export interface RoomReadRow {
   starter_onboarding_pending: boolean;
   room: RoomRow & {
     viewer_push_muted: boolean;
-    workspace_role: 'owner' | 'admin' | 'member' | 'spectator';
+    workspace_role: 'owner' | 'admin' | 'member';
     read_cursor: RoomView['viewer']['readCursor'] | null;
   };
   members: MemberRow[];

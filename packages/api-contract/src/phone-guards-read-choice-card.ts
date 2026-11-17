@@ -545,7 +545,7 @@ export function readWorkspace(value: unknown): ChatListWorkspace | null {
   return {
     id: item.id,
     name: typeof item.name === 'string' ? item.name : '',
-    role: oneOf(item.role, ['owner', 'admin', 'member', 'spectator']) ?? 'member',
+    role: oneOf(item.role, ['owner', 'admin', 'member']) ?? 'member',
     updatedAt: integer(item.updatedAt) ? item.updatedAt : 0,
     ...field('roomCount', integer(item.roomCount) ? item.roomCount : undefined),
     ...field('attention', typeof item.attention === 'boolean' ? item.attention : undefined),

@@ -138,7 +138,6 @@ import { unix, roomFilters, SLOW_ROOM_READ_MS, messageId } from './values.js';
         role: room.workspace_role,
         permissions: {
           send:
-            room.workspace_role !== 'spectator' &&
             !room.archived_at &&
             !room.direct_participants?.includes(SYSTEM_IDENTITY_ID),
           manage: room.workspace_role === 'owner' || room.workspace_role === 'admin',

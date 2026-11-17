@@ -26,7 +26,7 @@ import { hash, unix, normalizeAgentName, CONNECT_RENAME_WINDOW_MS } from './valu
       inviter_name: string;
       inviter_handle: string | null;
       inviter_face: string | null;
-      inviter_role: 'owner' | 'admin' | 'member' | 'spectator' | null;
+      inviter_role: 'owner' | 'admin' | 'member' | null;
       people: number;
       agents: number;
     }>(

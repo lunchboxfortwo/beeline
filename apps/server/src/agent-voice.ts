@@ -98,7 +98,7 @@ export class AgentVoiceService {
     if (!current) throw Error('Room agent access denied');
     return {
       currentVoiceId: current.voice,
-      canChange: ctx.owner_id === viewerId && ctx.viewer_role !== 'spectator',
+      canChange: ctx.owner_id === viewerId,
       choices,
     };
   }
@@ -109,7 +109,7 @@ export class AgentVoiceService {
     voiceId: string,
   ): Promise<AgentVoiceCatalog> {
     const ctx = await this.context(workspaceId, agentId, viewerId);
-    if (ctx.owner_id !== viewerId || ctx.viewer_role === 'spectator')
+    if (ctx.owner_id !== viewerId)
       throw Error('Only the agent owner can change its voice');
     const { choices } = await this.library();
     if (!choices.some((v) => v.id === voiceId))
@@ -119,7 +119,7 @@ export class AgentVoiceService {
       JOIN memberships agent_member ON agent_member.workspace_id=workspace.id AND agent_member.room_id IS NULL
         AND agent_member.identity_id=$2 AND agent_member.removed_at IS NULL
       JOIN memberships viewer_member ON viewer_member.workspace_id=workspace.id AND viewer_member.room_id IS NULL
-        AND viewer_member.identity_id=$3 AND viewer_member.removed_at IS NULL AND viewer_member.role<>'spectator'
+        AND viewer_member.identity_id=$3 AND viewer_member.removed_at IS NULL
       JOIN identities viewer ON viewer.id=$3 AND viewer.kind='human'
       WHERE workspace.id=$1 FOR SHARE OF workspace,agent_member,viewer_member
     ) UPDATE agents agent SET chosen_voices=jsonb_set(chosen_voices,ARRAY['aura-2'],to_jsonb($4::text)),updated_at=now()

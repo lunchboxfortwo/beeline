@@ -36,8 +36,8 @@ export async function humanRoomAdmin(
 }
 
 /**
- * A human who is a current member of the Room, corner or DM and not a
- * Workspace spectator: the gate for starting or cancelling a workflow run.
+ * A human who is a current member of the Room, corner or DM:
+ * the gate for starting or cancelling a workflow run.
  * A Room role never changes it.
  */
 export async function humanRoomMember(
@@ -53,10 +53,7 @@ export async function humanRoomMember(
     JOIN identities actor ON actor.id=$2 AND actor.kind='human'
     JOIN memberships room_member ON room_member.room_id=room.id AND room_member.identity_id=actor.id
       AND room_member.removed_at IS NULL
-    WHERE room.id=$1 AND room.archived_at IS NULL AND NOT EXISTS (
-      SELECT 1 FROM memberships spectator WHERE spectator.identity_id=actor.id
-        AND spectator.workspace_id=room.workspace_id AND spectator.room_id IS NULL
-        AND spectator.removed_at IS NULL AND spectator.role='spectator')`,
+    WHERE room.id=$1 AND room.archived_at IS NULL`,
         [roomId, actorId],
       )
     ).rowCount,

@@ -195,9 +195,9 @@ export function readPresence(value: unknown): {
 
 export const roomMemberFields = {
   identity: required((item) => readIdentity(item.identity) ?? undefined),
-  role: required((item): 'owner' | 'admin' | 'member' | 'spectator' =>
+  role: required((item): 'owner' | 'admin' | 'member' =>
     (typeof item.role === 'string' && item.role.length > 0 ? item.role : 'member') as
-      'owner' | 'admin' | 'member' | 'spectator'),
+      'owner' | 'admin' | 'member'),
   model: optional((item) =>
     readIdentity(item.identity)?.kind === 'agent' && typeof item.model === 'string' ? item.model : undefined),
   presence: optional((item) => readPresence(item.presence)),

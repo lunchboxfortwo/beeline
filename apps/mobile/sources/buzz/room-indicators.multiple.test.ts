@@ -13,7 +13,7 @@ it('joins two names and carries each server receipt time and cancellation coordi
     ['Ruby',100,{agentPubkey:'Ruby',requestId:'request-0'}],['Jellybean',120,{agentPubkey:'Jellybean',requestId:'request-1'}],
   ]);
 });
-it('counts three or more and keeps spectator cancellation controls absent', () => {
+it('counts three or more and keeps unauthorized cancellation controls absent', () => {
   const ack = selectComposerAckPresentation({...input,viewerCanSend:false,activeTurns:turns});
   expect(ack?.label).toBe('4 agents brewing…');
   expect(ack?.agents).toHaveLength(4);

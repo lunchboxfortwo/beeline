@@ -146,7 +146,7 @@ export type ComposerAckPresentation = {
   received?: boolean;
   /**
    * The coordinates a stop request names, present for anyone who may act in
-   * the Room. Spectators see only the working line.
+   * the Room. Viewers without stop permission see only the working line.
    */
   stop?: { agentPubkey: string; requestId: string };
 };

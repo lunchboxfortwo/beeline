@@ -57,7 +57,7 @@ import { phoneRequireWorkspaceManager, phoneRequireIdentity } from './access.js'
     await ctx.database.transaction(async (database) => {
       await database.query(`SELECT 1 FROM workspaces WHERE id=$1 FOR UPDATE`, [input.workspaceId]);
       const current = (
-        await database.query<{ role: 'owner' | 'admin' | 'member' | 'spectator' }>(
+        await database.query<{ role: 'owner' | 'admin' | 'member' }>(
           `SELECT role FROM memberships
            WHERE workspace_id=$1 AND room_id IS NULL AND identity_id=$2 AND removed_at IS NULL FOR UPDATE`,
           [input.workspaceId, viewerId],

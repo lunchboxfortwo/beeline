@@ -20,7 +20,7 @@ import { reviveDates, runtimeModelLabel, projectAgentPresence } from './read-pro
     workspaceRow: {
       id: string; name: string; avatar: string | null;
       visibility: 'public' | 'invite-only'; allow_fix_sweep: boolean; created_at: Date; updated_at: Date;
-      role: 'owner' | 'admin' | 'member' | 'spectator';
+      role: 'owner' | 'admin' | 'member';
     };
     viewerIdentity: RoomViewIdentity;
     managedRoomRows: Array<{
@@ -35,7 +35,7 @@ import { reviveDates, runtimeModelLabel, projectAgentPresence } from './read-pro
       workspace_row: {
         id: string; name: string; avatar: string | null;
         visibility: 'public' | 'invite-only'; allow_fix_sweep: boolean; created_at: Date; updated_at: Date;
-        role: 'owner' | 'admin' | 'member' | 'spectator';
+        role: 'owner' | 'admin' | 'member';
       };
       viewer_row: IdentityRow;
       managed_room_rows: Array<{

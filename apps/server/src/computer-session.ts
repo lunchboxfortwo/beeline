@@ -61,7 +61,7 @@ export async function mayViewComputer(database: SqlDatabase, row: ComputerSessio
        AND member.removed_at IS NULL
      JOIN memberships workspace_member ON workspace_member.workspace_id=room.workspace_id
        AND workspace_member.room_id IS NULL AND workspace_member.identity_id=$3
-       AND workspace_member.removed_at IS NULL AND workspace_member.role<>'spectator'
+       AND workspace_member.removed_at IS NULL
      JOIN room_access agent_member ON agent_member.room_id=room.id
        AND agent_member.identity_id=$2 AND agent_member.removed_at IS NULL
      WHERE agent.agent_id=$2`, [row.room_id, row.agent_id, viewerId],
