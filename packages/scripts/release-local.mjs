@@ -146,12 +146,16 @@ async function macJob({ job, context, label, engine }) {
   return result.job;
 }
 
-function privateIosJob(job) {
+export function privateIosJob(job) {
   const local = structuredClone(job);
   for (const step of local.steps) {
     if (step.name === 'Isolate the iOS signing keychain') step.run = `set -euo pipefail
 security list-keychains -d user > "$RUNNER_TEMP/user-keychains.txt"
-security default-keychain -d user > "$RUNNER_TEMP/user-default-keychain.txt"
+# A private HOME in an SSH session can have no default keychain yet.
+if ! security default-keychain -d user > "$RUNNER_TEMP/user-default-keychain.txt" 2> "$RUNNER_TEMP/user-default-keychain.err"; then
+  grep -Fq 'A default keychain could not be found' "$RUNNER_TEMP/user-default-keychain.err" || { cat "$RUNNER_TEMP/user-default-keychain.err" >&2; exit 1; }
+  : > "$RUNNER_TEMP/user-default-keychain.txt"
+fi
 mkdir -p "$HOME/Library/Keychains"
 keychain="$HOME/Library/Keychains/login.keychain-db"
 password=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(24).toString("hex"))')
@@ -160,7 +164,16 @@ security set-keychain-settings -lut 21600 "$keychain"
 security unlock-keychain -p "$password" "$keychain"
 security list-keychains -d user -s "$keychain"
 security default-keychain -d user -s "$keychain"`;
-    if (step.name === 'Restore the runner user keychains') step.run += '\nif [ -f "$HOME/Library/Keychains/login.keychain-db" ]; then security delete-keychain "$HOME/Library/Keychains/login.keychain-db"; fi';
+    if (step.name === 'Restore the runner user keychains') step.run = `set -euo pipefail
+if [ -f "$RUNNER_TEMP/user-keychains.txt" ]; then
+  xargs security list-keychains -d user -s < "$RUNNER_TEMP/user-keychains.txt"
+fi
+if [ -s "$RUNNER_TEMP/user-default-keychain.txt" ]; then
+  xargs security default-keychain -d user -s < "$RUNNER_TEMP/user-default-keychain.txt"
+fi
+if [ -f "$HOME/Library/Keychains/login.keychain-db" ]; then
+  security delete-keychain "$HOME/Library/Keychains/login.keychain-db"
+fi`;
   }
   return local;
 }

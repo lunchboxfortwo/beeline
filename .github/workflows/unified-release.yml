@@ -915,8 +915,7 @@ jobs:
         env:
           NATIVE_APP_VERSION: ${{ needs.initialize.outputs.native_app_version }}
         run: |
-          node scripts/check-release-version.cjs
-          node -e 'const fs=require("node:fs");const p=require("./package.json");p.version=process.env.NATIVE_APP_VERSION;fs.writeFileSync("package.json",JSON.stringify(p,null,2)+"\n")'
+          node scripts/check-release-version.cjs --apply-store-version
       - name: Report an Android build this release already shipped
         if: needs.initialize.outputs.android_shipped == 'true'
         run: echo "::notice::Android versionCode ${{ needs.initialize.outputs.android_version_code }} already shipped for ${{ needs.initialize.outputs.release_marker }}; no build or upload"
@@ -1104,7 +1103,7 @@ jobs:
         run: |
           PATH="$(dirname "$(command -v node)"):/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"
           export PATH
-          node -e 'const fs=require("node:fs");const p=require("./package.json");p.version=process.env.NATIVE_APP_VERSION;fs.writeFileSync("package.json",JSON.stringify(p,null,2)+"\n")'
+          node scripts/check-release-version.cjs --apply-store-version
       - name: Reuse the iOS build this release already shipped
         if: needs.initialize.outputs.ios_shipped == 'true'
         run: |
