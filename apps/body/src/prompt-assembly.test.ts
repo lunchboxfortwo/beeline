@@ -170,12 +170,13 @@ const scope6 = fixtureScope6();
   });
 
 
-  it('bounds the excerpt at a word boundary, including when a server sends too much', () => {
-    const rendered = renderReplyContext({ ...scope6.reply, replyToExcerpt: 'audit findings '.repeat(100) });
+  it('keeps both ends of the excerpt, including when a server sends too much', () => {
+    const text = 'audit findings '.repeat(200) + 'Want me to open a thread for that?';
+    const rendered = renderReplyContext({ ...scope6.reply, replyToExcerpt: text });
     const excerpt = JSON.parse(rendered.split('\n> ')[1]!) as string;
-    expect(excerpt.length).toBeLessThanOrEqual(300);
-    expect(excerpt).toMatch(/(?:audit|findings)…$/);
-    expect(renderReplyContext({ ...scope6.reply, replyToExcerpt: 'x'.repeat(500) }).length).toBeLessThan(400);
+    expect(excerpt).toBe(`${text.slice(0, 750)}…${text.slice(-750)}`);
+    const short = 'x'.repeat(1500);
+    expect(renderReplyContext({ ...scope6.reply, replyToExcerpt: short })).toContain(JSON.stringify(short));
   });
 
 

@@ -4,7 +4,7 @@ import { sendMessage } from './agent-messaging.js';
 import { recordedMessageRoute } from './message-route.js';
 import { ensureSystemIdentity } from './system-line.js';
 import type { AgentCommand,AgentCommandAction,RoomInboxResult,MessageRoute,MessageAsk } from '@beeline/api-contract/daemon';
-import { isBackgroundCommand,wall } from '@beeline/api-contract/daemon';
+import { boundReplyExcerpt,isBackgroundCommand,wall } from '@beeline/api-contract/daemon';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { createHash,randomBytes } from 'node:crypto';
 import { parseTaggedAgentLifecycleCommand } from './agent-command-create-agent-command.js';
@@ -689,6 +689,10 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
   const escalationIdentity = chat.handover?.author_id ?? opening?.authorId;
   const escalationRoom = chat.handover?.approval_basis.commanderReturnRoomId ?? chat.handover?.source_room_id ?? opening?.fromRoomId;
   const sourceText = chat.source?.text;
+  const reply = chat.source?.reply_to_message_id ? (await db.query<{ author_id: string; name: string; text: string }>(
+    `SELECT parent.author_id,author.name,left(parent.text,16001) text FROM messages parent
+     JOIN identities author ON author.id=parent.author_id WHERE parent.id=$1 AND parent.room_id=$2`,
+    [chat.source.reply_to_message_id,chat.source.room_id])).rows[0] : undefined;
   const scheduleOwner = (chat.source?.card as { ownerId?: unknown } | null)?.ownerId;
   const workflowOwner=chat.workflow_owner_id ?? (input.reason==='resume' && parent?.message?.systemEvent?.kind==='workflow-handoff'
     ? parent.message.route?.from.agent : undefined);
@@ -781,7 +785,8 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
           (!payload && input.wakeNote ? `\n${input.wakeNote}` : ''),
         attachments: payload?.attachments ?? chat.source?.attachments ?? [],
         type: privateMessage ? 'private' : chat.source?.presentation ?? 'system',
-        systemEvent: chat.source?.system_event,replyToMessageId:chat.source?.reply_to_message_id ?? undefined }),...wake.params,
+        systemEvent: chat.source?.system_event,replyToMessageId:chat.source?.reply_to_message_id ?? undefined,
+        ...(reply ? {replyToAuthorId:reply.author_id,replyToAuthorName:reply.name,replyToExcerpt:boundReplyExcerpt(reply.text)} : {}) }),...wake.params,
     ],
   )).rows[0] ?? (await db.query<CommandRow>(
     'SELECT * FROM agent_commands WHERE id=$1',[id],

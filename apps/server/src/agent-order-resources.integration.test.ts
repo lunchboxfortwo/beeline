@@ -115,13 +115,14 @@ describe('agent orders act for the issuing owner', () => {
       .toEqual({ slug: 'release', archived: true });
   });
 
-  it('uses a foreign issuer’s own owner without exposing the executing owner’s private resources', async () => {
+  it('uses membership for history while requester resources follow a foreign issuer’s owner', async () => {
     await db.query('UPDATE agents SET owner_id=$2 WHERE agent_id=$1', [ISSUER, OTHER]);
     const command = await order();
     const turn = await claim(command);
     expect(await daemon['grantRequester'](command)).toMatchObject({ id: OTHER });
     const history = await daemon.execute('searchInstitutionalHistory', { ...turn, query: 'marker' }, WORKER);
-    expect(history.results.map(row => row.messageId)).not.toContain('private');
+    // The worker and the output Room's complete human audience can read this Room.
+    expect(history.results.map(row => row.messageId)).toContain('private');
     const memory = await daemon.execute('searchInstitutionalMemory', { ...turn, query: 'marker' }, WORKER);
     expect(memory.results.map(row => row.id)).not.toContain(profile);
     expect(await daemon.execute('reportInstitutionalMemoryUsed', { ...turn, itemIds: [profile] }, WORKER))
@@ -189,15 +190,15 @@ describe('agent orders act for the issuing owner', () => {
     }
   });
 
-  it('preserves System-only resource provenance without widening institutional reads', async () => {
+  it('preserves System-only resource provenance while history uses the member agent’s access', async () => {
     await ensureSystemIdentity(db);
     const command = await order(SYSTEM_IDENTITY_ID);
     const turn = await claim(command);
     expect(await daemon['grantRequester'](command)).toMatchObject({ id: SYSTEM_IDENTITY_ID });
     await expect(daemon.execute('searchInstitutionalMemory', { ...turn, query: 'marker' }, WORKER))
       .rejects.toThrow('requester authority is unavailable');
-    await expect(daemon.execute('searchInstitutionalHistory', { ...turn, query: 'marker' }, WORKER))
-      .rejects.toThrow('requester authority is unavailable');
+    const history = await daemon.execute('searchInstitutionalHistory', { ...turn, query: 'marker' }, WORKER);
+    expect(history.results.map(row => row.messageId)).toContain('private');
   });
 
   it('follows agent ownership to a human and terminates ownership cycles', async () => {

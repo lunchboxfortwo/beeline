@@ -1,4 +1,3 @@
-import { resourceReadAuthority } from './resource-requester.js';
 import { Check } from 'typebox/value';
 import {
   INSTITUTIONAL_HISTORY_MATCH_SCAN_MAX,
@@ -10,8 +9,8 @@ import {
   type SearchInstitutionalHistoryInput,
   type SearchInstitutionalHistoryResult,
 } from '@beeline/api-contract/daemon';
-import type { CommandRow } from './agent-command.js';
 import type { SqlDatabase } from './database.js';
+import { AccessDeniedError } from './daemon/values.js';
 
 type SearchRow = {
   message_id: string | null;
@@ -26,8 +25,8 @@ type SearchRow = {
 };
 
 /**
- * Params: $1 output Room, $2 durable requester, $3 Workspace, $4 answering agent.
- * A source Room qualifies when the requester, the agent, and every current
+ * Params: $1 output Room, $2 reader, $3 Workspace, $4 answering agent.
+ * A source Room qualifies when the reader, the agent, and every current
  * human of the output Room can all read it. A Room and its corners always read
  * each other for an agent that is a current member of the output Room.
  */
@@ -112,8 +111,8 @@ function snippet(text: string, query: string): string {
 }
 
 /**
- * Search only messages whose source Room is visible to the requester, the
- * answering agent, and every current human member of the output Room. Indexed
+ * Search only messages whose source Room is visible to the agent and every
+ * current human member of the output Room. Indexed
  * exact/stemmed tokens and current Room names supply candidates inside the
  * recency window. Count distinct query words matched before the top-match cap;
  * fetch message bodies only for the requested results. Query bytes, history
@@ -121,14 +120,18 @@ function snippet(text: string, query: string): string {
  */
 export async function searchInstitutionalHistory(
   database: SqlDatabase,
-  command: Pick<CommandRow, 'room_id' | 'root_source_message_id' | 'agent_id' | 'turn_request_id'> & Partial<Pick<CommandRow, 'root_command_id'>>,
   input: SearchInstitutionalHistoryInput,
 ): Promise<SearchInstitutionalHistoryResult> {
   const query = boundedQuery(input.query);
   const limit = boundedLimit(input.limit);
   return database.transaction(async (db) => {
-    const authority = await resourceReadAuthority(db, command);
-    if (!authority) throw new Error('institutional history requester authority is unavailable');
+    const authority = (await db.query<{ workspace_id: string }>(
+      `SELECT room.workspace_id FROM rooms room
+       JOIN room_access member ON member.room_id=room.id AND member.identity_id=$2 AND member.removed_at IS NULL
+       JOIN memberships workspace_member ON workspace_member.workspace_id=room.workspace_id
+         AND workspace_member.room_id IS NULL AND workspace_member.identity_id=$2 AND workspace_member.removed_at IS NULL
+       WHERE room.id=$1`, [input.roomId, input.agentId])).rows[0];
+    if (!authority) throw new AccessDeniedError();
 
     const rows = await db.query<SearchRow>(
       `WITH ${AUTHORIZED_ROOMS_CTE}, query_terms AS (
@@ -236,10 +239,10 @@ export async function searchInstitutionalHistory(
        FROM authorized_room_count LEFT JOIN ranked ON true
        ORDER BY ranked.rank DESC,ranked.created_at DESC,ranked.message_id DESC`,
       [
-        command.room_id,
-        authority.requester_identity_id,
+        input.roomId,
+        input.agentId,
         authority.workspace_id,
-        command.agent_id,
+        input.agentId,
         query,
         INSTITUTIONAL_HISTORY_MATCH_SCAN_MAX,
         limit,

@@ -749,11 +749,11 @@ const scope23 = fixtureScope23();
         input: m25_expect.objectContaining({
           roomId: 'corner-room',
           messageId: 'corner-transcript-id',
-          requestId: 'request-1',
         }),
       },
     ]);
     m25_expect(scope23.calls[0]!.input.roomId).not.toBe('parent-room');
+    m25_expect(scope23.calls[0]!.input).not.toHaveProperty('requestId');
   });
 
 
@@ -767,6 +767,19 @@ const scope23 = fixtureScope23();
       messageId: 'corner-transcript-id',
       offset: 4000,
     });
+  });
+
+  m25_it('reads an explicitly addressed chat without replacing it with turn context', async () => {
+    await m25_callAgentTool('read', { facet: 'message', address: 'other-room', messageId: 'message-id' }, 'addressed');
+    m25_expect(scope23.calls[0]!.input).toMatchObject({ roomId: 'other-room', messageId: 'message-id' });
+    m25_expect(scope23.calls[0]!.input).not.toHaveProperty('requestId');
+  });
+
+  m25_it('searches the session thread without borrowing its command request', async () => {
+    await m25_callAgentTool('search', { scope: 'history', query: 'Sentry' }, 'search');
+    m25_expect(scope23.calls).toEqual([{ name: 'searchInstitutionalHistory', input: {
+      roomId: 'corner-room', agentId: 'agent-1', query: 'Sentry',
+    } }]);
   });
 });
 });

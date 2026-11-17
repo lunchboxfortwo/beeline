@@ -1,8 +1,8 @@
-export const REPLY_EXCERPT_MAX_LENGTH = 300;
+export const REPLY_EXCERPT_MAX_LENGTH = 1500;
 
-/** Keep reply context short, cutting at a word boundary when one is available. */
+/** Keep short parents whole and preserve both the context and the final ask. */
 export function boundReplyExcerpt(text: string): string {
-  if (text.length <= REPLY_EXCERPT_MAX_LENGTH) return text.trim();
-  const prefix = text.slice(0, REPLY_EXCERPT_MAX_LENGTH - 1);
-  return `${prefix.replace(/\s+\S*$/, '').trim()}…`;
+  if (text.length <= REPLY_EXCERPT_MAX_LENGTH) return text;
+  const half = REPLY_EXCERPT_MAX_LENGTH / 2;
+  return `${text.slice(0, half)}…${text.slice(-half)}`;
 }

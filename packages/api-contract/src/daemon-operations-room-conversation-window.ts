@@ -118,11 +118,12 @@ export type RoomInboxResult = {
     readonly replyAddress?: import('./agent-messaging.js').MessageAddress;
     readonly agentAuthor?: boolean;
     readonly replyToMessageId?: string;
-    /** Current author of the reply parent, projected by the server. */
+    /** Reply parent author; frozen at queue time for commands. */
     readonly replyToAuthorId?: string;
-    /** Current display name of the reply parent author. */
+    /** Reply parent author's display name; frozen at queue time for commands. */
     readonly replyToAuthorName?: string;
-    /** Quoted by the body as untrusted text; at most 300 characters. */
+    /** Whole parent up to 1500 characters; otherwise first/last 750 joined by ….
+     * Frozen at queue time for commands. */
     readonly replyToExcerpt?: string;
     readonly rootMessageId?: string;
     readonly requestId?: string;

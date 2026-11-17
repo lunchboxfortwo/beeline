@@ -9,7 +9,6 @@ import { migrate, type QueryResult, type SqlDatabase } from './database.js';
 import { PhoneService } from './phone-service.js';
 import { searchInstitutionalHistory } from './institutional-history.js';
 import { INSTITUTIONAL_HISTORY_MATCH_SCAN_MAX } from '@beeline/api-contract/daemon';
-import type { CommandRow } from './agent-command.js';
 import {
   assertHotRead,
   explainHotRead,
@@ -48,28 +47,6 @@ const matchers: ReadonlyArray<readonly [HotReadName, (sql: string) => boolean]> 
   ['corner-facts', (sql) => sql.includes('FROM rooms c LEFT JOIN work_items work') && sql.includes('LEFT JOIN corner_facts f')],
   ['history-search', (sql) => sql.includes('authorized_rooms AS') && sql.includes('matched_count')],
 ];
-
-// A human-authored corpus row: the durable root requester of the search turn.
-const REQUESTER_MESSAGE = 'corpus-message-000001';
-
-const searchCommand: CommandRow = {
-  id: 'corpus-search-command',
-  room_id: ROOM,
-  agent_id: AGENT,
-  source_message_id: REQUESTER_MESSAGE,
-  turn_request_id: 'corpus-search-request',
-  action: 'input',
-  reason: 'corpus',
-  root_command_id: 'corpus-search-command',
-  parent_command_id: null,
-  root_source_message_id: REQUESTER_MESSAGE,
-  agent_depth: 0,
-  state: 'pending',
-  result_message_id: null,
-  hiccup_attempts: 0,
-  lifecycle_before: null,
-  restart_confirmed_at: null,
-};
 
 class HotReadDatabase implements SqlDatabase {
   // A hot read measured inside a transaction still belongs to the outer run.
@@ -235,7 +212,7 @@ describe('PRODUCTION-CORPUS REPLAY hot-read gate', () => {
     await phone.readHistory(ROOM, VIEWER);
     await phone.readLiveDelta(ROOM, VIEWER, { type: 'message', messageId: LIVE_MESSAGE });
     await phone.readCorners(ROOM, VIEWER);
-    await searchInstitutionalHistory(measured, searchCommand, {
+    await searchInstitutionalHistory(measured, {
       agentId: AGENT,
       roomId: ROOM,
       query: 'fresh',
@@ -276,7 +253,7 @@ describe('PRODUCTION-CORPUS REPLAY hot-read gate', () => {
       query: 'production corpus message',
       limit: 10,
     };
-    const broad = await searchInstitutionalHistory(database, searchCommand, input);
+    const broad = await searchInstitutionalHistory(database, input);
     const wallMs = performance.now() - startedAt;
 
     expect(broad.results).toHaveLength(10);
@@ -285,7 +262,7 @@ describe('PRODUCTION-CORPUS REPLAY hot-read gate', () => {
     expect(wallMs).toBeLessThan(HOT_READ_BUDGETS_MS['history-search']);
     // HotReadDatabase measures and checks the search statement's plan and p95.
     const measured = new HotReadDatabase(database);
-    await searchInstitutionalHistory(measured, searchCommand, input);
+    await searchInstitutionalHistory(measured, input);
     console.info(`Workspace-wide history search: ${wallMs.toFixed(1)}ms`);
     console.info(timingTable([...measured.results.values()]));
     // With equal word coverage, keep the newest matches across 35,100 rows.

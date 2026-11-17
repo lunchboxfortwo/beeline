@@ -106,16 +106,12 @@ if (!ctx.commandTransaction || !ctx.authorizedCommand) {
 }
 
 export async function searchInstitutionalHistoryOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
-if (!ctx.commandTransaction || !ctx.authorizedCommand) {
-          throw new Error('institutional history search requires an active command');
-        }
         if (!ctx.institutionalMemoryShadow.live) {
           throw new Error('institutional memory is disabled');
         }
         return (await searchInstitutionalHistory(
           ctx.database,
-          ctx.authorizedCommand,
-          input as Input<'searchInstitutionalHistory'>,
+          { ...input as Input<'searchInstitutionalHistory'>, agentId: authenticatedAgentId },
         )) as Output<Name>;
 }
 

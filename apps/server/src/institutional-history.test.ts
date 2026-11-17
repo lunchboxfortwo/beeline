@@ -6,7 +6,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { agentToolsFor, callAgentTool } from '../../body/src/read-only-mcp.js';
-import type { CommandRow } from './agent-command.js';
 import { createAgentCommand } from './agent-command.js';
 import { DaemonService } from './daemon-service.js';
 import { LiveHub } from './live.js';
@@ -31,23 +30,6 @@ const OTHER_HUMAN = 'b'.repeat(64);
 const AGENT = 'c'.repeat(64);
 const ROOT = 'root-message';
 
-const command: CommandRow = {
-  id: 'command-1',
-  room_id: OUTPUT,
-  agent_id: AGENT,
-  source_message_id: ROOT,
-  turn_request_id: 'request-1',
-  action: 'input',
-  reason: 'test',
-  root_command_id: 'command-1',
-  parent_command_id: null,
-  root_source_message_id: ROOT,
-  agent_depth: 0,
-  state: 'pending',
-  result_message_id: null,
-  lifecycle_before: null,
-  restart_confirmed_at: null,
-};
 
 let database: PgliteDatabase;
 
@@ -169,9 +151,9 @@ describe('authorized institutional history search', () => {
     ];
     for (const args of cases) {
       const advertised = Check(schema, { scope: 'history', ...args });
-      const search = searchInstitutionalHistory(database, command, {
+      const search = searchInstitutionalHistory(database, {
         agentId: AGENT, roomId: OUTPUT, ...args,
-      } as Parameters<typeof searchInstitutionalHistory>[2]);
+      } as Parameters<typeof searchInstitutionalHistory>[1]);
       if (advertised) expect((await search).results).toBeInstanceOf(Array);
       else await expect(search).rejects.toThrow(/query is invalid|limit is invalid/);
     }
@@ -219,8 +201,8 @@ describe('authorized institutional history search', () => {
     expect(result.results[0]?.roomName).toBe('Workflow Page Redesign');
   });
 
-  it('intersects the source with the requester, agent, and complete output audience', async () => {
-    const shared = await searchInstitutionalHistory(database, command, {
+  it('intersects the source with the agent and complete output audience', async () => {
+    const shared = await searchInstitutionalHistory(database, {
       agentId: AGENT,
       roomId: OUTPUT,
       query: 'release marker',
@@ -238,7 +220,7 @@ describe('authorized institutional history search', () => {
       `UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`,
       [OUTPUT, OTHER_HUMAN],
     );
-    const privateVisible = await searchInstitutionalHistory(database, command, {
+    const privateVisible = await searchInstitutionalHistory(database, {
       agentId: AGENT,
       roomId: OUTPUT,
       query: 'release marker',
@@ -250,8 +232,7 @@ describe('authorized institutional history search', () => {
   });
 
   it('answers a corner turn whose durable request lives in the parent Room', async () => {
-    const cornerCommand: CommandRow = { ...command, id: 'command-2', room_id: CORNER };
-    const corner = await searchInstitutionalHistory(database, cornerCommand, {
+    const corner = await searchInstitutionalHistory(database, {
       agentId: AGENT,
       roomId: CORNER,
       query: 'release marker',
@@ -264,7 +245,7 @@ describe('authorized institutional history search', () => {
   });
 
   it('records the authorized Room count when the query matched nothing', async () => {
-    const empty = await searchInstitutionalHistory(database, command, {
+    const empty = await searchInstitutionalHistory(database, {
       agentId: AGENT,
       roomId: OUTPUT,
       query: 'nonexistentterm',
@@ -283,7 +264,7 @@ describe('authorized institutional history search', () => {
       transaction: (work) => inner.transaction((db) => work(recorded(db))),
     });
 
-    const searched = await searchInstitutionalHistory(recorded(database), command, {
+    const searched = await searchInstitutionalHistory(recorded(database), {
       agentId: AGENT,
       roomId: OUTPUT,
       query: 'release marker',
@@ -304,7 +285,7 @@ describe('authorized institutional history search', () => {
        FROM generate_series(1,$3::integer) series`,
       [SHARED, REQUESTER, INSTITUTIONAL_HISTORY_MATCH_SCAN_MAX + 25],
     );
-    const capped = await searchInstitutionalHistory(database, command, {
+    const capped = await searchInstitutionalHistory(database, {
       agentId: AGENT,
       roomId: OUTPUT,
       query: 'release marker',
@@ -327,7 +308,7 @@ describe('authorized institutional history search', () => {
     expect(newestWindow).not.toContain('bulk-0001');
     for (const result of capped.results) expect(newestWindow).toContain(result.messageId);
 
-    const repeated = await searchInstitutionalHistory(database, command, {
+    const repeated = await searchInstitutionalHistory(database, {
       agentId: AGENT,
       roomId: OUTPUT,
       query: 'release marker',
@@ -347,7 +328,7 @@ describe('authorized institutional history search', () => {
        ('exact-result',$1,$2,'The zxq_42 identifier.',now())`,
       [SHARED, REQUESTER],
     );
-    const result = await searchInstitutionalHistory(database, command, {
+    const result = await searchInstitutionalHistory(database, {
       agentId: AGENT,
       roomId: OUTPUT,
       query: 'steps receipts',
@@ -355,7 +336,7 @@ describe('authorized institutional history search', () => {
     });
     expect(result.results.map((row) => row.messageId)).toEqual(['step-result', 'repeated-result']);
     expect(result.results.map((row) => row.rank)).toEqual([2, 1]);
-    const exact = await searchInstitutionalHistory(database, command, {
+    const exact = await searchInstitutionalHistory(database, {
       agentId: AGENT,
       roomId: OUTPUT,
       query: 'zxq_42',
@@ -370,7 +351,7 @@ describe('authorized institutional history search', () => {
       PRIVATE,
       OTHER,
     ]);
-    const named = await searchInstitutionalHistory(database, command, {
+    const named = await searchInstitutionalHistory(database, {
       agentId: AGENT,
       roomId: OUTPUT,
       query: '"Workflow Page Redesign"',
@@ -379,14 +360,14 @@ describe('authorized institutional history search', () => {
     expect(named.results.map((row) => row.messageId)).toEqual(['shared-result']);
     expect(named.results[0]?.rank).toBe(3);
     await database.query(`UPDATE rooms SET name='Receipt rails' WHERE id=$1`, [SHARED]);
-    const renamed = await searchInstitutionalHistory(database, command, {
+    const renamed = await searchInstitutionalHistory(database, {
       agentId: AGENT,
       roomId: OUTPUT,
       query: 'receipt rail',
       limit: 10,
     });
     expect(renamed.results.map((row) => row.messageId)).toEqual(['shared-result']);
-    const previous = await searchInstitutionalHistory(database, command, {
+    const previous = await searchInstitutionalHistory(database, {
       agentId: AGENT,
       roomId: OUTPUT,
       query: 'Workflow Page Redesign',
@@ -407,7 +388,7 @@ describe('authorized institutional history search', () => {
        FROM generate_series(1,$3::integer) series`,
       [SHARED, REQUESTER, INSTITUTIONAL_HISTORY_MATCH_SCAN_MAX + 25],
     );
-    const result = await searchInstitutionalHistory(database, command, {
+    const result = await searchInstitutionalHistory(database, {
       agentId: AGENT,
       roomId: OUTPUT,
       query: 'workflow run screen UI design steps timeline',
@@ -433,7 +414,7 @@ describe('authorized institutional history search', () => {
       `INSERT INTO messages(id,room_id,author_id,text) VALUES('newer-partial',$1,$2,'The run.')`,
       [SHARED, REQUESTER],
     );
-    const result = await searchInstitutionalHistory(database, command, {
+    const result = await searchInstitutionalHistory(database, {
       agentId: AGENT,
       roomId: OUTPUT,
       query: 'workflow run steps the',
@@ -449,7 +430,7 @@ describe('authorized institutional history search', () => {
   });
 
   it('handles stopword-only and punctuation-only queries', async () => {
-    const exact = await searchInstitutionalHistory(database, command, {
+    const exact = await searchInstitutionalHistory(database, {
       agentId: AGENT,
       roomId: OUTPUT,
       query: 'the',
@@ -457,7 +438,7 @@ describe('authorized institutional history search', () => {
     });
     expect(exact.results.map((row) => row.messageId)).toEqual(['shared-result']);
     expect(exact.results[0]?.rank).toBe(1);
-    const empty = await searchInstitutionalHistory(database, command, {
+    const empty = await searchInstitutionalHistory(database, {
       agentId: AGENT,
       roomId: OUTPUT,
       query: '?!',
@@ -476,7 +457,7 @@ describe('authorized institutional history search', () => {
        ('card-named',$1,$2,'Agreed.','card',now())`,
       [SHARED, REQUESTER],
     );
-    const result = await searchInstitutionalHistory(database, command, {
+    const result = await searchInstitutionalHistory(database, {
       agentId: AGENT,
       roomId: OUTPUT,
       query: 'Workflow Page Redesign',
@@ -492,7 +473,7 @@ describe('authorized institutional history search', () => {
        VALUES('long-result',$1,$2,'Release marker '||repeat('x ',600),now())`,
       [SHARED, REQUESTER],
     );
-    const long = await searchInstitutionalHistory(database, command, {
+    const long = await searchInstitutionalHistory(database, {
       agentId: AGENT,
       roomId: OUTPUT,
       query: 'release marker',
@@ -512,7 +493,7 @@ describe('authorized institutional history search', () => {
               now()-($3::integer+1)*interval '1 day')`,
       [SHARED, REQUESTER, INSTITUTIONAL_HISTORY_MAX_AGE_DAYS],
     );
-    const windowed = await searchInstitutionalHistory(database, command, {
+    const windowed = await searchInstitutionalHistory(database, {
       agentId: AGENT,
       roomId: OUTPUT,
       query: 'release marker',
@@ -525,7 +506,7 @@ describe('authorized institutional history search', () => {
 
   it('bounds input and records content-free telemetry', async () => {
     await expect(
-      searchInstitutionalHistory(database, command, {
+      searchInstitutionalHistory(database, {
         agentId: AGENT,
         roomId: OUTPUT,
         query: 'release',
@@ -533,7 +514,7 @@ describe('authorized institutional history search', () => {
       }),
     ).rejects.toThrow('limit is invalid');
 
-    await searchInstitutionalHistory(database, command, {
+    await searchInstitutionalHistory(database, {
       agentId: AGENT,
       roomId: OUTPUT,
       query: 'release marker',
@@ -547,13 +528,7 @@ describe('authorized institutional history search', () => {
       `INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'daily triage sweep')`,
       [scheduleRoot, OUTPUT, AGENT],
     );
-    const scheduleCommand: CommandRow = {
-      ...command,
-      id: 'schedule-root-command',
-      source_message_id: scheduleRoot,
-      root_source_message_id: scheduleRoot,
-    };
-    const result = await searchInstitutionalHistory(database, scheduleCommand, {
+    const result = await searchInstitutionalHistory(database, {
       agentId: AGENT,
       roomId: OUTPUT,
       query: 'release marker',
@@ -562,20 +537,11 @@ describe('authorized institutional history search', () => {
     expect(result.results.map((row) => row.messageId)).toContain('shared-result');
   });
 
-  it('refuses when the root message\'s chat is in another Workspace than the calling chat', async () => {
-    const crossWorkspaceCommand: CommandRow = {
-      ...command,
-      id: 'cross-workspace-command',
-      source_message_id: 'cross-workspace',
-      root_source_message_id: 'cross-workspace',
-    };
-    await expect(
-      searchInstitutionalHistory(database, crossWorkspaceCommand, {
-        agentId: AGENT,
-        roomId: OUTPUT,
-        query: 'release marker',
-        limit: 10,
-      }),
-    ).rejects.toThrow(/requester authority is unavailable/);
+  it('derives its Workspace from current room access without a command root', async () => {
+    const result = await searchInstitutionalHistory(database, {
+      agentId: AGENT, roomId: OUTPUT, requestId: 'missing-command', query: 'release marker', limit: 10,
+    });
+    expect(result.results.map(row => row.messageId)).toEqual(['shared-result', ROOT]);
+    expect(result.results.every(row => row.roomId !== OTHER)).toBe(true);
   });
 });

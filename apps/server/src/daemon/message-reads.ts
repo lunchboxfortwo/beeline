@@ -94,16 +94,13 @@ import { daemonReach } from './corner-messages.js';
       )).rows[0];
     }
     let authority: { workspace_id: string; requester_identity_id: string } | undefined;
-    if (!row && ctx.authorizedCommand?.room_id === input.roomId) {
+    if (!row) {
       authority = (
         await ctx.database.query<{ workspace_id: string; requester_identity_id: string }>(
-          `SELECT output.workspace_id,root.author_id requester_identity_id
+          `SELECT output.workspace_id,$2::text requester_identity_id
            FROM rooms output
-           JOIN messages root ON root.id=$2 AND root.deleted_at IS NULL
-           JOIN rooms root_room ON root_room.id=root.room_id
-             AND root_room.workspace_id=output.workspace_id
            WHERE output.id=$1`,
-          [input.roomId, ctx.authorizedCommand.root_source_message_id],
+          [input.roomId, agentId],
         )
       ).rows[0];
       if (authority) {

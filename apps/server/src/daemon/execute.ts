@@ -101,8 +101,6 @@ import { sendMessage,replyToMessage } from '../agent-messaging.js';
       'deleteInstitutionalMemory',
       'reportInstitutionalMemoryUsed',
       'searchInstitutionalMemory',
-      'searchInstitutionalHistory',
-      'getRoomMessage',
       'loadWorkspaceSkill',
       'saveSkill',
       'deleteSkill',
@@ -181,8 +179,7 @@ import { sendMessage,replyToMessage } from '../agent-messaging.js';
       candidate.text = cleanVoiceReply(candidate.text, voiceAgentName);
 
     if (
-      !ctx.commandTransaction && scopedRoom && turnWrites.has(name) &&
-      (name !== 'getRoomMessage' || candidate.requestId !== undefined)
+      !ctx.commandTransaction && scopedRoom && turnWrites.has(name)
     ) {
       const writeStartedAt = Date.now();
       const events: LiveEvent[] = [];

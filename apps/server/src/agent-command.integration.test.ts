@@ -1,4 +1,5 @@
 import { sendMessage } from './agent-messaging.js';
+import { itemPrompt } from '../../body/src/place-prompt.js';
 import { migrate } from './database.js';
 import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { describe, expect, it, taggedIdentityIdsSql, seedCornerOpening, PhoneService, DaemonService, createAgentCommand, H, A, B, P, R, C, id, stopProofPostgresUrl, db, phone, daemon, live, commands, send, disconnectHelper, helperOwner, queuedHumanTags, queueStopOrders, claim, result, rootFixture, fixtureScope1, type SqlDatabase } from './test-support-agent-command.integration.test-support.js';
@@ -286,7 +287,8 @@ it('bootstrap identifies only pending member surfaces, including the corner pare
 it.each([R, C])('projects reply context outside the conversation window in %s', async (roomId) => {
   await rootFixture.db.query(`UPDATE messages SET created_at=now()-interval '1 day' WHERE room_id=$1`, [roomId]);
   const parentId = id();
-  const parentText = 'Five corners from the audit: '.repeat(30);
+  const parentText = 'Five corners from the audit: '.repeat(550) + 'Want me to open a thread for that?';
+  const excerpt = `${parentText.slice(0, 750)}…${parentText.slice(-750)}`;
   await rootFixture.db.query('INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,$4)',
     [parentId, roomId, B, parentText]);
   const sent = await rootFixture.phone.execute('sendRoomReply', {
@@ -294,18 +296,25 @@ it.each([R, C])('projects reply context outside the conversation window in %s', 
   }, H);
   const command = (await commands(A, roomId)).find((c) => c.sourceMessageId === sent.messageId)!;
   expect(command).toBeDefined();
-  const reply={replyToMessageId:parentId};
+  const reply={replyToMessageId:parentId, replyToAuthorId:B, replyToAuthorName:'Goosy', replyToExcerpt:excerpt};
   expect(command.source).toMatchObject(reply);
-  expect(command.source.replyToExcerpt).toBeUndefined();
+  const queued = await createAgentCommand(rootFixture.db, { id: id(), roomId, agentId: A,
+    sourceMessageId: sent.messageId, reason: 'human_tag' });
+  expect((await commands(A, roomId)).find(c => c.id === queued!.id)?.source).toMatchObject(reply);
+  expect(itemPrompt(command, { names: new Map() })).toContain(`In reply to Goosy: ${excerpt}`);
+  expect(itemPrompt(command, { names: new Map() })).toContain('Want me to open a thread for that?');
   const inbox = await rootFixture.daemon.execute('getRoomInbox', { roomId }, A);
   expect(inbox.items.find((m) => m.id === sent.messageId)).toMatchObject(reply);
   const conversation = await rootFixture.daemon.execute('getRoomConversation', { roomId, limit: 1 }, A);
   expect(conversation.items).toHaveLength(1);
   expect(conversation.items[0]).toMatchObject(reply);
   expect(conversation.items[0]?.id).toBe(sent.messageId);
-  expect(conversation.items[0]?.replyToExcerpt).toMatch(/^Five corners from the audit: .*…$/);
-  expect(conversation.items[0]?.replyToExcerpt?.length).toBeLessThanOrEqual(300);
-  console.log('Reproduction reply-context: queue freezes parent ID; explicit conversation read supplies the excerpt');
+  // Delivery uses the snapshot even after the parent and its author change.
+  await rootFixture.db.query('UPDATE messages SET text=$2 WHERE id=$1', [parentId, 'Changed parent']);
+  await rootFixture.db.query('UPDATE identities SET name=$2 WHERE id=$1', [B, 'Renamed Goosy']);
+  const redelivered = (await commands(A, roomId)).find(c => c.id === command.id)!;
+  await rootFixture.db.query('UPDATE identities SET name=$2 WHERE id=$1', [B, 'Goosy']);
+  expect(redelivered.source).toMatchObject(reply);
 });
 
 

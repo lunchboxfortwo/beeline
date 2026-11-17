@@ -1,6 +1,5 @@
 import { commandGrantAction,connectionInstallName,interpreterScriptArgument,isCommandGrantScript,type AgentGrantKind,type CommandGrantRule,type CommandGrantScript } from '@beeline/api-contract/agent-grants';
 import type { DaemonAttachment,DaemonOperationMap } from '@beeline/api-contract/daemon';
-import { REPLY_EXCERPT_MAX_LENGTH } from '@beeline/api-contract/daemon';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { createHash,randomBytes } from 'node:crypto';
 import { MESSAGE_CURSOR_MS_SQL } from '../database.js';
@@ -184,7 +183,7 @@ export const conversationColumns = `SELECT id,author_id,created_at,presentation,
         (SELECT parent.author_id FROM messages parent WHERE parent.id=messages.reply_to_message_id) reply_to_author_id,
         (SELECT author.name FROM messages parent JOIN identities author ON author.id=parent.author_id
          WHERE parent.id=messages.reply_to_message_id) reply_to_author_name,
-        (SELECT left(parent.text,${REPLY_EXCERPT_MAX_LENGTH + 1}) FROM messages parent
+        (SELECT left(parent.text,16001) FROM messages parent
          WHERE parent.id=messages.reply_to_message_id) reply_to_excerpt,
         root_message_id,request_id,
         (SELECT request.author_id FROM messages request WHERE request.id=messages.request_id) request_author_id,

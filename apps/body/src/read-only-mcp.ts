@@ -487,8 +487,8 @@ export async function daemonExecute(name: string, input: JsonObject): Promise<Js
   const body = JSON.stringify({
     ...input,
     ...(process.env.BEELINE_TURN_CONTEXT_FILE &&
-    ((!name.startsWith('get') || name.startsWith('getWallet') || name === 'getRoomMessage') &&
-      !name.startsWith('list'))
+    ((!name.startsWith('get') || name.startsWith('getWallet')) &&
+      !name.startsWith('list') && name !== 'searchInstitutionalHistory')
       ? await activeCommandContext()
       : {}),
   });

@@ -482,8 +482,8 @@ export class VoiceService {
     }
     if (request.name === 'search_history') {
       return JSON.stringify(await searchInstitutionalHistory(this.db, {
-        room_id: source.room_id, root_source_message_id: sourceId, agent_id: agentId, turn_request_id: sourceId,
-      }, { roomId: source.room_id, agentId, query: request.query, limit: 3 }));
+        roomId: source.room_id, agentId, query: request.query, limit: 3,
+      }));
     }
     if (!this.config.searchWeb) throw new Error('Voice web search is unavailable');
     return this.config.searchWeb(request.query, signal, request.currentTime);

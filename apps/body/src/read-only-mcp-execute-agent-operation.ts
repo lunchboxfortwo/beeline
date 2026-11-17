@@ -52,7 +52,7 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
     }
     case 'get_chat_message': {
       const message = await daemonExecute('getRoomMessage', {
-        roomId: requiredEnv('BEELINE_DAEMON_ROOM_ID'),
+        roomId: typeof args.address === 'string' ? args.address : agentScheduleRoomId(),
         messageId: args.messageId,
         ...(typeof args.offset === 'number' ? { offset: args.offset } : {}),
       });
@@ -187,7 +187,7 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
       return JSON.stringify(
         await daemonExecute('searchInstitutionalHistory', {
           agentId: requiredEnv('BEELINE_DAEMON_AGENT_ID'),
-          roomId: requiredEnv('BEELINE_DAEMON_ROOM_ID'),
+          roomId: agentScheduleRoomId(),
           query: args.query,
           ...(typeof args.limit === 'number' ? { limit: Math.floor(args.limit) } : {}),
         }),
