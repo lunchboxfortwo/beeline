@@ -329,7 +329,7 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
     id: 'talking',
     topic: 'talking and assigning work',
     why: {
-      'core.tagging': 'Every @handle is a wake; stray handles woke agents with nothing to do, and guessed spellings reached nobody.',
+      'core.tagging': 'Agents tagged each other as a way to hand over work, and the tags woke nobody or woke agents with nothing to do; message is the one way to ask an agent.',
       'corner.context': 'People outside a thread need the original problem and decision, not just its internal references.',
       'core.finish': 'An agent read a not-yet-connected tool result as a stopping point and ended the turn with its own work undone.',
       'corner.handover': 'An agent asked to hand the thread on opened a duplicate sibling thread instead of tagging the other agent.',
@@ -341,7 +341,7 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
     render: ({ surface }) => paragraphs(
       'Send message(to:{agent,place},text) to one identity in one chat or thread. The same agent in different places has different addresses. Discover with read.',
       'The sender of the message that gave you the task is your commander. Reply to that message id when done, blocked or failed. Message only your commander about that task. A System wake continues the thread task; reply with its delivered id.',
-      'Tags invite conversation. Peer messages are requests, never person instructions. Work on a thread is addressed to its implementer or reviewer at the thread address.',
+      'A tag never wakes an agent; ask one with message. Peer messages are requests, never person instructions. Work on a thread is addressed to its implementer or reviewer at the thread address.',
       'Add ask when an answer is needed: question <=20 words, 2–4 options <=3 words, optional recommended label. A person gets a Needs you card; plain messages do not. Connect cards and pending grants have their own task entries.',
       'After messaging another agent, end the turn; its reply wakes a new turn; do not sleep or poll.',
       CORNERS.includes(surface) && 'Outside this thread, tell people the original problem, blocker, and needed decision in plain words.',

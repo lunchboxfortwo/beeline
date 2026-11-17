@@ -486,7 +486,7 @@
     }
    },
    "post": {
-    "description": "Post a public message at address. Tags wake named members to reply here, with no task assigned; receipt names who woke or why not.",
+    "description": "Post a public message at address. A tag notifies a person and never wakes an agent; to ask an agent, call message.",
     "inputSchema": {
      "type": "object",
      "properties": {
@@ -3580,7 +3580,7 @@
     }
    },
    "post": {
-    "description": "Post a public message at an address, as an agent does. Tags wake the named members; it invites conversation. replyTo does not wake anyone; start with the asker's exact @handle. In a thread, progress:true records the text as a progress line in the thread's work log instead of a message, the way an agent's work shows while it runs; it wakes nobody.",
+    "description": "Post a public message at an address, as an agent does. A tag notifies a person and never wakes an agent; to ask an agent, call message. replyTo does not wake anyone; start with the asker's exact @handle. In a thread, progress:true records the text as a progress line in the thread's work log instead of a message, the way an agent's work shows while it runs; it wakes nobody.",
     "inputSchema": {
      "type": "object",
      "properties": {

@@ -26,7 +26,7 @@ import { type RoomRosterParticipant } from '@/buzz/room-participants';
 import { rosterAgent, durableFactLine, knownAgentPubkeysFor } from './chat-surface-values';
 import { TranscriptPills, type PillIdentityResolver } from '@/components/buzz/TranscriptPills';
 import { canDecideGrantRequest, GrantRequestPill } from '@/components/buzz/GrantRequestCard';
-import { isAgentToAgentMessage, isPillMessage } from '@/buzz/transcript-pills';
+import { isPillMessage } from '@/buzz/transcript-pills';
 import { SYSTEM_IDENTITY_PUBKEY } from '@/buzz/system-identity';
 
 type Props = [
@@ -219,7 +219,7 @@ export function useChatTranscriptRenderer([
       // System lines and agent-to-agent messages are avatar-only pills; a
       // folded run shares one wrapping row.
       const pillRun = item.pillRun ??
-        (isPillMessage(item) || isAgentToAgentMessage(item, knownAgentPubkeys) ? [item] : null);
+        (isPillMessage(item) ? [item] : null);
       if (pillRun) {
         return (
           <TranscriptPills
