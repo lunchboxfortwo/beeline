@@ -69,6 +69,7 @@ import { cancelArchivedCornerAssignments } from './corner-close.js';
 import { cornerOwedSchemaSql } from './corner-owed.js';
 import { cornerWaitingFunctionSql } from './corner-waiting.js';
 import { CORNER_ATTENTION_SCHEMA } from './corner-attention.js';
+import { MESSAGE_ASKS_INDEX_SCHEMA } from './message-asks.js';
 import { backfillCornerFollows, cornerFollowsSchemaSql } from './corner-follow.js';
 import { alreadyNoOp, alreadySatisfied, triggerAlreadyCurrent, runMigrationStep, splitMigrationStatements } from './migration-steps.js';
 import { SqlDatabase, SCHEMA, MESSAGE_CURSOR_MS_SQL } from './database.js';
@@ -518,6 +519,12 @@ export async function migrate(
      WHERE card->>'reportToId' IS NOT NULL`,
   ));
   await ddlScript('corner owed schema', cornerOwedSchemaSql());
+  await ddlScript('message question lookups', MESSAGE_ASKS_INDEX_SCHEMA);
+  await runMigrationStep('review repair parent index', () => createIndexConcurrently(
+    database, 'agent_commands_review_repair_parent_idx',
+    `CREATE INDEX CONCURRENTLY agent_commands_review_repair_parent_idx ON agent_commands(parent_command_id)
+     WHERE reason IN ('order','message') AND parent_command_id IS NOT NULL`,
+  ));
   await ddlScript('corner explicit wait function', cornerWaitingFunctionSql());
   // The idle function is built from the corner idle query. Import it after this
   // module has finished loading the command schema.

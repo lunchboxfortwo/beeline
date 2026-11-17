@@ -75,12 +75,16 @@ export async function loadCornerReviewState(db: SqlDatabase, cornerId: string, h
        UNION ALL
        SELECT message.text,false FROM messages message
        WHERE message.author_id=command.agent_id
-         AND (message.id=command.result_message_id OR message.request_id=command.turn_request_id
-           OR message.id IN (SELECT jsonb_array_elements_text(COALESCE(command.review_context->'reportIds','[]'::jsonb))))
+         -- Materialize recorded IDs as an array, not a hashed IN subplan.
+         -- The latter scans every message by this author before testing IDs.
+         AND (message.id=ANY(array_prepend(command.result_message_id,
+           ARRAY(SELECT jsonb_array_elements_text(COALESCE(command.review_context->'reportIds','[]'::jsonb)))))
+           OR message.request_id=command.turn_request_id)
          AND message.deleted_at IS NULL AND message.text ~* $3
        UNION ALL
        SELECT report.private_payload->>'text',false FROM agent_commands report
-       WHERE (report.id=command.result_message_id OR report.id IN (SELECT jsonb_array_elements_text(COALESCE(command.review_context->'reportIds','[]'::jsonb))))
+       WHERE report.id=ANY(array_prepend(command.result_message_id,
+         ARRAY(SELECT jsonb_array_elements_text(COALESCE(command.review_context->'reportIds','[]'::jsonb)))))
          AND report.private_payload->>'authorId'=command.agent_id AND report.private_payload->>'text' ~* $3
        ORDER BY delivered DESC LIMIT 1
      ) verdict ON true

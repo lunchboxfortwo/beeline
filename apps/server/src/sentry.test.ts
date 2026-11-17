@@ -594,6 +594,14 @@ it('WORKFLOW-ROLE-REFUSAL / BEELINE-SENTRY-REFUSALS / APP-REFUSAL-5: real agent 
         const outage = await call({...input,appId:'app:slack',tool:'SLACK_FETCH',arguments:{}},'executeAppTool');
         assert.equal(outage.status,503);
         assert.equal(outage.body.error,'App provider request failed (500): upstream broken');
+        // A Room command may address a thread that closed before rename.
+        // Preserve the refusal and state; this is a conflict, not an outage.
+        const archived = '55555555-5555-4555-8555-555555555555';
+        await db.query("INSERT INTO rooms(id,workspace_id,parent_id,name,archived_at) VALUES($1,$2,$3,'Closed',now())",[archived,workspace,room]);
+        await db.query("INSERT INTO corner_facts(corner_id) VALUES($1)",[archived]);
+        const rename = await call({roomId:room,requestId:pending.turnRequestId,cornerId:archived,name:'Renamed'},'renameCorner');
+        assert.deepEqual(rename,{status:409,body:{error:'thread is archived'}});
+        assert.equal((await db.query('SELECT name FROM rooms WHERE id=$1',[archived])).rows[0].name,'Closed');
         // The exact same wording on an unexpected failure must still alert.
         daemon.execute = async () => { throw new Error('queued attachments exceed the size cap'); };
         assert.equal((await call()).status,503);

@@ -32,6 +32,32 @@ const scope2 = fixtureScope2();
     await expect(synced).resolves.toEqual({ type: 'sync-ok' });
     expect(query).not.toHaveBeenCalled();
   });
+
+  it('handles a failed phone lease renewal while continuing to answer socket traffic', async () => {
+    const failure = new Error('timeout exceeded when trying to connect');
+    const renewLease = vi.fn().mockRejectedValue(failure);
+    const report = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const server = createBeelineServer({
+        database: { query: vi.fn(), transaction: vi.fn() },
+        auth: { authenticatePhone: vi.fn().mockResolvedValue('reader') } as unknown as TokenAuth,
+        phone: { canReadRooms: canReadRoomsFrom(async () => true) } as unknown as PhoneService,
+        daemon: { execute: vi.fn() } as unknown as DaemonService,
+        connectionPresence: { holdServerConnection: () => () => {}, renewLease } as never,
+        live: new LiveHub(), mediaMaximumBytes: 1,
+      });
+      scope2.servers.push(server);
+      await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+      const socket = new WebSocket(`ws://127.0.0.1:${(server.address() as AddressInfo).port}/v1/phone/live`, ['bearer.phone-token']);
+      scope2.sockets.push(socket);
+      await new Promise<void>((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });
+      const pong = nextSocketMessage(socket, 'pong');
+      socket.send(JSON.stringify({ type: 'ping' }));
+      await expect(pong).resolves.toEqual({ type: 'pong' });
+      expect(renewLease).toHaveBeenCalledOnce();
+      expect(report).toHaveBeenCalledWith('[live] lease renewal failed', failure);
+    } finally { report.mockRestore(); }
+  });
 });
 describe('daemon operation presence evidence', () => {
 const scope3 = fixtureScope3();

@@ -231,7 +231,12 @@ describe('thread message attribution', () => {
     if (surface === 'message') await findings(review!, '@hoots FAIL: repair the old head.');
     else await rootFixture.daemon.execute('postCornerMessage', { roomId: C, cornerId: C, requestId: review!.turnRequestId, text: '@hoots FAIL: repair the old head.' }, B);
     expect((await commands(A, C)).map(item => item.source.body)).toEqual(surface==='message' ? ['@hoots FAIL: repair the old head.'] : []);
-    expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND text LIKE '%repair the old head%'`, [C])).rowCount).toBe(surface==='post' ? 1 : 0);
+    // Agent messages leave a transcript reference card for their committed
+    // command; only post publishes ordinary conversation text.
+    expect((await rootFixture.db.query(`SELECT presentation,card_type FROM messages
+      WHERE room_id=$1 AND text LIKE '%repair the old head%'`, [C])).rows).toEqual([
+      { presentation: surface==='post' ? 'message' : 'card', card_type: surface==='post' ? null : 'agent-command' },
+    ]);
     expect((await rootFixture.db.query(`SELECT state FROM agent_commands WHERE id=$1`, [review!.id])).rows)
       .toEqual([{state:surface === 'message' ? 'complete' : 'pending'}]);
   });

@@ -1,4 +1,12 @@
-
+/** Questions live in the recipient's Room; their origin and reply are payload
+ * keys, so room/agent command indexes cannot serve these corner reads. */
+export const MESSAGE_ASKS_INDEX_SCHEMA = `
+CREATE INDEX IF NOT EXISTS agent_commands_message_ask_origin_idx ON agent_commands
+  ((private_payload->'route'->'from'->>'place')) WHERE private_payload->'messageAsk' IS NOT NULL;
+CREATE INDEX IF NOT EXISTS agent_commands_message_reply_idx ON agent_commands
+  ((private_payload->>'inReplyTo'),(private_payload->'route'->'from'->>'agent'))
+  WHERE private_payload->>'inReplyTo' IS NOT NULL;
+`;
 /** Each message owns its own question; unrelated output never answers it. */
 export function messageAsksSql(corner:string):string {
   return `SELECT ${corner}.id corner_id,question.report_id,question.message_id,NULL::text card_id,

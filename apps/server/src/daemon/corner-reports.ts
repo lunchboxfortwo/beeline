@@ -159,7 +159,7 @@ import { id,Input,Output } from './values.js';
         )
       ).rows[0];
       if (!corner?.parent_id) throw new Error('thread not found');
-      if (corner.archived_at) throw new Error('thread is archived');
+      if (corner.archived_at) throw new CommandRefusalError('thread is archived', 409);
       name ??= corner.name;
       if (input.reviewer !== undefined) await setCornerReviewer(db, input.cornerId, input.reviewer, agentId,
         (id, reviewer) => daemonCheckReviewerAuthors(ctx, db, id, reviewer));

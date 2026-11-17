@@ -3653,6 +3653,9 @@
       "drawing": {},
       "private_payload": {
         "kind": "existing before the registry; weekly audit reviews",
+        "route": "The recorded sender and destination preserve message authority across delivery and replies.",
+        "messageAsk": "An explicit message question remains independently unanswered until its own recipient replies.",
+        "inReplyTo": "The exact question being answered cannot be inferred from subsequent conversation text.",
         "automatic": "Identifies server-generated reminders so silent-wake limits do not suppress explicit commander reports.",
         "authorId": "existing before the registry; weekly audit reviews",
         "fromRoomId": "existing before the registry; weekly audit reviews",

@@ -1,4 +1,4 @@
-import { withSentryUser } from "./sentry.js";
+import { captureServerError, withSentryUser } from "./sentry.js";
 import type { WebSocket } from "ws";
 import type { DaemonLiveDependencies } from "./daemon-live.js";
 import type { LiveEvent, LiveTrace } from "./live.js";
@@ -63,7 +63,12 @@ export function handleLiveConnection(ctx: LiveConnectionContext, client: WebSock
         return;
       }
       const releaseServerConnection = ctx.options.connectionPresence?.holdServerConnection();
-      client.on('message', () => { void ctx.options.connectionPresence?.renewLease(); });
+      client.on('message', () => {
+        void ctx.options.connectionPresence?.renewLease().catch(error => {
+          captureServerError(error, { surface: 'live' });
+          console.error('[live] lease renewal failed', error);
+        });
+      });
       client.once('close', () => releaseServerConnection?.());
       client.once('error', () => releaseServerConnection?.());
       ctx.options.live.humanConnected(principal.identityId);
