@@ -82,16 +82,17 @@ export function activityReplyParent(
 /** Reply affordances and target installation share the same parent eligibility. */
 export function canBeginReply(message: ChatDisplayMessage, roomId: string): boolean {
   return !message.isAgentDraft && Boolean(
-    message.isAgentActivity || message.agentCommand || message.choice || message.reference?.channelId === roomId,
+    message.isAgentActivity || message.agentCommand || message.choice ||
+      message.presentation === 'card' || message.reference?.channelId === roomId,
   );
 }
 
 /**
  * The reply target for a transcript row, or null when the row cannot be a
- * parent in this Room. Activity rows borrow their turn's real parent. An
- * agent-command record or choice has no server reference because it is emitted
- * as a card: Reply addresses its sender as an ordinary message instead of
- * inventing parent proof. A card that ever gains a real reference uses it.
+ * parent in this Room. Activity rows borrow their turn's real parent. A
+ * card carries its server-projected reference as the parent proof. Legacy
+ * cached cards and agent-command records may lack that reference; they still
+ * address their sender without inventing proof.
  */
 export function beginReplyTarget(
   message: ChatDisplayMessage,
@@ -105,7 +106,7 @@ export function beginReplyTarget(
     ...display,
     ...(message.reference ? { reference: message.reference } : {}),
   };
-  if (message.agentCommand || message.choice) return target;
+  if (message.agentCommand || message.choice || message.presentation === 'card') return target;
   return target.reference?.channelId === roomId ? target : null;
 }
 

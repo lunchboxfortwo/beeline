@@ -128,6 +128,18 @@ describe('phone contract', () => {
       footer: 'closed · 3 of 4 voted',
     };
     expect(isRoomView({ ...room, messages: [{ ...message, choice }] })).toBe(true);
+    // Hash-derived choice IDs predate UUID variant normalization. They remain
+    // valid choice keys, while other IDs and malformed choice keys stay strict.
+    for (const choiceId of ['12345678-1234-4123-e123-123456789abc', choice.choiceId]) {
+      expect(readRoomView({ ...room, messages: [{ ...message, choice: { ...choice, choiceId } }] })
+        ?.messages[0]?.choice?.choiceId).toBe(choiceId);
+    }
+    for (const choiceId of ['', 'not-a-choice-id', '12345678-1234-4123-z123-123456789abc']) {
+      expect(readRoomView({ ...room, messages: [{ ...message, choice: { ...choice, choiceId } }] })
+        ?.messages[0]?.choice).toBeUndefined();
+    }
+    expect(readRoomView({ ...room, room: { ...room.room, id: '12345678-1234-4123-e123-123456789abc' } }))
+      .toBeNull();
     const humanPoll = { ...choice, status: 'open', agent: identity };
     expect(
       readRoomView({ ...room, messages: [{ ...message, choice: humanPoll }] })?.messages[0]?.choice,

@@ -215,7 +215,7 @@ export function projectedMessage(
     ...(row.deleted_at ? { deleted: true } : {}),
     ...(row.bookmarked ? { bookmarked: true } : {}),
     ...(row.feedback_reported ? { feedbackReported: true } : {}),
-    ...(row.presentation === 'message'
+    ...((row.presentation === 'message' || row.presentation === 'card')
       ? {
           reference: {
             channelId: row.room_id,

@@ -15,10 +15,10 @@ import { AgentSignInCard } from '@/components/buzz/AgentSignInCard';
 import { ComputerSessionCard } from '@/components/buzz/ComputerSession';
 import { resolveAgentDisplayIdentity } from '@/buzz/agent-display';
 import { messageJumpHref } from '@/buzz/corner-navigation';
-import { type MessageReplyDisplayTarget } from '@/buzz/message-reply';
+import { canBeginReply, type MessageReplyDisplayTarget } from '@/buzz/message-reply';
 import { archiveActionPresentation, liveCardPresentation, messageFailureGroups, messageRosterPresentation, useRoomMessageRenderItem } from '@/buzz/room-message-cell';
 import type { RoomMessagePresentation, RoomMessageRenderContext } from '@/buzz/room-message-cell';
-import { GitHubEventCard, NotificationLifecycleCard, DaemonFactCard, GrantRequestCard, SquireApprovalCard, ConnectorOfferCard, AppSignInCard, ChoiceCard, WalletCards, agentCommandTranscriptMessage, OrdinaryLedgerMessage, TargetBranchProposalCard, WritePermissionCard } from './RoomMessageVariants';
+import { GitHubEventCard, NotificationLifecycleCard, DaemonFactCard, GrantRequestCard, SquireApprovalCard, ConnectorOfferCard, AppSignInCard, ChoiceCard, WalletCards, agentCommandTranscriptMessage, OrdinaryLedgerMessage, TargetBranchProposalCard, WritePermissionCard, SwipeToReply } from './RoomMessageVariants';
 import { monolithPhoneOperation, phoneOperationFailureReason } from '@/sync/transport/monolith-operation';
 import { CornerOpenedMarkers } from '@/components/buzz/CornerOpenedMarker';
 import { LedgerRoomUpdate, LedgerSystemLine } from '@/components/buzz/Ledger';
@@ -192,6 +192,10 @@ export function useChatTranscriptRenderer([
       // closure still supplies handlers, layout flags, viewer pubkey, room
       // name, and the full handle list; mentionHandles is what makes a row
       // read that list again.
+      // Every card, including an unknown or rejected payload, gets this row's
+      // shared reply gesture. Ordinary messages own their richer interactions.
+      let ownsReplyGesture = false;
+      const renderContent = () => {
       const rowViewer = rowViewerIsAgent !== undefined ? rowViewerIsAgent : viewerIsAgent;
       const rowManage = rowCanManage !== undefined ? rowCanManage : canManageWorkspace;
       const rowPermission = rowPermissionActionId !== undefined ? rowPermissionActionId : permissionActionId;
@@ -319,7 +323,6 @@ export function useChatTranscriptRenderer([
             actionId={rowChoice}
             onAnswer={handleChoiceAnswer}
             onSkip={handleChoiceSkip}
-            onReply={!rowDesktopLayout && !isReadOnlyDirectMessage ? beginReply : undefined}
           />
         );
       }
@@ -568,6 +571,7 @@ export function useChatTranscriptRenderer([
           onDismiss={dismissOutboxMessage}
         />
       );
+      ownsReplyGesture = item.presentation !== 'card';
       return item.cornerMarkers?.length ? (
         <YStack>
           {ledgerMessage}
@@ -575,6 +579,17 @@ export function useChatTranscriptRenderer([
         </YStack>
       ) : (
         ledgerMessage
+      );
+      };
+      const content = renderContent();
+      if (!content || ownsReplyGesture || rowDesktopLayout || isReadOnlyDirectMessage ||
+        !canBeginReply(item, decodedId)) return content;
+      return (
+        <SwipeToReply messageId={item.id} isDesktop={false} replyOnly
+          onReply={() => beginReply(item)}
+          onLongPress={() => undefined} onReact={() => undefined} onForward={() => undefined}>
+          {content}
+        </SwipeToReply>
       );
     },
     [

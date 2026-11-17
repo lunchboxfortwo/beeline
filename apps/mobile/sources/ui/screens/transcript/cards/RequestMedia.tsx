@@ -10,12 +10,13 @@ import { useIsDesktop } from '@/utils/responsive';
  */
 export function RequestMedia({ message }: { message: ChatDisplayMessage }) {
     const desktop = useIsDesktop();
-    const image = message.attachments?.find(
+    const images = message.attachments?.filter(
         (attachment) => !attachment.expired && artifactFormat(attachment.mimeType) === 'image',
     );
-    if (!image) return null;
+    if (!images?.length) return null;
     const author = message.authorIdentity?.kind === 'agent'
         ? (message.authorIdentity.handle ?? message.authorIdentity.name).replace(/^@/, '')
         : undefined;
-    return <ArtifactCard attachment={image} authorHandle={image.author ?? author} isDesktop={desktop} />;
+    return <>{images.map(image => <ArtifactCard key={image.url} attachment={image}
+        authorHandle={image.author ?? author} isDesktop={desktop} />)}</>;
 }

@@ -86,6 +86,7 @@ vi.mock('@/app/(app)/beeline/chat/RoomMessageVariants', async () => {
   return {
     agentCommandTranscriptMessage,
     OrdinaryLedgerMessage: ({ message }: any) => <Text>{message.text}</Text>,
+    SwipeToReply: ({ children }: any) => <>{children}</>,
     GitHubEventCard: () => null, NotificationLifecycleCard: () => null, DaemonFactCard: () => null,
     GrantRequestCard: () => null, SquireApprovalCard: () => null, ConnectorOfferCard: () => null,
     AppSignInCard: () => null, ChoiceCard: () => null, WalletCards: () => null,

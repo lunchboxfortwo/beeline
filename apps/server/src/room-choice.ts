@@ -363,8 +363,15 @@ export async function postRoomChoice(
     )).rows[0] : undefined;
   const requester = requesterRow ? cardIdentity(requesterRow) : undefined;
   const mentionIds = await loadMentionIds(database, input.roomId, prompt, constraint);
-  const digest = input.messageId ? createHash('sha256').update(`message-ask:${input.messageId}`).digest('hex') : undefined;
-  const choiceId = digest ? `${digest.slice(0,8)}-${digest.slice(8,12)}-4${digest.slice(13,16)}-${digest.slice(16,20)}-${digest.slice(20,32)}` : randomUUID();
+  const digest = input.messageId ? createHash('sha256').update(`message-ask:${input.messageId}`).digest() : undefined;
+  if (digest) {
+    digest.writeUInt8((digest.readUInt8(6) & 0x0f) | 0x40, 6);
+    digest.writeUInt8((digest.readUInt8(8) & 0x3f) | 0x80, 8);
+  }
+  const hex = digest?.subarray(0, 16).toString('hex');
+  let choiceId = hex
+    ? `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20,32)}`
+    : randomUUID();
   const messageId = input.messageId ?? randomBytes(32).toString('hex');
   const closesAt = ttlSeconds ? new Date(Date.now() + ttlSeconds * 1000) : null;
   const card = buildChoiceCard({
@@ -400,6 +407,15 @@ export async function postRoomChoice(
     card: card as unknown as Record<string, unknown>,
     ...(input.requestId ? { requestId: input.requestId } : {}),
   });
+  // Publication serializes replays of a message. Read its stored choice after
+  // that boundary so even a concurrent legacy writer keeps its original ID.
+  if (input.messageId) {
+    const existing = (await database.query<{ id: string }>(
+      'SELECT id FROM room_choices WHERE message_id=$1 AND room_id=$2 AND agent_id=$3 LIMIT 1',
+      [input.messageId, input.roomId, input.agentId],
+    )).rows[0];
+    if (existing) choiceId = existing.id;
+  }
   await database.query(
     `INSERT INTO room_choices(
        id,room_id,workspace_id,agent_id,message_id,mode,prompt,constraint_text,options,

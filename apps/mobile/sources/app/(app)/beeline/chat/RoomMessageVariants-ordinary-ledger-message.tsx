@@ -580,7 +580,8 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
       </>
     </NewMessageMaterialize>
   );
-  if (announcementFeed) return content;
+  // Card rows use the transcript's shared wrapper, including parser fallbacks.
+  if (announcementFeed || message.presentation === 'card') return content;
   return (
     <SwipeToReply
       messageId={message.id}

@@ -189,6 +189,8 @@ export function createRoomMessageProjector(): RoomMessageProjector {
 
 /** Presentation-only row. It is recomputed from server DTO partitions and is never persisted. */
 export type ChatDisplayMessage = {
+  /** Retain the validated row kind even when a card's optional payload is rejected. */
+  presentation?: RoomViewMessage['presentation'];
   id: string;
   text: string;
   isUser: boolean;
@@ -362,6 +364,7 @@ export function displayRoomMessage(
     : undefined;
   return {
     id: message.id,
+    presentation: message.presentation,
     relayId: message.id,
     text: message.text,
     timestamp: message.createdAt,

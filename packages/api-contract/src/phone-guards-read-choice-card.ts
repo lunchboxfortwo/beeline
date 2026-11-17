@@ -15,7 +15,12 @@ function readChoiceCard(value: unknown): ChoiceCardView | null {
   const options = readList(item?.options, readChoiceOption);
   if (
     !item ||
-    !uuid(item.choiceId) ||
+    // Idempotent choices historically used a SHA-derived UUID without setting
+    // the variant bits. Keep those durable IDs readable without relaxing Room
+    // IDs or other UUID contracts.
+    !(typeof item.choiceId === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(item.choiceId) ||
+      uuid(item.choiceId)) ||
     !isChoiceMode(item.mode) ||
     !isChoiceStatus(item.status) ||
     !agent ||
