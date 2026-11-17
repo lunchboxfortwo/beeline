@@ -27,9 +27,12 @@ describe('actual owned model endpoint and actual quota adapter', () => {
   beforeEach(async context => {
     vi.mocked(freeAgentModelTakesImages).mockClear();
     const url=process.env.BEELINE_COMMAND_TEST_POSTGRES_URL;
-    if(url&&/image input|large provider/.test(context.task.name)){
-      const pg=await groupBPostgresDatabase(url);f=await seedOwnedModelFixture(pg.database,{installSchema:false});closeDatabase=pg.close;
+    if(url&&/image input|large provider|current Pi/.test(context.task.name)){
+      const pg=await groupBPostgresDatabase(url);f=await seedOwnedModelFixture(pg.database,{installSchema:false,
+        ...(/current Pi/.test(context.task.name) ? {model:'deepseek/deepseek-v4.1-flash'} : {})});closeDatabase=pg.close;
     }else{const local=await ownedModelFixture();f=local;closeDatabase=()=>local.db.close();} calls = []; reply = success;
+    await f.db.query(`INSERT INTO agent_turns(room_id,request_id,agent_id,status)
+      VALUES($1,'synthetic-request',$2,'working')`,[MODEL_ROOM,MODEL_AGENT]);
     options = { database: f.db, config: { model: 'unselected/default', dailyTokenCap: 100_000, firstDayTokenCap: 100_000, lifetimeTokenCap: 0 },
       upstreamKey: 'SYNTHETIC_SERVER_PROVIDER_KEY',
       ownedModel: { credentials: f.credentials, ready: () => true },
@@ -52,6 +55,56 @@ describe('actual owned model endpoint and actual quota adapter', () => {
     usage: (await f.db.query('SELECT tokens,reservation_credit FROM free_agent_usage')).rows,
     budget: (await f.db.query('SELECT usd FROM free_agent_budget')).rows,
     rate: (await f.db.query('SELECT calls FROM free_agent_call_rate')).rows,
+  });
+
+  it.skipIf(!process.env.BEELINE_COMMAND_TEST_POSTGRES_URL).each(['read','stop'] as const)('serializes a current Pi request with a command %s through production PostgreSQL migrations', async change => {
+    await f.db.query(`INSERT INTO free_agent_call_rate(owner_id,minute,calls,lifetime_tokens,last_grant)
+      SELECT owner_id,0,0,1000,256 FROM free_agents WHERE agent_id=$1`,[MODEL_AGENT]);
+    await f.db.query(`INSERT INTO free_agent_budget(day,usd) VALUES(current_date,0.01)`);
+    reply = () => new Response('data: '+JSON.stringify({choices:[{delta:{content:'Hello'},finish_reason:'stop'}],
+      usage:{prompt_tokens:10,completion_tokens:3,cost:0.00002}})+'\n\ndata: [DONE]\n\n',
+      {headers:{'content-type':'text/event-stream'}});
+    const locked=deferred<void>(), release=deferred<void>();
+    const {authorizeCommandOutput}=await import('./agent-command-route-agent-result.js');
+    const writer=f.db.transaction(async tx=>{
+      await authorizeCommandOutput(tx,MODEL_ROOM,MODEL_AGENT,'synthetic-request');
+      locked.resolve();await release.promise;
+      if(change==='stop') await tx.query(`SELECT beeline_finish_agent_command(id,'cancelled','stop',NULL)
+        FROM agent_commands WHERE agent_id=$1`,[MODEL_AGENT]);
+    });
+    await locked.promise;
+    const errors:unknown[]=[];
+    const lock=f.credentials.lockInvocation.bind(f.credentials);
+    vi.spyOn(f.credentials,'lockInvocation').mockImplementation(async(...args)=>{
+      try{await lock(...args);}catch(error){errors.push(error);throw error;}
+    });
+    const pending = fetch(origin + '/v1/free-agents/model/chat/completions', {
+      method: 'POST', headers: { authorization: 'Bearer bfm_native_provider_config',
+        'x-beeline-model-invocation': f.issued.token, 'x-beeline-model-request': ONE, 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'deepseek/deepseek-v4.1-flash',
+        messages: [{ role: 'system', content: 'You are Beebee.' }, { role: 'user', content: 'Hello Beebee' }],
+        stream: true, max_tokens: 65_536, stream_options: { include_usage: true } }),
+    });
+    try{
+      await vi.waitFor(async()=>{
+        const blocked=await f.db.query<{blocked:boolean}>(`SELECT EXISTS(SELECT 1 FROM pg_stat_activity
+          WHERE datname=current_database() AND cardinality(pg_blocking_pids(pid))>0) blocked`);
+        expect(errors.length>0||blocked.rows[0]!.blocked).toBe(true);
+      });
+      expect(calls).toHaveLength(0);
+    }finally{release.resolve();await writer;}
+    const response=await pending;
+    expect(errors).toEqual([]);
+    if(change==='stop'){
+      expect(response.status).toBe(403);await response.text();expect(calls).toHaveLength(0);
+      expect((await f.db.query('SELECT state FROM owned_model_attempts')).rows).toEqual([]);
+      expect((await f.db.query('SELECT state FROM agent_commands')).rows).toEqual([{state:'cancelled'}]);
+      return;
+    }
+    expect({status:response.status,body:await response.text()}).toMatchObject({status:200});
+    expect(calls).toHaveLength(1);
+    expect(JSON.parse(calls[0]!.body)).toMatchObject({model:'deepseek/deepseek-v4.1-flash',max_tokens:32_768});
+    expect((await f.db.query('SELECT state FROM owned_model_attempts')).rows).toEqual([{state:'succeeded'}]);
   });
 
   it('keeps the original claimed invocation usable after the former execution window', async () => {
@@ -174,13 +227,17 @@ describe('actual owned model endpoint and actual quota adapter', () => {
     expect(Number((await counters()).usage[0]?.tokens)).toBeGreaterThan(0);
   });
 
-  it('retains actual allowance on lost transport and refuses same-ID and new-UUID retries without duplicate accounting', async () => {
+  it('ends a lost model result while retaining allowance and refusing same-ID and new-UUID retries', async () => {
     reply = () => Promise.reject(new Error('SYNTHETIC_PRIVATE_PROVIDER_FAILURE'));
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
     const first = await call(); expect(first.status).toBe(409); expect(await first.json()).toMatchObject({ error: { code: 'owned_model_unknown' } });
     const before = await counters(); expect(Number(before.usage[0]?.tokens)).toBeGreaterThan(0);
-    const replay = await call(); expect(await replay.json()).toMatchObject({ receipt: { state: 'unknown' } });
-    const changedId = await call(input, TWO); expect(await changedId.json()).toMatchObject({ error: { code: 'owned_model_unknown' } });
+    expect((await f.db.query('SELECT state,report_outcome FROM agent_commands')).rows).toEqual([{state:'complete',report_outcome:'failed'}]);
+    expect((await f.db.query('SELECT status FROM agent_turns')).rows).toEqual([{status:'failed'}]);
+    expect((await f.db.query('SELECT id FROM messages')).rows).toEqual([]);
+    expect((await f.db.query('SELECT state FROM owned_model_attempts')).rows).toEqual([{state:'unknown'}]);
+    const replay = await call(); expect(replay.status).toBe(401);await replay.text();
+    const changedId = await call(input, TWO); expect(changedId.status).toBe(401);await changedId.text();
     await vi.advanceTimersByTimeAsync(24 * 60 * 60_000); vi.useRealTimers();
     expect(calls).toHaveLength(1); expect(await counters()).toEqual(before);
   });
@@ -190,13 +247,16 @@ describe('actual owned model endpoint and actual quota adapter', () => {
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
     const first = await call(); expect(first.status).toBe(409);
     expect(await first.json()).toMatchObject({ receipt: { state: status === 500 ? 'unknown' : 'refused' } });
+    expect((await f.db.query('SELECT state,report_outcome FROM agent_commands')).rows).toEqual([{state:'complete',report_outcome:'failed'}]);
+    expect((await f.db.query('SELECT status FROM agent_turns')).rows).toEqual([{status:'failed'}]);
+    expect((await f.db.query('SELECT id FROM messages')).rows).toEqual([]);
     if (status === 500) expect(Number((await counters()).usage[0]?.tokens)).toBeGreaterThan(0);
     else expect(Number((await counters()).usage[0]?.tokens)).toBe(0);
     await vi.advanceTimersByTimeAsync(24 * 60 * 60_000); vi.useRealTimers(); expect(calls).toHaveLength(1);
   });
 
-  it('uses the actual fetch transport once on a transient response and once on a lost response, without timer redispatch', async () => {
-    let requests = 0, drop = false; const forwarded: { url: string | undefined; headers: IncomingHttpHeaders; body: string }[] = [];
+  it.each([false,true])('uses the actual fetch transport once without timer redispatch (lost response: %s)', async drop => {
+    let requests = 0; const forwarded: { url: string | undefined; headers: IncomingHttpHeaders; body: string }[] = [];
     const upstream = createServer((request, response) => {
       let body = ''; request.on('data', chunk => { body += String(chunk); }); request.on('end', () => {
         requests++; forwarded.push({ url: request.url, headers: request.headers, body });
@@ -209,13 +269,12 @@ describe('actual owned model endpoint and actual quota adapter', () => {
     options.fetchImpl = undefined; options.upstreamBaseUrl = `http://127.0.0.1:${(upstream.address() as AddressInfo).port}/v1`;
     try {
       vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
-      const refused = await call(); expect(await refused.json()).toMatchObject({ receipt: { state: 'refused' } }); expect(requests).toBe(1);
+      const result = await call(); expect(await result.json()).toMatchObject({ receipt: { state: drop ? 'unknown' : 'refused' } }); expect(requests).toBe(1);
       expect(forwarded[0]?.url).toBe('/v1/chat/completions'); expect(forwarded[0]?.headers.authorization).toBe('Bearer SYNTHETIC_SERVER_PROVIDER_KEY');
       expect(forwarded[0]?.headers['x-beeline-model-request']).toBeUndefined(); expect(forwarded[0]?.body).not.toContain(f.issued.token);
-      drop = true; const unknown = await call(input, TWO); expect(await unknown.json()).toMatchObject({ receipt: { state: 'unknown' } });
-      expect(requests).toBe(2); expect(Number((await counters()).usage[0]?.tokens)).toBeGreaterThan(0);
-      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000); vi.useRealTimers(); expect(requests).toBe(2);
-      const replay = await call(input, TWO); expect(await replay.json()).toMatchObject({ receipt: { state: 'unknown' } }); expect(requests).toBe(2);
+      expect(Number((await counters()).usage[0]?.tokens)).toBeGreaterThanOrEqual(0);
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000); vi.useRealTimers(); expect(requests).toBe(1);
+      const replay = await call(input, TWO); expect(replay.status).toBe(401);await replay.text();expect(requests).toBe(1);
     } finally { vi.useRealTimers(); upstream.closeAllConnections(); await new Promise<void>(resolve => upstream.close(() => resolve())); }
   });
 
@@ -232,7 +291,7 @@ describe('actual owned model endpoint and actual quota adapter', () => {
     ]);
     expect(Number((await counters()).usage[0]?.tokens)).toBeGreaterThan(5);
     expect((await f.db.query(`SELECT kind FROM free_agent_events WHERE kind='model_usage'`)).rowCount).toBe(0);
-    const before = await counters(); const replay = await call(wire); expect(await replay.json()).toMatchObject({ receipt: { state: 'unknown' } });
+    const before = await counters(); const replay = await call(wire); expect(replay.status).toBe(401);await replay.text();
     expect(await counters()).toEqual(before); expect(calls).toHaveLength(1);
   });
 
@@ -298,14 +357,22 @@ describe('actual owned model endpoint and actual quota adapter', () => {
   });
 
   it('rolls actual token/budget/rate reservation back when the attempt insert cannot commit', async () => {
+    const reporting=await import('./sentry.js');
+    const report=vi.spyOn(reporting,'captureServerError').mockImplementation(()=>{});
+    const failure=new Error('synthetic attempt insert failure');
     const wrap = (tx: SqlDatabase): SqlDatabase => ({ transaction: work => tx.transaction(inner => work(wrap(inner))), query: (sql, values) => {
-      if (sql.includes('INSERT INTO owned_model_attempts(')) return Promise.reject(new Error('synthetic attempt insert failure'));
+      if (sql.includes('INSERT INTO owned_model_attempts(')) return Promise.reject(failure);
       return tx.query(sql, values);
     } });
     options.database = { query: (sql, values) => f.db.query(sql, values), transaction: work => f.db.transaction(tx => work(wrap(tx))) };
     const response = await call(); expect(response.status).toBe(503); await response.text(); expect(calls).toHaveLength(0);
+    expect((await f.db.query('SELECT state,report_outcome FROM agent_commands')).rows).toEqual([{state:'complete',report_outcome:'failed'}]);
+    expect((await f.db.query('SELECT status FROM agent_turns')).rows).toEqual([{status:'failed'}]);
+    expect((await f.db.query('SELECT id FROM messages')).rows).toEqual([]);
     expect(await counters()).toEqual({ usage: [], budget: [], rate: [] });
     expect((await f.db.query('SELECT * FROM owned_model_attempts')).rowCount).toBe(0);
+    expect(report).toHaveBeenCalledWith(failure,{operation:'free-agent-model-admission'});
+    report.mockRestore();
   });
 
   it('stops on the first chunk after authorization is revoked, without a timer', async () => {

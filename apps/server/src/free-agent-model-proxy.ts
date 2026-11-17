@@ -10,6 +10,8 @@ import { FreeAgentPromptCache, promptTextBytes } from './free-agent-prompt-budge
 import { OwnedModelAttempts, OwnedModelUnknownPayload, type OwnedModelAttemptReceipt, type OwnedModelEvidence, type OwnedModelReservation } from './owned-model-attempt.js';
 import { OwnedModelCredentials, type AuthenticatedOwnedModel } from './owned-model-credential.js';
 import { CommandRefusalError } from './command-refusal.js';
+import { endAgentTurn } from './agent-turn-end.js';
+import { captureServerError } from './sentry.js';
 import { AllowanceRefusal as OwnedModelAllowanceRefusal, DEFAULT_OUTPUT_RESERVATION, reserveAllowance, reserveAllowanceInTransaction, settleAllowance } from './free-agent-accounting.js';
 export { reserveAllowance } from './free-agent-accounting.js';
 
@@ -261,7 +263,6 @@ function ownedUsage(value: Usage | undefined, limits: FreeAgentLimits): { tokens
  * Schema/signer/claim/installed-helper negotiation must all precede ready(). */
 async function handleOwnedFreeAgentModel(request: IncomingMessage, response: ServerResponse, token: string,
   options: FreeAgentModelProxyOptions): Promise<boolean> {
-  const respondOutcome=(receipt:OwnedModelAttemptReceipt)=>ownedOutcome(response,receipt,token);
   const selected = options.ownedModel;
   if (!selected?.ready()) {
     sendJson(response, 401, { error: { code: 'owned_model_unavailable', message: 'Owned model access is unavailable' } }); return true;
@@ -276,12 +277,28 @@ async function handleOwnedFreeAgentModel(request: IncomingMessage, response: Ser
     sendJson(response, 400, { error: { message: 'Owned model request identity is required' } }); return true;
   }
   const binding = selected.credentials.actor(actor), limits = options.config.limits ?? DEFAULT_FREE_AGENT_LIMITS;
+  let modelSucceeded = false;
+  const respondOutcome = (receipt: OwnedModelAttemptReceipt) => {
+    modelSucceeded = receipt.state === 'succeeded';
+    ownedOutcome(response, receipt, token);
+  };
+  // A failed hosted call ends its item through the same owner as answers and
+  // Stop. UNKNOWN billing evidence stays retained; no new chat line is posted.
+  const failTurn = async () => {
+    try {
+      await options.database.transaction(async db => {
+        if (await endAgentTurn(db, { id: binding.commandId }, 'failed'))
+          await db.query('SELECT beeline_record_agent_answer($1,true,NULL)', [binding.commandId]);
+      });
+    } catch (error) { captureServerError(error, { operation: 'free-agent-model-failure' }); }
+  };
   let body: Record<string, unknown>;
   try {
     body = JSON.parse((await readBody(request)).toString('utf8')) as Record<string, unknown>;
     if (!body || typeof body !== 'object' || Array.isArray(body) || !Array.isArray(body.messages)) throw new Error('messages required');
     imageInput(body, selected.acceptsImages?.(binding.model) !== false);
   } catch {
+    await failTurn();
     sendJson(response,400,{error:{message:'Invalid owned model request',signedReceipt:encodeOwnedModelReceipt(token,
       {requestId:id,state:'refused',evidence:{kind:'not-dispatched',reason:'authority'}})}});return true;
   }
@@ -306,6 +323,8 @@ async function handleOwnedFreeAgentModel(request: IncomingMessage, response: Ser
       return { reservation: { ...reserved, day }, payload: modelPayload(body, binding.model, reserved.maxOutput, openRouter) };
     });
   } catch (error) {
+    captureServerError(error, { operation: 'free-agent-model-admission' });
+    await failTurn();
     if (error instanceof CommandRefusalError) sendJson(response, error.status, { error: {
       code: error instanceof OwnedModelAllowanceRefusal ? 'owned_model_allowance' :
         error instanceof OwnedModelUnknownPayload ? 'owned_model_unknown' : 'owned_model_refused', message: error.message,
@@ -314,7 +333,11 @@ async function handleOwnedFreeAgentModel(request: IncomingMessage, response: Ser
     else sendJson(response, 503, { error: { code: 'owned_model_unknown', message: 'Model request admission is uncertain; do not resubmit.' } });
     return true;
   }
-  if (!admitted.permit) { respondOutcome(admitted.receipt); return true; }
+  if (!admitted.permit) {
+    respondOutcome(admitted.receipt);
+    if (!modelSucceeded) await failTurn();
+    return true;
+  }
   const permit = admitted.permit;
   const reconcile = async () => {
     // The existing model leaf owns lost-result reads. This never creates a
@@ -412,6 +435,7 @@ async function handleOwnedFreeAgentModel(request: IncomingMessage, response: Ser
     // its original reservation. A lost answer is never reconstructed/replayed.
     if (!complete || !receipt || receipt.state !== 'succeeded') response.destroy();
     else {
+      modelSucceeded = true;
       const terminal = encodeOwnedModelReceipt(token, receipt);
       if (stream) response.end(filtered.terminal(terminal));
       else response.end(JSON.stringify({ ...answer, id: terminal }));
@@ -419,6 +443,7 @@ async function handleOwnedFreeAgentModel(request: IncomingMessage, response: Ser
     return true;
   } finally {
     response.removeListener('close', close);
+    if (!modelSucceeded) await failTurn();
   }
 }
 

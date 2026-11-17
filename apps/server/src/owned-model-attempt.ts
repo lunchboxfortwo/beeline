@@ -150,7 +150,9 @@ export class OwnedModelAttempts {
       throw new ReplayedAttempt(row);
     };
     const admitted: { row: Row; body?: string } = await this.database.transaction(async database => {
-      await this.credentials.lockInvocation(database, actor);
+      // Admission holds no access locks yet. Serialize with command writers;
+      // their ordinary row contention says nothing about provider entry.
+      await database.query('SELECT id FROM agent_commands WHERE id=$1 FOR SHARE', [owned.commandId]);
       await this.credentials.assertCurrent(database, actor);
       const old = (await database.query<Row>('SELECT * FROM owned_model_attempts WHERE credential_id=$1 AND model_request_id=$2 FOR UPDATE', [owned.id, id])).rows[0];
       if (old) {

@@ -613,7 +613,7 @@ export class FreeAgentService {
         // Fly create already boots it. Observe that launch; never send a second start.
         await this.machines.waitFor(machine.id,'started',60,machine.instance_id);
       } else if (machine.state === 'stopped' || machine.state === 'suspended') {
-        if ((work || completedEffect) && await owns()) {
+        if (work && await owns()) {
           mutationStarted = true;
           await this.machines.start(machine.id);
           await this.machines.waitFor(machine.id,'started',60,machine.instance_id);
