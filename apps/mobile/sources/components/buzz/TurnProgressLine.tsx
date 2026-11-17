@@ -97,6 +97,15 @@ const TurnProgressLineBody = React.memo(function TurnProgressLineBody({
   }, [startedAt]);
   const counter = startedAt != null ? formatWorkingCounter(startedAt * 1_000, now, stopping ? 'stopping' : 'thinking') : undefined;
   const stateLabel = [counter, received ? 'received' : undefined].filter(Boolean).join(' · ');
+  const workingAvatars = agents?.length ? (
+    <XStack alignItems="center" flexShrink={0}>
+      {agents.slice(0, 3).map((agent, index) => <YStack key={agent.pubkey} width={index === Math.min(agents.length, 3) - 1 ? 24 : 16} flexShrink={0}
+        borderWidth={2} borderColor="canvas" borderRadius="sm">
+        <IdentityMark kind="agent" seed={agent.pubkey} name={agent.name} avatarUrl={agent.avatar} face={agent.face} size={20} />
+      </YStack>)}
+      {agents.length > 3 ? <T v="meta" color="secondary" marginLeft="1">+{agents.length - 3}</T> : null}
+    </XStack>
+  ) : null;
   return (
     <TurnLineBar
       inset={inset}
@@ -123,25 +132,20 @@ const TurnProgressLineBody = React.memo(function TurnProgressLineBody({
         </YStack>
       ) : null}
       <XStack height={TURN_LINE_ROW_MIN_HEIGHT} minWidth={0} gap="2" alignItems="center">
+        <YStack testID={testID ? `${testID}-glyph` : undefined}>
+          {live ? <Spinner size="small" color="needsYou" scale={0.7} /> : <BeelineMarkSpinner />}
+        </YStack>
         {group ? (
           <ListItem flex={1} minWidth={0} padding="0" minHeight={0} gap="2" backgroundColor="transparent"
             justifyContent="flex-start" onPress={() => setExpanded(value => !value)}
             aria-label={expanded ? 'Hide working agents' : 'Show working agents'} accessibilityRole="button"
             role="button" aria-expanded={expanded} hitSlop={SLOP} accessibilityState={{ expanded }} testID="working-agents-toggle">
-            <XStack alignItems="center" flexShrink={0}>
-              {group.slice(0, 3).map((agent, index) => <YStack key={agent.pubkey} width={index === Math.min(group.length, 3) - 1 ? 24 : 16} flexShrink={0}
-                borderWidth={2} borderColor="canvas" borderRadius="sm">
-                <IdentityMark kind="agent" seed={agent.pubkey} name={agent.name} avatarUrl={agent.avatar} face={agent.face} size={20} />
-              </YStack>)}
-              {group.length > 3 ? <T v="meta" color="secondary" marginLeft="1">+{group.length - 3}</T> : null}
-            </XStack>
+            {workingAvatars}
             <T v="meta" color="secondary" numberOfLines={1} testID={testID ? `${testID}-label` : undefined}>{label}</T>
             {counter != null ? <T v="meta" color="secondary" flexShrink={0} testID={testID ? `${testID}-elapsed` : undefined}>{counter}</T> : null}
           </ListItem>
         ) : <>
-        <YStack testID={testID ? `${testID}-glyph` : undefined}>
-          {live ? <Spinner size="small" color="needsYou" scale={0.7} /> : <BeelineMarkSpinner />}
-        </YStack>
+        {workingAvatars}
         <XStack flex={1} minWidth={0} alignItems="center">
           <T v="meta" color="needsYou" numberOfLines={1} testID={testID ? `${testID}-label` : undefined}>{label}</T>
           {counter != null ? <T v="meta" color="needsYou" marginLeft="1" testID={testID ? `${testID}-elapsed` : undefined}>{counter}</T> : null}

@@ -77,6 +77,14 @@ it('shows nothing to press for someone who may not stop the turn', () => {
 });
 
 const agents = ['Ruby', 'Jellybean', 'Grunt', 'Bee'].map((name, i) => ({pubkey: name, name, startedAt: 100 + i * 20, stop: {agentPubkey: name, requestId: `request-${i}`}}));
+it.each([1, 3])('keeps the spinner and agent avatars together for %i working agents', (count) => {
+  let tree: any;
+  act(() => { tree = create(<TurnProgressLine agents={agents.slice(0, count)} label="Working…" />); });
+  expect(tree.root.findAllByType('Spinner')).toHaveLength(1);
+  expect(tree.root.findAllByType('IdentityMark')).toHaveLength(count);
+  act(() => tree.unmount());
+});
+
 it('overlaps two avatars and exposes each elapsed counter and individual Stop on tap', async () => {
   vi.useFakeTimers(); vi.setSystemTime(200_000);
   const stop = vi.fn(async (_stop: {agentPubkey:string;requestId:string}) => true); let tree: any;

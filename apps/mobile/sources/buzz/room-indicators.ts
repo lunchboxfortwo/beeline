@@ -264,7 +264,12 @@ export function selectComposerAckPresentation(
     const agent =
       agentFromConversationIdentity(input.conversationIdentities?.get(state.agentPubkey)) ??
       input.agentsByPubkey?.get(state.agentPubkey);
-    const subject = resolveAgentDisplayIdentity(state.agentPubkey, agent).name;
+    const display = resolveAgentDisplayIdentity(state.agentPubkey, agent);
+    const subject = display.name;
+    const agents: ComposerWorkingAgent[] = [{
+      pubkey: state.agentPubkey, name: display.name, avatar: display.avatarUrl, face: display.face,
+      startedAt: input.activeTurnStartedAt ?? 0,
+    }];
     // A real receipt carries its own identity: one verb per turn (seeded by
     // the turn key, never re-picked per tick) and the receipt's server time
     // for the elapsed counter. The local "sending…" bridge has neither.
@@ -277,6 +282,7 @@ export function selectComposerAckPresentation(
       // press does.
       const stoppable = viewerMayStopTurn(input.viewerPubkey, input.viewerCanSend);
       return {
+        agents,
         label: `${subject} ${verb.gerund.toLowerCase()}…`,
         turnKey,
         verb,
@@ -295,7 +301,7 @@ export function selectComposerAckPresentation(
           : {}),
       };
     }
-    return { label: `${subject} thinking…` };
+    return { agents, label: `${subject} thinking…` };
   }
   return { label: 'sending…' };
 }

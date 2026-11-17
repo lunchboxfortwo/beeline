@@ -21,7 +21,11 @@ it('counts three or more and keeps spectator cancellation controls absent', () =
 });
 it('keeps a single agent on its existing presentation', () => {
   const single={...input,activeTurnPubkey:'Ruby',activeTurnRequestId:'request-0',activeTurnStartedAt:100};
-  expect(selectComposerAckPresentation({...single,activeTurns:turns.slice(0,1)})).toEqual(selectComposerAckPresentation(single));
+  const ack = selectComposerAckPresentation({...single,activeTurns:turns.slice(0,1)});
+  expect(ack).toEqual(selectComposerAckPresentation(single));
+  expect(ack?.agents).toEqual([{pubkey:'Ruby',name:'Ruby',avatar:'/Ruby.png',face:'owl',startedAt:100}]);
+  expect(ack?.startedAt).toBe(100);
+  expect(ack?.stop).toEqual({agentPubkey:'Ruby',requestId:'request-0'});
 });
 
 it('keeps the server-assigned face when only membership detail is available', () => {
