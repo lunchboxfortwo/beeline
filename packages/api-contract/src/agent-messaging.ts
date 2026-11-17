@@ -22,7 +22,7 @@ export const MESSAGE_ADDRESS_SCHEMA = {
 export const MESSAGE_ASK_SCHEMA = {
   type: 'object', required: ['question', 'options'], additionalProperties: false,
   properties: {
-    question: { type: 'string', minLength: 1, maxLength: 450, pattern: '^\\S+(?:[ \\t]+\\S+)*$', description: 'A self-contained question addressed to the person: name what is being decided and the consequence of each option so they can decide from this card alone. At most 450 characters.' },
+    question: { type: 'string', minLength: 1, pattern: '^\\S+(?:[ \\t]+\\S+)*$', description: 'A clear question addressed to the person. Put the surrounding context in the message text.' },
     options: { type: 'array', minItems: 2, maxItems: 4,
       items: { type: 'string', pattern: '^\\S+(?:[ \\t]+\\S+){0,2}$' } },
     recommended: { type: 'string', description: 'One of the option labels.' },

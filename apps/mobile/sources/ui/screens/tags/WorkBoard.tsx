@@ -96,7 +96,6 @@ function AskCard({ item, actions, now }: { item: WorkItemView; actions: WorkBoar
   const [reply, setReply] = useState('');
   const [busy, setBusy] = useState(false);
   const ask = item.ask!;
-  const question = ask.approval?.kind === 'choice' ? ask.approval.subject : ask.text;
   const choices = ask.approval?.actions?.filter((action) => action.kind !== 'skip-choice') ?? [];
   const count = item.askIds?.length ?? 1;
   const run = async (action: () => Promise<void | boolean>) => {
@@ -153,7 +152,10 @@ function AskCard({ item, actions, now }: { item: WorkItemView; actions: WorkBoar
           <Glyph icon={X} size={14} />
         </Btn>
       </XStack>
-      <T>{question}</T>
+      <T>{ask.text}</T>
+      {ask.approval?.kind === 'choice' && !ask.text.includes(ask.approval.subject) ? (
+        <T>{ask.approval.subject}</T>
+      ) : null}
       {choices.length ? (
         <XStack gap="2" alignItems="stretch" flexWrap="wrap">
           {choices.map((action, index) => (

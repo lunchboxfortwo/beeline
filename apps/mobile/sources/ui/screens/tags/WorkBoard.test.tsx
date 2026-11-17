@@ -103,22 +103,31 @@ it('never disables the Needs you header or Clear all, and Clear all stays pressa
 });
 
 
-it('gives recommended and other question options the same outline control and still submits the pick', async () => {
+it.each([[false, false], [false, true], [true, false], [true, true]])('shows the full post and question once on desktop=%s with question in post=%s', async (desktop, includesQuestion) => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
     const person = { pubkey: 'agent', kind: 'agent' as const, name: 'Ruby' };
+    const question = 'Should I set up Squire?';
+    const context = 'I am researching launch sources for you. '.repeat(16) + '\nThe vendor report is missing, so I cannot finish the comparison.';
+    const fullPost = includesQuestion ? `${context} ${question}` : context;
     const choices = ['Yes', 'No'].map(label => ({ kind: 'choice' as const, choiceId: 'choice', optionId: label, label }));
     const board: WorkBoardView = {
         workspaceId: 'ws', workspaceName: 'Crew', viewerId: 'viewer', chats: [], people: [],
         items: [{ id: 'ask', roomId: 'chat', chatId: 'chat', chatName: 'general', threadName: 'Launch', title: 'Launch', state: 'needs-you',
             openedBy: person, assignee: null, createdAt: 1, updatedAt: 2, recommendedOptionId: 'Yes',
             ask: { messageId: 'ask', workspaceId: 'ws', roomId: 'chat', roomName: 'general', roomKind: 'room', author: person,
-                text: 'Should I run the phone proof? Yes checks the patch now; No leaves it waiting.', createdAt: 1,
-                approval: { kind: 'choice', actor: 'Ruby', ask: 'asks', subject: 'Should I run the phone proof? Yes checks the patch now; No leaves it waiting.', literal: false, actions: choices } } }],
+                text: fullPost, createdAt: 1,
+                approval: { kind: 'choice', actor: 'Ruby', ask: 'asks', subject: question, literal: false, actions: choices } } }],
     };
     const actions = { open: vi.fn(), reply: vi.fn(), decide: vi.fn(), assign: vi.fn(), clear: vi.fn(), clearAll: vi.fn() };
     let tree: any;
-    act(() => { tree = create(<WorkBoard board={board} desktop={false} actions={actions} />); });
+    act(() => { tree = create(<WorkBoard board={board} desktop={desktop} actions={actions} />); });
     try {
+        const post = tree.root.find((node: any) => node.type === 'Text' && node.props.children === fullPost);
+        expect(post.props.numberOfLines).toBeUndefined();
+        expect(post.props.ellipsizeMode).toBeUndefined();
+        const texts = tree.root.findAll((node: any) => node.type === 'Text')
+          .flatMap((node: any) => [node.props.children].flat(Infinity)).join(' ');
+        expect(texts.split(question)).toHaveLength(2);
         const { Btn } = await import('@/ui/grammar');
         const buttons = tree.root.findAllByType(Btn).filter((node: any) => ['Yes', 'No'].includes(node.props.label));
         expect(buttons.map((node: any) => node.props.kind)).toEqual(['secondary', 'secondary']);

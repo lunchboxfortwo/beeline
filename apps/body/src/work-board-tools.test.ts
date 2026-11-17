@@ -12,15 +12,14 @@ describe('typed Work board tools', () => {
     expect(()=>validateAdvertisedToolInput(reply,{id:'task',text:'Choose output',ask:{question:'Which output?',options:['Web','Phone'],recommended:'Web'}})).not.toThrow();
     for (const name of ['ask_owner','set_work_state','assign_work_item','add_work_note','attach_to_work_item']) expect(tools.some(tool=>tool.name===name)).toBe(false);
   });
-  it.each(['message', 'reply'])('accepts self-contained 450-character questions on %s', name => {
+  it.each(['message', 'reply'])('accepts questions beyond the former length limit on %s', name => {
     const tool = tools.find(tool => tool.name === name)!;
-    const question = 'Do you want the phone proof before shipping? Yes runs it now; no keeps the patch waiting for your review. '.padEnd(450, 'x');
+    const question = 'Which proof should I run? '.repeat(80).trim();
     const args = name === 'reply' ? { id: 'task', text: 'Choose output' } : { to: { agent: 'owner', place: 'chat' }, text: 'Choose output' };
     expect(() => validateAdvertisedToolInput(tool, { ...args, ask: { question, options: ['Yes', 'No'] } })).not.toThrow();
-    expect(() => validateAdvertisedToolInput(tool, { ...args, ask: { question: question + 'x', options: ['Yes', 'No'] } })).toThrow('ask.question: 451 characters; the limit is 450');
   });
-  it('uses normal schema validation before sending an oversized ask',()=>{
-    expect(()=>validateAdvertisedToolInput(reply,{id:'task',text:'Choose output',ask:{question:'x'.repeat(451),options:['Web','Phone']}})).toThrow('ask.question: 451 characters; the limit is 450');
+  it('validates question shape and option labels before sending an ask',()=>{
+    expect(()=>validateAdvertisedToolInput(reply,{id:'task',text:'Choose output',ask:{question:'',options:['Web','Phone']}})).toThrow();
     expect(()=>validateAdvertisedToolInput(reply,{id:'task',text:'Choose output',ask:{question:'Which output?',options:['One two three four','Phone']}})).toThrow('Shorten options');
   });
   it('dispatches named create, state and assignment tools through the same authorized work write', async () => {

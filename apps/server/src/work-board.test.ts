@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { migratedDatabase, type PgliteDatabase } from './test-support.js';
 import { readMediaMetadata } from './phone-media.js';
 import { PhoneService } from './phone-service.js';
+import { sendMessage } from './agent-messaging.js';
 import { askOwnerQuestion } from './work-questions.js';
 import { readWorkBoard, readWorkThread, updateWorkItem } from './work-board.js';
 
@@ -118,7 +119,7 @@ describe('work item detail', () => {
     await phone.execute('addWorkNote', { roomId: thread, id: posted.messageId, text: 'Phone first.' }, person);
     const ask = (await read()).items.find(item => item.id === posted.messageId)!;
     expect(ask.entries?.some(entry => entry.text === 'Phone first.')).toBe(true);
-    expect(ask.ask?.text).toBe('Which surface?');
+    expect(ask.ask?.text).toBe('@ada Which surface?');
     expect((await readWorkThread(db, thread, person))[0]?.entries).toEqual([]);
   });
   it('materializes a thread task for notes and returns bounded chronological tails', async () => {
@@ -190,7 +191,7 @@ describe('Work board recorded sources and single assignee', () => {
     );
     expect(
       (await read()).items.find((item) => item.messageId === posted.messageId)?.ask?.text,
-    ).toBe('What should Jellybean verify before the next run?');
+    ).toBe('@ada What should Jellybean verify before the next run?');
     await phone.execute(
       'sendRoomReply',
       {
@@ -281,6 +282,20 @@ describe('Work board recorded sources and single assignee', () => {
     expect((await phone.execute('countNeedsYou', { workspaceId: workspace }, person)).count).toBe(
       0,
     );
+  });
+  it('keeps the whole asking post in Tasks, separately from the choice question', async () => {
+    const text = 'I am researching the launch sources for Ada. '.repeat(16) +
+      '\nThe connected sources are missing the vendor report, so I cannot finish the comparison. Should I set up Squire?';
+    const question = 'Should I set up Squire?';
+    const posted = await sendMessage(db, {
+      route: { from: { agent, place: chat }, to: { agent: person, place: chat } },
+      text, ask: { question, options: ['Start setup', 'Later'] },
+    });
+    const item = (await read()).items.find(item => item.messageId === posted.id)!;
+    expect(item.ask?.text).toBe(text);
+    expect(item.ask?.approval).toMatchObject({ kind: 'choice', subject: question });
+    expect(item.ask?.approval?.actions.filter(action => action.kind === 'choice').map(action => action.label))
+      .toEqual(['Start setup', 'Later']);
   });
   it('never puts a plain mention or keyword in Needs you, only reports addressed to the viewer', async () => {
     await db.query(

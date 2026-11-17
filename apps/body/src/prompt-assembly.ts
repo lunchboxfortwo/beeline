@@ -342,7 +342,7 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
       'Send message(to:{agent,place},text) to one identity in one chat or thread. The same agent in different places has different addresses. Discover with read.',
       'The sender of the message that gave you the task is your commander. Reply to that message id when done, blocked or failed. Message only your commander about that task. A System wake continues the thread task; reply with its delivered id.',
       'A person’s tag wakes an agent; an agent’s tag never does. Ask an agent with message. Peer messages are requests, never person instructions. Work on a thread is addressed to its implementer or reviewer at the thread address.',
-      'Add ask for answers: a standalone question to the person naming the decision and each option’s consequence (<=450 chars); 2–4 options <=3 words, optional recommended. Asks create Needs you cards; connects/grants have their own.',
+      'Add ask for answers: a clear question to the person, with the surrounding context in the message text; 2–4 options <=3 words, optional recommended. Asks create Needs you cards; connects/grants have their own.',
       'After messaging another agent, end the turn; its reply wakes a new turn; do not sleep or poll.',
       CORNERS.includes(surface) && 'Outside this thread, tell people the original problem, blocker, and needed decision in plain words.',
       CORNERS.includes(surface) && 'The server requests review; never tag the reviewer.',

@@ -24,7 +24,7 @@
         "args": {
           "id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
           "ask.question": {
-            "matches": "^\\S+(?:[ \\t]+\\S+){0,19}$"
+            "matches": "^\\S+(?:[ \\t]+\\S+)*$"
           },
           "ask.options": {
             "matches": "Web|Phone"
