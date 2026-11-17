@@ -27,6 +27,25 @@ vi.mock('./IndexRow', () => ({
 import { foldPrLifecycleRuns } from '@/buzz/pr-lifecycle';
 import { foldPillRuns } from '@/buzz/transcript-pills';
 import { TranscriptPills } from './TranscriptPills';
+import { PillRow } from '@/ui/screens/transcript/PillRow';
+
+it.each(['message', 'reply'] as const)('renders an addressed %s with the recorded sender, recipient and text', kind => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const resolve = (id: string, name: string) => ({ kind: 'agent' as const, seed: id, name });
+  const message: ChatDisplayMessage = {
+    id: 'addressed', text: 'Please review the phone layout', isUser: false, timestamp: 1_800_000_000,
+    pubkey: 'ruby', authorIdentity: { pubkey: 'ruby', name: 'Ruby', kind: 'agent' },
+    agentCommand: { kind, recipient: { id: 'claude', name: 'Claude', handle: 'claude', kind: 'agent' },
+      text: 'Please review the phone layout' },
+  };
+  let tree: any;
+  act(() => { tree = create(<TranscriptPills run={[message]} resolve={resolve} />); });
+  const [item] = tree.root.findByType(PillRow).props.items;
+  expect(item).toMatchObject({ id: 'addressed', system: false,
+    from: { seed: 'ruby', name: 'Ruby' }, to: { seed: 'claude', name: 'Claude' } });
+  expect(item.body.props.markdown).toBe('@claude Please review the phone layout');
+  act(() => tree.unmount());
+});
 
 it('MERGE-ROWS-1 shows the merge count immediately and expands every stored event and destination', () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });

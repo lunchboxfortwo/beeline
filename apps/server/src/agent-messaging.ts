@@ -44,6 +44,17 @@ export async function sendMessage(db: SqlDatabase, input: {
           text:modelText(input.text),authorId:route.from.agent,fromRoomId:route.from.place,
           returnIdentityId:route.from.agent,attachments:input.attachments},
       });
+      // A transcript reference shares the committed command's identity, but is
+      // never a source message or another wake. Room reads enforce place access;
+      // card presentation keeps this reference out of agent conversation context.
+      await tx.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card,created_at)
+        SELECT $1,$2,$3,$4,'card','agent-command',jsonb_build_object(
+          'kind',$5::text,'text',$4::text,'recipient',jsonb_build_object(
+            'id',recipient.id,'name',recipient.name,'kind',recipient.kind,
+            'handle',beeline_room_handle(recipient.id,$2))),$6
+        FROM identities recipient WHERE recipient.id=$7
+        ON CONFLICT(id) DO NOTHING`,
+      [command!.id,to.place,route.from.agent,input.text,input.replyTo ? 'reply' : 'message',command!.created_at,to.agent]);
       return { id:command!.id,createdAt:Math.floor(new Date(command!.created_at).getTime()/1000) };
     }
     if (input.ask) {

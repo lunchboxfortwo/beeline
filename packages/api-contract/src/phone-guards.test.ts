@@ -19,6 +19,11 @@ m45_describe('phone surface readers', () => {
     m45_expect(parsed?.agentCommand?.recipient.kind).toBe(kind === 'agent' || kind === 'human' ? kind : undefined);
   });
 
+  m45_it.each(['message', 'reply'])('preserves addressed %s pill metadata', kind => {
+    const agentCommand = { kind, text: 'Please review', recipient: { id: 'recipient', name: 'Claude', kind: 'agent' } };
+    m45_expect(m45_readRoomViewMessage({ ...scope1.message, agentCommand })?.agentCommand).toEqual(agentCommand);
+  });
+
   m45_it('preserves the current-card link on expired connector offers and drops invalid links', () => {
     const replacementMessageId = 'f'.repeat(64);
     m45_expect(m45_readConnectorOfferCardView({ ...scope1.connectorOffer, status: 'failed', replacementMessageId }))

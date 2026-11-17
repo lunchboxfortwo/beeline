@@ -357,9 +357,9 @@ export type RoomViewMessage = {
     readonly targetBranch?: string;
   };
   /** A daemon-authored repository lifecycle fact, rendered as an actionable card. */
-  /** An agent's order into, or report from, a corner. The author is the sender. */
+  /** An agent's addressed message or legacy corner order/report. The author is the sender. */
   readonly agentCommand?: {
-    readonly kind: 'order' | 'report';
+    readonly kind: 'order' | 'report' | 'message' | 'reply';
     readonly recipient: { readonly id: string; readonly name: string; readonly handle?: string; readonly kind?: 'agent' | 'human' };
     readonly status?: 'done' | 'blocked' | 'needs-decision' | 'failed';
     readonly text: string;

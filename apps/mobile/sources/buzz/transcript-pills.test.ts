@@ -51,7 +51,7 @@ describe('transcript pills', () => {
     const rows = foldPillRuns([system('before'), tag, system('after')]);
     expect(rows.map(message => message.id)).toEqual(['before', 'tag', 'after']);
     expect(rows[1]!.pillRun).toBeUndefined();
-    const sent = row('sent', { pubkey: 'alan', agentCommand: { kind: 'message', recipient: { id: 'jimmy', name: 'Jimmy', kind: 'agent' }, text: 'Please review' } as never });
+    const sent = row('sent', { pubkey: 'alan', agentCommand: { kind: 'message', recipient: { id: 'jimmy', name: 'Jimmy', kind: 'agent' }, text: 'Please review' } });
     expect(isPillMessage(sent)).toBe(true);
   });
 

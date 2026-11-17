@@ -76,7 +76,7 @@ function readAgentCommand(value: unknown): NonNullable<RoomViewMessage['agentCom
   const recipient = record(item?.recipient);
   if (
     !item ||
-    (item.kind !== 'order' && item.kind !== 'report') ||
+    (item.kind !== 'order' && item.kind !== 'report' && item.kind !== 'message' && item.kind !== 'reply') ||
     typeof item.text !== 'string' ||
     !recipient ||
     typeof recipient.id !== 'string' ||
