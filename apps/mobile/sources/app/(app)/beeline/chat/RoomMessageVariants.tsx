@@ -14,7 +14,7 @@ import { openExternalUrl } from '@/utils/open-external-url';
 import { RequestMedia } from '@/ui/screens/transcript/cards/RequestMedia';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
 import { TranscriptCard, type TranscriptCardAction, type TranscriptCardChoice } from '@/components/buzz/TranscriptCard';
-import { OrdinaryLedgerMessageProps, ConnectorReceiptCard } from './RoomMessageVariants-attachment-card';
+import { OrdinaryLedgerMessageProps, ConnectorReceiptCard, SwipeToReply } from './RoomMessageVariants-attachment-card';
 import { OrdinaryLedgerMessage } from './RoomMessageVariants-ordinary-ledger-message';
 
 
@@ -320,6 +320,7 @@ export interface ChoiceCardProps {
   actionId: string | null;
   onAnswer(choiceId: string, optionId: string, note?: string): void;
   onSkip(choiceId: string): void;
+  onReply?(message: ChatDisplayMessage): void;
 }
 
 
@@ -342,6 +343,7 @@ export const ChoiceCard = React.memo(function ChoiceCard({
   actionId,
   onAnswer,
   onSkip,
+  onReply,
 }: ChoiceCardProps) {
   const card = message.choice!;
   const display =
@@ -405,7 +407,7 @@ export const ChoiceCard = React.memo(function ChoiceCard({
           },
         ]
       : [];
-  return (
+  const content = (
     <YStack marginTop="5">
       <TranscriptCard
         tier={open ? 'ask' : 'record'}
@@ -447,6 +449,14 @@ export const ChoiceCard = React.memo(function ChoiceCard({
         actions={actions}
       />
     </YStack>
+  );
+  if (!onReply) return content;
+  return (
+    <SwipeToReply messageId={message.id} isDesktop={false} replyOnly
+      onReply={!message.isAgentDraft ? () => onReply(message) : undefined}
+      onLongPress={() => undefined} onReact={() => undefined} onForward={() => undefined}>
+      {content}
+    </SwipeToReply>
   );
 });
 

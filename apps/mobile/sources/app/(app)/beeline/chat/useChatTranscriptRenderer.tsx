@@ -319,6 +319,7 @@ export function useChatTranscriptRenderer([
             actionId={rowChoice}
             onAnswer={handleChoiceAnswer}
             onSkip={handleChoiceSkip}
+            onReply={!rowDesktopLayout && !isReadOnlyDirectMessage ? beginReply : undefined}
           />
         );
       }

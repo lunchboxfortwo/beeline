@@ -34,6 +34,11 @@ vi.mock('@/components/buzz/MessageReactionRoster', () => ({ MessageReactionRoste
 vi.mock('@/components/buzz/Button', () => ({ Button: vi.fn(() => null) }));
 vi.mock('@/components/buzz/MonoHull', () => ({ NewMessageMaterialize: vi.fn(() => null), PixelLoader: vi.fn(() => null) }));
 vi.mock('@/modal', () => ({ Modal: vi.fn(() => null) }));
+vi.mock('@/buzz/chat-list-store', () => ({ readChatList: vi.fn() }));
+vi.mock('@/buzz/room-message-records', () => ({ roomMessageRecord: vi.fn(), writeRoomBookmark: vi.fn() }));
+vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: vi.fn(), phoneOperationFailureReason: vi.fn() }));
+vi.mock('@/buzz/message-forward', async importOriginal => ({ ...await importOriginal<typeof import('@/buzz/message-forward')>(), forwardMessageToRoom: vi.fn(), forwardTargets: vi.fn(), resolveForwardTargetRoom: vi.fn() }));
+
 vi.mock('@/buzz/picture-actions', () => ({ showPictureActions: vi.fn(() => null) }));
 vi.mock('@/buzz/chat-attachment', () => ({ formatAttachmentSize: vi.fn(() => null) }));
 vi.mock('@/utils/open-external-url', () => ({ openExternalUrl: vi.fn(() => null) }));
@@ -60,6 +65,8 @@ import { LedgerEntry, LedgerSteer } from '@/components/buzz/Ledger';
 import { NewMessageMaterialize } from '@/components/buzz/MonoHull';
 import { TurnSettledLine } from '@/components/buzz/TurnProgressLine';
 import { splitViewerContext } from '@/buzz/viewer-conversation';
+import TranscriptSwipeable from '@/components/buzz/TranscriptSwipeable';
+import { useChatMessageActions } from './useChatMessageActions';
 const VIEWER = 'a'.repeat(64);
 const choice: ChoiceCardView = {
   choiceId: '11111111-1111-4111-8111-111111111111', mode: 'question', status: 'open',
@@ -83,7 +90,7 @@ function element(card: ChoiceCardView, actionId: string | null = null) {
 function cardProps() { return renderer.root.findByType('TranscriptCard').props; }
 function plates() { return renderer.root.findAllByType(TranscriptCardChoicePlate); }
 beforeEach(() => { Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); vi.clearAllMocks(); });
-afterEach(() => { if (renderer) act(() => renderer.unmount()); });
+afterEach(() => { if (renderer) act(() => renderer.unmount()); vi.unstubAllGlobals(); });
 
 it('renders a workflow-closed question as a record without dead option boxes', () => {
   act(() => { renderer = create(element({ ...choice, status: 'closed', runId: 'run' })); });
@@ -247,3 +254,45 @@ it.each([false, true])('QUOTE-CLAMP: the original stays within two lines while t
   expect(quote.props.children).toContain(original);
   expect(renderer.root.findByType('LedgerSteer').props.bodyText).toBe(reply);
 });
+
+// Production's #beeline approval questions are choice cards, not prose messages.
+// Keep the recovered presentation/author/id shape, with synthetic question text.
+it.each(['open', 'answered', 'skipped', 'closed'] as const)(
+  'CHOICE-REPLY: swiping a %s agent question starts an addressed reply without deciding it', status => {
+    const card = { ...choice, status, prompt: `${'Investigation details. '.repeat(80)}May I proceed?` };
+    const row: ChatDisplayMessage = {
+      id: 'c'.repeat(64), relayId: 'c'.repeat(64), text: card.prompt, timestamp: message.timestamp,
+      isUser: false, isAgentAuthor: true, pubkey: card.agent.pubkey, authorIdentity: card.agent,
+      choice: card,
+    };
+    const installReply = vi.fn();
+    const prefill = vi.fn(), focus = vi.fn();
+    const frames: Array<() => void> = [];
+    vi.stubGlobal('requestAnimationFrame', (callback: () => void) => { frames.push(callback); return frames.length; });
+    function Fixture() {
+      const inputs: unknown[] = Array.from({ length: 34 }, () => vi.fn());
+      Object.assign(inputs, {
+        0: new Map(), 1: new Map(), 2: { current: [row] }, 3: 'room',
+        4: installReply, 5: prefill, 6: { current: '' }, 7: { current: null },
+        10: { current: { focus } },
+      });
+      const [, , onReply] = useChatMessageActions(inputs as Parameters<typeof useChatMessageActions>[0]);
+      return <ChoiceCard message={row} viewerIsAgent={false} viewerPubkey={VIEWER}
+        actionId={null} onAnswer={onAnswer} onSkip={onSkip} onReply={onReply} />;
+    }
+    act(() => { renderer = create(<Fixture />); });
+    const swipe = vi.mocked(TranscriptSwipeable).mock.calls.at(-1)?.[0];
+    expect(swipe?.enabled).toBe(true);
+    expect(swipe?.renderRightActions).toBeTypeOf('function');
+    act(() => { swipe!.onSwipeableWillOpen!('left'); while (frames.length) frames.shift()!(); });
+    expect(installReply).toHaveBeenCalledWith(expect.objectContaining({
+      messageId: row.id, authorPubkey: card.agent.pubkey, authorHandle: card.agent.handle, isAgent: true,
+    }));
+    expect(installReply.mock.calls[0][0].reference).toBeUndefined();
+    expect(prefill).toHaveBeenCalledWith(expect.objectContaining({ kind: 'fill', text: `@${card.agent.handle} ` }),
+      { handle: card.agent.handle, pubkey: card.agent.pubkey });
+    expect(focus).toHaveBeenCalledOnce();
+    expect(onAnswer).not.toHaveBeenCalled();
+    expect(onSkip).not.toHaveBeenCalled();
+  },
+);
