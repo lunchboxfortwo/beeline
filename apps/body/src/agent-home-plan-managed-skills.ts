@@ -387,6 +387,9 @@ export function roomAgentHomeEnv(root: string): Record<string, string> {
   return {
     HOME: resolve(resolved, 'user'),
     CLAUDE_CONFIG_DIR: resolve(resolved, 'claude'),
+    // Refreshes replace the private credential link; the helper writes back
+    // only that credential, without making the operator's directory writable.
+    CLAUDE_SECURESTORAGE_CONFIG_DIR: resolve(resolved, 'claude'),
     CODEX_HOME: resolve(resolved, 'codex'),
     GOOSE_PATH_ROOT: resolve(resolved, 'goose'),
     GROK_HOME: resolve(resolved, 'grok'),
@@ -412,8 +415,6 @@ export function roomAgentHomeEnv(root: string): Record<string, string> {
  */
 export const HARNESS_STATE_ENV_VARS = [
   'CLAUDE_CONFIG_DIR',
-  // The operator's shared Claude login store; Claude writes its login and
-  // refresh lock there (`sharedClaudeLoginEnv`).
   'CLAUDE_SECURESTORAGE_CONFIG_DIR',
   'CODEX_HOME',
   'GOOSE_PATH_ROOT',

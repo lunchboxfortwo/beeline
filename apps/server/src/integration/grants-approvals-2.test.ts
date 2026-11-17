@@ -134,81 +134,21 @@ const fixture = monolithFixture();
   });
 
 
-  it('requires a person for shared cache isolation, then applies and revokes the standing grant', async () => {
-    const adminToken = await fixture.phoneToken('cache-manager');
-    const adminId = createHash('sha256').update('github:cache-manager').digest('hex');
-    const memberToken = await fixture.phoneToken('cache-member');
-    const memberId = createHash('sha256').update('github:cache-member').digest('hex');
-    await fixture.operation('addWorkspaceMember', { workspaceId: WORKSPACE, memberId: adminId, role: 'admin' });
-    await fixture.operation('addWorkspaceMember', { workspaceId: WORKSPACE, memberId, role: 'member' });
-    await fixture.database.query(
-      `UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`,
-      [ROOM, adminId],
-    );
+  it.each([false, true])('legacy private-cache requests create no approval or mount authority (yolo=%s)', async yolo => {
+    await fixture.database.query(`UPDATE agents SET yolo_mode=$2 WHERE agent_id=$1`, [AGENT, yolo]);
     const invalid = await fixture.daemonOperation('requestAgentGrant', {
       roomId: ROOM, kind: 'shared_asset', target: 'some/file', reason: 'broken cache',
     });
     expect(invalid.status).toBe(400);
-    const ask = (await (await fixture.daemonOperation('requestAgentGrant', {
-      roomId: ROOM, kind: 'shared_asset', target: 'package-cache',
-      reason: 'The shared npm cache contains a corrupt package tarball',
-    })).json()) as { grantId: string; status: string; auto: boolean; messageId: string };
-    expect(ask).toMatchObject({ status: 'pending', auto: false });
-    expect((await fixture.daemonOperation('requestAgentGrant', {
-      roomId: ROOM, kind: 'shared_asset', target: 'package-cache', reason: 'same failure',
-    })).status).toBe(409);
-    const card = await fixture.database.query<{ room_id: string; card_type: string }>(
-      `SELECT room_id,card_type FROM messages WHERE id=$1`, [ask.messageId],
-    );
-    expect(card.rows[0]).toEqual({ room_id: ROOM, card_type: 'grant-request' });
-    const mirrored = await fixture.database.query<{ room_id: string }>(
-      `SELECT room_id FROM messages WHERE card_type='grant-request' AND room_id<>$2
-       AND EXISTS (SELECT 1 FROM jsonb_array_elements(card->'grants') entry
-         WHERE entry->>'grantId'=$1)`, [ask.grantId, ROOM],
-    );
-    expect(mirrored.rows).toHaveLength(1);
-    const managerTray = await fixture.operation('readNeedsYou', { workspaceId: WORKSPACE }, adminToken);
-    expect(JSON.stringify(await managerTray.json())).toContain('package-cache');
-    const memberTray = await fixture.operation('readNeedsYou', { workspaceId: WORKSPACE }, memberToken);
-    expect(JSON.stringify(await memberTray.json())).not.toContain('package-cache');
-    expect((await fixture.database.query(`SELECT status FROM agent_grants WHERE id=$1`, [ask.grantId])).rows)
-      .toEqual([{ status: 'pending' }]);
-    expect((await fixture.operation('decideAgentGrant', { grantId: ask.grantId, decision: 'always' }, memberToken)).status)
-      .toBe(403);
-    expect((await fixture.operation('decideAgentGrant', { grantId: ask.grantId, decision: 'once' }, adminToken)).status)
-      .toBe(400);
-    expect((await fixture.operation('decideAgentGrant', { grantId: ask.grantId, decision: 'always' }, adminToken)).status)
-      .toBe(200);
-    const settledCards = await fixture.database.query<{ status: string }>(
-      `SELECT entry->>'status' status FROM messages message,
-         jsonb_array_elements(message.card->'grants') entry
-       WHERE message.card_type='grant-request' AND entry->>'grantId'=$1`, [ask.grantId],
-    );
-    expect(settledCards.rows).toEqual([{ status: 'approved' }, { status: 'approved' }]);
-    const live = (await (await fixture.daemonOperation('listAgentGrants', { agentId: AGENT, roomId: ROOM })).json()) as {
-      grants: Array<{ grantId: string; kind: string; target: string }>;
-    };
-    expect(live.grants).toEqual(expect.arrayContaining([
-      expect.objectContaining({ grantId: ask.grantId, kind: 'shared_asset', target: 'package-cache' }),
-    ]));
-    expect((await fixture.phone.readWorkspaceMembers(WORKSPACE, adminId, { memberId: HUMAN }))?.grants)
-      .toEqual(expect.arrayContaining([
-        expect.objectContaining({ grantId: ask.grantId, status: 'approved' }),
-      ]));
-    expect((await fixture.operation('revokeAgentGrant', { grantId: ask.grantId }, adminToken)).status).toBe(200);
-    const afterRevoke = (await (await fixture.daemonOperation('listAgentGrants', { agentId: AGENT, roomId: ROOM })).json()) as {
-      grants: Array<{ grantId: string }>;
-    };
-    expect(afterRevoke.grants.some((grant) => grant.grantId === ask.grantId)).toBe(false);
-    await fixture.database.query(`UPDATE agents SET owner_id=$2 WHERE agent_id=$1`, [AGENT, memberId]);
-    const denied = (await (await fixture.daemonOperation('requestAgentGrant', {
-      roomId: ROOM, kind: 'shared_asset', target: 'codex-download-cache',
-      reason: 'The download cache has an incompatible binary',
-    })).json()) as { grantId: string };
-    expect((await fixture.operation('decideAgentGrant', { grantId: denied.grantId, decision: 'deny' }, memberToken)).status)
-      .toBe(200);
-    expect((await fixture.database.query(`SELECT status FROM agent_grants WHERE id=$1`, [denied.grantId])).rows)
-      .toEqual([{ status: 'denied' }]);
+    for (const category of ['package-cache', 'codex-download-cache', 'codex-plugin-cache']) {
+      const result = await fixture.daemonOperation('requestAgentGrant', {
+        roomId: ROOM, kind: 'shared_asset', target: category, reason: 'Use a private copy',
+      });
+      expect(result.status).toBe(200);
+      expect(await result.json()).toMatchObject({ status: 'approved', auto: true });
+    }
+    expect((await fixture.database.query(`SELECT 1 FROM agent_grants WHERE kind='shared_asset'`)).rows).toEqual([]);
+    expect((await fixture.database.query(`SELECT 1 FROM messages WHERE card_type='grant-request'`)).rows).toEqual([]);
   });
 
 
@@ -268,7 +208,7 @@ const fixture = monolithFixture();
   });
 
 
-  it('keeps owner tools available in a public Workspace and rejects calls without live command authority', async () => {
+  it('requires owner approval in a public Workspace and rejects calls without live command authority', async () => {
     await fixture.database.query(`UPDATE workspaces SET visibility='public' WHERE id=$1`, [WORKSPACE]);
     const source = (await (
       await fixture.operation('sendRoomMessage', { roomId: ROOM, text: '@bee work', mentions: [AGENT] })
@@ -282,7 +222,7 @@ const fixture = monolithFixture();
           })
         ).json()
       ).allowed,
-    ).toBe(true);
+    ).toBe(false);
     const response = await phoneFetch(`${fixture.origin}/v1/daemon/operations/authorizeResourceCall`, {
       method: 'POST',
       headers: { authorization: `Bearer ${fixture.daemonToken}`, 'content-type': 'application/json' },
@@ -414,6 +354,16 @@ const fixture = monolithFixture();
           })
         ).json()
       ).grants.map((g: any) => g.grantId),
-    ).toContain(grant.grantId);
+    ).not.toContain(grant.grantId);
+    // A fresh Ask first request becomes durable authority only after a human approves it.
+    const explicit = await (await fixture.daemonOperation('requestAgentGrant', {
+      roomId: ROOM, requestId: ownerAsk.messageId, kind: 'command', target: 'npm test', reason: 'run approved tests',
+    })).json();
+    expect(explicit).toMatchObject({ status: 'pending', auto: false });
+    expect((await fixture.operation('decideAgentGrant', { grantId: explicit.grantId, decision: 'always' })).status).toBe(200);
+    const live = await (await fixture.daemonOperation('listTurnAgentGrants', { roomId: ROOM, requestId: ask.messageId })).json();
+    expect(live.grants.map((g: { grantId: string }) => g.grantId)).toContain(explicit.grantId);
+    expect(live.grants.map((g: { grantId: string }) => g.grantId)).not.toContain(grant.grantId);
+
   });
 });

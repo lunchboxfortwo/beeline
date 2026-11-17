@@ -125,13 +125,14 @@ it.skipIf(spawnSync('bwrap', ['--ro-bind', '/', '/', 'true']).status !== 0 || ov
             mode: 'edit',
             cwd,
             worktreePath: cwd,
-            protectedPaths: [root],
+            grantedPaths: [{ path: root, writable: false }],
+            additionalWritablePaths: [cache],
             dependencyLayers: await dependencyLayers(resolve(cwd, '.layers'), [resolve(cwd, 'node_modules')]),
           },
           command,
           args,
         });
-        return spawnSync(wrapped.command, wrapped.args, { encoding: 'utf8' });
+        return spawnSync(wrapped.command, wrapped.args, { encoding: 'utf8', env: { ...process.env, npm_config_cache: cache } });
       };
       // A build may write anywhere in its own dependencies (Gradle writes in
       // React Native plugin folders); the shared bytes stay unchanged.

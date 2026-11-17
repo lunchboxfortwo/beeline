@@ -227,7 +227,7 @@ export function fixtureScope2() {
     await database.query(`INSERT INTO workspaces(id,name) VALUES($1,'Hive')`, [WORKSPACE]);
     await database.query(
       `INSERT INTO agents(agent_id,owner_id,machine_id,machine_name,yolo_mode)
-       VALUES($1,$2,'machine-one','Owner laptop',false)`,
+       VALUES($1,$2,'machine-one','Owner laptop',true)`,
       [HELPER, OWNER],
     );
     await database.query(

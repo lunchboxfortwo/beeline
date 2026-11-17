@@ -141,7 +141,7 @@ export class PlaceSession {
       writePolicy: () => parentRoomId
         ? { surface: 'corner', ...(this.scratch ? { scratch: this.scratch } : {}) }
         : {
-            surface: 'room', operatorHome: config.operatorHome ?? homedir(),
+            surface: 'room',
             ...(config.bwrapPath ? { bwrapPath: config.bwrapPath } : {}),
             ...(this.scratch ? { scratch: this.scratch } : {}),
             harnessStateDirs: [config.agentHomeRoot, config.agentPrivateRoot].filter((path): path is string => Boolean(path)),
@@ -268,17 +268,16 @@ export class PlaceSession {
     if (attachScratchRoot) await mkdir(attachScratchRoot, { recursive: true });
     this.attachmentDir = attachScratchRoot ? join(attachScratchRoot, 'attachments') : undefined;
     const sandboxSpec: SandboxSessionSpec = {
-      operatorHome,
       userRuntimeDir: `/run/user/${process.getuid?.() ?? 0}`,
       mode: corner ? 'edit' : 'readonly',
       cwd: folder,
-      ...(corner ? { worktreePath: folder, protectedPaths: [runtime.supervisorRoot] } : {}),
+      ...(corner ? { worktreePath: folder } : {}),
       ...(gitCommonDir ? { gitCommonDir } : {}),
       harnessStateDirs: stateDirs,
       harnessHomeStateDirs: homeStateDirs,
       ...(tmpDir ? { tmpDir } : {}),
       additionalWritablePaths: [
-        ...(config.browserShareHostSocket ? [dirname(config.browserShareHostSocket)] : []),
+        ...(corner && config.workspaceRoot ? [config.workspaceRoot] : []),
         ...(attachScratchRoot ? [attachScratchRoot] : []),
       ],
       maskPaths: [

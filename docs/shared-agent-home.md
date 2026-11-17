@@ -1,29 +1,24 @@
 # Workspace shared assets
 
 The helper now gives every agent in a Workspace on this machine one asset tree at
-`$XDG_STATE_HOME/beeline/workspaces/<Workspace digest>/shared-home`. New turns use
-its supported package caches, optional pinned harness and ACP adapter
-generations, and AVD metadata. Every harness kind uses the shared download
-caches, including harnesses without a pinnable adapter and turns where pinning
-fails; those turns use the host's installed adapter. Android tools and system
+`$XDG_STATE_HOME/beeline/workspaces/<Workspace digest>/shared-home`. Asset
+preparation selects supported package-cache locations, optional pinned harness
+and ACP adapter generations, and AVD metadata. Harnesses without a pinnable
+adapter and turns where pinning fails use the host's installed adapter. Android tools and system
 images continue to use the operator's installed SDK; the helper does not copy
 or hash that SDK. Every agent and Room keeps its existing `agent-home` path for harness
 sign-in, configuration, sessions, plugin data, and unknown files; resume needs no
 transcript migration. Pending approvals remain server scoped. Repository corners
-keep their own checkout and build output. Emulator launches through `beeline
-emulator -avd <name>` lease unique ports and private writable instance data.
+keep their own checkout and build output. For the current shared host emulator
+workflow, see [Android device proof](agent-body.md#android-device-proof-from-a-corner).
 
-`workspace-assets.ts` and `bwrap-sandbox.ts` own the layout and mount map. The
-selected Workspace cache is writable; published adapter and AVD metadata generations are
-read-only in sessions. Codex has no separate cache environment variable, so
-only its downloaded `cache` and `plugins/cache` paths are rebound to the shared
-tree. Cargo `registry` is rebound the same way; Cargo Git
-remotes and settings stay private because remote URLs may carry credentials. Browser binary
-download locations use explicit Playwright and Puppeteer cache variables. The
-rest of `CODEX_HOME` stays private. The stable parent masks hide other
-Workspaces and agent homes even if a new sibling appears after a turn starts.
-This is an ordinary path visibility boundary on the same Unix account, not a
-multi-user security perimeter.
+`workspace-assets.ts` owns the asset layout and `bwrap-sandbox.ts` owns the
+mount plan. Asset preparation still selects shared cache locations through the
+environment, but sessions no longer bind the Workspace cache writable or
+rebind Codex `cache`, `plugins/cache` or Cargo `registry` to that tree. The
+former shared-layout parent masks and required asset mounts are removed.
+Environment selection alone does not grant write access. Current session write
+boundaries and private-cache setup follow the [approval matrix](approval-matrix.md).
 
 Beeline adds no shared pip or Gradle cache override; their defaults follow
 the private Room HOME, while inherited custom locations remain unchanged.
@@ -65,12 +60,12 @@ The read-only baseline found 77 GiB under `beeline/agents` (76.38 GiB in
 four largest plausibly shareable download categories measured across old homes
 are:
 
-| Old-home category | Combined allocated bytes | Largest one-home copy |
-|---|---:|---:|
-| Codex download cache | 5,473,710,080 | 35,303,424 |
-| Codex plugin package cache | 5,267,750,912 | 30,625,792 |
-| npm home cache | 13,856,993,280 | 1,213,992,960 |
-| pnpm home store | 6,141,247,488 | 924,700,672 |
+| Old-home category          | Combined allocated bytes | Largest one-home copy |
+| -------------------------- | -----------------------: | --------------------: |
+| Codex download cache       |            5,473,710,080 |            35,303,424 |
+| Codex plugin package cache |            5,267,750,912 |            30,625,792 |
+| npm home cache             |           13,856,993,280 |         1,213,992,960 |
+| pnpm home store            |            6,141,247,488 |           924,700,672 |
 
 These categories total **30,739,701,760 bytes**. Keeping only the largest
 observed copy of each would use **2,204,622,848 bytes**, a theoretical upper
@@ -82,7 +77,8 @@ change. The dry-run command is the measured reclaimable amount after new
 turns have warmed the shared cache; it deliberately requires matching content
 before promising a byte.
 
-Validation used an isolated `XDG_STATE_HOME`: two same-repo checkouts ran
+Historical validation of the former writable shared-cache layout used an isolated
+`XDG_STATE_HOME`: two same-repo checkouts ran
 `npm ci` and the Body TypeScript build concurrently against one npm cache;
 two Codex sessions in separate Rooms resumed their own histories while using
 one download and plugin cache; two Android emulators reached boot completion

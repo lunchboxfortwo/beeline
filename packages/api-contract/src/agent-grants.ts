@@ -19,9 +19,9 @@ export const AGENT_GRANT_KINDS = [
 ] as const;
 export type AgentGrantKind = (typeof AGENT_GRANT_KINDS)[number];
 
-/** Budget and repository are retained for historical records, but cannot create new prompts. */
+/** Retired kinds remain readable in historical records, but cannot create new prompts. */
 export const REQUESTABLE_AGENT_GRANT_KINDS = AGENT_GRANT_KINDS.filter(
-  (kind) => kind !== 'budget' && kind !== 'repository',
+  (kind) => kind !== 'budget' && kind !== 'repository' && kind !== 'shared_asset',
 );
 export function isRequestableAgentGrantKind(
   value: unknown,
@@ -663,21 +663,19 @@ export function interpreterScriptArgument(
   return { index: head, path: '<stdin>', stdin: true };
 }
 
-/** Existing Android emulator access on the host adb server requires human consent. */
+/** The one shared host adb server; using an existing emulator needs no approval. */
 export const HOST_EMULATOR_TARGET = '127.0.0.1:5037';
 
-/** Shared by grant requests and owner-machine session startup. */
+/** One decision for request-time and per-call outside-resource authority. */
 export function agentGrantAutoApproves(input: {
   kind: AgentGrantKind; target: string; escalations?: readonly AgentGrantEscalation[];
   requireOwnerApproval?: boolean; ownApp?: boolean; yolo?: boolean; requesterIsOwner?: boolean;
 }): boolean {
-  return !input.requireOwnerApproval && input.kind !== 'shared_asset' &&
-    !(input.kind === 'host' && input.target === HOST_EMULATOR_TARGET) &&
-    !input.escalations?.length &&
+  if (input.kind === 'shared_asset' || (input.kind === 'host' && input.target === HOST_EMULATOR_TARGET)) return true;
+  return !input.requireOwnerApproval && !input.escalations?.length && input.yolo === true &&
     (input.kind === 'mcp' && (input.target.startsWith('app:') || input.target.startsWith('connection-install:'))
       ? input.ownApp === true
-      : input.kind === 'mcp' && input.target === 'wallet'
-        ? input.yolo === true && input.requesterIsOwner === true : true);
+      : input.kind === 'mcp' && input.target === 'wallet' ? input.requesterIsOwner === true : true);
 }
 
 /** Path requests retain their explicit write capability through activation. */

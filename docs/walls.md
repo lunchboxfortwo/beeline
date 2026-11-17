@@ -27,7 +27,7 @@ Why: sessions, model use and answers must stay bound to their own identity and p
 
 ## `sandbox` The sandbox walls around the agent's session
 
-Why: tools reach only permitted files and capabilities; if the sandbox fails, the agent still answers with writes restricted to its own folder.
+Why: source and private session state need distinct write boundaries. The [sandbox policy](approval-matrix.md) owns the mount rules, host-resource approvals and confinement limits. If the sandbox fails, the existing restricted callback fallback remains.
 
 ## `stop` Stop
 

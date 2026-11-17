@@ -329,7 +329,7 @@ const fixture = monolithFixture();
           reason: 'inspect the checkout',
         })
       ).json(),
-    ).toEqual(expect.objectContaining({ status: 'approved', auto: true }));
+    ).toEqual(expect.objectContaining({ status: 'pending', auto: false }));
 
     const rejected = await fixture.operation('updateAgentYolo', {
       workspaceId: WORKSPACE,
@@ -360,9 +360,10 @@ const fixture = monolithFixture();
 
 
   it('stores the purpose and declared facts with the approval request', async () => {
+    await fixture.database.query('UPDATE agents SET yolo_mode=false WHERE agent_id=$1', [AGENT]);
     await fixture.database.query('UPDATE agents SET machine_name=$2 WHERE agent_id=$1', [AGENT, 'squire']);
     const result = await fixture.daemonOperation('requestAgentGrant', {
-      roomId: ROOM, kind: 'shared_asset', target: 'package-cache', reason: 'repair corrupt cache',
+      roomId: ROOM, kind: 'path', target: '/host/private-cache', reason: 'repair corrupt cache',
       action: 'Isolate the package cache', purpose: 'finish  dependency\ninstallation', touches: 'Package cache', capabilities: 'Isolate this cache',
     });
     expect(result.status).toBe(200);
@@ -653,7 +654,7 @@ const fixture = monolithFixture();
     [true, false],
     [true, true],
   ])(
-    'lets an agent use its own owner resource (yolo=%s ownerRequester=%s)',
+    'applies effective yolo on every own-resource call (yolo=%s ownerRequester=%s)',
     async (yolo, ownerRequester) => {
       await fixture.database.query(`UPDATE agents SET yolo_mode=$2 WHERE agent_id=$1`, [AGENT, yolo]);
       const token = await fixture.phoneToken('matrix-member');
@@ -679,7 +680,7 @@ const fixture = monolithFixture();
       const resource = await (
         await fixture.daemonOperation('authorizeResourceCall', { ...context, target: 'paid-api' })
       ).json();
-      expect(resource.allowed).toBe(true);
+      expect(resource.allowed).toBe(yolo);
       expect(
         (
           await (
@@ -689,16 +690,16 @@ const fixture = monolithFixture();
             })
           ).json()
         ).allowed,
-      ).toBe(true);
+      ).toBe(yolo);
       expect(
         (
           await fixture.database.query(
             `SELECT id FROM agent_grants WHERE target IN ('paid-api','openaiDeveloperDocs')`,
           )
         ).rows,
-      ).toEqual([]);
+      ).toHaveLength(yolo ? 0 : 2);
       expect((await (await fixture.daemonOperation('authorizeSquireCall', context)).json()).allowed).toBe(
-        true,
+        yolo,
       );
       expect(
         (await fixture.database.query(`SELECT id FROM agent_grants WHERE kind='budget'`)).rows,
@@ -707,7 +708,7 @@ const fixture = monolithFixture();
   );
 
 
-  it('lets an agent use its owner tool when another person’s agent started the turn', async () => {
+  it('asks the resource owner when another person’s agent starts work with yolo off', async () => {
     const OTHER_AGENT = 'e'.repeat(64);
     const OTHER_OWNER = 'f'.repeat(64);
     await fixture.database.query(
@@ -741,10 +742,10 @@ const fixture = monolithFixture();
         target: 'openaiDeveloperDocs',
       })
     ).json()) as { allowed: boolean };
-    expect(result.allowed).toBe(true);
+    expect(result.allowed).toBe(false);
     expect(
       (await fixture.database.query(`SELECT id FROM messages WHERE card_type='grant-request'`)).rows,
-    ).toEqual([]);
+    ).toHaveLength(1);
   });
 
 

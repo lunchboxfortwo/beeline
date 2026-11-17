@@ -1,6 +1,6 @@
 # Owner connection consent — Reproduction R1
 
-The owner’s own agent should connect the owner’s app without a permission card. Other-account connection cards name the asking agent and the product.
+This historical reproduction covers the former unconditional own-account approval policy. Current connection consent follows the [approval matrix](../../approval-matrix.md).
 
 ## Reproduced
 

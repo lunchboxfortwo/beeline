@@ -322,7 +322,7 @@ it('preapproves a short list of read-only gh and git commands and still asks nea
     const rule = parseCommandGrantTarget(command);
     expect(isPreapprovedReadOnlyCommand(argv)).toBe(true);
     expect(commandRuleEscalations(rule)).toEqual([]);
-    expect(agentGrantAutoApproves({ kind: 'command', target: command, escalations: commandRuleEscalations(rule) })).toBe(true);
+    expect(agentGrantAutoApproves({ kind: 'command', target: command, yolo: true, escalations: commandRuleEscalations(rule) })).toBe(true);
     const bound = commandRuleEscalations(rule, script);
     expect(bound).toContain('unseen-script');
     expect(agentGrantAutoApproves({ kind: 'command', target: command, escalations: bound })).toBe(false);
@@ -359,4 +359,15 @@ it('preapproves a short list of read-only gh and git commands and still asks nea
   expect(commandRuleEscalations(parseCommandGrantTarget('fly deploy --with FLY_TOKEN'))).toEqual([]);
   expect(commandRuleEscalations(parseCommandGrantTarget(JSON.stringify(['python3', '-c', 'print(1)'])), script)).toContain('unseen-script');
   expect(commandGrantEscalations(['env', 'FOO=1', 'npm', 'test'])).toEqual([]);
+});
+
+
+it.each([false, true])('outside-resource auto authority follows effective yolo=%s, except shared emulator/cache retirement', yolo => {
+  for (const kind of ['path', 'host', 'secret', 'device', 'command', 'mcp'] as const)
+    expect(agentGrantAutoApproves({ kind, target: '/host/resource', yolo })).toBe(yolo);
+  expect(agentGrantAutoApproves({ kind: 'host', target: '127.0.0.1:5037', yolo })).toBe(true);
+  expect(agentGrantAutoApproves({ kind: 'mcp', target: 'app:foreign', ownApp: false, yolo })).toBe(false);
+  expect(agentGrantAutoApproves({ kind: 'command', target: 'cat .env', escalations: ['credential'], yolo })).toBe(false);
+  expect(agentGrantAutoApproves({ kind: 'command', target: 'python3 task.py', escalations: ['unseen-script'], yolo })).toBe(false);
+  expect(agentGrantAutoApproves({ kind: 'mcp', target: 'wallet', requesterIsOwner: false, yolo })).toBe(false);
 });

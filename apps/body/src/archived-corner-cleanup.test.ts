@@ -90,7 +90,7 @@ it('deletes a private repository whose dependency layer was really mounted', asy
   await writeFile(resolve(tree, 'plugin/build/old'), 'shared');
   const wrapped = wrapAgentCommand({
     bwrapPath: '/usr/bin/bwrap',
-    spec: { mode: 'edit', cwd: checkout, worktreePath: checkout, protectedPaths: [],
+    spec: { mode: 'edit', cwd: checkout, worktreePath: checkout,
       dependencyLayers: await dependencyLayers(resolve(repository, DEPENDENCY_LAYERS_DIR), [tree]) },
     command: 'sh', // Deleting a shared folder (as a Gradle clean does) leaves a whiteout under work/work.
     args: ['-c', 'rm -r node_modules/plugin/build && echo private > node_modules/plugin/new'],

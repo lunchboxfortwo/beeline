@@ -1,9 +1,9 @@
 /**
  * OS sandbox for agent commands on the executing owner's machine.
- * Startup uses the same auto-approval decision as request_grant. Owner HOME
- * binds read-write before credential and sibling masks; per-Room harness state
- * is restored afterwards. Repository and dependency overlays retain their own
- * read-only mounts. Docker sockets remain masked without an explicit grant.
+ * Host root stays read-only in every mode. Threads bind only their own work
+ * and Git storage writable; private harness state is writable in both modes.
+ * Owner paths and user services require explicit live grants. Credential, sibling
+ * and Docker socket masks remain. Host networking is still shared.
  *
  * Sessions receiving the user bus preserve the host PID namespace: sd_bus
  * cannot authenticate peers hidden behind --unshare-pid. Other sessions retain
@@ -12,13 +12,12 @@
  *
  * Missing or unusable bubblewrap remains a loudly reported fail-open path.
  */
-import { agentGrantAutoApproves,namesCredentialFile,pathGrantAllowsWrite,type SharedAssetCategory } from '@beeline/api-contract/agent-grants';
+import { namesCredentialFile,pathGrantAllowsWrite } from '@beeline/api-contract/agent-grants';
 import { lstatSync,mkdirSync,readdirSync,realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename,dirname,isAbsolute,relative,resolve,sep } from 'node:path';
+import { basename,dirname,isAbsolute,relative,resolve } from 'node:path';
 import type { SessionMode } from './config.js';
 import { CURSOR_HARNESS_COMMAND } from './cursor-acp-bridge.js';
-import { PACKAGE_CACHE_DIRS } from './workspace-assets.js';
 
 
 
@@ -216,10 +215,6 @@ export interface SandboxMountPlan {
   /** Broad owner capabilities precede every credential and sibling mask. */
   ownerPaths?: Array<{ path: string; writable: boolean }>;
   userBus?: string;
-  /** Reapply protected roots after owner grants; private harness mounts follow. */
-  protectedReadOnly?: string[];
-  /** Edit sessions start writable-by-default; Rooms keep the read-only root. */
-  rootWritable?: boolean;
   /**
    * Paths re-bound read-only after the tmpfs that would otherwise hide them.
    *
@@ -241,8 +236,6 @@ export interface SandboxMountPlan {
    * so a deliberate harness-state bind always wins over a mask.
    */
   masks: MaskedPath[];
-  /** Ordered mounts which must exist and may never silently degrade. */
-  requiredMounts?: Array<{ source: string; target: string; mode: 'bind' | 'ro-bind' }>;
   /** Approved host device nodes bound into the private `/dev`. */
   devices?: string[];
 }
@@ -257,8 +250,6 @@ export interface DependencyLayer { tree: string; upper: string; work: string }
 
 
 export interface SandboxSessionSpec {
-  /** Supplied only for an active agent command on its owner's machine. */
-  operatorHome?: string;
   userRuntimeDir?: string;
   grantedPaths?: Array<{ path: string; writable: boolean }>;
   mode: SessionMode;
@@ -281,31 +272,15 @@ export interface SandboxSessionSpec {
   tmpDir?: string;
   /** Git common directory backing a corner's linked worktree. */
   gitCommonDir?: string;
-  /** A Room gets private Git administration while its source stays read-only. */
-  roomGitDirectory?: string;
-  /** Hygiene denylist overlaid read-only in an edit session. */
-  protectedPaths?: string[];
   /** Shared dependency trees, each writable through this checkout's own layer. */
   dependencyLayers?: DependencyLayer[];
   /** Explicit capabilities restored writable after protected parent mounts. */
   additionalWritablePaths?: string[];
   /** Credential stores hidden from this session ({@link credentialMaskPaths}).
-   * Both modes get them: a Room reading the operator's gh token is the same
-   * out-of-band-push hole a corner would be. */
+   * Both modes hide ambient credentials. */
   maskPaths?: MaskedPath[];
   /** Approved `device` grants ({@link grantedSandboxDevices}). */
   devices?: string[];
-  /** Coarse Workspace asset and private Room boundary, shared by every bwrap caller. */
-  sharedLayout?: {
-    assetRoot: string;
-    agentRuntimeDir: string;
-    privateHomeRoot: string;
-    privateRoot?: string;
-    codexHome?: string;
-    packageHome?: string;
-    privateAssetRoot?: string;
-    isolatedCategories?: readonly SharedAssetCategory[];
-  };
 }
 
 
@@ -367,7 +342,7 @@ function normalize(paths: Array<string | undefined>): string[] {
 
 /**
  * The exact mount table for one session. Resolve optional capabilities here;
- * required private boundaries retain their fail-closed validation below.
+ * private paths and credentials are applied after the read-only host root.
  */
 export function sandboxMountPlan(spec: SandboxSessionSpec): SandboxMountPlan {
   const ownerPaths: NonNullable<SandboxMountPlan['ownerPaths']> = [];
@@ -381,11 +356,10 @@ export function sandboxMountPlan(spec: SandboxSessionSpec): SandboxMountPlan {
       if (grant.writable || isUnderTmp(path)) ownerPaths.push({ path, writable: grant.writable });
     } catch { /* An unavailable optional capability mounts nothing. */ }
   }
-  if (spec.operatorHome && agentGrantAutoApproves({ kind: 'path', target: spec.operatorHome }))
-    ownerPaths.unshift({ path: resolve(spec.operatorHome), writable: true });
-  const userBus = spec.operatorHome && spec.userRuntimeDir &&
-    lstatSync(spec.userRuntimeDir, { throwIfNoEntry: false })?.isDirectory() &&
-    agentGrantAutoApproves({ kind: 'command', target: 'systemctl --user' })
+  // User services are a host capability, never an ambient session mount.
+  const userBus = spec.userRuntimeDir && spec.grantedPaths?.some(grant =>
+    grant.writable && resolve(grant.path) === resolve(spec.userRuntimeDir!)) &&
+    lstatSync(spec.userRuntimeDir, { throwIfNoEntry: false })?.isDirectory()
     ? resolve(spec.userRuntimeDir) : undefined;
   // Harness bookkeeping, both modes — see the module comment for why a Room
   // cannot have this read-only. No part of any repository is in here.
@@ -399,6 +373,8 @@ export function sandboxMountPlan(spec: SandboxSessionSpec): SandboxMountPlan {
       ? [
           spec.worktreePath,
           spec.gitCommonDir,
+          // Overlay upper/work must share one writable mount.
+          ...(spec.dependencyLayers ?? []).map(layer => dirname(layer.upper)),
           ...(spec.additionalWritablePaths ?? []),
           ...harnessState,
         ]
@@ -418,86 +394,18 @@ export function sandboxMountPlan(spec: SandboxSessionSpec): SandboxMountPlan {
     ...(spec.harnessStateDirs ?? []),
     ...(spec.harnessHomeStateDirs ?? []),
   ]).filter((path) => isUnderTmp(path) && path !== '/tmp' && !writable.includes(path));
-  const readOnly = normalize([
-    ...(spec.mode === 'edit' ? (spec.protectedPaths ?? []) : []),
-    ...tmpRestores,
-  ]).filter((path) => !writable.includes(path));
-  const shared = spec.sharedLayout;
-  const requiredMounts: NonNullable<SandboxMountPlan['requiredMounts']> = [];
-  const boundaryMasks: MaskedPath[] = [];
-  if (shared) {
-    const assetRoot = resolve(shared.assetRoot);
-    const agentsRoot = dirname(resolve(shared.agentRuntimeDir));
-    const workspacesRoot = dirname(dirname(assetRoot));
-    boundaryMasks.push(
-      { path: workspacesRoot, kind: 'dir' },
-      { path: agentsRoot, kind: 'dir' },
-    );
-    const add = (path: string, mode: 'bind' | 'ro-bind', target = path): void => {
-      requiredMounts.push({ source: resolve(path), target: resolve(target), mode });
-    };
-    // Rebind the selected work directory before its nested private HOME.
-    const cwd = resolve(spec.cwd);
-    const relativeCwd = relative(agentsRoot, cwd);
-    if (relativeCwd === '' || (relativeCwd !== '..' && !relativeCwd.startsWith(`..${sep}`) && !isAbsolute(relativeCwd)))
-      add(cwd, spec.mode === 'edit' ? 'bind' : 'ro-bind');
-    add(shared.privateHomeRoot, 'bind');
-    if (shared.privateRoot) add(shared.privateRoot, 'bind');
-    if (shared.privateAssetRoot && shared.isolatedCategories?.length)
-      add(shared.privateAssetRoot, 'bind');
-    add(resolve(shared.agentRuntimeDir, 'runtime.json'), 'ro-bind');
-    // The selected repository-free Room is read-only, but its generated
-    // CodeGraph index remains writable after rebinding that Room cwd.
-    for (const path of spec.additionalWritablePaths ?? []) {
-      const rel = relative(cwd, resolve(path));
-      if (rel && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
-        add(path, 'bind');
-    }
-    add(resolve(assetRoot, 'cache'), 'bind');
-    const source = (category: SharedAssetCategory, suffix: string): string =>
-      shared.privateAssetRoot && shared.isolatedCategories?.includes(category)
-        ? resolve(shared.privateAssetRoot, suffix)
-        : resolve(assetRoot, suffix);
-    if (shared.privateAssetRoot) {
-      for (const suffix of shared.isolatedCategories?.includes('package-cache') ? PACKAGE_CACHE_DIRS : [])
-        add(resolve(shared.privateAssetRoot, 'cache', suffix), 'bind', resolve(assetRoot, 'cache', suffix));
-      for (const [category, suffix] of [
-        ['codex-download-cache', 'cache/codex/download'],
-        ['codex-plugin-cache', 'cache/codex/plugins'],
-      ] as const) {
-        if (shared.isolatedCategories?.includes(category))
-          add(resolve(shared.privateAssetRoot, suffix), 'bind', resolve(assetRoot, suffix));
-      }
-    }
-    if (shared.codexHome) {
-      add(source('codex-download-cache', 'cache/codex/download'), 'bind', resolve(shared.codexHome, 'cache'));
-      add(source('codex-plugin-cache', 'cache/codex/plugins'), 'bind', resolve(shared.codexHome, 'plugins/cache'));
-    }
-    if (shared.packageHome) {
-      add(source('package-cache', 'cache/cargo/registry'), 'bind', resolve(shared.packageHome, '.cargo/registry'));
-    }
-    add(resolve(assetRoot, 'tools'), 'ro-bind');
-  }
-  if (spec.mode === 'readonly' && spec.roomGitDirectory) {
-    // Preserve the seed's object view before replacing .git with private refs.
-    requiredMounts.push({ source: resolve(spec.cwd, '.git/objects'),
-      target: resolve(spec.roomGitDirectory, 'beeline-seed-objects'), mode: 'ro-bind' });
-    requiredMounts.push({ source: resolve(spec.roomGitDirectory), target: resolve(spec.cwd, '.git'), mode: 'bind' });
-  }
+  const readOnly = tmpRestores;
   return {
     ownerPaths,
-    protectedReadOnly: normalize(spec.protectedPaths ?? []),
     ...(userBus ? { userBus } : {}),
-    ...(spec.mode === 'edit' ? { rootWritable: true } : {}),
     readOnly,
     writable,
     ...(spec.dependencyLayers?.length ? { overlays: spec.dependencyLayers } : {}),
-    masks: [...(spec.maskPaths ?? []), ...boundaryMasks,
+    masks: [...(spec.maskPaths ?? []),
       ...[...new Set(['/run/docker.sock', '/var/run/docker.sock', ...(spec.userRuntimeDir ? [resolve(spec.userRuntimeDir, 'docker.sock')] : [])]
         .filter(path => lstatSync(path, { throwIfNoEntry: false }) &&
           !spec.grantedPaths?.some(grant => resolve(grant.path) === path)).map(path => realpathSync(path)))]
         .map(path => ({ path, kind: 'file' as const }))],
-    ...(requiredMounts.length ? { requiredMounts } : {}),
     ...(spec.devices?.length ? { devices: normalize(spec.devices) } : {}),
   };
 }
@@ -524,14 +432,12 @@ const OVERLAY_BOOTSTRAP = [
 /** Whether a native edit reaches a writable host mount in this exact plan. */
 export function sandboxAllowsWrite(plan: SandboxMountPlan, path: string): boolean {
   const covers = (root: string) => path === resolve(root) || path.startsWith(resolve(root) === '/' ? '/' : `${resolve(root)}/`);
-  let allowed = Boolean(plan.rootWritable);
+  let allowed = false;
   for (const root of plan.readOnly) if (covers(root)) allowed = false;
   for (const binding of plan.ownerPaths ?? []) if (covers(binding.path)) allowed = binding.writable;
   if (plan.userBus && covers(plan.userBus)) allowed = true;
-  for (const root of plan.protectedReadOnly ?? []) if (covers(root)) allowed = false;
   for (const mask of plan.masks) if (covers(mask.path)) allowed = false;
   for (const root of plan.writable) if (covers(root)) allowed = true;
-  for (const mount of plan.requiredMounts ?? []) if (covers(mount.target)) allowed = mount.mode === 'bind';
   for (const layer of plan.overlays ?? []) if (covers(layer.tree)) allowed = true;
   return allowed;
 }
@@ -561,7 +467,7 @@ export function buildBwrapArgv(input: {
       ? ['--unshare-user', '--uid', '0', '--gid', '0',
           ...['CAP_SYS_ADMIN', 'CAP_DAC_OVERRIDE', 'CAP_SETFCAP'].flatMap(cap => ['--cap-add', cap])]
       : []),
-    input.plan.rootWritable ? '--bind' : '--ro-bind',
+    '--ro-bind',
     '/',
     '/',
     '--dev',
@@ -580,7 +486,6 @@ export function buildBwrapArgv(input: {
       '--setenv', 'XDG_RUNTIME_DIR', input.plan.userBus,
       '--setenv', 'DBUS_SESSION_BUS_ADDRESS', `unix:path=${input.plan.userBus}/bus`);
   }
-  for (const path of input.plan.protectedReadOnly ?? []) args.push('--ro-bind', path, path);
   // Credential masks: applied after the ro-bind they override and before the
   // writable binds a deliberate harness-state bind would win with. A masked
   // DIRECTORY becomes an empty writable tmpfs (tools may write into nothing);
@@ -591,16 +496,8 @@ export function buildBwrapArgv(input: {
       args.push('--tmpfs', mask.path);
     } else args.push('--ro-bind', '/dev/null', mask.path);
   }
-  // Legacy optional harness roots may be absent. Coarse private/asset boundary
-  // mounts below are required and fail closed.
+  // Optional harness roots may be absent.
   for (const path of input.plan.writable) args.push('--bind-try', path, path);
-  for (const mount of input.plan.requiredMounts ?? []) {
-    const source = lstatSync(mount.source, { throwIfNoEntry: false });
-    const target = lstatSync(mount.target, { throwIfNoEntry: false });
-    if (!source || !target || source.isSymbolicLink() || target.isSymbolicLink())
-      throw new Error(`required sandbox mount is missing or a symlink: ${mount.source} -> ${mount.target}`);
-    args.push(`--${mount.mode}`, mount.source, mount.target);
-  }
   args.push('--chdir', input.cwd);
   // The sandbox must not outlive the daemon that owns the session.
   args.push('--die-with-parent');

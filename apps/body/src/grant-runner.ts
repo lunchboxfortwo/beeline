@@ -108,7 +108,6 @@ export type GrantRunRequester = { pubkey: string; name?: string };
  * spawned plainly or into the Room's read-only mount table.
  */
 export interface GrantWritePolicy {
-  operatorHome?: string;
   surface: AgentSurface;
   /** The self-tested bwrap; absent on a Room means its promise cannot be kept. */
   bwrapPath?: string;
@@ -118,7 +117,6 @@ export interface GrantWritePolicy {
   harnessStateDirs?: string[];
   /** Credential stores hidden from the run, exactly as a Room session hides them. */
   maskPaths?: MaskedPath[];
-  sharedLayout?: SandboxSessionSpec['sharedLayout'];
   /** Exact Room tool/cache environment, never agent provider credentials. */
   toolEnv?: Record<string, string>;
 }
@@ -827,7 +825,6 @@ function roomSandboxCommand(
     bwrapPath: policy.bwrapPath,
     spec: {
       mode: 'readonly',
-      operatorHome: policy.operatorHome,
       userRuntimeDir: runtimeDir,
       grantedPaths,
       devices,
@@ -838,7 +835,6 @@ function roomSandboxCommand(
       ...(policy.harnessStateDirs ? { harnessStateDirs: policy.harnessStateDirs } : {}),
       ...(policy.scratch ? { tmpDir: policy.scratch } : {}),
       ...(policy.maskPaths ? { maskPaths: policy.maskPaths } : {}),
-      ...(policy.sharedLayout ? { sharedLayout: policy.sharedLayout } : {}),
     },
     command: '/bin/sh',
     args: ['-c', SANDBOX_STARTED_SCRIPT, 'beeline-grant-sandbox', sandboxMarker, ...argv],

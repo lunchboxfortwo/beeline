@@ -55,10 +55,10 @@ describe('host emulator permission through request_grant', () => {
     expect(spawn).not.toHaveBeenCalled();
     expect(exec).not.toHaveBeenCalled();
   });
-  it('host emulator + permission: returns the existing address and ready serial', async () => {
+  it('host emulator without permission: returns the existing address and ready serial', async () => {
     const fixture = await adbFixture('emulator-5554\tdevice\nusb-123\tdevice\nemulator-5556\toffline\n', true);
     const result = await requestGrant(ask, deps([grant], [], fixture.probe));
-    expect(result).toContain('Host emulator allowed at 127.0.0.1:5037');
+    expect(result).toContain('Host emulator available at 127.0.0.1:5037');
     expect(result).toContain('adb -H 127.0.0.1 -P 5037 -s emulator-5554');
     expect(result).not.toContain('usb-123');
     expect(result).not.toContain('emulator-5556');
@@ -74,54 +74,22 @@ describe('host emulator permission through request_grant', () => {
     expect(result).not.toContain('adb -H');
     expect(fixture.requests).toEqual(['000chost:devices', '0023host-serial:emulator-5652:get-state']);
   });
-  it.each(['denied', 'revoked'])('permission %s: uses no emulator and does not probe the host', async status => {
-    const dependencies = deps([], [{ ...grant, status }]);
-    const result = await requestGrant(ask, dependencies);
-    expect(result).toContain('Host emulator permission refused');
-    expect(result).toContain('ask the host owner to reconsider');
-    expect(result).toContain('say so in your reply');
-    expect(dependencies.hostEmulators).not.toHaveBeenCalled();
-    expect(dependencies.execute).not.toHaveBeenCalledWith('requestAgentGrant', expect.anything());
-  });
-  it('requests the existing human grant flow before probing', async () => {
-    const dependencies = deps([], []);
-    expect(await requestGrant(ask, dependencies)).toContain('pending, card posted');
-    expect(dependencies.execute).toHaveBeenCalledWith('requestAgentGrant', { roomId: 'room', ...ask });
-    expect(dependencies.hostEmulators).not.toHaveBeenCalled();
-  });
-  it('a reviewer does not mistake the implementer permission for its own', async () => {
-    const dependencies = deps([], [{ ...grant, agentId: 'implementer', status: 'pending' }]);
-    expect(await requestGrant(ask, dependencies)).toContain('pending, card posted');
-    expect(dependencies.execute).toHaveBeenCalledWith('requestAgentGrant', { roomId: 'room', ...ask });
-    expect(dependencies.hostEmulators).not.toHaveBeenCalled();
-  });
-  it('pending permission uses no emulator and does not post another card', async () => {
-    const dependencies = deps([], [{ ...grant, status: 'pending' }]);
-    expect(await requestGrant(ask, dependencies)).toContain('permission pending');
-    expect(dependencies.hostEmulators).not.toHaveBeenCalled();
-    expect(dependencies.execute).not.toHaveBeenCalledWith('requestAgentGrant', expect.anything());
+  it.each(['pending', 'denied', 'revoked'])('ignores obsolete %s emulator permissions and returns the shared device without any grant call', async status => {
+    const dependencies = deps([], [{ ...grant, status }], vi.fn(async () => ['emulator-5554']));
+    expect(await requestGrant(ask, dependencies)).toContain('Host emulator available');
+    expect(dependencies.hostEmulators).toHaveBeenCalledTimes(1);
+    expect(dependencies.execute).not.toHaveBeenCalled();
   });
   it('a missing host adb server is unavailable without launching one', async () => {
     const probe = vi.fn(async (): Promise<string[]> => { throw new Error('ECONNREFUSED'); });
     expect(await requestGrant(ask, deps([grant], [], probe))).toContain('Host emulator unavailable');
     expect(probe).toHaveBeenCalledTimes(1);
   });
-  it('uses an automatic host approval on the next call without a new session', async () => {
-    const live: unknown[] = [];
+  it('returns a ready serial on the first request without opening or consuming a grant', async () => {
     const fixture = await adbFixture('emulator-5554\tdevice\n');
-    const dependencies = deps(live, [], fixture.probe);
-    dependencies.execute.mockImplementation(async (name: string) => {
-      if (name === 'requestAgentGrant') { live.push(grant); return { grantId: 'g1', auto: true }; }
-      return { grants: live };
-    });
-    expect(await requestGrant(ask, dependencies)).toContain('no new session is needed');
-    expect(dependencies.hostEmulators).not.toHaveBeenCalled();
+    const dependencies = deps([], [], fixture.probe);
     expect(await requestGrant(ask, dependencies)).toContain('adb -H 127.0.0.1 -P 5037 -s emulator-5554 get-state');
+    expect(dependencies.execute).not.toHaveBeenCalled();
     expect(fixture.requests).toEqual(['000chost:devices', '0023host-serial:emulator-5554:get-state']);
-  });
-  it('spends a once permission before delivering the address', async () => {
-    const dependencies = deps([{ ...grant, status: 'once' }], [], vi.fn(async () => ['emulator-5554']));
-    expect(await requestGrant(ask, dependencies)).toContain('Host emulator allowed');
-    expect(dependencies.execute).toHaveBeenLastCalledWith('consumeAgentGrant', { grantId: 'g1' });
   });
 });

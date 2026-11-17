@@ -16,11 +16,6 @@ export interface WorkspaceAssetPaths {
 }
 
 export const SHARED_LAYOUT_MARKER = 'layout-live-v1.json';
-export const PACKAGE_CACHE_DIRS = [
-  'npm', 'pnpm', 'uv', 'go-mod', 'go-build', 'turbo', 'huggingface',
-  'browser/playwright', 'browser/puppeteer', 'cargo/registry',
-] as const;
-
 export function workspaceAssetPaths(root: string): WorkspaceAssetPaths {
   const absolute = resolve(root);
   return {

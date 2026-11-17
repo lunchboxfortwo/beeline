@@ -505,13 +505,13 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   },
   {
     "name": "request_grant",
-    "description": "Request or list scoped grants. Shared-asset isolation uses kind shared_asset and a cache-category target. Existing human approvals and exact command/secret safeguards apply; listing reveals no secrets. " + HOST_EMULATOR_RULE,
+    "description": "Request or list scoped grants. Private cache copies need no approval; configure them under your private HOME. Existing human approvals and exact command/secret safeguards apply; listing reveals no secrets. " + HOST_EMULATOR_RULE,
     "inputSchema": {
       "type": "object",
       "properties": {
         "mode": {"type": "string", "enum": ["request", "list"]},
         "action": APPROVAL_ACTION_SCHEMA,
-        "kind": {"type": "string", "enum": ["path", "host", "secret", "device", "command", "mcp", "shared_asset"]},
+        "kind": {"type": "string", "enum": ["path", "host", "secret", "device", "command", "mcp"]},
         "target": {
           "type": "string",
           "minLength": 1,

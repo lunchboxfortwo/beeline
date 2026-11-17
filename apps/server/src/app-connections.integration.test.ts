@@ -484,6 +484,23 @@ const scope2 = fixtureScope2();
   });
 
 
+  it('Ask first requires the app owner approval before own-account installation, then reuses it', async () => {
+    await scope2.database.query('UPDATE agents SET yolo_mode=false WHERE agent_id=$1', [HELPER]);
+    await scope2.connectSquire();
+    const daemon = scope2.daemonWith(fakeRegistry([]).client);
+    const input = { ...turn, service: 'GitHub', reason: 'Read repository issues', squireAvailable: true };
+    const asked = await daemon.execute('connect', input, HELPER);
+    expect(asked.status).toBe('needs_approval');
+    const rows = (await scope2.database.query<{ id: string; status: string; auto: boolean }>(
+      "SELECT id,status,auto FROM agent_grants WHERE target='connection-install:github'")).rows;
+    expect(rows).toEqual([{ id: expect.any(String), status: 'pending', auto: false }]);
+    const phone = new PhoneService(scope2.database, 'http://placeholder');
+    await phone.execute('decideAgentGrant', { grantId: rows[0]!.id, decision: 'always' }, OWNER);
+    expect(await daemon.execute('connect', input, HELPER)).toMatchObject({ status: 'needs_squire' });
+    expect((await scope2.database.query("SELECT count(*)::int count FROM agent_grants WHERE target='connection-install:github'")).rows)
+      .toEqual([{ count: 1 }]);
+  });
+
   it('Reproduction R1: the owner’s agent connects GitHub without a permission card', async () => {
     await scope2.connectSquire();
     const daemon = scope2.daemonWith(fakeRegistry([]).client);
@@ -636,6 +653,7 @@ const scope2 = fixtureScope2();
   it.each([['agent owner first', false], ['foreign owner first', true]] as const)(
     'R1: asks with different deciders keep separate cards, %s; the absent owner mirror holds every ask',
     async (_order, foreignFirst) => {
+      await scope2.database.query('UPDATE agents SET yolo_mode=false WHERE agent_id=$1', [HELPER]);
       const foreign = 'd'.repeat(64);
       const apps = [['github', 'GitHub', '88888888-8888-4888-8888-888888888888'],
         ['linear', 'Linear', '99999999-9999-4999-8999-999999999999']] as const;
@@ -649,7 +667,7 @@ const scope2 = fixtureScope2();
         ...turn, kind: 'mcp', target: `connection-install:${key}`, appId, purpose: `Connect ${key}`, reason: `Connect ${key}`,
       }, HELPER);
       const askOwner = () => daemon.execute('requestAgentGrant', {
-        ...turn, kind: 'host', target: '127.0.0.1:5037', purpose: 'Use the emulator', reason: 'Use the emulator',
+        ...turn, kind: 'host', target: 'api.example.com', purpose: 'Use the host service', reason: 'Use the host service',
       }, HELPER);
       const first = foreignFirst ? await askForeign(apps[0][0], apps[0][2]) : await askOwner();
       const second = foreignFirst ? await askOwner() : await askForeign(apps[0][0], apps[0][2]);

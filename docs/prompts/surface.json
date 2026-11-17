@@ -1012,7 +1012,7 @@
     }
    },
    "request_grant": {
-    "description": "Request or list scoped grants. Shared-asset isolation uses kind shared_asset and a cache-category target. Existing human approvals and exact command/secret safeguards apply; listing reveals no secrets. Emulators: request_grant(mode:request,action:\"Use host emulator\",kind:host,target:\"127.0.0.1:5037\",reason,purpose); Allow: repeat for address or report unavailable/refused; never start one. Argument combinations (validated by Beeline): {\"anyOf\":[{\"properties\":{\"mode\":{\"const\":\"request\"}},\"required\":[\"mode\",\"kind\",\"target\",\"reason\",\"action\",\"purpose\"]},{\"properties\":{\"mode\":{\"const\":\"list\"}},\"required\":[\"mode\"]}]}",
+    "description": "Request or list scoped grants. Private cache copies need no approval; configure them under your private HOME. Existing human approvals and exact command/secret safeguards apply; listing reveals no secrets. Emulators: request_grant(mode:request,action:\"Use host emulator\",kind:host,target:\"127.0.0.1:5037\",reason,purpose); returns the existing shared emulator address without approval, or reports unavailable; never start one. Argument combinations (validated by Beeline): {\"anyOf\":[{\"properties\":{\"mode\":{\"const\":\"request\"}},\"required\":[\"mode\",\"kind\",\"target\",\"reason\",\"action\",\"purpose\"]},{\"properties\":{\"mode\":{\"const\":\"list\"}},\"required\":[\"mode\"]}]}",
     "inputSchema": {
      "type": "object",
      "properties": {
@@ -1037,8 +1037,7 @@
         "secret",
         "device",
         "command",
-        "mcp",
-        "shared_asset"
+        "mcp"
        ]
       },
       "target": {

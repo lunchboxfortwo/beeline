@@ -32,7 +32,7 @@ import { daemonOfferContext } from './workbench.js';
       target: typeof input.target === 'string' ? input.target.trim() : '',
     });
     if (gate.kind === 'refuse') return { allowed: false };
-    const result = await daemonAuthorizeScopedGrant(ctx, input, agentId, 'mcp', gate.target);
+    const result = await daemonAuthorizeScopedGrant(ctx, { ...input, ...(gate.kind === 'app' ? { appId: gate.appId } : {}) }, agentId, 'mcp', gate.target);
     if (gate.kind === 'app' && result.allowed && input.consume !== false) {
       const requester = await daemonGrantRequester(ctx);
       await recordAppUsage(ctx.database, {

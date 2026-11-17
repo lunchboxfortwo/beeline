@@ -137,7 +137,6 @@ export async function requestGrant(
   const { action, purpose } = grantApprovalIntent(args);
   const kind = stringArg(args, 'kind');
   if (kind === 'shared_asset') {
-    if (args.ttl !== undefined) throw new Error('shared asset isolation must be standing');
     return requestSharedAssetIsolation({ ...args, category: args.target }, deps);
   }
   if (!isRequestableAgentGrantKind(kind)) {
@@ -177,27 +176,12 @@ export async function requestGrant(
     }
   }
   if (kind === 'host' && target === HOST_EMULATOR_TARGET) {
-    const listed = await deps.execute('listAgentGrants', { roomId: deps.roomId });
-    const live = Array.isArray(listed.grants) ? listed.grants.map(asObject) : [];
-    const grant = live.find((entry) => entry.kind === kind && entry.target === target &&
-      (entry.status === 'approved' || entry.status === 'once'));
-    if (grant) {
-      let serials: string[];
-      try { serials = await (deps.hostEmulators ?? hostEmulatorSerials)(); }
-      catch { serials = []; }
-      if (!serials.length)
-        return 'Host emulator unavailable: no running host emulator is available; nothing was started. Ask the host owner to make a running emulator available, then call request_grant again. Do not use an emulator and say so in your reply.';
-      if (grant.status === 'once')
-        await deps.execute('consumeAgentGrant', { grantId: grant.grantId });
-      return `Host emulator allowed at ${target}: ${serials.map((serial) => `adb -H 127.0.0.1 -P 5037 -s ${serial} get-state`).join('; ')}. Run one returned get-state command and expect device before proof; keep its -H, -P and -s options on every adb command. If the device disappears, call request_grant again for the current address instead of reusing an old serial. Use this existing emulator only; the helper never starts or manages it.`;
-    }
-    const history = await deps.execute('listAgentGrantRequests', { roomId: deps.roomId });
-    const requests = Array.isArray(history.grants) ? history.grants.map(asObject) : [];
-    const previous = requests.find((entry) => !entry.agentId && entry.kind === kind && entry.target === target);
-    if (previous?.status === 'denied' || previous?.status === 'revoked')
-      return 'Host emulator permission refused: ask the host owner to reconsider access before retrying. Do not use an emulator and say so in your reply.';
-    if (previous?.status === 'pending')
-      return 'Host emulator permission pending: wait for the host to Allow, then call request_grant again for the existing emulator address; end your turn now without using an emulator.';
+    let serials: string[];
+    try { serials = await (deps.hostEmulators ?? hostEmulatorSerials)(); }
+    catch { serials = []; }
+    if (!serials.length)
+      return 'Host emulator unavailable: no running host emulator is available; nothing was started. Ask the host owner to make a running emulator available, then call request_grant again. Do not use an emulator and say so in your reply.';
+    return `Host emulator available at ${target}: ${serials.map((serial) => `adb -H 127.0.0.1 -P 5037 -s ${serial} get-state`).join('; ')}. Run one returned get-state command and expect device before proof; keep its -H, -P and -s options on every adb command. If the device disappears, call request_grant again for the current address instead of reusing an old serial. Use this existing shared emulator only; the helper never starts or manages it.`;
   }
   const result = await deps.execute('requestAgentGrant', {
     roomId: deps.roomId,
@@ -215,8 +199,6 @@ export async function requestGrant(
   const grantId = typeof result.grantId === 'string' ? result.grantId : 'unknown';
   const ask = `${kind === 'path' && pathGrantAllowsWrite(stringArg(args, 'capabilities')) ? 'read and write' : AGENT_GRANT_VERBS[kind]} ${target}`;
   if (result.auto === true) {
-    if (kind === 'host' && target === HOST_EMULATOR_TARGET)
-      return 'Host emulator permission approved. Call request_grant again now to read live authority and the existing emulator address; no new session is needed.';
     if (kind === 'command')
       return `approved: ${ask} [grant ${grantId}]. Run it now with run_granted_command and the argv.`;
     if (kind === 'device') {
@@ -270,23 +252,12 @@ export async function requestGrant(
 
 export async function requestSharedAssetIsolation(
   args: JsonObject,
-  deps: AgentGrantDeps = agentGrantDepsFromEnv(),
+  _deps?: AgentGrantDeps,
 ): Promise<string> {
-  const { action, purpose } = grantApprovalIntent(args);
   const category = stringArg(args, 'category');
   if (!isSharedAssetCategory(category))
     throw new Error(`category must be one of ${SHARED_ASSET_CATEGORIES.join(', ')}`);
-  const reason = stringArg(args, 'reason')?.trim();
-  if (!reason || reason.length > AGENT_GRANT_REASON_MAX_LENGTH)
-    throw new Error('reason must explain the failure in at most 1000 characters');
-  const result = await deps.execute('requestAgentGrant', {
-    roomId: deps.roomId, kind: 'shared_asset', target: category, reason, action, purpose,
-    ...(args.touches !== undefined ? { touches: stringArg(args, 'touches') } : {}),
-    ...(args.capabilities !== undefined ? { capabilities: stringArg(args, 'capabilities') } : {}),
-  });
-  if (result.status !== 'pending' || result.auto !== false)
-    throw new Error('shared asset isolation did not open a human approval');
-  return `pending, card posted: isolate ${category} [grant ${String(result.grantId)}]. A Workspace owner, admin, or this agent's owner must answer ALWAYS or NO on the card in this chat. Your turn is paused; end it now. If approved, the category becomes private from your next session.`;
+  return `No approval is needed for a private ${category} copy. Copy or configure the cache under your private HOME now; no shared-cache mount will change.`;
 }
 
 

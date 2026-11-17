@@ -137,8 +137,8 @@ export function isSandboxHomeEdit(request: AcpPermissionRequest, sandboxHome?: s
  * MCP tool call is approved; shell commands and native read/search requests
  * are approved while the OS sandbox wraps this session, as are native
  * writes/edits whose every path resolves to a writable mount in the effective
- * sandbox plan, including operator HOME and explicit grants. Credential and
- * sibling masks and protected read-only mounts still reject edits. Without the sandbox, only native reads confined to downloaded
+ * sandbox plan, including explicit host path grants. Credential and
+ * sibling masks and the read-only host root still reject edits. Without the sandbox, only native reads confined to downloaded
  * attachments are approved. Other native writes/edits, deletes, moves and
  * unstructured requests remain refused.
  *

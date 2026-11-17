@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { cornerImplementerSql } from '../corner-worker.js';
 import { AGENT_GRANT_REASON_MAX_LENGTH, AGENT_GRANT_TARGET_MAX_LENGTH, commandRuleEscalations, isRequestableAgentGrantKind, isSharedAssetCategory, isCommandGrantScript, parseCommandGrantTarget, type AgentGrantEscalation, type AgentGrantKind, type CommandGrantRule, type CommandGrantScript } from '@beeline/api-contract/agent-grants';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
-import { restateSystemLine, ensureSystemDirectMessageRoom, systemLine } from '../system-line.js';
+import { restateSystemLine, ensureSystemDirectMessageRoom, ensureSystemIdentity, systemLine } from '../system-line.js';
 import { postRoomChoice } from '../room-choice.js';
 import { workflowRunRequester } from '../workflow-runs.js';
 import type { DaemonContext } from './context.js';
@@ -19,11 +19,15 @@ import { daemonWriteResult } from './corner-messages.js';
 
 
   /**
-   * request_grant records owner-machine access without a card. Wallet access
-   * retains its requester/yolo rule. Credential files and unread scripts still
+   * request_grant uses effective YOLO for owner-machine access. Wallet access
+   * retains its requester rule. Credential files and unread scripts still
    * require a person. Budget and repository asks are retired.
    */
   export async function daemonRequestAgentGrant(ctx: DaemonContext, input: Input<'requestAgentGrant'>, agentId: string, requireOwnerApproval = false) {
+    if (input.kind === 'shared_asset') {
+      if (!isSharedAssetCategory(input.target)) throw new Error('shared asset category is invalid');
+      return { grantId: randomUUID(), status: 'approved' as const, auto: true };
+    }
     // Legacy request_grant used action as its mode. Keep display action absent
     // so the existing grant-kind fallback owns the card copy.
     const legacyIntent = input.action === undefined && isRequestableAgentGrantKind(input.kind);
@@ -50,10 +54,6 @@ import { daemonWriteResult } from './corner-messages.js';
       throw new Error('grant ttlSeconds is invalid');
     const kind: AgentGrantKind = input.kind;
     const target = kind === 'command' ? input.target : input.target.trim();
-    if (kind === 'shared_asset' && !isSharedAssetCategory(target))
-      throw new Error('shared asset category is invalid');
-    if (kind === 'shared_asset' && (input.ttlSeconds !== undefined || input.script !== undefined))
-      throw new Error('shared asset isolation must be standing');
     const squireRoute = kind === 'mcp' && target === 'squire';
     let rule: CommandGrantRule | undefined;
     if (kind === 'command') {
@@ -70,15 +70,6 @@ import { daemonWriteResult } from './corner-messages.js';
     const script = rule ? validateGrantScript(rule, input.script) : undefined;
     const escalations: AgentGrantEscalation[] = rule ? commandRuleEscalations(rule, script) : [];
     const reason = input.reason.trim();
-    if (kind === 'shared_asset') {
-      const existing = await ctx.database.query<{ status: string }>(
-        `SELECT status FROM agent_grants WHERE agent_id=$1 AND kind='shared_asset'
-         AND target=$2 AND status IN ('pending','approved') LIMIT 1`,
-        [agentId, target],
-      );
-      if (existing.rowCount)
-        throw new Error(`shared asset isolation conflict: ${target} is already ${existing.rows[0]!.status}`);
-    }
     const context = (
       await ctx.database.query<{
         workspace_id: string;
@@ -131,9 +122,8 @@ import { daemonWriteResult } from './corner-messages.js';
           avatar: string | null; display_name: string }>(
           `SELECT person.id,person.name,person.handle,person.avatar,app.display_name
            FROM workspace_apps app JOIN identities person ON person.id=app.owner_identity_id
-           WHERE app.id=$1::uuid AND app.app_key=$2 AND app.state='active'
-             AND ($3::boolean OR app.transport='composio')`,
-          [input.appId, target.slice(connectionInstall ? 'connection-install:'.length : 4), connectionInstall],
+           WHERE app.id=$1::uuid AND app.app_key=$2 AND app.state='active'`,
+          [input.appId, target.slice(connectionInstall ? 'connection-install:'.length : 4)],
         )).rows[0]
       : undefined;
     if (target.startsWith('app:') && !appOwner)
@@ -245,25 +235,15 @@ import { daemonWriteResult } from './corner-messages.js';
       if (auto) {
         return { messageId: undefined, additionalCardRoomIds: [] };
       }
+      if (squireRoute) await ensureSystemIdentity(database);
       // A decider who cannot read this Room gets the same card in their
       // @system DM, so Room membership stays the read boundary.
-      const absentDeciders = kind === 'shared_asset'
-        ? await database.query<{ identity_id: string }>(
-          `SELECT member.identity_id FROM memberships member
-           WHERE member.workspace_id=$1 AND member.room_id IS NULL
-             AND member.removed_at IS NULL
-             AND (member.role IN ('owner','admin') OR member.identity_id=$2)
-             AND NOT EXISTS (SELECT 1 FROM room_access room_member
-               WHERE room_member.room_id=$3 AND room_member.identity_id=member.identity_id
-                 AND room_member.removed_at IS NULL)`,
-          [context.workspace_id, context.owner_id, input.roomId],
-        )
-        : await database.query<{ identity_id: string }>(
-          `SELECT $1::text identity_id WHERE NOT EXISTS (SELECT 1 FROM room_access room_member
-             WHERE room_member.room_id=$2 AND room_member.identity_id=$1
-               AND room_member.removed_at IS NULL)`,
-          [resourceOwnerId, input.roomId],
-        );
+      const absentDeciders = await database.query<{ identity_id: string }>(
+        `SELECT $1::text identity_id WHERE NOT EXISTS (SELECT 1 FROM room_access room_member
+           WHERE room_member.room_id=$2 AND room_member.identity_id=$1
+             AND room_member.removed_at IS NULL)`,
+        [resourceOwnerId, input.roomId],
+      );
       const supersededIds = superseded.rows.map(row => row.id);
       let replacementCards: { id: string; card: { grants: (typeof grantView)[] } }[] = [];
       if (supersededIds.length) {
@@ -277,7 +257,7 @@ import { daemonWriteResult } from './corner-messages.js';
       }
       // One card holds only grants with one decider, so its controls always
       // match the authority the server checks.
-      const open = replacementCards.length || kind === 'shared_asset' ? undefined : (
+      const open = replacementCards.length ? undefined : (
         await database.query<{ id: string; card: { grants: (typeof grantView)[] } }>(
           `SELECT id,card FROM messages WHERE room_id=$1 AND card_type='grant-request'
            AND card->'agent'->>'pubkey'=$2 AND card->>'sourceRoomId'=$3
@@ -354,9 +334,7 @@ import { daemonWriteResult } from './corner-messages.js';
         ? {
             approval: {
               destination: 'room' as const,
-              authority: kind === 'shared_asset'
-                ? ('workspace-manager-or-agent-owner' as const)
-                : ('resource-owner' as const),
+              authority: 'resource-owner' as const,
             },
           }
         : {}),
@@ -425,18 +403,20 @@ import { daemonWriteResult } from './corner-messages.js';
        FROM agent_grants g LEFT JOIN identities requester ON requester.id=g.requested_by
        WHERE g.agent_id=$1 AND g.status IN ('approved','once')
          AND (g.expires_at IS NULL OR g.expires_at>now())
-         AND (NOT g.auto OR (g.kind<>'mcp' OR g.target<>'wallet') OR EXISTS (
+         AND (NOT g.auto OR (g.kind='host' AND g.target=$3) OR EXISTS (
            SELECT 1 FROM agents a JOIN workspaces w ON w.id=g.workspace_id
            WHERE a.agent_id=g.agent_id AND a.yolo_mode AND w.visibility<>'public'
-             AND (g.kind='repository' OR g.requested_by=a.owner_id)
+             AND (g.kind<>'mcp' OR g.target<>'wallet' OR g.requested_by=a.owner_id)
+             AND (g.app_id IS NULL OR EXISTS (SELECT 1 FROM workspace_apps app
+               WHERE app.id=g.app_id AND app.state='active' AND app.owner_identity_id=a.owner_id))
          ))
+         AND g.kind<>'shared_asset'
          AND (g.kind IN ('repository','shared_asset') OR g.auto OR g.decided_by=(
            SELECT owner_id FROM agents WHERE agent_id=g.agent_id
          ) OR (g.app_id IS NOT NULL AND EXISTS (
            SELECT 1 FROM workspace_apps app WHERE app.id=g.app_id
              AND app.state='active' AND g.decided_by=app.owner_identity_id
          )))
-         AND NOT (g.kind='host' AND g.target=$3 AND (g.auto OR g.decided_by IS NULL))
          AND ($2::uuid IS NULL OR g.workspace_id=(SELECT workspace_id FROM rooms WHERE id=$2))
        ORDER BY g.created_at DESC,g.id`,
       [agentId, roomId ?? null, HOST_EMULATOR_TARGET],
@@ -506,10 +486,10 @@ import { daemonWriteResult } from './corner-messages.js';
        )) AND g.superseded_at IS NULL
          AND ((g.status IN ('pending','approved','once') AND (g.expires_at IS NULL OR g.expires_at>now()))
            OR (g.kind='command' AND g.agent_id=$1 AND g.status IN ('approved','once','revoked','denied'))
-           OR (g.kind='host' AND g.target=$3 AND g.status IN ('denied','revoked')))
+           OR (g.kind='host' AND g.status IN ('denied','revoked')))
          AND ($2::uuid IS NULL OR g.workspace_id=(SELECT workspace_id FROM rooms WHERE id=$2))
        ORDER BY g.created_at DESC,g.id`,
-      [agentId, roomId ?? null, HOST_EMULATOR_TARGET],
+      [agentId, roomId ?? null],
     );
     return {
       grants: rows.rows.map((row) => ({
@@ -597,9 +577,9 @@ import { daemonWriteResult } from './corner-messages.js';
   }
 
 
-  /** An agent may use its own owner's resources; wallet retains its separate consent gate. */
+  /** Resource calls use current effective YOLO or live consent; wallet also checks its requester. */
   export async function daemonAuthorizeScopedGrant(ctx: DaemonContext,
-    input: Input<'authorizeSquireCall'> & { readonly consume?: boolean },
+    input: Input<'authorizeSquireCall'> & { readonly consume?: boolean; readonly appId?: string },
     agentId: string,
     kind: 'mcp',
     target: string,
@@ -630,8 +610,8 @@ import { daemonWriteResult } from './corner-messages.js';
     ).rows[0];
     if (!context) throw new Error('agent not found');
     if (!context.owner_present) throw new Error('resource owner access denied');
-    if (target !== 'wallet') return { allowed: true };
-    if (context.yolo_mode && requester.id === context.owner_id) return { allowed: true };
+    if (agentGrantAutoApproves({ kind, target, yolo: context.yolo_mode,
+      ownApp: true, requesterIsOwner: requester.id === context.owner_id })) return { allowed: true };
     const listed = await daemonListAgentGrants(ctx, agentId, input.roomId);
     const scopedGrants = listed.grants.filter((g) => g.roomId === input.roomId);
     const grant = scopedGrants.find(
@@ -666,7 +646,7 @@ import { daemonWriteResult } from './corner-messages.js';
       agentId,
     );
     return {
-      allowed: false,
+      allowed: asked.auto === true,
       grantId: asked.grantId,
       status: asked.status,
       ...(asked.messageId ? { messageId: asked.messageId } : {}),

@@ -393,19 +393,17 @@ m9_describe('beeline-agent request_grant', () => {
   });
 
 
-  m9_it('asks for one coarse shared asset category with a reason and a chat card', async () => {
+  m9_it('uses a private cache copy immediately without a grant or mount change', async () => {
     const ops: Array<{ name: string; input: Record<string, unknown> }> = [];
     const answer = await m9_requestSharedAssetIsolation({ action: 'Use the requested resource',
       category: 'package-cache', purpose: 'Shared npm tarball is corrupt', reason: 'Shared npm tarball is corrupt',
     }, scope8.deps({ grantId: 'g-7', status: 'pending', auto: false }, ops));
-    m9_expect(ops).toEqual([{ name: 'requestAgentGrant', input: { action: 'Use the requested resource',
-      roomId: 'room-1', kind: 'shared_asset', target: 'package-cache',
-      purpose: 'Shared npm tarball is corrupt', reason: 'Shared npm tarball is corrupt',
-    } }]);
-    m9_expect(answer).toContain('pending, card posted: isolate package-cache');
+    m9_expect(ops).toEqual([]);
+    m9_expect(answer).toContain('No approval is needed');
+    m9_expect(answer).toContain('under your private HOME now');
     await m9_expect(m9_requestSharedAssetIsolation({ action: 'Use the requested resource', category: 'cache/file', purpose: 'broken', reason: 'broken' },
       scope8.deps({}, ops))).rejects.toThrow('category must be one of');
-    m9_expect(ops).toHaveLength(1);
+    m9_expect(ops).toHaveLength(0);
   });
 
   m9_it.each([

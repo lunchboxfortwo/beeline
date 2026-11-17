@@ -146,12 +146,12 @@ describe('withdrawSupersededGrantAsks', () => {
     expect(await withdrawSupersededGrantAsks(database)).toBe(0);
   });
 
-  it('preserves host emulator consent through a server restart', async () => {
+  it('withdraws the obsolete host emulator ask through a server restart', async () => {
     const id = '20000000-0000-4000-8000-000000000005';
     await pendingAsk(id, 'host', '127.0.0.1:5037');
     await migrate(database);
     expect((await database.query(`SELECT status FROM agent_grants WHERE id=$1`, [id])).rows)
-      .toEqual([{ status: 'pending' }]);
+      .toEqual([{ status: 'revoked' }]);
     expect(await withdrawSupersededGrantAsks(database)).toBe(0);
   });
 
@@ -168,6 +168,17 @@ describe('withdrawSupersededGrantAsks', () => {
     expect(await withdrawSupersededGrantAsks(database)).toBe(0);
     expect((await database.query('SELECT status FROM agent_grants WHERE id=$1', [ask])).rows)
       .toEqual([{ status: 'pending' }]);
+  });
+
+  it.each(['off', 'public'])('preserves pending outside-resource requests with effective yolo %s', async mode => {
+    if (mode === 'off') await database.query('UPDATE agents SET yolo_mode=false WHERE agent_id=$1', [AGENT]);
+    else await database.query("UPDATE workspaces SET visibility='public' WHERE id=$1", [WORKSPACE]);
+    const ids = ['30000000-0000-4000-8000-000000000001', '30000000-0000-4000-8000-000000000002'];
+    await pendingAsk(ids[0]!, 'host', 'api.example.com');
+    await pendingAsk(ids[1]!, 'command', 'npm test');
+    for (let boot = 0; boot < 2; boot++) expect(await withdrawSupersededGrantAsks(database)).toBe(0);
+    expect((await database.query('SELECT status FROM agent_grants ORDER BY id')).rows)
+      .toEqual([{ status: 'pending' }, { status: 'pending' }]);
   });
 
   it('settles on boot the cards the current server would never raise, without waking their turns', async () => {

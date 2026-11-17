@@ -216,29 +216,28 @@ import { daemonRequestAgentGrant, daemonGrantRequester, daemonConsumeAgentGrant 
     const appOwner = (await ctx.database.query<{ owner_identity_id: string }>(
       'SELECT owner_identity_id FROM workspace_apps WHERE id=$1', [outcome.appId])).rows[0];
     const ownAccount = appOwner?.owner_identity_id === context.owner.pubkey;
+    const requester = await daemonGrantRequester(ctx);
     let consent = (await ctx.database.query<{ id: string; status: string }>(
       `SELECT grant_row.id,grant_row.status FROM agent_grants grant_row JOIN agents agent ON agent.agent_id=grant_row.agent_id
-        LEFT JOIN workspace_apps consent_app ON consent_app.id=grant_row.app_id
+        JOIN rooms room ON room.id=grant_row.room_id
+        JOIN workspaces workspace ON workspace.id=room.workspace_id
+        JOIN workspace_apps consent_app ON consent_app.id=grant_row.app_id
         WHERE agent.owner_id=$1 AND grant_row.kind='mcp' AND grant_row.target=$2
-          AND (NOT grant_row.auto OR $3::boolean)
-          AND COALESCE(consent_app.owner_identity_id,agent.owner_id)=$4
+          AND (NOT grant_row.auto OR ($3::boolean AND agent.yolo_mode AND workspace.visibility<>'public'))
+          AND consent_app.owner_identity_id=$4 AND consent_app.state='active'
+          AND grant_row.agent_id=$5 AND grant_row.room_id=$6 AND grant_row.requested_by=$7
+          AND grant_row.app_id=$8::uuid
+          AND (grant_row.auto OR grant_row.status='pending' OR grant_row.decided_by=$4)
           AND (grant_row.expires_at IS NULL OR grant_row.expires_at>now())
-        ORDER BY grant_row.created_at DESC LIMIT 1`,
-      [context.owner.pubkey, target, ownAccount, appOwner?.owner_identity_id ?? context.owner.pubkey])).rows[0];
-    if (ownAccount && consent?.status !== 'approved') {
-      const approved = await ctx.requestAgentGrant({ ...input, kind: 'mcp', target, appId: outcome.appId,
-        ...intent,
-        reason: `Connect ${outcome.app} through Trusty Squire for this request` }, agentId);
-      await ctx.database.query('UPDATE agent_grants SET command_id=$2 WHERE id=$1', [approved.grantId, commandId]);
-      consent = { id: approved.grantId, status: approved.status };
-    }
+        ORDER BY grant_row.created_at DESC,grant_row.id DESC LIMIT 1`,
+      [context.owner.pubkey, target, ownAccount, appOwner?.owner_identity_id ?? context.owner.pubkey,
+        agentId, input.roomId, requester.id, outcome.appId])).rows[0];
     if (!consent || consent.status === 'revoked') {
       const asked = await ctx.requestAgentGrant({ ...input, kind: 'mcp', target, appId: outcome.appId,
         ...intent,
-        reason: `Connect ${outcome.app} through Trusty Squire for this request` }, agentId, true);
+        reason: `Connect ${outcome.app} through Trusty Squire for this request` }, agentId, !ownAccount);
       await ctx.database.query('UPDATE agent_grants SET command_id=$2 WHERE id=$1', [asked.grantId, commandId]);
-      return { ...result, status: 'needs_approval', grantId: asked.grantId,
-        next: 'Wait for the owner’s connection approval.' };
+      consent = { id: asked.grantId, status: asked.status };
     }
     if (consent.status !== 'approved' && consent.status !== 'once')
       return { ...result, status: consent.status === 'pending' ? 'needs_approval' : 'unavailable',
@@ -357,13 +356,15 @@ import { daemonRequestAgentGrant, daemonGrantRequester, daemonConsumeAgentGrant 
       display_name: string; domain: string | null; transport: AppTransport;
       owner_identity_id: string; composio_account_id: string | null;
       composio_link_expires_at: Date | null;
-      agent_owner_id: string }>(
+      agent_owner_id: string; yolo_mode: boolean }>(
       `SELECT app.id,app.app_key,app.display_name,app.domain,app.transport,
               app.owner_identity_id,app.composio_account_id,
               app.composio_link_expires_at,
-              agent.owner_id agent_owner_id
+              agent.owner_id agent_owner_id,
+              (agent.yolo_mode AND workspace.visibility<>'public') yolo_mode
        FROM workspace_apps app JOIN agents agent ON agent.agent_id=$3
        JOIN rooms room ON room.id=$2
+       JOIN workspaces workspace ON workspace.id=room.workspace_id
        LEFT JOIN memberships owner_member ON owner_member.workspace_id=room.workspace_id
          AND owner_member.room_id IS NULL AND owner_member.identity_id=app.owner_identity_id
          AND owner_member.removed_at IS NULL
@@ -451,7 +452,7 @@ import { daemonRequestAgentGrant, daemonGrantRequester, daemonConsumeAgentGrant 
       : rootRequester;
     if (requester.kind !== 'human') throw new Error('App use requires a person’s request');
     let grantId: string | undefined;
-    if (row.agent_owner_id !== row.owner_identity_id) {
+    if (row.agent_owner_id !== row.owner_identity_id || !row.yolo_mode) {
       const grant = (await ctx.database.query<{ id: string; status: string }>(
         `SELECT id,status FROM agent_grants WHERE app_id=$1::uuid AND agent_id=$2
          AND room_id=$3 AND requested_by=$4 AND kind='mcp' AND target=$5
@@ -459,7 +460,7 @@ import { daemonRequestAgentGrant, daemonGrantRequester, daemonConsumeAgentGrant 
          AND status IN ('pending','approved','once')
          AND (expires_at IS NULL OR expires_at>now())
          ORDER BY created_at DESC,id DESC LIMIT 1`,
-        [row.id, agentId, input.roomId, requester.id, appResourceTarget(row.app_key),
+        [row.id, agentId, input.roomId, rootRequester.id, appResourceTarget(row.app_key),
           row.owner_identity_id],
       )).rows[0];
       if (!grant) {

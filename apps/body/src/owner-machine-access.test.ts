@@ -3,8 +3,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { resolve } from 'node:path';
 import { createRoomPermissionHandler, roomPermissionDecision } from './room-permissions.js';
-import { sandboxMountPlan, buildBwrapArgv, credentialMaskPaths, grantedSandboxPaths } from './bwrap-sandbox.js';
-import { agentGrantAutoApproves, isPreapprovedReadOnlyCommand, parseCommandGrantTarget } from '@beeline/api-contract/agent-grants';
+import { sandboxMountPlan, buildBwrapArgv, credentialMaskPaths, grantedSandboxPaths, sandboxAllowsWrite } from './bwrap-sandbox.js';
+import { isPreapprovedReadOnlyCommand, parseCommandGrantTarget } from '@beeline/api-contract/agent-grants';
 import { requestGrant, readGrantScript } from './read-only-mcp-agent-grant-deps.js';
 import { GrantCommandRunner } from './grant-runner.js';
 
@@ -169,29 +169,30 @@ function fixture(base = '/var/tmp') {
   const root = mkdtempSync(`${base}/beeline-access-`); roots.push(root); return root;
 }
 
-it.each(['/tmp', '/var/tmp'])('R1 writes the operator home under %s while keeping credentials and sibling work absent in a spawned readonly session', base => {
+it.each(['/tmp', '/var/tmp'])('R1 keeps chat host files read-only under %s while private state is writable and credentials stay masked', base => {
   const home = fixture(base);
+  const privateHome = resolve(home, 'agent-home'); mkdirSync(privateHome);
   const hidden = resolve(home, '.aws');
   const sibling = resolve(home, 'other-agent');
   for (const path of [hidden, sibling]) { mkdirSync(path); writeFileSync(resolve(path, 'sentinel'), 'private'); }
-  const plan = sandboxMountPlan({ mode: 'readonly', cwd: home, operatorHome: home,
+  const plan = sandboxMountPlan({ mode: 'readonly', cwd: home, additionalWritablePaths: [privateHome],
     maskPaths: [...credentialMaskPaths(undefined, home), { path: sibling, kind: 'dir' }] });
   const command = buildBwrapArgv({ bwrapPath: 'bwrap', plan, cwd: home, command: process.execPath,
-    args: ['-e', `const fs=require('fs'); fs.writeFileSync('written','ok');
+    args: ['-e', `const fs=require('fs'); fs.writeFileSync(process.env.PRIVATE_HOME+'/written','ok');
+      try { fs.writeFileSync('host-write','bad'); process.exit(43); } catch(e) { if(e.code !== 'EROFS') throw e; }
       if (fs.existsSync(process.env.HIDDEN+'/sentinel') || fs.existsSync(process.env.SIBLING+'/sentinel')) process.exit(42);`] });
-  const child = spawnSync(command.command, command.args, { encoding: 'utf8', env: { ...process.env, HIDDEN: hidden, SIBLING: sibling } });
+  const child = spawnSync(command.command, command.args, { encoding: 'utf8', env: { ...process.env, HIDDEN: hidden, SIBLING: sibling, PRIVATE_HOME: privateHome } });
   expect(child.stderr).toBe(''); expect(child.status).toBe(0);
-  expect(readFileSync(resolve(home, 'written'), 'utf8')).toBe('ok');
+  expect(readFileSync(resolve(privateHome, 'written'), 'utf8')).toBe('ok');
 });
 
-it('R1 startup asks the daemon policy and applies broad capabilities before masks', () => {
+it('R1 startup has no ambient owner HOME or bus capability and retains Docker masks', () => {
   const home = fixture();
-  const plan = sandboxMountPlan({ mode: 'readonly', cwd: home, operatorHome: home, userRuntimeDir: home });
-  expect(plan.ownerPaths?.some(binding => binding.path === home && binding.writable))
-    .toBe(agentGrantAutoApproves({ kind: 'path', target: home }));
-  expect(Boolean(plan.userBus)).toBe(agentGrantAutoApproves({ kind: 'command', target: 'systemctl --user' }));
+  const plan = sandboxMountPlan({ mode: 'readonly', cwd: home, userRuntimeDir: home });
+  expect(plan.ownerPaths).toEqual([]);
+  expect(plan.userBus).toBeUndefined();
   const socket = resolve(home, 'docker.sock'); writeFileSync(socket, 'socket stand-in');
-  const blocked = sandboxMountPlan({ mode: 'readonly', cwd: home, operatorHome: home, userRuntimeDir: home });
+  const blocked = sandboxMountPlan({ mode: 'readonly', cwd: home, userRuntimeDir: home });
   expect(blocked.masks).toContainEqual({ path: socket, kind: 'file' });
   const explicit = sandboxMountPlan({ mode: 'readonly', cwd: home, userRuntimeDir: home,
     grantedPaths: [{ path: socket, writable: true }] });
@@ -212,6 +213,20 @@ it.each(['/tmp', '/var/tmp'])('R2 a write path grant under %s retains its capabi
   expect(existsSync(resolve(target, 'written'))).toBe(true);
 });
 
+it.each([false, true])('runtime path grants preserve writable=%s in native and OS enforcement', writable => {
+  const runtime = fixture();
+  const target = resolve(runtime, 'state');
+  writeFileSync(target, 'original');
+  const plan = sandboxMountPlan({ mode: 'readonly', cwd: runtime, userRuntimeDir: runtime,
+    grantedPaths: [{ path: runtime, writable }] });
+  expect(sandboxAllowsWrite(plan, target)).toBe(writable);
+  const command = buildBwrapArgv({ bwrapPath: 'bwrap', plan, cwd: runtime,
+    command: process.execPath, args: ['-e', `require('node:fs').writeFileSync(${JSON.stringify(target)}, 'changed')`] });
+  const result = spawnSync(command.command, command.args, { encoding: 'utf8' });
+  expect(result.status === 0, result.stderr).toBe(writable);
+  expect(readFileSync(target, 'utf8')).toBe(writable ? 'changed' : 'original');
+});
+
 it('R2 a fresh sandbox reaches a user bus only when the capability preserves its PID namespace', async () => {
   const runtime = fixture();
   const daemon = spawn('dbus-daemon', ['--session', '--nofork', `--address=unix:path=${runtime}/bus`], { stdio: ['ignore', 'ignore', 'pipe'] });
@@ -223,7 +238,7 @@ it('R2 a fresh sandbox reaches a user bus only when the capability preserves its
   });
   const run = (access: boolean) => {
     const plan = sandboxMountPlan({ mode: 'readonly', cwd: runtime,
-      ...(access ? { operatorHome: runtime, userRuntimeDir: runtime } : {}) });
+      ...(access ? { userRuntimeDir: runtime, grantedPaths: [{ path: runtime, writable: true }] } : {}) });
     const command = buildBwrapArgv({ bwrapPath: 'bwrap', plan, cwd: runtime, command: 'busctl', args: ['--user', '--no-pager', 'list'] });
     if (access) expect(command.args).not.toContain('--unshare-pid');
     return spawnSync(command.command, command.args, { encoding: 'utf8', env: { ...process.env,
@@ -243,7 +258,7 @@ it('R2 a fresh sandbox reaches a user bus only when the capability preserves its
     ] } : {} } as never });
   runner.register('room', { workspaceId: 'workspace', cwd: target,
     turn: () => ({ requestId: 'request', generationId: 'generation' }),
-    writePolicy: () => ({ surface: 'room', bwrapPath: '/usr/bin/bwrap', operatorHome: runtime }) });
+    writePolicy: () => ({ surface: 'room', bwrapPath: '/usr/bin/bwrap' }) });
   const written = await runner.run({ roomId: 'room', argv: ['touch', resolve(target, 'granted-write')] });
   expect(written.output).toBe(''); expect(written.exitCode).toBe(0);
   expect(existsSync(resolve(target, 'granted-write'))).toBe(true);
@@ -255,13 +270,15 @@ it('R1 the non-edit session permission callback permits covered native edits and
   const home = fixture('/tmp'); const outside = fixture();
   const privateHome = resolve(home, 'agent-home'); mkdirSync(privateHome);
   const protectedDir = resolve(home, 'protected'); mkdirSync(protectedDir);
+  const project = resolve(home, 'project'); mkdirSync(project);
   const credentialDir = resolve(home, '.aws'); mkdirSync(credentialDir);
   const sibling = resolve(home, 'sibling'); mkdirSync(sibling);
   symlinkSync(outside, resolve(home, 'escape'));
-  const plan = sandboxMountPlan({ mode: 'readonly', cwd: home, operatorHome: home,
-    protectedPaths: [protectedDir], maskPaths: [{ path: credentialDir, kind: 'dir' }, { path: sibling, kind: 'dir' }] });
+  const plan = sandboxMountPlan({ mode: 'readonly', cwd: home,
+    grantedPaths: [{ path: project, writable: true }], additionalWritablePaths: [privateHome],
+    maskPaths: [{ path: credentialDir, kind: 'dir' }, { path: sibling, kind: 'dir' }] });
   const options = { shellSandboxed: true, sandboxHome: privateHome, sandboxPlan: plan };
-  expect(roomPermissionDecision({ toolCall: { kind: 'edit', locations: [{ path: resolve(home, 'project', 'new.txt') }] } }, options)).toBe('allow');
+  expect(roomPermissionDecision({ toolCall: { kind: 'edit', locations: [{ path: resolve(project, 'new.txt') }] } }, options)).toBe('allow');
   const callback = createRoomPermissionHandler(options);
   for (const [path, expected] of [
     [resolve(home, 'project', 'new.txt'), 'allow'], [resolve(privateHome, 'note'), 'allow'],
@@ -280,7 +297,7 @@ it('R3 following a denied-path hint grants the location the command actually wri
     api: { execute: async (operation: string) => operation === 'listTurnAgentGrants' ? { grants } : {} } as never });
   runner.register('room', { workspaceId: 'workspace', cwd: home,
     turn: () => ({ requestId: 'request', generationId: 'generation' }),
-    writePolicy: () => ({ surface: 'room', bwrapPath: '/usr/bin/bwrap', operatorHome: home }) });
+    writePolicy: () => ({ surface: 'room', bwrapPath: '/usr/bin/bwrap' }) });
   const refused = await runner.run({ roomId: 'room', argv: ['touch', outputPath] });
   expect(refused.exitCode).not.toBe(0);
   const hint = JSON.parse(refused.output.match(/Call request_grant\((.*)\)\./)![1]!);

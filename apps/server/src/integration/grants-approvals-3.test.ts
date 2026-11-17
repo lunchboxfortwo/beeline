@@ -313,7 +313,7 @@ const fixture = monolithFixture();
 
 
   it.each([false, true])(
-    'auto-approves owner-machine host and command grants for another requester (yolo=%s)',
+    'applies yolo to owner-machine grants for another requester (yolo=%s)',
     async (yolo) => {
       await fixture.database.query(`UPDATE agents SET yolo_mode=$2 WHERE agent_id=$1`, [AGENT, yolo]);
       const token = await fixture.phoneToken('foreign-root');
@@ -352,9 +352,10 @@ const fixture = monolithFixture();
             ...(kind === 'path' ? { capabilities: 'read and write' } : {}),
           })
         ).json()) as { grantId: string; status: string; auto: boolean; messageId?: string };
-        expect(grant).toMatchObject({ status: 'approved', auto: true });
-        expect(grant.messageId).toBeUndefined();
-        if (kind === 'path') {
+        expect(grant).toMatchObject({ status: yolo ? 'approved' : 'pending', auto: yolo });
+        if (yolo) expect(grant.messageId).toBeUndefined();
+        else expect(grant.messageId).toEqual(expect.any(String));
+        if (kind === 'path' && yolo) {
           const live = await (await fixture.daemonOperation('listAgentGrants', { roomId: ROOM })).json();
           expect(live.grants).toEqual(expect.arrayContaining([
             expect.objectContaining({ grantId: grant.grantId, capabilities: 'read and write' }),
@@ -370,7 +371,7 @@ const fixture = monolithFixture();
       }
       expect(
         (await fixture.database.query(`SELECT id FROM messages WHERE card_type='grant-request'`)).rows,
-      ).toEqual([]);
+      ).toHaveLength(yolo ? 0 : 1);
     },
   );
 
@@ -378,7 +379,7 @@ const fixture = monolithFixture();
   it.each(['host', 'command'] as const)('%s refusal stays visible to the agent without granting access', async kind => {
     await fixture.database.query(`UPDATE agents SET yolo_mode=false WHERE agent_id=$1`, [AGENT]);
     const ask = (await (await fixture.daemonOperation('requestAgentGrant', {
-      roomId: ROOM, kind, target: kind === 'host' ? '127.0.0.1:5037' : 'python3 checks.py',
+      roomId: ROOM, kind, target: kind === 'host' ? 'example.com' : 'python3 checks.py',
       ...(kind === 'command' ? { script: { path: 'checks.py', contents: 'print(1)\n',
         sha256: createHash('sha256').update('print(1)\n').digest('hex'), bytes: 9 } } : {}),
       reason: 'Test the app', purpose: 'Run the checks',
@@ -401,23 +402,47 @@ const fixture = monolithFixture();
   });
 
 
-  it.each([false, true])('host emulator requires the owner human Allow even with yolo=%s', async yolo => {
+  it.each([false, true])('shared host emulator needs no human approval with yolo=%s', async yolo => {
     await fixture.database.query(`UPDATE agents SET yolo_mode=$2 WHERE agent_id=$1`, [AGENT, yolo]);
-    const ask = (await (await fixture.daemonOperation('requestAgentGrant', {
+    const ask = await (await fixture.daemonOperation('requestAgentGrant', {
       roomId: ROOM, kind: 'host', target: '127.0.0.1:5037',
-      reason: 'Test the Android app', purpose: 'Use an existing host emulator',
-    })).json()) as { grantId: string; status: string; auto: boolean; messageId: string };
-    expect(ask).toMatchObject({ status: 'pending', auto: false });
-    expect(ask.messageId).toEqual(expect.any(String));
-    const read = async () => (await (await fixture.daemonOperation('listAgentGrants', { roomId: ROOM })).json()) as { grants: Array<{ grantId: string }> };
-    expect((await read()).grants).toEqual([]);
-    expect((await fixture.operation('decideAgentGrant', { grantId: ask.grantId, decision: 'always' })).status).toBe(200);
-    expect((await read()).grants).toEqual([expect.objectContaining({ grantId: ask.grantId })]);
-    // Automatic owner-machine host grants cannot supply emulator consent.
-    await fixture.database.query(`UPDATE agent_grants SET auto=true WHERE id=$1`, [ask.grantId]);
-    expect((await read()).grants).toEqual([]);
+      reason: 'Test the Android app', purpose: 'Use an existing shared emulator',
+    })).json();
+    expect(ask).toMatchObject({ status: 'approved', auto: true });
+    expect(ask.messageId).toBeUndefined();
+    const live = await (await fixture.daemonOperation('listAgentGrants', { roomId: ROOM })).json();
+    expect(live.grants).toEqual([expect.objectContaining({ grantId: ask.grantId })]);
+    expect((await fixture.database.query(`SELECT 1 FROM messages WHERE card_type='grant-request'`)).rows).toEqual([]);
   });
 
+  it('uses the same live authority for resource requests and calls after YOLO off, approval, expiry and revoke', async () => {
+    const source = await (await fixture.operation('sendRoomMessage', {
+      roomId: ROOM, text: '@bee use the resource', mentions: [AGENT],
+    })).json() as { messageId: string };
+    const input = { roomId: ROOM, requestId: source.messageId, target: 'test-resource' };
+    expect((await (await fixture.daemonOperation('authorizeResourceCall', input)).json()).allowed).toBe(true);
+    const auto = await (await fixture.daemonOperation('requestAgentGrant', {
+      ...input, kind: 'mcp', reason: 'Use the resource',
+    })).json();
+    expect(auto).toMatchObject({ status: 'approved', auto: true });
+    await fixture.database.query('UPDATE agents SET yolo_mode=false WHERE agent_id=$1', [AGENT]);
+    const ask = await (await fixture.daemonOperation('authorizeResourceCall', input)).json();
+    expect(ask).toMatchObject({ allowed: false, status: 'pending' });
+    expect((await (await fixture.daemonOperation('authorizeResourceCall', input)).json()).grantId).toBe(ask.grantId);
+    const live = await (await fixture.daemonOperation('listAgentGrants', { roomId: ROOM })).json();
+    expect(live.grants.map((g: { grantId: string }) => g.grantId)).not.toContain(auto.grantId);
+    expect((await fixture.operation('decideAgentGrant', { grantId: ask.grantId, decision: 'always' })).status).toBe(200);
+    expect(await (await fixture.daemonOperation('authorizeResourceCall', input)).json())
+      .toMatchObject({ allowed: true, grantId: ask.grantId });
+    expect((await fixture.operation('revokeAgentGrant', { grantId: ask.grantId })).status).toBe(200);
+    const next = await (await fixture.daemonOperation('authorizeResourceCall', input)).json();
+    expect(next).toMatchObject({ allowed: false, status: 'pending' });
+    expect(next.grantId).not.toBe(ask.grantId);
+    expect((await fixture.operation('decideAgentGrant', { grantId: next.grantId, decision: 'once' })).status).toBe(200);
+    expect((await (await fixture.daemonOperation('authorizeResourceCall', { ...input, consume: false })).json()).allowed).toBe(true);
+    expect((await (await fixture.daemonOperation('authorizeResourceCall', input)).json()).allowed).toBe(true);
+    expect((await (await fixture.daemonOperation('authorizeResourceCall', input)).json()).allowed).toBe(false);
+  });
 
   it('approves grants on the spot under yolo with auto=true and no card, for the owner; rejects retired budget prompts', async () => {
     await fixture.database.query(`UPDATE agents SET yolo_mode=true WHERE agent_id=$1`, [AGENT]);
