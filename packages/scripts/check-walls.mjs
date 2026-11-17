@@ -183,6 +183,8 @@ const SESSION_OPERATIONS = new Set(['this.repairCredentialLinks', 'this.startFre
   'repairRoomAgentCredentialLinks', 'lstat', 'assertRealContainedDirectory', 'writeIsolatedHarnessFile',
   'readlink', 'rm', 'symlink', 'rename', 'writeBackDetachedClaudeLogin', 'readFile', 'provisionPiCustomModelConfig',
   'deps.auth.authenticateDaemon', 'deps.auth.retiredDaemonAgent', 'session.claim', 'read', 'this.hostedModel', 'this.writeContext', 'OwnedModelFiles.create', 'readOnlyMcpServer', 'beelineAgentMcpServer', 'installOwnedModelProvider',
+  // Owner-requested credential bootstrap refreshes retained thread launchers.
+  'this.prepareGitHubLaunchers',
   // Owner-requested pre-turn steps: a thread checkout picks up the feature
   // branch before its turn, and received pictures ride inline as before.
   'this.refreshFeatureBranch', 'deliverAttachments']);

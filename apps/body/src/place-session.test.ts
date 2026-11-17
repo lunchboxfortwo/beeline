@@ -7,6 +7,7 @@ import { afterEach,expect,it,vi } from 'vitest';
 import type { AcpClient } from './acp.js';
 import type { BodyConfig } from './config.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
+import { installCornerGitHubWrappers } from './corner-github-auth.js';
 import { GrantCommandRunner } from './grant-runner.js';
 import { readGrantScript } from './read-only-mcp-agent-grant-deps.js';
 import { parseCommandGrantTarget } from '@beeline/api-contract/agent-grants';
@@ -61,6 +62,50 @@ async function fixture(corner = false) {
     source: { id: 'message', authorId: 'human', body: 'Please answer', attachments: [], type: 'message' } } as AgentCommand;
   return { session, item, prompt, execute, config, spawn, client };
 }
+
+it('rewrites pruned-release git/gh launchers before reusing a retained thread', async () => {
+  const f = await fixture(true);
+  const root = f.config.workspaceRoot!;
+  const entry = 'lib/beeline/beeline-cli.mjs';
+  const missing = join(root, 'lib/beeline-releases/pruned', entry);
+  const stable = join(root, 'lib/beeline', entry);
+  await mkdir(dirname(stable), { recursive: true });
+  await writeFile(stable, "process.stdout.write('fixture-token');");
+  const originalEntrypoint = process.argv[1];
+  process.argv[1] = missing;
+  f.config.runtimeConfigPath = join(root, 'runtime.json');
+  f.config.agentEnv.PATH = '/usr/bin:/bin';
+  try {
+    await f.session.start();
+    const home = f.config.agentHomeRoot!;
+    await installCornerGitHubWrappers({ root: home, runtimeConfigPath: f.config.runtimeConfigPath,
+      roomId: 'parent', cornerId: 'room', cliEntrypoint: stable, gitBinary: '/usr/bin/git', ghBinary: '/usr/bin/gh',
+      featureBranch: 'feature/corner-room', targetBranch: 'main' });
+    // Reproduce launchers written by the old generator, before release pruning.
+    for (const name of ['git', 'gh']) {
+      const path = join(home, 'beeline-github-bin', name);
+      await writeFile(path, (await readFile(path, 'utf8')).replace(stable, missing));
+    }
+    const gh = join(home, 'beeline-github-bin/gh');
+    const env = { ...process.env, HOME: root, XDG_CONFIG_HOME: join(root, 'config'), XDG_STATE_HOME: join(root, 'state') };
+    await expect(execFileAsync(process.execPath, [gh, '--version'], { env })).rejects.toMatchObject({
+      stderr: expect.stringContaining('MODULE_NOT_FOUND'),
+    });
+    await f.session.start();
+    expect(f.spawn).toHaveBeenCalledTimes(1);
+    for (const name of ['git', 'gh']) {
+      const source = await readFile(join(home, 'beeline-github-bin', name), 'utf8');
+      expect(source).toContain(stable);
+      expect(source).not.toContain(missing);
+    }
+    expect(await readFile(gh, 'utf8')).toContain('"command":"/usr/bin/gh"');
+    const expected = await execFileAsync('/usr/bin/gh', ['--version'], { env });
+    expect((await execFileAsync(process.execPath, [gh, '--version'], { env })).stdout).toBe(expected.stdout);
+  } finally {
+    process.argv[1] = originalEntrypoint;
+    await f.session.dispose();
+  }
+});
 
 it('starts and answers before optional reads begin, even if none of them resolve', async () => {
   const f = await fixture();

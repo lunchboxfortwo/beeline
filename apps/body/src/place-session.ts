@@ -200,6 +200,7 @@ export class PlaceSession {
       await this.writeContext(item, [], this.model?.paths().directory);
     }
     if (!this.alive || this.stale) await this.startFresh();
+    await this.prepareGitHubLaunchers();
   }
 
   private async startFresh(): Promise<void> {
@@ -254,8 +255,7 @@ export class PlaceSession {
     const repositoryBacked = repository?.resolution === 'repository';
     // Cold context loads after delivery; its absence does not mean no repository.
     const repositoryPending = !repository || repository.resolution === 'unverified';
-    // The wrapper directory is stable; setup may populate it while the
-    // session is already answering. Until then a tool receives its own error.
+    // Every start refreshes the launchers in this stable directory before delivery.
     if (corner && privateHomeRoot) agentEnv.PATH = [resolve(privateHomeRoot, 'beeline-github-bin'),
       agentEnv.PATH ?? process.env.PATH].filter(Boolean).join(delimiter);
     const knownModels = this.resources.context.modelCatalog?.find(option => option.category === 'model');
@@ -434,7 +434,7 @@ export class PlaceSession {
   }
 
   private async prepareOptionalHome(): Promise<void> {
-    const { config, parentRoomId, placeId } = this.options;
+    const { config } = this.options;
     const homeRoot = this.privateHomeRoot ?? config.agentHomeRoot;
     const configuration = this.resources.context.configuration;
     if (homeRoot) await prepareRoomAgentHome({
@@ -443,6 +443,12 @@ export class PlaceSession {
       isReviewer: configuration?.isReviewer === true,
       ...openRouterRoutingInput(config, { model: configuration?.model ?? config.modelSelection?.model }, undefined, {}),
     });
+    await this.prepareGitHubLaunchers();
+  }
+
+  private async prepareGitHubLaunchers(): Promise<void> {
+    const { config, parentRoomId, placeId } = this.options;
+    const homeRoot = this.privateHomeRoot ?? config.agentHomeRoot;
     if (parentRoomId && config.runtimeConfigPath && homeRoot) {
       const { execFileAsync } = await import('./workspace-checkout.js');
       const which = (name: string) => execFileAsync('which', [name]).then(result => String(result.stdout).trim()).catch(() => undefined);
