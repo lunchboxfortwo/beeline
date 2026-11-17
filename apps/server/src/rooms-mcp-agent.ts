@@ -169,10 +169,10 @@ export const MCP_AGENT_TOOLS: Tool[] = [
     address: address('Thread id.'), action: { type: 'string', enum: ['metadata', 'brief', 'install_brief'] }, reviewer: { type: 'string' },
     name: { type: 'string' }, objective: { type: 'string' }, brief, expectedRevision: { type: 'integer', minimum: 0 }, change: { type: 'string', maxLength: 1000 },
   }, ['address', 'action']),
-  tool('message', 'Send to one identity in one place. A thread selects its implementer or configured reviewer. The message records your origin; ask creates a card only for a person.', {
+  tool('message', 'Send to one identity in one place. A thread selects its implementer or configured reviewer. The message records your origin; ask creates a card only for a person. Use a self-contained question addressed to the person, naming what is being decided and the consequence of each option so they can decide from the card alone, at most 450 characters.', {
     address:address('Your sending place.'),to:MESSAGE_ADDRESS_SCHEMA,text:{type:'string'},ask:MESSAGE_ASK_SCHEMA,
   }, ['address','to','text']),
-  tool('reply', 'Reply to the recorded sender and place of id. Add ask only when you need an answer. Use this for done, blocked and failed outcomes.', {
+  tool('reply', 'Reply to the recorded sender and place of id. Add ask only when you need an answer. Use a self-contained question addressed to the person, naming what is being decided and the consequence of each option so they can decide from the card alone, at most 450 characters. Use this for done, blocked and failed outcomes.', {
     id:{type:'string'},text:{type:'string'},ask:MESSAGE_ASK_SCHEMA,
   }, ['id','text']),
   tool('create_work_item', 'Create a distinct work item and return its id. State defaults to backlog.', {

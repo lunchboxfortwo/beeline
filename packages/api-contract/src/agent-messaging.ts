@@ -22,7 +22,7 @@ export const MESSAGE_ADDRESS_SCHEMA = {
 export const MESSAGE_ASK_SCHEMA = {
   type: 'object', required: ['question', 'options'], additionalProperties: false,
   properties: {
-    question: { type: 'string', pattern: '^\\S+(?:[ \\t]+\\S+){0,19}$' },
+    question: { type: 'string', minLength: 1, maxLength: 450, pattern: '^\\S+(?:[ \\t]+\\S+)*$', description: 'A self-contained question addressed to the person: name what is being decided and the consequence of each option so they can decide from this card alone. At most 450 characters.' },
     options: { type: 'array', minItems: 2, maxItems: 4,
       items: { type: 'string', pattern: '^\\S+(?:[ \\t]+\\S+){0,2}$' } },
     recommended: { type: 'string', description: 'One of the option labels.' },
@@ -33,7 +33,6 @@ export const MESSAGE_ASK_SCHEMA = {
 export function validateMessageAsk(ask: MessageAsk): void {
   const short = (text: unknown, words: number) => typeof text === 'string' &&
     new RegExp(`^\\S+(?:[ \\t]+\\S+){0,${words - 1}}$`).test(text);
-  if (!short(ask.question, 20)) throw new Error('Shorten question to 20 words or fewer on one line.');
   if (!Array.isArray(ask.options) || ask.options.length < 2 || ask.options.length > 4 ||
       ask.options.some(option => !short(option, 3)))
     throw new Error('Shorten options to 2–4 labels of 3 words or fewer.');

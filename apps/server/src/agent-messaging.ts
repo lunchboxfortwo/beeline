@@ -1,4 +1,5 @@
-import { validateMessageAsk, type MessageAddress, type MessageAsk, type MessageRoute } from '@beeline/api-contract/daemon';
+import { Check, Errors } from 'typebox/value';
+import { MESSAGE_ASK_SCHEMA, validateMessageAsk, type MessageAddress, type MessageAsk, type MessageRoute } from '@beeline/api-contract/daemon';
 import { randomBytes } from 'node:crypto';
 import { answerQueuedMessage, queueMessage, refuseMessageMembership, type CommandRow } from './agent-command.js';
 import { commandAddress } from './commander.js';
@@ -7,6 +8,13 @@ import type { SqlDatabase } from './database.js';
 import { modelText } from './message-origin.js';
 import { postRoomChoice } from './room-choice.js';
 import { updateWorkItem } from './work-board.js';
+
+/** Validate the advertised ask schema before any lookup or publication. */
+function validateAskInput(ask: MessageAsk): void {
+  if (!Check(MESSAGE_ASK_SCHEMA, ask))
+    throw new Error(Errors(MESSAGE_ASK_SCHEMA, ask).map(error => error.message).join('; '));
+  validateMessageAsk(ask);
+}
 
 /** Resolve both coordinates together; a role is meaningful only at its thread. */
 export async function messageAddress(db: SqlDatabase, to: MessageAddress, sender: string): Promise<MessageAddress> {
@@ -27,7 +35,7 @@ export async function sendMessage(db: SqlDatabase, input: {
   route: MessageRoute; text: string; ask?: MessageAsk; id?: string;
   parent?: CommandRow; replyTo?: string; attachments?: CommandRow['answer_attachments'];
 }) {
-  if (input.ask) validateMessageAsk(input.ask);
+  if (input.ask) validateAskInput(input.ask);
   return db.transaction(async tx => {
     const to = input.replyTo ? input.route.to : await messageAddress(tx,input.route.to,input.route.from.agent);
     // A recorded reply can cross a private call site the worker never joined.
@@ -89,7 +97,7 @@ export async function sendMessage(db: SqlDatabase, input: {
 export async function replyToMessage(db: SqlDatabase, agentId: string, input: {
   id:string; text:string; ask?:MessageAsk; messageId?:string; roomId?:string;
 },onAnswered?:(roomId:string)=>void) {
-  if (input.ask) validateMessageAsk(input.ask);
+  if (input.ask) validateAskInput(input.ask);
   const item=(await db.query<CommandRow>(`SELECT * FROM agent_commands
     WHERE agent_id=$1 AND (id=$2 OR source_message_id=$2)
     ORDER BY (id=$2) DESC,created_at DESC LIMIT 1`,[agentId,input.id])).rows[0];

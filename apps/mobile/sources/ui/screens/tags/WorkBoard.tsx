@@ -161,11 +161,7 @@ function AskCard({ item, actions, now }: { item: WorkItemView; actions: WorkBoar
               key={index}
               label={action.label}
               disabled={busy}
-              kind={
-                action.kind === 'choice' && action.optionId === item.recommendedOptionId
-                  ? 'primary'
-                  : 'secondary'
-              }
+              kind="secondary"
               flexGrow={1}
               flexBasis={0}
               paddingHorizontal="3"
@@ -177,11 +173,7 @@ function AskCard({ item, actions, now }: { item: WorkItemView; actions: WorkBoar
               <T
                 v="meta"
                 textAlign="center"
-                color={
-                  action.kind === 'choice' && action.optionId === item.recommendedOptionId
-                    ? 'primaryInk'
-                    : 'ink'
-                }
+                color="ink"
               >
                 {action.label}
               </T>

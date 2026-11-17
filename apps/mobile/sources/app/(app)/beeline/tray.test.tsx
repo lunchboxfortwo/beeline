@@ -172,7 +172,7 @@ describe('Tasks tab', () => {
     expect(textOf(tree)).toContain('@Jellybean');
     expect(textOf(tree)).not.toContain('↳');
   });
-  it('offers choices once, emphasizes the recommendation, and sends the existing answer operation', async () => {
+  it('offers equally outlined choices once and sends the existing answer operation', async () => {
     const item = ask();
     serve([
       {
@@ -195,7 +195,8 @@ describe('Tasks tab', () => {
       },
     ]);
     const tree = await renderTags();
-    expect(byLabel(tree, 'Web').props.kind).toBe('primary');
+    expect(byLabel(tree, 'Web').props.kind).toBe('secondary');
+    expect(byLabel(tree, 'Phone').props.kind).toBe('secondary');
     await press(tree, 'Web');
     expect(state.operation).toHaveBeenCalledWith('answerChoice', {
       choiceId: 'choice',

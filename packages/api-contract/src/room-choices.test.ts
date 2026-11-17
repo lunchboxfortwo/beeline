@@ -73,6 +73,8 @@ describe('choice option normalisation', () => {
   it('owns prompt, constraint, and the ttl enum', () => {
     expect(normalizeChoicePrompt(' How do we ship? ')).toBe('How do we ship?');
     expect(() => normalizeChoicePrompt('x'.repeat(121))).toThrow('prompt is too long');
+    expect(normalizeChoicePrompt('x'.repeat(450), 'question')).toHaveLength(450);
+    expect(() => normalizeChoicePrompt('x'.repeat(451), 'question')).toThrow('prompt is too long');
     expect(normalizeChoiceConstraint('  one line  ')).toBe('one line');
     expect(normalizeChoiceConstraint(undefined)).toBeUndefined();
     expect(CHOICE_TTL_SECONDS).toEqual([300, 900, 3600, 14_400, 86_400]);

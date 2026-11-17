@@ -1,3 +1,4 @@
+import { MESSAGE_ASK_SCHEMA } from './agent-messaging.js';
 import { systemMessage } from './system-message-catalog.js';
 /**
  * Choice cards: one family for a lettered question and a Room poll.
@@ -108,11 +109,12 @@ export function normalizeChoiceOptions(input: unknown): ChoiceOptionRecord[] {
   });
 }
 
-export function normalizeChoicePrompt(value: unknown): string {
+export function normalizeChoicePrompt(value: unknown, mode: ChoiceMode = 'poll'): string {
   if (typeof value !== 'string') refuse('choice prompt is required');
   const prompt = flattenLine(value);
   if (!prompt) refuse('choice prompt is required');
-  if (prompt.length > CHOICE_PROMPT_MAX_LENGTH) refuse('choice prompt is too long');
+  const maxLength = mode === 'question' ? MESSAGE_ASK_SCHEMA.properties.question.maxLength : CHOICE_PROMPT_MAX_LENGTH;
+  if (prompt.length > maxLength) refuse('choice prompt is too long');
   return prompt;
 }
 

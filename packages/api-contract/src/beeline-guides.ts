@@ -106,7 +106,7 @@ export function beelineCornersSkillMarkdown(releaseId: string): string {
 
 - Reply to the message that gave you the task when done, blocked or failed. Its sender is your commander; its id already records the reply destination. System wakes continue that thread task.
 - The server requests review; never tag the reviewer.
-- Add ask only when an answer is needed. Use a question of at most 20 words and 2–4 option labels of at most 3 words, with an optional recommended label. An ask to a person appears in Needs you; a plain message does not. Each ask is independent.
+- Add ask only when an answer is needed. Use a self-contained question addressed to the person, naming what is being decided and the consequence of each option so they can decide from the card alone, at most 450 characters and 2–4 option labels of at most 3 words, with an optional recommended label. An ask to a person appears in Needs you; a plain message does not. Each ask is independent.
 - For friction in Beeline itself, call report_feedback with tool_name and error_excerpt when a tool failed.
 
 ## Frontend proof in the PR

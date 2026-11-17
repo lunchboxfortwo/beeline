@@ -640,11 +640,15 @@ const scope3 = fixtureScope3(scope1);
         attachments: [expect.objectContaining({ kind: 'link', name: 'Check evidence', url: 'https://example.com/checks', addedBy: expect.objectContaining({ pubkey: member }) })],
       });
       expect((await pending()).rows).toEqual(before);
-      const question=await scope3.ok(client,'reply',{id:order.id,text:'Choose the proof',ask:{question:'Which proof should run?',options:['Server suite','Body suite'],recommended:'Server suite'}});
+      const refusedAsk = await scope3.call(client, 'reply', { id: order.id, text: 'Choose the proof', ask: { question: 'x'.repeat(451), options: ['Server suite', 'Body suite'] } });
+      expect(refusedAsk.error).toBe(true);
+      expect((await scope1.db.query('SELECT message_id FROM work_questions WHERE room_id=$1', [ROOM])).rows).toEqual([]);
+      const standaloneQuestion = 'Which proof should I run before you review the patch? Server suite checks the service; Body suite checks the helper. '.padEnd(450, 'x');
+      const question=await scope3.ok(client,'reply',{id:order.id,text:'Choose the proof',ask:{question:standaloneQuestion,options:['Server suite','Body suite'],recommended:'Server suite'}});
       expect((await scope1.db.query(`SELECT state,assignee_id FROM work_items WHERE id=$1`, [question.id])).rows)
         .toEqual([{ state: 'needs-you', assignee_id: USER }]);
       expect((await scope1.db.query(`SELECT question FROM work_questions WHERE message_id=$1`, [question.id])).rows)
-        .toEqual([{ question: 'Which proof should run?' }]);
+        .toEqual([{ question: standaloneQuestion }]);
       const refused = await scope3.call(client, 'update_work', { roomId: PRIVATE, id: created.id, state: 'done' });
       expect(refused.error).toBe(true);
       expect(refused.text).toBe('Request refused: Access denied: you are not a member of that address.');

@@ -101,3 +101,28 @@ it('never disables the Needs you header or Clear all, and Clear all stays pressa
         expect(host('work-clear-all').props.disabled).toBeFalsy();
     } finally { act(() => tree.unmount()); }
 });
+
+
+it('gives recommended and other question options the same outline control and still submits the pick', async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    const person = { pubkey: 'agent', kind: 'agent' as const, name: 'Ruby' };
+    const choices = ['Yes', 'No'].map(label => ({ kind: 'choice' as const, choiceId: 'choice', optionId: label, label }));
+    const board: WorkBoardView = {
+        workspaceId: 'ws', workspaceName: 'Crew', viewerId: 'viewer', chats: [], people: [],
+        items: [{ id: 'ask', roomId: 'chat', chatId: 'chat', chatName: 'general', threadName: 'Launch', title: 'Launch', state: 'needs-you',
+            openedBy: person, assignee: null, createdAt: 1, updatedAt: 2, recommendedOptionId: 'Yes',
+            ask: { messageId: 'ask', workspaceId: 'ws', roomId: 'chat', roomName: 'general', roomKind: 'room', author: person,
+                text: 'Should I run the phone proof? Yes checks the patch now; No leaves it waiting.', createdAt: 1,
+                approval: { kind: 'choice', actor: 'Ruby', ask: 'asks', subject: 'Should I run the phone proof? Yes checks the patch now; No leaves it waiting.', literal: false, actions: choices } } }],
+    };
+    const actions = { open: vi.fn(), reply: vi.fn(), decide: vi.fn(), assign: vi.fn(), clear: vi.fn(), clearAll: vi.fn() };
+    let tree: any;
+    act(() => { tree = create(<WorkBoard board={board} desktop={false} actions={actions} />); });
+    try {
+        const { Btn } = await import('@/ui/grammar');
+        const buttons = tree.root.findAllByType(Btn).filter((node: any) => ['Yes', 'No'].includes(node.props.label));
+        expect(buttons.map((node: any) => node.props.kind)).toEqual(['secondary', 'secondary']);
+        await act(async () => buttons[0].props.onPress({ stopPropagation() {} }));
+        expect(actions.decide).toHaveBeenCalledWith(board.items[0], choices[0]);
+    } finally { act(() => tree.unmount()); }
+});

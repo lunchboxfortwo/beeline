@@ -320,7 +320,7 @@ export async function postRoomChoice(
   electorateCount: number;
   closesAt?: number;
 }> {
-  const prompt = normalizeChoicePrompt(input.prompt);
+  const prompt = normalizeChoicePrompt(input.prompt, input.mode);
   const constraint = normalizeChoiceConstraint(input.constraint);
   const options = normalizeChoiceOptions(input.options);
   const ttlSeconds = normalizeChoiceTtl(input.ttlSeconds, input.mode === 'poll');
