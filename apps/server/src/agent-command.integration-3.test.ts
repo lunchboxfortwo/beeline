@@ -326,22 +326,28 @@ it('preserves an ambiguous legacy tag and queues both addressed members', async 
 });
 
 
-  it('does not infer a producing model from the roster selection', async () => {
+  it('records the selected model on the reply without reading later roster changes', async () => {
     await rootFixture.db.query(`UPDATE agents SET selected_model='grok-4-fast' WHERE agent_id=$1`, [A]);
     await send('@hoots model check');
     const command = (await commands(A))[0]!;
     await claim(command);
     await result(command, 'Stamped answer');
-    // Selection is not evidence of the model the live harness actually used.
+    // Attribution is fixed when the server records the answer.
     await rootFixture.db.query(`UPDATE agents SET selected_model='newer-model' WHERE agent_id=$1`, [A]);
     const view = await rootFixture.phone.readRoom(R, H);
     const reply = view!.messages.find((message) => message.text === 'Stamped answer');
-    expect(reply?.agentModel).toBeUndefined();
-    // A human row carries no stamp, and an agent row with no known model
-    // stays unstamped rather than guessing.
+    expect(reply?.agentModel).toBe('grok-4-fast');
+    // A human row carries no model stamp.
     expect(
       view!.messages.find((message) => message.author.pubkey === H)?.agentModel,
     ).toBeUndefined();
+    await rootFixture.db.query('UPDATE agents SET selected_model=NULL WHERE agent_id=$1', [A]);
+    await send('@hoots unknown model');
+    const unknown = (await commands(A))[0]!;
+    await claim(unknown);
+    await result(unknown, 'Unstamped answer');
+    const next = await rootFixture.phone.readRoom(R, H);
+    expect(next!.messages.find(message => message.text === 'Unstamped answer')?.agentModel).toBeUndefined();
   });
 
 

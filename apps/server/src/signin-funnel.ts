@@ -59,6 +59,18 @@ export async function recordOnboardingEvent(database: SqlDatabase, identityId: s
   }, 'server', identityId);
 }
 
+/** Only a stored public answer supplies text and depth to the task funnel. */
+export async function observeQueuedAnswer(database: SqlDatabase, messageId: string, agentId: string) {
+  const reply = (await database.query<{ room_id: string; agent_depth: number; text: string }>(
+    `SELECT command.room_id,command.agent_depth,message.text FROM messages message
+     JOIN agent_commands command ON command.agent_id=message.author_id AND command.turn_request_id=message.request_id
+       AND (command.result_message_id=message.id OR command.posted_reply_id=message.id)
+     WHERE message.id=$1 AND message.author_id=$2 AND message.presentation='message' AND message.deleted_at IS NULL
+     ORDER BY command.created_at DESC,command.id DESC LIMIT 1`, [messageId,agentId],
+  )).rows[0];
+  if (reply) await observeOnboardingMessage(database,reply.room_id,agentId,reply.agent_depth,reply.text);
+}
+
 export async function observeOnboardingMessage(database: SqlDatabase, roomId: string, identityId: string, depth?: number, text = '') {
   const team = (await database.query<{ owner_id: string; agent_id: string; handle: string | null }>(
     `SELECT f.owner_id,f.agent_id,beeline_workspace_handle(i.id,m.workspace_id) handle FROM free_agents f JOIN identities i ON i.id=f.agent_id

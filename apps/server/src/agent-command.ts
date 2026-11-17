@@ -11,7 +11,7 @@ import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { createHash,randomBytes } from 'node:crypto';
 import { parseTaggedAgentLifecycleCommand,routeTaggedLifecycleCommand } from './agent-command-create-agent-command.js';
 import { AGENT_COMMAND_DELEGATION_SCHEMA } from './agent-command-queue.js';
-import { squireDecisionDetail,workflowWakeDetail,type WorkflowWakeCard } from './agent-input-context.js';
+import { queuedWorkflowWakeDetail,squireDecisionDetail,type WorkflowWakeCard } from './agent-input-context.js';
 import { repairAgentPost } from './agent-post-text.js';
 import { subscriptionPromptBody } from './agent-subscriptions.js';
 import { endAgentTurn } from './agent-turn-end.js';
@@ -26,6 +26,7 @@ import { cornerReviewerSql } from './corner-reviewer.js';
 import { cornerImplementerSql } from './corner-worker.js';
 import type { SqlDatabase } from './database.js';
 import { recordStarPromptReply } from './github-star-prompt.js';
+import { observeQueuedAnswer } from './signin-funnel.js';
 import { hasSystemReportMention,isChannelMentionToken,typedMentionHandles } from './message-mentions.js';
 import { mcpCommandWakeSql } from './rooms-mcp-events.js';
 import { recordMcpMemberWebhook,recordMcpMention } from './rooms-mcp-members.js';
@@ -596,8 +597,9 @@ async function postMessage(db: SqlDatabase, input: PublicPost, chat: Chat): Prom
       existing.text !== input.text || json(existing.attachments) !== attachments)
     ? hash(`message:${original}:${input.authorId}:${input.roomId}:${input.text}:${attachments}`) : original;
   const saved = (await db.query<{ id: string; created_at: Date; reply_to_message_id:string|null }>(
-     `INSERT INTO messages(id,room_id,author_id,text,attachments,source_client,presentation,request_id,card,reply_to_message_id,root_message_id,legacy_event,card_type)
-     SELECT $1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8,$9::jsonb,parent.id,COALESCE(parent.root_message_id,parent.id),$11::jsonb,$12
+     `INSERT INTO messages(id,room_id,author_id,text,attachments,source_client,presentation,request_id,card,reply_to_message_id,root_message_id,legacy_event,card_type,agent_model)
+     SELECT $1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8,$9::jsonb,parent.id,COALESCE(parent.root_message_id,parent.id),$11::jsonb,$12,
+       (SELECT selected_model FROM agents WHERE agent_id=$3)
      FROM (SELECT 1) source LEFT JOIN messages parent ON parent.id=$10 AND parent.room_id=$2 AND parent.deleted_at IS NULL
      ON CONFLICT(id) DO NOTHING RETURNING id,created_at,reply_to_message_id`,
     [id, chat.id, input.authorId, input.text, attachments, input.sourceClient ? json(input.sourceClient) : author?.client_id ? json({id:author.client_id,name:author.client_name}) : null,
@@ -759,6 +761,8 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
   // The workflow engine records its human owner as the assignment sender.
   // A resume keeps that same stored sender; later card actors do not transfer it.
   const privateMessage = Boolean(payload) && input.reason !== 'schedule';
+  const workflowDetail = await queuedWorkflowWakeDetail(db,chat.id,chat.source,input.sourceMessageId,
+    input.resume || input.reason === 'resume' ? parent?.source_message_id : undefined);
   const wake = mcpCommandWakeSql(19);
   let saved = (await db.query<CommandRow>(
     `WITH inserted AS (INSERT INTO agent_commands(id,room_id,agent_id,source_message_id,turn_request_id,action,reason,
@@ -786,7 +790,7 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
         authorId: scheduleSender?.agent ?? workflowOwner ?? payload?.authorId ?? chat.source?.author_id ?? SYSTEM_IDENTITY_ID,
         body: (payload?.text ?? subscriptionPromptBody(sourceText ?? input.reason, chat.source?.system_event ?? null)) +
           squireDecisionDetail(chat.source?.card_type ?? null,chat.source?.card ?? null) +
-          (chat.source?.room_id===chat.id ? workflowWakeDetail(chat.source.card_type ?? null,chat.source.card ?? null,null,null,null) : '') +
+          workflowDetail +
           (!payload && input.wakeNote ? `\n${input.wakeNote}` : ''),
         attachments: payload?.attachments ?? chat.source?.attachments ?? [],
         type: privateMessage ? 'private' : chat.source?.presentation ?? 'system',
@@ -980,6 +984,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
           [published.id,replySteps(input.steps),agentId]);
       };
       await Promise.all([
+        observeQueuedAnswer(database,published.id,agentId).catch(error=>console.warn('[answer] optional onboarding observation omitted:',error)),
         recordStarPromptReply(database,{roomId:input.roomId,agentId,requestId:input.requestId ?? '',messageId:published.id})
           .catch(error=>console.warn('[answer] optional star reply counter omitted:',error)),
         database.query(`SELECT beeline_record_agent_answer(id,false,NULL) FROM agent_commands
