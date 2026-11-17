@@ -137,7 +137,7 @@ async function joinCommand(args: string[], env: NodeJS.ProcessEnv): Promise<void
   own.sessionId=flag(args,'--conversation')??own.sessionId;
   if (own.agent === 'claude-code') assertClaudePolicy(env);
   const run = runner(dir, env);
-  const key = sessionKey(own.agent, own.cwd);
+  const key = sessionKey(own.agent, own.cwd, own.sessionId);
   const server = serverUrl(args, env);
   const attachment=flag(args,'--attach');
   if(attachment) {
@@ -233,7 +233,7 @@ async function finishJoinOwned(file: string, env: NodeJS.ProcessEnv): Promise<vo
     if (pending.agent === 'claude-code') {
       assertClaudePolicy(env);
     }
-    const key = sessionKey(pending.agent, pending.cwd);
+    const key = sessionKey(pending.agent, pending.cwd, pending.sessionId);
     const joined: JoinedSession = { key, agent: pending.agent, cwd: pending.cwd, name: pending.name, server: pending.server, clientId: pending.clientId,
       deliveryMechanism:'unfinished', accessToken: tokens.access_token,
       sessionId: pending.sessionId, pid: pending.pid, cursor: '0', deliveredWakes: [], agentBin: pending.agentBin, joinedAt: new Date().toISOString() };
@@ -303,7 +303,7 @@ function own(args: string[], env: NodeJS.ProcessEnv): JoinedSession {
   const as = flag(args, '--as');
   const found = as ? sessions.find(s => s.key === as) : (() => {
     const mine = findOwnSession(env, dir);
-    return sessions.find(s => s.key === sessionKey(mine.agent, mine.cwd));
+    return sessions.find(s => s.key === sessionKey(mine.agent, mine.cwd, mine.sessionId));
   })();
   if (!found) throw new Error(NOT_JOINED);
   return found;
@@ -313,7 +313,7 @@ function own(args: string[], env: NodeJS.ProcessEnv): JoinedSession {
 async function ownTool(dir: string, joined: JoinedSession, name: string, args: Record<string, unknown>): Promise<any> {
   let bridged = await toolViaBridge(dir, joined.key, name, args);
   // A sandbox that refuses the socket still lets the session write its own folder.
-  if (!bridged && existsSync(join(dir, 'bridge.pid')) && process.cwd().startsWith(joined.cwd)) bridged = await toolViaOutbox(joined.cwd, name, args);
+  if (!bridged && existsSync(join(dir, 'bridge.pid')) && process.cwd().startsWith(joined.cwd)) bridged = await toolViaOutbox(joined.cwd, name, args, joined.key);
   if (bridged) {
     if (!bridged.ok) throw new Error(bridged.error ?? 'Beeline refused the call');
     return bridged.data;

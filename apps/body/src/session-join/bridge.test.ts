@@ -9,7 +9,7 @@ import { join as m40_join } from 'node:path';
 
 import { Agent as m40_Agent } from 'undici';
 
-import { renderMention as m40_renderMention, renderWake as m40_renderWake, acceptMemberDelivery as m40_acceptMemberDelivery, toolViaOutbox as m40_toolViaOutbox } from "./bridge.js";
+import { renderMention as m40_renderMention, renderWake as m40_renderWake, acceptMemberDelivery as m40_acceptMemberDelivery, toolViaOutbox as m40_toolViaOutbox, serveOutboxes } from "./bridge.js";
 
 import { memberStream as m40_memberStream } from "./beeline-api.js";
 
@@ -103,6 +103,17 @@ m40_describe('durable member delivery ownership',()=>{
     await m40_acceptMemberDelivery(dir,joined.key,runner,{v:1,type:'checkpoint',cursor:{epoch,through:8},mentionCursor:'2'});
     await m40_expect(m40_acceptMemberDelivery(dir,joined.key,runner,{v:1,type:'checkpoint',cursor:{epoch,through:7},mentionCursor:'1'})).rejects.toThrow('backwards');
     m40_expect(m40_readState(dir).sessions[0]).toMatchObject({cursor:'2',streamCursor:{epoch,through:8}});
+  });
+  m40_it('retains the selected Codex member through a shared-folder outbox', async () => {
+    const dir=scratch(),cwd=scratch();
+    await m40_updateState(dir,state=>{state.sessions=['a','b'].map(id=>({...joined,cwd,key:`codex:${id}`,
+      accessToken:`token-${id}`,accessExpiresAt:Date.now()+60_000}));});
+    const fetched=m40_vi.fn(async (_url: string, init?: RequestInit) =>
+      Response.json({result:{content:[{type:'text',text:JSON.stringify({data:{principal:(init?.headers as Record<string,string>).authorization}})}]}}));
+    m40_vi.stubGlobal('fetch',fetched);
+    const waiting=m40_toolViaOutbox(cwd,'list_chats',{},'codex:b');
+    m40_expect(await serveOutboxes(dir)).toBe(1);
+    m40_expect(await waiting).toEqual({ok:true,data:{principal:'Bearer token-b'}});
   });
   m40_it.each([false,true])('waits for the outbox result without timed fallback (claimed=%s)',async claimed=>{
     m40_vi.useFakeTimers();const cwd=scratch();

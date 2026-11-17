@@ -233,9 +233,10 @@ export async function serveOutboxes(dir: string): Promise<number> {
       try { renameSync(path, taking); } catch { continue; }
       let answer: object;
       try {
-        const request = JSON.parse(readFileSync(taking, 'utf8')) as { name: string; args: Record<string, unknown> };
-        // The folder names the member: a request can only act as the session joined from this folder.
-        answer = { ok: true, data: await callTool(joined, await accessToken(dir, joined.key), request.name, request.args ?? {}) };
+        const request = JSON.parse(readFileSync(taking, 'utf8')) as { key?: string; name: string; args: Record<string, unknown> };
+        const member = request.key ? readState(dir).sessions.find(s => s.key === request.key && s.cwd === joined.cwd) : joined;
+        if (!member) throw new Error('This session has not joined Beeline from this folder');
+        answer = { ok: true, data: await callTool(member, await accessToken(dir, member.key), request.name, request.args ?? {}) };
       } catch (error) { answer = { ok: false, error: error instanceof Error ? error.message : String(error) }; }
       const result=path.replace(/\.request\.json$/,'.result.json');
       writeFileSync(result+'.tmp',JSON.stringify(answer),{mode:0o600});renameSync(result+'.tmp',result);
@@ -247,14 +248,14 @@ export async function serveOutboxes(dir: string): Promise<number> {
 }
 
 /** Leaves a tool call in the working folder's outbox and waits for the bridge's answer. */
-export async function toolViaOutbox(cwd: string, name: string, args: Record<string, unknown>): Promise<{ ok: boolean; data?: unknown; error?: string } | undefined> {
+export async function toolViaOutbox(cwd: string, name: string, args: Record<string, unknown>, key?: string): Promise<{ ok: boolean; data?: unknown; error?: string } | undefined> {
   const dirPath = outboxDir(cwd);
   mkdirSync(dirPath, { recursive: true });
   // Keep the outbox out of the person's repository.
   writeFileSync(join(cwd, '.beeline', '.gitignore'), '*\n');
   const id = `${Date.now()}-${process.pid}`;
   const request = join(dirPath, `${id}.request.json`), result = join(dirPath, `${id}.result.json`);
-  writeFileSync(`${request}.tmp`, JSON.stringify({ name, args }));
+  writeFileSync(`${request}.tmp`, JSON.stringify({ key, name, args }));
   renameSync(`${request}.tmp`, request);
   return new Promise(resolve=>{
     let settled=false;

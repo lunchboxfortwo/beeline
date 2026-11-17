@@ -125,8 +125,8 @@ export function updateState<T>(dir: string, change: (state: State) => T): Promis
   });
 }
 
-export function sessionKey(agent: AgentId, cwd: string): string {
-  return `${agent}:${cwd}`;
+export function sessionKey(agent: AgentId, cwd: string, sessionId?: string): string {
+  return `${agent}:${agent === 'codex' && sessionId ? sessionId : cwd}`;
 }
 
 function safe(value: string): string {

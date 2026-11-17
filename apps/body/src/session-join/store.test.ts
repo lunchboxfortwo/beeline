@@ -50,3 +50,36 @@ move4_describe('one joined-session delivery format across upgrade',()=>{
   });
 });
 });
+
+import { sessionKey } from './store.js';
+
+move4_describe('joined member identity', () => {
+  move4_it('keys Codex by session, including resumes and different folders', () => {
+    move4_expect(sessionKey('codex', '/repo', 'thread-a')).toBe('codex:thread-a');
+    move4_expect(sessionKey('codex', '/other', 'thread-a')).toBe(sessionKey('codex', '/repo', 'thread-a'));
+    move4_expect(sessionKey('codex', '/repo', 'thread-b')).not.toBe(sessionKey('codex', '/repo', 'thread-a'));
+  });
+  move4_it('keeps the folder key when Codex has no session id', () => {
+    move4_expect(sessionKey('codex', '/repo')).toBe('codex:/repo');
+    move4_expect(sessionKey('codex', '/repo', '')).toBe('codex:/repo');
+  });
+  move4_it('keeps other harnesses keyed by folder even with a session id', () => {
+    move4_expect(sessionKey('claude-code', '/repo', 'thread-a')).toBe('claude-code:/repo');
+    move4_expect(sessionKey('gemini', '/repo', 'thread-b')).toBe('gemini:/repo');
+  });
+});
+
+import { joinedFor } from './hook.js';
+import { findSession } from './sessions.js';
+import type { JoinedSession } from './store.js';
+
+move4_it('does not lend a Codex member or its rules to another session in the same folder', () => {
+  const joined: JoinedSession = { key: 'codex:thread-a', agent: 'codex', cwd: '/repo', sessionId: 'thread-a',
+    name: 'A', server: 'http://localhost', clientId: 'a', cursor: '0', deliveredWakes: [], joinedAt: '' };
+  move4_expect(joinedFor([joined], 'codex', 'thread-b', '/repo')).toBeUndefined();
+  move4_expect(findSession(joined, [{ agent: 'codex', sessionId: 'thread-b', cwd: '/repo' }])).toBeUndefined();
+  move4_expect(joinedFor([joined], 'codex', 'thread-a', '/repo')).toBe(joined);
+  move4_expect(findSession(joined, [{ agent: 'codex', sessionId: 'thread-a', cwd: '/repo' }])?.sessionId).toBe('thread-a');
+  const legacy = { ...joined, key: 'codex:/repo' };
+  move4_expect(findSession(legacy, [{ agent: 'codex', sessionId: 'thread-b', cwd: '/repo' }])?.sessionId).toBe('thread-b');
+});

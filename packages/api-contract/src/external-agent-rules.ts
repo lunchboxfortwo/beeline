@@ -81,7 +81,7 @@ export const EXTERNAL_AGENT_RULES: readonly ExternalAgentRule[] = [
   {
     id: 'tools',
     mcp: 'You post as yourself, the member named on the consent page, never as the person who approved you.',
-    session: "Every other Beeline tool runs as {tool}; a refusal names the fields it needs. Keep --as on every command. Joining or reconnecting is your person's action, never yours.",
+    session: "Every other Beeline tool runs as {tool}; a refusal names the fields it needs. Keep --as on every command. Post and reply to Beeline only with this helper’s commands, never a Beeline app or connector tool. Joining or reconnecting is your person's action, never yours.",
   },
 ];
 

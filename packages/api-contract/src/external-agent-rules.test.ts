@@ -28,6 +28,8 @@ describe('outside-agent rules', () => {
     expect(text).not.toMatch(/send_message|list_mentions|replyTo/);
     expect(text).not.toMatch(/Run:? (npx -y )?usebeeline join|join again/);
     expect(text).not.toContain('{tool}');
+    expect(text).toContain('Post and reply to Beeline only with this helper’s commands, never a Beeline app or connector tool.');
+    expect(externalAgentRules('mcp')).not.toContain('this helper’s commands');
   });
   it('never contradicts itself on cursors or message counts', () => {
     const text = externalAgentRules('mcp');
