@@ -56,19 +56,14 @@ export default function TrayScreen() {
   const actions = useMemo<WorkBoardActions>(
     () => ({
       open: (item) => {
-        if(item.source) {
-          if(item.source.messageId) {
-            const responseId=`work-source:${item.id}`;
-            prefetchPushRoom(responseId,item.source.roomId);
-            router.push(messageJumpHref(item.source.roomId,item.source.messageId,responseId,workspaceId));
-          } else navigateToRoom(router,item.source.roomId);
-          return;
-        }
-        if (item.messageId) {
-          const responseId = `work:${item.messageId}`;
-          prefetchPushRoom(responseId, item.roomId);
-          router.push(messageJumpHref(item.roomId, item.messageId, responseId, workspaceId));
-        } else navigateToRoom(router, item.roomId);
+        // A Needs you card opens the message asking for the decision. Its
+        // recorded source is the earlier request/thread the question is about.
+        const target = item.ask ?? item.source ?? item;
+        if (target.messageId) {
+          const responseId = `work:${target.messageId}`;
+          prefetchPushRoom(responseId, target.roomId);
+          router.push(messageJumpHref(target.roomId, target.messageId, responseId, workspaceId));
+        } else navigateToRoom(router, target.roomId);
       },
       reply: async (item, text) => {
         setError(null);
