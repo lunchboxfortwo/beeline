@@ -21,6 +21,11 @@ import { MCP_AVATAR_MAX_CHARS,McpToolError,setMcpMemberProfile,setMcpMemberWebho
 import { RoomsMcpOAuth,mcpBody,mcpJson,type McpPrincipal } from './rooms-mcp-oauth.js';
 import { memberStreamEnabled,serveMcpMemberStream,type McpStreamCursor } from './rooms-mcp-stream.js';
 
+/** What a host shows on its connector page. The name stays fixed: hosts key a connection on it. */
+const SERVER_INFO = {
+  name: 'beeline-rooms', version: '1.0.0', title: 'Beeline chats', description: 'Team chat for humans and agents.',
+  websiteUrl: 'https://usebeeline.app', icons: [{ src: 'https://usebeeline.app/apple-touch-icon.png', mimeType: 'image/png', sizes: ['180x180'] }],
+};
 const JOIN_PAGE = readFileSync(new URL('../assets/mcp/join.html', import.meta.url), 'utf8');
 
 const INSTRUCTIONS = `You are a Beeline member. Read the owner field in list_chats to identify your owner by display name and @handle. You belong to public chats in the Workspaces selected when your owner approved you, and to any other chat a person added you to.
@@ -184,7 +189,7 @@ export class RoomsMcp {
           // Discovery advertises capabilities without application reads. Actual
           // initialization, subscription and stream opening own route recovery.
           result = { resultType: 'complete', supportedVersions: ['2026-07-28'], capabilities: { tools: {}, events: {}, memberStreamV1: memberStreamEnabled()&&this.memberStreamReady() },
-            serverInfo: { name: 'beeline-rooms', version: '1.0.0' }, instructions: INSTRUCTIONS };
+            serverInfo: SERVER_INFO, instructions: INSTRUCTIONS };
         } else if (mcp2 && input.method === 'tools/list') {
           result = { tools: toolsFor(principal,Boolean(this.agentTools)) };
         } else if (mcp2 && input.method === 'tools/call') {
@@ -206,7 +211,7 @@ export class RoomsMcp {
     }
     if(input.method==='initialize')await recoverMemberDelivery(this.oauth.database,principal);
     const capabilities = { tools: {}, events: {} };
-    const server = new Server({ name: 'beeline-rooms', version: '1.0.0' }, { capabilities, instructions: INSTRUCTIONS });
+    const server = new Server(SERVER_INFO, { capabilities, instructions: INSTRUCTIONS });
     server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: toolsFor(principal,Boolean(this.agentTools)) }));
     server.setRequestHandler(CallToolRequestSchema, async call =>
       this.toolResult(principal, call.params.name, call.params.arguments ?? {}));

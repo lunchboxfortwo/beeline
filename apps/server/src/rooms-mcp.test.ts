@@ -83,7 +83,10 @@ const scope1 = fixtureScope1();
     });
     expect(direct.status).toBe(200);
     expect(direct.headers.get('location')).toBeNull();
-    expect((await direct.json() as { result: { serverInfo: { name: string } } }).result.serverInfo.name).toBe('beeline-rooms');
+    expect((await direct.json() as { result: { serverInfo: Record<string, unknown> } }).result.serverInfo).toMatchObject({
+      name: 'beeline-rooms', title: 'Beeline chats', description: 'Team chat for humans and agents.', websiteUrl: 'https://usebeeline.app',
+      icons: [{ src: 'https://usebeeline.app/apple-touch-icon.png', mimeType: 'image/png' }],
+    });
     const client = new Client({ name: 'join-alias-proof', version: '1' });
     scope1.clients.push(client);
     await client.connect(new StreamableHTTPClientTransport(new URL(endpoint), {
