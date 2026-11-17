@@ -28,7 +28,7 @@ describe.skipIf(!url)('Persisted schedule clock admission', () => {
         CREATE TABLE memberships(room_id uuid,identity_id text,removed_at timestamptz);
         CREATE VIEW room_access AS SELECT * FROM memberships;
         CREATE TABLE agent_schedules(id uuid PRIMARY KEY,room_id uuid,agent_id text,creator_id text,
-          owner_id text,workflow_slug text,human_command_message_id text,cadence jsonb,message text,
+          owner_id text,workflow_slug text,human_command_message_id text,requester_command_id text,cadence jsonb,message text,
           max_runs int,run_count int DEFAULT 0,next_run_at timestamptz,updated_at timestamptz DEFAULT now(),
           paused_at timestamptz,failed_due_at timestamptz,failed_revision timestamptz);`);
       // Use the assembled production schema regardless of how its SQL is split across files.

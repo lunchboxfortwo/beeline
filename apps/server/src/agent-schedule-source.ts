@@ -11,8 +11,8 @@ BEGIN
  WHEN 'messages' THEN
    IF NEW.card_type IS DISTINCT FROM 'workflow-handoff' THEN RETURN NULL;END IF;
  WHEN 'agent_schedules' THEN
-   IF TG_OP='UPDATE' AND ROW(NEW.paused_at,NEW.room_id,NEW.agent_id,NEW.creator_id,NEW.next_run_at,NEW.updated_at,NEW.cadence,NEW.message,NEW.max_runs,NEW.owner_id,NEW.workflow_slug,NEW.human_command_message_id)
-     IS NOT DISTINCT FROM ROW(OLD.paused_at,OLD.room_id,OLD.agent_id,OLD.creator_id,OLD.next_run_at,OLD.updated_at,OLD.cadence,OLD.message,OLD.max_runs,OLD.owner_id,OLD.workflow_slug,OLD.human_command_message_id)
+   IF TG_OP='UPDATE' AND ROW(NEW.paused_at,NEW.room_id,NEW.agent_id,NEW.creator_id,NEW.next_run_at,NEW.updated_at,NEW.cadence,NEW.message,NEW.max_runs,NEW.owner_id,NEW.workflow_slug,NEW.human_command_message_id,NEW.requester_command_id)
+     IS NOT DISTINCT FROM ROW(OLD.paused_at,OLD.room_id,OLD.agent_id,OLD.creator_id,OLD.next_run_at,OLD.updated_at,OLD.cadence,OLD.message,OLD.max_runs,OLD.owner_id,OLD.workflow_slug,OLD.human_command_message_id,OLD.requester_command_id)
      THEN RETURN NULL;END IF;
  WHEN 'rooms' THEN
    IF TG_OP<>'UPDATE' OR ROW(NEW.archived_at,NEW.parent_id) IS NOT DISTINCT FROM ROW(OLD.archived_at,OLD.parent_id) THEN RETURN NULL;END IF;

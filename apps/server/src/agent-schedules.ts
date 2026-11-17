@@ -1,6 +1,7 @@
 import { expireWorkflowRuns, nextWorkflowExpiryDelay } from './workflow-run-expiry.js';
 import { CornerAccessDatabase } from './corner-access-database.js';
 import { createAgentCommand } from './agent-command.js';
+import { savedScheduleCommand } from './scheduled-command-authority.js';
 import { randomBytes } from 'node:crypto';
 import { CronExpressionParser } from 'cron-parser';
 import type { RoomScheduleCadence } from '@beeline/api-contract/phone';
@@ -80,6 +81,7 @@ type DueSchedule = {
   agent_id: string;
   creator_id: string;
   human_command_message_id: string | null;
+  requester_command_id: string | null;
   owner_id: string | null;
   workflow_slug: string | null;
   cadence: RoomScheduleCadence;
@@ -134,7 +136,7 @@ export class AgentScheduleLoop {
     now ??= (await this.database.query<{ now_at: Date }>('SELECT clock_timestamp() now_at')).rows[0]!.now_at;
     for (const roomId of await expireWorkflowRuns(this.database, now)) this.onPosted?.(roomId);
     const due = await this.database.query<DueSchedule>(
-      `SELECT schedule.id,schedule.room_id,schedule.agent_id,schedule.creator_id,schedule.owner_id,schedule.workflow_slug,schedule.human_command_message_id,
+      `SELECT schedule.id,schedule.room_id,schedule.agent_id,schedule.creator_id,schedule.owner_id,schedule.workflow_slug,schedule.human_command_message_id,schedule.requester_command_id,
         schedule.cadence,schedule.message,schedule.max_runs,schedule.run_count,schedule.next_run_at,
         schedule.updated_at::text updated_at,schedule.next_run_at::text due_revision
        FROM agent_schedules schedule
@@ -160,7 +162,7 @@ export class AgentScheduleLoop {
         roomId = await this.database.transaction(async (database) => {
           const current = (
             await database.query<DueSchedule>(
-              `SELECT schedule.id,schedule.room_id,schedule.agent_id,schedule.creator_id,schedule.owner_id,schedule.workflow_slug,schedule.human_command_message_id,
+              `SELECT schedule.id,schedule.room_id,schedule.agent_id,schedule.creator_id,schedule.owner_id,schedule.workflow_slug,schedule.human_command_message_id,schedule.requester_command_id,
                 schedule.cadence,schedule.message,schedule.max_runs,schedule.run_count,schedule.next_run_at,
                 agent.name agent_name,schedule.updated_at::text updated_at,schedule.next_run_at::text due_revision
                FROM agent_schedules schedule
@@ -176,7 +178,7 @@ export class AgentScheduleLoop {
                  AND agent_membership.removed_at IS NULL
                WHERE schedule.paused_at IS NULL AND schedule.id=$1 AND schedule.next_run_at <= $2 AND ${unfailedSchedule}
                  AND (schedule.max_runs IS NULL OR schedule.run_count<schedule.max_runs)
-               FOR UPDATE OF schedule`,
+               FOR UPDATE OF schedule SKIP LOCKED`,
               [candidate.id, now],
             )
           ).rows[0];
@@ -248,6 +250,9 @@ export class AgentScheduleLoop {
             sourceMessageId: messageId,
             reason: 'schedule',
             scheduledHumanCommandMessageId: current.human_command_message_id ?? undefined,
+            parent: await savedScheduleCommand(database, current.requester_command_id, current.room_id, current.agent_id),
+            retainDepth: true,
+            inheritPrivatePayload: false,
           });
           await this.advance(database, current, now, true);
           return current.room_id;

@@ -579,6 +579,7 @@ ALTER TABLE workspace_skills ADD COLUMN IF NOT EXISTS owner_agent_id text REFERE
 ALTER TABLE workspace_skills ADD COLUMN IF NOT EXISTS ownership_initialized boolean NOT NULL DEFAULT false;
 ALTER TABLE agent_schedules ADD COLUMN IF NOT EXISTS workflow_slug text;
 ALTER TABLE agent_schedules ADD COLUMN IF NOT EXISTS human_command_message_id text;
+ALTER TABLE agent_schedules ADD COLUMN IF NOT EXISTS requester_command_id text;
 ALTER TABLE agent_schedules ADD COLUMN IF NOT EXISTS title text;
 ALTER TABLE agent_schedules ADD COLUMN IF NOT EXISTS paused_at timestamptz;
 -- Owner-approved labels for the existing #beeline schedules and its corners.

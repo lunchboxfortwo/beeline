@@ -7,6 +7,7 @@ import { CommandRow,checkFailureLogBody,createAgentCommand,reportedHeadBody } fr
 import { advanceCorner } from './corner-lifecycle.js';
 import { currentIdleReportSql } from './corner-idle.js';
 import type { SqlDatabase } from './database.js';
+import { savedScheduleCommand } from './scheduled-command-authority.js';
 
 
 
@@ -148,13 +149,24 @@ export async function routeSystemCommand(
         [input.roomId, input.commandId ?? null])).rows[0];
       if (!parent) continue;
     }
+    if (!parent && input.kind === 'subscription-fired') {
+      const definition = (await db.query<{ requester_command_id: string | null }>(
+        `SELECT subscription.requester_command_id FROM messages source
+         JOIN agent_subscriptions subscription ON subscription.id::text=source.system_event->>'subscriptionId'
+         WHERE source.id=$1 AND source.room_id=$2 AND subscription.room_id=$2
+           AND subscription.agent_id=$3 AND subscription.paused_at IS NULL`,
+        [input.sourceMessageId, input.roomId, agentId],
+      )).rows[0];
+      parent = await savedScheduleCommand(db, definition?.requester_command_id, input.roomId, agentId);
+    }
     await createAgentCommand(db, {
       roomId: input.roomId,
       agentId,
       sourceMessageId: input.sourceMessageId,
       workflowAssignment: input.assignmentTargets?.includes(agentId),
       reason: resume ? 'resume' : input.kind === 'schedule-ran' ? 'schedule' : input.kind === 'computer-session-activity' ? 'computer_activity' : 'subscribed_event',
-      ...(parent ? { parent, retainDepth: resume, resume } : {}),
+      ...(parent ? { parent, retainDepth: resume || input.kind === 'subscription-fired', resume,
+        ...(input.kind === 'subscription-fired' ? { inheritPrivatePayload: false } : {}) } : {}),
     });
   }
 }

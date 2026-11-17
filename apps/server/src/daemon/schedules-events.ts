@@ -3,6 +3,7 @@ import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { scheduleDisplayTitle, validateScheduleTitle } from '../schedule-title.js';
 import { setRoomEventSubscriptions } from '../agent-subscriptions.js';
 import { authorizeCommandOutput } from '../agent-command.js';
+import { verifiedScheduleCommand } from '../scheduled-command-authority.js';
 import { randomUUID } from 'node:crypto';
 import type { EventSubscriptionsResult } from '@beeline/api-contract/daemon';
 import { MAX_EVENT_CONSEQUENCE_LENGTH, MAX_MENTIONS_PER_EVENT, SUBSCRIBABLE_EVENT_KINDS, isAgentKind, isPerItemEventKind, isServerEventKind, isSubscribableEventKind, perItemSubscriptionRefusal } from '@beeline/api-contract/phone';
@@ -97,8 +98,8 @@ import { daemonWriteResult } from './corner-messages.js';
     // Only a server-validated human-rooted turn may authorize the saved task.
     // Nonhuman edits clear old authority, even if the task text is unchanged.
     let humanCommandMessageId: string | null = null;
-    if (typeof requestId === 'string') {
-      const command = await authorizeCommandOutput(db, roomId, agentId, requestId);
+    const command = await verifiedScheduleCommand(db, roomId, agentId, requestId);
+    if (command) {
       const human = (await db.query<{ id: string }>(
         `SELECT root.id FROM messages root
          JOIN identities person ON person.id=root.author_id AND person.kind='human' AND NOT person.hidden_from_roster
@@ -108,8 +109,8 @@ import { daemonWriteResult } from './corner-messages.js';
       humanCommandMessageId = human?.id ?? null;
     }
     await db.query(
-      `UPDATE agent_schedules SET human_command_message_id=$2 WHERE id=$1`,
-      [scheduleId, humanCommandMessageId],
+      `UPDATE agent_schedules SET human_command_message_id=$2,requester_command_id=$3 WHERE id=$1`,
+      [scheduleId, humanCommandMessageId, command?.id ?? null],
     );
   }
 

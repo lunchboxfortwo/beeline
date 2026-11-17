@@ -1,5 +1,6 @@
 import { webhookProviders, type ProviderService, connectedSlackApp, slackEventAvailable, slackDeliveries } from './providers/index.js';
 import { routeSystemCommand } from './agent-command.js';
+import { verifiedScheduleCommand } from './scheduled-command-authority.js';
 import { retireMembershipSubscriptionLists } from './membership-join.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { cornerReviewerSql } from './corner-reviewer.js';
@@ -51,6 +52,7 @@ DO $$ BEGIN
  END IF;
 END $$;
 ALTER TABLE agent_subscriptions ADD COLUMN IF NOT EXISTS title text;
+ALTER TABLE agent_subscriptions ADD COLUMN IF NOT EXISTS requester_command_id text;
 ALTER TABLE agent_subscriptions ADD COLUMN IF NOT EXISTS paused_at timestamptz;
 ALTER TABLE agent_subscriptions ADD COLUMN IF NOT EXISTS trigger_text text;
 ALTER TABLE agent_subscriptions ADD COLUMN IF NOT EXISTS service_app_id uuid REFERENCES workspace_apps(id) ON DELETE CASCADE;
@@ -230,6 +232,7 @@ async function createAgentSubscriptionInDb(
   const webhookOwner = input.source === 'webhook'
     ? await requireWebhookAdmin(db, input.roomId, undefined, { agentId, requestId: input.requestId }) : undefined;
   const workflowSlug = await scheduleWorkflowName(db, input.roomId, prompt, input.workflowName);
+  const requesterCommand = await verifiedScheduleCommand(db, input.roomId, agentId, input.requestId);
   if (repository) {
     const covered = await db.query(
       `SELECT 1 FROM github_repositories repo
@@ -273,17 +276,17 @@ async function createAgentSubscriptionInDb(
     : input.source === 'service' && input.event === 'new_message' ? input.channelId : null;
   const rows = await db.query<Row>(
     `INSERT INTO agent_subscriptions(id,workspace_id,room_id,agent_id,source,event,repository,prompt,workflow_slug,
-       service_app_id,service_account_id,service_channel_id,service_channel_name,trigger_id,title,trigger_text)
-     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+       service_app_id,service_account_id,service_channel_id,service_channel_name,trigger_id,title,trigger_text,requester_command_id)
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
      ON CONFLICT(room_id,agent_id,source,event,COALESCE(repository,''),
        COALESCE(service_app_id::text,''),COALESCE(service_channel_id,'')) DO UPDATE
        SET title=EXCLUDED.title,trigger_text=EXCLUDED.trigger_text,prompt=EXCLUDED.prompt,workflow_slug=EXCLUDED.workflow_slug,
-         service_channel_name=EXCLUDED.service_channel_name,trigger_id=EXCLUDED.trigger_id
+         service_channel_name=EXCLUDED.service_channel_name,trigger_id=EXCLUDED.trigger_id,requester_command_id=EXCLUDED.requester_command_id
      RETURNING *`,
     [id, room.rows[0]!.workspace_id, input.roomId, agentId, input.source, input.event,
       repository ?? null, prompt, workflowSlug ?? null, app?.id ?? null, app?.composio_account_id ?? null,
       channelScope,
-      input.source === 'service' && input.event === 'new_message' ? input.channelName ?? null : null, triggerId ?? null, title, when],
+      input.source === 'service' && input.event === 'new_message' ? input.channelName ?? null : null, triggerId ?? null, title, when, requesterCommand?.id ?? null],
   );
   if (webhookOwner) await createWebhookCredentials(db, rows.rows[0]!.id, webhookOwner);
   if (providerConnectorId) await notifyConnectorHelper(db, providerConnectorId);

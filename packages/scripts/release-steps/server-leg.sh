@@ -22,7 +22,7 @@ const others = [...new Set(images.filter((ref) => ref !== image))];
 // A Machine this release already updated names, in its Fly metadata,
 // the image it replaced; a rerun reads it there.
 const replaced = [...new Set(machines.filter((m, i) => images[i] === image)
-  .map((m) => tag(m.config?.metadata?.beeline_replaced_image)).filter((ref) => ref && ref !== image))];
+  .map((m) => tag(m.config?.env?.BEELINE_REPLACED_IMAGE ?? m.config?.metadata?.beeline_replaced_image)).filter((ref) => ref && ref !== image))];
 console.log(`image_ref=${image}`);
 console.log(`shipped=${live}`);
 // Only an unsplit fleet names one previous image.
@@ -122,21 +122,27 @@ canary_updated=0
 second_update_attempted=0
 fleet_updated=0
 
-# One retry covers a transient Fly API failure.
-retry_flyctl_update() {
-  local machine="$1" image="$2" desc="$3" replaced="${4:-}"
-  local metadata=()
-  # A forward update records the image it replaces on the Machine, so a
-  # rerun that finds this release live still knows what came before.
-  if [ -n "$replaced" ] && [ "${replaced%@sha256:*}" != "${image%@sha256:*}" ]; then
-    metadata=(--metadata "beeline_replaced_image=${replaced%@sha256:*}")
-  fi
-  if flyctl machine update "$machine" --app beeline-server --image "$image" "${metadata[@]}" --wait-timeout 300 --yes 2>&1; then
-    return 0
-  fi
-  echo "retry_flyctl_update($desc): first attempt failed, retrying in 10s" >&2
-  sleep 10
-  flyctl machine update "$machine" --app beeline-server --image "$image" "${metadata[@]}" --wait-timeout 300 --yes 2>&1
+# Fly starts a replacement beside the serving Machine and switches traffic
+# only after its service /readyz check passes. Apply that to one canary at a time.
+deploy_machine() {
+  local machine="$1" image="$2" target="$3" replaced="${4:-}"
+  local inventory="$RUNNER_TEMP/server-release/machines-replaced.json" replacement
+  flyctl deploy . --app beeline-server --config apps/infra/fly.beeline-server.toml \
+    --image "$image" --strategy bluegreen --only-machines "$machine" --ha=false \
+    --env "BEELINE_REPLACED_IMAGE=${replaced%@sha256:*}" --wait-timeout 300 --yes
+  flyctl machine list --app beeline-server --json > "$inventory"
+  replacement=$(node - "$inventory" "$machine" "$image" "$canary" "$second" <<'NODE'
+const [file, previous, image, ...peers] = process.argv.slice(2);
+const machines = JSON.parse(require('node:fs').readFileSync(file, 'utf8'));
+const tag = ref => String(ref ?? '').replace(/@sha256:[0-9a-f]+$/, '');
+const replacements = machines.filter(m => m.state === 'started' && tag(m.config?.image ?? m.imageRef) === tag(image)
+  && (m.id === previous || !peers.includes(m.id)));
+if (replacements.length !== 1) throw Error('Expected exactly one ready replacement Machine');
+process.stdout.write(replacements[0].id);
+NODE
+  )
+  # All forced-instance probes and rollback operations must use the new ID.
+  printf -v "$target" '%s' "$replacement"
 }
 
 # Report whether every Fly Machine runs its expected image.
@@ -163,10 +169,10 @@ rollback_canary() {
   status=$?
   if [ "$canary_updated" = 1 ] && [ "$fleet_updated" = 0 ]; then
     echo "Server promotion failed; restoring attempted Machines to their previous images" >&2
-    retry_flyctl_update "$canary" "$previous_ref" "rollback-canary" || true
+    deploy_machine "$canary" "$previous_ref" canary || true
     expected_second="$second_previous_ref"
     if [ "$second_update_attempted" = 1 ]; then
-      retry_flyctl_update "$second" "$second_previous_ref" "rollback-second" || true
+      deploy_machine "$second" "$second_previous_ref" second || true
     fi
     if verify_machine_images "$previous_ref" "$expected_second"; then
       echo "Rollback confirmed: every Machine runs its previous image"
@@ -222,7 +228,7 @@ if [ "$(read_plan split)" = true ]; then
   echo "::warning::Server fleet is split ($previous_ref, $second_previous_ref); converging both Machines on $image_ref"
 fi
 canary_updated=1
-retry_flyctl_update "$canary" "$image_ref" "canary" "$previous_ref"
+deploy_machine "$canary" "$image_ref" canary "$previous_ref"
 wait_for_machine_ready "$canary"
 
 if [ -n "${SERVER_CANARY_REVIEW_SECRET:-}" ]; then
@@ -313,7 +319,7 @@ done
 
 node packages/scripts/unified-release.mjs server-canary-promotion --samples "$canary_samples"
 second_update_attempted=1
-retry_flyctl_update "$second" "$image_ref" "second" "$second_previous_ref"
+deploy_machine "$second" "$image_ref" second "$second_previous_ref"
 wait_for_machine_ready "$second"
 fleet_updated=1
 trap - ERR

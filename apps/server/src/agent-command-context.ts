@@ -4,6 +4,8 @@ import { currentCornerBrief } from './corner-brief.js';
 import type { SqlDatabase } from './database.js';
 import { createDefaultEmbedFn, type EmbedFn } from './institutional-memory-embeddings.js';
 import { getInstitutionalContext } from './institutional-memory-shadow.js';
+import { namedWorkspaceProcedureContext } from './institutional-skills.js';
+import { resourceReadAuthority } from './resource-requester.js';
 
 export const INSTITUTIONAL_CONTEXT_MISSED_TEXT =
   'institutional memory did not load this turn; use search(scope:memory) before concluding anything is not stored.';
@@ -54,6 +56,17 @@ async function attachQueuedInstitutionalContext(
       [command.room_id],
     );
     text = saved.rowCount ? (await getInstitutionalContext(db, command, embed)).text : '';
+    if (saved.rowCount) {
+      const authority = await resourceReadAuthority(db, command);
+      if (authority) {
+        const procedures = await namedWorkspaceProcedureContext(db, {
+          workspaceId: authority.workspace_id, requesterIdentityId: authority.requester_identity_id,
+          agentId: command.agent_id,
+          text: command.message?.body ?? authority.source.text,
+        });
+        text = [text, procedures].filter(Boolean).join('\n\n');
+      }
+    }
     await db.query('RELEASE SAVEPOINT queued_institutional_context');
   } catch {
     await db.query('ROLLBACK TO SAVEPOINT queued_institutional_context');

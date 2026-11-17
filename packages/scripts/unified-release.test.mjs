@@ -111,7 +111,7 @@ test('free-agent image publication bakes its digest into the sole server rollout
   assert.ok(publish < build && build < rollout && rollout < verify);
   for (const index of [publish, build]) assert.equal(steps[index].if, "steps.fleet.outputs.shipped != 'true'");
   assert.equal(steps[verify].if, undefined, 'a shipped server must not hide a failed helper refresh on rerun');
-  const updates = steps.filter(step => /flyctl machine update/.test(step.run ?? ''));
+  const updates = steps.filter(step => /--strategy bluegreen/.test(step.run ?? ''));
   assert.equal(updates.length, 1);
   assert.equal(updates[0], steps[rollout]);
   assert.match(steps[publish].run, /--build-only --push/);
