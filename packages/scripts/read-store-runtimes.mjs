@@ -1,9 +1,34 @@
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { appStoreClient } from './ios-store-build.mjs';
 import { mintAccessToken } from './play-token.mjs';
 import { readPlayRuntime, easBuildInventory } from './store-build-runtime.mjs';
 import { playLiveBuilds, resolveStoreBuilds } from '../../apps/mobile/scripts/store-runtime-targets.mjs';
+import { runtimeVersionsFromConfig } from '../../apps/mobile/scripts/native-fingerprint.mjs';
+
+const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
+
+async function iosSourceRuntime(api, id, number, repository) {
+  const page = await api(`/v1/builds/${encodeURIComponent(id)}?include=betaBuildLocalizations`);
+  const build = page?.data;
+  if (build?.type !== 'builds' || build.id !== id || build.attributes?.version !== number)
+    throw new Error('ASC returned a different build identity');
+  const refs = build.relationships?.betaBuildLocalizations?.data ?? [];
+  const markers = [...new Set(refs.map(ref => page.included?.find(item =>
+    item.type === 'betaBuildLocalizations' && item.id === ref.id)?.attributes?.whatsNew)
+    .map(text => /^Beeline release (v\d+\.\d+\.\d+(?:-rc\.[1-9]\d*)?@([0-9a-f]{12}))$/.exec(text ?? ''))
+    .filter(Boolean).map(match => match[1]))];
+  if (markers.length !== 1) throw new Error('ASC build has no unique source release marker');
+  const marker = markers[0];
+  const git = args => execFileSync('git', args, { cwd: repository, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  const sourceSha = git(['rev-parse', '--verify', `${marker.split('@')[1]}^{commit}`]);
+  // Use the same committed pins and reader as unified-release apply-facts.
+  // These are the native build's pins, never the current checkout's OTA override.
+  const pins = JSON.parse(git(['show', `${sourceSha}:apps/mobile/native-fingerprint.json`]));
+  return { runtimeVersion: runtimeVersionsFromConfig(pins).ios,
+    evidence: `ASC build ${id}; source-commit derived from ${marker} (${sourceSha})` };
+}
 
 function newestBuildFirst(a, b) {
   const left = a.split('.').map(Number), right = b.split('.').map(Number);
@@ -23,9 +48,9 @@ async function publishedWindow(platform, numbers, historicalNumbers, builds, res
     catch (error) {
       if (!resolveRuntime) throw error;
       try {
-        const runtimeVersion = await resolveRuntime(number);
+        const { runtimeVersion, evidence } = await resolveRuntime(number);
         if (!/^\d+$/.test(runtimeVersion)) throw new Error('invalid runtime');
-        target = { platform, buildNumber: number, runtimeVersion, evidence: 'Play generated APK native manifest' };
+        target = { platform, buildNumber: number, runtimeVersion, evidence };
         builds.push(target);
       } catch (cause) {
         error.message += `: ${cause.message}`;
@@ -83,11 +108,12 @@ async function readPlayTrack(track, token, fetchImpl) {
   }
 }
 
-export async function readStores({ builds = [], previouslyLive = [], env = process.env, fetchImpl = fetch, appleApi, playRuntime = readPlayRuntime } = {}) {
+export async function readStores({ builds = [], previouslyLive = [], env = process.env, fetchImpl = fetch, appleApi, playRuntime = readPlayRuntime, repository = repositoryRoot } = {}) {
   const stores = {};
   await Promise.all(['android', 'ios'].map(async platform => {
     let numbers = [];
     let playToken;
+    let iosRuntime;
     const historicalNumbers = previouslyLive.filter(build => build.platform === platform && build.buildNumber).map(build => String(build.buildNumber));
     try {
       if (platform === 'android') {
@@ -97,6 +123,12 @@ export async function readStores({ builds = [], previouslyLive = [], env = proce
         const appleEnv = env.EXPO_ASC_API_KEY_P8?.includes('-----BEGIN')
           ? { ...env, EXPO_ASC_API_KEY_P8: Buffer.from(env.EXPO_ASC_API_KEY_P8).toString('base64') } : env;
         const api = appleApi ?? appStoreClient(appleEnv, fetchImpl);
+        const buildIds = new Map();
+        iosRuntime = number => {
+          if (builds.some(build => build.platform.toLowerCase() === 'ios' && String(build.appBuildVersion ?? build.buildNumber) === number))
+            throw new Error('Recorded iOS runtime is invalid or conflicting');
+          return iosSourceRuntime(api, buildIds.get(number), number, repository);
+        };
         let path = '/v1/apps/6803948500/appStoreVersions?filter[platform]=IOS&include=build&limit=200';
         numbers = [];
         while (path) {
@@ -113,13 +145,15 @@ export async function readStores({ builds = [], previouslyLive = [], env = proce
               throw error;
             }
             (state === 'REPLACED_WITH_NEW_VERSION' ? historicalNumbers : numbers).push(build.attributes.version);
+            buildIds.set(build.attributes.version, id);
           }
           path = page.links?.next ? new URL(page.links.next).pathname + new URL(page.links.next).search : null;
         }
       }
       const observedAt = new Date().toISOString();
       const resolved = await publishedWindow(platform, numbers, historicalNumbers, builds,
-        platform === 'android' ? number => playRuntime(number, playToken, { fetchImpl }) : undefined);
+        platform === 'android' ? async number => ({ runtimeVersion: await playRuntime(number, playToken, { fetchImpl }),
+          evidence: 'Play generated APK native manifest' }) : iosRuntime);
       const live = resolved.filter(t => numbers.includes(t.buildNumber)).map(t => ({ ...t, observedLiveAt: observedAt }));
       const historical = resolved.filter(t => !numbers.includes(t.buildNumber)).map(t => ({ ...t, publicationEvidence: platform === 'ios' ? 'ASC REPLACED_WITH_NEW_VERSION' : 'previous Play production observation', observedAt }));
       const newest = [...live].sort((a, b) => newestBuildFirst(a.buildNumber, b.buildNumber))[0];
@@ -136,7 +170,8 @@ export async function readStores({ builds = [], previouslyLive = [], env = proce
       try {
         const betaNumbers = await readPlayTrack('beta', playToken, fetchImpl);
         stores.android.betaLive = (await publishedWindow('android', betaNumbers, [], builds,
-          number => playRuntime(number, playToken, { fetchImpl })))
+          async number => ({ runtimeVersion: await playRuntime(number, playToken, { fetchImpl }),
+            evidence: 'Play generated APK native manifest' })))
           .map(target => ({ ...target, observedLiveAt: new Date().toISOString() }));
       } catch (error) {
         if (error.code === 'UNKNOWN_STORE_RUNTIME') stores.android.unknownRuntime = error.message;

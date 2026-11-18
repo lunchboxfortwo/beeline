@@ -477,8 +477,13 @@ builds record their embedded runtime in `release.json`; EAS build metadata
 supplies cloud upload identities. An unrecorded Play build resolves through
 Play's generated base APK and its native Expo runtime stamp, read with `aapt2`.
 ASC's public build API does not expose Expo.plist, so its exact distributed
-build number must match recorded upload metadata. Unknown runtimes within the
-newest three distinct published runtimes stop OTA delivery with the platform
+build number first resolves through recorded upload metadata. For local uploads
+missing that metadata, the build's unique Beeline release marker supplies its
+source commit. The reader uses that commit's native fingerprint runtime pins
+with the same reader as release finalization and labels the evidence as
+source-commit derived. Missing source or conflicting evidence fails closed.
+Unknown runtimes within the newest three distinct published runtimes stop OTA
+delivery with the platform
 and build number. There is no hand-maintained binary/runtime list.
 
 ## Routine release
