@@ -8,7 +8,8 @@ import type {
   WorkItemView,
 } from '@beeline/api-contract/phone';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
-import { Btn, Glyph, HEIGHT, T } from '@/ui/grammar';
+import { MonoMarkdown } from '@/components/buzz/MonoMarkdown';
+import { Btn, Glyph, HEIGHT, T, TypedView } from '@/ui/grammar';
 import { TabHeader, useScrolledUnder } from '@/ui/shell/TabHeader';
 import { compactRelativeTime } from '@/buzz/relative-time';
 import { WorkSheet } from './WorkItemDetail';
@@ -152,7 +153,7 @@ function AskCard({ item, actions, now }: { item: WorkItemView; actions: WorkBoar
           <Glyph icon={X} size={14} />
         </Btn>
       </XStack>
-      <T>{ask.text}</T>
+      <TypedView view={MonoMarkdown} markdown={ask.text} />
       {ask.approval?.kind === 'choice' && !ask.text.includes(ask.approval.subject) ? (
         <T>{ask.approval.subject}</T>
       ) : null}

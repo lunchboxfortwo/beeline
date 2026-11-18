@@ -11,8 +11,44 @@ vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ t
 vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: (props: any) => React.createElement('IdentityMark', props) }));
 vi.mock('@/ui/shell/TabHeader', () => ({ TabHeader: () => null, useScrolledUnder: () => ({ scrolled: false, scrollProps: {} }) }));
 vi.mock('./WorkItemDetail', () => ({ WorkSheet: () => null }));
+vi.mock('@/components/buzz/CodeBlock', () => ({ CodeBlock: () => null }));
+vi.mock('@/buzz/message-link', () => ({ messageLinkId: () => undefined, openMessageLink: vi.fn() }));
+vi.mock('@/utils/open-external-url', () => ({ openExternalUrl: vi.fn().mockResolvedValue(undefined) }));
 
 import { WorkBoard } from './WorkBoard';
+import { ProseRun } from '@/ui/grammar';
+import { MonoMarkdown } from '@/components/buzz/MonoMarkdown';
+import { openExternalUrl } from '@/utils/open-external-url';
+
+it.each([false, true])('renders Needs you markdown with transcript formatting on desktop=%s', (desktop) => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    const markdown = '**11 sources**\n\n**What squire has:**\n- `account_id`\n- [Source](https://example.com/source)';
+    const person = { pubkey: 'agent', kind: 'agent' as const, name: 'Ruby' };
+    const board: WorkBoardView = {
+        workspaceId: 'ws', workspaceName: 'Tubing Crew', viewerId: 'viewer', chats: [], people: [],
+        items: [{ id: 'ask', roomId: 'chat', chatId: 'chat', chatName: 'grunt', threadName: 'Launch',
+            title: 'Launch', state: 'needs-you', openedBy: person, assignee: null, createdAt: 1, updatedAt: 2,
+            ask: { messageId: 'ask', workspaceId: 'ws', roomId: 'chat', roomName: 'grunt', roomKind: 'room',
+                author: person, text: markdown, createdAt: 1 } }],
+    };
+    const actions = { open: vi.fn(), reply: vi.fn(), decide: vi.fn(), assign: vi.fn(), clear: vi.fn(), clearAll: vi.fn() };
+    let tree: any;
+    act(() => { tree = create(<WorkBoard board={board} desktop={desktop} actions={actions} />); });
+    try {
+        const card = tree.root.find((n: any) => typeof n.type === 'string' && n.props.testID === 'work-ask-ask');
+        const runs = card.findAllByType(ProseRun);
+        expect(runs.filter((n: any) => n.props.marks?.includes('strong')).map((n: any) => n.props.children))
+            .toEqual(['11 sources', 'What squire has:']);
+        expect(runs.find((n: any) => n.props.marks?.includes('code')).props.children).toBe('account_id');
+        expect(runs.filter((n: any) => n.props.children === '· ')).toHaveLength(2);
+        const link = runs.find((n: any) => n.props.accessibilityRole === 'link');
+        expect(link.props.children).toBe('Source');
+        act(() => link.props.onPress());
+        expect(openExternalUrl).toHaveBeenCalledWith('https://example.com/source');
+        expect(actions.open).not.toHaveBeenCalled();
+        expect(card.findAll((n: any) => n.type === 'Text' && n.props.children === markdown)).toHaveLength(0);
+    } finally { act(() => tree.unmount()); }
+});
 
 it('expands Done on tap and collapses it on the next tap', () => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -122,12 +158,12 @@ it.each([[false, false], [false, true], [true, false], [true, true]])('shows the
     let tree: any;
     act(() => { tree = create(<WorkBoard board={board} desktop={desktop} actions={actions} />); });
     try {
-        const post = tree.root.find((node: any) => node.type === 'Text' && node.props.children === fullPost);
+        const post = tree.root.findByType(MonoMarkdown);
+        expect(post.props.markdown).toBe(fullPost);
         expect(post.props.numberOfLines).toBeUndefined();
         expect(post.props.ellipsizeMode).toBeUndefined();
-        const texts = tree.root.findAll((node: any) => node.type === 'Text')
-          .flatMap((node: any) => [node.props.children].flat(Infinity)).join(' ');
-        expect(texts.split(question)).toHaveLength(2);
+        const separateQuestions = tree.root.findAll((node: any) => node.type === 'Text' && node.props.children === question);
+        expect(separateQuestions).toHaveLength(includesQuestion ? 0 : 1);
         const { Btn } = await import('@/ui/grammar');
         const buttons = tree.root.findAllByType(Btn).filter((node: any) => ['Yes', 'No'].includes(node.props.label));
         expect(buttons.map((node: any) => node.props.kind)).toEqual(['secondary', 'secondary']);
