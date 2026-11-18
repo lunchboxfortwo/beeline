@@ -1,3 +1,4 @@
+import { closeInactiveCorners, nextCornerCloseDelay } from './corner-auto-close.js';
 import { DatabaseLockDiagnostics } from './database-lock-diagnostics.js';
 import { githubProviderKey } from './providers/index.js';
 import { installShutdown } from './shutdown.js';
@@ -477,7 +478,13 @@ async function main() {
   const schedulesJob = eventJob('schedules', async () => {
     scheduleClock.stop();
     await schedules.runOnce();
-    scheduleClock.arm(await schedules.nextDelayMs());
+    await closeInactiveCorners(jobsDatabase, githubJobs ? {
+      closePullRequest: id => githubJobs.closeCornerPullRequest(id),
+      deleteCornerBranch: id => githubJobs.deleteCornerBranch(id),
+    } : undefined);
+    const delays = await Promise.all([schedules.nextDelayMs(), nextCornerCloseDelay(jobsDatabase)]);
+    const next = Math.min(...delays.map(delay => delay ?? Infinity));
+    scheduleClock.arm(Number.isFinite(next) ? next : undefined);
   });
   const scheduleClock = new OwnerScheduleClock(() => schedulesJob.wake());
   const mcpStop = new AbortController();
