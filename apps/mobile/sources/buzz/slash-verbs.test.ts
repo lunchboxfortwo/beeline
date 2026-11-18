@@ -134,7 +134,7 @@ describe('the Fast mode palette entry', () => {
   it('filters as the owner types and shows the current state', () => {
     const names = (query: string, enabled = false) =>
       availableAgentMentionCommands([], query, { enabled }).map((command) => command.name);
-    expect(names('')).toEqual(['restart', FAST_MODE_COMMAND]);
+    expect(names('')).toEqual(['restart', FAST_MODE_COMMAND, 'login']);
     expect(names('fa')).toEqual([FAST_MODE_COMMAND]);
     expect(names('fast')).toEqual([FAST_MODE_COMMAND]);
     expect(names('res')).toEqual(['restart']);
@@ -161,6 +161,7 @@ describe('agent-mention slash palette query', () => {
   it('offers Beeline restart without a harness catalog and preserves the mention on selection', () => {
     expect(availableAgentMentionCommands([], '')).toEqual([
       { name: 'restart', description: 'Restart this agent' },
+      { name: 'login', description: 'Sign in to this agent’s provider' },
     ]);
     expect(availableAgentMentionCommands([], 'res')).toHaveLength(1);
     expect(availableAgentMentionCommands([], 'loop')).toEqual([]);
@@ -171,7 +172,7 @@ describe('agent-mention slash palette query', () => {
     expect(availableAgentMentionCommands([
       { name: 'restart', description: 'Harness restart' },
       { name: 'loop', description: 'Run repeatedly' },
-    ], '').map((command) => command.name)).toEqual(['restart', 'loop']);
+    ], '').map((command) => command.name)).toEqual(['restart', 'login', 'loop']);
   });
 
   it('detects a slash token typed right after a completed @mention', () => {
@@ -223,15 +224,14 @@ describe('agent-mention slash palette query', () => {
 });
 
 
-describe('server-authorized login palette entry', () => {
-  it('offers login without a harness catalog and hides it without permission', () => {
-    expect(availableAgentMentionCommands([], 'lo', null, true).map(c => c.name)).toEqual(['login']);
-    expect(availableAgentMentionCommands([], 'lo', null, false)).toEqual([]);
-    expect(availableAgentMentionCommands([], 'lo')).toEqual([]);
+describe('Beeline login palette entry', () => {
+  it.each(['', 'lo', 'login', 'LOGIN'])('offers login without a harness catalog for %j', query => {
+    expect(availableAgentMentionCommands([], query).map(c => c.name)).toContain('login');
   });
   it('reserves login even when a stale harness advertises it', () => {
     const stale = [{ name: 'LOGIN', description: 'Harness login' }];
-    expect(availableAgentMentionCommands(stale, 'lo', null, true).map(c => c.name)).toEqual(['login']);
-    expect(availableAgentMentionCommands(stale, 'lo', null, false)).toEqual([]);
+    expect(availableAgentMentionCommands(stale, 'login')).toEqual([
+      { name: 'login', description: 'Sign in to this agent’s provider' },
+    ]);
   });
 });

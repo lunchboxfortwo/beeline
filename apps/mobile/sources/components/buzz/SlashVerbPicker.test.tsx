@@ -82,17 +82,18 @@ describe('SlashVerbPicker agent command palette', () => {
     );
   });
 
-  it('demonstrates owner login selection without harness commands', () => {
-    let composer = '@bee /lo';
+  it.each(['lo', 'login'])('offers /%s without a profile or harness catalog and preserves the target', (query) => {
+    let composer = `@bee /${query}`;
     const renderer = render(React.createElement(SlashVerbPicker, {
-      verbs: [], query: 'lo', highlightedIndex: 0,
+      verbs: [], query, highlightedIndex: 0,
       onDismiss: () => undefined, onSelect: () => undefined,
-      commands: availableAgentMentionCommands([], 'lo', null, true),
+      commands: availableAgentMentionCommands([], query),
       agentName: 'bee', agentLacksCommands: true,
       onSelectCommand: (name: string) => { composer = insertAgentSlashCommand(composer, name); },
     }));
     const login = find_by_test_id(renderer, 'slash-agent-command-login');
     expect(login).toHaveLength(1);
+    expect(renderer.root.findAll((node: any) => node.props.testID === 'slash-verb-no-match')).toHaveLength(0);
     login[0].props.onPress();
     expect(composer).toBe('@bee /login ');
     console.log(`Reproduction login-suggestion (shared phone/desktop picker): /lo → login row → ${composer}`);

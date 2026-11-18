@@ -27,7 +27,7 @@ function Composer({text='@claude',members=[claude],presences={}}:{text?:string;m
     latestAgentTurns:[],viewer:{permissions:{send:true}}};
   const [participants,,described]=useChatRoster([room as never,new Map(),[],null,'viewer',null,presences]);
   const args=[participants,{start:text.length,end:text.length},text,described,true,null,false,undefined,'room',null,[],
-    room,{},[],true,false,'viewer',{},{},{},[],null,'workspace',no,no,no];
+    room,{},[],true,false,'viewer',{},{},[],null,'workspace',no,no];
   current=useChatComposerSuggestions(args as Parameters<typeof useChatComposerSuggestions>[0]);
   return null;
 }
@@ -56,4 +56,9 @@ it.each(['online','offline'] as const)('keeps a member addressable with old %s p
 it('resolves the same @claude member for its command palette while its session is offline',()=>{
   act(()=>{tree=create(<Composer text="@claude /help" presences={{[claude.pubkey]:{agentPubkey:claude.pubkey,status:'offline',observedAt}}}/>);});
   expect(current[8]).toBe(claude.pubkey);
+});
+
+it.each(['online','offline'] as const)('offers login before any profile or command catalog read with %s presence',status=>{
+  act(()=>{tree=create(<Composer text="@claude /login" presences={{[claude.pubkey]:{agentPubkey:claude.pubkey,status,observedAt}}}/>);});
+  expect(current[9]).toEqual([{name:'login',description:'Sign in to this agent’s provider'}]);
 });

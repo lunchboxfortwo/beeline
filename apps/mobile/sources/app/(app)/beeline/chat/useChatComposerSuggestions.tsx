@@ -34,12 +34,10 @@ type Props = [
   viewerPubkey: string | undefined,
   agentCommandsByScope: Record<string, readonly AgentComposerCommand[]>,
   agentFastModeByScope: Record<string, FastModeCommandState | null>,
-  agentCanLoginByScope: Record<string, boolean>,
   combinedMessages: ChatDisplayMessage[],
   roomRepository: RoomRepository | null,
   activeCommunityId: string | null,
   setAgentCommandsByScope: React.Dispatch<React.SetStateAction<Record<string, readonly AgentComposerCommand[]>>>,
-  setAgentCanLoginByScope: React.Dispatch<React.SetStateAction<Record<string, boolean>>>,
   setAgentFastModeByScope: React.Dispatch<React.SetStateAction<Record<string, FastModeCommandState | null>>>,
 ];
 
@@ -48,8 +46,8 @@ export function useChatComposerSuggestions([
   describedRoomParticipants, composerFocused, dismissedMentionKey, isDirectMessage, parentChannelId,
   decodedId, roomClient, workspaceChats, roomSurface, presenceReconnectGrace, unprojectedMessages,
   participantsHydrated, participantPickerVisible, viewerPubkey, agentCommandsByScope,
-  agentFastModeByScope, agentCanLoginByScope, combinedMessages, roomRepository, activeCommunityId,
-  setAgentCommandsByScope, setAgentCanLoginByScope, setAgentFastModeByScope,
+  agentFastModeByScope, combinedMessages, roomRepository, activeCommunityId,
+  setAgentCommandsByScope, setAgentFastModeByScope,
 ]: Props): [
   directMessageListItem: ChatListItem | null,
   isReadOnlyDirectMessage: boolean,
@@ -266,9 +264,8 @@ export function useChatComposerSuggestions([
       published ?? [],
       mentionSlash.query,
       agentFastModeByScope[mentionAgentCommandScope],
-      agentCanLoginByScope[mentionAgentCommandScope],
     );
-  }, [agentCommandsByScope, agentFastModeByScope, agentCanLoginByScope, mentionAgentCommandScope, mentionSlash]);
+  }, [agentCommandsByScope, agentFastModeByScope, mentionAgentCommandScope, mentionSlash]);
 
   // True only once the read RESOLVED (absent or empty list): an in-flight or
   // failed read is unknown, never "does not advertise".
@@ -314,7 +311,7 @@ export function useChatComposerSuggestions([
     const pubkey = mentionSlashAgentPubkey;
     const scope = mentionAgentCommandScope;
     if (!pubkey || !scope || !roomClient || !activeCommunityId) return;
-    if (agentCommandsByScope[scope] !== undefined && agentFastModeByScope[scope] !== undefined && agentCanLoginByScope[scope] !== undefined) {
+    if (agentCommandsByScope[scope] !== undefined && agentFastModeByScope[scope] !== undefined) {
       return;
     }
     let cancelled = false;
@@ -326,7 +323,6 @@ export function useChatComposerSuggestions([
             ...current,
             [scope]: detail.commands ?? [],
           }));
-          setAgentCanLoginByScope((current) => ({ ...current, [scope]: detail.canLogin === true }));
           setAgentFastModeByScope((current) => ({
             ...current,
             [scope]: fastModeCommandState(detail, viewerPubkey),
@@ -344,7 +340,6 @@ export function useChatComposerSuggestions([
     activeCommunityId,
     agentCommandsByScope,
     agentFastModeByScope,
-    agentCanLoginByScope,
     decodedId,
     mentionAgentCommandScope,
     mentionSlashAgentPubkey,
@@ -357,7 +352,6 @@ export function useChatComposerSuggestions([
   useEffect(() => {
     if (mentionSlashAgentPubkey) return;
     setAgentFastModeByScope((current) => (Object.keys(current).length ? {} : current));
-    setAgentCanLoginByScope((current) => (Object.keys(current).length ? {} : current));
   }, [mentionSlashAgentPubkey]);
   return [
     directMessageListItem, isReadOnlyDirectMessage, messages, activeAgentTurns,

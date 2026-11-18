@@ -192,20 +192,19 @@ export function matchesAgentCommand(command: AgentPaletteCommand, query: string)
 }
 
 /**
- * Restart is a Beeline lifecycle action, available even without a harness
- * catalog. Login needs the server owner/harness verdict. Fast mode needs an
+ * Restart and login use Beeline’s tagged command route, even without a harness
+ * catalog. The server authorizes each action when sent. Fast mode needs an
  * owner state from an agent whose live catalog supports it.
  */
 export function availableAgentMentionCommands(
   advertised: readonly AgentPaletteCommand[],
   query: string,
   fastMode?: FastModeCommandState | null,
-  canLogin = false,
 ): AgentPaletteCommand[] {
   const restart = { name: 'restart', description: 'Restart this agent' };
-  const beeline = fastMode ? [restart, fastModePaletteCommand(fastMode)] : [restart];
-  if (canLogin) beeline.push({ name: 'login', description: 'Sign in to this agent’s provider' });
-  const reserved = new Set([...beeline.map((command) => command.name), 'login']);
+  const login = { name: 'login', description: 'Sign in to this agent’s provider' };
+  const beeline = fastMode ? [restart, fastModePaletteCommand(fastMode), login] : [restart, login];
+  const reserved = new Set(beeline.map((command) => command.name));
   return [
     ...beeline,
     ...advertised.filter((command) => !reserved.has(command.name.toLowerCase())),

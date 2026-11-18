@@ -102,8 +102,8 @@ export function BuzzChatSurface({
   const [
     inputText, setDesktopDeliveryState, setInputText, setInputSelection, setDismissedMentionKey,
     desktopWorkPaneRef, setDesktopWorkPane, desktopWorkPaneContent, inputSelection,
-    dismissedMentionKey, agentCommandsByScope, agentFastModeByScope, agentCanLoginByScope,
-    setAgentCommandsByScope, setAgentCanLoginByScope, setAgentFastModeByScope, optimisticDeletes,
+    dismissedMentionKey, agentCommandsByScope, agentFastModeByScope,
+    setAgentCommandsByScope, setAgentFastModeByScope, optimisticDeletes,
     optimisticReactions, dismissedSlashText, setHighlightedSlashVerbIndex, composerHeight,
     setReplyTarget, reactingRef, optimisticReactionsRef, setOptimisticReactions, showReportToast,
     setOptimisticDeletes, setMessageActionsTarget, setForwardTarget, setForwardRooms,
@@ -200,9 +200,9 @@ export function BuzzChatSurface({
     describedRoomParticipants, composerFocused, dismissedMentionKey, isDirectMessage,
     parentChannelId, decodedId, roomClient, workspaceChats, roomSurface, presenceReconnectGrace,
     unprojectedMessages, participantsHydrated, participantPickerVisible,
-    viewerPubkey, agentCommandsByScope, agentFastModeByScope, agentCanLoginByScope,
+    viewerPubkey, agentCommandsByScope, agentFastModeByScope,
     combinedMessages, roomRepository, activeCommunityId, setAgentCommandsByScope,
-    setAgentCanLoginByScope, setAgentFastModeByScope,
+    setAgentFastModeByScope,
   ]);
   const [
     emptyLedgerVariant, displayRoomName, roomName, firstRoomAgent, startCornerMessage,

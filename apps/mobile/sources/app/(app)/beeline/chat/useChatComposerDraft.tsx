@@ -36,9 +36,7 @@ export function useChatComposerDraft([
   dismissedMentionKey: string | null,
   agentCommandsByScope: Record<string, readonly AgentComposerCommand[]>,
   agentFastModeByScope: Record<string, FastModeCommandState | null>,
-  agentCanLoginByScope: Record<string, boolean>,
   setAgentCommandsByScope: React.Dispatch<React.SetStateAction<Record<string, readonly AgentComposerCommand[]>>>,
-  setAgentCanLoginByScope: React.Dispatch<React.SetStateAction<Record<string, boolean>>>,
   setAgentFastModeByScope: React.Dispatch<React.SetStateAction<Record<string, FastModeCommandState | null>>>,
   optimisticDeletes: Record<string, true>,
   optimisticReactions: Record<string, readonly import("@beeline/api-contract/phone").MessageReactionView[] | undefined>,
@@ -154,8 +152,6 @@ export function useChatComposerDraft([
     Record<string, FastModeCommandState | null>
   >({});
 
-  const [agentCanLoginByScope, setAgentCanLoginByScope] = useState<Record<string, boolean>>({});
-
   const [sending, setSending] = useState(false);
 
   const [cornerProposalAction, setCornerProposalAction] = useState<{
@@ -257,8 +253,8 @@ export function useChatComposerDraft([
   return [
     inputText, setDesktopDeliveryState, setInputText, setInputSelection, setDismissedMentionKey,
     desktopWorkPaneRef, setDesktopWorkPane, desktopWorkPaneContent, inputSelection,
-    dismissedMentionKey, agentCommandsByScope, agentFastModeByScope, agentCanLoginByScope,
-    setAgentCommandsByScope, setAgentCanLoginByScope, setAgentFastModeByScope, optimisticDeletes,
+    dismissedMentionKey, agentCommandsByScope, agentFastModeByScope,
+    setAgentCommandsByScope, setAgentFastModeByScope, optimisticDeletes,
     optimisticReactions, dismissedSlashText, setHighlightedSlashVerbIndex, composerHeight,
     setReplyTarget, reactingRef, optimisticReactionsRef, setOptimisticReactions, showReportToast,
     setOptimisticDeletes, setMessageActionsTarget, setForwardTarget, setForwardRooms,
