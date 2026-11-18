@@ -19,6 +19,18 @@ describe('thread status (header B)', () => {
     expect(threadListLabel({ state: 'archived' }, viewer).word).toBe('done');
   });
 
+  it('distinguishes unconfigured checks from checks that have not reported', () => {
+    expect(threadPrLine(lifecycle({ checksSummary: { status: 'passing', total: 0, failing: [], checks: [], updatedAt: 1 } }), false))
+      .toBe('#4181 · Open · No checks set up');
+    expect(threadPrLine(lifecycle({ checksSummary: { status: 'unknown', total: 0, failing: [], checks: [], updatedAt: 1 } }), false))
+      .toBe('#4181 · Open · No checks ran');
+    expect(threadPrLine(lifecycle({}), false)).toBe('#4181 · Open · No checks ran');
+    expect(threadPrLine(lifecycle({ checks: 'pending', checksSummary: { status: 'pending', total: 0, failing: [], checks: [], updatedAt: 1 } }), false))
+      .toBe('#4181 · Open · Checks running');
+    expect(threadPrLine(lifecycle({ checksSummary: { status: 'unknown', total: 2, failing: [], checks: [], updatedAt: 1 } }), false))
+      .toBe('#4181 · Open · No checks ran');
+  });
+
   it('writes the PR row from the lifecycle', () => {
     expect(threadPrLine(undefined, false)).toBeUndefined();
     expect(threadPrLine({ lifecycle: 'working', checks: 'unknown' }, false)).toBeUndefined();

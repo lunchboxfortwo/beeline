@@ -44,7 +44,7 @@ function checksText(lifecycle: CornerLifecycleView): string {
   const checks = summary?.checks ?? [];
   const total = summary?.total || checks.length;
   const status = summary?.status ?? lifecycle.checks;
-  if (total === 0 && status !== 'pending') return 'No checks ran';
+  if (total === 0 && status !== 'pending') return status === 'passing' ? 'No checks set up' : 'No checks ran';
   switch (status) {
     case 'failing': {
       const failed = checks.filter((check) => check.status === 'failed');
