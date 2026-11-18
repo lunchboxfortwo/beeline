@@ -155,7 +155,8 @@ it.each(['helper', 'missing', 'on_demand', 'webhook'] as const)(
       await runtime.utterance(human, "Grok Bot what's your name?");
       const liveDelivery = delivery === 'helper' || delivery === 'webhook';
       expect(answer).toHaveBeenCalledTimes(liveDelivery ? 1 : 2);
-      if (liveDelivery) expect(synthesize).not.toHaveBeenCalled();
+      if (liveDelivery) expect(synthesize.mock.calls.map(call => call[0]))
+        .toEqual(['Checking. I’ll tell you when I have it.']);
       else {
         expect(synthesize).toHaveBeenCalledWith('I am here. What do you need?', expect.any(String), expect.any(AbortSignal));
         expect(rtc.audio.captureFrame).toHaveBeenCalled();

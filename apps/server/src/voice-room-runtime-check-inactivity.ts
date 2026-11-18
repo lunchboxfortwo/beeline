@@ -362,8 +362,10 @@ async function voiceAgentBusy(ctx: VoiceRoomRuntime, agentId: string): Promise<b
       };
       if (generation.signal.aborted || ctx.closed) return;
       request.state = 'replying';
-      const answer = cleanVoiceReply(reply.text, agent.name);
-      answerToRecord = {agentId: agent.id, text: answer};
+      const modelAnswer = cleanVoiceReply(reply.text, agent.name);
+      // The handoff filler is call audio only; only model words enter chat.
+      const answer = modelAnswer || (reply.order ? "Checking. I’ll tell you when I have it." : '');
+      if (modelAnswer) answerToRecord = {agentId: agent.id, text: modelAnswer};
       // A different speaker may have taken the audio lane during classification.
       if (ctx.humanSpeaking.has(human) || controller.signal.aborted || ctx.closed || (ctx.speaking && !ctx.speaking.signal.aborted) || playbackVersion !== ctx.playbackVersion) {
         // Another speaker can suppress acknowledgement audio, never accepted work.

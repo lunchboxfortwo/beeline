@@ -418,17 +418,19 @@ it.each([false, true])('Reproduction SPOKEN-1: records search speech before a fi
 });
 
 
-it('lookup goes to order: dispatches without a canned line when the brain streams only whitespace', async () => {
+it.each([false, true])('lookup goes to order: speaks filler without storing it (streamed whitespace: %s)', async streamed => {
   const { service, speech } = conversationService(1);
   service.config.brain.answer.mockImplementation(async (_agent, _history, onText) => {
-    onText(' '); return { text: '', order: true };
+    if (streamed) onText(' ');
+    return { text: '', order: true };
   });
   const runtime = await VoiceRoomRuntime.connect(service as unknown as VoiceService, 'call', 'room');
   try {
     await runtime.utterance('human', 'Ruby build a widget');
     expect(service.dispatch).toHaveBeenCalledOnce();
     expect(service.recordAnswer).not.toHaveBeenCalled();
-    expect(speech.synthesize).not.toHaveBeenCalled();
+    expect(speech.synthesize.mock.calls.map(call => call[0]).join(' ')).toBe('Checking. I’ll tell you when I have it.');
+    expect(service.dispatch.mock.invocationCallOrder[0]).toBeLessThan(state.audio.captureFrame.mock.invocationCallOrder[0]!);
   } finally { await runtime.close(); }
 });
 
@@ -496,6 +498,8 @@ it('Reproduction voice-lost-1 stand-in: mixed request dispatch and failure follo
     const runtime = await voice.ensureRuntime(call);
     state.room.remoteParticipants.set(human, { identity: human });
     await runtime!.utterance(human, request);
+    expect(synthesized.join(' ')).toBe('Checking. I’ll tell you when I have it.');
+    expect((await db.query(`SELECT id FROM messages WHERE room_id=$1 AND author_id=$2`, [room, agent])).rowCount).toBe(0);
     const command = (await db.query<{ id: string; source_message_id: string }>(`SELECT id,source_message_id FROM agent_commands WHERE room_id=$1`, [room])).rows;
     expect(command).toHaveLength(1);
     expect((await db.query<{text:string}>(`SELECT text FROM messages WHERE id=$1`, [command[0]!.source_message_id])).rows[0]!.text).toBe('@ruby ' + request);
@@ -525,8 +529,8 @@ it('Reproduction voice-lost-1 stand-in: mixed request dispatch and failure follo
     const spoken = (await phone.readRoom(room, human))!.messages.filter(message => message.author.pubkey === agent);
     expect(spoken.slice(-2).map(message => message.text)).toEqual(['Let me look.', 'The answer is here.']);
     await vi.waitFor(async () => expect((await db.query(`SELECT 1 FROM voice_turn_timings
-      WHERE call_id=$1 AND stage='first_voiced_audio_published'`, [joined.call.id])).rowCount).toBe(2));
-    console.log('SPOKEN-1: silent order → normal completion and search announcement → answer; persisted phone reads preserve every utterance once, in order.');
+      WHERE call_id=$1 AND stage='first_voiced_audio_published'`, [joined.call.id])).rowCount).toBe(3));
+    console.log('SPOKEN-1: speech-only filler → normal completion and search announcement → answer; persisted phone reads exclude the filler and preserve model replies once, in order.');
   } finally { await voice.close(); await db.close(); }
 }, 30_000);
 
