@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { expect, it, vi } from 'vitest';
-import { announceAgentLifecycle, recordAgentEvidence } from './connection-presence.js';
+import { announceAgentLifecycle } from './connection-presence.js';
 import { migrate, PostgresDatabase } from './database.js';
 import { LiveHub } from './live.js';
 
@@ -9,7 +9,7 @@ const url = process.env.BEELINE_COMMAND_TEST_POSTGRES_URL;
 if (url && !['127.0.0.1', 'localhost', '[::1]'].includes(new URL(url).hostname))
   throw new Error('Presence deadlock proof requires isolated loopback PostgreSQL');
 
-it.skipIf(!url)('SERVER-31: evidence and a lifecycle update commit without a presence-row / owner-projection deadlock', async () => {
+it.skipIf(!url)('SERVER-31: two lifecycle updates commit without a presence-row / owner-projection deadlock', async () => {
   const admin = new Pool({ connectionString: url, max: 1 });
   const name = `presence_${randomUUID().replaceAll('-', '')}`;
   const isolated = new URL(url!); isolated.pathname = `/${name}`;
@@ -17,7 +17,7 @@ it.skipIf(!url)('SERVER-31: evidence and a lifecycle update commit without a pre
   const first = new PostgresDatabase('', 1, { pool: new Pool({ ...config, application_name: 'presence-announcer-proof' }) });
   const second = new PostgresDatabase('', 1, { pool: new Pool(config) });
   const observerPool = new Pool(config);
-  let announcement: Promise<void> | undefined, evidence: Promise<void> | undefined;
+  let announcement: Promise<void> | undefined, secondAnnouncement: Promise<void> | undefined;
   await admin.query(`CREATE DATABASE ${name}`);
   const observer = await observerPool.connect();
   try {
@@ -53,13 +53,13 @@ it.skipIf(!url)('SERVER-31: evidence and a lifecycle update commit without a pre
     await vi.waitFor(async () => {
       expect((await observer.query('SELECT pg_blocking_pids($1) blockers', [firstPid])).rows[0].blockers).toContain(observerPid);
     });
-    evidence = recordAgentEvidence(second,live,room,agent);
-    void evidence.catch(() => {});
+    secondAnnouncement = announceAgentLifecycle(second,live,room,agent,{ lifecycleId: 'boot-2' });
+    void secondAnnouncement.catch(() => {});
     await vi.waitFor(async () => {
       expect((await observer.query('SELECT pg_blocking_pids($1) blockers', [secondPid])).rows[0].blockers).toContain(firstPid);
     });
     await observer.query('SELECT pg_advisory_unlock(730031,1)');
-    const results = await Promise.allSettled([announcement,evidence]);
+    const results = await Promise.allSettled([announcement,secondAnnouncement]);
     for (const result of results) if (result.status === 'rejected') console.error('SERVER-31 lock cycle', result.reason);
     expect(results.map(result => result.status)).toEqual(['fulfilled','fulfilled']);
     const rows = (await first.query<{ body: { observedAt: number } }>(
@@ -69,7 +69,7 @@ it.skipIf(!url)('SERVER-31: evidence and a lifecycle update commit without a pre
     expect(rows[0]!.body.observedAt).toBeGreaterThan(before.observedAt);
   } finally {
     await observer.query('SELECT pg_advisory_unlock_all()');
-    await Promise.allSettled([announcement,evidence]);
+    await Promise.allSettled([announcement,secondAnnouncement]);
     await Promise.all([first.close(),second.close()]);
     observer.release(); await observerPool.end();
     await admin.query(`DROP DATABASE ${name}`); await admin.end();

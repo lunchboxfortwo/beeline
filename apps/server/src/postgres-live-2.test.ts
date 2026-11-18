@@ -680,7 +680,7 @@ const scope1 = fixtureScope1();
     const publishA = vi.spyOn(liveA, 'publish');
     const publishB = vi.spyOn(liveB, 'publish');
     const evidence = new ConnectionPresence(scope1.database, new LiveHub());
-    await evidence.evidence(roomIds[0], agent);
+    await evidence.announce(roomIds[0], agent, { lifecycleId: 'boot-2' });
 
     await eventually(
       () =>

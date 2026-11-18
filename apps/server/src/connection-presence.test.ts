@@ -3,7 +3,7 @@ import {DaemonService} from './daemon-service.js';
 import {PhoneService} from './phone-service.js';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {migratedDatabase,type PgliteDatabase} from './test-support.js';
-import {ConnectionPresence,recordAgentEvidence} from './connection-presence.js';
+import {ConnectionPresence} from './connection-presence.js';
 import { authorizeCommandOutput, createAgentCommand } from './agent-command.js';
 import {LiveHub} from './live.js';
 import {interruptAgentTurns} from './agent-turn-end.js';
@@ -81,23 +81,6 @@ it('retains one aggregate server lease while actual connections are held',async(
   expect((await database.query('SELECT 1 FROM live_server_instances WHERE instance_id=$1',[presence.instanceId])).rowCount).toBe(1);
   release();release();await presence.stop();
 });
-it('actual authenticated evidence advances the current lifecycle without a timer',async()=>{
-  await presence.announce(ROOM,AGENT,{lifecycleId:'boot',releaseVersion:'v1.0.0'});const before=await body();
-  await presence.evidence(ROOM,AGENT);await presence.evidence(ROOM,AGENT);
-  expect(await body()).toMatchObject({lifecycleId:'boot',releaseVersion:'v1.0.0',status:'online'});
-  expect(Number((await body())?.observedAt)).toBeGreaterThan(Number(before?.observedAt));
-});
-it('a shortened room id still advances online status',async()=>{
-  await presence.announce(ROOM,AGENT,{lifecycleId:'boot'});
-  await presence.evidence(ROOM.slice(0,8),AGENT);
-  expect(await body()).toMatchObject({status:'online',lifecycleId:'boot'});
-});
-it('evidence merges with a concurrent lifecycle announcement',async()=>{
-  await presence.announce(ROOM,AGENT,{lifecycleId:'boot-1'});
-  await Promise.all([presence.announce(ROOM,AGENT,{lifecycleId:'boot-2',releaseVersion:'v2.0.0'}),recordAgentEvidence(database,live,ROOM,AGENT)]);
-  expect(await body()).toMatchObject({lifecycleId:'boot-2',releaseVersion:'v2.0.0',status:'online'});
-});
-
 // Reproduction turn-write-reject: a stale server lease no longer refuses a claimed turn's output.
 it('accepts a claimed turn’s output while its server instance lease is stale',async()=>{
   const {command}=await claimed();

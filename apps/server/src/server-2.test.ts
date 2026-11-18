@@ -59,7 +59,7 @@ const scope2 = fixtureScope2();
     } finally { report.mockRestore(); }
   });
 });
-describe('daemon operation presence evidence', () => {
+describe('daemon HTTP operations', () => {
 const scope3 = fixtureScope3();
 
 
@@ -100,13 +100,13 @@ const scope3 = fixtureScope3();
   });
 
 
-  it('does not hold a command read behind a blocked durable evidence refresh', async () => {
-    let release!: () => void;
-    const blocked = new Promise<void>((resolve) => (release = resolve));
-    const evidence = vi.fn(() => blocked);
-    const execute = vi.fn().mockResolvedValue({ commandProtocol: 1, commands: [] });
+  it.each(['getAgentCommands', 'getRoomGitHubToken', 'authorizeResourceCall'] as const)(
+    '%s does not rewrite presence for an HTTP request', async name => {
+    const evidence = vi.fn(async () => {});
+    const query = vi.fn();
+    const execute = vi.fn().mockResolvedValue({});
     const server = createBeelineServer({
-      database: { query: vi.fn(), transaction: vi.fn() },
+      database: { query, transaction: vi.fn() },
       auth: {
         authenticatePhone: vi.fn().mockResolvedValue(null),
         authenticateDaemon: vi.fn().mockResolvedValue('agent'),
@@ -118,22 +118,20 @@ const scope3 = fixtureScope3();
       mediaMaximumBytes: 1,
     });
     scope3.servers.push(server);
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     const port = (server.address() as AddressInfo).port;
-
-    const response = await phoneFetch(`http://127.0.0.1:${port}/v1/daemon/operations/getAgentCommands`, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer bdt_${'t'.repeat(43)}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({ roomId: 'room' }),
-      signal: AbortSignal.timeout(1_000),
-    });
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ commandProtocol: 1, commands: [] });
-    expect(evidence).toHaveBeenCalledWith('room', 'agent');
-    release();
+    for (let call = 0; call < 3; call++) {
+      const response = await phoneFetch(`http://127.0.0.1:${port}/v1/daemon/operations/${name}`, {
+        method: 'POST',
+        headers: { authorization: `Bearer bdt_${'t'.repeat(43)}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ roomId: 'room' }),
+      });
+      expect(response.status).toBe(200);
+      await response.json();
+    }
+    expect(execute).toHaveBeenCalledTimes(3);
+    expect(evidence).not.toHaveBeenCalled();
+    expect(query).not.toHaveBeenCalled();
   });
 });
 describe('phone committed-row live delivery', () => {

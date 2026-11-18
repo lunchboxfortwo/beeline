@@ -28,12 +28,11 @@ interface HeldConnection {
   connectionId: string;
   instanceId: string;
 }
-/** Presence changes with authenticated traffic and connection lifecycle events. */
+/** Presence changes with connection lifecycle events. */
 export class ConnectionPresence {
   readonly instanceId: string;
   private stopped = false;
   private leaseWrite?: Promise<void>;
-  private readonly evidenceWrites = new Map<string, Promise<void>>();
   constructor(private readonly database: SqlDatabase, private readonly live: LiveHub,
     lease: { instanceId?: string } = {}) {
     this.instanceId = lease.instanceId ?? randomUUID();
@@ -66,19 +65,10 @@ export class ConnectionPresence {
     if (!this.stopped && metadata.lifecycleId)
       await announceAgentLifecycle(this.database, this.live, roomId, agentId, { ...metadata, lifecycleId: metadata.lifecycleId });
   }
-  async evidence(roomId: string | undefined, agentId: string): Promise<void> {
-    if (this.stopped) return;
-    await this.renewLease();
-    const running = this.evidenceWrites.get(agentId);
-    if (running) return running;
-    const work = recordAgentEvidence(this.database, this.live, roomId, agentId);
-    this.evidenceWrites.set(agentId, work);
-    try { await work; } finally { this.evidenceWrites.delete(agentId); }
-  }
   private readonly report = (error: unknown) => console.error('[presence] connection transition failed', error);
   async stop(): Promise<void> {
     this.stopped = true;
-    await Promise.all([this.leaseWrite, ...this.evidenceWrites.values()]);
+    await this.leaseWrite;
   }
 }
 
@@ -221,49 +211,6 @@ async function writeAgentAnnouncement(
   return {changed:Boolean(written.rowCount),previous:written.rows[0]?.previous??undefined};
 }
 
-export async function recordAgentEvidence(
-  database: SqlDatabase,
-  live: LiveHub,
-  roomId: string | undefined,
-  agentId: string,
-): Promise<void> {
-  const changed = await database.query(
-    // Lock the presence row before INSERT's owner-projection lock, matching
-    // lifecycle UPDATE's row-then-projection order.
-    `WITH previous AS MATERIALIZED (
-       SELECT output.room_id,output.body FROM live_outputs output
-       WHERE output.agent_id=$1 AND output.kind='presence'
-       ORDER BY output.updated_at DESC LIMIT 1 FOR UPDATE
-     ), target AS MATERIALIZED (
-       SELECT membership.room_id,previous.room_id previous_room,previous.body
-       FROM (SELECT 1) singleton LEFT JOIN previous ON true
-       JOIN room_access membership
-         ON membership.room_id=COALESCE($2::uuid,previous.room_id)
-        AND membership.identity_id=$1 AND membership.removed_at IS NULL
-     ), written AS (
-       INSERT INTO live_outputs(room_id,agent_id,turn_id,kind,body,updated_at)
-       SELECT COALESCE(previous_room,room_id),$1,'presence','presence',
-         COALESCE(body,'{}'::jsonb) || jsonb_build_object(
-           'status','online',
-           'observedAt',GREATEST($3::bigint,COALESCE((body->>'observedAt')::bigint,0)+1),
-           'evidenceNonce',$4::text
-         ),clock_timestamp()
-       FROM target
-       ON CONFLICT(room_id,agent_id,turn_id,kind) DO UPDATE SET
-         body=live_outputs.body || jsonb_build_object(
-           'status','online',
-           'observedAt',GREATEST($3::bigint,COALESCE((live_outputs.body->>'observedAt')::bigint,0)+1),
-           'evidenceNonce',$4::text
-         ),updated_at=EXCLUDED.updated_at
-       RETURNING 1
-     ) SELECT 1 FROM written`,
-    [agentId, presenceRoomId(roomId), Math.floor(Date.now() / 1000), randomUUID()],
-  );
-  // One canonical presence row produces one PostgreSQL notification. Local
-  // subscribers still receive the same membership-authorized projection.
-  if (changed.rowCount) await broadcastAgentPresence(database, live, agentId);
-}
-
 async function broadcastAgentPresence(
   database: SqlDatabase,
   live: LiveHub,
@@ -271,7 +218,7 @@ async function broadcastAgentPresence(
 ): Promise<void> {
   // Production arms listener-owned fanout so the NOTIFY path alone expands one
   // durable row across memberships. A second writer-local query would duplicate
-  // that work on every evidence write.
+  // that work on every presence change.
   if (live.listenerOwnsPresenceFanout()) return;
   const result = await database.query<{
     room_id: string;

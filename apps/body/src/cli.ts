@@ -203,7 +203,7 @@ async function main(): Promise<void> {
     process.stdout.once('error', (error: NodeJS.ErrnoException) => {
       if (error.code !== 'EPIPE') throw error;
     });
-    process.stdout.write(`${credential.token}\n`);
+    process.stdout.write(`${args.includes('--json') ? JSON.stringify(credential) : credential.token}\n`);
     return;
   }
 

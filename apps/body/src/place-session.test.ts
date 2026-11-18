@@ -93,7 +93,7 @@ it('rewrites pruned-release git/gh launchers before reusing a retained thread', 
     }
     const gh = join(home, 'beeline-github-bin/gh');
     const env = { ...process.env, HOME: root, XDG_CONFIG_HOME: join(root, 'config'), XDG_STATE_HOME: join(root, 'state') };
-    await expect(execFileAsync(process.execPath, [gh, '--version'], { env })).rejects.toMatchObject({
+    await expect(execFileAsync(process.execPath, [gh, 'auth', 'token'], { env })).rejects.toMatchObject({
       stderr: expect.stringContaining('MODULE_NOT_FOUND'),
     });
     await f.session.start();
@@ -106,6 +106,7 @@ it('rewrites pruned-release git/gh launchers before reusing a retained thread', 
     expect(await readFile(gh, 'utf8')).toContain('"command":"/usr/bin/gh"');
     const expected = await execFileAsync('/usr/bin/gh', ['--version'], { env });
     expect((await execFileAsync(process.execPath, [gh, '--version'], { env })).stdout).toBe(expected.stdout);
+    expect((await execFileAsync(process.execPath, [gh, 'auth', 'token'], { env })).stdout.trim()).toBe('fixture-token');
   } finally {
     process.argv[1] = originalEntrypoint;
     await f.session.dispose();

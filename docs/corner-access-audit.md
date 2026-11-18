@@ -20,7 +20,7 @@ The inventory below includes every production query call site referencing physic
 | [background.ts](../apps/server/src/background.ts) | `runUnthrottled` | — |
 | [commander.ts](../apps/server/src/commander.ts) | `commandAddress`, `reportToCommander`, `sendOrder`, `stopCommandedTurn` | — |
 | [computer-session.ts](../apps/server/src/computer-session.ts) | `mayViewComputer` | — |
-| [connection-presence.ts](../apps/server/src/connection-presence.ts) | `broadcastAgentPresence`, `failDelivery`, `observeOnce`, `recordAgentEvidence`, `writeAgentAnnouncement` | — |
+| [connection-presence.ts](../apps/server/src/connection-presence.ts) | `broadcastAgentPresence`, `failDelivery`, `observeOnce`, `writeAgentAnnouncement` | — |
 | [corner-brief.ts](../apps/server/src/corner-brief.ts) | `humanRoomMember`, `laterBriefApproval`, `resolveCornerBriefApproval` | — |
 | [corner-follow.ts](../apps/server/src/corner-follow.ts) | `backfillCornerFollows` | — |
 | [corner-holds.ts](../apps/server/src/corner-holds.ts) | `setCornerHold` | — |

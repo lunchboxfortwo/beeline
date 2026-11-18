@@ -323,7 +323,6 @@ export async function routeAuthenticated(request: IncomingMessage, response: Ser
       await refuseDaemon(request, response, options);
       return;
     }
-    void options.connectionPresence?.evidence(undefined, agentId);
     if (!options.objectService) {
       json(response, 503, { error: 'object_storage_unavailable' });
       return;
@@ -357,7 +356,6 @@ export async function routeAuthenticated(request: IncomingMessage, response: Ser
       await refuseDaemon(request, response, options);
       return;
     }
-    void options.connectionPresence?.evidence(undefined, agentId);
     if (!options.objectService) {
       json(response, 503, { error: 'object_storage_unavailable' });
       return;
@@ -408,7 +406,6 @@ export async function routeAuthenticated(request: IncomingMessage, response: Ser
       await refuseDaemon(request, response, options);
       return;
     }
-    void options.connectionPresence?.evidence(undefined, agentId);
     json(response, 410, {
       error: 'media_store_retired',
       detail:
@@ -439,13 +436,6 @@ export async function routeAuthenticated(request: IncomingMessage, response: Ser
       return;
     }
     const input = await body(request);
-    const evidenceRoom =
-      typeof input.roomId === 'string'
-        ? input.roomId
-        : typeof input.cornerId === 'string'
-          ? input.cornerId
-          : undefined;
-    void options.connectionPresence?.evidence(evidenceRoom, agentId);
     const result = await options.daemon.execute(name as never, input as never, agentId);
     json(response, 200, result);
     return;

@@ -17,11 +17,11 @@ export interface CornerGitHubLaunchers {
 }
 
 /**
- * Install session-local git/gh launchers which refresh credentials for remote
- * commands.
+ * Install session-local git/gh launchers which retain issued repository
+ * credentials until near expiry; writes check current thread authority.
  *
  * `gh` is always installed. When a host `gh` exists the launcher delegates to
- * it with the refreshed token; when it does not, the launcher answers
+ * it with the issued token; when it does not, the launcher answers
  * `gh pr create`, `gh pr view`, and a title or body `gh pr edit` directly over
  * the GitHub REST API with the same token. Host `gh` still asks GraphQL for
  * retired classic Projects on every edit, so those edits never go to the host
@@ -62,21 +62,18 @@ export async function installCornerGitHubWrappers(input: {
     featureBranch: input.featureBranch,
     targetBranch: input.targetBranch,
     gitCommand: input.gitBinary,
+    credentialPath: resolve(bin, 'repository-credential.json'),
     originUrl: input.originUrl ?? '',
   };
   await writeLauncher(resolve(bin, 'git'), {
     ...common,
     command: input.gitBinary,
     launcher: 'git',
-    restFallback: false,
   });
   await writeLauncher(resolve(bin, 'gh'), {
     ...common,
     command: input.ghBinary ?? '',
     launcher: 'gh',
-    // A host gh can still be unauthenticated and reject the app token; the
-    // REST path is the guarantee that a PR can always be opened.
-    restFallback: true,
   });
   return {
     env: {
@@ -239,12 +236,9 @@ export function cornerGitHubCommandRefusal(
 async function writeLauncher(path: string, config: Record<string, string | boolean>): Promise<void> {
   const source = `#!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { readFileSync, writeFileSync } from 'node:fs';
 const config = ${JSON.stringify(config)};
 const cornerGitHubCommandRefusal = ${cornerGitHubCommandRefusal.toString()};
-const authFailure = /(?:authentication failed|bad credentials|could not read username|not logged into any github hosts|http(?:\\/\\d(?:\\.\\d)?)? 40[13]|status (?:code )?40[13])/i;
 const argv = process.argv.slice(2);
 const gitContext = (() => {
   const out = [];
@@ -320,7 +314,7 @@ let threadWrite = false;
 const refusal = cornerGitHubCommandRefusal(config.launcher, argv, config.featureBranch, config.targetBranch, resolvePushBranch, pushesOrigin, () => { threadWrite = true; });
 if (refusal) { process.stderr.write(refusal + '\\n'); process.exitCode = 1; }
 function needsToken(args) {
-  if (config.launcher === 'gh') return true;
+  if (config.launcher === 'gh') return !args.some(arg => arg === '--help' || arg === '--version');
   const optionsWithValue = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--config-env']);
   let index = 0;
   while (index < args.length && args[index].startsWith('-')) {
@@ -338,39 +332,49 @@ function needsToken(args) {
     'status', 'switch', 'symbolic-ref', 'tag', 'update-index', 'update-ref',
     'verify-commit', 'verify-tag', 'worktree',
   ]);
+  if (args[index] === 'remote' && (args[index + 1] === 'get-url' ||
+      args.slice(index + 1).every(arg => arg === '-v' || arg === '--verbose'))) return false;
+  if (args[index] === 'ls-remote' && args.includes('--get-url')) return false;
   return !local.has(args[index]);
 }
 function token() {
-  const result = spawnSync(config.node, [config.cli, 'corner-read-token', '--config', config.config, '--room', threadWrite ? config.corner : config.room,
+  // The credential belongs to this repository session until GitHub's expiry.
+  // Writes still ask the server for current implementer authority every time.
+  const remote = git(['remote', 'get-url', 'origin'], { encoding: 'utf8' });
+  const scope = JSON.stringify([config.room, config.config, config.cli, remote.status === 0 ? remote.stdout.trim() : '']);
+  if (!threadWrite) {
+    try {
+      const issued = JSON.parse(readFileSync(config.credentialPath, 'utf8'));
+      if (issued.scope === scope && typeof issued.token === 'string' && issued.token &&
+          Number.isFinite(issued.expiresAt) && issued.expiresAt > Date.now() + 60_000)
+        return issued.token;
+    } catch {}
+  }
+  const result = spawnSync(config.node, [config.cli, 'corner-read-token', '--json', '--config', config.config, '--room', threadWrite ? config.corner : config.room,
     ...(threadWrite ? ['--write'] : [])], { encoding: 'utf8' });
-  if (result.status === 0 && result.stdout.trim()) return result.stdout.trim();
+  if (result.status === 0 && result.stdout.trim()) {
+    const output = result.stdout.trim();
+    let issued;
+    try { issued = JSON.parse(output); } catch {
+      // A running session may still use an older installed CLI through its anchor.
+      return output;
+    }
+    if (typeof issued.token === 'string' && issued.token) {
+      if (Number.isFinite(issued.expiresAt))
+        writeFileSync(config.credentialPath, JSON.stringify({ scope, token: issued.token, expiresAt: issued.expiresAt }), { mode: 0o600 });
+      return issued.token;
+    }
+  }
   process.stderr.write(result.stderr || 'Beeline could not refresh the repository credential.\\n');
   process.exitCode = result.status || 1;
   return undefined;
 }
 function runCommand(command, args, value, quiet) {
   const env = { ...process.env, GH_TOKEN: value, GITHUB_TOKEN: value, GIT_TERMINAL_PROMPT: '0' };
-  const child = spawn(command, config.launcher === 'gh' ? hostArguments(args) : args, { env, stdio: ['inherit', quiet ? 'ignore' : 'pipe', quiet ? 'ignore' : 'pipe'] });
-  if (quiet) {
-    return new Promise((resolve, reject) => {
-      child.once('error', reject);
-      child.once('close', (status) => resolve({ status, authenticationFailed: false }));
-    });
-  }
-  let authenticationFailed = false;
-  // Keep only enough diagnostic overlap to recognize an auth failure across chunks.
-  for (const [source, destination] of [[child.stdout, process.stdout], [child.stderr, process.stderr]]) {
-    let tail = '';
-    source.on('data', (chunk) => {
-      const diagnostic = tail + chunk.toString('utf8');
-      authenticationFailed ||= authFailure.test(diagnostic);
-      tail = diagnostic.slice(-1024);
-    });
-    source.pipe(destination, { end: false });
-  }
+  const child = spawn(command, args, { env, stdio: quiet ? 'ignore' : 'inherit' });
   return new Promise((resolve, reject) => {
     child.once('error', reject);
-    child.once('close', (status) => resolve({ status, authenticationFailed }));
+    child.once('close', (status) => resolve({ status }));
   });
 }
 function isPushCommand(args) {
@@ -461,56 +465,15 @@ async function github(pathname, options, value) {
   }
   return { ok: true, status: response.status, data };
 }
-let stdinBody;
-let stdinFile;
-let stdinDirectory;
-function cleanupStandardInput() {
-  if (stdinDirectory !== undefined) rmSync(stdinDirectory, { recursive: true, force: true });
-}
-process.once('exit', cleanupStandardInput);
-for (const [signal, status] of [['SIGINT', 130], ['SIGTERM', 143]]) {
-  process.once(signal, () => process.exit(status));
-}
-function readStandardInput() {
-  // gh uses "-" as the body file to mean standard input. Read it once: a host
-  // process spawned with inherited stdin would otherwise consume the pipe, and
-  // the REST fallback would then see an empty body.
-  return readFileSync(0, 'utf8');
-}
 function readBodyFile(path) {
-  if (path !== '-') return readFileSync(path, 'utf8');
-  if (stdinBody === undefined) stdinBody = readStandardInput();
-  return stdinBody;
-}
-function hostArguments(args) {
-  const next = args.slice();
-  for (let index = 0; index < next.length; index += 1) {
-    const arg = next[index];
-    const separate = arg === '--body-file' || arg === '-F';
-    const inline = arg.startsWith('--body-file=');
-    if (!separate && !inline) continue;
-    const value = separate ? next[index + 1] : arg.slice('--body-file='.length);
-    if (value !== '-') continue;
-    if (stdinBody === undefined) stdinBody = readStandardInput();
-    if (stdinFile === undefined) {
-      stdinDirectory = mkdtempSync(join(tmpdir(), 'beeline-gh-body-'));
-      stdinFile = join(stdinDirectory, 'body');
-      writeFileSync(stdinFile, stdinBody, { mode: 0o600, flag: 'wx' });
-    }
-    if (inline) next[index] = '--body-file=' + stdinFile;
-    else {
-      next[index + 1] = stdinFile;
-      index += 1;
-    }
-  }
-  return next;
+  return readFileSync(path === '-' ? 0 : path, 'utf8');
 }
 async function runRest(args, value) {
   const slug = repoSlug(args);
   const action = args[0] === 'pr' ? args[1] : undefined;
   if (!slug) {
     process.stderr.write('Beeline: no GitHub repository resolved for gh ' + args.slice(0, 2).join(' ') + '; pass --repo owner/repo.\\n');
-    return { status: 1, authenticationFailed: false };
+    return { status: 1 };
   }
   if (action === 'create') {
     let title = flagValue(args, ['--title', '-t']);
@@ -519,7 +482,7 @@ async function runRest(args, value) {
     if (bodyFile !== undefined && body === undefined) {
       try { body = readBodyFile(bodyFile); } catch {
         process.stderr.write('gh: could not read body file ' + bodyFile + '\\n');
-        return { status: 1, authenticationFailed: false };
+        return { status: 1 };
       }
     }
     if (hasFlag(args, ['--fill', '-f'])) {
@@ -528,7 +491,7 @@ async function runRest(args, value) {
     }
     if (title === undefined || title === '') {
       process.stderr.write('gh: a title is required (--title or --fill)\\n');
-      return { status: 1, authenticationFailed: false };
+      return { status: 1 };
     }
     const head = flagValue(args, ['--head', '-H']) || config.featureBranch;
     const base = flagValue(args, ['--base', '-B']) || config.targetBranch;
@@ -537,9 +500,9 @@ async function runRest(args, value) {
       method: 'POST',
       body: JSON.stringify({ title, body: body || '', head, base, draft }),
     }, value);
-    if (!created.ok) return { status: 1, authenticationFailed: created.status === 401 || created.status === 403 };
+    if (!created.ok) return { status: 1 };
     process.stdout.write((created.data.html_url || '') + '\\n');
-    return { status: 0, authenticationFailed: false };
+    return { status: 0 };
   }
   if (action === 'view') {
     const fields = (flagValue(args, ['--json']) || '').split(',').map((field) => field.trim()).filter(Boolean);
@@ -548,16 +511,16 @@ async function runRest(args, value) {
     if (number === undefined) {
       const owner = slug.split('/')[0];
       const listed = await github('/repos/' + slug + '/pulls?state=all&head=' + encodeURIComponent(owner + ':' + config.featureBranch), {}, value);
-      if (!listed.ok) return { status: 1, authenticationFailed: listed.status === 401 || listed.status === 403 };
+      if (!listed.ok) return { status: 1 };
       const first = Array.isArray(listed.data) ? listed.data[0] : undefined;
       if (!first) {
         process.stderr.write('gh: no pull request found for branch ' + config.featureBranch + '\\n');
-        return { status: 1, authenticationFailed: false };
+        return { status: 1 };
       }
       number = first.number;
     }
     const viewed = await github('/repos/' + slug + '/pulls/' + number, {}, value);
-    if (!viewed.ok) return { status: 1, authenticationFailed: viewed.status === 401 || viewed.status === 403 };
+    if (!viewed.ok) return { status: 1 };
     const pr = viewed.data;
     if (fields.length) {
       let files = [];
@@ -588,10 +551,10 @@ async function runRest(args, value) {
       const output = {};
       for (const field of fields) if (Object.hasOwn(all, field)) output[field] = all[field];
       process.stdout.write(JSON.stringify(output) + '\\n');
-      return { status: 0, authenticationFailed: false };
+      return { status: 0 };
     }
     process.stdout.write((pr.html_url || '') + '\\n');
-    return { status: 0, authenticationFailed: false };
+    return { status: 0 };
   }
   if (action === 'edit') {
     let body = flagValue(args, ['--body', '-b']);
@@ -600,23 +563,23 @@ async function runRest(args, value) {
     if (bodyFile !== undefined && body === undefined) {
       try { body = readBodyFile(bodyFile); } catch {
         process.stderr.write('gh: could not read body file ' + bodyFile + '\\n');
-        return { status: 1, authenticationFailed: false };
+        return { status: 1 };
       }
     }
     if (title === undefined && body === undefined) {
       process.stderr.write('gh: a title or body is required (--title, --body, or --body-file)\\n');
-      return { status: 1, authenticationFailed: false };
+      return { status: 1 };
     }
     let number = editPositionals(args).map((arg) => arg.match(/^([0-9]+)$/)).find(Boolean);
     number = number ? Number(number[1]) : undefined;
     if (number === undefined) {
       const owner = slug.split('/')[0];
       const listed = await github('/repos/' + slug + '/pulls?state=open&head=' + encodeURIComponent(owner + ':' + config.featureBranch), {}, value);
-      if (!listed.ok) return { status: 1, authenticationFailed: listed.status === 401 || listed.status === 403 };
+      if (!listed.ok) return { status: 1 };
       const first = Array.isArray(listed.data) ? listed.data[0] : undefined;
       if (!first) {
         process.stderr.write('gh: no pull request found for branch ' + config.featureBranch + '\\n');
-        return { status: 1, authenticationFailed: false };
+        return { status: 1 };
       }
       number = first.number;
     }
@@ -627,15 +590,12 @@ async function runRest(args, value) {
       method: 'PATCH',
       body: JSON.stringify(patch),
     }, value);
-    if (!updated.ok) return { status: 1, authenticationFailed: updated.status === 401 || updated.status === 403 };
+    if (!updated.ok) return { status: 1 };
     process.stdout.write((updated.data.html_url || '') + '\\n');
-    return { status: 0, authenticationFailed: false };
+    return { status: 0 };
   }
   process.stderr.write('Beeline: this host has no gh binary; only gh pr create, gh pr view, and gh pr edit of a title or body are provided through the app token. Use git for push and the Beeline read tool with facet checks.\\n');
-  return { status: 1, authenticationFailed: false };
-}
-function isRestCommand(args) {
-  return config.launcher === 'gh' && args[0] === 'pr' && (args[1] === 'create' || args[1] === 'view');
+  return { status: 1 };
 }
 function isPullRequestBodyEdit(args) {
   if (config.launcher !== 'gh' || args[0] !== 'pr' || args[1] !== 'edit') return false;
@@ -658,14 +618,6 @@ async function execute(args, value) {
   // Host gh fetches retired classic Projects on every edit, including a body
   // change, and GitHub rejects that query. Title and body edits skip it.
   if (isPullRequestBodyEdit(args)) return runRest(args, value);
-  if (isRestCommand(args)) {
-    if (config.command) {
-      const result = await runCommand(config.command, args, value).catch(() => ({ status: 1, authenticationFailed: true }));
-      // Only a missing or auth-refusing host gh earns the REST fallback; a real gh error stands.
-      if (result.status === 0 || !result.authenticationFailed) return result;
-    }
-    return runRest(args, value);
-  }
   if (!config.command) return runRest(args, value);
   return runCommand(config.command, args, value);
 }
