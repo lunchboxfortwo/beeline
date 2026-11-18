@@ -1,3 +1,4 @@
+import { personalGitHubConnection } from '../github-account-catalog.js';
 import { githubProviderKey } from '../providers/index.js';
 import { type PushLevel } from '@beeline/api-contract/phone';
 import type { PhoneContext } from './context.js';
@@ -10,13 +11,16 @@ import { unix } from './values.js';
     await phoneRequireRoomWorkspaceManager(ctx, input.roomId, viewerId);
     await ctx.database.transaction(async (db) => {
       if (input.githubInstallationId !== undefined) {
+        const personal = await personalGitHubConnection(db, viewerId);
+        const personalAccess = personal?.repositories?.some(repository =>
+          input.key === `github:${repository.id}` && input.name.toLowerCase() === repository.fullName.toLowerCase()) ?? false;
         const repositoryId = input.key.match(/^github:(\d+)$/)?.[1];
         const fullName = input.remote.match(/^git:\/\/github\.com\/([^/\s]+\/[^/\s]+)$/i)?.[1];
         if (!repositoryId || !fullName || input.name.toLowerCase() !== fullName.toLowerCase())
           throw new Error('GitHub repository binding is invalid');
         const access = await db.query(
-          `SELECT 1 FROM github_repositories r JOIN github_installations i USING(installation_id) WHERE r.repository_id=$1 AND r.installation_id=$2 AND lower(r.full_name)=lower($3) AND r.active AND i.owner_id=$4 AND i.status='active'`,
-          [repositoryId, input.githubInstallationId, fullName, viewerId],
+          `SELECT 1 FROM github_repositories r JOIN github_installations i USING(installation_id) WHERE r.repository_id=$1 AND r.installation_id=$2 AND lower(r.full_name)=lower($3) AND r.active AND (i.owner_id=$4 OR $5::boolean) AND i.status='active'`,
+          [repositoryId, input.githubInstallationId, fullName, viewerId, personalAccess],
         );
         if (!access.rowCount) throw new Error('GitHub repository access denied');
       }
@@ -179,7 +183,7 @@ import { unix } from './values.js';
     };
   }
 
-  export async function phoneListRepositories(ctx: PhoneContext, viewerId: string) {
+  export async function phoneListRepositories(ctx: PhoneContext, viewerId: string, includeAccount = false) {
     const installations = await ctx.database.query<{
       installation_id: string;
       account_id: string | null;
@@ -193,16 +197,22 @@ import { unix } from './values.js';
       `SELECT i.*,count(r.repository_id) FILTER (WHERE r.active)::text repository_count FROM github_installations i LEFT JOIN github_repositories r USING(installation_id) WHERE i.owner_id=$1 GROUP BY i.installation_id ORDER BY lower(i.account_login),i.installation_id`,
       [viewerId],
     );
+    const personal = includeAccount ? await personalGitHubConnection(ctx.database, viewerId) : undefined;
+    const catalog = personal?.repositories ?? undefined;
     const rows = await ctx.database.query<{
       repository_id: string;
       full_name: string;
       installation_id: string;
       default_branch: string;
       private: boolean | null;
+      owner_id: string;
     }>(
-      `SELECT r.* FROM github_repositories r JOIN github_installations i USING(installation_id) WHERE i.owner_id=$1 AND i.status='active' AND r.active`,
-      [viewerId],
+      `SELECT r.*,i.owner_id FROM github_repositories r JOIN github_installations i USING(installation_id)
+        WHERE (i.owner_id=$1 OR r.repository_id=ANY($2::bigint[])) AND i.status='active' AND r.active`,
+      [viewerId, catalog?.map(repository => repository.id) ?? []],
     );
+    const covered = new Map(rows.rows.map(row => [Number(row.repository_id), row]));
+    const accountIds = new Set(catalog?.map(repository => repository.id));
     return {
       installed: installations.rows.some((row) => row.status === 'active'),
       installations: installations.rows.map((row) => ({
@@ -223,15 +233,18 @@ import { unix } from './values.js';
             ? `https://github.com/organizations/${encodeURIComponent(row.account_login)}/settings/installations/${row.installation_id}`
             : `https://github.com/settings/installations/${row.installation_id}`,
       })),
-      repositories: rows.rows.map((row) => ({
-        id: Number(row.repository_id),
-        fullName: row.full_name,
-        installationId: Number(row.installation_id),
-        defaultBranch: row.default_branch,
-        // Rows stored before GitHub's flag was recorded read as private until
-        // the next installation refresh backfills it.
-        private: row.private !== false,
-      })),
+      repositories: [...new Map([
+        ...(catalog ?? []).map(repository => [repository.id, { ...repository,
+          ...(covered.get(repository.id)?.full_name.toLowerCase() === repository.fullName.toLowerCase()
+            ? { installationId: Number(covered.get(repository.id)!.installation_id) } : {}),
+        }] as const),
+        // Keep existing App-only choices too. Discovery must not remove a
+        // repository the viewer can already link through an owned installation.
+        ...rows.rows.filter(row => row.owner_id === viewerId && !accountIds.has(Number(row.repository_id)))
+          .map(row => [Number(row.repository_id), { id: Number(row.repository_id), fullName: row.full_name,
+            installationId: Number(row.installation_id), defaultBranch: row.default_branch,
+            private: row.private !== false }] as const),
+      ]).values()],
     };
   }
 

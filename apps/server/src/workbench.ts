@@ -200,7 +200,8 @@ export async function applyVaultList(
     state: entry.state,
     metadata: { fieldNames: entry.fieldNames, vaultCreatedAt: entry.createdAt,
       loginHosts: entry.loginHosts, faviconDomain: entry.faviconDomain, keyName: entry.keyName,
-      credentialKind: entry.credentialKind, expiresAt: entry.expiresAt },
+      credentialKind: entry.credentialKind, expiresAt: entry.expiresAt,
+      ...(entry.githubRepositories ? { githubRepositories: entry.githubRepositories } : {}) },
   }])).values()];
   const result=await database.query<{applied:boolean}>(
     `WITH accepted AS (
@@ -217,7 +218,11 @@ export async function applyVaultList(
         FROM reported r CROSS JOIN accepted WHERE $7::boolean
       ON CONFLICT (owner_identity_id,machine_id,reference) WHERE machine_id IS NOT NULL
         DO UPDATE SET service=EXCLUDED.service,label=EXCLUDED.label,hosts=EXCLUDED.hosts,
-          state=EXCLUDED.state,connection_metadata=EXCLUDED.connection_metadata,last_synced_at=now(),updated_at=now()
+          state=EXCLUDED.state,connection_metadata=
+            CASE WHEN workspace_connections.service IS NOT DISTINCT FROM EXCLUDED.service
+              AND EXCLUDED.state='active' AND NOT (EXCLUDED.connection_metadata ? 'githubRepositories')
+              THEN jsonb_strip_nulls(jsonb_build_object('githubRepositories',workspace_connections.connection_metadata->'githubRepositories'))
+              ELSE '{}'::jsonb END || EXCLUDED.connection_metadata,last_synced_at=now(),updated_at=now()
     ), removed AS (
       DELETE FROM workspace_connections cached WHERE owner_identity_id=$2 AND machine_id=$3
         AND NOT EXISTS(SELECT 1 FROM reported WHERE reference=cached.reference)

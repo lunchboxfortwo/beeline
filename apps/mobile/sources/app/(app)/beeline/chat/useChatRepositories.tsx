@@ -1,3 +1,4 @@
+import { installRepositoryCandidate } from '@/buzz/install-repository-candidate';
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import React, { useCallback } from 'react';
 import { Share } from 'react-native';
@@ -133,6 +134,10 @@ export function useChatRepositories([
       setRoomRepoBusy(true);
       setRoomRepoError(null);
       try {
+        const installed = await installRepositoryCandidate(input, `/beeline/chat/${encodeURIComponent(decodedId)}`);
+        if (!installed?.remote) return;
+        const remote = installed.remote;
+        input = installed;
         // A candidate without a connected installation may be a repository the
         // App never covered (an admin binding a repo whose OWNER has not
         // granted access). Probe the typed coverage state first: binding now
@@ -150,7 +155,7 @@ export function useChatRepositories([
         const published = await transport.roomRepositorySet(decodedId, {
           key: input.key,
           name: input.name,
-          remote: input.remote,
+          remote,
           ...(input.githubInstallationId
             ? { githubInstallationId: input.githubInstallationId }
             : {}),

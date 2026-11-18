@@ -3892,7 +3892,8 @@
       "schedule": {},
       "hosts": {},
       "connection_metadata": {
-        "vaultCreatedAt": "existing before the registry; weekly audit reviews"
+        "vaultCreatedAt": "existing before the registry; weekly audit reviews",
+        "githubRepositories": "Complete personal account catalog reported by the selected credential’s helper; the server has no vault token to derive it."
       },
       "grants": {},
       "status_steps": {},

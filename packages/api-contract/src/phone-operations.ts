@@ -243,7 +243,7 @@ export type PhoneOperationMap = PhoneRouteOperationMap & {
   } };
   adoptGitHubHandle: { input: EmptyInput; output: ManagedIdentityResult };
   claimManagedHandle: { input: ClaimManagedHandleInput; output: ManagedIdentityResult };
-  listGitHubRepositories: { input: RefreshInput; output: GitHubRepositoryListResult };
+  listGitHubRepositories: { input: RefreshInput & { readonly includeAccount?: boolean }; output: GitHubRepositoryListResult };
   beginGitHubInstallation: { input: BeginGitHubInstallationInput; output: BrowserAuthStartResult };
   createGitHubRepository: { input: CreateGitHubRepositoryInput; output: GitHubRepositoryResult };
   getGitHubRepositoryAccess: {
@@ -838,7 +838,7 @@ export type GitHubInstallation = {
 export type GitHubRepositoryListResult = {
   readonly installed: boolean;
   readonly installations: readonly GitHubInstallation[];
-  readonly repositories: readonly GitHubRepository[];
+  readonly repositories: readonly (Omit<GitHubRepository, 'installationId'> & { readonly installationId?: number })[];
   /** GitHub user token expired and could not be refreshed; stored data is served. */
   readonly githubReconnectNeeded?: boolean;
 };

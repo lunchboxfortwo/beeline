@@ -69,7 +69,7 @@ export type ConnectorAssignmentLoopOptions = {
   readonly watchTailscaleSignIn?: typeof watchTailscaleSignIn;
   /** Host-owned state root for Registry OAuth grants (never an isolated agent home). */
   readonly registryHome?: string;
-  readonly refreshVault?: () => Promise<void>;
+  readonly refreshVault?: (githubReference?: string) => Promise<void>;
   readonly installRegistry?: (
     input: Parameters<typeof installRegistryMcp>[0],
   ) => Promise<RegistryInstallResult>;
@@ -106,7 +106,7 @@ export class ConnectorAssignmentLoop {
     string,
     { attemptId: string; endsAt: number; expired?: boolean }
   >();
-  private readonly refreshVault: () => Promise<void>;
+  private readonly refreshVault: (githubReference?: string) => Promise<void>;
   private readonly revokeGrantsFn: (
     mcp: SquireMcpClient,
     ref: string,
@@ -243,7 +243,7 @@ export class ConnectorAssignmentLoop {
     } else if (assignment.kind === 'sync' && assignment.connectorType === 'tailscale') {
       await this.runTailscaleInstall(assignment.connectorId);
     } else if (assignment.kind === 'sync') {
-      await this.runSync();
+      await this.runSync(assignment.githubReference);
     } else if (assignment.kind === 'refresh-google-grant') {
       this.log('retired Google grant assignment ignored; reconnect through Connect an app');
     } else if (assignment.kind === 'revoke-grants')
@@ -506,8 +506,8 @@ export class ConnectorAssignmentLoop {
   }
 
   /** The machine owner coalesces observations and publishes changed content. */
-  private async runSync(): Promise<void> {
-    await this.refreshVault();
+  private async runSync(githubReference?: string): Promise<void> {
+    await this.refreshVault(githubReference);
   }
 
   private async runRevoke(connectorId: string, reference: string): Promise<void> {

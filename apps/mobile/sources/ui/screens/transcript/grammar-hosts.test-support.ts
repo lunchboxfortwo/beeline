@@ -39,6 +39,7 @@ export function tamaguiHosts() {
     module.useThemeName = () => 'dark_brass';
     module.getTokens = () => ({ space: { '1': { val: 4 } } });
     module.useMedia = () => ({});
+    module.useSheetContext = () => ({});
     module.styled = (base: unknown) => base;
     return module;
 }

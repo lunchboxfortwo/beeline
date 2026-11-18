@@ -187,7 +187,7 @@ export class MachineLink {
       random?: () => number;
       onRegistered?: () => void;
       subscribeResume?: (listener: () => void) => () => void;
-      readVault?: (agentId: string) => Promise<Omit<PostConnectorVaultInput, 'agentId'>>;
+      readVault?: (agentId: string, githubReference?: string) => Promise<Omit<PostConnectorVaultInput, 'agentId'>>;
       log?: (message: string) => void;
     },
   ) {
@@ -243,7 +243,9 @@ export class MachineLink {
   squireInstalled(): void { this.#vaultSnapshot = {}; }
 
   /** One observation at a time for the whole machine, including reconnects. */
-  refreshVault(): Promise<void> {
+  #githubReference?: string;
+  refreshVault(githubReference?: string): Promise<void> {
+    if (githubReference) this.#githubReference = githubReference;
     if (!this.options.readVault) return Promise.resolve();
     this.#vaultRefreshRequested = true;
     this.#vaultRefresh ??= this.#drainVaultRefreshes().finally(() => { this.#vaultRefresh = undefined; });
@@ -255,16 +257,18 @@ export class MachineLink {
     // callers request another observation; a failure never requests one.
     while (this.#vaultRefreshRequested) {
       this.#vaultRefreshRequested = false;
-      await this.#reportVault();
+      const githubReference = this.#githubReference;
+      this.#githubReference = undefined;
+      await this.#reportVault(githubReference);
     }
   }
 
-  async #reportVault(): Promise<void> {
+  async #reportVault(githubReference?: string): Promise<void> {
     const channel = [...this.#channels.values()].find(channel => channel.isOpen());
     if (!channel) return;
     const snapshot = this.#vaultSnapshot;
     try {
-      const report = await this.options.readVault!(channel.agentId);
+      const report = await this.options.readVault!(channel.agentId, githubReference);
       // The list and host/field sets have no ordering semantics.
       const content = JSON.stringify({ ...report, connections: report.connections.map(item => ({
         ...item, fieldNames: [...item.fieldNames].sort(), allowedHosts: [...item.allowedHosts].sort(),

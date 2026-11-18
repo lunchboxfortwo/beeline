@@ -393,6 +393,8 @@ export type VaultConnectionMeta = {
   readonly loginHosts?: readonly string[];
   readonly faviconDomain?: string;
   readonly keyName?: string;
+  /** Successful account-wide discovery through this exact personal credential. */
+  readonly githubRepositories?: readonly { readonly id: number; readonly fullName: string; readonly defaultBranch: string; readonly private: boolean }[];
   readonly credentialKind?: string;
   readonly expiresAt?: number;
   readonly createdAt: number;
@@ -574,7 +576,7 @@ export type ConnectorAssignment =
        *  should force through `--force-relogin=<provider>`. */
       readonly forceReloginProvider?: string;
     }
-  | { readonly kind: 'sync'; readonly connectorId: string; readonly connectorType: ConnectorKind }
+  | { readonly kind: 'sync'; readonly connectorId: string; readonly connectorType: ConnectorKind; readonly githubReference?: string }
   | {
       readonly kind: 'refresh-google-grant';
       readonly connectorId: string;

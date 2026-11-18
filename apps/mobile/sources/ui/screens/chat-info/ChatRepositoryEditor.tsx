@@ -1,3 +1,5 @@
+import { sharedLiveConnection } from '@/sync/transport/live-connection';
+import { installRepositoryCandidate } from '@/buzz/install-repository-candidate';
 import React, { useEffect, useState } from 'react';
 import { XStack } from 'tamagui';
 import { Btn, Copy, Row, SheetFrame } from '@/ui/grammar';
@@ -44,14 +46,25 @@ export function ChatRepositoryEditor({ roomId, current, canEditRepository, disab
         if (!open) return;
         let cancelled = false;
         let refreshed = false;
-        void monolithPhoneOperation('listGitHubRepositories', { refresh: true }).then(result => {
+        let revision = 0;
+        const initialRevision = revision;
+        void monolithPhoneOperation('listGitHubRepositories', { refresh: true, includeAccount: true }).then(result => {
             refreshed = true;
-            if (!cancelled) setRepositories(result.repositories);
+            if (!cancelled && revision === initialRevision) setRepositories(result.repositories);
         }).catch(() => undefined).finally(() => { if (!cancelled) setRepositoriesLoading(false); });
-        void monolithPhoneOperation('listGitHubRepositories', { refresh: false }).then(result => {
-            if (!cancelled && !refreshed) setRepositories(result.repositories);
+        void monolithPhoneOperation('listGitHubRepositories', { refresh: false, includeAccount: true }).then(result => {
+            if (!cancelled && !refreshed && revision === initialRevision) setRepositories(result.repositories);
         }).catch(() => undefined);
-        return () => { cancelled = true; };
+        const subscription = sharedLiveConnection().register([], event => {
+            if (!('monolithLive' in event)) return;
+            const live = event.monolithLive;
+            if (live.type !== 'resource-change' || live.resource !== 'workbench') return;
+            const currentRevision = ++revision;
+            void monolithPhoneOperation('listGitHubRepositories', { refresh: false, includeAccount: true }).then(result => {
+                if (!cancelled && revision === currentRevision) setRepositories(result.repositories);
+            }).catch(() => undefined);
+        });
+        return () => { cancelled = true; void subscription.then(stop => stop()).catch(() => undefined); };
     }, [open, roomId]);
 
     const openRepository = () => {
@@ -67,10 +80,14 @@ export function ChatRepositoryEditor({ roomId, current, canEditRepository, disab
             if (repositoryDraft) {
                 if (!repositoryDraft.remote) return;
                 if (!(await confirmRoomRepoReplacement(current?.name, openCorners))) return;
+                const selected = await installRepositoryCandidate(repositoryDraft,
+                    `/beeline/chat/${encodeURIComponent(roomId)}`, result => setRepositories(result.repositories));
+                if (!selected) return;
+                setRepositoryDraft(selected);
                 await monolithPhoneOperation('setRoomRepository', {
-                    roomId, key: repositoryDraft.key, name: repositoryDraft.name, remote: repositoryDraft.remote,
-                    targetBranch: repositoryDraft.defaultBranch ?? 'main',
-                    ...(repositoryDraft.githubInstallationId ? { githubInstallationId: repositoryDraft.githubInstallationId } : {}),
+                    roomId, key: selected.key, name: selected.name, remote: selected.remote!,
+                    targetBranch: selected.defaultBranch ?? 'main',
+                    ...(selected.githubInstallationId ? { githubInstallationId: selected.githubInstallationId } : {}),
                 });
             } else {
                 if (!current) return;

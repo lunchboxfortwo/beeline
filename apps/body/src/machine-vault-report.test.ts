@@ -187,6 +187,22 @@ describe('machine-owned vault reports', () => {
     expect(reports()[2]!.input.connections).toEqual([]);
   });
 
+  it('carries selected GitHub discovery through the machine observation even during another read', async () => {
+    const { machine, readVault, reports } = await fixture(1);
+    let finish!: (report: Report) => void;
+    readVault.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const ordinary = machine.refreshVault();
+    const discovery = machine.refreshVault('vault:selected-github');
+    const github = { ...credential('vault:selected-github'), service: 'github', githubRepositories: [
+      { id: 1, fullName: 'organization/project', defaultBranch: 'main', private: true },
+    ] };
+    readVault.mockResolvedValueOnce({ connections: [github] });
+    finish({ connections: [] });
+    await Promise.all([ordinary, discovery]);
+    expect(readVault).toHaveBeenLastCalledWith('agent-0', 'vault:selected-github');
+    expect(reports().at(-1)!.input.connections).toEqual([github]);
+  });
+
   it('preserves the last broker verdict on a failed read until the next ordinary observation', async () => {
     const { machine, readVault, reports, log } = await fixture(1);
     readVault.mockRejectedValueOnce(new Error('Squire MCP session closed'));

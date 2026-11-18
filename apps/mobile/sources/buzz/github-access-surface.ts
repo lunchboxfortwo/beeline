@@ -27,10 +27,12 @@ function hold(transport: BuzzRigTransport, scope: GitHubAccessScope) {
   void sharedLiveConnection().register([], (event) => {
     if (!('monolithLive' in event)) return;
     const live = event.monolithLive;
-    if (live.type !== 'invalidate' || live.roomId !== '' || live.reason !== 'reconnect') return;
+    const reconnect = live.type === 'invalidate' && live.roomId === '' && live.reason === 'reconnect';
+    const catalogChanged = live.type === 'resource-change' && live.resource === 'workbench';
+    if (!reconnect && !catalogChanged) return;
     for (const owner of held.values())
       void mobileSurfaceCache.fetch(address(owner.scope), guard,
-        () => owner.transport.workspaceGitHubAccess({ refresh: true })).catch(() => undefined);
+        () => owner.transport.workspaceGitHubAccess({ refresh: reconnect })).catch(() => undefined);
   }).then((stop) => { if (generation !== clientResetGeneration()) stop();
     else { starting = false; stopLive = stop; } },
     () => { if (generation === clientResetGeneration()) starting = false; });

@@ -51,6 +51,7 @@ import {
 } from './systemd.js';
 import { squireBrokerMeetsComputerUseMinimum, squireBrokerInstallEntry, squireHostPaths } from './squire-host.js';
 import { readVault } from './connector-squire.js';
+import { readPersonalGitHubRepositories } from './github-account-repositories.js';
 import { sharedSquireMcpClient, closeHelperSquireTransports, type SquireMcpConnection } from './squire-mcp-client.js';
 import { pruneDeletedRuntimes, pruneRepositoryCaches, pruneMachineStorage } from './host-disk-retention.js';
 import { HostPlaces } from './agent-process.js';
@@ -360,11 +361,22 @@ async function serveMachineHelper(
             resumes.on('resume', listener);
             return () => { resumes.off('resume', listener); };
           } } : {}),
-          readVault: async agentId => {
+          readVault: async (agentId, githubReference) => {
             if (!existsSync(squireBrokerInstallEntry(home)) && !existsSync(squireHostPaths(home).mcpSocket))
               return { connections: [], notAdded: true };
             vaultClient ??= sharedSquireMcpClient({ home, scope: { agentId, roomId: 'machine-vault' } });
-            return { connections: await readVault(vaultClient) };
+            const connections = await readVault(vaultClient);
+            const github = connections.find(connection => connection.reference === githubReference && connection.state === 'active');
+            if (github) {
+              try {
+                const repositories = await readPersonalGitHubRepositories(vaultClient, github);
+                return { connections: connections.map(connection => connection === github
+                  ? { ...connection, githubRepositories: repositories } : connection) };
+              } catch {
+                // A failed provider read never replaces the last complete catalog.
+              }
+            }
+            return { connections };
           },
           log: message => console.warn(`[helper] ${message}`),
           onRegistered: () => {

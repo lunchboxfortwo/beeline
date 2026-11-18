@@ -3,9 +3,9 @@ import { EmptyState } from './EmptyState';
 import { HullActionSheetRow } from './HullActionSheet';
 import { HULL_SHEET_ROW_HEIGHT } from '@/buzz/hull-sheet-layout';
 import { HullDialogInput } from '@/components/buzz/HullDialog';
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { VirtualizedList } from 'react-native';
-import { YStack } from 'tamagui';
+import { useSheetContext, YStack } from 'tamagui';
 import { Placeheld } from '@/ui/grammar';
 import { useTextDraft } from '@/buzz/use-text-draft';
 import {
@@ -42,6 +42,17 @@ export function RepoList<T = RepoCandidate>({
   draftContext,
 }: Omit<Props<T>, 'getCandidate'> & Partial<Pick<Props<T>, 'getCandidate'>>) {
   const [query, setQuery] = useTextDraft(`repo-search:${draftContext}:${testIDPrefix}`, '');
+  const sheet = useSheetContext();
+  const bridge = sheet.scrollBridge;
+  const setHasScrollView = 'setHasScrollView' in sheet ? sheet.setHasScrollView : undefined;
+  // A plain list must register with the sheet so its parent does not capture
+  // list swipes. Keep the list's own viewport and keyboard sizing intact.
+  useEffect(() => {
+    if (!bridge || !setHasScrollView) return;
+    setHasScrollView(true);
+    bridge.hasScrollableContent = true;
+    return () => { setHasScrollView(false); bridge.y = 0; };
+  }, [bridge, setHasScrollView]);
   // Opening with an empty search keeps the server array intact. Conversion is
   // owned by getItem, so only the rendered window becomes RepoCandidates.
   const data = useMemo(
@@ -70,6 +81,7 @@ export function RepoList<T = RepoCandidate>({
       >
         <VirtualizedList<RepoCandidate>
           data={data}
+          onScroll={event => { if (bridge) bridge.y = event.nativeEvent.contentOffset.y; }}
           getItem={(items: readonly T[], index: number) => getCandidate(items[index])}
           getItemCount={(items: readonly T[]) => items.length}
           keyExtractor={item => item.key}

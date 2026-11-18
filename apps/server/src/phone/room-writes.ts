@@ -1,3 +1,4 @@
+import { personalGitHubConnection } from '../github-account-catalog.js';
 import { unsubscribeRoomReviewer, subscribeRoomReviewer } from '../agent-subscriptions.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { reconcileConfiguredCornerReviewers } from '../agent-command.js';
@@ -21,6 +22,8 @@ import { normalizeHumanCornerTitle, UUID_PATTERN } from './values.js';
     const id = randomUUID();
     await ctx.database.transaction(async (db) => {
       await reserveRoomName(db, input.workspaceId, name);
+      const personal = input.repositoryId === undefined ? undefined : await personalGitHubConnection(db, viewerId);
+      const personalAccess = personal?.repositories?.some(repository => repository.id === input.repositoryId) ?? false;
       const repository =
         input.repositoryId === undefined
           ? undefined
@@ -35,8 +38,8 @@ import { normalizeHumanCornerTitle, UUID_PATTERN } from './values.js';
                 `SELECT r.repository_id,r.installation_id,r.full_name,r.default_branch,r.private
                  FROM github_repositories r
                  JOIN github_installations i USING(installation_id)
-                 WHERE r.repository_id=$1 AND r.active AND i.owner_id=$2 AND i.status='active'`,
-                [input.repositoryId, viewerId],
+                 WHERE r.repository_id=$1 AND r.active AND (i.owner_id=$2 OR $3::boolean) AND i.status='active'`,
+                [input.repositoryId, viewerId, personalAccess],
               )
             ).rows[0];
       if (input.repositoryId !== undefined && !repository)

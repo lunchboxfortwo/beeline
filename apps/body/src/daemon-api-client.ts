@@ -232,7 +232,7 @@ export class DaemonApiClient {
   }
 
   /** Refresh the shared machine observation after an explicit local vault event. */
-  refreshMachineVault(): Promise<void> { return this.#machine.refreshVault(); }
+  refreshMachineVault(githubReference?: string): Promise<void> { return this.#machine.refreshVault(githubReference); }
 
   /** The machine socket under this agent's registration. */
   get link(): Pick<LiveLink,'state'|'isOpen'|'onOpen'|'reconnects'> {

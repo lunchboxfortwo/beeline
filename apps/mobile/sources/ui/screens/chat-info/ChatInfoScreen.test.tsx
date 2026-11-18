@@ -1,3 +1,7 @@
+const catalogLive = vi.hoisted(() => ({ listener: null as null | ((event: any) => void) }));
+vi.mock('@/sync/transport/live-connection', () => ({ sharedLiveConnection: () => ({ register: async (_rooms: unknown, listener: (event: any) => void) => { catalogLive.listener = listener; return () => { catalogLive.listener = null; }; } }) }));
+vi.mock('@/auth/github-installation-host', () => ({ runHostGitHubInstallationSession: vi.fn() }));
+vi.mock('@/auth/github-auth-session', () => ({ githubInstallationRedirectUri: () => 'beeline://github-callback' }));
 import React from 'react';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create } from 'react-test-renderer';
@@ -125,8 +129,8 @@ describe('Chat info', () => {
         operation.mockResolvedValueOnce({ installations: [], repositories: [{ id: 9, fullName: 'owner/repo', installationId: 77, defaultBranch: 'develop', private: true }] });
         const tree = render();
         await act(async () => pressable(tree, 'chat-repository').props.onPress());
-        expect(operation).toHaveBeenCalledWith('listGitHubRepositories', { refresh: true });
-        expect(operation).toHaveBeenCalledWith('listGitHubRepositories', { refresh: false });
+        expect(operation).toHaveBeenCalledWith('listGitHubRepositories', { refresh: true, includeAccount: true });
+        expect(operation).toHaveBeenCalledWith('listGitHubRepositories', { refresh: false, includeAccount: true });
         const list = tree.root.findByType('RepoList');
         expect(tree.root.findAllByProps({ testID: 'chat-repository-pill' })).toHaveLength(0);
         expect(tree.root.findAllByProps({ testID: 'chat-repository-none' })).toHaveLength(0);
@@ -202,6 +206,22 @@ describe('Chat info', () => {
         await act(async () => pressable(tree, 'chat-repository').props.onPress());
         expect(operation.mock.calls.filter(([, input]) => input.refresh === true)).toHaveLength(2);
         await act(async () => resolve(fresh));
+        act(() => tree.unmount());
+    });
+
+    it('accepts a committed helper catalog without allowing an older refresh response to replace it', async () => {
+        let staleRefresh!: (value: unknown) => void;
+        const stored = { repositories: [{ id: 1, fullName: 'person/one', installationId: 77, defaultBranch: 'main' }] };
+        const complete = { repositories: Array.from({ length: 237 }, (_, index) => ({ id: index + 1, fullName: `owner-${index % 3}/repo-${index}`, defaultBranch: 'main' })) };
+        operation.mockImplementation((_name, input) => input.refresh
+            ? new Promise(resolve => { staleRefresh = resolve; }) : Promise.resolve(stored));
+        const tree = render();
+        await act(async () => pressable(tree, 'chat-repository').props.onPress());
+        operation.mockImplementation((_name, input) => input.refresh ? Promise.resolve(stored) : Promise.resolve(complete));
+        await act(async () => catalogLive.listener?.({ monolithLive: { type: 'resource-change', resource: 'workbench' } }));
+        expect(tree.root.findByType('RepoList').props.candidates).toHaveLength(237);
+        await act(async () => staleRefresh(stored));
+        expect(tree.root.findByType('RepoList').props.candidates).toHaveLength(237);
         act(() => tree.unmount());
     });
 

@@ -1,3 +1,4 @@
+import { installRepositoryCandidate } from '@/buzz/install-repository-candidate';
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import { githubInstallationRedirectUri } from '@/auth/github-auth-session';
 import { useGitHubInstallationSession } from '@/auth/github-installation-host';
@@ -74,6 +75,11 @@ export function useChannelsRepositories(
       const clearSubmittedRoom = repository ? () => undefined : roomNameDraft.capture();
       let publishAcknowledged = false;
       try {
+        if (repository) {
+          const installed = await installRepositoryCandidate(repository, '/beeline/channels');
+          if (!installed) return;
+          repository = installed;
+        }
         const roomId = await transport.createRoom(name, {
           communityId: activeCommunityId,
           visibility: inviteOnly ? 'invite-only' : 'public',

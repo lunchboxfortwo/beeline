@@ -1,3 +1,4 @@
+import { requestPersonalGitHubCatalog } from '../github-account-catalog.js';
 import { addWorkNote, attachToWorkItem } from '../work-item-detail.js';
 import { readWorkBoard, updateWorkItem } from '../work-board.js';
 import { phoneIdentity as identity } from '../phone-identity.js';
@@ -557,7 +558,9 @@ import { phoneReadConnectionDetail, phoneRevokeConnectionGrants } from './connec
         return (await phoneManagedIdentity(ctx, viewerId)) as Output<Name>;
       case 'listGitHubRepositories': {
         let githubReconnectNeeded = false;
+        const includeAccount = (input as Input<'listGitHubRepositories'>).includeAccount === true;
         if ((input as Input<'listGitHubRepositories'>).refresh !== false) {
+          if (includeAccount) await requestPersonalGitHubCatalog(ctx.database, viewerId);
           try {
             const outcome = await phoneRequireGitHub(ctx).refresh(viewerId);
             githubReconnectNeeded = Boolean(outcome?.githubReconnectNeeded);
@@ -565,7 +568,7 @@ import { phoneReadConnectionDetail, phoneRevokeConnectionGrants } from './connec
             // Never 503 the repo picker: degrade to stored installations/repositories.
           }
         }
-        const result = (await phoneListRepositories(ctx, viewerId)) as Output<Name>;
+        const result = (await phoneListRepositories(ctx, viewerId, includeAccount)) as Output<Name>;
         return githubReconnectNeeded ? { ...result, githubReconnectNeeded } : result;
       }
       case 'getGitHubRepositoryAccess':

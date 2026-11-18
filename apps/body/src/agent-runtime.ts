@@ -308,7 +308,7 @@ export async function runAgentRuntime(
           api: daemonApi,
           agentId,
           registryHome: config.operatorHome,
-          refreshVault: () => daemonApi.refreshMachineVault(),
+          refreshVault: reference => daemonApi.refreshMachineVault(reference),
           log: (message) => console.log(`[body] connector: ${message}`),
         });
         daemonApi.setConnectorAssignmentListener(() => connectorLoop?.wake());

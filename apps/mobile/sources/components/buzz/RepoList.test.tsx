@@ -1,3 +1,6 @@
+vi.mock('@/sync/transport/live-connection', () => ({ sharedLiveConnection: () => ({ register: async () => () => undefined }) }));
+vi.mock('@/auth/github-installation-host', () => ({ runHostGitHubInstallationSession: vi.fn() }));
+vi.mock('@/auth/github-auth-session', () => ({ githubInstallationRedirectUri: () => 'beeline://github-callback' }));
 import React from 'react';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create } from 'react-test-renderer';
@@ -5,11 +8,12 @@ import { describe, expect, it, vi } from 'vitest';
 
 const keyboard = vi.hoisted(() => ({ height: { value: 0 } }));
 const platform = vi.hoisted(() => ({ OS: 'android' }));
+const bridge = vi.hoisted(() => ({ scrollBridge: { y: 0, hasScrollableContent: false }, setHasScrollView: vi.fn() }));
 vi.mock('react-native-keyboard-controller', () => ({ useReanimatedKeyboardAnimation: () => keyboard }));
 vi.mock('@/ui/window-dimensions', () => ({ useWindowDimensions: () => ({ height: 640, width: 360 }) }));
 vi.mock('@/ui/lower-keyboard', () => ({ lowerKeyboard: vi.fn() }));
 vi.mock('react-native', () => ({ Platform: platform, useWindowDimensions: () => ({ height: 640, width: 360 }), VirtualizedList: 'VirtualizedList' }));
-vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
+vi.mock('tamagui', async () => ({ ...(await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts(), useSheetContext: () => bridge }));
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 24, bottom: 24, left: 0, right: 0 }) }));
 vi.mock('./RepositoryMark', () => ({ RepositoryMark: 'RepositoryMark' }));
@@ -42,12 +46,17 @@ describe('Repository list data window', () => {
     expect(nameRead).not.toHaveBeenCalled();
     const list = tree!.root.findByType('VirtualizedList');
     expect(list.props.getItemCount(list.props.data)).toBe(1000);
+    expect(bridge.setHasScrollView).toHaveBeenCalledWith(true);
+    act(() => list.props.onScroll({ nativeEvent: { contentOffset: { y: 400 } } }));
+    expect(bridge.scrollBridge.y).toBe(400);
+    expect(bridge.scrollBridge.hasScrollableContent).toBe(true);
     const item = list.props.getItem(list.props.data, 999);
     const row = list.props.renderItem({ item });
     expect(row.props.label).toBe('owner/repo-999');
     row.props.onPress();
     expect(onSelect).toHaveBeenCalledWith(candidates[999]);
     act(() => { tree!.unmount(); });
+    expect(bridge.setHasScrollView).toHaveBeenLastCalledWith(false);
   });
 
   it('keeps search and selection available for repositories beyond the initial window', () => {

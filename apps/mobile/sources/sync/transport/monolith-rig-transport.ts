@@ -482,7 +482,7 @@ export class MonolithRigTransport {
     return this.operation('removeRoomRepository', { roomId }).then(() => undefined);
   }
   async workspaceGitHubAccess(options: { refresh?: boolean } = {}) {
-    const value = (await this.operation('listGitHubRepositories', options)) as {
+    const value = (await this.operation('listGitHubRepositories', { ...options, includeAccount: true })) as {
       installed: boolean;
       installations: {
         installationId: number;
@@ -499,7 +499,7 @@ export class MonolithRigTransport {
       repositories: {
         id: number;
         fullName: string;
-        installationId: number;
+        installationId?: number;
         defaultBranch: string;
         private: boolean;
       }[];

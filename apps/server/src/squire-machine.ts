@@ -1,3 +1,4 @@
+import { personalGitHubConnection } from './github-account-catalog.js';
 import { SQUIRE_MCP_TARGET } from '@beeline/api-contract/phone';
 import { failConnectingOffers } from './connector-offer-completion.js';
 import type { ConnectorAssignment, ConnectorStatus, PostConnectorStatusInput } from '@beeline/api-contract/daemon';
@@ -182,13 +183,18 @@ export async function squireAssignments(database: SqlDatabase, agentId: string):
   if(row.helper_agent_id===agentId&&row.work.install) assignments.push({kind:'install',connectorId,connectorType:'trusty-squire',
     pairingGeneration:row.generation,...(row.work.forceReloginProvider?{forceReloginProvider:row.work.forceReloginProvider}:{})});
   for(const op of row.squire_work.ops??[]) {
-    if(op==='sync') assignments.push({kind:'sync',connectorId,connectorType:'trusty-squire'});
+    if(op==='sync' && !row.squire_work.ops?.includes('github-repositories')) assignments.push({kind:'sync',connectorId,connectorType:'trusty-squire'});
+    else if(op==='github-repositories') {
+      const owner=(await database.query<{owner_id:string}>('SELECT owner_id FROM agents WHERE agent_id=$1',[agentId])).rows[0];
+      const connection=owner && await personalGitHubConnection(database,owner.owner_id);
+      if(connection?.machine_id===row.machine_id) assignments.push({kind:'sync',connectorId,connectorType:'trusty-squire',githubReference:connection.reference});
+    }
     else if(op.startsWith('revoke-grants:')) assignments.push({kind:'revoke-grants',connectorId,connectorType:'trusty-squire',reference:op.slice(14)});
   }
-  if(row.squire_work.ops?.includes('sync')){
+  if(row.squire_work.ops?.some(op=>op==='sync'||op==='github-repositories')){
     const claimed=await database.query(`UPDATE agents SET squire_work=jsonb_set(squire_work,'{ops}',$2::jsonb)
       WHERE agent_id=$1 AND squire_work=$3::jsonb RETURNING agent_id`,
-    [agentId,JSON.stringify(row.squire_work.ops.filter(op=>op!=='sync')),JSON.stringify(row.squire_work)]);
+    [agentId,JSON.stringify(row.squire_work.ops.filter(op=>op!=='sync'&&op!=='github-repositories')),JSON.stringify(row.squire_work)]);
     if(!claimed.rowCount) return [];
   }
   return assignments;
