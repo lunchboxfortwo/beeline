@@ -229,6 +229,22 @@ it('coalesces concurrent runtime claims before their database lease resolves', a
   }
 });
 
+it('DEPLOY-CALL-2: a failed runtime connection cannot end durable participation', async () => {
+  const contender = new VoiceService(db, live, service.config);
+  const joined = await contender.join(R, H);
+  await contender.close();
+  await db.query('UPDATE voice_calls SET runtime_until=NULL WHERE id=$1', [joined.call.id]);
+  const replacement = new VoiceService(db, live, service.config);
+  vi.mocked(VoiceRoomRuntime.connect).mockRejectedValueOnce(new Error('RTC unavailable'));
+  try {
+    await expect(replacement.join(R, H, joined.call.id)).rejects.toThrow('RTC unavailable');
+    expect((await db.query<any>('SELECT ended_at FROM voice_calls WHERE id=$1', [joined.call.id])).rows[0].ended_at).toBeNull();
+    expect((await db.query<any>('SELECT left_at FROM voice_participants WHERE call_id=$1 AND identity_id=$2', [joined.call.id, H])).rows[0].left_at).toBeNull();
+    const resumed = await replacement.join(R, H, joined.call.id);
+    expect(resumed.call.id).toBe(joined.call.id);
+  } finally { await replacement.leave(joined.call.id, H); await replacement.close(); }
+});
+
 it('refuses removed Room and Workspace members, including stale call tokens', async () => {
   await db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [R, SECOND]);
   await expect(service.join(R, SECOND)).rejects.toThrow('access denied');

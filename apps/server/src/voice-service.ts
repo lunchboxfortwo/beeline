@@ -239,8 +239,7 @@ export class VoiceService {
       return call;
     });
     // Own runtime lease is cross-instance: a second phone never starts a second speaker.
-    try { await this.ensureRuntime(row); }
-    catch (error) { await this.leave(row.id, humanId, true, sessionId); throw error; }
+    await this.ensureRuntime(row);
     await (await this.runtimes.get(row.id))?.countHumans().catch(() => {});
     this.live.publish({ type: 'invalidate', roomId, reason: 'voice-participants' });
     const token = new AccessToken(this.config.apiKey, this.config.apiSecret, { identity: humanId,
@@ -254,11 +253,14 @@ export class VoiceService {
 
   /** Compatibility for older phones: idle never parks or removes a human. */
   async idleState(callId: string, humanId: string, db = this.db, sessionId?: string): Promise<VoiceIdleState> {
-    const participant = (await db.query<{ room_id: string }>(`SELECT c.room_id FROM voice_calls c
+    const participant = (await db.query<CallRow>(`SELECT c.* FROM voice_calls c
       JOIN voice_participants p ON p.call_id=c.id AND p.identity_id=$2 AND p.left_at IS NULL
       WHERE c.id=$1 AND c.ended_at IS NULL AND ($3::text IS NULL OR p.session_id=$3)`, [callId, humanId, sessionId ?? null])).rows[0];
     if (!participant) return { state: 'ended' };
     await this.access(participant.room_id, humanId, db);
+    // The reconnect read is also the handover boundary. Runtime loss never
+    // removes durable participation; the existing lease elects one new speaker.
+    await this.ensureRuntime(participant);
     return { state: 'ready' };
   }
 

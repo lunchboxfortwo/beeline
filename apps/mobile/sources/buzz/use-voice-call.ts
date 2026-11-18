@@ -115,12 +115,20 @@ export function useVoiceCall(roomId: string, enabled: boolean, roomAgents: reado
       if (version !== revision.current) { await release(); await monolithPhoneOperation('voiceLeave', { callId: joined.call.id, sessionId: joined.sessionId }); return; }
       setJoinedAgents({ roomId, agents: joined.agents });
       const { room } = transport;
+      const restoreTarget = async () => {
+        if (current() && targetRef.current) await room.localParticipant.publishData(new TextEncoder().encode(JSON.stringify(
+          { type: 'target', agentId: targetRef.current, tap: true })), { reliable: true, topic: VOICE_DATA_TOPIC });
+      };
+      room.on(RoomEvent.ParticipantConnected, participant => {
+        if (participant.identity === `beeline-voice-${joined!.call.id}`) void restoreTarget().catch(() => {});
+      });
       const stopMeter = subscribeVoiceMicrophone(room, amplitude => {
         if (current()) setLevel(quotaRef.current ? 0 : voiceWaveformLevel(amplitude));
       });
       const closeAudio = transport.closeAudio;
       transport.closeAudio = async () => { stopMeter(); await closeAudio(); };
       let microphonePublished = false;
+      let reconnecting: Promise<void> | undefined;
       const updateReadiness = () => {
         if (current()) setConnecting(!microphonePublished || !room.canPlaybackAudio);
       };
@@ -185,8 +193,35 @@ export function useVoiceCall(roomId: string, enabled: boolean, roomAgents: reado
       }
       room.on(RoomEvent.Disconnected, () => {
         if (version !== revision.current || mode.current !== 'active' || session.current?.room !== room) return;
-        void end();
-        setError('Conversation mode disconnected.');
+        if (reconnecting) return;
+        setConnecting(true);
+        // A lost transport does not mean the human left. Rejoin this call once;
+        // the expected id prevents a committed end from starting another call.
+        reconnecting = (async () => {
+          const replacement = await monolithPhoneOperation('voiceJoin', { roomId, expectedCallId: joined!.call.id });
+          if (!current()) {
+            await monolithPhoneOperation('voiceLeave', { callId: replacement.call.id, sessionId: replacement.sessionId });
+            return;
+          }
+          joined = replacement;
+          session.current = { ...transport!, callId: replacement.call.id, sessionId: replacement.sessionId };
+          await transport!.configureStop(replacement.call.id, replacement.stopToken);
+          if (!current()) return;
+          await room.connect(replacement.url, replacement.token, { maxRetries: 0 });
+          if (!current()) { await closeVoiceTransport(transport); return; }
+          await room.startAudio();
+          await room.localParticipant.setMicrophoneEnabled(!mutedRef.current && !quotaRef.current,
+            { echoCancellation: true, noiseSuppression: true, autoGainControl: false });
+          if (!current()) return;
+          setCall(replacement.call); setError(null); updateReadiness();
+          await restoreTarget();
+        })().catch(cause => {
+          if (current()) { setConnecting(false); setError(appErrorCopy(cause, 'Conversation mode disconnected.')); }
+          reconcileAgain = true;
+        }).finally(() => {
+          reconnecting = undefined;
+          if (reconcileAgain) { reconcileAgain = false; reconcile(); }
+        });
       });
       await room.connect(joined.url, joined.token, { maxRetries: 0 });
       if (version !== revision.current) { await release(); await monolithPhoneOperation('voiceLeave', { callId: joined.call.id, sessionId: joined.sessionId }); return; }
@@ -205,18 +240,30 @@ export function useVoiceCall(roomId: string, enabled: boolean, roomAgents: reado
       session.current = { ...transport, callId: joined.call.id, sessionId: joined.sessionId };
       setCall(joined.call); setTarget(defaultTarget ?? null); targetRef.current = defaultTarget ?? null;
       const live = sharedLiveConnection();
+      let reconciling: Promise<void> | undefined;
+      let reconcileAgain = false;
       const reconcile = () => {
         const active = joined!;
-        if (!current()) return;
-        void monolithPhoneOperation('voiceState', { callId: active.call.id, sessionId: active.sessionId }).then(state => {
+        if (!current() || reconciling || reconnecting) return;
+        reconciling = monolithPhoneOperation('voiceState', { callId: active.call.id, sessionId: active.sessionId }).then(state => {
           if (current() && joined === active && state.state === 'ended') {
             void end();
           }
-        }).catch(() => {});
+        }).catch(() => {}).finally(() => {
+          reconciling = undefined;
+          if (reconcileAgain) { reconcileAgain = false; reconcile(); }
+        });
       };
-      const dispose = await live.register([{ '#h': [roomId] }], reconcile);
+      const dispose = await live.register([{ '#h': [roomId] }], () => {
+        // A new committed event still needs coverage if it arrived during the read.
+        if (reconciling || reconnecting) reconcileAgain = true;
+        else reconcile();
+      });
       if (!current()) { dispose(); return; }
-      const disconnectListener = live.subscribeConnected(reconcile);
+      const disconnectListener = live.subscribeConnected(() => {
+        if (reconnecting) reconcileAgain = true;
+        else reconcile();
+      });
       liveCleanup.current = () => { dispose(); disconnectListener(); };
     } catch (cause) {
       if (version === revision.current) void reportClientError('voice-join', cause);

@@ -1,5 +1,56 @@
 import { expect, it, vi, VoiceService, VoiceRoomRuntime, RealVoiceService, migrate, PgliteDatabase, LiveHub, PhoneService, state, roster, conversationService, deferred, multiCall } from './test-support-voice-room-runtime.test-support.js';
 
+it('DEPLOY-CALL-1: one reconnect state read restores audio after a server runtime handover', async () => {
+  const db = new PgliteDatabase(), live = new LiveHub();
+  const human = 'a'.repeat(64), agent = 'b'.repeat(64);
+  const workspace = '11111111-1111-4111-8111-111111111111', room = '22222222-2222-4222-8222-222222222222';
+  const { service: fixture, speech } = conversationService(1);
+  fixture.config.brain.answer.mockImplementation(async (_agent, _history, onText) => {
+    onText('I heard you.'); return { text: 'I heard you.', order: false };
+  });
+  const receives: Array<(event: any) => void> = [];
+  fixture.config.stt.mockImplementation(async callback => { receives.push(callback); return { send() {}, close() {} }; });
+  const old = new RealVoiceService(db, live, { ...fixture.config, speech });
+  const replacement = new RealVoiceService(db, live, { ...fixture.config, speech });
+  try {
+    await migrate(db);
+    await db.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'human','Human','human'),($2,'agent','Ruby','ruby')`, [human, agent]);
+    await db.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [agent, human]);
+    await db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Runtime handover')`, [workspace]);
+    await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Room')`, [room, workspace]);
+    await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES
+      ($1,NULL,$2,'owner'),($1,NULL,$3,'member'),($1,$4,$2,'owner'),($1,$4,$3,'member')`, [workspace, human, agent, room]);
+    const joined = await old.join(room, human);
+    const before = (await db.query<any>('SELECT * FROM voice_calls WHERE id=$1', [joined.call.id])).rows[0];
+    const speak = async (transcript: string, count: number) => {
+      state.streams = [new ReadableStream()];
+      state.room.emit('track', { kind: 1 }, {}, { identity: human });
+      await vi.waitFor(() => expect(receives).toHaveLength(count));
+      receives.at(-1)!({ event: 'EndOfTurn', transcript, turn_index: 0, sequence_id: 0 });
+      await vi.waitFor(() => expect(speech.synthesize).toHaveBeenCalledTimes(count));
+      await vi.waitFor(() => expect(state.audio.captureFrame).toHaveBeenCalled());
+    };
+    await speak('Ruby before the replacement', 1);
+    expect(await replacement.idleState(joined.call.id, human, db, joined.sessionId)).toEqual({ state: 'ready' });
+    expect((await db.query<any>('SELECT runtime_owner FROM voice_calls WHERE id=$1', [joined.call.id])).rows[0].runtime_owner)
+      .toBe(before.runtime_owner);
+    await old.close();
+    expect((await db.query<any>('SELECT ended_at,runtime_until FROM voice_calls WHERE id=$1', [joined.call.id])).rows[0])
+      .toEqual({ ended_at: null, runtime_until: null });
+    expect(await replacement.idleState(joined.call.id, human, db, 'retired-session')).toEqual({ state: 'ended' });
+    expect(receives).toHaveLength(1);
+    expect(await replacement.idleState(joined.call.id, human, db, joined.sessionId)).toEqual({ state: 'ready' });
+    const after = (await db.query<any>('SELECT * FROM voice_calls WHERE id=$1', [joined.call.id])).rows[0];
+    expect(after).toMatchObject({ id: before.id, message_id: before.message_id, started_at: before.started_at, ended_at: null });
+    expect(after.runtime_owner).toContain(replacement.owner);
+    expect(after.runtime_owner).not.toBe(before.runtime_owner);
+    await speak('Ruby after the replacement', 2);
+    expect((await db.query<any>('SELECT session_id,left_at FROM voice_participants WHERE call_id=$1', [joined.call.id])).rows)
+      .toEqual([{ session_id: joined.sessionId, left_at: null }]);
+    expect((await db.query('SELECT 1 FROM voice_calls')).rowCount).toBe(1);
+  } finally { await old.close(); await replacement.close(); await db.close(); }
+}, 30_000);
+
 
 
 it('Reproduction VOICE-DISPOSE-1: ending a call while synthesis unwinds never clears disposed audio', async () => {
