@@ -15,6 +15,7 @@ import { readGrantScript } from './read-only-mcp-agent-grant-deps.js';
 import { parseCommandGrantTarget } from '@beeline/api-contract/agent-grants';
 import { freeAgentPiConfig } from './free-agent-vm.js';
 import { PlaceSession } from './place-session.js';
+import { distillTurnFailureReason } from './turn-failure-reason.js';
 import { sharedSquireMcpClient } from './squire-mcp-client.js';
 import type { AgentRuntimeRecord } from './runtime.js';
 import { execFileAsync,prepareWorkspace } from './workspace-checkout.js';
@@ -188,6 +189,24 @@ it('does not restore a streamed preamble after ACP selects no final answer', asy
     return {agentText:'',stopReason:'end_turn',updates:[],toolCalls:[]};
   });
   expect(await f.session.deliver(f.item)).toMatchObject({text:'',stopReason:'end_turn'});
+  await f.session.dispose();
+});
+
+it('fails a Codex turn whose whole reply is the proxy signed-out refusal, so the sign-in card shows', async () => {
+  const f = await fixture();
+  await f.session.start();
+  const refusal = 'unknown provider for model gpt-6.1-sol';
+  f.prompt.mockImplementationOnce(async (_sessionId?: unknown, _prompt?: unknown, onChunk?: unknown) => {
+    (onChunk as (delta: string, full: string, run: string) => void)(refusal, refusal, refusal);
+    return { agentText: `${refusal}  `, stopReason: 'end_turn', updates: [], toolCalls: [] };
+  });
+  const failure = await f.session.deliver(f.item).catch((error: unknown) => error);
+  expect(failure).toMatchObject({ name: 'WallRefusal', kind: 'signed-in' });
+  expect(distillTurnFailureReason(failure)).toEqual({ text: 'Authentication required: the agent needs to sign in again', kind: 'not-signed-in' });
+  // An answer that only mentions the refusal is still an answer.
+  const quoted = `The proxy said "${refusal}", so I switched models.`;
+  f.prompt.mockResolvedValueOnce({ agentText: quoted, stopReason: 'end_turn', updates: [], toolCalls: [] });
+  expect(await f.session.deliver({ ...f.item, id: 'second', turnRequestId: 'second' })).toMatchObject({ text: quoted });
   await f.session.dispose();
 });
 

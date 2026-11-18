@@ -10,7 +10,8 @@ import {
   prepareRoomAgentHome,
 } from './agent-home.js';
 import { credentialMaskPaths, wrapAgentCommand } from './bwrap-sandbox.js';
-import { cliProxyDir, cliProxyHarnessEnv } from './cliproxy.js';
+import { cliProxyDir, cliProxyHarnessEnv, machineCliProxy, machineCliProxyEndpoint } from './cliproxy.js';
+import { freeAgentPiConfig } from './free-agent-vm.js';
 
 const run = promisify(execFile);
 const roots: string[] = [];
@@ -495,3 +496,21 @@ it.each([
     }
   },
 );
+
+it('a free agent never reaches the proxy: its machine starts none and its hosted model stays its own', async () => {
+  // Free-agent helpers never start the machine proxy, so nothing waits on it.
+  expect(machineCliProxyEndpoint()).toBeUndefined();
+  await expect(machineCliProxy()).resolves.toBeUndefined();
+  const root = await mkdtemp('/var/tmp/beeline-proxy-free-');
+  roots.push(root);
+  const operatorHome = join(root, 'operator');
+  const hosted = freeAgentPiConfig({ modelBaseUrl: 'https://beeline.test/v1/free-agents/model', upstreamModel: 'deepseek/deepseek-v4.1-flash' });
+  await mkdir(join(operatorHome, '.pi', 'agent'), { recursive: true });
+  await writeFile(join(operatorHome, '.pi', 'agent', 'models.json'), hosted);
+  const env = await prepareRoomAgentCredentials({
+    root: join(root, 'home'), operatorHome, agentKind: 'pi', failClosed: true,
+    cliProxy: machineCliProxyEndpoint(), agentEnv: { BEELINE_FREE_AGENT_MODEL_TOKEN: 'free-token' },
+  });
+  tmpLinks.push(env.TMPDIR!);
+  expect(JSON.parse(await readFile(join(root, 'home', 'pi', 'models.json'), 'utf8'))).toEqual(JSON.parse(hosted));
+});

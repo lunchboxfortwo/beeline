@@ -96,14 +96,14 @@ test('only the shared builder and its known kinds may construct an existing wall
   } finally {rmSync(target,{recursive:true,force:true});}
 });
 
-test('an eighth canonical construction requires changing the captain-owned wall document', () => {
+test('a ninth canonical construction requires changing the captain-owned wall document', () => {
   const target=copy();
   try {
     const file=resolve(target,'apps/body/src/place-session.ts');
     writeFileSync(file,"import {wall} from '@beeline/api-contract/daemon';\n"+readFileSync(file,'utf8').replace('  async start(item?: AgentCommand): Promise<void> {',"  async start(item?: AgentCommand): Promise<void> { if(this.stale) throw wall('stop','added refusal');"));
-    assert.equal(productionWallSites(target).length,8);
-    assert.ok(judgeWalls(target).some(error=>error.includes('maximum 7')));
-    plant(target,WALLS_FILE,'Production wall constructions: 7.','Production wall constructions: 8.');
+    assert.equal(productionWallSites(target).length,9);
+    assert.ok(judgeWalls(target).some(error=>error.includes('maximum 8')));
+    plant(target,WALLS_FILE,'Production wall constructions: 8.','Production wall constructions: 9.');
     assert.deepEqual(judgeWalls(target),[]);
   } finally {rmSync(target,{recursive:true,force:true});}
 });
@@ -117,14 +117,14 @@ mutation('a daemon frame admission gate fails', 'apps/server/src/daemon-live.ts'
 
 mutation('a syntax error cannot hide a path guard', 'apps/body/src/agent-runner.ts', 'place.running = item;', 'place.running = item; if (');
 
-test('an eighth production wall construction fails even outside the named request path', () => {
+test('a ninth production wall construction fails even outside the named request path', () => {
   const target = copy();
   try {
     const file = resolve(target, 'apps/server/src/wall-sprawl.ts');
     writeFileSync(file, "import {wall} from '@beeline/api-contract/daemon';\n" +
       Array.from({length: 1}, (_, i) => `export const refusal${i} = () => wall('membership', 'duplicate');`).join('\n'));
-    assert.ok(productionWallSites(target).length > 7);
-    assert.ok(judgeWalls(target).some(error => error.includes('maximum 7')));
+    assert.ok(productionWallSites(target).length > 8);
+    assert.ok(judgeWalls(target).some(error => error.includes('maximum 8')));
   } finally { rmSync(target, {recursive:true, force:true}); }
 });
 

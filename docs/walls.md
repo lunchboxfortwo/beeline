@@ -6,12 +6,12 @@ refusals use `wall(kind, reason)` from `@beeline/api-contract/daemon`.
 `packages/api-contract/src/walls.ts` owns the kinds and error shape.
 `packages/scripts/check-walls.mjs` rejects other refusals, gates, skips, waits and caps
 on that path.
-Production wall constructions: 7.
+Production wall constructions: 8.
 Any additional construction requires lunchboxfortwo's review of a change here.
 
 ## `signed-in` The person must be signed in
 
-Why: each request must come from a known account.
+Why: each request must come from a known account. A harness whose reply is only the login proxy's refusal for an account not yet signed in there fails as not signed in, so the sign-in card shows; the captain approved this construction on 2026-11-18.
 
 ## `membership` Only members of a chat can message its agents
 

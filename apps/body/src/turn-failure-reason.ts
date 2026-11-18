@@ -44,6 +44,13 @@ export function redactToolDetail(value: string): string {
     );
 }
 
+/**
+ * CLIProxyAPI's refusal when no login it holds serves the model: the
+ * account was never signed in there. Codex shows it as its whole reply;
+ * Claude fails the turn with it.
+ */
+export const CLIPROXY_SIGNED_OUT = /unknown provider for model \S+/i;
+
 /** Preserve diagnostic stacks in the helper journal. */
 export function turnErrorDetail(error: unknown): string {
   return error instanceof Error ? error.stack || error.message : String(error);
@@ -70,7 +77,7 @@ export function distillTurnFailureReason(error: unknown): DistilledTurnFailureRe
   }
   // ACP -32000 is the harness's explicit authentication-required refusal.
   // Unlike a provider token-refresh race, retrying it cannot sign the agent in.
-  if (/^ACP error -32000: Authentication required(?:[.;]|$)/i.test(raw.trim())) {
+  if (/^ACP error -32000: Authentication required(?:[.;]|$)/i.test(raw.trim()) || CLIPROXY_SIGNED_OUT.test(raw)) {
     return { text: 'Authentication required: the agent needs to sign in again', kind: 'not-signed-in' };
   }
   const informative = raw

@@ -1,4 +1,4 @@
-import type { AgentCommand,DaemonOperationMap } from '@beeline/api-contract/daemon';
+import { wall,type AgentCommand,type DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { existsSync } from 'node:fs';
 import { mkdir,rm,writeFile } from 'node:fs/promises';
 import { homedir,hostname } from 'node:os';
@@ -37,6 +37,7 @@ import type { AgentRuntimeRecord } from './runtime.js';
 import { runtimeDirectory } from './runtime.js';
 import { SessionResources } from './session-resources.js';
 import { SquireTaskRelay } from './squire-task-relay.js';
+import { CLIPROXY_SIGNED_OUT } from './turn-failure-reason.js';
 import { AgentTurnStream,durableReplyText } from './turn-stream.js';
 import { WarmTranscript } from './warm-transcript.js';
 import { cornerCheckoutFolders,execFileAsync,githubGitEnv,roomCheckoutPath } from './workspace-checkout.js';
@@ -499,6 +500,8 @@ export class PlaceSession {
       const answering = client.sessionPrompt(sessionId, images.length ? [{ type: 'text', text: prompt }, ...images] : prompt, stream.onChunk);
       this.resources.refresh();
       result = await answering;
+      const reply = result.agentText.trim();
+      if (CLIPROXY_SIGNED_OUT.exec(reply)?.[0] === reply) throw wall('signed-in', reply);
     } catch (error) {
       void stream.retract();
       throw error;
