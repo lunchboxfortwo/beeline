@@ -25,41 +25,28 @@ if (!isolatedNativeProof(process.env)) {
 }
 
 /**
- * Headless login output as the real CLIs printed it on 2026-10-04 (ANSI
- * colour removed). Codes and challenges are from abandoned attempts.
+ * Headless login output as the real programs printed it (ANSI colour
+ * removed). Codes and challenges are from abandoned attempts.
  */
 
-/** `codex login --device-auth`, Codex 0.160.0. */
-export const CODEX_DEVICE_OUTPUT = `
-Welcome to Codex [v0.160.0]
-OpenAI's command-line coding agent
-
-Follow these steps to sign in with ChatGPT using device code authorization:
-
-1. Open this link in your browser and sign in to your account
-   https://auth.openai.com/codex/device
-
-2. Enter this one-time code (expires in 15 minutes)
-   EBQ9-VJCLN
-
-Continue only if you started this login in Codex. If a website or another person gave you this code, cancel.
+/** `cli-proxy-api -codex-device-login -no-browser`, CLIProxyAPI 8.0.77 (2026-11-17). */
+export const CODEX_DEVICE_OUTPUT = `CLIProxyAPI Version: 8.0.77, Commit: a5e8f69e, BuiltAt: 2026-11-17T22:19:21Z
+Starting Codex device authentication...
+Codex device URL: https://auth.openai.com/codex/device
+Codex device code: O55M-GK99G
 `;
 
-/** `grok login --device-auth`, Grok 1.0.46. */
-export const GROK_DEVICE_OUTPUT = `
-To sign in, open this URL in your browser:
+/** `cli-proxy-api -xai-login -no-browser`, CLIProxyAPI 8.0.77 (2026-11-17). */
+export const GROK_DEVICE_OUTPUT = `CLIProxyAPI Version: 8.0.77, Commit: a5e8f69e, BuiltAt: 2026-11-17T22:19:21Z
+Starting xAI authentication...
 
-  https://accounts.x.ai/oauth2/device?user_code=2RDF-2C74
+To authenticate, please visit:
+https://accounts.x.ai/oauth2/device?user_code=DC7F-7GCV
 
-  (Could not open browser automatically — open the URL above manually.)
-
-Confirm this code in your browser:
-
-  2RDF-2C74
-
-Only continue with a code you requested. Don't share it with anyone.
+Then enter this code: DC7F-7GCV
 
 Waiting for authorization...
+(This will timeout in 1800 seconds if not authorized)
 `;
 
 /** `NO_OPEN_BROWSER=1 cursor-agent login`, Cursor Agent 2026.10.01-e373342. */

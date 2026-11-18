@@ -14,6 +14,8 @@ import { resolve } from 'node:path';
 import type { AgentModelConfigOption } from './model-types.js';
 import { AcpClient } from './acp.js';
 import { agentBehavior, type AgentCommand } from './agent-command.js';
+import { prepareRoomAgentCredentials, roomSessionTmpDir } from './agent-home.js';
+import { machineCliProxy } from './cliproxy.js';
 import {
   applyAgentModelSelectionWithUpdatedCatalog,
   agentArgsWithModelSelection,
@@ -25,33 +27,6 @@ import {
 
 type ModelCatalogAgent = Pick<AgentCommand, 'command' | 'args'> &
   Partial<Pick<AgentCommand, 'kind'>>;
-
-/**
- * A catalog read against a provider the caller selected needs that provider,
- * not the operator's normal Goose session profile: Goose loads every enabled
- * extension from its config during `session/new`, and a slow or wedged stdio
- * extension used to make the connect wizard hang even though no tools are
- * needed to enumerate models. `GOOSE_PATH_ROOT` is Goose's supported
- * per-process config/data/state root, so that read gets a clean disposable
- * profile without touching the operator's config or changing any other
- * harness.
- *
- * With no provider handed over, the operator's own config IS the thing under
- * test — connect's discovery probe asks exactly whether Goose already holds a
- * provider of its own, and a disposable profile would answer "no" every time.
- * That read inspects the existing profile (see `withAgentModelCatalog`).
- */
-export function modelCatalogProbeEnvironment(
-  agent: ModelCatalogAgent,
-  agentEnv: Record<string, string>,
-  scratchCwd: string,
-): Record<string, string> {
-  if (!agentBehavior(agent.kind).probeProviderRootEnv || !agentEnv.GOOSE_PROVIDER) return agentEnv;
-  return {
-    ...agentEnv,
-    [agentBehavior(agent.kind).probeProviderRootEnv!]: resolve(scratchCwd, 'goose'),
-  };
-}
 
 /**
  * Goose's advertised `vendor/model` values are model identifiers routed by
@@ -88,7 +63,11 @@ async function withAgentModelCatalog<T>(
   }) => Promise<T>,
 ): Promise<T> {
   const scratchCwd = await mkdtemp(resolve(tmpdir(), 'beeline-pair-model-check-'));
-  const probeEnv = modelCatalogProbeEnvironment(agent, agentEnv, scratchCwd);
+  const cliProxy = (await machineCliProxy())?.endpoint;
+  const probeEnv = cliProxy ? { ...agentEnv, ...await prepareRoomAgentCredentials({
+    root: scratchCwd, operatorHome: agentEnv.HOME, agentKind: agent.kind, agentEnv, cliProxy,
+  }) } : agentBehavior(agent.kind).probeProviderRootEnv && agentEnv.GOOSE_PROVIDER
+    ? { ...agentEnv, [agentBehavior(agent.kind).probeProviderRootEnv!]: resolve(scratchCwd, 'goose') } : agentEnv;
   const client = new AcpClient({
     agentCommand: agent.command,
     agentArgs: agentArgsWithModelSelection(agent, selection),
@@ -133,6 +112,7 @@ async function withAgentModelCatalog<T>(
     return await inspected;
   } finally {
     await stopAgentProcess(client).catch(() => undefined);
+    await rm(roomSessionTmpDir(scratchCwd), { force: true }).catch(() => undefined);
     await rm(scratchCwd, { recursive: true, force: true }).catch(() => undefined);
   }
 }

@@ -1,7 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
 import { parseAcpUsage } from './acp.js';
-import { HarnessQuotaReader, quotaAxiArgs, quotaAxiLaunch, quotaAxiProvider, quotaAxiUsage } from './harness-quota.js';
+import { HarnessQuotaReader, invalidateQuotaReads, quotaAxiArgs, quotaAxiLaunch, quotaAxiProvider, quotaAxiUsage } from './harness-quota.js';
 import { QUOTA_AXI_CLAUDE_REPORT, QUOTA_AXI_CODEX_CURSOR_REPORT } from '../../../packages/test-helpers/helpers/helper.js';
+
+// Claude, Codex and Grok read the machine proxy's current login.
+vi.mock('./cliproxy.js', async (original) => {
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dir = mkdtempSync(join(tmpdir(), 'quota-proxy-'));
+  return {
+    ...(await original<typeof import('./cliproxy.js')>()),
+    cliProxyDir: () => dir,
+    machineCliProxy: async () => ({ readLogin: async () => ({ access_token: 'proxy-access', expired: '2026-11-18T00:00:00Z' }) }),
+  };
+});
 
 const now = Date.parse('2026-10-20T02:22:23.939Z') / 1000;
 
@@ -112,7 +125,7 @@ describe('quota-axi plan usage (Reproduction R2)', () => {
     expect(run).toHaveBeenCalledTimes(1);
     expect(run).toHaveBeenCalledWith(
       { command: 'node', args: ['q.mjs', '--provider', 'codex', '--json', '--full', '--no-credential-refresh'] },
-      env,
+      expect.objectContaining({ CODEX_HOME: expect.stringMatching(/quota-.*codex$/) }),
     );
     expect(post).toHaveBeenCalledWith(expect.objectContaining({ plan: 'pro' }));
     clock += 5 * 60_000;
@@ -142,14 +155,14 @@ describe('quota-axi plan usage (Reproduction R2)', () => {
     clock += 60_000;
     await corner.publish('codex', env);
     expect(run).toHaveBeenCalledTimes(1);
-    // Another agent on the same login shares the read; another login keeps its own budget.
+    // Every agent on this machine reads the proxy's one Codex login.
     await reader('agent-b').publish('codex', env);
     expect(run).toHaveBeenCalledTimes(1);
     await reader('agent-c').publish('codex', { CODEX_HOME: '/other/codex' });
-    expect(run).toHaveBeenCalledTimes(2);
+    expect(run).toHaveBeenCalledTimes(1);
     clock += 5 * 60_000;
     await corner.publish('codex', env);
-    expect(run).toHaveBeenCalledTimes(3);
+    expect(run).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -241,10 +254,10 @@ m18_describe('one read per plan account on this machine', () => {
     const reader = (agentId: string) => new m18_HarnessQuotaReader({
       agentId, slots, run, launch, now: () => now * 1000,
       post: async (usage) => { posts.push([agentId, usage]); },
-      credentialPath: () => '/home/op/.claude/.credentials.json',
     });
     const first = reader('ruby').publish('claude', { CLAUDE_CONFIG_DIR: '/agents/ruby/claude' }, true);
     const second = reader('nerd').publish('claude', { CLAUDE_CONFIG_DIR: '/agents/nerd/claude' }, true);
+    await m18_vi.waitFor(() => m18_expect(finish).toBeDefined());
     finish(JSON.stringify(verified('acct-1')));
     await m18_expect(first).resolves.toEqual({ status: 'fresh' });
     await m18_expect(second).resolves.toEqual({ status: 'fresh' });
@@ -262,7 +275,6 @@ m18_describe('one read per plan account on this machine', () => {
     const reader = (agentId: string) => new m18_HarnessQuotaReader({
       agentId, slots, run, launch, now: () => clock,
       post: async () => { posts.push(agentId); },
-      credentialPath: () => '/home/op/.claude/.credentials.json',
     });
     await reader('ruby').publish('claude', {});
     clock += 60_000;
@@ -279,7 +291,6 @@ m18_describe('one read per plan account on this machine', () => {
     const reader = new m18_HarnessQuotaReader({
       agentId: 'ruby', slots, run, launch, now: () => now * 1000,
       post: async (usage) => { posts.push(usage); },
-      credentialPath: () => '/home/op/.claude/.credentials.json',
     });
     await reader.publish('claude', {}, true);
     run.mockResolvedValueOnce(JSON.stringify({
@@ -288,160 +299,60 @@ m18_describe('one read per plan account on this machine', () => {
     const later = new m18_HarnessQuotaReader({
       agentId: 'ruby', slots, run, launch, now: () => (now + 3600) * 1000,
       post: async (usage) => { posts.push(usage); },
-      credentialPath: () => '/home/op/.claude/.credentials.json',
     });
     await m18_expect(later.publish('claude', {}, true)).resolves.toEqual({ status: 'signed_out' });
     m18_expect(posts[1]!.account).toEqual(posts[0]!.account);
     m18_expect(JSON.stringify(posts)).not.toContain('acct-1');
   });
 
-  m18_describe('agents with their own copy of one login', () => {
-    const setup = (accountOf: Record<string, string>) => {
-      let clock = now * 1000;
-      const slots = new Map();
-      const posts: Array<[string, m18_AgentUsage]> = [];
-      const logins: Record<string, string> = {};
-      const run = m18_vi.fn(async (_launch: unknown, env: Record<string, string>) =>
-        JSON.stringify(verified(accountOf[env.CLAUDE_CONFIG_DIR!]!)));
-      const publish = (agentId: string, force = false) => new m18_HarnessQuotaReader({
-        agentId, slots, run, launch, now: () => clock,
-        post: async (usage) => { posts.push([agentId, usage]); },
-        credentialPath: (_provider, env) => `${env.CLAUDE_CONFIG_DIR}/.credentials.json`,
-        fingerprint: (path) => logins[path] ?? 'first login',
-      }).publish('claude', { CLAUDE_CONFIG_DIR: `/agents/${agentId}/claude` }, force);
-      /** `claude /login` to another account in one agent's home. */
-      const switchLogin = (agentId: string, accountId: string) => {
-        accountOf[`/agents/${agentId}/claude`] = accountId;
-        logins[`/agents/${agentId}/claude/.credentials.json`] = `login ${accountId}`;
-      };
-      return { run, posts, publish, switchLogin, accountOf, advance: (ms: number) => { clock += ms; } };
+  m18_it('gives every agent on the machine one read per provider', async () => {
+    const run = m18_vi.fn(async () => JSON.stringify(verified('acct-1')));
+    const slots = new Map();
+    const reader = (agentId: string) => new m18_HarnessQuotaReader({ agentId, slots, run, launch, now: () => now * 1000, post: async () => {} });
+    await reader('ruby').publish('claude', {});
+    await reader('nerd').publish('claude', {});
+    m18_expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  m18_it('reads a proxied provider without a proxy login as signed out, without running the reader', async () => {
+    const run = m18_vi.fn(async () => JSON.stringify(verified('acct-1')));
+    const posts: m18_AgentUsage[] = [];
+    const reader = new m18_HarnessQuotaReader({
+      agentId: 'ruby', slots: new Map(), run, launch, now: () => now * 1000,
+      post: async (usage) => { posts.push(usage); },
+      proxy: async () => ({ readLogin: async () => undefined }),
+    });
+    await m18_expect(reader.publish('claude', {}, true)).resolves.toEqual({ status: 'signed_out' });
+    m18_expect(run).not.toHaveBeenCalled();
+    m18_expect(posts[0]).toMatchObject({ windows: [], read: { status: 'signed_out' } });
+  });
+
+  m18_it('hands quota-axi an access-token-only copy of the proxy login', async () => {
+    const { proxiedQuotaHome } = await import('./harness-quota.js');
+    const { mkdtemp, readFile, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const home = await mkdtemp(join(tmpdir(), 'quota-home-'));
+    const login = { access_token: 'access', refresh_token: 'refresh', id_token: 'id', account_id: 'acct',
+      expired: '2026-11-18T00:00:00.000Z', email: 'owner@example.com' };
+    const expected = {
+      claude: { claudeAiOauth: { accessToken: 'access', expiresAt: 1794960000000, scopes: ['user:inference', 'user:profile'] } },
+      codex: { auth_mode: 'chatgpt', tokens: { id_token: 'id', access_token: 'access', account_id: 'acct' } },
+      xai: { 'https://auth.x.ai::b1a00492-073a-47ea-816f-4c329264a828': {
+        key: 'access', auth_mode: 'oidc', email: 'owner@example.com', expires_at: '2026-11-18T00:00:00.000Z',
+        oidc_issuer: 'https://auth.x.ai', oidc_client_id: 'b1a00492-073a-47ea-816f-4c329264a828',
+      } },
     };
-
-    m18_it('share one read per interval once quota-axi verifies the account', async () => {
-      const { run, posts, publish, advance } = setup({ '/agents/ruby/claude': 'acct-1', '/agents/nerd/claude': 'acct-1' });
-      await publish('ruby');
-      await publish('nerd');
-      advance(m18_QUOTA_READ_INTERVAL_MS + 1);
-      await publish('ruby');
-      await m18_expect(publish('nerd')).resolves.toEqual({ status: 'fresh' });
-      m18_expect(run).toHaveBeenCalledTimes(3);
-      const [ruby, nerd] = posts.slice(2);
-      m18_expect([ruby![0], nerd![0]]).toEqual(['ruby', 'nerd']);
-      m18_expect(nerd![1]).toEqual(ruby![1]);
-    });
-
-    m18_it('join a read in flight from another home on the account', async () => {
-      const { run, posts, publish, advance } = setup({ '/agents/ruby/claude': 'acct-1', '/agents/nerd/claude': 'acct-1' });
-      await publish('ruby');
-      await publish('nerd');
-      advance(m18_QUOTA_READ_INTERVAL_MS + 1);
-      let finish!: (stdout: string) => void;
-      run.mockImplementationOnce(() => new Promise<string>((resolve) => { finish = resolve; }));
-      const ruby = publish('ruby');
-      const nerd = publish('nerd');
-      finish(JSON.stringify(verified('acct-1')));
-      await m18_expect(Promise.all([ruby, nerd])).resolves.toEqual([{ status: 'fresh' }, { status: 'fresh' }]);
-      m18_expect(run).toHaveBeenCalledTimes(3);
-      m18_expect(posts.slice(2).map(([agent]) => agent).sort()).toEqual(['nerd', 'ruby']);
-    });
-
-    m18_it('keep reading separately when the accounts differ', async () => {
-      const { run, posts, publish, advance } = setup({ '/agents/ruby/claude': 'acct-1', '/agents/nerd/claude': 'acct-2' });
-      await publish('ruby');
-      await publish('nerd');
-      advance(m18_QUOTA_READ_INTERVAL_MS + 1);
-      await publish('ruby');
-      await publish('nerd');
-      m18_expect(run).toHaveBeenCalledTimes(4);
-      m18_expect(posts[3]![1].account).toEqual(posts[1]![1].account);
-      m18_expect(posts[3]![1].account).not.toEqual(posts[2]![1].account);
-    });
-
-    m18_it('read their own login again as soon as its credential file changes', async () => {
-      const { run, posts, publish, switchLogin, advance } = setup({ '/agents/ruby/claude': 'acct-1', '/agents/nerd/claude': 'acct-1' });
-      await publish('ruby');
-      await publish('nerd');
-      switchLogin('nerd', 'acct-2');
-      advance(m18_QUOTA_READ_INTERVAL_MS + 1);
-      await publish('ruby');
-      await publish('nerd');
-      m18_expect(run).toHaveBeenCalledTimes(4);
-      const [ruby, nerd] = posts.slice(2);
-      m18_expect(nerd![0]).toBe('nerd');
-      m18_expect(nerd![1].account).not.toEqual(ruby![1].account);
-      // Ruby no longer rides Nerd's reads, and Nerd no longer rides Ruby's.
-      advance(m18_QUOTA_READ_INTERVAL_MS + 1);
-      await publish('ruby');
-      await publish('nerd');
-      m18_expect(run).toHaveBeenCalledTimes(6);
-    });
-
-    m18_it('read and post the new login on a refresh right after the credential file changes', async () => {
-      const { run, posts, publish, switchLogin, advance } = setup({ '/agents/nerd/claude': 'acct-1' });
-      await publish('nerd', true);
-      const before = posts.at(-1)![1];
-      run.mockImplementationOnce(async () => {
-        const report = verified('acct-2');
-        const [provider] = report.providers;
-        return JSON.stringify({
-          ...report,
-          providers: [{ ...provider!, windows: provider!.windows.map((w) => ({ ...w, percentRemaining: 20 })) }],
-        });
-      });
-      switchLogin('nerd', 'acct-2');
-      advance(1_000);
-      await m18_expect(publish('nerd', true)).resolves.toEqual({ status: 'fresh' });
-      m18_expect(run).toHaveBeenCalledTimes(2);
-      m18_expect(posts).toHaveLength(2);
-      const after = posts[1]![1];
-      m18_expect(after.account).not.toEqual(before.account);
-      m18_expect(before.windows[0]!.utilization).toBeCloseTo(0.09);
-      m18_expect(after.windows.every((w) => Math.abs(w.utilization - 0.8) < 1e-9)).toBe(true);
-    });
-
-    m18_it('read their own login on a refresh, even when the file did not change', async () => {
-      const { run, posts, publish, accountOf, advance } = setup({ '/agents/ruby/claude': 'acct-1', '/agents/nerd/claude': 'acct-1' });
-      await publish('ruby');
-      await publish('nerd');
-      accountOf['/agents/nerd/claude'] = 'acct-2';
-      for (let round = 0; round < 3; round++) {
-        advance(m18_QUOTA_READ_INTERVAL_MS + 1);
-        await publish('ruby', true);
-        await publish('nerd', true);
+    try {
+      for (const provider of ['claude', 'codex', 'xai'] as const) {
+        const env = await proxiedQuotaHome(provider, login, join(home, provider));
+        const homeEnv = { claude: 'CLAUDE_CONFIG_DIR', codex: 'CODEX_HOME', xai: 'GROK_HOME' }[provider];
+        const text = await readFile(join(env[homeEnv]!, provider === 'claude' ? '.credentials.json' : 'auth.json'), 'utf8');
+        m18_expect(JSON.parse(text)).toEqual(expected[provider]);
       }
-      const nerd = posts.filter(([agent]) => agent === 'nerd').at(-1)![1];
-      const ruby = posts.filter(([agent]) => agent === 'ruby').at(-1)![1];
-      m18_expect(nerd.account).not.toEqual(ruby.account);
-      m18_expect(run).toHaveBeenCalledTimes(8);
-    });
-
-    m18_it('read their own login again within a few intervals between turns', async () => {
-      const { run, posts, publish, accountOf, advance } = setup({ '/agents/ruby/claude': 'acct-1', '/agents/nerd/claude': 'acct-1' });
-      await publish('ruby');
-      await publish('nerd');
-      accountOf['/agents/nerd/claude'] = 'acct-2';
-      for (let round = 0; round < 3; round++) {
-        advance(m18_QUOTA_READ_INTERVAL_MS + 1);
-        await publish('ruby');
-        await publish('nerd');
-      }
-      // Nerd rode Ruby's reads for two intervals, then read its own login.
-      m18_expect(run).toHaveBeenCalledTimes(6);
-      const nerd = posts.filter(([agent]) => agent === 'nerd').at(-1)![1];
-      m18_expect(nerd.account).not.toEqual(posts.filter(([agent]) => agent === 'ruby').at(-1)![1].account);
-    });
-
-    m18_it("never hand one home's expired sign-in to another home", async () => {
-      const { run, posts, publish, advance } = setup({ '/agents/ruby/claude': 'acct-1', '/agents/nerd/claude': 'acct-1' });
-      await publish('ruby');
-      await publish('nerd');
-      advance(m18_QUOTA_READ_INTERVAL_MS + 1);
-      run.mockResolvedValueOnce(JSON.stringify(verified('acct-1', { status: 'auth_required', stale: true })));
-      await m18_expect(publish('ruby')).resolves.toEqual({ status: 'signed_out' });
-      await m18_expect(publish('nerd')).resolves.toEqual({ status: 'fresh' });
-      m18_expect(run).toHaveBeenCalledTimes(4);
-      m18_expect(posts[3]![0]).toBe('nerd');
-    });
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
   });
 
   m18_it('answers a failed read with a reason instead of dropping it', async () => {
@@ -451,7 +362,6 @@ m18_describe('one read per plan account on this machine', () => {
       agentId: 'ruby', slots: new Map(), launch, now: () => now * 1000,
       run: async () => { throw new Error('spawn failed'); },
       post: async (usage) => { posts.push(usage); },
-      credentialPath: () => '/home/op/.claude/.credentials.json',
     });
     await m18_expect(reader.publish('claude', {}, true)).resolves.toEqual({ status: 'failed', reason: "usage reader didn't run" });
     m18_expect(posts[0]).toMatchObject({ windows: [], read: { status: 'failed' }, account: { provider: 'claude' } });
@@ -459,4 +369,42 @@ m18_describe('one read per plan account on this machine', () => {
     error.mockRestore();
   });
 });
+});
+
+it('drops cached account bindings when a provider signs in again', async () => {
+  const slots = new Map();
+  const post = vi.fn(async (_usage: import('@beeline/api-contract/daemon').AgentUsage) => {});
+  const report = (accountId: string, percentRemaining: number) => JSON.stringify({ providers: [{
+    provider: 'cursor', account: { identityStatus: 'verified', accountId }, state: { status: 'fresh' },
+    windows: [{ id: 'monthly', percentRemaining }],
+  }] });
+  const run = vi.fn().mockResolvedValueOnce(report('old-account', 10)).mockResolvedValueOnce(report('new-account', 90));
+  const reader = new HarnessQuotaReader({ agentId: 'cache-test', slots, post, run, now: () => 0, launch: () => ({ command: 'quota', args: [] }) });
+  await reader.publish('cursor', {});
+  const old = post.mock.calls[0]![0];
+  invalidateQuotaReads(slots);
+  await reader.publish('cursor', {}, true);
+  expect(run).toHaveBeenCalledTimes(2);
+  expect(post.mock.calls[1]![0]).toMatchObject({ windows: [{ utilization: 0.1 }] });
+  expect(post.mock.calls[1]![0].account!.key).not.toBe(old.account!.key);
+});
+
+it('discards an older in-flight quota read after provider invalidation', async () => {
+  const slots = new Map();
+  let finish!: (report: string) => void;
+  const old = new Promise<string>(resolve => { finish = resolve; });
+  const post = vi.fn(async (_usage: import('@beeline/api-contract/daemon').AgentUsage) => {});
+  const report = (remaining: number) => JSON.stringify({ providers: [{ provider: 'cursor', state: { status: 'fresh' },
+    windows: [{ id: 'monthly', percentRemaining: remaining }] }] });
+  const run = vi.fn().mockReturnValueOnce(old).mockResolvedValueOnce(report(90));
+  const reader = new HarnessQuotaReader({ agentId: 'race-test', slots, post, run, now: () => 0, launch: () => ({ command: 'quota', args: [] }) });
+  const pending = reader.publish('cursor', {});
+  invalidateQuotaReads(slots);
+  await reader.publish('cursor', {}, true);
+  finish(report(10));
+  await expect(pending).resolves.toMatchObject({ status: 'failed' });
+  expect(post).toHaveBeenCalledOnce();
+  expect(post.mock.calls[0]![0]).toMatchObject({ windows: [{ utilization: 0.1 }] });
+  await reader.publish('cursor', {});
+  expect(run).toHaveBeenCalledTimes(2);
 });

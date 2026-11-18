@@ -102,6 +102,12 @@ export function harnessHomeStateDirs(
  * writable tmpfs (so tools that insist on writing e.g. `known_hosts` still
  * work against nothing), files by `/dev/null`.
  */
+const REQUIRED_CREDENTIAL_MASK_PATHS = [
+  '.config/beeline',
+  '.claude/.credentials.json', '.codex/auth.json', '.grok/auth.json',
+  '.pi/agent/auth.json', '.local/share/opencode/auth.json',
+] as const;
+
 export const KNOWN_CREDENTIAL_MASK_PATHS = [
   '.config/gh',
   '.ssh',
@@ -110,8 +116,9 @@ export const KNOWN_CREDENTIAL_MASK_PATHS = [
   '.secrets.env',
   '.beeline/registry-mcp',
   '.gnupg', '.aws', '.azure', '.kube', '.gcloud', '.docker',
-  '.config/gcloud', '.config/beeline', '.config/trusty-squire',
+  '.config/gcloud', '.config/trusty-squire',
   '.local/share/keyrings',
+  ...REQUIRED_CREDENTIAL_MASK_PATHS,
 ] as const;
 
 
@@ -144,7 +151,7 @@ export function credentialMaskPaths(
   },
   requiredPaths: string[] = [],
 ): MaskedPath[] {
-  const required = new Set(requiredPaths.map((path) => resolve(path)));
+  const required = new Set([...requiredPaths.map((path) => resolve(path)), ...REQUIRED_CREDENTIAL_MASK_PATHS.map((path) => resolve(home, path))]);
   const candidates = [
     ...KNOWN_CREDENTIAL_MASK_PATHS.map((entry) => resolve(home, entry)),
     ...(extraPaths ?? []).map((entry) => resolve(entry)),
@@ -428,6 +435,25 @@ const OVERLAY_BOOTSTRAP = [
   'exec "$@"',
 ].join('\n');
 
+/** Create missing mask mountpoints on namespace-only copies of their parents. */
+const MASK_MOUNTPOINT_BOOTSTRAP = [
+  'set -eu',
+  'scratch=/dev/shm/beeline-masks',
+  'mkdir "$scratch"',
+  'i=0',
+  'while [ "$1" != -- ]; do',
+  '  mkdir "$scratch/$i" "$scratch/$i/lower" "$scratch/$i/upper" "$scratch/$i/work"',
+  '  mount --bind "$1" "$scratch/$i/lower"',
+  '  mount -t overlay overlay -o "lowerdir=$scratch/$i/lower,upperdir=$scratch/$i/upper,workdir=$scratch/$i/work,userxattr" "$1"',
+  '  i=$((i + 1))',
+  '  shift',
+  'done',
+  'shift',
+  'while [ "$1" != -- ]; do mkdir -p -- "$1"; shift; done',
+  'shift',
+  'exec "$@"',
+].join('\n');
+
 
 /** Whether a native edit reaches a writable host mount in this exact plan. */
 export function sandboxAllowsWrite(plan: SandboxMountPlan, path: string): boolean {
@@ -512,7 +538,36 @@ export function buildBwrapArgv(input: {
   } else {
     args.push('--', input.command, ...(input.args ?? []));
   }
-  return { command: input.bwrapPath, args };
+  const missingMasks = input.plan.masks.filter(mask => mask.create);
+  if (!missingMasks.length) return { command: input.bwrapPath, args };
+  const parents = normalize(missingMasks.map(mask => {
+    let parent = dirname(mask.path);
+    while (!lstatSync(parent, { throwIfNoEntry: false })) parent = dirname(parent);
+    return parent;
+  })).filter((parent, _index, all) => !all.some(other =>
+    other !== parent && parent.startsWith(`${other}/`)));
+  // Writable grants and private state must bind the host inode, rather than
+  // writing into the temporary overlay. /dev is replaced by the inner bwrap,
+  // hiding these original-parent aliases before the agent starts.
+  for (let i = 0; i < args.length && args[i] !== '--'; i++) {
+    if (!['--bind', '--bind-try', '--ro-bind', '--ro-bind-try', '--dev-bind-try'].includes(args[i]!)) continue;
+    const source = args[i + 1]!;
+    const parentIndex = parents.findIndex(parent => source === parent || source.startsWith(`${parent}/`));
+    if (parentIndex !== -1) args[i + 1] = `/dev/shm/beeline-masks/${parentIndex}/lower${source.slice(parents[parentIndex]!.length)}`;
+    i += 2;
+  }
+  // The inner root bind makes these temporary overlays read-only before any
+  // agent code runs. Lower directories remain live, including native Cursor
+  // logins created after startup; mkdir never touches a host credential path.
+  return { command: input.bwrapPath, args: [
+    '--unshare-user', '--uid', '0', '--gid', '0',
+    ...['CAP_SYS_ADMIN', 'CAP_DAC_OVERRIDE', 'CAP_SETFCAP'].flatMap(cap => ['--cap-add', cap]),
+    '--bind', '/', '/', '--proc', '/proc', '--dev-bind', '/dev', '/dev', '--tmpfs', '/dev/shm',
+    '--die-with-parent', '--', 'sh', '-c', MASK_MOUNTPOINT_BOOTSTRAP, 'beeline-mask-mountpoints',
+    ...parents, '--', ...missingMasks.map(mask => mask.path), '--', input.bwrapPath,
+    ...(overlays.length ? [] : ['--unshare-user', '--uid', String(process.getuid!()), '--gid', String(process.getgid!()), '--cap-drop', 'ALL']),
+    ...args,
+  ] };
 }
 
 

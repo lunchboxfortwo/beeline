@@ -4,7 +4,6 @@
 
 The agent stays on your machine. Your provider key stays on your machine. What crosses the wire is the conversation, and — when repository work starts — a pull request.
 
-
 ## One message
 
 In a Room bound to a repository, someone types:
@@ -53,7 +52,7 @@ It does **not** ask for a name or a soul. The server assigns the agent one of tw
 │  ○ Rename this agent
 ```
 
-Codex, Claude Code, Grok, and OpenCode use the sign-in they already have on that machine, so they are not asked for a key at all. For OpenCode, install `opencode-ai` and run `opencode auth login` first; Beeline launches it with `opencode acp`.
+For provider sign-in and migration from native logins, follow the [README sign-in guidance](../README.md#get-started). Install `opencode-ai` for OpenCode; Beeline launches it with `opencode acp`.
 
 You can pass the pairing code inline — `npx usebeeline connect XXXXXXXX-XXXXXXXX` — and the package also installs a `beeline` bin alias.
 

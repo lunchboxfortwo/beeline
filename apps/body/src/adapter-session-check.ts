@@ -1,10 +1,10 @@
 import { startAgentProcess, stopAgentProcess } from './agent-process.js';
-import { agentBehavior } from './agent-command.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AcpClient, AcpRequestError } from './acp.js';
-import { prepareRoomAgentHome, roomSessionTmpDir, writeBackRoomClaudeLogin } from './agent-home.js';
+import { prepareRoomAgentHome, roomSessionTmpDir } from './agent-home.js';
+import { machineCliProxy } from './cliproxy.js';
 import type { ManagedAdapterKind } from './adapter-store.js';
 
 export interface AdapterSessionCheckResult {
@@ -20,7 +20,7 @@ export async function checkAdapterSession(options: {
   scratchRoot?: string;
   /** CI has no login: an auth-only refusal after session/new validates the wire contract. */
   allowUnauthenticatedSession?: boolean;
-  /** Helpers prepare exactly the same credential-linked isolated home as Room sessions. */
+  /** Helpers prepare exactly the same proxy-backed isolated home as Room sessions. */
   agentKind?: ManagedAdapterKind;
   onStage?: (stage: 'initialize' | 'session/new') => void;
   onInitialized?: (result: AdapterSessionCheckResult) => void;
@@ -29,13 +29,16 @@ export async function checkAdapterSession(options: {
   const homeRoot = join(cwd, 'agent-home');
   let client: AcpClient | undefined;
   let negotiated: Record<string, unknown> | undefined;
+  const cliProxy = options.agentKind ? (await machineCliProxy())?.endpoint : undefined;
   try {
-    const homeOverlay = options.agentKind
+    const homeOverlay = cliProxy
       ? await prepareRoomAgentHome({
           root: homeRoot,
           operatorHome: options.env.HOME,
           agentKind: options.agentKind,
           failClosed: true,
+          cliProxy,
+          agentEnv: options.env,
         })
       : {};
     client = new AcpClient({
@@ -102,9 +105,6 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:r.id,result})+'\\n'); });`
   } finally {
     try {
       if (client) await stopAgentProcess(client);
-      if (agentBehavior(options.agentKind).sharedLoginWriteBack) {
-        await writeBackRoomClaudeLogin({ root: homeRoot, operatorHome: options.env.HOME });
-      }
     } finally {
       if (options.agentKind) await rm(roomSessionTmpDir(homeRoot), { force: true });
       await rm(cwd, { recursive: true, force: true });

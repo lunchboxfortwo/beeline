@@ -4,11 +4,9 @@ import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, expect, it } from 'vitest';
 import type { AgentKind } from './agent-command.js';
-import { harnessStateDirsFromEnv, prepareRoomAgentCredentials, prepareRoomAgentHome, writeBackRoomClaudeLogin } from './agent-home.js';
-import { writeClaudeCredentials } from './claude-sign-in.js';
+import { harnessLoginWritablePaths, harnessStateDirsFromEnv, prepareRoomAgentCredentials, prepareRoomAgentHome } from './agent-home.js';
 import { writeOpenCodeKey } from './agent-sign-in.js';
 import { wrapAgentCommand } from './bwrap-sandbox.js';
-import { harnessLoginWritablePaths } from './harness-login-mounts.js';
 
 const run = promisify(execFile);
 const roots: string[] = [];
@@ -17,73 +15,93 @@ afterEach(async () => {
   await Promise.all(tmpLinks.splice(0).map(path => rm(path, { force: true })));
   await Promise.all(roots.splice(0).map(path => rm(path, { recursive: true, force: true })));
 });
-const cases: Array<{ kind: AgentKind; source: string; privateFile: string; fallback?: boolean }> = [
+const cursorCases = [
+  { source: '.config/cursor/auth.json', privateFile: 'user/.config/cursor/auth.json' },
+  { source: '.cursor/agent-cli-state.json', privateFile: 'cursor/agent-cli-state.json' },
+];
+const proxied: Array<{ kind: AgentKind; source: string; privateFile: string }> = [
   { kind: 'claude', source: '.claude/.credentials.json', privateFile: 'claude/.credentials.json' },
-  { kind: 'pi', source: '.pi/agent/auth.json', privateFile: 'pi/auth.json', fallback: true },
-  { kind: 'codex', source: '.codex/auth.json', privateFile: 'codex/auth.json', fallback: true },
-  { kind: 'grok', source: '.grok/auth.json', privateFile: 'grok/auth.json', fallback: true },
-  { kind: 'cursor', source: '.config/cursor/auth.json', privateFile: 'user/.config/cursor/auth.json', fallback: true },
-  { kind: 'cursor', source: '.cursor/agent-cli-state.json', privateFile: 'cursor/agent-cli-state.json', fallback: true },
-  { kind: 'opencode', source: '.local/share/opencode/auth.json', privateFile: 'user/.local/share/opencode/auth.json', fallback: true },
+  { kind: 'pi', source: '.pi/agent/auth.json', privateFile: 'pi/auth.json' },
+  { kind: 'codex', source: '.codex/auth.json', privateFile: 'codex/auth.json' },
+  { kind: 'grok', source: '.grok/auth.json', privateFile: 'grok/auth.json' },
+  { kind: 'opencode', source: '.local/share/opencode/auth.json', privateFile: 'user/.local/share/opencode/auth.json' },
 ];
 
+async function sandboxed(mode: 'readonly' | 'edit', root: string, env: Record<string, string>, kind: AgentKind, operatorHome: string, script: string) {
+  const { stateDirs, tmpDir } = harnessStateDirsFromEnv(env);
+  const command = wrapAgentCommand({ bwrapPath: '/usr/bin/bwrap',
+    spec: { mode, cwd: root, harnessStateDirs: stateDirs, tmpDir,
+      additionalWritablePaths: harnessLoginWritablePaths(kind, operatorHome) },
+    command: process.execPath, args: ['--input-type=module', '-e',
+      `import fs from 'node:fs';\nimport assert from 'node:assert/strict';\n${script}`] });
+  await run(command.command, command.args, { env: { ...process.env, ...env } });
+}
+
 for (const mode of ['readonly', 'edit'] as const) {
-  it.each(cases)('$kind login store supports refresh in ' + mode + ' mode', async ({ kind, source, privateFile, fallback }) => {
+  it.each(cursorCases)('Cursor native login store $source supports refresh in ' + mode + ' mode', async ({ source, privateFile }) => {
     const root = await mkdtemp('/var/tmp/beeline-login-mounts-'); roots.push(root);
     const operatorHome = join(root, 'operator');
     const shared = join(operatorHome, source);
-    const operatorSettings = join(dirname(shared), 'settings.json');
-    const outside = join(operatorHome, 'unrelated.json');
     await mkdir(dirname(shared), { recursive: true });
-    await writeFile(operatorSettings, 'operator settings');
-    await writeFile(outside, 'unrelated');
-    // The card dispatcher runs in the unsandboxed helper. These are the real
-    // helper writers for Claude/OpenCode. Native CLI login is deliberately NOT
-    // claimed proved by this test: its complete directory stays writable.
-    if (kind === 'claude') await writeClaudeCredentials(operatorHome, {
-      accessToken: 'login', refreshToken: 'login', expiresAt: 1000,
-      scopes: ['user:inference'], subscriptionType: null, rateLimitTier: null,
-    });
-    else if (kind === 'opencode') await writeOpenCodeKey(operatorHome, 'openai', 'login');
-    else await writeFile(shared, '{}');
-    if (kind === 'cursor') {
-      await mkdir(join(operatorHome, '.cursor'), { recursive: true });
-      await writeFile(join(operatorHome, '.cursor', 'agent-cli-state.json'), '{}');
-    }
+    await mkdir(join(operatorHome, '.cursor'), { recursive: true });
+    await mkdir(join(operatorHome, '.config', 'cursor'), { recursive: true });
+    await writeFile(shared, '{}');
+    await writeFile(join(operatorHome, 'unrelated.json'), 'unrelated');
     const privateRoot = join(root, 'private');
-    const env = await prepareRoomAgentCredentials({ root: privateRoot, operatorHome, agentKind: kind });
+    const env = await prepareRoomAgentCredentials({ root: privateRoot, operatorHome, agentKind: 'cursor' });
     tmpLinks.push(env.TMPDIR!);
-    const { stateDirs, tmpDir } = harnessStateDirsFromEnv(env);
     const credential = join(privateRoot, privateFile);
-    const command = wrapAgentCommand({ bwrapPath: '/usr/bin/bwrap',
-      spec: { mode, cwd: root, harnessStateDirs: stateDirs, tmpDir,
-        additionalWritablePaths: harnessLoginWritablePaths(kind, operatorHome) },
-      command: process.execPath, args: ['--input-type=module', '-e', `
-        import fs from 'node:fs';
-        import assert from 'node:assert/strict';
-        const credential = ${JSON.stringify(credential)};
-        assert.ok(fs.existsSync(credential));
-        // Prove rename and lock availability, including writers that resolve
-        // the credential link before staging. This is a filesystem contract,
-        // not a claim to have authenticated against a native provider.
-        const target = ${JSON.stringify(kind)} === 'claude' ? credential : fs.realpathSync(credential);
-        fs.writeFileSync(target + '.lock', 'lock');
-        fs.writeFileSync(target + '.next', JSON.stringify({ claudeAiOauth: { accessToken: 'refresh', expiresAt: 2000 } }));
-        fs.renameSync(target + '.next', target);
-        fs.unlinkSync(target + '.lock');
-        const settings = ${JSON.stringify(operatorSettings)};
-        if (${Boolean(fallback)}) fs.writeFileSync(settings, 'writable fallback');
-        else assert.throws(() => fs.writeFileSync(settings, 'escape'), { code: 'EROFS' });
-        assert.throws(() => fs.writeFileSync(${JSON.stringify(outside)}, 'escape'), { code: 'EROFS' });
-      `] });
-    await run(command.command, command.args, { env: { ...process.env, ...env } });
-    if (kind === 'claude') await writeBackRoomClaudeLogin({ root: privateRoot, operatorHome });
-    const refreshed = JSON.parse(await readFile(shared, 'utf8'));
-    expect(refreshed.claudeAiOauth.accessToken).toBe('refresh');
-    expect(await readFile(operatorSettings, 'utf8')).toBe(fallback ? 'writable fallback' : 'operator settings');
-    expect(await readFile(outside, 'utf8')).toBe('unrelated');
+    await sandboxed(mode, root, env, 'cursor', operatorHome, `
+      const target = fs.realpathSync(${JSON.stringify(credential)});
+      fs.writeFileSync(target + '.next', JSON.stringify({ refreshed: true }));
+      fs.renameSync(target + '.next', target);
+      assert.throws(() => fs.writeFileSync(${JSON.stringify(join(operatorHome, 'unrelated.json'))}, 'escape'), { code: 'EROFS' });`);
+    expect(JSON.parse(await readFile(shared, 'utf8'))).toEqual({ refreshed: true });
+    expect(await readFile(join(operatorHome, 'unrelated.json'), 'utf8')).toBe('unrelated');
   });
 
+  it.each(proxied)('$kind session holds no provider login and cannot write the operator store in ' + mode + ' mode', async ({ kind, source, privateFile }) => {
+    const root = await mkdtemp('/var/tmp/beeline-login-mounts-'); roots.push(root);
+    const operatorHome = join(root, 'operator');
+    const shared = join(operatorHome, source);
+    await mkdir(dirname(shared), { recursive: true });
+    const oauth = JSON.stringify({ native: { type: 'oauth', refresh: 'operator-refresh' } });
+    await writeFile(shared, oauth);
+    const privateRoot = join(root, 'private');
+    const env = await prepareRoomAgentCredentials({ root: privateRoot, operatorHome, agentKind: kind,
+      cliProxy: { url: 'http://127.0.0.1:9', key: 'local-key' } });
+    tmpLinks.push(env.TMPDIR!);
+    expect(harnessLoginWritablePaths(kind, operatorHome)).toEqual([]);
+    // Grok's private sign-in record holds only the local inference key.
+    const privateLogin = join(privateRoot, privateFile);
+    await sandboxed(mode, root, env, kind, operatorHome, `
+      const login = ${JSON.stringify(privateLogin)};
+      assert.ok(!fs.existsSync(login) || !fs.readFileSync(login, 'utf8').includes('operator-refresh'));
+      assert.equal(fs.existsSync(login), ${JSON.stringify(kind === 'grok')});
+      assert.throws(() => fs.writeFileSync(${JSON.stringify(shared)}, 'escape'), { code: 'EROFS' });`);
+    expect(await readFile(shared, 'utf8')).toBe(oauth);
+    expect(JSON.stringify(env)).not.toContain('operator-refresh');
+  });
+}
+
+it.each([
+  { kind: 'pi' as const, source: '.pi/agent/auth.json', target: 'pi/auth.json', key: { type: 'api_key', key: 'sk-pi' } },
+  { kind: 'opencode' as const, source: '.local/share/opencode/auth.json', target: 'user/.local/share/opencode/auth.json', key: { type: 'api', key: 'sk-oc' } },
+])('$kind keeps its API keys and drops OAuth entries', async ({ kind, source, target, key }) => {
+  const root = await mkdtemp('/var/tmp/beeline-login-keys-'); roots.push(root);
+  const operatorHome = join(root, 'operator');
+  await mkdir(dirname(join(operatorHome, source)), { recursive: true });
+  await writeFile(join(operatorHome, source), JSON.stringify({ openrouter: key, anthropic: { type: 'oauth', refresh: 'r' } }));
+  if (kind === 'opencode') await writeOpenCodeKey(operatorHome, 'openai', 'sk-openai');
+  const env = await prepareRoomAgentCredentials({ root: join(root, 'private'), operatorHome, agentKind: kind });
+  tmpLinks.push(env.TMPDIR!);
+  const copy = JSON.parse(await readFile(join(root, 'private', target), 'utf8'));
+  expect(copy.openrouter).toEqual(key);
+  expect(copy.anthropic).toBeUndefined();
+  if (kind === 'opencode') expect(copy.openai).toEqual({ type: 'api', key: 'sk-openai' });
+});
+
+for (const mode of ['readonly', 'edit'] as const) {
   it('keeps Goose operator config read-only and private login files writable in ' + mode + ' mode', async () => {
     const root = await mkdtemp('/var/tmp/beeline-goose-login-'); roots.push(root);
     const operatorHome = join(root, 'operator');

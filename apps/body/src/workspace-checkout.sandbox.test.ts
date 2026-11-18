@@ -9,7 +9,7 @@ import { createServer, type Server } from 'node:net';
 import type { AcpClient } from './acp.js';
 import type { BodyConfig } from './config.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
-import { harnessStateDirsFromEnv, prepareRoomAgentCredentials, writeBackRoomClaudeLogin } from './agent-home.js';
+import { harnessStateDirsFromEnv, prepareRoomAgentCredentials } from './agent-home.js';
 import { wrapAgentCommand } from './bwrap-sandbox.js';
 import { PlaceSession } from './place-session.js';
 import { runtimeDirectory, type AgentRuntimeRecord } from './runtime.js';
@@ -45,7 +45,6 @@ it.each([false, true])('commits from the live thread sandbox after workspace set
   const credentialState = join(operatorHome, '.claude');
   await mkdir(credentialState, { recursive: true });
   const login = { claudeAiOauth: { accessToken: 'original', refreshToken: 'original', expiresAt: 1000 } };
-  const refreshedLogin = { claudeAiOauth: { accessToken: 'rotated', refreshToken: 'rotated', expiresAt: 2000 } };
   await writeFile(join(credentialState, '.credentials.json'), JSON.stringify(login));
   const browserSocket = join(root, 'browser', 'control.sock');
   await mkdir(join(browserSocket, '..'), { recursive: true });
@@ -94,8 +93,9 @@ it.each([false, true])('commits from the live thread sandbox after workspace set
         try {
           require('node:fs').writeFileSync('proof.txt', 'thread edit\\n');
           require('node:fs').writeFileSync(${JSON.stringify(join(placeRoot, 'own-state'))}, 'private');
-          const loginDir = process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR ?? process.env.CLAUDE_CONFIG_DIR;
-          if (JSON.parse(require('node:fs').readFileSync(loginDir + '/.credentials.json', 'utf8')).claudeAiOauth.accessToken !== 'original') throw new Error('sign-in unavailable');
+          const loginDir = process.env.CLAUDE_CONFIG_DIR;
+          // The proxy owns the login: the session holds no Claude login file.
+          if (require('node:fs').existsSync(loginDir + '/.credentials.json')) throw new Error('session holds a login');
           require('node:fs').writeFileSync(loginDir + '/refresh-lock', 'refresh');
           const reached = await new Promise((done, reject) => {
             let data = '';
@@ -116,9 +116,6 @@ it.each([false, true])('commits from the live thread sandbox after workspace set
           const git = args => require('node:child_process').execFileSync('/usr/bin/git', args, { encoding: 'utf8' });
           git(['add', 'proof.txt']);
           git(['commit', '-m', 'thread edit']);
-          // Claude saves refreshed credentials by renaming over its login link.
-          require('node:fs').writeFileSync(loginDir + '/login-next', ${JSON.stringify(JSON.stringify(refreshedLogin))});
-          require('node:fs').renameSync(loginDir + '/login-next', loginDir + '/.credentials.json');
           console.log(git(['rev-parse', 'HEAD']).trim());
         } catch (error) { console.error(error.stderr?.toString() ?? String(error)); process.exitCode = 1; }
         process.stdin.destroy();
@@ -149,16 +146,13 @@ it.each([false, true])('commits from the live thread sandbox after workspace set
   expect(await readFile(join(cache, 'private'), 'utf8')).toBe('cache');
   expect(await readFile(join(placeRoot, 'own-state'), 'utf8')).toBe('private');
   expect(await readFile(join(privateHome, 'claude', 'refresh-lock'), 'utf8')).toBe('refresh');
-  // The helper shares only the rotated credential, never the operator settings.
-  await writeBackRoomClaudeLogin({ root: privateHome, operatorHome });
-  expect(JSON.parse(await readFile(join(credentialState, '.credentials.json'), 'utf8'))).toEqual(refreshedLogin);
-  expect(JSON.parse(await readFile(join(privateHome, 'claude', '.credentials.json'), 'utf8'))).toEqual(refreshedLogin);
+  expect(JSON.parse(await readFile(join(credentialState, '.credentials.json'), 'utf8'))).toEqual(login);
   expect(await readFile(hostFile, 'utf8')).toBe('host');
   for (const file of protectedFiles) expect(await readFile(file, 'utf8')).toBe('protected');
 });
 
 
-it('keeps operator Claude settings read-only in a signed-in Room', async () => {
+it('keeps operator Claude settings and login read-only in a proxied Room', async () => {
   const root = await mkdtemp('/var/tmp/beeline-room-login-');
   roots.push(root);
   const operatorHome = join(root, 'operator');
@@ -181,10 +175,10 @@ it('keeps operator Claude settings read-only in a signed-in Room', async () => {
       args: ['-e', `
         const fs = require('node:fs');
         const assert = require('node:assert/strict');
-        const loginDir = process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
-        assert.equal(fs.readFileSync(loginDir + '/.credentials.json', 'utf8'), ${JSON.stringify(login)});
+        const loginDir = process.env.CLAUDE_CONFIG_DIR;
+        assert.equal(fs.existsSync(loginDir + '/.credentials.json'), false);
         fs.writeFileSync(loginDir + '/refresh-lock', 'private');
-        for (const path of ${JSON.stringify([settings, source])}) {
+        for (const path of ${JSON.stringify([settings, source, join(operatorHome, '.claude', '.credentials.json')])}) {
           assert.throws(() => fs.writeFileSync(path, 'escape'), { code: 'EROFS' });
         }
       `],

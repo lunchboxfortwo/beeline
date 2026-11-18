@@ -168,6 +168,9 @@ async function main(): Promise<void> {
   if (command === 'converge-dependencies') {
     if (process.env.BEELINE_INTERNAL_RECOVERY !== '1') throw new Error('converge-dependencies is an internal recovery command');
     await refreshRuntimeHarnessAdapters({ env: process.env });
+    // The machine's login proxy tracks its latest release; the helper starts it.
+    const { installLatestCliProxy } = await import('./cliproxy.js');
+    await installLatestCliProxy().catch(error => console.error(`[beeline] CLIProxyAPI not updated: ${String(error)}`));
     const layout = beelineInstallLayout(process.env);
     if (!layout) throw new Error('dependency convergence requires an installed layout');
     const invocationPath = resolve(layout.libDir, 'lib/beeline/beeline-cli.mjs');

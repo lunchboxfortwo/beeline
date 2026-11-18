@@ -6,9 +6,8 @@
  * Code's own manual-paste OAuth link (PKCE, S256) and keeps the verifier in
  * memory. The owner approves on claude.ai,
  * pastes the code back, and the server relays it here once. This helper
- * exchanges it and atomically replaces the operator's shared
- * `~/.claude/.credentials.json` (mode 0600), the file every Room's isolated
- * Claude home links to (`agent-home.ts` SHARED_CREDENTIALS).
+ * exchanges it once and hands the login to the machine's CLIProxyAPI
+ * (`cliproxy.ts`), which alone refreshes it from then on.
  *
  * Claude's OAuth login is not a public API. The constants below mirror
  * Claude Code 2.1.280; `claude-sign-in.contract.test.ts` pins the request and
@@ -16,16 +15,13 @@
  * owner as `ClaudeSignInShapeError` instead of a corrupt login.
  */
 import { createHash, randomBytes } from 'node:crypto';
-import { join } from 'node:path';
 import { AGENT_SIGN_IN_ATTEMPT_TTL_MS } from '@beeline/api-contract/daemon';
-import { readJsonObject, writePrivateFileAtomically } from './atomic-private-file.js';
 
 export const CLAUDE_OAUTH = {
   clientId: '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
   authorizeUrl: 'https://claude.com/cai/oauth/authorize',
   tokenUrl: 'https://platform.claude.com/v1/oauth/token',
   redirectUri: 'https://platform.claude.com/oauth/code/callback',
-  profileUrl: 'https://api.anthropic.com/api/oauth/profile',
   scopes: [
     'org:create_api_key',
     'user:profile',
@@ -36,14 +32,6 @@ export const CLAUDE_OAUTH = {
     'user:plugins',
   ],
 } as const;
-
-/** Claude Code's own organization_type -> subscriptionType mapping. */
-const SUBSCRIPTION_TYPES: Readonly<Record<string, string>> = {
-  claude_max: 'max',
-  claude_pro: 'pro',
-  claude_enterprise: 'enterprise',
-  claude_team: 'team',
-};
 
 export const CLAUDE_SIGN_IN_EXPIRED_MESSAGE =
   'This sign-in expired or was already used. Send the agent `/login` again to start a new one.';
@@ -61,23 +49,6 @@ export class ClaudeSignInShapeError extends Error {
     this.name = 'ClaudeSignInShapeError';
   }
 }
-
-export type ClaudeTokenRequest = {
-  readonly grant_type: 'authorization_code';
-  readonly code: string;
-  readonly redirect_uri: string;
-  readonly client_id: string;
-  readonly code_verifier: string;
-  readonly state: string;
-};
-
-export type ClaudeOauthLogin = {
-  readonly accessToken: string;
-  readonly refreshToken: string;
-  /** Milliseconds since the epoch, as Claude Code stores it. */
-  readonly expiresAt: number;
-  readonly scopes: readonly string[];
-};
 
 function base64Url(bytes: Buffer): string {
   return bytes.toString('base64url');
@@ -104,8 +75,8 @@ export function splitPastedClaudeCode(pasted: string): { code: string; state?: s
   return { code: trimmed.slice(0, hash), state: trimmed.slice(hash + 1) };
 }
 
-/** Validate Claude's token answer before anything touches disk. */
-export function parseClaudeTokenResponse(body: unknown, now: number): ClaudeOauthLogin {
+/** Validate Claude's token answer, shaped as CLIProxyAPI stores a Claude account. */
+export function claudeProxyLogin(body: unknown, now: number): Record<string, unknown> {
   if (!body || typeof body !== 'object' || Array.isArray(body))
     throw new ClaudeSignInShapeError('not a JSON object');
   const value = body as Record<string, unknown>;
@@ -117,39 +88,16 @@ export function parseClaudeTokenResponse(body: unknown, now: number): ClaudeOaut
     throw new ClaudeSignInShapeError('missing expires_in');
   if (value.scope !== undefined && typeof value.scope !== 'string')
     throw new ClaudeSignInShapeError('scope is not a string');
-  const scopes = typeof value.scope === 'string' ? value.scope.split(' ').filter(Boolean) : [];
-  if (!scopes.includes('user:inference'))
+  if (!(typeof value.scope === 'string' ? value.scope.split(' ') : []).includes('user:inference'))
     throw new ClaudeSignInShapeError('the login does not grant user:inference');
+  const email = (value.account as { email_address?: unknown } | undefined)?.email_address;
   return {
-    accessToken: value.access_token,
-    refreshToken: value.refresh_token,
-    expiresAt: now + value.expires_in * 1000,
-    scopes,
+    access_token: value.access_token,
+    refresh_token: value.refresh_token,
+    expired: new Date(now + value.expires_in * 1000).toISOString(),
+    last_refresh: new Date(now).toISOString(),
+    ...(typeof email === 'string' && email ? { email } : {}),
   };
-}
-
-/** Replace the shared login atomically, keeping every other top-level key (other OAuth logins). */
-export async function writeClaudeCredentials(
-  operatorHome: string,
-  login: ClaudeOauthLogin & {
-    readonly subscriptionType: string | null;
-    readonly rateLimitTier: string | null;
-  },
-): Promise<string> {
-  const path = join(operatorHome, '.claude', '.credentials.json');
-  const next = {
-    ...(await readJsonObject(path)),
-    claudeAiOauth: {
-      accessToken: login.accessToken,
-      refreshToken: login.refreshToken,
-      expiresAt: login.expiresAt,
-      scopes: [...login.scopes],
-      subscriptionType: login.subscriptionType,
-      rateLimitTier: login.rateLimitTier,
-    },
-  };
-  await writePrivateFileAtomically(path, `${JSON.stringify(next, null, 2)}\n`);
-  return path;
 }
 
 type PendingAttempt = {
@@ -160,7 +108,6 @@ type PendingAttempt = {
 };
 
 export type ClaudeSignInOptions = {
-  readonly operatorHome: string;
   readonly fetch?: typeof fetch;
   readonly now?: () => number;
 };
@@ -171,7 +118,7 @@ export class ClaudeSignIn {
   readonly #fetch: typeof fetch;
   readonly #now: () => number;
 
-  constructor(private readonly options: ClaudeSignInOptions) {
+  constructor(options: ClaudeSignInOptions) {
     this.#fetch = options.fetch ?? fetch;
     this.#now = options.now ?? Date.now;
   }
@@ -192,8 +139,8 @@ export class ClaudeSignIn {
     });
   }
 
-  /** Exchange the pasted code and save the login. A rejected code keeps the attempt for a retry. */
-  async complete(attemptId: string, pasted: string): Promise<void> {
+  /** Exchange the pasted code for a login. A rejected code keeps the attempt for a retry. */
+  async complete(attemptId: string, pasted: string): Promise<Record<string, unknown>> {
     this.#prune();
     const attempt = this.#attempts.get(attemptId);
     if (!attempt || attempt.completing) throw new Error(CLAUDE_SIGN_IN_EXPIRED_MESSAGE);
@@ -203,14 +150,8 @@ export class ClaudeSignIn {
       throw new Error(CLAUDE_SIGN_IN_WRONG_ATTEMPT_MESSAGE);
     attempt.completing = true;
     try {
-      const request: ClaudeTokenRequest = {
-        grant_type: 'authorization_code',
-        code,
-        redirect_uri: CLAUDE_OAUTH.redirectUri,
-        client_id: CLAUDE_OAUTH.clientId,
-        code_verifier: attempt.verifier,
-        state: attempt.state,
-      };
+      const request = { grant_type: 'authorization_code', code, redirect_uri: CLAUDE_OAUTH.redirectUri,
+        client_id: CLAUDE_OAUTH.clientId, code_verifier: attempt.verifier, state: attempt.state };
       let response: Response;
       try {
         response = await this.#fetch(CLAUDE_OAUTH.tokenUrl, {
@@ -232,35 +173,11 @@ export class ClaudeSignIn {
       } catch {
         throw new ClaudeSignInShapeError('not JSON');
       }
-      const login = parseClaudeTokenResponse(body, this.#now());
-      const profile = await this.#profile(login.accessToken);
-      await writeClaudeCredentials(this.options.operatorHome, { ...login, ...profile });
+      const login = claudeProxyLogin(body, this.#now());
       this.#attempts.delete(attemptId);
+      return login;
     } finally {
       attempt.completing = false;
-    }
-  }
-
-  /** Best effort, like Claude Code's own login: a missing plan is `null`, never a failure. */
-  async #profile(
-    accessToken: string,
-  ): Promise<{ subscriptionType: string | null; rateLimitTier: string | null }> {
-    try {
-      const response = await this.#fetch(CLAUDE_OAUTH.profileUrl, {
-        headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
-        signal: undefined,
-      });
-      if (!response.ok) return { subscriptionType: null, rateLimitTier: null };
-      const organization = ((await response.json()) as { organization?: Record<string, unknown> })
-        ?.organization;
-      const type = organization?.organization_type;
-      const tier = organization?.rate_limit_tier;
-      return {
-        subscriptionType: typeof type === 'string' ? (SUBSCRIPTION_TYPES[type] ?? null) : null,
-        rateLimitTier: typeof tier === 'string' ? tier : null,
-      };
-    } catch {
-      return { subscriptionType: null, rateLimitTier: null };
     }
   }
 

@@ -1,4 +1,17 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+// Claude reads the machine proxy's current login.
+vi.mock('./cliproxy.js', async (original) => {
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dir = mkdtempSync(join(tmpdir(), 'usage-proxy-'));
+  return {
+    ...(await original<typeof import('./cliproxy.js')>()),
+    cliProxyDir: () => dir,
+    machineCliProxy: async () => ({ readLogin: async () => ({ access_token: 'proxy-access' }) }),
+  };
+});
 import { mkdtemp, mkdir, writeFile, link, symlink, rm, stat, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -73,7 +86,7 @@ m19_describe('real quota reader through negotiated daemon publication adapter',(
         calls.push({agent:agentId,name,input});return name==='publishAgentUsageAccount'?{ownerId,accountId:'1',revision:'b'.repeat(64)}:{id:'ok'};
       }} as unknown as m19_DaemonApiClient;
       return new m19_HarnessQuotaReader({agentId,slots,run,accountPublisher:m19_helperUsageBinding(api),post:usage=>api.execute('postAgentUsage',{agentId,usage}),
-        now:()=>100_000,credentialPath:()=>'/synthetic/fixture/credentials',fingerprint:()=> 'fixture-only',launch:()=>({command:'synthetic-node',args:[]})});
+        now:()=>100_000,launch:()=>({command:'synthetic-node',args:[]})});
     };
     const first=reader('agent-a'),second=reader('agent-b');
     await Promise.all([first.publish('claude',{}),second.publish('claude',{})]);
@@ -104,8 +117,9 @@ m19_describe('real quota reader through negotiated daemon publication adapter',(
     const api={agentId:'late-agent',channel:{usageAccountScope:scope},execute} as unknown as m19_DaemonApiClient;
     const run=m19_vi.fn(()=>new Promise<string>(resolve=>{finish=resolve;}));
     const reader=new m19_HarnessQuotaReader({agentId:'late-agent',slots:new Map(),run,accountPublisher:m19_helperUsageBinding(api),post:usage=>api.execute('postAgentUsage',{agentId:'late-agent',usage}),
-      now:()=>100_000,credentialPath:()=>'/synthetic/owner-change/credentials',fingerprint:()=> 'fixture',launch:()=>({command:'synthetic',args:[]})});
-    const reading=reader.publish('claude',{});if(changed==='owner')ownerId='new-owner';else generation++;finish(JSON.stringify(m19_QUOTA_AXI_CLAUDE_REPORT));
+      now:()=>100_000,launch:()=>({command:'synthetic',args:[]})});
+    const reading=reader.publish('claude',{});if(changed==='owner')ownerId='new-owner';else generation++;
+    await m19_vi.waitFor(()=>m19_expect(finish).toBeDefined());finish(JSON.stringify(m19_QUOTA_AXI_CLAUDE_REPORT));
     m19_expect(await reading).toEqual({status:'failed',reason:'usage ownership changed during read'});m19_expect(execute).not.toHaveBeenCalled();
   });
 
@@ -120,7 +134,7 @@ m19_describe('real quota reader through negotiated daemon publication adapter',(
     const api={agentId:'recovery-agent',channel:{usageAccountScope:scope},execute} as unknown as m19_DaemonApiClient;
     const run=m19_vi.fn(async()=>JSON.stringify(m19_QUOTA_AXI_CLAUDE_REPORT));
     const reader=new m19_HarnessQuotaReader({agentId:api.agentId,slots:new Map(),run,accountPublisher:m19_helperUsageBinding(api),post:usage=>api.execute('postAgentUsage',{agentId:api.agentId,usage}),
-      now:()=>100_000,credentialPath:()=>'/synthetic/recovery/credentials',fingerprint:()=> 'fixture',launch:()=>({command:'synthetic',args:[]})});
+      now:()=>100_000,launch:()=>({command:'synthetic',args:[]})});
     const publish=()=>reader.publish('claude',{});
     m19_expect(await publish()).toMatchObject({status:'failed'});await publish();m19_expect(execute).toHaveBeenCalledTimes(1);
     generation=2;m19_expect(await publish()).toMatchObject({status:'failed'});await publish();m19_expect(execute).toHaveBeenCalledTimes(2);

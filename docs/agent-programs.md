@@ -21,13 +21,14 @@ through `initialize` and `session/new`, including a system prompt, MCP declarati
 and harness-specific metadata, without a model prompt. Protocol version 1 must
 negotiate successfully; advertised capabilities are recorded, with optional
 features left optional. Package versions select releases, never compatibility.
-The runtime check uses the operator's installed program and the same isolated
-home preparation as Room sessions (`prepareRoomAgentHome`), linking the real
-Claude, Codex and Pi login files. Environment credentials remain available;
-ambient home state does not become the probe's writable home. Claude login
-refreshes use the Room write-back path before the disposable home is removed.
-An authentication refusal on a helper keeps the working copy and alerts once;
-it is never silently counted as a successful promotion.
+The runtime check uses the operator's installed program. When the machine's
+CLIProxyAPI is running in the helper, it uses the same isolated home preparation
+as Room sessions (`prepareRoomAgentHome`). Standalone CLI checks keep the
+caller's native credential environment. An authentication refusal on
+a helper keeps the working copy and alerts once; it is never silently counted
+as a successful promotion. Only callers that explicitly set
+`allowUnauthenticatedSession`, such as CI, accept an auth-only refusal after
+`session/new` as proof of the wire contract.
 
 A passing candidate atomically becomes the shared active command for every agent
 of that kind, including agents with older global paths in their runtime records.
@@ -58,15 +59,15 @@ reject adapter flags receive the install-message style with their version.
 Commands were checked against these upstream sources on 18 October 2026.
 The helper displays these commands; it does not run them.
 
-| Program | Command | Official source |
-| --- | --- | --- |
-| Codex | `npm install -g @openai/codex` | [OpenAI](https://help.openai.com/en/articles/11096431) |
-| Claude Code | `curl -fsSL https://claude.ai/install.sh \| bash` | [Claude](https://support.claude.com/en/articles/14554922-claude-code-user-faq) |
-| OpenCode | `npm install -g opencode-ai` | [OpenCode](https://opencode.ai/docs/) |
-| Pi | `curl -fsSL https://pi.dev/install.sh \| sh` | [Pi repository](https://github.com/earendil-works/pi#readme) |
-| Goose | `curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh \| bash` | [Goose](https://github.com/aaif-goose/goose/blob/main/documentation/docs/getting-started/installation.md) |
-| Grok | `curl -fsSL https://x.ai/cli/install.sh \| bash` | [Grok](https://x.ai/build) |
-| Cursor | `curl https://cursor.com/install -fsS \| bash` | [Cursor](https://cursor.com/docs/cli/overview) |
+| Program     | Command                                                                                           | Official source                                                                                           |
+| ----------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Codex       | `npm install -g @openai/codex`                                                                    | [OpenAI](https://help.openai.com/en/articles/11096431)                                                    |
+| Claude Code | `curl -fsSL https://claude.ai/install.sh \| bash`                                                 | [Claude](https://support.claude.com/en/articles/14554922-claude-code-user-faq)                            |
+| OpenCode    | `npm install -g opencode-ai`                                                                      | [OpenCode](https://opencode.ai/docs/)                                                                     |
+| Pi          | `curl -fsSL https://pi.dev/install.sh \| sh`                                                      | [Pi repository](https://github.com/earendil-works/pi#readme)                                              |
+| Goose       | `curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh \| bash` | [Goose](https://github.com/aaif-goose/goose/blob/main/documentation/docs/getting-started/installation.md) |
+| Grok        | `curl -fsSL https://x.ai/cli/install.sh \| bash`                                                  | [Grok](https://x.ai/build)                                                                                |
+| Cursor      | `curl https://cursor.com/install -fsS \| bash`                                                    | [Cursor](https://cursor.com/docs/cli/overview)                                                            |
 
 Adapter overrides: [Codex runtime options](https://github.com/agentclientprotocol/codex-acp#runtime-options)
 and [Claude adapter implementation](https://github.com/agentclientprotocol/claude-agent-acp/blob/main/src/acp-agent.ts).
@@ -106,16 +107,14 @@ No login or credential was supplied to resolve those refusals. After integrating
 the system-prompt wire fix, the daily compatibility check passes for all three:
 Claude 0.97.0 creates a session; Codex 2.3.0 and Pi 0.0.34 accept session setup
 and return authentication-required. All three negotiate ACP v1 and advertise
-their capabilities. Helper promotion remains stricter: it requires an actual
-session with the credential-linked home, and an auth failure produces the same
-one-time alert and retained working copy as any other failed candidate.
+their capabilities. Helper promotion follows the runtime-check policy above.
 
 Regression coverage: `adapter-update.test.ts` exercises failing and passing real
 ACP subprocesses for all three kinds, durable alert deduplication, the one-day
 boundary, partial installs, live command resolution and two independent helpers
 sharing one installation. It also proves CI's auth-only success classification,
-helper credential linking for every adapter, isolated-home cleanup, and
-one-time helper auth-failure alerts. `adapter-freshness.test.ts` covers update
+helper isolated-home preparation and cleanup, and one-time helper
+auth-failure alerts. `adapter-freshness.test.ts` covers update
 fan-out and session launches proceeding while a candidate holds the install lock.
 
 ## Reproduction installed-agent-add

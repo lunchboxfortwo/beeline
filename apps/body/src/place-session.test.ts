@@ -123,14 +123,13 @@ it('starts and answers before optional reads begin, even if none of them resolve
   await f.session.dispose();
 });
 
-it.each([false, true])('mounts the selected harness login fallback through the live session (thread=%s)', async corner => {
+it.each([false, true])('keeps the operator Pi login out of the live session (thread=%s)', async corner => {
   const f = await fixture(corner);
   f.config.operatorHome = await mkdtemp('/var/tmp/session-login-operator-'); roots.push(f.config.operatorHome);
   const loginDir = join(f.config.operatorHome!, '.pi', 'agent');
   await mkdir(loginDir, { recursive: true });
-  await writeFile(join(loginDir, 'auth.json'), '{}');
-  const outside = join(f.config.operatorHome!, 'operator-settings.json');
-  await writeFile(outside, 'protected');
+  const login = JSON.stringify({ anthropic: { type: 'oauth', refresh: 'operator-refresh' } });
+  await writeFile(join(loginDir, 'auth.json'), login);
   f.config.agentKind = 'pi';
   f.config.bwrapPath = '/usr/bin/bwrap';
   try {
@@ -141,16 +140,16 @@ it.each([false, true])('mounts the selected harness login fallback through the l
     await execFileAsync(launch.agentCommand, [...launch.agentArgs!.slice(0, commandIndex), process.execPath, '-e', `
       const fs = require('node:fs');
       const assert = require('node:assert/strict');
-      const auth = process.env.PI_CODING_AGENT_DIR + '/auth.json';
-      const target = fs.realpathSync(auth);
-      fs.writeFileSync(target + '.lock', 'lock');
-      fs.writeFileSync(target + '.next', 'refreshed');
-      fs.renameSync(target + '.next', target);
-      fs.unlinkSync(target + '.lock');
-      assert.throws(() => fs.writeFileSync(${JSON.stringify(outside)}, 'escape'), { code: 'EROFS' });
+      assert.equal(fs.existsSync(process.env.PI_CODING_AGENT_DIR + '/auth.json'), false);
+      // The masked operator login is neither readable nor writable here.
+      const operatorLogin = ${JSON.stringify(join(loginDir, 'auth.json'))};
+      let seen = '';
+      try { seen = fs.readFileSync(operatorLogin, 'utf8'); } catch {}
+      assert.equal(seen.includes('operator-refresh'), false);
+      assert.throws(() => fs.writeFileSync(operatorLogin, 'escape'));
     `], { env: { ...process.env, ...launch.agentEnv } });
-    expect(await readFile(join(loginDir, 'auth.json'), 'utf8')).toBe('refreshed');
-    expect(await readFile(outside, 'utf8')).toBe('protected');
+    expect(await readFile(join(loginDir, 'auth.json'), 'utf8')).toBe(login);
+    expect(JSON.stringify(launch.agentEnv)).not.toContain('operator-refresh');
   } finally { await f.session.dispose(); }
 });
 

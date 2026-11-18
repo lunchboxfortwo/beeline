@@ -21,7 +21,6 @@ export class PlaceStorage {
     runtimeDir: string;
     workspaceId: string;
     agentId: string;
-    operatorHome?: string;
     api: DaemonApiClient;
     live(placeId: string): boolean;
   }) {}
@@ -105,7 +104,6 @@ export class PlaceStorage {
       readStates: async () => states,
       relatedRoots: roomId => [resolve(supervisorRoot, 'beeline/corners', roomId),
         ...owners.filter(owner => owner.roomId === roomId).map(owner => resolve(supervisorRoot, 'beeline', owner.kind, owner.itemId))],
-      operatorHome: this.options.operatorHome,
       withIdleRoom: async (roomId, task) => {
         if (this.options.live(roomId)) return false;
         await task();

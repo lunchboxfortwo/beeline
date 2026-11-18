@@ -1,12 +1,11 @@
 import { lstat, readdir, readFile, readlink } from 'node:fs/promises';
 import { resolve, sep, relative } from 'node:path';
-import { homedir } from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 import { canonicalStoragePath, ordinaryDirectory, storageTree, isSquirePath, removeStoragePath, type TreeEntry } from './storage-filesystem.js';
 export { ordinaryDirectory, storageTree, isSquirePath, removeStoragePath } from './storage-filesystem.js';
-import { SHARED_CREDENTIALS, writeBackRoomClaudeLogin } from './agent-home.js';
+import { SHARED_CREDENTIALS } from './agent-home.js';
 
 export const STORAGE_ITEM_UNUSED_MS = 7 * 24 * 60 * 60_000;
 export interface StorageRoomState { roomId: string; archived: boolean; workspaceId?: string; landedHeadSha?: string }
@@ -264,22 +263,6 @@ function disposalObjects(root: string, archived: boolean, tree: Map<string, Tree
   return objects;
 }
 
-/** Removal must not lose a refreshed detached login when write-back is busy,
- * unreadable, or has no operator source. Those outcomes defer the Room. */
-export async function settleClaudeLogin(root: string, operatorHome: string): Promise<boolean> {
-  for (const home of ['agent-home', 'scratch/agent-home']) {
-    const path = resolve(root, home, 'claude/.credentials.json');
-    const info = await lstat(path).catch(() => undefined);
-    if (!info?.isFile()) continue;
-    // Validate the parent first: the write-back intentionally accesses only
-    // the operator's exact shared login, never an agent-controlled ancestor link.
-    if (!await ordinaryDirectory(resolve(root, home, 'claude'))) return false;
-    const outcome = await writeBackRoomClaudeLogin({ root: resolve(root, home), operatorHome });
-    if (outcome === 'busy') return false;
-  }
-  return true;
-}
-
 /** A live bind mount must never turn private cleanup into shared-cache cleanup. */
 async function captureMountUse(): Promise<(path: string) => boolean> {
   let mounts: string[];
@@ -323,7 +306,6 @@ export async function reclaimHelperStorage(input: {
   progress?: () => Promise<void>;
   inUse?: (root: string) => Promise<boolean>;
   dryRun?: boolean;
-  operatorHome?: string;
   log?: (entry: StorageReclaimEntry) => void;
   unknown?: (roomId: string, path: string) => void;
   now?: number;
@@ -354,7 +336,6 @@ export async function reclaimHelperStorage(input: {
         return;
       }
       if (await ownerInUse()) return;
-      if (!input.dryRun && !await settleClaudeLogin(root, input.operatorHome ?? homedir())) return;
       const tree = await storageTree(root, input.progress);
       const grouped = new Map<string, string[]>();
       const candidates = disposalObjects(root, state.archived, tree);
@@ -463,7 +444,6 @@ export interface WholeStorageOptions {
   dryRun?: boolean;
   now?: number;
   inUse?: (path: string) => Promise<boolean>;
-  operatorHome?: string;
   log?: (entry: StorageReclaimEntry) => void;
   beforeRemove?: () => Promise<boolean>;
   onError?: (path: string, error: unknown) => void;
@@ -508,12 +488,6 @@ export async function reclaimWholeStorageObject(
   if (!ended && !options.expireFiles && [...tree.values()].some(item => !Number.isFinite(item.lastUsed) ||
       (options.now ?? Date.now()) - item.lastUsed < STORAGE_ITEM_UNUSED_MS)) return [];
   if (options.beforeRemove && !await options.beforeRemove()) return [];
-  if (!options.dryRun) {
-    // Finds every detached Room login before deleting any part of an owner.
-    for (const path of tree.keys()) {
-      if (/(?:^|\/)rooms\/[^/]+$/.test(path) && !await settleClaudeLogin(path, options.operatorHome ?? homedir())) return [];
-    }
-  }
   const entries: StorageReclaimEntry[] = [];
   const links = new Map<string, number>();
   for (const path of ended ? wholeObjectsExceptSquire(root, tree) : options.expireFiles ? unusedStorageObjects(root, tree, options.now ?? Date.now()) : [root]) {

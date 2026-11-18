@@ -1,8 +1,11 @@
 /**
  * Plan quota for every harness quota-axi can read (Claude, Codex, Cursor,
- * Grok, OpenCode Go). After a turn the helper runs the pinned quota-axi CLI in
- * the agent's own environment, so it reads that agent's own login, and turns
- * its report into the `AgentUsage` windows the owner's Profile shows.
+ * Grok, OpenCode Go). After a turn the helper runs the pinned quota-axi CLI
+ * and turns its report into the `AgentUsage` windows the owner's Profile
+ * shows. Cursor and OpenCode Go read the agent's own environment. Claude,
+ * Codex and Grok logins live in the machine's CLIProxyAPI: quota-axi reads a
+ * private, access-token-only copy of the proxy's current login, which it
+ * cannot refresh, so the proxy stays the only refresher.
  *
  * quota-axi never refreshes credentials here (`--no-credential-refresh`). It
  * prompts no keychain and spends no Claude inference, because neither
@@ -11,9 +14,9 @@
  */
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { realpathSync, statSync } from 'node:fs';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { hostname } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
   usageReason,
@@ -23,6 +26,8 @@ import {
   type UsageWindow,
 } from '@beeline/api-contract/daemon';
 import { agentBehavior, type AgentKind } from './agent-command.js';
+import { writePrivateFileAtomically } from './atomic-private-file.js';
+import { cliProxyDir, machineCliProxy, type CliProxy, type ProxiedProvider } from './cliproxy.js';
 
 /** Bundled next to `beeline-cli.mjs` by `packages/scripts/build-beeline-bundle.mjs`. */
 export const QUOTA_AXI_BUNDLE_FILE = 'quota-axi.mjs';
@@ -31,12 +36,10 @@ const READ_TIMEOUT_MS = 30_000;
 export const QUOTA_READ_INTERVAL_MS = 5 * 60_000;
 /** A refresh this soon after the last read shares that read instead of asking again. */
 const REFRESH_REUSE_MS = 30_000;
-/**
- * How many intervals a home may ride another home's read before it reads its
- * own login again, in case the login changed without its file changing.
- */
-const ACCOUNT_REVERIFY_INTERVALS = 3;
 const MAX_WINDOWS = 8;
+/** xAI's OIDC issuer and the Grok CLI client the proxy refreshes as. */
+const XAI_ISSUER = 'https://auth.x.ai';
+const XAI_CLIENT_ID = 'b1a00492-073a-47ea-816f-4c329264a828';
 
 /**
  * The quota-axi provider for a harness, or undefined when the agent bills
@@ -170,36 +173,41 @@ export function quotaAxiAccountKey(report: unknown, provider: string): string | 
   return `id:${digest(provider, account.accountId, typeof account.organization === 'string' ? account.organization : '')}`;
 }
 
-/**
- * The credential file a provider reads in this environment, with links
- * resolved, so agents whose homes link one login share a read. Providers whose
- * store Beeline does not know return undefined and read per agent.
- */
-export function quotaCredentialPath(provider: string, env: Record<string, string>): string | undefined {
-  const credential = agentBehavior(provider).quotaCredential;
-  if (!credential) return;
-  const home = env.HOME;
-  const dir = env[credential.homeEnv] ?? (home && join(home, credential.directory));
-  if (!dir) return;
-  const file = join(dir, credential.file);
-  try {
-    return realpathSync(file);
-  } catch {
-    return file;
-  }
-}
+class SignedOut extends Error {}
+
+const text = (value: unknown) => (typeof value === 'string' ? value : undefined);
+
+/** Where quota-axi reads each proxied login, and that login as its store holds it. */
+const QUOTA_STORES: Readonly<Record<ProxiedProvider, {
+  dir: string; file: string; homeEnv: string;
+  store: (accessToken: string | undefined, expiresAt: number, login: Record<string, unknown>) => unknown;
+}>> = {
+  claude: { dir: 'claude', file: '.credentials.json', homeEnv: 'CLAUDE_CONFIG_DIR',
+    store: (accessToken, expiresAt) => ({ claudeAiOauth: { accessToken, expiresAt, scopes: ['user:inference', 'user:profile'] } }) },
+  codex: { dir: 'codex', file: 'auth.json', homeEnv: 'CODEX_HOME',
+    store: (accessToken, _expiresAt, login) => ({ auth_mode: 'chatgpt',
+      tokens: { id_token: text(login.id_token), access_token: accessToken, account_id: text(login.account_id) } }) },
+  xai: { dir: 'grok', file: 'auth.json', homeEnv: 'GROK_HOME',
+    store: (accessToken, expiresAt, login) => ({ [`${XAI_ISSUER}::${XAI_CLIENT_ID}`]: {
+      key: accessToken, auth_mode: 'oidc', email: text(login.email),
+      expires_at: Number.isFinite(expiresAt) ? new Date(expiresAt).toISOString() : undefined,
+      oidc_issuer: XAI_ISSUER, oidc_client_id: XAI_CLIENT_ID,
+    } }) },
+};
 
 /**
- * A cheap stamp of the credential file, so a new login (or a renewed token)
- * in that home is noticed without reading the vendor. Never reads the file.
+ * Write the proxy's current access token where quota-axi reads this provider,
+ * with no refresh token, and return the env that selects it.
  */
-export function credentialFingerprint(path: string): string {
-  try {
-    const stat = statSync(path);
-    return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}`;
-  } catch {
-    return 'missing';
-  }
+export async function proxiedQuotaHome(
+  provider: ProxiedProvider,
+  login: Record<string, unknown>,
+  home: string,
+): Promise<Record<string, string>> {
+  const { dir, file, homeEnv, store } = QUOTA_STORES[provider];
+  const value = store(text(login.access_token), Date.parse(text(login.expired) ?? ''), login);
+  await writePrivateFileAtomically(join(home, dir, file), JSON.stringify(value));
+  return { HOME: home, [homeEnv]: join(home, dir) };
 }
 
 export type QuotaAxiRun = (
@@ -238,18 +246,18 @@ type ReadSlot = {
   publicationSourceInvalid?:boolean;
   /** The account the last verified read named, for reads that cannot say. */
   accountKey?: string;
-  /** When this home's own read last named `accountKey`, in ms. */
-  verifiedAt?: number;
-  /** The credential file's stamp when the last read started; a new stamp drops that read. */
-  readLogin?: string;
 };
 /**
- * Every agent loop on this machine shares these slots, one per plan login:
- * agents whose homes link one credential file get one read per interval.
- * `account:<key>` names the slot that last read a verified account, so homes
- * with their own copy of one login share its reads too.
+ * Every agent loop on this machine shares these slots, one per provider: the
+ * machine holds one login for each (the proxy's, or Cursor's and OpenCode
+ * Go's operator login), so its agents get one read per interval.
  */
 const ACCOUNT_READ_SLOTS = new Map<string, ReadSlot>();
+
+/** A new login makes every cached read stale; the next read asks again. */
+export function invalidateQuotaReads(slots = ACCOUNT_READ_SLOTS): void {
+  slots.clear();
+}
 
 const outcomeOf = (usage: AgentUsage): UsageRefreshOutcome =>
   usage.read && usage.read.status !== 'fresh'
@@ -259,14 +267,6 @@ const outcomeOf = (usage: AgentUsage): UsageRefreshOutcome =>
         ...(usage.read.retryAfter ? { retryAfter: usage.read.retryAfter } : {}),
       }
     : { status: 'fresh' };
-
-/**
- * Whether a read from another home on `account` stands for this one too: same
- * verified account, and not a sign-in or reader failure that belongs to that
- * home alone.
- */
-const sharesAccount = (usage: AgentUsage, account: string) =>
-  usage.account?.key === account && usage.read?.status !== 'signed_out' && usage.read?.status !== 'failed';
 
 /**
  * Throttled plan reader for one agent. `publish` never throws and never
@@ -285,8 +285,7 @@ export class HarnessQuotaReader {
       launch?: () => { command: string; args: string[] };
       now?: () => number;
       intervalMs?: number;
-      credentialPath?: (provider: string, env: Record<string, string>) => string | undefined;
-      fingerprint?: (path: string) => string;
+      proxy?: () => Promise<Pick<CliProxy, 'readLogin'> | undefined>;
     },
   ) {}
 
@@ -296,68 +295,38 @@ export class HarnessQuotaReader {
     env: Record<string, string>,
     force = false,
   ): Promise<UsageRefreshOutcome | undefined> {
-    return provider ? this.start(provider, env, force, true) : Promise.resolve(undefined);
+    return provider ? this.start(provider, env, force) : Promise.resolve(undefined);
   }
 
   private start(
     provider: string,
     env: Record<string, string>,
     force: boolean,
-    shareAccount: boolean,
   ): Promise<UsageRefreshOutcome | undefined> {
     const now = this.options.now?.() ?? Date.now();
-    const credential = (this.options.credentialPath ?? quotaCredentialPath)(provider, env);
     const publicationScope=this.options.accountPublisher?.scopeKey()??'legacy';
-    const login = `${publicationScope}:${provider}:${credential ?? `agent:${this.options.agentId}`}`;
+    const login = `${publicationScope}:${provider}`;
     const slots = this.options.slots ?? ACCOUNT_READ_SLOTS;
     let slot = slots.get(login);
     if (!slot) slots.set(login, (slot = { lastStartedAt: -Infinity, posts: new Map() }));
-    if (slot.running) return this.deliver(slot, slot.running);
-    if(slot.publicationSourceInvalid)Object.assign(slot,{lastStartedAt:-Infinity,last:undefined,posts:new Map(),accountKey:undefined,verifiedAt:undefined,publicationSourceInvalid:false});
-    const fingerprint = credential ? (this.options.fingerprint ?? credentialFingerprint)(credential) : undefined;
-    // The login in this home changed since its last read: forget that read,
-    // its account and who it reached, so the next read is of the new login.
-    if (slot.lastStartedAt > -Infinity && slot.readLogin !== fingerprint)
-      Object.assign(slot, {
-        lastStartedAt: -Infinity, last: undefined, posts: new Map(), accountKey: undefined, verifiedAt: undefined,
-      });
+    if (slot.running) return this.deliver(slot, slot.running, login);
+    if(slot.publicationSourceInvalid)Object.assign(slot,{lastStartedAt:-Infinity,last:undefined,posts:new Map(),accountKey:undefined,publicationSourceInvalid:false});
     const intervalMs = this.options.intervalMs ?? QUOTA_READ_INTERVAL_MS;
-    // A refresh, or a home that has not read itself for a while, reads its own
-    // login rather than trust an account it named long ago.
-    const verifiedFor = force ? intervalMs : intervalMs * ACCOUNT_REVERIFY_INTERVALS;
-    const account = slot.accountKey && now - (slot.verifiedAt ?? -Infinity) < verifiedFor ? slot.accountKey : undefined;
-    const sibling = shareAccount && account ? slots.get(`${publicationScope}:account:${account}`) : undefined;
-    // Another home on this verified account is reading it now: join, unless
-    // that read finds its login moved or its own sign-in broken.
-    if (account && sibling && sibling !== slot && sibling.accountKey === account && sibling.running) {
-      const running = sibling.running;
-      return running.then((usage) =>
-        sharesAccount(usage, account)
-          ? this.deliver(sibling, running)
-          : this.start(provider, env, force, false));
-    }
-    const latest = account && sibling && sibling.accountKey === account && sibling.lastStartedAt > slot.lastStartedAt
-      && sibling.last && sharesAccount(sibling.last, account) ? sibling : slot;
-    const since = now - latest.lastStartedAt;
+    const since = now - slot.lastStartedAt;
     if (since < (force ? REFRESH_REUSE_MS : intervalMs))
-      return latest.last ? this.deliver(latest, Promise.resolve(latest.last)) : Promise.resolve(undefined);
+      return slot.last ? this.deliver(slot, Promise.resolve(slot.last), login) : Promise.resolve(undefined);
     // Turn-loop tests must never read the developer's real vendor quota.
     if (!this.options.run && process.env.VITEST) return Promise.resolve(undefined);
     const held = slot;
     held.lastStartedAt = now;
-    held.readLogin = fingerprint;
     held.publicationScope=publicationScope;
     held.publicationSourceValid=this.options.accountPublisher?.captureSource?.();
     held.publicationSourceInvalid=false;
     held.posts = new Map();
-    if (account) slots.set(`${publicationScope}:account:${account}`, held);
     held.running = this.read(provider, env, held, login, now).finally(() => {
       held.running = undefined;
     });
-    void held.running.then(() => {
-      if (held.accountKey && held.accountKey !== account) slots.set(`${publicationScope}:account:${held.accountKey}`, held);
-    });
-    return this.deliver(held, held.running);
+    return this.deliver(held, held.running, login);
   }
 
   private async read(
@@ -369,21 +338,37 @@ export class HarnessQuotaReader {
   ): Promise<AgentUsage> {
     const now = nowMs / 1000;
     let usage: AgentUsage;
+    const proxied = agentBehavior(provider).cliProxy?.login;
+    let home: string | undefined;
     try {
+      let runEnv = env;
+      if (proxied) {
+        const login = await (await (this.options.proxy ?? machineCliProxy)())?.readLogin(proxied);
+        // No proxy login for this provider: nothing to read until `/login`.
+        if (!login) throw new SignedOut();
+        await mkdir(cliProxyDir(env.HOME || homedir()), { recursive: true, mode: 0o700 });
+        home = await mkdtemp(join(cliProxyDir(env.HOME || homedir()), 'quota-'));
+        runEnv = { ...env, ...await proxiedQuotaHome(proxied, login, home) };
+      }
       const launch = (this.options.launch ?? quotaAxiLaunch)();
       const stdout = await (this.options.run ?? runQuotaAxi)(
         { command: launch.command, args: [...launch.args, ...quotaAxiArgs(provider)] },
-        env,
+        runEnv,
       );
       const report: unknown = JSON.parse(stdout);
       const accountKey = quotaAxiAccountKey(report, provider);
-      if (accountKey) Object.assign(slot, { accountKey, verifiedAt: nowMs });
+      if (accountKey) slot.accountKey = accountKey;
       usage = quotaAxiUsage(report, provider, now) ?? {
         updatedAt: now, windows: [], read: { status: 'failed', at: now, reason: 'no plan numbers' },
       };
     } catch (error) {
-      console.error(`[agent-usage] quota-axi ${provider} read failed`, error instanceof Error ? error.message : error);
-      usage = { updatedAt: now, windows: [], read: { status: 'failed', at: now, reason: "usage reader didn't run" } };
+      if (error instanceof SignedOut) usage = { updatedAt: now, windows: [], read: { status: 'signed_out', at: now } };
+      else {
+        console.error(`[agent-usage] quota-axi ${provider} read failed`, error instanceof Error ? error.message : error);
+        usage = { updatedAt: now, windows: [], read: { status: 'failed', at: now, reason: "usage reader didn't run" } };
+      }
+    } finally {
+      if (home) await rm(home, { recursive: true, force: true });
     }
     // Without a verified account the read stays with this machine's login, so
     // two different accounts are never merged.
@@ -393,9 +378,9 @@ export class HarnessQuotaReader {
     return slot.last;
   }
 
-  private async deliver(slot: ReadSlot, reading: Promise<AgentUsage>): Promise<UsageRefreshOutcome> {
+  private async deliver(slot: ReadSlot, reading: Promise<AgentUsage>, login: string): Promise<UsageRefreshOutcome> {
     const usage = await reading;
-    if(slot.publicationSourceInvalid||slot.publicationScope!==undefined&&slot.publicationScope!==(this.options.accountPublisher?.scopeKey()??'legacy'))
+    if((this.options.slots??ACCOUNT_READ_SLOTS).get(login)!==slot||slot.publicationSourceInvalid||slot.publicationScope!==undefined&&slot.publicationScope!==(this.options.accountPublisher?.scopeKey()??'legacy'))
       return {status:'failed',reason:'usage ownership changed during read'};
     const agentId = this.options.agentId;
     const boundary=this.options.accountPublisher?.publicationKey?.()??this.options.accountPublisher?.scopeKey()??'legacy';

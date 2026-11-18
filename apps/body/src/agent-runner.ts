@@ -96,7 +96,7 @@ export class AgentRunner {
     });
     this.storage = new PlaceStorage({
       supervisorRoot: runtime.supervisorRoot, runtimeDir, workspaceId: runtime.communityId,
-      agentId: this.agent.publicKey, operatorHome: baseConfig.operatorHome, api: options.daemonApi,
+      agentId: this.agent.publicKey, api: options.daemonApi,
       live: placeId => this.places.get(placeId)?.session.alive === true,
     });
     options.daemonApi.setQueueListener((commands, completed) => this.queueChanged(commands, completed));

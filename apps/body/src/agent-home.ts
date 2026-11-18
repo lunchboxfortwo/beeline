@@ -1,4 +1,3 @@
-import { waitForPathRemoval } from './filesystem-change.js';
 /**
  * Per-room-instance harness state directories.
  *
@@ -11,9 +10,12 @@ import { waitForPathRemoval } from './filesystem-change.js';
  * context bleed.
  *
  * Room harnesses receive a Beeline-owned `$HOME` as well as their harness
- * state roots. Known login files are linked into the harness-specific state
- * directory, preserving one operator login without inheriting `$HOME/.agents`,
- * plugins, configuration, or personal memory. Pi's credential-bearing custom
+ * state roots, without inheriting `$HOME/.agents`, plugins, configuration, or
+ * personal memory. Provider logins live only in the machine's CLIProxyAPI
+ * (`cliproxy.ts`); a session receives its local endpoint and inference key
+ * (`cliproxy.ts`). Cursor keeps its native login link. Pi and
+ * OpenCode receive private copies of their static API-key entries only.
+ * Pi's credential-bearing custom
  * provider catalog is copied as a private ordinary file into only its config
  * directory and regenerated on activation; operator UI/default settings stay
  * isolated.
@@ -48,14 +50,14 @@ import { waitForPathRemoval } from './filesystem-change.js';
  * Pi uses `PI_CODING_AGENT_DIR` and the isolated `$HOME`, preventing its
  * otherwise-implicit reads from the operator's `~/.pi` and `~/.agents` trees.
  */
-import { randomUUID } from 'node:crypto';
-import { existsSync,watch,type FSWatcher } from 'node:fs';
-import { chmod,lstat,mkdir,mkdtemp,readFile,readlink,realpath,rename,rm,symlink,writeFile } from 'node:fs/promises';
+import { existsSync,lstatSync,readFileSync,realpathSync } from 'node:fs';
+import { lstat,mkdir,mkdtemp,readdir,readlink,rm,symlink } from 'node:fs/promises';
 import { homedir,tmpdir } from 'node:os';
-import { dirname,resolve } from 'node:path';
-import { AGENT_BEHAVIORS,agentBehavior,SHARED_CREDENTIALS,type AgentKind } from './agent-command.js';
+import { basename,dirname,resolve } from 'node:path';
+import { AGENT_BEHAVIORS,agentBehavior,API_KEY_STORES,SHARED_CREDENTIALS,type AgentKind } from './agent-command.js';
+import { cliProxyHarnessEnv, type CliProxyEndpoint } from './cliproxy.js';
 import { assertRealContainedDirectory,isMissingPathError,roomAgentHomeEnv,roomSessionTmpDir,writeIsolatedHarnessFile } from './agent-home-plan-managed-skills.js';
-import { provisionAgentSkillsAndMcp,provisionPiCustomModelConfig } from './agent-home-provision-agent-skills-and-mcp.js';
+import { localGooseConfig,provisionAgentSkillsAndMcp,provisionPiCustomModelConfig,readJsonObject } from './agent-home-provision-agent-skills-and-mcp.js';
 import { BEELINE_ONBOARDING_SKILL_NAME,BEELINE_REVIEW_SKILL_NAME,BEELINE_SPEC_SKILL_NAME,BEELINE_TRIAGE_SKILL_NAME,runningBeelineReleaseId,SITUATIONAL_SKILL_NAMES } from './beeline-skill.js';
 import { DRAW_AVATAR_SKILL_NAME } from './draw-avatar-skill.js';
 import { type OpenRouterRoutingHomeInput } from './openrouter-routing.js';
@@ -283,220 +285,85 @@ export interface RoomAgentHomeInput {
   /** Beeline-owned dynamic host routes (Registry MCP), already scoped by the server. */
   extraHostRoutes?: Record<string, Record<string, unknown>>;
   resourceAuthFile?: string;
+  /** The machine's CLIProxyAPI; absent while it is down, so sessions start without a login. */
+  cliProxy?: CliProxyEndpoint;
+  /** The session's own env; a provider key there keeps that provider off the proxy. */
+  agentEnv?: Record<string, string>;
 }
-
-
-export function claudeLoginExpiresAt(text: string): number | undefined {
-  try {
-    const expiresAt = (JSON.parse(text) as { claudeAiOauth?: { expiresAt?: unknown } } | null)
-      ?.claudeAiOauth?.expiresAt;
-    return typeof expiresAt === 'number' && Number.isFinite(expiresAt) ? expiresAt : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-
-export const CLAUDE_LOGIN_LOCK_WAIT_MS = 2_000;
-
-export const CLAUDE_LOGIN_LOCK_STALE_MS = 30_000;
 
 
 /**
- * Run `write` while holding an exclusive lock file beside the shared Claude
- * login. Every Room's body process takes the same lock, so two write-backs
- * cannot interleave. A lock older than the stale bound belongs to a process
- * that died mid-write and is removed. Returns undefined when the lock stays
- * busy; the caller keeps its detached login for the next pass.
+ * Writable operator login destinations for an isolated session: only
+ * Cursor's native login directories, since a rename fails on a single-file
+ * mountpoint. Every other harness login lives in the machine's CLIProxyAPI.
  */
-export async function withSharedClaudeLoginLock<T>(
-  shared: string,
-  write: () => Promise<T>,
-): Promise<T | undefined> {
-  const lock = `${shared}.beeline-lock`;
-  const deadline = Date.now() + CLAUDE_LOGIN_LOCK_WAIT_MS;
-  for (;;) {
+export function harnessLoginWritablePaths(kind: AgentKind | undefined, operatorHome: string): string[] {
+  const writable: string[] = [];
+  for (const directory of agentBehavior(kind).nativeLoginDirs ?? []) {
+    const path = resolve(operatorHome, directory);
     try {
-      await writeFile(lock, String(process.pid), { flag: 'wx', mode: 0o600 });
-      break;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      const held = await lstat(lock).catch(() => undefined);
-      if (held && Date.now() - held.mtimeMs > CLAUDE_LOGIN_LOCK_STALE_MS) {
-        await rm(lock, { force: true });
-        continue;
-      }
-      if (Date.now() >= deadline) return undefined;
-      await waitForPathRemoval(lock);
-    }
+      const stats = lstatSync(path);
+      if (stats.isDirectory() || stats.isSymbolicLink()) writable.push(realpathSync(path));
+    } catch { /* No store until the helper completes the first /login. */ }
   }
-  try {
-    return await write();
-  } finally {
-    await rm(lock, { force: true });
-  }
+  return [...new Set(writable)].sort();
 }
 
+/** Login files a session home held before its harness moved to CLIProxyAPI. */
+const PROXIED_LOGIN_FILES = ['claude/.credentials.json', 'codex/auth.json', 'grok/auth.json'] as const;
 
 /**
- * Write a Room's detached Claude login back to the operator's shared file
- * when it expires later, then restore the Room's link.
- *
- * Claude Code persists a refresh with rename(2), which replaces the Room's
- * symlink and leaves the rotated refresh token in that Room alone. When the
- * old refresh token is single-use, the shared file then holds a spent token
- * and every other Room (and the operator CLI) fails its next refresh. Writing
- * the newer login back keeps one current token for everyone. The shared file is
- * replaced atomically (temp file, mode 0600, rename) under a lock, and only
- * when the shared login still expires earlier, so a concurrent refresh by
- * another Room or the operator is never overwritten. A detached file without
- * a readable `claudeAiOauth.expiresAt` is never written back.
- */
-export async function writeBackDetachedClaudeLogin(
-  target: string,
-  source: string,
-): Promise<'linked' | 'not-newer' | 'busy'> {
-  const detached = await readFile(target, 'utf8');
-  const detachedExpiresAt = claudeLoginExpiresAt(detached);
-  if (detachedExpiresAt === undefined) return 'not-newer';
-  const shared = await realpath(source);
-  const isNewer = async (): Promise<boolean> => {
-    const sharedExpiresAt = claudeLoginExpiresAt(await readFile(shared, 'utf8'));
-    return sharedExpiresAt !== undefined && detachedExpiresAt > sharedExpiresAt;
-  };
-  if (!(await isNewer())) return 'not-newer';
-  const written = await withSharedClaudeLoginLock(shared, async () => {
-    if (!(await isNewer())) return false;
-    const temp = `${shared}.beeline-${randomUUID()}`;
-    try {
-      await writeFile(temp, detached, { flag: 'wx', mode: 0o600 });
-      await chmod(temp, 0o600);
-      await rename(temp, shared);
-    } catch (error) {
-      await rm(temp, { force: true });
-      throw error;
-    }
-    return true;
-  });
-  if (written === undefined) return 'busy';
-  if (!written) return 'not-newer';
-  // The harness may have refreshed again since the read; keep that file for
-  // the next pass rather than linking over it.
-  if ((await readFile(target, 'utf8')) !== detached) return 'busy';
-  const link = `${target}.beeline-link-${randomUUID()}`;
-  await symlink(source, link);
-  await rename(link, target);
-  return 'linked';
-}
-
-
-/**
- * Restore shared login links, writing a newer detached Claude login back first.
- *
- * Harnesses commonly persist refreshed tokens with rename(2). When they do
- * that through an isolated path, the rename replaces the symlink itself and
- * leaves one Room holding a detached regular file. A failed-login retry
- * quarantines that file and restores the link; activation writes a newer
- * Claude login back to the operator's file (see
- * `writeBackDetachedClaudeLogin`) and relinks the Room.
+ * Restore the native Cursor login links, refresh the private API-key
+ * copies and remove any proxied login a session home still holds. A file a
+ * harness left in place of a link is replaced; the operator's login stays the one source.
  */
 export async function repairRoomAgentCredentialLinks(input: {
   root: string;
   operatorHome?: string;
-  writeBackNewerClaudeLogin?: boolean;
 }): Promise<void> {
   const root = resolve(input.root);
   const operatorHome = input.operatorHome ?? homedir();
   for (const credential of SHARED_CREDENTIALS) {
     const source = resolve(operatorHome, credential.source);
-    if (existsSync(source)) {
-      const target = resolve(root, credential.dir, credential.target);
+    const target = resolve(root, credential.dir, credential.target);
+    if (existsSync(source) && resolve(dirname(target), await readlink(target).catch(() => '')) !== source) {
       await mkdir(dirname(target), { recursive: true, mode: 0o700 });
-      const stats = await lstat(target).catch((error: unknown) => {
-        if (!isMissingPathError(error)) throw error;
-      });
-      const alreadyLinked = stats?.isSymbolicLink() && resolve(dirname(target), await readlink(target)) === source;
-      if (!alreadyLinked) {
-        const keptLogin = stats?.isFile() && input.writeBackNewerClaudeLogin && credential.writeBack &&
-          await writeBackDetachedClaudeLogin(target, source) !== 'not-newer';
-        if (!keptLogin) {
-          if (stats) await rename(target, `${target}.beeline-quarantine-${Date.now()}-${randomUUID()}`);
-          await symlink(source, target);
-        }
-      }
+      await rm(target, { force: true });
+      await symlink(source, target);
+    }
+  }
+  for (const store of API_KEY_STORES) {
+    const target = resolve(root, store.dir, store.target);
+    const keys = Object.entries(readJsonObject(resolve(operatorHome, store.source)) ?? {})
+      .filter(([, entry]) => (entry as { type?: unknown } | null)?.type === store.type);
+    await rm(target, { force: true });
+    if (keys.length) {
+      await mkdir(dirname(target), { recursive: true, mode: 0o700 });
+      await writeIsolatedHarnessFile(target, `${JSON.stringify(Object.fromEntries(keys), null, 2)}\n`);
+    }
+  }
+}
+
+/**
+ * Proxied logins never live in a session: remove links and quarantine copies
+ * an earlier home kept. Optional setup, off the answer path; the sandbox masks their targets.
+ */
+async function retireNativeLogins(root: string): Promise<void> {
+  for (const file of PROXIED_LOGIN_FILES) await rm(resolve(root, file), { force: true });
+  for (const file of [...PROXIED_LOGIN_FILES, ...API_KEY_STORES.map(store => `${store.dir}/${store.target}`)]) {
+    const target = resolve(root, file);
+    for (const name of await readdir(dirname(target)).catch(error => { if (!isMissingPathError(error)) throw error; return []; })) {
+      if (name.startsWith(`${basename(target)}.beeline-quarantine-`)) await rm(resolve(dirname(target), name), { force: true });
     }
   }
 }
 
 
 /**
- * Write a Claude login this Room refreshed back to the operator's file.
- *
- * Runs after each prompt settles, the point where Claude Code may have
- * refreshed and detached the Room's link, so the rotated token reaches other
- * Rooms before their next turn rather than at this Room's next activation.
- * Touches only the Claude credential and never quarantines.
- */
-export async function writeBackRoomClaudeLogin(input: {
-  root: string;
-  operatorHome?: string;
-}): Promise<'linked' | 'not-newer' | 'busy' | 'absent'> {
-  const claude = SHARED_CREDENTIALS.find((credential) => credential.writeBack)!;
-  const source = resolve(input.operatorHome ?? homedir(), claude.source);
-  if (!existsSync(source)) return 'busy';
-  const target = resolve(input.root, claude.dir, claude.target);
-  const stats = await lstat(target).catch(() => undefined);
-  if (!stats?.isFile()) return 'absent';
-  return writeBackDetachedClaudeLogin(target, source);
-}
-
-
-/**
- * Write a Claude login back the moment this Room's link detaches.
- *
- * A warm Claude Code process can refresh its login while its Room is idle.
- * The after-prompt write-back then waits for this Room's next turn, and every
- * other Room fails meanwhile on the spent shared token. Watching the Room's
- * Claude directory shares the rotated login at once. Passes run one at a time
- * through the same locked, expiry-checked write-back; a pass that finds the
- * link restored does nothing. Returns undefined when there is nothing to watch.
- */
-export function watchRoomClaudeLogin(input: {
-  root: string;
-  operatorHome?: string;
-}): FSWatcher | undefined {
-  const claude = SHARED_CREDENTIALS.find((credential) => credential.writeBack)!;
-  if (!existsSync(resolve(input.operatorHome ?? homedir(), claude.source))) return undefined;
-  const dir = resolve(input.root, claude.dir);
-  let pass = Promise.resolve();
-  let watcher: FSWatcher;
-  try {
-    watcher = watch(dir, (_event, filename) => {
-      if (filename !== claude.target) return;
-      pass = pass
-        .then(async () => { await writeBackRoomClaudeLogin(input); })
-        .catch((error: unknown) => {
-          console.error(`[body] could not write back a refreshed Claude login under ${dir}:`, error);
-        });
-    });
-  } catch (error) {
-    console.error(`[body] could not watch the Claude login under ${dir}:`, error);
-    return undefined;
-  }
-  watcher.on('error', (error) => {
-    console.error(`[body] stopped watching the Claude login under ${dir}:`, error);
-    watcher.close();
-  });
-  watcher.unref();
-  return watcher;
-}
-
-
-/**
- * Create the room-instance's harness state directories, share the operator's
- * harness login into them, and return the env overlay that points the harness at
- * them. An unsafe or unavailable private home never falls back to another
- * credential or ambient harness state.
+ * Create the room-instance's harness state directories and prepare its proxy
+ * routes, native Cursor links and private API-key copies. Return the harness
+ * environment overlay. An unsafe or unavailable private home never falls back
+ * to another credential or ambient harness state.
  */
 export async function prepareRoomAgentCredentials(input: RoomAgentHomeInput): Promise<Record<string, string>> {
   try { return await provisionRoomAgentCredentials(input); }
@@ -517,8 +384,7 @@ async function provisionRoomAgentCredentials(
   const root = resolve(input.root);
   const operatorHome = input.operatorHome ?? homedir();
   let tmpLinkReady = false;
-  try {
-    await mkdir(root, { recursive: true, mode: 0o700 });
+  await mkdir(root, { recursive: true, mode: 0o700 });
     const rootStats = await lstat(root);
     if (!rootStats.isDirectory() || rootStats.isSymbolicLink()) {
       throw new Error(`agent home root is not an ordinary directory: ${root}`);
@@ -546,32 +412,31 @@ async function provisionRoomAgentCredentials(
     } catch (error) {
       console.error(`[body] short TMPDIR link unavailable under ${root}:`, error);
     }
-  } catch (error) {
-    throw error;
-  }
 
-  try {
-    await repairRoomAgentCredentialLinks({
-      root,
-      operatorHome,
-      writeBackNewerClaudeLogin: agentBehavior(input.agentKind).sharedLoginWriteBack === true,
-    });
-  } catch (error) {
-    throw error;
+  await repairRoomAgentCredentialLinks({ root, operatorHome });
+  await mkdir(resolve(root, 'goose/config'), { recursive: true, mode: 0o700 });
+  for (const name of GOOSE_SHARED_CONFIG_FILES) {
+    const source = resolve(operatorHome, '.config/goose', name);
+    const target = resolve(root, 'goose/config', name);
+    await rm(target, { force: true });
+    if (existsSync(source)) {
+      const body = readFileSync(source, 'utf8');
+      await writeIsolatedHarnessFile(target, name === 'config.yaml' ? localGooseConfig(body) : body);
+    }
   }
-
-  if (agentBehavior(input.agentKind).hostedModelConfig === 'model-file') await provisionPiCustomModelConfig(root, operatorHome, true, undefined);
+  if (agentBehavior(input.agentKind).hostedModelConfig === 'model-file') await provisionPiCustomModelConfig(root, operatorHome, true, undefined, input.cliProxy, input.agentEnv);
 
   const env = tmpLinkReady
     ? roomAgentHomeEnv(root)
     : { ...roomAgentHomeEnv(root), TMPDIR: resolve(root, 'tmp') };
-  return env;
+  return { ...env, ...await cliProxyHarnessEnv({ kind: input.agentKind, root, operatorHome, proxy: input.cliProxy, env: { ...input.agentEnv, ...env } }) };
 }
 /** Optional skills and MCP setup, separate from the private credential home. */
 export async function prepareRoomAgentHome(input: RoomAgentHomeInput): Promise<Record<string, string>> {
   const env = await prepareRoomAgentCredentials(input);
   if (!env.HOME) return env;
   const root = dirname(env.HOME);
+  await retireNativeLogins(root);
   const operatorHome = input.operatorHome ?? homedir();
   // A cold process must not start optional MCP providers from a previous
   // activation. They remain reachable through session tools once loaded.
@@ -599,6 +464,8 @@ export async function prepareRoomAgentHome(input: RoomAgentHomeInput): Promise<R
         input.agentKind,
         input.resourceAuthFile,
         input.squireScope,
+        input.cliProxy,
+        input.agentEnv,
       ),
     );
   agentHomeProvisionQueues.set(root, provision);

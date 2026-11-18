@@ -11,9 +11,9 @@ import { piRetrySettings } from './pi-retry-settings.js';
  * context bleed.
  *
  * Room harnesses receive a Beeline-owned `$HOME` as well as their harness
- * state roots. Known login files are linked into the harness-specific state
- * directory, preserving one operator login without inheriting `$HOME/.agents`,
- * plugins, configuration, or personal memory. Pi's credential-bearing custom
+ * state roots, without inheriting `$HOME/.agents`, plugins, configuration, or
+ * personal memory. Credential isolation follows `agent-home.ts` and
+ * `cliproxy.ts`. Pi's credential-bearing custom
  * provider catalog is copied as a private ordinary file into only its config
  * directory and regenerated on activation; operator UI/default settings stay
  * isolated.
@@ -57,8 +57,9 @@ import { parse as parseToml,stringify as stringifyToml } from 'smol-toml';
 import { parse as parseYaml,stringify as stringifyYaml } from 'yaml';
 import { AGENT_BEHAVIORS,IMPORTED_MCP_KINDS,agentBehavior,type AgentKind } from './agent-command.js';
 import { assertRealContainedDirectory,copySafeSkillTree,materializedSkillManifest,planManagedSkills,resolveSharedSkillSources,writeIsolatedHarnessFile } from './agent-home-plan-managed-skills.js';
-import { AgentHomeSecurityError,AgentSkillDir,CODEX_ROOM_AGENT_LOCKDOWN_TOML,CODEX_ROOM_WEB_SEARCH_TOML,GOOSE_SHARED_CONFIG_FILES,HARNESS_MCP_CONFIGS,PI_CUSTOM_MODEL_CONFIG,PI_MCP_CONFIG,RoomAgentHomeInput } from './agent-home.js';
+import { AgentHomeSecurityError,AgentSkillDir,CODEX_ROOM_AGENT_LOCKDOWN_TOML,CODEX_ROOM_WEB_SEARCH_TOML,HARNESS_MCP_CONFIGS,PI_CUSTOM_MODEL_CONFIG,PI_MCP_CONFIG,RoomAgentHomeInput } from './agent-home.js';
 import { beelineManagedSkills } from './beeline-skill.js';
+import { piCliProxyProviders } from './cliproxy.js';
 import { DRAW_AVATAR_SKILL_NAME,drawAvatarSkillMarkdown } from './draw-avatar-skill.js';
 import { grantedSquireHostRoute,mergeGooseHostRoutes,mergeJsonHostRoutes,mergeTomlHostRoutes,rewriteGrantedHostRoutes } from './host-mcp-route.js';
 import { classifyImportedMcpServer } from './mcp-route-class.js';
@@ -93,6 +94,8 @@ export async function provisionAgentSkillsAndMcp(
   agentKind: AgentKind | undefined,
   resourceAuthFile?: string,
   squireScope?: RoomAgentHomeInput['squireScope'],
+  cliProxy?: RoomAgentHomeInput['cliProxy'],
+  agentEnv: Record<string, string> = {},
 ): Promise<void> {
   const managedSkills = [
     { name: DRAW_AVATAR_SKILL_NAME, content: drawAvatarSkillMarkdown(skillReleaseId) },
@@ -133,29 +136,6 @@ export async function provisionAgentSkillsAndMcp(
       if (failClosed) throw error;
       console.warn(`[body] operator MCP passthrough failed for ${config.dir}:`, error);
     }
-  }
-
-  try {
-    const gooseConfigDir = resolve(root, 'goose', 'config');
-    await mkdir(gooseConfigDir, { recursive: true, mode: 0o700 });
-    for (const name of GOOSE_SHARED_CONFIG_FILES) {
-      const source = resolve(operatorHome, '.config', 'goose', name);
-      const target = resolve(gooseConfigDir, name);
-      // Regeneration is deletion too: a config the operator removed must not
-      // keep answering in a Room.
-      if (existsSync(source)) {
-        const body = readFileSync(source, 'utf8');
-        await writeIsolatedHarnessFile(
-          target,
-          name === 'config.yaml' ? localGooseConfig(body) : body,
-        );
-      } else {
-        await unlink(target).catch(() => undefined);
-      }
-    }
-  } catch (error) {
-    if (failClosed) throw error;
-    console.warn('[body] operator Goose configuration passthrough failed:', error);
   }
 
   try {
@@ -231,7 +211,7 @@ export async function provisionAgentSkillsAndMcp(
     extraHostRoutes,
     squireScope,
   );
-  await provisionPiCustomModelConfig(root, operatorHome, failClosed, openRouterRouting);
+  await provisionPiCustomModelConfig(root, operatorHome, failClosed, openRouterRouting, cliProxy, agentEnv);
   // Keep the transport deadline and let Pi retry a temporary model failure twice.
   // Generate isolated settings rather than inheriting operator retry defaults.
   if (appliesToHarness(agentKind, 'pi')) {
@@ -334,8 +314,17 @@ export async function provisionPiCustomModelConfig(
   operatorHome: string,
   failClosed: boolean,
   openRouterRouting: RoomAgentHomeInput['openRouterRouting'],
+  cliProxy?: RoomAgentHomeInput['cliProxy'],
+  agentEnv: Record<string, string> = {},
 ): Promise<void> {
   const source = resolve(operatorHome, PI_CUSTOM_MODEL_CONFIG.source);
+  // Subscription providers this session holds no key for reach the proxy.
+  const withProxy = async (value: unknown) => {
+    const models = recordValue(value) ?? {};
+    const providers = recordValue(models.providers) ?? {};
+    const routed = await piCliProxyProviders(cliProxy, agentEnv, operatorHome, providers);
+    return Object.keys(routed).length ? { ...models, providers: { ...providers, ...routed } } : value;
+  };
   const target = resolve(root, 'pi', PI_CUSTOM_MODEL_CONFIG.target);
   // One decision per activation, one log line; never a failed activation.
   let decision: OpenRouterRoutingDecision | undefined;
@@ -370,7 +359,7 @@ export async function provisionPiCustomModelConfig(
     if (!sourceStats) {
       await writeIsolatedHarnessFile(
         target,
-        `${JSON.stringify(withOpenRouterModelRouting({}, pin), null, 2)}\n`,
+        `${JSON.stringify(await withProxy(withOpenRouterModelRouting({}, pin)), null, 2)}\n`,
       );
       return;
     }
@@ -386,7 +375,7 @@ export async function provisionPiCustomModelConfig(
     const sourceValue = JSON.parse(readFileSync(resolvedSource, 'utf8')) as unknown;
     await writeIsolatedHarnessFile(
       target,
-      `${JSON.stringify(withOpenRouterModelRouting(sourceValue, pin), null, 2)}\n`,
+      `${JSON.stringify(await withProxy(withOpenRouterModelRouting(sourceValue, pin)), null, 2)}\n`,
     );
   } catch (error) {
     // Never retain a stale credential-bearing copy when its current source is

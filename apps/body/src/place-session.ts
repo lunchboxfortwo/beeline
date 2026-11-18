@@ -6,9 +6,9 @@ import { delimiter,dirname,join,resolve } from 'node:path';
 import { AcpClient,agentTurnSteps,openAcpConversation,type AcpPromptBlock,type McpServerWire,type PromptResult,type ToolCallEntry } from './acp.js';
 import { agentCommandCatalogPublisher } from './agent-command-catalog.js';
 import { deliverAttachments } from './attachment-delivery.js';
-import { agentBehavior } from './agent-command.js';
 import { agentGitIdentityEnv } from './agent-git-identity.js';
-import { harnessStateDirsFromEnv,hostImportedMcpDeclarations,prepareRoomAgentCredentials,prepareRoomAgentHome,watchRoomClaudeLogin,writeBackRoomClaudeLogin } from './agent-home.js';
+import { harnessLoginWritablePaths,harnessStateDirsFromEnv,hostImportedMcpDeclarations,prepareRoomAgentCredentials,prepareRoomAgentHome } from './agent-home.js';
+import { machineCliProxy, machineCliProxyEndpoint } from './cliproxy.js';
 import { HostPlaces,startAgentProcess,stopAgentProcess } from './agent-process.js';
 import { credentialMaskPaths,harnessHomeStateDirs,sandboxMountPlan,siblingAgentMaskPaths,wrapAgentCommand,type SandboxSessionSpec } from './bwrap-sandbox.js';
 import { codegraphMcpServer } from './codegraph.js';
@@ -18,7 +18,6 @@ import { harnessIdentityLabel,sessionNewMcpServers } from './cursor-acp-bridge.j
 import type { DaemonApiClient } from './daemon-api-client.js';
 import type { GrantRunnerEndpoint,GrantRunnerRoom } from './grant-runner.js';
 import { harnessEnforcement,roomShellCapability } from './harness-capabilities.js';
-import { harnessLoginWritablePaths } from './harness-login-mounts.js';
 import { postChangedAgentUsage } from './helper-usage-binding.js';
 import { grantedHostRouteWires,grantedSquireHostRouteNames } from './host-mcp-route.js';
 import { CODE_OWNED_HOST_MCP_NAMES } from './mcp-route-class.js';
@@ -97,7 +96,6 @@ export class PlaceSession {
   /** Where received pictures are downloaded for an image-capable harness. */
   private attachmentDir?: string;
   private privateHomeRoot?: string;
-  private claudeLoginWatch?: { close(): void };
   private stopping = false;
   private model?: OwnedModelFiles;
   readonly resources: SessionResources;
@@ -239,7 +237,8 @@ export class PlaceSession {
     const homeOverlay = config.agentHomeRoot ? await prepareRoomAgentCredentials({
       root: config.agentHomeRoot, failClosed: true, agentKind: config.agentKind,
       onDiagnostic: message => this.notes.push(message),
-      operatorHome: config.operatorHome,
+      operatorHome: config.operatorHome, agentEnv: config.agentEnv,
+      cliProxy: machineCliProxyEndpoint(),
     }) : {};
     this.privateHomeRoot = homeOverlay.HOME ? dirname(homeOverlay.HOME) : undefined;
     const privateHomeRoot = this.privateHomeRoot;
@@ -350,8 +349,6 @@ export class PlaceSession {
     HostPlaces.enter(placeId);
     client.on('exit', () => { if (this.client === client && !this.stopping) this.options.onExit(); });
     await startAgentProcess(client);
-    if (agentBehavior(config.agentKind).sharedLoginWriteBack && privateHomeRoot)
-      this.claudeLoginWatch = watchRoomClaudeLogin({ root: privateHomeRoot, operatorHome: config.operatorHome });
     const brief = restore?.brief;
     const session = assembleSessionPrompt({
       squireAvailable: true,
@@ -439,7 +436,8 @@ export class PlaceSession {
     const configuration = this.resources.context.configuration;
     if (homeRoot) await prepareRoomAgentHome({
       root: homeRoot, failClosed: true, operatorHome: config.operatorHome,
-      agentKind: config.agentKind, sharedSkills: config.sharedSkills,
+      agentKind: config.agentKind, sharedSkills: config.sharedSkills, agentEnv: config.agentEnv,
+      cliProxy: machineCliProxyEndpoint(),
       isReviewer: configuration?.isReviewer === true,
       ...openRouterRoutingInput(config, { model: configuration?.model ?? config.modelSelection?.model }, undefined, {}),
     });
@@ -477,6 +475,8 @@ export class PlaceSession {
     this.model = undefined;
     await this.optional('Tool context', () => this.writeContext(item, batch.slice(1), model?.paths().directory), undefined);
     await this.refreshFeatureBranch();
+    // A stopped machine proxy starts again at the endpoint this session holds; the turn never waits for it.
+    void machineCliProxy();
     const options = { names: this.names, notes: this.notes, turnPrefix: this.turnPrefix, fresh: !this.windowDelivered };
     this.windowDelivered = true;
     const prompt = batch.length > 1 || item.offlineSeconds !== undefined
@@ -506,9 +506,6 @@ export class PlaceSession {
       this.squireRelay.deactivate(item.turnRequestId);
       this.current = undefined;
     }
-    if (this.privateHomeRoot && agentBehavior(this.options.config.agentKind).sharedLoginWriteBack)
-      void writeBackRoomClaudeLogin({ root: this.privateHomeRoot, operatorHome: this.options.config.operatorHome })
-        .catch(error => console.warn('[body] refreshed Claude login not shared:', error));
     const text = durableReplyText(result.agentText);
     let steps: Answer['steps'] = [];
     try { steps = roomReplySteps(agentTurnSteps(result.updates ?? [])); }
@@ -565,8 +562,6 @@ export class PlaceSession {
     this.privateHomeRoot = undefined;
     this.client = undefined;
     this.sessionId = undefined;
-    this.claudeLoginWatch?.close();
-    this.claudeLoginWatch = undefined;
     if (client) {
       this.stopping = true;
       try { await stopAgentProcess(client); }

@@ -8,6 +8,7 @@ import type { AgentId } from './session-join/agents.js';
 import type { AdapterUpdateOptions } from './adapter-update.js';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import type { ProxiedProvider } from './cliproxy.js';
 
 export const AGENT_KINDS = [
   'codex',
@@ -25,11 +26,19 @@ export type AgentKind = (typeof AGENT_KINDS)[number];
 /** Per-harness policy. Consumers select a capability; harness names stay here. */
 interface AgentBehavior {
   label?: string;
-  cliSignIn?: 'codex' | 'grok' | 'cursor';
+  cliSignIn?: 'cursor';
   providerKeyStore?: 'env' | 'auth-file';
-  sharedLoginWriteBack?: boolean;
-  codexCacheBindings?: boolean;
+  /** Native login directories a sandboxed session may write (`agent-home.ts`). */
+  nativeLoginDirs?: readonly string[];
+  /**
+   * How sessions reach CLIProxyAPI. A single-provider harness names its login;
+   * a multi-provider one routes `providers` it holds no key for (env, or
+   * `keyStore` under the operator's home) and signs in to that provider's login.
+   */
+  cliProxy?: { route: 'claude-env' | 'codex-env' | 'grok-env' | 'pi-models' | 'opencode-env' | 'goose-env'; login?: ProxiedProvider;
+    providers?: readonly string[]; keyStore?: string; providerConfig?: string };
   probeProviderRootEnv?: string;
+  codexCacheBindings?: boolean;
   modelCatalogOwnsCredentials?: boolean;
   fastMode?: boolean;
   modelLaunch?: 'native-args' | 'command';
@@ -40,7 +49,6 @@ interface AgentBehavior {
   providerModelEnv?: { provider: string; model: string };
   roomTomlDefaults?: boolean;
   nativeShellHook?: { config: 'launch-config' | 'hooks-file'; output: 'updated-input' | 'hook-specific' };
-  quotaCredential?: { homeEnv: string; directory: string; file: string };
   importedMcp?: { format: 'toml' | 'json' | 'extensions'; source: string; homeEnv: string; file: string };
   session?: SessionAgentBehavior;
 }
@@ -85,36 +93,39 @@ export function cursorAcpBridgeLaunch(): { command: string; args: string[] } {
 
 export const AGENT_BEHAVIORS: Readonly<Record<AgentKind, AgentBehavior>> = {
   codex: {
-    label: 'Codex', cliSignIn: 'codex', roomTomlDefaults: true, codexCacheBindings: true, fastMode: true,
-    quotaCredential: { homeEnv: 'CODEX_HOME', directory: '.codex', file: 'auth.json' },
+    label: 'Codex', roomTomlDefaults: true, codexCacheBindings: true, fastMode: true,
+    cliProxy: { route: 'codex-env', login: 'codex' },
     importedMcp: { format: 'toml', source: '.codex/config.toml', homeEnv: 'CODEX_HOME', file: 'config.toml' },
     session: { joinDelivery:'local', delivery: 'queue', memberPerSession: true, processNames: ['codex', 'codex-tui'], clientNames: ['codex'],
       hookOutput: { start: 'SessionStart', prompt: 'UserPromptSubmit', tool: 'PostToolUse', stop: 'block' } },
   },
   claude: {
-    label: 'Claude', sharedLoginWriteBack: true,
-    quotaCredential: { homeEnv: 'CLAUDE_CONFIG_DIR', directory: '.claude', file: '.credentials.json' },
+    label: 'Claude', cliProxy: { route: 'claude-env', login: 'claude' },
     importedMcp: { format: 'json', source: '.claude.json', homeEnv: 'CLAUDE_CONFIG_DIR', file: '.claude.json' },
     session: { joinDelivery:'local', delivery: 'socket', processNames: ['claude'], clientNames: ['claude-code', 'claude code'], clientExactNames: ['claude'],
       hookOutput: { start: 'SessionStart', prompt: 'UserPromptSubmit', stop: 'block' } },
   },
   goose: {
     label: 'Goose', providerKeyStore: 'env', probeProviderRootEnv: 'GOOSE_PATH_ROOT', modelCatalogOwnsCredentials: true,
+    cliProxy: { route: 'goose-env', providers: ['anthropic', 'openai'], keyStore: '.config/goose/secrets.yaml', providerConfig: '.config/goose/config.yaml' },
     providerModelEnv: { provider: 'GOOSE_PROVIDER', model: 'GOOSE_MODEL' },
     importedMcp: { format: 'extensions', source: '.config/goose/config.yaml', homeEnv: 'GOOSE_PATH_ROOT', file: 'config/config.yaml' },
   },
   pi: {
     label: 'Pi', providerKeyStore: 'env', hostedModelConfig: 'model-file',
+    cliProxy: { route: 'pi-models', providers: ['anthropic', 'openai', 'xai', 'openai-codex'], keyStore: '.pi/agent/auth.json' },
     importedMcp: { format: 'json', source: '.pi/agent/mcp.json', homeEnv: 'PI_CODING_AGENT_DIR', file: 'mcp.json' },
     session: { processNames: ['pi'], clientPrefix: 'pi', mailEvents: ['poll', 'post-tool-use'], pollText: true },
   },
   grok: {
     session: {joinDelivery:'on_demand',processNames:['grok'],clientExactNames:['grok','grok cli','grok build']},
-    label: 'Grok', cliSignIn: 'grok', modelLaunch: 'native-args',
+    label: 'Grok', modelLaunch: 'native-args', cliProxy: { route: 'grok-env', login: 'xai' },
     importedMcp: { format: 'toml', source: '.grok/config.toml', homeEnv: 'GROK_HOME', file: 'config.toml' },
   },
-  cursor: { nativeShellHook: { config: 'hooks-file', output: 'updated-input' }, label: 'Cursor', cliSignIn: 'cursor', resolveCommandOnStart: true, identityLabel: CURSOR_ACP_BRIDGE_LABEL, cliModelCatalog: true },
+  cursor: { nativeShellHook: { config: 'hooks-file', output: 'updated-input' }, label: 'Cursor', cliSignIn: 'cursor', resolveCommandOnStart: true, identityLabel: CURSOR_ACP_BRIDGE_LABEL, cliModelCatalog: true,
+    nativeLoginDirs: ['.cursor', '.config/cursor'] },
   opencode: { label: 'OpenCode', providerKeyStore: 'auth-file', modelCatalogOwnsCredentials: true, hostedModelConfig: 'inline-provider',
+    cliProxy: { route: 'opencode-env', providers: ['anthropic', 'openai', 'xai'], keyStore: '.local/share/opencode/auth.json' },
     session: { processNames: ['opencode'], clientNames: ['opencode'], mailEvents: ['poll'], pollText: true } },
   reference: {},
   custom: { modelLaunch: 'command' },
@@ -149,40 +160,26 @@ export function sessionAgentBehavior(agent: keyof typeof SESSION_AGENT_BEHAVIORS
 }
 
 /**
- * Credential files shared back into an isolated harness state directory,
+ * Native Cursor login files linked into an isolated harness state directory,
  * keyed by the state directory the harness was pointed at. `source` is
  * relative to the operator's real `$HOME`; `target` to the isolated dir.
+ * Every other harness login lives only in the machine's CLIProxyAPI.
  */
-export const SHARED_CREDENTIALS: Array<{
-  dir: 'claude' | 'codex' | 'grok' | 'pi' | 'cursor' | 'user';
-  source: string;
-  target: string;
-  writeBack?: boolean;
-}> = [
-  // Claude Code relocates ~/.claude wholesale via CLAUDE_CONFIG_DIR; the OAuth
-  // credentials live inside it, so an isolated dir needs them linked back.
-  { dir: 'claude', source: '.claude/.credentials.json', target: '.credentials.json', writeBack: AGENT_BEHAVIORS.claude.sharedLoginWriteBack },
-  // Codex CLI relocates ~/.codex via CODEX_HOME; auth.json holds its login.
-  { dir: 'codex', source: '.codex/auth.json', target: 'auth.json' },
-  // Grok relocates ~/.grok via GROK_HOME; auth.json holds its login (same
-  // shape as codex).
-  { dir: 'grok', source: '.grok/auth.json', target: 'auth.json' },
-  { dir: 'pi', source: '.pi/agent/auth.json', target: 'auth.json' },
-  // Cursor CLI stores chat/MCP state under ~/.cursor/; cursor-agent reads
-  // CURSOR_HOME to relocate that data directory. The login is NOT there:
-  // cursor-agent reads ~/.config/cursor/auth.json (XDG config). Beeline
-  // remaps HOME to the isolated user/ dir, so the login has to be linked
-  // into that HOME or every Room/corner except one that was patched by
-  // hand fails with "Authentication required".
+export const SHARED_CREDENTIALS: Array<{ dir: 'cursor' | 'user'; source: string; target: string }> = [
+  // cursor-agent keeps chat/MCP state under CURSOR_HOME but reads its login
+  // from ~/.config/cursor/auth.json, so the isolated HOME needs it linked.
   { dir: 'cursor', source: '.cursor/agent-cli-state.json', target: 'agent-cli-state.json' },
   { dir: 'user', source: '.config/cursor/auth.json', target: '.config/cursor/auth.json' },
-  // OpenCode stores provider logins under XDG data, which follows isolated HOME.
-  {
-    dir: 'user',
-    source: '.local/share/opencode/auth.json',
-    target: '.local/share/opencode/auth.json',
-  },
 ];
+
+/**
+ * Provider API keys a session copies from a native store it no longer links:
+ * only entries of `type` (static keys) travel, never an OAuth refresh token.
+ */
+export const API_KEY_STORES = [
+  { dir: 'pi', source: '.pi/agent/auth.json', target: 'auth.json', type: 'api_key' },
+  { dir: 'user', source: '.local/share/opencode/auth.json', target: '.local/share/opencode/auth.json', type: 'api' },
+] as const;
 
 export const AUTO_DETECT_AGENT_KINDS = [
   'codex',

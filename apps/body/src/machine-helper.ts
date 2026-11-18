@@ -57,6 +57,7 @@ import { HostPlaces } from './agent-process.js';
 import { refreshSystemdHelperUnit } from './native-helper.js';
 import { reclaimArchivedMemberStorage, watchStorageFacts, pruneStoppedAgentStorage, pruneEndedOwnerStorage, pruneArchivedCheckoutStorage, pruneUnusedCheckoutStorage } from './storage-owners.js';
 import { monitorHelperUsage } from './helper-usage.js';
+import { startMachineCliProxy, stopMachineCliProxy } from './cliproxy.js';
 
 /** How long an old per-agent daemon gets to drain before forced takeover. */
 
@@ -660,6 +661,8 @@ async function serveMachineHelper(
   await control.start();
   signals.on('SIGHUP', onHangup);
 
+  // The one owner of this machine's provider logins; sessions start on it.
+  if (!options.runAgent && !options.freeAgent) void startMachineCliProxy(env.HOME || homedir());
   try {
     if (resumes) disposeResume = watchFreeAgentResume(() => { resumes.emit('resume'); });
     console.log(`[helper] hosting ${initial.length} agent(s) on one machine socket per server`);
@@ -687,6 +690,7 @@ async function serveMachineHelper(
     settled = Promise.all([...slots.values()].map(slot => slot.running))
       .then(() => statusWrite);
   } finally {
+    stopMachineCliProxy();
     disposeResume?.();
     signals.off('SIGHUP', onHangup);
     update?.dispose();

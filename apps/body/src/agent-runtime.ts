@@ -328,7 +328,7 @@ export async function runAgentRuntime(
             operatorHome: config.operatorHome ?? homedir(),
             agentEnv: config.agentEnv,
             ...(runtime.llmEnvFile ? { llmEnvFile: runtime.llmEnvFile } : {}),
-            model: () => config.modelSelection?.model ?? runtime.modelSelection?.model,
+            model: async () => (await daemonApi.execute('getAgentConfiguration', { agentId })).model ?? config.modelSelection?.model,
             onResult: (attemptId, result) =>
               void reportAgentSignInResult(daemonApi, agentId, attemptId, cards, result, log),
             onSignedIn: () => daemonApi.emitConfigChanged(),

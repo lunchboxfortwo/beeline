@@ -3,18 +3,22 @@
  *
  * - paste-code (Claude Code): `claude-sign-in.ts` builds the PKCE link and
  *   exchanges the pasted code.
- * - device-code (Codex, Grok) and approve-wait (Cursor): this helper runs the
- *   harness's own headless login, reads the link (and code) it prints, and
- *   reports the result when that process ends. The CLI keeps its own session
- *   and writes its own login file under the operator's home, the file every
- *   Room's isolated home links to (`agent-home.ts` SHARED_CREDENTIALS).
- * - api-key (Pi, Goose, OpenCode): the pasted key is verified with the
+ * - device-code (Codex, Grok) and approve-wait (Cursor): this helper runs a
+ *   headless login, reads the link (and code) it prints, and reports the
+ *   result when that process ends. Codex and Grok run the machine
+ *   CLIProxyAPI's own device login (`cliproxy.ts`), which saves the login
+ *   into the proxy, the sole refresher of every session on that account;
+ *   Claude's exchanged login is handed to it once. Cursor keeps its native
+ *   login under the operator's home (`agent-home.ts` SHARED_CREDENTIALS).
+ * - Pi, Goose and OpenCode select proxy sign-in for an unkeyed subscription
+ *   provider using the current model/provider configuration; other routes use
+ *   api-key sign-in. The pasted key is verified with the
  *   provider (`provider-key-check.ts`, as `beeline connect` does) and written
  *   where that harness reads it.
  *
- * The CLI output shapes below were read from the real CLIs (Codex 0.160.0,
- * Grok 1.0.46, Cursor Agent 2026.10.01-e373342); `agent-sign-in.contract.test.ts`
- * pins them. Nothing here logs a code, key, or token.
+ * The output shapes below were read from CLIProxyAPI 8.0.77 and Cursor Agent
+ * 2026.10.01-e373342; `agent-sign-in.contract.test.ts` pins them. Nothing
+ * here logs a code, key, or token.
  */
 import { agentBehavior } from './agent-command.js';
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -22,7 +26,6 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   AGENT_SIGN_IN_ATTEMPT_TTL_MS,
-  AGENT_SIGN_IN_KINDS,
   AGENT_SIGN_IN_PROVIDER_LABELS,
   isAgentSignInHarness,
   type AgentSignInFrame,
@@ -33,44 +36,31 @@ import {
 } from '@beeline/api-contract/daemon';
 import { readJsonObject, writePrivateFileAtomically } from './atomic-private-file.js';
 import { ClaudeSignIn } from './claude-sign-in.js';
+import { parseEnvFile } from './config.js';
+import { invalidateQuotaReads } from './harness-quota.js';
+import { cliProxyLogin, machineCliProxy, type CliProxy, type ProxiedProvider } from './cliproxy.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
 import { verifyProviderKey } from './provider-key-check.js';
 
-/** How long the CLI may take to print its link before the attempt fails. */
-
 export type CliSignIn = {
+  /** The program the card names; `proxyFlag` runs the machine proxy's login instead. */
   readonly command: string;
   readonly args: readonly string[];
   readonly env: Readonly<Record<string, string>>;
   readonly kind: 'device-code' | 'approve-wait';
   /** Read the accumulated output; undefined until everything the card needs is printed. */
   readonly parse: (output: string, now: number) => AgentSignInLink | undefined;
+  readonly proxyFlag?: string;
 };
 
-/** `codex login --device-auth` (Codex 0.160.0). */
-export function parseCodexDeviceLogin(output: string, now: number): AgentSignInLink | undefined {
-  const url = /Open this link[^\n]*\n\s*(https:\/\/\S+)/.exec(output)?.[1];
-  const code = /Enter this one-time code[^\n]*\n\s*([A-Z0-9]{4}-[A-Z0-9]{4,6})\s*$/m.exec(output)?.[1];
-  if (!url || !code) return undefined;
-  const minutes = Number(/expires in (\d+) minutes/.exec(output)?.[1] ?? 15);
-  return { kind: 'device-code', authorizeUrl: url, userCode: code, expiresAt: now + minutes * 60_000 };
-}
-
 /**
- * `grok login --device-auth` (Grok 1.0.46). Grok prints no expiry, so the
- * card shows this helper's own limit: it stops the login after
- * `AGENT_SIGN_IN_ATTEMPT_TTL_MS` and settles the card as expired.
+ * CLIProxyAPI's `-codex-device-login` and `-xai-login`. Their device codes
+ * outlive this helper's attempt, so the card shows its own limit.
  */
-export function parseGrokDeviceLogin(output: string, now: number): AgentSignInLink | undefined {
-  const url = /open this URL in your browser:\s*\n\s*(https:\/\/\S+)/.exec(output)?.[1];
-  const code = /Confirm this code in your browser:\s*\n\s*([A-Z0-9]{4}-[A-Z0-9]{4,6})\s*$/m.exec(output)?.[1];
-  if (!url || !code) return undefined;
-  return {
-    kind: 'device-code',
-    authorizeUrl: url,
-    userCode: code,
-    expiresAt: now + AGENT_SIGN_IN_ATTEMPT_TTL_MS,
-  };
+export function parseProxyDeviceLogin(output: string, now: number): AgentSignInLink | undefined {
+  const url = /(?:Codex device URL:|please visit:)\s*(https:\/\/\S+)/.exec(output)?.[1];
+  const code = /(?:Codex device code:|enter this code:)\s*([A-Z0-9]{4}-[A-Z0-9]{4,6})\b/.exec(output)?.[1];
+  return url && code ? { kind: 'device-code', authorizeUrl: url, userCode: code, expiresAt: now + AGENT_SIGN_IN_ATTEMPT_TTL_MS } : undefined;
 }
 
 /** `NO_OPEN_BROWSER=1 cursor-agent login` (Cursor Agent 2026.10.01-e373342). */
@@ -79,21 +69,12 @@ export function parseCursorLogin(output: string): AgentSignInLink | undefined {
   return url ? { kind: 'approve-wait', authorizeUrl: url } : undefined;
 }
 
+/** The proxy's own device login for each proxied account; Claude uses Beeline's paste-code exchange. */
+const PROXY_SIGN_INS: Readonly<Record<ProxiedProvider, 'codex' | 'grok' | undefined>> = { claude: undefined, codex: 'codex', xai: 'grok' };
+
 export const CLI_SIGN_INS: Readonly<Record<'codex' | 'grok' | 'cursor', CliSignIn>> = {
-  codex: {
-    command: 'codex',
-    args: ['login', '--device-auth'],
-    env: {},
-    kind: 'device-code',
-    parse: parseCodexDeviceLogin,
-  },
-  grok: {
-    command: 'grok',
-    args: ['login', '--device-auth'],
-    env: {},
-    kind: 'device-code',
-    parse: parseGrokDeviceLogin,
-  },
+  codex: { command: 'codex', args: [], env: {}, kind: 'device-code', parse: parseProxyDeviceLogin, proxyFlag: '-codex-device-login' },
+  grok: { command: 'grok', args: [], env: {}, kind: 'device-code', parse: parseProxyDeviceLogin, proxyFlag: '-xai-login' },
   cursor: {
     command: 'cursor-agent',
     args: ['login'],
@@ -113,8 +94,6 @@ export const PROVIDER_KEY_ENV: Readonly<Record<AgentSignInKeyProvider, string>> 
 };
 
 const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
-/** Variables that point a harness at an isolated home; a login must land in the operator's. */
-const ISOLATION_VARIABLES = ['CODEX_HOME', 'GROK_HOME', 'CURSOR_HOME', 'CLAUDE_CONFIG_DIR'];
 
 function lastLine(output: string): string {
   const lines = output.replace(ANSI, '').split('\n').map((line) => line.trim()).filter(Boolean);
@@ -167,7 +146,7 @@ export type AgentSignInOptions = {
   /** The Pi/Goose provider env file `beeline connect` wrote. */
   readonly llmEnvFile?: string;
   /** The model the agent runs, `provider/model` for OpenCode. */
-  readonly model?: () => string | undefined;
+  readonly model?: () => string | undefined | Promise<string | undefined>;
   /** A result that arrives on its own, after `start` answered. */
   readonly onResult: (attemptId: string, result: { ok: true } | { ok: false; error: string }) => void;
   /**
@@ -176,6 +155,8 @@ export type AgentSignInOptions = {
    * it) and reads the new login.
    */
   readonly onSignedIn?: () => void;
+  /** The machine's CLIProxyAPI, which owns every proxied login. */
+  readonly proxy?: () => Promise<Pick<CliProxy, 'saveLogin' | 'login'> | undefined>;
   readonly spawn?: typeof spawn;
   readonly fetch?: typeof fetch;
   readonly now?: () => number;
@@ -198,7 +179,6 @@ export class AgentSignIn {
     this.#fetch = options.fetch ?? fetch;
     this.#now = options.now ?? Date.now;
     this.#claude = new ClaudeSignIn({
-      operatorHome: options.operatorHome,
       fetch: this.#fetch,
       now: this.#now,
     });
@@ -206,26 +186,28 @@ export class AgentSignIn {
 
   async start(attemptId: string): Promise<AgentSignInLink> {
     const { harness } = this.options;
-    if (AGENT_SIGN_IN_KINDS[harness] === 'paste-code')
-      return { kind: 'paste-code', authorizeUrl: this.#claude.start(attemptId) };
-    const cliSignIn = agentBehavior(harness).cliSignIn;
-    if (cliSignIn) return this.#startCli(attemptId, CLI_SIGN_INS[cliSignIn]);
-    return this.#startKey(attemptId);
+    const env = { ...(this.options.llmEnvFile ? parseEnvFile(this.options.llmEnvFile) : {}), ...this.options.agentEnv };
+    const model = await this.options.model?.();
+    const login = await cliProxyLogin(harness, model, env, this.options.operatorHome);
+    const cliSignIn = login ? PROXY_SIGN_INS[login] : agentBehavior(harness).cliSignIn;
+    if (login && !cliSignIn) return { kind: 'paste-code', authorizeUrl: this.#claude.start(attemptId) };
+    if (cliSignIn) return this.#startCli(attemptId, cliSignIn);
+    return this.#startKey(attemptId, model);
   }
 
   /** A pasted code (Claude) or key (Pi, Goose, OpenCode). */
   async submit(attemptId: string, value: string): Promise<void> {
-    if (AGENT_SIGN_IN_KINDS[this.options.harness] === 'paste-code') {
-      await this.#claude.complete(attemptId, value);
-      this.options.onSignedIn?.();
+    const pending = this.#pending.get(attemptId);
+    if (!pending) {
+      await (await this.#proxy()).saveLogin('claude', await this.#claude.complete(attemptId, value));
+      this.#signedIn();
       return;
     }
-    const pending = this.#pending.get(attemptId);
-    if (!pending || pending.kind !== 'key' || pending.expiresAt <= this.#now())
+    if (pending.kind !== 'key' || pending.expiresAt <= this.#now())
       throw new Error("This sign-in expired or was already used. Send the agent `/login` again to start a new one.");
     await this.#saveKey(pending.provider, value.trim());
     this.#pending.delete(attemptId);
-    this.options.onSignedIn?.();
+    this.#signedIn();
   }
 
   /** Stop every CLI login this runtime started (runtime shutdown). */
@@ -238,27 +220,36 @@ export class AgentSignIn {
     }
   }
 
-  #startCli(attemptId: string, login: CliSignIn): Promise<AgentSignInLink> {
+  async #proxy(): Promise<Pick<CliProxy, 'saveLogin' | 'login'>> {
+    const proxy = await (this.options.proxy ?? machineCliProxy)();
+    if (!proxy) throw new Error('CLIProxyAPI is not running');
+    return proxy;
+  }
+
+  #signedIn(): void {
+    invalidateQuotaReads();
+    this.options.onSignedIn?.();
+  }
+
+  async #startCli(attemptId: string, provider: keyof typeof CLI_SIGN_INS): Promise<AgentSignInLink> {
+    const login = CLI_SIGN_INS[provider];
     // One headless login at a time: a new `login` replaces an unfinished one.
     for (const [id, pending] of this.#pending) {
       if (pending.kind !== 'cli') continue;
       this.#pending.delete(id);
       pending.child.kill('SIGTERM');
     }
-    const env: NodeJS.ProcessEnv = {
-      ...process.env,
-      HOME: this.options.operatorHome,
-      PATH: this.options.agentEnv.PATH || process.env.PATH || '',
-      ...login.env,
-    };
-    for (const name of ISOLATION_VARIABLES) delete env[name];
+    // Cursor's own login lands in the operator's home, never an isolated one.
+    const { CURSOR_HOME: _isolated, ...ambient } = process.env;
+    const run = login.proxyFlag ? (await this.#proxy()).login(login.proxyFlag) : { command: login.command, args: [...login.args],
+      env: { ...ambient, HOME: this.options.operatorHome, PATH: this.options.agentEnv.PATH || process.env.PATH || '', ...login.env } };
     return new Promise((resolve, reject) => {
       let output = '';
       let answered = false;
       let child: ChildProcess;
       try {
-        child = this.#spawn(login.command, [...login.args], {
-          env,
+        child = this.#spawn(run.command, run.args, {
+          env: run.env,
           cwd: this.options.operatorHome,
           stdio: ['ignore', 'pipe', 'pipe'],
         });
@@ -288,7 +279,7 @@ export class AgentSignIn {
           reject(new Error(message));
         }
       });
-      child.once('exit', (code, signal) => {
+      child.once('close', (code, signal) => {
         const owned = this.#pending.get(attemptId);
         if (owned?.kind === 'cli' && owned.child === child) this.#pending.delete(attemptId);
         else return; // replaced, expired, or stopped: its outcome is already decided
@@ -298,17 +289,19 @@ export class AgentSignIn {
           reject(new Error(failure));
           return;
         }
-        if (code === 0) this.options.onSignedIn?.();
-        this.options.onResult(attemptId, code === 0 ? { ok: true } : { ok: false, error: failure });
+        // The proxy's login exits 0 either way; only its success line means saved.
+        const ok = code === 0 && (!login.proxyFlag || /^(?:Codex device|xAI) authentication successful!$/.test(lastLine(output)));
+        if (ok) this.#signedIn();
+        this.options.onResult(attemptId, ok ? { ok: true } : { ok: false, error: failure });
       });
     });
   }
 
-  async #startKey(attemptId: string): Promise<AgentSignInLink> {
+  async #startKey(attemptId: string, model: string | undefined): Promise<AgentSignInLink> {
     const { harness } = this.options;
     let provider: AgentSignInKeyProvider | undefined;
     if (agentBehavior(harness).providerKeyStore === 'auth-file') {
-      const prefix = this.options.model?.()?.split('/')[0];
+      const prefix = model?.split('/')[0];
       provider = prefix && prefix in PROVIDER_KEY_ENV ? (prefix as AgentSignInKeyProvider) : undefined;
       if (!provider)
         throw new Error(
