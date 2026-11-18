@@ -1,3 +1,4 @@
+import { mcpWebhookNeedsSecret } from './rooms-mcp-join-policy.js';
 import { agentMessageText } from '@beeline/api-contract/daemon';
 import { queuedContextSql } from './agent-command-context.js';
 import { legacyMessageBody } from './messaging-cutover.js';
@@ -558,6 +559,8 @@ export async function setMcpMemberWebhook(
   if (secret !== undefined && (typeof secret !== 'string' || !secret || secret.length > 512 || /[\u0000-\u0020\u007f]/.test(secret)))
     throw new McpToolError('Invalid webhook secret');
   if (secret !== undefined && !raw) throw new McpToolError('A webhook secret needs a webhook url');
+  if (raw && mcpWebhookNeedsSecret(raw) && secret === undefined)
+    throw new McpToolError('Cursor automation webhooks require their auth token');
   const sealed = secret === undefined ? null : sealSecrets(webhookKey(), secret);
   await db.transaction(async tx => {
     await tx.query("UPDATE rooms_mcp_delivery SET failure='webhook_changed',receipt_at=NULL WHERE member_id=$1 AND mechanism='webhook'",[memberId]);

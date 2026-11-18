@@ -1,3 +1,4 @@
+import { mcpHostHasInbound } from './rooms-mcp-join-policy.js';
 import type { MemberDelivery } from '@beeline/api-contract/phone';
 import { ExpectedRefusalError } from './command-refusal.js';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -11,6 +12,9 @@ type DeliveryMechanism = 'local' | 'events' | 'webhook' | 'on_demand';
 
 interface Route {
   member_id: string;
+  client_name: string;
+  redirects: string[];
+  has_receiver: boolean;
   generation: string;
   mechanism: DeliveryMechanism;
   host: string;
@@ -34,7 +38,11 @@ export async function readMemberDeliveries(
   if (!members.length) return result;
   const rows = (
     await db.query<Route>(
-      `SELECT m.member_id,d.generation,d.mechanism,d.host,d.surface,d.conversation,d.receipt_at,d.failure,
+      `SELECT m.member_id,client.name client_name,client.redirects,
+    (NULLIF(COALESCE(m.callback_url,client.callback_url),'') IS NOT NULL OR d.stream_id IS NOT NULL OR
+      EXISTS(SELECT 1 FROM rooms_mcp_event_subscriptions s WHERE s.member_id=m.member_id
+        AND (s.expires_at IS NULL OR s.expires_at>now()))) has_receiver,
+    d.generation,d.mechanism,d.host,d.surface,d.conversation,d.receipt_at,d.failure,
     (c.client_id IS NOT NULL AND c.revoked_at IS NULL AND
       CASE WHEN d.member_id IS NULL THEN (NULLIF(COALESCE(m.callback_url,client.callback_url),'') IS NOT NULL
         OR EXISTS(SELECT 1 FROM rooms_mcp_event_subscriptions s WHERE s.member_id=m.member_id AND (s.expires_at IS NULL OR s.expires_at>now())))
@@ -66,7 +74,9 @@ function projectDelivery(row: Route): MemberDelivery {
   const state = row.failure
     ? 'failed'
     : row.mechanism === 'on_demand'
-      ? 'host_without_live_delivery'
+      ? row.has_receiver || mcpHostHasInbound(row.client_name, row.redirects)
+        ? 'setup_unfinished'
+        : 'host_without_live_delivery'
       : row.receipt_at && row.credentials_valid
         ? 'proved_ready'
         : 'setup_unfinished';
@@ -109,6 +119,18 @@ export async function setupMemberDelivery(
       [principal.member_id],
     );
     if (!active.rowCount) throw new ExpectedRefusalError('Connection ended');
+    if (mechanism === 'on_demand') {
+      const receiver = (await tx.query<{ name: string; redirects: string[]; configured: boolean }>(
+        `SELECT client.name,client.redirects,
+          (NULLIF(COALESCE(m.callback_url,client.callback_url),'') IS NOT NULL OR
+            EXISTS(SELECT 1 FROM rooms_mcp_event_subscriptions s WHERE s.member_id=m.member_id
+              AND (s.expires_at IS NULL OR s.expires_at>now())) OR
+            EXISTS(SELECT 1 FROM rooms_mcp_delivery d WHERE d.member_id=m.member_id AND d.stream_id IS NOT NULL)) configured
+         FROM rooms_mcp_members m JOIN rooms_mcp_clients client ON client.id=m.client_id WHERE m.member_id=$1`,
+        [principal.member_id])).rows[0];
+      if (receiver && (receiver.configured || mcpHostHasInbound(receiver.name, receiver.redirects)))
+        throw new ExpectedRefusalError('This host has an inbound receiver. Finish its delivery setup and return the host receipt instead of joining on demand.');
+    }
     let subscription: string | null = null;
     if (mechanism === 'events') {
       subscription =

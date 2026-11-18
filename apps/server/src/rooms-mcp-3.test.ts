@@ -177,7 +177,7 @@ const scope1 = fixtureScope1();
     ['Dots', ['http://127.0.0.1:9876/callback'], 'ChatGPT'],
   ])('R-MCP-DEFAULT-PICTURES: %s %j shows app pictures on Allow and its member', async (name, redirects, display) => {
     const registered = await (await scope1.post('/mcp/oauth/register', { client_name: name, redirect_uris: redirects })).json() as { client_id: string };
-    const grant = await scope1.authorize('rooms:read rooms:write', 'allow', registered.client_id, redirects[0]);
+    const grant = await scope1.authorize('rooms:read rooms:write', 'allow', registered.client_id, redirects[0], { wake_url: 'https://hooks.example/avatar-fixture' });
     const html = grant.consentHtml;
     expect(html).toContain(`Join Beeline with ${display}`);
     expect(html).toMatch(/<img class="mark client" src="data:image/);
@@ -239,7 +239,7 @@ const scope1 = fixtureScope1();
       const { client_id } = await (await scope1.post('/mcp/oauth/register', { client_name: name, redirect_uris: [redirect] })).json() as { client_id: string };
       // Production ChatGPT and Cursor rows were registered before their mapping and kept no logo.
       await scope1.db.query('UPDATE rooms_mcp_clients SET logo=NULL WHERE id=$1', [client_id]);
-      const grant = await scope1.authorize('rooms:read rooms:write', 'allow', client_id, redirect);
+      const grant = await scope1.authorize('rooms:read rooms:write', 'allow', client_id, redirect, { wake_url: 'https://hooks.example/avatar-fixture' });
       expect((await scope1.exchange(grant, { redirect_uri: redirect })).status).toBe(200);
       ids.push(client_id);
     }

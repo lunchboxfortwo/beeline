@@ -451,7 +451,7 @@ import { phoneReadConnectionDetail, phoneRevokeConnectionGrants } from './connec
           if (error instanceof McpToolError) {
             if (error.message.includes('not enabled'))
               throw new Error('Auth tokens are not enabled on this server. Ask the operator to configure BEELINE_MCP_WEBHOOK_KEY.');
-            throw new Error('Webhook setup is invalid. Use a public HTTPS URL and an auth token without internal spaces or control characters.');
+            throw new Error('Webhook setup is invalid. Use a public HTTPS URL and an auth token without internal spaces or control characters. Cursor automation webhooks require their auth token.');
           }
           throw error;
         }

@@ -772,7 +772,7 @@ const scope1 = fixtureScope1();
     expect(grant.consentHtml).toMatch(/<img class="mark client" src="data:image/);
     expect(grant.consentHtml).not.toContain('Untrusted supplied name');
     expect(grant.consentHtml).not.toContain('id="trust_app"');
-    expect((await scope1.post('/mcp/oauth/consent', { flow: grant.flow, decision: 'allow', workspace_selection: '1', workspace_ids: [WORKSPACE] }, { cookie: grant.cookie, origin: scope1.origin })).status).toBe(302);
+    expect((await scope1.post('/mcp/oauth/consent', { flow: grant.flow, decision: 'allow', workspace_selection: '1', workspace_ids: [WORKSPACE], wake_url: 'https://hooks.example/branding-fixture' }, { cookie: grant.cookie, origin: scope1.origin })).status).toBe(302);
   });
 
   it('refuses a same-host redirect whose path differs at authorize and token exchange', async () => {

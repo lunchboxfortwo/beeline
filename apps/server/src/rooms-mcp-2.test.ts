@@ -144,6 +144,10 @@ const scope1 = fixtureScope1();
       await page('Saving your choice', 'consent submit', 'handle_taken',
         await scope1.post('/mcp/oauth/consent', { flow, decision: 'allow', trust_app: '1', workspace_selection: '1', workspace_ids: [WORKSPACE] }, { cookie, origin: scope1.origin }));
       await page('Returning to your session', 'handoff', 'handoff_invalid', await phoneFetch(`${scope1.origin}/mcp/oauth/handoff?state=state-sentinel-123&code=x`));
+      const grokClient = await (await scope1.post('/mcp/oauth/register', { client_name: 'Cursor', redirect_uris: ['https://www.cursor.com/agents/mcp/oauth/callback'] })).json() as { client_id: string };
+      const grok = await scope1.prepareAuthorization(undefined, grokClient.client_id, 'https://www.cursor.com/agents/mcp/oauth/callback');
+      await page('Saving your choice', 'consent submit', 'wake_required',
+        await scope1.post('/mcp/oauth/consent', { flow: grok.flow, decision: 'allow', workspace_selection: '1', workspace_ids: [WORKSPACE] }, { cookie: grok.cookie, origin: scope1.origin }));
       // Every sentence is driven by a real refusal, and each reason reads differently.
       expect([...shown].sort()).toEqual(Object.keys(BROWSER_REFUSALS).sort());
       expect(new Set(Object.values(BROWSER_REFUSALS)).size).toBe(Object.keys(BROWSER_REFUSALS).length);
@@ -355,7 +359,7 @@ const scope1 = fixtureScope1();
     expect((await scope1.post('/mcp/oauth/consent', { flow, decision: 'save', joiner_name: 'Firstmate', joiner_handle: 'firstmate' }, { cookie, origin: scope1.origin })).status).toBe(302);
     const renamed = await (await phoneFetch(`${scope1.origin}/mcp/oauth/consent?flow=${flow}`, { headers: { cookie } })).text();
     expect(renamed).toContain('Firstmate'); expect(renamed).toContain('@firstmate');
-    const allowed = await scope1.post('/mcp/oauth/consent', { flow, decision: 'allow', trust_app: '1', workspace_selection: '1', workspace_ids: [WORKSPACE] }, { cookie, origin: scope1.origin });
+    const allowed = await scope1.post('/mcp/oauth/consent', { flow, decision: 'allow', trust_app: '1', workspace_selection: '1', workspace_ids: [WORKSPACE], wake_url: 'https://hooks.example/grok' }, { cookie, origin: scope1.origin });
     expect(allowed.status).toBe(302);
     const code = new URL(allowed.headers.get('location')!).searchParams.get('code')!;
     expect((await scope1.post('/mcp/oauth/token', { grant_type: 'authorization_code', client_id: client.client_id, code, code_verifier: verifier, redirect_uri: 'http://127.0.0.1:9876/callback', resource: scope1.origin + '/mcp' })).status).toBe(200);
