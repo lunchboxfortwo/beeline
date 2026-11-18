@@ -99,7 +99,7 @@ export interface ActionResponseLike {
   notification?: {
     request?: {
       identifier?: unknown;
-      content?: { title?: unknown; body?: unknown; data?: unknown };
+      content?: { title?: unknown; body?: unknown; data?: unknown; dataString?: unknown };
     };
   };
 }
@@ -152,7 +152,9 @@ export function readNotificationAction(payload: unknown): NotificationActionRequ
   const request = response.notification?.request;
   const notificationId = typeof request?.identifier === 'string' ? request.identifier : '';
   if (!actionId || !notificationId) return null;
-  const data = stringData(request?.content?.data);
+  // Expo maps dataString for listeners/getLastResponse, but Android tasks
+  // receive the native serializer's bundle directly (including local outcomes).
+  const data = stringData(request?.content?.data ?? request?.content?.dataString);
   const body =
     typeof request?.content?.body === 'string' && request.content.body
       ? request.content.body

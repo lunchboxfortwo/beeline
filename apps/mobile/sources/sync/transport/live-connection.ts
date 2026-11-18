@@ -122,6 +122,7 @@ export class LiveConnection {
   private readonly paintOwners = new Map<string, Registration>();
   private recovery?: { generation: number; promise: Promise<void> };
   private recovering = false;
+  private notificationActions = 0;
   private requestId = 0;
   private socketEpoch = 0;
   private socketGeneration = 0;
@@ -258,6 +259,20 @@ export class LiveConnection {
         setConnectionFailure(failed);
         if (recovered && isOpen(this.socket)) this.publishConnected();
       }
+    }
+  }
+
+  /** A notification button wakes JS without a foreground AppState event. */
+  async runNotificationAction<T>(answer: () => Promise<T>): Promise<T> {
+    const first = this.notificationActions++ === 0;
+    try {
+      // OPEN may describe TCP from before suspension. Replace it before the
+      // first write, just as foreground resume does. Overlapping actions share
+      // that replacement, including a handshake already opening on a cold wake.
+      if (first && !this.foreground && isOpen(this.socket)) this.dropConnection();
+      return await answer();
+    } finally {
+      this.notificationActions--;
     }
   }
 

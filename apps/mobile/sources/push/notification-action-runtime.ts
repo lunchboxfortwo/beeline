@@ -3,6 +3,7 @@ import { getRandomBytes } from 'expo-crypto';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { stageCornerComposerDraft } from '@/buzz/message-corner-forward';
+import { sharedLiveConnection } from '@/sync/transport/live-connection';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import {
   NOTIFICATION_ACTION_TASK,
@@ -63,16 +64,20 @@ async function present(notification: OutcomeNotification): Promise<void> {
 const deps: NotificationActionDeps = {
   platform,
   decideGrant: (grantId, decision) =>
-    monolithPhoneOperation('decideAgentGrant', { grantId, decision }),
+    sharedLiveConnection().runNotificationAction(() =>
+      monolithPhoneOperation('decideAgentGrant', { grantId, decision }),
+    ),
   sendReply: ({ roomId, parentMessageId, text, messageId }) =>
-    monolithPhoneOperation('sendRoomReply', {
-      roomId,
-      parentMessageId,
-      text,
-      messageId,
-      mentions: [],
-      attachments: [],
-    }),
+    sharedLiveConnection().runNotificationAction(() =>
+      monolithPhoneOperation('sendRoomReply', {
+        roomId,
+        parentMessageId,
+        text,
+        messageId,
+        mentions: [],
+        attachments: [],
+      }),
+    ),
   newMessageId,
   present,
   handled: createHandledActionStore(AsyncStorage),

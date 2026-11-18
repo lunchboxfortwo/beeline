@@ -15,6 +15,7 @@ vi.mock('@/auth/monolith-session', () => ({
 }));
 vi.mock('react', () => ({ useSyncExternalStore: (_subscribe: unknown, snapshot: () => unknown) => snapshot() }));
 import { LiveConnection, useConnectionFailure, subscribeNetworkOnline, sharedLiveConnection, resetSharedLiveConnection, reconnectNow } from './live-connection';
+import { handleNotificationAction } from '@/push/notification-actions';
 import { PhoneSocketDisconnectedError } from './phone-socket-error';
 import { MonolithRequestTimeoutError } from '@/auth/monolith-session';
 import { createDiagnosticClient } from '@beeline/api-contract/diagnostics-client';
@@ -451,4 +452,76 @@ it('subscribes open Rooms without resume cursors and asks the server again for a
     const other=await connection.register([{'#h':['a']}],()=>{});expect(socket.sent.map(value=>JSON.parse(value)).filter(frame=>frame.type==='subscribe')).toHaveLength(2);
     stop();expect(socket.sent.some(value=>JSON.parse(value).type==='unsubscribe')).toBe(false);other();expect(socket.sent.some(value=>JSON.parse(value).type==='unsubscribe')).toBe(true);
   });
+});
+
+
+describe('inline notification actions resume the background connection', () => {
+  const response = (grantId: string) => ({
+    actionIdentifier: 'grant-once',
+    notification: { request: { identifier: grantId, content: {
+      data: { categoryId: 'beeline-grant', grantId },
+    } } },
+  });
+  it.each(['android', 'ios'] as const)('%s sends concurrent actions once on a fresh socket without foregrounding', async platform => {
+    const { connection } = setup();
+    const warm = connection.request('readWorkspaces', {});
+    const stale = await open(); stale.reply({ workspaces: [] }); await warm;
+    appState('background');
+    const present = vi.fn(async () => {});
+    const decideGrant = vi.fn((grantId: string, decision: 'once' | 'always' | 'deny') =>
+      connection.runNotificationAction(() => connection.request('decideAgentGrant', { grantId, decision })));
+    const deps = { platform, decideGrant, present, sendReply: vi.fn(), newMessageId: () => 'unused',
+      handled: { has: async () => false, add: async () => {} }, inFlight: new Map() };
+    const first = handleNotificationAction(response('grant-a'), deps);
+    const duplicate = handleNotificationAction(response('grant-a'), deps);
+    const second = handleNotificationAction(response('grant-b'), deps);
+    const fresh = await open();
+    expect(fresh).not.toBe(stale);
+    expect(stale.requests().map(frame => frame.op)).toEqual(['readWorkspaces']);
+    expect(fresh.requests().map(frame => frame.args.grantId)).toEqual(['grant-a', 'grant-b']);
+    fresh.reply({ status: 'once' }); fresh.reply({ status: 'once' }, 1);
+    await expect(Promise.all([first, duplicate, second])).resolves.toEqual(['done', null, 'done']);
+    expect(decideGrant).toHaveBeenCalledTimes(2);
+    expect(present).toHaveBeenCalledTimes(2);
+    expect(state.currentState).toBe('background');
+    expect(useConnectionFailure()).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+    // Another later press has its own background wake, not the old OPEN path.
+    const later = handleNotificationAction(response('grant-c'), deps);
+    const newest = await open(); expect(newest).not.toBe(fresh);
+    newest.reply({ status: 'once' }); await expect(later).resolves.toBe('done');
+  });
+  it('keeps the foreground socket and shares a cold background handshake', async () => {
+    const { connection } = setup();
+    const warm = connection.request('readWorkspaces', {});
+    const socket = await open(); socket.reply({}); await warm;
+    const foreground = connection.runNotificationAction(() => connection.request('decideAgentGrant', { grantId: 'a', decision: 'deny' }));
+    socket.reply({}, 1); await foreground;
+    expect(Socket.instances).toHaveLength(1);
+    appState('background'); socket.drop();
+    const cold = connection.request('readWorkspaces', {});
+    await tick();
+    const action = connection.runNotificationAction(() => connection.request('decideAgentGrant', { grantId: 'b', decision: 'once' }));
+    const opening = await open(); opening.reply({}); opening.reply({}, 1);
+    await Promise.all([cold, action]);
+    expect(Socket.instances).toHaveLength(2);
+  });
+});
+
+
+it('a rejected notification operation releases ownership so the next press gets a fresh connection', async () => {
+  const { connection } = setup();
+  appState('background');
+  const refused = connection.runNotificationAction(() =>
+    connection.request('decideAgentGrant', { grantId: 'denied', decision: 'once' })).catch(error => error);
+  const previous = await open(); previous.refuse();
+  expect(await refused).toBeInstanceOf(Error);
+  const next = connection.runNotificationAction(() =>
+    connection.request('decideAgentGrant', { grantId: 'next', decision: 'deny' }));
+  const fresh = await open();
+  expect(fresh).not.toBe(previous);
+  fresh.reply({ status: 'denied' });
+  await expect(next).resolves.toEqual({ status: 'denied' });
+  expect(previous.requests()).toHaveLength(1);
+  expect(vi.getTimerCount()).toBe(0);
 });
