@@ -47,6 +47,7 @@ function readChoiceCard(value: unknown): ChoiceCardView | null {
     status: item.status,
     agent,
     prompt: item.prompt,
+    ...field('runId', hex64(item.runId) ? item.runId : undefined),
     ...field('ask', typeof item.ask === 'string' ? item.ask : undefined),
     options,
     electorate: item.electorate,

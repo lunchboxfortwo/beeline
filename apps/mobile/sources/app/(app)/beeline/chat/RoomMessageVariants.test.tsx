@@ -12,7 +12,7 @@ vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-ho
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 vi.mock('@/components/buzz/ChoiceVideoPreview', () => ({ ChoiceVideoPreview: vi.fn(() => null) }));
-vi.mock('@/components/buzz/Ledger', () => ({ LedgerUntaggedHint: vi.fn(() => null), LedgerEntry: vi.fn(() => null), LedgerGhostLine: vi.fn(() => null), LedgerSystemLine: vi.fn(() => null), LedgerRoomUpdate: vi.fn(() => null), LedgerSteer: vi.fn(() => null) }));
+vi.mock('@/components/buzz/Ledger', () => ({ LedgerEntryFrame: ({ children }: any) => children, LedgerUntaggedHint: vi.fn(() => null), LedgerEntry: vi.fn(() => null), LedgerGhostLine: vi.fn(() => null), LedgerSystemLine: vi.fn(() => null), LedgerRoomUpdate: vi.fn(() => null), LedgerSteer: vi.fn(() => null) }));
 vi.mock('@/components/buzz/ErrorBanner', () => ({ ErrorBanner: vi.fn(() => null) }));
 vi.mock('@/components/buzz/LifecycleCard', () => ({ GitHubEventCard: vi.fn(() => null), DaemonFactCard: vi.fn(() => null) }));
 vi.mock('@/components/buzz/PrLifecycleCard', () => ({ NotificationLifecycleCard: vi.fn(() => null) }));
@@ -71,6 +71,7 @@ import { useChatMessageActions } from './useChatMessageActions';
 import { readRoomViewMessage } from '@beeline/api-contract/phone';
 import { displayRoomMessage } from '@/buzz/room-view-presentation';
 import { useChatTranscriptRenderer } from './useChatTranscriptRenderer';
+import { foldTranscriptRows } from '@/buzz/room-message-store';
 
 vi.mock('expo-router', () => ({ router: {} }));
 vi.mock('@/utils/responsive', () => ({ useIsDesktop: () => false }));
@@ -413,6 +414,80 @@ it.each(cardRendererCases)('wraps the $name renderer once and replies to that ca
   expect(onAnswer).not.toHaveBeenCalled();
   expect(onSkip).not.toHaveBeenCalled();
 });
+it('renders the morning workflow approval beside its same-time handoff with working decisions', () => {
+  // Reduced from the two 2026-11-18 production rows. Raw exports stay outside the repo.
+  const owner = '34cf4160723acd12d205dfbe292614bfec9489b78812d1cd9846c00346903334';
+  const agent = {
+    face: 'owl', kind: 'agent', name: 'Ruby', handle: 'ruby',
+    avatar: '/v1/agent-avatars/54c083c9-76ee-47e7-a797-b8fcb4a3a8a8',
+    pubkey: 'c3dfbf8acbb4b6e9f11bd37119a5ce2f4f104257885d098d8e075c0b0c4c066b',
+  };
+  const runId = 'af0d790d02ea49aa245270dbad8788436c1ef87d374f2aac5e75b484ab8a39d2';
+  const askId = '5ec426a2bad18dfc9b2e1387428364cb76c60f6a34870e8c32ba9419caf01d19';
+  const choiceId = '4d946fe7-10f6-494e-8314-8e5dfea4c182';
+  const prompt = 'Owner taps approve all, replies with item numbers, or skips the card.';
+  const createdAtMs = Date.parse('2026-11-18T15:27:20.072349Z');
+  const source = [
+    {
+      id: askId, text: `@ruby asked ${prompt}`, choice: {
+        choiceId, mode: 'question', status: 'open', agent, prompt, runId,
+        options: [
+          { label: 'approve_all', letter: 'A', optionId: 'A',
+            consequence: 'Open one fix thread per same-area bundle for every actionable card item.' },
+          { label: 'pick_numbers', letter: 'B', optionId: 'B',
+            consequence: "Read the owner's item numbers and open fix threads for only those items." },
+          { label: 'skip', letter: 'C', optionId: 'C', consequence: "The card's approvals are settled." },
+        ],
+        electorate: [owner], electorateCount: 1, votedCount: 0, responses: [],
+      },
+    },
+    {
+      id: runId, text: 'Ruby started workflow morning-card-2026-11-18 · run af0d790d',
+      systemEvent: {
+        kind: 'workflow-handoff', verb: 'started workflow',
+        object: { text: 'morning-card-2026-11-18' },
+        subject: { id: agent.pubkey, kind: 'agent', name: 'Ruby' },
+        consequence: 'run af0d790d',
+      },
+    },
+  ];
+  const projected = source.map(row => displayRoomMessage(readRoomViewMessage({
+    ...row, author: agent, presentation: 'card',
+    createdAt: Math.floor(createdAtMs / 1000), createdAtMs,
+  })!, owner));
+  const folded = foldTranscriptRows(projected, null);
+  expect(folded.rows.map(row => row.id)).toEqual([askId, runId]);
+  expect(folded.hostIds.get(askId)).toBe(askId);
+  expect(folded.hostIds.get(runId)).toBe(runId);
+  function Fixture() {
+    const args: unknown[] = Array(69).fill(undefined);
+    Object.assign(args, {
+      0: false, 4: null, 10: new Map(), 11: new Map(), 12: new Map(),
+      13: [], 14: syntheticImageChoice.room_id, 15: owner, 17: {}, 20: false,
+      21: onAnswer, 22: onSkip, 52: false,
+      53: new Set(), 54: new Set(), 55: new Set(),
+      56: { states: new Map(), retry: vi.fn() }, 57: {}, 58: new Map(), 63: folded.rows,
+    });
+    const [render] = useChatTranscriptRenderer(args as Parameters<typeof useChatTranscriptRenderer>[0]);
+    return <>{folded.rows.map(item => <React.Fragment key={item.id}>{render({ item })}</React.Fragment>)}</>;
+  }
+  act(() => { renderer = create(<Fixture />); });
+  expect(renderer.root.findAllByType('TranscriptCard')).toHaveLength(1);
+  expect(cardProps().title).toBe(prompt);
+  expect(cardProps().tier).toBe('ask');
+  expect(plates().map((plate: { props: React.ComponentProps<typeof TranscriptCardChoicePlate> }) =>
+    plate.props.choice.label)).toEqual(['approve_all', 'pick_numbers', 'skip']);
+  for (const plate of plates()) {
+    act(() => plate.props.choice.onPress());
+    expect(onAnswer).toHaveBeenLastCalledWith(choiceId, plate.props.choice.id);
+  }
+  act(() => cardProps().noteInput.onChangeText('1, 3'));
+  act(() => plates()[1].props.choice.onPress());
+  expect(onAnswer).toHaveBeenLastCalledWith(choiceId, 'B', '1, 3');
+  act(() => cardProps().actions[0].onPress());
+  expect(onSkip).toHaveBeenCalledExactlyOnceWith(choiceId);
+});
+
 let renderer: ReactTestRenderer;
 const onAnswer = vi.fn();
 const onSkip = vi.fn();

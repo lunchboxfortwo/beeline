@@ -313,7 +313,7 @@ export function useChatTranscriptRenderer([
       // The active call lives below the Room header; ended calls use LedgerSystemLine.
       if (item.voiceCall && !item.voiceCall.endedAt) return null;
       if (item.onboarding) return <RepositoryOnboardingCard card={item.onboarding} viewerId={cacheViewerPubkey} author={item.authorIdentity} />;
-      if (item.choice?.mode === 'poll') {
+      if (item.choice && (item.choice.mode === 'poll' || item.choice.runId)) {
         return (
           <ChoiceCard
             message={item}

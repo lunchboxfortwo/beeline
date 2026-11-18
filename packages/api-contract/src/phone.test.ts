@@ -128,6 +128,12 @@ describe('phone contract', () => {
       footer: 'closed · 3 of 4 voted',
     };
     expect(isRoomView({ ...room, messages: [{ ...message, choice }] })).toBe(true);
+    for (const runId of ['af0d790d02ea49aa245270dbad8788436c1ef87d374f2aac5e75b484ab8a39d2', 'invalid', null]) {
+      const gate = readRoomView({ ...room, messages: [{ ...message, choice: {
+        ...choice, mode: 'question', runId,
+      } }] })?.messages[0]?.choice;
+      expect(gate?.runId).toBe(typeof runId === 'string' && runId.length === 64 ? runId : undefined);
+    }
     // Hash-derived choice IDs predate UUID variant normalization. They remain
     // valid choice keys, while other IDs and malformed choice keys stay strict.
     for (const choiceId of ['12345678-1234-4123-e123-123456789abc', choice.choiceId]) {
