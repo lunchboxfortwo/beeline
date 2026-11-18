@@ -8,6 +8,7 @@ import { SYSTEM_MESSAGE_TURN_SILENCE } from './system-message-catalog-turn-silen
  * variables describe the ordered slots; parts preserve every byte around them.
  */
 export const SYSTEM_MESSAGE_CATALOG = {
+  'corner-auto-close.closed': { parts: ['closed after 7 days without a human message'], variables: [] },
   ...SYSTEM_MESSAGE_AWAY_AUTO_PAUSE,
   ...SYSTEM_MESSAGE_DAEMON_SERVICE,
   ...SYSTEM_MESSAGE_VOICE_SERVICE,

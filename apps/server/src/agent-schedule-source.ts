@@ -9,14 +9,20 @@ CREATE OR REPLACE FUNCTION beeline_agent_schedule_due_change() RETURNS trigger L
 BEGIN
  CASE TG_TABLE_NAME
  WHEN 'messages' THEN
-   IF NEW.card_type IS DISTINCT FROM 'workflow-handoff' THEN RETURN NULL;END IF;
+   IF NEW.card_type IS DISTINCT FROM 'workflow-handoff' AND NOT (
+     TG_OP='INSERT' AND NEW.presentation='message' AND NEW.system_event IS NULL
+     AND EXISTS(SELECT 1 FROM identities WHERE id=NEW.author_id AND kind='human' AND NOT hidden_from_roster)
+     AND EXISTS(SELECT 1 FROM rooms WHERE id=NEW.room_id AND parent_id IS NOT NULL AND archived_at IS NULL)
+   ) THEN RETURN NULL;END IF;
+ WHEN 'corner_facts' THEN
+   IF TG_OP='UPDATE' AND NEW.locked IS NOT DISTINCT FROM OLD.locked THEN RETURN NULL;END IF;
  WHEN 'agent_schedules' THEN
    IF TG_OP='UPDATE' AND ROW(NEW.paused_at,NEW.room_id,NEW.agent_id,NEW.creator_id,NEW.next_run_at,NEW.updated_at,NEW.cadence,NEW.message,NEW.max_runs,NEW.owner_id,NEW.workflow_slug,NEW.human_command_message_id,NEW.requester_command_id)
      IS NOT DISTINCT FROM ROW(OLD.paused_at,OLD.room_id,OLD.agent_id,OLD.creator_id,OLD.next_run_at,OLD.updated_at,OLD.cadence,OLD.message,OLD.max_runs,OLD.owner_id,OLD.workflow_slug,OLD.human_command_message_id,OLD.requester_command_id)
      THEN RETURN NULL;END IF;
  WHEN 'rooms' THEN
-   IF TG_OP<>'UPDATE' OR ROW(NEW.archived_at,NEW.parent_id) IS NOT DISTINCT FROM ROW(OLD.archived_at,OLD.parent_id) THEN RETURN NULL;END IF;
-   IF NOT EXISTS(SELECT 1 FROM agent_schedules WHERE room_id=NEW.id) THEN RETURN NULL;END IF;
+   IF TG_OP='UPDATE' AND ROW(NEW.archived_at,NEW.parent_id) IS NOT DISTINCT FROM ROW(OLD.archived_at,OLD.parent_id) THEN RETURN NULL;END IF;
+   IF NEW.parent_id IS NULL AND NOT EXISTS(SELECT 1 FROM agent_schedules WHERE room_id=NEW.id) THEN RETURN NULL;END IF;
  WHEN 'memberships' THEN
    IF TG_OP='UPDATE' AND ROW(NEW.room_id,NEW.identity_id,NEW.removed_at)
      IS NOT DISTINCT FROM ROW(OLD.room_id,OLD.identity_id,OLD.removed_at) THEN RETURN NULL;END IF;
@@ -36,7 +42,7 @@ END;
 $$;
 DROP TRIGGER IF EXISTS beeline_agent_schedule_due ON agent_subscriptions;
 DROP TRIGGER IF EXISTS beeline_agent_schedule_due ON agents;
-${['agent_schedules', 'rooms', 'memberships', 'identities', 'messages'].map(source => `
+${['agent_schedules', 'rooms', 'memberships', 'identities', 'messages', 'corner_facts'].map(source => `
 DROP TRIGGER IF EXISTS beeline_agent_schedule_due ON ${source};
 CREATE TRIGGER beeline_agent_schedule_due AFTER INSERT OR DELETE OR UPDATE ON ${source}
   FOR EACH ROW EXECUTE FUNCTION beeline_agent_schedule_due_change();
