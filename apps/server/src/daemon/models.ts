@@ -27,14 +27,18 @@ import { daemonWriteResult } from './corner-messages.js';
     );
     if (!ownerRequest.rowCount)
       throw new Error('only the agent owner may generate its avatar (access denied)');
-    const bytes = await renderAgentAvatar(input.drawing);
+    const stored = (await ctx.database.query<{ background: string }>(
+      'SELECT background FROM agent_avatars WHERE agent_id=$1', [agentId],
+    )).rows[0];
+    const background = input.background === undefined ? (stored?.background ?? '#E5A645') : input.background;
+    const bytes = await renderAgentAvatar(input.drawing, background);
     const id = randomUUID();
     const avatar = `/v1/agent-avatars/${id}`;
     await ctx.database.query(
-      `INSERT INTO agent_avatars(id,agent_id,bytes,request_id,drawing) VALUES($1,$2,$3,$4,$5::jsonb)
+      `INSERT INTO agent_avatars(id,agent_id,bytes,request_id,drawing,background) VALUES($1,$2,$3,$4,$5::jsonb,$6)
        ON CONFLICT(agent_id) DO UPDATE SET id=EXCLUDED.id,bytes=EXCLUDED.bytes,
-         request_id=EXCLUDED.request_id,drawing=EXCLUDED.drawing,generated_at=now()`,
-      [id, agentId, bytes, command.turn_request_id, JSON.stringify(input.drawing)],
+         request_id=EXCLUDED.request_id,drawing=EXCLUDED.drawing,background=EXCLUDED.background,generated_at=now()`,
+      [id, agentId, bytes, command.turn_request_id, JSON.stringify(input.drawing), background],
     );
     await ctx.database.query('UPDATE identities SET avatar=$2,updated_at=now() WHERE id=$1', [
       agentId,

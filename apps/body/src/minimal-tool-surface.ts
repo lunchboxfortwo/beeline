@@ -409,6 +409,7 @@ export const CAPABILITY_TOOLS: Record<string, Record<string, ToolDefinition>> = 
       "inputSchema": {
         "type": "object",
         "properties": {
+          "background": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$", "description": "Optional solid background #RRGGBB. Omit to preserve the saved background; new avatars default to brass." },
           "drawing": {
             "type": "array",
             "minItems": 1,

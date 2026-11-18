@@ -2,6 +2,7 @@ import { startQueuedTurn } from '../test-fixtures/queued-turn.test-support.js';
 import { phoneFetch } from '../../../../packages/test-helpers/helpers/phone-operation.js';
 import * as serverSentry from '.././sentry.js';
 
+import sharp from 'sharp';
 import { request as httpRequest } from 'node:http';
 import { describe, expect, it, vi } from 'vitest';
 import { FACE_NAMES, FACE_SOULS, isFaceId, type FaceId } from '@beeline/api-contract/phone';
@@ -53,7 +54,7 @@ const fixture = monolithFixture();
         [WORKSPACE, JSON.stringify([HUMAN, AGENT])],
       );
     expect((await completionMessages()).rowCount).toBe(0);
-    const saved = await call(input);
+    const saved = await call({ ...input, background: '#FF0000' });
     expect(saved.status).toBe(200);
     const first = await fixture.phone.readAgent(WORKSPACE, AGENT, HUMAN);
     expect(first?.avatarGenerationId).toBeTruthy();
@@ -66,6 +67,12 @@ const fixture = monolithFixture();
     expect(picture.headers.get('content-type')).toBe('image/webp');
     const bytes = new Uint8Array(await picture.arrayBuffer());
     expect(bytes.length).toBeGreaterThan(100);
+    const pixel = await sharp(bytes).extract({ left: 0, top: 0, width: 1, height: 1 }).raw().toBuffer();
+    expect(pixel[0]).toBeGreaterThan(240);
+    expect(pixel[1]).toBeLessThan(15);
+    expect(pixel[2]).toBeLessThan(15);
+    expect((await call({ ...input, background: 'url(https://example.com)' })).status).not.toBe(200);
+    expect((await fixture.phone.readAgent(WORKSPACE, AGENT, HUMAN))?.agent.identity.avatar).toBe(url);
     // Corrupt generation leaves both persisted face and success marker untouched.
     expect(
       (await call({ ...input, drawing: [{ type: 'image', href: 'file:///etc/passwd' }] })).status,
@@ -89,12 +96,14 @@ const fixture = monolithFixture();
     expect(committedSoul.agent.identity.avatar).toBe(url);
     expect((await fixture.phone.readAgent(WORKSPACE, AGENT, HUMAN))?.agent.identity.avatar).toBe(url);
     const context = await fixture.daemonOperation('getAgentAvatar', { roomId: ROOM });
-    expect((await context.json()).drawing).toEqual(drawing);
+    expect(await context.json()).toMatchObject({ drawing, background: '#FF0000' });
     const refined = [
       ...drawing,
       { type: 'path', d: 'M36,68 L50,74 L64,68', fill: 'none', stroke: 'ink', strokeWidth: 2 },
     ];
     expect((await call({ ...input, drawing: refined })).status).toBe(200);
+    const readback = await fixture.daemonOperation('getAgentAvatar', { roomId: ROOM });
+    expect((await readback.json()).background).toBe('#FF0000');
     const reopened = await new PhoneService(fixture.database, fixture.origin).readAgent(WORKSPACE, AGENT, HUMAN);
     expect(reopened?.avatarGenerationId).not.toBe(first?.avatarGenerationId);
     expect(reopened?.agent.identity.avatar).not.toBe(url);

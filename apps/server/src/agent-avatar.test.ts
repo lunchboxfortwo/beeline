@@ -16,6 +16,13 @@ describe('generated avatar rendering', () => {
     expect(await sharp(face).metadata()).toMatchObject({ width: 256, height: 256, format: 'webp' });
     expect(face.length).toBeLessThan(131072);
   });
+  it('keeps brass as the legacy default and validates custom solid colors', async () => {
+    const drawing = [{ type: 'circle', cx: 50, cy: 50, r: 20, fill: 'ink' }];
+    expect(await renderAgentAvatar(drawing)).toEqual(await renderAgentAvatar(drawing, '#E5A645'));
+    expect(await renderAgentAvatar(drawing, '#FF0000')).not.toEqual(await renderAgentAvatar(drawing));
+    for (const background of ['', '#fff', 'red', null, 'url(file:///tmp/a)', '#FF0000\"'])
+      await expect(renderAgentAvatar(drawing, background)).rejects.toThrow('background');
+  });
   it.each(
     [
       [],

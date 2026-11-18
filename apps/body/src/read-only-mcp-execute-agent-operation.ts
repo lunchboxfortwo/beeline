@@ -642,6 +642,7 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
         await daemonExecute('postAgentAvatar', {
           roomId: agentScheduleRoomId(),
           drawing: args.drawing,
+          background: args.background as string | undefined,
         }),
       );
     case 'fetch_image':

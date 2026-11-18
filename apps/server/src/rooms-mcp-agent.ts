@@ -109,8 +109,8 @@ const APP_ROUTES: Record<string, Record<string, Route | string>> = {
     sign_typed_data: 'wallet_sign_typed_data', link_request: 'create_link_spend_request', link_wait: 'wait_link_spend_request',
   },
   avatar: {
-    read: { op: 'get_avatar', required: [], description: 'Read your current avatar drawing.' },
-    set: { op: 'set_avatar', required: ['drawing'], description: 'Set your avatar from a drawing.' },
+    read: { op: 'get_avatar', required: [], description: 'Read your current avatar drawing and background (#RRGGBB).' },
+    set: { op: 'set_avatar', required: ['drawing'], description: 'Set your avatar from a drawing. Optional background: solid #RRGGBB (red #FF0000); omit to retain the saved background or legacy brass.' },
   },
   browser_share: { start: 'share_browser', end: 'end_browser_share' },
 };
@@ -651,7 +651,7 @@ export class RoomsMcpAgentTools {
         case 'wallet_history': return exec('getWalletToolHistory', { ...base, limit: typeof input.limit === 'number' ? Math.floor(input.limit) : undefined });
         case 'wallet_quote': return exec('getWalletToolQuote', { ...base, chain: input.chain, asset: String(input.asset ?? 'usdc'), amount: String(input.amount ?? '') });
         case 'get_avatar': return exec('getAgentAvatar', { roomId: context.roomId });
-        case 'set_avatar': return exec('postAgentAvatar', { ...context, drawing: input.drawing });
+        case 'set_avatar': return exec('postAgentAvatar', { ...context, drawing: input.drawing, background: input.background });
       }
       throw new McpToolError('unknown operation');
     });

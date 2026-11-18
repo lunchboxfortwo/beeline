@@ -502,13 +502,13 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
         )) as Output<Name>;
       case 'getAgentAvatar': {
         const row = (
-          await ctx.database.query<{ drawing: unknown; soul: unknown }>(
-            `SELECT portrait.drawing,agent.soul FROM agents agent
+          await ctx.database.query<{ drawing: unknown; background: string; soul: unknown }>(
+            `SELECT portrait.drawing,portrait.background,agent.soul FROM agents agent
            LEFT JOIN agent_avatars portrait ON portrait.agent_id=agent.agent_id WHERE agent.agent_id=$1`,
             [authenticatedAgentId],
           )
         ).rows[0];
-        return { drawing: row?.drawing ?? null, soul: row?.soul ?? null } as Output<Name>;
+        return { drawing: row?.drawing ?? null, background: row?.background ?? '#E5A645', soul: row?.soul ?? null } as Output<Name>;
       }
       case 'postAgentAvatar':
         return (await daemonAgentAvatar(ctx,

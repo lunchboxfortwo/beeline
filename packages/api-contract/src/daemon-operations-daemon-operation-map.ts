@@ -376,8 +376,8 @@ export type DaemonOperationMap = {
   postPermissionRequest: Operation<PostPermissionRequestInput, WriteResult>;
   postPermissionExecution: Operation<PostPermissionExecutionInput, WriteResult>;
   postAgentToolMandate: Operation<PostAgentToolMandateInput, WriteResult>;
-  getAgentAvatar: Operation<RoomInput, { readonly drawing: unknown; readonly soul: unknown }>;
-  postAgentAvatar: Operation<RoomInput & { readonly drawing: unknown }, WriteResult>;
+  getAgentAvatar: Operation<RoomInput, { readonly drawing: unknown; readonly background: string; readonly soul: unknown }>;
+  postAgentAvatar: Operation<RoomInput & { readonly drawing: unknown; readonly background?: string }, WriteResult>;
   postAgentUsage: Operation<AgentInput & { readonly usage: AgentUsage; readonly usageSource?:UsageWriteSource }, WriteResult>;
   publishAgentUsageAccount: Operation<AgentInput & { readonly usage: AgentUsage; readonly revision: string; readonly ownerId: string; readonly source: { readonly connectionId: string; readonly epoch: number } }, WriteResult & UsageAccountPublicationResult>;
   attachAgentUsageAccount: Operation<AgentInput & UsageAccountReference & { readonly source: { readonly connectionId: string; readonly epoch: number } }, WriteResult>;

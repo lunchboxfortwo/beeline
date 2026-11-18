@@ -216,6 +216,8 @@ CREATE TABLE IF NOT EXISTS agent_avatars (
   generated_at timestamptz NOT NULL DEFAULT now()
 );
 
+ALTER TABLE agent_avatars ADD COLUMN IF NOT EXISTS background text NOT NULL DEFAULT '#E5A645';
+
 -- Object-storage rows (object-storage.ts): person file shares and agent
 -- artifacts. Bytes live in S3-compatible storage. The key is kind/owner/sha256;
 -- owner+sha256 dedupes. The retired bytea media store is dropped below.

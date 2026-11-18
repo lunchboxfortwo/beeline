@@ -12,7 +12,9 @@ const attributes: Record<string, readonly string[]> = {
 };
 
 /** Only bounded geometry reaches librsvg: no caller XML, URLs, fonts or resources. */
-export async function renderAgentAvatar(drawing: unknown): Promise<Buffer> {
+export async function renderAgentAvatar(drawing: unknown, background: unknown = colors.brass): Promise<Buffer> {
+  if (typeof background !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(background))
+    throw new Error('avatar background must be #RRGGBB');
   if (!Array.isArray(drawing) || drawing.length < 1 || drawing.length > 128)
     throw new Error('avatar needs 1–128 shapes');
   const shapes = drawing.map((shape: unknown) => {
@@ -48,7 +50,7 @@ export async function renderAgentAvatar(drawing: unknown): Promise<Buffer> {
     }
     return `<${type} ${values.join(' ')} />`;
   });
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 100 100"><rect width="100" height="100" fill="${colors.brass}"/>${shapes.join('')}</svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 100 100"><rect width="100" height="100" fill="${background}"/>${shapes.join('')}</svg>`;
   const png = await sharp(Buffer.from(svg), { limitInputPixels: 65536 }).png().toBuffer();
   const stats = await sharp(png).stats();
   if (stats.channels.every((channel) => channel.stdev < 0.01))
