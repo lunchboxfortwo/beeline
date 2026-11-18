@@ -114,7 +114,7 @@ export function CommunityRail({ communities, activeCommunityId, onSelect, onAdd,
                 onExitPress={() => { setExitArmedId(null); onLeaveWorkspace?.(community.communityId); }}
                 testID={`community-rail-${community.communityId}`}
               >
-                <YStack width={TILE.pictureSize} height={TILE.pictureSize} borderRadius="sm" overflow="hidden" alignItems="center" justifyContent="center">
+                <YStack width={TILE.pictureSize} height={TILE.pictureSize} borderRadius="md" overflow="hidden" alignItems="center" justifyContent="center">
                   <IdentityMark
                     kind="workspace"
                     seed={community.communityId}

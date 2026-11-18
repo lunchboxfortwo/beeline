@@ -3,7 +3,9 @@ import * as React from 'react';
 import { act, create } from 'react-test-renderer';
 import { beforeEach, expect, it, vi } from 'vitest';
 
+vi.mock('react-native', () => ({ Platform: { OS: 'web' } }));
 vi.mock('react-native-reanimated', () => ({
+    default: { View: 'AnimatedView' },
     useSharedValue: (value: number) => React.useRef({ value }).current,
     useAnimatedStyle: (work: () => unknown) => work(),
     useReducedMotion: () => false,
@@ -16,7 +18,9 @@ vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-ho
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: 'IdentityMark' }));
+vi.mock('@/components/buzz/DesktopWorkspacePortal', () => ({ DesktopWorkspacePortal: ({ children }: React.PropsWithChildren) => children }));
 import { BuzzCommunityShell, CommunityRail, useCommunityDrawer } from './CommunityRail';
+import { DesktopWorkspaceRail } from './DesktopWorkspaceRail';
 
 beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; });
 
@@ -33,6 +37,22 @@ it('lists Workspaces and Add, and leaves Settings to its tab', () => {
     expect(onSelect).toHaveBeenCalledWith('w1');
     act(() => byID('community-rail-add')[0].props.onPress());
     expect(onAdd).toHaveBeenCalled();
+});
+
+it('clips phone and desktop Workspace pictures with the same radius token', () => {
+    let tree: any;
+    let desktop: any;
+    act(() => {
+        tree = create(<CommunityRail communities={[{ communityId: 'w1', name: 'Beeline Work', avatar: 'https://example.com/workspace.png' }]} activeCommunityId="w1" onSelect={vi.fn()} onAdd={vi.fn()} />);
+        desktop = create(<DesktopWorkspaceRail open workspaces={[{ id: 'w1', name: 'Beeline Work', avatar: 'https://example.com/workspace.png', roomCount: 1, needsAttention: false }]} activeWorkspaceId="w1" onClose={vi.fn()} onSelect={vi.fn()} onAdd={vi.fn()} onOpenAccount={vi.fn()} />);
+    });
+    const picture = tree.root.findByType('IdentityMark');
+    const desktopPicture = desktop.root.findAllByType('IdentityMark').find((node: any) => node.props.testID === 'desktop-workspace-mark-w1');
+    expect(picture.props.avatarUrl).toBe('https://example.com/workspace.png');
+    expect(picture.parent.props.overflow).toBe('hidden');
+    expect(picture.parent.props.borderRadius).toBe('md');
+    expect(picture.parent.props.borderRadius).toBe(desktopPicture.parent.props.borderRadius);
+    act(() => { tree.unmount(); desktop.unmount(); });
 });
 
 it('keeps drawer consumers unchanged across unrelated Room renders', () => {
