@@ -179,7 +179,7 @@ export type DaemonOperationMap = {
     }
   >;
   message: Operation<RoomInput & TurnOutputAuthority & { readonly to: import('./agent-messaging.js').MessageAddress; readonly text: string; readonly ask?: import('./agent-messaging.js').MessageAsk }, WriteResult>;
-  reply: Operation<RoomInput & TurnOutputAuthority & { readonly id: string; readonly text: string; readonly ask?: import('./agent-messaging.js').MessageAsk }, WriteResult>;
+  reply: Operation<RoomInput & TurnOutputAuthority & { readonly queuedRequestIds?: readonly string[]; readonly id: string; readonly text: string; readonly ask?: import('./agent-messaging.js').MessageAsk }, WriteResult & { readonly _meta?: { readonly beeline: { readonly turnComplete: true } } }>;
   /** Cutover only: calls serving queued legacy items. Remove with messaging-cutover.ts. */
   order: Operation<RoomInput & TurnOutputAuthority & { readonly address: string; readonly text: string; readonly agent?: string }, WriteResult>;
   stopAgentTurn: Operation<RoomInput & TurnOutputAuthority & { readonly address: string; readonly agent?: string }, StopAgentTurnResult>;

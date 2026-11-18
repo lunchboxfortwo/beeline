@@ -22,6 +22,7 @@ it('concurrent replies carry their own requestId in the same place',async()=>{
   await Promise.all(['first','second'].map(requestId=>callAgentTool('reply',{id:requestId,requestId,text:'Completed'},requestId)));
   expect(inputs.map(input=>input.requestId).sort()).toEqual(['first','second']);
   expect(inputs.every(input=>input.roomId==='room')).toBe(true);
+  expect(inputs.map(input=>input.queuedRequestIds)).toEqual([['first','second'],['first','second']]);
 });
 it('work tools can serve another item after the first answer',async()=>{
   const inputs:Record<string,unknown>[]=[];

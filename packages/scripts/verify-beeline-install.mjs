@@ -229,6 +229,21 @@ async function verifySquireProxy(proxyPath, cwd, env) {
   }
 }
 
+/** Exercise the delivered CLI and hook, without starting a helper or calling a provider. */
+export async function verifyBundledReplyCompletion(directory, options) {
+  const help = await run(process.execPath, [resolve(directory, 'beeline-cli.mjs'), '--help'], options);
+  if (!stripAnsi(help.stdout + help.stderr).includes('Usage:')) fail('bundled CLI help is missing');
+  for (const complete of [false, true]) {
+    const result = await run(process.execPath, [resolve(directory, 'claude-reply-completion-hook.mjs')], {
+      ...options,
+      input: JSON.stringify({hook_event_name:'PostToolUse',tool_name:'mcp__beeline-agent__reply',
+        tool_response:{_meta:{beeline:{turnComplete:complete}}}}),
+    });
+    const expected = complete ? {continue:false,suppressOutput:true} : {continue:true};
+    if (JSON.stringify(JSON.parse(result.stdout)) !== JSON.stringify(expected)) fail('bundled reply hook returned the wrong completion');
+  }
+}
+
 async function main() {
   const platform = requestedPlatform();
   if (!platform) fail('unsupported host platform');
@@ -287,6 +302,8 @@ async function main() {
     if (!stripAnsi(version.stdout).match(/^beeline 0\.0\.0$/m)) {
       fail(`beeline --version did not report its version:\n${version.stdout}`);
     }
+
+    await verifyBundledReplyCompletion(resolve(libDir, 'lib/beeline'), {cwd:bareCwd,env:runtimeEnv,timeoutMs:10_000});
 
     // Self-update probes the staged JS entrypoint directly, before the shell
     // wrapper can export paths for optional block-buzz helpers. Keep this

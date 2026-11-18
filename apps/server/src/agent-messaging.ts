@@ -105,7 +105,7 @@ export async function sendMessage(db: SqlDatabase, input: {
 
 /** The caller supplies an id, never a reply destination. */
 export async function replyToMessage(db: SqlDatabase, agentId: string, input: {
-  id:string; text:string; ask?:MessageAsk; messageId?:string; roomId?:string;
+  id:string; text:string; ask?:MessageAsk; messageId?:string; roomId?:string; queuedRequestIds?:readonly string[];
 },onAnswered?:(roomId:string)=>void) {
   if (input.ask) validateAskInput(input.ask);
   const item=(await db.query<CommandRow>(`SELECT * FROM agent_commands
@@ -115,5 +115,19 @@ export async function replyToMessage(db: SqlDatabase, agentId: string, input: {
   const saved=await answerQueuedMessage(db,agentId,{roomId:item.room_id,requestId:item.id,text:input.text,
     messageAsk:input.ask,messageId:input.messageId,explicitReply:true,replyFromPlace:input.roomId});
   if (!('answered' in saved) || saved.answered!==false) onAnswered?.(item.room_id);
-  return saved;
+  const owed = [...new Set(input.queuedRequestIds ?? [])];
+  const completed = !input.ask && saved.delivered && input.roomId === item.room_id && owed.includes(item.turn_request_id) && owed.length
+    ? (await db.query(`SELECT DISTINCT item.turn_request_id FROM agent_commands item JOIN messages reply
+        ON reply.id=COALESCE(item.result_message_id,item.posted_reply_id)
+        AND reply.author_id=item.agent_id AND reply.room_id=item.return_room_id AND reply.deleted_at IS NULL
+      WHERE item.agent_id=$1 AND item.room_id=$2 AND item.turn_request_id=ANY($3::text[])
+        AND item.state='complete'
+        AND NOT EXISTS (SELECT 1 FROM work_questions question WHERE question.message_id=reply.id)
+        AND NOT EXISTS (SELECT 1 FROM agent_commands question WHERE question.id=reply.id
+          AND question.private_payload->>'messageAsk' IS NOT NULL)`,[agentId,input.roomId,owed]).catch(error => {
+        console.warn('[reply] optional completion proof unavailable:',error);
+        return {rows:[]};
+      })).rows.length === owed.length
+    : false;
+  return {...saved,...(completed ? {_meta:{beeline:{turnComplete:true}}} : {})};
 }

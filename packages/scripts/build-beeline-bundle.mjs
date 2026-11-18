@@ -161,6 +161,27 @@ async function sha256(path) {
   return hash.digest('hex');
 }
 
+/** Package the CLI and the native reply hook together in the immutable release. */
+export async function bundleHelperCli(staging, sourceCommit = '') {
+  run('npx', [
+    '--no-install',
+    'esbuild',
+    resolve(repoRoot, 'apps/body/dist/cli.js'),
+    '--bundle',
+    '--platform=node',
+    '--format=esm',
+    '--target=node20',
+    "--banner:js=import { createRequire as __cr } from 'module'; const require = __cr(import.meta.url);",
+    '--define:import.meta.url="beeline:bundle"',
+    `--define:BEELINE_BUILD_SENTRY_DSN=${JSON.stringify(process.env.BEELINE_HELPER_SENTRY_DSN ?? '')}`,
+    `--define:BEELINE_BUILD_SENTRY_RELEASE=${JSON.stringify(sourceCommit)}`,
+    `--outfile=${resolve(staging, 'lib', 'beeline', 'beeline-cli.mjs')}`,
+  ]);
+  await copyFile(resolve(repoRoot, 'apps/body/dist/claude-reply-completion-hook.js'),
+    resolve(staging, 'lib/beeline/claude-reply-completion-hook.mjs'));
+  await chmod(resolve(staging, 'lib/beeline/claude-reply-completion-hook.mjs'), 0o755);
+}
+
 async function main() {
   const platform = parsePlatform();
   const carryIndex = process.argv.indexOf('--carry-forward');
@@ -217,20 +238,7 @@ async function main() {
       resolve(repoRoot, 'apps/body/dist/recovery-cli.js'),
       resolve(staging, 'lib/beeline/recovery-cli.mjs'),
     ));
-    run('npx', [
-      '--no-install',
-      'esbuild',
-      resolve(repoRoot, 'apps/body/dist/cli.js'),
-      '--bundle',
-      '--platform=node',
-      '--format=esm',
-      '--target=node20',
-      "--banner:js=import { createRequire as __cr } from 'module'; const require = __cr(import.meta.url);",
-      '--define:import.meta.url="beeline:bundle"',
-      `--define:BEELINE_BUILD_SENTRY_DSN=${JSON.stringify(process.env.BEELINE_HELPER_SENTRY_DSN ?? '')}`,
-      `--define:BEELINE_BUILD_SENTRY_RELEASE=${JSON.stringify(sourceCommit)}`,
-      `--outfile=${resolve(staging, 'lib', 'beeline', 'beeline-cli.mjs')}`,
-    ]);
+    await bundleHelperCli(staging, sourceCommit);
     run('npx', [
       '--no-install',
       'esbuild',

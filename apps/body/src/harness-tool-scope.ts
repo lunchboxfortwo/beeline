@@ -54,6 +54,8 @@
  *     of its own, so the mounted servers are the whole set by construction.
  */
 
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 import { CURSOR_HARNESS_COMMAND } from './cursor-acp-bridge.js';
 
 /** How well the daemon can confine this harness's tool surface to its own. */
@@ -75,7 +77,18 @@ export type ToolScopeEnforcement =
  * session/new). `disableClaudeAiConnectors` is any-source-true, so an operator
  * whose own settings leave it false cannot re-widen a Beeline session.
  */
-export const CLAUDE_TOOL_SCOPE_SETTINGS = { disableClaudeAiConnectors: true } as const;
+export const CLAUDE_TOOL_SCOPE_SETTINGS = {
+  disableClaudeAiConnectors: true,
+  get hooks() {
+    // Resolve only when a Claude session requests the hook, against its release.
+    const replyCompletionHook = import.meta.url.startsWith('beeline:')
+      ? resolve(dirname(process.argv[1]!), 'claude-reply-completion-hook.mjs')
+      : fileURLToPath(new URL('./claude-reply-completion-hook.js',import.meta.url));
+    return {PostToolUse:[{matcher:'mcp__beeline-agent__reply',hooks:[{
+      type:'command',command:"node '" + replyCompletionHook.replaceAll("'", "'\\''") + "'",
+    }]}]};
+  },
+} as const;
 
 /**
  * The one sentence every Beeline session's system prompt carries about its tool

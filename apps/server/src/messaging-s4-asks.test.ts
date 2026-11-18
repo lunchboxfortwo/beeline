@@ -34,11 +34,12 @@ it('S4: an ask to an agent commander keeps the thread waiting until that recipie
   expect(await queued()).toEqual([[B,THREAD]]);
 });
 
-it('S4: a transport duplicate creates one card and separate replies can ask independent questions',async()=>{
+it('S4: a request retry creates one card and separate requests can ask independent questions',async()=>{
   const task=await sendMessage(db,{route:{from:{agent:H,place:CHAT},to:{agent:B,place:THREAD}},text:'Build widget'});
   const first=await replyToMessage(db,B,{id:task.id,text:'Choose output',ask,messageId:'e'.repeat(64)});
   await replyToMessage(db,B,{id:task.id,text:'Choose output',ask,messageId:'e'.repeat(64)});
-  const second=await replyToMessage(db,B,{id:task.id,text:'Choose another output',ask});
+  const next=await sendMessage(db,{route:{from:{agent:H,place:CHAT},to:{agent:B,place:THREAD}},text:'Build another widget'});
+  const second=await replyToMessage(db,B,{id:next.id,text:'Choose another output',ask});
   expect(second.id).not.toBe(first.id);
   expect((await tray()).map(item=>item.messageId)).toEqual([first.id,second.id]);
   expect((await db.query('SELECT 1 FROM room_choices')).rowCount).toBe(2);
