@@ -1,6 +1,4 @@
 import { beforeEach } from 'vitest';
-import { becomeThreadImplementer } from './corner-lifecycle.js';
-import { insertCornerFacts } from './test-support.js';
 import { queueMessage } from './agent-command.js';
 import { SYSTEM_AUTHOR_ID, systemText } from './message-origin.js';
 import { H, A, B, C, W, CHAT, THREAD, db } from './messaging.test-support.js';
@@ -21,8 +19,6 @@ beforeEach(async () => {
   [DM, SIBLING, W, H, A, CHAT]);
   for (const member of [H, A]) await db.query(
     "INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'owner')", [W, DM, member]);
-  await insertCornerFacts(db, { cornerId: SIBLING });
-  await becomeThreadImplementer(db, SIBLING, B);
   await db.query('UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1', [CHAT, C]);
 });
 
@@ -36,9 +32,9 @@ export const settle = () => db.query("UPDATE agent_commands SET state='complete'
 
 /** The System wakes the corner machine queues for thread workers. */
 export const SYSTEM_WAKES = ['corner_check', 'corner_merge_conflict', 'corner_merge_refused', 'corner_review_needed', 'corner_review_dispatch'] as const;
-export async function systemWake(reason: typeof SYSTEM_WAKES[number], agentId = B, place = THREAD) {
-  return (await queueMessage(db, { roomId: place, agentId, sourceMessageId: null, reason,
-    privatePayload: { kind: 'lifecycle', authorId: SYSTEM_AUTHOR_ID, fromRoomId: place, text: systemText(`${reason} fact`) } }))!;
+export async function systemWake(reason: typeof SYSTEM_WAKES[number], agentId = B) {
+  return (await queueMessage(db, { roomId: THREAD, agentId, sourceMessageId: null, reason,
+    privatePayload: { kind: 'lifecycle', authorId: SYSTEM_AUTHOR_ID, fromRoomId: THREAD, text: systemText(`${reason} fact`) } }))!;
 }
 
 /** A person posts in a place; agent tags in it start turns there. */

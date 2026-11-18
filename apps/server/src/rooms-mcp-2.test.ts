@@ -377,7 +377,7 @@ const scope1 = fixtureScope1();
     const { client } = await scope1.connected();
     const setup = scope1.data(await client.callTool({ name: 'list_chats', arguments: {} })).setup;
     const send = (await client.listTools()).tools.find(tool => tool.name === 'reply')!;
-    expect(send.description).toContain('Use this for done, blocked and failed outcomes');
+    expect(send.description).toContain('recorded sender and place');
     expect(setup).toContain(MCP_STARTER_ROUTINE);
     expect(client.getInstructions()).not.toMatch(/setup_delivery for this same member|first reply after connection/);
     for (const text of [client.getInstructions(), setup]) {
@@ -390,7 +390,7 @@ const scope1 = fixtureScope1();
   it('serves only tuple messages and recorded replies to connected apps',async()=>{
     const {client}=await scope1.connected();
     const text=client.getInstructions();
-    for(const rule of ['Messages and wakes:', 'reply(id,text,ask?)', 'The server requests review; never tag the reviewer.']) expect(text).toContain(rule);
+    for(const rule of ['Messages and wakes:', 'reply(id,text,ask?)', 'The server requests review; never tag the reviewer.', 'recorded sender and place']) expect(text).toContain(rule);
     const tools=(await client.listTools()).tools;
     for(const name of ['send_message','order','report','ask_owner','merge_thread','react_to_message','record_merge_yes']) expect(tools.some(tool=>tool.name===name)).toBe(false);
     expect(tools.find(tool=>tool.name==='message')?.inputSchema.required).toEqual(['address','to','text']);

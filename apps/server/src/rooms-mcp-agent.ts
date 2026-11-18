@@ -172,7 +172,7 @@ export const MCP_AGENT_TOOLS: Tool[] = [
   tool('message', 'Send to one identity in one place. A thread selects its implementer or configured reviewer. The message records your origin; ask creates a card only for a person. Ask the person a clear question; put the surrounding context in the message text.', {
     address:address('Your sending place.'),to:MESSAGE_ADDRESS_SCHEMA,text:{type:'string'},ask:MESSAGE_ASK_SCHEMA,
   }, ['address','to','text']),
-  tool('reply', 'Add ask only when you need an answer. Ask the person a clear question; put the surrounding context in the message text. Use this for done, blocked and failed outcomes.', {
+  tool('reply', 'Reply to the recorded sender and place of id. Add ask only when you need an answer. Ask the person a clear question; put the surrounding context in the message text. Use this for done, blocked and failed outcomes.', {
     id:{type:'string'},text:{type:'string'},ask:MESSAGE_ASK_SCHEMA,
   }, ['id','text']),
   tool('create_work_item', 'Create a distinct work item and return its id. State defaults to backlog.', {

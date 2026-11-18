@@ -4,7 +4,7 @@ import { queueMessage,readAgentCommands } from './agent-command.js';
 import { RoomsMcpAgentTools } from './rooms-mcp-agent.js';
 import { H,A,B,C,CHAT,THREAD,OTHER,db,daemon,queued } from './messaging.test-support.js';
 
-it('S3: thread and chat tuples select exactly the recorded target and place; replies stay in the delivery thread',async()=>{
+it('S3: thread and chat tuples select exactly the recorded target and place; replies reverse the recorded tuple',async()=>{
   await queueMessage(db,{kind:'post',roomId:THREAD,authorId:H,text:'@sol Please inspect'});
   expect(await queued()).toEqual([[C,THREAD]]);
   await db.query("UPDATE agent_commands SET state='complete' WHERE agent_id=$1",[C]);
@@ -14,10 +14,10 @@ it('S3: thread and chat tuples select exactly the recorded target and place; rep
   expect(delivered.from).toEqual({agent:A,place:CHAT});
   expect(delivered.source.body).toBe('Build widget');
   await replyToMessage(db,B,{id:task.id,text:'Done'});
-  // Agent conversation stays with the work, including the commander wake.
-  expect(await queued()).toEqual([[A,THREAD]]);
+  // Production incident: the legacy report woke Ruby in the thread, despite a Milo return place.
+  expect(await queued()).toEqual([[A,CHAT]]);
   await sendMessage(db,{route:{from:{agent:A,place:CHAT},to:{agent:C,place:OTHER}},text:'Conversation'});
-  expect(await queued()).toEqual([[A,THREAD],[C,OTHER]]);
+  expect(await queued()).toEqual([[A,CHAT],[C,OTHER]]);
 });
 
 it('S3: a closed recorded destination ends the turn without rerouting to its parent',async()=>{
@@ -28,18 +28,18 @@ it('S3: a closed recorded destination ends the turn without rerouting to its par
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[task.id])).rows[0]).toEqual({state:'cancelled'});
 });
 
-it('S3: replying to a recorded sender stays in the thread without joining its private chat',async()=>{
+it('S3: replying to a recorded sender can return to its private chat without joining the worker there',async()=>{
   await db.query('DELETE FROM memberships WHERE room_id=$1 AND identity_id=$2',[OTHER,B]);
   const sent=await sendMessage(db,{route:{from:{agent:A,place:OTHER},to:{agent:B,place:THREAD}},text:'Build widget'});
   await replyToMessage(db,B,{id:sent.id,text:'Finished'});
-  expect(await queued()).toEqual([[A,THREAD]]);
+  expect(await queued()).toEqual([[A,OTHER]]);
 });
 
 it('S3: native message and reply operations deliver the same immutable tuple envelope',async()=>{
   const sent=await daemon.execute('message',{roomId:CHAT,to:{agent:'implementer',place:THREAD},text:'Build widget'},A);
   expect(await queued()).toEqual([[B,THREAD]]);
   await daemon.execute('reply',{id:sent.id,text:'Done'},B);
-  expect(await queued()).toEqual([[A,THREAD]]);
+  expect(await queued()).toEqual([[A,CHAT]]);
 });
 it('S3: an MCP message keeps its explicit sending place when another place has pending work',async()=>{
   await sendMessage(db,{route:{from:{agent:B,place:THREAD},to:{agent:A,place:CHAT}},text:'A different task'});
@@ -47,7 +47,7 @@ it('S3: an MCP message keeps its explicit sending place when another place has p
   await mcp.call(A,'message',{address:OTHER,to:{agent:'implementer',place:THREAD},text:'Build widget'});
   const received=(await readAgentCommands(db,B)).commands[0]!;
   expect(received.from).toEqual({agent:A,place:OTHER});
-  expect(await queued()).toEqual([[A,THREAD],[B,THREAD]]);
+  expect(await queued()).toEqual([[A,CHAT],[B,THREAD]]);
 });
 it('S3: an MCP task tool binds to the received thread message and preserves that call site',async()=>{
   const sent=await sendMessage(db,{route:{from:{agent:B,place:CHAT},to:{agent:A,place:THREAD}},text:'Take over widget'});
@@ -57,7 +57,7 @@ it('S3: an MCP task tool binds to the received thread message and preserves that
     .toEqual([{implementer_agent_id:A}]);
   expect(await queued()).toEqual([[A,THREAD]]);
   await mcp.call(A,'reply',{id:sent.id,text:'Done'});
-  expect(await queued()).toEqual([[B,THREAD]]);
+  expect(await queued()).toEqual([[B,CHAT]]);
 });
 
 it('S3: a stopped task cannot issue a new tuple message',async()=>{

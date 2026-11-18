@@ -126,7 +126,7 @@ describe('connected agent message protocol',()=>{
     const work=await tools.ok(client,'message',{address:ROOM,to:{agent:'implementer',place:PUBLIC_CORNER},text:'Check the widget'});
     await scope.daemon.execute('reply',{id:work.id,text:'Checked'},AGENT);
     const wake=(await tools.ok(client,'list_mentions',{})).wakes.find((item:{text:string})=>item.text==='Checked');
-    expect(wake).toMatchObject({address:PUBLIC_CORNER,from:{agent:AGENT,place:PUBLIC_CORNER}});
+    expect(wake).toMatchObject({address:ROOM,from:{agent:AGENT,place:PUBLIC_CORNER}});
     const final=await tools.ok(client,'reply',{id:task.id,text:'The widget is checked'});
     expect((await scope.db.query('SELECT room_id,card FROM messages WHERE id=$1',[final.id])).rows)
       .toMatchObject([{room_id:ROOM,card:{route:{to:{agent:USER,place:ROOM}}}}]);

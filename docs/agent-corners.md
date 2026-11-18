@@ -1,9 +1,9 @@
 # Corner authority and lifecycle invariants
 
 `message(to:{agent,place},text,ask?)` records both endpoints and returns its id.
-`reply(id,text,ask?)` answers the recorded sender without selecting a commander. Agent messages sent from a thread, including replies to requests delivered there, stay in that thread and wake their recipient there. Person-facing delivery keeps its recorded place.
+`reply(id,text,ask?)` returns to that sender in that place without selecting a commander.
 The sender of the task message remains its commander across brief revisions and later tags.
-System wakes continue that thread task and retain its commander as their reply recipient.
+System wakes continue that thread task and retain its commander's tuple as their reply destination.
 That commander is the sender of the opening task, else of the first task delivered to the implementer; a tag of another agent never replaces it.
 Thread work never takes a turn outside the thread: review gaps wake only the implementer there, and a commander who becomes the implementer gets no notice elsewhere.
 A closed return place ends the turn without rerouting.
@@ -12,7 +12,7 @@ Plain text, including blocked or done wording, creates no card.
 Attachments follow the same recorded tuple.
 Coverage: `messaging-s1-implementer.test.ts` through `messaging-s8-idle.test.ts`; the owner's four conditions, including external MCP and joined-session agents, in `messaging-c1-reply-place.test.ts` through `messaging-c4-external.test.ts`.
 
-Queued and in-flight legacy protocol items retain their ids, text and origins through the compatibility adapter; agent replies follow the thread routing above.
+Queued and in-flight legacy protocol items retain their stored routing through the compatibility adapter.
 The single removal point is `messaging-cutover.ts`: delete its adapter and the old daemon routes together after the queue drains.
 New tools advertise only messages and replies.
 

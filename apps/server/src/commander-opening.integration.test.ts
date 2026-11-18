@@ -1,4 +1,6 @@
 import { commanderReportAddress,reportToCommander } from './commander.js';
+import { advanceCorner } from './corner-lifecycle.js';
+import { readWorkThread } from './work-board.js';
 import {
 authority,claim,commands,
 createAgentCommand,
@@ -127,22 +129,24 @@ it('a self-opened thread keeps the task sender as commander and never wakes itse
   expect(await commanderReportAddress(rootFixture.db, opened.cornerId, opening)).toMatchObject({ recipient: HUMAN, returnRoom: DM });
 });
 
-it('Reproduction archived-return: closing the commander corner leaves replies in the delivered child thread', async () => {
+it('Reproduction archived-return: an answer to a closed commander corner ends its item and the opened corner rests idle', async () => {
   const outer = await open(), parentTurn = await worker(outer.cornerId);
   const child = await rootFixture.daemon.execute('createCorner', { ...authority(parentTurn), targetRoomId: ROOM,
     idempotencyKey: 'archived-return', name: 'Delegated', objective: 'Add the provider', implementer: 'ruby',
     brief: { spec: 'Add the provider', repositoryWork: false } }, WORKER);
   const assignment = (await commands(child.cornerId, RUBY)).find(command => command.reason === 'corner_objective')!;
   expect((await rootFixture.db.query(`SELECT return_room_id FROM agent_commands WHERE id=$1`, [assignment.id])).rows)
-    .toEqual([{ return_room_id: child.cornerId }]);
+    .toEqual([{ return_room_id: outer.cornerId }]);
   await claim(assignment);
   // The commander closes its own corner right after delegating.
   await rootFixture.db.query(`UPDATE rooms SET archived_at=now() WHERE id=$1`, [outer.cornerId]);
   await expect(rootFixture.daemon.execute('postRoomMessage', { ...authority(assignment),
-    text: 'blocked: no repository source here' }, RUBY)).resolves.toMatchObject({ id: expect.any(String) });
+    text: 'blocked: no repository source here' }, RUBY)).resolves.toMatchObject({ id: assignment.id });
   expect((await rootFixture.db.query(`SELECT state,cancellation_reason FROM agent_commands WHERE id=$1`, [assignment.id])).rows)
-    .toEqual([{ state: 'complete', cancellation_reason: null }]);
+    .toEqual([{ state: 'cancelled', cancellation_reason: 'return_address_archived' }]);
   expect((await commands(child.cornerId, RUBY)).map(command => command.id)).not.toContain(assignment.id);
-  expect((await commands(child.cornerId, WORKER)).find(command => command.reason === 'reply')?.source.body)
-    .toBe('blocked: no repository source here');
+  await advanceCorner(rootFixture.db, child.cornerId, { kind: 'reconcile' });
+  expect((await rootFixture.db.query(`SELECT machine->>'state' state FROM corner_facts WHERE corner_id=$1`, [child.cornerId])).rows)
+    .toEqual([{ state: 'idle' }]);
+  expect((await readWorkThread(rootFixture.db, child.cornerId, HUMAN))[0]).toMatchObject({ state: 'in-progress', idle: true });
 });

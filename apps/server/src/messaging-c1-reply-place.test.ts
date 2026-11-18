@@ -4,13 +4,12 @@ import { A, THREAD, daemon, db, PLACES, ROLES, inbox, settle, personSays, person
 const ask = { question: 'Which output?', options: ['Web', 'Phone'] };
 const cases = (Object.keys(PLACES) as Place[]).flatMap(place => (Object.keys(ROLES) as Role[]).flatMap(role => [false, true].map(withAsk => [place, role, withAsk] as const)));
 
-/** Agent replies remain in the thread where the request was delivered. */
-describe('C1: agent replies stay in the delivery thread', () => {
-  it.each(cases)('agent commander in the %s messages the thread %s; ask=%s replies stay in the delivery thread', async (place, role, withAsk) => {
+/** Condition 1: a commander's message to a thread agent is answered in the place it was sent from. */
+describe('C1: a thread agent replies at the place its commander sent from', () => {
+  it.each(cases)('agent commander in the %s messages the thread %s; ask=%s replies return there', async (place, role, withAsk) => {
     const worker = ROLES[role];
-    const delivery = place === 'sibling' ? PLACES.sibling : THREAD;
     const sent = await daemon.execute('message', { roomId: PLACES[place], to: { agent: role, place: THREAD }, text: 'Build widget' }, A);
-    expect((await inbox()).map(row => [row.agent_id, row.room_id])).toEqual([[worker, delivery]]);
+    expect((await inbox()).map(row => [row.agent_id, row.room_id])).toEqual([[worker, THREAD]]);
     await settle();
     // Later conversation in the thread never moves the return place.
     await personSays(THREAD, '@ruby Conversation only');
@@ -19,7 +18,7 @@ describe('C1: agent replies stay in the delivery thread', () => {
     const retry = await daemon.execute('reply', { id: sent.id, text: 'Done', ...(withAsk ? {ask} : {}) }, worker);
     expect(retry.id).toBe(result.id);
     expect((await inbox()).map(row => [row.agent_id, row.room_id, row.from, Boolean(row.ask)])).toEqual([
-      [A, delivery, { agent: worker, place: delivery }, withAsk],
+      [A, PLACES[place], { agent: worker, place: THREAD }, withAsk],
     ]);
   });
 

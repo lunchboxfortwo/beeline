@@ -6,7 +6,6 @@ import { commandAddress } from './commander.js';
 import { cornerReviewerSql } from './corner-reviewer.js';
 import type { SqlDatabase } from './database.js';
 import { modelText } from './message-origin.js';
-import { threadMessageRoute } from './message-route.js';
 import { postRoomChoice } from './room-choice.js';
 import { updateWorkItem } from './work-board.js';
 
@@ -38,11 +37,10 @@ export async function sendMessage(db: SqlDatabase, input: {
 }) {
   if (input.ask) validateAskInput(input.ask);
   return db.transaction(async tx => {
-    const addressed = input.replyTo ? input.route.to : await messageAddress(tx,input.route.to,input.route.from.agent);
+    const to = input.replyTo ? input.route.to : await messageAddress(tx,input.route.to,input.route.from.agent);
     // A recorded reply can cross a private call site the worker never joined.
     // Its recipient still belongs there; the responder belongs at its own origin.
-    const route = await threadMessageRoute(tx, { from: input.route.from, to: addressed });
-    const to = route.to;
+    const route = { from: input.route.from, to };
     const id = input.id ?? randomBytes(32).toString('hex');
     const human = (await tx.query("SELECT 1 FROM identities WHERE id=$1 AND kind='human'",[to.agent])).rowCount > 0;
     if (!human) {

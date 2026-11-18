@@ -3,16 +3,6 @@ import type { CommandRow } from './agent-command.js';
 import type { SqlDatabase } from './database.js';
 import { legacyMessageRoute } from './messaging-cutover.js';
 
-/** Agent conversation sent from a thread belongs to that thread. */
-export async function threadMessageRoute(db: SqlDatabase, route: MessageRoute, deliveryPlace = route.from.place): Promise<MessageRoute> {
-  const thread = (await db.query(`SELECT 1 FROM rooms source
-    JOIN identities sender ON sender.id=$2 AND sender.kind='agent'
-    JOIN identities recipient ON recipient.id=$3 AND recipient.kind='agent'
-    WHERE source.id=$1 AND source.parent_id IS NOT NULL`,
-    [deliveryPlace, route.from.agent, route.to.agent])).rowCount;
-  return thread ? { from: { ...route.from, place: deliveryPlace }, to: { ...route.to, place: deliveryPlace } } : route;
-}
-
 /** Current messages carry their whole route. Only retained pre-cutover items need adaptation. */
 export async function recordedMessageRoute(db:SqlDatabase,item:CommandRow):Promise<MessageRoute> {
   const route=item.message?.route ?? item.private_payload?.route;

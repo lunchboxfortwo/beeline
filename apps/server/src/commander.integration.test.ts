@@ -111,13 +111,13 @@ it('preserves tags in public prose without changing the recorded report route', 
   expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE text=$1`, [text])).rowCount).toBe(1);
 });
 
-it('an ordered final reply stays in its thread without posting a human tag', async () => {
+it('an ordered final reply follows its private return route without posting a human tag', async () => {
   const opened = await open(), turn = await worker(opened.cornerId);
   const text = '@captain Approve the reviewer-link fetch here?';
   const room = await rootFixture.daemon.execute('postRoomMessage', { ...authority(turn), text }, WORKER);
   expect(room.id).toMatch(/^[0-9a-f]{64}$/);
-  expect((await commands(opened.cornerId, RUBY)).find(c => c.reason === 'reply')?.source.body).toBe(text);
-  expect((await rootFixture.db.query(`SELECT room_id FROM messages WHERE text=$1`, [text])).rows).toEqual([{ room_id: opened.cornerId }]);
+  expect((await commands(DM, RUBY)).find(c => c.reason === 'reply')?.source.body).toBe(text);
+  expect((await rootFixture.db.query(`SELECT room_id FROM messages WHERE text=$1`, [text])).rows).toEqual([{ room_id: DM }]);
 });
 
 it('posts the rest when the thinking block is unclosed or the reply link is broken', async () => {
@@ -350,8 +350,8 @@ it('an ordered corner turn keeps live work and progress in the corner', async ()
   expect(row?.activity).toEqual([expect.objectContaining({ kind: 'tool', title: 'Read widget.ts' })]);
   await watched.execute('postRoomMessage', { ...authority(turn), text: 'private final output' }, WORKER);
   await watched.execute('postAgentTurnReceipt', { ...authority(turn), agentId: WORKER, status: 'complete', completionKind: 'no-reply' }, WORKER);
-  expect((await rootFixture.db.query(`SELECT room_id FROM messages WHERE text='private final output'`)).rows).toEqual([{ room_id: opened.cornerId }]);
-  expect((await commands(opened.cornerId, RUBY)).find(c => c.reason === 'reply')?.source.body).toBe('private final output');
+  expect((await rootFixture.db.query(`SELECT room_id FROM messages WHERE text='private final output'`)).rows).toEqual([{ room_id: DM }]);
+  expect((await commands(DM, RUBY)).find(c => c.reason === 'reply')?.source.body).toBe('private final output');
   expect((await rootFixture.db.query(`SELECT id FROM messages`)).rows).toHaveLength(before + 2);
   expect((await commands(opened.cornerId, WORKER))).toEqual([]);
 });
@@ -499,7 +499,7 @@ const scope1 = fixtureScope1();
     expect(await revision(outside)).toMatchObject({ revision: 2 });
     expect(await scope1.approval(opened.cornerId)).toMatchObject({ approvedBy: scope1.STRANGER, sourceMessageId: outside });
     await rootFixture.daemon.execute('postRoomMessage', { ...authority(turn), text: '@ruby Recorded the proof waiver approved by Stranger.' }, WORKER);
-    expect((await commands(opened.cornerId, RUBY)).find(c => c.reason === 'reply')?.source.body).toBe('@ruby Recorded the proof waiver approved by Stranger.');
+    expect((await commands(DM, RUBY)).find(c => c.reason === 'reply')?.source.body).toBe('@ruby Recorded the proof waiver approved by Stranger.');
     console.log('HUMAN-01: shared-Room member approval saved as revision 2 and announced in the corner');
   });
 
@@ -699,7 +699,7 @@ it('a green head whose reviewer command cannot be queued wakes the implementer i
     const handback=(await commands(opened.cornerId,WORKER)).find(c=>c.reason==='corner_review_needed')!;
     expect(handback.source.body).toMatch(/reviewer command could not be queued/);
     await rootFixture.daemon.execute('reply',{id:handback.id,text:'blocked: review dispatch is unavailable'},WORKER);
-    const report=(await commands(opened.cornerId,RUBY)).find(c=>c.reason==='reply'&&c.source.body.startsWith('blocked:'))!;
+    const report=(await commands(DM,RUBY)).find(c=>c.reason==='reply'&&c.source.body.startsWith('blocked:'))!;
     expect(report.source.body).toMatch(/^blocked:.*review/);
     expect(report.private).toBe(true);
     expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE text LIKE '%restore review dispatch%'`)).rowCount).toBe(0);

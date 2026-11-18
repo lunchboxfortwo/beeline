@@ -16,29 +16,28 @@ async function firstTask(place: string, opening: boolean) {
       route: { from: { agent: A, place }, to: { agent: B, place: THREAD } } } }))!;
 }
 
-/** A blocked reply wakes the commander in the delivery thread. */
-describe('C2: a blocked worker reaches its commander in the delivery thread', () => {
-  it.each(cases)('commander in the %s; a later thread tag; a blocked reply to the %s wake stays in the delivery thread', async (place, reason, worker) => {
+/** Condition 2: a blocked reply from a thread worker reaches its commander where the commander sent the task. */
+describe('C2: a blocked worker reaches its commander at the recorded origin place', () => {
+  it.each(cases)('commander in the %s; a later thread tag; a blocked reply to the %s wake returns there', async (place, reason, worker) => {
     for (const opening of [false, true]) {
       await db.query('DELETE FROM agent_commands');
-      const delivery = place === 'sibling' && !opening ? PLACES.sibling : THREAD;
       await firstTask(PLACES[place], opening);
       await settle();
       // Another person tag later in the thread is conversation, not a new commander.
       await personSays(THREAD, '@ruby Conversation only');
       await settle();
-      const wake = await systemWake(reason, worker, delivery);
+      const wake = await systemWake(reason, worker);
       await settle();
       await daemon.execute('reply', { id: wake.id, text: 'blocked: need a decision', ask }, worker);
       expect((await inbox()).map(row => [row.agent_id, row.room_id, row.from, Boolean(row.ask)]), `opening=${opening}`)
-        .toEqual([[A, delivery, { agent: worker, place: delivery }, true]]);
+        .toEqual([[A, PLACES[place], { agent: worker, place: THREAD }, true]]);
     }
   });
 
-  it.each(places)('commander in the %s; a blocked reply to the task itself stays in the delivery thread', async place => {
+  it.each(places)('commander in the %s; a blocked reply to the task itself returns there', async place => {
     const task = await firstTask(PLACES[place], false);
     await settle();
     await daemon.execute('reply', { id: task.id, text: 'blocked: need a decision', ask }, B);
-    expect((await inbox()).map(row => [row.agent_id, row.room_id, Boolean(row.ask)])).toEqual([[A, place === 'sibling' ? PLACES.sibling : THREAD, true]]);
+    expect((await inbox()).map(row => [row.agent_id, row.room_id, Boolean(row.ask)])).toEqual([[A, PLACES[place], true]]);
   });
 });
