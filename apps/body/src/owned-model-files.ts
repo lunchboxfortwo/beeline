@@ -21,7 +21,7 @@ interface CredentialFile { v: 1; binding: OwnedModelFileBinding; credential: Own
 interface Journal { v: 1; bindingHash: string; requests: { id: string; state: 'unknown' | 'succeeded' | 'refused' }[]; active: string | null }
 interface Owner { directory: string; authPath: string; journalPath: string; binding: OwnedModelFileBinding; digest: string; bindingHash: string }
 export class OwnedModelFileRefusal extends Error {
-  constructor() { super('Owned model local intent is unavailable or UNKNOWN; do not resubmit.'); }
+  constructor() { super('Owned model local intent is unavailable.'); }
 }
 const owners = new WeakMap<object, Owner>();
 const hash = (value: string) => createHash('sha256').update('beeline:owned-model:private-file:v1\0').update(value).digest('hex');
@@ -171,23 +171,19 @@ export class OwnedModelFiles {
       return Object.freeze({ state: journal.active === null ? 'idle' : 'unknown', requests: Object.freeze(journal.requests.map(entry => entry.id)) });
     } catch { throw new OwnedModelFileRefusal(); }
   }
-  /** Synchronous owner admission. The UUID is durably UNKNOWN before returning
-   * usable authorization. Header-only/SDK events cannot clear this latch. */
+  /** Synchronous owner admission. Each request gets a fresh UUID recorded as
+   * UNKNOWN before authorization returns; an earlier UNKNOWN never refuses it. */
   prepareHeaders(): Readonly<{ requestId: string; authorization: string }> {
     try {
       const owner = owners.get(this); if (!owner) throw new OwnedModelFileRefusal();
       const current = readCredential(owner, Date.now());
-      if (readJournal(owner).active !== null) throw new OwnedModelFileRefusal();
       const lock = join(owner.directory, 'requests.lock'); writeNew(lock, 'owned model request admission'); directorySync(owner.directory);
-      // Keep any failed/uncertain lock. Never guess that another process died
-      // and unlink its replacement, or recreate an absent journal after crash.
-      const journal = readJournal(owner);
-      if (journal.active !== null) throw new OwnedModelFileRefusal();
-      journal.requests = [];
-      const requestId = randomUUID(); journal.requests.push({ id: requestId, state: 'unknown' }); journal.active = requestId;
-      saveJournal(owner, journal);
-      unlinkSync(lock); directorySync(owner.directory);
-      return Object.freeze({ requestId, authorization: 'Bearer ' + current.credential.token });
+      try {
+        const journal = readJournal(owner);
+        const requestId = randomUUID(); journal.requests = [{ id: requestId, state: 'unknown' }]; journal.active = requestId;
+        saveJournal(owner, journal);
+        return Object.freeze({ requestId, authorization: 'Bearer ' + current.credential.token });
+      } finally { unlinkSync(lock); directorySync(owner.directory); }
     } catch { throw new OwnedModelFileRefusal(); }
   }
   /** A response/header/SDK event alone cannot clear UNKNOWN. The only clearing

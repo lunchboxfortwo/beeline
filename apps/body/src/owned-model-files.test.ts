@@ -3,7 +3,7 @@ import { lstatSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { encodeOwnedModelReceipt } from '@beeline/api-contract/helper-model-receipt';
-import { OwnedModelFiles, OwnedModelFileRefusal, OWNED_MODEL_FILE_MAX_BYTES,
+import { OwnedModelFiles, OWNED_MODEL_FILE_MAX_BYTES,
   type OwnedModelFileBinding, type OwnedModelFileCredential } from './owned-model-files.js';
 
 const roots: string[] = [];
@@ -21,7 +21,7 @@ const journal = (owner: OwnedModelFiles) => JSON.parse(readFileSync(owner.paths(
   active: string | null; requests: { id: string; state: string }[] };
 
 describe('owned model request journal capacity',()=>{
-  it('compacts successful history through more than 128 provider requests without admitting UNKNOWN replay', () => {
+  it('compacts successful history through more than 128 provider requests and sends after an UNKNOWN', () => {
     const {root, owner, granted}=fixture();let oldReceipt='';
     for(let index=0;index<256;index++){
       const request=owner.prepareHeaders();
@@ -32,7 +32,9 @@ describe('owned model request journal capacity',()=>{
     }
     const request=owner.prepareHeaders();const restarted=OwnedModelFiles.create({root,binding,credential:granted});
     expect(restarted.snapshot()).toEqual({state:'unknown',requests:[request.requestId]});
-    expect(()=>restarted.prepareHeaders()).toThrow(OwnedModelFileRefusal);
+    const next=restarted.prepareHeaders();
+    expect(next.requestId).not.toBe(request.requestId);
+    expect(restarted.snapshot()).toEqual({state:'unknown',requests:[next.requestId]});
     expect(lstatSync(owner.paths().journal).size).toBeLessThan(OWNED_MODEL_FILE_MAX_BYTES);
   });
 

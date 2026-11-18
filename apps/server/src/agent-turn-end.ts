@@ -1,5 +1,8 @@
+import { createHash } from 'node:crypto';
+import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import type { CommandRow } from './agent-command.js';
 import type { SqlDatabase } from './database.js';
+import { systemLine } from './system-line.js';
 
 /** Every terminal write to a queue item goes through this database function:
  * the answer was posted (complete), or Stop cancelled it. A terminal replay
@@ -121,6 +124,23 @@ export async function endAgentTurn(db: SqlDatabase, command: Pick<CommandRow, 'i
   const ended = await db.query('SELECT * FROM beeline_finish_agent_command($1,$2,$3,$4)',
     [command.id, outcome, reason ?? null, resultMessageId ?? null]);
   return ended.rowCount > 0;
+}
+
+/** A hosted turn that fails ends with its visible System line and reason. */
+export async function failHostedAgentTurn(db: SqlDatabase,
+  command: Pick<CommandRow, 'id' | 'room_id' | 'return_room_id' | 'turn_request_id'>, agentId: string, reason: string): Promise<boolean> {
+  if (!await endAgentTurn(db, command, 'failed', reason)) return false;
+  await db.query('SELECT beeline_record_agent_answer($1,true,$2)', [command.id, reason]);
+  const agent = (await db.query<{ name: string }>('SELECT name FROM identities WHERE id=$1', [agentId])).rows[0]!;
+  await systemLine(db, {
+    id: createHash('sha256').update(`failed:${command.id}`).digest('hex'),
+    roomId: command.return_room_id ?? command.room_id,
+    subject: { kind: 'agent', id: agentId, name: agent.name },
+    verb: systemMessage('agent-turn.failed'),
+    consequence: systemMessage('agent-turn.failure-reason', reason),
+    requestId: command.turn_request_id, commandId: command.id, durableFact: 'failure',
+  });
+  return true;
 }
 
 /** A turn is working only while its queue item is still pending. */

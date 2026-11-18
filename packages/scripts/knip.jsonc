@@ -41,7 +41,7 @@
         "packages/scripts/acp-adapter-issue.cjs",
         "packages/scripts/pages-channel.mjs",
         // Shared release shell/composite steps invoke these outside the JavaScript graph.
-        "packages/scripts/release-steps/{daemon-leg-step1,pages-leg-step3}.mjs",
+        "packages/scripts/release-steps/{daemon-leg-step1,pages-leg-step3,free-agent-reply-proof}.mjs",
         "packages/scripts/server-previous-sources.mjs",
         // The local Checks queue launches this worker by path in CI units and Body scopes.
         "packages/scripts/release-local-check-worker.mjs",

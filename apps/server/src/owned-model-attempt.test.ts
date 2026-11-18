@@ -56,18 +56,19 @@ describe('owned model durable UNKNOWN and exact one-use handoff primitive', () =
     await expect(restarted.handoff(first.permit!, async () => 'wrong owner')).rejects.toBeInstanceOf(OwnedModelUnknownPayload);
   });
 
-  it('refuses changed request identity and an identical semantic UNKNOWN under a new UUID before reserving again', async () => {
+  it('refuses changed request identity but admits an identical request under a new UUID after an UNKNOWN', async () => {
     const reserve = hook(); await attempts.reserve(fixture.actor, ONE, semantic, reserve);
     await expect(attempts.reserve(fixture.actor, ONE, { ...semantic, requested: 10 }, reserve)).rejects.toBeInstanceOf(OwnedModelIdentityConflict);
-    await expect(attempts.reserve(fixture.actor, TWO, semantic, reserve)).rejects.toBeInstanceOf(OwnedModelUnknownPayload);
-    expect(reserve).toHaveBeenCalledOnce(); expect(await reservations()).toBe(1);
+    expect((await attempts.reserve(fixture.actor, TWO, semantic, reserve)).permit).toBeDefined();
+    expect(reserve).toHaveBeenCalledTimes(2); expect(await reservations()).toBe(2);
   });
 
-  it('rolls the entire second reservation back when different semantic requests clamp to the same UNKNOWN final payload', async () => {
+  it('admits a second request whose final payload matches an earlier UNKNOWN', async () => {
     const reserve = hook(); await attempts.reserve(fixture.actor, ONE, { ...semantic, requested: 20 }, reserve);
-    await expect(attempts.reserve(fixture.actor, TWO, { ...semantic, requested: 40 }, reserve)).rejects.toBeInstanceOf(OwnedModelUnknownPayload);
-    expect(reserve).toHaveBeenCalledTimes(2); expect(await reservations()).toBe(1);
-    expect((await fixture.db.query('SELECT model_request_id FROM owned_model_attempts')).rows).toEqual([{ model_request_id: ONE }]);
+    expect((await attempts.reserve(fixture.actor, TWO, { ...semantic, requested: 40 }, reserve)).permit).toBeDefined();
+    expect(reserve).toHaveBeenCalledTimes(2); expect(await reservations()).toBe(2);
+    expect((await fixture.db.query('SELECT model_request_id FROM owned_model_attempts ORDER BY model_request_id')).rows)
+      .toEqual([{ model_request_id: ONE }, { model_request_id: TWO }]);
   });
 
   it('rolls reservation and attempt back together when the actual outer admission transaction fails', async () => {

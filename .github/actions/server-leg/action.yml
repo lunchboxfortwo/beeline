@@ -134,3 +134,8 @@ runs:
         IMAGE_REF: ${{ steps.free_agent_image.outputs.image_ref }}
       run: |-
         bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/server-leg.sh" step13
+
+    - name: Require a real free-agent reply in the review proof Workspace
+      shell: bash
+      run: |-
+        bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/server-leg.sh" free_agent_reply

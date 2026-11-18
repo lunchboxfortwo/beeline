@@ -24,8 +24,9 @@ CREATE TABLE IF NOT EXISTS owned_model_attempts (
  CHECK(COALESCE(state='unknown' OR evidence IS NOT NULL AND (state='succeeded' AND evidence->>'kind'='usage'
    OR state='refused' AND evidence->>'kind' IN ('not-dispatched','provider-refused')),false))
 );
-CREATE UNIQUE INDEX IF NOT EXISTS owned_model_unknown_request ON owned_model_attempts(command_id,generation_id,request_digest) WHERE state='unknown';
-CREATE UNIQUE INDEX IF NOT EXISTS owned_model_unknown_payload ON owned_model_attempts(command_id,generation_id,payload_digest) WHERE state='unknown';
+-- An earlier UNKNOWN attempt never refuses a new request for the same item.
+DROP INDEX IF EXISTS owned_model_unknown_request;
+DROP INDEX IF EXISTS owned_model_unknown_payload;
 CREATE OR REPLACE FUNCTION beeline_owned_model_attempt_immutable() RETURNS trigger AS $$
 BEGIN
  IF TG_OP='DELETE' THEN RAISE EXCEPTION 'owned model attempt identity is retained' USING ERRCODE='23514'; END IF;
@@ -108,7 +109,7 @@ export class OwnedModelIdentityConflict extends CommandRefusalError {
 }
 export class OwnedModelUnknownPayload extends CommandRefusalError {
   readonly state = 'unknown';
-  constructor() { super('Owned model request is already UNKNOWN; do not resubmit', 409); }
+  constructor() { super('Owned model request is already UNKNOWN', 409); }
 }
 const requestId = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
 const receipt = (row: Row): OwnedModelAttemptReceipt => Object.freeze({ requestId: row.model_request_id, state: row.state,
@@ -159,8 +160,6 @@ export class OwnedModelAttempts {
         if (old.request_digest !== semantic) throw new OwnedModelIdentityConflict();
         return { row: old };
       }
-      if ((await database.query(`SELECT 1 FROM owned_model_attempts WHERE command_id=$1 AND generation_id=$1 AND request_digest=$2 AND state='unknown'`,
-        [owned.commandId, semantic])).rowCount) throw new OwnedModelUnknownPayload();
       let prepared: Awaited<ReturnType<typeof reserve>>;
       try { prepared = await reserve(database, owned); }
       catch (error) {
@@ -181,9 +180,6 @@ export class OwnedModelAttempts {
       return { row, body: payload.body };
     }).catch((error: unknown) => {
       if (error instanceof ReplayedAttempt) return { row:error.row };
-      const conflict = error as { code?: unknown; constraint?: unknown } | null;
-      if (conflict?.code === '23505' && (conflict.constraint === 'owned_model_unknown_request' || conflict.constraint === 'owned_model_unknown_payload'))
-        throw new OwnedModelUnknownPayload();
       throw error;
     });
     if (admitted.body === undefined) return { receipt: receipt(admitted.row) };
@@ -206,12 +202,15 @@ export class OwnedModelAttempts {
     let completion: Promise<T> | undefined;
     try {
       await this.database.transaction(async database => {
+        // Ordinary writers (lifecycle reconcile, bootstrap, turn writes) hold
+        // these rows briefly; wait for them. Retirement locks free_agents
+        // before memberships, so taking it first, holding nothing, cannot deadlock.
+        await database.query('SELECT agent_id FROM free_agents WHERE agent_id=$1 FOR SHARE', [owned.agentId]);
         if (!await lockRoomAccess(database, [owned.roomId], [owned.agentId])) throw new OwnedModelRefusal();
         await this.credentials.lockInvocation(database, pending.actor);
-        await database.query('SELECT agent_id FROM free_agents WHERE agent_id=$1 FOR SHARE NOWAIT', [owned.agentId]);
-        await database.query('SELECT agent_id FROM agents WHERE agent_id=$1 FOR SHARE NOWAIT', [owned.agentId]);
-        await database.query('SELECT id FROM owned_model_credentials WHERE id=$1 FOR SHARE NOWAIT', [owned.id]);
-        const row = (await database.query<Row>('SELECT * FROM owned_model_attempts WHERE credential_id=$1 AND model_request_id=$2 FOR SHARE NOWAIT',
+        await database.query('SELECT agent_id FROM agents WHERE agent_id=$1 FOR SHARE', [owned.agentId]);
+        await database.query('SELECT id FROM owned_model_credentials WHERE id=$1 FOR SHARE', [owned.id]);
+        const row = (await database.query<Row>('SELECT * FROM owned_model_attempts WHERE credential_id=$1 AND model_request_id=$2 FOR SHARE',
           [owned.id, pending.requestId])).rows[0];
         if (!row || row.state !== 'unknown' || row.evidence || row.payload_digest !== pending.digest) throw new OwnedModelRefusal();
         await this.credentials.assertCurrent(database, pending.actor);

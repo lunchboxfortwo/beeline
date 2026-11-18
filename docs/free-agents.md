@@ -165,15 +165,19 @@ restart and needs no image rebuild.
 
 Each authorized model call goes directly upstream. A provider refusal is recorded
 for that exact invocation and returned plainly. The server leaf reads its recorded
-receipt after provider transport loss; a lost helper response remains UNKNOWN,
-without a helper-side receipt request or another paid request. No process-wide call queue or per-owner
+receipt after provider transport loss; a lost helper response stays UNKNOWN in
+its records. An earlier UNKNOWN attempt never refuses a later request: the next
+model request is sent with its own request ID. No process-wide call queue or per-owner
 minute throttle delays a call. Allowance and dollar reservations still happen
 atomically before provider entry.
 
 Helper model calls require a claimed `input`/`resume` command. The credential
 belongs to that invocation, not to a socket or server instance, so it keeps
 working through a deploy, a reconnect and a helper restart. Every request checks current invocation authority and the shared cost
-budget; a refusal ends that turn through the single terminal owner. The Machine
+budget; a refusal ends that turn through the single terminal owner, which posts
+the turn's failed System line with its reason. Final provider entry waits for
+ordinary row locks (lifecycle reconcile, bootstrap, turn writes); it takes the
+free-agent row first, matching retirement's order. The Machine
 then sleeps at its normal idle boundary. Pending and completed commands do not
 permit calls, including copied model tokens used from outside Beeline. The
 helper retains the command claim through model responses and tool follow-ups;
@@ -231,7 +235,7 @@ There is no elapsed execution window, generated shell-time budget, model-call
 queue or per-owner calls-per-minute limit. Model calls retain current command,
 generation, connection and Room membership checks, the daily token allowance,
 and the shared daily dollar budget. Lost model responses retain their original
-invocation receipt; they do not authorize another paid request.
+invocation receipt; a later request in a new turn is sent normally.
 
 Runtime preparation is outside execution. Pending commands are saved work;
 claims begin execution at the server claim timestamp. The image always runs its
@@ -299,9 +303,10 @@ Startup/recovery/release inventory visits every mapped machine regardless of the
 retired state, adopts known metadata mappings, leaves idle identities unprovisioned,
 and reports unmapped provider machines as preserved ownership discrepancies.
 A failed observation does not skip the rest of that finite inventory.
-After release, firstmate verifies that a stopped free agent in a firstmate-owned
-test Room answers a fresh message and checks actual image/connection/work facts;
-a successful signal or update POST alone is insufficient.
+The server leg then tags `@beebee_26` in the review identity's own Play Review's
+team `#general` and requires its real reply before the release succeeds
+(`packages/scripts/release-steps/free-agent-reply-proof.mjs`); a failed turn
+fails the release with its reason. A successful signal or update POST alone is insufficient.
 `free-agent-refresh.test.ts` covers all retired state values, deferred claimed
 work, partial failures and preserved unmapped machines.
 `packages/scripts/build-free-agent-image.sh` builds the

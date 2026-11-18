@@ -201,7 +201,7 @@ export class OwnedModelCredentials {
 
   /** Serialize provider admission with the item's answer and Stop. */
   async lockInvocation(database: SqlDatabase, actor: AuthenticatedOwnedModel): Promise<void> {
-    await database.query(`SELECT id FROM agent_commands WHERE id=$1 FOR SHARE NOWAIT`, [this.actor(actor).commandId]);
+    await database.query(`SELECT id FROM agent_commands WHERE id=$1 FOR SHARE`, [this.actor(actor).commandId]);
   }
 
   /** Read-only final predicate after the caller acquired its ordered locks. */

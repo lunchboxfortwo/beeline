@@ -107,6 +107,44 @@ describe('actual owned model endpoint and actual quota adapter', () => {
     expect((await f.db.query('SELECT state FROM owned_model_attempts')).rows).toEqual([{state:'succeeded'}]);
   });
 
+  it.skipIf(!process.env.BEELINE_COMMAND_TEST_POSTGRES_URL)('answers a current Pi request while lifecycle holds the free agent row', async () => {
+    // Beebee, 2026-11-18 14:16:34: admission passed, then the handoff met an
+    // ordinary free_agents row lock and refused (not-dispatched/authority);
+    // the turn ended failed with no reason and no visible line.
+    await f.db.query(`INSERT INTO free_agent_call_rate(owner_id,minute,calls,lifetime_tokens,last_grant)
+      SELECT owner_id,0,0,1000,256 FROM free_agents WHERE agent_id=$1`,[MODEL_AGENT]);
+    await f.db.query(`INSERT INTO free_agent_budget(day,usd) VALUES(current_date,0.01)`);
+    reply = () => new Response('data: '+JSON.stringify({choices:[{delta:{content:'Hello'},finish_reason:'stop'}],
+      usage:{prompt_tokens:10,completion_tokens:3,cost:0.00002}})+'\n\ndata: [DONE]\n\n',
+      {headers:{'content-type':'text/event-stream'}});
+    const locked=deferred<void>(), release=deferred<void>();
+    const lifecycle=f.db.transaction(async tx=>{
+      await tx.query('SELECT agent_id FROM free_agents WHERE agent_id=$1 FOR UPDATE',[MODEL_AGENT]);
+      locked.resolve();await release.promise;
+    });
+    await locked.promise;
+    const pending = fetch(origin + '/v1/free-agents/model/chat/completions', {
+      method: 'POST', headers: { authorization: 'Bearer bfm_native_provider_config',
+        'x-beeline-model-invocation': f.issued.token, 'x-beeline-model-request': ONE, 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'deepseek/deepseek-v4.1-flash',
+        messages: [{ role: 'system', content: 'You are Beebee.' }, { role: 'user', content: 'Hello Beebee' }],
+        stream: true, max_tokens: 65_536, stream_options: { include_usage: true } }),
+    });
+    let settled=false; void pending.finally(()=>{settled=true;});
+    try{
+      await vi.waitFor(async()=>{
+        const blocked=await f.db.query<{blocked:boolean}>(`SELECT EXISTS(SELECT 1 FROM pg_stat_activity
+          WHERE datname=current_database() AND cardinality(pg_blocking_pids(pid))>0) blocked`);
+        expect(settled||blocked.rows[0]!.blocked).toBe(true);
+      });
+    }finally{release.resolve();await lifecycle;}
+    const response=await pending;
+    expect({status:response.status,body:await response.text()}).toMatchObject({status:200});
+    expect((await f.db.query('SELECT state FROM owned_model_attempts')).rows).toEqual([{state:'succeeded'}]);
+    expect(calls).toHaveLength(1);
+    expect((await f.db.query('SELECT state FROM agent_commands')).rows).toEqual([{state:'pending'}]);
+  });
+
   it('keeps the original claimed invocation usable after the former execution window', async () => {
     await f.db.query("UPDATE agent_commands SET created_at=clock_timestamp()-interval '2 hours'");
     const response = await call();
@@ -234,7 +272,7 @@ describe('actual owned model endpoint and actual quota adapter', () => {
     const before = await counters(); expect(Number(before.usage[0]?.tokens)).toBeGreaterThan(0);
     expect((await f.db.query('SELECT state,report_outcome FROM agent_commands')).rows).toEqual([{state:'complete',report_outcome:'failed'}]);
     expect((await f.db.query('SELECT status FROM agent_turns')).rows).toEqual([{status:'failed'}]);
-    expect((await f.db.query('SELECT id FROM messages')).rows).toEqual([]);
+    expect((await f.db.query('SELECT text FROM messages')).rows).toEqual([{text:'@synthetic_model_agent failed · Model request did not complete'}]);
     expect((await f.db.query('SELECT state FROM owned_model_attempts')).rows).toEqual([{state:'unknown'}]);
     const replay = await call(); expect(replay.status).toBe(401);await replay.text();
     const changedId = await call(input, TWO); expect(changedId.status).toBe(401);await changedId.text();
@@ -249,7 +287,7 @@ describe('actual owned model endpoint and actual quota adapter', () => {
     expect(await first.json()).toMatchObject({ receipt: { state: status === 500 ? 'unknown' : 'refused' } });
     expect((await f.db.query('SELECT state,report_outcome FROM agent_commands')).rows).toEqual([{state:'complete',report_outcome:'failed'}]);
     expect((await f.db.query('SELECT status FROM agent_turns')).rows).toEqual([{status:'failed'}]);
-    expect((await f.db.query('SELECT id FROM messages')).rows).toEqual([]);
+    expect((await f.db.query('SELECT text FROM messages')).rows).toEqual([{text:'@synthetic_model_agent failed · Model request did not complete'}]);
     if (status === 500) expect(Number((await counters()).usage[0]?.tokens)).toBeGreaterThan(0);
     else expect(Number((await counters()).usage[0]?.tokens)).toBe(0);
     await vi.advanceTimersByTimeAsync(24 * 60 * 60_000); vi.useRealTimers(); expect(calls).toHaveLength(1);
@@ -368,7 +406,7 @@ describe('actual owned model endpoint and actual quota adapter', () => {
     const response = await call(); expect(response.status).toBe(503); await response.text(); expect(calls).toHaveLength(0);
     expect((await f.db.query('SELECT state,report_outcome FROM agent_commands')).rows).toEqual([{state:'complete',report_outcome:'failed'}]);
     expect((await f.db.query('SELECT status FROM agent_turns')).rows).toEqual([{status:'failed'}]);
-    expect((await f.db.query('SELECT id FROM messages')).rows).toEqual([]);
+    expect((await f.db.query('SELECT text FROM messages')).rows).toEqual([{text:'@synthetic_model_agent failed · Model request admission is uncertain'}]);
     expect(await counters()).toEqual({ usage: [], budget: [], rate: [] });
     expect((await f.db.query('SELECT * FROM owned_model_attempts')).rowCount).toBe(0);
     expect(report).toHaveBeenCalledWith(failure,{operation:'free-agent-model-admission'});

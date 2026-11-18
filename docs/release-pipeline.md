@@ -725,6 +725,13 @@ The server job has a fifteen-minute timeout. Free starter image publishing runs
 in its own `Free starter agent image` workflow after a successful release that
 shipped the server. It is best effort and never holds the release open.
 
+After the free-agent refresh, the server leg's last step tags the review
+identity's own free Beebee (`@beebee_26`, Play Review's team `#general`, never an
+owner Workspace) with `SERVER_CANARY_REVIEW_SECRET` and waits on the phone live
+socket for its reply. Its failed-turn line or a closed socket fails the release;
+there is no resend, poll or timer beyond the job timeout. A rerun repeats the
+proof. Coverage: `packages/scripts/unified-release.test.mjs`.
+
 Only a clean window permits the second Machine update. Each Machine must then
 answer `/readyz` and serve this exact `/version` before the job succeeds; no
 second smoke check or convergence wait repeats that proof. A failed Machine

@@ -10,7 +10,8 @@ import { FreeAgentPromptCache, promptTextBytes } from './free-agent-prompt-budge
 import { OwnedModelAttempts, OwnedModelUnknownPayload, type OwnedModelAttemptReceipt, type OwnedModelEvidence, type OwnedModelReservation } from './owned-model-attempt.js';
 import { OwnedModelCredentials, type AuthenticatedOwnedModel } from './owned-model-credential.js';
 import { CommandRefusalError } from './command-refusal.js';
-import { endAgentTurn } from './agent-turn-end.js';
+import { failHostedAgentTurn } from './agent-turn-end.js';
+import type { CommandRow } from './agent-command.js';
 import { captureServerError } from './sentry.js';
 import { AllowanceRefusal as OwnedModelAllowanceRefusal, DEFAULT_OUTPUT_RESERVATION, reserveAllowance, reserveAllowanceInTransaction, settleAllowance } from './free-agent-accounting.js';
 export { reserveAllowance } from './free-agent-accounting.js';
@@ -234,9 +235,9 @@ function ownedOutcome(response: ServerResponse, receipt: OwnedModelAttemptReceip
   if (response.headersSent) { response.destroy(); return; }
   sendJson(response, 409, { error: {
     code: receipt.state === 'unknown' ? 'owned_model_unknown' : 'owned_model_recorded',
-    message: receipt.state === 'unknown' ? 'Model request outcome is UNKNOWN; do not resubmit.' :
+    message: receipt.state === 'unknown' ? 'Model request outcome is UNKNOWN.' :
       receipt.evidence?.kind==='provider-refused' ? `The model provider refused this invocation (HTTP ${receipt.evidence.status}).` :
-      'Model request already has a recorded outcome; do not resubmit.',
+      'Model request already has a recorded outcome.',
     signedReceipt:encodeOwnedModelReceipt(token,receipt),
   }, receipt,signedReceipt:encodeOwnedModelReceipt(token,receipt) });
 }
@@ -283,12 +284,12 @@ async function handleOwnedFreeAgentModel(request: IncomingMessage, response: Ser
     ownedOutcome(response, receipt, token);
   };
   // A failed hosted call ends its item through the same owner as answers and
-  // Stop. UNKNOWN billing evidence stays retained; no new chat line is posted.
-  const failTurn = async () => {
+  // Stop, with the visible failed-turn line. UNKNOWN billing evidence stays retained.
+  const failTurn = async (reason = 'Model request did not complete') => {
     try {
       await options.database.transaction(async db => {
-        if (await endAgentTurn(db, { id: binding.commandId }, 'failed'))
-          await db.query('SELECT beeline_record_agent_answer($1,true,NULL)', [binding.commandId]);
+        const command = (await db.query<CommandRow>('SELECT * FROM agent_commands WHERE id=$1', [binding.commandId])).rows[0];
+        if (command) await failHostedAgentTurn(db, command, binding.agentId, reason);
       });
     } catch (error) { captureServerError(error, { operation: 'free-agent-model-failure' }); }
   };
@@ -298,7 +299,7 @@ async function handleOwnedFreeAgentModel(request: IncomingMessage, response: Ser
     if (!body || typeof body !== 'object' || Array.isArray(body) || !Array.isArray(body.messages)) throw new Error('messages required');
     imageInput(body, selected.acceptsImages?.(binding.model) !== false);
   } catch {
-    await failTurn();
+    await failTurn('Invalid owned model request');
     sendJson(response,400,{error:{message:'Invalid owned model request',signedReceipt:encodeOwnedModelReceipt(token,
       {requestId:id,state:'refused',evidence:{kind:'not-dispatched',reason:'authority'}})}});return true;
   }
@@ -324,13 +325,13 @@ async function handleOwnedFreeAgentModel(request: IncomingMessage, response: Ser
     });
   } catch (error) {
     captureServerError(error, { operation: 'free-agent-model-admission' });
-    await failTurn();
+    await failTurn(error instanceof CommandRefusalError ? error.message : 'Model request admission is uncertain');
     if (error instanceof CommandRefusalError) sendJson(response, error.status, { error: {
       code: error instanceof OwnedModelAllowanceRefusal ? 'owned_model_allowance' :
         error instanceof OwnedModelUnknownPayload ? 'owned_model_unknown' : 'owned_model_refused', message: error.message,
       ...(error instanceof OwnedModelAllowanceRefusal ? {signedReceipt:encodeOwnedModelReceipt(token,{requestId:id,state:'refused',evidence:{kind:'not-dispatched',reason:'authority'}})} : {}),
     }, ...(error instanceof OwnedModelAllowanceRefusal ? {signedReceipt:encodeOwnedModelReceipt(token,{requestId:id,state:'refused',evidence:{kind:'not-dispatched',reason:'authority'}})} : {}) });
-    else sendJson(response, 503, { error: { code: 'owned_model_unknown', message: 'Model request admission is uncertain; do not resubmit.' } });
+    else sendJson(response, 503, { error: { code: 'owned_model_unknown', message: 'Model request admission is uncertain.' } });
     return true;
   }
   if (!admitted.permit) {
@@ -371,7 +372,8 @@ async function handleOwnedFreeAgentModel(request: IncomingMessage, response: Ser
       if (abort.signal.aborted) throw new Error('Owned model invocation cancelled');
       return requestModelUpstream(options, bytes, abort.signal);
     }); }
-    catch {
+    catch (error) {
+      captureServerError(error, { operation: 'free-agent-model-handoff' });
       await knownNonentry('authority');
       return true;
     }

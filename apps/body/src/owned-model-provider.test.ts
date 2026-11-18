@@ -98,7 +98,20 @@ it('uses the actual Pi provider with one exact invocation credential and commits
   expect(owner.snapshot().state).toBe('idle');
   expect(calls).toEqual([baseUrl + '/chat/completions']);
 });
-it('keeps transport loss UNKNOWN without a helper receipt request or paid replay', async () => {
+it('delivers a finished answer whose receipt cannot be confirmed', async () => {
+  const owner = fixture();
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(
+    ['{"choices":[{"index":0,"delta":{"role":"assistant","content":"Answer"},"finish_reason":null}]}',
+      '{"id":"unsigned","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}']
+      .map(chunk => 'data: ' + chunk + '\n\n').join('') + 'data: [DONE]\n\n',
+    { headers: { 'content-type': 'text/event-stream' } })));
+  const result = await ownedModelStream(model, context).result();
+  expect(result.stopReason).toBe('stop');
+  expect(result.content).toContainEqual(expect.objectContaining({ type: 'text', text: 'Answer' }));
+  expect(owner.snapshot().state).toBe('unknown');
+});
+
+it('keeps transport loss UNKNOWN and sends the next model request', async () => {
   const owner = fixture();
   const calls: { method: string; url: string }[] = [];
   vi.stubGlobal('fetch',vi.fn(async (url,init) => {
@@ -108,8 +121,8 @@ it('keeps transport loss UNKNOWN without a helper receipt request or paid replay
   expect((await ownedModelStream(model,context).result()).stopReason).toBe('error');
   expect(calls).toEqual([{method:'POST',url:baseUrl+'/chat/completions'}]);
   expect(owner.snapshot().state).toBe('unknown');
-  expect(()=>ownedModelStream(model,context)).toThrow('UNKNOWN');
-  expect(calls).toHaveLength(1);
+  expect((await ownedModelStream(model,context).result()).stopReason).toBe('error');
+  expect(calls).toHaveLength(2);
 });
 
 it.each([true,false])('uses the native provider’s error receipt only when authenticated (%s)', async signed => {

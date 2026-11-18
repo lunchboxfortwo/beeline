@@ -375,5 +375,10 @@ if (result.exit_code !== undefined && result.exit_code !== 0) {
 }
 NODE
 ;;
+free_agent_reply)
+set -euo pipefail
+echo "::add-mask::$SERVER_CANARY_REVIEW_SECRET"
+node "$GITHUB_WORKSPACE/packages/scripts/release-steps/free-agent-reply-proof.mjs" | tee -a "$GITHUB_STEP_SUMMARY"
+;;
 *) echo "Unknown server-leg step: $1" >&2; exit 2 ;;
 esac

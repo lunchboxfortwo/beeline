@@ -174,3 +174,60 @@ esac
     assert.equal(readFileSync(env.CALLS, 'utf8').includes('machine update'), false);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+// Beebee, 2026-11-18: a released server shipped while every free-agent turn
+// failed. The server leg now requires a real reply from the review Workspace.
+test('the server leg ends by requiring a real free-agent reply in the review proof Workspace', () => {
+  const steps = parse(readFileSync('.github/actions/server-leg/action.yml', 'utf8')).runs.steps;
+  const verify = steps.findIndex(step => step.name?.startsWith('Verify the free starter image'));
+  const reply = steps.findIndex(step => step.name?.startsWith('Require a real free-agent reply'));
+  assert.equal(reply, steps.length - 1);
+  assert.ok(verify < reply);
+  assert.equal(steps[reply].if, undefined, 'a shipped server rerun still proves a reply');
+  assert.match(readFileSync('packages/scripts/release-steps/server-leg.sh', 'utf8'),
+    /^free_agent_reply\)\n[\s\S]*?free-agent-reply-proof\.mjs[\s\S]*?^;;$/m);
+});
+
+for (const outcome of ['reply', 'failure']) test(`the free-agent reply proof ${outcome === 'reply' ? 'passes on' : 'fails on'} a ${outcome}`, async () => {
+  const { createServer } = await import('node:http');
+  const { WebSocketServer } = await import('ws');
+  const { spawn } = await import('node:child_process');
+  const agent = 'bb35cda30e5bcda7bb15d78fe2def34ecc9e2a389f5c455fad8e657b2d0aa4a6';
+  const room = '79237f38-5214-47ef-b1ef-7bd8ad035d3a';
+  let socket, tagged;
+  const server = createServer(async (request, response) => {
+    let body = ''; for await (const chunk of request) body += chunk;
+    response.setHeader('content-type', 'application/json');
+    if (request.url === '/v1/auth/review/exchange') return response.end(JSON.stringify({ accessToken: 'synthetic-token' }));
+    if (request.url === '/v1/phone/operations/sendRoomMessage') {
+      tagged = JSON.parse(body); response.end('{}');
+      socket.send(JSON.stringify({ type: 'message-delta', roomId: room, message: { id: 'reply', requestId: tagged.messageId,
+        author: { pubkey: agent }, presentation: outcome === 'reply' ? 'message' : 'system',
+        text: outcome === 'reply' ? 'Hello from Beebee.' : '@beebee_26 failed · Model request did not complete' } }));
+      return;
+    }
+    response.statusCode = 404; response.end('{}');
+  });
+  const live = new WebSocketServer({ server, path: '/v1/phone/live' });
+  live.on('connection', (client, request) => {
+    assert.equal(request.headers['sec-websocket-protocol'], 'bearer.synthetic-token');
+    socket = client;
+    client.on('message', raw => {
+      const frame = JSON.parse(String(raw));
+      assert.deepEqual(frame, { type: 'subscribe', roomId: room, roomStateProjections: true });
+      client.send(JSON.stringify({ type: 'subscribed', roomId: room }));
+    });
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const child = spawn(process.execPath, ['packages/scripts/release-steps/free-agent-reply-proof.mjs'], {
+      env: { PATH: process.env.PATH, SERVER_CANARY_REVIEW_SECRET: 'synthetic-secret',
+        BEELINE_PROOF_ORIGIN: `http://127.0.0.1:${server.address().port}` }, stdio: ['ignore', 'pipe', 'pipe'] });
+    let output = ''; child.stdout.on('data', chunk => { output += chunk; }); child.stderr.on('data', chunk => { output += chunk; });
+    const code = await new Promise(resolve => child.once('exit', resolve));
+    assert.equal(tagged.roomId, room);
+    assert.match(tagged.text, /^@beebee_26 /);
+    if (outcome === 'reply') { assert.equal(code, 0, output); assert.match(output, /answered the release proof/); }
+    else { assert.notEqual(code, 0); assert.match(output, /Free agent turn failed: .*Model request did not complete/); }
+  } finally { for (const client of live.clients) client.terminate(); live.close(); server.close(); }
+});

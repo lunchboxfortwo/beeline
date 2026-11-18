@@ -27,6 +27,15 @@ async function blocked(admin: Pool, pid: number): Promise<void> {
   }
   throw new Error('Expected exact model/source writer to wait behind admitted work');
 }
+async function waiting(admin: Pool, holder: number): Promise<void> {
+  // Fixture synchronization: some backend is queued behind the writer's row lock.
+  for (let index = 0; index < 200; index++) {
+    if ((await admin.query<{ waiting: boolean }>(`SELECT EXISTS(SELECT 1 FROM pg_stat_activity
+      WHERE $1=ANY(pg_blocking_pids(pid))) waiting`, [holder])).rows[0]!.waiting) return;
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  throw new Error('Expected the model handoff to wait behind the writer');
+}
 function observe(database: SqlDatabase, after: (sql: string, tx: SqlDatabase) => Promise<void>): SqlDatabase {
   return {
     query: (sql, values) => database.query(sql, values),
@@ -134,7 +143,7 @@ describe.skipIf(!url)('real PostgreSQL owned model primitive contention', () => 
     } finally { release.resolve(); await Promise.allSettled([first, second].filter((work): work is NonNullable<typeof work> => work !== undefined)); await f.close(); }
   }, 20_000);
 
-  it.each(['payload', 'exhausted allowance'] as const)('rolls back a competing admission with %s', async kind => {
+  it.each(['payload', 'exhausted allowance'] as const)('resolves a competing admission with %s', async kind => {
     const f = await fixture(), entered = deferred<void>(), release = deferred<void>(), submitted = deferred<void>();
     let first: ReturnType<OwnedModelAttempts['reserve']> | undefined, second: ReturnType<OwnedModelAttempts['reserve']> | undefined;
     try {
@@ -162,9 +171,10 @@ describe.skipIf(!url)('real PostgreSQL owned model primitive contention', () => 
       const result=second.then(value=>({value}),error=>({error}));
       await submitted.promise;release.resolve();const admitted=await first, other=await result;
       if(kind==='payload'){
-        expect(other).toHaveProperty('error');
-        expect((other as {error:Error}).error.message).toContain('UNKNOWN');
-        expect((await f.left.query('SELECT * FROM owned_model_test_accounting')).rowCount).toBe(1);
+        // A different request is admitted beside an earlier UNKNOWN one.
+        expect((other as {value:{permit?:unknown}}).value.permit).toBeDefined();
+        expect((await f.left.query('SELECT * FROM owned_model_attempts')).rowCount).toBe(2);
+        return;
       }else{
         expect(other).toEqual({value:{receipt:admitted.receipt}});
         expect((await f.left.query('SELECT tokens::int FROM free_agent_usage')).rows).toEqual([{tokens:266}]);
@@ -181,7 +191,7 @@ describe.skipIf(!url)('real PostgreSQL owned model primitive contention', () => 
     let pause = false, early: unknown, handoff: ReturnType<OwnedModelAttempts['handoff']> | undefined, writer: Promise<unknown> | undefined;
     try {
       const owner = new OwnedModelAttempts(observe(f.left, async sql => {
-        if (pause && sql.includes('FROM owned_model_attempts') && sql.includes('FOR SHARE NOWAIT')) { pause = false; entered.resolve(); await release.promise; }
+        if (pause && sql.includes('FROM owned_model_attempts') && sql.includes('FOR SHARE')) { pause = false; entered.resolve(); await release.promise; }
       }), f.credentials);
       const first = await owner.reserve(f.actor, ONE, payload(), reserve);
       const next = await owner.reserve(f.actor, TWO, payload('synthetic next tool history'), async tx => ({ ...(await reserve(tx)), payload: payload('synthetic next tool history') }));
@@ -211,7 +221,7 @@ describe.skipIf(!url)('real PostgreSQL owned model primitive contention', () => 
     let handoff: ReturnType<OwnedModelAttempts['handoff']> | undefined;
     try {
       const owner = new OwnedModelAttempts(observe(f.left, async sql => {
-        if (pause && sql.includes('FROM owned_model_attempts') && sql.includes('FOR SHARE NOWAIT')) { pause = false; entered.resolve(); await release.promise; }
+        if (pause && sql.includes('FROM owned_model_attempts') && sql.includes('FOR SHARE')) { pause = false; entered.resolve(); await release.promise; }
       }), f.credentials);
       const admitted = await owner.reserve(f.actor, ONE, payload(), reserve), start = vi.fn(async () => 'must not enter'); pause = true;
       handoff = owner.handoff(admitted.permit!, start); void handoff.catch(error => { early = error; entered.resolve(); });
@@ -224,15 +234,12 @@ describe.skipIf(!url)('real PostgreSQL owned model primitive contention', () => 
     } finally { release.resolve(); await Promise.allSettled(handoff ? [handoff] : []); await f.close(); }
   }, 20_000);
 
-  it('refuses a reverse-order free-agent writer promptly instead of deadlocking or retrying provider entry', async () => {
-    const f = await fixture(), rowHeld = deferred<void>(), authorityHeld = deferred<void>(), requestAuthority = deferred<void>();
-    const releaseHandoff = deferred<void>(), pid = deferred<number>(); let pause = false, early: unknown;
+  it('waits behind a free-agent writer that then locks the Room, without deadlock or provider retry', async () => {
+    const f = await fixture(), rowHeld = deferred<void>(), requestAuthority = deferred<void>(), pid = deferred<number>(); let early: unknown;
     let writer: Promise<unknown> | undefined, handoff: ReturnType<OwnedModelAttempts['handoff']> | undefined;
     try {
-      const owner = new OwnedModelAttempts(observe(f.left, async sql => {
-        if (pause && sql.includes('FOR SHARE OF surface,parent,member,workspace')) { pause = false; authorityHeld.resolve(); await releaseHandoff.promise; }
-      }), f.credentials);
-      const admitted = await owner.reserve(f.actor, ONE, payload(), reserve), start = vi.fn(async () => 'must not enter');
+      const owner = new OwnedModelAttempts(f.left, f.credentials);
+      const admitted = await owner.reserve(f.actor, ONE, payload(), reserve), start = vi.fn(async () => 'synthetic completion');
       writer = f.right.transaction(async tx => {
         await tx.query('SELECT agent_id FROM free_agents WHERE agent_id=$1 FOR UPDATE', [MODEL_AGENT]);
         pid.resolve(Number((await tx.query<{ pid: number }>('SELECT pg_backend_pid() pid')).rows[0]!.pid));
@@ -240,14 +247,14 @@ describe.skipIf(!url)('real PostgreSQL owned model primitive contention', () => 
         await tx.query('SELECT id FROM rooms WHERE id=$1 FOR UPDATE', [MODEL_ROOM]);
       });
       void writer.catch(error => { early = error; rowHeld.resolve(); }); await rowHeld.promise; if (early) throw early;
-      pause = true; handoff = owner.handoff(admitted.permit!, start);
-      void handoff.catch(error => { early = error; authorityHeld.resolve(); }); await authorityHeld.promise; if (early) throw early;
-      requestAuthority.resolve(); await blocked(f.admin, await pid.promise); releaseHandoff.resolve();
-      await expect(handoff).rejects.toMatchObject({ code: '55P03' }); await writer;
-      expect(start).not.toHaveBeenCalled(); await expect(owner.handoff(admitted.permit!, start)).rejects.toThrow('UNKNOWN');
+      handoff = owner.handoff(admitted.permit!, start);
+      await waiting(f.admin, await pid.promise); expect(start).not.toHaveBeenCalled();
+      requestAuthority.resolve(); await writer;
+      expect((await handoff).state).toBe('started'); expect(start).toHaveBeenCalledOnce();
+      await expect(owner.handoff(admitted.permit!, start)).rejects.toThrow('UNKNOWN'); expect(start).toHaveBeenCalledOnce();
       expect((await f.right.query('SELECT state FROM owned_model_attempts')).rows).toEqual([{ state: 'unknown' }]);
     } finally {
-      requestAuthority.resolve(); releaseHandoff.resolve();
+      requestAuthority.resolve();
       await Promise.allSettled([writer, handoff].filter((work): work is NonNullable<typeof work> => work !== undefined)); await f.close();
     }
   }, 20_000);
@@ -267,9 +274,9 @@ describe.skipIf(!url)('real PostgreSQL owned model primitive contention', () => 
     } finally { await f.close(); }
   }, 20_000);
 
-  it('refuses behind actual bootstrap row ownership without retrying or invalidating its queue credential', async () => {
-    const f = await fixture(), held = deferred<void>(), release = deferred<void>(); let early: unknown;
-    let bootstrap: ReturnType<FreeAgentService['bootstrap']> | undefined;
+  it('waits behind actual bootstrap row ownership, then enters its model request once', async () => {
+    const f = await fixture(), held = deferred<void>(), release = deferred<void>(), pid = deferred<number>(); let early: unknown;
+    let bootstrap: ReturnType<FreeAgentService['bootstrap']> | undefined, handoff: ReturnType<OwnedModelAttempts['handoff']> | undefined;
     try {
       await f.left.query(`ALTER TABLE agents ADD COLUMN soul jsonb;
         ALTER TABLE free_agents ADD COLUMN bootstrap_hash text,ADD COLUMN updated_at timestamptz;
@@ -280,22 +287,27 @@ describe.skipIf(!url)('real PostgreSQL owned model primitive contention', () => 
       const noMachine = vi.fn(async () => { throw new Error('No lifecycle effect is authorized by this fixture'); });
       const machines: FreeAgentMachines = { create: noMachine, find: noMachine, start: noMachine, suspend: noMachine, stop: noMachine, destroy: noMachine, state: noMachine, waitFor: noMachine };
       const config = freeAgentConfigFromEnv({ BEELINE_FREE_AGENT_SEAL_KEY: key, FLY_FREE_AGENT_IMAGE: 'synthetic-image' }, 'https://synthetic.invalid')!;
-      const service = new FreeAgentService(observe(f.right, async sql => {
-        if (sql.includes('FOR UPDATE OF f')) { held.resolve(); await release.promise; }
+      const service = new FreeAgentService(observe(f.right, async (sql, tx) => {
+        if (sql.includes('FOR UPDATE OF f')) {
+          pid.resolve(Number((await tx.query<{ pid: number }>('SELECT pg_backend_pid() pid')).rows[0]!.pid)); held.resolve(); await release.promise;
+        }
       }), config, machines, async () => ({exchangeToken:'synthetic-exchange'}));
       bootstrap = service.bootstrap(bootstrapToken); void bootstrap.catch(error => { early = error; held.resolve(); });
       await held.promise; if (early) throw early;
-      const start = vi.fn(async () => 'must not enter'); await expect(owner.handoff(admitted.permit!, start)).rejects.toMatchObject({ code: '55P03' });
+      // Beebee, 2026-11-18 14:16:34: an ordinary free_agents row lock refused
+      // the handoff (not-dispatched/authority) and the turn failed silently.
+      const start = vi.fn(async () => 'synthetic completion'); handoff = owner.handoff(admitted.permit!, start);
+      await waiting(f.admin, await pid.promise); expect(start).not.toHaveBeenCalled();
       release.resolve(); expect((await bootstrap)?.daemonExchangeToken).toBe('synthetic-exchange');
-      expect(start).not.toHaveBeenCalled(); expect(noMachine).not.toHaveBeenCalled();
+      expect((await handoff).state).toBe('started'); expect(start).toHaveBeenCalledOnce(); expect(noMachine).not.toHaveBeenCalled();
       expect((await f.credentials.authenticate(f.left, f.issued.token)).binding.commandId).toBe(f.actor.binding.commandId);
       expect((await f.left.query('SELECT state FROM owned_model_attempts')).rows).toEqual([{ state: 'unknown' }]);
-    } finally { release.resolve(); await Promise.allSettled(bootstrap ? [bootstrap] : []); await f.close(); }
+    } finally { release.resolve(); await Promise.allSettled([bootstrap, handoff].filter(work => work !== undefined)); await f.close(); }
   }, 20_000);
 
-  it('releases final authority on NOWAIT refusal so actual retirement can finish its reverse-order membership write', async () => {
-    const f = await fixture(), rowHeld = deferred<void>(), authorityHeld = deferred<void>(), releaseRetire = deferred<void>(), releaseHandoff = deferred<void>();
-    const pid = deferred<number>(); let early: unknown, pause = false;
+  it('waits behind actual retirement holding no authority locks, so retirement finishes and the handoff refuses', async () => {
+    const f = await fixture(), rowHeld = deferred<void>(), releaseRetire = deferred<void>();
+    const pid = deferred<number>(); let early: unknown;
     let retirement: Promise<unknown> | undefined, handoff: ReturnType<OwnedModelAttempts['handoff']> | undefined;
     try {
       await f.left.query(`ALTER TABLE free_agents ADD COLUMN bootstrap_hash text,ADD COLUMN wake_requested_at timestamptz,ADD COLUMN updated_at timestamptz;
@@ -310,9 +322,7 @@ describe.skipIf(!url)('real PostgreSQL owned model primitive contention', () => 
         CREATE TABLE daemon_tokens(agent_id text,revoked_at timestamptz);
         CREATE TABLE agent_schedules(agent_id text,workspace_id uuid);
         CREATE TABLE agent_grants(id text,room_id uuid,agent_id text,workspace_id uuid,status text,decided_by text,decided_at timestamptz);`);
-      const owner = new OwnedModelAttempts(observe(f.left, async sql => {
-        if (pause && sql.includes('FOR SHARE OF surface,parent,member,workspace')) { pause = false; authorityHeld.resolve(); await releaseHandoff.promise; }
-      }), f.credentials), admitted = await owner.reserve(f.actor, ONE, payload(), reserve);
+      const owner = new OwnedModelAttempts(f.left, f.credentials), admitted = await owner.reserve(f.actor, ONE, payload(), reserve);
       const writer = observe(f.right, async (sql, tx) => {
         if (sql.includes('UPDATE free_agents SET removed_at=')) {
           pid.resolve(Number((await tx.query<{ pid: number }>('SELECT pg_backend_pid() pid')).rows[0]!.pid)); rowHeld.resolve(); await releaseRetire.promise;
@@ -321,14 +331,14 @@ describe.skipIf(!url)('real PostgreSQL owned model primitive contention', () => 
       retirement = writer.transaction(tx => retireAgentFromWorkspace(tx, { workspaceId: MODEL_WORKSPACE, agentId: MODEL_AGENT,
         remover: { pubkey: MODEL_OWNER, name: 'Synthetic owner', kind: 'human' }, removed: { pubkey: MODEL_AGENT, name: 'Synthetic agent', kind: 'agent' } }));
       void retirement.catch(error => { early = error; rowHeld.resolve(); }); await rowHeld.promise; if (early) throw early;
-      const start = vi.fn(async () => 'must not enter'); pause = true; handoff = owner.handoff(admitted.permit!, start);
-      void handoff.catch(error => { early = error; authorityHeld.resolve(); }); await authorityHeld.promise; if (early) throw early;
-      releaseRetire.resolve(); await blocked(f.admin, await pid.promise); releaseHandoff.resolve();
-      await expect(handoff).rejects.toMatchObject({ code: '55P03' }); await retirement; expect(start).not.toHaveBeenCalled();
+      const start = vi.fn(async () => 'must not enter'); handoff = owner.handoff(admitted.permit!, start);
+      void handoff.catch(() => {}); await waiting(f.admin, await pid.promise); expect(start).not.toHaveBeenCalled();
+      releaseRetire.resolve(); await retirement;
+      await expect(handoff).rejects.toThrow('authority'); expect(start).not.toHaveBeenCalled();
       await expect(f.credentials.authenticate(f.left, f.issued.token)).rejects.toThrow('authority');
       expect((await f.left.query('SELECT hidden_from_roster FROM identities WHERE id=$1', [MODEL_AGENT])).rows).toEqual([{ hidden_from_roster: true }]);
     } finally {
-      releaseRetire.resolve(); releaseHandoff.resolve();
+      releaseRetire.resolve();
       await Promise.allSettled([retirement, handoff].filter((work): work is NonNullable<typeof work> => work !== undefined)); await f.close();
     }
   }, 20_000);

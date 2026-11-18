@@ -59,7 +59,7 @@ export function ownedModelStream(
   const fail = () => output.push({type:'error',reason:options.signal?.aborted ? 'aborted' : 'error',error:{
     role:'assistant',content:[],api:model.api,provider:model.provider,model:model.id,timestamp:Date.now(),
     usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},
-    stopReason:options.signal?.aborted ? 'aborted' : 'error',errorMessage:'Model result is unavailable; do not resubmit this request.',
+    stopReason:options.signal?.aborted ? 'aborted' : 'error',errorMessage:'Model result is unavailable.',
   }});
   void (async () => {
     for await (const event of upstream) {
@@ -72,21 +72,10 @@ export function ownedModelStream(
           const detail=(body.error && typeof body.error==='object' ? body.error : body) as typeof body;
           owner.confirmReceipt(detail.signedReceipt);
           if(typeof detail.message==='string')event.error.errorMessage=detail.message;
-        } catch { /* Transport loss stays UNKNOWN; the helper never resubmits. */ }
+        } catch { /* Transport loss stays UNKNOWN in the journal. */ }
       }
-      if (event.type === 'done' && !owner.confirmReceipt(event.message.responseId)) {
-        output.push({
-          type: 'error',
-          reason: 'error',
-          error: {
-            ...event.message,
-            stopReason: 'error',
-            errorMessage: 'Model outcome is unknown; do not resubmit this request.',
-          },
-        });
-        output.end();
-        return;
-      }
+      // A finished answer is delivered even when its receipt cannot settle the journal.
+      if (event.type === 'done') owner.confirmReceipt(event.message.responseId);
       if(event.type==='done' || event.type==='error')terminal=true;
       output.push(event);
     }
