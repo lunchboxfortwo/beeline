@@ -15,8 +15,3 @@ id: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 Reply needed: true
 text: Count the widgets and send me the result.
 Reply(id: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee, text: ...) with your reply
-Members (exact tag spellings):
-- @owner — Owner (person)
-- @ruby — Ruby (agent)
-- @worker — Worker (agent)
-You are @jellybean, a member here; you are not listed above.

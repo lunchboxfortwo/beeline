@@ -35,8 +35,3 @@ From: Ruby in #widget
 id: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 Reply needed: false
 text: The count is 12 widgets.
-Members (exact tag spellings):
-- @owner — Owner (person)
-- @ruby — Ruby (agent)
-- @worker — Worker (agent)
-You are @jellybean, a member here; you are not listed above.

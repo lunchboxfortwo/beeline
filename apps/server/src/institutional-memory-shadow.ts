@@ -1,11 +1,10 @@
 import { resourceReadAuthority, resourceRequester } from './resource-requester.js';
 import { cornerCommissionerSql } from './corner-opening.js';
 import { randomUUID } from 'node:crypto';
-import { INSTITUTIONAL_CONTEXT_HARD_MAX_BYTES, INSTITUTIONAL_SKILL_INDEX_MAX_BYTES, WORKSPACE_CORE_SKILL_SLUG, institutionalMemoryRequestWords, INSTITUTIONAL_MEMORY_VECTOR_CANDIDATES_MAX, INSTITUTIONAL_MEMORY_VECTOR_MAX_DISTANCE, INSTITUTIONAL_CONTEXT_VECTOR_ITEMS_MAX, parseInstitutionalMemoryProposal, type InstitutionalMemoryItem, type InstitutionalContextSnapshot, type InstitutionalMemoryProposal } from '@beeline/api-contract/daemon';
+import { INSTITUTIONAL_CONTEXT_HARD_MAX_BYTES, institutionalMemoryRequestWords, INSTITUTIONAL_CONTEXT_VECTOR_MAX_DISTANCE, INSTITUTIONAL_CONTEXT_VECTOR_ITEMS_MAX, parseInstitutionalMemoryProposal, type InstitutionalMemoryItem, type InstitutionalContextSnapshot, type InstitutionalMemoryProposal } from '@beeline/api-contract/daemon';
 import type { CommandRow } from './agent-command.js';
 import type { SqlDatabase } from './database.js';
-import { authorizedWorkspaceSkillCandidates, vectorWorkspaceSkillCandidates, type WorkspaceSkillIndexCandidate, type WorkspaceSkillVectorCandidate } from './institutional-skills.js';
-import { createDefaultEmbedFn, pgvectorLiteral, memoryEnvLimit, precomputedEmbedFn, type EmbedFn } from './institutional-memory-embeddings.js';
+import { createDefaultEmbedFn, pgvectorLiteral, precomputedEmbedFn, type EmbedFn } from './institutional-memory-embeddings.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { saveInstitutionalMemory, updateInstitutionalMemory, deleteInstitutionalMemory, reportInstitutionalMemoryUsed, searchInstitutionalMemory, getInstitutionalMemoryTurnStats, tombstoneInstitutionalMemoryForMessage } from './institutional-memory-shadow-save-institutional-memory.js';
 
@@ -73,9 +72,8 @@ type ContextItemRow = {
   confidence: number;
   version: number;
   updated_at: Date;
-  /** Cosine distance to the snapshot's query embedding; present only for a
-   *  row the vector pass found (see `getInstitutionalContext`'s hybrid merge). */
-  distance?: number;
+  /** Cosine distance to the message text's query embedding. */
+  distance: number;
 };
 
 
@@ -117,14 +115,6 @@ export function searchRelevance(
 }
 
 
-function skillMatches(skill: WorkspaceSkillIndexCandidate, words: ReadonlySet<string>): number {
-  return keywordMatches(
-    [...institutionalMemoryRequestWords(skill.slug.replace(/-/g, ' '), skill.description)],
-    words,
-  );
-}
-
-
 /**
  * Compile one command-bound, immutable turn snapshot. Workspace facts are
  * transparent across the Workspace; only the durable root requester's own
@@ -146,9 +136,8 @@ export async function precomputeInstitutionalQueryEmbedding(
   const text = input.kind === 'search'
     ? input.query.trim()
     : (await database.query<{ text: string }>(
-      `SELECT CASE WHEN command.reason IN ('schedule','subscribed_event')
-         THEN COALESCE(command.message->>'body',root.text) ELSE root.text END text FROM agent_commands command
-       JOIN messages root ON root.id=command.root_source_message_id AND root.deleted_at IS NULL
+      `SELECT COALESCE(command.message->>'body',root.text) text FROM agent_commands command
+       LEFT JOIN messages root ON root.id=command.root_source_message_id AND root.deleted_at IS NULL
        WHERE command.room_id=$1 AND command.agent_id=$2 AND command.turn_request_id=$3
        ORDER BY command.created_at DESC LIMIT 1`,
       [input.roomId, input.agentId, input.requestId],
@@ -166,67 +155,18 @@ export async function getInstitutionalContext(
 ): Promise<InstitutionalContextSnapshot> {
   const read = await resourceReadAuthority(database, command);
   if (!read) throw new Error('institutional memory requester authority is unavailable');
-  // Background sources carry the trusted action beside a generic System line.
-  // Match that action while keeping the stored root as the authority boundary.
-  const requestText = ['schedule', 'subscribed_event'].includes(command.reason)
-    ? command.message?.body ?? read.source.text
-    : read.source.text;
+  // Match the message itself; root provenance remains the authority boundary.
+  const requestText = command.message?.body ?? read.source.text;
   const queryEmbedding = await embed(
     requestText, 'query');
   return database.transaction(async (db) => {
     const readAuthority = await resourceReadAuthority(db, command);
-    const repository = (await db.query<{ repository_key: string | null; repository_name: string | null }>(
-      `SELECT COALESCE(room.repository_key,parent.repository_key) repository_key,
-              COALESCE(room.repository_name,parent.repository_name) repository_name
-       FROM rooms room LEFT JOIN rooms parent ON parent.id=room.parent_id WHERE room.id=$1`,
-      [command.room_id],
-    )).rows[0];
-    const authority = readAuthority && repository ? { ...readAuthority, ...repository } : undefined;
-    if (!authority) throw new Error('institutional memory requester authority is unavailable');
-    // Only facts whose saved keywords appear in the request load. Nothing
-    // fills leftover fact space, so a request that matches no fact loads none.
+    if (!readAuthority) throw new Error('institutional memory requester authority is unavailable');
+    const authority = readAuthority;
     const words = institutionalMemoryRequestWords(requestText);
-    // Kicked off alongside the DB queries below, not after: the embedding
-    // call is a separate network round trip, so it costs nothing extra as
-    // long as it resolves before the queries that need it. It still carries
-    // its own short deadline (see the constant's doc) — a slow OpenRouter
-    // response degrades this snapshot to keyword-only, never to empty.
-    const candidates = (
-      await db.query<ContextItemRow>(
-        `SELECT item.id,item.kind,item.canonical_key,item.body,item.keywords,item.confidence,
-                item.version,item.updated_at
-         FROM institutional_memory_items item
-         WHERE item.workspace_id=$1 AND item.state='active' AND item.deleted_at IS NULL
-           AND item.keywords && $3::text[]
-           AND (
-             item.kind='workspace_fact' OR
-             (item.kind='human_profile_fact' AND item.subject_identity_id=$2)
-           )
-           AND NOT EXISTS (
-             SELECT 1 FROM institutional_memory_item_sources source
-             JOIN messages message ON message.id=source.message_id
-             WHERE source.item_id=item.id AND message.deleted_at IS NOT NULL
-           )
-         ORDER BY item.updated_at DESC,item.id
-         LIMIT 500`,
-        [
-          authority.workspace_id,
-          authority.requester_identity_id,
-          [...words],
-        ],
-      )
-    ).rows;
-    // Every authorized skill is a candidate, matched or not: the index has its
-    // own budget, and an agent focused on another topic still sees it.
-    const authorizedSkills = await authorizedWorkspaceSkillCandidates(db, {
-      workspaceId: authority.workspace_id,
-      requesterIdentityId: authority.requester_identity_id,
-      agentId: command.agent_id,
-    });
     const embeddingMs = queryEmbedding.ms;
     const embeddingOutcome = queryEmbedding.outcome;
     let vectorItemCandidates: ContextItemRow[] = [];
-    let vectorSkillCandidates: WorkspaceSkillVectorCandidate[] = [];
     if (queryEmbedding.outcome === 'served' && queryEmbedding.vector) {
       const vec = pgvectorLiteral(queryEmbedding.vector);
       vectorItemCandidates = (
@@ -236,7 +176,7 @@ export async function getInstitutionalContext(
            FROM institutional_memory_items item
            WHERE item.workspace_id=$1 AND item.state='active' AND item.deleted_at IS NULL
              AND item.embedding IS NOT NULL
-             AND item.embedding <=> $3::vector <= $5
+             AND item.embedding <=> $3::vector <= $4
              AND (
                item.kind='workspace_fact' OR
                (item.kind='human_profile_fact' AND item.subject_identity_id=$2)
@@ -246,73 +186,26 @@ export async function getInstitutionalContext(
                JOIN messages message ON message.id=source.message_id
                WHERE source.item_id=item.id AND message.deleted_at IS NOT NULL
              )
-           ORDER BY item.embedding <=> $3::vector
-           LIMIT $4`,
+           ORDER BY item.embedding <=> $3::vector`,
           [
             authority.workspace_id,
             authority.requester_identity_id,
             vec,
-            INSTITUTIONAL_MEMORY_VECTOR_CANDIDATES_MAX,
-            memoryEnvLimit('INSTITUTIONAL_MEMORY_VECTOR_MAX_DISTANCE', INSTITUTIONAL_MEMORY_VECTOR_MAX_DISTANCE),
+            INSTITUTIONAL_CONTEXT_VECTOR_MAX_DISTANCE,
           ],
         )
       ).rows;
-      vectorSkillCandidates = await vectorWorkspaceSkillCandidates(db, {
-        workspaceId: authority.workspace_id,
-        requesterIdentityId: authority.requester_identity_id,
-        agentId: command.agent_id,
-        queryEmbedding: vec,
-        limit: INSTITUTIONAL_MEMORY_VECTOR_CANDIDATES_MAX,
-      });
     }
-    // Hybrid merge: the keyword/word-overlap set UNIONs with the nearest
-    // vector matches under the same scope filters. An item present in both
-    // ranks by keyword overlap first (unchanged from before this feature);
-    // an item the vector pass alone found ranks by how close it is.
-    const mergedItems = new Map<string, ContextItemRow>();
-    for (const item of candidates) mergedItems.set(item.id, item);
-    let vectorOnly = 0;
-    for (const item of vectorItemCandidates) {
-      if (!mergedItems.has(item.id) &&
-          vectorOnly < memoryEnvLimit('INSTITUTIONAL_CONTEXT_VECTOR_ITEMS_MAX', INSTITUTIONAL_CONTEXT_VECTOR_ITEMS_MAX)) {
-        mergedItems.set(item.id, item);
-        vectorOnly++;
-      }
-    }
-    const ranked = [...mergedItems.values()].sort((left, right) => {
-      const relevance =
-        keywordMatches(right.keywords, words) - keywordMatches(left.keywords, words);
+    // Meaning qualifies and ranks a note; keywords only break equal distances.
+    const ranked = vectorItemCandidates.sort((left, right) => {
+      const distance = left.distance - right.distance;
+      if (distance) return distance;
+      const relevance = keywordMatches(right.keywords, words) - keywordMatches(left.keywords, words);
       if (relevance) return relevance;
-      const leftDistance = left.distance ?? Number.POSITIVE_INFINITY;
-      const rightDistance = right.distance ?? Number.POSITIVE_INFINITY;
-      if (leftDistance !== rightDistance) return leftDistance - rightDistance;
-      const confidence = right.confidence - left.confidence;
-      if (confidence) return confidence;
-      const recency = right.updated_at.getTime() - left.updated_at.getTime();
-      return recency || left.id.localeCompare(right.id);
+      return right.updated_at.getTime() - left.updated_at.getTime() || left.id.localeCompare(right.id);
     });
-    const mergedSkills = new Map<string, WorkspaceSkillIndexCandidate & { distance?: number }>();
-    for (const skill of authorizedSkills) mergedSkills.set(skill.id, skill);
-    // A vector row is the same authorized row plus its distance, so it replaces
-    // the catalog row: a semantic match keeps its rank when the index is full.
-    for (const skill of vectorSkillCandidates) mergedSkills.set(skill.id, skill);
-    const skillCandidates = [...mergedSkills.values()].sort((left, right) => {
-      const core =
-        Number(right.slug === WORKSPACE_CORE_SKILL_SLUG) -
-        Number(left.slug === WORKSPACE_CORE_SKILL_SLUG);
-      if (core) return core;
-      const relevance = skillMatches(right, words) - skillMatches(left, words);
-      if (relevance) return relevance;
-      const leftDistance = left.distance ?? Number.POSITIVE_INFINITY;
-      const rightDistance = right.distance ?? Number.POSITIVE_INFINITY;
-      if (leftDistance !== rightDistance) return leftDistance - rightDistance;
-      return (
-        right.updated_at.getTime() - left.updated_at.getTime() || left.id.localeCompare(right.id)
-      );
-    });
-    // One list under one header, filled greedily: facts inside the hard cap,
-    // then skill lines inside their own budget, so neither crowds out the
-    // other. An item that does not fit is skipped whole, never cut mid-sentence.
+    // At most three qualifying notes. Never fill spare space with weaker matches.
+    // An item that does not fit is skipped whole, never cut mid-sentence.
     const lines = [INSTITUTIONAL_CONTEXT_HEADER];
     const fits = (line: string): boolean =>
       Buffer.byteLength([...lines, line].join('\n'), 'utf8') <=
@@ -320,6 +213,7 @@ export async function getInstitutionalContext(
     const selected: ContextItemRow[] = [];
     const bytesByKind = { workspace: 0, profile: 0, skills: 0 };
     for (const item of ranked) {
+      if (selected.length === INSTITUTIONAL_CONTEXT_VECTOR_ITEMS_MAX) break;
       // The number lets report_memory_used name a snapshot item without its id.
       const line = `- [${selected.length + 1}] ${item.body}`;
       if (!fits(line)) continue;
@@ -327,18 +221,6 @@ export async function getInstitutionalContext(
       selected.push(item);
       bytesByKind[item.kind === 'workspace_fact' ? 'workspace' : 'profile'] +=
         Buffer.byteLength(line, 'utf8') + 1;
-    }
-    const selectedSkills: WorkspaceSkillIndexCandidate[] = [];
-    for (const skill of skillCandidates) {
-      const line =
-        skill.kind === 'workflow'
-          ? `- Workflow ${skill.slug} (app_tool beeline:workflow start): ${skill.description}`
-          : `- Procedure ${skill.slug} (read facet:procedure): ${skill.description}`;
-      const lineBytes = Buffer.byteLength(line, 'utf8') + 1;
-      if (bytesByKind.skills + lineBytes > INSTITUTIONAL_SKILL_INDEX_MAX_BYTES) continue;
-      lines.push(line);
-      selectedSkills.push(skill);
-      bytesByKind.skills += lineBytes;
     }
     const text = lines.length > 1 ? lines.join('\n') : '';
     const wrapperBytes = text ? Buffer.byteLength(INSTITUTIONAL_CONTEXT_HEADER, 'utf8') : 0;
@@ -353,7 +235,7 @@ export async function getInstitutionalContext(
       profile: ranked.filter(
         (item) => item.kind === 'human_profile_fact' && !selected.includes(item),
       ).length,
-      skills: skillCandidates.length - selectedSkills.length,
+      skills: 0,
     };
     const serveId = randomUUID();
     await db.query(
@@ -373,14 +255,14 @@ export async function getInstitutionalContext(
         snapshotRevision,
         selected.length > 0,
         selected.map((item) => item.id),
-        selectedSkills.map((skill) => skill.slug),
+        [],
         bytesByKind.workspace,
         bytesByKind.profile,
         bytesByKind.skills,
         wrapperBytes,
         totalBytes,
         Math.ceil(totalBytes / 4),
-        ranked.length + skillCandidates.length,
+        ranked.length,
         JSON.stringify(omitted),
       ],
     );

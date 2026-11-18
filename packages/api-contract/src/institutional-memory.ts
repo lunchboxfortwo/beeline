@@ -136,15 +136,7 @@ export const INSTITUTIONAL_MEMORY_RATIONALE_MAX_LENGTH = 500;
 export const INSTITUTIONAL_MEMORY_SOURCE_MESSAGE_MAX = 16;
 /** The saved facts memory adds to one turn, header included. */
 export const INSTITUTIONAL_CONTEXT_HARD_MAX_BYTES = 1_000;
-/**
- * The procedure and workflow index lines, on their own budget beside the facts
- * above, so a turn full of matching facts still lists the Workspace's skills.
- * A typical line is 90-110 bytes, so this holds about ten. Both budgets
- * together are at most 2,000 bytes (about 500 tokens), a quarter of the
- * 2,000-token p95 target (`INSTITUTIONAL_CONTEXT_TOKEN_TARGET`).
- */
-export const INSTITUTIONAL_SKILL_INDEX_MAX_BYTES = 1_000;
-/** The always-first index line: the Workspace's own start-of-task procedure. */
+/** The Workspace's own start-of-task procedure slug. */
 export const WORKSPACE_CORE_SKILL_SLUG = 'workspace-core';
 /** Search query limits use Unicode code points across history and memory. */
 export const INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS = 500;
@@ -190,12 +182,14 @@ export const INSTITUTIONAL_MEMORY_EMBEDDING_ENV_VAR = 'OPENROUTER_EMBEDDING_API_
 /** Nearest-neighbor candidates pulled per hybrid search, before the result limit applies. */
 export const INSTITUTIONAL_MEMORY_VECTOR_CANDIDATES_MAX = 20;
 export const INSTITUTIONAL_MEMORY_VECTOR_MAX_DISTANCE = 0.66;
+/** Delivery cutoff calibrated on real messages; explicit search keeps its broader recall. */
+export const INSTITUTIONAL_CONTEXT_VECTOR_MAX_DISTANCE = 0.45;
 export const INSTITUTIONAL_CONTEXT_VECTOR_ITEMS_MAX = 3;
 export const INSTITUTIONAL_MEMORY_ALIGN_MAX_DISTANCE = 0.75;
 /** A snapshot's embedding call gets a slice of the whole 500ms context-fetch
  *  budget (`INSTITUTIONAL_CONTEXT_TIMEOUT_MS`, apps/body/src/institutional-context.ts);
  *  the rest stays for the DB queries the snapshot already runs. A miss here
- *  degrades to keyword-only candidates, never to an empty snapshot. Raised
+ *  leaves notes out when unavailable. Raised
  *  100ms→400ms after production showed real OpenRouter embedding calls
  *  routinely exceeding 100ms, so the budget never let one actually land. */
 export const INSTITUTIONAL_CONTEXT_EMBEDDING_TIMEOUT_MS = 400;

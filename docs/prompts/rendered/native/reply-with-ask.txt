@@ -36,8 +36,3 @@ id: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 Reply needed: true
 text: The count is 12 widgets. Should I use the small batch? Options: Small batch; Full batch.
 Reply(id: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee, text: ...) with your reply
-Members (exact tag spellings):
-- @owner — Owner (person)
-- @ruby — Ruby (agent)
-- @worker — Worker (agent)
-You are @jellybean, a member here; you are not listed above.

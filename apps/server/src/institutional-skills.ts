@@ -7,7 +7,6 @@ import {
   WORKSPACE_SKILL_DESCRIPTION_MAX_LENGTH,
   WORKSPACE_SKILL_MARKDOWN_MAX_BYTES,
   WORKSPACE_SKILL_SLUG_MAX_LENGTH,
-  INSTITUTIONAL_MEMORY_VECTOR_MAX_DISTANCE,
   INSTITUTIONAL_MEMORY_ALIGN_MAX_DISTANCE,
   type LoadWorkspaceSkillInput,
   type LoadWorkspaceSkillResult,
@@ -51,19 +50,6 @@ type SkillRow = {
   kind: 'procedure' | 'workflow';
 };
 
-export type WorkspaceSkillIndexCandidate = Pick<
-  SkillRow,
-  | 'id'
-  | 'slug'
-  | 'description'
-  | 'current_version'
-  | 'source_room_id'
-  | 'repository'
-  | 'path'
-  | 'updated_at'
-  | 'kind'
->;
-
 const AUTHORIZED_SKILLS_SQL = `
   FROM workspace_skills skill
   JOIN workspace_skill_versions version
@@ -80,28 +66,7 @@ const AUTHORIZED_SKILLS_SQL = `
         AND workspace_requester.identity_id=$2 AND workspace_requester.removed_at IS NULL
     )`;
 
-export async function authorizedWorkspaceSkillCandidates(
-  database: SqlDatabase,
-  input: {
-    workspaceId: string;
-    requesterIdentityId: string;
-    agentId: string;
-  },
-): Promise<WorkspaceSkillIndexCandidate[]> {
-  return (
-    await database.query<WorkspaceSkillIndexCandidate>(
-      `SELECT skill.id,skill.slug,skill.description,skill.current_version,
-              skill.source_room_id,skill.repository,skill.path,skill.updated_at,skill.kind
-       ${AUTHORIZED_SKILLS_SQL}
-       ORDER BY skill.updated_at DESC,skill.id
-       LIMIT 200`,
-      [input.workspaceId, input.requesterIdentityId, input.agentId],
-    )
-  ).rows;
-}
-
-/** Explicit names load the current authorized procedure body before delivery.
- * The catalog's ranking and byte budget do not decide whether a named task loads. */
+/** Explicit names load the current authorized procedure body before delivery. */
 export async function namedWorkspaceProcedureContext(
   database: SqlDatabase,
   input: { workspaceId: string; requesterIdentityId: string; agentId: string; text: string },
@@ -330,50 +295,6 @@ async function similarWorkspaceSkills(
       [workspaceId, slug, pgvectorLiteral(query.vector),
        memoryEnvLimit('INSTITUTIONAL_MEMORY_ALIGN_MAX_DISTANCE', INSTITUTIONAL_MEMORY_ALIGN_MAX_DISTANCE)],
     )).rows : [];
-}
-
-export type WorkspaceSkillVectorCandidate = WorkspaceSkillIndexCandidate & {
-  distance: number;
-};
-
-/**
- * The nearest authorized skills to an already-computed query embedding
- * (`[0.1,0.2,...]::vector` literal, see `pgvectorLiteral`), for the per-turn
- * snapshot's hybrid skill index. Same authority filter as the keyword path
- * above; a skill with no embedding yet (or the embedding cycle disabled)
- * simply cannot appear here. Covers a `kind='workflow'` row automatically:
- * this query has no kind filter, and the caller renders its index line by
- * `skill.kind` the same way the keyword path already does.
- */
-export async function vectorWorkspaceSkillCandidates(
-  database: SqlDatabase,
-  input: {
-    workspaceId: string;
-    requesterIdentityId: string;
-    agentId: string;
-    queryEmbedding: string;
-    limit: number;
-  },
-): Promise<WorkspaceSkillVectorCandidate[]> {
-  return (
-    await database.query<WorkspaceSkillVectorCandidate>(
-      `SELECT skill.id,skill.slug,skill.description,skill.current_version,
-              skill.source_room_id,skill.repository,skill.path,skill.updated_at,skill.kind,
-              (skill.embedding <=> $4::vector) distance
-       ${AUTHORIZED_SKILLS_SQL} AND skill.embedding IS NOT NULL
-         AND (skill.embedding <=> $4::vector) <= $6
-       ORDER BY skill.embedding <=> $4::vector
-       LIMIT $5`,
-      [
-        input.workspaceId,
-        input.requesterIdentityId,
-        input.agentId,
-        input.queryEmbedding,
-        input.limit,
-        memoryEnvLimit('INSTITUTIONAL_MEMORY_VECTOR_MAX_DISTANCE', INSTITUTIONAL_MEMORY_VECTOR_MAX_DISTANCE),
-      ],
-    )
-  ).rows;
 }
 
 /**

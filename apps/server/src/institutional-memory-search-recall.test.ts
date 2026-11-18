@@ -168,14 +168,14 @@ describe('search_memory recall (institutional memory)', () => {
     );
     expect(saved.itemId).toBeTruthy();
 
-    // The passive per-turn snapshot: root message says "wife" + "tokyo", the
-    // item's keywords overlap, so it is already carried in ambient context.
+    // With embeddings unavailable, passive context carries no keyword-only notes.
+    // Explicit search retains its lexical recall below.
     const context = await daemon.execute(
       'getInstitutionalContext',
       { roomId: ROOM, requestId: 'cake-order-turn' },
       RONNIE,
     );
-    expect(context.itemIds).toContain(saved.itemId);
+    expect(context.itemIds).toEqual([]);
 
     // The exact seven queries Ronnie's real turn issued via search_memory
     // (pi session transcript, corner 72e6065e "cake order", turn

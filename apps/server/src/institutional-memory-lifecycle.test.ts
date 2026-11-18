@@ -1,3 +1,4 @@
+import { stubMemoryEmbeddings } from './test-fixtures/memory-embeddings.test-support.js';
 import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { PgliteDatabase, migratedDatabase } from './test-support.js';
@@ -407,6 +408,7 @@ describe('memory expiry by kind and by real use', () => {
   });
 
   it('a snapshot load or a search result does not reset age; a used report does', async () => {
+    stubMemoryEmbeddings();
     const loaded = await save();
     const used = await save({
       canonicalKey: 'deploy.release-window',
@@ -449,6 +451,7 @@ describe('memory expiry by kind and by real use', () => {
   });
 
   it('resolves a used report of snapshot line numbers to the items that turn was served', async () => {
+    stubMemoryEmbeddings();
     const fact = await save();
     await age(fact.itemId, 91);
     const { authority } = await turn(ROOM, 'How does the staging deploy work?');

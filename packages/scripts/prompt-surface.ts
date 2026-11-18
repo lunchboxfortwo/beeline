@@ -129,11 +129,12 @@ export async function renderAuditPrompts() {
     cursor: '0', deliveredWakes: [], joinedAt: '2026-11-17T00:00:00.000Z' };
   return situations.flatMap(situation => {
     const saved = situation.saved;
+    // First-chat fixtures receive members; later messages have unchanged membership.
     const context = [
       ...(situation.name === 'fresh-thread-first-turn'
         ? [generatedThreadRenamePrompt(saved.turn.generatedTitle as string)] : []),
       ...(saved.session?.brief ? [`Current thread brief, revision 1. It governs this thread; earlier instructions that conflict with it are historical:\n${(saved.session.brief as { spec: string }).spec}`] : []),
-      'Members (exact tag spellings):\n- @owner — Owner (person)\n- @ruby — Ruby (agent)\n- @worker — Worker (agent)\nYou are @jellybean, a member here; you are not listed above.',
+      ...(['person-tag', 'fresh-thread-first-turn'].includes(situation.name) ? ['Members (exact tag spellings):\n- @owner — Owner (person)\n- @ruby — Ruby (agent)\n- @worker — Worker (agent)\nYou are @jellybean, a member here; you are not listed above.'] : []),
     ].join('\n\n');
     const command: AgentCommand = { id, roomId: situation.place, roomName: situation.place === thread ? 'widget' : 'Inventory',
       returnRoomId: situation.returnPlace ?? situation.from,

@@ -19,10 +19,6 @@ import {
 import { PgliteDatabase } from './test-support.js';
 import { saveWorkflow, startWorkflow } from './workflow-runs.js';
 import { pgvectorLiteral } from './institutional-memory-embeddings.js';
-import {
-  INSTITUTIONAL_CONTEXT_HARD_MAX_BYTES,
-  INSTITUTIONAL_SKILL_INDEX_MAX_BYTES,
-} from '@beeline/api-contract/daemon';
 
 const WORKSPACE = '10000000-0000-4000-8000-000000000201';
 const ROOM = '20000000-0000-4000-8000-000000000201';
@@ -105,7 +101,7 @@ afterEach(async () => {
 });
 
 describe('merge-derived restricted Workspace procedures', () => {
-  it('indexes, authorizes, loads, and measures a stored merge-derived procedure', async () => {
+  it('authorizes, loads, and measures a stored merge-derived procedure without injecting its index', async () => {
     // Merge review no longer writes procedures; a Workspace keeps the ones an
     // earlier merge review stored, with their legacy job provenance.
     const legacyJob = '50000000-0000-4000-8000-000000000201';
@@ -127,7 +123,7 @@ describe('merge-derived restricted Workspace procedures', () => {
     [WORKSPACE,CORNER,TARGET_COMMIT,markdown,createHash('sha256').update(markdown).digest('hex'),legacyJob,[MERGE_MESSAGE,'review-finding']]);
 
     const context = await getInstitutionalContext(database, command);
-    expect(context.text).toContain('safe-release-migrations');
+    expect(context.text).toBe('');
     expect(context.text).not.toContain('# Safe release migrations');
     // Catalog exposure is not use: only an explicit load advances last_served_at.
     expect(
@@ -143,7 +139,7 @@ describe('merge-derived restricted Workspace procedures', () => {
           `SELECT skill_candidates FROM institutional_context_serves ORDER BY created_at DESC LIMIT 1`,
         )
       ).rows[0]?.skill_candidates,
-    ).toContain('safe-release-migrations');
+    ).toEqual([]);
     const loaded = await loadWorkspaceSkill(database, command, {
       agentId: OTHER_AGENT,
       roomId: ROOM,
@@ -177,9 +173,7 @@ describe('merge-derived restricted Workspace procedures', () => {
       `UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`,
       [CORNER, OTHER_HUMAN],
     );
-    expect((await getInstitutionalContext(database, command)).text).toContain(
-      'safe-release-migrations',
-    );
+    expect((await getInstitutionalContext(database, command)).text).toBe('');
     await expect(
       loadWorkspaceSkill(database, command, {
         agentId: OTHER_AGENT,
@@ -212,7 +206,7 @@ describe('merge-derived restricted Workspace procedures', () => {
     ).toMatchObject({ markdown: '', source_deleted_at: expect.any(Date) });
   });
 
-  it('lists the saved feedback-triage workflow in a corner turn with no setting, and starts it at notify', async () => {
+  it('omits the saved feedback-triage catalog line but still starts it at notify', async () => {
     const contract = JSON.parse(
       readFileSync(new URL('../../../docs/workflows/feedback-triage.json', import.meta.url), 'utf8'),
     ) as { name: string; description: string };
@@ -229,9 +223,7 @@ describe('merge-derived restricted Workspace procedures', () => {
       root_source_message_id: 'triage-ask',
     };
     const context = await getInstitutionalContext(database, cornerTurn);
-    expect(context.text).toContain(
-      `Workflow feedback-triage (app_tool beeline:workflow start): ${contract.description}`,
-    );
+    expect(context.text).toBe('');
     const started = await startWorkflow(database, cornerTurn, {
       name: 'feedback-triage',
       roleBindings: { triager: OTHER_AGENT },
@@ -239,7 +231,7 @@ describe('merge-derived restricted Workspace procedures', () => {
     expect(started.state).toBe('notify');
   });
 
-  it('indexes and loads a workflow row with the contract wrapper, distinct from a procedure', async () => {
+  it('loads a workflow row with the contract wrapper without injecting its index', async () => {
     const contract = {
       version: 1,
       name: 'ship-release',
@@ -253,7 +245,7 @@ describe('merge-derived restricted Workspace procedures', () => {
     };
     await saveWorkflow(database, command, { contract: describedWorkflow(contract) });
     const context = await getInstitutionalContext(database, command);
-    expect(context.text).toContain('Workflow ship-release (app_tool beeline:workflow start): Ship a release safely');
+    expect(context.text).toBe('');
     expect(context.text).not.toContain('Procedure ship-release');
     const loaded = await loadWorkspaceSkill(database, command, {
       agentId: OTHER_AGENT,
@@ -457,9 +449,7 @@ describe('save_skill', () => {
       root_source_message_id: otherRoot,
     };
     const context = await getInstitutionalContext(database, otherRoomCommand);
-    expect(context.text).toContain(
-      'Procedure cartoon-short-video (read facet:procedure): Storyboard render cartoon clip',
-    );
+    expect(context.text).toBe('');
     const loaded = await loadWorkspaceSkill(database, otherRoomCommand, {
       agentId: WORKER,
       roomId: CORNER,
@@ -509,122 +499,19 @@ const SHIP_RELEASE = {
   },
 };
 
-describe('snapshot skill index budget', () => {
-  const turn = (requestId: string): CommandRow => ({ ...command, turn_request_id: requestId });
-  const serve = async (requestId: string) =>
-    (
-      await database.query<{
-        item_ids: string[];
-        workspace_fact_bytes: number;
-        skill_index_bytes: number;
-        total_bytes: number;
-        estimated_tokens: number;
-      }>(
-        `SELECT item_ids,workspace_fact_bytes,skill_index_bytes,total_bytes,estimated_tokens
-         FROM institutional_context_serves WHERE request_id=$1`,
-        [requestId],
-      )
-    ).rows[0]!;
-
-  it('lists unrelated procedures and workflows beside a full fact budget, workspace-core first', async () => {
-    // Twenty matching facts: more than the fact budget holds.
-    await database.query(
-      `INSERT INTO institutional_memory_items
-       (id,workspace_id,kind,canonical_key,body,source_room_id,source_message_id,
-        audience_kind,confidence,version,created_by_command_id,keywords)
-       SELECT md5('release-fact-'||i::text)::uuid,$1,'workspace_fact','release.'||i::text,
-         'Release migration fact '||i::text||': keep concurrent indexes outside transactions.',
-         $2,$3,'workspace',0.9,1,'fixture',ARRAY['release','migrations']
-       FROM generate_series(1,20) AS i`,
-      [WORKSPACE, ROOM, ROOT],
-    );
-    const before = await getInstitutionalContext(database, turn('budget-before'));
-    const beforeServe = await serve('budget-before');
-    expect(beforeServe.skill_index_bytes).toBe(0);
-
-    await saveSkill(database, command, {
-      slug: 'cartoon-short-video',
-      description: 'Storyboard render cartoon clip',
-      markdown: 'Keep every shot under four seconds.',
-    });
-    await saveWorkflow(database, command, { contract: describedWorkflow(SHIP_RELEASE) });
-    await saveSkill(database, command, {
-      slug: 'workspace-core',
-      description: 'Load at task start: machines and checklists',
-      markdown: 'Niglet reaches Fly; Ruby does not.',
-    });
-    const after = await getInstitutionalContext(database, turn('budget-after'));
-    const afterServe = await serve('budget-after');
-
-    // The request is about release migrations; only ship-release shares a word.
-    const lines = after.text.split('\n');
-    const skillLines = lines.filter((line) => /^- (Procedure|Workflow) /.test(line));
-    expect(skillLines[0]).toBe(
-      '- Procedure workspace-core (read facet:procedure): Load at task start: machines and checklists',
-    );
-    expect(skillLines).toContain(
-      '- Procedure cartoon-short-video (read facet:procedure): Storyboard render cartoon clip',
-    );
-    expect(skillLines).toContain('- Workflow ship-release (app_tool beeline:workflow start): Ship a release safely');
-
-    // Facts keep exactly what they had: same items, same bytes, inside their cap.
-    expect(after.itemIds).toEqual(before.itemIds);
-    expect(afterServe.workspace_fact_bytes).toBe(beforeServe.workspace_fact_bytes);
-    expect(afterServe.workspace_fact_bytes).toBeLessThanOrEqual(INSTITUTIONAL_CONTEXT_HARD_MAX_BYTES);
-    expect(afterServe.skill_index_bytes).toBeGreaterThan(0);
-    expect(afterServe.skill_index_bytes).toBeLessThanOrEqual(INSTITUTIONAL_SKILL_INDEX_MAX_BYTES);
-    expect(afterServe.estimated_tokens).toBeLessThanOrEqual(500);
-    console.log(
-      `snapshot bytes before: facts=${beforeServe.workspace_fact_bytes} skills=${beforeServe.skill_index_bytes} total=${beforeServe.total_bytes}; ` +
-        `after: facts=${afterServe.workspace_fact_bytes} skills=${afterServe.skill_index_bytes} total=${afterServe.total_bytes} tokens=${afterServe.estimated_tokens}`,
-    );
+it('does not inject the saved catalog, including workspace-core or a matching workflow', async () => {
+  await saveSkill(database, command, {
+    slug: 'workspace-core', description: 'Load at task start: machines and checklists',
+    markdown: 'Niglet reaches Fly; Ruby does not.',
   });
-
-  it('keeps a meaning-only match in a full index ahead of newer unmatched skills', async () => {
-    await saveSkill(database, command, {
-      slug: 'schema-ordering',
-      description: 'Order schema changes safely',
-      markdown: 'body',
-    });
-    const near = [1, ...new Array(1023).fill(0)];
-    await database.query(
-      `UPDATE workspace_skills SET embedding=$2::vector,updated_at=now()-interval '1 day'
-       WHERE workspace_id=$1 AND slug='schema-ordering'`,
-      [WORKSPACE, pgvectorLiteral(near)],
-    );
-    for (let index = 0; index < 30; index++) {
-      await saveSkill(database, command, {
-        slug: `procedure-number-${index}`,
-        description: `Unrelated procedure number ${index} for testing`,
-        markdown: 'body',
-      });
-    }
-    const context = await getInstitutionalContext(
-      database,
-      turn('meaning-full-index'),
-      async () => ({ outcome: 'served', vector: near, ms: 1 }),
-    );
-    expect(context.text).toContain(
-      '- Procedure schema-ordering (read facet:procedure): Order schema changes safely',
-    );
-    expect((await serve('meaning-full-index')).skill_index_bytes).toBeLessThanOrEqual(
-      INSTITUTIONAL_SKILL_INDEX_MAX_BYTES,
-    );
-  });
-
-  it('keeps the skill index inside its own budget when the Workspace has many skills', async () => {
-    for (let index = 0; index < 30; index++) {
-      await saveSkill(database, command, {
-        slug: `procedure-number-${index}`,
-        description: `Unrelated procedure number ${index} for testing`,
-        markdown: 'body',
-      });
-    }
-    await getInstitutionalContext(database, turn('many-skills'));
-    const row = await serve('many-skills');
-    expect(row.skill_index_bytes).toBeGreaterThan(INSTITUTIONAL_SKILL_INDEX_MAX_BYTES - 120);
-    expect(row.skill_index_bytes).toBeLessThanOrEqual(INSTITUTIONAL_SKILL_INDEX_MAX_BYTES);
-  });
+  await saveWorkflow(database, command, { contract: describedWorkflow(SHIP_RELEASE) });
+  const context = await getInstitutionalContext(database, command);
+  expect(context.text).toBe('');
+  const served = (await database.query<{ skill_candidates: string[]; skill_index_bytes: number }>(
+    'SELECT skill_candidates,skill_index_bytes FROM institutional_context_serves WHERE request_id=$1',
+    [command.turn_request_id],
+  )).rows[0]!;
+  expect(served).toMatchObject({ skill_candidates: [], skill_index_bytes: 0 });
 });
 
 describe('delete_skill', () => {

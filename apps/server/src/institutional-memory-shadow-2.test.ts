@@ -1,3 +1,5 @@
+import { stubMemoryEmbeddings, memoryConcept } from './test-fixtures/memory-embeddings.test-support.js';
+import { pgvectorLiteral } from './institutional-memory-embeddings.js';
 import { describe, expect, it, migrateData, startQueuedTurn, createAgentCommand, WORKSPACE, ROOM, OTHER_ROOM, HUMAN, AGENT, OTHER_AGENT, OTHER_HUMAN, MESSAGE, database, liveDaemon, enrollLive, openTurn, closeTurn, rootFixture } from './test-support-institutional-memory-shadow.test-support.js';
 
 describe('institutional memory phase-0 shadow capture', () => {
@@ -153,6 +155,9 @@ describe('institutional memory phase-0 shadow capture', () => {
       },
     ]);
 
+    stubMemoryEmbeddings({ 'Give me the bullet points.': memoryConcept(0) }, memoryConcept(1));
+    await rootFixture.database.query('UPDATE institutional_memory_items SET embedding=$2::vector WHERE id=$1',
+      [current, pgvectorLiteral(memoryConcept(0))]);
     // A request that touches it loads it like any other profile fact.
     const bulletMessage = '7'.repeat(64);
     await rootFixture.database.query(
@@ -268,6 +273,7 @@ describe('institutional memory phase-0 shadow capture', () => {
 });
 describe('institutional memory authority for agent-started turns', () => {
   it('serves the per-turn snapshot for a turn started by a schedule or event wake, whose root message is agent-authored', async () => {
+    stubMemoryEmbeddings();
     await enrollLive();
     const humanTurn = await openTurn('human-write-turn');
     await liveDaemon().execute(

@@ -47,7 +47,7 @@ Agent tools:
   "reason": "message",
   "kind": "message",
   "text": "Count the widgets and send me the result.",
-  "institutionalContext": "Members (exact tag spellings):\n- @owner — Owner (person)\n- @ruby — Ruby (agent)\n- @worker — Worker (agent)\nYou are @jellybean, a member here; you are not listed above.",
+  "institutionalContext": "",
   "attachments": [],
   "createdAt": "2026-11-17T00:00:00.000Z",
   "next": "From: Ruby in #Inventory\nid: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\nReply needed: true\ntext: Count the widgets and send me the result.\nReply(id: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee, text: ...) with your reply"

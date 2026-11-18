@@ -47,7 +47,7 @@ Agent tools:
   "reason": "corner_check",
   "kind": "lifecycle",
   "text": "All widget checks passed. No changes or public update are needed.",
-  "institutionalContext": "Current thread brief, revision 1. It governs this thread; earlier instructions that conflict with it are historical:\nImplement the requested widget.\n\nMembers (exact tag spellings):\n- @owner — Owner (person)\n- @ruby — Ruby (agent)\n- @worker — Worker (agent)\nYou are @jellybean, a member here; you are not listed above.",
+  "institutionalContext": "Current thread brief, revision 1. It governs this thread; earlier instructions that conflict with it are historical:\nImplement the requested widget.",
   "attachments": [],
   "createdAt": "2026-11-17T00:00:00.000Z",
   "next": "From: System in #widget\nid: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\nReply needed: false\ntext: All widget checks passed. No changes or public update are needed."

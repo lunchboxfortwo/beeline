@@ -47,7 +47,7 @@ Agent tools:
   "reason": "reply",
   "kind": "reply",
   "text": "Done: the widget change is ready for review.",
-  "institutionalContext": "Members (exact tag spellings):\n- @owner — Owner (person)\n- @ruby — Ruby (agent)\n- @worker — Worker (agent)\nYou are @jellybean, a member here; you are not listed above.",
+  "institutionalContext": "",
   "attachments": [],
   "createdAt": "2026-11-17T00:00:00.000Z",
   "next": "From: Worker in #widget\nid: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\nReply needed: false\ntext: Done: the widget change is ready for review."

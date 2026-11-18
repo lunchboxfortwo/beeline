@@ -1,3 +1,4 @@
+import { stubMemoryEmbeddings } from './test-fixtures/memory-embeddings.test-support.js';
 import { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 import { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -43,6 +44,7 @@ describe('save_memory requester authority on corner wakes', () => {
   let agentToken: string;
 
   beforeEach(async () => {
+    stubMemoryEmbeddings({}, undefined, fetch);
     database = await migratedDatabase();
     await new AuthStore(database as unknown as TransactionalDatabase).migrate();
     await database.query(

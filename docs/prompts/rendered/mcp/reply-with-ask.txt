@@ -54,7 +54,7 @@ Agent tools:
     ]
   },
   "text": "The count is 12 widgets. Should I use the small batch? Options: Small batch; Full batch.",
-  "institutionalContext": "Members (exact tag spellings):\n- @owner — Owner (person)\n- @ruby — Ruby (agent)\n- @worker — Worker (agent)\nYou are @jellybean, a member here; you are not listed above.",
+  "institutionalContext": "",
   "attachments": [],
   "createdAt": "2026-11-17T00:00:00.000Z",
   "next": "From: Ruby in #widget\nid: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\nReply needed: true\ntext: The count is 12 widgets. Should I use the small batch? Options: Small batch; Full batch.\nReply(id: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee, text: ...) with your reply"

@@ -11,12 +11,7 @@ import { LiveHub } from './live.js';
 import { OPENROUTER_EMBEDDINGS_URL, pgvectorLiteral } from './institutional-memory-embeddings.js';
 import { getInstitutionalContext } from './institutional-memory-shadow.js';
 
-// The per-turn snapshot (getInstitutionalContext) is hybrid the same way
-// search_memory is: its keyword/word-overlap candidates UNION the nearest
-// vector matches under the same scope filters. Its own embedding call is
-// bounded to a slice of the snapshot's 500ms budget (INSTITUTIONAL_CONTEXT_
-// EMBEDDING_TIMEOUT_MS) — a slow call degrades to keyword-only, never to an
-// empty snapshot.
+// Delivery uses semantic qualification; explicit memory search still has hybrid recall.
 
 const WORKSPACE = '10000000-0000-4000-8000-00000000ce11';
 const ROOM = '20000000-0000-4000-8000-00000000ce11';
@@ -79,6 +74,7 @@ beforeEach(async () => {
 afterEach(() => {
   delete process.env.OPENROUTER_EMBEDDING_API_KEY;
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 async function openCommand(requestId: string, generationId: string) {
@@ -118,8 +114,36 @@ function stubEmbeddingFetch(delayMs = 0): void {
   );
 }
 
-describe('getInstitutionalContext hybrid vector snapshot', () => {
-  it('loads nothing beyond the distance floor and caps vector-only memories at three', async () => {
+describe('getInstitutionalContext semantic snapshot', () => {
+  it('ranks by meaning, breaks ties by keywords, and never qualifies a common word or missing embedding', async () => {
+    stubEmbeddingFetch();
+    const command = await openCommand('semantic-rank', 'semantic-gen');
+    // Retired delivery overrides cannot loosen the calibrated floor or three-note maximum.
+    vi.stubEnv('INSTITUTIONAL_MEMORY_VECTOR_MAX_DISTANCE', '1');
+    vi.stubEnv('INSTITUTIONAL_CONTEXT_VECTOR_ITEMS_MAX', '99');
+    const distances = [0.2, 0.1, 0.1, 0.15, 0.46, null];
+    const ids = distances.map((_, i) => `30000000-0000-4000-8000-00000000cf0${i}`);
+    for (const [i, distance] of distances.entries()) {
+      const cosine = 1 - (distance ?? 0);
+      const embedding = distance === null ? null
+        : pgvectorLiteral([cosine, Math.sqrt(1 - cosine * cosine), ...new Array(DIM - 2).fill(0)]);
+      await database.query(`INSERT INTO institutional_memory_items
+        (id,workspace_id,kind,canonical_key,body,keywords,embedding,source_room_id,source_message_id,
+         audience_kind,confidence,version)
+        VALUES($1,$2,'workspace_fact',$3,$3,$4,$5::vector,$6,$7,'workspace',0.9,1)`,
+      [ids[i], WORKSPACE, `Fact ${i}.`, i === 1 || i === 3 ? ['nomatch'] : ['wife', 'live'],
+        embedding, ROOM, MESSAGE]);
+    }
+    const context = await getInstitutionalContext(database, command, async () => ({
+      outcome: 'served', vector: conceptVector(WIFE_CONCEPT), ms: 0,
+    }));
+    expect(context.itemIds).toEqual([ids[2], ids[1], ids[3]]);
+    const unavailable = await getInstitutionalContext(database, command, async () => ({ outcome: 'disabled', ms: 0 }));
+    expect(unavailable.text).toBe('');
+    expect(unavailable.itemIds).toEqual([]);
+  });
+
+  it('loads nothing beyond the distance floor and caps all memories at three', async () => {
     stubEmbeddingFetch();
     const daemon = liveDaemon();
     await openCommand('floor-1', 'floor-gen');
@@ -264,7 +288,7 @@ describe('getInstitutionalContext hybrid vector snapshot', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it('surfaces a workspace skill by meaning alone, matching neither its slug nor its description', async () => {
+  it('omits procedures even when their meaning matches exactly', async () => {
     stubEmbeddingFetch();
     const daemon = liveDaemon();
     await openCommand('turn-4', 'gen-4');
@@ -297,16 +321,10 @@ describe('getInstitutionalContext hybrid vector snapshot', () => {
       { roomId: ROOM, requestId: 'turn-4' },
       RONNIE,
     );
-    expect(context.text).toContain('gift-shopping');
+    expect(context.text).toBe('');
   });
 
-  // A workflow row is a workspace_skills row of kind='workflow' (#1909): the
-  // embedding cycle has no kind filter, so it is embedded and found the same
-  // way a procedure is, with no code change — this proves it, and that the
-  // index renders it with the workflow (app_tool beeline:workflow start) wording, not the
-  // procedure (read facet:procedure) wording, even when found by meaning
-  // alone with no shared words.
-  it('surfaces a kind=workflow skill by meaning alone, with the workflow wording', async () => {
+  it('omits workflows even when their meaning matches exactly', async () => {
     stubEmbeddingFetch();
     const daemon = liveDaemon();
     await openCommand('turn-5', 'gen-5');
@@ -331,7 +349,6 @@ describe('getInstitutionalContext hybrid vector snapshot', () => {
       { roomId: ROOM, requestId: 'turn-5' },
       RONNIE,
     );
-    expect(context.text).toContain('Workflow gift-approval (app_tool beeline:workflow start)');
-    expect(context.text).not.toContain('Procedure gift-approval');
+    expect(context.text).toBe('');
   });
 });

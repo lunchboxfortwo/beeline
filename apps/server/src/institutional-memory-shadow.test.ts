@@ -1,4 +1,8 @@
+import { beforeEach } from 'vitest';
+import { stubMemoryEmbeddings, memoryConcept } from './test-fixtures/memory-embeddings.test-support.js';
 import { describe, expect, it, INSTITUTIONAL_CONTEXT_HEADER, tombstoneInstitutionalMemoryForMessage, startQueuedTurn, createAgentCommand, WORKSPACE, OTHER_WORKSPACE, ROOM, DM, OTHER_ROOM, HUMAN, AGENT, OTHER_AGENT, OTHER_HUMAN, MESSAGE, DM_MESSAGE, database, liveDaemon, enrollLive, openTurn, closeTurn, rootFixture } from './test-support-institutional-memory-shadow.test-support.js';
+
+beforeEach(() => stubMemoryEmbeddings());
 
 describe('institutional memory phase-0 shadow capture', () => {
   it('keeps DM facts out of shared memory but accepts the requester profile exception', async () => {
@@ -331,6 +335,11 @@ describe('institutional memory phase-0 shadow capture', () => {
 
 
   it('routes self facts to the requester profile and third-party facts to shared memory', async () => {
+    stubMemoryEmbeddings({
+      'delivery.alex-day: Alex receives packages on Thursdays.': memoryConcept(1),
+      'What is the handoff schedule?': memoryConcept(1),
+      'Alex receives packages': memoryConcept(1),
+    });
     await enrollLive();
     const source = '4'.repeat(64);
     const otherSource = '5'.repeat(64);
@@ -585,7 +594,11 @@ describe('institutional memory phase-0 shadow capture', () => {
   });
 
 
-  it('serves only items whose keywords match the request, inside 1,000 bytes', async () => {
+  it('serves only semantically matching notes, inside 1,000 bytes', async () => {
+    stubMemoryEmbeddings({
+      'billing.invoice-day: Invoices go out on the first business day of the month.': memoryConcept(1),
+      'screenshots.dark-mode: Prefers screenshots taken in dark mode.': memoryConcept(2),
+    });
     await enrollLive();
     const turn = await openTurn('keyword-turn');
     const daemon = liveDaemon();

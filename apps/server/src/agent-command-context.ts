@@ -36,7 +36,7 @@ export async function attachQueuedContext(
   return contextual;
 }
 
-/** Freeze the old fact/profile/skill snapshot before commit publishes the queue
+/** Freeze the note and named-procedure snapshot before commit publishes the queue
  * or an external wake. Private command metadata, never public message text. */
 async function attachQueuedInstitutionalContext(
   db: SqlDatabase,
@@ -162,7 +162,8 @@ async function attachQueuedConversation(
       ...(withMembers ? [memberText] : []),
       ...(rows.length ? [heading, ...rows.map(line)] : []),
     ].join('\n\n');
-  const full = render(window, 'Recent conversation here, oldest first:', true, true);
+  const withMembers = !previous || memberVersion !== previous.memberVersion;
+  const full = render(window, 'Recent conversation here, oldest first:', true, withMembers);
   const after = previous?.createdAt
     ? (
         await db.query<(typeof window)[number]>(
@@ -188,7 +189,7 @@ async function attachQueuedConversation(
         after,
         'New messages here since your last turn, oldest first:',
         brief?.revision !== previous.briefRevision,
-        memberVersion !== previous.memberVersion,
+        withMembers,
       )
     : full;
   const newest = source

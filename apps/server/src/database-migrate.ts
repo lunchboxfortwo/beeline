@@ -39,6 +39,7 @@ import { backfillPushOutbox, PUSH_OUTBOX_SCHEMA } from './push-outbox.js';
 import { LEGACY_STORAGE_SCHEMA } from './migrations/legacy-storage.js';
 import { CORNER_PERSON_STATE_SCHEMA, migrateCornerPersonState } from './corner-person-state.js';
 import { CORNER_MEMBERSHIPS_SCHEMA, removeCornerMemberships } from './migrations/corner-memberships.js';
+import { retireDatedCardWorkflows } from './migrations/dated-card-workflows.js';
 import { deleteArchivedCornerWakeSources } from './migrations/archived-corner-wakes.js';
 import { retireBotDirectMessages } from './migrations/one-system-thread.js';
 import { FREE_AGENTS_SCHEMA, FREE_AGENT_CONNECT_GUIDE } from './free-agents.js';
@@ -740,7 +741,7 @@ export async function migrateData(database: SqlDatabase): Promise<void> {
       ADD CONSTRAINT institutional_memory_items_state_check CHECK (state IN ('active','stale','archived')) NOT VALID`);
     await database.query(`ALTER TABLE institutional_memory_items VALIDATE CONSTRAINT institutional_memory_items_state_check`);
     await database.query(`UPDATE workspace_skills SET state='stale'
-      WHERE state='archived'`);
+      WHERE state='archived' AND deleted_at IS NULL`);
     await database.query(`ALTER TABLE workspace_skills
       DROP CONSTRAINT IF EXISTS workspace_skills_state_check`);
     await database.query(`ALTER TABLE workspace_skills
@@ -750,6 +751,8 @@ export async function migrateData(database: SqlDatabase): Promise<void> {
       SET status='dead',error='curator model jobs removed',updated_at=now()
       WHERE trigger_kind='curator' AND status IN ('pending','retry','claimed')`);
   });
+  await dataStep('dated card workflows', () => workflowBackfillOnce(
+    database, 'dated-card-workflows-2026-11-18', retireDatedCardWorkflows));
   await dataStep('connector machine IDs', () => backfillConnectorMachineId(database));
   await dataStep('registry apps', () => backfillRegistryApps(database));
   await dataStep('restore owner-approved grants', () => workflowBackfillOnce(

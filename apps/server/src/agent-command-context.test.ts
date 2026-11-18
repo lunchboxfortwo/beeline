@@ -31,13 +31,14 @@ it('queues only what a live session has not seen: new messages, and the member l
   expect(second!.source.conversationContext).not.toContain('first request');
   expect(second!.source.conversationContext).not.toContain('Members (exact tag spellings):');
   expect(third!.source.conversationContext).toBeUndefined();
-  // A fresh session still has the bounded window, brief-free here, with members.
+  // A fresh session still gets recent messages, without repeating unchanged members.
   expect(third!.source.conversationWindow).toContain('second request');
-  expect(third!.source.conversationWindow).toContain('Members (exact tag spellings):');
+  expect(third!.source.conversationWindow).not.toContain('Members (exact tag spellings):');
   const live = itemPrompt(third!, { names: new Map() });
   const fresh = itemPrompt(third!, { names: new Map(), fresh: true });
   expect(live).not.toContain('Untagged chatter between requests');
   expect(fresh).toContain('Untagged chatter between requests');
+  expect(fresh).not.toContain('Members (exact tag spellings):');
 
   await rootFixture.db.query(
     `INSERT INTO identities(id,kind,name,handle) VALUES($1,'human','Quill','quill') ON CONFLICT DO NOTHING`,
@@ -52,7 +53,9 @@ it('queues only what a live session has not seen: new messages, and the member l
     await send('@hoots fifth request');
     const [, , , fourth, fifth] = await commands(A);
     expect(fourth!.source.conversationContext).toContain('@quill — Quill (person)');
+    expect(itemPrompt(fourth!, { names: new Map(), fresh: true })).toContain('@quill — Quill (person)');
     expect(fifth!.source.conversationContext ?? '').not.toContain('Members (exact tag spellings):');
+    expect(itemPrompt(fifth!, { names: new Map(), fresh: true })).not.toContain('Members (exact tag spellings):');
   } finally {
     await rootFixture.db.query('DELETE FROM memberships WHERE identity_id=$1', [Q]);
   }
