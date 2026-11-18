@@ -2,12 +2,12 @@ import { askingMessageSql, NEEDS_YOU_EXPIRY_HOURS, needsYouAnsweredSql, question
 import { tagsKnownIdentitySql } from './message-mentions.js';
 
 /** Resolve an incoming request once, in the message's own transaction. */
-function requestedSql(): string {
-  return `m.presentation='message' AND m.deleted_at IS NULL AND m.author_id<>recipient.id AND (
-    (${askingMessageSql('m')} AND m.card->>'reportToId'=recipient.id)
-    OR (m.system_event IS NULL AND recipient.kind='human'
-      AND EXISTS (SELECT 1 FROM identities sender WHERE sender.id=m.author_id AND sender.kind='human')
-      AND ${tagsKnownIdentitySql('m', 'recipient.id', 'recipient.handle', 'recipient.kind', false)})
+function requestedSql(message = 'm'): string {
+  return `${message}.presentation='message' AND ${message}.deleted_at IS NULL AND ${message}.author_id<>recipient.id AND (
+    (${askingMessageSql(message)} AND ${message}.card->>'reportToId'=recipient.id)
+    OR (${message}.system_event IS NULL AND recipient.kind='human'
+      AND EXISTS (SELECT 1 FROM identities sender WHERE sender.id=${message}.author_id AND sender.kind='human')
+      AND ${tagsKnownIdentitySql(message, 'recipient.id', 'recipient.handle', 'recipient.kind', false)})
   )`;
 }
 
@@ -29,14 +29,15 @@ BEGIN
   WHERE mark.message_id=NEW.id AND mark.cleared_at IS NULL AND m.id=mark.message_id
     AND recipient.id=mark.identity_id
     AND ((${requestedSql()}) IS NOT TRUE OR ${needsYouAnsweredSql('m', 'recipient.id')});
+  -- The trigger already owns this row; rejoining messages can scan Room history per write.
   INSERT INTO needs_you_marks(identity_id,message_id,workspace_id,first_seen_at)
-    SELECT recipient.id,m.id,room.workspace_id,NULL
-    FROM messages m JOIN rooms room ON room.id=m.room_id
+    SELECT recipient.id,NEW.id,room.workspace_id,NULL
+    FROM rooms room
     JOIN room_access member ON member.room_id=room.id AND member.removed_at IS NULL
     JOIN identities recipient ON recipient.id=member.identity_id
-    WHERE m.id=NEW.id AND room.archived_at IS NULL
+    WHERE room.id=NEW.room_id AND room.archived_at IS NULL
       AND ${viewerMemberSql('room.workspace_id', 'recipient.id')}
-      AND ${requestedSql()} AND NOT (${needsYouAnsweredSql('m', 'recipient.id')})
+      AND ${requestedSql('NEW')} AND NOT (${needsYouAnsweredSql('NEW', 'recipient.id')})
     ON CONFLICT(identity_id,message_id) DO NOTHING;
   RETURN NEW;
 END $$;

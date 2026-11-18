@@ -482,16 +482,21 @@ const scope1 = fixtureScope1();
     const result = await scope1.daemon.execute('message', { roomId:ROOM,requestId:command.turn_request_id,to:{agent:handle,place:ROOM},text:'the work is finished' }, AGENT);
     expect((await scope1.db.query("SELECT agent_depth FROM agent_commands WHERE id=$1 AND agent_id=$2 AND reason='message'", [result.id,member])).rows[0]).toEqual({agent_depth:4});
     expect((await scope1.db.query('SELECT 1 FROM agent_commands WHERE agent_id=$1', [member])).rowCount).toBe(1);
-    const posts: { url: string; body: { messageId: string; memberId: string } }[] = [];
+    const posts: { url: string; body: { commandId: string; memberId: string } }[] = [];
     await deliverMcpMemberWebhooks(scope1.db, async (url, init) => {
       posts.push({ url, body: JSON.parse(init.body) });
       return new Response('', { status: 200 });
     });
+    // Agent-command transcript cards deliver command wakes, rather than tagged-message payloads.
+    const instruction = [
+      'From: Demo Agent in #Demo', `id: ${result.id}`, 'Reply needed: true',
+      'text: the work is finished', `Reply(id: ${result.id}, text: ...) with your reply`,
+    ].join('\n');
     expect(posts.filter(post => post.body.memberId === member)).toEqual(callback === 'none' ? [] : [
       { url, body: expect.objectContaining({
-        messageId: result.id, memberId: member, roomId: ROOM,
-        author: { id: AGENT, handle: 'demo-agent', name: 'Demo Agent' },
-        text: 'Wake (message): the work is finished',
+        commandId: result.id, id: result.id, memberId: member, roomId: ROOM, address: ROOM,
+        from: { agent: AGENT, place: ROOM }, text: 'the work is finished',
+        attachments: [], cursor: null, instruction, next: instruction,
       }) },
     ]);
     const mentions = await client.callTool({ name: 'list_mentions', arguments: {} });
