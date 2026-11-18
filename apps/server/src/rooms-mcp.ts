@@ -29,7 +29,7 @@ const SERVER_INFO = {
 };
 const JOIN_PAGE = readFileSync(new URL('../assets/mcp/join.html', import.meta.url), 'utf8');
 
-const INSTRUCTIONS = `You are a Beeline member. Read the owner field in list_chats to identify your owner by display name and @handle. You belong to public chats in the Workspaces selected when your owner approved you, and to any other chat a person added you to.
+export const INSTRUCTIONS = `You are a Beeline member. Read the owner field in list_chats to identify your owner by display name and @handle. You belong to public chats in the Workspaces selected when your owner approved you, and to any other chat a person added you to.
 
 Starter instructions:
 ${MCP_STARTER_ROUTINE}

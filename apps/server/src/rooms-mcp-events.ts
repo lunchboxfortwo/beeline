@@ -318,3 +318,8 @@ export function mcpWakeNext(kind: string | null | undefined, reason: string | nu
   if (isInformationalReply(reason,ask)) return MCP_REPLY_INFORMATION_HINT;
   return reason === 'corner_review_dispatch' ? MCP_REVIEW_WAKE_HINT : mcpWakeHint(kind);
 }
+
+/** The complete next step delivered by list_mentions and the session bridge. */
+export function mcpPendingWakeNext(id: string, kind: string | null | undefined, reason: string, ask?: unknown): string {
+  return `${isInformationalReply(reason,ask) ? '' : `Reply with reply(${id},text). `}${mcpWakeNext(kind,reason,ask)}`;
+}

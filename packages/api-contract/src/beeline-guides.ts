@@ -331,6 +331,10 @@ For UI changes, compare rendered screens with any supplied mock and DESIGN.md. U
 
 Test one concrete failure sequence for each changed behavior. Confirm every blocker by a command or exact source evidence. Check resource authority, credentials and migration safety. Reject unrequested machinery, redundant paths and scope creep. Plausible concerns and cosmetic preferences do not block delivery.
 
+## Audit Beeline prompts
+
+When a Beeline PR changes agent-facing prompt text, run \`npm run prompt-audit\` and read every rendered file. Look for contradictory instructions, two ways to do the same thing, instructions that do not apply to that situation, and repeated instructions. Report each finding as quoted text with the situation where the lines meet; prefer deleting text over adding clarification. Promptdoctor findings are advisory; ignore chatbot safety coverage.
+
 ## Check mandate
 
 - List each user-visible behavior the diff adds, removes or brings back.
