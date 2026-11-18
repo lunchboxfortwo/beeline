@@ -1,7 +1,5 @@
 import { deleteCornerBranchBestEffort } from './corner-branch-cleanup.js';
 import { closeCornerState } from './corner-close.js';
-import { readRecordedPullRequest } from './github-missing-pull-request.js';
-import { ExpectedRefusalError } from './command-refusal.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { cornerObjectiveSql } from './corner-objective.js';
 import { cornerOwnerSql } from './corner-worker.js';
@@ -63,11 +61,11 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
     if (!Number.isSafeInteger(number) || number <= 0)
       throw new Error('invalid pull request number');
     // Always resolve the head: a force-push must never inherit a green predecessor.
+    // An unavailable read (including a masked 404) cannot unlink a recorded PR.
     const fetchStartedAt = (await ctx.database.query<{ started_at: number }>(
       `SELECT extract(epoch FROM clock_timestamp())::double precision started_at`,
     )).rows[0]!.started_at;
-    const pr = await readRecordedPullRequest(ctx, input.cornerId, target.token, target.repository, number);
-    if (!pr) throw new ExpectedRefusalError('the thread has no pull request');
+    const pr = await ctx.app.readPullRequest(target.token, target.repository, number);
     // Explicit reconciliation also observes an unmerged close even when the
     // check verdict is unchanged. No clock scans for missed close webhooks.
     if (!corner.archived && pr.state === 'closed' && !pr.merged && corner.lifecycle.pr?.number === number) {
@@ -104,8 +102,7 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
       const absent = await ctx.app.confirmNoChecks(target.token, target.repository, pr.headSha);
       // Re-read after registration evidence: neither a new head nor a newly
       // registered status context can inherit the earlier empty rollup.
-      const latestPr = await readRecordedPullRequest(ctx, input.cornerId, target.token, target.repository, number);
-      if (!latestPr) throw new ExpectedRefusalError('the thread has no pull request');
+      const latestPr = await ctx.app.readPullRequest(target.token, target.repository, number);
       rollup = await ctx.app.readCommitCheckRollup(target.token, target.repository, pr.headSha);
       zeroChecksConfirmed = absent && !rollup.pendingRegistrations && latestPr.headSha === pr.headSha && rollup.total === 0;
     }
@@ -406,7 +403,7 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
 
 
   /** Forget a PR association under the lifecycle lock, without interpreting provider absence as closure. */
-  export async function forgetCornerPullRequest(database: SqlDatabase, cornerId: string, number: number) {
+  async function forgetCornerPullRequest(database: SqlDatabase, cornerId: string, number: number) {
     const removed = await database.query<{ archived: boolean; locked: boolean }>(
       `UPDATE corner_github_cache fact SET lifecycle=(fact.lifecycle-'pr'-'mergeQueue'-'checksSummary')||'{"checks":"unknown"}'::jsonb
        FROM rooms corner,corner_facts state
@@ -534,8 +531,7 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
         });
         const pr = cornerId && confirmedPr?.number === row.number
           ? confirmedPr
-          : await readRecordedPullRequest(ctx, row.corner_id, token.token, row.repository, row.number);
-        if (!pr) continue;
+          : await ctx.app.readPullRequest(token.token, row.repository, row.number);
         if (pr.mergeability === 'unknown') continue;
         const staleBase = Boolean(
           row.base_sha &&

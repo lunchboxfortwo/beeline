@@ -1,4 +1,3 @@
-import { readRecordedPullRequest } from './github-missing-pull-request.js';
 import { githubProviderKey } from './providers/index.js';
 import { storeGitHubInstallations } from './github-installation-store.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
@@ -61,9 +60,8 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
         );
         const interruptedOnly = failedChecks.length === 0 && interruptedNames.size > 0;
         const livePr = options?.snapshot?.pr ?? (target.pr_number && (rollup.state === 'passed' || rollup.state === 'failed' || failedChecks.length > 0)
-          ? await readRecordedPullRequest(ctx, target.corner_id, token.token, repository, Number(target.pr_number), database)
+          ? await ctx.app.readPullRequest(token.token, repository, Number(target.pr_number))
           : undefined);
-        if (target.pr_number && !livePr && (rollup.state === 'passed' || rollup.state === 'failed' || failedChecks.length > 0)) return;
         confirmedPr = livePr;
         if (livePr?.state === 'closed' && !livePr.merged) {
           await ctx.recordClosedCornerPullRequest(target.corner_id, Number(target.pr_number), database);
