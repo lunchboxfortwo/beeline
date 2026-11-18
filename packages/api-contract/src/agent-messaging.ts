@@ -34,6 +34,25 @@ export function isInformationalReply(reason: string | null | undefined, ask: unk
   return reason === 'reply' && !ask;
 }
 
+/** A person's tag or message and an agent's message() are requests; a resumed turn still owes its request's answer. */
+export const REQUEST_REASONS: readonly string[] = ['human_tag', 'direct_message', 'human_message', 'agent_tag',
+  'message', 'order', 'voice_order', 'corner_objective', 'resume'];
+
+/** Requests, and replies carrying an ask, need a reply; everything else is information. */
+export function replyNeeded(reason: string | null | undefined, ask: unknown): boolean {
+  return REQUEST_REASONS.includes(reason ?? '') || (reason === 'reply' && Boolean(ask));
+}
+
+/** The one message format every agent surface shows. */
+export function agentMessageText(message: {
+  readonly from: string; readonly place: string; readonly id: string; readonly replyNeeded: boolean;
+  readonly text: string; readonly attachments?: readonly string[];
+}): string {
+  return [`From: ${message.from} in #${message.place}`, `id: ${message.id}`, `Reply needed: ${message.replyNeeded}`,
+    `text: ${message.text}`, ...(message.attachments?.length ? [`attachment: ${message.attachments.join(', ')}`] : []),
+    ...(message.replyNeeded ? [`Reply(id: ${message.id}, text: ...) with your reply`] : [])].join('\n');
+}
+
 /** The plain shortening error is shared by the tool validator and server. */
 export function validateMessageAsk(ask: MessageAsk): void {
   const short = (text: unknown, words: number) => typeof text === 'string' &&

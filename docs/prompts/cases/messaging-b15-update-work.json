@@ -13,7 +13,7 @@
     "task": {
       "fromName": "Ruby",
       "commandReason": "message",
-      "body": "Message id: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\nFrom: Ruby\nFrom-place: 22222222-2222-4222-8222-222222222222\nDestination: (jellybean, 22222222-2222-4222-8222-222222222222)\nReply with reply(id: \"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\", text: ...).\nSet task id \"work\" in chat 22222222-2222-4222-8222-222222222222 to in-progress and assign it to jellybean in one call."
+      "body": "From: Ruby in #Milo\nid: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\nReply needed: true\ntext: Set task id \"work\" in chat 22222222-2222-4222-8222-222222222222 to in-progress and assign it to jellybean in one call.\nReply(id: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee, text: ...) with your reply"
     },
     "members": "Members: ruby (Ruby, agent), jellybean (Jellybean, agent), sol (Sol, agent), owner (Owner, person). You are Jellybean."
   },

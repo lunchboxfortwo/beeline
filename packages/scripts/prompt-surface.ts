@@ -18,12 +18,12 @@ import { itemPrompt, resumePrompt } from '../../apps/body/src/place-prompt.js';
 import { renderMention, renderRules, renderWake } from '../../apps/body/src/session-join/bridge.js';
 import type { JoinedSession } from '../../apps/body/src/session-join/store.js';
 import type { AgentCommand } from '../api-contract/src/daemon-operations.js';
-import { generatedThreadRenamePrompt, GENERATED_THREAD_BRIEF_PROMPT } from '../api-contract/src/corner-text.js';
+import { generatedThreadRenamePrompt } from '../api-contract/src/corner-text.js';
 import { mentionRouting } from '../../apps/server/src/owed-mentions.js';
 import { loadCases, loadSource } from './prompt-cases.js';
 import { beelineManagedSkills } from '../api-contract/src/beeline-guides.js';
 import { MCP_AGENT_TOOLS, MCP_OPERATOR_TOOLS, MCP_RETIRED_TOOLS } from '../../apps/server/src/rooms-mcp-agent.js';
-import { mcpPendingWakeNext, mcpWakeNext } from '../../apps/server/src/rooms-mcp-events.js';
+import { mcpWakeText } from '../../apps/server/src/rooms-mcp-events.js';
 import { INSTRUCTIONS, ROOM_TOOLS } from '../../apps/server/src/rooms-mcp.js';
 
 const SNAPSHOT = join(resolve(__dirname, '../..'), 'docs', 'prompts', 'surface.json');
@@ -53,10 +53,12 @@ const RESUME_BRANCHES: Record<string, Parameters<typeof resumePrompt>[0]> = {
   'mcp-grant': { body: '<person> approved mcp <route>' },
   'command-grant': { body: '<person> approved command <argv>' },
 };
-const MCP_WAKE_BRANCHES: Record<string, Parameters<typeof mcpWakeNext>> = {
-  message: ['message', 'message'], reply: ['reply', 'reply'], 'reply-with-ask': ['reply', 'reply', {question:'<question>',options:['<option>','<option>']}], order: ['order', 'order'],
-  review: ['lifecycle', 'corner_review_dispatch'], lifecycle: ['lifecycle', 'corner_check'], event: [null, 'subscribed_event'],
+const MCP_WAKE_BRANCHES: Record<string, [reason: string, ask?: unknown]> = {
+  tag: ['human_tag'], message: ['message'], reply: ['reply'], 'reply-with-ask': ['reply', {question:'<question>',options:['<option>','<option>']}], order: ['order'],
+  review: ['corner_review_dispatch'], lifecycle: ['corner_check'], event: ['subscribed_event'],
 };
+const wakeFixture = (reason: string, ask?: unknown) => mcpWakeText({ id: '<id>', fromName: '<name>', placeName: '<place>',
+  from: { agent: '<agent>', place: '<place>' }, reason, ask, text: '<text>' });
 
 export function extractSurface() {
   const bodyTools = Object.values(BODY_VARIANTS).flatMap(variant => agentToolsFor(...variant));
@@ -73,7 +75,7 @@ export function extractSurface() {
     mcp: { instructions: INSTRUCTIONS, chat: byName(ROOM_TOOLS), agent: byName(MCP_AGENT_TOOLS), operator: byName(MCP_OPERATOR_TOOLS),
       retired: Object.fromEntries(Object.entries(MCP_RETIRED_TOOLS).sort(([a], [b]) => a.localeCompare(b))) },
     wakes: {
-      'mcp-next': Object.fromEntries(Object.entries(MCP_WAKE_BRANCHES).map(([branch, args]) => [branch, mcpWakeNext(...args)])),
+      'mcp-next': Object.fromEntries(Object.entries(MCP_WAKE_BRANCHES).map(([branch, args]) => [branch, wakeFixture(...args)])),
       'body-resume': Object.fromEntries(Object.entries(RESUME_BRANCHES).map(([branch, item]) => [branch, resumePrompt(item)])),
     },
     guides: {
@@ -127,7 +129,7 @@ export async function renderAuditPrompts() {
     const saved = situation.saved;
     const context = [
       ...(situation.name === 'fresh-thread-first-turn'
-        ? [generatedThreadRenamePrompt(saved.turn.generatedTitle as string), GENERATED_THREAD_BRIEF_PROMPT] : []),
+        ? [generatedThreadRenamePrompt(saved.turn.generatedTitle as string)] : []),
       ...(saved.session?.brief ? [`Current thread brief, revision 1. It governs this thread; earlier instructions that conflict with it are historical:\n${(saved.session.brief as { spec: string }).spec}`] : []),
       'Members (exact tag spellings):\n- @owner — Owner (person)\n- @ruby — Ruby (agent)\n- @worker — Worker (agent)\nYou are @jellybean, a member here; you are not listed above.',
     ].join('\n\n');
@@ -147,10 +149,9 @@ export async function renderAuditPrompts() {
       id: command.sourceMessageId, room_id: situation.place, room_name: command.roomName,
       author_handle: situation.author, author_name: names.get(situation.author), text: situation.text,
       institutionalContext: context, attachments: [], created_at: joined.joinedAt, deliveryCursor: '1', truncated: false };
-    // list_mentions adds a reply instruction to every non-information wake,
-    // even when mcpWakeNext itself suggests handling background work silently.
-    const next = mcpPendingWakeNext(id, situation.kind, situation.reason, situation.ask);
-    const wake = { id, address: situation.place, from: command.from!, reason: situation.reason,
+    const named = { fromName: names.get(situation.author) ?? null, placeName: situation.from === thread ? 'widget' : 'Inventory' };
+    const next = mcpWakeText({ id, from: command.from!, ...named, reason: situation.reason, ask: situation.ask, text: situation.text });
+    const wake = { id, address: situation.place, from: command.from!, ...named, reason: situation.reason,
       ...(situation.kind ? { kind: situation.kind } : {}), ...(situation.ask ? { ask: situation.ask } : {}),
       text: situation.text, institutionalContext: context, attachments: [], createdAt: joined.joinedAt, next };
     const mcpDelivery = situation.reason === 'human_tag' ? mention : wake;
@@ -158,7 +159,7 @@ export async function renderAuditPrompts() {
       { name: `native/${situation.name}.txt`, text: [session.systemPrompt, itemPrompt(command, { names, fresh: true })].join('\n\n') },
       { name: `mcp/${situation.name}.txt`, text: `${INSTRUCTIONS}\n\n${JSON.stringify(mcpDelivery, null, 2)}` },
       { name: `session-joined/${situation.name}.txt`, text: `${renderRules(joined, runner)}\n\n${situation.reason === 'human_tag'
-        ? renderMention(mention, joined, runner) : renderWake(wake, joined, runner)}` },
+        ? renderMention(mention) : renderWake(wake, joined, runner)}` },
     ];
   });
 }

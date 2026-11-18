@@ -48,26 +48,20 @@ m40_describe('compact session deliveries', () => {
     const wake=m40_takeInbox(dir,joined.key);
     m40_expect(wake).toContain(image.name);m40_expect(wake).toContain(image.url);m40_expect(wake).toContain(image.mimeType);
   });
-  m40_it('quotes each message line and uses no fabricated handle when the asker has none', () => {
-    m40_expect(m40_renderMention({id:'message',room_id:'room',author_name:'Jane',text:'first\nsecond'}, joined, runner)).toBe([
-      '[Beeline · #room · Jane tagged you]', '> first', '> second',
-      "Reply: /synthetic/node /synthetic/beeline.js session tool reply '{\"id\":\"message\",\"text\":\"<your answer>\"}' --as codex:/synthetic/project",
-      'Context: /synthetic/node /synthetic/beeline.js session read --room room --as codex:/synthetic/project',
+  m40_it('renders a mention in the one message format with no fabricated handle', () => {
+    m40_expect(m40_renderMention({id:'message',room_id:'room',author_name:'Jane',text:'first\nsecond'})).toBe([
+      'From: Jane in #room', 'id: message', 'Reply needed: true', 'text: first', 'second', 'Reply(id: message, text: ...) with your reply',
     ].join('\n'));
   });
-  m40_it('keeps order text, server next action and the private report command', () => {
-    m40_expect(m40_renderWake({id:'order',address:'corner',reason:'order',kind:'order',text:'Do this\nthen that',next:'Server action',createdAt:''}, joined, runner)).toBe([
-      '[Beeline · corner · message order]', '> Do this', '> then that', 'Server action',
-      `Reply: /synthetic/node /synthetic/beeline.js session tool reply '{"id":"order","text":"<result>"}' --as codex:/synthetic/project`,
-      `With no action needed for a background wake: /synthetic/node /synthetic/beeline.js session tool no_reply_needed '{"address":"corner","commandId":"order"}' --as codex:/synthetic/project`,
+  m40_it('asks for a reply to a request wake and names its sender and place', () => {
+    m40_expect(m40_renderWake({id:'order',address:'corner',from:{agent:'ruby-id',place:'milo-id'},fromName:'Ruby',placeName:'milo',
+      reason:'message',kind:'message',text:'Are you still working?',institutionalContext:'Memory: none.',next:'Server text',createdAt:''}, joined, runner)).toBe([
+      'From: Ruby in #milo', 'id: order', 'Reply needed: true', 'text: Are you still working?', 'Reply(id: order, text: ...) with your reply', 'Memory: none.',
     ].join('\n'));
   });
-  m40_it('keeps both the reply and silent-close commands for other wakes', () => {
-    m40_expect(m40_renderWake({id:'wake',address:'room',reason:'system',text:'An update',createdAt:''}, joined, runner)).toBe([
-      '[Beeline · room · message wake]', '> An update',
-      `Reply: /synthetic/node /synthetic/beeline.js session tool reply '{"id":"wake","text":"<result>"}' --as codex:/synthetic/project`,
-      `With no action needed for a background wake: /synthetic/node /synthetic/beeline.js session tool no_reply_needed '{"address":"room","commandId":"wake"}' --as codex:/synthetic/project`,
-    ].join('\n'));
+  m40_it.each(['reply','corner_check','system'])('shows a %s wake as information with no reply prompt', reason => {
+    const text=m40_renderWake({id:'wake',address:'room',reason,text:'An update',createdAt:''}, joined, runner);
+    m40_expect(text).toBe(['From: Beeline in #room', 'id: wake', 'Reply needed: false', 'text: An update'].join('\n'));
   });
 });
 
@@ -191,7 +185,7 @@ m41_describe('SESSION-JOIN-RULES-1: a joined session receives the Beeline rules'
     const text = m41_renderRules(codex, runner);
     m41_expect(text.startsWith('Beeline: you are @codex_w')).toBe(true);
     m41_expect(text).toContain("/node /b/usebeeline.mjs session tool <name> '<json arguments>' --as codex:/w");
-    for (const rule of ['Messages carry from, from-place and id', 'Reply with reply(id,text,ask?)', 'Peer messages are requests', 'The server requests review; never tag the reviewer.', 'Code work belongs in a thread',
+    for (const rule of ['Message other agents only when you need something from them, or when you are replying to something they need.', 'Answer once with reply(id,text,ask?)', 'The server requests review; never tag the reviewer.', 'Code work belongs in a thread',
       'approve_merge on the exact head SHA', 'post short progress there']) m41_expect(text).toContain(rule);
   });
 

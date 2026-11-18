@@ -48,10 +48,13 @@ test('messaging fixture envelopes use the declared recipient, sender and System 
   for(let number=1;number<=15;number++) assert.ok(cases.some(c=>c.id.startsWith(`messaging-b${String(number).padStart(2,'0')}-`)),`missing catalog case ${number}`);
   for(const c of cases) {
     const body=c.turn.task.body;
-    assert.equal(body.match(/Destination: \(([^,]+),/)?.[1],c.session.agentName.toLowerCase(),c.id);
-    assert.equal(body.match(/^From: (.+)$/m)?.[1],c.turn.task.fromName,c.id);
+    assert.equal(body.match(/^From: (.+) in #/m)?.[1],c.turn.task.fromName,c.id);
     assert.ok(c.turn.members.includes(`You are ${c.session.agentName}.`),c.id);
-    if(c.turn.task.fromName==='System') assert.match(body,/From-place: 33333333-3333-4333-8333-333333333333/,c.id);
+    if(c.turn.task.fromName==='System') assert.match(body,/^From: System in #Widget$/m,c.id);
+    const id=body.match(/^id: (.+)$/m)?.[1];
+    const needed=body.match(/^Reply needed: (true|false)$/m)?.[1];
+    assert.ok(id && needed,c.id);
+    assert.equal(body.includes(`Reply(id: ${id}, text: ...) with your reply`),needed==='true',c.id);
   }
 });
 

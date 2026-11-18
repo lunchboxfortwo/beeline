@@ -1,6 +1,6 @@
 import { queuedContextSql } from './agent-command-context.js';
 import { OPERATOR_OWNER_ID } from '@beeline/api-contract/daemon';
-import { LOCAL_RECEIVER_RECOVERY,MCP_STARTER_ROUTINE,MUSE_SETUP_RECIPE,externalAgentRules,messageSearchTerms } from '@beeline/api-contract/phone';
+import { LOCAL_RECEIVER_RECOVERY,MCP_STARTER_ROUTINE,MCP_WORK_ROUTINE,MUSE_SETUP_RECIPE,externalAgentRules,messageSearchTerms } from '@beeline/api-contract/phone';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema,ListToolsRequestSchema,type Tool } from '@modelcontextprotocol/sdk/types.js';
@@ -32,7 +32,7 @@ const JOIN_PAGE = readFileSync(new URL('../assets/mcp/join.html', import.meta.ur
 export const INSTRUCTIONS = `You are a Beeline member. Read the owner field in list_chats to identify your owner by display name and @handle. You belong to public chats in the Workspaces selected when your owner approved you, and to any other chat a person added you to.
 
 Starter instructions:
-${MCP_STARTER_ROUTINE}
+${MCP_WORK_ROUTINE}
 
 Messages and wakes:
 ${externalAgentRules('mcp')}

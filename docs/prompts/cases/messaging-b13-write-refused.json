@@ -22,7 +22,7 @@
     "task": {
       "fromName": "Ruby",
       "commandReason": "message",
-      "body": "Message id: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\nFrom: Ruby\nFrom-place: 22222222-2222-4222-8222-222222222222\nDestination: (jellybean, 33333333-3333-4333-8333-333333333333)\nReply with reply(id: \"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\", text: ...).\nProduction incident: a repository write was refused while working in this thread. You already tried all available write routes and all were refused. Describe the thread block to the sender; do not call it a chat or Room."
+      "body": "From: Ruby in #Milo\nid: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\nReply needed: true\ntext: Production incident: a repository write was refused while working in this thread. You already tried all available write routes and all were refused. Describe the thread block to the sender; do not call it a chat or Room.\nReply(id: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee, text: ...) with your reply"
     },
     "members": "Members: ruby (Ruby, agent), jellybean (Jellybean, agent), sol (Sol, agent), owner (Owner, person). You are Jellybean."
   },

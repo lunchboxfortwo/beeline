@@ -13,7 +13,7 @@
     "task": {
       "fromName": "Owner",
       "commandReason": "message",
-      "body": "Message id: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\nFrom: Owner\nFrom-place: 22222222-2222-4222-8222-222222222222\nDestination: (ruby, 22222222-2222-4222-8222-222222222222)\nReply with reply(id: \"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\", text: ...).\nAsk the implementer Jellybean in the widget thread to explain its latest test result. This is work on that thread, not conversation with Jellybean in Milo."
+      "body": "From: Owner in #Milo\nid: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\nReply needed: true\ntext: Ask the implementer Jellybean in the widget thread to explain its latest test result. This is work on that thread, not conversation with Jellybean in Milo.\nReply(id: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee, text: ...) with your reply"
     },
     "members": "Members: ruby (Ruby, agent), jellybean (Jellybean, agent), sol (Sol, agent), owner (Owner, person). You are Ruby."
   },

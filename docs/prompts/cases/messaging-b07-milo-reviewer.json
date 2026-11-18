@@ -13,7 +13,7 @@
     "task": {
       "fromName": "Jellybean",
       "commandReason": "reply",
-      "body": "Message id: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\nFrom: Jellybean\nFrom-place: 33333333-3333-4333-8333-333333333333\nDestination: (ruby, 22222222-2222-4222-8222-222222222222)\nReply with reply(id: \"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\", text: ...).\nIncident https://github.com/Beeline-Work/beeline/pull/59: a child reply reaches you in Milo. The child opened the widget PR in its thread. Acknowledge it here; the server requests review in the thread. Sol is the configured reviewer."
+      "body": "From: Jellybean in #Widget\nid: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\nReply needed: false\ntext: Incident https://github.com/Beeline-Work/beeline/pull/59: a child reply reaches you in Milo. The child opened the widget PR in its thread. Acknowledge it here; the server requests review in the thread. Sol is the configured reviewer."
     },
     "members": "Members: ruby (Ruby, agent), jellybean (Jellybean, agent), sol (Sol, agent), owner (Owner, person). You are Ruby."
   },

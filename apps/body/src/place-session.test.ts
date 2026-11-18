@@ -166,15 +166,13 @@ it('delivers report audience names from the queue with only people in the roster
     };
     await f.session.deliver(report);
     const prompt = f.prompt.mock.calls[0]![1];
-    expect(prompt).toContain('From: Jellybean (worker)');
-    expect(prompt).toContain('From-place:');
-    expect(prompt).toContain(`Message id: ${report.id}`);
-    expect(prompt).toContain(`Reply with reply(id: "${report.id}", text: ...).`);
+    expect(prompt).toContain(`From: Jellybean in #fast-source-setup\nid: ${report.id}\nReply needed: false\ntext: The work is ready.`);
+    expect(prompt).not.toContain('Reply(id:');
     // Offline delivery uses each item's own names, not the session's roster.
     await f.session.deliver({ ...report, offlineSeconds: 60 });
-    expect(f.prompt.mock.calls[1]![1]).toContain('From: Jellybean (worker)');
+    expect(f.prompt.mock.calls[1]![1]).toContain('From: Jellybean in #');
     await f.session.deliver({ ...report, reason: 'order' });
-    expect(f.prompt.mock.calls[2]![1]).toContain('Your final reply is posted to Milo.');
+    expect(f.prompt.mock.calls[2]![1]).toContain(`Reply needed: true\ntext: The work is ready.\nReply(id: ${report.id}, text: ...) with your reply`);
   } finally {
     await f.session.dispose();
   }
@@ -234,8 +232,8 @@ it('allows an unchanged automatic attention wake to finish without repeating a s
   const f = await fixture();
   await f.session.start();
   await f.session.deliver({ ...f.item, reason: 'attention_report' });
-  expect(f.prompt.mock.calls[0]![1]).toContain('If nothing has changed or needs action, call no_reply_needed');
-  expect(f.prompt.mock.calls[0]![1]).toContain('Human requests in this batch still need an answer.');
+  expect(f.prompt.mock.calls[0]![1]).toContain('Reply needed: false');
+  expect(f.prompt.mock.calls[0]![1]).not.toContain('Reply(id:');
   await f.session.dispose();
 });
 
@@ -334,7 +332,7 @@ it('delivers a frozen reply pointer without waiting for a parent-message read', 
   f.item.source.replyToMessageId = 'parent-message';
   await f.session.start();
   expect(await f.session.deliver(f.item, [])).toMatchObject({ text: 'The answer' });
-  expect(f.prompt.mock.calls[0]?.[1]).toContain('Reply to message parent-message; read it with session tools if needed.');
+  expect(f.prompt.mock.calls[0]?.[1]).toContain('In reply to message parent-message');
   await f.session.dispose();
 });
 
@@ -599,7 +597,7 @@ it('delivers an 18-hour offline backlog as one prompt without requiring steering
   expect(f.prompt).toHaveBeenCalledTimes(1);
   const prompt = f.prompt.mock.calls[0]![1];
   expect(prompt).toContain('> You were offline for 18 h. These arrived while you were away and may be outdated.');
-  for (let n = 1; n <= 3; n++) expect(prompt).toContain(`asker-${n}: question ${n}`);
+  for (let n = 1; n <= 3; n++) expect(prompt).toMatch(new RegExp(`^From: asker-${n} in #.+\\nid: tag-${n}\\nReply needed: (true|false)\\ntext: question ${n}$`, 'm'));
   expect(prompt.match(/scheduled run/g)).toHaveLength(1);
   expect(prompt).toContain('scheduled run 24');
   expect(prompt).toContain('Answer each asker in one combined reply.');

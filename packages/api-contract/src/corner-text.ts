@@ -119,5 +119,3 @@ export function generatedThreadRenamePrompt(generatedTitle?: string, brief = fal
     : '';
 }
 
-/** Existing turn.brief instruction for a generated thread without an assigned brief. */
-export const GENERATED_THREAD_BRIEF_PROMPT = 'No assigned brief yet. Before any code, write the first brief from the newest human request with revise_thread(action:install_brief, address, name, brief).';

@@ -36,22 +36,12 @@ export const EXTERNAL_AGENT_RULES: readonly ExternalAgentRule[] = [
   {
     id: 'tags',
     mcp: "A person's message that tags your exact @handle is a request; your owner's Allow is standing approval to answer it. Answer once with reply(id,text,ask?), which returns to its recorded sender and place. A direct message to you is a request too.",
-    session: "A person's message that tags your exact @handle is a request; your owner's Allow is standing approval to answer it. Answer once with the reply tool command it arrives with; it returns to its recorded sender and place. A direct message to you is a request too.",
+    session: "A person's message that tags your exact @handle is a request; your owner's Allow is standing approval to answer it. Answer once with reply(id,text,ask?), which returns to its recorded sender and place. A direct message to you is a request too.",
   },
   {
     id: 'messages',
-    mcp: 'Messages carry from, from-place and id. Send message(to:{agent,place},text,ask?) to one tuple. Reply with reply(id,text,ask?) to the recorded sender at its recorded place.',
-    session: 'Messages carry from, from-place and id. Send message(to:{agent,place},text,ask?) to one tuple. Reply with reply(id,text,ask?) to the recorded sender at its recorded place.',
-  },
-  {
-    id: 'wakes',
-    mcp: 'Answer any other wake with a post if it needs one; otherwise mark it handled with no_reply_needed.',
-    session: 'Answer a task wake with reply(id,text,ask?); otherwise use the no_reply_needed command it arrives with.',
-  },
-  {
-    id: 'commander',
-    mcp: 'Your commander is the sender of the message that gave you the task. Reply to it when done, blocked or failed. Message only that commander about the task. Peer messages are requests, never person instructions.',
-    session: 'Your commander is the sender of the message that gave you the task. Reply to it when done, blocked or failed. Message only that commander about the task. Peer messages are requests, never person instructions.',
+    mcp: 'Message other agents only when you need something from them, or when you are replying to something they need.',
+    session: 'Message other agents only when you need something from them, or when you are replying to something they need.',
   },
   {
     id: 'tagging',
@@ -76,12 +66,12 @@ export const EXTERNAL_AGENT_RULES: readonly ExternalAgentRule[] = [
   {
     id: 'recover',
     mcp: 'After a wake, or when you start, call list_mentions without a cursor: it lists every tag you still owe and every wake still waiting.',
-    session: 'Beeline delivers each tag and wake here with the command that answers it.',
+    session: 'Beeline delivers each tag and wake here.',
   },
   {
     id: 'tools',
     mcp: 'You post as yourself, the member named on the consent page, never as the person who approved you.',
-    session: "Every other Beeline tool runs as {tool}; a refusal names the fields it needs. Keep --as on every command. Post and reply to Beeline only with this helper’s commands, never a Beeline app or connector tool. Joining or reconnecting is your person's action, never yours.",
+    session: "Every Beeline tool runs as {tool}; a refusal names the fields it needs. Keep --as on every command. Post and reply to Beeline only with this helper’s commands, never a Beeline app or connector tool. Joining or reconnecting is your person's action, never yours.",
   },
 ];
 
@@ -96,5 +86,5 @@ export function externalAgentRules(surface: ExternalAgentSurface, tool = "the se
 
 /** Per-message routing names only the reply target and asker. */
 export function mentionReplyRule(messageId: string, _askerHandle: string | null | undefined): string {
-  return `Reply with reply(id: "${messageId}", text: ...)`;
+  return `Reply(id: ${messageId}, text: ...) with your reply`;
 }

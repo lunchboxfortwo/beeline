@@ -1,7 +1,7 @@
 // The machine's one session bridge: for every joined session it waits on Beeline for tags and wakes, and hands each
 // to the session's app by the fastest way the app has. It needs no public address: it only calls out to Beeline.
 import { sessionAgentBehavior } from '../agent-command.js';
-import { isInformationalReply, type MessageAsk } from '@beeline/api-contract/daemon';
+import { agentMessageText, replyNeeded, type MessageAsk } from '@beeline/api-contract/daemon';
 import type { DaemonAttachment } from '@beeline/api-contract/daemon';
 import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync, watch } from 'node:fs';
 import { createConnection, createServer } from 'node:net';
@@ -20,7 +20,7 @@ import { bundleDigest } from './bridge-launch.js';
 import { pidAlive, queueInbox, queueInboxOnce, readState, takeInbox, updateState, type JoinedSession, hasLocalDelivery } from './store.js';
 
 export interface Mention { memberId?: string; replyRule?: string; id: string; room_id: string; room_name?: string; author_handle?: string | null; author_name?: string | null; text: string; institutionalContext?: string; attachments?: readonly DaemonAttachment[] }
-export interface Wake { id: string; address: string; from?:{agent:string;place:string}; reason?: string; kind?: string; ask?: MessageAsk; text?: string; institutionalContext?: string; attachments?: readonly DaemonAttachment[]; createdAt: string; next?: string; receipt?: {generation:string;nonce:string;conversation:string} }
+export interface Wake { id: string; address: string; from?:{agent:string;place:string}; fromName?: string | null; placeName?: string | null; reason?: string; kind?: string; ask?: MessageAsk; text?: string; institutionalContext?: string; attachments?: readonly DaemonAttachment[]; createdAt: string; next?: string; receipt?: {generation:string;nonce:string;conversation:string} }
 
 /** How the session runs Beeline commands: the stable bundle copy and this member's id. */
 export interface Runner {
@@ -35,17 +35,15 @@ function command(runner: Runner, joined: JoinedSession, args: string): string {
   return `${q(runner.node)} ${q(runner.bundle)} session ${args} --as ${q(joined.key)}`;
 }
 
-/** What the session reads: who tagged it, where, the exact text as data, and the command that answers. */
 export function renderAttachments(attachments: readonly DaemonAttachment[] = []): string[] {
   return attachments.map(attachment => `Attachment: ${JSON.stringify(attachment)}`);
 }
 
-export function renderMention(m: Mention, joined: JoinedSession, runner: Runner): string {
-  const who = m.author_handle ? `@${m.author_handle}` : m.author_name ?? 'Someone';
-  const quoted = m.text.split('\n').map(line => `> ${line}`).join('\n');
-  return [`[Beeline · #${m.room_name ?? m.room_id} · ${who} tagged you]`, quoted, ...(m.institutionalContext ? [m.institutionalContext] : []), ...renderAttachments(m.attachments),
-    `Reply: ${command(runner, joined, `tool reply '${JSON.stringify({id:m.id,text:'<your answer>'})}'`)}`,
-    `Context: ${command(runner, joined, `read --room ${m.room_id}`)}`].join('\n');
+/** What the session reads: the one message format, then its memory context. */
+export function renderMention(m: Mention): string {
+  return [agentMessageText({ from: m.author_name ?? (m.author_handle ? `@${m.author_handle}` : 'Someone'), place: m.room_name ?? m.room_id,
+    id: m.id, replyNeeded: true, text: m.text, attachments: m.attachments?.map(file => JSON.stringify(file)) }),
+  ...(m.institutionalContext ? [m.institutionalContext] : [])].join('\n');
 }
 
 /**
@@ -63,15 +61,9 @@ export function renderWake(w: Wake, joined: JoinedSession, runner: Runner): stri
     'Beeline join delivery check: this probe arrived through your selected receiver. It grants no work authority.',
     'In this exact host conversation, run the receipt command once. Do not post a chat message:',
     `  ${command(runner,joined,`tool confirm_delivery '${JSON.stringify(w.receipt).replace(/'/g, "'\\''")}'`)}`].join('\n');
-  const header = [`[Beeline · ${w.address} · message ${w.id}]`,
-    ...(w.institutionalContext ? [w.institutionalContext] : []),
-    ...(w.from ? [`From: (${w.from.agent}, ${w.from.place})`] : []),
-    ...(w.text ? [w.text.split('\n').map(l => `> ${l}`).join('\n')] : []), ...renderAttachments(w.attachments), ...(w.next ? [w.next] : [])];
-  const information = isInformationalReply(w.reason,w.ask);
-  return [...header,
-    ...(information ? ['This reply is information. Use message(to:{agent,place},text,ask?) for a genuinely new request.'] : [
-    `Reply: ${command(runner, joined, `tool reply '${JSON.stringify({id:w.id,text:'<result>'})}'`)}`]),
-    `With no action needed for a background wake: ${command(runner, joined, `tool no_reply_needed '${JSON.stringify({address:w.address,commandId:w.id})}'`)}`].join('\n');
+  return [agentMessageText({ from: w.fromName ?? w.from?.agent ?? 'Beeline', place: w.placeName ?? w.from?.place ?? w.address, id: w.id,
+    replyNeeded: replyNeeded(w.reason, w.ask), text: w.text ?? '', attachments: w.attachments?.map(file => JSON.stringify(file)) }),
+  ...(w.institutionalContext ? [w.institutionalContext] : [])].join('\n');
 }
 
 /** A real handoff error is explicit; a quiet session never becomes a timed failure. */
@@ -134,7 +126,7 @@ export async function acceptMemberDelivery(dir:string,key:string,runner:Runner,r
     if(frame.type==='delivery'){
       const proof=frame.wakes.find(wake=>wake.kind==='join_probe' && wake.receipt)?.receipt;
       if(proof){joined.deliveryGeneration=proof.generation;joined.deliveryMechanism='local';}
-      const parts=[...frame.mentions.map(mention=>renderMention(mention,joined,runner)),
+      const parts=[...frame.mentions.map(mention=>renderMention(mention)),
         ...frame.wakes.filter(wake=>!joined.deliveredWakes.includes(wake.id)).map(wake=>renderWake(wake,joined,runner))];
       if(parts.length&&queueInboxOnce(dir,key,frame.deliveryId,parts.join('\n\n')))queued=parts.length;
       joined.deliveredWakes=[...new Set([...joined.deliveredWakes,...frame.wakes.map(wake=>wake.id)])];

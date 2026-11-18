@@ -3,7 +3,7 @@ import { MCP_STARTER_ROUTINE } from '@beeline/api-contract/phone';
 import { migrate } from './database.js';
 import { bundledMcpLogo } from './rooms-mcp-logos.js';
 import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
-import { AGENT,CORNER,Client,FACE_SOULS,MCP_AGENT_EXCLUSIONS,MCP_APP_ROUTE_OPERATIONS,MCP_ORDER_WAKE_HINT,MCP_REVIEW_WAKE_HINT,OTHER,PREREGISTERED_MCP_CLIENTS,PRIVATE,ROOM,StreamableHTTPClientTransport,USER,WORKSPACE,backfillMcpMemberAvatars,createAgentCommand,createHash,deliverMcpMemberWebhooks,describe,ensureMcpMember,expect,fixtureScope1,fixtureScope2,fixtureScope3,it,opaque,openSecrets,phoneFetch,randomBytes,randomUUID,readFileSync,routeAgentResult,routeHumanMessage,sharp,tokenHash,vi } from './test-support-rooms-mcp.test-support.js';
+import { AGENT,CORNER,Client,FACE_SOULS,MCP_AGENT_EXCLUSIONS,MCP_APP_ROUTE_OPERATIONS,OTHER,PREREGISTERED_MCP_CLIENTS,PRIVATE,ROOM,StreamableHTTPClientTransport,USER,WORKSPACE,backfillMcpMemberAvatars,createAgentCommand,createHash,deliverMcpMemberWebhooks,describe,ensureMcpMember,expect,fixtureScope1,fixtureScope2,fixtureScope3,it,opaque,openSecrets,phoneFetch,randomBytes,randomUUID,readFileSync,routeAgentResult,routeHumanMessage,sharp,tokenHash,vi } from './test-support-rooms-mcp.test-support.js';
 import { PUBLIC_CORNER } from './test-support-rooms-mcp.test-support.js';
 
 describe('chats connector HTTP OAuth and MCP', () => {
@@ -290,9 +290,7 @@ const scope1 = fixtureScope1();
       expect(posts).toHaveLength(1);
       expect(posts[0]).toMatchObject({ url: 'https://hooks.example/muse', authorization: 'Bearer tag-secret',
         body: { memberId: member, roomId: ROOM, messageId: sent.messageId, text: `@${handle} please answer` } });
-      expect(String(posts[0]!.body.instruction)).toContain('reply(id,text');
-      expect(String(posts[0]!.body.instruction)).toContain(`Reply with reply(id: "${sent.messageId}", text: ...)`);
-      expect(String(posts[0]!.body.instruction)).toContain('Replies wake only their recorded sender in the recorded place');
+      expect(String(posts[0]!.body.instruction)).toMatch(new RegExp(`^From: .+ in #.+\nid: ${sent.messageId}\nReply needed: true\ntext: @${handle} please answer\nReply\\(id: ${sent.messageId}, text: \\.\\.\\.\\) with your reply$`));
       // Removing the webhook stops the push.
       await client.callTool({ name: 'set_webhook', arguments: { url: '' } });
       const quiet = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: `@${handle} again` }, USER);
@@ -570,14 +568,16 @@ const scope3 = fixtureScope3(scope1);
 
     // Reproduction (R-MCP-ACK-ONE): no_reply_needed(address) marked every non-order wake at the address handled,
     // including wakes the app had not seen, and could not clear a wake whose claim had expired.
-    it('an MCP silence acknowledgement leaves unanswered wakes in order',async()=>{
+    // A named wake that needs no reply is cleared, so a no-reply wake never forces a post.
+    it('an MCP silence acknowledgement clears only the named no-reply wake',async()=>{
   const {client,member}=await scope1.connected();
-  const wake=(text:string)=>createAgentCommand(scope1.db,{roomId:ROOM,agentId:member,sourceMessageId:null,reason:'report',privatePayload:{kind:'report',authorId:AGENT,fromRoomId:ROOM,text}});
-  const first=(await wake('done: first'))!,second=(await wake('done: second'))!;
-  expect(await scope3.ok(client,'no_reply_needed',{address:ROOM,commandId:first.id})).toEqual({cleared:0});
+  const wake=(text:string,reason='report')=>createAgentCommand(scope1.db,{roomId:ROOM,agentId:member,sourceMessageId:null,reason,privatePayload:{kind:reason,authorId:AGENT,fromRoomId:ROOM,text}});
+  const first=(await wake('done: first'))!,second=(await wake('done: second'))!,request=(await wake('please count widgets','message'))!;
   expect(await scope3.ok(client,'no_reply_needed',{address:ROOM})).toEqual({cleared:0});
+  expect(await scope3.ok(client,'no_reply_needed',{address:ROOM,commandId:first.id})).toEqual({cleared:1});
+  expect(await scope3.ok(client,'no_reply_needed',{address:ROOM,commandId:request.id})).toEqual({cleared:0});
   const page=await scope3.ok(client,'list_mentions',{});
-  expect((page.wakes as {id:string}[]).map(item=>item.id)).toEqual([first.id,second.id]);
+  expect((page.wakes as {id:string}[]).map(item=>item.id)).toEqual([second.id,request.id]);
 });
 
     // Reproduction (R-MCP-LIMITS): search advertised limit 20 while the server refuses anything above 10.

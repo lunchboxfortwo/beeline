@@ -503,12 +503,12 @@ describe('prompt assembly guards', () => {
   });
 
 
-  it('keeps decisions on the chain of command', () => {
+  it('gives agents one rule for messaging each other', () => {
     for (const [name, context] of Object.entries(SESSION_VARIANTS)) {
       const text = assembleSessionPrompt(context).systemPrompt;
-      expect(text, name).toContain('The sender of the message that gave you the task is your commander.');
+      expect(text, name).toContain('Message other agents only when you need something from them, or when you are replying to something they need.');
       expect(text, name).not.toContain('If human, tag them');
-      expect(text, name).toContain('Reply to that message id when done, blocked or failed.');
+      expect(text, name).not.toContain('Message only your commander');
       const corner = ['code-corner', 'repo-less-corner'].includes(context.surface);
       expect(text.includes('The server requests review; never tag the reviewer.'), name).toBe(corner);
     }
@@ -624,7 +624,8 @@ describe('prompt assembly guards', () => {
       ...TURN_VARIANTS['code-corner-turn']!,
       generatedTitle: 'still harbor thread',
     }).text;
-    expect(generated).toContain('write the first brief from the newest human request with revise_thread(action:install_brief, address, name, brief).');
+    expect(generated).toContain('call revise_thread(action:install_brief, address:thisCornerAddress) once');
+    expect(generated).not.toContain('No assigned brief yet');
     const repoLess = assembleTurnPrompt({ ...TURN_VARIANTS['code-corner-turn']!, surface: 'repo-less-corner' }).text;
     expect(repoLess).toContain('No assigned brief: the human messages in this thread are the authority');
   });
@@ -656,7 +657,7 @@ describe('prompt assembly guards', () => {
     for (const surface of ['code-corner', 'repo-less-corner'] as const) {
       const session = assembleSessionPrompt({ surface, agentName: 'Bee' }).systemPrompt;
       expect(session).toContain('Send message(to:{agent,place},text)');
-      expect(session).toContain('Reply to that message id when done, blocked or failed');
+      expect(session).toContain('Message other agents only when you need something from them');
       const turn = assembleTurnPrompt({
         surface,
         corners: [{ cornerId: 'sibling-id', parentRoomId: 'room-id', createdBy: 'agent-id', archived: false, objective: 'Other work' }],
@@ -672,11 +673,11 @@ describe('prompt assembly guards', () => {
   it.each(PROMPT_SURFACES)('has one coordination rule and no chain-skipping escalation on %s', (surface) => {
     const context = { surface, agentName: 'Bee', agentCommand: 'codex-acp' };
     const entries = sessionSections(context);
-    const coordination = entries.filter(({ text }) => text.includes('Reply to that message id'));
+    const coordination = entries.filter(({ text }) => text.includes('Message other agents only when'));
     expect(coordination.map(({ section }) => section.id)).toEqual(['talking']);
     const session = assembleSessionPrompt(context);
     const turn = assembleTurnPrompt({ surface, sessionPrefix: session.turnPrefix, task: { body: 'Continue' } });
-    expect(turn.text).toContain('Reply to that message id when done, blocked or failed');
+    expect(turn.text).toContain('Message other agents only when you need something from them, or when you are replying to something they need.');
     expect(turn.text).not.toContain('to the person who started the chain');
   });
 });

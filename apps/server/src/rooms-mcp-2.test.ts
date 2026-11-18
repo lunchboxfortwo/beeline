@@ -1,5 +1,5 @@
 import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
-import { AGENT,BROWSER_REFUSALS,Client,CORNER,createHash,deliverMcpMemberWebhooks,describe,ensureMcpMember,expect,fixtureScope1,it,MCP_AGENT_TOOLS,MCP_STARTER_ROUTINE,MCP_TAG_INSTRUCTION,opaque,phoneFetch,PRIVATE,PUBLIC_CORNER,randomBytes,readFileSync,ROOM,routeHumanMessage,startQueuedTurn,StreamableHTTPClientTransport,tokenHash,USER,vi,WORKSPACE } from './test-support-rooms-mcp.test-support.js';
+import { AGENT,BROWSER_REFUSALS,Client,CORNER,createHash,deliverMcpMemberWebhooks,describe,ensureMcpMember,expect,fixtureScope1,it,MCP_AGENT_TOOLS,MCP_STARTER_ROUTINE,MCP_WORK_ROUTINE,opaque,phoneFetch,PRIVATE,PUBLIC_CORNER,randomBytes,readFileSync,ROOM,routeHumanMessage,startQueuedTurn,StreamableHTTPClientTransport,tokenHash,USER,vi,WORKSPACE } from './test-support-rooms-mcp.test-support.js';
 
 describe('chats connector HTTP OAuth and MCP', () => {
 const scope1 = fixtureScope1();
@@ -373,13 +373,15 @@ const scope1 = fixtureScope1();
     expect(list![1].match(/<li>/g)).toHaveLength(items.length);
   });
 
-  it('repeats the saved starter wake rule in server, setup and webhook instructions', async () => {
+  it('repeats the saved starter wake rule in server and setup instructions', async () => {
     const { client } = await scope1.connected();
     const setup = scope1.data(await client.callTool({ name: 'list_chats', arguments: {} })).setup;
     const send = (await client.listTools()).tools.find(tool => tool.name === 'reply')!;
     expect(send.description).toContain('recorded sender and place');
-    for (const text of [client.getInstructions(), setup, MCP_TAG_INSTRUCTION]) {
-      expect(text).toContain(MCP_STARTER_ROUTINE);
+    expect(setup).toContain(MCP_STARTER_ROUTINE);
+    expect(client.getInstructions()).not.toMatch(/setup_delivery for this same member|first reply after connection/);
+    for (const text of [client.getInstructions(), setup]) {
+      expect(text).toContain(MCP_WORK_ROUTINE);
       expect(text).toContain('Act only on your own tags and wakes from list_mentions. Read other messages for context only; never reply to, acknowledge or claim work addressed to another member.');
       expect(text).not.toContain('Tag another agent only to hand it a spelled-out job');
     }

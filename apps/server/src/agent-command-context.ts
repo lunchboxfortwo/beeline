@@ -1,4 +1,4 @@
-import { generatedThreadRenamePrompt, GENERATED_THREAD_BRIEF_PROMPT } from '@beeline/api-contract/daemon';
+import { generatedThreadRenamePrompt } from '@beeline/api-contract/daemon';
 import { cornerKindSql } from './corner-opening.js';
 import { createHash } from 'node:crypto';
 import type { CommandRow } from './agent-command.js';
@@ -149,7 +149,7 @@ async function attachQueuedConversation(
   // so native prompts and external wakes receive it before optional reads.
   const generatedTitle = thread?.kind === 'human' && !brief ? thread.title : undefined;
   const naming = generatedTitle
-    ? [generatedThreadRenamePrompt(generatedTitle), GENERATED_THREAD_BRIEF_PROMPT]
+    ? [generatedThreadRenamePrompt(generatedTitle)]
     : [];
   const briefText = brief
     ? `Current thread brief, revision ${brief.revision}. It governs this thread; earlier instructions that conflict with it are historical:\n${brief.spec}`

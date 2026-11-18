@@ -22,7 +22,7 @@
     "task": {
       "fromName": "System",
       "commandReason": "corner_check",
-      "body": "Message id: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\nFrom: System\nFrom-place: 33333333-3333-4333-8333-333333333333\nDestination: (jellybean, 33333333-3333-4333-8333-333333333333)\nReply with reply(id: \"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\", text: ...).\nSystem: all checks on the assigned widget head failed. Your thread commander is Ruby in Milo; System is not your commander. Build access is unavailable. Tell the commander through the delivered message id."
+      "body": "From: System in #Widget\nid: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\nReply needed: false\ntext: System: all checks on the assigned widget head failed. Your thread commander is Ruby in Milo; System is not your commander. Build access is unavailable. Tell the commander through the delivered message id."
     },
     "members": "Members: ruby (Ruby, agent), jellybean (Jellybean, agent), sol (Sol, agent), owner (Owner, person). You are Jellybean."
   },

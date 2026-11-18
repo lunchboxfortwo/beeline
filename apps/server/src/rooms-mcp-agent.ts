@@ -15,7 +15,7 @@ import type { DaemonService } from './daemon-service.js';
 import type { SqlDatabase } from './database.js';
 import type { ObjectService } from './object-service.js';
 import { clearOwedMention } from './owed-mentions.js';
-import { mcpPendingWakeNext } from './rooms-mcp-events.js';
+import { mcpWakeText } from './rooms-mcp-events.js';
 import { McpToolError,mcpProvenance } from './rooms-mcp-members.js';
 
 /**
@@ -707,14 +707,21 @@ function briefDraft(value: unknown): Args | undefined {
 /** The queue envelope is identical for subscription and helper agents. */
 export async function pendingMcpWakes(db: SqlDatabase, member: string) {
   const {rows} = await readAgentQueueRows(db,member);
-  return Promise.all(rows.filter(item=>item.reason!=='mcp_call').map(async item=>{
+  const wakes = await Promise.all(rows.filter(item=>item.reason!=='mcp_call').map(async item=>{
     const route=item.message?.route ?? item.private_payload?.route ?? await recordedMessageRoute(db,item);
     return {id:item.id,address:item.room_id,reason:item.reason,
       ...(item.private_payload ? {kind:item.private_payload.kind} : {}),from:route.from,
       text:legacyMessageBody(item,item.message?.body ?? item.private_payload?.text ?? item.reason),createdAt:item.created_at,
       ...(item.message?.institutionalContext || item.message?.conversationContext ? {institutionalContext:queuedContextText(item.message)} : {}),
       attachments:item.message?.attachments ?? item.private_payload?.attachments ?? [],
-      ...(item.private_payload?.messageAsk ? {ask:item.private_payload.messageAsk} : {}),
-      next:mcpPendingWakeNext(item.id,item.private_payload?.kind ?? null,item.reason,item.private_payload?.messageAsk)};
+      ...(item.private_payload?.messageAsk ? {ask:item.private_payload.messageAsk} : {})};
   }));
+  if (!wakes.length) return [];
+  const names = new Map((await db.query<{id:string;name:string|null}>(`SELECT id,name FROM identities WHERE id=ANY($1::text[])
+    UNION ALL SELECT id::text,name FROM rooms WHERE id=ANY($2::uuid[])`,
+  [wakes.map(wake=>wake.from.agent),wakes.map(wake=>wake.from.place).filter(place=>UUID.test(place))])).rows.map(row=>[row.id,row.name]));
+  return wakes.map(wake=>{
+    const named={...wake,fromName:names.get(wake.from.agent) ?? null,placeName:names.get(wake.from.place) ?? null};
+    return {...named,next:mcpWakeText({...named,ask:named.ask})};
+  });
 }

@@ -17,7 +17,7 @@ import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js'
 import { PgliteDatabase } from './test-support.js';
 
 
-import { MCP_STARTER_ROUTINE } from '@beeline/api-contract/phone';
+import { externalAgentRules } from '@beeline/api-contract/phone';
 
 const owner = '1'.repeat(64), member = '2'.repeat(64), other = '3'.repeat(64), helper = '4'.repeat(64);
 const workspace = '11111111-1111-4111-8111-111111111111', room = '22222222-2222-4222-8222-222222222222';
@@ -51,9 +51,9 @@ describe('owed chat tags', () => {
   afterAll(async () => { await db.close(); });
 
   it('C1 connector instructions answer where the message came from', () => {
-    expect(MCP_STARTER_ROUTINE).toContain('Answer where the message came from');
-    expect(MCP_STARTER_ROUTINE).toContain('typed in your own app');
-    expect(MCP_STARTER_ROUTINE).toContain('reply(id,text)');
+    expect(externalAgentRules('mcp')).toContain('Answer where the message came from');
+    expect(externalAgentRules('mcp')).toContain('typed in your own app');
+    expect(externalAgentRules('mcp')).toContain('reply(id,text,ask?)');
   });
   it('C2 webhook and list_mentions routing fields survive instruction truncation', async () => {
     const message = await tag(member, 'x'.repeat(20000));
@@ -61,7 +61,7 @@ describe('owed chat tags', () => {
     const payloads: any[] = [];
     await deliverMcpMemberWebhooks(db, async (_url, init) => { payloads.push(JSON.parse(init.body)); return new Response('', { status: 200 }); });
     const payload = payloads.find(p => p.messageId === message);
-    const expected = { roomId: room, messageId: message, memberId: member, replyRule: `Reply with reply(id: "${message}", text: ...)` };
+    const expected = { roomId: room, messageId: message, memberId: member, replyRule: `Reply(id: ${message}, text: ...) with your reply` };
     expect(payload).toMatchObject(expected);
     const cut = { ...payload, instruction: payload.instruction.slice(0, 200) };
     expect(cut).toMatchObject(expected);

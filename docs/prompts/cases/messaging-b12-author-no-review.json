@@ -23,7 +23,7 @@
     "task": {
       "fromName": "Ruby",
       "commandReason": "message",
-      "body": "Message id: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\nFrom: Ruby\nFrom-place: 22222222-2222-4222-8222-222222222222\nDestination: (jellybean, 33333333-3333-4333-8333-333333333333)\nReply with reply(id: \"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\", text: ...).\nYou authored and implemented the widget head. You were asked to approve that same work as reviewer. State the block to the sender."
+      "body": "From: Ruby in #Milo\nid: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\nReply needed: true\ntext: You authored and implemented the widget head. You were asked to approve that same work as reviewer. State the block to the sender.\nReply(id: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee, text: ...) with your reply"
     },
     "members": "Members: ruby (Ruby, agent), jellybean (Jellybean, agent), sol (Sol, agent), owner (Owner, person). You are Jellybean."
   },

@@ -22,7 +22,7 @@ describe('assembled prompts', () => {
     const gib = Number((ACP_SESSION_MEMORY_MAX_BYTES / 1024 ** 3).toFixed(2));
     for (const surface of PROMPT_SURFACES) {
       const session = assembleSessionPrompt({ surface, agentName: 'Bee', agentCommand: 'codex-acp' });
-      expect(session.systemPrompt).toContain('Answer every queued request.');
+      expect(session.systemPrompt).not.toMatch(/Answer every queued request|Separately reply to the task message/);
       expect(session.systemPrompt).not.toContain('end silently');
       expect(session.systemPrompt).toContain(`Memory cap: ${gib} GiB per session.`);
       expect(session.systemPrompt).toContain('Size builds, tests and data jobs to fit it; split heavy work.');
@@ -175,22 +175,21 @@ it('releases delegated turns on every surface so reports can wake a new turn', (
 mergedDescribe23("owed-tag-prompt.test.ts", () => {m23_describe('owed tag delivery', () => {
 const scope16 = fixtureScope16();
 
-  m23_it.each(['claude-code', 'codex'] as const)('C3 %s joined-session mention keeps compact header, quoted text and routing commands', agent => {
+  m23_it('C3 joined-session mention keeps the one message format with its full text', () => {
     const text = m23_renderMention({ id: scope16.routing.messageId, room_id: scope16.routing.roomId, memberId: scope16.routing.memberId,
-      room_name: scope16.routing.roomName, author_name: scope16.routing.fromName, author_handle: scope16.routing.fromHandle, text: 'x'.repeat(30000) },
-    { key: 'joined', agent, cwd: '/', name: 'Helper', server: '', clientId: '', refreshToken: '', cursor: '0', deliveredWakes: [], joinedAt: '' },
-    { node: '/node', bundle: '/bundle' });
+      room_name: scope16.routing.roomName, author_name: scope16.routing.fromName, author_handle: scope16.routing.fromHandle, text: 'x'.repeat(30000) });
     m23_expect(text).toBe([
-      '[Beeline · #Design · @ruby_2 tagged you]',
-      '> ' + 'x'.repeat(30000),
-      "Reply: /node /bundle session tool reply '{\"id\":\"message-id\",\"text\":\"<your answer>\"}' --as joined",
-      'Context: /node /bundle session read --room room-id --as joined',
+      'From: Ruby in #Design',
+      'id: message-id',
+      'Reply needed: true',
+      'text: ' + 'x'.repeat(30000),
+      'Reply(id: message-id, text: ...) with your reply',
     ].join('\n'));
   });
 
   m23_it('C2 managed helper prompt routing survives a truncated long instruction', () => {
     const result = m23_assembleTurnPrompt({ surface: 'room', routing: scope16.routing, sessionPrefix: 'x'.repeat(10000), task: { body: 'long task' } });
-    for (const value of [scope16.routing.roomId, scope16.routing.messageId, scope16.routing.memberId, 'Reply with reply(id: "message-id", text: ...)']) m23_expect(result.text.slice(0,400)).toContain(value);
+    for (const value of [scope16.routing.roomId, scope16.routing.messageId, scope16.routing.memberId, 'Reply(id: message-id, text: ...) with your reply']) m23_expect(result.text.slice(0,400)).toContain(value);
   });
 });
 });

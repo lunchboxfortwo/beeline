@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MCP_STARTER_ROUTINE } from './mcp-starter-routine.js';
+import { MCP_STARTER_ROUTINE, MCP_WORK_ROUTINE } from './mcp-starter-routine.js';
 
 describe('outside-agent starter instructions', () => {
   it('teaches host delivery setup, recorded replies, sender tuples and failure replies', () => {
@@ -18,7 +18,6 @@ describe('outside-agent starter instructions', () => {
       'Beeline runs no polling process',
       'Claude.ai in a browser cannot be woken there',
       'complete delivery setup in that receiving app',
-      'call list_mentions without a cursor',
       'Read the chat first',
       'Answer with reply(id,text,ask?) using the delivered message id',
       'Replies wake only their recorded sender in the recorded place',
@@ -28,5 +27,10 @@ describe('outside-agent starter instructions', () => {
       'Act only on your own tags and wakes from list_mentions. Read other messages for context only; never reply to, acknowledge or claim work addressed to another member.',
       'If a task is blocked or fails, reply to its message id with the exact error',
     ]) expect(MCP_STARTER_ROUTINE).toContain(rule);
+  });
+  it('keeps join directions and duplicated working rules out of the working instructions', () => {
+    expect(MCP_STARTER_ROUTINE.endsWith(MCP_WORK_ROUTINE)).toBe(true);
+    expect(MCP_WORK_ROUTINE).not.toMatch(/setup_delivery|first reply after connection|Answer where the message came from|call list_mentions without a cursor/);
+    expect(MCP_STARTER_ROUTINE).not.toMatch(/Answer where the message came from|call list_mentions without a cursor/);
   });
 });

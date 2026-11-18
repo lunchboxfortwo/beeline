@@ -7,7 +7,7 @@ import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { clearOwedMention, mentionReplyKey } from '../owed-mentions.js';
 import { postRepositoryOnboarding } from '../repository-onboarding.js';
 import { CommandRefusalError } from '../commander.js';
-import { isInformationalReply, isBackgroundCommand, vaultSaveRequest, type VaultSaveCard } from '@beeline/api-contract/daemon';
+import { replyNeeded, vaultSaveRequest, type VaultSaveCard } from '@beeline/api-contract/daemon';
 import { FIRST_PARTY_INTEGRATIONS } from '../first-party-integrations.js';
 import { setCornerHold } from '../corner-holds.js';
 import { authorizeCommandOutput } from '../agent-command-route-agent-result.js';
@@ -227,18 +227,18 @@ export async function getRoomGitHubTokenOperation<Name extends keyof DaemonOpera
 
 export async function markAgentTurnSilentOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 
-        const declinedMessage = name === 'markAgentTurnSilent' ? (input as Input<'markAgentTurnSilent'>).messageId : undefined;
+        let declinedMessage = name === 'markAgentTurnSilent' ? (input as Input<'markAgentTurnSilent'>).messageId : undefined;
         if (name === 'markAgentTurnSilent') {
           const command = ctx.authorizedCommand;
           if (!command) throw new CommandRefusalError('silence requires an active turn', 409);
+          // A messageId that names no tag here (a delivered message id) declines nothing; silence still ends the turn.
           if (declinedMessage && !await mentionReplyKey(ctx.database, authenticatedAgentId, command.room_id, declinedMessage))
-            throw new CommandRefusalError('messageId must be a tagged message in this chat', 400);
+            declinedMessage = undefined;
           if (!(await ctx.database.query(`SELECT 1 FROM agent_pending_attachments
             WHERE room_id=$1 AND agent_id=$2 AND request_id=$3 LIMIT 1`,
             [command.room_id, authenticatedAgentId, command.turn_request_id])).rowCount) {
             const answered = command.state === 'complete' || command.action === 'restart'
-              || isInformationalReply(command.reason,command.private_payload?.messageAsk)
-              || isBackgroundCommand(command.private_payload?.automatic ? 'attention_report' : command.reason) || Boolean((await ctx.database.query(
+              || !replyNeeded(command.reason,command.private_payload?.messageAsk) || Boolean((await ctx.database.query(
               `SELECT 1 FROM messages WHERE room_id=$1 AND author_id=$2 AND request_id=$3
                 AND presentation IN ('message','card') AND deleted_at IS NULL LIMIT 1`,
               [command.return_room_id, authenticatedAgentId, command.turn_request_id])).rowCount);

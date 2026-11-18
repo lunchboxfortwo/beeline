@@ -111,13 +111,13 @@ it('delivers the generated human thread rename and first-brief asks on its first
   const external = renderWake(wake, joined, runner);
   // Mentions carry the same frozen context through queuedContextSql.
   const mention = renderMention({ id: opening!.sourceMessageId, room_id: C,
-    institutionalContext: wake.institutionalContext, text: opening!.source.body }, joined, runner);
+    institutionalContext: wake.institutionalContext, text: opening!.source.body });
   for (const prompt of [native, external, mention]) {
     expect(prompt).toContain('still has its generated name, "steady-amber-thread"');
     expect(prompt).toContain('revise_thread(action:install_brief');
     expect(prompt).toContain('a short objective');
     expect(prompt).toContain('brief.approval.sourceMessageId');
-    expect(prompt).toContain('write the first brief from the newest human request');
+    expect(prompt).not.toContain('No assigned brief yet');
   }
 });
 

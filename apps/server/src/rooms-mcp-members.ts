@@ -1,7 +1,7 @@
-import { isInformationalReply } from '@beeline/api-contract/daemon';
+import { agentMessageText } from '@beeline/api-contract/daemon';
 import { queuedContextSql } from './agent-command-context.js';
 import { legacyMessageBody } from './messaging-cutover.js';
-import { MCP_STARTER_ROUTINE,agentHandleFromName,mentionReplyRule } from '@beeline/api-contract/phone';
+import { agentHandleFromName } from '@beeline/api-contract/phone';
 import { createHash,randomUUID } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
 import { Agent,request as httpsRequest } from 'node:https';
@@ -20,7 +20,7 @@ restoreInvitedWorkspaceMembership,
 } from './membership-join.js';
 import { mentionRouting } from './owed-mentions.js';
 import { notifyMcpDeliveryChange,notifyMcpWebhook } from './postgres-live.js';
-import { deliverMcpEvents,mcpWakeNext,queueMcpMentionEvents } from './rooms-mcp-events.js';
+import { deliverMcpEvents,mcpWakeText,queueMcpMentionEvents } from './rooms-mcp-events.js';
 import { fetchMcpLogo,mcpClientName,mcpMemberAvatar } from './rooms-mcp-logos.js';
 
 /** The identity id a connection's member always has, derived from its grant. */
@@ -189,9 +189,6 @@ function webhookKey(): string {
   return key;
 }
 
-/** What a tagged client is told, in the instructions and on every webhook POST. */
-export const MCP_TAG_INSTRUCTION = `A person tagged you. Your owner's Allow is standing approval to answer. ${MCP_STARTER_ROUTINE}`;
-
 /**
  * Every tag or direct message addressed to an AI-client member, in order.
  * list_mentions reads it after a wake; send_message reads its latest row for
@@ -285,22 +282,20 @@ export async function recordMcpMemberWebhook(
   return { callId: id, memberId, roomId, messageId };
 }
 
-function routingInstruction(row: {member_id: string; room_id: string; message_id: string; author_handle: string | null}): string {
-  return `chat ID ${row.room_id}; message ID ${row.message_id}; member ID ${row.member_id}; ${mentionReplyRule(row.message_id, row.author_handle)}.`;
-}
-
 /**
  * An order, report, lifecycle or scheduled wake has no Room message to reply
  * to: its outbox row names the command. The body is the MCP Events `wake`
  * payload (`rooms-mcp-events.ts`), so a webhook, an event and list_mentions agree.
  */
-function wakeBody(row: { member_id: string; room_id: string; command_from:MessageAddress; command_id: string | null; command_reason: string | null;
-  command_kind: string | null; command_ask: unknown; command_text: string | null; command_attachments: DaemonAttachment[]; body: string; institutional_context: string | null }) {
-  const next = `${isInformationalReply(row.command_reason,row.command_ask) ? '' : `Reply with reply(${row.command_id},text). `}${mcpWakeNext(row.command_kind,row.command_reason,row.command_ask)}`;
+function wakeBody(row: { member_id: string; room_id: string; command_from:MessageAddress; command_id: string | null; command_reason: string | null; command_ask: unknown; command_text: string | null; command_attachments: DaemonAttachment[]; body: string; institutional_context: string | null },
+  names: { from: string | null; place: string | null }) {
+  const text = legacyMessageBody({reason:row.command_reason ?? ''},row.command_text ?? row.body,row.command_from.agent);
+  const next = mcpWakeText({id:row.command_id!,fromName:names.from,placeName:names.place,from:row.command_from,
+    reason:row.command_reason,ask:row.command_ask,text,attachments:row.command_attachments});
   return { memberId: row.member_id, roomId: row.room_id, address: row.room_id, commandId: row.command_id, id: row.command_id,
-    from:row.command_from,text:legacyMessageBody({reason:row.command_reason ?? ''},row.command_text ?? row.body,row.command_from.agent),attachments:row.command_attachments,next,cursor:null,
+    from:row.command_from,text,attachments:row.command_attachments,next,cursor:null,
     ...(row.institutional_context ? {institutionalContext:row.institutional_context} : {}),
-    instruction:`Message ${row.command_id} from (${row.command_from.agent}, ${row.command_from.place}) at ${row.room_id}. ${next}` };
+    instruction:next };
 }
 
 /**
@@ -325,7 +320,7 @@ export async function deliverMcpMemberWebhooks(
       call_id: string; member_id: string; room_id: string; message_id: string;
       body: string; owner_id: string | null; callback_url: string | null; callback_secret: string | null; deliverable: boolean; answered: boolean;
       author_id: string | null; author_handle: string | null; author_name: string | null; author_kind: string | null; cursor: string | null;
-      command_from:MessageAddress; command_id: string | null; command_reason: string | null; command_kind: string | null; command_ask: unknown; command_text: string | null; probe: object | null; delivery_generation:string|null;
+      command_from:MessageAddress; room_name: string | null; command_id: string | null; command_reason: string | null; command_ask: unknown; command_text: string | null; probe: object | null; delivery_generation:string|null;
       attachments: DaemonAttachment[]; command_attachments: DaemonAttachment[]; institutional_context: string | null;
     }>(
       `WITH claimed AS (
@@ -339,14 +334,14 @@ export async function deliverMcpMemberWebhooks(
        SELECT claimed.call_id,claimed.member_id,claimed.room_id,claimed.message_id,claimed.body,member.owner_id,
          COALESCE(member.callback_url,client.callback_url) callback_url,
          CASE WHEN member.callback_url IS NOT NULL THEN member.callback_secret END callback_secret,
-         message.author_id,beeline_room_handle(author.id,message.room_id) author_handle,author.name author_name,author.kind author_kind,mention.seq::text cursor,mention.cleared_at IS NOT NULL answered,
+         message.author_id,beeline_room_handle(author.id,message.room_id) author_handle,author.name author_name,room.name room_name,author.kind author_kind,mention.seq::text cursor,mention.cleared_at IS NOT NULL answered,
          message.attachments,COALESCE(command.message->'attachments',command.private_payload->'attachments',source.attachments,'[]'::jsonb) command_attachments,
          COALESCE(${queuedContextSql('command')},(SELECT ${queuedContextSql('queued')} FROM agent_commands queued
            WHERE queued.agent_id=claimed.member_id AND queued.source_message_id=claimed.message_id ORDER BY queued.created_at DESC LIMIT 1)) institutional_context,
          COALESCE(command.message->'route'->'from',command.private_payload->'route'->'from',
            jsonb_build_object('agent',COALESCE(command.private_payload->>'authorId',command.message->>'authorId'),
              'place',COALESCE(command.private_payload->>'fromRoomId',command.room_id::text))) command_from,
-         delivery.generation delivery_generation,probe.probe,command.id command_id,command.reason command_reason,command.private_payload->>'kind' command_kind,command.private_payload->'messageAsk' command_ask,
+         delivery.generation delivery_generation,probe.probe,command.id command_id,command.reason command_reason,command.private_payload->'messageAsk' command_ask,
          left(COALESCE(command.private_payload->>'text',source.text),16000) command_text,(
            room.id IS NOT NULL AND room.archived_at IS NULL AND mention.cleared_at IS NULL
            AND beeline_mcp_delivery_owner(claimed.member_id,'webhook')
@@ -384,14 +379,20 @@ export async function deliverMcpMemberWebhooks(
     let accepted = false;
     let httpStatus: number | null = null;
     const deliveryStarted=Date.now();
+    const place = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(row.command_from?.place ?? '') ? row.command_from.place : null;
+    const names = row.command_id ? (await db.query<{ from: string | null; place: string | null }>(
+      'SELECT (SELECT name FROM identities WHERE id=$1) "from",(SELECT name FROM rooms WHERE id=$2::uuid) place',
+      [row.command_from.agent, place])).rows[0]! : { from: null, place: null };
     try {
       if (!row.callback_url) throw new Error('no callback url');
       const response = await transport(row.callback_url, {
         headers: { 'content-type': 'application/json',
           ...(row.callback_secret ? { authorization: `Bearer ${openSecrets<string>(webhookKey(), row.callback_secret)}` } : {}) },
-        body: JSON.stringify(row.probe ?? (row.command_id ? wakeBody(row) : { ...mentionRouting(row.member_id, row.room_id, row.message_id, row.author_handle),
+        body: JSON.stringify(row.probe ?? (row.command_id ? wakeBody(row,names) : { ...mentionRouting(row.member_id, row.room_id, row.message_id, row.author_handle),
           author: row.author_id ? { id: row.author_id, handle: row.author_handle, name: row.author_name } : null,
-          text: row.body, ...(row.institutional_context ? {institutionalContext:row.institutional_context} : {}), attachments: row.attachments, cursor: row.cursor, instruction: `${routingInstruction(row)} ${MCP_TAG_INSTRUCTION}` })),
+          text: row.body, ...(row.institutional_context ? {institutionalContext:row.institutional_context} : {}), attachments: row.attachments, cursor: row.cursor,
+          instruction: agentMessageText({from:row.author_name ?? row.author_handle ?? 'Someone',place:row.room_name ?? row.room_id,id:row.message_id,replyNeeded:true,
+            text:row.body,attachments:(row.attachments ?? []).map(file=>file.name ?? 'attachment')}) })),
       });
       accepted = response.ok;
       httpStatus=response.status;

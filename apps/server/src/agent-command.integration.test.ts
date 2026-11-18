@@ -30,7 +30,7 @@ it.each(['ordinary', 'tagged', 'threaded', 'private', 'private-agent', 'corner',
     const roomId = path === 'corner' ? C : R;
     if (path === 'dm') await rootFixture.db.query('UPDATE rooms SET direct_participants=$2::jsonb WHERE id=$1', [R, JSON.stringify([H,A])]);
     const queued = await createAgentCommand(rootFixture.db, { roomId, agentId:A, sourceMessageId:null,
-      reason:path.startsWith('private')?'order':'system', ...(path.startsWith('private')?{
+      reason:path.startsWith('private')?'order':'human_message', ...(path.startsWith('private')?{
         privatePayload:{kind:'order',authorId:path==='private-agent'?B:H,fromRoomId:R,text:'Please answer'}}:{}) });
     const command=(await commands(A,roomId)).find(c=>c.id===queued!.id)!;
     await claim(command);

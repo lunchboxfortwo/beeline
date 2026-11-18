@@ -1,6 +1,6 @@
 import { MCP_WEBHOOK_TABLE,POSTGRES_LIVE_CHANNEL } from './postgres-live-notifications.js';
 import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
-import { AGENT,backfillMcpMemberAvatars,Client,createAgentCommand,createHash,createServer,deliverMcpMemberWebhooks,describe,ensureMcpMember,expect,fixtureScope1,it,MCP_ORDER_WAKE_HINT,MCP_REVIEW_WAKE_HINT,MCP_WAKE_HINT,opaque,openSecrets,OTHER,pendingMcpWakes,phoneFetch,postMcpWebhook,randomBytes,randomUUID,recordSigninAttempt,ROOM,routeHumanMessage,runMcpWebhookDelivery,StreamableHTTPClientTransport,tokenHash,USER,vi,Webhook,WORKSPACE,type AddressInfo } from './test-support-rooms-mcp.test-support.js';
+import { AGENT,backfillMcpMemberAvatars,Client,createAgentCommand,createHash,createServer,deliverMcpMemberWebhooks,describe,ensureMcpMember,expect,fixtureScope1,it,opaque,openSecrets,OTHER,pendingMcpWakes,phoneFetch,postMcpWebhook,randomBytes,randomUUID,recordSigninAttempt,ROOM,routeHumanMessage,runMcpWebhookDelivery,StreamableHTTPClientTransport,tokenHash,USER,vi,Webhook,WORKSPACE,type AddressInfo } from './test-support-rooms-mcp.test-support.js';
 
 describe('chats connector HTTP OAuth and MCP', () => {
 const scope1 = fixtureScope1();
@@ -233,7 +233,7 @@ const scope1 = fixtureScope1();
       expect(bearerCalls).toBe(0);
       expect(received).toHaveLength(3);
       expect(received.find(event=>event.data?.messageId===sent.messageId)).toMatchObject({ name: 'mention', cursor: null,
-        data: { roomId: ROOM, messageId: sent.messageId, memberId: member, replyRule: `Reply with reply(id: "${sent.messageId}", text: ...)`, idempotencyKey: `mention:${member}:${sent.messageId}`, author: { id: USER }, text: '@' + handle + ' reply here',attachments:[image] } });
+        data: { roomId: ROOM, messageId: sent.messageId, memberId: member, replyRule: `Reply(id: ${sent.messageId}, text: ...) with your reply`, idempotencyKey: `mention:${member}:${sent.messageId}`, author: { id: USER }, text: '@' + handle + ' reply here',attachments:[image] } });
       expect(await deliverMcpMemberWebhooks(scope1.db, deliveryTransport)).toBe(0);
       const reply = await client.callTool({ name:'reply',arguments:{id:sent.messageId,text:'Event received.'} });
       expect(reply.isError).not.toBe(true);
@@ -361,7 +361,8 @@ const scope1 = fixtureScope1();
         return new Response(null, { status: 204 });
       })).toBe(1);
       expect(route === 'webhook' ? received[0] : received[0]!.data).toMatchObject({
-        commandId:sent.id,address:ROOM,from:{agent:AGENT,place:ROOM},text:args.text,next:expect.stringContaining(MCP_ORDER_WAKE_HINT),
+        commandId:sent.id,address:ROOM,from:{agent:AGENT,place:ROOM},text:args.text,
+        next:expect.stringMatching(new RegExp(`^From: .+ in #.+\nid: ${sent.id}\nReply needed: true\ntext: [^]+\nReply\\(id: ${sent.id}, text: \\.\\.\\.\\) with your reply$`)),
       });
       expect(scope1.data(await client.callTool({ name: 'list_mentions', arguments: {} })).wakes)
         .toContainEqual(expect.objectContaining({ id:sent.id,from:{agent:AGENT,place:ROOM} }));
@@ -455,7 +456,7 @@ const scope1 = fixtureScope1();
     expect(JSON.parse((await queued(cornerCommand.id))[0]!.body).data).toMatchObject({
       roomId: opened.cornerId, address: opened.cornerId, commandId: cornerCommand.id,
       text: 'Private thread assignment for the subscribed implementer',
-      next:expect.stringContaining(MCP_ORDER_WAKE_HINT),
+      next:expect.stringContaining(`id: ${cornerCommand.id}\nReply needed: true\ntext: Private thread assignment for the subscribed implementer\nReply(id: ${cornerCommand.id}, text: ...) with your reply`),
     });
     const report = await createAgentCommand(scope1.db, {
       roomId: ROOM, agentId: member, sourceMessageId: null, reason: 'report',
@@ -468,7 +469,7 @@ const scope1 = fixtureScope1();
     )).toEqual([]);
     expect(JSON.parse((await queued(report!.id))[0]!.body).data).toMatchObject({
       text: 'done: the report reached the commander',
-      next:expect.stringContaining(MCP_WAKE_HINT),
+      next:expect.stringMatching(/\nReply needed: false\ntext: done: the report reached the commander$/),
     });
     expect(await deliverMcpMemberWebhooks(scope1.db, transport)).toBe(2);
     expect(received).toHaveLength(3);
@@ -499,14 +500,20 @@ const scope1 = fixtureScope1();
     await scope1.db.query(`UPDATE agent_commands SET state='complete', completed_at=now() WHERE id=$1`, [commander.id]);
     await scope1.db.query(`UPDATE agent_turns SET status='complete' WHERE agent_id=$1`, [AGENT]);
     // Reproduction (MCP-REVIEW-WAKE-1): a reviewer dispatch carried the generic "no_reply_needed" hint.
+    // The wake now carries only the one message format; the standing review rule says how to review.
     await scope1.eventCall(token, 'events/subscribe', { ...params, name: 'wake', delivery: { ...params.delivery, url: wakeTooUrl, secret } });
     const review = await createAgentCommand(scope1.db, {
       roomId: ROOM, agentId: member, sourceMessageId: null, reason: 'corner_review_dispatch',
       privatePayload: { text: `Current handoff target: PR #7 at ${'a'.repeat(40)}.`, authorId: AGENT, fromRoomId: ROOM, kind: 'lifecycle' },
     });
-    expect(JSON.parse((await queued(review!.id))[0]!.body).data).toMatchObject({next:expect.stringContaining(MCP_REVIEW_WAKE_HINT)});
-    expect((await pendingMcpWakes(scope1.db, member)).find(item => item.id === review!.id)).toMatchObject({next:expect.stringContaining(MCP_REVIEW_WAKE_HINT)});
-    expect(MCP_REVIEW_WAKE_HINT).toContain('approve_merge with the head SHA');
+    const reviewNext = `id: ${review!.id}\nReply needed: false\ntext: Current handoff target: PR #7 at ${'a'.repeat(40)}.`;
+    const queuedNext = JSON.parse((await queued(review!.id))[0]!.body).data.next as string;
+    const pendingNext = (await pendingMcpWakes(scope1.db, member)).find(item => item.id === review!.id)!.next;
+    for (const next of [queuedNext, pendingNext]) {
+      expect(next).toContain(reviewNext);
+      expect(next).not.toMatch(/no_reply_needed|Reply\(id/);
+    }
+    expect(pendingNext).toBe(queuedNext);
   });
 
   it.each(['consent', 'profile'])('MCP-WAKE-SETUP: %s saves once, delivers tags and never reads the key back', async path => {

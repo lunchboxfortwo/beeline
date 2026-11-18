@@ -323,7 +323,7 @@ reportCorner,
 cornerWorking,
 };
 }
-export { FACE_SOULS,MCP_STARTER_ROUTINE } from '@beeline/api-contract/phone';
+export { FACE_SOULS,MCP_STARTER_ROUTINE,MCP_WORK_ROUTINE } from '@beeline/api-contract/phone';
 export { Client } from '@modelcontextprotocol/sdk/client/index.js';
 export { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 export { createHash,randomBytes,randomUUID } from 'node:crypto';
@@ -345,8 +345,8 @@ export { LiveHub } from './live.js';
 export { ObjectService } from './object-service.js';
 export { PhoneService } from './phone-service.js';
 export { MCP_AGENT_EXCLUSIONS,MCP_AGENT_TOOLS,MCP_APP_ROUTE_OPERATIONS,pendingMcpWakes } from './rooms-mcp-agent.js';
-export { MCP_ORDER_WAKE_HINT,MCP_REVIEW_WAKE_HINT,MCP_WAKE_HINT,RoomsMcpEvents } from './rooms-mcp-events.js';
-export { backfillMcpMemberAvatars,deliverMcpMemberWebhooks,ensureMcpMember,MCP_TAG_INSTRUCTION,postMcpWebhook,runMcpWebhookDelivery } from './rooms-mcp-members.js';
+export { RoomsMcpEvents } from './rooms-mcp-events.js';
+export { backfillMcpMemberAvatars,deliverMcpMemberWebhooks,ensureMcpMember,postMcpWebhook,runMcpWebhookDelivery } from './rooms-mcp-members.js';
 export { BROWSER_REFUSALS,RoomsMcpOAuth } from './rooms-mcp-oauth.js';
 export { PREREGISTERED_MCP_CLIENTS } from './rooms-mcp-preregistered.js';
 export { RoomsMcp } from './rooms-mcp.js';

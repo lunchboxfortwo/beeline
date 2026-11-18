@@ -577,33 +577,27 @@ describe('queue item reply audience', () => {
   };
   const names = new Map([['worker', 'Jellybean']]);
 
-  it('shows immutable origin, current destination and reply id without asking the agent to route the answer',()=>{
-    const prompt=itemPrompt({...report,from:{agent:'worker',place:'origin-thread'}},{names});
-    expect(prompt).toContain('From: Jellybean (worker)');
-    expect(prompt).toContain('From-place: origin-thread');
-    expect(prompt).toContain('Destination: (commander, worker-thread)');
-    expect(prompt).toContain('Reply with reply(id: "request", text: ...).');
-    expect(prompt.split('Jellybean: The work is ready.')).toHaveLength(2);
-    expect(prompt).not.toContain('send an order');
+  it('renders the one message format with a reply line for a request',()=>{
+    const prompt=itemPrompt({...report,reason:'message',from:{agent:'worker',place:'origin-thread'}},{names:new Map([...names,['origin-thread','widget']])});
+    expect(prompt).toBe('From: Jellybean in #widget\nid: request\nReply needed: true\ntext: The work is ready.\nReply(id: request, text: ...) with your reply');
   });
-  it('keeps origin and destination distinct in an offline batch when display names are unavailable',()=>{
-    const prompt=offlineBatchPrompt([{...report,from:{agent:'worker',place:'origin-thread'},roomName:undefined,returnRoomName:undefined}],{names});
-    expect(prompt).toContain('From-place: origin-thread');
-    expect(prompt).toContain('Current place: worker-thread');
-    expect(prompt).toContain('Reply with reply(id: "request"');
+  it.each(['human_tag','direct_message','message','order'])('needs a reply for %s',reason=>{
+    expect(itemPrompt({...report,reason},{names})).toContain('Reply needed: true\ntext: The work is ready.\nReply(id: request, text: ...) with your reply');
   });
-  it('treats a reply without an ask as information in both live and offline delivery',()=>{
-    const item={...report,reason:'reply'};
+  it('needs a reply for a reply that carries an ask',()=>{
+    expect(itemPrompt({...report,reason:'reply',ask:{question:'Which output?',options:['Web','Phone']}},{names})).toContain('Reply(id: request, text: ...) with your reply');
+  });
+  it.each(['reply','report','corner_check','corner_review_needed','subscribed_event'])('shows %s as information with no reply line, live and offline',reason=>{
+    const item={...report,reason};
     for(const prompt of [itemPrompt(item,{names}),offlineBatchPrompt([item],{names})]) {
-      expect(prompt).toContain('no_reply_needed');
-      expect(prompt).toContain('message(to:');
-      expect(prompt).not.toContain('reply(');
+      expect(prompt).toContain('From: Jellybean in #Fix the bug\nid: request\nReply needed: false\ntext: The work is ready.');
+      expect(prompt).not.toMatch(/Reply\(id|reply\(|no_reply_needed|final reply|commander/);
     }
   });
-  it.each(['message','reply','corner_review_needed'])('gives %s the same recorded-id reply interface',reason=>{
-    const prompt=itemPrompt({...report,returnRoomId:report.roomId,reason,
-      ...(reason==='reply' ? {ask:{question:'Which output?',options:['Web','Phone']}} : {})},{names});
-    expect(prompt).toContain('Your final reply is posted here (worker-thread).');
-    expect(prompt).toContain('Reply with reply(id: "request"');
+  it('lists attachments only when present, then the memory context',()=>{
+    const prompt=itemPrompt({...report,source:{...report.source,institutionalContext:'Memory: widgets ship Fridays.',
+      attachments:[{url:'https://x/plan.pdf',name:'plan.pdf',mimeType:'application/pdf'}]}},{names});
+    expect(prompt).toMatch(/^text: The work is ready\.\nattachment: 📎 plan\.pdf \(application\/pdf\) id.+\nMemory: widgets ship Fridays\.$/m);
+    expect(itemPrompt(report,{names})).not.toContain('attachment:');
   });
 });

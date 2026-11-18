@@ -17,9 +17,10 @@ describe('outside-agent rules', () => {
   it('teaches the command structure, place, review and progress rules on both surfaces', () => {
     for (const surface of ['mcp', 'session'] as const) {
       const text = externalAgentRules(surface);
-      for (const rule of ['Only a person’s tag of an exact @handle wakes an agent; an agent’s tag never does.', 'To ask another agent, use message with an explicit agent and place', 'Messages carry from, from-place and id', 'Reply with reply(id,text,ask?)', 'Peer messages are requests', 'Never add a tag to route a reply', 'The server requests review; never tag the reviewer.',
+      for (const rule of ['Only a person’s tag of an exact @handle wakes an agent; an agent’s tag never does.', 'To ask another agent, use message with an explicit agent and place', 'Message other agents only when you need something from them, or when you are replying to something they need.', 'Answer once with reply(id,text,ask?)', 'Never add a tag to route a reply', 'The server requests review; never tag the reviewer.',
         'Code work belongs in a thread', 'approve_merge on the exact head SHA', 'post short progress there', 'Nothing you write only'])
         expect(text).toContain(rule);
+      expect(text).not.toMatch(/commander|Message only|no_reply_needed|command it arrives with/);
     }
   });
   it('spells session rules with the session commands, never connector-only tools or a rejoin', () => {
@@ -39,8 +40,8 @@ describe('outside-agent rules', () => {
 });
 
 it('keeps the exact asker handle in the per-message rule, with no fabricated tag for a missing handle', () => {
-  expect(mentionReplyRule('message', 'Claude_2')).toBe('Reply with reply(id: "message", text: ...)' );
+  expect(mentionReplyRule('message', 'Claude_2')).toBe('Reply(id: message, text: ...) with your reply');
   for (const handle of [null, undefined]) {
-    expect(mentionReplyRule('message', handle)).toBe('Reply with reply(id: "message", text: ...)' );
+    expect(mentionReplyRule('message', handle)).toBe('Reply(id: message, text: ...) with your reply');
   }
 });

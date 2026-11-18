@@ -103,7 +103,7 @@ describe('C4: external agents route like native agents', () => {
     const sent = await scope.daemon.execute('message', { roomId: ROOM, to: { agent: 'implementer', place: THREAD }, text: 'Build widget' }, AGENT);
     // list_mentions and post predate the messaging tools, so a stale host still has them.
     const [received] = (await tools.ok(client, 'list_mentions', {})).wakes as { id: string; next: string }[];
-    expect(received).toMatchObject({ id: sent.id, next: expect.stringContaining(`reply(${sent.id},text)`) });
+    expect(received).toMatchObject({ id: sent.id, next: expect.stringContaining(`Reply(id: ${sent.id}, text: ...) with your reply`) });
     // A public post is conversation; only reply(id) answers the recorded sender.
     for (const address of [ROOM, THREAD]) await tools.ok(client, 'post', { address, text: 'Done' });
     expect(await pending(AGENT)).toEqual([]);

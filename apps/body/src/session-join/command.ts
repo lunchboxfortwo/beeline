@@ -256,7 +256,7 @@ async function finishJoinOwned(file: string, env: NodeJS.ProcessEnv): Promise<vo
     await updateState(dir, state => {
       state.sessions = state.sessions.filter(s => s.key !== key);
       state.sessions.push(joined);
-      const waiting = [...first.mentions.map(m => renderMention(m, joined, run)), ...first.wakes.map(w => renderWake(w, joined, run))];
+      const waiting = [...first.mentions.map(m => renderMention(m)), ...first.wakes.map(w => renderWake(w, joined, run))];
       if (waiting.length) queueInbox(dir, key, waiting.join('\n\n'));
     });
     if(joined.sessionId) recordHookSession(dir,{agent:joined.agent,sessionId:joined.sessionId,cwd:joined.cwd,pid:joined.pid,seenAt:Date.now()});

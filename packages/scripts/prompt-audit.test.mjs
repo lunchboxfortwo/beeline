@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { renderAuditPrompts } from './prompt-surface.ts';
 import { INSTRUCTIONS } from '../../apps/server/src/rooms-mcp.ts';
-import { mcpPendingWakeNext } from '../../apps/server/src/rooms-mcp-events.ts';
+import { mcpWakeText } from '../../apps/server/src/rooms-mcp-events.ts';
 
 test('audit covers every situation in all three runtimes, without replay-controller instructions', async () => {
   const prompts = await renderAuditPrompts();
@@ -12,11 +12,12 @@ test('audit covers every situation in all three runtimes, without replay-control
     .flatMap(runtime => situations.map(situation => `${runtime}/${situation}.txt`)).sort());
   for (const prompt of prompts) {
     assert.doesNotMatch(prompt.text, /Prompt case replay:|You are the agent described below|Return calls:\[\]/);
-    assert.match(prompt.text, /commander/);
+    assert.ok(prompt.text.includes('Message other agents only when you need something from them, or when you are replying to something they need.'), prompt.name);
+    assert.doesNotMatch(prompt.text, /Message only|final reply is posted|This reply is information|background context|Reply with reply/, prompt.name);
     if (prompt.name.startsWith('mcp/')) assert.ok(prompt.text.startsWith(INSTRUCTIONS));
     if (prompt.name.endsWith('informational-reply.txt') || prompt.name.endsWith('commander-worker-report.txt')) {
-      assert.match(prompt.text, /This reply is information/);
-      assert.doesNotMatch(prompt.text, /Reply: .*tool reply/);
+      assert.match(prompt.text, /Reply needed: false/);
+      assert.doesNotMatch(prompt.text, /Reply\(id: e{64}/);
     }
     if (prompt.name.endsWith('fresh-thread-first-turn.txt')) {
       assert.match(prompt.text, /corner-7f3a/);
@@ -24,15 +25,17 @@ test('audit covers every situation in all three runtimes, without replay-control
     }
   }
   const native = prompts.find(prompt => prompt.name === 'native/check-system-event.txt').text;
-  assert.match(native, /Your final reply is posted to Inventory/);
-  assert.match(native, /This is background context/);
+  assert.match(native, /^From: System in #widget\nid: e{64}\nReply needed: false\ntext: All widget checks passed\./m);
+  for (const runtime of ['native', 'mcp', 'session-joined'])
+    assert.match(prompts.find(prompt => prompt.name === `${runtime}/reply-with-ask.txt`).text, /Reply\(id: e{64}, text: \.\.\.\) with your reply/);
   const joined = prompts.find(prompt => prompt.name === 'session-joined/reply-with-ask.txt').text;
-  assert.match(joined, /Reply: .*tool reply/);
   assert.match(joined, /--as claude-code:\/audit\/project/);
 });
 
-test('MCP audit next steps preserve the delivered pending-wake prefix and informational exception', () => {
-  assert.match(mcpPendingWakeNext('wake-id', 'lifecycle', 'corner_check'), /^Reply with reply\(wake-id,text\)\. Handle it/);
-  assert.match(mcpPendingWakeNext('wake-id', 'reply', 'reply'), /^This reply is information/);
-  assert.match(mcpPendingWakeNext('wake-id', 'reply', 'reply', { question: 'Continue?', options: ['Yes', 'No'] }), /^Reply with reply\(wake-id,text\)/);
+test('MCP wakes carry the one message format, with a reply line only when a reply is needed', () => {
+  const wake = (reason, ask) => mcpWakeText({ id: 'wake-id', fromName: 'Ruby', placeName: 'beeline', from: { agent: 'ruby', place: 'room' },
+    reason, ask, text: 'Are you still working?' });
+  assert.equal(wake('message'), 'From: Ruby in #beeline\nid: wake-id\nReply needed: true\ntext: Are you still working?\nReply(id: wake-id, text: ...) with your reply');
+  for (const reason of ['corner_check', 'reply']) assert.equal(wake(reason), 'From: Ruby in #beeline\nid: wake-id\nReply needed: false\ntext: Are you still working?');
+  assert.match(wake('reply', { question: 'Continue?', options: ['Yes', 'No'] }), /\nReply\(id: wake-id, text: \.\.\.\) with your reply$/);
 });

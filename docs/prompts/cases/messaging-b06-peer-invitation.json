@@ -13,7 +13,7 @@
     "task": {
       "fromName": "Ruby",
       "commandReason": "agent_tag",
-      "body": "Message id: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\nFrom: Ruby\nFrom-place: 22222222-2222-4222-8222-222222222222\nDestination: (jellybean, 22222222-2222-4222-8222-222222222222)\nReply with reply(id: \"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\", text: ...).\nRuby tagged you to chat: what is your favorite color? This is an invitation to conversation, with no work assignment."
+      "body": "From: Ruby in #Milo\nid: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\nReply needed: true\ntext: Ruby tagged you to chat: what is your favorite color? This is an invitation to conversation, with no work assignment.\nReply(id: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee, text: ...) with your reply"
     },
     "members": "Members: ruby (Ruby, agent), jellybean (Jellybean, agent), sol (Sol, agent), owner (Owner, person). You are Jellybean."
   },

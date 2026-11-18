@@ -1,4 +1,4 @@
-import { isInformationalReply, isBackgroundCommand, subscriptionActionPrompt, type AgentCommand, type SystemEvent } from '@beeline/api-contract/daemon';
+import { agentMessageText, replyNeeded, subscriptionActionPrompt, type AgentCommand, type SystemEvent } from '@beeline/api-contract/daemon';
 import { parseGrantDecisionLine } from '@beeline/api-contract/agent-grants';
 import { SCHEDULE_RAN_VERB, SCHEDULE_SCHEDULER_NAME } from '@beeline/api-contract/scheduled-prompts';
 import { attachmentMarkerLines } from './attachment-delivery.js';
@@ -124,10 +124,10 @@ export function resumePrompt(item: { body: string; systemEvent?: SystemEvent }):
 const RESUME_KINDS = new Set(['grant-decided', 'connector-offer-decided', 'squire-approval-decided']);
 
 /**
- * What the session is told for one queue item: who asked, where it came from,
- * where the answer goes, and the message itself, with the queue-time context:
- * memory, then what this session has not seen (the bounded window once for a
- * fresh session, otherwise only new messages and a changed brief or member list).
+ * What the session is told for one queue item, in the one message format
+ * (`agentMessageText`), then the queue-time context: memory, then what this
+ * session has not seen (the bounded window once for a fresh session, otherwise
+ * only new messages and a changed brief or member list).
  */
 export function itemPrompt(item: AgentCommand, options: {
   names: ReadonlyMap<string, string>;
@@ -142,34 +142,19 @@ export function itemPrompt(item: AgentCommand, options: {
   const author = inboxItemAuthorName(source, options.names);
   const body = source.systemEvent && RESUME_KINDS.has(source.systemEvent.kind ?? '')
     ? resumePrompt(source) : inboxItemPromptBody(source);
-  const threadName = item.roomName ?? options.names.get(item.roomId) ?? item.roomId;
-  const returnRoomName = item.returnRoomName ?? options.names.get(item.returnRoomId) ?? item.returnRoomId;
-  const sameRoom = item.returnRoomId === item.roomId;
-  const text = body.trim() || '(shared attachments)';
+  const from = item.from ?? { agent: source.authorId, place: item.roomId };
+  const place = from.place === item.roomId ? item.roomName ?? options.names.get(item.roomId) ?? item.roomId
+    : (from.place === item.returnRoomId ? item.returnRoomName : undefined) ?? options.names.get(from.place) ?? from.place;
   const context = options.fresh ? source.conversationWindow ?? source.conversationContext : source.conversationContext;
-  const answerTo = sameRoom
-    ? `Your final reply is posted here (${item.roomId}).`
-    : `Your final reply is posted to ${returnRoomName}.`;
-  const from=item.from ?? {agent:source.authorId,place:item.roomId};
-  const information = isInformationalReply(item.reason, item.ask);
-  const response = information
-    ? 'This reply is information. Call no_reply_needed to finish. Use message(to:{agent,place},text,ask?) for a genuinely new request.'
-    : `${answerTo}\nReply with reply(id: "${item.id}", text: ...).`;
-  const request = `Message id: ${item.id}\nFrom: ${author} (${from.agent})\nFrom-place: ${from.place}\nDestination: (${item.agentId}, ${item.roomId})\nCurrent place: ${threadName}\n${response}`;
   return [
     ...(options.turnPrefix ? [options.turnPrefix] : []),
     ...(options.notes?.length ? ['Session setup notes:', ...options.notes.map(note => `- ${note}`)] : []),
-    request,
-    'Use this requestId with tools that ask for one.',
+    agentMessageText({ from: author, place, id: item.id, replyNeeded: replyNeeded(item.reason, item.ask),
+      text: body.trim() || '(shared attachments)', attachments: attachmentMarkerLines(source.attachments) }),
+    ...(source.replyToExcerpt ? [`In reply to ${source.replyToAuthorName ?? 'a message'}: ${source.replyToExcerpt}`]
+      : source.replyToMessageId ? [`In reply to message ${source.replyToMessageId}`] : []),
     ...(source.institutionalContext ? [source.institutionalContext] : []),
     ...(context ? [context] : []),
-    ...(isBackgroundCommand(item.reason)
-      ? ['This is background context. If nothing has changed or needs action, call no_reply_needed and finish without a public reply. Human requests in this batch still need an answer.'] : []),
-    `[message id: ${source.id}]`,
-    ...(source.replyToMessageId ? [`Reply to message ${source.replyToMessageId}; read it with session tools if needed.`] : []),
-    `${author}: ${text}`,
-    ...(source.replyToExcerpt ? [`In reply to ${source.replyToAuthorName ?? 'a message'}: ${source.replyToExcerpt}`] : []),
-    ...attachmentMarkerLines(source.attachments),
   ].join('\n');
 }
 
@@ -184,7 +169,7 @@ export function offlineBatchPrompt(items: readonly AgentCommand[], options: Para
     ...(options.turnPrefix ? [options.turnPrefix] : []),
     ...(items[0]?.offlineSeconds !== undefined
       ? [`> You were offline for ${hours} h. These arrived while you were away and may be outdated.`] : []),
-    'Answer each asker in one combined reply. Informational replies need no answer. Follow the newest instructions when earlier discussion has moved on.',
+    'Answer each asker in one combined reply. Follow the newest instructions when earlier discussion has moved on.',
     'The offline note, when present, is private context for you.',
     ...(options.notes?.length ? ['Session setup notes:', ...options.notes.map(note => `- ${note}`)] : []),
     ...visible.map((item, index) => itemPrompt(item, { names: options.names, fresh: index === 0 && options.fresh })),
