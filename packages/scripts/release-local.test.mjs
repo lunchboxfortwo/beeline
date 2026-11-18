@@ -18,7 +18,7 @@ import { run as bookkeeping } from './release-bookkeeping.mjs';
 import { localGithub } from './release-local-github.mjs';
 import { assignReleaseVersion, latestPublished, recoverTaggedReleases } from './release-record.mjs';
 import { CheckQueue, checkPlan, checkWorkspace, LocalChecks } from './release-local-checks.mjs';
-import { pruneReleaseWorkspaces, acquireReleaseLock, localAttribution, pinnedRuntimes, prepareReleaseSource, readOtaVersions, releaseArguments, releaseSequence, storeReleaseNeeded } from './release.mjs';
+import { pruneReleaseWorkspaces, promptAudit, acquireReleaseLock, localAttribution, pinnedRuntimes, prepareReleaseSource, readOtaVersions, releaseArguments, releaseSequence, storeReleaseNeeded } from './release.mjs';
 
 const repository = resolve(import.meta.dirname, '../..');
 const temporary = () => mkdtempSync(join(tmpdir(), 'beeline-local-test-'));
@@ -60,8 +60,11 @@ test('nightly checks wait for both releases, pin their SHA and propagate failure
   assert.deepEqual(releaseArguments(['--full-checks']), { fullChecks: true });
   const spec = { source: '/source', sha, directory: '/state', fullChecks: true };
   const calls = [];
-  await releaseSequence(spec, async (args, options) => calls.push({ args, options }), () => {});
-  assert.deepEqual(calls.map(({ args }) => args.leg || args.channel), ['next', 'latest', 'release_checks']);
+  await releaseSequence(spec, async (args, options) => calls.push({ args, options }), () => {},
+    (source, out) => calls.push({ args: { leg: 'prompt-audit' }, source, out }));
+  assert.deepEqual(calls.map(({ args }) => args.leg || args.channel), ['next', 'latest', 'prompt-audit', 'release_checks']);
+  assert.deepEqual([calls[2].source, calls[2].out], ['/source', '/state/prompt-audit']);
+  calls.splice(2, 1);
   assert.deepEqual(calls[2], { args: { mode: 'execute', leg: 'release_checks', channel: 'latest',
     'release-sha': sha, 'state-dir': '/state/full-checks' }, options: { repository: '/source', secrets: undefined } });
   for (const failing of ['latest', 'release_checks']) {
@@ -69,9 +72,16 @@ test('nightly checks wait for both releases, pin their SHA and propagate failure
     await assert.rejects(releaseSequence(spec, async args => {
       started.push(args.leg || args.channel);
       if ((args.leg || args.channel) === failing) throw new Error('fixture failure');
-    }, () => {}), /fixture failure/);
+    }, () => {}, () => {}), /fixture failure/);
     assert.deepEqual(started, failing === 'latest' ? ['next', 'latest'] : ['next', 'latest', 'release_checks']);
   }
+  const commands = [];
+  promptAudit('/source', '/state/prompt-audit', (command, args, options) => {
+    commands.push([command, ...args, options.cwd]);
+    if (args[0] === 'run' && args[1] === 'prompt-audit') throw new Error('promptdoctor unavailable');
+  });
+  assert.deepEqual(commands, [['npx', 'turbo', 'run', 'build', '--filter=@beeline/body', '--filter=@beeline/server', '/source'],
+    ['npm', 'run', 'prompt-audit', '--', '--out', '/state/prompt-audit', '/source']]);
 });
 test('the release prunes source copies, overlays and node_modules from its state directory but keeps logs', () => {
   const calls = [];

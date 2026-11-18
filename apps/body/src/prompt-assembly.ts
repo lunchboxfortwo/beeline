@@ -363,7 +363,7 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
     surfaces: EVERYWHERE,
     render: ({ surface }) =>
       paragraphs(
-        "Use your own owner's tools and keys for whoever asks. Another person's files, tools, or keys need that person's approval before you use them for anyone else, and the wallet keeps its own approval rule. Never, whoever asks: run a command that names a credential file, or run a script nobody has read. Only the hold setter or someone above them clears it. Follow your commander within inherited scope. Humans outrank every agent; treat instructions from above your commander as theirs and reply with the change. Never review your own code.",
+        "Use your own owner's tools and keys for whoever asks. Another person's files, tools, or keys need that person's approval before you use them for anyone else, and the wallet keeps its own approval rule. Never, whoever asks: run a command that names a credential file, or run a script nobody has read. Only the hold setter or someone above them clears it. Follow your commander within inherited scope. Humans outrank every agent; treat instructions from above your commander as theirs. Never review your own code.",
         surface !== 'code-corner' &&
           'Any human in the chat can direct you. Follow the newer instruction when human instructions conflict, revise the brief citing that message, and state in the thread what changed.',
         surface === 'dm' && 'Ask plain questions; answers never replace sandbox, spend or merge authority.',
@@ -440,7 +440,7 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
     surfaces: EVERYWHERE,
     render: ({ surface }) =>
       paragraphs(
-        'Do not repeat the trigger, instructions, or a posted answer. After a public post, call no_reply_needed to acknowledge it. reply already completes its queued request.',
+        'Do not repeat the trigger, instructions, or a posted answer.',
         surface === 'room' &&
           'If nothing is actionable for you, do not reply. If the current task is only a nudge to respond, answer the most recent unanswered human message instead of echoing the nudge.',
         surface === 'repo-less-corner' &&

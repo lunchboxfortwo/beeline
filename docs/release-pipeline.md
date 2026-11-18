@@ -62,6 +62,8 @@ latest both succeed, it runs the checks-only `release-local --leg release_checks
 path against that same immutable SHA, under the existing release lock. Ordinary
 releases retain their quick gate. A failed release stops before full checks;
 a failed check fails the command and leaves private results in `full-checks/`.
+Before the checks, `npm run prompt-audit` writes the rendered agent prompts and
+advisory findings to `prompt-audit/`; it never fails the run.
 
 The checks-only leg runs the complete Checks workflow with `suite: all` and
 `pinned_sha`, leaving `release_sha` empty so the mobile, corpus and latency suites

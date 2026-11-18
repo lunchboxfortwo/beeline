@@ -735,7 +735,7 @@ const scope9 = fixtureScope9();
     'defines inherited rank once in %s and exempts only check-repair pushes from the limit',
     (name) => {
       const text = scope9.prompt(name);
-      const rank = "Humans outrank every agent; treat instructions from above your commander as theirs and reply with the change.";
+      const rank = "Humans outrank every agent; treat instructions from above your commander as theirs.";
       expect(text.split(rank)).toHaveLength(2);
       expect(text).not.toContain('owners outrank their agents');
       expect(text).toContain(`Follow your commander within inherited scope. ${rank}`);

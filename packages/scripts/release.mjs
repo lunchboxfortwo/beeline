@@ -87,7 +87,15 @@ export async function readOtaVersions(env, fetchImpl = fetch) {
 // release through git tags. Latest must see the tag Next just created.
 const fetchTags = source => execFileSync('git', ['fetch', '--tags', 'origin'], { cwd: source, stdio: 'ignore' });
 
-export async function releaseSequence({ source, sha, directory, secrets, dispatchedBy, otaVersions, store, desktopMode = 'build', macHelpers = 'build', fullChecks = false }, runLocalRelease, refreshTags = fetchTags) {
+// Advisory: the rendered prompts and findings land with the nightly results and never fail the run.
+export function promptAudit(source, out, run = execFileSync) {
+  try {
+    run('npx', ['turbo', 'run', 'build', '--filter=@beeline/body', '--filter=@beeline/server'], { cwd: source, stdio: 'inherit' });
+    run('npm', ['run', 'prompt-audit', '--', '--out', out], { cwd: source, stdio: 'inherit' });
+  } catch (error) { console.warn(`Prompt audit did not complete: ${error.message}`); }
+}
+
+export async function releaseSequence({ source, sha, directory, secrets, dispatchedBy, otaVersions, store, desktopMode = 'build', macHelpers = 'build', fullChecks = false }, runLocalRelease, refreshTags = fetchTags, audit = promptAudit) {
   for (const channel of ['next', 'latest']) {
     if (channel === 'latest') refreshTags(source);
     await runLocalRelease({ mode: 'execute', channel, 'release-sha': sha,
@@ -97,7 +105,9 @@ export async function releaseSequence({ source, sha, directory, secrets, dispatc
       'mac-helpers': macHelpers,
     }, { repository: source, secrets });
   }
-  if (fullChecks) await runLocalRelease({ mode: 'execute', leg: 'release_checks', channel: 'latest',
+  if (!fullChecks) return;
+  audit(source, join(directory, 'prompt-audit'));
+  await runLocalRelease({ mode: 'execute', leg: 'release_checks', channel: 'latest',
     'release-sha': sha, 'state-dir': join(directory, 'full-checks'),
   }, { repository: source, secrets });
 }

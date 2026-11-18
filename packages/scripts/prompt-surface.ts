@@ -2,8 +2,8 @@
  * The registered agent-facing surface: every tool, wake template and guide a
  * Beeline agent can be handed, keyed by runtime and capability.
  *
- *   node --import tsx packages/scripts/prompt-surface.ts           rewrite docs/prompts/surface.json
- *   node --import tsx packages/scripts/prompt-surface.ts --check   fail when the committed snapshot is stale
+ *   node --import tsx packages/scripts/prompt-surface.ts           rewrite docs/prompts/surface.json and docs/prompts/rendered
+ *   node --import tsx packages/scripts/prompt-surface.ts --check   fail when either committed snapshot is stale
  *
  * Inventories: native body tools per session variant with their nested app_tool
  * capabilities (`apps/body/src/minimal-tool-surface.ts`), external MCP tools
@@ -11,8 +11,8 @@
  * families with one fixture per branch, and first-party skills
  * (`packages/api-contract/src/beeline-guides.ts`). It never calls a model.
  */
-import { readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { CAPABILITY_TOOLS, agentToolsFor, type ToolDefinition } from '../../apps/body/src/minimal-tool-surface.js';
 import { itemPrompt, resumePrompt } from '../../apps/body/src/place-prompt.js';
 import { renderMention, renderRules, renderWake } from '../../apps/body/src/session-join/bridge.js';
@@ -27,6 +27,8 @@ import { mcpWakeText } from '../../apps/server/src/rooms-mcp-events.js';
 import { INSTRUCTIONS, ROOM_TOOLS } from '../../apps/server/src/rooms-mcp.js';
 
 const SNAPSHOT = join(resolve(__dirname, '../..'), 'docs', 'prompts', 'surface.json');
+/** What `npm run prompt-audit` renders, so a prompt change shows its full message diff. */
+const RENDERED = join(resolve(__dirname, '../..'), 'docs', 'prompts', 'rendered');
 
 type Tool = { name: string; description?: string; inputSchema: unknown };
 const byName = (tools: readonly Tool[]) =>
@@ -164,12 +166,22 @@ export async function renderAuditPrompts() {
   });
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === resolve(__filename)) {
-  const rendered = `${JSON.stringify(extractSurface(), null, 1)}\n`;
+if (process.argv[1] && resolve(process.argv[1]) === resolve(__filename)) void (async () => {
+  const files = new Map([[SNAPSHOT, `${JSON.stringify(extractSurface(), null, 1)}\n`],
+    ...(await renderAuditPrompts()).map(prompt => [join(RENDERED, prompt.name), `${prompt.text}\n`] as const)]);
   if (process.argv.includes('--check')) {
-    if (readFileSync(SNAPSHOT, 'utf8') !== rendered) {
-      console.error('docs/prompts/surface.json is stale: run node --import tsx packages/scripts/prompt-surface.ts and commit the result.');
+    const committed = readdirSync(RENDERED, { recursive: true, encoding: 'utf8' }).map(path => join(RENDERED, path))
+      .filter(path => statSync(path).isFile());
+    if ([...files].some(([path, text]) => !existsSync(path) || readFileSync(path, 'utf8') !== text)
+      || committed.some(path => !files.has(path))) {
+      console.error('docs/prompts/surface.json or docs/prompts/rendered is stale: run node --import tsx packages/scripts/prompt-surface.ts and commit the result.');
       process.exit(1);
     }
-  } else writeFileSync(SNAPSHOT, rendered);
-}
+  } else {
+    rmSync(RENDERED, { recursive: true, force: true });
+    for (const [path, text] of files) {
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, text);
+    }
+  }
+})();
