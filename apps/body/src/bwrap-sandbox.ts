@@ -559,10 +559,13 @@ export function buildBwrapArgv(input: {
   // The inner root bind makes these temporary overlays read-only before any
   // agent code runs. Lower directories remain live, including native Cursor
   // logins created after startup; mkdir never touches a host credential path.
+  // Inherit /proc here. --proc adds read-only submounts which become locked
+  // across the inner user namespace; Linux then refuses its fresh PID procfs
+  // as more revealing. The inner sandbox still owns --proc and PID isolation.
   return { command: input.bwrapPath, args: [
     '--unshare-user', '--uid', '0', '--gid', '0',
     ...['CAP_SYS_ADMIN', 'CAP_DAC_OVERRIDE', 'CAP_SETFCAP'].flatMap(cap => ['--cap-add', cap]),
-    '--bind', '/', '/', '--proc', '/proc', '--dev-bind', '/dev', '/dev', '--tmpfs', '/dev/shm',
+    '--bind', '/', '/', '--dev-bind', '/dev', '/dev', '--tmpfs', '/dev/shm',
     '--die-with-parent', '--', 'sh', '-c', MASK_MOUNTPOINT_BOOTSTRAP, 'beeline-mask-mountpoints',
     ...parents, '--', ...missingMasks.map(mask => mask.path), '--', input.bwrapPath,
     ...(overlays.length ? [] : ['--unshare-user', '--uid', String(process.getuid!()), '--gid', String(process.getgid!()), '--cap-drop', 'ALL']),
