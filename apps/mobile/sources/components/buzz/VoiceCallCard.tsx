@@ -32,7 +32,7 @@ export function VoiceCallCard({ call, joined, onJoin, connecting = false, viewer
             accessibilityLabel="Join call"
             testID="voice-call-join"
             label={connecting ? 'Joining…' : 'Join'}
-            variant="primary"
+            variant="quiet"
             loading={connecting}
           />
         )}

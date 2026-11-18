@@ -65,7 +65,9 @@ it('iphone-022-gate: joining from the header presents the update instruction in 
   await act(async () => {renderer = create(/*#__PURE__*/React.createElement(VoiceCallCard, { call: { id: 'call', roomId: 'room', startedAt: 1, participants: [] } as any,
       joined: false, onJoin: () => showVoiceJoinError(VOICE_UPDATE_MESSAGE) }));});
   try {
-    await act(async () => renderer.root.findByProps({ testID: 'voice-call-join' }).props.onPress());
+    const join = renderer.root.findByProps({ testID: 'voice-call-join' });
+    expect(join.props.variant).toBe('quiet');
+    await act(async () => join.props.onPress());
     expect(show).toHaveBeenCalledWith(expect.objectContaining({ message: 'Update Beeline in the App Store to join calls.' }));
   } finally
   {await act(async () => renderer.unmount());}
