@@ -1,4 +1,5 @@
 import { afterEach, vi } from 'vitest';
+import { stubMemoryEmbeddings } from './test-fixtures/memory-embeddings.test-support.js';
 import type { CommandRow } from './agent-command.js';
 import { createAgentSubscription } from './agent-subscriptions.js';
 import { AgentScheduleLoop } from './agent-schedules.js';
@@ -14,7 +15,7 @@ import {
 afterEach(() => vi.unstubAllEnvs());
 
 it.each(['schedule', 'subscribed_event'] as const)('%s retains its scheduler’s verified command-only root', async (reason) => {
-  vi.stubEnv('OPENROUTER_EMBEDDING_API_KEY', '');
+  stubMemoryEmbeddings();
   await enrollLive();
   const seed = await openTurn('seed');
   const daemon = liveDaemon();
