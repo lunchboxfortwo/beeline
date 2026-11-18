@@ -8,17 +8,24 @@ import { captureServerError } from "./sentry.js";
 import { VoiceSpeechPrefetch } from "./voice-speech-prefetch.js";
 import { type SpeechMember, MarkdownSpeechStream, markdownToSpeech } from "./markdown-to-speech.js";
 import { cleanVoiceReply } from "./voice-reply.js";
+import { readMemberDelivery } from './rooms-mcp-delivery.js';
 import { VoiceRoomRuntime, DeliveredVoicePlaybackError, spokenReport } from './voice-room-runtime.js';
 
 
 // Speech arrives through the same durable command queue as text. Inspect it
 // only on speech events; the existing helper claim owns the pending batch.
+// An external host without live delivery cannot consume that batch. Its owed
+// work stays queued, but must not silence the agent's voice conversation.
 async function voiceAgentBusy(ctx: VoiceRoomRuntime, agentId: string): Promise<boolean> {
-  const result = await ctx.observe(() => ctx.service.db.query<{ busy: boolean }>(`SELECT EXISTS(
+  const result = await ctx.observe(() => ctx.service.db.query<{ busy: boolean; external: boolean }>(`SELECT EXISTS(
     SELECT 1 FROM agent_commands command WHERE command.room_id=$1 AND command.agent_id=$2
       AND command.action='input'
-      AND command.state='pending') busy`, [ctx.roomId, agentId]));
-  return result.rows[0]?.busy === true;
+      AND command.state='pending') busy,
+    EXISTS(SELECT 1 FROM rooms_mcp_members WHERE member_id=$2) external`, [ctx.roomId, agentId]));
+  if (result.rows[0]?.busy !== true) return false;
+  if (!result.rows[0].external) return true;
+  const delivery = await ctx.observe(() => readMemberDelivery(ctx.service.db, agentId));
+  return !delivery.offline && delivery.mechanism !== 'on_demand';
 }
 
   export function voiceRoomRuntimeClearAudioQueue(ctx: VoiceRoomRuntime) {

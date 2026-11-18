@@ -108,3 +108,69 @@ it('starts over the phone socket, speaks a reply, and speaks a real helper comma
     await db.close();
   }
 }, 30_000);
+
+it.each(['helper', 'missing', 'on_demand', 'webhook'] as const)(
+  'VOICE-EXTERNAL-QUEUE: a %s delivery queue only suppresses conversation when it can receive live work',
+  async delivery => {
+    const db = await migratedDatabase();
+    const live = new LiveHub();
+    const human = 'c'.repeat(64), agent = 'd'.repeat(64);
+    const workspace = '33333333-3333-4333-8333-333333333333';
+    const room = '44444444-4444-4444-8444-444444444444';
+    const answer = vi.fn(async () => ({ text: 'I am here. What do you need?', order: false }));
+    const synthesize = vi.fn(async function* (_text: string) { yield new Uint8Array([200, 1, 200, 1]); });
+    const voice = new VoiceService(db, live, { url: 'ws://rtc', apiKey: 'devkey', apiSecret: 'secret',
+      speech: { synthesize }, stt: vi.fn(), brain: { answer } });
+    let callId: string | undefined;
+    try {
+      await db.query(`INSERT INTO identities(id,kind,name,handle) VALUES
+        ($1,'human','Caller','caller'),($2,'agent','Grok Bot','grok_bot')`, [human, agent]);
+      await db.query('INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)', [agent, human]);
+      await db.query("INSERT INTO workspaces(id,name) VALUES($1,'Voice external queue proof')", [workspace]);
+      await db.query("INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'general')", [room, workspace]);
+      for (const id of [human, agent]) await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
+        VALUES($1,NULL,$2,'owner'),($1,$3,$2,'member')`, [workspace, id, room]);
+      if (delivery !== 'helper') {
+        await db.query(`INSERT INTO rooms_mcp_clients(id,name,redirects) VALUES('voice-client','Grok Bot','[]')`);
+        await db.query(`INSERT INTO rooms_mcp_connections(client_id,identity_id,scope)
+          VALUES('voice-client',$1,'rooms:read rooms:write')`, [human]);
+        await db.query(`INSERT INTO rooms_mcp_members(client_id,owner_id,member_id,model_label,callback_url)
+          VALUES('voice-client',$1,$2,'Grok Bot',$3)`,
+        [human, agent, delivery === 'webhook' ? 'https://receiver.example/wake' : null]);
+        if (delivery === 'on_demand') await db.query(`INSERT INTO rooms_mcp_delivery
+          (member_id,generation,mechanism,host,surface,conversation,nonce_hash,probe)
+          VALUES($1,'voice-generation','on_demand','Grok','chat','voice-test','unused','{}')`, [agent]);
+      }
+      const joined = await voice.join(room, human); callId = joined.call.id;
+      const runtime = await (voice as unknown as { runtimes: Map<string, Promise<VoiceRoomRuntime>> }).runtimes.get(callId)!;
+      rtc.room.remoteParticipants.set(human, { identity: human });
+      answer.mockResolvedValueOnce({ text: '', order: true });
+      await runtime.utterance(human, 'Grok Bot check the latest build');
+      const initial = (await db.query<{ id: string }>(`SELECT id FROM agent_commands
+        WHERE room_id=$1 AND agent_id=$2 AND reason='voice_order'`, [room, agent])).rows[0]!;
+      expect(initial).toBeDefined();
+
+      // An unclaimed external request must not turn all later conversation
+      // into silent handoffs to a host with no inbound delivery mechanism.
+      await runtime.utterance(human, "Grok Bot what's your name?");
+      const liveDelivery = delivery === 'helper' || delivery === 'webhook';
+      expect(answer).toHaveBeenCalledTimes(liveDelivery ? 1 : 2);
+      if (liveDelivery) expect(synthesize).not.toHaveBeenCalled();
+      else {
+        expect(synthesize).toHaveBeenCalledWith('I am here. What do you need?', expect.any(String), expect.any(AbortSignal));
+        expect(rtc.audio.captureFrame).toHaveBeenCalled();
+        const phone = new PhoneService(db, 'http://proof');
+        expect((await phone.readRoom(room, human))!.messages.some(message =>
+          message.author.pubkey === agent && message.text === 'I am here. What do you need?')).toBe(true);
+      }
+      // Voice conversation never drops or pretends to answer the real work.
+      expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [initial.id])).rows)
+        .toEqual([{ state: 'pending' }]);
+      expect((await db.query('SELECT source_message_id FROM voice_orders WHERE call_id=$1', [callId])).rows)
+        .toHaveLength(liveDelivery ? 2 : 1);
+    } finally {
+      if (callId) await voice.leave(callId, human);
+      await voice.close(); await db.close();
+    }
+  }, 30_000,
+);
