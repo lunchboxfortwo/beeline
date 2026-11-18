@@ -152,7 +152,7 @@ it('retains a refused stored answer and never runs the agent again on another qu
 });
 
 it('durably closes failed background work without a public answer or redelivery', async () => {
-  const f = await fixture(), item = { ...f.item('exited'), reason: 'schedule' };
+  const f = await fixture(), item = { ...f.item('exited'), reason: 'subscribed_event' };
   harness.deliver.mockRejectedValueOnce(new Error('signal SIGKILL'));
   f.changed([item]);
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({
@@ -228,8 +228,9 @@ it('continues delivering queued input while a stored answer awaits its post ackn
   await vi.waitFor(async () => expect(await new AnswerStore(join(f.root, 'answers')).all()).toEqual([]));
 });
 
-it.each(['end_turn', 'cancelled'])('answers busy-place human input in the next turn after %s', async stopReason => {
-  const f = await fixture(), first = f.item('running'), next = f.item('followup');
+it.each(['human_tag','schedule'].flatMap(reason=>['end_turn','cancelled'].map(stopReason=>({reason,stopReason}))))(
+  'answers busy-place $reason input in the next turn after $stopReason', async ({reason,stopReason}) => {
+  const f = await fixture(), first = f.item('running'), next = {...f.item('followup'),reason};
   const answering = deferred<Record<string, unknown>>();
   harness.deliver.mockReturnValueOnce(answering.promise);
   f.changed([first]);
@@ -277,18 +278,21 @@ it('posts an already stored answer when the outbox becomes unwritable afterwards
 });
 
 
-it('sends empty closing text through the answer exit and retains it while no answer exists',async()=>{
+it.each(['empty','failed'])('leaves an %s scheduled answer owed and delivers the pending request again',async outcome=>{
   const f=await fixture(),item={...f.item('empty-closing'),reason:'schedule'};
-  harness.deliver.mockResolvedValueOnce({text:'',steps:[],toolCalls:[],cleanup:async()=>{}});
+  if(outcome==='failed') harness.deliver.mockRejectedValueOnce(new Error('harness disconnected'));
+  else harness.deliver.mockResolvedValueOnce({text:'',steps:[],toolCalls:[],cleanup:async()=>{}});
   f.execute.mockImplementation(async name=>name==='postRoomMessage'?{id:'owed',createdAt:1,answered:false}:{id:'status',createdAt:1});
   f.changed([item]);
   await vi.waitFor(()=>expect(f.execute).toHaveBeenCalledWith('postRoomMessage',expect.objectContaining({text:'',requestId:item.turnRequestId})));
-  expect((await new AnswerStore(join(f.root,'answers')).all()).map(answer=>answer.itemId)).toEqual([item.id]);
+  await vi.waitFor(async()=>expect(await new AnswerStore(join(f.root,'answers')).all()).toEqual([]));
   expect(f.execute.mock.calls.some(call=>call[0]==='markAgentTurnSilent')).toBe(false);
   f.execute.mockResolvedValue({id:'posted',createdAt:1});
   f.changed([item]);
   await vi.waitFor(async()=>expect(await new AnswerStore(join(f.root,'answers')).all()).toEqual([]));
-  expect(harness.deliver).toHaveBeenCalledTimes(1);
+  await vi.waitFor(()=>expect(harness.deliver).toHaveBeenCalledTimes(2));
+  expect(harness.deliver).toHaveBeenLastCalledWith(item,[item]);
+  await vi.waitFor(()=>expect(f.execute).toHaveBeenCalledWith('postRoomMessage',expect.objectContaining({requestId:item.id,text:'answer'})));
 });
 
 it.each(['end_turn', 'cancelled'])('closes only background items in an empty reconnect batch after %s', async stopReason => {
