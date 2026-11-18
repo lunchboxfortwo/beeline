@@ -188,23 +188,51 @@ test('the server leg ends by requiring a real free-agent reply in the review pro
     /^free_agent_reply\)\n[\s\S]*?free-agent-reply-proof\.mjs[\s\S]*?^;;$/m);
 });
 
-for (const outcome of ['reply', 'failure']) test(`the free-agent reply proof ${outcome === 'reply' ? 'passes on' : 'fails on'} a ${outcome}`, async () => {
+for (const [delivery, outcome] of [
+  ['delta', 'reply'], ['delta', 'failure'],
+  ['invalidate', 'reply'], ['invalidate', 'failure'],
+  ['failed-turn', 'failure'], ['cancelled-turn', 'failure'],
+]) test(`the free-agent reply proof ${outcome === 'reply' ? 'passes on' : 'fails on'} a ${outcome} via ${delivery}`, async () => {
   const { createServer } = await import('node:http');
   const { WebSocketServer } = await import('ws');
   const { spawn } = await import('node:child_process');
   const agent = 'bb35cda30e5bcda7bb15d78fe2def34ecc9e2a389f5c455fad8e657b2d0aa4a6';
   const room = '79237f38-5214-47ef-b1ef-7bd8ad035d3a';
-  let socket, tagged;
+  const requestId = '1'.repeat(64); // The command ID, not its source message ID.
+  let socket, tagged, message, roomReads = 0;
   const server = createServer(async (request, response) => {
     let body = ''; for await (const chunk of request) body += chunk;
     response.setHeader('content-type', 'application/json');
     if (request.url === '/v1/auth/review/exchange') return response.end(JSON.stringify({ accessToken: 'synthetic-token' }));
     if (request.url === '/v1/phone/operations/sendRoomMessage') {
-      tagged = JSON.parse(body); response.end('{}');
-      socket.send(JSON.stringify({ type: 'message-delta', roomId: room, message: { id: 'reply', requestId: tagged.messageId,
-        author: { pubkey: agent }, presentation: outcome === 'reply' ? 'message' : 'system',
-        text: outcome === 'reply' ? 'Hello from Beebee.' : '@beebee_26 failed · Model request did not complete' } }));
+      tagged = JSON.parse(body);
+      // Production's 2026-11-18 reply used the command request ID; both live
+      // deltas and Room reads project messages.request_id without rewriting it.
+      message = { id: 'reply', requestId, liveTurnId: `live-turn:${requestId}`,
+        createdAt: 1795017258, createdAtMs: 1795017258844,
+        author: { pubkey: agent, kind: 'agent', name: 'Beebee', handle: 'beebee_26' },
+        presentation: outcome === 'reply' ? 'message' : 'system',
+        text: outcome === 'reply' ? 'Release proof: Beebee is online and ready to work in #general.' : '@beebee_26 failed · Model request did not complete' };
+      // A live event can arrive before the HTTP acknowledgement.
+      for (const unrelated of [{ ...message, requestId: 'unrelated-command', text: 'Old answer' },
+        { ...message, author: { pubkey: 'other-agent' }, text: 'Other agent' }])
+        socket.send(JSON.stringify({ type: 'message-delta', roomId: room, message: unrelated }));
+      socket.send(JSON.stringify(delivery === 'delta' ? { type: 'message-delta', roomId: room, message }
+        : delivery.endsWith('-turn') ? { type: 'turn-delta', roomId: room,
+          turn: { agentPubkey: agent, requestId, status: delivery.split('-')[0] } }
+        : { type: 'invalidate', roomId: room, reason: 'delta-fallback:postgres:messages' }));
+      response.end(JSON.stringify({ messageId: tagged.messageId,
+        pendingAgentCommands: [{ requestId: 'other-command', agentPubkey: 'other-agent', createdAt: 1795017221 },
+          { requestId, agentPubkey: agent, createdAt: 1795017221 }] }));
       return;
+    }
+    if (request.url === `/v1/phone/rooms/${room}`) {
+      roomReads++;
+      return response.end(JSON.stringify({ room: { id: room }, messages: [
+        { ...message, id: 'old-reply', requestId: 'unrelated-command', text: 'Old answer' },
+        { ...message, id: 'other-agent', author: { pubkey: 'other-agent' } },
+        ...(delivery.endsWith('-turn') ? [] : [message]),
+      ] }));
     }
     response.statusCode = 404; response.end('{}');
   });
@@ -222,12 +250,15 @@ for (const outcome of ['reply', 'failure']) test(`the free-agent reply proof ${o
   try {
     const child = spawn(process.execPath, ['packages/scripts/release-steps/free-agent-reply-proof.mjs'], {
       env: { PATH: process.env.PATH, SERVER_CANARY_REVIEW_SECRET: 'synthetic-secret',
-        BEELINE_PROOF_ORIGIN: `http://127.0.0.1:${server.address().port}` }, stdio: ['ignore', 'pipe', 'pipe'] });
+        BEELINE_PROOF_ORIGIN: `http://127.0.0.1:${server.address().port}` }, stdio: ['ignore', 'pipe', 'pipe'], timeout: 5000 });
     let output = ''; child.stdout.on('data', chunk => { output += chunk; }); child.stderr.on('data', chunk => { output += chunk; });
     const code = await new Promise(resolve => child.once('exit', resolve));
     assert.equal(tagged.roomId, room);
     assert.match(tagged.text, /^@beebee_26 /);
-    if (outcome === 'reply') { assert.equal(code, 0, output); assert.match(output, /answered the release proof/); }
+    assert.notEqual(tagged.messageId, requestId);
+    assert.equal(roomReads, delivery === 'delta' ? 0 : 1);
+    if (outcome === 'reply') { assert.equal(code, 0, output); assert.match(output, /answered the release proof.*Release proof: Beebee is online/); }
+    else if (delivery.endsWith('-turn')) { assert.notEqual(code, 0); assert.match(output, new RegExp(`Free agent turn ${delivery.split('-')[0]} without a reply`)); }
     else { assert.notEqual(code, 0); assert.match(output, /Free agent turn failed: .*Model request did not complete/); }
   } finally { for (const client of live.clients) client.terminate(); live.close(); server.close(); }
 });

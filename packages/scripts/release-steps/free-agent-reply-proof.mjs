@@ -24,12 +24,13 @@ const sentAt = Date.now();
 const outcome = await new Promise((resolve, reject) => {
   const socket = new WebSocket(`${origin.replace(/^http/, 'ws')}/v1/phone/live`, [`bearer.${accessToken}`]);
   let sent = false, settled = false, reading = false, dirty = false;
+  let accepted, requestId;
   const finish = (error, value) => {
     if (settled) return; settled = true; socket.close();
     if (error) reject(error); else resolve(value);
   };
   const judge = message => {
-    if (message?.author?.pubkey !== agentId || message.requestId !== messageId) return;
+    if (message?.author?.pubkey !== agentId || message.requestId !== requestId) return;
     if (message.presentation === 'message' && message.text) finish(undefined, message.text);
     else if (message.presentation === 'system') finish(new Error(`Free agent turn failed: ${message.text}`));
   };
@@ -46,21 +47,28 @@ const outcome = await new Promise((resolve, reject) => {
     } catch (error) { finish(error); } finally { reading = false; }
   };
   socket.addEventListener('open', () => socket.send(JSON.stringify({ type: 'subscribe', roomId, roomStateProjections: true })));
-  socket.addEventListener('message', event => {
+  socket.addEventListener('message', async event => {
     const frame = JSON.parse(String(event.data));
     if (frame.type === 'subscribed' && !sent) {
       sent = true;
-      fetch(`${origin}/v1/phone/operations/sendRoomMessage`, {
+      accepted = fetch(`${origin}/v1/phone/operations/sendRoomMessage`, {
         method: 'POST', headers,
         body: JSON.stringify({ roomId, messageId, text: `@${handle} Release proof: reply with one short sentence.` }),
       }).then(async response => {
-        if (!response.ok) finish(new Error(`Proof tag failed with HTTP ${response.status}: ${await response.text()}`));
-      }, finish);
+        if (!response.ok) throw new Error(`Proof tag failed with HTTP ${response.status}: ${await response.text()}`);
+        // Replies name the accepted agent command, not the human source message.
+        const receipt = await response.json();
+        requestId = receipt.pendingAgentCommands?.find(command => command.agentPubkey === agentId)?.requestId;
+        if (!requestId) throw new Error('Proof tag accepted no command for the free agent');
+      }).catch(finish);
       return;
     }
     if (frame.roomId !== roomId) return;
+    // Committed live frames may beat the HTTP receipt carrying that command ID.
+    await accepted;
+    if (!sent || settled) return;
     if (frame.type === 'message-delta') judge(frame.message);
-    else if (frame.type === 'turn-delta' && frame.turn?.agentPubkey === agentId && frame.turn.requestId === messageId &&
+    else if (frame.type === 'turn-delta' && frame.turn?.agentPubkey === agentId && frame.turn.requestId === requestId &&
         (frame.turn.status === 'failed' || frame.turn.status === 'cancelled'))
       void read().then(() => finish(new Error(`Free agent turn ${frame.turn.status} without a reply`)));
     else if (frame.type === 'invalidate') void read();
