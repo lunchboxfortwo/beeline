@@ -91,12 +91,13 @@ describe('connected agent message protocol',()=>{
     for(const [address,place] of [[PRIVATE,ROOM],[ROOM,PRIVATE]])
       expect((await tools.call(client,'message',{address,to:{agent:USER,place},text:'Forbidden'})).error).toBe(true);
   });
-  it('keeps two asks independent and records the recommended option',async()=>{
+  it('keeps asks for separate tasks independent and records the recommended option',async()=>{
     const {client,member}=await scope.connected();
     const task=await humanTask(member);
     const ask={question:'Which proof?',options:['Server','Body'],recommended:'Server'};
     const first=await tools.ok(client,'reply',{id:task.id,text:'Choose a proof',ask});
-    const second=await tools.ok(client,'reply',{id:task.id,text:'Choose another proof',ask});
+    const next=await humanTask(member,'Inspect another widget');
+    const second=await tools.ok(client,'reply',{id:next.id,text:'Choose another proof',ask});
     expect(first.id).not.toBe(second.id);
     expect((await scope.db.query('SELECT message_id,recommended_option_id FROM work_questions WHERE message_id=ANY($1::text[])',[ [first.id,second.id] ])).rows)
       .toEqual(expect.arrayContaining([{message_id:first.id,recommended_option_id:expect.any(String)},{message_id:second.id,recommended_option_id:expect.any(String)}]));
@@ -125,7 +126,7 @@ describe('connected agent message protocol',()=>{
     const work=await tools.ok(client,'message',{address:ROOM,to:{agent:'implementer',place:PUBLIC_CORNER},text:'Check the widget'});
     await scope.daemon.execute('reply',{id:work.id,text:'Checked'},AGENT);
     const wake=(await tools.ok(client,'list_mentions',{})).wakes.find((item:{text:string})=>item.text==='Checked');
-    expect(wake).toMatchObject({address:ROOM,from:{agent:AGENT,place:PUBLIC_CORNER}});
+    expect(wake).toMatchObject({address:PUBLIC_CORNER,from:{agent:AGENT,place:PUBLIC_CORNER}});
     const final=await tools.ok(client,'reply',{id:task.id,text:'The widget is checked'});
     expect((await scope.db.query('SELECT room_id,card FROM messages WHERE id=$1',[final.id])).rows)
       .toMatchObject([{room_id:ROOM,card:{route:{to:{agent:USER,place:ROOM}}}}]);

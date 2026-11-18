@@ -1,3 +1,4 @@
+import { insertCornerFacts } from './test-support.js';
 import { queueMessage } from './agent-command.js';
 import { SYSTEM_AUTHOR_ID, systemText } from './message-origin.js';
 import { MCP_RETIRED_TOOLS } from './rooms-mcp-agent.js';
@@ -17,11 +18,12 @@ describe('C4: external agents route like native agents', () => {
     await db().query('INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)', [REVIEWER, USER]);
     await db().query("INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')", [WORKSPACE, ROOM, REVIEWER]);
     await db().query("INSERT INTO rooms(id,workspace_id,name,parent_id) VALUES($1,$2,'Sibling',$3)", [SIBLING, WORKSPACE, ROOM]);
+    await insertCornerFacts(db(), { cornerId: SIBLING });
   });
   beforeEach(async () => {
     await db().query("DELETE FROM agent_commands");
     await db().query('UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1', [ROOM, REVIEWER]);
-    await db().query('UPDATE corner_facts SET implementer_agent_id=$2 WHERE corner_id=$1', [THREAD, AGENT]);
+    await db().query('UPDATE corner_facts SET implementer_agent_id=$2 WHERE corner_id=ANY($1::uuid[])', [[THREAD, SIBLING], AGENT]);
   });
   /** A connected external member, also reachable in a DM with its person. */
   async function external() {
@@ -37,46 +39,48 @@ describe('C4: external agents route like native agents', () => {
     `SELECT id,room_id,message->'route'->'from' "from",private_payload->'messageAsk' ask FROM agent_commands
      WHERE agent_id=$1 AND state='pending' AND reason<>'mcp_call' ORDER BY created_at,id`, [agent])).rows;
   const settle = () => db().query("UPDATE agent_commands SET state='complete' WHERE state='pending'");
-  const wake = async (agent: string, reason = 'corner_check') => (await queueMessage(db(), { roomId: THREAD, agentId: agent, sourceMessageId: null, reason,
-    privatePayload: { kind: 'lifecycle', authorId: SYSTEM_AUTHOR_ID, fromRoomId: THREAD, text: systemText('Checks failed') } }))!;
+  const wake = async (agent: string, reason = 'corner_check', place = THREAD) => (await queueMessage(db(), { roomId: place, agentId: agent, sourceMessageId: null, reason,
+    privatePayload: { kind: 'lifecycle', authorId: SYSTEM_AUTHOR_ID, fromRoomId: place, text: systemText('Checks failed') } }))!;
 
   it.each(Object.entries(places).flatMap(([name, id]) => Object.entries(roles).map(([role, worker]) => [name, role, id, worker] as const)))(
     'an external commander in the %s messages the thread %s over MCP and receives plain, ask and blocked replies there', async (_name, role, place, worker) => {
       const { client, member } = await external();
+      const delivery = place === SIBLING ? SIBLING : THREAD;
       const sent = await tools.ok(client, 'message', { address: place, to: { agent: role, place: THREAD }, text: 'Build widget' });
-      expect((await pending(worker)).map(row => row.room_id)).toEqual([THREAD]);
+      expect((await pending(worker)).map(row => row.room_id)).toEqual([delivery]);
       await settle();
       await scope.daemon.execute('reply', { id: sent.id, text: 'Done' }, worker);
       await scope.daemon.execute('reply', { id: sent.id, text: 'blocked: need a choice', ask }, worker);
       // A System wake in the thread continues the commander's task.
-      if (role === 'implementer') await scope.daemon.execute('reply', { id: (await wake(worker)).id, text: 'blocked: build access', ask }, worker);
+      if (role === 'implementer') await scope.daemon.execute('reply', { id: (await wake(worker, 'corner_check', delivery)).id, text: 'blocked: build access', ask }, worker);
       const wakes = (await tools.ok(client, 'list_mentions', {})).wakes as { address: string; from: unknown }[];
       expect(wakes.map(item => [item.address, item.from])).toEqual(
-        Array(role === 'implementer' ? 3 : 2).fill([place, { agent: worker, place: THREAD }]));
+        Array(role === 'implementer' ? 3 : 2).fill([delivery, { agent: worker, place: delivery }]));
       expect((await pending(member)).map(row => Boolean(row.ask))).toEqual(role === 'implementer' ? [false, true, true] : [false, true]);
     });
 
   it.each(Object.entries(places))('an external thread implementer replies over MCP to a native commander in the %s, including after a System wake', async (_place, place) => {
     const { client, member } = await external();
-    await db().query('UPDATE corner_facts SET implementer_agent_id=$2 WHERE corner_id=$1', [THREAD, member]);
+    const delivery = place === SIBLING ? SIBLING : THREAD;
+    await db().query('UPDATE corner_facts SET implementer_agent_id=$2 WHERE corner_id=ANY($1::uuid[])', [[THREAD, SIBLING], member]);
     if (place === DM) await db().query("INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')", [WORKSPACE, DM, AGENT]);
     const sent = await scope.daemon.execute('message', { roomId: place, to: { agent: 'implementer', place: THREAD }, text: 'Build widget' }, AGENT);
     const received = (await tools.ok(client, 'list_mentions', {})).wakes as { id: string; address: string; from: unknown }[];
-    expect(received.map(item => [item.id, item.address, item.from])).toEqual([[sent.id, THREAD, { agent: AGENT, place }]]);
+    expect(received.map(item => [item.id, item.address, item.from])).toEqual([[sent.id, delivery, { agent: AGENT, place }]]);
     await tools.ok(client, 'reply', { id: sent.id, text: 'Done' });
-    const system = await wake(member);
+    const system = await wake(member, 'corner_check', delivery);
     await tools.ok(client, 'reply', { id: system.id, text: 'blocked: build access', ask });
     expect((await pending(AGENT)).map(row => [row.room_id, row.from, Boolean(row.ask)])).toEqual([
-      [place, { agent: member, place: THREAD }, false],
-      [place, { agent: member, place: THREAD }, true],
+      [delivery, { agent: member, place: delivery }, false],
+      [delivery, { agent: member, place: delivery }, true],
     ]);
     // Condition 3 for an external worker: none of its work was queued outside the thread.
-    expect((await db().query("SELECT room_id FROM agent_commands WHERE agent_id=$1 AND room_id<>$2 AND reason<>'mcp_call'", [member, THREAD])).rows).toEqual([]);
+    expect((await db().query("SELECT room_id FROM agent_commands WHERE agent_id=$1 AND room_id<>$2 AND reason<>'mcp_call'", [member, delivery])).rows).toEqual([]);
   });
 
   it('a joined session uses the same tools/call request as usebeeline session reply --reply-to and session tool message', async () => {
     const { token, member } = await external();
-    await db().query('UPDATE corner_facts SET implementer_agent_id=$2 WHERE corner_id=$1', [THREAD, member]);
+    await db().query('UPDATE corner_facts SET implementer_agent_id=$2 WHERE corner_id=ANY($1::uuid[])', [[THREAD, SIBLING], member]);
     // The exact JSON-RPC body and headers of the body's session-join callTool.
     const session = async (name: string, args: Record<string, unknown>) => {
       const response = await scope.post('/mcp', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } },
@@ -89,24 +93,24 @@ describe('C4: external agents route like native agents', () => {
     await session('reply', { id: sent.id, text: 'Done' });
     await session('reply', { id: (await wake(member)).id, text: 'blocked: build access' });
     const asked = await session('message', { address: THREAD, to: { agent: 'reviewer', place: THREAD }, text: 'Please review', ask });
-    expect((await pending(AGENT)).map(row => row.room_id)).toEqual([ROOM, ROOM]);
+    expect((await pending(AGENT)).map(row => row.room_id)).toEqual([THREAD, THREAD]);
     await scope.daemon.execute('reply', { id: asked.id, text: 'Approved' }, REVIEWER);
     expect((await session('list_mentions', {})).wakes.map((item: { address: string; from: unknown }) => [item.address, item.from]))
       .toEqual([[THREAD, { agent: REVIEWER, place: THREAD }]]);
   });
 
-  it('a host with a stale cached tool list learns each replacement, can read its wakes, and cannot answer them until refreshed', async () => {
+  it('a host with a stale cached tool list learns each replacement and its final thread post answers there', async () => {
     const { client, member } = await external();
     for (const [name, replacement] of Object.entries(MCP_RETIRED_TOOLS))
       expect(await tools.call(client, name, {})).toEqual({ error: true, text: `Request refused: ${name} is retired: ${replacement}.` });
-    await db().query('UPDATE corner_facts SET implementer_agent_id=$2 WHERE corner_id=$1', [THREAD, member]);
+    await db().query('UPDATE corner_facts SET implementer_agent_id=$2 WHERE corner_id=ANY($1::uuid[])', [[THREAD, SIBLING], member]);
     const sent = await scope.daemon.execute('message', { roomId: ROOM, to: { agent: 'implementer', place: THREAD }, text: 'Build widget' }, AGENT);
     // list_mentions and post predate the messaging tools, so a stale host still has them.
     const [received] = (await tools.ok(client, 'list_mentions', {})).wakes as { id: string; next: string }[];
     expect(received).toMatchObject({ id: sent.id, next: expect.stringContaining(`Reply(id: ${sent.id}, text: ...) with your reply`) });
-    // A public post is conversation; only reply(id) answers the recorded sender.
+    // A final post at the same return address answers the pending thread request.
     for (const address of [ROOM, THREAD]) await tools.ok(client, 'post', { address, text: 'Done' });
-    expect(await pending(AGENT)).toEqual([]);
-    expect((await pending(member)).map(row => row.id)).toEqual([sent.id]);
+    expect((await pending(AGENT)).map(row => [row.room_id, row.from])).toEqual([[THREAD, { agent: member, place: THREAD }]]);
+    expect(await pending(member)).toEqual([]);
   });
 });

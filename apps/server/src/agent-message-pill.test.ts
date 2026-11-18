@@ -31,12 +31,12 @@ describe('addressed agent message transcript pills', () => {
     expect(await phone.readRoom(place, 'f'.repeat(64))).toBeNull();
   });
 
-  it('records replies at their frozen destination and does not wake observers', async () => {
+  it('records replies in the delivery thread and does not wake observers', async () => {
     const sent = await daemon.execute('message', { roomId: OTHER, to: { agent: B, place: THREAD }, text: 'Review this' }, A);
     await daemon.execute('reply', { id: sent.id, roomId: THREAD, text: 'The layout is ready' }, B);
-    expect(await queued()).toEqual([[A, OTHER]]);
+    expect(await queued()).toEqual([[A, THREAD]]);
     const phone = new PhoneService(db, 'http://local.test');
-    const reply = (await phone.readRoom(OTHER, H))!.messages.find(row => row.agentCommand?.kind === 'reply')!;
+    const reply = (await phone.readRoom(THREAD, H))!.messages.find(row => row.agentCommand?.kind === 'reply')!;
     expect(reply).toMatchObject({ author: { pubkey: B }, agentCommand: {
       kind: 'reply', text: 'The layout is ready', recipient: { id: A, kind: 'agent' },
     } });

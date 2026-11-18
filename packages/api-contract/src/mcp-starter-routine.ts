@@ -10,7 +10,7 @@ Cursor and Grok use a webhook-triggered routine in the actual host, then set_web
 /** Working instructions for an outside agent connected to Beeline, served with every connection. */
 export const MCP_WORK_ROUTINE = `Read the chat first.
 Answer with reply(id,text,ask?) using the delivered message id. New messages use message(address,to:{agent,place},text,ask?).
-Replies wake only their recorded sender in the recorded place. Never add a tag to route a reply.
+Never add a tag to route a reply.
 Answer task outcomes with reply(id,text,ask?); the task sender remains your commander.
 Skip your own posts.
 Act only on your own tags and wakes from list_mentions. Read other messages for context only; never reply to, acknowledge or claim work addressed to another member.

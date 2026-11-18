@@ -3,7 +3,7 @@ import { parseAgentAccessPolicy,senderMayAddressAgent } from '@beeline/api-contr
 import { attachQueuedContext } from './agent-command-context.js';
 import { initializeThreadImplementer } from './corner-lifecycle.js';
 import { sendMessage } from './agent-messaging.js';
-import { recordedMessageRoute } from './message-route.js';
+import { recordedMessageRoute,threadMessageRoute } from './message-route.js';
 import { ensureSystemIdentity } from './system-line.js';
 import type { AgentCommand,AgentCommandAction,RoomInboxResult,MessageRoute,MessageAsk } from '@beeline/api-contract/daemon';
 import { boundReplyExcerpt,isInformationalReply,isBackgroundCommand,wall } from '@beeline/api-contract/daemon';
@@ -319,13 +319,7 @@ export async function hasPendingCornerReview(db: SqlDatabase, roomId: string, ag
     [roomId,agentId,headSha,pullRequest == null ? null : json(pullRequest)])).rowCount > 0;
 }
 
-/** Read the same root requester that cancelAgentTurn authorizes, including relayed turns. */
-export function turnRootMessageSql(turn: 'turn' | 'written'): string {
-  return `COALESCE((SELECT command.root_source_message_id FROM agent_commands command
-    WHERE command.room_id=${turn}.room_id AND command.agent_id=${turn}.agent_id
-      AND command.turn_request_id=${turn}.request_id
-    ORDER BY command.created_at DESC,command.id DESC LIMIT 1),${turn}.request_id)`;
-}
+export { turnRootMessageSql } from './message-route.js';
 
 export function nextAgentDepth(parentDepth: number): number {
   return parentDepth + 1;
@@ -737,9 +731,13 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
     returnIdentityId: payload.replyAddress?.agent ?? payload.route?.from.agent ?? (cornerWake ? undefined : handover?.author_id ?? payload.returnIdentityId ?? (payload.kind === 'order' ? payload.authorId
       : (parent?.agent_id === input.agentId && parentReturn!==input.agentId ? parentReturn : undefined) ?? chat.parent_source?.author_id)),
   } as PrivateCommandPayload;
-  const returnRoom = workflowOwner ? chat.id : payload?.replyAddress?.place ?? payload?.route?.from.place ?? (input.reason === 'schedule' || cornerWake ? chat.id : payload?.kind === 'order' ? payload.fromRoomId : payload || lifecycle
+  let returnRoom = workflowOwner ? chat.id : payload?.replyAddress?.place ?? payload?.route?.from.place ?? (input.reason === 'schedule' || cornerWake ? chat.id : payload?.kind === 'order' ? payload.fromRoomId : payload || lifecycle
     ? handover?.approval_basis.commanderReturnRoomId ?? handover?.source_room_id ??
       (parent?.agent_id === input.agentId ? parent.return_room_id : undefined) ?? chat.parent_source?.room_id ?? parent?.return_room_id ?? chat.id : chat.id);
+  const returnIdentity = payload?.replyAddress?.agent ?? payload?.route?.from.agent ?? payload?.returnIdentityId;
+  if (chat.parent_id && returnIdentity) returnRoom = (await threadMessageRoute(db, {
+    from: { agent: input.agentId, place: chat.id }, to: { agent: returnIdentity, place: returnRoom! },
+  })).to.place;
   const reviewSource = input.reason === 'report' ? input.reportSource ?? input.parent : input.parent;
   const selectedReview=chat.review?.agentId===input.agentId && chat.review.headSha &&
     ['corner_review_dispatch','subscribed_event','agent_tag','order','message'].includes(input.reason) ? chat.review : undefined;
@@ -890,7 +888,9 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
     }
     const payload = item?.private_payload;
     if (item && item.state!=='cancelled' && !input.report && (!item.public_reply_id || input.explicitReply) && (item.message?.route || payload?.route || input.explicitReply)) {
-      const route = await recordedMessageRoute(db,item);
+      const recorded = await recordedMessageRoute(db,item);
+      const reply = await threadMessageRoute(db, { from: { agent: agentId, place: input.replyFromPlace ?? input.roomId }, to: recorded.from }, item.room_id);
+      const route = { ...recorded, from: reply.to };
       const messageText=repairAgentPost(item.reason==='voice_order' ? cleanVoiceReply(input.text,item.name) : input.text).text.trim();
       if (!messageText && !item.answer_attachments?.length && !input.sharedReplyId && (payload?.automatic || isBackgroundCommand(item.reason) || isInformationalReply(item.reason,payload?.messageAsk))) {
         completedNow=true;
@@ -908,7 +908,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
       const saved = input.sharedReplyId ? await queueMessage(db,{kind:'delivery',roomId:route.from.place,
         authorId:agentId,recipientId:route.from.agent,sourceRoomId:input.roomId,sourceItem:item,
         id:input.sharedReplyId,postedReplyId:input.sharedReplyId,text:modelText(''),attachments:item.answer_attachments}) : await sendMessage(db,{
-        route:{from:{agent:agentId,place:input.replyFromPlace ?? input.roomId},to:route.from},text:messageText,
+        route:{from:reply.from,to:route.from},text:messageText,
         ask:input.messageAsk,id:hash(`answer:${item.id}:${route.from.place}:${route.from.agent}${input.messageAsk ? ':ask' : ''}`),parent:item,
         replyTo:item.id,attachments:[...new Map([...(payload?.attachments ?? []),...(item.answer_attachments ?? [])].map(file=>[file.url,file])).values()],
       });

@@ -34,7 +34,7 @@ it('S8: an outstanding ask suppresses idle notices',async()=>{
     ask:{question:'Which output?',options:['Web','Phone']}});
   for(let event=0;event<3;event++) await refreshCornerAttention(db,THREAD);
   expect((await db.query(cornerIdleSql('$1'),[THREAD])).rows[0]).toMatchObject({blocking:true,idle_eligible:false});
-  expect(await queued()).toEqual([[A,CHAT]]);
+  expect(await queued()).toEqual([[A,THREAD]]);
   expect((await db.query("SELECT 1 FROM agent_commands WHERE private_payload->>'automatic'='true'")).rowCount).toBe(0);
 });
 

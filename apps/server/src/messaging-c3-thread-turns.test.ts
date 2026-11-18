@@ -32,8 +32,8 @@ describe('C3: thread work never takes a turn in the parent chat', () => {
     await fixtureScope18().checkRun(thread, 'typecheck', 'failure');
     for (const wake of await pendingFor(thread, A))
       await rootFixture.daemon.execute('reply', { id: wake.id, text: 'blocked: need build access', ask: { question: 'Grant access?', options: ['Yes', 'No'] } }, A);
-    // An agent commander answers in its own place; the answer wakes the implementer in the thread.
-    const asked = (await pendingFor(R, F)).filter(row => row.reason === 'reply' && row.ask);
+    // An agent commander answers in the thread; the answer wakes the implementer in the thread.
+    const asked = (await pendingFor(thread, F)).filter(row => row.reason === 'reply' && row.ask);
     expect(asked.length).toBe(opener === 'another agent' ? 1 : 0);
     for (const row of asked) await rootFixture.daemon.execute('reply', { id: row.id, text: 'Access granted' }, F);
     expect((await pendingFor(thread, A)).map(row => row.reason)).toEqual(asked.map(() => 'reply'));

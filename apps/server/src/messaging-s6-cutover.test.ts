@@ -21,5 +21,5 @@ it('S6: queued legacy order, report and corner_land items retain ids, text, orig
   await answerQueuedMessage(db,B,{roomId:THREAD,requestId:land!.id,text:'',harnessEnded:true});
   expect((await db.query("SELECT state FROM agent_commands WHERE id=ANY($1::text[])",[[task!.id,report!.id,land!.id]])).rows)
     .toEqual([{state:'complete'},{state:'complete'},{state:'complete'}]);
-  expect(await queued()).toEqual([[A,CHAT],[B,THREAD]]);
+  expect(await queued()).toEqual([[A,THREAD],[B,THREAD]]);
 });

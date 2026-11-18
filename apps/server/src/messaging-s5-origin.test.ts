@@ -5,8 +5,8 @@ import { SYSTEM_AUTHOR_ID,modelText,systemText } from './message-origin.js';
 import { systemLine } from './system-line.js';
 import { H,A,B,C,CHAT,THREAD,db,queued } from './messaging.test-support.js';
 
-it('S5: a failing-check wake keeps its thread origin and replies to the task sender in the original chat',async()=>{
-  // https://github.com/Beeline-Work/beeline/pull/59: Ruby was woken in the thread while its return place was Milo.
+it('S5: a failing-check wake keeps its thread origin and replies to the task sender in the delivery thread',async()=>{
+  // The original chat address cannot move an agent reply out of the thread.
   await queueMessage(db,{roomId:THREAD,agentId:B,sourceMessageId:null,reason:'corner_objective',
     privatePayload:{kind:'message',text:modelText('Build widget'),authorId:A,fromRoomId:CHAT,
       route:{from:{agent:A,place:CHAT},to:{agent:B,place:THREAD}}}});
@@ -17,10 +17,10 @@ it('S5: a failing-check wake keeps its thread origin and replies to the task sen
   expect(wake.from).toEqual({agent:SYSTEM_AUTHOR_ID,place:THREAD});
   expect(await queued()).toEqual([[B,THREAD]]);
   await replyToMessage(db,B,{id:failure!.id,text:'Need build access'});
-  expect(await queued()).toEqual([[A,CHAT]]);
+  expect(await queued()).toEqual([[A,THREAD]]);
   const delivered=(await readAgentCommands(db,A)).commands[0]!;
   expect(delivered.from).toEqual({agent:B,place:THREAD});
-  expect(delivered.roomId).toBe(CHAT);
+  expect(delivered.roomId).toBe(THREAD);
   expect((await readAgentCommands(db,C)).commands).toEqual([]);
 });
 
@@ -33,5 +33,5 @@ it('S5: a System event retains its thread commander even when its source line re
   const item=await queueMessage(db,{roomId:THREAD,agentId:B,sourceMessageId:note.id,reason:'corner_check'});
   expect((await readAgentCommands(db,B)).commands[0]!.from).toEqual({agent:SYSTEM_AUTHOR_ID,place:THREAD});
   await replyToMessage(db,B,{id:item!.id,text:'Build access is missing'});
-  expect(await queued()).toEqual([[A,CHAT]]);
+  expect(await queued()).toEqual([[A,THREAD]]);
 });
