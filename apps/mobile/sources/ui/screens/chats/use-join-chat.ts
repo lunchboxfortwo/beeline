@@ -27,5 +27,18 @@ export function useJoinChat(
       setJoining(null);
     }
   }, [fail, open, refresh, viewer]);
-  return { joining, join };
+  const [clearing, setClearing] = useState(false);
+  const clearJoinable = useCallback(async (workspaceId: string) => {
+    if (!viewer) return;
+    setClearing(true);
+    try {
+      await monolithPhoneOperation('clearJoinableChats', { workspaceId });
+      refresh();
+    } catch (caught) {
+      fail(appErrorCopy(caught));
+    } finally {
+      setClearing(false);
+    }
+  }, [fail, refresh, viewer]);
+  return { joining, join, clearing, clearJoinable };
 }

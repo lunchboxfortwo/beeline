@@ -1,3 +1,4 @@
+import { Button } from '@/components/buzz/Button';
 import { WorkStateMark } from '@/ui/screens/tags/WorkMarks';
 import { RepositoryMark } from '@/components/buzz/RepositoryMark';
 import React, { useRef, useState } from 'react';
@@ -343,19 +344,25 @@ export function ChatRowDivider({ roomId }: { roomId: string }) {
 export function JoinableChats({
   chats,
   joining,
+  clearing,
+  onClear,
   onJoin,
 }: {
   chats: NonNullable<ChatListView['joinable']>;
   joining: string | null;
+  clearing: boolean;
+  onClear: () => void;
   onJoin: (roomId: string, name: string) => void;
 }) {
   if (!chats.length) return null;
   return (
     <YStack paddingHorizontal="4" paddingTop="3" paddingBottom="4" gap="2" testID="public-to-join">
       <Separator borderColor="stroke" marginBottom="2" />
-      <T v="metaStrong" color="secondary">
-        Public chats you can join
-      </T>
+      <XStack gap="2" alignItems="center">
+        <T v="metaStrong" color="secondary" flex={1}>Public chats you can join</T>
+        <Button label="Clear" size="inline" variant="secondary" alignSelf="center"
+          disabled={clearing} onPress={onClear} testID="clear-joinable" />
+      </XStack>
       {chats.map((chat) => (
         <XStack
           key={chat.id}

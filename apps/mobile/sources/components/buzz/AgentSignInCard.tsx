@@ -177,7 +177,9 @@ export function AgentSignInCard({
     last: boolean,
   ) => (
     <Step last={last}>
-      <WorkflowStepCircle status={opened ? 'done' : 'current'} />
+      <YStack width={26} alignItems="center">
+        <WorkflowStepCircle status={opened ? 'done' : 'current'} />
+      </YStack>
       <StepBody>
         <T>{opened ? label.done : label.ahead}</T>
         <XStack alignItems="center" gap="2">
@@ -208,15 +210,18 @@ export function AgentSignInCard({
     </Step>
   );
 
-  const waitLine = (text: string) => (
-    <XStack alignItems="center" gap="2">
-      <StateDot kind="pulse" />
+  const waitLine = (text: string, inStep = false) => (
+    <XStack position="relative" alignItems="center" gap="2">
+      <YStack position={inStep ? 'absolute' : 'relative'} left={inStep ? -34 : undefined}
+        width={inStep ? 26 : 8} height={19} alignItems="center" justifyContent="center">
+        <StateDot kind="pulse" />
+      </YStack>
       <T v="meta" color="secondary" flex={1} minWidth={0}>{text}</T>
     </XStack>
   );
 
   const field = (placeholder: string, secure: boolean) => (
-    <XStack flexWrap="wrap" gap="2">
+    <XStack flexWrap="wrap" alignItems="center" gap="2">
       <Input
         flex={1}
         flexBasis={120}
@@ -244,6 +249,7 @@ export function AgentSignInCard({
         label={value ? 'Clear' : 'Paste'}
         onPress={() => (value ? setValue('') : void paste())}
         testID={`${testID}-paste`}
+        alignSelf="center"
         size="inline"
         variant="secondary"
       />
@@ -264,16 +270,23 @@ export function AgentSignInCard({
           false,
         )}
         <Step last>
-          <WorkflowStepCircle status={opened || value ? 'current' : 'pending'} />
+          <YStack width={26} alignItems="center">
+            <WorkflowStepCircle status={opened || value ? 'current' : 'pending'} />
+          </YStack>
           <StepBody>
             <T color={opened || value ? 'ink' : 'secondary'}>
               {`Paste the code ${service.site} shows`}
             </T>
             {field(`Code from ${service.site}`, false)}
             {value && CLAUDE_CODE_SHAPE.test(value) ? (
-              <T v="meta" color="secondary" testID={`${testID}-shape`}>
-                {`✓ Looks like a ${service.name} login code · ${maskMiddle(value)}`}
-              </T>
+              <XStack gap="1" alignItems="center" minWidth={0} testID={`${testID}-shape`}>
+                <T v="meta" color="secondary" flex={1} minWidth={0} numberOfLines={1}>
+                  {`✓ Looks like a ${service.name} login code ·`}
+                </T>
+                <T v="meta" color="secondary" flexShrink={0} numberOfLines={1}>
+                  {maskMiddle(value)}
+                </T>
+              </XStack>
             ) : null}
             {failureLine}
             <Button
@@ -308,7 +321,9 @@ export function AgentSignInCard({
           false,
         )}
         <Step last>
-          <WorkflowStepCircle status={opened ? 'current' : 'pending'} />
+          <YStack width={26} alignItems="center">
+            <WorkflowStepCircle status={opened ? 'current' : 'pending'} />
+          </YStack>
           <StepBody>
             <T>Enter this code there</T>
             <XStack flexWrap="wrap" alignItems="center" gap="2">
@@ -329,6 +344,7 @@ export function AgentSignInCard({
                   minutes
                     ? `Waiting for approval · expires in ${minutes} min`
                     : 'Waiting for approval',
+                  true,
                 )}
             {card.harness === 'codex' ? (
               <T v="meta" color="secondary">
@@ -391,11 +407,13 @@ export function AgentSignInCard({
       stamp={stamp}
       subline={subline}
       testID={testID}
+      padding="4"
+      alignSublineWithTitle
       tier={ask ? 'ask' : 'record'}
       title={title}
     >
       {steps ? (
-        <YStack paddingHorizontal="4" paddingTop="2" paddingBottom="4" minWidth={0} testID={`${testID}-body`}>
+        <YStack paddingHorizontal="0" paddingTop="0" paddingBottom="0" minWidth={0} testID={`${testID}-body`}>
           {steps}
         </YStack>
       ) : null}
@@ -406,7 +424,7 @@ export function AgentSignInCard({
 /** One numbered step: circle, then its body; a stroke divides it from the next. */
 function Step({ last = false, children }: { last?: boolean; children: React.ReactNode }) {
   return (
-    <XStack gap="4" paddingTop="4" paddingBottom={last ? 0 : '4'} borderBottomWidth={last ? 0 : 1} borderBottomColor="stroke">
+    <XStack gap="2" paddingTop="2" paddingBottom={last ? 0 : '3'} borderBottomWidth={last ? 0 : 1} borderBottomColor="stroke">
       {children}
     </XStack>
   );

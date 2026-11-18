@@ -48,6 +48,9 @@ type TranscriptCardNoteInput = {
 
 export type TranscriptCardProps = {
   tier: TranscriptCardTier;
+  /** Uniform inner inset; sign-in steps use the standard gutter. */
+  padding?: '3' | '4';
+  alignSublineWithTitle?: boolean;
   title: ReactNode;
   wrapTitle?: boolean;
   subline?: ReactNode;
@@ -99,6 +102,8 @@ export type TranscriptCardProps = {
  */
 export function TranscriptCard({
   tier,
+  padding = '3',
+  alignSublineWithTitle = false,
   title,
   wrapTitle = false,
   subline,
@@ -147,6 +152,9 @@ export function TranscriptCard({
       {identity ? <YStack>{identity}</YStack> : null}
       <YStack flex={1} minWidth={0}>
         <T v="heading" numberOfLines={wrapTitle ? undefined : 1} testID={titleTestID}>{title}</T>
+        {alignSublineWithTitle && subline ? (
+          <T v="meta" color="secondary" numberOfLines={sublineLines} testID={sublineTestID}>{subline}</T>
+        ) : null}
       </YStack>
     </XStack>
   );
@@ -154,7 +162,7 @@ export function TranscriptCard({
     <XStack gap="2" alignItems="flex-start" flex={1} minWidth={0}>
       <YStack flex={1} minWidth={0} gap="1">
         {titleLine}
-        {subline ? (
+        {!alignSublineWithTitle && subline ? (
           <T v="meta" color="secondary" numberOfLines={sublineLines} testID={sublineTestID}>{subline}</T>
         ) : null}
       </YStack>
@@ -175,7 +183,7 @@ export function TranscriptCard({
       borderWidth={1}
       borderColor="stroke"
       borderRadius="md"
-      padding="3"
+      padding={padding === '4' ? '4' : '3'}
       gap="3"
       testID={testID}
     >

@@ -160,7 +160,7 @@ const BuzzChannels = memo(function BuzzChannels({ session }: { session: DeckSess
   const { refreshMissed, refreshNow } = useChannelsRequestedActions(state, view);
   const actions = useChannelsRoomActions(state, view.rows, state.chatList?.chats ?? EMPTY_CHATS);
   useChannelsSubscriptions(state, view.activeCommunityId, refreshMissed);
-  const { selectWorkspace, rowActions, openRoom, joining, join } = useChannelsNavigation(state, view, actions);
+  const { selectWorkspace, rowActions, openRoom, joining, join, clearing, clearJoinable } = useChannelsNavigation(state, view, actions);
   const repositories = useChannelsRepositories(state, view, openRoom);
   const { landing, closeAgentConnect, connectAgent } = useChannelsCompose(state, view);
   const { chatList, identity, isDesktop, error, refreshing, needsYouCount, ageNow, onLayout } = state;
@@ -219,7 +219,7 @@ const BuzzChannels = memo(function BuzzChannels({ session }: { session: DeckSess
           if (activeCommunityId) router.push(messageSearchHref(result, activeCommunityId) as Href);
         }}
       />
-      {search.open ? null : <JoinableChats chats={chatList.joinable ?? []} joining={joining} onJoin={(id, name) => void join(id, name)} />}
+      {search.open ? null : <JoinableChats clearing={clearing} onClear={() => void clearJoinable(chatList.workspace.id)} chats={chatList.joinable ?? []} joining={joining} onJoin={(id, name) => void join(id, name)} />}
     </>
   );
   const renderRow = (item: ChatListItem, index: number) => {

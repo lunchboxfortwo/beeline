@@ -194,6 +194,7 @@ export type PhoneOperationMap = PhoneRouteOperationMap & {
   updateRoom: { input: UpdateRoomInput; output: void };
   deleteRoom: { input: RoomInput; output: void };
   leaveRoom: { input: RoomInput & { readonly confirmDelete?: true }; output: void };
+  clearJoinableChats: { input: WorkspaceInput; output: void };
   closeChat: { input: RoomInput; output: void };
   reopenChat: { input: RoomInput; output: void };
   addRoomMember: { input: AddRoomMembersInput; output: MembershipResult & { readonly joinedIds?: readonly string[]; readonly roomView?: RoomView } };

@@ -37,7 +37,7 @@ import { phoneBeginAgentSignIn, phoneDecideAgentGrant, phoneRevokeAgentGrant, ph
 import { phoneListMessageBookmarks, phoneReadNeedsYou, phoneReadTray, phoneCountNeedsYou, phoneClearNeedsYou, phoneClearNeedsYouSection } from './tray.js';
 import { phoneHasRoomAccess, phoneRequireWorkspaceAgent, phoneRequireWorkspaceMember, phoneRequireHumanRoomWorkspaceManager, phoneRequireGitHub } from './access.js';
 import { phoneCancelAgentTurn, phoneRequestCornerClose, phoneDecideApprovalCard, phoneDecidePermission } from './approvals.js';
-import { phoneCreateHumanCorner, phoneCreateRoom, phoneUpdateRoom, phoneDeleteRoom, phoneLeaveRoom, phoneCloseChat, phoneReopenChat, phoneAddRoomMember, phoneRemoveRoomMember } from './room-writes.js';
+import { phoneCreateHumanCorner, phoneCreateRoom, phoneUpdateRoom, phoneDeleteRoom, phoneLeaveRoom, phoneClearJoinableChats, phoneCloseChat, phoneReopenChat, phoneAddRoomMember, phoneRemoveRoomMember } from './room-writes.js';
 import { phoneAcceptConnectorOffer } from './connector-offers.js';
 import { phoneCreateRoomPoll, phoneActOnRepositoryCard, phoneAnswerChoice, phoneSkipChoice } from './room-actions.js';
 import { phoneCreateWorkspace, phoneUpdateWorkspace, phoneLeaveWorkspace, phoneDeleteWorkspace } from './workspace-writes.js';
@@ -358,6 +358,9 @@ import { phoneReadConnectionDetail, phoneRevokeConnectionGrants } from './connec
         return undefined as Output<Name>;
       case 'leaveRoom':
         await phoneLeaveRoom(ctx, input as Input<'leaveRoom'>, viewerId);
+        return undefined as Output<Name>;
+      case 'clearJoinableChats':
+        await phoneClearJoinableChats(ctx, (input as Input<'clearJoinableChats'>).workspaceId, viewerId);
         return undefined as Output<Name>;
       case 'closeChat':
         await phoneCloseChat(ctx, (input as Input<'closeChat'>).roomId, viewerId);

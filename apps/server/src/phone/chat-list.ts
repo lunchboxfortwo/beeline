@@ -153,6 +153,8 @@ import { turnRootMessageSql } from '../agent-command.js';
           FROM (SELECT r.id,r.name,r.updated_at FROM rooms r
             WHERE r.workspace_id=$1 AND r.parent_id IS NULL AND r.archived_at IS NULL
               AND r.visibility='public' AND r.direct_participants IS NULL
+              AND NOT EXISTS (SELECT 1 FROM chat_dismissals dismissed
+                WHERE dismissed.room_id=r.id AND dismissed.identity_id=$2)
               AND NOT EXISTS (SELECT 1 FROM memberships mine WHERE mine.room_id=r.id
                 AND mine.identity_id=$2 AND mine.removed_at IS NULL)
             ORDER BY r.updated_at DESC,r.id LIMIT 200) open_room),'[]'::json) joinable_rows

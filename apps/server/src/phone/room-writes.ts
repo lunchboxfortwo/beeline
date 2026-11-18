@@ -317,6 +317,28 @@ import { normalizeHumanCornerTitle, UUID_PATTERN } from './values.js';
     });
   }
 
+  /** Clear the current public suggestions, for this viewer and Workspace. */
+  export async function phoneClearJoinableChats(ctx: PhoneContext, workspaceId: string, viewerId: string) {
+    await ctx.database.transaction(async (database) => {
+      const member = await database.query(
+        `SELECT 1 FROM memberships WHERE workspace_id=$1 AND room_id IS NULL
+         AND identity_id=$2 AND removed_at IS NULL FOR SHARE`,
+        [workspaceId, viewerId],
+      );
+      if (!member.rowCount) throw new Error('workspace membership required');
+      await database.query(
+        `INSERT INTO chat_dismissals(room_id,identity_id,dismissed_at)
+         SELECT room.id,$2,now() FROM rooms room
+         WHERE room.workspace_id=$1 AND room.parent_id IS NULL AND room.archived_at IS NULL
+           AND room.visibility='public' AND room.direct_participants IS NULL
+           AND NOT EXISTS(SELECT 1 FROM memberships mine WHERE mine.room_id=room.id
+             AND mine.identity_id=$2 AND mine.removed_at IS NULL)
+         ON CONFLICT (room_id,identity_id) DO NOTHING`,
+        [workspaceId, viewerId],
+      );
+    });
+  }
+
   export async function phoneCloseChat(ctx: PhoneContext, roomId: string, viewerId: string) {
     await ctx.database.transaction(async (database) => {
       const membership = await database.query(

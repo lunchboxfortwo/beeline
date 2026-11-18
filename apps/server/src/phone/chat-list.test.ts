@@ -80,3 +80,35 @@ it('Reproduction quiet-chat-badge: a thread message never marks its chat unread;
   await phone.execute('sendRoomMessage', { roomId: JOINED, text: 'Chat news' }, TEAMMATE);
   expect((await row())?.unread).toBe(true);
 });
+
+
+it('Clear hides the current public suggestions durably for this viewer; a new public chat appears again', async () => {
+  await phone.execute('clearJoinableChats', { workspaceId: WORKSPACE }, PERSON);
+  expect((await phone.readChats(WORKSPACE, PERSON))?.joinable).toEqual([]);
+  // A fresh service/device reads the committed dismissal, not a local hidden flag.
+  expect((await new PhoneService(database, 'https://server.usebeeline.app').readChats(WORKSPACE, PERSON))?.joinable).toEqual([]);
+  expect((await phone.readChats(WORKSPACE, PERSON))?.chats.map(chat => chat.room.id)).toEqual([JOINED]);
+  const dismissed = await database.query<{ room_id: string; identity_id: string }>('SELECT room_id,identity_id FROM chat_dismissals');
+  expect(dismissed.rows).toHaveLength(2);
+  expect(dismissed.rows.map(row => row.room_id).sort()).toEqual([LAUNCH, LEFT].sort());
+  expect(dismissed.rows.every(row => row.identity_id === PERSON)).toBe(true);
+  // Activity/renaming on an old suggestion does not undo Clear.
+  await database.query(`UPDATE rooms SET name='renamed',updated_at=now() WHERE id=$1`, [LAUNCH]);
+  expect((await phone.readChats(WORKSPACE, PERSON))?.joinable).toEqual([]);
+  const fresh = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  await database.query(`INSERT INTO rooms(id,workspace_id,name,created_by) VALUES($1,$2,'fresh',$3)`, [fresh, WORKSPACE, TEAMMATE]);
+  expect((await phone.readChats(WORKSPACE, PERSON))?.joinable).toEqual([{ id: fresh, name: 'fresh', memberCount: 0 }]);
+  await phone.execute('clearJoinableChats', { workspaceId: WORKSPACE }, PERSON);
+  await phone.execute('clearJoinableChats', { workspaceId: WORKSPACE }, PERSON);
+  expect((await phone.readChats(WORKSPACE, PERSON))?.joinable).toEqual([]);
+  expect((await database.query('SELECT 1 FROM chat_dismissals')).rowCount).toBe(3);
+});
+
+it('Clear is scoped to the current viewer and requires current Workspace membership', async () => {
+  await phone.execute('clearJoinableChats', { workspaceId: WORKSPACE }, TEAMMATE);
+  expect((await phone.readChats(WORKSPACE, PERSON))?.joinable).toHaveLength(2);
+  await expect(phone.execute('clearJoinableChats', { workspaceId: OTHER_WORKSPACE }, PERSON)).rejects.toThrow('workspace membership required');
+  await database.query(`UPDATE memberships SET removed_at=now() WHERE workspace_id=$1 AND room_id IS NULL AND identity_id=$2`, [WORKSPACE, PERSON]);
+  await expect(phone.execute('clearJoinableChats', { workspaceId: WORKSPACE }, PERSON)).rejects.toThrow('workspace membership required');
+  expect((await database.query('SELECT 1 FROM chat_dismissals WHERE identity_id=$1', [PERSON])).rowCount).toBe(0);
+});

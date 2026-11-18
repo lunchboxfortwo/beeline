@@ -21,7 +21,7 @@ import type { RoomMessagePresentation, RoomMessageRenderContext } from '@/buzz/r
 import { GitHubEventCard, NotificationLifecycleCard, DaemonFactCard, GrantRequestCard, SquireApprovalCard, ConnectorOfferCard, AppSignInCard, ChoiceCard, WalletCards, agentCommandTranscriptMessage, OrdinaryLedgerMessage, TargetBranchProposalCard, WritePermissionCard, SwipeToReply } from './RoomMessageVariants';
 import { monolithPhoneOperation, phoneOperationFailureReason } from '@/sync/transport/monolith-operation';
 import { CornerOpenedMarkers } from '@/components/buzz/CornerOpenedMarker';
-import { LedgerRoomUpdate, LedgerSystemLine } from '@/components/buzz/Ledger';
+import { LedgerEntryFrame, LedgerRoomUpdate, LedgerSystemLine } from '@/components/buzz/Ledger';
 import { type RoomRosterParticipant } from '@/buzz/room-participants';
 import { rosterAgent, durableFactLine, knownAgentPubkeysFor } from './chat-surface-values';
 import { TranscriptPills, type PillIdentityResolver } from '@/components/buzz/TranscriptPills';
@@ -366,23 +366,25 @@ export function useChatTranscriptRenderer([
           agentFor(card.agentId),
         ).name;
         return (
-          <AgentSignInCard
-            card={card}
-            agentName={agentName}
-            isOwner={!rowViewer && cacheViewerPubkey === card.ownerId}
-            onSubmit={async (code) => {
-              try {
-                await monolithPhoneOperation('completeAgentSignIn', {
-                  roomId: decodedId,
-                  messageId: item.id,
-                  code,
-                });
-              } catch (error) {
-                throw new Error(phoneOperationFailureReason(error));
-              }
-            }}
-            testID={`agent-sign-in-${item.id}`}
-          />
+          <LedgerEntryFrame hasByline>
+            <AgentSignInCard
+              card={card}
+              agentName={agentName}
+              isOwner={!rowViewer && cacheViewerPubkey === card.ownerId}
+              onSubmit={async (code) => {
+                try {
+                  await monolithPhoneOperation('completeAgentSignIn', {
+                    roomId: decodedId,
+                    messageId: item.id,
+                    code,
+                  });
+                } catch (error) {
+                  throw new Error(phoneOperationFailureReason(error));
+                }
+              }}
+              testID={`agent-sign-in-${item.id}`}
+            />
+          </LedgerEntryFrame>
         );
       }
       if (item.connectorOffer) {

@@ -24,6 +24,7 @@ const phoneOperations = {
   cancelLinkSignIn: true,
   claimAgentPairing: true,
   claimManagedHandle: true,
+  clearJoinableChats: true,
   clearMessageBookmarks: true,
   clearNeedsYou: true,
   clearNeedsYouSection: true,

@@ -279,7 +279,7 @@ export const SidebarView = React.memo(function SidebarView() {
   });
   const newThread = React.useCallback((roomId: string) => void openNewThread(roomId), [openNewThread]);
   const refreshList = React.useCallback(() => { if (chatListKey) refreshChatList(chatListKey); }, [chatListKey]);
-  const { joining, join } = useJoinChat(identityPubkey, refreshList, openRoom, setNavigationError);
+  const { joining, join, clearing, clearJoinable } = useJoinChat(identityPubkey, refreshList, openRoom, setNavigationError);
   const openPlace = React.useCallback((place: SidePlace['key']) => {
     if (place === 'tray')
       router.push({ pathname: '/beeline/tray', params: { communityId: workspaceId ?? '', workspaceName: activeWorkspace?.name ?? '' } } as never);
@@ -410,7 +410,7 @@ export const SidebarView = React.memo(function SidebarView() {
               }}
             />
             {search.open || !surface ? null : (
-              <JoinableChats chats={surface.joinable ?? []} joining={joining} onJoin={(id, name) => void join(id, name)} />
+              <JoinableChats clearing={clearing} onClear={() => void clearJoinable(surface.workspace.id)} chats={surface.joinable ?? []} joining={joining} onJoin={(id, name) => void join(id, name)} />
             )}
           </ScrollView>
           {isDesktop && (

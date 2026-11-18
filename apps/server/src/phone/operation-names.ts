@@ -86,6 +86,7 @@ export const PHONE_OPERATION_NAMES = new Set<keyof PhoneOperationMap>([
   'updateRoom',
   'deleteRoom',
   'leaveRoom',
+  'clearJoinableChats',
   'closeChat',
   'reopenChat',
   'addRoomMember',

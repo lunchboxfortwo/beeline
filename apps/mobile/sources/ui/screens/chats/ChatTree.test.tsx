@@ -23,10 +23,11 @@ vi.mock('react-native-safe-area-context', () => ({
 }));
 vi.mock('@/buzz/message-outbox-observer', () => ({ useRoomOutboxFailure: () => null }));
 vi.mock('@/buzz/room-corner-store', () => ({ useRoomCornerSummary: () => null }));
+vi.mock('@/components/buzz/Button', () => ({ Button: (props: any) => React.createElement('Button', props) }));
 vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: () => null }));
 
 import type { ChatListItem } from '@beeline/buzz-client';
-import { ChatRow, ChatRowDivider, NEW_THREAD_HOLD_MS } from './ChatTree';
+import { ChatRow, ChatRowDivider, JoinableChats, NEW_THREAD_HOLD_MS } from './ChatTree';
 import { WorkStateMark } from '@/ui/screens/tags/WorkMarks';
 import { TextSizeContext, type TextSize } from '@/ui/grammar';
 
@@ -452,5 +453,26 @@ it('keeps B as the default and permits the local avatar-column C comparison', ()
   act(() => tree.update(<ChatRow {...props} />));
   expect(icons()).toHaveLength(0);
   expect(tree.root.findByType('RepositoryMark').props.size).toBe(36);
+  act(() => tree.unmount());
+});
+
+
+it('Clear dispatches the section action; the next server projection hides it and a new chat shows it again', () => {
+  const onClear = vi.fn();
+  const chats = [{ id: 'public', name: 'Public', memberCount: 23 }];
+  const props = { chats, joining: null, clearing: false, onClear, onJoin: vi.fn() };
+  let tree!: ReactTestRenderer;
+  act(() => { tree = create(<JoinableChats {...props} />); });
+  act(() => byTestID(tree, 'clear-joinable').props.onPress());
+  expect(onClear).toHaveBeenCalledOnce();
+  // The component renders the server's list as-is while the write is pending.
+  act(() => tree.update(<JoinableChats {...props} clearing />));
+  expect(byTestID(tree, 'clear-joinable').props.disabled).toBe(true);
+  expect(byTestID(tree, 'joinable-public')).toBeDefined();
+  act(() => tree.update(<JoinableChats {...props} chats={[]} />));
+  expect(tree.toJSON()).toBeNull();
+  act(() => tree.update(<JoinableChats {...props} chats={[{ id: 'new', name: 'New', memberCount: 1 }]} />));
+  expect(byTestID(tree, 'joinable-new')).toBeDefined();
+  expect(tree.root.findAll((node: any) => node.props.testID === 'joinable-public')).toHaveLength(0);
   act(() => tree.unmount());
 });

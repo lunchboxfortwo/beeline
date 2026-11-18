@@ -2394,6 +2394,10 @@ export const operationShapes = {
     "input": 550,
     "output": 505
   },
+  "phone.clearJoinableChats": {
+    "input": 501,
+    "output": 499
+  },
   "phone.clearMessageBookmarks": {
     "input": 501,
     "output": 499

@@ -65,6 +65,6 @@ export function useChannelsNavigation(
   );
 
   const refreshList = useCallback(() => chatStore.current?.force(), []);
-  const { joining, join } = useJoinChat(identity?.publicKey, refreshList, openRoom, setError);
-  return { selectWorkspace, rowActions, openRoom, joining, join };
+  const { joining, join, clearing, clearJoinable } = useJoinChat(identity?.publicKey, refreshList, openRoom, setError);
+  return { selectWorkspace, rowActions, openRoom, joining, join, clearing, clearJoinable };
 }
