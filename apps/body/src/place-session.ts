@@ -278,6 +278,7 @@ export class PlaceSession {
       ...(tmpDir ? { tmpDir } : {}),
       additionalWritablePaths: [
         ...harnessLoginWritablePaths(config.agentKind, operatorHome),
+        ...(this.model ? [resolve(dirname(this.contextPath), 'state')] : []),
         ...(corner && config.workspaceRoot ? [config.workspaceRoot] : []),
         ...(attachScratchRoot ? [attachScratchRoot] : []),
       ],

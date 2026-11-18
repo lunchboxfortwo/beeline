@@ -1,8 +1,10 @@
 import type { AgentCommand } from '@beeline/api-contract/daemon';
 import { EventEmitter } from 'node:events';
+import { createRequire } from 'node:module';
 import { mkdir,mkdtemp,readFile,rm,writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname,join } from 'node:path';
+import { OwnedModelFiles } from './owned-model-files.js';
 import { afterEach,expect,it,vi } from 'vitest';
 import type { AcpClient } from './acp.js';
 import type { BodyConfig } from './config.js';
@@ -34,8 +36,8 @@ vi.mock('./squire-mcp-client.js', async original => ({
 const roots: string[] = [];
 afterEach(async () => { for (const path of roots.splice(0)) await rm(path, { recursive: true, force: true }); });
 
-async function fixture(corner = false) {
-  const root = await mkdtemp(join(tmpdir(), 'session-start-')); roots.push(root);
+async function fixture(corner = false, temporaryRoot = tmpdir()) {
+  const root = await mkdtemp(join(temporaryRoot, 'session-start-')); roots.push(root);
   let delivered = false;
   const prompt = vi.fn(async () => { delivered = true; return { agentText: 'The answer', stopReason: 'end_turn', updates: [], toolCalls: [] }; });
   const client = Object.assign(new EventEmitter(), {
@@ -637,6 +639,35 @@ it('rejects a hosted item without its credential before launching ACP', async ()
   await expect(f.session.start(f.item)).rejects.toThrow('Owned model local intent is unavailable');
   expect(f.spawn).not.toHaveBeenCalled();
   await f.session.dispose();
+});
+
+it('admits the hosted model journal inside the live Room sandbox across cold and warm items', async () => {
+  const f = await fixture(false, '/var/tmp');
+  f.config.bwrapPath = '/usr/bin/bwrap';
+  const modelCredential = { v: 1 as const, token: 'bfmc_v1.' + 'a'.repeat(32) + '.' + 'b'.repeat(64), expiresAt: null };
+  try {
+    for (const id of ['cold-tag', 'warm-tag']) {
+      const item = { ...f.item, id, turnRequestId: id, modelCredential };
+      await f.session.start(item);
+      const launch = f.spawn.mock.calls[0]![0];
+      const commandIndex = launch.agentArgs!.lastIndexOf(launch.harnessCommand!);
+      const probe = `import {OwnedModelFiles} from ${JSON.stringify(new URL('./owned-model-files.ts', import.meta.url).href)};
+        import {readFileSync,writeFileSync} from 'node:fs';
+        const active=JSON.parse(readFileSync(process.env.BEELINE_TURN_CONTEXT_FILE,'utf8'));
+        const owner=OwnedModelFiles.open(active.ownedModelDirectory);
+        owner.prepareHeaders(); console.log(owner.snapshot().state);
+        try {writeFileSync(process.env.BEELINE_TURN_CONTEXT_FILE,'escape');throw new Error('turn context became writable');}
+        catch(error){if(error.code!=='EROFS')throw error;}`;
+      const result = await execFileAsync(launch.agentCommand, [...launch.agentArgs!.slice(0, commandIndex),
+        process.execPath, '--import', createRequire(import.meta.url).resolve('tsx'), '--input-type=module', '-e', probe], { env: { ...process.env, ...launch.agentEnv } });
+      expect(result.stdout.trim()).toBe('unknown');
+      const active = JSON.parse(await readFile(f.session.contextPath, 'utf8'));
+      expect(OwnedModelFiles.open(active.ownedModelDirectory).snapshot()).toMatchObject({ state: 'unknown' });
+      const answer = await f.session.deliver(item);
+      void answer.cleanup();
+    }
+    expect(f.spawn).toHaveBeenCalledTimes(1);
+  } finally { await f.session.dispose(); }
 });
 
 it('mounts Room CodeGraph at the cached workspace checkout', async () => {

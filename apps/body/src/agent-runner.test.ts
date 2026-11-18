@@ -437,6 +437,30 @@ it('ends a hosted item with the real startup failure and does not replay it on r
   expect(harness.deliver).not.toHaveBeenCalled();
 });
 
+it.each([false, true])('ends an unanswered hosted tag visibly after empty end_turn (restored=%s)', async restored => {
+  if (restored) vi.spyOn(AnswerStore.prototype, 'all').mockResolvedValueOnce([{
+    itemId: 'beebee-empty-end-turn', roomId: 'room', requestId: 'beebee-empty-end-turn', text: '', harnessEnded: true,
+  }]);
+  const f = await fixture();
+  const item = { ...f.item('beebee-empty-end-turn'), modelCredential: {
+    v: 1 as const, token: 'bfmc_v1.' + 'a'.repeat(32) + '.' + 'b'.repeat(64), expiresAt: null,
+  } };
+  // Beebee, 2026-11-18 05:08:46: Pi recorded a local model-intent error,
+  // but pi-acp returned end_turn without any content updates.
+  harness.deliver.mockResolvedValueOnce({ text: '', stopReason: 'end_turn', steps: [], toolCalls: [], cleanup: async () => {} });
+  f.execute.mockImplementation(async name => name === 'postRoomMessage'
+    ? { id: item.id, createdAt: 1, answered: false } : { id: item.id, createdAt: 1 });
+  f.changed([item]);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('startAgentTurn', {
+    roomId: item.roomId, requestId: item.turnRequestId, available: false,
+    failureReason: 'Agent harness ended without a public answer',
+  }));
+  f.opened();
+  f.changed([item]);
+  await Promise.resolve();
+  expect(harness.deliver).toHaveBeenCalledTimes(restored ? 0 : 1);
+});
+
 
 it('handles a restart control without starting the harness and acknowledges it silently', async () => {
   const f = await fixture();

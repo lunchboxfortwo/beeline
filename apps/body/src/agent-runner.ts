@@ -336,12 +336,19 @@ export class AgentRunner {
         void this.answers.remove(answer.itemId).catch(error => console.warn('[body] answer cleanup failed:', error));
       } else if (!answer.text && this.latest.some(item =>
         [answer.itemId, ...(answer.queuedRequestIds ?? [])].includes(item.id) && !isBackgroundCommand(item.reason))) {
-        // An older helper may have persisted an empty human completion. The
-        // server refused it, so it must not suppress the next queue delivery.
+        const pending = this.latest.filter(item => [answer.itemId, ...(answer.queuedRequestIds ?? [])].includes(item.id));
+        const hosted = answer.harnessEnded && (pending.some(item => item.modelCredential)
+          || this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_ID || this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN);
+        if (hosted) for (const item of pending) await api.execute('startAgentTurn', {
+          roomId: item.roomId, requestId: item.turnRequestId, available: false,
+          failureReason: 'Agent harness ended without a public answer',
+        });
+        // Hosted turns close visibly; personal helpers retain the owed request
+        // for their next queue delivery after the server refused an empty answer.
         await this.answers.remove(answer.itemId);
         this.stored.delete(answer.itemId);
         this.durable.delete(answer.itemId);
-        for (const id of [answer.itemId, ...(answer.queuedRequestIds ?? [])]) this.answered.delete(id);
+        if (!hosted) for (const id of [answer.itemId, ...(answer.queuedRequestIds ?? [])]) this.answered.delete(id);
       }
     } catch (error) {
       // A queued item still owns its stored answer, including after a refusal.
