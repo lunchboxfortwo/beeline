@@ -25,6 +25,8 @@ import { IdentityMark, isPersonPictureUrl, personInitial } from './IdentityMark'
 import { PERSON_PLATE } from '@/buzz/faces/face-tile';
 import { INK } from '@/buzz/faces/animals';
 import { identityPalette } from '@/buzz/identity-mark';
+import { defaultConfig } from '@tamagui/config/v6';
+import { WORKSPACE_RAIL_TILE } from '@/buzz/workspace-tile';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -135,5 +137,21 @@ describe('initials', () => {
     expect(personInitial(undefined, undefined)).toBe('?');
     expect(isPersonPictureUrl('/v1/person-avatars/11111111-1111-4111-8111-111111111111')).toBe(true);
     expect(isPersonPictureUrl('/v1/avatars/11111111-1111-4111-8111-111111111111')).toBe(false);
+  });
+});
+
+
+describe('Workspace plate corners', () => {
+  it.each([false, true])('matches the rail pictures’ md outer radius (selected: %s)', async (selected) => {
+    const size = WORKSPACE_RAIL_TILE.pictureSize;
+    const tree = await render(<IdentityMark kind="workspace" seed="workspace" size={size} selected={selected} />);
+    const rects = tree.root.findAll((node: any) => node.type === 'Rect');
+    const frame = rects.find((node: any) => node.props.strokeWidth);
+    const body = rects[0];
+    expect((frame.props.rx + frame.props.strokeWidth / 2) * size / 100)
+      .toBeCloseTo(defaultConfig.tokens.radius.md);
+    expect(defaultConfig.tokens.radius.md).toBe(6);
+    expect(body.props.rx).toBe(frame.props.rx);
+    await act(async () => tree.unmount());
   });
 });

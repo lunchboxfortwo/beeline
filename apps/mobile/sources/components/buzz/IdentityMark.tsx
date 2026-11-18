@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Image, Platform } from 'react-native';
 import { YStack, useTheme, useThemeName } from 'tamagui';
+import { defaultConfig } from '@tamagui/config/v6';
+import { WORKSPACE_RAIL_TILE } from '@/buzz/workspace-tile';
 import Svg, { G, Path, Rect, SvgUri, Text as SvgText } from 'react-native-svg';
 import { isConnectorLogoUrl } from '@beeline/api-contract/phone';
 import {
@@ -81,11 +83,11 @@ const FACE_PLATE_RADIUS = 3;
 // ── The Workspace plate ──────────────────────────────────────────────────────
 
 /** The plate fills its seat the way a Workspace picture does: inset only far
- *  enough that the selected frame's stroke is not clipped, with corners that
- *  follow the rail seat's curve (8px on a 36px picture ≈ 22%). */
+ *  enough that the selected frame's stroke is not clipped. Its painted outer
+ *  corner matches the pictures' md radius at the shared rail size. */
 const PLATE_INSET = 3;
 const PLATE_SIDE = 100 - PLATE_INSET * 2;
-const PLATE_RADIUS = 22 - PLATE_INSET;
+const PLATE_OUTER_RADIUS = defaultConfig.tokens.radius.md * 100 / WORKSPACE_RAIL_TILE.pictureSize;
 
 /** The workspace cypher: speakeasy's 3×3 primitive plate — block, slot, cut,
  *  void — in our tones. A machined plate, never a QR code. The grid keeps the
@@ -119,12 +121,11 @@ function plateRects(cell: CypherCell, index: number): Array<[number, number, num
 
 /** The half fill's left half, rounded on the left to match the frame and
  *  square along the centre line. */
-function leftHalfPath(): string {
+function leftHalfPath(r: number): string {
   const left = PLATE_INSET;
   const top = PLATE_INSET;
   const right = 50;
   const bottom = PLATE_INSET + PLATE_SIDE;
-  const r = PLATE_RADIUS;
   return (
     `M${right} ${top}H${left + r}A${r} ${r} 0 0 0 ${left} ${top + r}` +
     `V${bottom - r}A${r} ${r} 0 0 0 ${left + r} ${bottom}H${right}Z`
@@ -176,6 +177,8 @@ function WorkspacePlate({
   const bodyFill = visibleFillState === 'solid' ? palette.mid : palette.deep;
   const frameStroke = selected ? palette.bright : detailed ? palette.mid : palette.bright;
   const frameWidth = selected ? 6 : 3.5;
+  // SVG strokes straddle the path; subtract their outset from the outer curve.
+  const plateRadius = PLATE_OUTER_RADIUS - frameWidth / 2;
   return (
     <Svg width={size} height={size} viewBox="0 0 100 100">
       <Rect
@@ -183,16 +186,16 @@ function WorkspacePlate({
         y={PLATE_INSET}
         width={PLATE_SIDE}
         height={PLATE_SIDE}
-        rx={PLATE_RADIUS}
+        rx={plateRadius}
         fill={bodyFill}
       />
-      {visibleFillState === 'half' && <Path d={leftHalfPath()} fill={palette.mid} />}
+      {visibleFillState === 'half' && <Path d={leftHalfPath(plateRadius)} fill={palette.mid} />}
       <Rect
         x={PLATE_INSET}
         y={PLATE_INSET}
         width={PLATE_SIDE}
         height={PLATE_SIDE}
-        rx={PLATE_RADIUS}
+        rx={plateRadius}
         fill="none"
         stroke={frameStroke}
         strokeWidth={frameWidth}
