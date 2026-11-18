@@ -106,6 +106,33 @@
       "phase": "M5"
     },
     {
+      "id": "apps/body/src/cliproxy.ts::fetch",
+      "file": "apps/body/src/cliproxy.ts",
+      "kind": "fetch",
+      "count": 2,
+      "compatibility": "legacy-only",
+      "phase": "M5",
+      "reason": "Local CLIProxyAPI the owner approved on 2026-11-17 (#4504): downloads the latest proxy release from GitHub and calls the proxy on 127.0.0.1 for shared provider logins."
+    },
+    {
+      "id": "apps/body/src/cliproxy.ts::fetch-impl",
+      "file": "apps/body/src/cliproxy.ts",
+      "kind": "fetch-impl",
+      "count": 2,
+      "compatibility": "legacy-only",
+      "phase": "M5",
+      "reason": "Local CLIProxyAPI the owner approved on 2026-11-17 (#4504): downloads the latest proxy release from GitHub and calls the proxy on 127.0.0.1 for shared provider logins."
+    },
+    {
+      "id": "apps/body/src/cliproxy.ts::import:node:net",
+      "file": "apps/body/src/cliproxy.ts",
+      "kind": "import:node:net",
+      "count": 1,
+      "compatibility": "legacy-only",
+      "phase": "M5",
+      "reason": "Local CLIProxyAPI the owner approved on 2026-11-17 (#4504): downloads the latest proxy release from GitHub and calls the proxy on 127.0.0.1 for shared provider logins."
+    },
+    {
       "id": "apps/body/src/connect-command.ts::fetch-impl",
       "file": "apps/body/src/connect-command.ts",
       "kind": "fetch-impl",
