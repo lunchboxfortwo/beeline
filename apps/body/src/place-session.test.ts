@@ -22,10 +22,12 @@ import { execFileAsync,prepareWorkspace } from './workspace-checkout.js';
 
 // Cache persistence is tested with real files by SessionResources. These
 // prompt tests intentionally finish while optional background work is pending.
-vi.mock('./atomic-private-file.js', async original => ({
-  ...await original<typeof import('./atomic-private-file.js')>(),
-  writePrivateFileAtomically: vi.fn(async () => {}),
-}));
+vi.mock('./atomic-private-file.js', async original => {
+  const actual = await original<typeof import('./atomic-private-file.js')>();
+  return { ...actual, writePrivateFileAtomically: vi.fn(async (path: string, contents: string) => {
+    if (!path.endsWith('/session-context.json')) await actual.writePrivateFileAtomically(path, contents);
+  }) };
+});
 vi.mock('./agent-home.js', async original => ({
   ...await original<typeof import('./agent-home.js')>(),
   prepareRoomAgentHome: vi.fn(() => new Promise(() => {})),

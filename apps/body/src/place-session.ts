@@ -1,10 +1,11 @@
 import { wall,type AgentCommand,type DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { existsSync } from 'node:fs';
-import { mkdir,rm,writeFile } from 'node:fs/promises';
+import { mkdir,rm } from 'node:fs/promises';
 import { homedir,hostname } from 'node:os';
 import { delimiter,dirname,join,resolve } from 'node:path';
 import { AcpClient,agentTurnSteps,openAcpConversation,type AcpPromptBlock,type McpServerWire,type PromptResult,type ToolCallEntry } from './acp.js';
 import { agentCommandCatalogPublisher } from './agent-command-catalog.js';
+import { writePrivateFileAtomically } from './atomic-private-file.js';
 import { deliverAttachments } from './attachment-delivery.js';
 import { agentGitIdentityEnv } from './agent-git-identity.js';
 import { harnessLoginWritablePaths,harnessStateDirsFromEnv,hostImportedMcpDeclarations,prepareRoomAgentCredentials,prepareRoomAgentHome } from './agent-home.js';
@@ -172,8 +173,8 @@ export class PlaceSession {
    * authorize each call through the resource façade with this connection. */
   async writeContext(item: AgentCommand | undefined, queued: readonly AgentCommand[], ownedModelDirectory?: string): Promise<void> {
     await writeTurnContext(this.contextPath, item, queued, ownedModelDirectory);
-    await writeFile(`${this.contextPath}.resource-auth.json`,
-      JSON.stringify({ ...this.options.api.connection(), turnContextPath: this.contextPath }), { mode: 0o600 });
+    await writePrivateFileAtomically(`${this.contextPath}.resource-auth.json`,
+      JSON.stringify({ ...this.options.api.connection(), turnContextPath: this.contextPath }));
   }
 
   /** A free agent's hosted model is reachable only with a credential bound to this item. */
@@ -579,12 +580,11 @@ export class PlaceSession {
 /** The file the agent's tools read to learn which item they serve. */
 export async function writeTurnContext(path: string, item: Pick<AgentCommand, 'id' | 'roomId' | 'turnRequestId' | 'rootCommandId' | 'reason' | 'operatorAgent'> | undefined,
   queued: readonly Pick<AgentCommand, 'turnRequestId' | 'rootCommandId' | 'reason'>[] = [], ownedModelDirectory?: string): Promise<void> {
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  await writeFile(path, JSON.stringify(item ? {
+  await writePrivateFileAtomically(path, JSON.stringify(item ? {
     roomId: item.roomId, requestId: item.turnRequestId, taskId: item.rootCommandId, commandReason: item.reason, itemId: item.id,
     ...(item.operatorAgent ? {operatorAgent:true} : {}),
     commands: queued.map(command => ({ requestId: command.turnRequestId, commandReason: command.reason, taskId: command.rootCommandId })),
     startedAt: Date.now(),
     ...(ownedModelDirectory ? { ownedModelDirectory } : {}),
-  } : {}), { mode: 0o600 });
+  } : {}));
 }
