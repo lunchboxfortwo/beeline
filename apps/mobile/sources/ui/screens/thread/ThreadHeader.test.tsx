@@ -12,6 +12,7 @@ vi.mock('@/components/buzz/RepositoryMark', () => ({ RepositoryMark: (props: any
 vi.mock('tamagui', () => ({ ListItem: 'ListItem', XStack: 'XStack', YStack: 'YStack', useThemeName: () => appearance.name }));
 vi.mock('lucide-react-native', () => ({ ArrowLeft: 'ArrowLeft', ArrowRight: 'ArrowRight', Users: 'Users', CornerDownRight: 'CornerDownRight', GitPullRequest: 'GitPullRequest', MoreHorizontal: 'MoreHorizontal' }));
 vi.mock('@/ui/grammar', () => ({ Btn: 'Btn', Glyph: 'Glyph', T: 'T', SafeTop: 'SafeTop', HEIGHT: { control: 44 }, useTextSize: () => 'medium', typeStyle: (v:string) => ({lineHeight:v === 'title' ? 31 : 19}) }));
+import { YStack as YStackForTest } from 'tamagui';
 import { ThreadBar, ThreadTitleBlock, type ThreadHeaderData } from './ThreadHeader';
 
 const byTestID = (tree: any, testID: string) => tree.root.findAll((node: any) => node.props?.testID === testID && typeof node.type === 'string');
@@ -27,7 +28,7 @@ it('draws the title block: title, shared work-state glyph, PR and preserved quot
   const openBrief = vi.fn(), openPr = vi.fn();
   let tree: any;
   act(() => { tree = create(<ThreadTitleBlock h={reconnect} openBrief={openBrief} openPr={openPr} />); });
-  expect(byTestID(tree, 'thread-title')[0].props.children).toBe('Reconnect keeps place');
+  expect(byTestID(tree, 'thread-title')[0].findByType('T').props.children).toBe('Reconnect keeps place');
   expect(byTestID(tree, 'thread-status')).toHaveLength(0);
   expect(byTestID(tree, 'thread-status-dot')).toHaveLength(0);
   expect(tree.root.findByType('WorkStateMark').props.state).toBe('in-review');
@@ -77,7 +78,8 @@ it('keeps the bar slim, and gives it the title with a work-state glyph once the 
   expect(names.findAll((n: any) => n.props.testID === 'thread-bar-title' && typeof n.type === 'string')).toHaveLength(1);
   expect(byTestID(tree, 'thread-chat-link')[0].props.flexShrink).not.toBe(0);
   expect(byTestID(tree, 'thread-chat-link')[0].findByType('T').props.flexShrink).toBe(1);
-  expect(title.findByType('T').props.flexShrink).toBe(1);
+  expect(byTestID(tree, 'thread-bar-name')[0].props.flexShrink).toBe(1);
+  expect(title.findByType('T').props.flexShrink).toBe(0);
   act(() => tree.unmount());
 });
 
@@ -89,7 +91,7 @@ it('expands the full header from a tap on the slim bar, and shows it under the b
   expect(expand).toHaveBeenCalledTimes(1);
   act(() => tree.update(<ThreadBar h={reconnect} collapsed openChat={vi.fn()} expand={expand} expanded={<ThreadTitleBlock h={reconnect} />} />));
   expect(byTestID(tree, 'thread-bar-title')).toHaveLength(0);
-  expect(byTestID(tree, 'thread-title')[0].props.children).toBe('Reconnect keeps place');
+  expect(byTestID(tree, 'thread-title')[0].findByType('T').props.children).toBe('Reconnect keeps place');
   act(() => tree.unmount());
 });
 
@@ -141,7 +143,7 @@ for (const [state, glyph, idle] of [['waiting', 'needs-you', false], ['working',
     let tree: any;
     act(() => { tree = create(<><ThreadTitleBlock h={{...reconnect,state,waitsOnViewer:state === 'waiting'}}/><ThreadBar h={{...reconnect,state}} collapsed openChat={() => undefined}/></>); });
     expect(tree.root.findAllByType('WorkStateMark').map((node:any) => node.props)).toEqual([{state:glyph,idle},{state:glyph,idle}]);
-    expect(byTestID(tree,'thread-title')[0].props.regular).toBe(state !== 'waiting');
+    expect(byTestID(tree,'thread-title')[0].findByType('T').props.regular).toBe(state !== 'waiting');
     expect(byTestID(tree,'thread-objective')[0].props.v).toBe('meta');
     expect(byTestID(tree,'thread-objective')[0].props.numberOfLines).toBeUndefined();
     expect(byTestID(tree,'thread-title-block')[0].props.paddingHorizontal).toBe('4');
@@ -149,13 +151,15 @@ for (const [state, glyph, idle] of [['waiting', 'needs-you', false], ['working',
   });
 }
 
-it('centers the glyph box on the title line in expanded and collapsed headers', () => {
+it('centers the state and arrow within the first title line in expanded and collapsed headers', () => {
   let tree:any;
   act(()=>{tree=create(<><ThreadTitleBlock h={reconnect}/><ThreadBar h={reconnect} collapsed openChat={()=>{}}/></>);});
   expect(byTestID(tree,'thread-title-row')[0].props.alignItems).toBe('center');
-  expect(byTestID(tree,'thread-state-box')[0].props).toMatchObject({height:31,alignItems:'center',justifyContent:'center'});
-  expect(byTestID(tree,'thread-bar-state-box')[0].props).toMatchObject({height:19,alignItems:'center',justifyContent:'center'});
+  expect(byTestID(tree,'thread-state-box')[0].props).toMatchObject({height:31,alignSelf:'flex-start',alignItems:'center',justifyContent:'center'});
+  expect(byTestID(tree,'thread-bar-state-box')[0].props).toMatchObject({height:19,alignSelf:'flex-start',alignItems:'center',justifyContent:'center'});
   expect(byTestID(tree,'thread-state-box')[0].props.paddingTop).toBeUndefined();
+  expect(byTestID(tree,'thread-arrow-box')[0].props).toMatchObject({height:31,alignSelf:'flex-start',justifyContent:'center'});
+  expect(byTestID(tree,'thread-bar-arrow-box')[0].props).toMatchObject({height:19,alignSelf:'flex-start',justifyContent:'center'});
   act(()=>tree.unmount());
 });
 for (const theme of ['light_stone','dark_stone','light_brass','dark_brass']) {
@@ -165,5 +169,35 @@ for (const theme of ['light_stone','dark_stone','light_brass','dark_brass']) {
     expect(byTestID(tree,'thread-brief')[0].props.borderColor).toBe(theme.includes('stone')?'strongStroke':'needsYou');
     expect(byTestID(tree,'thread-objective')[0].props.numberOfLines).toBeUndefined();
     act(()=>tree.unmount());
+  });
+}
+
+// 360pt frame - 32pt gutters - 18pt arrow - 18pt state - three 8pt gaps - 26pt avatar.
+const phoneWidth = 360;
+const phoneTitleWidth = phoneWidth - 32 - 18 - 18 - 3 * 8 - 26;
+for (const [title, parts] of [
+  ['accept-provider-terms', ['accept-', 'provider-', 'terms']],
+  ['accept-provider-terms-and-conditions', ['accept-', 'provider-', 'terms-', 'and-', 'conditions']],
+  ['fix-login', ['fix-', 'login']],
+  ['plain', ['plain']],
+  ['-double--dash-', ['-', 'double-', '-', 'dash-']],
+] as const) {
+  it(`offers only hyphen boundaries at the phone's ${phoneTitleWidth}pt title width: ${title}`, () => {
+    let tree:any;
+    const assignee = {pubkey:'agent',kind:'agent' as const,name:'Agent'};
+    const h = {...reconnect, title, workItem:{id:'work',roomId:'thread',chatId:'chat',chatName:'grunt',threadName:title,title,state:'needs-you' as const,assignee,openedBy:assignee,createdAt:1,updatedAt:1}};
+    act(() => { tree = create(<YStackForTest width={phoneWidth}><ThreadTitleBlock h={h}/><ThreadBar h={h} collapsed openChat={()=>{}}/></YStackForTest>); });
+    for (const id of ['thread-title', 'thread-bar-name']) {
+      const name = byTestID(tree, id)[0];
+      expect(name.props).toMatchObject({flexWrap:'wrap',flexShrink:1,minWidth:0,accessible:true,accessibilityLabel:title});
+      const runs = name.findAllByType('T');
+      expect(runs.map((run:any) => run.props.children)).toEqual(parts);
+      expect(runs.map((run:any) => run.props.children).join('')).toBe(title);
+      for (const run of runs) expect(run.props).toMatchObject({numberOfLines:1,flexShrink:0});
+      // The renderer has no layout engine: assert the indivisible units given to native/web flex.
+      // The final "s" can never wrap independently from "terms".
+      expect(runs.some((run:any) => run.props.children === 's')).toBe(false);
+    }
+    act(() => tree.unmount());
   });
 }

@@ -34,6 +34,21 @@ export type ThreadHeaderData = {
     objective?: string;
 };
 
+/** Each run is indivisible on native and web; flex may wrap only after its trailing hyphen. */
+function ThreadName({ title, v, regular = false, testID }: {
+    title: string; v: 'title' | 'meta' | 'metaStrong'; regular?: boolean; testID?: string;
+}) {
+    const parts = title.match(/[^-]*-|[^-]+$/g) ?? [''];
+    return (
+        <XStack flexShrink={1} minWidth={0} flexWrap="wrap" accessible accessibilityLabel={title}
+            aria-label={title} testID={testID}>
+            {parts.map((part, index) => (
+                <T key={index} v={v} regular={regular} color="ink" numberOfLines={1} flexShrink={0}>{part}</T>
+            ))}
+        </XStack>
+    );
+}
+
 export function ThreadBar({ h, collapsed, expanded, back, openChat, expand, openActions, safeTop = true, barRef, onBarLayout }: {
     h: ThreadHeaderData; collapsed: boolean;
     /** The full header, shown under the bar while the title block is away. */
@@ -64,9 +79,9 @@ export function ThreadBar({ h, collapsed, expanded, back, openChat, expand, open
                                 <ListItem padding="0" minHeight={0} gap="2" alignItems="center"
                                     backgroundColor="transparent" justifyContent="flex-start" onPress={expand}
                                     aria-label={h.title} accessibilityRole={expand ? 'button' : 'text'} testID="thread-bar-title">
-                                    <Glyph icon={CornerDownRight} size={16} />
-                                    {h.state ? <YStack height={lineHeight} alignItems="center" justifyContent="center" testID="thread-bar-state-box"><WorkStateMark state={threadWorkState({ state: h.state })} idle={h.state === 'idle'} /></YStack> : null}
-                                    <T v={h.waitsOnViewer ? "metaStrong" : "meta"} color="ink" flexShrink={1}>{h.title}</T>
+                                    <YStack height={lineHeight} alignSelf="flex-start" justifyContent="center" testID="thread-bar-arrow-box"><Glyph icon={CornerDownRight} size={16} /></YStack>
+                                    {h.state ? <YStack height={lineHeight} alignItems="center" justifyContent="center" alignSelf="flex-start" testID="thread-bar-state-box"><WorkStateMark state={threadWorkState({ state: h.state })} idle={h.state === 'idle'} /></YStack> : null}
+                                    <ThreadName title={h.title} v={h.waitsOnViewer ? "metaStrong" : "meta"} testID="thread-bar-name" />
                                 </ListItem>
                             ) : null}
                         </YStack>
@@ -96,9 +111,9 @@ export function ThreadTitleBlock({ h, openBrief, openPr, blockRef, onBlockLayout
             paddingHorizontal={inset ? "4" : "0"} paddingTop={inset ? "4" : "0"} paddingBottom="3" gap="2" borderBottomWidth={1} borderColor="stroke"
             testID="thread-title-block">
             <XStack gap="2" alignItems="center" testID="thread-title-row">
-                <Glyph icon={CornerDownRight} size={18} />
-                <YStack height={lineHeight} alignItems="center" justifyContent="center" testID="thread-state-box">{h.state ? <WorkStateMark state={threadWorkState({ state: h.state })} idle={h.state === 'idle'} /> : null}</YStack>
-                <YStack flex={1} minWidth={0}><T v="title" regular={!h.waitsOnViewer} testID="thread-title">{h.title}</T></YStack>
+                <YStack height={lineHeight} alignSelf="flex-start" justifyContent="center" testID="thread-arrow-box"><Glyph icon={CornerDownRight} size={18} /></YStack>
+                <YStack height={lineHeight} alignItems="center" justifyContent="center" alignSelf="flex-start" testID="thread-state-box">{h.state ? <WorkStateMark state={threadWorkState({ state: h.state })} idle={h.state === 'idle'} /> : null}</YStack>
+                <YStack flex={1} minWidth={0}><ThreadName title={h.title} v="title" regular={!h.waitsOnViewer} testID="thread-title" /></YStack>
                 {h.workItem ? <Btn kind="quiet" label="Change assignee" paddingHorizontal="0" minHeight={0} height={26} hitSlop={10} onPress={() => setAssigneeOpen(!assigneeOpen)}>{h.workItem.assignee ? <WorkAvatar person={h.workItem.assignee} size={26} /> : <Glyph icon={Users} />}</Btn> : null}
             </XStack>
             {h.workItem && assigneeOpen ? <WorkAssigneePicker people={h.people ?? []} onPick={person => {
