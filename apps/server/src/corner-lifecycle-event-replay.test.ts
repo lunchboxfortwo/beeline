@@ -68,7 +68,7 @@ describe('corner lifecycle recorded event sequences', () => {
     },
   );
 
-  it('keeps an owner emulator ask visible after the failed-review handback ends', async () => {
+  it('auto-approves the shared emulator without a waiting state or resume after review handback', async () => {
     const cornerId = await inReview();
     const [review] = await commands(B, cornerId);
     await claim(review!);
@@ -78,23 +78,52 @@ describe('corner lifecycle recorded event sequences', () => {
     await advanceCorner(rootFixture.db, cornerId, { kind: 'reconcile' });
     const repair = (await commands(A, cornerId)).find(command => command.reason === 'message');
     await claim(repair!);
+    await rootFixture.db.query('UPDATE agents SET yolo_mode=false WHERE agent_id=$1', [A]);
+    const grant = await rootFixture.daemon.execute('requestAgentGrant', {
+      action: 'Use the requested resource', roomId: cornerId, requestId: repair!.turnRequestId,
+      kind: 'host', target: '127.0.0.1:5037', purpose: 'Capture required phone screenshots',
+      reason: 'Use the shared emulator for the approved visual proof.',
+    }, A);
+    expect(grant).toMatchObject({ status: 'approved', auto: true });
+    expect(grant.messageId).toBeUndefined();
+    expect((await rootFixture.db.query('SELECT status,auto FROM agent_grants WHERE id=$1', [grant.grantId])).rows)
+      .toEqual([{ status: 'approved', auto: true }]);
+    await advanceCorner(rootFixture.db, cornerId, { kind: 'reconcile' });
+    expect(await machine(cornerId)).toMatchObject({ state: 'working' });
+    await terminalResult(repair!, 'The shared emulator is available for the requested screenshots.');
+    await advanceCorner(rootFixture.db, cornerId, { kind: 'reconcile' });
+    expect((await machine(cornerId)).state).not.toBe('waiting');
+    expect((await commands(A, cornerId)).filter(command => command.reason === 'resume')).toEqual([]);
+  });
+
+  it('keeps a required owner host ask visible after the failed-review handback ends', async () => {
+    const cornerId = await inReview();
+    const [review] = await commands(B, cornerId);
+    await claim(review!);
+    await rootFixture.daemon.execute('message', { roomId: cornerId, requestId: review!.turnRequestId,to:{agent:'implementer',place:cornerId}, text: 'FAIL: required native phone screenshots are missing.' }, B);
+    await terminalResult(review!,'');
+    await rootFixture.daemon.execute('postAgentTurnReceipt', { roomId: cornerId, requestId: review!.turnRequestId, status: 'complete' }, B);
+    await advanceCorner(rootFixture.db, cornerId, { kind: 'reconcile' });
+    const repair = (await commands(A, cornerId)).find(command => command.reason === 'message');
+    await claim(repair!);
+    await rootFixture.db.query('UPDATE agents SET yolo_mode=false WHERE agent_id=$1', [A]);
     const changes: string[] = [];
     const unlisten = await rootFixture.db.client.listen('beeline_live_v1', raw => {
       const event = JSON.parse(raw);
       if (event.table === 'corner_state') changes.push(event.roomId);
     });
     try {
-      const ask = await rootFixture.daemon.execute('requestAgentGrant', {action: 'Use the requested resource',  roomId: cornerId, requestId: repair!.turnRequestId, kind: 'host', target: '127.0.0.1:5037', purpose: 'Capture required phone screenshots', reason: 'Use the owner emulator for the approved visual proof.' }, A);
+      const ask = await rootFixture.daemon.execute('requestAgentGrant', {action: 'Use the requested resource',  roomId: cornerId, requestId: repair!.turnRequestId, kind: 'host', target: 'owner-proof-host', purpose: 'Capture required phone screenshots', reason: 'Use the owner host for the approved visual proof.' }, A);
       expect(ask).toMatchObject({ status: 'pending', auto: false });
       // The card sits in the corner where the agent asked.
       expect((await rootFixture.db.query('SELECT room_id FROM messages WHERE id=$1', [ask.messageId])).rows[0]!.room_id)
         .toBe(cornerId);
       await advanceCorner(rootFixture.db, cornerId, { kind: 'reconcile' });
       expect(await machine(cornerId)).toMatchObject({ state: 'waiting', reason: 'user_action' });
-      await terminalResult(repair!, 'Awaiting the owner emulator approval to capture phone screenshots.');
+      await terminalResult(repair!, 'Awaiting the owner host approval to capture phone screenshots.');
       await advanceCorner(rootFixture.db, cornerId, { kind: 'reconcile' });
       expect(await machine(cornerId)).toMatchObject({ state: 'waiting', reason: 'user_action' });
-      expect((await commands(B, cornerId)).map(command=>({reason:command.reason,body:command.source.body}))).toEqual([{reason:'reply',body:'Awaiting the owner emulator approval to capture phone screenshots.'}]);
+      expect((await commands(B, cornerId)).map(command=>({reason:command.reason,body:command.source.body}))).toEqual([{reason:'reply',body:'Awaiting the owner host approval to capture phone screenshots.'}]);
       changes.length = 0;
       await rootFixture.phone.execute('decideAgentGrant', { grantId: ask.grantId, decision: 'always' }, H);
       expect(changes).toContain(cornerId);
@@ -108,7 +137,7 @@ describe('corner lifecycle recorded event sequences', () => {
       await advanceCorner(rootFixture.db, cornerId, { kind: 'reconcile' });
       expect((await commands(A, cornerId)).filter(command => command.action === 'input' && command.reason === 'resume').map(command => command.id))
         .toEqual(resumes.map(command => command.id));
-      expect((await commands(B, cornerId)).map(command=>({reason:command.reason,body:command.source.body}))).toEqual([{reason:'reply',body:'Awaiting the owner emulator approval to capture phone screenshots.'}]);
+      expect((await commands(B, cornerId)).map(command=>({reason:command.reason,body:command.source.body}))).toEqual([{reason:'reply',body:'Awaiting the owner host approval to capture phone screenshots.'}]);
     } finally { await unlisten(); }
   });
 });

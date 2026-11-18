@@ -1,7 +1,7 @@
 import { cornerReviewerSql } from '../corner-reviewer.js';
 import { cornerImplementerSql } from '../corner-worker.js';
-import { advanceCorner, lockCornerLifecycle } from '../corner-lifecycle.js';
-import { cornerLifecycleSql, writeCornerGithubCache } from '../corner-github-cache.js';
+import { advanceCorner, lockCornerLifecycle, recordCornerGithubFact } from '../corner-lifecycle.js';
+import { cornerLifecycleSql } from '../corner-github-cache.js';
 import type { DaemonContext } from './context.js';
 import { Output } from './values.js';
 
@@ -76,19 +76,7 @@ import { Output } from './values.js';
         current.lifecycle.checks === 'passing'
       )
         return;
-      const lifecycle = {
-        ...current.lifecycle,
-        checks: 'passing' as const,
-        checksSummary: {
-          status: 'passing' as const,
-          total: 0,
-          failing: [],
-          checks: [],
-          updatedAt: Math.floor((await db.query<{ now: number }>(`SELECT extract(epoch FROM clock_timestamp())::double precision now`)).rows[0]!.now),
-          fetchStartedAt,
-        },
-      };
-      await writeCornerGithubCache(db, cornerId, lifecycle);
+      await recordCornerGithubFact(db, cornerId, { kind: 'zero-checks-confirmed', fetchStartedAt });
       return advanceCorner(db, cornerId, { kind: 'checks', result: 'passing' });
     });
     if (advanced?.land && ctx.landCorner) {

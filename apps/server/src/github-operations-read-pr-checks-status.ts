@@ -11,9 +11,8 @@ import type { CornerLifecycleView } from '@beeline/api-contract/phone';
 import type { CornerPullRequestResult } from '@beeline/api-contract/daemon';
 import type { SqlDatabase } from './database.js';
 import { GITHUB_SUBJECT, systemLine } from './system-line.js';
-import { withdrawPullRequestMergeApprovals } from './corner-merge-approval.js';
 import { moveStoredCornerHead } from './github-operations-begin-identity.js';
-import { advanceCorner, cornerReviewWokenSql, confirmCornerMergeAuthority, lockCornerLifecycle, lockCornerArchivalAuthority, cornerMergeGate, cornerMergeability } from './corner-lifecycle.js';
+import { recordCornerGithubFact, advanceCorner, cornerReviewWokenSql, confirmCornerMergeAuthority, lockCornerLifecycle, lockCornerArchivalAuthority, cornerMergeGate, cornerMergeability } from './corner-lifecycle.js';
 import { queueCornerMergeConflict, reconcileCornerMergeBlockers } from './agent-command.js';
 import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, CornerWebhookTarget, record, mergeConflictKey, hash, text } from './github-operations.js';
 
@@ -278,11 +277,7 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
         status.headSha,
       );
       if (result === 'queued') {
-        await ctx.database.query(
-          `UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{mergeQueue}',
-             jsonb_build_object('headSha',$2::text))
-           WHERE corner_id=$1 AND lifecycle->'pr'->>'headSha'=$2`, [cornerId, status.headSha],
-        );
+        await recordCornerGithubFact(ctx.database, cornerId, { kind: 'merge-queued', headSha: status.headSha });
         await ctx.reconcileQueuedCorners(cornerId);
         ctx.onRoomChanged?.(cornerId);
         return { status: 'queued' };
@@ -304,9 +299,7 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
           const queue = await ctx.app.readPullRequestQueue(token.token, target.full_name, target.number);
           confirmedUnqueued = !queue.entry;
           if (queue.entry && queue.headSha === status.headSha) {
-            await ctx.database.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{mergeQueue}',
-              jsonb_build_object('headSha',$2::text)) WHERE corner_id=$1 AND lifecycle->'pr'->>'headSha'=$2`,
-              [cornerId, status.headSha]);
+            await recordCornerGithubFact(ctx.database, cornerId, { kind: 'merge-queued', headSha: status.headSha });
             await ctx.reconcileQueuedCorners(cornerId);
             ctx.onRoomChanged?.(cornerId);
             return { status: 'queued' };
@@ -402,20 +395,6 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
   }
 
 
-  /** Forget a PR association under the lifecycle lock, without interpreting provider absence as closure. */
-  async function forgetCornerPullRequest(database: SqlDatabase, cornerId: string, number: number) {
-    const removed = await database.query<{ archived: boolean; locked: boolean }>(
-      `UPDATE corner_github_cache fact SET lifecycle=(fact.lifecycle-'pr'-'mergeQueue'-'checksSummary')||'{"checks":"unknown"}'::jsonb
-       FROM rooms corner,corner_facts state
-       WHERE fact.corner_id=$1 AND corner.id=fact.corner_id AND state.corner_id=fact.corner_id
-         AND ${cornerRunOutcomeSql('fact.corner_id')} IS DISTINCT FROM 'landed'
-         AND (fact.lifecycle->'pr'->>'number')::int=$2
-       RETURNING corner.archived_at IS NOT NULL archived,state.locked`, [cornerId, number],
-    );
-    if (removed.rowCount) await withdrawPullRequestMergeApprovals(database, cornerId, number);
-    return removed.rows[0];
-  }
-
   /** A confirmed unmerged close ends the linked work unless it is a locked standing thread. */
   export async function gitHubOperationsRecordClosedCornerPullRequest(ctx: GitHubOperations,
     cornerId: string, number: number, database: SqlDatabase = ctx.database,
@@ -425,7 +404,7 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
       archived = false;
       await lockCornerLifecycle(db, cornerId);
       await lockCornerArchivalAuthority(db);
-      const removed = await forgetCornerPullRequest(db, cornerId, number);
+      const removed = await recordCornerGithubFact(db, cornerId, { kind: 'pr-forgotten', number });
       if (!removed) return false;
       if (!removed.archived) {
         if (removed.locked) await advanceCorner(db, cornerId, { kind: 'reconcile' });

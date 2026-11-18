@@ -7,7 +7,7 @@ import type { CornerLifecycleView } from '@beeline/api-contract/phone';
 import type { SqlDatabase } from './database.js';
 import { GITHUB_SUBJECT, systemLine, type SystemPhrase } from './system-line.js';
 import { archiveCornerState, lockCornerArchivalAuthority } from './corner-close.js';
-import { advanceCorner, planCornerCheckObservation, checksSettled, actionsJobId, lockCornerLifecycle, type CornerEvent } from './corner-lifecycle.js';
+import { recordCornerGithubFact, advanceCorner, planCornerCheckObservation, checksSettled, actionsJobId, lockCornerLifecycle, type CornerEvent } from './corner-lifecycle.js';
 import { routeSystemCommand } from './agent-command.js';
 import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, hash } from './github-operations.js';
 
@@ -222,14 +222,7 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
         if (noteInserted) ctx.onRoomChanged?.(target.corner_id);
     } catch (error) {
       if (transientGitHubError(error)) {
-        await database.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(
-            jsonb_set(lifecycle,'{checks}','"pending"'::jsonb),
-              '{checksSummary}',jsonb_build_object('total',0,'failing','[]'::jsonb,
-                'checks','[]'::jsonb,'updatedAt',floor(extract(epoch FROM clock_timestamp()))) ||
-                COALESCE(lifecycle->'checksSummary','{}'::jsonb) || '{"status":"pending"}'::jsonb)
-          WHERE corner_id=$1 AND lifecycle->'pr'->>'headSha'=$2
-            AND COALESCE((lifecycle->'checksSummary'->>'fetchStartedAt')::double precision,0)<=$3`,
-          [target.corner_id, checkHeadSha, fetchStartedAt]);
+        await recordCornerGithubFact(database, target.corner_id, { kind: 'checks-unavailable', headSha: checkHeadSha, fetchStartedAt });
       }
       throw error;
     }
@@ -256,15 +249,10 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
 
   export async function gitHubOperationsUpdateLifecycle(ctx: GitHubOperations,
     cornerId: string,
-    patch: Partial<CornerLifecycleView>,
+    patch: Partial<Pick<CornerLifecycleView, 'pr' | 'checks' | 'checksSummary'>>,
     database: SqlDatabase = ctx.database,
   ) {
-    const previous = await ctx.lifecycle(cornerId, database);
-    const { branch: _branch, ...lifecycle } = { ...previous, ...patch };
-    await database.query(
-      `UPDATE corner_github_cache SET lifecycle=$2::jsonb WHERE corner_id=$1`,
-      [cornerId, JSON.stringify(lifecycle)],
-    );
+    await recordCornerGithubFact(database, cornerId, { kind: 'github-observed', patch });
   }
 
 
@@ -376,32 +364,10 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
         if (!archived) return;
       }
       updated = true;
-      await database.query(
-        `UPDATE corner_github_cache SET
-           lifecycle=((lifecycle-'mergeQueue') -
-             CASE WHEN $3 THEN ARRAY['pr','outcome','checksSummary'] ELSE ARRAY[]::text[] END)||$2::jsonb WHERE corner_id=$1`,
-        [
-          target.corner_id,
-          JSON.stringify({
-            lifecycle: locked ? 'working' : 'done',
-            checks: locked ? 'unknown' : 'passing',
-            ...(!locked ? { outcome: 'landed' } : {}),
-            ...(!locked && mergedPr
-              ? {
-                  pr: {
-                    ...mergedPr,
-                    mergedAt: pullRequest.mergedAt ?? new Date().toISOString(),
-                    ...(pullRequest.mergeCommitSha
-                      ? { mergeCommitSha: pullRequest.mergeCommitSha }
-                      : {}),
-                    ...(pullRequest.mergedBy ? { mergedBy: pullRequest.mergedBy } : {}),
-                  },
-                }
-              : {}),
-          }),
-          locked,
-        ],
-      );
+      await recordCornerGithubFact(database, target.corner_id, {
+        kind: 'merged', locked, pr: mergedPr, mergedAt: pullRequest.mergedAt,
+        mergeCommitSha: pullRequest.mergeCommitSha, mergedBy: pullRequest.mergedBy,
+      });
       const merged: SystemPhrase = {
         subject: pullRequest.mergedBy
           ? { kind: githubProviderKey, name: pullRequest.mergedBy }

@@ -1,3 +1,6 @@
+import { cornerFeatureBranchSql } from './corner-branch.js';
+import { cornerRunOutcomeSql } from './corner-run.js';
+import { withdrawPullRequestMergeApprovals } from './corner-merge-approval.js';
 import { cornerOwnerSql } from './corner-worker.js';
 import { CornerLifecycleView } from '@beeline/api-contract/phone';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
@@ -10,7 +13,7 @@ import { cornerIdleSql,type CornerIdleRow } from './corner-idle.js';
 import { CORNER_IDLE_REPORT_BUDGET } from './corner-idle-budget.js';
 import { loadCorner,type CornerRow } from './corner-lifecycle-read-state.js';
 import { cornerMergeGate,independentReviewerConfigured,loadCornerReviewState,lockCornerArchivalAuthority,lockCornerLifecycle,noteReviewDispatchFailure,reachableReviewer } from './corner-lifecycle-review-state.js';
-import { OK,reviewChecksSql,type Applied,type CornerAdvance,type CornerEvent,type RevisionWake } from './corner-lifecycle-values.js';
+import { OK,reviewChecksSql,type Applied,type CornerAdvance,type CornerEvent,type CornerGithubFact,type RevisionWake } from './corner-lifecycle-values.js';
 import { transitionCorner,type CornerMachine,type CornerMachineFacts } from './corner-machine.js';
 import { deliverableCommandSql } from './chat-corner-counts.js';
 import { loadCornerWaiting } from './corner-waiting.js';
@@ -50,7 +53,7 @@ CREATE TRIGGER corner_github_cache_mirror AFTER INSERT OR UPDATE OF lifecycle ON
 /**
  * The corner's own row: created once with the corner, then changed only by
  * this module (its lock, implementer and reviewer). Its GitHub display cache row starts
- * with it and is then written only from GitHub (`corner_github_cache`).
+ * with it; every GitHub and helper observation is committed by this owner.
  */
 export async function createCornerFacts(db: SqlDatabase, cornerId: string, humanOpen = false): Promise<void> {
   // A just-inserted human corner has no commands, checks, receipts or waits to
@@ -855,3 +858,105 @@ export { cornerMergeGate } from './corner-lifecycle-review-state.js';
 export { confirmCornerMergeAuthority } from './corner-lifecycle-review-state.js';
 
 export { deleteStoredCornerWorkflows } from './corner-lifecycle-review-state.js';
+
+/** The one router for GitHub/helper facts. Callers retain their existing lifecycle
+ * locks and emit observations; this owner decides the guarded cache transition. */
+export function recordCornerGithubFact(db: SqlDatabase, cornerId: string,
+  fact: Extract<CornerGithubFact, { kind: 'pr-forgotten' }>,
+): Promise<{ archived: boolean; locked: boolean } | undefined>;
+export function recordCornerGithubFact(db: SqlDatabase, cornerId: string,
+  fact: Exclude<CornerGithubFact, { kind: 'pr-forgotten' }>,
+): Promise<boolean>;
+export async function recordCornerGithubFact(db: SqlDatabase, cornerId: string,
+  fact: CornerGithubFact,
+): Promise<boolean | { archived: boolean; locked: boolean } | undefined> {
+  switch (fact.kind) {
+    case 'seeded':
+      return Boolean((await db.query(`INSERT INTO corner_github_cache(corner_id,lifecycle)
+        VALUES($1,COALESCE($2::jsonb,'{"lifecycle":"unknown","checks":"unknown"}'::jsonb))
+        ON CONFLICT(corner_id) DO UPDATE SET lifecycle=EXCLUDED.lifecycle`,
+        [cornerId, fact.lifecycleJson])).rowCount);
+    case 'github-observed':
+    case 'pr-opened': {
+      const previous = (await db.query<{ lifecycle: CornerLifecycleView }>(
+        `SELECT lifecycle-'branch' lifecycle FROM corner_github_cache WHERE corner_id=$1`, [cornerId],
+      )).rows[0]?.lifecycle ?? { lifecycle: 'unknown', checks: 'unknown' };
+      const patch = fact.kind === 'pr-opened' ? { lifecycle: 'in-review', pr: fact.pr } : fact.patch;
+      const { branch: _branch, ...lifecycle } = { ...previous, ...patch };
+      return Boolean((await db.query(`UPDATE corner_github_cache SET lifecycle=$2::jsonb WHERE corner_id=$1`,
+        [cornerId, JSON.stringify(lifecycle)])).rowCount);
+    }
+    case 'helper-observed': {
+      const lifecycle = { lifecycle: fact.remote.state === 'gone' ? 'unknown' : fact.remote.state,
+        checks: fact.remote.checks, ...(fact.remote.pullRequest ? { pr: fact.remote.pullRequest } : {}) };
+      // A restart heartbeat is lower authority than the complete GitHub PR/check facts.
+      return Boolean((await db.query(`INSERT INTO corner_github_cache(corner_id,lifecycle) VALUES($1,$2::jsonb)
+        ON CONFLICT(corner_id) DO UPDATE SET lifecycle=CASE
+          WHEN EXCLUDED.lifecycle->>'lifecycle'='working' AND corner_github_cache.lifecycle ? 'pr'
+            THEN corner_github_cache.lifecycle-'branch'
+          ELSE (corner_github_cache.lifecycle-'branch') || EXCLUDED.lifecycle END`,
+        [cornerId, JSON.stringify(lifecycle)])).rowCount);
+    }
+    case 'checks-unavailable':
+      return Boolean((await db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(
+          jsonb_set(lifecycle,'{checks}','"pending"'::jsonb),
+          '{checksSummary}',jsonb_build_object('total',0,'failing','[]'::jsonb,
+            'checks','[]'::jsonb,'updatedAt',floor(extract(epoch FROM clock_timestamp()))) ||
+            COALESCE(lifecycle->'checksSummary','{}'::jsonb) || '{"status":"pending"}'::jsonb)
+        WHERE corner_id=$1 AND lifecycle->'pr'->>'headSha'=$2
+          AND COALESCE((lifecycle->'checksSummary'->>'fetchStartedAt')::double precision,0)<=$3`,
+        [cornerId, fact.headSha, fact.fetchStartedAt])).rowCount);
+    case 'head-observed':
+      return Boolean((await db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(jsonb_set(
+          jsonb_set(lifecycle-'checksSummary','{pr,headSha}',to_jsonb($4::text)),
+          '{pr,mergeability}','"unknown"'),'{checks}','"pending"')
+        WHERE corner_id=$1 AND lifecycle->'pr'->>'number'=$2
+          AND lifecycle->'pr'->>'headSha'=$3 RETURNING corner_id`,
+        [cornerId, String(fact.number), fact.from, fact.to])).rowCount);
+    case 'pr-discovered':
+      return Boolean((await db.query(`UPDATE corner_github_cache fact SET lifecycle=lifecycle || $3::jsonb
+        FROM rooms room WHERE fact.corner_id=$1 AND room.id=fact.corner_id AND room.archived_at IS NULL
+          AND ${cornerFeatureBranchSql('room')}=$2 AND fact.lifecycle->'pr'->>'number' IS NULL`,
+        [cornerId, fact.branch, JSON.stringify({ lifecycle: 'in-review', pr: fact.pr })])).rowCount);
+    case 'pr-forgotten': {
+      const removed = await db.query<{ archived: boolean; locked: boolean }>(
+        `UPDATE corner_github_cache fact SET lifecycle=(fact.lifecycle-'pr'-'mergeQueue'-'checksSummary')||'{"checks":"unknown"}'::jsonb
+         FROM rooms corner,corner_facts state
+         WHERE fact.corner_id=$1 AND corner.id=fact.corner_id AND state.corner_id=fact.corner_id
+           AND ${cornerRunOutcomeSql('fact.corner_id')} IS DISTINCT FROM 'landed'
+           AND (fact.lifecycle->'pr'->>'number')::int=$2
+         RETURNING corner.archived_at IS NOT NULL archived,state.locked`, [cornerId, fact.number]);
+      if (removed.rowCount) await withdrawPullRequestMergeApprovals(db, cornerId, fact.number);
+      return removed.rows[0];
+    }
+    case 'merge-queued':
+      return Boolean((await db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{mergeQueue}',$3::jsonb)
+        WHERE corner_id=$1 AND lifecycle->'pr'->>'headSha'=$2`, [cornerId, fact.headSha,
+        JSON.stringify({ headSha: fact.headSha, ...(fact.combinedSha !== undefined ? { combinedSha: fact.combinedSha } : {}) })])).rowCount);
+    case 'merge-queue-removed':
+      return Boolean((await db.query(`UPDATE corner_github_cache SET lifecycle=lifecycle-'mergeQueue'
+        WHERE corner_id=$1 AND COALESCE(lifecycle->'mergeQueue'->>'headSha',lifecycle->'pr'->>'headSha')=$2
+        RETURNING 1`, [cornerId, fact.headSha])).rowCount);
+    case 'merged':
+      return Boolean((await db.query(`UPDATE corner_github_cache SET lifecycle=((lifecycle-'mergeQueue') -
+        CASE WHEN $3 THEN ARRAY['pr','outcome','checksSummary'] ELSE ARRAY[]::text[] END)||$2::jsonb WHERE corner_id=$1`,
+        [cornerId, JSON.stringify({ lifecycle: fact.locked ? 'working' : 'done', checks: fact.locked ? 'unknown' : 'passing',
+          ...(!fact.locked ? { outcome: 'landed' } : {}),
+          ...(!fact.locked && fact.pr ? { pr: { ...fact.pr, mergedAt: fact.mergedAt ?? new Date().toISOString(),
+            ...(fact.mergeCommitSha ? { mergeCommitSha: fact.mergeCommitSha } : {}),
+            ...(fact.mergedBy ? { mergedBy: fact.mergedBy } : {}) } } : {}),
+        }), fact.locked])).rowCount);
+    case 'zero-checks-confirmed':
+      return Boolean((await db.query(`UPDATE corner_github_cache SET lifecycle=lifecycle || $2::jsonb WHERE corner_id=$1`,
+        [cornerId, JSON.stringify({ checks: 'passing', checksSummary: { status: 'passing', total: 0, failing: [], checks: [],
+          updatedAt: Math.floor((await db.query<{ now: number }>(`SELECT extract(epoch FROM clock_timestamp())::double precision now`)).rows[0]!.now),
+          fetchStartedAt: fact.fetchStartedAt } })])).rowCount);
+  }
+}
+
+/** Account deletion settles the deleted agents' corners with its explicit reason. */
+export async function markOwnedCornersAbandoned(database: SqlDatabase, agentIds: string[], reason: string): Promise<void> {
+  await database.query(`UPDATE corner_github_cache SET lifecycle=lifecycle||$2::jsonb
+    WHERE ${cornerOwnerSql('corner_github_cache.corner_id')}=ANY($1)`,
+    [agentIds, JSON.stringify({ lifecycle: 'done', outcome: 'abandoned', reason })]);
+}

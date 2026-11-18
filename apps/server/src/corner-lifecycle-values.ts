@@ -1,3 +1,5 @@
+import type { PostCornerRemoteStateInput } from '@beeline/api-contract/daemon';
+import type { CornerLifecycleView } from '@beeline/api-contract/phone';
 import type { AgentCommandInput,CommandRow } from './agent-command.js';
 
 
@@ -63,3 +65,19 @@ export type CornerEvent =
   | { kind: 'closed' }
   | { kind: 'merge-conflict'; sourceMessageId: string }
   | { kind: 'reconcile' };
+
+/** Observations admitted by the lifecycle owner; adapters never receive a SQL writer. */
+export type CornerGithubFact =
+  | { kind: 'seeded'; lifecycleJson: string | null }
+  | { kind: 'github-observed'; patch: Partial<Pick<CornerLifecycleView, 'pr' | 'checks' | 'checksSummary'>> }
+  | { kind: 'pr-opened'; pr: NonNullable<CornerLifecycleView['pr']> }
+  | { kind: 'helper-observed'; remote: Pick<PostCornerRemoteStateInput, 'state' | 'checks' | 'pullRequest'> }
+  | { kind: 'checks-unavailable'; headSha: string; fetchStartedAt: number }
+  | { kind: 'head-observed'; number: number; from: string; to: string }
+  | { kind: 'pr-discovered'; branch: string; pr: NonNullable<CornerLifecycleView['pr']> }
+  | { kind: 'pr-forgotten'; number: number }
+  | { kind: 'merge-queued'; headSha: string; combinedSha?: string }
+  | { kind: 'merge-queue-removed'; headSha: string }
+  | { kind: 'merged'; locked: boolean; pr?: NonNullable<CornerLifecycleView['pr']>;
+      mergedAt?: string; mergeCommitSha?: string; mergedBy?: string }
+  | { kind: 'zero-checks-confirmed'; fetchStartedAt: number };

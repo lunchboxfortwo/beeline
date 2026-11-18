@@ -160,23 +160,18 @@
     {
       "id": "corner.github-cache-writes",
       "module": "Corner state machine",
-      "invariant": "GitHub's corner display cache (corner_github_cache) is written only from GitHub, helper remote-state reports and the corner module's seed and close.",
+      "invariant": "Corner GitHub state (PR, checks, merge queue and lifecycle) is written only by the lifecycle owner.",
       "pattern": "(?:INSERT\\s+INTO|UPDATE|DELETE\\s+FROM)\\s+corner_github_cache\\b",
       "flags": "i",
       "scope": [
         "apps/server/src"
       ],
       "owners": [
-        "apps/server/src/corner-close.ts",
-        "apps/server/src/corner-github-cache.ts",
-        "apps/server/src/corner-lifecycle.ts",
-        "apps/server/src/github-operations-begin-identity.ts",
-        "apps/server/src/github-operations-read-pr-checks-status.ts",
-        "apps/server/src/github-operations-reconcile-queued-corners.ts",
-        "apps/server/src/github-operations-refresh-check-rollup.ts"
+        "apps/server/src/corner-lifecycle.ts"
       ],
       "total": 0,
-      "fix": "Write the cache through apps/server/src/corner-github-cache.ts (writeCornerGithubCache, recordHelperRemoteState) or GitHubOperations in apps/server/src/github-operations.ts; read it with cornerLifecycleSql."
+      "fix": "Emit a fact through recordCornerGithubFact in apps/server/src/corner-lifecycle.ts; read it with cornerLifecycleSql.",
+      "strict": true
     },
     {
       "id": "corner.merge-approval-writes",

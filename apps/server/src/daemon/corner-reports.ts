@@ -3,8 +3,8 @@ import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { answerQueuedMessage,authorizeCommandOutput,type CommandRow } from '../agent-command.js';
 import { CommandRefusalError } from '../commander.js';
 import { currentCornerBrief,resolveCornerBriefApproval,resolveCornerBriefAttachments,resolvePendingCornerBriefAttachments,validateCornerBrief } from '../corner-brief.js';
-import { cornerLifecycleSql,recordHelperRemoteState } from '../corner-github-cache.js';
-import { lockCornerLifecycle } from '../corner-lifecycle.js';
+import { cornerLifecycleSql } from '../corner-github-cache.js';
+import { lockCornerLifecycle,recordCornerGithubFact } from '../corner-lifecycle.js';
 import { cornerObjectiveSql,writeCornerObjective } from '../corner-objective.js';
 import { cornerKindSql } from '../corner-opening.js';
 import { setCornerReviewer } from '../corner-reviewer.js';
@@ -93,14 +93,7 @@ import { id,Input,Output } from './values.js';
 
   export async function daemonCornerRemote(ctx: DaemonContext, input: Input<'postCornerRemoteState'>, agentId: string) {
     await daemonAccess(ctx, input.cornerId, agentId);
-    // A helper heartbeat never ends a corner: only close and merge archive it.
-    // A `gone` remote branch is recorded as an unknown remote state.
-    const lifecycle = {
-      lifecycle: input.state === 'gone' ? 'unknown' : input.state,
-      checks: input.checks,
-      ...(input.pullRequest ? { pr: input.pullRequest } : {}),
-    };
-    await recordHelperRemoteState(ctx.database, input.cornerId, lifecycle);
+    await recordCornerGithubFact(ctx.database, input.cornerId, { kind: 'helper-observed', remote: input });
     return daemonWriteResult(ctx);
   }
 

@@ -10,7 +10,7 @@ import { GITHUB_IDENTITY_AUDIENCE, GitHubHttpError } from '@beeline/auth/github'
 import type { SqlDatabase } from './database.js';
 import { cornerImplementerSql } from './corner-worker.js';
 import { currentCornerBrief } from './corner-brief.js';
-import { advanceCorner, lockCornerLifecycle } from './corner-lifecycle.js';
+import { recordCornerGithubFact, advanceCorner, lockCornerLifecycle } from './corner-lifecycle.js';
 import { GitHubOperations, Input, hash, challenge, record, GitHubRecord, text, integer } from './github-operations.js';
 
 
@@ -573,13 +573,10 @@ import { GitHubOperations, Input, hash, challenge, record, GitHubRecord, text, i
     await ctx.database.transaction(async db => {
       await lockCornerLifecycle(db, cornerId);
       // A webhook or close may have won while the provider read was in flight.
-      await db.query(`UPDATE corner_github_cache fact SET lifecycle=lifecycle || $3::jsonb
-        FROM rooms room WHERE fact.corner_id=$1 AND room.id=fact.corner_id AND room.archived_at IS NULL
-          AND ${cornerFeatureBranchSql('room')}=$2 AND fact.lifecycle->'pr'->>'number' IS NULL`,
-      [cornerId, corner.branch, JSON.stringify({ lifecycle: 'in-review',
+      await recordCornerGithubFact(db, cornerId, { kind: 'pr-discovered', branch: corner.branch,
         pr: { number: pr.number, url: pr.url, title: pr.title ?? `Pull request #${pr.number}`,
-          headSha: pr.headSha, targetBranch: pr.baseRef, mergeability: 'unknown',
-          ...(pr.baseSha ? { baseSha: pr.baseSha } : {}) } })]);
+          headSha: pr.headSha, targetBranch: pr.baseRef!, mergeability: 'unknown',
+          ...(pr.baseSha ? { baseSha: pr.baseSha } : {}) } });
     });
     ctx.onRoomChanged?.(cornerId);
   }
@@ -620,15 +617,7 @@ import { GitHubOperations, Input, hash, challenge, record, GitHubRecord, text, i
         return { corner: { ...corner, lifecycle } };
       },
       async write(db) {
-        const changed = await db.query(
-          `UPDATE corner_github_cache SET lifecycle=jsonb_set(jsonb_set(
-             jsonb_set(lifecycle-'checksSummary','{pr,headSha}',to_jsonb($4::text)),
-             '{pr,mergeability}','"unknown"'),'{checks}','"pending"')
-           WHERE corner_id=$1 AND lifecycle->'pr'->>'number'=$2
-             AND lifecycle->'pr'->>'headSha'=$3 RETURNING corner_id`,
-          [cornerId, String(number), from, to],
-        );
-        return Boolean(changed.rowCount);
+        return recordCornerGithubFact(db, cornerId, { kind: 'head-observed', number, from, to });
       },
     });
   }

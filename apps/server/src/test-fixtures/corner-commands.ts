@@ -1,4 +1,4 @@
-import { becomeThreadImplementer, createCornerFacts, setCornerLockedFact, setCornerReviewerFact } from '../corner-lifecycle.js';
+import { recordCornerGithubFact, becomeThreadImplementer, createCornerFacts, setCornerLockedFact, setCornerReviewerFact } from '../corner-lifecycle.js';
 import { randomUUID } from 'node:crypto';
 import type { SqlDatabase } from '../database.js';
 
@@ -63,10 +63,5 @@ export async function seedCornerFactsRow(
   if (initial) await becomeThreadImplementer(db, cornerId, initial.created_by);
   if (locked) await setCornerLockedFact(db, cornerId, locked);
   if (reviewerAgentId) await setCornerReviewerFact(db, cornerId, reviewerAgentId);
-  await db.query(
-    `INSERT INTO corner_github_cache(corner_id,lifecycle)
-     VALUES($1,COALESCE($2::jsonb,'{"lifecycle":"unknown","checks":"unknown"}'::jsonb))
-     ON CONFLICT(corner_id) DO UPDATE SET lifecycle=EXCLUDED.lifecycle`,
-    [cornerId, lifecycle],
-  );
+  await recordCornerGithubFact(db, cornerId, { kind: 'seeded', lifecycleJson: lifecycle });
 }

@@ -377,7 +377,7 @@ async refreshCheckRollup(target: CornerWebhookTarget & {
     };
 }) { return gitHubOperationsRefreshCheckRollup(this, target, repository, check, database, options); }
 async lifecycle(cornerId: string, database: SqlDatabase = this.database): Promise<CornerLifecycleView> { return gitHubOperationsLifecycle(this, cornerId, database); }
-async updateLifecycle(cornerId: string, patch: Partial<CornerLifecycleView>, database: SqlDatabase = this.database) { return gitHubOperationsUpdateLifecycle(this, cornerId, patch, database); }
+async updateLifecycle(cornerId: string, patch: Partial<Pick<CornerLifecycleView, 'pr' | 'checks' | 'checksSummary'>>, database: SqlDatabase = this.database) { return gitHubOperationsUpdateLifecycle(this, cornerId, patch, database); }
 async systemNote(roomId: string, authorId: string, phrase: SystemPhrase, dedupe: string, database: SqlDatabase = this.database, deferNotification = false) { return gitHubOperationsSystemNote(this, roomId, authorId, phrase, dedupe, database, deferNotification); }
 async mergeCorner(target: CornerWebhookTarget, pullRequest: {
     repository: string;

@@ -6,7 +6,7 @@ import { cornerFeatureBranchSql } from './corner-branch.js';
 import { GitHubAppClient, githubMergeability } from '@beeline/auth/github';
 import type { CornerLifecycleView } from '@beeline/api-contract/phone';
 import { GITHUB_SUBJECT, systemLine } from './system-line.js';
-import { advanceCorner, lockCornerLifecycle, cornerMergeGate } from './corner-lifecycle.js';
+import { recordCornerGithubFact, advanceCorner, lockCornerLifecycle, cornerMergeGate } from './corner-lifecycle.js';
 import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, branchForEvent, text, record, githubUrl, hash, integer, checkFact } from './github-operations.js';
 
 
@@ -52,10 +52,10 @@ import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, br
         if (!queue.entry && !row.cached) continue;
         const gate = await cornerMergeGate(ctx.database, row.corner_id, { number: row.number, headSha: row.head_sha });
         if (queue.entry && gate.open && queue.headSha === row.head_sha) {
-          await ctx.database.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{mergeQueue}',
-              jsonb_build_object('headSha',$2::text,'combinedSha',$3::text))
-            WHERE corner_id=$1 AND lifecycle->'pr'->>'headSha'=$2`,
-            [row.corner_id, row.head_sha, queue.entry.headCommit?.oid ?? row.combined_sha ?? '']);
+          await recordCornerGithubFact(ctx.database, row.corner_id, {
+            kind: 'merge-queued', headSha: row.head_sha,
+            combinedSha: queue.entry.headCommit?.oid ?? row.combined_sha ?? '',
+          });
           continue;
         }
         if (queue.entry) await ctx.app.dequeuePullRequest(token.token, queue.id);
@@ -65,10 +65,8 @@ import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, br
           : `Removed from the merge queue: ${rollup?.failing.join(', ') || 'GitHub removed the entry before merging'}`;
         await ctx.database.transaction(async db => {
           await lockCornerLifecycle(db, row.corner_id);
-          const changed = await db.query(`UPDATE corner_github_cache SET lifecycle=lifecycle-'mergeQueue'
-            WHERE corner_id=$1 AND COALESCE(lifecycle->'mergeQueue'->>'headSha',lifecycle->'pr'->>'headSha')=$2
-            RETURNING 1`, [row.corner_id, row.head_sha]);
-          if (!changed.rowCount) return;
+          const changed = await recordCornerGithubFact(db, row.corner_id, { kind: 'merge-queue-removed', headSha: row.head_sha });
+          if (!changed) return;
           await advanceCorner(db, row.corner_id, { kind: 'merge-refused', headSha: row.head_sha, confirmedUnmerged: true, reason });
         });
         ctx.onRoomChanged?.(row.corner_id);
@@ -389,22 +387,18 @@ import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, br
             // A webhook's mergeable_state is a cached field. Never wake the
             // implementer from it; keep an unconfirmed verdict as unknown and
             // let refreshStaleMergeability confirm it against the live PR.
-            await ctx.updateLifecycle(
-              target.corner_id,
-              {
-                lifecycle: 'in-review',
-                pr: {
-                  number,
-                  url,
-                  title,
-                  targetBranch,
-                  headSha,
-                  mergeability: mergeability === 'dirty' ? 'unknown' : mergeability,
-                  ...(baseSha ? { baseSha } : {}),
-                },
+            await recordCornerGithubFact(tx, target.corner_id, {
+              kind: 'pr-opened',
+              pr: {
+                number,
+                url,
+                title,
+                targetBranch,
+                headSha,
+                mergeability: mergeability === 'dirty' ? 'unknown' : mergeability,
+                ...(baseSha ? { baseSha } : {}),
               },
-              tx,
-            );
+            });
           });
           if (differentPr) continue;
           if (mergeability === 'unknown' || mergeability === 'dirty')

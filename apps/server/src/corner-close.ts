@@ -3,7 +3,7 @@ import type { SqlDatabase } from './database.js';
 import { advanceCorner } from './corner-lifecycle.js';
 
 export { lockCornerArchivalAuthority, archiveCornerState, cancelCornerAgentCommands } from './corner-lifecycle.js';
-import { cornerOwnerSql } from './corner-worker.js';
+export { markOwnedCornersAbandoned } from './corner-lifecycle.js';
 
 /** Release migration: old archived corners cannot have an active assignment. */
 export async function cancelArchivedCornerAssignments(database: SqlDatabase): Promise<void> {
@@ -43,13 +43,4 @@ export async function closeCornerState(database: SqlDatabase, cornerId: string) 
   const corner = (await database.query<{ parent_id: string }>('SELECT parent_id FROM rooms WHERE id=$1 AND parent_id IS NOT NULL', [cornerId])).rows[0];
   if (!corner) throw new Error('thread not found');
   return { parentId: corner.parent_id, archived: outcome.archived === true };
-}
-
-/** Account deletion: the deleted agents' corners settle as done/abandoned, with the reason. */
-export async function markOwnedCornersAbandoned(database: SqlDatabase, agentIds: string[], reason: string): Promise<void> {
-  await database.query(
-    `UPDATE corner_github_cache SET lifecycle=lifecycle||$2::jsonb
-     WHERE ${cornerOwnerSql('corner_github_cache.corner_id')}=ANY($1)`,
-    [agentIds, JSON.stringify({ lifecycle: 'done', outcome: 'abandoned', reason })],
-  );
 }

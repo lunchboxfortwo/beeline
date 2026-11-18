@@ -15,6 +15,15 @@ export function inspectCornerMachineSource(file, text) {
     );
   const queueNames = new Set(['createAgentCommand']);
   function visit(node) {
+    if ((ts.isStringLiteralLike(node) || ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node)) &&
+        /\b(?:UPDATE|INSERT\s+INTO|DELETE\s+FROM)\s+(?:[\w"]+\s*\.\s*)?"?corner_github_cache"?\b/i.test(node.text))
+      deny(node, 'corner state write outside its owner');
+    // Cache writes are forbidden throughout the product tree. The existing
+    // server command/archival rules do not govern same-named helper modules.
+    if (!file.startsWith('apps/server/src/')) {
+      ts.forEachChild(node, visit);
+      return;
+    }
     if ((ts.isExportDeclaration(node) || ts.isImportDeclaration(node) && node.importClause?.namedBindings && ts.isNamespaceImport(node.importClause.namedBindings)) &&
         node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier) && /\/agent-command(?:\.[jt]s)?$/.test(node.moduleSpecifier.text))
       deny(node, 'raw command capability escapes through a namespace or re-export');
@@ -65,7 +74,6 @@ export function inspectCornerMachineSource(file, text) {
 }
 export function checkCornerMachine(root) {
   return sourceFiles(root)
-    .filter((file) => file.startsWith('apps/server/src/'))
     .flatMap((file) =>
       inspectCornerMachineSource(file, readFileSync(path.join(root, file), 'utf8')),
     );
