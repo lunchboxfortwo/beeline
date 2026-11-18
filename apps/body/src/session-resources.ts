@@ -40,11 +40,16 @@ export class SessionResources {
 
   refresh(): void {
     const { api, agentId, placeId, parentRoomId, workspaceId } = this.options;
-    this.load('configuration', () => api.execute('getAgentConfiguration', { agentId, roomId: placeId }));
+    this.refreshConfiguration();
     this.load('roster', () => api.execute('getWorkspaceRoster', { agentId, workspaceId }));
     this.load('repository', () => api.execute('getRoomRepositoryState', { roomId: parentRoomId ?? placeId }));
     this.load('grants', () => api.execute('listAgentGrants', { agentId, roomId: placeId }));
     if (parentRoomId) this.load('restore', () => api.execute('getCornerRestoreState', { cornerId: placeId }));
+  }
+
+  refreshConfiguration(): void {
+    const { api, agentId, placeId } = this.options;
+    this.load('configuration', () => api.execute('getAgentConfiguration', { agentId, roomId: placeId }));
   }
 
   private load<K extends keyof Context>(key: K, read: () => Promise<Context[K]>): void {

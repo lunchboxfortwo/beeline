@@ -378,7 +378,7 @@ export class AgentRunner {
 
   private configChanged(): void {
     for (const [placeId, place] of this.places) {
-      place.session.resources.refresh();
+      place.session.resources.refreshConfiguration();
       place.session.stale = true;
       if (!place.running) void place.session.stop().then(() => this.pump(placeId));
     }

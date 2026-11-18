@@ -528,6 +528,45 @@ it('F14 unrelated turn/activity/usage changes make zero daemon inbox reads', asy
   expect(vi.mocked(daemon.execute).mock.calls.filter(([name])=>name==='getAgentCommands')).toHaveLength(1);
 });
 
+it('pushes corner queue metadata without waking bootstrap discovery for every queue update', async () => {
+  const live=new LiveHub(),daemon=daemonStub();
+  let commands:Record<string,unknown>[]=[];
+  vi.mocked(daemon.execute).mockImplementation(async () => ({commandProtocol:2,commands}) as never);
+  const {port}=await start({live,daemon}),client=await machine(port);
+  await register(client,AGENT_A,'bdt_a');
+  client.send({type:'subscribe-queue',agentId:AGENT_A});
+  await client.next(frame=>frame.type==='commands');
+  commands=[{id:'new-command',roomId:'new-corner',parentRoomId:'parent-room'}];
+  for(let change=0;change<3;change++) {
+    const after=client.frames.length;
+    live.publish({type:'invalidate',roomId:'new-corner',parentRoomId:'parent-room',
+      openedBy:AGENT_A,targetAgentId:AGENT_A,reason:'postgres:agent_commands'});
+    const frame=await client.next(frame=>client.frames.indexOf(frame)>=after&&frame.type==='commands');
+    expect(frame.commands).toEqual(commands);
+  }
+  expect(client.frames.filter(frame=>frame.type==='rooms-changed')).toEqual([]);
+  const after=client.frames.length;
+  live.publish({type:'invalidate',roomId:'new-corner',parentRoomId:'parent-room',
+    openedBy:AGENT_A,targetAgentId:AGENT_A,reason:'postgres:memberships'});
+  expect(await client.next(frame=>client.frames.indexOf(frame)>=after&&frame.type==='rooms-changed'))
+    .toMatchObject({roomId:'new-corner',parentRoomId:'parent-room',openedBy:AGENT_A});
+  const repositoryAfter=client.frames.length;
+  live.publish({type:'invalidate',roomId:'parent-room',reason:'postgres:rooms',repositoryChanged:true});
+  expect(await client.next(frame=>client.frames.indexOf(frame)>=repositoryAfter&&frame.type==='rooms-changed'))
+    .toMatchObject({roomId:'parent-room',repositoryChanged:true});
+});
+
+it('keeps corner discovery for installed helpers without a whole-queue subscription', async () => {
+  const live=new LiveHub(),daemon=daemonStub();
+  const {port}=await start({live,daemon}),client=await machine(port);
+  await register(client,AGENT_A,'bdt_a');
+  live.publish({type:'invalidate',roomId:'new-corner',parentRoomId:'parent-room',
+    openedBy:AGENT_A,targetAgentId:AGENT_A,reason:'postgres:agent_commands'});
+  expect(await client.next(frame=>frame.type==='rooms-changed'))
+    .toMatchObject({roomId:'new-corner',parentRoomId:'parent-room',openedBy:AGENT_A});
+  expect(vi.mocked(daemon.execute).mock.calls.filter(([name])=>name==='getAgentCommands')).toEqual([]);
+});
+
 it('projects completed queue removals separately from Stop before the reply operation returns', async () => {
   const database = new PgliteDatabase(); requestDatabases.push(database);
   await database.query(ROUTER_COMMAND_SCHEMA);

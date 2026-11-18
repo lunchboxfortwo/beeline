@@ -47,3 +47,13 @@ it('returns a tool error until a Registry route loads, then attaches it to the s
     line: expect.stringContaining('"method":"tools/call"') }));
   expect(vi.mocked(brokerRequest).mock.calls.filter(([, input]) => JSON.parse(input.line).method === 'initialize')).toHaveLength(1);
 });
+
+it('a configuration notification reads only configuration, preserving unrelated optional context', async () => {
+  const f=await fixture();
+  f.resources.context.roster={members:[]};
+  f.resources.context.repository={resolution:'none'};
+  f.resources.refreshConfiguration();
+  await vi.waitFor(()=>expect(f.execute).toHaveBeenCalledOnce());
+  expect(f.execute).toHaveBeenCalledWith('getAgentConfiguration',{agentId:'agent',roomId:'room'});
+  expect(f.resources.context).toMatchObject({roster:{members:[]},repository:{resolution:'none'}});
+});

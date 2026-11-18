@@ -181,9 +181,9 @@ export class DaemonAgentSession {
         }
         if (event.reason === 'postgres:agent_commands') {
           this.#pushQueue();
-          // A command for a corner this helper has not seen carries its parent
-          // and opener, exactly as a membership push does.
-          if (!event.parentRoomId) return;
+          // Queue subscribers receive the place and parent on the item. Only
+          // older helpers without that subscription still need discovery.
+          if (this.#queueSubscribed || !event.parentRoomId) return;
         } else if (event.reason === 'agent-config') {
           transport.send({ type: 'config-changed', ...(event.roomId ? { roomId: event.roomId } : {}) });
           return;

@@ -8,7 +8,7 @@ import { AnswerStore } from './answer-store.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
 import { identityFromKey,type AgentRuntimeRecord } from './runtime.js';
 
-const harness = vi.hoisted(() => ({ start: vi.fn(), deliver: vi.fn(), stop: vi.fn(), steer: vi.fn(), cancel: vi.fn() }));
+const harness = vi.hoisted(() => ({ start: vi.fn(), deliver: vi.fn(), stop: vi.fn(), steer: vi.fn(), cancel: vi.fn(), refresh: vi.fn(), refreshConfiguration: vi.fn() }));
 vi.mock('./place-session.js', () => ({ PlaceSession: class {
   alive = false;
   stale = false;
@@ -22,6 +22,7 @@ vi.mock('./place-session.js', () => ({ PlaceSession: class {
   followUp = harness.steer;
   stop = harness.stop;
   cancel = harness.cancel;
+  resources={refresh:harness.refresh,refreshConfiguration:harness.refreshConfiguration};
   grantPlace() { return {}; }
   async writeContext() {}
 } }));
@@ -33,6 +34,8 @@ beforeEach(() => {
   harness.stop.mockReset().mockResolvedValue(undefined);
   harness.steer.mockReset().mockResolvedValue(undefined);
   harness.cancel.mockReset();
+  harness.refresh.mockReset();
+  harness.refreshConfiguration.mockReset();
 });
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 
@@ -49,10 +52,11 @@ async function fixture() {
   const runtime = { agent, communityId: 'workspace', rooms: [], supervisorRoot: root } as unknown as AgentRuntimeRecord;
   let changed!: (commands: readonly AgentCommand[], completed: readonly string[]) => void;
   let opened!: () => void;
+  let configChanged!: () => void;
   const execute = vi.fn(async (_name: string, _input: Record<string, unknown>) => ({ id: 'posted', createdAt: 1 }));
   const api = { execute,
     setQueueListener: (listener: typeof changed) => { changed = listener; },
-    setConfigChangedListener() {}, setRoomsChangedListener() {}, setCornerCompleteListener() {},
+    setConfigChangedListener: (listener:()=>void) => {configChanged=listener;}, setRoomsChangedListener() {}, setCornerCompleteListener() {},
     onLiveOpen: (listener: () => void) => { opened = listener; return () => {}; },
   } as unknown as DaemonApiClient;
   new AgentRunner(runtime, join(root, 'runtime.json'), {
@@ -63,8 +67,21 @@ async function fixture() {
     rootSourceMessageId: id, sourceMessageId: id, agentDepth: 0,
     source: { id, authorId: 'human', body: id, attachments: [], createdAt: 1, type: 'message' },
   });
-  return { root, execute, opened: () => opened(), changed: (commands: AgentCommand[], completed: readonly string[] = []) => changed(commands, completed), item };
+  return { root, execute, opened: () => opened(), configChanged:()=>configChanged(), changed: (commands: AgentCommand[], completed: readonly string[] = []) => changed(commands, completed), item };
 }
+
+it('a configuration change refreshes configuration without rereading every optional resource', async () => {
+  const f=await fixture(),answering=deferred<Record<string,unknown>>();
+  harness.deliver.mockReturnValueOnce(answering.promise);
+  f.changed([f.item('active')]);
+  await vi.waitFor(()=>expect(harness.deliver).toHaveBeenCalledOnce());
+  f.configChanged();
+  expect(harness.refresh).not.toHaveBeenCalled();
+  expect(harness.refreshConfiguration).toHaveBeenCalledOnce();
+  expect(harness.stop).not.toHaveBeenCalled();
+  answering.resolve({text:'answer',steps:[],toolCalls:[],cleanup:async()=>{}});
+  await vi.waitFor(()=>expect(f.execute).toHaveBeenCalledWith('postAgentTurnReceipt',expect.anything()));
+});
 
 it('reannounces an active turn after registration without delivering its prompt again', async () => {
   const f = await fixture(), item = f.item('still-working');
