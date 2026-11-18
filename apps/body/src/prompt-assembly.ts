@@ -1,3 +1,4 @@
+import { generatedThreadRenamePrompt, GENERATED_THREAD_BRIEF_PROMPT } from '@beeline/api-contract/daemon';
 import type { CornerBrief } from '@beeline/api-contract/daemon';
 import { boundReplyExcerpt,isBackgroundCommand,subscriptionActionPrompt,WORKSPACE_CORE_SKILL_SLUG,type RoomInboxResult,type SystemEvent } from '@beeline/api-contract/daemon';
 import { mentionReplyRule } from '@beeline/api-contract/phone';
@@ -670,9 +671,7 @@ export const TURN_SECTIONS: readonly PromptSection<TurnPromptContext>[] = [
     layer: 'turn',
     surfaces: CORNERS,
     render: ({ generatedTitle, brief }) =>
-      generatedTitle
-        ? `This human-opened thread still has its generated name, "${generatedTitle}". If the newest human message states the work, call revise_thread(action:${brief ? 'metadata' : 'install_brief'}, address:thisCornerAddress) once before you reply with a name of at most three words joined by hyphens (no whitespace) and a short objective${brief ? '' : ', plus a brief grounded in that message with brief.approval.sourceMessageId set to the human message id'}. A bare mention does not state the work; leave the name until a message does.`
-        : '',
+      generatedThreadRenamePrompt(generatedTitle, Boolean(brief)),
   },
   {
     id: 'turn.brief',
@@ -685,7 +684,7 @@ export const TURN_SECTIONS: readonly PromptSection<TurnPromptContext>[] = [
       brief
         ? `${renderAssignedCornerBrief(brief.brief)}${cornerHasRepositoryWork(brief.brief) ? `\n\nAssigned files:\n${brief.fileLines.join('\n') || '(none)'}` : brief.fileLines.length ? `\n\nBrief attachments:\n${brief.fileLines.join('\n')}` : ''}\n\nRead the current brief revision ${brief.brief.revision} before acting. It governs this turn. Replaced instructions: earlier delivered messages and review targets are historical wherever they conflict with this brief; do not act on their superseded scope.${brief.missingRequiredFile ? '\nRequired assignment files are unavailable. Pause work that depends on them and report the missing file precisely.' : ''}`
         : surface === 'code-corner'
-          ? `No assigned brief yet. Before any code, ${generatedTitle ? 'write the first brief from the newest human request with revise_thread(action:install_brief, address, name, brief)' : 'reply to the task message with ask for the first brief'}.`
+          ? generatedTitle ? GENERATED_THREAD_BRIEF_PROMPT : 'No assigned brief yet. Before any code, reply to the task message with ask for the first brief.'
           : 'No assigned brief: the human messages in this thread are the authority; skip steps that need a brief revision.',
   },
   {

@@ -111,3 +111,13 @@ export function cornerDisplayName(name: string | null | undefined): string {
     ? normalized
     : words.slice(0, CORNER_NAME_MAX_WORDS).join(' ');
 }
+
+/** Existing turn.rename text, shared with queue-time context for every session host. */
+export function generatedThreadRenamePrompt(generatedTitle?: string, brief = false): string {
+  return generatedTitle
+    ? `This human-opened thread still has its generated name, "${generatedTitle}". If the newest human message states the work, call revise_thread(action:${brief ? 'metadata' : 'install_brief'}, address:thisCornerAddress) once before you reply with a name of at most three words joined by hyphens (no whitespace) and a short objective${brief ? '' : ', plus a brief grounded in that message with brief.approval.sourceMessageId set to the human message id'}. A bare mention does not state the work; leave the name until a message does.`
+    : '';
+}
+
+/** Existing turn.brief instruction for a generated thread without an assigned brief. */
+export const GENERATED_THREAD_BRIEF_PROMPT = 'No assigned brief yet. Before any code, write the first brief from the newest human request with revise_thread(action:install_brief, address, name, brief).';

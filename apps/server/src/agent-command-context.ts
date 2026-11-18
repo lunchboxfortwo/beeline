@@ -1,3 +1,5 @@
+import { generatedThreadRenamePrompt, GENERATED_THREAD_BRIEF_PROMPT } from '@beeline/api-contract/daemon';
+import { cornerKindSql } from './corner-opening.js';
 import { createHash } from 'node:crypto';
 import type { CommandRow } from './agent-command.js';
 import { currentCornerBrief } from './corner-brief.js';
@@ -137,17 +139,25 @@ async function attachQueuedConversation(
     ...(self ? [`You are @${self}, a member here; you are not listed above.`] : []),
   ].join('\n');
   const memberVersion = createHash('sha256').update(memberText).digest('hex').slice(0, 16);
-  const brief = (
-    await db.query('SELECT 1 FROM rooms WHERE id=$1 AND parent_id IS NOT NULL', [command.room_id])
-  ).rowCount
-    ? await currentCornerBrief(db, command.room_id)
-    : undefined;
+  const thread = (await db.query<{ title: string; kind: string }>(
+    `SELECT name title,${cornerKindSql('rooms.id')} kind FROM rooms WHERE id=$1 AND parent_id IS NOT NULL`,
+    [command.room_id],
+  )).rows[0];
+  const brief = thread ? await currentCornerBrief(db, command.room_id) : undefined;
+  // Same server fact as getCornerRestoreState: a human-opened thread's
+  // generated name stands until its first brief. Freeze the ask with the turn
+  // so native prompts and external wakes receive it before optional reads.
+  const generatedTitle = thread?.kind === 'human' && !brief ? thread.title : undefined;
+  const naming = generatedTitle
+    ? [generatedThreadRenamePrompt(generatedTitle), GENERATED_THREAD_BRIEF_PROMPT]
+    : [];
   const briefText = brief
     ? `Current thread brief, revision ${brief.revision}. It governs this thread; earlier instructions that conflict with it are historical:\n${brief.spec}`
     : '';
   const line = (row: (typeof window)[number]) => `[message id: ${row.id}] ${row.name}: ${row.text}`;
   const render = (rows: typeof window, heading: string, withBrief: boolean, withMembers: boolean) =>
     [
+      ...naming,
       ...(withBrief && briefText ? [briefText] : []),
       ...(withMembers ? [memberText] : []),
       ...(rows.length ? [heading, ...rows.map(line)] : []),

@@ -1,3 +1,4 @@
+import { renderWake, renderMention } from '../../body/src/session-join/bridge.js';
 import { pendingMcpWakes } from './rooms-mcp-agent.js';
 import { itemPrompt } from '../../body/src/place-prompt.js';
 import {
@@ -96,4 +97,42 @@ it('delivers all unseen messages beyond the cold window limit', async () => {
   expect(next.source.conversationWindow).toContain('Unseen chatter 24.');
   await send('@hoots another request');
   expect((await commands(A)).at(-1)!.source.conversationContext).toBeUndefined();
+});
+
+
+it('delivers the generated human thread rename and first-brief asks on its first native and external turn', async () => {
+  await rootFixture.db.query('UPDATE rooms SET name=$2 WHERE id=$1', [C, 'steady-amber-thread']);
+  await send('@hoots Build the thread naming fix', C);
+  const [opening] = await commands(A, C);
+  const native = itemPrompt(opening!, { names: new Map(), fresh: true });
+  const wake = (await pendingMcpWakes(rootFixture.db, A)).find(wake => wake.id === opening!.id)!;
+  const runner = { node: '/synthetic/node', bundle: '/synthetic/beeline.mjs' };
+  const joined = { agent: 'codex', cwd: '/synthetic' } as Parameters<typeof renderWake>[1];
+  const external = renderWake(wake, joined, runner);
+  // Mentions carry the same frozen context through queuedContextSql.
+  const mention = renderMention({ id: opening!.sourceMessageId, room_id: C,
+    institutionalContext: wake.institutionalContext, text: opening!.source.body }, joined, runner);
+  for (const prompt of [native, external, mention]) {
+    expect(prompt).toContain('still has its generated name, "steady-amber-thread"');
+    expect(prompt).toContain('revise_thread(action:install_brief');
+    expect(prompt).toContain('a short objective');
+    expect(prompt).toContain('brief.approval.sourceMessageId');
+    expect(prompt).toContain('write the first brief from the newest human request');
+  }
+});
+
+it('does not ask to rename a human thread after its name and brief are set', async () => {
+  await rootFixture.db.query('UPDATE rooms SET name=$2 WHERE id=$1', [C, 'thread-naming-fix']);
+  await rootFixture.db.query(
+    `INSERT INTO corner_brief_revisions(corner_id,revision,spec,objective,author_id,source_room_id)
+     VALUES($1,1,'Restore the naming prompt.','Restore naming',$2,$3)`, [C, H, R],
+  );
+  await send('@hoots Continue the fix', C);
+  const [opening] = await commands(A, C);
+  const wake = (await pendingMcpWakes(rootFixture.db, A)).find(wake => wake.id === opening!.id)!;
+  for (const prompt of [itemPrompt(opening!, { names: new Map(), fresh: true }), wake.institutionalContext ?? '']) {
+    expect(prompt).toContain('Restore the naming prompt.');
+    expect(prompt).not.toContain('still has its generated name');
+    expect(prompt).not.toContain('write the first brief');
+  }
 });
