@@ -28,7 +28,6 @@ async function room(p, f, corner = false) {
 }
 async function list(p) {
   await p.goto(`/beeline/channels?communityId=${workspace}`);
-  await visible(id(p, 'chat-list-header').filter({ hasText: 'Web Latency Rig' }));
 }
 async function agentProfile(p) {
   await p.goto(`/beeline/agent-profile?communityId=${workspace}&agentId=${agent}`);

@@ -9,7 +9,8 @@ test('route captures cannot inherit another route context and retain resource ob
   const out = await mkdtemp(join(tmpdir(), 'route-isolation-'));
   const contexts = [];
   const browser = {
-    async newContext() {
+    async newContext(options) {
+      assert.equal(options.storageState, 'reviewer-session.json');
       const visits = [];
       const context = {
         storageState: async () => ({ cookies: [], origins: [] }),
@@ -42,7 +43,10 @@ test('route captures cannot inherit another route context and retain resource ob
           return {
             setDefaultTimeout() {},
             setDefaultNavigationTimeout() {},
-            goto: async (url) => visits.push(url),
+            goto: async (url) => {
+              assert.ok(!url.startsWith('/review/'), 'samples restore the saved reviewer session');
+              visits.push(url);
+            },
             waitForURL: async () => {},
             locator: () => target,
             getByText: () => target,
@@ -69,6 +73,7 @@ test('route captures cannot inherit another route context and retain resource ob
       secret: 'local-fixture',
       out,
       blockedRequests: [],
+      storageState: 'reviewer-session.json',
     });
     assert.equal(contexts.length, 24);
     for (const context of contexts) {
@@ -103,7 +108,8 @@ test('route captures cannot inherit another route context and retain resource ob
 test('a warm page that misses its fixture is recorded and the sweep continues', async () => {
   const out = await mkdtemp(join(tmpdir(), 'route-warm-miss-'));
   const browser = {
-    async newContext() {
+    async newContext(options) {
+      assert.equal(options.storageState, 'reviewer-session.json');
       const visits = [];
       return {
         storageState: async () => ({ cookies: [], origins: [] }),
@@ -141,7 +147,10 @@ test('a warm page that misses its fixture is recorded and the sweep continues', 
           return {
             setDefaultTimeout() {},
             setDefaultNavigationTimeout() {},
-            goto: async (url) => visits.push(url),
+            goto: async (url) => {
+              assert.ok(!url.startsWith('/review/'), 'samples restore the saved reviewer session');
+              visits.push(url);
+            },
             waitForURL: async () => {},
             locator: () => target,
             getByText: () => target,
@@ -164,6 +173,7 @@ test('a warm page that misses its fixture is recorded and the sweep continues', 
       secret: 'local-fixture',
       out,
       blockedRequests: [],
+      storageState: 'reviewer-session.json',
     });
     const captures = JSON.parse(await readFile(join(out, 'route-captures.json')));
     const briefWarm = captures.filter(

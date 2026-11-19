@@ -12,7 +12,7 @@ import { captureRoutes } from './web-route-capture.mjs';
 import { readWebResources } from './web-resources.mjs';
 import { tapFeedback, armTapTiming, readTapTiming } from './web-tap-timing.mjs';
 import { armForwardTiming, readForwardTiming } from './web-forward-timing.mjs';
-import { fixtureSignIn } from './web-signin.mjs';
+import { fixtureContext, saveReviewerSession } from './web-signin.mjs';
 async function bounded(work, milliseconds, label) {
   let timer;
   try {
@@ -269,7 +269,7 @@ async function main() {
   let browser;
   try {
     browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
-    let storageState;
+    const storageState = await saveReviewerSession(browser, { origin, backend, blockedRequests, secret, out });
     for (let capture = 1; capture <= 2; capture++) {
       for (const name of inventory)
         if (!exclusions[name]) await resetWebFixture(db, fixture(name), false);
@@ -281,53 +281,13 @@ async function main() {
         else
           for (let sample = 0; sample < 20; sample++) {
             await resetWebFixture(db, f);
-            const context = await browser.newContext({
-              viewport: { width: 390, height: 844 },
-              baseURL: origin.origin,
-              serviceWorkers: 'block',
-              storageState,
-            });
-            // Only this known local API gets CORS headers. No production host, asset,
-            // analytics endpoint or OAuth page may escape the isolated fixture.
-            await context.route('**/*', async (route) => {
-              const request = route.request(),
-                url = new URL(request.url());
-              if (url.origin === origin.origin) return route.continue();
-              if (url.origin === backend.origin) {
-                if (request.method() === 'OPTIONS')
-                  return route.fulfill({
-                    status: 204,
-                    headers: {
-                      'access-control-allow-origin': origin.origin,
-                      'access-control-allow-headers': '*',
-                      'access-control-allow-methods': '*',
-                    },
-                  });
-                const response = await route.fetch();
-                return route.fulfill({
-                  response,
-                  headers: { ...response.headers(), 'access-control-allow-origin': origin.origin },
-                });
-              }
-              blockedRequests.push({ capture, origin: url.origin });
-              await route.abort();
-            });
-            await context.routeWebSocket('**/*', (socket) => {
-              const url = new URL(socket.url());
-              if (url.hostname === backend.hostname && url.port === backend.port)
-                socket.connectToServer();
-              else {
-                blockedRequests.push({ capture, origin: url.origin });
-                socket.close();
-              }
+            const context = await fixtureContext(browser, {
+              origin, backend, blockedRequests, capture, storageState,
             });
             try {
               const page = await context.newPage();
               page.setDefaultTimeout(4000);
               page.setDefaultNavigationTimeout(6000);
-              if (!storageState) {
-                storageState = await fixtureSignIn(context, secret);
-              }
               try {
                 const prepared = await bounded(
                   () => steps[name](page, f, `rig-${name}-${capture}-${sample}`),
