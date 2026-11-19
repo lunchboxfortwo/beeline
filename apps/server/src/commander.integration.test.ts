@@ -66,7 +66,7 @@ it('stores private orders and reports once in the queue without transcript copie
   expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND card_type='agent-command'`,[opened.cornerId])).rowCount).toBe(0);
   await advanceCorner(rootFixture.db, opened.cornerId, { kind: 'reconcile' });
   expect(await rootFixture.daemon.execute('getCornerRestoreState', { cornerId: opened.cornerId }, WORKER))
-    .toMatchObject({ state: 'waiting' });
+    .toMatchObject({ state: 'working' });
   expect((await rootFixture.db.query(`SELECT private_payload->>'reportStatus' status FROM agent_commands WHERE id=$1`, [report.id])).rows)
     .toEqual([{ status: 'blocked' }]);
   expect((await rootFixture.db.query(`SELECT count(*)::int n FROM messages WHERE room_id=ANY($1::uuid[])`,[[ROOM,DM]])).rows[0]!.n).toBe(before);
@@ -680,7 +680,7 @@ it('opening from a report resumes the original order instead of treating the rep
 });
 
 
-it('a green head whose reviewer command cannot be queued wakes the implementer in the thread; its blocked reply reaches the commander', async () => {
+it('a green head whose reviewer command cannot be queued wakes the implementer and keeps its answer in the thread', async () => {
   const opened = await open();
   await rootFixture.db.query(`UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1`, [ROOM, RUBY]);
   await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=$2::jsonb WHERE corner_id=$1`, [opened.cornerId,
@@ -698,10 +698,12 @@ it('a green head whose reviewer command cannot be queued wakes the implementer i
     expect((await commands(DM,RUBY)).filter(c=>c.reason==='system')).toEqual([]);
     const handback=(await commands(opened.cornerId,WORKER)).find(c=>c.reason==='corner_review_needed')!;
     expect(handback.source.body).toMatch(/reviewer command could not be queued/);
-    await rootFixture.daemon.execute('reply',{id:handback.id,text:'blocked: review dispatch is unavailable'},WORKER);
-    const report=(await commands(DM,RUBY)).find(c=>c.reason==='reply'&&c.source.body.startsWith('blocked:'))!;
-    expect(report.source.body).toMatch(/^blocked:.*review/);
-    expect(report.private).toBe(true);
+    expect(handback.from).toEqual({agent:SYSTEM_IDENTITY_ID,place:opened.cornerId});
+    const answer='blocked: review dispatch is unavailable';
+    await rootFixture.daemon.execute('reply',{id:handback.id,text:answer},WORKER);
+    expect((await commands(DM,RUBY)).filter(c=>c.reason==='reply'&&c.source.body===answer)).toEqual([]);
+    expect((await rootFixture.phone.readRoom(opened.cornerId,HUMAN))?.messages.filter(message=>message.text===answer))
+      .toEqual([expect.objectContaining({author:expect.objectContaining({pubkey:WORKER})})]);
     expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE text LIKE '%restore review dispatch%'`)).rowCount).toBe(0);
   } finally {
     await rootFixture.db.query(`DROP TRIGGER refuse_review_command ON agent_commands; DROP FUNCTION refuse_review_command()`);

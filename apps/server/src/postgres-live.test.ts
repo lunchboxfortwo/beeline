@@ -74,6 +74,7 @@ const scope1 = fixtureScope1();
     await eventually(() => wake.mock.calls.length === 1); wake.mockClear();
     const child = '44444444-4444-4444-8444-444444444444';
     await scope1.database.query("INSERT INTO rooms(id,workspace_id,parent_id,name) VALUES($1,$2,$3,'Child')", [child,WORKSPACE,ROOM]);
+    await eventually(() => wake.mock.calls.length === 1); wake.mockClear();
     await scope1.database.query('UPDATE agent_schedules SET room_id=$2 WHERE id=$1', [schedule,child]);
     await eventually(() => wake.mock.calls.length === 1); wake.mockClear();
     // Child schedule access is inherited from this parent membership.

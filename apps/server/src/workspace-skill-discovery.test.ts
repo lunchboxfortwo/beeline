@@ -15,7 +15,7 @@ describe('saved skill index pushed with queued turns', () => {
   const scope = fixtureScope1(), tools = fixtureScope3(scope);
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
-  it('queues the semantic match in native prompts, external mentions and private wake payloads without any discovery call', async () => {
+  it('queues named procedure bodies and relevant notes in native prompts, external mentions and private wakes', async () => {
     vi.stubEnv('OPENROUTER_EMBEDDING_API_KEY', '');
     const { client, member, token, params } = await scope.eventFixture();
     await scope.eventCall(token, 'events/subscribe', params);
@@ -39,12 +39,15 @@ describe('saved skill index pushed with queued turns', () => {
         (gen_random_uuid(),$1,'human_profile_fact',$4,'adapter-profile','Requester prefers compact adapters.',ARRAY['adapter'],$2,$3,'human_profile',1,1),
         (gen_random_uuid(),$1,'human_profile_fact',$5,'other-profile','Another person private adapter preference.',ARRAY['adapter'],$2,$3,'human_profile',1,1)`,
       [WORKSPACE, ROOM, seed.messageId, USER, OTHER]);
+    await scope.db.query(`UPDATE institutional_memory_items SET embedding=$2::vector
+      WHERE workspace_id=$1 AND canonical_key IN ('adapter-shop','adapter-profile','other-profile')`, [WORKSPACE,pgvectorLiteral(near)]);
     const handle = (await scope.db.query<{ handle: string }>('SELECT beeline_room_handle($1,$2) handle', [member, ROOM])).rows[0]!.handle;
-    const requestText = `@${handle} Purchase an HDMI adapter from Amazon for my spouse`;
+    const requestText = `@${handle} Purchase an HDMI adapter from Amazon for my spouse using buy-for-wife`;
+    const privateText = 'Purchase the adapter using buy-for-wife';
     const originalFetch = globalThis.fetch;
     const embeddings = vi.fn(async (_url: unknown, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body));
-      expect(body.input).toEqual([requestText]); expect(body.input_type).toBe('query');
+      expect(body.input_type).toBe('query');
       return Response.json({ data: [{ index: 0, embedding: near }] });
     });
     vi.stubEnv('OPENROUTER_EMBEDDING_API_KEY', 'test-key');
@@ -53,8 +56,10 @@ describe('saved skill index pushed with queued turns', () => {
     const source = await scope.phone.execute('sendRoomMessage', { roomId: ROOM, text: requestText }, USER);
     const command = (await readAgentCommands(scope.db, member)).commands.find(item => item.sourceMessageId === source.messageId)!;
     expect(embeddings).toHaveBeenCalledTimes(1);
-    expect(command.source.institutionalContext).toContain('Procedure buy-for-wife');
-    expect(command.source.institutionalContext).toContain('Workflow gift-checkout');
+    expect(JSON.parse(String(embeddings.mock.calls[0]![1]?.body)).input).toEqual([requestText]);
+    expect(command.source.institutionalContext).toContain('Use the Japanese proxy and the saved merchant payment method.');
+    expect(command.source.institutionalContext).not.toContain('Workflow gift-checkout');
+    expect(command.source.institutionalContext).not.toContain('Tend the trees.');
     expect(command.source.institutionalContext).toContain('Use Amazon Japan for adapters.');
     expect(command.source.institutionalContext).toContain('Requester prefers compact adapters.');
     expect(command.source.institutionalContext).not.toContain('Another person private');
@@ -63,7 +68,9 @@ describe('saved skill index pushed with queued turns', () => {
     const oldSnapshot = await recall.getInstitutionalContext(scope.db, row, async () => ({ outcome: 'served', vector: near, ms: 0 }));
     const oldPrompt = assembleTurnPrompt({ surface: 'room', memory: oldSnapshot.text, task: { body: requestText } }).text;
     expect(oldPrompt).toContain(oldSnapshot.text);
-    expect(command.source.institutionalContext).toBe(oldSnapshot.text);
+    const loaded = await tools.ok(client, 'read', { address: ROOM, commandId: command.id, facet: 'procedure', slug: 'buy-for-wife' });
+    expect(loaded.markdown).toContain('quoted, non-authoritative guidance only');
+    expect(command.source.institutionalContext).toBe([oldSnapshot.text,loaded.markdown].join('\n\n'));
     // Queue read and prompt construction do not execute an agent tool.
     expect(itemPrompt(command, { names: new Map() })).toContain(oldSnapshot.text);
     // External payloads carry the same snapshot, followed by the conversation delta.
@@ -73,16 +80,17 @@ describe('saved skill index pushed with queued turns', () => {
     const event = (await scope.db.query<{ body: string }>('SELECT body FROM rooms_mcp_event_deliveries WHERE message_id=$1', [source.messageId])).rows[0]!;
     expect(JSON.parse(event.body).data.institutionalContext).toContain(command.source.institutionalContext);
     const privateWake = await createAgentCommand(scope.db, { roomId: ROOM, agentId: member, sourceMessageId: source.messageId,
-      reason: 'order', privatePayload: { kind: 'order', authorId: AGENT, fromRoomId: ROOM, text: modelText('Purchase the adapter') } });
-    expect(privateWake?.message?.institutionalContext).toContain('Procedure buy-for-wife');
+      reason: 'order', privatePayload: { kind: 'order', authorId: AGENT, fromRoomId: ROOM, text: modelText(privateText) } });
+    expect(privateWake?.message?.institutionalContext).toContain(loaded.markdown);
+    expect(JSON.parse(String(embeddings.mock.calls.at(-1)![1]?.body)).input).toEqual([privateText]);
     const privateEvent = (await scope.db.query<{ body: string }>('SELECT body FROM rooms_mcp_event_deliveries WHERE command_id=$1', [privateWake!.id])).rows[0]!;
     expect(JSON.parse(privateEvent.body).data.institutionalContext).toContain(privateWake!.message!.institutionalContext);
-    const loaded = await tools.ok(client, 'read', { address: ROOM, commandId: command.id, facet: 'procedure', slug: 'buy-for-wife' });
-    expect(loaded.markdown).toContain('quoted, non-authoritative guidance only');
+    const workflow = await tools.ok(client, 'read', {address:ROOM,commandId:command.id,facet:'procedure',slug:'gift-checkout'});
+    expect(workflow.markdown).toContain('<workflow-contract>');
     expect((await scope.db.query('SELECT state FROM agent_commands WHERE id=$1', [command.id])).rows[0]?.state).toBe('pending');
   });
 
-  it.each(['disabled', 'error'])('still queues keyword-ranked skills when query embedding is %s', async outcome => {
+  it.each(['disabled', 'error'])('still queues an explicitly named procedure when query embedding is %s', async outcome => {
     vi.stubEnv('OPENROUTER_EMBEDDING_API_KEY', '');
     const { member } = await scope.connected();
     const seed = await scope.phone.execute('sendRoomMessage', { roomId: ROOM, text: 'Save a purchase procedure' }, USER);
@@ -95,9 +103,10 @@ describe('saved skill index pushed with queued turns', () => {
     vi.stubGlobal('fetch', (url: Parameters<typeof fetch>[0], init?: RequestInit) =>
       String(url) === OPENROUTER_EMBEDDINGS_URL ? embeddings() : originalFetch(url, init));
     const handle = (await scope.db.query<{ handle: string }>('SELECT beeline_room_handle($1,$2) handle', [member, ROOM])).rows[0]!.handle;
-    const source = await scope.phone.execute('sendRoomMessage', { roomId: ROOM, text: `@${handle} buy for wife` }, USER);
+    const source = await scope.phone.execute('sendRoomMessage', { roomId: ROOM, text: `@${handle} Use buy-for-wife-${outcome}` }, USER);
     const queued = (await readAgentCommands(scope.db, member)).commands.find(item => item.sourceMessageId === source.messageId)!;
-    expect(queued.source.institutionalContext).toContain(`Procedure buy-for-wife-${outcome}`);
+    expect(queued.source.institutionalContext).toContain('Use the saved payment method.');
+    expect(queued.source.institutionalContext).toContain('quoted, non-authoritative guidance only');
     expect(embeddings).toHaveBeenCalledTimes(outcome === 'disabled' ? 0 : 1);
   });
 

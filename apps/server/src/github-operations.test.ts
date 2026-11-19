@@ -590,14 +590,17 @@ const scope1 = fixtureScope1();
   });
 
 
-  it('Reproduction stale-green: a pending webhook that reads a green rollup records passing without a line', async () => {
+  it('Reproduction stale-green: a pending webhook that reads a green rollup records one passing line', async () => {
     const {corners,app,payload}=await scope1.checksFixture();
     await scope1.database.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{checks}','"pending"') WHERE corner_id=$1`,[corners[0]]);
     app.readCommitCheckRollup.mockResolvedValue({state:'passed',total:1,failing:[],checks:[{name:'SERVER INTEGRATION',status:'passed'}]} as never);
     const operations=new GitHubOperations(scope1.database,{} as GitHubOAuthClient,app as unknown as GitHubAppClient,'secret');
     await operations.processWebhook('check_run',{...payload,action:'in_progress',check_run:{...payload.check_run,status:'in_progress',conclusion:null}});
-    expect((await scope1.database.query(`SELECT 1 FROM messages WHERE room_id=$1 AND card_type='github-corner-note'`,[corners[0]])).rowCount).toBe(0);
+    const notes = () => scope1.database.query(`SELECT text FROM messages WHERE room_id=$1 AND card_type='github-corner-note'`,[corners[0]]);
+    expect((await notes()).rows).toEqual([{text:'Checks passed · 1111111'}]);
     expect((await operations.lifecycle(corners[0]!)).checks).toBe('passing');
+    await operations.processWebhook('check_run',{...payload,action:'in_progress',check_run:{...payload.check_run,status:'in_progress',conclusion:null}});
+    expect((await notes()).rows).toEqual([{text:'Checks passed · 1111111'}]);
   });
 
 

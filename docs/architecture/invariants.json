@@ -669,6 +669,7 @@
           "bytes": "existing before the registry; weekly audit reviews",
           "request_id": "existing before the registry; weekly audit reviews",
           "drawing": "existing before the registry; weekly audit reviews",
+          "background": "Agent-selected solid background retained independently of the encoded portrait bytes.",
           "generated_at": "existing before the registry; weekly audit reviews"
         }
       },
@@ -919,6 +920,7 @@
           "updated_at": "existing before the registry; weekly audit reviews",
           "workflow_slug": "existing before the registry; weekly audit reviews",
           "human_command_message_id": "existing before the registry; weekly audit reviews",
+          "requester_command_id": "Verified command authorizing the schedule; retains the original requester for later occurrences.",
           "title": "existing before the registry; weekly audit reviews",
           "last_reported_blocking_run_id": {
             "reason": "existing before the registry; weekly audit reviews",
@@ -934,6 +936,7 @@
         "module": "Background work and timers",
         "reason": "existing before the registry; weekly audit reviews",
         "columns": {
+          "requester_command_id": "Verified command authorizing the subscription; retains the original requester for later event wakes.",
           "paused_at": "Preserves explicit suspension managed by agent-wake-pause.ts so every event ingress stops wakes without deleting the subscription.",
           "id": "existing before the registry; weekly audit reviews",
           "workspace_id": "existing before the registry; weekly audit reviews",
