@@ -45,12 +45,6 @@ type DesktopWorkspaceRailProps = {
   readonly onClose: () => void;
   readonly onSelect: (workspaceId: string) => void;
   readonly onAdd: () => void;
-  /** The account hub. The rail's scrim covers the pane that also names it. */
-  readonly onOpenAccount: () => void;
-  readonly viewerPubkey?: string;
-  readonly viewerName?: string;
-  readonly viewerAvatarUrl?: string;
-  readonly viewerFace?: string;
 };
 
 export function DesktopWorkspaceRail({
@@ -60,11 +54,6 @@ export function DesktopWorkspaceRail({
   onClose,
   onSelect,
   onAdd,
-  onOpenAccount,
-  viewerPubkey,
-  viewerName,
-  viewerAvatarUrl,
-  viewerFace,
 }: DesktopWorkspaceRailProps) {
   const reducedMotion = useReducedMotion();
   const railX = useSharedValue(reducedMotion ? 0 : -RAIL_WIDTH);
@@ -72,8 +61,6 @@ export function DesktopWorkspaceRail({
   const [hoveredWorkspaceId, setHoveredWorkspaceId] = React.useState<string | null>(null);
   const [focusedWorkspaceId, setFocusedWorkspaceId] = React.useState<string | null>(null);
   const [addFocused, setAddFocused] = React.useState(false);
-  const [accountFocused, setAccountFocused] = React.useState(false);
-  const [accountHovered, setAccountHovered] = React.useState(false);
   const activeIndex = Math.max(
     0,
     workspaces.findIndex((workspace) => workspace.id === activeWorkspaceId),
@@ -109,11 +96,6 @@ export function DesktopWorkspaceRail({
           onAdd();
           return;
         }
-        if (focusedIndexRef.current === workspaces.length + 1) {
-          event.preventDefault();
-          onOpenAccount();
-          return;
-        }
         const workspace = workspaces[focusedIndexRef.current];
         if (!workspace) return;
         event.preventDefault();
@@ -125,8 +107,8 @@ export function DesktopWorkspaceRail({
       event.preventDefault();
       const startIndex = focusedIndexRef.current;
       const delta = event.key === 'ArrowDown' ? 1 : -1;
-      // Workspaces, then the add tile, then the account hub.
-      const itemCount = workspaces.length + 2;
+      // Workspaces, then the add tile.
+      const itemCount = workspaces.length + 1;
       const nextIndex = (startIndex + delta + itemCount) % itemCount;
       focusedIndexRef.current = nextIndex;
       tileRefs.current[nextIndex]?.focus?.();
@@ -138,7 +120,6 @@ export function DesktopWorkspaceRail({
     activeIndex,
     onAdd,
     onClose,
-    onOpenAccount,
     onSelect,
     open,
     workspaces,
@@ -314,63 +295,6 @@ export function DesktopWorkspaceRail({
                   testID="desktop-workspace-add"
                 >
                   <Glyph icon={Plus} accent />
-                </YStack>
-                <YStack width={32} height={1} marginVertical="1" backgroundColor="strongStroke" />
-                {/* The account hub. The rail's scrim covers the navigation pane
-                    that also names it, so without this the rail is a dead end for
-                    everything that is not a Workspace. */}
-                <YStack position="relative" width={TILE_SIZE} height={TILE_SIZE} overflow="visible">
-                  <YStack
-                    accessibilityLabel={viewerName ? `${viewerName} — Settings` : 'Settings'}
-                    accessibilityRole="menuitem"
-                    tabIndex={0}
-                    onBlur={() => setAccountFocused(false)}
-                    onFocus={() => {
-                      focusedIndexRef.current = workspaces.length + 1;
-                      setAccountFocused(true);
-                    }}
-                    onMouseEnter={() => setAccountHovered(true)}
-                    onMouseLeave={() => setAccountHovered(false)}
-                    onPress={onOpenAccount}
-                    ref={(node: any) => {
-                      tileRefs.current[workspaces.length + 1] = node;
-                    }}
-                    width={TILE_SIZE}
-                    height={TILE_SIZE}
-                    minWidth={44}
-                    minHeight={44}
-                    alignItems="center"
-                    justifyContent="center"
-                    borderRadius="lg"
-                    backgroundColor="highlight"
-                    borderWidth={accountFocused ? 2 : 0}
-                    borderColor="needsYou"
-                    outlineStyle="none"
-                    cursor="pointer"
-                    testID="desktop-workspace-account"
-                  >
-                    {viewerPubkey ? (
-                      <IdentityMark
-                        avatarUrl={viewerAvatarUrl}
-                        face={viewerFace}
-                        kind="human"
-                        name={viewerName ?? 'You'}
-                        seed={viewerPubkey}
-                        size={32}
-                        testID="desktop-workspace-account-mark"
-                      />
-                    ) : (
-                      // The identity has not loaded yet. Hold the mark's box open
-                      // rather than drawing a stand-in, exactly as the navigation
-                      // pane's own account row does.
-                      <YStack width={32} height={32} />
-                    )}
-                  </YStack>
-                  {(accountHovered || accountFocused) && (
-                    <TileLabel testID="desktop-workspace-account-label" name="Settings">
-                      {viewerName}
-                    </TileLabel>
-                  )}
                 </YStack>
               </YStack>
             </YStack>

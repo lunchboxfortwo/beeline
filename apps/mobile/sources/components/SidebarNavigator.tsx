@@ -45,9 +45,11 @@ const SETUP_SURFACES = ['/beeline/community', '/beeline/create-workspace'];
 
 export const SidebarNavigator = React.memo(function SidebarNavigator() {
   const isTablet = useIsTablet();
-  // Compact screens have no drawer. Route straight into their stack instead
-  // of reconciling a second navigator whose surface is always hidden.
-  return isTablet ? <DesktopSidebarNavigator /> : <Slot />;
+  // A native phone has no drawer: it routes straight into its stack instead of
+  // reconciling a second navigator whose surface is always hidden. A web window
+  // can be resized across the breakpoint, so it keeps one navigator at every
+  // width (zero-width drawer when compact) and never remounts the open chat.
+  return isTablet || Platform.OS === 'web' ? <DesktopSidebarNavigator /> : <Slot />;
 });
 
 const DesktopSidebarNavigator = React.memo(() => {

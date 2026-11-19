@@ -16,15 +16,17 @@ type HeaderProps = Omit<React.ComponentProps<typeof ChatListHeader>, 'onWorkspac
 const HeaderHost = createContext<((header: HeaderProps) => () => void) | null>(null);
 
 /** The shell owns the header; a mounted tab supplies only its controls. */
-export function TabHeaderHost({workspaceName,children,visible=true}:{workspaceName:string;children:React.ReactNode;visible?:boolean}) {
+export function TabHeaderHost({workspaceName,children,visible=true,host=true}:{workspaceName:string;children:React.ReactNode;visible?:boolean;
+    /** False on desktop: tabs draw their own header, and the children keep their place in the tree. */
+    host?:boolean}) {
     const [slot,setSlot]=useState<{key:symbol;header:HeaderProps}|null>(null);
     const register=useCallback((header:HeaderProps)=>{
         const key=Symbol();setSlot({key,header});
         return ()=>setSlot(current=>current?.key===key?null:current);
     },[]);
     const header=slot?.header;
-    return <HeaderHost.Provider value={register}>
-        <YStack display={visible?'flex':'none'}><MountedTabHeader {...header} workspaceName={workspaceName} scrolled={header?.scrolled ?? false} /></YStack>
+    return <HeaderHost.Provider value={host?register:null}>
+        {host ? <YStack display={visible?'flex':'none'}><MountedTabHeader {...header} workspaceName={workspaceName} scrolled={header?.scrolled ?? false} /></YStack> : null}
         {children}
     </HeaderHost.Provider>;
 }

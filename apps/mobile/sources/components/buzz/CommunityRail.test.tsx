@@ -44,7 +44,7 @@ it('clips phone and desktop Workspace pictures with the same radius token', () =
     let desktop: any;
     act(() => {
         tree = create(<CommunityRail communities={[{ communityId: 'w1', name: 'Beeline Work', avatar: 'https://example.com/workspace.png' }]} activeCommunityId="w1" onSelect={vi.fn()} onAdd={vi.fn()} />);
-        desktop = create(<DesktopWorkspaceRail open workspaces={[{ id: 'w1', name: 'Beeline Work', avatar: 'https://example.com/workspace.png', roomCount: 1, needsAttention: false }]} activeWorkspaceId="w1" onClose={vi.fn()} onSelect={vi.fn()} onAdd={vi.fn()} onOpenAccount={vi.fn()} />);
+        desktop = create(<DesktopWorkspaceRail open workspaces={[{ id: 'w1', name: 'Beeline Work', avatar: 'https://example.com/workspace.png', roomCount: 1, needsAttention: false }]} activeWorkspaceId="w1" onClose={vi.fn()} onSelect={vi.fn()} onAdd={vi.fn()} />);
     });
     const picture = tree.root.findByType('IdentityMark');
     const desktopPicture = desktop.root.findAllByType('IdentityMark').find((node: any) => node.props.testID === 'desktop-workspace-mark-w1');

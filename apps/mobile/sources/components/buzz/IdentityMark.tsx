@@ -157,6 +157,16 @@ function cellFill(cell: CypherCell, palette: IdentityPalette): string {
   return cell.tone === 'bright' ? palette.bright : palette.mid;
 }
 
+/** The same palette as greys of equal luminance (Rec. 709), for the neutral Stone set. */
+function neutralPalette(palette: IdentityPalette): IdentityPalette {
+  const grey = (hex: string) => {
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+    const y = Math.round(0.2126 * r! + 0.7152 * g! + 0.0722 * b!).toString(16).padStart(2, '0');
+    return `#${y}${y}${y}`;
+  };
+  return { ...palette, mid: grey(palette.mid), bright: grey(palette.bright), deep: grey(palette.deep) };
+}
+
 function WorkspacePlate({
   seed,
   size,
@@ -166,7 +176,11 @@ function WorkspacePlate({
   size: number;
   selected: boolean;
 }): React.ReactElement {
-  const { palette, fillState, cells, rotation } = identityMarkGeometry(seed, 'workspace');
+  const geometry = identityMarkGeometry(seed, 'workspace');
+  const { fillState, cells, rotation } = geometry;
+  // Stone is a neutral colour set: the brass plate keeps its seeded luminance,
+  // fill and cypher (so Workspaces still differ) but drops the hue.
+  const palette = useThemeName().includes('stone') ? neutralPalette(geometry.palette) : geometry.palette;
   // Below the cypher floor the colour and the silhouette *are* the identity,
   // so the mark goes solid rather than muddy.
   const detailed = size >= CYPHER_MIN_SIZE;

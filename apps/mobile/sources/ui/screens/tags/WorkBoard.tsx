@@ -410,7 +410,8 @@ export function WorkBoard({
   return (
     <YStack flex={1} minHeight={0} testID="work-board">
       {desktop ? (
-        <XStack justifyContent="flex-end" paddingHorizontal="4" paddingTop="3">
+        <XStack alignItems="center" paddingHorizontal="4" paddingTop="4" paddingBottom="3">
+          <T v="title" flex={1}>Tasks</T>
           {filter}
         </XStack>
       ) : (

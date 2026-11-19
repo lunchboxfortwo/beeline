@@ -143,8 +143,11 @@ export function CommunityRail({ communities, activeCommunityId, onSelect, onAdd,
 
 type CommunityDrawerContextValue = {
   drawerOpen: boolean;
-  openDrawer: () => void;
+  /** Absent under a desktop shell, which switches Workspaces from its own rail. */
+  openDrawer?: () => void;
 };
+/** A desktop shell: nested shells still render bare, so a resize keeps their screens mounted. */
+const NO_DRAWER: CommunityDrawerContextValue = { drawerOpen: false };
 
 const CommunityDrawerContext = createContext<CommunityDrawerContextValue | null>(null);
 
@@ -155,15 +158,17 @@ export function useCommunityDrawer(): CommunityDrawerContextValue | null {
 
 type BuzzCommunityShellProps = CommunityRailProps & {
   children: React.ReactNode;
+  /** False on desktop, which has its own rail: the same tree stays mounted with no drawer. */
+  drawer?: boolean;
 };
 
-export function BuzzCommunityShell({ children, communities, activeCommunityId, onSelect, onAdd, onLeaveWorkspace }: BuzzCommunityShellProps) {
+export function BuzzCommunityShell({ children, communities, activeCommunityId, onSelect, onAdd, onLeaveWorkspace, drawer = true }: BuzzCommunityShellProps) {
   const parent=useCommunityDrawer();
   return parent ? <>{children}</> : <CommunityDrawerShell communities={communities} activeCommunityId={activeCommunityId}
-    onSelect={onSelect} onAdd={onAdd} onLeaveWorkspace={onLeaveWorkspace}>{children}</CommunityDrawerShell>;
+    onSelect={onSelect} onAdd={onAdd} onLeaveWorkspace={onLeaveWorkspace} drawer={drawer}>{children}</CommunityDrawerShell>;
 }
 
-function CommunityDrawerShell({ children, communities, activeCommunityId, onSelect, onAdd, onLeaveWorkspace }: BuzzCommunityShellProps) {
+function CommunityDrawerShell({ children, communities, activeCommunityId, onSelect, onAdd, onLeaveWorkspace, drawer: enabled }: BuzzCommunityShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerX = useSharedValue(-DRAWER_WIDTH);
   const scrimOpacity = useSharedValue(0);
@@ -202,10 +207,10 @@ function CommunityDrawerShell({ children, communities, activeCommunityId, onSele
 
   const drawer = useMemo(() => ({ drawerOpen, openDrawer }), [drawerOpen, openDrawer]);
   return (
-    <CommunityDrawerContext.Provider value={drawer}>
+    <CommunityDrawerContext.Provider value={enabled ? drawer : NO_DRAWER}>
       <YStack flex={1} minWidth={0} backgroundColor="canvas">
         {children}
-        {drawerOpen ? (
+        {enabled && drawerOpen ? (
           <YStack position="absolute" top={0} right={0} bottom={0} left={0} zIndex={20} testID="community-drawer-overlay">
             <Motion overlay motion={scrimStyle}>
               <YStack position="absolute" top={0} right={0} bottom={0} left={DRAWER_WIDTH} backgroundColor="canvas" accessibilityRole="button"

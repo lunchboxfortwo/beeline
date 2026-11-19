@@ -18,10 +18,11 @@ import {PhoneTabBar,SharedTabBarHeight} from './PhoneTabScreen';
 /** Mounted above the phone stack, so changing tabs cannot reload its name. */
 export function WorkspaceTabShell({children}:{children:React.ReactNode}) {
     const desktop=useIsDesktop();
-    return desktop ? <>{children}</> : <PhoneWorkspaceShell>{children}</PhoneWorkspaceShell>;
+    // One tree at every width: a window resized across the breakpoint keeps its open route and draft.
+    return <PhoneWorkspaceShell phone={!desktop}>{children}</PhoneWorkspaceShell>;
 }
 
-function PhoneWorkspaceShell({children}:{children:React.ReactNode}) {
+function PhoneWorkspaceShell({children,phone}:{children:React.ReactNode;phone:boolean}) {
     const pathname=usePathname();
     const active=useActiveCommunityId();
     const reset=useSyncExternalStore(subscribeClientReset,clientResetGeneration);
@@ -49,16 +50,16 @@ function PhoneWorkspaceShell({children}:{children:React.ReactNode}) {
     // A hidden bar measures zero; the roots under a pushed page keep their space.
     const [bar,setBar]=useState(0);
     return <BuzzCommunityShell communities={communities} activeCommunityId={active??null} onSelect={select}
-        onAdd={()=>router.push('/beeline/community')}>
+        onAdd={()=>router.push('/beeline/community')} drawer={phone}>
         <YStack flex={1} minHeight={0}>
-            <SharedTabBarHeight.Provider value={bar}>
-                <TabHeaderHost workspaceName={workspace?.name??''} visible={root}>{children}</TabHeaderHost>
+            <SharedTabBarHeight.Provider value={phone?bar:null}>
+                <TabHeaderHost workspaceName={workspace?.name??''} visible={root} host={phone}>{children}</TabHeaderHost>
             </SharedTabBarHeight.Provider>
             {/* One bar over the four tab roots: switching tabs never remounts it. */}
-            <YStack position="absolute" left={0} right={0} bottom={0} display={root?'flex':'none'}
+            {phone ? <YStack position="absolute" left={0} right={0} bottom={0} display={root?'flex':'none'}
                 onLayout={event=>{const height=event.nativeEvent.layout.height;if(height>0)setBar(height);}} testID="shared-tab-bar">
                 <PhoneTabBar active={tabForPath(pathname)??'chats'}/>
-            </YStack>
+            </YStack> : null}
         </YStack>
     </BuzzCommunityShell>;
 }

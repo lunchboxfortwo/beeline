@@ -21,24 +21,25 @@ import { BuzzRigTransport } from '@/sync/transport';
 import { RoomViewClient } from '@/sync/transport/room-view-client';
 import { useHeaderHeight, useIsDesktop } from '@/utils/responsive';
 import { isTauri } from '@/utils/isTauri';
-import { Copy, SafeTop, T } from '@/ui/grammar';
+import { Copy, SafeTop, TextSizeContext } from '@/ui/grammar';
+import { useFinePointer } from '@/utils/use-fine-pointer';
 import { SIDE_PLACES, SidePlaceRow, type SidePlace } from '@/ui/screens/chats/SidePlaces';
 import { ChatListHeader, CLOSED_SEARCH, type ChatSearch } from '@/ui/screens/chats/ChatListHeader';
-import { ChatRow, JoinableChats } from '@/ui/screens/chats/ChatTree';
+import { JoinableChats } from '@/ui/screens/chats/ChatTree';
+import { DesktopChatList } from '@/ui/screens/chats/DesktopChatList';
 import { SurfaceGlyphLoader } from '@/components/buzz/SurfaceGlyphLoader';
 import { filterChats } from '@/ui/screens/chats/chat-tree-model';
 import { MessageMatches } from '@/ui/screens/chats/MessageMatches';
 import { useJoinChat } from '@/ui/screens/chats/use-join-chat';
 import { useNewThread } from '@/ui/screens/chats/use-new-thread';
 import {
-  type RoomViewIdentity,
   type WorkspaceListView,
   isWorkspaceListView,
 } from '@beeline/buzz-client';
 import { useGlobalSearchParams, usePathname, useRouter, type Href } from 'expo-router';
 import * as React from 'react';
 import { Platform } from 'react-native';
-import { ScrollView, Separator, XStack, YStack } from 'tamagui';
+import { ScrollView, Separator, YStack } from 'tamagui';
 
 function selectedRoomId(pathname: string): string | null {
   const prefix = '/beeline/chat/';
@@ -82,7 +83,6 @@ export const SidebarView = React.memo(function SidebarView() {
   const [client, setClient] = React.useState<RoomViewClient | null>(null);
   const [relayUrl, setRelayUrl] = React.useState<string | null>(null);
   const [identityPubkey, setIdentityPubkey] = React.useState<string | null>(null);
-  const [viewerIdentity, setViewerIdentity] = React.useState<RoomViewIdentity | null>(null);
   const [workspaces, setWorkspaces] = React.useState<WorkspaceListView['workspaces']>([]);
   const [workspaceId, setWorkspaceId] = React.useState<string | null>(null);
   const [search, setSearch] = React.useState<ChatSearch>(CLOSED_SEARCH);
@@ -121,7 +121,6 @@ export const SidebarView = React.memo(function SidebarView() {
       setRelayUrl(baseUrl);
       setIdentityPubkey(identity.publicKey);
       if (cached) {
-        setViewerIdentity(cached.viewer);
         setWorkspaces(cached.workspaces);
       }
       workspaceIdRef.current = selected;
@@ -151,7 +150,6 @@ export const SidebarView = React.memo(function SidebarView() {
       const cached = mobileSurfaceCache.peek(address, isWorkspaceListView);
       if (!cancelled) {
         if (cached) setNavigationError(null);
-        setViewerIdentity(cached?.viewer ?? null);
         setWorkspaces(cached?.workspaces ?? []);
       }
     });
@@ -342,7 +340,12 @@ export const SidebarView = React.memo(function SidebarView() {
   );
 
   const canStartChat = Boolean(workspaceId) && canCreateRoom;
+  // Under a mouse the sidebar's narrow column runs at the Small preset, so its
+  // type and spacing shrink together; touch keeps the reader's own Text size.
+  const finePointer = useFinePointer();
+  const textSize = React.useContext(TextSizeContext);
   return (
+    <TextSizeContext.Provider value={finePointer ? 'small' : textSize}>
     <YStack flex={1} minHeight={0}>
       {macTitlebarInset ? <YStack height={macTitlebarInset} /> : null}
       {(!isDesktop || showRoomList) && (
@@ -369,7 +372,6 @@ export const SidebarView = React.memo(function SidebarView() {
             ))}
           </YStack>
           <Separator borderColor="stroke" />
-          <XStack paddingHorizontal="4" paddingTop="3"><T v="metaStrong" color="secondary">Chats</T></XStack>
           {pinError ? <YStack paddingHorizontal="4" paddingTop="2"><Copy small color="removed">{pinError}</Copy></YStack> : null}
           <ScrollView flex={1} minHeight={0} testID="desktop-chat-tree">
             {navigationError ? (
@@ -383,21 +385,18 @@ export const SidebarView = React.memo(function SidebarView() {
                 <Copy quiet>{search.open ? 'No chats match.' : `No ${ROOMS_LABEL.toLowerCase()} or direct messages yet.`}</Copy>
               </YStack>
             ) : (
-              filteredChats.map((item, index) => (
-                <ChatRow
-                  key={item.room.id}
-                  item={item}
-                  viewer={identityPubkey ?? undefined}
-                  now={ageNow}
-                  first={index === 0}
-                  selected={isDesktop && activeRoomId === item.room.id}
-                  pinned={pinned.includes(item.room.id)}
-                  onOpen={openRoom}
-                  onPin={togglePin}
-                  onOpenThread={openThread}
-                  onNewThread={viewerIsAgent ? undefined : newThread}
-                />
-              ))
+              <DesktopChatList
+                chats={filteredChats}
+                viewer={identityPubkey ?? undefined}
+                now={ageNow}
+                selected={isDesktop ? activeRoomId : null}
+                pinned={pinned}
+                corners={(item) => cornerSummaries.get(item.room.id)?.openCorners ?? item.openCorners}
+                onOpen={openRoom}
+                onPin={togglePin}
+                onOpenThread={openThread}
+                onNewThread={viewerIsAgent ? undefined : newThread}
+              />
             )}
             <MessageMatches
               search={messageSearch}
@@ -421,16 +420,8 @@ export const SidebarView = React.memo(function SidebarView() {
                 router.push('/beeline/community' as Href);
               }}
               onClose={() => setWorkspaceSwitcherOpen(false)}
-              onOpenAccount={() => {
-                setWorkspaceSwitcherOpen(false);
-                router.push('/beeline/settings' as Href);
-              }}
               onSelect={selectWorkspace}
               open={workspaceSwitcherOpen}
-              viewerAvatarUrl={viewerIdentity?.avatar}
-              viewerFace={viewerIdentity?.face}
-              viewerName={viewerIdentity?.name}
-              viewerPubkey={identityPubkey ?? undefined}
               workspaces={workspaces.map((workspace) => ({
                 id: workspace.id,
                 name: workspace.name,
@@ -443,5 +434,6 @@ export const SidebarView = React.memo(function SidebarView() {
         </YStack>
       )}
     </YStack>
+    </TextSizeContext.Provider>
   );
 });
