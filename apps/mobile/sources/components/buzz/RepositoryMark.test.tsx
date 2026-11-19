@@ -12,7 +12,7 @@ it('shows the stored owner photo, falls back to the favicon on failure, then the
   await act(async()=>{tree=create(<RepositoryMark avatarUrl="https://avatars.githubusercontent.com/u/42" faviconUrl="https://github.githubassets.com/favicons/favicon.png" size={28}/>);});
   const image=()=>tree.root.find((node:any)=>node.type==='NativeImage');
   expect(image().props.source.uri).toBe('https://avatars.githubusercontent.com/u/42');
-  expect(image().props.style).toEqual({width:'100%',height:'100%'});
+  expect(image().props.style).toEqual([{width:'100%',height:'100%'},{imageRendering:'pixelated'}]);
   await act(async()=>image().props.onError());
   expect(image().props.source.uri).toBe('https://github.githubassets.com/favicons/favicon.png');
   await act(async()=>image().props.onError());
