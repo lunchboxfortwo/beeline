@@ -31,7 +31,7 @@ export type ChatListKey = {
 };
 export type ChatListConsumer = {
   readonly visible: () => boolean;
-  readonly onRead?: () => void;
+  readonly onRead?: (stamp: number) => void;
   readonly onError?: (reason: unknown) => void;
 };
 export interface ChatListHandle {
@@ -116,7 +116,7 @@ namespace ChatReads {
         this.confirmedRead = true;
         mobileSurfaceCache.publish(this.address, value, isChatListView, readStamp);
         void mobileSurfaceCache.persist(this.address, this.saved(value), isChatListView);
-        for (const consumer of this.consumers) consumer.onRead?.();
+        for (const consumer of this.consumers) consumer.onRead?.(readStamp);
         if (chatWatchFiltersKey(value.watchFilters) !== this.watchKey)
           void this.watch(value.watchFilters);
       } catch (reason) {
@@ -329,12 +329,13 @@ export const chatListSnapshot = ChatReads.chatListSnapshot;
 export const refreshChatList = ChatReads.refreshChatList;
 export const resetChatListStoresForTest = ChatReads.reset;
 
-/** Existing Forward gesture only. All other consumers attach observations. */
-export function readChatList(key: ChatListKey): Promise<ChatListView> {
+export function readChatList(key: ChatListKey, fresh = false): Promise<ChatListView> {
+  const after = currentSurfaceStamp();
   return new Promise((resolve, reject) => {
     let handle: ChatListHandle | undefined;
     let stop: (() => void) | undefined;
-    const finish = () => {
+    const finish = (stamp = 0) => {
+      if (fresh && stamp <= after) return;
       const value = handle?.current();
       if (!value || !handle?.confirmed()) return;
       stop?.();
@@ -350,7 +351,10 @@ export function readChatList(key: ChatListKey): Promise<ChatListView> {
         reject(reason);
       },
     });
-    stop = handle.subscribe(finish);
-    finish();
+    if (fresh) handle.force();
+    else {
+      stop = handle.subscribe(finish);
+      finish();
+    }
   });
 }

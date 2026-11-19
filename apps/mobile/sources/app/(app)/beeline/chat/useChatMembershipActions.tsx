@@ -1,3 +1,4 @@
+import { readChatList, type ChatListKey } from '@/buzz/chat-list-store';
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import React, { useCallback } from 'react';
 import * as Haptics from 'expo-haptics';
@@ -31,13 +32,14 @@ type Props = [
   setRenameBusy: React.Dispatch<React.SetStateAction<boolean>>,
   renameTextDraft: import("@/buzz/text-draft-store").TextDraft<string>,
   applyRoomName: (name: string, expected?: string) => void,
+  chatListKey: ChatListKey | null,
 ];
 
 export function useChatMembershipActions([
   transport, activeCommunityId, canManageWorkspace, setMembershipError, decodedId, setParticipantPickerVisible,
   setRoomActionsVisible, roomLifecycleBusy, setRoomLifecycleBusy, displayRoomName,
   roomSurface, readRoom, renameBusy, setRenameEditing, setRenameError, renameDraft, isCorner,
-  canRenameTitle, setRenameBusy, renameTextDraft, applyRoomName,
+  canRenameTitle, setRenameBusy, renameTextDraft, applyRoomName, chatListKey,
 ]: Props): [
   closeRoomActions: () => void,
   handleConnectAgent: () => void,
@@ -103,6 +105,7 @@ export function useChatMembershipActions([
           );
           if (!left) return;
         }
+        if (chatListKey) await readChatList(chatListKey, true);
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         returnToRoomList();
       } catch (err) {
@@ -118,6 +121,7 @@ export function useChatMembershipActions([
     },
     [
       decodedId,
+      chatListKey,
       displayRoomName,
       canManageWorkspace,
       roomSurface?.leaveDeletesRoom,

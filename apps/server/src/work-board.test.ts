@@ -316,7 +316,8 @@ describe('Work board recorded sources and single assignee', () => {
   it('projects an archived working thread as Done for seven days', async () => {
     await updateWorkItem(db, { roomId: thread, state: 'in-progress', assigneeId: agent }, agent);
     await db.query('UPDATE rooms SET archived_at=now() WHERE id=$1', [thread]);
-    expect((await read()).items.find((item) => item.id === thread)?.state).toBe('done');
+    expect((await read()).items.find((item) => item.id === thread)).toMatchObject({ state: 'done', roomArchived: true });
+    expect((await readWorkThread(db, thread, person))[0]).toMatchObject({ state: 'done', roomArchived: true });
     await db.query("UPDATE rooms SET archived_at=now()-interval '8 days' WHERE id=$1", [thread]);
     expect((await read()).items.find((item) => item.id === thread)).toBeUndefined();
     expect((await db.query('SELECT id FROM work_items WHERE room_id=$1', [thread])).rowCount).toBe(

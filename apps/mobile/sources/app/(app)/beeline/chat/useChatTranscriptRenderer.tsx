@@ -692,7 +692,7 @@ export function useChatTranscriptRenderer([
     ),
     ...archiveActionPresentation(item, {
       roomArchived: isArchived,
-      cornerSwipeOffered: !isDirectMessage && !viewerIsAgent && !desktopExperience,
+      cornerSwipeOffered: !isDirectMessage && !viewerIsAgent,
       cornerProposalOffered: !isCorner && !viewerIsAgent && !isReadOnlyDirectMessage,
     }),
     channelReferenceKey,
@@ -725,7 +725,6 @@ export function useChatTranscriptRenderer([
     channelReferenceKey,
     isArchived,
     isDirectMessage,
-    desktopExperience,
     isDesktop,
     isCorner,
     isReadOnlyDirectMessage,

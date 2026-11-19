@@ -60,7 +60,7 @@ export function WorkItemDetail({
     }
   };
   const changeState = async (state: WorkState) => {
-    if (state === item.state || busy.current.state) return;
+    if (item.roomArchived || state === item.state || busy.current.state) return;
     busy.current.state = true;
     setChangingState(true);
     try {
@@ -133,7 +133,7 @@ export function WorkItemDetail({
               {item.idle ? 'Idle' : STATE_LABEL[item.state]}
             </T>
           </XStack>
-          <XStack gap="2" flexWrap="wrap" role="radiogroup" aria-label="State" testID="work-state-picker">
+          {!item.roomArchived ? <XStack gap="2" flexWrap="wrap" role="radiogroup" aria-label="State" testID="work-state-picker">
             {SETTABLE_STATES.map((state) => (
               <Btn
                 key={state}
@@ -150,7 +150,7 @@ export function WorkItemDetail({
                 <T v="meta" color={item.state === state ? 'needsYou' : 'ink'}>{STATE_LABEL[state]}</T>
               </Btn>
             ))}
-          </XStack>
+          </XStack> : null}
           {item.objective ? <T testID="work-sheet-objective">{item.objective}</T> : null}
           <YStack gap="2">
             <T v="meta" color="secondary">

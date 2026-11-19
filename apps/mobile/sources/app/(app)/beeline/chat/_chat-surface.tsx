@@ -346,7 +346,7 @@ export function BuzzChatSurface({
     setRoomActionsVisible, roomLifecycleBusy,
     setRoomLifecycleBusy, displayRoomName, roomSurface, readRoom, renameBusy, setRenameEditing,
     setRenameError, renameDraft, isCorner, canRenameTitle, setRenameBusy, renameTextDraft,
-    applyRoomName,
+    applyRoomName, chatListKey,
   ]);
   const [
     startRenameFromTitle, handleForwardToNewCorner, handleOpenRandomCorner,

@@ -59,3 +59,19 @@ it('TASK-STATE-1: the task sheet sets Backlog, In progress or Done through updat
     expect(work.monolithPhoneOperation).toHaveBeenCalledOnce();
     act(() => tree.unmount());
 });
+
+
+it.each([false, true])('hides archived task transitions on desktop=%s', async (desktop) => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    work.monolithPhoneOperation.mockClear();
+    const item = { id: 'archived', roomId: 'thread', title: 'Closed work', state: 'done', roomArchived: true, entries: [], attachments: [] } as unknown as WorkItemView;
+    let tree: any;
+    act(() => { tree = create(<WorkItemDetail item={item} workspaceId="ws" viewerId="viewer" desktop={desktop} now={0} />); });
+    expect(tree.root.findAll((node: any) => node.props.testID === 'work-state-picker')).toHaveLength(0);
+    expect(work.monolithPhoneOperation).not.toHaveBeenCalled();
+    act(() => { tree.update(<WorkItemDetail item={{ ...item, roomArchived: undefined }} workspaceId="ws" viewerId="viewer" desktop={desktop} now={0} />); });
+    const choice = tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'work-state-backlog');
+    await act(async () => { choice.props.onPress(); });
+    expect(work.monolithPhoneOperation).toHaveBeenCalledExactlyOnceWith('updateWorkItem', { roomId: 'thread', id: 'archived', state: 'backlog' });
+    act(() => tree.unmount());
+});

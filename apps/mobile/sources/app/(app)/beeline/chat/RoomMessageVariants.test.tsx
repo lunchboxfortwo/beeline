@@ -88,8 +88,9 @@ vi.mock('@/components/buzz/GrantRequestCard', () => ({
 vi.mock('./chat-surface-values', () => ({
   knownAgentPubkeysFor: () => new Set(), rosterAgent: () => undefined, durableFactLine: () => '',
 }));
-vi.mock('@/buzz/room-message-cell', () => ({
-  messageFailureGroups: () => new Map(), archiveActionPresentation: () => ({}),
+vi.mock('@/buzz/room-message-cell', async importOriginal => ({
+  messageFailureGroups: () => new Map(),
+  archiveActionPresentation: (await importOriginal<typeof import('@/buzz/room-message-cell')>()).archiveActionPresentation,
   liveCardPresentation: () => ({}), messageRosterPresentation: () => ({}),
   useRoomMessageRenderItem: ({ render, presentationForMessage }: any) => ({ item }: any) =>
     render(item, presentationForMessage(item)),
@@ -696,4 +697,28 @@ it.each([false, true])('QUOTE-CLAMP: the original stays within two lines while t
   expect(quote.props.numberOfLines).toBe(2);
   expect(quote.props.children).toContain(original);
   expect(renderer.root.findByType('LedgerSteer').props.bodyText).toBe(reply);
+});
+
+
+it('removes desktop New thread when an ordinary message Room is archived', () => {
+  const row: ChatDisplayMessage = { id: 'message', text: 'Start here', timestamp: 1, isUser: false };
+  const forward = vi.fn();
+  function Fixture({ archived }: { archived: boolean }) {
+    const args: unknown[] = Array(68).fill(undefined);
+    Object.assign(args, {
+      0: false, 10: new Map(), 11: new Map(), 12: new Map(), 13: [],
+      14: 'room', 15: VIEWER, 17: { handleForwardToNewCorner: forward },
+      20: true, 29: true, 47: false, 48: archived, 51: true,
+      52: new Set(), 53: new Set(), 54: new Set(),
+      55: { states: new Map(), retry: vi.fn() }, 56: {}, 57: new Map(), 62: [row],
+    });
+    const [render] = useChatTranscriptRenderer(args as Parameters<typeof useChatTranscriptRenderer>[0]);
+    return render({ item: row });
+  }
+  act(() => { renderer = create(<Fixture archived={false} />); });
+  expect(renderer.root.findByType(OrdinaryLedgerMessage).props.onForwardToNewCorner).toBe(forward);
+  act(() => { renderer.update(<Fixture archived />); });
+  expect(renderer.root.findByType(OrdinaryLedgerMessage).props.onForwardToNewCorner).toBeUndefined();
+  act(() => { renderer.update(<Fixture archived={false} />); });
+  expect(renderer.root.findByType(OrdinaryLedgerMessage).props.onForwardToNewCorner).toBe(forward);
 });

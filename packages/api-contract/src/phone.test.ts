@@ -14,6 +14,7 @@ import {
   readCornerListView,
   readInviteView,
   readRoomView,
+  readWorkItem,
   readWorkspaceView,
   isPushLevel,
   WORKSPACE_MEMBER_PAGE_SIZE,
@@ -410,4 +411,12 @@ describe('phone contract', () => {
     expect(isAgentPairingCode('1234ABCD-5678EF9')).toBe(false);
     expect(normalizeAgentPairingCode('  1234abcd-5678ef90  ')).toBe('1234ABCD-5678EF90');
   });
+});
+
+
+it('preserves the archived Room restriction in validated task details', () => {
+  const item = { id: 'task', roomId: 'room', chatId: 'chat', chatName: 'Chat', title: 'Task', threadName: 'Thread', state: 'done', openedBy: identity, assignee: null, createdAt: 1, updatedAt: 2 };
+  expect(readWorkItem({ ...item, roomArchived: true })?.roomArchived).toBe(true);
+  expect(readWorkItem(item)?.roomArchived).toBeUndefined();
+  expect(readWorkItem({ ...item, roomArchived: 'true' })?.roomArchived).toBeUndefined();
 });
