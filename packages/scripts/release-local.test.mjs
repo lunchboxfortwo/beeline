@@ -366,7 +366,7 @@ fs.writeFileSync(process.env.GITHUB_OUTPUT, 'version=21.0.1\\n');`);
     const fetchImpl = async (url, options) => { downloads.push({ url, options }); return { ok: true, arrayBuffer: async () => new ArrayBuffer(0) }; };
     for (const release of ['', 'JAVA_VERSION="17.0.21"\nIMPLEMENTOR="Eclipse Adoptium"\n', 'JAVA_VERSION="21.0.1"\nIMPLEMENTOR="Ubuntu"\n', 'JAVA_VERSION="21.0.1"\nIMPLEMENTOR="AdoptOpenJDK"\n']) {
       writeFileSync(join(home, 'release'), release);
-      await setupJava({ action: 'actions/setup-java@v4', inputs: { distribution: 'temurin', 'java-version': '21' }, env, directory, processes, token: 'fixture-token', timeout: 2000, fetchImpl });
+      await setupJava({ action: 'actions/setup-java@v4', inputs: { distribution: 'temurin', 'java-version': '21' }, env, directory, processes, token: 'fixture-token', timeout: 2000, fetchImpl, jvmRoots: [join(directory, 'no-system-jdks')] });
       assert.equal(readFileSync(env.GITHUB_ENV, 'utf8'), 'JAVA_HOME=/installed/temurin\n');
       assert.equal(readFileSync(env.GITHUB_PATH, 'utf8'), '/installed/temurin/bin\n');
     }
