@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
 import { parse } from 'yaml';
 import { LocalActions, matrixRows } from './release-local-actions.mjs';
@@ -566,6 +566,7 @@ test('private HOME GitHub fetches use ephemeral credentials and redact their enc
 });
 test('Body occupies a queue slot through a bounded host-user scope with private source and HOME', async () => {
   const directory = temporary(), calls = [];
+  let hostSource;
   try {
     const engine = new LocalActions({ root: repository, directory, secrets: {}, processes: new Processes({}, () => {}) });
     const checks = new LocalChecks(engine);
@@ -578,7 +579,9 @@ test('Body occupies a queue slot through a bounded host-user scope with private 
       assert.equal(args.some(arg => /nsenter|setfcap/.test(arg)), false);
       const jobDirectory = join(directory, 'jobs/release_checks-body-suite-local');
       const spec = JSON.parse(readFileSync(join(jobDirectory, 'spec.json'), 'utf8'));
-      assert.equal(spec.root, join(jobDirectory, 'source'));
+      // Body's sandbox hides /tmp, so its checkout must live elsewhere.
+      assert.match(spec.root, /^\/var\/tmp\/beeline-check-source-[\w-]+\/source$/);
+      hostSource = dirname(spec.root);
       assert.equal(spec.directory, jobDirectory);
       assert.match(spec.temporary, /^\/tmp\/beeline-check-[\w-]+$/);
       assert.ok(spec.temporary.length < 40);
@@ -588,9 +591,10 @@ test('Body occupies a queue slot through a bounded host-user scope with private 
     };
     const result = await checks.execute(4, { steps: [] }, { github: { sha, job: 'body-suite' }, secrets: { PRIVATE: 'never-forward' } }, 'release_checks/body-suite-local');
     assert.equal(result.result, 'success');
-    assert.ok(calls.some(args => args[0] === 'cp'));
+    assert.ok(calls.some(args => args[0] === 'cp' && args.at(-1) === join(hostSource, 'source')));
+    assert.ok(calls.some(args => args.join(' ') === `rm -rf ${hostSource}`));
     assert.ok(calls.some(args => args[0] === 'chown' && args[2] === `${process.getuid()}:${process.getgid()}`));
-  } finally { rmSync(directory, { recursive: true, force: true }); }
+  } finally { rmSync(directory, { recursive: true, force: true }); if (hostSource) rmSync(hostSource, { recursive: true, force: true }); }
 });
 test('workflow expressions preserve hyphenated identifiers, booleans, defaults and failure semantics', () => {
   const context = { inputs: { run_release_proof: false }, steps: { 'local-root': { outputs: { 'cache-hit': 'true' } } }, needs: { proof: { result: 'failure' } } };

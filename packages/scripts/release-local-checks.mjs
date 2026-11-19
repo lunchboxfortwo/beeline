@@ -111,9 +111,13 @@ export class LocalChecks {
     const owner = host ? `${process.getuid()}:${process.getgid()}` : shard.name;
     const directory = join(this.engine.directory, 'jobs', label.replaceAll('/', '-'));
     mkdirSync(directory, { recursive: true, mode: 0o700 });
-    let source = this.source;
+    let source = this.source, hostSource;
     if (!preparation && checkWorkspace(context.github.job) === 'private copy of build') {
-      source = join(directory, 'source');
+      // Body's own sandbox replaces /tmp with an empty tmpfs, so its sandbox
+      // proofs cannot load a checkout below /tmp. CI checks out outside /tmp;
+      // the host copy does too (release state usually lives in /tmp).
+      if (host) hostSource = mkdtempSync('/var/tmp/beeline-check-source-');
+      source = join(hostSource ?? directory, 'source');
       await this.privileged(['cp', '-a', '--reflink=auto', this.source, source]);
       await this.privileged(['chown', '-R', owner, source]);
     }
@@ -156,6 +160,7 @@ export class LocalChecks {
     finally {
       this.active.delete(unit);
       if (temporary) rmSync(temporary, { recursive: true, force: true });
+      if (hostSource) await this.privileged(['rm', '-rf', hostSource]);
       await this.privileged(['chown', '-R', `${process.getuid()}:${process.getgid()}`, directory]);
     }
     const resultPath = join(directory, 'result.json');

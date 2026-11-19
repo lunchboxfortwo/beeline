@@ -200,7 +200,10 @@ export class LocalActions {
         if (Object.keys(service.env ?? {}).some(key => key !== 'POSTGRES_PASSWORD') || !service.image.startsWith('pgvector/pgvector:')) throw new Error('Unsupported service definition; add a local adapter before releasing');
         const args = ['run', '--detach', '--name', serviceName, '--publish', '127.0.0.1::5432'];
         for (const [key, value] of Object.entries(service.env ?? {})) args.push('--env', `${key}=${value}`);
-        args.push(service.image);
+        // This throwaway database dies with the job. On squire's disk, fsync made
+        // DROP DATABASE's forced checkpoint take 16.7s and schema migrations 9x
+        // slower than with fsync off, past suite timeouts that hosted runners meet.
+        args.push(service.image, '-c', 'fsync=off');
         await this.processes.run('docker', args, { env: context.env, quiet: true });
         services.push(serviceName);
         const port = (await this.processes.run('docker', ['port', serviceName, '5432/tcp'], { env: context.env, quiet: true })).trim().split(':').at(-1);
