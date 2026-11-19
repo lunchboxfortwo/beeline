@@ -125,7 +125,24 @@ placement under the private state directory.
 Cache misses rebuild; unknown action types fail.
 
 The temporary outage policy is explicit: **website not released** means static
-GitHub Pages is left serving its published site. The selected EAS web app leg
+GitHub Pages is left serving its published site. This is a local-runner bypass,
+not a report that the Pages hosting account is suspended: `release-local.mjs`
+skips the entire `pages-leg` composite. That composite requires an uploaded
+Actions Pages artifact and an Actions OIDC token, which local execution cannot
+provide. Removing the bypass alone cannot deploy the site.
+
+To resume static website delivery with the current hosting configuration, the
+repository/organization administrator must restore GitHub Actions execution if
+it is unavailable, then the owner must authorize the existing hosted
+`Unified production release` latest promotion for the intended successful next
+commit. Its `website` job assembles the static site, uploads the real Pages
+artifact and deploys with OIDC. Next releases carry the website unchanged;
+merging website changes or running the local release command does not publish
+them. Keeping releases entirely local instead requires an explicitly chosen
+alternative static publishing path and Pages configuration; it cannot be
+recovered by inventing an Actions artifact or token.
+
+The selected EAS web app leg
 still exports, uploads private source maps when configured, deploys and verifies its canonical
 origin. The Intel Mac helper builds and runs its installation proof on the
 MacBook. The authorized MacBook is Intel, so the Apple-silicon helper remains

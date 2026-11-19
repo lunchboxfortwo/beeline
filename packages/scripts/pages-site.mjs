@@ -14,6 +14,8 @@ const REQUIRED_STATIC_PATHS = [
   'favicon.ico',
   'apple-touch-icon.png',
   'icon-512.png',
+  'icon-192.png',
+  'site.webmanifest',
   'privacy/index.html',
   'terms/index.html',
   'delete-account/index.html',

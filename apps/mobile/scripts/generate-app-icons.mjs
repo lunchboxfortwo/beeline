@@ -45,7 +45,10 @@ for (const [file, size] of [
     ['apps/mobile/fastlane/metadata/android/en-US/images/icon.png', 512],
     ['apps/mobile/store/assets/store-icon-512.png', 512],
     ['apps/mobile/store/assets/ios-app-icon-1024.png', 1024],
+    ['apps/site/icon-192.png', 192],
     ['apps/site/icon-512.png', 512],
+    ['apps/mobile/public/icon-192.png', 192],
+    ['apps/mobile/public/icon-512.png', 512],
     ['apps/site/apple-touch-icon.png', 180],
 ]) put(file, render(regular, size));
 const scratch = mkdtempSync(join(tmpdir(), 'beeline-stone-icons-'));
