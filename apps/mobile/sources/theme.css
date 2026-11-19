@@ -22,6 +22,17 @@ body {
     height: 100vh;
 }
 
+/* Tamagui draws Switch, RadioGroup.Item and Toggle frames as <button> Views,
+   but its own reset covers only button.is_DOM. They kept the browser's 2px
+   outset border and 1px 6px padding: the switch knob spilled out of its track
+   and the radio dot squeezed into a bar. Zero specificity, so each control's
+   own border and padding still win. */
+:where(button.is_View) {
+    border-width: 0;
+    border-style: solid;
+    padding: 0;
+}
+
 /* Theme-aware scrollbar styles using Unistyles CSS variables.
    Use text-secondary for the thumb so it stays visible on all
    surface colors (divider == surfaceHighest in dark theme). */

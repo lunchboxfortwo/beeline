@@ -20,7 +20,9 @@ const DESKTOP_CSS = `
         -webkit-user-drag: none;
         user-drag: none;
     }
-    :focus-visible {
+    /* Text fields match :focus-visible on every focus and draw their own focus
+       border (composer, search), so the ring would double inside it. */
+    :focus-visible:not(input, textarea, [contenteditable="true"], [contenteditable=""]) {
         outline: 2px solid #d7af5f !important;
         outline-offset: 2px !important;
     }

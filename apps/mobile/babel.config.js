@@ -1,5 +1,5 @@
 module.exports = function (api) {
-  api.cache(true);
+  const web = api.caller((caller) => caller?.platform === 'web');
 
   // Determine which worklets plugin to use based on installed versions
   // Reanimated v4+ uses react-native-worklets/plugin
@@ -21,6 +21,12 @@ module.exports = function (api) {
   return {
     presets: ['babel-preset-expo'],
     plugins: [
+      // The web export compiles object spread with babel-preset-expo's loose
+      // transform, which turns `{ ...value, get val() {} }` into Object.assign
+      // and drops the getter. Tamagui's useTheme() tracks theme keys through
+      // that getter, so `.val` readers missed live Light/Dark switches. The
+      // strict transform runs first and keeps getters.
+      ...(web ? [require.resolve('@babel/plugin-transform-object-rest-spread')] : []),
       require.resolve('./plugins/direct-lucide-imports.cjs'),
       require.resolve('./plugins/direct-library-imports.cjs'),
       ...(process.env.BEELINE_TRANSCRIPT_MEASURE === '1'

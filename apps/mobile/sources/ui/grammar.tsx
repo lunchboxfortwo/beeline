@@ -416,10 +416,13 @@ export function StatusMark({ unread, tagged }: { unread: boolean; tagged: boolea
 }
 
 
-/** Device safe-area spacers: the only place a screen takes an inset that is not a grammar step. */
-export function SafeTop() {
+/**
+ * Device safe-area spacers: the only place a screen takes an inset that is not a grammar step.
+ * A bar with its own fill passes it, so the status-bar strip continues the bar: `<SafeTop fill="raised" />`.
+ */
+export function SafeTop({ fill = 'canvas' }: { fill?: ColorToken }) {
     const insets = useSafeAreaInsets();
-    return <YStack height={insets.top} backgroundColor="canvas" />;
+    return <YStack height={insets.top} backgroundColor={fill} />;
 }
 export function SafeBottom() {
     const insets = useSafeAreaInsets();
