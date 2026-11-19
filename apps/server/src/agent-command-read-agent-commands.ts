@@ -167,7 +167,8 @@ export async function routeSystemCommand(
       workflowAssignment: input.assignmentTargets?.includes(agentId),
       reason: resume ? 'resume' : input.kind === 'schedule-ran' ? 'schedule' : input.kind === 'computer-session-activity' ? 'computer_activity' : 'subscribed_event',
       ...(parent ? { parent, retainDepth: resume || input.kind === 'subscription-fired', resume,
-        ...(input.kind === 'subscription-fired' ? { inheritPrivatePayload: false } : {}) } : {}),
+        // A person's grant decision supplies its own sender and return place.
+        ...(input.kind === 'grant-decided' || input.kind === 'subscription-fired' ? { inheritPrivatePayload: false } : {}) } : {}),
     });
   }
 }
