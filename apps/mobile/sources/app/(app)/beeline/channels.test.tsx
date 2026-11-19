@@ -774,3 +774,34 @@ describe('Room deck live path', () => {
     await act(async () => renderer.unmount());
   });
 });
+
+it('keeps the desktop New chat sheet open instead of selecting the first chat', async () => {
+  deck.desktop = true;
+  deck.newRoom = 'new-chat-request';
+  deck.holdLayouts = true;
+  fixtureScope1().saveDeck();
+  for (const value of hotSurfaces.saved.values() as Iterable<any>) {
+    if (value.workspace) value.workspace.role = 'owner';
+    for (const workspace of value.workspaces ?? []) workspace.role = 'owner';
+  }
+  let renderer!: ReactTestRenderer;
+  try {
+    await act(async () => { renderer = create(<BuzzChannels />); });
+    expect(renderer.root.findByType(NewChatSheet).props.step).toBe('menu');
+    expect(router.replace).not.toHaveBeenCalled();
+    // Dismissing (or creating, which clears the step before opening the new chat) never jumps to the first chat.
+    await act(async () => renderer.root.findByType(NewChatSheet).props.onStep(null));
+    expect(router.replace).not.toHaveBeenCalled();
+  } finally { if (renderer) await act(async () => renderer.unmount()); }
+});
+
+it('opens the top chat in the desktop middle when no New chat request is pending', async () => {
+  deck.desktop = true;
+  deck.holdLayouts = true;
+  fixtureScope1().saveDeck();
+  let renderer!: ReactTestRenderer;
+  try {
+    await act(async () => { renderer = create(<BuzzChannels />); });
+    expect(router.replace).toHaveBeenCalledWith(expect.objectContaining({ pathname: '/beeline/chat/[channelId]' }));
+  } finally { if (renderer) await act(async () => renderer.unmount()); }
+});

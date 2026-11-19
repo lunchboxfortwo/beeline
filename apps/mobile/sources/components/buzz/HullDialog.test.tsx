@@ -27,6 +27,8 @@ vi.mock('react-native', async () => {
     Text: 'Text',
     TextInput: 'TextInput',
     View: 'View',
+    Keyboard: {},
+    useWindowDimensions: () => ({ width: 1280, height: 800 }),
   };
 });
 vi.mock('react-native-reanimated', () => {
@@ -195,3 +197,16 @@ it('keeps Android screen sheets in the current window and owns hardware Back onl
   });
   expect(modalRenders).toHaveBeenCalledOnce();
 });
+
+it.each([[true, '1'], [false, '5']])('clears the surface top with the title when grip is %s', async (grip, paddingTop) => {
+  const { HullActionSheet } = await import('./HullActionSheet');
+  act(() => {
+    renderer = create(<HullActionSheet grip={grip} title="@luna" titleTestID="sheet-title"><Content /></HullActionSheet>);
+  });
+  const title = renderer.root.findAll((node: any) => node.props.testID === 'sheet-title')[0];
+  expect(title.props.paddingTop).toBe(paddingTop);
+});
+
+function Content() {
+  return React.createElement('Text', {}, 'Mute notifications');
+}

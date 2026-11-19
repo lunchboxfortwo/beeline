@@ -68,6 +68,8 @@ const deck = vi.hoisted(() => ({
   pathname: '/beeline/channels',
   initialUrl: null as string | null | Promise<string | null>,
   naming: false,
+  desktop: false,
+  newRoom: undefined as string | undefined,
   holdLayouts: false,
   routerMode: 'legacy' as 'legacy' | 'router' | 'pending',
   withholdWorkspaceSnapshot: false,
@@ -232,7 +234,7 @@ vi.mock('expo-router', () => ({
   router: { push: vi.fn(), replace: vi.fn() },
   useLocalSearchParams: () =>
     !deck.deferWorkspaceSelection && deck.selectedWorkspace
-      ? { communityId: deck.selectedWorkspace }
+      ? { communityId: deck.selectedWorkspace, newRoom: deck.newRoom }
       : {},
 }));
 
@@ -372,7 +374,7 @@ vi.mock('@/buzz/surface-storage', async () => {
 
 vi.mock('@/buzz/room-open-prefetch', () => ({ dispatchRoomOpenTap: vi.fn(), warmRoomRouteCode: vi.fn() }));
 
-vi.mock('@/utils/responsive', () => ({ useIsDesktop: () => false }));
+vi.mock('@/utils/responsive', () => ({ useIsDesktop: () => deck.desktop }));
 
 vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: deck.operation, readServerSurface: vi.fn() }));
 
@@ -587,6 +589,8 @@ beforeEach(async () => {
   deck.pathname = '/beeline/channels';
   deck.initialUrl = null;
   deck.naming = false;
+  deck.desktop = false;
+  deck.newRoom = undefined;
   deck.holdLayouts = false;
   hotSurfaces.saved.clear();
   hotSurfaces.values.clear();
