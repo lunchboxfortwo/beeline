@@ -55,6 +55,7 @@ const chats = vi.hoisted(() =>
                   ...(openCornerState.current === 'waiting' ? { attention: true } : {}),
                 },
                 { id: 'corner-theirs', name: 'Their fix', state: 'waiting', lastActivityAt: Math.floor(Date.now() / 1000) },
+                { id: 'corner-mine', name: 'Your call', state: 'waiting', reason: 'question', blocker: { kind: 'message', personId: 'viewer' }, lastActivityAt: Math.floor(Date.now() / 1000) },
               ],
             },
             {
@@ -663,16 +664,15 @@ describe('desktop Workspace navigation', () => {
     expect(control('room-dm-a').props['aria-current']).toBeUndefined();
   });
 
-  it('nests the waiting chat threads first and opens one in the main pane', () => {
+  it('lists only the threads waiting on the viewer under Waiting on you and opens one in the main pane', () => {
     const rows = tree.root.findAll((node: any) => typeof node.type === 'string' && String(node.props.testID ?? '').startsWith('thread-row-'));
-    expect(rows[0]?.props.testID).toBe('thread-row-corner-theirs');
-    // Only waiting threads show until the chat is expanded; the other thread stays behind `more`.
-    expect(rows.some((node: any) => node.props.testID === 'thread-row-corner-a')).toBe(false);
-    expect(control('thread-row-corner-theirs').props['aria-label']).toBe('Thread Their fix, waiting on a reply');
-    act(() => control('thread-row-corner-theirs').props.onPress());
+    // A thread waiting on someone else, or still working, stays in its chat.
+    expect(rows.map((node: any) => node.props.testID)).toEqual(['thread-row-corner-mine']);
+    expect(control('thread-row-corner-mine').props['aria-label']).toBe('Thread Your call in #Alpha, waiting on you');
+    act(() => control('thread-row-corner-mine').props.onPress());
     expect(routerPush).toHaveBeenCalledWith({
       pathname: '/beeline/chat/[channelId]',
-      params: { channelId: 'corner-theirs', parent: 'room-a', title: 'Their fix' },
+      params: { channelId: 'corner-mine', parent: 'room-a', title: 'Your call' },
     });
   });
 

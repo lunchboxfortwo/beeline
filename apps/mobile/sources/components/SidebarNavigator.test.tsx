@@ -4,10 +4,16 @@ import { act, create } from 'react-test-renderer';
 import { expect, it, vi } from 'vitest';
 const viewport = vi.hoisted(() => ({ tablet: false, listeners: new Set<() => void>() }));
 const drawer = vi.hoisted(() => vi.fn());
+const route = vi.hoisted(() => ({ mounts: 0 }));
 vi.mock('lucide-react-native', () => ({ ChevronLeft: () => null, ChevronRight: () => null }));
 vi.mock('expo-image', () => ({ Image: 'Image' }));
-vi.mock('expo-router/drawer', () => ({ Drawer: (props: any) => { drawer(); return React.createElement('Drawer', props); } }));
-vi.mock('expo-router', () => ({ Slot: () => React.createElement('Slot'), usePathname: () => '/beeline/chat/room', useRouter: () => ({}) }));
+vi.mock('expo-router/drawer', () => ({ Drawer: (props: any) => {
+  drawer();
+  const [draft, setDraft] = React.useState('');
+  React.useEffect(() => { route.mounts++; }, []);
+  return React.createElement('Drawer', props, React.createElement('Draft', { value: draft, onChange: setDraft }));
+} }));
+vi.mock('expo-router', () => ({ Slot: () => { React.useEffect(() => { route.mounts++; }, []); return React.createElement('Slot'); }, usePathname: () => '/beeline/chat/room', useRouter: () => ({}) }));
 vi.mock('@/utils/responsive', async () => {
   const React = await import('react');
   return { useIsTablet: () => React.useSyncExternalStore(
@@ -35,14 +41,18 @@ vi.mock('@/buzz/desktop-workbench-state', () => ({ DESKTOP_NAV_DEFAULT_WIDTH: 26
 vi.mock('@/components/SidebarView', () => ({ SidebarView: () => null }));
 import { SidebarNavigator } from './SidebarNavigator';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
-it('routes a phone directly to its stack without mounting an invisible drawer navigator', async () => {
+it('keeps the browser route and its draft mounted across compact and desktop widths', async () => {
   let tree: ReturnType<typeof create>;
   await act(async () => { tree = create(<SidebarNavigator />); });
-  expect(tree.root.findAllByType('Slot')).toHaveLength(1);
-  expect(drawer).not.toHaveBeenCalled();
-  await act(async () => { viewport.tablet = true; viewport.listeners.forEach((listener) => listener()); });
-  expect(tree.root.findAllByType('Slot')).toHaveLength(0);
-  expect(drawer).toHaveBeenCalled();
-  expect(tree.root.findByType('Drawer').props.screenOptions.drawerType).toBe('permanent');
+  const initialMounts = route.mounts;
+  expect(tree.root.findAllByType('Drawer')).toHaveLength(1);
+  await act(async () => tree.root.findByType('Draft').props.onChange('Unsent draft'));
+  for (const tablet of [true, false, true]) {
+    await act(async () => { viewport.tablet = tablet; viewport.listeners.forEach((listener) => listener()); });
+    expect(route.mounts).toBe(initialMounts);
+    expect(tree.root.findByType('Draft').props.value).toBe('Unsent draft');
+    expect(tree.root.findByType('Drawer').props.screenOptions.drawerType).toBe('permanent');
+    if (!tablet) expect(tree.root.findByType('Drawer').props.screenOptions.drawerStyle.width).toBe(0);
+  }
   await act(async () => tree.unmount());
 });

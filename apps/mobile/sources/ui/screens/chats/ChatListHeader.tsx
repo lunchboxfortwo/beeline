@@ -14,9 +14,10 @@ const CHIPS: { value: SearchChip; label: string }[] = [
 
 /** The workspace title is static across tab controls, searches and row updates. */
 const WorkspaceSwitcher=React.memo(function WorkspaceSwitcher({name,open}:{name:string;open?:()=>void}) {
-  return open ? <Btn kind="quiet" label={`Workspace: ${name}. Switch workspace`} paddingHorizontal="2" onPress={open} testID="workspace-switcher">
-    <XStack gap="1" alignItems="center"><T v="heading" numberOfLines={1}>{name}</T><Glyph icon={ChevronDown} size={16} /></XStack>
-  </Btn> : <YStack paddingHorizontal="2"><T v="heading" numberOfLines={1}>{name}</T></YStack>;
+  // A long name truncates rather than pushing Search and New chat off the edge.
+  return open ? <Btn kind="quiet" label={`Workspace: ${name}. Switch workspace`} paddingHorizontal="2" flexShrink={1} minWidth={0} onPress={open} testID="workspace-switcher">
+    <XStack gap="1" alignItems="center" flexShrink={1} minWidth={0}><T v="heading" numberOfLines={1} flexShrink={1}>{name}</T><Glyph icon={ChevronDown} size={16} /></XStack>
+  </Btn> : <YStack paddingHorizontal="2" flexShrink={1} minWidth={0}><T v="heading" numberOfLines={1}>{name}</T></YStack>;
 });
 
 /**
@@ -93,8 +94,7 @@ export function ChatListHeader({ workspaceName, onWorkspace, onNew, search, onSe
   }
   return (
     <XStack paddingHorizontal="2" height={HEIGHT.tabBar} alignItems="center" gap="1" testID="chat-list-header">
-      <WorkspaceSwitcher name={workspaceName} open={onWorkspace?open:undefined} />
-      <YStack flex={1} />
+      <XStack flex={1} minWidth={0}><WorkspaceSwitcher name={workspaceName} open={onWorkspace?open:undefined} /></XStack>
       <XStack gap="1">
         {search && onSearch ? <Btn kind="icon" label="Search" onPress={() => onSearch({ ...search, open: true })} testID="room-search-open"><Glyph icon={Search} /></Btn> : null}
         {onNew ? <Btn kind="icon" label="New chat" onPress={onNew} testID="new-chat"><Glyph icon={Plus} /></Btn> : null}

@@ -24,6 +24,7 @@ import {WorkspaceTabShell} from './WorkspaceTabShell';
 import {TabHeader} from './TabHeader';
 import {ChatListHeader} from '@/ui/screens/chats/ChatListHeader';
 import {SafeTop} from '@/ui/grammar';
+import {BuzzCommunityShell} from '@/components/buzz/CommunityRail';
 
 let tree:any;
 beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;f.path='/beeline/people';f.desktop=false;f.titleRenders=0;
@@ -125,6 +126,25 @@ it('keeps the navigation stack mounted while hiding its header on a chat route',
     f.path='/beeline/chat/room';await act(async()=>tree.update(render()));
     f.path='/beeline/people';await act(async()=>tree.update(render()));
     expect(mounts).toBe(1);
+});
+
+it('keeps the route and draft mounted when the viewport changes between phone and desktop',async()=>{
+    let mounts=0;
+    function Route(){
+        const [draft,setDraft]=React.useState('');
+        useEffect(()=>{mounts++;},[]);
+        return <input value={draft} onChange={event=>setDraft(event.target.value)}/>;
+    }
+    // A chat screen nests its own Workspace shell; it must render the same way at both widths.
+    const render=()=><WorkspaceTabShell><BuzzCommunityShell communities={[]} activeCommunityId={null} onSelect={()=>undefined} onAdd={()=>undefined}>
+        <Route/></BuzzCommunityShell></WorkspaceTabShell>;
+    await act(async()=>{tree=create(render());});
+    act(()=>tree.root.findByType('input').props.onChange({target:{value:'Unsent draft'}}));
+    for(const desktop of [true,false,true]){
+        f.desktop=desktop;await act(async()=>tree.update(render()));
+        expect(mounts).toBe(1);
+        expect(tree.root.findByType('input').props.value).toBe('Unsent draft');
+    }
 });
 
 it('keeps the existing desktop shell and memoizes its workspace title across controls',()=>{

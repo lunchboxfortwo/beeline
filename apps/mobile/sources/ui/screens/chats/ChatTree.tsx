@@ -29,7 +29,7 @@ const MARK = 36;
 /** Holding a chat's mark this long opens a new thread in it (today's corner-glyph threshold). */
 export const NEW_THREAD_HOLD_MS = 450;
 /** Holding the row this long toggles its pin (React Native's default long press). */
-const PIN_HOLD_MS = 500;
+export const PIN_HOLD_MS = 500;
 
 type PressEvent = {
   stopPropagation?: () => void;
@@ -45,7 +45,7 @@ const touchTime = (event?: PressEvent) => event?.nativeEvent?.timestamp ?? event
  * native, and a busy JS thread that delivers both events late cannot shorten it.
  * `press` runs `onHold` for a hold and `onTap` otherwise.
  */
-function useHold(ms: number, onHold: (() => void) | undefined, onTap: () => void, contain = false) {
+export function useHold(ms: number, onHold: (() => void) | undefined, onTap: () => void, contain = false) {
   const pressedAt = useRef<number | undefined>(undefined);
   return {
     onPressIn: (event?: PressEvent) => {

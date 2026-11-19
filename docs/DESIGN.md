@@ -286,7 +286,7 @@ Approval cards lead with the agent’s plain-language purpose, then available Ru
 4. **The edge layer** (`recolorEdge`, `EDGE_GROW = 3`) draws a contrast copy behind shapes that would vanish on their plate.
 5. **A gold ring means working**: a live turn or corner (`selectWorkingAgents`), breathing on `HullLivePulse`, never presence alone. It never touches the identity colour.
 
-**Workspace plate.** Every Workspace mark is a 3×3 block/slot/cut/void plate in tones of one brass hue (`WORKSPACE_BRASS_HUE` ≈ 40°); it goes solid below `CYPHER_MIN_SIZE` (24). Owners may set a Workspace picture, seated concentric inside its bezel (`buzz/workspace-tile.ts`).
+**Workspace plate.** Every Workspace mark is a 3×3 block/slot/cut/void plate in tones of one brass hue (`WORKSPACE_BRASS_HUE` ≈ 40°), drawn as greys of the same luminance under Stone; it goes solid below `CYPHER_MIN_SIZE` (24). Owners may set a Workspace picture, seated concentric inside its bezel (`buzz/workspace-tile.ts`).
 
 **Pictures.** A person's mark is their first initial; Settings → You → Profile picture uploads a photo (stored durably at `/v1/person-avatars/`) that fills the same box, and Remove clears that uploaded picture. Agents have no photo override. The other images are Workspace pictures, server-generated agent portraits (`/v1/agent-avatars/`), and connector logos; a stored Google or GitHub sign-in photo fills a person's mark when no uploaded picture exists.
 
