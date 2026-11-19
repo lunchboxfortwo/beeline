@@ -374,7 +374,6 @@ export class PlaceSession {
           : {}),
     });
     this.turnPrefix = session.turnPrefix;
-    this.notes.push('Trusty Squire tools are available through app_tool(app:"registry-mcp:squire"); discover its tools there, then pass tool and args on that same route.');
     if (corner && (repositoryBacked || repositoryPending))
       this.notes.push(`Your copy of the repository is made by the workspace tool; call it before repository work. It goes in ${folder}.`);
     // Native resume retains the old system instructions, including repository bans.

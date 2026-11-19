@@ -47,7 +47,8 @@ describe('R2594 repository setup guidance', () => {
   it('does not ask a repository-backed chat to link its repository again', () => {
     const prompt = assembleSessionPrompt({ surface: 'room', agentName: 'Bee',
       agentCommand: 'claude-agent-acp', repository: { name: 'owner/widgets', branch: 'main' } }).systemPrompt;
-    expect(prompt).toContain('The repository filesystem is read-only here. The chat is bound to owner/widgets (branch main); the read-only checkout is at the session root.');
+    expect(prompt).toContain('The chat is bound to owner/widgets (branch main). Call workspace for a read-only checkout.');
+    expect(prompt).not.toContain('checkout is at the session root');
     expect(prompt).not.toContain('chat header → Repository');
     expect(prompt).not.toContain('no linked repository');
   });

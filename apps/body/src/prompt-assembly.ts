@@ -297,7 +297,7 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
             repositoryPending
               ? 'This is a Beeline chat. Repository context loads through read(facet:session). Call workspace to make a read-only copy of its linked repository; the tool returns its path or the reason it is unavailable. Web search is available.'
               : repository
-              ? `This is a Beeline chat. The repository filesystem is read-only here. The chat is bound to ${repository.name} (branch ${repository.branch}); the read-only checkout is at the session root. Web search is available.`
+              ? `This is a Beeline chat. The repository filesystem is read-only here. The chat is bound to ${repository.name} (branch ${repository.branch}). Call workspace for a read-only checkout. Web search is available.`
               : 'This Beeline chat has no linked repository. Web search is available.',
             !repository && !repositoryPending ? 'When code work comes up, say in your first reply: this chat has no linked repository; use chat header → Repository → Link or Create. Never send them to another chat. For quick snippets or single files, deliver an attachment; mention linking for ongoing code work. If gh is unavailable, consult beeline-connecting-services for repository and organization setup before proposing a personal GitHub connection.' : '',
             shellLine(shell),
