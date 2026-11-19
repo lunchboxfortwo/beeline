@@ -62,7 +62,7 @@ export function ThreadBar({ h, collapsed, expanded, back, openChat, expand, open
     return (
         <YStack backgroundColor="raised" borderBottomWidth={1} borderColor="stroke" testID="corner-session-header">
             <YStack ref={barRef as never} onLayout={onBarLayout}>
-                {safeTop ? <SafeTop /> : null}
+                {safeTop ? <SafeTop fill="raised" /> : null}
                 <XStack paddingHorizontal="4" paddingVertical="1" gap="2" alignItems="center" testID="thread-header">
                     {back ? <Btn kind="icon" label="Back" onPress={back} testID="chat-back"><Glyph icon={ArrowLeft} /></Btn> : null}
                     <XStack flex={1} minWidth={0} gap="2" alignItems="center">

@@ -428,7 +428,7 @@ export const stonePalette: Record<'dark' | 'light', Partial<Record<keyof Beeline
     },
     light: {
         bgBase: '#fafaf9', bgRaised: '#f5f5f4', bgHighlight: '#e7e5e4', bgUnread: '#f0efed',
-        textPrimary: '#1c1917', textSecondary: '#44403c', textMuted: '#78716c',
+        textPrimary: '#1c1917', textSecondary: '#44403c', textMuted: '#6b6560',
         border: '#e7e5e4', borderStrong: '#d6d3d1', accent: '#57534e',
         buttonPrimaryFill: '#1c1917', buttonPrimaryText: '#fafaf9',
     },

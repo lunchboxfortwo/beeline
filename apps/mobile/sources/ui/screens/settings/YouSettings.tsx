@@ -115,7 +115,7 @@ export function YouSettings({ you }: { you: You }) {
                                     dot takes brand ink on the canvas and vanishes. The brand theme has to
                                     sit on the item that paints the circle. */}
                                 <RadioGroup.Item value={value} id={`palette-${value}`} aria-label={label} testID={`palette-${value}`}
-                                    theme={palette === value ? 'brand' : undefined}>
+                                    theme={palette === value ? 'brand' : undefined} {...(palette === value ? {} : { borderColor: 'strongStroke' as const })}>
                                     <RadioGroup.Indicator />
                                 </RadioGroup.Item>
                                 <YStack flex={1}>
@@ -158,7 +158,7 @@ export function YouSettings({ you }: { you: You }) {
                 <Row label="Privacy Policy" onPress={open(PRIVACY_URL)} testID="settings-privacy-row" />
                 <Row label="Terms of Service" onPress={open(TERMS_URL)} testID="settings-terms-row" />
                 <Row label="Send feedback" onPress={open(FEEDBACK_MAILTO)} testID="settings-feedback-row" />
-                <DangerRow label="Sign out" onPress={() => void you.signOut()} testID="sign-out-setting" />
+                <Row label="Sign out" onPress={() => void you.signOut()} testID="sign-out-setting" />
                 {confirmDelete ? (
                     <YStack paddingVertical="3" gap="2" testID="confirm-delete-account">
                         <Copy small>deleting your account will delete all your data. this action is irrevocable. confirm?</Copy>
