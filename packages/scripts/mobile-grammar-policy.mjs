@@ -11,7 +11,7 @@ import { scanVisualSource } from './mobile-visual-policy.mjs';
  */
 export const GRAMMAR_FILE = 'ui/grammar.tsx';
 // The app root lives beside the grammar so screens do not load the gesture runtime.
-export const GRAMMAR_FILES = new Set([GRAMMAR_FILE, 'ui/grammar-root.tsx']);
+export const GRAMMAR_FILES = new Set([GRAMMAR_FILE, 'ui/grammar-root.tsx', 'ui/grammar-image.tsx']);
 export const TOKEN_FILES = new Set(['ui/tamagui.config.ts', 'buzz/groknight.ts']);
 
 export const COLOR_TOKENS = new Set([

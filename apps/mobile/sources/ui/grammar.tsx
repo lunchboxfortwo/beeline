@@ -19,7 +19,7 @@ import {
 import { ArrowLeft, Check, ChevronRight, Copy as CopyIcon, Hash } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { useAnimatedStyle, type AnimatedProps, type AnimatedStyle } from 'react-native-reanimated';
-import { Image, type ColorValue, type ImageProps, type ImageStyle, type ViewProps, type ViewStyle } from 'react-native';
+import type { ColorValue, ViewProps, ViewStyle } from 'react-native';
 import { QR_INK, QR_PAPER, SCRIM } from '@/buzz/groknight';
 
 /**
@@ -261,12 +261,6 @@ export function Screen({ title, back, children, testID, right, header }: { title
             </ScrollView>
         </YStack>
     );
-}
-
-/** An image drawn pixel-sharp on web, so small pixel-art icons do not blur. Native ignores the hint. */
-const PIXELATED = { imageRendering: 'pixelated' } as ImageStyle;
-export function PixelImage({ style, ...props }: ImageProps) {
-    return <Image {...props} style={[style, PIXELATED]} />;
 }
 
 /** A chat's mark: the chat glyph on its own plate (a chat has no picture of its own). */

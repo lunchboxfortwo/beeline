@@ -1,6 +1,6 @@
 import React from 'react';
 import { PixelRatio, type ImageProps } from 'react-native';
-import { PixelImage } from '@/ui/grammar';
+import { PixelImage } from '@/ui/grammar-image';
 
 export type RepositoryImageProps = ImageProps & { size: number; homepage: boolean };
 
