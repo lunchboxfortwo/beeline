@@ -39,6 +39,7 @@ function pillItem(message: ChatDisplayMessage, resolve: PillIdentityResolver, ha
       from: BEELINE,
       to: systemTarget(message, resolve),
       time,
+      summary: message.text,
       body: (
         <LedgerSystemLine
           id={message.id}

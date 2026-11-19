@@ -26,7 +26,6 @@ import { SlashVerbPicker } from '@/components/buzz/SlashVerbPicker';
 import { Button } from '@/components/buzz/Button';
 import { ConversationComposer, type DictatedSend } from '@/components/buzz/ConversationComposer';
 import { RoomMemberOption, MessageShortcut, COMPOSER_MAX_HEIGHT, COMPOSER_MIN_HEIGHT } from './chat-surface-values';
-import { TURN_LINE_BOX_HEIGHT } from '@/buzz/room-bottom-chrome';
 import { Motion, T, type MotionStyle } from '@/ui/grammar';
 
 type Props = {
@@ -414,8 +413,6 @@ export const ChatSurfaceComposer = React.memo(function ChatSurfaceComposer({
                         accessibilityLiveRegion="polite"
                         testID="desktop-message-status"
                       >
-                        {/* The shared thinking line's full box, held while idle so the desktop composer stays still. */}
-                        <YStack height={TURN_LINE_BOX_HEIGHT} />
                         <YStack flex={1} minWidth={0} justifyContent="center">
                         {desktopDeliveryState === 'sending' ? (
                           <T v="code" color="secondary" paddingHorizontal="4">SENDING…</T>

@@ -12,8 +12,20 @@ vi.mock('@/buzz/message-link', () => ({ messageLinkId: () => undefined, openMess
 vi.mock('@/utils/open-external-url', () => ({ openExternalUrl: vi.fn() }));
 import { STEP } from '@/ui/grammar';
 import { MonoMarkdown } from './MonoMarkdown';
+import { parseMarkdown } from '@/components/markdown/parseMarkdown';
 
 beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; });
+
+it.each([false, true])('parses transcript quotes and task items with document=%s', document => {
+    const blocks = parseMarkdown('> Quoted **words**\n> second line\n\n- [x] Finished\n- [ ] Pending\n  - [X] Nested\n- ordinary', document);
+    expect(blocks[0]).toMatchObject({ type: 'quote', content: [{ text: 'Quoted ' }, { text: 'words' }, { text: '\nsecond line' }] });
+    expect(blocks[1]).toMatchObject({ type: 'list', items: [
+        { depth: 0, checked: true, spans: [{ text: 'Finished' }] },
+        { depth: 0, checked: false, spans: [{ text: 'Pending' }] },
+        { depth: 1, checked: true, spans: [{ text: 'Nested' }] },
+        { depth: 0, spans: [{ text: 'ordinary' }] },
+    ] });
+});
 
 it('keeps slash commands joined in rendered prose without changing paths or inline code', () => {
     let tree: any;
