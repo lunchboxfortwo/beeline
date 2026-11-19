@@ -43,9 +43,9 @@ const you = {
     update: { enabled: false, busy: false, message: null, label: 'Check', check: () => undefined, version: 'test' },
 } as unknown as You;
 
-function render() {
+function render(props: You = you) {
     let tree: ReturnType<typeof create>;
-    act(() => { tree = create(React.createElement(YouSettings, { you })); });
+    act(() => { tree = create(React.createElement(YouSettings, { you: props })); });
     return tree!;
 }
 
@@ -70,5 +70,17 @@ describe('Color set radios', () => {
         expect(tree.root.findByProps({ 'aria-label': 'Color set' }).props.value).toBe('brass');
         expect(item(tree, 'palette-brass').props.theme).toBe('brand');
         expect(item(tree, 'palette-stone').props.theme).toBeUndefined();
+    });
+});
+
+describe('Push failure row', () => {
+    const failing = (retryable: boolean) => ({
+        ...you, push: { ...you.push, failure: 'notification permission not granted', retryable },
+    }) as unknown as You;
+
+    // W18: a permission the browser will not ask for again cannot be retried.
+    it('offers Retry notifications only while the failure can be retried', () => {
+        expect(render(failing(true)).root.findAllByProps({ testID: 'push-retry-registration' })).not.toHaveLength(0);
+        expect(render(failing(false)).root.findAllByProps({ testID: 'push-retry-registration' })).toHaveLength(0);
     });
 });

@@ -88,6 +88,8 @@ const roomIdsFromFilters = (filters: SurfaceFilters) =>
       .filter(Boolean),
   );
 const isOpen = (socket: WebSocket | undefined): socket is WebSocket & { readyState: 1 } => socket?.readyState === 1;
+/** Pause between socket admissions while the outage banner shows in the foreground. */
+const OUTAGE_RECONNECT_MS = 5_000;
 
 /** The production native/browser host supplies online events without probes. */
 export function subscribeNetworkOnline(online: () => void): () => void {
@@ -123,6 +125,7 @@ export class LiveConnection {
   private readonly paintOwners = new Map<string, Registration>();
   private recovery?: { generation: number; promise: Promise<void> };
   private recovering = false;
+  private outageRetry?: ReturnType<typeof setTimeout>;
   private notificationActions = 0;
   private requestId = 0;
   private socketEpoch = 0;
@@ -260,6 +263,7 @@ export class LiveConnection {
         setConnectionFailure(failed);
         if (recovered && isOpen(this.socket)) this.publishConnected();
       }
+      this.reconnectAfterOutage();
     }
   }
 
@@ -290,6 +294,27 @@ export class LiveConnection {
         if (this.recovery === recovery) this.recovering = false;
       });
     return recovery.promise;
+  }
+
+  /**
+   * A server outage sends no client event, so while the banner shows in the
+   * foreground the socket is admitted again after a pause. The admission is
+   * the one reconcile read; its success clears the banner and refreshes open
+   * surfaces. No HTTP probe, and no write is replayed.
+   */
+  private reconnectAfterOutage(): void {
+    if (this.outageRetry || this.disposed || !this.foreground || !connectionFailure()) return;
+    this.outageRetry = setTimeout(() => {
+      this.outageRetry = undefined;
+      if (this.disposed || !this.foreground || !connectionFailure() || this.recovering) return;
+      this.recovering = true;
+      void this.request('readWorkspaces', {}, { reconnectAttempt: true })
+        .then(() => this.refreshRoom(), () => undefined)
+        .finally(() => {
+          this.recovering = false;
+          this.reconnectAfterOutage();
+        });
+    }, OUTAGE_RECONNECT_MS);
   }
 
   // Existing update/artifact observers use this confirmed availability generation.
@@ -614,6 +639,7 @@ export class LiveConnection {
   }
   dispose(): void {
     this.disposed = true;
+    clearTimeout(this.outageRetry);
     this.identity++;
     resetConnectionFailure();
     this.dropConnection();

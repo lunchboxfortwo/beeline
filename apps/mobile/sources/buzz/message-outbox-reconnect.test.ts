@@ -138,7 +138,8 @@ it('a failed replacement opening ends recovery after that one connection attempt
   Socket.instances[1]!.drop(); await tick();
   expect(room.state(event.id)?.text).toBe('Not sent');
   await vi.advanceTimersByTimeAsync(3 * 60 * 60 * 1000);
-  expect(Socket.instances).toHaveLength(2);
+  // While the banner shows, the socket is readmitted for a read only; the send is never replayed.
+  expect(Socket.instances.slice(2).flatMap(socket => socket.requests()).some(request => request.op === 'sendRoomMessage')).toBe(false);
   expect(room.state(event.id)?.text).toBe('Not sent');
 });
 
@@ -171,11 +172,12 @@ it('a replacement opened by the Room read shares the send budget through its con
   expect(replacement.requests().filter(request => request.op === 'readWorkspaces')).toHaveLength(1);
   expect(replacement.requests().filter(request => request.op === 'sendRoomMessage')).toHaveLength(1);
   // Opening alone does not confirm recovery. A loss before the confirming
-  // answer must settle both owners without creating a third socket.
+  // answer must settle both owners without replaying the send.
   replacement.drop(); await tick();
   expect(room.state(event.id)?.text).toBe('Not sent');
   await vi.advanceTimersByTimeAsync(3 * 60 * 60 * 1000);
-  expect(Socket.instances).toHaveLength(2);
+  // While the banner shows, the socket is readmitted for a read only; the send is never replayed.
+  expect(Socket.instances.slice(2).flatMap(socket => socket.requests()).some(request => request.op === 'sendRoomMessage')).toBe(false);
   expect(room.state(event.id)?.text).toBe('Not sent');
 });
 

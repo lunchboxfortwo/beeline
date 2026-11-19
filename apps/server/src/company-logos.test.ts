@@ -48,6 +48,26 @@ describe('server company logos', () => {
     expect(a?.mime).toBe('image/png'); expect(a).toBe(b); expect(await readCompanyLogo('fresh.example')).toBe(a); expect(mocks.get).toHaveBeenCalledTimes(2);
     expect(mocks.get.mock.calls[1]?.[0].pathname).toBe('/mark.png');
   });
+  it('reads icon links from the head of a homepage larger than the read limit', async () => {
+    const png = await sharp({ create: { width: 2, height: 2, channels: 4, background: '#123456' } }).png().toBuffer();
+    response(`<link rel="icon" href="/big.png">${' '.repeat(600 * 1024)}`, 'text/html'); response(png);
+    const icon = await readCompanyLogo('large-home.example');
+    expect(icon?.mime).toBe('image/png'); expect(mocks.get.mock.calls[1]?.[0].pathname).toBe('/big.png');
+  });
+  it('decodes a Windows icon from the conventional favicon.ico', async () => {
+    // One 2x2 8-bit entry: palette [transparent, red], top row red, bottom row masked out.
+    const bmp = Buffer.alloc(40 + 256 * 4 + 2 * 4 + 2 * 4);
+    bmp.writeUInt32LE(40, 0); bmp.writeInt32LE(2, 4); bmp.writeInt32LE(4, 8); bmp.writeUInt16LE(1, 12); bmp.writeUInt16LE(8, 14);
+    bmp.writeUInt32LE(0x00ff0000, 40 + 4);
+    const pixels = 40 + 256 * 4; bmp[pixels + 4] = 1; bmp[pixels + 5] = 1; bmp[pixels + 8] = 0xc0;
+    const ico = Buffer.alloc(22); ico.writeUInt16LE(1, 2); ico.writeUInt16LE(1, 4); ico[6] = 2; ico[7] = 2;
+    ico.writeUInt32LE(bmp.length, 14); ico.writeUInt32LE(22, 18);
+    response('<html></html>', 'text/html'); response(Buffer.concat([ico, bmp]), 'image/x-icon');
+    const icon = await readCompanyLogo('ico-only.example');
+    expect(mocks.get.mock.calls[1]?.[0].pathname).toBe('/favicon.ico');
+    const { data } = await sharp(icon!.bytes).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    expect([...data]).toEqual([255, 0, 0, 255, 255, 0, 0, 255, 0, 0, 0, 0, 0, 0, 0, 0]);
+  });
   it('expires missing site icons after one minute', async () => {
     const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
     mocks.lookup.mockResolvedValue([{ address: '127.0.0.1', family: 4 }]);

@@ -717,14 +717,6 @@
       "phase": "M4"
     },
     {
-      "id": "apps/mobile/src-tauri/src/lib.rs::global-object",
-      "file": "apps/mobile/src-tauri/src/lib.rs",
-      "kind": "global-object",
-      "count": 1,
-      "compatibility": "legacy-only",
-      "phase": "M4"
-    },
-    {
       "id": "apps/server/src/apns-push.ts::import:node:http2",
       "file": "apps/server/src/apns-push.ts",
       "kind": "import:node:http2",

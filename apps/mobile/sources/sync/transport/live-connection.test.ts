@@ -138,20 +138,40 @@ describe('the one phone socket', () => {
     expect(useConnectionFailure()).toBe(false);
     expect(vi.getTimerCount()).toBe(0);
   });
-  it.each(['open', 'read'] as const)('shows one failure only when the replacement %s fails, with no third attempt', async stage => {
+  it.each(['open', 'read'] as const)('shows one failure only when the replacement %s fails, then readmits the socket while it shows', async stage => {
     const { connection } = setup();
+    const listener = vi.fn(); await connection.register([{ '#h': ['a'] }], listener);
     const read = connection.request('readRoom', { roomId: 'a' }).catch(error => error);
     (await open()).drop();
     if (stage === 'read') await open();
     await failRecovery();
     expect(await read).toBeInstanceOf(PhoneSocketDisconnectedError);
     expect(useConnectionFailure()).toBe(true);
+    expect(Socket.instances).toHaveLength(2);
+    listener.mockClear();
+    // Linux F07: the server is still down; each paused admission fails without a write or HTTP probe.
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(Socket.instances).toHaveLength(3);
+    Socket.instances[2].fail(); await tick();
+    expect(useConnectionFailure()).toBe(true); expect(listener).not.toHaveBeenCalled();
+    // The server is back: the next admission is the one reconcile read, and the banner clears.
+    await vi.advanceTimersByTimeAsync(5_000);
+    const socket = Socket.instances[3]; socket.open(); await tick();
+    expect(socket.requests().map(frame => frame.op)).toEqual(['readWorkspaces']);
+    socket.reply({ workspaces: [] }); await tick();
+    expect(useConnectionFailure()).toBe(false);
+    expect(listener).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(Socket.instances).toHaveLength(4); expect(vi.getTimerCount()).toBe(0);
+  });
+  it('stops readmitting the socket in the background', async () => {
+    const { connection } = setup();
+    const read = connection.request('readRoom', { roomId: 'a' }).catch(error => error);
+    (await open()).drop(); await failRecovery(); await read;
+    expect(useConnectionFailure()).toBe(true);
+    appState('background');
     await vi.advanceTimersByTimeAsync(90_000);
     expect(Socket.instances).toHaveLength(2);
-    expect(vi.getTimerCount()).toBe(0);
-    const next = connection.request('readRoom', { roomId: 'a' });
-    const socket = await open(); socket.reply({}); await next;
-    expect(useConnectionFailure()).toBe(false);
   });
   it('initial socket admission gets only one replacement', async () => {
     const { connection } = setup();

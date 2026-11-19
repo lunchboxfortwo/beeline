@@ -13,7 +13,7 @@ export function ConnectionStatus({ children }: { children?: React.ReactNode }) {
       {failed && (
         <YStack accessibilityLiveRegion="polite" flexShrink={0} paddingHorizontal="5" backgroundColor="raised" testID="connection-status-disconnected">
           <YStack height={insets.top} />
-          <IndexRow wrap inset="flush" title="Beeline isn’t connected" description="Try your request again."
+          <IndexRow wrap inset="flush" title="Beeline isn’t connected"
             action="Reconnect" onPress={reconnectNow} testID="connection-status-reconnect" />
         </YStack>
       )}
