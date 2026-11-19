@@ -8,7 +8,7 @@ vi.mock('expo-router', () => ({ router: { replace } }));
 vi.mock('tamagui', () => ({ YStack: 'YStack' }));
 vi.mock('@/ui/grammar', () => ({ Btn: 'Btn', T: 'T' }));
 vi.mock('@/components/buzz/BeelineMark', () => ({ BeelineMark: 'BeelineMark' }));
-import NotFound from './+not-found';
+import NotFound from '@/app/+not-found';
 
 it('W2 gives an unknown route a branded way back to chats', () => {
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
