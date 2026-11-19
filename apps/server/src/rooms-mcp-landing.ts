@@ -51,7 +51,7 @@ function installOffer(userAgent: string): string {
         ? ['Linux', 'Beeline-x86_64.AppImage']
         : null;
   const url = platform
-    ? `https://github.com/Beeline-Work/beeline/releases/latest/download/${platform[1]}`
+    ? `https://github.com/lunchboxfortwo/beeline/releases/latest/download/${platform[1]}`
     : 'https://usebeeline.app/#download';
   return `<a class="btn landing-download" href="${url}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="3" width="18" height="13" rx="1"/><path d="M8 21h8m-4-5v5"/></svg>${platform ? `Download for ${platform[0]}` : 'Download Beeline'}</a>`;
 }

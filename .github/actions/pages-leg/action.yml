@@ -1,26 +1,26 @@
 # Static marketing site only. Helper downloads are served by the Cloudflare
 # /dl/* route from public Release assets; never upload archives to Pages.
-name: Publish the static website on Pages
+name: Publish the static website on Cloudflare Pages
 description: Deploy the static website without helper download bytes
+inputs:
+  cloudflare_api_token:
+    description: Cloudflare token with Pages Edit authority
+    required: true
+  cloudflare_account_id:
+    description: Cloudflare account owning the usebeeline Pages project
+    required: true
 runs:
   using: composite
   steps:
     - name: Assemble the static website without helper downloads
       shell: bash
       run: bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/pages-leg.sh" step0
-    - uses: actions/configure-pages@v5
-    # Keep rerun artifacts distinct.
-    - uses: actions/upload-pages-artifact@v5
-      id: pages-artifact
-      with:
-        name: github-pages-${{ github.job }}-${{ github.run_attempt }}
-        path: ${{ runner.temp }}/usebeeline-pages
-        include-hidden-files: true
-    - name: Deploy Pages with one immediate retry for an empty status
+    - name: Deploy the existing usebeeline Cloudflare Pages project
       uses: actions/github-script@v7
       env:
-        PAGES_ARTIFACT_ID: ${{ steps.pages-artifact.outputs.artifact_id }}
+        CLOUDFLARE_PAGES_TOKEN: ${{ inputs.cloudflare_api_token }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ inputs.cloudflare_account_id }}
       with:
         script: |
           const { run } = await import(`${process.env.GITHUB_WORKSPACE}/packages/scripts/release-steps/pages-leg-step3.mjs`);
-          await run({ github, core, context });
+          await run({ context });

@@ -81,6 +81,7 @@ export function attribution(text) {
 
 export function missingReleaseCredentials(args, secrets, plan = {}) {
   const required = ['EXPO_TOKEN', 'EXPO_ASC_KEY_ID', 'EXPO_ASC_ISSUER_ID', 'EXPO_ASC_API_KEY_P8', 'NPM_AUTOMATION_TOKEN'];
+  if (args.channel === 'latest') required.push('CLOUDFLARE_PAGES_TOKEN', 'CLOUDFLARE_ACCOUNT_ID');
   if (args.channel === 'next') required.push('FLY_API_TOKEN', 'FLY_FREE_AGENT_IMAGE_TOKEN', 'MIGRATION_DATABASE_URL', 'SERVER_CANARY_ROOM_ID');
   if (plan.run_mobile_native === 'true' && plan.native_android === 'true') required.push('GOOGLE_PLAY_SERVICE_ACCOUNT_JSON');
   const missing = required.filter(name => !secrets[name]);
@@ -311,11 +312,6 @@ export function localHooks(directory, processes, { fullChecks = false } = {}) {
         result.outputs.trigger_epoch = String(Math.floor(Date.now() / 1000));
         return true;
       }
-      if (step.uses === './.github/actions/pages-leg') {
-        processes.log('website not released: static Pages deployment is suspended locally; web app continues');
-        appendSummary(env.GITHUB_STEP_SUMMARY, 'website not released: static Pages deployment suspended; web app released separately.');
-        return true;
-      }
       // Provisioning a hosted VM is replaced by checking already installed
       // tools. Never change squire's /usr/bin or apt packages from a release.
       if (step.run?.startsWith('sudo ln -sf')) {
@@ -482,11 +478,11 @@ export async function runLocalRelease(args, { repository = root, secrets: provid
     CLOUDFLARE_ACCOUNT_ID: secrets.CLOUDFLARE_ACCOUNT_ID || '', BEELINE_HELPER_SENTRY_DSN: secrets.BEELINE_HELPER_SENTRY_DSN || '', BEELINE_MOBILE_SENTRY_DSN: secrets.BEELINE_MOBILE_SENTRY_DSN || '' };
   const engine = new LocalActions({ root, directory, secrets, variables, processes, github: localGithub, hooks: localHooks(directory, processes, { fullChecks: args.leg === 'release_checks' }) });
   engine.inspect(WORKFLOW);
-  const context = { github: { repository: 'Beeline-Work/beeline', sha, run_id: String(Math.floor(Date.now() / 1000)), run_attempt: '1', event_name: 'workflow_dispatch', event: {}, actor: 'local-release', token: secrets.GITHUB_TOKEN || secrets.GH_TOKEN || '' }, runner: {}, job: { status: 'success' } };
+  const context = { github: { repository: 'lunchboxfortwo/beeline', sha, run_id: String(Math.floor(Date.now() / 1000)), run_attempt: '1', event_name: 'workflow_dispatch', event: {}, actor: 'local-release', token: secrets.GITHUB_TOKEN || secrets.GH_TOKEN || '' }, runner: {}, job: { status: 'success' } };
   if (args.mode === 'plan') {
     console.log(`Local ${args.channel} release at ${sha}; no release commands executed.`);
     console.log(JSON.stringify(releasePlan(engine.read(WORKFLOW), engine.read(checksWorkflow), args), null, 2));
-    console.log('website not released: static Pages is suspended; selected web app leg still runs.');
+    console.log('Selected website delivery publishes static assets to Cloudflare Pages and deploys the EAS web app.');
     console.log(`Mac helper mode: ${variables.macHelperMode}; Intel builds on MacBook, ARM carry retains its recorded identity. Desktop mode: ${variables.desktopMode}; builds use MacBook, squire and the Windows VM; carry retains the entire published version.`);
     console.log(`iOS store builds use SSH on ${MAC}. Canary, helper update proof, optional device proof, rollback and finalization stay enabled. ${args.channel === 'latest' ? 'Promotion reuses the successful next verdict; no checks run.' : 'Quick checks run before next delivery.'}`);
     return;
@@ -498,7 +494,6 @@ export async function runLocalRelease(args, { repository = root, secrets: provid
     await releaseChecks(engine, context);
     return;
   }
-  console.log('website not released: static Pages suspended; the selected EAS web app still runs.');
   console.log(`Local desktop policy: ${variables.desktopMode}; installer publication remains in the latest release finalization.`);
   attribution(args['dispatched-by']);
   if (!args['release-sha']) throw new Error('--execute requires an explicit immutable --release-sha');
@@ -521,7 +516,7 @@ export async function runLocalRelease(args, { repository = root, secrets: provid
   const cancel = () => { engine.cancelled = true; engine.abortController.abort(); processes.cancel(); };
   process.once('SIGINT', cancel); process.once('SIGTERM', cancel);
   try {
-    const response = await fetch('https://api.github.com/repos/Beeline-Work/beeline/actions/workflows/unified-release.yml/runs?per_page=100', { headers: { Authorization: `Bearer ${context.github.token}` }, signal: AbortSignal.timeout(30_000) });
+    const response = await fetch('https://api.github.com/repos/lunchboxfortwo/beeline/actions/workflows/unified-release.yml/runs?per_page=100', { headers: { Authorization: `Bearer ${context.github.token}` }, signal: AbortSignal.timeout(30_000) });
     if (!response.ok) throw new Error(`Cannot verify hosted release inactivity (HTTP ${response.status})`);
     const runs = await response.json();
     if (runs.workflow_runs.some(run => run.status !== 'completed')) throw new Error('A hosted production release is queued or active');
@@ -529,7 +524,7 @@ export async function runLocalRelease(args, { repository = root, secrets: provid
     const results = await engine.workflow(WORKFLOW, inputs, context);
     if (results.release_result?.outputs.outcome !== 'success' || results.release_validation?.result !== 'success') throw new Error(`Release failed; inspect private results under ${directory}`);
     console.log(`Local release completed; private results: ${directory}`);
-    console.log('website not released: static Pages suspended. Platform carry details are in the release record.');
+    console.log('Platform carry and website delivery details are in the release record.');
   } finally {
     process.removeListener('SIGINT', cancel); process.removeListener('SIGTERM', cancel);
   }

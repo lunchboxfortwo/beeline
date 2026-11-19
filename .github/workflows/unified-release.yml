@@ -842,9 +842,6 @@ jobs:
     permissions:
       actions: read
       contents: read
-      pages: write
-      id-token: write
-    environment: github-pages
     concurrency:
       group: usebeeline-pages
       cancel-in-progress: false
@@ -866,6 +863,9 @@ jobs:
           npm run build -w @beeline/nostr && npm run build -w @beeline/api-contract && npm run build -w @beeline/buzz-client && npm run build -w @beeline/net
       - uses: ./.github/actions/eas-cli
       - uses: ./.github/actions/pages-leg
+        with:
+          cloudflare_api_token: ${{ secrets.CLOUDFLARE_PAGES_TOKEN }}
+          cloudflare_account_id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       - uses: ./.github/actions/web-app-leg
         with:
           sentry_auth_token: ${{ secrets.SENTRY_AUTH_TOKEN }}
@@ -1456,7 +1456,7 @@ jobs:
           # is already present before clients can discover this version.
           ghr_upload_verified "$RELEASE_VERSION" "$manifest"
           ghr_publish "$RELEASE_VERSION" "$notes"
-          manifest_url='https://github.com/Beeline-Work/beeline/releases/latest/download/Beeline-latest.json'
+          manifest_url='https://github.com/lunchboxfortwo/beeline/releases/latest/download/Beeline-latest.json'
           verified=false
           for _ in {1..12}; do
             if node packages/scripts/desktop-update.mjs verify --url "$manifest_url" --expected "$manifest"; then

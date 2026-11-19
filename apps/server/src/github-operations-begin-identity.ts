@@ -549,7 +549,7 @@ import { GitHubOperations, Input, hash, challenge, record, GitHubRecord, text, i
   export async function gitHubOperationsDispatchProductionRelease(ctx: GitHubOperations, roomId: string, inputs: Record<string, string>): Promise<void> {
     if (!inputs.dispatched_by) throw new Error('Production release requires an agent identity');
     const target = await ctx.roomAnchorTarget(roomId);
-    if (target.repository.toLowerCase() !== 'beeline-work/beeline' || target.defaultBranch !== 'main')
+    if (target.repository.toLowerCase() !== 'lunchboxfortwo/beeline' || target.defaultBranch !== 'main')
       throw new Error('Production release requires Beeline main');
     await ctx.app.dispatchProductionWorkflow(target.token, target.repository, inputs);
   }

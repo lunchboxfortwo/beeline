@@ -3,7 +3,7 @@ import test from 'node:test';
 import { createHash, generateKeyPairSync } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync, chmodSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:http';
 import { parse } from 'yaml';
@@ -13,6 +13,9 @@ import { latestPublished, assignReleaseVersion, compareVersions, versionedReleas
 import { pagesChannelTag, publishPagesChannel, downloadPagesChannel } from './pages-channel.mjs';
 import { buildPagesSite } from './pages-site.mjs';
 import { deployPages } from './deploy-pages.mjs';
+import { LocalActions } from './release-local-actions.mjs';
+import { localHooks } from './release-local.mjs';
+import { Processes } from './release-local-process.mjs';
 import { readStores } from './read-store-runtimes.mjs';
 import { readPlayRuntime, runtimeFromApkDump, easBuildInventory } from './store-build-runtime.mjs';
 import { androidReleaseProfile } from './android-release-channel.mjs';
@@ -21,97 +24,28 @@ import { playLiveBuilds } from '../../apps/mobile/scripts/store-runtime-targets.
 import { prepareWebSourcemaps } from '../../apps/mobile/scripts/prepare-web-sourcemaps.mjs';
 import { condition } from './release-local-expressions.mjs';
 
-test('Reproduction 24: empty Pages status retries once immediately, then fails and cancels', async () => {
-  for (const recovered of [false, true]) {
-    const calls = [];
-    let reads = 0;
-    const proof = deployPages({
-      github: { request: async (route, args) => {
-        calls.push(route);
-        assert.equal(args.request.timeout, 30000);
-        if (route.endsWith('/cancel')) return {};
-        if (route.startsWith('POST')) return { data: { id: '123' } };
-        reads++;
-        return { data: recovered && reads === 2 ? { status: 'succeed' } : {} };
-      } }, repo: { owner: 'test', repo: 'test' }, artifactId: 1, sha: 'head', idToken: 'test',
-      wait: async () => assert.fail('Empty status must retry without waiting'),
-    });
-    if (recovered) await proof;
-    else await assert.rejects(proof, /empty status after one retry/);
-    assert.equal(reads, 2);
-    assert.equal(calls.filter(route => route.endsWith('/cancel')).length, recovered ? 0 : 1);
+test('Cloudflare Pages publishes the exact release to production without GitHub Pages artifacts or OIDC', async () => {
+  const options = { directory: '/tmp/static-site', sha: 'a'.repeat(40), token: 'fixture-token', accountId: 'b'.repeat(32) };
+  const calls = [];
+  const execute = async (command, args, config) => { calls.push({ command, args, config }); return {}; };
+  await deployPages({ ...options, execute });
+  assert.equal(calls.length, 1);
+  const { command, args, config } = calls[0];
+  assert.equal(command, 'npx');
+  assert.ok(args.includes('--project-name=usebeeline'));
+  assert.ok(args.includes('--branch=main'));
+  assert.ok(args.includes(`--commit-hash=${options.sha}`));
+  assert.ok(args.includes(options.directory));
+  assert.equal(args.some(arg => arg.includes(options.token)), false);
+  assert.equal(config.env.CLOUDFLARE_API_TOKEN, options.token);
+  assert.equal(config.env.CLOUDFLARE_ACCOUNT_ID, options.accountId);
+  for (const [key, value, error] of [['token', '', /CLOUDFLARE_PAGES_TOKEN/],
+    ['accountId', '', /CLOUDFLARE_ACCOUNT_ID/], ['sha', 'main', /exact release commit/]]) {
+    await assert.rejects(deployPages({ ...options, [key]: value, execute }), error);
   }
+  assert.equal(calls.length, 1, 'invalid configuration never starts publication');
+  await assert.rejects(deployPages({ ...options, execute: async () => { throw new Error('Cloudflare upload failed'); } }), /Cloudflare upload failed/);
 });
-
-test('Reproduction publish-wait-1 diagnostic stand-in: timeout records deployment and last status before cancel', async () => {
-  // Preserve the timeout diagnostic independently of the stalled-host replay below.
-  const events = [];
-  let elapsed = 0;
-  let reads = 0;
-  await assert.rejects(deployPages({
-    github: { request: async (route) => {
-      if (route.endsWith('/cancel')) { events.push('cancel'); return {}; }
-      if (route.startsWith('POST')) return { data: { id: 'publish-wait-fixture' } };
-      reads++;
-      if (reads === 1) return { data: { status: 'deploying' } };
-      throw new Error('temporary upstream error');
-    } },
-    repo: { owner: 'test', repo: 'test' }, artifactId: 1, sha: 'head', idToken: 'test',
-    now: () => elapsed,
-    wait: async () => { elapsed += 300000; },
-    log: message => events.push(message),
-  }), /Pages deployment timed out.*publish-wait-fixture.*deploying/);
-  assert.match(events[0], /publish-wait-fixture/);
-  assert.match(events.at(-2), /publish-wait-fixture.*deploying/);
-  assert.equal(events.at(-1), 'cancel');
-});
-
-// GitHub deployment history uses in_progress/success; Pages reports deploying/succeed.
-// Replay the preserved timing with both vocabularies at the actual wait boundary.
-for (const activeStatus of ['in_progress', 'deploying']) {
-  for (const outcome of ['healthy', 'retry succeeds', 'retry stalls']) {
-    test(`Reproduction publish-wait-1: ${activeStatus}, ${outcome}`, async () => {
-      let elapsed = 0;
-      let createdAt = 0;
-      let deployments = 0;
-      const cancelled = [];
-      const cancelTimes = [];
-      const logs = [];
-      const payloads = [];
-      const ids = outcome === 'healthy' ? ['7671253449'] : ['7670937024', '7671253449'];
-      const proof = deployPages({
-        github: { request: async (route, args) => {
-          if (route.endsWith('/cancel')) { cancelled.push(route); cancelTimes.push(elapsed - createdAt); return {}; }
-          if (route.startsWith('POST')) {
-            payloads.push([args.artifact_id, args.pages_build_version, args.oidc_token]);
-            createdAt = elapsed;
-            return { data: { id: ids[deployments++] } };
-          }
-          assert.ok(route.endsWith(`/${ids[deployments - 1]}`));
-          const age = elapsed - createdAt;
-          const healthy = outcome === 'healthy' || (deployments === 2 && outcome === 'retry succeeds');
-          const status = age === 0 ? 'waiting' : age === 5000 ? 'queued'
-            : healthy && age >= 215000 ? 'succeed' : activeStatus;
-          return { data: { status } };
-        } },
-        repo: { owner: 'test', repo: 'test' }, artifactId: 42, sha: 'same-head', idToken: 'test',
-        now: () => elapsed, wait: async ms => { elapsed += ms; }, log: line => logs.push(line),
-      });
-      if (outcome === 'retry stalls') {
-        await assert.rejects(proof, /stalled.*7671253449.*last status=/);
-        assert.ok(logs.some(line => line.includes('7671253449') && line.includes(`last status="${activeStatus}"`)));
-      } else {
-        assert.equal((await proof).id, ids[outcome === 'healthy' ? 0 : 1]);
-      }
-      assert.ok(cancelTimes.every(ms => ms === 490000));
-      assert.equal(deployments, outcome === 'healthy' ? 1 : 2);
-      assert.deepEqual(payloads, Array(deployments).fill([42, 'same-head', 'test']));
-      assert.deepEqual(cancelled, ids.slice(0, outcome === 'healthy' ? 0 : outcome === 'retry succeeds' ? 1 : 2)
-        .map(id => `POST /repos/{owner}/{repo}/pages/deployments/${id}/cancel`));
-      if (outcome !== 'healthy') assert.match(logs.join('\n'), /7670937024.*last status=/);
-    });
-  }
-}
 
 const sha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 // Unit fixture identities must work in CI's single-commit checkout.
@@ -870,3 +804,44 @@ test('release identity reads one page even when that page is full', () => {
   assert.equal(page.length, 100);
   assert.equal(releaseStartRestCallCount(), 4);
 });
+
+test('the local runner executes the real static-site composite and propagates Cloudflare failure', () => fixture(async directory => {
+  const root = resolve(import.meta.dirname, '../..');
+  const bin = join(directory, 'bin'); mkdirSync(bin);
+  const capture = join(directory, 'upload.json');
+  const stub = join(bin, 'npx');
+  writeFileSync(stub, `#!/usr/bin/env node
+require('node:fs').writeFileSync(${JSON.stringify(capture)}, JSON.stringify({
+  args: process.argv.slice(2), token: process.env.CLOUDFLARE_API_TOKEN,
+  accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+}));
+`);
+  chmodSync(stub, 0o700);
+  const secrets = { CLOUDFLARE_PAGES_TOKEN: 'fixture-token' };
+  const logs = [];
+  const processes = new Processes(secrets, line => logs.push(line));
+  const engine = new LocalActions({ root, directory, secrets, processes,
+    github: () => ({ request: () => { throw new Error('Website must not call GitHub Pages'); } }),
+    hooks: localHooks(directory, processes) });
+  const context = { github: { repository: 'lunchboxfortwo/beeline', sha, job: 'website' },
+    runner: { temp: directory }, deadline: Date.now() + 60000,
+    job: { status: 'success' }, secrets, vars: { CLOUDFLARE_ACCOUNT_ID: 'b'.repeat(32) },
+    inputs: {}, steps: {}, env: { PATH: `${bin}:${process.env.PATH}`, HOME: directory,
+      GITHUB_WORKSPACE: root, RUNNER_TEMP: directory, GITHUB_STEP_SUMMARY: join(directory, 'summary.md') } };
+  const steps = [{ uses: './.github/actions/pages-leg', with: {
+    cloudflare_api_token: '${{ secrets.CLOUDFLARE_PAGES_TOKEN }}',
+    cloudflare_account_id: '${{ vars.CLOUDFLARE_ACCOUNT_ID }}' } }];
+  await engine.steps(steps, context);
+  assert.equal(context.job.status, 'success', logs.join('\n'));
+  const upload = JSON.parse(readFileSync(capture));
+  assert.equal(upload.token, secrets.CLOUDFLARE_PAGES_TOKEN);
+  assert.equal(upload.accountId, context.vars.CLOUDFLARE_ACCOUNT_ID);
+  assert.ok(upload.args.includes(`--commit-hash=${sha}`));
+  assert.ok(upload.args.includes('--branch=main'));
+  const site = join(directory, 'usebeeline-pages');
+  assert.equal(readFileSync(join(site, 'index.html'), 'utf8'), readFileSync(join(root, 'apps/site/index.html'), 'utf8'));
+  assert.throws(() => readFileSync(join(site, 'dl/manifest.json')), /ENOENT/);
+  writeFileSync(stub, '#!/bin/sh\nexit 17\n');
+  await engine.steps(steps, context);
+  assert.equal(context.job.status, 'failure');
+}));

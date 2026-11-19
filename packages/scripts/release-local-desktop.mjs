@@ -45,7 +45,7 @@ export function stageDesktopSet({ directories, directory, version, releaseVersio
   const required = ['Beeline-universal.dmg', 'Beeline-universal.app.tar.gz', 'Beeline-x86_64.AppImage', 'Beeline-x86_64.deb', 'Beeline-x86_64.rpm', 'Beeline-x86_64-setup.exe', 'Beeline-x86_64.msi'];
   for (const name of required) if (!existsSync(join(directory, name))) throw new Error(`Incomplete desktop set: ${name}`);
   for (const name of ['Beeline-universal.app.tar.gz', 'Beeline-x86_64.AppImage', 'Beeline-x86_64-setup.exe']) verifyUpdaterFile(join(directory, name), publicKey);
-  const manifest = createDesktopUpdateManifest({ directory, version, releaseTag: releaseVersion, repository: 'Beeline-Work/beeline', publishedAt: new Date().toISOString() });
+  const manifest = createDesktopUpdateManifest({ directory, version, releaseTag: releaseVersion, repository: 'lunchboxfortwo/beeline', publishedAt: new Date().toISOString() });
   privateWrite(join(directory, 'Beeline-latest.json'), JSON.stringify(manifest, null, 2) + '\n');
   privateWrite(join(directory, 'desktop-stage.json'), JSON.stringify({ sha, desktopVersion: version, releaseVersion, directory,
     files: required.map(name => ({ name, sha256: createHash('sha256').update(readFileSync(join(directory, name))).digest('hex') })), updaterSignaturesVerified: true }, null, 2));

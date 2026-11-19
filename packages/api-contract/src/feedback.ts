@@ -27,7 +27,7 @@ export const FEEDBACK_FIXED_TITLE_MAX_LENGTH = 120;
 /** Items one `notify_feedback_fixed` call may resolve. */
 export const FEEDBACK_FIXED_ITEMS_MAX = 50;
 /** Where fix pull requests land; a Fixed DM links only to a pull request here. */
-export const FEEDBACK_DEFAULT_REPOSITORY = 'Beeline-Work/beeline';
+export const FEEDBACK_DEFAULT_REPOSITORY = 'lunchboxfortwo/beeline';
 
 export type ReportFeedbackInput = {
   readonly roomId: string;

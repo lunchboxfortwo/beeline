@@ -22,7 +22,7 @@ plus every pull request an earlier run left in `unnotifiedPullRequests`. Their b
 carry a `Feedback items:` line, for example:
 
 ```
-gh pr list --repo Beeline-Work/beeline --state merged --search '"Feedback items:" in:body' --json number,title,url,body,mergedAt
+gh pr list --repo lunchboxfortwo/beeline --state merged --search '"Feedback items:" in:body' --json number,title,url,body,mergedAt
 ```
 
 For each one, call `report_feedback(action:fixed)` with the item ids from that line, a short

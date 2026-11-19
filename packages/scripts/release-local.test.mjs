@@ -159,6 +159,10 @@ test('local preflight requires user GitHub authority instead of App credentials'
   assert.equal(missing.includes('BEELINE_GITHUB_APP_ID'), false);
   assert.equal(missing.includes('BEELINE_GITHUB_APP_PRIVATE_KEY'), false);
   assert.equal(missing.includes('GITHUB_TOKEN or GH_TOKEN'), true);
+  const latest = missingReleaseCredentials({ channel: 'latest' }, {});
+  assert.equal(latest.includes('CLOUDFLARE_PAGES_TOKEN'), true);
+  assert.equal(latest.includes('CLOUDFLARE_ACCOUNT_ID'), true);
+  assert.equal(missing.includes('CLOUDFLARE_PAGES_TOKEN'), false);
   const policy = localHooks(tmpdir(), new Processes({}, () => {}));
   await assert.rejects(policy.step({ step: { id: 'app_token' }, context: { github: { job: 'initialize' } }, result: { outputs: {} } }), /requires GITHUB_TOKEN or GH_TOKEN/);
 });
@@ -976,7 +980,7 @@ for (const [platform, otherPlatform, carryKey] of [
 test('default CLI plan never requires secrets or starts release commands', () => {
   const output = execFileSync(process.execPath, ['packages/scripts/release-local.mjs', '--plan'], { cwd: repository, encoding: 'utf8' });
   assert.match(output, /no release commands executed/);
-  assert.match(output, /website not released/);
+  assert.match(output, /static assets to Cloudflare Pages/);
   assert.match(output, /Intel helper built on MacBook; ARM helper carried with its recorded identity/);
   assert.match(output, /complete native signed updater set, including Windows, built from the promoted commit/);
   const carried = execFileSync(process.execPath, ['packages/scripts/release-local.mjs', '--plan', '--desktop-mode', 'carry', '--mac-helpers', 'carry'], { cwd: repository, encoding: 'utf8' });

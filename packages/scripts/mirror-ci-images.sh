@@ -12,18 +12,18 @@ mirror() {
   # anonymous CI runners. The digest check below keeps this fallback exact.
   if ! skopeo copy --all --preserve-digests \
     "docker://docker.io/$source@$digest" \
-    "docker://ghcr.io/beeline-work/$destination"; then
+    "docker://ghcr.io/lunchboxfortwo/$destination"; then
     skopeo copy --all --preserve-digests \
       "docker://mirror.gcr.io/$source@$digest" \
-      "docker://ghcr.io/beeline-work/$destination"
+      "docker://ghcr.io/lunchboxfortwo/$destination"
   fi
   local mirrored_digest
-  mirrored_digest="sha256:$(skopeo inspect --raw "docker://ghcr.io/beeline-work/$destination" | sha256sum | cut -d' ' -f1)"
+  mirrored_digest="sha256:$(skopeo inspect --raw "docker://ghcr.io/lunchboxfortwo/$destination" | sha256sum | cut -d' ' -f1)"
   test "$mirrored_digest" = "$digest" || {
     echo "Mirror digest differs: $destination is $mirrored_digest, expected $digest" >&2
     return 1
   }
-  echo "Mirrored $source@$digest to ghcr.io/beeline-work/$destination"
+  echo "Mirrored $source@$digest to ghcr.io/lunchboxfortwo/$destination"
 }
 
 mirror library/node ci-node:22-bookworm-slim \

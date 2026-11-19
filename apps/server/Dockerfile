@@ -1,4 +1,4 @@
-FROM ghcr.io/beeline-work/ci-node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392 AS build
+FROM ghcr.io/lunchboxfortwo/ci-node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392 AS build
 WORKDIR /app
 
 COPY package.json package-lock.json ./
@@ -29,7 +29,7 @@ RUN npm run build -w @beeline/nostr \
   && npm run build -w @beeline/auth \
   && npm run build -w @beeline/server
 
-FROM ghcr.io/beeline-work/ci-node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392 AS runtime
+FROM ghcr.io/lunchboxfortwo/ci-node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392 AS runtime
 # rtc-node's Rust/rustls signaling uses the OS trust store, not Node's bundled roots.
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
   && test -s /etc/ssl/certs/ca-certificates.crt \

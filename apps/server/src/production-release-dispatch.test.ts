@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { migrate } from './database.js';
 import { PgliteDatabase } from './test-support.js';
+import { gitHubOperationsDispatchProductionRelease } from './github-operations-begin-identity.js';
+import type { GitHubOperations } from './github-operations.js';
 import { productionReleaseDispatch } from './production-release-dispatch.js';
 import * as Sentry from '@sentry/node';
 import { captureServerError } from './sentry.js';
@@ -336,4 +338,19 @@ it('release channels: preserves explicit latest only for owners and defaults ord
   } finally {
     await db.query(`UPDATE memberships SET role='owner' WHERE identity_id=$1`, [human]);
   }
+});
+
+it('dispatches production releases only for canonical Beeline main', async () => {
+  const dispatch = vi.fn(async () => {});
+  const target = { repository: 'Lunchboxfortwo/Beeline', defaultBranch: 'main', token: 'fixture' };
+  const ctx = { roomAnchorTarget: async () => target, app: { dispatchProductionWorkflow: dispatch } } as unknown as GitHubOperations;
+  const inputs = { dispatched_by: 'human-authorized-agent' };
+  await gitHubOperationsDispatchProductionRelease(ctx, room, inputs);
+  expect(dispatch).toHaveBeenCalledWith('fixture', target.repository, inputs);
+  dispatch.mockClear();
+  target.repository = 'Beeline-Work/beeline';
+  await expect(gitHubOperationsDispatchProductionRelease(ctx, room, inputs)).rejects.toThrow('Beeline main');
+  target.repository = 'lunchboxfortwo/beeline'; target.defaultBranch = 'feature';
+  await expect(gitHubOperationsDispatchProductionRelease(ctx, room, inputs)).rejects.toThrow('Beeline main');
+  expect(dispatch).not.toHaveBeenCalled();
 });

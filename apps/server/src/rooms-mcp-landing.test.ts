@@ -128,9 +128,9 @@ describe('Device install offers and safe landing text', () => {
     ['iPhone', 'apps.apple.com'],
     ['Macintosh Mobile/15 Safari', 'apps.apple.com'],
     ['Android', 'play.google.com'],
-    ['Macintosh', 'Beeline-universal.dmg'],
-    ['Windows NT', 'Beeline-x86_64-setup.exe'],
-    ['X11 Linux', 'Beeline-x86_64.AppImage'],
+    ['Macintosh', 'https://github.com/lunchboxfortwo/beeline/releases/latest/download/Beeline-universal.dmg'],
+    ['Windows NT', 'https://github.com/lunchboxfortwo/beeline/releases/latest/download/Beeline-x86_64-setup.exe'],
+    ['X11 Linux', 'https://github.com/lunchboxfortwo/beeline/releases/latest/download/Beeline-x86_64.AppImage'],
     ['', 'https://usebeeline.app/#download'],
   ])('offers the right destination for %s', (ua, destination) => {
     const html = renderMcpWorkspaceLanding(landing, ua);
