@@ -119,7 +119,7 @@ describe('corner lifecycle recorded event sequences', () => {
       expect((await rootFixture.db.query('SELECT room_id FROM messages WHERE id=$1', [ask.messageId])).rows[0]!.room_id)
         .toBe(cornerId);
       await advanceCorner(rootFixture.db, cornerId, { kind: 'reconcile' });
-      expect(await machine(cornerId)).toMatchObject({ state: 'waiting', reason: 'user_action' });
+      expect(await machine(cornerId)).toMatchObject({ state: 'working' });
       await terminalResult(repair!, 'Awaiting the owner host approval to capture phone screenshots.');
       await advanceCorner(rootFixture.db, cornerId, { kind: 'reconcile' });
       expect(await machine(cornerId)).toMatchObject({ state: 'waiting', reason: 'user_action' });

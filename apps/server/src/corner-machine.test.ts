@@ -73,7 +73,7 @@ describe('corner transition table', () => {
     ).toEqual([]);
   });
   it.each(['question', 'approve', 'connect'] as const)(
-    'an explicit %s wait stays visible during worker, reviewer and CI activity',
+    'an explicit %s wait returns after the worker ends, including during review and CI',
     (reason) => {
       const result = run({
         ...green,
@@ -82,11 +82,18 @@ describe('corner transition table', () => {
         lifecycle: { ...green.lifecycle!, checks: 'pending' },
         blocker: { reason, itemId: 'ask' },
       });
-      expect(result.state).toMatchObject({
+      expect(result.state.state).toBe('working');
+      expect(result.notifications).toEqual([]);
+      const ended = run({
+        ...green, reviewerActive: true, turnRunning: false,
+        lifecycle: { ...green.lifecycle!, checks: 'pending' },
+        blocker: { reason, itemId: 'ask' },
+      }, observe, result.state);
+      expect(ended.state).toMatchObject({
         state: 'waiting',
         reason: reason === 'question' ? 'question' : 'user_action',
       });
-      expect(result.notifications.map((n) => n.kind)).toEqual(['waiting']);
+      expect(ended.notifications.map((n) => n.kind)).toEqual(['waiting']);
       expect(run({ ...facts, turnRunning: true }, observe, result.state).state.state).toBe(
         'working',
       );

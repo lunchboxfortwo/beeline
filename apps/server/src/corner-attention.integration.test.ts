@@ -271,6 +271,37 @@ it('Reproduction CORNER-STATE: the Room list and corner inspection agree that CI
   expect(await state()).toBe('idle');
   console.info('Demonstrated CORNER-STATE: live work is Working, pending CI is Review, failing checks alone are Idle');
 });
+it('THREAD-WORKING: an owner ask yields to a running retry and returns when it ends', async () => {
+  // The outstanding question stays unanswered when the owner tags the worker to retry.
+  await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,card_type)
+    VALUES('retry-question',$1,$2,'Which scope?','message','choice')`, [C, WORKER]);
+  await db.query(`INSERT INTO corner_owed(corner_id,message_id,person_id,created_at,blocking,answerable)
+    VALUES($1,'retry-question',$2,now(),true,false) ON CONFLICT(message_id,person_id)
+    DO UPDATE SET blocking=true,answerable=false`, [C, HUMAN]);
+  const shown = async () => ({
+    state: await state(),
+    row: (await phone.readCorners(ROOM, HUMAN))!.corners[0]!,
+    chat: (await phone.readChats(WS, HUMAN))!.chats.find(chat => chat.room.id === ROOM)?.openCorners?.[0],
+    deck: (await phone.liveChatCornerStatus(ROOM, HUMAN))!,
+  });
+  const before = await shown();
+  expect(before.state).toBe('waiting');
+  expect(before.row).toMatchObject({ state: 'waiting', blocker: { personId: HUMAN } });
+  await turn();
+  const during = await shown();
+  expect(during.state).toBe('working');
+  expect(during.row.state).toBe('working');
+  expect(during.row.blocker).toBeUndefined();
+  expect(during.chat?.state).toBe('working');
+  expect(during.deck.waitingCornerCount).toBe(0);
+  await end();
+  const after = await shown();
+  expect(after.state).toBe('waiting');
+  expect(after.row).toMatchObject({ state: 'waiting', blocker: before.row.blocker, itemId: before.row.itemId });
+  expect(after.chat?.state).toBe('waiting');
+  expect(after.deck.waitingCornerCount).toBe(1);
+});
+
 it.each(['pending', 'unreported'] as const)(
   'Reproduction R1: a lone human merge hold shows review during %s checks and waits once they pass',
   async (checks) => {

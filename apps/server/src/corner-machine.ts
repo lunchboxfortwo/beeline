@@ -166,8 +166,8 @@ export function transitionCorner(
       'merge-refused',
       `refused:${event.headSha}:${event.reason}:${event.confirmedUnmerged ? f.checkSourceId : ''}`,
     );
-  // Explicit waits remain visible even while CI or a receipt is running. Red
-  // and green facts still retain their existing admission through that wait.
+  // Explicit waits remain visible during CI, but a running worker owns Working.
+  // Red and green facts retain their existing admission through the wait.
   const review = f.reviewEnded;
   const exhausted = (review?.emptyCount ?? 0) >= 1;
   if (
@@ -219,6 +219,7 @@ export function transitionCorner(
   let state: CornerMachine;
   if (
     f.blocker &&
+    !f.turnRunning &&
     (f.blocker.blocker?.kind !== 'merge-hold' ||
       (!f.turnRunning && !f.reviewerActive && !checksUnderway && !wakes.some((w) => w.kind === 'review')))
   ) {

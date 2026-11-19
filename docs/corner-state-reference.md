@@ -11,8 +11,9 @@ The machine persists one state on `corner_facts.machine`:
 - **Review:** checks are underway (`checks`), or the configured reviewer owns the
   current head (`reviewer`). The corner override wins over the parent Room reviewer.
 - **Waiting:** an explicit blocker, user action or question needs an answer. These
-  waits remain visible during work and CI. A merge hold vetoes landing while work
-  continues; it becomes Waiting when it is all that remains.
+  waits remain visible during CI. A running worker takes precedence; the wait
+  returns when the turn ends if its blocker is still open. A merge hold vetoes
+  landing while work continues; it becomes Waiting when it is all that remains.
 - **Idle:** no implementing, review or waiting work remains.
 - **Archived:** terminal after authorized closure or a confirmed merge. A locked
   standing corner remains active after a merge.

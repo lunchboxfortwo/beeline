@@ -78,8 +78,9 @@ it.each(['blocked', 'needs_decision'] as const)('WORKER-BLOCK: real %s report su
   await daemon.execute('report', { ...turn, status, text: 'The router-login secrets are missing.' }, WORKER);
   expect(await state()).toBe('waiting');
   expect((await db.query("SELECT id FROM messages WHERE card_type='agent-command'")).rows).toEqual([]);
-  const next = await input(); // Commander orders the worker; a wake is not work output.
-  expect(await state()).toBe('waiting');
+  const next = await input(); // New work hides the retained blocker until this turn ends.
+  expect(await state()).toBe('working');
+  expect(await loadCornerWaiting(db, C)).toBeDefined();
   await daemon.execute('postRoomMessage', { ...next, text: 'I confirmed the decision. Still waiting on secrets.' }, WORKER);
   await reactions();
   expect(await state()).toBe('waiting');
@@ -104,8 +105,9 @@ it('WORKER-BLOCK: native ask cards replace the block and remain open through com
     options: [{ label: 'One', consequence: 'Continue' }, { label: 'Two', consequence: 'Stop' }] }, WORKER);
   await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation)
     VALUES('commander-chatter',$1,$2,'Use option one.','message'),('person-chatter',$1,$3,'Looking.','message')`, [C, COMMANDER, HUMAN]);
-  expect(await state()).toBe('waiting');
-  expect((await phone.readCorners(ROOM, HUMAN))!.corners[0]).toMatchObject({ state: 'waiting' });
+  expect(await state()).toBe('working');
+  expect(await loadCornerWaiting(db, C)).toBeDefined();
+  expect((await phone.readCorners(ROOM, HUMAN))!.corners[0]).toMatchObject({ state: 'working' });
   await phone.execute('answerChoice', { choiceId: choice.choiceId, optionId: 'A' }, HUMAN);
   await daemon.execute('postRoomMessage', { ...ask, text: 'Continuing with that choice.' }, WORKER);
   expect(await state()).toBe('working'); // The native decision queued its own continuation.
@@ -140,13 +142,15 @@ it('WORKER-BLOCK: a granted-run activity row, rather than read/think activity, l
   await daemon.execute('report', { ...await input(), status: 'blocked', text: 'Waiting for execution.' }, WORKER);
   const next = await input();
   await daemon.execute('postAgentActivity', { ...next, activity: [{ kind: 'tool', title: 'read status', operation: 'read' }] }, WORKER);
-  expect(await state()).toBe('waiting');
+  expect(await state()).toBe('working');
+  expect(await loadCornerWaiting(db, C)).toBeDefined();
   const grant = randomUUID();
   await db.query(`INSERT INTO agent_grants(id,agent_id,workspace_id,room_id,kind,target,reason,requested_by,status)
     VALUES($1,$2,$3,$4,'command','true','Proof',$5,'approved')`, [grant, WORKER, WS, ROOM, HUMAN]);
   await daemon.execute('postAgentActivity', { ...next, activity: [{ kind: 'tool',
     title: `ran true under grant ${grant} · asked by Owner`, operation: 'execute', status: 'exit 0' }] }, WORKER);
   expect(await state()).toBe('working');
+  expect(await loadCornerWaiting(db, C)).toBeUndefined();
 });
 
 it('IDLE-BUDGET: moving a PR head cannot rearm receipts after completed notices are retired', async () => {

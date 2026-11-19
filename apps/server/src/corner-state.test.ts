@@ -9,12 +9,14 @@ it.each(['landed', 'closed', 'ask_human', 'implement', 'checks', 'review'])(
     expect(deriveCornerState({ ...facts, run: { state } })).toEqual({ state: 'idle' });
   },
 );
-it('the public waiting view preserves its selection and audience during work and CI', () => {
+it('a running turn overrides waiting on the owner, then restores the same blocker', () => {
   const blocker = { reason: 'question' as const, itemId: 'report',
     blocker: { kind: 'report' as const, personId: 'commander', personName: 'Commander' } };
-  expect(deriveCornerState({ ...facts, turnRunning: true, reviewerActive: true,
-    lifecycle: { lifecycle: 'in-review', checks: 'pending' }, blocker }))
-    .toEqual({ state: 'waiting', ...blocker });
+  const waiting = { ...facts, reviewerActive: true,
+    lifecycle: { lifecycle: 'in-review' as const, checks: 'pending' as const }, blocker };
+  expect(deriveCornerState(waiting)).toEqual({ state: 'waiting', ...blocker });
+  expect(deriveCornerState({ ...waiting, turnRunning: true })).toEqual({ state: 'working' });
+  expect(deriveCornerState(waiting)).toEqual({ state: 'waiting', ...blocker });
 });
 it('the public review view omits machine phases and effect receipts', () => {
   expect(deriveCornerState({ ...facts, lifecycle: { lifecycle: 'in-review', checks: 'pending' } }))

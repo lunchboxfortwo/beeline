@@ -150,8 +150,8 @@ function scan(
                       const anyBlocker = blocker !== 'none';
                       let expected: CornerState;
                       if (closed) expected = 'archived';
-                      else if (anyBlocker && (blocker !== 'merge-hold' || !turnRunning && !reviewerActive && !pending)) expected = 'waiting';
                       else if (turnRunning) expected = 'working';
+                      else if (anyBlocker && (blocker !== 'merge-hold' || !turnRunning && !reviewerActive && !pending)) expected = 'waiting';
                       else if (reviewerActive || pending) expected = 'review';
                       else if (anyBlocker) expected = 'waiting';
                       else expected = 'idle';
