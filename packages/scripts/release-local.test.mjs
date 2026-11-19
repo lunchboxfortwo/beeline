@@ -946,7 +946,7 @@ test('default CLI plan never requires secrets or starts release commands', () =>
   assert.match(output, /no release commands executed/);
   assert.match(output, /static assets to Cloudflare Pages/);
   assert.match(output, /Intel and ARM helpers built on MacBook; ARM cross-build verified with lipo and codesign/);
-  assert.match(output, /complete native signed updater set, including Windows, built from the promoted commit/);
+  assert.match(output, /macOS and Linux signed updater set built from the promoted commit; published Windows installers carried unchanged/);
   const carried = execFileSync(process.execPath, ['packages/scripts/release-local.mjs', '--plan', '--desktop-mode', 'carry', '--mac-helpers', 'carry'], { cwd: repository, encoding: 'utf8' });
   assert.match(carried, /Apple-silicon and Intel Mac helpers carried unchanged/);
   assert.match(carried, /published signed updater set carried unchanged/);

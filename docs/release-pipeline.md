@@ -205,9 +205,19 @@ network listener.
 The existing workflow assigns the next desktop version, stages stable names,
 and publishes the complete set and manifest during latest finalization.
 `npm run release -- --no-store --desktop-mode carry` instead carries the
-complete published signed installer set and its version unchanged. Never
-advance a desktop version for a partial set. The hosted pipeline is unchanged;
-do not run hosted and local releases together.
+complete published signed installer set and its version unchanged.
+
+While `WINDOWS_DESKTOP` in `packages/scripts/release-local-desktop.mjs` is
+`skip` (since 19 Nov 2026: Chad's Windows VM is in use elsewhere), the local
+release builds macOS and Linux only and never contacts Chad. It copies the
+published Windows installers from `downloads.usebeeline.app/latest/` into the
+new release unchanged, and omits Windows from the new updater manifest. The
+manifest has one version for every OS, so a carried Windows entry would make
+Windows apps reinstall the same build on every check. Windows apps instead stay
+on their installed version until Windows builds resume. Set the constant to
+`build` to restore the complete set. Apart from this Windows skip, never advance
+a desktop version for a partial set. The hosted pipeline is unchanged; do not
+run hosted and local releases together.
 
 For an installer-only proof with no publication or channel mutation:
 
@@ -217,8 +227,9 @@ node packages/scripts/release-local.mjs --dry-run --leg desktop \
   --env-file ~/.config/beeline-release.env --state-dir /outside/repo/desktop-proof
 ```
 
-This reads the live desktop version, builds its successor on all three hosts,
-and writes installers, signatures, `Beeline-latest.json` and `desktop-stage.json`
+This reads the live desktop version, builds its successor on every enabled
+host (macOS and Linux while Windows is skipped, which carries the published
+Windows installers instead), and writes installers, signatures, `Beeline-latest.json` and `desktop-stage.json`
 under `<state-dir>/desktop-release`. It performs no GitHub or R2 uploads.
 
 Local credentials come only from `~/.config/beeline-release.env` (or an explicit

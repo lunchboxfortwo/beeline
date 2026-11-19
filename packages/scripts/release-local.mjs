@@ -14,7 +14,7 @@ import { downloadPagesChannel } from './pages-channel.mjs';
 import { checksWorkflow, checkPlan, LocalChecks } from './release-local-checks.mjs';
 import { LocalDelivery } from './release-local-delivery.mjs';
 import { droppedChecks, localWorkflow, quickChecks, releasePlan } from './release-local-policy.mjs';
-import { DesktopBuild, desktopDryRun } from './release-local-desktop.mjs';
+import { DesktopBuild, WINDOWS_DESKTOP, carryWindowsInstallers, desktopDryRun, desktopWorkflow } from './release-local-desktop.mjs';
 import { carryHelperPlatform } from './helper-carry.mjs';
 import { macSigningTools } from './release-local-desktop-worker.mjs';
 
@@ -263,7 +263,7 @@ export function localHooks(directory, processes, { fullChecks = false, checksGat
       }
       if (file === '.github/workflows/desktop.yml') {
         const delivery = engine.localDelivery || new LocalDelivery(engine);
-        return { workflow, parallel: true, job: (job, context, label, env) => delivery.run(job,
+        return { workflow: desktopWorkflow(workflow), parallel: true, job: (job, context, label, env) => delivery.run(job,
           { ...context, github: { ...context.github, job: 'desktop_build' } }, label, env) };
       }
     },
@@ -348,6 +348,15 @@ export function localHooks(directory, processes, { fullChecks = false, checksGat
         step.run = step.run.replace(/--depth(?:=|\s+)\d+\s*/g, '');
         if (/git fetch[^\n]*--shallow/.test(step.run)) throw new Error('A local release must not shallow-fetch the shared repository');
       }
+      if (step.name === 'Build the signed desktop update manifest' && WINDOWS_DESKTOP !== 'build') {
+        await carryWindowsInstallers(join(env.RUNNER_TEMP, 'desktop-release'));
+        if (!step.run.includes('--omit windows-x86_64')) {
+          const run = step.run.replace('desktop-update.mjs manifest \\', 'desktop-update.mjs manifest --omit windows-x86_64 \\');
+          if (run === step.run) throw new Error('Cannot omit Windows from the desktop updater manifest');
+          step.run = run;
+        }
+        processes.log('Windows desktop skipped: published Windows installers carried unchanged; the updater manifest omits Windows.');
+      }
       if (step.name === 'Publish the exact helper CLI package') {
         // Keep publication logic and exact smoke-tested tarball; the global
         // npm install is confined to this job's private NPM_CONFIG_PREFIX.
@@ -384,7 +393,9 @@ export function localHooks(directory, processes, { fullChecks = false, checksGat
         record.delivery.localExceptions = { staticWebsite: 'not released',
           helperArm64: engine.variables.macHelperMode === 'build' ? 'cross-built on Intel Mac; lipo and codesign verified' : 'carried unchanged',
           helperX64: engine.variables.macHelperMode === 'build' ? 'built and install-verified on Intel Mac' : 'carried unchanged',
-          desktop: engine.variables.desktopMode === 'build' ? 'native signed updater builds on MacBook, squire and Windows VM' : 'published signed updater set carried unchanged, including Windows' };
+          desktop: engine.variables.desktopMode !== 'build' ? 'published signed updater set carried unchanged, including Windows'
+            : WINDOWS_DESKTOP === 'build' ? 'native signed updater builds on MacBook, squire and Windows VM'
+              : 'native signed updater builds on MacBook and squire; Windows installers carried unchanged and omitted from the updater manifest' };
         record.delivery.localExceptions.checks = engine.variables.releaseChecks ?? (context.inputs.channel === 'latest'
           ? { retained: [], reusedFrom: 'successful next release of this commit', coverage: 'no checks run on promotion' }
           : { retained: ['build', 'typecheck', 'dead-code', 'design grammar', 'codecs'], dropped: droppedChecks(engine.read(checksWorkflow)), coverage: 'not produced by quick release checks' });
@@ -519,7 +530,7 @@ export async function runLocalRelease(args, { repository = root, secrets: provid
     console.log(`Local ${args.channel} release at ${sha}; no release commands executed.`);
     console.log(JSON.stringify(releasePlan(engine.read(WORKFLOW), engine.read(checksWorkflow), args), null, 2));
     console.log('Selected website delivery publishes static assets to Cloudflare Pages and deploys the EAS web app.');
-    console.log(`Mac helper mode: ${variables.macHelperMode}; Intel and ARM helpers build on MacBook; ARM uses lipo and codesign verification. Desktop mode: ${variables.desktopMode}; builds use MacBook, squire and the Windows VM; carry retains the entire published version.`);
+    console.log(`Mac helper mode: ${variables.macHelperMode}; Intel and ARM helpers build on MacBook; ARM uses lipo and codesign verification. Desktop mode: ${variables.desktopMode}; builds use MacBook, squire${WINDOWS_DESKTOP === 'build' ? ' and the Windows VM' : '; Windows is skipped and its published installers carried'}; carry retains the entire published version.`);
     console.log(`iOS store builds use SSH on ${MAC}. Canary, helper update proof, optional device proof, rollback and finalization stay enabled. ${args.channel === 'latest' ? 'Promotion reuses the successful next verdict; no checks run.' : 'Quick checks run before next delivery.'}`);
     return;
   }

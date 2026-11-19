@@ -5,7 +5,9 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { DesktopBuild, stageDesktopSet, verifyUpdaterFile } from './release-local-desktop.mjs';
+import { parse } from 'yaml';
+import { DesktopBuild, WINDOWS_DESKTOP, carryWindowsInstallers, stageDesktopSet, verifyUpdaterFile } from './release-local-desktop.mjs';
+import { verifyDesktopUpdateManifest } from './desktop-update.mjs';
 import { localHooks, parseArguments } from './release-local.mjs';
 import { releaseArguments, releaseSequence } from './release.mjs';
 import { LocalDelivery } from './release-local-delivery.mjs';
@@ -50,10 +52,15 @@ test('a full staged set has one desktop version, four platform entries and verif
     const names = ['Beeline-universal.dmg', 'Beeline-universal.app.tar.gz', 'Beeline-x86_64.AppImage', 'Beeline-x86_64.deb', 'Beeline-x86_64.rpm', 'Beeline-x86_64-setup.exe', 'Beeline-x86_64.msi'];
     for (const name of names) writeFileSync(join(directory, name), name);
     for (const name of [names[1], names[2], names[5]]) key.sign(join(directory, name));
-    const spec = { directories: [], directory, version: '0.2.166', releaseVersion: 'v0.1.217', sha: 'a'.repeat(40), publicKey: key.publicKey };
+    const spec = { directories: [], directory, version: '0.2.166', releaseVersion: 'v0.1.217', sha: 'a'.repeat(40), publicKey: key.publicKey, windows: 'build' };
     const manifest = stageDesktopSet(spec);
     assert.equal(manifest.version, '0.2.166');
     assert.equal(Object.keys(manifest.platforms).length, 4);
+    // A skipped Windows build keeps its carried installers but gives Windows no newer updater entry.
+    const skipped = stageDesktopSet({ ...spec, windows: 'skip' });
+    assert.deepEqual(Object.keys(skipped.platforms), ['darwin-x86_64', 'darwin-aarch64', 'linux-x86_64']);
+    assert.equal(verifyDesktopUpdateManifest(skipped, skipped), skipped);
+    assert.throws(() => verifyDesktopUpdateManifest(skipped, manifest), /differs/);
     assert.equal(manifest.platforms['darwin-aarch64'].url, manifest.platforms['darwin-x86_64'].url);
     assert.equal(JSON.parse(readFileSync(join(directory, 'desktop-stage.json'))).updaterSignaturesVerified, true);
     rmSync(join(directory, names[4]));
@@ -86,6 +93,23 @@ test('build planning preserves the workflow-assigned desktop version; carry rest
       assert.equal(result.outputs.desktop_version, mode === 'build' ? '0.2.166' : '0.2.165');
     }
   } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('a skipped Windows build carries the published installers and omits Windows from the new manifest', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'desktop-windows-carry-'));
+  const original = globalThis.fetch, requested = [];
+  globalThis.fetch = async url => { requested.push(url); return new Response(`published ${url.split('/').at(-1)}`); };
+  try {
+    const release = parse(readFileSync(join(import.meta.dirname, '../../.github/workflows/unified-release.yml'), 'utf8'));
+    const step = structuredClone(release.jobs.release_result.steps.find(candidate => candidate.name === 'Build the signed desktop update manifest'));
+    const run = step.run;
+    const hooks = localHooks(directory, { log() {} });
+    for (let attempt = 0; attempt < 2; attempt++) await hooks.step({ step, context: { github: { job: 'release_result' } }, env: { RUNNER_TEMP: directory }, result: { outputs: {} } });
+    assert.equal(step.run, run.replace('manifest \\', 'manifest --omit windows-x86_64 \\'));
+    assert.deepEqual(requested.slice(0, 3), ['Beeline-x86_64-setup.exe', 'Beeline-x86_64-setup.exe.sig', 'Beeline-x86_64.msi'].map(name => `https://downloads.usebeeline.app/latest/${name}`));
+    assert.equal(readFileSync(join(directory, 'desktop-release/Beeline-x86_64.msi'), 'utf8'), 'published Beeline-x86_64.msi');
+    await assert.rejects(carryWindowsInstallers(directory, async () => new Response('', { status: 404 })), /Beeline-x86_64-setup.exe: HTTP 404/);
+  } finally { globalThis.fetch = original; rmSync(directory, { recursive: true, force: true }); }
 });
 
 test('both Mac helper architectures share the one Mac orchestration slot', async () => {
@@ -122,12 +146,17 @@ test('SSH diagnostics cannot become part of the temporary certificate export', a
 test('the committed Desktop job runs through the shared delivery queue without rewriting its steps', async () => {
   const calls = [];
   const engine = { localDelivery: { run: async (...args) => { calls.push(args); return { result: 'success' }; } } };
-  const workflow = { jobs: { build: { steps: [{ name: 'Build the desktop bundle', run: 'workflow-owned build command' }] } } };
+  const include = ['macos-universal', 'linux-x86_64', 'windows-x86_64'].map(label => ({ label }));
+  const workflow = { jobs: { build: { strategy: { matrix: { include } }, steps: [{ name: 'Build the desktop bundle', run: 'workflow-owned build command' }] } } };
   const hooks = await localHooks('/state', {}).workflow({ file: '.github/workflows/desktop.yml', workflow, engine });
   const context = { github: { job: 'build', sha: 'a'.repeat(40) }, matrix: { label: 'macos-universal' } };
-  assert.equal(hooks.workflow, workflow);
-  await hooks.job(workflow.jobs.build, context, 'desktop/mac', { VARIANT: 'production' });
-  assert.equal(calls[0][0], workflow.jobs.build);
+  assert.equal(WINDOWS_DESKTOP, 'skip');
+  // Skipping Windows removes only its row, so the Windows VM is never contacted.
+  assert.deepEqual(hooks.workflow.jobs.build.strategy.matrix.include.map(row => row.label), ['macos-universal', 'linux-x86_64']);
+  assert.deepEqual(hooks.workflow.jobs.build.steps, workflow.jobs.build.steps);
+  assert.equal(include.length, 3);
+  await hooks.job(hooks.workflow.jobs.build, context, 'desktop/mac', { VARIANT: 'production' });
+  assert.equal(calls[0][0], hooks.workflow.jobs.build);
   assert.equal(calls[0][1].github.job, 'desktop_build');
   assert.equal(calls[0][1].matrix.label, 'macos-universal');
   assert.equal(context.github.job, 'build');

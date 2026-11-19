@@ -1,4 +1,4 @@
-// Desktop workflow adapter: native builds on the three authorized hosts, no publication.
+// Desktop workflow adapter: native builds on the authorized hosts, no publication.
 import { createHash, createPublicKey, randomBytes, verify } from 'node:crypto';
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -9,6 +9,28 @@ import { linuxDesktop } from './release-local-desktop-linux.mjs';
 import { createDesktopUpdateManifest, nextDesktopVersion } from './desktop-update.mjs';
 
 const DESKTOP_MAC = 'dani@macbook-pro-7';
+// Owner switch (19 Nov 2026): chad's Windows VM is in use elsewhere. 'skip' builds macOS and Linux only,
+// never contacts chad, and carries the published Windows installers unchanged. Set to 'build' to resume.
+export const WINDOWS_DESKTOP = 'skip';
+const WINDOWS_CARRIED = ['Beeline-x86_64-setup.exe', 'Beeline-x86_64-setup.exe.sig', 'Beeline-x86_64.msi'];
+
+export function desktopWorkflow(workflow, windows = WINDOWS_DESKTOP) {
+  if (windows === 'build') return workflow;
+  const local = structuredClone(workflow);
+  local.jobs.build.strategy.matrix.include = local.jobs.build.strategy.matrix.include.filter(row => row.label !== 'windows-x86_64');
+  return local;
+}
+
+// The updater manifest has one version for every OS and the app installs whatever it names, so a carried
+// Windows entry under a newer version would reinstall the same build on every check. Manifests built while
+// Windows is skipped omit Windows; Windows apps stay on their installed version.
+export async function carryWindowsInstallers(directory, fetchImpl = fetch) {
+  for (const name of WINDOWS_CARRIED) {
+    const response = await fetchImpl(`https://downloads.usebeeline.app/latest/${name}`, { signal: AbortSignal.timeout(10 * 60_000) });
+    if (!response.ok) throw new Error(`Published Windows installer ${name}: HTTP ${response.status}`);
+    privateWrite(join(directory, name), Buffer.from(await response.arrayBuffer()));
+  }
+}
 const root = resolve(import.meta.dirname, '../..');
 const quote = value => `'${value.replaceAll("'", "'\\''")}'`;
 const runtimeFiles = ['release-local-desktop-worker.mjs', 'release-local-actions.mjs', 'release-local-expressions.mjs', 'release-local-process.mjs', 'release-local-java.mjs'];
@@ -39,13 +61,14 @@ export function verifyUpdaterFile(file, publicKey) {
   return true;
 }
 
-export function stageDesktopSet({ directories, directory, version, releaseVersion, sha, publicKey }) {
+export function stageDesktopSet({ directories, directory, version, releaseVersion, sha, publicKey, windows = WINDOWS_DESKTOP }) {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   for (const path of directories) for (const name of readdirSync(path)) cpSync(join(path, name), join(directory, name));
   const required = ['Beeline-universal.dmg', 'Beeline-universal.app.tar.gz', 'Beeline-x86_64.AppImage', 'Beeline-x86_64.deb', 'Beeline-x86_64.rpm', 'Beeline-x86_64-setup.exe', 'Beeline-x86_64.msi'];
   for (const name of required) if (!existsSync(join(directory, name))) throw new Error(`Incomplete desktop set: ${name}`);
   for (const name of ['Beeline-universal.app.tar.gz', 'Beeline-x86_64.AppImage', 'Beeline-x86_64-setup.exe']) verifyUpdaterFile(join(directory, name), publicKey);
-  const manifest = createDesktopUpdateManifest({ directory, version, releaseTag: releaseVersion, repository: 'lunchboxfortwo/beeline', publishedAt: new Date().toISOString() });
+  const manifest = createDesktopUpdateManifest({ directory, version, releaseTag: releaseVersion, repository: 'lunchboxfortwo/beeline', publishedAt: new Date().toISOString(),
+    omit: windows === 'build' ? [] : ['windows-x86_64'] });
   privateWrite(join(directory, 'Beeline-latest.json'), JSON.stringify(manifest, null, 2) + '\n');
   privateWrite(join(directory, 'desktop-stage.json'), JSON.stringify({ sha, desktopVersion: version, releaseVersion, directory,
     files: required.map(name => ({ name, sha256: createHash('sha256').update(readFileSync(join(directory, name))).digest('hex') })), updaterSignaturesVerified: true }, null, 2));
@@ -274,7 +297,7 @@ export async function desktopDryRun(engine, context) {
   const releaseVersion = engine.variables.desktopReleaseVersion;
   if (!/^v\d+\.\d+\.\d+$/.test(releaseVersion || '')) throw new Error('Desktop proof requires --release-version vX.Y.Z');
   const inputs = { variant: 'production', release_sha: context.github.sha, release_version: releaseVersion, desktop_version: version };
-  const workflow = parse(await engine.processes.run('git', ['show', `${context.github.sha}:.github/workflows/desktop.yml`], { cwd: engine.root, env: process.env, quiet: true }));
+  const workflow = desktopWorkflow(parse(await engine.processes.run('git', ['show', `${context.github.sha}:.github/workflows/desktop.yml`], { cwd: engine.root, env: process.env, quiet: true })));
   const build = new DesktopBuild(engine), paths = [], failures = [];
   // Attempt every platform even when one host has an external blocker.
   for (const matrix of workflow.jobs.build.strategy.matrix.include) {
@@ -284,6 +307,12 @@ export async function desktopDryRun(engine, context) {
     } catch (error) { failures.push(`${matrix.label}: ${error.message}`); engine.processes.log(error.message); }
   }
   if (failures.length) throw new Error(`Desktop set incomplete: ${failures.join('; ')}`);
+  if (WINDOWS_DESKTOP !== 'build') {
+    const carried = join(engine.directory, 'desktop-windows-carried');
+    await carryWindowsInstallers(carried);
+    paths.push(carried);
+    engine.processes.log('Windows desktop skipped: published Windows installers carried unchanged; the updater manifest omits Windows.');
+  }
   const directory = join(engine.directory, 'desktop-release');
   stageDesktopSet({ directories: paths, directory, version, releaseVersion, sha: context.github.sha, publicKey: updaterCredentials(engine.secrets).TAURI_UPDATER_PUBLIC_KEY });
   engine.processes.log(`Desktop ${version} staged at ${directory}; no uploads or publication performed.`);
