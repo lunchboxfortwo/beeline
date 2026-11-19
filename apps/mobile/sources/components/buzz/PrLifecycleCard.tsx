@@ -138,14 +138,14 @@ export function RepositoryLifecycleRow({
   }
   const copy = (
     <T
-      v={isRepositoryLifecycleItem(item) ? 'body' : 'meta'}
+      v="meta"
       color="secondary"
       marginVertical={isRepositoryLifecycleItem(item) ? 0 : '1'}
       numberOfLines={2}
       ellipsizeMode="tail"
     >
-      <T v={isRepositoryLifecycleItem(item) ? 'heading' : 'metaStrong'} color={/fail/i.test(state) ? 'needsYou' : 'ink'}>{verb} </T>
-      {number && item.url ? <><T v="heading" color="needsYou" textDecorationLine="underline">#{number}</T>{' '}</> : null}
+      <T v="metaStrong" color={/fail/i.test(state) ? 'needsYou' : 'ink'}>{verb} </T>
+      {number && item.url ? <><T v="metaStrong" color="needsYou" textDecorationLine="underline">#{number}</T>{' '}</> : null}
       {item.title}
     </T>
   );
