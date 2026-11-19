@@ -29,9 +29,9 @@ test('quick local checks retain original static gates and explicitly remove suit
   const plan = releasePlan(read('unified-release.yml'), original);
   assert.equal(plan.targetSeconds, 1800);
   assert.match(plan.coverage, /no release coverage map/);
-  assert.ok(plan.checks.dropped.includes('server-suite-shard'));
-  assert.ok(plan.checks.dropped.includes('mobile-suite'));
-  assert.ok(plan.checks.dropped.includes('body-suite'));
+  assert.ok(plan.checks.retained.includes('server-suite-shard'));
+  assert.ok(plan.checks.retained.includes('mobile-suite'));
+  assert.ok(plan.checks.retained.includes('body-suite'));
 });
 
 test('local delivery preserves real dependency joins and requires the quick verdict instead of nonexistent coverage', async () => {
@@ -61,7 +61,7 @@ test('local latest promotion has no reusable Checks call or quick gates', async 
   assert.ok(Object.values(workflow.jobs).every(job => ![job.needs ?? []].flat().includes('release_checks')));
   assert.deepEqual(workflow.jobs.release_validation.steps.map(step => step.run), ['echo "Promoting the successful next commit; no checks run."']);
   const plan = releasePlan(read('unified-release.yml'), read('checks.yml'), { channel: 'latest' });
-  assert.deepEqual(plan.checks.retained, []);
+  assert.match(plan.checks.reusedFrom, /same-SHA full Checks/);
   const directory = temporary(), started = [];
   try {
     const engine = new LocalActions({ root, directory, processes: new Processes({}, () => {}) });

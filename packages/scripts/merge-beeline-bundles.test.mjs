@@ -43,7 +43,7 @@ test('both carry flags preserve published Mac bytes and identities beside a new 
   const previous = JSON.parse(readFileSync(join(mac, 'manifest.json')));
   for (const [platform, bundle] of Object.entries(previous.bundles)) {
     assert.deepEqual(manifest.bundles[platform], { ...bundle,
-      carriedFrom: { commit: oldSha, version: bundle.version, sha256: bundle.sha256 } });
+      carriedFrom: { commit: oldSha, version: bundle.version, sha256: bundle.sha256, releases: 1 } });
     for (const name of [bundle.file, `${bundle.file}.sha256`])
       assert.deepEqual(readFileSync(join(outputDir, name)), readFileSync(join(mac, name)));
   }
@@ -81,4 +81,16 @@ test('published carried Mac helpers download without either optional Mac input-h
   assert.deepEqual(await downloadPagesChannel({ github, repo: {}, directory: downloaded }), manifest);
   for (const name of names) assert.deepEqual(readFileSync(join(downloaded, name)), readFileSync(join(outputDir, name)));
   for (const name of MAC_INPUT_FILES) assert.throws(() => readFileSync(join(downloaded, name)), { code: 'ENOENT' });
+});
+
+test('merging a fourth carried platform fails before publication', async t => {
+  const { linux, mac, outputDir } = fixture(t);
+  let carried = mac;
+  for (let release = 1; release <= 3; release++) {
+    const next = `${outputDir}-${release}`;
+    const manifest = await mergeBeelineBundles({ outputDir: next, inputDirs: [linux], carriedArm64Dir: carried, carriedX64Dir: carried });
+    assert.equal(manifest.bundles['darwin-arm64'].carriedFrom.releases, release);
+    carried = next;
+  }
+  await assert.rejects(mergeBeelineBundles({ outputDir, inputDirs: [linux], carriedArm64Dir: carried, carriedX64Dir: carried }), /more than 3 releases/);
 });

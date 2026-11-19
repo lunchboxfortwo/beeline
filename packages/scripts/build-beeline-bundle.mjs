@@ -9,6 +9,7 @@ import {
   cp,
   mkdir,
   readFile,
+  readdir,
   rm,
   stat,
   writeFile,
@@ -81,7 +82,7 @@ async function executable(path) {
   }
 }
 
-export async function resolveAgentBinaries(platform, { toolsDirectory = toolsRoot } = {}) {
+export async function resolveAgentBinaries(platform, { toolsDirectory = toolsRoot, host = hostPlatform() } = {}) {
   let agent = process.env.BUZZ_AGENT_BIN ?? '';
   let mcp = process.env.BUZZ_DEV_MCP_BIN ?? '';
   if (Boolean(agent) !== Boolean(mcp)) {
@@ -91,7 +92,8 @@ export async function resolveAgentBinaries(platform, { toolsDirectory = toolsRoo
   // PATH may contain installed helper launchers, not native build outputs.
   // Only explicit cache/build overrides can bypass the pinned Cargo recipe.
   if (!agent || !mcp) {
-    if (platform !== hostPlatform()) {
+    const crossMac = host === 'darwin-x64' && platform === 'darwin-arm64';
+    if (platform !== host && !crossMac) {
       fail(
         `cross-platform ${platform} binaries must be supplied with BUZZ_AGENT_BIN and BUZZ_DEV_MCP_BIN`,
       );
@@ -121,6 +123,7 @@ export async function resolveAgentBinaries(platform, { toolsDirectory = toolsRoo
       '--manifest-path',
       resolve(upstreamRoot, 'Cargo.toml'),
       ...NATIVE_CARGO_BUILD_FLAGS,
+      ...(crossMac ? ['--target', 'aarch64-apple-darwin'] : []),
       '--target-dir',
       targetRoot,
     ]);
@@ -130,8 +133,9 @@ export async function resolveAgentBinaries(platform, { toolsDirectory = toolsRoo
       await appendFile(process.env.GITHUB_STEP_SUMMARY, `Native Cargo build: ${cargoSeconds}s (${platform}; binary cache ${process.env.BEELINE_NATIVE_CACHE_SOURCE ?? 'not-configured'})\n`)
         .catch(() => console.warn('build-beeline-bundle: timing summary unavailable'));
     }
-    agent = resolve(targetRoot, 'release', 'buzz-agent');
-    mcp = resolve(targetRoot, 'release', 'buzz-dev-mcp');
+    const release = crossMac ? resolve(targetRoot, 'aarch64-apple-darwin/release') : resolve(targetRoot, 'release');
+    agent = resolve(release, 'buzz-agent');
+    mcp = resolve(release, 'buzz-dev-mcp');
   }
 
   for (const path of [agent, mcp]) {
@@ -152,6 +156,40 @@ function assertBinaryPlatform(path, platform) {
         : description.includes('Mach-O') &&
           (description.includes('x86_64') || description.includes('universal binary'));
   if (!valid) fail(`${basename(path)} is not a ${platform} executable (${description})`);
+}
+
+// npm ci installs host-only optional packages. Fetch the locked target package
+// for a cross-build, checking the same integrity recorded by npm's lockfile.
+async function codegraphBundle(platform) {
+  const directory = resolve(repoRoot, 'node_modules/@colbymchenry', `codegraph-${platform}`);
+  if (await executable(resolve(directory, 'bin/codegraph'))) return directory;
+  const name = `@colbymchenry/codegraph-${platform}`;
+  const lock = JSON.parse(await readFile(resolve(repoRoot, 'package-lock.json'), 'utf8')).packages[`node_modules/${name}`];
+  if (!lock?.integrity?.startsWith('sha512-')) fail(`No locked CodeGraph bundle for ${platform}`);
+  await mkdir(toolsRoot, { recursive: true });
+  const packed = capture('npm', ['pack', `${name}@${lock.version}`, '--ignore-scripts', '--json', '--pack-destination', toolsRoot]);
+  const archive = resolve(toolsRoot, JSON.parse(packed)[0].filename);
+  const integrity = 'sha512-' + createHash('sha512').update(await readFile(archive)).digest('base64');
+  if (integrity !== lock.integrity) fail(`CodeGraph integrity differs for ${platform}`);
+  await mkdir(directory, { recursive: true });
+  run('tar', ['-xzf', archive, '-C', directory, '--strip-components=1']);
+  return directory;
+}
+
+export async function verifyMacBinaries(staging, platform, { execute = run, inspect = path => capture('file', ['-b', path]) } = {}) {
+  const arch = platform === 'darwin-arm64' ? 'arm64' : 'x86_64';
+  // Sign our Cargo outputs ad hoc; retain vendor signatures on packaged tools.
+  for (const binary of ['buzz-agent', 'buzz-dev-mcp'])
+    execute('codesign', ['--force', '--sign', '-', resolve(staging, 'bin', binary)]);
+  for (const entry of await readdir(staging, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    const path = resolve(entry.parentPath, entry.name);
+    const description = inspect(path);
+    if (!description) throw new Error(`Cannot inspect packaged binary ${path}`);
+    if (!description.includes('Mach-O')) continue;
+    execute('lipo', ['-verify_arch', arch, path]);
+    execute('codesign', ['--verify', '--strict', path]);
+  }
 }
 
 async function sha256(path) {
@@ -204,12 +242,7 @@ async function main() {
         JSON.stringify(previousInputs) !== JSON.stringify(currentInputs)) fail('Mac bundle inputs changed');
     run('tar', ['-C', staging, '-xzf', resolve(carryDir, bundle.file)]);
   }
-  const codegraphSource = resolve(
-    repoRoot,
-    'node_modules',
-    '@colbymchenry',
-    `codegraph-${platform}`,
-  );
+  const codegraphSource = carryDir ? undefined : await codegraphBundle(platform);
   if (!carryDir && !(await executable(resolve(codegraphSource, 'bin', 'codegraph')))) {
     fail(`CodeGraph platform bundle not installed for ${platform}: ${codegraphSource}`);
   }
@@ -402,6 +435,8 @@ async function main() {
     )}\n`,
   );
 
+  if (platform.startsWith('darwin-')) await verifyMacBinaries(staging, platform);
+
   const filename = `beeline-${platform}.tar.gz`;
   const archive = resolve(outputRoot, filename);
   await rm(archive, { force: true });
@@ -434,9 +469,8 @@ async function main() {
   // Prove the just-written artifact installs and starts from a cwd with no
   // checkout and no BEELINE_READONLY_MCP_* overrides. This keeps release bundles
   // from drifting behind the read-only boundary implemented by Body.
-  // Cross-platform builds cannot run this probe; manifest.json records the
-  // honest per-platform verification status instead of implying it, and is
-  // written only AFTER the probe so it never claims an unverified bundle.
+  // Cross-built Mac bundles have architecture/signature proof instead of an
+  // executable install probe. Record that distinction explicitly.
   let verified = false;
   if (platform === hostPlatform()) {
     run(process.execPath, [
@@ -446,12 +480,12 @@ async function main() {
     ]);
     verified = true;
   } else {
-    console.log(
-      `build-beeline-bundle: skipping executable install probe for cross-platform ${platform}`,
-    );
+    verified = platform.startsWith('darwin-');
+    console.log(`build-beeline-bundle: ${platform} verified with lipo and codesign; native install probe requires its host`);
   }
 
   manifest.bundles[platform].verified = verified;
+  manifest.bundles[platform].verification = platform === hostPlatform() ? 'installation' : 'architecture-signature';
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   if (platform.startsWith('darwin-')) {
     await writeFile(resolve(outputRoot, 'mac-helper-inputs.json'), `${JSON.stringify(macHelperInputs())}\n`);

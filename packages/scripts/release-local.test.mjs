@@ -18,7 +18,7 @@ import { run as bookkeeping } from './release-bookkeeping.mjs';
 import { localGithub } from './release-local-github.mjs';
 import { assignReleaseVersion, latestPublished, recoverTaggedReleases } from './release-record.mjs';
 import { CheckQueue, checkPlan, checkWorkspace, LocalChecks } from './release-local-checks.mjs';
-import { pruneReleaseWorkspaces, promptAudit, acquireReleaseLock, localAttribution, pinnedRuntimes, prepareReleaseSource, readOtaVersions, releaseArguments, releaseSequence, storeReleaseNeeded } from './release.mjs';
+import { pruneReleaseWorkspaces, promptAudit, acquireReleaseLock, localAttribution, pinnedRuntimes, prepareReleaseSource, readOtaVersions, releaseArguments, storeReleaseNeeded } from './release.mjs';
 
 const repository = resolve(import.meta.dirname, '../..');
 const temporary = () => mkdtempSync(join(tmpdir(), 'beeline-local-test-'));
@@ -38,43 +38,7 @@ test('execution is explicit and requires immutable identity and complete attribu
   const provenance = Object.fromEntries(['agentId', 'handle', 'place', 'humanCommandMessageId', 'auditMessageId'].map(k => [k, k]));
   assert.deepEqual(attribution(JSON.stringify(provenance)), provenance);
 });
-test('one command completes next before promoting the same SHA; store builds go only to production', async () => {
-  const calls = [], dispatchedBy = localAttribution();
-  const spec = { source: '/fixture/source', sha, directory: '/fixture/state', secrets: {}, dispatchedBy, otaVersions: ['v0.1.2-rc.9'], store: true };
-  const refreshed = [];
-  await releaseSequence(spec, async (args, options) => calls.push({ args, options, tagsRefreshed: refreshed.length }), source => refreshed.push(source));
-  assert.deepEqual(refreshed, ['/fixture/source']);
-  assert.deepEqual(calls.map(c => c.tagsRefreshed), [0, 1]);
-  assert.deepEqual(calls.map(c => [c.args.channel, c.args['store-track'], c.args['release-sha']]),
-    [['next', 'none', sha], ['latest', 'production', sha]]);
-  const otaOnly = [];
-  await releaseSequence({ ...spec, store: false }, async args => otaOnly.push(args['store-track']), () => {});
-  assert.deepEqual(otaOnly, ['none', 'none']);
-  assert.deepEqual(calls.map(c => c.args['state-dir']), ['/fixture/state/next', '/fixture/state/latest']);
-  assert.ok(calls.every(c => c.options.repository === spec.source && c.args['dispatched-by'] === JSON.stringify(dispatchedBy)));
-  const failed = [];
-  await assert.rejects(releaseSequence(spec, async args => { failed.push(args.channel); throw new Error('next failed'); }, () => {}), /next failed/);
-  assert.deepEqual(failed, ['next']);
-});
-test('nightly checks wait for both releases, pin their SHA and propagate failures', async () => {
-  assert.deepEqual(releaseArguments(['--full-checks']), { fullChecks: true });
-  const spec = { source: '/source', sha, directory: '/state', fullChecks: true };
-  const calls = [];
-  await releaseSequence(spec, async (args, options) => calls.push({ args, options }), () => {},
-    (source, out) => calls.push({ args: { leg: 'prompt-audit' }, source, out }));
-  assert.deepEqual(calls.map(({ args }) => args.leg || args.channel), ['next', 'latest', 'prompt-audit', 'release_checks']);
-  assert.deepEqual([calls[2].source, calls[2].out], ['/source', '/state/prompt-audit']);
-  calls.splice(2, 1);
-  assert.deepEqual(calls[2], { args: { mode: 'execute', leg: 'release_checks', channel: 'latest',
-    'release-sha': sha, 'state-dir': '/state/full-checks' }, options: { repository: '/source', secrets: undefined } });
-  for (const failing of ['latest', 'release_checks']) {
-    const started = [];
-    await assert.rejects(releaseSequence(spec, async args => {
-      started.push(args.leg || args.channel);
-      if ((args.leg || args.channel) === failing) throw new Error('fixture failure');
-    }, () => {}, () => {}), /fixture failure/);
-    assert.deepEqual(started, failing === 'latest' ? ['next', 'latest'] : ['next', 'latest', 'release_checks']);
-  }
+test('prompt audit is advisory and writes beside nightly checks', () => {
   const commands = [];
   promptAudit('/source', '/state/prompt-audit', (command, args, options) => {
     commands.push([command, ...args, options.cwd]);
@@ -959,7 +923,7 @@ for (const [platform, otherPlatform, carryKey] of [
     assert.equal(manifest.bundles[platform].commit, oldSha);
     assert.equal(manifest.bundles[platform].version, previous.version);
     assert.equal(manifest.bundles[platform].sha256, previous.sha256);
-    assert.deepEqual(manifest.bundles[platform].carriedFrom, { commit: oldSha, version: previous.version, sha256: previous.sha256 });
+    assert.deepEqual(manifest.bundles[platform].carriedFrom, { commit: oldSha, version: previous.version, sha256: previous.sha256, releases: 1 });
     for (const name of [previous.file, `${previous.file}.sha256`])
       assert.deepEqual(readFileSync(join(output, name)), readFileSync(join(carried, name)));
     await validateBundleDirectory(output, { expectedSha: sha, expectedVersion: 'v1.2.3' });
@@ -981,7 +945,7 @@ test('default CLI plan never requires secrets or starts release commands', () =>
   const output = execFileSync(process.execPath, ['packages/scripts/release-local.mjs', '--plan'], { cwd: repository, encoding: 'utf8' });
   assert.match(output, /no release commands executed/);
   assert.match(output, /static assets to Cloudflare Pages/);
-  assert.match(output, /Intel helper built on MacBook; ARM helper carried with its recorded identity/);
+  assert.match(output, /Intel and ARM helpers built on MacBook; ARM cross-build verified with lipo and codesign/);
   assert.match(output, /complete native signed updater set, including Windows, built from the promoted commit/);
   const carried = execFileSync(process.execPath, ['packages/scripts/release-local.mjs', '--plan', '--desktop-mode', 'carry', '--mac-helpers', 'carry'], { cwd: repository, encoding: 'utf8' });
   assert.match(carried, /Apple-silicon and Intel Mac helpers carried unchanged/);

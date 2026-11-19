@@ -67,7 +67,7 @@ test('normal full release builds desktop while the explicit carry option survive
   assert.throws(() => parseArguments(['--desktop-mode', 'partial']), /desktop-mode/);
   for (const mode of [undefined, 'carry']) {
     const calls = [];
-    await releaseSequence({ source: '/source', sha: 'a'.repeat(40), directory: '/state', desktopMode: mode }, async args => calls.push(args), () => {});
+    await releaseSequence({ source: '/source', sha: 'a'.repeat(40), directory: '/state', desktopMode: mode }, async args => { if (!args.leg) calls.push(args); }, () => {}, () => {});
     assert.deepEqual(calls.map(args => args['desktop-mode']), [mode || 'build', mode || 'build']);
   }
 });
@@ -88,12 +88,12 @@ test('build planning preserves the workflow-assigned desktop version; carry rest
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
-test('Intel helper and iOS share the one Mac orchestration slot, while ARM carry uses a local slot', async () => {
+test('both Mac helper architectures share the one Mac orchestration slot', async () => {
   const delivery = new LocalDelivery({ variables: { macHelperMode: 'build' } }), placements = [];
   delivery.execute = async (slot, _job, context) => { placements.push([context.matrix.platform, slot]); return { result: 'success' }; };
   await delivery.run({}, { github: { job: 'helper_macos' }, matrix: { platform: 'darwin-x64' } });
   await delivery.run({}, { github: { job: 'helper_macos' }, matrix: { platform: 'darwin-arm64' } });
-  assert.deepEqual(placements, [['darwin-x64', 4], ['darwin-arm64', 1]]);
+  assert.deepEqual(placements, [['darwin-x64', 4], ['darwin-arm64', 4]]);
 });
 
 test('release entrypoint executes through a symlink, including macOS /tmp aliases', () => {

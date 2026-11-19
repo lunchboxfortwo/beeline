@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { carryHelperPlatform } from './helper-carry.mjs';
 import { releaseChannel, channelComponents, promotionSource, channelBaseline } from './release-channel.mjs';
 import { encodeReleaseOutput, decodeReleaseOutput } from './release-job-output.mjs';
 import { execFileSync } from 'node:child_process';
@@ -337,7 +338,7 @@ export function artifactReference(component, { version, sourceSha }) {
 
 // What a carried component still serves: the server image, the phone OTA
 // branch and its targets. Rollbacks read these from the newest release.
-const CARRIED_FACTS = ['imageRef', 'previousImageRef', 'otaBranch', 'previousOtaBranch', 'otaTargets', 'storeTrack'];
+const CARRIED_FACTS = ['imageRef', 'previousImageRef', 'otaBranch', 'previousOtaBranch', 'otaTargets', 'storeTrack', 'platforms'];
 
 function previousComponent(previous, component) {
   const legacyName = component === 'helper' ? 'daemon' : component === 'mobile-ota' ? 'app' : component;
@@ -448,6 +449,9 @@ export function initializeRelease({ version, sourceSha, previous, selectedCompon
         }
       : previousComponent(previous, component);
   }
+  if (!selected.has('helper') && components.helper.platforms)
+    components.helper.platforms = Object.fromEntries(Object.entries(components.helper.platforms)
+      .map(([platform, bundle]) => [platform, carryHelperPlatform(platform, bundle)]));
   return {
     schemaVersion: 2, version, sourceSha, state: 'planned', startedAt, updatedAt: startedAt,
     ...(previous ? { supersedes: { version: previous.version, sourceSha: previous.sourceSha } } : {}),

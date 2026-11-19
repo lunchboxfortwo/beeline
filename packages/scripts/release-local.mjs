@@ -15,6 +15,7 @@ import { checksWorkflow, checkPlan, LocalChecks } from './release-local-checks.m
 import { LocalDelivery } from './release-local-delivery.mjs';
 import { droppedChecks, localWorkflow, quickChecks, releasePlan } from './release-local-policy.mjs';
 import { DesktopBuild, desktopDryRun } from './release-local-desktop.mjs';
+import { carryHelperPlatform } from './helper-carry.mjs';
 import { macSigningTools } from './release-local-desktop-worker.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -107,6 +108,19 @@ async function carryMacHelper(engine, context) {
   return { result: 'success', outputs: { shipped: 'false' } };
 }
 
+// Local Mac jobs always build from this commit. Native ARM execution is not
+// available on this Intel host; the bundle owns architecture/signature proof.
+export function macHelperJob(job) {
+  const local = structuredClone(job);
+  local.env = { ...local.env, CARGO_BUILD_JOBS: '2', CI_TEST_WORKERS: '2', BEELINE_LOCAL_RELEASE: 'true' };
+  local.steps = local.steps.filter(step => !['previous_bundle', 'carry_bundle', 'native_cache'].includes(step.id));
+  for (const step of local.steps) {
+    if (step.name === 'Require the native build architecture') step.run = 'test "$(uname -m)" = x86_64';
+    if (step.if) step.if = step.if.replace(" && steps.carry_bundle.outcome != 'success'", '');
+  }
+  return local;
+}
+
 async function macJob({ job, context, label, engine }) {
   // A private remote build tree, not the host's checkout, HOME, Pictures or keys.
   const remote = remoteDirectory(engine, label);
@@ -119,7 +133,7 @@ async function macJob({ job, context, label, engine }) {
   if (secrets.EXPO_ASC_API_KEY_P8?.includes('-----BEGIN')) secrets.EXPO_ASC_API_KEY_P8 = Buffer.from(secrets.EXPO_ASC_API_KEY_P8).toString('base64');
   const spec = {
     job: context.github.job === 'mobile_native_ios' ? privateIosJob(job)
-      : { ...job, env: { ...job.env, CARGO_BUILD_JOBS: '2', CI_TEST_WORKERS: '2', BEELINE_LOCAL_RELEASE: 'true' } },
+      : macHelperJob(job),
     label, secrets, context: { ...context, secrets: {}, github: { ...context.github } },
     variables: engine.variables, workflowEnv: engine.read?.(WORKFLOW)?.env,
   };
@@ -212,6 +226,7 @@ if [ ! -x '${directory}/node/bin/node' ]; then
 fi
 export RUSTUP_HOME='${directory}/rustup' CARGO_HOME='${directory}/cargo'
 rustup toolchain install 1.95.0 --profile minimal --no-self-update
+rustup target add --toolchain 1.95.0 aarch64-apple-darwin
 '${directory}/node/bin/node' --version
 rustup run 1.95.0 rustc --version
 `;
@@ -221,7 +236,7 @@ rustup run 1.95.0 rustc --version
   return directory;
 }
 
-export function localHooks(directory, processes, { fullChecks = false } = {}) {
+export function localHooks(directory, processes, { fullChecks = false, checksGate } = {}) {
   return {
     workflow: async ({ file, workflow, inputs, inherited, engine }) => {
       file = file.replace(/^\.\//, '');
@@ -234,7 +249,16 @@ export function localHooks(directory, processes, { fullChecks = false } = {}) {
         const delivery = new LocalDelivery(engine);
         engine.localDelivery = delivery;
         process.once('SIGINT', delivery.cancel); process.once('SIGTERM', delivery.cancel);
-        return { workflow: localWorkflow(workflow, inputs), parallel: true, job: (...args) => delivery.run(...args),
+        return { workflow: localWorkflow(workflow, { ...inputs, parallelChecks: Boolean(checksGate) }), parallel: true, job: async (...args) => {
+          if (checksGate && args[1].github.job === 'release_validation') {
+            await checksGate;
+            const checks = engine.variables.releaseChecks;
+            if (checks.sourceSha !== inherited.github.sha || !(checks.result === 'success' || (checks.result === 'skipped' && checks.ownerMessageId)))
+              throw new Error('Full checks do not authorize this release SHA');
+            return { result: 'success', outputs: {} };
+          }
+          return delivery.run(...args);
+        },
           finish: () => { process.removeListener('SIGINT', delivery.cancel); process.removeListener('SIGTERM', delivery.cancel); } };
       }
       if (file === '.github/workflows/desktop.yml') {
@@ -261,15 +285,13 @@ export function localHooks(directory, processes, { fullChecks = false } = {}) {
       }
       if (['helper_linux', 'helper_macos', 'server'].includes(context.github.job)) context.env.CARGO_BUILD_JOBS = '2';
       if (context.github.job === 'helper_macos') {
-        // The authorized Mac is Intel. ARM archives keep their proven identity
-        // until a native ARM installation probe can actually run.
-        if (engine.variables?.macHelperMode === 'build' && context.matrix.platform === 'darwin-x64') return macJob(args);
+        if (engine.variables?.macHelperMode === 'build') return macJob(args);
         return carryMacHelper(engine, context);
       }
       if (context.github.job === 'mobile_native_ios') return macJob(args);
-      if (context.github.job === 'helper') {
+      if (context.github.job === 'helper' && engine.variables?.macHelperMode !== 'build') {
         context.env.BEELINE_RELEASE_CARRIED_ARM64_DIR = join(directory, 'carried-arm64');
-        if (engine.variables?.macHelperMode !== 'build') context.env.BEELINE_RELEASE_CARRIED_X64_DIR = join(directory, 'carried-x64');
+        context.env.BEELINE_RELEASE_CARRIED_X64_DIR = join(directory, 'carried-x64');
       }
       if (['release_validation', 'bookkeeping'].includes(context.github.job)) {
         context.env.BEELINE_LOCAL_RELEASE_RECORDS = join(directory, 'records.json');
@@ -333,6 +355,11 @@ export function localHooks(directory, processes, { fullChecks = false } = {}) {
       }
     },
     afterStep: async ({ step, context, env, result, engine }) => {
+      if (step.name === 'Produce the inspectable release plan' && result.outputs.run_helper === 'true' && engine?.variables?.macHelperMode === 'carry') {
+        const previous = JSON.parse(readFileSync(join(context.runner.temp, 'previous/release.json'), 'utf8'));
+        for (const [platform, bundle] of Object.entries(previous.components.helper.platforms || {}))
+          if (platform.startsWith('darwin-')) carryHelperPlatform(platform, bundle);
+      }
       if (step.name === 'Produce the inspectable release plan' &&
           result.outputs.run_mobile_native === 'true' && result.outputs.native_android === 'true' &&
           !context.secrets?.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON) {
@@ -353,20 +380,29 @@ export function localHooks(directory, processes, { fullChecks = false } = {}) {
         const record = JSON.parse(readFileSync(path, 'utf8'));
         delete record.runId;
         record.execution = { kind: 'local', id: basename(directory), dispatchedBy: JSON.parse(context.inputs.dispatched_by) };
-        record.delivery.localExceptions = { staticWebsite: 'not released', helperArm64: 'carried unchanged; authorized Mac is Intel',
+        if (engine.variables.releaseChecks) record.checks = engine.variables.releaseChecks;
+        record.delivery.localExceptions = { staticWebsite: 'not released',
+          helperArm64: engine.variables.macHelperMode === 'build' ? 'cross-built on Intel Mac; lipo and codesign verified' : 'carried unchanged',
           helperX64: engine.variables.macHelperMode === 'build' ? 'built and install-verified on Intel Mac' : 'carried unchanged',
           desktop: engine.variables.desktopMode === 'build' ? 'native signed updater builds on MacBook, squire and Windows VM' : 'published signed updater set carried unchanged, including Windows' };
-        record.delivery.localExceptions.checks = context.inputs.channel === 'latest'
+        record.delivery.localExceptions.checks = engine.variables.releaseChecks ?? (context.inputs.channel === 'latest'
           ? { retained: [], reusedFrom: 'successful next release of this commit', coverage: 'no checks run on promotion' }
-          : { retained: ['build', 'typecheck', 'dead-code', 'design grammar', 'codecs'], dropped: droppedChecks(engine.read(checksWorkflow)), coverage: 'not produced by quick release checks' };
+          : { retained: ['build', 'typecheck', 'dead-code', 'design grammar', 'codecs'], dropped: droppedChecks(engine.read(checksWorkflow)), coverage: 'not produced by quick release checks' });
+        const helperManifest = join(directory, 'jobs/helper-local/daemon-release/manifest.json');
+        if (existsSync(helperManifest)) record.components.helper.platforms = JSON.parse(readFileSync(helperManifest, 'utf8')).bundles;
         const previousPath = join(context.runner.temp, 'previous/release.json');
         if (existsSync(previousPath)) {
           const previous = JSON.parse(readFileSync(previousPath, 'utf8'));
           record.components.website.staticSourceSha = previous.components.website.staticSourceSha || previous.components.website.sourceSha;
+          // The release record also counts releases that carried the whole
+          // helper without republishing its channel manifest.
+          if (existsSync(helperManifest)) for (const [platform, bundle] of Object.entries(record.components.helper.platforms)) {
+            const prior = previous.components.helper.platforms?.[platform];
+            if (bundle.carriedFrom && prior?.sha256 === bundle.sha256 && prior.commit === bundle.commit)
+              record.components.helper.platforms[platform] = carryHelperPlatform(platform, prior);
+          }
         }
         if (record.delivery.live?.components?.website?.state === 'success') record.delivery.live.components.website.scope = 'web-app';
-        const helperManifest = join(directory, 'jobs/helper-local/daemon-release/manifest.json');
-        if (existsSync(helperManifest)) record.components.helper.platforms = JSON.parse(readFileSync(helperManifest, 'utf8')).bundles;
         privateWrite(path, `${JSON.stringify(record, null, 2)}\n`);
       }
     },
@@ -460,7 +496,7 @@ export async function releaseChecks(engine, context) {
   return results;
 }
 
-export async function runLocalRelease(args, { repository = root, secrets: providedSecrets } = {}) {
+export async function runLocalRelease(args, { repository = root, secrets: providedSecrets, checksGate } = {}) {
   const root = repository;
   if (args.help) { console.log('node packages/scripts/release-local.mjs [--plan | --dry-run [--leg release|release_checks|initialize|server|helper|mobile-ota|pages|web-app|eas-cli|require-tools|mac-tools|desktop] | --execute --leg release_checks] [--channel next|latest] [--release-sha <40-char SHA>] [--release-version vX.Y.Z] [--desktop-mode build|carry] [--mac-helpers build|carry] [--env-file ~/.config/beeline-release.env] [--run-release-proof] [--store-track none|beta|production] [--state-dir /outside/repo]'); return; }
   if (args['remote-job']) { await remoteJob(args['remote-job']); return; }
@@ -474,16 +510,16 @@ export async function runLocalRelease(args, { repository = root, secrets: provid
   const secrets = providedSecrets ?? (args.mode === 'execute' || (args.mode === 'dry-run' && args['env-file']) ? loadEnvironment(envFile, root) : {});
   if (!secrets.GITHUB_TOKEN && secrets.GH_TOKEN) secrets.GITHUB_TOKEN = secrets.GH_TOKEN;
   const processes = new Processes(secrets);
-  const variables = { otaVersions: args.otaVersions ?? [], desktopMode: args['desktop-mode'] || 'build', desktopReleaseVersion: args['release-version'], macHelperMode: args['mac-helpers'] || 'build',
+  const variables = { releaseChecks: args.checks, otaVersions: args.otaVersions ?? [], desktopMode: args['desktop-mode'] || 'build', desktopReleaseVersion: args['release-version'], macHelperMode: args['mac-helpers'] || 'build',
     CLOUDFLARE_ACCOUNT_ID: secrets.CLOUDFLARE_ACCOUNT_ID || '', BEELINE_HELPER_SENTRY_DSN: secrets.BEELINE_HELPER_SENTRY_DSN || '', BEELINE_MOBILE_SENTRY_DSN: secrets.BEELINE_MOBILE_SENTRY_DSN || '' };
-  const engine = new LocalActions({ root, directory, secrets, variables, processes, github: localGithub, hooks: localHooks(directory, processes, { fullChecks: args.leg === 'release_checks' }) });
+  const engine = new LocalActions({ root, directory, secrets, variables, processes, github: localGithub, hooks: localHooks(directory, processes, { fullChecks: args.leg === 'release_checks', checksGate }) });
   engine.inspect(WORKFLOW);
   const context = { github: { repository: 'lunchboxfortwo/beeline', sha, run_id: String(Math.floor(Date.now() / 1000)), run_attempt: '1', event_name: 'workflow_dispatch', event: {}, actor: 'local-release', token: secrets.GITHUB_TOKEN || secrets.GH_TOKEN || '' }, runner: {}, job: { status: 'success' } };
   if (args.mode === 'plan') {
     console.log(`Local ${args.channel} release at ${sha}; no release commands executed.`);
     console.log(JSON.stringify(releasePlan(engine.read(WORKFLOW), engine.read(checksWorkflow), args), null, 2));
     console.log('Selected website delivery publishes static assets to Cloudflare Pages and deploys the EAS web app.');
-    console.log(`Mac helper mode: ${variables.macHelperMode}; Intel builds on MacBook, ARM carry retains its recorded identity. Desktop mode: ${variables.desktopMode}; builds use MacBook, squire and the Windows VM; carry retains the entire published version.`);
+    console.log(`Mac helper mode: ${variables.macHelperMode}; Intel and ARM helpers build on MacBook; ARM uses lipo and codesign verification. Desktop mode: ${variables.desktopMode}; builds use MacBook, squire and the Windows VM; carry retains the entire published version.`);
     console.log(`iOS store builds use SSH on ${MAC}. Canary, helper update proof, optional device proof, rollback and finalization stay enabled. ${args.channel === 'latest' ? 'Promotion reuses the successful next verdict; no checks run.' : 'Quick checks run before next delivery.'}`);
     return;
   }
