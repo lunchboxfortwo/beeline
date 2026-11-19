@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto';
+import { beginAgentInvocation } from './agent-invocation.js';
+import { sendMessage,replyToMessage } from './agent-messaging.js';
 import { readChatListView,readRoomViewMessage } from '@beeline/api-contract/phone';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import type { AddressInfo } from 'node:net';
@@ -774,4 +777,30 @@ it('projects the same assigned face and generated portrait in voice and Room ide
   } finally {
     await db.query('UPDATE identities SET face_id=NULL,avatar=NULL WHERE id=$1', [A]);
   }
+});
+
+it.each([false,true])('voice explicit reply suppression preserves answer correlation (unrelated target: %s)',async unrelated=>{
+ const room=randomUUID();
+ await db.query(`INSERT INTO rooms(id,workspace_id,name,direct_participants) VALUES($1,$2,'Voice suppression proof',$3)`,[room,W,DIRECT]);
+ for(const id of [H,A])await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`,[W,room,id]);
+ const joined=await service.join(room,H);
+ try{
+  const agent=(await service.agents(room,H)).find(agent=>agent.id===A)!;
+  const owner=(await db.query<{runtime_owner:string}>('SELECT runtime_owner FROM voice_calls WHERE id=$1',[joined.call.id])).rows[0]!.runtime_owner;
+  const source=await service.recordHuman(joined.call.id,room,H,agent,'Please find the result',owner);
+  await service.dispatch(joined.call.id,source,A);
+  const {readAgentCommands,answerQueuedMessage}=await import('./agent-command.js');
+  const current=(await readAgentCommands(db,A,room)).commands.find(command=>command.source.id===source)!;
+  const invocation={id:randomUUID(),requestId:current.turnRequestId};
+  await beginAgentInvocation(db,A,room,current.turnRequestId,invocation.id);
+  const old=unrelated?await sendMessage(db,{route:{from:{agent:H,place:room},to:{agent:A,place:room}},text:'Older separate request'}):undefined;
+  const reply=await replyToMessage(db,A,{roomId:room,invocation,id:old?.id ?? current.id,text:'The explicit result'});
+  expect(await answerQueuedMessage(db,A,{roomId:room,requestId:current.id,text:'Trailing voice recap',harnessEnded:true,invocation})).toMatchObject({suppressed:true,answered:false});
+  const eligible=(await db.query(`SELECT m.id FROM voice_orders o JOIN agent_commands c ON c.source_message_id=o.source_message_id AND c.agent_id=o.agent_id
+    JOIN messages m ON m.author_id=o.agent_id AND m.room_id=$2 AND (m.id=c.result_message_id OR m.request_id=c.id OR m.request_id=c.turn_request_id)
+    WHERE o.call_id=$1 AND o.spoken_message_id IS NULL AND m.presentation='message' AND m.deleted_at IS NULL`,[joined.call.id,room])).rows;
+  expect(eligible).toEqual(unrelated?[]:[{id:reply.id}]);
+  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[current.id])).rows).toEqual([{state:unrelated?'pending':'complete'}]);
+  expect((await db.query("SELECT 1 FROM messages WHERE room_id=$1 AND text='Trailing voice recap'",[room])).rowCount).toBe(0);
+ }finally{await service.leave(joined.call.id,H);await db.query('DELETE FROM rooms WHERE id=$1',[room]);}
 });

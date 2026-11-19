@@ -207,16 +207,13 @@ describe('owed chat tags', () => {
     }
     expect((await db.query('SELECT 1 FROM messages WHERE reply_to_message_id=$1',[message])).rowCount).toBe(2);
   });
-  it('R1 a second, different reply to the same tag is stored, readable, searchable and only reaches its recorded sender', async () => {
-    const message = await tag(member, 'desktop audit request');
-    const first = await call('reply',{id:message,text:'@owner blocked for now'});
-    const second = await call('reply',{id:message,text:'@owner @pidoong unblocked zebracorn'});
-    expect(second.id).not.toBe(first.id);
-    const replies = (await db.query<{ id: string; text: string }>('SELECT id,text FROM messages WHERE reply_to_message_id=$1 ORDER BY created_at,id', [message])).rows;
-    expect(replies.map(r => r.id).sort()).toEqual([first.id, second.id].sort());
-    expect((await call('read_messages', { room })).messages.map((m: any) => m.id)).toEqual(expect.arrayContaining([first.id, second.id]));
-    expect((await call('search_messages', { query: 'zebracorn' })).messages.map((m: any) => m.id)).toEqual([second.id]);
-    expect((await db.query("SELECT 1 FROM agent_commands WHERE agent_id=$1 AND source_message_id=$2",[other,second.id])).rowCount).toBe(0);
+  it('R1 a second reply confirms the terminal answer; a deliberate later message publishes explicitly', async () => {
+    const message=await tag(member,'desktop audit request');
+    const first=await call('reply',{id:message,text:'@owner blocked for now'});
+    const retry=await call('reply',{id:message,text:'A later result requires explicit publication'});
+    expect(retry.id).toBe(first.id);
+    expect((await db.query('SELECT id FROM messages WHERE reply_to_message_id=$1',[message])).rows).toEqual([{id:first.id}]);
+    expect((await call('read_messages',{room})).messages.map((m:any)=>m.id)).toContain(first.id);
   });
   it('an unanswered tag remains owed until its own reply is posted', async () => {
     await db.query("UPDATE agent_commands SET state='complete' WHERE agent_id=$1 AND state='pending'", [helper]);
@@ -317,15 +314,40 @@ describe('owed chat tags', () => {
     expect((await owedMentions(db, member)).map(m => m.messageId)).not.toContain(unanswered);
   });
 
-  it('distinct explicit replies to a real queued tag are independently delivered',async()=>{
+  it('repeated explicit replies to a real queued tag confirm the first delivery',async()=>{
     const handle=(await db.query<{handle:string}>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1',[member,room])).rows[0]!.handle;
     const source=await phone.execute('sendRoomMessage',{roomId:room,text:`@${handle} review this`},owner);
     const first=await call('reply',{id:source.messageId,text:'First answer'});
     const second=await call('reply',{id:source.messageId,text:'Additional explicit message'});
-    expect(second.id).not.toBe(first.id);
-    expect((await call('reply',{id:source.messageId,text:'Additional explicit message'})).id).not.toBe(second.id);
-    expect((await db.query('SELECT count(*)::int n FROM messages WHERE author_id=$1 AND reply_to_message_id=$2',[member,source.messageId])).rows[0]).toEqual({n:3});
+    expect(second.id).toBe(first.id);
+    expect((await call('reply',{id:source.messageId,text:'Additional explicit message'})).id).toBe(second.id);
+    expect((await db.query('SELECT count(*)::int n FROM messages WHERE author_id=$1 AND reply_to_message_id=$2',[member,source.messageId])).rows[0]).toEqual({n:1});
     expect((await db.query('SELECT state FROM agent_commands WHERE agent_id=$1 AND source_message_id=$2',[member,source.messageId])).rows[0]).toEqual({state:'complete'});
+  });
+
+  it('visible terminal failure closes both owed reads, including a late mention row; a newer pending retry remains owed',async()=>{
+    const source=await tag(helper),pending=await tag(helper);
+    const command=(await db.query('SELECT * FROM agent_commands WHERE source_message_id=$1 AND agent_id=$2 ORDER BY created_at DESC LIMIT 1',[source,helper])).rows[0];
+    const {failHostedAgentTurn}=await import('./agent-turn-end.js');
+    await db.transaction(async tx=>{await failHostedAgentTurn(tx,command,helper,'Provider failed');});
+    const owed=async()=> (await daemon.execute('getOwedMentions',{},helper)).owedMentions.map(m=>m.messageId);
+    expect(await owed()).not.toContain(source);expect(await owed()).toContain(pending);
+    expect(JSON.stringify(await (mcp as any).toolResult(principal(helper),'list_mentions',{}))).not.toContain(source);
+    await db.query('UPDATE rooms_mcp_mentions SET cleared_at=NULL WHERE member_id=$1 AND message_id=$2',[helper,source]);
+    expect(await owed()).not.toContain(source);
+    await db.query("UPDATE agent_commands SET state='pending',report_outcome=NULL,completed_at=NULL WHERE id=$1",[command.id]);
+    expect(await owed()).toContain(source);
+  });
+  it('failed diagnostics and historical completion without communicated failure remain owed',async()=>{
+    const source=await tag(helper);
+    await db.query("UPDATE agent_commands SET state='complete',report_outcome='failed' WHERE source_message_id=$1 AND agent_id=$2",[source,helper]);
+    expect((await owedMentions(db,helper)).map(m=>m.messageId)).toContain(source);
+  });
+  it('a delivered question card settles only its own incoming tag',async()=>{
+    const source=await tag(member),pending=await tag(member);
+    await call('reply',{id:source,text:'Choose a result',ask:{question:'Which?',options:['A','B']}});
+    expect((await owedMentions(db,member)).map(m=>m.messageId)).not.toContain(source);
+    expect((await owedMentions(db,member)).map(m=>m.messageId)).toContain(pending);
   });
 
 });

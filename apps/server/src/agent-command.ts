@@ -1,3 +1,4 @@
+import { finalizeAgentInvocation } from './agent-invocation.js';
 import { legacyCommandPayload } from './messaging-cutover.js';
 import { parseAgentAccessPolicy,senderMayAddressAgent } from '@beeline/api-contract/agent-access';
 import { attachQueuedContext } from './agent-command-context.js';
@@ -807,7 +808,6 @@ const hash = (text: string) => createHash('sha256').update(text).digest('hex');
 export function refuseMessageMembership(message='address requires current membership'):never {
   throw wall('membership',message);
 }
-
 /** The only queue-answer exit. Publication and completion share its transaction. */
 export async function answerQueuedMessage(database: SqlDatabase, agentId: string, input: {
   roomId: string; requestId?: string; text: string; report?: boolean; status?: unknown; ask?: string;
@@ -816,9 +816,12 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
   steps?: unknown; messageId?: string; replyToMessageId?: string;
   queuedRequestIds?: readonly string[];
   harnessEnded?: boolean;
+  invocation?: import('@beeline/api-contract/daemon').AgentInvocation;
   /** Internal publication receipt shared by items with the same return address. */
   sharedReplyId?: string;
-}): Promise<{ id: string; createdAt: number; delivered?: boolean; receipt?: string; answered?: boolean; woken?: string[]; notWoken?: {handle:string;reason:string}[] }> {
+}): Promise<{ id: string; createdAt: number; delivered?: boolean; receipt?: string; answered?: boolean; suppressed?: boolean; woken?: string[]; notWoken?: {handle:string;reason:string}[] }> {
+  if (input.harnessEnded && input.invocation && !input.explicitReply && !input.report) return finalizeAgentInvocation(database,agentId,input.roomId,input.invocation,
+    db => answerQueuedMessage(db,agentId,{...input,invocation:undefined}));
   if (input.queuedRequestIds?.length) return database.transaction(async db => {
     const ids = [...new Set([input.requestId, ...(input.queuedRequestIds ?? [])].filter((id): id is string => Boolean(id)))];
     const items = (await db.query<CommandRow & { return_agent_id: string | null; batch_reply_id: string | null }>(`SELECT item.*,recipient.id return_agent_id,posted.id batch_reply_id

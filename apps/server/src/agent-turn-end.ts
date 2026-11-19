@@ -10,6 +10,13 @@ import { systemLine } from './system-line.js';
  * Nothing else ends an item; a dropped helper leaves it pending.
  */
 export const AGENT_TURN_END_SCHEMA = `
+CREATE TABLE IF NOT EXISTS agent_invocations (
+  command_id text NOT NULL REFERENCES agent_commands(id) ON DELETE CASCADE,
+  invocation_id text NOT NULL,
+  replied boolean NOT NULL DEFAULT false,
+  final_suppressed boolean NOT NULL DEFAULT false,
+  PRIMARY KEY(command_id,invocation_id)
+);
 ALTER TABLE agent_turns ADD COLUMN IF NOT EXISTS connection_epoch bigint;
 -- Lifecycle projections may finish their reads in a different order. Keep a
 -- revision even when two executions start in one second. The constant column

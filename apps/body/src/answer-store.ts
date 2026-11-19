@@ -12,8 +12,10 @@ export interface StoredAnswer {
   readonly requestId: string;
   /** Empty text alone does not acknowledge an unanswered queue item. */
   readonly text: string;
-  /** The harness ended; empty output completes the item without a post. */
+  readonly failureReason?: string;
+  /** The harness ended; unanswered requests remain owed. */
   readonly harnessEnded?: boolean;
+  readonly invocation?: import('@beeline/api-contract/daemon').AgentInvocation;
   readonly steps?: DaemonOperationMap['postRoomMessage']['input']['steps'];
 }
 

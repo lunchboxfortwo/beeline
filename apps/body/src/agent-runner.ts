@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { AgentCommand } from '@beeline/api-contract/daemon';
 import { isBackgroundCommand } from '@beeline/api-contract/daemon';
 import { dirname,resolve } from 'node:path';
@@ -25,6 +26,7 @@ interface Place {
   session: PlaceSession;
   waiting: AgentCommand[];
   running?: AgentCommand;
+  retryOwed?: boolean;
   idleTimer?: NodeJS.Timeout;
 }
 
@@ -40,6 +42,8 @@ export class AgentRunner {
   private readonly answered = new Set<string>();
   /** Server-confirmed tool replies can finish an item before the harness ends. */
   private readonly completed = new Set<string>();
+  private readonly suppressionRetried = new Set<string>();
+  private readonly awaitingInput = new Set<string>();
   private readonly answers: AnswerStore;
   private readonly stored = new Map<string, StoredAnswer>();
   private readonly posting = new Set<string>();
@@ -149,6 +153,8 @@ export class AgentRunner {
   /** The server's whole list of this agent's undone items, oldest first. */
   private queueChanged(commands: readonly AgentCommand[], completed: readonly string[] = []): void {
     for (const id of completed) this.completed.add(id);
+    // A new server delivery is the normal retry boundary, including reconnect.
+    this.awaitingInput.clear();
     this.latest = commands;
     void this.restored.then(() => this.reconcileQueue()).catch(error => console.error('[body] queue delivery failed:', error));
   }
@@ -158,6 +164,7 @@ export class AgentRunner {
     const listed = new Set(commands.map(item => item.id));
     const running = new Set([...this.places.values()].map(place => place.running?.id));
     for (const id of this.completed) if (!running.has(id)) this.completed.delete(id);
+    for (const id of this.suppressionRetried) if (!listed.has(id)) {this.suppressionRetried.delete(id);this.awaitingInput.delete(id);}
     for (const id of this.answered) if (!listed.has(id) && !this.stored.has(id)) this.answered.delete(id);
     void this.resendStoredAnswers(listed);
     for (const place of this.places.values()) {
@@ -189,7 +196,8 @@ export class AgentRunner {
   /** Hand the next waiting item of one place to its session; one at a time per place. */
   private async pump(placeId: string): Promise<void> {
     const place = this.places.get(placeId);
-    const item = place && !place.running && !this.stopped ? place.waiting.shift() : undefined;
+    const ready = place?.waiting.some(item => !this.awaitingInput.has(item.id));
+    const item = place && ready && !place.running && !this.stopped ? place.waiting.shift() : undefined;
     if (place && !place.running) this.armIdle(place, Boolean(item));
     if (place && item) await this.deliver(placeId, place, item);
   }
@@ -203,6 +211,7 @@ export class AgentRunner {
     const batch = item.action === 'restart' ? [item] : [item, ...place.waiting.slice(0, restartIndex < 0 ? undefined : restartIndex)];
     const batched = new Set(batch.map(next => next.id));
     let started = false;
+    const invocation = {id:randomUUID(),requestId:item.turnRequestId};
     try {
       if (item.action === 'restart') {
         await place.session.stop();
@@ -211,40 +220,39 @@ export class AgentRunner {
       } else {
         // Required item credentials and provider configuration precede ACP startup.
         await place.session.start(item);
+        await this.options.daemonApi.execute('startAgentTurn',{roomId:item.roomId,requestId:item.turnRequestId,invocationId:invocation.id});
         started = true;
-        this.recordTurnStart(item);
-        const answer = await place.session.deliver(item, batch);
+        const answer = await place.session.deliver(item, batch, invocation);
         // Empty background work closes quietly; an unanswered request stays owed.
         const steps = answer.text && answer.steps.length ? { steps: answer.steps } : {};
         // Stop wall: a stopped item gets no answer.
         const pendingBatch = batch.filter(next => this.latest.some(listed => listed.id === next.id));
-        if (pendingBatch.length) {
-          await this.store({
-            itemId: pendingBatch[0]!.id, roomId: item.roomId, requestId: pendingBatch[0]!.turnRequestId,
-            queuedRequestIds: pendingBatch.slice(1).map(next => next.id), text: answer.text, harnessEnded: true, ...steps,
-          });
-        }
+        if (pendingBatch.length || this.completed.has(item.id)) await this.store({
+          itemId: (pendingBatch[0] ?? item).id, roomId: item.roomId, requestId: (pendingBatch[0] ?? item).turnRequestId, invocation,
+          queuedRequestIds: pendingBatch.slice(1).map(next => next.id), text: answer.text, harnessEnded: true, ...steps,
+        });
         place.waiting = place.waiting.filter(next => !batched.has(next.id));
         void Promise.resolve().then(() => this.afterAnswer(item, answer))
           .catch(error => console.warn('[body] answer diagnostics failed:', error));
       }
     } catch (error) {
       console.error(`[body] place ${placeId} could not answer ${item.id}:`, error);
-      if (this.latest.some(listed => listed.id === item.id) && !this.answered.has(item.id)) {
+      if (batch.some(next => this.latest.some(listed => listed.id === next.id) && !this.answered.has(next.id))) {
         if (!this.stopped && !item.modelCredential) this.reportOwnerBlocker(item, error);
-        if (!this.stopped && (item.modelCredential || this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN)) {
-          const reason = redactToolDetail(distillTurnFailureReason(error).text).slice(0, 2_000);
-          await this.options.daemonApi.execute('startAgentTurn', {
-            roomId: item.roomId, requestId: item.turnRequestId, available: false, failureReason: reason,
-          });
-          this.answered.add(item.id);
-          started = true;
-        } else if (started && !this.stopped) {
+        if (started && !this.stopped) {
           const pending = batch.filter(next => this.latest.some(listed => listed.id === next.id));
           if (pending.length) await this.store({
             itemId: pending[0]!.id, roomId: item.roomId, requestId: pending[0]!.turnRequestId,
-            queuedRequestIds: pending.slice(1).map(next => next.id), text: '', harnessEnded: true,
+            queuedRequestIds: pending.slice(1).map(next => next.id), text: '', harnessEnded: true, invocation,
+            failureReason:redactToolDetail(distillTurnFailureReason(error).text).slice(0,2_000),
           });
+        } else if (!this.stopped && (item.modelCredential || this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN)) {
+          await this.options.daemonApi.execute('startAgentTurn', {
+            roomId: item.roomId, requestId: item.turnRequestId, available: false,
+            failureReason:redactToolDetail(distillTurnFailureReason(error).text).slice(0,2_000),
+          });
+          this.answered.add(item.id);
+          started = true;
         } else {
           place.waiting.unshift(item);
           if (!this.stopped) void this.options.daemonApi.execute('startAgentTurn', {
@@ -256,6 +264,7 @@ export class AgentRunner {
       await place.session.stop().catch(stopError => console.warn('[body] session stop failed:', stopError));
     } finally {
       place.running = undefined;
+      if (place.retryOwed) {place.retryOwed=false;this.reconcileQueue();}
     }
     if (started) void this.pump(placeId);
   }
@@ -327,10 +336,24 @@ export class AgentRunner {
       }) : await api.execute('postRoomMessage', {
         roomId: answer.roomId, requestId: answer.itemId, text: answer.text, presentation: 'message',
         ...(answer.harnessEnded ? { harnessEnded: true } : {}),
+        ...(answer.invocation ? {invocation:answer.invocation} : {}),
         ...(answer.queuedRequestIds?.length ? { queuedRequestIds: answer.queuedRequestIds } : {}),
         ...(answer.steps ? { steps: answer.steps } : {}),
       });
-      if (receipt.answered!==false) {
+      if ('suppressed' in receipt && receipt.suppressed) {
+        await this.answers.remove(answer.itemId);
+        this.stored.delete(answer.itemId);
+        this.durable.delete(answer.itemId);
+        for (const id of [answer.itemId,...(answer.queuedRequestIds ?? [])]) {
+          this.answered.delete(id);
+          if (this.suppressionRetried.has(id)) this.awaitingInput.add(id);
+          else this.suppressionRetried.add(id);
+        }
+        // Resume still-owed work through the normal queue after this execution releases.
+        const place=this.places.get(answer.roomId);
+        if (place?.running) place.retryOwed=true;
+        else this.reconcileQueue();
+      } else if (receipt.answered!==false) {
         this.stored.delete(answer.itemId);
         this.durable.delete(answer.itemId);
         void this.answers.remove(answer.itemId).catch(error => console.warn('[body] answer cleanup failed:', error));
@@ -341,7 +364,7 @@ export class AgentRunner {
           || this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_ID || this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN);
         if (hosted) for (const item of pending) await api.execute('startAgentTurn', {
           roomId: item.roomId, requestId: item.turnRequestId, available: false,
-          failureReason: 'Agent harness ended without a public answer',
+          failureReason: answer.failureReason ?? 'Agent harness ended without a public answer',
         });
         // Hosted turns close visibly; personal helpers retain the owed request
         // for their next queue delivery after the server refused an empty answer.

@@ -40,16 +40,25 @@ export async function prepareMentionReplyInput(db: SqlDatabase, member: string,
 export const OWED_MENTION_OPEN_SQL = `
   NOT EXISTS(SELECT 1 FROM messages reply WHERE reply.room_id=mention.room_id
     AND reply.author_id=mention.member_id AND reply.reply_to_message_id=mention.message_id
-    AND reply.deleted_at IS NULL AND reply.presentation='message')
+    AND reply.deleted_at IS NULL AND reply.presentation IN ('message','card'))
   AND NOT EXISTS(SELECT 1 FROM messages reply WHERE reply.room_id=mention.room_id
     AND reply.author_id=mention.member_id AND reply.request_id=mention.message_id
-    AND reply.deleted_at IS NULL AND reply.presentation='message')
+    AND reply.deleted_at IS NULL AND reply.presentation IN ('message','card'))
   AND NOT EXISTS(SELECT 1 FROM agent_commands source
     JOIN messages reply ON reply.room_id=source.room_id AND reply.author_id=source.agent_id
       AND (reply.request_id=source.turn_request_id OR reply.id=source.result_message_id)
-      AND reply.deleted_at IS NULL AND reply.presentation='message'
+      AND reply.deleted_at IS NULL AND reply.presentation IN ('message','card')
     WHERE source.source_message_id=mention.message_id AND source.room_id=mention.room_id
       AND source.agent_id=mention.member_id)
+  AND (NOT EXISTS(SELECT 1 FROM agent_commands source JOIN messages failure
+      ON failure.id=encode(sha256(('failed:' || source.id)::bytea),'hex')
+      AND failure.room_id=COALESCE(source.return_room_id,source.room_id)
+      AND failure.request_id=source.turn_request_id AND failure.durable_fact='failure'
+      AND failure.deleted_at IS NULL
+    WHERE source.source_message_id=mention.message_id AND source.room_id=mention.room_id
+      AND source.agent_id=mention.member_id AND source.state='complete' AND source.report_outcome='failed')
+    OR EXISTS(SELECT 1 FROM agent_commands retry WHERE retry.source_message_id=mention.message_id
+      AND retry.room_id=mention.room_id AND retry.agent_id=mention.member_id AND retry.state='pending'))
   AND (NOT EXISTS(SELECT 1 FROM agent_commands source WHERE source.source_message_id=mention.message_id
       AND source.room_id=mention.room_id AND source.agent_id=mention.member_id AND source.state='cancelled')
     OR EXISTS(SELECT 1 FROM agent_commands source WHERE source.source_message_id=mention.message_id

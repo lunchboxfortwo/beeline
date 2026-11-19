@@ -154,7 +154,7 @@ export type DaemonOperationMap = {
     { readonly commandProtocol: 2; readonly commands: readonly AgentCommand[] }
   >;
   /** Marks the item's turn as working once its helper hands it to the agent session. Status only. */
-  startAgentTurn: Operation<RoomInput & { readonly requestId: string; readonly available?: boolean; readonly failureReason?: string }, WriteResult>;
+  startAgentTurn: Operation<RoomInput & { readonly requestId: string; readonly invocationId?: string; readonly available?: boolean; readonly failureReason?: string }, WriteResult>;
   /** A hosted-model credential bound to one undone queue item (`requestId`). */
   getModelCredential: Operation<RoomInput & { readonly requestId: string }, { readonly modelCredential?: OwnedModelCredential }>;
   getDaemonBootstrap: Operation<DaemonBootstrapInput, DaemonBootstrapResult>;
@@ -179,7 +179,7 @@ export type DaemonOperationMap = {
     }
   >;
   message: Operation<RoomInput & TurnOutputAuthority & { readonly to: import('./agent-messaging.js').MessageAddress; readonly text: string; readonly ask?: import('./agent-messaging.js').MessageAsk }, WriteResult>;
-  reply: Operation<RoomInput & TurnOutputAuthority & { readonly queuedRequestIds?: readonly string[]; readonly id: string; readonly text: string; readonly ask?: import('./agent-messaging.js').MessageAsk }, WriteResult & { readonly _meta?: { readonly beeline: { readonly turnComplete: true } } }>;
+  reply: Operation<RoomInput & TurnOutputAuthority & { readonly invocation?: import('./daemon-operations.js').AgentInvocation; readonly queuedRequestIds?: readonly string[]; readonly id: string; readonly text: string; readonly ask?: import('./agent-messaging.js').MessageAsk }, WriteResult & { readonly _meta?: { readonly beeline: { readonly turnComplete: true } } }>;
   /** Cutover only: calls serving queued legacy items. Remove with messaging-cutover.ts. */
   order: Operation<RoomInput & TurnOutputAuthority & { readonly address: string; readonly text: string; readonly agent?: string }, WriteResult>;
   stopAgentTurn: Operation<RoomInput & TurnOutputAuthority & { readonly address: string; readonly agent?: string }, StopAgentTurnResult>;

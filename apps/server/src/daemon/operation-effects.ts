@@ -1,3 +1,4 @@
+import { beginAgentInvocation } from '../agent-invocation.js';
 import { normalizeAgentApprovalIntent } from '../tray-approval-ask.js';
 import { isBeelineGuideName } from '@beeline/api-contract/beeline-guides';
 import { workflowOutputBindingCtes } from '../workflow-step-output.js';
@@ -165,6 +166,7 @@ export async function startAgentTurnOperation<Name extends keyof DaemonOperation
           AND ($2::text IS NULL OR (connection_id=$2 AND epoch=$3)) FOR SHARE`,
           [authenticatedAgentId,source?.connectionId ?? null,source?.epoch ?? null]);
         if(source && !connection.rowCount) return;
+        if (request.invocationId) await beginAgentInvocation(db,authenticatedAgentId,request.roomId,request.requestId,request.invocationId);
         await db.query(`WITH delivered AS (SELECT * FROM agent_commands
           WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3 AND state='pending' FOR SHARE),
           ${workflowOutputBindingCtes('delivered')}

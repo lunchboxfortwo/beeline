@@ -171,8 +171,8 @@ export class PlaceSession {
 
   /** Bind the tools to the item this session is answering; host MCP routes
    * authorize each call through the resource façade with this connection. */
-  async writeContext(item: AgentCommand | undefined, queued: readonly AgentCommand[], ownedModelDirectory?: string): Promise<void> {
-    await writeTurnContext(this.contextPath, item, queued, ownedModelDirectory);
+  async writeContext(item: AgentCommand | undefined, queued: readonly AgentCommand[], ownedModelDirectory?: string, invocation?: import('@beeline/api-contract/daemon').AgentInvocation): Promise<void> {
+    await writeTurnContext(this.contextPath, item, queued, ownedModelDirectory, invocation);
     await writePrivateFileAtomically(`${this.contextPath}.resource-auth.json`,
       JSON.stringify({ ...this.options.api.connection(), turnContextPath: this.contextPath }));
   }
@@ -468,7 +468,7 @@ export class PlaceSession {
    * Hand one item to the session and wait for its answer. Throws only when
    * the harness itself fails; only background work may complete silently.
    */
-  async deliver(item: AgentCommand, batch: readonly AgentCommand[] = []): Promise<Answer> {
+  async deliver(item: AgentCommand, batch: readonly AgentCommand[] = [], invocation?: import('@beeline/api-contract/daemon').AgentInvocation): Promise<Answer> {
     // start() ran first; a session that died since fails its prompt.
     const client = this.client!;
     const sessionId = this.sessionId!;
@@ -476,7 +476,7 @@ export class PlaceSession {
     if (item.roomId === this.options.placeId) this.squireRelay.activate(item, item.id);
     const model = this.model ?? await this.hostedModel(item);
     this.model = undefined;
-    await this.optional('Tool context', () => this.writeContext(item, batch.slice(1), model?.paths().directory), undefined);
+    await this.writeContext(item, batch.slice(1), model?.paths().directory, invocation);
     await this.refreshFeatureBranch();
     // A stopped machine proxy starts again at the endpoint this session holds; the turn never waits for it.
     void machineCliProxy();
@@ -579,12 +579,13 @@ export class PlaceSession {
 
 /** The file the agent's tools read to learn which item they serve. */
 export async function writeTurnContext(path: string, item: Pick<AgentCommand, 'id' | 'roomId' | 'turnRequestId' | 'rootCommandId' | 'reason' | 'operatorAgent'> | undefined,
-  queued: readonly Pick<AgentCommand, 'turnRequestId' | 'rootCommandId' | 'reason'>[] = [], ownedModelDirectory?: string): Promise<void> {
+  queued: readonly Pick<AgentCommand, 'turnRequestId' | 'rootCommandId' | 'reason'>[] = [], ownedModelDirectory?: string, invocation?: import('@beeline/api-contract/daemon').AgentInvocation): Promise<void> {
   await writePrivateFileAtomically(path, JSON.stringify(item ? {
     roomId: item.roomId, requestId: item.turnRequestId, taskId: item.rootCommandId, commandReason: item.reason, itemId: item.id,
     ...(item.operatorAgent ? {operatorAgent:true} : {}),
     commands: queued.map(command => ({ requestId: command.turnRequestId, commandReason: command.reason, taskId: command.rootCommandId })),
     startedAt: Date.now(),
+    ...(invocation ? {invocation} : {}),
     ...(ownedModelDirectory ? { ownedModelDirectory } : {}),
   } : {}));
 }

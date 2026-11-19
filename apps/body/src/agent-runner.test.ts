@@ -44,7 +44,7 @@ function deferred<T>() {
   const promise = new Promise<T>(done => { resolve = done; });
   return { promise, resolve };
 }
-async function fixture() {
+async function fixture(saved?: import('./answer-store.js').StoredAnswer) {
   const root = await mkdtemp(join(tmpdir(), 'queue-runner-')); roots.push(root);
   const secretKeyHex = '01'.repeat(32);
   const identity = identityFromKey(secretKeyHex, 'Agent');
@@ -59,6 +59,7 @@ async function fixture() {
     setConfigChangedListener: (listener:()=>void) => {configChanged=listener;}, setRoomsChangedListener() {}, setCornerCompleteListener() {},
     onLiveOpen: (listener: () => void) => { opened = listener; return () => {}; },
   } as unknown as DaemonApiClient;
+  if (saved) await new AnswerStore(join(root,'answers')).save(saved);
   new AgentRunner(runtime, join(root, 'runtime.json'), {
     workspaceRoot: root, agentBinary: 'fixture', mcpBinary: 'fixture', agentEnv: {},
   }, { daemonApi: api });
@@ -91,7 +92,7 @@ it('reannounces an active turn after registration without delivering its prompt 
   await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(1));
   f.opened();
   expect(f.execute.mock.calls.filter(([name]) => name === 'startAgentTurn')).toEqual([
-    ['startAgentTurn',{roomId:item.roomId,requestId:item.turnRequestId}],
+    ['startAgentTurn',{roomId:item.roomId,requestId:item.turnRequestId,invocationId:expect.any(String)}],
     ['startAgentTurn',{roomId:item.roomId,requestId:item.turnRequestId}],
   ]);
   expect(harness.deliver).toHaveBeenCalledTimes(1);
@@ -101,20 +102,19 @@ it('reannounces an active turn after registration without delivering its prompt 
   expect(f.execute.mock.calls.filter(([name]) => name === 'startAgentTurn')).toHaveLength(2);
 });
 
-it('lets a committed reply finish returning while its harness continues, across later queue pushes', async () => {
-  const f = await fixture(), item = f.item('reply-in-progress');
-  const answering = deferred<Record<string, unknown>>();
+it('lets a committed reply finish while its harness continues, then records suppression and cleans up with no pending item', async () => {
+  const f=await fixture(),item=f.item('reply-in-progress');
+  const answering=deferred<Record<string,unknown>>(),cleanup=vi.fn(async()=>{});
   harness.deliver.mockReturnValueOnce(answering.promise);
-  f.changed([item]);
-  await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(1));
-  f.changed([], [item.id]);
-  await Promise.resolve();
-  f.changed([]);
-  await Promise.resolve();
+  f.execute.mockImplementation(async name=>name==='postRoomMessage'?{id:item.id,createdAt:1,suppressed:true,answered:false}:{id:'ok',createdAt:1});
+  f.changed([item]);await vi.waitFor(()=>expect(harness.deliver).toHaveBeenCalledOnce());
+  f.changed([],[item.id]);await Promise.resolve();f.changed([]);await Promise.resolve();
   expect(harness.cancel).not.toHaveBeenCalled();
-  answering.resolve({text:'',steps:[],toolCalls:[],cleanup:async()=>{}});
-  await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(1));
-  expect(f.execute.mock.calls.filter(([name]) => name === 'postRoomMessage')).toEqual([]);
+  answering.resolve({text:'Trailing recap',steps:[],toolCalls:[],cleanup});
+  await vi.waitFor(()=>expect(f.execute).toHaveBeenCalledWith('postRoomMessage',expect.objectContaining({requestId:item.id,harnessEnded:true,invocation:{id:expect.any(String),requestId:item.turnRequestId}})),{timeout:5000});
+  await vi.waitFor(()=>expect(cleanup).toHaveBeenCalledOnce());
+  expect(harness.deliver).toHaveBeenCalledOnce();
+  await vi.waitFor(async()=>expect(await new AnswerStore(join(f.root,'answers')).all()).toEqual([]));
 });
 
 it('writes the harness-reported token usage on the turn receipt after the answer', async () => {
@@ -126,15 +126,16 @@ it('writes the harness-reported token usage on the turn receipt after the answer
     requestId: 'tokens', inputTokens: 1200, totalInputTokens: 1200, outputTokens: 80 })));
 });
 
-it('still cancels Stop while a tool call is running, without mistaking another completed item for its reply', async () => {
-  const f = await fixture(), item = f.item('stopped');
-  const answering = deferred<Record<string, unknown>>();
-  harness.deliver.mockReturnValueOnce(answering.promise);
-  f.changed([item]);
-  await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(1));
-  f.changed([], ['another-item']);
-  await vi.waitFor(() => expect(harness.cancel).toHaveBeenCalledTimes(1));
-  answering.resolve({text:'',steps:[],toolCalls:[],cleanup:async()=>{}});
+it('Stop cancels the harness, retracts output, and leaves no stored final when every item disappeared',async()=>{
+ const f=await fixture(),item=f.item('stopped');
+ const answering=deferred<Record<string,unknown>>(),cleanup=vi.fn(async()=>{});
+ harness.deliver.mockReturnValueOnce(answering.promise);
+ f.changed([item]);await vi.waitFor(()=>expect(harness.deliver).toHaveBeenCalledOnce());
+ f.changed([],['another-item']);await vi.waitFor(()=>expect(harness.cancel).toHaveBeenCalledOnce());
+ answering.resolve({text:'Stopped narration',steps:[],toolCalls:[],cleanup});
+ await vi.waitFor(()=>expect(cleanup).toHaveBeenCalledOnce());
+ expect(f.execute.mock.calls.filter(([name])=>name==='postRoomMessage')).toEqual([]);
+ expect(await new AnswerStore(join(f.root,'answers')).all()).toEqual([]);
 });
 
 it('loads stored answers before delivering a reconnect snapshot to the harness', async () => {
@@ -513,4 +514,74 @@ it('keeps restart out of input batches and delivers subsequent work after restar
   expect(harness.stop).toHaveBeenCalledTimes(1);
   expect(harness.deliver.mock.calls[1]).toEqual([next, [next]]);
   expect(f.execute).toHaveBeenCalledWith('markAgentTurnSilent', { roomId: 'room', requestId: 'restart' });
+});
+
+it('suppression consumes a stored final, retains owed siblings, and bounds automatic retries',async()=>{
+ const f=await fixture(),first=f.item('suppressed-first'),second=f.item('suppressed-second');
+ const cleanup=vi.fn(async()=>{});
+ harness.deliver.mockResolvedValue({text:'Replied to an old request',steps:[],toolCalls:[],cleanup});
+ f.execute.mockImplementation(async(name,input)=>name==='postRoomMessage'?{id:'suppressed',createdAt:1,answered:false,suppressed:true}:{id:'ok',createdAt:1});
+ f.changed([first,second]);
+ await vi.waitFor(()=>expect(harness.deliver).toHaveBeenCalledTimes(2),{timeout:5000});
+ await vi.waitFor(()=>expect(cleanup).toHaveBeenCalledTimes(2),{timeout:5000});
+ expect(f.execute.mock.calls.filter(([name])=>name==='startAgentTurn').every(([,input])=>input.available!==false)).toBe(true);
+ expect(await new AnswerStore(join(f.root,'answers')).all()).toEqual([]);
+ const finals=f.execute.mock.calls.filter(([name])=>name==='postRoomMessage');
+ expect(finals).toHaveLength(2);
+ expect(finals[0]![1]).toMatchObject({invocation:{id:expect.any(String),requestId:first.turnRequestId},queuedRequestIds:[second.id]});
+ expect((finals[1]![1].invocation as any).id).not.toBe((finals[0]![1].invocation as any).id);
+ // A subsequent normal input makes held requests eligible together, with a fresh invocation.
+ f.execute.mockImplementation(async()=>({id:'posted',createdAt:1}));
+ const third=f.item('new-input');f.changed([first,second,third]);
+ await vi.waitFor(()=>expect(harness.deliver).toHaveBeenCalledTimes(3),{timeout:5000});
+ expect(harness.deliver).toHaveBeenLastCalledWith(first,[first,second,third]);
+ await vi.waitFor(()=>expect(cleanup).toHaveBeenCalledTimes(3));
+});
+it('suppressed hosted final never synthesizes a no-public-answer failure',async()=>{
+ const f=await fixture(),item={...f.item('hosted-suppressed'),modelCredential:{token:'test'}} as unknown as AgentCommand;
+ harness.deliver.mockResolvedValueOnce({text:'Recap',steps:[],toolCalls:[],cleanup:async()=>{}});
+ harness.deliver.mockImplementationOnce(()=>new Promise(()=>{}));
+ f.execute.mockImplementation(async(name)=>name==='postRoomMessage'?{id:'suppressed',createdAt:1,answered:false,suppressed:true}:{id:'ok',createdAt:1});
+ f.changed([item]);
+ await vi.waitFor(()=>expect(harness.deliver).toHaveBeenCalledTimes(2),{timeout:5000});
+ expect(f.execute.mock.calls.some(([name,input])=>name==='startAgentTurn'&&input.available===false)).toBe(false);
+ expect(await new AnswerStore(join(f.root,'answers')).all()).toEqual([]);
+});
+it('the original invocation survives anchor completion while the final answers a pending sibling',async()=>{
+ const f=await fixture(),first=f.item('original-anchor'),second=f.item('remaining-sibling');
+ const held=deferred<Record<string,unknown>>();harness.deliver.mockReturnValueOnce(held.promise);
+ f.changed([first,second]);await vi.waitFor(()=>expect(harness.deliver).toHaveBeenCalledOnce());
+ f.changed([second],[first.id]);
+ held.resolve({text:'Closing text',steps:[],toolCalls:[],cleanup:async()=>{}});
+ await vi.waitFor(()=>expect(f.execute).toHaveBeenCalledWith('postRoomMessage',expect.objectContaining({requestId:second.id,invocation:{id:expect.any(String),requestId:first.turnRequestId}})),{timeout:5000});
+});
+
+it('a reloaded suppressed final is consumed once, and the owed request gets a fresh attempt',async()=>{
+ const invocation={id:'persisted-invocation',requestId:'recovered'};
+ const f=await fixture({itemId:'recovered',roomId:'room',requestId:'recovered',text:'Stale recap',harnessEnded:true,invocation});
+ const answering=deferred<Record<string,unknown>>();harness.deliver.mockReturnValueOnce(answering.promise);
+ f.execute.mockImplementation(async name=>name==='postRoomMessage'?{id:'receipt',createdAt:1,answered:false,suppressed:true}:{id:'ok',createdAt:1});
+ f.changed([f.item('recovered')]);
+ await vi.waitFor(()=>expect(harness.deliver).toHaveBeenCalledOnce(),{timeout:5000});
+ expect(f.execute).toHaveBeenCalledWith('postRoomMessage',expect.objectContaining({text:'Stale recap',invocation}));
+ expect(await new AnswerStore(join(f.root,'answers')).all()).toEqual([]);
+ const fresh=f.execute.mock.calls.find(([name])=>name==='startAgentTurn')![1];
+ expect(fresh.invocationId).not.toBe(invocation.id);
+ f.execute.mockImplementation(async()=>({id:'posted',createdAt:1}));
+ answering.resolve({text:'Actual new result',steps:[],toolCalls:[],cleanup:async()=>{}});
+ await vi.waitFor(()=>expect(f.execute).toHaveBeenCalledWith('postRoomMessage',expect.objectContaining({text:'Actual new result'})),{timeout:5000});
+});
+it('failure after the original anchor replied still finalizes and resumes the owed sibling',async()=>{
+ const f=await fixture(),first=f.item('failed-anchor'),second=f.item('owed-after-failure');
+ let reject!:(error:Error)=>void;
+ harness.deliver.mockReturnValueOnce(new Promise((_resolve,fail)=>{reject=fail;}));
+ const next=deferred<Record<string,unknown>>();harness.deliver.mockReturnValueOnce(next.promise);
+ f.execute.mockImplementation(async name=>name==='postRoomMessage'?{id:'receipt',createdAt:1,answered:false,suppressed:true}:{id:'ok',createdAt:1});
+ f.changed([first,second]);await vi.waitFor(()=>expect(harness.deliver).toHaveBeenCalledOnce());
+ f.changed([second],[first.id]);reject(new Error('harness disconnected after reply'));
+ await vi.waitFor(()=>expect(harness.deliver).toHaveBeenCalledTimes(2),{timeout:5000});
+ expect(f.execute).toHaveBeenCalledWith('postRoomMessage',expect.objectContaining({requestId:second.id,invocation:{id:expect.any(String),requestId:first.turnRequestId}}));
+ f.execute.mockImplementation(async()=>({id:'posted',createdAt:1}));
+ next.resolve({text:'Sibling result',steps:[],toolCalls:[],cleanup:async()=>{}});
+ await vi.waitFor(()=>expect(f.execute).toHaveBeenCalledWith('postRoomMessage',expect.objectContaining({text:'Sibling result'})),{timeout:5000});
 });

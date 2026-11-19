@@ -3623,6 +3623,16 @@
           "question": "Agent-authored short question, validated when written.",
           "recommended_option_id": "Optional recommendation from the asking agent."
         }
+      },
+      "agent_invocations": {
+        "module": "Work authority",
+        "reason": "Confirmed reply evidence belongs to a harness attempt, independently of its target and message lifetime.",
+        "columns": {
+          "command_id": "Executing command; cascade owns retention.",
+          "invocation_id": "Fresh helper attempt nonce.",
+          "replied": "Committed explicit reply delivered during this attempt.",
+          "final_suppressed": "Accepted final suppression, distinct from an answer."
+        }
       }
     },
     "jsonb": {

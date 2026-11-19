@@ -161,6 +161,8 @@ export type AgentCommand = {
 };
 
 /** `requestId` names the queue item a tool call serves. */
+/** Private helper invocation identity; reply targets never supply this authority. */
+export type AgentInvocation = { readonly id: string; readonly requestId: string };
 export type TurnOutputAuthority = { readonly requestId?: string };
 
 /** A commander's stop: whether a running turn was cancelled, and how many of its queued orders were dropped. */

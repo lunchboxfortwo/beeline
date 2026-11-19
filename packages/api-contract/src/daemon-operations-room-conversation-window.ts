@@ -422,7 +422,9 @@ export type WriteResult = {
 };
 
 export type PostRoomMessageResult = WriteResult & {
-  /** False when no public reply exists and closing text is empty; the queue item stays owed. */
+  /** Final consumed without publication or settling unanswered requests. */
+  readonly suppressed?: boolean;
+  /** False when the final does not answer the request; the queue item stays owed. */
   readonly answered?: boolean;
   /** Non-fatal delivery warnings after a public reply has already posted. */
   readonly receipt?: string;
@@ -435,8 +437,9 @@ export type ReactToRoomMessageInput = RoomInput & {
 
 export type PostRoomMessageInput = TurnOutputAuthority &
   RoomInput & {
-    /** Helper closing receipt: empty output completes the item without publishing. */
+    /** Helper closing receipt; unanswered requests remain owed. */
     readonly harnessEnded?: boolean;
+    readonly invocation?: import('./daemon-operations.js').AgentInvocation;
     readonly requestId?: string;
     /** Other queue items answered by this combined reply, in the same chat. */
     readonly queuedRequestIds?: readonly string[];

@@ -384,6 +384,7 @@ export async function activeCommandContext(): Promise<{
   roomId: string;
   requestId: string;
   taskId?: string;
+  invocation?: import('@beeline/api-contract/daemon').AgentInvocation;
 }> {
   const value = await readTurnContextFile();
   const requestId = commandRequest.getStore() ?? value.requestId;
@@ -391,6 +392,7 @@ export async function activeCommandContext(): Promise<{
   if (!value.roomId || !requestId) throw new Error('no item is being answered here');
   const taskId = commands?.find(command => command.requestId === requestId)?.taskId ?? value.taskId;
   return {roomId:String(value.roomId),requestId:String(requestId),
+    ...(value.invocation ? {invocation:value.invocation as import('@beeline/api-contract/daemon').AgentInvocation} : {}),
     ...(typeof taskId === 'string' ? {taskId} : {})};
 }
 

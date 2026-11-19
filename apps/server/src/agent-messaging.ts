@@ -1,3 +1,4 @@
+import { lockAgentInvocation } from './agent-invocation.js';
 import { Check, Errors } from 'typebox/value';
 import { isInformationalReply, MESSAGE_ASK_SCHEMA, validateMessageAsk, type MessageAddress, type MessageAsk, type MessageRoute } from '@beeline/api-contract/daemon';
 import { randomBytes } from 'node:crypto';
@@ -105,15 +106,20 @@ export async function sendMessage(db: SqlDatabase, input: {
 
 /** The caller supplies an id, never a reply destination. */
 export async function replyToMessage(db: SqlDatabase, agentId: string, input: {
-  id:string; text:string; ask?:MessageAsk; messageId?:string; roomId?:string; queuedRequestIds?:readonly string[];
+  id:string; text:string; invocation?:import('@beeline/api-contract/daemon').AgentInvocation; ask?:MessageAsk; messageId?:string; roomId?:string; queuedRequestIds?:readonly string[];
 },onAnswered?:(roomId:string)=>void) {
   if (input.ask) validateAskInput(input.ask);
+  return db.transaction(async db => {
+  const invocation = input.invocation && input.roomId ? await lockAgentInvocation(db,agentId,input.roomId,input.invocation) : undefined;
+  if (invocation?.state === 'cancelled') refuseMessageMembership('command turn cancelled');
   const item=(await db.query<CommandRow>(`SELECT * FROM agent_commands
     WHERE agent_id=$1 AND (id=$2 OR source_message_id=$2)
     ORDER BY (id=$2) DESC,created_at DESC LIMIT 1`,[agentId,input.id])).rows[0];
   if (!item) refuseMessageMembership();
   const saved=await answerQueuedMessage(db,agentId,{roomId:item.room_id,requestId:item.id,text:input.text,
     messageAsk:input.ask,messageId:input.messageId,explicitReply:true,replyFromPlace:input.roomId});
+  if (invocation && saved.delivered) await db.query(`UPDATE agent_invocations SET replied=true
+    WHERE command_id=$1 AND invocation_id=$2`,[invocation.command_id,input.invocation!.id]);
   if (!('answered' in saved) || saved.answered!==false) onAnswered?.(item.room_id);
   const owed = [...new Set(input.queuedRequestIds ?? [])];
   const completed = !input.ask && saved.delivered && input.roomId === item.room_id && owed.includes(item.turn_request_id) && owed.length
@@ -130,4 +136,5 @@ export async function replyToMessage(db: SqlDatabase, agentId: string, input: {
       })).rows.length === owed.length
     : false;
   return {...saved,...(completed ? {_meta:{beeline:{turnComplete:true}}} : {})};
+  });
 }

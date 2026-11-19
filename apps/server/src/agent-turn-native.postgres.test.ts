@@ -1,3 +1,6 @@
+import { beginAgentInvocation } from './agent-invocation.js';
+import { sendMessage,replyToMessage } from './agent-messaging.js';
+import { answerQueuedMessage } from './agent-command.js';
 import { randomUUID } from 'node:crypto';
 import { Pool,type QueryResultRow } from 'pg';
 import { afterAll,beforeAll,describe,expect,it } from 'vitest';
@@ -131,4 +134,49 @@ describe.skipIf(!url)('native terminal receipt serialization',()=>{
     } finally {release();await Promise.allSettled([creating]);}
 
   },20_000);
+  it.each(['reply','final'] as const)('serializes a concurrent %s-first invocation receipt and final without deadlocking',async order=>{
+    const task=()=>sendMessage(first,{route:{from:{agent:person,place:room},to:{agent,place:room}},text:'Race task'});
+    const current=await task(),old=await task(),invocation={id:randomUUID(),requestId:current.id};
+    await beginAgentInvocation(first,agent,room,current.id,invocation.id);
+    const deferred=()=>{let resolve!:()=>void;const promise=new Promise<void>(done=>resolve=done);return {promise,resolve};};
+    const held=deferred(),release=deferred(),contending=deferred();
+    const observe=(db:SqlDatabase,owner:boolean):SqlDatabase=>({
+      query:async<Row extends QueryResultRow>(sql:string,values?:unknown[])=>{
+        const claim=sql.includes('FOR UPDATE OF receipt');
+        if(claim&&!owner)contending.resolve();
+        const result=await db.query<Row>(sql,values);
+        if(claim&&owner){held.resolve();await release.promise;}
+        return result;
+      },transaction:work=>db.transaction(tx=>work(observe(tx,owner))),
+    });
+    const reply=(db:SqlDatabase)=>replyToMessage(db,agent,{roomId:room,id:old.id,text:'Explicit answer',invocation});
+    const final=(db:SqlDatabase)=>answerQueuedMessage(db,agent,{roomId:room,requestId:current.id,text:'Trailing narration',harnessEnded:true,invocation});
+    const a=(order==='reply'?reply:final)(observe(first,true));
+    let b:Promise<unknown>|undefined;
+    try {
+      await Promise.race([held.promise,a.then(()=>{throw new Error('Invocation lock was not acquired');})]);
+      b=(order==='reply'?final:reply)(observe(second,false));
+      await Promise.race([contending.promise,b.then(()=>{throw new Error('Invocation contention was not reached');})]);
+      release.resolve();const results=await Promise.all([a,b]);
+      const finalResult=results[order==='reply'?1:0];
+      if(order==='reply') {
+        expect(finalResult).toMatchObject({suppressed:true,answered:false});
+        expect((await first.query('SELECT state FROM agent_commands WHERE id=$1',[current.id])).rows).toEqual([{state:'pending'}]);
+      } else expect(finalResult).not.toHaveProperty('suppressed');
+      expect((await first.query('SELECT 1 FROM messages WHERE text=$1',['Trailing narration'])).rowCount).toBe(order==='reply'?0:1);
+      await first.query("UPDATE messages SET deleted_at=now() WHERE text='Trailing narration'");
+    } finally {release.resolve();await Promise.allSettled([a,...(b?[b]:[])]);}
+  },20_000);
+  it('reciprocal targets in independent invocations acquire no executing-command lock',async()=>{
+    const task=()=>sendMessage(first,{route:{from:{agent:person,place:room},to:{agent,place:room}},text:'Reciprocal task'});
+    const a=await task(),b=await task();
+    const ia={id:randomUUID(),requestId:a.id},ib={id:randomUUID(),requestId:b.id};
+    await beginAgentInvocation(first,agent,room,a.id,ia.id);await beginAgentInvocation(first,agent,room,b.id,ib.id);
+    await Promise.all([
+      replyToMessage(first,agent,{roomId:room,id:b.id,text:'Answer B',invocation:ia}),
+      replyToMessage(second,agent,{roomId:room,id:a.id,text:'Answer A',invocation:ib}),
+    ]);
+    for(const invocation of [ia,ib])expect(await answerQueuedMessage(first,agent,{roomId:room,requestId:invocation.requestId,text:'Recap',harnessEnded:true,invocation})).toMatchObject({suppressed:true});
+  },20_000);
+
 });
