@@ -110,6 +110,18 @@ describe('connected agent message protocol',()=>{
     const other=await sendMessage(scope.db,{route:{from:{agent:USER,place:ROOM},to:{agent:AGENT,place:ROOM}},text:'For another member'});
     expect((await tools.call(client,'reply',{id:other.id,text:'Not mine'})).error).toBe(true);
   });
+  it('validates reply arguments before resolving the queued message or membership',async()=>{
+    const {client,member}=await scope.connected();
+    const task=await humanTask(member);
+    const legacy=await tools.call(client,'reply',{address:ROOM,message:task.messageId});
+    expect(legacy).toMatchObject({error:true});
+    expect(legacy.text).toContain('reply: unknown fields: address, message');
+    expect(legacy.text).not.toContain('membership');
+    const missing=await tools.call(client,'reply',{text:'Missing message id'});
+    expect(missing.text).toContain('reply: required: id');
+    expect((await scope.db.query('SELECT state FROM agent_commands WHERE id=$1',[task.id])).rows).toEqual([{state:'pending'}]);
+    await tools.ok(client,'reply',{id:task.messageId,text:'The widget works'});
+  });
   it('answers explicitly selected messages in any order without spending another item',async()=>{
     const {client,member}=await scope.connected();
     const first=await humanTask(member,'First task'),second=await humanTask(member,'Second task');

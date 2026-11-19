@@ -117,6 +117,17 @@ describe.each(['pglite',...(postgresUrl?['postgres']:[])])('P12 MCP committed me
     await serveMcpMemberStream(db,principal,output as unknown as ServerResponse,{cursor:head,mentionCursor:'1'},read as never);
     expect(read).toHaveBeenCalledTimes(1);expect(output.frames).toEqual([{v:1,type:'checkpoint',cursor:head,mentionCursor:'1'}]);
   });
+  it('delivers the last pending mention beyond the former initialization page limit',async()=>{
+    const output=reply(),read=vi.fn(async(_db:SqlDatabase,after:string)=>{
+      const next=Number(after)+1;
+      return {mentions:[{id:`backlog-${next}`,room_id:room,deliveryCursor:String(next)}],wakes:[],nextCursor:String(next),more:next<35};
+    });
+    await serveMcpMemberStream(db,principal,output as unknown as ServerResponse,{mentionCursor:'0'},read);
+    expect(read).toHaveBeenCalledTimes(35);
+    expect(output.frames.at(-2)).toMatchObject({type:'delivery',deliveryId:'mention:backlog-35:0'});
+    expect(output.frames.at(-1)).toMatchObject({type:'checkpoint',mentionCursor:'35'});
+    expect(output.writableEnded).toBe(false);
+  });
   it('does not publish a rolled-back source or unrelated token-use metrics',async()=>{
     const output=reply(),read=page();
     await serveMcpMemberStream(db,principal,output as unknown as ServerResponse,{mentionCursor:'1'},read as never);
@@ -178,11 +189,11 @@ describe.each(['pglite',...(postgresUrl?['postgres']:[])])('P12 MCP committed me
       await until(()=>!!readState(stateDir).sessions[0]?.streamCursor);
       await db.query(`INSERT INTO rooms_mcp_mentions(member_id,room_id,message_id) VALUES('member',$1,'before-expiry')`,[room]);
       await until(()=>messages.length===1&&readState(stateDir).sessions[0]?.cursor!=='1');
-      expect(messages[0]).toContain('tool reply');expect(messages[0]).toContain('\"id\":\"before-expiry\"');
+      expect(messages[0]).toContain('Reply(id: before-expiry, text: ...)');expect(messages[0]).toContain('id: before-expiry');
       await db.query(`UPDATE rooms_mcp_tokens SET expires_at=now()-interval '2 hours' WHERE hash='synthetic-token'`);
       await db.query(`INSERT INTO rooms_mcp_mentions(member_id,room_id,message_id) VALUES('member',$1,'during-expiry')`,[room]);
       await until(()=>messages.length===2);
-      expect(messages[1]).toContain('"id":"during-expiry"');
+      expect(messages[1]).toContain('id: during-expiry');
       expect(connections).toHaveLength(1);expect(refreshes).toHaveLength(0);
       expect(readState(stateDir).sessions[0]?.accessToken).toBe(principal.hash);
       const revoked=once(connections[0]!.output,'close');
@@ -230,7 +241,7 @@ describe.each(['pglite',...(postgresUrl?['postgres']:[])])('P12 MCP committed me
     }
   });
   it('honors revocation at the final credential fence without releasing prepared content',async()=>{
-    const output=reply(),read=page();let transactions=0;
+    const output=reply(),read=page(),errors=vi.spyOn(console,'error').mockImplementation(()=>{});let transactions=0;
     const observed:SqlDatabase={query:(sql,values)=>db.query(sql,values),transaction:async work=>{
       const result=await db.transaction(work);
       if(++transactions===2)await db.query(`UPDATE rooms_mcp_tokens SET revoked_at=now()`);
@@ -240,6 +251,7 @@ describe.each(['pglite',...(postgresUrl?['postgres']:[])])('P12 MCP committed me
       await serveMcpMemberStream(observed,principal,output as unknown as ServerResponse,{mentionCursor:'0'},read);
       expect(read).toHaveBeenCalledTimes(1);expect(transactions).toBe(2);
       expect(output.frames).toEqual([{v:1,type:'ended',reason:'unavailable'}]);
-    }finally{await db.query(`UPDATE rooms_mcp_tokens SET revoked_at=NULL`);}
+      expect(errors).toHaveBeenCalledWith('[mcp-member-stream] drain failed',expect.objectContaining({message:'member stream authority changed'}));
+    }finally{errors.mockRestore();await db.query(`UPDATE rooms_mcp_tokens SET revoked_at=NULL`);}
   });
 });

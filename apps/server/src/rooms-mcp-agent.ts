@@ -76,6 +76,14 @@ export const MCP_RETIRED_TOOLS: Readonly<Record<string, string>> = {
 type Args = Record<string, unknown>;
 type Route = { op: string; required: string[]; description: string };
 
+function validateToolArguments(definition: Tool, args: Args): void {
+  const properties = definition.inputSchema.properties ?? {};
+  const extra = Object.keys(args).filter(key => !(key in properties));
+  if (extra.length) throw new McpToolError(`${definition.name}: unknown fields: ${extra.join(', ')}`);
+  const missing = (definition.inputSchema.required ?? []).filter(key => args[key] === undefined);
+  if (missing.length) throw new McpToolError(`${definition.name}: required: ${missing.join(', ')}`);
+}
+
 /** First-party app_tool operations, keyed like the agent's app_tool routes. */
 const APP_ROUTES: Record<string, Record<string, Route | string>> = {
   vault: {
@@ -353,6 +361,7 @@ export class RoomsMcpAgentTools {
 
   async call(member: string, name: string, args: Args): Promise<unknown> {
     if (name === 'message' || name === 'reply' || name === 'post' && args.progress !== true) {
+      validateToolArguments(MCP_AGENT_TOOLS.find(candidate => candidate.name === name)!, args);
       const target = name === 'message' ? addressArg(args.address ?? object(args.to).place)
         : String(args.address ?? args.room ?? '');
       const item = (await this.db.query<import('./agent-command.js').CommandRow>(
@@ -376,11 +385,7 @@ export class RoomsMcpAgentTools {
     const permitted=operator && (await this.db.query('SELECT 1 FROM agents WHERE agent_id=$1 AND owner_id=$2',[member,OPERATOR_OWNER_ID])).rowCount>0;
     const definition = MCP_AGENT_TOOLS.find(candidate => candidate.name === name) ?? (permitted ? operator : undefined);
     if (!definition) throw new McpToolError(`unknown tool: ${name}`);
-    const properties = definition.inputSchema.properties ?? {};
-    const extra = Object.keys(args).filter(key => !(key in properties));
-    if (extra.length) throw new McpToolError(`${name}: unknown fields: ${extra.join(', ')}`);
-    const missing = (definition.inputSchema.required ?? []).filter(key => args[key] === undefined);
-    if (missing.length) throw new McpToolError(`${name}: required: ${missing.join(', ')}`);
+    validateToolArguments(definition, args);
     if (args.commandId !== undefined && name !== 'no_reply_needed') {
       if (typeof args.commandId !== 'string' || !/^[0-9a-f]{64}$/.test(args.commandId)) throw new McpToolError('Invalid commandId');
       const target = addressArg(args.address ?? args.room ?? args.roomId ?? object(args.about).roomId);

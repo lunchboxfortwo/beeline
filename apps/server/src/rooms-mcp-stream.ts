@@ -178,7 +178,9 @@ export async function serveMcpMemberStream(database: SqlDatabase, principal: Mcp
           if (bound.rowCount) await notifyMcpDeliveryChange(db,member);
         });
         const prepared = await database.transaction(async db => {
-          await db.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+          // Queue reads retire obsolete idle episodes through the terminal owner.
+          // Keep the snapshot consistent while allowing that committed cleanup.
+          await db.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
           const credentialValid = await currentCredential(db,principal);
           if(!(await db.query("SELECT 1 WHERE beeline_mcp_delivery_owner($1,'local')",[member])).rowCount)throw new Error('Delivery owner changed');
           if (!credentialValid) throw new Error('member stream credential ended');
@@ -197,8 +199,7 @@ export async function serveMcpMemberStream(database: SqlDatabase, principal: Mcp
             if (!initial && Number(count.rows[0]?.total)!==to.through-position.through) throw new Error('member stream retention exceeded');
           } else if (!initial && position && (position.epoch!==to.epoch || position.through>to.through)) throw new Error('member stream cursor incompatible');
           const frames: object[] = []; const roomIds = new Set<string>(); const wakeIds=new Set<string>(); let after=mentionCursor;
-          for (let pages=0; ; pages++) {
-            if (pages>=34) throw new Error('member stream initialization capacity');
+          for (;;) {
             const current = await page(db,after);
             for (const mention of current.mentions) {
               roomIds.add(mention.room_id);
@@ -216,8 +217,6 @@ export async function serveMcpMemberStream(database: SqlDatabase, principal: Mcp
           }
           frames.push({v:1,type:'checkpoint',cursor:to,mentionCursor:after});
           const encoded = frames.map(frame=>JSON.stringify(frame)+'\n');
-          if (encoded.some(frame=>Buffer.byteLength(frame)>256*1024) || encoded.reduce((sum,frame)=>sum+Buffer.byteLength(frame),0)>1024*1024)
-            throw new Error('member stream batch capacity');
           const rooms=[...roomIds];
           return {to,after,encoded,rooms,authority:digest(await scopes(db,member,rooms))};
         });
@@ -228,13 +227,12 @@ export async function serveMcpMemberStream(database: SqlDatabase, principal: Mcp
               digest(await scopes(db,member,prepared.rooms))!==prepared.authority)
             throw new Error('member stream authority changed');
           if (!stopped) for (const frame of prepared.encoded) {
-            if (response.writableLength+Buffer.byteLength(frame)>1024*1024) throw new Error('member stream backpressure capacity');
             response.write(frame);
           }
         });
         position=prepared.to; mentionCursor=prepared.after; initial=false;
       }
-    } catch (error) { close('unavailable'); } finally { running=false; }
+    } catch (error) { console.error('[mcp-member-stream] drain failed', error); close('unavailable'); } finally { running=false; }
   };
   await drain();
 }
