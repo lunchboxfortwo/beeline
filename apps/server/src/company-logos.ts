@@ -73,10 +73,9 @@ function homepageUrl(value: string): URL | undefined {
   } catch { return undefined; }
 }
 
-/** Use the existing safe icon endpoint; Room reads never wait on a website. */
-export function homepageIconUrl(homepage: string | null | undefined, origin: string): string | undefined {
-  const url = homepage ? homepageUrl(homepage) : undefined;
-  return url ? `${origin}/v1/company-logos/${encodeURIComponent(url.href)}` : undefined;
+/** A repository homepage normalized to its HTTPS icon-cache key. */
+export function homepageKey(homepage: string | null | undefined): string | undefined {
+  return homepage ? homepageUrl(homepage)?.href : undefined;
 }
 
 /** Raw RGBA from a Windows icon's largest entry (sharp reads PNG entries but not .ico files). */
@@ -155,16 +154,49 @@ export async function readCompanyLogo(id: string): Promise<Image | undefined> {
   const homepage = homepageUrl(id);
   if (!homepage || (!id.includes('://') && (homepage.hostname !== id || id.length > 253))) return undefined;
   // Domain-based Workbench logos and repository homepages share one cache.
-  const key = homepage.href;
+  return cachedIcon(homepage.href, () => siteIcon(homepage));
+}
+function cachedIcon(key: string, load: () => Promise<Image | undefined>): Promise<Image | undefined> | undefined {
   const held = cache.get(key);
-  if (held && held.until > Date.now()) return held.pending ?? held.image;
+  if (held && held.until > Date.now()) return held.pending ?? Promise.resolve(held.image);
   if (fetching >= 4) return undefined;
   if (cache.size >= 512) { for (const key of cache.keys()) { if (!COMPANY_MARK_IDS.has(key) && !cache.get(key)?.pending) { cache.delete(key); break; } } }
   fetching++;
-  const pending = siteIcon(homepage).then(image => { cache.set(key, { image, until: Date.now() + (image ? 10 * 60_000 : 60_000) }); return image; })
+  const pending = load().catch(() => undefined).then(image => { cache.set(key, { image, until: Date.now() + (image ? 10 * 60_000 : 60_000) }); return image; })
     .finally(() => { fetching--; });
   cache.set(key, { until: Infinity, pending });
   return pending;
+}
+
+const REPOSITORY_ICON = /^(?:(?:public|app)\/)?(?:favicon\.svg|favicon\.ico|apple-touch-icon\.png|icon-512\.png)$/;
+type RepositoryRead = (path: string) => Promise<unknown>;
+/** The repository's own committed icon from one tree listing: the largest square, a vector beating any raster. */
+export function readRepositoryIcon(fullName: string, branch: string, read: RepositoryRead): Promise<Image | undefined> | undefined {
+  return cachedIcon(`github:${fullName.toLowerCase()}`, async () => {
+    const tree = await read(`git/trees/${encodeURIComponent(branch)}?recursive=1`) as { tree?: { path?: unknown; type?: unknown; sha?: unknown }[] } | undefined;
+    let best: { size: number; bytes: Buffer } | undefined;
+    for (const entry of tree?.tree ?? []) {
+      if (entry.type !== 'blob' || typeof entry.path !== 'string' || typeof entry.sha !== 'string' || !REPOSITORY_ICON.test(entry.path)) continue;
+      try {
+        const blob = await read(`git/blobs/${encodeURIComponent(entry.sha)}`) as { content?: unknown } | undefined;
+        if (typeof blob?.content !== 'string') continue;
+        const bytes = Buffer.from(blob.content, 'base64');
+        const image = icoImage(bytes) ?? sharp(bytes, { limitInputPixels: 1_000_000, animated: false });
+        const { width, height, format } = await image.clone().metadata();
+        const vector = format === 'svg';
+        const size = vector ? Infinity : width ?? 0;
+        if (!width || width !== height || (best && best.size >= size)) continue;
+        best = { size, bytes: await image.resize(64, 64, { fit: 'inside', withoutEnlargement: !vector }).png().toBuffer() };
+      } catch { /* try the next committed icon */ }
+    }
+    return best ? { bytes: best.bytes, mime: 'image/png' } : undefined;
+  });
+}
+
+/** Approved repository chat order: homepage favicon, then the repository's own icon file. */
+export async function readRepositoryLogo(homepage: string | null, fullName: string, branch: string, read?: RepositoryRead): Promise<Image | undefined> {
+  const key = homepageKey(homepage);
+  return (key ? await readCompanyLogo(key) : undefined) ?? (read ? await readRepositoryIcon(fullName, branch, read) : undefined);
 }
 
 /** Native requests physical pixels so Image can display pixel art without resampling. */

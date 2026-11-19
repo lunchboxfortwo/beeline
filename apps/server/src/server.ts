@@ -111,6 +111,8 @@ export const ROOM_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}
 export interface GitHubServerHooks {
   webhookSecret?: string;
   roomToken?: (identityId: string, roomId: string) => Promise<{ token: string; expiresAt: number }>;
+  /** One GET under the repository chat's repository, with its installation token. */
+  readRepository?: (roomId: string, fullName: string, path: string) => Promise<unknown>;
   onWebhook?: (eventType: string, payload: unknown, deliveryId?: string) => Promise<void>;
   completeInstallation?: (state: string, installationId: number) => Promise<string>;
 }

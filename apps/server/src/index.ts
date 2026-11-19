@@ -462,6 +462,8 @@ async function main() {
       ...(github
         ? {
             roomToken: async (_identityId: string, roomId: string) => github.roomToken(roomId),
+            readRepository: async (roomId: string, fullName: string, path: string) =>
+              github.app.issuesRequest((await github.roomToken(roomId)).token, fullName, 'GET', path),
             onWebhook: processGitHubWebhook,
             completeInstallation: (state: string, installationId: number) =>
               github.completeInstallation(state, installationId),
