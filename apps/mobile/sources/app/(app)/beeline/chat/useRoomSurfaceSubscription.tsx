@@ -6,6 +6,7 @@ import { router } from 'expo-router';
 import { finishRestoredRoom } from '@/navigation/restored-page';
 import { KIND_AGENT_DRAFT, LiveOverlayDecoder, isRoomView, type LiveOverlay, type RoomView, type RoomViewMessage } from '@beeline/buzz-client';
 import { RoomViewClient, RoomViewHttpError } from '@/sync/transport/room-view-client';
+import { sharedLiveConnection } from '@/sync/transport/live-connection';
 import { loadBuzzIdentity, loadBuzzViewerPubkey, peekBuzzViewerContext, getEffectiveRelayUrl } from '@/auth/buzz-identity-storage';
 import { markRoomOpen, markRoomOpenWeight } from '@/buzz/room-open-trace';
 import { displayRoomMessages, reconcileRoomView, reconcileRoomMessageDelta } from '@/buzz/room-view-presentation';
@@ -109,6 +110,7 @@ export function useRoomSurfaceSubscription([
     let decoder: LiveOverlayDecoder | undefined;
     let pendingOverlayEvents: Parameters<LiveOverlayDecoder['decode']>[0][] = [];
     let watchGeneration = 0;
+    let subscribedGeneration: number | undefined;
     let hasPainted = false;
     let reopenedChat = false;
     let pendingReadTraces: ReceivedLiveTrace[] = [];
@@ -341,6 +343,11 @@ export function useRoomSurfaceSubscription([
             if (live.type === 'sync-ok') return;
             if (live.type === 'subscribed') {
               markRoomOpen('subscribed', live.roomId);
+              // The open already owns one (possibly prefetched) read. Later
+              // admissions cover updates missed while push was disconnected.
+              const generation = sharedLiveConnection().diagnostics().generation;
+              if (subscribedGeneration !== undefined && generation !== subscribedGeneration) readVisibleRoom();
+              subscribedGeneration = generation;
               return;
             }
             if (live.type === 'sidebar-preview') {
@@ -377,6 +384,9 @@ export function useRoomSurfaceSubscription([
               return;
             }
             if (live.type === 'invalidate') {
+              // Wait for replacement admission rather than starting a second
+              // Room read during recovery. An in-place resync still reads now.
+              if (live.reason === 'reconnect' && !sharedLiveConnection().commandState().ready) return;
               if (ROOM_READ_UNCHANGED_REASONS.has(live.reason)) return;
               // A committed row's own delta follows this hint and paints it.
               // Only a row the server could not read (its fallback, which

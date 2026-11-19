@@ -765,7 +765,7 @@ describe('useRoomSurfaceSession', () => {
   });
 
 
-  it('reads once on its first handshake and never starts reads from resubscribe', async () => {
+  it('uses one opening read, then one covering read per reconnect admission', async () => {
     controls.cached = roomView('room-a');
     let renderer!: ReactTestRenderer;
     await act(async () => {
@@ -774,18 +774,34 @@ describe('useRoomSurfaceSession', () => {
       );
     });
     await flushEffects();
+    const openingReads = controls.roomReads;
+    expect(openingReads).toBe(1);
 
     await act(async () => {
       controls.subscriptions[0]!.emit({
         monolithLive: { type: 'subscribed', roomId: 'room-a' },
       });
     });
+    expect(controls.roomReads).toBe(openingReads);
 
+    await act(async () => {
+      controls.subscriptions[0]!.emit({ monolithLive: { type: 'subscribed', roomId: 'room-a' } });
+    });
+    expect(controls.roomReads).toBe(openingReads);
+    controls.connectionGeneration++;
     await act(async () => {
       controls.subscriptions[0]!.emit({
         monolithLive: { type: 'subscribed', roomId: 'room-a' },
       });
     });
+    expect(controls.roomReads).toBe(openingReads + 1);
+    controls.connectionGeneration++;
+    await act(async () => {
+      controls.subscriptions[0]!.emit({
+        monolithLive: { type: 'subscribed', roomId: 'room-a' },
+      });
+    });
+    expect(controls.roomReads).toBe(openingReads + 2);
     await act(async () => renderer.unmount());
   });
 
@@ -794,7 +810,7 @@ describe('useRoomSurfaceSession', () => {
 
 
 
-  it('uses the push read already started before route mount without a subscription reread', async () => {
+  it('uses the push read already started before route mount without an initial subscription reread', async () => {
     controls.roomResponse = roomView('room-a');
     prefetchPushRoom('response-prefetched', 'room-a');
     await flushMicrotasks();

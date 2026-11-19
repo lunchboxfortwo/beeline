@@ -60,6 +60,10 @@ type TestSurfaceEvent = NostrEvent | MonolithSurfaceEvent;
 // These fixtures exercise the negotiated legacy compatibility path. The actual
 // router owner/negotiation path has independent integration coverage.
 vi.mock('@/sync/transport/live-connection', () => ({
+  sharedLiveConnection: () => ({
+    commandState: () => ({ ready: controls.connectionReady }),
+    diagnostics: () => ({ generation: controls.connectionGeneration }),
+  }),
   reconnectNow: () => {
     controls.explicitReconnects += 1;
   },
@@ -76,6 +80,8 @@ const controls = vi.hoisted(() => ({
   routeChannelId: 'room-a',
   scopeProbe: null as null | ((session: any, overlay: any, history: any) => void),
   focused: true,
+  connectionReady: true,
+  connectionGeneration: 1,
   routerMode: 'legacy' as 'legacy' | 'pending' | 'router',
   routerValue: null as RoomView | null,
   navigationListeners: new Map<string, Set<() => void>>(),
@@ -572,6 +578,8 @@ beforeEach(() => {
   vi.unstubAllGlobals();
   roomTransitionWork.flush();
   controls.focused = true;
+  controls.connectionReady = true;
+  controls.connectionGeneration = 1;
   controls.focusListeners.clear();
   controls.navigationListeners.clear();
   controls.interactionTasks.clear();

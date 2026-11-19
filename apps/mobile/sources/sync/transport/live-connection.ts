@@ -33,6 +33,7 @@ type RequestOptions = {
   reconnectOwnedByOutbox?: true;
 };
 type PendingRequest = {
+  operation: string;
   frame: string;
   socket?: WebSocket;
   generation?: number;
@@ -320,6 +321,7 @@ export class LiveConnection {
         return true;
       };
       const request: PendingRequest = {
+        operation,
         frame: JSON.stringify({
           t: 'req',
           id,
@@ -445,12 +447,20 @@ export class LiveConnection {
 
   private socketFailed(socket: WebSocket): void {
     if (this.socket !== socket) return;
+    const wasConnected = !this.connecting;
+    const requestOwnsRecovery = [...this.requests.values()].some(request =>
+      !['reportDiagnostics', 'reportSigninFunnel'].includes(request.operation));
     this.dropConnection(true);
     // Every open surface lost coverage, even when an unrelated request was
     // pending. Telemetry intentionally cannot reconnect itself; a diagnostic
     // upload must not swallow the only signal that makes the Room read again.
     // The confirming replacement retains its existing one-attempt budget.
-    if (!this.recovering && AppState.currentState === 'active') this.refreshRoom();
+    if (!this.recovering && AppState.currentState === 'active') {
+      // Reopen established push coverage even when a Room waits for admission
+      // before reading. Failed admission alone must not open another socket.
+      if (wasConnected && !requestOwnsRecovery) this.reconnectNow();
+      this.refreshRoom();
+    }
   }
   private dropConnection(transportFailed = false): void {
     const socket = this.socket;

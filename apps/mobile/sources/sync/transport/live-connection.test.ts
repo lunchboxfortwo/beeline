@@ -300,6 +300,26 @@ describe('the one phone socket', () => {
     const { connection } = setup(); const listener = vi.fn(); await connection.register([{ '#h': ['a'] }], listener);
     (await open()).drop(); expect(listener).toHaveBeenCalledOnce(); expect(useConnectionFailure()).toBe(false);
   });
+  it.each(['android', 'ios', 'web'])('%s reopens idle push coverage without a pre-admission read or repeating failed admission', async platform => {
+    state.platform = platform;
+    const { connection } = setup();
+    await connection.register([{ '#h': ['a'] }], () => {});
+    const first = await open();
+    const upload = connection.request('reportDiagnostics', {} as never, { reconnectOwnedByOutbox: true })
+      .catch(() => undefined);
+    first.drop();
+    await upload;
+    await tick();
+    expect(Socket.instances).toHaveLength(2);
+    const replacement = Socket.instances[1]!;
+    expect(replacement.requests()).toHaveLength(0);
+    replacement.fail();
+    await tick();
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(Socket.instances).toHaveLength(2);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(useConnectionFailure()).toBe(false);
+  });
   it('a diagnostic upload cannot hide a socket close from the Room covering read', async () => {
     const { connection } = setup();
     let room = { working:true, replies:[] as string[] };
