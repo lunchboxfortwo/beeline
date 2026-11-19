@@ -1,7 +1,7 @@
 import { queueMessage } from './agent-command.js';
 import { SYSTEM_AUTHOR_ID, systemText } from './message-origin.js';
 import { MCP_RETIRED_TOOLS } from './rooms-mcp-agent.js';
-import { AGENT, PUBLIC_CORNER, ROOM, USER, WORKSPACE, beforeAll, beforeEach, describe, expect, fixtureScope1, fixtureScope3, it } from './test-support-rooms-mcp.test-support.js';
+import { AGENT, PRIVATE, PUBLIC_CORNER, ROOM, USER, WORKSPACE, beforeAll, beforeEach, describe, expect, fixtureScope1, fixtureScope3, it } from './test-support-rooms-mcp.test-support.js';
 
 const REVIEWER = 'e'.repeat(64);
 const DM = '66666666-6666-4666-8666-666666666666', SIBLING = '77777777-7777-4777-8777-777777777777';
@@ -93,6 +93,34 @@ describe('C4: external agents route like native agents', () => {
     await scope.daemon.execute('reply', { id: asked.id, text: 'Approved' }, REVIEWER);
     expect((await session('list_mentions', {})).wakes.map((item: { address: string; from: unknown }) => [item.address, item.from]))
       .toEqual([[THREAD, { agent: REVIEWER, place: THREAD }]]);
+  });
+
+  it.each([AGENT, 'demo-agent', '@demo-agent'])('a joined session outside a turn messages %s in a shared thread without a sending address', async recipient => {
+    const { token, member } = await external();
+    expect(await pending(member)).toEqual([]);
+    const response = await scope.post('/mcp', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
+      name: 'message', arguments: { to: { agent: recipient, place: THREAD }, text: 'Please review this thread' },
+    } }, { authorization: `Bearer ${token}`, 'mcp-protocol-version': '2026-07-28', accept: 'application/json' });
+    const value = await response.json() as { result: { isError?: boolean; content: { text: string }[] } };
+    expect(value.result.isError, value.result.content[0]!.text).toBeFalsy();
+    const sent = JSON.parse(value.result.content[0]!.text).data;
+    expect(await pending(AGENT)).toEqual([{ id: sent.id, room_id: THREAD, from: { agent: member, place: THREAD }, ask: null }]);
+    await scope.daemon.execute('reply', { id: sent.id, text: 'Reviewed' }, AGENT);
+    expect((await pending(member)).map(row => [row.room_id, row.from]))
+      .toEqual([[THREAD, { agent: AGENT, place: THREAD }]]);
+  });
+
+  it('a standalone session message still requires both identities to share its place', async () => {
+    const { client, member } = await external();
+    const outsider = 'f'.repeat(64);
+    await db().query("INSERT INTO identities(id,kind,name) VALUES($1,'agent','Outsider')", [outsider]);
+    await db().query('INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)', [outsider, USER]);
+    for (const to of [{ agent: AGENT, place: PRIVATE }, { agent: outsider, place: THREAD }]) {
+      const refused = await tools.call(client, 'message', { to, text: 'Forbidden' });
+      expect(refused).toEqual({ error: true, text: 'Request refused: address requires current membership.' });
+    }
+    expect(await pending(member)).toEqual([]);
+    expect(await pending(AGENT)).toEqual([]);
   });
 
   it('a host with a stale cached tool list learns each replacement, can read its wakes, and cannot answer them until refreshed', async () => {

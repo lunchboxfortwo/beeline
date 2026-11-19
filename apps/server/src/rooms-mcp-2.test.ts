@@ -397,7 +397,7 @@ const scope1 = fixtureScope1();
     for(const rule of ['Messages and wakes:', 'reply(id,text,ask?)', 'The server requests review; never tag the reviewer.', 'recorded sender and place']) expect(text).toContain(rule);
     const tools=(await client.listTools()).tools;
     for(const name of ['send_message','order','report','ask_owner','merge_thread','react_to_message','record_merge_yes']) expect(tools.some(tool=>tool.name===name)).toBe(false);
-    expect(tools.find(tool=>tool.name==='message')?.inputSchema.required).toEqual(['address','to','text']);
+    expect(tools.find(tool=>tool.name==='message')?.inputSchema.required).toEqual(['to','text']);
     expect(tools.find(tool=>tool.name==='reply')?.inputSchema.required).toEqual(['id','text']);
   });
 

@@ -170,8 +170,8 @@ export const MCP_AGENT_TOOLS: Tool[] = [
     name: { type: 'string' }, objective: { type: 'string' }, brief, expectedRevision: { type: 'integer', minimum: 0 }, change: { type: 'string', maxLength: 1000 },
   }, ['address', 'action']),
   tool('message', 'Send to one identity in one place. A thread selects its implementer or configured reviewer. The message records your origin; ask creates a card only for a person. Ask the person a clear question; put the surrounding context in the message text.', {
-    address:address('Your sending place.'),to:MESSAGE_ADDRESS_SCHEMA,text:{type:'string'},ask:MESSAGE_ASK_SCHEMA,
-  }, ['address','to','text']),
+    address:address('Your sending place; omit to send from to.place.'),to:MESSAGE_ADDRESS_SCHEMA,text:{type:'string'},ask:MESSAGE_ASK_SCHEMA,
+  }, ['to','text']),
   tool('reply', 'Reply to the recorded sender and place of id. Add ask only when you need an answer. Ask the person a clear question; put the surrounding context in the message text. Use this for done, blocked and failed outcomes.', {
     id:{type:'string'},text:{type:'string'},ask:MESSAGE_ASK_SCHEMA,
   }, ['id','text']),
@@ -353,7 +353,8 @@ export class RoomsMcpAgentTools {
 
   async call(member: string, name: string, args: Args): Promise<unknown> {
     if (name === 'message' || name === 'reply' || name === 'post' && args.progress !== true) {
-      const target = String(args.address ?? args.room ?? '');
+      const target = name === 'message' ? addressArg(args.address ?? object(args.to).place)
+        : String(args.address ?? args.room ?? '');
       const item = (await this.db.query<import('./agent-command.js').CommandRow>(
         `SELECT * FROM agent_commands WHERE agent_id=$1 AND (state='pending' OR id=$2) AND reason<>'mcp_call'
          AND ($2::text IS NULL OR id=$2) AND ($4 OR room_id::text=$3) ORDER BY (room_id::text=$3) DESC,inbox_sequence,id LIMIT 1`,
