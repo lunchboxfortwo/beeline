@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { Input, XStack, YStack } from 'tamagui';
 import { FileText, Link as LinkIcon, Plus } from 'lucide-react-native';
-import type { WorkItemView } from '@beeline/api-contract/phone';
+import type { WorkItemView, WorkState } from '@beeline/api-contract/phone';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
 import { compactRelativeTime } from '@/buzz/relative-time';
 import { mediaIdFromUrl } from '@/buzz/artifact';
@@ -18,6 +18,9 @@ const STATE_LABEL = {
   backlog: 'Backlog',
   done: 'Done',
 };
+
+/** The states a person sets by hand; the others follow the thread's own work. */
+const SETTABLE_STATES = ['backlog', 'in-progress', 'done'] as const satisfies readonly WorkState[];
 
 /** Shared phone/desktop detail. Server responses own the stream and attachments. */
 export function WorkItemDetail({
@@ -36,7 +39,8 @@ export function WorkItemDetail({
   const [note, setNote] = useState('');
   const [sending, setSending] = useState(false);
   const [attaching, setAttaching] = useState(false);
-  const busy = useRef({ note: false, attachment: false });
+  const [changingState, setChangingState] = useState(false);
+  const busy = useRef({ note: false, attachment: false, state: false });
   const address = { roomId: item.roomId, id: item.id };
   const refresh = () => loadWorkBoard(workspaceId, true);
   const send = async () => {
@@ -53,6 +57,20 @@ export function WorkItemDetail({
     } finally {
       busy.current.note = false;
       setSending(false);
+    }
+  };
+  const changeState = async (state: WorkState) => {
+    if (state === item.state || busy.current.state) return;
+    busy.current.state = true;
+    setChangingState(true);
+    try {
+      await monolithPhoneOperation('updateWorkItem', { ...address, state });
+      await refresh();
+    } catch {
+      /* The shared connection owner handles transport failures. */
+    } finally {
+      busy.current.state = false;
+      setChangingState(false);
     }
   };
   const attach = async (kind: 'file' | 'link') => {
@@ -114,6 +132,24 @@ export function WorkItemDetail({
             <T v="meta" color="secondary">
               {item.idle ? 'Idle' : STATE_LABEL[item.state]}
             </T>
+          </XStack>
+          <XStack gap="2" flexWrap="wrap" role="radiogroup" aria-label="State" testID="work-state-picker">
+            {SETTABLE_STATES.map((state) => (
+              <Btn
+                key={state}
+                kind={item.state === state ? 'accent' : 'secondary'}
+                label={STATE_LABEL[state]}
+                role="radio"
+                aria-checked={item.state === state}
+                disabled={changingState}
+                onPress={() => {
+                  void changeState(state);
+                }}
+                testID={`work-state-${state}`}
+              >
+                <T v="meta" color={item.state === state ? 'needsYou' : 'ink'}>{STATE_LABEL[state]}</T>
+              </Btn>
+            ))}
           </XStack>
           {item.objective ? <T testID="work-sheet-objective">{item.objective}</T> : null}
           <YStack gap="2">

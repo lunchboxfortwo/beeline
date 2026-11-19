@@ -10,7 +10,7 @@ vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcrip
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: (props: any) => React.createElement('IdentityMark', props) }));
 vi.mock('@/ui/shell/TabHeader', () => ({ TabHeader: () => null, useScrolledUnder: () => ({ scrolled: false, scrollProps: {} }) }));
-vi.mock('./WorkItemDetail', () => ({ WorkSheet: () => null }));
+vi.mock('./WorkItemDetail', () => ({ WorkSheet: (props: any) => React.createElement('WorkSheet', props) }));
 vi.mock('@/components/buzz/CodeBlock', () => ({ CodeBlock: () => null }));
 vi.mock('@/buzz/message-link', () => ({ messageLinkId: () => undefined, openMessageLink: vi.fn() }));
 vi.mock('@/utils/open-external-url', () => ({ openExternalUrl: vi.fn().mockResolvedValue(undefined) }));
@@ -169,5 +169,24 @@ it.each([[false, false], [false, true], [true, false], [true, true]])('shows the
         expect(buttons.map((node: any) => node.props.kind)).toEqual(['secondary', 'secondary']);
         await act(async () => buttons[0].props.onPress({ stopPropagation() {} }));
         expect(actions.decide).toHaveBeenCalledWith(board.items[0], choices[0]);
+    } finally { act(() => tree.unmount()); }
+});
+
+it('TASK-STATE-2: a thread card opens its thread, and its status mark opens the task sheet', () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    const item = { id: 'thread', roomId: 'thread', roomKind: 'corner', chatId: 'chat', chatName: 'general', threadName: 'Ship it', title: 'Ship it', state: 'in-progress' };
+    const board = { workspaceId: 'ws', workspaceName: 'Crew', viewerId: 'viewer', chats: [], people: [], items: [item] } as unknown as WorkBoardView;
+    const actions = { open: vi.fn(), reply: vi.fn(), decide: vi.fn(), assign: vi.fn(), clear: vi.fn(), clearAll: vi.fn() };
+    let tree: any;
+    act(() => { tree = create(<WorkBoard board={board} desktop={false} actions={actions} />); });
+    const host = (id: string) => tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === id);
+    try {
+        if (host('work-section-in-progress').props['aria-expanded'] === false) act(() => host('work-section-in-progress').props.onPress());
+        act(() => host('work-item-thread').props.onPress());
+        expect(actions.open).toHaveBeenCalledOnce();
+        expect(tree.root.findByType('WorkSheet').props.item).toBeNull();
+        act(() => host('work-state-mark-thread').props.onPress());
+        expect(tree.root.findByType('WorkSheet').props.item).toMatchObject({ id: 'thread' });
+        expect(actions.open).toHaveBeenCalledOnce();
     } finally { act(() => tree.unmount()); }
 });

@@ -38,7 +38,6 @@ import { useRoomMessageStore } from '@/buzz/room-message-store';
 import {
   roomMessageRecord,
   useRoomMessageRecords,
-  writeRoomBookmark,
 } from '@/buzz/room-message-records';
 
 import type { RoomHistoryView, RoomViewMessage } from '@beeline/buzz-client';

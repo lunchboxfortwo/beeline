@@ -110,6 +110,8 @@ function PersonProfile({ workspaceId, memberId, close }: { workspaceId: string; 
     }, [focused, workspaceId, memberId, retry]);
 
     const self = viewer?.identity.pubkey === memberId;
+    // The server adds someone else to a chat only for a Workspace admin or owner.
+    const canInvite = Boolean(viewer?.permissions.manage);
     const canEditRole = !self && Boolean(viewer?.permissions.manage) && Boolean(member) &&
         ((viewer?.role === 'owner' && member?.role !== 'owner') ||
             (viewer?.role === 'admin' && member?.role === 'member'));
@@ -219,9 +221,11 @@ function PersonProfile({ workspaceId, memberId, close }: { workspaceId: string; 
                             <Btn kind="primary" minHeight={HEIGHT.control} label="Message" disabled={busy} onPress={message} testID="human-profile-message">
                                 <XStack gap="2" alignItems="center"><Glyph icon={MessagesSquare} size={16} color="primaryInk" /><T v="heading" color="primaryInk">Message</T></XStack>
                             </Btn>
-                            <Btn label="Invite to chat" disabled={busy} onPress={() => setInviting(true)} testID="human-profile-invite">
-                                <XStack gap="2" alignItems="center"><Glyph icon={UserPlus} size={16} color="ink" /><T v="heading">Invite to chat</T></XStack>
-                            </Btn>
+                            {canInvite ? (
+                                <Btn label="Invite to chat" disabled={busy} onPress={() => setInviting(true)} testID="human-profile-invite">
+                                    <XStack gap="2" alignItems="center"><Glyph icon={UserPlus} size={16} color="ink" /><T v="heading">Invite to chat</T></XStack>
+                                </Btn>
+                            ) : null}
                             {canEditRole && !editing ? (
                                 <Btn label="Edit" disabled={busy} onPress={() => setEditing(true)} testID="edit-person-role">
                                     <XStack gap="2" alignItems="center"><Glyph icon={Pencil} size={16} color="ink" /><T v="heading">Edit</T></XStack>
@@ -267,7 +271,7 @@ function PersonProfile({ workspaceId, memberId, close }: { workspaceId: string; 
                     </Section>
                 </>
             ) : null}
-            <SheetFrame open={inviting} close={() => setInviting(false)} title="Invite to chat" testID="person-invite-chat">
+            <SheetFrame open={inviting && canInvite} close={() => setInviting(false)} title="Invite to chat" testID="person-invite-chat">
                 {!chatList ? <Spinner /> : chats.map((item) => (
                     <SheetRow key={item.room.id} icon={null} label={roomTitle(item.room.name) ?? item.room.name} onPress={() => inviteTo(item.room.id)} testID={`person-invite-${item.room.id}`} />
                 ))}

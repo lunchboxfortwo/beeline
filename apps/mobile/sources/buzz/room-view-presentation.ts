@@ -235,7 +235,6 @@ export type ChatDisplayMessage = {
   sourceClient?: RoomViewMessage['sourceClient'];
   agentModel?: string;
   reactions?: RoomViewMessage['reactions'];
-  bookmarked?: boolean;
   /** Someone reported this message to the Beeline feedback loop; shared, not private. */
   feedbackReported?: boolean;
   replyToId?: string;
@@ -400,7 +399,6 @@ export function displayRoomMessage(
     ...(message.reactions
       ? { reactions: message.reactions.map((reaction) => ({ ...reaction })) }
       : {}),
-    ...(message.bookmarked ? { bookmarked: true } : {}),
     ...(message.feedbackReported ? { feedbackReported: true } : {}),
     ...(message.reply ? { replyToId: message.reply.eventId } : {}),
     ...(message.durableFact ? { durableFact: { kind: message.durableFact } } : {}),

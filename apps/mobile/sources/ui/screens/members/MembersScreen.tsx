@@ -12,6 +12,8 @@ import { InvitePeopleSheet } from '@/ui/screens/people/InvitePeopleSheet';
 import { useWorkspaceRoster } from '@/ui/screens/people/use-workspace-roster';
 import { AddChatAgentsSheet } from './AddChatAgentsSheet';
 import { useRoomView } from './use-room-view';
+import { appErrorCopy } from '@/buzz/app-error-copy';
+import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 
 /**
  * A chat's Members: exactly two sections, People and Agents, each with its own
@@ -50,19 +52,44 @@ export function MembersScreen({ roomId, close }: { roomId: string; close: () => 
     const openAgent = (row: PeopleRow) => () => openPlace({ kind: 'agent', agentId: row.id, workspaceId }, desktop);
     const canInvite = roster.surface?.viewer.permissions.manage === true;
     const canAddAgents = room?.viewer.permissions.manage === true;
+    // Workspace admins and owners only, and only in a top-level chat: the server's own gate.
+    const canRemove = canInvite && Boolean(room) && !room?.parent && !room?.directMessage;
+    const [removing, setRemoving] = useState<string | null>(null);
+    const [removeError, setRemoveError] = useState<string | null>(null);
+    const removeMember = (row: PeopleRow) => !canRemove || row.id === viewerPubkey ? undefined : {
+        label: `Remove ${row.handle} from ${tag}`,
+        disabled: removing !== null,
+        onPress: () => void (async () => {
+            const { Modal } = await import('@/modal');
+            const confirmed = await Modal.confirm(`Remove ${row.handle} from ${tag}?`, undefined, {
+                cancelText: 'Cancel', confirmText: 'Remove', destructive: true,
+            });
+            if (!confirmed) return;
+            setRemoving(row.id);
+            setRemoveError(null);
+            try {
+                await monolithPhoneOperation('removeRoomMember', { roomId, memberId: row.id });
+                await refresh();
+            } catch (reason) {
+                setRemoveError(appErrorCopy(reason));
+            } finally {
+                setRemoving(null);
+            }
+        })(),
+    };
 
     return (
         <Screen title="Members" back={close} testID="members">
-            {error ? <Copy small quiet role="alert">{error}</Copy> : null}
+            {error || removeError ? <Copy small quiet role="alert">{error ?? removeError}</Copy> : null}
             <YStack gap="2" testID="members-people">
                 <SectionHead title={`People · ${people.length}`} addLabel="Add people" testID="add-people"
                     onAdd={canInvite && workspaceId ? () => setSheet('people') : undefined} />
-                <MemberCard rows={people} open={openPerson} />
+                <MemberCard rows={people} open={openPerson} remove={removeMember} />
             </YStack>
             <YStack gap="2" testID="members-agents">
                 <SectionHead title={`Agents · ${agents.length}`} addLabel="Add agents" testID="add-agents"
                     onAdd={canAddAgents ? () => setSheet('agents') : undefined} />
-                <MemberCard rows={agents} open={openAgent} />
+                <MemberCard rows={agents} open={openAgent} remove={removeMember} />
             </YStack>
             {workspaceId ? (
                 <>

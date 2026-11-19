@@ -9,7 +9,7 @@ import { scrollFollowOnLayoutChange } from '@/buzz/room-scroll-follow';
 vi.mock('react-native', () => ({ AccessibilityInfo: { announceForAccessibility: vi.fn() } }));
 vi.mock('@/modal', () => ({ Modal: {} }));
 vi.mock('@/buzz/chat-list-store', () => ({ readChatList: vi.fn() }));
-vi.mock('@/buzz/room-message-records', () => ({ roomMessageRecord: vi.fn(), writeRoomBookmark: vi.fn() }));
+vi.mock('@/buzz/room-message-records', () => ({ roomMessageRecord: vi.fn() }));
 vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: vi.fn(), phoneOperationFailureReason: vi.fn() }));
 vi.mock('@/buzz/message-forward', () => ({ forwardMessageToRoom: vi.fn(), forwardTargets: vi.fn(), resolveForwardTargetRoom: vi.fn() }));
 

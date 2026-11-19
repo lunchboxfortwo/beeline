@@ -76,7 +76,6 @@ type Props = [
   handleCopyLedgerMessage: (text: string) => void,
   openMessageActions: (message: ChatDisplayMessage) => void,
   handleReactToMessage: (message: ChatDisplayMessage, emoji: MessageReactionEmoji) => Promise<void>,
-  handleBookmarkMessage: (message: ChatDisplayMessage) => Promise<void>,
   handleReportMessage: (message: ChatDisplayMessage) => Promise<void>,
   isDirectMessage: boolean,
   isArchived: boolean,
@@ -112,7 +111,7 @@ export function useChatTranscriptRenderer([
   setTargetBranchActionId, handleOpenSystemIdentity, openCurrentBrief, replyTargetForMessage,
   isReadOnlyDirectMessage, channelReferenceIndex, handleOpenCode, handleOpenMessageSource,
   handleOpenProfile, dismissComposerKeyboard, beginReply, handleCopyLedgerMessage,
-  openMessageActions, handleReactToMessage, handleBookmarkMessage, handleReportMessage,
+  openMessageActions, handleReactToMessage, handleReportMessage,
   isDirectMessage, isArchived, handleCornerProposalDecision, dismissOutboxMessage, isDesktop,
   bylineOpeners, hintMessageIds, failedOutboxIds, outbox, speakerWorking, answerByMessageId,
   cornerProposalAction, speakerRoleByPubkey, visibleMessageById, channelReferenceKey,
@@ -552,10 +551,9 @@ export function useChatTranscriptRenderer([
           onMessageActions={openMessageActions}
           onReact={handleReactToMessage}
           onForward={rowActions.beginForward}
-          onBookmark={handleBookmarkMessage}
           onReportIssue={handleReportMessage}
           {...((rowCornerSwipeEnabled ??
-            (!isDirectMessage && !isArchived && !viewerIsAgent && !desktopExperience)) &&
+            (!isDirectMessage && !isArchived && !viewerIsAgent)) &&
           rowRoomArchived !== true
             ? { onForwardToNewCorner: rowActions.handleForwardToNewCorner }
             : {})}
@@ -611,7 +609,6 @@ export function useChatTranscriptRenderer([
       handleOpenCode,
       handleOpenMessageSource,
       handleReactToMessage,
-      handleBookmarkMessage,
       handleReportMessage,
       handleCornerProposalDecision,
       grantActionId,

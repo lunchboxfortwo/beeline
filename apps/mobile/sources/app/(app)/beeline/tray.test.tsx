@@ -48,13 +48,14 @@ describe('Tasks tab', () => {
     serve([task(), task({ id: 'idle', title: 'release-corner', idle: true, assignee: null })]);
     const tree = await renderTags();
     await press(tree, 'In progress 2');
+    // The glyph is its own control ahead of the row: it opens the task sheet.
+    const mark = (title: string) => byLabel(tree, `Change state of ${title}`).find((n: any) => n.props.state !== undefined);
+    expect(mark('Measure phone reply latency').props).toMatchObject({ state: 'in-progress' });
     const row = byLabel(tree, 'Measure phone reply latency');
     const children = row.children.filter((n: any) => typeof n !== 'string');
-    expect(children[0].props).toMatchObject({ state: 'in-progress' });
     expect(children.at(-1).findAllByType('Avatar')).toHaveLength(1);
-    const idle = byLabel(tree, 'release-corner');
-    expect(idle.findAllByType('Avatar')).toHaveLength(0);
-    expect(idle.children[0].props).toMatchObject({ state: 'in-progress', idle: true });
+    expect(byLabel(tree, 'release-corner').findAllByType('Avatar')).toHaveLength(0);
+    expect(mark('release-corner').props).toMatchObject({ state: 'in-progress', idle: true });
   });
   it('opens a thread row straight into its thread, with no sheet in between', async () => {
     serve([task({ roomKind: 'corner' })]);

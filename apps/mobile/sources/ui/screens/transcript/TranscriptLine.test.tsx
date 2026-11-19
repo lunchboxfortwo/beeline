@@ -45,10 +45,9 @@ describe('TranscriptLine', () => {
         expect(tree.root.findAll((node: any) => node.type === 'YStack' && node.props.width === 44)).toHaveLength(1);
     });
 
-    it('shows the bookmark and reported states beside the time', () => {
-        const tree = render(<TranscriptLine sender={{ name: 'Dan', stamp: '09:51', bookmarked: true, feedbackReported: true }} />);
+    it('shows the reported state beside the time', () => {
+        const tree = render(<TranscriptLine sender={{ name: 'Dan', stamp: '09:51', feedbackReported: true }} />);
         expect(tree.root.findByProps({ testID: 'chat-reported-marker' }).props.children).toBe('Reported');
-        expect(tree.root.findAll((node: any) => node.type === 'YStack' && node.props.testID === 'chat-bookmark-marker')).toHaveLength(1);
         expect(tree.root.findAllByProps({ testID: 'chat-byline-profile' })).toHaveLength(0);
     });
 });

@@ -51,7 +51,6 @@ function repeatableWrite(name: string, input: unknown): boolean {
     case 'closeChat':
     case 'updateRoomPushState':
     case 'clearNeedsYou':
-    case 'setMessageBookmark':
     case 'updateWorkItem':
       return true;
     default:

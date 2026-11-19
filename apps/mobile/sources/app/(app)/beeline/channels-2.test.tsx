@@ -494,3 +494,19 @@ const scope7 = fixtureScope7();
     }
   });
 });
+
+describe('Direct message swipe', () => {
+  it('SWIPE-CLOSE-1: names the close action in text beside its glyph', async () => {
+    deck.renderRows = true;
+    deck.chatsResponse = listOf([room('room-a', 30), room('dm-a', 20, { directMessage: { peer: { pubkey: 'maya', kind: 'person', name: 'Maya' } } } as never)]);
+    const renderer = await mountDeck();
+    const swipe = renderer.root.findAllByType('Swipeable').find((node: any) => node.props.testID === 'chat-close-swipe-dm-a')!;
+    let actions!: ReturnType<typeof create>;
+    act(() => { actions = create(swipe.props.renderRightActions()); });
+    const close = actions.root.find((node: any) => node.props.testID === 'chat-close-action-dm-a');
+    expect(close.props.label).toMatch(/^Close /);
+    expect(actions.root.findAll((node: any) => node.props.v === 'meta' && node.props.children === 'Close')).not.toHaveLength(0);
+    act(() => actions.unmount());
+    await act(async () => renderer.unmount());
+  });
+});

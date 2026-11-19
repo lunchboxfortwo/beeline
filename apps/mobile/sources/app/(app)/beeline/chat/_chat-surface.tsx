@@ -293,7 +293,7 @@ export function BuzzChatSurface({
   );
   const [
     replyTargetForMessage, beginForward, beginReply, openMessageActions, handleReactToMessage,
-    handleBookmarkMessage, handleReportMessage, dismissOutboxMessage, messageIsBookmarked,
+    handleReportMessage, dismissOutboxMessage,
     canDeleteMessage, handleDeleteMessage, forwardToRoom,
   ] = useChatMessageActions([
     agentByPubkey, personProfileByPubkey, chronologicalMessagesRef, decodedId, setReplyTarget,
@@ -406,7 +406,7 @@ export function BuzzChatSurface({
     setTargetBranchActionId, handleOpenSystemIdentity, openCurrentBrief, replyTargetForMessage,
     isReadOnlyDirectMessage, channelReferenceIndex, handleOpenCode, handleOpenMessageSource,
     handleOpenProfile, dismissComposerKeyboard, beginReply, handleCopyLedgerMessage,
-    openMessageActions, handleReactToMessage, handleBookmarkMessage, handleReportMessage,
+    openMessageActions, handleReactToMessage, handleReportMessage,
     isDirectMessage, isArchived, handleCornerProposalDecision, dismissOutboxMessage, isDesktop,
     bylineOpeners, hintMessageIds, failedOutboxIds, outbox, speakerWorking, answerByMessageId,
     cornerProposalAction, speakerRoleByPubkey, visibleMessageById, channelReferenceKey,
@@ -665,8 +665,6 @@ export function BuzzChatSurface({
   messageActionsTarget={messageActionsTarget}
   outbox={outbox}
   handleReactToMessage={handleReactToMessage}
-  messageIsBookmarked={messageIsBookmarked}
-  handleBookmarkMessage={handleBookmarkMessage}
   handleReportMessage={handleReportMessage}
   handleCopyLedgerMessage={handleCopyLedgerMessage}
   showCopyToast={showReportToast}

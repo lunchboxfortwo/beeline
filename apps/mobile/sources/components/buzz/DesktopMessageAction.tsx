@@ -3,14 +3,13 @@ import Svg, { Circle, Path, Rect } from 'react-native-svg';
 import { YStack, useTheme } from 'tamagui';
 import { T } from '@/ui/grammar';
 
-type Action = 'copy' | 'reply' | 'react' | 'bookmark' | 'report' | 'forward';
+type Action = 'copy' | 'reply' | 'react' | 'report' | 'forward' | 'thread' | 'more';
 
-/** The desktop ledger's six actions share one outline scale and named tooltip. */
+/** The desktop ledger's actions share one outline scale and named tooltip. */
 export function DesktopMessageAction({
   action,
   label,
   tooltip,
-  selected,
   onPress,
   onFocus,
   onBlur,
@@ -19,7 +18,6 @@ export function DesktopMessageAction({
   action: Action;
   label: string;
   tooltip: string;
-  selected?: boolean;
   onPress?: () => void;
   onFocus: () => void;
   onBlur: () => void;
@@ -28,12 +26,11 @@ export function DesktopMessageAction({
   const [named, setNamed] = useState(false);
   const [pressed, setPressed] = useState(false);
   const theme = useTheme();
-  const ink = (selected ? theme.needsYou?.val : theme.secondary?.val) as string;
+  const ink = theme.secondary?.val as string;
   return (
     <YStack
       accessibilityLabel={label}
       accessibilityRole="button"
-      accessibilityState={action === 'bookmark' ? { selected } : undefined}
       onPress={onPress}
       onFocus={() => {
         setNamed(true);
@@ -81,11 +78,16 @@ export function DesktopMessageAction({
             <Path d="M8 14q4 5 8 0M8 9h.01M16 9h.01" />
           </>
         ) : null}
-        {action === 'bookmark' ? (
-          <Path d="M6 3h12v18l-6-4-6 4z" fill={selected ? ink : 'none'} />
-        ) : null}
         {action === 'report' ? <Path d="M5 21V3m0 0h14l-3 5 3 5H5" /> : null}
         {action === 'forward' ? <Path d="m15 5 6 6-6 6M21 11H11a7 7 0 0 0-7 7" /> : null}
+        {action === 'thread' ? <Path d="m15 10 5 5-5 5M4 4v7a4 4 0 0 0 4 4h12" /> : null}
+        {action === 'more' ? (
+          <>
+            <Circle cx={5} cy={12} r={1} />
+            <Circle cx={12} cy={12} r={1} />
+            <Circle cx={19} cy={12} r={1} />
+          </>
+        ) : null}
       </Svg>
       {named ? (
         <YStack

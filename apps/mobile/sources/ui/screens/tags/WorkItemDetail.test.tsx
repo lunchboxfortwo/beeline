@@ -12,11 +12,12 @@ vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-ho
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 24, bottom: 34, left: 0, right: 0 }) }));
 vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: () => null }));
-vi.mock('@/buzz/work-board-store', () => ({ loadWorkBoard: vi.fn() }));
-vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: vi.fn() }));
+const work = vi.hoisted(() => ({ loadWorkBoard: vi.fn(async () => undefined), monolithPhoneOperation: vi.fn(async () => undefined) }));
+vi.mock('@/buzz/work-board-store', () => ({ loadWorkBoard: work.loadWorkBoard }));
+vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: work.monolithPhoneOperation }));
 vi.mock('@/utils/open-external-url', () => ({ openExternalUrl: vi.fn() }));
 import { KeyboardBody } from '@/ui/grammar';
-import { WorkSheet } from './WorkItemDetail';
+import { WorkItemDetail, WorkSheet } from './WorkItemDetail';
 
 it('keeps the note and Send inside the shared keyboard body while activity can shrink and scroll', () => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -41,4 +42,20 @@ it('keeps the note and Send inside the shared keyboard body while activity can s
         act(() => { tree.update(sheet()); });
         expect(Math.abs(Object.assign({}, ...tree.root.findByType(KeyboardBody).findByType('View').props.style).paddingBottom)).toBe(0);
     } finally { act(() => tree.unmount()); }
+});
+
+it('TASK-STATE-1: the task sheet sets Backlog, In progress or Done through updateWorkItem', async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    const item = { id: 'task', roomId: 'room', title: 'Ship it', state: 'in-progress', entries: [], attachments: [] } as unknown as WorkItemView;
+    let tree: any;
+    act(() => { tree = create(<WorkItemDetail item={item} workspaceId="ws" viewerId="viewer" desktop={false} now={0} />); });
+    const choice = (state: string) => tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === `work-state-${state}`);
+    expect(['backlog', 'in-progress', 'done'].map((state) => choice(state).props['aria-checked'])).toEqual([false, true, false]);
+    await act(async () => { choice('done').props.onPress(); });
+    expect(work.monolithPhoneOperation).toHaveBeenCalledExactlyOnceWith('updateWorkItem', { roomId: 'room', id: 'task', state: 'done' });
+    expect(work.loadWorkBoard).toHaveBeenCalledWith('ws', true);
+    // The current state is not sent again.
+    await act(async () => { choice('in-progress').props.onPress(); });
+    expect(work.monolithPhoneOperation).toHaveBeenCalledOnce();
+    act(() => tree.unmount());
 });

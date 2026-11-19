@@ -18,7 +18,6 @@ type RoomRecords = {
   mentionsViewer?: true;
   gapBefore?: string;
   turns: Map<string, { row: RoomViewAgentTurn; stamp: number }>;
-  bookmarkedAt: Map<string, number>;
   views: Map<string, Set<string>>;
   seenRows: WeakSet<RoomViewMessage>;
   listeners: Set<() => void>;
@@ -53,7 +52,6 @@ subscribeClientReset(() => {
     room.gapBefore = undefined;
     room.latestId = undefined;
     room.turns.clear();
-    room.bookmarkedAt.clear();
     room.views.clear();
     room.seenRows = new WeakSet();
     notify(room);
@@ -65,7 +63,7 @@ function records(key: string): RoomRecords {
   let room = rooms.get(key);
   if (!room) {
     const [scope, roomId] = key.split('\u0000');
-    room = { scope: scope!, roomId: roomId!, messages: new Map(), incomplete: new Set(), tailIds: [], toolIds: [], corner: false, turns: new Map(), bookmarkedAt: new Map(),
+    room = { scope: scope!, roomId: roomId!, messages: new Map(), incomplete: new Set(), tailIds: [], toolIds: [], corner: false, turns: new Map(),
       views: new Map(), seenRows: new WeakSet(), listeners: new Set(), revision: 0 };
     rooms.set(key, room);
   }
@@ -78,7 +76,6 @@ function prune(room: RoomRecords): void {
     if ([...room.views.values()].some((ids) => ids.has(id))) continue;
     room.messages.delete(id);
     room.incomplete.delete(id);
-    room.bookmarkedAt.delete(id);
   }
 }
 
@@ -127,12 +124,9 @@ function accept(room: RoomRecords, incoming: RoomViewMessage, shared: boolean, c
   else if (!readAt.has(incoming)) readAt.set(incoming, currentSurfaceStamp());
   if (held && !shared && !upgrading && (held.version ?? 0) === (incoming.version ?? 0) &&
     (readAt.get(held) ?? 0) > readAt.get(incoming)!) return false;
-  const written = room.bookmarkedAt.get(incoming.id);
-  const keepBookmark = shared || (written !== undefined && readAt.get(incoming)! < written);
-  const bookmarked = held && keepBookmark ? held.bookmarked : incoming.bookmarked;
   const feedbackReported = Boolean(held?.feedbackReported || incoming.feedbackReported);
-  const next = bookmarked === incoming.bookmarked && feedbackReported === Boolean(incoming.feedbackReported)
-    ? incoming : { ...incoming, bookmarked, feedbackReported };
+  const next = feedbackReported === Boolean(incoming.feedbackReported)
+    ? incoming : { ...incoming, feedbackReported };
   // Identity selection can recreate an unchanged row when turn subscribers refresh.
   // Keep its record stable so the layout effect does not notify those subscribers again.
   if (held && equal(held, next)) return false;
@@ -311,15 +305,6 @@ export const roomSurfaceRecords = {
     }) };
   },
 };
-
-export function writeRoomBookmark(scope: string | null, roomId: string, id: string, bookmarked: boolean): void {
-  const room = scope ? rooms.get(keyOf(scope, roomId)) : undefined;
-  const held = room?.messages.get(id);
-  if (!room || !held) return;
-  room.bookmarkedAt.set(id, nextSurfaceStamp());
-  room.messages.set(id, { ...held, bookmarked });
-  notify(room);
-}
 
 export function roomMessageRecord(scope: string | null, roomId: string, id: string): RoomViewMessage | undefined {
   return scope ? rooms.get(keyOf(scope, roomId))?.messages.get(id) : undefined;

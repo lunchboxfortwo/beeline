@@ -12,7 +12,7 @@ import { resolveAgentDisplayIdentity } from '@/buzz/agent-display';
 import { fallbackMemberHandle, fallbackMemberName } from '@/buzz/member-display';
 import { beginReplyTarget, type MessageReplyDisplayTarget, type MessageReplyTarget } from '@/buzz/message-reply';
 import { planReplyPrefill, type ComposerPrefill, type ComposerPrefillPlan } from '@/buzz/composer-prefill';
-import { roomMessageRecord, writeRoomBookmark } from '@/buzz/room-message-records';
+import { roomMessageRecord } from '@/buzz/room-message-records';
 import { monolithPhoneOperation, phoneOperationFailureReason } from '@/sync/transport/monolith-operation';
 import { promptAndReportMessageIssue, reportIssueToastCopy } from '@/buzz/report-message-issue';
 import { forwardMessageToRoom, forwardTargets, resolveForwardTargetRoom, type ForwardTarget } from '@/buzz/message-forward';
@@ -68,10 +68,8 @@ export function useChatMessageActions([
   beginReply: (message: ChatDisplayMessage) => void,
   openMessageActions: (message: ChatDisplayMessage) => void,
   handleReactToMessage: (message: ChatDisplayMessage, emoji: MessageReactionEmoji) => Promise<void>,
-  handleBookmarkMessage: (message: ChatDisplayMessage) => Promise<void>,
   handleReportMessage: (message: ChatDisplayMessage) => Promise<void>,
   dismissOutboxMessage: (eventId: string) => void,
-  messageIsBookmarked: (message: ChatDisplayMessage) => boolean,
   canDeleteMessage: (message: ChatDisplayMessage) => boolean,
   handleDeleteMessage: (message: ChatDisplayMessage) => Promise<void>,
   forwardToRoom: (target: ForwardTarget) => Promise<boolean>,
@@ -198,45 +196,6 @@ export function useChatMessageActions([
     [applyRoomMessageResult, decodedId, starPrompt.accept],
   );
 
-
-  const messageIsBookmarked = useCallback(
-    (message: ChatDisplayMessage) => Boolean(
-      roomMessageRecord(messageRecordScope, decodedId, message.relayId ?? message.id)?.bookmarked ?? message.bookmarked,
-    ),
-    [decodedId, messageRecordScope],
-  );
-
-
-  const handleBookmarkMessage = useCallback(
-    async (message: ChatDisplayMessage) => {
-      if (message.isAgentActivity || message.isAgentDraft) return;
-      const messageId = message.relayId ?? message.id;
-      const previous = messageIsBookmarked(message);
-      const bookmarked = !previous;
-      writeRoomBookmark(messageRecordScope, decodedId, messageId, bookmarked);
-      AccessibilityInfo.announceForAccessibility(
-        bookmarked ? 'Message bookmarked' : 'Bookmark removed',
-      );
-      try {
-        const result = await monolithPhoneOperation('setMessageBookmark', {
-          roomId: decodedId,
-          messageId,
-          bookmarked,
-        });
-        writeRoomBookmark(messageRecordScope, decodedId, messageId, result.bookmarked);
-        const row = roomMessageRecord(messageRecordScope, decodedId, messageId);
-        if (row) applyRoomMessageResult({ ...row, bookmarked: result.bookmarked });
-      } catch (error) {
-        writeRoomBookmark(messageRecordScope, decodedId, messageId, previous);
-        AccessibilityInfo.announceForAccessibility('Bookmark change failed');
-        Modal.alert(
-          bookmarked ? 'Could not bookmark message' : 'Could not remove bookmark',
-          appErrorCopy(error),
-        );
-      }
-    },
-    [applyRoomMessageResult, decodedId, messageIsBookmarked, messageRecordScope],
-  );
 
 
   const handleReportMessage = useCallback(
@@ -407,7 +366,7 @@ export function useChatMessageActions([
   const dismissOutboxMessage = outbox.dismiss;
   return [
     replyTargetForMessage, beginForward, beginReply, openMessageActions, handleReactToMessage,
-    handleBookmarkMessage, handleReportMessage, dismissOutboxMessage, messageIsBookmarked,
+    handleReportMessage, dismissOutboxMessage,
     canDeleteMessage, handleDeleteMessage, forwardToRoom,
   ];
 }

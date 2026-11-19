@@ -15,6 +15,7 @@ import { openExternalUrl } from '@/utils/open-external-url';
 import { getBuzzRuntimeConfig } from '@/buzz/runtime-config';
 import type { CompanyLogo } from '@beeline/api-contract/workbench';
 import { ChoiceSheet } from './ChoiceSheet';
+import { WORKSPACE_LABEL } from '@/buzz/vocabulary';
 import type { YouSettings as You } from './useYouSettings';
 
 const PRIVACY_URL = 'https://usebeeline.app/privacy/';
@@ -134,6 +135,12 @@ export function YouSettings({ you }: { you: You }) {
                         right={<Switch checked={roomOpenTrace} onCheckedChange={setRoomOpenTrace} aria-label="Chat open trace"><Switch.Thumb /></Switch>} />
                 ) : null}
             </Section>
+
+            {you.workspace ? (
+                <Section title={WORKSPACE_LABEL} testID="workspace-membership-settings">
+                    <DangerRow label={you.busy === 'leave' ? 'Leaving…' : `Leave ${you.workspace.name}`} onPress={() => void you.leaveWorkspace()} testID="leave-workspace-setting" last />
+                </Section>
+            ) : null}
 
             <Section title="Account" testID="account-settings">
                 {providers?.map((link) => (

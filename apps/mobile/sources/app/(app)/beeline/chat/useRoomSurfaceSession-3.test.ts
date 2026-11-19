@@ -6,7 +6,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { visibleLiveOverlays } from '@beeline/buzz-client';
 import { mobileSurfaceCache } from '@/buzz/surface-storage';
 import { RoomViewHttpError } from '@beeline/buzz-client';
-import { roomMessageRecord, writeRoomBookmark } from '@/buzz/room-message-records';
 import { type NostrEvent, type RoomView } from '@beeline/buzz-client';
 import { type UseRoomSurfaceSessionResult } from './useRoomSurfaceSession';
 
@@ -701,23 +700,6 @@ const scope3 = fixtureScope3();
     await scope3.emitUnrelatedDelta('later-1');
     await scope3.emitUnrelatedDelta('later-2');
     expect(scope3.byId(current().historyRows, 'old-row')?.deleted).toBe(true);
-    await act(async () => renderer.unmount());
-  });
-
-
-  it('keeps the server bookmark on an older row after the windows re-render', async () => {
-    const { current, renderer } = await scope3.openWithHistory();
-    // The chat screen's bookmark settlement: the server value onto the record.
-    await act(async () => {
-      writeRoomBookmark(current().session.messageRecordScope, 'room-a', 'old-row', true);
-      current().session.applyRoomMessageResult({
-        ...roomMessageRecord(current().session.messageRecordScope, 'room-a', 'old-row')!,
-        bookmarked: true,
-      });
-    });
-    await scope3.emitUnrelatedDelta('later-1');
-    await scope3.emitUnrelatedDelta('later-2');
-    expect(scope3.byId(current().historyRows, 'old-row')?.bookmarked).toBe(true);
     await act(async () => renderer.unmount());
   });
 

@@ -5,7 +5,7 @@ export const CONCEPT_ICONS = {
   thread: 'CornerDownRight', chat: 'Hash', message: 'MessagesSquare',
   warning: 'AlertTriangle', archive: 'Archive', down: 'ArrowDown', back: 'ArrowLeft',
   forward: 'ArrowRight', up: 'ArrowUp', mention: 'AtSign', audio: 'AudioLines',
-  bookmark: 'Bookmark', agent: 'Bot', selected: 'Check', expand: 'ChevronDown',
+  agent: 'Bot', selected: 'Check', expand: 'ChevronDown',
   previous: 'ChevronLeft', next: 'ChevronRight', contract: 'ChevronUp',
   clipboard: 'Clipboard', copy: 'Copy', reply: 'CornerUpLeft', download: 'Download',
   external: 'ExternalLink', document: 'FileText', file: 'File', codeFile: 'FileCode', filter: 'Filter', pullRequest: 'GitPullRequest',
