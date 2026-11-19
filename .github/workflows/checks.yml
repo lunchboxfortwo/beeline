@@ -242,7 +242,7 @@ jobs:
       # unconfined userns bwrap profile the Beeline development host uses.
       - name: Give bwrap the host userns AppArmor profile
         run: |
-          sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict
+          if [ -e /etc/apparmor.d/bwrap-userns-restrict ]; then sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict; fi
           printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile beeline-bwrap /usr/bin/bwrap flags=(unconfined) {\n  userns,\n}\n' | sudo tee /etc/apparmor.d/beeline-bwrap
           sudo apparmor_parser -r /etc/apparmor.d/beeline-bwrap
         if: steps.changes.outputs.run == 'true'
