@@ -84,6 +84,7 @@ export function AppMark({
       borderRadius={size <= 28 ? 'sm' : 'md'}
       alignItems="center"
       justifyContent="center"
+      position="relative"
       overflow="hidden"
       backgroundColor={lightPlate ? (dark ? 'ink' : 'canvas') : plate === 'dark' ? (dark ? 'canvas' : 'ink') : 'raised'}
     >
@@ -99,7 +100,8 @@ export function AppMark({
       {bundled ? (
         <Image
           accessibilityIgnoresInvertColors
-          source={bundled}
+          // Tamagui's web Image reads only src; native maps it to the source.
+          src={bundled as unknown as string}
           width={imageSize}
           height={imageSize}
         />
@@ -108,7 +110,7 @@ export function AppMark({
         <Image
           testID={testID ? `${testID}-icon` : undefined}
           accessibilityIgnoresInvertColors
-          source={{ uri }}
+          src={uri}
           onLoad={() => setLoadedUri(uri)}
           onError={() => setFailedUris((current) => [...current, uri])}
           width={imageSize}
