@@ -453,7 +453,7 @@ export const ChatSurfaceComposer = React.memo(function ChatSurfaceComposer({
                       isDirectMessage={isDirectMessage}
                       placeholder={composerPlaceholder}
                       hasAgentMembers={Boolean(roomSurface?.members.some(member => member.identity.kind === 'agent'))}
-                      voice={!isCorner && roomSurface?.members.some(member => member.identity.kind === 'agent') ? voice : undefined}
+                      voice={isDirectMessage && !isCorner && roomSurface?.members.some(member => member.identity.kind === 'agent') ? voice : undefined}
                       onStop={
                         composerAck?.stop ? () => handleStopTurn(composerAck.stop!) : undefined
                       }

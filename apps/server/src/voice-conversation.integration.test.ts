@@ -45,7 +45,7 @@ vi.mock('livekit-server-sdk', async original => ({
   RoomServiceClient: class { async removeParticipant() {} async deleteRoom() {} },
 }));
 
-it('starts over the phone socket, speaks a reply, and speaks a real helper command result', async () => {
+it('starts an agent DM call over the phone socket, speaks a reply, and speaks a real helper command result', async () => {
   const db = new PgliteDatabase();
   const live = new LiveHub();
   const human = 'a'.repeat(64), agent = 'b'.repeat(64);
@@ -61,7 +61,7 @@ it('starts over the phone socket, speaks a reply, and speaks a real helper comma
   await db.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'human','Caller','caller'),($2,'agent','Ruby','ruby')`, [human, agent]);
   await db.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [agent, human]);
   await db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Voice conversation proof')`, [workspaceId]);
-  await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Room')`, [roomId, workspaceId]);
+  await db.query(`INSERT INTO rooms(id,workspace_id,name,direct_participants) VALUES($1,$2,'Ruby DM',$3)`, [roomId, workspaceId, JSON.stringify([human, agent])]);
   for (const id of [human, agent]) await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
     VALUES($1,NULL,$2,'owner'),($1,$3,$2,'member')`, [workspaceId, id, roomId]);
   const auth = new TokenAuth(db, async token => ({ subject: token, login: token, name: token }));
@@ -127,7 +127,7 @@ it.each(['helper', 'missing', 'on_demand', 'webhook'] as const)(
         ($1,'human','Caller','caller'),($2,'agent','Grok Bot','grok_bot')`, [human, agent]);
       await db.query('INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)', [agent, human]);
       await db.query("INSERT INTO workspaces(id,name) VALUES($1,'Voice external queue proof')", [workspace]);
-      await db.query("INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'general')", [room, workspace]);
+      await db.query("INSERT INTO rooms(id,workspace_id,name,direct_participants) VALUES($1,$2,'Grok Bot DM',$3)", [room, workspace, JSON.stringify([human, agent])]);
       for (const id of [human, agent]) await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
         VALUES($1,NULL,$2,'owner'),($1,$3,$2,'member')`, [workspace, id, room]);
       if (delivery !== 'helper') {

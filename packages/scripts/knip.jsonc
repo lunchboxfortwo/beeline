@@ -162,7 +162,6 @@
         "packages/scripts/prove-voice-multi-routing.ts",
         "packages/scripts/prove-voice-tls.mjs",
         "packages/scripts/serve-voice-ui-proof.ts",
-        "packages/scripts/serve-voice-room-review.ts",
         "packages/scripts/helper-proof/prove-linux.mjs",
         "packages/scripts/helper-proof/prove-update-handoff.mjs",
         "packages/scripts/prove-helper-migration-update.mjs",

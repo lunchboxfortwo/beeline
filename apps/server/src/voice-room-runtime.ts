@@ -13,7 +13,7 @@ import { VoiceEagerReply } from "./voice-eager-reply.js";
 import type { VoiceService } from "./voice-service.js";
 import type { LiveEvent } from "./live.js";
 import { voiceRoomRuntimeRefreshSpeakingSpeed, voiceRoomRuntimeObserveCallerResume, voiceRoomRuntimeFinishVoicedReply, voiceRoomRuntimeHumanQuiet, voiceRoomRuntimeWaitForQuiet, voiceRoomRuntimeTask, voiceRoomRuntimeFailure, voiceRoomRuntimeSafeSignal, voiceRoomRuntimeSignal, voiceRoomRuntimeStopInput, voiceRoomRuntimeEnforceBudget, voiceRoomRuntimeRenewLease, voiceRoomRuntimeRecover, voiceRoomRuntimeRequestLeaseRecovery, voiceRoomRuntimeSettleLeaseRecovery, voiceRoomRuntimeResumeLeaseEvidence, voiceRoomRuntimeRevalidateAuthorityChange, voiceRoomRuntimeRevalidateParticipants, voiceRoomRuntimeReconcileParticipants } from './voice-room-runtime-refresh-speaking-speed.js';
-import { voiceRoomRuntimeClearAudioQueue, voiceRoomRuntimeInterruptPlayback, voiceRoomRuntimeParticipantLeft, voiceRoomRuntimeStopCall, voiceRoomRuntimeAimSpokenName, voiceRoomRuntimeCountHumans, voiceRoomRuntimeCancelEager, voiceRoomRuntimePrepareEager, voiceRoomRuntimeUtterance, voiceRoomRuntimeRefresh, voiceRoomRuntimeCancelResume } from './voice-room-runtime-check-inactivity.js';
+import { voiceRoomRuntimeClearAudioQueue, voiceRoomRuntimeInterruptPlayback, voiceRoomRuntimeParticipantLeft, voiceRoomRuntimeStopCall, voiceRoomRuntimeAimSpokenName, voiceRoomRuntimeCancelEager, voiceRoomRuntimePrepareEager, voiceRoomRuntimeUtterance, voiceRoomRuntimeRefresh, voiceRoomRuntimeCancelResume } from './voice-room-runtime-check-inactivity.js';
 import { voiceRoomRuntimeClose, voiceRoomRuntimeFinishClose } from './voice-room-runtime-close.js';
 
 
@@ -52,8 +52,7 @@ export const BACKCHANNEL = /^(uh|um|uhm|er|erm|ah|oh|ha|haha|hah|hm|hmm|mm|mhm|m
 
 
 
-/** In a call with several humans, any of them may interrupt an agent, but noise and
- * backchannel words never do. Confirmed speech needs two words or about 400 ms. */
+/** Confirmed barge-in needs two meaningful words or about 400 ms. */
 export function voiceInterrupt(event: FluxEvent): boolean {
   const words = speechWords(event.transcript).filter(word => !BACKCHANNEL.test(word.replace(/-/g, '')));
   if (!words.length) return false;
@@ -149,10 +148,6 @@ async refreshSpeakingSpeed(human: string) { return voiceRoomRuntimeRefreshSpeaki
    spokenWrites = Promise.resolve();
 
    readonly shutdown = new AbortController();
-
-   lastAnnouncedHumanCount?: number;
-
-   humanCountRefresh = Promise.resolve();
 
    speaking?: AbortController;
 
@@ -276,8 +271,6 @@ interruptPlayback() { return voiceRoomRuntimeInterruptPlayback(this); }
 participantLeft(human: string) { return voiceRoomRuntimeParticipantLeft(this, human); }
 async stopCall() { return voiceRoomRuntimeStopCall(this); }
 async aimSpokenName(human: string, text: string, version: number) { return voiceRoomRuntimeAimSpokenName(this, human, text, version); }
-/** Deduplicate announcements only; mode decisions always read the database count. */
-countHumans(announce = false): Promise<void> { return voiceRoomRuntimeCountHumans(this, announce); }
 cancelEager(human: string) { return voiceRoomRuntimeCancelEager(this, human); }
 async prepareEager(human: string, event: FluxEvent) { return voiceRoomRuntimePrepareEager(this, human, event); }
 async utterance(human: string, fragment: string, startedAt = performance.now(), interrupts = true, confirmedSpeech = true) { return voiceRoomRuntimeUtterance(this, human, fragment, startedAt, interrupts, confirmedSpeech); }
@@ -448,8 +441,8 @@ async finishClose(meterClose: Promise<void>) { return voiceRoomRuntimeFinishClos
         else await ctx.resume(participant.identity);
       }, participant.identity);
     });
-    ctx.room.on(RoomEvent.ParticipantConnected, participant => {
-      ctx.task(async () => { await ctx.reconcileParticipants(); await ctx.countHumans(true); });
+    ctx.room.on(RoomEvent.ParticipantConnected, () => {
+      ctx.task(() => ctx.reconcileParticipants());
     });
     ctx.room.on(RoomEvent.Disconnected, () => { if (!ctx.closed) ctx.task(() => ctx.close()); });
     await ctx.room.connect(ctx.service.config.url, await token.toJwt(), { autoSubscribe: true, dynacast: false });
@@ -458,7 +451,6 @@ async finishClose(meterClose: Promise<void>) { return voiceRoomRuntimeFinishClos
     await ctx.room.localParticipant!.publishTrack(LocalAudioTrack.createAudioTrack('beeline-agent-speech', ctx.audio), options);
     ctx.shutdown.signal.throwIfAborted();
     await ctx.reconcileParticipants();
-    await ctx.countHumans(true).catch(() => {});
     await ctx.refresh();
   }
 
@@ -600,13 +592,11 @@ async finishClose(meterClose: Promise<void>) { return voiceRoomRuntimeFinishClos
       // Recognized speech fences classification even when it is too short to barge in.
       const activeRequest = ctx.assembler.current(human);
       let pausedReply = event.event !== 'EndOfTurn' && !!activeRequest && activeRequest.state !== 'playing' && ctx.speakingHuman === human;
-      let liveHumans: number | undefined;
       if (event.event !== 'EndOfTurn') {
         if (activeRequest?.state === 'playing') {
-          if (!voiceInterrupt(event)) liveHumans = await ctx.observe(() => ctx.service.humanCount(ctx.callId));
           if (!ownsInput()) return;
-          // A final can arrive while live membership resolves. Never cancel its newer request.
-          if ((liveHumans === 1 || voiceInterrupt(event)) && ctx.assembler.current(human) === activeRequest) {
+          // Only pause the request still owned by this input.
+          if (ctx.assembler.current(human) === activeRequest) {
             ctx.interruptPlayback(); ctx.assembler.pause(human); pausedReply = true;
           }
         } else {
@@ -637,11 +627,8 @@ async finishClose(meterClose: Promise<void>) { return voiceRoomRuntimeFinishClos
         ctx.task(() => ctx.utterance(human, fragment, receivedAt, interrupts, confirmedVoiceSpeech(event)), human);
         return;
       }
-      // With several humans, anyone may interrupt, but only with real speech.
-      const humans = liveHumans ?? await ctx.observe(() => ctx.service.humanCount(ctx.callId));
       if (ctx.inputVersions.get(human) !== version || event.turn_index <= (ctx.turnIndices.get(human) ?? -1)) return;
-      const interrupts = humans === 1 || voiceInterrupt(event);
-      if (interrupts && !pausedReply) ctx.interruptPlayback();
+      if (!pausedReply) ctx.interruptPlayback();
       if (event.event !== 'EndOfTurn' || !event.transcript.trim() ||
           event.turn_index <= (ctx.turnIndices.get(human) ?? -1)) return;
       ctx.turnIndices.set(human, event.turn_index);

@@ -57,7 +57,7 @@ export function openingVoiceName(text: string, agents: readonly VoiceAgent[]): V
 }
 
 /** Only an opening name changes the voice target. One human keeps the selected agent. */
-export function namedVoiceTarget(text: string, agents: readonly VoiceAgent[], selected?: string, humans = 1): VoiceAgent | undefined {
+export function namedVoiceTarget(text: string, agents: readonly VoiceAgent[], selected?: string): VoiceAgent | undefined {
   return openingVoiceName(text, agents) ??
-    (humans === 1 ? agents.find(agent => agent.id === selected) ?? agents[0] : undefined);
+    (agents.find(agent => agent.id === selected) ?? agents[0]);
 }

@@ -18,14 +18,17 @@ import { readVoiceContext } from './voice-context.js';
 import { VoiceRoomRuntime } from './voice-room-runtime.js';
 import { VoiceService } from './voice-service.js';
 
-vi.mock('./voice-room-runtime.js', () => ({ VoiceRoomRuntime: { connect: vi.fn(async (_service: unknown, _call: string, roomId: string, _owner: string, callCardId: string) => ({ roomId, callCardId, reconcileParticipants: vi.fn(async()=>{}), revalidateParticipants: vi.fn(async()=>{}), revalidateAuthorityChange: vi.fn(async()=>{}), stopCall: vi.fn(), close: vi.fn(), park: vi.fn(), resume: vi.fn(), refresh: vi.fn(), countHumans: vi.fn(async () => {}) })) } }));
+vi.mock('./voice-room-runtime.js', () => ({ VoiceRoomRuntime: { connect: vi.fn(async (_service: unknown, _call: string, roomId: string, _owner: string, callCardId: string) => ({ roomId, callCardId, reconcileParticipants: vi.fn(async()=>{}), revalidateParticipants: vi.fn(async()=>{}), revalidateAuthorityChange: vi.fn(async()=>{}), stopCall: vi.fn(), close: vi.fn(), park: vi.fn(), resume: vi.fn(), refresh: vi.fn() })) } }));
 vi.mock('livekit-server-sdk', async original => {
   const actual = await original<typeof import('livekit-server-sdk')>();
   return { ...actual, RoomServiceClient: class { async removeParticipant() {} async deleteRoom() {} } };
 });
 const H = 'a'.repeat(64), SECOND = 'd'.repeat(64), A = 'b'.repeat(64), B = 'c'.repeat(64);
 const W = '11111111-1111-4111-8111-111111111111', R = '22222222-2222-4222-8222-222222222222';
+const DIRECT = JSON.stringify([H,A]);
 const db = new PgliteDatabase(); const live = new LiveHub();
+const humanCount = async (callId: string) => (await db.query<{ count: number }>(
+  `SELECT count(*)::int count FROM voice_participants WHERE call_id=$1 AND left_at IS NULL`, [callId])).rows[0]!.count;
 const service = new VoiceService(db, live, { url: 'ws://localhost:7880', apiKey: 'devkey', apiSecret: 'secret', publicOrigin: 'http://proof',
   brain: { answer: vi.fn() }, speech: { synthesize: vi.fn() }, stt: vi.fn() });
 beforeAll(async () => {
@@ -37,15 +40,52 @@ beforeAll(async () => {
     VALUES('github','voice-proof-owner',$1,'https://github.com','beeline','voice-proof-owner')`, [H]);
   await db.query(`INSERT INTO agents(agent_id,owner_id,soul) VALUES($1,$3,'{"instructions":"Warm."}'),($2,$3,'{"instructions":"Concise."}')`, [A, B, H]);
   await db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Voice proof')`, [W]);
-  await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Room')`, [R, W]);
+  await db.query(`INSERT INTO rooms(id,workspace_id,name,direct_participants) VALUES($1,$2,'Room',$3)`, [R, W,DIRECT]);
   for (const id of [H, A, B, SECOND]) await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
     VALUES($1,NULL,$2,'owner'),($1,$3,$2,'member')`, [W, id, R]);
 }, 30_000);
 afterAll(async () => { await service.close(); await db.close(); });
 
+it('rejects group chats, threads and human DMs without creating a call, even for reconnect requests', async () => {
+  const group = '19191919-1919-4919-8919-191919191919';
+  const thread = '20202020-2020-4020-8020-202020202020';
+  const people = '21212121-2121-4121-8121-212121212121';
+  await db.query(`INSERT INTO rooms(id,workspace_id,name,direct_participants,parent_id) VALUES
+    ($1,$4,'Group',NULL,NULL),($2,$4,'Thread',NULL,$1),($3,$4,'People',$5,NULL)`,
+    [group, thread, people, W, JSON.stringify([H, SECOND])]);
+  for (const room of [group, people]) for (const who of [H, A, SECOND])
+    await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [W,room,who]);
+  const before = (await db.query('SELECT count(*)::int count FROM voice_calls')).rows;
+  try {
+    for (const room of [group, thread, people]) {
+      await expect(service.join(room,H)).rejects.toThrow('only available in agent DMs');
+      await expect(service.join(room,H,'23232323-2323-4323-8323-232323232323')).rejects.toThrow('only available in agent DMs');
+    }
+    expect((await db.query('SELECT count(*)::int count FROM voice_calls')).rows).toEqual(before);
+    expect(await service.current(group,H)).toBeNull();
+  } finally { await db.query('DELETE FROM rooms WHERE id=ANY($1::uuid[])', [[thread,group,people]]); }
+});
+
+it('lets a legacy group call end normally while refusing further joins', async () => {
+  const room = '24242424-2424-4424-8424-242424242424';
+  await db.query(`INSERT INTO rooms(id,workspace_id,name,direct_participants) VALUES($1,$2,'Legacy call',$3)`, [room,W,JSON.stringify([H,A])]);
+  for (const who of [H,A,SECOND]) await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [W,room,who]);
+  const joined = await service.join(room,H);
+  try {
+    // Model the durable facts written by the previous server before deploy.
+    await db.query('UPDATE rooms SET direct_participants=NULL WHERE id=$1',[room]);
+    await db.query(`INSERT INTO voice_participants(call_id,identity_id,session_id) VALUES($1,$2,'legacy')`, [joined.call.id,SECOND]);
+    await expect(service.join(room,H,joined.call.id)).rejects.toThrow('only available in agent DMs');
+    await service.leave(joined.call.id,H);
+    expect((await service.current(room,SECOND))?.participants.map(person=>person.pubkey)).toEqual([SECOND]);
+    await service.leave(joined.call.id,SECOND);
+    expect(await service.current(room,SECOND)).toBeNull();
+  } finally { await service.leave(joined.call.id,H); await service.leave(joined.call.id,SECOND); await db.query('DELETE FROM rooms WHERE id=$1',[room]); }
+});
+
 it('stores queryable voice timing stages once per generation without transcript content', async () => {
   const timingRoom = '99999999-9999-4999-8999-999999999999';
-  await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Timing proof')`, [timingRoom, W]);
+  await db.query(`INSERT INTO rooms(id,workspace_id,name,direct_participants) VALUES($1,$2,'Timing proof',$3)`, [timingRoom, W,DIRECT]);
   await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
     VALUES($1,$2,$3,'member'),($1,$2,$4,'member')`, [W, timingRoom, H, A]);
   const joined = await service.join(timingRoom, H);
@@ -62,7 +102,7 @@ it('stores queryable voice timing stages once per generation without transcript 
 
 it('refuses the retired HTTP call join for Android and JSON bodies', async () => {
   const roomId = '66666666-6666-4666-8666-666666666666';
-  await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Android join proof')`, [roomId, W]);
+  await db.query(`INSERT INTO rooms(id,workspace_id,name,direct_participants) VALUES($1,$2,'Android join proof',$3)`, [roomId, W,DIRECT]);
   for (const id of [H, A]) await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
     VALUES($1,$2,$3,'member')`, [W, roomId, id]);
   const auth = new TokenAuth(db, async token => ({ subject: token, login: token, name: token }));
@@ -89,7 +129,7 @@ it('refuses the retired HTTP call join for Android and JSON bodies', async () =>
 
 it('SOCKET-OPS-1: joins, reads, resumes and leaves a real voice session over the phone socket', async () => {
   const roomId = '55555555-5555-4555-8555-555555555555';
-  await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Socket voice proof')`, [roomId, W]);
+  await db.query(`INSERT INTO rooms(id,workspace_id,name,direct_participants) VALUES($1,$2,'Socket voice proof',$3)`, [roomId, W,DIRECT]);
   for (const id of [H, A]) await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
     VALUES($1,$2,$3,'member')`, [W, roomId, id]);
   const auth = new TokenAuth(db, async token => ({ subject: token, login: token, name: token }));
@@ -177,12 +217,12 @@ it('preserves distinct paragraphs and intentional repetition within an answer', 
   expect((await db.query<{ text: string }>(`SELECT text FROM messages WHERE room_id=$1 AND author_id=$2`, [R, B])).rows.map(row => row.text)).toEqual([text]);
 });
 
-it('joins a second human into one persisted call, targets only Ruby, and ends after the last leaves', async () => {
+it('keeps a DM call to its caller, targets Ruby and ends when the caller leaves', async () => {
   const joined = await service.join(R, H);
-  const second = await service.join(R, SECOND);
-  expect(second.call.id).toBe(joined.call.id);
-  expect(second.call.participants.map(p => p.pubkey)).toEqual([H, SECOND]);
-  expect(await service.humanCount(joined.call.id)).toBe(2);
+  await expect(service.join(R, SECOND)).rejects.toThrow('only available in agent DMs');
+  await expect(service.join(R, SECOND, joined.call.id)).rejects.toThrow('only available in agent DMs');
+  expect(joined.call.participants.map(p => p.pubkey)).toEqual([H]);
+  expect(await humanCount(joined.call.id)).toBe(1);
   const lease = (await db.query<{ runtime_owner: string }>(`SELECT runtime_owner FROM voice_calls WHERE id=$1`, [joined.call.id])).rows[0]!.runtime_owner;
   const before = (await db.query(`SELECT 1 FROM messages WHERE room_id=$1`, [R])).rowCount;
   await service.recordHuman(joined.call.id,R,H,(await service.agents(R,H))[0]!,'stale runtime','old-lease');
@@ -193,7 +233,7 @@ it('joins a second human into one persisted call, targets only Ruby, and ends af
   expect(readChatListView(deck)?.chats[0]?.voiceCall?.id).toBe(joined.call.id);
   const room = await phone.readRoom(R, SECOND);
   const card = room?.messages.find(m => m.voiceCall);
-  expect(readRoomViewMessage(card)?.voiceCall?.participants).toHaveLength(2);
+  expect(readRoomViewMessage(card)?.voiceCall?.participants).toHaveLength(1);
   const agent = (await service.agents(R, H)).find(a => a.id === A)!;
   const source = await service.recordHuman(joined.call.id, R, H, agent, 'Build a widget and ask @sol later');
   expect((await db.query(`SELECT * FROM agent_commands WHERE source_message_id=$1`, [source])).rowCount).toBe(0);
@@ -202,9 +242,7 @@ it('joins a second human into one persisted call, targets only Ruby, and ends af
   await service.recordAnswer(R, A, 'I’ll work on that.');
   expect((await db.query<{ author_id: string }>(`SELECT author_id FROM messages WHERE text='I’ll work on that.'`)).rows[0]?.author_id).toBe(A);
   await service.leave(joined.call.id, H);
-  expect((await service.current(R, SECOND))?.participants).toHaveLength(1);
-  expect(await service.humanCount(joined.call.id)).toBe(1);
-  await service.leave(joined.call.id, SECOND);
+  expect(await humanCount(joined.call.id)).toBe(0);
   expect(await service.current(R, SECOND)).toBeNull();
   const ended = await phone.readRoom(R, SECOND);
   expect(ended?.messages.find(m => m.voiceCall)?.text).toMatch(/^Voice call ended · \d+:\d{2}$/);
@@ -310,37 +348,6 @@ it('call-wide-end-3: idle is a no-op in solo calls even while call work is pendi
   } finally { await service.leave(joined.call.id,H); }
 });
 
-it('multi-human-silence-1: an old client idle deadline keeps both participants active', async () => {
-  const joined = await service.join(R, H);
-  // Earlier access tests deliberately remove SECOND from the Workspace.
-  await db.query(`UPDATE memberships SET role='owner',removed_at=NULL WHERE room_id IS NULL AND identity_id=$1`, [SECOND]);
-  await service.join(R, SECOND);
-  try {
-    expect(await service.idle(joined.call.id, H, joined.sessionId)).toEqual({ state: 'ready' });
-    expect(await service.humanCount(joined.call.id)).toBe(2);
-    expect(await service.idleState(joined.call.id, H, db, joined.sessionId)).toEqual({ state: 'ready' });
-    expect((await db.query(`SELECT parked_at,left_at FROM voice_participants WHERE call_id=$1 AND identity_id=$2`, [joined.call.id,H])).rows[0]).toEqual({ parked_at: null, left_at: null });
-  } finally { await service.leave(joined.call.id,H); await service.leave(joined.call.id,SECOND); }
-});
-
-it('multi-human-mode-2: join, leave and rejoin notify the RTC owner immediately after commit', async () => {
-  const joined = await service.join(R,H);
-  const runtime = await vi.mocked(VoiceRoomRuntime.connect).mock.results.at(-1)!.value;
-  const counts: number[] = [];
-  vi.spyOn(runtime,'countHumans').mockImplementation(async () => { counts.push(await service.humanCount(joined.call.id)); });
-  const other = new VoiceService(db,live,service.config);
-  try {
-    await other.join(R,SECOND);
-    await vi.waitFor(() => expect(counts.at(-1)).toBe(2));
-    await other.leave(joined.call.id,SECOND);
-    await vi.waitFor(() => expect(counts.at(-1)).toBe(1));
-    await other.join(R,SECOND);
-    await vi.waitFor(() => expect(counts.at(-1)).toBe(2));
-    await db.query(`UPDATE voice_participants SET parked_at=now() WHERE call_id=$1 AND identity_id=$2`,[joined.call.id,SECOND]);
-    expect(await service.humanCount(joined.call.id)).toBe(2);
-  } finally { await other.close(); await service.leave(joined.call.id,H); await service.leave(joined.call.id,SECOND); }
-});
-
 it('idle with no session command keeps participation active', async () => {
   const joined = await service.join(R, H);
   expect(await service.idle(joined.call.id, H)).toEqual({ state: 'ready' });
@@ -430,7 +437,7 @@ it('call-wide-end-3: reconnect cannot create or join a successor after its call 
   await expect(service.join(R,H,joined.call.id)).rejects.toThrow('voice session ended');
   expect(await service.current(R,H)).toBeNull();
   const successor=await service.join(R,H);
-  try { await expect(service.join(R,SECOND,joined.call.id)).rejects.toThrow('voice session ended'); }
+  try { await expect(service.join(R,H,joined.call.id)).rejects.toThrow('voice session ended'); }
   finally { await service.leave(successor.call.id,H); }
 });
 
@@ -443,14 +450,12 @@ it('call-wide-end-3: a stale owner or speech during the end transaction cannot c
   try {
     expect(await service.endInactive(joined.call.id,owner,()=>quiet)).toBe(false);
     expect(await service.current(R,H)).not.toBeNull();
-    expect(await service.humanCount(joined.call.id)).toBe(1);
+    expect(await humanCount(joined.call.id)).toBe(1);
   } finally { card.mockRestore();await service.leave(joined.call.id,H); }
 });
 
 it('quiet termination puts its reason on the ended card and explicit leave omits it', async () => {
   const first = await service.join(R, H);
-  const second = await service.join(R, SECOND);
-  await service.leave(first.call.id, SECOND, false, second.sessionId);
   await db.query(`UPDATE voice_calls SET started_at=now()-interval '2 minutes',runtime_owner=$2,runtime_until=now()+interval '1 minute' WHERE id=$1`, [first.call.id, service.owner]);
   await db.query(`UPDATE agent_commands SET state='complete',completed_at=now() WHERE state IN ('pending','claimed')`);
   // Model the actual quiet interval so millisecond Date conversion cannot tie
@@ -465,7 +470,7 @@ it('quiet termination puts its reason on the ended card and explicit leave omits
   expect((await new PhoneService(db,'http://proof').readRoom(R,H))?.messages.find(m=>m.voiceCall?.id===first.call.id)?.voiceCall?.endReason).toBe('silence');
   expect((await new PhoneService(db,'http://proof').readRoom(R,H))?.messages.find(m=>m.voiceCall?.id===first.call.id)?.text)
     .toMatch(/^Voice call ended · \d+:\d{2} · No one spoke for 60s$/);
-  expect(await service.idleState(first.call.id, SECOND, db, second.sessionId)).toEqual({state:'ended'});
+  expect(await service.idleState(first.call.id, SECOND, db, first.sessionId)).toEqual({state:'ended'});
   expect(await service.idleState(first.call.id, H, db, 'old-session')).toEqual({state:'ended'});
   const fresh = await service.join(R, H);
   expect(fresh.call.id).not.toBe(first.call.id);
@@ -478,12 +483,12 @@ it('quiet termination puts its reason on the ended card and explicit leave omits
 
 it('demonstrates workspace exhaustion ending the whole call and refusing HTTP joins until reset', async () => {
   const otherRoom = '55555555-5555-4555-8555-555555555555';
-  await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Concurrent call')`, [otherRoom, W]);
+  await db.query(`INSERT INTO rooms(id,workspace_id,name,direct_participants) VALUES($1,$2,'Concurrent call',$3)`, [otherRoom, W,DIRECT]);
   for (const who of [H, SECOND, A]) await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
     VALUES($1,$2,$3,'member')`, [W, otherRoom, who]);
   await db.query(`UPDATE memberships SET role='owner',removed_at=NULL WHERE identity_id=ANY($1::text[])`, [[H, SECOND]]);
   const first = await service.join(R, H);
-  await service.join(R, SECOND);
+  await db.query('UPDATE rooms SET direct_participants=$2 WHERE id=$1', [otherRoom, JSON.stringify([SECOND,A])]);
   const concurrent = await service.join(otherRoom, SECOND);
   const now = Date.now();
   // Seed today's exhausted budget without depending on the test's hour of day.
@@ -535,7 +540,7 @@ it('demonstrates workspace exhaustion ending the whole call and refusing HTTP jo
 it('DELIVERY-2: stable request IDs deduplicate uncertain recording and delivery, and committed orders cannot be revised', async () => {
   const room = '78787878-7878-4787-8787-787878787878';
   const id = 'stable-voice-request-delivery-2';
-  await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Delivery proof')`, [room,W]);
+  await db.query(`INSERT INTO rooms(id,workspace_id,name,direct_participants) VALUES($1,$2,'Delivery proof',$3)`, [room,W,DIRECT]);
   for (const who of [H,A]) await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [W,room,who]);
   const joined = await service.join(room,H);
   try {
@@ -561,12 +566,12 @@ it('call history search excludes chats another caller cannot read and privately 
   await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$3,'Search call'),($2,$3,'Private source')`, [room, privateRoom, W]);
   for (const id of [H, A, SECOND]) await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [W, room, id]);
   for (const id of [H, A]) await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [W, privateRoom, id]);
-  const call = await service.join(room, H);
-  await service.join(room, SECOND);
+  await db.query('UPDATE rooms SET direct_participants=$2 WHERE id=$1', [room, JSON.stringify([SECOND,A])]);
+  const call = await service.join(room, SECOND);
   await db.query(`UPDATE voice_calls SET runtime_owner=$2,runtime_until=now()+interval '60 seconds' WHERE id=$1`, [call.call.id, service.owner]);
   try {
     const agent = (await service.agents(room, H)).find(a => a.id === A)!;
-    const source = await service.recordHuman(call.call.id, room, H, agent, 'Find saffronmarker', service.owner);
+    const source = await service.recordHuman(call.call.id, room, SECOND, agent, 'Find saffronmarker', service.owner);
     await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES('voice-shared-search',$1,$3,'saffronmarker public answer'),('voice-private-search',$2,$3,'saffronmarker secret answer')`, [room, privateRoom, H]);
     const result = JSON.parse(await service.search(call.call.id, source, A, { name: 'search_history', query: 'saffronmarker' }, new AbortController().signal));
     expect(result.results.some((row: any) => row.messageId === 'voice-shared-search')).toBe(true);
@@ -607,7 +612,7 @@ it('call history search excludes chats another caller cannot read and privately 
 
 it('VOICE-ROUTER-1: hand-offs arriving mid-turn remain pending for the next current-state batch', async () => {
   const room = '67676767-6767-4767-8767-676767676767';
-  await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Busy voice proof')`, [room,W]);
+  await db.query(`INSERT INTO rooms(id,workspace_id,name,direct_participants) VALUES($1,$2,'Busy voice proof',$3)`, [room,W,DIRECT]);
   for (const who of [H,A]) await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [W,room,who]);
   const joined = await service.join(room,H);
   try {
@@ -637,7 +642,7 @@ it('VOICE-ROUTER-1: hand-offs arriving mid-turn remain pending for the next curr
 
 it('Reproduction R1/R2: a handed-off voice request carries today and posts its heavy answer without its own name', async () => {
   const room = '13131313-1313-4313-8313-131313131313';
-  await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Voice reply proof')`,[room,W]);
+  await db.query(`INSERT INTO rooms(id,workspace_id,name,direct_participants) VALUES($1,$2,'Voice reply proof',$3)`,[room,W,DIRECT]);
   for (const id of [H,A]) await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`,[W,room,id]);
   const joined = await service.join(room,H);
   try {
@@ -662,7 +667,7 @@ it('Reproduction R1/R2: a handed-off voice request carries today and posts its h
 
 it('Reproduction VOICE-TAG-1: final call tags stay quiet; the full agent messages its peer', async () => {
   const room = '31313131-3131-4131-8131-313131313131';
-  await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Voice message proof')`, [room,W]);
+  await db.query(`INSERT INTO rooms(id,workspace_id,name,direct_participants) VALUES($1,$2,'Voice message proof',$3)`, [room,W,DIRECT]);
   for (const id of [H,A,B]) await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [W,room,id]);
   const joined=await service.join(room,H);
   try {
@@ -690,7 +695,7 @@ it('Reproduction VOICE-TAG-1: final call tags stay quiet; the full agent message
 
 it('VOICE-TAG-1: voice orders retain provenance for message() beyond the former depth bound', async () => {
   const room = '32323232-3232-4232-8232-323232323232';
-  await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Voice depth proof')`, [room,W]);
+  await db.query(`INSERT INTO rooms(id,workspace_id,name,direct_participants) VALUES($1,$2,'Voice depth proof',$3)`, [room,W,DIRECT]);
   for (const id of [H,A,B]) await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [W,room,id]);
   const joined = await service.join(room,H);
   try {
@@ -710,7 +715,7 @@ it('VOICE-TAG-1: voice orders retain provenance for message() beyond the former 
 
 it('F17: an absent-session expiry cannot remove a replacement session or a successor runtime participant',async()=>{
   const room='12121212-1212-4212-8212-121212121212';
-  await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Voice expiry fences')`,[room,W]);
+  await db.query(`INSERT INTO rooms(id,workspace_id,name,direct_participants) VALUES($1,$2,'Voice expiry fences',$3)`,[room,W,DIRECT]);
   for(const id of [H,A])await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`,[W,room,id]);
   const joined=await service.join(room,H);
   try{
@@ -727,7 +732,7 @@ it('F17: an absent-session expiry cannot remove a replacement session or a succe
 
 it('F17: a committed exact call-card source reaches the held runtime participant owner without a periodic scan',async()=>{
   const room='13131313-1313-4313-8313-131313131313';
-  await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Voice source fence')`,[room,W]);
+  await db.query(`INSERT INTO rooms(id,workspace_id,name,direct_participants) VALUES($1,$2,'Voice source fence',$3)`,[room,W,DIRECT]);
   for(const id of [H,A])await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`,[W,room,id]);
   const joined=await service.join(room,H);
   try{
@@ -735,28 +740,23 @@ it('F17: a committed exact call-card source reaches the held runtime participant
     const runtime=await vi.mocked(VoiceRoomRuntime.connect).mock.results.at(-1)!.value;
     await Promise.resolve();
     vi.mocked(runtime.reconcileParticipants).mockClear();
-    vi.mocked(runtime.countHumans).mockClear();
     vi.mocked(runtime.refresh).mockClear();
     for (const reason of ['postgres:room_read_marks', 'postgres:message_bookmarks', 'postgres:push_devices'])
       live.publish({type:'invalidate',roomId:room,reason});
     live.publish({type:'invalidate',roomId:R,reason:'voice-participants'});
     await new Promise(resolve=>setImmediate(resolve));
-    expect(runtime.countHumans).not.toHaveBeenCalled();
     expect(runtime.refresh).not.toHaveBeenCalled();
     expect(runtime.reconcileParticipants).not.toHaveBeenCalled();
     live.publish({type:'invalidate',roomId:room,reason:'postgres:messages',messageId:'unrelated'});
     await new Promise(resolve=>setImmediate(resolve));
     expect(runtime.reconcileParticipants).not.toHaveBeenCalled();
-    expect(runtime.countHumans).not.toHaveBeenCalled();
     expect(runtime.refresh).toHaveBeenCalledOnce();
     live.publish({type:'invalidate',roomId:room,reason:'postgres:messages',messageId:call.message_id});
     await new Promise(resolve=>setImmediate(resolve));
     expect(runtime.reconcileParticipants).toHaveBeenCalledOnce();
-    expect(runtime.countHumans).toHaveBeenCalledOnce();
     live.publish({type:'invalidate',roomId:room,reason:'postgres:agent_commands'});
     await new Promise(resolve=>setImmediate(resolve));
     expect(runtime.refresh).toHaveBeenCalledTimes(3);
-    expect(runtime.countHumans).toHaveBeenCalledOnce();
   }finally{await service.leave(joined.call.id,H);await db.query('DELETE FROM rooms WHERE id=$1',[room]);}
 });
 

@@ -582,9 +582,6 @@
       "VoiceAgentStrip",
       "VoiceBar"
     ],
-    "components/buzz/VoiceCallCard.tsx": [
-      "VoiceCallCard"
-    ],
     "components/buzz/VoicePreviewPlayer.native.tsx": [
       "VoicePreviewPlayer"
     ],
@@ -816,10 +813,6 @@
     "components/buzz/TranscriptReference.tsx": {
       "25b80d7ac400061f4653": 1,
       "e3735b6b9b84181ec0a6": 1
-    },
-    "components/buzz/VoiceCallCard.tsx": {
-      "15f4bfb3260376544362": 1,
-      "374342a797c166704900": 1
     },
     "components/buzz/WalletQr.tsx": {
       "795a06a3c8214f8ee29d": 1,

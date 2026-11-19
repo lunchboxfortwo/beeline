@@ -7,6 +7,7 @@ import { createHash,createHmac,randomBytes,randomUUID,timingSafeEqual } from 'no
 import { queueMessage,type CommandRow } from './agent-command.js';
 import { AgentVoiceService } from './agent-voice.js';
 import { CornerAccessDatabase } from './corner-access-database.js';
+import { ExpectedRefusalError } from './command-refusal.js';
 import type { SqlDatabase } from './database.js';
 import { searchInstitutionalHistory } from './institutional-history.js';
 import type { LiveHub } from './live.js';
@@ -62,7 +63,7 @@ export class VoiceService {
             event.reason === 'postgres:messages' && !!r.callCardId && event.messageId === r.callCardId;
           const workChanged = ['message', 'postgres:messages', 'turn', 'postgres:agent_turns', 'postgres:agent_commands'].includes(event.reason);
           return Promise.all([
-            ...(participantsChanged ? [r.countHumans(), r.reconcileParticipants()] : []),
+            ...(participantsChanged ? [r.reconcileParticipants()] : []),
             ...(workChanged ? [r.refresh()] : []),
           ]);
         }).catch(() => {});
@@ -184,13 +185,6 @@ export class VoiceService {
     return speech;
   }
 
-  async humanCount(callId: string): Promise<number> {
-    const result = await this.db.query<{ count: number }>(`SELECT count(*)::int count FROM voice_participants p
-      JOIN identities i ON i.id=p.identity_id AND i.kind='human'
-      WHERE p.call_id=$1 AND p.left_at IS NULL`, [callId]);
-    return result.rows[0]?.count ?? 0;
-  }
-
   async view(row: CallRow, db = this.db): Promise<VoiceCall> {
     const members = await db.query<IdentityRow>(`SELECT i.* FROM voice_participants p JOIN identities i ON i.id=p.identity_id
       WHERE p.call_id=$1 AND p.left_at IS NULL ORDER BY p.joined_at,i.id`, [row.id]);
@@ -213,13 +207,23 @@ export class VoiceService {
     if (!agents.length) throw new Error('This conversation has no agent you can address');
     const sessionId = randomUUID();
     const row = await this.db.transaction(async db => {
+      // Lock the Room before admitting or replacing a session. A call belongs
+      // only to the human in an exact human/agent DM, never a group or thread.
+      const direct = (await db.query<{ id: string }>(`SELECT r.id FROM rooms r
+        WHERE r.id=$1 AND r.parent_id IS NULL AND jsonb_array_length(r.direct_participants)=2
+          AND r.direct_participants ? $2
+          AND EXISTS(SELECT 1 FROM identities i WHERE i.kind='agent' AND r.direct_participants ? i.id)
+        FOR UPDATE OF r`, [roomId, humanId])).rows[0];
+      if (!direct) throw new ExpectedRefusalError('Calls are only available in agent DMs');
       await this.access(roomId, humanId, db);
       const workspaceId = await this.workspaceId(roomId, db);
       await this.budget.require(workspaceId, db);
       let call: CallRow;
       if (expectedCallId) {
         const current = await db.query<CallRow>(`UPDATE voice_calls SET room_id=room_id
-          WHERE id=$1 AND room_id=$2 AND ended_at IS NULL RETURNING *`, [expectedCallId,roomId]);
+          WHERE id=$1 AND room_id=$2 AND ended_at IS NULL
+            AND EXISTS(SELECT 1 FROM voice_participants p WHERE p.call_id=voice_calls.id AND p.identity_id=$3 AND p.left_at IS NULL)
+          RETURNING *`, [expectedCallId,roomId,humanId]);
         if (!current.rows[0]) throw new Error('voice session ended');
         call=current.rows[0];
       } else {
@@ -238,9 +242,8 @@ export class VoiceService {
       await this.updateCard(call, db);
       return call;
     });
-    // Own runtime lease is cross-instance: a second phone never starts a second speaker.
+    // The same caller may replace their phone session; only one runtime speaks.
     await this.ensureRuntime(row);
-    await (await this.runtimes.get(row.id))?.countHumans().catch(() => {});
     this.live.publish({ type: 'invalidate', roomId, reason: 'voice-participants' });
     const token = new AccessToken(this.config.apiKey, this.config.apiSecret, { identity: humanId,
       ttl: '10m', metadata: JSON.stringify({ callId: row.id, kind: 'human' }) });
@@ -362,7 +365,6 @@ export class VoiceService {
     if (!inactivity) await this.rooms.removeParticipant(`beeline-voice-${callId}`, humanId).catch(() => {});
     (await this.runtimes.get(callId))?.participantLeft?.(humanId);
     if (row.ended_at && inactivity) { inactivity.ended = true; await (await this.runtimes.get(callId))?.stopCall(); }
-    await (await this.runtimes.get(callId))?.countHumans().catch(() => {});
     this.live.publish({ type: 'invalidate', roomId: row.room_id, reason: 'voice-participants' });
     if (row.ended_at) await this.finishEndedCall(callId);
   }

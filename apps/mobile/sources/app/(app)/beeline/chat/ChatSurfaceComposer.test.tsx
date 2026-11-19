@@ -102,3 +102,26 @@ it.each([false, true])('COMPOSER-KEYBOARD-1: desktop=%s, only the phone chrome l
   act(() => renderer!.update(<ChatSurfaceComposer {...props} sending={false} />));
   expect(renderer!.root.findByType('Composer').props.attachments).toHaveLength(1);
 });
+
+// A Room with agent members still uses the thread's field/mic/send row.
+it.each([
+  { isDirectMessage: false, isCorner: false, agent: true, callable: false },
+  { isDirectMessage: false, isCorner: true, agent: true, callable: false },
+  { isDirectMessage: true, isCorner: true, agent: true, callable: false },
+  { isDirectMessage: true, isCorner: false, agent: false, callable: false },
+  { isDirectMessage: true, isCorner: false, agent: true, callable: true },
+])('calls are available only in an agent DM: %j', ({ agent, callable, ...location }) => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const voice = { join: vi.fn() };
+  const props = {
+    ...location, desktopExperience: false, pendingAttachments: [], composerTagHandles: new Set(),
+    voice, roomSurface: { room: { name: 'crew' }, members: [{ identity: { kind: agent ? 'agent' : 'human' } }] },
+    composerInputRevisionRef: { current: 0 }, composerHeight: 26, setComposerHeight: () => {},
+    inputText: '', inputTextRef: { current: '' }, setInputText: () => {},
+  } as unknown as Props;
+  act(() => { renderer = create(<ChatSurfaceComposer {...props} />); });
+  const composer = renderer!.root.findByType('Composer');
+  expect(composer.props.voice).toBe(callable ? voice : undefined);
+  if (location.isCorner) expect(composer.props.placeholder).toBe('Reply in thread');
+  else if (!location.isDirectMessage) expect(composer.props.placeholder).toBe('Message #crew');
+});

@@ -12,7 +12,6 @@ import { type RoomSurfaceSessionBindings, type UseRoomSurfaceSessionResult } fro
 import { BuzzCommunityShell } from '@/components/buzz/CommunityRail';
 import { RoomActionsBackground } from '@/components/buzz/RoomRepositoryChoice';
 import { RoomReviewerSurfaceNotice } from '@/components/buzz/RoomReviewerActions';
-import { VoiceCallCard } from '@/components/buzz/VoiceCallCard';
 export { ChatOpeningSurface } from '@/components/buzz/ChatOpeningSurface';
 import { useChatRoute } from './useChatRoute';
 import { useChatScrollState } from './useChatScrollState';
@@ -480,12 +479,6 @@ export function BuzzChatSurface({
               onNewThread={() => void handleOpenRandomCorner()}
               newThreadDisabled={viewerIsAgent || isArchived} />
           )}
-
-          {!isCorner && !isDirectMessage && (() => {
-            const call = workspaceChats.find(chat => chat.room.id === decodedId)?.voiceCall;
-            return call && !call.endedAt ? <VoiceCallCard call={call} viewer={viewerPubkey}
-              joined={voice.call?.id === call.id} connecting={voice.connecting} onJoin={() => void voice.join()} /> : null;
-          })()}
 
           <RoomReviewerSurfaceNotice
             allowAutoMerge={roomRepository?.allowAutoMerge}

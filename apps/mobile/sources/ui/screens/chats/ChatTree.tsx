@@ -11,7 +11,6 @@ import type { ChatListItem, ChatListView } from '@beeline/buzz-client';
 import { useRoomOutboxFailure } from '@/buzz/message-outbox-observer';
 import { compactRelativeTime } from '@/buzz/relative-time';
 import { useRoomCornerSummary } from '@/buzz/room-corner-store';
-import { voiceCallHumanNames } from '@/buzz/voice-call-members';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
 import { Btn, ChatName, Copy, Glyph, HEIGHT, StatusMark, T, useStep } from '@/ui/grammar';
 import {
@@ -191,7 +190,7 @@ export const ChatRow = React.memo(
     const preview = chatPreview(item, viewer);
     const unread = item.unread === true;
     const tagged = chatTagged(item);
-    const call = item.voiceCall && !item.voiceCall.endedAt ? item.voiceCall : null;
+    const call = item.directMessage?.peer.kind === 'agent' && item.voiceCall && !item.voiceCall.endedAt ? item.voiceCall : null;
     const age = call
       ? voiceDuration(now / 1000 - call.startedAt)
       : compactRelativeTime(item.latestMessage?.createdAt ?? item.room.updatedAt, now);
@@ -254,7 +253,7 @@ export const ChatRow = React.memo(
               </Copy>
             ) : call ? (
               <Copy small numberOfLines={2} accent testID={`room-${item.room.id}-preview`}>
-                Ongoing call: {voiceCallHumanNames(call, viewer)}
+                Ongoing call
               </Copy>
             ) : (
               <Copy small numberOfLines={2} quiet={!unread} testID={`room-${item.room.id}-preview`}>

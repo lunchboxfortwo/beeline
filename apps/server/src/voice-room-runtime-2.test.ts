@@ -61,28 +61,6 @@ it.each(['stop', 'cancel', 'wait', 'no', 'Yeah', 'Please explain something else'
 });
 
 
-it('VOICE-CUTIN-1: a delayed membership read cannot cancel a newer finalized request', async () => {
-  const harness = phantomHarness('Here is the answer.');
-  const runtime = await VoiceRoomRuntime.connect(harness.service as unknown as VoiceService, 'call', 'room');
-  state.streams = [new ReadableStream()];
-  let release!: (value: number) => void;
-  try {
-    state.room.emit('track', { kind: 1 }, {}, { identity: 'human' });
-    await vi.waitFor(() => expect(harness.service.config.stt).toHaveBeenCalledOnce());
-    harness.emit('EndOfTurn', 'Explain the answer', 0);
-    await vi.waitFor(() => expect(harness.service.recordAnswer).toHaveBeenCalledOnce());
-    harness.service.humanCount.mockImplementationOnce(() => new Promise<number>(resolve => { release = resolve; }));
-    harness.emit('Update', 'wait', 1, [{ confidence: 0.95 }]);
-    harness.emit('EndOfTurn', 'Please explain something else', 1);
-    await vi.waitFor(() => expect(harness.speech.synthesize).toHaveBeenCalledTimes(2));
-    release(1);
-    await new Promise<void>(resolve => setImmediate(resolve));
-    expect(harness.service.recordHuman).toHaveBeenCalledTimes(2);
-    expect(harness.speech.synthesize.mock.calls.at(-1)?.[2].aborted).toBe(false);
-  } finally { harness.finishPlayback(); await runtime.close(); }
-});
-
-
 it('keeps echo context until a delayed final and ignores duplicate finals before they cancel audio', async () => {
   const harness = phantomHarness();
   const runtime = await VoiceRoomRuntime.connect(harness.service as unknown as VoiceService, 'call', 'room');
@@ -229,7 +207,7 @@ it('ignores legacy park and routes resume to the RTC owner only for the current 
 it('finished-sentence timing adds no wait before commit or first audio', async () => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'performance'] });
   const delay = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
-  const { service, speech } = conversationService(1);
+  const { service, speech } = conversationService();
   let receive!: (event: any) => void;
   service.config.stt.mockImplementation(async (callback: any) => { receive = callback; return { send() {}, close() {} }; });
   let committed = 0, audible = 0;
@@ -238,7 +216,6 @@ it('finished-sentence timing adds no wait before commit or first audio', async (
   service.config.brain.answer.mockImplementation(async () => { await delay(20); return { text: 'A finished reply.', order: false }; });
   speech.synthesize.mockImplementation(async function* () { await delay(40); yield new Uint8Array([200, 1]); });
   const runtime = await VoiceRoomRuntime.connect(service as unknown as VoiceService, 'call', 'room');
-  service.humanCount.mockImplementation(async () => { await delay(2); return 1; });
   state.room.localParticipant.publishData.mockImplementation(async () => { await delay(1); });
   state.audio.captureFrame.mockImplementation(async () => { await delay(1); audible = performance.now(); });
   try {
@@ -248,14 +225,14 @@ it('finished-sentence timing adds no wait before commit or first audio', async (
     expect(receive).toBeDefined();
     receive({ event: 'EndOfTurn', transcript: 'Ruby this sentence is finished.', turn_index: 0, sequence_id: 0 });
     await vi.advanceTimersByTimeAsync(200);
-    expect({ committed, audible }).toEqual({ committed: 1011, audible: 1076 });
+    expect({ committed, audible }).toEqual({ committed: 1009, audible: 1074 });
     console.log('FINISHED-SENTENCE timing fixture:', JSON.stringify({ endOfTurnToCommitMs: committed - 1000, endOfTurnToFirstAudioMs: audible - 1000, eotThreshold: 0.7, eotTimeoutMs: 1000, providerAndTransport: 'controlled doubles' }));
   } finally { await runtime.close(); vi.useRealTimers(); }
 });
 
 
 it('Reproduction CONTINUATION-1: resumes during thinking without creating another message', async () => {
-  const { service } = conversationService(1);
+  const { service } = conversationService();
   const logs = vi.spyOn(console, 'info');
   const releases: Array<() => void> = [];
   service.config.brain.answer.mockImplementation(async (_agent, _history, _onText, signal) => {
@@ -283,7 +260,7 @@ it('Reproduction CONTINUATION-1: resumes during thinking without creating anothe
 
 
 it('a failed authorization after confirmed partial speech does not poison the next final', async () => {
-  const { service } = conversationService(1);
+  const { service } = conversationService();
   let receive!: (event: any) => void;
   service.config.stt.mockImplementation(async callback => { receive = callback; return { send() {}, close() {} }; });
   const runtime = await VoiceRoomRuntime.connect(service as unknown as VoiceService, 'call', 'room');
@@ -308,11 +285,11 @@ it('a failed authorization after confirmed partial speech does not poison the ne
 });
 
 
-it.each(['agents', 'humanCount'])('settles a shared source when %s fails and allows the next turn', async stage => {
-  const { service } = conversationService(1);
+it.each(['agents'])('settles a shared source when %s fails and allows the next turn', async stage => {
+  const { service } = conversationService();
   const runtime = await VoiceRoomRuntime.connect(service as unknown as VoiceService, 'call', 'room');
   const setup = deferred<any>();
-  const failing = stage === 'agents' ? service.agents : stage === 'humanCount' ? service.humanCount : state.room.localParticipant.publishData;
+  const failing = service.agents;
   failing.mockClear();
   failing.mockImplementationOnce(() => setup.promise);
   try {
@@ -329,7 +306,7 @@ it.each(['agents', 'humanCount'])('settles a shared source when %s fails and all
 
 
 it('shares an insert in flight and serializes later edits before restarting the newest text', async () => {
-  const { service } = conversationService(1);
+  const { service } = conversationService();
   const insert = deferred<string>(), edit = deferred<void>();
   service.recordHuman.mockImplementationOnce(() => insert.promise);
   service.reviseHuman.mockImplementationOnce(() => edit.promise);
@@ -353,8 +330,8 @@ it('shares an insert in flight and serializes later edits before restarting the 
 });
 
 
-it('multi-human-silence-1: the same human can continue a pending pre-audio request', async () => {
-  const { service, speech } = conversationService(2);
+it('legacy-microphone: the same human can continue a pending pre-audio request', async () => {
+  const { service, speech } = conversationService();
   speech.synthesize.mockImplementationOnce(async function* (_text, _voice, signal) {
     yield Buffer.alloc(960);
     await new Promise<void>((_resolve, reject) => {
@@ -375,7 +352,7 @@ it('multi-human-silence-1: the same human can continue a pending pre-audio reque
 
 
 it('quiet PCM keeps assembly open until a voiced answer is accepted', async () => {
-  const { service, speech } = conversationService(1);
+  const { service, speech } = conversationService();
   speech.synthesize.mockImplementationOnce(async function* (_text, _voice, signal) {
     yield Buffer.alloc(960);
     await new Promise<void>((_resolve, reject) => {
@@ -397,7 +374,7 @@ it('quiet PCM keeps assembly open until a voiced answer is accepted', async () =
 
 
 it('does not call playback after cancellation during an awaited speaker signal', async () => {
-  const { service } = conversationService(1);
+  const { service } = conversationService();
   const runtime = await VoiceRoomRuntime.connect(service as unknown as VoiceService, 'call', 'room');
   const speaker = deferred<void>();
   let waiting = false;
@@ -419,29 +396,8 @@ it('does not call playback after cancellation during an awaited speaker signal',
 });
 
 
-it('Reproduction DELIVERY-2: another human cannot cancel classification before acknowledgement', async () => {
-  const { service, speech } = conversationService(2);
-  const decision = deferred<any>();
-  let signal!: AbortSignal;
-  service.config.brain.answer.mockImplementationOnce(async (_agent, _history, delta, cancellation) => {
-    signal = cancellation; delta('Checking. '); return decision.promise;
-  });
-  const runtime = await VoiceRoomRuntime.connect(service as unknown as VoiceService, 'call', 'room');
-  try {
-    const first = runtime.utterance('human', 'Ruby check my latest report');
-    await vi.waitFor(() => expect(service.config.brain.answer).toHaveBeenCalledOnce());
-    expect(state.audio.captureFrame).not.toHaveBeenCalled();
-    await runtime.utterance('second', 'Goosey another question');
-    expect(signal.aborted).toBe(false);
-    decision.resolve({ text: 'Checking.', order: true }); await first;
-    expect(service.dispatch).toHaveBeenCalledOnce();
-    expect(service.reviseHuman).not.toHaveBeenCalled();
-  } finally { decision.resolve({text: '', order: false}); await runtime.close(); }
-});
-
-
 it('superseded pending setup cannot restore an older target', async () => {
-  const { service } = conversationService(1);
+  const { service } = conversationService();
   const authorization = deferred<typeof roster>();
   service.agents.mockImplementationOnce(() => authorization.promise);
   const runtime = await VoiceRoomRuntime.connect(service as unknown as VoiceService, 'call', 'room');
@@ -459,7 +415,7 @@ it('superseded pending setup cannot restore an older target', async () => {
 
 
 it('a continuation can change the authorized target without creating another source', async () => {
-  const { service } = conversationService(1);
+  const { service } = conversationService();
   service.config.brain.answer.mockImplementationOnce(async (_agent, _history, _delta, signal) => {
     await new Promise<void>((_resolve, reject) => signal.addEventListener('abort', () => reject(new DOMException('Interrupted', 'AbortError')), { once: true }));
     return { text: '', order: false };
@@ -478,7 +434,7 @@ it('a continuation can change the authorized target without creating another sou
 
 
 it.each([2, 960])('commits before first capture (%d bytes), with independent later requests', async size => {
-  const { service } = conversationService(1);
+  const { service } = conversationService();
   service.speech.mockResolvedValue({ synthesize: async function* () { yield Buffer.alloc(size, 1); } } as any);
   service.config.brain.answer.mockImplementation(async () => ({ text: 'I will do it.', order: true }));
   const runtime = await VoiceRoomRuntime.connect(service as unknown as VoiceService, 'call', 'room');
@@ -500,7 +456,7 @@ it.each([2, 960])('commits before first capture (%d bytes), with independent lat
 
 
 it('inherits an opening target while authorization is still pending', async () => {
-  const { service } = conversationService(1);
+  const { service } = conversationService();
   const agents = deferred<typeof roster>();
   service.agents.mockImplementationOnce(() => agents.promise);
   const runtime = await VoiceRoomRuntime.connect(service as unknown as VoiceService, 'call', 'room');
@@ -517,7 +473,7 @@ it('inherits an opening target while authorization is still pending', async () =
 
 
 it('respects an avatar target change during a pre-audio continuation', async () => {
-  const { service } = conversationService(1);
+  const { service } = conversationService();
   service.config.brain.answer.mockImplementationOnce(async (_agent, _history, _delta, signal) => {
     await new Promise<void>((_resolve, reject) => signal.addEventListener('abort', () => reject(new DOMException('Interrupted', 'AbortError')), { once: true }));
     return { text: '', order: false };
@@ -535,7 +491,7 @@ it('respects an avatar target change during a pre-audio continuation', async () 
 
 
 it('dispatches an audible order before playback ends and keeps it across barge-in', async () => {
-  const { service } = conversationService(1);
+  const { service } = conversationService();
   service.config.brain.answer.mockImplementationOnce(async () => ({ text: 'I will do it.', order: true }));
   const runtime = await VoiceRoomRuntime.connect(service as unknown as VoiceService, 'call', 'room');
   const playback = deferred<void>(), dispatch = deferred<void>();
@@ -555,7 +511,7 @@ it('dispatches an audible order before playback ends and keeps it across barge-i
 
 
 it('does not duplicate an audible answer when barge-in races its persistence', async () => {
-  const { service } = conversationService(1);
+  const { service } = conversationService();
   const runtime = await VoiceRoomRuntime.connect(service as unknown as VoiceService, 'call', 'room');
   const persistence = deferred<void>();
   service.recordAnswer.mockImplementationOnce(() => persistence.promise);
@@ -574,7 +530,7 @@ it('does not duplicate an audible answer when barge-in races its persistence', a
 
 
 it('delivers external work even when acknowledgement produces no audio', async () => {
-  const { service, speech } = conversationService(1);
+  const { service, speech } = conversationService();
   service.config.brain.answer.mockImplementation(async () => ({ text: 'I will do it.', order: true }));
   speech.synthesize.mockImplementation(async function* () {});
   const runtime = await VoiceRoomRuntime.connect(service as unknown as VoiceService, 'call', 'room');
@@ -587,7 +543,7 @@ it('delivers external work even when acknowledgement produces no audio', async (
 
 
 it('Reproduction DELIVERY-2: dispatch retry reuses the accepted source without reclassifying or revising', async () => {
-  const { service, speech } = conversationService(2);
+  const { service, speech } = conversationService();
   service.config.brain.answer.mockImplementationOnce(async () => ({ text: 'Checking.', order: true }));
   service.dispatch.mockRejectedValueOnce(new Error('commit acknowledgement lost'));
   const runtime = await VoiceRoomRuntime.connect(service as unknown as VoiceService, 'call', 'room');
@@ -607,7 +563,7 @@ it.each([1200, 1500])('CONTINUATION-1: real service and phone read retain one so
   const db = new PgliteDatabase(), live = new LiveHub();
   const human = 'a'.repeat(64), agent = 'b'.repeat(64);
   const workspace = '11111111-1111-4111-8111-111111111111', room = '22222222-2222-4222-8222-222222222222';
-  const { service: fixture, speech } = conversationService(1);
+  const { service: fixture, speech } = conversationService();
   let receive!: (event: any) => void;
   fixture.config.stt.mockImplementation(async callback => { receive = callback; return { send() {}, close() {} }; });
   const release = deferred<void>();
@@ -626,7 +582,7 @@ it.each([1200, 1500])('CONTINUATION-1: real service and phone read retain one so
     await db.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'human','Human','human'),($2,'agent','Ruby','ruby')`, [human, agent]);
     await db.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [agent, human]);
     await db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Continuation proof')`, [workspace]);
-    await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Room')`, [room, workspace]);
+    await db.query(`INSERT INTO rooms(id,workspace_id,name,direct_participants) VALUES($1,$2,'Room',$3)`, [room, workspace, JSON.stringify([human, agent])]);
     await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES
       ($1,NULL,$2,'owner'),($1,NULL,$3,'member'),($1,$4,$2,'owner'),($1,$4,$3,'member')`, [workspace, human, agent, room]);
     const joined = await voice.join(room, human);
@@ -667,126 +623,4 @@ it.each([1200, 1500])('CONTINUATION-1: real service and phone read retain one so
     release.resolve();
     expect(runtime).toBeDefined();
   } finally { await voice.close(); await db.close(); }
-}, 30_000);
-
-it('Reproduction MULTI-1: another human\'s laughter does not cancel the reply to the human who tagged an agent', async () => {
-  const { service } = conversationService(2);
-  const opened: ((event: any) => void)[] = [];
-  service.config.stt.mockImplementation(async (onEvent: (event: any) => void) => {
-    opened.push(onEvent);
-    return { send: vi.fn(), close: vi.fn() };
-  });
-  const receivers = new Map<string, (event: any) => void>();
-  let firstToken!: () => void;
-  service.config.brain.answer.mockImplementation(async (_agent, _history, onText, signal: AbortSignal) => {
-    // The model is still producing its first token when the other human talks.
-    await new Promise<void>((resolve, reject) => {
-      firstToken = resolve;
-      signal.addEventListener('abort', () => reject(new DOMException('Interrupted', 'AbortError')), { once: true });
-    });
-    onText('I’m here. What do you need?');
-    return { text: 'I’m here. What do you need?', order: false };
-  });
-  const runtime = await VoiceRoomRuntime.connect(service as unknown as VoiceService, 'call', 'room');
-  state.streams = [new ReadableStream(), new ReadableStream()];
-  const words = (text: string) => text.split(' ').map((word, i) => ({ word, start: i * 0.2, end: (i + 1) * 0.2, confidence: 0.95 }));
-  const say = (human: string, event: string, transcript: string, turn: number) =>
-    receivers.get(human)!({ event, transcript, turn_index: turn, sequence_id: turn, words: words(transcript) });
-  try {
-    for (const human of ['starter', 'second']) {
-      state.room.emit('track', { kind: 1 }, {}, { identity: human });
-      await vi.waitFor(() => expect(opened).toHaveLength(receivers.size + 1));
-      receivers.set(human, opened.at(-1)!);
-    }
-    say('second', 'EndOfTurn', 'Ruby are you there', 0);
-    await vi.waitFor(() => expect(service.config.brain.answer).toHaveBeenCalledOnce());
-    say('starter', 'Update', 'haha', 0);
-    say('starter', 'EndOfTurn', 'haha', 0);
-    firstToken();
-    await vi.waitFor(() => expect(service.recordAnswer).toHaveBeenCalledWith('room', 'ruby', 'I’m here. What do you need?', expect.any(Object)));
-    expect(service.config.brain.answer.mock.calls[0]?.[3].aborted).toBe(false);
-    expect(service.recordHuman.mock.calls.map(call => [call[2], call[4]])).toEqual([['second', 'Ruby are you there']]);
-  } finally { await runtime.close(); }
-});
-
-
-it('Demonstration MULTI-1: two humans in one call both get the agent reply, with no false offline notice', async () => {
-  const db = new PgliteDatabase();
-  const live = new LiveHub();
-  const starter = 'a'.repeat(64), second = 'd'.repeat(64), agent = 'b'.repeat(64);
-  const workspace = '11111111-1111-4111-8111-111111111111';
-  const room = '22222222-2222-4222-8222-222222222222';
-  const started = performance.now();
-  const timeline: string[] = [];
-  const note = (text: string) => timeline.push(`${(performance.now() - started).toFixed(1).padStart(7)}ms ${text}`);
-  const config = conversationService(2).service.config;
-  const opened: ((event: any) => void)[] = [];
-  config.stt.mockImplementation(async (onEvent: (event: any) => void) => { opened.push(onEvent); return { send: vi.fn(), close: vi.fn() }; });
-  const latency: { commit: number; brain: number }[] = [];
-  let endOfTurn = 0;
-  config.brain.answer.mockImplementation(async (_agent, history, onText, signal: AbortSignal) => {
-    latency.push({ commit: 0, brain: performance.now() - endOfTurn });
-    const text = history.at(-1)!.content.includes('Candy') ? 'I’m here, senpai!' : 'I’m here. What do you need?';
-    note(`brain start for "${history.at(-1)!.content}"`);
-    // Luna's first token takes about half a second; the other human talks meanwhile.
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(resolve, 300);
-      signal.addEventListener('abort', () => { clearTimeout(timer); note('reply CANCELLED before its first token'); reject(new DOMException('Interrupted', 'AbortError')); }, { once: true });
-    });
-    onText(text); return { text, order: false };
-  });
-  const voice = new RealVoiceService(db, live, { ...config, speech: { synthesize: async function* () { yield new Uint8Array([200, 1]); } } });
-  const presence = new ConnectionPresence(db, live);
-  const words = (text: string) => text.split(' ').map((word, i) => ({ word, start: i * 0.2, end: (i + 1) * 0.2, confidence: 0.95 }));
-  try {
-    await migrate(db);
-    await db.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'human','Starter','starter'),($2,'human','Second','second'),($3,'agent','Candy','candy')`, [starter, second, agent]);
-    await db.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [agent, starter]);
-    await db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Multiparty proof')`, [workspace]);
-    await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'experiments')`, [room, workspace]);
-    await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES
-      ($1,NULL,$2,'owner'),($1,NULL,$3,'member'),($1,NULL,$4,'member'),($1,$5,$2,'owner'),($1,$5,$3,'member'),($1,$5,$4,'member')`,
-      [workspace, starter, second, agent, room]);
-    await presence.announce(room, agent, { lifecycleId: 'helper-boot' });
-    const joined = await voice.join(room, starter);
-    await voice.join(room, second);
-    const call = (await db.query<any>(`SELECT * FROM voice_calls WHERE id=$1`, [joined.call.id])).rows[0];
-    const runtime = (await voice.ensureRuntime(call))!;
-    state.streams = [new ReadableStream(), new ReadableStream()];
-    const receivers = new Map<string, (event: any) => void>();
-    for (const human of [starter, second]) {
-      state.room.emit('track', { kind: 1 }, {}, { identity: human });
-      await vi.waitFor(() => expect(opened).toHaveLength(receivers.size + 1));
-      receivers.set(human, opened.at(-1)!);
-    }
-    const say = (human: string, event: string, transcript: string, turn: number) => {
-      note(`${human === starter ? 'starter' : 'second '} STT ${event}: "${transcript}"`);
-      if (event === 'EndOfTurn') endOfTurn = performance.now();
-      receivers.get(human)!({ event, transcript, turn_index: turn, sequence_id: turn, words: words(transcript) });
-    };
-    const replies = async () => (await new PhoneService(db, 'http://proof').readRoom(room, starter))!.messages
-      .filter(message => message.author.pubkey === agent && message.presentation === 'message').map(message => message.text);
-    // The call starter tags the agent; the second human is mid-sentence.
-    say(starter, 'EndOfTurn', 'Candy are you there', 0);
-    await vi.waitFor(() => expect(config.brain.answer).toHaveBeenCalledTimes(1));
-    say(second, 'Update', 'haha', 0);
-    await vi.waitFor(async () => expect(await replies()).toEqual(['I’m here, senpai!']), { timeout: 3000 });
-    note('reply visible to starter');
-    // The second human tags the agent; the starter laughs over the first token.
-    say(second, 'EndOfTurn', 'Candy can you hear me too', 1);
-    await vi.waitFor(() => expect(config.brain.answer).toHaveBeenCalledTimes(2));
-    say(starter, 'Update', 'mm hmm', 1);
-    await vi.waitFor(async () => expect(await replies()).toHaveLength(2), { timeout: 3000 });
-    note('reply visible to second human');
-    const failed = (await db.query(`SELECT text FROM messages WHERE card_type='turn-failed'`)).rows;
-    const status = (await db.query<{ body: { status: string } }>(`SELECT body FROM live_outputs WHERE agent_id=$1 AND kind='presence'`, [agent])).rows[0]!.body.status;
-    note(`after both replies: presence=${status}, offline notices=${failed.length}`);
-    expect(failed).toEqual([]);
-    expect(status).toBe('online');
-    await runtime.close();
-  } finally {
-    console.log('Demonstration MULTI-1\n' + timeline.join('\n'));
-    for (const [i, sample] of latency.entries()) console.log(`latency turn ${i}: end of speech -> brain start ${sample.brain.toFixed(1)} ms`);
-    await presence.stop(); await voice.close(); await db.close();
-  }
 }, 30_000);

@@ -25,16 +25,14 @@ it.each(['Gussie, are you there?', 'hey Goosey help', 'Goosy what do you think',
   const roster = [...agents, { id: 'goosy', name: 'Goosy', handle: 'goosy', soul: '', voice: 'goosy-voice' }];
   expect(nameSound('Gussie')).toBe(nameSound('Goosy'));
   expect(nameSound('Goosey')).toBe(nameSound('Goosy'));
-  expect(namedVoiceTarget(text, roster, 'ruby', 2)?.id).toBe('goosy');
-  expect(namedVoiceTarget(text, roster, 'ruby', 1)?.id).toBe('goosy');
+  expect(namedVoiceTarget(text, roster, 'ruby')?.id).toBe('goosy');
 });
-it('resolves an ambiguous sound to no target with several humans and keeps the lock for one human', () => {
+it('keeps the selected target for an ambiguous sound', () => {
   const roster = [...agents, { id: 'goosy', name: 'Goosy', handle: 'goosy', soul: '', voice: '' },
     { id: 'gussie', name: 'Gussie', handle: 'gussie', soul: '', voice: '' }];
-  expect(namedVoiceTarget('Goosey help', roster, 'ruby', 2)).toBeUndefined();
-  expect(namedVoiceTarget('Goosey help', roster, 'ruby', 1)?.id).toBe('ruby');
-  expect(namedVoiceTarget('Hoots, hats or hits', [{ id: 'hoots', name: 'Hoots', handle: 'hoots', soul: '', voice: '' }], undefined, 2)?.id).toBe('hoots');
-  expect(namedVoiceTarget('Hats off', [{ id: 'hoots', name: 'Hoots', handle: 'hoots', soul: '', voice: '' }], undefined, 2)).toBeUndefined();
+  expect(namedVoiceTarget('Goosey help', roster, 'ruby')?.id).toBe('ruby');
+  expect(openingVoiceName('Hoots, hats or hits', [{ id: 'hoots', name: 'Hoots', handle: 'hoots', soul: '', voice: '' }])?.id).toBe('hoots');
+  expect(openingVoiceName('Hats off', [{ id: 'hoots', name: 'Hoots', handle: 'hoots', soul: '', voice: '' }])).toBeUndefined();
 });
 
 it.each(['um hey Candy help', 'uh, Candie', 'so Candy help', 'alright Candy help',

@@ -2,10 +2,10 @@ import { VOICE_DATA_TOPIC, expect, it, vi, VoiceService, VoiceRoomRuntime, spoke
 
 
 
-it.each([1,2].flatMap(humans => ['stop', 'End conversation.', 'leave conversation'].map(phrase => ({humans,phrase}))))('call-wide-end-3: %s interrupts without leaving or closing input', async ({humans,phrase}) => {
+it.each(['stop', 'End conversation.', 'leave conversation'])('call-wide-end-3: %s interrupts without leaving or closing input', async phrase => {
   let onSpeech!: (event: any) => void;
   state.streams = [new ReadableStream()];
-  const { service } = conversationService(humans);
+  const { service } = conversationService();
   const leave = vi.fn(async () => {}), close = vi.fn();
   service.config.stt.mockImplementation(async (callback: any) => {
     onSpeech = callback; return { send: vi.fn(), close };
@@ -25,8 +25,8 @@ it.each([1,2].flatMap(humans => ['stop', 'End conversation.', 'leave conversatio
 });
 
 
-it('multi-human-silence-1: resume without a report acknowledges idle playback to restore legacy microphones', async () => {
-  const { service } = conversationService(2);
+it('legacy-microphone: resume without a report acknowledges idle playback to restore legacy microphones', async () => {
+  const { service } = conversationService();
   const runtime = await VoiceRoomRuntime.connect(service as unknown as VoiceService, 'call', 'room');
   state.room.remoteParticipants.set('human', { identity: 'human', trackPublications: new Map() });
   try {
@@ -125,7 +125,7 @@ it('checks expired voice authority on the next control event and does nothing wh
   vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
   let now = 1000;
   const monotonic = vi.spyOn(performance, 'now').mockImplementation(() => now);
-  const { service } = conversationService(1);
+  const { service } = conversationService();
   const runtime = await VoiceRoomRuntime.connect(service as unknown as VoiceService, 'call', 'room');
   try {
     service.db.query.mockClear();
@@ -144,7 +144,7 @@ it('checks expired voice authority on the next control event and does nothing wh
 
 
 it.each(['Ruby', 'Dr. Ruby', 'Ruby!', '🌻 Ruby'])('VOICE-LABEL-1: %s labels are removed before synthesis and transcript writes', async (name) => {
-  const { service, speech } = conversationService(1);
+  const { service, speech } = conversationService();
   const outputs = [`${name} (@ruby) [#beeline/item/previous]: A small ceramic planter.`,
     '[#beeline/item/previous]: Choose one with drainage.'];
   const fetcher = vi.fn(async () => new Response(outputs.shift()!.match(/.{1,12}/gu)!.map(content =>
@@ -167,7 +167,7 @@ it.each(['Ruby', 'Dr. Ruby', 'Ruby!', '🌻 Ruby'])('VOICE-LABEL-1: %s labels ar
 
 
 it('routes unnamed solo speech to the last active agent despite the initial first-agent selection', async () => {
-  const { service } = conversationService(1);
+  const { service } = conversationService();
   service.lastActiveAgent.mockResolvedValue('goose');
   const runtime = await VoiceRoomRuntime.connect(service as unknown as VoiceService, 'call', 'room');
   try {
@@ -182,7 +182,7 @@ it('routes unnamed solo speech to the last active agent despite the initial firs
 
 
 it('keeps named addresses and deliberate avatar taps ahead of recent solo activity', async () => {
-  const { service } = conversationService(1);
+  const { service } = conversationService();
   service.lastActiveAgent.mockResolvedValue('goose');
   const runtime = await VoiceRoomRuntime.connect(service as unknown as VoiceService, 'call', 'room');
   try {
@@ -201,7 +201,7 @@ it('keeps named addresses and deliberate avatar taps ahead of recent solo activi
 
 
 it('preserves the first agent and selected target when no agent has been active', async () => {
-  const { service } = conversationService(1);
+  const { service } = conversationService();
   const runtime = await VoiceRoomRuntime.connect(service as unknown as VoiceService, 'call', 'room');
   try {
     await runtime.utterance('human', 'Can you help?');
@@ -214,46 +214,21 @@ it('preserves the first agent and selected target when no agent has been active'
 });
 
 
-it('refreshes recent solo activity each turn and does not use it for multi-human calls', async () => {
-  const { service } = conversationService(1);
+it('refreshes recent activity each turn', async () => {
+  const { service } = conversationService();
   service.lastActiveAgent.mockResolvedValueOnce('goose').mockResolvedValueOnce('ruby');
   const runtime = await VoiceRoomRuntime.connect(service as unknown as VoiceService, 'call', 'room');
   try {
     await runtime.utterance('human', 'Can you help?');
     await runtime.utterance('human', 'What next?');
     expect(service.config.brain.answer.mock.calls.map(call => call[0].id)).toEqual(['goose', 'ruby']);
-    service.humanCount.mockResolvedValue(2);
-    await runtime.utterance('human', 'Can you help?');
-    expect(service.config.brain.answer).toHaveBeenCalledTimes(2);
     expect(service.lastActiveAgent).toHaveBeenCalledTimes(2);
   } finally { await runtime.close(); }
 });
 
 
-it('switches on an opening name and ignores unnamed speech from either human, including after an avatar tap', async () => {
-  const { service } = conversationService();
-  const runtime = await VoiceRoomRuntime.connect(service as unknown as VoiceService, 'call', 'room');
-  try {
-    await runtime.utterance('human', 'Hello Ruby');
-    await runtime.utterance('human', 'Please help me, GOOSEY');
-    expect(service.config.brain.answer).toHaveBeenCalledOnce();
-    await runtime.utterance('human', 'Hey GOOSEY, please help me');
-    expect(service.config.brain.answer.mock.calls.map(call => call[0].id)).toEqual(['ruby', 'goose']);
-    state.room.emit('data', new TextEncoder().encode(JSON.stringify({ type: 'target', agentId: 'ruby' })), { identity: 'human' }, undefined, 'beeline.voice.v1');
-    await vi.waitFor(() => expect(service.access).toHaveBeenCalled());
-    await runtime.utterance('human', 'What do you think?');
-    await runtime.utterance('second', 'I agree with you.');
-    expect(service.config.brain.answer).toHaveBeenCalledTimes(2);
-    expect(service.recordHuman).toHaveBeenCalledTimes(2);
-    service.humanCount.mockResolvedValue(1);
-    await runtime.utterance('human', 'Continue please');
-    expect(service.config.brain.answer.mock.calls.at(-1)?.[0].id).toBe('ruby');
-  } finally { await runtime.close(); }
-});
-
-
 it.each([true, false])('plays the complete reply when streamed=%s, including every sentence', async streamed => {
-  const { service, speech } = conversationService(1);
+  const { service, speech } = conversationService();
   if (!streamed) service.config.brain.answer.mockImplementation(async () => ({ text: 'First sentence. Second sentence! Third sentence.', order: false }));
   const runtime = await VoiceRoomRuntime.connect(service as unknown as VoiceService, 'call', 'room');
   try {
@@ -277,7 +252,7 @@ it('uses confident recognized speech for barge-in and rejects noise and echo fra
 
 
 it('opens one STT stream for duplicate track events, dispatches one final turn, and ignores noise or echo while speaking', async () => {
-  const { service } = conversationService(1);
+  const { service } = conversationService();
   service.config.brain.answer.mockImplementation(async (_agent, _history, onText) => {
     onText('Sure. Here is the full explanation.');
     return { text: 'Sure. Here is the full explanation.', order: false };
@@ -337,7 +312,7 @@ it('claims a report once before playback and never replays an interrupted openin
 
 
 it('waits for an utterance that starts while a report claim is in flight', async () => {
-  const { service, speech } = conversationService(1);
+  const { service, speech } = conversationService();
   let offered = false;
   let playbackStarted!: () => void;
   const firstPlayback = new Promise<void>(resolve => { playbackStarted = resolve; });
@@ -360,8 +335,6 @@ it('waits for an utterance that starts while a report claim is in flight', async
     // Synchronize on the held playout itself, not a short polling window
     // that can expire under the full CI shard's event-loop load.
     await firstPlayback;
-    // Membership refresh must keep the caller present while playback is held.
-    await runtime.countHumans();
     expect(speech.synthesize).toHaveBeenCalledOnce();
     releaseClaim();
     await new Promise(resolve => setImmediate(resolve));
@@ -374,7 +347,7 @@ it('waits for an utterance that starts while a report claim is in flight', async
 
 
 it('prepares the playback provider and current voice concurrently without using a cached voice', async () => {
-  const { service, speech } = conversationService(1);
+  const { service, speech } = conversationService();
   const runtime = await VoiceRoomRuntime.connect(service as unknown as VoiceService, 'call', 'room');
   const prepared = deferred<typeof speech>();
   service.speech.mockReturnValue(prepared.promise);
@@ -390,7 +363,7 @@ it('prepares the playback provider and current voice concurrently without using 
 
 
 it('voice timing persistence never holds first audio behind a storage write', async () => {
-  const { service } = conversationService(1);
+  const { service } = conversationService();
   const timing = vi.fn(() => new Promise<void>(() => {}));
   const runtime = await VoiceRoomRuntime.connect({ ...service, recordTiming: timing } as unknown as VoiceService, 'call', 'room');
   try {
@@ -402,7 +375,7 @@ it('voice timing persistence never holds first audio behind a storage write', as
 
 
 it.each([false, true])('Reproduction SPOKEN-1: records search speech before a final reply or failure (fails=%s)', async fails => {
-  const { service } = conversationService(1);
+  const { service } = conversationService();
   service.config.brain.answer.mockImplementation(async (_agent, _history, onText, _signal, context) => {
     await context.announce('Let me look.');
     if (fails) throw new Error('Voice reply unavailable');
@@ -419,7 +392,7 @@ it.each([false, true])('Reproduction SPOKEN-1: records search speech before a fi
 
 
 it.each([false, true])('lookup goes to order: speaks filler without storing it (streamed whitespace: %s)', async streamed => {
-  const { service, speech } = conversationService(1);
+  const { service, speech } = conversationService();
   service.config.brain.answer.mockImplementation(async (_agent, _history, onText) => {
     if (streamed) onText(' ');
     return { text: '', order: true };
@@ -436,7 +409,7 @@ it.each([false, true])('lookup goes to order: speaks filler without storing it (
 
 
 it('records the audible acknowledgement before external work completes', async () => {
-  const { service } = conversationService(1);
+  const { service } = conversationService();
   service.config.brain.answer.mockImplementation(async (_agent, _history, onText) => {
     onText('You’re right to question it.');
     return { text: 'You’re right to question it.', order: true };
@@ -451,7 +424,7 @@ it('records the audible acknowledgement before external work completes', async (
 
 
 it('does not fall back to a second visible reply when a handoff fails', async () => {
-  const { service } = conversationService(1);
+  const { service } = conversationService();
   service.config.brain.answer.mockImplementation(async (_agent, _history, onText) => {
     onText('I’ll check.'); return { text: 'I’ll check.', order: true };
   });
@@ -470,7 +443,7 @@ it('Reproduction voice-lost-1 stand-in: mixed request dispatch and failure follo
   const human = 'a'.repeat(64), agent = 'b'.repeat(64);
   const workspace = '11111111-1111-4111-8111-111111111111';
   const room = '22222222-2222-4222-8222-222222222222';
-  const config = conversationService(1).service.config;
+  const config = conversationService().service.config;
   const request = 'Introduce yourself. Connect my Shopify';
   const failure = 'Shopify could not connect because Trusty Squire is unavailable.';
   const brain = new OpenRouterVoiceBrain('test', async (_url, options) => {
@@ -667,7 +640,7 @@ it('Demonstration VOICE-ACK-1, stray-word-1 and filler-final-1/2: recognizer fin
   const db = new PgliteDatabase(), live = new LiveHub();
   const human = 'a'.repeat(64), agent = 'b'.repeat(64);
   const workspace = '11111111-1111-4111-8111-111111111111', room = '22222222-2222-4222-8222-222222222222';
-  const fixture = conversationService(1);
+  const fixture = conversationService();
   let receive!: (event: any) => void, finish!: () => void;
   fixture.service.config.stt.mockImplementation(async callback => {
     receive = callback; return { send: vi.fn(), close: vi.fn() };

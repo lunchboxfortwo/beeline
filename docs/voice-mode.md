@@ -1,17 +1,19 @@
 # Beeline voice mode
 
-Hold the existing composer mic to start voice mode. A short press still starts
-text dictation. Voice stays in the conversation: tap an agent's square avatar,
-or say its name, to aim your words. The labeled end control ends your participation;
-hold the waveform to open the optional full-screen view. Room members join
-through the live call card. With several humans, a separate **Leave call**
-button ends only your participation; solo calls show **End call**.
-After the last person leaves, that card becomes
-`Voice call ended · duration`.
+Calls are available only in a DM between one person and an agent. Tap the
+conversation-mode control or hold the composer mic to start; a short mic press
+still starts text dictation. Group chats and threads use the same call-free
+composer. The server rejects group, thread and human-DM call admission, including
+requests from older apps. An already-running group call can end normally; no
+live-call migration is needed.
+
+The labeled **End call** control ends the call. Its transcript card becomes
+`Voice call ended · duration`. The same caller can reconnect to their existing
+session; another person cannot join it. There is no group call card or Join button.
 
 Each Workspace has 60 minutes of call time per day. A call spends wall-clock
-time while at least one human has a live microphone; adding people does not
-multiply it. Concurrent calls in different Rooms each spend from that same
+time while the caller has a live microphone. Concurrent calls in different
+agent DMs each spend from that same
 budget. Muted microphones and reconnect periods without input spend nothing.
 No owner timezone is stored today, so the explicit fallback is UTC midnight.
 With two minutes remaining, everyone's existing tip slot shows `2 min left today`
@@ -84,31 +86,13 @@ field; the server ignores it. Room assignment reserves saved voices and resolves
 collisions deterministically. The profile opened from a Room shows its effective
 assignment. There are no cloning or upload controls.
 
-Say an agent's handle or display name at the start of a request to address it;
-matching ignores case and respects word boundaries. Up to four leading greetings
-or fillers (such as "um hey" or "okay so") are skipped before matching. An exact
-agent name or handle always takes priority over treating its word as filler.
-Ambiguous names and the existing short-name fuzzy guard are unchanged. Tapping an avatar pins that agent for your speech until you tap it again, tap
-Unpin, or pin another agent. The pin is private to each participant and remains
-in place when someone speaks an agent's name. With no pin and two or more humans,
-start each request with an agent's name to get a reply.
-A name-only segment holds that human's addressee for three seconds, renewed
-while that human speaks. Pinned avatars have a filled tile and brass pin badge;
-the line above the voice bar says “Pinned to <Name>” with an Unpin link.
-Speaking avatars retain their pulsing brass frame, including beneath a pin badge.
-Reduced motion keeps the speaking frame steady. Names are never underlined. An unfinished request retains
-its addressee across further segments; an explicit new name replaces it. Other
-humans cannot consume the draft. Delivery, cancel, expiry or departure clears the temporary spoken address.
-Departure also clears the persistent tap selection. An expired name alone never dispatches work; an unaddressed
-request asks for the agent's name again.
-With exactly one human, unnamed speech addresses the eligible agent who most
-recently posted a message in that Room or corner. An opening agent name or an
-explicit avatar tap takes priority. If no eligible agent has posted there, the
-last routed agent, or the first listed agent, remains the fallback. Joining a call does not pin anyone.
-
-Call mode follows the live database human count, including parked legacy humans
-and humans inside reconnect grace. Joins, leaves and sweeps immediately announce
-the committed count. Routing and interruption decisions never use a cached mode.
+Unnamed speech addresses the DM's agent. Saying its handle or display name at
+the start also works, with the existing case-insensitive name matching and
+opening-filler handling. A name-only segment holds the address for three seconds;
+expiry does not prevent the next ordinary DM request. An unfinished request keeps
+its addressee across further segments. Delivery, cancel, expiry or departure
+clears the temporary spoken address. Departure also clears a persistent avatar pin.
+There is no human-count mode switch or unaddressed group-speech notification.
 
 There are no per-person silence deadlines or parked microphone states. The runtime
 owner ends the whole call after 60 consecutive seconds without confirmed human
@@ -144,9 +128,8 @@ Low-confidence or very short finals do not override the word-count/duration
 barge-in gate in single-human calls. An interrupted real-work report stays in the
 transcript and does not replay its opening on subsequent refreshes.
 
-A second human uses Join on the Room call card. While connecting, the card says
-Joining and the composer shows the avatars. Connection failures remain readable
-in both the card and VoiceBar.
+While connecting, the composer shows the agent. Connection failures remain
+readable in the existing voice controls and error dialog.
 
 `agent-voice.ts` owns library reads, owner saves and bounded previews. The
 client renders validated catalog/write receipts, never a guessed voice choice.
@@ -155,7 +138,7 @@ visible bar follows each volume event directly, without smoothing or offscreen
 entry delay. The history retains its 120 ms sample spacing and native glide;
 that history timer never gates the current visible level. The loudest current
 microphone or remote audio track drives the bars. Muting the local microphone
-still lets another human or an agent animate them; silence stays flat.
+still lets the agent animate them; silence stays flat.
 Web uses unsmoothed audio analysers; native uses the same volume processor
 for local and remote tracks.
 
@@ -177,7 +160,7 @@ then plays the acknowledgement. The brain starts immediately at Flux EndOfTurn:
 there is no settling timer. Until the first voiced frame is ready to publish,
 recognized speech from that human aborts the pending brain/synthesis generation.
 The next final joins the same message row and reruns the brain on the complete
-request. Other humans can still receive their replies.
+request.
 
 For orders, the runtime prepares the first voiced acknowledgement frame, closes
 assembly, commits the dispatch, then publishes that frame. A synthesis failure or
@@ -332,17 +315,8 @@ VOICE_PROOF_LIVE_FLUX=1 \
   node --import tsx packages/scripts/prove-voice-mode.ts
 ```
 
-The multiparty regression proof, `packages/scripts/prove-voice-multiparty.ts`, creates
-another disposable in-memory Workspace and waits for a release emulator's second
-human to Join through the actual call card. It uses live Flux, Luna and Aura 2,
-checks both named agents, complete multi-sentence synthesis, silence for unnamed
-speech, one concurrent reply stream and actual audio on both human clients.
-Its scoped `session.json` and raw logs stay in `.beeline-proof/multiparty/`;
-release fixture files under `apps/mobile/.voice-proof/` use a local ignore file.
-
-```sh
-node --import tsx packages/scripts/prove-voice-multiparty.ts
-```
+The linked multiparty artifacts are historical evidence from before calls were
+restricted to agent DMs; they are not a current join flow.
 
 Historical Aura measurements on 2026-10-13: local LiveKit end-of-turn to first
 server audio was 1870, 911, 930 ms (p50 930 ms); Fly transport was 1217, 1042,

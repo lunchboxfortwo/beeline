@@ -3,7 +3,7 @@ import type { RoomViewIdentity } from './phone-types.js';
 
 export const VOICE_QUOTA_MESSAGE = 'Daily voice limit reached. Try again tomorrow.';
 
-/** Voice is a Room session; its speakers are existing member identities. */
+/** A call between the human and agent in a DM. */
 export type VoiceCall = {
   id: string;
   roomId: string;
@@ -35,13 +35,10 @@ export type VoiceSignal =
   | { type: 'ending'; deadline: number | null; serverNow: number }
   | { type: 'resume' | 'park'; sessionId: string }
   | { type: 'speech' }
-  /** A tap also sends the next turn to this agent when several humans are in the call. */
+  /** Explicitly select the agent for the next turn. */
   | { type: 'target'; agentId: string; tap?: boolean }
   /** Clear only the sending participant's explicit pin. */
   | { type: 'unpin' }
-  | { type: 'humans'; count: number }
-  /** Several humans are in the call and this turn named no agent, so nobody answers. */
-  | { type: 'unaddressed' }
   | { type: 'speaker'; agentId: string | null }
   | { type: 'error'; message: string; code?: 'speech-quota-exhausted' }
   | { type: 'latency'; firstAudioMs: number };

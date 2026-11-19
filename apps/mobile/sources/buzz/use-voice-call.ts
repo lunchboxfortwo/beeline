@@ -49,9 +49,6 @@ export function useVoiceCall(roomId: string, enabled: boolean, roomAgents: reado
   const quotaRef = React.useRef(false);
   const [budgetWarning, setBudgetWarning] = React.useState<string | null>(null);
   const [firstAudioMs, setFirstAudioMs] = React.useState<number | null>(null);
-  const [humans, setHumans] = React.useState(1);
-  /** Counts group turns that did not name or tap an agent. */
-  const [unaddressed, setUnaddressed] = React.useState(0);
   const session = React.useRef<{ room: Room; callId: string; sessionId: string; closeAudio(): Promise<void> } | null>(null);
   const revision = React.useRef(0);
   const pending = React.useRef(false);
@@ -71,7 +68,7 @@ export function useVoiceCall(roomId: string, enabled: boolean, roomAgents: reado
     mutedRef.current = false; setMuted(false);
     setEndingSeconds(null); setCall(null); setSpeaker(null); setLevel(0); setConnecting(false); setError(null);
     transientReplyError.current = false;
-    setJoinedAgents(null); setTarget(null); targetRef.current = null; setHumans(1);
+    setJoinedAgents(null); setTarget(null); targetRef.current = null;
     speakerRef.current = null;
     if (cancelJoin) await cancelJoin();
     if (!current) return;
@@ -133,8 +130,6 @@ export function useVoiceCall(roomId: string, enabled: boolean, roomAgents: reado
         if (current()) setConnecting(!microphonePublished || !room.canPlaybackAudio);
       };
       room.on(RoomEvent.AudioPlaybackStatusChanged, updateReadiness);
-      let humanCount = joined.call.participants.filter(p => p.kind === 'human').length;
-      setHumans(humanCount);
       mode.current = 'active';
       room.on(RoomEvent.DataReceived, (bytes, participant, _kind, topic) => {
         if (version !== revision.current || topic !== VOICE_DATA_TOPIC || participant?.identity !== `beeline-voice-${joined!.call.id}`) return;
@@ -177,10 +172,6 @@ export function useVoiceCall(roomId: string, enabled: boolean, roomAgents: reado
             } else transientReplyError.current = true;
           }
           if (data.type === 'latency') setFirstAudioMs(data.firstAudioMs);
-          if (data.type === 'humans') {
-            humanCount = data.count; setHumans(data.count);
-          }
-          if (data.type === 'unaddressed') setUnaddressed(count => count + 1);
         } catch {}
       });
       if (Platform.OS === 'web') {
@@ -298,7 +289,7 @@ export function useVoiceCall(roomId: string, enabled: boolean, roomAgents: reado
     } catch (cause) { void reportClientError('voice-join', cause); }
     finally { mutePending.current = false; }
   }, []);
-  return { budgetWarning, muted, toggleMute, endingWarning: endingSeconds === null ? undefined : `Ending in ${endingSeconds}s`, call, agents, target, speaker, level, connecting, error, quotaExhausted, firstAudioMs, humans, unaddressed, join, end, aim };
+  return { budgetWarning, muted, toggleMute, endingWarning: endingSeconds === null ? undefined : `Ending in ${endingSeconds}s`, call, agents, target, speaker, level, connecting, error, quotaExhausted, firstAudioMs, join, end, aim };
 }
 
 export type VoiceCallState = ReturnType<typeof useVoiceCall>;

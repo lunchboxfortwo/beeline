@@ -476,3 +476,18 @@ it('Clear dispatches the section action; the next server projection hides it and
   expect(tree.root.findAll((node: any) => node.props.testID === 'joinable-public')).toHaveLength(0);
   act(() => tree.unmount());
 });
+
+it.each([undefined, 'human', 'agent'] as const)('shows a running call only for an agent DM (peer=%s)', kind => {
+  let tree!: ReactTestRenderer;
+  const chat = {
+    ...item,
+    directMessage: kind ? { peer: { pubkey: 'peer', kind, name: 'Ruby' } } : undefined,
+    voiceCall: { id: 'call', roomId: ROOM, startedAt: 1_700_000_000, participants: [] },
+  } as unknown as ChatListItem;
+  act(() => { tree = create(<ChatRow item={chat} now={1_700_000_010_000} first onOpen={() => {}} onPin={() => {}} onOpenThread={() => {}} />); });
+  try {
+    const preview = byTestID(tree, `room-${ROOM}-preview`);
+    if (kind === 'agent') expect(preview.props.children).toBe('Ongoing call');
+    else expect(preview.props.children).not.toBe('Ongoing call');
+  } finally { act(() => tree.unmount()); }
+});

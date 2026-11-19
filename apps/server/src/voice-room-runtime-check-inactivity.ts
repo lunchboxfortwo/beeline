@@ -63,34 +63,10 @@ async function voiceAgentBusy(ctx: VoiceRoomRuntime, agentId: string): Promise<b
 
 
   export async function voiceRoomRuntimeAimSpokenName(ctx: VoiceRoomRuntime, human: string, text: string, version: number) {
-    const agent = namedVoiceTarget(text, await ctx.observe(() => ctx.service.agents(ctx.roomId, human)), undefined, 2);
+    const agent = openingVoiceName(text, await ctx.observe(() => ctx.service.agents(ctx.roomId, human)));
     if (!agent || ctx.closed || ctx.inputVersions.get(human) !== version) return;
     ctx.targets.set(human, agent.id);
     await ctx.signal({ type: 'target', agentId: agent.id }, human);
-  }
-
-
-
-  /** Deduplicate announcements only; mode decisions always read the database count. */
-  export function voiceRoomRuntimeCountHumans(ctx: VoiceRoomRuntime, announce = false): Promise<void> {
-    const refresh = ctx.humanCountRefresh.catch(() => {}).then(async () => {
-      const count = await ctx.observe(() => ctx.service.humanCount(ctx.callId));
-      const changed = count !== ctx.lastAnnouncedHumanCount;
-      if (changed || announce) {
-        await ctx.signal({ type: 'humans', count });
-      }
-      ctx.lastAnnouncedHumanCount = count;
-      const humans = ctx.assembler.humans();
-      if (humans.length) {
-        const active = await ctx.observe(() => ctx.service.db.query<{identity_id: string}>(
-          `SELECT identity_id FROM voice_participants WHERE call_id=$1 AND left_at IS NULL AND identity_id=ANY($2::text[])`,
-          [ctx.callId, humans]));
-        const joined = new Set(active.rows.map(row => row.identity_id));
-        for (const human of humans) if (!joined.has(human)) ctx.participantLeft(human);
-      }
-    });
-    ctx.humanCountRefresh = refresh;
-    return refresh;
   }
 
 
@@ -114,14 +90,13 @@ async function voiceAgentBusy(ctx: VoiceRoomRuntime, agentId: string): Promise<b
     const draft: { turn: number; text: string; reply?: VoiceEagerReply } = { turn: event.turn_index, text: event.transcript };
     ctx.eager.set(human, draft);
     const agents = await ctx.observe(() => ctx.service.agents(ctx.roomId, human));
-    const humans = await ctx.observe(() => ctx.service.humanCount(ctx.callId));
     const named = openingVoiceName(event.transcript, agents);
     const pinned = agents.find(agent => agent.id === ctx.explicitTargets.get(human));
     const tapped = agents.find(agent => agent.id === ctx.assembler.target(human));
-    const selected = humans === 1 && !named && !pinned && !tapped
+    const selected = !named && !pinned && !tapped
       ? await ctx.observe(() => ctx.service.lastActiveAgent(ctx.roomId, agents)) ?? ctx.targets.get(human)
       : ctx.targets.get(human);
-    const agent = pinned ?? named ?? tapped ?? (humans === 1 ? namedVoiceTarget(event.transcript, agents, selected, humans) : undefined);
+    const agent = pinned ?? named ?? tapped ?? namedVoiceTarget(event.transcript, agents, selected);
     if (!agent || voiceNameOnly(event.transcript, agents) || voiceContactNameOnly(event.transcript, ctx.externalContacts.get(human))) { if (ctx.eager.get(human) === draft) ctx.cancelEager(human); return; }
     if (await voiceAgentBusy(ctx, agent.id)) { if (ctx.eager.get(human) === draft) ctx.cancelEager(human); return; }
     const history = await ctx.observe(() => readVoiceContext(ctx.service.db, ctx.roomId, '', agent.id));
@@ -142,9 +117,6 @@ async function voiceAgentBusy(ctx: VoiceRoomRuntime, agentId: string): Promise<b
     const eager = ctx.eager.get(human);
     ctx.eager.delete(human);
 
-    if (!interrupts && !ctx.assembler.current(human) && ctx.speaking && await ctx.observe(() => ctx.service.humanCount(ctx.callId)) > 1 &&
-        !voiceNameOnly(fragment, await ctx.observe(() => ctx.service.agents(ctx.roomId, human))) &&
-        !voiceContactNameOnly(fragment, ctx.externalContacts.get(human))) { eager?.reply?.cancel(); return; }
     if (interrupts) ctx.interruptPlayback();
     let playbackVersion = ctx.playbackVersion;
     const traceId = randomUUID();
@@ -206,24 +178,23 @@ async function voiceAgentBusy(ctx: VoiceRoomRuntime, agentId: string): Promise<b
       const roomMembers = ctx.service.memberNames
         ? ctx.observe(() => ctx.service.memberNames(ctx.roomId)).catch(() => []) : Promise.resolve([]);
       const agents = await ctx.observe(() => ctx.service.agents(ctx.roomId, human));
-      const humans = await ctx.observe(() => ctx.service.humanCount(ctx.callId));
-      if (humans === 1 && !interrupts && confirmedSpeech) { ctx.interruptPlayback(); playbackVersion = ctx.playbackVersion; }
+      if (!interrupts && confirmedSpeech) { ctx.interruptPlayback(); playbackVersion = ctx.playbackVersion; }
       const members: SpeechMember[] = [...agents.map(agent => ({ handle: agent.handle, name: agent.name })), ...await roomMembers];
       let sourceId = retry ? await request.source : previous ? await priorSource : '';
       const named = openingVoiceName(fragment, agents);
       const pinned = agents.find(agent => agent.id === ctx.explicitTargets.get(human));
       const tapped = pinned ?? agents.find(agent => agent.id === ctx.assembler.target(human));
       let selected = request.agent?.id ?? ctx.targets.get(human);
-      if (humans === 1 && !previous && !named && !tapped && !retry)
+      if (!previous && !named && !tapped && !retry)
         selected = await ctx.observe(() => ctx.service.lastActiveAgent(ctx.roomId, agents)) ?? selected;
       const changedTarget = previous?.agent && ctx.targets.get(human) !== previous.agent.id
         ? agents.find(agent => agent.id === ctx.targets.get(human)) : undefined;
       const agent = retry ? request.agent : pinned ?? named ?? tapped ?? changedTarget ?? request.agent ?? openingVoiceName(request.text, agents) ??
-        (humans === 1 ? namedVoiceTarget(request.text, agents, selected, humans) : undefined);
+        namedVoiceTarget(request.text, agents, selected);
       if (generation.signal.aborted || ctx.closed) { resolveSource?.(sourceId); return; }
       if (!agent) {
         resolveSource?.(''); ctx.assembler.finish(human, request);
-        await ctx.safeSignal({ type: 'unaddressed' }, human); return;
+        return;
       }
       request.agent = agent;
       ctx.targets.set(human, agent.id);

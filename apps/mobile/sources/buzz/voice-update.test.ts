@@ -15,7 +15,6 @@ vi.mock('@/ui/grammar', async () => {
 });
 import { Modal } from '@/modal/ModalManager';
 import { WebAlertModal } from '@/modal/components/WebAlertModal';
-import { VoiceCallCard } from '@/components/buzz/VoiceCallCard';
 import { showVoiceJoinError, VOICE_UPDATE_MESSAGE } from './voice-update';
 import type { AlertModalConfig } from '@/modal/types';
 beforeEach(() => openURL.mockReset().mockResolvedValue(undefined));
@@ -57,18 +56,4 @@ it('MOBILE-11 renders a Retry action that joins only when tapped', async () => {
     await act(async () => dialog.props.actions[1].onPress());
     expect(retry).toHaveBeenCalledOnce();
   } finally { await act(async () => renderer.unmount()); }
-});
-it('iphone-022-gate: joining from the header presents the update instruction in the existing dialog', async () => {
-  const show = vi.fn(() => 'update');
-  Modal.setFunctions(show, () => {}, () => {});
-  let renderer: any;
-  await act(async () => {renderer = create(/*#__PURE__*/React.createElement(VoiceCallCard, { call: { id: 'call', roomId: 'room', startedAt: 1, participants: [] } as any,
-      joined: false, onJoin: () => showVoiceJoinError(VOICE_UPDATE_MESSAGE) }));});
-  try {
-    const join = renderer.root.findByProps({ testID: 'voice-call-join' });
-    expect(join.props.variant).toBe('quiet');
-    await act(async () => join.props.onPress());
-    expect(show).toHaveBeenCalledWith(expect.objectContaining({ message: 'Update Beeline in the App Store to join calls.' }));
-  } finally
-  {await act(async () => renderer.unmount());}
 });

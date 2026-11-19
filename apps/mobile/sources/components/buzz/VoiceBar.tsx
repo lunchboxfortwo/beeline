@@ -65,7 +65,7 @@ export function VoiceBar({ voice, testIDPrefix = 'chat' }: {
           disabled={voice.connecting || voice.quotaExhausted} accessibilityState={{ selected: voice.muted }} testID={`${testIDPrefix}-mic`}>
           <Glyph icon={voice.muted ? MicOff : Mic} />
         </Btn>
-        <Btn kind="icon" label={voice.humans > 1 ? 'Leave call' : 'End call'} onPress={() => void voice.end()} testID="voice-mic">
+        <Btn kind="icon" label="End call" onPress={() => void voice.end()} testID="voice-mic">
           <Glyph icon={Square} />
         </Btn>
       </XStack>

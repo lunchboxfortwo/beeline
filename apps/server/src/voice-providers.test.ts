@@ -74,17 +74,10 @@ describe('voice providers', () => {
     expect(namedVoiceTarget('Sol, please help Ruby', agents, 'b')?.id).toBe('a');
   });
 
-  it('requires a spoken name with multiple humans even after selecting an avatar', () => {
-    const agents = assignVoiceAgents([
-      { id: 'ruby', name: 'Ruby Rose', handle: 'ruby', soul: '' },
-      { id: 'goose', name: 'Goosey', handle: 'goose', soul: '' },
-    ]);
-    expect(namedVoiceTarget('What do you think?', agents, 'ruby', 2)).toBeUndefined();
-    expect(namedVoiceTarget('What do you think?', agents, 'goose', 1)?.id).toBe('goose');
-    expect(namedVoiceTarget('Could you help me, GOOSEY?', agents, 'ruby', 2)).toBeUndefined();
-    expect(namedVoiceTarget('Hey @GoOsE please', agents, 'ruby', 2)?.id).toBe('goose');
-    expect(namedVoiceTarget('Hello RUBY ROSE', agents, 'goose', 2)?.id).toBe('ruby');
-    expect(namedVoiceTarget('gooseberries', agents, 'ruby', 2)).toBeUndefined();
+  it('routes unnamed DM speech to its only agent without requiring a spoken name', () => {
+    const agents = assignVoiceAgents([{ id: 'ruby', name: 'Ruby Rose', handle: 'ruby', soul: '' }]);
+    expect(namedVoiceTarget('What do you think?', agents)?.id).toBe('ruby');
+    expect(namedVoiceTarget('Hello RUBY ROSE', agents)?.id).toBe('ruby');
   });
 
   it('speaks as the existing agent with reasoning off and ordinary order and quick search tools', async () => {

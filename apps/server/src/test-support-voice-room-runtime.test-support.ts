@@ -57,7 +57,7 @@ export const roster = [
   { id: 'goose', name: 'Goosey', handle: 'goose', soul: '', voice: 'apollo' },
 ];
 
-export function conversationService(humans = 2) {
+export function conversationService() {
   const speech = { synthesize: vi.fn(async function* () { yield new Uint8Array([200, 1, 200, 1]); }) };
   const service = {
     runtimeScope: vi.fn(async (roomId: string) => ({workspaceId:'human',authorityRoomId:roomId})), workspaceId: vi.fn(async () => 'human'), endWorkspaceCalls: vi.fn(async () => {}), callWorkState: vi.fn(async () => ({pending:false,finishedAt:0})), hasCallWork: vi.fn(async () => false), endInactive: vi.fn(async () => false), budget: { fence: async (_call: string, _owner: string, enqueue: () => void) => { enqueue(); return true; }, read: vi.fn(async () => ({ remainingMs: 3600000, resetAt: Date.now() + 86400000, timeZone: 'UTC' })), record: vi.fn(async () => ({ remainingMs: 3600000, resetAt: Date.now() + 86400000, timeZone: 'UTC' })), limitMs: 3600000 }, owner: 'owner', config: { url: 'ws://local', apiKey: 'devkey', apiSecret: 'secret', stt: vi.fn(),
@@ -66,7 +66,7 @@ export function conversationService(humans = 2) {
         return { text: 'First sentence. Second sentence! Third sentence.', order: false };
       }) } },
     lastActiveAgent: vi.fn(async (): Promise<string | undefined> => undefined),
-    humanCount: vi.fn(async () => humans), agents: vi.fn(async () => roster), speech: vi.fn(async () => speech),
+    agents: vi.fn(async () => roster), speech: vi.fn(async () => speech),
     access: vi.fn(async () => {}), leave: vi.fn(async () => {}), reviseHuman: vi.fn(async () => {}), recordHuman: vi.fn(async () => 'source'), recordAnswer: vi.fn(async () => {}),
     dispatch: vi.fn(async () => {}), db: { query: vi.fn(async (sql: string, parameters?: any[]) => ({ rowCount: 1,
       rows: sql.includes('identity_id=ANY') ? (parameters?.[1] ?? []).map((identity_id: string) => ({identity_id})) : [] })) }, runtimeClosed: vi.fn(),
@@ -138,8 +138,8 @@ export function deferred<T>() {
 }
 
 
-export function multiCall(humans = 2) {
-  const { service, speech } = conversationService(humans);
+export function callFixture() {
+  const { service, speech } = conversationService();
   const roomData = (human: string, signal: object) => state.room.emit('data', new TextEncoder().encode(JSON.stringify(signal)),
     { identity: human }, undefined, 'beeline.voice.v1');
   const signals = (human?: string) => state.room.localParticipant.publishData.mock.calls
