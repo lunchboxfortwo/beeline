@@ -562,6 +562,10 @@ jobs:
           mobile: "true"
         if: steps.changes.outputs.run == 'true'
       - name: Execute mobile-export-reachability in its own checkout
+        env:
+          # V8 sizes its default heap from the runner's 8 GB cgroup (about 2 GB);
+          # the Android export needs more.
+          NODE_OPTIONS: --max-old-space-size=4096
         run: timeout 30m bash packages/scripts/ci-workspace-tasks.sh mobile-export-reachability
         if: steps.changes.outputs.run == 'true'
   # Required check. Its decision matches the server shards', which leave the
