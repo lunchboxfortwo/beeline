@@ -80,7 +80,7 @@ export async function requireScheduledWorkReader(db: SqlDatabase, roomId: string
          SELECT 1 FROM memberships workspace_member WHERE workspace_member.workspace_id=room.workspace_id
            AND workspace_member.room_id IS NULL AND workspace_member.identity_id=$2 AND workspace_member.removed_at IS NULL))`,
     [roomId, viewerId]);
-  if (!allowed.rowCount) throw new Error('room membership required');
+  if (!allowed.rowCount) throw new Error('chat membership required');
 }
 
 /** Humans manage their own DMs; Rooms retain Workspace admin authority. */

@@ -237,6 +237,15 @@ jobs:
         if: steps.changes.outputs.run == 'true'
       - run: sudo apt-get update && sudo apt-get install -y bubblewrap
         if: steps.changes.outputs.run == 'true'
+      # Ubuntu 26.04 ships bwrap-userns-restrict, which strips capabilities from
+      # bwrap's children so the sandbox's nested mounts fail. Use the same
+      # unconfined userns bwrap profile the Beeline development host uses.
+      - name: Give bwrap the host userns AppArmor profile
+        run: |
+          sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict
+          printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile beeline-bwrap /usr/bin/bwrap flags=(unconfined) {\n  userns,\n}\n' | sudo tee /etc/apparmor.d/beeline-bwrap
+          sudo apparmor_parser -r /etc/apparmor.d/beeline-bwrap
+        if: steps.changes.outputs.run == 'true'
       - name: Run the hermetic Body suite
         run: node packages/scripts/run-workspace-tests.mjs body
         if: steps.changes.outputs.run == 'true'

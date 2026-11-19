@@ -26,6 +26,8 @@ interface Place {
   session: PlaceSession;
   waiting: AgentCommand[];
   running?: AgentCommand;
+  /** The running item from its turn start request until its harness returns. */
+  turnStarted?: AgentCommand;
   retryOwed?: boolean;
   idleTimer?: NodeJS.Timeout;
 }
@@ -109,9 +111,10 @@ export class AgentRunner {
     options.daemonApi.setCornerCompleteListener(cornerId => void this.cornerComplete(cornerId));
     this.releaseLiveOpen = options.daemonApi.onLiveOpen(() => {
       // Registration interrupts the old connection's turn projections, while
-      // these harnesses keep working. Reassert only their active invocations.
+      // these harnesses keep working. Reassert only their started invocations,
+      // including one whose start reply the reconnect dropped.
       for (const place of this.places.values())
-        if (place.session.current) this.recordTurnStart(place.session.current);
+        if (place.turnStarted) this.recordTurnStart(place.turnStarted);
     });
   }
 
@@ -220,9 +223,11 @@ export class AgentRunner {
       } else {
         // Required item credentials and provider configuration precede ACP startup.
         await place.session.start(item);
+        place.turnStarted = item;
         await this.options.daemonApi.execute('startAgentTurn',{roomId:item.roomId,requestId:item.turnRequestId,invocationId:invocation.id});
         started = true;
         const answer = await place.session.deliver(item, batch, invocation);
+        place.turnStarted = undefined;
         // Empty background work closes quietly; an unanswered request stays owed.
         const steps = answer.text && answer.steps.length ? { steps: answer.steps } : {};
         // Stop wall: a stopped item gets no answer.
@@ -264,6 +269,7 @@ export class AgentRunner {
       await place.session.stop().catch(stopError => console.warn('[body] session stop failed:', stopError));
     } finally {
       place.running = undefined;
+      place.turnStarted = undefined;
       if (place.retryOwed) {place.retryOwed=false;this.reconcileQueue();}
     }
     if (started) void this.pump(placeId);
