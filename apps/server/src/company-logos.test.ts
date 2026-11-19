@@ -12,7 +12,7 @@ beforeEach(() => { vi.clearAllMocks(); mocks.agents.length = 0; mocks.lookup.moc
 afterEach(() => vi.restoreAllMocks());
 function response(body: Buffer | string, mime = 'image/png', status = 200, location?: string) {
   mocks.get.mockImplementationOnce((_url, _options, callback) => {
-    const req = new EventEmitter(); const res = Object.assign(new EventEmitter(), { headers: { 'content-type': mime, location }, statusCode: status });
+    const req = Object.assign(new EventEmitter(), { destroy: vi.fn() }); const res = Object.assign(new EventEmitter(), { headers: { 'content-type': mime, location }, statusCode: status });
     queueMicrotask(() => { callback(res); res.emit('data', Buffer.from(body)); res.emit('end'); }); return req;
   });
 }
