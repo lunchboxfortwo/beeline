@@ -1,7 +1,7 @@
 # Operator finances
 
 This is a feature, not a defect report. The frontend is in
-`Beeline-Work/beeline-dashboard`, corner `8891ee39-1fd9-47c1-88c0-69e022da45db`.
+`lunchboxfortwo/beeline-dashboard`, corner `8891ee39-1fd9-47c1-88c0-69e022da45db`.
 
 The dashboard-secret-only `GET /v1/admin/dashboard` adds `finances`.
 `operator-finances.ts` owns collection and projection; `operator-dashboard-services.ts`
@@ -10,7 +10,7 @@ The existing dashboard sections and authentication are unchanged.
 
 ## Fixed dashboard contract (PR A)
 
-The wire shape exactly matches `Beeline-Work/beeline-dashboard` commit `bafb528`,
+The wire shape exactly matches `lunchboxfortwo/beeline-dashboard` commit `bafb528`,
 `public/finances-data.js` and `test/fixtures/finances/dashboard.json`.
 Authoritative TypeScript: `apps/server/src/operator-finances-contract.ts`.
 The dashboard example fixture is copied alongside it as

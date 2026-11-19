@@ -2,7 +2,7 @@
 // Release bookkeeping, outside the release path.
 //
 // After each release attempt this writes one small JSON file to the Loops /
-// insights data store (Beeline-Work/beeline-insights, releases/<version>.json):
+// insights data store (lunchboxfortwo/beeline-insights, releases/<version>.json):
 // the merges the release delivered, the phone OTA branch and runtimes, whether
 // the owner's phone reported the update, and how long each job took. It
 // replaces the old cumulative delivery index artifact, owner-receipt
@@ -16,7 +16,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-export const INSIGHTS_REPOSITORY = 'Beeline-Work/beeline-insights';
+export const INSIGHTS_REPOSITORY = 'lunchboxfortwo/beeline-insights';
 const MAX_MERGES = 500;
 
 function warn(message) {

@@ -4,7 +4,7 @@
   "description": "Connect an AI coding agent to Beeline with one command.",
   "homepage": "https://usebeeline.app",
   "bugs": {
-    "url": "https://github.com/Beeline-Work/beeline/issues"
+    "url": "https://github.com/lunchboxfortwo/beeline/issues"
   },
   "keywords": [
     "ai",
@@ -23,7 +23,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Beeline-Work/beeline.git",
+    "url": "git+https://github.com/lunchboxfortwo/beeline.git",
     "directory": "packages/usebeeline"
   },
   "type": "module",

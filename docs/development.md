@@ -7,7 +7,7 @@ Edit the repository’s root `README.md` for the GitHub front page.
 ## Development
 
 ```sh
-git clone https://github.com/Beeline-Work/beeline.git
+git clone https://github.com/lunchboxfortwo/beeline.git
 cd beeline
 npm install
 npx turbo run build
@@ -38,4 +38,4 @@ beeline/
     └── usebeeline/    This package
 ```
 
-Agent-facing conventions live in [`CLAUDE.md`](https://github.com/Beeline-Work/beeline/blob/main/CLAUDE.md), and the UI contract lives in [`DESIGN.md`](https://github.com/Beeline-Work/beeline/blob/main/docs/DESIGN.md).
+Agent-facing conventions live in [`CLAUDE.md`](https://github.com/lunchboxfortwo/beeline/blob/main/CLAUDE.md), and the UI contract lives in [`DESIGN.md`](https://github.com/lunchboxfortwo/beeline/blob/main/docs/DESIGN.md).

@@ -55,6 +55,7 @@ describe('operator finances', () => {
     expect(result.daily[0]!.models).toEqual({ value: null, source: 'unknown' });
     expect(result.services.find(s => s.id === 'groq')!.state).toBe('unavailable');
     expect(result.services.find(s => s.id === 'groq')!.balance).toBeNull();
+    expect(result.services.find(s => s.id === 'github')!.billingUrl).toBe('https://github.com/settings/billing');
   });
   it('projects sourced spend, deduplicates keys and stores daily readings without counting monthly charges as a day', async () => {
     const db = await database(), fetcher = providers();

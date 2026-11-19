@@ -60,7 +60,7 @@ Do not stop or restart Beeline agents or the shared no-mistakes daemon. If the
 pool does not drain after cancellation, report the condition to firstmate.
 
 For each run, retain its URL, PR head, creation time, Linux job start/finish
-and runner names using `gh-axi api repos/Beeline-Work/beeline/actions/runs/RUN_ID/jobs?per_page=100`.
+and runner names using `gh-axi api repos/lunchboxfortwo/beeline/actions/runs/RUN_ID/jobs?per_page=100`.
 Compute required Linux wall time from run creation to the last required Linux
 completion, including hosted preparation, queue time and verdicts; report Mac
 helper and desktop timings separately. A failed or cancelled run is not a

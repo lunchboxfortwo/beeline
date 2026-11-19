@@ -5,6 +5,8 @@ set -euo pipefail
 # Keep architecture and trusted-base phone/UI policy checks equivalent to TYPECHECK.
 
 typecheck() {
+  # Live GitHub operations must target the current account
+  npm run lint:repositories
   # Enforce the shared UI component registry
   export UI_POLICY_BASE="$CI_BASE_SHA"
   git fetch --no-tags origin "$UI_POLICY_BASE"

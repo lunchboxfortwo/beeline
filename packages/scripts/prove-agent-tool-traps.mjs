@@ -76,10 +76,10 @@ try {
   await daemon.execute('updateAgentSchedule', { ...turn, scheduleId: created.scheduleId, prompt: 'Changed task' }, agent);
   assert((await daemon.execute('listAgentSchedules', { roomId: room }, agent)).schedules.some(s => s.title === 'Keep this title' && s.prompt === 'Changed task'));
   const issue = await phone.execute('reportMessageIssue', { roomId: room, messageId: first.messageId }, owner);
-  daemon.feedback.config = { repository: 'Beeline-Work/beeline', systemSenders: [] };
+  daemon.feedback.config = { repository: 'lunchboxfortwo/beeline', systemSenders: [] };
   daemon.feedback.pullRequests = { merged: async () => true };
   assert.deepEqual(await daemon.execute('notifyFeedbackFixed', { ...turn, itemIds: [issue.itemId], title: 'Fixed tools',
-    prUrl: 'https://github.com/Beeline-Work/beeline/pull/7' }, agent), { resolved: 1, notified: 0 });
+    prUrl: 'https://github.com/lunchboxfortwo/beeline/pull/7' }, agent), { resolved: 1, notified: 0 });
   const decision = await daemon.execute('postSquireApprovalDecision', { ...turn, approvalId: 'proof', status: 'approved',
     tool: 'proof', title: 'Approval', detail: 'Approved' }, agent);
   const resume = (await daemon.execute('getAgentCommands', { roomId: room }, agent)).commands.find(c => c.sourceMessageId === decision.id);

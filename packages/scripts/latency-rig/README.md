@@ -599,7 +599,7 @@ approved first-party `github / beeline-insights-loop` connection. Credentials st
 in the connection, never in the rig, repository or capture environment:
 
 1. Read the current GitHub contents response for
-   `Beeline-Work/beeline-insights`, `main`, `loops/loops.json` and save its
+   `lunchboxfortwo/beeline-insights`, `main`, `loops/loops.json` and save its
    `{sha, content}` as `contents.json` outside the repository. Use the Beeline
    App for any linked-repository write; never switch to personal credentials
    following an App denial.

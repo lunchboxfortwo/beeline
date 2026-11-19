@@ -125,9 +125,9 @@ placement under the private state directory.
 Cache misses rebuild; unknown action types fail.
 
 The canonical product repository is `lunchboxfortwo/beeline`. Historical PR and
-run evidence remains linked to `Beeline-Work/beeline`; those records were not
-copied. Release downloads do not exist in the new repository until a release
-publishes them. `Beeline-Work/beeline-insights` remains the bookkeeping store.
+run evidence retains its original URLs; those records were not copied. Release
+downloads do not exist in the new repository until a release publishes them.
+`lunchboxfortwo/beeline-insights` is the bookkeeping store.
 
 CI base image mirrors use `ghcr.io/lunchboxfortwo`. The existing `Refresh CI
 base image mirrors` workflow copies the pinned upstream manifests there with
@@ -953,7 +953,7 @@ cross-run download or Actions-artifact lookup.
 Delivery bookkeeping lives in the Loops/insights data store, not in the
 release path. After each attempt, the `bookkeeping` job runs
 `packages/scripts/release-bookkeeping.mjs`. It writes one file,
-`Beeline-Work/beeline-insights` `releases/<version>.json`, which records:
+`lunchboxfortwo/beeline-insights` `releases/<version>.json`, which records:
 
 - the commits since the previous release;
 - the phone OTA branch and runtimes, and the time from trigger to phone;
