@@ -159,19 +159,19 @@ crashes the service.
 ### Updating an existing App for repository secrets and environments
 
 The manifest change only affects newly created Apps. The owner must update the existing
-Beeline-Work App on github.com; deploying this code does not change its registration.
+Beeline App on github.com; deploying this code does not change its registration.
 
 1. Open the App owner's **Settings → Developer settings → GitHub Apps** (for an
    organization-owned App, start at that organization's Settings), then **Edit**
    beside the Beeline App.
 2. Open **Permissions & events → Repository permissions**. Set **Secrets** and
    **Environments** to **Read and write**, then **Save changes**. Leave other grants unchanged.
-3. As an owner of Beeline-Work, open GitHub's permission-update notification email
+3. As lunchboxfortwo, open GitHub's permission-update notification email
    and follow **Review permission request** for that installation. Review and accept
    the two added permissions. The installation can also be reached from
-   **Beeline-Work → Settings → GitHub Apps → Configure** beside the Beeline App.
+   **Settings → Applications → Installed GitHub Apps → Configure** beside the Beeline App.
 4. Retry the repository secrets request with a newly minted installation token:
-   `gh api repos/Beeline-Work/beeline/actions/secrets`. It should return HTTP 200.
+   `gh api repos/lunchboxfortwo/beeline/actions/secrets`. It should return HTTP 200.
    Do not put secret values in logs or chat.
 
 GitHub retains the installation's previous permissions until its owner approves the update.

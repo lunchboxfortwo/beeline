@@ -46,10 +46,12 @@ The existing schedule prompt, sealed exchange, 6M-token/$3 caps and every
 per-run rule remain unchanged. Saved procedure version 3 explicitly preserves
 the instruction to read the current brief and obey branch authority.
 
-Results are indexed on [Prompt nightly results](https://github.com/Beeline-Work/beeline/issues/2710).
-The saved morning-card procedure reads its newest result comment and linked
-artifacts. Saved triage/workspace-walk procedures require failing cases before
-prompt fixes.
+New results belong in `lunchboxfortwo/beeline`. The [original Prompt nightly
+results](https://github.com/Beeline-Work/beeline/issues/2710) remain historical
+evidence; do not write new results there. Point the saved morning-card procedure
+at the new repository’s results issue before reading its newest result comment
+and linked artifacts. Saved triage/workspace-walk procedures require failing
+cases before prompt fixes.
 
 Local build, root typecheck, 70-case structural validation, 13 case-rule tests,
 eight nightly-control tests, workflow path validation and actionlint pass.

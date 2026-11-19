@@ -73,7 +73,7 @@ const SESSION_VARIANTS_BASE: Record<string, SessionPromptContext> = {
     agentName: 'Bee',
     soul,
     agentCommand: 'claude-agent-acp',
-    repository: { name: 'Beeline-Work/beeline', branch: 'main' },
+    repository: { name: 'lunchboxfortwo/beeline', branch: 'main' },
     shell: { available: true },
     writableHome: '/srv/beeline/agents/bee/rooms/room/agent-home/user',
   },

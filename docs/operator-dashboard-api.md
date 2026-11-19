@@ -2,7 +2,7 @@
 
 `GET /v1/admin/dashboard` is authenticated with `BEELINE_DASHBOARD_SECRET`.
 The private frontend and same-origin Cloudflare Pages proxy live in
-`Beeline-Work/beeline-dashboard`. The browser never holds the bearer secret.
+`lunchboxfortwo/beeline-dashboard`. The browser never holds the bearer secret.
 Existing Cloudflare Access protects `dashboard.usebeeline.app`.
 
 The additive `finances` block provides service dependencies, provider balances,
@@ -430,7 +430,7 @@ Before deployment there is no measured historical linker count, not a measured
 zero. Both free-agent labels and this dated label are supplied in the response;
 new stages have null/unmeasured timing until a timing definition is approved.
 
-Server-only delivery precedes the frontend change in `Beeline-Work/beeline-dashboard`.
+Server-only delivery precedes the frontend change in `lunchboxfortwo/beeline-dashboard`.
 The frontend must render these labels and stages with its existing bar style once
 repository App access is granted; that change and its screenshot are separate work.
 
@@ -501,9 +501,9 @@ people with captured X context, and `unattributedShare` (null with no people).
 `signups` also preserves aggregate attributed rows that lack matching API entity
 IDs, so those signups remain visible. No click IDs or account IDs leave this API.
 
-Live analytics and the frontend remain pending: the corner's GitHub App cannot
-resolve `Beeline-Work/beeline-dashboard`. The X developer onboarding succeeded
-and exposed company app `33573631`, but the Ads API access form requires verified
+The frontend repository is `lunchboxfortwo/beeline-dashboard` (private, copied
+on 19 November 2026). Live analytics remain pending. The X developer onboarding
+succeeded and exposed company app `33573631`, but the Ads API access form requires verified
 contact name/title, city/state, email and phone before it can be submitted. The
 existing discovery bearer is not an Ads API OAuth1 credential. No reporting
 credential was obtained and no live daily X reporting is claimed.

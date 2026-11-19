@@ -246,7 +246,7 @@ The fix for `not_system_sender` is to make the triager's owner a System sender.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `BEELINE_SYSTEM_SENDERS` | empty | Comma-separated identity ids of the people whose agents may have System send Fixed DMs. Empty means nobody can. |
-| `BEELINE_FEEDBACK_REPOSITORY` | `Beeline-Work/beeline` | The repository fix pull requests land in. A Fixed DM links only to a merged pull request here; the Beeline GitHub App must be installed on it. |
+| `BEELINE_FEEDBACK_REPOSITORY` | `lunchboxfortwo/beeline` | The repository fix pull requests land in. A Fixed DM links only to a merged pull request here; the Beeline GitHub App must be installed on it. |
 
 ### Make an owner a System sender
 

@@ -391,5 +391,5 @@ cancelled the old run. That cancelled run is queue/cancellation evidence,
 not a completed baseline measurement.
 
 For a completed job while its workflow still runs, fetch its log directly with
-`gh-axi api repos/Beeline-Work/beeline/actions/jobs/JOB_ID/logs --full`.
+`gh-axi api repos/lunchboxfortwo/beeline/actions/jobs/JOB_ID/logs --full`.
 `gh-axi run view --log` waits for the entire workflow to finish.
