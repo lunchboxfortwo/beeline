@@ -3,18 +3,18 @@ import type { TextInput } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { router, type Href } from 'expo-router';
-import { loadBuzzIdentity } from '@/auth/buzz-identity-storage';
 import { BuzzRigTransport } from '@/sync/transport';
 import { type ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { type ChannelReferenceTarget } from '@/buzz/channel-reference';
 import { scheduleAnimationFrame } from '@/buzz/host-scheduler';
 import { openExternalUrl } from '@/utils/open-external-url';
-import { FAST_MODE_COMMAND, insertAgentSlashCommand, type BuiltInSlashVerbId, type FastModeCommandState } from '@/buzz/slash-verbs';
+import { type BuiltInSlashVerbId } from '@/buzz/slash-verbs';
 import { useNewThread } from '@/ui/screens/chats/use-new-thread';
 import { copyEntireTurn } from '@/buzz/message-copy';
 import { storeTempText } from '@/sync/persistence';
 import { useScopedCallbacks } from '@/buzz/use-stable';
 import { type DictatedSend } from '@/components/buzz/ConversationComposer';
+import type { ChatComposerCommandController } from './useChatComposerCommandController';
 import { MessageShortcut, COMPOSER_MIN_HEIGHT } from './chat-surface-values';
 
 type Props = [
@@ -26,13 +26,9 @@ type Props = [
   setHighlightedSlashVerbIndex: React.Dispatch<React.SetStateAction<number>>,
   composerRef: React.RefObject<TextInput | null>,
   inputText: string,
-  mentionSlashAgentPubkey: string | null,
-  mentionAgentCommandScope: string | null,
-  agentFastModeByScope: Record<string, FastModeCommandState | null>,
+  commandController: ChatComposerCommandController,
   activeCommunityId: string | null,
-  setAgentFastModeByScope: React.Dispatch<React.SetStateAction<Record<string, FastModeCommandState | null>>>,
   transport: BuzzRigTransport | null,
-  setSessionTransport: (transport: BuzzRigTransport) => void,
   decodedId: string,
   setCreatePollVisible: React.Dispatch<React.SetStateAction<boolean>>,
   canManageWorkspace: boolean,
@@ -48,8 +44,6 @@ type Props = [
   openWorkspaceRoster: () => void,
   setParticipantPickerVisible: React.Dispatch<React.SetStateAction<boolean>>,
   highlightedSlashVerbIndex: number,
-  mentionAgentCommands: import("@/buzz/slash-verbs").AgentPaletteCommand[],
-  slashVerbs: import("@/buzz/slash-verbs").BuiltInSlashVerb[],
   handleSend: (shortcut?: MessageShortcut, dictated?: DictatedSend) => Promise<boolean | undefined>,
   beginForward: (message: ChatDisplayMessage) => Promise<void>,
   handleForwardToNewCorner: (message: ChatDisplayMessage) => void,
@@ -60,13 +54,12 @@ type Props = [
 
 export function useChatComposerCommands([
   inputTextRef, setInputText, setInputSelection, setComposerHeight, setDismissedSlashText,
-  setHighlightedSlashVerbIndex, composerRef, inputText, mentionSlashAgentPubkey,
-  mentionAgentCommandScope, agentFastModeByScope, activeCommunityId, setAgentFastModeByScope,
-  transport, setSessionTransport, decodedId, setCreatePollVisible, canManageWorkspace,
+  setHighlightedSlashVerbIndex, composerRef, inputText, commandController, activeCommunityId,
+  transport, decodedId, setCreatePollVisible, canManageWorkspace,
   pendingCornerRequest, handleWritePermission, startRenameFromTitle, handleCloseCorner,
   pendingTargetBranchProposal, handleConfirmTargetBranch, handleConnectAgent, setMembershipError,
   setParticipantPickerKind, openWorkspaceRoster, setParticipantPickerVisible,
-  highlightedSlashVerbIndex, mentionAgentCommands, slashVerbs, handleSend, beginForward,
+  highlightedSlashVerbIndex, handleSend, beginForward,
   handleForwardToNewCorner, handleOpenChannelReference, handleOpenMention, cacheViewerPubkey,
 ]: Props): [
   rowActions: { handleWritePermission: (message: ChatDisplayMessage, decision: "allow" | "deny") => Promise<void>; beginForward: (message: ChatDisplayMessage) => Promise<void>; handleForwardToNewCorner: (message: ChatDisplayMessage) => void; handleConfirmTargetBranch: (message: ChatDisplayMessage) => Promise<void>; handleOpenChannelReference: (target: ChannelReferenceTarget, text?: string) => Promise<void>; handleOpenMention: (participantId: string) => Promise<void>; },
@@ -75,11 +68,11 @@ export function useChatComposerCommands([
   handleCopyLedgerMessage: (text: string) => void,
   dismissSlashMenu: () => void,
   runSlashVerb: (verb: BuiltInSlashVerbId) => void,
-  selectAgentCommand: (name: string) => void,
   selectHighlightedPaletteItem: () => void,
   handleSelectLedgerMessage: (text: string) => void,
 ] {
 
+  const { mentionAgentCommands, slashVerbs, selectAgentCommand } = commandController;
 
   const clearSlashComposer = useCallback(() => {
     inputTextRef.current = '';
@@ -96,82 +89,6 @@ export function useChatComposerCommands([
     clearSlashComposer();
     void Haptics.selectionAsync();
   }, [clearSlashComposer]);
-
-
-  /**
-   * Insert a selected agent command in place of the typed `/query` token,
-   * KEEPING the @mention that scoped the palette. The trailing space closes
-   * the palette and leaves the composer ready for the command's arguments.
-   */
-  const insertAgentCommand = useCallback(
-    (name: string) => {
-      const next = insertAgentSlashCommand(inputText, name);
-      inputTextRef.current = next;
-      setInputText(next);
-      setInputSelection({ start: next.length, end: next.length });
-      setComposerHeight(COMPOSER_MIN_HEIGHT);
-      void Haptics.selectionAsync();
-    },
-    [inputText],
-  );
-
-
-  /**
-   * Fast mode is the owner's toggle, not text: it writes through the same
-   * `updateAgentModelSelection` operation as the profile switch and leaves
-   * the palette open on the new state.
-   */
-  const toggleAgentFastMode = useCallback(async () => {
-    const pubkey = mentionSlashAgentPubkey;
-    const scope = mentionAgentCommandScope;
-    const current = scope ? agentFastModeByScope[scope] : null;
-    if (!pubkey || !scope || !current || current.status === 'saving' || !activeCommunityId) {
-      return;
-    }
-    const enabled = !current.enabled;
-    setAgentFastModeByScope((state) => ({
-      ...state,
-      [scope]: { enabled: current.enabled, status: 'saving' },
-    }));
-    void Haptics.selectionAsync();
-    try {
-      let writeTransport = transport;
-      if (!writeTransport) {
-        const identity = await loadBuzzIdentity();
-        if (!identity) throw new Error('Beeline identity is unavailable');
-        writeTransport = new BuzzRigTransport(identity);
-        setSessionTransport(writeTransport);
-      }
-      const client = await writeTransport.ensureClient();
-      await client.setAgentModelConfig(activeCommunityId, pubkey, { fastMode: enabled });
-      setAgentFastModeByScope((state) => ({ ...state, [scope]: { enabled } }));
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch {
-      setAgentFastModeByScope((state) => ({
-        ...state,
-        [scope]: { enabled: current.enabled, status: 'failed' },
-      }));
-    }
-  }, [
-    activeCommunityId,
-    agentFastModeByScope,
-    mentionAgentCommandScope,
-    mentionSlashAgentPubkey,
-    setSessionTransport,
-    transport,
-  ]);
-
-
-  const selectAgentCommand = useCallback(
-    (name: string) => {
-      if (name === FAST_MODE_COMMAND) {
-        void toggleAgentFastMode();
-        return;
-      }
-      insertAgentCommand(name);
-    },
-    [insertAgentCommand, toggleAgentFastMode],
-  );
 
 
   const openNewThread = useNewThread(() => transport);
@@ -311,7 +228,7 @@ export function useChatComposerCommands([
   }, `${decodedId}\0${cacheViewerPubkey}`);
   return [
     rowActions, handleOpenGitHubEvent, handleOpenSystemIdentity, handleCopyLedgerMessage,
-    dismissSlashMenu, runSlashVerb, selectAgentCommand, selectHighlightedPaletteItem,
+    dismissSlashMenu, runSlashVerb, selectHighlightedPaletteItem,
     handleSelectLedgerMessage,
   ];
 }

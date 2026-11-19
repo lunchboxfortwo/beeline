@@ -27,8 +27,10 @@ import { Button } from '@/components/buzz/Button';
 import { ConversationComposer, type DictatedSend } from '@/components/buzz/ConversationComposer';
 import { RoomMemberOption, MessageShortcut, COMPOSER_MAX_HEIGHT, COMPOSER_MIN_HEIGHT } from './chat-surface-values';
 import { Motion, T, type MotionStyle } from '@/ui/grammar';
+import type { ChatComposerCommandController } from './useChatComposerCommandController';
 
 type Props = {
+  commandController: ChatComposerCommandController;
   desktopExperience: boolean;
   setTurnChromeTopInset: React.Dispatch<React.SetStateAction<number>>;
   composerAck: ComposerAckPresentation | null;
@@ -42,18 +44,10 @@ type Props = {
   readOnlyFooterInset: { marginBottom: number; paddingBottom?: undefined; } | { paddingBottom: number; marginBottom?: undefined; };
   /** The composer's animated foot (keyboard or safe-area inset), as a height under the row. */
   composerBottomInset: MotionStyle;
-  slashMenuVisible: boolean;
-  mentionSlashAgentPubkey: string | null;
   agentByPubkey: Map<string, import("@/buzz/agent-display").DisplayableAgent>;
-  slashVerbs: import("@/buzz/slash-verbs").BuiltInSlashVerb[];
-  currentSlashQuery: string | null;
-  mentionSlash: import("@/buzz/slash-verbs").AgentMentionSlash | null;
   highlightedSlashVerbIndex: number;
   dismissSlashMenu: () => void;
   runSlashVerb: (verb: BuiltInSlashVerbId) => void;
-  mentionAgentCommands: import("@/buzz/slash-verbs").AgentPaletteCommand[];
-  mentionAgentLacksCommands: boolean;
-  selectAgentCommand: (name: string) => void;
   mentionMenuVisible: boolean;
   highlightedMentionIndex: number;
   keyboardHeight: number;
@@ -109,7 +103,6 @@ type Props = {
   setComposerHeight: React.Dispatch<React.SetStateAction<number>>;
   setComposerFocused: React.Dispatch<React.SetStateAction<boolean>>;
   selectHighlightedPaletteItem: () => void;
-  paletteItemCount: number;
   setHighlightedSlashVerbIndex: React.Dispatch<React.SetStateAction<number>>;
   suggestionCount: number;
   handleSend: (shortcut?: MessageShortcut, dictated?: DictatedSend) => Promise<boolean | undefined>;
@@ -121,6 +114,7 @@ type Props = {
 };
 
 export const ChatSurfaceComposer = React.memo(function ChatSurfaceComposer({
+  commandController,
   desktopExperience,
   setTurnChromeTopInset,
   composerAck,
@@ -133,18 +127,10 @@ export const ChatSurfaceComposer = React.memo(function ChatSurfaceComposer({
   isReadOnlyDirectMessage,
   readOnlyFooterInset,
   composerBottomInset,
-  slashMenuVisible,
-  mentionSlashAgentPubkey,
   agentByPubkey,
-  slashVerbs,
-  currentSlashQuery,
-  mentionSlash,
   highlightedSlashVerbIndex,
   dismissSlashMenu,
   runSlashVerb,
-  mentionAgentCommands,
-  mentionAgentLacksCommands,
-  selectAgentCommand,
   mentionMenuVisible,
   highlightedMentionIndex,
   keyboardHeight,
@@ -200,7 +186,6 @@ export const ChatSurfaceComposer = React.memo(function ChatSurfaceComposer({
   setComposerHeight,
   setComposerFocused,
   selectHighlightedPaletteItem,
-  paletteItemCount,
   setHighlightedSlashVerbIndex,
   suggestionCount,
   handleSend,
@@ -210,6 +195,10 @@ export const ChatSurfaceComposer = React.memo(function ChatSurfaceComposer({
   channelMenuKey,
   setInputSelection,
 }: Props) {
+  const {
+    slashMenuVisible, mentionSlashAgentPubkey, slashVerbs, currentSlashQuery, mentionSlash,
+    mentionAgentCommands, mentionAgentLacksCommands, selectAgentCommand, paletteItemCount,
+  } = commandController;
   // RN-web measures content when its input ref attaches. Keep this callback
   // stable so a height update cannot reattach the ref and measure in a loop.
   const handleContentSizeChange = React.useCallback<

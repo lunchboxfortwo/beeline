@@ -44,7 +44,7 @@ it('COMPOSER-SIZE-1: settles ref measurements, grows and shrinks, then sends the
     const [text, setText] = React.useState('hello');
     const inputTextRef = React.useRef(text);
     const props = {
-      desktopExperience: false, pendingAttachments: [], composerTagHandles: new Set(),
+      commandController: {}, desktopExperience: false, pendingAttachments: [], composerTagHandles: new Set(),
       voice: {}, roomSurface: { members: [] }, composerInputRevisionRef: { current: 0 },
       composerHeight: height, setComposerHeight: setHeight, inputText: text,
       inputTextRef, setInputText: setText,
@@ -74,7 +74,7 @@ it('COMPOSER-SIZE-1: settles ref measurements, grows and shrinks, then sends the
 it.each([false, true])('COMPOSER-KEYBOARD-1: desktop=%s, only the phone chrome lets the list give up height', (desktop) => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   const props = {
-    desktopExperience: desktop, mentionMenuVisible: true, keyboardHeight: 300,
+    commandController: {}, desktopExperience: desktop, mentionMenuVisible: true, keyboardHeight: 300,
     mentionSuggestions: { matches: [], overflow: 18 }, personProfileByPubkey: new Map(),
     pendingAttachments: [{ uri: 'file:///29819.jpg', name: '29819.jpg', mimeType: 'image/jpeg', size: 1 }],
     attachmentUploader: { state: () => undefined }, composerTagHandles: new Set(),
@@ -114,7 +114,7 @@ it.each([
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   const voice = { join: vi.fn() };
   const props = {
-    ...location, desktopExperience: false, pendingAttachments: [], composerTagHandles: new Set(),
+    ...location, commandController: {}, desktopExperience: false, pendingAttachments: [], composerTagHandles: new Set(),
     voice, roomSurface: { room: { name: 'crew' }, members: [{ identity: { kind: agent ? 'agent' : 'human' } }] },
     composerInputRevisionRef: { current: 0 }, composerHeight: 26, setComposerHeight: () => {},
     inputText: '', inputTextRef: { current: '' }, setInputText: () => {},

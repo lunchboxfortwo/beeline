@@ -1,13 +1,11 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { type RoomRepository, type ChatListItem } from '@beeline/buzz-client';
-import { type AgentComposerCommand } from '@beeline/api-contract/phone';
 import { type ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { activeChannelAtCursor, channelSuggestionCandidates, filterChannelSuggestions, type ChannelSuggestion } from '@/buzz/channel-suggestions';
 import { useRoomCorners } from '@/buzz/use-room-corners';
 import { roomOpenCornerRows } from '@/buzz/room-corner-store';
-import { activeMentionAtCursor, filterMentionCandidates, mentionedAgentPubkey } from '@/buzz/room-participants';
+import { activeMentionAtCursor, filterMentionCandidates } from '@/buzz/room-participants';
 import { useStarPrompt } from '@/components/buzz/StarPromptCard';
-import { availableAgentMentionCommands, fastModeCommandState, slashVerbQuery, agentMentionSlashQuery, type FastModeCommandState } from '@/buzz/slash-verbs';
 import { isAgentTurnActive } from '@/buzz/agent-presence';
 import { sameElementRefs, useStable } from '@/buzz/use-stable';
 import { roomMemberManagementState } from '@/buzz/room-member-management';
@@ -15,7 +13,6 @@ import { type RoomRosterParticipant } from '@/buzz/room-participants';
 import { CHANNEL_MENTION_OPTION, SYSTEM_MENTION_OPTION } from './chat-surface-values';
 
 type Props = [
-  roomParticipants: RoomRosterParticipant[],
   inputSelection: { start: number; end: number; },
   inputText: string,
   describedRoomParticipants: RoomRosterParticipant[],
@@ -31,23 +28,15 @@ type Props = [
   unprojectedMessages: ChatDisplayMessage[],
   participantsHydrated: boolean,
   participantPickerVisible: boolean,
-  viewerPubkey: string | undefined,
-  agentCommandsByScope: Record<string, readonly AgentComposerCommand[]>,
-  agentFastModeByScope: Record<string, FastModeCommandState | null>,
   combinedMessages: ChatDisplayMessage[],
   roomRepository: RoomRepository | null,
-  activeCommunityId: string | null,
-  setAgentCommandsByScope: React.Dispatch<React.SetStateAction<Record<string, readonly AgentComposerCommand[]>>>,
-  setAgentFastModeByScope: React.Dispatch<React.SetStateAction<Record<string, FastModeCommandState | null>>>,
 ];
 
 export function useChatComposerSuggestions([
-  roomParticipants, inputSelection, inputText,
+  inputSelection, inputText,
   describedRoomParticipants, composerFocused, dismissedMentionKey, isDirectMessage, parentChannelId,
   decodedId, roomClient, workspaceChats, roomSurface, presenceReconnectGrace, unprojectedMessages,
-  participantsHydrated, participantPickerVisible, viewerPubkey, agentCommandsByScope,
-  agentFastModeByScope, combinedMessages, roomRepository, activeCommunityId,
-  setAgentCommandsByScope, setAgentFastModeByScope,
+  participantsHydrated, participantPickerVisible, combinedMessages, roomRepository,
 ]: Props): [
   directMessageListItem: ChatListItem | null,
   isReadOnlyDirectMessage: boolean,
@@ -55,17 +44,11 @@ export function useChatComposerSuggestions([
   activeAgentTurns: import("@beeline/api-contract/phone").RoomViewAgentTurn[],
   pendingCornerRequest: ChatDisplayMessage | undefined,
   pendingTargetBranchProposal: ChatDisplayMessage | undefined,
-  currentSlashQuery: string | null,
-  mentionSlash: import("@/buzz/slash-verbs").AgentMentionSlash | null,
-  mentionSlashAgentPubkey: string | null,
-  mentionAgentCommands: import("@/buzz/slash-verbs").AgentPaletteCommand[],
   agentTurnMarkers: readonly import("@beeline/api-contract/phone").RoomViewAgentTurn[],
   activeAgentTurn: import("@beeline/api-contract/phone").RoomViewAgentTurn,
   starPrompt: ReturnType<typeof useStarPrompt>,
   activeMention: import("@/buzz/room-participants").ActiveMention | null,
   activeChannel: import("@/buzz/channel-suggestions").ActiveChannel | null,
-  mentionAgentCommandScope: string | null,
-  mentionAgentLacksCommands: boolean,
   mentionMenuVisible: boolean,
   mentionSuggestions: { matches: RoomRosterParticipant[]; overflow: number; },
   channelMenuVisible: boolean,
@@ -75,20 +58,6 @@ export function useChatComposerSuggestions([
   channelMenuKey: string | null,
   memberManagement: { canOpenRoster: boolean; pickerVisible: boolean; },
 ] {
-
-  // The committed Room roster supplies addresses, including disconnected
-  // session agents whose messages wait in the ordinary queue.
-  const mentionableAgents = useMemo(
-    () =>
-      roomParticipants
-        .filter((participant) => participant.kind === 'agent')
-        .map((participant) => ({
-          pubkey: participant.pubkey,
-          name: participant.name,
-          handle: participant.handle,
-        })),
-    [roomParticipants],
-  );
 
   const activeMention = useMemo(
     () =>
@@ -241,42 +210,6 @@ export function useChatComposerSuggestions([
 
   const starPrompt = useStarPrompt(decodedId, Boolean(roomSurface) && !isReadOnlyDirectMessage);
 
-  const currentSlashQuery = useMemo(() => slashVerbQuery(inputText), [inputText]);
-
-  // Mention-scoped palette: `@agent /query` addresses THAT agent's advertised
-  // commands. Mutually exclusive with `currentSlashQuery` by shape — the plain
-  // path requires the WHOLE composer to be one slash token.
-  const mentionSlash = useMemo(() => agentMentionSlashQuery(inputText), [inputText]);
-
-  const mentionSlashAgentPubkey = useMemo(() => {
-    if (!mentionSlash) return null;
-    return mentionedAgentPubkey(`@${mentionSlash.mention}`, mentionableAgents) ?? null;
-  }, [mentionSlash, mentionableAgents]);
-
-  const mentionAgentCommandScope = mentionSlashAgentPubkey
-    ? `${decodedId}:${viewerPubkey}:${mentionSlashAgentPubkey}`
-    : null;
-
-  const mentionAgentCommands = useMemo(() => {
-    if (!mentionSlash || !mentionAgentCommandScope) return [];
-    const published = agentCommandsByScope[mentionAgentCommandScope];
-    return availableAgentMentionCommands(
-      published ?? [],
-      mentionSlash.query,
-      agentFastModeByScope[mentionAgentCommandScope],
-    );
-  }, [agentCommandsByScope, agentFastModeByScope, mentionAgentCommandScope, mentionSlash]);
-
-  // True only once the read RESOLVED (absent or empty list): an in-flight or
-  // failed read is unknown, never "does not advertise".
-  const mentionAgentLacksCommands = Boolean(
-    mentionSlash &&
-    mentionSlashAgentPubkey &&
-    mentionAgentCommandScope &&
-    agentCommandsByScope[mentionAgentCommandScope] !== undefined &&
-    (agentCommandsByScope[mentionAgentCommandScope]?.length ?? 0) === 0,
-  );
-
   const pendingCornerRequest = useMemo(() => {
     for (let index = combinedMessages.length - 1; index >= 0; index -= 1) {
       const message = combinedMessages[index];
@@ -304,60 +237,10 @@ export function useChatComposerSuggestions([
     return undefined;
   }, [combinedMessages, roomRepository?.targetBranch]);
 
-  // Load the addressed agent's published command list on demand — the palette
-  // combines this record with server-authorized Beeline actions. A
-  // failed read stays unknown and never blocks typing.
-  useEffect(() => {
-    const pubkey = mentionSlashAgentPubkey;
-    const scope = mentionAgentCommandScope;
-    if (!pubkey || !scope || !roomClient || !activeCommunityId) return;
-    if (agentCommandsByScope[scope] !== undefined && agentFastModeByScope[scope] !== undefined) {
-      return;
-    }
-    let cancelled = false;
-    roomClient
-      .agent(activeCommunityId, pubkey)
-      .then((detail) => {
-        if (!cancelled) {
-          setAgentCommandsByScope((current) => ({
-            ...current,
-            [scope]: detail.commands ?? [],
-          }));
-          setAgentFastModeByScope((current) => ({
-            ...current,
-            [scope]: fastModeCommandState(detail, viewerPubkey),
-          }));
-        }
-      })
-      .catch(() => {
-        // A transport failure is not evidence that no record exists. Keep the
-        // scope unresolved so the palette never makes a false absence claim.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    activeCommunityId,
-    agentCommandsByScope,
-    agentFastModeByScope,
-    decodedId,
-    mentionAgentCommandScope,
-    mentionSlashAgentPubkey,
-    roomClient,
-    viewerPubkey,
-  ]);
-
-  // Re-read owner actions each time the palette opens so profile changes
-  // cannot leave an earlier permission or toggle state on screen.
-  useEffect(() => {
-    if (mentionSlashAgentPubkey) return;
-    setAgentFastModeByScope((current) => (Object.keys(current).length ? {} : current));
-  }, [mentionSlashAgentPubkey]);
   return [
     directMessageListItem, isReadOnlyDirectMessage, messages, activeAgentTurns,
-    pendingCornerRequest, pendingTargetBranchProposal, currentSlashQuery, mentionSlash,
-    mentionSlashAgentPubkey, mentionAgentCommands, agentTurnMarkers, activeAgentTurn, starPrompt,
-    activeMention, activeChannel, mentionAgentCommandScope, mentionAgentLacksCommands,
+    pendingCornerRequest, pendingTargetBranchProposal, agentTurnMarkers, activeAgentTurn, starPrompt,
+    activeMention, activeChannel,
     mentionMenuVisible, mentionSuggestions, channelMenuVisible, channelSuggestions, suggestionCount,
     mentionMenuKey, channelMenuKey, memberManagement,
   ];
