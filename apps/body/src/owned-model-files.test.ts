@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { lstatSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { encodeOwnedModelReceipt } from '@beeline/api-contract/helper-model-receipt';
-import { OwnedModelFiles, OWNED_MODEL_FILE_MAX_BYTES,
+import { OwnedModelFiles, OwnedModelFileRefusal, OWNED_MODEL_FILE_MAX_BYTES,
   type OwnedModelFileBinding, type OwnedModelFileCredential } from './owned-model-files.js';
 
 const roots: string[] = [];
@@ -19,6 +19,27 @@ function fixture() {
 }
 const journal = (owner: OwnedModelFiles) => JSON.parse(readFileSync(owner.paths().journal, 'utf8')) as {
   active: string | null; requests: { id: string; state: string }[] };
+
+it.each([false, true])('recreates a queued invocation after suppressed-answer cleanup (interrupted: %s)', interrupted => {
+  const { root, owner, granted } = fixture();
+  const request = owner.prepareHeaders();
+  const directory = owner.paths().directory;
+  const savedCredential = readFileSync(owner.paths().credential, 'utf8');
+  owner.revoke();
+  if (interrupted) writeFileSync(owner.paths().credential, savedCredential, { mode: 0o600 });
+  expect(() => OwnedModelFiles.open(directory)).toThrow();
+  expect(() => owner.prepareHeaders()).toThrow(OwnedModelFileRefusal);
+
+  // Suppressed trailing text leaves this same server-owned queue item owed.
+  // Its next execution receives the credential again, including after restart.
+  const resumed = OwnedModelFiles.create({ root, binding, credential: granted });
+  expect(resumed.paths().directory).toBe(directory);
+  expect(resumed.snapshot()).toEqual({ state: 'unknown', requests: [request.requestId] });
+  const next = OwnedModelFiles.open(directory).prepareHeaders();
+  expect(next.authorization).toBe('Bearer ' + token);
+  expect(next.requestId).not.toBe(request.requestId);
+  expect(resumed.snapshot()).toEqual({ state: 'unknown', requests: [next.requestId] });
+});
 
 describe('owned model request journal capacity',()=>{
   it('compacts successful history through more than 128 provider requests and sends after an UNKNOWN', () => {

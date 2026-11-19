@@ -127,6 +127,7 @@ export class OwnedModelFiles {
   static open(directory:string):OwnedModelFiles {
     if(!isAbsolute(directory))throw new OwnedModelFileRefusal();
     privateDirectory(directory);
+    if(existsSync(join(directory,'revoked')))throw new OwnedModelFileRefusal();
     const stored=JSON.parse(readPrivate(join(directory,'credential.json'))) as CredentialFile;
     const owner=OwnedModelFiles.create({root:dirname(directory),binding:stored.binding,credential:stored.credential});
     if(owner.paths().directory!==directory)throw new OwnedModelFileRefusal();
@@ -150,6 +151,14 @@ export class OwnedModelFiles {
       if (created) {
         writeNew(authPath, contents); writeNew(journalPath, JSON.stringify({ v: 1, bindingHash: owner.bindingHash, requests: [], active: null } satisfies Journal));
         directorySync(directory); directorySync(root);
+      } else if (existsSync(join(directory, 'revoked'))) {
+        // Harness cleanup ends only that execution. A suppressed answer can
+        // leave the same server-owned item queued, with its credential supplied
+        // again. Restore it without discarding the durable request journal.
+        privateDirectory(directory); readJournal(owner);
+        const temporary = join(directory, 'credential-' + randomBytes(16).toString('hex') + '.tmp');
+        writeNew(temporary, contents); renameSync(temporary, authPath); directorySync(directory);
+        unlinkSync(join(directory, 'revoked')); directorySync(directory);
       }
       readCredential(owner, Date.now()); readJournal(owner);
       const value = new OwnedModelFiles(); owners.set(value, owner); return value;

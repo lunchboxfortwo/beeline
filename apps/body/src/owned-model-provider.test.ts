@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { encodeOwnedModelReceipt } from '@beeline/api-contract/helper-model-receipt';
 import { OwnedModelFiles, OwnedModelFileRefusal } from './owned-model-files.js';
 import { installOwnedModelProvider } from './owned-model-install.js';
@@ -52,8 +52,14 @@ function fixture() {
   vi.stubEnv('BEELINE_TURN_CONTEXT_FILE', path);
   return owner;
 }
-it('uses the actual Pi provider with one exact invocation credential and commits its authenticated receipt', async () => {
+it.each([false, true])('uses the actual Pi provider and commits its receipt (resumed after cleanup: %s)', async resumed => {
   const owner = fixture();
+  if (resumed) {
+    const binding = owner.binding(), root = dirname(owner.paths().directory);
+    owner.prepareHeaders();
+    owner.revoke();
+    OwnedModelFiles.create({ root, binding, credential: { v: 1, token, expiresAt: null } });
+  }
   const calls: string[] = [];
   vi.stubGlobal(
     'fetch',
