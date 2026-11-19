@@ -1,5 +1,6 @@
 import { IdentityMark } from '@/components/buzz/IdentityMark';
 import { RepositoryMark } from '@/components/buzz/RepositoryMark';
+import { WorkStateMark } from '@/ui/screens/tags/WorkMarks';
 import React, { useEffect, useMemo, useState } from 'react';
 import { router, type Href } from 'expo-router';
 import { Card, Input, ListItem, Separator, Switch, XStack, YStack } from 'tamagui';
@@ -203,7 +204,7 @@ export function ChatInfoScreen({ roomId, close }: { roomId: string; close: () =>
                 {finished.length ? finished.map((item, index) => {
                     const title = cornerShortTitle(name, item.corner.name, item.corner.id);
                     return (
-                        <Row leading={item.corner.avatar || item.corner.favicon ? <RepositoryMark avatarUrl={item.corner.avatar} faviconUrl={item.corner.favicon} size={28} /> : undefined} key={item.corner.id} label={title} detail={finishedWhen(item.closedAt)}
+                        <Row leading={<YStack width={28} height={28} alignItems="center" justifyContent="center"><WorkStateMark state="done" /></YStack>} key={item.corner.id} label={title} detail={finishedWhen(item.closedAt)}
                             onPress={() => router.push(cornerHref(item.corner.id, roomId, title))}
                             last={index === finished.length - 1 && !corners.record?.archived?.next} testID={`finished-${item.corner.id}`} />
                     );

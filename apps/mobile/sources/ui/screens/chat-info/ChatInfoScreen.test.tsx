@@ -46,6 +46,7 @@ const loadArchived = vi.hoisted(() => vi.fn(async () => undefined));
 vi.mock('@/buzz/use-room-corners', () => ({ useRoomCorners: () => ({ record: { archived: { corners: data.archived, total: data.total }, summary: { cornerCount: data.openCorners } }, loadArchived }) }));
 
 import { ChatInfoScreen } from './ChatInfoScreen';
+import { WorkStateMark } from '@/ui/screens/tags/WorkMarks';
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const ROOM = '22222222-2222-4222-8222-222222222222';
@@ -314,6 +315,20 @@ describe('Chat info', () => {
         expect(flat(tree)).toContain('Finished threads · 27');
         act(() => { pressable(tree, `finished-${CORNER}`).props.onPress(); });
         expect(router.push).toHaveBeenCalledWith(expect.objectContaining({ params: expect.objectContaining({ id: CORNER, parent: ROOM }) }));
+    });
+
+    it.each([
+        { avatar: 'https://example.com/workspace.png' },
+        { favicon: 'https://example.com/favicon.ico' },
+        {},
+    ])('uses the done thread glyph in finished rows with %j', (images) => {
+        data.archived[0].corner = { ...data.archived[0].corner, ...images };
+        data.room.room.avatar = 'https://example.com/chat.png';
+        const tree = render();
+        const row = pressable(tree, `finished-${CORNER}`);
+        expect(row.findByType(WorkStateMark).props.state).toBe('done');
+        expect(row.findAll((node: any) => node.type === 'RepositoryMark')).toHaveLength(0);
+        expect(tree.root.findByType('RepositoryMark').props.avatarUrl).toBe(data.room.room.avatar);
     });
 
     it("leaves with today's confirmation and returns to Chats", async () => {
