@@ -104,7 +104,7 @@ export function beelineCornersSkillMarkdown(releaseId: string): string {
 
 ## Messages, asks and feedback
 
-- Reply to the message that gave you the task when done, blocked or failed. Its sender is your commander; its id already records the reply destination. System wakes continue that thread task.
+- Reply to the message that gave you the task when done, blocked or failed. Its sender is your commander; its id already records the reply destination.
 - The server requests review; never tag the reviewer.
 - Add ask only when an answer is needed. Ask the person a clear question; put the surrounding context in the message text. Use 2–4 option labels of at most 3 words, with an optional recommended label. An ask to a person appears in Needs you; a plain message does not. Each ask is independent.
 - For friction in Beeline itself, call report_feedback with tool_name and error_excerpt when a tool failed.

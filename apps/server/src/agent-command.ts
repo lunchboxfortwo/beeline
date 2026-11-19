@@ -17,7 +17,7 @@ import { subscriptionPromptBody } from './agent-subscriptions.js';
 import { endAgentTurn } from './agent-turn-end.js';
 import { closingActivity,replySteps } from './answer-activity.js';
 import { CornerAccessDatabase } from './corner-access-database.js';
-import { cornerCommanderBriefSql,threadCommanderAddressSql } from './corner-commander.js';
+import { cornerCommanderBriefSql } from './corner-commander.js';
 import { cornerLifecycleSql } from './corner-github-cache.js';
 import { currentIdleReportSql } from './corner-idle.js';
 import { greenReviewRequestSql,reviewChecksSql } from './corner-lifecycle-values.js';
@@ -221,7 +221,7 @@ export type PrivateCommandPayload = PayloadVoice & {
   route?: MessageRoute;
   messageAsk?: MessageAsk;
   inReplyTo?: string;
-  /** A System wake continues the thread task; it never makes System the commander. */
+  /** Explicit return address for workflow owners and legacy message delivery. */
   replyAddress?: MessageRoute['from'];
   /** Stable tool-call key on the corner's opening order. */
   openKey?: string;
@@ -419,7 +419,6 @@ export type QueuedOrder = {
 type Member = { id: string; kind: 'human' | 'agent'; handle: string | null; name: string;
   callback: string | null; client_id: string | null; client_name: string | null; mcp: boolean; starter: string | null; owner_id: string | null; access_policy: unknown };
 type Chat = { id: string; parent_id: string | null; archived: boolean; direct_participants: string[] | null;
-  commander: MessageRoute['from'] | null;
   workflow_owner_id:string|null;
   worker: string | null; source_member: boolean; source_archived: boolean; source_parent_id: string | null;
   source_worker: string | null; source_target_member: boolean;
@@ -485,7 +484,6 @@ export async function queueMessage(database: SqlDatabase, raw: QueuedPost | Queu
           WHERE gh.corner_id=room.id) review,
          COALESCE((SELECT jsonb_agg(audience) FROM audience),'[]'::jsonb) members,
          to_jsonb(initial) opening,
-         ${threadCommanderAddressSql('room.id')} commander,
          (SELECT owner.id FROM messages workflow JOIN messages start ON start.id=workflow.card->>'runId'
            AND start.room_id=workflow.room_id JOIN identities owner ON owner.id=start.card->>'ownerId'
            AND owner.kind='human' WHERE workflow.id=$2 AND workflow.card_type='workflow-handoff') workflow_owner_id,
@@ -711,7 +709,6 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
     payload={...payload,kind:'lifecycle',authorId:from.agent,
       text:input.privatePayload?.text ?? systemText(sourceText ?? input.reason),fromRoomId:from.place,
       route:{from,to:{agent:input.agentId,place:chat.id}},
-      ...(from.agent===SYSTEM_IDENTITY_ID && chat.commander ? {replyAddress:chat.commander} : {}),
     } as PrivateCommandPayload;
   }
   const scheduleSender=scheduledReturn ? {agent:scheduledReturn.returnIdentityId ?? SYSTEM_IDENTITY_ID,place:chat.id} : undefined;
@@ -776,7 +773,7 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
         replyAddress:workflowOwner ? {agent:workflowOwner,place:chat.id} :
           input.reason==='mcp_call' && parent?.agent_id===input.agentId && parent.message?.route ? parent.message.replyAddress :
           payload?.replyAddress ?? (!payload?.route && (payload?.authorId ?? chat.source?.author_id)===SYSTEM_IDENTITY_ID
-            ? chat.commander ?? (payload?.returnIdentityId ? {agent:payload.returnIdentityId,place:returnRoom} : undefined) : undefined),
+            ? (payload?.returnIdentityId ? {agent:payload.returnIdentityId,place:returnRoom} : undefined) : undefined),
         authorId: scheduleSender?.agent ?? workflowOwner ?? payload?.authorId ?? chat.source?.author_id ?? SYSTEM_IDENTITY_ID,
         body: (payload?.text ?? subscriptionPromptBody(sourceText ?? input.reason, chat.source?.system_event ?? null)) +
           squireDecisionDetail(chat.source?.card_type ?? null,chat.source?.card ?? null) +
@@ -901,7 +898,12 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
       }
       const saved = input.sharedReplyId ? await queueMessage(db,{kind:'delivery',roomId:route.from.place,
         authorId:agentId,recipientId:route.from.agent,sourceRoomId:input.roomId,sourceItem:item,
-        id:input.sharedReplyId,postedReplyId:input.sharedReplyId,text:modelText(''),attachments:item.answer_attachments}) : await sendMessage(db,{
+        id:input.sharedReplyId,postedReplyId:input.sharedReplyId,text:modelText(''),attachments:item.answer_attachments}) : route.from.agent===SYSTEM_IDENTITY_ID ? await queueMessage(db,{
+        kind:'post',roomId:route.from.place,authorId:agentId,text:modelText(messageText),agentIds:[],
+        id:hash(`answer:${item.id}:${route.from.place}:${route.from.agent}${input.messageAsk ? ':ask' : ''}`),
+        parent:item,replyTo:item.source_message_id ?? item.id,requestId:item.turn_request_id,commandRoomId:item.room_id,
+        attachments:[...new Map([...(payload?.attachments ?? []),...(item.answer_attachments ?? [])].map(file=>[file.url,file])).values()],
+      }) : await sendMessage(db,{
         route:{from:{agent:agentId,place:input.replyFromPlace ?? input.roomId},to:route.from},text:messageText,
         ask:input.messageAsk,id:hash(`answer:${item.id}:${route.from.place}:${route.from.agent}${input.messageAsk ? ':ask' : ''}`),parent:item,
         replyTo:item.id,attachments:[...new Map([...(payload?.attachments ?? []),...(item.answer_attachments ?? [])].map(file=>[file.url,file])).values()],

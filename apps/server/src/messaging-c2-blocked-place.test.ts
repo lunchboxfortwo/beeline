@@ -16,9 +16,9 @@ async function firstTask(place: string, opening: boolean) {
       route: { from: { agent: A, place }, to: { agent: B, place: THREAD } } } }))!;
 }
 
-/** Condition 2: a blocked reply from a thread worker reaches its commander where the commander sent the task. */
-describe('C2: a blocked worker reaches its commander at the recorded origin place', () => {
-  it.each(cases)('commander in the %s; a later thread tag; a blocked reply to the %s wake returns there', async (place, reason, worker) => {
+/** System wakes answer in the thread; task replies retain their sender's place. */
+describe('C2: blocked replies retain the addressed message destination', () => {
+  it.each(cases)('commander in the %s; a later thread tag; a blocked reply to the %s wake stays in the thread', async (place, reason, worker) => {
     for (const opening of [false, true]) {
       await db.query('DELETE FROM agent_commands');
       await firstTask(PLACES[place], opening);
@@ -28,9 +28,11 @@ describe('C2: a blocked worker reaches its commander at the recorded origin plac
       await settle();
       const wake = await systemWake(reason, worker);
       await settle();
-      await daemon.execute('reply', { id: wake.id, text: 'blocked: need a decision', ask }, worker);
+      const answer = await daemon.execute('reply', { id: wake.id, text: 'blocked: need a decision', ask }, worker);
       expect((await inbox()).map(row => [row.agent_id, row.room_id, row.from, Boolean(row.ask)]), `opening=${opening}`)
-        .toEqual([[A, PLACES[place], { agent: worker, place: THREAD }, true]]);
+        .toEqual([]);
+      expect((await db.query('SELECT room_id,author_id FROM messages WHERE id=$1', [answer.id])).rows)
+        .toEqual([{ room_id: THREAD, author_id: worker }]);
     }
   });
 

@@ -31,8 +31,8 @@ mutation('a repair wake cannot follow another tagged agent', 'apps/server/src/co
   'agentId: corner.worker_agent_id,', 'agentId: corner.latest_tagged_agent_id,');
 mutation('a message cannot wake an agent at its origin place', 'apps/server/src/agent-messaging.ts',
   'roomId: to.place, agentId: to.agent', 'roomId: route.from.place, agentId: to.agent');
-mutation('a System wake cannot change commander on a tag', 'apps/server/src/agent-command.ts',
-  'replyAddress:chat.commander', 'replyAddress:chat.last_tag');
+mutation('a System wake cannot redirect its thread answer', 'apps/server/src/agent-command.ts',
+  'payload?.route?.from.place', 'payload?.route?.to.place');
 mutation('an idle notice cannot reply to the same commander who receives it', 'apps/server/src/commander.ts',
   'replyAddress,automatic:true', 'replyAddress:{agent:route.recipient,place:route.returnRoom},automatic:true');
 mutation('an orphan idle notice cannot invent an owner destination', 'apps/server/src/commander.ts',

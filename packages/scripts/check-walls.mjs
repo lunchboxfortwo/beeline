@@ -113,7 +113,7 @@ export function judgeMergeContract(root) {
 }
 // Owner-approved destinations: messages use their tuple, replies use the recorded
 // sender tuple, repairs use the implementer, review uses the reviewer, and System
-// work replies to the thread commander. No last-tag or ancestor destination exists.
+// work replies in the thread. No last-tag or ancestor destination exists.
 export const WAKE_DESTINATIONS = {
   'merge-conflict': 'corner.worker_agent_id',
   revision: 'agentId',
@@ -125,7 +125,7 @@ export const WAKE_DESTINATIONS = {
 export const MESSAGE_WAKE_DESTINATIONS = {
   message: { agent: 'to.agent', place: 'to.place' },
   reply: { agent: 'route.from.agent', place: 'route.from.place' },
-  system: 'chat.commander',
+  system: 'route.from.place',
   idleNotice: 'senderTask ? (await recordedMessageRoute(db,senderTask)).from : undefined',
 };
 export function judgeWakeDestinations(root) {
@@ -162,8 +162,11 @@ export function judgeWakeDestinations(root) {
   if(!normalize(messaging).includes(normalize('roomId: to.place, agentId: to.agent')))
     errors.push('message delivery must wake its agent and place tuple');
   const queue=readFileSync(resolve(root,'apps/server/src/agent-command.ts'),'utf8');
-  if(!normalize(queue).includes(normalize('to:route.from')) || !normalize(queue).includes(normalize('replyAddress:chat.commander')))
-    errors.push('reply and System destinations must retain the recorded sender and thread commander');
+  if(!normalize(queue).includes(normalize('to:route.from')))
+    errors.push('replies must retain the recorded sender');
+  if(normalize(queue).includes(normalize('replyAddress:chat.commander')) ||
+      !normalize(queue).includes(normalize('payload?.route?.from.place')))
+    errors.push('System wake answers must retain their thread destination');
   const notices=readFileSync(resolve(root,'apps/server/src/commander.ts'),'utf8');
   if(!normalize(notices).includes(normalize(`const replyAddress=${MESSAGE_WAKE_DESTINATIONS.idleNotice};`)) ||
       !normalize(notices).includes(normalize('route.incoming?.parent_command_id ?? route.parent?.id')) ||
