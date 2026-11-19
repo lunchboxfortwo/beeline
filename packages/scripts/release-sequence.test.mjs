@@ -1,31 +1,63 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { releaseSequence } from './release.mjs';
+import { releaseArguments, releaseSequence } from './release.mjs';
 
 const sha = 'a'.repeat(40);
 const spec = { source: '/source', sha, directory: '/state', store: true };
-test('the ordinary nightly command runs full checks before delivery and records their result path in both channels', async () => {
-  const calls = [], refreshed = [], audits = [];
-  await releaseSequence(spec, async args => calls.push(args), source => refreshed.push(source), (...args) => audits.push(args));
-  assert.deepEqual(calls.map(args => args.leg || args.channel), ['release_checks', 'next', 'latest']);
-  assert.deepEqual(audits, [['/source', '/state/prompt-audit']]);
-  assert.deepEqual(refreshed, ['/source']);
-  assert.equal(calls[0]['release-sha'], sha);
-  assert.equal(calls[0]['state-dir'], '/state/full-checks');
-  assert.deepEqual(calls.slice(1).map(args => args['store-track']), ['none', 'production']);
-  for (const args of calls.slice(1)) {
-    assert.deepEqual(args.checks, { sourceSha: sha, result: 'success', resultsPath: '/state/full-checks/release-checks.json' });
-    assert.equal(args['release-sha'], sha);
+const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
+test('full checks overlap builds, gate promotion on the exact SHA and record both channel results', async () => {
+  const verdict = deferred(), build = deferred(), calls = [];
+  let promoted = false;
+  const release = releaseSequence(spec, async (args, options) => {
+    calls.push(args);
+    if (args.leg) return verdict.promise;
+    if (args.channel === 'next') build.resolve();
+    await options.checksGate;
+    assert.equal(args.checks.sourceSha, args['release-sha']);
+    promoted = true;
+  }, () => {}, () => {});
+  await build.promise;
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(calls.map(args => args.leg || args.channel), ['next', 'release_checks']);
+  assert.equal(promoted, false);
+  verdict.resolve();
+  await release;
+  assert.equal(promoted, true);
+  assert.equal(calls.at(-1).channel, 'latest');
+  for (const args of calls.filter(args => !args.leg)) {
+    assert.equal(args.checks.result, 'success');
+    assert.equal(args.checks.resultsPath, '/state/full-checks/release-checks.json');
+    assert.equal(typeof args.checks.wallSeconds, 'number');
   }
 });
-test('a full-check failure prevents every release; each delivery failure stops subsequent channels', async () => {
-  for (const failing of ['release_checks', 'next', 'latest']) {
-    const calls = [];
-    await assert.rejects(releaseSequence(spec, async args => {
-      const leg = args.leg || args.channel;
-      calls.push(leg);
-      if (leg === failing) throw new Error('fixture failure');
-    }, () => {}, () => {}), /fixture failure/);
-    assert.deepEqual(calls, ['release_checks', 'next', 'latest'].slice(0, ['release_checks', 'next', 'latest'].indexOf(failing) + 1));
-  }
+test('checks failure blocks promotion and waits for the build sibling before returning', async () => {
+  const verdict = deferred(), build = deferred(), started = deferred();
+  let finished = false, promoted = false;
+  const release = releaseSequence(spec, async (args, options) => {
+    if (args.leg) return verdict.promise;
+    started.resolve();
+    await build.promise;
+    await options.checksGate;
+    promoted = true;
+  }, () => {}, () => {}).finally(() => { finished = true; });
+  const rejection = assert.rejects(release, /bad suite/);
+  await started.promise;
+  verdict.reject(new Error('bad suite'));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(finished, false);
+  build.resolve();
+  await rejection;
+  assert.equal(promoted, false);
+});
+test('only an explicit owner-message skip omits Checks and records the exception', async () => {
+  assert.deepEqual(releaseArguments(['--skip-full-checks', 'owner-message-42']), { skipFullChecks: 'owner-message-42' });
+  for (const argv of [['--skip-full-checks'], ['--skip-full-checks', ' '], ['--skip-full-checks', '--no-store']])
+    assert.throws(() => releaseArguments(argv), /Usage/);
+  const calls = [];
+  await releaseSequence({ ...spec, skipFullChecks: 'owner-message-42' }, async (args, options) => {
+    calls.push(args);
+    await options.checksGate;
+  }, () => {}, () => assert.fail('skipped checks cannot run audit'));
+  assert.deepEqual(calls.map(args => args.channel), ['next', 'latest']);
+  for (const args of calls) assert.deepEqual(args.checks, { sourceSha: sha, result: 'skipped', ownerMessageId: 'owner-message-42' });
 });

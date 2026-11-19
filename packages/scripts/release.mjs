@@ -11,12 +11,12 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 export function releaseArguments(argv) {
   const options = {};
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--full-checks') options.fullChecks = true;
+    if (argv[i] === '--skip-full-checks' && argv[i + 1]?.trim() && !argv[i + 1].startsWith('--')) options.skipFullChecks = argv[++i].trim();
     else if (argv[i] === '--no-store') options.noStore = true;
     else if (argv[i] === '--desktop-mode' && ['build', 'carry'].includes(argv[i + 1])) options.desktopMode = argv[++i];
     else if (argv[i] === '--mac-helpers' && ['build', 'carry'].includes(argv[i + 1])) options.macHelpers = argv[++i];
     else if (argv[i] === '--dispatched-by' && i + 1 < argv.length) options.dispatchedBy = JSON.parse(argv[++i]);
-    else throw new Error('Usage: node packages/scripts/release.mjs [--no-store] [--full-checks] [--desktop-mode build|carry] [--mac-helpers build|carry] [--dispatched-by <JSON>]');
+    else throw new Error('Usage: node packages/scripts/release.mjs [--no-store] [--skip-full-checks <owner message id>] [--desktop-mode build|carry] [--mac-helpers build|carry] [--dispatched-by <JSON>]');
   }
   return options;
 }
@@ -95,21 +95,35 @@ export function promptAudit(source, out, run = execFileSync) {
   } catch (error) { console.warn(`Prompt audit did not complete: ${error.message}`); }
 }
 
-export async function releaseSequence({ source, sha, directory, secrets, dispatchedBy, otaVersions, store, desktopMode = 'build', macHelpers = 'build' }, runLocalRelease, refreshTags = fetchTags, audit = promptAudit) {
-  audit(source, join(directory, 'prompt-audit'));
-  const resultsPath = join(directory, 'full-checks', 'release-checks.json');
-  await runLocalRelease({ mode: 'execute', leg: 'release_checks', channel: 'latest',
-    'release-sha': sha, 'state-dir': join(directory, 'full-checks'),
-  }, { repository: source, secrets });
-  const checks = { sourceSha: sha, result: 'success', resultsPath };
-  for (const channel of ['next', 'latest']) {
-    if (channel === 'latest') refreshTags(source);
-    await runLocalRelease({ mode: 'execute', channel, 'release-sha': sha,
-      'state-dir': join(directory, channel), 'dispatched-by': JSON.stringify(dispatchedBy),
-      'store-track': channel === 'latest' && store ? 'production' : 'none', otaVersions,
-      'desktop-mode': desktopMode, 'mac-helpers': macHelpers, checks,
-    }, { repository: source, secrets });
-  }
+export async function releaseSequence({ source, sha, directory, secrets, dispatchedBy, otaVersions, store, desktopMode = 'build', macHelpers = 'build', skipFullChecks }, runLocalRelease, refreshTags = fetchTags, audit = promptAudit) {
+  const checks = { sourceSha: sha, result: skipFullChecks ? 'skipped' : 'running',
+    ...(skipFullChecks ? { ownerMessageId: skipFullChecks } : { resultsPath: join(directory, 'full-checks', 'release-checks.json') }) };
+  const checksGate = skipFullChecks ? Promise.resolve() : Promise.resolve().then(async () => {
+    audit(source, join(directory, 'prompt-audit'));
+    const startedAt = Date.now();
+    try {
+      await runLocalRelease({ mode: 'execute', leg: 'release_checks', channel: 'latest',
+        'release-sha': sha, 'state-dir': join(directory, 'full-checks'),
+      }, { repository: source, secrets });
+      checks.result = 'success';
+    } catch (error) { checks.result = 'failure'; throw error; }
+    finally { checks.wallSeconds = (Date.now() - startedAt) / 1000; }
+  });
+  const delivery = (async () => {
+    for (const channel of ['next', 'latest']) {
+      if (channel === 'latest') refreshTags(source);
+      await runLocalRelease({ mode: 'execute', channel, 'release-sha': sha,
+        'state-dir': join(directory, channel), 'dispatched-by': JSON.stringify(dispatchedBy),
+        'store-track': channel === 'latest' && store ? 'production' : 'none', otaVersions,
+        'desktop-mode': desktopMode, 'mac-helpers': macHelpers, checks,
+      }, { repository: source, secrets, checksGate });
+      await checksGate;
+    }
+  })();
+  // Keep the release lock and private sources until both siblings have stopped,
+  // including a build or suite still running when the other sibling fails.
+  const results = await Promise.allSettled([checksGate, delivery]);
+  for (const result of results) if (result.status === 'rejected') throw result.reason;
 }
 
 // Every release leaves full source copies, overlay layers and node_modules in its
@@ -138,7 +152,7 @@ async function main(argv) {
       store = storeReleaseNeeded(pinnedRuntimes(readFileSync(join(source, 'apps/mobile/app.config.js'), 'utf8')), stores);
     }
     console.log(store ? 'Store release: production; a pinned native runtime is not live in its store.' : 'Store release: none.');
-    await releaseSequence({ source, sha, directory, secrets, dispatchedBy, otaVersions, store, desktopMode: options.desktopMode, macHelpers: options.macHelpers }, runLocalRelease);
+    await releaseSequence({ source, sha, directory, secrets, dispatchedBy, otaVersions, store, desktopMode: options.desktopMode, macHelpers: options.macHelpers, skipFullChecks: options.skipFullChecks }, runLocalRelease);
     console.log(`Released ${sha} to next and latest${store ? ' with production store builds' : ''}. Private results: ${directory}`);
   } finally {
     try { pruneReleaseWorkspaces(directory); } catch { /* leftovers are retried by the next release's own prune */ }

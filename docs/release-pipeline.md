@@ -45,25 +45,35 @@ published between the two legs. Version allocation reads release records and
 all versioned OTA branch names, so an orphaned OTA rc cannot be reused.
 
 `npm run release` never uploads store beta builds: next is the OTA beta only. Latest submits production store builds when a pinned native runtime is not the newest one live in its store (or a store cannot be read); `--no-store` skips them.
-After full checks, the next leg runs the existing quick local checks. Latest
-promotes that exact successful next SHA without invoking Checks or repeating typecheck, dead-code,
-grammar or codec checks. Neither leg dispatches GitHub CI. Existing delivery
-proofs, canary, rollback and finalization stay with their release legs.
+Full Checks start alongside the next release's helper and desktop builds.
+The existing release validation join waits for their exact-SHA verdict before
+any helper publication, server migration/rollout, OTA/channel promotion,
+website deployment, store upload or finalization. Latest reuses that same
+successful verdict. Neither leg dispatches GitHub CI. Existing delivery proofs,
+canary, rollback and finalization stay with their release legs.
 
 The existing dispatched-by fields default to the invoking user (or `firstmate`),
 place `squire`, and local command/audit IDs `squire-release-<UTC timestamp>`.
 `--dispatched-by '<JSON>'` is an optional attribution override. These are local
 execution IDs; the local command does not request a server receipt.
 
-## Nightly full checks on squire
+## Full checks on squire
 
-The nightly release uses `npm run release`; full checks are mandatory by default.
-Before next or latest delivery, it runs the checks-only `release-local --leg
-release_checks` path against the same immutable SHA, under the existing release
-lock. A failed check stops delivery and leaves private results in `full-checks/`.
-Both published `release.json` records include `checks.sourceSha`, `checks.result`
-and the absolute `checks.resultsPath` for `full-checks/release-checks.json`.
-The legacy `--full-checks` flag is accepted but no longer required.
+Every release uses full Checks by default with `npm run release`. The
+checks-only `release-local --leg release_checks` path runs against the same
+immutable SHA, under the release lock, concurrently with pure build jobs.
+A failed suite blocks every promotion and release completion; the command
+waits for both check and build siblings before releasing its lock or pruning
+private sources. There is no additional nightly check dispatch in this local
+workflow.
+Both published `release.json` records include `checks.sourceSha`, `checks.result`,
+`checks.wallSeconds` and the absolute `checks.resultsPath` for
+`full-checks/release-checks.json`. The private `release-checks-timing.json` also
+records the suite wall-clock, host load and per-job placement.
+For an owner-authorized urgent fix only, pass
+`--skip-full-checks "<owner message id>"`. This explicit exception records
+`checks.result: skipped` and `checks.ownerMessageId` in both release records;
+it never becomes the default. A missing or blank owner message is rejected.
 Before the checks, `npm run prompt-audit` writes the rendered agent prompts and
 advisory findings to `prompt-audit/`; it never fails the run.
 

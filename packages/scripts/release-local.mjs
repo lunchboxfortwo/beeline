@@ -236,7 +236,7 @@ rustup run 1.95.0 rustc --version
   return directory;
 }
 
-export function localHooks(directory, processes, { fullChecks = false } = {}) {
+export function localHooks(directory, processes, { fullChecks = false, checksGate } = {}) {
   return {
     workflow: async ({ file, workflow, inputs, inherited, engine }) => {
       file = file.replace(/^\.\//, '');
@@ -249,7 +249,16 @@ export function localHooks(directory, processes, { fullChecks = false } = {}) {
         const delivery = new LocalDelivery(engine);
         engine.localDelivery = delivery;
         process.once('SIGINT', delivery.cancel); process.once('SIGTERM', delivery.cancel);
-        return { workflow: localWorkflow(workflow, inputs), parallel: true, job: (...args) => delivery.run(...args),
+        return { workflow: localWorkflow(workflow, { ...inputs, parallelChecks: Boolean(checksGate) }), parallel: true, job: async (...args) => {
+          if (checksGate && args[1].github.job === 'release_validation') {
+            await checksGate;
+            const checks = engine.variables.releaseChecks;
+            if (checks.sourceSha !== inherited.github.sha || !(checks.result === 'success' || (checks.result === 'skipped' && checks.ownerMessageId)))
+              throw new Error('Full checks do not authorize this release SHA');
+            return { result: 'success', outputs: {} };
+          }
+          return delivery.run(...args);
+        },
           finish: () => { process.removeListener('SIGINT', delivery.cancel); process.removeListener('SIGTERM', delivery.cancel); } };
       }
       if (file === '.github/workflows/desktop.yml') {
@@ -376,9 +385,9 @@ export function localHooks(directory, processes, { fullChecks = false } = {}) {
           helperArm64: engine.variables.macHelperMode === 'build' ? 'cross-built on Intel Mac; lipo and codesign verified' : 'carried unchanged',
           helperX64: engine.variables.macHelperMode === 'build' ? 'built and install-verified on Intel Mac' : 'carried unchanged',
           desktop: engine.variables.desktopMode === 'build' ? 'native signed updater builds on MacBook, squire and Windows VM' : 'published signed updater set carried unchanged, including Windows' };
-        record.delivery.localExceptions.checks = context.inputs.channel === 'latest'
+        record.delivery.localExceptions.checks = engine.variables.releaseChecks ?? (context.inputs.channel === 'latest'
           ? { retained: [], reusedFrom: 'successful next release of this commit', coverage: 'no checks run on promotion' }
-          : { retained: ['build', 'typecheck', 'dead-code', 'design grammar', 'codecs'], dropped: droppedChecks(engine.read(checksWorkflow)), coverage: 'not produced by quick release checks' };
+          : { retained: ['build', 'typecheck', 'dead-code', 'design grammar', 'codecs'], dropped: droppedChecks(engine.read(checksWorkflow)), coverage: 'not produced by quick release checks' });
         const helperManifest = join(directory, 'jobs/helper-local/daemon-release/manifest.json');
         if (existsSync(helperManifest)) record.components.helper.platforms = JSON.parse(readFileSync(helperManifest, 'utf8')).bundles;
         const previousPath = join(context.runner.temp, 'previous/release.json');
@@ -487,7 +496,7 @@ export async function releaseChecks(engine, context) {
   return results;
 }
 
-export async function runLocalRelease(args, { repository = root, secrets: providedSecrets } = {}) {
+export async function runLocalRelease(args, { repository = root, secrets: providedSecrets, checksGate } = {}) {
   const root = repository;
   if (args.help) { console.log('node packages/scripts/release-local.mjs [--plan | --dry-run [--leg release|release_checks|initialize|server|helper|mobile-ota|pages|web-app|eas-cli|require-tools|mac-tools|desktop] | --execute --leg release_checks] [--channel next|latest] [--release-sha <40-char SHA>] [--release-version vX.Y.Z] [--desktop-mode build|carry] [--mac-helpers build|carry] [--env-file ~/.config/beeline-release.env] [--run-release-proof] [--store-track none|beta|production] [--state-dir /outside/repo]'); return; }
   if (args['remote-job']) { await remoteJob(args['remote-job']); return; }
@@ -503,7 +512,7 @@ export async function runLocalRelease(args, { repository = root, secrets: provid
   const processes = new Processes(secrets);
   const variables = { releaseChecks: args.checks, otaVersions: args.otaVersions ?? [], desktopMode: args['desktop-mode'] || 'build', desktopReleaseVersion: args['release-version'], macHelperMode: args['mac-helpers'] || 'build',
     CLOUDFLARE_ACCOUNT_ID: secrets.CLOUDFLARE_ACCOUNT_ID || '', BEELINE_HELPER_SENTRY_DSN: secrets.BEELINE_HELPER_SENTRY_DSN || '', BEELINE_MOBILE_SENTRY_DSN: secrets.BEELINE_MOBILE_SENTRY_DSN || '' };
-  const engine = new LocalActions({ root, directory, secrets, variables, processes, github: localGithub, hooks: localHooks(directory, processes, { fullChecks: args.leg === 'release_checks' }) });
+  const engine = new LocalActions({ root, directory, secrets, variables, processes, github: localGithub, hooks: localHooks(directory, processes, { fullChecks: args.leg === 'release_checks', checksGate }) });
   engine.inspect(WORKFLOW);
   const context = { github: { repository: 'lunchboxfortwo/beeline', sha, run_id: String(Math.floor(Date.now() / 1000)), run_attempt: '1', event_name: 'workflow_dispatch', event: {}, actor: 'local-release', token: secrets.GITHUB_TOKEN || secrets.GH_TOKEN || '' }, runner: {}, job: { status: 'success' } };
   if (args.mode === 'plan') {
