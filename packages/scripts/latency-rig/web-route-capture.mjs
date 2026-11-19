@@ -5,7 +5,7 @@ import { routeFixture, waitForRouteContent } from './web-route-fixtures.mjs';
 import { summarize } from './web-capture.mjs';
 import { readWebResources } from './web-resources.mjs';
 import { armTapTiming } from './web-tap-timing.mjs';
-import { fixtureSignIn } from './web-signin.mjs';
+import { fixtureContext } from './web-signin.mjs';
 
 export async function captureRoutes({
   browser,
@@ -51,84 +51,59 @@ export async function captureRoutes({
         };
         captures.push(record);
         for (let sample = 0; sample < count; sample++) {
-          const context = await browser.newContext({
-            baseURL: origin.origin,
-            viewport: { width: 390, height: 844 },
-            serviceWorkers: 'block',
+          const context = await fixtureContext(browser, {
+            origin,
+            backend,
+            blockedRequests,
+            capture,
             storageState,
-          });
-          await context.route('**/*', async (route) => {
-            const request = route.request(),
-              url = new URL(request.url());
-            if (url.origin === origin.origin) return route.continue();
-            if (url.origin !== backend.origin) {
-              blockedRequests.push({ capture, lane: 'routes', origin: url.origin });
-              return route.abort();
-            }
-            if (request.method() === 'OPTIONS')
-              return route.fulfill({
-                status: 204,
-                headers: {
-                  'access-control-allow-origin': origin.origin,
-                  'access-control-allow-headers': '*',
-                  'access-control-allow-methods': '*',
-                },
-              });
-            const response = await route.fetch();
-            return route.fulfill({
-              response,
-              headers: { ...response.headers(), 'access-control-allow-origin': origin.origin },
-            });
-          });
-          await context.routeWebSocket('**/*', (socket) => {
-            const url = new URL(socket.url());
-            if (url.hostname === backend.hostname && url.port === backend.port) {
-              const server = socket.connectToServer();
-              socket.onMessage((message) => {
-                let frame;
-                try {
-                  frame = JSON.parse(message.toString());
-                } catch {
-                  return server.send(message);
-                }
-                // No wallet provider is present locally. Fixture ONLY its read DTO;
-                // never intercept a write, grant, balance refresh or spending action.
-                if (frame.op === 'readWallet')
-                  return socket.send(
-                    JSON.stringify({
-                      t: 'res',
-                      id: frame.id,
-                      ok: true,
-                      result: {
-                        address: '0x0000000000000000000000000000000000000000',
-                        solanaAddress: null,
-                        totalUsd: '$0.00',
-                        coins: [],
-                        chains: [
-                          {
-                            id: 'base',
-                            name: 'Base',
-                            feeUsd: null,
-                            sponsored: true,
-                            hasBalance: false,
-                          },
-                        ],
-                        sponsorship: null,
-                        delegation: { active: false, expiresAt: null },
-                      },
-                    }),
-                  );
-                server.send(message);
-              });
-            } else socket.close();
+            socketRoute: (socket) => {
+              const url = new URL(socket.url());
+              if (url.hostname === backend.hostname && url.port === backend.port) {
+                const server = socket.connectToServer();
+                socket.onMessage((message) => {
+                  let frame;
+                  try {
+                    frame = JSON.parse(message.toString());
+                  } catch {
+                    return server.send(message);
+                  }
+                  // No wallet provider is present locally. Fixture ONLY its read DTO;
+                  // never intercept a write, grant, balance refresh or spending action.
+                  if (frame.op === 'readWallet')
+                    return socket.send(
+                      JSON.stringify({
+                        t: 'res',
+                        id: frame.id,
+                        ok: true,
+                        result: {
+                          address: '0x0000000000000000000000000000000000000000',
+                          solanaAddress: null,
+                          totalUsd: '$0.00',
+                          coins: [],
+                          chains: [
+                            {
+                              id: 'base',
+                              name: 'Base',
+                              feeUsd: null,
+                              sponsored: true,
+                              hasBalance: false,
+                            },
+                          ],
+                          sponsorship: null,
+                          delegation: { active: false, expiresAt: null },
+                        },
+                      }),
+                    );
+                  server.send(message);
+                });
+              } else socket.close();
+            },
           });
           const page = await context.newPage();
           page.setDefaultTimeout(5000);
           page.setDefaultNavigationTimeout(15000);
           try {
-            if (!storageState) {
-              storageState = await fixtureSignIn(context, secret);
-            }
             try {
               // A warm page that never shows its fixture used to throw here and
               // stop the whole sweep. Record that sample and keep going.

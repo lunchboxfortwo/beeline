@@ -335,15 +335,12 @@ test('Room-open setup waits for the actual destination row before the action clo
     waitFor: () => rowReady,
     click: async () => {},
   };
-  const header = {
-    filter() {
-      return this;
-    },
-    waitFor: async () => {},
-  };
   const page = {
     goto: async () => {},
-    getByTestId: (id) => (id.startsWith('room-') ? row : header),
+    getByTestId: (id) => {
+      assert.ok(id.startsWith('room-'), 'setup waits on the fixture row, not retired workspace header text');
+      return row;
+    },
   };
   const setup = steps['open-room'](page, fixture('open-room')).then((value) => {
     prepared = value;
