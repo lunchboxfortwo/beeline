@@ -82,7 +82,7 @@ export const routeFixtures = {
   '/beeline/settings/workspace': content(id('workspace-name-row'), {
     state: 'workspace-settings',
   }),
-  '/beeline/tray': content(id('tray-list'), { absent: id('tray-loader') }),
+  '/beeline/tray': content('[data-testid="work-board"] [data-testid^="work-ask-"]'),
   '/beeline/workflow': content(id('workflow-steps'), {
     params: { roomId: workflow.roomId, name: 'latency-start-workflow' },
   }),
