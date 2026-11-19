@@ -2,11 +2,9 @@ import { setDesktopPaneOpen } from '@/buzz/desktop-layout-state';
 import { useTextDraft } from '@/buzz/use-text-draft';
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { BuzzRigTransport } from '@/sync/transport';
-import { type AgentComposerCommand } from '@beeline/api-contract/phone';
 import { type ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { desktopWorkPaneVisibleContent, initialDesktopWorkPaneState, desktopDraftKey } from '@/buzz/desktop-workbench-state';
 import { createChatAttachmentUploader, type PickedChatAttachment } from '@/buzz/chat-attachment';
-import { type FastModeCommandState } from '@/buzz/slash-verbs';
 import { type MessageReplyTarget } from '@/buzz/message-reply';
 import { useCopiedToast } from '@/components/buzz/CopiedToast';
 import { type ForwardTarget } from '@/buzz/message-forward';
@@ -34,10 +32,6 @@ export function useChatComposerDraft([
   desktopWorkPaneContent: import("@/buzz/desktop-workbench-state").DesktopWorkPaneContent | null,
   inputSelection: { start: number; end: number; },
   dismissedMentionKey: string | null,
-  agentCommandsByScope: Record<string, readonly AgentComposerCommand[]>,
-  agentFastModeByScope: Record<string, FastModeCommandState | null>,
-  setAgentCommandsByScope: React.Dispatch<React.SetStateAction<Record<string, readonly AgentComposerCommand[]>>>,
-  setAgentFastModeByScope: React.Dispatch<React.SetStateAction<Record<string, FastModeCommandState | null>>>,
   optimisticDeletes: Record<string, true>,
   optimisticReactions: Record<string, readonly import("@beeline/api-contract/phone").MessageReactionView[] | undefined>,
   dismissedSlashText: string | null,
@@ -142,16 +136,6 @@ export function useChatComposerDraft([
 
   const [dismissedSlashText, setDismissedSlashText] = useState<string | null>(null);
 
-  /** Per-Room+agent command lists (undefined = unresolved, empty = advertises none). */
-  const [agentCommandsByScope, setAgentCommandsByScope] = useState<
-    Record<string, readonly AgentComposerCommand[]>
-  >({});
-
-  /** Per-Room+agent Fast mode toggle (undefined = unread, null = not offered to this viewer). */
-  const [agentFastModeByScope, setAgentFastModeByScope] = useState<
-    Record<string, FastModeCommandState | null>
-  >({});
-
   const [sending, setSending] = useState(false);
 
   const [cornerProposalAction, setCornerProposalAction] = useState<{
@@ -253,8 +237,7 @@ export function useChatComposerDraft([
   return [
     inputText, setDesktopDeliveryState, setInputText, setInputSelection, setDismissedMentionKey,
     desktopWorkPaneRef, setDesktopWorkPane, desktopWorkPaneContent, inputSelection,
-    dismissedMentionKey, agentCommandsByScope, agentFastModeByScope,
-    setAgentCommandsByScope, setAgentFastModeByScope, optimisticDeletes,
+    dismissedMentionKey, optimisticDeletes,
     optimisticReactions, dismissedSlashText, setHighlightedSlashVerbIndex, composerHeight,
     setReplyTarget, reactingRef, optimisticReactionsRef, setOptimisticReactions, showReportToast,
     setOptimisticDeletes, setMessageActionsTarget, setForwardTarget, setForwardRooms,

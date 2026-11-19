@@ -24,6 +24,7 @@ import { useChatRoomPresentation } from './useChatRoomPresentation';
 import { useChatTranscriptHistory } from './useChatTranscriptHistory';
 import { useChatRoster } from './useChatRoster';
 import { useChatComposerSuggestions } from './useChatComposerSuggestions';
+import { useChatComposerCommandController } from './useChatComposerCommandController';
 import { useChatHeader } from './useChatHeader';
 import { useChatTranscriptProjection } from './useChatTranscriptProjection';
 import { useChatTranscriptWindow } from './useChatTranscriptWindow';
@@ -101,8 +102,7 @@ export function BuzzChatSurface({
   const [
     inputText, setDesktopDeliveryState, setInputText, setInputSelection, setDismissedMentionKey,
     desktopWorkPaneRef, setDesktopWorkPane, desktopWorkPaneContent, inputSelection,
-    dismissedMentionKey, agentCommandsByScope, agentFastModeByScope,
-    setAgentCommandsByScope, setAgentFastModeByScope, optimisticDeletes,
+    dismissedMentionKey, optimisticDeletes,
     optimisticReactions, dismissedSlashText, setHighlightedSlashVerbIndex, composerHeight,
     setReplyTarget, reactingRef, optimisticReactionsRef, setOptimisticReactions, showReportToast,
     setOptimisticDeletes, setMessageActionsTarget, setForwardTarget, setForwardRooms,
@@ -189,20 +189,24 @@ export function BuzzChatSurface({
   ]);
   const [
     directMessageListItem, isReadOnlyDirectMessage, messages, activeAgentTurns,
-    pendingCornerRequest, pendingTargetBranchProposal, currentSlashQuery, mentionSlash,
-    mentionSlashAgentPubkey, mentionAgentCommands, agentTurnMarkers, activeAgentTurn, starPrompt,
-    activeMention, activeChannel, mentionAgentCommandScope, mentionAgentLacksCommands,
+    pendingCornerRequest, pendingTargetBranchProposal, agentTurnMarkers, activeAgentTurn, starPrompt,
+    activeMention, activeChannel,
     mentionMenuVisible, mentionSuggestions, channelMenuVisible, channelSuggestions, suggestionCount,
     mentionMenuKey, channelMenuKey, memberManagement,
   ] = useChatComposerSuggestions([
-    roomParticipants, inputSelection, inputText,
+    inputSelection, inputText,
     describedRoomParticipants, composerFocused, dismissedMentionKey, isDirectMessage,
     parentChannelId, decodedId, roomClient, workspaceChats, roomSurface, presenceReconnectGrace,
     unprojectedMessages, participantsHydrated, participantPickerVisible,
-    viewerPubkey, agentCommandsByScope, agentFastModeByScope,
-    combinedMessages, roomRepository, activeCommunityId, setAgentCommandsByScope,
-    setAgentFastModeByScope,
+    combinedMessages, roomRepository,
   ]);
+  const commandController = useChatComposerCommandController({
+    roomParticipants, inputText, decodedId, viewerPubkey, roomClient, activeCommunityId,
+    transport, setSessionTransport, inputTextRef, setInputText, setInputSelection, setComposerHeight,
+    isCorner, isDirectMessage, viewerIsAgent, roomSurface, canManageWorkspace, pendingCornerRequest,
+    pendingTargetBranchProposal, targetBranchActionId, composerFocused, dismissedSlashText,
+    setHighlightedSlashVerbIndex,
+  });
   const [
     emptyLedgerVariant, displayRoomName, roomName, firstRoomAgent, startCornerMessage,
     focusComposer, starterPrompts, starterIntro, storedRoomName, headerTitleKind,
@@ -237,18 +241,15 @@ export function BuzzChatSurface({
     desktopScrollNodeRef, heldLandingFromOldestRef, phoneContentHeightRef, phoneScrollOffsetRef,
     heldLandingShortRef, phoneListHeightRef, observeVisibleMessages, chronologicalMessagesRef,
     newMessageHasObservedVisibility, newestTranscriptMessageId, desktopContentObserverRef,
-    desktopContentNodeRef, observeTailPinned, applyComposerPrefill, composerPrefillRef, slashVerbs,
+    desktopContentNodeRef, observeTailPinned, applyComposerPrefill, composerPrefillRef,
     phoneUnderfill, detachedFillMeasuredRef, holdPhoneLanding, newMessageBadgeCount,
-    newestJumpDiscShown, slashMenuVisible, paletteItemCount,
+    newestJumpDiscShown,
   ] = useChatTranscriptWindow([
     anchoredSegmentActive, scrollController, fillTranscript, foldedMessages, desktopTranscript,
     transcriptMessages, roomClient, cacheViewerPubkey, transcriptFillStatus, visibleMessageCount,
     visibleMessages, viewerIsAgent, userPubkey, agentByPubkey, isDirectMessage, decodedId,
     roomSurface, selectedAgentMentionsRef, selectedMentionsRef, inputTextRef, setInputText,
     setInputSelection, arrivalMessages, unreadLine, transcriptArrivalObservation, isCorner,
-    canManageWorkspace, pendingCornerRequest, pendingTargetBranchProposal, targetBranchActionId,
-    currentSlashQuery, mentionSlash, composerFocused, mentionSlashAgentPubkey, dismissedSlashText,
-    inputText, mentionAgentCommands, setHighlightedSlashVerbIndex,
   ]);
   const [
     desktopRowNodesRef, messageJumpCanScrollTo, raiseSourceLandingFlash, messageAnchorIdRef,
@@ -380,17 +381,16 @@ export function BuzzChatSurface({
   ]);
   const [
     rowActions, handleOpenGitHubEvent, handleOpenSystemIdentity, handleCopyLedgerMessage,
-    dismissSlashMenu, runSlashVerb, selectAgentCommand, selectHighlightedPaletteItem,
+    dismissSlashMenu, runSlashVerb, selectHighlightedPaletteItem,
     handleSelectLedgerMessage,
   ] = useChatComposerCommands([
     inputTextRef, setInputText, setInputSelection, setComposerHeight, setDismissedSlashText,
-    setHighlightedSlashVerbIndex, composerRef, inputText, mentionSlashAgentPubkey,
-    mentionAgentCommandScope, agentFastModeByScope, activeCommunityId, setAgentFastModeByScope,
-    transport, setSessionTransport, decodedId, setCreatePollVisible, canManageWorkspace,
+    setHighlightedSlashVerbIndex, composerRef, inputText, commandController, activeCommunityId,
+    transport, decodedId, setCreatePollVisible, canManageWorkspace,
     pendingCornerRequest, handleWritePermission, startRenameFromTitle, handleCloseCorner,
     pendingTargetBranchProposal, handleConfirmTargetBranch, handleConnectAgent, setMembershipError,
     setParticipantPickerKind, openWorkspaceRoster, setParticipantPickerVisible,
-    highlightedSlashVerbIndex, mentionAgentCommands, slashVerbs, handleSend, beginForward,
+    highlightedSlashVerbIndex, handleSend, beginForward,
     handleForwardToNewCorner, handleOpenChannelReference, handleOpenMention, cacheViewerPubkey,
   ]);
   const [
@@ -573,18 +573,11 @@ export function BuzzChatSurface({
   isReadOnlyDirectMessage={isReadOnlyDirectMessage}
   readOnlyFooterInset={readOnlyFooterInset}
   composerBottomInset={composerBottomInset}
-  slashMenuVisible={slashMenuVisible}
-  mentionSlashAgentPubkey={mentionSlashAgentPubkey}
+  commandController={commandController}
   agentByPubkey={agentByPubkey}
-  slashVerbs={slashVerbs}
-  currentSlashQuery={currentSlashQuery}
-  mentionSlash={mentionSlash}
   highlightedSlashVerbIndex={highlightedSlashVerbIndex}
   dismissSlashMenu={dismissSlashMenu}
   runSlashVerb={runSlashVerb}
-  mentionAgentCommands={mentionAgentCommands}
-  mentionAgentLacksCommands={mentionAgentLacksCommands}
-  selectAgentCommand={selectAgentCommand}
   mentionMenuVisible={mentionMenuVisible}
   highlightedMentionIndex={highlightedMentionIndex}
   keyboardHeight={keyboardHeight}
@@ -640,7 +633,6 @@ export function BuzzChatSurface({
   setComposerHeight={setComposerHeight}
   setComposerFocused={setComposerFocused}
   selectHighlightedPaletteItem={selectHighlightedPaletteItem}
-  paletteItemCount={paletteItemCount}
   setHighlightedSlashVerbIndex={setHighlightedSlashVerbIndex}
   suggestionCount={suggestionCount}
   handleSend={handleSend}

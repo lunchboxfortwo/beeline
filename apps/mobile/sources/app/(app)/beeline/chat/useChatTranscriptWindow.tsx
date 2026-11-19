@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useCallback, useMemo } from 'react';
 import { type ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { cancelScheduledAnimationFrame, scheduleAnimationFrame } from '@/buzz/host-scheduler';
-import { availableSlashVerbs } from '@/buzz/slash-verbs';
 import { answerPrefillCandidate, planAnswerPrefill, type ComposerPrefill, type ComposerPrefillPlan } from '@/buzz/composer-prefill';
 import { visibleTranscriptWindow } from '@/buzz/transcript-presentation';
 import { newestTranscriptRowId } from '@/buzz/room-new-message-boundary';
@@ -36,18 +35,6 @@ type Props = [
   unreadLine: { dividerMessageId: string | null; retire: () => void; },
   transcriptArrivalObservation: import("@/buzz/transcript-motion").TranscriptArrivalObservation,
   isCorner: boolean,
-  canManageWorkspace: boolean,
-  pendingCornerRequest: ChatDisplayMessage | undefined,
-  pendingTargetBranchProposal: ChatDisplayMessage | undefined,
-  targetBranchActionId: string | null,
-  currentSlashQuery: string | null,
-  mentionSlash: import("@/buzz/slash-verbs").AgentMentionSlash | null,
-  composerFocused: boolean,
-  mentionSlashAgentPubkey: string | null,
-  dismissedSlashText: string | null,
-  inputText: string,
-  mentionAgentCommands: import("@/buzz/slash-verbs").AgentPaletteCommand[],
-  setHighlightedSlashVerbIndex: React.Dispatch<React.SetStateAction<number>>,
 ];
 
 export function useChatTranscriptWindow([
@@ -56,9 +43,6 @@ export function useChatTranscriptWindow([
   visibleMessages, viewerIsAgent, userPubkey, agentByPubkey, isDirectMessage, decodedId,
   roomSurface, selectedAgentMentionsRef, selectedMentionsRef, inputTextRef, setInputText,
   setInputSelection, arrivalMessages, unreadLine, transcriptArrivalObservation, isCorner,
-  canManageWorkspace, pendingCornerRequest, pendingTargetBranchProposal, targetBranchActionId,
-  currentSlashQuery, mentionSlash, composerFocused, mentionSlashAgentPubkey, dismissedSlashText,
-  inputText, mentionAgentCommands, setHighlightedSlashVerbIndex,
 ]: Props): [
   desktopScrollNodeRef: React.RefObject<HTMLElement | null>,
   heldLandingFromOldestRef: React.RefObject<number>,
@@ -75,14 +59,11 @@ export function useChatTranscriptWindow([
   observeTailPinned: (pinned: boolean) => void,
   applyComposerPrefill: (plan: ComposerPrefillPlan, agent?: { handle: string; pubkey: string; }) => void,
   composerPrefillRef: React.RefObject<ComposerPrefill | null>,
-  slashVerbs: import("@/buzz/slash-verbs").BuiltInSlashVerb[],
   phoneUnderfill: { observeListHeight: (height: number) => void; observeContentHeight: (height: number) => void; },
   detachedFillMeasuredRef: React.RefObject<boolean>,
   holdPhoneLanding: (height: number) => void,
   newMessageBadgeCount: number,
   newestJumpDiscShown: boolean,
-  slashMenuVisible: boolean,
-  paletteItemCount: number,
 ] {
 
   // A detached window fills with newer rows only once a pending landing has
@@ -265,73 +246,6 @@ export function useChatTranscriptWindow([
     enabled: !isCorner,
   });
 
-  const slashVerbs = useMemo(
-    () =>
-      availableSlashVerbs(
-        {
-          canBuild: Boolean(
-            !isCorner && !isDirectMessage && !viewerIsAgent && roomSurface?.viewer.permissions.send,
-          ),
-          canCreatePoll: Boolean(
-            !isCorner && !isDirectMessage && !viewerIsAgent && roomSurface?.viewer.permissions.send,
-          ),
-          canManageSchedules: Boolean(
-            !isCorner &&
-            !viewerIsAgent &&
-            (isDirectMessage ? Boolean(roomSurface?.viewer.permissions.send) : canManageWorkspace),
-          ),
-          canRunWorkflows: Boolean(
-            !isCorner &&
-            !isDirectMessage &&
-            !viewerIsAgent &&
-            canManageWorkspace &&
-            roomSurface?.repositoryResolution === 'repository',
-          ),
-          canOpenCorner: Boolean(!isCorner && !viewerIsAgent && pendingCornerRequest),
-          canRename: Boolean(!isCorner && !isDirectMessage && !viewerIsAgent && canManageWorkspace),
-          canCloseCorner: isCorner && !viewerIsAgent,
-          canChangeTargetBranch: Boolean(
-            !isCorner &&
-            !viewerIsAgent &&
-            canManageWorkspace &&
-            pendingTargetBranchProposal &&
-            !targetBranchActionId,
-          ),
-          canAddAgent: Boolean(!isCorner && !isDirectMessage && !viewerIsAgent),
-          canInvitePerson: Boolean(
-            !isCorner && !isDirectMessage && !viewerIsAgent && canManageWorkspace,
-          ),
-        },
-        currentSlashQuery ?? mentionSlash?.query ?? '',
-      ),
-    [
-      currentSlashQuery,
-      mentionSlash?.query,
-      canManageWorkspace,
-      isCorner,
-      isDirectMessage,
-      pendingCornerRequest,
-      pendingTargetBranchProposal,
-      targetBranchActionId,
-      viewerIsAgent,
-      roomSurface?.repositoryResolution,
-      roomSurface?.viewer.permissions.send,
-    ],
-  );
-
-  const slashMenuVisible = Boolean(
-    composerFocused &&
-    (currentSlashQuery !== null || (mentionSlash !== null && mentionSlashAgentPubkey !== null)) &&
-    dismissedSlashText !== inputText,
-  );
-
-  const paletteItemCount =
-    mentionAgentCommands.length + slashVerbs.length;
-
-  useEffect(() => {
-    setHighlightedSlashVerbIndex(0);
-  }, [currentSlashQuery, mentionSlash?.query, paletteItemCount]);
-
   // The desktop transcript's real scroll container and content node — a
   // plain scrollable View over real DOM (`shouldFollowDesktopTail` in
   // `buzz/room-scroll-follow.ts`), not React Native Web's FlatList/
@@ -347,8 +261,8 @@ export function useChatTranscriptWindow([
     desktopScrollNodeRef, heldLandingFromOldestRef, phoneContentHeightRef, phoneScrollOffsetRef,
     heldLandingShortRef, phoneListHeightRef, observeVisibleMessages, chronologicalMessagesRef,
     newMessageHasObservedVisibility, newestTranscriptMessageId, desktopContentObserverRef,
-    desktopContentNodeRef, observeTailPinned, applyComposerPrefill, composerPrefillRef, slashVerbs,
+    desktopContentNodeRef, observeTailPinned, applyComposerPrefill, composerPrefillRef,
     phoneUnderfill, detachedFillMeasuredRef, holdPhoneLanding, newMessageBadgeCount,
-    newestJumpDiscShown, slashMenuVisible, paletteItemCount,
+    newestJumpDiscShown,
   ];
 }
