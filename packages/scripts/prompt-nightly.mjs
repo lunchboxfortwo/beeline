@@ -398,11 +398,12 @@ export async function replaySample({ prompt, skills, rule, model, request, ledge
     if (invalidCalls.length && !transcript.calls.length && ['final', 'round-limit'].includes(terminal)) {
       status = 'behavior'; reason = 'No valid tool call after validation errors'; terminal = 'invalid-call';
     }
+    const graded = evaluateCase({ ...testCase, pass: rule }, transcript);
     let verdict = { pass: null, reason };
     if (status === 'behavior') verdict = unsafe || terminal === 'invalid-call'
-      ? { pass: false, reason: unsafe ?? reason } : evaluateCase({ ...testCase, pass: rule }, transcript);
+      ? { pass: false, reason: unsafe ?? reason } : graded;
     return { ...verdict, status, terminal, transcript, attemptedCalls, invalidCalls, recovered, tokens, cost, requests, rounds, seed,
-      truthfulness: testCase.truthfulness ? evaluateRule(testCase.truthfulness, transcript) : undefined };
+      truthfulness: graded.truthfulness };
   };
   for (let round = 0; round < MAX_ROUNDS; round++) {
     const answerSchema = { type: 'object', properties: { calls: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, args: { type: 'object' } }, required: ['name', 'args'], additionalProperties: false } }, text: { type: 'string' } }, required: ['calls', 'text'], additionalProperties: false };
