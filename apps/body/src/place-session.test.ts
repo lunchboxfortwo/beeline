@@ -235,6 +235,7 @@ it('discovers and calls Squire in the same cold session without a Registry insta
       return { agentText: 'The answer', stopReason: 'end_turn', updates: [], toolCalls: [] };
     });
     await f.session.deliver(f.item, []);
+    expect(f.prompt.mock.calls[0]?.[1]).not.toContain('Trusty Squire tools are available');
     expect(f.execute).toHaveBeenCalledWith('authorizeResourceCall', expect.objectContaining({ target: 'squire', requestId: f.item.turnRequestId }));
     expect(requestMcp).toHaveBeenCalledWith('tools/call', { name: 'list_credentials', arguments: { fields: 'summary' } });
     f.execute.mockImplementation((name: string) => name === 'authorizeResourceCall'
