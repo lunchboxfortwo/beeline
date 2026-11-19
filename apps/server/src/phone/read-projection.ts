@@ -1,4 +1,3 @@
-import { homepageIconUrl } from '../company-logos.js';
 import { phoneIdentity as identity } from '../phone-identity.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { nextScheduleOccurrence } from '../agent-schedules.js';
@@ -105,7 +104,7 @@ export function effortCatalogAxis(
 }
 
 export function roomHeader(row: RoomHeaderRow, publicOrigin: string) {
-  const homepageIcon = homepageIconUrl(row.repository_homepage, publicOrigin);
+  const homepageIcon = row.repository_icon_room ? `${publicOrigin}/v1/repository-icons/${row.repository_icon_room}` : undefined;
   return {
     id: row.id,
     ...(homepageIcon ? { homepageIcon } : {}),

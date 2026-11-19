@@ -6,7 +6,7 @@ vi.mock('node:dns/promises', () => ({ lookup: mocks.lookup }));
 vi.mock('node:https', () => ({
   Agent: class { constructor(options: unknown) { mocks.agents.push(options); } destroy() {} }, get: mocks.get,
 }));
-import { companyLogo, homepageIconUrl, publicIconResponse, readCompanyLogo, sizeCompanyLogo } from './company-logos.js';
+import { companyLogo, homepageKey, publicIconResponse, readCompanyLogo, readRepositoryIcon, readRepositoryLogo, sizeCompanyLogo } from './company-logos.js';
 import { COMPANY_MARK_IDS } from './company-registry.js';
 beforeEach(() => { vi.clearAllMocks(); mocks.agents.length = 0; mocks.lookup.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]); });
 afterEach(() => vi.restoreAllMocks());
@@ -121,10 +121,65 @@ describe('repository homepage icons', () => {
     expect(await readCompanyLogo('https://shared-cache.example/')).not.toBe(icon);
     expect(mocks.get).toHaveBeenCalledTimes(4);
   });
-  it('projects only valid homepage URLs and upgrades bare or HTTP websites to HTTPS', () => {
-    expect(homepageIconUrl('grunt.run', 'https://api')).toBe('https://api/v1/company-logos/https%3A%2F%2Fgrunt.run%2F');
-    expect(homepageIconUrl('http://grunt.run/docs/#hi', 'https://api')).toBe('https://api/v1/company-logos/https%3A%2F%2Fgrunt.run%2Fdocs%2F');
-    for (const homepage of [undefined, '', 'https://user:pass@grunt.run', 'https://grunt.run:8443', 'file:///tmp/icon', 'https://127.0.0.1'])
-      expect(homepageIconUrl(homepage, 'https://api')).toBeUndefined();
+  it('keys only valid homepage URLs and upgrades bare or HTTP websites to HTTPS', () => {
+    expect(homepageKey('grunt.run')).toBe('https://grunt.run/');
+    expect(homepageKey('http://grunt.run/docs/#hi')).toBe('https://grunt.run/docs/');
+    for (const homepage of [undefined, null, '', 'https://user:pass@grunt.run', 'https://grunt.run:8443', 'file:///tmp/icon', 'https://127.0.0.1'])
+      expect(homepageKey(homepage)).toBeUndefined();
+  });
+});
+
+describe('repository icon files', () => {
+  const square = (width: number, height = width) => sharp({ create: { width, height, channels: 4, background: '#123456' } }).png().toBuffer();
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><path fill="#fff" d="M0 0h16v16H0z"/></svg>';
+  function repository(files: Record<string, Buffer | string>) {
+    const paths = Object.keys(files);
+    return vi.fn(async (path: string) => {
+      if (path.startsWith('git/trees/')) return { tree: [{ path: 'public', type: 'tree', sha: 'dir' },
+        ...paths.map((file, index) => ({ path: file, type: 'blob', sha: `sha${index}` }))] };
+      const file = paths[Number(path.slice('git/blobs/sha'.length))]!;
+      return { content: Buffer.from(files[file]!).toString('base64'), encoding: 'base64' };
+    });
+  }
+  it('lists the tree once and picks the largest square icon under root, public/ or app/', async () => {
+    const read = repository({ 'README.md': 'hi', 'docs/favicon.svg': svg, 'favicon.ico': await square(16), 'public/apple-touch-icon.png': await square(180),
+      'app/icon-512.png': await square(512, 256), 'public/logo.png': await square(600) });
+    const icon = await readRepositoryIcon('owner/largest', 'main', read);
+    expect(read.mock.calls.map(([path]) => path)).toEqual(['git/trees/main?recursive=1', 'git/blobs/sha2', 'git/blobs/sha3', 'git/blobs/sha4']);
+    expect((await sharp(icon!.bytes).metadata()).width).toBe(64);
+    expect(await readRepositoryIcon('Owner/Largest', 'main', read)).toBe(icon);
+    expect(read).toHaveBeenCalledTimes(4);
+  });
+  it('prefers a committed SVG over any raster and rasterizes it at full icon size', async () => {
+    const icon = await readRepositoryIcon('owner/vector', 'main', repository({ 'icon-512.png': await square(512), 'public/favicon.svg': svg }));
+    expect((await sharp(icon!.bytes).metadata()).width).toBe(64);
+  });
+  it('reads a committed favicon.ico through its largest entry', async () => {
+    const png = await square(32);
+    // A 2x2 32-bit entry with its 1-bit mask rows, then the larger PNG entry.
+    const bmp = Buffer.alloc(40 + 2 * 2 * 4 + 2 * 4); bmp.writeUInt32LE(40, 0); bmp.writeInt32LE(2, 4); bmp.writeInt32LE(4, 8); bmp.writeUInt16LE(1, 12); bmp.writeUInt16LE(32, 14);
+    for (let offset = 40; offset < 56; offset += 4) bmp.set([0x56, 0x34, 0x12, 0xff], offset);
+    const header = Buffer.alloc(6 + 32); header.writeUInt16LE(1, 2); header.writeUInt16LE(2, 4);
+    header[6] = 2; header.writeUInt32LE(bmp.length, 14); header.writeUInt32LE(38, 18);
+    header[22] = 32; header.writeUInt32LE(png.length, 30); header.writeUInt32LE(38 + bmp.length, 34);
+    const icon = await readRepositoryIcon('owner/ico', 'main', repository({ 'favicon.ico': Buffer.concat([header, bmp, png]) }));
+    expect((await sharp(icon!.bytes).metadata()).width).toBe(32);
+  });
+  it('finds no icon when the tree has none or GitHub refuses, and keeps that miss for a minute', async () => {
+    expect(await readRepositoryIcon('owner/none', 'main', repository({ 'src/index.ts': 'x', 'favicon.png': await square(32) }))).toBeUndefined();
+    const refused = vi.fn(async () => { throw new Error('404'); });
+    expect(await readRepositoryIcon('owner/gone', 'main', refused)).toBeUndefined();
+    expect(await readRepositoryIcon('owner/gone', 'main', refused)).toBeUndefined();
+    expect(refused).toHaveBeenCalledTimes(1);
+  });
+  it('tries the homepage favicon first and the repository file only when the homepage has none', async () => {
+    const read = repository({ 'favicon.svg': svg });
+    response('<link rel="icon" href="/mark.png">', 'text/html'); response(await square(48));
+    const homepage = await readRepositoryLogo('homepage-first.example', 'owner/homepage', 'main', read);
+    expect((await sharp(homepage!.bytes).metadata()).width).toBe(48); expect(read).not.toHaveBeenCalled();
+    mocks.lookup.mockResolvedValue([{ address: '127.0.0.1', family: 4 }]);
+    const file = await readRepositoryLogo('no-icon.example', 'owner/file', 'main', read);
+    expect((await sharp(file!.bytes).metadata()).width).toBe(64); expect(read).toHaveBeenCalledTimes(2);
+    expect(await readRepositoryLogo(null, 'owner/unlinked', 'main')).toBeUndefined();
   });
 });
