@@ -254,7 +254,7 @@ export const SYSTEM_MESSAGE_DAEMON_SERVICE = {
   },
 
   'phone-service.opened-a-corner': {
-    parts: ['opened a corner'],
+    parts: ['opened a thread'],
     variables: [],
   },
 

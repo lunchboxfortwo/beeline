@@ -201,3 +201,10 @@ it('ends the open list on a firm edge above the transcript', () => {
   expect(edge()).toBe('strongStroke');
   act(() => tree.unmount());
 });
+it('W8 names a single active thread in the trigger', () => {
+  fixture.summary = { cornerCount: 1, openCorners: [] };
+  let tree: any;
+  act(() => { tree = create(<ThreadsDropdown roomId="r" chatName="general" openThread={vi.fn()} onNewThread={vi.fn()} />); });
+  expect(byTestID(tree, 'threads-dropdown-trigger')[0].props.label).toBe('1 active thread in general');
+  act(() => tree.unmount());
+});

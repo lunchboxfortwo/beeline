@@ -675,8 +675,8 @@ export default function BuzzOnboarding() {
               <Btn
                 kind="primary"
                 label={signInLabel}
-                minHeight={HEIGHT.tabBar}
-                borderRadius="lg"
+                minHeight={HEIGHT.primary}
+                borderRadius="sm"
                 testID="onboarding-github-sign-in"
                 disabled={entryBusy}
                 onPress={() => void handleSignIn()}
@@ -687,25 +687,26 @@ export default function BuzzOnboarding() {
               </Btn>
               <Btn
                 label="Continue with Google"
-                minHeight={HEIGHT.tabBar}
-                borderRadius="lg"
+                minHeight={HEIGHT.primary}
+                borderRadius="sm"
                 testID="onboarding-google-sign-in"
                 disabled={entryBusy}
                 onPress={() => void handleGoogleSignIn()}
               >
                 {loadingAction === 'google' ? <Spinner color="ink" /> : 'Continue with Google'}
               </Btn>
-              {notice ? null : <T v="meta" color="secondary" textAlign="center">GitHub is recommended.</T>}
             </>
           ) : null}
         </>
       }
     >
-      <BeelineMark size={120} shimmer />
       <Rise>
-        <YStack alignItems="center" gap="2">
-          <T v="title" testID="onboarding-wordmark">beeline<T v="title" color="needsYou">.</T></T>
-          <T v="body" color="secondary" textAlign="center" testID="onboarding-tagline">workspace for all intelligence</T>
+        <YStack alignItems="center" gap="5" testID="welcome-brand-stack">
+          <BeelineMark size={72} tight />
+          <YStack alignItems="center" gap="2">
+            <T v="title" testID="onboarding-wordmark">beeline.</T>
+            <T v="body" color="secondary" textAlign="center" testID="onboarding-tagline">workspace for all intelligence</T>
+          </YStack>
         </YStack>
       </Rise>
     </OnboardingFrame>

@@ -60,7 +60,7 @@ export function ChatSurfaceErrorHeader({ title, showBack, handleBack, error }: {
         {showBack ? <Btn kind="icon" label="Back" onPress={handleBack} testID="chat-back"><Glyph icon={ArrowLeft} /></Btn> : null}
         <T v="title" flex={1}>{title}</T>
       </XStack>
-      {error ? <YStack paddingHorizontal="4" paddingVertical="3"><T v="body" color="secondary" testID="room-read-error">{error}</T></YStack> : null}
+      {error ? <YStack paddingHorizontal="4" paddingVertical="3"><T v="body" color="secondary" testID="room-read-error">This chat can't be opened.</T></YStack> : null}
     </YStack>
   );
 }

@@ -3,6 +3,7 @@ import { ListItem, ScrollView, Separator, Spinner, XStack, YStack } from 'tamagu
 import { ArrowLeft, ChevronDown, ChevronRight } from 'lucide-react-native';
 import { Btn, Glyph, HEIGHT, SafeBottom, SafeTop, T } from '@/ui/grammar';
 import { Rise } from './Rise';
+import { useIsDesktop } from '@/utils/responsive';
 
 /**
  * The onboarding chrome (build spec decision 29): one 4-segment progress
@@ -99,6 +100,15 @@ export function Problem({ title, message, testID }: { title?: string; message: s
 export function OnboardingFrame({ stage, back, footer, center = false, testID, children }: {
     stage?: Stage; back?: () => void; footer?: React.ReactNode; center?: boolean; testID?: string; children: React.ReactNode;
 }) {
+    const desktopWelcome = useIsDesktop() && center;
+    if (desktopWelcome) return (
+        <YStack flex={1} minHeight={0} backgroundColor="canvas" alignItems="center" justifyContent="center" paddingHorizontal="5" testID={testID}>
+            <YStack width={340} maxWidth="100%" alignItems="stretch" gap="8" testID="welcome-column">
+                {children}
+                {footer ? <Rise order={2}><YStack gap="3" paddingTop="3">{footer}</YStack></Rise> : null}
+            </YStack>
+        </YStack>
+    );
     return (
         <YStack flex={1} minHeight={0} backgroundColor="canvas" testID={testID}>
             <SafeTop />

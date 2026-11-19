@@ -722,6 +722,9 @@ function approvalView(
       ] };
     }
     case 'choice': {
+      // An identifier-shaped label (approve_all) reads as words on the Tasks card.
+      const optionLabel = (label: string) => /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/.test(label)
+        ? label[0]!.toUpperCase() + label.slice(1).replaceAll('_', ' ') : label;
       const result = view(
         'choice',
         'asks you to choose',
@@ -729,7 +732,7 @@ function approvalView(
         false,
         text(
           (card.options ?? [])
-            .map((option) => text(option.label))
+            .map((option) => text(optionLabel(option.label ?? '')))
             .filter(Boolean)
             .join(' · '),
         ),
@@ -737,7 +740,9 @@ function approvalView(
       if (!result || !card.choiceId) return result;
       const actions: NeedsYouActionView[] = (card.options ?? []).flatMap(option =>
         option.optionId && option.label ? [{ kind: 'choice' as const, choiceId: card.choiceId!,
-          optionId: option.optionId, label: option.label, detail: option.consequence }] : []);
+          optionId: option.optionId,
+          label: optionLabel(option.label),
+          detail: option.consequence }] : []);
       // A workflow default is already one of its explicit outcomes. Skipping
       // would apply that outcome, whereas dismissing only hides the tray row.
       if (!card.runId) actions.push({ kind: 'skip-choice', choiceId: card.choiceId, label: 'Skip' });

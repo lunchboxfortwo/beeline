@@ -187,6 +187,12 @@ export function projectedMessage(
   publicOrigin: string,
   viewerId?: string,
 ): RoomViewMessage {
+  // Historical opening cards keep their stored identifiers and names; only
+  // the product-authored noun follows the current thread vocabulary.
+  if (row.card_type === 'daemon-fact' && row.card?.type === 'corner-open' && row.system_event?.verb === 'opened a corner') {
+    const event = { ...row.system_event, verb: systemMessage('phone-service.opened-a-corner') };
+    row = { ...row, system_event: event, text: formatSystemLine(event) };
+  }
   const author = identity(
     {
       id: row.author_id,

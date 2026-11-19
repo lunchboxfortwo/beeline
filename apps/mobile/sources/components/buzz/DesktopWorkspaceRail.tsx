@@ -192,7 +192,7 @@ export function DesktopWorkspaceRail({
                 {workspaces.map((workspace, index) => {
                   const current = workspace.id === activeWorkspaceId;
                   const labelled = (hoveredWorkspaceId ?? focusedWorkspaceId) === workspace.id;
-                  const roomLabel = `${workspace.roomCount} chats`;
+                  const roomLabel = `${workspace.roomCount} ${workspace.roomCount === 1 ? 'chat' : 'chats'}`;
                   const pillHeight = current ? 36 : 10;
                   return (
                     <YStack

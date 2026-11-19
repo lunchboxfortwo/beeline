@@ -16,6 +16,8 @@ export type BuiltInSlashVerbId =
 export type BuiltInSlashVerb = {
   id: BuiltInSlashVerbId;
   command: string;
+  /** Public menu spelling; the command id stays compatible with the protocol. */
+  commandLabel?: string;
   label: string;
   description: string;
 };
@@ -67,6 +69,7 @@ const BUILT_IN_SLASH_VERBS: readonly (BuiltInSlashVerb & {
   {
     id: 'open-corner',
     command: 'open-corner',
+    commandLabel: 'open-thread',
     label: 'Open edit thread',
     description: 'Allow the pending repository edit request',
     available: 'canOpenCorner',
@@ -102,6 +105,7 @@ const BUILT_IN_SLASH_VERBS: readonly (BuiltInSlashVerb & {
   {
     id: 'close-corner',
     command: 'close-corner',
+    commandLabel: 'close-thread',
     label: 'Close thread',
     description: 'End this edit session and archive the thread',
     available: 'canCloseCorner',
@@ -227,6 +231,7 @@ export function availableSlashVerbs(
       availability[verb.available] &&
       (!normalizedQuery ||
         verb.command.startsWith(normalizedQuery) ||
+        verb.commandLabel?.startsWith(normalizedQuery) ||
         verb.label.toLowerCase().includes(normalizedQuery)),
   ).map(({ available: _available, ...verb }) => verb);
 }

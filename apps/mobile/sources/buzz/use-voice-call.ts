@@ -260,7 +260,15 @@ export function useVoiceCall(roomId: string, enabled: boolean, roomAgents: reado
       if (version === revision.current) void reportClientError('voice-join', cause);
       await release();
       if (joined) await monolithPhoneOperation('voiceLeave', { callId: joined.call.id, sessionId: joined.sessionId }).catch(() => {});
-      if (version === revision.current) { setError(appErrorCopy(cause, 'Conversation mode could not start') || 'Conversation mode could not start'); setConnecting(false); }
+      if (version === revision.current) {
+        const endedVersion = revision.current + 1;
+        await end();
+        if (revision.current !== endedVersion) return;
+        const name = cause && typeof cause === 'object' && 'name' in cause ? cause.name : '';
+        setError(name === 'NotFoundError' ? 'No microphone was found.'
+          : name === 'NotAllowedError' ? 'Microphone access is blocked.'
+          : appErrorCopy(cause, 'Conversation mode could not start') || 'Conversation mode could not start');
+      }
     } finally {
       if (joiningCleanup.current === release) joiningCleanup.current = null;
       pending.current = false;
