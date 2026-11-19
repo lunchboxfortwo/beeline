@@ -68,10 +68,11 @@ soul. Existing free agents keep their names.
 - **Image replacement and wake.** The owner preserves the full machine config and
   persistent filesystem. A successful image POST does not establish readiness:
   the owner observes completion for the returned Fly version before deciding
-  whether an ordinary start is required. Fly launches a created or replaced machine;
-  the owner waits for that launch without sending another start. Only stopped or
-  suspended machines that have not just been replaced receive a start, followed
-  by Fly's completion observation. A started machine awaits its real
+  whether an ordinary start is required. Fly launches a created machine and
+  reboots a running replacement; replacing a non-running machine leaves the new
+  version stopped. The owner observes that stopped version, then starts it only
+  for queued work. Stopped or suspended machines with work receive a start,
+  followed by Fly's completion observation. A started machine awaits its real
   authenticated helper connection. A lost provider reply gets one authoritative
   observation, never a replay of the unknown mutation; saved commands remain
   pending. Recovery after an unobservable provider completion requires another

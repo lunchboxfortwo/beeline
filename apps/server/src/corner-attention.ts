@@ -162,7 +162,7 @@ export class CornerMachineEvents {
   private readonly pending = new Set<string>();
   constructor(
     private db: SqlDatabase,
-    private live: LiveHub,
+    live: LiveHub,
     private report: (error: unknown) => void,
   ) {
     this.release = live.subscribeAll((event) => {
@@ -195,9 +195,9 @@ export class CornerMachineEvents {
       try {
         do {
           this.pending.delete(id);
-          const next = await refreshCornerAttention(this.db, id);
-          if (next && !this.stopped)
-            this.live.publish({ type: 'invalidate', roomId: next.parentId, reason: 'corner-status' });
+          // Only committed row changes invalidate the parent through the
+          // PostgreSQL listener. Recovery visits are not changes to its list.
+          await refreshCornerAttention(this.db, id);
         } while (!this.stopped && this.pending.has(id));
       } finally { this.refreshing.delete(id); this.pending.delete(id); }
     })();

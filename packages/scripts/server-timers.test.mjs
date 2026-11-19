@@ -1,14 +1,13 @@
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { tmpdir } from 'node:os';
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { readInvariants, strictRelaxations } from './architecture-invariants.mjs';
 
 it('the real architecture check rejects every server timer outside the schedule and shutdown owners', () => {
-  const parent = path.resolve('.beeline-proof');
-  mkdirSync(parent, { recursive: true });
-  const root = mkdtempSync(path.join(parent, 'server-timers-'));
+  const root = mkdtempSync(path.join(tmpdir(), 'server-timers-'));
   const rules = readInvariants(process.cwd()).rules.filter(rule => rule.id.startsWith('timers.server-') || rule.id === 'timers.shutdown-sites');
   const invariants = { rules };
   const write = (file, source) => {
