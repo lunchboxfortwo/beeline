@@ -23,7 +23,7 @@ export function threadListLabel(thread: ThreadWaitFacts, viewer: string | undefi
 }
 
 /**
- * The PR row under a thread's status: "#4181 · Open · All 14 checks passed".
+ * The PR row under a thread's status: "#4181 · Open · Checks passed".
  * Undefined until a pull request exists.
  */
 export function threadPrLine(lifecycle: CornerLifecycleView | undefined, archived: boolean): string | undefined {
@@ -49,12 +49,11 @@ function checksText(lifecycle: CornerLifecycleView): string {
     case 'failing': {
       const failed = checks.filter((check) => check.status === 'failed');
       const count = failed.length || summary?.failing.length || 0;
-      const name = failed[0]?.name ?? summary?.failing[0];
       const label = `${count || ''} ${plural(count, 'check')} failed`.trim();
-      return name ? `${label} · ${name.trim()}` : label;
+      return label;
     }
     case 'passing':
-      return `All ${total} ${plural(total, 'check')} passed`;
+      return 'Checks passed';
     case 'pending': {
       if (total === 0) return 'Checks running';
       const passed = checks.filter((check) => check.status === 'passed' || check.conclusion === 'skipped').length;

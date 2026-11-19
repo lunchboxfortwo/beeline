@@ -1,3 +1,4 @@
+import { repositorySystemLine } from '@beeline/api-contract/phone';
 import { LedgerDisclosure, LedgerLogGroup } from './LedgerDisclosure';
 import { systemLineText, webhookCallerMessage } from '@/buzz/system-lines';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -180,7 +181,7 @@ export function LedgerSystemLine({
   const [cut, setCut] = useState<{ key: string; at: number } | null>(null);
   const measurementRef = useRef<unknown>(null);
   const probeRef = useRef<unknown>(null);
-  const failedCheck = event?.kind === 'check-failed' && /^[a-f0-9]{40}$/i.test(event.object?.headSha ?? '');
+  const repositoryLine = event ? repositorySystemLine(event) : undefined;
   const fullText = event ? systemLineText(event) : text;
   const measureWebOverflow = () => {
     const element = measurementRef.current as unknown as HTMLElement | null;
@@ -241,7 +242,7 @@ export function LedgerSystemLine({
   );
   // Each segment renders any prefix of its text, so the closed cut keeps names and links.
   const segments: { text: string; render?: (piece: string) => React.ReactNode }[] = [];
-  if (failedCheck) {
+  if (repositoryLine !== undefined) {
     const url = event?.object?.url;
     segments.push({ text: fullText, ...(url && onOpenUrl ? {
       render: (piece: string) => <T v="meta" color="secondary" textDecorationLine="underline"

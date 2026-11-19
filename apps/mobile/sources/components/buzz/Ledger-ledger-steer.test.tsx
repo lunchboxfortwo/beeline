@@ -40,3 +40,22 @@ it('shows historical failed-head facts with the exact compact copy in the small 
   expect(node.props.children).toEqual(['Failed check 82828a8']);
   act(() => tree.unmount());
 });
+
+
+it.each([
+  '2 commits pushed · 82828a8',
+  'Check failed · TYPECHECK · 82828a8',
+  'Checks passed · 82828a8',
+  'Review requested · Vera',
+  '1 merge conflict',
+])('renders the complete repository sentence in the small role: %s', verb => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  let tree: any;
+  act(() => { tree = create(<LedgerSystemLine id="repository" text="Old stored text" stamp="09:51" bare
+    event={{ subject: { kind: 'github', name: '@beeline-app[bot]' }, verb,
+      object: { text: 'PR title on feature/branch', headSha: '82828a8' + '1'.repeat(33) } }} />); });
+  const node = tree.root.find((node: any) => node.props.testID === 'system-line-text-repository' && node.props.v);
+  expect(node.props.v).toBe('meta');
+  expect(node.props.children).toEqual([verb]);
+  act(() => tree.unmount());
+});

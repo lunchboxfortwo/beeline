@@ -161,7 +161,7 @@ describe('PR-scoped check gate', () => {
     const lines = (await rootFixture.db.query<{ text: string }>(
       `SELECT text FROM messages WHERE room_id=$1 AND presentation='system'`, [AUTHOR])).rows.map(row => row.text);
     expect(lines.filter(text => / a check /.test(text))).toEqual([]);
-    expect(lines.some(text => text.includes('requested review of'))).toBe(true);
+    expect(lines.some(text => text.includes('Review requested ·'))).toBe(true);
     expect((await rootFixture.db.query(`SELECT 1 FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND reason='corner_review_dispatch'`,
       [AUTHOR, REVIEWER])).rowCount).toBe(1);
   });

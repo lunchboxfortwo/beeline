@@ -468,12 +468,13 @@ import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, br
           target.author_id,
           {
             subject: actor(text(record(body.pusher)?.name) ?? actorLogin),
-            verb: systemMessage("github-operations.pushed"),
+            verb: commits === 1 ? systemMessage('github-operations.commit-pushed', head?.slice(0, 7) ?? '')
+              : systemMessage('github-operations.commits-pushed', commits, head?.slice(0, 7) ?? ''),
             object: {
-              text: `${commits ? systemMessage("github-operations.commit-to", commits, commits === 1 ? '' : systemMessage("github-operations.s")) : ''}${branch}`,
+              text: String(commits),
+              ...(head ? { headSha: head } : {}),
               ...(compare ? { url: compare } : {}),
             },
-            ...(head ? { consequence: systemMessage("github-operations.at", head.slice(0, 12)) } : {}),
           },
           `github:push:${text(body.after) ?? hash(JSON.stringify(body))}`,
           database,

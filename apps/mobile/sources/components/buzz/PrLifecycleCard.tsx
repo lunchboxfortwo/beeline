@@ -63,7 +63,7 @@ export const NotificationLifecycleCard = React.memo(function NotificationLifecyc
 type RepositoryItem = NotificationLifecycleRun['items'][number];
 export function isRepositoryLifecycleItem(item: RepositoryItem) {
   return (
-    ['pull-request', 'issue', 'corner'].includes(item.kind) && !item.state.startsWith('Checks ')
+    !item.displayText && ['pull-request', 'issue', 'corner'].includes(item.kind) && !item.state.startsWith('Checks ')
   );
 }
 
@@ -100,7 +100,7 @@ export function RepositoryLifecycleRow({
         trailing={
           item.cornerId
             ? {
-                accessibilityLabel: `Open thread ${item.title}`,
+                accessibilityLabel: `Open thread ${item.displayText ?? item.title}`,
                 onPress: () => onOpenCorner(item.cornerId!),
                 testID: cornerTestID,
               }
@@ -144,9 +144,11 @@ export function RepositoryLifecycleRow({
       numberOfLines={2}
       ellipsizeMode="tail"
     >
-      <T v={isRepositoryLifecycleItem(item) ? 'heading' : 'metaStrong'} color={/fail/i.test(state) ? 'needsYou' : 'ink'}>{verb} </T>
-      {number && item.url && isRepositoryLifecycleItem(item) ? <><T v="heading" color="needsYou" textDecorationLine="underline">#{number}</T>{' '}</> : null}
-      {item.title}
+      {item.displayText ? <T v="meta" color={/fail/i.test(state) ? 'needsYou' : 'secondary'}>{item.displayText}</T> : <>
+        <T v={isRepositoryLifecycleItem(item) ? 'heading' : 'metaStrong'} color={/fail/i.test(state) ? 'needsYou' : 'ink'}>{verb} </T>
+        {number && item.url && isRepositoryLifecycleItem(item) ? <><T v="heading" color="needsYou" textDecorationLine="underline">#{number}</T>{' '}</> : null}
+        {item.title}
+      </>}
     </T>
   );
   return (
@@ -157,7 +159,7 @@ export function RepositoryLifecycleRow({
       primary={
         item.url && (isRepositoryLifecycleItem(item) || item.cornerId)
           ? {
-              accessibilityLabel: item.cornerId ? `Open thread ${item.title}` : `Open ${item.kindLine}`,
+              accessibilityLabel: item.cornerId ? `Open thread ${item.displayText ?? item.title}` : `Open ${item.kindLine}`,
               onPress: () => item.cornerId ? onOpenCorner(item.cornerId) : onOpenUrl(item.url!),
               testID: `notification-run-cell-url-${item.id}`,
             }
@@ -166,7 +168,7 @@ export function RepositoryLifecycleRow({
       trailing={
         item.cornerId
           ? {
-              accessibilityLabel: `Open thread ${item.title}`,
+              accessibilityLabel: `Open thread ${item.displayText ?? item.title}`,
               onPress: () => onOpenCorner(item.cornerId!),
               testID: cornerTestID,
             }

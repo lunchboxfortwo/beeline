@@ -297,16 +297,16 @@ const fixture = monolithFixture();
     expect(cornerBeforeMerge.messages).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          text: expect.stringMatching(/^@GitHub pushed 2 commits to feature\/corner-[0-9a-f]{12} · at [0-9a-f]{12}$/),
+          text: '2 commits pushed · 1111111',
         }),
         expect.objectContaining({
-          text: 'Failed check 1111111',
-          systemEvent: expect.objectContaining({ kind: 'check-failed', verb: 'failed check' }),
+          text: 'Check failed · typecheck · 1111111',
+          systemEvent: expect.objectContaining({ kind: 'check-failed', verb: 'Check failed · typecheck · 1111111' }),
         }),
       ]),
     );
     expect(cornerBeforeMerge.messages.some(message => /opened a pull request/.test(message.text))).toBe(false);
-    // Only failures print: no started or passed check lines.
+    // Started and cancelled checks stay silent.
     expect(cornerBeforeMerge.messages.some(message => /^@GitHub (?:started|passed|cancelled) a check/.test(message.text))).toBe(false);
     // No system line carries a colon, an em dash, a trailing period, or a URL.
     for (const message of cornerBeforeMerge.messages.filter((m) => m.presentation === 'system')) {

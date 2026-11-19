@@ -140,7 +140,7 @@ const scope1 = fixtureScope1();
           [corner],
         )
       ).rows,
-    ).toEqual([{ agent_id: REVIEWER, source_verb: 'requested review of' }]);
+    ).toEqual([{ agent_id: REVIEWER, source_verb: 'Review requested · Reviewer' }]);
     // A re-run on the same head reopens checks, and its green dispatches the
     // reviewer again even though this head's green note was already written.
     await scope1.database.query(`DELETE FROM agent_commands WHERE room_id=$1`, [corner]);
@@ -792,7 +792,7 @@ const scope1 = fixtureScope1();
       )
     ).rows[0];
     console.info(`Reproduction C2-1: failing wake body="${command?.body ?? ''}"`);
-    expect(command?.body).toBe('Failed check 1111111');
+    expect(command?.body).toBe('Check failed · typecheck · 1111111');
     expect((await readAgentCommands(scope1.database, REVIEWER, corner)).commands[0]?.source.body).toContain('typecheck');
   });
 });

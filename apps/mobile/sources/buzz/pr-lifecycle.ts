@@ -1,4 +1,4 @@
-import { cornerDisplayName, cornerShortTitle } from '@beeline/api-contract/phone';
+import { cornerDisplayName, cornerShortTitle, repositorySystemLine } from '@beeline/api-contract/phone';
 import type { SystemLineMessage } from './system-lines';
 
 // The NAME titles a corner card; a card written before the name existed
@@ -30,6 +30,7 @@ export type NotificationLifecycleRun = {
   items: {
     id: string;
     title: string;
+    displayText?: string;
     state: NotificationLifecycleState;
     kindLine: string;
     kind: 'corner' | 'pull-request' | 'issue' | 'check' | 'notice' | 'payment' | 'wallet';
@@ -125,11 +126,17 @@ export function lifecycleItem(message: SystemLineMessage): LifecycleItem | undef
   }
   const check = message.isSystemNotice ? message.systemEvent : undefined;
   if (check?.subject.kind !== 'github') return;
-  if (check.kind === 'check-failed' && /^[a-f0-9]{40}$/i.test(check.object?.headSha ?? '')) {
-    const headSha = check.object!.headSha!.toLowerCase();
+  const displayText = repositorySystemLine(check);
+  if (displayText !== undefined) {
+    const state = /^(?:Check failed|Failed check)/.test(displayText) ? 'Checks failed'
+      : displayText.startsWith('Checks passed') ? 'Checks passed'
+        : displayText.startsWith('Review requested') ? 'requested review of'
+          : displayText === '1 merge conflict' ? 'found merge conflicts in' : 'pushed';
     return {
-      ...base, title: headSha.slice(0, 7), state: 'Failed check', kind: 'check',
-      kindLine: 'Check', url: check.object?.url, headSha, actor: check.subject.name,
+      ...base, title: '', displayText, state,
+      kind: state.startsWith('Checks ') ? 'check' : /\/pull\/\d+/.test(check.object?.url ?? '') ? 'pull-request' : 'notice',
+      kindLine: state.startsWith('Checks ') ? 'Check' : 'GitHub',
+      url: check.object?.url, headSha: check.object?.headSha,
     };
   }
   const action = check.verb.match(/^(started|passed|failed) a check$/)?.[1];
@@ -180,7 +187,7 @@ export function lifecycleSummary(items: readonly LifecycleItem[]): string {
   const counts = new Map<string, { kind: string; state: string; count: number }>();
   const seenPrEvents = new Set<string>();
   for (const item of items) {
-    const kind =
+    let kind =
       item.kind === 'pull-request'
         ? 'PR'
         : item.kind === 'issue'
@@ -194,7 +201,11 @@ export function lifecycleSummary(items: readonly LifecycleItem[]): string {
                 : item.kind === 'corner'
                   ? 'corner'
                   : 'notice';
-    const state = item.state === 'Failed check' ? 'failed' : item.state.replace(/^(PR|Checks) /, '').toLowerCase();
+    let state = item.state === 'Failed check' ? 'failed' : item.state.replace(/^(PR|Checks) /, '').toLowerCase();
+    if (state === 'pushed') { kind = 'commit'; state = ''; }
+    else if (state === 'found merge conflicts in') { kind = 'merge conflict'; state = ''; }
+    else if (state === 'requested review of') { kind = 'review'; state = 'requested'; }
+    else if (state === 'found failing checks on') { kind = 'check'; state = 'failed'; }
     const key = `${kind}:${state}`;
     // Stored webhook and subscription lines can describe the same PR event.
     // Count it once per run, keeping each committed line in the disclosure.
@@ -205,21 +216,19 @@ export function lifecycleSummary(items: readonly LifecycleItem[]): string {
       seenPrEvents.add(eventKey);
     }
     const group = counts.get(key) ?? { kind, state, count: 0 };
-    group.count++;
+    group.count += kind === 'commit' ? Number(item.displayText?.match(/^(\d+) commits? pushed/)?.[1] ?? 1) : 1;
     counts.set(key, group);
   }
-  const order = ['PR:opened', 'PR:merged', 'PR:closed', 'issue:filed', 'issue:closed'];
+  const order = ['PR:opened', 'PR:merged', 'PR:closed', 'issue:filed', 'issue:closed', 'commit:', 'check:failed', 'check:passed', 'review:requested', 'merge conflict:'];
   const rank = (key: string) => {
     const index = order.indexOf(key);
     return index < 0 ? order.length : index;
   };
-  const namedKinds = new Set<string>();
   return [...counts.entries()]
     .sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b))
     .map(([, { kind, state, count }]) => {
-      const noun = namedKinds.has(kind) ? '' : ` ${kind}${count === 1 ? '' : 's'}`;
-      namedKinds.add(kind);
-      return `${count}${noun} ${state}`;
+      const noun = ` ${kind}${count === 1 ? '' : 's'}`;
+      return `${count}${noun}${state ? ` ${state}` : ''}`;
     })
     .join(' · ');
 }
@@ -232,6 +241,11 @@ export function foldPrLifecycleRuns<T extends SystemLineMessage>(messages: reado
     const fact = message.daemonFact;
     if (fact?.pullRequest?.url) corners.set(canonical(fact.pullRequest.url), fact.cornerId);
   }
+  const namedFailureHeads = new Set(messages.filter(message =>
+    message.systemEvent?.object?.headSha &&
+    !/check suite/i.test(message.systemEvent.object.text) &&
+    /^(?:failed a check|Check failed ·)/.test(message.systemEvent.verb)
+  ).map(message => message.systemEvent!.object!.headSha));
   const result: T[] = [];
   let run: { anchor: T; ids: string[]; boundaries: { id: string; orderAtMs: number }[]; items: LifecycleItem[]; index: number } | undefined;
   for (const message of messages) {
@@ -241,7 +255,9 @@ export function foldPrLifecycleRuns<T extends SystemLineMessage>(messages: reado
         !fact.sourceMessageId &&
         message.systemEvent?.kind !== 'corner-opened' &&
         !(fact.outcome === 'landed' && fact.pullRequest)) ||
-      fact?.type === 'worktree-cleaned'
+      fact?.type === 'worktree-cleaned' ||
+      (/check suite/i.test(message.systemEvent?.object?.text ?? '') &&
+        namedFailureHeads.has(message.systemEvent?.object?.headSha))
     ) {
       // Retain hidden ids for jumps/read cursors without drawing another close notice.
       if (run) {

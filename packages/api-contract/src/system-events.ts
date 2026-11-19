@@ -224,16 +224,43 @@ export function joinSystemNames(names: readonly string[]): string {
   return systemMessage("system-events.and", names.slice(0, -1).join(systemMessage("system-events.list-separator")), names[names.length - 1]);
 }
 
+/** Complete CI/PR copy, also accepting historical structured events. */
+export function repositorySystemLine(event: Omit<SystemEvent, 'subject'> & {
+  readonly subject: SystemSubject | readonly SystemSubject[];
+}): string | undefined {
+  const subject = Array.isArray(event.subject) ? event.subject[0] : event.subject as SystemSubject;
+  if (subject?.kind !== 'github') return undefined;
+  const verb = event.verb.trim();
+  if (/^(?:\d+ commits? pushed · |Check failed · |Checks passed · |Review requested · |1 merge conflict$|Failed check [a-f0-9]{7}$)/i.test(verb)) return verb;
+  const sha = event.object?.headSha?.slice(0, 7).toLowerCase()
+    ?? event.consequence?.match(/\b[a-f0-9]{7,40}\b/i)?.[0].slice(0, 7).toLowerCase();
+  if (verb === 'pushed' && sha) {
+    const count = Number(event.object?.text.match(/^(\d+) commits?\b/)?.[1] ?? 1);
+    return count === 1 ? systemMessage('github-operations.commit-pushed', sha)
+      : systemMessage('github-operations.commits-pushed', count, sha);
+  }
+  if (verb === 'found merge conflicts in') return systemMessage('github-operations.merge-conflict');
+  if (verb === 'requested review of') return systemMessage('github-operations.review-requested', 'reviewer');
+  if ((event.kind === 'check-failed' || verb === 'failed a check') && sha) {
+    const payload = event.payload as { failedJobs?: { name?: string }[] } | undefined;
+    const name = verb === 'failed a check' ? event.object?.text
+      : Array.isArray(payload?.failedJobs) ? payload.failedJobs[0]?.name : undefined;
+    return name && !/check suite/i.test(name) ? systemMessage('github-operations.check-failed', name, sha)
+      : systemMessage('system-events.failed-check', sha);
+  }
+  if ((event.kind === 'check-passed' || verb === 'passed a check') && sha)
+    return systemMessage('github-operations.checks-passed', sha);
+  return undefined;
+}
+
 /** The stored text for one event, or for a fold of several subjects sharing one verb. */
 export function formatSystemLine(
   event: Omit<SystemEvent, 'subject'> & {
     readonly subject: SystemSubject | readonly SystemSubject[];
   },
 ): string {
-  // A failed-head fact names the commit, including historical stored wording.
-  if (event.kind === 'check-failed' && /^[a-f0-9]{40}$/i.test(event.object?.headSha ?? '')) {
-    return systemMessage('system-events.failed-check', event.object!.headSha!.slice(0, 7).toLowerCase());
-  }
+  const repositoryLine = repositorySystemLine(event);
+  if (repositoryLine !== undefined) return repositoryLine;
   const subjects = Array.isArray(event.subject)
     ? (event.subject as readonly SystemSubject[])
     : [event.subject as SystemSubject];

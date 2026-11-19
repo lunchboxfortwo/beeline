@@ -86,7 +86,7 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
         }) | undefined;
         const reported = oldReport?.reportedHeadSha === checkHeadSha && Boolean(oldReport.reportedFailing?.length);
         const logCandidates = !reported && rollup.state !== 'pending' && checksSettled(rollup.checks)
-          ? failedChecks : [];
+          ? failedChecks.filter(item => !/check suite/i.test(item.name)) : [];
         const jobLogs = await Promise.all(logCandidates.map(async item => {
           const jobId = actionsJobId(item.url);
           if (!jobId) return { name: item.name, ...(item.url ? { url: item.url } : {}) };
@@ -138,30 +138,28 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
             (current.checks === 'passing' || current.checks === 'failing'));
           const becamePassing = summary.status === 'passing' && (current.checks !== 'passing' || !sameReportedHead || newAttempt);
           const becameFailing = reportFailure;
-          // A pass, a start and a cancellation print no line: only a failure
-          // is news. The passing verdict still advances the corner below.
-          const cancelled = String(providerCheck.conclusion ?? '').toUpperCase() === 'CANCELLED';
+          const suite = /check suite/i.test(providerCheck.name);
+          const failureName = becameFailing || suite
+            ? failedChecks.find(item => !/check suite/i.test(item.name))?.name
+            : providerCheck.name;
+          const sha7 = checkHeadSha.slice(0, 7);
           const dedupe = becameFailing
             ? `github:checks:failed:${providerCheck.headSha}`
+            : becamePassing ? `github:checks:passed:${checkHeadSha}`
             : `github:checks:${providerCheck.status}:${providerCheck.name}:${providerCheck.headSha ?? hash(JSON.stringify(providerCheck))}`;
           const phrase: SystemPhrase = {
             subject: GITHUB_SUBJECT,
-            verb: becameFailing ? systemMessage('github-operations.failed-check') : systemMessage('github-operations.a-check', providerCheck.status),
+            verb: becamePassing ? systemMessage('github-operations.checks-passed', sha7)
+              : failureName ? systemMessage('github-operations.check-failed', failureName, sha7)
+                : systemMessage('system-events.failed-check', sha7),
             ...(becameFailing ? { kind: 'check-failed' as const } : {}),
-            object: becameFailing
-              ? {
-                  text: checkHeadSha.slice(0, 7),
-                  ...(current.pr?.url ? { url: current.pr.url } : {}),
-                  ...(providerCheck.headSha ? { headSha: providerCheck.headSha } : {}),
-                }
-              : {
-                  text: providerCheck.name,
-                  ...(providerCheck.url ? { url: providerCheck.url } : {}),
-                  ...(providerCheck.headSha ? { headSha: providerCheck.headSha } : {}),
-                },
-            ...(!becameFailing && providerCheck.status === 'failed' && providerCheck.conclusion && providerCheck.conclusion !== 'failure'
-              ? { consequence: providerCheck.conclusion }
-              : {}),
+            object: {
+              text: failureName ?? sha7,
+              url: becameFailing
+                ? failedChecks.find(item => item.name === failureName)?.url ?? (suite ? providerCheck.url : undefined) ?? current.pr?.url
+                : providerCheck.url ?? current.pr?.url,
+              headSha: checkHeadSha,
+            },
             ...(becameFailing ? { payload: { failedJobs: jobLogs } } : {}),
           };
           const event: CornerEvent | null = becameFailing
@@ -173,7 +171,7 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
               : summary.status === 'failing' && !becameFailing
                 ? { kind: 'reconcile' }
                 : null;
-          return { summary, storedSummary, event, wantsNote: becameFailing || (providerCheck.status === 'failed' && !cancelled && !options?.quiet), phrase, dedupe };
+          return { summary, storedSummary, event, wantsNote: becameFailing || becamePassing, phrase, dedupe };
         };
         // The head check and the machine write share one lock. The idle snapshot
         // and the other lifecycle reads run before that lock.
@@ -211,6 +209,21 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
                 cardType: 'github-corner-note',
                 routeCommands: false,
               })).inserted;
+              // The head failure owns the repair wake; additional failed jobs
+              // are individual display rows, never suite or duplicate notices.
+              if (plan.event?.kind === 'checks' && plan.event.result === 'failing') {
+                for (const job of jobLogs.filter(job => job.name !== jobLogs[0]?.name && !/check suite/i.test(job.name))) {
+                  const note = await systemLine(db, {
+                    id: hash(`beeline:${target.corner_id}:github:checks:failed:${checkHeadSha}:${job.name}`),
+                    roomId: target.corner_id, authorId: target.author_id,
+                    subject: GITHUB_SUBJECT,
+                    verb: systemMessage('github-operations.check-failed', job.name, checkHeadSha.slice(0, 7)),
+                    object: { text: job.name, url: job.url, headSha: checkHeadSha },
+                    cardType: 'github-corner-note', routeCommands: false,
+                  });
+                  noteInserted ||= note.inserted;
+                }
+              }
             }
             return plan.event ?? false;
           },

@@ -142,16 +142,6 @@ export const SYSTEM_MESSAGE_DAEMON_SERVICE = {
     variables: [],
   },
 
-  'github-operations.found-merge-conflicts-in': {
-    parts: ['found merge conflicts in'],
-    variables: [],
-  },
-
-  'github-operations.pull-request-2': {
-    parts: ['pull request #', ''],
-    variables: ['row_number'],
-  },
-
   'github-operations.github': {
     parts: ['github'],
     variables: [],
@@ -167,35 +157,12 @@ export const SYSTEM_MESSAGE_DAEMON_SERVICE = {
     variables: ['integer_pullRequest_number'],
   },
 
-  'github-operations.pushed': {
-    parts: ['pushed'],
-    variables: [],
-  },
-
-  'github-operations.commit-to': {
-    parts: ['', ' commit', ' to '],
-    variables: ['commits', 'commits_1_s'],
-  },
-
-  'github-operations.s': {
-    parts: ['s'],
-    variables: [],
-  },
-
-  'github-operations.at': {
-    parts: ['at ', ''],
-    variables: ['head_slice_0_12'],
-  },
-
-  'github-operations.failed-check': {
-    parts: ['failed check'],
-    variables: [],
-  },
-
-  'github-operations.a-check': {
-    parts: ['', ' a check'],
-    variables: ['label'],
-  },
+  'github-operations.commit-pushed': { parts: ['1 commit pushed · ', ''], variables: ['sha7'] },
+  'github-operations.commits-pushed': { parts: ['', ' commits pushed · ', ''], variables: ['count', 'sha7'] },
+  'github-operations.check-failed': { parts: ['Check failed · ', ' · ', ''], variables: ['name', 'sha7'] },
+  'github-operations.checks-passed': { parts: ['Checks passed · ', ''], variables: ['sha7'] },
+  'github-operations.merge-conflict': { parts: ['1 merge conflict'], variables: [] },
+  'github-operations.review-requested': { parts: ['Review requested · ', ''], variables: ['reviewer'] },
 
   'membership-join.joined': {
     parts: ['joined'],

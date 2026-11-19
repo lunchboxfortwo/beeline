@@ -560,8 +560,8 @@ async function writeCornerAdvance(
                 roomId: cornerId,
                 authorId: corner.worker_agent_id ?? SYSTEM_IDENTITY_ID,
                 subject: GITHUB_SUBJECT,
-                verb: systemMessage('corner-lifecycle.requested-review-of'),
-                object: { text: corner.lifecycle.pr?.title ?? 'Pull request', headSha: head },
+                verb: systemMessage('github-operations.review-requested', corner.configured_reviewer_name ?? 'reviewer'),
+                object: { text: corner.configured_reviewer_name ?? 'reviewer', id: reviewer, headSha: head },
               })
             ).id;
           const queued = await queueReviewerCommand(db, {

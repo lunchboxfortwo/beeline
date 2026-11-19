@@ -569,9 +569,9 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
             roomId: row.corner_id,
             authorId: row.author_id,
             subject: GITHUB_SUBJECT,
-            verb: systemMessage("github-operations.found-merge-conflicts-in"),
+            verb: systemMessage('github-operations.merge-conflict'),
             object: {
-              text: row.title ?? systemMessage("github-operations.pull-request-2", row.number),
+              text: '1 merge conflict',
               url: row.url,
               headSha: pr.headSha,
             },

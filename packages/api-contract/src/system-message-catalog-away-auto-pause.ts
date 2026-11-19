@@ -168,11 +168,6 @@ export const SYSTEM_MESSAGE_AWAY_AUTO_PAUSE = {
     variables: [],
   },
 
-  'corner-lifecycle.requested-review-of': {
-    parts: ['requested review of'],
-    variables: [],
-  },
-
   'corner-lifecycle.unknown-dispatch-error': {
     parts: ['unknown dispatch error'],
     variables: [],

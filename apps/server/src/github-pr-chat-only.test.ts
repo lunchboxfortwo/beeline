@@ -17,7 +17,10 @@ describe('PR lifecycle cards belong to the parent chat', () => {
     });
     const cards = (await scope.database.query(`SELECT m.room_id,m.card_type FROM messages m
       WHERE m.card_type IN ('github-event','github-corner-note') AND ${visibleChatMessageSql('m')}`)).rows;
-    expect(cards).toEqual([{ room_id: '22222222-2222-4222-8222-222222222222', card_type: 'github-event' }]);
+    expect(cards).toEqual([
+      { room_id: '22222222-2222-4222-8222-222222222222', card_type: 'github-event' },
+      { room_id: corner, card_type: 'github-corner-note' },
+    ]);
     expect((await scope.database.query(`SELECT 1 FROM messages WHERE room_id=$1
       AND system_event->>'verb'='opened a pull request'`, [corner])).rowCount).toBe(0);
     for (const [id, verb, kind] of [['old-open', 'opened a pull request', null], ['old-merge', 'merged', 'merged'], ['check', 'failed check', 'check-failed']]) {
@@ -31,7 +34,7 @@ describe('PR lifecycle cards belong to the parent chat', () => {
     expect(view?.messages.map(message => message.id)).not.toContain('old-open');
     expect(view?.messages.map(message => message.id)).not.toContain('old-merge');
     expect((await scope.database.query(`SELECT m.id FROM messages m WHERE m.room_id=$1
-      AND m.card_type='github-corner-note' AND ${visibleChatMessageSql('m')}`, [corner])).rows).toEqual([{ id: 'check' }]);
+      AND m.card_type='github-corner-note' AND m.system_event->>'verb' NOT LIKE 'Checks passed · %' AND ${visibleChatMessageSql('m')}`, [corner])).rows).toEqual([{ id: 'check' }]);
   });
 
   it('stores the failed head copy exactly and preserves the failure payload and wake source', async () => {
@@ -42,8 +45,8 @@ describe('PR lifecycle cards belong to the parent chat', () => {
     const rows = (await scope.database.query(`SELECT text,system_event FROM messages
       WHERE room_id=$1 AND system_event->>'kind'='check-failed'`, [corners[0]])).rows;
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ text: 'Failed check 1111111', system_event: {
-      verb: 'failed check', object: { text: '1111111', headSha: '1'.repeat(40) }, payload: { failedJobs: [{ name: 'typecheck' }] },
+    expect(rows[0]).toMatchObject({ text: 'Check failed · typecheck · 1111111', system_event: {
+      verb: 'Check failed · typecheck · 1111111', object: { text: 'typecheck', headSha: '1'.repeat(40) }, payload: { failedJobs: [{ name: 'typecheck' }] },
     } });
   });
 });

@@ -237,3 +237,29 @@ it.each(['found failing checks on', 'failed check'])('formats failed head copy w
     object: { text: 'Setup: quiet defaults', headSha: '82828A8' + '1'.repeat(33) }, consequence: 'failing typecheck',
   })).toBe('Failed check 82828a8');
 });
+
+
+it.each([
+  ['2 commits pushed · 82828a8', '2 commits pushed · 82828a8'],
+  ['Check failed · TYPECHECK · 82828a8', 'Check failed · TYPECHECK · 82828a8'],
+  ['Checks passed · 82828a8', 'Checks passed · 82828a8'],
+  ['Review requested · Vera', 'Review requested · Vera'],
+  ['1 merge conflict', '1 merge conflict'],
+])('renders complete repository sentences without actors or PR objects: %s', (verb, expected) => {
+  expect(formatSystemLine({ subject: { kind: 'github', name: '@beeline-app[bot]' }, verb,
+    object: { text: 'A PR title on feature/my-branch', headSha: '82828a8' + '1'.repeat(33) },
+  })).toBe(expected);
+});
+
+it('shortens historical push hashes and keeps the commit count', () => {
+  expect(formatSystemLine({ subject: { kind: 'github', name: '@GitHub' }, verb: 'pushed',
+    object: { text: '2 commits to feature/private-branch' }, consequence: 'at 82828a811111',
+  })).toBe('2 commits pushed · 82828a8');
+});
+
+
+it('uses the failed job name retained in a historical head payload', () => {
+  expect(formatSystemLine({ subject: { kind: 'github', name: '@GitHub' }, verb: 'failed check', kind: 'check-failed',
+    object: { text: '1111111', headSha: '1'.repeat(40) }, payload: { failedJobs: [{ name: 'TYPECHECK' }] },
+  })).toBe('Check failed · TYPECHECK · 1111111');
+});

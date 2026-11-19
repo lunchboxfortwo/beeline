@@ -35,7 +35,7 @@ describe('thread status (header B)', () => {
     expect(threadPrLine(undefined, false)).toBeUndefined();
     expect(threadPrLine({ lifecycle: 'working', checks: 'unknown' }, false)).toBeUndefined();
     expect(threadPrLine(lifecycle({ checksSummary: { status: 'passing', total: 14, failing: [], checks: [], updatedAt: 1 } }), false))
-      .toBe('#4181 · Open · All 14 checks passed');
+      .toBe('#4181 · Open · Checks passed');
     expect(threadPrLine(lifecycle({
       checksSummary: { status: 'pending', total: 12, failing: [], updatedAt: 1, checks: [
         ...Array.from({ length: 9 }, (_, i) => ({ name: `c${i}`, status: 'passed' as const })),
@@ -43,7 +43,7 @@ describe('thread status (header B)', () => {
       ] },
     }), false)).toBe('#4181 · Open · 9 of 12 checks passed · running');
     expect(threadPrLine(lifecycle({ checksSummary: { status: 'failing', total: 3, failing: ['Mobile suite'], checks: [], updatedAt: 1 } }), false))
-      .toBe('#4181 · Open · 1 check failed · Mobile suite');
+      .toBe('#4181 · Open · 1 check failed');
     expect(threadPrLine(lifecycle({ pr: { ...pr, mergedAt: '2026-11-11' } }), false)).toBe('#4181 · Merged');
     expect(threadPrLine(lifecycle({}), true)).toBe('#4181 · Closed');
     expect(threadPrLine(lifecycle({ pr: { ...pr, mergeability: 'dirty' } }), false)).toBe('#4181 · Open · Merge conflict');

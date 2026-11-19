@@ -60,12 +60,12 @@ const scope1 = fixtureScope1();
     runInNewContext(formatter.code, { module, exports: module.exports });
     const { cornerStatusLine } = module.exports as typeof import('../../mobile/sources/buzz/corner-status-line.js');
     expect(cornerStatusLine(lifecycle, false)).toBe('PR #1 · all 31 tests passed');
-    // A green head prints no check line; the reviewer's request is the record.
+    // The reviewer's request remains its wake source alongside the passing line.
     const facts = () => scope1.database.query(`SELECT 1 FROM messages WHERE room_id=$1
-      AND system_event->>'verb'='requested review of' AND system_event->'object'->>'headSha'=$2`, [corner, newHead]);
+      AND system_event->>'verb' LIKE 'Review requested · %' AND system_event->'object'->>'headSha'=$2`, [corner, newHead]);
     const wakes = () => scope1.database.query(`SELECT command.agent_id FROM agent_commands command
       JOIN messages source ON source.id=command.source_message_id WHERE command.room_id=$1
-      AND source.system_event->>'verb'='requested review of'
+      AND source.system_event->>'verb' LIKE 'Review requested · %'
       AND source.system_event->'object'->>'headSha'=$2`, [corner, newHead]);
     expect((await facts()).rowCount).toBe(1);
     expect((await wakes()).rows).toEqual([{ agent_id: REVIEWER }]);
@@ -185,7 +185,7 @@ const scope1 = fixtureScope1();
   });
 
 
-  it('B3: records no started or passed notes while retaining the green rollup', async () => {
+  it('B3: records one complete passed line and no started notes', async () => {
     const { corners, app, payload } = await scope1.checksFixture();
     const operations = new GitHubOperations(scope1.database, {} as GitHubOAuthClient, app as unknown as GitHubAppClient, 'secret');
     app.readCommitCheckRollup.mockResolvedValue({ state: 'pending', total: 2, failing: [], checks: [
@@ -199,18 +199,18 @@ const scope1 = fixtureScope1();
       { name: 'tests', status: 'passed' }, { name: 'lint', status: 'passed' },
     ] });
     await operations.processWebhook('check_run', payload);
-    expect((await scope1.database.query(`SELECT 1 FROM messages WHERE room_id=$1 AND card_type='github-corner-note'`, [corners[0]])).rows).toHaveLength(0);
+    expect((await scope1.database.query(`SELECT text FROM messages WHERE room_id=$1 AND card_type='github-corner-note'`, [corners[0]])).rows).toEqual([{ text: 'Checks passed · 1111111' }]);
     expect((await operations.lifecycle(corners[0]!)).checks).toBe('passing');
   });
 
 
-  it('gives a check suite a browser card URL even when GitHub sends only its API URL', async () => {
+  it('names the failed job on a suite refresh and links to the browser checks page', async () => {
     const { corners, headSha, app, payload } = await scope1.checksFixture();
     const operations = new GitHubOperations(scope1.database, {} as GitHubOAuthClient, app as unknown as GitHubAppClient, 'secret');
     await scope1.database.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{checks}','"unknown"') WHERE corner_id=$1`, [corners[0]]);
-    // Only a failing check prints a line; other checks are still running.
-    app.readCommitCheckRollup.mockResolvedValue({ state: 'pending', total: 2, failing: [], checks: [
-      { name: 'GitHub Actions check suite', status: 'failed' }, { name: 'lint', status: 'pending' },
+    // A suite refresh names the failed job after the rollup settles.
+    app.readCommitCheckRollup.mockResolvedValue({ state: 'failed', total: 2, failing: ['TYPECHECK'], checks: [
+      { name: 'TYPECHECK', status: 'failed' }, { name: 'lint', status: 'passed' },
     ] });
     await operations.processWebhook('check_suite', {
       ...payload,
@@ -221,7 +221,7 @@ const scope1 = fixtureScope1();
       },
     });
     const row = (await scope1.database.query<{ card_type: string; card: { source: string }; system_event: { object: { url: string } } }>(
-      `SELECT card_type,card,system_event FROM messages WHERE room_id=$1 AND text='@GitHub failed a check GitHub Actions check suite'`,
+      `SELECT card_type,card,system_event FROM messages WHERE room_id=$1 AND text='Check failed · TYPECHECK · 1111111'`,
       [corners[0]],
     )).rows[0];
     expect(row).toMatchObject({
@@ -486,7 +486,7 @@ const scope1 = fixtureScope1();
     expect(app.openPullRequestsForBranch).not.toHaveBeenCalled();
   });
 
-  it('Reproduction R10-1: refreshes only a recorded PR head and keeps passing checks quiet', async () => {
+  it('Reproduction R10-1: refreshes only a recorded PR head and reports passing checks once', async () => {
     const workspace = '11111111-1111-4111-8111-111111111111';
     const room = '22222222-2222-4222-8222-222222222222';
     const corner = '33333333-3333-4333-8333-333333333333';
@@ -566,8 +566,8 @@ const scope1 = fixtureScope1();
     expect(app.readCommitCheckRollup).toHaveBeenCalledWith('room-token', 'owner/widgets', headSha);
     expect(await operations.lifecycle(corner)).toMatchObject({ pr: { number: 4, headSha },
       checksSummary: { total: 1, checks: [{ name: 'build', status: 'passed' }] } });
-    expect((await scope1.database.query(`SELECT id FROM messages WHERE room_id=$1
-      AND card_type='github-corner-note'`, [corner])).rows).toEqual([]);
+    expect((await scope1.database.query(`SELECT text FROM messages WHERE room_id=$1
+      AND card_type='github-corner-note'`, [corner])).rows).toEqual([{ text: 'Checks passed · 1111111' }]);
   });
 
   it('credits the first agent to speak in an ownerless corner on merge, not a copied parent owner', async () => {

@@ -22,7 +22,20 @@ const scope1 = fixtureScope1();
     checks=checks.map(check=>({...check,status:'failed'}));
     await operations.processWebhook('check_run',{...payload,check_run:{...payload.check_run,name:'desktop',conclusion:'failure'}});
     expect(await wakes()).toHaveLength(1);
-    expect((await wakes())[0]!.body).toBe('Failed check 1111111');
+    expect((await wakes())[0]!.body).toBe('Check failed · typecheck · 1111111');
+    expect((await scope1.database.query<{ text: string }>(
+      `SELECT text FROM messages WHERE room_id=$1 AND card_type='github-corner-note' ORDER BY text`, [corner],
+    )).rows).toEqual([
+      { text: 'Check failed · desktop · 1111111' },
+      { text: 'Check failed · typecheck · 1111111' },
+    ]);
+    await operations.processWebhook('check_suite', { ...payload, action: 'completed',
+      check_suite: { head_sha: '1'.repeat(40), status: 'completed', conclusion: 'failure', app: { name: 'GitHub Actions' } },
+    });
+    expect((await scope1.database.query(
+      `SELECT text FROM messages WHERE room_id=$1 AND card_type='github-corner-note'`, [corner],
+    )).rows).toHaveLength(2);
+
     const details = (await readAgentCommands(scope1.database, REVIEWER, corner)).commands[0]!.source.body;
     expect(details).toContain('typecheck');
     expect(details).toContain('desktop');
@@ -78,7 +91,7 @@ const scope1 = fixtureScope1();
     expect(await wakes()).toHaveLength(0);
     await operations.processWebhook('check_run', failure('TYPECHECK'));
     expect((await wakes())).toHaveLength(1);
-    expect((await wakes())[0]?.body).toBe('Failed check 1111111');
+    expect((await wakes())[0]?.body).toBe('Check failed · TYPECHECK · 1111111');
     expect((await scope1.database.query<{ body: string }>(
       `SELECT system_event->'payload'->'failedJobs'->0->>'errorLines' body FROM messages
        WHERE room_id=$1 AND system_event->>'kind'='check-failed'`, [corner],

@@ -70,7 +70,7 @@ describe('composeSystemLine', () => {
         headSha: 'a'.repeat(40),
       },
     });
-    expect(line.text).toBe('GitHub passed a check Beeline CI');
+    expect(line.text).toBe('Checks passed · aaaaaaa');
     expect(line.event.object).toEqual({
       text: 'Beeline CI',
       url: 'https://github.com/acme/w/runs/1',
