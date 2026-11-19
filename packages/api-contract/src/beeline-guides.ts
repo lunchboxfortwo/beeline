@@ -339,6 +339,7 @@ When a Beeline PR changes agent-facing prompt text, run \`npm run prompt-audit\`
 
 - List each user-visible behavior the diff adds, removes or brings back.
 - Match each one to a quoted line in the brief's Intent. An item with no match is outside the mandate.
+- FAIL any PR whose brief's Intent does not quote a person's message with its message ID, including an agent-initiated thread with no human command.
 - For each touched feature, look for an earlier human decision: Search the chat for the feature name together with remove, revert or "don't". Run \`git log -S<symbol>\` on the touched files to find earlier removals and reverts.
 - A conflict, or a change much larger than the brief, blocks PASS. Send a FAIL to the worker, quoting the old decision or Intent and the diff line, and message it at its thread address to restore the approved state. Do not escalate the deviation to the commander or owner.
 - Only when the brief itself orders a change that conflicts with an earlier human decision, reply to the task message with ask, quoting both. The worker cannot restore it without breaking its brief.
