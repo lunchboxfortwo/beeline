@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, type RefObject } from 'react';
 import type { TranscriptHistoryStatus } from './room-message-store';
 
 /**
@@ -84,4 +84,31 @@ export function usePhoneUnderfillHistory({
     [check],
   );
   return { observeListHeight, observeContentHeight };
+}
+
+/** Desktop measures the committed DOM rather than native list callbacks. */
+export function useDesktopUnderfillHistory({ enabled, status, historyRevision, scrollNode, contentNode, threshold, fill }: {
+  enabled: boolean;
+  status: TranscriptHistoryStatus;
+  historyRevision: number;
+  scrollNode: RefObject<HTMLElement | null>;
+  contentNode: RefObject<HTMLElement | null>;
+  threshold: number;
+  fill: () => void;
+}) {
+  useEffect(() => {
+    if (!enabled || status !== 'idle') return;
+    const node = scrollNode.current;
+    const content = contentNode.current;
+    if (!node || !content) return;
+    const check = () => {
+      if (phoneTranscriptUnderfilled({ contentHeight: node.scrollHeight, listHeight: node.clientHeight, threshold })) fill();
+    };
+    check();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(check);
+    observer.observe(node);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [enabled, status, historyRevision, scrollNode, contentNode, threshold, fill]);
 }

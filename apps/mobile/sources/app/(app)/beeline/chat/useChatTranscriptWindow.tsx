@@ -6,7 +6,7 @@ import { answerPrefillCandidate, planAnswerPrefill, type ComposerPrefill, type C
 import { visibleTranscriptWindow } from '@/buzz/transcript-presentation';
 import { newestTranscriptRowId } from '@/buzz/room-new-message-boundary';
 import { useNewMessageControl } from '@/buzz/use-new-message-control';
-import { usePhoneUnderfillHistory } from '@/buzz/phone-underfill-history';
+import { useDesktopUnderfillHistory, usePhoneUnderfillHistory } from '@/buzz/phone-underfill-history';
 import { TAIL_PIN_THRESHOLD } from './chat-surface-values';
 
 type Props = [
@@ -343,6 +343,19 @@ export function useChatTranscriptWindow([
   const desktopContentNodeRef = useRef<HTMLElement | null>(null);
 
   const desktopContentObserverRef = useRef<ResizeObserver | null>(null);
+
+  // A newest page made entirely of folded events can occupy just one row.
+  // Recheck pages that fold into the same row without changing its height.
+  useDesktopUnderfillHistory({
+    enabled: desktopTranscript && !anchoredSegmentActive && transcriptMessages.length > 0 &&
+      Boolean(roomClient) && Boolean(cacheViewerPubkey),
+    status: transcriptFillStatus,
+    historyRevision: visibleMessageCount,
+    scrollNode: desktopScrollNodeRef,
+    contentNode: desktopContentNodeRef,
+    threshold: TAIL_PIN_THRESHOLD,
+    fill: fillShortTranscript,
+  });
   return [
     desktopScrollNodeRef, heldLandingFromOldestRef, phoneContentHeightRef, phoneScrollOffsetRef,
     heldLandingShortRef, phoneListHeightRef, observeVisibleMessages, chronologicalMessagesRef,

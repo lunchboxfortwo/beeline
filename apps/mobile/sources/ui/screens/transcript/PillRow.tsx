@@ -17,6 +17,8 @@ export type PillItem = {
     from: PillFace;
     to?: PillFace;
     time: string;
+    /** A system fact remains readable while its details are collapsed. */
+    summary?: string;
     /** The message, read under the row once its pill is opened. */
     body: React.ReactNode;
     system: boolean;
@@ -36,8 +38,8 @@ function heading(item: PillItem): string {
 }
 
 /**
- * System and agent-to-agent messages as avatar-only pills (from face → to
- * face) in one wrapping row. A tap opens that message under the row.
+ * System facts and agent-to-agent messages in one wrapping row. System pills
+ * keep their summary visible; a tap opens the full message under the row.
  */
 export function PillRow({ items, testID }: { items: readonly PillItem[]; testID?: string }) {
     const [openId, setOpenId] = useState<string | null>(null);
@@ -53,6 +55,7 @@ export function PillRow({ items, testID }: { items: readonly PillItem[]; testID?
                             kind="secondary"
                             label={`${expanded ? 'Hide' : 'Read'} message from ${heading(item)}, ${item.time}`}
                             minHeight={HEIGHT.control}
+                            maxWidth="100%"
                             paddingHorizontal="2"
                             gap="1"
                             borderRadius="full"
@@ -63,6 +66,7 @@ export function PillRow({ items, testID }: { items: readonly PillItem[]; testID?
                             testID={item.system ? 'system-pill' : 'agent-pill'}
                         >
                             <Face face={item.from} />
+                            {item.system && item.summary ? <Copy small quiet numberOfLines={1} flexShrink={1}>{item.summary}</Copy> : null}
                             {item.to ? <Glyph icon={ArrowRight} size={14} /> : null}
                             {item.to ? <Face face={item.to} /> : null}
                         </Btn>

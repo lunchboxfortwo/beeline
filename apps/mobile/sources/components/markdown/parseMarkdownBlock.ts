@@ -85,7 +85,7 @@ export function parseMarkdownBlock(markdown: string, document = false) {
         let trimmed = line.trim();
 
         // Consecutive quote lines form one block; a bare `>` keeps a paragraph break.
-        if (document && /^>\s?/.test(trimmed)) {
+        if (/^>\s?/.test(trimmed)) {
             const quoted = [trimmed.replace(/^>\s?/, '')];
             while (index < lines.length && /^>\s?/.test(lines[index].trim())) {
                 quoted.push(lines[index++].trim().replace(/^>\s?/, ''));
@@ -187,7 +187,14 @@ export function parseMarkdownBlock(markdown: string, document = false) {
                 index++;
             }
             const baseIndent = allLines[0].indent;
-            blocks.push({ type: 'list', items: allLines.map((l) => ({ depth: Math.floor((l.indent - baseIndent) / 2), spans: parseMarkdownSpans(l.content, false) })) });
+            blocks.push({ type: 'list', items: allLines.map((l) => {
+                const task = l.content.match(/^\[([ xX])\]\s+/);
+                return {
+                    depth: Math.floor((l.indent - baseIndent) / 2),
+                    ...(task ? { checked: task[1].toLowerCase() === 'x' } : {}),
+                    spans: parseMarkdownSpans(task ? l.content.slice(task[0].length) : l.content, false),
+                };
+            }) });
             continue;
         }
 

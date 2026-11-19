@@ -36,6 +36,47 @@ type Props = React.ComponentProps<typeof ChatSurfaceTranscript>;
 let renderer: ReactTestRenderer;
 afterEach(() => { if (renderer) act(() => renderer.unmount()); });
 
+it('cold desktop open keeps the newest page when the unread boundary predates it', async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const tail: RoomViewMessage[] = Array.from({ length: 30 }, (_, index) => ({
+    id: `newest-${index}`, text: `Newest ${index}`, createdAt: 1000 + index,
+    presentation: 'message', author: { pubkey: 'reader', kind: 'human', name: 'Reader' },
+  }));
+  const client = { history: vi.fn(async () => ({ roomId: 'room', messages: [] })) };
+  const frames: Array<() => void> = [];
+  let history!: ReturnType<typeof useRoomMessageStore>;
+  let displayed: ChatDisplayMessage[] = [];
+  const controller = createTranscriptScrollController<ChatDisplayMessage>({
+    rows: () => displayed,
+    rowIndex: (destination, rows) => rows.findIndex(row => row.id === destination.messageId),
+    list: () => ({ toRow: () => true, toNewest() {}, toOffset() {}, toEstimatedRow() {}, shiftBy() {} }),
+    onUnreachable: () => history.loadOlder(displayed.length),
+    schedule: work => { frames.push(work); },
+  });
+  const noop = () => {};
+  function ColdOpen() {
+    history = useRoomMessageStore({ roomId: 'room', tailMessages: tail, roomClient: client,
+      enabled: true, initialVisibleCount: 30 });
+    displayed = [...history.rows, ...tail].map(row => ({
+      id: row.id, text: row.text, timestamp: row.createdAt, isUser: false,
+    }));
+    useChatTranscriptLanding([
+      controller, noop, true, noop, displayed, null, false, 'oldest-unread', '', 'room',
+      noop, { subscribeCommit: () => noop }, { call: null }, displayed, undefined, undefined,
+      undefined, { current: null }, { current: new Map() }, () => true, client, 'reader',
+      { room: { id: 'room' } }, history.jumpTo, false, 'complete', { current: null }, noop,
+    ] as unknown as Parameters<typeof useChatTranscriptLanding>[0]);
+    return null;
+  }
+  await act(async () => { renderer = create(<ColdOpen />); });
+  await act(async () => { while (frames.length) frames.shift()!(); });
+  expect(client.history).not.toHaveBeenCalled();
+  expect(displayed.map(row => row.id)).toEqual(tail.map(row => row.id));
+  // Older history remains available when the reader actually asks for it.
+  await act(async () => history.loadOlder(displayed.length));
+  expect(client.history).toHaveBeenCalledExactlyOnceWith('room', { createdAt: 1000, id: 'newest-0' });
+});
+
 it('keeps a short-message viewport in the eager phone window through draft replacement and arrivals (R1)', () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   const row = (id: string): ChatDisplayMessage => ({ id, text: id, timestamp: 1, isUser: false });

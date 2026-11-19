@@ -3,6 +3,7 @@ import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 
+vi.mock('react-native', () => ({ useWindowDimensions: () => ({ height: 844, width: 390 }) }));
 vi.mock('tamagui', async () => (await import('./grammar-hosts.test-support')).tamaguiHosts());
 vi.mock('lucide-react-native', async () => (await import('./grammar-hosts.test-support')).lucideHosts());
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
@@ -42,5 +43,14 @@ describe('PillRow', () => {
         expect(pill().props['aria-expanded']).toBe(true);
         act(() => pill().props.onPress());
         expect(tree.root.findAll((node: any) => node.type === 'YStack' && node.props.testID === 'pill-open')).toHaveLength(0);
+    });
+    it('W5 keeps a collapsed system pill readable by its summary', () => {
+        let tree: any;
+        const system: PillItem = { id: 'call-ended', system: true, from: { kind: 'system', name: 'Beeline' }, time: '22:41',
+            summary: 'Voice call ended · 2:13', body: React.createElement('Text', { testID: 'call-body' }, 'Voice call ended · 2:13') };
+        act(() => { tree = create(<PillRow items={[system]} />); });
+        const pill = tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'system-pill');
+        expect(pill.props['aria-expanded']).toBe(false);
+        expect(pill.findAll((node: any) => node.type === 'Text').map((node: any) => node.props.children)).toContain('Voice call ended · 2:13');
     });
 });

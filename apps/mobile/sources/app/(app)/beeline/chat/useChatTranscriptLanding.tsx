@@ -83,11 +83,13 @@ export function useChatTranscriptLanding([
     scrollController.observeLayout();
   }, [desktopTranscript, scrollController, transcriptJump, transcriptMessages]);
 
-  // A Room opened with unread messages lands on the first of them.
+  // Desktop opens at the newest page. Walking back to an old unread boundary
+  // can read the entire transcript before the reader has asked for history.
+  // The phone retains its existing first-unread landing.
   useEffect(() => {
-    if (isCorner || !firstUnreadMessageId || messageAnchorId) return;
+    if (desktopTranscript || isCorner || !firstUnreadMessageId || messageAnchorId) return;
     scrollController.request({ kind: 'firstUnread', messageId: firstUnreadMessageId });
-  }, [decodedId, firstUnreadMessageId, isCorner, messageAnchorId, scrollController]);
+  }, [decodedId, desktopTranscript, firstUnreadMessageId, isCorner, messageAnchorId, scrollController]);
 
   // The disc's one job. It lands on the tail itself rather than on a queued
   // boundary row, so a reader who is merely re-reading history — no queue at

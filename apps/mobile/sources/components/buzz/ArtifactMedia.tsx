@@ -4,7 +4,8 @@ import { useArtifactRecoveryGeneration } from '@/buzz/use-artifact-recovery';
 import { appReadErrorCopy } from '@/buzz/app-error-copy';
 import { ArtifactByteError } from '@/buzz/artifact-byte-error';
 import { Image, ScrollView, YStack } from 'tamagui';
-import { T } from '@/ui/grammar';
+import { Image as ImageGlyph } from 'lucide-react-native';
+import { Glyph, T } from '@/ui/grammar';
 import type { AttachmentReference } from '@beeline/buzz-client';
 
 import { artifactTextPreview } from '@/buzz/artifact';
@@ -88,8 +89,9 @@ export function ArtifactImage({
   }, [attachment.url, attachment.mimeType, attachment.size, attachment.sha256, attachment.expired, fit]);
   if (failed) {
     return (
-      <YStack width="100%" height="100%" paddingHorizontal="5" testID="artifact-image-failed">
-        <IndexRow inset="flush" title="Image unavailable" />
+      <YStack width="100%" height="100%" alignItems="center" justifyContent="center" gap="2" padding="4" testID="artifact-image-failed">
+        <Glyph icon={ImageGlyph} />
+        <T v="meta" color="secondary">Image unavailable</T>
       </YStack>
     );
   }

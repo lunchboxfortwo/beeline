@@ -1,7 +1,8 @@
 import React, { createContext, useCallback, useContext, useMemo } from 'react';
 import { Platform, type StyleProp, type TextStyle } from 'react-native';
 import { XStack, YStack } from 'tamagui';
-import { Indent, ProseRun, T, type ProseMark } from '@/ui/grammar';
+import { Glyph, Indent, ProseRun, T, type ProseMark } from '@/ui/grammar';
+import { Check } from 'lucide-react-native';
 import { parseMarkdown, type MarkdownSpan } from '@/components/markdown/parseMarkdown';
 import { CodeBlock } from '@/components/buzz/CodeBlock';
 import {
@@ -576,14 +577,21 @@ export const MonoMarkdown = React.memo(function MonoMarkdown({
             <YStack key={index} width="100%" gap={document ? '2' : '1'} marginBottom={last ? 0 : document ? '4' : '2'}>
               {block.items.map((item, itemIndex) => (
                 <Indent key={itemIndex} depth={item.depth}>
+                  <XStack gap="2" alignItems="flex-start">
+                    {'checked' in item && item.checked !== undefined ? (
+                      // A task item's box, drawn in the stroke token; done holds the check.
+                      <YStack borderWidth={1} borderColor="stroke" borderRadius="sm" marginTop="1" testID={item.checked ? 'task-done' : 'task-open'}>
+                        {item.checked ? <Glyph icon={Check} size={14} /> : <YStack width={14} height={14} />}
+                      </YStack>
+                    ) : null}
                   <ProseRun
                     userSelect={proseSelect}
-                    width="100%"
+                    flex={1}
                     body={base}
                   >
                     {itemIndex === 0 ? lead : null}
                     <ProseRun marks={['quiet']}>
-                      {'number' in item ? `${item.number}. ` : '· '}
+                      {'number' in item ? `${item.number}. ` : 'checked' in item ? '' : '· '}
                     </ProseRun>
                     <InlineMarkdown
                       spans={item.spans}
@@ -596,6 +604,7 @@ export const MonoMarkdown = React.memo(function MonoMarkdown({
                       tail={itemIndex === block.items.length - 1 ? trail : undefined}
                     />
                   </ProseRun>
+                  </XStack>
                 </Indent>
               ))}
             </YStack>
