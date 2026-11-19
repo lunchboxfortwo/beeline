@@ -50,7 +50,11 @@ describe('release refresh and committed free-agent sleep events', () => {
         return Response.json({id,...machine});
       }
       if (path === '/stop') machine.state = 'stopped';
-      else if (path === '/wait') machine.state = new URL(String(url)).searchParams.get('state')!;
+      else if (path === '/wait') {
+        const query = new URL(String(url)).searchParams;
+        if (query.get('state') !== machine.state || query.get('instance_id') !== machine.instance_id)
+          return new Response('requested state/version not reached', { status: 408 });
+      }
       else if (path === '/suspend') machine.state = 'suspended';
       else if (path === '/start') {
         machine.state = 'started';
@@ -230,8 +234,9 @@ describe('release refresh and committed free-agent sleep events', () => {
     for(let n=1;n<=31;n++)expect(fleet.get(`m${n}`)?.config.image).toBe(IMAGE);
     expect(fleet.get('m32')?.config.image).toBe(IMAGE);
     expect((await db.query(`SELECT fly_machine_id FROM free_agents WHERE agent_id=$1`,[agentId(33)])).rows).toEqual([{fly_machine_id:null}]);
-    expect(calls.filter(call=>call.includes('/start'))).toHaveLength(0);
-    expect(calls.filter(call=>call.endsWith('/wait'))).toHaveLength(32);
+    expect(calls.filter(call=>call.includes('/start'))).toEqual(['POST m32/start']);
+    expect(calls.filter(call=>call.endsWith('/wait'))).toHaveLength(33);
+    for(let n=1;n<=31;n++)expect(fleet.get(`m${n}`)?.state).toBe('stopped');
     expect(fleet.get('m32')?.state).toBe('started');
     expect((await db.query(`SELECT 1 FROM agent_commands WHERE state='pending'`)).rowCount).toBe(1);
   });
@@ -240,7 +245,7 @@ describe('release refresh and committed free-agent sleep events', () => {
     await seed(1);await seed(2);failUpdate='m1';
     await expect(service.reconcileAll()).rejects.toThrow('observation unavailable for 1');
     expect(fleet.get('m2')?.config.image).toBe(IMAGE);
-    expect(fleet.get('m2')?.state).toBe('started');
+    expect(fleet.get('m2')?.state).toBe('stopped');
     expect(calls.filter(call=>call==='POST m1')).toHaveLength(1);
     expect(calls.filter(call=>call.endsWith('/start'))).toHaveLength(0);
   });

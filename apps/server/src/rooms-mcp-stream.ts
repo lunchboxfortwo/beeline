@@ -137,7 +137,7 @@ async function scopes(db: SqlDatabase, member: string, rooms: readonly string[])
  * initial repeatable-read cut. Each real committed hint coalesces one drain;
  * an idle stream makes no reads, writes, empty responses or heartbeat frames. */
 export async function serveMcpMemberStream(database: SqlDatabase, principal: McpPrincipal, response: ServerResponse,
-  input: { cursor?: McpStreamCursor; mentionCursor: string },
+  input: { cursor?: McpStreamCursor; mentionCursor: string; signal?: AbortSignal },
   page: (db: SqlDatabase, after: string) => Promise<McpStreamPage>): Promise<void> {
   if (!principal.member_id || !principal.scope.split(' ').includes('rooms:read')) throw new Error('member stream unavailable');
   await recoverMemberDelivery(database,principal);
@@ -151,8 +151,10 @@ export async function serveMcpMemberStream(database: SqlDatabase, principal: Mcp
     await notifyMcpDeliveryChange(db,member);
   });
   let stopped = false, running = false, dirty = true, initial = true, position = input.cursor, mentionCursor = input.mentionCursor;
+  const shutdown = () => close();
   const close = (reason?: 'unavailable') => {
     if (stopped) return; stopped=true; release();
+    input.signal?.removeEventListener('abort',shutdown);
     void database.transaction(async db=>{
       await db.query('UPDATE rooms_mcp_delivery SET stream_id=NULL WHERE member_id=$1 AND stream_id=$2',[member,streamId]);
       await notifyMcpDeliveryChange(db,member);
@@ -162,6 +164,8 @@ export async function serveMcpMemberStream(database: SqlDatabase, principal: Mcp
   };
   const release = subscribeCommandCompletion({principal:'mcp',operation:'stream',commandId:member}, () => { dirty=true; void drain(); });
   response.once('close',()=>close());
+  input.signal?.addEventListener('abort',shutdown,{once:true});
+  if(input.signal?.aborted){close();return;}
   response.writeHead(200, {'content-type':'application/x-ndjson','cache-control':'no-store','x-content-type-options':'nosniff'});
   response.flushHeaders();
   const drain = async () => {

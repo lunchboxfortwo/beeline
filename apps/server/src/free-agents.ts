@@ -599,13 +599,15 @@ export class FreeAgentService {
       // Queued and running items survive a replacement; never replace an in-progress connector install.
       if (refreshImage && !sameMachineImage(machine.config.image,this.config.image) && !initial.connector) {
         if (!await owns()) return;
+        const replacementState = machine.state === 'started' ? 'started' : 'stopped';
         mutationStarted = true;
         machine = await this.machines.update(machine,this.config.image);
         if (!machine.instance_id) throw new Error('Fly update returned no replacement version');
-        // Provider completion is version-bound. A timeout leaves the result unknown.
-        await this.machines.waitFor(machine.id,'started',60,machine.instance_id);
+        // Fly replaces a non-running Machine without booting it. Observe that
+        // version in its actual target state; queued work owns the start below.
+        await this.machines.waitFor(machine.id,replacementState,60,machine.instance_id);
         const observed = await this.machines.read(machine.id);
-        if (!observed || observed.instance_id !== machine.instance_id || observed.state !== 'started') throw new Error('Fly replacement version is unconfirmed');
+        if (!observed || observed.instance_id !== machine.instance_id || observed.state !== replacementState) throw new Error('Fly replacement version is unconfirmed');
         machine = observed;
         completedEffect = true;
       }

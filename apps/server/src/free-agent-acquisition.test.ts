@@ -125,9 +125,15 @@ function lab(initial = 'stopped', oldImage = 'old-release') {
       await hooks.update?.();if(hooks.failUpdate)return new Response('unavailable',{status:500});
       const update=JSON.parse(String(init.body));expect(update.current_version).toBe(version);
       expect(update.config.rootfs).toEqual({persist:'always'});
-      currentImage=update.config.image;version='replacement';state='replacing';return Response.json(machine());
+      currentImage=update.config.image;version='replacement';state=state==='started'?'started':'stopped';return Response.json(machine());
     }
-    if(path==='/m1/wait'){expect(address.searchParams.get('instance_id')).toBe(version);state=address.searchParams.get('state')!;}
+    if(path==='/m1/wait'){
+      expect(address.searchParams.get('instance_id')).toBe(version);
+      // A create is already booting; waiting observes that launch. Image
+      // replacement above leaves non-running versions stopped instead.
+      if(state==='created'&&address.searchParams.get('state')==='started')state='started';
+      if(address.searchParams.get('state')!==state)return new Response('state not reached',{status:408});
+    }
     else if(path==='/m1/start'){expect(['stopped','suspended','created']).toContain(state);state='started';}
     else if(path==='/m1/suspend'){await hooks.suspend?.();state='suspended';}
     else throw new Error(`Unexpected Fly call ${path}`);
@@ -137,16 +143,16 @@ function lab(initial = 'stopped', oldImage = 'old-release') {
   return {calls,hooks,service,state:()=>state};
 }
 
-it.each(['stopped','suspended','created'])('confirms Fly launched a replaced %s machine without a second start',async initial=>{
+it.each(['stopped','suspended','created','started'])('observes the replaced %s machine and starts it only when required',async initial=>{
   const runtime=lab(initial);await send('saved message');
   await Promise.all([runtime.service().reconcile(MODEL_AGENT,true),runtime.service().reconcile(MODEL_AGENT,true)]);
-  expect(runtime.calls).toEqual(['POST /m1','GET /m1/wait']);expect(runtime.state()).toBe('started');
+  expect(runtime.calls).toEqual(['POST /m1','GET /m1/wait',...(initial==='started'?[]:['POST /m1/start','GET /m1/wait'])]);expect(runtime.state()).toBe('started');
   expect((await fixture.db.query(`SELECT state,runtime_owner FROM free_agents`)).rows).toEqual([{state:'sleeping',runtime_owner:null}]);
   expect((await fixture.db.query(`SELECT 1 FROM agent_commands WHERE state='pending'`)).rowCount).toBe(1);
 });
 
 it('visits old-image idle mappings independently of retired state without provisioning idle identities',async()=>{
-  const runtime=lab();await runtime.service().reconcileAll();expect(runtime.state()).toBe('started');
+  const runtime=lab();await runtime.service().reconcileAll();expect(runtime.state()).toBe('stopped');
   runtime.calls.length=0;await fixture.db.query(`UPDATE free_agents SET fly_machine_id=NULL`);
   await runtime.service().reconcileAll();expect(runtime.calls).toEqual([]);
 });
@@ -249,7 +255,7 @@ it('replaces a busy snapshot immediately and retains its queued work',async()=>{
   const runtime=lab('suspended');
   await fixture.db.query("UPDATE agent_commands SET state='pending' WHERE id='synthetic-command'");
   await runtime.service().reconcile(MODEL_AGENT,true);
-  expect(runtime.calls).toEqual(['POST /m1','GET /m1/wait']);expect(runtime.state()).toBe('started');
+  expect(runtime.calls).toEqual(['POST /m1','GET /m1/wait','POST /m1/start','GET /m1/wait']);expect(runtime.state()).toBe('started');
   expect((await fixture.db.query("SELECT state FROM agent_commands WHERE id='synthetic-command'")).rows).toEqual([{state:'pending'}]);
 });
 

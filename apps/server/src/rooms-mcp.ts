@@ -98,6 +98,7 @@ function roomArg(value: unknown): string {
 }
 
 export class RoomsMcp {
+  private readonly shutdown = new AbortController();
   private readonly agentTools?: RoomsMcpAgentTools;
   private readonly events: RoomsMcpEvents;
   constructor(readonly oauth: RoomsMcpOAuth, private readonly phone: PhoneService, private readonly live: LiveHub,
@@ -106,6 +107,7 @@ export class RoomsMcp {
     this.events = events ?? new RoomsMcpEvents(oauth.database);
     if (daemon) this.agentTools = new RoomsMcpAgentTools(oauth.database, daemon, objects);
   }
+  stop(): void { this.shutdown.abort(); }
   async handle(request: IncomingMessage, response: ServerResponse): Promise<boolean> {
     const url = new URL(request.url ?? '/', this.oauth.origin);
     if (await this.oauth.handle(request, response, url)) return true;
@@ -165,7 +167,7 @@ export class RoomsMcp {
         }
         const mentionCursor=url.searchParams.get('mentions') ?? '0';
         if (!/^[0-9]{1,18}$/.test(mentionCursor)) throw new Error();
-        await serveMcpMemberStream(this.oauth.database,principal,response,{cursor,mentionCursor},
+        await serveMcpMemberStream(this.oauth.database,principal,response,{cursor,mentionCursor,signal:this.shutdown.signal},
           (db,after)=>this.mentionsPage(principal.member_id!,after,30,db,true));
       } catch { if (!response.headersSent) mcpJson(response,400,{error:'invalid_stream_request'}); else response.end(); }
       return true;

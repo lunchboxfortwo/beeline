@@ -78,6 +78,7 @@ test('replacement configuration retains the serving fleet’s resources and runt
   assert.match(config, /NODE_OPTIONS = ""/);
   assert.match(config, /BEELINE_GOOGLE_SIGN_IN_SUBJECTS = "[^"]+"/);
   assert.doesNotMatch(config, /BEELINE_SERVER_MACHINES\s*=/);
-  assert.doesNotMatch(config, /^kill_(?:signal|timeout)\s*=/m);
+  assert.match(config, /^kill_signal = "SIGTERM"$/m);
+  assert.match(config, /^kill_timeout = "300s"$/m);
   assert.match(config, /\[\[restart\]\]\s+policy = "on-failure"\s+retries = 10/);
 });

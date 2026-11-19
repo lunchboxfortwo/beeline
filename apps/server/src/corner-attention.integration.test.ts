@@ -556,9 +556,26 @@ it('Reproduction SENTRY-4B: overlapping events collapse into one committed-event
     const duplicate = runtime.refresh(C);
     release(); await Promise.all([first, second, duplicate]);
     expect(observe).toHaveBeenCalledTimes(2);
-    expect(publish).toHaveBeenCalledTimes(2);
+    expect(publish).not.toHaveBeenCalled();
     expect((await phone.readCorners(ROOM, HUMAN))!.corners.find(corner => corner.corner.id === C)?.state).toBe('idle');
   } finally { release(); observe.mockRestore(); await runtime.stop(); }
+});
+
+it('startup and listener recovery do not invalidate parent lists for unchanged corners', async () => {
+  await refreshCornerAttention(db, C);
+  const live = new LiveHub();
+  const publish = vi.spyOn(live, 'publish');
+  const errors: unknown[] = [];
+  const runtime = new CornerMachineEvents(db, live, error => errors.push(error));
+  try {
+    const before = (await db.query('SELECT machine FROM corner_facts WHERE corner_id=$1', [C])).rows;
+    await runtime.start();
+    live.resync();
+    await runtime.start();
+    expect((await db.query('SELECT machine FROM corner_facts WHERE corner_id=$1', [C])).rows).toEqual(before);
+    expect(publish).not.toHaveBeenCalled();
+    expect(errors).toEqual([]);
+  } finally { await runtime.stop(); }
 });
 
 

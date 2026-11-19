@@ -77,6 +77,31 @@ describe.each(['pglite',...(postgresUrl?['postgres']:[])])('P12 MCP committed me
   });
   const reply=()=>{const result=new Reply();replies.push(result);return result;};
 
+  it.each(['connected','opening'])('shutdown ends a %s member stream and releases delivery ownership',async state=>{
+    await db.query(`INSERT INTO rooms_mcp_delivery(member_id,mechanism)
+      SELECT 'member','local' WHERE NOT EXISTS(SELECT 1 FROM rooms_mcp_delivery WHERE member_id='member')`);
+    const output=reply(),read=page(),shutdown=new AbortController();
+    let entered!:()=>void,release!:()=>void;
+    const opening=new Promise<void>(resolve=>{entered=resolve;});
+    const gate=new Promise<void>(resolve=>{release=resolve;});
+    const database:SqlDatabase={query:(sql,values)=>db.query(sql,values),transaction:async work=>{
+      if(state==='opening'){entered();await gate;}
+      return db.transaction(work);
+    }};
+    const stream=serveMcpMemberStream(database,principal,output as unknown as ServerResponse,
+      {mentionCursor:'0',signal:shutdown.signal},read);
+    if(state==='opening')await opening;else {
+      await stream;
+      expect((await db.query('SELECT stream_id FROM rooms_mcp_delivery WHERE member_id=$1',['member'])).rows)
+        .toEqual([{stream_id:expect.any(String)}]);
+    }
+    shutdown.abort();release();await stream;
+    expect(output.writableEnded).toBe(true);
+    if(state==='opening')expect(read).not.toHaveBeenCalled();
+    await vi.waitFor(async()=>expect((await db.query('SELECT stream_id FROM rooms_mcp_delivery WHERE member_id=$1',['member'])).rows)
+      .toEqual([{stream_id:null}]));
+  });
+
   it('has no idle reads or empty frames for a day, then captures the real committed source',async()=>{
     vi.useFakeTimers({toFake:['Date']});
     const output=reply(),read=page();

@@ -629,6 +629,7 @@ export function createBeelineServer(options: ServerOptions): Server {
     // Connections stay held across a restart: helpers reconnect to a running
     // instance, and this instance's lease releases whatever never returns.
     shuttingDown = true;
+    options.roomsMcp?.stop();
     releaseConnectionEpochs?.();
     // noServer owns no listener; waiting for its clients is sufficient.
     const clientsClosed = Promise.all([...webSockets.clients].map(client => new Promise<void>(resolve => {
