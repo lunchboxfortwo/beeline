@@ -205,7 +205,7 @@ export function projectedMessage(
       ? row.system_event
         ? formatSystemLine(row.system_event)
         : systemMessage("phone-service.message-deleted")
-      : row.text,
+      : row.system_event?.kind === 'check-failed' ? formatSystemLine(row.system_event) : row.text,
     createdAt: unix(row.created_at),
     createdAtMs: row.created_at.getTime(),
     ...(typeof row.version === 'number' ? { version: row.version } : {}),

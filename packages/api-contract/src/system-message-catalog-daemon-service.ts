@@ -167,11 +167,6 @@ export const SYSTEM_MESSAGE_DAEMON_SERVICE = {
     variables: ['integer_pullRequest_number'],
   },
 
-  'github-operations.opened-a-pull-request': {
-    parts: ['opened a pull request'],
-    variables: [],
-  },
-
   'github-operations.pushed': {
     parts: ['pushed'],
     variables: [],
@@ -192,29 +187,14 @@ export const SYSTEM_MESSAGE_DAEMON_SERVICE = {
     variables: ['head_slice_0_12'],
   },
 
-  'github-operations.found-failing-checks-on': {
-    parts: ['found failing checks on'],
+  'github-operations.failed-check': {
+    parts: ['failed check'],
     variables: [],
   },
 
   'github-operations.a-check': {
     parts: ['', ' a check'],
     variables: ['label'],
-  },
-
-  'github-operations.the-pull-request': {
-    parts: ['the pull request'],
-    variables: [],
-  },
-
-  'github-operations.failing': {
-    parts: ['failing ', ''],
-    variables: ['failing_join'],
-  },
-
-  'github-operations.list-separator': {
-    parts: [', '],
-    variables: [],
   },
 
   'membership-join.joined': {

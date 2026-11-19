@@ -232,9 +232,7 @@ export function composeSystemLine(phrase: SystemPhrase): { text: string; event: 
       ...(phrase.subscriptionWorkflowSlug ? { subscriptionWorkflowSlug: phrase.subscriptionWorkflowSlug } : {}),
     } : {}),
   };
-  // The kind never reaches the text: `formatSystemLine` reads subject, verb,
-  // object and consequence, so a line's wording is exactly what it was before
-  // it carried a kind.
+  // The shared formatter owns the sentence, including the compact failed-head copy.
   return { text: formatSystemLine(event), event };
 }
 

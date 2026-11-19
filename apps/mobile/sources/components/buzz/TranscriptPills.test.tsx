@@ -141,3 +141,21 @@ it.each([false, true])('UAR-1 chat renders person-facing report text immediately
   expect(renderedText()).not.toContain('Choose the endpoint');
   act(() => tree.unmount());
 });
+
+it('PR-CHAT-ONLY uses large PR cards and small failed-head lines with no PR title or number', async () => {
+  const { RepositoryLifecycleRow } = await import('./PrLifecycleCard');
+  const base = { id: 'copy', title: 'Setup: quiet defaults', kindLine: 'PR #112',
+    url: 'https://github.com/owner/widgets/pull/112', actor: '', updatedBy: 'copy' };
+  let tree: any;
+  act(() => { tree = create(<RepositoryLifecycleRow item={{ ...base, kind: 'pull-request', state: 'PR opened' }} onOpenCorner={() => {}} onOpenUrl={() => {}} />); });
+  expect(tree.root.findAllByType('Text').map((node: any) => node.props.v)).toContain('body');
+  expect(tree.root.findAllByType('Text').map((node: any) => node.props.v)).toContain('heading');
+  act(() => { tree.update(<RepositoryLifecycleRow item={{ ...base, kind: 'check', state: 'Failed check', title: '82828a8' }} onOpenCorner={() => {}} onOpenUrl={() => {}} />); });
+  const text = tree.root.findAllByType('Text');
+  expect(text.map((node: any) => node.props.v)).not.toContain('heading');
+  expect(text.map((node: any) => node.props.v)).not.toContain('body');
+  const words = (value: any): string => typeof value === 'string' ? value
+    : Array.isArray(value) ? value.map(words).join('') : value?.props ? words(value.props.children) : '';
+  expect(words(text[0].props.children)).toBe('Failed check 82828a8');
+  act(() => tree.unmount());
+});

@@ -297,23 +297,15 @@ const fixture = monolithFixture();
     expect(cornerBeforeMerge.messages).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          presentation: 'system',
-          text: '@octocat opened a pull request Ship the widget',
-          systemEvent: {
-            subject: { kind: 'github', name: '@octocat' },
-            verb: 'opened a pull request',
-            object: { text: 'Ship the widget', url: 'https://github.com/owner/widgets/pull/42' },
-          },
-        }),
-        expect.objectContaining({
           text: expect.stringMatching(/^@GitHub pushed 2 commits to feature\/corner-[0-9a-f]{12} · at [0-9a-f]{12}$/),
         }),
         expect.objectContaining({
-          text: '@GitHub found failing checks on Ship the widget · failing typecheck',
-          systemEvent: expect.objectContaining({ verb: 'found failing checks on' }),
+          text: 'Failed check 1111111',
+          systemEvent: expect.objectContaining({ kind: 'check-failed', verb: 'failed check' }),
         }),
       ]),
     );
+    expect(cornerBeforeMerge.messages.some(message => /opened a pull request/.test(message.text))).toBe(false);
     // Only failures print: no started or passed check lines.
     expect(cornerBeforeMerge.messages.some(message => /^@GitHub (?:started|passed|cancelled) a check/.test(message.text))).toBe(false);
     // No system line carries a colon, an em dash, a trailing period, or a URL.

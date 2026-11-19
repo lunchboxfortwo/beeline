@@ -1,3 +1,4 @@
+import { formatSystemLine } from '@beeline/api-contract/phone';
 import type { RoomViewMessage, SystemEvent, SystemSubject } from '@beeline/api-contract/phone';
 
 /**
@@ -51,6 +52,7 @@ export function joinSystemNames(names: readonly string[]): string {
 
 /** The plain text of an event for one or several subjects (previews, accessibility). */
 export function systemLineText(event: SystemEvent, subjects?: readonly SystemSubject[]): string {
+  if (event.kind === 'check-failed') return formatSystemLine(event);
   const names = (subjects ?? [event.subject]).map((subject) => subject.name);
   const head = [joinSystemNames(names), event.verb].filter(Boolean).join(' ');
   const line = event.object?.text ? `${head} ${event.object.text}` : head;

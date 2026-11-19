@@ -22,8 +22,10 @@ const scope1 = fixtureScope1();
     checks=checks.map(check=>({...check,status:'failed'}));
     await operations.processWebhook('check_run',{...payload,check_run:{...payload.check_run,name:'desktop',conclusion:'failure'}});
     expect(await wakes()).toHaveLength(1);
-    expect((await wakes())[0]!.body).toContain('typecheck');
-    expect((await wakes())[0]!.body).toContain('desktop');
+    expect((await wakes())[0]!.body).toBe('Failed check 1111111');
+    const details = (await readAgentCommands(scope1.database, REVIEWER, corner)).commands[0]!.source.body;
+    expect(details).toContain('typecheck');
+    expect(details).toContain('desktop');
     await operations.processWebhook('check_run',payload);
     expect(await wakes()).toHaveLength(1);
   });
@@ -76,7 +78,7 @@ const scope1 = fixtureScope1();
     expect(await wakes()).toHaveLength(0);
     await operations.processWebhook('check_run', failure('TYPECHECK'));
     expect((await wakes())).toHaveLength(1);
-    expect((await wakes())[0]?.body).toContain('TYPECHECK');
+    expect((await wakes())[0]?.body).toBe('Failed check 1111111');
     expect((await scope1.database.query<{ body: string }>(
       `SELECT system_event->'payload'->'failedJobs'->0->>'errorLines' body FROM messages
        WHERE room_id=$1 AND system_event->>'kind'='check-failed'`, [corner],
@@ -86,7 +88,8 @@ const scope1 = fixtureScope1();
     expect(inbox.commands[0]?.source.body).toContain('> ##[error]TS2345 bad type');
     expect(inbox.commands[0]?.source.body).toContain('untrusted outside data');
 
-    expect((await wakes())[0]?.body).toContain('desktop');
+    expect(inbox.commands[0]?.source.body).toContain('TYPECHECK');
+    expect(inbox.commands[0]?.source.body).toContain('desktop');
     expect(inbox.commands.some(command=>command.source.body.includes('https://github.com/owner/widgets/actions/runs/10/job/102'))).toBe(true);
     await operations.processWebhook('check_run',payload);
     expect(await wakes()).toHaveLength(1);

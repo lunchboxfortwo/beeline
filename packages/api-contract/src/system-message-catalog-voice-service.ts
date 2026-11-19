@@ -540,6 +540,11 @@ export const SYSTEM_MESSAGE_VOICE_SERVICE = {
     variables: [],
   },
 
+  'system-events.failed-check': {
+    parts: ['Failed check ', ''],
+    variables: ['head'],
+  },
+
   'system-events.space': {
     parts: [' '],
     variables: [],

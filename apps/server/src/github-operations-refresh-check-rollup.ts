@@ -141,17 +141,16 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
           // A pass, a start and a cancellation print no line: only a failure
           // is news. The passing verdict still advances the corner below.
           const cancelled = String(providerCheck.conclusion ?? '').toUpperCase() === 'CANCELLED';
-          const failing = summary.failing.length ? summary.failing : [providerCheck.name];
           const dedupe = becameFailing
             ? `github:checks:failed:${providerCheck.headSha}`
             : `github:checks:${providerCheck.status}:${providerCheck.name}:${providerCheck.headSha ?? hash(JSON.stringify(providerCheck))}`;
           const phrase: SystemPhrase = {
             subject: GITHUB_SUBJECT,
-            verb: becameFailing ? systemMessage('github-operations.found-failing-checks-on') : systemMessage('github-operations.a-check', providerCheck.status),
+            verb: becameFailing ? systemMessage('github-operations.failed-check') : systemMessage('github-operations.a-check', providerCheck.status),
             ...(becameFailing ? { kind: 'check-failed' as const } : {}),
             object: becameFailing
               ? {
-                  text: current.pr?.title ?? (current.pr?.number ? systemMessage('github-operations.pull-request-2', current.pr.number) : systemMessage('github-operations.the-pull-request')),
+                  text: checkHeadSha.slice(0, 7),
                   ...(current.pr?.url ? { url: current.pr.url } : {}),
                   ...(providerCheck.headSha ? { headSha: providerCheck.headSha } : {}),
                 }
@@ -160,11 +159,9 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
                   ...(providerCheck.url ? { url: providerCheck.url } : {}),
                   ...(providerCheck.headSha ? { headSha: providerCheck.headSha } : {}),
                 },
-            ...(becameFailing
-              ? { consequence: systemMessage('github-operations.failing', failing.join(systemMessage('github-operations.list-separator'))) }
-              : providerCheck.status === 'failed' && providerCheck.conclusion && providerCheck.conclusion !== 'failure'
-                ? { consequence: providerCheck.conclusion }
-                : {}),
+            ...(!becameFailing && providerCheck.status === 'failed' && providerCheck.conclusion && providerCheck.conclusion !== 'failure'
+              ? { consequence: providerCheck.conclusion }
+              : {}),
             ...(becameFailing ? { payload: { failedJobs: jobLogs } } : {}),
           };
           const event: CornerEvent | null = becameFailing
@@ -381,6 +378,8 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
         roomId: target.corner_id,
         authorId: target.author_id,
         ...merged,
+        // Keep the kinded source for merge subscriptions without a thread card.
+        presentation: 'activity',
         cardType: 'github-corner-note',
       });
       await advanceCorner(database, target.corner_id, {

@@ -307,15 +307,15 @@ it.each(['dm', 'room', 'parent'] as const)('Reproduction CORNER-ROOM-2: keeps th
   const roomCards = merged.roomMessages.filter(m => m.daemonFact?.cornerId === opened.cornerId);
   expect(roomCards).toEqual(roomOpening ? [roomOpening] : []);
   const prRows = merged.roomMessages.filter(m => m.githubEvent?.url === payload.pull_request.html_url);
-  expect(prRows).toHaveLength(kind === 'room' ? 1 : 0);
+  expect(prRows).toHaveLength(1);
   const storedEvents = (await db.query<{id:string}>(`SELECT id FROM messages WHERE room_id=$1 AND card_type='github-event' AND card->>'cornerId'=$2`,[R,opened.cornerId])).rows;
-  expect(storedEvents).toHaveLength(kind === 'room' ? 1 : 0);
-  if (kind !== 'room') expect((await phone.readRoom(R,OUTSIDER))!.viewer.readCursor?.unreadCount).toBe(0);
-  if (kind === 'room') expect(prRows[0].githubEvent).toMatchObject({ action: 'merged', cornerId: opened.cornerId });
+  expect(storedEvents).toHaveLength(1);
+  if (kind !== 'room') expect((await phone.readRoom(R,OUTSIDER))!.viewer.readCursor?.unreadCount).toBe(1);
+  expect(prRows[0].githubEvent).toMatchObject({ action: 'merged', cornerId: opened.cornerId });
   // Legacy readRoom exposes both the static opening and the distinct GitHub
   // event. Select the opening by its identity, never physical query row order.
   const storedRoomOpening = (await db.query(`SELECT card FROM messages
-    WHERE room_id=$1 AND card->>'cornerId'=$2 AND ($3::text IS NULL OR id=$3)`,
+    WHERE room_id=$1 AND card->>'cornerId'=$2 AND card_type='daemon-fact' AND ($3::text IS NULL OR id=$3)`,
     [R, opened.cornerId, roomOpening?.id ?? null])).rows[0];
   expect(storedRoomOpening?.card.type).toBe(kind === 'room' ? 'corner-open' : undefined);
   snapshots[`${kind}-merged`] = merged;
@@ -358,22 +358,23 @@ it('Reproduction CORNER-ROOM-2: preview, unread, history and live reads share op
   const room = (await phone.readRoom(R, OUTSIDER))!;
   expect(room.messages.map(m => m.id)).not.toContain(marker.id);
   expect(room.messages.map(m => m.id)).not.toContain(legacy);
-  expect(room.viewer.readCursor).toMatchObject({ firstUnreadMessageId: null, unreadCount: 0 });
+  expect(room.messages.map(m => m.id)).toContain(legacyPr);
+  expect(room.viewer.readCursor).toMatchObject({ firstUnreadMessageId: legacyPr, unreadCount: 1 });
   const chat = (await phone.readChats(W, OUTSIDER))!.chats.find(c => c.room.id === R)!;
-  expect(chat.latestMessage).toBeUndefined();
-  expect(chat.unread).toBe(false);
-  expect((await phone.readHistory(R, OUTSIDER))!.messages.map(m => m.id)).toEqual([]);
-  expect((await phone.readHistoryAround(R, OUTSIDER, marker.id))!.messages.map(m => m.id)).toEqual([]);
+  expect(chat.latestMessage?.id).toBe(legacyPr);
+  expect(chat.unread).toBe(true);
+  expect((await phone.readHistory(R, OUTSIDER))!.messages.map(m => m.id)).toEqual([legacyPr]);
+  expect((await phone.readHistoryAround(R, OUTSIDER, marker.id))!.messages.map(m => m.id)).toEqual([legacyPr]);
   const live = await phone.readLiveDelta(R, OUTSIDER, { type: 'message', messageId: marker.id });
   expect(live).toBeNull();
-  expect(await phone.readLiveDelta(R, OUTSIDER, {type:'message',messageId:legacyPr})).toBeNull();
+  expect(await phone.readLiveDelta(R, OUTSIDER, {type:'message',messageId:legacyPr})).not.toBeNull();
   expect(await phone.readLiveDelta(R, OUTSIDER, { type: 'message', messageId: legacy })).toBeNull();
   // Older settled Room opening rows stay hidden when their call site is elsewhere.
   await db.query(`UPDATE messages SET card=card||'{"type":"corner-complete","outcome":"landed"}'::jsonb WHERE id=$1`, [marker.id]);
   expect((await phone.readRoom(R, OUTSIDER))!.messages.find(m => m.id===marker.id)?.daemonFact).toBeUndefined();
 });
 
-it.each(['dm','room'] as const)('Reproduction CORNER-ROOM-2: archived %s corner PR events stay at their call site', async (kind) => {
+it.each(['dm','room'] as const)('Reproduction CORNER-ROOM-2: archived %s corner PR events stay in the parent chat', async (kind) => {
   const sourceRoom=kind === 'dm' ? DM : R;
   const command = await request(sourceRoom);
   const opened = await open(sourceRoom, command);
@@ -394,10 +395,10 @@ it.each(['dm','room'] as const)('Reproduction CORNER-ROOM-2: archived %s corner 
   }
   const messages = (await phone.readRoom(R, OUTSIDER))!.messages;
   expect(messages.filter(m => m.daemonFact?.cornerId === opened.cornerId)).toEqual(marker ? [marker] : []);
-  expect(messages.filter(m => m.githubEvent).map(m=>m.githubEvent)).toEqual(kind === 'room' ? [
+  expect(messages.filter(m => m.githubEvent).map(m=>m.githubEvent)).toEqual([
     expect.objectContaining({action:'opened',cornerId:opened.cornerId}),
     expect.objectContaining({action:'closed',cornerId:opened.cornerId}),
-  ] : []);
+  ]);
 });
 
 it.each([false, true])('keeps a human opening static with a resident source=%s', async (withSource) => {

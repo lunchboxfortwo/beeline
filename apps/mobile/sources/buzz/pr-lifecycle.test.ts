@@ -113,3 +113,11 @@ describe('lifecycle-1: stored GitHub lifecycle summaries', () => {
   });
 
 });
+
+it.each(['found failing checks on', 'failed check'])('classifies %s as a small check row even with a PR URL', verb => {
+  const message = subscription('failure', verb, 112);
+  message.systemEvent = { ...message.systemEvent!, kind: 'check-failed',
+    object: { ...message.systemEvent!.object!, headSha: '82828a8' + '1'.repeat(33) } };
+  expect(lifecycleItem(message)).toMatchObject({ kind: 'check', state: 'Failed check', title: '82828a8', headSha: '82828a8' + '1'.repeat(33) });
+  expect(lifecycleSummary(run([message]).items)).toBe('1 check failed');
+});

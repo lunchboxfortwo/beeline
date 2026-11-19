@@ -125,6 +125,13 @@ export function lifecycleItem(message: SystemLineMessage): LifecycleItem | undef
   }
   const check = message.isSystemNotice ? message.systemEvent : undefined;
   if (check?.subject.kind !== 'github') return;
+  if (check.kind === 'check-failed' && /^[a-f0-9]{40}$/i.test(check.object?.headSha ?? '')) {
+    const headSha = check.object!.headSha!.toLowerCase();
+    return {
+      ...base, title: headSha.slice(0, 7), state: 'Failed check', kind: 'check',
+      kindLine: 'Check', url: check.object?.url, headSha, actor: check.subject.name,
+    };
+  }
   const action = check.verb.match(/^(started|passed|failed) a check$/)?.[1];
   if (!action) {
     const url = check.object?.url;
@@ -187,7 +194,7 @@ export function lifecycleSummary(items: readonly LifecycleItem[]): string {
                 : item.kind === 'corner'
                   ? 'corner'
                   : 'notice';
-    const state = item.state.replace(/^(PR|Checks) /, '').toLowerCase();
+    const state = item.state === 'Failed check' ? 'failed' : item.state.replace(/^(PR|Checks) /, '').toLowerCase();
     const key = `${kind}:${state}`;
     // Stored webhook and subscription lines can describe the same PR event.
     // Count it once per run, keeping each committed line in the disclosure.

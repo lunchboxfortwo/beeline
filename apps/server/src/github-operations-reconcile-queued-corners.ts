@@ -228,12 +228,6 @@ import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, br
          ORDER BY membership.joined_at LIMIT 1
        )author ON true
        WHERE room.parent_id IS NULL AND room.archived_at IS NULL
-         AND NOT EXISTS (SELECT 1 FROM messages callsite
-           WHERE callsite.card_type='daemon-fact'
-             AND callsite.card->>'cornerId'=destination.corner_id::text
-             AND callsite.card->>'type' IN ('corner-open','corner-complete')
-             AND callsite.card->>'sourceMessageId' IS NOT NULL
-             AND callsite.room_id<>room.id)
          AND room.github_installation_id=$1
          AND COALESCE(room.created_by,author.identity_id) IS NOT NULL
          AND lower(regexp_replace(regexp_replace(
@@ -432,18 +426,6 @@ import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, br
           );
         } else if (body.action === 'closed' && number) {
           await ctx.recordClosedCornerPullRequest(target.corner_id, number, database);
-        } else if (body.action === 'opened' && url) {
-          await ctx.systemNote(
-            target.corner_id,
-            target.author_id,
-            {
-              subject: actor(text(record(pullRequest?.user)?.login) ?? actorLogin),
-              verb: systemMessage("github-operations.opened-a-pull-request"),
-              object: { text: title, url },
-            },
-            `github:pull-request:opened:${url}`,
-            database,
-          );
         }
         continue;
       }

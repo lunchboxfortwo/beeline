@@ -1,5 +1,5 @@
 import { LedgerDisclosure, LedgerLogGroup } from './LedgerDisclosure';
-import { webhookCallerMessage } from '@/buzz/system-lines';
+import { systemLineText, webhookCallerMessage } from '@/buzz/system-lines';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import { ScrollView, XStack, YStack } from 'tamagui';
@@ -180,9 +180,8 @@ export function LedgerSystemLine({
   const [cut, setCut] = useState<{ key: string; at: number } | null>(null);
   const measurementRef = useRef<unknown>(null);
   const probeRef = useRef<unknown>(null);
-  const fullText = event
-    ? `${event.subject.name} ${event.verb}${event.object?.text ? ` ${event.object.text}` : ''}${event.consequence ? ` · ${event.consequence}` : ''}`
-    : text;
+  const failedCheck = event?.kind === 'check-failed' && /^[a-f0-9]{40}$/i.test(event.object?.headSha ?? '');
+  const fullText = event ? systemLineText(event) : text;
   const measureWebOverflow = () => {
     const element = measurementRef.current as unknown as HTMLElement | null;
     if (element) setOverflows(webFitsTwoLines(element) === false);
@@ -242,7 +241,14 @@ export function LedgerSystemLine({
   );
   // Each segment renders any prefix of its text, so the closed cut keeps names and links.
   const segments: { text: string; render?: (piece: string) => React.ReactNode }[] = [];
-  if (event) {
+  if (failedCheck) {
+    const url = event?.object?.url;
+    segments.push({ text: fullText, ...(url && onOpenUrl ? {
+      render: (piece: string) => <T v="meta" color="secondary" textDecorationLine="underline"
+        key="failed-check" testID={`system-line-object-${id}`} accessibilityRole="link"
+        onPress={(press) => { press.stopPropagation(); onOpenUrl(url); }}>{piece}</T>,
+    } : {}) });
+  } else if (event) {
     segments.push(
       { text: event.subject.name, render: name(event.subject, 0) },
       { text: ` ${event.verb}` },

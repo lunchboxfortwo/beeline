@@ -231,3 +231,9 @@ describe('the event kinds beside the prose', () => {
     expect(formatSystemLine(event)).toBe('Ada joined');
   });
 });
+
+it.each(['found failing checks on', 'failed check'])('formats failed head copy without PR prose: %s', verb => {
+  expect(formatSystemLine({ subject: { kind: 'github', name: '@GitHub' }, verb, kind: 'check-failed',
+    object: { text: 'Setup: quiet defaults', headSha: '82828A8' + '1'.repeat(33) }, consequence: 'failing typecheck',
+  })).toBe('Failed check 82828a8');
+});

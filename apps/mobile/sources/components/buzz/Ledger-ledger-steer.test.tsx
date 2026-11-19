@@ -10,7 +10,7 @@ vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ t
 vi.mock('./IdentityMark', () => ({ IdentityMark: (props: any) => React.createElement('IdentityMark', props) }));
 vi.mock('./MonoMarkdown', () => ({ MonoMarkdown: (props: any) => React.createElement('MonoMarkdown', props) }));
 
-import { LedgerSteer } from './Ledger-ledger-steer';
+import { LedgerSteer, LedgerSystemLine } from './Ledger-ledger-steer';
 
 it('shows your own message with your name in brass and the body in ink', () => {
   let tree: any;
@@ -25,4 +25,18 @@ it('shows your own message with your name in brass and the body in ink', () => {
   const body = tree.root.find((node: any) => node.props.view && node.props.markdown === 'hi @kai');
   expect(body.props.color).toBe('ink');
   expect(body.props.mentionHandles).toEqual(['kai']);
+});
+
+
+it('shows historical failed-head facts with the exact compact copy in the small role', () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  let tree: any;
+  act(() => { tree = create(<LedgerSystemLine id="failure" text="Old stored PR title" stamp="09:51" bare
+    event={{ subject: { kind: 'github', name: '@GitHub' }, kind: 'check-failed', verb: 'found failing checks on',
+      object: { text: 'Setup: quiet defaults', url: 'https://github.com/owner/widgets/pull/112', headSha: '82828a8' + '1'.repeat(33) },
+      consequence: 'failing typecheck' }} />); });
+  const node = tree.root.find((node: any) => node.props.testID === 'system-line-text-failure' && node.props.v);
+  expect(node.props.v).toBe('meta');
+  expect(node.props.children).toEqual(['Failed check 82828a8']);
+  act(() => tree.unmount());
 });

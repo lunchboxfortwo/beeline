@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, GitHubAppClient, GitHubOAuthClient, seedCornerOpening, insertCornerFacts, GitHubOperations, HUMAN, REVIEWER, fixtureScope1 } from './test-support-github-operations.test-support.js';
+import { describe, expect, it, vi, GitHubAppClient, GitHubOAuthClient, seedCornerOpening, insertCornerFacts, GitHubOperations, readAgentCommands, HUMAN, REVIEWER, fixtureScope1 } from './test-support-github-operations.test-support.js';
 
 describe('GitHub phone operations', () => {
 const scope1 = fixtureScope1();
@@ -792,6 +792,7 @@ const scope1 = fixtureScope1();
       )
     ).rows[0];
     console.info(`Reproduction C2-1: failing wake body="${command?.body ?? ''}"`);
-    expect(command?.body).toContain('typecheck');
+    expect(command?.body).toBe('Failed check 1111111');
+    expect((await readAgentCommands(scope1.database, REVIEWER, corner)).commands[0]?.source.body).toContain('typecheck');
   });
 });

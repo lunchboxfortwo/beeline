@@ -230,6 +230,10 @@ export function formatSystemLine(
     readonly subject: SystemSubject | readonly SystemSubject[];
   },
 ): string {
+  // A failed-head fact names the commit, including historical stored wording.
+  if (event.kind === 'check-failed' && /^[a-f0-9]{40}$/i.test(event.object?.headSha ?? '')) {
+    return systemMessage('system-events.failed-check', event.object!.headSha!.slice(0, 7).toLowerCase());
+  }
   const subjects = Array.isArray(event.subject)
     ? (event.subject as readonly SystemSubject[])
     : [event.subject as SystemSubject];
