@@ -436,8 +436,6 @@ Use your judgment about how much planning work needs. This loop can help for a l
 
 ## Dispatch and revision
 
-Include "no progress reports" in the brief and any implementing message.
-
 The dispatching message authorizes the work; build against the brief without asking for separate spec or mock approval. Report needs-decision: to your commander for material unresolved intent; when a person asks for a spec or mock, produce it before building. Include a dispatching message as \`approval\` when available; opening on agent judgment needs no human approval. Revisions retain their approval requirement.
 
 Pass the brief as \`open_thread.brief\`. Read the current revision before revising and use \`revise_thread(action:brief)\` with the complete replacement spec, the approving message, and a concise change description. Preserve unaffected intent quotes, user stories, and references. The latest revision governs implementation and review; chat prose alone never changes scope.
