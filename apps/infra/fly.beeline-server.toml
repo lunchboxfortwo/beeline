@@ -1,5 +1,8 @@
 app = "beeline-server"
 primary_region = "iad"
+kill_signal = "SIGTERM"
+# Let admitted requests finish before the server's dependency cleanup.
+kill_timeout = "300s"
 
 [build]
   dockerfile = "apps/server/Dockerfile"

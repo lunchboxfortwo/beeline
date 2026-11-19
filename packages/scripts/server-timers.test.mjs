@@ -20,7 +20,7 @@ it('the real architecture check rejects every server timer outside the schedule 
     write('docs/architecture/invariants.json', JSON.stringify(invariants));
     write('docs/architecture/machine-connection-sinks.json', '{}');
     write('apps/server/src/owner-schedule-clock.ts', 'setTimeout(fireSchedule, dueTime);');
-    write('apps/server/src/shutdown.ts', 'setTimeout(exit, 10000); setTimeout(drain, 5000); setTimeout(terminate, 1000);');
+    write('apps/server/src/shutdown.ts', 'setTimeout(exit, 10000); setTimeout(terminate, 1000);');
     const clean = check();
     assert.equal(clean.status, 0, clean.stderr);
     for (const source of [
@@ -38,7 +38,7 @@ it('the real architecture check rejects every server timer outside the schedule 
       assert.match(result.stderr, /timers\.server-/);
     }
     write('apps/server/src/planted-background.ts', '');
-    write('apps/server/src/shutdown.ts', 'setTimeout(exit, 10000); setTimeout(drain, 5000); setTimeout(terminate, 1000); setTimeout(extra, 100);');
+    write('apps/server/src/shutdown.ts', 'setTimeout(exit, 10000); setTimeout(terminate, 1000); setTimeout(drain, 5000);');
     const extraDeadline = check();
     assert.equal(extraDeadline.status, 1);
     assert.match(extraDeadline.stderr, /timers\.shutdown-sites/);

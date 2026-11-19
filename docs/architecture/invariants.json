@@ -637,7 +637,7 @@
     {
       "id": "timers.shutdown-sites",
       "module": "Server shutdown",
-      "invariant": "Shutdown owns exactly the request drain, process deadline and live-close deadline.",
+      "invariant": "Shutdown owns exactly the dependency-cleanup and live-close deadlines; Fly owns request-drain grace.",
       "pattern": "\\bsetTimeout\\b|\\bAbortSignal\\s*\\.\\s*timeout\\s*\\(",
       "scope": [
         "apps/server/src"
@@ -645,10 +645,10 @@
       "owners": [
         "apps/server/src/shutdown.ts"
       ],
-      "ownerSites": 3,
+      "ownerSites": 2,
       "total": 0,
       "strict": true,
-      "fix": "Keep the three bounded shutdown deadlines in shutdown.ts; do not add retry or background clocks.",
+      "fix": "Keep the two bounded shutdown deadlines in shutdown.ts; do not add request cutoffs, retry or background clocks.",
       "filePattern": "^apps/server/src/shutdown\\.ts$"
     }
   ],

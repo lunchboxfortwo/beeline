@@ -1,6 +1,5 @@
 import type { Server } from 'node:http';
 
-export const REQUEST_DRAIN_MS = 5_000;
 export const SHUTDOWN_DEADLINE_MS = 10_000;
 export const LIVE_CLOSE_MS = 1_000;
 
@@ -15,16 +14,15 @@ export function installShutdown(server: Server, cleanup: () => Promise<void>): v
   const stop = () => {
     if (stopping) return;
     stopping = true;
-    // Keep this timer referenced: a hung cleanup must still exit before Fly kills us.
-    const deadline = setTimeout(() => {
-      console.error('[server] shutdown deadline reached');
-      process.exit(1);
-    }, SHUTDOWN_DEADLINE_MS);
-    const drain = setTimeout(() => server.closeAllConnections(), REQUEST_DRAIN_MS);
     void (async () => {
       try {
         await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
-        clearTimeout(drain);
+        // Fly owns the request-drain grace. Start the cleanup deadline only
+        // after admitted requests (including upload bodies) finish.
+        const deadline = setTimeout(() => {
+          console.error('[server] shutdown deadline reached');
+          process.exit(1);
+        }, SHUTDOWN_DEADLINE_MS);
         await cleanup();
         clearTimeout(deadline);
         process.exit(0);
