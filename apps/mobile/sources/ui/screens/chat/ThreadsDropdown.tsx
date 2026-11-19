@@ -78,7 +78,8 @@ export function ThreadsDropdown({ roomId, chatName, viewer, openThread, onNewThr
             {newThreadPrompt ? <ForwardCornerSheet visible fromMessage={false}
                 onClose={() => setNewThreadPrompt(false)}
                 onOpen={() => { setNewThreadPrompt(false); onNewThread(); }} /> : null}
-            <Separator borderColor="stroke" marginTop="2" />
+            {/* An open list ends on a firm edge so the transcript below it does not read as part of it. */}
+            <Separator borderColor={open ? 'strongStroke' : 'stroke'} marginTop="2" />
         </YStack>
     );
 }

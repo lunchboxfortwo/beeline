@@ -100,8 +100,9 @@ it.each(SIZES)('Text size %s spaces the place header with its preset steps', (sc
 it.each(SIZES)('Text size %s pads the sheet with its preset steps and keeps it clear of the bottom system bar', (scale) => {
     const tree = at(scale, <SheetFrame open close={vi.fn()} title="Attach"><T>row</T></SheetFrame>);
     const body = tree.root.findAll((node: any) => node.type === 'YStack' && node.props.paddingBottom !== undefined)[0];
+    // The grip above the body is the top edge's space.
     expect([body.props.padding, body.props.paddingTop, body.props.gap])
-        .toEqual([scaled('4', scale), scaled('3', scale), scaled('2', scale)]);
+        .toEqual([scaled('4', scale), 0, scaled('2', scale)]);
     // The physical inset is added after the preset step, unchanged.
     expect(body.props.paddingBottom).toBe(scaled('6', scale) + insets.bottom);
     const head = tree.root.findAll((node: any) => node.type === 'XStack' && node.props.minHeight !== undefined)[0];

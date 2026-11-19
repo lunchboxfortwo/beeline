@@ -325,12 +325,15 @@ export function SheetFrame({ open, close, title, testID, children, back, scrolla
         <Theme name={theme}>
             <Sheet modal open={open} onOpenChange={(o: boolean) => { if (!o) close(); }} snapPointsMode="fit" dismissOnSnapToBottom>
                 <Sheet.Overlay backgroundColor={SCRIM} />
-                <Sheet.Handle backgroundColor="secondary" opacity={0.5} />
                 <Sheet.Container maxWidth={480} width="100%" alignSelf="center" testID={testID}>
                     <Sheet.Background backgroundColor="raised" borderTopLeftRadius="lg" borderTopRightRadius="lg" borderWidth={1} borderColor="stroke" />
+                    {/* The grip sits on the sheet's own edge; the whole sheet is the drag surface. */}
+                    <YStack accessibilityElementsHidden importantForAccessibility="no-hide-descendants" height={18} alignItems="center" justifyContent="center">
+                        <YStack width={34} height={3} borderRadius="sm" backgroundColor="secondary" opacity={0.55} />
+                    </YStack>
                     <SheetKeyboardBody>
                         {/* Text-size steps, then the device's physical bottom inset. */}
-                        <YStack flexShrink={1} minHeight={0} padding={step('4')} paddingTop={step('3')} paddingBottom={step('6') + insets.bottom} gap={step('2')}>
+                        <YStack flexShrink={1} minHeight={0} padding={step('4')} paddingTop={0} paddingBottom={step('6') + insets.bottom} gap={step('2')}>
                             <XStack flexShrink={0} gap={step('2')} alignItems="center" paddingBottom={step('2')} minHeight={HEIGHT.control}>
                                 {back ? <Btn kind="icon" label="Back" onPress={back}><Glyph icon={ArrowLeft} /></Btn> : null}
                                 <T v="title" flex={1}>{title}</T>

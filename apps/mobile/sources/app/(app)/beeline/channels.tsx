@@ -171,13 +171,17 @@ const BuzzChannels = memo(function BuzzChannels({ session }: { session: DeckSess
   const workspaceName = chatList?.workspace.name ?? activeCommunity?.name ?? WORKSPACE_LABEL;
   // Desktop has no bare list in the middle: the top chat of the already loaded
   // list opens there (build spec, desktop walk "open: sidebar, #beeline in the middle").
+  // A sidebar New chat request owns this deck instead: the chat it creates opens.
+  const composingChat = state.newChatStep !== null || Boolean(canCreate && state.requestedNewRoom &&
+    state.requestedNewRoom !== state.handledNewRoomRequest.current);
   const desktopFirstChat = isDesktop && landing.kind === 'deck' ? rows[0]?.room.id : undefined;
   const openedDesktopChat = useRef(false);
   useEffect(() => {
+    if (composingChat) openedDesktopChat.current = true;
     if (!desktopFirstChat || openedDesktopChat.current) return;
     openedDesktopChat.current = true;
     router.replace(roomHref(desktopFirstChat));
-  }, [desktopFirstChat]);
+  }, [composingChat, desktopFirstChat]);
 
   if (landing.kind === 'error') {
     return (

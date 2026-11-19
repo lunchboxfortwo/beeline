@@ -189,3 +189,15 @@ it('names the active count, then lists every thread inside a list capped at 45% 
   expect(loadMoreOpen).toHaveBeenCalledTimes(1);
   act(() => tree.unmount());
 });
+
+it('ends the open list on a firm edge above the transcript', () => {
+  fixture.summary = { cornerCount: 1, openCorners: [{ id: 'a', name: 'one', state: 'idle' }] };
+  fixture.corners = { openRows: [], record: null, loadMoreOpen: vi.fn() };
+  let tree: any;
+  act(() => { tree = create(<ThreadsDropdown roomId="r" chatName="general" openThread={vi.fn()} onNewThread={vi.fn()} />); });
+  const edge = () => tree.root.findAllByType('Separator').at(-1).props.borderColor;
+  expect(edge()).toBe('stroke');
+  act(() => byTestID(tree, 'threads-dropdown-trigger')[0].props.onPress());
+  expect(edge()).toBe('strongStroke');
+  act(() => tree.unmount());
+});

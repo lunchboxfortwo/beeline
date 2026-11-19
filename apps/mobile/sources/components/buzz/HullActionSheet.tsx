@@ -120,6 +120,8 @@ export function HullActionSheet({
         {children}
       </YStack>
     );
+  // Without a grip or navigation above it, the title clears the surface's top edge itself.
+  const clearsTop = !grip && navigation == null;
   return (
     <HullFloatingSurface width="100%" testID={testID}>
       {grip ? (
@@ -141,7 +143,7 @@ export function HullActionSheet({
           onPress={onTitlePress}
           testID={titleTestID}
         >
-          <T v="heading" numberOfLines={1} paddingHorizontal="6" paddingTop="1" paddingBottom="2">{title}</T>
+          <T v="heading" numberOfLines={1} paddingHorizontal="6" paddingTop={clearsTop ? '5' : '1'} paddingBottom="2">{title}</T>
         </YStack>
       ) : title ? (
         <T
@@ -149,7 +151,7 @@ export function HullActionSheet({
           accessibilityRole="header"
           numberOfLines={1}
           paddingHorizontal="6"
-          paddingTop="1"
+          paddingTop={clearsTop ? '5' : '1'}
           paddingBottom="2"
           testID={titleTestID}
         >
