@@ -845,8 +845,8 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
       const address = JSON.stringify([item.return_room_id ?? input.roomId,item.return_agent_id]);
       const saved = await answerQueuedMessage(db,agentId,{
         ...input,queuedRequestIds:undefined,requestId:item.id,
-        sharedReplyId:item.return_agent_id ? undefined : receipts.get(address),
-        messageId:hash(`answer:${item.return_agent_id ? item.id : input.requestId}:${address}`),
+        sharedReplyId:receipts.get(address),
+        messageId:hash(`answer:${input.requestId}:${address}`),
       });
       result ??= saved;
       if (saved.answered === false) unanswered = true;
