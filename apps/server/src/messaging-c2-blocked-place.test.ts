@@ -30,8 +30,8 @@ describe('C2: blocked replies retain the addressed message destination', () => {
       await settle();
       const answer = await daemon.execute('reply', { id: wake.id, text: 'blocked: need a decision', ask }, worker);
       expect((await inbox()).map(row => [row.agent_id, row.room_id, row.from, Boolean(row.ask)]), `opening=${opening}`)
-        .toEqual([]);
-      expect((await db.query('SELECT room_id,author_id FROM messages WHERE id=$1', [answer.id])).rows)
+        .toEqual(reason === 'corner_review_dispatch' ? [[B, THREAD, { agent: C, place: THREAD }, true]] : []);
+      if (reason !== 'corner_review_dispatch') expect((await db.query('SELECT room_id,author_id FROM messages WHERE id=$1', [answer.id])).rows)
         .toEqual([{ room_id: THREAD, author_id: worker }]);
     }
   });

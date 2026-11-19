@@ -28,11 +28,24 @@ async function answeredInThread(agentId: string, reason: string) {
 
 }
 
-it('a passing-check review wake answers in the thread instead of the commissioning chat', async () => {
+it('a reviewer final answer wakes the implementer with its findings in the thread', async () => {
   await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
   await lifecycle('passing');
   await github('passed a check', 'check-passed');
-  await answeredInThread(B, 'corner_review_dispatch');
+  const [review] = await commands(B, C);
+  expect(review).toMatchObject({ reason: 'corner_review_dispatch', returnRoomId: C });
+  const findings = `Changes requested on ${head}: [P1] Keep the table anchored when quiet defaults change.`;
+  const before = (await commands(A, C)).map(command => command.id);
+  await result(review!, findings);
+  const replies = (await commands(A, C)).filter(command => !before.includes(command.id));
+  expect(replies).toEqual([expect.objectContaining({ roomId: C, agentId: A, reason: 'reply',
+    source: expect.objectContaining({ body: findings,
+      route: { from: { agent: B, place: C }, to: { agent: A, place: C } } }) })]);
+  await result(review!, findings);
+  expect((await commands(A, C)).filter(command => !before.includes(command.id)).map(command => command.id))
+    .toEqual(replies.map(command => command.id));
+  expect(await commands(A, R)).toEqual([]);
+  expect((await rootFixture.db.query('SELECT 1 FROM corner_merge_approvals WHERE corner_id=$1', [C])).rowCount).toBe(0);
 });
 
 it('a failing-check wake answers in the thread', async () => {

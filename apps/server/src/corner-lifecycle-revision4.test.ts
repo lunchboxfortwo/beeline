@@ -32,7 +32,7 @@ describe('revision 4 simple corner review model', () => {
     const fixes=await commands(A,C);
     for(const fix of fixes) {
       await claim(fix);
-      await result(fix,'The requested correction is ready.');
+      await result(fix,'');
     }
     await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{checks}','"pending"') WHERE corner_id=$1`,[C]);
     await advanceCorner(rootFixture.db,C,{kind:'checks-pending'});
@@ -65,14 +65,14 @@ describe('revision 4 simple corner review model', () => {
     await claim(first!);
     await result(first!,'FAIL: attach the required evidence.');
     await reconcileConfiguredCornerReviewers(rootFixture.db,R);
-    const [repair]=(await commands(A,C)).filter(command=>command.reason==='corner_review_needed');
+    const [repair]=(await commands(A,C)).filter(command=>command.reason==='reply');
     expect(repair).toBeDefined();
     await claim(repair!);
     await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{checks}','"pending"') WHERE corner_id=$1`,[C]);
     await advanceCorner(rootFixture.db,C,{kind:'checks-pending'});
     await greenHead(107,head);
     expect(await commands(B,C)).toEqual([]);
-    await result(repair!,'The requested evidence is attached; the head is unchanged.');
+    await result(repair!,'');
     for(let event=0;event<3;event++) await reconcileConfiguredCornerReviewers(rootFixture.db,R);
     const next=(await commands(B,C)).filter(command=>command.reason==='corner_review_dispatch');
     expect(next).toHaveLength(1);

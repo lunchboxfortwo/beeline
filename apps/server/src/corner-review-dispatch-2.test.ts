@@ -39,8 +39,8 @@ describe('corner message attribution', () => {
     await result(review!, 'FAIL: the waiver is not in the brief.');
     await reconcileConfiguredCornerReviewers(rootFixture.db, R);
     const repairs=await commands(A,C);
-    expect(repairs.some(item=>item.reason==='corner_review_needed')).toBe(true);
-    for(const repair of repairs) { await claim(repair); await result(repair,'The waiver evidence is ready.'); }
+    expect(repairs.map(item=>item.reason)).toEqual(['reply']);
+    for(const repair of repairs) { await claim(repair); await result(repair,''); }
     // A CI re-run on the same head and the same brief revision.
     await verdict('rerun');
     const repeated = (await commands(B, C)).length;
