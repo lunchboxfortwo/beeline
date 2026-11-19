@@ -12,6 +12,8 @@ import { applyAppearanceChoice } from '@/display';
 import { APP_UI_SIZE_LABELS, APP_UI_SIZE_OPTIONS } from '@/ui-size';
 import { roomOpenTraceEnabled } from '@/buzz/room-open-trace';
 import { openExternalUrl } from '@/utils/open-external-url';
+import { getBuzzRuntimeConfig } from '@/buzz/runtime-config';
+import type { CompanyLogo } from '@beeline/api-contract/workbench';
 import { ChoiceSheet } from './ChoiceSheet';
 import type { YouSettings as You } from './useYouSettings';
 
@@ -29,6 +31,9 @@ const APPEARANCES = [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']]
 const PALETTES = [['brass', 'Brass', 'Aubergine, Bone and brass.'], ['stone', 'Stone', 'Neutral Stone on the same components. Default.']] as const;
 const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 const open = (url: string) => () => void openExternalUrl(url).catch(() => undefined);
+/** The server's own brand mark for a sign-in provider, the same one its Connectors rows use. */
+const providerMark = (provider: 'github' | 'google'): CompanyLogo =>
+    ({ kind: 'image', uri: `${getBuzzRuntimeConfig().monolithUrl}/v1/company-logos/${provider}`, plate: 'dark' });
 
 /** A destructive row: the label in removed ink, nothing else. */
 function DangerRow({ label, onPress, testID, last }: { label: string; onPress: () => void; testID?: string; last?: boolean }) {
@@ -81,7 +86,7 @@ export function YouSettings({ you }: { you: You }) {
                     <Row
                         label="Push not working"
                         detail={capitalize(you.push.failure)}
-                        right={<Btn label="Retry notifications" disabled={you.push.working} onPress={you.push.retry} testID="push-retry-registration">{you.push.working ? 'Retrying notifications…' : 'Retry notifications'}</Btn>}
+                        right={you.push.retryable ? <Btn label="Retry notifications" disabled={you.push.working} onPress={you.push.retry} testID="push-retry-registration">{you.push.working ? 'Retrying notifications…' : 'Retry notifications'}</Btn> : undefined}
                     />
                 ) : null}
                 <YStack paddingVertical="3" gap="2">
@@ -134,7 +139,7 @@ export function YouSettings({ you }: { you: You }) {
                 {providers?.map((link) => (
                     <Row
                         key={link.provider}
-                        leading={<ServiceMark company={link.provider === 'google' ? 'Google' : 'GitHub'} domain={link.provider === 'google' ? 'google.com' : 'github.com'} />}
+                        leading={<ServiceMark company={link.provider === 'google' ? 'Google' : 'GitHub'} mark={providerMark(link.provider)} />}
                         label={link.provider === 'google' ? 'Google' : 'GitHub'}
                         detail={link.login}
                         value={link.reconnect ? 'Reconnect' : providers.length === 1 ? 'Signed in' : 'Linked'}
@@ -143,11 +148,11 @@ export function YouSettings({ you }: { you: You }) {
                     />
                 ))}
                 {providers && !providers.some((link) => link.provider === 'github') ? (
-                    <Row leading={<ServiceMark company="GitHub" domain="github.com" />} label="GitHub" detail="Needed to link repositories" value="Connect"
+                    <Row leading={<ServiceMark company="GitHub" mark={providerMark('github')} />} label="GitHub" detail="Needed to link repositories" value="Connect"
                         onPress={you.busy === 'github' ? undefined : () => void you.connectGitHub()} testID="settings-provider-github" />
                 ) : null}
                 {providers && !providers.some((link) => link.provider === 'google') ? (
-                    <Row leading={<ServiceMark company="Google" domain="google.com" />} label="Google" value="Connect"
+                    <Row leading={<ServiceMark company="Google" mark={providerMark('google')} />} label="Google" value="Connect"
                         onPress={you.busy === 'google' ? undefined : () => void you.connectGoogle()} testID="settings-provider-google" />
                 ) : null}
                 <Row label="Privacy Policy" onPress={open(PRIVACY_URL)} testID="settings-privacy-row" />

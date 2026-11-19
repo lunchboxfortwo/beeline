@@ -60,6 +60,7 @@ export function AppMark({
   testID?: string;
 }) {
   const [failedUris, setFailedUris] = useState<string[]>([]);
+  const [loadedUri, setLoadedUri] = useState<string>();
   const imageSize = Math.round(size * 0.56);
   const bundled = mark ? undefined : BUNDLED_MARKS[name.toLowerCase()];
   const uri = mark ? (mark.kind === 'image' ? mark.uri : undefined) : bundled
@@ -70,7 +71,9 @@ export function AppMark({
   const showImage = uri && !failedUris.includes(uri);
   const dark = useThemeName().startsWith('dark');
   const ink = (useTheme() as Record<string, { val: string } | undefined>).ink?.val;
-  const plate = showImage && mark?.kind === 'image' ? mark.plate : undefined;
+  // Until the image arrives the row keeps its fallback, so a slow logo never leaves an empty plate.
+  const loaded = showImage && loadedUri === uri;
+  const plate = loaded && mark?.kind === 'image' ? mark.plate : undefined;
   // A light plate stays light and a dark plate stays dark in either mode.
   const lightPlate = white || plate === 'light';
   return (
@@ -81,20 +84,24 @@ export function AppMark({
       borderRadius={size <= 28 ? 'sm' : 'md'}
       alignItems="center"
       justifyContent="center"
+      position="relative"
       overflow="hidden"
       backgroundColor={lightPlate ? (dark ? 'ink' : 'canvas') : plate === 'dark' ? (dark ? 'canvas' : 'ink') : 'raised'}
     >
-      {!showImage && !bundled ? (
-        domain || (mark && mark.kind !== 'monogram') ? (
-          <Svg width={imageSize} height={imageSize} viewBox="0 0 24 24" fill="none" stroke={ink} strokeWidth={1.4} {...DECORATIVE_GLYPH_PROPS}>
-            <Circle cx={12} cy={12} r={9} /><Ellipse cx={12} cy={12} rx={4} ry={9} /><Path d="M3 12h18M5 7h14M5 17h14" />
-          </Svg>
-        ) : <T v="heading">{name.slice(0, 1).toUpperCase()}</T>
+      {!loaded && !bundled ? (
+        <YStack position="absolute" top={0} right={0} bottom={0} left={0} alignItems="center" justifyContent="center">
+          {domain || (mark && mark.kind !== 'monogram') ? (
+            <Svg width={imageSize} height={imageSize} viewBox="0 0 24 24" fill="none" stroke={ink} strokeWidth={1.4} {...DECORATIVE_GLYPH_PROPS}>
+              <Circle cx={12} cy={12} r={9} /><Ellipse cx={12} cy={12} rx={4} ry={9} /><Path d="M3 12h18M5 7h14M5 17h14" />
+            </Svg>
+          ) : <T v="heading">{name.slice(0, 1).toUpperCase()}</T>}
+        </YStack>
       ) : null}
       {bundled ? (
         <Image
           accessibilityIgnoresInvertColors
-          source={bundled}
+          // Tamagui's web Image reads only src; native maps it to the source.
+          src={bundled as unknown as string}
           width={imageSize}
           height={imageSize}
         />
@@ -103,7 +110,8 @@ export function AppMark({
         <Image
           testID={testID ? `${testID}-icon` : undefined}
           accessibilityIgnoresInvertColors
-          source={{ uri }}
+          src={uri}
+          onLoad={() => setLoadedUri(uri)}
           onError={() => setFailedUris((current) => [...current, uri])}
           width={imageSize}
           height={imageSize}

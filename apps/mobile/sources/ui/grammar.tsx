@@ -255,9 +255,10 @@ export function Screen({ title, back, children, testID, right, header }: { title
     return (
         <YStack flex={1} minHeight={0} backgroundColor="canvas" testID={testID}>
             {header ?? <ScreenHeader title={title} back={back} right={right} safeTop />}
-            {/* The column grows to the page's height so a page loader centres in it. */}
+            {/* The column grows to the page's height so a page loader centres in it; wide windows read it at the Settings width. */}
             <ScrollView flex={1} minHeight={0} keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1 }}>
-                <YStack flexGrow={1} padding={step('4')} gap={step('5')} paddingBottom={step('8')}>{children}</YStack>
+                <YStack flexGrow={1} padding={step('4')} gap={step('5')} paddingBottom={step('8')}
+                    width="100%" maxWidth={720} alignSelf="center">{children}</YStack>
             </ScrollView>
         </YStack>
     );

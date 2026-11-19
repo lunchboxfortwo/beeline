@@ -287,6 +287,8 @@ export function useYouSettings({ linkedWorkspaceId, githubReconnect, githubConne
     const shownPushLevel = managed?.pushLevel ?? pushLevel;
     const pushFailure = shownPushLevel !== 'off' && pushEnabled === true && pushRegistration !== null &&
         !pushRegistration.registered ? buzzPushPhaseDetail(pushRegistration.phase) : null;
+    // A permission the OS or browser will not ask for again cannot be fixed by retrying.
+    const pushRetryable = !(pushRegistration?.phase === 'permission-denied' && pushPermission?.canAskAgain === false);
     const name = managed?.name ?? profileName;
     const handle = managed?.handle ?? (name ? personHandle(name, pubkey ?? '') : '');
 
@@ -296,7 +298,7 @@ export function useYouSettings({ linkedWorkspaceId, githubReconnect, githubConne
         push: {
             supported: pushPermission !== null && pushPermission.status !== 'unsupported',
             level: shownPushLevel, disabled: pushEnabled === null || pushWorking, working: pushWorking,
-            failure: pushFailure, retry: () => void retryPush(), change: changePushLevel,
+            failure: pushFailure, retryable: pushRetryable, retry: () => void retryPush(), change: changePushLevel,
         },
         speakingSpeed: managed?.speakingSpeed ?? 1.15, changeSpeakingSpeed,
         busy, connectGoogle, connectGitHub, changePicture, signOut, deleteAccount,

@@ -372,6 +372,8 @@ describe('one tap from a Connectors row', () => {
       items: [{ id: 'stripe-key', title: 'Stripe key', subtitle: 'stripe.com', kind: 'key', target: { kind: 'key', connectionId: 'stripe-key' }, status: 'Expired', attention: true }] }]));
     const renderer = await render();
     expect(row(renderer, 'stripe').props.value).toBe('Expired');
+    // F08: the status is said once, as the value, not again in the description.
+    expect(row(renderer, 'stripe').props.description).not.toContain('Expired');
     await act(async () => row(renderer, 'stripe').props.onPress());
     expect(navigation.push.mock.calls).toEqual([[{ pathname: '/beeline/settings/workbench/service', params: { ...scope, service: 'stripe' } }]]);
   });

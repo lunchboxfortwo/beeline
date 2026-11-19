@@ -118,10 +118,33 @@ fn register_linux_deep_links(app: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// A process that inherits a revoked or expired session keyring (a stale login
+/// shell) can neither read nor write the kernel keyring, and keyring reports
+/// that as NoEntry. Join a fresh session; keyring links the user's persistent
+/// keyring into it, so saved sessions are found again.
+#[cfg(target_os = "linux")]
+fn renew_dead_session_keyring() {
+    const KEYCTL_GET_KEYRING_ID: libc::c_long = 0;
+    const KEYCTL_JOIN_SESSION_KEYRING: libc::c_long = 1;
+    const KEY_SPEC_SESSION_KEYRING: libc::c_long = -3;
+    // SAFETY: keyctl takes integer arguments here and a null name for an anonymous session.
+    unsafe {
+        if libc::syscall(libc::SYS_keyctl, KEYCTL_GET_KEYRING_ID, KEY_SPEC_SESSION_KEYRING, 0) >= 0 {
+            return;
+        }
+        let error = std::io::Error::last_os_error().raw_os_error();
+        if error == Some(libc::EKEYREVOKED) || error == Some(libc::EKEYEXPIRED) {
+            libc::syscall(libc::SYS_keyctl, KEYCTL_JOIN_SESSION_KEYRING, std::ptr::null::<libc::c_char>());
+        }
+    }
+}
+
 // The shell hosts the Expo web bundle but owns the few native boundaries that
 // cannot safely degrade to browser APIs, including session credential custody.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    renew_dead_session_keyring();
     let builder = tauri::Builder::default();
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {

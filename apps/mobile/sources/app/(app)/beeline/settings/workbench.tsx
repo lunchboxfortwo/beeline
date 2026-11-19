@@ -49,7 +49,7 @@ export default function WorkbenchScreen() {
               {rows.map((row, n) => {
                 const state = connectionViewState(row);
                 return <ConnectorRow key={row.id} title={row.name}
-                  description={state === 'error' && row.status ? `${row.status} · ${row.subtitle}` : row.subtitle}
+                  description={row.subtitle}
                   descriptionContent={row.roomsClientId ? <AiClientSubtitle agent={view?.aiClients?.find(client => client.clientId === row.roomsClientId)?.agent?.name} /> : undefined}
                   leading={<ServiceMark company={row.name} domain={row.domain} mark={row.logo} />}
                   action={row.section === 'attention' ? 'Reconnect' : state === 'connect' ? 'Connect' : undefined}

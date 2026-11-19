@@ -94,15 +94,11 @@ it('keeps the actual recovery row intrinsic and all of its text wrapping at phon
           },
           {
             "numberOfLines": undefined,
-            "text": "Try your request again.",
-          },
-          {
-            "numberOfLines": undefined,
             "text": "Reconnect",
           },
         ],
         "rowHeight": undefined,
-        "rowPadding": "3",
+        "rowPadding": 0,
         "safeAreaTop": 24,
         "width": 390,
       }
