@@ -48,12 +48,13 @@ export function updaterBuildConfig({ version, publicKey, endpoint }) {
   };
 }
 
-export function createDesktopUpdateManifest({ directory, version, releaseTag, repository, publishedAt }) {
+export function createDesktopUpdateManifest({ directory, version, releaseTag, repository, publishedAt, omit = [] }) {
   const normalized = normalizeDesktopVersion(version);
   if (!/^v\d+\.\d+\.\d+$/.test(releaseTag ?? '')) fail('release tag must be vX.Y.Z');
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository ?? '')) fail('invalid repository');
   const platforms = {};
   for (const [platform, file] of Object.entries(SIGNED_ASSETS)) {
+    if (omit.includes(platform)) continue;
     const signature = readFileSync(join(directory, `${file}.sig`), 'utf8').trim();
     if (!signature) fail(`${file}.sig is empty`);
     platforms[platform] = {
@@ -73,6 +74,8 @@ export function createDesktopUpdateManifest({ directory, version, releaseTag, re
 export function verifyDesktopUpdateManifest(actual, expected) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) fail('served desktop update manifest differs from the release artifact');
   for (const [platform, asset] of Object.entries(SIGNED_ASSETS)) {
+    // A platform the expected manifest deliberately omits is checked by equality above.
+    if (!expected.platforms?.[platform]) continue;
     const entry = actual.platforms?.[platform];
     if (!entry?.signature || basename(new URL(entry.url).pathname) !== asset) {
       fail(`desktop update manifest has no valid ${platform} payload`);
@@ -110,6 +113,7 @@ async function main(argv) {
       releaseTag: args.tag,
       repository: args.repository,
       publishedAt: args['published-at'] ?? new Date().toISOString(),
+      omit: args.omit ? args.omit.split(',') : [],
     });
     writeFileSync(args.output, `${JSON.stringify(manifest, null, 2)}\n`);
     return;
