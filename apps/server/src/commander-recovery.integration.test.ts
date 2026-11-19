@@ -162,7 +162,7 @@ it('reports a later corner order to the opening commander', async () => {
   expect((await commands(ROOM, OTHER)).some((c) => c.reason === 'report')).toBe(false);
 });
 
-it('keeps approval resume provenance and posts progress only in the corner', async () => {
+it('keeps approval resume provenance and the request’s recorded private return route', async () => {
   const opened = await open(),
     turn = await worker(opened.cornerId);
   await systemLine(rootFixture.db, {
@@ -179,20 +179,24 @@ it('keeps approval resume provenance and posts progress only in the corner', asy
   expect(resumed.source.body).toContain('received approval');
   expect(resumed.parentCommandId).toBe(turn.id);
   await claim(resumed);
+  const progress = 'Approval resumed; continuing work in the thread.';
   await rootFixture.daemon.execute(
     'postRoomMessage',
-    { ...authority(resumed), text: 'PRIVATE COORDINATION LEAK' },
+    { ...authority(resumed), text: progress },
     WORKER,
   );
-  expect(
-    (await rootFixture.db.query(`SELECT text FROM messages WHERE text='PRIVATE COORDINATION LEAK'`)).rowCount,
-  ).toBe(0);
+  expect((await rootFixture.db.query(`SELECT room_id,author_id,presentation,card_type FROM messages WHERE text=$1`, [progress])).rows)
+    .toEqual([{room_id:DM,author_id:WORKER,presentation:'card',card_type:'agent-command'}]);
   expect(
     (await commands(DM, RUBY)).some(
-      (c) => c.reason === 'report' && c.source.body === 'done: PRIVATE COORDINATION LEAK',
+      (c) => c.reason === 'report' && c.source.body === `done: ${progress}`,
     ),
   ).toBe(false);
-  expect((await commands(DM,RUBY)).some(item=>item.source.body==='PRIVATE COORDINATION LEAK')).toBe(true);
+  expect((await commands(DM,RUBY)).filter(item=>item.source.body===progress)).toEqual([
+    expect.objectContaining({private:true,reason:'reply',agentId:RUBY,roomId:DM,
+      from:{agent:WORKER,place:opened.cornerId},
+      source:expect.objectContaining({route:{from:{agent:WORKER,place:opened.cornerId},to:{agent:RUBY,place:DM}}})}),
+  ]);
 });
 
 it('keeps private work across connection close and a new helper process resumes it without a failure report', async () => {

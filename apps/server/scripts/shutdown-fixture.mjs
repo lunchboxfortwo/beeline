@@ -8,9 +8,12 @@ const server = createBeelineServer({
   database: { query: async () => ({ rows: [], rowCount: 0 }), transaction: async () => {} },
   auth: { authenticateDaemon: async () => 'shutdown-agent' },
   phone: {}, daemon: {}, live: new LiveHub(), mediaMaximumBytes: 1,
-  authHandler: (_request, response) => {
+  authHandler: (request, response) => {
     process.send?.({ type: 'request-started' });
-    if (!process.env.BEELINE_SHUTDOWN_STUCK_REQUEST) setTimeout(() => response.end('completed'), 300);
+    let body = '';
+    request.on('data', chunk => { body += chunk; });
+    request.on('end', () => setTimeout(() => response.end(
+      request.method === 'POST' && body !== 'firstlast' ? 'incomplete upload' : 'completed'), 300));
   },
 });
 installShutdown(server, async () => {

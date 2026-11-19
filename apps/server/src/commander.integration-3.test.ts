@@ -137,31 +137,41 @@ it.each(['dm', 'room', 'corner', 'parent-room'] as const)('post receipt identifi
 
 
 
-it('opens with an independent reviewer and lets another member change it through metadata', async () => {
+it('inherits an independent Room reviewer and lets another member set its metadata override', async () => {
+  await rootFixture.phone.execute('updateRoom', {roomId:ROOM,reviewerAgentId:RUBY}, HUMAN);
   const input = { ...authority(rootFixture.order), requestId: rootFixture.order.turnRequestId, targetRoomId: ROOM,
-    name: 'Reviewer', objective: 'Prove corner reviewer assignment', implementer: 'worker', reviewer: 'ruby',
+    name: 'Reviewer', objective: 'Prove corner reviewer assignment', implementer: 'worker',
     brief: { spec: 'Prove reviewer assignment', repositoryWork: false } };
   const opened = await rootFixture.daemon.execute('createCorner', input, RUBY);
   expect((await rootFixture.db.query(`SELECT reviewer_agent_id FROM corner_facts WHERE corner_id=$1`, [opened.cornerId])).rows[0])
-    .toEqual({ reviewer_agent_id: RUBY });
+    .toEqual({ reviewer_agent_id: null });
+  expect(await rootFixture.daemon.execute('getAgentConfiguration', {roomId:opened.cornerId}, RUBY))
+    .toMatchObject({isReviewer:true,reviewerHandle:'ruby'});
   // Tool retries retain the original corner rather than opening duplicate work.
   expect((await rootFixture.daemon.execute('createCorner', input, RUBY)).cornerId).toBe(opened.cornerId);
   const turn = await worker(opened.cornerId);
   await expect(rootFixture.daemon.execute('renameCorner', { ...authority(turn), cornerId: opened.cornerId, reviewer: 'worker' }, WORKER))
     .rejects.toThrow('implementer cannot review');
   await rootFixture.daemon.execute('renameCorner', { ...authority(turn), cornerId: opened.cornerId, reviewer: 'ruby' }, WORKER);
+  expect((await rootFixture.db.query(`SELECT reviewer_agent_id FROM corner_facts WHERE corner_id=$1`, [opened.cornerId])).rows[0])
+    .toEqual({reviewer_agent_id:RUBY});
   const lines = await rootFixture.db.query(`SELECT text FROM messages WHERE room_id=$1 AND text LIKE '%set the thread reviewer%'`, [opened.cornerId]);
   expect(lines.rowCount).toBe(1);
-  console.info('Demonstrated corner-reviewer: open assigns an independent reviewer; another member can set it without editing the brief; self review is refused.');
+  console.info('Demonstrated corner-reviewer: open inherits the Room reviewer; another member can set its override without editing the brief; self review is refused.');
 });
 
 
-it('refuses opening with the implementer as reviewer atomically', async () => {
-  await expect(rootFixture.daemon.execute('createCorner', { ...authority(rootFixture.order), requestId: rootFixture.order.turnRequestId,
+it('refuses an implementer reviewer metadata override atomically', async () => {
+  const opened = await rootFixture.daemon.execute('createCorner', { ...authority(rootFixture.order), requestId: rootFixture.order.turnRequestId,
     targetRoomId: ROOM, name: 'Reviewer', objective: 'Prove reviewer independence',
-    implementer: 'worker', reviewer: 'worker', brief: { spec: 'Prove reviewer independence', repositoryWork: false } }, RUBY))
+    implementer: 'worker', brief: { spec: 'Prove reviewer independence', repositoryWork: false } }, RUBY);
+  const before = (await rootFixture.db.query(`SELECT id FROM rooms WHERE parent_id=$1`, [ROOM])).rows;
+  await expect(rootFixture.daemon.execute('renameCorner', {...authority(rootFixture.order),cornerId:opened.cornerId,reviewer:'worker'},RUBY))
     .rejects.toThrow('implementer cannot review');
-  expect((await rootFixture.db.query(`SELECT 1 FROM rooms WHERE parent_id=$1`, [ROOM])).rowCount).toBe(0);
+  expect((await rootFixture.db.query(`SELECT id FROM rooms WHERE parent_id=$1`, [ROOM])).rows).toEqual(before);
+  expect((await rootFixture.db.query(`SELECT reviewer_agent_id FROM corner_facts WHERE corner_id=$1`, [opened.cornerId])).rows[0])
+    .toEqual({reviewer_agent_id:null});
+  expect((await rootFixture.db.query(`SELECT id FROM messages WHERE room_id=$1 AND text LIKE '%set the thread reviewer%'`,[opened.cornerId])).rows).toEqual([]);
 });
 
 

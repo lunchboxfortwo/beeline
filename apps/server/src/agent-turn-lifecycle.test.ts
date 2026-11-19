@@ -47,8 +47,13 @@ it.each(['human_tag','schedule'])('quietly ends an unanswered %s harness executi
   await daemon.execute('postRoomMessage',closing,A);
   await daemon.execute('postRoomMessage',closing,A);
   expect((await db.query("SELECT id FROM messages WHERE room_id=$1 AND presentation='system' AND text LIKE '%failed%'",[R])).rows).toEqual([]);
-  expect((await readAgentCommands(db,A,R)).commands.map(item=>item.id)).toEqual(reason==='human_tag'?[c.id]:[]);
+  expect((await readAgentCommands(db,A,R)).commands.map(item=>item.id)).toEqual([c.id]);
   expect((await phone.readRoom(R,H))?.latestAgentTurns?.some(turn=>turn.status==='working')).toBe(false);
+  if (reason === 'schedule') {
+    expect(await daemon.execute('markAgentTurnSilent',{roomId:R,requestId:c.turnRequestId},A)).toMatchObject({answered:true});
+    expect((await readAgentCommands(db,A,R)).commands).toEqual([]);
+    expect((await db.query('SELECT id FROM messages WHERE room_id=$1 AND author_id<>$2',[R,H])).rows).toEqual([]);
+  }
 });
 
 it('quietly acknowledges background no_reply_needed without inventing a reply',async()=>{
@@ -60,10 +65,12 @@ it('quietly acknowledges background no_reply_needed without inventing a reply',a
   expect((await db.query('SELECT id FROM messages WHERE room_id=$1 AND author_id<>$2',[R,H])).rows).toEqual([]);
 });
 
-it('quietly settles an empty batch while leaving its unanswered human item owed',async()=>{
+it('keeps empty batch requests owed until the schedule is explicitly acknowledged',async()=>{
   const first=await ask(),second=await ask();
   await db.query("UPDATE agent_commands SET reason='schedule' WHERE id=$1",[first.id]);
   await daemon.execute('postRoomMessage',{roomId:R,requestId:first.id,queuedRequestIds:[second.id],text:'',harnessEnded:true},A);
+  expect((await readAgentCommands(db,A,R)).commands.map(item=>item.id)).toEqual([first.id,second.id]);
+  expect(await daemon.execute('markAgentTurnSilent',{roomId:R,requestId:first.id},A)).toMatchObject({answered:true});
   expect((await readAgentCommands(db,A,R)).commands.map(item=>item.id)).toEqual([second.id]);
   expect((await db.query('SELECT id FROM messages WHERE room_id=$1 AND author_id<>$2',[R,H])).rows).toEqual([]);
 });

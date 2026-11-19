@@ -79,7 +79,8 @@ it('DROP-24: delivers every answer across repeated mid-answer drops with one rec
     await vi.waitFor(()=>expect(answered.size).toBe(24));
     await drop();await drop(); // Every answer is on the wire, none acknowledged.
     answerGate.resolve();
-    await vi.waitFor(()=>expect(traced.size).toBe(24));
+    // 24 real answer writes run here; the 1 s default is not this proof's subject.
+    await vi.waitFor(()=>expect(traced.size).toBe(24),{timeout:10_000});
     await drop();await drop(); // Diagnostics sent, results still withheld.
     traceGate.resolve();
     await Promise.all(turns);

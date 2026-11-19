@@ -371,7 +371,7 @@ const scope18 = fixtureScope18();
     const [fix] = (await commands(A, cornerId)).filter((command) => command.reason === 'corner_check');
     // The turn names the failed job even while another job runs.
     expect(fix!.private).toBe(true);
-    expect(fix!.source.body).toContain('failing Body suite');
+    expect(fix!.source.body).toContain('Check failed · Body suite · 7777777');
     await claim(fix!);
     await result(fix!, 'Fixed the Body suite failure and pushed.');
     const repaired = '9'.repeat(40);

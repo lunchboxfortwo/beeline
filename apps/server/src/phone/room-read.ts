@@ -55,12 +55,13 @@ import { unix, roomFilters, SLOW_ROOM_READ_MS, messageId } from './values.js';
       Boolean(corner),
       viewerId,
     );
-    const enrichment = corner
-      ? await measured(
-          'enrichment',
-          phoneCornerRoomEnrichment(ctx, room, rows, initialMessageResult, viewerId),
-        )
-      : undefined;
+    // The work item read is independent of the enrichment; overlap the two.
+    const [enrichment, workThread] = corner
+      ? await Promise.all([
+          measured('enrichment', phoneCornerRoomEnrichment(ctx, room, rows, initialMessageResult, viewerId)),
+          readWorkThread(ctx.database, roomId, viewerId, ctx.publicOrigin),
+        ])
+      : [undefined, undefined];
     if (enrichment) {
       const presenceByMember = new Map(enrichment.presence.map((item) => [item.id, item]));
       for (const member of rows.members) {
@@ -103,7 +104,7 @@ import { unix, roomFilters, SLOW_ROOM_READ_MS, messageId } from './values.js';
     const { messages, toolRows } = messageResult;
     const plan = facts?.plan;
     const paintedRoom = roomHeader(room, ctx.publicOrigin);
-    const workItem=corner?(await readWorkThread(ctx.database,roomId,viewerId,ctx.publicOrigin))[0]:undefined;
+    const workItem=workThread?.[0];
     const briefing = await phoneDecorateCornerOpenCards(ctx, room.parent_id ?? roomId, collapsePermissionCards(
       briefingRows.map((row) => projectedMessage(row, ctx.publicOrigin)).sort(messageOrder),
     ));

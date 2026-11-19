@@ -271,8 +271,12 @@ it.each(['legacy', 'helper'])('R-RELEASE-CARD: built %s MCP tool dispatches thro
       if (edited) {
         // A turn with no Workspace admin behind it cannot edit the saved schedule
         // at all, so its human approval survives untouched.
-        await db.query(`UPDATE agent_commands SET root_source_message_id='missing' WHERE id='command'`);
-        await expect(service.execute('updateAgentSchedule', { roomId: room, requestId: input.requestId, scheduleId: saved.scheduleId, prompt: 'Run a different release task.' }, agent)).rejects.toThrow('workspace admins only');
+        const editedRequestId = `unapproved-edit-${mode}`;
+        await db.query(`INSERT INTO agent_commands(id,room_id,agent_id,source_message_id,turn_request_id,action,reason,
+          root_command_id,root_source_message_id,agent_depth,state)
+          SELECT $1,room_id,agent_id,source_message_id,$1,action,reason,$1,'missing',agent_depth,'pending'
+          FROM agent_commands WHERE id='command'`, [editedRequestId]);
+        await expect(service.execute('updateAgentSchedule', { roomId: room, requestId: editedRequestId, scheduleId: saved.scheduleId, prompt: 'Run a different release task.' }, agent)).rejects.toThrow('workspace admins only');
         expect((await db.query(`SELECT message FROM agent_schedules WHERE id=$1`, [saved.scheduleId])).rows[0])
           .toEqual({ message: 'Run the explicitly commanded nightly production release with dispatch_release.' });
         edited = false;

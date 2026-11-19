@@ -549,8 +549,9 @@ export function buildBwrapArgv(input: {
   // Writable grants and private state must bind the host inode, rather than
   // writing into the temporary overlay. /dev is replaced by the inner bwrap,
   // hiding these original-parent aliases before the agent starts.
+  // Read-only restores keep the overlay's namespace-only mask mountpoints.
   for (let i = 0; i < args.length && args[i] !== '--'; i++) {
-    if (!['--bind', '--bind-try', '--ro-bind', '--ro-bind-try', '--dev-bind-try'].includes(args[i]!)) continue;
+    if (!['--bind', '--bind-try', '--dev-bind-try'].includes(args[i]!)) continue;
     const source = args[i + 1]!;
     const parentIndex = parents.findIndex(parent => source === parent || source.startsWith(`${parent}/`));
     if (parentIndex !== -1) args[i + 1] = `/dev/shm/beeline-masks/${parentIndex}/lower${source.slice(parents[parentIndex]!.length)}`;

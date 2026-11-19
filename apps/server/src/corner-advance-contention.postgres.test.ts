@@ -7,6 +7,7 @@ import { migrate, PostgresDatabase, type SqlDatabase } from './database.js';
 import { GitHubOperations } from './github-operations.js';
 import { systemLine } from './system-line.js';
 import { assignCornerWorker } from './test-fixtures/corner-commands.js';
+import { cornerIdleSql } from './corner-idle.js';
 
 const url = process.env.BEELINE_COMMAND_TEST_POSTGRES_URL;
 if (url && !['127.0.0.1', 'localhost', '[::1]'].includes(new URL(url).hostname))
@@ -78,8 +79,16 @@ describe.skipIf(!url)('corner advance under one busy corner', () => {
     { kind: 'reconcile' },
   ];
 
-  const machine = async (cornerId: string) =>
-    (await database.query<{ machine: unknown }>('SELECT machine FROM corner_facts WHERE corner_id=$1', [cornerId])).rows[0]?.machine;
+  // Each corner's idle notice is keyed by its own idle epoch; compare corners
+  // with that exact stamp named, so a different stamp still fails.
+  const idleSince = async (cornerId: string) =>
+    (await database.query<{ person_since: string }>(cornerIdleSql('$1'), [cornerId])).rows[0]!.person_since;
+  const machine = async (cornerId: string) => {
+    const stored = (await database.query<{ machine: { effects?: string[] } }>(
+      'SELECT machine FROM corner_facts WHERE corner_id=$1', [cornerId])).rows[0]?.machine;
+    const own = `idle:${await idleSince(cornerId)}:`;
+    return stored && { ...stored, effects: stored.effects?.map(key => key.startsWith(own) ? `idle:<own>:${key.slice(own.length)}` : key) };
+  };
 
   const commands = async (cornerId: string) =>
     (await database.query<{ reason: string; agent_id: string; state: string }>(
@@ -135,8 +144,9 @@ describe.skipIf(!url)('corner advance under one busy corner', () => {
     const reference = await seedBusyCorner();
     await advanceCorner(database, reference.cornerId, second);
     await advanceCorner(database, reference.cornerId, first);
-    // A write from the stale read would drop the recorded yes.
-    expect(await machine(cornerId)).toMatchObject({ effects: expect.arrayContaining(['approved-on-green']) });
+    // With no required reviewer the approved green head settles idle (749858090
+    // moved the yes to the merge gate); a write from the stale read would not.
+    expect(await machine(cornerId)).toMatchObject({ state: 'idle', headSha: head, effects: ['idle:<own>:0'] });
     expect(await machine(cornerId)).toEqual(await machine(reference.cornerId));
     expect(await commands(cornerId)).toEqual(await commands(reference.cornerId));
     // The first event read the corner again after the second event's commit.

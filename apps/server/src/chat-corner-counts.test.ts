@@ -166,14 +166,14 @@ describe('chat corner counts', () => {
         attention: true,
       },
     ]);
-    expect(result.get('room')).toMatchObject({ cornerCount: 4, waitingCornerCount: 3 });
+    expect(result.get('room')).toMatchObject({ cornerCount: 4, waitingCornerCount: 2 });
     expect(
       result.get('room')?.openCorners.map(({ state, mine, attention }) => [state, mine, attention]),
     ).toEqual([
       ['idle', true, undefined],
       ['waiting', true, true],
       ['waiting', true, undefined],
-      ['waiting', true, true],
+      ['working', true, undefined],
     ]);
   });
   it("stamps only the viewer's waiting corners with when they handed back", () => {

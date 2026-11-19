@@ -75,7 +75,7 @@ const scope2 = fixtureScope2(_name, stored);
     const [review] = await commands(B, cornerId);
     await claim(review!);
     await approve(cornerId);
-    await result(review!, `approved ${SHA}`);
+    await result(review!, '');
     // No executing, checking or unanswered work remains after this verdict.
     expect(await currentState(cornerId)).toBe('idle');
 
@@ -393,7 +393,7 @@ const scope9 = fixtureScope9();
     const [review] = await commands(B, cornerId);
     await claim(review!);
     await rootFixture.daemon.execute('approveCornerMerge', { cornerId, headSha: '7'.repeat(40) }, B);
-    await result(review!, 'Review complete: approved, merge it.');
+    await result(review!, '');
     expect(await currentState(cornerId)).toBe('idle');
 
     expect(await reasons(cornerId, A)).not.toContain('corner_land');

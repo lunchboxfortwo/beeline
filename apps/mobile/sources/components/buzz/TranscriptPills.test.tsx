@@ -67,7 +67,7 @@ it('MERGE-ROWS-1 shows the merge count immediately and expands every stored even
   act(() => control('notification-run-more-merge-0').props.onPress());
   for (const [index, event] of events.entries()) {
     const row = control(`notification-run-cell-${event.id}`);
-    const copy = row.findAll((node: any) => node.type === 'Text').map((node: any) => node.props.children).flat();
+    const copy = row.findAll((node: any) => node.type === 'Text').flatMap((node: any) => node.children);
     expect(copy).toContain(`Change ${index}`);
     act(() => row.props.onPress());
     expect(openUrl).toHaveBeenLastCalledWith(event.systemEvent!.object!.url);

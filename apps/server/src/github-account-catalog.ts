@@ -1,4 +1,5 @@
 import { appConnections } from './app-connections.js';
+import { githubProviderKey } from './providers/index.js';
 import { queueOwnerSquireWork } from './squire-machine.js';
 import type { VaultConnectionMeta } from '@beeline/api-contract/daemon';
 import type { SqlDatabase } from './database.js';
@@ -7,9 +8,9 @@ import type { SqlDatabase } from './database.js';
  * Never substitute another token when that connection refuses a read. */
 export async function personalGitHubConnection(database: SqlDatabase, ownerId: string) {
   const app = (await database.query(`SELECT 1 FROM workspace_apps
-    WHERE owner_identity_id=$1 AND app_key='github' AND transport='squire-api' AND state='active'`, [ownerId])).rowCount;
+    WHERE owner_identity_id=$1 AND app_key=$2 AND transport='squire-api' AND state='active'`, [ownerId, githubProviderKey])).rowCount;
   if (!app) return undefined;
-  const selected = (await appConnections(database, ownerId, 'github')).find(connection => connection.state === 'active');
+  const selected = (await appConnections(database, ownerId, githubProviderKey)).find(connection => connection.state === 'active');
   if (!selected) return undefined;
   return (await database.query<{
     reference: string; machine_id: string;

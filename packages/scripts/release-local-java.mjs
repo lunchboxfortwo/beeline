@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { parse } from 'yaml';
 import { privateWrite, readOptional } from './release-local-process.mjs';
 
-export async function setupJava({ action, inputs, env, directory, processes, token, timeout, fetchImpl = fetch }) {
+export async function setupJava({ action, inputs, env, directory, processes, token, timeout, fetchImpl = fetch, jvmRoots = ['/usr/lib/jvm', '/opt/java'] }) {
   const version = inputs['java-version'];
   const distribution = inputs.distribution;
   if (!version || !distribution) throw new Error('Local setup-java requires java-version and distribution');
@@ -13,7 +13,7 @@ export async function setupJava({ action, inputs, env, directory, processes, tok
   if (/^\d+(?:\.\d+)*$/.test(version) && distribution === 'temurin' &&
       (!inputs['java-package'] || inputs['java-package'] === 'jdk') &&
       (!inputs.architecture || inputs.architecture === process.arch) && inputs['check-latest'] !== 'true') {
-    const candidates = [env.JAVA_HOME, ...globSync('/usr/lib/jvm/*'), ...globSync('/opt/java/*')].filter(Boolean);
+    const candidates = [env.JAVA_HOME, ...jvmRoots.flatMap(root => globSync(`${root}/*`))].filter(Boolean);
     for (const home of candidates) {
       const release = readOptional(join(home, 'release'));
       const installed = /^JAVA_VERSION="([^"]+)"/m.exec(release)?.[1];

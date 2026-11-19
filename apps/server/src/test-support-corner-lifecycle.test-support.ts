@@ -465,7 +465,7 @@ export async function approved(): Promise<string> {
   const [review] = await commands(B, cornerId);
   await claim(review!);
   await approve(cornerId);
-  await result(review!, `approved ${SHA}`);
+  await result(review!, '');
   githubHead = SHA;
   githubRollupState = 'passed';
   return cornerId;

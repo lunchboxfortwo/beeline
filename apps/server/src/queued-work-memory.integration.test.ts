@@ -1,6 +1,6 @@
 import { pendingMcpWakes } from './rooms-mcp-agent.js';
-import { randomUUID } from 'node:crypto';
 import { afterEach, vi } from 'vitest';
+import { INSTITUTIONAL_MEMORY_EMBEDDING_DIMENSIONS } from '@beeline/api-contract/daemon';
 import { AgentScheduleLoop } from './agent-schedules.js';
 import { createAgentSubscription } from './agent-subscriptions.js';
 import { readAgentCommands } from './agent-command-read-agent-commands.js';
@@ -12,12 +12,23 @@ import {
   rootFixture, enrollLive, liveDaemon, openTurn, startQueuedTurn, expect, it,
 } from './test-support-institutional-memory-shadow.test-support.js';
 
+vi.mock('./institutional-memory-embeddings.js', async original => {
+  const { INSTITUTIONAL_MEMORY_EMBEDDING_DIMENSIONS } = await import('@beeline/api-contract/daemon');
+  return {
+    ...await original<typeof import('./institutional-memory-embeddings.js')>(),
+    createDefaultEmbedFn: () => async () => ({outcome:'served' as const,
+      vector:Array.from({length:INSTITUTIONAL_MEMORY_EMBEDDING_DIMENSIONS},(_,index)=>Number(index===0)),ms:0}),
+  };
+});
+
 afterEach(() => vi.unstubAllEnvs());
 
 async function seedMemory() {
   vi.stubEnv('OPENROUTER_EMBEDDING_API_KEY', '');
   await enrollLive();
   const turn = await openTurn('seed-memory');
+  const seed = (await readAgentCommands(rootFixture.database, AGENT)).commands.find(command=>command.id===turn.requestId)!;
+  expect(seed.source.conversationWindow ?? seed.source.conversationContext).toContain('Members (exact tag spellings):');
   await liveDaemon().execute('saveInstitutionalMemory', {
     ...turn, agentId: AGENT, memoryKind: 'workspace_fact',
     canonicalKey: 'deploy.marker', body: 'Release migrations write the marker last.',
@@ -27,6 +38,10 @@ async function seedMemory() {
     (id,workspace_id,kind,subject_identity_id,canonical_key,body,keywords,source_room_id,source_message_id,audience_kind,confidence,version)
     VALUES(gen_random_uuid(),$1,'human_profile_fact',$2,'private-marker','Other person private marker preference.',
       ARRAY['marker'],$3,$4,'human_profile',1,1)`, [WORKSPACE, OTHER_HUMAN, ROOM, MESSAGE]);
+  const vector = Array.from({length:INSTITUTIONAL_MEMORY_EMBEDDING_DIMENSIONS},(_,index)=>Number(index===0));
+  await rootFixture.database.query('UPDATE institutional_memory_items SET embedding=$2::vector WHERE workspace_id=$1',
+    [WORKSPACE,JSON.stringify(vector)]);
+  return turn;
 }
 
 async function delivered(reason: string) {
@@ -34,7 +49,9 @@ async function delivered(reason: string) {
   expect(queued).toBeDefined();
   expect(queued.source.institutionalContext).toContain('marker last');
   expect(queued.source.institutionalContext).not.toContain('Other person private');
-  expect(queued.source.conversationWindow ?? queued.source.conversationContext).toContain('Members (exact tag spellings):');
+  const conversation = queued.source.conversationWindow ?? queued.source.conversationContext;
+  expect(conversation).toContain('Remember that deploy writes the marker last.');
+  expect(conversation).not.toContain('Members (exact tag spellings):');
   expect(itemPrompt(queued, { names: new Map(), fresh: true })).toContain('marker last');
   const wake = (await pendingMcpWakes(rootFixture.database, AGENT)).find(item => item.id === queued.id)!;
   expect(wake.institutionalContext).toBe(
@@ -44,11 +61,10 @@ async function delivered(reason: string) {
 }
 
 it('delivers scheduler context and lets the scheduled turn read and save memory', async () => {
-  await seedMemory();
-  await rootFixture.database.query(`INSERT INTO agent_schedules
-    (id,workspace_id,room_id,agent_id,creator_id,owner_id,cadence,message,max_runs,next_run_at)
-    VALUES($1,$2,$3,$4,$5,$5,'{"kind":"interval","everyMinutes":1}',
-      'Check the release marker',1,now()-interval '1 second')`, [randomUUID(), WORKSPACE, ROOM, AGENT, HUMAN]);
+  const seed = await seedMemory();
+  const schedule = await liveDaemon().execute('createAgentSchedule', {...seed,title:'Check marker',
+    prompt:'Check the release marker',cadence:{kind:'interval',everyMinutes:1},maxRuns:1}, AGENT);
+  await rootFixture.database.query("UPDATE agent_schedules SET next_run_at=now()-interval '1 second' WHERE id=$1", [schedule.scheduleId]);
   expect(await new AgentScheduleLoop(rootFixture.database).runOnce()).toBe(1);
   const queued = await delivered('schedule');
   expect(queued.from).toEqual({ agent: HUMAN, place: ROOM });

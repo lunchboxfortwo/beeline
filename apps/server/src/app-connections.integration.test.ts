@@ -713,14 +713,19 @@ const scope2 = fixtureScope2();
   });
 
 
-  it.each(['denied', 'once'])('R1: owner setup replaces legacy %s consent with quiet standing consent', async status => {
+  it.each(['denied', 'once'])('R1: owner setup respects legacy %s consent without new cards', async status => {
     await scope2.connectSquire();
     const daemon = scope2.daemonWith(fakeRegistry([]).client);
     const input = { ...turn, service: 'resend.com', reason: 'Send email', noApi: true, squireAvailable: true };
     await daemon.execute('connect', input, HELPER);
     const grant = (await scope2.database.query<{ id: string }>(`SELECT id FROM agent_grants WHERE target='connection-install:resend'`)).rows[0]!;
     await scope2.database.query(`UPDATE agent_grants SET status=$3,auto=false,decided_by=$2 WHERE id=$1`, [grant.id, OWNER, status]);
-    expect(await daemon.execute('connect', input, HELPER)).toMatchObject({ status: 'needs_squire' });
+    const result = await daemon.execute('connect', input, HELPER);
+    expect(result).toMatchObject(status === 'denied' ? {status:'unavailable',grantId:grant.id} : {status:'needs_squire'});
+    expect((await scope2.database.query(`SELECT id FROM agent_grants WHERE target='connection-install:resend'`)).rows)
+      .toEqual([{id:grant.id}]);
+    expect((await scope2.database.query(`SELECT status,auto,decided_by,expires_at FROM agent_grants WHERE id=$1`, [grant.id])).rows[0])
+      .toMatchObject({status,auto:false,decided_by:OWNER,...(status==='once' ? {expires_at:expect.any(Date)} : {})});
     expect((await scope2.database.query(`SELECT id FROM messages WHERE card_type='grant-request'`)).rows).toHaveLength(0);
   });
 

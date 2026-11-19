@@ -523,9 +523,9 @@ export async function migrate(
   await ddlScript('corner owed schema', cornerOwedSchemaSql());
   await ddlScript('message question lookups', MESSAGE_ASKS_INDEX_SCHEMA);
   await runMigrationStep('review repair parent index', () => createIndexConcurrently(
-    database, 'agent_commands_review_repair_parent_idx',
-    `CREATE INDEX CONCURRENTLY agent_commands_review_repair_parent_idx ON agent_commands(parent_command_id)
-     WHERE reason IN ('order','message') AND parent_command_id IS NOT NULL`,
+    database, 'agent_commands_review_repair_parent_v2_idx',
+    `CREATE INDEX CONCURRENTLY agent_commands_review_repair_parent_v2_idx ON agent_commands(parent_command_id)
+     WHERE reason IN ('order','message','reply') AND parent_command_id IS NOT NULL`,
   ));
   await ddlScript('corner explicit wait function', cornerWaitingFunctionSql());
   // The idle function is built from the corner idle query. Import it after this

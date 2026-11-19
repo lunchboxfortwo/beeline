@@ -313,7 +313,7 @@ describe('a corner opened before the workflow run existed (AC-10)', () => {
     const [review] = await commands(B, cornerId);
     await claim(review!);
     await approve(cornerId);
-    await result(review!, `approved ${SHA}`);
+    await result(review!, '');
     expect(await currentState(cornerId)).toBe('idle');
     rootFixture.githubHead = SHA;
     rootFixture.githubRollupState = 'passed';

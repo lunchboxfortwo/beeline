@@ -7,7 +7,7 @@ import { LiveHub } from './live.js';
 import type { PhoneService } from './phone-service.js';
 import { createBeelineServer } from './server.js';
 
-// The elected background leader retains one configured client. Nine active
+// The live listener retains one configured client. Nine active
 // helpers can reconnect together after a deployment, so every helper must be
 // able to record evidence without starving public requests behind that burst.
 const productionConfig = readFileSync(
@@ -168,7 +168,7 @@ describe('production database-pool latency boundary', () => {
       reconciliations,
       presenceReads,
     });
-    expect(PRODUCTION_DATABASE_POOL_MAX).toBe(10);
+    expect(PRODUCTION_DATABASE_POOL_MAX).toBe(25);
     expect(reconciliations).toBe(daemonOperationsInWindow);
     expect(presenceReads).toBe(daemonOperationsInWindow * LOCAL_LIVE_LISTENERS);
     expect(percentile(pool.waits, 0.95)).toBeLessThan(500);

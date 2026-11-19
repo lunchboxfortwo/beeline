@@ -1,8 +1,10 @@
 import { EventEmitter } from 'node:events';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { rm } from 'node:fs/promises';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readAgentDetailView, readWorkspaceMemberListView } from '@beeline/api-contract/phone';
 import { usageSummary, type AgentUsage } from '@beeline/api-contract/daemon';
-import { HarnessQuotaReader, QUOTA_READ_INTERVAL_MS } from '../../body/src/harness-quota.js';
+import { HarnessQuotaReader, invalidateQuotaReads, QUOTA_READ_INTERVAL_MS } from '../../body/src/harness-quota.js';
+import { cliProxyDir } from '../../body/src/cliproxy.js';
 import { createUsageRefresh } from '../../body/src/agent-usage-refresh.js';
 import { QUOTA_AXI_CLAUDE_REPORT } from '../../body/src/harness-quota.fixtures.js';
 import { DaemonService } from './daemon-service.js';
@@ -11,6 +13,19 @@ import { PhoneService } from './phone-service.js';
 import { POSTGRES_LIVE_CHANNEL, PostgresLiveListener, type LivePgClient } from './postgres-live.js';
 import { PgliteDatabase, migratedDatabase } from './test-support.js';
 
+vi.mock('../../body/src/cliproxy.js', async original => {
+  const { mkdtemp } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const directory = await mkdtemp(join(tmpdir(), 'usage-account-proxy-'));
+  return {
+    ...await original<typeof import('../../body/src/cliproxy.js')>(),
+    cliProxyDir: () => directory,
+    machineCliProxy: async () => ({readLogin:async () => ({access_token:'fixture-access',expired:'2030-01-01T00:00:00Z'})}),
+  };
+});
+afterAll(() => rm(cliProxyDir(), {recursive:true,force:true}));
+
 const WORKSPACE = '11111111-1111-4111-8111-111111111111';
 const RUBY = 'a'.repeat(64);
 const NERD = 'd'.repeat(64);
@@ -18,7 +33,6 @@ const OWNER = 'b'.repeat(64);
 const OTHER = 'c'.repeat(64);
 const claude = QUOTA_AXI_CLAUDE_REPORT.providers[0]!;
 const launch = () => ({ command: 'node', args: ['q.mjs'] });
-const credentialPath = () => '/home/op/.claude/.credentials.json';
 /** `quota-axi --provider claude --full --json` for one verified login. */
 const report = (percentRemaining: number, state: Record<string, unknown> = { status: 'fresh', stale: false }) => JSON.stringify({
   ...QUOTA_AXI_CLAUDE_REPORT,
@@ -95,7 +109,7 @@ afterEach(async () => {
 /** One agent's helper turn-end reader, posting through the daemon API as that agent. */
 function reader(agentId: string, slots: Map<string, never>, run: () => Promise<string>, at: number) {
   return new HarnessQuotaReader({
-    agentId, slots, run, launch, credentialPath, now: () => at * 1000,
+    agentId, slots, run, launch, now: () => at * 1000,
     post: (usage: AgentUsage) => daemon.execute('postAgentUsage', { agentId, usage }, agentId),
   });
 }
@@ -138,7 +152,6 @@ describe('R-USAGE-2: agents on one plan account report the same numbers', () => 
     await reader(RUBY, new Map(), async () => report(60), now).publish('claude', {}, true);
     await new HarnessQuotaReader({
       agentId: NERD, slots: new Map(), launch, now: () => now * 1000,
-      credentialPath: () => '/home/other/.claude/.credentials.json',
       run: async () => report(10).replace('acct-1', 'acct-2'),
       post: (usage) => daemon.execute('postAgentUsage', { agentId: NERD, usage }, NERD),
     }).publish('claude', {}, true);
@@ -156,19 +169,17 @@ describe('R-USAGE-2: agents on one plan account report the same numbers', () => 
 
   it('stops sharing when one agent signs in to another account', async () => {
     let clock = Date.now();
-    const slots = new Map();
+    const slots = new Map([[RUBY,new Map()],[NERD,new Map()]]);
     const accountOf: Record<string, [string, number]> = { [RUBY]: ['acct-1', 60], [NERD]: ['acct-1', 60] };
     const publish = (agentId: string, force = false) => new HarnessQuotaReader({
-      agentId, slots, launch, now: () => clock,
-      credentialPath: () => `/agents/${agentId}/claude/.credentials.json`,
-      fingerprint: () => 'unchanged',
+      agentId, slots:slots.get(agentId)!, launch, now: () => clock,
       run: async () => report(accountOf[agentId]![1]).replace('acct-1', accountOf[agentId]![0]),
       post: (usage) => daemon.execute('postAgentUsage', { agentId, usage }, agentId),
     }).publish('claude', {}, force);
     await publish(RUBY);
     await publish(NERD);
     expect((await views(NERD)).profile?.sharedWith).toEqual(['Ruby']);
-    // Nerd's helper now reads another account, with the credential file left as it was.
+    // Nerd's helper changes its proxy login; Ruby's helper retains its own account.
     accountOf[NERD] = ['acct-2', 20];
     for (let round = 0; round < 2; round++) {
       clock += QUOTA_READ_INTERVAL_MS + 1;
@@ -186,19 +197,17 @@ describe('R-USAGE-2: agents on one plan account report the same numbers', () => 
 
   it('shows the new account on a refresh a second after the sign-in', async () => {
     let clock = Date.now();
-    let login = 'login acct-1';
+    const slots = new Map();
     let account: [string, number] = ['acct-1', 60];
     const run = vi.fn(async () => report(account[1]).replace('acct-1', account[0]));
     const nerdReader = new HarnessQuotaReader({
-      agentId: NERD, slots: new Map(), launch, now: () => clock, run,
-      credentialPath: () => `/agents/${NERD}/claude/.credentials.json`,
-      fingerprint: () => login,
+      agentId: NERD, slots, launch, now: () => clock, run,
       post: (usage) => daemon.execute('postAgentUsage', { agentId: NERD, usage }, NERD),
     });
     await nerdReader.publish('claude', {}, true);
     expect((await views(NERD)).profile?.windows[0]?.utilization).toBe(0.4);
-    // `claude /login` to another account rewrites the credential file.
-    login = 'login acct-2';
+    // A successful proxy login invalidates the helper's existing provider read.
+    invalidateQuotaReads(slots);
     account = ['acct-2', 20];
     clock += 1_000;
     await expect(nerdReader.publish('claude', {}, true)).resolves.toEqual({ status: 'fresh' });

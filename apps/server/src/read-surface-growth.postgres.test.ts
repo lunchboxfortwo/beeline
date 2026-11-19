@@ -57,10 +57,12 @@ describe.skipIf(!url)('complete plain read surfaces (real PostgreSQL)',()=>{
   });
 
   it('reads, counts, and marks all 501 questions and checks each item deadline',async()=>{
-    await db.query(`INSERT INTO messages(id,room_id,author_id,text) SELECT 'ask-'||n,$1,$2,'@reader Please review question '||n||'?' FROM generate_series(1,501) n`,[ROOM,AGENT]);
-    await db.query(`INSERT INTO messages(id,room_id,author_id,text,created_at) VALUES('expired-ask',$1,$2,'@reader Please review?',now()-interval '8 days')`,[ROOM,AGENT]);
+    // Needs you holds reports addressed to the reader, not plain tagged questions (07176681f).
+    await db.query(`INSERT INTO messages(id,room_id,author_id,text,card) SELECT 'ask-'||n,$1,$2,'needs-decision: Please review question '||n||'?',jsonb_build_object('reportToId',$3::text) FROM generate_series(1,501) n`,[ROOM,AGENT,VIEWER]);
+    await db.query(`INSERT INTO messages(id,room_id,author_id,text,card,created_at) VALUES('expired-ask',$1,$2,'needs-decision: Please review?',jsonb_build_object('reportToId',$3::text),now()-interval '8 days')`,[ROOM,AGENT,VIEWER]);
     await db.query(`INSERT INTO needs_you_marks(identity_id,message_id,workspace_id,first_seen_at)
-      VALUES($1,'expired-ask',$2,now()-interval '2 days')`,[VIEWER,WS]);
+      VALUES($1,'expired-ask',$2,now()-interval '2 days')
+      ON CONFLICT(identity_id,message_id) DO UPDATE SET first_seen_at=EXCLUDED.first_seen_at`,[VIEWER,WS]);
     const input={workspaceId:WS,markSeen:false};
     const needs=await phone.execute('readNeedsYou',input,VIEWER);
     expect(needs.items).toHaveLength(501);
