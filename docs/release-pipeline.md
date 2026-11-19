@@ -129,6 +129,10 @@ run evidence remains linked to `Beeline-Work/beeline`; those records were not
 copied. Release downloads do not exist in the new repository until a release
 publishes them. `Beeline-Work/beeline-insights` remains the bookkeeping store.
 
+CI base image mirrors use `ghcr.io/lunchboxfortwo`. The existing `Refresh CI
+base image mirrors` workflow copies the pinned upstream manifests there with
+their digests preserved; consumers and the mirror script must stay in sync.
+
 The static website publishes by Cloudflare Pages Direct Upload to the existing
 `usebeeline` project, which already serves `usebeeline.app` and has no Git
 integration. Both hosted and local releases run the same `pages-leg` composite:

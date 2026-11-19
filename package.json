@@ -21,7 +21,7 @@
     "test:phone-network": "node --test packages/scripts/phone-network-channels.test.mjs",
     "lint:typecheck": "npm run typecheck",
     "lint:shell": "git ls-files -z -- '*.sh' | xargs -0 shellcheck",
-    "lint:workflows": "docker run --rm --user 0 -v \"$PWD:/repo\" -w /repo ghcr.io/beeline-work/ci-actionlint:1.7.7@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9 -config-file .github/actionlint.yaml",
+    "lint:workflows": "docker run --rm --user 0 -v \"$PWD:/repo\" -w /repo ghcr.io/lunchboxfortwo/ci-actionlint:1.7.7@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9 -config-file .github/actionlint.yaml",
     "lint:referenced-paths": "node packages/scripts/verify-referenced-paths.mjs && node --test packages/scripts/verify-referenced-paths.test.mjs",
     "dead-code:prepare": "turbo run build",
     "predead-code": "npm run dead-code:prepare",

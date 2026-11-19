@@ -37,7 +37,7 @@ hooks.step = async args => {
   if (args.step.name === 'Lint GitHub Actions workflows') {
     const container = `beeline-actionlint-${spec.context.github.run_id}-${spec.context.github.job}`;
     try {
-      await processes.run('docker', ['create', '--name', container, '--workdir', '/repo', 'ghcr.io/beeline-work/ci-actionlint:1.7.7@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9', '-config-file', '.github/actionlint.yaml'], { env: args.env });
+      await processes.run('docker', ['create', '--name', container, '--workdir', '/repo', 'ghcr.io/lunchboxfortwo/ci-actionlint:1.7.7@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9', '-config-file', '.github/actionlint.yaml'], { env: args.env });
       await processes.run('docker', ['cp', '/source/.github', `${container}:/repo/.github`], { env: args.env });
       await processes.run('docker', ['cp', '/source/.git', `${container}:/repo/.git`], { env: args.env });
       await processes.run('docker', ['start', '--attach', container], { env: args.env });
