@@ -152,9 +152,23 @@ it.each(['helper', 'missing', 'on_demand', 'webhook'] as const)(
 
       // An unclaimed external request must not turn all later conversation
       // into silent handoffs to a host with no inbound delivery mechanism.
-      await runtime.utterance(human, "Grok Bot what's your name?");
+      // The incident contained distinct turns over 53 seconds, not duplicate
+      // provider finals. Replay the recorded text without inventing turn IDs.
+      const conversation = delivery === 'on_demand' ? [
+        'We',
+        "or developer. What's your name,",
+        "good... let's build a house, and after we're done, we sell the house, we can pay you for the land. You know what I'm saying?",
+        "Hey, Crockpot. What's your name?",
+        'Alright. Well, I would like to talk to baby g. Okay?',
+        'Alright. Bye.',
+        "Hey, Croc. What's your name?",
+        'Oh, okay. Yeah. What can we get?',
+        "Hey, Brock. What's up?",
+        "Oh, okay. Yeah. That's a bug.",
+      ] : ["Grok Bot what's your name?"];
+      for (const text of conversation) await runtime.utterance(human, text);
       const liveDelivery = delivery === 'helper' || delivery === 'webhook';
-      expect(answer).toHaveBeenCalledTimes(liveDelivery ? 1 : 2);
+      expect(answer).toHaveBeenCalledTimes(liveDelivery ? 1 : 1 + conversation.length);
       if (liveDelivery) expect(synthesize.mock.calls.map(call => call[0]))
         .toEqual(['Checking. I’ll tell you when I have it.']);
       else {

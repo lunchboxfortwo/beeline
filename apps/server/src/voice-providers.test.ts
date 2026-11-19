@@ -152,8 +152,8 @@ describe('voice providers', () => {
     }
     const socket = new Socket(); const accept = vi.fn(); const error = vi.fn();
     const connect = vi.fn(() => socket as unknown as WebSocket);
-    const opening = fluxFactory('secret', 'account', connect)(accept, error, ['Ruby', 'ruby', 'Grok bot', 'Grok bot']);
-    expect(new URL(connect.mock.calls[0]![0]).searchParams.getAll('keyterm')).toEqual(['Ruby', 'ruby', 'Grok bot']);
+    const opening = fluxFactory('secret', 'account', connect)(accept, error, ['Ruby', 'ruby', 'Grok Bot', ' @grok_bot ', '', 'Grok Bot']);
+    expect(new URL(connect.mock.calls[0]![0]).searchParams.getAll('keyterm')).toEqual(['Ruby', 'Grok Bot']);
     expect(connect.mock.calls[0]![0]).toContain('sample_rate=16000');
     expect(connect.mock.calls[0]![0]).toContain('@cf/deepgram/flux');
     socket.emit('open'); const stt = await opening;

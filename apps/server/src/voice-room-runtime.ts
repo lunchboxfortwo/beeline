@@ -507,12 +507,13 @@ async finishClose(meterClose: Promise<void>) { return voiceRoomRuntimeFinishClos
       // particular an old denial cannot stop the replacement microphone.
       if (!ownsInput()) { releaseBuffered(); return; }
       if (!member.rowCount) { ctx.stopInput(human); return; }
-      const [agents, budget, contacts] = await Promise.all([
+      const [agents, budget, contacts, members] = await Promise.all([
         ctx.observe(() => ctx.service.agents(ctx.roomId, human)), ctx.observe(() => ctx.service.budget.read(ctx.workspaceId)),
         ctx.observe(() => ctx.service.db.query<{ name: string }>(
           `SELECT btrim(title) AS name FROM agent_subscriptions
            WHERE room_id=$1 AND source='webhook' AND btrim(title)<>''
            GROUP BY btrim(title) ORDER BY name LIMIT 80`, [ctx.roomId])),
+        ctx.service.memberNames ? ctx.observe(() => ctx.service.memberNames(ctx.roomId)) : Promise.resolve([]),
         ctx.refreshSpeakingSpeed(human),
       ]);
       if (ctx.closed || ctx.inputVersions.get(human) !== version) { releaseBuffered(); return; }
@@ -520,7 +521,8 @@ async finishClose(meterClose: Promise<void>) { return voiceRoomRuntimeFinishClos
       if (budget.remainingMs <= 0) { ctx.stopInput(human); return; }
       const externalContacts = contacts.rows.map(contact => contact.name.slice(0, 80));
       ctx.externalContacts.set(human, externalContacts);
-      const hints = [...new Set([...agents.flatMap(agent => [agent.name, agent.handle]), ...externalContacts])].slice(0, 80);
+      const hints = [...new Set([...agents.flatMap(agent => [agent.name, agent.handle]),
+        ...members.flatMap(member => member.handle ? [member.name, member.handle] : [member.name]), ...externalContacts])].slice(0, 80);
       stt = await ctx.service.config.stt(event => {
       if (!ownsInput()) return;
       const receivedAt = performance.now();

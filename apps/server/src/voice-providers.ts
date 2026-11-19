@@ -80,7 +80,14 @@ export function fluxFactory(token: string, accountId: string,
     const url = new URL(`wss://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/deepgram/flux`);
     url.search = new URLSearchParams({ encoding: 'linear16', sample_rate: '16000',
       eot_threshold: '0.7', eager_eot_threshold: '0.5', eot_timeout_ms: '1000' }).toString();
-    for (const hint of [...new Set(hints)].slice(0, 80)) url.searchParams.append('keyterm', hint.slice(0, 80));
+    // Prefer the display name's spelling over equivalent wire handles such as
+    // grok_bot. Flux keyterms are spoken phrases, with consistent proper-name case.
+    const keyterms = new Map<string, string>();
+    for (const hint of hints) {
+      const term = hint.trim().replace(/^@/, '').replace(/_/g, ' ').trim().replace(/\s+/g, ' ').slice(0, 80);
+      if (term && !keyterms.has(term.toLowerCase())) keyterms.set(term.toLowerCase(), term);
+    }
+    for (const term of [...keyterms.values()].slice(0, 80)) url.searchParams.append('keyterm', term);
     const socket = connect(url.toString(), { headers: { Authorization: `Bearer ${token}` },
       handshakeTimeout: 10_000, maxPayload: 64 * 1024 });
     let opened = false;
