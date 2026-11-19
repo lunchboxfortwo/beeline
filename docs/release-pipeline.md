@@ -124,23 +124,28 @@ Completed outputs, artifacts and failure logs keep the existing local handoff.
 placement under the private state directory.
 Cache misses rebuild; unknown action types fail.
 
-The temporary outage policy is explicit: **website not released** means static
-GitHub Pages is left serving its published site. This is a local-runner bypass,
-not a report that the Pages hosting account is suspended: `release-local.mjs`
-skips the entire `pages-leg` composite. That composite requires an uploaded
-Actions Pages artifact and an Actions OIDC token, which local execution cannot
-provide. Removing the bypass alone cannot deploy the site.
+The canonical product repository is `lunchboxfortwo/beeline`. Historical PR and
+run evidence remains linked to `Beeline-Work/beeline`; those records were not
+copied. Release downloads do not exist in the new repository until a release
+publishes them. `Beeline-Work/beeline-insights` remains the bookkeeping store.
 
-To resume static website delivery with the current hosting configuration, the
-repository/organization administrator must restore GitHub Actions execution if
-it is unavailable, then the owner must authorize the existing hosted
-`Unified production release` latest promotion for the intended successful next
-commit. Its `website` job assembles the static site, uploads the real Pages
-artifact and deploys with OIDC. Next releases carry the website unchanged;
-merging website changes or running the local release command does not publish
-them. Keeping releases entirely local instead requires an explicitly chosen
-alternative static publishing path and Pages configuration; it cannot be
-recovered by inventing an Actions artifact or token.
+The static website publishes by Cloudflare Pages Direct Upload to the existing
+`usebeeline` project, which already serves `usebeeline.app` and has no Git
+integration. Both hosted and local releases run the same `pages-leg` composite:
+assemble `apps/site` without download archives, then deploy that directory to
+the project's production branch (`main`) with the exact release commit.
+This uses Cloudflare credentials rather than GitHub Pages artifacts or OIDC.
+The previous local static-site bypass is removed. No DNS or domain attachment
+change is required, and GitHub Pages must not be enabled for this site.
+
+Hosted delivery requires the `CLOUDFLARE_PAGES_TOKEN` Actions secret (Cloudflare
+Pages Edit authority) and the `CLOUDFLARE_ACCOUNT_ID` repository variable.
+Local latest promotion requires the same names in its private release
+environment. The vaulted `pages-deploy-2027` credential owns Pages delivery;
+the separate R2 token owns downloads. The Pages command uses the
+[Cloudflare Direct Upload flow](https://developers.cloudflare.com/pages/how-to/use-direct-upload-with-continuous-integration/).
+Next releases carry the website unchanged; only an owner-authorized latest
+promotion publishes it. Merging website changes alone does not publish them.
 
 The selected EAS web app leg
 still exports, uploads private source maps when configured, deploys and verifies its canonical

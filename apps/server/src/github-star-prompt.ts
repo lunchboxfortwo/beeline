@@ -18,7 +18,7 @@ import type { SqlDatabase } from './database.js';
  * and nothing is gated on it (GitHub Acceptable Use Policies). "Not now"
  * waits for the next milestone; the close button and a star stop it for good.
  */
-export const STAR_PROMPT_REPOSITORY = 'Beeline-Work/beeline';
+export const STAR_PROMPT_REPOSITORY = 'lunchboxfortwo/beeline';
 const STAR_PROMPT_URL = `https://github.com/${STAR_PROMPT_REPOSITORY}`;
 export const STAR_PROMPT_MILESTONES: readonly number[] = [3, 30, 300];
 const MID_CONVERSATION_SECONDS = 30;

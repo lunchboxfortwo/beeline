@@ -249,7 +249,7 @@ jobs:
           node packages/scripts/desktop-update.mjs config \
             --version "$DESKTOP_VERSION" \
             --endpoint 'https://downloads.usebeeline.app/latest/Beeline-latest.json' \
-            --endpoint 'https://github.com/Beeline-Work/beeline/releases/latest/download/Beeline-latest.json' \
+            --endpoint 'https://github.com/lunchboxfortwo/beeline/releases/latest/download/Beeline-latest.json' \
             --output "$updater_config"
           echo "TAURI_UPDATER_CONFIG=$updater_config" >> "$GITHUB_ENV"
       - name: Build the desktop bundle

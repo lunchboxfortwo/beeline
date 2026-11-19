@@ -5,7 +5,7 @@ set -euo pipefail
 base="$HOME/.local/share/beeline-log-walk"
 checkout="$base/checkout"
 if [ ! -d "$checkout/.git" ]; then
-  git clone --quiet https://github.com/Beeline-Work/beeline.git "$checkout"
+  git clone --quiet https://github.com/lunchboxfortwo/beeline.git "$checkout"
 fi
 git -C "$checkout" fetch --quiet origin main
 git -C "$checkout" checkout --quiet --detach FETCH_HEAD

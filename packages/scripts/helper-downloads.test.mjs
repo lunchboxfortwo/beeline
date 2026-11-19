@@ -238,6 +238,14 @@ test('website publication excludes every download while preserving installers an
     assert.match(action.runs.steps[0].run, /release-steps\/pages-leg\.sh/);
     assert.match(await readFile('packages/scripts/release-steps/pages-leg.sh', 'utf8'), /--static-only/);
     assert.equal(action.runs.steps.some(step => step.with?.script?.includes('downloadPagesChannel')), false);
+    assert.equal(action.runs.steps.some(step => /actions\/(configure-pages|upload-pages-artifact)/.test(step.uses ?? '')), false);
+    const deploy = action.runs.steps.find(step => step.env?.CLOUDFLARE_PAGES_TOKEN);
+    assert.equal(deploy.env.CLOUDFLARE_PAGES_TOKEN, '${{ inputs.cloudflare_api_token }}');
+    const workflow = await yaml('.github/workflows/unified-release.yml');
+    assert.equal(workflow.jobs.website.permissions.pages, undefined);
+    const leg = workflow.jobs.website.steps.find(step => step.uses === './.github/actions/pages-leg');
+    assert.equal(leg.with.cloudflare_api_token, '${{ secrets.CLOUDFLARE_PAGES_TOKEN }}');
+    assert.equal(leg.with.cloudflare_account_id, '${{ vars.CLOUDFLARE_ACCOUNT_ID }}');
     await buildPagesSite({ outputRoot: directory, includeDownloads: false });
     await assert.rejects(access(join(directory, 'dl')), { code: 'ENOENT' });
     for (const file of ['index.html', 'install.sh', '.well-known/apple-app-site-association', '.well-known/assetlinks.json']) {

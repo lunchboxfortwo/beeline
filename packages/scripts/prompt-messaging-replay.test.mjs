@@ -13,7 +13,7 @@ test('both pinned models run all three samples even after a failed assertion; th
   const out=mkdtempSync(join(tmpdir(),'beeline-message-replay-'));
   const head='a'.repeat(40),calls=[];let published=0;
   try {
-    const run=await replay({repository:'Beeline-Work/beeline',number:1,head,out},{
+    const run=await replay({repository:'lunchboxfortwo/beeline',number:1,head,out},{
       liveHead:()=>({state:'open',head}),checkout:()=>head,loadCases:()=>[{id:'case',pass:{call:'reply'}}],
       loadSource:async()=>({}),publish:()=>published++,executeSample:async sample=>{
         calls.push([sample.model,sample.seed]);
@@ -32,7 +32,7 @@ test('a changed PR head never publishes an obsolete model verdict',async()=>{
   const out=mkdtempSync(join(tmpdir(),'beeline-message-replay-'));
   const head='a'.repeat(40);let reads=0,published=0;
   try {
-    const run=await replay({repository:'Beeline-Work/beeline',number:1,head,out},{
+    const run=await replay({repository:'lunchboxfortwo/beeline',number:1,head,out},{
       liveHead:()=>({state:'open',head:++reads===1?head:'b'.repeat(40)}),checkout:()=>head,
       loadCases:()=>[{id:'case'}],loadSource:async()=>({}),publish:()=>published++,
       executeSample:async()=>({status:'behavior',pass:true,exitCode:0}),

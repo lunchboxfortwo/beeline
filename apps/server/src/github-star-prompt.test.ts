@@ -90,7 +90,7 @@ beforeAll(async () => {
       return;
     }
     githubCalls.push(`${request.method} ${request.url} ${request.headers.authorization}`);
-    if (request.url !== '/user/starred/Beeline-Work/beeline') {
+    if (request.url !== '/user/starred/lunchboxfortwo/beeline') {
       response.writeHead(404).end();
       return;
     }
@@ -197,16 +197,16 @@ it.each(['helper', 'free/hosted'])('shows the card on a fresh account’s 3rd co
   expect(await read()).toEqual({
     prompt: {
       milestone: 3,
-      repository: 'Beeline-Work/beeline',
-      url: 'https://github.com/Beeline-Work/beeline',
+      repository: 'lunchboxfortwo/beeline',
+      url: 'https://github.com/lunchboxfortwo/beeline',
     },
   });
   await vi.waitFor(() => expect(githubCalls).toEqual([
-    `GET /user/starred/Beeline-Work/beeline Bearer ${USER_TOKEN}`,
+    `GET /user/starred/lunchboxfortwo/beeline Bearer ${USER_TOKEN}`,
   ]));
 
   expect(await answer('star', 3)).toEqual({ outcome: 'starred' });
-  expect(githubCalls.at(-1)).toBe(`PUT /user/starred/Beeline-Work/beeline Bearer ${USER_TOKEN}`);
+  expect(githubCalls.at(-1)).toBe(`PUT /user/starred/lunchboxfortwo/beeline Bearer ${USER_TOKEN}`);
   expect(starred).toBe(true);
   expect(await read()).toEqual({ prompt: null });
 });
@@ -280,7 +280,7 @@ it.each(['unlinked', 'missing token', 'stale token'])('authorizes a %s account, 
   expect(response.status, await response.clone().text()).toBe(302);
   expect(response.headers.get('location')).toBe(`beeline://beeline/chat/${R}?githubStar=starred`);
   expect(starred).toBe(true);
-  expect(githubCalls).toContain(`PUT /user/starred/Beeline-Work/beeline Bearer ${USER_TOKEN}`);
+  expect(githubCalls).toContain(`PUT /user/starred/lunchboxfortwo/beeline Bearer ${USER_TOKEN}`);
   expect(await operations.userCredential(H, db)).toMatchObject({ subject: '42', token: USER_TOKEN, refreshToken: 'refresh-token' });
   expect((await db.query(`SELECT encrypted_token FROM github_user_tokens WHERE subject='42'`)).rows[0]!.encrypted_token).not.toBe(USER_TOKEN);
   await db.query(`UPDATE github_star_prompts SET replies=300 WHERE identity_id=$1`, [H]);

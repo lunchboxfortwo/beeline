@@ -38,7 +38,7 @@ export function liveHead(repository, number) {
   return { state: match[1], head: match[2] };
 }
 export async function replay({ repository, number, head, agent = 'subscription', out, sourceRoot = ROOT, only }, dependencies = {}) {
-  if (repository !== 'Beeline-Work/beeline' || !Number.isSafeInteger(number) || number < 1 ||
+  if (repository !== 'lunchboxfortwo/beeline' || !Number.isSafeInteger(number) || number < 1 ||
       !/^[a-f0-9]{40}$/.test(head)) throw new Error('Expected Beeline PR and exact head');
   const current = dependencies.liveHead ?? liveHead;
   const isCurrent = () => { const live = current(repository, number); return live.state === 'open' && live.head === head; };

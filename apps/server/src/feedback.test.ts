@@ -716,7 +716,7 @@ const scope5 = fixtureScope5();
 });
 describe('feedback config', () => {
   it('defaults the repository and has no System sender unless configured', () => {
-    expect(feedbackConfigFromEnv({})).toEqual({ repository: 'Beeline-Work/beeline', systemSenders: [] });
+    expect(feedbackConfigFromEnv({})).toEqual({ repository: 'lunchboxfortwo/beeline', systemSenders: [] });
     expect(
       feedbackConfigFromEnv({
         BEELINE_FEEDBACK_REPOSITORY: 'o/r',

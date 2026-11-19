@@ -9,7 +9,7 @@ Pod::Spec.new do |s|
   s.author         = 'Beeline'
   s.homepage       = 'https://usebeeline.app'
   s.platforms      = { :ios => '15.1' }
-  s.source         = { :git => 'https://github.com/Beeline-Work/beeline.git', :tag => s.version.to_s }
+  s.source         = { :git => 'https://github.com/lunchboxfortwo/beeline.git', :tag => s.version.to_s }
   s.static_framework = true
   s.dependency 'ExpoModulesCore'
   s.source_files = '**/*.{h,m,mm,swift}'
