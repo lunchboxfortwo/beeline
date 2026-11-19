@@ -4,8 +4,10 @@ import { join } from 'node:path';
 import { LocalActions } from './release-local-actions.mjs';
 import { Processes, privateWrite } from './release-local-process.mjs';
 
-export function desktopBuildEnvironment({ directory, cargoHome, home }) {
-  return { CARGO_BUILD_JOBS: '2', CI_TEST_WORKERS: '2', BEELINE_LOCAL_RELEASE: 'true', CARGO_HOME: cargoHome,
+export function desktopBuildEnvironment({ directory, cargoHome, home }, platform = process.platform) {
+  // Universal macOS builds compile both architectures serially. Two Cargo jobs
+  // consumed the build deadline before DMG creation on the eight-thread Mac.
+  return { CARGO_BUILD_JOBS: platform === 'darwin' ? '4' : '2', CI_TEST_WORKERS: '2', BEELINE_LOCAL_RELEASE: 'true', CARGO_HOME: cargoHome,
     RUSTUP_HOME: join(directory, 'tools/rustup'), NPM_CONFIG_USERCONFIG: join(home, '.npmrc') };
 }
 

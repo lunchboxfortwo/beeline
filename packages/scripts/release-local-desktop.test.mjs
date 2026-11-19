@@ -144,6 +144,15 @@ test('private-HOME native builds do not forward release authorities into their b
   assert.equal(mac.CLOUDFLARE_R2_TOKEN, undefined);
 });
 
+test('universal Mac compilation uses four Cargo jobs without increasing other native host limits', () => {
+  const paths = { directory: '/task/state', cargoHome: '/task/cargo', home: '/task/private-home' };
+  for (const platform of ['darwin', 'linux', 'win32']) {
+    const env = desktopBuildEnvironment(paths, platform);
+    assert.equal(env.CARGO_BUILD_JOBS, platform === 'darwin' ? '4' : '2');
+    assert.equal(env.CI_TEST_WORKERS, '2');
+  }
+});
+
 test('only Apple signing tools receive the operator HOME, preserving arguments and failures', () => {
   const directory = mkdtempSync(join(tmpdir(), 'desktop-signing-home-'));
   try {
