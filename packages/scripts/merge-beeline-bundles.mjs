@@ -4,6 +4,7 @@ import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { validateBundleDirectory } from './pages-site.mjs';
+import { carryHelperPlatform } from './helper-carry.mjs';
 
 export async function mergeBeelineBundles({ outputDir, inputDirs, carriedArm64Dir, carriedX64Dir }) {
   outputDir = resolve(outputDir);
@@ -44,7 +45,7 @@ export async function mergeBeelineBundles({ outputDir, inputDirs, carriedArm64Di
     const { manifest: previous } = await validateBundleDirectory(resolve(directory));
     const carried = previous.bundles[platform];
     if (!carried || bundles[platform]) throw new Error(`expected one carried ${platform} helper`);
-    bundles[platform] = { ...carried, carriedFrom: { commit: carried.commit, version: carried.version, sha256: carried.sha256 } };
+    bundles[platform] = carryHelperPlatform(platform, carried);
     for (const name of [carried.file, `${carried.file}.sha256`])
       await copyFile(join(directory, name), join(outputDir, name));
     console.log(`Helper ${platform} carried unchanged: ${carried.version} ${carried.commit} sha256=${carried.sha256}`);

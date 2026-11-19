@@ -95,21 +95,21 @@ export function promptAudit(source, out, run = execFileSync) {
   } catch (error) { console.warn(`Prompt audit did not complete: ${error.message}`); }
 }
 
-export async function releaseSequence({ source, sha, directory, secrets, dispatchedBy, otaVersions, store, desktopMode = 'build', macHelpers = 'build', fullChecks = false }, runLocalRelease, refreshTags = fetchTags, audit = promptAudit) {
+export async function releaseSequence({ source, sha, directory, secrets, dispatchedBy, otaVersions, store, desktopMode = 'build', macHelpers = 'build' }, runLocalRelease, refreshTags = fetchTags, audit = promptAudit) {
+  audit(source, join(directory, 'prompt-audit'));
+  const resultsPath = join(directory, 'full-checks', 'release-checks.json');
+  await runLocalRelease({ mode: 'execute', leg: 'release_checks', channel: 'latest',
+    'release-sha': sha, 'state-dir': join(directory, 'full-checks'),
+  }, { repository: source, secrets });
+  const checks = { sourceSha: sha, result: 'success', resultsPath };
   for (const channel of ['next', 'latest']) {
     if (channel === 'latest') refreshTags(source);
     await runLocalRelease({ mode: 'execute', channel, 'release-sha': sha,
       'state-dir': join(directory, channel), 'dispatched-by': JSON.stringify(dispatchedBy),
       'store-track': channel === 'latest' && store ? 'production' : 'none', otaVersions,
-      'desktop-mode': desktopMode,
-      'mac-helpers': macHelpers,
+      'desktop-mode': desktopMode, 'mac-helpers': macHelpers, checks,
     }, { repository: source, secrets });
   }
-  if (!fullChecks) return;
-  audit(source, join(directory, 'prompt-audit'));
-  await runLocalRelease({ mode: 'execute', leg: 'release_checks', channel: 'latest',
-    'release-sha': sha, 'state-dir': join(directory, 'full-checks'),
-  }, { repository: source, secrets });
 }
 
 // Every release leaves full source copies, overlay layers and node_modules in its
@@ -138,7 +138,7 @@ async function main(argv) {
       store = storeReleaseNeeded(pinnedRuntimes(readFileSync(join(source, 'apps/mobile/app.config.js'), 'utf8')), stores);
     }
     console.log(store ? 'Store release: production; a pinned native runtime is not live in its store.' : 'Store release: none.');
-    await releaseSequence({ source, sha, directory, secrets, dispatchedBy, otaVersions, store, desktopMode: options.desktopMode, macHelpers: options.macHelpers, fullChecks: options.fullChecks }, runLocalRelease);
+    await releaseSequence({ source, sha, directory, secrets, dispatchedBy, otaVersions, store, desktopMode: options.desktopMode, macHelpers: options.macHelpers }, runLocalRelease);
     console.log(`Released ${sha} to next and latest${store ? ' with production store builds' : ''}. Private results: ${directory}`);
   } finally {
     try { pruneReleaseWorkspaces(directory); } catch { /* leftovers are retried by the next release's own prune */ }

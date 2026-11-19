@@ -45,8 +45,8 @@ published between the two legs. Version allocation reads release records and
 all versioned OTA branch names, so an orphaned OTA rc cannot be reused.
 
 `npm run release` never uploads store beta builds: next is the OTA beta only. Latest submits production store builds when a pinned native runtime is not the newest one live in its store (or a store cannot be read); `--no-store` skips them.
-The next leg runs the existing quick local checks. Latest promotes that exact
-successful next SHA without invoking Checks or repeating typecheck, dead-code,
+After full checks, the next leg runs the existing quick local checks. Latest
+promotes that exact successful next SHA without invoking Checks or repeating typecheck, dead-code,
 grammar or codec checks. Neither leg dispatches GitHub CI. Existing delivery
 proofs, canary, rollback and finalization stay with their release legs.
 
@@ -57,11 +57,13 @@ execution IDs; the local command does not request a server receipt.
 
 ## Nightly full checks on squire
 
-The nightly release uses `npm run release -- --full-checks`. After next and
-latest both succeed, it runs the checks-only `release-local --leg release_checks`
-path against that same immutable SHA, under the existing release lock. Ordinary
-releases retain their quick gate. A failed release stops before full checks;
-a failed check fails the command and leaves private results in `full-checks/`.
+The nightly release uses `npm run release`; full checks are mandatory by default.
+Before next or latest delivery, it runs the checks-only `release-local --leg
+release_checks` path against the same immutable SHA, under the existing release
+lock. A failed check stops delivery and leaves private results in `full-checks/`.
+Both published `release.json` records include `checks.sourceSha`, `checks.result`
+and the absolute `checks.resultsPath` for `full-checks/release-checks.json`.
+The legacy `--full-checks` flag is accepted but no longer required.
 Before the checks, `npm run prompt-audit` writes the rendered agent prompts and
 advisory findings to `prompt-audit/`; it never fails the run.
 
@@ -104,8 +106,8 @@ caches, Docker configuration and logs.
 The existing `beeline-ci1..4.slice` parents enforce 3 CPUs / 12 GiB each.
 After the checks verdict, the delivery queue uses at most three local slots
 and one separate capped slot for remote Mac orchestration.
-iOS store compilation and the Intel Mac helper share the remote orchestration
-slot while server, Linux helper, ARM helper carry, OTA and web app legs use
+iOS store compilation and both Mac helpers share the remote orchestration
+slot while server, Linux helper, OTA and web app legs use
 available local slots.
 Each delivery worker runs as the operator in its own source checkout and process,
 so production credentials never enter credential-free CI jails.
@@ -153,11 +155,18 @@ promotion publishes it. Merging website changes alone does not publish them.
 
 The selected EAS web app leg
 still exports, uploads private source maps when configured, deploys and verifies its canonical
-origin. The Intel Mac helper builds and runs its installation proof on the
-MacBook. The authorized MacBook is Intel, so the Apple-silicon helper remains
-carried byte for byte with its original commit/version/checksum and a
-`carriedFrom` record: its native installation proof requires an ARM Mac.
-`--mac-helpers carry` retains both published Apple helper archives instead.
+origin. Both Mac helpers build on the authorized Intel MacBook
+(`dani@100.104.88.126`). Rust cross-compiles the ARM helper for
+`aarch64-apple-darwin`; packaging fetches the locked ARM CodeGraph bundle with
+its npm integrity verified. Every packaged Mach-O passes `lipo -verify_arch`
+and `codesign --verify --strict`; our Cargo binaries receive ad-hoc signatures.
+Intel also runs the installation proof. ARM records
+`verification: architecture-signature` because an executable installation proof
+requires an ARM Mac. `--mac-helpers carry` retains both published Apple helper
+archives instead. Carry provenance counts consecutive releases, and a fourth
+carry fails the release. Legacy carried archives without a count require a
+rebuild; newly built archives reset the count. The same limit applies when a
+release carries the entire helper component.
 
 The desktop updater manifest has one version for all platforms. A normal
 `npm run release -- --no-store` builds the complete installer set from the
