@@ -149,7 +149,7 @@ export function ChatInfoScreen({ roomId, close }: { roomId: string; close: () =>
         <Screen title="Chat info" back={close} testID="chat-info" header={(
             // The chat's own header frame, so entering chat info keeps the name in place.
             <PlaceHeader back={close} testID="chat-info-header"
-                mark={direct ? null : <RepositoryMark avatarUrl={room?.room.avatar} faviconUrl={room?.room.favicon} size={36} />}
+                mark={direct ? null : <RepositoryMark homepageIconUrl={room?.room.homepageIcon} avatarUrl={room?.room.avatar} faviconUrl={room?.room.favicon} size={36} />}
                 title={<ChatName name={tag || name} />}
                 meta={room && !direct ? <Copy small quiet testID="chat-kind">{chatKindLine(room.room.visibility, workspaceName, room.members.length)}</Copy> : null} />
         )}>

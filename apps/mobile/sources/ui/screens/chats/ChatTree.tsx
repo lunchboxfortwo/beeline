@@ -88,7 +88,7 @@ function ChatMark({ item, size = MARK }: { size?: number; item: Partial<Pick<Cha
     );
   }
   return (
-    <RepositoryMark avatarUrl={item.room?.avatar} faviconUrl={item.room?.favicon} size={size} />
+    <RepositoryMark homepageIconUrl={item.room?.homepageIcon} avatarUrl={item.room?.avatar} faviconUrl={item.room?.favicon} size={size} />
   );
 }
 

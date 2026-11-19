@@ -459,6 +459,7 @@ export function BuzzChatSurface({
   memberCount={roomParticipantTotal}
   repositoryAvatar={roomSurface?.room.avatar}
   repositoryFavicon={roomSurface?.room.favicon}
+  repositoryHomepageIcon={roomSurface?.room.homepageIcon}
   openChatInfo={openChatInfo}
   openMembers={openMembers}
   dmPeer={dmPeerMark}

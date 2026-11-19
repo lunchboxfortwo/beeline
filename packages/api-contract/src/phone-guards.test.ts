@@ -3,6 +3,13 @@ import { m45_describe, m45_expect, m45_it, m45_ROOM_VIEW_MESSAGE_LIMIT, m45_read
 mergedDescribe45("phone-guards.tolerance.test.ts", () => {
 const scope1 = fixtureScope1();
 m45_describe('phone surface readers', () => {
+  m45_it('preserves the repository homepage icon on Room headers and omits unreadable values', () => {
+    const homepageIcon = 'https://api/v1/company-logos/https%3A%2F%2Fgrunt.run%2F';
+    const view = m45_readRoomView({ ...scope1.currentRoom, room: { ...scope1.header, homepageIcon } });
+    m45_expect(view?.room.homepageIcon).toBe(homepageIcon);
+    m45_expect(m45_readRoomView({ ...scope1.currentRoom, room: { ...scope1.header, homepageIcon: 42 } })?.room.homepageIcon).toBeUndefined();
+  });
+
   m45_it('preserves approval intent through connector, permission and Squire phone projections', () => {
     const intent = { action: 'Connect Gmail', purpose: 'read the renewal notice' };
     m45_expect(m45_readConnectorOfferCardView({ ...scope1.connectorOffer, ...intent })).toMatchObject(intent);

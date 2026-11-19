@@ -2,7 +2,7 @@ import React from 'react';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create } from 'react-test-renderer';
 import { expect, it, vi } from 'vitest';
-vi.mock('react-native', () => ({ Image: 'NativeImage' }));
+vi.mock('react-native', () => ({ Image: 'NativeImage', PixelRatio: { get: () => 3, getPixelSizeForLayoutSize: (size: number) => size * 3 } }));
 vi.mock('tamagui',async()=>(await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
 vi.mock('lucide-react-native',async()=>(await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('react-native-safe-area-context',()=>({useSafeAreaInsets:()=>({top:0,bottom:0,left:0,right:0})}));
@@ -19,4 +19,17 @@ it('shows the stored owner photo, falls back to the favicon on failure, then the
   expect(tree.root.findAll((node:any)=>node.type==='NativeImage')).toHaveLength(0);
   expect(tree.root.findAll((node:any)=>node.type==='Icon.Hash')).toHaveLength(1);
   await act(async()=>tree.unmount());
+});
+
+it('prioritizes the homepage icon at native pixel density and falls back to the owner after a failed fetch', async () => {
+  let tree: any;
+  const homepage = 'https://beeline.example/v1/company-logos/https%3A%2F%2Fgrunt.run%2F';
+  await act(async () => { tree = create(<RepositoryMark homepageIconUrl={homepage} avatarUrl="https://avatars.githubusercontent.com/u/42" size={36} />); });
+  const image = () => tree.root.find((node: any) => node.type === 'NativeImage');
+  expect(image().props.source).toMatchObject({ uri: `${homepage}?size=108`, width: 36, height: 36, scale: 3 });
+  expect(image().props.resizeMode).toBe('contain');
+  expect(image().props.resizeMethod).toBe('scale');
+  await act(async () => image().props.onError());
+  expect(image().props.source.uri).toBe('https://avatars.githubusercontent.com/u/42');
+  await act(async () => tree.unmount());
 });

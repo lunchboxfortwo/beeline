@@ -340,6 +340,7 @@ import { GitHubAppClient, GitHubAppConfig, jsonObject, githubHeaders, repository
           fullName,
           remote,
           defaultBranch,
+          ...(typeof repo.homepage === 'string' && repo.homepage.trim() ? { homepage: repo.homepage.trim() } : {}),
           private: repo.private !== false,
           allowAutoMerge: repo.allow_auto_merge === true,
         };
@@ -408,6 +409,7 @@ import { GitHubAppClient, GitHubAppConfig, jsonObject, githubHeaders, repository
       fullName,
       remote,
       defaultBranch,
+      ...(typeof body.homepage === 'string' && body.homepage.trim() ? { homepage: body.homepage.trim() } : {}),
       private: body.private !== false,
       allowAutoMerge: body.allow_auto_merge === true,
     };

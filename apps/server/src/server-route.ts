@@ -26,7 +26,7 @@ import { ingestWalletWebhook } from "./wallet-webhooks.js";
 import { WEBHOOK_BODY_LIMIT, ingestSubscriptionWebhook } from "./subscription-webhooks.js";
 import { ingestProviderWebhook } from "./provider-webhooks.js";
 import { ingestComposioDelivery } from "./composio-delivery.js";
-import { readCompanyLogo } from "./company-logos.js";
+import { readCompanyLogo, sizeCompanyLogo } from "./company-logos.js";
 import { connectorLogo } from "./workbench.js";
 import { serveEmailImage } from "./email-images.js";
 import { ServerOptions, exactPath, bytes, MAX_JSON_BYTES, json, body, appSignInWebOrigin, appSignInReturnCookie, bearerSecretMatches, clientKey, publicJson, funnelRateLimit, signatureMatches } from './server.js';
@@ -814,10 +814,11 @@ a:focus-visible { outline: 3px solid #c8a8e8; outline-offset: 4px; }
     let id: string;
     try { id = decodeURIComponent(url.pathname.slice('/v1/company-logos/'.length)); }
     catch { json(response, 400, { error: 'invalid_company' }); return; }
-    const image = await readCompanyLogo(id);
+    const cached = await readCompanyLogo(id);
+    const image = cached ? await sizeCompanyLogo(cached, url.searchParams.get('size')) : undefined;
     if (!image) { json(response, 404, { error: 'company_icon_unavailable' }); return; }
     response.writeHead(200, { 'content-type': image.mime, 'content-length': String(image.bytes.length),
-      'cache-control': 'public, max-age=86400', 'x-content-type-options': 'nosniff',
+      'cache-control': 'no-store', 'x-content-type-options': 'nosniff',
       'content-security-policy': "default-src 'none'; sandbox" });
     response.end(image.bytes); return;
   }

@@ -25,6 +25,7 @@ type Props = {
   memberCount: number;
   repositoryAvatar?: string;
   repositoryFavicon?: string;
+  repositoryHomepageIcon?: string;
   openChatInfo: () => void;
   openMembers: () => void;
   /** A DM's peer, when its mark should show. */
@@ -78,6 +79,7 @@ export const ChatSurfaceHeaderView = React.memo(function ChatSurfaceHeaderView({
   memberCount,
   repositoryAvatar,
   repositoryFavicon,
+  repositoryHomepageIcon,
   openChatInfo,
   openMembers,
   dmPeer,
@@ -133,7 +135,7 @@ export const ChatSurfaceHeaderView = React.memo(function ChatSurfaceHeaderView({
       backTestID="chat-back"
       mark={isDirectMessage
         ? dmPeer ? <IdentityMark kind={dmPeer.kind} seed={dmPeer.seed} avatarUrl={dmPeer.avatarUrl} face={dmPeer.face} name={title ?? ''} size={36} /> : null
-        : <RepositoryMark avatarUrl={repositoryAvatar} faviconUrl={repositoryFavicon} size={36} />}
+        : <RepositoryMark homepageIconUrl={repositoryHomepageIcon} avatarUrl={repositoryAvatar} faviconUrl={repositoryFavicon} size={36} />}
       title={name}
       meta={meta}
       right={right}

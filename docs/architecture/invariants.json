@@ -1499,7 +1499,8 @@
           "active": "existing before the registry; weekly audit reviews",
           "updated_at": "existing before the registry; weekly audit reviews",
           "private": "existing before the registry; weekly audit reviews",
-          "allow_auto_merge": "existing before the registry; weekly audit reviews"
+          "allow_auto_merge": "existing before the registry; weekly audit reviews",
+          "homepage": "GitHub repository website used for its chat mark"
         }
       },
       "github_star_prompts": {

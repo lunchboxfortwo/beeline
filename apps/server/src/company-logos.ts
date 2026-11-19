@@ -39,13 +39,14 @@ export async function publicIconResponse(url: URL, redirects = 0, deadline = Dat
   } });
   try {
     const response = await new Promise<{ bytes: Buffer; mime: string; location?: string; status: number }>((resolve, reject) => {
-      const req = get(url, { agent,  headers: { accept: 'image/*,text/html;q=0.5', 'user-agent': 'Beeline company icons' } }, res => {
+      const req = get(url, { agent, timeout: remaining, headers: { accept: 'image/*,text/html;q=0.5', 'user-agent': 'Beeline company icons' } }, res => {
         const chunks: Buffer[] = []; let size = 0;
         res.on('data', (chunk: Buffer) => { size += chunk.length; if (size > LIMIT) req.destroy(new Error('company icon too large')); else chunks.push(chunk); });
         res.on('error', reject);
         res.on('end', () => resolve({ bytes: Buffer.concat(chunks), mime: (res.headers['content-type'] ?? '').split(';')[0]!,
           status: res.statusCode ?? 500, location: res.headers.location }));
       });
+      req.on('timeout', () => req.destroy(new Error('company icon timeout')));
       req.on('error', reject);
     });
     if (response.status >= 300 && response.status < 400 && response.location)
@@ -54,11 +55,28 @@ export async function publicIconResponse(url: URL, redirects = 0, deadline = Dat
     return { bytes: response.bytes, mime: response.mime, url };
   } finally { agent.destroy(); }
 }
-async function siteIcon(domain: string): Promise<Image | undefined> {
+function homepageUrl(value: string): URL | undefined {
+  try {
+    if (value.length > 2048) return undefined;
+    const url = new URL(value.includes('://') ? value : `https://${value}`);
+    if (!['https:', 'http:'].includes(url.protocol) || !companyHost(value) || url.username || url.password || url.port) return undefined;
+    url.protocol = 'https:';
+    url.hash = '';
+    return url;
+  } catch { return undefined; }
+}
+
+/** Use the existing safe icon endpoint; Room reads never wait on a website. */
+export function homepageIconUrl(homepage: string | null | undefined, origin: string): string | undefined {
+  const url = homepage ? homepageUrl(homepage) : undefined;
+  return url ? `${origin}/v1/company-logos/${encodeURIComponent(url.href)}` : undefined;
+}
+
+async function siteIcon(homepage: URL): Promise<Image | undefined> {
   const urls: URL[] = [];
   const deadline = Date.now() + 10_000;
   try {
-    const page = await publicIconResponse(new URL(`https://${domain}/`), 0, deadline);
+    const page = await publicIconResponse(homepage, 0, deadline);
     if (page.mime === 'text/html') {
       const html = page.bytes.toString('utf8');
       for (const tag of html.match(/<link\b[^>]{0,2048}>/gi) ?? []) {
@@ -71,7 +89,7 @@ async function siteIcon(domain: string): Promise<Image | undefined> {
       }
     }
   } catch { /* root unavailable; still try the conventional site icon */ }
-  urls.push(new URL(`https://${domain}/favicon.ico`));
+  urls.push(new URL('/favicon.ico', homepage));
   for (const url of urls.slice(0, 4)) {
     try {
       const image = await publicIconResponse(url, 0, deadline);
@@ -92,15 +110,25 @@ export async function readCompanyLogo(id: string): Promise<Image | undefined> {
     const image = { bytes, mime: 'image/png' };
     cache.set(id, { until: Infinity, image }); return image;
   }
-  const domain = companyHost(id);
-  if (!domain || domain !== id || id.length > 253) return undefined;
-  const held = cache.get(id);
+  const homepage = homepageUrl(id);
+  if (!homepage || (!id.includes('://') && (homepage.hostname !== id || id.length > 253))) return undefined;
+  // Domain-based Workbench logos and repository homepages share one cache.
+  const key = homepage.href;
+  const held = cache.get(key);
   if (held && held.until > Date.now()) return held.pending ?? held.image;
   if (fetching >= 4) return undefined;
   if (cache.size >= 512) { for (const key of cache.keys()) { if (!COMPANY_MARK_IDS.has(key) && !cache.get(key)?.pending) { cache.delete(key); break; } } }
   fetching++;
-  const pending = siteIcon(domain).then(image => { cache.set(id, { image, until: Date.now() + (image ? 86400_000 : 10 * 60_000) }); return image; })
+  const pending = siteIcon(homepage).then(image => { cache.set(key, { image, until: Date.now() + (image ? 10 * 60_000 : 60_000) }); return image; })
     .finally(() => { fetching--; });
-  cache.set(id, { until: Date.now() + 30_000, pending });
+  cache.set(key, { until: Infinity, pending });
   return pending;
+}
+
+/** Native requests physical pixels so Image can display pixel art without resampling. */
+export async function sizeCompanyLogo(image: Image, size: string | null): Promise<Image> {
+  const pixels = Number(size);
+  if (!Number.isInteger(pixels) || pixels < 1 || pixels > 512) return image;
+  return { bytes: await sharp(image.bytes).resize(pixels, pixels, { fit: 'contain', kernel: 'nearest',
+    background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer(), mime: 'image/png' };
 }

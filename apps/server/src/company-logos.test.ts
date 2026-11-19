@@ -1,14 +1,15 @@
 import { EventEmitter } from 'node:events';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import sharp from 'sharp';
 const mocks = vi.hoisted(() => ({ lookup: vi.fn(), get: vi.fn(), agents: [] as any[] }));
 vi.mock('node:dns/promises', () => ({ lookup: mocks.lookup }));
 vi.mock('node:https', () => ({
   Agent: class { constructor(options: unknown) { mocks.agents.push(options); } destroy() {} }, get: mocks.get,
 }));
-import { companyLogo, publicIconResponse, readCompanyLogo } from './company-logos.js';
+import { companyLogo, homepageIconUrl, publicIconResponse, readCompanyLogo, sizeCompanyLogo } from './company-logos.js';
 import { COMPANY_MARK_IDS } from './company-registry.js';
 beforeEach(() => { vi.clearAllMocks(); mocks.agents.length = 0; mocks.lookup.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]); });
+afterEach(() => vi.restoreAllMocks());
 function response(body: Buffer | string, mime = 'image/png', status = 200, location?: string) {
   mocks.get.mockImplementationOnce((_url, _options, callback) => {
     const req = new EventEmitter(); const res = Object.assign(new EventEmitter(), { headers: { 'content-type': mime, location }, statusCode: status });
@@ -47,10 +48,63 @@ describe('server company logos', () => {
     expect(a?.mime).toBe('image/png'); expect(a).toBe(b); expect(await readCompanyLogo('fresh.example')).toBe(a); expect(mocks.get).toHaveBeenCalledTimes(2);
     expect(mocks.get.mock.calls[1]?.[0].pathname).toBe('/mark.png');
   });
+  it('expires missing site icons after one minute', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    mocks.lookup.mockResolvedValue([{ address: '127.0.0.1', family: 4 }]);
+    expect(await readCompanyLogo('expiry-miss.example')).toBeUndefined();
+    const calls = mocks.lookup.mock.calls.length;
+    clock.mockReturnValue(1_059_999);
+    expect(await readCompanyLogo('expiry-miss.example')).toBeUndefined();
+    expect(mocks.lookup).toHaveBeenCalledTimes(calls);
+    clock.mockReturnValue(1_060_000);
+    mocks.lookup.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
+    response('<link rel="icon" href="favicon.svg">', 'text/html');
+    response('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><path fill="#fff" d="M0 0h16v16H0z"/></svg>', 'image/svg+xml');
+    expect((await readCompanyLogo('expiry-miss.example'))?.mime).toBe('image/png');
+    expect(mocks.lookup.mock.calls.length).toBeGreaterThan(calls);
+  });
   it('negative-caches unavailable site icons without issuing repeated requests', async () => {
     mocks.lookup.mockResolvedValue([{ address: '127.0.0.1', family: 4 }]);
     expect(await readCompanyLogo('unavailable.example')).toBeUndefined(); const calls = mocks.lookup.mock.calls.length;
     expect(await readCompanyLogo('unavailable.example')).toBeUndefined(); expect(mocks.lookup).toHaveBeenCalledTimes(calls);
     expect(await readCompanyLogo('../sentry')).toBeUndefined();
+  });
+});
+
+describe('repository homepage icons', () => {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><path fill="#fff" d="M0 0h8v16H0z"/><path fill="#000" d="M8 0h8v16H8z"/></svg>';
+  it('uses the homepage path and its relative SVG icon, converted for native Image', async () => {
+    response('<link rel="icon" href="favicon.svg">', 'text/html');
+    response(svg, 'image/svg+xml');
+    const icon = await readCompanyLogo('https://project.example/docs/');
+    expect(mocks.get.mock.calls.map(call => call[0].href)).toEqual([
+      'https://project.example/docs/', 'https://project.example/docs/favicon.svg',
+    ]);
+    expect(icon?.mime).toBe('image/png');
+    expect((await sharp(icon!.bytes).metadata()).width).toBe(16);
+    const native = await sizeCompanyLogo(icon!, '108');
+    expect((await sharp(native.bytes).metadata()).width).toBe(108);
+    const { data, info } = await sharp(native.bytes).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    const colors = new Set<string>();
+    for (let offset = 0; offset < data.length; offset += info.channels) colors.add(data.subarray(offset, offset + info.channels).toString('hex'));
+    expect(colors).toEqual(new Set(['ffffffff', '000000ff']));
+  });
+  it('shares normalized homepage hits for ten minutes, then fetches again', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(2_000_000);
+    response('<link rel="apple-touch-icon" href="/icon.svg">', 'text/html'); response(svg, 'image/svg+xml');
+    const icon = await readCompanyLogo('shared-cache.example');
+    clock.mockReturnValue(2_599_999);
+    expect(await readCompanyLogo('https://shared-cache.example/')).toBe(icon);
+    expect(mocks.get).toHaveBeenCalledTimes(2);
+    clock.mockReturnValue(2_600_000);
+    response('<link rel="icon" href="/new.svg">', 'text/html'); response(svg, 'image/svg+xml');
+    expect(await readCompanyLogo('https://shared-cache.example/')).not.toBe(icon);
+    expect(mocks.get).toHaveBeenCalledTimes(4);
+  });
+  it('projects only valid homepage URLs and upgrades bare or HTTP websites to HTTPS', () => {
+    expect(homepageIconUrl('grunt.run', 'https://api')).toBe('https://api/v1/company-logos/https%3A%2F%2Fgrunt.run%2F');
+    expect(homepageIconUrl('http://grunt.run/docs/#hi', 'https://api')).toBe('https://api/v1/company-logos/https%3A%2F%2Fgrunt.run%2Fdocs%2F');
+    for (const homepage of [undefined, '', 'https://user:pass@grunt.run', 'https://grunt.run:8443', 'file:///tmp/icon', 'https://127.0.0.1'])
+      expect(homepageIconUrl(homepage, 'https://api')).toBeUndefined();
   });
 });

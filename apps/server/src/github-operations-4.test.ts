@@ -35,6 +35,7 @@ const scope1 = fixtureScope1();
           installationId: 77,
           fullName: 'owner/widgets',
           defaultBranch: 'main',
+          homepage: 'https://grunt.run',
         },
       ]),
       installationToken: vi.fn(async () => ({
@@ -57,6 +58,7 @@ const scope1 = fixtureScope1();
       installation: { id: 77 },
     });
 
+    expect((await scope1.database.query('SELECT homepage FROM github_repositories WHERE repository_id=101')).rows[0]).toEqual({ homepage: 'https://grunt.run' });
     expect(tokenDuringSync).toBe('scoped-token');
     expect(await operations.roomToken(room)).toMatchObject({ token: 'scoped-token' });
     expect(
@@ -160,6 +162,7 @@ const scope1 = fixtureScope1();
           installationId: 77,
           fullName: 'owner/widgets',
           defaultBranch: 'main',
+          homepage: 'https://grunt.run',
           private: widgetsPrivate,
         },
         {
@@ -223,6 +226,7 @@ const scope1 = fixtureScope1();
           installationId: 77,
           fullName: 'owner/widgets',
           defaultBranch: 'main',
+          homepage: 'https://grunt.run',
           private: false,
           allowAutoMerge: widgetsAutoMerge,
         },

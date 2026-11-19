@@ -175,6 +175,11 @@ const scope1 = fixtureScope1();
     const other = await scope1.phoneOperation('readWorkbench', { workspaceId: WORKSPACE }, scope1.recipientToken) as typeof view;
     expect(other.companies?.rows.some(r => r.id === 'example.co.uk')).toBe(false);
     const response = await phoneFetch(`${scope1.origin}/v1/company-logos/sentry`);
+    const nativeLogo = await phoneFetch(`${scope1.origin}/v1/company-logos/sentry?size=108`);
+    expect(nativeLogo.status).toBe(200);
+    const sharp = (await import('sharp')).default;
+    expect((await sharp(Buffer.from(await nativeLogo.arrayBuffer())).metadata()).width).toBe(108);
+    expect(nativeLogo.headers.get('cache-control')).toBe('no-store');
     expect(response.status).toBe(200); expect(response.headers.get('content-type')).toBe('image/png'); expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(0);
   });
 

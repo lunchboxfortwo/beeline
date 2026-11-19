@@ -310,6 +310,8 @@ export interface GitHubInstallationRepository {
   fullName: string;
   remote: string;
   defaultBranch: string;
+  /** Repository website configured in GitHub, when present. */
+  homepage?: string;
   /** GitHub's `private` flag; an absent flag is treated as private. */
   private: boolean;
   /** GitHub's repository-level auto-merge toggle; an absent flag is treated as off. */

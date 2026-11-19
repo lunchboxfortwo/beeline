@@ -9,6 +9,7 @@ it('lists every installation repository across GitHub pages', async () => {
   const repositories = Array.from({ length: 237 }, (_, index) => ({
     id: index + 1, name: `repo-${index}`, full_name: `owner/repo-${index}`,
     clone_url: `https://github.com/owner/repo-${index}.git`, default_branch: 'main',
+    homepage: index === 236 ? 'https://grunt.run' : null,
   }));
   const request = vi.spyOn(app, 'request').mockImplementation(async url => {
     const page = Number(new URL(url).searchParams.get('page'));
@@ -16,7 +17,8 @@ it('lists every installation repository across GitHub pages', async () => {
   });
   const result = await app.listRepositories(77);
   expect(result).toHaveLength(237);
+  expect(result[0]?.homepage).toBeUndefined();
   expect(result.map(repo => repo.id)).toEqual(repositories.map(repo => repo.id));
-  expect(result[236]).toMatchObject({ fullName: 'owner/repo-236', installationId: 77 });
+  expect(result[236]).toMatchObject({ fullName: 'owner/repo-236', installationId: 77, homepage: 'https://grunt.run' });
   expect(request.mock.calls.map(([url]) => new URL(url).searchParams.get('page'))).toEqual(['1', '2', '3']);
 });

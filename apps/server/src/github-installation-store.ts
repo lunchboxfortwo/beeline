@@ -14,7 +14,7 @@ export async function storeGitHubInstallations(database:SqlDatabase,viewerId:str
     avatar:account.avatarUrl??null,selection:account.repositorySelection}));
   const repositories=[...new Map(snapshots.flatMap(snapshot=>snapshot.repositories).map(repository=>[repository.id,{
     id:repository.id,installation_id:repository.installationId,name:repository.fullName,branch:repository.defaultBranch,
-    private:repository.private,auto_merge:repository.allowAutoMerge,
+    private:repository.private,auto_merge:repository.allowAutoMerge,homepage:repository.homepage??null,
   }])).values()];
   await database.query(`INSERT INTO github_installations(installation_id,owner_id,account_id,account_login,account_type,account_avatar_url,repository_selection,status)
     SELECT id,$2,account_id,login,type,avatar,selection,'active'
@@ -27,14 +27,14 @@ export async function storeGitHubInstallations(database:SqlDatabase,viewerId:str
       IS DISTINCT FROM (EXCLUDED.owner_id,EXCLUDED.account_id,EXCLUDED.account_login,EXCLUDED.account_type,
         EXCLUDED.account_avatar_url,EXCLUDED.repository_selection,EXCLUDED.status)`,[JSON.stringify(installations),viewerId]);
   await database.query(`WITH refreshed AS (
-    INSERT INTO github_repositories(repository_id,installation_id,full_name,default_branch,private,allow_auto_merge)
-    SELECT id,installation_id,name,branch,private,auto_merge
-    FROM jsonb_to_recordset($1::jsonb) repository(id bigint,installation_id bigint,name text,branch text,private boolean,auto_merge boolean)
+    INSERT INTO github_repositories(repository_id,installation_id,full_name,default_branch,private,allow_auto_merge,homepage)
+    SELECT id,installation_id,name,branch,private,auto_merge,homepage
+    FROM jsonb_to_recordset($1::jsonb) repository(id bigint,installation_id bigint,name text,branch text,private boolean,auto_merge boolean,homepage text)
     ORDER BY id ON CONFLICT(repository_id) DO UPDATE SET installation_id=EXCLUDED.installation_id,full_name=EXCLUDED.full_name,
-      default_branch=EXCLUDED.default_branch,private=EXCLUDED.private,allow_auto_merge=EXCLUDED.allow_auto_merge,active=true,updated_at=now()
+      default_branch=EXCLUDED.default_branch,private=EXCLUDED.private,allow_auto_merge=EXCLUDED.allow_auto_merge,homepage=EXCLUDED.homepage,active=true,updated_at=now()
     WHERE (github_repositories.installation_id,github_repositories.full_name,github_repositories.default_branch,
-      github_repositories.private,github_repositories.allow_auto_merge,github_repositories.active)
-      IS DISTINCT FROM (EXCLUDED.installation_id,EXCLUDED.full_name,EXCLUDED.default_branch,EXCLUDED.private,EXCLUDED.allow_auto_merge,true)
+      github_repositories.private,github_repositories.allow_auto_merge,github_repositories.homepage,github_repositories.active)
+      IS DISTINCT FROM (EXCLUDED.installation_id,EXCLUDED.full_name,EXCLUDED.default_branch,EXCLUDED.private,EXCLUDED.allow_auto_merge,EXCLUDED.homepage,true)
     RETURNING repository_id,full_name
   ) UPDATE rooms SET repository_name=refreshed.full_name,repository_remote='git://github.com/' || refreshed.full_name,
       repository_updated_at=now(),updated_at=now()

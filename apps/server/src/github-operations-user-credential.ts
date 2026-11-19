@@ -110,15 +110,16 @@ import { GitHubOperations } from './github-operations.js';
       installationId: number;
       fullName: string;
       defaultBranch: string;
+      homepage?: string;
       private: boolean;
       allowAutoMerge: boolean;
     },
     database: SqlDatabase,
   ) {
     await database.query(
-      `INSERT INTO github_repositories(repository_id,installation_id,full_name,default_branch,private,allow_auto_merge) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(repository_id) DO UPDATE SET installation_id=EXCLUDED.installation_id,full_name=EXCLUDED.full_name,default_branch=EXCLUDED.default_branch,private=EXCLUDED.private,allow_auto_merge=EXCLUDED.allow_auto_merge,active=true,updated_at=now()
-       WHERE (github_repositories.installation_id,github_repositories.full_name,github_repositories.default_branch,github_repositories.private,github_repositories.allow_auto_merge,github_repositories.active)
-         IS DISTINCT FROM (EXCLUDED.installation_id,EXCLUDED.full_name,EXCLUDED.default_branch,EXCLUDED.private,EXCLUDED.allow_auto_merge,true)`,
+      `INSERT INTO github_repositories(repository_id,installation_id,full_name,default_branch,private,allow_auto_merge,homepage) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(repository_id) DO UPDATE SET installation_id=EXCLUDED.installation_id,full_name=EXCLUDED.full_name,default_branch=EXCLUDED.default_branch,private=EXCLUDED.private,allow_auto_merge=EXCLUDED.allow_auto_merge,homepage=EXCLUDED.homepage,active=true,updated_at=now()
+       WHERE (github_repositories.installation_id,github_repositories.full_name,github_repositories.default_branch,github_repositories.private,github_repositories.allow_auto_merge,github_repositories.homepage,github_repositories.active)
+         IS DISTINCT FROM (EXCLUDED.installation_id,EXCLUDED.full_name,EXCLUDED.default_branch,EXCLUDED.private,EXCLUDED.allow_auto_merge,EXCLUDED.homepage,true)`,
       [
         repository.id,
         repository.installationId,
@@ -126,6 +127,7 @@ import { GitHubOperations } from './github-operations.js';
         repository.defaultBranch,
         repository.private,
         repository.allowAutoMerge,
+        repository.homepage ?? null,
       ],
     );
   }

@@ -432,6 +432,7 @@ async storeRepository(repository: {
     installationId: number;
     fullName: string;
     defaultBranch: string;
+    homepage?: string;
     private: boolean;
     allowAutoMerge: boolean;
 }, database: SqlDatabase) { return gitHubOperationsStoreRepository(this, repository, database); }

@@ -21,7 +21,15 @@ it('projects the stored repo-owner avatar and native-compatible favicon on chats
   expect((await service.readRoom(thread,owner))?.room).toMatchObject(mark);
   expect((await service.readChats(workspace,owner))?.chats.find(item=>item.room.id===room)?.room).toMatchObject(mark);
   expect((await service.readCorners(room,owner))?.corners.find(item=>item.corner.id===thread)?.corner).toMatchObject(mark);
+  await db.query("UPDATE github_repositories SET homepage='https://grunt.run/'");
+  const homepageMark = { ...mark, homepageIcon: 'https://beeline.example/v1/company-logos/https%3A%2F%2Fgrunt.run%2F' };
+  expect((await service.readRoom(room,owner))?.room).toMatchObject(homepageMark);
+  expect((await service.readRoom(thread,owner))?.room).toMatchObject(homepageMark);
+  expect((await service.readChats(workspace,owner))?.chats.find(item=>item.room.id===room)?.room).toMatchObject(homepageMark);
+  expect((await service.readCorners(room,owner))?.corners.find(item=>item.corner.id===thread)?.corner).toMatchObject(homepageMark);
+  await db.query('UPDATE github_repositories SET homepage=NULL');
+  expect((await service.readRoom(room,owner))?.room.homepageIcon).toBeUndefined();
   await db.query('UPDATE github_installations SET account_avatar_url=NULL');
   const fallback=(await db.query(`SELECT ${repositoryMarkColumnsSql('room')} FROM rooms room WHERE id=$1`,[thread])).rows[0];
-  expect(fallback).toEqual({repository_avatar:null,repository_favicon:mark.favicon});
+  expect(fallback).toEqual({repository_homepage:null,repository_avatar:null,repository_favicon:mark.favicon});
 });

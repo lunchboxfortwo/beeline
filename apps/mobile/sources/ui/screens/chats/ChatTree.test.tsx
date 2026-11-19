@@ -112,6 +112,7 @@ it('shows the repository mark on the chat row and the status glyph first on its 
       ...item.room,
       avatar: 'https://avatars.githubusercontent.com/u/42',
       favicon: 'https://github.githubassets.com/favicons/favicon.png',
+      homepageIcon: 'https://api/v1/company-logos/https%3A%2F%2Fgrunt.run%2F',
     },
     openCorners: [
       {
@@ -140,6 +141,7 @@ it('shows the repository mark on the chat row and the status glyph first on its 
   expect(marks).toHaveLength(1);
   expect(marks[0].props).toMatchObject({
     avatarUrl: marked.room.avatar,
+    homepageIconUrl: marked.room.homepageIcon,
     faviconUrl: marked.room.favicon,
   });
   const threadRow = tree.root.find((node: any) => node.props?.testID === 'thread-row-thread');

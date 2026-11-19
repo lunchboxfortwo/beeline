@@ -438,6 +438,12 @@
       "loadingRow",
       "ownerMenu"
     ],
+    "components/buzz/RepositoryImage.tsx": [
+      "RepositoryImage"
+    ],
+    "components/buzz/RepositoryImage.web.tsx": [
+      "RepositoryImage"
+    ],
     "components/buzz/RepositoryMark.tsx": [
       "RepositoryMark"
     ],
