@@ -4,7 +4,7 @@ import { act, create } from 'react-test-renderer';
 import { beforeEach, expect, it, vi } from 'vitest';
 
 vi.mock('tamagui', () => ({ YStack: (props: any) => React.createElement('YStack', props, props.children) }));
-vi.mock('@/buzz/needs-you-store', () => ({ useNeedsYouCount: () => 2 }));
+vi.mock('@/buzz/work-board-store', () => ({ useWorkBoardNeedsYouCount: () => 2 }));
 vi.mock('@/buzz/use-active-community', () => ({ useActiveCommunityId: () => 'w1' }));
 vi.mock('./TabBar', () => ({ TabBar: (props: any) => React.createElement('TabBar', props) }));
 

@@ -171,7 +171,7 @@ vi.mock('tamagui', async () => {
   return hosts;
 });
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
-vi.mock('@/buzz/needs-you-store', () => ({ useNeedsYouCount: () => 0 }));
+vi.mock('@/buzz/work-board-store', () => ({ useWorkBoardNeedsYouCount: () => 0 }));
 vi.mock('@/utils/responsive', () => ({ useIsDesktop: () => false }));
 vi.mock('@/components/buzz/ServiceMark', () => ({ ServiceMark: (props: any) => React.createElement('ServiceMark', props) }));
 vi.mock('@/sync/transport', () => ({

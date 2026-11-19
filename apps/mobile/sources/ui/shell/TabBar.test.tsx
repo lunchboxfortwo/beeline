@@ -34,6 +34,18 @@ it('leaves web tab labels as they were, with no ellipsis', async () => {
     expect(props.adjustsFontSizeToFit).toBeUndefined();
 });
 
+it.each([0, 1])('shows the Tasks badge only for a nonzero board count (%s)', async (count) => {
+    const { TabBar } = await import('./TabBar');
+    const { CountPill } = await import('@/ui/grammar');
+    let tree: any;
+    act(() => { tree = create(<TabBar active="tags" tagsCount={count} />); });
+    try {
+        const badges = tree.root.findAllByType(CountPill);
+        expect(badges).toHaveLength(count ? 1 : 0);
+        if (count) expect(badges[0].props.n).toBe(count);
+    } finally { act(() => tree.unmount()); }
+});
+
 it.each(['dark', 'light'])('shows the selected tab apart from the others under %s Stone colors', async (mode) => {
     platform.OS = 'ios';
     currentTheme.name = `${mode}_stone`;

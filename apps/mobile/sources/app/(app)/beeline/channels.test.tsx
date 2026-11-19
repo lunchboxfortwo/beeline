@@ -696,7 +696,7 @@ describe('Room deck live path', () => {
     await act(async () => renderer.root.findByType(ChatListHeader).props.onNew());
     expect(renderer.root.findByType(NewChatSheet).props.step).toBe('menu');
     await act(async () => renderer.root.findByType(NewChatSheet).props.onPickRepository({
-      key: 'github:42', name: 'owner/Paper_Band', private: true,
+      key: 'github:42', name: 'owner/Paper_Band', private: true, githubInstallationId: 7,
     }));
     expect(deck.createRoom).toHaveBeenCalledWith('paper-band', expect.objectContaining({
       communityId: 'workspace',

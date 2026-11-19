@@ -1,6 +1,6 @@
 import React, { createContext, useContext } from 'react';
 import { YStack } from 'tamagui';
-import { useNeedsYouCount } from '@/buzz/needs-you-store';
+import { useWorkBoardNeedsYouCount } from '@/buzz/work-board-store';
 import { useActiveCommunityId } from '@/buzz/use-active-community';
 import { TabBar } from './TabBar';
 import { isTabRootPath, tabForPath, type Tab } from './tab-routes';
@@ -32,6 +32,6 @@ export function PhoneTabScreen({ route, children }: { route: { name: string }; c
 
 export function PhoneTabBar({ active }: { active: Tab }) {
     const workspaceId = useActiveCommunityId() ?? undefined;
-    const tagsCount = useNeedsYouCount(workspaceId, workspaceId);
+    const tagsCount = useWorkBoardNeedsYouCount(workspaceId);
     return <TabBar active={active} tagsCount={tagsCount} />;
 }

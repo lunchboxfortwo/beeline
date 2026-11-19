@@ -31,6 +31,19 @@ function decodedStorageKey(key: string): string | null {
   }
 }
 
+// Tasks now observes the held Work board. Retire the old independent badge cache.
+for (const key of responses.getAllKeys()) {
+  const decoded = decodedStorageKey(key);
+  if (decoded === null) continue;
+  try {
+    const address = JSON.parse(decoded) as unknown;
+    if (Array.isArray(address) && address[3] === '/workspace/:id/needs-you')
+      responses.delete(key);
+  } catch {
+    // An unrelated malformed key is not part of this retirement.
+  }
+}
+
 const durableSurfaceCache = new SurfaceResponseCache(
   {
     get: async (key) => responses.getString(storageKey(key)) ?? null,

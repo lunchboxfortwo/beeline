@@ -4,7 +4,6 @@ import type {
   ChatListWorkspace,
   CornerListView,
   MessageBookmarkView,
-  NeedsYouItemView,
   RoomView,
   RoomViewIdentity,
   RoomViewMember,
@@ -198,10 +197,6 @@ export class IdentitySelection {
     });
   }
 
-  needsYou(view: { items: readonly NeedsYouItemView[] }): { items: readonly NeedsYouItemView[] } {
-    return fields(view, { items: list(view.items, (item) => this.people(item, 'author')) });
-  }
-
   bookmarks<T extends { bookmarks: readonly MessageBookmarkView[] }>(view: T): T {
     return fields(view, {
       bookmarks: list(view.bookmarks, (bookmark) => this.people(bookmark, 'author')),
@@ -243,8 +238,6 @@ export function selectIdentities(address: SurfaceCacheAddress, value: unknown, s
   if (endpoint === '/workspace/:id') return selection.workspaceView(value as WorkspaceView);
   if (endpoint === '/workspace/:id/chats') return selection.chatList(value as ChatListView);
   if (endpoint === '/workspace/:id/agents/:agentId') return selection.agentDetail(value as AgentDetailView);
-  if (endpoint === '/workspace/:id/needs-you')
-    return selection.needsYou(value as { items: readonly NeedsYouItemView[] });
   if (endpoint === '/workspace/:id/bookmarks')
     return selection.bookmarks(value as { bookmarks: readonly MessageBookmarkView[] });
   if (endpoint === '/room/:id/corners') return selection.corners(value as CornerListView);

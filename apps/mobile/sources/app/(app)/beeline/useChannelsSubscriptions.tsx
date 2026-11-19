@@ -20,7 +20,7 @@ export function useChannelsSubscriptions(
   {
     drawn, setConfirmedWorkspaceCount, deckMissedRef, deckVisible, setError, identity, relayUrl,
     deckFocusedRef, transport, setDeletedWorkspaceNotice, selectedId, chatStore, setChatList,
-    setRefreshing, readWorkspaceRef, setNeedsYouSignal, retryGeneration, setAgeNow,
+    setRefreshing, readWorkspaceRef, retryGeneration, setAgeNow,
   }: DeckState,
   activeCommunityId: string | null,
   refreshMissed: () => void,
@@ -130,7 +130,6 @@ export function useChannelsSubscriptions(
               visible: deckVisible,
               onRead: () => {
                 if (selectedWorkspaceRemoved) return;
-                setNeedsYouSignal((signal) => signal + 1);
                 setRefreshing(false);
                 setError(null);
               },
@@ -156,8 +155,6 @@ export function useChannelsSubscriptions(
           if (!selectedWorkspaceRemoved) setChatList(chats.current());
         };
         paint();
-        // A store another screen already read is current: it seeds the badge.
-        if (chats.confirmed()) setNeedsYouSignal((signal) => signal + 1);
         // Saved Rooms are the first usable deck; paint them immediately.
         // Confirmed live reconciliation still yields to Room or push navigation.
         unsubscribeChats = chats.subscribe(() => {

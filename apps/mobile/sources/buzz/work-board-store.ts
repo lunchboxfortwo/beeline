@@ -10,13 +10,14 @@ type Slot = {
   reading?: Promise<void>;
   dirty: boolean;
   unavailable: boolean;
+  readers: number;
   listeners: Set<() => void>;
 };
 const slots = new Map<string, Slot>();
 function slot(id: string): Slot {
   let held = slots.get(id);
   if (!held) {
-    held = { value: null, dirty: true, unavailable: false, listeners: new Set() };
+    held = { value: null, dirty: true, unavailable: false, readers: 0, listeners: new Set() };
     slots.set(id, held);
   }
   return held;
@@ -66,7 +67,7 @@ export function loadWorkBoard(workspaceId: string, invalidate = false): Promise<
     .finally(() => {
       if (held.reading !== reading) return;
       held.reading = undefined;
-      if (held.dirty && held.listeners.size && generation === clientResetGeneration())
+      if (held.dirty && held.readers && generation === clientResetGeneration())
         void loadWorkBoard(workspaceId).catch(() => undefined);
     });
   held.reading = reading;
@@ -92,6 +93,7 @@ export function useWorkBoard(workspaceId: string) {
   );
   useEffect(() => {
     if (!workspaceId) return;
+    held.readers++;
     let stopped = false;
     let release: (() => void) | undefined;
     const connection = sharedLiveConnection();
@@ -116,12 +118,28 @@ export function useWorkBoard(workspaceId: string) {
     const connected = connection.subscribeConnected(refresh);
     refresh();
     return () => {
+      held.readers--;
       stopped = true;
       release?.();
       connected();
     };
   }, [workspaceId, generation]);
   return value;
+}
+
+/** Observe the Tasks screen's held board only; badges never start a read or connection. */
+export function useWorkBoardNeedsYouCount(workspaceId: string | null | undefined): number {
+  const held = slot(workspaceId ?? '');
+  return useSyncExternalStore(
+    (listener) => {
+      held.listeners.add(listener);
+      return () => {
+        held.listeners.delete(listener);
+      };
+    },
+    () => held.value?.items.filter((item) => item.ask).length ?? 0,
+    () => 0,
+  );
 }
 
 export function useWorkBoardUnavailable(workspaceId: string): boolean {

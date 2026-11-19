@@ -5,6 +5,10 @@ import { afterEach, beforeEach, vi } from 'vitest';
 import type { WorkBoardView, WorkItemView } from '@beeline/api-contract/phone';
 import TrayScreen from '@/app/(app)/beeline/tray';
 vi.mock('@/buzz/use-relative-time-refresh', () => ({ useRelativeTimeRefresh: () => undefined }));
+vi.mock('react-native', () => ({ Platform: { OS: 'ios' } }));
+vi.mock('@/components/buzz/MonoMarkdown', () => ({
+  MonoMarkdown: (p: any) => React.createElement('Text', {}, p.markdown),
+}));
 vi.mock('tamagui', async () =>
   (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts(),
 );
@@ -15,6 +19,7 @@ vi.mock('@/ui/grammar', async () => {
   const { createElement } = await import('react');
   return {
     T: (p: any) => createElement('Text', p, p.children),
+    TypedView: ({ view: View, ...props }: any) => createElement(View, props),
     Copy: (p: any) => createElement('Text', p, p.children),
     Glyph: (p: any) => createElement('Glyph', p),
     Btn: (p: any) => createElement('Button', { 'aria-label': p.label, ...p }, p.children),

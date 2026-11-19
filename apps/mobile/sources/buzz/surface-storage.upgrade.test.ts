@@ -55,6 +55,23 @@ const legacyFixture = readFileSync(
 );
 
 describe('STATE-UPGRADE gate — server-indexed surface storage', () => {
+  it('removes retired needs-you disk entries at startup without touching other surfaces', async () => {
+    const responseStore = mmkv.stores.get('buzz-surface-responses')!;
+    const key = (endpoint: string, viewer = 'viewer') => `surface.${encodeURIComponent(surfaceCacheKey(
+      surfaceAddress('https://usebeeline.app', viewer, endpoint, { workspaceId: 'ws' }),
+    ))}`;
+    const oldKeys = [key('/workspace/:id/needs-you'), key('/workspace/:id/needs-you', 'other-viewer')];
+    for (const retired of oldKeys) responseStore.set(retired, JSON.stringify({ items: [{ messageId: 'old' }] }));
+    const chatsKey = key('/workspace/:id/chats');
+    responseStore.set(chatsKey, 'saved chats');
+    responseStore.set('surface.bad-json', 'unrelated');
+    vi.resetModules();
+    await import('./surface-storage');
+    for (const retired of oldKeys) expect(responseStore.has(retired)).toBe(false);
+    expect(responseStore.get(chatsKey)).toBe('saved chats');
+    expect(responseStore.get('surface.bad-json')).toBe('unrelated');
+  });
+
   it('boots beside the release-v3 WorkspaceSnapshot without reading or rewriting it', async () => {
     const legacy = mmkv.stores.get(LEGACY_STORE) ?? new Map<string, string>();
     legacy.set(LEGACY_KEY, legacyFixture);

@@ -11,7 +11,7 @@ vi.mock('react-native-safe-area-context',()=>({useSafeAreaInsets:()=>({top:24,ri
 vi.mock('expo-router',()=>({usePathname:()=>f.path,router:{replace:f.replace,push:vi.fn()}}));
 vi.mock('@/utils/responsive',()=>({useIsDesktop:()=>f.desktop}));
 vi.mock('@/buzz/use-active-community',()=>({useActiveCommunityId:()=> 'ws'}));
-vi.mock('@/buzz/needs-you-store',()=>({useNeedsYouCount:()=>0}));
+vi.mock('@/buzz/work-board-store',()=>({useWorkBoardNeedsYouCount:()=>0}));
 vi.mock('@/auth/buzz-identity-storage',()=>({loadBuzzIdentity:f.identity,getEffectiveRelayUrl:async()=> 'https://test.invalid'}));
 vi.mock('@/buzz/surface-storage',()=>({mobileSurfaceCache:{read:f.read},surfaceAddress:()=> 'workspaces'}));
 vi.mock('@/buzz/use-shared-surface',()=>({useSurfaceSnapshot:()=>({workspaces:[{id:'ws',name:'Tubing Crew'}]})}));

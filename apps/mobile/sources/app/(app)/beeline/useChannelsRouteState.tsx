@@ -1,4 +1,3 @@
-import { useNeedsYouCount } from '@/buzz/needs-you-store';
 import { type ChatListHandle } from '@/buzz/chat-list-store';
 import { mobileSurfaceCache, surfaceAddress, restoreStoredSurface } from '@/buzz/surface-storage';
 import { useGitHubAccess } from '@/buzz/github-access-surface';
@@ -50,14 +49,6 @@ export function useChannelsRouteState(session: DeckSession) {
   }, [notifyDraw]);
   useEffect(() => () => { firstLayout.current?.(); firstLayout.current = null; }, []);
   useLatencyRouteFrame('/beeline/channels', chatList !== null, true);
-  // A covering list read seeds the Needs-you rows behind the badge;
-  // ordinary changes carry typed row deltas on the live socket.
-  const [needsYouSignal, setNeedsYouSignal] = useState(0);
-  const needsYouCount = useNeedsYouCount(
-    chatList?.workspace.id,
-    needsYouSignal === 0 ? undefined : needsYouSignal,
-    () => deckVisible(),
-  );
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deletedWorkspaceNotice, setDeletedWorkspaceNotice] = useState<string | null>(null);
@@ -86,11 +77,11 @@ export function useChannelsRouteState(session: DeckSession) {
     workspaceList, requestedWorkspaceId, chatList, identity, relayUrl, isDesktop, requestedNewRoom,
     handledNewRoomRequest, newChatStep, setNewChatStep, readWorkspaceRef, chatStore, deckMissedRef,
     transport, setError, drawn, setConfirmedWorkspaceCount, deckVisible, deckFocusedRef,
-    setDeletedWorkspaceNotice, selectedId, setChatList, setRefreshing, setNeedsYouSignal,
+    setDeletedWorkspaceNotice, selectedId, setChatList, setRefreshing,
     retryGeneration, setAgeNow, githubScope, setRepoPickerError, setRepoAccessLoading,
     setRepoPickerNotice, creatingRoom, setCreatingRoom, confirmedWorkspaceCount, error,
     setAgentConnectVisible, onLayout, refreshing,
-    needsYouCount, repoAccessLoading, repoCandidates, repoInstallations, repoPickerError,
+    repoAccessLoading, repoCandidates, repoInstallations, repoPickerError,
     repoPickerNotice, agentConnectVisible, deletedWorkspaceNotice, ageNow,
   };
 }

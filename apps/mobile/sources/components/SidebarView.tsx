@@ -1,7 +1,7 @@
 import { appErrorCopy, appReadErrorCopy } from '@/buzz/app-error-copy';
 import { useDesktopLayout } from '@/buzz/desktop-layout-state';
 import { removeRoomSearchDrafts } from '@/buzz/room-search-drafts';
-import { useNeedsYouCount } from '@/buzz/needs-you-store';
+import { useWorkBoardNeedsYouCount } from '@/buzz/work-board-store';
 import { invalidatesWorkspaceList } from '@/buzz/workspace-list-invalidation';
 import { getEffectiveRelayUrl, loadBuzzIdentity } from '@/auth/buzz-identity-storage';
 import { saveActiveCommunityId, subscribeActiveCommunityId } from '@/buzz/community-storage';
@@ -254,7 +254,7 @@ export const SidebarView = React.memo(function SidebarView() {
   const canManageWorkspace = isWorkspaceManagerRole(surface?.workspace.role);
   const viewerIsAgent = surface?.viewer.kind === 'agent';
   const canCreateRoom = !viewerIsAgent && canManageWorkspace;
-  const needsYouCount = useNeedsYouCount(workspaceId, surface);
+  const needsYouCount = useWorkBoardNeedsYouCount(workspaceId);
   const placeSelected = (place: SidePlace['key']) => pathname.startsWith(`/beeline/${place}`);
   const openRoom = React.useCallback(
     (roomId: string) => {
