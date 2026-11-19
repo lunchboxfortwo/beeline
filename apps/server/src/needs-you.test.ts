@@ -740,6 +740,19 @@ describe('PhoneService Needs-you tray', () => {
     await database.query(`UPDATE messages SET card=card || '{"runId":"workflow-run"}'::jsonb WHERE id=$1`, [id]);
     const [workflowItem] = (await read()).items;
     expect(workflowItem?.approval?.actions).toEqual(item?.approval?.actions?.slice(0, 2));
+    // The Tasks labels are words; the option ids sent back remain unchanged.
+    await database.query(`UPDATE messages SET card=jsonb_set(card,'{options}',$2::jsonb) WHERE id=$1`, [id, JSON.stringify([
+      { optionId: 'approve_all', label: 'approve_all' },
+      { optionId: 'pick_numbers', label: 'pick_numbers' },
+      { optionId: 'skip', label: 'skip' },
+    ])]);
+    const [worded] = (await read()).items;
+    expect(worded?.approval?.detail).toBe('Approve all · Pick numbers · Skip');
+    expect(worded?.approval?.actions).toMatchObject([
+      { optionId: 'approve_all', label: 'Approve all' },
+      { optionId: 'pick_numbers', label: 'Pick numbers' },
+      { optionId: 'skip', label: 'Skip' },
+    ]);
     // Dismissal hides the row without deciding the workflow choice.
     await phone.execute('clearNeedsYou', { workspaceId: WORKSPACE, messageId: id }, VIEWER);
     expect(await approvals()).toEqual([]);

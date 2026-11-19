@@ -16,6 +16,7 @@ vi.mock('tamagui', async () => (await import('./onboarding.test-support')).tamag
 vi.mock('lucide-react-native', async () => (await import('./onboarding.test-support')).lucideMock());
 vi.mock('./Rise', async () => (await import('./onboarding.test-support')).riseMock());
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
+vi.mock('@/utils/responsive', () => ({ useIsDesktop: () => false }));
 vi.mock('@beeline/buzz-client', () => ({
   normalizeManagedHandle: (value: string) => (/^[a-z0-9-]{3,30}$/.test(value.trim()) ? value.trim() : null),
 }));

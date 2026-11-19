@@ -166,7 +166,7 @@ function AskCard({ item, actions, now }: { item: WorkItemView; actions: WorkBoar
               disabled={busy}
               kind="secondary"
               flexGrow={1}
-              flexBasis={0}
+              flexBasis="auto"
               paddingHorizontal="3"
               onPress={(event) => {
                 stop(event);

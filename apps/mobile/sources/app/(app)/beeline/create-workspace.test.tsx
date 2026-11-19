@@ -12,6 +12,7 @@ const controls = vi.hoisted(() => ({
 
 vi.mock('tamagui', async () => (await import('@/ui/screens/onboarding/onboarding.test-support')).tamaguiMock());
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/onboarding/onboarding.test-support')).lucideMock());
+vi.mock('@/utils/responsive', () => ({ useIsDesktop: () => false }));
 vi.mock('@/ui/screens/onboarding/Rise', async () => (await import('@/ui/screens/onboarding/onboarding.test-support')).riseMock());
 vi.mock('@/ui/screens/onboarding/YouStep', () => ({ YouStep: () => null }));
 vi.mock('expo-router', () => ({

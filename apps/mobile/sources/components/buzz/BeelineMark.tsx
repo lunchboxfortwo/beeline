@@ -1,20 +1,8 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Platform } from 'react-native';
 import Svg, { G, Path } from 'react-native-svg';
-import Animated, {
-  Easing,
-  ReduceMotion,
-  useAnimatedProps,
-  useReducedMotion,
-  useSharedValue,
-  withSequence,
-  withTiming,
-} from 'react-native-reanimated';
 import beelineMark from '@/buzz/beeline-mark.json';
-import { useThemeName } from 'tamagui';
-import { beelineThemes } from '@/buzz/groknight';
-
-const AnimatedPath = Animated.createAnimatedComponent(Path);
+import { useTheme } from 'tamagui';
 
 // The original continuous-line loop — canonical geometry (see sources/assets/images/mark.svg,
 // do not redesign). The group transform places the path on its 240-unit canvas.
@@ -23,28 +11,11 @@ const MARK_VIEWBOX = beelineMark.viewBox;
 const MARK_TRANSFORM = beelineMark.transform;
 const MARK_FILL_RULE = beelineMark.fillRule as 'evenodd' | 'nonzero';
 
-export function BeelineMark({ size = 112, shimmer = false }: { size?: number; shimmer?: boolean }) {
-  const tokens = beelineThemes[useThemeName().startsWith('light') ? 'bone' : 'obsidian'];
-  const reducedMotion = useReducedMotion();
-  const highlight = useSharedValue(0);
+// Canonical path's visible bounds, so the welcome sizes the ink rather than its padding.
+const INK_BOX = { x: 74, y: 60, w: 100, h: 126 };
 
-  useEffect(() => {
-    if (!shimmer || reducedMotion) return;
-    highlight.value = withSequence(
-      withTiming(0.33, {
-        duration: 650,
-        easing: Easing.linear,
-        reduceMotion: ReduceMotion.System,
-      }),
-      withTiming(0, {
-        duration: 650,
-        easing: Easing.linear,
-        reduceMotion: ReduceMotion.System,
-      }),
-    );
-  }, [highlight, reducedMotion, shimmer]);
-
-  const highlightProps = useAnimatedProps(() => ({ opacity: highlight.value }));
+export function BeelineMark({ size = 112, tight = false }: { size?: number; tight?: boolean }) {
+  const ink = useTheme().ink?.val;
 
   return (
     <Svg
@@ -55,21 +26,15 @@ export function BeelineMark({ size = 112, shimmer = false }: { size?: number; sh
       {...(Platform.OS === 'web'
         ? { role: 'img' as const, 'aria-label': 'Beeline logo' }
         : { accessible: true, accessibilityLabel: 'Beeline logo' })}
-      width={size}
+      width={tight ? Math.round((size * INK_BOX.w) / INK_BOX.h) : size}
       height={size}
-      viewBox={MARK_VIEWBOX}
+      viewBox={tight ? `${INK_BOX.x} ${INK_BOX.y} ${INK_BOX.w} ${INK_BOX.h}` : MARK_VIEWBOX}
     >
       <G transform={MARK_TRANSFORM}>
         <Path
           d={MARK_PATH}
           fillRule={MARK_FILL_RULE}
-          fill={tokens.brandMark}
-        />
-        <AnimatedPath
-          d={MARK_PATH}
-          fillRule={MARK_FILL_RULE}
-          fill={tokens.textPrimary}
-          animatedProps={highlightProps}
+          fill={ink}
         />
       </G>
     </Svg>

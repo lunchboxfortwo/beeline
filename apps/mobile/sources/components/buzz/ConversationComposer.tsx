@@ -365,7 +365,7 @@ function ConversationComposerContent({
   const showConversation = Boolean(voice) && (voice?.connecting || (!hasSomethingToSend && !dictationBusy));
   const sendDisabled = disabled || sendingSpeech || (!hasSomethingToSend && !isListening);
   const dailyLimitError = voice?.error?.startsWith('Calls resume at ') ? voice.error : null;
-  const conversationActive = Boolean(!voice?.connecting && (voice?.call || (voice?.error && !dailyLimitError)));
+  const conversationActive = Boolean(!voice?.connecting && voice?.call);
   React.useEffect(() => {
     if (Platform.OS !== 'web' || !showConversation || conversationActive) return;
     containerRef.current?.querySelector(`[data-testid="${testIDPrefix}-conversation"]`)

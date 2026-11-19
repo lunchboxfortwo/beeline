@@ -15,7 +15,7 @@ import { describe, expect, it, vi } from 'vitest';
 /**
  * Canonical brand treatment on the welcome step (owner spec, 2026-08-23;
  * build spec decision 29): the wordmark reads exactly `beeline.` with the
- * trailing period in brass, and every type style comes from the grammar's
+ * trailing period in ink, and every type style comes from the grammar's
  * six styles — no logo-font exception, no new fonts.
  */
 
@@ -110,7 +110,7 @@ vi.mock('react-native', async () => {
 const { default: BuzzOnboarding } = await import('./onboarding');
 
 describe('onboarding — canonical brand treatment', () => {
-  it('renders the wordmark as exactly "beeline." with a brass period glyph', async () => {
+  it('renders the wordmark as exactly "beeline." in ink', async () => {
     let tree!: ReactTestRenderer;
     await act(async () => {
       tree = create(React.createElement(BuzzOnboarding));
@@ -122,18 +122,11 @@ describe('onboarding — canonical brand treatment', () => {
     );
     expect(marks).toHaveLength(1);
     const children = marks[0].props.children;
-    expect(Array.isArray(children)).toBe(true);
-    // The word itself…
-    expect(children[0]).toBe('beeline');
-    // …and its trailing period, in the title style and brass.
-    const period = children[1];
-    expect(period.props.children).toBe('.');
-    expect(period.props.color).toBe('needsYou');
-    expect(period.props.v).toBe('title');
+    expect(children).toBe('beeline.');
     expect(marks[0].props.fontFamily).toBe('SpaceGrotesk-SemiBold');
   });
 
-  it('renders the original tagline and both providers as 52 px actions, GitHub first', async () => {
+  it('renders the original tagline and both providers as 48 px actions, GitHub first', async () => {
     let tree!: ReactTestRenderer;
     await act(async () => {
       tree = create(React.createElement(BuzzOnboarding));
@@ -153,12 +146,12 @@ describe('onboarding — canonical brand treatment', () => {
     const github = byTestID('onboarding-github-sign-in').find((node: any) => node.type === 'Button');
     expect(github?.props['aria-label']).toBe('Continue with GitHub');
     expect(github?.props.theme).toBe('button');
-    expect(github?.props.minHeight).toBe(52);
+    expect(github?.props.minHeight).toBe(48);
     const google = byTestID('onboarding-google-sign-in').find((node: any) => node.type === 'Button');
     expect(google?.props['aria-label']).toBe('Continue with Google');
-    expect(google?.props.minHeight).toBe(52);
+    expect(google?.props.minHeight).toBe(48);
     const words = tree.root.findAll((node: any) => node.type === 'Text').map((node: any) => node.props.children);
-    expect(words).toContain('GitHub is recommended.');
+    expect(words).not.toContain('GitHub is recommended.');
   });
 });
 
@@ -192,8 +185,9 @@ describe('onboarding — a pending sign-in leaves the buttons usable', () => {
 });
 
 describe('onboarding — grammar source assertions', () => {
-  it('keeps the wordmark period a separate brass title inside the title', () => {
-    expect(source()).toContain('beeline<T v="title" color="needsYou">.</T>');
+  it('keeps the brand together in one stack', () => {
+    expect(source()).toContain('testID="welcome-brand-stack"');
+    expect(source()).toContain('<BeelineMark size={72} tight />');
   });
 
   it('builds the welcome on the grammar, with no hand-built styles left', () => {
@@ -202,6 +196,6 @@ describe('onboarding — grammar source assertions', () => {
     expect(src).not.toContain('react-native-unistyles');
     expect(src).not.toMatch(/\bstyle=/);
     expect(src).not.toContain('Typography.logo()');
-    expect(src.match(/minHeight=\{HEIGHT\.tabBar\}/g)).toHaveLength(2);
+    expect(src.match(/minHeight=\{HEIGHT\.primary\}/g)).toHaveLength(2);
   });
 });

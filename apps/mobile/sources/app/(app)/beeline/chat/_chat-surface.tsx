@@ -431,7 +431,7 @@ export function BuzzChatSurface({
     return (
       <ChatSurfaceErrorHeader
         title={displayHeaderTitle ?? routeChannelTitle ?? ROOM_TITLE}
-        showBack={!isDesktop || isCorner}
+        showBack
         handleBack={handleBack}
         error={transcriptHydrationError}
       />

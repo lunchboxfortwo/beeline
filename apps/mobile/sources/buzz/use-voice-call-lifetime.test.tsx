@@ -48,6 +48,32 @@ it('MOBILE-11 leaves a dropped join ready for an explicit next attempt', async (
   } finally { await act(async () => tree.unmount()); fixture.request.mockReset(); fixture.disconnect.mockClear(); fixture.closeAudio.mockClear(); }
 });
 
+it('W4 releases a failed microphone join, explains it, and accepts the next explicit join', async () => {
+  fixture.request.mockImplementation(async name => name === 'voiceJoin' ? {
+    call: { id: 'call', participants: [] }, sessionId: 'session', stopToken: 'stop',
+    agents: [], url: 'wss://voice.invalid', token: 'fixture',
+  } : { left: true });
+  fixture.microphone.mockRejectedValueOnce(Object.assign(new Error('Requested device not found'), { name: 'NotFoundError' }));
+  let state!: ReturnType<typeof useVoiceCall>;
+  function Screen() { state = useVoiceCall('room', true); return null; }
+  let tree: any;
+  await act(async () => { tree = create(<Screen />); });
+  try {
+    await act(async () => { await state.join(); });
+    expect(state.call).toBeNull();
+    expect(state.connecting).toBe(false);
+    expect(state.agents).toEqual([]);
+    expect(state.target).toBeNull();
+    expect(state.error).toBe('No microphone was found.');
+    expect(fixture.disconnect).toHaveBeenCalledOnce();
+    expect(fixture.closeAudio).toHaveBeenCalledOnce();
+    expect(fixture.request).toHaveBeenLastCalledWith('voiceLeave', { callId: 'call', sessionId: 'session' });
+    await act(async () => { await state.join(); });
+    expect(state.call?.id).toBe('call');
+    expect(state.error).toBeNull();
+  } finally { await act(async () => tree.unmount()); }
+});
+
 it('reconnects RTC once to the same durable call without sending Leave and preserves mute', async () => {
   fixture.request.mockImplementation(async name => name === 'voiceJoin' ? {
     call: { id: 'call', participants: [] }, sessionId: 'session', stopToken: 'stop',

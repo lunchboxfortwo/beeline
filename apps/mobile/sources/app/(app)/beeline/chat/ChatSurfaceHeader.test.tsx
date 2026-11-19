@@ -17,7 +17,7 @@ vi.mock('@/ui/grammar', async () => {
 });
 vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: 'IdentityMark' }));
 vi.mock('@/ui/screens/thread/ThreadHeader', () => ({ ThreadBar: 'ThreadBar' }));
-import { ChatSurfaceHeaderView } from './ChatSurfaceHeader';
+import { ChatSurfaceHeaderView, ChatSurfaceErrorHeader } from './ChatSurfaceHeader';
 
 const byTestID = (tree: any, testID: string) => tree.root.findAll((node: any) => node.props.testID === testID && typeof node.type === 'string');
 const base = {
@@ -26,6 +26,16 @@ const base = {
 };
 
 beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; });
+
+it('W3 explains an inaccessible chat and keeps its back action', () => {
+  const back = vi.fn();
+  let tree: any;
+  act(() => { tree = create(<ChatSurfaceErrorHeader title="Chat" showBack handleBack={back} error="This request was refused." />); });
+  expect(byTestID(tree, 'room-read-error')[0].props.children).toBe("This chat can't be opened.");
+  act(() => byTestID(tree, 'chat-back')[0].props.onPress());
+  expect(back).toHaveBeenCalledOnce();
+  act(() => tree.unmount());
+});
 
 it('is #name over a plain member count with ⚙, and no faces or repository', () => {
   const openChatInfo = vi.fn(), openMembers = vi.fn();

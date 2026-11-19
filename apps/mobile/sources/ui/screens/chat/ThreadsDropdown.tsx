@@ -54,7 +54,7 @@ export function ThreadsDropdown({ roomId, chatName, viewer, openThread, onNewThr
                 <XStack marginHorizontal="3" backgroundColor="raised" borderRadius="sm" alignItems="center">
                     <Collapsible.Trigger asChild>
                         <Btn
-                            kind="quiet" label={`${count} active threads in ${chatName ?? 'this chat'}`}
+                            kind="quiet" label={`${count} active ${count === 1 ? 'thread' : 'threads'} in ${chatName ?? 'this chat'}`}
                             flex={1} minWidth={HEIGHT.control} height="auto" justifyContent="flex-start" gap="1" aria-expanded={open}
                             testID="threads-dropdown-trigger"
                         >

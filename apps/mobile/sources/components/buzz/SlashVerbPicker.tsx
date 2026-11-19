@@ -84,11 +84,11 @@ export function SlashVerbPicker({
                 key={verb.id}
                 first={index === 0}
                 selected={index === highlightedIndex}
-                label={`/${verb.command}. ${verb.description}`}
+                label={`/${verb.commandLabel ?? verb.command}. ${verb.description}`}
                 state={{ selected: index === highlightedIndex }}
                 onPress={() => onSelect(verb.id)}
                 testID={`slash-verb-${verb.id}`}
-                name={`/${verb.command} · ${verb.label}`}
+                name={`/${verb.commandLabel ?? verb.command} · ${verb.label}`}
                 detail={verb.description}
               />
             );

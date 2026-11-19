@@ -25,6 +25,15 @@ const allAvailable: SlashVerbAvailability = {
   canInvitePerson: true,
 };
 
+it('W15 finds thread menu names while keeping legacy command ids', () => {
+  expect(availableSlashVerbs(allAvailable, 'close-thread')).toEqual([
+    expect.objectContaining({ id: 'close-corner', command: 'close-corner', commandLabel: 'close-thread' }),
+  ]);
+  expect(availableSlashVerbs(allAvailable, 'open-thread')).toEqual([
+    expect.objectContaining({ id: 'open-corner', command: 'open-corner', commandLabel: 'open-thread' }),
+  ]);
+});
+
 describe('Buzz composer built-in slash verbs', () => {
   it('opens only for a slash token occupying the composer', () => {
     expect(slashVerbQuery('/')).toBe('');
