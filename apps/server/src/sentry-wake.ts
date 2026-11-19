@@ -7,6 +7,7 @@ import type { SqlDatabase } from './database.js';
 import { createAgentCommand } from './agent-command.js';
 import { ensureSystemIdentity } from './system-line.js';
 import { SYSTEM_AUTHOR_ID,systemText } from './message-origin.js';
+import { savedScheduleCommand } from './scheduled-command-authority.js';
 
 export function sentryWakeAgentFromEnv(env: NodeJS.ProcessEnv = process.env): string {
   const agentId = env.BEELINE_SENTRY_TRIAGE_AGENT_ID ?? '7eafb2e0cc049a9b3345f4322024b604358af04cb551d1fc71084ca3a99d7877';
@@ -18,6 +19,7 @@ export const SENTRY_WAKE_SCHEMA = `
 CREATE TABLE IF NOT EXISTS sentry_wake_state (
  singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton)
 );
+ALTER TABLE sentry_wake_state ADD COLUMN IF NOT EXISTS requester_command_id text;
 INSERT INTO sentry_wake_state(singleton) VALUES(true) ON CONFLICT DO NOTHING;
 CREATE TABLE IF NOT EXISTS sentry_wake_issues (
  issue_id text NOT NULL,
@@ -57,8 +59,6 @@ export async function receiveSentryWake(db: SqlDatabase, raw: Buffer,
   const resource = headers['sentry-hook-resource'];
   const action = payload.action;
   const eventType = resource === 'issue' && action === 'created' ? 'issue.created'
-    : resource === 'issue' && action === 'unresolved' ? 'issue.unresolved'
-    : resource === 'issue' && action === 'regressed' ? 'issue.regression'
     : resource === 'event_alert' && action === 'triggered' ? 'event.alert' : null;
   if (!eventType) return 202;
   const issue = object(data.issue);
@@ -69,24 +69,40 @@ export async function receiveSentryWake(db: SqlDatabase, raw: Buffer,
   if (!/^\d+$/.test(issueId) || !title) return 400;
   const count = Number(issue.count ?? event.count ?? 1);
   if (!Number.isSafeInteger(count) || count < 0) return 400;
+  const occurrence = issue.lastSeen ?? event.datetime;
+  if (eventType === 'event.alert' &&
+      (typeof occurrence !== 'string' || !Number.isFinite(Date.parse(occurrence)))) return 202;
   const now = new Date();
   await db.transaction(async tx => {
     // The singleton lock also orders ingestion against a batch being committed.
     await tx.query(`SELECT singleton FROM sentry_wake_state WHERE singleton FOR UPDATE`);
+    // issue.created owns the first occurrence. Alert actions also arrive for
+    // that occurrence, in either order; only a later alert is a wake source.
+    // Retain a quiet first observation so subsequent alerts need no API lookup.
+    const first = eventType === 'event.alert' ? (await tx.query<{ first_seen: Date | null }>(
+      'SELECT min(first_seen) first_seen FROM sentry_wake_issues WHERE issue_id=$1', [issueId],
+    )).rows[0]?.first_seen : undefined;
+    const firstSeen = timestamp(issue.firstSeen, first ? new Date(first) : now);
+    const lastSeen = timestamp(issue.lastSeen ?? event.datetime, now);
+    const knownFirst = first || typeof issue.firstSeen === 'string' && Number.isFinite(Date.parse(issue.firstSeen));
+    const pending = eventType === 'issue.created' || (knownFirst
+      ? typeof occurrence === 'string' && Date.parse(occurrence) > Date.parse(firstSeen)
+      : count > 1);
     const level = text(issue.level ?? event.level, 20) || 'error';
     await tx.query(`INSERT INTO sentry_wake_issues
       (issue_id,event_type,title,level,culprit,permalink,first_seen,last_seen,event_count,delivery_hash,pending)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
       ON CONFLICT(issue_id,event_type) DO UPDATE SET
         title=EXCLUDED.title,level=EXCLUDED.level,culprit=EXCLUDED.culprit,
         first_seen=LEAST(sentry_wake_issues.first_seen,EXCLUDED.first_seen),
         last_seen=EXCLUDED.last_seen,event_count=GREATEST(sentry_wake_issues.event_count,EXCLUDED.event_count),
         delivery_hash=EXCLUDED.delivery_hash,pending=sentry_wake_issues.pending OR EXCLUDED.pending
       WHERE sentry_wake_issues.delivery_hash<>EXCLUDED.delivery_hash
-        AND sentry_wake_issues.last_seen<=EXCLUDED.last_seen`,
+        AND sentry_wake_issues.event_type='event.alert'
+        AND sentry_wake_issues.last_seen<EXCLUDED.last_seen`,
     [issueId,eventType,title,level,redactDiagnostic(text(issue.culprit ?? event.culprit)),
       `https://beeline-bt.sentry.io/issues/${issueId}/`, timestamp(issue.firstSeen ?? event.datetime, now),
-      timestamp(issue.lastSeen ?? event.datetime, now),count,createHash('sha256').update(raw).digest('hex')]);
+      lastSeen,count,createHash('sha256').update(raw).digest('hex'),pending]);
     await notifySentryWake(tx);
   });
   await flushSentryWakes(db, agentId);
@@ -97,16 +113,21 @@ export async function receiveSentryWake(db: SqlDatabase, raw: Buffer,
  * False parks an empty, unauthorized or busy batch; it creates no retry deadline. */
 export async function flushSentryWakes(db: SqlDatabase, agentId = sentryWakeAgentFromEnv()): Promise<boolean> {
   try { return await db.transaction(async tx => {
-    await tx.query(`SELECT singleton FROM sentry_wake_state WHERE singleton FOR UPDATE`);
+    const definition = (await tx.query<{ requester_command_id: string | null }>(
+      `SELECT singleton,requester_command_id FROM sentry_wake_state WHERE singleton FOR UPDATE`,
+    )).rows[0];
     const issues = await tx.query<{ issue_id: string; level: string; title: string; permalink: string; event_count: string }>(
       `SELECT issue_id,level,title,permalink,event_count FROM sentry_wake_issues
        WHERE pending ORDER BY last_seen,issue_id,event_type`);
     if (!issues.rowCount) return false;
+    const parent = await savedScheduleCommand(tx, definition?.requester_command_id, TRIAGE, agentId);
+    if (!parent) return false;
     await ensureSystemIdentity(tx);
     const digest = `${issues.rowCount} Sentry issue events\n` + issues.rows.map(row =>
       `${row.level}: ${row.title} ${row.permalink} (${row.event_count} events)`).join('\n');
     const command = await createAgentCommand(tx, {
       roomId: TRIAGE, agentId, sourceMessageId: null, reason: 'subscribed_event',
+      parent, retainDepth: true, inheritPrivatePayload: false,
       privatePayload: { kind: 'lifecycle', authorId: SYSTEM_AUTHOR_ID, fromRoomId: TRIAGE,
         text: systemText(`${quoteOutsideData('Sentry digest', digest)}\n\nSummarize these Sentry issues and keep for the morning card. Include each Sentry short ID (look it up from the linked issue if needed), its URL, and the observed impact.`) },
     });

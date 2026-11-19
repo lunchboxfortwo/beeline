@@ -135,16 +135,21 @@ describe.skipIf(!url)('atomic claims replace advisory serialization', () => {
 
   it('concurrent Sentry flushers admit one digest through the existing singleton row',async()=>{
     const agent=randomUUID().replaceAll('-','').repeat(2),issue=String(Date.now());
+    const owner=randomUUID().replaceAll('-','').repeat(2);
+    await first.query(`INSERT INTO identities(id,kind,name) VALUES($1,'human','Digest owner')`,[owner]);
     await first.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Triage')`,[agent]);
-    await first.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$1)`,[agent]);
+    await first.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`,[agent,owner]);
     await first.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Triage')`,[SENTRY_TRIAGE_ROOM,workspace]);
     await first.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
-      VALUES($1,NULL,$2,'member'),($1,$3,$2,'member')`,[workspace,agent,SENTRY_TRIAGE_ROOM]);
+      VALUES($1,NULL,$2,'member'),($1,$3,$2,'member'),($1,NULL,$4,'owner'),($1,$3,$4,'owner')`,[workspace,agent,SENTRY_TRIAGE_ROOM,owner]);
+    await first.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES('sentry-request',$1,$2,'Keep Sentry digests')`,[SENTRY_TRIAGE_ROOM,owner]);
+    const request=await createAgentCommand(first,{roomId:SENTRY_TRIAGE_ROOM,agentId:agent,sourceMessageId:'sentry-request',reason:'human_tag'});
+    await first.query('UPDATE sentry_wake_state SET requester_command_id=$1 WHERE singleton',[request!.id]);
     await first.query(`INSERT INTO sentry_wake_issues(issue_id,event_type,title,level,culprit,permalink,first_seen,last_seen,event_count,delivery_hash,pending)
       VALUES($1,'issue.created','Fixture','error','','https://test.invalid',now(),now(),1,'fixture',true)`,[issue]);
     const results=await overlap(db=>flushSentryWakes(db,agent),'FROM sentry_wake_state WHERE singleton FOR UPDATE');
     expect(results).toEqual([true,false]);
-    expect((await first.query(`SELECT id FROM agent_commands WHERE room_id=$1 AND agent_id=$2`,[SENTRY_TRIAGE_ROOM,agent])).rowCount).toBe(1);
+    expect((await first.query(`SELECT id FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND reason='subscribed_event'`,[SENTRY_TRIAGE_ROOM,agent])).rowCount).toBe(1);
     expect((await first.query('SELECT pending FROM sentry_wake_issues WHERE issue_id=$1',[issue])).rows).toEqual([{pending:false}]);
   });
 

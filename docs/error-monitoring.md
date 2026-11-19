@@ -139,16 +139,28 @@ Credit/balance and server/database capacity alerts are a separate follow-up.
 `POST /v1/sentry/webhook` authenticates the original body using
 `Sentry-Hook-Signature` (HMAC-SHA256) and the server-only
 `BEELINE_SENTRY_CLIENT_SECRET` Fly secret. Missing configuration or an invalid
-signature returns 401. It accepts created issues, all unresolved issues regardless
-of substatus, regressed issues, and triggered `event_alert` notifications. Other
-signed events are acknowledged without waking an agent. The Telegram receiver
-above remains independent.
+signature returns 401. Created issue webhooks own new-issue wakes. Triggered
+`event_alert` notifications wake only for an occurrence later than the issue's
+first event; their paired first-event notification stays quiet in either arrival
+order. Unresolved/regressed issue webhooks are acknowledged without waking;
+later alerts retain regression and other alert-condition coverage. The Telegram
+receiver above remains independent.
 
 `sentry_wake_issues` stores issue metadata keyed by issue id and event type.
-Exact delivery repeats and older occurrences do not re-arm an acknowledged row;
-a changed, current occurrence admits a new event. The singleton row orders
+Created issues are admitted once; repeated alert bodies, other rule names for
+the same occurrence, and older occurrences do not re-arm an acknowledged row.
+A later alert occurrence admits a new event. The singleton row orders
 committed ingestion and delivery across server instances. The private command
 and its batch acknowledgement commit together.
+
+The earliest stored issue timestamp (or an explicit issue firstSeen/count in the
+payload) distinguishes later alerts. An alert with no known issue history and
+no evidence of a later occurrence records a quiet first observation; subsequent
+later alerts wake normally. No downstream digest deduplication is involved.
+The standing definition stores `requester_command_id`, seeded from the owner's
+recorded Sentry request by `migrations/sentry-digest-authority.ts`. Delivery uses
+the same saved command-root path as schedules, scoped to the original agent and
+Room, so connected lookups and institutional memory retain requester authority.
 
 HTTP arrivals and committed eligibility changes admit delivery. Startup and idle
 time do no work. An unavailable recipient leaves pending metadata for an actual
@@ -157,15 +169,12 @@ creates no retry deadline. There is no urgency, daily or elapsed-time batch gate
 The standing feedback schedule remains an owner-created schedule.
 The server setting `BEELINE_SENTRY_TRIAGE_AGENT_ID` selects the recipient and
 defaults to Jellybean (`7eafb2e0cc049a9b3345f4322024b604358af04cb551d1fc71084ca3a99d7877`).
-The receiver and background worker share that setting. Set it consistently on
-all server machines and restart through the normal release process to change
-the recipient without code. Digests instruct Jellybean to investigate and open
-and own warranted fix corners, with Jellybean implementing and Speedy reviewing,
-linking the Sentry issue id and URL. Existing corner authority and merge gates
-still apply. Ruby receives only blocked or needs-decision reports, including
-exact authority refusals. The command itself stays private; Jellybean must post
-one short visible summary line per digest in issues-triage, naming the Sentry
-short IDs and each action (dismissed, existing corner, new corner).
+The receiver and background worker share that setting. A replacement recipient
+requires its own verified requester definition in the triage Room; changing
+the setting alone does not transfer the existing definition's authority.
+Digests ask Jellybean to summarize the issues for the morning card, including
+each Sentry short ID, URL and observed impact. Existing corner authority and
+merge gates still apply to follow-up work. The command itself stays private.
 Sentry text is quoted as untrusted data. Receiver failures return 503 without recursive Sentry capture.
 
 Integration created 2026-10-18 UTC:

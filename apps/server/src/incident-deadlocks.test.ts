@@ -216,6 +216,9 @@ describe.skipIf(!url)('production incident deadlocks on real PostgreSQL', () => 
   it.each(['singleton','insert'])('SERVER-25: a busy %s leaves the Sentry batch pending and delivers it once after release', async kind => {
     const triage = 'a914716f-cd6c-4663-b42a-6e1044dc2bb9';
     await db.query(`INSERT INTO rooms(id,workspace_id,parent_id,name,created_by) VALUES($1,$2,$3,'Triage',$4)`, [triage,W,R,A]);
+    await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES('sentry-request',$1,$2,'Keep Sentry digests')`,[triage,H]);
+    const request = await createAgentCommand(db,{roomId:triage,agentId:A,sourceMessageId:'sentry-request',reason:'human_tag'});
+    await db.query('UPDATE sentry_wake_state SET requester_command_id=$1 WHERE singleton',[request!.id]);
     await db.query(`DELETE FROM sentry_wake_issues`);
     await db.query(`INSERT INTO sentry_wake_issues(issue_id,event_type,title,level,culprit,permalink,first_seen,last_seen,event_count,delivery_hash)
       VALUES('7825612495','issue.created','canceling statement due to lock timeout','error','createAgentCommand',

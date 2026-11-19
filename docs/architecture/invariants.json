@@ -2650,7 +2650,8 @@
         "module": "Background work and timers",
         "reason": "existing before the registry; weekly audit reviews",
         "columns": {
-          "singleton": "existing before the registry; weekly audit reviews"
+          "singleton": "existing before the registry; weekly audit reviews",
+          "requester_command_id": "Definition-owned verified command root authorizing standing Sentry digest deliveries; scoped to its original agent and Room."
         }
       },
       "service_review_visits": {

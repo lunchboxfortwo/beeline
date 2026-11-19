@@ -48,6 +48,7 @@ import { SUBSCRIPTION_WEBHOOKS_SCHEMA } from './subscription-webhooks.js';
 import { AGENT_SUBSCRIPTIONS_SCHEMA, migrateMembershipSubscriptions } from './agent-subscriptions.js';
 import { PROVIDER_WEBHOOKS_SCHEMA } from './provider-webhooks.js';
 import { SENTRY_WAKE_SCHEMA } from './sentry-wake.js';
+import { seedSentryDigestAuthority } from './migrations/sentry-digest-authority.js';
 import { CORNER_MERGE_HOLDS_SCHEMA } from './migrations/corner-merge-holds.js';
 import { hyphenateCornerNames } from './migrations/corner-names.js';
 import { normalizeLegacyWorkflowRuns, reportAbandonedWorkflowEndings, saveUnsavedWorkflowRunStatus, workflowBackfillOnce } from './migrations/workflow-cleanup.js';
@@ -611,6 +612,8 @@ export async function migrateData(database: SqlDatabase): Promise<void> {
     database, 'provider-photos-v1', async db => { await backfillProviderPhotos(db); }));
   await dataStep('departed reviewers', () => workflowBackfillOnce(
     database, 'departed-reviewers-v1', clearDepartedReviewers));
+  await dataStep('standing Sentry digest authority', () => workflowBackfillOnce(
+    database, 'sentry-digest-authority-v1', seedSentryDigestAuthority));
   await dataStep('archived corner holds', () => releaseArchivedCornerHolds(database));
   await dataStep('corner hold messages', () => backfillCornerHoldMessages(database));
   await dataStep('push outbox cutover', () => workflowBackfillOnce(
