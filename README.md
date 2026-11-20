@@ -37,6 +37,8 @@ In a DM, open **… → Close conversation**; on phone, you can also swipe the c
 
 Workspace admins and owners can remove someone from a top-level chat's **Members** list and use **Invite to chat** on a person's profile. On desktop, a message's **More** button opens actions including **Copy link**, **Select** and, when permitted, **Delete**. Eligible messages also offer **New thread**.
 
+**Tasks** and **Team** use the Workspace named by a link or your saved selection. Without either, they load your Workspaces and save the first one; if you belong to none, they show **No Workspace to show**. Chats also saves the Workspace it displays, so you do not need to open a chat first.
+
 In **Tasks → Needs you**, an agent’s decision card shows its question, a brief when supplied, and option buttons. Tap through to read the full message. Answer a request by quote-replying to its message or choosing one of its options. A request also clears when its source thread closes, the same agent sends you a newer report from that thread, the agent closes the ask, or you clear it yourself. Separate asks in a chat or DM stay independent. Opening Tasks does not clear requests, and requests have no expiry timer. Approval cards retain their own decision and expiry rules.
 
 Agents access Trusty Squire through `app_tool(app:"registry-mcp:squire")`. Fresh sessions name this route in their startup notes and clear obsolete native MCP mounts before the agent starts, so a stale direct Squire connection does not mask the working vault route.

@@ -31,7 +31,12 @@ import { FlatList } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { XStack, YStack } from 'tamagui';
 import { LogOut } from 'lucide-react-native';
-import { FirstContentDrawContext, isInitialLandingNavigationSuppressed, isInitialLandingResolved, markInitialLandingResolved } from '@/navigation/initial-landing';
+import {
+  FirstContentDrawContext,
+  isInitialLandingNavigationSuppressed,
+  isInitialLandingResolved,
+  markInitialLandingResolved,
+} from '@/navigation/initial-landing';
 import { isPersonNameOnboardingPending } from '@/buzz/person-name';
 import { initialAuthUrl } from '@/auth/desktop-auth-session';
 import { deliverDesktopDeepLink } from '@/auth/desktop-deep-link';
@@ -42,7 +47,13 @@ import { subscribeClientReset } from '@/sync/client-reset';
 const ROW_HEIGHT = 64;
 
 /** The first Workspace view: quiet orientation, then two restrained actions. */
-function EmptyRoomActions({ canAddRoom, canConnectAgent, onAddRoom, onConnectAgent, testID = 'room-list-empty' }: {
+function EmptyRoomActions({
+  canAddRoom,
+  canConnectAgent,
+  onAddRoom,
+  onConnectAgent,
+  testID = 'room-list-empty',
+}: {
   canAddRoom: boolean;
   canConnectAgent: boolean;
   onAddRoom: () => void;
@@ -52,10 +63,20 @@ function EmptyRoomActions({ canAddRoom, canConnectAgent, onAddRoom, onConnectAge
   return (
     <YStack padding="4" paddingTop="8" gap="2" testID={testID}>
       <T v="heading">No chats yet</T>
-      <Copy small quiet>A chat holds the people and agents working on one thing.</Copy>
+      <Copy small quiet>
+        A chat holds the people and agents working on one thing.
+      </Copy>
       <XStack gap="2" paddingTop="3">
-        {canAddRoom ? <Btn kind="primary" label="New chat" onPress={onAddRoom} testID="empty-add-room">New chat</Btn> : null}
-        {canConnectAgent ? <Btn label="Connect an agent" onPress={onConnectAgent} testID="empty-connect-agent">Connect an agent</Btn> : null}
+        {canAddRoom ? (
+          <Btn kind="primary" label="New chat" onPress={onAddRoom} testID="empty-add-room">
+            New chat
+          </Btn>
+        ) : null}
+        {canConnectAgent ? (
+          <Btn label="Connect an agent" onPress={onConnectAgent} testID="empty-connect-agent">
+            Connect an agent
+          </Btn>
+        ) : null}
       </XStack>
     </YStack>
   );
@@ -69,16 +90,20 @@ export type DeckSession = { identity: Identity; relayUrl: string; workspaceId: s
 
 export default function SavedRoomDeck() {
   const rootRoute = useRef(usePathname() === '/').current;
-  const requestedWorkspaceId = firstParam(useLocalSearchParams<{ communityId?: string | string[] }>().communityId);
+  const requestedWorkspaceId = firstParam(
+    useLocalSearchParams<{ communityId?: string | string[] }>().communityId,
+  );
   const notifyDraw = useContext(FirstContentDrawContext);
   const [session, setSession] = useState<DeckSession | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
   // Explicit launch routes can leave this root mounted under their screen.
   // Back must restore it even when its first attempt ended in a redirect.
-  useFocusEffect(useCallback(() => {
-    if (rootRoute && !session && isInitialLandingResolved()) setRetry(value => value + 1);
-  }, [rootRoute, session]));
+  useFocusEffect(
+    useCallback(() => {
+      if (rootRoute && !session && isInitialLandingResolved()) setRetry((value) => value + 1);
+    }, [rootRoute, session]),
+  );
   useEffect(() => {
     const rootLanding = rootRoute && !isInitialLandingResolved();
     let cancelled = false;
@@ -114,12 +139,19 @@ export default function SavedRoomDeck() {
       }
       stopWorkspace = watchActiveCommunityId(identity.publicKey, (workspaceId) => {
         if (cancelled) return;
-        restoreStoredSurface(surfaceAddress(relayUrl, identity.publicKey, '/workspaces'), isWorkspaceListView);
+        restoreStoredSurface(
+          surfaceAddress(relayUrl, identity.publicKey, '/workspaces'),
+          isWorkspaceListView,
+        );
         // A Room saves its Workspace on arrival. The already drawn deck's
         // session does not change when that is the Workspace it is showing.
-        setSession(current => current?.identity === identity &&
-          current.relayUrl === relayUrl && current.workspaceId === workspaceId
-          ? current : { identity, relayUrl, workspaceId });
+        setSession((current) =>
+          current?.identity === identity &&
+          current.relayUrl === relayUrl &&
+          current.workspaceId === workspaceId
+            ? current
+            : { identity, relayUrl, workspaceId },
+        );
       });
     };
     void restore().catch((reason) => {
@@ -129,7 +161,7 @@ export default function SavedRoomDeck() {
       cancelled = true;
       stopWorkspace?.();
       setSession(null);
-      setRetry(value => value + 1);
+      setRetry((value) => value + 1);
     });
     return () => {
       cancelled = true;
@@ -137,25 +169,44 @@ export default function SavedRoomDeck() {
       stopReset();
     };
   }, [rootRoute, retry]);
-  useEffect(() => { if (session || error) markInitialLandingResolved(); }, [session, error]);
-  if (error) return (
-    <YStack flex={1} backgroundColor="canvas" onLayout={notifyDraw} testID="room-deck-unavailable">
-      <SafeTop />
-      <YStack padding="4" gap="2">
-        <T v="heading">Secure storage unavailable</T>
-        <Copy small quiet>{error}</Copy>
-        <XStack>
-          <Btn label="Retry" accessibilityHint="Secure storage unavailable" onPress={() => setRetry(value => value + 1)} testID="room-deck-error-retry">{'Retry'}</Btn>
-        </XStack>
+  useEffect(() => {
+    if (session || error) markInitialLandingResolved();
+  }, [session, error]);
+  if (error)
+    return (
+      <YStack
+        flex={1}
+        backgroundColor="canvas"
+        onLayout={notifyDraw}
+        testID="room-deck-unavailable"
+      >
+        <SafeTop />
+        <YStack padding="4" gap="2">
+          <T v="heading">Secure storage unavailable</T>
+          <Copy small quiet>
+            {error}
+          </Copy>
+          <XStack>
+            <Btn
+              label="Retry"
+              accessibilityHint="Secure storage unavailable"
+              onPress={() => setRetry((value) => value + 1)}
+              testID="room-deck-error-retry"
+            >
+              {'Retry'}
+            </Btn>
+          </XStack>
+        </YStack>
       </YStack>
-    </YStack>
-  );
+    );
   return session ? (
     <BuzzChannels
       key={`${session.identity.publicKey}:${session.relayUrl}:${requestedWorkspaceId ?? session.workspaceId}`}
       session={session}
     />
-  ) : <PageLoader testID="rooms-loader-gate" />;
+  ) : (
+    <PageLoader testID="rooms-loader-gate" />
+  );
 }
 
 const EMPTY_CHATS: readonly ChatListItem[] = [];
@@ -225,20 +276,40 @@ const BuzzChannels = memo(function BuzzChannels({ session }: { session: DeckSess
   const { refreshMissed, refreshNow } = useChannelsRequestedActions(state, view);
   const actions = useChannelsRoomActions(state, view.rows, state.chatList?.chats ?? EMPTY_CHATS);
   useChannelsSubscriptions(state, view.activeCommunityId, refreshMissed);
-  const { selectWorkspace, rowActions, openRoom, joining, join, clearing, clearJoinable } = useChannelsNavigation(state, view, actions);
+  const { selectWorkspace, rowActions, openRoom, joining, join, clearing, clearJoinable } =
+    useChannelsNavigation(state, view, actions);
   const repositories = useChannelsRepositories(state, view, openRoom);
   const { landing, closeAgentConnect, connectAgent } = useChannelsCompose(state, view);
   const { chatList, identity, isDesktop, error, refreshing, ageNow, onLayout } = state;
-  const { activeCommunity, activeCommunityId, viewerIsAgent, canManageWorkspace, search, setSearch, pinned } = view;
-  const { roomListGestures, swipeableRefs, handleLeaveRoom, handleCloseChat, visibleRows: rows } = actions;
+  const {
+    activeCommunity,
+    activeCommunityId,
+    viewerIsAgent,
+    canManageWorkspace,
+    search,
+    setSearch,
+    pinned,
+  } = view;
+  const {
+    roomListGestures,
+    swipeableRefs,
+    handleLeaveRoom,
+    handleCloseChat,
+    visibleRows: rows,
+  } = actions;
   const canCreate = !viewerIsAgent && canManageWorkspace;
   const { scrolled, scrollProps } = useScrolledUnder();
   const workspaceName = chatList?.workspace.name ?? activeCommunity?.name ?? WORKSPACE_LABEL;
   // Desktop has no bare list in the middle: the top chat of the already loaded
   // list opens there (build spec, desktop walk "open: sidebar, #beeline in the middle").
   // A sidebar New chat request owns this deck instead: the chat it creates opens.
-  const composingChat = state.newChatStep !== null || Boolean(canCreate && state.requestedNewRoom &&
-    state.requestedNewRoom !== state.handledNewRoomRequest.current);
+  const composingChat =
+    state.newChatStep !== null ||
+    Boolean(
+      canCreate &&
+      state.requestedNewRoom &&
+      state.requestedNewRoom !== state.handledNewRoomRequest.current,
+    );
   const desktopFirstChat = isDesktop && landing.kind === 'deck' ? rows[0]?.room.id : undefined;
   const openedDesktopChat = useRef(false);
   useEffect(() => {
@@ -253,7 +324,11 @@ const BuzzChannels = memo(function BuzzChannels({ session }: { session: DeckSess
       <YStack flex={1} backgroundColor="canvas" testID="room-deck-unavailable">
         <SafeTop />
         <ChatListHeader workspaceName={workspaceName} search={search} onSearch={setSearch} />
-        <YStack padding="4"><Copy small quiet testID="room-deck-error-retry">{error ?? ''}</Copy></YStack>
+        <YStack padding="4">
+          <Copy small quiet testID="room-deck-error-retry">
+            {error ?? ''}
+          </Copy>
+        </YStack>
       </YStack>
     );
   }
@@ -263,7 +338,13 @@ const BuzzChannels = memo(function BuzzChannels({ session }: { session: DeckSess
     return (
       <YStack flex={1} minHeight={0} backgroundColor="canvas">
         {isDesktop ? null : (
-          <TabHeader workspaceName={workspaceName} onNew={canCreate ? () => state.setNewChatStep('menu') : undefined} search={search} onSearch={setSearch} scrolled={false} />
+          <TabHeader
+            workspaceName={workspaceName}
+            onNew={canCreate ? () => state.setNewChatStep('menu') : undefined}
+            search={search}
+            onSearch={setSearch}
+            scrolled={false}
+          />
         )}
         <PageLoader testID="rooms-loader-gate" onLayout={onLayout} />
       </YStack>
@@ -288,7 +369,15 @@ const BuzzChannels = memo(function BuzzChannels({ session }: { session: DeckSess
           if (activeCommunityId) router.push(messageSearchHref(result, activeCommunityId) as Href);
         }}
       />
-      {search.open ? null : <JoinableChats clearing={clearing} onClear={() => void clearJoinable(chatList.workspace.id)} chats={chatList.joinable ?? []} joining={joining} onJoin={(id, name) => void join(id, name)} />}
+      {search.open ? null : (
+        <JoinableChats
+          clearing={clearing}
+          onClear={() => void clearJoinable(chatList.workspace.id)}
+          chats={chatList.joinable ?? []}
+          joining={joining}
+          onJoin={(id, name) => void join(id, name)}
+        />
+      )}
     </>
   );
   const renderRow = (item: ChatListItem, index: number) => {
@@ -345,27 +434,74 @@ const BuzzChannels = memo(function BuzzChannels({ session }: { session: DeckSess
       onSelect={selectWorkspace}
       onAdd={() => router.push('/beeline/community' as Href)}
     >
-      <YStack flex={1} minHeight={0} backgroundColor="canvas" onLayout={onLayout} testID={refreshing ? 'room-list-refreshing' : 'room-list-idle'}>
+      <YStack
+        flex={1}
+        minHeight={0}
+        backgroundColor="canvas"
+        onLayout={onLayout}
+        testID={refreshing ? 'room-list-refreshing' : 'room-list-idle'}
+      >
         {isDesktop ? null : (
-          <TabHeader workspaceName={workspaceName} onNew={canCreate ? () => state.setNewChatStep('menu') : undefined} search={search} onSearch={setSearch} scrolled={scrolled} />
+          <TabHeader
+            workspaceName={workspaceName}
+            onNew={canCreate ? () => state.setNewChatStep('menu') : undefined}
+            search={search}
+            onSearch={setSearch}
+            scrolled={scrolled}
+          />
         )}
-        {view.pinError ? <YStack paddingHorizontal="4" paddingVertical="2"><Copy small color="removed">{view.pinError}</Copy></YStack> : null}
+        {view.pinError ? (
+          <YStack paddingHorizontal="4" paddingVertical="2">
+            <Copy small color="removed">
+              {view.pinError}
+            </Copy>
+          </YStack>
+        ) : null}
         {state.deletedWorkspaceNotice ? (
           <YStack paddingHorizontal="4" paddingVertical="2">
-            <Btn kind="quiet" label={state.deletedWorkspaceNotice} onPress={() => state.setDeletedWorkspaceNotice(null)} testID="workspace-deleted-notice">
-              <Copy small color="removed">{state.deletedWorkspaceNotice}</Copy>
+            <Btn
+              kind="quiet"
+              label={state.deletedWorkspaceNotice}
+              onPress={() => state.setDeletedWorkspaceNotice(null)}
+              testID="workspace-deleted-notice"
+            >
+              <Copy small color="removed">
+                {state.deletedWorkspaceNotice}
+              </Copy>
             </Btn>
           </YStack>
         ) : null}
-        {error ? <YStack paddingHorizontal="4" paddingVertical="2"><Copy small color="removed">{error}</Copy></YStack> : null}
+        {error ? (
+          <YStack paddingHorizontal="4" paddingVertical="2">
+            <Copy small color="removed">
+              {error}
+            </Copy>
+          </YStack>
+        ) : null}
         {isDesktop ? (
-          chatList.chats.length === 0 ? empty : (
-            <YStack flex={1} alignItems="center" justifyContent="center" gap="2" padding="6" testID="desktop-room-selection-empty">
-              <Copy small quiet>Choose a chat from the sidebar.</Copy>
+          chatList.chats.length === 0 ? (
+            empty
+          ) : (
+            <YStack
+              flex={1}
+              alignItems="center"
+              justifyContent="center"
+              gap="2"
+              padding="6"
+              testID="desktop-room-selection-empty"
+            >
+              <Copy small quiet>
+                Choose a chat from the sidebar.
+              </Copy>
             </YStack>
           )
         ) : (
-          <YStack flex={1} minHeight={0} testID="room-list-gestures" {...roomListGestures.touchHandlers}>
+          <YStack
+            flex={1}
+            minHeight={0}
+            testID="room-list-gestures"
+            {...roomListGestures.touchHandlers}
+          >
             <FlatList
               testID="room-list"
               {...roomListGestures.listHandlers}
@@ -382,12 +518,13 @@ const BuzzChannels = memo(function BuzzChannels({ session }: { session: DeckSess
               renderItem={({ item, index }) => renderRow(item, index)}
               ListFooterComponent={footer}
               ListEmptyComponent={
-                view.messageSearch.status !== 'unavailable' ? null
-                  : search.open ? (
-                    <YStack padding="4" gap="2" testID="room-list-no-match">
-                      <Copy quiet>No chats match.</Copy>
-                    </YStack>
-                  ) : empty
+                view.messageSearch.status !== 'unavailable' ? null : search.open ? (
+                  <YStack padding="4" gap="2" testID="room-list-no-match">
+                    <Copy quiet>No chats match.</Copy>
+                  </YStack>
+                ) : (
+                  empty
+                )
               }
             />
           </YStack>

@@ -1,7 +1,11 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { isWorkspaceListView } from '@beeline/buzz-client';
 import { getEffectiveRelayUrl, loadBuzzIdentity } from '@/auth/buzz-identity-storage';
-import { loadActiveCommunityId, saveActiveCommunityId, watchActiveCommunityId } from '@/buzz/community-storage';
+import {
+  loadActiveCommunityId,
+  saveActiveCommunityId,
+  watchActiveCommunityId,
+} from '@/buzz/community-storage';
 import { mobileSurfaceCache, surfaceAddress } from '@/buzz/surface-storage';
 import { clientResetGeneration, subscribeClientReset } from '@/sync/client-reset';
 import { useSurfaceFocus } from '@/buzz/use-surface-focus';
@@ -42,8 +46,8 @@ export function useActiveCommunityId(retryGeneration = 0): string | null | undef
 }
 
 /**
- * The chat list's unsaved fallback: the first Workspace the viewer belongs to.
- * `undefined` while that read is open; `null` when the viewer has none.
+ * Discover the first Workspace when no selection is saved, as the chat list does.
+ * `undefined` while unresolved (including read failures); `null` after confirmed absence.
  * A resolved id is stored so Tasks and Team share it with the chat list.
  */
 export function useFallbackWorkspaceId(enabled: boolean): string | null | undefined {
@@ -73,6 +77,8 @@ export function useFallbackWorkspaceId(enabled: boolean): string | null | undefi
         pending = false;
         let requested = false;
         try {
+          // A coalesced fetch may predate focus. Only our own covering read can
+          // settle discovery; queued invalidations need another read afterward.
           const list = await mobileSurfaceCache.fetch(address, isWorkspaceListView, () => {
             requested = true;
             return new RoomViewClient({ baseUrl: relayUrl, identity }).workspaces();
@@ -83,7 +89,9 @@ export function useFallbackWorkspaceId(enabled: boolean): string | null | undefi
           const next = current || list.workspaces[0]?.id || null;
           if (next && !current) await saveActiveCommunityId(identity.publicKey, next);
           if (!cancelled) setWorkspaceId(next);
-        } catch { return; } finally {
+        } catch {
+          return;
+        } finally {
           reading = false;
           if ((pending || !requested) && !cancelled) void read();
         }
@@ -91,11 +99,17 @@ export function useFallbackWorkspaceId(enabled: boolean): string | null | undefi
       const release = await sharedLiveConnection().register([], (event) => {
         if (invalidatesWorkspaceList(event)) void read();
       });
-      if (cancelled) { release(); return; }
+      if (cancelled) {
+        release();
+        return;
+      }
       stop = release;
       await read();
     })().catch(() => undefined);
-    return () => { cancelled = true; stop?.(); };
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
   }, [enabled, focused, reset]);
   return enabled ? workspaceId : undefined;
 }
