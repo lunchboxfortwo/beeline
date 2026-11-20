@@ -34,6 +34,7 @@ export function ApproveDeny({
         <XStack gap="2" flexWrap="wrap" alignItems="center">
             <Btn
                 kind="primary"
+                {...(busy ? { backgroundColor: 'canvas' } : {})}
                 label={`${approveLabel}: ${title}`}
                 disabled={disabled || busy}
                 aria-busy={busy}
@@ -41,8 +42,8 @@ export function ApproveDeny({
                 testID={approveTestID}
             >
                 <XStack gap="2" alignItems="center">
-                    {busy ? <Spinner size="small" color="primaryInk" /> : <Glyph icon={Check} size={16} color="primaryInk" />}
-                    <T v="heading" color="primaryInk">{approveLabel}</T>
+                    {busy ? <Spinner size="small" /> : <Glyph icon={Check} size={16} color="primaryInk" />}
+                    <T v="heading" color={busy ? 'ink' : 'primaryInk'}>{approveLabel}</T>
                 </XStack>
             </Btn>
             {extra}

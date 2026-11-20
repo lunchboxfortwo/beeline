@@ -77,6 +77,7 @@ import { Spinner } from '@/ui/grammar';
 import { WorkflowWorkingMark } from './WorkflowWorkingMark';
 import { SurfaceGlyphLoader } from './SurfaceGlyphLoader';
 import { PageLoader } from '@/ui/PageLoader';
+import { ApproveDeny } from '@/ui/screens/transcript/cards/ApproveDeny';
 
 const originalConsoleError = console.error;
 
@@ -214,6 +215,17 @@ describe('shared workflow rail marks', () => {
 });
 
 describe('spinner colour', () => {
+  // Owner revision 3: every loading mark uses the state ink, including busy controls.
+  it('keeps a submitting approval ring in state ink on a contrasting face', () => {
+    const tree = render(<ApproveDeny title="Workspace access" busy onApprove={() => undefined} onDeny={() => undefined} />);
+    expect(tree.root.findByType('Circle').props.stroke).toBe('needsYou');
+    const approve = tree.root.findAllByType('Button').find((node: any) => node.props['aria-label'] === 'Approve: Workspace access');
+    expect(approve.props.backgroundColor).toBe('canvas');
+    expect(approve.props.disabled).toBe(true);
+    expect(tree.root.findAllByType('Text').find((node: any) => node.props.children === 'Approve').props.color).toBe('ink');
+    act(() => tree.unmount());
+  });
+
   it('uses the state ink by default and allows control text ink inside a control', () => {
     const standalone = render(<Spinner />);
     const ink = standalone.root.findByType('Circle').props.stroke;
