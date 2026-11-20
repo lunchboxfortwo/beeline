@@ -19,6 +19,8 @@ on:
         description: Unique dispatch id, so the release finds this run
         type: string
         required: true
+env:
+  BEELINE_HELPER_SENTRY_DSN: ${{ vars.BEELINE_HELPER_SENTRY_DSN }}
 permissions:
   contents: read
 jobs:

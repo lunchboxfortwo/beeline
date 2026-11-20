@@ -26,21 +26,22 @@ export async function githubMacHelpers({ processes, token, repository, sha, vers
   await gh(['workflow', 'run', MAC_HELPERS_WORKFLOW, '-R', repository, '--ref', ref,
     '-f', `release_sha=${sha}`, '-f', `release_version=${version}`, '-f', `request_id=${requestId}`]);
   let run;
-  while (true) {
-    if (now() > deadline) throw new Error(`Mac helper build did not finish within ${timeoutMinutes} minutes${run ? `: ${run.html_url}` : ''}`);
-    if (!run) {
-      const runs = await api(`repos/${repository}/actions/workflows/${MAC_HELPERS_WORKFLOW}/runs?event=workflow_dispatch&per_page=30`);
-      run = runs.workflow_runs.find(candidate => candidate.display_title?.endsWith(`· ${requestId}`));
-      if (run) processes.log(`Mac helpers building on GitHub: ${run.html_url}`);
+  try {
+    while (true) {
+      if (now() > deadline) throw new Error(`Mac helper build did not finish within ${timeoutMinutes} minutes${run ? `: ${run.html_url}` : ''}`);
+      if (!run) {
+        const runs = await api(`repos/${repository}/actions/workflows/${MAC_HELPERS_WORKFLOW}/runs?event=workflow_dispatch&per_page=30`);
+        run = runs.workflow_runs.find(candidate => candidate.display_title?.endsWith(`· ${requestId}`));
+        if (run) processes.log(`Mac helpers building on GitHub: ${run.html_url}`);
+      }
+      if (run) {
+        run = await api(`repos/${repository}/actions/runs/${run.id}`);
+        if (run.status === 'completed') break;
+      }
+      await sleep(poll, signal);
     }
-    if (run) {
-      run = await api(`repos/${repository}/actions/runs/${run.id}`);
-      if (run.status === 'completed') break;
-    }
-    try { await sleep(poll, signal); } catch (error) {
-      if (run) await gh(['run', 'cancel', String(run.id), '-R', repository]).catch(() => {});
-      throw error;
-    }
+  } finally {
+    if (run && run.status !== 'completed') await gh(['run', 'cancel', String(run.id), '-R', repository]).catch(() => {});
   }
   const { jobs } = await api(`repos/${repository}/actions/runs/${run.id}/jobs?per_page=10`);
   const results = {};

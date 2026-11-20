@@ -292,6 +292,8 @@ test('delivery setup failures retain an inspectable redacted job record', async 
 });
 
 test('the dispatched Mac workflow builds exactly what unified-release helper_macos builds, minus its carry', () => {
+  assert.equal(read('mac-helpers.yml').env.BEELINE_HELPER_SENTRY_DSN, read('unified-release.yml').env.BEELINE_HELPER_SENTRY_DSN);
+  assert.equal(read('mac-helpers.yml').env.BEELINE_HELPER_SENTRY_DSN, '${{ vars.BEELINE_HELPER_SENTRY_DSN }}');
   const hosted = read('unified-release.yml').jobs.helper_macos, github = read('mac-helpers.yml').jobs.helper_macos;
   assert.deepEqual(github.strategy, hosted.strategy);
   assert.equal(github['runs-on'], hosted['runs-on']);
@@ -318,6 +320,7 @@ function fakeGithub({ conclusions = { 'darwin-arm64': 'success', 'darwin-x64': '
     calls.push({ command, args, options });
     assert.equal(command, 'gh');
     if (args[0] === 'workflow') { requestId = args.at(-1).slice('request_id='.length); return ''; }
+    if (args[0] === 'run' && args[1] === 'cancel') return '';
     if (args[0] === 'run' && args[1] === 'download') {
       const directory = args.at(-1);
       writeFileSync(join(directory, 'manifest.json'), args[args.indexOf('-n') + 1]);
@@ -377,9 +380,34 @@ test('a cancelled release cancels its GitHub Mac run, and an unfinished run time
       directory, artifacts: new Map(), signal: abort.signal, sleep: async () => { if (++sleeps === 3) throw new Error('Mac helper build cancelled'); } }), /cancelled/);
     assert.deepEqual(calls.at(-1).args.slice(0, 3), ['run', 'cancel', '77']);
     let clock = 0;
-    await assert.rejects(githubMacHelpers({ processes: fakeGithub({ pending: Infinity }).processes, token: 't', repository: 'fixture/repo', sha: 'c'.repeat(40),
+    const timedOut = fakeGithub({ pending: Infinity });
+    await assert.rejects(githubMacHelpers({ processes: timedOut.processes, token: 't', repository: 'fixture/repo', sha: 'c'.repeat(40),
       version: 'v1.2.3-rc.1', directory, artifacts: new Map(), now: () => clock, sleep: async () => { clock += 60 * 60_000; } }), /did not finish within 90 minutes: https:/);
+    assert.deepEqual(timedOut.calls.at(-1).args, ['run', 'cancel', '77', '-R', 'fixture/repo']);
   } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('GitHub status errors and cancellation during polling cancel the known unfinished Mac run', async () => {
+  for (const failure of ['first status', 'mid-poll', 'aborted API', 'cancel error']) {
+    const { calls, processes } = fakeGithub({ pending: Infinity }), original = processes.run.bind(processes);
+    const abort = new AbortController(), error = new Error(failure);
+    let polls = 0;
+    processes.run = async (command, args, options) => {
+      if (args[0] === 'api' && args[1].endsWith('/runs/77') && ++polls === (failure === 'first status' ? 1 : 2)) {
+        if (failure === 'aborted API') abort.abort();
+        throw error;
+      }
+      const result = await original(command, args, options);
+      if (args[1] === 'cancel' && failure === 'cancel error') throw new Error('cancel unavailable');
+      return result;
+    };
+    const artifacts = new Map();
+    await assert.rejects(githubMacHelpers({ processes, token: 't', repository: 'fixture/repo', sha: 'c'.repeat(40),
+      version: 'v1.2.3-rc.1', directory: root, artifacts, signal: abort.signal, sleep: async () => {} }), caught => caught === error);
+    assert.deepEqual(calls.at(-1).args, ['run', 'cancel', '77', '-R', 'fixture/repo']);
+    assert.equal(calls.filter(call => call.args[1] === 'cancel').length, 1);
+    assert.equal(artifacts.size, 0);
+  }
 });
 
 test('both helper_macos rows of a local release share one GitHub dispatch and never use the Mac queue', async () => {
