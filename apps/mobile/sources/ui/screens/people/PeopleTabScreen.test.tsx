@@ -11,7 +11,7 @@ vi.mock('expo-clipboard', () => ({ setStringAsync: vi.fn() }));
 vi.mock('expo-router', () => ({ useLocalSearchParams: () => ({}), router: { push: vi.fn(), replace: vi.fn() } }));
 vi.mock('@/utils/responsive', () => ({ useIsDesktop: () => false }));
 vi.mock('@/buzz/latency-route-hook', () => ({ useLatencyRouteFrame: () => undefined }));
-vi.mock('@/buzz/use-active-community', () => ({ useActiveCommunityId: () => 'ws' }));
+vi.mock('@/buzz/use-active-community', () => ({ useActiveCommunityId: () => 'ws', useFallbackWorkspaceId: () => undefined }));
 vi.mock('@/ui/shell/panel', () => ({ openPlace: vi.fn() }));
 vi.mock('@/auth/buzz-identity-storage', () => ({
     getEffectiveRelayUrl: async () => 'https://relay.test',

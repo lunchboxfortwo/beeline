@@ -8,7 +8,7 @@ import { WORKSPACE_LABEL } from '@/buzz/vocabulary';
 import { openPlace } from '@/ui/shell/panel';
 import { useIsDesktop } from '@/utils/responsive';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
-import { useActiveCommunityId } from '@/buzz/use-active-community';
+import { useActiveCommunityId, useFallbackWorkspaceId } from '@/buzz/use-active-community';
 import { agentRow, personRow, type PeopleRow } from './people-rows';
 import { MemberCard, SectionHead } from './PeopleParts';
 import { InvitePeopleSheet } from './InvitePeopleSheet';
@@ -27,8 +27,11 @@ export function PeopleTabScreen() {
     useLatencyRouteFrame('/beeline/people');
     const desktop = useIsDesktop();
     const params = useLocalSearchParams<{ communityId?: string | string[]; action?: string | string[] }>();
+    const routeId = first(params.communityId);
     const activeWorkspaceId = useActiveCommunityId();
-    const workspaceId = first(params.communityId) || activeWorkspaceId || undefined;
+    const discovered = useFallbackWorkspaceId(activeWorkspaceId === null && !routeId);
+    const workspaceId = routeId || activeWorkspaceId || discovered || undefined;
+    const resolving = !workspaceId && (activeWorkspaceId === undefined || discovered === undefined);
     const roster = useWorkspaceRoster(workspaceId);
     const [sheet, setSheet] = useState<'people' | 'agents' | null>(null);
     const workspace = roster.surface?.workspace;
@@ -63,7 +66,12 @@ export function PeopleTabScreen() {
             ) : (
                 <TabHeader workspaceName={workspaceName || WORKSPACE_LABEL} scrolled={scrolled} />
             )}
-            {!roster.surface && !roster.error ? <PageLoader /> : <ScrollView flex={1} minHeight={0} {...(desktop ? {} : scrollProps)}>
+            {resolving || (workspaceId && !roster.surface && !roster.error) ? <PageLoader /> : !workspaceId ? (
+                <YStack padding="6" gap="2" alignItems="center" testID="people-no-workspace">
+                    <T v="heading">No Workspace to show</T>
+                    <T v="meta" color="secondary">This link did not name a Workspace, and none is open.</T>
+                </YStack>
+            ) : <ScrollView flex={1} minHeight={0} {...(desktop ? {} : scrollProps)}>
                 <YStack padding="4" gap="5" paddingBottom="8" width="100%" maxWidth={760} alignSelf="center">
                     {roster.error ? <Copy small quiet role="alert">{roster.error}</Copy> : null}
                     <YStack gap="2" testID="people-humans">

@@ -10,7 +10,7 @@ import { useChannelsCompose } from './useChannelsCompose';
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import { getEffectiveRelayUrl, loadBuzzIdentity } from '@/auth/buzz-identity-storage';
 import { restoreStoredSurface, surfaceAddress } from '@/buzz/surface-storage';
-import { watchActiveCommunityId } from '@/buzz/community-storage';
+import { saveActiveCommunityId, watchActiveCommunityId } from '@/buzz/community-storage';
 import { messageSearchHref } from '@/buzz/use-message-search';
 import { roomRowName } from '@/buzz/room-list-row';
 import { roomHref } from '@/buzz/corner-navigation';
@@ -216,6 +216,12 @@ const RowSwipeAction = memo(function RowSwipeAction({
 const BuzzChannels = memo(function BuzzChannels({ session }: { session: DeckSession }) {
   const state = useChannelsRouteState(session);
   const view = useChannelsPresentation(state);
+  // A chat open stores its Workspace. The list itself only derived one, so a
+  // fresh session that never opened a chat left Tasks and Team spinning.
+  useEffect(() => {
+    if (session.workspaceId || !view.activeCommunityId) return;
+    void saveActiveCommunityId(state.identity.publicKey, view.activeCommunityId);
+  }, [session.workspaceId, view.activeCommunityId, state.identity.publicKey]);
   const { refreshMissed, refreshNow } = useChannelsRequestedActions(state, view);
   const actions = useChannelsRoomActions(state, view.rows, state.chatList?.chats ?? EMPTY_CHATS);
   useChannelsSubscriptions(state, view.activeCommunityId, refreshMissed);

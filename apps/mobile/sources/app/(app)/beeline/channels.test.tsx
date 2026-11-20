@@ -300,6 +300,15 @@ it('paints saved Rooms while background transitions wait, then yields live recon
     if (renderer) await act(async () => renderer.unmount());
   }
 });
+describe('Fresh session without a stored Workspace', () => {
+  it('stores the workspace the chat list is showing so later tabs can open it', async () => {
+    deck.storedWorkspace = null;
+    const renderer = await mountDeck();
+    expect(paintedRows(renderer).length).toBeGreaterThan(0);
+    expect(vi.mocked(saveActiveCommunityId)).toHaveBeenCalledWith('viewer', 'workspace');
+    await act(async () => renderer.unmount());
+  });
+});
 describe('Persisted Workspace bootstrap', () => {
   it('waits for the stored Workspace and reads its Rooms ahead of the recency-first Workspace', async () => {
     deck.deferWorkspaceSelection = true;

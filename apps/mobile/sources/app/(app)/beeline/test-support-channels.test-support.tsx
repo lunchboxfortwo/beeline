@@ -83,6 +83,8 @@ const deck = vi.hoisted(() => ({
   useRealWorkspaceRead: false,
   socketRequest: vi.fn(),
   selectedWorkspace: 'workspace' as string | null,
+  /** `undefined` follows selectedWorkspace. `null` is a fresh session with nothing stored. */
+  storedWorkspace: undefined as string | null | undefined,
   deferWorkspaceSelection: false,
   workspaceSelectionListener: null as null | ((id: string | null) => void),
   chatsWorkspaces: [] as string[],
@@ -289,11 +291,12 @@ vi.mock('@/auth/buzz-identity-storage', () => ({
 }));
 
 vi.mock('@/buzz/community-storage', () => ({
-  loadActiveCommunityId: vi.fn(async () => deck.selectedWorkspace),
+  loadActiveCommunityId: vi.fn(async () => deck.storedWorkspace !== undefined ? deck.storedWorkspace : deck.selectedWorkspace),
   saveActiveCommunityId: vi.fn(async () => undefined),
   watchActiveCommunityId: vi.fn((_pubkey: string, listener: (id: string | null) => void) => {
     deck.workspaceSelectionListener = listener;
-    if (!deck.deferWorkspaceSelection) void Promise.resolve(deck.selectedWorkspace).then(listener);
+    const stored = deck.storedWorkspace !== undefined ? deck.storedWorkspace : deck.selectedWorkspace;
+    if (!deck.deferWorkspaceSelection) void Promise.resolve(stored).then(listener);
     return () => undefined;
   }),
 }));
@@ -618,6 +621,7 @@ beforeEach(async () => {
   deck.useRealWorkspaceRead = false;
   deck.socketRequest.mockReset();
   deck.selectedWorkspace = 'workspace';
+  deck.storedWorkspace = undefined;
   deck.reconnects = 0;
   deck.connectionState = 'connected';
   deck.storedInvite = null;
