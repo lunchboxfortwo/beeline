@@ -63,18 +63,27 @@ export function useFallbackWorkspaceId(enabled: boolean): string | null | undefi
         return;
       }
       const address = surfaceAddress(relayUrl, identity.publicKey, '/workspaces');
+      let reading = false;
+      let pending = false;
       const read = async () => {
         if (cancelled) return;
+        pending = true;
+        if (reading) return;
+        reading = true;
+        pending = false;
         try {
           const list = await mobileSurfaceCache.fetch(address, isWorkspaceListView, () =>
             new RoomViewClient({ baseUrl: relayUrl, identity }).workspaces());
-          if (cancelled || !list) return;
+          if (cancelled || pending || !list) return;
           const current = await loadActiveCommunityId(identity.publicKey);
-          if (cancelled) return;
+          if (cancelled || pending) return;
           const next = current || list.workspaces[0]?.id || null;
           if (next && !current) await saveActiveCommunityId(identity.publicKey, next);
           if (!cancelled) setWorkspaceId(next);
-        } catch { return; }
+        } catch { return; } finally {
+          reading = false;
+          if (pending && !cancelled) void read();
+        }
       };
       const release = await sharedLiveConnection().register([], (event) => {
         if (invalidatesWorkspaceList(event)) void read();

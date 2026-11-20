@@ -2,12 +2,14 @@ import * as React from 'react';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { isWorkspaceListView } from '@beeline/buzz-client';
+import { mobileSurfaceCache, surfaceAddress } from '@/buzz/surface-storage';
 import { saveActiveCommunityId } from '@/buzz/community-storage';
 
 const state = vi.hoisted(() => ({
     listener: null as null | ((event: any) => void),
     request: vi.fn(),
-    list: { workspaces: [{ id: 'crew', name: 'Tubing Crew' }] } as { workspaces: { id: string; name: string }[] },
+    list: { workspaces: [{ id: 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb', name: 'Tubing Crew' }] } as { workspaces: { id: string; name: string }[] },
 }));
 
 vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
@@ -35,16 +37,26 @@ vi.mock('@/sync/transport/live-connection', () => ({
         },
     }),
 }));
-vi.mock('@/buzz/surface-storage', () => ({
-    surfaceAddress: () => 'workspaces',
-    mobileSurfaceCache: {
-        peek: () => ({ workspaces: [] }),
-        read: async () => ({ workspaces: [] }),
-        fetch: async (_address: unknown, _guard: unknown, request: () => Promise<unknown>) => request(),
-    },
-}));
+vi.mock('@/buzz/surface-storage', async () => {
+    const { SurfaceRegistry } = await import('@/buzz/surface-registry');
+    const { SurfaceResponseCache } = await import('@beeline/buzz-client');
+    return {
+        surfaceAddress: (relayOrigin: string, viewerPubkey: string, endpoint: string) => ({ relayOrigin, viewerPubkey, endpoint }),
+        mobileSurfaceCache: new SurfaceRegistry(new SurfaceResponseCache({
+            get: async () => null, set: async () => undefined, remove: async () => undefined,
+        })),
+    };
+});
 vi.mock('@/sync/transport/room-view-client', () => ({
-    RoomViewClient: class { workspaces() { return state.request(); } },
+    RoomViewClient: class {
+        async workspaces() {
+            return {
+                ...await state.request(),
+                viewer: { pubkey: 'a'.repeat(64), kind: 'human', name: 'Viewer' },
+                truncated: false, watchFilters: [],
+            };
+        }
+    },
 }));
 vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: (props: any) => React.createElement('IdentityMark', props) }));
 vi.mock('@/components/buzz/SurfaceGlyphLoader', () => ({ SurfaceGlyphLoader: () => React.createElement('SurfaceGlyphLoader') }));
@@ -74,9 +86,14 @@ async function render(): Promise<ReactTestRenderer> {
 
 beforeEach(async () => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
-    state.list = { workspaces: [{ id: 'crew', name: 'Tubing Crew' }] };
+    state.list = { workspaces: [{ id: 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb', name: 'Tubing Crew' }] };
     state.request.mockReset().mockImplementation(async () => state.list);
     state.listener = null;
+    mobileSurfaceCache.clear();
+    mobileSurfaceCache.publish(surfaceAddress('https://relay.test', 'viewer', '/workspaces'), {
+        workspaces: [], viewer: { pubkey: 'a'.repeat(64), kind: 'human', name: 'Viewer' },
+        truncated: false, watchFilters: [],
+    }, isWorkspaceListView);
     await saveActiveCommunityId('viewer', null);
 });
 afterEach(async () => { for (const tree of mounted.splice(0)) await act(async () => tree.unmount()); });
@@ -119,10 +136,31 @@ it('discovers membership added after a confirmed empty list', async () => {
     await act(async () => { tree = create(<PeopleTabScreen />); });
     mounted.push(tree);
     expect(hosts(tree, 'people-no-workspace')).toHaveLength(1);
-    state.list = { workspaces: [{ id: 'crew', name: 'Tubing Crew' }] };
+    state.list = { workspaces: [{ id: 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb', name: 'Tubing Crew' }] };
     await act(async () => {
         state.listener?.({ monolithLive: { type: 'invalidate', roomId: '', reason: 'postgres:memberships' } });
     });
     expect(hosts(tree, 'people-humans')).toHaveLength(1);
     expect(hosts(tree, 'people-no-workspace')).toHaveLength(0);
 });
+
+it.each(['postgres:memberships', 'postgres:workspaces', 'reconnect'])(
+    'covers an invalidation during an outstanding read: %s', async (reason) => {
+        let complete!: (value: { workspaces: { id: string; name: string }[] }) => void;
+        state.request.mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
+        let tree!: ReactTestRenderer;
+        await act(async () => { tree = create(<PeopleTabScreen />); });
+        mounted.push(tree);
+        expect(state.request).toHaveBeenCalledTimes(1);
+        await act(async () => {
+            state.listener?.({ monolithLive: { type: 'invalidate', roomId: '', reason } });
+            state.listener?.({ monolithLive: { type: 'invalidate', roomId: '', reason } });
+        });
+        expect(state.request).toHaveBeenCalledTimes(1);
+        await act(async () => { complete({ workspaces: [] }); });
+        expect(state.request).toHaveBeenCalledTimes(2);
+        expect(hosts(tree, 'people-humans')).toHaveLength(1);
+        expect(hosts(tree, 'people-no-workspace')).toHaveLength(0);
+        expect(loaders(tree)).toHaveLength(0);
+    },
+);
