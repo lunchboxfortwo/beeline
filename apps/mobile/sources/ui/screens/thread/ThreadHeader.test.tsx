@@ -211,3 +211,18 @@ for (const [title, parts] of [
     act(() => tree.unmount());
   });
 }
+
+for (const workState of ['backlog', 'done'] as const) {
+  it.each(['idle', 'working', 'waiting', 'review', undefined] as const)(`preserves stored ${workState} in both headers over %s`, state => {
+    const assignee = { pubkey: 'agent', kind: 'agent' as const, name: 'Agent' };
+    const h: ThreadHeaderData = { ...reconnect, state, waitsOnViewer: true,
+      workItem: { id: 'thread', roomId: 'thread', chatId: 'chat', chatName: 'beeline', threadName: 'task', title: 'task',
+        state: workState, assignee, openedBy: assignee, createdAt: 1, updatedAt: 1 } };
+    let tree: any;
+    act(() => { tree = create(<><ThreadTitleBlock h={h}/><ThreadBar h={h} collapsed openChat={() => undefined}/></>); });
+    expect(tree.root.findAllByType('WorkStateMark').map((node: any) => node.props)).toEqual([
+      { state: workState, idle: false }, { state: workState, idle: false },
+    ]);
+    act(() => tree.unmount());
+  });
+}

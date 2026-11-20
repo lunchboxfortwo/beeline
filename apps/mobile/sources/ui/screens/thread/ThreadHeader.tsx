@@ -55,6 +55,8 @@ function ThreadName({ title, v, regular = false, testID, trail }: {
 
 /** The thread's state mark for this viewer: a wait on anyone else reads idle. */
 function HeaderMark({ h }: { h: ThreadHeaderData }) {
+    if (h.workItem?.state === 'backlog' || h.workItem?.state === 'done')
+        return <WorkStateMark state={h.workItem.state} idle={false} />;
     if (!h.state) return null;
     const { state, idle } = h.state === 'waiting'
         ? (h.waitsOnViewer ? { state: 'needs-you' as const, idle: false } : { state: 'in-progress' as const, idle: true })
