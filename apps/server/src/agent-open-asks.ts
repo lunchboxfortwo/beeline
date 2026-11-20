@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { shortenAsk } from '@beeline/api-contract/phone';
 import { CommandRefusalError } from './command-refusal.js';
 import type { SqlDatabase } from './database.js';
-import { AGENT_ASK_CLOSE_REASONS, needsYouSentence, settledMarkReasonSql, type AgentAskCloseReason } from './needs-you.js';
+import { AGENT_ASK_CLOSE_REASONS, needsYouSentence, questionRecipientSql, settledMarkReasonSql, type AgentAskCloseReason } from './needs-you.js';
 
 /** Lines an agent sees before the rest is counted. */
 const OPEN_ASK_LINES = 5;
@@ -21,7 +21,7 @@ function age(createdAt: Date, now: number): string {
  * Workspace, oldest first. `version` names the set, not its wording, so a
  * turn shows the list again only when an ask opened or closed.
  */
-export async function agentOpenAsks(db: SqlDatabase, agentId: string, roomId: string, now = Date.now()): Promise<{ version: string; text: string }> {
+export async function agentOpenAsks(db: SqlDatabase, agentId: string, roomId: string | null, now = Date.now()): Promise<{ version: string; text: string }> {
   const rows = (await db.query<OpenAsk>(
     `SELECT m.id,m.created_at,m.text,COALESCE(m.card->>'ask',m.card->>'prompt') ask,room.name room_name,
        array_agg(COALESCE(beeline_workspace_handle(mark.identity_id,mark.workspace_id),person.name) ORDER BY mark.identity_id) handles,
@@ -31,7 +31,15 @@ export async function agentOpenAsks(db: SqlDatabase, agentId: string, roomId: st
      JOIN rooms room ON room.id=m.room_id AND room.archived_at IS NULL
      JOIN identities person ON person.id=mark.identity_id
      WHERE mark.cleared_at IS NULL AND m.deleted_at IS NULL
-       AND mark.workspace_id=(SELECT workspace_id FROM rooms WHERE id=$2)
+       AND ((NOT EXISTS (SELECT 1 FROM work_questions question WHERE question.message_id=m.id)
+         AND NOT EXISTS (SELECT 1 FROM room_choices choice WHERE choice.message_id=m.id AND choice.mode='question'))
+         OR ${questionRecipientSql('m', 'mark.identity_id')})
+       AND (mark.workspace_id=(SELECT workspace_id FROM rooms WHERE id=$2)
+         OR ($2::uuid IS NULL AND EXISTS (SELECT 1 FROM memberships workspace
+           WHERE workspace.workspace_id=mark.workspace_id AND workspace.room_id IS NULL
+             AND workspace.identity_id=$1 AND workspace.removed_at IS NULL)
+           AND EXISTS (SELECT 1 FROM room_access access WHERE access.room_id=room.id
+             AND access.identity_id=$1 AND access.removed_at IS NULL)))
        AND (${settledMarkReasonSql('m', 'mark.identity_id')}) IS NULL
      GROUP BY m.id,room.name ORDER BY m.created_at,m.id`,
     [agentId, roomId],

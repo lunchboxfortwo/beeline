@@ -124,6 +124,29 @@ const scope1 = fixtureScope1();
       expect((await scope1.db.query("SELECT 1 FROM agent_commands WHERE id=$1 AND agent_id=$2 AND reason='message'",[sent.id,member])).rowCount).toBe(1);
     }, 60_000);
 
+  it('supplies unchanged open asks on fresh MCP initialization and keeps later wakes change-only', async () => {
+    const { token, member } = await scope1.connected();
+    const askId = randomBytes(32).toString('hex');
+    await scope1.db.query(`INSERT INTO messages(id,room_id,author_id,text,card)
+      VALUES($1,$2,$3,'blocked: Choose the release surface',jsonb_build_object('reportToId',$4::text))`, [askId, ROOM, member, USER]);
+    try {
+      const source = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: 'Continue the work.' }, USER);
+      await createAgentCommand(scope1.db, { roomId: ROOM, agentId: member, sourceMessageId: source.messageId, reason: 'human_message' });
+      const second = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: 'Continue again.' }, USER);
+      const command = (await createAgentCommand(scope1.db, { roomId: ROOM, agentId: member, sourceMessageId: second.messageId, reason: 'human_message' }))!;
+      expect((await pendingMcpWakes(scope1.db, member)).find(wake => wake.id === command.id)?.institutionalContext ?? '').not.toContain(`[ask id: ${askId}]`);
+      for (const method of ['initialize', 'server/discover']) {
+        const initialized = await scope1.eventCall(token, method, method === 'initialize'
+          ? { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'fresh-asks', version: '1' } } : {});
+        expect(initialized.result.instructions).toContain(`[ask id: ${askId}]`);
+        expect(initialized.result.instructions.trim().endsWith('Choose the release surface')).toBe(true);
+      }
+      expect((await pendingMcpWakes(scope1.db, member)).find(wake => wake.id === command.id)?.institutionalContext ?? '').not.toContain(`[ask id: ${askId}]`);
+    } finally {
+      await scope1.db.query('DELETE FROM messages WHERE id=$1', [askId]);
+    }
+  });
+
   it('MCP-EVENTS-1: discovers, verifies, refreshes and unsubscribes on the authenticated MCP endpoint', async () => {
     const fixture = await scope1.eventFixture();
     const { token, params, posts, member } = fixture;

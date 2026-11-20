@@ -25,7 +25,11 @@ BEGIN
   FROM messages m,identities recipient
   WHERE mark.message_id=asking_id AND mark.cleared_at IS NULL AND m.id=mark.message_id
     AND recipient.id=mark.identity_id
-    AND ((${requestedSql()}) IS NOT TRUE OR (${settledMarkReasonSql('m', 'recipient.id')}) IS NOT NULL);
+    AND (m.deleted_at IS NOT NULL
+      OR ((${requestedSql()}) IS NOT TRUE
+        AND NOT EXISTS (SELECT 1 FROM work_questions question WHERE question.message_id=m.id)
+        AND NOT EXISTS (SELECT 1 FROM room_choices choice WHERE choice.message_id=m.id AND choice.mode='question'))
+      OR (${settledMarkReasonSql('m', 'recipient.id')}) IS NOT NULL);
   INSERT INTO needs_you_marks(identity_id,message_id,workspace_id,cleared_at,cleared_reason)
     SELECT recipient.id,m.id,room.workspace_id,
       CASE WHEN (${settledMarkReasonSql('m', 'recipient.id')}) IS NOT NULL THEN now() END,

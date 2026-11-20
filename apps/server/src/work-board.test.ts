@@ -572,6 +572,37 @@ describe('question retirement', () => {
     expect((await agentOpenAsks(db, agent, chat)).text).toBe('');
   });
 
+  it.each([true, false])('preserves unanswered questions through reassignment, options=%s', async options => {
+    const { messageId } = await askOwnerQuestion(db, {
+      about: { kind: 'thread', roomId: thread }, question: 'Which surface?',
+      ...(options ? { options: [{ label: 'Web' }, { label: 'Phone' }] } : { freeText: true }),
+    }, agent);
+    const otherTasks = async () => (await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items.map(item => item.messageId);
+    const original = await agentOpenAsks(db, agent, chat);
+    expect(await tasks()).toEqual([messageId]);
+    await updateWorkItem(db, { id: messageId, roomId: thread, assigneeId: other }, person);
+    expect(await tasks()).toEqual([]);
+    expect(await otherTasks()).toEqual([messageId]);
+    const reassigned = await agentOpenAsks(db, agent, chat);
+    expect(reassigned.text).toContain('to @juniper:');
+    expect(reassigned.text).not.toContain('to @ada:');
+    expect(reassigned.version).not.toBe(original.version);
+    expect(await retirement(messageId)).toEqual([{ cleared_reason: null, cleared: false }]);
+    await updateWorkItem(db, { id: messageId, roomId: thread, assigneeId: null }, person);
+    expect(await tasks()).toEqual([]);
+    expect(await otherTasks()).toEqual([]);
+    expect((await agentOpenAsks(db, agent, chat)).text).toBe('');
+    await updateWorkItem(db, { id: messageId, roomId: thread, assigneeId: person }, person);
+    expect(await tasks()).toEqual([messageId]);
+    expect(await otherTasks()).toEqual([]);
+    expect((await agentOpenAsks(db, agent, chat)).version).toBe(original.version);
+    await closeAgentAsk(db, agent, { messageId, reason: 'withdrawn' });
+    await updateWorkItem(db, { id: messageId, roomId: thread, assigneeId: other }, person);
+    await updateWorkItem(db, { id: messageId, roomId: thread, assigneeId: person }, person);
+    expect(await tasks()).toEqual([]);
+    expect(await retirement(messageId)).toEqual([{ cleared_reason: 'withdrawn', cleared: true }]);
+  });
+
   it.each(['source-closed', 'superseded', 'answered', 'quote', 'section'] as const)('retires a forwarded question on %s', async event => {
     const question = await sendMessage(db, {
       route: { from: { agent, place: thread }, to: { agent: person, place: dm } },

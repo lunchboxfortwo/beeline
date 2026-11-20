@@ -600,6 +600,38 @@ describe('queue item reply audience', () => {
     expect(prompt).toMatch(/^text: The work is ready\.\nattachment: 📎 plan\.pdf \(application\/pdf\) id.+\nMemory: widgets ship Fridays\.$/m);
     expect(itemPrompt(report,{names})).not.toContain('attachment:');
   });
+  it.each([false, true])('ends a batch with one latest reminder, including collapsed schedules, fresh=%s', fresh => {
+    const old = 'Your open asks, oldest first.\n- [ask id: old] Earlier question?';
+    const current = 'Your open asks, oldest first.\n' + Array.from({ length: 5 }, (_, i) => `- [ask id: ${i}] Question?`).join('\n') + '\n3 more';
+    const items = [
+      { ...report, id: 'first', source: { ...report.source, openAsks: old, openAsksChanged: old } },
+      { ...report, id: 'schedule-1', scheduleId: 'daily', source: { ...report.source, body: 'Collapsed schedule', openAsks: current, openAsksChanged: current } },
+      { ...report, id: 'schedule-2', scheduleId: 'daily', source: { ...report.source, body: 'Newest schedule', openAsks: current } },
+    ];
+    const prompt = offlineBatchPrompt(items, { names, fresh });
+    expect(prompt).not.toContain('Collapsed schedule');
+    expect(prompt).toContain('Newest schedule');
+    expect(prompt).not.toContain('[ask id: old]');
+    expect(prompt.split('Your open asks, oldest first.')).toHaveLength(2);
+    expect(prompt.split('[ask id:')).toHaveLength(6);
+    expect(prompt.endsWith(current)).toBe(true);
+  });
+
+  it('uses the final empty set after an earlier batch item changed', () => {
+    const prompt = offlineBatchPrompt([
+      { ...report, source: { ...report.source, openAsks: 'Historical ask', openAsksChanged: 'Historical ask' } },
+      { ...report, id: 'last', source: { ...report.source, openAsksChanged: 'You have no open asks now.' } },
+    ], { names });
+    expect(prompt).not.toContain('Historical ask');
+    expect(prompt.endsWith('You have no open asks now.')).toBe(true);
+  });
+
+  it('omits unchanged batch reminders until a fresh session', () => {
+    const item = { ...report, source: { ...report.source, openAsks: 'Current open asks' } };
+    expect(offlineBatchPrompt([item], { names })).not.toContain('Current open asks');
+    expect(offlineBatchPrompt([item], { names, fresh: true }).endsWith('Current open asks')).toBe(true);
+  });
+
   it('ends with the open asks for a fresh session, otherwise only when they changed',()=>{
     const asks='Your open asks, oldest first.\n- [ask id: a] 2h ago in Milo, to @ada: Ship it?';
     const source={...report.source,conversationContext:'New messages here.',openAsks:asks};
