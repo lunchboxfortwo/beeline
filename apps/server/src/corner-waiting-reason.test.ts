@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { HUMAN, ROOM, RUBY, WORKER, authority, claim, commands, expect, it, open, rootFixture, worker } from './test-support-commander.integration.test-support.js';
-import { cornerBlockerSql, cornerRowState, chatCornerCounts } from './chat-corner-counts.js';
+import { cornerBlockerSql, cornerFactsSql, cornerRowState, chatCornerCounts } from './chat-corner-counts.js';
 import { cornerWaitingReportSql } from './corner-waiting-report.js';
+import { refreshCornerAttention } from './corner-attention.js';
 
 async function blocked(text = 'Need a decision.', status: 'blocked' | 'needs_decision' = 'blocked') {
   const opened = await open(), turn = await worker(opened.cornerId);
@@ -28,7 +29,7 @@ it.each([
     lifecycle: null, latest_turn_status: null, blocking: true,
     waiting_item_id: selected.item_id, waiting_reason: selected.reason };
   expect(cornerRowState(row)).toEqual({ state: 'waiting', reason, itemId: 'item' });
-  expect(chatCornerCounts([row]).get('parent')?.openCorners[0]?.state).toBe('waiting');
+  expect(chatCornerCounts([row], 'viewer').get('parent')?.openCorners[0]?.state).toBe('waiting');
 });
 
 it('R1: chooses the oldest blocker deterministically', async () => {
@@ -131,4 +132,32 @@ it.each(['corner', 'thread'] as const)('REPORT-REPLY: a forwarded human report c
     VALUES('forwarded-answer',$1,$2,'yes',$3)`, [surface === 'corner' ? cornerId : ROOM, HUMAN,
       surface === 'thread' ? 'forwarded-report' : null]);
   expect(await waitingPeople(cornerId)).toEqual([]);
+});
+
+it('selects each outstanding report recipient for their own corner surfaces', async () => {
+  const { cornerId } = await blocked('@captain choose a scope.');
+  // The attention worker commits the state machine before clients reread it.
+  await refreshCornerAttention(rootFixture.db, cornerId);
+  const facts = cornerFactsSql('$2');
+  const read = async (viewer: string) => (await rootFixture.db.query<any>(
+    `SELECT c.id,c.name,c.parent_id,c.archived_at,${facts.columns} FROM rooms c ${facts.joins} WHERE c.id=$1`,
+    [cornerId, viewer])).rows[0];
+  for (const viewer of [HUMAN, RUBY]) {
+    const row = await read(viewer);
+    expect(row.waiting_person_id).toBe(viewer);
+    expect(chatCornerCounts([row], viewer).get(ROOM)?.openCorners[0]?.workState).toBe('needs-you');
+    expect((await rootFixture.phone.readCorners(ROOM, viewer))?.corners.find(row => row.corner.id === cornerId)?.blocker?.personId).toBe(viewer);
+  }
+  await rootFixture.db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES('recipient-answer',$1,$2,'Yes')`, [cornerId, HUMAN]);
+  expect((await read(HUMAN)).waiting_person_id).toBe(RUBY);
+  expect((await read(RUBY)).waiting_person_id).toBe(RUBY);
+});
+
+it.each(['backlog', 'done'])('keeps stored %s in both corner rows and deck summaries', async workState => {
+  const { cornerId } = await open();
+  await rootFixture.db.query(`INSERT INTO work_items(id,room_id,state,opened_by) VALUES($1,$2,$3,$4)
+    ON CONFLICT(id) DO UPDATE SET state=excluded.state`, [cornerId, ROOM, workState, HUMAN]);
+  const view = await rootFixture.phone.readCorners(ROOM, HUMAN);
+  expect(view?.corners.find(row => row.corner.id === cornerId)?.workState).toBe(workState);
+  expect(view?.summary?.openCorners.find(row => row.id === cornerId)?.workState).toBe(workState);
 });

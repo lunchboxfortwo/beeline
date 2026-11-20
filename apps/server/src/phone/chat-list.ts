@@ -100,7 +100,7 @@ import { turnRootMessageSql } from '../agent-command.js';
         LEFT JOIN identities requester ON requester.id=trigger.author_id AND requester.kind='human'),'[]'::jsonb) turns,
         COALESCE(lm.author_id<>$2 AND ${tagsKnownIdentitySql('lm', '$2',
           '(SELECT handle FROM identities WHERE id=$2)', '(SELECT kind FROM identities WHERE id=$2)')},false) latest_tags_viewer,
-        ${roomAttentionActorSql('r')} attention_actor_name,
+        ${roomAttentionActorSql('r', '$2')} attention_actor_name,
         peer.id peer_id,peer.kind peer_kind,peer.name peer_name,
         CASE WHEN peer.kind='agent' THEN COALESCE(peer_address.handle,peer.handle) ELSE peer.handle END peer_handle,
         peer.avatar peer_avatar,peer.face_id peer_face,
@@ -108,7 +108,7 @@ import { turnRootMessageSql } from '../agent-command.js';
         NULL::timestamptz peer_activity_at,
         false agents_offline,
         ${roomWorkingSql('r')} working,
-        ${roomNeedsYouSql('r')} needs_you,
+        ${roomNeedsYouSql('r', '$2')} needs_you,
         (r.direct_participants IS NOT NULL AND EXISTS(
           SELECT 1 FROM chat_dismissals dismissal
           WHERE dismissal.room_id=r.id AND dismissal.identity_id=$2
@@ -256,7 +256,7 @@ import { turnRootMessageSql } from '../agent-command.js';
     // naming unread, which old phones require) lets the phone keep what it
     // last knew instead of painting no corners and no unread dot.
     const countsByRoom = cornerRows ? chatCornerCounts(cornerRows.map((corner) =>
-      reviveDates(corner, ['archived_at', 'latest_created_at']))) : undefined;
+      reviveDates(corner, ['archived_at', 'latest_created_at'])), viewerId) : undefined;
     const unavailable = [
       ...(cursors ? [] : ['unread' as const]),
       ...(cornerRows ? [] : ['corners' as const]),

@@ -1,3 +1,4 @@
+import { cornerBlockerSql } from './chat-corner-counts.js';
 import {
   cornerShortTitle,
   WORK_STATES,
@@ -115,12 +116,14 @@ function workColumnsSql(viewer: string): string {
     CASE WHEN w.id IS NOT NULL AND w.id<>r.id::text THEN COALESCE(w.title,r.name) ELSE r.name END name,r.name thread_name,
     CASE WHEN r.archived_at IS NOT NULL OR w.state='done' THEN 'done'
       WHEN w.state='backlog' OR (r.parent_id IS NULL AND w.state IS NULL) THEN 'backlog'
-      WHEN r.parent_id IS NULL OR w.id<>r.id::text THEN w.state
-      WHEN f.machine->>'state'='waiting' THEN 'needs-you'
+      WHEN r.parent_id IS NULL OR w.id<>r.id::text THEN
+        CASE WHEN w.state='needs-you' AND w.assignee_id IS DISTINCT FROM ${viewer} THEN 'in-progress' ELSE w.state END
+      WHEN f.machine->>'state'='waiting' AND blocker.person_id=${viewer} THEN 'needs-you'
       WHEN f.machine->>'state'='review' THEN 'in-review' ELSE 'in-progress' END state,
     (r.parent_id IS NOT NULL AND r.archived_at IS NULL AND COALESCE(w.id,r.id::text)=r.id::text
       AND w.state IS DISTINCT FROM 'backlog' AND w.state IS DISTINCT FROM 'done'
-      AND COALESCE(f.machine->>'state','idle') NOT IN ('working','review','waiting')) idle,
+      AND (COALESCE(f.machine->>'state','idle') NOT IN ('working','review','waiting')
+        OR (f.machine->>'state'='waiting' AND blocker.person_id IS DISTINCT FROM ${viewer}))) idle,
     COALESCE(NULLIF(CASE WHEN r.parent_id IS NOT NULL AND COALESCE(w.id,r.id::text)=r.id::text
       THEN ${cornerObjectiveSql('r')} END,''),w.objective,'') objective,
     row_to_json(assignee) assignee,row_to_json(opener) opener,
@@ -130,6 +133,7 @@ function workColumnsSql(viewer: string): string {
     JOIN room_access a ON a.room_id=COALESCE(r.parent_id,r.id) AND a.identity_id=${viewer} AND a.removed_at IS NULL
     LEFT JOIN rooms p ON p.id=r.parent_id LEFT JOIN work_items w ON w.id=ref.id
     LEFT JOIN corner_facts f ON f.corner_id=r.id
+    ${cornerBlockerSql('ref.id=r.id::text', false, viewer, 'r')}
     JOIN identities opener ON opener.id=COALESCE(w.opened_by,r.created_by,${viewer})
     LEFT JOIN identities assignee ON assignee.id=CASE WHEN w.room_id IS NOT NULL THEN w.assignee_id
       ELSE ${cornerImplementerSql('f', 'r')} END`;

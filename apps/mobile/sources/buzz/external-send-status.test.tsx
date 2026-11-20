@@ -9,11 +9,10 @@ import { isAgentTurnActive } from './agent-presence';
 import type { RoomViewAgentTurn } from '@beeline/buzz-client';
 
 vi.mock('react-native', () => ({ Text: 'Text', View: 'View' }));
-vi.mock('tamagui', () => ({ XStack: 'XStack', YStack: 'YStack', Spinner: 'Spinner' }));
-vi.mock('@/ui/grammar', () => ({ T: 'Text' }));
+vi.mock('tamagui', () => ({ XStack: 'XStack', YStack: 'YStack' }));
+vi.mock('@/ui/grammar', () => ({ T: 'Text', Spinner: 'Spinner' }));
 vi.mock('@/components/buzz/TurnLineFrame', () => ({ TurnLineBar: 'Bar', TurnBandSlot: 'Slot' }));
 vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: 'IdentityMark' }));
-vi.mock('@/components/buzz/BeelineMarkSpinner', () => ({ BeelineMarkSpinner: 'BeelineMarkSpinner', MARK_CELL: 18 }));
 const current = vi.hoisted(() => ({ theme: 'obsidian' as 'obsidian' | 'bone' }));
 import { TurnProgressLine } from '@/components/buzz/TurnProgressLine';
 
@@ -46,7 +45,6 @@ it('shows the accepted recipients immediately and removes the line at exactly th
   act(() => { tree = create(<Harness initial={accepted()} />); });
   expect(tree.root.findByType('Text').props.children).toBe('Sent to @atlas, @nova');
   expect(tree.root.findAllByType('Spinner')).toHaveLength(0);
-  expect(tree.root.findByType('BeelineMarkSpinner').props.live).toBeFalsy();
   expect(tree.root.findAll((node: { props: { children?: unknown } }) => node.props.children === 'Stop')).toHaveLength(0);
   act(() => vi.advanceTimersByTime(2_999));
   expect(tree.root.findAllByType('Text')).toHaveLength(1);
@@ -72,7 +70,7 @@ it('does not show Sent before acceptance or for a native send', () => {
 });
 
 describe.each(['bone', 'obsidian'] as const)('%s approved one-line style', (theme) => {
-  it('clips long handles at the tail using the thinking line font, color and static mark', () => {
+  it('clips long handles at the tail using the thinking line font and color, with no mark', () => {
     current.theme = theme;
     act(() => { tree = create(<Harness initial={accepted(['long-handle-'.repeat(20), 'nova'])} />); });
     const text = tree.root.findByType('Text');
@@ -80,7 +78,7 @@ describe.each(['bone', 'obsidian'] as const)('%s approved one-line style', (them
     expect(text.props.v).toBe('meta');
     expect(text.props.color).toBe('needsYou');
     expect(beelineThemes[theme].accent).toBeTruthy();
-    expect(tree.root.findByType('BeelineMarkSpinner').props.live).toBeFalsy();
+    expect(tree.root.findAllByType('Spinner')).toHaveLength(0);
   });
 });
 
@@ -92,7 +90,6 @@ it('keeps a native working receipt, its counter and Stop ahead of an external ac
     .toEqual(native);
   act(() => { tree = create(<TurnProgressLine {...native!} onStop={() => undefined} />); });
   expect(tree.root.findAllByType('Spinner')).toHaveLength(1);
-  expect(tree.root.findAllByType('BeelineMarkSpinner')).toHaveLength(0);
   expect(tree.root.findAll((node: { props: { children?: unknown } }) => node.props.children === 'Stop')).toHaveLength(1);
   expect(native?.stop).toEqual({ agentPubkey: 'native', requestId: 'turn' });
 });
@@ -111,7 +108,7 @@ it('shows Monarch working from claim at 0s with no transcript, thoughts, tools o
   expect(presentation?.label).toBe(`Monarch ${presentation!.verb!.gerund.toLowerCase()}…`);
   act(() => { tree = create(<TurnProgressLine {...presentation!} testID="claim-progress" />); });
   expect(tree.root.findAllByType('Text').map((node: { props: { children: unknown } }) => node.props.children)).toEqual([presentation!.label, '0s']);
-  expect(tree.root.findByType('Spinner').props.color).toBe('needsYou');
+  expect(tree.root.findAllByType('Spinner')).toHaveLength(1);
   act(() => vi.advanceTimersByTime(3_000));
   expect(tree.root.findAllByType('Text').map((node: { props: { children: unknown } }) => node.props.children)).toEqual([presentation!.label, '3s']);
 });

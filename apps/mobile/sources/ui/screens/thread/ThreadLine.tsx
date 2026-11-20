@@ -1,34 +1,39 @@
-import { RepositoryMark } from '@/components/buzz/RepositoryMark';
 import React from 'react';
 import { ListItem, YStack } from 'tamagui';
 import { CornerDownRight } from 'lucide-react-native';
-import type { CornerBlocker, CornerState, CornerStateReason } from '@beeline/api-contract/phone';
-import { Copy, Glyph, HEIGHT } from '@/ui/grammar';
+import type { CornerBlocker, CornerState, CornerStateReason, WorkState } from '@beeline/api-contract/phone';
+import { Copy, Glyph, HEIGHT, MARK, typeStyle, useTextSize } from '@/ui/grammar';
+import { WorkStateMark } from '@/ui/screens/tags/WorkMarks';
+import { threadMark } from '@/ui/screens/chats/chat-tree-model';
 import { threadListLabel } from './thread-status';
 
 /**
- * One thread under its chat: repository mark or ↳, the title, and its state
- * line. A thread waiting on this viewer reads "waiting on you" in semibold;
- * one waiting on anyone else names them, quiet.
+ * One thread in a chat's thread list: ↳, the title and its state line, then its state mark
+ * on the right, both centred on the title's line. A thread waiting on this viewer reads
+ * "waiting on you" in semibold; one waiting on anyone else names them, quiet.
  */
-export function ThreadLine({ title, state, blocker, reason, viewer, onPress, testID, avatarUrl, faviconUrl }: {
-    avatarUrl?: string; faviconUrl?: string;
-    title: string; state: CornerState; blocker?: CornerBlocker; reason?: CornerStateReason;
+export function ThreadLine({ title, state, workState, blocker, reason, viewer, onPress, testID }: {
+    title: string; state: CornerState; workState?: WorkState; blocker?: CornerBlocker; reason?: CornerStateReason;
     /** The viewer's identity id; the waiting line names them "you". */
     viewer?: string;
     onPress: () => void; testID?: string;
 }) {
     const { word, you: brass } = threadListLabel({ state, blocker, reason }, viewer);
+    const mark = threadMark({ state, workState, blocker }, viewer);
+    const line = typeStyle('body', useTextSize()).lineHeight;
     return (
         <ListItem
             padding="0" paddingVertical="2" gap="2" minHeight={HEIGHT.control}
             alignItems="flex-start" justifyContent="flex-start" backgroundColor="transparent"
             onPress={onPress} aria-label={`Thread ${title}, ${word}`} accessibilityRole="button" testID={testID}
         >
-            <YStack paddingTop="0.5">{avatarUrl || faviconUrl ? <RepositoryMark avatarUrl={avatarUrl} faviconUrl={faviconUrl} size={16} /> : <Glyph icon={CornerDownRight} size={16} accent={brass} />}</YStack>
+            <YStack height={line} justifyContent="center"><Glyph icon={CornerDownRight} size={16} /></YStack>
             <YStack flex={1} minWidth={0} gap="1">
                 <Copy>{title}</Copy>
                 <Copy small strong={brass} accent={brass} quiet={!brass}>{word}</Copy>
+            </YStack>
+            <YStack width={MARK} height={line} flexShrink={0} alignItems="center" justifyContent="center" testID={testID ? `${testID}-state` : undefined}>
+                <WorkStateMark state={mark.state} idle={mark.idle} />
             </YStack>
         </ListItem>
     );

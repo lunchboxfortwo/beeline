@@ -1,7 +1,7 @@
 import React from 'react';
-import { ListItem, Spinner, XStack, YStack } from 'tamagui';
+import { ListItem, XStack, YStack } from 'tamagui';
 import { ChevronRight } from 'lucide-react-native';
-import { Copy, Glyph, HEIGHT, T } from '@/ui/grammar';
+import { Copy, Glyph, HEIGHT, T, Spinner } from '@/ui/grammar';
 import type { TranscriptCardChoice } from '@/components/buzz/ChoicePlate';
 
 /**
@@ -30,7 +30,7 @@ export function ChoiceOption({ choice, closed }: { choice: TranscriptCardChoice;
                 <T v={choice.leader ? 'heading' : 'body'} color={choice.disabled && !choice.busy ? 'secondary' : 'ink'}>{choice.label}</T>
                 {choice.consequence ? <Copy small quiet>{choice.consequence}</Copy> : null}
             </YStack>
-            {choice.busy ? <Spinner size="small" color="needsYou" /> : null}
+            {choice.busy ? <Spinner size="small" /> : null}
             {closed && choice.votes !== undefined ? (
                 <T v="meta" color={choice.leader ? 'needsYou' : 'secondary'} testID={`transcript-card-choice-count-${choice.id}`}>{choice.votes}</T>
             ) : null}

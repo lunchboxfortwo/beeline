@@ -2,18 +2,16 @@ import beelineMark from './beeline-mark.json';
 import brand from './brand.json';
 import { beelineThemes } from './groknight';
 
-/** The square the thinking mark sits in: as tall as the 12px mono label's 18px line. */
+/** Compact brand-mark framing; loading and working indicators belong to the grammar Spinner. */
 export const MARK_CELL = 18;
-/** In-app load gates: larger than the thinking cell, smaller than the splash. */
-export const SURFACE_GLYPH_SIZE = 48;
 /** Fraction of the cell the mark's height takes — the optical size of the label's glyphs. */
 const MARK_CELL_FILL = 13 / 18;
 /** Stroke width in path units while the glyph is painting. */
 export const GLYPH_STROKE = 7;
 
-/** Splash paints once. Completion is honest: loading ends. */
+/** Splash paints the brand once, then holds the completed mark. */
 export const SPLASH_PAINT_MS = 900;
-/** Thinking paints, then immediately releases. It never holds the completed stroke. */
+/** The release animation never holds the completed stroke. */
 export const RELEASE_PAINT_MS = 720;
 export const RELEASE_UNWIND_MS = 880;
 /** Brief rest at empty so the loop returns to nothing instead of restarting at the finish. */
@@ -36,7 +34,7 @@ export function glyphPaintInk(dark: boolean): string {
 
 /**
  * The shipped mark is one closed polyline — the outline of a continuous ribbon.
- * `cell` crops to the mark so it fills the thinking line's 18px square.
+ * `cell` crops to the mark for compact brand framing.
  * `icon` keeps the 240-unit canvas and inset transform the launcher splash uses.
  */
 export const ribbon = (() => {

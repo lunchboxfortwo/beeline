@@ -1,7 +1,6 @@
 import React from 'react';
 import { XStack, YStack } from 'tamagui';
-import { Inked, T } from '@/ui/grammar';
-import { PixelLoader } from './MonoHull';
+import { Inked, Spinner, T } from '@/ui/grammar';
 import { CHEVRON_ROW_SIZE, ChevronGlyph } from './ChevronGlyph';
 
 export type TranscriptCardChoice = {
@@ -98,7 +97,7 @@ export function TranscriptCardChoicePlate({
         </YStack>
         {choice.busy ? (
           <YStack justifyContent="center" height={26}>
-            <PixelLoader compact />
+            <Spinner />
           </YStack>
         ) : null}
         {closed && choice.votes !== undefined ? (

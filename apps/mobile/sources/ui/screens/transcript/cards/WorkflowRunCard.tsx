@@ -1,12 +1,14 @@
+import { WorkflowStepCircle } from '@/components/buzz/WorkflowStepCircle';
+import { WorkflowWorkingMark } from '@/components/buzz/WorkflowWorkingMark';
 import React, { useMemo } from 'react';
-import { Card, Spinner, XStack, YStack } from 'tamagui';
-import { Check, Workflow, X } from 'lucide-react-native';
+import { Card, XStack, YStack } from 'tamagui';
+import { Workflow } from 'lucide-react-native';
 import { identityHandle, type WorkflowRunDetailView } from '@beeline/api-contract/phone';
 import { Copy, Glyph, T } from '@/ui/grammar';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import { observeRoomResource, useObservedResource } from '@/buzz/use-observed-resource';
 import { useRoomWorkflowRun } from '@/buzz/use-room-workflow-run';
-import { workflowDisplayName, workflowRunLine, workflowStateLabel, type WorkflowLineStatus, type WorkflowLineStep } from '@/buzz/workflow-graph';
+import { workflowDisplayName, workflowRunLine, workflowStateLabel, type WorkflowLineStatus, type WorkflowLineStep, type WorkflowLineKind } from '@/buzz/workflow-graph';
 import { workflowRunHeadline, workflowStarterLine, workflowStepAssignee, workflowStepMeta } from '@/buzz/workflow-run-copy';
 
 /**
@@ -28,7 +30,7 @@ export function WorkflowRunCard({ roomId }: { roomId: string | undefined }) {
     return <WorkflowRunCardView detail={detail} />;
 }
 
-type RailStep = { key: string; name: string; who?: string; note?: string; status: WorkflowLineStatus };
+type RailStep = { key: string; name: string; who?: string; note?: string; status: WorkflowLineStatus; kind: WorkflowLineKind };
 
 /** The rail's rows from the run: name, who holds it, and the note done and current steps carry. */
 export function workflowRailSteps(detail: WorkflowRunDetailView): RailStep[] {
@@ -58,11 +60,11 @@ export function workflowRailSteps(detail: WorkflowRunDetailView): RailStep[] {
             who: assignee ? `@${identityHandle(assignee)}` : meta || undefined,
             note: note || undefined,
             status: step.status,
+            kind: step.kind,
         };
     });
 }
 
-/** One run on one rail: done is a brass check, current a brass ring, not yet a hollow ring. */
 export function WorkflowRunCardView({ detail }: { detail: WorkflowRunDetailView }) {
     const steps = useMemo(() => workflowRailSteps(detail), [detail]);
     const active = detail.run.status === 'live';
@@ -78,7 +80,8 @@ export function WorkflowRunCardView({ detail }: { detail: WorkflowRunDetailView 
                     <Copy strong>{name}</Copy>
                     <Copy small quiet testID="workflow-run-headline">{starter ? `${headline} · ${starter}` : headline}</Copy>
                 </YStack>
-                {active && headline === 'Running' ? <Spinner size="small" color="needsYou" /> : null}
+                {active ? <WorkflowWorkingMark kind={detail.contract.handoffs[detail.run.state]?.kind}
+                    holder={detail.run.holder} viewerHolds={detail.run.viewerHolds} size={16} /> : null}
             </XStack>
             <YStack>
                 {steps.map((step, index) => {
@@ -86,7 +89,9 @@ export function WorkflowRunCardView({ detail }: { detail: WorkflowRunDetailView 
                     return (
                         <XStack key={step.key} gap="3" alignItems="stretch" testID={`workflow-step-${step.status}`}>
                             <YStack width={20} alignItems="center">
-                                <StepCircle status={step.status} />
+                                {step.status === 'current' ? <WorkflowWorkingMark kind={step.kind}
+                                    holder={detail.run.holder} viewerHolds={detail.run.viewerHolds} />
+                                    : <WorkflowStepCircle status={step.status} />}
                                 {last ? null : (
                                     <YStack flex={1} width={2} backgroundColor={step.status === 'done' ? 'needsYou' : 'strongStroke'} />
                                 )}
@@ -106,29 +111,4 @@ export function WorkflowRunCardView({ detail }: { detail: WorkflowRunDetailView 
             </YStack>
         </Card>
     );
-}
-
-function StepCircle({ status }: { status: WorkflowLineStatus }) {
-    if (status === 'done') {
-        return (
-            <YStack width={20} height={20} borderRadius="full" backgroundColor="needsYou" alignItems="center" justifyContent="center" testID="step-done">
-                <Glyph icon={Check} size={14} color="primaryInk" />
-            </YStack>
-        );
-    }
-    if (status === 'current') {
-        return (
-            <YStack width={20} height={20} borderRadius="full" borderWidth={2} borderColor="needsYou" alignItems="center" justifyContent="center" testID="step-current">
-                <YStack width={8} height={8} borderRadius="full" backgroundColor="needsYou" />
-            </YStack>
-        );
-    }
-    if (status === 'failed') {
-        return (
-            <YStack width={20} height={20} borderRadius="full" borderWidth={2} borderColor="removed" alignItems="center" justifyContent="center" testID="step-failed">
-                <Glyph icon={X} size={14} color="removed" />
-            </YStack>
-        );
-    }
-    return <YStack width={20} height={20} borderRadius="full" borderWidth={2} borderColor="strongStroke" testID="step-pending" />;
 }

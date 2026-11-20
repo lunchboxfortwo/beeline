@@ -208,3 +208,17 @@ it('W8 names a single active thread in the trigger', () => {
   expect(byTestID(tree, 'threads-dropdown-trigger')[0].props.label).toBe('1 active thread in general');
   act(() => tree.unmount());
 });
+
+it.each(['backlog', 'done'])('preserves %s when full thread rows replace the summary', (workState) => {
+  fixture.summary = { cornerCount: 1, openCorners: [{ id: 'a', name: 'one', state: 'idle', workState }] };
+  fixture.corners = { openRows: [], record: {} };
+  const element = () => <ThreadsDropdown roomId="r" chatName="general" openThread={vi.fn()} onNewThread={vi.fn()} />;
+  let tree: any;
+  act(() => { tree = create(element()); });
+  act(() => byTestID(tree, 'threads-dropdown-trigger')[0].props.onPress());
+  expect(tree.root.findByType('ThreadLine').props.workState).toBe(workState);
+  fixture.corners = { openRows: [{ corner: { id: 'a', name: 'one' }, state: 'idle', workState }], record: {} };
+  act(() => tree.update(element()));
+  expect(tree.root.findByType('ThreadLine').props.workState).toBe(workState);
+  act(() => tree.unmount());
+});

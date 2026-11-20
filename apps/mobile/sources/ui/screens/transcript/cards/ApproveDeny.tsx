@@ -1,7 +1,7 @@
 import React from 'react';
-import { Spinner, XStack } from 'tamagui';
+import { XStack } from 'tamagui';
 import { Check } from 'lucide-react-native';
-import { Btn, Glyph, T } from '@/ui/grammar';
+import { Btn, Glyph, T, Spinner } from '@/ui/grammar';
 
 /**
  * Approve / Deny everywhere a request waits on you (build spec decision 17):
@@ -34,6 +34,7 @@ export function ApproveDeny({
         <XStack gap="2" flexWrap="wrap" alignItems="center">
             <Btn
                 kind="primary"
+                {...(busy ? { backgroundColor: 'canvas' } : {})}
                 label={`${approveLabel}: ${title}`}
                 disabled={disabled || busy}
                 aria-busy={busy}
@@ -41,8 +42,8 @@ export function ApproveDeny({
                 testID={approveTestID}
             >
                 <XStack gap="2" alignItems="center">
-                    {busy ? <Spinner size="small" color="primaryInk" /> : <Glyph icon={Check} size={16} color="primaryInk" />}
-                    <T v="heading" color="primaryInk">{approveLabel}</T>
+                    {busy ? <Spinner size="small" /> : <Glyph icon={Check} size={16} color="primaryInk" />}
+                    <T v="heading" color={busy ? 'ink' : 'primaryInk'}>{approveLabel}</T>
                 </XStack>
             </Btn>
             {extra}

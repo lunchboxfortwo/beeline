@@ -1,6 +1,7 @@
+import { WorkStateMark } from '@/ui/screens/tags/WorkMarks';
 import React from 'react';
+import { AtSign } from 'lucide-react-native';
 import { Card, XStack, YStack } from 'tamagui';
-import { AtSign, Check } from 'lucide-react-native';
 import { Copy, Glyph, T } from '@/ui/grammar';
 
 /**
@@ -20,11 +21,10 @@ export function RequestFrame({ ask, children, testID }: { ask: string; children?
     );
 }
 
-/** A decided request's one quiet line: a check, then who decided and when. */
 export function SettledLine({ children, failed = false, testID }: { children: React.ReactNode; failed?: boolean; testID?: string }) {
     return (
         <XStack gap="2" alignItems="center">
-            {failed ? null : <Glyph icon={Check} size={16} />}
+            {failed ? null : <WorkStateMark state="done" size={16} />}
             <YStack flex={1} minWidth={0}>
                 {failed ? <T v="meta" color="removed" testID={testID}>{children}</T> : <Copy small quiet testID={testID}>{children}</Copy>}
             </YStack>

@@ -1,3 +1,5 @@
+import { WorkflowStepCircle } from '@/components/buzz/WorkflowStepCircle';
+import { WorkflowWorkingMark } from '@/components/buzz/WorkflowWorkingMark';
 import { PageLoader } from '@/ui/PageLoader';
 import { SettingsRow } from '@/components/buzz/SettingsRow';
 import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
@@ -19,12 +21,8 @@ import { useRoomLiveDrafts } from '@/buzz/room-live-drafts';
 import { liveRoomRuns, useRoomWorkflowRuns } from '@/buzz/use-room-workflow-run';
 import { workflowDisplayName, workflowStateLabel } from '@/buzz/workflow-graph';
 import { formatRunDuration, runDayLabel, workflowRunHeadline, workflowRunHref, workflowStarterLine } from '@/buzz/workflow-run-copy';
-import { HullLivePulse } from '@/components/buzz/MonoHull';
 import { PageHeader } from '@/components/buzz/PageHeader';
-import {
-  WorkflowRunLine,
-  WorkflowStepCircle,
-} from '@/components/buzz/WorkflowRunLine';
+import { WorkflowRunLine } from '@/components/buzz/WorkflowRunLine';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import { Btn, Copy, SafeBottom, SafeTop, T } from '@/ui/grammar';
 
@@ -33,7 +31,6 @@ function first(value: string | string[] | undefined): string | undefined {
 }
 
 const TIME = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
-const LIVE_DOT = 10;
 const LIVE_HALO = 20;
 
 /**
@@ -116,14 +113,8 @@ export default function WorkflowRun() {
           <YStack paddingTop="6" paddingHorizontal="4" testID="workflow-run-summary">
             <XStack alignItems="center" gap="2">
               {live ? (
-                <YStack width={LIVE_HALO} height={LIVE_HALO} alignItems="center" justifyContent="center">
-                  <YStack position="absolute" left={0} top={0} width={LIVE_HALO} height={LIVE_HALO}>
-                    <HullLivePulse>
-                      <YStack width={LIVE_HALO} height={LIVE_HALO} borderRadius="full" borderWidth={1} borderColor="needsYou" />
-                    </HullLivePulse>
-                  </YStack>
-                  <YStack width={LIVE_DOT} height={LIVE_DOT} borderRadius="full" backgroundColor="needsYou" />
-                </YStack>
+                <WorkflowWorkingMark size={LIVE_HALO} viewerHolds={run.viewerHolds}
+                  kind={detail.contract.handoffs[run.state]?.kind} holder={run.holder} />
               ) : (
                 <WorkflowStepCircle status={run.status === 'done' ? 'done' : 'failed'} />
               )}

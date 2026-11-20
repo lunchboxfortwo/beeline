@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GitHubAppClient, GitHubOAuthClient } from '@beeline/auth/github';
-import { migrate, PostgresDatabase, type SqlDatabase } from './database.js';
+import { migrate, postgresPoolConfig, PostgresDatabase, type SqlDatabase } from './database.js';
 import { GitHubOperations } from './github-operations.js';
 import { DaemonService } from './daemon-service.js';
 import { LiveHub } from './live.js';
@@ -129,8 +129,12 @@ describe.skipIf(!url)('production incident deadlocks on real PostgreSQL', () => 
     // 70aec06b59b34e22b735171fcf55e500 (GitHub webhook checkout).
     // Fly logs show command-row waits before the checkout failures.
     const isolated = new URL(url!); isolated.pathname = `/${databaseName}`;
-    const appDb = new PostgresDatabase('', 2, { pool: new Pool({ connectionString: isolated.toString(), max: 2,
-      connectionTimeoutMillis: 50, statement_timeout: 2000 }) });
+    const pool = new Pool(postgresPoolConfig(isolated.toString(), 2));
+    const appDb = new PostgresDatabase('', 2, { pool });
+    // Prove spare capacity, not cold connection startup within an arbitrary 50ms.
+    const clients = await Promise.all([pool.connect(), pool.connect()]);
+    for (const client of clients) client.release();
+    expect(appDb.poolCounts()).toEqual({ total: 2, idle: 2, waiting: 0 });
     const source = 'e'.repeat(64);
     await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Work')`, [source,R,H]);
     const command = await createAgentCommand(db, { roomId: R, agentId: A, sourceMessageId: source, reason: 'human_tag' });

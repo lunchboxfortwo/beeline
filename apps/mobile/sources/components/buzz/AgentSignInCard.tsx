@@ -13,7 +13,7 @@ import { AppMark } from './AppMark';
 import { Button } from './Button';
 import { StateDot } from './StateDot';
 import { TranscriptCard } from './TranscriptCard';
-import { WorkflowStepCircle } from './WorkflowRunLine';
+import { WorkflowStepCircle } from './WorkflowStepCircle';
 
 /** The company each harness signs in to: its name, logo domain, and site. */
 const HARNESS_SERVICE: Record<

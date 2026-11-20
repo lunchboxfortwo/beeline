@@ -24,6 +24,8 @@ vi.mock('@/ui/grammar', async () => {
     Glyph: (p: any) => createElement('Glyph', p),
     Btn: (p: any) => createElement('Button', { 'aria-label': p.label, ...p }, p.children),
     HEIGHT: { control: 44 },
+    MARK: 18,
+    AtMark: (p: any) => createElement('AtMark', p),
     SheetScroll: (p: any) => createElement('ScrollView', p, p.children),
     SheetFrame: (p: any) =>
       p.open ? createElement('Sheet', { testID: p.testID, title: p.title }, p.children) : null,

@@ -1,3 +1,4 @@
+import { permissionDeciderSql } from './permission-decider.js';
 import { humanReportCornerSql } from './corner-waiting-report.js';
 import { repositoryMarkColumnsSql } from './repository-mark.js';
 import { messageColumns } from './message-columns.js';
@@ -394,10 +395,7 @@ return [
        AND m.deleted_at IS NULL OFFSET 0
    ) m
    ${APPROVAL_JOINS}
-   WHERE CASE WHEN m.card->>'purpose'='squire-spending' THEN EXISTS (
-         SELECT 1 FROM agents spender
-         WHERE spender.agent_id=m.card->'agent'->>'pubkey' AND spender.owner_id=$2)
-       ELSE (permission.principal_id=$2 OR ${VIEWER_MANAGES_WORKSPACE}) END`,
+   WHERE ${permissionDeciderSql('permission', 'm.card', '$1', '$2')}`,
   // An open question addressed to the viewer: tagged, or asked of its
   // requester when it tags nobody (`addressedToPersonSql`'s reading).
   `${APPROVAL_FROM('choice', 'choice.closes_at')}

@@ -3,8 +3,7 @@ import * as React from 'react';
 import type { Pressable, PressableProps } from 'react-native';
 import { XStack, type XStackProps } from 'tamagui';
 import * as Haptics from 'expo-haptics';
-import { Inked, T } from '@/ui/grammar';
-import { PixelLoader } from './MonoHull';
+import { Inked, Spinner, T } from '@/ui/grammar';
 import { ChevronGlyph } from './ChevronGlyph';
 import { ExternalGlyph } from './ExternalGlyph';
 
@@ -200,7 +199,7 @@ function ButtonFrame({
       {...frame}
       {...pickLayout(props)}
     >
-      {loading && <PixelLoader compact />}
+      {loading && <Spinner />}
       {iconPosition === 'start' && icon}
       {label ? (
         <T

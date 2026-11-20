@@ -2,7 +2,7 @@ import { PageLoader } from '@/ui/PageLoader';
 import React, { useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import { router, useNavigation } from 'expo-router';
-import { ListItem, Spinner, XStack, YStack } from 'tamagui';
+import { ListItem, XStack, YStack } from 'tamagui';
 import { MessagesSquare, Pencil, UserPlus } from 'lucide-react-native';
 import { roomTitle, type RoomViewMember, type WorkspaceMemberListView } from '@beeline/api-contract/phone';
 import { isWorkspaceMemberListView } from '@beeline/buzz-client';
@@ -27,7 +27,7 @@ import { currentSurfaceStamp } from '@/buzz/surface-clock';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
 import { openPlace } from '@/ui/shell/panel';
 import { useIsDesktop } from '@/utils/responsive';
-import { Btn, Copy, Glyph, HEIGHT, Row, Screen, Section, SheetFrame, SheetRow, T } from '@/ui/grammar';
+import { Btn, Copy, Glyph, HEIGHT, Row, Screen, Section, SheetFrame, SheetRow, T, Spinner } from '@/ui/grammar';
 import { ProfileHead } from './ProfileParts';
 
 type Role = RoomViewMember['role'];

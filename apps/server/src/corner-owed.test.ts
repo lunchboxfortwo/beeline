@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { backfillCornerOwed, type SqlDatabase } from './database.js';
 import { addressedToPersonSql, cornerOwedBackfillSql, cornerOwedSchemaSql } from './corner-owed.js';
+import { cornerWaitingSql } from './corner-waiting.js';
 import { PhoneService } from './phone-service.js';
 import { seedCornerOpening, PgliteDatabase, migratedDatabase, insertCornerFacts } from './test-support.js';
 
@@ -158,6 +159,57 @@ describe('corner_owed', () => {
         [WORKSPACE, id, id === OWNER ? 'owner' : 'member', ROOM],
       );
     await insertCornerFacts(database, { cornerId: CORNER, ownerAgentId: AGENT, commissionedBy: OWNER });
+  });
+
+  const permission = async (purpose: string) => {
+    await database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
+      VALUES($1,NULL,$2,'member'),($1,$3,$2,'member')`, [WORKSPACE, LATE, ROOM]);
+    await database.query(`INSERT INTO permission_authority(permission_id,room_id,principal_id,request_id,scope,status)
+      VALUES('request',$1,$2,'request-turn','{}'::jsonb,'pending')`, [CORNER, OTHER]);
+    await post('permission-card', AGENT, 'Approve this request', { presentation: 'card', cardType: 'permission',
+      card: { permissionId: 'request', purpose, status: 'pending', agent: { pubkey: AGENT } } });
+  };
+  const permissionPeople = async () => (await database.query<{ person_id: string }>(
+    `SELECT person_id FROM corner_owed WHERE message_id='permission-card' ORDER BY person_id`,
+  )).rows.map(row => row.person_id);
+
+  it('attributes spending blockers to the agent owner, and refreshes historical principal rows', async () => {
+    await permission('squire-spending');
+    await database.query(`UPDATE memberships SET role='admin' WHERE workspace_id=$1 AND identity_id=$2 AND room_id IS NULL`, [WORKSPACE, OTHER]);
+    expect(await permissionPeople()).toEqual([OWNER]);
+    const waiting = (await database.query<{ person_id: string }>(
+      `SELECT waiting.person_id FROM rooms c CROSS JOIN LATERAL (${cornerWaitingSql('c')}) waiting WHERE c.id=$1`, [CORNER],
+    )).rows;
+    expect(waiting).toEqual([{ person_id: OWNER }]);
+    expect((await phone.readCorners(ROOM, OWNER))?.corners[0]?.blocker?.personId).toBe(OWNER);
+    expect((await phone.readChats(WORKSPACE, OTHER))?.chats.find(row => row.room.id === ROOM)?.openCorners?.[0]?.workState).toBe('in-progress');
+    await database.query(`DELETE FROM corner_owed WHERE message_id='permission-card'`);
+    await database.query(`INSERT INTO corner_owed(corner_id,person_id,message_id,created_at,answerable,blocking)
+      VALUES($1,$2,'permission-card',now(),false,true)`, [CORNER, OTHER]);
+    await database.query(cornerOwedSchemaSql());
+    expect(await permissionPeople()).toEqual([OWNER]);
+    await database.query(`UPDATE agents SET owner_id=$1 WHERE agent_id=$2`, [LATE, AGENT]);
+    expect(await permissionPeople()).toEqual([LATE]);
+    await database.query(`UPDATE permission_authority SET status='authorized' WHERE permission_id='request'`);
+    expect(await permissionPeople()).toEqual([]);
+  });
+
+  it('keeps ordinary permission blockers aligned with current requester and Workspace managers', async () => {
+    await permission('write');
+    expect(await permissionPeople()).toEqual([OWNER, OTHER]);
+    await database.query(`UPDATE memberships SET role='admin' WHERE workspace_id=$1 AND identity_id=$2 AND room_id IS NULL`, [WORKSPACE, LATE]);
+    expect(await permissionPeople()).toEqual([OWNER, OTHER, LATE]);
+    for (const viewer of [OWNER, OTHER, LATE]) {
+      expect((await phone.readCorners(ROOM, viewer))?.corners[0]?.blocker?.personId).toBe(viewer);
+    }
+    await database.query(`UPDATE memberships SET role='member' WHERE workspace_id=$1 AND identity_id=$2 AND room_id IS NULL`, [WORKSPACE, LATE]);
+    expect(await permissionPeople()).toEqual([OWNER, OTHER]);
+    await database.query(`UPDATE memberships SET removed_at=now() WHERE workspace_id=$1 AND identity_id=$2 AND room_id IS NULL`, [WORKSPACE, OTHER]);
+    expect(await permissionPeople()).toEqual([OWNER]);
+    await database.query(`UPDATE permission_authority SET principal_id=$1 WHERE permission_id='request'`, [LATE]);
+    expect(await permissionPeople()).toEqual([OWNER, LATE]);
+    await database.query(`UPDATE permission_authority SET status='denied' WHERE permission_id='request'`);
+    expect(await permissionPeople()).toEqual([]);
   });
 
   it.each(['approved', 'denied', 'expired'])('removes a %s Squire card from owed items without a separate decision message', async status => {

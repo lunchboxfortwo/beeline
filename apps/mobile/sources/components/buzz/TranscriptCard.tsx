@@ -1,7 +1,7 @@
 import React, { useState, type ReactNode } from 'react';
-import { Card, Input, ListItem, Separator, Spinner, XStack, YStack } from 'tamagui';
+import { Card, Input, ListItem, Separator, XStack, YStack } from 'tamagui';
 import { Check, ChevronDown, ChevronRight, ExternalLink, X } from 'lucide-react-native';
-import { Btn, Copy, Glyph, HEIGHT, T } from '@/ui/grammar';
+import { Btn, Copy, Glyph, HEIGHT, T, Spinner } from '@/ui/grammar';
 import { SettledLine } from '@/ui/screens/transcript/cards/RequestCard';
 import { ChoiceOption } from '@/ui/screens/transcript/cards/ChoiceOption';
 import { ErrorBanner } from './ErrorBanner';
@@ -291,7 +291,7 @@ function ActionButton({ action }: { action: TranscriptCardAction }) {
       testID={action.testID}
     >
       <XStack gap="2" alignItems="center">
-        {action.loading ? <Spinner size="small" color={kind === 'primary' ? 'primaryInk' : 'secondary'} />
+        {action.loading ? <Spinner size="small" color={kind === 'primary' ? 'primaryInk' : quiet ? 'secondary' : 'ink'} />
           : kind === 'primary' && action.label === 'Approve' ? <Glyph icon={Check} size={16} color="primaryInk" /> : null}
         <T v="heading" color={kind === 'primary' ? 'primaryInk' : quiet ? 'secondary' : 'ink'}>{action.label}</T>
         {action.destination === 'external' ? <Glyph icon={ExternalLink} size={16} />

@@ -1,3 +1,4 @@
+import { permissionDeciderSql } from './permission-decider.js';
 import { cornerWaitingSql } from './corner-waiting.js';
 import { currentCornerCommandTargetSql } from './agent-command.js';
 import type { CornerMachine } from './corner-lifecycle.js';
@@ -137,7 +138,7 @@ export function cornerFactsSql(viewerExpr: string): {
     LEFT JOIN corner_facts f ON f.corner_id=c.id
     LEFT JOIN corner_github_cache gh ON gh.corner_id=c.id
     ${cornerWorkSql()}
-    ${cornerBlockerSql()}
+    ${cornerBlockerSql('true', false, viewerExpr)}
     LEFT JOIN LATERAL (SELECT message.id,message.text,message.author_id,message.created_at,message.presentation FROM messages message WHERE message.room_id=c.id
       AND message.presentation IN ('message','system') AND ${visibleChatMessageSql('message')}
       ORDER BY created_at DESC,id DESC LIMIT 1) lm ON true
@@ -204,24 +205,30 @@ export function cornerWorkSql(): string {
 }
 
 /**
- * Blocking people and recorded commanders. Display picks the oldest; reminders retain newest-first selection.
- * Merge holds rank after every other blocker, so a hold is selected only when nothing else is open.
+ * Blocking people and recorded commanders. Viewer reads prefer their own outstanding blocker;
+ * within that selection, display picks the oldest and reminders retain newest-first selection.
+ * Merge holds rank after other blockers within the selected person scope.
  */
-export function cornerBlockerSql(sourcePredicate = 'true', newestFirst = false): string {
+export function cornerBlockerSql(
+  sourcePredicate = 'true',
+  newestFirst = false,
+  viewerExpr?: string,
+  corner = 'c',
+): string {
   const direction = newestFirst ? 'DESC' : 'ASC';
   return `LEFT JOIN LATERAL (
     SELECT ranked.* FROM (
       SELECT blockers.*,person.name person_name
       FROM (
       SELECT waiting.item_id,waiting.person_id,waiting.created_at,waiting.reason,waiting.kind
-      FROM (${cornerWaitingSql('c')}) waiting WHERE NOT waiting.private
+      FROM (${cornerWaitingSql(corner)}) waiting WHERE NOT waiting.private
       UNION ALL
       SELECT hold.id::text,hold.actor_id,hold.set_at,'approve','merge-hold' FROM corner_merge_holds hold
       JOIN identities holder ON holder.id=hold.actor_id AND holder.kind='human'
-      WHERE hold.corner_id=c.id AND hold.released_at IS NULL
+      WHERE hold.corner_id=${corner}.id AND hold.released_at IS NULL
     ) blockers LEFT JOIN identities person ON person.id=blockers.person_id
     WHERE ${sourcePredicate}
-    ) ranked ORDER BY ranked.kind='merge-hold',ranked.created_at ${direction},ranked.item_id ${direction},ranked.person_id LIMIT 1
+    ) ranked ORDER BY ${viewerExpr ? `(ranked.person_id=${viewerExpr}) DESC NULLS LAST,` : ''}ranked.kind='merge-hold',ranked.created_at ${direction},ranked.item_id ${direction},ranked.person_id LIMIT 1
   ) blocker ON true`;
 }
 
@@ -234,11 +241,22 @@ export function openCornerFactsSql(parentPredicate: string, viewerExpr: string):
     ORDER BY c.created_at DESC,c.id DESC`;
 }
 
-/** A Room or any corner under it has a pending permission. */
-export function roomNeedsYouSql(room: string): string {
-  return `EXISTS(SELECT 1 FROM permission_authority p
-    WHERE p.status='pending' AND (p.room_id=${room}.id OR p.room_id IN
-      (SELECT id FROM rooms WHERE parent_id=${room}.id)))`;
+/** The viewer can decide a pending permission in a Room or any corner under it. */
+export function roomNeedsYouSql(room: string, viewerExpr: string): string {
+  return `EXISTS(SELECT 1 FROM permission_authority permission
+    ${permissionCardSql()}
+    WHERE permission.status='pending' AND (permission.room_id=${room}.id OR permission.room_id IN
+      (SELECT id FROM rooms WHERE parent_id=${room}.id))
+      AND ${permissionDeciderSql('permission', 'permission_card.card', `${room}.workspace_id`, viewerExpr)})`;
+}
+
+function permissionCardSql(): string {
+  return `LEFT JOIN LATERAL (
+      SELECT message.card FROM messages message
+      WHERE message.room_id=permission.room_id AND message.card_type='permission'
+        AND message.card->>'permissionId'=permission.permission_id
+      ORDER BY message.created_at DESC,message.id DESC LIMIT 1
+    ) permission_card ON true`;
 }
 
 /** A Room or any open corner under it has a working turn. */
@@ -262,18 +280,14 @@ export function roomWorkingSql(room: string): string {
   ) working)`;
 }
 
-/** The agent named on the newest pending permission card in a Room or its corners. */
-export function roomAttentionActorSql(room: string): string {
+/** The agent on the newest pending permission the viewer can decide in a Room or its corners. */
+export function roomAttentionActorSql(room: string, viewerExpr: string): string {
   return `(SELECT agent.name
     FROM permission_authority permission
-    LEFT JOIN LATERAL (
-      SELECT message.card FROM messages message
-      WHERE message.room_id=permission.room_id AND message.card_type='permission'
-        AND message.card->>'permissionId'=permission.permission_id
-      ORDER BY message.created_at DESC,message.id DESC LIMIT 1
-    ) permission_card ON true
+    ${permissionCardSql()}
     LEFT JOIN identities agent ON agent.id=permission_card.card->'agent'->>'pubkey'
     WHERE permission.status='pending'
+      AND ${permissionDeciderSql('permission', 'permission_card.card', `${room}.workspace_id`, viewerExpr)}
       AND (permission.room_id=${room}.id OR permission.room_id IN (
         SELECT id FROM rooms WHERE parent_id=${room}.id
       ))
@@ -287,7 +301,10 @@ export type ChatCornerSummary = {
   openCorners: ChatListCorner[];
 };
 
-/** Count every corner; include every Mine and Needs you corner alongside the newest others. */
+/**
+ * Count every corner; include every Mine and Needs you corner alongside the newest others.
+ * Needs you is per viewer: a corner waiting on someone else reads In progress for this viewer.
+ */
 export function chatCornerCounts(
   rows: readonly (CornerStateRow & {
     id: string;
@@ -296,6 +313,7 @@ export function chatCornerCounts(
     latest_created_at?: Date | null;
     attention?: boolean | null;
   })[],
+  viewerId: string,
 ): Map<string, ChatCornerSummary> {
   const counts = new Map<string, ChatCornerSummary>();
   for (const row of rows) {
@@ -326,7 +344,7 @@ export function chatCornerCounts(
           ? row.work_state
           : state === 'review'
             ? 'in-review'
-            : state === 'waiting'
+            : state === 'waiting' && blocker?.personId === viewerId
               ? 'needs-you'
               : 'in-progress',
       state,
@@ -343,7 +361,8 @@ export function chatCornerCounts(
   for (const count of counts.values()) {
     let others = Math.max(0, OPEN_CORNER_PREVIEW - count.mineCornerCount);
     count.openCorners = count.openCorners.filter(
-      (corner) => corner.mine || corner.workState === 'needs-you' || others-- > 0,
+      // Every waiting thread stays listed, whoever it waits on.
+      (corner) => corner.mine || corner.state === 'waiting' || others-- > 0,
     );
   }
   return counts;

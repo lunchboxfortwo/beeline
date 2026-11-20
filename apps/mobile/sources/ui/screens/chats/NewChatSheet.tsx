@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Input, ListItem, Spinner, Switch, XStack, YStack, useTheme } from 'tamagui';
+import { Input, ListItem, Switch, XStack, YStack, useTheme } from 'tamagui';
 import { FlatList } from 'react-native';
 import { Lock, Pencil, Search } from 'lucide-react-native';
 import Svg, { Path } from 'react-native-svg';
@@ -9,7 +9,7 @@ import { RepositoryMark } from '@/components/buzz/RepositoryMark';
 import { ROOM_SLUG_HINT, roomNameEntry, validRoomSlug } from '@/buzz/room-name';
 import { filterRepoCandidates, type RepoCandidate } from '@/buzz/room-repo-picker';
 import { ROOM_LABEL } from '@/buzz/vocabulary';
-import { Btn, Copy, Glyph, HEIGHT, SheetFrame, SheetRow } from '@/ui/grammar';
+import { Btn, Copy, Glyph, HEIGHT, SheetFrame, SheetRow, Spinner } from '@/ui/grammar';
 
 export type NewChatStep = 'menu' | 'empty' | 'github';
 

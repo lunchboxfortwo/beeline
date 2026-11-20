@@ -1,14 +1,12 @@
 import React from 'react';
 import { YStack } from 'tamagui';
-import { MARK_CELL, SURFACE_GLYPH_SIZE } from '@/buzz/beeline-glyph';
-import { BeelineGlyphPaint } from './BeelineGlyphPaint';
+import { Spinner } from '@/ui/grammar';
 
 /**
- * The one in-app load-gate treatment: the same self-painting glyph as splash
- * and the thinking line. Duration is unknown, so this uses the release loop —
- * it never holds a completed stroke as progress toward a finish. The page loader
- * is the one every page shows while it loads: it fills the space its page
- * gives it and sits in the middle of it. A compact loader sits inline.
+ * The one in-app load gate: the ring spinner, the same mark as every other
+ * loading and working-now state. The Beeline mark is the brand, never a
+ * loader. The page loader fills the space its page gives it and sits in the
+ * middle of it; a compact loader sits inline.
  */
 export function SurfaceGlyphLoader({
   compact = false,
@@ -29,15 +27,10 @@ export function SurfaceGlyphLoader({
       onLayout={onLayout}
       alignItems="center"
       justifyContent="center"
-      accessibilityLabel="Loading"
-      accessibilityRole="progressbar"
       testID={testID}
     >
-      <BeelineGlyphPaint
-        framing="cell"
-        live
-        loop="release"
-        size={size ?? (compact ? MARK_CELL : SURFACE_GLYPH_SIZE)}
+      <Spinner
+        size={size ?? (compact ? 'small' : 'large')}
         testID={testID ? `${testID}-glyph` : undefined}
       />
     </YStack>

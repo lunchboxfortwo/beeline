@@ -25,6 +25,11 @@ vi.mock('react-native', () => ({
   Text: (props: { children?: React.ReactNode }) => React.createElement('span', props, props.children),
   TextInput: (props: Record<string, unknown>) => React.createElement('input', props),
 }));
+// The ring spinner animates through the global Reanimated host stub, which is not a DOM element.
+vi.mock('@/ui/grammar', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/ui/grammar')>()),
+  Spinner: () => React.createElement('span', { role: 'progressbar' }),
+}));
 vi.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));

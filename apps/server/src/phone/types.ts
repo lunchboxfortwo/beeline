@@ -167,9 +167,9 @@ export interface DeckCornerFacts {
 
 
 /** The parent Room row's corner summary from its corner facts. */
-export function deckCornerSummary(roomId: string, deck: DeckCornerFacts): ChatCornerSummary {
+export function deckCornerSummary(roomId: string, deck: DeckCornerFacts, viewerId: string): ChatCornerSummary {
   return chatCornerCounts(deck.corner_rows.map((corner) =>
-    reviveDates(corner, ['archived_at', 'latest_created_at']))).get(roomId) ?? {
+    reviveDates(corner, ['archived_at', 'latest_created_at'])), viewerId).get(roomId) ?? {
     cornerCount: 0, waitingCornerCount: 0, mineCornerCount: 0, openCorners: [],
   };
 }

@@ -110,7 +110,7 @@ for (const theme of ['light_stone', 'dark_stone']) {
     ])(`keeps the chat image in the collapsed ${state} bar under ${theme}: %j`, (image) => {
       appearance.name = theme;
       let tree: any;
-      act(() => { tree = create(<ThreadBar h={{ ...reconnect, ...image, state }} collapsed back={() => {}} openChat={() => {}} />); });
+      act(() => { tree = create(<ThreadBar h={{ ...reconnect, ...image, state, waitsOnViewer: state === 'waiting' }} collapsed back={() => {}} openChat={() => {}} />); });
       expect(tree.root.findByType('RepositoryMark').props).toMatchObject({
         avatarUrl: image.repositoryAvatar, faviconUrl: image.repositoryFavicon, size: 28,
       });
@@ -141,7 +141,7 @@ it('shows only a title-row assignee and preserves the existing picker',async()=>
 for (const [state, glyph, idle] of [['waiting', 'needs-you', false], ['working', 'in-progress', false], ['idle', 'in-progress', true], ['review', 'in-review', false], ['archived', 'done', false]] as const) {
   it(`maps ${state} through the shared state graph in both headers`, () => {
     let tree: any;
-    act(() => { tree = create(<><ThreadTitleBlock h={{...reconnect,state,waitsOnViewer:state === 'waiting'}}/><ThreadBar h={{...reconnect,state}} collapsed openChat={() => undefined}/></>); });
+    act(() => { tree = create(<><ThreadTitleBlock h={{...reconnect,state,waitsOnViewer:state === 'waiting'}}/><ThreadBar h={{...reconnect,state,waitsOnViewer:state === 'waiting'}} collapsed openChat={() => undefined}/></>); });
     expect(tree.root.findAllByType('WorkStateMark').map((node:any) => node.props)).toEqual([{state:glyph,idle},{state:glyph,idle}]);
     expect(byTestID(tree,'thread-title')[0].findByType('T').props.regular).toBe(state !== 'waiting');
     expect(byTestID(tree,'thread-objective')[0].props.v).toBe('meta');
@@ -151,13 +151,23 @@ for (const [state, glyph, idle] of [['waiting', 'needs-you', false], ['working',
   });
 }
 
-it('centers the state and arrow within the first title line in expanded and collapsed headers', () => {
+it('reads a wait on someone else as idle in both headers, never needs you', () => {
+  let tree: any;
+  act(() => { tree = create(<><ThreadTitleBlock h={{...reconnect,state:'waiting',waitsOnViewer:false}}/><ThreadBar h={{...reconnect,state:'waiting',waitsOnViewer:false}} collapsed openChat={() => undefined}/></>); });
+  expect(tree.root.findAllByType('WorkStateMark').map((node:any) => node.props)).toEqual([{state:'in-progress',idle:true},{state:'in-progress',idle:true}]);
+  act(() => tree.unmount());
+});
+
+it('sets the state mark right after the thread name, centred on its line, with the arrow first', () => {
   let tree:any;
   act(()=>{tree=create(<><ThreadTitleBlock h={reconnect}/><ThreadBar h={reconnect} collapsed openChat={()=>{}}/></>);});
   expect(byTestID(tree,'thread-title-row')[0].props.alignItems).toBe('center');
-  expect(byTestID(tree,'thread-state-box')[0].props).toMatchObject({height:31,alignSelf:'flex-start',alignItems:'center',justifyContent:'center'});
-  expect(byTestID(tree,'thread-bar-state-box')[0].props).toMatchObject({height:19,alignSelf:'flex-start',alignItems:'center',justifyContent:'center'});
-  expect(byTestID(tree,'thread-state-box')[0].props.paddingTop).toBeUndefined();
+  for (const [name, height] of [['thread-title', 31], ['thread-bar-name', 19]] as const) {
+    const box = byTestID(tree, `${name}-state`)[0];
+    expect(box.props).toMatchObject({height,alignItems:'center',justifyContent:'center'});
+    const runs = byTestID(tree, name)[0].children.filter((child: any) => typeof child !== 'string');
+    expect(runs.at(-1)).toBe(box);
+  }
   expect(byTestID(tree,'thread-arrow-box')[0].props).toMatchObject({height:31,alignSelf:'flex-start',justifyContent:'center'});
   expect(byTestID(tree,'thread-bar-arrow-box')[0].props).toMatchObject({height:19,alignSelf:'flex-start',justifyContent:'center'});
   act(()=>tree.unmount());
@@ -198,6 +208,21 @@ for (const [title, parts] of [
       // The final "s" can never wrap independently from "terms".
       expect(runs.some((run:any) => run.props.children === 's')).toBe(false);
     }
+    act(() => tree.unmount());
+  });
+}
+
+for (const workState of ['backlog', 'done'] as const) {
+  it.each(['idle', 'working', 'waiting', 'review', undefined] as const)(`preserves stored ${workState} in both headers over %s`, state => {
+    const assignee = { pubkey: 'agent', kind: 'agent' as const, name: 'Agent' };
+    const h: ThreadHeaderData = { ...reconnect, state, waitsOnViewer: true,
+      workItem: { id: 'thread', roomId: 'thread', chatId: 'chat', chatName: 'beeline', threadName: 'task', title: 'task',
+        state: workState, assignee, openedBy: assignee, createdAt: 1, updatedAt: 1 } };
+    let tree: any;
+    act(() => { tree = create(<><ThreadTitleBlock h={h}/><ThreadBar h={h} collapsed openChat={() => undefined}/></>); });
+    expect(tree.root.findAllByType('WorkStateMark').map((node: any) => node.props)).toEqual([
+      { state: workState, idle: false }, { state: workState, idle: false },
+    ]);
     act(() => tree.unmount());
   });
 }

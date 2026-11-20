@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { transformSync } from '@babel/core';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 const projectRoot = resolve(__dirname, '../..');
 const requireFromProject = createRequire(resolve(projectRoot, 'package.json'));
@@ -22,10 +22,15 @@ function compiledForWebExport(source: string): Record<string, unknown> {
 }
 
 describe('web export object spread', () => {
-    it('keeps a getter written after a spread, so it still runs on every read', () => {
-        const compiled = compiledForWebExport(
+    let compiled: Record<string, unknown>;
+    // Cold Expo/Babel plugin initialization is build setup, not getter execution.
+    beforeAll(() => {
+        compiled = compiledForWebExport(
             'let reads = 0; const value = { a: 1 }; module.exports = { ...value, get val() { reads += 1; return reads; } };',
         );
+    }, 30_000);
+
+    it('keeps a getter written after a spread, so it still runs on every read', () => {
         expect(Object.getOwnPropertyDescriptor(compiled, 'val')?.get).toBeTypeOf('function');
         expect([compiled.val, compiled.val]).toEqual([1, 2]);
     });

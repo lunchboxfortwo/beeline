@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { CornerDownRight, type LucideProps } from 'lucide-react-native';
-import Svg, { Circle, Path } from 'react-native-svg';
-import { XStack, YStack, useTheme } from 'tamagui';
+import { XStack, YStack } from 'tamagui';
 import {
   identityHandle,
   type WorkflowActorView,
@@ -26,14 +25,13 @@ import { Inked, T } from '@/ui/grammar';
 import { findRoomCornerRow, useRoomCornerRecord } from '@/buzz/room-corner-store';
 import { CHEVRON_ROW_SIZE, ChevronGlyph } from './ChevronGlyph';
 import { ContentTarget } from './IndexRow';
-import { DECORATIVE_GLYPH_PROPS } from './decorative-glyph';
+import { WorkflowStepCircle } from './WorkflowStepCircle';
+import { WorkflowWorkingMark } from './WorkflowWorkingMark';
 import { IdentityMark } from './IdentityMark';
-import { HullLivePulse } from './MonoHull';
 
 const CLOCK = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
 
 const CIRCLE = 20;
-const HALO = 32;
 /** The circle's top within a step row, and the line's x (the circle's centre). */
 const CIRCLE_TOP = 8;
 const LINE_X = 28;
@@ -58,65 +56,6 @@ type SegmentTone = 'brass' | 'quiet';
 /** Brass where the run went, quiet ahead. */
 function segmentTone(above: WorkflowLineStep, below: WorkflowLineStep): SegmentTone {
   return reached(above) && reached(below) ? 'brass' : 'quiet';
-}
-
-/** One step's circle: brass check, breathing brass ring, hollow, or ink x. */
-export function WorkflowStepCircle({
-  status,
-  size = CIRCLE,
-  testID,
-}: {
-  status: WorkflowLineStatus;
-  size?: number;
-  testID?: string;
-}) {
-  const { brass, ground, hollow, ink } = usePalette();
-  return (
-    <Svg
-      {...DECORATIVE_GLYPH_PROPS}
-      height={size}
-      testID={testID}
-      viewBox="0 0 20 20"
-      width={size}
-    >
-      {status === 'done' ? (
-        <>
-          <Circle cx={10} cy={10} fill={brass} r={9} />
-          <Path
-            d="M6 10.2l2.6 2.6L14 7.4"
-            fill="none"
-            stroke={ground}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2.2}
-          />
-        </>
-      ) : status === 'current' ? (
-        <>
-          <Circle cx={10} cy={10} fill={ground} r={8.25} stroke={brass} strokeWidth={1.5} />
-          <Circle cx={10} cy={10} fill={brass} r={4} />
-        </>
-      ) : status === 'failed' ? (
-        <>
-          <Circle cx={10} cy={10} fill={ground} r={8.25} stroke={ink} strokeWidth={1.5} />
-          <Path d="M7 7l6 6M13 7l-6 6" stroke={ink} strokeLinecap="round" strokeWidth={1.6} />
-        </>
-      ) : (
-        <Circle cx={10} cy={10} fill={ground} r={8} stroke={hollow} strokeWidth={1.5} />
-      )}
-    </Svg>
-  );
-}
-
-/** The SVG inks: react-native-svg takes colour strings, read from the theme. */
-function usePalette() {
-  const t = useTheme() as Record<string, { val: string } | undefined>;
-  return {
-    brass: t.needsYou?.val,
-    ground: t.canvas?.val,
-    hollow: t.secondary?.val,
-    ink: t.secondary?.val,
-  };
 }
 
 /** A 2pt piece of the line, solid brass or quiet: above the circle, or from below it to the row's foot. */
@@ -177,8 +116,6 @@ export function WorkflowRunLine({
     [detail.contract, detail.history, detail.run],
   );
   return (
-    // The current step's halo (HALO, wider than the circle it rings) would
-    // otherwise touch whatever sits directly above the rail.
     <YStack paddingTop="2" testID={testID}>
       {line.map((step, index) => (
         <StepRow
@@ -367,15 +304,12 @@ function StepRow({
         paddingRight="4"
         testID={`${testID}-header`}
       >
-        {current ? (
-          <YStack position="absolute" left={LINE_X - HALO / 2} top={CIRCLE_TOP + CIRCLE / 2 - HALO / 2} width={HALO} height={HALO}>
-            <HullLivePulse>
-              <YStack width={HALO} height={HALO} borderRadius="full" borderWidth={1} borderColor="needsYou" testID={`${testID}-halo`} />
-            </HullLivePulse>
-          </YStack>
-        ) : null}
         <YStack position="absolute" left={LINE_X - CIRCLE / 2} top={CIRCLE_TOP}>
-          <WorkflowStepCircle status={step.status} testID={`${testID}-circle-${step.status}`} />
+          {current ? <WorkflowWorkingMark
+            kind={step.kind} holder={detail.run?.holder}
+            viewerHolds={run.viewerHolds}
+            testID={`${testID}-current-mark`}
+          /> : <WorkflowStepCircle status={step.status} testID={`${testID}-circle-${step.status}`} />}
         </YStack>
         <YStack width={COPY_X} />
         <YStack flex={1} minWidth={0} paddingVertical="2" opacity={dimmed}>

@@ -1,129 +1,9 @@
 import * as React from 'react';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import path from 'node:path';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { beelineThemes } from '@/buzz/groknight';
-import { MARK_CELL, SURFACE_GLYPH_SIZE, ribbon } from '@/buzz/beeline-glyph';
-
-type LoadingTreatment = 'glyph' | 'exception';
-type LoadingSurface = {
-  id: string;
-  file: string;
-  treatment: LoadingTreatment;
-  reason?: string;
-};
-
-/**
- * Every normal-use loading surface and its treatment. A leftover on the old
- * four-dot PixelLoader must land here as an explicit exception — never silently.
- * Paths are relative to `apps/mobile/sources`.
- */
-const LOADING_SURFACES: readonly LoadingSurface[] = [
-  { id: 'voice-startup', file: 'components/buzz/VoiceBar.tsx', treatment: 'glyph' },
-  { id: 'thinking', file: 'components/buzz/TurnProgressLine.tsx', treatment: 'glyph' },
-  { id: 'activity-working', file: 'components/buzz/ActivityTimeline.tsx', treatment: 'glyph' },
-  { id: 'room-corner-entry', file: 'components/buzz/ChatOpeningSurface.tsx', treatment: 'glyph' },
-  { id: 'room-deck', file: 'app/(app)/beeline/channels.tsx', treatment: 'glyph' },
-  { id: 'people', file: 'ui/screens/people/PeopleTabScreen.tsx', treatment: 'glyph' },
-  { id: 'workspace-settings', file: 'ui/screens/settings/WorkspaceSettings.tsx', treatment: 'glyph' },
-  { id: 'agent-profile', file: 'ui/screens/profiles/AgentProfileScreen.tsx', treatment: 'glyph' },
-  { id: 'person-profile', file: 'ui/screens/profiles/PersonProfileScreen.tsx', treatment: 'glyph' },
-  { id: 'community', file: 'ui/screens/onboarding/WorkspaceSetup.tsx', treatment: 'glyph' },
-  { id: 'schedules', file: 'app/(app)/beeline/settings/schedules.tsx', treatment: 'glyph' },
-  { id: 'workbench', file: 'app/(app)/beeline/settings/workbench.tsx', treatment: 'glyph' },
-  {
-    id: 'workbench-connect',
-    file: 'app/(app)/beeline/settings/workbench/connect.tsx',
-    treatment: 'glyph',
-  },
-  { id: 'wallet', file: 'app/(app)/beeline/settings/workbench/wallet.tsx', treatment: 'glyph' },
-  { id: 'tray', file: 'app/(app)/beeline/tray.tsx', treatment: 'glyph' },
-  {
-    id: 'forward-picker',
-    file: 'components/buzz/ForwardMessagePickerSheet.tsx',
-    treatment: 'glyph',
-  },
-  { id: 'desktop-sidebar', file: 'components/SidebarView.tsx', treatment: 'glyph' },
-  { id: 'invite-join', file: 'app/(app)/join/[token].tsx', treatment: 'glyph' },
-  { id: 'review-signin', file: 'app/(app)/review/[secret].tsx', treatment: 'glyph' },
-  {
-    id: 'button-busy',
-    file: 'components/buzz/Button.tsx',
-    treatment: 'exception',
-    reason:
-      'Button compact busy sits on a labeled 44pt control; a release-loop glyph would crowd the plate and flash on sub-100ms submits.',
-  },
-  {
-    id: 'choice-plate-busy',
-    file: 'components/buzz/ChoicePlate.tsx',
-    treatment: 'exception',
-    reason:
-      'A tapped choice option shows the same compact busy as a Button while its answer sends; not a page load gate.',
-  },
-  {
-    id: 'ota-check-busy',
-    file: 'ui/screens/settings/YouSettings.tsx',
-    treatment: 'exception',
-    reason:
-      'Trailing Settings-row busy while a version check returns; same compact-control case as a button, not a page load gate.',
-  },
-  {
-    id: 'history-line',
-    file: 'app/(app)/beeline/chat/_chat-surface.tsx',
-    treatment: 'exception',
-    reason:
-      '"Loading earlier messages…" is an inscribed transcript history row, not a load gate. A painting glyph would interrupt the ledger.',
-  },
-  {
-    id: 'artifact-preview',
-    file: 'components/buzz/ArtifactCard.tsx',
-    treatment: 'exception',
-    reason:
-      'Content-shaped preview placeholder; cache hits resolve in well under 100ms and a paint loop would flash.',
-  },
-  {
-    id: 'artifact-viewer',
-    file: 'components/buzz/ArtifactViewer.tsx',
-    treatment: 'exception',
-    reason:
-      'Content-shaped viewer placeholder while preview bytes or the native module resolve; same flash risk as the card.',
-  },
-  {
-    id: 'desktop-artifact',
-    file: 'components/buzz/DesktopArtifactPane.tsx',
-    treatment: 'exception',
-    reason: 'Shares the artifact viewer placeholder; not a Room/Corner load gate.',
-  },
-  {
-    id: 'webview-signin',
-    file: 'app/(app)/beeline/settings/workbench/connect-signin.tsx',
-    treatment: 'exception',
-    reason: 'Native WebView document chrome, not a Beeline surface load gate.',
-  },
-];
-
-function loadingSurfaceGlyphFiles(): readonly string[] {
-  return [
-    ...new Set(
-      LOADING_SURFACES.filter((surface) => surface.treatment === 'glyph').map(
-        (surface) => surface.file,
-      ),
-    ),
-  ];
-}
-
-function loadingSurfaceExceptionFiles(): readonly string[] {
-  return [
-    ...new Set(
-      LOADING_SURFACES.filter((surface) => surface.treatment === 'exception').map(
-        (surface) => surface.file,
-      ),
-    ),
-  ];
-}
 
 vi.mock('react-native', async () => {
   const ReactModule = await import('react');
@@ -146,7 +26,7 @@ vi.mock('react-native-svg', async () => {
   const ReactModule = await import('react');
   const host = (name: string) => (props: any) =>
     ReactModule.createElement(name, props, props.children);
-  return { default: host('Svg'), Path: host('Path'), G: host('G') };
+  return { default: host('Svg'), Circle: host('Circle'), Path: host('Path'), G: host('G') };
 });
 
 const motion = vi.hoisted(() => ({
@@ -176,6 +56,7 @@ vi.mock('react-native-reanimated', async () => {
     cancelAnimation: vi.fn(),
     runOnJS: (fn: (...args: unknown[]) => unknown) => fn,
     useAnimatedProps: (factory: () => unknown) => factory(),
+    useAnimatedStyle: (factory: () => unknown) => factory(),
     useReducedMotion: () => motion.reducedMotion,
     useSharedValue: (value: number) => ({ value }),
     withDelay: (_ms: number, value: unknown) => value,
@@ -188,11 +69,17 @@ vi.mock('react-native-reanimated', async () => {
   };
 });
 
+import { StepDot } from '@/ui/screens/settings/connectors/ConnectSteps';
+import { StateDot } from './StateDot';
+import { SettledLine } from '@/ui/screens/transcript/cards/RequestCard';
+import { WorkflowStepCircle } from './WorkflowStepCircle';
+import { Spinner } from '@/ui/grammar';
+import { WorkflowWorkingMark } from './WorkflowWorkingMark';
 import { SurfaceGlyphLoader } from './SurfaceGlyphLoader';
 import { PageLoader } from '@/ui/PageLoader';
+import { ApproveDeny } from '@/ui/screens/transcript/cards/ApproveDeny';
 
 const originalConsoleError = console.error;
-const SOURCES_ROOT = path.resolve(__dirname, '../..');
 
 beforeAll(() => {
   (
@@ -234,53 +121,39 @@ function dots(renderer: ReactTestRenderer) {
   });
 }
 
-const GLYPH_MARKERS = ['PageLoader', 'SurfaceGlyphLoader', 'BeelineGlyphPaint', 'BeelineMarkSpinner'] as const;
-
-function walkSourceFiles(dir: string): string[] {
-  return readdirSync(dir).flatMap((name) => {
-    if (name === 'node_modules' || name.startsWith('.')) return [];
-    const full = path.join(dir, name);
-    const stat = statSync(full);
-    if (stat.isDirectory()) return walkSourceFiles(full);
-    if (!/\.(ts|tsx)$/.test(name)) return [];
-    if (/\.test\.(ts|tsx)$/.test(name)) return [];
-    return [full];
-  });
-}
-
-function pixelLoaderCallSites(): string[] {
-  return walkSourceFiles(SOURCES_ROOT)
-    .filter((file) => {
-      const source = readFileSync(file, 'utf8');
-      return /<PixelLoader\b/.test(source);
-    })
-    .map((file) => path.relative(SOURCES_ROOT, file).replaceAll('\\', '/'));
-}
-
 describe('SurfaceGlyphLoader', () => {
-  it('paints the release-loop glyph at the surface size, never dots', () => {
+  it('turns the one ring spinner at the page size, never dots or the Beeline mark', () => {
     const renderer = render(React.createElement(SurfaceGlyphLoader));
-    const screen = renderer.root.findByProps({ testID: 'surface-glyph-loader' });
-    expect(screen.props.accessibilityRole).toBe('progressbar');
-    expect(renderer.root.findByType('Svg').props.width).toBe(SURFACE_GLYPH_SIZE);
-    expect(renderer.root.findByType('AnimatedPath').props.d).toBe(ribbon.path);
+    const spinner = renderer.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'surface-glyph-loader-glyph');
+    expect(spinner.props.accessibilityRole).toBe('progressbar');
+    expect(renderer.root.findByType('Svg').props.width).toBe(32);
+    expect(renderer.root.findAllByType('Circle')).toHaveLength(1);
+    expect(renderer.root.findAllByType('AnimatedPath')).toHaveLength(0);
     expect(motion.repeats[0]?.reverse).toBe(false);
     expect(dots(renderer)).toHaveLength(0);
   });
 
-  it('keeps compact loaders on the thinking cell so inline gates match the thinking line', () => {
+  it('keeps compact loaders at the inline spinner size', () => {
     const renderer = render(React.createElement(SurfaceGlyphLoader, { compact: true }));
-    expect(renderer.root.findByType('Svg').props.width).toBe(MARK_CELL);
+    expect(renderer.root.findByType('Svg').props.width).toBe(16);
     expect(dots(renderer)).toHaveLength(0);
+  });
+
+  it('holds still under reduced motion', () => {
+    motion.reducedMotion = true;
+    render(React.createElement(SurfaceGlyphLoader));
+    expect(motion.repeats).toHaveLength(0);
   });
 });
 
 describe('Page loading boundary', () => {
-  it('fills the page on canvas and centres the one glyph', () => {
+  it('fills the page on canvas and centres the one spinner', () => {
     const page = render(React.createElement(PageLoader, { testID: 'rooms-loader-gate' }));
     const gate = page.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'rooms-loader-gate');
     expect(gate.props).toMatchObject({ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'canvas' });
     expect(page.root.findAllByType('Svg')).toHaveLength(1);
+    expect(page.root.findAllByType('Circle')).toHaveLength(1);
+    expect(page.root.findAll((node: any) => typeof node.type === 'string' && node.props.accessibilityRole === 'progressbar')).toHaveLength(1);
   });
 });
 
@@ -290,6 +163,8 @@ describe('Room/thread opening safe area', () => {
     const { composerBottomPadding } = await import('@/buzz/composer-keyboard');
     safeArea.bottom = bottom;
     const tree = render(<ChatOpeningSurface isCorner />);
+    expect(tree.root.findAll((node: any) => typeof node.type === 'string' && node.props.accessibilityRole === 'progressbar')).toHaveLength(1);
+    expect(tree.root.findAllByType('Circle')).toHaveLength(1);
     const foot = tree.root.findAllByType('AnimatedView').find((node: any) => node.props.testID === 'room-loading-safe-bottom');
     const style = Array.isArray(foot.props.style) ? Object.assign({}, ...foot.props.style) : foot.props.style;
     expect(style.height).toBe(composerBottomPadding('android', bottom, 0));
@@ -301,35 +176,101 @@ describe('Room/thread opening safe area', () => {
   });
 });
 
-describe('normal-use loading surfaces', () => {
-  it('records a reason for every surface that stays off the glyph', () => {
-    for (const surface of LOADING_SURFACES) {
-      if (surface.treatment === 'exception') {
-        expect(surface.reason?.trim().length, surface.id).toBeGreaterThan(10);
-      } else {
-        expect(surface.reason, surface.id).toBeUndefined();
-      }
+
+describe('workflow execution marks', () => {
+  it('spins only for executing work, with static marks for waits and viewer holds', () => {
+    const executing = render(<WorkflowWorkingMark kind="handoff" holder={{ id: 'agent', kind: 'agent', name: 'Bee' }} viewerHolds={false} />);
+    expect(executing.root.findAll((node: any) => typeof node.type === 'string' && node.props.accessibilityRole === 'progressbar')).toHaveLength(1);
+    act(() => executing.unmount());
+    for (const viewerHolds of [true, false]) {
+      const waiting = render(<WorkflowWorkingMark kind="gate" viewerHolds={viewerHolds} />);
+      expect(waiting.root.findAll((node: any) => typeof node.type === 'string' && node.props.accessibilityRole === 'progressbar')).toHaveLength(0);
+      expect(waiting.root.findByType('Svg').props.accessibilityLabel).toBe(viewerHolds ? 'needs you' : 'working');
+      act(() => waiting.unmount());
     }
   });
+});
 
-  it('keeps every glyph surface on the painting mark, not PixelLoader', () => {
-    for (const file of loadingSurfaceGlyphFiles()) {
-      const source = readFileSync(path.join(SOURCES_ROOT, file), 'utf8');
-      expect(
-        GLYPH_MARKERS.some((marker) => source.includes(marker)),
-        `${file} is a glyph load gate but mounts none of ${GLYPH_MARKERS.join(', ')}`,
-      ).toBe(true);
-      expect(source, `${file} still mounts PixelLoader`).not.toMatch(/<PixelLoader\b/);
-    }
+describe('shared workflow rail marks', () => {
+  it('uses a filled disc inside a ring for completed steps', () => {
+    const tree = render(<WorkflowStepCircle status="done" />);
+    const svg = tree.root.findByType('Svg');
+    expect(svg.props.accessibilityLabel).toBe('done');
+    const circles = tree.root.findAllByType('Circle');
+    expect(circles).toHaveLength(2);
+    expect(circles[0].props.fill).toBe('none');
+    expect(circles[1].props.fill).toBe(circles[0].props.stroke);
+    expect(circles[1].props.r).toBeLessThan(circles[0].props.r);
+    expect(tree.root.findAllByType('Path')).toHaveLength(0);
+    act(() => tree.unmount());
   });
 
-  it('refuses a newly found PixelLoader load gate without a recorded exception', () => {
-    const allowed = new Set(loadingSurfaceExceptionFiles());
-    for (const file of pixelLoaderCallSites()) {
-      expect(
-        allowed.has(file),
-        `${file} still mounts PixelLoader without a recorded exception`,
-      ).toBe(true);
-    }
+  it.each(['current', 'pending'] as const)('draws %s as working or idle, without a done disc', (status) => {
+    const tree = render(<WorkflowStepCircle status={status} />);
+    expect(tree.root.findByType('Svg').props.accessibilityLabel).toBe(status === 'current' ? 'working' : 'idle');
+    expect(tree.root.findAllByType('Circle')).toHaveLength(1);
+    expect(tree.root.findAllByType('Path')).toHaveLength(status === 'current' ? 1 : 0);
+    act(() => tree.unmount());
+  });
+});
+
+describe('spinner colour', () => {
+  // Owner revision 3: every loading mark uses the state ink, including busy controls.
+  it('keeps a submitting approval ring in state ink on a contrasting face', () => {
+    const tree = render(<ApproveDeny title="Workspace access" busy onApprove={() => undefined} onDeny={() => undefined} />);
+    expect(tree.root.findByType('Circle').props.stroke).toBe('needsYou');
+    const approve = tree.root.findAllByType('Button').find((node: any) => node.props['aria-label'] === 'Approve: Workspace access');
+    expect(approve.props.backgroundColor).toBe('canvas');
+    expect(approve.props.disabled).toBe(true);
+    expect(tree.root.findAllByType('Text').find((node: any) => node.props.children === 'Approve').props.color).toBe('ink');
+    act(() => tree.unmount());
+  });
+
+  it('uses the state ink by default and allows control text ink inside a control', () => {
+    const standalone = render(<Spinner />);
+    const ink = standalone.root.findByType('Circle').props.stroke;
+    expect(ink).toBe('needsYou');
+    act(() => standalone.unmount());
+    const control = render(<button><Spinner color="primaryInk" /></button>);
+    const controlInk = control.root.findByType('Circle').props.stroke;
+    expect(controlInk).toBe('primaryInk');
+    expect(controlInk).not.toBe(ink);
+    act(() => control.unmount());
+  });
+});
+
+describe('connector and completion marks', () => {
+  it.each([
+    ['done', 'done'], ['waiting', 'needs you'], ['todo', 'idle'], ['failed', 'failed'],
+  ] as const)('renders a %s connector step in the shared state ink', (state, label) => {
+    const tree = render(<StepDot state={state} />);
+    expect(tree.root.findByType('Svg').props.accessibilityLabel).toBe(label);
+    for (const circle of tree.root.findAllByType('Circle')) expect(circle.props.stroke ?? circle.props.fill).toBe('needsYou');
+    expect(tree.root.findAll((node: any) => typeof node.type === 'string' && node.props.accessibilityRole === 'progressbar')).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
+  it('spins the running connector step', () => {
+    const tree = render(<StepDot state="current" />);
+    expect(tree.root.findAll((node: any) => typeof node.type === 'string' && node.props.accessibilityRole === 'progressbar')).toHaveLength(1);
+    act(() => tree.unmount());
+  });
+
+  it.each(['live', 'failed'] as const)('uses the shared glyph for the %s task indicator', kind => {
+    const tree = render(<StateDot kind={kind} />);
+    expect(tree.root.findByType('Svg').props.accessibilityLabel).toBe(kind === 'live' ? 'done' : 'failed');
+    for (const circle of tree.root.findAllByType('Circle')) expect(circle.props.stroke ?? circle.props.fill).toBe('needsYou');
+    act(() => tree.unmount());
+  });
+
+  it('marks a decided request with a disc inside a ring', () => {
+    const tree = render(<SettledLine>Approved by Ada</SettledLine>);
+    expect(tree.root.findByType('Svg').props.accessibilityLabel).toBe('done');
+    const circles = tree.root.findAllByType('Circle');
+    expect(circles).toHaveLength(2);
+    expect(circles[0].props.fill).toBe('none');
+    expect(circles[1].props.fill).toBe(circles[0].props.stroke);
+    expect(tree.root.findAllByType('Path')).toHaveLength(0);
+    act(() => tree.unmount());
   });
 });

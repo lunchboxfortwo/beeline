@@ -1,10 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { ListItem, ScrollView, Spinner, XStack, YStack } from 'tamagui';
-import { T } from '@/ui/grammar';
+import { ListItem, ScrollView, XStack, YStack } from 'tamagui';
+import { T, Spinner } from '@/ui/grammar';
 import { IdentityMark } from './IdentityMark';
 import { Button } from './Button';
 import type { ComposerWorkingAgent } from '@/buzz/room-indicators';
-import { BeelineMarkSpinner } from './BeelineMarkSpinner';
 import { TURN_LINE_ROW_MIN_HEIGHT } from '@/buzz/room-bottom-chrome';
 import { SPINNER_STEP_MS, elapsedSeconds, formatWorkingCounter } from '@/buzz/turn-clock';
 import { TurnBandSlot, TurnLineBar } from './TurnLineFrame';
@@ -132,9 +131,7 @@ const TurnProgressLineBody = React.memo(function TurnProgressLineBody({
         </YStack>
       ) : null}
       <XStack height={TURN_LINE_ROW_MIN_HEIGHT} minWidth={0} gap="2" alignItems="center">
-        <YStack testID={testID ? `${testID}-glyph` : undefined}>
-          {live ? <Spinner size="small" color="needsYou" scale={0.7} /> : <BeelineMarkSpinner />}
-        </YStack>
+        {live ? <Spinner testID={testID ? `${testID}-glyph` : undefined} /> : null}
         {group ? (
           <ListItem flex={1} minWidth={0} padding="0" minHeight={0} gap="2" backgroundColor="transparent"
             justifyContent="flex-start" onPress={() => setExpanded(value => !value)}
@@ -179,16 +176,15 @@ const TurnProgressLineBody = React.memo(function TurnProgressLineBody({
 
 /**
  * The one-line summary a finished turn leaves behind, briefly: the past-tense
- * verb, total seconds and the "done" stamp. Static, with the completed mark;
+ * verb, total seconds and the "done" stamp. No mark: the words say it;
  * the screen clears it after a few seconds. A failed send uses it with Retry.
  */
-export function TurnSettledLine({ line, testID, inset = true, leading = false, leadingGlyph = true, multiline = false, action }: {
+export function TurnSettledLine({ line, testID, inset = true, leading = false, multiline = false, action }: {
   line: string;
   testID?: string;
   inset?: boolean;
   /** The external-send variant shares the thinking line's live region. */
   leading?: boolean;
-  leadingGlyph?: boolean;
   /** Failed message reasons stay readable in the transcript. */
   multiline?: boolean;
   action?: { label: string; onPress(): void };
@@ -196,10 +192,7 @@ export function TurnSettledLine({ line, testID, inset = true, leading = false, l
   return (
     <TurnLineBar inset={inset} accessibilityLabel={line} accessibilityLiveRegion={leading ? 'polite' : undefined} testID={testID}>
       <XStack height={multiline ? undefined : TURN_LINE_ROW_MIN_HEIGHT} minWidth={0}
-        gap={action && !leadingGlyph ? '0' : '2'} alignItems={multiline ? "baseline" : "center"}>
-        {leadingGlyph ? (
-          <YStack testID={testID ? `${testID}-glyph` : undefined}><BeelineMarkSpinner /></YStack>
-        ) : null}
+        gap="0" alignItems={multiline ? "baseline" : "center"}>
         <T v="meta" color="needsYou" numberOfLines={multiline ? undefined : 1}
           flexShrink={multiline ? 1 : undefined} testID={testID ? `${testID}-line` : undefined}>{line}</T>
         {action ? (

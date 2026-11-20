@@ -547,6 +547,7 @@ export type CornerListItem = {
   readonly corner: RoomViewHeader;
   readonly lifecycle: CornerLifecycleView;
   readonly state: CornerState;
+  readonly workState?: import('./work-board.js').WorkState;
   /** Timestamp of the fact that produced `state`. A working state uses the
    * latest child turn receipt rather than the corner metadata timestamp. */
   readonly stateAt?: number;

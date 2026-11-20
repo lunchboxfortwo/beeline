@@ -1,11 +1,12 @@
+import { WorkStateMark } from '@/ui/screens/tags/WorkMarks';
 import { PageLoader } from '@/ui/PageLoader';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Input, ListItem, Spinner, XStack, YStack } from 'tamagui';
-import { Bot, Check, Link, Lock, Mail, Sparkles, Terminal, Users } from 'lucide-react-native';
+import { Input, ListItem, XStack, YStack } from 'tamagui';
+import { Bot, Link, Lock, Mail, Sparkles, Terminal, Users } from 'lucide-react-native';
 import { router } from 'expo-router';
 import * as Crypto from 'expo-crypto';
 import { isWorkspaceListView, type Identity, type WorkspaceListView } from '@beeline/buzz-client';
-import { Btn, Copy, CopyLine, Glyph, T } from '@/ui/grammar';
+import { Btn, Copy, CopyLine, Glyph, T, Spinner } from '@/ui/grammar';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
@@ -288,7 +289,7 @@ export function WorkspaceSetup({ route, entry = 'workspace' }: { route: string; 
                     <YStack gap="2">
                         <XStack gap="2" alignItems="center"><Glyph icon={Link} size={16} /><T v="metaStrong" color="secondary">Invite link</T></XStack>
                         {inviteLink ? <CopyLine line={inviteLink} label="Copy invite link" onCopy={copyLine} />
-                            : error ? null : <Spinner color="secondary" testID="invite-link-loader" />}
+                            : error ? null : <Spinner testID="invite-link-loader" />}
                     </YStack>
                 </Rise>
                 <Rise order={2}>
@@ -302,7 +303,7 @@ export function WorkspaceSetup({ route, entry = 'workspace' }: { route: string; 
                         </XStack>
                         {invited.map((address) => (
                             <XStack key={address} gap="2" alignItems="center" testID="teammate-invited">
-                                <Glyph icon={Check} size={14} accent /><Copy small>{address}</Copy><Copy small quiet>invited</Copy>
+                                <WorkStateMark state="done" size={14} /><Copy small>{address}</Copy><Copy small quiet>invited</Copy>
                             </XStack>
                         ))}
                         {problem}
@@ -329,7 +330,7 @@ export function WorkspaceSetup({ route, entry = 'workspace' }: { route: string; 
             <Rise order={1}>
                 <YStack gap="2">
                     {pairCommand ? <CopyLine line={pairCommand} label="Copy connect command" onCopy={copyLine} />
-                        : error ? null : <Spinner color="secondary" testID="pair-command-loader" />}
+                        : error ? null : <Spinner testID="pair-command-loader" />}
                     {problem}
                 </YStack>
             </Rise>

@@ -128,5 +128,6 @@ export function svgHosts() {
     Path: host('Path'),
     Circle: host('Circle'),
     Rect: host('Rect'),
+    G: host('G'),
   };
 }

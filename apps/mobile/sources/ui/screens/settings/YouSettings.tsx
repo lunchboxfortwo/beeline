@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { Platform } from 'react-native';
 import { router } from 'expo-router';
-import { Label, RadioGroup, Separator, Spinner, Switch, ToggleGroup, XStack, YStack } from 'tamagui';
+import { Label, RadioGroup, Separator, Switch, ToggleGroup, XStack, YStack } from 'tamagui';
 import { PUSH_LEVELS, type PushLevel } from '@beeline/api-contract/phone';
-import { Btn, Copy, HEIGHT, Row, Section, T } from '@/ui/grammar';
+import { Btn, Copy, HEIGHT, Row, Section, T, Spinner } from '@/ui/grammar';
 import { IdentityMark, isPersonPictureUrl } from '@/components/buzz/IdentityMark';
 import { ServiceMark } from '@/components/buzz/ServiceMark';
 import { BeelineMark } from '@/components/buzz/BeelineMark';

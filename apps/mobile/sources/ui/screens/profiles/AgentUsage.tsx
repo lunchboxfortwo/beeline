@@ -1,11 +1,11 @@
 import React from 'react';
 import { AccessibilityInfo } from 'react-native';
-import { Separator, Spinner, XStack, YStack } from 'tamagui';
+import { Separator, XStack, YStack } from 'tamagui';
 import { RefreshCw } from 'lucide-react-native';
 import { readUsageRefreshOutcome, type AgentUsage, type UsageRefreshOutcome } from '@beeline/api-contract/phone';
 import { usageProvider } from '@/buzz/agent-usage';
 import { USAGE_REFRESH_CLIENT_TIMEOUT_MS, usageCell } from './usage-cell';
-import { Btn, Copy, Glyph, Section, T } from '@/ui/grammar';
+import { Btn, Copy, Glyph, Section, T, Spinner } from '@/ui/grammar';
 
 /**
  * Owner-only Usage: one column per window (or allowance, or spend), the note

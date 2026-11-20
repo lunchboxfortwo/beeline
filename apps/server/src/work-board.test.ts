@@ -774,3 +774,42 @@ describe('question retirement', () => {
     expect(await tasks()).toEqual([]);
   });
 });
+
+describe('viewer-scoped task states', () => {
+  it.each([chat, dm, thread])('scopes stored Needs you to the assignee in %s', async roomId => {
+    await updateWorkItem(db, { id: 'assigned-task', roomId, state: 'needs-you', assigneeId: person }, agent);
+    const stateFor = async (viewer: string) => (await readWorkBoard(db, workspace, viewer)).items.find(item => item.id === 'assigned-task')?.state;
+    expect(await stateFor(person)).toBe('needs-you');
+    expect(await stateFor(other)).toBe('in-progress');
+    await updateWorkItem(db, { id: 'assigned-task', roomId, assigneeId: other }, person);
+    expect(await stateFor(person)).toBe('in-progress');
+    expect(await stateFor(other)).toBe('needs-you');
+    await updateWorkItem(db, { id: 'assigned-task', roomId, assigneeId: null }, person);
+    expect(await stateFor(person)).toBe('in-progress');
+    expect(await stateFor(other)).toBe('in-progress');
+    expect((await stored('assigned-task'))?.state).toBe('needs-you');
+  });
+
+  it('uses permission deciders for waiting threads in both Tasks and thread reads', async () => {
+    await machine(thread, 'waiting');
+    await db.query(`INSERT INTO permission_authority(permission_id,room_id,principal_id,request_id,scope,status)
+      VALUES('viewer-permission',$1,$2,'permission-turn','{}'::jsonb,'pending')`, [thread, other]);
+    await db.query(`INSERT INTO messages(id,room_id,author_id,text,card_type,presentation,card)
+      VALUES('viewer-permission-card',$1,$2,'Approve spending','permission','card',$3::jsonb)`, [thread, agent, JSON.stringify({
+        permissionId: 'viewer-permission', requestId: 'permission-turn', repository: '', purpose: 'squire-spending', status: 'pending', tool: 'money.spend',
+        agent: { pubkey: agent, kind: 'agent', name: 'Jellybean' }, requester: { pubkey: other, kind: 'human', name: 'Juniper' },
+      })]);
+    expect((await readWorkThread(db, thread, person))[0]).toMatchObject({ state: 'needs-you' });
+    expect((await readWorkThread(db, thread, other))[0]).toMatchObject({ state: 'in-progress', idle: true });
+    expect((await readWorkBoard(db, workspace, other)).items.find(item => item.id === thread)).toMatchObject({ state: 'in-progress', idle: true });
+    expect((await read()).items.some(item => item.roomId === thread && item.state === 'needs-you')).toBe(true);
+    await db.query(`UPDATE messages SET card=card-'purpose' WHERE id='viewer-permission-card'`);
+    for (const viewer of [person, other]) {
+      expect((await readWorkThread(db, thread, viewer))[0]).toMatchObject({ state: 'needs-you' });
+      expect((await readWorkBoard(db, workspace, viewer)).items.some(item => item.roomId === thread && item.state === 'needs-you')).toBe(true);
+    }
+    await db.query(`UPDATE permission_authority SET status='authorized' WHERE permission_id='viewer-permission'`);
+    for (const viewer of [person, other])
+      expect((await readWorkThread(db, thread, viewer))[0]).toMatchObject({ state: 'in-progress', idle: true });
+  });
+});

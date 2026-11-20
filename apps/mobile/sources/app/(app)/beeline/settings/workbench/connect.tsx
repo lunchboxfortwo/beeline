@@ -343,7 +343,7 @@ function ConnectToolFlow() {
           </YStack>
           {shown.map((step, index) => (
             <XStack key={step.key} gap="3" testID={`connect-step-${index}-${step.state}`}>
-              <StepDot number={index + 1} state={step.state} testID={`connect-step-${index}-dot`} />
+              <StepDot state={step.state} testID={`connect-step-${index}-dot`} />
               <YStack flex={1} minWidth={0} gap="1" paddingTop="0.5">
                 <Copy quiet={step.state === 'todo'}>{step.title}</Copy>
                 {step.detail ? (

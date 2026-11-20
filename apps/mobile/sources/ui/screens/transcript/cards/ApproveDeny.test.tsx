@@ -8,6 +8,7 @@ vi.mock('lucide-react-native', async () => (await import('../grammar-hosts.test-
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 
 import { ApproveDeny } from './ApproveDeny';
+import { Spinner } from '@/ui/grammar';
 import { RequestFrame } from './RequestCard';
 
 const buttons = (tree: any) => tree.root.findAll((node: any) => node.type === 'Button');
@@ -31,7 +32,7 @@ describe('ApproveDeny', () => {
         let tree: any;
         act(() => { tree = create(<ApproveDeny title="Add Figma" busy onApprove={() => undefined} onDeny={() => undefined} />); });
         expect(buttons(tree).every((button: any) => button.props.disabled)).toBe(true);
-        expect(tree.root.findAll((node: any) => node.type === 'Spinner')).toHaveLength(1);
+        expect(tree.root.findAll((node: any) => node.type === Spinner)).toHaveLength(1);
     });
 
 

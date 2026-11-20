@@ -295,6 +295,10 @@ describe('phone contract', () => {
         { corner: header, lifecycle, state, initiator: identity },
       ]);
     }
+    for (const workState of ['backlog', 'done']) {
+      expect(cornersFor({ corner: header, lifecycle, state: 'idle', workState })?.[0]?.workState).toBe(workState);
+    }
+    expect(cornersFor({ corner: header, lifecycle, state: 'idle', workState: 'invalid' })?.[0]?.workState).toBeUndefined();
     // The latest brief revision rides along; anything but a positive integer is dropped.
     expect(cornersFor({ corner: header, lifecycle, state: 'working', briefRevision: 3 })).toEqual([
       { corner: header, lifecycle, state: 'working', briefRevision: 3 },

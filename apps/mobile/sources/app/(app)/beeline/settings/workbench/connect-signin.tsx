@@ -2,7 +2,7 @@ import { appErrorCopy } from '@/buzz/app-error-copy';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
-import { Spinner, YStack } from 'tamagui';
+import { YStack } from 'tamagui';
 import * as WebBrowser from 'expo-web-browser';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSandboxWebView } from '@/components/buzz/sandbox-webview';
@@ -11,7 +11,7 @@ import { getWorkbenchSource } from '@/buzz/workbench-source';
 import { connectorOfferCompletionRoute } from '@/buzz/connector-offer-ceremony';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import { takeAppSignInReturn } from '@/buzz/app-sign-in';
-import { Btn, Copy, T } from '@/ui/grammar';
+import { Btn, Copy, T, Spinner } from '@/ui/grammar';
 import { ConnectorFooter, ConnectorFrame, ConnectorNote } from '@/ui/screens/settings/connectors/ConnectorParts';
 
 function first(value: string | string[] | undefined): string | undefined { return Array.isArray(value) ? value[0] : value; }
@@ -43,7 +43,7 @@ function AppSignInReturnScreen({ sessionUri }: { sessionUri: string }) {
   return (
     <YStack flex={1} alignItems="center" justifyContent="center" padding="6" backgroundColor="canvas" testID="app-sign-in-return">
       {error ? <ConnectorNote tone="danger" testID="app-sign-in-error">{error}</ConnectorNote>
-        : <Spinner color="secondary" accessibilityLabel="Completing app sign-in" />}
+        : <Spinner accessibilityLabel="Completing app sign-in" />}
     </YStack>);
 }
 
@@ -165,13 +165,13 @@ function ConnectorSignInOverlay() {
           </SignInCenter>
         ) : fallback ? (
           <SignInCenter testID="signin-finishing">
-            <Spinner color="needsYou" accessibilityLabel="Finishing sign-in" />
+            <Spinner accessibilityLabel="Finishing sign-in" />
             <T v="body" textAlign="center">Finishing sign-in…</T>
             <Copy small quiet textAlign="center">You signed in on Chrome. {machineName} is saving the session. This page switches to connected by itself.</Copy>
           </SignInCenter>
         ) : loading ? (
           <SignInCenter cover testID="signin-webview-loading">
-            <Spinner color="needsYou" accessibilityLabel="Loading Google sign-in" />
+            <Spinner accessibilityLabel="Loading Google sign-in" />
             <T v="body" textAlign="center">{squire ? 'Loading Google sign-in…' : `Loading ${connectorName} sign-in…`}</T>
             <Copy small quiet textAlign="center">From {machineName}’s secure browser</Copy>
           </SignInCenter>
