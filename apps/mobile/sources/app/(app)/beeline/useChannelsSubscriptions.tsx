@@ -151,16 +151,21 @@ export function useChannelsSubscriptions(
       releaseChats = () => chats?.release();
       if (chats) {
         chatStore.current = chats;
+        let hasContent = false;
         const paint = () => {
-          if (!selectedWorkspaceRemoved) setChatList(chats.current());
+          if (selectedWorkspaceRemoved) return;
+          const next = chats.current();
+          hasContent = next !== null;
+          setChatList(next);
         };
         paint();
         // Saved Rooms are the first usable deck; paint them immediately.
-        // Confirmed live reconciliation still yields to Room or push navigation.
+        // A cold deck's first response must also replace its loader immediately.
+        // Later live reconciliation still yields to Room or push navigation.
         unsubscribeChats = chats.subscribe(() => {
           // Removed private state must clear even while the list is covered.
           if (!deckVisible() && chats.current() !== null) return;
-          if (chats.confirmed()) startTransition(paint);
+          if (chats.confirmed() && hasContent) startTransition(paint);
           else paint();
         });
       }

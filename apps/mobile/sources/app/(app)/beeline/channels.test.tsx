@@ -54,6 +54,29 @@ it('keeps the drawn list out of parent navigation redraws', async () => {
 describe('Saved deck cold launch', () => {
 const scope1 = fixtureScope1();
 
+  it('shows the first completed chat read while navigation transitions are held', async () => {
+    // Android F02 / cold review entry: a completed server read must replace
+    // the loader without requiring Activity recreation or another navigation.
+    let reply!: (value: ChatListView) => void;
+    deck.chatsResponse = new Promise<ChatListView>(resolve => { reply = resolve; });
+    deck.renderRows = true;
+    transitions.held = true;
+    let renderer!: ReactTestRenderer;
+    try {
+      await act(async () => { renderer = create(<BuzzChannels />); });
+      await vi.waitFor(() => expect(deck.chatsReads).toBe(1));
+      expect(renderer.root.findAllByProps({ testID: 'room-list' })).toHaveLength(0);
+      await act(async () => reply(chatList({ id: 'first', text: 'Ready after sign-in', createdAt: 10 })));
+      await quiet();
+      expect(paintedRows(renderer)[0]?.latestMessage?.text).toBe('Ready after sign-in');
+      expect(renderer.root.findAllByProps({ testID: 'rooms-loader-gate' })).toHaveLength(0);
+      act(() => renderer.root.find((node: any) => node.type === 'ListItem' && node.props.testID === 'room-room-a').props.onPress());
+      expect(dispatchRoomOpenTap).toHaveBeenCalledWith('room-a', expect.anything());
+    } finally {
+      if (renderer) await act(async () => renderer.unmount());
+    }
+  });
+
 
   it('starts at the saved deck with synchronous scoped rows before layout, pending invite and live reads', async () => {
     deck.pathname = '/';
