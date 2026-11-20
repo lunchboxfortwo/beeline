@@ -41,7 +41,7 @@ import { SquireTaskRelay } from './squire-task-relay.js';
 import { CLIPROXY_SIGNED_OUT } from './turn-failure-reason.js';
 import { AgentTurnStream,durableReplyText } from './turn-stream.js';
 import { WarmTranscript } from './warm-transcript.js';
-import { cornerCheckoutFolders,execFileAsync,githubGitEnv,roomCheckoutPath } from './workspace-checkout.js';
+import { cornerCheckoutFolders,execFileAsync,githubGitEnv,prepareWorkspace,roomCheckoutPath } from './workspace-checkout.js';
 import { syncCornerBranch } from './corner-branch-sync.js';
 
 
@@ -110,6 +110,9 @@ export class PlaceSession {
       placeId: options.placeId, workspaceId: options.workspaceId, parentRoomId: options.parentRoomId,
       cachePath: resolve(root, 'session-context.json'), brokerSocket: options.config.registryMcpBrokerSocket,
       configured: () => this.prepareOptionalHome(),
+      checkout: () => prepareWorkspace({ api: options.api, config: options.config, supervisorRoot: options.runtime.supervisorRoot,
+        workspaceId: options.workspaceId, agent: options.agent, placeId: options.placeId,
+        ...(options.parentRoomId ? { parentRoomId: options.parentRoomId } : {}) }),
       squireMcp: input => this.requestSquire(input),
     });
     this.warm = new WarmTranscript({ path: resolve(root, 'agent-home', 'warm-transcript.json') });

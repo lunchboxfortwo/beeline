@@ -18,7 +18,7 @@ type Context = {
 /** Optional facts load beside the live session. No caller can wait for a refresh. */
 export class SessionResources {
   readonly context: Partial<Context> = {};
-  readonly status: Partial<Record<keyof Context | 'setup', string>> = {};
+  readonly status: Partial<Record<keyof Context | 'setup' | 'checkout', string>> = {};
   private readonly connections = new Map<string, Promise<string>>();
   private writes = Promise.resolve();
   private rpcId = 0;
@@ -27,6 +27,8 @@ export class SessionResources {
     api: DaemonApiClient; agentId: string; placeId: string; workspaceId: string;
     parentRoomId?: string; cachePath: string; brokerSocket?: string;
     configured(): Promise<void>;
+    /** The `workspace` tool's checkout; returns its result text. */
+    checkout?(): Promise<string>;
     squireMcp?(input: { tool?: unknown; args?: unknown }): Promise<unknown>;
   }) {
     // A cache miss or corrupt cache cannot delay the first message. Grants
@@ -62,8 +64,11 @@ export class SessionResources {
   }
 
   async prepare(): Promise<void> {
-    try { await this.options.configured(); this.status.setup = 'ready'; }
-    catch (error) { this.status.setup = String(error); throw error; }
+    try {
+      await this.options.configured();
+      if (this.options.checkout) this.status.checkout = await this.options.checkout();
+      this.status.setup = 'ready';
+    } catch (error) { this.status.setup = String(error); throw error; }
   }
 
   rememberModelCatalog(catalog: AgentModelConfigOption[]): void {
@@ -80,7 +85,7 @@ export class SessionResources {
 
   read(): unknown {
     return { ...this.context, status: this.status,
-      next: 'read(facet:session,name:prepare) installs optional skills and setup. Unavailable resources are tool errors. Trusty Squire uses app_tool(app:"registry-mcp:squire"). Registry MCP uses app_tool(app:"registry-mcp:<serverName>"); approved paths and devices are available to run_granted_command without remounting this session.' };
+      next: 'read(facet:session,name:prepare) installs optional skills and setup and makes the repository checkout. Unavailable resources are tool errors. Trusty Squire uses app_tool(app:"registry-mcp:squire"). Registry MCP uses app_tool(app:"registry-mcp:<serverName>"); approved paths and devices are available to run_granted_command without remounting this session.' };
   }
 
   /** Registry routes join the existing app_tool surface as soon as they load. */
