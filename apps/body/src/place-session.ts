@@ -206,7 +206,7 @@ export class PlaceSession {
   private async startFresh(): Promise<void> {
     await this.stop();
     this.stale = false;
-    this.notes = [];
+    this.notes = ['Trusty Squire uses app_tool(app:"registry-mcp:squire"); discover operate_drive and use_credential there. A direct squire MCP startup failure does not establish that this route is unavailable.'];
     this.windowDelivered = false;
     const sandbox = Boolean(this.options.config.bwrapPath);
     if (!sandbox) this.notes.push(`The OS sandbox is unavailable. You can read files, edit files only inside ${this.folder()}, and shell commands are refused.`);
