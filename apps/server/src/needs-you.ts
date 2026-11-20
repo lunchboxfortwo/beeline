@@ -128,6 +128,8 @@ type GrantCardEntry = { machine?: string; grantId?: string; kind?: AgentGrantKin
 
 /** The raw card fields the approval rows read; every kind's card is a subset. */
 type ApprovalCard = {
+  question?: string;
+  brief?: string;
   ask?: string;
   agent?: { name?: string; pubkey?: string };
   requester?: { name?: string; pubkey?: string };
@@ -580,7 +582,8 @@ export async function needsYouItems(database: SqlDatabase, workspaceId: string, 
           approval.kind === 'grant'
             ? { ...row.card, grants: row.card?.grants?.filter(entry => entry.grantId && row.pending_grant_ids?.includes(entry.grantId)) }
             : row.card ?? {}) ?? approval.subject
-      : needsYouRowText(row.text, row.viewer_handle, typeof row.card?.ask === 'string' ? row.card.ask : undefined),
+      : [typeof row.card?.question === 'string' ? row.card.question : needsYouRowText(row.text, row.viewer_handle, typeof row.card?.ask === 'string' ? row.card.ask : undefined),
+          ...(typeof row.card?.brief === 'string' ? [row.card.brief] : [])].join('\n\n'),
     createdAt: Math.floor(row.created_at.getTime() / 1000),
     ...(expiresAt !== undefined ? { expiresAt } : {}),
     ...(row.author_id && row.author_kind && row.author_name

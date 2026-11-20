@@ -1,6 +1,6 @@
 import { lockAgentInvocation } from './agent-invocation.js';
 import { Check, Errors } from 'typebox/value';
-import { isInformationalReply, MESSAGE_ASK_SCHEMA, validateMessageAsk, type MessageAddress, type MessageAsk, type MessageRoute } from '@beeline/api-contract/daemon';
+import { isInformationalReply, MESSAGE_ASK_SCHEMA, validateMessageAsk, reportMessageAsk, type MessageAddress, type MessageAsk, type MessageRoute } from '@beeline/api-contract/daemon';
 import { randomBytes } from 'node:crypto';
 import { answerQueuedMessage, queueMessage, refuseMessageMembership, type CommandRow } from './agent-command.js';
 import { commandAddress } from './commander.js';
@@ -12,9 +12,10 @@ import { updateWorkItem } from './work-board.js';
 
 /** Validate the advertised ask schema before any lookup or publication. */
 function validateAskInput(ask: MessageAsk): void {
+  // Named limit refusals come first, so an over-long ask reports its counts.
+  validateMessageAsk(ask);
   if (!Check(MESSAGE_ASK_SCHEMA, ask))
     throw new Error(Errors(MESSAGE_ASK_SCHEMA, ask).map(error => error.message).join('; '));
-  validateMessageAsk(ask);
 }
 
 /** Resolve both coordinates together; a role is meaningful only at its thread. */
@@ -33,9 +34,11 @@ export async function messageAddress(db: SqlDatabase, to: MessageAddress, sender
 
 /** Both publication paths commit their route alongside the message itself. */
 export async function sendMessage(db: SqlDatabase, input: {
-  route: MessageRoute; text: string; ask?: MessageAsk; id?: string;
+  route: MessageRoute; text: string; ask?: MessageAsk; question?: string; brief?: string; options?: readonly string[]; id?: string;
   parent?: CommandRow; replyTo?: string; attachments?: CommandRow['answer_attachments'];
 }) {
+  const reportAsk = reportMessageAsk(input);
+  input = { ...input, ask: input.ask ?? reportAsk };
   if (input.ask) validateAskInput(input.ask);
   return db.transaction(async tx => {
     const to = input.replyTo ? input.route.to : await messageAddress(tx,input.route.to,input.route.from.agent);
@@ -89,10 +92,10 @@ export async function sendMessage(db: SqlDatabase, input: {
       const origin=(await tx.query<{parent_id:string|null}>('SELECT parent_id FROM rooms WHERE id=$1',[route.from.place])).rows[0];
       const about=origin?.parent_id ? {kind:'thread',roomId:route.from.place}
         : {kind:'request',roomId:route.from.place,messageId:input.parent?.source_message_id ?? input.replyTo ?? id};
-      await tx.query(`INSERT INTO work_questions(message_id,room_id,about,question,recommended_option_id)
-        VALUES($1,$2,$3::jsonb,$4,$5) ON CONFLICT(message_id) DO NOTHING`,
+      await tx.query(`INSERT INTO work_questions(message_id,room_id,about,question,brief,recommended_option_id)
+        VALUES($1,$2,$3::jsonb,$4,$5,$6) ON CONFLICT(message_id) DO NOTHING`,
         [id,to.place,JSON.stringify(about),
-          input.ask.question,options.find(option=>option.label===input.ask!.recommended)?.optionId ?? null]);
+          input.ask.question,input.ask.brief ?? null,options.find(option=>option.label===input.ask!.recommended)?.optionId ?? null]);
       await updateWorkItem(tx,{id,roomId:to.place,state:'needs-you',assigneeId:to.agent},route.from.agent,input.replyTo ? to.agent : undefined);
       return { id, createdAt: Math.floor(Date.now()/1000) };
     }
@@ -106,8 +109,10 @@ export async function sendMessage(db: SqlDatabase, input: {
 
 /** The caller supplies an id, never a reply destination. */
 export async function replyToMessage(db: SqlDatabase, agentId: string, input: {
-  id:string; text:string; invocation?:import('@beeline/api-contract/daemon').AgentInvocation; ask?:MessageAsk; messageId?:string; roomId?:string; queuedRequestIds?:readonly string[];
+  id:string; text:string; invocation?:import('@beeline/api-contract/daemon').AgentInvocation; ask?:MessageAsk; question?:string; brief?:string; options?:readonly string[]; messageId?:string; roomId?:string; queuedRequestIds?:readonly string[];
 },onAnswered?:(roomId:string)=>void) {
+  const reportAsk = reportMessageAsk(input);
+  input = { ...input, ask: input.ask ?? reportAsk };
   if (input.ask) validateAskInput(input.ask);
   return db.transaction(async db => {
   const invocation = input.invocation && input.roomId ? await lockAgentInvocation(db,agentId,input.roomId,input.invocation) : undefined;

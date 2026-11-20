@@ -9,7 +9,7 @@ import {
 import { workDetailColumnsSql, projectWorkDetail, addWorkNote,attachToWorkItem,type WorkDetailRow } from './work-item-detail.js';
 import type { SqlDatabase } from './database.js';
 import { phoneIdentity, type PhoneIdentityRow } from './phone-identity.js';
-import { needsYouItems } from './needs-you.js';
+import { needsYouItems, needsYouRowText } from './needs-you.js';
 import { cornerImplementerSql } from './corner-worker.js';
 import { cornerObjectiveSql, writeCornerObjective } from './corner-objective.js';
 import { CommandRefusalError } from './command-refusal.js';
@@ -195,12 +195,16 @@ export async function readWorkBoard(
         WorkDetailRow & {
           message_id: string;
           message_text: string;
+          report_digest: boolean;
           question: string | null;
+          brief: string | null;
           source: WorkItemView['source'] | null;
           recommended_option_id: string | null;
         }
       >(
-        `SELECT source.id message_id,source.text message_text,q.question,q.recommended_option_id,${workDetailColumnsSql('source.id')},
+        `SELECT source.id message_id,source.text message_text,q.message_id IS NULL AND source.card->>'reportToId' IS NOT NULL report_digest,
+           COALESCE(q.question,CASE WHEN source.card->>'reportToId' IS NOT NULL THEN source.card->>'question' END) question,
+           COALESCE(q.brief,CASE WHEN source.card->>'reportToId' IS NOT NULL THEN source.card->>'brief' END) brief,q.recommended_option_id,${workDetailColumnsSql('source.id')},
            CASE WHEN source.card->'route' IS NOT NULL THEN jsonb_strip_nulls(jsonb_build_object(
              'roomId',origin.id,'messageId',CASE WHEN q.about->>'kind'='request' AND EXISTS(SELECT 1 FROM messages task
                WHERE task.id=q.about->>'messageId' AND task.room_id=origin.id) THEN q.about->>'messageId' END,
@@ -242,14 +246,18 @@ export async function readWorkBoard(
       state: 'needs-you',
       assignee: viewer,
       messageId: ask.messageId,
-      ask: q && (q.question || ask.approval?.kind === 'choice')
+      ask: q && (q.question || q.brief || ask.approval?.kind === 'choice')
         ? {
             ...ask,
-            text: q.message_text || q.question || ask.text,
+            // A choice card shows question and any brief; the full message stays one tap away.
+            text: q.report_digest ? q.question || needsYouRowText(q.message_text, viewer.handle ?? null)
+              : q.question && q.brief ? `${q.question}\n\n${q.brief}`
+              : q.question && ask.approval?.actions?.some(action => action.kind === 'choice') ? q.question : q.message_text || q.question || ask.text,
             approval: ask.approval ? { ...ask.approval, subject: q.question || ask.approval.subject } : undefined,
           }
         : ask,
       askIds: [ask.messageId],
+      ...(q?.brief ? { brief: q.brief } : {}),
       ...(q?.source ? {source:q.source} : {}),
       ...(q?.recommended_option_id ? { recommendedOptionId: q.recommended_option_id } : {}),
     };

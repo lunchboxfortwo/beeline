@@ -3625,6 +3625,7 @@
           "room_id": "Source conversation.",
           "about": "Typed thread, PR or request reference.",
           "question": "Agent-authored short question, validated when written.",
+          "brief": "Agent-authored card brief of at most 280 characters, validated when written; null when the ask sent none.",
           "recommended_option_id": "Optional recommendation from the asking agent."
         }
       },
@@ -3875,6 +3876,8 @@
         "fromState": "existing before the registry; weekly audit reviews",
         "commandId": "existing before the registry; weekly audit reviews",
         "trigger": "existing before the registry; weekly audit reviews",
+        "question": "Optional report decision question, at most 120 Unicode characters; persisted on the message for Needs you reads.",
+        "brief": "Optional report context, at most 280 Unicode characters; persisted without truncation for Needs you reads.",
         "reportToId": "the person a human-directed worker report addresses; written with the report, it scopes the derived wait",
         "reportStatus": "The explicit report operation records its outcome independently of presentation text.",
         "owner": "the person who decides a grant-request card; written with the card, it keeps asks with different deciders on separate cards"

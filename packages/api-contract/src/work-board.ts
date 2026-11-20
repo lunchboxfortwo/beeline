@@ -54,6 +54,8 @@ export type WorkItemView = {
   readonly entries?: readonly WorkItemEntry[];
   readonly attachments?: readonly WorkItemAttachment[];
   readonly ask?: NeedsYouItemView;
+  /** The ask's brief (at most 280 characters); the card shows it under the question instead of the full message. */
+  readonly brief?: string;
   /** This row owns one ask; answering it never clears another question. */
   readonly askIds?: readonly string[];
   readonly recommendedOptionId?: string;

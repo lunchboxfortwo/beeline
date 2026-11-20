@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { migratedDatabase, type PgliteDatabase } from './test-support.js';
 import { readMediaMetadata } from './phone-media.js';
 import { PhoneService } from './phone-service.js';
-import { sendMessage } from './agent-messaging.js';
+import { replyToMessage, sendMessage } from './agent-messaging.js';
 import { askOwnerQuestion } from './work-questions.js';
 import { readWorkBoard, readWorkThread, updateWorkItem } from './work-board.js';
 
@@ -283,19 +283,96 @@ describe('Work board recorded sources and single assignee', () => {
       0,
     );
   });
-  it('keeps the whole asking post in Tasks, separately from the choice question', async () => {
+  it('shows only question, brief and buttons on the card, with the full post one tap away, and accepts an ask without a brief', async () => {
     const text = 'I am researching the launch sources for Ada. '.repeat(16) +
       '\nThe connected sources are missing the vendor report, so I cannot finish the comparison. Should I set up Squire?';
     const question = 'Should I set up Squire?';
+    const brief = 'The vendor report is missing, so the comparison cannot finish. Setup takes two minutes; later leaves it unfinished.';
     const posted = await sendMessage(db, {
       route: { from: { agent, place: chat }, to: { agent: person, place: chat } },
-      text, ask: { question, options: ['Start setup', 'Later'] },
+      text, ask: { question, brief, options: ['Start setup', 'Later'] },
     });
     const item = (await read()).items.find(item => item.messageId === posted.id)!;
-    expect(item.ask?.text).toBe(text);
+    expect(item.brief).toBe(brief);
+    expect(item.ask?.text).toBe(`${question}\n\n${brief}`);
     expect(item.ask?.approval).toMatchObject({ kind: 'choice', subject: question });
     expect(item.ask?.approval?.actions.filter(action => action.kind === 'choice').map(action => action.label))
       .toEqual(['Start setup', 'Later']);
+    expect((await db.query<{ text: string }>('SELECT text FROM messages WHERE id=$1', [posted.id])).rows[0]?.text).toBe(text);
+    // An older helper's ask carries no brief: the card shows its question and buttons.
+    const legacyPost = await sendMessage(db, {
+      route: { from: { agent, place: chat }, to: { agent: person, place: chat } },
+      text, ask: { question, options: ['Start setup', 'Later'] },
+    });
+    const legacy = (await read()).items.find(item => item.messageId === legacyPost.id)!;
+    expect(legacy.ask?.text).toBe(question);
+    expect(legacy).not.toHaveProperty('brief');
+    expect(legacy.ask?.approval?.actions.filter(action => action.kind === 'choice').map(action => action.label))
+      .toEqual(['Start setup', 'Later']);
+  });
+  it('refuses an over-limit question or brief before writing anything, naming the counts', async () => {
+    const route = { from: { agent, place: chat }, to: { agent: person, place: chat } };
+    await expect(sendMessage(db, { route, text: 'Choose',
+      ask: { question: `${'Should I '.repeat(13)}ship?`, brief: 'It is ready.', options: ['Yes', 'No'] } }))
+      .rejects.toThrow('ask.question is 122 characters; the limit is 120');
+    await expect(sendMessage(db, { route, text: 'Choose',
+      ask: { question: 'Ship it?', brief: 'Ready. '.repeat(41).trim(), options: ['Yes', 'No'] } }))
+      .rejects.toThrow('ask.brief is 286 characters; the limit is 280');
+    expect((await db.query('SELECT message_id FROM work_questions')).rowCount).toBe(0);
+  });
+  it.each(['blocked:', 'needs-decision:'])('preserves %s report digests through message and reply', async prefix => {
+    const question = 'Use the signed build?';
+    const brief = 'The build is ready. Signing lets the latency check finish.';
+    const text = `${prefix} ${'Full report details. '.repeat(30)}`.trim();
+    const posted = await sendMessage(db, {
+      route: { from: { agent, place: thread }, to: { agent: person, place: chat } },
+      text, question, brief, options: ['Sign build', 'Wait'],
+    });
+    const request = await sendMessage(db, {
+      route: { from: { agent: person, place: chat }, to: { agent, place: thread } }, text: 'Check latency',
+    });
+    const replied = await replyToMessage(db, agent, { id: request.id, roomId: thread, text, question, brief, options: ['Sign build', 'Wait'] });
+    for (const id of [posted.id, replied.id]) {
+      const item = (await read()).items.find(item => item.messageId === id)!;
+      expect(item).toMatchObject({ brief, ask: { text: `${question}\n\n${brief}` } });
+      expect(item.ask?.approval?.actions.filter(action => action.kind === 'choice').map(action => action.label))
+        .toEqual(['Sign build', 'Wait']);
+      expect((await db.query<{ text: string }>('SELECT text FROM messages WHERE id=$1', [id])).rows[0]?.text).toBe(text);
+      const choice = item.ask!.approval!.actions.find(action => action.kind === 'choice')!;
+      if (choice.kind !== 'choice') throw new Error('choice missing');
+      await phone.execute('answerChoice', { choiceId: choice.choiceId, optionId: choice.optionId }, person);
+      expect((await read()).items.some(item => item.messageId === id && item.ask)).toBe(false);
+    }
+    expect((await readWorkBoard(db, workspace, other)).items.some(item => item.ask)).toBe(false);
+  });
+  it.each(['question', 'brief'] as const)('refuses oversized report %s before message or reply publication', async field => {
+    const request = await sendMessage(db, {
+      route: { from: { agent: person, place: chat }, to: { agent, place: thread } }, text: 'Check latency',
+    });
+    const digest = { [field]: '🐝'.repeat(field === 'question' ? 121 : 281) };
+    const error = `${field} is ${field === 'question' ? 121 : 281} characters; the limit is ${field === 'question' ? 120 : 280}`;
+    await expect(sendMessage(db, { route: { from: { agent, place: thread }, to: { agent: person, place: chat } },
+      text: 'blocked: Build is missing.', ...digest })).rejects.toThrow(error);
+    await expect(replyToMessage(db, agent, { id: request.id, roomId: thread, text: 'blocked: Build is missing.', ...digest })).rejects.toThrow(error);
+    expect((await db.query('SELECT id FROM messages WHERE author_id=$1', [agent])).rows).toEqual([]);
+    expect((await db.query<{ state: string }>('SELECT state FROM agent_commands WHERE id=$1', [request.id])).rows[0]?.state).toBe('pending');
+  });
+  it.each([{ question: 'Use the signed build?' }, { brief: 'Signing unblocks the check.' }])('refuses report digests without decision options: %j', async digest => {
+    await expect(sendMessage(db, {
+      route: { from: { agent, place: chat }, to: { agent: person, place: chat } },
+      text: 'blocked: The signed build is missing.', ...digest,
+    })).rejects.toThrow();
+    expect((await db.query('SELECT id FROM messages')).rowCount).toBe(0);
+  });
+  it('keeps the legacy 140-character report sentence without digest fields', async () => {
+    const text = `blocked: ${'z'.repeat(200)}. More report context.`;
+    await db.query('INSERT INTO messages(id,room_id,author_id,text,card) VALUES($1,$2,$3,$4,$5::jsonb)',
+      ['legacy-report', chat, agent, text, JSON.stringify({ reportToId: person })]);
+    const item = (await read()).items.find(item => item.messageId === 'legacy-report')!;
+    expect(item).not.toHaveProperty('brief');
+    expect(Array.from(item.ask!.text).length).toBe(140);
+    expect(item.ask!.text).not.toContain('More report context');
+    expect((await db.query<{ text: string }>('SELECT text FROM messages WHERE id=$1', ['legacy-report'])).rows[0]?.text).toBe(text);
   });
   it('never puts a plain mention or keyword in Needs you, only reports addressed to the viewer', async () => {
     await db.query(

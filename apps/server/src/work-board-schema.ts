@@ -90,6 +90,8 @@ CREATE TABLE IF NOT EXISTS work_questions (
   question text NOT NULL,
   recommended_option_id text
 );
+-- The card's brief; null when an older helper or earlier ask sent none.
+ALTER TABLE work_questions ADD COLUMN IF NOT EXISTS brief text;
 CREATE INDEX IF NOT EXISTS work_questions_room_idx ON work_questions(room_id);
 ${workItemNotificationSchema()}
 DROP TRIGGER IF EXISTS work_item_changed ON work_items;
