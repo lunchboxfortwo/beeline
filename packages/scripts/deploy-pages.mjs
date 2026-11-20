@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { dirname, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 const executeFile = promisify(execFile);
@@ -16,6 +17,9 @@ export async function deployPages({ directory, sha, token, accountId, execute = 
   ], {
     env: { ...process.env, CLOUDFLARE_API_TOKEN: token, CLOUDFLARE_ACCOUNT_ID: accountId,
       WRANGLER_SEND_METRICS: 'false', CI: 'true' },
+    // Wrangler writes .wrangler/tmp under its working directory; the local
+    // release runs from /, which is not writable, so work beside the build.
+    cwd: dirname(resolve(directory)),
     timeout: 600000, maxBuffer: 8 * 1024 * 1024,
   });
   if (stdout) console.log(stdout);
