@@ -12,7 +12,8 @@ export function humanReportCornerSql(message: string): string {
 
 /** Keep forwarded reports on their origin index, with a separate legacy fallback. */
 export function cornerHumanReportsSql(cornerId: string, workerId: string): string {
-  const columns = 'message.id,message.room_id,message.author_id,message.text,message.card,message.presentation,message.system_event,message.deleted_at,message.request_id,message.created_at';
+  const columns =
+    'message.id,message.room_id,message.author_id,message.text,message.card,message.presentation,message.system_event,message.deleted_at,message.request_id,message.created_at';
   return `SELECT ${columns} FROM messages message
     WHERE message.author_id=${workerId} AND message.card->>'reportToId' IS NOT NULL
       AND message.card->>'sourceRoomId'=(${cornerId})::text
@@ -51,7 +52,8 @@ export function reportCardIdSql(id: string): string {
  * keeps one newest row per source so each probe stays on its index.
  */
 function cornerReportItemsSql(cornerId: string, worker: string, latestOnly = false): string {
-  const newest = (table: string) => latestOnly ? `ORDER BY ${table}.created_at DESC,${table}.id DESC LIMIT 1` : '';
+  const newest = (table: string) =>
+    latestOnly ? `ORDER BY ${table}.created_at DESC,${table}.id DESC LIMIT 1` : '';
   return `SELECT items.*,ARRAY[items.message_id,items.card_id] asked_items FROM (
       (SELECT command.id report_id,
         CASE WHEN command.room_id=${cornerId} THEN visible.id END message_id,
