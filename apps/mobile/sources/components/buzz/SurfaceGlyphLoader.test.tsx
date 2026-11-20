@@ -69,6 +69,9 @@ vi.mock('react-native-reanimated', async () => {
   };
 });
 
+import { StepDot } from '@/ui/screens/settings/connectors/ConnectSteps';
+import { StateDot } from './StateDot';
+import { SettledLine } from '@/ui/screens/transcript/cards/RequestCard';
 import { WorkflowStepCircle } from './WorkflowStepCircle';
 import { Spinner } from '@/ui/grammar';
 import { WorkflowWorkingMark } from './WorkflowWorkingMark';
@@ -221,5 +224,41 @@ describe('spinner colour', () => {
     expect(controlInk).toBe('primaryInk');
     expect(controlInk).not.toBe(ink);
     act(() => control.unmount());
+  });
+});
+
+describe('connector and completion marks', () => {
+  it.each([
+    ['done', 'done'], ['waiting', 'needs you'], ['todo', 'idle'], ['failed', 'failed'],
+  ] as const)('renders a %s connector step in the shared state ink', (state, label) => {
+    const tree = render(<StepDot state={state} />);
+    expect(tree.root.findByType('Svg').props.accessibilityLabel).toBe(label);
+    for (const circle of tree.root.findAllByType('Circle')) expect(circle.props.stroke ?? circle.props.fill).toBe('needsYou');
+    expect(tree.root.findAll((node: any) => typeof node.type === 'string' && node.props.accessibilityRole === 'progressbar')).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
+  it('spins the running connector step', () => {
+    const tree = render(<StepDot state="current" />);
+    expect(tree.root.findAll((node: any) => typeof node.type === 'string' && node.props.accessibilityRole === 'progressbar')).toHaveLength(1);
+    act(() => tree.unmount());
+  });
+
+  it.each(['live', 'failed'] as const)('uses the shared glyph for the %s task indicator', kind => {
+    const tree = render(<StateDot kind={kind} />);
+    expect(tree.root.findByType('Svg').props.accessibilityLabel).toBe(kind === 'live' ? 'done' : 'failed');
+    for (const circle of tree.root.findAllByType('Circle')) expect(circle.props.stroke ?? circle.props.fill).toBe('needsYou');
+    act(() => tree.unmount());
+  });
+
+  it('marks a decided request with a disc inside a ring', () => {
+    const tree = render(<SettledLine>Approved by Ada</SettledLine>);
+    expect(tree.root.findByType('Svg').props.accessibilityLabel).toBe('done');
+    const circles = tree.root.findAllByType('Circle');
+    expect(circles).toHaveLength(2);
+    expect(circles[0].props.fill).toBe('none');
+    expect(circles[1].props.fill).toBe(circles[0].props.stroke);
+    expect(tree.root.findAllByType('Path')).toHaveLength(0);
+    act(() => tree.unmount());
   });
 });

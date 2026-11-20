@@ -1,7 +1,8 @@
+import { WorkStateMark } from '@/ui/screens/tags/WorkMarks';
 import { PageLoader } from '@/ui/PageLoader';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Input, ListItem, XStack, YStack } from 'tamagui';
-import { Bot, Check, Link, Lock, Mail, Sparkles, Terminal, Users } from 'lucide-react-native';
+import { Bot, Link, Lock, Mail, Sparkles, Terminal, Users } from 'lucide-react-native';
 import { router } from 'expo-router';
 import * as Crypto from 'expo-crypto';
 import { isWorkspaceListView, type Identity, type WorkspaceListView } from '@beeline/buzz-client';
@@ -302,7 +303,7 @@ export function WorkspaceSetup({ route, entry = 'workspace' }: { route: string; 
                         </XStack>
                         {invited.map((address) => (
                             <XStack key={address} gap="2" alignItems="center" testID="teammate-invited">
-                                <Glyph icon={Check} size={14} accent /><Copy small>{address}</Copy><Copy small quiet>invited</Copy>
+                                <WorkStateMark state="done" size={14} /><Copy small>{address}</Copy><Copy small quiet>invited</Copy>
                             </XStack>
                         ))}
                         {problem}

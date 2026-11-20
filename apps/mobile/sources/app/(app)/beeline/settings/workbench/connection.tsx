@@ -1,3 +1,4 @@
+import { StateDot } from '@/components/buzz/StateDot';
 import { PageLoader } from '@/ui/PageLoader';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import React, { useCallback, useMemo, useState } from 'react';
@@ -118,8 +119,7 @@ export default function ConnectionDetailScreen() {
           </YStack>
           {state ? (
             <XStack gap="2" alignItems="center" testID="connection-detail-state">
-              <YStack width={8} height={8} borderRadius="full"
-                backgroundColor={state.tone === 'danger' ? 'removed' : state.tone === 'accent' ? 'needsYou' : 'added'} />
+              <StateDot kind={state.glyph} />
               <T v="meta" color={state.tone === 'danger' ? 'removed' : state.tone === 'accent' ? 'needsYou' : 'secondary'}>{state.label}</T>
             </XStack>
           ) : null}

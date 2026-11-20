@@ -1,3 +1,4 @@
+import { permissionDeciderSql } from './permission-decider.js';
 import { cornerWaitingSql } from './corner-waiting.js';
 import { cornerImplementerSql, cornerOwnerSql } from './corner-worker.js';
 import { cornerCommissionerSql } from './corner-opening.js';
@@ -200,8 +201,14 @@ function cornerOwedRowsSql(where: string, bulk: boolean, corner?: string, parent
       -- Historical callers retain only answerable rows, so approval-card rules cannot apply.
       AND ${historical ? addressedToPersonSql('item', 'person.id', 'person.handle', 'person.kind') : `CASE
         WHEN item.card_type='permission' THEN EXISTS (
-          SELECT 1 FROM permission_authority permission WHERE permission.permission_id=item.card->>'permissionId'
-            AND permission.status='pending' AND permission.principal_id=person.id)
+          SELECT 1 FROM permission_authority permission
+          JOIN rooms permission_room ON permission_room.id=permission.room_id
+          JOIN memberships workspace_member ON workspace_member.workspace_id=permission_room.workspace_id
+            AND workspace_member.room_id IS NULL AND workspace_member.identity_id=person.id
+            AND workspace_member.removed_at IS NULL
+          WHERE permission.permission_id=item.card->>'permissionId' AND permission.room_id=item.room_id
+            AND permission.status='pending'
+            AND ${permissionDeciderSql('permission', 'item.card', 'permission_room.workspace_id', 'person.id')})
         WHEN item.card_type IN ('app-sign-in','agent-sign-in') THEN
           item.card->>'ownerId'=person.id AND item.card->>'status' IN ('starting','pending')
         WHEN item.card_type='connector-offer' THEN
@@ -451,8 +458,15 @@ DECLARE
   member memberships%ROWTYPE;
 BEGIN
   IF TG_OP='DELETE' THEN member := OLD; ELSE member := NEW; END IF;
-  IF member.room_id IS NULL
-    OR NOT EXISTS (SELECT 1 FROM identities WHERE id=member.identity_id AND kind='human') THEN
+  IF NOT EXISTS (SELECT 1 FROM identities WHERE id=member.identity_id AND kind='human') THEN
+    RETURN NULL;
+  END IF;
+  IF member.room_id IS NULL THEN
+    PERFORM corner_owed_recompute_message(card.id)
+    FROM permission_authority permission JOIN rooms scope ON scope.id=permission.room_id
+    JOIN messages card ON card.room_id=permission.room_id AND card.card_type='permission'
+      AND card.card->>'permissionId'=permission.permission_id
+    WHERE scope.workspace_id=member.workspace_id AND permission.status='pending';
     RETURN NULL;
   END IF;
   -- Legacy corner-row deletion during migration cannot change inherited access.
@@ -477,10 +491,10 @@ DROP TRIGGER IF EXISTS corner_owed_member_insert ON memberships;
 CREATE TRIGGER corner_owed_member_insert AFTER INSERT OR DELETE ON memberships
   FOR EACH ROW EXECUTE FUNCTION corner_owed_member_changed();
 DROP TRIGGER IF EXISTS corner_owed_member_update ON memberships;
-CREATE TRIGGER corner_owed_member_update AFTER UPDATE OF removed_at,room_id,identity_id ON memberships
+CREATE TRIGGER corner_owed_member_update AFTER UPDATE OF removed_at,room_id,identity_id,role ON memberships
   FOR EACH ROW WHEN (
-    (OLD.removed_at,OLD.room_id,OLD.identity_id) IS DISTINCT FROM
-    (NEW.removed_at,NEW.room_id,NEW.identity_id)
+    (OLD.removed_at,OLD.room_id,OLD.identity_id,OLD.role) IS DISTINCT FROM
+    (NEW.removed_at,NEW.room_id,NEW.identity_id,NEW.role)
   ) EXECUTE FUNCTION corner_owed_member_changed();
 
 -- A handle change changes which tags reach that person.
@@ -578,9 +592,36 @@ BEGIN
 END
 $corner_owed$;
 DROP TRIGGER IF EXISTS corner_owed_permission_update ON permission_authority;
-CREATE TRIGGER corner_owed_permission_update AFTER UPDATE OF status ON permission_authority
-  FOR EACH ROW WHEN (OLD.status IS DISTINCT FROM NEW.status)
+CREATE TRIGGER corner_owed_permission_update AFTER INSERT OR UPDATE OF status,principal_id ON permission_authority
+  FOR EACH ROW
   EXECUTE FUNCTION corner_owed_permission_changed();
+
+CREATE OR REPLACE FUNCTION corner_owed_permission_owner_changed() RETURNS trigger
+LANGUAGE plpgsql AS $corner_owed$
+BEGIN
+  PERFORM corner_owed_recompute_message(card.id)
+  FROM permission_authority permission
+  JOIN messages card ON card.room_id=permission.room_id AND card.card_type='permission'
+    AND card.card->>'permissionId'=permission.permission_id
+  WHERE permission.status='pending' AND card.card->>'purpose'='squire-spending'
+    AND card.card->'agent'->>'pubkey'=NEW.agent_id;
+  RETURN NULL;
+END
+$corner_owed$;
+DROP TRIGGER IF EXISTS corner_owed_permission_owner_update ON agents;
+CREATE TRIGGER corner_owed_permission_owner_update AFTER UPDATE OF owner_id ON agents
+  FOR EACH ROW WHEN (OLD.owner_id IS DISTINCT FROM NEW.owner_id)
+  EXECUTE FUNCTION corner_owed_permission_owner_changed();
+
+DO $permission_owed$
+BEGIN
+  DELETE FROM corner_owed owed USING messages item
+  WHERE item.id=owed.message_id AND item.card_type='permission';
+  ${CORNER_OWED_INSERT}
+  ${cornerOwedRowsSql("item.card_type='permission'", true)}
+  ON CONFLICT DO NOTHING;
+END
+$permission_owed$;
 
 -- Existing projection rows from the former automatic escalation policy must
 -- not keep a person waiting after release. History itself stays readable.
