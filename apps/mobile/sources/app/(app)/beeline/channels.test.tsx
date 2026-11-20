@@ -4,7 +4,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
-import { RoomViewHttpError, type ChatListView, type ChatListItem } from '@beeline/buzz-client';
+import { RoomViewHttpError, SurfaceResponseCache, isWorkspaceListView, type ChatListView, type ChatListItem } from '@beeline/buzz-client';
+import { SurfaceRegistry } from '@/buzz/surface-registry';
 import BuzzChannels from './channels';
 import { router } from 'expo-router';
 import { loadBuzzIdentity } from '@/auth/buzz-identity-storage';
@@ -53,6 +54,49 @@ it('keeps the drawn list out of parent navigation redraws', async () => {
 
 describe('Saved deck cold launch', () => {
 const scope1 = fixtureScope1();
+
+  it('opens a fresh deck while native interactions hold Workspace persistence', async () => {
+    // F02: fresh sign-in has no selected Workspace. Completed reads must
+    // produce usable chats without Activity recreation or disk completion.
+    scope1.saveDeck();
+    deck.workspacesResponse = [...hotSurfaces.saved.values()].find(isWorkspaceListView)!;
+    deck.chatsResponse = [...hotSurfaces.saved.values()].find(value => !isWorkspaceListView(value));
+    hotSurfaces.saved.clear();
+    deck.selectedWorkspace = null;
+    const writes: Array<() => Promise<void>> = [];
+    const registry = new SurfaceRegistry(new SurfaceResponseCache({
+      get: async () => null, set: async () => undefined, remove: async () => undefined,
+    }), value => value, (_address, value) => value,
+    (_key, work) => new Promise(resolve => {
+      writes.push(async () => { await work(); resolve(); });
+    }));
+    // Keep the existing renderer fixture's subscriptions, but execute the
+    // real fetch/persistence boundary instead of its immediate-write fake.
+    registry.observe('/workspaces', (address, value) => {
+      const fixtureAddress = JSON.stringify([address.relayOrigin, address.viewerPubkey, address.endpoint, address.params]);
+      mobileSurfaceCache.publish(fixtureAddress as never, value, isWorkspaceListView);
+    });
+    const fetch = vi.spyOn(mobileSurfaceCache, 'fetch').mockImplementation(async (address, guard, request) => {
+      const [relayOrigin, viewerPubkey, endpoint, params] = JSON.parse(address as unknown as string);
+      return registry.fetch({ relayOrigin, viewerPubkey, endpoint, params }, guard, request);
+    });
+    vi.mocked(saveActiveCommunityId).mockImplementationOnce(async (_pubkey, id) => {
+      deck.workspaceSelectionListener?.(id);
+    });
+    let renderer!: ReactTestRenderer;
+    try {
+      await act(async () => { renderer = create(<BuzzChannels />); });
+      await quiet();
+      expect(writes.length).toBeGreaterThan(0);
+      await quiet();
+      expect(paintedRows(renderer)[0]?.room.id).toBe('22222222-2222-4222-8222-222222222222');
+      expect(renderer.root.findAllByProps({ testID: 'rooms-loader-gate' })).toHaveLength(0);
+    } finally {
+      if (renderer) await act(async () => renderer.unmount());
+      for (const write of writes) await write();
+      fetch.mockRestore();
+    }
+  });
 
   it('shows the first completed chat read while navigation transitions are held', async () => {
     // Android F02 / cold review entry: a completed server read must replace

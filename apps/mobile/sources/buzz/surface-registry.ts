@@ -216,7 +216,9 @@ export class SurfaceRegistry {
       if (this.epoch !== epoch || (this.revisions.get(key) ?? 0) !== revision) {
         return this.peek(address, guard);
       }
-      await this.write(address, value, guard, stamp);
+      // Navigation consumes the published answer, never the interaction-
+      // deferred disk write. A fresh deck needs it to select its Workspace.
+      void this.write(address, value, guard, stamp).catch(() => undefined);
       return this.peek(address, guard);
     });
     this.fetches.set(key, pending);
