@@ -82,6 +82,11 @@ function validateToolArguments(definition: Tool, args: Args): void {
   if (extra.length) throw new McpToolError(`${definition.name}: unknown fields: ${extra.join(', ')}`);
   const missing = (definition.inputSchema.required ?? []).filter(key => args[key] === undefined);
   if (missing.length) throw new McpToolError(`${definition.name}: required: ${missing.join(', ')}`);
+  if (definition.name === 'message') {
+    const to = object(args.to);
+    if (typeof to.agent !== 'string' || typeof to.place !== 'string')
+      throw new McpToolError('to must be {agent, place}: agent name and the chat, thread or DM id');
+  }
 }
 
 /** First-party app_tool operations, keyed like the agent's app_tool routes. */
@@ -365,11 +370,6 @@ export class RoomsMcpAgentTools {
   async call(member: string, name: string, args: Args): Promise<unknown> {
     if (name === 'message' || name === 'reply' || name === 'post' && args.progress !== true) {
       validateToolArguments(MCP_AGENT_TOOLS.find(candidate => candidate.name === name)!, args);
-      if (name === 'message') {
-        const to = object(args.to);
-        if (typeof to.agent !== 'string' || typeof to.place !== 'string')
-          throw new McpToolError('to must be {agent, place}: agent name and the chat, thread or DM id');
-      }
       const target = name === 'message' ? addressArg(args.address ?? object(args.to).place)
         : String(args.address ?? args.room ?? '');
       const item = (await this.db.query<import('./agent-command.js').CommandRow>(
