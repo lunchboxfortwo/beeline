@@ -5,56 +5,113 @@ import { expect, it, vi } from 'vitest';
 
 const store = vi.hoisted(() => new Map<string, string>());
 vi.mock('react-native-mmkv', () => ({
-    MMKV: class {
-        getString(key: string) { return store.get(key); }
-        set(key: string, value: string) { store.set(key, value); }
-        delete(key: string) { store.delete(key); }
-    },
+  MMKV: class {
+    getString(key: string) {
+      return store.get(key);
+    }
+    set(key: string, value: string) {
+      store.set(key, value);
+    }
+    delete(key: string) {
+      store.delete(key);
+    }
+  },
 }));
 vi.mock('@/utils/web-storage', () => ({ webRuntimeStorage: () => null }));
-vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
-vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
+vi.mock('tamagui', async () =>
+  (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts(),
+);
+vi.mock('lucide-react-native', async () =>
+  (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts(),
+);
 vi.mock('react-native', () => ({ Platform: { OS: 'android' } }));
-vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
+vi.mock('react-native-safe-area-context', () => ({
+  useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
+}));
 vi.mock('expo-router', () => ({ router: { push: vi.fn() } }));
 vi.mock('@/display', () => ({ applyAppearanceChoice: vi.fn() }));
 vi.mock('@/buzz/room-open-trace', () => ({ roomOpenTraceEnabled: () => false }));
 vi.mock('@/utils/open-external-url', () => ({ openExternalUrl: async () => undefined }));
 vi.mock('@/components/buzz/IdentityMark', () => ({
-    IdentityMark: (props: Record<string, unknown>) => React.createElement('IdentityMark', props),
-    isPersonPictureUrl: () => false,
+  IdentityMark: (props: Record<string, unknown>) => React.createElement('IdentityMark', props),
+  isPersonPictureUrl: () => false,
 }));
 const marks = vi.hoisted(() => ({ renders: 0 }));
-vi.mock('@/components/buzz/ServiceMark', () => ({ ServiceMark: () => { marks.renders++; return null; } }));
+vi.mock('@/components/buzz/ServiceMark', () => ({
+  ServiceMark: () => {
+    marks.renders++;
+    return null;
+  },
+}));
 vi.mock('@/components/buzz/BeelineMark', () => ({ BeelineMark: () => null }));
 
 import { YouSettings } from './YouSettings';
 import type { YouSettings as You } from './useYouSettings';
 
-(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+(
+  globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
 
 const you = {
-    error: null, notice: null, pubkey: 'person', name: 'Lunchbox', handle: 'lunchboxfortwo', avatar: null, providers: [],
-    role: null, workspace: null, canManageWorkspace: false, workbench: null,
-    push: { supported: false, level: 'attention', disabled: false, working: false, failure: null, retry: () => undefined, change: () => undefined },
-    speakingSpeed: 1.15, changeSpeakingSpeed: () => undefined,
-    busy: null, connectGoogle: async () => undefined, connectGitHub: async () => undefined, changePicture: async () => undefined,
-    signOut: async () => undefined, deleteAccount: async () => undefined,
-    update: { enabled: false, busy: false, message: null, label: 'Check', check: () => undefined, version: 'test' },
+  error: null,
+  notice: null,
+  pubkey: 'person',
+  name: 'Lunchbox',
+  handle: 'lunchboxfortwo',
+  avatar: null,
+  providers: [],
+  role: null,
+  workspace: null,
+  canManageWorkspace: false,
+  workbench: null,
+  push: {
+    supported: false,
+    level: 'attention',
+    disabled: false,
+    working: false,
+    failure: null,
+    retry: () => undefined,
+    change: () => undefined,
+  },
+  speakingSpeed: 1.15,
+  changeSpeakingSpeed: () => undefined,
+  busy: null,
+  connectGoogle: async () => undefined,
+  connectGitHub: async () => undefined,
+  changePicture: async () => undefined,
+  signOut: async () => undefined,
+  deleteAccount: async () => undefined,
+  update: {
+    enabled: false,
+    busy: false,
+    message: null,
+    label: 'Check',
+    check: () => undefined,
+    version: 'test',
+  },
 } as unknown as You;
 
-
 it('keeps the Account sections as they are when an unrelated Settings read lands', () => {
-    let tree!: ReturnType<typeof create>;
-    act(() => { tree = create(React.createElement(YouSettings, { you })); });
-    const drawn = marks.renders;
-    expect(drawn).toBeGreaterThan(0);
-    const signOut = tree.root.findByProps({ testID: 'sign-out-setting' }).props.onPress;
-    // Each read hands Settings a new object with new action closures.
-    act(() => tree.update(React.createElement(YouSettings, { you: { ...you, name: 'Lunchbox Two', signOut: async () => undefined } as You })));
-    expect(marks.renders).toBe(drawn);
-    expect(tree.root.findByProps({ testID: 'sign-out-setting' }).props.onPress).toBe(signOut);
-    act(() => tree.update(React.createElement(YouSettings, { you: { ...you, busy: 'github' } as You })));
-    expect(marks.renders).toBeGreaterThan(drawn);
-    act(() => tree.unmount());
+  let tree!: ReturnType<typeof create>;
+  act(() => {
+    tree = create(React.createElement(YouSettings, { you }));
+  });
+  const drawn = marks.renders;
+  expect(drawn).toBeGreaterThan(0);
+  const signOut = tree.root.findByProps({ testID: 'sign-out-setting' }).props.onPress;
+  // Each read hands Settings a new object with new action closures.
+  act(() =>
+    tree.update(
+      React.createElement(YouSettings, {
+        you: { ...you, name: 'Lunchbox Two', signOut: async () => undefined } as You,
+      }),
+    ),
+  );
+  expect(marks.renders).toBe(drawn);
+  expect(tree.root.findByProps({ testID: 'sign-out-setting' }).props.onPress).toBe(signOut);
+  act(() =>
+    tree.update(React.createElement(YouSettings, { you: { ...you, busy: 'github' } as You })),
+  );
+  expect(marks.renders).toBeGreaterThan(drawn);
+  act(() => tree.unmount());
 });

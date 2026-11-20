@@ -1,10 +1,6 @@
 {
   "about": "Every place the phone app opens a network connection, or names a host, besides the main live socket. packages/scripts/check-phone-network-channels.mjs fails CI on any call site or host not listed here, and on any entry that is new or larger than on the base branch. The socket migration shrinks this list to the exceptions and links. packageRoots lists the shared-package sources the phone bundles; every file reachable from a phone import there is scanned too, and that coverage may only grow.",
-  "packageRoots": [
-    "packages/api-contract/src",
-    "packages/buzz-client/src",
-    "packages/nostr/src"
-  ],
+  "packageRoots": ["packages/api-contract/src", "packages/buzz-client/src", "packages/nostr/src"],
   "entries": [
     {
       "file": "apps/mobile/sources/sync/transport/live-connection.ts",
@@ -131,13 +127,6 @@
       "count": 1,
       "fate": "exception",
       "why": "Public minimum-version check. Must work when the socket protocol is too new for this build."
-    },
-    {
-      "file": "apps/mobile/sources/buzz/use-voice-call.ts",
-      "kind": "import:livekit-client",
-      "count": 1,
-      "fate": "exception",
-      "why": "Voice call room events from LiveKit."
     },
     {
       "file": "apps/mobile/sources/buzz/voice-transport.native.ts",
