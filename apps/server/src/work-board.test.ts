@@ -603,6 +603,61 @@ describe('question retirement', () => {
     expect(await retirement(messageId)).toEqual([{ cleared_reason: 'withdrawn', cleared: true }]);
   });
 
+  it.each([true, false].flatMap(options => [other, null].map(assigneeId => ({ options, assigneeId }))))(
+    'bulk clearing preserves dormant question marks, options=$options assignee=$assigneeId', async ({ options, assigneeId }) => {
+      const input = {
+        about: { kind: 'thread' as const, roomId: thread }, question: 'Which surface?',
+        ...(options ? { options: [{ label: 'Web' }, { label: 'Phone' }] } : { freeText: true }),
+      };
+      const dormant = await askOwnerQuestion(db, input, agent);
+      await updateWorkItem(db, { id: dormant.messageId, roomId: thread, assigneeId }, person);
+      const visible = await askOwnerQuestion(db, input, agent);
+      expect(await tasks()).toEqual([visible.messageId]);
+      await phone.execute('clearNeedsYouSection', { workspaceId: workspace }, person);
+      expect(await retirement(visible.messageId)).toEqual([{ cleared_reason: 'manual', cleared: true }]);
+      expect(await retirement(dormant.messageId)).toEqual([{ cleared_reason: null, cleared: false }]);
+      await updateWorkItem(db, { id: dormant.messageId, roomId: thread, assigneeId: person }, person);
+      expect(await tasks()).toEqual([dormant.messageId]);
+      expect((await agentOpenAsks(db, agent, chat)).text).toContain(dormant.messageId);
+    },
+  );
+
+  it.each([true, false].flatMap(options => [true, false].map(workspaceAccess => ({ options, workspaceAccess }))))(
+    'records assignments before access is granted, options=$options workspaceAccess=$workspaceAccess', async ({ options, workspaceAccess }) => {
+      await db.query("UPDATE rooms SET visibility='invite-only' WHERE id=$1", [chat]);
+      await phone.execute('removeRoomMember', { roomId: chat, memberId: other }, person);
+      if (!workspaceAccess) await db.query('UPDATE memberships SET removed_at=now() WHERE workspace_id=$1 AND room_id IS NULL AND identity_id=$2', [workspace, other]);
+      const { messageId } = await askOwnerQuestion(db, {
+        about: { kind: 'thread', roomId: thread }, question: 'Which surface?',
+        ...(options ? { options: [{ label: 'Web' }, { label: 'Phone' }] } : { freeText: true }),
+      }, agent);
+      await updateWorkItem(db, { id: messageId, roomId: thread, assigneeId: other }, person);
+      expect((await db.query('SELECT cleared_at,cleared_reason FROM needs_you_marks WHERE message_id=$1 AND identity_id=$2', [messageId, other])).rows).toEqual([{ cleared_at: null, cleared_reason: null }]);
+      if (workspaceAccess) {
+        expect((await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items).toEqual([]);
+        expect(await phone.execute('countNeedsYou', { workspaceId: workspace }, other)).toEqual({ count: 0 });
+      } else {
+        await db.query('UPDATE memberships SET removed_at=NULL WHERE workspace_id=$1 AND room_id IS NULL AND identity_id=$2', [workspace, other]);
+      }
+      await phone.execute('addRoomMember', { roomId: chat, memberId: other }, person);
+      expect((await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items.map(item => item.messageId)).toEqual([messageId]);
+      expect(await phone.execute('countNeedsYou', { workspaceId: workspace }, other)).toEqual({ count: 1 });
+      expect((await agentOpenAsks(db, agent, chat)).text).toContain(messageId);
+    },
+  );
+
+  it('records an addressed standalone choice before its recipient joins the Room', async () => {
+    await db.query("UPDATE rooms SET visibility='invite-only' WHERE id=$1", [chat]);
+    await phone.execute('removeRoomMember', { roomId: chat, memberId: other }, person);
+    const choice = await postRoomChoice(db, { roomId: chat, agentId: agent, requesterId: person,
+      mode: 'question', prompt: 'Which surface?', options: [{ label: 'Web', consequence: 'Web' }, { label: 'Phone', consequence: 'Phone' }] });
+    await db.query(`UPDATE messages SET card=jsonb_set(card,'{mentionIds}',to_jsonb(ARRAY[$2::text])) WHERE id=$1`, [choice.messageId, other]);
+    expect((await db.query('SELECT cleared_at FROM needs_you_marks WHERE message_id=$1 AND identity_id=$2', [choice.messageId, other])).rows).toEqual([{ cleared_at: null }]);
+    expect((await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items).toEqual([]);
+    await phone.execute('addRoomMember', { roomId: chat, memberId: other }, person);
+    expect((await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items.map(item => item.messageId)).toEqual([choice.messageId]);
+  });
+
   it.each([true, false].flatMap(options => (['answered', 'withdrawn', 'superseded'] as const).map(reason => ({ options, reason }))))(
     'keeps agent closure for a first-time assignee, options=$options reason=$reason', async ({ options, reason }) => {
       const { messageId } = await askOwnerQuestion(db, {

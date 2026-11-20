@@ -37,10 +37,19 @@ BEGIN
       CASE WHEN (${settledMarkReasonSql('m', 'recipient.id')}) IS NOT NULL THEN now() END,
       ${settledMarkReasonSql('m', 'recipient.id')}
     FROM messages m JOIN rooms room ON room.id=m.room_id
-    JOIN room_access member ON member.room_id=room.id AND member.removed_at IS NULL
-    JOIN identities recipient ON recipient.id=member.identity_id
+    JOIN LATERAL (
+      SELECT member.identity_id FROM room_access member WHERE member.room_id=room.id AND member.removed_at IS NULL
+      UNION
+      SELECT work.assignee_id FROM work_questions question JOIN work_items work ON work.id=question.message_id
+        WHERE question.message_id=m.id
+      UNION
+      SELECT jsonb_array_elements_text(COALESCE(m.card->'mentionIds','[]'::jsonb)
+        || jsonb_build_array(m.card->'requester'->>'pubkey'))
+        WHERE EXISTS (SELECT 1 FROM room_choices choice WHERE choice.message_id=m.id AND choice.mode='question')
+    ) addressed ON true
+    JOIN identities recipient ON recipient.id=addressed.identity_id
     WHERE m.id=asking_id
-      AND ${viewerMemberSql('room.workspace_id', 'recipient.id')}
+      AND (${questionRecipientSql('m', 'recipient.id')} OR ${viewerMemberSql('room.workspace_id', 'recipient.id')})
       AND ${requestedSql()}
     ON CONFLICT(identity_id,message_id) DO NOTHING;
 END $$;

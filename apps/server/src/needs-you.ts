@@ -302,7 +302,10 @@ export function settledMarkReasonSql(message: string, viewerId: string): string 
 
 /** Open records leave only on an event; none expires. */
 const QUESTION_WHERE = `mark.cleared_at IS NULL AND m.deleted_at IS NULL
-  AND (m.presentation='message' OR ${questionRecipientSql('m', 'mark.identity_id')})`;
+  AND ((m.presentation='message'
+    AND NOT EXISTS (SELECT 1 FROM work_questions question WHERE question.message_id=m.id)
+    AND NOT EXISTS (SELECT 1 FROM room_choices choice WHERE choice.message_id=m.id AND choice.mode='question'))
+    OR ${questionRecipientSql('m', 'mark.identity_id')})`;
 
 /** Clear every current question. */
 export async function clearNeedsYouQuestions(
