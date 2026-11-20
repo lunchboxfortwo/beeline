@@ -100,9 +100,9 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
           'handle',viewer.handle,'avatar',viewer.avatar,'face_id',viewer.face_id) viewer_row,
         ${deck ? `CASE WHEN authorized.parent_id IS NULL AND authorized.archived_at IS NULL
           THEN jsonb_build_object(
-            'needs_you',${roomNeedsYouSql('authorized')},
+            'needs_you',${roomNeedsYouSql('authorized', '$2')},
             'working',${roomWorkingSql('authorized')},
-            'attention_actor',${roomAttentionActorSql('authorized')},
+            'attention_actor',${roomAttentionActorSql('authorized', '$2')},
             'corner_rows',COALESCE((SELECT jsonb_agg(to_jsonb(deck_corner)
               ORDER BY deck_corner.created_at DESC,deck_corner.id DESC)
               FROM (${openCornerFactsSql('=authorized.id', '$2')}) deck_corner),'[]'::jsonb))
@@ -601,6 +601,7 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
         corner: about ? { ...header, about } : header,
         lifecycle,
         ...derived,
+        ...(corner.work_state === 'backlog' || corner.work_state === 'done' ? { workState: corner.work_state } : {}),
         stateAt:
           hasLiveWorkingTurn && corner.latest_turn_created_at
             ? unix(corner.latest_turn_created_at)

@@ -92,7 +92,7 @@ function ThreadsDropdownList({ roomId, chatName, count, fallback, viewer, openTh
     const corners = useRoomCorners(roomId, null, false);
     const lines: Line[] = corners.openRows.length
         ? corners.openRows.map((row) => ({ id: row.corner.id, title: cornerShortTitle(chatName, row.corner.name, row.corner.id),
-            state: row.state, blocker: row.blocker, reason: row.reason }))
+            state: row.state, workState: row.workState, blocker: row.blocker, reason: row.reason }))
         : fallback.map((corner) => ({ id: corner.id, title: cornerShortTitle(chatName, corner.name, corner.id),
             state: corner.state, workState: corner.workState, blocker: corner.blocker, reason: corner.reason }));
     const more = corners.record?.nextOpen ? Math.max(0, count - lines.length) : 0;

@@ -81,9 +81,9 @@ import { phoneListRoomWorkflowRuns } from './schedules.js';
     const deltas = new Map<string, RoomLiveDelta>();
     if (!viewers.length) return deltas;
     if (target.type === 'turn') {
-      const row = (
+      const rows = (
         await database.query<AgentTurnRow & {
-          authorized_viewers: string[];
+          viewer_id: string;
           deck_needs_you: boolean;
           deck_attention_actor: string | null;
           deck_working: boolean;
@@ -98,31 +98,33 @@ import { phoneListRoomWorkflowRuns } from './schedules.js';
                AND workspace_member.removed_at IS NULL
              WHERE room.id=$1
            )
-           SELECT turn.request_id,turn.agent_id,turn.status,turn.started_at,turn.created_at,turn.version,
+           SELECT DISTINCT ON (authorized.identity_id) turn.request_id,turn.agent_id,turn.status,turn.started_at,turn.created_at,turn.version,
              requester.id requested_by,
-             ARRAY(SELECT identity_id FROM authorized) authorized_viewers,
-             ${roomNeedsYouSql('room')} deck_needs_you,
+             authorized.identity_id viewer_id,
+             ${roomNeedsYouSql('room', 'authorized.identity_id')} deck_needs_you,
              ${roomWorkingSql('room')} deck_working,
-             ${roomAttentionActorSql('room')} deck_attention_actor
-           FROM rooms room
+             ${roomAttentionActorSql('room', 'authorized.identity_id')} deck_attention_actor
+           FROM rooms room CROSS JOIN authorized
            JOIN agent_turns turn ON turn.room_id=room.id AND turn.agent_id=$3
            LEFT JOIN messages trigger ON trigger.id=${turnRootMessageSql('turn')}
            LEFT JOIN identities requester ON requester.id=trigger.author_id
              AND requester.kind='human'
            WHERE room.id=$1 AND EXISTS(SELECT 1 FROM authorized)
              AND (turn.status<>'working' OR ${workingTurnFreshSql('turn')})
-           ORDER BY (turn.status='working') DESC,turn.created_at DESC,turn.request_id DESC LIMIT 1`,
+           ORDER BY authorized.identity_id,(turn.status='working') DESC,turn.created_at DESC,turn.request_id DESC`,
           [roomId, viewers, target.agentId],
         )
-      ).rows[0];
-      if (!row || row.request_id !== target.requestId) return deltas;
-      const delta: RoomLiveDelta = {
-        type: 'turn-delta', roomId, turn: ctx.projectAgentTurns([row])[0]!,
-        agentState: row.deck_needs_you ? 'needs-you' : row.deck_working ? 'working' : null,
-        ...(row.deck_needs_you ? { attentionReason: { kind: 'approval' as const,
-          ...(row.deck_attention_actor ? { actor: row.deck_attention_actor } : {}) } } : {}),
-      };
-      for (const viewer of row.authorized_viewers) deltas.set(viewer, delta);
+      ).rows;
+      for (const row of rows) {
+        if (row.request_id !== target.requestId) continue;
+        const delta: RoomLiveDelta = {
+          type: 'turn-delta', roomId, turn: ctx.projectAgentTurns([row])[0]!,
+          agentState: row.deck_needs_you ? 'needs-you' : row.deck_working ? 'working' : null,
+          ...(row.deck_needs_you ? { attentionReason: { kind: 'approval' as const,
+            ...(row.deck_attention_actor ? { actor: row.deck_attention_actor } : {}) } } : {}),
+        };
+        deltas.set(row.viewer_id, delta);
+      }
       return deltas;
     }
     const row = (

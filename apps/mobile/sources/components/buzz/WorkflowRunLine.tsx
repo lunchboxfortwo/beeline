@@ -22,17 +22,17 @@ import {
   workflowStepMeta,
 } from '@/buzz/workflow-run-copy';
 import { isGeneratedAgentAvatarUrl } from '@/buzz/identity-mark';
-import { Inked, Spinner, T } from '@/ui/grammar';
+import { Inked, T } from '@/ui/grammar';
 import { findRoomCornerRow, useRoomCornerRecord } from '@/buzz/room-corner-store';
 import { CHEVRON_ROW_SIZE, ChevronGlyph } from './ChevronGlyph';
 import { ContentTarget } from './IndexRow';
 import { DECORATIVE_GLYPH_PROPS } from './decorative-glyph';
+import { WorkflowWorkingMark } from './WorkflowWorkingMark';
 import { IdentityMark } from './IdentityMark';
 
 const CLOCK = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
 
 const CIRCLE = 20;
-const HALO = 32;
 /** The circle's top within a step row, and the line's x (the circle's centre). */
 const CIRCLE_TOP = 8;
 const LINE_X = 28;
@@ -176,8 +176,6 @@ export function WorkflowRunLine({
     [detail.contract, detail.history, detail.run],
   );
   return (
-    // The current step's halo (HALO, wider than the circle it rings) would
-    // otherwise touch whatever sits directly above the rail.
     <YStack paddingTop="2" testID={testID}>
       {line.map((step, index) => (
         <StepRow
@@ -366,13 +364,12 @@ function StepRow({
         paddingRight="4"
         testID={`${testID}-header`}
       >
-        {current ? (
-          <YStack position="absolute" left={LINE_X - HALO / 2} top={CIRCLE_TOP + CIRCLE / 2 - HALO / 2} width={HALO} height={HALO}>
-            <Spinner size={HALO} testID={`${testID}-halo`} accessibilityLabel="Current step" />
-          </YStack>
-        ) : null}
         <YStack position="absolute" left={LINE_X - CIRCLE / 2} top={CIRCLE_TOP}>
-          <WorkflowStepCircle status={step.status} testID={`${testID}-circle-${step.status}`} />
+          {current ? <WorkflowWorkingMark
+            waiting={step.kind === 'gate' || step.kind === 'waiting' || detail.run?.holder?.kind === 'human'}
+            viewerHolds={run.viewerHolds}
+            testID={`${testID}-current-mark`}
+          /> : <WorkflowStepCircle status={step.status} testID={`${testID}-circle-${step.status}`} />}
         </YStack>
         <YStack width={COPY_X} />
         <YStack flex={1} minWidth={0} paddingVertical="2" opacity={dimmed}>

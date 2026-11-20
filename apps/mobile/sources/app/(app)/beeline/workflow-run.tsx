@@ -1,3 +1,4 @@
+import { WorkflowWorkingMark } from '@/components/buzz/WorkflowWorkingMark';
 import { PageLoader } from '@/ui/PageLoader';
 import { SettingsRow } from '@/components/buzz/SettingsRow';
 import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
@@ -25,7 +26,7 @@ import {
   WorkflowStepCircle,
 } from '@/components/buzz/WorkflowRunLine';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
-import { Btn, Copy, SafeBottom, SafeTop, Spinner, T } from '@/ui/grammar';
+import { Btn, Copy, SafeBottom, SafeTop, T } from '@/ui/grammar';
 
 function first(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -114,7 +115,8 @@ export default function WorkflowRun() {
           <YStack paddingTop="6" paddingHorizontal="4" testID="workflow-run-summary">
             <XStack alignItems="center" gap="2">
               {live ? (
-                <Spinner size={LIVE_HALO} accessibilityLabel="Running" />
+                <WorkflowWorkingMark size={LIVE_HALO} viewerHolds={run.viewerHolds}
+                  waiting={['gate', 'waiting'].includes(detail.contract.handoffs[run.state]?.kind ?? '') || run.holder?.kind === 'human'} />
               ) : (
                 <WorkflowStepCircle status={run.status === 'done' ? 'done' : 'failed'} />
               )}

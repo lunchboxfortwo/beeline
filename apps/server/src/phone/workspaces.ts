@@ -42,7 +42,7 @@ import { phoneProjectMemberGrantRows } from './agent-reads.js';
          SELECT count(*)::text room_count,COALESCE(bool_or(
            (latest.id IS NOT NULL AND (mark.message_created_at IS NULL OR
              latest.id<>mark.message_id AND (latest.created_at,latest.id)>(mark.message_created_at,mark.message_id)))
-           OR ${roomNeedsYouSql('r')}
+           OR ${roomNeedsYouSql('r', '$2')}
          ),false) attention
          FROM rooms r JOIN memberships member ON member.room_id=r.id
            AND member.identity_id=$2 AND member.removed_at IS NULL

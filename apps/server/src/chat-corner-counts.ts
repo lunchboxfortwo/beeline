@@ -1,3 +1,4 @@
+import { permissionDeciderSql } from './permission-decider.js';
 import { cornerWaitingSql } from './corner-waiting.js';
 import { currentCornerCommandTargetSql } from './agent-command.js';
 import type { CornerMachine } from './corner-lifecycle.js';
@@ -137,7 +138,7 @@ export function cornerFactsSql(viewerExpr: string): {
     LEFT JOIN corner_facts f ON f.corner_id=c.id
     LEFT JOIN corner_github_cache gh ON gh.corner_id=c.id
     ${cornerWorkSql()}
-    ${cornerBlockerSql()}
+    ${cornerBlockerSql('true', false, viewerExpr)}
     LEFT JOIN LATERAL (SELECT message.id,message.text,message.author_id,message.created_at,message.presentation FROM messages message WHERE message.room_id=c.id
       AND message.presentation IN ('message','system') AND ${visibleChatMessageSql('message')}
       ORDER BY created_at DESC,id DESC LIMIT 1) lm ON true
@@ -207,7 +208,7 @@ export function cornerWorkSql(): string {
  * Blocking people and recorded commanders. Display picks the oldest; reminders retain newest-first selection.
  * Merge holds rank after every other blocker, so a hold is selected only when nothing else is open.
  */
-export function cornerBlockerSql(sourcePredicate = 'true', newestFirst = false): string {
+export function cornerBlockerSql(sourcePredicate = 'true', newestFirst = false, viewerExpr?: string): string {
   const direction = newestFirst ? 'DESC' : 'ASC';
   return `LEFT JOIN LATERAL (
     SELECT ranked.* FROM (
@@ -221,7 +222,7 @@ export function cornerBlockerSql(sourcePredicate = 'true', newestFirst = false):
       WHERE hold.corner_id=c.id AND hold.released_at IS NULL
     ) blockers LEFT JOIN identities person ON person.id=blockers.person_id
     WHERE ${sourcePredicate}
-    ) ranked ORDER BY ranked.kind='merge-hold',ranked.created_at ${direction},ranked.item_id ${direction},ranked.person_id LIMIT 1
+    ) ranked ORDER BY ${viewerExpr ? `(ranked.person_id=${viewerExpr}) DESC NULLS LAST,` : ''}ranked.kind='merge-hold',ranked.created_at ${direction},ranked.item_id ${direction},ranked.person_id LIMIT 1
   ) blocker ON true`;
 }
 
@@ -235,10 +236,21 @@ export function openCornerFactsSql(parentPredicate: string, viewerExpr: string):
 }
 
 /** A Room or any corner under it has a pending permission. */
-export function roomNeedsYouSql(room: string): string {
-  return `EXISTS(SELECT 1 FROM permission_authority p
-    WHERE p.status='pending' AND (p.room_id=${room}.id OR p.room_id IN
-      (SELECT id FROM rooms WHERE parent_id=${room}.id)))`;
+export function roomNeedsYouSql(room: string, viewerExpr: string): string {
+  return `EXISTS(SELECT 1 FROM permission_authority permission
+    ${permissionCardSql()}
+    WHERE permission.status='pending' AND (permission.room_id=${room}.id OR permission.room_id IN
+      (SELECT id FROM rooms WHERE parent_id=${room}.id))
+      AND ${permissionDeciderSql('permission', 'permission_card.card', `${room}.workspace_id`, viewerExpr)})`;
+}
+
+function permissionCardSql(): string {
+  return `LEFT JOIN LATERAL (
+      SELECT message.card FROM messages message
+      WHERE message.room_id=permission.room_id AND message.card_type='permission'
+        AND message.card->>'permissionId'=permission.permission_id
+      ORDER BY message.created_at DESC,message.id DESC LIMIT 1
+    ) permission_card ON true`;
 }
 
 /** A Room or any open corner under it has a working turn. */
@@ -263,17 +275,13 @@ export function roomWorkingSql(room: string): string {
 }
 
 /** The agent named on the newest pending permission card in a Room or its corners. */
-export function roomAttentionActorSql(room: string): string {
+export function roomAttentionActorSql(room: string, viewerExpr: string): string {
   return `(SELECT agent.name
     FROM permission_authority permission
-    LEFT JOIN LATERAL (
-      SELECT message.card FROM messages message
-      WHERE message.room_id=permission.room_id AND message.card_type='permission'
-        AND message.card->>'permissionId'=permission.permission_id
-      ORDER BY message.created_at DESC,message.id DESC LIMIT 1
-    ) permission_card ON true
+    ${permissionCardSql()}
     LEFT JOIN identities agent ON agent.id=permission_card.card->'agent'->>'pubkey'
     WHERE permission.status='pending'
+      AND ${permissionDeciderSql('permission', 'permission_card.card', `${room}.workspace_id`, viewerExpr)}
       AND (permission.room_id=${room}.id OR permission.room_id IN (
         SELECT id FROM rooms WHERE parent_id=${room}.id
       ))

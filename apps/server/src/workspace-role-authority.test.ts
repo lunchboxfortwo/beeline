@@ -1,3 +1,4 @@
+import { roomNeedsYouSql, roomAttentionActorSql } from './chat-corner-counts.js';
 import { readdirSync,readFileSync } from 'node:fs';
 import { dirname,join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -228,6 +229,34 @@ describe('permissions: agent owner, Workspace admin, or anyone in the chat', () 
     const roster = (await phone.readRoom(ROOM, WS_OWNER))?.members ?? [];
     expect(roster.find((member) => member.identity.pubkey === ROOM_ADMIN)?.role).toBe('member');
     expect(roster.find((member) => member.identity.pubkey === WS_ADMIN)?.role).toBe('admin');
+  });
+
+  it.each(['write', 'squire-spending'])('permission attention uses the decider rule for %s across rooms, corners and live viewers', async (purpose) => {
+    await startTurn(ROOM, ROOM_ADMIN);
+    const turn = (await database.query<{ request_id: string }>(`SELECT request_id FROM agent_turns WHERE room_id=$1 AND agent_id=$2 ORDER BY created_at DESC LIMIT 1`, [ROOM, AGENT])).rows[0]!;
+    for (const roomId of [ROOM, corner]) {
+      await database.query(`INSERT INTO permission_authority(permission_id,room_id,principal_id,request_id,scope,status)
+        VALUES('attention',$1,$2,'req','{}'::jsonb,'pending')`, [roomId, ROOM_ADMIN]);
+      await database.query(`INSERT INTO messages(id,room_id,author_id,text,card_type,card)
+        VALUES('attention-card',$1,$2,'Approve','permission',$3::jsonb)`, [roomId, AGENT,
+        JSON.stringify({ permissionId: 'attention', purpose, agent: { pubkey: AGENT } })]);
+      for (const viewer of PEOPLE) {
+        const expected = purpose === 'squire-spending' ? viewer === AGENT_OWNER : viewer !== AGENT_OWNER;
+        const result = (await database.query<{ needs_you: boolean; actor: string | null }>(
+          `SELECT ${roomNeedsYouSql('room', '$2')} needs_you,${roomAttentionActorSql('room', '$2')} actor FROM rooms room WHERE room.id=$1`,
+          [ROOM, viewer])).rows[0]!;
+        expect(result).toEqual({ needs_you: expected, actor: expected ? 'Bee' : null });
+      }
+      const deltas = await phone.readLiveDeltas(ROOM, PEOPLE, { type: 'turn', agentId: AGENT, requestId: turn.request_id });
+      for (const viewer of PEOPLE) {
+        const expected = purpose === 'squire-spending' ? viewer === AGENT_OWNER : viewer !== AGENT_OWNER;
+        const delta = deltas.get(viewer);
+        expect(delta?.type).toBe('turn-delta');
+        expect(delta?.type === 'turn-delta' ? delta.agentState : undefined).toBe(expected ? 'needs-you' : 'working');
+      }
+      await database.query(`DELETE FROM permission_authority WHERE permission_id='attention'`);
+      await database.query(`DELETE FROM messages WHERE id='attention-card'`);
+    }
   });
 
   it('only the agent owner approves its Trusty Squire spending, in every place', async () => {
