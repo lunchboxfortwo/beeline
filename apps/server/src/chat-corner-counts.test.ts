@@ -33,29 +33,30 @@ describe('chat corner counts', () => {
     ]);
   });
   it('counts canonical waiting separately from working and review', () => {
-    const result = chatCornerCounts([
-      {
-        ...row({ reason: 'question' }),
-        blocking: true,
-        waiting_item_id: 'question',
-        waiting_reason: 'question' as const,
-        waiting_kind: 'message' as const,
-      },
-      {
-        ...row({ reason: 'failed' }),
-        blocking: true,
-        waiting_item_id: 'question',
-        waiting_reason: 'question' as const,
-        waiting_kind: 'message' as const,
-      },
-      row({}, 'working'),
-      {
-        ...row({
-          checks: 'pending',
-          pr: { url: 'https://github.com/example/repo/pull/1', number: 1 },
-        } as any),
-      },
-    ],
+    const result = chatCornerCounts(
+      [
+        {
+          ...row({ reason: 'question' }),
+          blocking: true,
+          waiting_item_id: 'question',
+          waiting_reason: 'question' as const,
+          waiting_kind: 'message' as const,
+        },
+        {
+          ...row({ reason: 'failed' }),
+          blocking: true,
+          waiting_item_id: 'question',
+          waiting_reason: 'question' as const,
+          waiting_kind: 'message' as const,
+        },
+        row({}, 'working'),
+        {
+          ...row({
+            checks: 'pending',
+            pr: { url: 'https://github.com/example/repo/pull/1', number: 1 },
+          } as any),
+        },
+      ],
       'viewer',
     );
     expect(result.get('room')).toMatchObject({ cornerCount: 4, waitingCornerCount: 2 });
@@ -67,12 +68,13 @@ describe('chat corner counts', () => {
     ]);
   });
   it('projects a stored Backlog or Done and otherwise the live state, without changing execution authority', () => {
-    const result = chatCornerCounts([
-      { ...row({}, 'working'), work_state: 'backlog' as const },
-      { ...row({}, 'working'), work_state: 'in-review' as const },
-      { ...row(), work_state: 'done' as const },
-      row(),
-    ],
+    const result = chatCornerCounts(
+      [
+        { ...row({}, 'working'), work_state: 'backlog' as const },
+        { ...row({}, 'working'), work_state: 'in-review' as const },
+        { ...row(), work_state: 'done' as const },
+        row(),
+      ],
       'viewer',
     );
     expect(
@@ -85,19 +87,20 @@ describe('chat corner counts', () => {
     ]);
   });
   it('marks corners the viewer follows or that owe them something', () => {
-    const result = chatCornerCounts([
-      { ...row(), follows_viewer: true },
-      { ...row({}, 'working'), follows_viewer: true },
-      {
-        ...row(),
-        blocking: true,
-        waiting_item_id: 'question',
-        waiting_reason: 'question' as const,
-        waiting_kind: 'message' as const,
-        owed_viewer: true,
-      },
-      row({ reason: 'question' }),
-    ],
+    const result = chatCornerCounts(
+      [
+        { ...row(), follows_viewer: true },
+        { ...row({}, 'working'), follows_viewer: true },
+        {
+          ...row(),
+          blocking: true,
+          waiting_item_id: 'question',
+          waiting_reason: 'question' as const,
+          waiting_kind: 'message' as const,
+          owed_viewer: true,
+        },
+        row({ reason: 'question' }),
+      ],
       'viewer',
     );
     expect(result.get('room')?.openCorners.map((corner) => corner.mine)).toEqual([
@@ -119,9 +122,10 @@ describe('chat corner counts', () => {
         id: `${prefix}-${index}`,
         follows_viewer: mine,
       }));
-    const few = chatCornerCounts([...corners('other', 10, false), ...corners('mine', 3, true)], 'viewer').get(
-      'room',
-    );
+    const few = chatCornerCounts(
+      [...corners('other', 10, false), ...corners('mine', 3, true)],
+      'viewer',
+    ).get('room');
     expect(few?.openCorners.map((corner) => corner.id)).toEqual([
       'other-0',
       'other-1',
@@ -133,9 +137,10 @@ describe('chat corner counts', () => {
       'mine-2',
     ]);
     expect(few).toMatchObject({ cornerCount: 13, mineCornerCount: 3 });
-    const many = chatCornerCounts([...corners('other', 2, false), ...corners('mine', 9, true)], 'viewer').get(
-      'room',
-    );
+    const many = chatCornerCounts(
+      [...corners('other', 2, false), ...corners('mine', 9, true)],
+      'viewer',
+    ).get('room');
     expect(many?.openCorners.map((corner) => corner.id)).toEqual(
       Array.from({ length: 9 }, (_, index) => `mine-${index}`),
     );
@@ -150,10 +155,11 @@ describe('chat corner counts', () => {
       waiting_reason: 'question' as const,
       waiting_kind: 'message' as const,
     }));
-    const result = chatCornerCounts([
-      ...Array.from({ length: 10 }, (_, i) => ({ ...row({}, 'working'), id: `working-${i}` })),
-      ...blocked,
-    ],
+    const result = chatCornerCounts(
+      [
+        ...Array.from({ length: 10 }, (_, i) => ({ ...row({}, 'working'), id: `working-${i}` })),
+        ...blocked,
+      ],
       'viewer',
     ).get('room');
     expect(result?.cornerCount).toBe(22);
@@ -162,36 +168,37 @@ describe('chat corner counts', () => {
     );
   });
   it('reads idle with nothing owed and flags only unseen asks for the viewer', () => {
-    const result = chatCornerCounts([
-      { ...row(), follows_viewer: true, owed_viewer: false, attention: false },
-      {
-        ...row(),
-        blocking: true,
-        waiting_item_id: 'question',
-        waiting_reason: 'question' as const,
-        waiting_kind: 'message' as const,
-        owed_viewer: true,
-        attention: true,
-      },
-      {
-        ...row(),
-        blocking: true,
-        waiting_item_id: 'question',
-        waiting_reason: 'question' as const,
-        waiting_kind: 'message' as const,
-        owed_viewer: true,
-        attention: false,
-      },
-      {
-        ...row({}, 'working'),
-        blocking: true,
-        waiting_item_id: 'question',
-        waiting_reason: 'question' as const,
-        waiting_kind: 'message' as const,
-        owed_viewer: true,
-        attention: true,
-      },
-    ],
+    const result = chatCornerCounts(
+      [
+        { ...row(), follows_viewer: true, owed_viewer: false, attention: false },
+        {
+          ...row(),
+          blocking: true,
+          waiting_item_id: 'question',
+          waiting_reason: 'question' as const,
+          waiting_kind: 'message' as const,
+          owed_viewer: true,
+          attention: true,
+        },
+        {
+          ...row(),
+          blocking: true,
+          waiting_item_id: 'question',
+          waiting_reason: 'question' as const,
+          waiting_kind: 'message' as const,
+          owed_viewer: true,
+          attention: false,
+        },
+        {
+          ...row({}, 'working'),
+          blocking: true,
+          waiting_item_id: 'question',
+          waiting_reason: 'question' as const,
+          waiting_kind: 'message' as const,
+          owed_viewer: true,
+          attention: true,
+        },
+      ],
       'viewer',
     );
     expect(result.get('room')).toMatchObject({ cornerCount: 4, waitingCornerCount: 2 });
@@ -206,19 +213,20 @@ describe('chat corner counts', () => {
   });
   it("stamps only the viewer's waiting corners with when they handed back", () => {
     const at = new Date('2026-09-29T12:00:00Z');
-    const result = chatCornerCounts([
-      {
-        ...row(),
-        blocking: true,
-        waiting_item_id: 'question',
-        waiting_reason: 'question' as const,
-        waiting_kind: 'message' as const,
-        follows_viewer: true,
-        latest_created_at: at,
-      },
-      { ...row({}, 'working'), follows_viewer: true, latest_created_at: at },
-      { ...row(), latest_created_at: at },
-    ],
+    const result = chatCornerCounts(
+      [
+        {
+          ...row(),
+          blocking: true,
+          waiting_item_id: 'question',
+          waiting_reason: 'question' as const,
+          waiting_kind: 'message' as const,
+          follows_viewer: true,
+          latest_created_at: at,
+        },
+        { ...row({}, 'working'), follows_viewer: true, latest_created_at: at },
+        { ...row(), latest_created_at: at },
+      ],
       'viewer',
     );
     expect(result.get('room')?.openCorners.map((corner) => corner.waitingSince)).toEqual([
@@ -229,19 +237,20 @@ describe('chat corner counts', () => {
   });
   it('stamps every corner with when it last spoke', () => {
     const at = new Date('2026-09-29T12:00:00Z');
-    const result = chatCornerCounts([
-      {
-        ...row(),
-        blocking: true,
-        waiting_item_id: 'question',
-        waiting_reason: 'question' as const,
-        waiting_kind: 'message' as const,
-        follows_viewer: true,
-        latest_created_at: at,
-      },
-      { ...row({}, 'working'), latest_created_at: at },
-      { ...row(), latest_created_at: null },
-    ],
+    const result = chatCornerCounts(
+      [
+        {
+          ...row(),
+          blocking: true,
+          waiting_item_id: 'question',
+          waiting_reason: 'question' as const,
+          waiting_kind: 'message' as const,
+          follows_viewer: true,
+          latest_created_at: at,
+        },
+        { ...row({}, 'working'), latest_created_at: at },
+        { ...row(), latest_created_at: null },
+      ],
       'viewer',
     );
     expect(result.get('room')?.openCorners.map((corner) => corner.lastActivityAt)).toEqual([
@@ -252,12 +261,15 @@ describe('chat corner counts', () => {
   });
   it('excludes terminal lifecycle even before archived_at is projected', () => {
     expect(
-      chatCornerCounts([
-        row({ lifecycle: 'done' }),
-        row({ outcome: 'landed' }),
-        { ...row(), archived_at: new Date() },
-        { ...row(), parent_id: 'another' },
-      ], 'viewer'),
+      chatCornerCounts(
+        [
+          row({ lifecycle: 'done' }),
+          row({ outcome: 'landed' }),
+          { ...row(), archived_at: new Date() },
+          { ...row(), parent_id: 'another' },
+        ],
+        'viewer',
+      ),
     ).toEqual(
       new Map([
         [
