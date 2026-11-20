@@ -13,7 +13,7 @@ vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ t
 vi.mock('@/buzz/message-outbox-observer', () => ({ useRoomOutboxFailure: () => null }));
 vi.mock('@/buzz/room-corner-store', () => ({ useRoomCornerSummary: () => null }));
 vi.mock('@/components/buzz/Button', () => ({ Button: (props: any) => React.createElement('Button', props) }));
-vi.mock('@/components/buzz/RepositoryMark', () => ({ RepositoryMark: () => null }));
+vi.mock('@/components/buzz/RepositoryMark', () => ({ RepositoryMark: (props: any) => React.createElement('RepositoryMark', props) }));
 vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: () => null }));
 vi.mock('@/utils/use-fine-pointer', () => ({ useFinePointer: () => pointer.fine }));
 
@@ -87,4 +87,13 @@ it('marks unread chats semibold and keeps 44 pt rows for touch', () => {
   expect(row.props.minHeight).toBe(HEIGHT.control);
   expect(row.props.role).toBe('button');
   pointer.fine = true;
+});
+
+it('leads a chat with its repository picture, and # when it has none', () => {
+  const pictured = chat('beeline', { room: { id: 'beeline', name: 'beeline', updatedAt: NOW / 1000 - 60, avatar: 'https://example.test/a.png' } } as any);
+  const { tree } = render([pictured, chat('plain')]);
+  const marks = tree.root.findAll((node: any) => node.type === 'RepositoryMark');
+  expect(marks.map((node: any) => node.props)).toEqual([expect.objectContaining({ avatarUrl: 'https://example.test/a.png', size: 20 })]);
+  const plain = tree.root.findAll((node: any) => node.props?.testID === 'room-plain')[0]!;
+  expect(plain.findAll((node: any) => node.type === 'Icon.Hash').length).toBeGreaterThan(0);
 });
