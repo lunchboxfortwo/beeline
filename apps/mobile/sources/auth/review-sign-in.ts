@@ -24,7 +24,9 @@ export async function signInWithReviewSecret(
   await import('./signin-funnel').then(module=>module.suppressSigninFunnel()).catch(()=>undefined);
   const alreadyAccepted = await session.reviewIdentityForSecret(secret);
   if (alreadyAccepted) return alreadyAccepted;
-  await session.signOut();
+  // Signing out announces an identity change, which reloads the launch landing and
+  // routes this link again; with nobody signed in that only restarts this screen.
+  if (await session.identityId()) await session.signOut();
   await Promise.all([clearBuzzIdentity(), clearPendingGitHubSignInState()]);
   clearMobileSurfaceStorage();
   return session.exchangeReviewSecret(secret);
