@@ -25,7 +25,7 @@ import { MessageMatches } from '@/ui/screens/chats/MessageMatches';
 import { NewChatSheet } from '@/ui/screens/chats/NewChatSheet';
 import { isWorkspaceListView, type ChatListItem, type Identity } from '@beeline/buzz-client';
 import { router, useLocalSearchParams, usePathname, type Href } from 'expo-router';
-import { memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { FlatList } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
@@ -172,13 +172,6 @@ export default function SavedRoomDeck() {
   useEffect(() => {
     if (session || error) markInitialLandingResolved();
   }, [session, error]);
-  // The route's Workspace wins, so the saved one arriving after a chat opens
-  // (already the route's) must not re-render the whole list behind that chat.
-  const deckWorkspaceId = requestedWorkspaceId ?? session?.workspaceId ?? null;
-  const deckSession = useMemo(
-    () => session && { ...session, workspaceId: deckWorkspaceId },
-    [session?.identity, session?.relayUrl, deckWorkspaceId],
-  ); // only what the deck reads
   if (error)
     return (
       <YStack
@@ -206,10 +199,10 @@ export default function SavedRoomDeck() {
         </YStack>
       </YStack>
     );
-  return deckSession ? (
+  return session ? (
     <BuzzChannels
-      key={`${deckSession.identity.publicKey}:${deckSession.relayUrl}:${deckWorkspaceId}`}
-      session={deckSession}
+      key={`${session.identity.publicKey}:${session.relayUrl}:${requestedWorkspaceId ?? session.workspaceId}`}
+      session={session}
     />
   ) : (
     <PageLoader testID="rooms-loader-gate" />
