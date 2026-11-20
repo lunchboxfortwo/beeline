@@ -1,6 +1,6 @@
 import { lockAgentInvocation } from './agent-invocation.js';
 import { Check, Errors } from 'typebox/value';
-import { isInformationalReply, MESSAGE_ASK_SCHEMA, validateMessageAsk, validateMessageDigest, type MessageAddress, type MessageAsk, type MessageRoute } from '@beeline/api-contract/daemon';
+import { isInformationalReply, MESSAGE_ASK_SCHEMA, validateMessageAsk, reportMessageAsk, type MessageAddress, type MessageAsk, type MessageRoute } from '@beeline/api-contract/daemon';
 import { randomBytes } from 'node:crypto';
 import { answerQueuedMessage, queueMessage, refuseMessageMembership, type CommandRow } from './agent-command.js';
 import { commandAddress } from './commander.js';
@@ -8,7 +8,6 @@ import { cornerReviewerSql } from './corner-reviewer.js';
 import type { SqlDatabase } from './database.js';
 import { modelText } from './message-origin.js';
 import { postRoomChoice } from './room-choice.js';
-import { isNeedsYouAsk } from './needs-you.js';
 import { updateWorkItem } from './work-board.js';
 
 /** Validate the advertised ask schema before any lookup or publication. */
@@ -35,10 +34,11 @@ export async function messageAddress(db: SqlDatabase, to: MessageAddress, sender
 
 /** Both publication paths commit their route alongside the message itself. */
 export async function sendMessage(db: SqlDatabase, input: {
-  route: MessageRoute; text: string; ask?: MessageAsk; question?: string; brief?: string; id?: string;
+  route: MessageRoute; text: string; ask?: MessageAsk; question?: string; brief?: string; options?: readonly string[]; id?: string;
   parent?: CommandRow; replyTo?: string; attachments?: CommandRow['answer_attachments'];
 }) {
-  validateMessageDigest(input);
+  const reportAsk = reportMessageAsk(input);
+  input = { ...input, ask: input.ask ?? reportAsk };
   if (input.ask) validateAskInput(input.ask);
   return db.transaction(async tx => {
     const to = input.replyTo ? input.route.to : await messageAddress(tx,input.route.to,input.route.from.agent);
@@ -100,8 +100,7 @@ export async function sendMessage(db: SqlDatabase, input: {
       return { id, createdAt: Math.floor(Date.now()/1000) };
     }
     const saved = await queueMessage(tx,{kind:'post',id,roomId:to.place,authorId:route.from.agent,
-      origin:route.from,text:modelText(input.text),card:{route,sourceRoomId:route.from.place,...(isNeedsYouAsk(input.text) && (input.question !== undefined || input.brief !== undefined)
-        ? {reportToId:to.agent,question:input.question,brief:input.brief} : {})},agentIds:[],audienceId:input.replyTo ? to.agent : undefined,
+      origin:route.from,text:modelText(input.text),card:{route,sourceRoomId:route.from.place},agentIds:[],audienceId:input.replyTo ? to.agent : undefined,
       attachments:input.attachments,parent:input.parent,replyTo:input.parent?.source_message_id ?? input.replyTo,
       requestId:input.parent?.turn_request_id,commandRoomId:input.parent?.room_id});
     return { id:saved.id,createdAt:saved.createdAt };
@@ -110,9 +109,10 @@ export async function sendMessage(db: SqlDatabase, input: {
 
 /** The caller supplies an id, never a reply destination. */
 export async function replyToMessage(db: SqlDatabase, agentId: string, input: {
-  id:string; text:string; invocation?:import('@beeline/api-contract/daemon').AgentInvocation; ask?:MessageAsk; question?:string; brief?:string; messageId?:string; roomId?:string; queuedRequestIds?:readonly string[];
+  id:string; text:string; invocation?:import('@beeline/api-contract/daemon').AgentInvocation; ask?:MessageAsk; question?:string; brief?:string; options?:readonly string[]; messageId?:string; roomId?:string; queuedRequestIds?:readonly string[];
 },onAnswered?:(roomId:string)=>void) {
-  validateMessageDigest(input);
+  const reportAsk = reportMessageAsk(input);
+  input = { ...input, ask: input.ask ?? reportAsk };
   if (input.ask) validateAskInput(input.ask);
   return db.transaction(async db => {
   const invocation = input.invocation && input.roomId ? await lockAgentInvocation(db,agentId,input.roomId,input.invocation) : undefined;
@@ -122,7 +122,7 @@ export async function replyToMessage(db: SqlDatabase, agentId: string, input: {
     ORDER BY (id=$2) DESC,created_at DESC LIMIT 1`,[agentId,input.id])).rows[0];
   if (!item) refuseMessageMembership();
   const saved=await answerQueuedMessage(db,agentId,{roomId:item.room_id,requestId:item.id,text:input.text,
-    messageAsk:input.ask,question:input.question,brief:input.brief,messageId:input.messageId,explicitReply:true,replyFromPlace:input.roomId});
+    messageAsk:input.ask,messageId:input.messageId,explicitReply:true,replyFromPlace:input.roomId});
   if (invocation && saved.delivered) await db.query(`UPDATE agent_invocations SET replied=true
     WHERE command_id=$1 AND invocation_id=$2`,[invocation.command_id,input.invocation!.id]);
   if (!('answered' in saved) || saved.answered!==false) onAnswered?.(item.room_id);

@@ -372,8 +372,8 @@ export class RoomsMcpAgentTools {
       if (name === 'post' && item?.state==='pending' && (item.return_room_id ?? item.room_id) === target)
         return this.exec(member,'postRoomMessage',{...context,text:args.text,replyToMessageId:args.replyTo});
       return this.exec(member,name === 'post' ? 'postCornerMessage' : name,
-        name === 'message' ? {...context,to:args.to,text:args.text,ask:args.ask,question:args.question,brief:args.brief}
-        : name === 'reply' ? {id:args.id,text:args.text,ask:args.ask,question:args.question,brief:args.brief}
+        name === 'message' ? {...context,to:args.to,text:args.text,ask:args.ask,question:args.question,brief:args.brief,options:args.options}
+        : name === 'reply' ? {id:args.id,text:args.text,ask:args.ask,question:args.question,brief:args.brief,options:args.options}
         : {...context,cornerId:target,text:args.text,replyTo:args.replyTo});
     }
     return this.callTool(member,name,args);

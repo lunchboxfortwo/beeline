@@ -61,12 +61,16 @@ describe('connected agent message protocol',()=>{
   });
   it('forwards report digests from connected message and reply tools', async () => {
     const {client,member}=await scope.connected();
-    const digest={question:'Use the signed build?',brief:'Signing lets the check finish.'};
+    const digest={question:'Use the signed build?',brief:'Signing lets the check finish.',options:['Sign build','Wait']};
     const task=await humanTask(member);
     const reply=await tools.ok(client,'reply',{id:task.messageId,text:'blocked: Need a signed build.',...digest});
     const message=await tools.ok(client,'message',{address:ROOM,to:{agent:USER,place:ROOM},text:'needs-decision: Need a signed build.',...digest});
-    for (const saved of [reply,message])
-      expect((await scope.db.query('SELECT card FROM messages WHERE id=$1',[saved.id])).rows[0]?.card).toMatchObject(digest);
+    for (const saved of [reply,message]) {
+      const board = await scope.phone.execute('readWorkBoard', {workspaceId: (await scope.db.query('SELECT workspace_id FROM rooms WHERE id=$1',[ROOM])).rows[0]!.workspace_id}, USER);
+      const item = board.items.find(item => item.messageId === saved.id)!;
+      expect(item.brief).toBe(digest.brief);
+      expect(item.ask?.approval?.actions.filter(action => action.kind === 'choice').map(action => action.label)).toEqual(digest.options);
+    }
   });
   it('replies to a received public message id under its own byline without a tag or a card',async()=>{
     const {client,member}=await scope.connected();

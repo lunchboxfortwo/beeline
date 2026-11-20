@@ -28,7 +28,7 @@ export const ASK_BRIEF_MAX_CHARACTERS = 280;
 /** The limits every tool that writes an ask states up front. */
 const ASK_LIMITS_TEXT = `Character limits: question at most ${ASK_QUESTION_MAX_CHARACTERS} characters, brief at most ${ASK_BRIEF_MAX_CHARACTERS} characters, both counted in characters; an ask over either limit is refused with its counts, so rewrite it shorter.`;
 /** The ask sentence for every message/reply tool description, before anything else about the tool. */
-export const ASK_TOOL_TEXT = `Add ask only when a person must decide: their Needs you card shows only ask.question, ask.brief and the option buttons, with your full text one tap away. ${ASK_LIMITS_TEXT} Use 2–4 option labels of at most 3 words. For blocked:/needs-decision: reports, optional top-level question and brief use the same limits and refusals; omit them for the legacy report card.`;
+export const ASK_TOOL_TEXT = `Add ask only when a person must decide: their Needs you card shows only ask.question, ask.brief and the option buttons, with your full text one tap away. ${ASK_LIMITS_TEXT} Use 2–4 option labels of at most 3 words. For blocked:/needs-decision: reports, supply top-level question, brief and options (2–4 labels of at most 3 words), or use ask; both create the same decision buttons and enforce the same limits and refusals. Omit digest fields for a legacy report.`;
 export const MESSAGE_ASK_SCHEMA = {
   type: 'object', required: ['question', 'options'], additionalProperties: false,
   description: `The person's Needs you card shows only question, brief and the option buttons; the full message text is one tap away. ${ASK_LIMITS_TEXT}`,
@@ -42,6 +42,7 @@ export const MESSAGE_ASK_SCHEMA = {
 } as const;
 
 export const REPORT_DIGEST_PROPERTIES = {
+  options: MESSAGE_ASK_SCHEMA.properties.options,
   question: { type: 'string', description: `Report question: at most ${ASK_QUESTION_MAX_CHARACTERS} characters, one line ending with ?.` },
   brief: { type: 'string', description: `Report brief: at most ${ASK_BRIEF_MAX_CHARACTERS} characters, at most 2 sentences explaining why it matters and the options.` },
 } as const;
@@ -87,4 +88,14 @@ export function validateMessageAsk(ask: MessageAsk): void {
   if (!Array.isArray(ask.options) || ask.options.length < 2 || ask.options.length > 4 ||
       ask.options.some(option => !short(option, 3)))
     throw new Error('Shorten options to 2–4 labels of 3 words or fewer.');
+}
+
+/** Report digests use the same persisted choices as asks, never a text-only card. */
+export function reportMessageAsk(input: MessageDigest & { readonly options?: readonly string[] }): MessageAsk | undefined {
+  validateMessageDigest(input);
+  if (input.question === undefined && input.brief === undefined && input.options === undefined) return undefined;
+  if (!input.question) throw new Error('Report digests require a question and 2–4 options; use ask or supply question, brief and options.');
+  const ask = { question: input.question, brief: input.brief, options: input.options! };
+  validateMessageAsk(ask);
+  return ask;
 }

@@ -323,20 +323,25 @@ describe('Work board recorded sources and single assignee', () => {
   it.each(['blocked:', 'needs-decision:'])('preserves %s report digests through message and reply', async prefix => {
     const question = 'Use the signed build?';
     const brief = 'The build is ready. Signing lets the latency check finish.';
-    const text = `${prefix} ${'Full report details. '.repeat(30)}`;
+    const text = `${prefix} ${'Full report details. '.repeat(30)}`.trim();
     const posted = await sendMessage(db, {
       route: { from: { agent, place: thread }, to: { agent: person, place: chat } },
-      text, question, brief,
+      text, question, brief, options: ['Sign build', 'Wait'],
     });
     const request = await sendMessage(db, {
       route: { from: { agent: person, place: chat }, to: { agent, place: thread } }, text: 'Check latency',
     });
-    const replied = await replyToMessage(db, agent, { id: request.id, roomId: thread, text, question, brief });
+    const replied = await replyToMessage(db, agent, { id: request.id, roomId: thread, text, question, brief, options: ['Sign build', 'Wait'] });
     for (const id of [posted.id, replied.id]) {
       const item = (await read()).items.find(item => item.messageId === id)!;
-      expect(item).toMatchObject({ brief, ask: { text: question } });
-      expect((await db.query<{ text: string; card: { question: string; brief: string } }>('SELECT text,card FROM messages WHERE id=$1', [id])).rows[0])
-        .toMatchObject({ text, card: { question, brief } });
+      expect(item).toMatchObject({ brief, ask: { text: `${question}\n\n${brief}` } });
+      expect(item.ask?.approval?.actions.filter(action => action.kind === 'choice').map(action => action.label))
+        .toEqual(['Sign build', 'Wait']);
+      expect((await db.query<{ text: string }>('SELECT text FROM messages WHERE id=$1', [id])).rows[0]?.text).toBe(text);
+      const choice = item.ask!.approval!.actions.find(action => action.kind === 'choice')!;
+      if (choice.kind !== 'choice') throw new Error('choice missing');
+      await phone.execute('answerChoice', { choiceId: choice.choiceId, optionId: choice.optionId }, person);
+      expect((await read()).items.some(item => item.messageId === id && item.ask)).toBe(false);
     }
     expect((await readWorkBoard(db, workspace, other)).items.some(item => item.ask)).toBe(false);
   });
@@ -352,14 +357,12 @@ describe('Work board recorded sources and single assignee', () => {
     expect((await db.query('SELECT id FROM messages WHERE author_id=$1', [agent])).rows).toEqual([]);
     expect((await db.query<{ state: string }>('SELECT state FROM agent_commands WHERE id=$1', [request.id])).rows[0]?.state).toBe('pending');
   });
-  it.each([{ question: 'Use the signed build?' }, { brief: '🐝'.repeat(280) }])('keeps report digest fields independently optional: %j', async digest => {
-    const posted = await sendMessage(db, {
+  it.each([{ question: 'Use the signed build?' }, { brief: 'Signing unblocks the check.' }])('refuses report digests without decision options: %j', async digest => {
+    await expect(sendMessage(db, {
       route: { from: { agent, place: chat }, to: { agent: person, place: chat } },
       text: 'blocked: The signed build is missing.', ...digest,
-    });
-    const item = (await read()).items.find(item => item.messageId === posted.id)!;
-    expect(item.ask?.text).toBe(digest.question ?? 'The signed build is missing.');
-    expect(item.brief).toBe(digest.brief);
+    })).rejects.toThrow();
+    expect((await db.query('SELECT id FROM messages')).rowCount).toBe(0);
   });
   it('keeps the legacy 140-character report sentence without digest fields', async () => {
     const text = `blocked: ${'z'.repeat(200)}. More report context.`;

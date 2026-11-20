@@ -152,7 +152,7 @@ it.each([[false, false], [false, true], [true, false], [true, true]])('shows the
             openedBy: person, assignee: null, createdAt: 1, updatedAt: 2, recommendedOptionId: 'Yes',
             ask: { messageId: 'ask', workspaceId: 'ws', roomId: 'chat', roomName: 'general', roomKind: 'room', author: person,
                 text: fullPost, createdAt: 1,
-                approval: { kind: 'choice', actor: 'Ruby', ask: 'asks', subject: question, literal: false, actions: choices } }) } }],
+                approval: { kind: 'choice', actor: 'Ruby', ask: 'asks', subject: question, literal: false, actions: choices } } }],
     };
     const actions = { open: vi.fn(), reply: vi.fn(), decide: vi.fn(), assign: vi.fn(), clear: vi.fn(), clearAll: vi.fn() };
     let tree: any;
@@ -172,7 +172,7 @@ it.each([[false, false], [false, true], [true, false], [true, true]])('shows the
     } finally { act(() => tree.unmount()); }
 });
 
-it.each([false, true])('shows question and brief for a digest card (report=%s), opening the full post on tap', report => {
+it.each([false, true])('shows question, brief and buttons for decision digests on desktop=%s', async desktop => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
     const person = { pubkey: 'agent', kind: 'agent' as const, name: 'Ruby' };
     const question = 'Open the chat-icon fix as a #beeline thread?';
@@ -183,17 +183,22 @@ it.each([false, true])('shows question and brief for a digest card (report=%s), 
         items: [{ id: 'ask', roomId: 'chat', chatId: 'chat', chatName: 'general', threadName: 'Icons', title: 'Icons', state: 'needs-you',
             openedBy: person, assignee: null, createdAt: 1, updatedAt: 2, brief,
             ask: { messageId: 'ask', workspaceId: 'ws', roomId: 'chat', roomName: 'general', roomKind: 'room', author: person,
-                text: report ? question : `${question}\n\n${brief}`, createdAt: 1,
-                ...(report ? {} : { approval: { kind: 'choice', actor: 'Ruby', ask: 'asks', subject: question, literal: false, actions: choices } }) } }],
+                text: `${question}\n\n${brief}`, createdAt: 1,
+                approval: { kind: 'choice', actor: 'Ruby', ask: 'asks', subject: question, literal: false, actions: choices } } }],
     };
     const actions = { open: vi.fn(), reply: vi.fn(), decide: vi.fn(), assign: vi.fn(), clear: vi.fn(), clearAll: vi.fn() };
     let tree: any;
-    act(() => { tree = create(<WorkBoard board={board} desktop={false} actions={actions} />); });
+    act(() => { tree = create(<WorkBoard board={board} desktop={desktop} actions={actions} />); });
     try {
         expect(tree.root.findAllByType(MonoMarkdown)).toHaveLength(0);
         const text = (value: string) => tree.root.findAll((node: any) => node.type === 'Text' && node.props.children === value);
         expect(text(question)).toHaveLength(1);
         expect(text(brief)).toHaveLength(1);
+        const { Btn } = await import('@/ui/grammar');
+        const buttons = tree.root.findAllByType(Btn).filter((node: any) => choices.some(choice => choice.label === node.props.label));
+        expect(buttons.map((node: any) => node.props.label)).toEqual(['Open it', 'Homepage only', 'Hold']);
+        await act(async () => buttons[0].props.onPress({ stopPropagation() {} }));
+        expect(actions.decide).toHaveBeenCalledWith(board.items[0], choices[0]);
         const card = tree.root.find((node: any) => node.props.testID === 'work-ask-ask' && typeof node.props.onPress === 'function');
         act(() => card.props.onPress());
         expect(actions.open).toHaveBeenCalledWith(board.items[0]);
