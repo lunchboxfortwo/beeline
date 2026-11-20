@@ -374,6 +374,40 @@ it('an optional home/skills setup that never resolves cannot hold the answer', a
   await f.session.dispose();
 });
 
+it('session prepare makes the Room checkout before it reports setup ready', async () => {
+  const f = await fixture();
+  const root = f.config.workspaceRoot!;
+  const source = join(root, 'source');
+  await execFileAsync('git', ['init', '--initial-branch=main', source]);
+  await writeFile(join(source, 'README.md'), 'Room repository contents');
+  await execFileAsync('git', ['-C', source, 'add', 'README.md']);
+  await execFileAsync('git', ['-C', source, '-c', 'user.name=T', '-c', 'user.email=t@t', 'commit', '-m', 'initial']);
+  const repository = { resolution: 'repository', key: 'owner/repo', remote: `file://${source}`, targetBranch: 'main' };
+  f.execute.mockImplementation(name => name === 'getRoomRepositoryState' ? Promise.resolve(repository) : new Promise(() => {}));
+  const { prepareRoomAgentHome } = await import('./agent-home.js');
+  vi.mocked(prepareRoomAgentHome).mockResolvedValueOnce({});
+  await f.session.resources.prepare();
+  const { status } = f.session.resources.read() as { status: Record<string, string> };
+  expect(status.setup).toBe('ready');
+  const path = /Checkout ready at (\S+) on main \(read-only\)/.exec(status.checkout ?? '')?.[1];
+  expect(path).toBeDefined();
+  expect(await readFile(join(path!, 'README.md'), 'utf8')).toBe('Room repository contents');
+  await f.session.dispose();
+});
+
+it('session prepare reports a failed checkout instead of setup ready', async () => {
+  const f = await fixture();
+  const repository = { resolution: 'repository', key: 'owner/missing', remote: `file://${join(f.config.workspaceRoot!, 'missing')}`, targetBranch: 'main' };
+  f.execute.mockImplementation(name => name === 'getRoomRepositoryState' ? Promise.resolve(repository) : new Promise(() => {}));
+  const { prepareRoomAgentHome } = await import('./agent-home.js');
+  vi.mocked(prepareRoomAgentHome).mockResolvedValueOnce({});
+  await expect(f.session.resources.prepare()).rejects.toThrow();
+  const { status } = f.session.resources.read() as { status: Record<string, string> };
+  expect(status.setup).not.toBe('ready');
+  expect(status.setup).toContain('missing');
+  await f.session.dispose();
+});
+
 it('answers from a fresh private home when the configured home is a file', async () => {
   const f = await fixture();
   await writeFile(f.config.agentHomeRoot!, 'not a directory');
