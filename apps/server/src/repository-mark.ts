@@ -1,12 +1,8 @@
-/** Repository chat mark columns from the linked installation, inherited by its threads. */
+/** The repository chat mark column, inherited by its threads: `<chat id>/<icon hash>` when the chat's linked
+ * repository has a stored icon (repository-icons.ts), else NULL. A database read only; never GitHub. */
 export function repositoryMarkColumnsSql(room: string): string {
-  const source = `SELECT source.*,installation.account_avatar_url,installation.account_type,repository.full_name
-    FROM rooms source LEFT JOIN github_repositories repository ON repository.full_name=source.repository_name
-    LEFT JOIN github_installations installation ON installation.installation_id=COALESCE(source.github_installation_id,repository.installation_id)
-    WHERE source.id=COALESCE(${room}.parent_id,${room}.id) AND source.repository_resolution='repository'`;
-  // The icon endpoint tries the homepage favicon, then the repository's own icon file.
-  return `(SELECT mark.id FROM (${source}) mark WHERE mark.full_name IS NOT NULL) repository_icon_room,
-    (SELECT mark.account_avatar_url FROM (${source}) mark WHERE mark.account_type='Organization') repository_avatar,
-    (SELECT 'https://github.githubassets.com/favicons/favicon.png' FROM (${source}) mark
-      WHERE mark.repository_remote ~ 'github[.]com[:/]') repository_favicon`;
+  return `(SELECT source.id || '/' || icon.icon_hash FROM rooms source
+    JOIN github_repositories repository ON repository.full_name=source.repository_name
+    JOIN repository_icons icon ON icon.repository_id=repository.repository_id AND icon.icon_hash IS NOT NULL
+    WHERE source.id=COALESCE(${room}.parent_id,${room}.id) AND source.repository_resolution='repository') repository_icon`;
 }

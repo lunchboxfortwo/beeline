@@ -1,6 +1,5 @@
 import { permissionDeciderSql } from './permission-decider.js';
 import { humanReportCornerSql } from './corner-waiting-report.js';
-import { repositoryMarkColumnsSql } from './repository-mark.js';
 import { messageColumns } from './message-columns.js';
 import { squireApprovalAction } from '@beeline/api-contract/phone';
 import { approvalAsk } from './tray-approval-ask.js';
@@ -166,8 +165,6 @@ type Row = {
   message_id: string;
   room_id: string;
   room_name: string;
-  repository_avatar?: string | null;
-  repository_favicon?: string | null;
   room_kind: 'room' | 'corner' | 'direct';
   parent_room_name: string | null;
   text: string;
@@ -187,7 +184,6 @@ type Row = {
 };
 
 const ROW_COLUMNS = `
-  ${repositoryMarkColumnsSql('room')},
   m.id message_id,m.room_id,m.text,m.card,m.attachments,m.created_at,mark.cleared_at,
   CASE WHEN room.direct_participants IS NOT NULL THEN COALESCE((
       SELECT peer.name FROM room_access peer_member
@@ -618,8 +614,6 @@ export async function needsYouItems(database: SqlDatabase, workspaceId: string, 
     workspaceId,
     roomId: row.room_id,
     roomName: row.room_name,
-    ...(row.repository_avatar ? { roomAvatar: row.repository_avatar } : {}),
-    ...(row.repository_favicon ? { roomFavicon: row.repository_favicon } : {}),
     roomKind: row.room_kind,
     ...(row.parent_room_name ? { parentRoomName: row.parent_room_name } : {}),
     text: approval

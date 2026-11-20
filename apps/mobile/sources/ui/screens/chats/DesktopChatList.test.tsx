@@ -13,10 +13,11 @@ vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ t
 vi.mock('@/buzz/message-outbox-observer', () => ({ useRoomOutboxFailure: () => null }));
 vi.mock('@/buzz/room-corner-store', () => ({ useRoomCornerSummary: () => null }));
 vi.mock('@/components/buzz/Button', () => ({ Button: (props: any) => React.createElement('Button', props) }));
-vi.mock('@/components/buzz/RepositoryMark', () => ({ RepositoryMark: () => null }));
+vi.mock('@/components/buzz/RepositoryMark', () => ({ RepositoryMark: (props: any) => React.createElement('RepositoryMark', props) }));
 vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: () => null }));
 vi.mock('@/utils/use-fine-pointer', () => ({ useFinePointer: () => pointer.fine }));
 
+import { Hash } from 'lucide-react-native';
 import type { ChatListCorner } from '@beeline/api-contract/phone';
 import type { ChatListItem } from '@beeline/buzz-client';
 import { HEIGHT } from '@/ui/grammar';
@@ -87,4 +88,16 @@ it('marks unread chats semibold and keeps 44 pt rows for touch', () => {
   expect(row.props.minHeight).toBe(HEIGHT.control);
   expect(row.props.role).toBe('button');
   pointer.fine = true;
+});
+
+it('leads a chat with its repository icon file, falling back to a bare #', () => {
+  const icon = 'https://example.test/v1/repository-icons/beeline';
+  const pictured = chat('beeline', { room: { id: 'beeline', name: 'beeline', updatedAt: NOW / 1000 - 60, homepageIcon: icon,
+    avatar: 'https://example.test/owner.png', favicon: 'https://example.test/favicon.png' } } as any);
+  const { tree } = render([pictured, chat('plain')]);
+  const marks = tree.root.findAll((node: any) => node.type === 'RepositoryMark').map((node: any) => node.props);
+  expect(marks).toEqual([expect.objectContaining({ homepageIconUrl: icon, size: 20 }), expect.objectContaining({ homepageIconUrl: undefined })]);
+  expect(marks[0].avatarUrl).toBeUndefined();
+  expect(marks[0].faviconUrl).toBeUndefined();
+  for (const mark of marks) expect(mark.fallback.props.icon).toBe(Hash);
 });

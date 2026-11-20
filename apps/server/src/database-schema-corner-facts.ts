@@ -281,6 +281,16 @@ ALTER TABLE github_repositories ADD COLUMN IF NOT EXISTS homepage text;
 -- reviewer set on a Room whose repository allows auto-merge never gets a
 -- turn, since GitHub merges on the same green-checks signal that wakes it.
 ALTER TABLE github_repositories ADD COLUMN IF NOT EXISTS allow_auto_merge boolean;
+-- A linked repository's chat picture, resolved once from its committed icon files
+-- (repository-icons.ts): the picked file's path, a 64 px PNG and its content hash, or NULL
+-- for none. No row means not resolved yet; a default-branch push touching an icon path replaces it.
+CREATE TABLE IF NOT EXISTS repository_icons (
+  repository_id bigint PRIMARY KEY REFERENCES github_repositories(repository_id) ON DELETE CASCADE,
+  icon_path text,
+  icon_hash text,
+  icon_png bytea,
+  resolved_at timestamptz NOT NULL DEFAULT now()
+);
 
 
 -- First confirmed link per person and Workspace, without repository or message content.

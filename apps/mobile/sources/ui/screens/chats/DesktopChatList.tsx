@@ -7,6 +7,7 @@ import type { ChatListItem } from '@beeline/buzz-client';
 import { compactRelativeTime } from '@/buzz/relative-time';
 import { roomRowName } from '@/buzz/room-list-row';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
+import { RepositoryMark } from '@/components/buzz/RepositoryMark';
 import { AtMark, Glyph, HEIGHT, MARK, StatusMark, T, typeStyle, useStep, useTextSize } from '@/ui/grammar';
 import { threadWaitsOnViewer } from '@/ui/screens/thread/thread-status';
 import { useFinePointer } from '@/utils/use-fine-pointer';
@@ -132,7 +133,7 @@ type ChatLineProps = {
   onOpen: Props['onOpen']; onPin: Props['onPin']; onNewThread: Props['onNewThread'];
 };
 
-/** One chat on one line: its # or face, name (semibold when unread), pin, age, dot. */
+/** One chat on one line: its repository picture, # or face, name (semibold when unread), pin, age, dot. */
 const ChatLine = React.memo(function ChatLine({ item, now, selected, pinned, onOpen, onPin, onNewThread }: ChatLineProps) {
   const unread = item.unread === true;
   const tagged = chatTagged(item);
@@ -151,7 +152,7 @@ const ChatLine = React.memo(function ChatLine({ item, now, selected, pinned, onO
           peer.kind === 'agent'
             ? <IdentityMark kind="agent" seed={peer.pubkey} name={peer.name} avatarUrl={peer.avatar} face={peer.face} size={LEAD} />
             : <IdentityMark kind="human" seed={peer.pubkey} name={peer.name} avatarUrl={peer.avatar} face={peer.face} size={LEAD} />
-        ) : <Glyph icon={Hash} size={16} />}
+        ) : <RepositoryMark homepageIconUrl={item.room.homepageIcon} size={LEAD} fallback={<Glyph icon={Hash} size={16} />} />}
       </XStack>
       <T v={unread ? 'metaStrong' : 'meta'} color={unread ? 'ink' : 'secondary'} flex={1} numberOfLines={1}
         testID={`room-${item.room.id}-title`}>{roomRowName(item).name}</T>

@@ -88,8 +88,8 @@ function ChatMark({ item, size = MARK }: { size?: number; item: Partial<Pick<Cha
       />
     );
   }
-  // A chat is # in the list; its repository picture belongs to the chat page.
-  return <RepositoryMark size={size} />;
+  // A chat's picture is its repository's committed icon file; without one it is #.
+  return <RepositoryMark homepageIconUrl={item.room?.homepageIcon} size={size} />;
 }
 
 /** One thread under its chat: ↳, its name at the meta size, then its state mark in the chat's

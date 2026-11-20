@@ -108,7 +108,7 @@ it('holding the row toggles its pin instead of opening it, even when both touch 
   ).toHaveLength(0);
 });
 
-it('shows # on the chat row (the picture is the chat page’s) and its thread row as ↳, name, then state mark', () => {
+it('shows the repository picture on the chat row and its thread row as ↳, name, then state mark', () => {
   let tree!: ReactTestRenderer;
   const marked = {
     ...item,
@@ -145,7 +145,8 @@ it('shows # on the chat row (the picture is the chat page’s) and its thread ro
   });
   const marks = tree.root.findAll((node: any) => node.type === 'RepositoryMark');
   expect(marks).toHaveLength(1);
-  expect(marks[0].props).toEqual({ size: 36 });
+  // Only the repository's own icon file: no owner avatar or GitHub favicon.
+  expect(marks[0].props).toEqual({ homepageIconUrl: marked.room.homepageIcon, size: 36 });
   const threadRow = tree.root.find((node: any) => node.props?.testID === 'thread-row-thread');
   expect(threadRow.findAll((node: any) => node.type === 'RepositoryMark')).toHaveLength(0);
   expect(threadRow.findByType(WorkStateMark).props.state).toBe('needs-you');

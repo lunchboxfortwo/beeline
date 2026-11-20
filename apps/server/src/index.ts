@@ -462,8 +462,7 @@ async function main() {
       ...(github
         ? {
             roomToken: async (_identityId: string, roomId: string) => github.roomToken(roomId),
-            readRepository: async (roomId: string, fullName: string, path: string) =>
-              github.app.issuesRequest((await github.roomToken(roomId)).token, fullName, 'GET', path),
+            resolveRepositoryIcons: () => github.resolveRepositoryIcons(),
             onWebhook: processGitHubWebhook,
             completeInstallation: (state: string, installationId: number) =>
               github.completeInstallation(state, installationId),
@@ -511,6 +510,9 @@ async function main() {
   }, port, host);
   stopFreeAgentWake=freeAgents?.subscribeToWakes(live);
   schedulesJob.wake();
+  // One-time backfill: linked repositories with no stored chat picture yet. Resolved ones are skipped, so a
+  // restart reads nothing from GitHub once every linked repository has a row.
+  void githubJobs?.resolveRepositoryIcons().catch(error => console.error('[server] repository icon backfill failed:', error));
   const stopOperationOutcomes = startOperationOutcomeFlush(jobsDatabase, operationOutcomes, backgroundJobs);
   console.log(`[server] listening on ${host}:${port}; store=postgres; background=events`);
   installShutdown(server, async () => {

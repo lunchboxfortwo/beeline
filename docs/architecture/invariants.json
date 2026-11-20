@@ -1503,7 +1503,7 @@
           "updated_at": "existing before the registry; weekly audit reviews",
           "private": "existing before the registry; weekly audit reviews",
           "allow_auto_merge": "existing before the registry; weekly audit reviews",
-          "homepage": "GitHub repository website used for its chat mark"
+          "homepage": "GitHub repository website as GitHub reports it; chat marks use repository_icons, not this"
         }
       },
       "github_star_prompts": {
@@ -2289,6 +2289,17 @@
           "connector_id": "existing before the registry; weekly audit reviews",
           "code": "existing before the registry; weekly audit reviews",
           "expires_at": "existing before the registry; weekly audit reviews"
+        }
+      },
+      "repository_icons": {
+        "module": "GitHub (apps/server/src/repository-icons.ts)",
+        "reason": "A linked repository's chat picture, resolved once from GitHub so chat list loads never read GitHub.",
+        "columns": {
+          "repository_id": "The linked GitHub repository the picture belongs to; one row per repository.",
+          "icon_path": "Repository path of the picked file, so a push touching a custom <link> target re-resolves it.",
+          "icon_hash": "SHA-256 of the stored PNG; names the immutable icon URL, NULL when the repository has none.",
+          "icon_png": "The picked file as a 64 px PNG, served without GitHub or image work.",
+          "resolved_at": "When the picture was last resolved from GitHub."
         }
       },
       "repository_link_successes": {
