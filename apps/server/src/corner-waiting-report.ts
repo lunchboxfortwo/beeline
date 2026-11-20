@@ -12,7 +12,8 @@ export function humanReportCornerSql(message: string): string {
 
 /** Keep forwarded reports on their origin index, with a separate legacy fallback. */
 export function cornerHumanReportsSql(cornerId: string, workerId: string): string {
-  const columns = 'message.id,message.room_id,message.author_id,message.text,message.card,message.presentation,message.system_event,message.deleted_at,message.request_id,message.created_at';
+  const columns =
+    'message.id,message.room_id,message.author_id,message.text,message.card,message.presentation,message.system_event,message.deleted_at,message.request_id,message.created_at';
   return `SELECT ${columns} FROM messages message
     WHERE message.author_id=${workerId} AND message.card->>'reportToId' IS NOT NULL
       AND message.card->>'sourceRoomId'=(${cornerId})::text
@@ -51,7 +52,8 @@ export function reportCardIdSql(id: string): string {
  * keeps one newest row per source so each probe stays on its index.
  */
 function cornerReportItemsSql(cornerId: string, worker: string, latestOnly = false): string {
-  const newest = (table: string) => latestOnly ? `ORDER BY ${table}.created_at DESC,${table}.id DESC LIMIT 1` : '';
+  const newest = (table: string) =>
+    latestOnly ? `ORDER BY ${table}.created_at DESC,${table}.id DESC LIMIT 1` : '';
   return `SELECT items.*,ARRAY[items.message_id,items.card_id] asked_items FROM (
       (SELECT command.id report_id,
         CASE WHEN command.room_id=${cornerId} THEN visible.id END message_id,
@@ -112,15 +114,18 @@ export function cornerWaitingReportSql(corner: string): string {
       WHERE answer.author_id=person.id AND answer.created_at>latest.created_at
         AND answer.presentation='message' AND answer.system_event IS NULL AND answer.deleted_at IS NULL
         AND answer.reply_to_message_id=ANY(latest.asked_items))
-    AND NOT EXISTS(SELECT 1 FROM (${workerOutputSql(`${corner}.id`, worker)}) output
-      WHERE output.ended_at>latest.created_at)
+    AND NOT EXISTS(${workerOutputSql(`${corner}.id`, worker, 'latest.created_at')})
     UNION ALL ${messageAsksSql(corner)}`;
 }
 
-/** Recorded implementer output lifts its block; receiving input or writing prose does not. */
-function workerOutputSql(corner: string, worker: string): string {
-  return `SELECT message.created_at ended_at FROM messages message
-    WHERE message.room_id=${corner} AND message.author_id=${worker} AND message.deleted_at IS NULL AND (
+/**
+ * Recorded implementer output after `since` lifts its block; receiving input or writing prose does not.
+ * The fence keeps the probe on the corner's own page: a busy worker's author index spans every Room.
+ */
+function workerOutputSql(corner: string, worker: string, since: string): string {
+  return `SELECT 1 FROM (SELECT * FROM messages page WHERE page.room_id=${corner} AND page.created_at>${since}
+      OFFSET 0) message
+    WHERE message.author_id=${worker} AND message.deleted_at IS NULL AND (
       (message.presentation='activity' AND EXISTS (
         SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(message.activity)='array'
           THEN message.activity ELSE '[]'::jsonb END) step

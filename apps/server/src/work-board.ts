@@ -7,7 +7,13 @@ import {
   type WorkItemView,
   type WorkState,
 } from '@beeline/api-contract/phone';
-import { workDetailColumnsSql, projectWorkDetail, addWorkNote,attachToWorkItem,type WorkDetailRow } from './work-item-detail.js';
+import {
+  workDetailColumnsSql,
+  projectWorkDetail,
+  addWorkNote,
+  attachToWorkItem,
+  type WorkDetailRow,
+} from './work-item-detail.js';
 import type { SqlDatabase } from './database.js';
 import { phoneIdentity, type PhoneIdentityRow } from './phone-identity.js';
 import { needsYouItems, needsYouRowText } from './needs-you.js';
@@ -56,7 +62,7 @@ export async function updateWorkItem(
   db: SqlDatabase,
   input: UpdateWorkItemInput,
   actorId: string,
-  accessIdentityId=actorId,
+  accessIdentityId = actorId,
 ): Promise<void> {
   if (input.state !== undefined && !WORK_STATES.includes(input.state))
     throw new Error('invalid work state');
@@ -99,8 +105,9 @@ export async function updateWorkItem(
     // Started work carries its objective into the thread it runs in, unless the thread has its own.
     if (item.corner && item.objective && item.state !== 'backlog')
       await writeCornerObjective(tx, input.roomId, item.objective, true);
-    if (input.note!==undefined) await addWorkNote(tx,{...input,text:input.note},actorId);
-    for (const attachment of input.attachments ?? []) await attachToWorkItem(tx,{...input,attachment},actorId);
+    if (input.note !== undefined) await addWorkNote(tx, { ...input, text: input.note }, actorId);
+    for (const attachment of input.attachments ?? [])
+      await attachToWorkItem(tx, { ...input, attachment }, actorId);
     await tx.query("SELECT set_config('beeline.work_actor',$1,true)", [previous]);
   });
 }
@@ -109,6 +116,7 @@ export async function updateWorkItem(
  * Board columns for `rooms r` with optional `w` (its work item), `p` (parent) and `f` (corner facts).
  * A corner's live machine places it in progress; only a stored Backlog or Done moves it.
  * An open thread with nothing running stays In progress as idle.
+ * The blocker only decides a waiting corner, so other corners skip its lookup.
  */
 function workColumnsSql(viewer: string): string {
   return `r.id room_id,CASE WHEN r.direct_participants IS NOT NULL THEN 'direct' WHEN r.parent_id IS NOT NULL THEN 'corner' ELSE 'room' END room_kind,
@@ -133,7 +141,7 @@ function workColumnsSql(viewer: string): string {
     JOIN room_access a ON a.room_id=COALESCE(r.parent_id,r.id) AND a.identity_id=${viewer} AND a.removed_at IS NULL
     LEFT JOIN rooms p ON p.id=r.parent_id LEFT JOIN work_items w ON w.id=ref.id
     LEFT JOIN corner_facts f ON f.corner_id=r.id
-    ${cornerBlockerSql('ref.id=r.id::text', false, viewer, 'r')}
+    ${cornerBlockerSql("ref.id=r.id::text AND f.machine->>'state'='waiting'", false, viewer, 'r')}
     JOIN identities opener ON opener.id=COALESCE(w.opened_by,r.created_by,${viewer})
     LEFT JOIN identities assignee ON assignee.id=CASE WHEN w.room_id IS NOT NULL THEN w.assignee_id
       ELSE ${cornerImplementerSql('f', 'r')} END`;
@@ -225,7 +233,7 @@ export async function readWorkBoard(
     items.filter((item) => item.id === item.roomId).map((item) => [item.roomId, item]),
   );
   // One Needs you row per thread: the thread itself, carrying its first ask and the count.
-  const askingRooms=new Set(needs.items.map(ask=>ask.roomId));
+  const askingRooms = new Set(needs.items.map((ask) => ask.roomId));
   const asks = needs.items.map((ask): WorkItemView => {
     const thread = threads.get(ask.roomId);
     const q = questionById.get(ask.messageId);
@@ -249,19 +257,26 @@ export async function readWorkBoard(
       state: 'needs-you',
       assignee: viewer,
       messageId: ask.messageId,
-      ask: q && (q.question || q.brief || ask.approval?.kind === 'choice')
-        ? {
-            ...ask,
-            // A choice card shows question and any brief; the full message stays one tap away.
-            text: q.report_digest ? q.question || needsYouRowText(q.message_text, viewer.handle ?? null)
-              : q.question && q.brief ? `${q.question}\n\n${q.brief}`
-              : q.question && ask.approval?.actions?.some(action => action.kind === 'choice') ? q.question : q.message_text || q.question || ask.text,
-            approval: ask.approval ? { ...ask.approval, subject: q.question || ask.approval.subject } : undefined,
-          }
-        : ask,
+      ask:
+        q && (q.question || q.brief || ask.approval?.kind === 'choice')
+          ? {
+              ...ask,
+              // A choice card shows question and any brief; the full message stays one tap away.
+              text: q.report_digest
+                ? q.question || needsYouRowText(q.message_text, viewer.handle ?? null)
+                : q.question && q.brief
+                  ? `${q.question}\n\n${q.brief}`
+                  : q.question && ask.approval?.actions?.some((action) => action.kind === 'choice')
+                    ? q.question
+                    : q.message_text || q.question || ask.text,
+              approval: ask.approval
+                ? { ...ask.approval, subject: q.question || ask.approval.subject }
+                : undefined,
+            }
+          : ask,
       askIds: [ask.messageId],
       ...(q?.brief ? { brief: q.brief } : {}),
-      ...(q?.source ? {source:q.source} : {}),
+      ...(q?.source ? { source: q.source } : {}),
       ...(q?.recommended_option_id ? { recommendedOptionId: q.recommended_option_id } : {}),
     };
   });
