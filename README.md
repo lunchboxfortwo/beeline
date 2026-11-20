@@ -35,6 +35,8 @@ Tap **Ask an agent** or **Open a thread** in an empty chat to fill the message c
 
 In a DM, open **… → Close conversation**; on phone, you can also swipe the chat row and tap **Close**. To leave the current Workspace, open **Settings → You → Leave [Workspace name]**. A sole owner must first make someone else an owner.
 
+For thread locking and close permissions, see [corner authority and lifecycle](docs/agent-corners.md#authority-and-lifecycle).
+
 Workspace admins and owners can remove someone from a top-level chat's **Members** list and use **Invite to chat** on a person's profile. On desktop, a message's **More** button opens actions including **Copy link**, **Select** and, when permitted, **Delete**. Eligible messages also offer **New thread**.
 
 **Tasks** and **Team** use the Workspace named by a link or your saved selection. Without either, they load your Workspaces and save the first one; if you belong to none, they show **No Workspace to show**. Chats also saves the Workspace it displays, so you do not need to open a chat first.

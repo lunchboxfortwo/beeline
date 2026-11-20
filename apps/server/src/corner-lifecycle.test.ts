@@ -129,13 +129,25 @@ describe('thread lock', () => {
   });
 
 
-  it('allows a person to close a locked thread and rejects agents changing the lock', async () => {
+  it('lets only a Workspace owner or admin close a locked thread, refuses every other writer, and rejects agents changing the lock', async () => {
     const cornerId = await open();
     await expect(rootFixture.phone.execute('setCornerLocked', { roomId: cornerId, locked: true }, A)).rejects.toThrow(/access denied/);
     await rootFixture.phone.execute('setCornerLocked', { roomId: cornerId, locked: true }, H);
     await expect(rootFixture.phone.execute('setCornerLocked', { roomId: cornerId, locked: false }, A)).rejects.toThrow(/access denied/);
+    const role = (value: string) => rootFixture.db.query(
+      `UPDATE memberships SET role=$3 WHERE workspace_id=$1 AND room_id IS NULL AND identity_id=$2`, [W, H, value]);
+    await role('member');
+    try {
+      await expect(rootFixture.phone.execute('setCornerLocked', { roomId: cornerId, locked: false }, H)).rejects.toThrow(/locked/);
+      expect((await rootFixture.phone.readRoom(cornerId, H))?.cornerLocked).toBe(true);
+      await expect(rootFixture.phone.execute('requestCornerClose', { roomId: cornerId }, H)).rejects.toThrow(/locked/);
+    } finally { await role('owner'); }
+    await expect(rootFixture.db.query(`UPDATE rooms SET archived_at=now() WHERE id=$1`, [cornerId])).rejects.toThrow(/locked/);
+    expect((await rootFixture.db.query(`SELECT archived_at FROM rooms WHERE id=$1`, [cornerId])).rows[0]?.archived_at).toBeNull();
+    expect(await currentState(cornerId)).not.toBe('archived');
     await rootFixture.phone.execute('requestCornerClose', { roomId: cornerId }, H);
     expect(await currentState(cornerId)).toBe('archived');
+    expect((await rootFixture.db.query(`SELECT locked FROM corner_facts WHERE corner_id=$1`, [cornerId])).rows[0]?.locked).toBe(false);
   });
 
 

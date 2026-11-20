@@ -35,6 +35,19 @@ DROP INDEX IF EXISTS corner_facts_commissioned_by_idx;
 DROP INDEX IF EXISTS corner_facts_workflow_land_idx;
 ALTER TABLE corner_facts DROP CONSTRAINT IF EXISTS corner_facts_kind_check;
 ALTER TABLE corner_facts DROP CONSTRAINT IF EXISTS corner_facts_lane_check;
+-- A locked corner cannot be archived by any writer, scripts included; an
+-- authorized Workspace owner or admin must unlock it before archival.
+CREATE OR REPLACE FUNCTION refuse_locked_corner_archive() RETURNS trigger LANGUAGE plpgsql AS $locked$
+BEGIN
+  IF EXISTS (SELECT 1 FROM corner_facts WHERE corner_id=NEW.id AND locked) THEN
+    RAISE EXCEPTION 'thread % is locked; unlock it to close it', NEW.id USING ERRCODE='check_violation';
+  END IF;
+  RETURN NEW;
+END $locked$;
+DROP TRIGGER IF EXISTS rooms_refuse_locked_archive ON rooms;
+CREATE TRIGGER rooms_refuse_locked_archive BEFORE UPDATE OF archived_at ON rooms
+  FOR EACH ROW WHEN (OLD.archived_at IS NULL AND NEW.archived_at IS NOT NULL)
+  EXECUTE FUNCTION refuse_locked_corner_archive();
 
 -- GitHub's display cache for a corner (PR, checks, mergeability), written only
 -- from GitHub and helper remote-state reports. Disposable: it is never corner

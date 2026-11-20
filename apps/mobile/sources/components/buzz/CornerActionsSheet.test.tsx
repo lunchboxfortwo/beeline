@@ -19,7 +19,7 @@ const flush = () => act(async () => { await Promise.resolve(); });
 
 function props(overrides: Partial<React.ComponentProps<typeof CornerActionsSheet>> = {}) {
   return {
-    visible: true, title: 'Reconnect keeps place', locked: false, connected: true,
+    visible: true, title: 'Reconnect keeps place', locked: false, canManage: false, connected: true,
     onClose: vi.fn(), closeCorner: vi.fn(async () => undefined), setLocked: vi.fn(async () => undefined),
     onClosed: vi.fn(), onSaved: vi.fn(), onError: vi.fn(), ...overrides,
   };
@@ -60,5 +60,22 @@ it('cannot change the lock while disconnected, and Cancel closes the sheet', () 
   expect(byTestID(tree, 'lock-corner-action').props.disabled).toBe(true);
   act(() => byTestID(tree, 'corner-actions-close').props.onPress());
   expect(p.onClose).toHaveBeenCalledTimes(1);
+  act(() => tree.unmount());
+});
+
+it('offers unlock and Close on a locked thread only to a Workspace owner or admin', async () => {
+  const closeRows = (tree: any) => tree.root.findAll((node: any) => node.props.testID === 'close-corner-action' && typeof node.type === 'string');
+  let tree: any;
+  act(() => { tree = create(<CornerActionsSheet {...props({ locked: true })} />); });
+  expect(closeRows(tree)).toHaveLength(0);
+  expect(tree.root.findAllByProps({ testID: 'lock-corner-action' })).toHaveLength(0);
+  expect(tree.root.findAllByProps({ testID: 'lock-corner-switch' })).toHaveLength(0);
+  const manager = props({ locked: true, canManage: true });
+  act(() => tree.update(<CornerActionsSheet {...manager} />));
+  expect(byTestID(tree, 'lock-corner-switch').props.checked).toBe(true);
+  act(() => byTestID(tree, 'lock-corner-switch').props.onCheckedChange(false));
+  await flush();
+  expect(manager.setLocked).toHaveBeenCalledWith(false);
+  expect(closeRows(tree)).toHaveLength(1);
   act(() => tree.unmount());
 });
