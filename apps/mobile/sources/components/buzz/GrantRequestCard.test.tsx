@@ -78,7 +78,12 @@ describe('grant request card', () => {
         expect(tree.root.find((node: any) => node.type === 'Card').props.backgroundColor).toBe('raised');
         const outcome = tree.root.find((node: any) => node.type === 'Text' && node.props.testID === 'grant-grant-1-outcome');
         expect(String(outcome.props.children)).toMatch(/^Always · Allowed by you · /);
-        expect(tree.root.findAll((node: any) => node.type === 'Icon.Check')).toHaveLength(1);
+        const mark = tree.root.findByType('Svg');
+        expect(mark.props.accessibilityLabel).toBe('done');
+        const circles = mark.findAllByType('Circle');
+        expect(circles).toHaveLength(2);
+        expect(circles[0].props.fill).toBe('none');
+        expect(circles[1].props.fill).toBe(circles[0].props.stroke);
     });
 
     it('shows another Room member a collapsed pill whose card opens without controls', () => {

@@ -227,7 +227,7 @@ describe('Connection detail screen', () => {
     setWorkbenchSource(source);
     const renderer = await render();
     const state = renderer.root.findByProps({ testID: 'connection-detail-state' });
-    expect(state.findAll((node: any) => node.props.backgroundColor === 'needsYou').length).toBeGreaterThan(0);
+    expect(state.findAll((node: any) => typeof node.type === 'string' && node.props.accessibilityRole === 'progressbar')).toHaveLength(1);
     expect(state.findAll((node: any) => node.props.children === 'refreshing').length).toBeGreaterThan(0);
   });
 
