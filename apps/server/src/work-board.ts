@@ -109,6 +109,7 @@ export async function updateWorkItem(
  * Board columns for `rooms r` with optional `w` (its work item), `p` (parent) and `f` (corner facts).
  * A corner's live machine places it in progress; only a stored Backlog or Done moves it.
  * An open thread with nothing running stays In progress as idle.
+ * The blocker only decides a waiting corner, so other corners skip its lookup.
  */
 function workColumnsSql(viewer: string): string {
   return `r.id room_id,CASE WHEN r.direct_participants IS NOT NULL THEN 'direct' WHEN r.parent_id IS NOT NULL THEN 'corner' ELSE 'room' END room_kind,
@@ -133,7 +134,7 @@ function workColumnsSql(viewer: string): string {
     JOIN room_access a ON a.room_id=COALESCE(r.parent_id,r.id) AND a.identity_id=${viewer} AND a.removed_at IS NULL
     LEFT JOIN rooms p ON p.id=r.parent_id LEFT JOIN work_items w ON w.id=ref.id
     LEFT JOIN corner_facts f ON f.corner_id=r.id
-    ${cornerBlockerSql('ref.id=r.id::text', false, viewer, 'r')}
+    ${cornerBlockerSql("ref.id=r.id::text AND f.machine->>'state'='waiting'", false, viewer, 'r')}
     JOIN identities opener ON opener.id=COALESCE(w.opened_by,r.created_by,${viewer})
     LEFT JOIN identities assignee ON assignee.id=CASE WHEN w.room_id IS NOT NULL THEN w.assignee_id
       ELSE ${cornerImplementerSql('f', 'r')} END`;

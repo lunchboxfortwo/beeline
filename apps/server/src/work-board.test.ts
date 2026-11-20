@@ -775,6 +775,37 @@ describe('question retirement', () => {
   });
 });
 
+describe('corner report blocks on the board', () => {
+  // The blocker decides a column only while the stored machine waits; output in the corner lifts it.
+  it('places a worker block by machine state and corner output, in Tasks and thread reads', async () => {
+    await machine(thread, 'idle');
+    await db.query('UPDATE corner_facts SET implementer_agent_id=$2 WHERE corner_id=$1', [thread, agent]);
+    const post = (id: string, room: string, minutesAgo: number, fields: { text?: string; card_type?: string; card?: object }) =>
+      db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card,created_at)
+        VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,now()-make_interval(mins=>$8))`, [id, room, agent, fields.text ?? '',
+        fields.card_type ? 'card' : 'message', fields.card_type ?? null, JSON.stringify(fields.card ?? null), minutesAgo]);
+    await post('worker-output-before', thread, 30, { card_type: 'vault-save', card: {} });
+    await post('worker-block', thread, 20, { text: 'blocked: need the staging key', card: { reportToId: person, reportStatus: 'blocked' } });
+    const states = async (viewer: string) => [
+      (await readWorkThread(db, thread, viewer))[0],
+      (await readWorkBoard(db, workspace, viewer)).items.find(item => item.roomId === thread),
+    ].map(item => [item?.state, item?.idle ?? false]);
+    // [thread read, board row] per viewer. The board lists the viewer's ask in the thread's place.
+    const progress = ['in-progress', true], asked = ['needs-you', false];
+    expect(await states(person)).toEqual([progress, asked]);
+    expect(await states(other)).toEqual([progress, progress]);
+    await machine(thread, 'waiting');
+    expect(await states(person)).toEqual([asked, asked]);
+    expect(await states(other)).toEqual([progress, progress]);
+    await post('worker-output-elsewhere', chat, 10, { card_type: 'vault-save', card: {} });
+    expect(await states(person)).toEqual([asked, asked]);
+    expect(await states(other)).toEqual([progress, progress]);
+    await post('worker-output-after', thread, 10, { card_type: 'vault-save', card: {} });
+    expect(await states(person)).toEqual([progress, asked]);
+    expect(await states(other)).toEqual([progress, progress]);
+  });
+});
+
 describe('viewer-scoped task states', () => {
   it.each([chat, dm, thread])('scopes stored Needs you to the assignee in %s', async roomId => {
     await updateWorkItem(db, { id: 'assigned-task', roomId, state: 'needs-you', assigneeId: person }, agent);
