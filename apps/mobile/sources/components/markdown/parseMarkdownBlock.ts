@@ -97,6 +97,10 @@ export function parseMarkdownBlock(markdown: string, document = false) {
         // Code block
         if (trimmed.startsWith('```')) {
             const language = trimmed.slice(3).trim() || null;
+            if (lines.slice(index).every(line => !line.trim())) {
+                blocks.push({ type: 'text', content: [{ styles: [], text: trimmed, url: null }] });
+                break;
+            }
             let content = [];
             while (index < lines.length) {
                 const nextLine = lines[index];

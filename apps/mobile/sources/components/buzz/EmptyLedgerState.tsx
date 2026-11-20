@@ -21,8 +21,11 @@ type EmptyLedgerStateProps = {
   name?: string;
   agentHandle?: string;
   onPress: () => void;
-  /** A Room the viewer can write in, empty: teach by doing (first Room). */
-  starterPrompts?: readonly EmptyLedgerStarterPrompt[];
+  /**
+   * First steps for a writable empty Room; null hides copy while they load,
+   * undefined uses the generic empty state.
+   */
+  starterPrompts?: readonly EmptyLedgerStarterPrompt[] | null;
   /** The line under the starter title (`roomStarterIntro`). */
   starterIntro?: string;
   testID?: string;
@@ -72,6 +75,7 @@ export function EmptyLedgerState({
   starterIntro,
   testID = 'empty-ledger-state',
 }: EmptyLedgerStateProps) {
+  if (variant === 'room' && starterPrompts === null) return null;
   const copy = emptyLedgerCopy(variant, name, agentHandle);
   if (variant === 'room' && starterPrompts?.length) {
     return (

@@ -25,7 +25,8 @@ import { MessageMatches } from '@/ui/screens/chats/MessageMatches';
 import { NewChatSheet } from '@/ui/screens/chats/NewChatSheet';
 import { isWorkspaceListView, type ChatListItem, type Identity } from '@beeline/buzz-client';
 import { router, useLocalSearchParams, usePathname, type Href } from 'expo-router';
-import { memo, useContext, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import { FlatList } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { XStack, YStack } from 'tamagui';
@@ -68,13 +69,18 @@ export type DeckSession = { identity: Identity; relayUrl: string; workspaceId: s
 
 export default function SavedRoomDeck() {
   const rootRoute = useRef(usePathname() === '/').current;
-  const rootLanding = useRef(rootRoute && !isInitialLandingResolved()).current;
   const requestedWorkspaceId = firstParam(useLocalSearchParams<{ communityId?: string | string[] }>().communityId);
   const notifyDraw = useContext(FirstContentDrawContext);
   const [session, setSession] = useState<DeckSession | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
+  // Explicit launch routes can leave this root mounted under their screen.
+  // Back must restore it even when its first attempt ended in a redirect.
+  useFocusEffect(useCallback(() => {
+    if (rootRoute && !session && isInitialLandingResolved()) setRetry(value => value + 1);
+  }, [rootRoute, session]));
   useEffect(() => {
+    const rootLanding = rootRoute && !isInitialLandingResolved();
     let cancelled = false;
     let stopWorkspace: (() => void) | undefined;
     const restore = async () => {
@@ -130,7 +136,7 @@ export default function SavedRoomDeck() {
       stopWorkspace?.();
       stopReset();
     };
-  }, [rootRoute, rootLanding, retry]);
+  }, [rootRoute, retry]);
   useEffect(() => { if (session || error) markInitialLandingResolved(); }, [session, error]);
   if (error) return (
     <YStack flex={1} backgroundColor="canvas" onLayout={notifyDraw} testID="room-deck-unavailable">

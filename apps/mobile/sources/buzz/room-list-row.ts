@@ -45,7 +45,8 @@ export function roomRowName(item: Pick<ChatListItem, 'room' | 'directMessage'>):
  * The preview line's attribution. The viewer's own last message reads
  * `you: ` in the muted tone; anyone else's — a person or an agent alike —
  * reads `@handle: ` in brass; an empty Room reads `No messages yet` with no
- * attribution at all. The preview text itself always sits in the quiet tone.
+ * attribution at all. System events also omit attribution because their text
+ * already names the actor. The preview text itself always sits in the quiet tone.
  */
 export type RoomRowPreview =
   | { attribution: 'none'; text: string }
@@ -61,6 +62,8 @@ export function roomRowPreview(
   if (!latest) return { attribution: 'none', text: NO_ACTIVITY_PREVIEW };
   const preview = text || attachmentPreview(latest.attachments);
   if (!preview) return { attribution: 'none', text: NO_ACTIVITY_PREVIEW };
+  // A system line already names who acted ("@ana opened a thread …"); a "You:" prefix would repeat it.
+  if (latest.systemEvent) return { attribution: 'none', text: preview };
   if (viewerPubkey && latest.author.pubkey === viewerPubkey)
     return { attribution: 'self', text: preview };
   // Older cached grant cards may still carry the asking agent as author.

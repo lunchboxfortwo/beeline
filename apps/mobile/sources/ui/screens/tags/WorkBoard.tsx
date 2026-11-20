@@ -291,7 +291,8 @@ function SectionHead({
       aria-label={`${title} ${count}`}
       testID={testID}
     >
-      {onToggle ? <Glyph icon={open ? ChevronDown : ChevronRight} size={14} /> : null}
+      {/* An empty phone section keeps the chevron's width, so the titles stay in line. */}
+      {onToggle ? <Glyph icon={open ? ChevronDown : ChevronRight} size={14} /> : open !== undefined ? <YStack width={14} /> : null}
       <T v="metaStrong">
         {title}
       </T>
@@ -439,8 +440,9 @@ export function WorkBoard({
     needs.map((item) => <AskCard key={item.id} item={item} actions={actions} now={now} />)
   ) : (
     <YStack paddingHorizontal="6" paddingTop="8" paddingBottom="5" gap="1" alignItems="center" testID="work-calm">
+      {/* A no-break space keeps "now" off a line of its own in a narrow column. */}
       <T v="heading" textAlign="center">
-        Nothing needs you now
+        {'Nothing needs you\u00a0now'}
       </T>
       <T color="secondary" textAlign="center">
         Go do something else.
@@ -502,9 +504,10 @@ export function WorkBoard({
                   count={section.list.length}
                   note={'note' in section ? section.note : undefined}
                   open={open[section.key]}
-                  onToggle={() =>
+                  // An empty section has nothing to show, so it does not open.
+                  onToggle={section.list.length ? () =>
                     setOpen((current) => ({ ...current, [section.key]: !current[section.key] }))
-                  }
+                  : undefined}
                   testID={section.testID}
                 />
                 {open[section.key] ? rows(section.list) : null}

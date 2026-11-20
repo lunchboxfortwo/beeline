@@ -103,7 +103,7 @@ it('ignores the old needs-you disk cache and matches the board through zero, one
   expect(mock.cache.has(key)).toBe(true);
   expect(count()).toBe(0);
   expect(asks()).toHaveLength(0);
-  expect(tree.root.findAll((n: any) => n.type === 'Text' && n.props.children === 'Nothing needs you now')).toHaveLength(1);
+  expect(tree.root.findAll((n: any) => n.type === 'Text' && n.props.children === 'Nothing needs you\u00a0now')).toHaveLength(1);
   expect(mock.read).toHaveBeenCalledExactlyOnceWith('readWorkBoard', { workspaceId: 'ws' });
 
   mock.read.mockResolvedValueOnce(board([{ ...item, state: 'in-progress', ask }]));

@@ -26,7 +26,8 @@ export function TabHeaderHost({workspaceName,children,visible=true,host=true}:{w
     },[]);
     const header=slot?.header;
     return <HeaderHost.Provider value={host?register:null}>
-        {host ? <YStack display={visible?'flex':'none'}><MountedTabHeader {...header} workspaceName={workspaceName} scrolled={header?.scrolled ?? false} /></YStack> : null}
+        {/* Never flattened: Android Fabric lost this wrapper when display came back on after a deep-link start, and the app stayed blank. */}
+        {host ? <YStack collapsable={false} display={visible?'flex':'none'}><MountedTabHeader {...header} workspaceName={workspaceName} scrolled={header?.scrolled ?? false} /></YStack> : null}
         {children}
     </HeaderHost.Provider>;
 }

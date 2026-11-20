@@ -35,7 +35,7 @@ type Props = [
   firstRoomAgent: import("@beeline/api-contract/phone").RoomViewIdentity | undefined,
   startCornerMessage: () => void,
   focusComposer: () => void,
-  starterPrompts: { lead: string; detail: string; testID: string; onPress: () => void; }[] | undefined,
+  starterPrompts: { lead: string; detail: string; testID: string; onPress: () => void; }[] | null | undefined,
   starterIntro: string | undefined,
 ];
 

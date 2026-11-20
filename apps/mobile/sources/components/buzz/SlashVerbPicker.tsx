@@ -44,7 +44,9 @@ export function SlashVerbPicker({
       dismissTestID="slash-verb-dismiss"
     >
       {commandCount > 0 || verbs.length > 0 ? (
-        <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} maxHeight={VISIBLE_ROWS * 56} flexShrink={1} testID="slash-verb-scroll">
+        <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}
+          // Above the keyboard the card can end mid-row; Android fades that edge so the cut row reads as more below.
+          fadingEdgeLength={{ start: 0, end: 48 }} maxHeight={VISIBLE_ROWS * 56} flexShrink={1} testID="slash-verb-scroll">
           {agentLacksCommands && commandCount === 0 ? (
             <YStack paddingVertical="2" testID="slash-agent-no-commands">
               <T v="meta" color="secondary" numberOfLines={2}>
