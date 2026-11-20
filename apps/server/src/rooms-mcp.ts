@@ -16,7 +16,7 @@ import type { PhoneService } from './phone-service.js';
 import { visibleChatMessageSql } from './read-cursor.js';
 import { MCP_AGENT_EXCLUSIONS,MCP_AGENT_TOOLS,MCP_OPERATOR_TOOLS,MCP_RETIRED_TOOLS,RoomsMcpAgentTools,mcpRefusal,pendingMcpWakes } from './rooms-mcp-agent.js';
 import { MCP_FULL_SCOPE } from './rooms-mcp-connections.js';
-import { confirmMemberDelivery,failMemberDelivery,localDeliveryProbe,prepareLocalDelivery,readMemberDelivery,recoverMemberDelivery,setupMemberDelivery } from './rooms-mcp-delivery.js';
+import { connectorHostAcceptedSql,confirmMemberDelivery,failMemberDelivery,localDeliveryProbe,prepareLocalDelivery,readMemberDelivery,recoverMemberDelivery,setupMemberDelivery } from './rooms-mcp-delivery.js';
 import { mcpEndpoint,resourceMetadataUrl } from './rooms-mcp-endpoints.js';
 import { McpEventError,RoomsMcpEvents } from './rooms-mcp-events.js';
 import { MCP_AVATAR_MAX_CHARS,McpToolError,setMcpMemberProfile,setMcpMemberWebhook } from './rooms-mcp-members.js';
@@ -269,6 +269,8 @@ export class RoomsMcp {
        LEFT JOIN identities i ON i.id=m.author_id
        WHERE mention.member_id=$1 AND mention.cleared_at IS NULL AND mention.seq>$2::bigint
          AND ${OWED_MENTION_OPEN_SQL}
+         AND NOT EXISTS(SELECT 1 FROM agent_commands command WHERE command.agent_id=mention.member_id
+           AND command.source_message_id=mention.message_id AND ${connectorHostAcceptedSql('command')})
          AND EXISTS(SELECT 1 FROM rooms active WHERE active.id=mention.room_id AND active.archived_at IS NULL)
        ORDER BY mention.seq LIMIT $3`, [member, cursor, limit + 1])).rows;
     const page = rows.slice(0, limit);

@@ -6,7 +6,7 @@ import type { SqlDatabase } from './database.js';
 import { recordDiagnostic } from './diagnostics.js';
 import { openSecrets,sealSecrets } from './free-agents.js';
 import { notifyMcpWakesSql,notifyMcpWebhook,POSTGRES_LIVE_CHANNEL } from './postgres-live.js';
-import { connectorDeliveryChanged, noteConnectorPresence, recoverMemberDelivery } from './rooms-mcp-delivery.js';
+import { connectorHostAcceptedSql, connectorDeliveryChanged, noteConnectorPresence, recoverMemberDelivery } from './rooms-mcp-delivery.js';
 import { postMcpWebhook } from './rooms-mcp-members.js';
 import type { McpPrincipal } from './rooms-mcp-oauth.js';
 
@@ -145,9 +145,9 @@ export class RoomsMcpEvents {
         changed ? current.secret : current?.previous_secret ?? null,
         changed ? new Date(Date.now() + 300_000) : current?.rotation_until ?? null,
         sameSecret && old.verified_at.getTime() >= Date.now() - 300_000 ? old.verified_at : new Date(), expires, name]);
+      await recoverMemberDelivery(tx,principal);
+      await noteConnectorPresence(tx,principal.member_id!);
     });
-    await recoverMemberDelivery(this.db,principal);
-    await noteConnectorPresence(this.db,principal.member_id!);
     return { id, refreshBefore: expires?.toISOString() ?? null, cursor: null, truncated: false };
   }
 }
@@ -254,6 +254,9 @@ export async function deliverMcpEvents(db: SqlDatabase, transport: Transport, si
       SELECT s.*,d.event_id,d.body,d.command_id,d.probe_generation,selected.generation delivery_generation,
         (beeline_mcp_delivery_owner(s.member_id,'events',s.id) AND (s.expires_at IS NULL OR s.expires_at>now()) AND c.revoked_at IS NULL AND c.client_id IS NOT NULL
          AND r.archived_at IS NULL AND r.id IS NOT NULL
+         AND NOT EXISTS(SELECT 1 FROM agent_commands accepted
+           WHERE accepted.agent_id=s.member_id AND (accepted.id=d.command_id OR accepted.source_message_id=d.message_id)
+             AND ${connectorHostAcceptedSql('accepted')})
          AND ((d.probe_generation IS NOT NULL AND EXISTS(SELECT 1 FROM rooms_mcp_delivery proof
              WHERE proof.member_id=s.member_id AND proof.generation=d.probe_generation AND proof.receipt_at IS NULL AND proof.failure IS NULL))
            OR (d.message_id IS NOT NULL AND m.deleted_at IS NULL AND m.id IS NOT NULL

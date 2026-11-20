@@ -21,7 +21,7 @@ restoreInvitedWorkspaceMembership,
 } from './membership-join.js';
 import { mentionRouting } from './owed-mentions.js';
 import { notifyMcpWebhook } from './postgres-live.js';
-import { connectorDeliveryChanged,markConnectorsOffline,noteConnectorPresence,readMemberDeliveries } from './rooms-mcp-delivery.js';
+import { connectorHostAcceptedSql,connectorDeliveryChanged,markConnectorsOffline,noteConnectorPresence,readMemberDeliveries } from './rooms-mcp-delivery.js';
 import { deliverMcpEvents,mcpWakeText,queueMcpMentionEvents } from './rooms-mcp-events.js';
 import { fetchMcpLogo,mcpClientName,mcpMemberAvatar } from './rooms-mcp-logos.js';
 
@@ -347,6 +347,9 @@ export async function deliverMcpMemberWebhooks(
          left(COALESCE(command.private_payload->>'text',source.text),16000) command_text,(
            room.id IS NOT NULL AND room.archived_at IS NULL AND mention.cleared_at IS NULL
            AND beeline_mcp_delivery_owner(claimed.member_id,'webhook')
+           AND NOT EXISTS(SELECT 1 FROM agent_commands accepted
+             WHERE accepted.agent_id=claimed.member_id AND claimed.message_id IN (accepted.id,accepted.source_message_id)
+               AND ${connectorHostAcceptedSql('accepted')})
            AND (probe.member_id IS NOT NULL OR message.id IS NOT NULL OR command.state='pending')
            AND EXISTS (SELECT 1 FROM room_access room_member
              WHERE room_member.room_id=claimed.room_id AND room_member.identity_id=claimed.member_id

@@ -419,11 +419,16 @@ export const UNCLAIMED_CONNECTOR_INPUT_SQL = `command.state='pending' AND comman
   AND NOT EXISTS(SELECT 1 FROM agent_commands tool WHERE tool.parent_command_id=command.id AND tool.reason='mcp_call')
   AND NOT EXISTS(SELECT 1 FROM messages answer WHERE answer.author_id=command.agent_id
     AND answer.request_id IN (command.id,command.turn_request_id) AND answer.deleted_at IS NULL)
-  AND NOT EXISTS(SELECT 1 FROM rooms_mcp_webhook_outbox outbox WHERE outbox.member_id=command.agent_id
-    AND outbox.message_id IN (command.id,command.source_message_id) AND outbox.delivery_state='delivered')
-  AND NOT EXISTS(SELECT 1 FROM rooms_mcp_event_deliveries event JOIN rooms_mcp_event_subscriptions subscription
-    ON subscription.id=event.subscription_id AND subscription.member_id=command.agent_id
-    WHERE (event.command_id=command.id OR event.message_id=command.source_message_id) AND event.delivery_state='delivered')`;
+  AND NOT ${connectorHostAcceptedSql('command')}`;
+
+export function connectorHostAcceptedSql(command: string): string {
+  return `(EXISTS(SELECT 1 FROM rooms_mcp_members member WHERE member.member_id=${command}.agent_id)
+    AND (EXISTS(SELECT 1 FROM rooms_mcp_webhook_outbox outbox WHERE outbox.member_id=${command}.agent_id
+      AND outbox.message_id IN (${command}.id,${command}.source_message_id) AND outbox.delivery_state='delivered')
+    OR EXISTS(SELECT 1 FROM rooms_mcp_event_deliveries event JOIN rooms_mcp_event_subscriptions subscription
+      ON subscription.id=event.subscription_id AND subscription.member_id=${command}.agent_id
+      WHERE (event.command_id=${command}.id OR event.message_id=${command}.source_message_id) AND event.delivery_state='delivered')))`;
+}
 
 /** The last time the server saw these connectors offline; their reconnect retires work queued up to it. */
 export async function markConnectorsOffline(db: SqlDatabase, members: readonly string[]): Promise<void> {

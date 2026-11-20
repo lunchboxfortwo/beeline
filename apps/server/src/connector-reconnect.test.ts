@@ -1,8 +1,9 @@
 import {
-  describe, expect, it, fixtureScope1, opaque, createAgentCommand, pendingMcpWakes, ROOM, USER, AGENT,
+  describe, expect, it, vi, deliverMcpMemberWebhooks, fixtureScope1, opaque, createAgentCommand, pendingMcpWakes, ROOM, USER, AGENT,
 } from './test-support-rooms-mcp.test-support.js';
 import { randomBytes } from 'node:crypto';
 import { CONNECTOR_RECONNECT_RETIRED } from './rooms-mcp-delivery.js';
+import { deliverMcpEvents } from './rooms-mcp-events.js';
 import { retireStuckConnectorCommands } from './migrations/stuck-connector-commands.js';
 
 /** The owner's no-timer rule: a connector's reconnect retires what was queued before it went offline. */
@@ -87,6 +88,50 @@ describe('CONNECTOR-RECONNECT: event-driven retirement on the agent-command queu
     expect((await commandFor(member, connectedSource))[0]).toMatchObject({ state: 'cancelled', cancellation_reason: CONNECTOR_RECONNECT_RETIRED });
   });
 
+  it.each(['webhook', 'events'])('keeps %s-accepted commands pending without replaying them after reconnect', async (mechanism) => {
+    const fixture = mechanism === 'events' ? await scope.eventFixture() : await connector();
+    const { client, member } = fixture;
+    const handle = data(await client.callTool({ name: 'list_chats', arguments: {} })).you.handle as string;
+    if ('params' in fixture)
+      expect((await scope.eventCall(fixture.token, 'events/subscribe', fixture.params)).error).toBeUndefined();
+    const source = await tag(handle, 'accepted before disconnect');
+    const [command] = await commandFor(member, source);
+    expect(command?.state).toBe('pending');
+    const delivered: string[] = [];
+    const accept = async (_url: string, init: { body: string }) => {
+      delivered.push(init.body);
+      return new Response(null, { status: 204 });
+    };
+    if (mechanism === 'events') await deliverMcpEvents(scope.db, accept);
+    else await deliverMcpMemberWebhooks(scope.db, accept);
+    expect(delivered.some(body => body.includes(source) || body.includes(command!.id))).toBe(true);
+
+    if ('params' in fixture) {
+      await scope.db.query("UPDATE rooms_mcp_event_subscriptions SET expires_at=now()-interval '1 second' WHERE member_id=$1", [member]);
+      expect((await scope.eventCall(fixture.token, 'events/subscribe', fixture.params)).error).toBeUndefined();
+    } else {
+      await offline(client);
+      await online(client);
+    }
+
+    expect((await commandFor(member, source))[0]).toMatchObject({ state: 'pending', cancellation_reason: null });
+    expect(await pendingMcpWakes(scope.db, member)).toEqual([]);
+    const caughtUp = data(await client.callTool({ name: 'list_mentions', arguments: {} }));
+    expect(caughtUp.wakes).toEqual([]);
+    expect(caughtUp.mentions).toEqual([]);
+    const repeated: string[] = [];
+    const observe = async (_url: string, init: { body: string }) => {
+      repeated.push(init.body);
+      return new Response(null, { status: 204 });
+    };
+    await deliverMcpEvents(scope.db, observe);
+    await deliverMcpMemberWebhooks(scope.db, observe);
+    expect(repeated.some(body => body.includes(source) || body.includes(command!.id))).toBe(false);
+    const fresh = await tag(handle, 'new input after reconnect');
+    const [freshCommand] = await commandFor(member, fresh);
+    expect((await pendingMcpWakes(scope.db, member)).map(wake => wake.id)).toEqual([freshCommand!.id]);
+  });
+
   it('retires a tag at the exact microsecond cutoff and preserves work after it', async () => {
     const { client, member, handle } = await connector();
     const atCutoff = await tag(handle, 'queued at the disconnect');
@@ -120,9 +165,25 @@ describe('CONNECTOR-RECONNECT: event-driven retirement on the agent-command queu
     expect((await scope.db.query('SELECT disconnected_at FROM rooms_mcp_members WHERE member_id=$1', [member])).rows[0]!.disconnected_at).toBeNull();
     await scope.db.query("UPDATE rooms_mcp_event_subscriptions SET expires_at=now()-interval '1 second' WHERE id=$1", [subscribed.result.id]);
 
-    const renewed = await scope.eventCall(token, 'events/subscribe', params);
-
-    expect(renewed.error).toBeUndefined();
+    const committed: Array<{ state: string; active: boolean }> = [];
+    const transaction = scope.db.transaction.bind(scope.db);
+    const observe = vi.spyOn(scope.db, 'transaction').mockImplementation(async work => {
+      const result = await transaction(work);
+      committed.push(...(await scope.db.query<{ state: string; active: boolean }>(
+        `SELECT command.state,(subscription.expires_at IS NULL OR subscription.expires_at>now()) active
+         FROM agent_commands command CROSS JOIN rooms_mcp_event_subscriptions subscription
+         WHERE command.agent_id=$1 AND command.source_message_id=$2 AND subscription.id=$3`,
+        [member, stale, subscribed.result.id])).rows);
+      return result;
+    });
+    try {
+      const renewed = await scope.eventCall(token, 'events/subscribe', params);
+      expect(renewed.error).toBeUndefined();
+    } finally {
+      observe.mockRestore();
+    }
+    expect(committed.length).toBeGreaterThan(0);
+    expect(committed.filter(row => row.active && row.state === 'pending')).toEqual([]);
     expect((await commandFor(member, stale))[0]).toMatchObject({ state: 'cancelled', cancellation_reason: CONNECTOR_RECONNECT_RETIRED });
     expect(await owed(member, stale)).toBe(0);
     const caughtUp = data(await client.callTool({ name: 'list_mentions', arguments: {} }));
