@@ -2,25 +2,54 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { ChatListView } from '@beeline/buzz-client';
 const io = vi.hoisted(() => ({ chats: vi.fn(), value: null as ChatListView | null }));
 vi.mock('react-native', () => ({ AppState: { currentState: 'active' } }));
-vi.mock('@/auth/buzz-identity-storage', () => ({ loadBuzzIdentity: async () => ({ publicKey: 'viewer' }), peekBuzzViewerContext: () => null }));
+vi.mock('@/auth/buzz-identity-storage', () => ({
+  loadBuzzIdentity: async () => ({ publicKey: 'viewer' }),
+  peekBuzzViewerContext: () => null,
+}));
 vi.mock('@/sync/client-reset', () => ({ subscribeClientReset: () => () => {} }));
-vi.mock('@/sync/transport/live-connection', () => ({ sharedLiveConnection: () => ({ register: async () => () => {}, isViewing: () => false }) }));
-vi.mock('@/sync/transport/room-view-client', () => ({ RoomViewClient: class { chats = io.chats; } }));
+vi.mock('@/sync/transport/live-connection', () => ({
+  sharedLiveConnection: () => ({ register: async () => () => {}, isViewing: () => false }),
+}));
+vi.mock('@/sync/transport/room-view-client', () => ({
+  RoomViewClient: class {
+    chats = io.chats;
+  },
+}));
 vi.mock('./room-message-records', () => ({ indexedPreviewId: () => undefined }));
 vi.mock('./room-live-state', () => ({ observeRoomLiveState: () => {} }));
-vi.mock('./room-corner-store', () => ({ applyChatListCorners: () => {}, cornerStoreClock: () => 0, getRoomCornerSummary: () => undefined }));
+vi.mock('./room-corner-store', () => ({
+  applyChatListCorners: () => {},
+  cornerStoreClock: () => 0,
+  getRoomCornerSummary: () => undefined,
+}));
 vi.mock('./surface-storage', () => ({
   surfaceAddress: () => 'chats',
   mobileSurfaceCache: {
-    peek: () => io.value, read: async () => io.value,
-    publish: (_address: unknown, value: ChatListView) => { io.value = value; },
-    persist: async () => {}, subscribe: () => () => {}, clear: () => { io.value = null; },
+    peek: () => io.value,
+    read: async () => io.value,
+    publish: (_address: unknown, value: ChatListView) => {
+      io.value = value;
+    },
+    persist: async () => {},
+    subscribe: () => () => {},
+    clear: () => {
+      io.value = null;
+    },
   },
 }));
 import { acquireChatList, readChatList, resetChatListStoresForTest } from './server-read-owner';
 const key = { relayUrl: 'https://server.test', viewerPubkey: 'viewer', workspaceId: 'workspace' };
-const view = (name: string) => ({ workspace: { id: 'workspace', name }, chats: [], watchFilters: [], viewer: {} }) as unknown as ChatListView;
-afterEach(() => { resetChatListStoresForTest(); vi.clearAllMocks(); });
+const view = (name: string) =>
+  ({
+    workspace: { id: 'workspace', name },
+    chats: [],
+    watchFilters: [],
+    viewer: {},
+  }) as unknown as ChatListView;
+afterEach(() => {
+  resetChatListStoresForTest();
+  vi.clearAllMocks();
+});
 
 it('waits for a post-action list read despite cached and older in-flight answers', async () => {
   io.value = view('cached');
@@ -34,7 +63,10 @@ it('waits for a post-action list read despite cached and older in-flight answers
   held.force();
   await vi.waitFor(() => expect(pending).toHaveLength(1));
   let settled = false;
-  const fresh = readChatList(key, true).then((value) => { settled = true; return value; });
+  const fresh = readChatList(key, true).then((value) => {
+    settled = true;
+    return value;
+  });
   await vi.waitFor(() => expect(pending).toHaveLength(2));
   pending.shift()!(view('old in-flight answer'));
   await vi.waitFor(() => expect(held.current()?.workspace.name).toBe('old in-flight answer'));
