@@ -53,6 +53,7 @@ describe.each(['pglite',...(postgresUrl?['postgres']:[])])('P12 MCP committed me
       CREATE TABLE rooms_mcp_mentions(seq bigserial PRIMARY KEY,member_id text,room_id uuid,message_id text,cleared_at timestamptz);
       CREATE TABLE agent_commands(id text,agent_id text,reason text,state text,hiccup_attempts integer,private_payload jsonb,source_message_id text,
         action text,created_at timestamptz DEFAULT now(),posted_reply_id text,parent_command_id text,turn_request_id text);
+      CREATE TABLE agent_invocations(command_id text,invocation_id text);
       CREATE TABLE messages(id text,author_id text,request_id text,deleted_at timestamptz);
       CREATE TABLE rooms_mcp_webhook_outbox(member_id text,message_id text,delivery_state text);
       CREATE TABLE rooms_mcp_event_deliveries(subscription_id text,command_id text,message_id text,delivery_state text);

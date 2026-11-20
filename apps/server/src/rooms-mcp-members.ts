@@ -402,9 +402,13 @@ export async function deliverMcpMemberWebhooks(
       accepted = response.ok;
       httpStatus=response.status;
     } catch { accepted = false; }
-    await db.query(`UPDATE rooms_mcp_webhook_outbox SET delivered_at=now(),completed_at=now(),
-      delivery_state=$2,http_status=$3,failure_category=$4,duration_ms=$5 WHERE call_id=$1`,
+    await db.transaction(async tx => {
+      await tx.query(`SELECT id FROM agent_commands WHERE agent_id=$1
+        AND $2 IN (id,source_message_id) ORDER BY id FOR UPDATE`, [row.member_id,row.message_id]);
+      await tx.query(`UPDATE rooms_mcp_webhook_outbox SET delivered_at=now(),completed_at=now(),
+        delivery_state=$2,http_status=$3,failure_category=$4,duration_ms=$5 WHERE call_id=$1`,
       [row.call_id,accepted?'delivered':'failed',httpStatus,accepted?null:httpStatus?'http_error':'network_error',Date.now()-deliveryStarted]);
+    });
     await recordDiagnostic(db,{name:'mcp_delivery',deliveryState:accepted?'delivered':'failed',outcome:accepted?'success':'failed',
       code:accepted?'host_execution_unknown':httpStatus?'http_error':'network_error',...(row.command_id?{commandId:row.command_id}:{}),
       ...(httpStatus?{httpStatus}:{}),durationMs:Date.now()-deliveryStarted},row.owner_id??undefined).catch(()=>undefined);
@@ -567,6 +571,8 @@ export async function setMcpMemberWebhook(
     throw new McpToolError('Cursor automation webhooks require their auth token');
   const sealed = secret === undefined ? null : sealSecrets(webhookKey(), secret);
   await db.transaction(async tx => {
+    const unseen = await tx.query('SELECT 1 FROM rooms_mcp_members WHERE member_id=$1 AND disconnected_at IS NULL FOR UPDATE', [memberId]);
+    if (unseen.rowCount) await noteConnectorPresence(tx, memberId);
     await tx.query("UPDATE rooms_mcp_delivery SET failure='webhook_changed',receipt_at=NULL WHERE member_id=$1 AND mechanism='webhook'",[memberId]);
     // Keep the empty string: COALESCE must not restore the registration callback.
     await tx.query(

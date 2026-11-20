@@ -243,7 +243,7 @@ export async function deliverMcpEvents(db: SqlDatabase, transport: Transport, si
   let delivered = 0;
   for (;;) {
     if (signal?.aborted) break;
-    const row = (await db.query<Subscription & { event_id: string; body: string; command_id: string | null; probe_generation: string | null; delivery_generation:string|null; deliverable: boolean }>(`
+    const row = (await db.query<Subscription & { event_id: string; body: string; message_id: string | null; command_id: string | null; probe_generation: string | null; delivery_generation:string|null; deliverable: boolean }>(`
       WITH claimed AS (
         UPDATE rooms_mcp_event_deliveries d SET claimed_at=now(),attempted_at=now()
         WHERE d.event_id IN (
@@ -251,7 +251,7 @@ export async function deliverMcpEvents(db: SqlDatabase, transport: Transport, si
           WHERE delivered_at IS NULL AND claimed_at IS NULL
           ORDER BY event_id LIMIT 1 FOR UPDATE SKIP LOCKED)
         RETURNING d.*)
-      SELECT s.*,d.event_id,d.body,d.command_id,d.probe_generation,selected.generation delivery_generation,
+      SELECT s.*,d.event_id,d.body,d.message_id,d.command_id,d.probe_generation,selected.generation delivery_generation,
         (beeline_mcp_delivery_owner(s.member_id,'events',s.id) AND (s.expires_at IS NULL OR s.expires_at>now()) AND c.revoked_at IS NULL AND c.client_id IS NOT NULL
          AND r.archived_at IS NULL AND r.id IS NOT NULL
          AND NOT EXISTS(SELECT 1 FROM agent_commands accepted
@@ -290,9 +290,13 @@ export async function deliverMcpEvents(db: SqlDatabase, transport: Transport, si
 
       } catch { /* Best effort; a failure creates no future delivery. */ }
     }
-    await db.query(`UPDATE rooms_mcp_event_deliveries SET delivered_at=now(),completed_at=now(),
-      http_status=$2,failure_category=$3,duration_ms=$4,delivery_state=$5 WHERE event_id=$1`,
-    [row.event_id,status,category,Date.now()-startedAt,state]);
+    await db.transaction(async tx => {
+      await tx.query(`SELECT id FROM agent_commands WHERE agent_id=$1
+        AND (id=$2 OR source_message_id=$3) ORDER BY id FOR UPDATE`, [row.member_id,row.command_id,row.message_id]);
+      await tx.query(`UPDATE rooms_mcp_event_deliveries SET delivered_at=now(),completed_at=now(),
+        http_status=$2,failure_category=$3,duration_ms=$4,delivery_state=$5 WHERE event_id=$1`,
+      [row.event_id,status,category,Date.now()-startedAt,state]);
+    });
     if(state==='failed' && (status===404 || status===410)) {
       await db.transaction(async tx=>{
         const ended=await tx.query(`UPDATE rooms_mcp_event_subscriptions SET expires_at=now()

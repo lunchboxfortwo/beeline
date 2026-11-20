@@ -37,7 +37,6 @@ type Attachment = NonNullable<PrivateCommandPayload['attachments']>[number];
 /** Sanitizing keeps the text's declared origin. */
 const pgText=<Text extends string>(value:Text)=>value.replace(/[\u0000\uD800-\uDFFF]/gu,'\uFFFD') as Text;
 const json=(value:unknown)=>JSON.stringify(value,(_key,part)=>typeof part==='string'?pgText(part):part);
-
 export function checkFailureLogBody(event: { kind?: string; payload?: unknown } | null): string {
   if (event?.kind !== 'check-failed') return '';
   const payload = event.payload as { failedJobs?: unknown } | undefined;
@@ -136,7 +135,6 @@ CREATE INDEX IF NOT EXISTS agent_commands_result_message_idx ON agent_commands(r
   WHERE result_message_id IS NOT NULL;
 ALTER TABLE agent_grants ADD COLUMN IF NOT EXISTS command_id text;
 ALTER TABLE agent_pending_attachments ADD COLUMN IF NOT EXISTS request_id text;
-
 -- Retire synthetic working turns. Pending commands are projected directly.
 DROP TRIGGER IF EXISTS show_dispatched_agent_work ON agent_commands;
 DROP FUNCTION IF EXISTS show_dispatched_agent_work();
@@ -195,7 +193,6 @@ UPDATE agent_commands SET return_room_id=CASE WHEN private_payload->>'kind'='ord
     AND private_payload->>'fromRoomId' ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
   THEN (private_payload->>'fromRoomId')::uuid ELSE room_id END
   WHERE state='pending' AND return_room_id IS NULL;
-
 UPDATE agent_commands item SET message=(SELECT jsonb_build_object(
   'id',COALESCE(item.source_message_id,item.id),'authorId',COALESCE(item.private_payload->>'authorId',source.author_id),
   'body',COALESCE(item.private_payload->>'text',source.text,item.reason),
@@ -210,9 +207,7 @@ FROM (SELECT room_id,agent_id,request_id,jsonb_agg(jsonb_build_object(
   FROM agent_pending_attachments GROUP BY room_id,agent_id,request_id) attachments
 WHERE command.room_id=attachments.room_id AND command.agent_id=attachments.agent_id
   AND command.turn_request_id=attachments.request_id AND command.state='pending' AND command.answer_attachments='[]'::jsonb;
-
 `;
-
 /** Transport data only: orders and reports never become transcript messages. */
 /** A private payload's text names its origin: an agent's (or person's) own
  * words, or System text under the System identity. */
@@ -680,6 +675,11 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
     : randomBytes(32).toString('hex'));
   const lifecycle = input.reason.startsWith('corner_') || input.reason === 'subscribed_event' && Boolean(chat.opening);
   const parent = input.parent ?? (lifecycle ? chat.opening ?? undefined : undefined);
+  if (input.reason === 'mcp_call' && parent?.id) {
+    const claimed = (await db.query<{ state: string }>(`SELECT command.state FROM agent_commands command WHERE command.id=$1
+      AND EXISTS(SELECT 1 FROM rooms_mcp_members member WHERE member.member_id=command.agent_id) FOR UPDATE OF command`, [parent.id])).rows[0];
+    if (claimed?.state === 'cancelled') throw wall('access', 'command turn cancelled');
+  }
   const handover = lifecycle && !input.privatePayload ? chat.handover : undefined;
   const opening = input.reason === 'corner_objective' ? input.privatePayload : chat.opening?.private_payload;
   const escalationIdentity = chat.handover?.author_id ?? opening?.authorId;

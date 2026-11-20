@@ -140,6 +140,24 @@ describe('CONNECTOR-RECONNECT: event-driven retirement on the agent-command queu
     expect((await pendingMcpWakes(scope.db, member)).map(wake => wake.id)).toEqual([freshCommand!.id]);
   });
 
+  it('retires expired event backlog when a webhook restores an unobserved offline route', async () => {
+    const { client, member, token, params } = await scope.eventFixture();
+    const handle = data(await client.callTool({ name: 'list_chats', arguments: {} })).you.handle as string;
+    const subscription = await scope.eventCall(token, 'events/subscribe', params);
+    expect(subscription.error).toBeUndefined();
+    const stale = await tag(handle, 'waiting on the expired event route');
+    expect((await scope.db.query('SELECT disconnected_at FROM rooms_mcp_members WHERE member_id=$1', [member])).rows[0]!.disconnected_at).toBeNull();
+    await scope.db.query("UPDATE rooms_mcp_event_subscriptions SET expires_at=now()-interval '1 second' WHERE id=$1", [subscription.result.id]);
+
+    expect((await online(client)).isError).not.toBe(true);
+
+    expect((await commandFor(member, stale))[0]).toMatchObject({ state: 'cancelled', cancellation_reason: CONNECTOR_RECONNECT_RETIRED });
+    expect(await owed(member, stale)).toBe(0);
+    expect(await pendingMcpWakes(scope.db, member)).toEqual([]);
+    const fresh = await tag(handle, 'new work on the webhook route');
+    expect((await commandFor(member, fresh))[0]?.state).toBe('pending');
+  });
+
   it('a rejected sender cannot move the cutoff past an owner order', async () => {
     const { client, member, handle } = await connector();
     await scope.db.query(`UPDATE agents SET access_policy='{"type":"creator"}'::jsonb WHERE agent_id=$1`, [member]);

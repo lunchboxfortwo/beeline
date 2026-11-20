@@ -444,30 +444,35 @@ export async function markConnectorsOffline(db: SqlDatabase, members: readonly s
  * tags it still owes, so none runs late. Nothing is posted and nobody is woken.
  * Work queued after that, or while connected, is still delivered.
  */
-export async function noteConnectorPresence(db: SqlDatabase, member: string): Promise<number> {
-  const delivery = await readMemberDelivery(db, member);
-  if (delivery.offline) {
-    await markConnectorsOffline(db, [member]);
-    return 0;
-  }
-  const reconnected = (await db.query<{ disconnected_at: string }>(
-    `UPDATE rooms_mcp_members member SET disconnected_at=NULL
-     FROM (SELECT member_id,disconnected_at FROM rooms_mcp_members
-       WHERE member_id=$1 AND disconnected_at IS NOT NULL FOR UPDATE) before
-     WHERE member.member_id=before.member_id RETURNING before.disconnected_at::text`,
-    [member],
-  )).rows[0];
-  if (!reconnected) return 0;
-  const retired = await db.query(
-    `WITH candidate AS MATERIALIZED (SELECT command.id FROM agent_commands command
-       WHERE command.agent_id=$1 AND command.created_at<=$2 AND ${UNCLAIMED_CONNECTOR_INPUT_SQL})
-     SELECT ended.id FROM candidate
-       CROSS JOIN LATERAL beeline_finish_agent_command(candidate.id,'cancelled',$3,NULL) ended`,
-    [member, reconnected.disconnected_at, CONNECTOR_RECONNECT_RETIRED],
-  );
-  await db.query(`UPDATE rooms_mcp_mentions mention SET cleared_at=now()
-    WHERE mention.member_id=$1 AND mention.cleared_at IS NULL AND ${OWED_WITHOUT_QUEUED_COMMAND_SQL}`, [member]);
-  return retired.rowCount ?? 0;
+export async function noteConnectorPresence(database: SqlDatabase, member: string): Promise<number> {
+  return database.transaction(async db => {
+    const delivery = await readMemberDelivery(db, member);
+    if (delivery.offline) {
+      await markConnectorsOffline(db, [member]);
+      return 0;
+    }
+    const reconnected = (await db.query<{ disconnected_at: string }>(
+      `UPDATE rooms_mcp_members member SET disconnected_at=NULL
+       FROM (SELECT member_id,disconnected_at FROM rooms_mcp_members
+         WHERE member_id=$1 AND disconnected_at IS NOT NULL FOR UPDATE) before
+       WHERE member.member_id=before.member_id RETURNING before.disconnected_at::text`,
+      [member],
+    )).rows[0];
+    if (!reconnected) return 0;
+    const locked = (await db.query<{ id: string }>(`SELECT command.id FROM agent_commands command
+      WHERE command.agent_id=$1 AND command.created_at<=$2 AND command.state='pending'
+      ORDER BY command.id FOR UPDATE OF command`, [member,reconnected.disconnected_at])).rows;
+    const retired = await db.query(
+      `WITH candidate AS MATERIALIZED (SELECT command.id FROM agent_commands command
+         WHERE command.agent_id=$1 AND command.created_at<=$2 AND command.id=ANY($4::text[]) AND ${UNCLAIMED_CONNECTOR_INPUT_SQL})
+       SELECT ended.id FROM candidate
+         CROSS JOIN LATERAL beeline_finish_agent_command(candidate.id,'cancelled',$3,NULL) ended`,
+      [member, reconnected.disconnected_at, CONNECTOR_RECONNECT_RETIRED, locked.map(command => command.id)],
+    );
+    await db.query(`UPDATE rooms_mcp_mentions mention SET cleared_at=now()
+      WHERE mention.member_id=$1 AND mention.cleared_at IS NULL AND ${OWED_WITHOUT_QUEUED_COMMAND_SQL}`, [member]);
+    return retired.rowCount ?? 0;
+  });
 }
 
 /** A committed delivery change invalidates Room reads, then applies presence. */
