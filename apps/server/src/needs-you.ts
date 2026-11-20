@@ -239,12 +239,19 @@ export function questionRecipientSql(message: string, viewerId: string): string 
 
 /** One answer rule for write-time clearing and the legacy backfill. */
 export function needsYouAnsweredSql(message: string, viewerId: string): string {
+  const question = `(EXISTS (SELECT 1 FROM work_questions question WHERE question.message_id=${message}.id)
+    OR EXISTS (SELECT 1 FROM room_choices choice WHERE choice.message_id=${message}.id AND choice.mode='question'))`;
   return `(EXISTS (
     SELECT 1 FROM messages reply
-    WHERE reply.reply_to_message_id=${message}.id AND reply.author_id=${viewerId}
+    WHERE reply.reply_to_message_id=${message}.id
+      AND (reply.author_id=${viewerId} OR (${question}
+        AND EXISTS (SELECT 1 FROM needs_you_marks recipient WHERE recipient.message_id=${message}.id
+          AND recipient.identity_id=reply.author_id)))
       AND reply.presentation='message' AND reply.system_event IS NULL AND reply.deleted_at IS NULL
       AND reply.created_at>${message}.created_at
-  ) OR EXISTS (SELECT 1 FROM room_choices choice WHERE choice.message_id=${message}.id
+  ) OR (${question} AND EXISTS (SELECT 1 FROM needs_you_marks answered
+    WHERE answered.message_id=${message}.id AND answered.cleared_at IS NOT NULL AND answered.cleared_reason='answered'))
+    OR EXISTS (SELECT 1 FROM room_choices choice WHERE choice.message_id=${message}.id
     AND choice.mode='question' AND choice.status='answered'))`;
 }
 

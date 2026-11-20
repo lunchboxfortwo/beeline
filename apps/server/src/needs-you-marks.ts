@@ -60,10 +60,10 @@ CREATE TRIGGER question_needs_you_mark AFTER INSERT OR UPDATE OF status ON room_
   FOR EACH ROW EXECUTE FUNCTION question_needs_you_mark();
 CREATE OR REPLACE FUNCTION maintain_needs_you_marks() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-  -- Replies settle only the author's open items, using the former read-time rule.
   IF NEW.presentation='message' AND NEW.system_event IS NULL AND NEW.deleted_at IS NULL THEN
     UPDATE needs_you_marks mark SET cleared_at=now(),cleared_reason='answered'
-    FROM messages m WHERE mark.identity_id=NEW.author_id AND mark.cleared_at IS NULL
+    FROM messages m WHERE (mark.identity_id=NEW.author_id OR mark.message_id=NEW.reply_to_message_id)
+      AND mark.cleared_at IS NULL
       AND m.id=mark.message_id AND ${needsYouAnsweredSql('m', 'mark.identity_id')};
   END IF;
   -- The same agent's newer report from the same thread replaces its older asks of that person.

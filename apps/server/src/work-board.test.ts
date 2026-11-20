@@ -654,6 +654,35 @@ describe('question retirement', () => {
     expect((await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items.map(item => item.messageId)).toEqual([messageId]);
   });
 
+  it.each([true, false])('keeps quote answers terminal for new assignees, options=%s', async options => {
+    const { messageId } = await askOwnerQuestion(db, {
+      about: { kind: 'thread', roomId: thread }, question: 'Which surface?',
+      ...(options ? { options: [{ label: 'Web' }, { label: 'Phone' }] } : { freeText: true }),
+    }, agent);
+    const reply = await phone.execute('sendRoomReply', { roomId: thread, parentMessageId: messageId, text: 'Use Web.' }, person);
+    expect(await retirement(messageId)).toEqual([{ cleared_reason: 'answered', cleared: true }]);
+    await updateWorkItem(db, { id: messageId, roomId: thread, assigneeId: other }, person);
+    expect((await db.query('SELECT cleared_reason,cleared_at IS NOT NULL cleared FROM needs_you_marks WHERE message_id=$1 AND identity_id=$2', [messageId, other])).rows).toEqual([{ cleared_reason: 'answered', cleared: true }]);
+    await db.query('UPDATE messages SET deleted_at=now() WHERE id=$1', [reply.messageId]);
+    expect((await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items).toEqual([]);
+    expect(await phone.execute('countNeedsYou', { workspaceId: workspace }, other)).toEqual({ count: 0 });
+    expect((await agentOpenAsks(db, agent, chat)).text).toBe('');
+    expect((await agentOpenAsks(db, agent, null)).text).toBe('');
+    await updateWorkItem(db, { id: messageId, roomId: thread, assigneeId: person }, person);
+    expect(await tasks()).toEqual([]);
+  });
+
+  it('settles every recipient of a standalone question when one quote-answers', async () => {
+    const question = await postRoomChoice(db, { roomId: dm, agentId: agent, requesterId: person,
+      mode: 'question', prompt: 'Which surface?', options: [{ label: 'Web', consequence: 'Web' }, { label: 'Phone', consequence: 'Phone' }] });
+    await db.query(`UPDATE messages SET card=jsonb_set(card,'{mentionIds}',to_jsonb($2::text[])) WHERE id=$1`, [question.messageId, [person, other]]);
+    await phone.execute('sendRoomReply', { roomId: dm, parentMessageId: question.messageId, text: 'Use Web.' }, person);
+    expect((await db.query('SELECT identity_id,cleared_reason FROM needs_you_marks WHERE message_id=$1 AND cleared_at IS NOT NULL ORDER BY identity_id', [question.messageId])).rows).toEqual([
+      { identity_id: person, cleared_reason: 'answered' }, { identity_id: other, cleared_reason: 'answered' },
+    ]);
+    expect((await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items).toEqual([]);
+  });
+
   it.each(['source-closed', 'superseded', 'answered', 'quote', 'section'] as const)('retires a forwarded question on %s', async event => {
     const question = await sendMessage(db, {
       route: { from: { agent, place: thread }, to: { agent: person, place: dm } },

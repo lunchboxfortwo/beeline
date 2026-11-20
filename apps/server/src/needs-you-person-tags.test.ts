@@ -61,6 +61,18 @@ describe('person tags in Needs you', () => {
     expect(await count()).toBe(0);
   });
 
+  it('keeps ordinary personal tags per-person after another recipient quote-answers', async () => {
+    const tagged = await post(ROOM, PEER, '@ada @hoots please review.', 30);
+    await database.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'human','Quill','quill')`, ['e'.repeat(64)]);
+    await database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')`, [WORKSPACE, ROOM, 'e'.repeat(64)]);
+    await database.query('UPDATE messages SET text=$2 WHERE id=$1', [tagged, '@ada @quill please review.']);
+    const reply = await post(ROOM, VIEWER, 'Reviewed.', 10);
+    await database.query('UPDATE messages SET reply_to_message_id=$2 WHERE id=$1', [reply, tagged]);
+    expect(await count()).toBe(0);
+    expect((await phone.execute('readNeedsYou', { workspaceId: WORKSPACE }, 'e'.repeat(64))).items.map(item => item.messageId)).toEqual([tagged]);
+    expect((await database.query('SELECT cleared_at FROM needs_you_marks WHERE message_id=$1 AND identity_id=$2', [tagged, 'e'.repeat(64)])).rows).toEqual([{ cleared_at: null }]);
+  });
+
   it('PERSON-TAG: shares the question rules: no expiry, section clear and count', async () => {
     const id = await post(CORNER, PEER, '@ada please review this corner.', 30 * 60);
     expect(await count()).toBe(1);
