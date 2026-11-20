@@ -13,8 +13,14 @@ const historicalFiles = [
   /(?:^|\/)test-fixtures\//,
 ];
 const historicalLines = new Map([
-  ['docs/ci-checks-consolidation.md', /^Collected on 2026-10-22 from the GitHub Actions jobs API \(`GET \/repos\/Beeline-Work\/beeline\/actions\/runs\/\{run_id\}\/jobs\?per_page=100`\)/],
-  ['docs/incident-gap-coverage.md', /^- `Beeline-Work\/beeline-insights` .* were read through the owner's sealed GitHub read credential\./],
+  [
+    'docs/ci-checks-consolidation.md',
+    /^Collected on 2026-10-22 from the GitHub Actions jobs API \(`GET \/repos\/Beeline-Work\/beeline\/actions\/runs\/\{run_id\}\/jobs\?per_page=100`\)/,
+  ],
+  [
+    'docs/incident-gap-coverage.md',
+    /^- `Beeline-Work\/beeline-insights` .* were read through the owner's sealed GitHub read credential\./,
+  ],
 ]);
 const historicalUrlFiles = new Set([
   'docs/approval-matrix.md',
@@ -35,26 +41,42 @@ const retiredOwner = ['Beeline', 'Work'].join('-');
 const podspec = 'apps/mobile/modules/voice-background-audio/ios/VoiceBackgroundAudio.podspec';
 
 export function legacyRepositoryReferences(file, source) {
-  if (historicalFiles.some(pattern => pattern.test(file))) return [];
+  // This migration must match the retired owner to rewrite stored repository targets.
+  if (file === 'apps/server/src/migrations/beeline-work-repository-move.ts') return [];
+  if (historicalFiles.some((pattern) => pattern.test(file))) return [];
   return source.split('\n').flatMap((line, index) => {
     // Preserve the exact iOS source line: changing it changes the native fingerprint.
-    if (file === podspec && line === `  s.source         = { :git => 'https://github.com/${retiredOwner}/beeline.git', :tag => s.version.to_s }`) return [];
+    if (
+      file === podspec &&
+      line ===
+        `  s.source         = { :git => 'https://github.com/${retiredOwner}/beeline.git', :tag => s.version.to_s }`
+    )
+      return [];
     const historical = line.replace(historicalLines.get(file) ?? /$^/, '');
     // Immutable PR/issue/run/commit evidence, including approval-matrix history
     // and architecture invariant drop notes. A live repo name on the same line
     // still fails; blob/main, API, clone and billing URLs are never evidence.
-    const evidence = historicalUrlFiles.has(file)
-      || (file === 'docs/architecture/invariants.json' && /^\s*"drop":/.test(line));
-    const live = evidence ? historical.replace(/https:\/\/github\.com\/Beeline-Work\/[^/\s]+\/(?:pull|issues|actions\/runs)\/\d+|https:\/\/github\.com\/Beeline-Work\/[^/\s]+\/commit\/[a-f\d]{7,40}/gi, '') : historical;
+    const evidence =
+      historicalUrlFiles.has(file) ||
+      (file === 'docs/architecture/invariants.json' && /^\s*"drop":/.test(line));
+    const live = evidence
+      ? historical.replace(
+          /https:\/\/github\.com\/Beeline-Work\/[^/\s]+\/(?:pull|issues|actions\/runs)\/\d+|https:\/\/github\.com\/Beeline-Work\/[^/\s]+\/commit\/[a-f\d]{7,40}/gi,
+          '',
+        )
+      : historical;
     return /Beeline-Work\//i.test(live)
-      ? [`${file}:${index + 1}: live repository references must use lunchboxfortwo/`] : [];
+      ? [`${file}:${index + 1}: live repository references must use lunchboxfortwo/`]
+      : [];
   });
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const root = fileURLToPath(new URL('../..', import.meta.url));
-  const files = execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8' }).split('\0').filter(Boolean);
-  const errors = files.flatMap(file => {
+  const files = execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8' })
+    .split('\0')
+    .filter(Boolean);
+  const errors = files.flatMap((file) => {
     const source = readFileSync(resolve(root, file), 'utf8');
     return source.includes('\0') ? [] : legacyRepositoryReferences(file, source);
   });
