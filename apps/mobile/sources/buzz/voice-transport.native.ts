@@ -12,6 +12,8 @@ import {
 export type Room = LiveKit.Room;
 type Track = LiveKit.Track;
 let voiceClient: typeof LiveKit | undefined;
+let audioSession:
+  { startAudioSession(): Promise<void>; stopAudioSession(): Promise<void> } | undefined;
 let loadingVoiceClient: Promise<typeof LiveKit> | undefined;
 
 /**
@@ -20,8 +22,9 @@ let loadingVoiceClient: Promise<typeof LiveKit> | undefined;
  */
 export function loadVoiceClient() {
   return (loadingVoiceClient ??= (async () => {
-    const { registerGlobals } = await import('@livekit/react-native');
+    const { registerGlobals, AudioSession } = await import('@livekit/react-native');
     registerGlobals();
+    audioSession = AudioSession;
     voiceClient = await import('livekit-client');
     return voiceClient;
   })().catch((error: unknown) => {
@@ -142,7 +145,8 @@ export async function createVoiceRoom(
     }
   }
   // Lazy: installed binaries without WebRTC can still dictate/use the Room.
-  const { AudioSession } = await import('@livekit/react-native');
+  const { Room } = await loadVoiceClient();
+  const AudioSession = audioSession!;
   const { requireNativeModule } = await import('expo-modules-core');
   const background = requireNativeModule<{
     configureStop(url: string, token: string, generation: number): Promise<void>;
@@ -159,7 +163,6 @@ export async function createVoiceRoom(
       PermissionsAndroid.RESULTS.GRANTED
   )
     throw new Error('Microphone permission is required for Conversation mode.');
-  const { Room } = await loadVoiceClient();
   let generation: number | undefined;
   const addListener =
     typeof background.addListener === 'function'
