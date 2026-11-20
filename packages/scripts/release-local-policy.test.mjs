@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import test from 'node:test';
 import { parse } from 'yaml';
-import { localHooks } from './release-local.mjs';
+import { dryRun, localHooks } from './release-local.mjs';
 import { LocalActions } from './release-local-actions.mjs';
 import { LocalDelivery, writeToolAdapters } from './release-local-delivery.mjs';
 import { localToolPlan } from './release-local-tools.mjs';
@@ -336,6 +336,40 @@ function fakeGithub({ conclusions = { 'darwin-arm64': 'success', 'darwin-x64': '
   };
   return { calls, processes };
 }
+
+test('Mac helper dry-run signals cancel the remote run and release their listeners', async () => {
+  for (const outcome of ['SIGINT', 'SIGTERM', 'success', 'failure']) {
+    const directory = temporary();
+    const listeners = Object.fromEntries(['SIGINT', 'SIGTERM'].map(signal => [signal, process.listeners(signal)]));
+    try {
+      const { calls, processes } = fakeGithub({ pending: outcome.startsWith('SIG') ? Infinity : 0,
+        conclusions: { 'darwin-arm64': outcome === 'failure' ? 'failure' : 'success', 'darwin-x64': 'success' } });
+      const original = processes.run.bind(processes);
+      processes.run = async (command, args, options) => {
+        const result = await original(command, args, options);
+        if (args[0] === 'api' && args[1].endsWith('/runs/77') && outcome.startsWith('SIG')) process.emit(outcome);
+        return result;
+      };
+      const engine = new LocalActions({ root, directory, processes });
+      const execution = dryRun({ leg: 'mac-helpers' }, engine, { github: { sha: 'a'.repeat(40), token: 't', repository: 'fixture/repo' } });
+      if (outcome.startsWith('SIG')) {
+        await assert.rejects(execution, /Mac helper build cancelled/);
+        assert.equal(engine.abortController.signal.aborted, true);
+        assert.deepEqual(calls.at(-1).args, ['run', 'cancel', '77', '-R', 'fixture/repo']);
+      } else {
+        if (outcome === 'failure') await assert.rejects(execution, /Dry-run mac-helpers failed/);
+        else {
+          await execution;
+          const report = JSON.parse(readFileSync(join(directory, 'mac-helpers.json'), 'utf8'));
+          assert.equal(report.results['darwin-arm64'].result, 'success');
+          assert.equal(report.results['darwin-x64'].result, 'success');
+        }
+        assert.ok(calls.every(call => call.args[1] !== 'cancel'));
+      }
+      for (const signal of ['SIGINT', 'SIGTERM']) assert.deepEqual(process.listeners(signal), listeners[signal]);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  }
+});
 
 test('one GitHub run builds both Mac helpers and hands their artifacts to the helper join', async () => {
   const directory = temporary();

@@ -485,10 +485,16 @@ export async function dryRun(args, engine, context) {
     else if (leg === 'mac-tools') { await prepareMacTools(engine); continue; }
     else if (leg === 'mac-helpers') {
       if (!context.github.token) throw new Error('Dry-run mac-helpers requires --env-file with GITHUB_TOKEN or GH_TOKEN');
-      const results = await githubMacHelpers({ processes: engine.processes, token: context.github.token, repository: context.github.repository,
-        sha, version: args['release-version'] || version, directory: engine.directory, artifacts: engine.artifacts, records: engine.records, signal: engine.abortController.signal });
-      privateWrite(join(engine.directory, 'mac-helpers.json'), JSON.stringify({ results, artifacts: [...engine.artifacts] }, null, 2));
-      if (Object.values(results).some(result => result.result !== 'success')) throw new Error('Dry-run mac-helpers failed; no release was attempted');
+      const cancel = () => engine.abortController.abort();
+      process.once('SIGINT', cancel); process.once('SIGTERM', cancel);
+      try {
+        const results = await githubMacHelpers({ processes: engine.processes, token: context.github.token, repository: context.github.repository,
+          sha, version: args['release-version'] || version, directory: engine.directory, artifacts: engine.artifacts, records: engine.records, signal: engine.abortController.signal });
+        privateWrite(join(engine.directory, 'mac-helpers.json'), JSON.stringify({ results, artifacts: [...engine.artifacts] }, null, 2));
+        if (Object.values(results).some(result => result.result !== 'success')) throw new Error('Dry-run mac-helpers failed; no release was attempted');
+      } finally {
+        process.removeListener('SIGINT', cancel); process.removeListener('SIGTERM', cancel);
+      }
       continue;
     }
     else if (['eas-cli', 'require-tools'].includes(leg)) steps = [{ uses: `./.github/actions/${leg}`, with: leg === 'require-tools' ? { tools: 'node git docker ssh tar curl' } : {} }];
