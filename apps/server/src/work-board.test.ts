@@ -603,6 +603,57 @@ describe('question retirement', () => {
     expect(await retirement(messageId)).toEqual([{ cleared_reason: 'withdrawn', cleared: true }]);
   });
 
+  it.each([true, false].flatMap(options => (['answered', 'withdrawn', 'superseded'] as const).map(reason => ({ options, reason }))))(
+    'keeps agent closure for a first-time assignee, options=$options reason=$reason', async ({ options, reason }) => {
+      const { messageId } = await askOwnerQuestion(db, {
+        about: { kind: 'thread', roomId: thread }, question: 'Which surface?',
+        ...(options ? { options: [{ label: 'Web' }, { label: 'Phone' }] } : { freeText: true }),
+      }, agent);
+      expect(await tasks()).toEqual([messageId]);
+      expect((await db.query('SELECT 1 FROM needs_you_marks WHERE message_id=$1 AND identity_id=$2', [messageId, other])).rowCount).toBe(0);
+      expect(await closeAgentAsk(db, agent, { messageId, reason })).toEqual({ closed: 1 });
+      await updateWorkItem(db, { id: messageId, roomId: thread, assigneeId: other }, person);
+      expect((await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items).toEqual([]);
+      expect(await phone.execute('countNeedsYou', { workspaceId: workspace }, other)).toEqual({ count: 0 });
+      expect((await agentOpenAsks(db, agent, chat)).text).toBe('');
+      expect((await agentOpenAsks(db, agent, null)).text).toBe('');
+      expect((await db.query('SELECT identity_id,cleared_reason,cleared_at IS NOT NULL cleared FROM needs_you_marks WHERE message_id=$1 ORDER BY identity_id', [messageId])).rows).toEqual([
+        { identity_id: person, cleared_reason: reason, cleared: true },
+        { identity_id: other, cleared_reason: reason, cleared: true },
+      ]);
+      expect(await closeAgentAsk(db, agent, { messageId, reason: 'withdrawn' })).toEqual({ closed: 0 });
+      expect((await db.query('SELECT ask_closed_reason FROM messages WHERE id=$1', [messageId])).rows).toEqual([{ ask_closed_reason: reason }]);
+    },
+  );
+
+  it('preserves standalone choice closure when it is addressed to a new person', async () => {
+    const question = await postRoomChoice(db, { roomId: dm, agentId: agent, requesterId: person,
+      mode: 'question', prompt: 'Which surface?', options: [{ label: 'Web', consequence: 'Web' }, { label: 'Phone', consequence: 'Phone' }] });
+    await closeAgentAsk(db, agent, { messageId: question.messageId, reason: 'withdrawn' });
+    await db.query(`UPDATE messages SET card=jsonb_set(card,'{mentionIds}',to_jsonb(ARRAY[$2::text])) WHERE id=$1`, [question.messageId, other]);
+    expect((await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items).toEqual([]);
+    expect((await db.query('SELECT cleared_reason,cleared_at IS NOT NULL cleared FROM needs_you_marks WHERE message_id=$1 AND identity_id=$2', [question.messageId, other])).rows).toEqual([{ cleared_reason: 'withdrawn', cleared: true }]);
+  });
+
+  it('hides reminders after Room access is revoked, including changed private details', async () => {
+    await db.query("UPDATE rooms SET visibility='private' WHERE id=$1", [chat]);
+    const { messageId } = await askOwnerQuestion(db, {
+      about: { kind: 'thread', roomId: thread }, question: 'Which surface?', freeText: true,
+    }, agent);
+    const before = await agentOpenAsks(db, agent, dm);
+    expect(before.text).toContain(messageId);
+    expect((await agentOpenAsks(db, agent, null)).text).toContain(messageId);
+    await phone.execute('removeRoomMember', { roomId: chat, memberId: agent }, person);
+    await db.query('UPDATE rooms SET name=$2 WHERE id=$1', [thread, 'Confidential new name']);
+    await updateWorkItem(db, { id: messageId, roomId: thread, assigneeId: other }, person);
+    for (const roomId of [dm, null]) {
+      const after = await agentOpenAsks(db, agent, roomId);
+      expect(after.text).toBe('');
+      expect(after.version).not.toBe(before.version);
+    }
+    expect((await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items.map(item => item.messageId)).toEqual([messageId]);
+  });
+
   it.each(['source-closed', 'superseded', 'answered', 'quote', 'section'] as const)('retires a forwarded question on %s', async event => {
     const question = await sendMessage(db, {
       route: { from: { agent, place: thread }, to: { agent: person, place: dm } },

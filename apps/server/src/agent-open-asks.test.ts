@@ -19,8 +19,15 @@ describe('an agent\'s open asks', () => {
     await db.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'human','Ada','ada'),($2,'agent','Hoots','hoots'),($3,'agent','Other','other')`, [PERSON, AGENT, OTHER]);
     await db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Hive')`, [WORKSPACE]);
     await db.query(`INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Launch')`, [ROOM, WORKSPACE]);
-    await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$2,'owner'),($1,$3,$2,'member'),($1,$3,$4,'member'),($1,$3,$5,'member')`,
+    await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$2,'owner'),($1,NULL,$4,'member'),($1,NULL,$5,'member'),($1,$3,$2,'member'),($1,$3,$4,'member'),($1,$3,$5,'member')`,
       [WORKSPACE, PERSON, ROOM, AGENT, OTHER]);
+  });
+
+  it('requires current Workspace membership for both scoped and fresh-session reminders', async () => {
+    const id = await ask(1);
+    for (const roomId of [ROOM, null]) expect((await agentOpenAsks(db, AGENT, roomId)).text).toContain(id);
+    await db.query('UPDATE memberships SET removed_at=now() WHERE workspace_id=$1 AND identity_id=$2 AND room_id IS NULL', [WORKSPACE, AGENT]);
+    for (const roomId of [ROOM, null]) expect((await agentOpenAsks(db, AGENT, roomId)).text).toBe('');
   });
 
   it('lists at most five, oldest first, then counts the rest; the version names the set, not its wording or age', async () => {

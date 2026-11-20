@@ -34,12 +34,12 @@ export async function agentOpenAsks(db: SqlDatabase, agentId: string, roomId: st
        AND ((NOT EXISTS (SELECT 1 FROM work_questions question WHERE question.message_id=m.id)
          AND NOT EXISTS (SELECT 1 FROM room_choices choice WHERE choice.message_id=m.id AND choice.mode='question'))
          OR ${questionRecipientSql('m', 'mark.identity_id')})
-       AND (mark.workspace_id=(SELECT workspace_id FROM rooms WHERE id=$2)
-         OR ($2::uuid IS NULL AND EXISTS (SELECT 1 FROM memberships workspace
-           WHERE workspace.workspace_id=mark.workspace_id AND workspace.room_id IS NULL
-             AND workspace.identity_id=$1 AND workspace.removed_at IS NULL)
-           AND EXISTS (SELECT 1 FROM room_access access WHERE access.room_id=room.id
-             AND access.identity_id=$1 AND access.removed_at IS NULL)))
+       AND ($2::uuid IS NULL OR mark.workspace_id=(SELECT workspace_id FROM rooms WHERE id=$2))
+       AND EXISTS (SELECT 1 FROM memberships workspace
+         WHERE workspace.workspace_id=mark.workspace_id AND workspace.room_id IS NULL
+           AND workspace.identity_id=$1 AND workspace.removed_at IS NULL)
+       AND EXISTS (SELECT 1 FROM room_access access WHERE access.room_id=room.id
+         AND access.identity_id=$1 AND access.removed_at IS NULL)
        AND (${settledMarkReasonSql('m', 'mark.identity_id')}) IS NULL
      GROUP BY m.id,room.name ORDER BY m.created_at,m.id`,
     [agentId, roomId],
@@ -65,12 +65,18 @@ export async function closeAgentAsk(db: SqlDatabase, agentId: string, input: { m
   if (typeof input.messageId !== 'string' || !input.messageId) throw new CommandRefusalError('close_ask: id is required', 400);
   if (!AGENT_ASK_CLOSE_REASONS.includes(input.reason as AgentAskCloseReason))
     throw new CommandRefusalError(`close_ask: reason must be one of ${AGENT_ASK_CLOSE_REASONS.join(', ')}`, 400);
-  const own = await db.query('SELECT 1 FROM messages WHERE id=$1 AND author_id=$2', [input.messageId, agentId]);
-  if (!own.rowCount) throw new CommandRefusalError('close_ask: that id is not one of your asks', 404);
-  const closed = await db.query(
-    `UPDATE needs_you_marks SET cleared_at=now(),cleared_reason=$2
-     WHERE message_id=$1 AND cleared_at IS NULL`,
-    [input.messageId, input.reason],
-  );
-  return { closed: closed.rowCount ?? 0 };
+  return db.transaction(async tx => {
+    const question = await tx.query<{ ask_closed_reason: string }>(
+      `UPDATE messages SET ask_closed_reason=COALESCE(ask_closed_reason,$2)
+       WHERE id=$1 AND author_id=$3 RETURNING ask_closed_reason`,
+      [input.messageId, input.reason, agentId],
+    );
+    if (!question.rowCount) throw new CommandRefusalError('close_ask: that id is not one of your asks', 404);
+    const closed = await tx.query(
+      `UPDATE needs_you_marks SET cleared_at=now(),cleared_reason=$2
+       WHERE message_id=$1 AND cleared_at IS NULL`,
+      [input.messageId, question.rows[0]!.ask_closed_reason],
+    );
+    return { closed: closed.rowCount ?? 0 };
+  });
 }

@@ -16,10 +16,12 @@ function requestedSql(message = 'm'): string {
 /** All send paths already commit messages through the same database boundary. */
 export function needsYouMarksSchema(): string {
   return `
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS ask_closed_reason text;
 ALTER TABLE needs_you_marks ADD COLUMN IF NOT EXISTS cleared_reason text;
 CREATE INDEX IF NOT EXISTS needs_you_marks_open_identity_idx ON needs_you_marks(identity_id) WHERE cleared_at IS NULL;
 CREATE OR REPLACE FUNCTION refresh_needs_you_mark(asking_id text) RETURNS void LANGUAGE plpgsql AS $$
 BEGIN
+  PERFORM 1 FROM messages WHERE id=asking_id FOR UPDATE;
   UPDATE needs_you_marks mark SET cleared_at=now(),
     cleared_reason=COALESCE(${settledMarkReasonSql('m', 'recipient.id')},'removed')
   FROM messages m,identities recipient

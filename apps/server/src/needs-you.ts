@@ -285,7 +285,8 @@ export function supersedesSql(newer: string, message: string, viewerId: string):
  * written before those triggers existed.
  */
 export function settledMarkReasonSql(message: string, viewerId: string): string {
-  return `CASE WHEN ${sourceClosedSql(message)} THEN 'source-closed'
+  return `CASE WHEN ${message}.ask_closed_reason IS NOT NULL THEN ${message}.ask_closed_reason
+    WHEN ${sourceClosedSql(message)} THEN 'source-closed'
     WHEN EXISTS (SELECT 1 FROM messages newer WHERE ${supersedesSql('newer', message, viewerId)}) THEN 'superseded'
     WHEN ${needsYouAnsweredSql(message, viewerId)} THEN 'answered'
     WHEN EXISTS (SELECT 1 FROM room_choices choice WHERE choice.message_id=${message}.id
