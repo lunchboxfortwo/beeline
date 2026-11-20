@@ -1,4 +1,3 @@
-
 import * as React from 'react';
 
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
@@ -6,10 +5,14 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { RoomViewHttpError, type ChatListItem, type ChatListView, type WorkspaceListView, } from '@beeline/buzz-client';
+import {
+  RoomViewHttpError,
+  type ChatListItem,
+  type ChatListView,
+  type WorkspaceListView,
+} from '@beeline/buzz-client';
 
 import type { MonolithSurfaceEvent } from '@/sync/transport/monolith-rig-transport';
-
 
 import BuzzChannels from './channels';
 
@@ -19,7 +22,11 @@ import { loadBuzzIdentity } from '@/auth/buzz-identity-storage';
 
 import { loadPendingInvite } from '@/buzz/pending-invite';
 
-import { resetInitialLandingForTests, markInitialLandingResolved, suppressInitialLandingNavigation } from '@/navigation/initial-landing';
+import {
+  resetInitialLandingForTests,
+  markInitialLandingResolved,
+  suppressInitialLandingNavigation,
+} from '@/navigation/initial-landing';
 
 import Index from '../index';
 
@@ -41,10 +48,13 @@ export { transitions };
 
 vi.mock('react', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react')>();
-  return { ...actual, startTransition: (work: () => void) => {
-    if (transitions.held) transitions.pending.push(work);
-    else actual.startTransition(work);
-  } };
+  return {
+    ...actual,
+    startTransition: (work: () => void) => {
+      if (transitions.held) transitions.pending.push(work);
+      else actual.startTransition(work);
+    },
+  };
 });
 
 vi.mock('@expo/vector-icons/Ionicons', async () => {
@@ -54,14 +64,14 @@ vi.mock('@expo/vector-icons/Ionicons', async () => {
 
 vi.mock('react-native-keyboard-controller', async () => {
   const R = await import('react');
-  return { useReanimatedKeyboardAnimation: () => ({ height: { value: 0 } }), KeyboardAvoidingView: (props: any) => R.createElement('View', props, props.children) };
+  return {
+    useReanimatedKeyboardAnimation: () => ({ height: { value: 0 } }),
+    KeyboardAvoidingView: (props: any) => R.createElement('View', props, props.children),
+  };
 });
-
 
 // These fixtures exercise the negotiated legacy compatibility path. The actual
 // router owner/negotiation path has independent integration coverage.
-
-
 
 const deck = vi.hoisted(() => ({
   appState: 'active' as string,
@@ -122,11 +132,12 @@ const hotSurfaces = vi.hoisted(() => ({
 }));
 export { hotSurfaces };
 
-
 vi.mock('react-native', async () => {
   const ReactModule = await import('react');
   const host = (name: string) => (props: any) => {
-    ReactModule.useEffect(() => { if (!deck.holdLayouts) props.onLayout?.(); }, [props.onLayout]);
+    ReactModule.useEffect(() => {
+      if (!deck.holdLayouts) props.onLayout?.();
+    }, [props.onLayout]);
     return ReactModule.createElement(name, props, props.children);
   };
   return {
@@ -183,17 +194,19 @@ vi.mock('react-native', async () => {
   };
 });
 
-
 function hostModule(...names: string[]) {
   return Object.fromEntries(
-    names.map((name) => [name, (props: any) => {
-      React.useEffect(() => { if (name === 'SurfaceGlyphLoader' && !deck.holdLayouts) props.onLayout?.(); }, [props.onLayout]);
-      return React.createElement(name, props, props?.children);
-    }]),
+    names.map((name) => [
+      name,
+      (props: any) => {
+        React.useEffect(() => {
+          if (name === 'SurfaceGlyphLoader' && !deck.holdLayouts) props.onLayout?.();
+        }, [props.onLayout]);
+        return React.createElement(name, props, props?.children);
+      },
+    ]),
   );
 }
-
-
 
 vi.mock('@/components/buzz/ChevronGlyph', () => ({
   CHEVRON_ROW_SIZE: 16,
@@ -205,20 +218,29 @@ vi.mock('@/components/buzz/CommunityRail', () => ({
   useCommunityDrawer: () => ({ drawerOpen: false, openDrawer: deck.openDrawer }),
 }));
 
-vi.mock('tamagui', async () => (await import('@/ui/screens/chats/tamagui-hosts.test-support')).tamaguiHosts(() => !deck.holdLayouts));
+vi.mock('tamagui', async () =>
+  (await import('@/ui/screens/chats/tamagui-hosts.test-support')).tamaguiHosts(
+    () => !deck.holdLayouts,
+  ),
+);
 
-vi.mock('lucide-react-native', async () => (await import('@/ui/screens/chats/tamagui-hosts.test-support')).lucideHosts());
+vi.mock('lucide-react-native', async () =>
+  (await import('@/ui/screens/chats/tamagui-hosts.test-support')).lucideHosts(),
+);
 
-vi.mock('react-native-svg', async () => (await import('@/ui/screens/chats/tamagui-hosts.test-support')).svgHosts());
+vi.mock('react-native-svg', async () =>
+  (await import('@/ui/screens/chats/tamagui-hosts.test-support')).svgHosts(),
+);
 
 vi.mock('@/components/buzz/IdentityMark', () => hostModule('IdentityMark'));
-
 
 vi.mock('@/components/buzz/CornerWorkingPulse', () => hostModule('CornerWorkingPulse'));
 
 vi.mock('@/components/buzz/MemberRosterRow', () => hostModule('MemberRosterRow'));
 
-vi.mock('@/ui/screens/members/ChatAddSheets', () => hostModule('WorkspaceAddAgentSheet', 'ChatAddSheet'));
+vi.mock('@/ui/screens/members/ChatAddSheets', () =>
+  hostModule('WorkspaceAddAgentSheet', 'ChatAddSheet'),
+);
 
 vi.mock('@/components/buzz/Button', () => hostModule('Button'));
 
@@ -269,14 +291,23 @@ vi.mock('@react-navigation/native', () => ({
   },
 }));
 
-vi.mock('@/auth/desktop-auth-session', () => ({ initialAuthUrl: vi.fn(async () => deck.initialUrl) }));
+vi.mock('@/auth/desktop-auth-session', () => ({
+  initialAuthUrl: vi.fn(async () => deck.initialUrl),
+}));
 
 vi.mock('@/buzz/pending-invite', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/buzz/pending-invite')>();
-  return { ...actual, loadPendingInvite: vi.fn(async () => deck.storedInvite instanceof Promise ? deck.storedInvite : actual.loadPendingInvite()) };
+  return {
+    ...actual,
+    loadPendingInvite: vi.fn(async () =>
+      deck.storedInvite instanceof Promise ? deck.storedInvite : actual.loadPendingInvite(),
+    ),
+  };
 });
 
-vi.mock('@/buzz/person-name', () => ({ isPersonNameOnboardingPending: vi.fn(async () => deck.naming) }));
+vi.mock('@/buzz/person-name', () => ({
+  isPersonNameOnboardingPending: vi.fn(async () => deck.naming),
+}));
 
 vi.mock('@/auth/github-auth-session', () => ({ githubInstallationRedirectUri: () => '' }));
 
@@ -291,11 +322,14 @@ vi.mock('@/auth/buzz-identity-storage', () => ({
 }));
 
 vi.mock('@/buzz/community-storage', () => ({
-  loadActiveCommunityId: vi.fn(async () => deck.storedWorkspace !== undefined ? deck.storedWorkspace : deck.selectedWorkspace),
+  loadActiveCommunityId: vi.fn(async () =>
+    deck.storedWorkspace !== undefined ? deck.storedWorkspace : deck.selectedWorkspace,
+  ),
   saveActiveCommunityId: vi.fn(async () => undefined),
   watchActiveCommunityId: vi.fn((_pubkey: string, listener: (id: string | null) => void) => {
     deck.workspaceSelectionListener = listener;
-    const stored = deck.storedWorkspace !== undefined ? deck.storedWorkspace : deck.selectedWorkspace;
+    const stored =
+      deck.storedWorkspace !== undefined ? deck.storedWorkspace : deck.selectedWorkspace;
     if (!deck.deferWorkspaceSelection) void Promise.resolve(stored).then(listener);
     return () => undefined;
   }),
@@ -313,10 +347,11 @@ vi.mock('@/buzz/surface-storage', async () => {
     for (const listener of hotSurfaces.listeners.get(address) ?? []) listener();
   };
   roomSurfaceRecords.subscribe((scope, roomId) => {
-    for (const address of hotSurfaces.values.keys()) if (roomSurfaceRecords.matches(parsed(address), scope, roomId)) {
-      selected.delete(address);
-      notify(address);
-    }
+    for (const address of hotSurfaces.values.keys())
+      if (roomSurfaceRecords.matches(parsed(address), scope, roomId)) {
+        selected.delete(address);
+        notify(address);
+      }
   });
   const cache = {
     peek: vi.fn((address: string) => {
@@ -341,12 +376,14 @@ vi.mock('@/buzz/surface-storage', async () => {
     clear: vi.fn(() => {
       hotSurfaces.values.clear();
     }),
-    publish: vi.fn((address: string, value: unknown, _guard?: unknown, stamp = nextSurfaceStamp()) => {
-      hotSurfaces.values.set(address, roomSurfaceRecords.store(parsed(address), value, stamp));
-      selected.delete(address);
-      notify(address);
-      return value;
-    }),
+    publish: vi.fn(
+      (address: string, value: unknown, _guard?: unknown, stamp = nextSurfaceStamp()) => {
+        hotSurfaces.values.set(address, roomSurfaceRecords.store(parsed(address), value, stamp));
+        selected.delete(address);
+        notify(address);
+        return value;
+      },
+    ),
     subscribe: vi.fn((address: string, listener: () => void) => {
       const listeners = hotSurfaces.listeners.get(address) ?? new Set<() => void>();
       listeners.add(listener);
@@ -375,11 +412,17 @@ vi.mock('@/buzz/surface-storage', async () => {
   };
 });
 
-vi.mock('@/buzz/room-open-prefetch', () => ({ dispatchRoomOpenTap: vi.fn(), warmRoomRouteCode: vi.fn() }));
+vi.mock('@/buzz/room-open-prefetch', () => ({
+  dispatchRoomOpenTap: vi.fn(),
+  warmRoomRouteCode: vi.fn(),
+}));
 
 vi.mock('@/utils/responsive', () => ({ useIsDesktop: () => deck.desktop }));
 
-vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: deck.operation, readServerSurface: vi.fn() }));
+vi.mock('@/sync/transport/monolith-operation', () => ({
+  monolithPhoneOperation: deck.operation,
+  readServerSurface: vi.fn(),
+}));
 
 vi.mock('@/sync/transport', () => ({
   BuzzRigTransport: class {
@@ -415,35 +458,38 @@ vi.mock('@/sync/transport', () => ({
 vi.mock('@/sync/transport/live-connection', async () => {
   const { publishPhoneLiveEvent } = await import('@/sync/transport/phone-live-events');
   return {
-  useConnectionState: () => deck.connectionState,
-  reconnectNow: () => {
-    deck.reconnects += 1;
-  },
-  sharedLiveConnection: () => ({
-    connectionStatus: () => deck.connectionState,
-    subscribeConnectionStatus: () => () => undefined,
+    useConnectionState: () => deck.connectionState,
     reconnectNow: () => {
       deck.reconnects += 1;
     },
-    request: deck.socketRequest,
-    register: async (
-      filters: readonly { readonly '#h'?: readonly string[] }[],
-      listener: (event: MonolithSurfaceEvent) => void,
-    ) => {
-      // The badge's identity-wide watch is outside this deck fixture.
-      if (!filters.length) return () => undefined;
-      deck.subscriptions.push({ filters, emit: event => {
-        if ('monolithLive' in event) publishPhoneLiveEvent(event.monolithLive);
-        listener(event);
-      } });
-      return () => undefined;
-    },
-    whenSubscribed: async () => undefined,
-    isViewing: () => false,
-    reconnect: () => {
-      deck.reconnects += 1;
-    },
-  }),
+    sharedLiveConnection: () => ({
+      connectionStatus: () => deck.connectionState,
+      subscribeConnectionStatus: () => () => undefined,
+      reconnectNow: () => {
+        deck.reconnects += 1;
+      },
+      request: deck.socketRequest,
+      register: async (
+        filters: readonly { readonly '#h'?: readonly string[] }[],
+        listener: (event: MonolithSurfaceEvent) => void,
+      ) => {
+        // The badge's identity-wide watch is outside this deck fixture.
+        if (!filters.length) return () => undefined;
+        deck.subscriptions.push({
+          filters,
+          emit: (event) => {
+            if ('monolithLive' in event) publishPhoneLiveEvent(event.monolithLive);
+            listener(event);
+          },
+        });
+        return () => undefined;
+      },
+      whenSubscribed: async () => undefined,
+      isViewing: () => false,
+      reconnect: () => {
+        deck.reconnects += 1;
+      },
+    }),
   };
 });
 
@@ -483,16 +529,13 @@ vi.mock('@/sync/transport/room-view-client', async () => ({
   },
 }));
 
-
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
-
 export const viewer = { pubkey: 'viewer', kind: 'human' as const, name: 'Captain' };
 
 export const agent = { pubkey: 'agent', kind: 'agent' as const, name: 'Greeter' };
-
 
 export function chatList(latest: { id: string; text: string; createdAt: number }): ChatListView {
   return {
@@ -517,8 +560,11 @@ export function chatList(latest: { id: string; text: string; createdAt: number }
   };
 }
 
-
-export function room(id: string, latestAt: number, extra: Partial<ChatListItem> = {}): ChatListItem {
+export function room(
+  id: string,
+  latestAt: number,
+  extra: Partial<ChatListItem> = {},
+): ChatListItem {
   return {
     room: {
       id,
@@ -534,7 +580,6 @@ export function room(id: string, latestAt: number, extra: Partial<ChatListItem> 
   };
 }
 
-
 export function listOf(chats: ChatListItem[], extra: Partial<ChatListView> = {}): ChatListView {
   return {
     workspace: { id: 'workspace', name: 'Work', role: 'member', updatedAt: 1 },
@@ -546,7 +591,6 @@ export function listOf(chats: ChatListItem[], extra: Partial<ChatListView> = {})
   };
 }
 
-
 export function paintedRows(renderer: ReactTestRenderer): ChatListItem[] {
   const list = renderer.root.find(
     (node: { type: unknown; props: { testID?: string } }) =>
@@ -554,7 +598,6 @@ export function paintedRows(renderer: ReactTestRenderer): ChatListItem[] {
   );
   return list.props.data as ChatListItem[];
 }
-
 
 export function roomWatch() {
   const watch = deck.subscriptions.find((entry) =>
@@ -564,10 +607,8 @@ export function roomWatch() {
   return watch;
 }
 
-
 /** Longer than the scheduler's 500 ms floor and 1 s dirty ceiling. */
 export const quiet = () => act(() => new Promise((resolve) => setTimeout(resolve, 1_100)));
-
 
 const mountedDecks = new Set<ReactTestRenderer>();
 
@@ -581,7 +622,6 @@ export async function mountDeck(): Promise<ReactTestRenderer> {
   await quiet();
   return renderer;
 }
-
 
 beforeEach(async () => {
   await act(async () => {
@@ -599,7 +639,9 @@ beforeEach(async () => {
   hotSurfaces.values.clear();
   vi.stubGlobal('requestAnimationFrame', (run: () => void) => setTimeout(run, 0));
   vi.stubGlobal('cancelAnimationFrame', (id: ReturnType<typeof setTimeout>) => clearTimeout(id));
-  vi.mocked(loadBuzzIdentity).mockReset().mockResolvedValue({ publicKey: 'viewer', secretKey: new Uint8Array(32) });
+  vi.mocked(loadBuzzIdentity)
+    .mockReset()
+    .mockResolvedValue({ publicKey: 'viewer', secretKey: new Uint8Array(32) });
   vi.mocked(loadPendingInvite).mockClear();
   transitions.held = false;
   transitions.pending = [];
@@ -638,7 +680,6 @@ beforeEach(async () => {
   deck.chatsResponse = chatList({ id: 'm1', text: 'earlier', createdAt: 10 });
 });
 
-
 afterEach(async () => {
   await act(async () => {
     for (const renderer of mountedDecks) renderer.unmount();
@@ -650,9 +691,7 @@ afterEach(async () => {
   deck.blur = null;
 });
 
-
 vi.mock('@/components/buzz/WorkspaceActionsMenu', () => hostModule('WorkspaceActionsMenu'));
-
 
 vi.mock('@react-native-async-storage/async-storage', () => ({
   default: {
@@ -665,47 +704,65 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
   },
 }));
 export function fixtureScope1() {
-
   const savedViewer = 'a'.repeat(64);
 
   const savedWorkspace = '11111111-1111-4111-8111-111111111111';
 
   function saveDeck() {
     deck.selectedWorkspace = savedWorkspace;
-    vi.mocked(loadBuzzIdentity).mockResolvedValue({ publicKey: savedViewer, secretKey: new Uint8Array(32) });
-    const workspaces = { workspaces: [{ id: savedWorkspace, name: 'Work', role: 'member' as const, updatedAt: 1 }], viewer: { ...viewer, pubkey: savedViewer }, truncated: false, watchFilters: [] };
-    hotSurfaces.saved.set(JSON.stringify(['https://relay.test', savedViewer, '/workspaces', undefined]), workspaces);
+    vi.mocked(loadBuzzIdentity).mockResolvedValue({
+      publicKey: savedViewer,
+      secretKey: new Uint8Array(32),
+    });
+    const workspaces = {
+      workspaces: [{ id: savedWorkspace, name: 'Work', role: 'member' as const, updatedAt: 1 }],
+      viewer: { ...viewer, pubkey: savedViewer },
+      truncated: false,
+      watchFilters: [],
+    };
+    hotSurfaces.saved.set(
+      JSON.stringify(['https://relay.test', savedViewer, '/workspaces', undefined]),
+      workspaces,
+    );
     const base = chatList({ id: 'c'.repeat(64), text: 'saved before effects', createdAt: 1 });
     const saved: ChatListView = {
       ...base,
       workspace: { ...base.workspace, id: savedWorkspace },
       viewer: { ...viewer, pubkey: savedViewer },
-      chats: base.chats.map(item => ({
+      chats: base.chats.map((item) => ({
         ...item,
-        room: { ...item.room, id: '22222222-2222-4222-8222-222222222222', workspaceId: savedWorkspace },
+        room: {
+          ...item.room,
+          id: '22222222-2222-4222-8222-222222222222',
+          workspaceId: savedWorkspace,
+        },
         latestMessage: { ...item.latestMessage!, author: { ...agent, pubkey: 'b'.repeat(64) } },
       })),
       watchFilters: [],
     };
-    hotSurfaces.saved.set(JSON.stringify(['https://relay.test', savedViewer, '/workspace/:id/chats', { workspaceId: savedWorkspace }]), saved);
+    hotSurfaces.saved.set(
+      JSON.stringify([
+        'https://relay.test',
+        savedViewer,
+        '/workspace/:id/chats',
+        { workspaceId: savedWorkspace },
+      ]),
+      saved,
+    );
   }
-return {
-savedViewer,
-savedWorkspace,
-saveDeck,
-};
+  return {
+    savedViewer,
+    savedWorkspace,
+    saveDeck,
+  };
 }
 export function fixtureScope3() {
-
   beforeEach(() => {
     hotSurfaces.values.clear();
   });
-return {
-
-};
+  return {};
 }
 export function fixtureScope5() {
-
   const listIn = (renderer: ReactTestRenderer) => renderer.root.findByType('FlatList');
 
   const touchIn = (renderer: ReactTestRenderer) =>
@@ -719,15 +776,14 @@ export function fixtureScope5() {
     );
 
   const swipeIn = (renderer: ReactTestRenderer) => renderer.root.findByType('Swipeable');
-return {
-listIn,
-touchIn,
-pressIn,
-swipeIn,
-};
+  return {
+    listIn,
+    touchIn,
+    pressIn,
+    swipeIn,
+  };
 }
 export function fixtureScope7() {
-
   beforeEach(() => {
     vi.useFakeTimers();
     hotSurfaces.values.clear();
@@ -735,13 +791,11 @@ export function fixtureScope7() {
 
   afterEach(() => vi.useRealTimers());
 
-
   async function advance(ms = 100) {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(ms);
     });
   }
-
 
   async function openDeck() {
     let renderer!: ReactTestRenderer;
@@ -754,14 +808,12 @@ export function fixtureScope7() {
     return renderer;
   }
 
-
   async function activate(state: string) {
     await act(async () => {
       deck.appState = state;
       for (const listener of deck.appStateListeners) listener(state);
     });
   }
-
 
   async function missChanges() {
     await activate('background');
@@ -792,10 +844,10 @@ export function fixtureScope7() {
     expect(deck.workspaceReads).toBe(1);
     expect(deck.chatsReads).toBe(1);
   }
-return {
-advance,
-openDeck,
-activate,
-missChanges,
-};
+  return {
+    advance,
+    openDeck,
+    activate,
+    missChanges,
+  };
 }
