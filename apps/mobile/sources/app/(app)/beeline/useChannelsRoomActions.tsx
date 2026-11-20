@@ -7,7 +7,7 @@ import { Modal } from '@/modal';
 import { type ChatListItem } from '@beeline/buzz-client';
 import * as Haptics from 'expo-haptics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Swipeable } from 'react-native-gesture-handler';
+import type { SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSwipeable';
 import type { DeckState } from './useChannelsRouteState';
 
 /** Swipe gestures and the swipe actions: leave a chat, close a direct message.
@@ -19,7 +19,7 @@ export function useChannelsRoomActions(
   rows: readonly ChatListItem[],
   allRows: readonly ChatListItem[] = rows,
 ) {
-  const swipeableRefs = useRef<Map<string, Swipeable | null>>(new Map());
+  const swipeableRefs = useRef<Map<string, SwipeableMethods | null>>(new Map());
   const roomListGestures = useRoomListGestures();
   // Pending ids stay hidden until the call settles; done ids until the list drops them.
   const [hidden, setHidden] = useState<ReadonlyMap<string, 'pending' | 'done'>>(() => new Map());

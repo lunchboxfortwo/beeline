@@ -25,10 +25,10 @@ import { MessageMatches } from '@/ui/screens/chats/MessageMatches';
 import { NewChatSheet } from '@/ui/screens/chats/NewChatSheet';
 import { isWorkspaceListView, type ChatListItem, type Identity } from '@beeline/buzz-client';
 import { router, useLocalSearchParams, usePathname, type Href } from 'expo-router';
-import { memo, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useContext, useEffect, useRef, useState, type RefObject } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { FlatList } from 'react-native';
-import { Swipeable } from 'react-native-gesture-handler';
+import Swipeable, { type SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSwipeable';
 import { XStack, YStack } from 'tamagui';
 import { LogOut } from 'lucide-react-native';
 import {
@@ -211,8 +211,14 @@ export default function SavedRoomDeck() {
 
 const EMPTY_CHATS: readonly ChatListItem[] = [];
 
-// Swipeable re-renders every row when the list is covered or measured; a memoized
-// action keeps those re-renders from rebuilding each row's hidden button.
+// The row hands its methods to useImperativeHandle, which also takes a
+// callback ref; the component's props type names only an object ref.
+const rowSwipeRef = (attach: (ref: SwipeableMethods | null) => void) =>
+  attach as unknown as RefObject<SwipeableMethods | null>;
+
+// The row keeps its measured width in a shared value, so covering the deck
+// (display: none) or measuring the list does not re-render every row. A
+// memoized action still keeps other row re-renders off its hidden button.
 const RowSwipeAction = memo(function RowSwipeAction({
   item,
   canInteract,
@@ -402,12 +408,12 @@ const BuzzChannels = memo(function BuzzChannels({ session }: { session: DeckSess
         {index === 0 ? null : <ChatRowDivider roomId={item.room.id} />}
         <Swipeable
           enabled={roomListGestures.swipesEnabled}
-          activeOffsetX={[-15, 15]}
-          failOffsetY={[-10, 10]}
-          ref={(ref) => {
+          dragOffsetFromLeftEdge={15}
+          dragOffsetFromRightEdge={15}
+          ref={rowSwipeRef((ref) => {
             if (ref) swipeableRefs.current.set(item.room.id, ref);
             else swipeableRefs.current.delete(item.room.id);
-          }}
+          })}
           friction={1}
           overshootRight={false}
           rightThreshold={ROW_HEIGHT}

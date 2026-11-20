@@ -470,8 +470,8 @@ describe('Room list gestures', () => {
     const list = scope5.listIn(renderer);
     expect(scope5.swipeIn(renderer).props).toMatchObject({
       enabled: true,
-      activeOffsetX: [-15, 15],
-      failOffsetY: [-10, 10],
+      dragOffsetFromLeftEdge: 15,
+      dragOffsetFromRightEdge: 15,
     });
     act(() => {
       expect(scope5.touchIn(renderer).props.onStartShouldSetResponderCapture()).toBe(false);

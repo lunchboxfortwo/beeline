@@ -262,7 +262,7 @@ vi.mock('expo-router', () => ({
       : {},
 }));
 
-vi.mock('react-native-gesture-handler', () => hostModule('Swipeable'));
+vi.mock('react-native-gesture-handler/ReanimatedSwipeable', () => ({ default: hostModule('Swipeable').Swipeable }));
 
 vi.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: deck.bottomInset, left: 0, right: 0 }),
