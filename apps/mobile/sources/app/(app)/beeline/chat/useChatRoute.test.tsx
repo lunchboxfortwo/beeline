@@ -10,12 +10,20 @@ vi.mock('@react-navigation/native', async () => await import('@react-navigation/
 vi.mock('expo-router', async () => ({
   // Expo Router 55's no-parent hook also reads useStateForPath. Model
   // that external subscription without loading its native module barrel.
-  useNavigation: () => { useStateForPath(); return useNavigation(); },
+  useNavigation: () => {
+    useStateForPath();
+    return useNavigation();
+  },
   useLocalSearchParams: () => ({ channelId: 'room-a', title: 'Room A' }),
 }));
 vi.mock('react-native', () => ({ Platform: { OS: 'web' } }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ bottom: 0 }) }));
-vi.mock('@/buzz/room-send-list', () => ({ RoomSendPreview: class { activate() {} dispose() {} } }));
+vi.mock('@/buzz/room-send-list', () => ({
+  RoomSendPreview: class {
+    activate() {}
+    dispose() {}
+  },
+}));
 vi.mock('@/utils/responsive', () => ({ useIsDesktop: () => false }));
 vi.mock('@/utils/isDesktopShell', () => ({ isDesktopShell: () => false }));
 import { useChatRoute } from './useChatRoute';
@@ -42,16 +50,22 @@ it('keeps a mounted Room out of navigator path updates while retaining navigatio
     </NavigationContext.Provider>
   );
   let tree: ReturnType<typeof create>;
-  await act(async () => { tree = create(view(undefined)); });
+  await act(async () => {
+    tree = create(view(undefined));
+  });
   try {
     expect(renders).toBe(1);
-    await act(async () => { tree.update(view({ routes: [{ name: 'chat', params: { channelId: 'room-a' } }] })); });
+    await act(async () => {
+      tree.update(view({ routes: [{ name: 'chat', params: { channelId: 'room-a' } }] }));
+    });
     expect(renders).toBe(1);
     expect(tree.root.findByType('button').props.children).toBe('room-a');
     act(() => tree.root.findByType('button').props.onClick());
     expect(goBack).toHaveBeenCalledOnce();
     const nextGoBack = vi.fn();
-    await act(async () => { tree.update(view(undefined, { goBack: nextGoBack })); });
+    await act(async () => {
+      tree.update(view(undefined, { goBack: nextGoBack }));
+    });
     act(() => tree.root.findByType('button').props.onClick());
     expect(nextGoBack).toHaveBeenCalledOnce();
     expect(goBack).toHaveBeenCalledOnce();
