@@ -6,6 +6,8 @@ vi.mock('@/buzz/room-transition-work', () => ({
   deferRoomWrite: (_key: string, work: () => Promise<void>) => work(),
 }));
 vi.mock('expo-router', () => ({ useFocusEffect: () => undefined }));
+// Screens take useFocusEffect from React Navigation; this file's mock above stays its focus wiring.
+vi.mock('@react-navigation/native', async () => ({ useFocusEffect: (await import('expo-router')).useFocusEffect }));
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   isWorkspaceListView,

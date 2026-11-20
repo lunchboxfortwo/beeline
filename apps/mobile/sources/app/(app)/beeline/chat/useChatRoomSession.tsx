@@ -3,7 +3,7 @@ import { appErrorCopy } from '@/buzz/app-error-copy';
 import React, { useEffect, useLayoutEffect, useState, useCallback } from 'react';
 import { Platform, AppState } from 'react-native';
 import * as Notifications from 'expo-notifications';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { sharedLiveConnection } from '@/sync/transport/live-connection';
 import { BuzzRigTransport } from '@/sync/transport';
 import { type ChatDisplayMessage } from '@/buzz/room-view-presentation';

@@ -19,6 +19,7 @@
       "DesktopSidebarNavigator",
       "PersistentHeader",
       "SidebarNavigator",
+      "drawer",
       "drawerContent"
     ],
     "components/SidebarView.tsx": [

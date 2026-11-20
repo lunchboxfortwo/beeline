@@ -9,6 +9,10 @@ import { type RepoCandidate } from '@/buzz/room-repo-picker';
 import { type ChannelKind } from '@/buzz/corner-session';
 import { useRoomRoster } from '@/buzz/use-room-roster';
 
+// Shared empty lists keep the memoized composer's props equal across renders.
+const NO_REPO_CANDIDATES: RepoCandidate[] = [];
+const NO_INSTALLATIONS: GitHubInstallationAccess[] = [];
+
 type Props = [
   desktopWorkPaneRef: React.RefObject<import("@/buzz/desktop-workbench-state").DesktopWorkPaneState>,
   setDesktopWorkPane: React.Dispatch<React.SetStateAction<import("@/buzz/desktop-workbench-state").DesktopWorkPaneState>>,
@@ -156,9 +160,9 @@ export function useChatDesktopLayout([
 
   const githubAccess = useGitHubAccess(githubScope);
 
-  const roomRepoCandidates = githubAccess?.candidates ?? [];
+  const roomRepoCandidates = githubAccess?.candidates ?? NO_REPO_CANDIDATES;
 
-  const githubInstallations = githubAccess?.installations ?? [];
+  const githubInstallations = githubAccess?.installations ?? NO_INSTALLATIONS;
   return [
     chatListKey, isArchived, isCorner, activeCommunityId, surfaceParentId, parentChannelId,
     resolvedChannelName, commitDesktopWorkPane, desktopWorkRoomId, cacheViewerPubkey,

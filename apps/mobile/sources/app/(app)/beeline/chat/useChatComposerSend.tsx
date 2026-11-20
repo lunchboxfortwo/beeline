@@ -5,7 +5,7 @@ import { appErrorCopy } from '@/buzz/app-error-copy';
 import React, { useRef, useCallback } from 'react';
 import { Buffer } from 'buffer';
 import { type TextInput, Platform } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { loadBuzzIdentity } from '@/auth/buzz-identity-storage';
 import { readGitHubAccess } from '@/buzz/github-access-surface';
 import { Modal } from '@/modal';

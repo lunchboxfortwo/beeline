@@ -29,8 +29,14 @@ function SessionRequired() {
   return null;
 }
 
-export default function RootLayout() {
+// The route subscription stays in a leaf. In the layout it re-rendered the
+// stack, and every screen in it, after each navigation had already rendered.
+function RememberLastPage() {
   useRememberLastPage();
+  return null;
+}
+
+export default function RootLayout() {
   const isDesktop = useIsDesktop();
   const t = useTheme();
   const dark = useThemeName().startsWith('dark');
@@ -39,6 +45,7 @@ export default function RootLayout() {
   return (
     <YStack flex={1} backgroundColor="canvas">
       <SessionRequired />
+      <RememberLastPage />
       <ConnectionStatus>
       <WorkspaceTabShell>
       <Stack

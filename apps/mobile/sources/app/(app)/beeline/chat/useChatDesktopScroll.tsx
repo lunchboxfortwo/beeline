@@ -1,7 +1,8 @@
 import { observeArtifactRows } from '@/buzz/artifact-viewport';
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { type ViewToken } from 'react-native';
-import { useFocusEffect, router } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
+import { router } from 'expo-router';
 import { type ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { shouldFollowDesktopTail } from '@/buzz/room-scroll-follow';
 import { messageJumpHref } from '@/buzz/corner-navigation';

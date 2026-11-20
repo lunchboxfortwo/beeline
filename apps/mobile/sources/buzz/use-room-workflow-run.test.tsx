@@ -6,6 +6,8 @@ const read = vi.hoisted(() => vi.fn(async () => ({ workflows: [] })));
 // This suite exercises the explicitly negotiated legacy-server cohort.
 
 vi.mock('expo-router', () => ({ useFocusEffect: (effect: () => (() => void)) => { wire.focus = effect; React.useEffect(() => { const blur = effect(); wire.blur = blur; return blur; }, [effect]); } }));
+// Screens take useFocusEffect from React Navigation; this file's mock above stays its focus wiring.
+vi.mock('@react-navigation/native', async () => ({ useFocusEffect: (await import('expo-router')).useFocusEffect }));
 vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: read }));
 const wire = vi.hoisted(() => ({ listener: undefined as any, foreground: undefined as any, focus: undefined as any, blur: undefined as any, fail: false }));
 vi.mock('react-native', () => ({ AppState: { currentState: 'active', addEventListener: (_: string, callback: unknown) => { wire.foreground = callback; return { remove: vi.fn() }; } } }));

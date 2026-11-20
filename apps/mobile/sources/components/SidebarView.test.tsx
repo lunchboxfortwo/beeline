@@ -201,6 +201,8 @@ vi.mock('expo-router', async () => {
   useRouter: () => stableRouter,
   });
 });
+// The sidebar's surfaces take useFocusEffect from React Navigation; no screen focus runs here.
+vi.mock('@react-navigation/native', () => ({ useFocusEffect: () => undefined }));
 vi.mock('@/utils/responsive', () => ({ useHeaderHeight: () => 56, useIsDesktop: () => true }));
 vi.mock('@/utils/isTauri', () => ({ isTauri: () => desktopShell.current }));
 vi.mock('@/utils/platform', () => ({ isDesktopPlatform: () => true }));

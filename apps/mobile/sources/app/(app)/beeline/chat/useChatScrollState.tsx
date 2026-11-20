@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useCallback, useState, useRef } from 'react';
 import type { FlatList, ViewProps } from 'react-native';
 import { ListCell } from '@/ui/grammar-root';
 import { type ChatDisplayMessage } from '@/buzz/room-view-presentation';
@@ -59,7 +59,8 @@ export function useChatScrollState([
   const transcriptWindowIdRef = useRef(0);
   const sendPreviewRef = useRef(sendPreview);
   sendPreviewRef.current = sendPreview;
-  const phoneRowKey = (rowId: string) => `${transcriptWindowIdRef.current}:${sendPreviewRef.current.key(rowId)}`;
+  const phoneRowKey = useCallback(
+    (rowId: string) => `${transcriptWindowIdRef.current}:${sendPreviewRef.current.key(rowId)}`, []);
   const [measuredPhoneRowKeys] = useState(() => new Set<string>());
   const [phoneScrollList] = useState(() =>
     phoneTranscriptList(
