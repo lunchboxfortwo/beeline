@@ -118,10 +118,12 @@ including when a person tags it), it records that moment on
 back online, the unclaimed commands queued up to that moment are cancelled
 (`connector_reconnected`) and its owed tags are cleared, so none runs late.
 A command counts as claimed once an answer is committed, a tool call runs
-under it, or a webhook or event host has accepted it; claimed commands stay,
+under it, or a webhook or event dispatch is in flight or accepted; claimed commands stay,
 following brief revision 2’s “never retire a command the connector has already
-claimed”. Host-accepted commands are excluded from subsequent queue and mention
-delivery, including after reconnect.
+claimed”. Dispatch claims commit before HTTP begins, with no database lock held
+during the send. Failed dispatches remain retirable. In-flight and accepted
+commands are excluded from subsequent queue and mention delivery, including
+after reconnect.
 Work queued after that moment, or while connected, is still delivered. Nothing
 is posted and nobody is woken. A connector that is never online, such as an
 on-demand host with no route, keeps its queue. The one-time

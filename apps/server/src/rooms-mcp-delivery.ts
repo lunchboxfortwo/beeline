@@ -411,7 +411,7 @@ export const OWED_WITHOUT_QUEUED_COMMAND_SQL = `NOT EXISTS(SELECT 1 FROM agent_c
 
 /**
  * A connector's queued input it has not claimed: no answer committed, no tool
- * call made under it, and no webhook or event host accepted it. Its own
+ * call made under it, and no webhook or event dispatch in flight or accepted. Its own
  * in-flight tool items (`mcp_call`) are never retired.
  */
 export const UNCLAIMED_CONNECTOR_INPUT_SQL = `command.state='pending' AND command.action='input' AND command.reason<>'mcp_call'
@@ -425,10 +425,10 @@ export const UNCLAIMED_CONNECTOR_INPUT_SQL = `command.state='pending' AND comman
 export function connectorHostAcceptedSql(command: string): string {
   return `(EXISTS(SELECT 1 FROM rooms_mcp_members member WHERE member.member_id=${command}.agent_id)
     AND (EXISTS(SELECT 1 FROM rooms_mcp_webhook_outbox outbox WHERE outbox.member_id=${command}.agent_id
-      AND outbox.message_id IN (${command}.id,${command}.source_message_id) AND outbox.delivery_state='delivered')
+      AND outbox.message_id IN (${command}.id,${command}.source_message_id) AND (outbox.delivery_state='delivered' OR outbox.claimed_at IS NOT NULL AND outbox.delivery_state IS DISTINCT FROM 'failed'))
     OR EXISTS(SELECT 1 FROM rooms_mcp_event_deliveries event JOIN rooms_mcp_event_subscriptions subscription
       ON subscription.id=event.subscription_id AND subscription.member_id=${command}.agent_id
-      WHERE (event.command_id=${command}.id OR event.message_id=${command}.source_message_id) AND event.delivery_state='delivered')))`;
+      WHERE (event.command_id=${command}.id OR event.message_id=${command}.source_message_id) AND (event.delivery_state='delivered' OR event.claimed_at IS NOT NULL AND event.delivery_state IS DISTINCT FROM 'failed'))))`;
 }
 
 /** The last time the server saw these connectors offline; their reconnect retires work queued up to it. */

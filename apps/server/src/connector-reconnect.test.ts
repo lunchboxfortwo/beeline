@@ -140,6 +140,72 @@ describe('CONNECTOR-RECONNECT: event-driven retirement on the agent-command queu
     expect((await pendingMcpWakes(scope.db, member)).map(wake => wake.id)).toEqual([freshCommand!.id]);
   });
 
+  it.each(['webhook', 'events'])('preserves a %s dispatch while reconnect and historical retirement run before HTTP returns', async mechanism => {
+    const fixture = mechanism === 'events' ? await scope.eventFixture() : await connector();
+    const { client, member } = fixture;
+    const handle = data(await client.callTool({ name: 'list_chats', arguments: {} })).you.handle as string;
+    if ('params' in fixture)
+      expect((await scope.eventCall(fixture.token, 'events/subscribe', fixture.params)).error).toBeUndefined();
+    const source = await tag(handle, 'dispatch already started');
+    const [command] = await commandFor(member, source);
+    await scope.db.query("UPDATE agent_commands SET created_at='2026-11-14T13:48:23Z' WHERE id=$1", [command!.id]);
+    let observed = false;
+    let transportFailure: unknown;
+    const transport = async (_url: string, init: { body: string }) => {
+      try {
+        if (!observed && (init.body.includes(source) || init.body.includes(command!.id))) {
+          observed = true;
+          expect(await pendingMcpWakes(scope.db, member)).toEqual([]);
+          if ('params' in fixture) {
+            const { secret: _, ...delivery } = fixture.params.delivery;
+            expect((await scope.eventCall(fixture.token, 'events/unsubscribe', { name: 'mention', arguments: {}, delivery })).error).toBeUndefined();
+            expect((await scope.eventCall(fixture.token, 'events/subscribe', fixture.params)).error).toBeUndefined();
+          } else {
+            await offline(client);
+            await online(client);
+          }
+          await retireStuckConnectorCommands(scope.db);
+          expect((await commandFor(member, source))[0]).toMatchObject({ state: 'pending', cancellation_reason: null });
+          expect(await pendingMcpWakes(scope.db, member)).toEqual([]);
+        }
+        return new Response(null, { status: 204 });
+      } catch (error) { transportFailure = error; throw error; }
+    };
+    if (mechanism === 'events') await deliverMcpEvents(scope.db, transport);
+    else await deliverMcpMemberWebhooks(scope.db, transport);
+    expect(transportFailure).toBeUndefined();
+    expect(observed).toBe(true);
+    expect((await commandFor(member, source))[0]).toMatchObject({ state: 'pending', cancellation_reason: null });
+  });
+
+  it.each(['webhook', 'events'])('retires a failed %s dispatch on reconnect', async mechanism => {
+    const fixture = mechanism === 'events' ? await scope.eventFixture() : await connector();
+    const { client, member } = fixture;
+    const handle = data(await client.callTool({ name: 'list_chats', arguments: {} })).you.handle as string;
+    if ('params' in fixture)
+      expect((await scope.eventCall(fixture.token, 'events/subscribe', fixture.params)).error).toBeUndefined();
+    const source = await tag(handle, 'dispatch will fail');
+    const [command] = await commandFor(member, source);
+    const attempts: string[] = [];
+    const fail = async (_url: string, init: { body: string }) => {
+      attempts.push(init.body);
+      return new Response(null, { status: 503 });
+    };
+    if (mechanism === 'events') await deliverMcpEvents(scope.db, fail);
+    else await deliverMcpMemberWebhooks(scope.db, fail);
+    expect(attempts.some(body => body.includes(source) || body.includes(command!.id))).toBe(true);
+    if ('params' in fixture) {
+      const { secret: _, ...delivery } = fixture.params.delivery;
+      await scope.eventCall(fixture.token, 'events/unsubscribe', { name: 'mention', arguments: {}, delivery });
+      await scope.eventCall(fixture.token, 'events/subscribe', fixture.params);
+    } else {
+      await offline(client);
+      await online(client);
+    }
+    expect((await commandFor(member, source))[0]).toMatchObject({ state: 'cancelled', cancellation_reason: CONNECTOR_RECONNECT_RETIRED });
+    expect(await owed(member, source)).toBe(0);
+  });
+
   it('retires expired event backlog when a webhook restores an unobserved offline route', async () => {
     const { client, member, token, params } = await scope.eventFixture();
     const handle = data(await client.callTool({ name: 'list_chats', arguments: {} })).you.handle as string;
