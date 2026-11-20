@@ -127,8 +127,8 @@ const RESUME_KINDS = new Set(['grant-decided', 'connector-offer-decided', 'squir
  * What the session is told for one queue item, in the one message format
  * (`agentMessageText`), then the queue-time context: memory, then what this
  * session has not seen (the bounded window once for a fresh session, otherwise
- * only new messages and a changed brief or member list), then the agent's open
- * asks (for a fresh session, or when they changed).
+ * only new messages and a changed brief or member list). The caller appends
+ * open asks after the complete delivery, including when items are batched.
  */
 function itemPromptContext(item: AgentCommand, options: {
   names: ReadonlyMap<string, string>;
