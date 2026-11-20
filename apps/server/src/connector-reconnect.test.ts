@@ -87,6 +87,52 @@ describe('CONNECTOR-RECONNECT: event-driven retirement on the agent-command queu
     expect((await commandFor(member, connectedSource))[0]).toMatchObject({ state: 'cancelled', cancellation_reason: CONNECTOR_RECONNECT_RETIRED });
   });
 
+  it('retires a tag at the exact microsecond cutoff and preserves work after it', async () => {
+    const { client, member, handle } = await connector();
+    const atCutoff = await tag(handle, 'queued at the disconnect');
+    const afterCutoff = await tag(handle, 'queued after the disconnect');
+    await offline(client);
+    await scope.db.query("UPDATE rooms_mcp_members SET disconnected_at='2026-11-20T20:10:00.123456Z' WHERE member_id=$1", [member]);
+    await scope.db.query("UPDATE agent_commands SET created_at='2026-11-20T20:10:00.123456Z' WHERE agent_id=$1 AND source_message_id=$2", [member, atCutoff]);
+    await scope.db.query("UPDATE agent_commands SET created_at='2026-11-20T20:10:00.123457Z' WHERE agent_id=$1 AND source_message_id=$2", [member, afterCutoff]);
+
+    await online(client);
+
+    expect((await commandFor(member, atCutoff))[0]).toMatchObject({ state: 'cancelled', cancellation_reason: CONNECTOR_RECONNECT_RETIRED });
+    expect(await owed(member, atCutoff)).toBe(0);
+    expect((await commandFor(member, afterCutoff))[0]?.state).toBe('pending');
+    expect(await owed(member, afterCutoff)).toBe(1);
+  });
+
+  it.each([false, true])('retires backlog on expired subscription renewal with delivery binding=%s', async (bound) => {
+    const { client, member, token, params } = await scope.eventFixture();
+    const handle = data(await client.callTool({ name: 'list_chats', arguments: {} })).you.handle as string;
+    const subscribed = await scope.eventCall(token, 'events/subscribe', params);
+    expect(subscribed.error).toBeUndefined();
+    if (bound) {
+      const setup = await client.callTool({ name: 'setup_delivery', arguments: {
+        mechanism: 'events', host: 'ChatGPT', surface: 'Work', conversation: 'reconnect-thread',
+      } });
+      expect(setup.isError).not.toBe(true);
+    }
+    const stale = await tag(handle, 'queued before subscription expired');
+    expect((await commandFor(member, stale))[0]?.state).toBe('pending');
+    expect((await scope.db.query('SELECT disconnected_at FROM rooms_mcp_members WHERE member_id=$1', [member])).rows[0]!.disconnected_at).toBeNull();
+    await scope.db.query("UPDATE rooms_mcp_event_subscriptions SET expires_at=now()-interval '1 second' WHERE id=$1", [subscribed.result.id]);
+
+    const renewed = await scope.eventCall(token, 'events/subscribe', params);
+
+    expect(renewed.error).toBeUndefined();
+    expect((await commandFor(member, stale))[0]).toMatchObject({ state: 'cancelled', cancellation_reason: CONNECTOR_RECONNECT_RETIRED });
+    expect(await owed(member, stale)).toBe(0);
+    const caughtUp = data(await client.callTool({ name: 'list_mentions', arguments: {} }));
+    expect(caughtUp.mentions).toEqual([]);
+    expect(caughtUp.wakes).toEqual([]);
+    const fresh = await tag(handle, 'queued after renewal');
+    expect((await commandFor(member, fresh))[0]?.state).toBe('pending');
+    expect(await owed(member, fresh)).toBe(1);
+  });
+
   it('retires the old stuck connector commands once, silently, and leaves other agents alone', async () => {
     const { member, handle } = await connector();
     const stale = await tag(handle, 'stuck since 14 Nov');

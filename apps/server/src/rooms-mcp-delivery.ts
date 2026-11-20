@@ -165,6 +165,7 @@ export async function setupMemberDelivery(
       )
     ).rows[0];
     if (old) return;
+    await noteConnectorPresence(tx, principal.member_id!);
     const generation = randomUUID(),
       nonce = randomBytes(32).toString('base64url');
     const receipt = { generation, nonce, conversation };
@@ -443,11 +444,11 @@ export async function noteConnectorPresence(db: SqlDatabase, member: string): Pr
     await markConnectorsOffline(db, [member]);
     return 0;
   }
-  const reconnected = (await db.query<{ disconnected_at: Date }>(
+  const reconnected = (await db.query<{ disconnected_at: string }>(
     `UPDATE rooms_mcp_members member SET disconnected_at=NULL
      FROM (SELECT member_id,disconnected_at FROM rooms_mcp_members
        WHERE member_id=$1 AND disconnected_at IS NOT NULL FOR UPDATE) before
-     WHERE member.member_id=before.member_id RETURNING before.disconnected_at`,
+     WHERE member.member_id=before.member_id RETURNING before.disconnected_at::text`,
     [member],
   )).rows[0];
   if (!reconnected) return 0;

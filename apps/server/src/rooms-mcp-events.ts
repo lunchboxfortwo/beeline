@@ -135,6 +135,7 @@ export class RoomsMcpEvents {
       if(current?.expires_at && current.expires_at.getTime()<=Date.now())
         await tx.query("UPDATE rooms_mcp_delivery SET failure='event_subscription_ended',receipt_at=NULL WHERE member_id=$1 AND mechanism='events' AND subscription_id=$2",[principal.member_id,id]);
       if(changed) await tx.query("UPDATE rooms_mcp_delivery SET failure='event_signing_key_changed',receipt_at=NULL WHERE member_id=$1 AND mechanism='events' AND subscription_id=$2",[principal.member_id,id]);
+      await noteConnectorPresence(tx, principal.member_id!);
       await tx.query(`INSERT INTO rooms_mcp_event_subscriptions(id,client_id,owner_id,member_id,url,secret,
         previous_secret,rotation_until,verified_at,expires_at,event_name) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
         ON CONFLICT(id) DO UPDATE SET secret=EXCLUDED.secret,previous_secret=EXCLUDED.previous_secret,
