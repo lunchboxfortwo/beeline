@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Input, ListItem, ScrollView, XStack, YStack } from 'tamagui';
-import { ChevronDown, ChevronRight, Filter, X } from 'lucide-react-native';
+import { ChevronDown, ChevronRight, CornerDownRight, Filter, X } from 'lucide-react-native';
 import type {
   NeedsYouActionView,
   RoomViewIdentity,
@@ -224,20 +224,20 @@ function AskCard({ item, actions, now }: { item: WorkItemView; actions: WorkBoar
     </YStack>
   );
 }
-/** Backlog, In progress and Done rows: status glyph, the name, the assignee at the right. */
-/** A task row. Its status mark opens the task sheet, where the state changes. */
+/** The assignee column, held open when a task has none so every state mark stays in one column. */
+const AVATAR = 24;
+/**
+ * A Backlog, In progress or Done row: ↳ and the name, then its state mark in the board's mark
+ * column, then the assignee. The mark opens the task sheet, where the state changes.
+ */
 function WorkRow({ item, onPress, onState }: { item: WorkItemView; onPress: () => void; onState: () => void }) {
   return (
-    <XStack alignItems="center" paddingLeft="2">
-      <Btn kind="icon" label={`Change state of ${item.title}`} onPress={onState} testID={`work-state-mark-${item.id}`}>
-        <WorkStateMark state={item.state} idle={item.idle} />
-      </Btn>
+    <XStack alignItems="center" paddingLeft="4" paddingRight="4" gap="2">
       <ListItem
         flex={1}
         minWidth={0}
         minHeight={44}
-        paddingLeft="1"
-        paddingRight="4"
+        padding="0"
         paddingVertical="2"
         gap="3"
         backgroundColor="transparent"
@@ -246,11 +246,17 @@ function WorkRow({ item, onPress, onState }: { item: WorkItemView; onPress: () =
         aria-label={item.title}
         testID={`work-item-${item.id}`}
       >
+        <Glyph icon={CornerDownRight} size={16} />
         <T v="meta" flex={1} numberOfLines={1}>
           {item.title}
         </T>
-        {item.assignee ? <WorkAvatar person={item.assignee} /> : null}
       </ListItem>
+      <Btn kind="icon" label={`Change state of ${item.title}`} onPress={onState} testID={`work-state-mark-${item.id}`}>
+        <WorkStateMark state={item.state} idle={item.idle} />
+      </Btn>
+      <YStack width={AVATAR} height={AVATAR} flexShrink={0}>
+        {item.assignee ? <WorkAvatar person={item.assignee} size={AVATAR} /> : null}
+      </YStack>
     </XStack>
   );
 }
@@ -289,10 +295,25 @@ function SectionHead({
       <T v="metaStrong">
         {title}
       </T>
-      <T v="meta" color="secondary" flex={1}>
-        {note ? `${count} · ${note}` : count}
-      </T>
-      {right}
+      {right ? (
+        <>
+          <T v="meta" color="secondary" flex={1}>
+            {note ? `${count} · ${note}` : count}
+          </T>
+          {right}
+        </>
+      ) : (
+        <>
+          {/* A list section's count sits in its rows' state-mark column. */}
+          <T v="meta" color="secondary" flex={1}>
+            {note ?? ''}
+          </T>
+          <XStack width={HEIGHT.control} justifyContent="center" testID={`${testID}-count`}>
+            <T v="meta" color="secondary">{String(count)}</T>
+          </XStack>
+          <YStack width={AVATAR} />
+        </>
+      )}
     </ListItem>
   );
 }

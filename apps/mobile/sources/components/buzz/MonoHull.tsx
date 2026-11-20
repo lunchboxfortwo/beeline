@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AppState, Platform, type AppStateStatus } from 'react-native';
-import { XStack, YStack, type YStackProps } from 'tamagui';
+import { YStack, type YStackProps } from 'tamagui';
 import {
   Easing,
   FadeInDown,
@@ -9,16 +9,14 @@ import {
   useReducedMotion,
   useSharedValue,
   withRepeat,
-  withSequence,
   withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
 import { hasMessageRevealed, markMessageRevealed } from '@/buzz/message-reveal';
-import { Motion, T } from '@/ui/grammar';
+import { Motion } from '@/ui/grammar';
 
 export const motionTokens = {
   confirm: 240,
-  loaderFrame: 133,
   liveCycle: 1120,
   /**
    * How long a settled row takes to dip and come back when it demotes out of
@@ -93,63 +91,6 @@ export function HullSurface({ children, strength = 'quiet', testID, ...props }: 
       </YStack>
       {children}
     </YStack>
-  );
-}
-
-export function PixelLoader({ compact = false }: { compact?: boolean }) {
-  const reducedMotion = useReducedMotion();
-  const frame = useSharedValue(0);
-
-  useEffect(() => {
-    if (reducedMotion) return;
-    frame.value = withRepeat(
-      withTiming(4, {
-        duration: motionTokens.loaderFrame * 4,
-        easing: Easing.linear,
-        reduceMotion: ReduceMotion.System,
-      }),
-      -1,
-      false,
-    );
-  }, [frame, reducedMotion]);
-
-  return (
-    <XStack
-      accessibilityLabel="Loading"
-      accessibilityRole="progressbar"
-      width={compact ? 32 : 42}
-      height={compact ? 10 : 14}
-      alignItems="center"
-      gap="1"
-    >
-      {reducedMotion ? (
-        <T v="code" color="ink">◇</T>
-      ) : (
-        [0, 1, 2, 3].map((index) => (
-          <LoaderCell key={index} frame={frame} index={index} compact={compact} />
-        ))
-      )}
-    </XStack>
-  );
-}
-
-function LoaderCell({
-  frame,
-  index,
-  compact,
-}: {
-  frame: SharedValue<number>;
-  index: number;
-  compact: boolean;
-}) {
-  const style = useAnimatedStyle(() => {
-    const active = Math.floor(frame.value) % 4 === index;
-    return { opacity: active ? 1 : 0.28 };
-  });
-  return (
-    <Motion motion={style}>
-      <YStack width={compact ? 5 : 7} height={compact ? 5 : 7} backgroundColor="ink" />
-    </Motion>
   );
 }
 

@@ -8,6 +8,7 @@ import {
   chatThreads,
   filterChats,
   shownThreads,
+  threadMark,
   threadWord,
 } from './chat-tree-model';
 
@@ -81,7 +82,7 @@ describe('chat rows', () => {
         lastActivityAt: ago(8 * 24),
       })),
     ];
-    expect(chatThreads(chat('a'), corners).map((c) => c.id)).toEqual([
+    expect(chatThreads(chat('a'), corners, viewer).map((c) => c.id)).toEqual([
       ...Array.from({ length: 12 }, (_, i) => `blocked-${i}`),
       'working',
       'review',
@@ -89,8 +90,8 @@ describe('chat rows', () => {
       'done',
     ]);
     expect(threadWord(corners[4]!, viewer)).toBe('waiting on you');
-    expect(chatThreads(chat('dm', { directMessage: { peer: alan } }), corners)).toEqual([]);
-    expect(chatThreads(chat('quiet'), corners.slice(0, 4)).map((c) => c.id)).toEqual([
+    expect(chatThreads(chat('dm', { directMessage: { peer: alan } }), corners, viewer)).toEqual([]);
+    expect(chatThreads(chat('quiet'), corners.slice(0, 4), viewer).map((c) => c.id)).toEqual([
       'working',
       'review',
       'backlog',
@@ -98,18 +99,28 @@ describe('chat rows', () => {
     ]);
   });
 
+  it('marks Needs you only for the person a thread waits on; a wait on anyone else is idle', () => {
+    const waiting = (blocker: typeof onViewer) =>
+      ({ id: 'w', name: 'w', state: 'waiting', workState: 'needs-you', blocker }) as ChatListCorner;
+    expect(threadMark(waiting(onViewer), viewer)).toEqual({ state: 'needs-you', idle: false });
+    expect(threadMark(waiting(onAlan), viewer)).toEqual({ state: 'in-progress', idle: true });
+    expect(threadMark({ state: 'waiting', blocker: onAlan } as ChatListCorner, viewer)).toEqual({ state: 'in-progress', idle: true });
+    expect(threadMark({ state: 'working', workState: 'in-progress' } as ChatListCorner, viewer)).toEqual({ state: 'in-progress', idle: false });
+    expect(threadMark({ state: 'archived' } as ChatListCorner, viewer)).toEqual({ state: 'done', idle: false });
+  });
+
   it('shows at most three waiting threads, counts the rest, and shows none when none wait', () => {
     const corner = (id: string, workState: string) =>
-      ({ id, name: id, state: 'working', workState }) as unknown as ChatListCorner;
+      ({ id, name: id, state: workState === 'needs-you' ? 'waiting' : 'working', workState, blocker: onViewer }) as unknown as ChatListCorner;
     const threads = [
       ...['a', 'b', 'c', 'd'].map((id) => corner(id, 'needs-you')),
       corner('e', 'in-progress'),
     ];
-    expect(shownThreads(threads, false)).toEqual({ shown: threads.slice(0, 3), more: 2 });
-    expect(shownThreads(threads, true)).toEqual({ shown: threads, more: 0 });
-    expect(shownThreads([threads[0]!, threads[4]!], false)).toEqual({ shown: [threads[0]], more: 1 });
-    expect(shownThreads([threads[4]!], false)).toEqual({ shown: [], more: 0 });
-    expect(shownThreads([threads[4]!], true)).toEqual({ shown: [], more: 0 });
+    expect(shownThreads(threads, false, viewer)).toEqual({ shown: threads.slice(0, 3), more: 2 });
+    expect(shownThreads(threads, true, viewer)).toEqual({ shown: threads, more: 0 });
+    expect(shownThreads([threads[0]!, threads[4]!], false, viewer)).toEqual({ shown: [threads[0]], more: 1 });
+    expect(shownThreads([threads[4]!], false, viewer)).toEqual({ shown: [], more: 0 });
+    expect(shownThreads([threads[4]!], true, viewer)).toEqual({ shown: [], more: 0 });
   });
 
   it('keeps rows without a work state', () => {

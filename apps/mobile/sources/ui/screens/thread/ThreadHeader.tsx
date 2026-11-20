@@ -9,7 +9,7 @@ import { ListItem, XStack, YStack, useThemeName } from 'tamagui';
 import { ArrowLeft, Users, CornerDownRight, GitPullRequest, MoreHorizontal } from 'lucide-react-native';
 import type { CornerState } from '@beeline/api-contract/phone';
 import { Btn, Glyph, HEIGHT, SafeTop, T, typeStyle, useTextSize } from '@/ui/grammar';
-import { threadWorkState } from '../chats/chat-tree-model';
+import { threadMark } from '../chats/chat-tree-model';
 
 /**
  * Header B (the only thread header). A slim bar keeps Back, the chat (opens
@@ -35,19 +35,31 @@ export type ThreadHeaderData = {
     objective?: string;
 };
 
-/** Each run is indivisible on native and web; flex may wrap only after its trailing hyphen. */
-function ThreadName({ title, v, regular = false, testID }: {
-    title: string; v: 'title' | 'meta' | 'metaStrong'; regular?: boolean; testID?: string;
+/** Each run is indivisible on native and web; flex may wrap only after its trailing hyphen.
+ * `trail` (the state mark) follows the last run, centred on its line. */
+function ThreadName({ title, v, regular = false, testID, trail }: {
+    title: string; v: 'title' | 'meta' | 'metaStrong'; regular?: boolean; testID?: string; trail?: React.ReactNode;
 }) {
     const parts = title.match(/[^-]*-|[^-]+$/g) ?? [''];
+    const line = typeStyle(v, useTextSize()).lineHeight;
     return (
-        <XStack flexShrink={1} minWidth={0} flexWrap="wrap" accessible accessibilityLabel={title}
+        <XStack flexShrink={1} minWidth={0} flexWrap="wrap" alignItems="center" accessible accessibilityLabel={title}
             aria-label={title} testID={testID}>
             {parts.map((part, index) => (
                 <T key={index} v={v} regular={regular} color="ink" numberOfLines={1} flexShrink={0}>{part}</T>
             ))}
+            {trail ? <YStack height={line} marginLeft="2" alignItems="center" justifyContent="center" testID={testID ? `${testID}-state` : undefined}>{trail}</YStack> : null}
         </XStack>
     );
+}
+
+/** The thread's state mark for this viewer: a wait on anyone else reads idle. */
+function HeaderMark({ h }: { h: ThreadHeaderData }) {
+    if (!h.state) return null;
+    const { state, idle } = h.state === 'waiting'
+        ? (h.waitsOnViewer ? { state: 'needs-you' as const, idle: false } : { state: 'in-progress' as const, idle: true })
+        : threadMark({ state: h.state }, undefined);
+    return <WorkStateMark state={state} idle={idle} />;
 }
 
 export function ThreadBar({ h, collapsed, expanded, back, openChat, expand, openActions, safeTop = true, barRef, onBarLayout }: {
@@ -81,8 +93,7 @@ export function ThreadBar({ h, collapsed, expanded, back, openChat, expand, open
                                     backgroundColor="transparent" justifyContent="flex-start" onPress={expand}
                                     aria-label={h.title} accessibilityRole={expand ? 'button' : 'text'} testID="thread-bar-title">
                                     <YStack height={lineHeight} alignSelf="flex-start" justifyContent="center" testID="thread-bar-arrow-box"><Glyph icon={CornerDownRight} size={16} /></YStack>
-                                    {h.state ? <YStack height={lineHeight} alignItems="center" justifyContent="center" alignSelf="flex-start" testID="thread-bar-state-box"><WorkStateMark state={threadWorkState({ state: h.state })} idle={h.state === 'idle'} /></YStack> : null}
-                                    <ThreadName title={h.title} v={h.waitsOnViewer ? "metaStrong" : "meta"} testID="thread-bar-name" />
+                                    <ThreadName title={h.title} v={h.waitsOnViewer ? "metaStrong" : "meta"} testID="thread-bar-name" trail={<HeaderMark h={h} />} />
                                 </ListItem>
                             ) : null}
                         </YStack>
@@ -113,8 +124,7 @@ export function ThreadTitleBlock({ h, openBrief, openPr, blockRef, onBlockLayout
             testID="thread-title-block">
             <XStack gap="2" alignItems="center" testID="thread-title-row">
                 <YStack height={lineHeight} alignSelf="flex-start" justifyContent="center" testID="thread-arrow-box"><Glyph icon={CornerDownRight} size={18} /></YStack>
-                <YStack height={lineHeight} alignItems="center" justifyContent="center" alignSelf="flex-start" testID="thread-state-box">{h.state ? <WorkStateMark state={threadWorkState({ state: h.state })} idle={h.state === 'idle'} /> : null}</YStack>
-                <YStack flex={1} minWidth={0}><ThreadName title={h.title} v="title" regular={!h.waitsOnViewer} testID="thread-title" /></YStack>
+                <YStack flex={1} minWidth={0}><ThreadName title={h.title} v="title" regular={!h.waitsOnViewer} testID="thread-title" trail={<HeaderMark h={h} />} /></YStack>
                 {h.workItem ? <Btn kind="quiet" label="Change assignee" paddingHorizontal="0" minHeight={0} height={26} hitSlop={10} onPress={() => setAssigneeOpen(!assigneeOpen)}>{h.workItem.assignee ? <WorkAvatar person={h.workItem.assignee} size={26} /> : <Glyph icon={Users} />}</Btn> : null}
             </XStack>
             {h.workItem && assigneeOpen ? <WorkAssigneePicker people={h.people ?? []} onPick={person => {

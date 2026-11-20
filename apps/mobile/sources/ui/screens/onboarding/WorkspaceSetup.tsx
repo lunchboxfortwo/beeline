@@ -1,11 +1,11 @@
 import { PageLoader } from '@/ui/PageLoader';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Input, ListItem, Spinner, XStack, YStack } from 'tamagui';
+import { Input, ListItem, XStack, YStack } from 'tamagui';
 import { Bot, Check, Link, Lock, Mail, Sparkles, Terminal, Users } from 'lucide-react-native';
 import { router } from 'expo-router';
 import * as Crypto from 'expo-crypto';
 import { isWorkspaceListView, type Identity, type WorkspaceListView } from '@beeline/buzz-client';
-import { Btn, Copy, CopyLine, Glyph, T } from '@/ui/grammar';
+import { Btn, Copy, CopyLine, Glyph, T, Spinner } from '@/ui/grammar';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';

@@ -575,7 +575,7 @@ const scope5 = fixtureScope5();
     deck.chatsResponse = listOf([
       room('room-a', 10, {
         cornerCount: 1,
-        openCorners: [{ id: 'corner-1', name: 'fix', state: 'waiting', mine: true, lastActivityAt: Math.floor(Date.now() / 1000) }],
+        openCorners: [{ id: 'corner-1', name: 'fix', state: 'waiting', mine: true, blocker: { kind: 'report', personId: 'viewer' }, lastActivityAt: Math.floor(Date.now() / 1000) }],
       }),
     ]);
     const renderer = await mountDeck();

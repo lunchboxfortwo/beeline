@@ -48,7 +48,7 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
     });
     if (!loaded) return null;
     return loaded.deck
-      ? { ...loaded.view, summary: deckCornerSummary(roomId, loaded.deck) }
+      ? { ...loaded.view, summary: deckCornerSummary(roomId, loaded.deck, viewerId) }
       : loaded.view;
   }
 

@@ -3,10 +3,9 @@ import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { expect, it, vi } from 'vitest';
 import { TurnProgressLine, TurnSettledLine } from './TurnProgressLine';
-vi.mock('tamagui', () => ({ XStack: 'XStack', YStack: 'YStack', ListItem: 'ListItem', ScrollView: 'ScrollView', Spinner: 'Spinner' }));
-vi.mock('@/ui/grammar', () => ({ useStep: () => () => 8, T: (props: any) => React.createElement('T', props) }));
+vi.mock('tamagui', () => ({ XStack: 'XStack', YStack: 'YStack', ListItem: 'ListItem', ScrollView: 'ScrollView' }));
+vi.mock('@/ui/grammar', () => ({ useStep: () => () => 8, T: (props: any) => React.createElement('T', props), Spinner: 'Spinner' }));
 vi.mock('./TurnLineFrame', () => ({ TurnLineBar: (props: any) => React.createElement('Bar', props), TurnBandSlot: 'Slot' }));
-vi.mock('./BeelineMarkSpinner', () => ({ BeelineMarkSpinner: () => React.createElement('Mark') }));
 
 vi.mock('./IdentityMark', () => ({ IdentityMark: 'IdentityMark' }));
 vi.mock('./Button', () => ({ Button: 'Button' }));
@@ -17,7 +16,7 @@ it('wraps failure reasons and keeps Retry on the same baseline', () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   const retry = vi.fn(), stopPropagation = vi.fn(); let renderer: any;
   act(() => { renderer = create(<TurnSettledLine line={'Not sent: ' + 'A long server refusal. '.repeat(20)}
-    leadingGlyph={false} inset={false} multiline action={{ label: 'Retry', onPress: retry }} testID="failed" />); });
+    inset={false} multiline action={{ label: 'Retry', onPress: retry }} testID="failed" />); });
   const line = renderer.root.find((node: any) => node.props.testID === 'failed-line');
   expect(line.props.numberOfLines).toBeUndefined();
   expect(line.props.flexShrink).toBe(1);
@@ -25,7 +24,7 @@ it('wraps failure reasons and keeps Retry on the same baseline', () => {
   expect(row.props.height).toBeUndefined();
   expect(row.props.alignItems).toBe('baseline');
   expect(line.props.children).toContain('A long server refusal.');
-  expect(renderer.root.findAllByType('Mark')).toHaveLength(0);
+  expect(renderer.root.findAllByType('Spinner')).toHaveLength(0);
   const action = renderer.root.find((node: any) => node.props.testID === 'failed-retry');
   expect(action.props.children).toBe('Retry');
   act(() => action.props.onPressIn({ stopPropagation }));
@@ -34,9 +33,9 @@ it('wraps failure reasons and keeps Retry on the same baseline', () => {
   act(() => renderer.unmount());
 });
 
-it('keeps the existing settled-turn mark when no failure-line options are supplied', () => {
+it('leaves a finished turn without a mark: the words say it', () => {
   let renderer: any; act(() => { renderer = create(<TurnSettledLine line="Finished" />); });
-  expect(renderer.root.findAllByType('Mark')).toHaveLength(1);
+  expect(renderer.root.findAllByType('Spinner')).toHaveLength(0);
   expect(texts(renderer)).toEqual(['Finished']);
   expect(renderer.root.findAllByType('T')[0].props.numberOfLines).toBe(1);
   act(() => renderer.unmount());
@@ -52,10 +51,10 @@ it('renders release preparation in the thinking line without scheduling an execu
   } finally { act(() => renderer?.unmount()); vi.useRealTimers(); }
 });
 
-it('is one small line: a brass spinner, "Name thinking…" and a plain Stop', () => {
+it('is one small line: the ring spinner, "Name thinking…" and a plain Stop', () => {
   const stop = vi.fn(); let renderer: any;
   act(() => { renderer = create(<TurnProgressLine label="Jimmy thinking…" onStop={stop} testID="turn" />); });
-  expect(renderer.root.findByType('Spinner').props.color).toBe('needsYou');
+  expect(renderer.root.findByType('Spinner').props.testID).toBe('turn-glyph');
   const label = renderer.root.find((node: any) => node.props.testID === 'turn-label');
   expect(label.props.children).toBe('Jimmy thinking…');
   expect(label.props.color).toBe('needsYou');

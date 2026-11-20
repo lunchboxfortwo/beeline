@@ -2,7 +2,7 @@ import React, { useCallback, useContext, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 import { Platform, useWindowDimensions } from 'react-native';
 import { Collapsible, ScrollView, Separator, XStack, YStack } from 'tamagui';
-import { ChevronDown, ChevronUp, CornerDownRight } from 'lucide-react-native';
+import { ChevronDown, ChevronUp } from 'lucide-react-native';
 import { cornerShortTitle, type ChatListCorner, type CornerState } from '@beeline/api-contract/phone';
 import { useRoomCornerSummary } from '@/buzz/room-corner-store';
 import { useRoomCorners } from '@/buzz/use-room-corners';
@@ -13,7 +13,7 @@ import { ThreadLine } from '@/ui/screens/thread/ThreadLine';
 /** The list is at most this share of the window and scrolls inside itself. */
 export const THREADS_DROPDOWN_SHARE = 0.45;
 
-type Line = Pick<ChatListCorner, 'id' | 'blocker' | 'reason'> & { title: string; state: CornerState };
+type Line = Pick<ChatListCorner, 'id' | 'blocker' | 'reason' | 'workState'> & { title: string; state: CornerState };
 
 const DropdownContext = React.createContext<{
     open: boolean; setOpen: (open: boolean) => void;
@@ -66,7 +66,6 @@ export function ThreadsDropdown({ roomId, chatName, viewer, openThread, onNewThr
                     <Btn kind="quiet" label="New thread" gap="1" flexShrink={1} minWidth={HEIGHT.control} height="auto"
                         disabled={newThreadDisabled} testID="threads-new-thread"
                         onPress={() => { setOpen(false); setNewThreadPrompt(true); }}>
-                        <Glyph icon={CornerDownRight} size={16} />
                         <Copy small>New thread</Copy>
                     </Btn>
                 </XStack>
@@ -95,20 +94,20 @@ function ThreadsDropdownList({ roomId, chatName, count, fallback, viewer, openTh
         ? corners.openRows.map((row) => ({ id: row.corner.id, title: cornerShortTitle(chatName, row.corner.name, row.corner.id),
             state: row.state, blocker: row.blocker, reason: row.reason }))
         : fallback.map((corner) => ({ id: corner.id, title: cornerShortTitle(chatName, corner.name, corner.id),
-            state: corner.state, blocker: corner.blocker, reason: corner.reason }));
+            state: corner.state, workState: corner.workState, blocker: corner.blocker, reason: corner.reason }));
     const more = corners.record?.nextOpen ? Math.max(0, count - lines.length) : 0;
     return (
         <ScrollView maxHeight={Math.round(height * THREADS_DROPDOWN_SHARE)} keyboardShouldPersistTaps="handled" testID="threads-dropdown-list">
             <YStack marginLeft="6" marginRight="4" marginTop="1" paddingLeft="3" borderLeftWidth={1} borderColor="strongStroke">
                 {lines.map((line) => (
-                    <ThreadLine key={line.id} title={line.title} state={line.state} blocker={line.blocker} reason={line.reason} viewer={viewer}
+                    <ThreadLine key={line.id} title={line.title} state={line.state} workState={line.workState} blocker={line.blocker} reason={line.reason} viewer={viewer}
                         onPress={() => openThread(line.id)} testID={`thread-row-${line.id}`} />
                 ))}
                 {more ? (
                     <Btn kind="quiet" label={`${more} more threads`} justifyContent="flex-start" gap="2"
                         onPress={() => void corners.loadMoreOpen()} testID="threads-dropdown-more">
-                        <Glyph icon={CornerDownRight} size={16} />
                         <Copy small quiet>{`${more} more`}</Copy>
+                        <Glyph icon={ChevronDown} size={14} />
                     </Btn>
                 ) : null}
             </YStack>

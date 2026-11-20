@@ -1,7 +1,7 @@
 import React from 'react';
-import { Spinner, XStack } from 'tamagui';
+import { XStack } from 'tamagui';
 import { Check } from 'lucide-react-native';
-import { Btn, Glyph, T } from '@/ui/grammar';
+import { Btn, Glyph, T, Spinner } from '@/ui/grammar';
 
 /**
  * Approve / Deny everywhere a request waits on you (build spec decision 17):

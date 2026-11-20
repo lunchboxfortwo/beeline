@@ -287,7 +287,10 @@ export type ChatCornerSummary = {
   openCorners: ChatListCorner[];
 };
 
-/** Count every corner; include every Mine and Needs you corner alongside the newest others. */
+/**
+ * Count every corner; include every Mine and Needs you corner alongside the newest others.
+ * Needs you is per viewer: a corner waiting on someone else reads In progress for this viewer.
+ */
 export function chatCornerCounts(
   rows: readonly (CornerStateRow & {
     id: string;
@@ -296,6 +299,7 @@ export function chatCornerCounts(
     latest_created_at?: Date | null;
     attention?: boolean | null;
   })[],
+  viewerId: string,
 ): Map<string, ChatCornerSummary> {
   const counts = new Map<string, ChatCornerSummary>();
   for (const row of rows) {
@@ -326,7 +330,7 @@ export function chatCornerCounts(
           ? row.work_state
           : state === 'review'
             ? 'in-review'
-            : state === 'waiting'
+            : state === 'waiting' && blocker?.personId === viewerId
               ? 'needs-you'
               : 'in-progress',
       state,
@@ -343,7 +347,8 @@ export function chatCornerCounts(
   for (const count of counts.values()) {
     let others = Math.max(0, OPEN_CORNER_PREVIEW - count.mineCornerCount);
     count.openCorners = count.openCorners.filter(
-      (corner) => corner.mine || corner.workState === 'needs-you' || others-- > 0,
+      // Every waiting thread stays listed, whoever it waits on.
+      (corner) => corner.mine || corner.state === 'waiting' || others-- > 0,
     );
   }
   return counts;

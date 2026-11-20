@@ -1,8 +1,8 @@
 import React, { useMemo } from 'react';
-import { Card, Spinner, XStack, YStack } from 'tamagui';
+import { Card, XStack, YStack } from 'tamagui';
 import { Check, Workflow, X } from 'lucide-react-native';
 import { identityHandle, type WorkflowRunDetailView } from '@beeline/api-contract/phone';
-import { Copy, Glyph, T } from '@/ui/grammar';
+import { Copy, Glyph, T, Spinner } from '@/ui/grammar';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import { observeRoomResource, useObservedResource } from '@/buzz/use-observed-resource';
 import { useRoomWorkflowRun } from '@/buzz/use-room-workflow-run';

@@ -1,7 +1,7 @@
 import React from 'react';
-import { Spinner, XStack, YStack } from 'tamagui';
+import { XStack, YStack } from 'tamagui';
 import { Check, X } from 'lucide-react-native';
-import { Glyph, T } from '@/ui/grammar';
+import { Glyph, T, Spinner } from '@/ui/grammar';
 
 export type ConnectStepState = 'done' | 'current' | 'waiting' | 'todo' | 'failed';
 export type ConnectBarPart = 'filled' | 'active' | 'failed' | 'empty';

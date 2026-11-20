@@ -256,7 +256,7 @@ import { turnRootMessageSql } from '../agent-command.js';
     // naming unread, which old phones require) lets the phone keep what it
     // last knew instead of painting no corners and no unread dot.
     const countsByRoom = cornerRows ? chatCornerCounts(cornerRows.map((corner) =>
-      reviveDates(corner, ['archived_at', 'latest_created_at']))) : undefined;
+      reviveDates(corner, ['archived_at', 'latest_created_at'])), viewerId) : undefined;
     const unavailable = [
       ...(cursors ? [] : ['unread' as const]),
       ...(cornerRows ? [] : ['corners' as const]),

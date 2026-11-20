@@ -11,6 +11,7 @@ vi.mock('@/buzz/use-observed-resource', () => ({ useObservedResource: () => ({ d
 vi.mock('@/buzz/use-room-workflow-run', () => ({ useRoomWorkflowRun: () => ({ workflow: undefined }) }));
 
 import { WorkflowRunCard, WorkflowRunCardView } from './WorkflowRunCard';
+import { Spinner } from '@/ui/grammar';
 
 const JIMMY = { id: 'j', kind: 'agent', name: 'Jimmy', handle: 'jimmy' } as const;
 const ALAN = { id: 'a', kind: 'agent', name: 'Alan', handle: 'alan' } as const;
@@ -45,7 +46,7 @@ describe('workflow run card', () => {
         const notes = tree.root.findAll((node: any) => node.type === 'Text' && node.props.color === 'needsYou').map((node: any) => node.props.children);
         expect(notes).toContain('Reading the change now.');
         expect(tree.root.find((node: any) => node.props.testID === 'workflow-run-headline').props.children).toBe('Running · Jimmy');
-        expect(tree.root.findAll((node: any) => node.type === 'Spinner')).toHaveLength(1);
+        expect(tree.root.findAll((node: any) => node.type === Spinner)).toHaveLength(1);
     });
 
     it('renders nothing without a live run', () => {

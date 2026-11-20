@@ -31,7 +31,7 @@ const LOCAL_ICONS = {
   PinGlyph: new Set(['PinGlyph']),
   'wallet-icons': new Set(['chainIcon', 'tokenIcon']),
   'decorative-glyph': new Set(['DECORATIVE_GLYPH_PROPS']),
-  'beeline-glyph': new Set(['MARK_CELL', 'SURFACE_GLYPH_SIZE', 'GLYPH_STROKE', 'SPLASH_PAINT_MS', 'RELEASE_PAINT_MS', 'RELEASE_UNWIND_MS', 'RELEASE_REST_MS', 'GLYPH_PAINT', 'glyphPaintInk', 'ribbon', 'glyphViewBox']),
+  'beeline-glyph': new Set(['MARK_CELL', 'GLYPH_STROKE', 'SPLASH_PAINT_MS', 'RELEASE_PAINT_MS', 'RELEASE_UNWIND_MS', 'RELEASE_REST_MS', 'GLYPH_PAINT', 'glyphPaintInk', 'ribbon', 'glyphViewBox']),
   grammar: new Set(['Glyph', 'EmojiGlyph']),
   ComposerChrome: new Set(['ComposerGlyph']),
   Suggestions: new Set(['SuggestionGlyph']),

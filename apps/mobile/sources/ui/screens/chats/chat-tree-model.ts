@@ -1,9 +1,9 @@
 import { cornerShortTitle, isConnectorIdentity, roomTitle } from '@beeline/api-contract/phone';
-import type { ChatListCorner, CornerState, WorkState } from '@beeline/api-contract/phone';
+import type { ChatListCorner, WorkState } from '@beeline/api-contract/phone';
 import type { ChatListItem } from '@beeline/buzz-client';
 import { roomRowAttentionReason, roomRowName, roomRowPreview } from '@/buzz/room-list-row';
 import type { RepoCandidate } from '@/buzz/room-repo-picker';
-import { threadListLabel } from '@/ui/screens/thread/thread-status';
+import { threadListLabel, threadWaitsOnViewer, type ThreadWaitFacts } from '@/ui/screens/thread/thread-status';
 
 export type SearchChip = 'unread' | 'pinned';
 
@@ -45,21 +45,37 @@ export function threadTitle(item: ChatListItem, corner: ChatListCorner): string 
   return cornerShortTitle(item.room.name, corner.name, corner.id);
 }
 
-/** A thread's Tasks state; a row without one reads its corner state. */
-export function threadWorkState(corner: { state: CornerState; workState?: WorkState }): WorkState {
-  return (
-    (corner.state === 'archived' ? 'done' : undefined) ?? corner.workState ??
-    (corner.state === 'waiting' ? 'needs-you' : corner.state === 'review' ? 'in-review' : 'in-progress')
-  );
+/**
+ * A thread's Tasks state for this viewer; a row without one reads its corner state.
+ * Needs you only when the thread waits on this viewer; a wait on anyone else is in progress.
+ */
+export function threadWorkState(
+  corner: ThreadWaitFacts & { workState?: WorkState },
+  viewer: string | undefined,
+): WorkState {
+  if (corner.state === 'archived') return 'done';
+  const state = corner.workState ??
+    (corner.state === 'waiting' ? 'needs-you' : corner.state === 'review' ? 'in-review' : 'in-progress');
+  return state === 'needs-you' && !threadWaitsOnViewer(corner, viewer) ? 'in-progress' : state;
+}
+
+/** The thread's state mark: its Tasks state, drawn idle while nothing runs (a wait on someone else included). */
+export function threadMark(
+  corner: ThreadWaitFacts & { workState?: WorkState },
+  viewer: string | undefined,
+): { state: WorkState; idle: boolean } {
+  const state = threadWorkState(corner, viewer);
+  return { state, idle: state === 'in-progress' && (corner.state === 'idle' || corner.state === 'waiting') };
 }
 
 /** Chats navigate every thread: waiting ones first, the rest in server order. */
 export function chatThreads(
   item: ChatListItem,
   corners: readonly ChatListCorner[] | undefined,
+  viewer: string | undefined,
 ): ChatListCorner[] {
   if (item.directMessage || !corners?.length) return [];
-  const waiting = (corner: ChatListCorner) => threadWorkState(corner) === 'needs-you';
+  const waiting = (corner: ChatListCorner) => threadWorkState(corner, viewer) === 'needs-you';
   return [...corners.filter(waiting), ...corners.filter((corner) => !waiting(corner))];
 }
 
@@ -71,8 +87,9 @@ export const WAITING_THREADS_SHOWN = 3;
 export function shownThreads(
   threads: readonly ChatListCorner[],
   expanded: boolean,
+  viewer: string | undefined,
 ): { shown: readonly ChatListCorner[]; more: number } {
-  const waiting = threads.filter((corner) => threadWorkState(corner) === 'needs-you').length;
+  const waiting = threads.filter((corner) => threadWorkState(corner, viewer) === 'needs-you').length;
   if (!waiting) return { shown: [], more: 0 };
   const shown = expanded ? threads : threads.slice(0, Math.min(waiting, WAITING_THREADS_SHOWN));
   return { shown, more: threads.length - shown.length };

@@ -1,7 +1,7 @@
 import React, { useState, type ReactNode } from 'react';
-import { Card, Input, ListItem, Separator, Spinner, XStack, YStack } from 'tamagui';
+import { Card, Input, ListItem, Separator, XStack, YStack } from 'tamagui';
 import { Check, ChevronDown, ChevronRight, ExternalLink, X } from 'lucide-react-native';
-import { Btn, Copy, Glyph, HEIGHT, T } from '@/ui/grammar';
+import { Btn, Copy, Glyph, HEIGHT, T, Spinner } from '@/ui/grammar';
 import { SettledLine } from '@/ui/screens/transcript/cards/RequestCard';
 import { ChoiceOption } from '@/ui/screens/transcript/cards/ChoiceOption';
 import { ErrorBanner } from './ErrorBanner';

@@ -1,7 +1,7 @@
 import React from 'react';
-import { ListItem, ScrollView, Separator, Spinner, XStack, YStack } from 'tamagui';
+import { ListItem, ScrollView, Separator, XStack, YStack } from 'tamagui';
 import { ArrowLeft, ChevronDown, ChevronRight } from 'lucide-react-native';
-import { Btn, Glyph, HEIGHT, SafeBottom, SafeTop, T } from '@/ui/grammar';
+import { Btn, Glyph, HEIGHT, SafeBottom, SafeTop, T, Spinner } from '@/ui/grammar';
 import { Rise } from './Rise';
 import { useIsDesktop } from '@/utils/responsive';
 

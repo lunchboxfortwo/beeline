@@ -1,7 +1,6 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { YStack } from 'tamagui';
-import { useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
-import { Motion } from '@/ui/grammar';
+import { Spinner } from '@/ui/grammar';
 
 /**
  * StateDot — the ONE instrument dot (board revision 2's `.gind`): an 8px
@@ -9,22 +8,19 @@ import { Motion } from '@/ui/grammar';
  * The word is the signal; the dot is never the only carrier:
  *
  *   - `'live'`    filled with the theme's success token — a settled, good state;
- *   - `'pulse'`   filled brass, gently pulsing — work in flight;
+ *   - `'pulse'`   work in flight: the one ring spinner, at the dot's row size;
  *   - `'failed'`  filled with the dialog-danger token — a broken state.
- *
- * The pulse honors reduced motion the way `PulsingText` does: a still,
- * fully visible dot is the fallback.
  */
 export type StateDotKind = 'live' | 'pulse' | 'failed';
 
-function Dot({ kind, testID }: { kind: StateDotKind; testID?: string }) {
+function Dot({ kind, testID }: { kind: Exclude<StateDotKind, 'pulse'>; testID?: string }) {
   return (
     <YStack
       width={8}
       height={8}
       borderRadius="full"
       flexShrink={0}
-      backgroundColor={kind === 'live' ? 'added' : kind === 'pulse' ? 'needsYou' : 'removed'}
+      backgroundColor={kind === 'live' ? 'added' : 'removed'}
       testID={testID}
     />
   );
@@ -32,16 +28,5 @@ function Dot({ kind, testID }: { kind: StateDotKind; testID?: string }) {
 
 export function StateDot({ kind, testID }: { kind: StateDotKind; testID?: string }) {
   if (kind !== 'pulse') return <Dot kind={kind} testID={testID ? `${testID}-${kind}` : undefined} />;
-  return <PulsingDot testID={testID ? `${testID}-pulse` : undefined} />;
-}
-
-function PulsingDot({ testID }: { testID?: string }) {
-  const pulse = useSharedValue(1);
-
-  useEffect(() => {
-    pulse.value = withRepeat(withSequence(withTiming(0.35, { duration: 700 }), withTiming(1, { duration: 700 })), -1);
-  }, [pulse]);
-
-  const motion = useAnimatedStyle(() => ({ opacity: pulse.value }));
-  return <Motion motion={motion} testID={testID}><Dot kind="pulse" /></Motion>;
+  return <Spinner size={12} testID={testID ? `${testID}-pulse` : undefined} />;
 }

@@ -12,7 +12,7 @@ import { useRoomOutboxFailure } from '@/buzz/message-outbox-observer';
 import { compactRelativeTime } from '@/buzz/relative-time';
 import { useRoomCornerSummary } from '@/buzz/room-corner-store';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
-import { Btn, ChatName, Copy, Glyph, HEIGHT, StatusMark, T, useStep } from '@/ui/grammar';
+import { Btn, ChatName, Copy, Glyph, HEIGHT, MARK as STATE_MARK, StatusMark, T, typeStyle, useStep, useTextSize } from '@/ui/grammar';
 import {
   chatPreview,
   chatTagged,
@@ -20,6 +20,7 @@ import {
   chatTitle,
   joinableTitle,
   shownThreads,
+  threadMark,
   threadTitle,
   threadWorkState,
 } from './chat-tree-model';
@@ -87,13 +88,12 @@ function ChatMark({ item, size = MARK }: { size?: number; item: Partial<Pick<Cha
       />
     );
   }
-  return (
-    <RepositoryMark homepageIconUrl={item.room?.homepageIcon} avatarUrl={item.room?.avatar} faviconUrl={item.room?.favicon} size={size} />
-  );
+  // A chat is # in the list; its repository picture belongs to the chat page.
+  return <RepositoryMark size={size} />;
 }
 
-/** One thread under its chat: its status glyph first, as on Tasks, then its name at the
- * meta size; a waiting thread's name is semibold ink, the others regular and quieter. */
+/** One thread under its chat: ↳, its name at the meta size, then its state mark in the chat's
+ * mark column; a thread waiting on the viewer is semibold ink, the others regular and quieter. */
 function ThreadLine({
   item,
   corner,
@@ -109,7 +109,7 @@ function ThreadLine({
 }) {
   const { word } = threadListLabel(corner, viewer);
   const title = threadTitle(item, corner);
-  const state = threadWorkState(corner);
+  const { state, idle } = threadMark(corner, viewer);
   const step = useStep();
   return (
     <ListItem
@@ -121,16 +121,12 @@ function ThreadLine({
       justifyContent="flex-start"
       backgroundColor="transparent"
       onPress={() => onOpen(item.room.id, corner.id, corner.name)}
+      paddingRight="2"
       aria-label={`Thread ${title}, ${word}`}
       accessibilityRole="button"
       testID={`thread-row-${corner.id}`}
     >
-      {layout === 'C' ? (
-        <XStack width={40} flexShrink={0} alignItems="center" justifyContent="space-between">
-          <Glyph icon={CornerDownRight} size={16} />
-          <WorkStateMark state={state} idle={corner.state === 'idle'} />
-        </XStack>
-      ) : <WorkStateMark state={state} idle={corner.state === 'idle'} />}
+      <XStack width={layout === 'C' ? 40 : undefined} flexShrink={0}><Glyph icon={CornerDownRight} size={16} /></XStack>
       <T
         v={state === 'needs-you' ? 'metaStrong' : 'meta'}
         color={state === 'needs-you' ? 'ink' : 'secondary'}
@@ -139,6 +135,9 @@ function ThreadLine({
       >
         {title}
       </T>
+      <YStack width={STATE_MARK} height={STATE_MARK} flexShrink={0} alignItems="center" justifyContent="center">
+        <WorkStateMark state={state} idle={idle} />
+      </YStack>
     </ListItem>
   );
 }
@@ -183,13 +182,18 @@ export const ChatRow = React.memo(
     const summary = useRoomCornerSummary(item.room.id);
     const [expanded, setExpanded] = useState(false);
     const { shown: threads, more } = shownThreads(
-      chatThreads(item, summary?.openCorners ?? item.openCorners),
+      chatThreads(item, summary?.openCorners ?? item.openCorners, viewer),
       expanded,
+      viewer,
     );
     const title = chatTitle(item);
     const preview = chatPreview(item, viewer);
     const unread = item.unread === true;
-    const tagged = chatTagged(item);
+    // Needs you: the chat's own ask or @mention, or a thread waiting on the viewer that is not
+    // already listed under it with its own mark.
+    const tagged = chatTagged(item) || (summary?.openCorners ?? item.openCorners ?? []).some((corner) =>
+      threadWorkState(corner, viewer) === 'needs-you' && !threads.some((shown) => shown.id === corner.id));
+    const nameLine = typeStyle('listTitle', useTextSize()).lineHeight;
     const call = item.directMessage?.peer.kind === 'agent' && item.voiceCall && !item.voiceCall.endedAt ? item.voiceCall : null;
     const age = call
       ? voiceDuration(now / 1000 - call.startedAt)
@@ -266,11 +270,15 @@ export const ChatRow = React.memo(
               </Copy>
             )}
           </YStack>
-          <YStack alignItems="flex-end" gap="2" paddingTop="0.5">
-            <Copy small quiet testID={`room-${item.room.id}-age`}>
-              {age}
-            </Copy>
-            <StatusMark unread={unread} tagged={tagged} />
+          <YStack alignItems="flex-end" gap="2">
+            <XStack height={nameLine} alignItems="center" gap="2">
+              <Copy small quiet testID={`room-${item.room.id}-age`}>
+                {age}
+              </Copy>
+              <YStack width={STATE_MARK} alignItems="center">
+                <StatusMark unread={unread} tagged={tagged} />
+              </YStack>
+            </XStack>
             {pinned ? <Glyph icon={Pin} size={14} /> : null}
           </YStack>
         </ListItem>

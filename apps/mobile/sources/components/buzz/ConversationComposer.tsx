@@ -13,7 +13,7 @@ import {
   type TextLayoutEvent,
 } from 'react-native';
 import { YStack, useTheme } from 'tamagui';
-import { useTextSize } from '@/ui/grammar';
+import { Spinner, useTextSize } from '@/ui/grammar';
 import { NativeTypeInput, NativeTypeMeasure } from '@/ui/grammar-root';
 import { groknight } from '@/buzz/groknight';
 import { HullDialog } from './HullDialog';
@@ -21,7 +21,6 @@ import { COMPOSER_GLYPH_SIZE } from './MicGlyph';
 import { VoiceAgentStrip, VoiceBar } from './VoiceBar';
 import { RuntimeErrorBoundary } from './RuntimeErrorBoundary';
 import type { VoiceCallState } from '@/buzz/use-voice-call';
-import { BeelineMarkSpinner } from './BeelineMarkSpinner';
 import { SurfaceGlyphLoader } from './SurfaceGlyphLoader';
 import { useSpeechInput } from '@/buzz/speech-input';
 import { composerBackspaceCursor, deleteComposerTagBackward, splitComposerTags } from '@/buzz/composer-tags';
@@ -175,7 +174,6 @@ function ConversationComposerContent({
   onRetryAttachment,
   placeholder,
 }: Props) {
-  const brass = useTheme().needsYou?.val as string;
   const textSize = useTextSize();
   const containerRef = React.useRef<HTMLElement | null>(null);
   const ownInputRef = React.useRef<TextInput | null>(null);
@@ -653,7 +651,7 @@ function ConversationComposerContent({
             testID={`${testIDPrefix}-send`}
           >
             {sendingSpeech ? (
-              <BeelineMarkSpinner ink={brass} live testID={`${testIDPrefix}-speech-finalizing`} />
+              <Spinner testID={`${testIDPrefix}-speech-finalizing`} accessibilityLabel="Finishing speech input" />
             ) : (
               <ComposerGlyph icon={ArrowUp} primary />
             )}

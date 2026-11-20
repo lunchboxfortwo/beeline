@@ -22,13 +22,12 @@ import {
   workflowStepMeta,
 } from '@/buzz/workflow-run-copy';
 import { isGeneratedAgentAvatarUrl } from '@/buzz/identity-mark';
-import { Inked, T } from '@/ui/grammar';
+import { Inked, Spinner, T } from '@/ui/grammar';
 import { findRoomCornerRow, useRoomCornerRecord } from '@/buzz/room-corner-store';
 import { CHEVRON_ROW_SIZE, ChevronGlyph } from './ChevronGlyph';
 import { ContentTarget } from './IndexRow';
 import { DECORATIVE_GLYPH_PROPS } from './decorative-glyph';
 import { IdentityMark } from './IdentityMark';
-import { HullLivePulse } from './MonoHull';
 
 const CLOCK = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
 
@@ -369,9 +368,7 @@ function StepRow({
       >
         {current ? (
           <YStack position="absolute" left={LINE_X - HALO / 2} top={CIRCLE_TOP + CIRCLE / 2 - HALO / 2} width={HALO} height={HALO}>
-            <HullLivePulse>
-              <YStack width={HALO} height={HALO} borderRadius="full" borderWidth={1} borderColor="needsYou" testID={`${testID}-halo`} />
-            </HullLivePulse>
+            <Spinner size={HALO} testID={`${testID}-halo`} accessibilityLabel="Current step" />
           </YStack>
         ) : null}
         <YStack position="absolute" left={LINE_X - CIRCLE / 2} top={CIRCLE_TOP}>

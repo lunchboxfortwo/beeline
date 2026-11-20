@@ -42,6 +42,10 @@ const item = {
   unread: false,
 } as unknown as ChatListItem;
 
+/** The viewer every waiting fixture waits on. */
+const VIEWER = 'viewer';
+const ON_VIEWER = { kind: 'report', personId: VIEWER, personName: 'Vera' };
+
 const byTestID = (tree: ReactTestRenderer, id: string) =>
   tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === id);
 
@@ -104,7 +108,7 @@ it('holding the row toggles its pin instead of opening it, even when both touch 
   ).toHaveLength(0);
 });
 
-it('shows the repository mark on the chat row and the status glyph first on its thread row', () => {
+it('shows # on the chat row (the picture is the chat page’s) and its thread row as ↳, name, then state mark', () => {
   let tree!: ReactTestRenderer;
   const marked = {
     ...item,
@@ -120,6 +124,7 @@ it('shows the repository mark on the chat row and the status glyph first on its 
         name: 'Thread',
         state: 'waiting',
         workState: 'needs-you',
+        blocker: { kind: 'report', personId: 'viewer', personName: 'Vera' },
         lifecycle: { lifecycle: 'idle', checks: 'unknown' },
         lastActivityAt: 1_700_000_000,
       },
@@ -129,6 +134,7 @@ it('shows the repository mark on the chat row and the status glyph first on its 
     tree = create(
       <ChatRow
         item={marked}
+        viewer="viewer"
         now={1_700_000_000_000}
         first
         onOpen={vi.fn()}
@@ -139,16 +145,16 @@ it('shows the repository mark on the chat row and the status glyph first on its 
   });
   const marks = tree.root.findAll((node: any) => node.type === 'RepositoryMark');
   expect(marks).toHaveLength(1);
-  expect(marks[0].props).toMatchObject({
-    avatarUrl: marked.room.avatar,
-    homepageIconUrl: marked.room.homepageIcon,
-    faviconUrl: marked.room.favicon,
-  });
+  expect(marks[0].props).toEqual({ size: 36 });
   const threadRow = tree.root.find((node: any) => node.props?.testID === 'thread-row-thread');
   expect(threadRow.findAll((node: any) => node.type === 'RepositoryMark')).toHaveLength(0);
   expect(threadRow.findByType(WorkStateMark).props.state).toBe('needs-you');
   const host = threadRow.findAll((node: any) => typeof node.type === 'string')[0]!;
-  expect(host.findAll((node: any) => typeof node.type === 'string')[1]?.type).toBe('WorkStateMark');
+  const parts = host.children.filter((child: any) => typeof child !== 'string');
+  expect(parts[0].findAll((node: any) => node.type === 'Icon.CornerDownRight')).toHaveLength(1);
+  expect(parts.at(-1).findAll((node: any) => node.type === 'WorkStateMark')).toHaveLength(1);
+  // The thread under the chat carries the needs-you mark; the chat row does not repeat it.
+  expect(tree.root.findAll((node: any) => node.props?.testID === 'status-mark')).toHaveLength(0);
   act(() => tree.unmount());
 });
 
@@ -195,7 +201,7 @@ it('with the divider outside, the row spans divider to divider and keeps its spa
   for (const tree of [inside, outside, last, divider]) act(() => tree.unmount());
 });
 
-it('names whom a waiting thread waits on for screen readers, showing only its pause glyph and name', () => {
+it('names a thread that waits on the viewer for screen readers; a wait on someone else does not list it', () => {
   const commander = 'c'.repeat(64);
   const member = 'm'.repeat(64);
   const waiting = {
@@ -227,7 +233,12 @@ it('names whom a waiting thread waits on for screen readers, showing only its pa
         />,
       );
     });
-    const line = byTestID(tree, 'thread-row-corner-w');
+    const lines = tree.root.findAll((node: any) => typeof node.type === 'string' && node.props.testID === 'thread-row-corner-w');
+    if (!lines.length) {
+      act(() => tree.unmount());
+      return null;
+    }
+    const line = lines[0];
     const texts = line.findAll((node: any) => node.type === 'Text');
     const result = {
       aria: line.props['aria-label'],
@@ -242,12 +253,9 @@ it('names whom a waiting thread waits on for screen readers, showing only its pa
     shown: ['One durable turn owner'],
     glyph: 'needs-you',
   });
-  // The other member follows the thread too (`mine`), yet it waits on Claude, not on them.
-  expect(label(member)).toEqual({
-    aria: 'Thread One durable turn owner, waiting on Claude',
-    shown: ['One durable turn owner'],
-    glyph: 'needs-you',
-  });
+  // The other member follows the thread too (`mine`), yet it waits on Claude, not on them:
+  // it needs nothing from them, so it is not listed under the chat.
+  expect(label(member)).toBeNull();
 });
 
 // Chat list previews stop at two lines at every Text size.
@@ -352,6 +360,7 @@ it('shows up to three waiting threads, then more opens every thread, waiting fir
     name: `Needs you ${i}`,
     state: 'waiting',
     workState: 'needs-you',
+    blocker: ON_VIEWER,
   }));
   const other = ['in-progress', 'in-review', 'backlog', 'done'].map((workState) => ({
     id: workState,
@@ -362,6 +371,7 @@ it('shows up to three waiting threads, then more opens every thread, waiting fir
   const idle = { id: 'idle', name: 'idle', state: 'idle', workState: 'in-progress' };
   let tree!: ReactTestRenderer;
   const props = {
+    viewer: VIEWER,
     now: 1_700_000_000_000,
     first: true,
     onOpen: vi.fn(),
@@ -420,13 +430,13 @@ it.each(['small', 'medium', 'large'] as const)(
   (size: TextSize) => {
     const waiting = {
       ...item,
-      openCorners: [{ id: 'w', name: 'waiting', state: 'waiting', workState: 'needs-you' }],
+      openCorners: [{ id: 'w', name: 'waiting', state: 'waiting', workState: 'needs-you', blocker: ON_VIEWER }],
     } as unknown as ChatListItem;
     let tree!: ReactTestRenderer;
     act(() => {
       tree = create(
         <TextSizeContext.Provider value={size}>
-          <ChatRow item={waiting} now={1_700_000_000_000} first onOpen={vi.fn()} onPin={vi.fn()} onOpenThread={vi.fn()} />
+          <ChatRow item={waiting} viewer={VIEWER} now={1_700_000_000_000} first onOpen={vi.fn()} onPin={vi.fn()} onOpenThread={vi.fn()} />
         </TextSizeContext.Provider>,
       );
     });
@@ -437,14 +447,14 @@ it.each(['small', 'medium', 'large'] as const)(
   },
 );
 
-it('keeps B as the default and permits the local avatar-column C comparison', () => {
-  const marked = { ...item, openCorners: [{ id: 'thread', name: 'Thread', state: 'waiting', workState: 'needs-you' }] } as unknown as ChatListItem;
-  const props = { item: marked, now: 1_700_000_000_000, first: true, onOpen: vi.fn(), onPin: vi.fn(), onOpenThread: vi.fn() };
+it('keeps B as the default and permits the local avatar-column C comparison, ↳ leading both', () => {
+  const marked = { ...item, openCorners: [{ id: 'thread', name: 'Thread', state: 'waiting', workState: 'needs-you', blocker: ON_VIEWER }] } as unknown as ChatListItem;
+  const props = { item: marked, viewer: VIEWER, now: 1_700_000_000_000, first: true, onOpen: vi.fn(), onPin: vi.fn(), onOpenThread: vi.fn() };
   let tree!: ReactTestRenderer;
   act(() => { tree = create(<ChatRow {...props} />); });
   const thread = () => byTestID(tree, 'thread-row-thread');
   const icons = () => thread().findAll((node: any) => typeof node.type === 'string' && node.type === 'Icon.CornerDownRight');
-  expect(icons()).toHaveLength(0);
+  expect(icons()).toHaveLength(1);
   expect(tree.root.findByType('RepositoryMark').props.size).toBe(36);
   act(() => tree.update(<ChatRow {...props} threadLayout="C" />));
   expect(icons()).toHaveLength(1);
@@ -453,7 +463,7 @@ it('keeps B as the default and permits the local avatar-column C comparison', ()
   expect(tree.root.findByType('RepositoryMark').props.size).toBe(40);
   expect(byTestID(tree, `nest-${ROOM}`).props).toMatchObject({ marginLeft: '0', paddingLeft: '2', borderLeftWidth: 1 });
   act(() => tree.update(<ChatRow {...props} />));
-  expect(icons()).toHaveLength(0);
+  expect(icons()).toHaveLength(1);
   expect(tree.root.findByType('RepositoryMark').props.size).toBe(36);
   act(() => tree.unmount());
 });

@@ -560,7 +560,7 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
             <LedgerUntaggedHint messageId={message.id} />
           ) : null}
           {message.isUser && sendState && sendState.kind !== 'sending' && sendFailureIds?.length ? (
-            <TurnSettledLine inset={false} leadingGlyph={false} multiline
+            <TurnSettledLine inset={false} multiline
               line={sendFailureIds.length > 1 ? `${sendFailureIds.length} not sent` : sendState.text}
               action={onRetry ? { label: sendFailureIds.length > 1 ? 'Retry all' : 'Retry', onPress: () => onRetry(sendFailureIds) } : undefined}
               testID={`outbox-delivery-failed-${message.id}`} />

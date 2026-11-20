@@ -6,9 +6,8 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { beelineThemes } from '@/buzz/groknight';
-import { MARK_CELL, SURFACE_GLYPH_SIZE, ribbon } from '@/buzz/beeline-glyph';
 
-type LoadingTreatment = 'glyph' | 'exception';
+type LoadingTreatment = 'spinner' | 'exception';
 type LoadingSurface = {
   id: string;
   file: string;
@@ -17,72 +16,55 @@ type LoadingSurface = {
 };
 
 /**
- * Every normal-use loading surface and its treatment. A leftover on the old
- * four-dot PixelLoader must land here as an explicit exception — never silently.
+ * Every normal-use loading surface and its treatment: the one ring spinner
+ * (directly or through PageLoader/SurfaceGlyphLoader). A surface that shows
+ * something else must land here as an explicit exception — never silently.
  * Paths are relative to `apps/mobile/sources`.
  */
 const LOADING_SURFACES: readonly LoadingSurface[] = [
-  { id: 'voice-startup', file: 'components/buzz/VoiceBar.tsx', treatment: 'glyph' },
-  { id: 'thinking', file: 'components/buzz/TurnProgressLine.tsx', treatment: 'glyph' },
-  { id: 'activity-working', file: 'components/buzz/ActivityTimeline.tsx', treatment: 'glyph' },
-  { id: 'room-corner-entry', file: 'components/buzz/ChatOpeningSurface.tsx', treatment: 'glyph' },
-  { id: 'room-deck', file: 'app/(app)/beeline/channels.tsx', treatment: 'glyph' },
-  { id: 'people', file: 'ui/screens/people/PeopleTabScreen.tsx', treatment: 'glyph' },
-  { id: 'workspace-settings', file: 'ui/screens/settings/WorkspaceSettings.tsx', treatment: 'glyph' },
-  { id: 'agent-profile', file: 'ui/screens/profiles/AgentProfileScreen.tsx', treatment: 'glyph' },
-  { id: 'person-profile', file: 'ui/screens/profiles/PersonProfileScreen.tsx', treatment: 'glyph' },
-  { id: 'community', file: 'ui/screens/onboarding/WorkspaceSetup.tsx', treatment: 'glyph' },
-  { id: 'schedules', file: 'app/(app)/beeline/settings/schedules.tsx', treatment: 'glyph' },
-  { id: 'workbench', file: 'app/(app)/beeline/settings/workbench.tsx', treatment: 'glyph' },
+  { id: 'voice-startup', file: 'components/buzz/VoiceBar.tsx', treatment: 'spinner' },
+  { id: 'thinking', file: 'components/buzz/TurnProgressLine.tsx', treatment: 'spinner' },
+  { id: 'activity-working', file: 'components/buzz/ActivityTimeline.tsx', treatment: 'spinner' },
+  { id: 'room-corner-entry', file: 'components/buzz/ChatOpeningSurface.tsx', treatment: 'spinner' },
+  { id: 'room-deck', file: 'app/(app)/beeline/channels.tsx', treatment: 'spinner' },
+  { id: 'people', file: 'ui/screens/people/PeopleTabScreen.tsx', treatment: 'spinner' },
+  { id: 'workspace-settings', file: 'ui/screens/settings/WorkspaceSettings.tsx', treatment: 'spinner' },
+  { id: 'agent-profile', file: 'ui/screens/profiles/AgentProfileScreen.tsx', treatment: 'spinner' },
+  { id: 'person-profile', file: 'ui/screens/profiles/PersonProfileScreen.tsx', treatment: 'spinner' },
+  { id: 'community', file: 'ui/screens/onboarding/WorkspaceSetup.tsx', treatment: 'spinner' },
+  { id: 'schedules', file: 'app/(app)/beeline/settings/schedules.tsx', treatment: 'spinner' },
+  { id: 'workbench', file: 'app/(app)/beeline/settings/workbench.tsx', treatment: 'spinner' },
   {
     id: 'workbench-connect',
     file: 'app/(app)/beeline/settings/workbench/connect.tsx',
-    treatment: 'glyph',
+    treatment: 'spinner',
   },
-  { id: 'wallet', file: 'app/(app)/beeline/settings/workbench/wallet.tsx', treatment: 'glyph' },
-  { id: 'tray', file: 'app/(app)/beeline/tray.tsx', treatment: 'glyph' },
+  { id: 'wallet', file: 'app/(app)/beeline/settings/workbench/wallet.tsx', treatment: 'spinner' },
+  { id: 'tray', file: 'app/(app)/beeline/tray.tsx', treatment: 'spinner' },
   {
     id: 'forward-picker',
     file: 'components/buzz/ForwardMessagePickerSheet.tsx',
-    treatment: 'glyph',
+    treatment: 'spinner',
   },
-  { id: 'desktop-sidebar', file: 'components/SidebarView.tsx', treatment: 'glyph' },
-  { id: 'invite-join', file: 'app/(app)/join/[token].tsx', treatment: 'glyph' },
-  { id: 'review-signin', file: 'app/(app)/review/[secret].tsx', treatment: 'glyph' },
-  {
-    id: 'button-busy',
-    file: 'components/buzz/Button.tsx',
-    treatment: 'exception',
-    reason:
-      'Button compact busy sits on a labeled 44pt control; a release-loop glyph would crowd the plate and flash on sub-100ms submits.',
-  },
-  {
-    id: 'choice-plate-busy',
-    file: 'components/buzz/ChoicePlate.tsx',
-    treatment: 'exception',
-    reason:
-      'A tapped choice option shows the same compact busy as a Button while its answer sends; not a page load gate.',
-  },
-  {
-    id: 'ota-check-busy',
-    file: 'ui/screens/settings/YouSettings.tsx',
-    treatment: 'exception',
-    reason:
-      'Trailing Settings-row busy while a version check returns; same compact-control case as a button, not a page load gate.',
-  },
+  { id: 'desktop-sidebar', file: 'components/SidebarView.tsx', treatment: 'spinner' },
+  { id: 'invite-join', file: 'app/(app)/join/[token].tsx', treatment: 'spinner' },
+  { id: 'review-signin', file: 'app/(app)/review/[secret].tsx', treatment: 'spinner' },
+  { id: 'button-busy', file: 'components/buzz/Button.tsx', treatment: 'spinner' },
+  { id: 'choice-plate-busy', file: 'components/buzz/ChoicePlate.tsx', treatment: 'spinner' },
+  { id: 'ota-check-busy', file: 'ui/screens/settings/YouSettings.tsx', treatment: 'spinner' },
   {
     id: 'history-line',
     file: 'app/(app)/beeline/chat/_chat-surface.tsx',
     treatment: 'exception',
     reason:
-      '"Loading earlier messages…" is an inscribed transcript history row, not a load gate. A painting glyph would interrupt the ledger.',
+      '"Loading earlier messages…" is an inscribed transcript history row, not a load gate. A spinner would interrupt the ledger.',
   },
   {
     id: 'artifact-preview',
     file: 'components/buzz/ArtifactCard.tsx',
     treatment: 'exception',
     reason:
-      'Content-shaped preview placeholder; cache hits resolve in well under 100ms and a paint loop would flash.',
+      'Content-shaped preview placeholder; cache hits resolve in well under 100ms and a spinner would flash.',
   },
   {
     id: 'artifact-viewer',
@@ -97,33 +79,8 @@ const LOADING_SURFACES: readonly LoadingSurface[] = [
     treatment: 'exception',
     reason: 'Shares the artifact viewer placeholder; not a Room/Corner load gate.',
   },
-  {
-    id: 'webview-signin',
-    file: 'app/(app)/beeline/settings/workbench/connect-signin.tsx',
-    treatment: 'exception',
-    reason: 'Native WebView document chrome, not a Beeline surface load gate.',
-  },
+  { id: 'webview-signin', file: 'app/(app)/beeline/settings/workbench/connect-signin.tsx', treatment: 'spinner' },
 ];
-
-function loadingSurfaceGlyphFiles(): readonly string[] {
-  return [
-    ...new Set(
-      LOADING_SURFACES.filter((surface) => surface.treatment === 'glyph').map(
-        (surface) => surface.file,
-      ),
-    ),
-  ];
-}
-
-function loadingSurfaceExceptionFiles(): readonly string[] {
-  return [
-    ...new Set(
-      LOADING_SURFACES.filter((surface) => surface.treatment === 'exception').map(
-        (surface) => surface.file,
-      ),
-    ),
-  ];
-}
 
 vi.mock('react-native', async () => {
   const ReactModule = await import('react');
@@ -146,7 +103,7 @@ vi.mock('react-native-svg', async () => {
   const ReactModule = await import('react');
   const host = (name: string) => (props: any) =>
     ReactModule.createElement(name, props, props.children);
-  return { default: host('Svg'), Path: host('Path'), G: host('G') };
+  return { default: host('Svg'), Circle: host('Circle'), Path: host('Path'), G: host('G') };
 });
 
 const motion = vi.hoisted(() => ({
@@ -176,6 +133,7 @@ vi.mock('react-native-reanimated', async () => {
     cancelAnimation: vi.fn(),
     runOnJS: (fn: (...args: unknown[]) => unknown) => fn,
     useAnimatedProps: (factory: () => unknown) => factory(),
+    useAnimatedStyle: (factory: () => unknown) => factory(),
     useReducedMotion: () => motion.reducedMotion,
     useSharedValue: (value: number) => ({ value }),
     withDelay: (_ms: number, value: unknown) => value,
@@ -234,7 +192,9 @@ function dots(renderer: ReactTestRenderer) {
   });
 }
 
-const GLYPH_MARKERS = ['PageLoader', 'SurfaceGlyphLoader', 'BeelineGlyphPaint', 'BeelineMarkSpinner'] as const;
+const SPINNER_MARKERS = ['PageLoader', 'SurfaceGlyphLoader', '<Spinner'] as const;
+/** The Beeline mark is the brand: drawn still on the update gate, never as a loader. */
+const BRAND_MARK_FILES = new Set(['components/StoreUpdateGate.tsx', 'components/buzz/BeelineGlyphPaint.tsx']);
 
 function walkSourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -248,35 +208,35 @@ function walkSourceFiles(dir: string): string[] {
   });
 }
 
-function pixelLoaderCallSites(): string[] {
-  return walkSourceFiles(SOURCES_ROOT)
-    .filter((file) => {
-      const source = readFileSync(file, 'utf8');
-      return /<PixelLoader\b/.test(source);
-    })
-    .map((file) => path.relative(SOURCES_ROOT, file).replaceAll('\\', '/'));
-}
+const relative = (file: string) => path.relative(SOURCES_ROOT, file).replaceAll('\\', '/');
 
 describe('SurfaceGlyphLoader', () => {
-  it('paints the release-loop glyph at the surface size, never dots', () => {
+  it('turns the one ring spinner at the page size, never dots or the Beeline mark', () => {
     const renderer = render(React.createElement(SurfaceGlyphLoader));
-    const screen = renderer.root.findByProps({ testID: 'surface-glyph-loader' });
-    expect(screen.props.accessibilityRole).toBe('progressbar');
-    expect(renderer.root.findByType('Svg').props.width).toBe(SURFACE_GLYPH_SIZE);
-    expect(renderer.root.findByType('AnimatedPath').props.d).toBe(ribbon.path);
+    const spinner = renderer.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'surface-glyph-loader-glyph');
+    expect(spinner.props.accessibilityRole).toBe('progressbar');
+    expect(renderer.root.findByType('Svg').props.width).toBe(32);
+    expect(renderer.root.findAllByType('Circle')).toHaveLength(1);
+    expect(renderer.root.findAllByType('AnimatedPath')).toHaveLength(0);
     expect(motion.repeats[0]?.reverse).toBe(false);
     expect(dots(renderer)).toHaveLength(0);
   });
 
-  it('keeps compact loaders on the thinking cell so inline gates match the thinking line', () => {
+  it('keeps compact loaders at the inline spinner size', () => {
     const renderer = render(React.createElement(SurfaceGlyphLoader, { compact: true }));
-    expect(renderer.root.findByType('Svg').props.width).toBe(MARK_CELL);
+    expect(renderer.root.findByType('Svg').props.width).toBe(16);
     expect(dots(renderer)).toHaveLength(0);
+  });
+
+  it('holds still under reduced motion', () => {
+    motion.reducedMotion = true;
+    render(React.createElement(SurfaceGlyphLoader));
+    expect(motion.repeats).toHaveLength(0);
   });
 });
 
 describe('Page loading boundary', () => {
-  it('fills the page on canvas and centres the one glyph', () => {
+  it('fills the page on canvas and centres the one spinner', () => {
     const page = render(React.createElement(PageLoader, { testID: 'rooms-loader-gate' }));
     const gate = page.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'rooms-loader-gate');
     expect(gate.props).toMatchObject({ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'canvas' });
@@ -312,24 +272,23 @@ describe('normal-use loading surfaces', () => {
     }
   });
 
-  it('keeps every glyph surface on the painting mark, not PixelLoader', () => {
-    for (const file of loadingSurfaceGlyphFiles()) {
-      const source = readFileSync(path.join(SOURCES_ROOT, file), 'utf8');
+  it('keeps every loading surface on the one ring spinner', () => {
+    for (const surface of LOADING_SURFACES.filter((entry) => entry.treatment === 'spinner')) {
+      const source = readFileSync(path.join(SOURCES_ROOT, surface.file), 'utf8');
       expect(
-        GLYPH_MARKERS.some((marker) => source.includes(marker)),
-        `${file} is a glyph load gate but mounts none of ${GLYPH_MARKERS.join(', ')}`,
+        SPINNER_MARKERS.some((marker) => source.includes(marker)),
+        `${surface.file} is a loading surface but mounts none of ${SPINNER_MARKERS.join(', ')}`,
       ).toBe(true);
-      expect(source, `${file} still mounts PixelLoader`).not.toMatch(/<PixelLoader\b/);
     }
   });
 
-  it('refuses a newly found PixelLoader load gate without a recorded exception', () => {
-    const allowed = new Set(loadingSurfaceExceptionFiles());
-    for (const file of pixelLoaderCallSites()) {
-      expect(
-        allowed.has(file),
-        `${file} still mounts PixelLoader without a recorded exception`,
-      ).toBe(true);
+  it('has one spinner: no platform spinner and no Beeline mark as a loader', () => {
+    for (const file of walkSourceFiles(SOURCES_ROOT)) {
+      const source = readFileSync(file, 'utf8');
+      const name = relative(file);
+      expect(source, `${name} imports another spinner`).not.toMatch(/import \{[^}]*\bSpinner\b[^}]*\} from 'tamagui'/);
+      expect(source, `${name} mounts ActivityIndicator`).not.toMatch(/<ActivityIndicator\b/);
+      if (!BRAND_MARK_FILES.has(name)) expect(source, `${name} draws the Beeline mark`).not.toMatch(/<BeelineGlyphPaint\b/);
     }
   });
 });

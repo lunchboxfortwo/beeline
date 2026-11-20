@@ -427,7 +427,7 @@ import { phoneListRoomWorkflowRuns } from './schedules.js';
     const loaded = await phoneLoadCorners(ctx, parentRoomId, viewerId, { deck: true });
     if (!loaded?.deck) return null;
     const { view, deck } = loaded;
-    return { ...deckCornerSummary(parentRoomId, deck),
+    return { ...deckCornerSummary(parentRoomId, deck, viewerId),
       agentState: deck.needs_you ? 'needs-you' : deck.working ? 'working' : null,
       ...(deck.needs_you ? { attentionReason: { kind: 'approval' as const,
         ...(deck.attention_actor ? { actor: deck.attention_actor } : {}) } } : {}),

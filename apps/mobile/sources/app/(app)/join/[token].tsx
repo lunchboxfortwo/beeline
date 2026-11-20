@@ -1,7 +1,7 @@
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ListItem, Spinner, YStack } from 'tamagui';
+import { ListItem, YStack } from 'tamagui';
 import { Sparkles } from 'lucide-react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useURL } from 'expo-linking';
@@ -16,7 +16,7 @@ import { clearPendingInvite, savePendingInvite } from '@/buzz/pending-invite';
 import { WORKSPACE_LABEL } from '@/buzz/vocabulary';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
 import { PageLoader } from '@/ui/PageLoader';
-import { Btn, T } from '@/ui/grammar';
+import { Btn, T, Spinner } from '@/ui/grammar';
 import { Choice, Heading, OnboardingFrame, OrRule, Problem } from '@/ui/screens/onboarding/OnboardingFrame';
 import { Rise } from '@/ui/screens/onboarding/Rise';
 import { YouStep } from '@/ui/screens/onboarding/YouStep';

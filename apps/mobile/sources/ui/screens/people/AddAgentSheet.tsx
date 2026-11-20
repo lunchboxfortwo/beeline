@@ -1,8 +1,8 @@
 import type { AgentInvitationPickerGuide } from '@beeline/api-contract/phone';
 import { useEffect, useState } from 'react';
-import { Image, Separator, Spinner, XStack, YStack } from 'tamagui';
+import { Image, Separator, XStack, YStack } from 'tamagui';
 import { Globe, Terminal } from 'lucide-react-native';
-import { Btn, Copy, CopyLine, Glyph, SheetFrame, SheetRow, T } from '@/ui/grammar';
+import { Btn, Copy, CopyLine, Glyph, SheetFrame, SheetRow, T, Spinner } from '@/ui/grammar';
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import { agentPairingCommand } from '@/buzz/agent-pairing-command';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';

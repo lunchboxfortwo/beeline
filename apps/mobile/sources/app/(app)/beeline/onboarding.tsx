@@ -8,8 +8,8 @@ import { useTextDraft } from '@/buzz/use-text-draft';
 /** Native GitHub-first onboarding. OAuth proves lookup only; the Nostr key remains device-held. */
 import React, { useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
-import { Input, Spinner, XStack, YStack } from 'tamagui';
-import { Btn, HEIGHT, T } from '@/ui/grammar';
+import { Input, XStack, YStack } from 'tamagui';
+import { Btn, HEIGHT, T, Spinner } from '@/ui/grammar';
 import { Heading, OnboardingFrame, Primary, Problem } from '@/ui/screens/onboarding/OnboardingFrame';
 import { Rise } from '@/ui/screens/onboarding/Rise';
 import { router } from 'expo-router';

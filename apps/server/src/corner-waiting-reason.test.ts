@@ -28,7 +28,7 @@ it.each([
     lifecycle: null, latest_turn_status: null, blocking: true,
     waiting_item_id: selected.item_id, waiting_reason: selected.reason };
   expect(cornerRowState(row)).toEqual({ state: 'waiting', reason, itemId: 'item' });
-  expect(chatCornerCounts([row]).get('parent')?.openCorners[0]?.state).toBe('waiting');
+  expect(chatCornerCounts([row], 'viewer').get('parent')?.openCorners[0]?.state).toBe('waiting');
 });
 
 it('R1: chooses the oldest blocker deterministically', async () => {

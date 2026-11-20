@@ -7,6 +7,7 @@ vi.mock('expo-font', () => ({ useFonts: vi.fn(() => [true, null]) }));
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { Spinner } from '@/ui/grammar';
 
 vi.mock('react-native', async () => {
   const ReactModule = await import('react');
@@ -30,17 +31,11 @@ vi.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
 }));
 
-vi.mock('./MonoHull', () => ({
-  PixelLoader: (props: any) => React.createElement('PixelLoader', props),
-}));
 vi.mock('./MonoMarkdown', () => ({
   MonoMarkdown: (props: any) => React.createElement('MonoMarkdown', props, props.markdown),
 }));
 vi.mock('./IdentityMark', () => ({
   IdentityMark: (props: any) => React.createElement('IdentityMark', props),
-}));
-vi.mock('./BeelineMarkSpinner', () => ({
-  BeelineMarkSpinner: (props: any) => React.createElement('BeelineMarkSpinner', props),
 }));
 vi.mock('./Button', () => ({ Button: (props: any) => React.createElement('Button', props, props.label) }));
 vi.mock('./HullActionSheet', () => ({
@@ -49,9 +44,18 @@ vi.mock('./HullActionSheet', () => ({
     React.createElement('HullActionSheetModal', props, props.children),
   HullActionSheetRow: (props: any) => React.createElement('HullActionSheetRow', props, props.label),
 }));
-vi.mock('react-native-reanimated', () => ({
-  useReducedMotion: () => false,
-}));
+vi.mock('react-native-reanimated', async () => {
+  const ReactModule = await import('react');
+  return {
+    default: { View: (props: any) => ReactModule.createElement('AnimatedView', props, props.children) },
+    Easing: { linear: (t: number) => t },
+    useAnimatedStyle: () => ({}),
+    useReducedMotion: () => false,
+    useSharedValue: (value: number) => ({ value }),
+    withRepeat: (value: number) => value,
+    withTiming: (value: number) => value,
+  };
+});
 vi.mock('expo-clipboard', () => ({
   setStringAsync: vi.fn().mockResolvedValue(undefined),
 }));
@@ -212,9 +216,8 @@ describe('one-line tool ledger', () => {
       />,
     );
     expandRun(renderer, 'live');
-    const spinner = renderer.root.findByProps({ testID: 'activity-verdict-live' });
-    expect(spinner.props.children.type).toBeTypeOf('function');
-    expect(spinner.props.children.props.live).toBe(true);
+    const spinner = renderer.root.findAll((node: any) => node.props.testID === 'activity-verdict-live')[0];
+    expect(spinner.type).toBe(Spinner);
   });
 
   it('every line is a 44-minimum tap target and opens its output state', () => {

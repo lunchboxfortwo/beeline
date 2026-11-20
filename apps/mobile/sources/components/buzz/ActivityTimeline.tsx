@@ -4,7 +4,7 @@ import { readRoomViewMessage, type PhoneOperationMap } from '@beeline/api-contra
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import React, { useEffect, useMemo, useState } from 'react';
 import { XStack, YStack } from 'tamagui';
-import { T, TypedView } from '@/ui/grammar';
+import { Spinner, T, TypedView } from '@/ui/grammar';
 import type { AgentActivityItem } from '@/sync/transport/rig-transport';
 import { buildTurnActivity } from '@/buzz/activity-timeline';
 import { formatToolCallDuration } from '@/buzz/tool-call-row';
@@ -15,7 +15,6 @@ import {
   type ToolLedgerLine,
   type ToolLedgerRun,
 } from '@/buzz/tool-ledger';
-import { BeelineMarkSpinner } from './BeelineMarkSpinner';
 import { ToolOutputSheet } from './ToolOutputSheet';
 import { TranscriptLine } from '@/ui/screens/transcript/TranscriptLine';
 import { type LedgerBylineMark } from './Ledger';
@@ -104,7 +103,7 @@ function ToolLedgerLineRow({
         {line.reason ? <T v="meta" color="secondary" numberOfLines={1} minWidth={0}>{line.reason}</T> : null}
         {duration ? <T v="code" color="secondary" flexShrink={0} fontVariant={['tabular-nums']}>{duration}</T> : null}
         {showVerdict && hasNamedAction && line.outcome === 'failure' ? <T v="code" color="needsYou" accessibilityElementsHidden width={18} flexShrink={0} textAlign="right" testID={`activity-verdict-${line.id}`}>✗</T> : null}
-        {showVerdict && line.outcome === 'running' ? <YStack testID={`activity-verdict-${line.id}`}><BeelineMarkSpinner live /></YStack> : null}
+        {showVerdict && line.outcome === 'running' ? <Spinner testID={`activity-verdict-${line.id}`} /> : null}
       </XStack>
     </TranscriptNavigationRow>
   );

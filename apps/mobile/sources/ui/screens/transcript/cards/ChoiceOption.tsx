@@ -1,7 +1,7 @@
 import React from 'react';
-import { ListItem, Spinner, XStack, YStack } from 'tamagui';
+import { ListItem, XStack, YStack } from 'tamagui';
 import { ChevronRight } from 'lucide-react-native';
-import { Copy, Glyph, HEIGHT, T } from '@/ui/grammar';
+import { Copy, Glyph, HEIGHT, T, Spinner } from '@/ui/grammar';
 import type { TranscriptCardChoice } from '@/components/buzz/ChoicePlate';
 
 /**

@@ -1,14 +1,13 @@
 import React, { useState } from 'react';
 import equal from 'fast-deep-equal';
 import { ListItem, XStack, YStack } from 'tamagui';
-import { ChevronDown, ChevronUp, Hash, Pin } from 'lucide-react-native';
+import { ChevronDown, ChevronUp, CornerDownRight, Hash, Pin } from 'lucide-react-native';
 import type { ChatListCorner } from '@beeline/api-contract/phone';
 import type { ChatListItem } from '@beeline/buzz-client';
 import { compactRelativeTime } from '@/buzz/relative-time';
 import { roomRowName } from '@/buzz/room-list-row';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
-import { Glyph, HEIGHT, T, useStep } from '@/ui/grammar';
-import { WorkStateMark } from '@/ui/screens/tags/WorkMarks';
+import { AtMark, Glyph, HEIGHT, MARK, StatusMark, T, typeStyle, useStep, useTextSize } from '@/ui/grammar';
 import { threadWaitsOnViewer } from '@/ui/screens/thread/thread-status';
 import { useFinePointer } from '@/utils/use-fine-pointer';
 import { NEW_THREAD_HOLD_MS, PIN_HOLD_MS, useHold } from './ChatTree';
@@ -18,8 +17,8 @@ import { chatTagged, chatTitle, threadTitle } from './chat-tree-model';
 export const SECTION_CAP = { chats: 8, dms: 5 } as const;
 /** The lead column: a chat's # glyph or a direct message's face. */
 const LEAD = 20;
-/** The trailing state column: the unread dot or tagged ring. */
-const TRAIL = 12;
+/** The trailing state column, the same column as every state mark: needs you, unread, a section's count. */
+const TRAIL = MARK;
 
 type Props = {
   chats: readonly ChatListItem[];
@@ -38,12 +37,11 @@ type Props = {
 const age = (seconds: number | undefined, now: number) => compactRelativeTime(seconds, now);
 const chatAge = (item: ChatListItem, now: number) => age(item.latestMessage?.createdAt ?? item.room.updatedAt, now);
 
-/** Unread is a solid brass dot; a tag rings it. The column holds its width when empty. */
+/** The row's state mark, or its empty column. */
 function Dot({ unread, tagged }: { unread: boolean; tagged: boolean }) {
   return (
-    <YStack width={TRAIL} height={TRAIL} flexShrink={0} borderRadius="full" borderWidth={tagged ? 1 : 0} borderColor="needsYou"
-      alignItems="center" justifyContent="center">
-      {unread || tagged ? <YStack width={6} height={6} borderRadius="full" backgroundColor="needsYou" /> : null}
+    <YStack width={TRAIL} height={TRAIL} flexShrink={0} alignItems="center" justifyContent="center">
+      <StatusMark unread={unread} tagged={tagged} />
     </YStack>
   );
 }
@@ -100,8 +98,7 @@ function SectionLabel({ title, count, rule }: { title: string; count: number; ru
     <XStack borderTopWidth={rule ? 1 : 0} borderColor="stroke" marginTop={rule ? step('2') : '0'}
       paddingLeft={step('5')} paddingRight={step('6')} paddingTop={step('3')} paddingBottom={step('1')} gap={step('2')} alignItems="center">
       <T v="meta" color="secondary" flex={1}>{title}</T>
-      <T v="meta" color="secondary">{String(count)}</T>
-      <XStack width={TRAIL} />
+      <XStack minWidth={TRAIL} justifyContent="center"><T v="meta" color="secondary">{String(count)}</T></XStack>
     </XStack>
   );
 }
@@ -112,10 +109,12 @@ function WaitingRow({ item, corner, now, onOpenThread }: {
 }) {
   const title = threadTitle(item, corner);
   const where = corner.reason ? `${corner.reason} · ${chatTitle(item)}` : chatTitle(item);
+  // ↳ and the mark centre on the title's line.
+  const line = typeStyle('metaStrong', useTextSize()).lineHeight;
   return (
     <Row twoLine label={`Thread ${title} in ${chatTitle(item)}, waiting on you`}
       onPress={() => onOpenThread(item.room.id, corner.id, corner.name)} testID={`thread-row-${corner.id}`}>
-      <XStack width={LEAD} height={18} alignItems="center" justifyContent="center"><WorkStateMark state="needs-you" /></XStack>
+      <XStack width={LEAD} height={line} alignItems="center" justifyContent="center"><Glyph icon={CornerDownRight} size={16} /></XStack>
       <YStack flex={1} minWidth={0}>
         <XStack gap="2" alignItems="center">
           <T v="metaStrong" color="ink" flex={1} numberOfLines={1}>{title}</T>
@@ -123,7 +122,7 @@ function WaitingRow({ item, corner, now, onOpenThread }: {
         </XStack>
         <T v="meta" color="secondary" numberOfLines={1}>{where}</T>
       </YStack>
-      <XStack width={TRAIL} />
+      <XStack width={TRAIL} height={line} alignItems="center" justifyContent="center"><AtMark /></XStack>
     </Row>
   );
 }

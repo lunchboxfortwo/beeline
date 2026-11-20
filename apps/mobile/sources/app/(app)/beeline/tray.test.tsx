@@ -44,17 +44,26 @@ describe('Tasks tab', () => {
     await press(tree, 'In progress 2');
     expect(textOf(tree)).not.toContain('Measure phone reply latency');
   });
-  it('draws the status glyph first on each row and the assignee at its right', async () => {
+  it('draws ↳ and the name first, then the status mark in one column, then the assignee', async () => {
     serve([task(), task({ id: 'idle', title: 'release-corner', idle: true, assignee: null })]);
     const tree = await renderTags();
     await press(tree, 'In progress 2');
-    // The glyph is its own control ahead of the row: it opens the task sheet.
+    // The mark is its own control after the name: it opens the task sheet.
     const mark = (title: string) => byLabel(tree, `Change state of ${title}`).find((n: any) => n.props.state !== undefined);
     expect(mark('Measure phone reply latency').props).toMatchObject({ state: 'in-progress' });
     const row = byLabel(tree, 'Measure phone reply latency');
-    const children = row.children.filter((n: any) => typeof n !== 'string');
-    expect(children.at(-1).findAllByType('Avatar')).toHaveLength(1);
-    expect(byLabel(tree, 'release-corner').findAllByType('Avatar')).toHaveLength(0);
+    expect(row.findAllByType('Glyph')[0]?.props.size).toBe(16);
+    const parts = (title: string) => {
+      let node = byLabel(tree, title);
+      while (node.type !== 'XStack') node = node.parent;
+      return node.children.filter((n: any) => typeof n !== 'string');
+    };
+    expect(parts('Measure phone reply latency').map((n: any) => n.props['aria-label'] ?? n.props.label ?? null))
+      .toEqual(['Measure phone reply latency', 'Change state of Measure phone reply latency', null]);
+    expect(parts('Measure phone reply latency').at(-1).findAllByType('Avatar')).toHaveLength(1);
+    // A task with no assignee keeps the column open, so its mark stays in line.
+    expect(parts('release-corner').at(-1).findAllByType('Avatar')).toHaveLength(0);
+    expect(parts('release-corner')).toHaveLength(3);
     expect(mark('release-corner').props).toMatchObject({ state: 'in-progress', idle: true });
   });
   it('opens a thread row straight into its thread, with no sheet in between', async () => {

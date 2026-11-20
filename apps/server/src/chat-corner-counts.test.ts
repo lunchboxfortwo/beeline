@@ -14,6 +14,24 @@ const row = (
   worker_active: latest_turn_status === 'working',
 });
 describe('chat corner counts', () => {
+  it('marks a waiting corner Needs you only for the person it waits on', () => {
+    const waitingOn = (personId: string) => ({
+      ...row({ reason: 'question' }),
+      id: personId,
+      blocking: true,
+      waiting_item_id: 'question',
+      waiting_reason: 'question' as const,
+      waiting_kind: 'message' as const,
+      waiting_person_id: personId,
+    });
+    const result = chatCornerCounts([waitingOn('viewer'), waitingOn('someone-else')], 'viewer');
+    expect(
+      result.get('room')?.openCorners.map((corner) => [corner.id, corner.state, corner.workState]),
+    ).toEqual([
+      ['viewer', 'waiting', 'needs-you'],
+      ['someone-else', 'waiting', 'in-progress'],
+    ]);
+  });
   it('counts canonical waiting separately from working and review', () => {
     const result = chatCornerCounts([
       {
@@ -37,7 +55,9 @@ describe('chat corner counts', () => {
           pr: { url: 'https://github.com/example/repo/pull/1', number: 1 },
         } as any),
       },
-    ]);
+    ],
+      'viewer',
+    );
     expect(result.get('room')).toMatchObject({ cornerCount: 4, waitingCornerCount: 2 });
     expect(result.get('room')?.openCorners.map((corner) => corner.state)).toEqual([
       'waiting',
@@ -52,7 +72,9 @@ describe('chat corner counts', () => {
       { ...row({}, 'working'), work_state: 'in-review' as const },
       { ...row(), work_state: 'done' as const },
       row(),
-    ]);
+    ],
+      'viewer',
+    );
     expect(
       result.get('room')?.openCorners.map((corner) => [corner.state, corner.workState]),
     ).toEqual([
@@ -75,7 +97,9 @@ describe('chat corner counts', () => {
         owed_viewer: true,
       },
       row({ reason: 'question' }),
-    ]);
+    ],
+      'viewer',
+    );
     expect(result.get('room')?.openCorners.map((corner) => corner.mine)).toEqual([
       true,
       true,
@@ -84,7 +108,7 @@ describe('chat corner counts', () => {
     ]);
   });
   it('marks a corner the viewer commissioned as Mine through its follow row', () => {
-    const result = chatCornerCounts([{ ...row(), follows_viewer: true }, row()]);
+    const result = chatCornerCounts([{ ...row(), follows_viewer: true }, row()], 'viewer');
     expect(result.get('room')?.openCorners.map((corner) => corner.mine)).toEqual([true, undefined]);
     expect(result.get('room')?.mineCornerCount).toBe(1);
   });
@@ -95,7 +119,7 @@ describe('chat corner counts', () => {
         id: `${prefix}-${index}`,
         follows_viewer: mine,
       }));
-    const few = chatCornerCounts([...corners('other', 10, false), ...corners('mine', 3, true)]).get(
+    const few = chatCornerCounts([...corners('other', 10, false), ...corners('mine', 3, true)], 'viewer').get(
       'room',
     );
     expect(few?.openCorners.map((corner) => corner.id)).toEqual([
@@ -109,7 +133,7 @@ describe('chat corner counts', () => {
       'mine-2',
     ]);
     expect(few).toMatchObject({ cornerCount: 13, mineCornerCount: 3 });
-    const many = chatCornerCounts([...corners('other', 2, false), ...corners('mine', 9, true)]).get(
+    const many = chatCornerCounts([...corners('other', 2, false), ...corners('mine', 9, true)], 'viewer').get(
       'room',
     );
     expect(many?.openCorners.map((corner) => corner.id)).toEqual(
@@ -129,9 +153,11 @@ describe('chat corner counts', () => {
     const result = chatCornerCounts([
       ...Array.from({ length: 10 }, (_, i) => ({ ...row({}, 'working'), id: `working-${i}` })),
       ...blocked,
-    ]).get('room');
+    ],
+      'viewer',
+    ).get('room');
     expect(result?.cornerCount).toBe(22);
-    expect(result?.openCorners.filter((c) => c.workState === 'needs-you').map((c) => c.id)).toEqual(
+    expect(result?.openCorners.filter((c) => c.state === 'waiting').map((c) => c.id)).toEqual(
       blocked.map((c) => c.id),
     );
   });
@@ -165,7 +191,9 @@ describe('chat corner counts', () => {
         owed_viewer: true,
         attention: true,
       },
-    ]);
+    ],
+      'viewer',
+    );
     expect(result.get('room')).toMatchObject({ cornerCount: 4, waitingCornerCount: 2 });
     expect(
       result.get('room')?.openCorners.map(({ state, mine, attention }) => [state, mine, attention]),
@@ -190,7 +218,9 @@ describe('chat corner counts', () => {
       },
       { ...row({}, 'working'), follows_viewer: true, latest_created_at: at },
       { ...row(), latest_created_at: at },
-    ]);
+    ],
+      'viewer',
+    );
     expect(result.get('room')?.openCorners.map((corner) => corner.waitingSince)).toEqual([
       at.getTime() / 1000,
       undefined,
@@ -211,7 +241,9 @@ describe('chat corner counts', () => {
       },
       { ...row({}, 'working'), latest_created_at: at },
       { ...row(), latest_created_at: null },
-    ]);
+    ],
+      'viewer',
+    );
     expect(result.get('room')?.openCorners.map((corner) => corner.lastActivityAt)).toEqual([
       at.getTime() / 1000,
       at.getTime() / 1000,
@@ -225,7 +257,7 @@ describe('chat corner counts', () => {
         row({ outcome: 'landed' }),
         { ...row(), archived_at: new Date() },
         { ...row(), parent_id: 'another' },
-      ]),
+      ], 'viewer'),
     ).toEqual(
       new Map([
         [

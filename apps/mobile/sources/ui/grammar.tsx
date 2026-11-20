@@ -18,7 +18,8 @@ import {
 } from 'tamagui';
 import { ArrowLeft, Check, ChevronRight, Copy as CopyIcon, Hash } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, { useAnimatedStyle, type AnimatedProps, type AnimatedStyle } from 'react-native-reanimated';
+import Animated, { Easing, useAnimatedStyle, useReducedMotion, useSharedValue, withRepeat, withTiming, type AnimatedProps, type AnimatedStyle } from 'react-native-reanimated';
+import Svg, { Circle, G, Path } from 'react-native-svg';
 import type { ColorValue, ViewProps, ViewStyle } from 'react-native';
 import { QR_INK, QR_PAPER, SCRIM } from '@/buzz/groknight';
 
@@ -405,12 +406,60 @@ export function CountPill({ n }: { n: number }) {
     );
 }
 
-/** Unread is a solid brass dot; a tag adds a ring around it. */
+/**
+ * The one size of every state mark in a row's right column: thread status, needs you, unread.
+ * Marks share the `needsYou` colour; each is drawn in a 20-unit box around a ring of r 8.2.
+ */
+export const MARK = 18;
+
+/** Needs you: an @ fitted to the state ring (Lucide's at-sign scaled onto r 8.2), the Tasks tab's sign. */
+export function AtMark({ size = MARK }: { size?: number }) {
+    const ink = useTheme().needsYou?.val as string;
+    return (
+        <Svg width={size} height={size} viewBox="0 0 20 20" accessibilityLabel="needs you">
+            <G transform="translate(10 10) scale(0.82) translate(-12 -12)">
+                <Circle cx={12} cy={12} r={4} fill="none" stroke={ink} strokeWidth={2.4} />
+                <Path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0 -5.46 8.91" fill="none" stroke={ink} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />
+            </G>
+        </Svg>
+    );
+}
+
+const SPINNER_SIZE = { small: 16, large: 32 } as const;
+/**
+ * The one ring spinner: working right now and every loading state. A track ring and a quarter
+ * arc that turns; held still under reduced motion. The Beeline mark is never a loader.
+ */
+export function Spinner({ size = 'small', color = 'needsYou', testID, accessibilityLabel = 'Loading' }: {
+    size?: keyof typeof SPINNER_SIZE | number; color?: ColorToken; testID?: string; accessibilityLabel?: string;
+}) {
+    const ink = (useTheme() as Record<string, { val: string } | undefined>)[color]?.val as string;
+    const reduced = useReducedMotion();
+    const turn = useSharedValue(0);
+    useEffect(() => {
+        if (reduced) return;
+        turn.value = withRepeat(withTiming(360, { duration: 900, easing: Easing.linear }), -1, false);
+    }, [reduced, turn]);
+    const motion = useAnimatedStyle(() => ({ transform: [{ rotate: `${turn.value}deg` }] }));
+    const px = typeof size === 'number' ? size : SPINNER_SIZE[size];
+    return (
+        <YStack width={px} height={px} accessibilityRole="progressbar" aria-label={accessibilityLabel} testID={testID}>
+            <Motion motion={motion}>
+                <Svg width={px} height={px} viewBox="0 0 20 20">
+                    <Circle cx={10} cy={10} r={8.2} fill="none" stroke={ink} strokeOpacity={0.7} strokeWidth={1.7} />
+                    <Path d="M10 1.8A8.2 8.2 0 0 1 18.2 10" fill="none" stroke={ink} strokeWidth={2.2} strokeLinecap="round" />
+                </Svg>
+            </Motion>
+        </YStack>
+    );
+}
+
+/** A chat's right-column mark: needs you (an approval, a question or an @mention) is the @; unread is a dot. */
 export function StatusMark({ unread, tagged }: { unread: boolean; tagged: boolean }) {
     if (!unread && !tagged) return null;
     return (
-        <YStack width={16} height={16} borderRadius="full" borderWidth={tagged ? 1 : 0} borderColor="needsYou" alignItems="center" justifyContent="center" aria-label={tagged ? 'Tagged you' : 'Unread'} testID="status-mark">
-            <YStack width={8} height={8} borderRadius="full" backgroundColor="needsYou" />
+        <YStack width={MARK} height={MARK} alignItems="center" justifyContent="center" aria-label={tagged ? 'Needs you' : 'Unread'} testID="status-mark">
+            {tagged ? <AtMark /> : <YStack width={8} height={8} borderRadius="full" backgroundColor="needsYou" />}
         </YStack>
     );
 }

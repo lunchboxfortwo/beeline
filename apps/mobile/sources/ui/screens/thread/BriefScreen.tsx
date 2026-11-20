@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ListItem, Separator, Spinner, XStack, YStack } from 'tamagui';
+import { ListItem, Separator, XStack, YStack } from 'tamagui';
 import { isRoomView, type SurfaceCacheAddress } from '@beeline/buzz-client';
 import type { Identity } from '@beeline/buzz-client';
 import type { RoomView } from '@beeline/api-contract/phone';
@@ -9,7 +9,7 @@ import { mobileSurfaceCache, surfaceAddress } from '@/buzz/surface-storage';
 import { useSurfaceSnapshot } from '@/buzz/use-shared-surface';
 import { RoomViewClient } from '@/sync/transport/room-view-client';
 import { openExternalUrl } from '@/utils/open-external-url';
-import { Copy, Screen, T } from '@/ui/grammar';
+import { Copy, Screen, T, Spinner } from '@/ui/grammar';
 import { briefBlocks, briefSpans, type BriefBlock } from './brief-blocks';
 
 type Brief = NonNullable<RoomView['cornerBrief']>;

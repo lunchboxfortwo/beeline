@@ -2,7 +2,7 @@ import { appErrorCopy } from '@/buzz/app-error-copy';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
-import { Spinner, YStack } from 'tamagui';
+import { YStack } from 'tamagui';
 import * as WebBrowser from 'expo-web-browser';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSandboxWebView } from '@/components/buzz/sandbox-webview';
@@ -11,7 +11,7 @@ import { getWorkbenchSource } from '@/buzz/workbench-source';
 import { connectorOfferCompletionRoute } from '@/buzz/connector-offer-ceremony';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import { takeAppSignInReturn } from '@/buzz/app-sign-in';
-import { Btn, Copy, T } from '@/ui/grammar';
+import { Btn, Copy, T, Spinner } from '@/ui/grammar';
 import { ConnectorFooter, ConnectorFrame, ConnectorNote } from '@/ui/screens/settings/connectors/ConnectorParts';
 
 function first(value: string | string[] | undefined): string | undefined { return Array.isArray(value) ? value[0] : value; }

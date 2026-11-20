@@ -5,7 +5,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 
 const fixture = vi.hoisted(() => ({ view: null as any, read: vi.fn(), fetch: vi.fn(), open: vi.fn() }));
 vi.mock('tamagui', () => ({ ListItem: 'ListItem', Separator: 'Separator', Spinner: 'Spinner', XStack: 'XStack', YStack: 'YStack' }));
-vi.mock('@/ui/grammar', () => ({ Copy: 'Copy', Screen: 'Screen', T: 'T' }));
+vi.mock('@/ui/grammar', () => ({ Copy: 'Copy', Screen: 'Screen', T: 'T', Spinner: 'Spinner' }));
 vi.mock('@beeline/buzz-client', () => ({ isRoomView: () => true }));
 vi.mock('@/auth/buzz-identity-storage', () => ({
   loadBuzzIdentity: async () => ({ publicKey: 'me' }), getEffectiveRelayUrl: async () => 'https://relay.example',
