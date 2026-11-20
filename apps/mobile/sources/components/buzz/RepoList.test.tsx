@@ -77,6 +77,17 @@ describe('Repository list data window', () => {
     expect(onSelect).toHaveBeenCalledWith(candidates[999]);
     act(() => { tree!.unmount(); });
   });
+
+  it('says no repositories are connected until a search matches nothing', () => {
+    let tree: ReturnType<typeof create>;
+    act(() => { tree = create(<RepoList candidates={[]} currentKey={null} loading={false}
+      onSelect={vi.fn()} testIDPrefix="repos" draftContext="empty" />); });
+    const empty = () => tree!.root.findByType('VirtualizedList').props.ListEmptyComponent.props.title;
+    expect(empty()).toBe('No repositories connected.');
+    act(() => { tree!.root.findByType('Placeheld').props.onChangeText('beeline'); });
+    expect(empty()).toBe('No repos match.');
+    act(() => { tree!.unmount(); });
+  });
 });
 
 // Exercise the actual sheet keyboard budget and every ancestor between it and

@@ -15,8 +15,9 @@ const TABS: { value: Tab; label: string; icon: typeof Hash }[] = [
 ];
 
 // Phone text sizes can wrap "People" to "Peopl" + a hidden "e"; native keeps one line and shrinks to fit.
+// Large system text stops at 1.3x so all four labels keep one size; shrinking only "Settings" read as uneven.
 // Web has no shrink-to-fit (it would cut the label with an ellipsis), and its labels fit already.
-const ONE_LINE = Platform.OS === 'web' ? {} : { numberOfLines: 1, adjustsFontSizeToFit: true, minimumFontScale: 0.5 };
+const ONE_LINE = Platform.OS === 'web' ? {} : { numberOfLines: 1, adjustsFontSizeToFit: true, minimumFontScale: 0.5, maxFontSizeMultiplier: 1.3 };
 
 /** The phone's four places. Chats leads; Tasks carries the live count. The lit tab has a bold label and a heavier icon. */
 export const TabBar = React.memo(function TabBar({ active, tagsCount = 0 }: { active: Tab; tagsCount?: number }) {

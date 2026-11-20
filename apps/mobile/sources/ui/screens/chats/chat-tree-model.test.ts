@@ -42,6 +42,14 @@ describe('chat rows', () => {
     });
   });
 
+  it('shows a system line as written, without a "You:" prefix', () => {
+    const latest = { ...chat('beeline').latestMessage!, text: '@alan opened a thread calm-willow-thread',
+      presentation: 'card' as const, systemEvent: { kind: 'corner-opened' } as never };
+    expect(chatPreview(chat('beeline', { latestMessage: latest }), alan.pubkey)).toEqual({
+      text: '@alan opened a thread calm-willow-thread',
+    });
+  });
+
   it('rings the dot for an unread tag or a chat that needs the viewer', () => {
     expect(chatTagged(chat('a', { unread: true }))).toBe(false);
     expect(

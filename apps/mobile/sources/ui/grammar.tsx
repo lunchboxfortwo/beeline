@@ -369,12 +369,13 @@ export function SheetScroll({ children }: { children: React.ReactNode }) {
 
 /** One sheet row: an icon column, a label and an optional quiet line, then a chevron when it opens a step. */
 export function SheetRow({ icon, label, detail, onPress, testID, right, chevron = false, selected }: {
-    icon: React.ReactNode; label: string; detail?: string; onPress: () => void; testID?: string; right?: React.ReactNode; chevron?: boolean; selected?: boolean;
+    /** The leading column; omit it for a row with no leading mark. */
+    icon?: React.ReactNode; label: string; detail?: string; onPress: () => void; testID?: string; right?: React.ReactNode; chevron?: boolean; selected?: boolean;
 }) {
     const step = useStep();
     return (
         <ListItem minHeight={HEIGHT.sheetRow} paddingHorizontal="0" paddingVertical={step('2')} gap={step('3')} justifyContent="flex-start" backgroundColor="raised" onPress={onPress} aria-label={selected !== undefined && detail ? `${label}, ${detail}` : label} accessibilityRole={selected === undefined ? "button" : "radio"} role={selected === undefined ? "button" : "radio"} aria-checked={selected} testID={testID}>
-            <YStack width={28} alignItems="center">{icon}</YStack>
+            {icon === undefined ? null : <YStack width={28} alignItems="center">{icon}</YStack>}
             <YStack flex={1} minWidth={0} gap={step(selected === undefined ? '1' : '0')}>
                 <Copy>{label}</Copy>
                 {detail ? <Copy small quiet>{detail}</Copy> : null}

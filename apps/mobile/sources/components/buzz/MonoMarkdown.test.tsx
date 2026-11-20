@@ -27,6 +27,11 @@ it.each([false, true])('parses transcript quotes and task items with document=%s
     ] });
 });
 
+it('reads an empty code fence as its typed text, not an empty code frame', () => {
+    expect(parseMarkdown('```ts', false)).toMatchObject([{ type: 'text', content: [{ text: '```ts' }] }]);
+    expect(parseMarkdown('```ts\nconst a = 1;\n```', false)).toMatchObject([{ type: 'code-block', language: 'ts', content: 'const a = 1;' }]);
+});
+
 it('keeps slash commands joined in rendered prose without changing paths or inline code', () => {
     let tree: any;
     act(() => { tree = create(<MonoMarkdown textStyle={{}} markdown={'Try /draw-avatar now. **/draw-avatar** remains joined. /tmp/file and `echo /draw-avatar` stay literal.'} />); });

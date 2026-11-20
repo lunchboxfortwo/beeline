@@ -109,6 +109,12 @@ export function parseMarkdownBlock(markdown: string, document = false) {
             }
             const contentString = content.join('\n');
 
+            // A fence with nothing inside reads as the text that was typed, not an empty frame.
+            if (!contentString.trim()) {
+                blocks.push({ type: 'text', content: [{ styles: [], text: trimmed, url: null }] });
+                continue;
+            }
+
             // Detect mermaid diagram language and route to appropriate block type
             if (language === 'mermaid') {
                 blocks.push({ type: 'mermaid', content: contentString });

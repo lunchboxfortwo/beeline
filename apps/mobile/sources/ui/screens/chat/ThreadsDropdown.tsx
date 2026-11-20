@@ -55,11 +55,13 @@ export function ThreadsDropdown({ roomId, chatName, viewer, openThread, onNewThr
                     <Collapsible.Trigger asChild>
                         <Btn
                             kind="quiet" label={`${count} active ${count === 1 ? 'thread' : 'threads'} in ${chatName ?? 'this chat'}`}
-                            flex={1} minWidth={HEIGHT.control} height="auto" justifyContent="flex-start" gap="1" aria-expanded={open}
+                            flex={1} minWidth={HEIGHT.control} height="auto" justifyContent="flex-start" gap="1"
+                            // No active threads: nothing to open, so no chevron.
+                            disabled={!count} aria-expanded={count ? open : undefined}
                             testID="threads-dropdown-trigger"
                         >
                             <Copy small>{`Threads · ${count} active`}</Copy>
-                            <Glyph icon={open ? ChevronUp : ChevronDown} size={14} />
+                            {count ? <Glyph icon={open ? ChevronUp : ChevronDown} size={14} /> : null}
                         </Btn>
                     </Collapsible.Trigger>
                     <Separator vertical borderColor="stroke" height="4" />

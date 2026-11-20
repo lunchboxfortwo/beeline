@@ -440,4 +440,16 @@ describe('Workspace settings tab', () => {
     await act(async () => { byId(renderer, 'workspace-public-join-copy').props.onPress(); await Promise.resolve(); });
     expect(clipboard.setStringAsync).toHaveBeenCalledWith(`https://usebeeline.app/join/${token}`);
   });
+
+  it('describes Invite-only beside the Visibility value only when it is Invite-only', async () => {
+    const view = workspaceView('member');
+    roomViews.workspace.mockResolvedValue(view);
+    const invite = await render();
+    expect(byId(invite, 'workspace-visibility-row').props.detail).toBe('Invite-only keeps discovery closed. Existing members keep their access.');
+    act(() => invite.unmount());
+    roomViews.workspace.mockResolvedValue({ ...view, workspace: { ...view.workspace, visibility: 'public' } });
+    const open = await render();
+    expect(byId(open, 'workspace-visibility-row').props.detail).toBeUndefined();
+    act(() => open.unmount());
+  });
 });

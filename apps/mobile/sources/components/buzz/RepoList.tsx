@@ -90,7 +90,7 @@ export function RepoList<T = RepoCandidate>({
           windowSize={1}
           keyboardShouldPersistTaps="handled"
           ListEmptyComponent={
-            <EmptyState testID={`${testIDPrefix}-empty`} title={loading ? 'Loading repos…' : 'No repos match.'} />
+            <EmptyState testID={`${testIDPrefix}-empty`} title={loading ? 'Loading repos…' : query.trim() ? 'No repos match.' : 'No repositories connected.'} />
           }
           nestedScrollEnabled
           renderItem={({ item }) => (

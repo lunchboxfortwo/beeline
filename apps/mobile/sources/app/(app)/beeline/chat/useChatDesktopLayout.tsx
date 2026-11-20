@@ -123,7 +123,11 @@ export function useChatDesktopLayout([
 
   const readPickerRoster=useCallback((workspaceId:string)=>roomClient!.workspace(workspaceId),[roomClient]);
 
-  const {value:workspaceRoster,open:openWorkspaceRoster}=useRoomRoster(activeCommunityId,userPubkey,participantPickerVisible,roomClient?readPickerRoster:undefined,setMembershipError);
+  // An empty chat's first steps depend on the Workspace's agents, so it reads the roster too;
+  // only the picker reports a failed read.
+  const emptyChat=Boolean(roomSurface&&!isCorner&&!isDirectMessage&&roomSurface.messages.length===0);
+  const rosterError=useCallback((reason:string)=>{if(participantPickerVisible)setMembershipError(reason);},[participantPickerVisible,setMembershipError]);
+  const {value:workspaceRoster,open:openWorkspaceRoster}=useRoomRoster(activeCommunityId,userPubkey,participantPickerVisible||emptyChat,roomClient?readPickerRoster:undefined,rosterError);
 
   // The DM header, the repository-change guard, mentions and forwarding read
   // the app-level Room list, which stays live while this Room is open.

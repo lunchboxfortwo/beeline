@@ -201,6 +201,16 @@ it('ends the open list on a firm edge above the transcript', () => {
   expect(edge()).toBe('strongStroke');
   act(() => tree.unmount());
 });
+it('offers nothing to open when the chat has no active threads', () => {
+  fixture.summary = { cornerCount: 0, openCorners: [] };
+  let tree: any;
+  act(() => { tree = create(<ThreadsDropdown roomId="r" chatName="general" openThread={vi.fn()} onNewThread={vi.fn()} />); });
+  const trigger = byTestID(tree, 'threads-dropdown-trigger')[0];
+  expect(trigger.props.disabled).toBe(true);
+  expect(trigger.props['aria-expanded']).toBeUndefined();
+  expect(tree.root.findAll((node: any) => node.props?.icon && node.props.size === 14)).toHaveLength(0);
+  act(() => tree.unmount());
+});
 it('W8 names a single active thread in the trigger', () => {
   fixture.summary = { cornerCount: 1, openCorners: [] };
   let tree: any;

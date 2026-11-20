@@ -70,6 +70,9 @@ it('expands Done on tap and collapses it on the next tap', () => {
         act(() => host('work-section-done').props.onPress());
         expect(host('work-section-done').props['aria-expanded']).toBe(false);
         expect(rows()).toHaveLength(0);
+        // An empty section has nothing to open.
+        expect(host('work-section-backlog').props.onPress).toBeUndefined();
+        expect(host('work-section-backlog').props['aria-expanded']).toBeUndefined();
     } finally { act(() => tree.unmount()); }
 });
 

@@ -267,6 +267,8 @@ export function useChatHeader([
   const starterPromptDefs = useMemo(() => {
     if (emptyLedgerVariant !== 'room' || viewerIsAgent || !roomSurface?.viewer.permissions.send)
       return undefined;
+    // Wait for the Workspace roster: guessing first and correcting later flips the copy on screen.
+    if (!workspaceRoster) return undefined;
     return roomStarterPrompts({
       roomAgent: firstRoomAgent,
       workspaceAgentCount: workspaceRoster ? workspaceRoster.agents.length : null,

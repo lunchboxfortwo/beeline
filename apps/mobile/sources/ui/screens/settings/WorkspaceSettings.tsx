@@ -214,7 +214,8 @@ export function WorkspaceSettings({ workspaceId }: { workspaceId: string }) {
                     </YStack>
                 ) : null}
                 <Row label="Visibility" value={workspace.visibility ? WORKSPACE_VISIBILITY_LABELS[workspace.visibility] : undefined}
-                    detail="Invite-only keeps discovery closed. Existing members keep their access."
+                    // The helper describes Invite-only, so it shows only beside that value; Public has its join-link row.
+                    detail={workspace.visibility === 'invite-only' ? 'Invite-only keeps discovery closed. Existing members keep their access.' : undefined}
                     onPress={canManage && working !== 'visibility' ? () => setSheet('visibility') : undefined} testID="workspace-visibility-row"
                     last={workspace.visibility !== 'public' && !canManage} />
                 {workspace.visibility === 'public' ? (

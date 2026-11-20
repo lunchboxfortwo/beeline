@@ -116,7 +116,7 @@ describe('Tasks tab', () => {
   it('says nothing needs you when no ask waits', async () => {
     serve([task()]);
     const tree = await renderTags();
-    expect(textOf(tree)).toContain('Nothing needs you now');
+    expect(textOf(tree)).toContain('Nothing needs you\u00a0now');
     expect(textOf(tree)).toContain('Go do something else.');
     expect(tree.root.findAll((n: any) => n.props?.['aria-label'] === 'Clear all')).toHaveLength(0);
   });

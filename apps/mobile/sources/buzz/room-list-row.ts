@@ -61,6 +61,8 @@ export function roomRowPreview(
   if (!latest) return { attribution: 'none', text: NO_ACTIVITY_PREVIEW };
   const preview = text || attachmentPreview(latest.attachments);
   if (!preview) return { attribution: 'none', text: NO_ACTIVITY_PREVIEW };
+  // A system line already names who acted ("@ana opened a thread …"); a "You:" prefix would repeat it.
+  if (latest.systemEvent) return { attribution: 'none', text: preview };
   if (viewerPubkey && latest.author.pubkey === viewerPubkey)
     return { attribution: 'self', text: preview };
   // Older cached grant cards may still carry the asking agent as author.
