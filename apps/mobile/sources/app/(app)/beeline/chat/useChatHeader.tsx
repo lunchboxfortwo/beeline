@@ -62,7 +62,7 @@ export function useChatHeader([
   firstRoomAgent: import("@beeline/api-contract/phone").RoomViewIdentity | undefined,
   startCornerMessage: () => void,
   focusComposer: () => void,
-  starterPrompts: { lead: string; detail: string; testID: string; onPress: () => void; }[] | null | undefined,
+  starterPrompts: { lead: string; detail: string; testID: string; fillText?: string; onPress: () => void; }[] | null | undefined,
   starterIntro: string | undefined,
   storedRoomName: string,
   headerTitleKind: 'room' | 'dm' | 'corner',
@@ -292,6 +292,7 @@ export function useChatHeader([
       lead: prompt.lead,
       detail: prompt.detail,
       testID: prompt.testID,
+      ...(prompt.action.kind === 'fill' ? { fillText: prompt.action.text } : {}),
       onPress: () => {
         if (prompt.action.kind === 'fill')
           fillComposer(prompt.action.text, {

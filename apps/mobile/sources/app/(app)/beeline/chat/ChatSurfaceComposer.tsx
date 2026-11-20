@@ -17,6 +17,7 @@ import { formatAttachmentSize, type PickedChatAttachment } from '@/buzz/chat-att
 import { type BuiltInSlashVerbId } from '@/buzz/slash-verbs';
 import { type MessageReplyTarget } from '@/buzz/message-reply';
 import { splitComposerTags } from '@/buzz/composer-tags';
+import { isBareStarterTemplate } from '@/buzz/starter-prompts';
 import { mentionKeyboardAction } from '@/buzz/composer-keyboard';
 import { TurnProgressLine } from '@/components/buzz/TurnProgressLine';
 import { ChannelSuggestionMenu, MentionSuggestionMenu } from '@/components/buzz/MentionSuggestionMenu';
@@ -84,6 +85,8 @@ type Props = {
   replyTarget: MessageReplyTarget | null;
   setReplyTarget: React.Dispatch<React.SetStateAction<MessageReplyTarget | null>>;
   composerTagHandles: Set<string>;
+  /** The starter fills on offer here: their bare text is nothing to send yet. */
+  starterTemplates: readonly string[];
   pendingAttachments: PickedChatAttachment[];
   attachmentUploader: { state(attachment: PickedChatAttachment): import("@/buzz/chat-attachment").ChatAttachmentUploadState | undefined; subscribe(listener: () => void): () => void; start(client: import("@beeline/buzz-client").BuzzClient, attachments: readonly PickedChatAttachment[]): void; retain(attachments: readonly PickedChatAttachment[]): void; uploadAll(client: import("@beeline/buzz-client").BuzzClient, attachments: readonly PickedChatAttachment[]): Promise<import("@beeline/buzz-client").AttachmentReference[]>; };
   sending: boolean;
@@ -167,6 +170,7 @@ export const ChatSurfaceComposer = React.memo(function ChatSurfaceComposer({
   replyTarget,
   setReplyTarget,
   composerTagHandles,
+  starterTemplates,
   pendingAttachments,
   attachmentUploader,
   sending,
@@ -220,6 +224,9 @@ export const ChatSurfaceComposer = React.memo(function ChatSurfaceComposer({
   // not by default); only the list's scroll inside them gives up height, so the
   // field, attachments and keyboard spacer keep theirs.
   const phoneShrink = desktopExperience ? undefined : { flexShrink: 1, minHeight: 0 };
+  // A starter's bare template is not a message until something is added to it.
+  const starterUnfilled =
+    !pendingAttachments.length && isBareStarterTemplate(inputText, starterTemplates);
   return (<YStack
                 position="relative"
                 zIndex={1}
@@ -488,7 +495,8 @@ export const ChatSurfaceComposer = React.memo(function ChatSurfaceComposer({
                       canSend={
                         slashMenuVisible
                           ? Boolean(inputText.trim())
-                          : Boolean(
+                          : !starterUnfilled &&
+                            Boolean(
                               splitComposerTags(inputText, composerTagHandles).rest.trim() ||
                               pendingAttachments.length,
                             )
@@ -547,7 +555,7 @@ export const ChatSurfaceComposer = React.memo(function ChatSurfaceComposer({
                           );
                           if (desktopAction === 'send') {
                             event.preventDefault();
-                            void handleSend();
+                            if (!starterUnfilled) void handleSend();
                           }
                           return;
                         }

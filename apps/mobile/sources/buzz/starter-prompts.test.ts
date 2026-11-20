@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { roomStarterIntro, roomStarterPrompts } from './starter-prompts';
+import { isBareStarterTemplate, roomStarterIntro, roomStarterPrompts } from './starter-prompts';
 
 const MANAGER = { canManageWorkspace: true };
 
@@ -111,5 +111,43 @@ describe('the first Room starter prompts', () => {
       'Invite someone to Northstar Lab',
     ]);
     expect(roomStarterIntro(prompts)).toBe('Connect an agent, then ask it for something here.');
+  });
+});
+
+describe('a bare starter template has nothing to send', () => {
+  const templates = roomStarterPrompts({
+    ...MANAGER,
+    roomAgent: { pubkey: 'agent-1', handle: 'ruby' },
+    workspaceAgentCount: 1,
+  }).flatMap((prompt) => (prompt.action.kind === 'fill' ? [prompt.action.text] : []));
+
+  it('covers every fill starter on offer', () => {
+    expect(templates).toEqual([
+      '@ruby Help me turn this idea into a plan: ',
+      '@ruby Open a thread to ',
+    ]);
+  });
+
+  it.each(templates)('holds Send while %j is unfilled, trailing whitespace included', (template) => {
+    expect(isBareStarterTemplate(template, templates)).toBe(true);
+    expect(isBareStarterTemplate(`${template}   `, templates)).toBe(true);
+    expect(isBareStarterTemplate(`${template}\n`, templates)).toBe(true);
+    expect(isBareStarterTemplate(template.trimEnd(), templates)).toBe(true);
+  });
+
+  it.each(templates)('allows Send once anything is typed after %j', (template) => {
+    expect(isBareStarterTemplate(`${template}x`, templates)).toBe(false);
+    expect(isBareStarterTemplate(`${template}ship the onboarding fix`, templates)).toBe(false);
+  });
+
+  it('leaves drafts that never came from a starter alone', () => {
+    for (const draft of ['', 'hello', '@ruby', '@ruby Help me']) {
+      expect(isBareStarterTemplate(draft, templates)).toBe(false);
+    }
+    expect(isBareStarterTemplate('@ruby Open a thread to ', [])).toBe(false);
+  });
+
+  it('keeps a complete starter prompt with no trailing slot sendable', () => {
+    expect(isBareStarterTemplate('@ruby Summarize today', ['@ruby Summarize today'])).toBe(false);
   });
 });

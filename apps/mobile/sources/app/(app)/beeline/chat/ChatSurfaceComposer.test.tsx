@@ -44,7 +44,7 @@ it('COMPOSER-SIZE-1: settles ref measurements, grows and shrinks, then sends the
     const [text, setText] = React.useState('hello');
     const inputTextRef = React.useRef(text);
     const props = {
-      commandController: {}, desktopExperience: false, pendingAttachments: [], composerTagHandles: new Set(),
+      commandController: {}, desktopExperience: false, pendingAttachments: [], composerTagHandles: new Set(), starterTemplates: [],
       voice: {}, roomSurface: { members: [] }, composerInputRevisionRef: { current: 0 },
       composerHeight: height, setComposerHeight: setHeight, inputText: text,
       inputTextRef, setInputText: setText,
@@ -77,7 +77,7 @@ it.each([false, true])('COMPOSER-KEYBOARD-1: desktop=%s, only the phone chrome l
     commandController: {}, desktopExperience: desktop, mentionMenuVisible: true, keyboardHeight: 300,
     mentionSuggestions: { matches: [], overflow: 18 }, personProfileByPubkey: new Map(),
     pendingAttachments: [{ uri: 'file:///29819.jpg', name: '29819.jpg', mimeType: 'image/jpeg', size: 1 }],
-    attachmentUploader: { state: () => undefined }, composerTagHandles: new Set(),
+    attachmentUploader: { state: () => undefined }, composerTagHandles: new Set(), starterTemplates: [],
     voice: {}, roomSurface: { members: [] }, composerInputRevisionRef: { current: 0 },
     composerHeight: 26, setComposerHeight: () => undefined, inputText: '@',
     inputTextRef: { current: '@' }, setInputText: () => undefined,
@@ -114,7 +114,7 @@ it.each([
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   const voice = { join: vi.fn() };
   const props = {
-    ...location, commandController: {}, desktopExperience: false, pendingAttachments: [], composerTagHandles: new Set(),
+    ...location, commandController: {}, desktopExperience: false, pendingAttachments: [], composerTagHandles: new Set(), starterTemplates: [],
     voice, roomSurface: { room: { name: 'crew' }, members: [{ identity: { kind: agent ? 'agent' : 'human' } }] },
     composerInputRevisionRef: { current: 0 }, composerHeight: 26, setComposerHeight: () => {},
     inputText: '', inputTextRef: { current: '' }, setInputText: () => {},
@@ -124,4 +124,25 @@ it.each([
   expect(composer.props.voice).toBe(callable ? voice : undefined);
   if (location.isCorner) expect(composer.props.placeholder).toBe('Reply in thread');
   else if (!location.isDirectMessage) expect(composer.props.placeholder).toBe('Message #crew');
+});
+
+// Tapping a starter fills its bare template; Send stays off until something is added.
+it('holds Send on a bare starter template until something is added', () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const template = '@ruby Open a thread to ';
+  const props = (inputText: string, extra: Partial<Props> = {}) => ({
+    commandController: {}, desktopExperience: false, pendingAttachments: [],
+    composerTagHandles: new Set(['ruby']), starterTemplates: [template],
+    voice: {}, roomSurface: { members: [] }, composerInputRevisionRef: { current: 0 },
+    composerHeight: 26, setComposerHeight: () => undefined, inputText,
+    inputTextRef: { current: inputText }, setInputText: () => undefined, ...extra,
+  }) as unknown as Props;
+  act(() => { renderer = create(<ChatSurfaceComposer {...props(template)} />); });
+  expect(renderer!.root.findByType('Composer').props.canSend).toBe(false);
+  act(() => renderer!.update(<ChatSurfaceComposer {...props(`${template}  `)} />));
+  expect(renderer!.root.findByType('Composer').props.canSend).toBe(false);
+  act(() => renderer!.update(<ChatSurfaceComposer {...props(`${template}fix login`)} />));
+  expect(renderer!.root.findByType('Composer').props.canSend).toBe(true);
+  act(() => renderer!.update(<ChatSurfaceComposer {...props('Open a thread to ', { starterTemplates: [] })} />));
+  expect(renderer!.root.findByType('Composer').props.canSend).toBe(true);
 });

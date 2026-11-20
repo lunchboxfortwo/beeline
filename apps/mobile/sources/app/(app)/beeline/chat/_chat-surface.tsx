@@ -1,4 +1,4 @@
-import { useCallback, type MutableRefObject, type Ref } from 'react';
+import { useCallback, useMemo, type MutableRefObject, type Ref } from 'react';
 import { Platform } from 'react-native';
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
 import { useAnimatedStyle } from 'react-native-reanimated';
@@ -220,6 +220,10 @@ export function BuzzChatSurface({
     activeCommunityId, viewerIsAgent, setAgentConnectVisible, canManageWorkspace,
     setMembershipError, setParticipantPickerKind, openWorkspaceRoster, setParticipantPickerVisible,
   ]);
+  const starterTemplates = useMemo(
+    () => starterPrompts?.flatMap((prompt) => (prompt.fillText ? [prompt.fillText] : [])) ?? [],
+    [starterPrompts],
+  );
   const [
     desktopTranscript, transcriptMessagesRef, transcriptMessages, visibleMessages,
     cornerAgentPubkey, dismissComposerKeyboard, speakerWorking, continuedAttributionIds,
@@ -614,6 +618,7 @@ export function BuzzChatSurface({
   replyTarget={replyTarget}
   setReplyTarget={setReplyTarget}
   composerTagHandles={composerTagHandles}
+  starterTemplates={starterTemplates}
   pendingAttachments={pendingAttachments}
   attachmentUploader={attachmentUploader}
   sending={sending}
