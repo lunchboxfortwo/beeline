@@ -123,7 +123,8 @@ export function cornerWaitingReportSql(corner: string): string {
  * The fence keeps the probe on the corner's own page: a busy worker's author index spans every Room.
  */
 function workerOutputSql(corner: string, worker: string, since: string): string {
-  return `SELECT 1 FROM (SELECT * FROM messages page WHERE page.room_id=${corner} AND page.created_at>${since}
+  return `SELECT 1 FROM (SELECT page.author_id,page.deleted_at,page.presentation,page.activity,page.card_type,page.card
+      FROM messages page WHERE page.room_id=${corner} AND page.created_at>${since}
       OFFSET 0) message
     WHERE message.author_id=${worker} AND message.deleted_at IS NULL AND (
       (message.presentation='activity' AND EXISTS (
