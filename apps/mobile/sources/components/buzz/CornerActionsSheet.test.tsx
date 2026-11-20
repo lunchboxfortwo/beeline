@@ -63,13 +63,19 @@ it('cannot change the lock while disconnected, and Cancel closes the sheet', () 
   act(() => tree.unmount());
 });
 
-it('offers Close on a locked thread only to a Workspace owner or admin', () => {
+it('offers unlock and Close on a locked thread only to a Workspace owner or admin', async () => {
   const closeRows = (tree: any) => tree.root.findAll((node: any) => node.props.testID === 'close-corner-action' && typeof node.type === 'string');
   let tree: any;
   act(() => { tree = create(<CornerActionsSheet {...props({ locked: true })} />); });
   expect(closeRows(tree)).toHaveLength(0);
+  expect(tree.root.findAllByProps({ testID: 'lock-corner-action' })).toHaveLength(0);
+  expect(tree.root.findAllByProps({ testID: 'lock-corner-switch' })).toHaveLength(0);
+  const manager = props({ locked: true, canManage: true });
+  act(() => tree.update(<CornerActionsSheet {...manager} />));
   expect(byTestID(tree, 'lock-corner-switch').props.checked).toBe(true);
-  act(() => tree.update(<CornerActionsSheet {...props({ locked: true, canManage: true })} />));
+  act(() => byTestID(tree, 'lock-corner-switch').props.onCheckedChange(false));
+  await flush();
+  expect(manager.setLocked).toHaveBeenCalledWith(false);
   expect(closeRows(tree)).toHaveLength(1);
   act(() => tree.unmount());
 });

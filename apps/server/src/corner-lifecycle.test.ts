@@ -138,6 +138,8 @@ describe('thread lock', () => {
       `UPDATE memberships SET role=$3 WHERE workspace_id=$1 AND room_id IS NULL AND identity_id=$2`, [W, H, value]);
     await role('member');
     try {
+      await expect(rootFixture.phone.execute('setCornerLocked', { roomId: cornerId, locked: false }, H)).rejects.toThrow(/locked/);
+      expect((await rootFixture.phone.readRoom(cornerId, H))?.cornerLocked).toBe(true);
       await expect(rootFixture.phone.execute('requestCornerClose', { roomId: cornerId }, H)).rejects.toThrow(/locked/);
     } finally { await role('owner'); }
     await expect(rootFixture.db.query(`UPDATE rooms SET archived_at=now() WHERE id=$1`, [cornerId])).rejects.toThrow(/locked/);

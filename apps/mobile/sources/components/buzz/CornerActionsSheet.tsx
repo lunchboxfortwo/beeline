@@ -89,7 +89,7 @@ export function CornerActionsSheet({
   };
   return (
     <SheetFrame open={visible} close={dismiss} title={title} testID="corner-actions-sheet">
-      <ListItem padding="0" paddingVertical="3" gap="3" alignItems="flex-start" backgroundColor="raised"
+      {closeOffered && <ListItem padding="0" paddingVertical="3" gap="3" alignItems="flex-start" backgroundColor="raised"
         minHeight={HEIGHT.sheetRow} disabled={lockDisabled} onPress={() => void changeLock(!locked)}
         aria-label="Lock thread" accessibilityRole="switch" accessibilityState={{ checked: locked, disabled: lockDisabled }}
         testID="lock-corner-action">
@@ -102,7 +102,7 @@ export function CornerActionsSheet({
           backgroundColor={locked ? 'needsYou' : 'highlight'} aria-label="Lock thread" testID="lock-corner-switch">
           <Switch.Thumb backgroundColor="ink" />
         </Switch>
-      </ListItem>
+      </ListItem>}
       {closeOffered && <Separator borderColor="stroke" />}
       {closeOffered && <ListItem padding="0" paddingVertical="3" gap="3" alignItems="flex-start" backgroundColor="raised"
         minHeight={HEIGHT.sheetRow} disabled={closing} onPress={() => void close()}

@@ -133,6 +133,8 @@ import { messageId, SPENDING_OWNER_AUTHORITY_MESSAGE } from './values.js';
         );
       // Only a Workspace owner or admin closes a locked thread: the close unlocks it.
       // Anyone else is refused by the rooms trigger, so their close leaves the PR open.
+      if (locked === false && room.locked && !manager)
+        throw new Error(`thread ${roomId} is locked; unlock it to close it`);
       return !room.locked || manager;
     };
     const mayClose = await ctx.database.transaction(authorize);

@@ -531,6 +531,14 @@ describe('deleteAccount', () => {
       [CORNER, DELETED_ACCOUNT_IDENTITY_ID], 1);
   });
 
+  it('leaves an owned locked corner open when deleting the account', async () => {
+    await phone.execute('setCornerLocked', { roomId: CORNER, locked: true }, OWNER);
+    await phone.execute('deleteAccount', {}, OWNER);
+    await expectRowCount(`SELECT 1 FROM identities WHERE id=ANY($1)`, [[OWNER, AGENT]], 0);
+    await expectRowCount(`SELECT 1 FROM rooms WHERE id=$1 AND archived_at IS NULL`, [CORNER], 1);
+    await expectRowCount(`SELECT 1 FROM corner_facts WHERE corner_id=$1 AND locked`, [CORNER], 1);
+  });
+
   it('keeps shared corner records under the tombstone and releases holds on the corners it archives', async () => {
     await database.query(`UPDATE corner_facts SET owner_agent_id=$2 WHERE corner_id=$1`, [CORNER, AGENT]);
     await database.query(`UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1`, [ROOM, AGENT]);

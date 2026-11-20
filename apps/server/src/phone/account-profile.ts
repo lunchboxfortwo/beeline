@@ -4,7 +4,7 @@ import { withdrawMergeApprovalsBy } from '../corner-merge-approval.js';
 import { cornerOwnerSql } from '../corner-worker.js';
 import { collapseTombstonedCornerHolds } from '../corner-holds.js';
 import { isFaceId, isPushLevel } from '@beeline/api-contract/phone';
-import { lockCornerLifecycle, clearCornerReviewers, setCornerLockedFact } from '../corner-lifecycle.js';
+import { lockCornerLifecycle, clearCornerReviewers } from '../corner-lifecycle.js';
 import { transferWorkspaceOwnership, writeSurfacePushState } from '../membership-join.js';
 import { ARTIFACT_TTL_HOURS, mediaTtlHours } from '../media-ttl.js';
 import { closeCornerState, lockCornerArchivalAuthority, markOwnedCornersAbandoned } from '../corner-close.js';
@@ -109,8 +109,8 @@ import { phoneManagedIdentity } from './repositories.js';
       const plannedAgents = new Set(owned.rows.map(row => row.agent_id));
       if (currentOwned.rows.length !== plannedAgents.size || currentOwned.rows.some(row => !plannedAgents.has(row.agent_id)))
         throw new Error('Account changed while deletion was being prepared; try again');
-      const closingCorners = await database.query<{ id: string }>(
-        `SELECT c.id FROM rooms c WHERE c.parent_id IS NOT NULL AND c.archived_at IS NULL
+      const closingCorners = await database.query<{ id: string; locked: boolean }>(
+        `SELECT c.id,f.locked FROM rooms c JOIN corner_facts f ON f.corner_id=c.id WHERE c.parent_id IS NOT NULL AND c.archived_at IS NULL
            AND ${cornerOwnerSql('c.id')}=ANY($1) ORDER BY c.id FOR KEY SHARE OF c`, [gone]);
       const plannedIds = new Set(plannedCorners.rows.map(row => row.id));
       if (closingCorners.rows.some(row => !plannedIds.has(row.id)))
@@ -140,9 +140,8 @@ import { phoneManagedIdentity } from './repositories.js';
       ]);
       // Lifecycle scope and authority were locked before any erasure above.
       // Preserve the common close path, including workflow and wake cleanup.
-      // Deleting the account unlocks its corners: the database refuses archiving a locked one.
       for (const corner of closingCorners.rows) {
-        await setCornerLockedFact(database, corner.id, false);
+        if (corner.locked) continue;
         await closeCornerState(database, corner.id);
       }
       await markOwnedCornersAbandoned(database, gone, `${account.name} deleted their account`);
