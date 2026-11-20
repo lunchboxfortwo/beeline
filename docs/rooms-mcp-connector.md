@@ -63,7 +63,7 @@ One server-created join probe carries a nonce bound to the member, delivery gene
 and target conversation through that ordinary route. Only `confirm_delivery` from
 the authenticated host turn establishes `proved_ready`; the callback ownership
 challenge is separate. Profile setup, queue acceptance and HTTP success never create
-a host receipt. Replacement and signing-key rotation fence old receipts. Subscription expiry and token revocation invalidate readiness on reads. MCP access tokens have no expiry; new responses contain no expires_in or refresh token. Older refresh-only clients can adopt a permanent access token once without rotation. Actual transport
+a host receipt. Replacement and signing-key rotation fence old receipts. Subscription expiry and token revocation invalidate readiness on reads. Token lifetime and legacy refresh behavior follow [OAuth endpoints and revocation](#oauth-endpoints-and-revocation). Actual transport
 errors project `failed`; a quiet host stays `setup_unfinished`. No Beeline recurring mention check, retry timer or automatic resend is added. Meta Muse uses the owner-approved runtime task and queue/event-hook recipe published verbatim on the join and connect pages; Muse owns its scheduling and credentials. The server exposes these facts in chat members and
 send receipts. The only delivery notice is the shared IndexRow saying the agent is offline, with Connect again returning to the join flow. It is driven by server route/credential facts, never elapsed silence.
 
@@ -108,8 +108,27 @@ delivery. Without a webhook, the tag remains available to `list_mentions`. Repli
 
 A tag delivers once. An owed mention remains available as private context, but
 elapsed time never re-delivers it or reopens its completed helper command.
-ChatGPT hosts that cannot run an event while closed recover owed tags through
-`list_mentions` on their next run.
+ChatGPT hosts that cannot run an event while closed use `list_mentions` on their
+next run, subject to the reconnect retirement rule below.
+
+A reconnect retires stale work without a timer. Each time the server sees a
+connector offline (the same delivery facts that drive the offline line,
+including when a person tags it), it records that moment on
+`rooms_mcp_members.disconnected_at`. When a delivery change brings the connector
+back online, the unclaimed commands queued up to that moment are cancelled
+(`connector_reconnected`). Owed tags with no remaining pending command are cleared.
+A command counts as claimed once an invocation is registered, an answer is
+committed, a tool call is recorded under it, or a webhook or event dispatch is in
+flight or accepted; claimed commands stay. Dispatch claims commit before HTTP
+begins, with no database lock held during the send. Failed dispatches remain retirable. In-flight and accepted
+commands are excluded from subsequent queue and mention delivery, including
+after reconnect.
+Work queued after that moment, or while connected, is still delivered. Nothing
+is posted and nobody is woken. A connector that is never online, such as an
+on-demand host with no route, keeps its queue. The one-time
+`stuck-connector-commands-v1` migration applied the same rule to work queued
+before 20 Nov 2026 20:00 UTC. Coverage: `connector-reconnect.test.ts` and
+`connector-retirement.postgres.test.ts`.
 
 ## Agent tools
 
@@ -172,7 +191,7 @@ The public instructions are mirrored in `apps/site/room/index.html` and the ship
 - Consent branding comes from the fixed website-supported agent list in `rooms-mcp-logos.ts`, selected by the active redirect host or scheme. Local loopback and Beeline handoff callbacks select a fixed list entry by agent name. Unsupported apps show the real destination in a red warning, receive the same permissions, and require an explicit trust checkbox on both the page and the Allow POST.
 - Exact registered HTTPS and native private-use scheme redirects (for example, `cursor://` and `com.example.app:/`) are accepted; HTTP is allowed only for loopback clients. Redirects with fragments or user info, browser executable/local-content schemes and common non-app protocols are refused. Consent permits the registered native scheme through its form CSP. An optional `logo_uri` is fetched once with HTTPS, public-address checks, pinned DNS, redirect refusal, a 256 KiB limit and image decoding; the cached PNG is served as inline data, never hotlinked.
 - `resource` must be the canonical MCP URL on authorization and token exchange. Authorization uses `S256`. Register `token_endpoint_auth_method` as `none`, `client_secret_post` or `client_secret_basic`, `grant_types:["authorization_code","refresh_token"]`, `response_types:["code"]`.
-- Codes expire after a minute and are single use. Access tokens expire after an hour. Refresh tokens rotate on every use. Reusing a consumed refresh token revokes its entire family, including access tokens. Connections persist until disconnected; refresh credentials are hashed and retained for reuse detection.
+- Codes expire after a minute and are single use. Stored access tokens do not expire and remain subject to explicit revocation. Token responses contain a ten-year `expires_in` for older clients' token-clock compatibility and no refresh token. An unused legacy refresh credential can obtain permanent access once; reuse is refused without revoking the family. Connections persist until disconnected; legacy refresh credentials remain hashed.
 - Browser flows expire after ten minutes, require a browser-bound HttpOnly cookie, and check same-origin consent POSTs. Google and GitHub use the existing Beeline login and account-linking methods. Temporary phone credentials remain server-side and are revoked immediately after identity resolution.
 - Secret-based registrations return a random `client_secret` once; only its hash and the chosen authentication method are stored. Token exchange, refresh and revocation require that method and secret, alongside existing PKCE and resource binding. Lost secrets require re-registration. Legacy/public registrations remain `none`.
 - Refused registrations log their error code and bounded client name, redirect schemes/hosts, auth method, grant types and response types. Redirect paths, query strings, user info, tokens and secrets are excluded. Admission refusals log the error without parsing a rate-limited body.
@@ -203,7 +222,7 @@ For an interactive review:
 3. Choose **Continue with GitHub**. Only in this loopback fixture, the synthetic provider signs in the seeded reviewer automatically. Confirm the consent screen names the client, account and both permissions; choose **Allow**.
 4. Initialize and list tools. Call `list_chats`; expect only the fixture chat. Read it and find the synthetic agent activity.
 5. Send `@demo-agent acknowledge the connector review` to that chat. Expect a message id and queued agent command. The automatic proof additionally claims that command, commits an agent reply and reads it through the phone service. The interactive fixture has no running helper, so it queues the command rather than inventing a reply.
-6. Refresh the issued token through the advertised token endpoint; expect a new refresh token and a working access token. In Settings → Connectors, open the client and choose Disconnect. Repeat an MCP call; expect 401. The `--ui` proof mode keeps the seeded service open for the production native controls to perform this step.
+6. Confirm the issued access token works without refresh; token behavior follows [OAuth endpoints and revocation](#oauth-endpoints-and-revocation). In Settings → Connectors, open the client and choose Disconnect. Repeat an MCP call; expect 401. The `--ui` proof mode keeps the seeded service open for the production native controls to perform this step.
 7. Run `npm run test -w @beeline/server -- src/rooms-mcp.test.ts` for separate-account denial, read-only consent, PKCE/redirect/audience binding, replay, expiry, rate limits and membership removal.
 
 To reproduce the Inspector CLI portion used for the committed evidence, install Inspector in a disposable tools directory (version 2.12.0 was used), then point `MCP_INSPECTOR_CLIENT` at its `clients/cli/build/index.js` when running the automatic proof. It calls Inspector's real CLI entry in-process, keeps the local OAuth grant in memory and prints only synthetic chat results. The SDK performs discovery, DCR and PKCE; Inspector then uses that OAuth-issued grant to list, read and send. It does not claim the Inspector browser performed the authorization ceremony.
@@ -260,7 +279,7 @@ The endpoint uses the existing OAuth registration/PKCE flow and posts under the
 connection's own member, never under the consenting person's byline.
 
 Subscriptions persist in PostgreSQL, are scoped to the member and consenting
-client/owner connection. Omitted or `null` `ttlMs` means no expiry; finite positive TTLs are honored without a day cap. No Beeline renewal runs. Owner disconnect, host unsubscribe or connection revocation ends delivery; an explicit unknown/gone (404/410) receiver response ends that destination immediately. A subsequent authenticated host connection/subscription re-runs delivery setup and emits one new generation-bound join probe. Original chat messages remain owed rather than automatically resent. Reusing a subscription uses the same deterministic ID. Verification is cached for five minutes for the
+client/owner connection. Omitted or `null` `ttlMs` means no expiry; finite positive TTLs are honored without a day cap. No Beeline renewal runs. Owner disconnect, host unsubscribe or connection revocation ends delivery; an explicit unknown/gone (404/410) receiver response ends that destination immediately. A subsequent authenticated host connection/subscription re-runs delivery setup and emits one new generation-bound join probe. Catch-up follows the [owed chat tag rules](#owed-chat-tags). Reusing a subscription uses the same deterministic ID. Verification is cached for five minutes for the
 same principal, URL and key. A replacement key triggers verification and both
 keys sign during a five-minute rotation window. Secrets are sealed with
 `BEELINE_MCP_WEBHOOK_KEY`; the server must configure that key before subscribing.
@@ -271,7 +290,9 @@ The event outbox is separate from the bearer ledger because it deduplicates by
 subscription/message, while the legacy ledger deduplicates by member/message;
 both drain once through the existing committed webhook notification.
 Delivery rechecks expiry, consent, current chat/Workspace access and message
-deletion. Unsubscribe/disconnect cascade pending deliveries. Expiry is evaluated during reads and sends; no expiry or renewal job owns these subscriptions.
+deletion. Unsubscribe expires the subscription in place, retaining its delivery
+ledger so dispatch claims and acceptance evidence survive resubscription.
+Disconnect deletes subscriptions and cascades their deliveries. Expiry is evaluated during reads and sends; no expiry or renewal job owns these subscriptions.
 
 This event has no protocol replay: `cursor` is always `null`, and non-null
 subscription cursors are refused. Use `list_mentions` for ledger catch-up.

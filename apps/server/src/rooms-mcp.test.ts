@@ -175,7 +175,7 @@ const scope1 = fixtureScope1();
     const { secret: _secret, ...delivery } = params.delivery;
     expect((await scope1.eventCall(token, 'events/unsubscribe', { name: 'mention', arguments: {}, delivery })).result).toEqual({});
     expect((await scope1.eventCall(token, 'events/unsubscribe', { name: 'mention', arguments: {}, delivery })).result).toEqual({});
-    expect((await scope1.db.query('SELECT id FROM rooms_mcp_event_subscriptions WHERE member_id=$1', [member])).rowCount).toBe(0);
+    expect((await scope1.db.query('SELECT id FROM rooms_mcp_event_subscriptions WHERE member_id=$1 AND (expires_at IS NULL OR expires_at>now())', [member])).rowCount).toBe(0);
   });
 
 
@@ -388,7 +388,7 @@ const scope1 = fixtureScope1();
         next:expect.stringMatching(new RegExp(`^From: .+ in #.+\nid: ${sent.id}\nReply needed: true\ntext: [^]+\nReply\\(id: ${sent.id}, text: \\.\\.\\.\\) with your reply$`)),
       });
       expect(scope1.data(await client.callTool({ name: 'list_mentions', arguments: {} })).wakes)
-        .toContainEqual(expect.objectContaining({ id:sent.id,from:{agent:AGENT,place:ROOM} }));
+        .not.toContainEqual(expect.objectContaining({ id:sent.id }));
       notices.length = 0;
       expect(await scope1.daemon.execute('order', args, AGENT)).toMatchObject({ id: sent.id });
       expect(notices).toEqual([]);

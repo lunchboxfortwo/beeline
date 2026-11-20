@@ -5,8 +5,8 @@ import { createHash,createHmac,randomBytes,randomUUID,timingSafeEqual } from 'no
 import type { SqlDatabase } from './database.js';
 import { recordDiagnostic } from './diagnostics.js';
 import { openSecrets,sealSecrets } from './free-agents.js';
-import { notifyMcpDeliveryChange,notifyMcpWakesSql,notifyMcpWebhook,POSTGRES_LIVE_CHANNEL } from './postgres-live.js';
-import { recoverMemberDelivery } from './rooms-mcp-delivery.js';
+import { notifyMcpWakesSql,notifyMcpWebhook,POSTGRES_LIVE_CHANNEL } from './postgres-live.js';
+import { connectorHostAcceptedSql, connectorDeliveryChanged, noteConnectorPresence, recoverMemberDelivery } from './rooms-mcp-delivery.js';
 import { postMcpWebhook } from './rooms-mcp-members.js';
 import type { McpPrincipal } from './rooms-mcp-oauth.js';
 
@@ -92,9 +92,9 @@ export class RoomsMcpEvents {
     ])).digest('hex');
     if (!subscribing) {
       await this.db.transaction(async tx=>{
-        await tx.query('DELETE FROM rooms_mcp_event_subscriptions WHERE id=$1 AND member_id=$2', [id, principal.member_id]);
+        await tx.query('UPDATE rooms_mcp_event_subscriptions SET expires_at=now() WHERE id=$1 AND member_id=$2', [id, principal.member_id]);
         await tx.query("UPDATE rooms_mcp_delivery SET failure='event_subscription_ended',receipt_at=NULL WHERE member_id=$1 AND subscription_id=$2",[principal.member_id,id]);
-        await notifyMcpDeliveryChange(tx,principal.member_id!);
+        await connectorDeliveryChanged(tx,principal.member_id!);
       });
       return {};
     }
@@ -135,6 +135,7 @@ export class RoomsMcpEvents {
       if(current?.expires_at && current.expires_at.getTime()<=Date.now())
         await tx.query("UPDATE rooms_mcp_delivery SET failure='event_subscription_ended',receipt_at=NULL WHERE member_id=$1 AND mechanism='events' AND subscription_id=$2",[principal.member_id,id]);
       if(changed) await tx.query("UPDATE rooms_mcp_delivery SET failure='event_signing_key_changed',receipt_at=NULL WHERE member_id=$1 AND mechanism='events' AND subscription_id=$2",[principal.member_id,id]);
+      await noteConnectorPresence(tx, principal.member_id!);
       await tx.query(`INSERT INTO rooms_mcp_event_subscriptions(id,client_id,owner_id,member_id,url,secret,
         previous_secret,rotation_until,verified_at,expires_at,event_name) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
         ON CONFLICT(id) DO UPDATE SET secret=EXCLUDED.secret,previous_secret=EXCLUDED.previous_secret,
@@ -144,8 +145,9 @@ export class RoomsMcpEvents {
         changed ? current.secret : current?.previous_secret ?? null,
         changed ? new Date(Date.now() + 300_000) : current?.rotation_until ?? null,
         sameSecret && old.verified_at.getTime() >= Date.now() - 300_000 ? old.verified_at : new Date(), expires, name]);
+      await recoverMemberDelivery(tx,principal);
+      await noteConnectorPresence(tx,principal.member_id!);
     });
-    await recoverMemberDelivery(this.db,principal);
     return { id, refreshBefore: expires?.toISOString() ?? null, cursor: null, truncated: false };
   }
 }
@@ -241,17 +243,23 @@ export async function deliverMcpEvents(db: SqlDatabase, transport: Transport, si
   let delivered = 0;
   for (;;) {
     if (signal?.aborted) break;
-    const row = (await db.query<Subscription & { event_id: string; body: string; command_id: string | null; probe_generation: string | null; delivery_generation:string|null; deliverable: boolean }>(`
-      WITH claimed AS (
-        UPDATE rooms_mcp_event_deliveries d SET claimed_at=now(),attempted_at=now()
-        WHERE d.event_id IN (
-          SELECT event_id FROM rooms_mcp_event_deliveries
-          WHERE delivered_at IS NULL AND claimed_at IS NULL
-          ORDER BY event_id LIMIT 1 FOR UPDATE SKIP LOCKED)
-        RETURNING d.*)
-      SELECT s.*,d.event_id,d.body,d.command_id,d.probe_generation,selected.generation delivery_generation,
-        (beeline_mcp_delivery_owner(s.member_id,'events',s.id) AND (s.expires_at IS NULL OR s.expires_at>now()) AND c.revoked_at IS NULL AND c.client_id IS NOT NULL
+    const row = await db.transaction(async tx => {
+      const candidate = (await tx.query<{ event_id: string; member_id: string; command_id: string | null; message_id: string | null }>(`
+        SELECT delivery.event_id,subscription.member_id,delivery.command_id,delivery.message_id
+        FROM rooms_mcp_event_deliveries delivery JOIN rooms_mcp_event_subscriptions subscription ON subscription.id=delivery.subscription_id
+        WHERE delivery.delivered_at IS NULL AND delivery.claimed_at IS NULL
+        ORDER BY delivery.event_id LIMIT 1 FOR UPDATE OF delivery SKIP LOCKED`)).rows[0];
+      if (!candidate) return;
+      const commands = (await tx.query<{ state: string }>(`SELECT state FROM agent_commands WHERE agent_id=$1
+        AND (id=$2 OR source_message_id=$3) ORDER BY id FOR UPDATE`, [candidate.member_id,candidate.command_id,candidate.message_id])).rows;
+      const row = (await tx.query<Subscription & { event_id: string; body: string; message_id: string | null; command_id: string | null; probe_generation: string | null; delivery_generation:string|null; deliverable: boolean }>(`
+      WITH claimed AS (SELECT * FROM rooms_mcp_event_deliveries WHERE event_id=$1)
+      SELECT s.*,d.event_id,d.body,d.message_id,d.command_id,d.probe_generation,selected.generation delivery_generation,
+        ($2::boolean AND beeline_mcp_delivery_owner(s.member_id,'events',s.id) AND (s.expires_at IS NULL OR s.expires_at>now()) AND c.revoked_at IS NULL AND c.client_id IS NOT NULL
          AND r.archived_at IS NULL AND r.id IS NOT NULL
+         AND NOT EXISTS(SELECT 1 FROM agent_commands accepted
+           WHERE accepted.agent_id=s.member_id AND (accepted.id=d.command_id OR accepted.source_message_id=d.message_id)
+             AND ${connectorHostAcceptedSql('accepted')})
          AND ((d.probe_generation IS NOT NULL AND EXISTS(SELECT 1 FROM rooms_mcp_delivery proof
              WHERE proof.member_id=s.member_id AND proof.generation=d.probe_generation AND proof.receipt_at IS NULL AND proof.failure IS NULL))
            OR (d.message_id IS NOT NULL AND m.deleted_at IS NULL AND m.id IS NOT NULL
@@ -266,8 +274,16 @@ export async function deliverMcpEvents(db: SqlDatabase, transport: Transport, si
       LEFT JOIN rooms_mcp_delivery selected ON selected.member_id=s.member_id
       LEFT JOIN rooms_mcp_connections c ON c.client_id=s.client_id AND c.identity_id=s.owner_id
       LEFT JOIN rooms r ON r.id=d.room_id LEFT JOIN messages m ON m.id=d.message_id
-      LEFT JOIN agent_commands command ON command.id=d.command_id`)).rows[0];
-    if (!row || signal?.aborted) break;
+      LEFT JOIN agent_commands command ON command.id=d.command_id`,
+      [candidate.event_id, commands.length === 0 || commands.some(command => command.state === 'pending')])).rows[0];
+      if (row) await tx.query(`UPDATE rooms_mcp_event_deliveries SET
+        claimed_at=CASE WHEN $2 THEN now() ELSE NULL END,
+        attempted_at=CASE WHEN $2 THEN now() ELSE attempted_at END,
+        delivered_at=CASE WHEN $2 THEN delivered_at ELSE now() END,
+        delivery_state=CASE WHEN $2 THEN delivery_state ELSE 'skipped' END WHERE event_id=$1`, [row.event_id,row.deliverable]);
+      return row;
+    });
+    if (!row) break;
     const startedAt = Date.now();
     let state: 'delivered'|'failed'|'skipped' = row.deliverable ? 'failed' : 'skipped';
     let status: number | null = null;
@@ -296,7 +312,7 @@ export async function deliverMcpEvents(db: SqlDatabase, transport: Transport, si
       });
     }
     if(state==='failed' && status!==404 && status!==410) await db.query("UPDATE rooms_mcp_delivery SET failure='event_delivery_failed' WHERE member_id=$1 AND generation=$2 AND mechanism='events'",[row.member_id,row.delivery_generation]);
-    if(state==='failed')await notifyMcpDeliveryChange(db,row.member_id);
+    if(state==='failed')await connectorDeliveryChanged(db,row.member_id);
     await recordDiagnostic(db,{ name: 'mcp_delivery',...(row.command_id ? { commandId:row.command_id } : {}),deliveryState: state,outcome: state==='delivered' ? 'success' : state==='failed' ? 'failed' : 'unknown',
       ...(status ? { httpStatus: status } : {}),code: category ?? 'host_execution_unknown',durationMs: Date.now()-startedAt },row.owner_id).catch(()=>undefined);
   }

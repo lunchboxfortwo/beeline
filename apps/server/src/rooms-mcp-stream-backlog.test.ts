@@ -34,6 +34,10 @@ describe('MCP member stream pending backlog', () => {
     const handle = (await scope.db.query<{ handle: string }>('SELECT beeline_room_handle($1,$2) handle', [member, ROOM])).rows[0]!.handle;
     const tag = await scope.phone.execute('sendRoomMessage', { roomId: ROOM, text: `@${handle} Please investigate` }, USER);
     const command = (await scope.db.query<{ id: string }>('SELECT id FROM agent_commands WHERE agent_id=$1 AND source_message_id=$2', [member, tag.messageId])).rows[0]!;
+    // This proof is about backlog size on a live stream: the work counts as
+    // queued while connected. A reconnect retiring work queued before the
+    // connector was last seen offline is covered by connector-reconnect.test.ts.
+    await scope.db.query('UPDATE rooms_mcp_members SET disconnected_at=NULL WHERE member_id=$1', [member]);
     if (oversized) await scope.db.query(`UPDATE agent_commands SET message=jsonb_set(message,'{body}',to_jsonb(repeat('x',400000)))
       WHERE id=ANY($1::text[])`, [old.slice(0, 3)]);
     await scope.db.query("UPDATE live_streams SET sequence=1925 WHERE id='mcp:'||$1", [member]);

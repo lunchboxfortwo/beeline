@@ -30,14 +30,13 @@ import { recordStarPromptReply } from './github-star-prompt.js';
 import { observeQueuedAnswer } from './signin-funnel.js';
 import { hasSystemReportMention,isChannelMentionToken,typedMentionHandles } from './message-mentions.js';
 import { mcpCommandWakeSql } from './rooms-mcp-events.js';
-import { recordMcpMemberWebhook,recordMcpMention } from './rooms-mcp-members.js';
+import { recordMcpMemberWebhook,recordMcpMention,noteOfflineConnectors } from './rooms-mcp-members.js';
 import { cleanVoiceReply } from './voice-reply.js';
 import { modelText,systemText,type AgentVoice,type Composed,type MemberText,type SystemAuthorId } from './message-origin.js';
 type Attachment = NonNullable<PrivateCommandPayload['attachments']>[number];
 /** Sanitizing keeps the text's declared origin. */
 const pgText=<Text extends string>(value:Text)=>value.replace(/[\u0000\uD800-\uDFFF]/gu,'\uFFFD') as Text;
 const json=(value:unknown)=>JSON.stringify(value,(_key,part)=>typeof part==='string'?pgText(part):part);
-
 export function checkFailureLogBody(event: { kind?: string; payload?: unknown } | null): string {
   if (event?.kind !== 'check-failed') return '';
   const payload = event.payload as { failedJobs?: unknown } | undefined;
@@ -136,7 +135,6 @@ CREATE INDEX IF NOT EXISTS agent_commands_result_message_idx ON agent_commands(r
   WHERE result_message_id IS NOT NULL;
 ALTER TABLE agent_grants ADD COLUMN IF NOT EXISTS command_id text;
 ALTER TABLE agent_pending_attachments ADD COLUMN IF NOT EXISTS request_id text;
-
 -- Retire synthetic working turns. Pending commands are projected directly.
 DROP TRIGGER IF EXISTS show_dispatched_agent_work ON agent_commands;
 DROP FUNCTION IF EXISTS show_dispatched_agent_work();
@@ -195,7 +193,6 @@ UPDATE agent_commands SET return_room_id=CASE WHEN private_payload->>'kind'='ord
     AND private_payload->>'fromRoomId' ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
   THEN (private_payload->>'fromRoomId')::uuid ELSE room_id END
   WHERE state='pending' AND return_room_id IS NULL;
-
 UPDATE agent_commands item SET message=(SELECT jsonb_build_object(
   'id',COALESCE(item.source_message_id,item.id),'authorId',COALESCE(item.private_payload->>'authorId',source.author_id),
   'body',COALESCE(item.private_payload->>'text',source.text,item.reason),
@@ -210,9 +207,7 @@ FROM (SELECT room_id,agent_id,request_id,jsonb_agg(jsonb_build_object(
   FROM agent_pending_attachments GROUP BY room_id,agent_id,request_id) attachments
 WHERE command.room_id=attachments.room_id AND command.agent_id=attachments.agent_id
   AND command.turn_request_id=attachments.request_id AND command.state='pending' AND command.answer_attachments='[]'::jsonb;
-
 `;
-
 /** Transport data only: orders and reports never become transcript messages. */
 /** A private payload's text names its origin: an agent's (or person's) own
  * words, or System text under the System identity. */
@@ -642,16 +637,16 @@ async function postMessage(db: SqlDatabase, input: PublicPost, chat: Chat): Prom
       if (item) commands.push(item);
       return item;
     });
-  const targets = input.presentation === 'card' || stops.length || lifecycle ? [] : input.agentIds ? chat.members.filter(member => input.agentIds!.includes(member.id)) : [...new Map([
+  const targets = (input.presentation === 'card' || stops.length || lifecycle ? [] : input.agentIds ? chat.members.filter(member => input.agentIds!.includes(member.id)) : [...new Map([
     // Only a person's tag wakes an agent; an agent reaches another agent through message().
     ...(human ? explicit : []),
     ...(human && !hasSystemReportMention(input.text) && chat.direct_participants ? agents.filter(member=>chat.direct_participants!.includes(member.id)) : []),
     ...(human && !explicit.length && solo ? [solo] : []),
-  ].filter(member => member.kind === 'agent' && member.id !== input.authorId && member.id !== SYSTEM_IDENTITY_ID).map(member => [member.id, member])).values()];
+  ].filter(member => member.kind === 'agent' && member.id !== input.authorId && member.id !== SYSTEM_IDENTITY_ID).map(member => [member.id, member])).values()]).filter(member => !human || member.access_policy == null ||
+    senderMayAddressAgent(parseAgentAccessPolicy(member.access_policy), input.authorId, member.owner_id ?? undefined));
   const avatarJob = human && /^(?:@[^\s]+\s+)?\/draw-avatar(?:\s|$)/i.test(input.text.trim());
   // The owner's creator/allowlist setting decides which people address a hosted agent; others are not its targets.
-  for (const member of targets.filter(member => !human || member.access_policy == null ||
-    senderMayAddressAgent(parseAgentAccessPolicy(member.access_policy), input.authorId, member.owner_id ?? undefined))) {
+  for (const member of human ? await noteOfflineConnectors(db, targets) : targets) {
     const item = await insertAgentCommand(db, { roomId: chat.id, agentId: member.id, sourceMessageId: id,
       reason: human ? chat.direct_participants ? 'direct_message' : 'human_tag' : 'agent_tag', parent: input.parent,
       inheritPrivatePayload: false,
@@ -670,9 +665,14 @@ async function postMessage(db: SqlDatabase, input: PublicPost, chat: Chat): Prom
 async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, chat: Chat): Promise<CommandRow | undefined> {
   const sender = chat.members.find(member => member.id === (input.privatePayload?.authorId ?? chat.source?.author_id));
   const target = chat.members.find(member => member.id === input.agentId);
-  if (sender?.kind === 'human' && input.reason !== 'tagged_lifecycle_restart' && input.reason !== 'tagged_lifecycle_retry' && target?.access_policy != null &&
+  let cancelled = false; if (input.reason === 'mcp_call' && input.parent?.id) {
+    const claimed = (await db.query<{ state: string }>(`SELECT command.state FROM agent_commands command WHERE command.id=$1
+      AND EXISTS(SELECT 1 FROM rooms_mcp_members member WHERE member.member_id=command.agent_id) FOR UPDATE OF command`, [input.parent.id])).rows[0];
+    cancelled = claimed?.state === 'cancelled';
+  }
+  if (cancelled || sender?.kind === 'human' && input.reason !== 'tagged_lifecycle_restart' && input.reason !== 'tagged_lifecycle_retry' && target?.access_policy != null &&
     !senderMayAddressAgent(parseAgentAccessPolicy(target.access_policy), sender.id, target.owner_id ?? undefined))
-    throw wall('access', 'the agent owner’s creator-only or people-allowlist policy does not allow this sender to address the agent');
+    throw wall('access', cancelled ? 'command turn cancelled' : 'the agent owner’s creator-only or people-allowlist policy does not allow this sender to address the agent');
   if (input.avatarJob && sender?.kind === 'human' && target?.access_policy != null && target.owner_id !== sender.id)
     throw wall('membership', 'only the agent owner may generate its avatar (access denied)');
   const id = input.id ?? (input.sourceMessageId

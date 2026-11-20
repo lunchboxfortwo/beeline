@@ -58,6 +58,7 @@ describe('owed chat tags', () => {
   it('C2 webhook and list_mentions routing fields survive instruction truncation', async () => {
     const message = await tag(member, 'x'.repeat(20000));
     await recordMcpMemberWebhook(db, member, 'https://example.com/wake', room, message, 'x'.repeat(20000));
+    const before = await call('list_mentions');
     const payloads: any[] = [];
     await deliverMcpMemberWebhooks(db, async (_url, init) => { payloads.push(JSON.parse(init.body)); return new Response('', { status: 200 }); });
     const payload = payloads.find(p => p.messageId === message);
@@ -69,7 +70,8 @@ describe('owed chat tags', () => {
     expect(payload.instruction).toContain(expected.replyRule);
     expect(await owedMentions(db, member)).toContainEqual(expect.objectContaining(expected));
     const page = await call('list_mentions');
-    expect(page.mentions.find((m: any) => m.id === message)).toMatchObject(expected);
+    expect(before.mentions.find((m: any) => m.id === message)).toMatchObject(expected);
+    expect(page.mentions.some((m: any) => m.id === message)).toBe(false);
   });
   it('C4 private member/message record survives a handle rename and includes helper agents', async () => {
     const message = await tag();

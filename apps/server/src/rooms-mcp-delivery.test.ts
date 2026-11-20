@@ -551,6 +551,8 @@ describe('JOIN-DELIVERY persistent Events lifecycle', () => {
     expect(
       data(await client.callTool({ name: 'confirm_delivery', arguments: receipt })).delivery,
     ).toMatchObject({ state: 'proved_ready', offline: false });
+    // The resubscription is the connector's reconnect: both tags, queued before
+    // it was last seen offline, are retired and never run (connector-reconnect.test.ts).
     expect(
       (
         await scope.db.query(
@@ -558,7 +560,7 @@ describe('JOIN-DELIVERY persistent Events lifecycle', () => {
           [member],
         )
       ).rowCount,
-    ).toBe(2);
+    ).toBe(0);
   });
 });
 

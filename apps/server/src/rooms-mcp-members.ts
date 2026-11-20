@@ -20,7 +20,8 @@ removeIdentityMemberships,
 restoreInvitedWorkspaceMembership,
 } from './membership-join.js';
 import { mentionRouting } from './owed-mentions.js';
-import { notifyMcpDeliveryChange,notifyMcpWebhook } from './postgres-live.js';
+import { notifyMcpWebhook } from './postgres-live.js';
+import { connectorHostAcceptedSql,connectorDeliveryChanged,markConnectorsOffline,noteConnectorPresence,readMemberDeliveries } from './rooms-mcp-delivery.js';
 import { deliverMcpEvents,mcpWakeText,queueMcpMentionEvents } from './rooms-mcp-events.js';
 import { fetchMcpLogo,mcpClientName,mcpMemberAvatar } from './rooms-mcp-logos.js';
 
@@ -317,58 +318,69 @@ export async function deliverMcpMemberWebhooks(
   let delivered = 0;
   for (;;) {
     if (signal?.aborted) break;
-    const claimed = await db.query<{
-      call_id: string; member_id: string; room_id: string; message_id: string;
-      body: string; owner_id: string | null; callback_url: string | null; callback_secret: string | null; deliverable: boolean; answered: boolean;
-      author_id: string | null; author_handle: string | null; author_name: string | null; author_kind: string | null; cursor: string | null;
-      command_from:MessageAddress; room_name: string | null; command_id: string | null; command_reason: string | null; command_ask: unknown; command_text: string | null; probe: object | null; delivery_generation:string|null;
-      attachments: DaemonAttachment[]; command_attachments: DaemonAttachment[]; institutional_context: string | null;
-    }>(
-      `WITH claimed AS (
-         UPDATE rooms_mcp_webhook_outbox outbox SET claimed_at=now(),attempted_at=now()
-         WHERE outbox.call_id IN (
-           SELECT candidate.call_id FROM rooms_mcp_webhook_outbox candidate
-           WHERE candidate.delivered_at IS NULL AND candidate.claimed_at IS NULL
-           ORDER BY candidate.created_at,candidate.call_id LIMIT 1
-           FOR UPDATE SKIP LOCKED)
-         RETURNING outbox.call_id,outbox.member_id,outbox.room_id,outbox.message_id,outbox.body)
-       SELECT claimed.call_id,claimed.member_id,claimed.room_id,claimed.message_id,claimed.body,member.owner_id,
-         COALESCE(member.callback_url,client.callback_url) callback_url,
-         CASE WHEN member.callback_url IS NOT NULL THEN member.callback_secret END callback_secret,
-         message.author_id,beeline_room_handle(author.id,message.room_id) author_handle,author.name author_name,room.name room_name,author.kind author_kind,mention.seq::text cursor,mention.cleared_at IS NOT NULL answered,
-         message.attachments,COALESCE(command.message->'attachments',command.private_payload->'attachments',source.attachments,'[]'::jsonb) command_attachments,
-         COALESCE(${queuedContextSql('command')},(SELECT ${queuedContextSql('queued')} FROM agent_commands queued
-           WHERE queued.agent_id=claimed.member_id AND queued.source_message_id=claimed.message_id ORDER BY queued.created_at DESC LIMIT 1)) institutional_context,
-         COALESCE(command.message->'route'->'from',command.private_payload->'route'->'from',
-           jsonb_build_object('agent',COALESCE(command.private_payload->>'authorId',command.message->>'authorId'),
-             'place',COALESCE(command.private_payload->>'fromRoomId',command.room_id::text))) command_from,
-         delivery.generation delivery_generation,probe.probe,command.id command_id,command.reason command_reason,command.private_payload->'messageAsk' command_ask,
-         left(COALESCE(command.private_payload->>'text',source.text),16000) command_text,(
-           room.id IS NOT NULL AND room.archived_at IS NULL AND mention.cleared_at IS NULL
-           AND beeline_mcp_delivery_owner(claimed.member_id,'webhook')
-           AND (probe.member_id IS NOT NULL OR message.id IS NOT NULL OR command.state='pending')
-           AND EXISTS (SELECT 1 FROM room_access room_member
-             WHERE room_member.room_id=claimed.room_id AND room_member.identity_id=claimed.member_id
-               AND room_member.removed_at IS NULL)
-           AND EXISTS (SELECT 1 FROM memberships workspace_member
-             WHERE workspace_member.workspace_id=room.workspace_id AND workspace_member.room_id IS NULL
-               AND workspace_member.identity_id=claimed.member_id AND workspace_member.removed_at IS NULL)
-         ) deliverable
-       FROM claimed
-       LEFT JOIN rooms_mcp_members member ON member.member_id=claimed.member_id
-       LEFT JOIN rooms_mcp_clients client ON client.id=member.client_id
-       LEFT JOIN rooms room ON room.id=claimed.room_id
-       LEFT JOIN messages message ON message.id=claimed.message_id AND message.card_type IS DISTINCT FROM 'agent-command'
-       LEFT JOIN identities author ON author.id=message.author_id
-       LEFT JOIN rooms_mcp_mentions mention ON mention.member_id=claimed.member_id AND mention.message_id=claimed.message_id
-       LEFT JOIN agent_commands command ON message.id IS NULL AND command.id=claimed.message_id AND command.agent_id=claimed.member_id
-       LEFT JOIN messages source ON source.id=command.source_message_id
-       LEFT JOIN rooms_mcp_delivery delivery ON delivery.member_id=claimed.member_id
-       LEFT JOIN rooms_mcp_delivery probe ON probe.member_id=claimed.member_id AND probe.generation=claimed.message_id
-         AND probe.mechanism='webhook' AND probe.receipt_at IS NULL AND probe.failure IS NULL`,
-    );
-    const row = claimed.rows[0];
-    if (!row || signal?.aborted) break;
+    const row = await db.transaction(async tx => {
+      const candidate = (await tx.query<{ call_id: string; member_id: string; message_id: string }>(`
+        SELECT call_id,member_id,message_id FROM rooms_mcp_webhook_outbox
+        WHERE delivered_at IS NULL AND claimed_at IS NULL
+        ORDER BY created_at,call_id LIMIT 1 FOR UPDATE SKIP LOCKED`)).rows[0];
+      if (!candidate) return;
+      const commands = (await tx.query<{ state: string }>(`SELECT state FROM agent_commands WHERE agent_id=$1
+        AND $2 IN (id,source_message_id) ORDER BY id FOR UPDATE`, [candidate.member_id,candidate.message_id])).rows;
+      const claimed = await tx.query<{
+        call_id: string; member_id: string; room_id: string; message_id: string;
+        body: string; owner_id: string | null; callback_url: string | null; callback_secret: string | null; deliverable: boolean; answered: boolean;
+        author_id: string | null; author_handle: string | null; author_name: string | null; author_kind: string | null; cursor: string | null;
+        command_from:MessageAddress; room_name: string | null; command_id: string | null; command_reason: string | null; command_ask: unknown; command_text: string | null; probe: object | null; delivery_generation:string|null;
+        attachments: DaemonAttachment[]; command_attachments: DaemonAttachment[]; institutional_context: string | null;
+      }>(
+        `WITH claimed AS (SELECT * FROM rooms_mcp_webhook_outbox WHERE call_id=$1)
+         SELECT claimed.call_id,claimed.member_id,claimed.room_id,claimed.message_id,claimed.body,member.owner_id,
+           COALESCE(member.callback_url,client.callback_url) callback_url,
+           CASE WHEN member.callback_url IS NOT NULL THEN member.callback_secret END callback_secret,
+           message.author_id,beeline_room_handle(author.id,message.room_id) author_handle,author.name author_name,room.name room_name,author.kind author_kind,mention.seq::text cursor,mention.cleared_at IS NOT NULL answered,
+           message.attachments,COALESCE(command.message->'attachments',command.private_payload->'attachments',source.attachments,'[]'::jsonb) command_attachments,
+           COALESCE(${queuedContextSql('command')},(SELECT ${queuedContextSql('queued')} FROM agent_commands queued
+             WHERE queued.agent_id=claimed.member_id AND queued.source_message_id=claimed.message_id ORDER BY queued.created_at DESC LIMIT 1)) institutional_context,
+           COALESCE(command.message->'route'->'from',command.private_payload->'route'->'from',
+             jsonb_build_object('agent',COALESCE(command.private_payload->>'authorId',command.message->>'authorId'),
+               'place',COALESCE(command.private_payload->>'fromRoomId',command.room_id::text))) command_from,
+           delivery.generation delivery_generation,probe.probe,command.id command_id,command.reason command_reason,command.private_payload->'messageAsk' command_ask,
+           left(COALESCE(command.private_payload->>'text',source.text),16000) command_text,(
+             $2::boolean AND room.id IS NOT NULL AND room.archived_at IS NULL AND mention.cleared_at IS NULL
+             AND beeline_mcp_delivery_owner(claimed.member_id,'webhook')
+             AND NOT EXISTS(SELECT 1 FROM agent_commands accepted
+               WHERE accepted.agent_id=claimed.member_id AND claimed.message_id IN (accepted.id,accepted.source_message_id)
+                 AND ${connectorHostAcceptedSql('accepted')})
+             AND (probe.member_id IS NOT NULL OR message.id IS NOT NULL OR command.state='pending')
+             AND EXISTS (SELECT 1 FROM room_access room_member
+               WHERE room_member.room_id=claimed.room_id AND room_member.identity_id=claimed.member_id
+                 AND room_member.removed_at IS NULL)
+             AND EXISTS (SELECT 1 FROM memberships workspace_member
+               WHERE workspace_member.workspace_id=room.workspace_id AND workspace_member.room_id IS NULL
+                 AND workspace_member.identity_id=claimed.member_id AND workspace_member.removed_at IS NULL)
+           ) deliverable
+         FROM claimed
+         LEFT JOIN rooms_mcp_members member ON member.member_id=claimed.member_id
+         LEFT JOIN rooms_mcp_clients client ON client.id=member.client_id
+         LEFT JOIN rooms room ON room.id=claimed.room_id
+         LEFT JOIN messages message ON message.id=claimed.message_id AND message.card_type IS DISTINCT FROM 'agent-command'
+         LEFT JOIN identities author ON author.id=message.author_id
+         LEFT JOIN rooms_mcp_mentions mention ON mention.member_id=claimed.member_id AND mention.message_id=claimed.message_id
+         LEFT JOIN agent_commands command ON message.id IS NULL AND command.id=claimed.message_id AND command.agent_id=claimed.member_id
+         LEFT JOIN messages source ON source.id=command.source_message_id
+         LEFT JOIN rooms_mcp_delivery delivery ON delivery.member_id=claimed.member_id
+         LEFT JOIN rooms_mcp_delivery probe ON probe.member_id=claimed.member_id AND probe.generation=claimed.message_id
+           AND probe.mechanism='webhook' AND probe.receipt_at IS NULL AND probe.failure IS NULL`,
+        [candidate.call_id, commands.length === 0 || commands.some(command => command.state === 'pending')]);
+      const row = claimed.rows[0];
+      if (row) await tx.query(`UPDATE rooms_mcp_webhook_outbox SET
+        claimed_at=CASE WHEN $2 THEN now() ELSE NULL END,
+        attempted_at=CASE WHEN $2 THEN now() ELSE attempted_at END,
+        delivered_at=CASE WHEN $2 THEN delivered_at ELSE now() END,
+        delivery_state=CASE WHEN $2 THEN delivery_state ELSE 'skipped' END WHERE call_id=$1`, [row.call_id,row.deliverable && Boolean(row.callback_url)]);
+      return row;
+    });
+    if (!row) break;
     if (!row.deliverable || !row.callback_url) {
       await db.query("UPDATE rooms_mcp_webhook_outbox SET delivered_at=now(),completed_at=now(),delivery_state='skipped',failure_category='access_ended' WHERE call_id=$1", [row.call_id]);
       await db.query(
@@ -400,12 +412,12 @@ export async function deliverMcpMemberWebhooks(
     } catch { accepted = false; }
     await db.query(`UPDATE rooms_mcp_webhook_outbox SET delivered_at=now(),completed_at=now(),
       delivery_state=$2,http_status=$3,failure_category=$4,duration_ms=$5 WHERE call_id=$1`,
-      [row.call_id,accepted?'delivered':'failed',httpStatus,accepted?null:httpStatus?'http_error':'network_error',Date.now()-deliveryStarted]);
+    [row.call_id,accepted?'delivered':'failed',httpStatus,accepted?null:httpStatus?'http_error':'network_error',Date.now()-deliveryStarted]);
     await recordDiagnostic(db,{name:'mcp_delivery',deliveryState:accepted?'delivered':'failed',outcome:accepted?'success':'failed',
       code:accepted?'host_execution_unknown':httpStatus?'http_error':'network_error',...(row.command_id?{commandId:row.command_id}:{}),
       ...(httpStatus?{httpStatus}:{}),durationMs:Date.now()-deliveryStarted},row.owner_id??undefined).catch(()=>undefined);
     if (!accepted) await db.query("UPDATE rooms_mcp_delivery SET failure='webhook_delivery_failed' WHERE member_id=$1 AND generation=$2 AND mechanism='webhook'",[row.member_id,row.delivery_generation]);
-    if (!accepted)await notifyMcpDeliveryChange(db,row.member_id);
+    if (!accepted)await connectorDeliveryChanged(db,row.member_id);
     if (!accepted)
       await db.query(`UPDATE subscription_webhook_calls SET outcome='refused',reason='delivery failed' WHERE id=$1`, [row.call_id]);
     else delivered++;
@@ -563,6 +575,8 @@ export async function setMcpMemberWebhook(
     throw new McpToolError('Cursor automation webhooks require their auth token');
   const sealed = secret === undefined ? null : sealSecrets(webhookKey(), secret);
   await db.transaction(async tx => {
+    const unseen = await tx.query('SELECT 1 FROM rooms_mcp_members WHERE member_id=$1 AND disconnected_at IS NULL FOR UPDATE', [memberId]);
+    if (unseen.rowCount) await noteConnectorPresence(tx, memberId);
     await tx.query("UPDATE rooms_mcp_delivery SET failure='webhook_changed',receipt_at=NULL WHERE member_id=$1 AND mechanism='webhook'",[memberId]);
     // Keep the empty string: COALESCE must not restore the registration callback.
     await tx.query(
@@ -575,6 +589,7 @@ export async function setMcpMemberWebhook(
         WHERE member_id=$1 AND delivered_at IS NULL RETURNING call_id
       ) UPDATE subscription_webhook_calls SET outcome='skipped',reason='webhook disabled'
         WHERE id IN (SELECT call_id FROM cancelled)`, [memberId]);
+    await noteConnectorPresence(tx, memberId);
   });
   return { webhook: raw || null, secret: Boolean(sealed) };
 }
@@ -607,4 +622,21 @@ export async function mcpProvenance(db: SqlDatabase, memberId: string, roomId: s
       [memberId, roomId, messageId ?? null, replyTo ?? null],
     )).rows[0];
   });
+}
+
+/**
+ * A person's tag or direct message to an offline connector is queued as usual
+ * and the Room shows the existing offline line. Seeing the connector offline
+ * here moves its disconnect marker, so its reconnect retires this tag too.
+ */
+export async function noteOfflineConnectors<T extends { id: string; mcp: boolean }>(
+  db: SqlDatabase,
+  targets: readonly T[],
+): Promise<readonly T[]> {
+  const connectors = targets.filter((target) => target.mcp).map((target) => target.id);
+  if (!connectors.length) return targets;
+  const deliveries = await readMemberDeliveries(db, connectors);
+  const offline = connectors.filter((member) => deliveries.get(member)?.offline);
+  if (offline.length) await markConnectorsOffline(db, offline);
+  return targets;
 }

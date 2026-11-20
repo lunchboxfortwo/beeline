@@ -30,10 +30,18 @@ describe.skipIf(!url)('MCP real PostgreSQL final authority contention',()=>{
         CREATE TABLE room_access(room_id uuid,identity_id text,removed_at timestamptz);
         CREATE TABLE memberships(workspace_id uuid,room_id uuid,identity_id text,role text,removed_at timestamptz);
         CREATE TABLE rooms_mcp_mentions(seq bigserial PRIMARY KEY,member_id text,room_id uuid,message_id text,cleared_at timestamptz);
-        CREATE TABLE agent_commands(id text,agent_id text,reason text,state text,hiccup_attempts integer,private_payload jsonb,source_message_id text);
-        CREATE TABLE rooms_mcp_members(client_id text,owner_id text,member_id text,callback_url text);
-        CREATE TABLE rooms_mcp_clients(id text,callback_url text);
-        CREATE TABLE rooms_mcp_delivery(member_id text,mechanism text,subscription_id text,stream_id text,credential_hash text,host text,surface text,conversation text,failure text);
+        CREATE TABLE agent_commands(id text,agent_id text,reason text,state text,hiccup_attempts integer,private_payload jsonb,source_message_id text,
+          action text,created_at timestamptz DEFAULT now(),posted_reply_id text,parent_command_id text,turn_request_id text);
+        CREATE TABLE agent_invocations(command_id text,invocation_id text);
+        CREATE TABLE messages(id text,author_id text,request_id text,deleted_at timestamptz);
+        CREATE TABLE rooms_mcp_webhook_outbox(member_id text,message_id text,delivery_state text,claimed_at timestamptz);
+        CREATE TABLE rooms_mcp_event_deliveries(subscription_id text,command_id text,message_id text,delivery_state text,claimed_at timestamptz);
+        -- Reconnect retirement finds no queued work in this fixture; any call is a fixture gap.
+        CREATE FUNCTION beeline_finish_agent_command(text,text,text,text) RETURNS SETOF agent_commands LANGUAGE plpgsql AS $$
+          BEGIN RAISE EXCEPTION 'beeline_finish_agent_command is outside this isolated fixture'; END $$;
+        CREATE TABLE rooms_mcp_members(client_id text,owner_id text,member_id text,callback_url text,disconnected_at timestamptz);
+        CREATE TABLE rooms_mcp_clients(id text,callback_url text,name text,redirects jsonb);
+        CREATE TABLE rooms_mcp_delivery(member_id text,mechanism text,subscription_id text,stream_id text,credential_hash text,host text,surface text,conversation text,failure text,generation text,receipt_at timestamptz);
         CREATE TABLE rooms_mcp_event_subscriptions(id text,member_id text,url text,event_name text,expires_at timestamptz,verified_at timestamptz);
         CREATE TABLE rooms_mcp_tokens(hash text,client_id text,identity_id text,family_id text,scope text,expires_at timestamptz,revoked_at timestamptz);
         CREATE TABLE rooms_mcp_connections(client_id text,identity_id text,scope text,revoked_at timestamptz);

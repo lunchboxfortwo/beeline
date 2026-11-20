@@ -1,3 +1,4 @@
+import { connectorHostAcceptedSql } from './rooms-mcp-delivery.js';
 import { legacyMessageBody } from './messaging-cutover.js';
 import type { AgentCommand,RoomInboxResult } from '@beeline/api-contract/daemon';
 import { OPERATOR_OWNER_ID } from '@beeline/api-contract/daemon';
@@ -36,6 +37,7 @@ export async function readAgentQueueRows(db:SqlDatabase,agentId:string,roomId?:s
      LEFT JOIN agent_connections connection ON connection.agent_id=item.agent_id
      LEFT JOIN agents agent ON agent.agent_id=item.agent_id
      WHERE NOT EXISTS(SELECT 1 FROM retired WHERE retired.id=item.id)
+       AND NOT ${connectorHostAcceptedSql('item')}
      ORDER BY item.inbox_sequence,item.created_at,item.id`, [agentId, roomId ?? null]);
  }
 
