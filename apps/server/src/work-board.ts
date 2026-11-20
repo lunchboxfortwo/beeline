@@ -196,11 +196,12 @@ export async function readWorkBoard(
           message_id: string;
           message_text: string;
           question: string | null;
+          brief: string | null;
           source: WorkItemView['source'] | null;
           recommended_option_id: string | null;
         }
       >(
-        `SELECT source.id message_id,source.text message_text,q.question,q.recommended_option_id,${workDetailColumnsSql('source.id')},
+        `SELECT source.id message_id,source.text message_text,q.question,q.brief,q.recommended_option_id,${workDetailColumnsSql('source.id')},
            CASE WHEN source.card->'route' IS NOT NULL THEN jsonb_strip_nulls(jsonb_build_object(
              'roomId',origin.id,'messageId',CASE WHEN q.about->>'kind'='request' AND EXISTS(SELECT 1 FROM messages task
                WHERE task.id=q.about->>'messageId' AND task.room_id=origin.id) THEN q.about->>'messageId' END,
@@ -245,11 +246,13 @@ export async function readWorkBoard(
       ask: q && (q.question || ask.approval?.kind === 'choice')
         ? {
             ...ask,
-            text: q.message_text || q.question || ask.text,
+            // The card shows question and brief; the full message stays one tap away.
+            text: q.question && q.brief ? `${q.question}\n\n${q.brief}` : q.message_text || q.question || ask.text,
             approval: ask.approval ? { ...ask.approval, subject: q.question || ask.approval.subject } : undefined,
           }
         : ask,
       askIds: [ask.messageId],
+      ...(q?.question && q.brief ? { brief: q.brief } : {}),
       ...(q?.source ? {source:q.source} : {}),
       ...(q?.recommended_option_id ? { recommendedOptionId: q.recommended_option_id } : {}),
     };

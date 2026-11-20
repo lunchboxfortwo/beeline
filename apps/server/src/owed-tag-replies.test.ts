@@ -345,7 +345,7 @@ describe('owed chat tags', () => {
   });
   it('a delivered question card settles only its own incoming tag',async()=>{
     const source=await tag(member),pending=await tag(member);
-    await call('reply',{id:source,text:'Choose a result',ask:{question:'Which?',options:['A','B']}});
+    await call('reply',{id:source,text:'Choose a result',ask:{question:'Which?',brief: 'It decides the next step.', options:['A','B']}});
     expect((await owedMentions(db,member)).map(m=>m.messageId)).not.toContain(source);
     expect((await owedMentions(db,member)).map(m=>m.messageId)).toContain(pending);
   });

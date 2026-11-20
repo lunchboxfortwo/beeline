@@ -137,7 +137,8 @@ export type AgentCommand = {
   readonly turnRequestId: string;
   readonly action: AgentCommandAction;
   readonly reason: string;
-  readonly ask?: import('./agent-messaging.js').MessageAsk;
+  /** Asks queued before briefs existed carry no brief. */
+  readonly ask?: Omit<import('./agent-messaging.js').MessageAsk, 'brief'> & { readonly brief?: string };
   /** The schedule whose run woke this turn, when this is a `schedule` command. */
   readonly scheduleId?: string;
   /** Pending at reconnect; duration is measured from the previous connection release. */

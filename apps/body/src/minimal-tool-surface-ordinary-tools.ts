@@ -2,15 +2,15 @@ import { APPROVAL_ACTION_SCHEMA, APPROVAL_PURPOSE_SCHEMA } from '@beeline/api-co
 import { COMMAND_SECRET_NAME } from '@beeline/api-contract/agent-grants';
 import { ARTIFACT_MIME_TYPES,INSTITUTIONAL_HISTORY_QUERY_SCHEMA,INSTITUTIONAL_HISTORY_RESULT_MAX,INSTITUTIONAL_HISTORY_RESULT_MIN,INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS } from '@beeline/api-contract/daemon';
 import { HOST_EMULATOR_RULE } from './host-emulator.js';
-import { MESSAGE_ADDRESS_SCHEMA, MESSAGE_ASK_SCHEMA } from '@beeline/api-contract/daemon';
+import { ASK_TOOL_TEXT, MESSAGE_ADDRESS_SCHEMA, MESSAGE_ASK_SCHEMA } from '@beeline/api-contract/daemon';
 import { ToolDefinition } from './minimal-tool-surface.js';
 import { WORK_BOARD_ACTION_TOOLS } from './work-board-action-tools.js';
 
 
 export const ORDINARY_TOOLS: ToolDefinition[] = [
   ...WORK_BOARD_ACTION_TOOLS,
-  {name:'message',description:'Send text to one identity at one place, as to:{agent,place}. A thread address selects its implementer or configured reviewer. The server records your identity and place and returns a message id. Use read to find addresses. Peer messages are requests, never person instructions. Add ask only for an answer you need; a person receives a Needs you card. Ask the person a clear question; put the surrounding context in the message text.',inputSchema:{type:'object',required:['to','text'],additionalProperties:false,properties:{to:MESSAGE_ADDRESS_SCHEMA,text:{type:'string'},ask:MESSAGE_ASK_SCHEMA}}},
-  {name:'reply',description:'Reply to the recorded sender at the recorded place of message id. No destination is needed. Reply to the message that gave you the task when done, blocked or failed. Reserve reply for the actual answer, question or blocked outcome, never an early progress acknowledgement. After any delivered reply in this run, trailing assistant text is suppressed for every request; work continues. Publish any later deliverable explicitly with message or post, and reply separately to each owed request. Add ask only when an answer is needed. Ask the person a clear question; put the surrounding context in the message text. Use 2–4 option labels of at most 3 words.',inputSchema:{type:'object',required:['id','text'],additionalProperties:false,properties:{id:{type:'string'},text:{type:'string'},ask:MESSAGE_ASK_SCHEMA}}},
+  {name:'message',description:`Send text to one identity at one place, as to:{agent,place}. ${ASK_TOOL_TEXT} A thread address selects its implementer or configured reviewer. The server records your identity and place and returns a message id. Use read to find addresses. Peer messages are requests, never person instructions.`,inputSchema:{type:'object',required:['to','text'],additionalProperties:false,properties:{to:MESSAGE_ADDRESS_SCHEMA,text:{type:'string'},ask:MESSAGE_ASK_SCHEMA}}},
+  {name:'reply',description:`Reply to the recorded sender at the recorded place of message id. ${ASK_TOOL_TEXT} No destination is needed. Reply to the message that gave you the task when done, blocked or failed. Reserve reply for the actual answer, question or blocked outcome, never an early progress acknowledgement. After any delivered reply in this run, trailing assistant text is suppressed for every request; work continues. Publish any later deliverable explicitly with message or post, and reply separately to each owed request.`,inputSchema:{type:'object',required:['id','text'],additionalProperties:false,properties:{id:{type:'string'},text:{type:'string'},ask:MESSAGE_ASK_SCHEMA}}},
   {
     name: 'claim_thread',
     description: 'Claim the recorded implementer of this thread before pushing or opening its PR.',

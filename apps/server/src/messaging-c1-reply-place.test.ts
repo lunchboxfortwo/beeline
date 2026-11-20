@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { A, THREAD, daemon, db, PLACES, ROLES, inbox, settle, personSays, personDeliveries, type Place, type Role } from './messaging-conditions.test-support.js';
 
-const ask = { question: 'Which output?', options: ['Web', 'Phone'] };
+const ask = { question: 'Which output?', brief: 'It decides the next step.', options: ['Web', 'Phone'] };
 const cases = (Object.keys(PLACES) as Place[]).flatMap(place => (Object.keys(ROLES) as Role[]).flatMap(role => [false, true].map(withAsk => [place, role, withAsk] as const)));
 
 /** Condition 1: a commander's message to a thread agent is answered in the place it was sent from. */

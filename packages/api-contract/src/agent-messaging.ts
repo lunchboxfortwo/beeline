@@ -4,6 +4,8 @@ export type MessageAddress = { readonly agent: string; readonly place: string };
 export const OPERATOR_OWNER_ID = '34cf4160723acd12d205dfbe292614bfec9489b78812d1cd9846c00346903334';
 export type MessageAsk = {
   readonly question: string;
+  /** Why it matters and what each option means; the card shows it under the question. */
+  readonly brief: string;
   readonly options: readonly string[];
   readonly recommended?: string;
 };
@@ -19,10 +21,19 @@ export const MESSAGE_ADDRESS_SCHEMA = {
     place: { type: 'string', description: 'Chat, DM or thread id from read.' },
   },
 } as const;
+/** A Needs you card shows only question, brief and option buttons; longer asks are refused, never truncated. */
+export const ASK_QUESTION_MAX_CHARACTERS = 120;
+export const ASK_BRIEF_MAX_CHARACTERS = 280;
+/** The limits every tool that writes an ask states up front. */
+const ASK_LIMITS_TEXT = `Character limits: question at most ${ASK_QUESTION_MAX_CHARACTERS} characters, brief at most ${ASK_BRIEF_MAX_CHARACTERS} characters, both counted in characters; an ask over either limit is refused with its counts, so rewrite it shorter.`;
+/** The ask sentence for every message/reply tool description, before anything else about the tool. */
+export const ASK_TOOL_TEXT = `Add ask only when a person must decide: their Needs you card shows only ask.question, ask.brief and the option buttons, with your full text one tap away. ${ASK_LIMITS_TEXT} Use 2–4 option labels of at most 3 words.`;
 export const MESSAGE_ASK_SCHEMA = {
-  type: 'object', required: ['question', 'options'], additionalProperties: false,
+  type: 'object', required: ['question', 'brief', 'options'], additionalProperties: false,
+  description: `The person's Needs you card shows only question, brief and the option buttons; the full message text is one tap away. ${ASK_LIMITS_TEXT}`,
   properties: {
-    question: { type: 'string', minLength: 1, pattern: '^\\S+(?:[ \\t]+\\S+)*$', description: 'A clear question addressed to the person. Put the surrounding context in the message text.' },
+    question: { type: 'string', minLength: 1, pattern: '^\\S+(?:[ \\t]+\\S+)*$', description: `At most ${ASK_QUESTION_MAX_CHARACTERS} characters: one line ending with ?, the one decision the buttons answer.` },
+    brief: { type: 'string', minLength: 1, description: `At most ${ASK_BRIEF_MAX_CHARACTERS} characters and at most 2 sentences: why it matters and what each option means. Plain text.` },
     options: { type: 'array', minItems: 2, maxItems: 4,
       items: { type: 'string', pattern: '^\\S+(?:[ \\t]+\\S+){0,2}$' } },
     recommended: { type: 'string', description: 'One of the option labels.' },
@@ -55,6 +66,14 @@ export function agentMessageText(message: {
 
 /** The plain shortening error is shared by the tool validator and server. */
 export function validateMessageAsk(ask: MessageAsk): void {
+  if (typeof ask.brief !== 'string' || !ask.brief.trim())
+    throw new Error(`Add ask.brief: why it matters and what each option means, at most ${ASK_BRIEF_MAX_CHARACTERS} characters.`);
+  const over = ([['question', ask.question, ASK_QUESTION_MAX_CHARACTERS], ['brief', ask.brief, ASK_BRIEF_MAX_CHARACTERS]] as const)
+    .flatMap(([field, text, limit]) => {
+      const length = typeof text === 'string' ? Array.from(text).length : 0;
+      return length > limit ? [`ask.${field} is ${length} characters; the limit is ${limit}`] : [];
+    });
+  if (over.length) throw new Error(`${over.join('; ')}. Rewrite it shorter and send the ask again.`);
   const short = (text: unknown, words: number) => typeof text === 'string' &&
     new RegExp(`^\\S+(?:[ \\t]+\\S+){0,${words - 1}}$`).test(text);
   if (!Array.isArray(ask.options) || ask.options.length < 2 || ask.options.length > 4 ||

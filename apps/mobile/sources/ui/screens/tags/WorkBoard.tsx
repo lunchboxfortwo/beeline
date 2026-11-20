@@ -153,10 +153,20 @@ function AskCard({ item, actions, now }: { item: WorkItemView; actions: WorkBoar
           <Glyph icon={X} size={14} />
         </Btn>
       </XStack>
-      <TypedView view={MonoMarkdown} markdown={ask.text} />
-      {ask.approval?.kind === 'choice' && !ask.text.includes(ask.approval.subject) ? (
-        <T>{ask.approval.subject}</T>
-      ) : null}
+      {item.brief && ask.approval?.kind === 'choice' ? (
+        // Question and brief are enough to decide; the full message is one tap away.
+        <YStack gap="1">
+          <T v="heading">{ask.approval.subject}</T>
+          <T>{item.brief}</T>
+        </YStack>
+      ) : (
+        <>
+          <TypedView view={MonoMarkdown} markdown={ask.text} />
+          {ask.approval?.kind === 'choice' && !ask.text.includes(ask.approval.subject) ? (
+            <T>{ask.approval.subject}</T>
+          ) : null}
+        </>
+      )}
       {choices.length ? (
         <XStack gap="2" alignItems="stretch" flexWrap="wrap">
           {choices.map((action, index) => (

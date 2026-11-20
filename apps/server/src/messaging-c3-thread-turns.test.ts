@@ -31,7 +31,7 @@ describe('C3: thread work never takes a turn in the parent chat', () => {
     rootFixture.githubApp.readCommitCheckRollup.mockResolvedValueOnce({ state: 'failed', total: 1, failing: ['typecheck'], checks: [{ name: 'typecheck', status: 'failed' }] });
     await fixtureScope18().checkRun(thread, 'typecheck', 'failure');
     for (const wake of await pendingFor(thread, A))
-      await rootFixture.daemon.execute('reply', { id: wake.id, text: 'blocked: need build access', ask: { question: 'Grant access?', options: ['Yes', 'No'] } }, A);
+      await rootFixture.daemon.execute('reply', { id: wake.id, text: 'blocked: need build access', ask: { question: 'Grant access?', brief: 'It decides the next step.', options: ['Yes', 'No'] } }, A);
     // System wake answers stay in the thread without asking the commander.
     const asked = (await pendingFor(R, F)).filter(row => row.reason === 'reply' && row.ask);
     expect(asked).toEqual([]);

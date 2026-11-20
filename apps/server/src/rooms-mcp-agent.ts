@@ -1,7 +1,7 @@
 import { queuedContextText } from './agent-command-context.js';
 import { legacyMessageBody } from './messaging-cutover.js';
 import { recordedMessageRoute } from './message-route.js';
-import { MESSAGE_ADDRESS_SCHEMA,MESSAGE_ASK_SCHEMA,OPERATOR_OWNER_ID } from '@beeline/api-contract/daemon';
+import { ASK_TOOL_TEXT,MESSAGE_ADDRESS_SCHEMA,MESSAGE_ASK_SCHEMA,OPERATOR_OWNER_ID } from '@beeline/api-contract/daemon';
 import { INSTITUTIONAL_HISTORY_RESULT_MAX,INSTITUTIONAL_MEMORY_SEARCH_RESULT_MAX,REPOSITORY_SUBSCRIPTION_EVENTS,WallRefusal } from '@beeline/api-contract/daemon';
 import { SUBSCRIBABLE_EVENT_KINDS } from '@beeline/api-contract/phone';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
@@ -177,10 +177,10 @@ export const MCP_AGENT_TOOLS: Tool[] = [
     address: address('Thread id.'), action: { type: 'string', enum: ['metadata', 'brief', 'install_brief'] }, reviewer: { type: 'string' },
     name: { type: 'string' }, objective: { type: 'string' }, brief, expectedRevision: { type: 'integer', minimum: 0 }, change: { type: 'string', maxLength: 1000 },
   }, ['address', 'action']),
-  tool('message', 'Send to one identity in one place. A thread selects its implementer or configured reviewer. The message records your origin; ask creates a card only for a person. Ask the person a clear question; put the surrounding context in the message text.', {
+  tool('message', `Send to one identity in one place. ${ASK_TOOL_TEXT} A thread selects its implementer or configured reviewer. The message records your origin; ask creates a card only for a person.`, {
     address:address('Your sending place; omit to send from to.place.'),to:MESSAGE_ADDRESS_SCHEMA,text:{type:'string'},ask:MESSAGE_ASK_SCHEMA,
   }, ['to','text']),
-  tool('reply', 'Reply to the recorded sender and place of id. Add ask only when you need an answer. Ask the person a clear question; put the surrounding context in the message text. Use this for done, blocked and failed outcomes.', {
+  tool('reply', `Reply to the recorded sender and place of id. ${ASK_TOOL_TEXT} Use this for done, blocked and failed outcomes.`, {
     id:{type:'string'},text:{type:'string'},ask:MESSAGE_ASK_SCHEMA,
   }, ['id','text']),
   tool('create_work_item', 'Create a distinct work item and return its id. State defaults to backlog.', {

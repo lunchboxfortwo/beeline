@@ -283,19 +283,37 @@ describe('Work board recorded sources and single assignee', () => {
       0,
     );
   });
-  it('keeps the whole asking post in Tasks, separately from the choice question', async () => {
+  it('shows only question, brief and buttons on the card, with the full post one tap away', async () => {
     const text = 'I am researching the launch sources for Ada. '.repeat(16) +
       '\nThe connected sources are missing the vendor report, so I cannot finish the comparison. Should I set up Squire?';
     const question = 'Should I set up Squire?';
+    const brief = 'The vendor report is missing, so the comparison cannot finish. Setup takes two minutes; later leaves it unfinished.';
     const posted = await sendMessage(db, {
       route: { from: { agent, place: chat }, to: { agent: person, place: chat } },
-      text, ask: { question, options: ['Start setup', 'Later'] },
+      text, ask: { question, brief, options: ['Start setup', 'Later'] },
     });
     const item = (await read()).items.find(item => item.messageId === posted.id)!;
-    expect(item.ask?.text).toBe(text);
+    expect(item.brief).toBe(brief);
+    expect(item.ask?.text).toBe(`${question}\n\n${brief}`);
     expect(item.ask?.approval).toMatchObject({ kind: 'choice', subject: question });
     expect(item.ask?.approval?.actions.filter(action => action.kind === 'choice').map(action => action.label))
       .toEqual(['Start setup', 'Later']);
+    expect((await db.query<{ text: string }>('SELECT text FROM messages WHERE id=$1', [posted.id])).rows[0]?.text).toBe(text);
+    // An ask stored before briefs existed keeps showing its whole post.
+    await db.query('UPDATE work_questions SET brief=NULL WHERE message_id=$1', [posted.id]);
+    const legacy = (await read()).items.find(item => item.messageId === posted.id)!;
+    expect(legacy.ask?.text).toBe(text);
+    expect(legacy).not.toHaveProperty('brief');
+  });
+  it('refuses an over-limit question or brief before writing anything, naming the counts', async () => {
+    const route = { from: { agent, place: chat }, to: { agent: person, place: chat } };
+    await expect(sendMessage(db, { route, text: 'Choose',
+      ask: { question: `${'Should I '.repeat(13)}ship?`, brief: 'It is ready.', options: ['Yes', 'No'] } }))
+      .rejects.toThrow('ask.question is 122 characters; the limit is 120');
+    await expect(sendMessage(db, { route, text: 'Choose',
+      ask: { question: 'Ship it?', brief: 'Ready. '.repeat(41).trim(), options: ['Yes', 'No'] } }))
+      .rejects.toThrow('ask.brief is 286 characters; the limit is 280');
+    expect((await db.query('SELECT message_id FROM work_questions')).rowCount).toBe(0);
   });
   it('never puts a plain mention or keyword in Needs you, only reports addressed to the viewer', async () => {
     await db.query(

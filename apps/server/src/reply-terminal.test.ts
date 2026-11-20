@@ -6,7 +6,7 @@ import { itemPrompt } from '../../body/src/place-prompt.js';
 import { renderWake } from '../../body/src/session-join/bridge.js';
 import { AGENT, ROOM, describe, expect, fixtureScope1, fixtureScope3, it } from './test-support-rooms-mcp.test-support.js';
 
-const ask = { question: 'Which output?', options: ['Web', 'Phone'] };
+const ask = { question: 'Which output?', brief: 'It decides the next step.', options: ['Web', 'Phone'] };
 const runner = { node: '/proof/node', bundle: '/proof/beeline.mjs' };
 const joined = { key: 'codex:/proof', agent: 'codex' as const, cwd: '/proof', name: 'Proof',
   server: 'https://proof.invalid', clientId: 'proof', cursor: '0', deliveredWakes: [], joinedAt: '' };

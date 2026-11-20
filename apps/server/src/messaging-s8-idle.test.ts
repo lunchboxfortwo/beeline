@@ -31,7 +31,7 @@ it('S8: an idle episode emits at most one notice at its commander tuple',async()
 it('S8: an outstanding ask suppresses idle notices',async()=>{
   await idleThread();
   await sendMessage(db,{route:{from:{agent:B,place:THREAD},to:{agent:A,place:CHAT}},text:'Need direction',
-    ask:{question:'Which output?',options:['Web','Phone']}});
+    ask:{question:'Which output?',brief: 'It decides the next step.', options:['Web','Phone']}});
   for(let event=0;event<3;event++) await refreshCornerAttention(db,THREAD);
   expect((await db.query(cornerIdleSql('$1'),[THREAD])).rows[0]).toMatchObject({blocking:true,idle_eligible:false});
   expect(await queued()).toEqual([[A,CHAT]]);

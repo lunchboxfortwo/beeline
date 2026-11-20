@@ -6,7 +6,7 @@ import { needsYouItems } from './needs-you.js';
 import { phoneIdentity } from './phone-identity.js';
 import { cornerWaitingReportSql } from './corner-waiting-report.js';
 import { H,A,B,W,CHAT,THREAD,db,queued } from './messaging.test-support.js';
-const ask={question:'Which output?',options:['Web','Phone'],recommended:'Web'};
+const ask={question:'Which output?',brief: 'It decides the next step.', options:['Web','Phone'],recommended:'Web'};
 const tray=async()=>(await needsYouItems(db,W,H,row=>phoneIdentity(row,''))).items;
 it('S4: asks to a person create independent cards; answering clears that card alone, and plain replies create none',async()=>{
   const first=await sendMessage(db,{route:{from:{agent:B,place:THREAD},to:{agent:H,place:CHAT}},text:'Choose output',ask});

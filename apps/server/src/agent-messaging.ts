@@ -12,9 +12,10 @@ import { updateWorkItem } from './work-board.js';
 
 /** Validate the advertised ask schema before any lookup or publication. */
 function validateAskInput(ask: MessageAsk): void {
+  // Named limit refusals come first, so an over-long ask reports its counts.
+  validateMessageAsk(ask);
   if (!Check(MESSAGE_ASK_SCHEMA, ask))
     throw new Error(Errors(MESSAGE_ASK_SCHEMA, ask).map(error => error.message).join('; '));
-  validateMessageAsk(ask);
 }
 
 /** Resolve both coordinates together; a role is meaningful only at its thread. */
@@ -89,10 +90,10 @@ export async function sendMessage(db: SqlDatabase, input: {
       const origin=(await tx.query<{parent_id:string|null}>('SELECT parent_id FROM rooms WHERE id=$1',[route.from.place])).rows[0];
       const about=origin?.parent_id ? {kind:'thread',roomId:route.from.place}
         : {kind:'request',roomId:route.from.place,messageId:input.parent?.source_message_id ?? input.replyTo ?? id};
-      await tx.query(`INSERT INTO work_questions(message_id,room_id,about,question,recommended_option_id)
-        VALUES($1,$2,$3::jsonb,$4,$5) ON CONFLICT(message_id) DO NOTHING`,
+      await tx.query(`INSERT INTO work_questions(message_id,room_id,about,question,brief,recommended_option_id)
+        VALUES($1,$2,$3::jsonb,$4,$5,$6) ON CONFLICT(message_id) DO NOTHING`,
         [id,to.place,JSON.stringify(about),
-          input.ask.question,options.find(option=>option.label===input.ask!.recommended)?.optionId ?? null]);
+          input.ask.question,input.ask.brief,options.find(option=>option.label===input.ask!.recommended)?.optionId ?? null]);
       await updateWorkItem(tx,{id,roomId:to.place,state:'needs-you',assigneeId:to.agent},route.from.agent,input.replyTo ? to.agent : undefined);
       return { id, createdAt: Math.floor(Date.now()/1000) };
     }
