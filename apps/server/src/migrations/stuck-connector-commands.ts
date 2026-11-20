@@ -5,7 +5,7 @@ import {
   UNCLAIMED_CONNECTOR_INPUT_SQL,
 } from '../rooms-mcp-delivery.js';
 
-/** Queued before the owner chose reconnect retirement (20 Nov 2026, 20:05 UTC). */
+/** Fixed historical cutoff; reruns must not retire newly queued work. */
 const STUCK_CONNECTOR_COMMANDS_BEFORE = '2026-11-20T20:00:00Z';
 
 /**
@@ -16,11 +16,16 @@ const STUCK_CONNECTOR_COMMANDS_BEFORE = '2026-11-20T20:00:00Z';
 export async function retireStuckConnectorCommands(
   database: SqlDatabase,
 ): Promise<{ commands: number; tags: number }> {
-  return database.transaction(async db => {
-    const locked = (await db.query<{ id: string }>(`SELECT command.id FROM agent_commands command
+  return database.transaction(async (db) => {
+    const locked = (
+      await db.query<{ id: string }>(
+        `SELECT command.id FROM agent_commands command
       WHERE command.created_at<$1::timestamptz AND command.state='pending'
         AND EXISTS(SELECT 1 FROM rooms_mcp_members member WHERE member.member_id=command.agent_id)
-      ORDER BY command.id FOR UPDATE OF command`, [STUCK_CONNECTOR_COMMANDS_BEFORE])).rows;
+      ORDER BY command.id FOR UPDATE OF command`,
+        [STUCK_CONNECTOR_COMMANDS_BEFORE],
+      )
+    ).rows;
     const retired = await db.query(
       `WITH candidate AS MATERIALIZED (SELECT command.id FROM agent_commands command
          WHERE command.created_at<$1::timestamptz
@@ -28,7 +33,11 @@ export async function retireStuckConnectorCommands(
            AND command.id=ANY($3::text[]) AND ${UNCLAIMED_CONNECTOR_INPUT_SQL})
        SELECT ended.id FROM candidate
          CROSS JOIN LATERAL beeline_finish_agent_command(candidate.id,'cancelled',$2,NULL) ended`,
-      [STUCK_CONNECTOR_COMMANDS_BEFORE, CONNECTOR_RECONNECT_RETIRED, locked.map(command => command.id)],
+      [
+        STUCK_CONNECTOR_COMMANDS_BEFORE,
+        CONNECTOR_RECONNECT_RETIRED,
+        locked.map((command) => command.id),
+      ],
     );
     const cleared = await db.query(
       `UPDATE rooms_mcp_mentions mention SET cleared_at=now()
@@ -38,7 +47,9 @@ export async function retireStuckConnectorCommands(
       [STUCK_CONNECTOR_COMMANDS_BEFORE],
     );
     const result = { commands: retired.rowCount ?? 0, tags: cleared.rowCount ?? 0 };
-    console.log(`retireStuckConnectorCommands: retired ${result.commands} command(s), cleared ${result.tags} tag(s)`);
+    console.log(
+      `retireStuckConnectorCommands: retired ${result.commands} command(s), cleared ${result.tags} tag(s)`,
+    );
     return result;
   });
 }

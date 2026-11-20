@@ -410,8 +410,9 @@ export const OWED_WITHOUT_QUEUED_COMMAND_SQL = `NOT EXISTS(SELECT 1 FROM agent_c
   WHERE queued.agent_id=mention.member_id AND queued.source_message_id=mention.message_id AND queued.state='pending')`;
 
 /**
- * A connector's queued input it has not claimed: no answer committed, no tool
- * call made under it, and no webhook or event dispatch in flight or accepted. Its own
+ * A connector's queued input it has not claimed: no invocation registered, no
+ * answer committed, no tool call recorded under it, and no webhook or event
+ * dispatch in flight or accepted. Its own
  * in-flight tool items (`mcp_call`) are never retired.
  */
 export const UNCLAIMED_CONNECTOR_INPUT_SQL = `command.state='pending' AND command.action='input' AND command.reason<>'mcp_call'
