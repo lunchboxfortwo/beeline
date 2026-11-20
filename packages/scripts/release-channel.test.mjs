@@ -39,6 +39,7 @@ test('Cloudflare Pages publishes the exact release to production without GitHub 
   assert.equal(args.some(arg => arg.includes(options.token)), false);
   assert.equal(config.env.CLOUDFLARE_API_TOKEN, options.token);
   assert.equal(config.env.CLOUDFLARE_ACCOUNT_ID, options.accountId);
+  assert.notEqual(config.cwd, '/', 'wrangler needs a writable working directory');
   for (const [key, value, error] of [['token', '', /CLOUDFLARE_PAGES_TOKEN/],
     ['accountId', '', /CLOUDFLARE_ACCOUNT_ID/], ['sha', 'main', /exact release commit/]]) {
     await assert.rejects(deployPages({ ...options, [key]: value, execute }), error);
