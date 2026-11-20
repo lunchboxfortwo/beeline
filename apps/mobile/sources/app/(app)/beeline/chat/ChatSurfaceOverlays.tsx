@@ -21,8 +21,16 @@ import { AttachmentPickerSheet } from '@/components/buzz/AttachmentPickerSheet';
 import { ForwardMessagePickerSheet } from '@/components/buzz/ForwardMessagePickerSheet';
 import { ForwardCornerSheet } from '@/components/buzz/ForwardCornerSheet';
 import { MessageReactionStrip } from '@/components/buzz/MessageReactionStrip';
-import { HullActionSheetCancel, HullActionSheetModal, HullActionSheetRow } from '@/components/buzz/HullActionSheet';
-import { RoomActionsSheet, type RoomActionsSheetHandle, type RoomRepositoryOptions } from '@/components/buzz/RoomRepositoryChoice';
+import {
+  HullActionSheetCancel,
+  HullActionSheetModal,
+  HullActionSheetRow,
+} from '@/components/buzz/HullActionSheet';
+import {
+  RoomActionsSheet,
+  type RoomActionsSheetHandle,
+  type RoomRepositoryOptions,
+} from '@/components/buzz/RoomRepositoryChoice';
 import { RoomReviewerActions } from '@/components/buzz/RoomReviewerActions';
 import { HullDialog, HullDialogInput } from '@/components/buzz/HullDialog';
 import { type CornerOpenAttempt } from '@/buzz/open-random-corner';
@@ -56,7 +64,10 @@ type Props = {
   canDeleteMessage: (message: ChatDisplayMessage) => boolean;
   handleDeleteMessage: (message: ChatDisplayMessage) => Promise<void>;
   setForwardCornerPrompt: React.Dispatch<React.SetStateAction<ChatDisplayMessage | null>>;
-  confirmForwardToNewCorner: (retry?: { target: ChatDisplayMessage; attempt: CornerOpenAttempt; }) => Promise<void>;
+  confirmForwardToNewCorner: (retry?: {
+    target: ChatDisplayMessage;
+    attempt: CornerOpenAttempt;
+  }) => Promise<void>;
   forwardCornerPrompt: ChatDisplayMessage | null;
   forwardBusyRoomId: string | null;
   forwardError: string | null;
@@ -66,11 +77,11 @@ type Props = {
   forwardToRoom: (target: ForwardTarget) => Promise<boolean>;
   forwardRooms: readonly ForwardTarget[] | null;
   forwardTarget: ChatDisplayMessage | null;
-  roomSurface: import("@beeline/api-contract/phone").RoomView | null;
+  roomSurface: import('@beeline/api-contract/phone').RoomView | null;
   isDirectMessage: boolean;
   membershipError: string | null;
   setParticipantPickerVisible: React.Dispatch<React.SetStateAction<boolean>>;
-  memberManagement: { canOpenRoster: boolean; pickerVisible: boolean; };
+  memberManagement: { canOpenRoster: boolean; pickerVisible: boolean };
   renameBusy: boolean;
   closeRoomActions: () => void;
   canRenameTitle: boolean;
@@ -97,19 +108,19 @@ type Props = {
   setRoomActionsVisible: (visible: boolean) => void | undefined;
   activeCommunityId: string | null;
   roomLifecycleBusy: boolean;
-  handleRoomLifecycle: (action: "delete" | "leave" | "close") => Promise<void>;
+  handleRoomLifecycle: (action: 'delete' | 'leave' | 'close') => Promise<void>;
   renameError: string | null;
   setDmActionsVisible: React.Dispatch<React.SetStateAction<boolean>>;
   dmActionsVisible: boolean;
   viewerIsAgent: boolean;
   headerTitle: string | null;
-  cornerOwnerDisplay: import("@/buzz/agent-display").AgentDisplayIdentity | null | undefined;
+  cornerOwnerDisplay: import('@/buzz/agent-display').AgentDisplayIdentity | null | undefined;
   cornerActionsVisible: boolean;
   transport: BuzzRigTransport | null;
   setCornerActionsVisible: React.Dispatch<React.SetStateAction<boolean>>;
   handleBack: () => void;
   readRoom: () => void;
-  participantPickerKind: "agent" | "person" | null;
+  participantPickerKind: 'agent' | 'person' | null;
   agentConnectVisible: boolean;
   closeAgentConnect: () => void;
   createPollVisible: boolean;
@@ -209,163 +220,181 @@ export function ChatSurfaceOverlays({
   const renameMounted = useOpenedSheet(isCorner && renameEditing);
   const pollMounted = useOpenedSheet(createPollVisible);
   const messageLinkToken = messageActionsTarget ? chatMessageLinkToken(messageActionsTarget) : null;
-  return <>
-      {attachmentPickerVisible && <AttachmentPickerSheet
-        visible={attachmentPickerVisible}
-        onClose={() => setAttachmentPickerVisible(false)}
-        onPickDocument={() => void pickDocument()}
-        onPickPhoto={() => void pickPhoto()}
-        onPickPasted={desktopExperience ? undefined : () => void pasteImage()}
-      />}
-
-      {messageActionsMounted && <HullActionSheetModal
-        accessibilityLabel="Close message actions"
-        onClose={() => setMessageActionsTarget(null)}
-        testID="message-actions-sheet"
-        title="Message"
-        subtitle={messageActionsTarget ? outbox.states.get(messageActionsTarget.id)?.reason : undefined}
-        visible={Boolean(messageActionsTarget)}
-      >
-        {messageActionsTarget && outbox.states.get(messageActionsTarget.id)?.kind !== 'sending' && outbox.current()?.get(messageActionsTarget.id) ? (
-          <HullActionSheetRow label="Retry" testID="message-retry-action" onPress={() => {
-            const target = messageActionsTarget;
-            setMessageActionsTarget(null);
-            void outbox.retry([target.id]);
-          }} />
-        ) : null}
-        {messageActionsTarget && !messageActionsTarget.isAgentActivity ? (
-          // The reaction entry point is the emoji scroll itself — the sheet's
-          // top cell, with no React row and nothing to expand above it.
-          <MessageReactionStrip
-            onReact={(emoji) => {
-              const target = messageActionsTarget;
-              setMessageActionsTarget(null);
-              if (target) void handleReactToMessage(target, emoji);
-            }}
-          />
-        ) : null}
-        {messageActionsTarget && !messageActionsTarget.isAgentActivity ? (
-          <HullActionSheetRow
-            accessibilityLabel="Report an issue with this message"
-            label="Report issue"
-            onPress={() => {
-              const target = messageActionsTarget;
-              setMessageActionsTarget(null);
-              if (target) void handleReportMessage(target);
-            }}
-            testID="message-report-action"
-          />
-        ) : null}
-        {messageActionsTarget ? (
-          <HullActionSheetRow
-            accessibilityLabel="Copy message text"
-            label="Copy"
-            onPress={() => {
-              handleCopyLedgerMessage(
-                messageActionsTarget.isAgentActivity
-                  ? agentActivityReplyExcerpt(messageActionsTarget)
-                  : messageActionsTarget.text,
-              );
-              setMessageActionsTarget(null);
-            }}
-            testID="message-copy-action"
-          />
-        ) : null}
-        {messageLinkToken ? (
-          <HullActionSheetRow
-            accessibilityLabel={`Copy link ${messageLinkToken}`}
-            label="Copy link"
-            metadata={messageLinkToken}
-            onPress={() => {
-              setMessageActionsTarget(null);
-              void copyChatMessageLink(messageLinkToken, Clipboard.setStringAsync,
-                { showCopied: showCopyToast, showCopyFailed: showCopyToast });
-            }}
-            testID="message-copy-link-action"
-          />
-        ) : null}
-        {messageActionsTarget ? (
-          <HullActionSheetRow
-            accessibilityLabel="Select message text"
-            label="Select"
-            onPress={() => {
-              const target = messageActionsTarget;
-              setMessageActionsTarget(null);
-              if (target) {
-                handleSelectLedgerMessage(
-                  target.isAgentActivity ? agentActivityReplyExcerpt(target) : target.text,
-                );
-              }
-            }}
-            testID="message-select-action"
-          />
-        ) : null}
-        {messageActionsTarget && canBeginReply(messageActionsTarget, decodedId) ? (
-          <HullActionSheetRow
-            accessibilityLabel="Reply to message"
-            label="Reply"
-            onPress={() => {
-              const target = messageActionsTarget;
-              setMessageActionsTarget(null);
-              if (target) beginReply(target);
-            }}
-            testID="message-reply-action"
-          />
-        ) : null}
-        {messageActionsTarget && !messageActionsTarget.isAgentActivity ? (
-          <HullActionSheetRow
-            accessibilityLabel="Forward message"
-            label="Forward"
-            onPress={() => {
-              const target = messageActionsTarget;
-              setMessageActionsTarget(null);
-              if (target) void beginForward(target);
-            }}
-            testID="message-forward-action"
-          />
-        ) : null}
-        {messageActionsTarget && canDeleteMessage(messageActionsTarget) ? (
-          <HullActionSheetRow
-            accessibilityLabel="Delete message"
-            destructive
-            label="Delete"
-            onPress={() => {
-              const target = messageActionsTarget;
-              setMessageActionsTarget(null);
-              if (target) void handleDeleteMessage(target);
-            }}
-            testID="message-delete-action"
-          />
-        ) : null}
-        <HullActionSheetCancel
-          onPress={() => setMessageActionsTarget(null)}
-          testID="message-actions-close"
+  return (
+    <>
+      {attachmentPickerVisible && (
+        <AttachmentPickerSheet
+          visible={attachmentPickerVisible}
+          onClose={() => setAttachmentPickerVisible(false)}
+          onPickDocument={() => void pickDocument()}
+          onPickPhoto={() => void pickPhoto()}
+          onPickPasted={desktopExperience ? undefined : () => void pasteImage()}
         />
-      </HullActionSheetModal>}
+      )}
 
-      {forwardCornerMounted && <ForwardCornerSheet
-        onClose={() => setForwardCornerPrompt(null)}
-        onOpen={() => void confirmForwardToNewCorner()}
-        visible={Boolean(forwardCornerPrompt)}
-      />}
+      {messageActionsMounted && (
+        <HullActionSheetModal
+          accessibilityLabel="Close message actions"
+          onClose={() => setMessageActionsTarget(null)}
+          testID="message-actions-sheet"
+          title="Message"
+          subtitle={
+            messageActionsTarget ? outbox.states.get(messageActionsTarget.id)?.reason : undefined
+          }
+          visible={Boolean(messageActionsTarget)}
+        >
+          {messageActionsTarget &&
+          outbox.states.get(messageActionsTarget.id)?.kind !== 'sending' &&
+          outbox.current()?.get(messageActionsTarget.id) ? (
+            <HullActionSheetRow
+              label="Retry"
+              testID="message-retry-action"
+              onPress={() => {
+                const target = messageActionsTarget;
+                setMessageActionsTarget(null);
+                void outbox.retry([target.id]);
+              }}
+            />
+          ) : null}
+          {messageActionsTarget && !messageActionsTarget.isAgentActivity ? (
+            // The reaction entry point is the emoji scroll itself — the sheet's
+            // top cell, with no React row and nothing to expand above it.
+            <MessageReactionStrip
+              onReact={(emoji) => {
+                const target = messageActionsTarget;
+                setMessageActionsTarget(null);
+                if (target) void handleReactToMessage(target, emoji);
+              }}
+            />
+          ) : null}
+          {messageActionsTarget && !messageActionsTarget.isAgentActivity ? (
+            <HullActionSheetRow
+              accessibilityLabel="Report an issue with this message"
+              label="Report issue"
+              onPress={() => {
+                const target = messageActionsTarget;
+                setMessageActionsTarget(null);
+                if (target) void handleReportMessage(target);
+              }}
+              testID="message-report-action"
+            />
+          ) : null}
+          {messageActionsTarget ? (
+            <HullActionSheetRow
+              accessibilityLabel="Copy message text"
+              label="Copy"
+              onPress={() => {
+                handleCopyLedgerMessage(
+                  messageActionsTarget.isAgentActivity
+                    ? agentActivityReplyExcerpt(messageActionsTarget)
+                    : messageActionsTarget.text,
+                );
+                setMessageActionsTarget(null);
+              }}
+              testID="message-copy-action"
+            />
+          ) : null}
+          {messageLinkToken ? (
+            <HullActionSheetRow
+              accessibilityLabel={`Copy link ${messageLinkToken}`}
+              label="Copy link"
+              metadata={messageLinkToken}
+              onPress={() => {
+                setMessageActionsTarget(null);
+                void copyChatMessageLink(messageLinkToken, Clipboard.setStringAsync, {
+                  showCopied: showCopyToast,
+                  showCopyFailed: showCopyToast,
+                });
+              }}
+              testID="message-copy-link-action"
+            />
+          ) : null}
+          {messageActionsTarget ? (
+            <HullActionSheetRow
+              accessibilityLabel="Select message text"
+              label="Select"
+              onPress={() => {
+                const target = messageActionsTarget;
+                setMessageActionsTarget(null);
+                if (target) {
+                  handleSelectLedgerMessage(
+                    target.isAgentActivity ? agentActivityReplyExcerpt(target) : target.text,
+                  );
+                }
+              }}
+              testID="message-select-action"
+            />
+          ) : null}
+          {messageActionsTarget && canBeginReply(messageActionsTarget, decodedId) ? (
+            <HullActionSheetRow
+              accessibilityLabel="Reply to message"
+              label="Reply"
+              onPress={() => {
+                const target = messageActionsTarget;
+                setMessageActionsTarget(null);
+                if (target) beginReply(target);
+              }}
+              testID="message-reply-action"
+            />
+          ) : null}
+          {messageActionsTarget && !messageActionsTarget.isAgentActivity ? (
+            <HullActionSheetRow
+              accessibilityLabel="Forward message"
+              label="Forward"
+              onPress={() => {
+                const target = messageActionsTarget;
+                setMessageActionsTarget(null);
+                if (target) void beginForward(target);
+              }}
+              testID="message-forward-action"
+            />
+          ) : null}
+          {messageActionsTarget && canDeleteMessage(messageActionsTarget) ? (
+            <HullActionSheetRow
+              accessibilityLabel="Delete message"
+              destructive
+              label="Delete"
+              onPress={() => {
+                const target = messageActionsTarget;
+                setMessageActionsTarget(null);
+                if (target) void handleDeleteMessage(target);
+              }}
+              testID="message-delete-action"
+            />
+          ) : null}
+          <HullActionSheetCancel
+            onPress={() => setMessageActionsTarget(null)}
+            testID="message-actions-close"
+          />
+        </HullActionSheetModal>
+      )}
 
-      {forwardMessageMounted && <ForwardMessagePickerSheet
-        draftContext={decodedId}
-        busyRoomId={forwardBusyRoomId}
-        error={forwardError}
-        onClose={() => {
-          if (forwardBusyRoomId) return;
-          setForwardTarget(null);
-        }}
-        onDismiss={() => {
-          setForwardRooms(null);
-          setForwardError(null);
-        }}
-        onForward={forwardToRoom}
-        targets={forwardRooms}
-        visible={Boolean(forwardTarget)}
-      />}
+      {forwardCornerMounted && (
+        <ForwardCornerSheet
+          onClose={() => setForwardCornerPrompt(null)}
+          onOpen={() => void confirmForwardToNewCorner()}
+          visible={Boolean(forwardCornerPrompt)}
+        />
+      )}
 
+      {forwardMessageMounted && (
+        <ForwardMessagePickerSheet
+          draftContext={decodedId}
+          busyRoomId={forwardBusyRoomId}
+          error={forwardError}
+          onClose={() => {
+            if (forwardBusyRoomId) return;
+            setForwardTarget(null);
+          }}
+          onDismiss={() => {
+            setForwardRooms(null);
+            setForwardError(null);
+          }}
+          onForward={forwardToRoom}
+          targets={forwardRooms}
+          visible={Boolean(forwardTarget)}
+        />
+      )}
 
       <RoomActionsSheet
         accessibilityLabel={`Close ${ROOM_LABEL} actions`}
@@ -380,37 +409,65 @@ export function ChatSurfaceOverlays({
         repository={roomRepoOptions}
         backgroundRef={conversationFrameRef}
       >
-        {() => <>
+        {() => (
+          <>
             {!isCorner && canRenameTitle && renameEditing && (
               // Hangs between the sheet's rows, on their 24pt inset.
-              <YStack paddingHorizontal="6" paddingVertical="2" borderTopWidth={1} borderTopColor="stroke" testID="rename-room-editor">
-                <T v="meta" color="secondary">New {ROOM_LABEL.toLowerCase()} name</T>
+              <YStack
+                paddingHorizontal="6"
+                paddingVertical="2"
+                borderTopWidth={1}
+                borderTopColor="stroke"
+                testID="rename-room-editor"
+              >
+                <T v="meta" color="secondary">
+                  New {ROOM_LABEL.toLowerCase()} name
+                </T>
                 <YStack marginTop="1">
-                <HullDialogInput
-                  accessibilityLabel={`New ${ROOM_LABEL} name`}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  // The native field's own prop; the Tamagui field type does not name it.
-                  {...{ editable: !renameBusy }}
-                  onChangeText={(value) => {
-                    setRenameDraft(roomNameEntry(value));
-                    if (value.trim()) setRenameError(null);
-                  }}
-                  onSubmitEditing={() => void handleRenameRoom()}
-                  returnKeyType="done"
-                  selectTextOnFocus
-                  testID="rename-room-input"
-                  value={renameDraft}
-                />
+                  <HullDialogInput
+                    accessibilityLabel={`New ${ROOM_LABEL} name`}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    // The native field's own prop; the Tamagui field type does not name it.
+                    {...{ editable: !renameBusy }}
+                    onChangeText={(value) => {
+                      setRenameDraft(roomNameEntry(value));
+                      if (value.trim()) setRenameError(null);
+                    }}
+                    onSubmitEditing={() => void handleRenameRoom()}
+                    returnKeyType="done"
+                    selectTextOnFocus
+                    testID="rename-room-input"
+                    value={renameDraft}
+                  />
                 </YStack>
                 {!validRoomSlug(renameDraft.trim()) && (
-                  <T v="meta" color="secondary">{ROOM_SLUG_HINT}</T>
+                  <T v="meta" color="secondary">
+                    {ROOM_SLUG_HINT}
+                  </T>
                 )}
                 <YStack marginTop="2">
-                <HullDialogActions actions={[{ disabled: renameBusy, label: "Cancel", onPress: () => {
-                      setRenameEditing(false);
-                      setRenameError(null);
-                    }, variant: "quiet" }, { disabled: renameBusy || !validRoomSlug(renameDraft.trim()), label: renameBusy ? 'Renaming…' : 'Save', loading: renameBusy, onPress: () => void handleRenameRoom(), testID: "apply-room-rename", variant: 'primary' }]} />
+                  <HullDialogActions
+                    actions={[
+                      {
+                        disabled: renameBusy,
+                        label: 'Cancel',
+                        onPress: () => {
+                          setRenameEditing(false);
+                          setRenameError(null);
+                        },
+                        variant: 'quiet',
+                      },
+                      {
+                        disabled: renameBusy || !validRoomSlug(renameDraft.trim()),
+                        label: renameBusy ? 'Renaming…' : 'Save',
+                        loading: renameBusy,
+                        onPress: () => void handleRenameRoom(),
+                        testID: 'apply-room-rename',
+                        variant: 'primary',
+                      },
+                    ]}
+                  />
                 </YStack>
               </YStack>
             )}
@@ -488,161 +545,187 @@ export function ChatSurfaceOverlays({
               testID="leave-room-action"
             />
             {(renameError || membershipError) && (
-              <YStack accessibilityRole="alert" marginHorizontal="6" marginTop="2" padding="2" borderWidth={1} borderColor="strongStroke" backgroundColor="highlight">
+              <YStack
+                accessibilityRole="alert"
+                marginHorizontal="6"
+                marginTop="2"
+                padding="2"
+                borderWidth={1}
+                borderColor="strongStroke"
+                backgroundColor="highlight"
+              >
                 <ErrorBanner inline title={renameError ?? membershipError ?? ''} />
               </YStack>
             )}
-        </>}
+          </>
+        )}
       </RoomActionsSheet>
 
-      {dmActionsMounted && <HullActionSheetModal
-        accessibilityLabel="Close conversation actions"
-        onClose={() => setDmActionsVisible(false)}
-        testID="dm-actions-sheet"
-        title={displayRoomName}
-        visible={dmActionsVisible}
-      >
-        <HullActionSheetRow
-          label="Mute notifications"
-          accessibilityLabel="Mute notifications from this conversation"
-          disabled={pushMuteWorking}
-          onPress={() => void togglePushMute()}
-          toggle={{
-            value: pushMuted,
-            disabled: pushMuteWorking,
-            onValueChange: () => void togglePushMute(),
-          }}
-          testID="dm-push-mute"
-        />
-        {!viewerIsAgent && roomSurface?.viewer.permissions.send && (
+      {dmActionsMounted && (
+        <HullActionSheetModal
+          accessibilityLabel="Close conversation actions"
+          onClose={() => setDmActionsVisible(false)}
+          testID="dm-actions-sheet"
+          title={displayRoomName}
+          visible={dmActionsVisible}
+        >
           <HullActionSheetRow
-            accessibilityLabel="View conversation routines"
-            chevron="right"
-            label="Routines"
-            onPress={() => {
-              setDmActionsVisible(false);
-              router.push({
-                pathname: '/beeline/settings/schedules',
-                params: { roomId: decodedId, workspaceId: activeCommunityId },
-              } as unknown as Href);
+            label="Mute notifications"
+            accessibilityLabel="Mute notifications from this conversation"
+            disabled={pushMuteWorking}
+            onPress={() => void togglePushMute()}
+            toggle={{
+              value: pushMuted,
+              disabled: pushMuteWorking,
+              onValueChange: () => void togglePushMute(),
             }}
-            testID="dm-schedules-action"
+            testID="dm-push-mute"
           />
-        )}
-        <HullActionSheetRow
-          accessibilityLabel="Close conversation"
-          disabled={roomLifecycleBusy}
-          label="Close conversation"
-          onPress={() => void handleRoomLifecycle('close')}
-          testID="dm-close-action"
-        />
-        {membershipError && (
-          <YStack accessibilityRole="alert" marginHorizontal="6" marginTop="2" padding="2" borderWidth={1} borderColor="strongStroke" backgroundColor="highlight">
-            <ErrorBanner inline title={membershipError} />
-          </YStack>
-        )}
-        <HullActionSheetCancel
-          onPress={() => setDmActionsVisible(false)}
-          testID="dm-actions-close"
-        />
-      </HullActionSheetModal>}
+          {!viewerIsAgent && roomSurface?.viewer.permissions.send && (
+            <HullActionSheetRow
+              accessibilityLabel="View conversation routines"
+              chevron="right"
+              label="Routines"
+              onPress={() => {
+                setDmActionsVisible(false);
+                router.push({
+                  pathname: '/beeline/settings/schedules',
+                  params: { roomId: decodedId, workspaceId: activeCommunityId },
+                } as unknown as Href);
+              }}
+              testID="dm-schedules-action"
+            />
+          )}
+          <HullActionSheetRow
+            accessibilityLabel="Close conversation"
+            disabled={roomLifecycleBusy}
+            label="Close conversation"
+            onPress={() => void handleRoomLifecycle('close')}
+            testID="dm-close-action"
+          />
+          {membershipError && (
+            <YStack
+              accessibilityRole="alert"
+              marginHorizontal="6"
+              marginTop="2"
+              padding="2"
+              borderWidth={1}
+              borderColor="strongStroke"
+              backgroundColor="highlight"
+            >
+              <ErrorBanner inline title={membershipError} />
+            </YStack>
+          )}
+          <HullActionSheetCancel
+            onPress={() => setDmActionsVisible(false)}
+            testID="dm-actions-close"
+          />
+        </HullActionSheetModal>
+      )}
 
-      {cornerActionsVisible && <CornerActionsSheet
-        title={headerTitle ?? cornerOwnerDisplay?.name ?? CORNER_TITLE}
-        visible={cornerActionsVisible}
-        locked={roomSurface?.cornerLocked === true}
-        canManage={canManageWorkspace}
-        connected={Boolean(transport)}
-        onClose={() => setCornerActionsVisible(false)}
-        closeCorner={async () => {
-          if (!transport) throw new Error('Still connecting. Try again in a moment.');
-          await transport.closeCorner(decodedId);
-        }}
-        setLocked={async (locked) => {
-          if (!transport) throw new Error('Still connecting. Try again in a moment.');
-          await transport.setCornerLocked(decodedId, locked);
-        }}
-        onClosed={() => {
-          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-          handleBack();
-        }}
-        onSaved={() => readRoom()}
-        onError={(error) => {
-          readRoom();
-          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-          Modal.alert('Could not complete request', appErrorCopy(error));
-        }}
-      />}
-
-      {renameMounted && <HullDialog
-        actions={[
-          {
-            disabled: renameBusy,
-            label: 'Cancel',
-            onPress: () => {
-              setRenameEditing(false);
-              setRenameError(null);
-            },
-          },
-          {
-            busy: renameBusy,
-            disabled: renameBusy || !renameDraft.trim(),
-            label: renameBusy ? 'Renaming' : 'Apply',
-            onPress: () => void handleRenameRoom(),
-            testID: 'apply-corner-rename',
-            variant: 'primary',
-          },
-        ]}
-        dismissOnBackdrop={!renameBusy}
-        onRequestClose={() => {
-          if (renameBusy) return;
-          setRenameEditing(false);
-          setRenameError(null);
-        }}
-        testID="rename-corner-dialog"
-        title={`Rename ${CORNER_LABEL}`}
-        visible={isCorner && renameEditing}
-      >
-        <HullDialogInput
-          accessibilityLabel={`New ${CORNER_LABEL} name`}
-          autoCapitalize="none"
-          autoCorrect={false}
-          autoFocus
-          // The native field's own prop; the Tamagui field type does not name it.
-          {...{ editable: !renameBusy }}
-          maxLength={120}
-          onChangeText={(value) => {
-            setRenameDraft(roomNameEntry(value));
-            if (value.trim()) setRenameError(null);
+      {cornerActionsVisible && (
+        <CornerActionsSheet
+          title={headerTitle ?? cornerOwnerDisplay?.name ?? CORNER_TITLE}
+          visible={cornerActionsVisible}
+          locked={roomSurface?.cornerLocked === true}
+          canManage={canManageWorkspace}
+          connected={Boolean(transport)}
+          onClose={() => setCornerActionsVisible(false)}
+          closeCorner={async () => {
+            if (!transport) throw new Error('Still connecting. Try again in a moment.');
+            await transport.closeCorner(decodedId);
           }}
-          onSubmitEditing={() => void handleRenameRoom()}
-          returnKeyType="done"
-          selectTextOnFocus
-          testID="rename-corner-input"
-          value={renameDraft}
+          setLocked={async (locked) => {
+            if (!transport) throw new Error('Still connecting. Try again in a moment.');
+            await transport.setCornerLocked(decodedId, locked);
+          }}
+          onClosed={() => {
+            void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+            handleBack();
+          }}
+          onSaved={() => readRoom()}
+          onError={(error) => {
+            readRoom();
+            void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            Modal.alert('Could not complete request', appErrorCopy(error));
+          }}
         />
-        {renameError ? (
-          <ErrorBanner inline title={renameError} />
-        ) : null}
-      </HullDialog>}
+      )}
+
+      {renameMounted && (
+        <HullDialog
+          actions={[
+            {
+              disabled: renameBusy,
+              label: 'Cancel',
+              onPress: () => {
+                setRenameEditing(false);
+                setRenameError(null);
+              },
+            },
+            {
+              busy: renameBusy,
+              disabled: renameBusy || !renameDraft.trim(),
+              label: renameBusy ? 'Renaming' : 'Apply',
+              onPress: () => void handleRenameRoom(),
+              testID: 'apply-corner-rename',
+              variant: 'primary',
+            },
+          ]}
+          dismissOnBackdrop={!renameBusy}
+          onRequestClose={() => {
+            if (renameBusy) return;
+            setRenameEditing(false);
+            setRenameError(null);
+          }}
+          testID="rename-corner-dialog"
+          title={`Rename ${CORNER_LABEL}`}
+          visible={isCorner && renameEditing}
+        >
+          <HullDialogInput
+            accessibilityLabel={`New ${CORNER_LABEL} name`}
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoFocus
+            // The native field's own prop; the Tamagui field type does not name it.
+            {...{ editable: !renameBusy }}
+            maxLength={120}
+            onChangeText={(value) => {
+              setRenameDraft(roomNameEntry(value));
+              if (value.trim()) setRenameError(null);
+            }}
+            onSubmitEditing={() => void handleRenameRoom()}
+            returnKeyType="done"
+            selectTextOnFocus
+            testID="rename-corner-input"
+            value={renameDraft}
+          />
+          {renameError ? <ErrorBanner inline title={renameError} /> : null}
+        </HullDialog>
+      )}
 
       {memberManagement.pickerVisible ? (
-        <ChatAddSheet roomId={decodedId} sheet={participantPickerKind === 'person' ? 'people' : 'agents'}
-          close={() => setParticipantPickerVisible(false)} />
+        <ChatAddSheet
+          roomId={decodedId}
+          sheet={participantPickerKind === 'person' ? 'people' : 'agents'}
+          close={() => setParticipantPickerVisible(false)}
+        />
       ) : null}
       {agentConnectVisible && activeCommunityId ? (
         <WorkspaceAddAgentSheet workspaceId={activeCommunityId} close={closeAgentConnect} />
       ) : null}
-      {pollMounted && <CreatePollSheet
-        draftContext={decodedId}
-        visible={createPollVisible}
-        busy={createPollBusy}
-        onClose={() => setCreatePollVisible(false)}
-        onCreate={handleCreatePoll}
-      />}
-
-</>; }
-
+      {pollMounted && (
+        <CreatePollSheet
+          draftContext={decodedId}
+          visible={createPollVisible}
+          busy={createPollBusy}
+          onClose={() => setCreatePollVisible(false)}
+          onCreate={handleCreatePoll}
+        />
+      )}
+    </>
+  );
+}
 
 function useOpenedSheet(visible: boolean): boolean {
   const opened = React.useRef(false);

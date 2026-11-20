@@ -35,8 +35,8 @@ DROP INDEX IF EXISTS corner_facts_commissioned_by_idx;
 DROP INDEX IF EXISTS corner_facts_workflow_land_idx;
 ALTER TABLE corner_facts DROP CONSTRAINT IF EXISTS corner_facts_kind_check;
 ALTER TABLE corner_facts DROP CONSTRAINT IF EXISTS corner_facts_lane_check;
--- A locked corner cannot be archived by any writer, scripts included; a person
--- unlocks it first (owner order 2026-11-20).
+-- A locked corner cannot be archived by any writer, scripts included; an
+-- authorized Workspace owner or admin must unlock it before archival.
 CREATE OR REPLACE FUNCTION refuse_locked_corner_archive() RETURNS trigger LANGUAGE plpgsql AS $locked$
 BEGIN
   IF EXISTS (SELECT 1 FROM corner_facts WHERE corner_id=NEW.id AND locked) THEN

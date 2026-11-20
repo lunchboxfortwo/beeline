@@ -6,8 +6,14 @@ import { BuzzRigTransport } from '@/sync/transport';
 import type { RoomViewClient } from '@/sync/transport/room-view-client';
 import { mentionedAgentPubkey, type RoomRosterParticipant } from '@/buzz/room-participants';
 import {
-  availableAgentMentionCommands, availableSlashVerbs, fastModeCommandState, slashVerbQuery,
-  agentMentionSlashQuery, FAST_MODE_COMMAND, insertAgentSlashCommand, type FastModeCommandState,
+  availableAgentMentionCommands,
+  availableSlashVerbs,
+  fastModeCommandState,
+  slashVerbQuery,
+  agentMentionSlashQuery,
+  FAST_MODE_COMMAND,
+  insertAgentSlashCommand,
+  type FastModeCommandState,
 } from '@/buzz/slash-verbs';
 import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { COMPOSER_MIN_HEIGHT } from './chat-surface-values';
@@ -39,10 +45,28 @@ type Props = {
 };
 
 export function useChatComposerCommandController({
-  roomParticipants, inputText, decodedId, viewerPubkey, roomClient, activeCommunityId,
-  transport, setSessionTransport, inputTextRef, setInputText, setInputSelection, setComposerHeight,
-  isCorner, isDirectMessage, viewerIsAgent, roomSurface, canManageWorkspace, pendingCornerRequest,
-  pendingTargetBranchProposal, targetBranchActionId, composerFocused, dismissedSlashText,
+  roomParticipants,
+  inputText,
+  decodedId,
+  viewerPubkey,
+  roomClient,
+  activeCommunityId,
+  transport,
+  setSessionTransport,
+  inputTextRef,
+  setInputText,
+  setInputSelection,
+  setComposerHeight,
+  isCorner,
+  isDirectMessage,
+  viewerIsAgent,
+  roomSurface,
+  canManageWorkspace,
+  pendingCornerRequest,
+  pendingTargetBranchProposal,
+  targetBranchActionId,
+  composerFocused,
+  dismissedSlashText,
   setHighlightedSlashVerbIndex,
 }: Props) {
   /** Per-Room+agent command lists (undefined = unresolved, empty = advertises none). */
@@ -64,7 +88,12 @@ export function useChatComposerCommandController({
 
   const mentionSlashAgentPubkey = useMemo(() => {
     if (!mentionSlash) return null;
-    return mentionedAgentPubkey(`@${mentionSlash.mention}`, roomParticipants.filter((member) => member.kind === 'agent')) ?? null;
+    return (
+      mentionedAgentPubkey(
+        `@${mentionSlash.mention}`,
+        roomParticipants.filter((member) => member.kind === 'agent'),
+      ) ?? null
+    );
   }, [mentionSlash, roomParticipants]);
 
   const mentionAgentCommandScope = mentionSlashAgentPubkey
@@ -238,7 +267,10 @@ export function useChatComposerCommandController({
           ),
           canOpenCorner: Boolean(!isCorner && !viewerIsAgent && pendingCornerRequest),
           canRename: Boolean(!isCorner && !isDirectMessage && !viewerIsAgent && canManageWorkspace),
-          canCloseCorner: isCorner && !viewerIsAgent && (roomSurface?.cornerLocked !== true || canManageWorkspace),
+          canCloseCorner:
+            isCorner &&
+            !viewerIsAgent &&
+            (roomSurface?.cornerLocked !== true || canManageWorkspace),
           canChangeTargetBranch: Boolean(
             !isCorner &&
             !viewerIsAgent &&
@@ -281,13 +313,30 @@ export function useChatComposerCommandController({
     setHighlightedSlashVerbIndex(0);
   }, [currentSlashQuery, mentionSlash?.query, paletteItemCount]);
 
-  return useMemo(() => ({
-    currentSlashQuery, mentionSlash, mentionSlashAgentPubkey, mentionAgentCommands,
-    mentionAgentLacksCommands, slashVerbs, slashMenuVisible, paletteItemCount, selectAgentCommand,
-  }), [
-    currentSlashQuery, mentionSlash, mentionSlashAgentPubkey, mentionAgentCommands,
-    mentionAgentLacksCommands, slashVerbs, slashMenuVisible, paletteItemCount, selectAgentCommand,
-  ]);
+  return useMemo(
+    () => ({
+      currentSlashQuery,
+      mentionSlash,
+      mentionSlashAgentPubkey,
+      mentionAgentCommands,
+      mentionAgentLacksCommands,
+      slashVerbs,
+      slashMenuVisible,
+      paletteItemCount,
+      selectAgentCommand,
+    }),
+    [
+      currentSlashQuery,
+      mentionSlash,
+      mentionSlashAgentPubkey,
+      mentionAgentCommands,
+      mentionAgentLacksCommands,
+      slashVerbs,
+      slashMenuVisible,
+      paletteItemCount,
+      selectAgentCommand,
+    ],
+  );
 }
 
 export type ChatComposerCommandController = ReturnType<typeof useChatComposerCommandController>;

@@ -7,87 +7,96 @@ import { isFaceId, isPushLevel } from '@beeline/api-contract/phone';
 import { lockCornerLifecycle, clearCornerReviewers } from '../corner-lifecycle.js';
 import { transferWorkspaceOwnership, writeSurfacePushState } from '../membership-join.js';
 import { ARTIFACT_TTL_HOURS, mediaTtlHours } from '../media-ttl.js';
-import { closeCornerState, lockCornerArchivalAuthority, markOwnedCornersAbandoned } from '../corner-close.js';
-import { DELETED_ACCOUNT_IDENTITY_ID, DELETED_ACCOUNT_NAME, SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
+import {
+  closeCornerState,
+  lockCornerArchivalAuthority,
+  markOwnedCornersAbandoned,
+} from '../corner-close.js';
+import {
+  DELETED_ACCOUNT_IDENTITY_ID,
+  DELETED_ACCOUNT_NAME,
+  SYSTEM_IDENTITY_ID,
+} from '@beeline/api-contract/system-identity';
 import type { PhoneContext } from './context.js';
 import { phoneRequireIdentity } from './access.js';
 import { Input } from './types.js';
 import { phoneManagedIdentity } from './repositories.js';
 
-
-  /**
-   * Deletes the signed-in person's account and personal data — a real
-   * `DELETE FROM identities`, not a flag — in one transaction:
-   *
-   *   - every agent the account owns is removed outright (its identity row
-   *     goes too); its daemon tokens, schedules and grants die with it, and
-   *     the corners it owned lose their owner and archive as
-   *     `done`/`abandoned` (account deletion is a full erasure, so those
-   *     corners cannot wait for a helper);
-   *   - Workspace/Room ownership the account held alone passes to the
-   *     longest-serving remaining human (admin first), so shared surfaces
-   *     stay manageable;
-   *   - messages the account or its agents authored in Rooms, corners and
-   *     DMs that others still read remain as the conversation record (the
-   *     privacy page's "Room content may remain available" rule) but are
-   *     re-attributed to the hidden DELETED_ACCOUNT_IDENTITY_ID author and
-   *     stripped of their mentions of the deleted ids;
-   *   - DM Rooms whose only other participants were the account's own agents
-   *     are deleted outright — nobody else relies on them;
-   *   - every Composio connected account the person owns is revoked at the
-   *     provider first; a revocation failure aborts before anything is erased;
-   *   - every free agent's Machine is deleted next, for the same reason;
-   *   - sign-in identity links (`beeline_identity_links`) for the person's
-   *     subjects and keys are deleted;
-   *   - sessions, access/refresh/daemon tokens, push devices, media bytes,
-   *     GitHub tokens/links/installations, invites, pairing codes, grants,
-   *     read marks and succession rows all go with the identity row's
-   *     cascades.
-   *
-   * Idempotent: once the identity row is gone the operation resolves without
-   * effect, so a retried or doubled call never errors. A fresh GitHub sign-in
-   * with the same subject afterwards creates a NEW account.
-   */
-  export async function phoneDeleteAccount(ctx: PhoneContext, viewerId: string) {
-    if (viewerId === SYSTEM_IDENTITY_ID) throw new Error('only a person may delete their account');
-    // Idempotency floor: an already-deleted account reads as an empty graph.
-    const held = await ctx.database.query(`SELECT 1 FROM identities WHERE id=$1`, [viewerId]);
-    if (!held.rowCount) return;
-    const account = await phoneRequireIdentity(ctx, viewerId);
-    if (account.kind !== 'human') throw new Error('only a person may delete their account');
-    // Provider tokens live at Composio, not here: revoke every connected
-    // account the person owns before erasing anything, so a failed revocation
-    // leaves the account whole and a retry finishes the job. Composio's
-    // deleteAccount already treats an account that is gone as revoked.
-    const providerAccounts = await ctx.database.query<{ composio_account_id: string }>(
-      `SELECT DISTINCT composio_account_id FROM workspace_apps
+/**
+ * Deletes the signed-in person's account and personal data — a real
+ * `DELETE FROM identities`, not a flag — in one transaction:
+ *
+ *   - every agent the account owns is removed outright (its identity row
+ *     goes too); its daemon tokens, schedules and grants die with it, and
+ *     the corners it owned lose their owner and archive as
+ *     `done`/`abandoned` (account deletion is a full erasure, so those
+ *     corners cannot wait for a helper);
+ *   - Workspace/Room ownership the account held alone passes to the
+ *     longest-serving remaining human (admin first), so shared surfaces
+ *     stay manageable;
+ *   - messages the account or its agents authored in Rooms, corners and
+ *     DMs that others still read remain as the conversation record (the
+ *     privacy page's "Room content may remain available" rule) but are
+ *     re-attributed to the hidden DELETED_ACCOUNT_IDENTITY_ID author and
+ *     stripped of their mentions of the deleted ids;
+ *   - DM Rooms whose only other participants were the account's own agents
+ *     are deleted outright — nobody else relies on them;
+ *   - every Composio connected account the person owns is revoked at the
+ *     provider first; a revocation failure aborts before anything is erased;
+ *   - every free agent's Machine is deleted next, for the same reason;
+ *   - sign-in identity links (`beeline_identity_links`) for the person's
+ *     subjects and keys are deleted;
+ *   - sessions, access/refresh/daemon tokens, push devices, media bytes,
+ *     GitHub tokens/links/installations, invites, pairing codes, grants,
+ *     read marks and succession rows all go with the identity row's
+ *     cascades.
+ *
+ * Idempotent: once the identity row is gone the operation resolves without
+ * effect, so a retried or doubled call never errors. A fresh GitHub sign-in
+ * with the same subject afterwards creates a NEW account.
+ */
+export async function phoneDeleteAccount(ctx: PhoneContext, viewerId: string) {
+  if (viewerId === SYSTEM_IDENTITY_ID) throw new Error('only a person may delete their account');
+  // Idempotency floor: an already-deleted account reads as an empty graph.
+  const held = await ctx.database.query(`SELECT 1 FROM identities WHERE id=$1`, [viewerId]);
+  if (!held.rowCount) return;
+  const account = await phoneRequireIdentity(ctx, viewerId);
+  if (account.kind !== 'human') throw new Error('only a person may delete their account');
+  // Provider tokens live at Composio, not here: revoke every connected
+  // account the person owns before erasing anything, so a failed revocation
+  // leaves the account whole and a retry finishes the job. Composio's
+  // deleteAccount already treats an account that is gone as revoked.
+  const providerAccounts = await ctx.database.query<{ composio_account_id: string }>(
+    `SELECT DISTINCT composio_account_id FROM workspace_apps
        WHERE owner_identity_id=$1 AND composio_account_id IS NOT NULL`,
-      [viewerId],
-    );
-    if (providerAccounts.rowCount && !ctx.composio)
-      throw new Error('App connections cannot be revoked now; try again later');
-    for (const row of providerAccounts.rows)
-      await ctx.composio!.deleteAccount(row.composio_account_id);
-    // Free agents run on their own Machines. The identity delete cascades the
-    // free_agents row the leader's removal sweep would need, so retire each
-    // agent and delete its Machine first; anything left aborts for a retry.
-    const freeAgentIds = (
-      await ctx.database.query<{ agent_id: string }>(
-        `UPDATE free_agents SET removed_at=coalesce(removed_at,now()),updated_at=now()
+    [viewerId],
+  );
+  if (providerAccounts.rowCount && !ctx.composio)
+    throw new Error('App connections cannot be revoked now; try again later');
+  for (const row of providerAccounts.rows)
+    await ctx.composio!.deleteAccount(row.composio_account_id);
+  // Free agents run on their own Machines. The identity delete cascades the
+  // free_agents row the leader's removal sweep would need, so retire each
+  // agent and delete its Machine first; anything left aborts for a retry.
+  const freeAgentIds = (
+    await ctx.database.query<{ agent_id: string }>(
+      `UPDATE free_agents SET removed_at=coalesce(removed_at,now()),updated_at=now()
          WHERE owner_id=$1 OR agent_id IN (SELECT agent_id FROM agents WHERE owner_id=$1)
          RETURNING agent_id`,
-        [viewerId],
-      )
-    ).rows.map((row) => row.agent_id);
-    if (ctx.freeAgents)
-      for (const agentId of freeAgentIds) await ctx.freeAgents.cleanupRemoved(agentId);
-    const machinesLeft = await ctx.database.query(
-      `SELECT 1 FROM free_agents WHERE agent_id=ANY($1) AND removal_cleaned_at IS NULL
+      [viewerId],
+    )
+  ).rows.map((row) => row.agent_id);
+  if (ctx.freeAgents)
+    for (const agentId of freeAgentIds) await ctx.freeAgents.cleanupRemoved(agentId);
+  const machinesLeft = await ctx.database.query(
+    `SELECT 1 FROM free_agents WHERE agent_id=ANY($1) AND removal_cleaned_at IS NULL
          AND (fly_machine_id IS NOT NULL OR $2::boolean)`,
-      [freeAgentIds, Boolean(ctx.freeAgents)],
-    );
-    if (machinesLeft.rowCount) throw new Error('Agent machines are still stopping; try again shortly');
-    const erase = () => ctx.database.transaction(async (database) => {
+    [freeAgentIds, Boolean(ctx.freeAgents)],
+  );
+  if (machinesLeft.rowCount)
+    throw new Error('Agent machines are still stopping; try again shortly');
+  const erase = () =>
+    ctx.database.transaction(async (database) => {
       const owned = await database.query<{ agent_id: string }>(
         `SELECT agent_id FROM agents WHERE owner_id=$1
          UNION SELECT agent_id FROM free_agents WHERE owner_id=$1`,
@@ -95,39 +104,57 @@ import { phoneManagedIdentity } from './repositories.js';
       );
       // Everything erased by this deletion: the person and each agent it owned.
       const gone = [viewerId, ...owned.rows.map((row) => row.agent_id)];
-      const plannedCorners = await database.query<{id:string}>(
+      const plannedCorners = await database.query<{ id: string }>(
         `SELECT c.id FROM rooms c WHERE c.parent_id IS NOT NULL AND c.archived_at IS NULL
-           AND ${cornerOwnerSql('c.id')}=ANY($1) ORDER BY c.id`, [gone]);
+           AND ${cornerOwnerSql('c.id')}=ANY($1) ORDER BY c.id`,
+        [gone],
+      );
       for (const corner of plannedCorners.rows) await lockCornerLifecycle(database, corner.id);
       await lockCornerArchivalAuthority(database);
       // Discovery takes no row locks. A newly acquired agent/corner changes
       // the deletion scope and requires a new explicit attempt, rather than
       // taking another lifecycle lock while holding authority in reverse order.
-      const currentOwned = await database.query<{agent_id:string}>(
+      const currentOwned = await database.query<{ agent_id: string }>(
         `SELECT agent_id FROM agents WHERE owner_id=$1
-         UNION SELECT agent_id FROM free_agents WHERE owner_id=$1`, [viewerId]);
-      const plannedAgents = new Set(owned.rows.map(row => row.agent_id));
-      if (currentOwned.rows.length !== plannedAgents.size || currentOwned.rows.some(row => !plannedAgents.has(row.agent_id)))
+         UNION SELECT agent_id FROM free_agents WHERE owner_id=$1`,
+        [viewerId],
+      );
+      const plannedAgents = new Set(owned.rows.map((row) => row.agent_id));
+      if (
+        currentOwned.rows.length !== plannedAgents.size ||
+        currentOwned.rows.some((row) => !plannedAgents.has(row.agent_id))
+      )
         throw new Error('Account changed while deletion was being prepared; try again');
       const closingCorners = await database.query<{ id: string; locked: boolean }>(
         `SELECT c.id,f.locked FROM rooms c JOIN corner_facts f ON f.corner_id=c.id WHERE c.parent_id IS NOT NULL AND c.archived_at IS NULL
-           AND ${cornerOwnerSql('c.id')}=ANY($1) ORDER BY c.id FOR KEY SHARE OF c`, [gone]);
-      const plannedIds = new Set(plannedCorners.rows.map(row => row.id));
-      if (closingCorners.rows.some(row => !plannedIds.has(row.id)))
+           AND ${cornerOwnerSql('c.id')}=ANY($1) ORDER BY c.id FOR KEY SHARE OF c`,
+        [gone],
+      );
+      const plannedIds = new Set(plannedCorners.rows.map((row) => row.id));
+      if (closingCorners.rows.some((row) => !plannedIds.has(row.id)))
         throw new Error('Account changed while deletion was being prepared; try again');
       // Lock shared Room and identity rows in key order before erasure. In
       // particular, do not update every DM in the database for one deletion.
-      await database.query(`SELECT id FROM rooms
+      await database.query(
+        `SELECT id FROM rooms
         WHERE created_by=ANY($1) OR direct_participants ?| $1::text[]
-        ORDER BY id FOR UPDATE`, [gone]);
-      const directRooms = (await database.query<{ id: string }>(
-        `SELECT id FROM rooms WHERE direct_participants ?| $1::text[]`, [gone],
-      )).rows.map(row => row.id);
-      await database.query(`SELECT id FROM identities WHERE id=ANY($1) ORDER BY id FOR UPDATE`, [gone]);
-      if (!(await database.query(`SELECT 1 FROM identities WHERE id=$1`, [viewerId])).rowCount) return;
+        ORDER BY id FOR UPDATE`,
+        [gone],
+      );
+      const directRooms = (
+        await database.query<{ id: string }>(
+          `SELECT id FROM rooms WHERE direct_participants ?| $1::text[]`,
+          [gone],
+        )
+      ).rows.map((row) => row.id);
+      await database.query(`SELECT id FROM identities WHERE id=ANY($1) ORDER BY id FOR UPDATE`, [
+        gone,
+      ]);
+      if (!(await database.query(`SELECT 1 FROM identities WHERE id=$1`, [viewerId])).rowCount)
+        return;
 
       // The agents are removed, not re-owned: tokens, schedules and grants die
-      // with them, and their corners archive as removeAgent archives them.
+      // with them. Corner cleanup below preserves locked shared threads.
       await database.query(`UPDATE daemon_tokens SET revoked_at=now() WHERE agent_id=ANY($1)`, [
         gone,
       ]);
@@ -169,10 +196,10 @@ import { phoneManagedIdentity } from './repositories.js';
       ]);
       // Workspace deletion audits outlive both the workspace and its actor.
       // Preserve the event while anonymising attribution like shared messages.
-      await database.query(`UPDATE workspace_deletions SET deleted_by=$2 WHERE deleted_by=ANY($1)`, [
-        gone,
-        DELETED_ACCOUNT_IDENTITY_ID,
-      ]);
+      await database.query(
+        `UPDATE workspace_deletions SET deleted_by=$2 WHERE deleted_by=ANY($1)`,
+        [gone, DELETED_ACCOUNT_IDENTITY_ID],
+      );
       // Active merge holds stay active under the tombstone holder. A corner
       // keeps one active hold per holder, so when several holds on one corner
       // now share the tombstone, only the hardest to release stays. Any member
@@ -194,7 +221,14 @@ import { phoneManagedIdentity } from './repositories.js';
         ['corner_merge_holds', 'released_by'],
         ['corner_merge_holds', 'set_by_agent_id'],
       ])
-        if ((await database.query<{ present: boolean }>(`SELECT to_regclass($1) IS NOT NULL present`, [table])).rows[0]!.present)
+        if (
+          (
+            await database.query<{ present: boolean }>(
+              `SELECT to_regclass($1) IS NOT NULL present`,
+              [table],
+            )
+          ).rows[0]!.present
+        )
           await database.query(`UPDATE ${table} SET ${column}=$2 WHERE ${column}=ANY($1)`, [
             gone,
             DELETED_ACCOUNT_IDENTITY_ID,
@@ -236,7 +270,10 @@ import { phoneManagedIdentity } from './repositories.js';
         `UPDATE agent_commands SET agent_id=$2 WHERE agent_id=ANY($1) AND reason='corner_objective'`,
         [gone, DELETED_ACCOUNT_IDENTITY_ID],
       );
-      await database.query(`DELETE FROM agent_commands WHERE agent_id=ANY($1) AND reason<>'corner_objective'`, [gone]);
+      await database.query(
+        `DELETE FROM agent_commands WHERE agent_id=ANY($1) AND reason<>'corner_objective'`,
+        [gone],
+      );
       await database.query(`DELETE FROM agent_turn_traces WHERE agent_id=ANY($1)`, [gone]);
       await database.query(`DELETE FROM agent_turns WHERE agent_id=ANY($1)`, [gone]);
       await database.query(`DELETE FROM agent_turn_traces WHERE agent_id=ANY($1)`, [gone]);
@@ -283,9 +320,18 @@ import { phoneManagedIdentity } from './repositories.js';
 
       // Rooms and GitHub connections the account created: the artifacts stay,
       // the attribution goes.
-      await database.query(`UPDATE work_items SET opened_by=$2 WHERE opened_by=ANY($1)`,[gone,DELETED_ACCOUNT_IDENTITY_ID]);
-      await database.query(`UPDATE work_item_entries SET author_id=$2 WHERE author_id=ANY($1)`,[gone,DELETED_ACCOUNT_IDENTITY_ID]);
-      await database.query(`UPDATE work_item_attachments SET added_by=$2 WHERE added_by=ANY($1)`,[gone,DELETED_ACCOUNT_IDENTITY_ID]);
+      await database.query(`UPDATE work_items SET opened_by=$2 WHERE opened_by=ANY($1)`, [
+        gone,
+        DELETED_ACCOUNT_IDENTITY_ID,
+      ]);
+      await database.query(`UPDATE work_item_entries SET author_id=$2 WHERE author_id=ANY($1)`, [
+        gone,
+        DELETED_ACCOUNT_IDENTITY_ID,
+      ]);
+      await database.query(`UPDATE work_item_attachments SET added_by=$2 WHERE added_by=ANY($1)`, [
+        gone,
+        DELETED_ACCOUNT_IDENTITY_ID,
+      ]);
       await database.query(`UPDATE rooms SET created_by=NULL WHERE created_by=ANY($1)`, [gone]);
       await database.query(`DELETE FROM github_installations WHERE owner_id=ANY($1)`, [gone]);
       await database.query(
@@ -318,43 +364,45 @@ import { phoneManagedIdentity } from './repositories.js';
       await database.query(`DELETE FROM identities WHERE id=ANY($1) AND kind='agent'`, [gone]);
       await database.query(`DELETE FROM identities WHERE id=$1`, [viewerId]);
     });
-    try {
-      await erase();
-    } catch (error) {
-      // PostgreSQL aborts the complete transaction on deadlock. Only that
-      // known rollback is safe to retry; provider cleanup stays outside it.
-      if (!error || typeof error !== 'object' || !('code' in error) || error.code !== '40P01') throw error;
-      await erase();
-    }
+  try {
+    await erase();
+  } catch (error) {
+    // PostgreSQL aborts the complete transaction on deadlock. Only that
+    // known rollback is safe to retry; provider cleanup stays outside it.
+    if (!error || typeof error !== 'object' || !('code' in error) || error.code !== '40P01')
+      throw error;
+    await erase();
   }
+}
 
-  export async function phoneUpdateProfile(ctx: PhoneContext, input: Input<'updatePersonProfile'>, viewerId: string) {
-    if (input.name !== undefined && (!input.name.trim() || input.name.trim().length > 60))
-      throw new Error('invalid person name');
-    if (
-      input.handle !== undefined &&
-      !/^[a-z0-9](?:[a-z0-9._-]{0,28}[a-z0-9])?$/.test(input.handle)
-    )
-      throw new Error('invalid person handle');
-    return ctx.database.transaction(async (database) => {
-      if (input.handle !== undefined) {
-        if (['channel', 'system', 'play-review', 'review', 'scheduler'].includes(input.handle))
-          throw new Error('invalid reserved handle');
-      }
-      const avatar =
-        input.avatar === undefined
-          ? null
-          : await storePersonAvatar(
-              database,
-              viewerId,
-              input.avatar,
-              ctx.publicOrigin,
-              ctx.objects
-                ? (id, ownerId) => ctx.objects!.readOwnedBytes(ownerId, id, database)
-                : undefined,
-            );
-      const updated = await database.query<IdentityRow>(
-        `WITH target AS MATERIALIZED (SELECT id FROM identities WHERE id=$1 FOR UPDATE),
+export async function phoneUpdateProfile(
+  ctx: PhoneContext,
+  input: Input<'updatePersonProfile'>,
+  viewerId: string,
+) {
+  if (input.name !== undefined && (!input.name.trim() || input.name.trim().length > 60))
+    throw new Error('invalid person name');
+  if (input.handle !== undefined && !/^[a-z0-9](?:[a-z0-9._-]{0,28}[a-z0-9])?$/.test(input.handle))
+    throw new Error('invalid person handle');
+  return ctx.database.transaction(async (database) => {
+    if (input.handle !== undefined) {
+      if (['channel', 'system', 'play-review', 'review', 'scheduler'].includes(input.handle))
+        throw new Error('invalid reserved handle');
+    }
+    const avatar =
+      input.avatar === undefined
+        ? null
+        : await storePersonAvatar(
+            database,
+            viewerId,
+            input.avatar,
+            ctx.publicOrigin,
+            ctx.objects
+              ? (id, ownerId) => ctx.objects!.readOwnedBytes(ownerId, id, database)
+              : undefined,
+          );
+    const updated = await database.query<IdentityRow>(
+      `WITH target AS MATERIALIZED (SELECT id FROM identities WHERE id=$1 FOR UPDATE),
          claimed AS MATERIALIZED (
            SELECT CASE WHEN $3::text IS NULL THEN NULL ELSE beeline_identity_handle($1,$3,true) END handle FROM target
          ) UPDATE identities
@@ -364,69 +412,87 @@ import { phoneManagedIdentity } from './repositories.js';
              updated_at=now()
          FROM claimed WHERE id=$1 AND ($3::text IS NULL OR claimed.handle=$3)
          RETURNING id,kind,name,identities.handle,avatar`,
-        [viewerId, input.name ?? null, input.handle ?? null, avatar],
-      );
-      const profile = updated.rows[0];
-      if (!profile) throw new Error(input.handle===undefined?'identity not found':'managed handle is already claimed');
-      return {
-        personId: profile.id,
-        name: profile.name,
-        ...(profile.handle ? { handle: profile.handle } : {}),
-        ...(profile.avatar
-          ? {
-              avatar: profile.avatar.startsWith('/v1/person-avatars/')
-                ? assetUrl(profile.avatar, ctx.publicOrigin)
-                : profile.avatar,
-            }
-          : {}),
-      };
-    });
-  }
-
-  /** The face ceremony: one of `FACE_IDS` for the viewer's own identity, or null to clear. */
-  export async function phoneUpdateFace(ctx: PhoneContext, input: Input<'updateIdentityFace'>, viewerId: string) {
-    if (input.faceId !== null && !isFaceId(input.faceId)) throw new Error('invalid face id');
-    const updated = await ctx.database.query(
-      `UPDATE identities SET face_id=$2,updated_at=now() WHERE id=$1`,
-      [viewerId, input.faceId],
+      [viewerId, input.name ?? null, input.handle ?? null, avatar],
     );
-    if (!updated.rowCount) throw new Error('identity not found');
-  }
+    const profile = updated.rows[0];
+    if (!profile)
+      throw new Error(
+        input.handle === undefined ? 'identity not found' : 'managed handle is already claimed',
+      );
+    return {
+      personId: profile.id,
+      name: profile.name,
+      ...(profile.handle ? { handle: profile.handle } : {}),
+      ...(profile.avatar
+        ? {
+            avatar: profile.avatar.startsWith('/v1/person-avatars/')
+              ? assetUrl(profile.avatar, ctx.publicOrigin)
+              : profile.avatar,
+          }
+        : {}),
+    };
+  });
+}
 
-  export async function phoneUpdateRoomPushState(ctx: PhoneContext, input: Input<'updateRoomPushState'>, viewerId: string) {
-    if (
-      (input.muted !== undefined && typeof input.muted !== 'boolean') ||
-      (input.viewing !== undefined && typeof input.viewing !== 'boolean') ||
-      (input.viewing !== undefined &&
-        (typeof input.sessionId !== 'string' || !input.sessionId || input.sessionId.length > 100))
-    )
-      throw new Error('invalid push state');
-    return ctx.database.transaction(async (database) => {
-      const updated = await writeSurfacePushState<{ push_muted: boolean }>(database, [input.roomId, viewerId, input.muted ?? null]);
-      if (!updated.rows[0]) throw new Error('room not found');
-      if (input.viewing === true)
-        await database.query(
-          `INSERT INTO room_push_views(room_id,identity_id,session_id,expires_at)
+/** The face ceremony: one of `FACE_IDS` for the viewer's own identity, or null to clear. */
+export async function phoneUpdateFace(
+  ctx: PhoneContext,
+  input: Input<'updateIdentityFace'>,
+  viewerId: string,
+) {
+  if (input.faceId !== null && !isFaceId(input.faceId)) throw new Error('invalid face id');
+  const updated = await ctx.database.query(
+    `UPDATE identities SET face_id=$2,updated_at=now() WHERE id=$1`,
+    [viewerId, input.faceId],
+  );
+  if (!updated.rowCount) throw new Error('identity not found');
+}
+
+export async function phoneUpdateRoomPushState(
+  ctx: PhoneContext,
+  input: Input<'updateRoomPushState'>,
+  viewerId: string,
+) {
+  if (
+    (input.muted !== undefined && typeof input.muted !== 'boolean') ||
+    (input.viewing !== undefined && typeof input.viewing !== 'boolean') ||
+    (input.viewing !== undefined &&
+      (typeof input.sessionId !== 'string' || !input.sessionId || input.sessionId.length > 100))
+  )
+    throw new Error('invalid push state');
+  return ctx.database.transaction(async (database) => {
+    const updated = await writeSurfacePushState<{ push_muted: boolean }>(database, [
+      input.roomId,
+      viewerId,
+      input.muted ?? null,
+    ]);
+    if (!updated.rows[0]) throw new Error('room not found');
+    if (input.viewing === true)
+      await database.query(
+        `INSERT INTO room_push_views(room_id,identity_id,session_id,expires_at)
          VALUES($1,$2,$3,now()+interval '45 seconds')
          ON CONFLICT(room_id,identity_id,session_id) DO UPDATE SET expires_at=EXCLUDED.expires_at`,
-          [input.roomId, viewerId, input.sessionId],
-        );
-      if (input.viewing === false)
-        await database.query(
-          `DELETE FROM room_push_views WHERE room_id=$1 AND identity_id=$2 AND session_id=$3`,
-          [input.roomId, viewerId, input.sessionId],
-        );
-      return { muted: updated.rows[0].push_muted };
-    });
-  }
+        [input.roomId, viewerId, input.sessionId],
+      );
+    if (input.viewing === false)
+      await database.query(
+        `DELETE FROM room_push_views WHERE room_id=$1 AND identity_id=$2 AND session_id=$3`,
+        [input.roomId, viewerId, input.sessionId],
+      );
+    return { muted: updated.rows[0].push_muted };
+  });
+}
 
-
-  export async function phoneUpdatePushLevel(ctx: PhoneContext, input: Input<'updateIdentityPushLevel'>, viewerId: string) {
-    if (!isPushLevel(input.pushLevel)) throw new Error('invalid push level');
-    const updated = await ctx.database.query(
-      `UPDATE identities SET push_level=$2,updated_at=now() WHERE id=$1 AND kind='human'`,
-      [viewerId, input.pushLevel],
-    );
-    if (!updated.rowCount) throw new Error('identity not found');
-    return phoneManagedIdentity(ctx, viewerId);
-  }
+export async function phoneUpdatePushLevel(
+  ctx: PhoneContext,
+  input: Input<'updateIdentityPushLevel'>,
+  viewerId: string,
+) {
+  if (!isPushLevel(input.pushLevel)) throw new Error('invalid push level');
+  const updated = await ctx.database.query(
+    `UPDATE identities SET push_level=$2,updated_at=now() WHERE id=$1 AND kind='human'`,
+    [viewerId, input.pushLevel],
+  );
+  if (!updated.rowCount) throw new Error('identity not found');
+  return phoneManagedIdentity(ctx, viewerId);
+}
