@@ -9,7 +9,7 @@ import { messageId } from './values.js';
 
 
 
-  /** The viewer's Needs-you cells (`needs-you.ts` owns the rule). Reading changes nothing. */
+  /** The viewer's Needs-you cells; `needs-you.ts` also persists legacy retirement. */
   export async function phoneReadNeedsYou(ctx: PhoneContext,
     input: Input<'readNeedsYou'>,
     viewerId: string,

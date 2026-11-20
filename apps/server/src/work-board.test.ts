@@ -636,7 +636,7 @@ describe('question retirement', () => {
   });
 
   it('hides reminders after Room access is revoked, including changed private details', async () => {
-    await db.query("UPDATE rooms SET visibility='private' WHERE id=$1", [chat]);
+    await db.query("UPDATE rooms SET visibility='invite-only' WHERE id=$1", [chat]);
     const { messageId } = await askOwnerQuestion(db, {
       about: { kind: 'thread', roomId: thread }, question: 'Which surface?', freeText: true,
     }, agent);

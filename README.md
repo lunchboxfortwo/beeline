@@ -35,7 +35,7 @@ In a DM, open **… → Close conversation**; on phone, you can also swipe the c
 
 Workspace admins and owners can remove someone from a top-level chat's **Members** list and use **Invite to chat** on a person's profile. On desktop, a message's **More** button opens actions including **Copy link**, **Select** and, when permitted, **Delete**. Eligible messages also offer **New thread**.
 
-In **Needs you**, an agent’s decision card shows its question, a brief when supplied, and option buttons. Tap through to read the full message.
+In **Tasks → Needs you**, an agent’s decision card shows its question, a brief when supplied, and option buttons. Tap through to read the full message. Answer a request by quote-replying to its message or choosing one of its options. A request also clears when its source thread closes, the same agent sends you a newer report from that thread, the agent closes the ask, or you clear it yourself. Separate asks in a chat or DM stay independent. Opening Tasks does not clear requests, and requests have no expiry timer. Approval cards retain their own decision and expiry rules.
 
 ## More
 
