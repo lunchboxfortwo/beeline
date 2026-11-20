@@ -82,6 +82,11 @@ function validateToolArguments(definition: Tool, args: Args): void {
   if (extra.length) throw new McpToolError(`${definition.name}: unknown fields: ${extra.join(', ')}`);
   const missing = (definition.inputSchema.required ?? []).filter(key => args[key] === undefined);
   if (missing.length) throw new McpToolError(`${definition.name}: required: ${missing.join(', ')}`);
+  if (definition.name === 'message') {
+    const to = object(args.to);
+    if (typeof to.agent !== 'string' || typeof to.place !== 'string')
+      throw new McpToolError('to must be {agent, place}: agent name and the chat, thread or DM id');
+  }
 }
 
 /** First-party app_tool operations, keyed like the agent's app_tool routes. */
