@@ -642,16 +642,16 @@ async function postMessage(db: SqlDatabase, input: PublicPost, chat: Chat): Prom
       if (item) commands.push(item);
       return item;
     });
-  const targets = input.presentation === 'card' || stops.length || lifecycle ? [] : input.agentIds ? chat.members.filter(member => input.agentIds!.includes(member.id)) : [...new Map([
+  const targets = (input.presentation === 'card' || stops.length || lifecycle ? [] : input.agentIds ? chat.members.filter(member => input.agentIds!.includes(member.id)) : [...new Map([
     // Only a person's tag wakes an agent; an agent reaches another agent through message().
     ...(human ? explicit : []),
     ...(human && !hasSystemReportMention(input.text) && chat.direct_participants ? agents.filter(member=>chat.direct_participants!.includes(member.id)) : []),
     ...(human && !explicit.length && solo ? [solo] : []),
-  ].filter(member => member.kind === 'agent' && member.id !== input.authorId && member.id !== SYSTEM_IDENTITY_ID).map(member => [member.id, member])).values()];
+  ].filter(member => member.kind === 'agent' && member.id !== input.authorId && member.id !== SYSTEM_IDENTITY_ID).map(member => [member.id, member])).values()]).filter(member => !human || member.access_policy == null ||
+    senderMayAddressAgent(parseAgentAccessPolicy(member.access_policy), input.authorId, member.owner_id ?? undefined));
   const avatarJob = human && /^(?:@[^\s]+\s+)?\/draw-avatar(?:\s|$)/i.test(input.text.trim());
   // The owner's creator/allowlist setting decides which people address a hosted agent; others are not its targets.
-  for (const member of (human ? await noteOfflineConnectors(db, targets) : targets).filter(member => !human || member.access_policy == null ||
-    senderMayAddressAgent(parseAgentAccessPolicy(member.access_policy), input.authorId, member.owner_id ?? undefined))) {
+  for (const member of human ? await noteOfflineConnectors(db, targets) : targets) {
     const item = await insertAgentCommand(db, { roomId: chat.id, agentId: member.id, sourceMessageId: id,
       reason: human ? chat.direct_participants ? 'direct_message' : 'human_tag' : 'agent_tag', parent: input.parent,
       inheritPrivatePayload: false,

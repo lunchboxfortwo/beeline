@@ -1,3 +1,4 @@
+import { beginAgentInvocation } from './agent-invocation.js';
 import { queuedContextText } from './agent-command-context.js';
 import { legacyMessageBody } from './messaging-cutover.js';
 import { recordedMessageRoute } from './message-route.js';
@@ -376,6 +377,8 @@ export class RoomsMcpAgentTools {
         `SELECT * FROM agent_commands WHERE agent_id=$1 AND (state='pending' OR id=$2) AND reason<>'mcp_call'
          AND ($2::text IS NULL OR id=$2) AND ($4 OR room_id::text=$3) ORDER BY (room_id::text=$3) DESC,inbox_sequence,id LIMIT 1`,
         [member,typeof args.commandId === 'string' ? args.commandId : null,target,name==='reply'])).rows[0];
+      if (item?.state === 'pending' && typeof args.commandId === 'string')
+        await beginAgentInvocation(this.db, member, item.room_id, item.turn_request_id, `mcp:${randomBytes(16).toString('hex')}`);
       const context = {roomId:item?.room_id ?? target,requestId:item?.turn_request_id};
       if (name === 'post' && item?.state==='pending' && (item.return_room_id ?? item.room_id) === target)
         return this.exec(member,'postRoomMessage',{...context,text:args.text,replyToMessageId:args.replyTo});
@@ -401,6 +404,7 @@ export class RoomsMcpAgentTools {
       const turn = await this.db.transaction(async tx => {
         const selected = await selectMcpMessage(tx, member, target, String(args.commandId));
         if (!selected) throw new McpToolError('commandId is not an available message for you at this address');
+        await beginAgentInvocation(tx, member, selected.room_id, selected.turn_request_id, `mcp:${randomBytes(16).toString('hex')}`);
         return { roomId: selected.room_id, requestId: selected.turn_request_id, commandId: selected.id, received: true };
       });
       const { commandId: _, ...input } = args;

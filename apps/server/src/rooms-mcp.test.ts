@@ -175,7 +175,7 @@ const scope1 = fixtureScope1();
     const { secret: _secret, ...delivery } = params.delivery;
     expect((await scope1.eventCall(token, 'events/unsubscribe', { name: 'mention', arguments: {}, delivery })).result).toEqual({});
     expect((await scope1.eventCall(token, 'events/unsubscribe', { name: 'mention', arguments: {}, delivery })).result).toEqual({});
-    expect((await scope1.db.query('SELECT id FROM rooms_mcp_event_subscriptions WHERE member_id=$1', [member])).rowCount).toBe(0);
+    expect((await scope1.db.query('SELECT id FROM rooms_mcp_event_subscriptions WHERE member_id=$1 AND (expires_at IS NULL OR expires_at>now())', [member])).rowCount).toBe(0);
   });
 
 

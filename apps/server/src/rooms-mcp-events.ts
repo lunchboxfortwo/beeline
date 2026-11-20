@@ -92,7 +92,7 @@ export class RoomsMcpEvents {
     ])).digest('hex');
     if (!subscribing) {
       await this.db.transaction(async tx=>{
-        await tx.query('DELETE FROM rooms_mcp_event_subscriptions WHERE id=$1 AND member_id=$2', [id, principal.member_id]);
+        await tx.query('UPDATE rooms_mcp_event_subscriptions SET expires_at=now() WHERE id=$1 AND member_id=$2', [id, principal.member_id]);
         await tx.query("UPDATE rooms_mcp_delivery SET failure='event_subscription_ended',receipt_at=NULL WHERE member_id=$1 AND subscription_id=$2",[principal.member_id,id]);
         await connectorDeliveryChanged(tx,principal.member_id!);
       });

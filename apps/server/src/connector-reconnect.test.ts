@@ -1,5 +1,5 @@
 import {
-  describe, expect, it, vi, deliverMcpMemberWebhooks, fixtureScope1, opaque, createAgentCommand, pendingMcpWakes, ROOM, USER, AGENT,
+  describe, expect, it, vi, deliverMcpMemberWebhooks, fixtureScope1, opaque, createAgentCommand, pendingMcpWakes, ROOM, USER, OTHER, WORKSPACE, AGENT,
 } from './test-support-rooms-mcp.test-support.js';
 import { randomBytes } from 'node:crypto';
 import { CONNECTOR_RECONNECT_RETIRED } from './rooms-mcp-delivery.js';
@@ -88,8 +88,8 @@ describe('CONNECTOR-RECONNECT: event-driven retirement on the agent-command queu
     expect((await commandFor(member, connectedSource))[0]).toMatchObject({ state: 'cancelled', cancellation_reason: CONNECTOR_RECONNECT_RETIRED });
   });
 
-  it.each(['webhook', 'events'])('keeps %s-accepted commands pending without replaying them after reconnect', async (mechanism) => {
-    const fixture = mechanism === 'events' ? await scope.eventFixture() : await connector();
+  it.each(['webhook', 'events', 'unsubscribe'])('keeps %s-accepted commands pending without replaying them after reconnect', async (mechanism) => {
+    const fixture = mechanism !== 'webhook' ? await scope.eventFixture() : await connector();
     const { client, member } = fixture;
     const handle = data(await client.callTool({ name: 'list_chats', arguments: {} })).you.handle as string;
     if ('params' in fixture)
@@ -102,12 +102,20 @@ describe('CONNECTOR-RECONNECT: event-driven retirement on the agent-command queu
       delivered.push(init.body);
       return new Response(null, { status: 204 });
     };
-    if (mechanism === 'events') await deliverMcpEvents(scope.db, accept);
+    if (mechanism !== 'webhook') await deliverMcpEvents(scope.db, accept);
     else await deliverMcpMemberWebhooks(scope.db, accept);
     expect(delivered.some(body => body.includes(source) || body.includes(command!.id))).toBe(true);
 
     if ('params' in fixture) {
-      await scope.db.query("UPDATE rooms_mcp_event_subscriptions SET expires_at=now()-interval '1 second' WHERE member_id=$1", [member]);
+      if (mechanism === 'unsubscribe') {
+        const { secret: _, ...delivery } = fixture.params.delivery;
+        expect((await scope.eventCall(fixture.token, 'events/unsubscribe', {
+          name: 'mention', arguments: {}, delivery,
+        })).error).toBeUndefined();
+        expect(await pendingMcpWakes(scope.db, member)).toEqual([]);
+      } else {
+        await scope.db.query("UPDATE rooms_mcp_event_subscriptions SET expires_at=now()-interval '1 second' WHERE member_id=$1", [member]);
+      }
       expect((await scope.eventCall(fixture.token, 'events/subscribe', fixture.params)).error).toBeUndefined();
     } else {
       await offline(client);
@@ -130,6 +138,52 @@ describe('CONNECTOR-RECONNECT: event-driven retirement on the agent-command queu
     const fresh = await tag(handle, 'new input after reconnect');
     const [freshCommand] = await commandFor(member, fresh);
     expect((await pendingMcpWakes(scope.db, member)).map(wake => wake.id)).toEqual([freshCommand!.id]);
+  });
+
+  it('a rejected sender cannot move the cutoff past an owner order', async () => {
+    const { client, member, handle } = await connector();
+    await scope.db.query(`UPDATE agents SET access_policy='{"type":"creator"}'::jsonb WHERE agent_id=$1`, [member]);
+    await scope.db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')
+      ON CONFLICT (room_id,identity_id) WHERE room_id IS NOT NULL DO NOTHING`, [WORKSPACE, ROOM, OTHER]);
+    await offline(client);
+    const marker = async () => (await scope.db.query<{ cutoff: string }>(
+      'SELECT disconnected_at::text cutoff FROM rooms_mcp_members WHERE member_id=$1', [member])).rows[0]!.cutoff;
+    const before = await marker();
+    const order = (await createAgentCommand(scope.db, {
+      roomId: ROOM, agentId: member, sourceMessageId: null, reason: 'order',
+      privatePayload: { kind: 'order', authorId: USER, fromRoomId: ROOM, text: 'owner order after disconnect' },
+    }))!;
+
+    const rejected = await scope.phone.execute('sendRoomMessage', { roomId: ROOM, text: `@${handle} rejected tag` }, OTHER);
+    await scope.db.backgroundWork.drain();
+
+    expect(await commandFor(member, rejected.messageId)).toEqual([]);
+    expect(await marker()).toBe(before);
+    await online(client);
+    expect((await pendingMcpWakes(scope.db, member)).map(wake => wake.id)).toEqual([order.id]);
+  });
+
+  it.each([['reconnect', 'search'], ['historical', 'search'], ['reconnect', 'message']])('preserves an explicitly bound command during %s retirement after %s', async (retirement, tool) => {
+    const { client, member, handle } = await connector();
+    const claimedSource = await tag(handle, 'use a tool for this command');
+    const untouchedSource = await tag(handle, 'unclaimed work');
+    const [claimed] = await commandFor(member, claimedSource);
+    const result = await client.callTool({ name: tool, arguments: tool === 'search'
+      ? { address: ROOM, scope: 'history', query: 'command', commandId: claimed!.id }
+      : { to: { agent: AGENT, place: ROOM }, text: 'working on the command', commandId: claimed!.id } });
+    expect(result.isError).not.toBe(true);
+    expect((await commandFor(member, claimedSource))[0]?.state).toBe('pending');
+
+    if (retirement === 'historical') {
+      await scope.db.query("UPDATE agent_commands SET created_at='2026-11-14T13:48:23Z' WHERE agent_id=$1", [member]);
+      await retireStuckConnectorCommands(scope.db);
+    } else {
+      await offline(client);
+      await online(client);
+    }
+
+    expect((await commandFor(member, claimedSource))[0]).toMatchObject({ state: 'pending', cancellation_reason: null });
+    expect((await commandFor(member, untouchedSource))[0]).toMatchObject({ state: 'cancelled', cancellation_reason: CONNECTOR_RECONNECT_RETIRED });
   });
 
   it('retires a tag at the exact microsecond cutoff and preserves work after it', async () => {

@@ -416,6 +416,7 @@ export const OWED_WITHOUT_QUEUED_COMMAND_SQL = `NOT EXISTS(SELECT 1 FROM agent_c
  */
 export const UNCLAIMED_CONNECTOR_INPUT_SQL = `command.state='pending' AND command.action='input' AND command.reason<>'mcp_call'
   AND command.posted_reply_id IS NULL
+  AND NOT EXISTS(SELECT 1 FROM agent_invocations invocation WHERE invocation.command_id=command.id)
   AND NOT EXISTS(SELECT 1 FROM agent_commands tool WHERE tool.parent_command_id=command.id AND tool.reason='mcp_call')
   AND NOT EXISTS(SELECT 1 FROM messages answer WHERE answer.author_id=command.agent_id
     AND answer.request_id IN (command.id,command.turn_request_id) AND answer.deleted_at IS NULL)
