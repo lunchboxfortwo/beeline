@@ -117,8 +117,8 @@ import { messageId, SPENDING_OWNER_AUTHORITY_MESSAGE } from './values.js';
       );
       if (!access.rowCount) throw new Error('room access denied');
       const room = (
-        await database.query<{ created_by: string | null; kind: string }>(
-          `SELECT room.created_by,${cornerKindSql('room.id')} kind
+        await database.query<{ created_by: string | null; kind: string; locked: boolean }>(
+          `SELECT room.created_by,${cornerKindSql('room.id')} kind,fact.locked
            FROM rooms room JOIN corner_facts fact ON fact.corner_id=room.id
            WHERE room.id=$1 AND room.parent_id IS NOT NULL
            FOR KEY SHARE OF room FOR UPDATE OF fact`,
@@ -131,16 +131,20 @@ import { messageId, SPENDING_OWNER_AUTHORITY_MESSAGE } from './values.js';
         throw new Error(
           'corner close access denied: only the creator or a workspace owner or admin can close this corner',
         );
+      // Only a Workspace owner or admin closes a locked thread: the close unlocks it.
+      // Anyone else is refused by the rooms trigger, so their close leaves the PR open.
+      return !room.locked || manager;
     };
-    await ctx.database.transaction(authorize);
-    if (locked === undefined)
+    const mayClose = await ctx.database.transaction(authorize);
+    if (locked === undefined && mayClose)
       await closeCornerPullRequestBestEffort(ctx.database, roomId,
         ctx.github ? id => ctx.github!.closeCornerPullRequest(id) : undefined);
     const archived = await ctx.database.transaction(async database => {
-      await authorize(database);
       if (locked !== undefined) {
+        await authorize(database);
         await setCornerLockedFact(database, roomId, locked);
       } else {
+        if (await authorize(database)) await setCornerLockedFact(database, roomId, false);
         return (await closeCornerState(database, roomId)).archived;
       }
     });

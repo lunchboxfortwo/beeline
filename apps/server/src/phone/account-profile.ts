@@ -4,7 +4,7 @@ import { withdrawMergeApprovalsBy } from '../corner-merge-approval.js';
 import { cornerOwnerSql } from '../corner-worker.js';
 import { collapseTombstonedCornerHolds } from '../corner-holds.js';
 import { isFaceId, isPushLevel } from '@beeline/api-contract/phone';
-import { lockCornerLifecycle, clearCornerReviewers } from '../corner-lifecycle.js';
+import { lockCornerLifecycle, clearCornerReviewers, setCornerLockedFact } from '../corner-lifecycle.js';
 import { transferWorkspaceOwnership, writeSurfacePushState } from '../membership-join.js';
 import { ARTIFACT_TTL_HOURS, mediaTtlHours } from '../media-ttl.js';
 import { closeCornerState, lockCornerArchivalAuthority, markOwnedCornersAbandoned } from '../corner-close.js';
@@ -140,7 +140,11 @@ import { phoneManagedIdentity } from './repositories.js';
       ]);
       // Lifecycle scope and authority were locked before any erasure above.
       // Preserve the common close path, including workflow and wake cleanup.
-      for (const corner of closingCorners.rows) await closeCornerState(database, corner.id);
+      // Deleting the account unlocks its corners: the database refuses archiving a locked one.
+      for (const corner of closingCorners.rows) {
+        await setCornerLockedFact(database, corner.id, false);
+        await closeCornerState(database, corner.id);
+      }
       await markOwnedCornersAbandoned(database, gone, `${account.name} deleted their account`);
       await database.query(
         `DELETE FROM agent_schedules WHERE agent_id=ANY($1) OR creator_id=ANY($1)`,

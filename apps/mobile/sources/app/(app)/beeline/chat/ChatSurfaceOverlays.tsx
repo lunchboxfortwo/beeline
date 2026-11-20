@@ -551,6 +551,7 @@ export function ChatSurfaceOverlays({
         title={headerTitle ?? cornerOwnerDisplay?.name ?? CORNER_TITLE}
         visible={cornerActionsVisible}
         locked={roomSurface?.cornerLocked === true}
+        canManage={canManageWorkspace}
         connected={Boolean(transport)}
         onClose={() => setCornerActionsVisible(false)}
         closeCorner={async () => {

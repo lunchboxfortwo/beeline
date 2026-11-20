@@ -238,7 +238,7 @@ export function useChatComposerCommandController({
           ),
           canOpenCorner: Boolean(!isCorner && !viewerIsAgent && pendingCornerRequest),
           canRename: Boolean(!isCorner && !isDirectMessage && !viewerIsAgent && canManageWorkspace),
-          canCloseCorner: isCorner && !viewerIsAgent,
+          canCloseCorner: isCorner && !viewerIsAgent && (roomSurface?.cornerLocked !== true || canManageWorkspace),
           canChangeTargetBranch: Boolean(
             !isCorner &&
             !viewerIsAgent &&
@@ -265,6 +265,7 @@ export function useChatComposerCommandController({
       viewerIsAgent,
       roomSurface?.repositoryResolution,
       roomSurface?.viewer.permissions.send,
+      roomSurface?.cornerLocked,
     ],
   );
 

@@ -6,12 +6,14 @@ import { Btn, Copy, Glyph, HEIGHT, SheetFrame, T } from '@/ui/grammar';
 /**
  * ⋯ on a thread (header B): Lock thread, Close thread, Cancel. Closing the
  * surface leaves a request running, but retires its navigation. The lock
- * value comes from the current server Room read.
+ * value comes from the current server Room read. A locked thread offers
+ * Close only to a Workspace owner or admin (the server refuses anyone else).
  */
 export function CornerActionsSheet({
   visible,
   title,
   locked,
+  canManage,
   connected,
   onClose,
   closeCorner,
@@ -23,6 +25,8 @@ export function CornerActionsSheet({
   visible: boolean;
   title: string;
   locked: boolean;
+  /** Workspace owner or admin: may close a locked thread. */
+  canManage: boolean;
   connected: boolean;
   onClose: () => void;
   closeCorner: () => Promise<void>;
@@ -67,6 +71,7 @@ export function CornerActionsSheet({
     }
   };
   const lockDisabled = closing || !connected || saving;
+  const closeOffered = !locked || canManage;
   const changeLock = async (value: boolean) => {
     if (savingRef.current || closing || !connected) return;
     const attempt = generation.current;
@@ -91,15 +96,15 @@ export function CornerActionsSheet({
         <YStack paddingTop="0.5"><Glyph icon={Lock} size={18} /></YStack>
         <YStack flex={1} minWidth={0} gap="1">
           <Copy>Lock thread</Copy>
-          <Copy small quiet>Stops agents from closing this thread, including after a merge. You can still close it.</Copy>
+          <Copy small quiet>Stops agents and members from closing this thread, including after a merge. Admins can still close it.</Copy>
         </YStack>
         <Switch checked={locked} disabled={lockDisabled} onCheckedChange={(value: boolean) => void changeLock(value)}
           backgroundColor={locked ? 'needsYou' : 'highlight'} aria-label="Lock thread" testID="lock-corner-switch">
           <Switch.Thumb backgroundColor="ink" />
         </Switch>
       </ListItem>
-      <Separator borderColor="stroke" />
-      <ListItem padding="0" paddingVertical="3" gap="3" alignItems="flex-start" backgroundColor="raised"
+      {closeOffered && <Separator borderColor="stroke" />}
+      {closeOffered && <ListItem padding="0" paddingVertical="3" gap="3" alignItems="flex-start" backgroundColor="raised"
         minHeight={HEIGHT.sheetRow} disabled={closing} onPress={() => void close()}
         aria-label="Close thread" accessibilityRole="button" testID="close-corner-action">
         <YStack paddingTop="0.5"><Glyph icon={Archive} size={18} /></YStack>
@@ -107,7 +112,7 @@ export function CornerActionsSheet({
           <T v="heading" color="removed">{closing ? 'Closing thread…' : 'Close thread'}</T>
           <Copy small quiet>Ends the edit session and archives this thread. Unmerged work is lost.</Copy>
         </YStack>
-      </ListItem>
+      </ListItem>}
       <XStack paddingTop="2">
         <Btn kind="secondary" label="Cancel" flex={1} minHeight={HEIGHT.primary} onPress={dismiss} testID="corner-actions-close">Cancel</Btn>
       </XStack>
