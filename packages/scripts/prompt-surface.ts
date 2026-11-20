@@ -56,7 +56,7 @@ const RESUME_BRANCHES: Record<string, Parameters<typeof resumePrompt>[0]> = {
   'command-grant': { body: '<person> approved command <argv>' },
 };
 const MCP_WAKE_BRANCHES: Record<string, [reason: string, ask?: unknown]> = {
-  tag: ['human_tag'], message: ['message'], reply: ['reply'], 'reply-with-ask': ['reply', {question:'<question>',brief:'<brief>',options:['<option>','<option>']}], order: ['order'],
+  tag: ['human_tag'], message: ['message'], reply: ['reply'], 'reply-with-ask': ['reply', {question:'<question>',options:['<option>','<option>']}], order: ['order'],
   review: ['corner_review_dispatch'], lifecycle: ['corner_check'], event: ['subscribed_event'],
 };
 const wakeFixture = (reason: string, ask?: unknown) => mcpWakeText({ id: '<id>', fromName: '<name>', placeName: '<place>',
@@ -105,7 +105,7 @@ export async function renderAuditPrompts() {
   const request = fixture('messaging-b01-finish');
   const checks = fixture('messaging-b05-system-checks');
   const first = fixture('rename-generated-corner');
-  const ask = { question: 'Should I use the small batch?', brief: 'The full batch takes an hour longer.', options: ['Small batch', 'Full batch'] };
+  const ask = { question: 'Should I use the small batch?', options: ['Small batch', 'Full batch'] };
   const situations = [
     { name: 'person-tag', saved: person, reason: 'human_tag', kind: null, author: 'owner', from: room, place: room,
       text: person.turn.task.body },

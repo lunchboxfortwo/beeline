@@ -306,7 +306,6 @@
        "type": "object",
        "required": [
         "question",
-        "brief",
         "options"
        ],
        "additionalProperties": false,
@@ -836,7 +835,6 @@
        "type": "object",
        "required": [
         "question",
-        "brief",
         "options"
        ],
        "additionalProperties": false,
@@ -3432,7 +3430,6 @@
        "type": "object",
        "required": [
         "question",
-        "brief",
         "options"
        ],
        "additionalProperties": false,
@@ -3902,7 +3899,6 @@
        "type": "object",
        "required": [
         "question",
-        "brief",
         "options"
        ],
        "additionalProperties": false,

@@ -57,12 +57,13 @@ it('refuses an over-limit question or brief with the field, its length and the l
     .toThrow('ask.question is 131 characters; the limit is 120; ask.brief is 281 characters; the limit is 280.');
   // Characters, not UTF-16 units: 280 emoji fit exactly.
   expect(() => validateMessageAsk({ ...ask, brief: '🐝'.repeat(280) })).not.toThrow();
-  expect(() => validateMessageAsk({ ...ask, brief: '' })).toThrow('Add ask.brief');
-  expect(() => validateMessageAsk({ question: 'Ship it?', options: ['Yes', 'No'] } as never)).toThrow('Add ask.brief');
+  // Older helpers send no brief; only the length refusal is new.
+  expect(() => validateMessageAsk({ question: 'Ship it?', options: ['Yes', 'No'] })).not.toThrow();
+  expect(() => validateMessageAsk({ question: `${'q'.repeat(120)}?`, options: ['Yes', 'No'] })).toThrow('ask.question is 121 characters');
 });
 
 it('states both limits up front in the ask schema and tool text', () => {
   for (const text of [MESSAGE_ASK_SCHEMA.description, ASK_TOOL_TEXT])
     expect(text).toContain('question at most 120 characters, brief at most 280 characters, both counted in characters; an ask over either limit is refused with its counts');
-  expect(MESSAGE_ASK_SCHEMA.required).toContain('brief');
+  expect(MESSAGE_ASK_SCHEMA.required).not.toContain('brief');
 });

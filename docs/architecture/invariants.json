@@ -3625,7 +3625,7 @@
           "room_id": "Source conversation.",
           "about": "Typed thread, PR or request reference.",
           "question": "Agent-authored short question, validated when written.",
-          "brief": "Agent-authored card brief of at most 280 characters, validated when written; null for older asks.",
+          "brief": "Agent-authored card brief of at most 280 characters, validated when written; null when the ask sent none.",
           "recommended_option_id": "Optional recommendation from the asking agent."
         }
       },

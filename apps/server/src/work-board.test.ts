@@ -283,7 +283,7 @@ describe('Work board recorded sources and single assignee', () => {
       0,
     );
   });
-  it('shows only question, brief and buttons on the card, with the full post one tap away', async () => {
+  it('shows only question, brief and buttons on the card, with the full post one tap away, and accepts an ask without a brief', async () => {
     const text = 'I am researching the launch sources for Ada. '.repeat(16) +
       '\nThe connected sources are missing the vendor report, so I cannot finish the comparison. Should I set up Squire?';
     const question = 'Should I set up Squire?';
@@ -299,11 +299,16 @@ describe('Work board recorded sources and single assignee', () => {
     expect(item.ask?.approval?.actions.filter(action => action.kind === 'choice').map(action => action.label))
       .toEqual(['Start setup', 'Later']);
     expect((await db.query<{ text: string }>('SELECT text FROM messages WHERE id=$1', [posted.id])).rows[0]?.text).toBe(text);
-    // An ask stored before briefs existed keeps showing its whole post.
-    await db.query('UPDATE work_questions SET brief=NULL WHERE message_id=$1', [posted.id]);
-    const legacy = (await read()).items.find(item => item.messageId === posted.id)!;
-    expect(legacy.ask?.text).toBe(text);
+    // An older helper's ask carries no brief: the card shows its question and buttons.
+    const legacyPost = await sendMessage(db, {
+      route: { from: { agent, place: chat }, to: { agent: person, place: chat } },
+      text, ask: { question, options: ['Start setup', 'Later'] },
+    });
+    const legacy = (await read()).items.find(item => item.messageId === legacyPost.id)!;
+    expect(legacy.ask?.text).toBe(question);
     expect(legacy).not.toHaveProperty('brief');
+    expect(legacy.ask?.approval?.actions.filter(action => action.kind === 'choice').map(action => action.label))
+      .toEqual(['Start setup', 'Later']);
   });
   it('refuses an over-limit question or brief before writing anything, naming the counts', async () => {
     const route = { from: { agent, place: chat }, to: { agent: person, place: chat } };

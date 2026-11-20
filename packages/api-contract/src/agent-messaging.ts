@@ -4,8 +4,8 @@ export type MessageAddress = { readonly agent: string; readonly place: string };
 export const OPERATOR_OWNER_ID = '34cf4160723acd12d205dfbe292614bfec9489b78812d1cd9846c00346903334';
 export type MessageAsk = {
   readonly question: string;
-  /** Why it matters and what each option means; the card shows it under the question. */
-  readonly brief: string;
+  /** Why it matters and what each option means; the card shows it under the question. Older helpers omit it. */
+  readonly brief?: string;
   readonly options: readonly string[];
   readonly recommended?: string;
 };
@@ -29,7 +29,7 @@ const ASK_LIMITS_TEXT = `Character limits: question at most ${ASK_QUESTION_MAX_C
 /** The ask sentence for every message/reply tool description, before anything else about the tool. */
 export const ASK_TOOL_TEXT = `Add ask only when a person must decide: their Needs you card shows only ask.question, ask.brief and the option buttons, with your full text one tap away. ${ASK_LIMITS_TEXT} Use 2–4 option labels of at most 3 words.`;
 export const MESSAGE_ASK_SCHEMA = {
-  type: 'object', required: ['question', 'brief', 'options'], additionalProperties: false,
+  type: 'object', required: ['question', 'options'], additionalProperties: false,
   description: `The person's Needs you card shows only question, brief and the option buttons; the full message text is one tap away. ${ASK_LIMITS_TEXT}`,
   properties: {
     question: { type: 'string', minLength: 1, pattern: '^\\S+(?:[ \\t]+\\S+)*$', description: `At most ${ASK_QUESTION_MAX_CHARACTERS} characters: one line ending with ?, the one decision the buttons answer.` },
@@ -66,8 +66,6 @@ export function agentMessageText(message: {
 
 /** The plain shortening error is shared by the tool validator and server. */
 export function validateMessageAsk(ask: MessageAsk): void {
-  if (typeof ask.brief !== 'string' || !ask.brief.trim())
-    throw new Error(`Add ask.brief: why it matters and what each option means, at most ${ASK_BRIEF_MAX_CHARACTERS} characters.`);
   const over = ([['question', ask.question, ASK_QUESTION_MAX_CHARACTERS], ['brief', ask.brief, ASK_BRIEF_MAX_CHARACTERS]] as const)
     .flatMap(([field, text, limit]) => {
       const length = typeof text === 'string' ? Array.from(text).length : 0;

@@ -9,7 +9,7 @@ describe('typed Work board tools', () => {
   const tools = agentToolsFor(true, false, true, true);
   const reply = tools.find(tool=>tool.name==='reply')!;
   it('advertises short asks on replies and one work update surface',()=>{
-    expect(()=>validateAdvertisedToolInput(reply,{id:'task',text:'Choose output',ask:{question:'Which output?',brief: 'It decides the next step.', options:['Web','Phone'],recommended:'Web'}})).not.toThrow();
+    expect(()=>validateAdvertisedToolInput(reply,{id:'task',text:'Choose output',ask:{question:'Which output?',options:['Web','Phone'],recommended:'Web'}})).not.toThrow();
     for (const name of ['ask_owner','set_work_state','assign_work_item','add_work_note','attach_to_work_item']) expect(tools.some(tool=>tool.name===name)).toBe(false);
   });
   it.each(['message', 'reply'])('refuses an over-limit question or brief on %s with its counts', name => {
@@ -17,14 +17,14 @@ describe('typed Work board tools', () => {
     const args = name === 'reply' ? { id: 'task', text: 'Choose output' } : { to: { agent: 'owner', place: 'chat' }, text: 'Choose output' };
     expect(tool.description).toContain('question at most 120 characters, brief at most 280 characters');
     const question = 'Which proof should I run? '.repeat(80).trim();
-    expect(() => validateAdvertisedToolInput(tool, { ...args, ask: { question, brief: 'It decides the next step.', options: ['Yes', 'No'] } }))
+    expect(() => validateAdvertisedToolInput(tool, { ...args, ask: { question, options: ['Yes', 'No'] } }))
       .toThrow(`ask.question is ${question.length} characters; the limit is 120`);
     expect(() => validateAdvertisedToolInput(tool, { ...args, ask: { question: 'Which proof?', brief: 'b'.repeat(281), options: ['Yes', 'No'] } }))
       .toThrow('ask.brief is 281 characters; the limit is 280');
   });
   it('validates question shape and option labels before sending an ask',()=>{
-    expect(()=>validateAdvertisedToolInput(reply,{id:'task',text:'Choose output',ask:{question:'',brief: 'It decides the next step.', options:['Web','Phone']}})).toThrow();
-    expect(()=>validateAdvertisedToolInput(reply,{id:'task',text:'Choose output',ask:{question:'Which output?',brief: 'It decides the next step.', options:['One two three four','Phone']}})).toThrow('Shorten options');
+    expect(()=>validateAdvertisedToolInput(reply,{id:'task',text:'Choose output',ask:{question:'',options:['Web','Phone']}})).toThrow();
+    expect(()=>validateAdvertisedToolInput(reply,{id:'task',text:'Choose output',ask:{question:'Which output?',options:['One two three four','Phone']}})).toThrow('Shorten options');
   });
   it('dispatches named create, state and assignment tools through the same authorized work write', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'beeline-work-tools-'));

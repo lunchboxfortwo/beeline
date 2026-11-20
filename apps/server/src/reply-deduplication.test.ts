@@ -73,7 +73,7 @@ it('a follow-up ask after an informational answer stays owed and retries publish
  const request=await task();
  const context={roomId:CHAT,queuedRequestIds:[request.id]};
  await replyToMessage(db,B,{...context,id:request.id,text:'Inspected'});
- const input={...context,id:request.id,text:'Which output?',ask:{question:'Which output?',brief: 'It decides the next step.', options:['Web','Phone']}};
+ const input={...context,id:request.id,text:'Which output?',ask:{question:'Which output?',options:['Web','Phone']}};
  const question=await replyToMessage(db,B,input);
  expect(question).not.toHaveProperty('_meta');
  expect(await replyToMessage(db,B,input)).toMatchObject({id:question.id});
@@ -83,7 +83,7 @@ it('a follow-up ask after an informational answer stays owed and retries publish
 it('an earlier ask in the batch prevents a later reply from ending the native turn',async()=>{
  const first=await task(),second=await task();
  const context={roomId:CHAT,queuedRequestIds:[first.id,second.id]};
- expect(await replyToMessage(db,B,{...context,id:first.id,text:'Which output?',ask:{question:'Which output?',brief: 'It decides the next step.', options:['Web','Phone']}})).not.toHaveProperty('_meta');
+ expect(await replyToMessage(db,B,{...context,id:first.id,text:'Which output?',ask:{question:'Which output?',options:['Web','Phone']}})).not.toHaveProperty('_meta');
  expect(await replyToMessage(db,B,{...context,id:second.id,text:'Done'})).not.toHaveProperty('_meta');
 });
 
@@ -119,7 +119,7 @@ it.each(['empty','invalid ask','missing target','archived'])('an undelivered %s 
  const target=await sendMessage(db,{route:{from:{agent:H,place:OTHER},to:{agent:B,place:CHAT}},text:'Other'});
  if(kind==='archived')await db.query('UPDATE rooms SET archived_at=now() WHERE id=$1',[OTHER]);
  const attempt=replyToMessage(db,B,{roomId:CHAT,invocation,id:kind==='missing target'?'missing':target.id,text:kind==='empty'?'':'Answer',
-  ...(kind==='invalid ask'?{ask:{question:'Invalid',brief: 'It decides the next step.', options:[]}}:{})});
+  ...(kind==='invalid ask'?{ask:{question:'Invalid',options:[]}}:{})});
  if(kind==='missing target'||kind==='invalid ask')await expect(attempt).rejects.toThrow();else await attempt;
  expect(await answerQueuedMessage(db,B,{roomId:CHAT,requestId:current.id,text:'Final',harnessEnded:true,invocation})).not.toHaveProperty('suppressed');
  expect((await answers()).map(row=>row.text)).toEqual(['Final']);
@@ -135,7 +135,7 @@ it('a rolled-back reply leaves no marker; a committed reply with a lost tool res
 });
 it('a delivered ask suppresses recap without declaring the turn complete',async()=>{
  const current=await task(),invocation=await invocationFor(current.id);
- const question=await replyToMessage(db,B,{roomId:CHAT,invocation,id:current.id,text:'Choose',queuedRequestIds:[current.id],ask:{question:'Which?',brief: 'It decides the next step.', options:['A','B']}});
+ const question=await replyToMessage(db,B,{roomId:CHAT,invocation,id:current.id,text:'Choose',queuedRequestIds:[current.id],ask:{question:'Which?',options:['A','B']}});
  expect(question).not.toHaveProperty('_meta');
  expect(await answerQueuedMessage(db,B,{roomId:CHAT,requestId:current.id,text:'Asked a question',harnessEnded:true,invocation})).toMatchObject({suppressed:true});
  expect(await answers()).toHaveLength(1);
@@ -195,7 +195,7 @@ it('a confirmed reply in P leaves a simultaneous invocation in P2 eligible for i
 it('an agent-directed ask suppresses recap and preserves its separate response obligation',async()=>{
  const current=await sendMessage(db,{route:{from:{agent:A,place:OTHER},to:{agent:B,place:CHAT}},text:'Please inspect'});
  const invocation=await invocationFor(current.id);
- const question=await replyToMessage(db,B,{roomId:CHAT,invocation,id:current.id,text:'Which scope?',queuedRequestIds:[current.id],ask:{question:'Which scope?',brief: 'It decides the next step.', options:['Small','Full']}});
+ const question=await replyToMessage(db,B,{roomId:CHAT,invocation,id:current.id,text:'Which scope?',queuedRequestIds:[current.id],ask:{question:'Which scope?',options:['Small','Full']}});
  expect(question).not.toHaveProperty('_meta');
  expect(await answerQueuedMessage(db,B,{roomId:CHAT,requestId:current.id,text:'Asked A',harnessEnded:true,invocation})).toMatchObject({suppressed:true});
  expect((await db.query("SELECT 1 FROM agent_commands WHERE id=$1 AND agent_id=$2 AND state='pending' AND private_payload->>'messageAsk' IS NOT NULL",[question.id,A])).rowCount).toBe(1);

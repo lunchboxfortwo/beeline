@@ -246,8 +246,9 @@ export async function readWorkBoard(
       ask: q && (q.question || ask.approval?.kind === 'choice')
         ? {
             ...ask,
-            // The card shows question and brief; the full message stays one tap away.
-            text: q.question && q.brief ? `${q.question}\n\n${q.brief}` : q.message_text || q.question || ask.text,
+            // A choice card shows question and any brief; the full message stays one tap away.
+            text: q.question && q.brief ? `${q.question}\n\n${q.brief}`
+              : q.question && ask.approval?.actions?.some(action => action.kind === 'choice') ? q.question : q.message_text || q.question || ask.text,
             approval: ask.approval ? { ...ask.approval, subject: q.question || ask.approval.subject } : undefined,
           }
         : ask,

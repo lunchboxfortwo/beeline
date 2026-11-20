@@ -5,7 +5,7 @@ import { AGENT, PRIVATE, PUBLIC_CORNER, ROOM, USER, WORKSPACE, beforeAll, before
 
 const REVIEWER = 'e'.repeat(64);
 const DM = '66666666-6666-4666-8666-666666666666', SIBLING = '77777777-7777-4777-8777-777777777777';
-const ask = { question: 'Which output?', brief: 'It decides the next step.', options: ['Web', 'Phone'] };
+const ask = { question: 'Which output?', options: ['Web', 'Phone'] };
 const THREAD = PUBLIC_CORNER;
 
 /** Condition 4: external agents send to and receive from thread agents and commanders with the same routing. */

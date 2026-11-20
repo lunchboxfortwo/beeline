@@ -35,7 +35,7 @@ it('person-facing messages and questions retain the owner’s chat address', asy
   await daemon.execute('message', { roomId: THREAD, to: { agent: H, place: CHAT }, text: 'The artifact is ready' }, B);
   await daemon.execute('message', {
     roomId: THREAD, to: { agent: H, place: CHAT }, text: 'Choose the output',
-    ask: { question: 'Which output?', brief: 'It decides the next step.', options: ['Web', 'Phone'] },
+    ask: { question: 'Which output?', options: ['Web', 'Phone'] },
   }, B);
   expect((await db.query('SELECT room_id FROM messages WHERE author_id=$1 ORDER BY created_at,id', [B])).rows)
     .toEqual([{ room_id: CHAT }, { room_id: CHAT }]);

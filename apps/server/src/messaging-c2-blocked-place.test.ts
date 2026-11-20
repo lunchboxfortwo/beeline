@@ -3,7 +3,7 @@ import { queueMessage } from './agent-command.js';
 import { modelText } from './message-origin.js';
 import { A, B, C, THREAD, daemon, db, PLACES, SYSTEM_WAKES, inbox, settle, personSays, systemWake, type Place } from './messaging-conditions.test-support.js';
 
-const ask = { question: 'Which output?', brief: 'It decides the next step.', options: ['Web', 'Phone'] };
+const ask = { question: 'Which output?', options: ['Web', 'Phone'] };
 const places = Object.keys(PLACES) as Place[];
 const wakes = SYSTEM_WAKES.map(reason => [reason, reason === 'corner_review_dispatch' ? C : B] as const);
 const cases = places.flatMap(place => wakes.map(([reason, worker]) => [place, reason, worker] as const));

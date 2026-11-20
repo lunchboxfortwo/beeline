@@ -8,7 +8,7 @@ describe('addressed agent message transcript pills', () => {
   it.each([CHAT, THREAD])('publishes the existing pill in destination %s without another wake', async place => {
     const sent = await daemon.execute('message', {
       roomId: OTHER, to: { agent: B, place }, text: 'Please review the phone layout',
-      ask: { question: 'Ready?', brief: 'It decides the next step.', options: ['Yes', 'No'] },
+      ask: { question: 'Ready?', options: ['Yes', 'No'] },
     }, A);
     expect(await queued()).toEqual([[B, place]]);
     const phone = new PhoneService(db, 'http://local.test');

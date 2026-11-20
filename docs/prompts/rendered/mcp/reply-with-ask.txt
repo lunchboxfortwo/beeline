@@ -48,7 +48,6 @@ Agent tools:
   "kind": "reply",
   "ask": {
     "question": "Should I use the small batch?",
-    "brief": "The full batch takes an hour longer.",
     "options": [
       "Small batch",
       "Full batch"
