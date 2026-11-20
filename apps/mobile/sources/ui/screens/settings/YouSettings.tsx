@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { memo, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import { router } from 'expo-router';
 import { Label, RadioGroup, Separator, Switch, ToggleGroup, XStack, YStack } from 'tamagui';
@@ -41,18 +41,31 @@ function DangerRow({ label, onPress, testID, last }: { label: string; onPress: (
     return <Row label={label} tone="removed" onPress={onPress} testID={testID} last={last} />;
 }
 
+type YouActions = {
+    retryPush(): void; changePushLevel(level: PushLevel): void; changeSpeakingSpeed(speed: 1.15 | 1.3 | 1.5): void;
+    leaveWorkspace(): void; connectGitHub(): void; connectGoogle(): void; signOut(): void; deleteAccount(): void; checkUpdate(): void;
+};
+
 /** Settings → You: picture, connectors, this device, and the account. */
 export function YouSettings({ you }: { you: You }) {
-    const [appearance, setAppearance] = useLocalSettingMutable('appearance');
-    const [uiSize, setUiSize] = useLocalSettingMutable('uiSize');
-    const [palette, setPalette] = useLocalSettingMutable('palette');
-    const [roomOpenTrace, setRoomOpenTrace] = useLocalSettingMutable('roomOpenTraceOverlay');
-    const [sheet, setSheet] = useState<'push' | 'size' | 'speed' | null>(null);
-    const [confirmDelete, setConfirmDelete] = useState(false);
     const hasPhoto = isPersonPictureUrl(you.avatar);
-    const sizeLabel = Platform.OS === 'web' ? 'Interface size' : 'Text size';
-    const providers = you.providers;
     const connectors = you.workbench ? [you.workbench.value, you.workbench.attention].filter(Boolean).join(' · ') : undefined;
+    // Settings re-renders as each of its reads lands. The sections below the
+    // profile take stable actions and only their own values, so a read that
+    // does not change them does not rebuild them.
+    const latest = useRef(you);
+    useLayoutEffect(() => { latest.current = you; });
+    const actions = useMemo<YouActions>(() => ({
+        retryPush: () => latest.current.push.retry(),
+        changePushLevel: (level) => void latest.current.push.change(level),
+        changeSpeakingSpeed: (speed) => latest.current.changeSpeakingSpeed(speed),
+        leaveWorkspace: () => void latest.current.leaveWorkspace(),
+        connectGitHub: () => void latest.current.connectGitHub(),
+        connectGoogle: () => void latest.current.connectGoogle(),
+        signOut: () => void latest.current.signOut(),
+        deleteAccount: () => void latest.current.deleteAccount(),
+        checkUpdate: () => latest.current.update.check(),
+    }), []);
 
     return (
         <YStack gap="5">
@@ -79,15 +92,38 @@ export function YouSettings({ you }: { you: You }) {
                 />
             </Section>
 
+            <DeviceSection pushSupported={you.push.supported} pushLevel={you.push.level} pushDisabled={you.push.disabled}
+                pushFailure={you.push.failure} pushRetryable={you.push.retryable} pushWorking={you.push.working}
+                speakingSpeed={you.speakingSpeed} actions={actions} />
+
+            <AccountSections workspaceName={you.workspace?.name} busy={you.busy} providers={you.providers}
+                notice={you.notice} error={you.error} updateEnabled={you.update.enabled} updateBusy={you.update.busy}
+                updateLabel={you.update.label} updateMessage={you.update.message} version={you.update.version} actions={actions} />
+        </YStack>
+    );
+}
+
+const DeviceSection = memo(function DeviceSection({ pushSupported, pushLevel, pushDisabled, pushFailure, pushRetryable, pushWorking, speakingSpeed, actions }: {
+    pushSupported: boolean; pushLevel: PushLevel; pushDisabled: boolean; pushFailure: string | null; pushRetryable: boolean;
+    pushWorking: boolean; speakingSpeed: 1.15 | 1.3 | 1.5; actions: YouActions;
+}) {
+    const [appearance, setAppearance] = useLocalSettingMutable('appearance');
+    const [uiSize, setUiSize] = useLocalSettingMutable('uiSize');
+    const [palette, setPalette] = useLocalSettingMutable('palette');
+    const [roomOpenTrace, setRoomOpenTrace] = useLocalSettingMutable('roomOpenTraceOverlay');
+    const [sheet, setSheet] = useState<'push' | 'size' | 'speed' | null>(null);
+    const sizeLabel = Platform.OS === 'web' ? 'Interface size' : 'Text size';
+    return (
+        <>
             <Section title="Device" testID="appearance-section">
-                {you.push.supported ? (
-                    <Row label="Notifications" value={PUSH_LEVEL_LABELS[you.push.level]} onPress={you.push.disabled ? undefined : () => setSheet('push')} testID="push-notifications-setting" />
+                {pushSupported ? (
+                    <Row label="Notifications" value={PUSH_LEVEL_LABELS[pushLevel]} onPress={pushDisabled ? undefined : () => setSheet('push')} testID="push-notifications-setting" />
                 ) : null}
-                {you.push.failure ? (
+                {pushFailure ? (
                     <Row
                         label="Push not working"
-                        detail={capitalize(you.push.failure)}
-                        right={you.push.retryable ? <Btn label="Retry notifications" disabled={you.push.working} onPress={you.push.retry} testID="push-retry-registration">{you.push.working ? 'Retrying notifications…' : 'Retry notifications'}</Btn> : undefined}
+                        detail={capitalize(pushFailure)}
+                        right={pushRetryable ? <Btn label="Retry notifications" disabled={pushWorking} onPress={actions.retryPush} testID="push-retry-registration">{pushWorking ? 'Retrying notifications…' : 'Retry notifications'}</Btn> : undefined}
                     />
                 ) : null}
                 <YStack paddingVertical="3" gap="2">
@@ -129,19 +165,37 @@ export function YouSettings({ you }: { you: You }) {
                 </YStack>
                 <Separator borderColor="stroke" />
                 <Row label={sizeLabel} value={APP_UI_SIZE_LABELS[uiSize]} onPress={() => setSheet('size')} testID="ui-size-setting" />
-                <Row label="Speaking speed" value={SPEAKING_SPEED_LABELS[you.speakingSpeed]} onPress={() => setSheet('speed')} testID="speaking-speed-setting" last={!roomOpenTraceEnabled()} />
+                <Row label="Speaking speed" value={SPEAKING_SPEED_LABELS[speakingSpeed]} onPress={() => setSheet('speed')} testID="speaking-speed-setting" last={!roomOpenTraceEnabled()} />
                 {roomOpenTraceEnabled() ? (
                     <Row label="Chat open trace" detail="Show open timings on screen" testID="debug-room-open-trace" last
                         right={<Switch checked={roomOpenTrace} onCheckedChange={setRoomOpenTrace} aria-label="Chat open trace"><Switch.Thumb /></Switch>} />
                 ) : null}
             </Section>
+            <ChoiceSheet open={sheet === 'push'} close={() => setSheet(null)} title="Push notifications" testID="push-notifications-sheet"
+                value={pushLevel} onChoose={actions.changePushLevel}
+                choices={PUSH_LEVELS.map((level) => ({ value: level, label: PUSH_LEVEL_LABELS[level], detail: PUSH_LEVEL_DETAILS[level] }))} />
+            <ChoiceSheet open={sheet === 'size'} close={() => setSheet(null)} title={sizeLabel} testID="ui-size-sheet" value={uiSize}
+                onChoose={(next) => setUiSize(next)}
+                choices={APP_UI_SIZE_OPTIONS.map((size) => ({ value: size, label: APP_UI_SIZE_LABELS[size] }))} />
+            <ChoiceSheet open={sheet === 'speed'} close={() => setSheet(null)} title="Speaking speed" testID="speaking-speed-sheet" value={speakingSpeed}
+                onChoose={actions.changeSpeakingSpeed}
+                choices={([1.15, 1.3, 1.5] as const).map((speed) => ({ value: speed, label: SPEAKING_SPEED_LABELS[speed] }))} />
+        </>
+    );
+});
 
-            {you.workspace ? (
+const AccountSections = memo(function AccountSections({ workspaceName, busy, providers, notice, error, updateEnabled, updateBusy, updateLabel, updateMessage, version, actions }: {
+    workspaceName: string | undefined; busy: You['busy']; providers: You['providers']; notice: string | null; error: string | null;
+    updateEnabled: boolean; updateBusy: boolean; updateLabel: string; updateMessage: string | null; version: string; actions: YouActions;
+}) {
+    const [confirmDelete, setConfirmDelete] = useState(false);
+    return (
+        <>
+            {workspaceName !== undefined ? (
                 <Section title={WORKSPACE_LABEL} testID="workspace-membership-settings">
-                    <DangerRow label={you.busy === 'leave' ? 'Leaving…' : `Leave ${you.workspace.name}`} onPress={() => void you.leaveWorkspace()} testID="leave-workspace-setting" last />
+                    <DangerRow label={busy === 'leave' ? 'Leaving…' : `Leave ${workspaceName}`} onPress={actions.leaveWorkspace} testID="leave-workspace-setting" last />
                 </Section>
             ) : null}
-
             <Section title="Account" testID="account-settings">
                 {providers?.map((link) => (
                     <Row
@@ -150,29 +204,29 @@ export function YouSettings({ you }: { you: You }) {
                         label={link.provider === 'google' ? 'Google' : 'GitHub'}
                         detail={link.login}
                         value={link.reconnect ? 'Reconnect' : providers.length === 1 ? 'Signed in' : 'Linked'}
-                        onPress={link.provider === 'github' && you.busy !== 'github' ? () => void you.connectGitHub() : undefined}
+                        onPress={link.provider === 'github' && busy !== 'github' ? actions.connectGitHub : undefined}
                         testID={`settings-provider-${link.provider}`}
                     />
                 ))}
                 {providers && !providers.some((link) => link.provider === 'github') ? (
                     <Row leading={<ServiceMark company="GitHub" mark={providerMark('github')} />} label="GitHub" detail="Needed to link repositories" value="Connect"
-                        onPress={you.busy === 'github' ? undefined : () => void you.connectGitHub()} testID="settings-provider-github" />
+                        onPress={busy === 'github' ? undefined : actions.connectGitHub} testID="settings-provider-github" />
                 ) : null}
                 {providers && !providers.some((link) => link.provider === 'google') ? (
                     <Row leading={<ServiceMark company="Google" mark={providerMark('google')} />} label="Google" value="Connect"
-                        onPress={you.busy === 'google' ? undefined : () => void you.connectGoogle()} testID="settings-provider-google" />
+                        onPress={busy === 'google' ? undefined : actions.connectGoogle} testID="settings-provider-google" />
                 ) : null}
                 <Row label="Privacy Policy" onPress={open(PRIVACY_URL)} testID="settings-privacy-row" />
                 <Row label="Terms of Service" onPress={open(TERMS_URL)} testID="settings-terms-row" />
                 <Row label="Send feedback" onPress={open(FEEDBACK_MAILTO)} testID="settings-feedback-row" />
-                <Row label="Sign out" onPress={() => void you.signOut()} testID="sign-out-setting" />
+                <Row label="Sign out" onPress={actions.signOut} testID="sign-out-setting" />
                 {confirmDelete ? (
                     <YStack paddingVertical="3" gap="2" testID="confirm-delete-account">
                         <Copy small>deleting your account will delete all your data. this action is irrevocable. confirm?</Copy>
                         <XStack gap="2">
-                            <Btn label="Cancel account deletion" disabled={you.busy === 'delete'} onPress={() => setConfirmDelete(false)} testID="delete-account-cancel">Cancel</Btn>
-                            <Btn kind="destructive" label="Yes, delete account" disabled={you.busy === 'delete'} onPress={() => void you.deleteAccount()} testID="delete-account-yes">
-                                {you.busy === 'delete' ? 'Deleting…' : 'Delete account'}
+                            <Btn label="Cancel account deletion" disabled={busy === 'delete'} onPress={() => setConfirmDelete(false)} testID="delete-account-cancel">Cancel</Btn>
+                            <Btn kind="destructive" label="Yes, delete account" disabled={busy === 'delete'} onPress={actions.deleteAccount} testID="delete-account-yes">
+                                {busy === 'delete' ? 'Deleting…' : 'Delete account'}
                             </Btn>
                         </XStack>
                     </YStack>
@@ -181,28 +235,19 @@ export function YouSettings({ you }: { you: You }) {
                 )}
             </Section>
 
-            {you.notice ? <Copy small quiet testID="settings-notice">{you.notice}</Copy> : null}
-            {you.error ? <T v="meta" color="removed" testID="settings-error">{you.error}</T> : null}
+            {notice ? <Copy small quiet testID="settings-notice">{notice}</Copy> : null}
+            {error ? <T v="meta" color="removed" testID="settings-error">{error}</T> : null}
 
             <YStack gap="2" alignItems="center" testID="ota-update-info">
                 <XStack gap="3" alignItems="center" justifyContent="center" flexWrap="wrap">
                     <BeelineMark size={20} />
-                    <Copy small quiet>Beeline version {you.update.version}</Copy>
-                    {you.update.busy ? <Spinner testID="ota-update-progress" />
-                        : <Btn label={you.update.label} disabled={!you.update.enabled} onPress={you.update.check} testID="ota-update-check">Check</Btn>}
+                    <Copy small quiet>Beeline version {version}</Copy>
+                    {updateBusy ? <Spinner testID="ota-update-progress" />
+                        : <Btn label={updateLabel} disabled={!updateEnabled} onPress={actions.checkUpdate} testID="ota-update-check">Check</Btn>}
                 </XStack>
-                {you.update.message ? <Copy small quiet>{you.update.message}</Copy> : null}
+                {updateMessage ? <Copy small quiet>{updateMessage}</Copy> : null}
             </YStack>
 
-            <ChoiceSheet open={sheet === 'push'} close={() => setSheet(null)} title="Push notifications" testID="push-notifications-sheet"
-                value={you.push.level} onChoose={(level) => void you.push.change(level)}
-                choices={PUSH_LEVELS.map((level) => ({ value: level, label: PUSH_LEVEL_LABELS[level], detail: PUSH_LEVEL_DETAILS[level] }))} />
-            <ChoiceSheet open={sheet === 'size'} close={() => setSheet(null)} title={sizeLabel} testID="ui-size-sheet" value={uiSize}
-                onChoose={(next) => setUiSize(next)}
-                choices={APP_UI_SIZE_OPTIONS.map((size) => ({ value: size, label: APP_UI_SIZE_LABELS[size] }))} />
-            <ChoiceSheet open={sheet === 'speed'} close={() => setSheet(null)} title="Speaking speed" testID="speaking-speed-sheet" value={you.speakingSpeed}
-                onChoose={you.changeSpeakingSpeed}
-                choices={([1.15, 1.3, 1.5] as const).map((speed) => ({ value: speed, label: SPEAKING_SPEED_LABELS[speed] }))} />
-        </YStack>
+        </>
     );
-}
+});

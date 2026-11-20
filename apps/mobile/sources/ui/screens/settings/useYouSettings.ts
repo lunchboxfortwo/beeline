@@ -36,6 +36,8 @@ import {
     createManualUpdateState, isManualUpdateBusy, manualUpdateButtonLabel, manualUpdateMessage, manualUpdateReducer,
 } from '@/app/(app)/beeline/settings/manual-update-state';
 
+const NO_PROVIDERS: readonly never[] = [];
+
 /**
  * Everything Settings → You reads and writes: the managed identity (name,
  * handle, picture, sign-in providers, push level, speaking speed), the
@@ -309,7 +311,7 @@ export function useYouSettings({ linkedWorkspaceId, githubReconnect, githubConne
     const handle = managed?.handle ?? (name ? personHandle(name, pubkey ?? '') : '');
 
     return {
-        error, notice, pubkey, name, handle, avatar: managed?.avatar, providers: managed ? managed.providers ?? [] : null,
+        error, notice, pubkey, name, handle, avatar: managed?.avatar, providers: managed ? managed.providers ?? NO_PROVIDERS : null,
         role, workspace, canManageWorkspace, workbench, workspacesReady: workspaceList !== null,
         push: {
             supported: pushPermission !== null && pushPermission.status !== 'unsupported',
