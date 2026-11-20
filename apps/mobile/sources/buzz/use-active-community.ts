@@ -71,10 +71,13 @@ export function useFallbackWorkspaceId(enabled: boolean): string | null | undefi
         if (reading) return;
         reading = true;
         pending = false;
+        let requested = false;
         try {
-          const list = await mobileSurfaceCache.fetch(address, isWorkspaceListView, () =>
-            new RoomViewClient({ baseUrl: relayUrl, identity }).workspaces());
-          if (cancelled || pending || !list) return;
+          const list = await mobileSurfaceCache.fetch(address, isWorkspaceListView, () => {
+            requested = true;
+            return new RoomViewClient({ baseUrl: relayUrl, identity }).workspaces();
+          });
+          if (cancelled || pending || !requested || !list) return;
           const current = await loadActiveCommunityId(identity.publicKey);
           if (cancelled || pending) return;
           const next = current || list.workspaces[0]?.id || null;
@@ -82,7 +85,7 @@ export function useFallbackWorkspaceId(enabled: boolean): string | null | undefi
           if (!cancelled) setWorkspaceId(next);
         } catch { return; } finally {
           reading = false;
-          if (pending && !cancelled) void read();
+          if ((pending || !requested) && !cancelled) void read();
         }
       };
       const release = await sharedLiveConnection().register([], (event) => {

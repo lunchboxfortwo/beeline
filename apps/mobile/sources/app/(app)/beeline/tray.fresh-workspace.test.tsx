@@ -4,9 +4,10 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { isWorkspaceListView } from '@beeline/buzz-client';
 import { mobileSurfaceCache, surfaceAddress } from '@/buzz/surface-storage';
-import { saveActiveCommunityId } from '@/buzz/community-storage';
+import { loadActiveCommunityId, saveActiveCommunityId } from '@/buzz/community-storage';
 
 const state = vi.hoisted(() => ({
+    focused: true,
     listener: null as null | ((event: any) => void),
     request: vi.fn(),
     list: { workspaces: [{ id: 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb', name: 'Tubing Crew' }] } as { workspaces: { id: string; name: string }[] },
@@ -31,7 +32,7 @@ vi.mock('@/auth/buzz-identity-storage', () => ({
 vi.mock('@react-native-async-storage/async-storage', () => ({
     default: { getItem: async () => null, setItem: async () => undefined, removeItem: async () => undefined },
 }));
-vi.mock('@/buzz/use-surface-focus', () => ({ useSurfaceFocus: () => true }));
+vi.mock('@/buzz/use-surface-focus', () => ({ useSurfaceFocus: () => state.focused }));
 vi.mock('@/sync/transport/live-connection', () => ({
     sharedLiveConnection: () => ({
         register: async (_filters: unknown, listener: (event: any) => void) => {
@@ -91,6 +92,7 @@ beforeEach(async () => {
     state.list = { workspaces: [{ id: 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb', name: 'Tubing Crew' }] };
     state.request.mockReset().mockImplementation(async () => state.list);
     state.listener = null;
+    state.focused = true;
     mobileSurfaceCache.clear();
     mobileSurfaceCache.publish(surfaceAddress('https://relay.test', 'viewer', '/workspaces'), {
         workspaces: [], viewer: { pubkey: 'a'.repeat(64), kind: 'human', name: 'Viewer' },
@@ -155,6 +157,44 @@ it.each(['postgres:memberships', 'postgres:workspaces', 'reconnect'])(
         expect(state.request).toHaveBeenCalledTimes(1);
         await act(async () => { complete({ workspaces: [] }); });
         expect(state.request).toHaveBeenCalledTimes(2);
+        expect(hosts(tree, 'work-board')).toHaveLength(1);
+        expect(hosts(tree, 'tray-no-workspace')).toHaveLength(0);
+        expect(loaders(tree)).toHaveLength(0);
+    },
+);
+
+it.each(['empty', 'failed', 'stale workspace'])(
+    'starts a covering read after refocus when the older read returns %s', async (outcome) => {
+        let complete!: (value: { workspaces: { id: string; name: string }[] }) => void;
+        let fail!: (reason: Error) => void;
+        state.request.mockImplementationOnce(() => new Promise((resolve, reject) => {
+            complete = resolve;
+            fail = reject;
+        }));
+        state.list = { workspaces: [] };
+        let tree!: ReactTestRenderer;
+        await act(async () => { tree = create(<TrayScreen />); });
+        mounted.push(tree);
+        expect(state.request).toHaveBeenCalledTimes(1);
+        await act(async () => {
+            state.focused = false;
+            tree.update(<TrayScreen />);
+        });
+        expect(state.listener).toBeNull();
+        state.list = { workspaces: [{ id: 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb', name: 'Tubing Crew' }] };
+        await act(async () => {
+            state.focused = true;
+            tree.update(<TrayScreen />);
+        });
+        expect(state.request).toHaveBeenCalledTimes(1);
+        await act(async () => {
+            if (outcome === 'failed') fail(new Error('old connection lost'));
+            else complete({ workspaces: outcome === 'empty' ? [] : [
+                { id: 'cccccccc-3333-4333-8333-cccccccccccc', name: 'Old Workspace' },
+            ] });
+        });
+        expect(state.request).toHaveBeenCalledTimes(2);
+        expect(await loadActiveCommunityId('viewer')).toBe('bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb');
         expect(hosts(tree, 'work-board')).toHaveLength(1);
         expect(hosts(tree, 'tray-no-workspace')).toHaveLength(0);
         expect(loaders(tree)).toHaveLength(0);
