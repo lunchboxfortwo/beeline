@@ -424,12 +424,14 @@ export const UNCLAIMED_CONNECTOR_INPUT_SQL = `command.state='pending' AND comman
   AND NOT ${connectorHostAcceptedSql('command')}`;
 
 export function connectorHostAcceptedSql(command: string): string {
+  // Private payloads are delivered by command id; their source is provenance.
+  const message = `CASE WHEN ${command}.private_payload IS NULL OR ${command}.reason='schedule' THEN ${command}.source_message_id ELSE ${command}.id END`;
   return `(EXISTS(SELECT 1 FROM rooms_mcp_members member WHERE member.member_id=${command}.agent_id)
     AND (EXISTS(SELECT 1 FROM rooms_mcp_webhook_outbox outbox WHERE outbox.member_id=${command}.agent_id
-      AND outbox.message_id IN (${command}.id,${command}.source_message_id) AND (outbox.delivery_state='delivered' OR outbox.claimed_at IS NOT NULL AND outbox.delivery_state IS DISTINCT FROM 'failed'))
+      AND outbox.message_id IN (${command}.id,${message}) AND (outbox.delivery_state='delivered' OR outbox.claimed_at IS NOT NULL AND outbox.delivery_state IS DISTINCT FROM 'failed'))
     OR EXISTS(SELECT 1 FROM rooms_mcp_event_deliveries event JOIN rooms_mcp_event_subscriptions subscription
       ON subscription.id=event.subscription_id AND subscription.member_id=${command}.agent_id
-      WHERE (event.command_id=${command}.id OR event.message_id=${command}.source_message_id) AND (event.delivery_state='delivered' OR event.claimed_at IS NOT NULL AND event.delivery_state IS DISTINCT FROM 'failed'))))`;
+      WHERE (event.command_id=${command}.id OR event.message_id=${message}) AND (event.delivery_state='delivered' OR event.claimed_at IS NOT NULL AND event.delivery_state IS DISTINCT FROM 'failed'))))`;
 }
 
 /** The last time the server saw these connectors offline; their reconnect retires work queued up to it. */

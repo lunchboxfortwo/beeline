@@ -75,7 +75,12 @@ describe.each(['pglite',...(postgresUrl?['postgres']:[])])('P12 MCP committed me
       INSERT INTO rooms_mcp_connections VALUES('client','owner','rooms:read',NULL);
       INSERT INTO rooms_mcp_tokens(hash,client_id,identity_id,scope,expires_at) VALUES('synthetic-token','client','owner','rooms:read',now()+interval '2 days');`);
   },30000);
-  afterEach(()=>{for(const reply of replies.splice(0))reply.end();vi.useRealTimers();});
+  afterEach(async()=>{
+    for(const reply of replies.splice(0))reply.end();vi.useRealTimers();
+    // Stream closure releases its binding in an asynchronous transaction. Await
+    // that committed state before the next case reads its journal head.
+    await vi.waitFor(async()=>expect((await db.query("SELECT 1 FROM rooms_mcp_delivery WHERE stream_id IS NOT NULL")).rowCount).toBe(0));
+  });
   afterAll(async()=>{await release?.();await closeDatabase?.();});
   const page=()=>vi.fn(async(transaction:SqlDatabase,after:string)=>{
     const mentions=(await transaction.query<{id:string;room_id:string;deliveryCursor:string}>(

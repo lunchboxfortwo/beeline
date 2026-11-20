@@ -78,6 +78,35 @@ describe('CONNECTOR-RECONNECT: event-driven retirement on the agent-command queu
       [randomBytes(32).toString('hex'), ROOM, member, 'on it', request],
     );
 
+  it.each(['webhook', 'events'])('accepts distinct %s orders sharing a tag source', async (mechanism) => {
+    const fixture = mechanism === 'webhook' ? await connector() : await scope.eventFixture();
+    const { client, member } = fixture;
+    if ('params' in fixture) await scope.eventCall(fixture.token, 'events/subscribe', fixture.params);
+    const handle = data(await client.callTool({ name: 'list_chats', arguments: {} })).you.handle;
+    const source = await tag(handle, 'public request');
+    const drain = mechanism === 'webhook' ? deliverMcpMemberWebhooks : deliverMcpEvents;
+    const accepted: string[] = [];
+    const transport = async (_url: string, init: { body: string }) => {
+      accepted.push(init.body);
+      return new Response(null, { status: 204 });
+    };
+    await drain(scope.db, transport);
+    // The queue contract gives a private order its own identity and payload,
+    // even when its provenance names an already delivered public message.
+    const order = await createAgentCommand(scope.db, {
+      roomId: ROOM, agentId: member, sourceMessageId: source, reason: 'order',
+      privatePayload: { kind: 'order', authorId: USER, fromRoomId: ROOM, text: 'separate private assignment' },
+    });
+    expect(await pendingMcpWakes(scope.db, member)).toContainEqual(expect.objectContaining({ id: order!.id }));
+    const before = accepted.length;
+    await drain(scope.db, transport);
+    expect(accepted.slice(before)).toHaveLength(1);
+    expect(accepted[before]).toContain('separate private assignment');
+    expect(await pendingMcpWakes(scope.db, member)).toEqual([]);
+    expect((await scope.db.query('SELECT state FROM agent_commands WHERE id=$1', [order!.id])).rows)
+      .toEqual([{ state: 'pending' }]);
+  });
+
   it('connector-pending-1: a tag sent while offline shows only the offline line, and the reconnect retires it without running it', async () => {
     const { client, member, handle } = await connector();
     const before = await tag(handle, 'queued while connected');

@@ -388,7 +388,7 @@ const scope1 = fixtureScope1();
         next:expect.stringMatching(new RegExp(`^From: .+ in #.+\nid: ${sent.id}\nReply needed: true\ntext: [^]+\nReply\\(id: ${sent.id}, text: \\.\\.\\.\\) with your reply$`)),
       });
       expect(scope1.data(await client.callTool({ name: 'list_mentions', arguments: {} })).wakes)
-        .toContainEqual(expect.objectContaining({ id:sent.id,from:{agent:AGENT,place:ROOM} }));
+        .not.toContainEqual(expect.objectContaining({ id:sent.id }));
       notices.length = 0;
       expect(await scope1.daemon.execute('order', args, AGENT)).toMatchObject({ id: sent.id });
       expect(notices).toEqual([]);

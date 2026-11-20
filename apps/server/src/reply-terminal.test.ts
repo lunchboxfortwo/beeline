@@ -75,7 +75,9 @@ describe('replies without an ask end acknowledgement exchanges', () => {
       expect(next!.includes(`Reply(id: ${replied.id}, text: ...) with your reply`)).toBe(asked);
       expect(next!).toContain(`Reply needed: ${asked}`);
       expect(next!).not.toContain('no_reply_needed');
-      expect(next!).toBe((await tools.ok(client, 'list_mentions', {})).wakes.find((wake:{id:string})=>wake.id===replied.id).next);
+      const wake = (await tools.ok(client, 'list_mentions', {})).wakes.find((wake:{id:string})=>wake.id===replied.id);
+      if (route === 'events') expect(wake.next).toBe(next!);
+      else expect(wake).toBeUndefined();
       await tools.ok(client, 'reply', {id:replied.id,text:'Received'});
       if (!asked) expect(await native()).toEqual([]);
       else expect(await native()).toHaveLength(1);

@@ -665,9 +665,14 @@ async function postMessage(db: SqlDatabase, input: PublicPost, chat: Chat): Prom
 async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, chat: Chat): Promise<CommandRow | undefined> {
   const sender = chat.members.find(member => member.id === (input.privatePayload?.authorId ?? chat.source?.author_id));
   const target = chat.members.find(member => member.id === input.agentId);
-  if (sender?.kind === 'human' && input.reason !== 'tagged_lifecycle_restart' && input.reason !== 'tagged_lifecycle_retry' && target?.access_policy != null &&
+  let cancelled = false; if (input.reason === 'mcp_call' && input.parent?.id) {
+    const claimed = (await db.query<{ state: string }>(`SELECT command.state FROM agent_commands command WHERE command.id=$1
+      AND EXISTS(SELECT 1 FROM rooms_mcp_members member WHERE member.member_id=command.agent_id) FOR UPDATE OF command`, [input.parent.id])).rows[0];
+    cancelled = claimed?.state === 'cancelled';
+  }
+  if (cancelled || sender?.kind === 'human' && input.reason !== 'tagged_lifecycle_restart' && input.reason !== 'tagged_lifecycle_retry' && target?.access_policy != null &&
     !senderMayAddressAgent(parseAgentAccessPolicy(target.access_policy), sender.id, target.owner_id ?? undefined))
-    throw wall('access', 'the agent owner’s creator-only or people-allowlist policy does not allow this sender to address the agent');
+    throw wall('access', cancelled ? 'command turn cancelled' : 'the agent owner’s creator-only or people-allowlist policy does not allow this sender to address the agent');
   if (input.avatarJob && sender?.kind === 'human' && target?.access_policy != null && target.owner_id !== sender.id)
     throw wall('membership', 'only the agent owner may generate its avatar (access denied)');
   const id = input.id ?? (input.sourceMessageId
@@ -675,11 +680,6 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
     : randomBytes(32).toString('hex'));
   const lifecycle = input.reason.startsWith('corner_') || input.reason === 'subscribed_event' && Boolean(chat.opening);
   const parent = input.parent ?? (lifecycle ? chat.opening ?? undefined : undefined);
-  if (input.reason === 'mcp_call' && parent?.id) {
-    const claimed = (await db.query<{ state: string }>(`SELECT command.state FROM agent_commands command WHERE command.id=$1
-      AND EXISTS(SELECT 1 FROM rooms_mcp_members member WHERE member.member_id=command.agent_id) FOR UPDATE OF command`, [parent.id])).rows[0];
-    if (claimed?.state === 'cancelled') throw wall('access', 'command turn cancelled');
-  }
   const handover = lifecycle && !input.privatePayload ? chat.handover : undefined;
   const opening = input.reason === 'corner_objective' ? input.privatePayload : chat.opening?.private_payload;
   const escalationIdentity = chat.handover?.author_id ?? opening?.authorId;

@@ -504,7 +504,7 @@ const scope1 = fixtureScope1();
       }) },
     ]);
     const mentions = await client.callTool({ name: 'list_mentions', arguments: {} });
-    expect(JSON.stringify(mentions)).toContain(result.id);
+    expect(JSON.stringify(mentions).includes(result.id)).toBe(callback === 'none');
   });
 
 
