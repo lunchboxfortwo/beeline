@@ -64,7 +64,7 @@ it.each([0, 1])(
         () => {},
         () => {},
         () => {},
-      ]);
+      ], React.useRef<string | null>(null));
       return (
         <EmptyLedgerState
           variant={variant}
@@ -109,3 +109,47 @@ it.each([0, 1])(
     await act(async () => tree.unmount());
   },
 );
+
+it.each([
+  ['starter-ask-agent', '@ruby Help me turn this idea into a plan: '],
+  ['starter-open-corner', '@ruby Open a thread to '],
+])('records %s only when its fill succeeds', (testID, expected) => {
+  const draft = { current: '' };
+  const insertedStarterRef = { current: null as string | null };
+  const setText = vi.fn();
+  const setSelection = vi.fn();
+  function Header() {
+    const [, , , , , , prompts] = useChatHeader([
+      undefined,
+      { members: [{ identity: { kind: 'agent', handle: 'ruby', pubkey: 'agent-1' } }],
+        viewer: { permissions: { send: true } } } as any,
+      'general', false, 'room', 'room-id', false, 'viewer', null, new Map(), null,
+      new Map(), 0,
+      { agents: [{}], workspace: { name: 'Team' } } as any,
+      false, { current: null }, draft, { current: new Map() }, { current: new Map() },
+      setText, setSelection, 'workspace', false, vi.fn(), true,
+      vi.fn(), vi.fn(), vi.fn(), vi.fn(),
+    ], insertedStarterRef);
+    return <EmptyLedgerState variant="room" starterPrompts={prompts} onPress={() => {}} />;
+  }
+  let tree: ReturnType<typeof create>;
+  act(() => { tree = create(<Header />); });
+  const press = () => tree.root.findAll((node: any) =>
+    node.props.testID === testID && typeof node.props.onPress === 'function')[0].props.onPress();
+  try {
+    act(press);
+    expect(draft.current).toBe(expected);
+    expect(setText).toHaveBeenLastCalledWith(expected);
+    expect(insertedStarterRef.current).toBe(expected);
+    expect(setSelection).toHaveBeenLastCalledWith({ start: expected.length, end: expected.length });
+    draft.current = 'my own draft';
+    insertedStarterRef.current = null;
+    setText.mockClear();
+    act(press);
+    expect(draft.current).toBe('my own draft');
+    expect(setText).not.toHaveBeenCalled();
+    expect(insertedStarterRef.current).toBeNull();
+  } finally {
+    act(() => tree.unmount());
+  }
+});

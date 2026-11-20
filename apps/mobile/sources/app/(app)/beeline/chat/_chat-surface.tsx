@@ -1,4 +1,4 @@
-import { useCallback, useMemo, type MutableRefObject, type Ref } from 'react';
+import { useCallback, useRef, type MutableRefObject, type Ref } from 'react';
 import { Platform } from 'react-native';
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
 import { useAnimatedStyle } from 'react-native-reanimated';
@@ -100,7 +100,7 @@ export function BuzzChatSurface({
     decodedId, () => setMembershipError, navigation, session,
   ]);
   const [
-    inputText, setDesktopDeliveryState, setInputText, setInputSelection, setDismissedMentionKey,
+    inputText, setDesktopDeliveryState, updateInputText, setInputSelection, setDismissedMentionKey,
     desktopWorkPaneRef, setDesktopWorkPane, desktopWorkPaneContent, inputSelection,
     dismissedMentionKey, optimisticDeletes,
     optimisticReactions, dismissedSlashText, setHighlightedSlashVerbIndex, composerHeight,
@@ -118,6 +118,11 @@ export function BuzzChatSurface({
   ] = useChatComposerDraft([
     decodedId, userPubkey, desktopExperience, desktopAvailableWidth, outbox, transport,
   ]);
+  const insertedStarterRef = useRef<string | null>(null);
+  const setInputText = useCallback((update: string | ((previous: string) => string)) => {
+    insertedStarterRef.current = null;
+    updateInputText(update);
+  }, [updateInputText]);
   const [
     setMembershipError, isDirectMessage, participantPickerVisible, roomRepoAccessIssue, setCornerOpenRepoPrompt, participantPickerKind, composerFocused,
     directMessage, setAgentConnectVisible, setParticipantPickerKind, setParticipantPickerVisible, targetBranchActionId,
@@ -219,11 +224,7 @@ export function BuzzChatSurface({
     selectedAgentMentionsRef, selectedMentionsRef, setInputText, setInputSelection,
     activeCommunityId, viewerIsAgent, setAgentConnectVisible, canManageWorkspace,
     setMembershipError, setParticipantPickerKind, openWorkspaceRoster, setParticipantPickerVisible,
-  ]);
-  const starterTemplates = useMemo(
-    () => starterPrompts?.flatMap((prompt) => (prompt.fillText ? [prompt.fillText] : [])) ?? [],
-    [starterPrompts],
-  );
+  ], insertedStarterRef);
   const [
     desktopTranscript, transcriptMessagesRef, transcriptMessages, visibleMessages,
     cornerAgentPubkey, dismissComposerKeyboard, speakerWorking, continuedAttributionIds,
@@ -618,7 +619,7 @@ export function BuzzChatSurface({
   replyTarget={replyTarget}
   setReplyTarget={setReplyTarget}
   composerTagHandles={composerTagHandles}
-  starterTemplates={starterTemplates}
+  insertedStarterRef={insertedStarterRef}
   pendingAttachments={pendingAttachments}
   attachmentUploader={attachmentUploader}
   sending={sending}

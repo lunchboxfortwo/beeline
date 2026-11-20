@@ -128,26 +128,26 @@ describe('a bare starter template has nothing to send', () => {
     ]);
   });
 
-  it.each(templates)('holds Send while %j is unfilled, trailing whitespace included', (template) => {
-    expect(isBareStarterTemplate(template, templates)).toBe(true);
-    expect(isBareStarterTemplate(`${template}   `, templates)).toBe(true);
-    expect(isBareStarterTemplate(`${template}\n`, templates)).toBe(true);
-    expect(isBareStarterTemplate(template.trimEnd(), templates)).toBe(true);
+  it.each(templates)('blocks only the exact inserted template %j', (template) => {
+    expect(isBareStarterTemplate(template, template)).toBe(true);
+    expect(isBareStarterTemplate(`${template}   `, template)).toBe(false);
+    expect(isBareStarterTemplate(`${template}\n`, template)).toBe(false);
+    expect(isBareStarterTemplate(template.trimEnd(), template)).toBe(false);
   });
 
   it.each(templates)('allows Send once anything is typed after %j', (template) => {
-    expect(isBareStarterTemplate(`${template}x`, templates)).toBe(false);
-    expect(isBareStarterTemplate(`${template}ship the onboarding fix`, templates)).toBe(false);
+    expect(isBareStarterTemplate(`${template}x`, template)).toBe(false);
+    expect(isBareStarterTemplate(`${template}ship the onboarding fix`, template)).toBe(false);
   });
 
   it('leaves drafts that never came from a starter alone', () => {
     for (const draft of ['', 'hello', '@ruby', '@ruby Help me']) {
-      expect(isBareStarterTemplate(draft, templates)).toBe(false);
+      expect(isBareStarterTemplate(draft, null)).toBe(false);
     }
-    expect(isBareStarterTemplate('@ruby Open a thread to ', [])).toBe(false);
+    expect(isBareStarterTemplate('@ruby Open a thread to ', null)).toBe(false);
   });
 
   it('keeps a complete starter prompt with no trailing slot sendable', () => {
-    expect(isBareStarterTemplate('@ruby Summarize today', ['@ruby Summarize today'])).toBe(false);
+    expect(isBareStarterTemplate('@ruby Summarize today', '@ruby Summarize today')).toBe(false);
   });
 });

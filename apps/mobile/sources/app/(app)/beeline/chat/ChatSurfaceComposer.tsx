@@ -85,8 +85,7 @@ type Props = {
   replyTarget: MessageReplyTarget | null;
   setReplyTarget: React.Dispatch<React.SetStateAction<MessageReplyTarget | null>>;
   composerTagHandles: Set<string>;
-  /** The starter fills on offer here: their bare text is nothing to send yet. */
-  starterTemplates: readonly string[];
+  insertedStarterRef: React.RefObject<string | null>;
   pendingAttachments: PickedChatAttachment[];
   attachmentUploader: { state(attachment: PickedChatAttachment): import("@/buzz/chat-attachment").ChatAttachmentUploadState | undefined; subscribe(listener: () => void): () => void; start(client: import("@beeline/buzz-client").BuzzClient, attachments: readonly PickedChatAttachment[]): void; retain(attachments: readonly PickedChatAttachment[]): void; uploadAll(client: import("@beeline/buzz-client").BuzzClient, attachments: readonly PickedChatAttachment[]): Promise<import("@beeline/buzz-client").AttachmentReference[]>; };
   sending: boolean;
@@ -170,7 +169,7 @@ export const ChatSurfaceComposer = React.memo(function ChatSurfaceComposer({
   replyTarget,
   setReplyTarget,
   composerTagHandles,
-  starterTemplates,
+  insertedStarterRef,
   pendingAttachments,
   attachmentUploader,
   sending,
@@ -224,9 +223,13 @@ export const ChatSurfaceComposer = React.memo(function ChatSurfaceComposer({
   // not by default); only the list's scroll inside them gives up height, so the
   // field, attachments and keyboard spacer keep theirs.
   const phoneShrink = desktopExperience ? undefined : { flexShrink: 1, minHeight: 0 };
-  // A starter's bare template is not a message until something is added to it.
   const starterUnfilled =
-    !pendingAttachments.length && isBareStarterTemplate(inputText, starterTemplates);
+    !pendingAttachments.length && isBareStarterTemplate(inputText, insertedStarterRef.current);
+  const sendComposer = (dictated?: DictatedSend) => {
+    if (!pendingAttachments.length && isBareStarterTemplate(inputTextRef.current, insertedStarterRef.current))
+      return Promise.resolve(false);
+    return handleSend(undefined, dictated);
+  };
   return (<YStack
                 position="relative"
                 zIndex={1}
@@ -555,7 +558,7 @@ export const ChatSurfaceComposer = React.memo(function ChatSurfaceComposer({
                           );
                           if (desktopAction === 'send') {
                             event.preventDefault();
-                            if (!starterUnfilled) void handleSend();
+                            void sendComposer();
                           }
                           return;
                         }
@@ -600,7 +603,7 @@ export const ChatSurfaceComposer = React.memo(function ChatSurfaceComposer({
                           ? () => {
                               selectHighlightedPaletteItem();
                             }
-                          : (dictated?: DictatedSend) => handleSend(undefined, dictated)
+                          : sendComposer
                       }
                     />
                     <Motion motion={composerBottomInset} />

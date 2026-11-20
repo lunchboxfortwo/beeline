@@ -99,13 +99,6 @@ export function roomStarterPrompts(input: {
   ];
 }
 
-/**
- * A fill starter that ends in a space leaves its slot at the end for the
- * person to finish, so the composer holding only that bare template (trailing
- * whitespace included) has nothing to send yet. A starter that is already a
- * complete prompt stays sendable as it is.
- */
-export function isBareStarterTemplate(text: string, templates: readonly string[]): boolean {
-  const typed = text.trimEnd();
-  return templates.some((template) => /\s$/.test(template) && template.trimEnd() === typed);
+export function isBareStarterTemplate(text: string, insertedTemplate: string | null): boolean {
+  return insertedTemplate !== null && /\s$/.test(insertedTemplate) && text === insertedTemplate;
 }
