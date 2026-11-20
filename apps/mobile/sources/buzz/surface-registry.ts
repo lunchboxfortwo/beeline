@@ -199,6 +199,7 @@ export class SurfaceRegistry {
 
   /**
    * Coalesce simultaneous route reads of the same authorized projection.
+   * Resolves from the published value without waiting for disk persistence.
    * Resolves null when a publish or removal overtook the response and no
    * current value is held: the caller must not paint.
    */

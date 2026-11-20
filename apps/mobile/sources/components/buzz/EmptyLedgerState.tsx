@@ -21,7 +21,10 @@ type EmptyLedgerStateProps = {
   name?: string;
   agentHandle?: string;
   onPress: () => void;
-  /** A Room the viewer can write in, empty: teach by doing (first Room). */
+  /**
+   * First steps for a writable empty Room; null hides copy while they load,
+   * undefined uses the generic empty state.
+   */
   starterPrompts?: readonly EmptyLedgerStarterPrompt[] | null;
   /** The line under the starter title (`roomStarterIntro`). */
   starterIntro?: string;

@@ -45,7 +45,8 @@ export function roomRowName(item: Pick<ChatListItem, 'room' | 'directMessage'>):
  * The preview line's attribution. The viewer's own last message reads
  * `you: ` in the muted tone; anyone else's — a person or an agent alike —
  * reads `@handle: ` in brass; an empty Room reads `No messages yet` with no
- * attribution at all. The preview text itself always sits in the quiet tone.
+ * attribution at all. System events also omit attribution because their text
+ * already names the actor. The preview text itself always sits in the quiet tone.
  */
 export type RoomRowPreview =
   | { attribution: 'none'; text: string }

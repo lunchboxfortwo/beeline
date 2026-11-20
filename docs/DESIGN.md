@@ -224,7 +224,7 @@ Flat by default. Depth is tonal: the elevation ladder in Colors, one hairline, a
 
 A **box** (border + fill + radius) appears only around something the user must find and act on (an input, a button, a poll option), or a small number of distinct, non-repeating regions (the merge-approval panel, a safety notice, a grant card). A box never wraps an ordinary message, attachment, or avatar.
 
-A **rule** is one edge, no fill, no radius. Hairlines divide an index (Room list, members, settings). In the transcript, code fences take a quiet 2 px left rule. Steps and repository-event disclosures carry no top rule; their type and chevron mark them, with a 44 px minimum tap height. Only separators between sibling rows remain; first children and standalone records have no upper boundary.
+A **rule** is one edge, no fill, no radius. Hairlines divide an index (Room list, members, settings). In the transcript, code fences take a quiet 2 px left rule. An unterminated fence with no code renders its opening marker as text. Steps and repository-event disclosures carry no top rule; their type and chevron mark them, with a 44 px minimum tap height. Only separators between sibling rows remain; first children and standalone records have no upper boundary.
 
 **Choice options are plates, not ledger rows.** A poll or question option is its own house-radius plate with a 1 px border, `space.sm` apart, a letter on a 26 px square, label in `body`, consequence in `meta` at `ledgerQuiet`.
 
@@ -262,7 +262,7 @@ Approval cards lead with the agent’s plain-language purpose, then available Ru
 - **Busy:** the grammar `Spinner` (the one ring spinner) appears inside the labelled control.
 
 ### Index rows
-- **`ChatRow`** (`ui/screens/chats/ChatTree.tsx`) is shared by phone and desktop. Names use `body` (SemiBold when unread); previews are one `meta` line in `textSecondary` (`textPrimary` when unread) with `@author · ` inline. Room names carry a brass `#`. The trailing mark sits on the name's line after the age: a dot means new messages; the `AtMark` replaces it while the Room needs the viewer (an approval waiting, an unread mention, or a thread waiting on them that is not listed under it). Long press toggles a device-local pin.
+- **`ChatRow`** (`ui/screens/chats/ChatTree.tsx`) is shared by phone and desktop. Names use `body` (SemiBold when unread); previews are one `meta` line in `textSecondary` (`textPrimary` when unread) with attribution governed by `roomRowPreview` in `buzz/room-list-row.ts`. Room names carry a brass `#`. The trailing mark sits on the name's line after the age: a dot means new messages; the `AtMark` replaces it while the Room needs the viewer (an approval waiting, an unread mention, or a thread waiting on them that is not listed under it). Long press toggles a device-local pin.
 - **Desktop selection** is `bgHighlight` plus a 1 px brass left rule. The phone has no selected state.
 - **Thread expansion.** Chat-list thread visibility and More follow [product behavior notes](product-notes.md).
 - **Standalone corners list** (`corners/[roomId]`): `PageHeader` with the Room name as eyebrow; rows use `ThreadLine`: thread identity, title and state copy, with the shared state mark at the right.
