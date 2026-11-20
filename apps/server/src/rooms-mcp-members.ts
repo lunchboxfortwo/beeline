@@ -20,7 +20,8 @@ removeIdentityMemberships,
 restoreInvitedWorkspaceMembership,
 } from './membership-join.js';
 import { mentionRouting } from './owed-mentions.js';
-import { notifyMcpDeliveryChange,notifyMcpWebhook } from './postgres-live.js';
+import { notifyMcpWebhook } from './postgres-live.js';
+import { connectorDeliveryChanged,markConnectorsOffline,noteConnectorPresence,readMemberDeliveries } from './rooms-mcp-delivery.js';
 import { deliverMcpEvents,mcpWakeText,queueMcpMentionEvents } from './rooms-mcp-events.js';
 import { fetchMcpLogo,mcpClientName,mcpMemberAvatar } from './rooms-mcp-logos.js';
 
@@ -405,7 +406,7 @@ export async function deliverMcpMemberWebhooks(
       code:accepted?'host_execution_unknown':httpStatus?'http_error':'network_error',...(row.command_id?{commandId:row.command_id}:{}),
       ...(httpStatus?{httpStatus}:{}),durationMs:Date.now()-deliveryStarted},row.owner_id??undefined).catch(()=>undefined);
     if (!accepted) await db.query("UPDATE rooms_mcp_delivery SET failure='webhook_delivery_failed' WHERE member_id=$1 AND generation=$2 AND mechanism='webhook'",[row.member_id,row.delivery_generation]);
-    if (!accepted)await notifyMcpDeliveryChange(db,row.member_id);
+    if (!accepted)await connectorDeliveryChanged(db,row.member_id);
     if (!accepted)
       await db.query(`UPDATE subscription_webhook_calls SET outcome='refused',reason='delivery failed' WHERE id=$1`, [row.call_id]);
     else delivered++;
@@ -575,6 +576,7 @@ export async function setMcpMemberWebhook(
         WHERE member_id=$1 AND delivered_at IS NULL RETURNING call_id
       ) UPDATE subscription_webhook_calls SET outcome='skipped',reason='webhook disabled'
         WHERE id IN (SELECT call_id FROM cancelled)`, [memberId]);
+    await noteConnectorPresence(tx, memberId);
   });
   return { webhook: raw || null, secret: Boolean(sealed) };
 }
@@ -607,4 +609,21 @@ export async function mcpProvenance(db: SqlDatabase, memberId: string, roomId: s
       [memberId, roomId, messageId ?? null, replyTo ?? null],
     )).rows[0];
   });
+}
+
+/**
+ * A person's tag or direct message to an offline connector is queued as usual
+ * and the Room shows the existing offline line. Seeing the connector offline
+ * here moves its disconnect marker, so its reconnect retires this tag too.
+ */
+export async function noteOfflineConnectors<T extends { id: string; mcp: boolean }>(
+  db: SqlDatabase,
+  targets: readonly T[],
+): Promise<readonly T[]> {
+  const connectors = targets.filter((target) => target.mcp).map((target) => target.id);
+  if (!connectors.length) return targets;
+  const deliveries = await readMemberDeliveries(db, connectors);
+  const offline = connectors.filter((member) => deliveries.get(member)?.offline);
+  if (offline.length) await markConnectorsOffline(db, offline);
+  return targets;
 }

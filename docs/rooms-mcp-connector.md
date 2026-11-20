@@ -111,6 +111,20 @@ elapsed time never re-delivers it or reopens its completed helper command.
 ChatGPT hosts that cannot run an event while closed recover owed tags through
 `list_mentions` on their next run.
 
+A reconnect retires stale work without a timer. Each time the server sees a
+connector offline (the same delivery facts that drive the offline line,
+including when a person tags it), it records that moment on
+`rooms_mcp_members.disconnected_at`. When a delivery change brings the connector
+back online, the unclaimed commands queued up to that moment are cancelled
+(`connector_reconnected`) and its owed tags are cleared, so none runs late.
+A command counts as claimed once an answer is committed, a tool call runs
+under it, or a webhook or event host has accepted it; claimed commands stay.
+Work queued after that moment, or while connected, is still delivered. Nothing
+is posted and nobody is woken. A connector that is never online, such as an
+on-demand host with no route, keeps its queue. The one-time
+`stuck-connector-commands-v1` migration applied the same rule to work queued
+before 20 Nov 2026 20:00 UTC. Coverage: `connector-reconnect.test.ts`.
+
 ## Agent tools
 
 A connected app's member also gets the tools Beeline agents have (`apps/server/src/rooms-mcp-agent.ts`). Each call runs the same `DaemonService` operation an agent's tool call reaches, as the member, so membership, reviewer independence, the merge gate (reviewer pass, green checks, no hold), holds, grants and passkey approvals apply unchanged. Each tool takes the `address` it acts in, because an app has no current place.

@@ -63,6 +63,7 @@ import { backfillWorkflowSkillDescriptions, closeStaleWorkflowGateChoices } from
 import { withdrawSupersededGrantAsks } from './grant-policy-upgrade.js';
 import { restoreOwnerApprovedGrants } from './migrations/owner-approved-grants.js';
 import { clearDepartedReviewers } from './migrations/departed-reviewers.js';
+import { retireStuckConnectorCommands } from './migrations/stuck-connector-commands.js';
 import { backfillRegistryApps } from './app-connections.js';
 import { postgresLiveSchema } from './postgres-live.js';
 import { COMPUTER_EXPIRY_SCHEMA } from './computer-expiry-schema.js';
@@ -656,6 +657,8 @@ export async function migrateData(database: SqlDatabase): Promise<void> {
     workflowBackfillOnce(database, 'archived-corner-assignments-v1', cancelArchivedCornerAssignments));
   await dataStep('archived corner wakes', () =>
     workflowBackfillOnce(database, 'archived-corner-wakes-v1', deleteArchivedCornerWakeSources));
+  await dataStep('stuck connector commands', () =>
+    workflowBackfillOnce(database, 'stuck-connector-commands-v1', retireStuckConnectorCommands));
   await dataStep('terminal push claims', () =>
     workflowBackfillOnce(database, 'terminal-push-claims-v1', compactPushClaims));
   if (searchDocuments)

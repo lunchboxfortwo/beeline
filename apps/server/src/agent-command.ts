@@ -30,7 +30,7 @@ import { recordStarPromptReply } from './github-star-prompt.js';
 import { observeQueuedAnswer } from './signin-funnel.js';
 import { hasSystemReportMention,isChannelMentionToken,typedMentionHandles } from './message-mentions.js';
 import { mcpCommandWakeSql } from './rooms-mcp-events.js';
-import { recordMcpMemberWebhook,recordMcpMention } from './rooms-mcp-members.js';
+import { recordMcpMemberWebhook,recordMcpMention,noteOfflineConnectors } from './rooms-mcp-members.js';
 import { cleanVoiceReply } from './voice-reply.js';
 import { modelText,systemText,type AgentVoice,type Composed,type MemberText,type SystemAuthorId } from './message-origin.js';
 type Attachment = NonNullable<PrivateCommandPayload['attachments']>[number];
@@ -650,7 +650,7 @@ async function postMessage(db: SqlDatabase, input: PublicPost, chat: Chat): Prom
   ].filter(member => member.kind === 'agent' && member.id !== input.authorId && member.id !== SYSTEM_IDENTITY_ID).map(member => [member.id, member])).values()];
   const avatarJob = human && /^(?:@[^\s]+\s+)?\/draw-avatar(?:\s|$)/i.test(input.text.trim());
   // The owner's creator/allowlist setting decides which people address a hosted agent; others are not its targets.
-  for (const member of targets.filter(member => !human || member.access_policy == null ||
+  for (const member of (human ? await noteOfflineConnectors(db, targets) : targets).filter(member => !human || member.access_policy == null ||
     senderMayAddressAgent(parseAgentAccessPolicy(member.access_policy), input.authorId, member.owner_id ?? undefined))) {
     const item = await insertAgentCommand(db, { roomId: chat.id, agentId: member.id, sourceMessageId: id,
       reason: human ? chat.direct_participants ? 'direct_message' : 'human_tag' : 'agent_tag', parent: input.parent,

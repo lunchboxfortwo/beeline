@@ -2568,7 +2568,8 @@
           "created_at": "existing before the registry; weekly audit reviews",
           "callback_url": "existing before the registry; weekly audit reviews",
           "callback_secret": "existing before the registry; weekly audit reviews",
-          "profile_set": "existing before the registry; weekly audit reviews"
+          "profile_set": "existing before the registry; weekly audit reviews",
+          "disconnected_at": "The last time the server saw the connector offline; its reconnect retires the unclaimed commands queued up to then."
         }
       },
       "rooms_mcp_mentions": {

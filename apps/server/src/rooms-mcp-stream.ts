@@ -1,5 +1,5 @@
-import { recoverMemberDelivery } from './rooms-mcp-delivery.js';
-import { notifyCommittedCommand, notifyMcpDeliveryChange } from './postgres-live.js';
+import { connectorDeliveryChanged, recoverMemberDelivery } from './rooms-mcp-delivery.js';
+import { notifyCommittedCommand } from './postgres-live.js';
 import { ROUTER_AUTHORITY_LOCK } from './router-authority-lock.js';
 import { MEMBERSHIP_AUTHORITY_SCHEMA } from './membership-authority-schema.js';
 import { committedCommandNotificationSchema } from './postgres-live.js';
@@ -148,7 +148,7 @@ export async function serveMcpMemberStream(database: SqlDatabase, principal: Mcp
   await database.transaction(async db=>{
     await db.query("UPDATE rooms_mcp_delivery SET stream_id=$2,credential_hash=$3 WHERE member_id=$1 AND mechanism='local'",[member,streamId,principal.hash]);
     await notifyCommittedCommand(db,{principal:'mcp',operation:'stream',commandId:member});
-    await notifyMcpDeliveryChange(db,member);
+    await connectorDeliveryChanged(db,member);
   });
   let stopped = false, running = false, dirty = true, initial = true, position = input.cursor, mentionCursor = input.mentionCursor;
   const shutdown = () => close();
@@ -157,7 +157,7 @@ export async function serveMcpMemberStream(database: SqlDatabase, principal: Mcp
     input.signal?.removeEventListener('abort',shutdown);
     void database.transaction(async db=>{
       await db.query('UPDATE rooms_mcp_delivery SET stream_id=NULL WHERE member_id=$1 AND stream_id=$2',[member,streamId]);
-      await notifyMcpDeliveryChange(db,member);
+      await connectorDeliveryChanged(db,member);
     }).catch(()=>undefined);
     if (reason && !response.destroyed && !response.writableEnded) response.write(JSON.stringify({v:1,type:'ended',reason})+'\n');
     if (!response.writableEnded) response.end();
@@ -179,7 +179,7 @@ export async function serveMcpMemberStream(database: SqlDatabase, principal: Mcp
           if (!await currentCredential(db,principal)) throw new Error('member stream credential ended');
           const bound=await db.query(`UPDATE rooms_mcp_delivery SET stream_id=$2,credential_hash=$3
             WHERE member_id=$1 AND mechanism='local' AND stream_id IS NULL`,[member,streamId,principal.hash]);
-          if (bound.rowCount) await notifyMcpDeliveryChange(db,member);
+          if (bound.rowCount) await connectorDeliveryChanged(db,member);
         });
         const prepared = await database.transaction(async db => {
           // Queue reads retire obsolete idle episodes through the terminal owner.

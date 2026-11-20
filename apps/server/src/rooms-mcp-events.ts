@@ -5,8 +5,8 @@ import { createHash,createHmac,randomBytes,randomUUID,timingSafeEqual } from 'no
 import type { SqlDatabase } from './database.js';
 import { recordDiagnostic } from './diagnostics.js';
 import { openSecrets,sealSecrets } from './free-agents.js';
-import { notifyMcpDeliveryChange,notifyMcpWakesSql,notifyMcpWebhook,POSTGRES_LIVE_CHANNEL } from './postgres-live.js';
-import { recoverMemberDelivery } from './rooms-mcp-delivery.js';
+import { notifyMcpWakesSql,notifyMcpWebhook,POSTGRES_LIVE_CHANNEL } from './postgres-live.js';
+import { connectorDeliveryChanged, noteConnectorPresence, recoverMemberDelivery } from './rooms-mcp-delivery.js';
 import { postMcpWebhook } from './rooms-mcp-members.js';
 import type { McpPrincipal } from './rooms-mcp-oauth.js';
 
@@ -94,7 +94,7 @@ export class RoomsMcpEvents {
       await this.db.transaction(async tx=>{
         await tx.query('DELETE FROM rooms_mcp_event_subscriptions WHERE id=$1 AND member_id=$2', [id, principal.member_id]);
         await tx.query("UPDATE rooms_mcp_delivery SET failure='event_subscription_ended',receipt_at=NULL WHERE member_id=$1 AND subscription_id=$2",[principal.member_id,id]);
-        await notifyMcpDeliveryChange(tx,principal.member_id!);
+        await connectorDeliveryChanged(tx,principal.member_id!);
       });
       return {};
     }
@@ -146,6 +146,7 @@ export class RoomsMcpEvents {
         sameSecret && old.verified_at.getTime() >= Date.now() - 300_000 ? old.verified_at : new Date(), expires, name]);
     });
     await recoverMemberDelivery(this.db,principal);
+    await noteConnectorPresence(this.db,principal.member_id!);
     return { id, refreshBefore: expires?.toISOString() ?? null, cursor: null, truncated: false };
   }
 }
@@ -296,7 +297,7 @@ export async function deliverMcpEvents(db: SqlDatabase, transport: Transport, si
       });
     }
     if(state==='failed' && status!==404 && status!==410) await db.query("UPDATE rooms_mcp_delivery SET failure='event_delivery_failed' WHERE member_id=$1 AND generation=$2 AND mechanism='events'",[row.member_id,row.delivery_generation]);
-    if(state==='failed')await notifyMcpDeliveryChange(db,row.member_id);
+    if(state==='failed')await connectorDeliveryChanged(db,row.member_id);
     await recordDiagnostic(db,{ name: 'mcp_delivery',...(row.command_id ? { commandId:row.command_id } : {}),deliveryState: state,outcome: state==='delivered' ? 'success' : state==='failed' ? 'failed' : 'unknown',
       ...(status ? { httpStatus: status } : {}),code: category ?? 'host_execution_unknown',durationMs: Date.now()-startedAt },row.owner_id).catch(()=>undefined);
   }

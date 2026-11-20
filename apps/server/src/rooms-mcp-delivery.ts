@@ -202,7 +202,7 @@ export async function setupMemberDelivery(
         principal.hash,
       ],
     );
-    await notifyMcpDeliveryChange(tx, principal.member_id!);
+    await connectorDeliveryChanged(tx, principal.member_id!);
     if (mechanism === 'local') {
       await tx.query(
         `SELECT beeline_mcp_stream($1,jsonb_build_object('kind','join_probe','id',$2::text))`,
@@ -296,7 +296,7 @@ export async function confirmMemberDelivery(
     throw new ExpectedRefusalError(
       'Delivery receipt does not match the current member, generation and conversation',
     );
-  await notifyMcpDeliveryChange(db, principal.member_id!);
+  await connectorDeliveryChanged(db, principal.member_id!);
   return { delivery: await readMemberDelivery(db, principal.member_id!) };
 }
 export async function localDeliveryProbe(db: SqlDatabase, member: string) {
@@ -319,7 +319,7 @@ export async function failMemberDelivery(
       'UPDATE rooms_mcp_delivery SET failure=$3 WHERE member_id=$1 AND generation=$2',
       [member, generation, reason.slice(0, 300)],
     );
-    await notifyMcpDeliveryChange(tx, member);
+    await connectorDeliveryChanged(tx, member);
   });
 }
 /** Setup in the active local assistant adopts the existing consent, with a single-use credential handoff. */
@@ -399,4 +399,72 @@ export async function recoverMemberDelivery(
     )
   ).rows[0];
   if (binding) await setupMemberDelivery(db, principal, binding);
+}
+
+/** Cancellation reason recorded on a connector command retired by a reconnect. */
+export const CONNECTOR_RECONNECT_RETIRED = 'connector_reconnected';
+
+/** An owed tag with no queued command still to deliver it. */
+export const OWED_WITHOUT_QUEUED_COMMAND_SQL = `NOT EXISTS(SELECT 1 FROM agent_commands queued
+  WHERE queued.agent_id=mention.member_id AND queued.source_message_id=mention.message_id AND queued.state='pending')`;
+
+/**
+ * A connector's queued input it has not claimed: no answer committed, no tool
+ * call made under it, and no webhook or event host accepted it. Its own
+ * in-flight tool items (`mcp_call`) are never retired.
+ */
+export const UNCLAIMED_CONNECTOR_INPUT_SQL = `command.state='pending' AND command.action='input' AND command.reason<>'mcp_call'
+  AND command.posted_reply_id IS NULL
+  AND NOT EXISTS(SELECT 1 FROM agent_commands tool WHERE tool.parent_command_id=command.id AND tool.reason='mcp_call')
+  AND NOT EXISTS(SELECT 1 FROM messages answer WHERE answer.author_id=command.agent_id
+    AND answer.request_id IN (command.id,command.turn_request_id) AND answer.deleted_at IS NULL)
+  AND NOT EXISTS(SELECT 1 FROM rooms_mcp_webhook_outbox outbox WHERE outbox.member_id=command.agent_id
+    AND outbox.message_id IN (command.id,command.source_message_id) AND outbox.delivery_state='delivered')
+  AND NOT EXISTS(SELECT 1 FROM rooms_mcp_event_deliveries event JOIN rooms_mcp_event_subscriptions subscription
+    ON subscription.id=event.subscription_id AND subscription.member_id=command.agent_id
+    WHERE (event.command_id=command.id OR event.message_id=command.source_message_id) AND event.delivery_state='delivered')`;
+
+/** The last time the server saw these connectors offline; their reconnect retires work queued up to it. */
+export async function markConnectorsOffline(db: SqlDatabase, members: readonly string[]): Promise<void> {
+  await db.query('UPDATE rooms_mcp_members SET disconnected_at=now() WHERE member_id=ANY($1::text[])', [members]);
+}
+
+/**
+ * Commit-time connector presence, read from the same server delivery facts as
+ * the Room's offline line. Each time the server sees the connector offline it
+ * moves the marker; coming back retires the unclaimed commands queued up to the
+ * last time it was seen offline, through the terminal owner, and clears the
+ * tags it still owes, so none runs late. Nothing is posted and nobody is woken.
+ * Work queued after that, or while connected, is still delivered.
+ */
+export async function noteConnectorPresence(db: SqlDatabase, member: string): Promise<number> {
+  const delivery = await readMemberDelivery(db, member);
+  if (delivery.offline) {
+    await markConnectorsOffline(db, [member]);
+    return 0;
+  }
+  const reconnected = (await db.query<{ disconnected_at: Date }>(
+    `UPDATE rooms_mcp_members member SET disconnected_at=NULL
+     FROM (SELECT member_id,disconnected_at FROM rooms_mcp_members
+       WHERE member_id=$1 AND disconnected_at IS NOT NULL FOR UPDATE) before
+     WHERE member.member_id=before.member_id RETURNING before.disconnected_at`,
+    [member],
+  )).rows[0];
+  if (!reconnected) return 0;
+  const retired = await db.query(
+    `WITH candidate AS MATERIALIZED (SELECT command.id FROM agent_commands command
+       WHERE command.agent_id=$1 AND command.created_at<=$2 AND ${UNCLAIMED_CONNECTOR_INPUT_SQL})
+     SELECT ended.id FROM candidate
+       CROSS JOIN LATERAL beeline_finish_agent_command(candidate.id,'cancelled',$3,NULL) ended`,
+    [member, reconnected.disconnected_at, CONNECTOR_RECONNECT_RETIRED],
+  );
+  await db.query(`UPDATE rooms_mcp_mentions mention SET cleared_at=now()
+    WHERE mention.member_id=$1 AND mention.cleared_at IS NULL AND ${OWED_WITHOUT_QUEUED_COMMAND_SQL}`, [member]);
+  return retired.rowCount ?? 0;
+}
+
+/** A committed delivery change invalidates Room reads, then applies presence. */
+export async function connectorDeliveryChanged(db: SqlDatabase, member: string): Promise<void> {
+  await notifyMcpDeliveryChange(db, member);
+  await noteConnectorPresence(db, member);
 }
