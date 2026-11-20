@@ -173,6 +173,42 @@ const scope1 = fixtureScope1();
   });
 
 
+  it('restores the retained root when Back returns from a review launch', async () => {
+    // Android F02: the launch URL owns initial navigation, but Back must
+    // reveal a usable signed-in deck rather than its abandoned load gate.
+    deck.pathname = '/';
+    deck.initialUrl = 'beeline://review/play-review-secret-value-0001';
+    let renderer!: ReactTestRenderer;
+    try {
+      await act(async () => { renderer = create(<Index />); });
+      expect(router.replace).toHaveBeenCalledWith({
+        pathname: '/review/[secret]', params: { secret: 'play-review-secret-value-0001' },
+      });
+      expect(renderer.root.findAllByProps({ testID: 'room-list' })).toHaveLength(0);
+      // The root layout marks explicit navigation committed; the stack can
+      // retain index under the review screen and its replacement chat deck.
+      markInitialLandingResolved();
+      await act(async () => { deck.blur?.(); });
+      vi.mocked(router.replace).mockClear();
+      await act(async () => {
+        deck.focusEffect?.();
+        renderer.update(<Index />);
+      });
+      await quiet();
+      expect(paintedRows(renderer)[0]?.latestMessage?.text).toBe('earlier');
+      expect(renderer.root.findAllByProps({ testID: 'rooms-loader-gate' })).toHaveLength(0);
+      expect(router.replace).not.toHaveBeenCalled();
+      const reads = deck.chatsReads;
+      await act(async () => { deck.blur?.(); });
+      await act(async () => { deck.focusEffect?.(); });
+      await quiet();
+      expect(paintedRows(renderer)[0]?.latestMessage?.text).toBe('earlier');
+      expect(deck.chatsReads).toBe(reads);
+      expect(router.replace).not.toHaveBeenCalled();
+    } finally { if (renderer) await act(async () => renderer.unmount()); }
+  });
+
+
   it.each([
     ['https://usebeeline.app/join/bzi_' + 'ab'.repeat(32), '/join/[token]', 'token', 'bzi_' + 'ab'.repeat(32)],
     ['beeline://review/play-review-secret-value-0001', '/review/[secret]', 'secret', 'play-review-secret-value-0001'],
