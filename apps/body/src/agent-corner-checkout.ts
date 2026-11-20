@@ -157,6 +157,7 @@ export async function materializeAgentCornerCheckout(input: {
       await rename(resolve(staging, 'HEAD'), resolve(paths.gitCommonDir, 'HEAD'));
     } finally { await rm(staging, { recursive: true, force: true }); }
   }
+  await git([`--git-dir=${paths.gitCommonDir}`, 'remote', 'set-url', 'origin', input.remote]);
   await git([`--git-dir=${paths.gitCommonDir}`, 'config', '--replace-all', 'remote.origin.fetch', '+refs/heads/*:refs/remotes/origin/*']);
   if (!creating && input.targetBranch) await fetchRepositoryCache({ gitDir: paths.gitCommonDir, label,
     args: ['origin', `+refs/heads/${input.targetBranch}:refs/remotes/origin/${input.targetBranch}`], env: input.env });

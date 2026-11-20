@@ -15,6 +15,9 @@ export async function repointBeelineWorkRepositories(database: SqlDatabase): Pro
         AND lower(moved.full_name)='lunchboxfortwo/'||lower(split_part(retired.full_name,'/',2))
       WHERE lower(retired.full_name) LIKE 'beeline-work/%'
         AND room.repository_key='github:'||retired.repository_id::text`);
+    await db.query(`UPDATE workspace_skills
+      SET repository='lunchboxfortwo/'||split_part(repository,'/',2)
+      WHERE lower(repository) LIKE 'beeline-work/%'`);
     await db.query(`UPDATE workspace_skill_versions
       SET repository='lunchboxfortwo/'||split_part(repository,'/',2)
       WHERE lower(repository) LIKE 'beeline-work/%'`);

@@ -24,7 +24,7 @@ beforeEach(async () => {
     VALUES($1,$2,'dashboard','github:11','Beeline-Work/beeline-dashboard','git://github.com/Beeline-Work/beeline-dashboard','repository',1)`, [LINKED, WORKSPACE]);
   await db.query(`INSERT INTO rooms(id,workspace_id,parent_id,name,repository_key) VALUES($1,$2,$3,'apm','github:12')`, [OTHER, WORKSPACE, PARENT]);
   await db.query(`INSERT INTO workspace_skills(id,workspace_id,slug,description,state,current_version,revision,source_room_id,repository,target_commit,path,kind)
-    VALUES($1,$2,'latency','Latency','active',1,1,$3,'lunchboxfortwo/beeline','',NULL,'procedure')`, [SKILL, WORKSPACE, PARENT]);
+    VALUES($1,$2,'latency','Latency','active',1,1,$3,'Beeline-Work/beeline','',NULL,'procedure')`, [SKILL, WORKSPACE, PARENT]);
   await db.query(`INSERT INTO workspace_skill_versions(skill_id,version,markdown,content_hash,source_job_id,source_message_ids,repository,target_commit,path,extractor_version,model)
     VALUES($1,1,'{}',$2,NULL,$3,'Beeline-Work/beeline','',NULL,'test','n/a')`, [SKILL, 'a'.repeat(64), ['m']]);
 });
@@ -44,6 +44,8 @@ it('repoints Rooms and saved skill versions from each retired Beeline-Work repos
   expect(await room(PARENT)).toEqual(untouched);
   // No moved copy exists, so the binding is left as it was.
   expect((await room(OTHER))?.repository_key).toBe('github:12');
+  expect((await db.query(`SELECT repository FROM workspace_skills WHERE id=$1`, [SKILL])).rows)
+    .toEqual([{ repository: 'lunchboxfortwo/beeline' }]);
   expect((await db.query(`SELECT repository FROM workspace_skill_versions WHERE skill_id=$1`, [SKILL])).rows)
     .toEqual([{ repository: 'lunchboxfortwo/beeline' }]);
 });

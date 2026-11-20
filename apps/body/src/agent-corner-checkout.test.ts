@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -13,7 +13,7 @@ afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 
-it.each(['empty folder', 'missing .git', 'rebuilt storage', 'both empty', 'intact', 'branch elsewhere'])('recovers %s without replacing bound folders', async state => {
+it.each(['empty folder', 'missing .git', 'rebuilt storage', 'both empty', 'intact', 'branch elsewhere', 'moved remote'])('recovers %s without replacing bound folders', async state => {
   const root = await mkdtemp(join(tmpdir(), 'agent-checkout-'));
   roots.push(root);
   const seed = join(root, 'seed');
@@ -51,7 +51,21 @@ it.each(['empty folder', 'missing .git', 'rebuilt storage', 'both empty', 'intac
   if (state === 'both empty') {
     for (const entry of await readdir(paths.gitCommonDir)) await rm(join(paths.gitCommonDir, entry), { recursive: true, force: true });
   }
+  let movedHead: string | undefined;
+  if (state === 'moved remote') {
+    const moved = join(root, 'moved');
+    await rename(seed, moved);
+    input.remote = `file://${moved}`;
+    await writeFile(join(moved, 'proof.txt'), 'remote update\n');
+    await git('-C', moved, 'add', '.');
+    await git('-C', moved, '-c', 'user.name=Proof', '-c', 'user.email=proof@example.com', 'commit', '-m', 'remote update');
+    movedHead = await git('-C', moved, 'rev-parse', 'HEAD');
+  }
   await materializeAgentCornerCheckout(input);
+  if (movedHead) {
+    expect(await git('-C', paths.path, 'remote', 'get-url', 'origin')).toBe(input.remote);
+    expect(await git('-C', paths.path, 'rev-parse', 'refs/remotes/origin/main')).toBe(movedHead);
+  }
   expect((await stat(paths.path)).ino).toBe(pathInode);
   expect((await stat(paths.gitCommonDir)).ino).toBe(gitInode);
   expect(await git('-C', paths.path, 'branch', '--show-current')).toBe(input.branch);
