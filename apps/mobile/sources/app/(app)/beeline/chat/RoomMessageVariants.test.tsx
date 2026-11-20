@@ -18,8 +18,8 @@ vi.mock('@/components/buzz/LifecycleCard', () => ({ GitHubEventCard: vi.fn(() =>
 vi.mock('@/components/buzz/PrLifecycleCard', () => ({ NotificationLifecycleCard: vi.fn(() => null) }));
 vi.mock('@/components/buzz/TranscriptSwipeable', () => ({ default: vi.fn((props: any) => props.children) }));
 vi.mock('@/components/buzz/TurnProgressLine', () => ({ TurnSettledLine: vi.fn(() => null) }));
-vi.mock('@/components/buzz/DesktopMessageAction', () => ({ DesktopMessageAction: vi.fn(() => null) }));
-vi.mock('@/components/buzz/ButtonRow', () => ({ ButtonRowFrame: vi.fn(() => null) }));
+vi.mock('@/components/buzz/DesktopMessageAction', () => ({ DesktopMessageAction: (props: any) => React.createElement('DesktopMessageAction', props) }));
+vi.mock('@/components/buzz/ButtonRow', () => ({ ButtonRowFrame: ({ children }: any) => children }));
 vi.mock('@/components/buzz/DesktopWorkspacePortal', () => ({ DesktopWorkspacePortal: vi.fn(() => null) }));
 vi.mock('@/components/buzz/AppMark', () => ({ AppMark: vi.fn(() => null) }));
 vi.mock('@/components/buzz/ArtifactMedia', () => ({ ArtifactImage: vi.fn(() => null) }));
@@ -716,9 +716,11 @@ it('removes desktop New thread when an ordinary message Room is archived', () =>
     return render({ item: row });
   }
   act(() => { renderer = create(<Fixture archived={false} />); });
-  expect(renderer.root.findByType(OrdinaryLedgerMessage).props.onForwardToNewCorner).toBe(forward);
+  act(() => renderer.root.findByProps({ testID: 'thread-button-message' }).props.onPress());
+  expect(forward).toHaveBeenCalledWith(row);
   act(() => { renderer.update(<Fixture archived />); });
-  expect(renderer.root.findByType(OrdinaryLedgerMessage).props.onForwardToNewCorner).toBeUndefined();
+  expect(renderer.root.findAllByProps({ testID: 'thread-button-message' })).toHaveLength(0);
   act(() => { renderer.update(<Fixture archived={false} />); });
-  expect(renderer.root.findByType(OrdinaryLedgerMessage).props.onForwardToNewCorner).toBe(forward);
+  act(() => renderer.root.findByProps({ testID: 'thread-button-message' }).props.onPress());
+  expect(forward).toHaveBeenCalledTimes(2);
 });
