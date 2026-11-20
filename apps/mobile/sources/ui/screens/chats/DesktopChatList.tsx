@@ -152,9 +152,7 @@ const ChatLine = React.memo(function ChatLine({ item, now, selected, pinned, onO
           peer.kind === 'agent'
             ? <IdentityMark kind="agent" seed={peer.pubkey} name={peer.name} avatarUrl={peer.avatar} face={peer.face} size={LEAD} />
             : <IdentityMark kind="human" seed={peer.pubkey} name={peer.name} avatarUrl={peer.avatar} face={peer.face} size={LEAD} />
-        ) : item.room.homepageIcon || item.room.avatar || item.room.favicon
-          ? <RepositoryMark homepageIconUrl={item.room.homepageIcon} avatarUrl={item.room.avatar} faviconUrl={item.room.favicon} size={LEAD} />
-          : <Glyph icon={Hash} size={16} />}
+        ) : <RepositoryMark homepageIconUrl={item.room.homepageIcon} size={LEAD} fallback={<Glyph icon={Hash} size={16} />} />}
       </XStack>
       <T v={unread ? 'metaStrong' : 'meta'} color={unread ? 'ink' : 'secondary'} flex={1} numberOfLines={1}
         testID={`room-${item.room.id}-title`}>{roomRowName(item).name}</T>

@@ -17,8 +17,6 @@ export type Output<Name extends keyof PhoneOperationMap> = PhoneOperationMap[Nam
 
 export interface RoomRow {
   repository_icon_room?: string | null;
-  repository_avatar?: string | null;
-  repository_favicon?: string | null;
   id: string;
   workspace_id: string;
   parent_id: string | null;
@@ -131,7 +129,7 @@ export interface AgentGrantRow {
   requester: IdentityRow; decider: IdentityRow | null; script: unknown;
 }
 
-export type RoomHeaderRow = Pick<RoomRow, 'repository_icon_room' | 'repository_avatar' | 'repository_favicon' | 'id' | 'workspace_id' | (typeof CORNER_ROW_ROOM_COLUMNS)[number]>;
+export type RoomHeaderRow = Pick<RoomRow, 'repository_icon_room' | 'id' | 'workspace_id' | (typeof CORNER_ROW_ROOM_COLUMNS)[number]>;
 
 export type CornerRow = RoomHeaderRow & OpenCornerFactsRow & {
   objective: string | null;

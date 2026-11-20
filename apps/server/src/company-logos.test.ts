@@ -6,7 +6,7 @@ vi.mock('node:dns/promises', () => ({ lookup: mocks.lookup }));
 vi.mock('node:https', () => ({
   Agent: class { constructor(options: unknown) { mocks.agents.push(options); } destroy() {} }, get: mocks.get,
 }));
-import { companyLogo, homepageKey, publicIconResponse, readCompanyLogo, readRepositoryIcon, readRepositoryLogo, sizeCompanyLogo } from './company-logos.js';
+import { companyLogo, publicIconResponse, readCompanyLogo, readRepositoryIcon, repositoryIconCandidates, sizeCompanyLogo } from './company-logos.js';
 import { COMPANY_MARK_IDS } from './company-registry.js';
 beforeEach(() => { vi.clearAllMocks(); mocks.agents.length = 0; mocks.lookup.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]); });
 afterEach(() => vi.restoreAllMocks());
@@ -121,12 +121,6 @@ describe('repository homepage icons', () => {
     expect(await readCompanyLogo('https://shared-cache.example/')).not.toBe(icon);
     expect(mocks.get).toHaveBeenCalledTimes(4);
   });
-  it('keys only valid homepage URLs and upgrades bare or HTTP websites to HTTPS', () => {
-    expect(homepageKey('grunt.run')).toBe('https://grunt.run/');
-    expect(homepageKey('http://grunt.run/docs/#hi')).toBe('https://grunt.run/docs/');
-    for (const homepage of [undefined, null, '', 'https://user:pass@grunt.run', 'https://grunt.run:8443', 'file:///tmp/icon', 'https://127.0.0.1'])
-      expect(homepageKey(homepage)).toBeUndefined();
-  });
 });
 
 describe('repository icon files', () => {
@@ -141,18 +135,35 @@ describe('repository icon files', () => {
       return { content: Buffer.from(files[file]!).toString('base64'), encoding: 'base64' };
     });
   }
-  it('lists the tree once and picks the largest square icon under root, public/ or app/', async () => {
-    const read = repository({ 'README.md': 'hi', 'docs/favicon.svg': svg, 'favicon.ico': await square(16), 'public/apple-touch-icon.png': await square(180),
-      'app/icon-512.png': await square(512, 256), 'public/logo.png': await square(600) });
+  it('picks icon files anywhere: root or a public/ directory first, then the shallowest path', () => {
+    // Today's trees: beeline, trusty-squire, grunt, testatlas and amazing-adventure.
+    expect(repositoryIconCandidates(['README.md', 'apps/mobile/fastlane/metadata/android/en-US/images/icon.png', 'apps/mobile/logo.png',
+      'apps/mobile/public/icon-512.png', 'apps/mobile/sources/assets/images/favicon.png', 'apps/mobile/sources/assets/images/icon.svg',
+      'apps/site/apple-touch-icon.png', 'apps/site/favicon.ico', 'apps/site/icon-512.png'])[0]).toEqual(['apps/mobile/public/icon-512.png']);
+    expect(repositoryIconCandidates(['apps/web/public/logo.svg', 'apps/web/public/favicon.svg', 'apps/web/src/main.ts'])).toEqual([['apps/web/public/favicon.svg', 'apps/web/public/logo.svg']]);
+    expect(repositoryIconCandidates(['site/favicon.svg', 'site/index.html'])).toEqual([['site/favicon.svg']]);
+    expect(repositoryIconCandidates(['public/favicon.svg', 'src/app.tsx'])).toEqual([['public/favicon.svg']]);
+    expect(repositoryIconCandidates(['README.md', 'src/index.ts', 'favicon.gif', 'mylogo.png', 'logo.jpg', 'icons/icon-192.png'])).toEqual([]);
+    // Root beats public/, a deeper public/ beats a shallower ordinary directory, then depth orders the rest.
+    expect(repositoryIconCandidates(['a/b/logo.png', 'assets/logo.png', 'web/public/icon.png', 'public/favicon.ico', 'Favicon.SVG', 'icon.png']))
+      .toEqual([['Favicon.SVG', 'icon.png'], ['public/favicon.ico'], ['web/public/icon.png'], ['assets/logo.png'], ['a/b/logo.png']]);
+  });
+  it('reads the first group with a square icon, its vector or largest square winning', async () => {
+    const read = repository({ 'README.md': 'hi', 'favicon.png': await square(32, 16), 'public/apple-touch-icon.png': await square(180),
+      'public/logo.png': await square(600), 'docs/favicon.svg': svg });
     const icon = await readRepositoryIcon('owner/largest', 'main', read);
-    expect(read.mock.calls.map(([path]) => path)).toEqual(['git/trees/main?recursive=1', 'git/blobs/sha2', 'git/blobs/sha3', 'git/blobs/sha4']);
+    // The non-square root file falls through to public/; the deeper docs/ file is never read.
+    expect(read.mock.calls.map(([path]) => path)).toEqual(['git/trees/main?recursive=1', 'git/blobs/sha1', 'git/blobs/sha2', 'git/blobs/sha3']);
     expect((await sharp(icon!.bytes).metadata()).width).toBe(64);
     expect(await readRepositoryIcon('Owner/Largest', 'main', read)).toBe(icon);
     expect(read).toHaveBeenCalledTimes(4);
   });
-  it('prefers a committed SVG over any raster and rasterizes it at full icon size', async () => {
-    const icon = await readRepositoryIcon('owner/vector', 'main', repository({ 'icon-512.png': await square(512), 'public/favicon.svg': svg }));
+  it('prefers a committed SVG over any raster, whatever its aspect, and rasterizes it at full icon size', async () => {
+    const icon = await readRepositoryIcon('owner/vector', 'main', repository({ 'public/icon-512.png': await square(512), 'public/favicon.svg': svg }));
     expect((await sharp(icon!.bytes).metadata()).width).toBe(64);
+    // testatlas's committed favicon.svg is 64x60.
+    const wide = await readRepositoryIcon('owner/wide', 'main', repository({ 'public/favicon.svg': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 60"><path d="M0 0h64v60H0z"/></svg>' }));
+    expect((await sharp(wide!.bytes).metadata()).width).toBe(64);
   });
   it('reads a committed favicon.ico through its largest entry', async () => {
     const png = await square(32);
@@ -166,20 +177,10 @@ describe('repository icon files', () => {
     expect((await sharp(icon!.bytes).metadata()).width).toBe(32);
   });
   it('finds no icon when the tree has none or GitHub refuses, and keeps that miss for a minute', async () => {
-    expect(await readRepositoryIcon('owner/none', 'main', repository({ 'src/index.ts': 'x', 'favicon.png': await square(32) }))).toBeUndefined();
+    expect(await readRepositoryIcon('owner/none', 'main', repository({ 'src/index.ts': 'x', 'favicon.gif': await square(32) }))).toBeUndefined();
     const refused = vi.fn(async () => { throw new Error('404'); });
     expect(await readRepositoryIcon('owner/gone', 'main', refused)).toBeUndefined();
     expect(await readRepositoryIcon('owner/gone', 'main', refused)).toBeUndefined();
     expect(refused).toHaveBeenCalledTimes(1);
-  });
-  it('tries the homepage favicon first and the repository file only when the homepage has none', async () => {
-    const read = repository({ 'favicon.svg': svg });
-    response('<link rel="icon" href="/mark.png">', 'text/html'); response(await square(48));
-    const homepage = await readRepositoryLogo('homepage-first.example', 'owner/homepage', 'main', read);
-    expect((await sharp(homepage!.bytes).metadata()).width).toBe(48); expect(read).not.toHaveBeenCalled();
-    mocks.lookup.mockResolvedValue([{ address: '127.0.0.1', family: 4 }]);
-    const file = await readRepositoryLogo('no-icon.example', 'owner/file', 'main', read);
-    expect((await sharp(file!.bytes).metadata()).width).toBe(64); expect(read).toHaveBeenCalledTimes(2);
-    expect(await readRepositoryLogo(null, 'owner/unlinked', 'main')).toBeUndefined();
   });
 });

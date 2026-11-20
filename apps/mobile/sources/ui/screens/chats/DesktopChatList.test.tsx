@@ -17,6 +17,7 @@ vi.mock('@/components/buzz/RepositoryMark', () => ({ RepositoryMark: (props: any
 vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: () => null }));
 vi.mock('@/utils/use-fine-pointer', () => ({ useFinePointer: () => pointer.fine }));
 
+import { Hash } from 'lucide-react-native';
 import type { ChatListCorner } from '@beeline/api-contract/phone';
 import type { ChatListItem } from '@beeline/buzz-client';
 import { HEIGHT } from '@/ui/grammar';
@@ -89,11 +90,14 @@ it('marks unread chats semibold and keeps 44 pt rows for touch', () => {
   pointer.fine = true;
 });
 
-it('leads a chat with its repository picture, and # when it has none', () => {
-  const pictured = chat('beeline', { room: { id: 'beeline', name: 'beeline', updatedAt: NOW / 1000 - 60, avatar: 'https://example.test/a.png' } } as any);
+it('leads a chat with its repository icon file, falling back to a bare #', () => {
+  const icon = 'https://example.test/v1/repository-icons/beeline';
+  const pictured = chat('beeline', { room: { id: 'beeline', name: 'beeline', updatedAt: NOW / 1000 - 60, homepageIcon: icon,
+    avatar: 'https://example.test/owner.png', favicon: 'https://example.test/favicon.png' } } as any);
   const { tree } = render([pictured, chat('plain')]);
-  const marks = tree.root.findAll((node: any) => node.type === 'RepositoryMark');
-  expect(marks.map((node: any) => node.props)).toEqual([expect.objectContaining({ avatarUrl: 'https://example.test/a.png', size: 20 })]);
-  const plain = tree.root.findAll((node: any) => node.props?.testID === 'room-plain')[0]!;
-  expect(plain.findAll((node: any) => node.type === 'Icon.Hash').length).toBeGreaterThan(0);
+  const marks = tree.root.findAll((node: any) => node.type === 'RepositoryMark').map((node: any) => node.props);
+  expect(marks).toEqual([expect.objectContaining({ homepageIconUrl: icon, size: 20 }), expect.objectContaining({ homepageIconUrl: undefined })]);
+  expect(marks[0].avatarUrl).toBeUndefined();
+  expect(marks[0].faviconUrl).toBeUndefined();
+  for (const mark of marks) expect(mark.fallback.props.icon).toBe(Hash);
 });

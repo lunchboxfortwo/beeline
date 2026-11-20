@@ -33,3 +33,12 @@ it('prioritizes the homepage icon at native pixel density and falls back to the 
   expect(image().props.source.uri).toBe('https://avatars.githubusercontent.com/u/42');
   await act(async () => tree.unmount());
 });
+
+it('swaps in the given fallback when the repository icon is missing or fails', async () => {
+  let tree: any;
+  const icon = 'https://beeline.example/v1/repository-icons/22222222-2222-4222-8222-222222222222';
+  await act(async () => { tree = create(<RepositoryMark homepageIconUrl={icon} size={20} fallback={<React.Fragment>bare</React.Fragment>} />); });
+  await act(async () => tree.root.find((node: any) => node.type === 'NativeImage').props.onError());
+  expect(tree.toJSON()).toBe('bare');
+  await act(async () => tree.unmount());
+});

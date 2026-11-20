@@ -26,7 +26,7 @@ import { ingestWalletWebhook } from "./wallet-webhooks.js";
 import { WEBHOOK_BODY_LIMIT, ingestSubscriptionWebhook } from "./subscription-webhooks.js";
 import { ingestProviderWebhook } from "./provider-webhooks.js";
 import { ingestComposioDelivery } from "./composio-delivery.js";
-import { readCompanyLogo, readRepositoryLogo, sizeCompanyLogo } from "./company-logos.js";
+import { readCompanyLogo, readRepositoryIcon, sizeCompanyLogo } from "./company-logos.js";
 import { connectorLogo } from "./workbench.js";
 import { serveEmailImage } from "./email-images.js";
 import { ServerOptions, exactPath, bytes, MAX_JSON_BYTES, json, body, appSignInWebOrigin, appSignInReturnCookie, bearerSecretMatches, clientKey, publicJson, funnelRateLimit, signatureMatches } from './server.js';
@@ -815,12 +815,13 @@ a:focus-visible { outline: 3px solid #c8a8e8; outline-offset: 4px; }
     let cached: Awaited<ReturnType<typeof readCompanyLogo>>;
     if (repositoryIconRoom) {
       const read = options.github?.readRepository;
-      const repository = (await options.database.query<{ homepage: string | null; full_name: string; default_branch: string }>(
-        `SELECT repository.homepage,repository.full_name,repository.default_branch FROM rooms room
+      const repository = (await options.database.query<{ full_name: string; default_branch: string }>(
+        `SELECT repository.full_name,repository.default_branch FROM rooms room
          JOIN github_repositories repository ON repository.full_name=room.repository_name
          WHERE room.id=$1 AND room.parent_id IS NULL AND room.repository_resolution='repository'`, [repositoryIconRoom])).rows[0];
-      cached = repository ? await readRepositoryLogo(repository.homepage, repository.full_name, repository.default_branch,
-        read && (path => read(repositoryIconRoom, repository.full_name, path))) : undefined;
+      // A chat's picture is only the repository's own committed icon file.
+      cached = repository && read ? await readRepositoryIcon(repository.full_name, repository.default_branch,
+        path => read(repositoryIconRoom, repository.full_name, path)) : undefined;
     } else {
       let id: string;
       try { id = decodeURIComponent(url.pathname.slice('/v1/company-logos/'.length)); }

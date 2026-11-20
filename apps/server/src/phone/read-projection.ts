@@ -108,8 +108,6 @@ export function roomHeader(row: RoomHeaderRow, publicOrigin: string) {
   return {
     id: row.id,
     ...(homepageIcon ? { homepageIcon } : {}),
-    ...(row.repository_avatar ? { avatar: row.repository_avatar } : {}),
-    ...(row.repository_favicon ? { favicon: row.repository_favicon } : {}),
     workspaceId: row.workspace_id,
     ...(row.parent_id ? { parentId: row.parent_id } : {}),
     name: row.name,

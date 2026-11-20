@@ -73,11 +73,6 @@ function homepageUrl(value: string): URL | undefined {
   } catch { return undefined; }
 }
 
-/** A repository homepage normalized to its HTTPS icon-cache key. */
-export function homepageKey(homepage: string | null | undefined): string | undefined {
-  return homepage ? homepageUrl(homepage)?.href : undefined;
-}
-
 /** Raw RGBA from a Windows icon's largest entry (sharp reads PNG entries but not .ico files). */
 function icoImage(bytes: Buffer): sharp.Sharp | undefined {
   if (bytes.length < 22 || bytes.readUInt32BE(0) !== 0x00000100) return undefined;
@@ -168,35 +163,53 @@ function cachedIcon(key: string, load: () => Promise<Image | undefined>): Promis
   return pending;
 }
 
-const REPOSITORY_ICON = /^(?:(?:public|app)\/)?(?:favicon\.svg|favicon\.ico|apple-touch-icon\.png|icon-512\.png)$/;
+const ICON_NAMES = new Set(['favicon.svg', 'favicon.ico', 'favicon.png', 'apple-touch-icon.png', 'icon.svg', 'icon.png', 'icon-512.png', 'logo.svg', 'logo.png']);
+/** Most blob reads one repository icon lookup spends. */
+const ICON_READS = 8;
+/** Committed icon files in pick order: groups of equal rank, a file at the root or directly in a public/
+ * directory first, then the shallowest path. Within a group the best square wins (vector, then largest). */
+export function repositoryIconCandidates(paths: readonly string[]): string[][] {
+  const ranked = paths.flatMap((path) => {
+    const parts = path.split('/');
+    if (!ICON_NAMES.has(parts[parts.length - 1]!.toLowerCase())) return [];
+    const preferred = parts.length === 1 || parts[parts.length - 2]!.toLowerCase() === 'public';
+    return [{ path, rank: `${preferred ? 0 : 1}:${String(parts.length).padStart(4, '0')}` }];
+  }).sort((a, b) => a.rank.localeCompare(b.rank) || a.path.localeCompare(b.path));
+  const groups = new Map<string, string[]>();
+  for (const { path, rank } of ranked) groups.set(rank, [...groups.get(rank) ?? [], path]);
+  return [...groups.values()];
+}
 type RepositoryRead = (path: string) => Promise<unknown>;
-/** The repository's own committed icon from one tree listing: the largest square, a vector beating any raster. */
+/** The repository's own committed icon from one tree listing, else none. */
 export function readRepositoryIcon(fullName: string, branch: string, read: RepositoryRead): Promise<Image | undefined> | undefined {
   return cachedIcon(`github:${fullName.toLowerCase()}`, async () => {
     const tree = await read(`git/trees/${encodeURIComponent(branch)}?recursive=1`) as { tree?: { path?: unknown; type?: unknown; sha?: unknown }[] } | undefined;
-    let best: { size: number; bytes: Buffer } | undefined;
-    for (const entry of tree?.tree ?? []) {
-      if (entry.type !== 'blob' || typeof entry.path !== 'string' || typeof entry.sha !== 'string' || !REPOSITORY_ICON.test(entry.path)) continue;
-      try {
-        const blob = await read(`git/blobs/${encodeURIComponent(entry.sha)}`) as { content?: unknown } | undefined;
-        if (typeof blob?.content !== 'string') continue;
-        const bytes = Buffer.from(blob.content, 'base64');
-        const image = icoImage(bytes) ?? sharp(bytes, { limitInputPixels: 1_000_000, animated: false });
-        const { width, height, format } = await image.clone().metadata();
-        const vector = format === 'svg';
-        const size = vector ? Infinity : width ?? 0;
-        if (!width || width !== height || (best && best.size >= size)) continue;
-        best = { size, bytes: await image.resize(64, 64, { fit: 'inside', withoutEnlargement: !vector }).png().toBuffer() };
-      } catch { /* try the next committed icon */ }
+    const blobs = new Map<string, string>();
+    for (const entry of tree?.tree ?? [])
+      if (entry.type === 'blob' && typeof entry.path === 'string' && typeof entry.sha === 'string') blobs.set(entry.path, entry.sha);
+    let reads = 0;
+    for (const group of repositoryIconCandidates([...blobs.keys()])) {
+      let best: { size: number; bytes: Buffer } | undefined;
+      for (const path of group) {
+        if (reads++ >= ICON_READS) break;
+        try {
+          const blob = await read(`git/blobs/${encodeURIComponent(blobs.get(path)!)}`) as { content?: unknown } | undefined;
+          if (typeof blob?.content !== 'string') continue;
+          const bytes = Buffer.from(blob.content, 'base64');
+          const image = icoImage(bytes) ?? sharp(bytes, { limitInputPixels: 1_000_000, animated: false });
+          const { width, height, format } = await image.clone().metadata();
+          const vector = format === 'svg';
+          const size = vector ? Infinity : width ?? 0;
+          // A raster must be square; a vector scales into the square whatever its aspect.
+          if (!width || (!vector && width !== height) || (best && best.size >= size)) continue;
+          best = { size, bytes: await image.resize(64, 64, { fit: 'inside', withoutEnlargement: !vector }).png().toBuffer() };
+        } catch { /* try the next committed icon */ }
+      }
+      if (best) return { bytes: best.bytes, mime: 'image/png' };
+      if (reads >= ICON_READS) break;
     }
-    return best ? { bytes: best.bytes, mime: 'image/png' } : undefined;
+    return undefined;
   });
-}
-
-/** Approved repository chat order: homepage favicon, then the repository's own icon file. */
-export async function readRepositoryLogo(homepage: string | null, fullName: string, branch: string, read?: RepositoryRead): Promise<Image | undefined> {
-  const key = homepageKey(homepage);
-  return (key ? await readCompanyLogo(key) : undefined) ?? (read ? await readRepositoryIcon(fullName, branch, read) : undefined);
 }
 
 /** Native requests physical pixels so Image can display pixel art without resampling. */
