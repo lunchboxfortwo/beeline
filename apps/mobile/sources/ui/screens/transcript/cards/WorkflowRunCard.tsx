@@ -112,4 +112,3 @@ export function WorkflowRunCardView({ detail }: { detail: WorkflowRunDetailView 
         </Card>
     );
 }
-
