@@ -35,6 +35,8 @@ In a DM, open **… → Close conversation**; on phone, you can also swipe the c
 
 Workspace admins and owners can remove someone from a top-level chat's **Members** list and use **Invite to chat** on a person's profile. On desktop, a message's **More** button opens actions including **Copy link**, **Select** and, when permitted, **Delete**. Eligible messages also offer **New thread**.
 
+In **Needs you**, an agent’s decision card shows its question, a brief when supplied, and option buttons. Tap through to read the full message.
+
 ## More
 
 - [Product behavior notes](docs/product-notes.md)
