@@ -84,6 +84,12 @@ test('Mac proof verifies every packaged Mach-O architecture and signature and pr
   assert.equal(calls.filter(([command]) => command === 'lipo').length, 4);
   assert.equal(calls.filter(([command, args]) => command === 'codesign' && args[0] === '--verify').length, 4);
   assert.ok(calls.filter(([command]) => command === 'lipo').every(([, args]) => args[1] === '-verify_arch' && args[2] === 'arm64'));
+  const unsignedCalls = [];
+  await verifyMacBinaries(directory, 'darwin-arm64', {
+    inspect, signed: path => !path.endsWith('parser.node'), execute: (...args) => unsignedCalls.push(args),
+  });
+  const adHoc = unsignedCalls.filter(([command, args]) => command === 'codesign' && args[0] === '--force' && !args.at(-1).includes('/bin/'));
+  assert.deepEqual(adHoc.map(([, args]) => args.at(-1).split('/').pop()), ['parser.node']);
   for (const rejected of ['lipo', 'codesign']) await assert.rejects(verifyMacBinaries(directory, 'darwin-arm64', {
     inspect, execute: (command, args) => {
       if (command === rejected && (command === 'lipo' || args[0] === '--verify')) throw new Error('invalid binary');
