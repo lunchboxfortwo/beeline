@@ -19,7 +19,6 @@ import { beginComposioAppSignIn } from '../app-connections.js';
 import { webPushPublicKey } from '../web-push.js';
 import { type PhoneOperationMap } from '@beeline/api-contract/phone';
 import { reportMessageIssue } from '../feedback.js';
-import { markNeedsYouSeen } from '../needs-you.js';
 import { REVIEW_IDENTITY_ID } from '../review-access.js';
 import { recordOwnerGitHubSelection } from '../app-connections.js';
 import type { ReadWalletHistoryInput } from '@beeline/api-contract/wallet';
@@ -189,10 +188,6 @@ import { phoneReadConnectionDetail, phoneRevokeConnectionGrants } from './connec
           input as Input<'countNeedsYou'>,
           viewerId,
         )) as Output<Name>;
-      case 'markNeedsYouSeen': {
-        const request = input as Input<'markNeedsYouSeen'>;
-        return await markNeedsYouSeen(ctx.database, request.workspaceId, viewerId, request.messageIds) as Output<Name>;
-      }
       case 'clearNeedsYou':
         await phoneClearNeedsYou(ctx, input as Input<'clearNeedsYou'>, viewerId);
         return undefined as Output<Name>;

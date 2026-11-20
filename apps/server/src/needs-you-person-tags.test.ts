@@ -59,16 +59,12 @@ describe('person tags in Needs you', () => {
     expect(await count()).toBe(0);
   });
 
-  it('PERSON-TAG: shares question first-seen expiry, section clear and count rules', async () => {
-    const id = await post(CORNER, PEER, '@ada please review this corner.', 30);
+  it('PERSON-TAG: shares the question rules: no expiry, section clear and count', async () => {
+    const id = await post(CORNER, PEER, '@ada please review this corner.', 30 * 60);
     expect(await count()).toBe(1);
-    expect((await database.query('SELECT 1 FROM needs_you_marks WHERE message_id=$1 AND first_seen_at IS NOT NULL', [id])).rowCount).toBe(0);
-    expect((await read()).items[0]?.expiresAt).toBeGreaterThan(Date.now() / 1000 + 23 * 3600);
-    await database.query(`UPDATE needs_you_marks SET first_seen_at=now()-interval '25 hours' WHERE message_id=$1`, [id]);
-    expect((await read()).items).toEqual([]);
-    expect(await count()).toBe(0);
+    expect((await read()).items.map(item => [item.messageId, item.expiresAt])).toEqual([[id, undefined]]);
     await post(ROOM, PEER, '@ada please check another note.');
-    expect(await count()).toBe(1);
+    expect(await count()).toBe(2);
     await phone.execute('clearNeedsYouSection', { workspaceId: WORKSPACE }, VIEWER);
     expect((await read()).items).toEqual([]);
     expect(await count()).toBe(0);
@@ -95,7 +91,8 @@ describe('person tags in Needs you', () => {
     await post(ROOM, VIEWER, 'Resolved.', 40);
     const open = await post(ROOM, AGENT, 'needs-decision: choose a route', 30);
     const seen = await post(CORNER, AGENT, 'blocked: a seen report', 20);
-    const dismissed = await post(CORNER, AGENT, 'blocked: a dismissed report', 10);
+    // In the chat, so this newer report does not supersede the thread's open one.
+    const dismissed = await post(ROOM, AGENT, 'blocked: a dismissed report', 10);
     await database.query(`UPDATE messages SET card=jsonb_build_object('reportToId',$1::text) WHERE id=ANY($2::text[])`, [VIEWER, [open, seen, dismissed]]);
     await post(ROOM, PEER, '@ada an old personal tag', 5);
     await database.query(`INSERT INTO needs_you_marks(identity_id,message_id,workspace_id,cleared_at)

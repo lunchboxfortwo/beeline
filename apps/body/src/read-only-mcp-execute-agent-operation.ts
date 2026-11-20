@@ -57,6 +57,8 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
       });
       return JSON.stringify({...result, id: update.id ?? args.roomId});
     }
+    case 'close_ask':
+      return JSON.stringify(await daemonExecute('closeAgentAsk', { messageId: args.id, reason: args.reason }));
     case 'get_chat_message': {
       const message = await daemonExecute('getRoomMessage', {
         roomId: typeof args.address === 'string' ? args.address : agentScheduleRoomId(),

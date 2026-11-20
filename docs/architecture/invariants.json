@@ -657,7 +657,7 @@
       "apps/server/src",
       "apps/auth/src"
     ],
-    "bootstrapTotal": 1647,
+    "bootstrapTotal": 1646,
     "unusedTotal": 171,
     "tables": {
       "agent_avatars": {
@@ -2043,8 +2043,12 @@
           "identity_id": "existing before the registry; weekly audit reviews",
           "message_id": "existing before the registry; weekly audit reviews",
           "workspace_id": "existing before the registry; weekly audit reviews",
-          "first_seen_at": "existing before the registry; weekly audit reviews",
+          "first_seen_at": {
+            "reason": "Retired 24-hour paint clock; current requests do not read or write it, retained for preceding serving and rollback images.",
+            "drop": "docs/release-pipeline.md#release-memory - later contract release after rollback images drain"
+          },
           "cleared_at": "existing before the registry; weekly audit reviews",
+          "cleared_reason": "Why the record left the list (answered, superseded, source-closed, withdrawn, removed, manual, or expired by the retired clock); the event that cleared it is not otherwise recoverable.",
           "reminder_dismissed_at": "existing before the registry; weekly audit reviews"
         }
       },

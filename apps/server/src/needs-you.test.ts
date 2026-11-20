@@ -14,6 +14,7 @@ import {
   withoutReaderTags,
 } from './needs-you.js';
 import { PgliteDatabase, migratedDatabase } from './test-support.js';
+import { needsYouMarksSchema } from './needs-you-marks.js';
 
 describe('the Needs-you ask rule', () => {
   it('holds only blocked and needs-decision reports, never mentions, questions or keywords', () => {
@@ -234,7 +235,7 @@ describe('PhoneService Needs-you tray', () => {
     await report(OTHER_ROOM, PEER, 'blocked: a Room the reader cannot see.', 5);
 
     const { items } = await read();
-    // Oldest first: nothing has started a clock yet.
+    // Oldest first.
     expect(items.map((item) => item.messageId)).toEqual([personTag, taggedReport, question, blocked]);
     expect(items[3]).toMatchObject({
       roomId: CORNER,
@@ -287,7 +288,6 @@ describe('PhoneService Needs-you tray', () => {
       expect(value?.count).toBe(1);
       expect(value?.items.map(item => item.messageId)).toEqual([question]);
       expect(cells).toHaveBeenCalledTimes(1);
-      expect((await database.query('SELECT * FROM needs_you_marks WHERE first_seen_at IS NOT NULL')).rows).toEqual([]);
     } finally { cells.mockRestore(); }
   });
 
@@ -305,94 +305,91 @@ describe('PhoneService Needs-you tray', () => {
     expect((await read()).items).toEqual([]);
   });
 
-  it('F04: live projections never start unseen clocks; only painted IDs are marked', async () => {
+  it('NO-TIMER: an open ask never expires, and no read, count or live projection writes', async () => {
     const first = await report(ROOM, PEER, 'needs-decision: please review this');
     const second = await report(ROOM, PEER, 'needs-decision: can you confirm?');
     const marks = async () => (await database.query(
-      `SELECT * FROM needs_you_marks WHERE first_seen_at IS NOT NULL ORDER BY message_id`,
-    )).rows;
-    const live = () => phone.liveNeedsYou(ROOM, VIEWER);
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const projection = await live();
-      expect(projection?.count).toBe(2);
-      expect(projection?.items.map(item => item.messageId)).toEqual([first, second]);
-      expect(projection?.items.every(item => item.expiresAt === undefined)).toBe(true);
-      expect(await marks()).toEqual([]);
-    }
-    await database.query(`UPDATE messages SET created_at=created_at-interval '25 hours'`);
-    expect((await live())?.count).toBe(2);
-    expect(await marks()).toEqual([]);
-    const seen = await phone.execute('markNeedsYouSeen', {
-      workspaceId: WORKSPACE, messageIds: [first],
-    }, VIEWER);
+      `SELECT message_id,first_seen_at,cleared_at FROM needs_you_marks ORDER BY message_id`)).rows;
     const before = await marks();
-    expect(before).toHaveLength(1);
-    const projection = await live();
-    expect(projection?.items.find(item => item.messageId === first)?.expiresAt)
-      .toBe(seen.seen[0]!.expiresAt);
-    expect(projection?.items.find(item => item.messageId === second)?.expiresAt).toBeUndefined();
+    expect(before).toEqual([
+      { message_id: first, first_seen_at: null, cleared_at: null },
+      { message_id: second, first_seen_at: null, cleared_at: null },
+    ]);
+    await database.query(`UPDATE messages SET created_at=created_at-interval '30 days'`);
+    const reads = [
+      (await read()).items,
+      (await phone.execute('readNeedsYou', { workspaceId: WORKSPACE, markSeen: false }, VIEWER)).items,
+      (await phone.execute('readTray', { workspaceId: WORKSPACE }, VIEWER)).needs?.items ?? [],
+      (await phone.liveNeedsYou(ROOM, VIEWER))?.items ?? [],
+    ];
+    for (const items of reads) {
+      expect(items.map(item => item.messageId)).toEqual([first, second]);
+      expect(items.every(item => item.expiresAt === undefined)).toBe(true);
+    }
+    expect((await read()).nextExpiry).toBeUndefined();
+    expect(await phone.execute('countNeedsYou', { workspaceId: WORKSPACE }, VIEWER)).toEqual({ count: 2 });
     expect(await marks()).toEqual(before);
+    await expect(phone.execute('markNeedsYouSeen' as 'countNeedsYou', { workspaceId: WORKSPACE }, VIEWER)).rejects.toThrow();
   });
 
-  it('starts the 24-hour clock on the first read, never on the badge count', async () => {
-    const id = await report(ROOM, PEER, 'needs-decision: can you look?');
-    expect(await count()).toBe(1);
-    expect(
-      (await database.query(`SELECT 1 FROM needs_you_marks WHERE message_id=$1 AND first_seen_at IS NOT NULL`, [id])).rowCount,
-    ).toBe(0);
+  const reasons = async () => (await database.query(
+    `SELECT message_id,cleared_reason FROM needs_you_marks WHERE identity_id=$1 AND cleared_at IS NOT NULL ORDER BY message_id`, [VIEWER])).rows;
+  const sourced = async (roomId: string, sourceRoomId: string, text: string, to = VIEWER) => {
+    const id = (sequence += 1).toString(16).padStart(64, '0');
+    await database.query(`INSERT INTO messages(id,room_id,author_id,text,card) VALUES($1,$2,$3,$4,
+      jsonb_build_object('reportToId',$5::text,'sourceRoomId',$6::text,'reportStatus',split_part($4,':',1)))`,
+    [id, roomId, AGENT, text, to, sourceRoomId]);
+    return id;
+  };
 
-    const firstRead=await read();
-    const first = firstRead.items[0]!;
-    expect(firstRead.nextExpiry).toBeGreaterThan(Date.now()+23*3600000);
-    expect((await phone.execute('countNeedsYou',{workspaceId:WORKSPACE},VIEWER)).nextExpiry).toBe(firstRead.nextExpiry);
-    expect(first.expiresAt).toBeGreaterThan(Date.now() / 1000 + 23 * 3600);
-    const again = (await read()).items[0]!;
-    expect(again.expiresAt).toBe(first.expiresAt);
-
-    // Seen 25 hours ago, on whatever device: gone everywhere.
-    await database.query(
-      `UPDATE needs_you_marks SET first_seen_at=now() - interval '25 hours' WHERE message_id=$1`,
-      [id],
-    );
-    expect((await read()).items).toEqual([]);
-    expect(await count()).toBe(0);
+  it('SUPERSEDED: only the same agent\'s newer report from the same thread to the same person replaces an ask', async () => {
+    const old = await sourced(ROOM, CORNER, 'blocked: need an endpoint');
+    const chat = await sourced(ROOM, ROOM, 'needs-decision: which cohort?');
+    const elsewhere = await sourced(ROOM, OTHER_ROOM, 'blocked: other work');
+    await database.query(`UPDATE rooms SET parent_id=$2 WHERE id=$1`, [OTHER_ROOM, ROOM]);
+    await sourced(ROOM, CORNER, 'done: for someone else', PEER);
+    await sourced(ROOM, ROOM, 'needs-decision: a second chat question?');
+    expect(await reasons()).toEqual([]);
+    await sourced(ROOM, CORNER, 'done: endpoint v2 shipped');
+    expect(await reasons()).toEqual([{ message_id: old, cleared_reason: 'superseded' }]);
+    expect((await read()).items.map(item => item.messageId)).toEqual([chat, elsewhere, expect.any(String)]);
   });
 
-  it('TRAY-CACHED-EMPTY-1: badge rows leave unseen asks available 25 hours later; only painted ids start expiry', async () => {
-    const first = await report(ROOM, PEER, 'needs-decision: please review this');
-    const second = await report(ROOM, PEER, 'needs-decision: can you confirm?');
-    const badge = () => phone.execute('readNeedsYou', { workspaceId: WORKSPACE, markSeen: false }, VIEWER);
-    expect((await badge()).items.map(item => item.messageId)).toEqual([first, second]);
-    expect((await badge()).items.every(item => item.expiresAt === undefined)).toBe(true);
-    const trayPreview = await phone.execute('readTray', { workspaceId: WORKSPACE, markSeen: false }, VIEWER);
-    expect(trayPreview.needs?.items.every(item => item.expiresAt === undefined)).toBe(true);
-    expect((await database.query(`SELECT * FROM needs_you_marks WHERE first_seen_at IS NOT NULL`)).rowCount).toBe(0);
-    // Advancing an unseen ask never starts its first-seen expiry.
-    await database.query(`UPDATE messages SET created_at=created_at-interval '25 hours' WHERE id=ANY($1::text[])`, [[first, second]]);
-    expect((await badge()).items.map(item => item.messageId)).toEqual([first, second]);
+  it('RECONCILE: the Tasks read applies the clearing rules to records written before their triggers', async () => {
+    await database.query('ALTER TABLE messages DISABLE TRIGGER message_needs_you_marks');
+    await database.query('ALTER TABLE rooms DISABLE TRIGGER room_close_needs_you_marks');
+    const closed = await sourced(ROOM, CORNER, 'blocked: closed thread');
+    const replaced = await sourced(ROOM, OTHER_ROOM, 'blocked: first try');
+    await database.query(`UPDATE rooms SET parent_id=$2 WHERE id=$1`, [OTHER_ROOM, ROOM]);
+    const newer = await sourced(ROOM, OTHER_ROOM, 'needs-decision: second try?');
+    const answered = await report(ROOM, AGENT, 'needs-decision: which cohort?', 120);
+    await database.query(`UPDATE messages SET reply_to_message_id=$2 WHERE id=$1`, [await post(ROOM, VIEWER, 'cohort B', 60), answered]);
+    const open = await report(ROOM, AGENT, 'blocked: still open');
+    await database.query(`INSERT INTO needs_you_marks(identity_id,message_id,workspace_id) SELECT $1,unnest($2::text[]),$3`,
+      [VIEWER, [closed, replaced, newer, answered, open], WORKSPACE]);
+    await database.query(`UPDATE rooms SET archived_at=now() WHERE id=$1`, [CORNER]);
+    await database.query('ALTER TABLE messages ENABLE TRIGGER message_needs_you_marks');
+    await database.query('ALTER TABLE rooms ENABLE TRIGGER room_close_needs_you_marks');
+    expect((await read()).items.map(item => item.messageId)).toEqual([open, newer]);
     expect(await count()).toBe(2);
-    const seen = await phone.execute('markNeedsYouSeen', { workspaceId: WORKSPACE, messageIds: [first] }, VIEWER);
-    expect(seen.seen).toEqual([{ messageId: first, expiresAt: expect.any(Number) }]);
-    expect(seen.seen[0]!.expiresAt).toBeGreaterThan(Date.now() / 1000 + 23 * 3600);
-    const reopened = await phone.execute('markNeedsYouSeen', { workspaceId: WORKSPACE, messageIds: [first] }, VIEWER);
-    expect(reopened).toEqual(seen);
-    expect((await badge()).items.find(item => item.messageId === second)?.expiresAt).toBeUndefined();
-    await database.query(`UPDATE needs_you_marks SET first_seen_at=first_seen_at-interval '25 hours' WHERE message_id=$1`, [first]);
-    expect((await badge()).items.map(item => item.messageId)).toEqual([second]);
-    expect(await count()).toBe(1);
   });
 
-  it('acknowledges only available questions belonging to this viewer and Workspace', async () => {
-    const own = await report(ROOM, PEER, 'needs-decision: please look');
-    const hidden = await report(OTHER_ROOM, PEER, 'needs-decision: please look');
-    const unrelated = await post(ROOM, PEER, 'hello');
-    await phone.execute('clearNeedsYou', { workspaceId: WORKSPACE, messageId: own }, VIEWER);
-    const result = await phone.execute('markNeedsYouSeen', {
-      workspaceId: WORKSPACE, messageIds: [own, hidden, unrelated, 'missing'],
-    }, VIEWER);
-    expect(result.seen).toEqual([]);
-    await expect(phone.execute('markNeedsYouSeen', { workspaceId: WORKSPACE, messageIds: [unrelated] }, 'outsider'))
-      .rejects.toThrow('workspace membership required');
+  it('RETIRED-CLOCK: records the old clock already hid stay cleared, once, and live ones stay open', async () => {
+    const hidden = await report(ROOM, AGENT, 'blocked: painted two days ago');
+    const live = await report(ROOM, AGENT, 'blocked: painted an hour ago');
+    await database.query(`UPDATE needs_you_marks SET first_seen_at=now()-CASE WHEN message_id=$1 THEN interval '2 days' ELSE interval '1 hour' END`, [hidden]);
+    await database.query("DELETE FROM workflow_backfills WHERE name='needs-you-retired-clock-v1'");
+    await database.query(needsYouMarksSchema());
+    expect(await reasons()).toEqual([{ message_id: hidden, cleared_reason: 'expired' }]);
+    expect((await read()).items.map(item => item.messageId)).toEqual([live]);
+  });
+
+  it('records why each record left: manual clears and removed messages', async () => {
+    const tapped = await report(ROOM, AGENT, 'blocked: tap me');
+    const removed = await report(ROOM, AGENT, 'blocked: delete me');
+    await phone.execute('clearNeedsYou', { workspaceId: WORKSPACE, messageId: tapped }, VIEWER);
+    await database.query(`UPDATE messages SET deleted_at=now() WHERE id=$1`, [removed]);
+    expect(await reasons()).toEqual([{ message_id: tapped, cleared_reason: 'manual' }, { message_id: removed, cleared_reason: 'removed' }]);
   });
 
   it('uses one database statement and one pool checkout for each tray read and badge count', async () => {
@@ -405,9 +402,9 @@ describe('PhoneService Needs-you tray', () => {
 
     const { items } = await read();
     expect(items.map((item) => item.messageId)).toEqual([id]);
-    expect(items[0]?.expiresAt).toBeDefined();
+    expect(items[0]?.expiresAt).toBeUndefined();
     expect(query).toHaveBeenCalledTimes(1);
-    expect(query.mock.calls[0]?.[0]).toContain('INSERT INTO needs_you_marks');
+    expect(query.mock.calls[0]?.[0]).not.toContain('INSERT INTO needs_you_marks');
     query.mockRestore();
   });
 
@@ -586,8 +583,6 @@ describe('PhoneService Needs-you tray', () => {
       },
     });
     expect(item!.expiresAt).toBeUndefined();
-    expect(await phone.execute('markNeedsYouSeen', { workspaceId: WORKSPACE, messageIds: [card] }, VIEWER))
-      .toEqual({ seen: [] });
 
     // Dismissing it only hides the tray row; it does not decide the grant.
     await phone.execute('clearNeedsYou', { workspaceId: WORKSPACE, messageId: card }, VIEWER);

@@ -128,7 +128,7 @@ export type PhoneOperationMap = PhoneRouteOperationMap & {
   /** Report issue: files this message with the Beeline feedback loop. One report per message. */
   reportMessageIssue: { input: ReportMessageIssueInput; output: ReportMessageIssueResult };
   listMessageBookmarks: { input: WorkspaceInput & { readonly before?: string }; output: MessageBookmarkListResult };
-  /** Needs-you rows. Legacy reads mark seen; markSeen:false previews without starting expiry. */
+  /** Needs-you rows. markSeen:false names a non-phone HTTP read; no read starts a timer. */
   readNeedsYou: { input: WorkspaceInput & { readonly markSeen?: boolean }; output: NeedsYouListResult };
   readWorkBoard: { input: WorkspaceInput; output: import('./work-board.js').WorkBoardView };
   addWorkNote: { input: import('./work-board.js').AddWorkNoteInput; output: void };
@@ -138,11 +138,8 @@ export type PhoneOperationMap = PhoneRouteOperationMap & {
     readonly needs?: NeedsYouListResult; readonly saved?: MessageBookmarkListResult;
     readonly needsError?: string; readonly savedError?: string;
   } };
-  /** The tray badge count. Unlike `readNeedsYou`, it starts no clock. */
+  /** The tray badge count. */
   countNeedsYou: { input: WorkspaceInput; output: NeedsYouCountResult };
-  /** Acknowledge only question rows actually painted in the visible Tray. */
-  markNeedsYouSeen: { input: WorkspaceInput & { readonly messageIds: readonly string[] };
-    output: { readonly seen: readonly { readonly messageId: string; readonly expiresAt: number }[] } };
   /** Tapped or dismissed: the cell leaves the viewer's tray on every device. */
   clearNeedsYou: { input: ClearNeedsYouInput; output: void };
   /** Clear every question in one Workspace, including rows beyond the display limit; approvals remain. */
@@ -600,7 +597,7 @@ export type ReportMessageIssueInput = RoomInput & {
 /** `duplicate` is true when this message was already reported. */
 export type ReportMessageIssueResult = { readonly itemId: string; readonly duplicate: boolean };
 export type MessageBookmarkListResult = { readonly bookmarks: readonly MessageBookmarkView[]; readonly next?: string };
-/** These reads include the next display expiry in epoch milliseconds. */
+/** These reads include the next approval card expiry in epoch milliseconds. */
 export type NeedsYouListResult = {
   readonly nextExpiry?: number; readonly items: readonly NeedsYouItemView[] };
 export type NeedsYouCountResult = {

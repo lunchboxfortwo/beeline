@@ -171,7 +171,6 @@ export async function readWorkBoard(
       workspaceId,
       viewerId,
       (row) => phoneIdentity(row, publicOrigin),
-      false,
       undefined,
       publicOrigin,
     ),

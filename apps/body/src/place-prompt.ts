@@ -127,7 +127,8 @@ const RESUME_KINDS = new Set(['grant-decided', 'connector-offer-decided', 'squir
  * What the session is told for one queue item, in the one message format
  * (`agentMessageText`), then the queue-time context: memory, then what this
  * session has not seen (the bounded window once for a fresh session, otherwise
- * only new messages and a changed brief or member list).
+ * only new messages and a changed brief or member list), then the agent's open
+ * asks (for a fresh session, or when they changed).
  */
 export function itemPrompt(item: AgentCommand, options: {
   names: ReadonlyMap<string, string>;
@@ -146,6 +147,7 @@ export function itemPrompt(item: AgentCommand, options: {
   const place = from.place === item.roomId ? item.roomName ?? options.names.get(item.roomId) ?? item.roomId
     : (from.place === item.returnRoomId ? item.returnRoomName : undefined) ?? options.names.get(from.place) ?? from.place;
   const context = options.fresh ? source.conversationWindow ?? source.conversationContext : source.conversationContext;
+  const asks = options.fresh ? source.openAsks : source.openAsksChanged;
   return [
     ...(options.turnPrefix ? [options.turnPrefix] : []),
     ...(options.notes?.length ? ['Session setup notes:', ...options.notes.map(note => `- ${note}`)] : []),
@@ -155,6 +157,7 @@ export function itemPrompt(item: AgentCommand, options: {
       : source.replyToMessageId ? [`In reply to message ${source.replyToMessageId}`] : []),
     ...(source.institutionalContext ? [source.institutionalContext] : []),
     ...(context ? [context] : []),
+    ...(asks ? [asks] : []),
   ].join('\n');
 }
 

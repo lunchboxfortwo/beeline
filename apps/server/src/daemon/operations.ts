@@ -2,6 +2,7 @@ import { becomeThreadImplementer } from '../corner-lifecycle.js';
 import { addWorkNote, attachToWorkItem } from '../work-item-detail.js';
 import { askOwnerQuestion } from '../work-questions.js';
 import { updateWorkItem } from '../work-board.js';
+import { closeAgentAsk } from '../agent-open-asks.js';
 import { setAgentWakePaused } from '../agent-wake-pause.js';
 import { attachUsageAccount, helperUsageEnabled, publishUsageAccount } from '../helper-usage.js';
 import { owedMentions } from '../owed-mentions.js';
@@ -65,6 +66,8 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
         await updateWorkItem(ctx.database,update,authenticatedAgentId);
         return daemonWriteResult(ctx) as Output<Name>;
       }
+      case 'closeAgentAsk':
+        return await closeAgentAsk(ctx.database,authenticatedAgentId,input as Input<'closeAgentAsk'>) as Output<Name>;
       case 'getInstitutionalContext':
         return getInstitutionalContextOperation(ctx, name, input, authenticatedAgentId, candidate, scopedRoom);
       case 'saveInstitutionalMemory':

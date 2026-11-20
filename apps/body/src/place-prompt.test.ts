@@ -600,4 +600,11 @@ describe('queue item reply audience', () => {
     expect(prompt).toMatch(/^text: The work is ready\.\nattachment: 📎 plan\.pdf \(application\/pdf\) id.+\nMemory: widgets ship Fridays\.$/m);
     expect(itemPrompt(report,{names})).not.toContain('attachment:');
   });
+  it('ends with the open asks for a fresh session, otherwise only when they changed',()=>{
+    const asks='Your open asks, oldest first.\n- [ask id: a] 2h ago in Milo, to @ada: Ship it?';
+    const source={...report.source,conversationContext:'New messages here.',openAsks:asks};
+    expect(itemPrompt({...report,source},{names,fresh:true}).endsWith(`New messages here.\n${asks}`)).toBe(true);
+    expect(itemPrompt({...report,source},{names})).not.toContain('open asks');
+    expect(itemPrompt({...report,source:{...source,openAsksChanged:'You have no open asks now.'}},{names}).endsWith('You have no open asks now.')).toBe(true);
+  });
 });

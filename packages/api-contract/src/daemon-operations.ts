@@ -154,8 +154,12 @@ export type AgentCommand = {
     readonly conversationContext?: string;
     /** The bounded recent window, brief and member list a fresh session renders once; present only when it differs from conversationContext. */
     readonly conversationWindow?: string;
+    /** The agent's own open asks (at most five lines, then a count), which a fresh session renders at the end of the prompt. */
+    readonly openAsks?: string;
+    /** The open asks again, or a line saying none remain, present only when the set changed since this agent's previous command in this place. */
+    readonly openAsksChanged?: string;
     /** Server-side record of what this command's context covered, read by the next command's delta. */
-    readonly contextSeen?: { readonly messageId?: string; readonly createdAt?: string; readonly briefRevision?: number; readonly memberVersion?: string };
+    readonly contextSeen?: { readonly messageId?: string; readonly createdAt?: string; readonly briefRevision?: number; readonly memberVersion?: string; readonly openAsksVersion?: string };
   };
   readonly createdAt: number;
 };

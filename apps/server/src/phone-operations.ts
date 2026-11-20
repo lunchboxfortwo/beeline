@@ -39,7 +39,7 @@ const quiet = new Set<string>([
  * generic retry adapter. Keep legacy hints until projection closure is proven. */
 export const ATOMIC_ROUTER_COMMANDS = new Set([
   'markRead', 'markUnread', 'reactToMessage', 'deleteRoomMessage',
-  'setMessageBookmark', 'clearMessageBookmarks', 'markNeedsYouSeen',
+  'setMessageBookmark', 'clearMessageBookmarks',
   'clearNeedsYou', 'clearNeedsYouSection',
   'deleteRoomSchedule',
 ]);

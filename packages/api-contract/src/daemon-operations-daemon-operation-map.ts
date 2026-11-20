@@ -20,6 +20,8 @@ import { ReviseCornerBriefInput, PostSquireApprovalInput, PostSquireLoginWallInp
 export type DaemonOperationMap = {
   addWorkNote: Operation<RoomInput & TurnOutputAuthority & Omit<import('./work-board.js').AddWorkNoteInput,'roomId'> & { readonly targetRoomId: string }, WriteResult>;
   attachToWorkItem: Operation<RoomInput & TurnOutputAuthority & Omit<import('./work-board.js').AttachToWorkItemInput,'roomId'> & { readonly targetRoomId: string }, WriteResult>;
+  /** The asking agent closes its own open ask on every person's Needs you list, keeping the reason. */
+  closeAgentAsk: Operation<RoomInput & TurnOutputAuthority & { readonly messageId: string; readonly reason: 'answered' | 'withdrawn' | 'superseded' }, { readonly closed: number }>;
   updateWorkItem: Operation<RoomInput & TurnOutputAuthority & Omit<import('./work-board.js').UpdateWorkItemInput,'roomId'> & { readonly targetRoomId: string }, WriteResult>;
   askOwnerQuestion: Operation<RoomInput & TurnOutputAuthority & import('./work-board.js').AskOwnerQuestionInput, WriteResult>;
   postVaultSaveCard: Operation<RoomInput & TurnOutputAuthority & import('./vault-save.js').VaultSaveRequest, WriteResult>;
