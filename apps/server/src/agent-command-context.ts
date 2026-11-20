@@ -1,5 +1,6 @@
 import { generatedThreadRenamePrompt } from '@beeline/api-contract/daemon';
 import { cornerKindSql } from './corner-opening.js';
+import { agentOpenAsks } from './agent-open-asks.js';
 import { createHash } from 'node:crypto';
 import type { CommandRow } from './agent-command.js';
 import { currentCornerBrief } from './corner-brief.js';
@@ -84,6 +85,8 @@ async function attachQueuedInstitutionalContext(
 
 /** The bounded recent window a fresh session receives once. */
 export const CONVERSATION_WINDOW_MESSAGES = 20;
+/** `agentOpenAsks` version of an empty set, for commands queued before the version existed. */
+const NO_OPEN_ASKS = createHash('sha256').update('').digest('hex').slice(0, 16);
 const MESSAGE_CHARS = 1_000;
 type Seen = NonNullable<NonNullable<CommandRow['message']>['contextSeen']>;
 
@@ -200,24 +203,33 @@ async function attachQueuedConversation(
           ...(previous?.messageId ? { messageId: previous.messageId } : {}),
           ...(previous?.createdAt ? { createdAt: previous.createdAt } : {}),
         };
+  // The agent's own open asks: in full for a fresh session, otherwise only when
+  // the set changed since this place's previous command.
+  const asks = await agentOpenAsks(db, command.agent_id, command.room_id);
+  const asksChanged = previous
+    ? (previous.openAsksVersion ?? NO_OPEN_ASKS) !== asks.version
+    : Boolean(asks.text);
   const contextSeen: Seen = {
     ...newest,
     ...(brief ? { briefRevision: brief.revision } : {}),
     memberVersion,
+    openAsksVersion: asks.version,
   };
   const message = {
     ...command.message,
     contextSeen,
     ...(delta ? { conversationContext: delta } : {}),
     ...(full !== delta ? { conversationWindow: full } : {}),
+    ...(asks.text ? { openAsks: asks.text } : {}),
+    ...(asksChanged ? { openAsksChanged: asks.text || 'You have no open asks now.' } : {}),
   };
   return { ...command, message };
 }
 
 /** The queue-time context text an external wake or mention carries: the
- * institutional snapshot, then the conversation delta. */
+ * institutional snapshot, the conversation delta, then changed open asks. */
 export const queuedContextText = (message: CommandRow['message']) =>
-  [message?.institutionalContext, message?.conversationContext].filter(Boolean).join('\n\n');
+  [message?.institutionalContext, message?.conversationContext, message?.openAsksChanged].filter(Boolean).join('\n\n');
 
 export const queuedContextSql = (alias: string) =>
-  `NULLIF(concat_ws(E'\\n\\n',NULLIF(${alias}.message->>'institutionalContext',''),${alias}.message->>'conversationContext'),'')`;
+  `NULLIF(concat_ws(E'\\n\\n',NULLIF(${alias}.message->>'institutionalContext',''),${alias}.message->>'conversationContext',${alias}.message->>'openAsksChanged'),'')`;

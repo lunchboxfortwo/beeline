@@ -1,3 +1,4 @@
+import { agentOpenAsks } from './agent-open-asks.js';
 import { queuedContextSql } from './agent-command-context.js';
 import { OPERATOR_OWNER_ID } from '@beeline/api-contract/daemon';
 import { LOCAL_RECEIVER_RECOVERY,MCP_STARTER_ROUTINE,MCP_WORK_ROUTINE,MUSE_SETUP_RECIPE,externalAgentRules,messageSearchTerms } from '@beeline/api-contract/phone';
@@ -189,10 +190,8 @@ export class RoomsMcp {
       try {
         let result: object;
         if (input.method === 'server/discover') {
-          // Discovery advertises capabilities without application reads. Actual
-          // initialization, subscription and stream opening own route recovery.
           result = { resultType: 'complete', supportedVersions: ['2026-07-28'], capabilities: { tools: {}, events: {}, memberStreamV1: memberStreamEnabled()&&this.memberStreamReady() },
-            serverInfo: SERVER_INFO, instructions: INSTRUCTIONS };
+            serverInfo: SERVER_INFO, instructions: await this.sessionInstructions(principal) };
         } else if (mcp2 && input.method === 'tools/list') {
           result = { tools: toolsFor(principal,Boolean(this.agentTools)) };
         } else if (mcp2 && input.method === 'tools/call') {
@@ -214,7 +213,8 @@ export class RoomsMcp {
     }
     if(input.method==='initialize')await recoverMemberDelivery(this.oauth.database,principal);
     const capabilities = { tools: {}, events: {} };
-    const server = new Server(SERVER_INFO, { capabilities, instructions: INSTRUCTIONS });
+    const instructions = input.method === 'initialize' ? await this.sessionInstructions(principal) : INSTRUCTIONS;
+    const server = new Server(SERVER_INFO, { capabilities, instructions });
     server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: toolsFor(principal,Boolean(this.agentTools)) }));
     server.setRequestHandler(CallToolRequestSchema, async call =>
       this.toolResult(principal, call.params.name, call.params.arguments ?? {}));
@@ -224,6 +224,12 @@ export class RoomsMcp {
     await transport.handleRequest(request, response, input);
     return true;
   }
+  private async sessionInstructions(principal: McpPrincipal): Promise<string> {
+    if (!principal.member_id || !principal.scope.split(' ').includes('rooms:read')) return INSTRUCTIONS;
+    const asks = await agentOpenAsks(this.oauth.database, principal.member_id, null);
+    return [INSTRUCTIONS, asks.text].filter(Boolean).join('\n\n');
+  }
+
   private async audit(principal: McpPrincipal, operation: string, outcome: string): Promise<void> {
     try { await this.oauth.audit(principal, operation, outcome); }
     catch (error) { console.warn('[chats-mcp] optional audit omitted:', error); }

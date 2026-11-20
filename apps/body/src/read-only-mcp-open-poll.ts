@@ -296,7 +296,8 @@ async function executeResourceTool(name: string, args: JsonObject, toolCallId: s
     case 'message':
     case 'reply': return execute(name);
     case 'create_work_item':
-    case 'update_work': return execute(name);
+    case 'update_work':
+    case 'close_ask': return execute(name);
     case 'read': {
       const facet = args.facet;
       if (facet === 'procedure' && args.slug === undefined) args.slug = args.name;

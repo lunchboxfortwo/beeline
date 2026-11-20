@@ -49,7 +49,9 @@ describe('person tags in Needs you', () => {
     await post(ROOM, VIEWER, '@ada a note to myself.', 31);
     expect((await read()).items).toMatchObject([{ messageId: tagged, author: { name: 'Juniper', kind: 'human' } }]);
     expect(await count()).toBe(1);
-    await post(ROOM, VIEWER, 'Reviewed the launch note.', 20);
+    const reply = await post(ROOM, VIEWER, 'Reviewed the launch note.', 20);
+    expect(await count()).toBe(1);
+    await database.query('UPDATE messages SET reply_to_message_id=$2 WHERE id=$1', [reply, tagged]);
     expect((await read()).items).toEqual([]);
     expect(await count()).toBe(0);
     const dismissed = await post(ROOM, PEER, '@ada please check the revised note.', 10);
@@ -59,16 +61,24 @@ describe('person tags in Needs you', () => {
     expect(await count()).toBe(0);
   });
 
-  it('PERSON-TAG: shares question first-seen expiry, section clear and count rules', async () => {
-    const id = await post(CORNER, PEER, '@ada please review this corner.', 30);
-    expect(await count()).toBe(1);
-    expect((await database.query('SELECT 1 FROM needs_you_marks WHERE message_id=$1 AND first_seen_at IS NOT NULL', [id])).rowCount).toBe(0);
-    expect((await read()).items[0]?.expiresAt).toBeGreaterThan(Date.now() / 1000 + 23 * 3600);
-    await database.query(`UPDATE needs_you_marks SET first_seen_at=now()-interval '25 hours' WHERE message_id=$1`, [id]);
-    expect((await read()).items).toEqual([]);
+  it('keeps ordinary personal tags per-person after another recipient quote-answers', async () => {
+    const tagged = await post(ROOM, PEER, '@ada @hoots please review.', 30);
+    await database.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'human','Quill','quill')`, ['e'.repeat(64)]);
+    await database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')`, [WORKSPACE, ROOM, 'e'.repeat(64)]);
+    await database.query('UPDATE messages SET text=$2 WHERE id=$1', [tagged, '@ada @quill please review.']);
+    const reply = await post(ROOM, VIEWER, 'Reviewed.', 10);
+    await database.query('UPDATE messages SET reply_to_message_id=$2 WHERE id=$1', [reply, tagged]);
     expect(await count()).toBe(0);
-    await post(ROOM, PEER, '@ada please check another note.');
+    expect((await phone.execute('readNeedsYou', { workspaceId: WORKSPACE }, 'e'.repeat(64))).items.map(item => item.messageId)).toEqual([tagged]);
+    expect((await database.query('SELECT cleared_at FROM needs_you_marks WHERE message_id=$1 AND identity_id=$2', [tagged, 'e'.repeat(64)])).rows).toEqual([{ cleared_at: null }]);
+  });
+
+  it('PERSON-TAG: shares the question rules: no expiry, section clear and count', async () => {
+    const id = await post(CORNER, PEER, '@ada please review this corner.', 30 * 60);
     expect(await count()).toBe(1);
+    expect((await read()).items.map(item => [item.messageId, item.expiresAt])).toEqual([[id, undefined]]);
+    await post(ROOM, PEER, '@ada please check another note.');
+    expect(await count()).toBe(2);
     await phone.execute('clearNeedsYouSection', { workspaceId: WORKSPACE }, VIEWER);
     expect((await read()).items).toEqual([]);
     expect(await count()).toBe(0);
@@ -81,7 +91,7 @@ describe('person tags in Needs you', () => {
       .toEqual([{ first_seen_at: null, cleared_at: null }]);
     expect(await readNeedsYouOrder(database, WORKSPACE, VIEWER)).toEqual({ count: 1, order: [id] });
     expect((await phone.liveNeedsYou(ROOM, VIEWER))?.count).toBe(1);
-    await phone.execute('sendRoomMessage', { roomId: ROOM, messageId: 'e'.repeat(64), text: 'Reviewed.' }, VIEWER);
+    await phone.execute('sendRoomReply', { roomId: ROOM, parentMessageId: id, text: 'Reviewed.' }, VIEWER);
     expect((await database.query('SELECT cleared_at FROM needs_you_marks WHERE message_id=$1', [id])).rows[0]?.cleared_at).toBeInstanceOf(Date);
     expect(await count()).toBe(0);
   });
@@ -92,10 +102,12 @@ describe('person tags in Needs you', () => {
     const retitled = await post(CORNER, AGENT, 'done: no longer a report', 60);
     const answered = await post(ROOM, AGENT, 'blocked: answered report', 50);
     await database.query(`UPDATE messages SET card=jsonb_build_object('reportToId',$1::text) WHERE id=$2`, [VIEWER, answered]);
-    await post(ROOM, VIEWER, 'Resolved.', 40);
+    const reply = await post(ROOM, VIEWER, 'Resolved.', 40);
+    await database.query('UPDATE messages SET reply_to_message_id=$2 WHERE id=$1', [reply, answered]);
     const open = await post(ROOM, AGENT, 'needs-decision: choose a route', 30);
     const seen = await post(CORNER, AGENT, 'blocked: a seen report', 20);
-    const dismissed = await post(CORNER, AGENT, 'blocked: a dismissed report', 10);
+    // In the chat, so this newer report does not supersede the thread's open one.
+    const dismissed = await post(ROOM, AGENT, 'blocked: a dismissed report', 10);
     await database.query(`UPDATE messages SET card=jsonb_build_object('reportToId',$1::text) WHERE id=ANY($2::text[])`, [VIEWER, [open, seen, dismissed]]);
     await post(ROOM, PEER, '@ada an old personal tag', 5);
     await database.query(`INSERT INTO needs_you_marks(identity_id,message_id,workspace_id,cleared_at)
@@ -127,12 +139,15 @@ describe('person tags in Needs you', () => {
     expect((await database.query('SELECT cleared_at FROM needs_you_marks WHERE message_id=$1', [id])).rows[0]?.cleared_at).toBeInstanceOf(Date);
   });
 
-  it('settles an open report when its recorded origin is updated to an answered corner', async () => {
+  it('keeps an open report after unrelated conversation in its updated origin', async () => {
     const id = await post(ROOM, AGENT, 'blocked: choose a route', 20);
     await database.query(`UPDATE messages SET card=jsonb_build_object('reportToId',$1::text) WHERE id=$2`, [VIEWER, id]);
     await post(CORNER, VIEWER, 'Use the first route.', 5);
     expect(await count()).toBe(1);
     await database.query(`UPDATE messages SET card=card||jsonb_build_object('sourceRoomId',$1::text) WHERE id=$2`, [CORNER, id]);
+    expect(await count()).toBe(1);
+    const reply = await post(CORNER, VIEWER, 'Use the first route.', 1);
+    await database.query('UPDATE messages SET reply_to_message_id=$2 WHERE id=$1', [reply, id]);
     expect(await count()).toBe(0);
   });
 

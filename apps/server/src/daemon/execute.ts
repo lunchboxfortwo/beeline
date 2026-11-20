@@ -93,6 +93,7 @@ import { sendMessage,replyToMessage } from '../agent-messaging.js';
       'addWorkNote',
       'attachToWorkItem',
       'updateWorkItem',
+      'closeAgentAsk',
       'openRoomPoll',
       'renameCorner',
       'getInstitutionalContext',

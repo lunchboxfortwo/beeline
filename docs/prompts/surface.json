@@ -77,6 +77,35 @@
      "additionalProperties": false
     }
    },
+   "close_ask": {
+    "description": "Close one of your open asks on every person's Tasks list. Use answered when it was settled elsewhere, withdrawn when you no longer need it, superseded when a newer ask replaces it.",
+    "inputSchema": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "id",
+      "reason"
+     ],
+     "properties": {
+      "id": {
+       "type": "string",
+       "description": "The ask id from your open asks."
+      },
+      "reason": {
+       "enum": [
+        "answered",
+        "withdrawn",
+        "superseded"
+       ]
+      },
+      "requestId": {
+       "type": "string",
+       "minLength": 1,
+       "description": "The claimed request this tool serves."
+      }
+     }
+    }
+   },
    "close_thread": {
     "description": "Cancel work and archive the addressed thread. Attach required artifacts first.",
     "inputSchema": {
@@ -1716,6 +1745,7 @@
     "reply",
     "claim_thread",
     "update_work",
+    "close_ask",
     "read",
     "search",
     "remember",
@@ -1744,6 +1774,7 @@
     "reply",
     "claim_thread",
     "update_work",
+    "close_ask",
     "read",
     "search",
     "remember",
@@ -1772,6 +1803,7 @@
     "reply",
     "claim_thread",
     "update_work",
+    "close_ask",
     "read",
     "search",
     "remember",
@@ -1800,6 +1832,7 @@
     "reply",
     "claim_thread",
     "update_work",
+    "close_ask",
     "read",
     "search",
     "remember",
@@ -1828,6 +1861,7 @@
     "reply",
     "claim_thread",
     "update_work",
+    "close_ask",
     "read",
     "search",
     "remember",
@@ -1854,6 +1888,7 @@
     "reply",
     "claim_thread",
     "update_work",
+    "close_ask",
     "read",
     "search",
     "remember",
@@ -1882,6 +1917,7 @@
     "reply",
     "claim_thread",
     "update_work",
+    "close_ask",
     "read",
     "search",
     "remember",
@@ -3245,6 +3281,41 @@
      },
      "required": [
       "address"
+     ],
+     "additionalProperties": false
+    }
+   },
+   "close_ask": {
+    "description": "Close one of your open asks on every person's Tasks list: answered (settled elsewhere), withdrawn (no longer needed) or superseded (a newer ask replaces it).",
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "commandId": {
+       "type": "string",
+       "pattern": "^[0-9a-f]{64}$",
+       "description": "Message id from the delivery this call serves."
+      },
+      "address": {
+       "type": "string",
+       "format": "uuid",
+       "description": "chat, thread or DM id you belong to."
+      },
+      "id": {
+       "type": "string",
+       "description": "The ask id from your open asks."
+      },
+      "reason": {
+       "enum": [
+        "answered",
+        "withdrawn",
+        "superseded"
+       ]
+      }
+     },
+     "required": [
+      "address",
+      "id",
+      "reason"
      ],
      "additionalProperties": false
     }

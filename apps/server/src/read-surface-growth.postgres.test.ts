@@ -56,7 +56,7 @@ describe.skipIf(!url)('complete plain read surfaces (real PostgreSQL)',()=>{
     await db.query(`UPDATE memberships SET removed_at=NULL WHERE room_id=$1 AND identity_id=$2`,[ROOM,VIEWER]);
   });
 
-  it('reads, counts, and marks all 501 questions and checks each item deadline',async()=>{
+  it('reads and counts all 502 questions, however old, with no item deadline',async()=>{
     // Needs you holds reports addressed to the reader, not plain tagged questions (07176681f).
     await db.query(`INSERT INTO messages(id,room_id,author_id,text,card) SELECT 'ask-'||n,$1,$2,'needs-decision: Please review question '||n||'?',jsonb_build_object('reportToId',$3::text) FROM generate_series(1,501) n`,[ROOM,AGENT,VIEWER]);
     await db.query(`INSERT INTO messages(id,room_id,author_id,text,card,created_at) VALUES('expired-ask',$1,$2,'needs-decision: Please review?',jsonb_build_object('reportToId',$3::text),now()-interval '8 days')`,[ROOM,AGENT,VIEWER]);
@@ -65,14 +65,9 @@ describe.skipIf(!url)('complete plain read surfaces (real PostgreSQL)',()=>{
       ON CONFLICT(identity_id,message_id) DO UPDATE SET first_seen_at=EXCLUDED.first_seen_at`,[VIEWER,WS]);
     const input={workspaceId:WS,markSeen:false};
     const needs=await phone.execute('readNeedsYou',input,VIEWER);
-    expect(needs.items).toHaveLength(501);
-    expect(needs.items.some(item=>item.messageId==='expired-ask')).toBe(false);
-    expect(await phone.execute('countNeedsYou',{workspaceId:WS},VIEWER)).toEqual({count:501});
-    expect((await phone.execute('readTray',input,VIEWER)).needs?.items).toHaveLength(501);
-    const seen=await phone.execute('markNeedsYouSeen',{workspaceId:WS,messageIds:needs.items.map(item=>item.messageId)},VIEWER);
-    expect(seen.seen).toHaveLength(501);
-    await db.query(`UPDATE needs_you_marks SET first_seen_at=now()-interval '2 days' WHERE message_id='ask-1' AND identity_id=$1`,[VIEWER]);
-    expect((await phone.execute('readNeedsYou',input,VIEWER)).items).toHaveLength(500);
-    expect(await phone.execute('countNeedsYou',{workspaceId:WS},VIEWER)).toMatchObject({count:500});
+    expect(needs.items).toHaveLength(502);
+    expect(needs.items.every(item=>item.expiresAt===undefined)).toBe(true);
+    expect(await phone.execute('countNeedsYou',{workspaceId:WS},VIEWER)).toEqual({count:502});
+    expect((await phone.execute('readTray',input,VIEWER)).needs?.items).toHaveLength(502);
   });
 });

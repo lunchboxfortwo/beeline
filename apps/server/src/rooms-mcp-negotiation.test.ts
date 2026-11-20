@@ -4,16 +4,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RoomsMcp } from './rooms-mcp.js';
 import { RoomsMcpOAuth } from './rooms-mcp-oauth.js';
 import type { TokenAuth } from './auth.js';
-import type { SqlDatabase } from './database.js';
 import type { PhoneService } from './phone-service.js';
 import { LiveHub } from './live.js';
+import { migratedDatabase } from './test-support.js';
 const cleanups:Array<()=>Promise<void>>=[];
 afterEach(async()=>{for(const cleanup of cleanups.splice(0))await cleanup();vi.unstubAllEnvs();});
 async function fixture(ready:boolean){
-  const query=vi.fn(async()=>{throw new Error('unexpected application read');});
+  const database=await migratedDatabase();
+  cleanups.push(()=>database.close());
+  const query=vi.spyOn(database,'query');
   // Keep origin/resource initialization identical to production; only the
-  // authenticated principal and admission are synthetic in this zero-read proof.
-  const oauth=new RoomsMcpOAuth({query} as unknown as SqlDatabase,'http://127.0.0.1',{} as TokenAuth);
+  // authenticated principal and admission are synthetic in this negotiation proof.
+  const oauth=new RoomsMcpOAuth(database,'http://127.0.0.1',{} as TokenAuth);
   vi.spyOn(oauth,'principal').mockResolvedValue({hash:'synthetic',client_id:'client',identity_id:'owner',member_id:'member',scope:'rooms:read'});
   vi.spyOn(oauth,'audit').mockResolvedValue(undefined);
   const mcp=new RoomsMcp(oauth,{} as PhoneService,new LiveHub(),undefined,undefined,undefined,()=>ready);
@@ -36,7 +38,8 @@ describe('MCP member stream server-first negotiation',()=>{
       const stream=await fetch(origin+'/mcp/member-stream?mentions=0',{headers:{authorization:'Bearer synthetic'}});
       expect(stream.status).toBe(409);expect(await stream.json()).toEqual({error:'member_stream_unavailable'});
     }
-    expect(query).not.toHaveBeenCalled();
+    // Discovery reads the current open asks once for the fresh session.
+    expect(query).toHaveBeenCalledTimes(1);
   });
 });
 

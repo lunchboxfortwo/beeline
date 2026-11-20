@@ -314,8 +314,7 @@ import { phoneListRoomWorkflowRuns } from './schedules.js';
   }
 
 
-  /** Current count plus only the changed Room's cells. This is a peek: the
-   * 24-hour first-seen clock starts only on explicit seen commands or legacy tray reads. */
+  /** Current count plus only the changed Room's cells, without legacy retirement writes. */
   export async function phoneLiveNeedsYou(ctx: PhoneContext, roomId: string, viewerId: string): Promise<{
     workspaceId: string; count: number; items: readonly NeedsYouItemView[];
   } | null> {
@@ -335,7 +334,7 @@ import { phoneListRoomWorkflowRuns } from './schedules.js';
     // This snapshot proves there are no cells to project. Legacy replay still
     // sends the empty delta, without repeating the expensive cell query.
     if(order.count===0)return {workspaceId:scope.workspace_id,count:0,items:[]};
-    const { items } = await needsYouItems(database, scope.workspace_id, viewerId, (row) => identity(row, ctx.publicOrigin), false, [roomId], ctx.publicOrigin);
+    const { items } = await needsYouItems(database, scope.workspace_id, viewerId, (row) => identity(row, ctx.publicOrigin), [roomId], ctx.publicOrigin);
     const selected=new Map(items.map(item=>[item.messageId,item]));
     return { workspaceId: scope.workspace_id, count: order.count,
       items: order.order.flatMap(id=>selected.has(id)?[selected.get(id)!]:[]) };

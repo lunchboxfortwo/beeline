@@ -9,11 +9,7 @@ import { messageId } from './values.js';
 
 
 
-  /**
-   * The viewer's Needs-you cells (`needs-you.ts` owns the rule). Showing a
-   * cell starts its 24-hour clock once, for every device; a clock already
-   * running is left alone.
-   */
+  /** The viewer's Needs-you cells; `needs-you.ts` also persists legacy retirement. */
   export async function phoneReadNeedsYou(ctx: PhoneContext,
     input: Input<'readNeedsYou'>,
     viewerId: string,
@@ -23,7 +19,6 @@ import { messageId } from './values.js';
       input.workspaceId,
       viewerId,
       (row) => identity(row, ctx.publicOrigin),
-      input.markSeen !== false,
       undefined,
       ctx.publicOrigin,
     );
@@ -59,8 +54,8 @@ import { messageId } from './values.js';
     if (typeof input.messageId !== 'string' || !input.messageId)
       throw new Error('messageId is required');
     const cleared = await ctx.database.query(
-      `INSERT INTO needs_you_marks(identity_id,message_id,workspace_id,cleared_at,reminder_dismissed_at)
-       SELECT $1,message.id,room.workspace_id,now(),CASE WHEN $4::boolean THEN now() END
+      `INSERT INTO needs_you_marks(identity_id,message_id,workspace_id,cleared_at,cleared_reason,reminder_dismissed_at)
+       SELECT $1,message.id,room.workspace_id,now(),'manual',CASE WHEN $4::boolean THEN now() END
        FROM messages message
        JOIN rooms room ON room.id=message.room_id AND room.workspace_id=$3
        JOIN memberships member ON member.room_id=room.id AND member.identity_id=$1
@@ -68,6 +63,7 @@ import { messageId } from './values.js';
        WHERE message.id=$2
        ON CONFLICT(identity_id,message_id)
          DO UPDATE SET cleared_at=COALESCE(needs_you_marks.cleared_at,now()),
+           cleared_reason=COALESCE(needs_you_marks.cleared_reason,EXCLUDED.cleared_reason),
            reminder_dismissed_at=COALESCE(needs_you_marks.reminder_dismissed_at,EXCLUDED.reminder_dismissed_at)`,
       [viewerId, input.messageId, input.workspaceId, input.dismissReminder === true],
     );
@@ -89,10 +85,11 @@ import { messageId } from './values.js';
     const approvalIds = items.filter((item) => item.approval).map((item) => item.messageId);
     if (approvalIds.length) {
       await ctx.database.query(
-        `INSERT INTO needs_you_marks(identity_id,message_id,workspace_id,cleared_at,reminder_dismissed_at)
-         SELECT $1,id,$3,now(),now() FROM unnest($2::text[]) id
+        `INSERT INTO needs_you_marks(identity_id,message_id,workspace_id,cleared_at,cleared_reason,reminder_dismissed_at)
+         SELECT $1,id,$3,now(),'manual',now() FROM unnest($2::text[]) id
          ON CONFLICT(identity_id,message_id)
            DO UPDATE SET cleared_at=COALESCE(needs_you_marks.cleared_at,now()),
+           cleared_reason=COALESCE(needs_you_marks.cleared_reason,EXCLUDED.cleared_reason),
            reminder_dismissed_at=COALESCE(needs_you_marks.reminder_dismissed_at,EXCLUDED.reminder_dismissed_at)`,
         [viewerId, approvalIds, input.workspaceId],
       );

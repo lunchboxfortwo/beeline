@@ -1,3 +1,4 @@
+import { archiveCorner } from './corner-lifecycle.js';
 import { AgentScheduleLoop,DM,DaemonService,GITHUB_SUBJECT,GitHubOperations,HUMAN,LiveHub,ROOM,RUBY,SYSTEM_IDENTITY_ID,WORKER,WS,advanceCorner,authority,claim,commands,createAgentCommand,describe,expect,fixtureScope1,insertCornerFacts,it,open,randomBytes,randomUUID,readCornerObjective,rootFixture,systemLine,unreadMessageSql,vi,worker,type CommandRow,type GitHubAppClient,type GitHubOAuthClient } from './test-support-commander.integration.test-support.js';
 
 
@@ -85,6 +86,69 @@ it.each(['needs_decision: choose the product scope', 'needs-decision: choose the
   expect(rows).toEqual([{ room_id: DM, author_id: RUBY, text, card: { ask: 'Which product scope should we use?', reportToId: HUMAN,
     reportStatus: 'needs-decision', sourceRoomId: opened.cornerId } }]);
   expect((await rootFixture.phone.readRoom(DM, HUMAN))?.messages.some(m => m.text === rows[0]!.text)).toBe(true);
+});
+
+/** The commander's report to the captain, relayed from the worker's thread. */
+async function relay(cornerId: string, turn: Parameters<typeof authority>[0], status: 'blocked' | 'needs_decision' | 'done', text: string) {
+  await rootFixture.daemon.execute('report', { status, ...authority(turn), text }, WORKER);
+  const report = (await commands(cornerId, RUBY)).filter(c => c.reason === 'report').at(-1)!;
+  await claim(report);
+  const posted = await rootFixture.daemon.execute('report', { status, ...authority(report), text }, RUBY);
+  return { report, id: posted.id };
+}
+const cleared = async () => (await rootFixture.db.query(`SELECT m.text,mark.cleared_reason reason FROM needs_you_marks mark
+  JOIN messages m ON m.id=mark.message_id WHERE mark.identity_id=$1 ORDER BY m.created_at`, [HUMAN])).rows;
+const asks = async () => (await rootFixture.phone.execute('readNeedsYou', { workspaceId: WS }, HUMAN)).items.map(item => item.text);
+
+it('NEEDS-YOU-SUPERSEDED: the same agent\'s newer report from the thread replaces its open ask, and the agent sees its asks only when they change', async () => {
+  const opened = await open(), turn = await worker(opened.cornerId);
+  const first = await relay(opened.cornerId, turn, 'needs_decision', 'needs-decision: v1 or v2?');
+  expect(await asks()).toEqual(['v1 or v2?']);
+  await rootFixture.daemon.execute('order', { ...authority(first.report), address: opened.cornerId, text: 'Use endpoint v2' }, RUBY);
+  const second = (await commands(opened.cornerId, WORKER)).find(c => c.reason === 'order')!;
+  await claim(second);
+  const done = await relay(opened.cornerId, second, 'done', 'done: shipped v2');
+  // Ruby's turn after the ask opened carried it once, at the end of its prompt context.
+  expect(done.report.source.openAsks).toContain(`[ask id: ${first.id}]`);
+  expect(done.report.source.openAsksChanged).toBe(done.report.source.openAsks);
+  expect(first.report.source.openAsksChanged).toBeUndefined();
+  expect(await asks()).toEqual([]);
+  expect(await cleared()).toEqual([{ text: 'needs-decision: v1 or v2?', reason: 'superseded' }]);
+  // The next turn in that place says the list emptied, then stays quiet while it is unchanged.
+  await rootFixture.daemon.execute('order', { ...authority(done.report), address: opened.cornerId, text: 'Tidy up' }, RUBY);
+  const tidy = (await commands(opened.cornerId, WORKER)).filter(c => c.reason === 'order').at(-1)!;
+  await claim(tidy);
+  await rootFixture.daemon.execute('report', { status: 'done', ...authority(tidy), text: 'done: tidy' }, WORKER);
+  const after = (await commands(opened.cornerId, RUBY)).filter(c => c.reason === 'report').at(-1)!;
+  expect(after.source.openAsksChanged).toBe('You have no open asks now.');
+  expect(after.source.openAsks).toBeUndefined();
+});
+
+it('NEEDS-YOU-CLOSED: closing the source thread or the asking agent\'s close_ask retires the ask with its reason', async () => {
+  const opened = await open(), turn = await worker(opened.cornerId);
+  const ask = await relay(opened.cornerId, turn, 'blocked', 'blocked: need an endpoint decision');
+  expect(await asks()).toEqual(['need an endpoint decision']);
+  await archiveCorner(rootFixture.db, opened.cornerId);
+  expect(await asks()).toEqual([]);
+  expect(await cleared()).toEqual([{ text: 'blocked: need an endpoint decision', reason: 'source-closed' }]);
+  const own = await rootFixture.daemon.execute('report', { status: 'needs_decision', ...authority(rootFixture.order), text: 'needs-decision: pick a scope' }, RUBY);
+  expect(await asks()).toEqual(['pick a scope']);
+  await expect(rootFixture.daemon.execute('closeAgentAsk', { ...authority(rootFixture.order), messageId: own.id, reason: 'forgotten' as 'withdrawn' }, RUBY))
+    .rejects.toThrow(/reason must be one of answered, withdrawn, superseded/);
+  await expect(rootFixture.daemon.execute('closeAgentAsk', { ...authority(rootFixture.order), messageId: ask.id, reason: 'withdrawn' }, WORKER))
+    .rejects.toThrow();
+  expect(await rootFixture.daemon.execute('closeAgentAsk', { ...authority(rootFixture.order), messageId: own.id, reason: 'withdrawn' }, RUBY))
+    .toEqual({ closed: 1 });
+  expect(await asks()).toEqual([]);
+  expect((await cleared()).at(-1)).toEqual({ text: 'needs-decision: pick a scope', reason: 'withdrawn' });
+});
+
+it('NEEDS-YOU-ANSWERED: a quote reply on the asking message retires it as answered', async () => {
+  const own = await rootFixture.daemon.execute('report', { status: 'needs_decision', ...authority(rootFixture.order), text: 'needs-decision: pick a scope' }, RUBY);
+  await rootFixture.db.query(`INSERT INTO messages(id,room_id,author_id,text,reply_to_message_id) VALUES($1,$2,$3,'v2',$4)`,
+    [randomBytes(32).toString('hex'), ROOM, HUMAN, own.id]);
+  expect(await asks()).toEqual([]);
+  expect(await cleared()).toEqual([{ text: 'needs-decision: pick a scope', reason: 'answered' }]);
 });
 
 it('preserves tags in public prose without changing the recorded report route', async () => {

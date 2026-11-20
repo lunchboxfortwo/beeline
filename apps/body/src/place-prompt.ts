@@ -127,9 +127,10 @@ const RESUME_KINDS = new Set(['grant-decided', 'connector-offer-decided', 'squir
  * What the session is told for one queue item, in the one message format
  * (`agentMessageText`), then the queue-time context: memory, then what this
  * session has not seen (the bounded window once for a fresh session, otherwise
- * only new messages and a changed brief or member list).
+ * only new messages and a changed brief or member list). The caller appends
+ * open asks after the complete delivery, including when items are batched.
  */
-export function itemPrompt(item: AgentCommand, options: {
+function itemPromptContext(item: AgentCommand, options: {
   names: ReadonlyMap<string, string>;
   /** Setup steps that failed or were skipped when this session started. */
   notes?: readonly string[];
@@ -158,12 +159,20 @@ export function itemPrompt(item: AgentCommand, options: {
   ].join('\n');
 }
 
+export function itemPrompt(item: AgentCommand, options: Parameters<typeof itemPromptContext>[1]): string {
+  const asks = options.fresh ? item.source.openAsks : item.source.openAsksChanged;
+  return [itemPromptContext(item, options), ...(asks ? [asks] : [])].join('\n');
+}
+
 /** One pending batch per chat. Repeated runs keep only the newest run's content;
  * all queue items still belong to the answer, including the collapsed runs. */
 export function offlineBatchPrompt(items: readonly AgentCommand[], options: Parameters<typeof itemPrompt>[1]): string {
   const latestSchedule = new Map<string, AgentCommand>();
   for (const item of items) if (item.scheduleId) latestSchedule.set(item.scheduleId, item);
   const visible = items.filter(item => !item.scheduleId || latestSchedule.get(item.scheduleId) === item);
+  const latest = items.at(-1)?.source;
+  const asks = options.fresh || items.some(item => item.source.openAsksChanged !== undefined)
+    ? latest?.openAsks ?? (options.fresh ? undefined : 'You have no open asks now.') : undefined;
   const hours = Number(((items[0]?.offlineSeconds ?? 0) / 3600).toFixed(1));
   return [
     ...(options.turnPrefix ? [options.turnPrefix] : []),
@@ -172,6 +181,7 @@ export function offlineBatchPrompt(items: readonly AgentCommand[], options: Para
     'Answer each asker in one combined reply. Follow the newest instructions when earlier discussion has moved on.',
     'The offline note, when present, is private context for you.',
     ...(options.notes?.length ? ['Session setup notes:', ...options.notes.map(note => `- ${note}`)] : []),
-    ...visible.map((item, index) => itemPrompt(item, { names: options.names, fresh: index === 0 && options.fresh })),
+    ...visible.map((item, index) => itemPromptContext(item, { names: options.names, fresh: index === 0 && options.fresh })),
+    ...(asks ? [asks] : []),
   ].join('\n\n');
 }

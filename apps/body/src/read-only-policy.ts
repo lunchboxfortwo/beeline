@@ -262,7 +262,7 @@ export function isMountedMcpToolPermissionRequest(
 }
 
 const AGENT_SURFACE_TOOL_NAMES = [
-  'update_work', 'create_work_item',
+  'update_work', 'create_work_item', 'close_ask',
   'claim_thread', 'read', 'search', 'remember', 'revise_thread', 'message', 'reply', 'stop',
   'approve_merge', 'set_thread_hold', 'close_thread',
   'post', 'request_grant', 'app_tool', 'wake',

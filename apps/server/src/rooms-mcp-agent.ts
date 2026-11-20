@@ -192,6 +192,9 @@ export const MCP_AGENT_TOOLS: Tool[] = [
     state:{enum:['needs-you','in-progress','in-review','backlog','done']},assigneeId:{type:['string','null']},
     note:{type:'string'},attachments:{type:'array',items:{type:'object',properties:{kind:{enum:['file','link']},name:{type:'string'},url:{type:'string'},objectId:{type:'string'}},required:['kind','name'],additionalProperties:false}},
   }, ['roomId']),
+  tool('close_ask', 'Close one of your open asks on every person\'s Tasks list: answered (settled elsewhere), withdrawn (no longer needed) or superseded (a newer ask replaces it).', {
+    address: address(), id: { type: 'string', description: 'The ask id from your open asks.' }, reason: { enum: ['answered', 'withdrawn', 'superseded'] },
+  }, ['address', 'id', 'reason']),
   tool('stop', 'Stop the running turn of an agent you messaged, or one working in a thread you opened.', {
     address: address(), agent: { type: 'string', maxLength: 120 },
   }, ['address']),
@@ -413,6 +416,7 @@ export class RoomsMcpAgentTools {
         const result = await exec('updateWorkItem', { ...update, ...context, targetRoomId: args.roomId });
         return { ...object(result), id: update.id ?? args.roomId };
       }, addressArg(args.roomId));
+      case 'close_ask': return turn((_, context) => exec('closeAgentAsk', { ...context, messageId: args.id, reason: args.reason }));
       case 'read': return this.read(member, args, exec, turn);
       case 'load_workspace_skill':
         return this.read(member, { ...args, facet: 'procedure' }, exec, turn);
@@ -718,7 +722,7 @@ export async function pendingMcpWakes(db: SqlDatabase, member: string) {
     return {id:item.id,address:item.room_id,reason:item.reason,
       ...(item.private_payload ? {kind:item.private_payload.kind} : {}),from:route.from,
       text:legacyMessageBody(item,item.message?.body ?? item.private_payload?.text ?? item.reason),createdAt:item.created_at,
-      ...(item.message?.institutionalContext || item.message?.conversationContext ? {institutionalContext:queuedContextText(item.message)} : {}),
+      ...(item.message?.institutionalContext || item.message?.conversationContext || item.message?.openAsksChanged ? {institutionalContext:queuedContextText(item.message)} : {}),
       attachments:item.message?.attachments ?? item.private_payload?.attachments ?? [],
       ...(item.private_payload?.messageAsk ? {ask:item.private_payload.messageAsk} : {})};
   }));

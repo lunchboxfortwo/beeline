@@ -178,7 +178,7 @@ it('IDLE-BUDGET: a native human permission decision restores one notice', async 
   await reactions(); expect(await idleReports()).toHaveLength(2);
 });
 
-it.each([false, true])('REPORT-REPLY: owner yes clears Ruby’s report (threaded=%s) and silence spends the sole idle notice', async threaded => {
+it.each([false, true])('REPORT-REPLY: owner yes clears the wait, only a quote clears Tasks (threaded=%s), and silence spends the sole idle notice', async threaded => {
   // Retained human-directed report, as in still-river-thread; no new work output follows it.
   await db.query(`UPDATE identities SET name='Ruby' WHERE id=$1`, [WORKER]);
   await db.query(`INSERT INTO messages(id,room_id,author_id,text,card,created_at)
@@ -193,7 +193,8 @@ it.each([false, true])('REPORT-REPLY: owner yes clears Ruby’s report (threaded
   expect((await db.query('SELECT corner_has_explicit_wait($1) waiting', [C])).rows).toEqual([{ waiting: false }]);
   expect(await state()).toBe('idle');
   expect((await phone.readCorners(ROOM, HUMAN))!.corners[0]).toMatchObject({ state: 'idle' });
-  expect((await phone.execute('readNeedsYou', { workspaceId: WS }, HUMAN)).items).toEqual([]);
+  expect((await phone.execute('readNeedsYou', { workspaceId: WS }, HUMAN)).items.map(item => item.messageId))
+    .toEqual(threaded ? [] : ['ruby-decision']);
   expect(await idleReports()).toHaveLength(1);
   expect((await db.query(cornerIdleSql('$1'), [C])).rows[0]).toMatchObject({ idle_eligible: true, idle_report_count: 1 });
   const notice = (await readAgentCommands(db, COMMANDER, ROOM)).commands.find(item => item.source.authorId === SYSTEM_IDENTITY_ID)!;
