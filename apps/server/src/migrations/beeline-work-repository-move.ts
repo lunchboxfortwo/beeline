@@ -1,8 +1,9 @@
 import type { SqlDatabase } from '../database.js';
 
 /** The owner moved every Beeline-Work repository to lunchboxfortwo under the
- * same name. Repoint the Rooms and saved skill versions still naming the
- * retired repositories. Unmatched names are left as they are. */
+ * same name. Room bindings require a matching active destination in the
+ * catalog; current skills and saved versions have their retired owner replaced
+ * regardless of catalog availability. */
 export async function repointBeelineWorkRepositories(database: SqlDatabase): Promise<void> {
   await database.transaction(async (db) => {
     await db.query(`UPDATE rooms room SET
