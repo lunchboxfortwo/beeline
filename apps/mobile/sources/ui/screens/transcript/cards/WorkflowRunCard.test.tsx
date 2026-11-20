@@ -1,4 +1,5 @@
 import React from 'react';
+import type { WorkflowRunDetailView } from '@beeline/api-contract/phone';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
@@ -31,7 +32,7 @@ const detail = {
         { fromState: 'fix', outcome: 'done', toState: 'review', at: 3, actor: JIMMY, displayStatus: 'current', liveOutput: 'Reading the change now.' },
     ],
     roleHolders: { fixer: JIMMY, reviewer: ALAN },
-} as never;
+} as unknown as WorkflowRunDetailView;
 
 describe('workflow run card', () => {
     it('draws the run on one rail: done, current, then not yet', () => {
@@ -41,12 +42,43 @@ describe('workflow run card', () => {
             .map((node: any) => node.props.testID);
         expect(states.slice(0, 3)).toEqual(['workflow-step-done', 'workflow-step-done', 'workflow-step-current']);
         expect(states.slice(3).every((state: string) => state === 'workflow-step-pending')).toBe(true);
-        expect(tree.root.find((node: any) => node.props.testID === 'step-current').props.borderColor).toBe('needsYou');
-        expect(tree.root.findAll((node: any) => node.props.testID === 'step-done').every((node: any) => node.props.backgroundColor === 'needsYou')).toBe(true);
+        const completed = tree.root.findAll((node: any) => node.type === 'Svg' && node.props.accessibilityLabel === 'done');
+        expect(completed).toHaveLength(2);
+        for (const svg of completed) {
+            const circles = svg.findAllByType('Circle');
+            expect(circles).toHaveLength(2);
+            expect(circles[0].props.fill).toBe('none');
+            expect(circles[1].props.fill).toBe(circles[0].props.stroke);
+            expect(svg.findAllByType('Path')).toHaveLength(0);
+        }
         const notes = tree.root.findAll((node: any) => node.type === 'Text' && node.props.color === 'needsYou').map((node: any) => node.props.children);
         expect(notes).toContain('Reading the change now.');
         expect(tree.root.find((node: any) => node.props.testID === 'workflow-run-headline').props.children).toBe('Running · Jimmy');
-        expect(tree.root.findAll((node: any) => node.type === Spinner)).toHaveLength(1);
+        expect(tree.root.findAll((node: any) => node.type === Spinner)).toHaveLength(2);
+        act(() => tree.unmount());
+    });
+
+    it.each([
+        { kind: 'gate', viewerHolds: true, human: false, mark: 'needs you' },
+        { kind: 'gate', viewerHolds: false, human: false, mark: 'working' },
+        { kind: 'waiting', viewerHolds: false, human: false, mark: 'working' },
+        { kind: 'handoff', viewerHolds: true, human: true, mark: 'needs you' },
+        { kind: 'handoff', viewerHolds: false, human: true, mark: 'working' },
+    ] as const)('keeps a $kind step static when viewerHolds=$viewerHolds and human=$human', ({ kind, viewerHolds, human, mark }) => {
+        const scenario = {
+            ...detail,
+            run: { ...detail.run, viewerHolds, holder: human ? { id: 'other', kind: 'human', name: 'Ada' } : ALAN },
+            contract: { ...detail.contract, handoffs: { ...detail.contract.handoffs,
+                review: { ...detail.contract.handoffs.review, kind },
+            } },
+        } as WorkflowRunDetailView;
+        let tree: any;
+        act(() => { tree = create(<WorkflowRunCardView detail={scenario} />); });
+        expect(tree.root.findAllByType(Spinner)).toHaveLength(0);
+        const current = tree.root.findAll((node: any) => node.type === 'XStack' && node.props.testID === 'workflow-step-current')[0];
+        expect(current.findByType('Svg').props.accessibilityLabel).toBe(mark);
+        expect(tree.root.findAll((node: any) => node.type === 'Svg' && node.props.accessibilityLabel === mark)).toHaveLength(2);
+        act(() => tree.unmount());
     });
 
     it('renders nothing without a live run', () => {

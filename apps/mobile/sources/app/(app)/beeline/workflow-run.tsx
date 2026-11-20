@@ -1,3 +1,4 @@
+import { WorkflowStepCircle } from '@/components/buzz/WorkflowStepCircle';
 import { WorkflowWorkingMark } from '@/components/buzz/WorkflowWorkingMark';
 import { PageLoader } from '@/ui/PageLoader';
 import { SettingsRow } from '@/components/buzz/SettingsRow';
@@ -21,10 +22,7 @@ import { liveRoomRuns, useRoomWorkflowRuns } from '@/buzz/use-room-workflow-run'
 import { workflowDisplayName, workflowStateLabel } from '@/buzz/workflow-graph';
 import { formatRunDuration, runDayLabel, workflowRunHeadline, workflowRunHref, workflowStarterLine } from '@/buzz/workflow-run-copy';
 import { PageHeader } from '@/components/buzz/PageHeader';
-import {
-  WorkflowRunLine,
-  WorkflowStepCircle,
-} from '@/components/buzz/WorkflowRunLine';
+import { WorkflowRunLine } from '@/components/buzz/WorkflowRunLine';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import { Btn, Copy, SafeBottom, SafeTop, T } from '@/ui/grammar';
 
@@ -116,7 +114,7 @@ export default function WorkflowRun() {
             <XStack alignItems="center" gap="2">
               {live ? (
                 <WorkflowWorkingMark size={LIVE_HALO} viewerHolds={run.viewerHolds}
-                  waiting={['gate', 'waiting'].includes(detail.contract.handoffs[run.state]?.kind ?? '') || run.holder?.kind === 'human'} />
+                  kind={detail.contract.handoffs[run.state]?.kind} holder={run.holder} />
               ) : (
                 <WorkflowStepCircle status={run.status === 'done' ? 'done' : 'failed'} />
               )}

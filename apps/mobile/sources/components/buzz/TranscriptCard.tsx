@@ -291,7 +291,7 @@ function ActionButton({ action }: { action: TranscriptCardAction }) {
       testID={action.testID}
     >
       <XStack gap="2" alignItems="center">
-        {action.loading ? <Spinner size="small" color={kind === 'primary' ? 'primaryInk' : 'secondary'} />
+        {action.loading ? <Spinner size="small" color={kind === 'primary' ? 'primaryInk' : quiet ? 'secondary' : 'ink'} />
           : kind === 'primary' && action.label === 'Approve' ? <Glyph icon={Check} size={16} color="primaryInk" /> : null}
         <T v="heading" color={kind === 'primary' ? 'primaryInk' : quiet ? 'secondary' : 'ink'}>{action.label}</T>
         {action.destination === 'external' ? <Glyph icon={ExternalLink} size={16} />

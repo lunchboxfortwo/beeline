@@ -24,7 +24,7 @@ function Waiting({ joined, where }: { joined: PeopleRow | undefined; where: stri
         </XStack>
     ) : (
         <XStack gap="2" alignItems="center" role="status" testID="external-waiting">
-            <Spinner size="small" color="needsYou" />
+            <Spinner size="small" />
             <Copy small quiet>Waiting for the agent to join. You can close this; it appears when it joins.</Copy>
         </XStack>
     );

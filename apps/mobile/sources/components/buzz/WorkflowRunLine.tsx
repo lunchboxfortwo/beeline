@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { CornerDownRight, type LucideProps } from 'lucide-react-native';
-import Svg, { Circle, Path } from 'react-native-svg';
-import { XStack, YStack, useTheme } from 'tamagui';
+import { XStack, YStack } from 'tamagui';
 import {
   identityHandle,
   type WorkflowActorView,
@@ -26,7 +25,7 @@ import { Inked, T } from '@/ui/grammar';
 import { findRoomCornerRow, useRoomCornerRecord } from '@/buzz/room-corner-store';
 import { CHEVRON_ROW_SIZE, ChevronGlyph } from './ChevronGlyph';
 import { ContentTarget } from './IndexRow';
-import { DECORATIVE_GLYPH_PROPS } from './decorative-glyph';
+import { WorkflowStepCircle } from './WorkflowStepCircle';
 import { WorkflowWorkingMark } from './WorkflowWorkingMark';
 import { IdentityMark } from './IdentityMark';
 
@@ -57,65 +56,6 @@ type SegmentTone = 'brass' | 'quiet';
 /** Brass where the run went, quiet ahead. */
 function segmentTone(above: WorkflowLineStep, below: WorkflowLineStep): SegmentTone {
   return reached(above) && reached(below) ? 'brass' : 'quiet';
-}
-
-/** One step's circle: brass check, breathing brass ring, hollow, or ink x. */
-export function WorkflowStepCircle({
-  status,
-  size = CIRCLE,
-  testID,
-}: {
-  status: WorkflowLineStatus;
-  size?: number;
-  testID?: string;
-}) {
-  const { brass, ground, hollow, ink } = usePalette();
-  return (
-    <Svg
-      {...DECORATIVE_GLYPH_PROPS}
-      height={size}
-      testID={testID}
-      viewBox="0 0 20 20"
-      width={size}
-    >
-      {status === 'done' ? (
-        <>
-          <Circle cx={10} cy={10} fill={brass} r={9} />
-          <Path
-            d="M6 10.2l2.6 2.6L14 7.4"
-            fill="none"
-            stroke={ground}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2.2}
-          />
-        </>
-      ) : status === 'current' ? (
-        <>
-          <Circle cx={10} cy={10} fill={ground} r={8.25} stroke={brass} strokeWidth={1.5} />
-          <Circle cx={10} cy={10} fill={brass} r={4} />
-        </>
-      ) : status === 'failed' ? (
-        <>
-          <Circle cx={10} cy={10} fill={ground} r={8.25} stroke={ink} strokeWidth={1.5} />
-          <Path d="M7 7l6 6M13 7l-6 6" stroke={ink} strokeLinecap="round" strokeWidth={1.6} />
-        </>
-      ) : (
-        <Circle cx={10} cy={10} fill={ground} r={8} stroke={hollow} strokeWidth={1.5} />
-      )}
-    </Svg>
-  );
-}
-
-/** The SVG inks: react-native-svg takes colour strings, read from the theme. */
-function usePalette() {
-  const t = useTheme() as Record<string, { val: string } | undefined>;
-  return {
-    brass: t.needsYou?.val,
-    ground: t.canvas?.val,
-    hollow: t.secondary?.val,
-    ink: t.secondary?.val,
-  };
 }
 
 /** A 2pt piece of the line, solid brass or quiet: above the circle, or from below it to the row's foot. */
@@ -366,7 +306,7 @@ function StepRow({
       >
         <YStack position="absolute" left={LINE_X - CIRCLE / 2} top={CIRCLE_TOP}>
           {current ? <WorkflowWorkingMark
-            waiting={step.kind === 'gate' || step.kind === 'waiting' || detail.run?.holder?.kind === 'human'}
+            kind={step.kind} holder={detail.run?.holder}
             viewerHolds={run.viewerHolds}
             testID={`${testID}-current-mark`}
           /> : <WorkflowStepCircle status={step.status} testID={`${testID}-circle-${step.status}`} />}

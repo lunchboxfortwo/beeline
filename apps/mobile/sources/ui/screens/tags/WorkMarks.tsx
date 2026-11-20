@@ -10,12 +10,12 @@ import { AtMark, MARK } from '@/ui/grammar';
  * full disc in the ring done. Fills sit inside the ring and grow clockwise from the top. Needs
  * you is the @ fitted to the ring. Working right now (a running turn, a load) is the `Spinner`.
  */
-export function WorkStateMark({ state, idle = false }: { state: WorkState; idle?: boolean }) {
+export function WorkStateMark({ state, idle = false, size = MARK }: { state: WorkState; idle?: boolean; size?: number }) {
   const ink = useTheme().needsYou?.val as string;
-  if (state === 'needs-you') return <AtMark />;
+  if (state === 'needs-you') return <AtMark size={size} />;
   const label = idle && state === 'in-progress' ? 'idle' : state === 'in-progress' ? 'working' : state === 'in-review' ? 'in review' : state;
   return (
-    <Svg width={MARK} height={MARK} viewBox="0 0 20 20" accessibilityLabel={label}>
+    <Svg width={size} height={size} viewBox="0 0 20 20" accessibilityLabel={label}>
       <Circle
         cx={10}
         cy={10}

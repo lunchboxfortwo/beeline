@@ -429,6 +429,7 @@ const SPINNER_SIZE = { small: 16, large: 32 } as const;
 /**
  * The one ring spinner: working right now and every loading state. A track ring and a quarter
  * arc that turns; held still under reduced motion. The Beeline mark is never a loader.
+ * Colour overrides are only for spinners inside controls, matching the control’s text colour.
  */
 export function Spinner({ size = 'small', color = 'needsYou', testID, accessibilityLabel = 'Loading' }: {
     size?: keyof typeof SPINNER_SIZE | number; color?: ColorToken; testID?: string; accessibilityLabel?: string;

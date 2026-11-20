@@ -13,7 +13,7 @@ export function StepDot({ state, number, testID }: { state: ConnectStepState; nu
             borderColor={state === 'failed' ? 'removed' : state === 'todo' ? 'strongStroke' : 'needsYou'}>
             {state === 'done' ? <Glyph icon={Check} size={16} accent />
                 : state === 'failed' ? <Glyph icon={X} size={16} color="removed" />
-                    : state === 'current' ? <Spinner size="small" color="needsYou" />
+                    : state === 'current' ? <Spinner size="small" />
                         : <T v="metaStrong" color={state === 'waiting' ? 'needsYou' : 'secondary'}>{number}</T>}
         </YStack>
     );

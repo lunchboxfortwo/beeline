@@ -1,11 +1,13 @@
 import React from 'react';
+import type { WorkflowActorView } from '@beeline/api-contract/phone';
+import type { WorkflowLineKind } from '@/buzz/workflow-graph';
 import { AtMark, Spinner } from '@/ui/grammar';
 import { WorkStateMark } from '@/ui/screens/tags/WorkMarks';
 
-export function WorkflowWorkingMark({ waiting, viewerHolds, size = 20, testID }: {
-  waiting: boolean; viewerHolds: boolean; size?: number; testID?: string;
+export function WorkflowWorkingMark({ kind, holder, viewerHolds, size = 20, testID }: {
+  kind: WorkflowLineKind | undefined; holder?: WorkflowActorView; viewerHolds: boolean; size?: number; testID?: string;
 }) {
   if (viewerHolds) return <AtMark size={size} />;
-  if (waiting) return <WorkStateMark state="in-progress" />;
+  if (kind === 'gate' || kind === 'waiting' || holder?.kind === 'human') return <WorkStateMark state="in-progress" size={size} />;
   return <Spinner size={size} testID={testID} accessibilityLabel="Running" />;
 }

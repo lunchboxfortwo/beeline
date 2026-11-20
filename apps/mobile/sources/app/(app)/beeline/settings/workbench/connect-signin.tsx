@@ -43,7 +43,7 @@ function AppSignInReturnScreen({ sessionUri }: { sessionUri: string }) {
   return (
     <YStack flex={1} alignItems="center" justifyContent="center" padding="6" backgroundColor="canvas" testID="app-sign-in-return">
       {error ? <ConnectorNote tone="danger" testID="app-sign-in-error">{error}</ConnectorNote>
-        : <Spinner color="secondary" accessibilityLabel="Completing app sign-in" />}
+        : <Spinner accessibilityLabel="Completing app sign-in" />}
     </YStack>);
 }
 
@@ -165,13 +165,13 @@ function ConnectorSignInOverlay() {
           </SignInCenter>
         ) : fallback ? (
           <SignInCenter testID="signin-finishing">
-            <Spinner color="needsYou" accessibilityLabel="Finishing sign-in" />
+            <Spinner accessibilityLabel="Finishing sign-in" />
             <T v="body" textAlign="center">Finishing sign-in…</T>
             <Copy small quiet textAlign="center">You signed in on Chrome. {machineName} is saving the session. This page switches to connected by itself.</Copy>
           </SignInCenter>
         ) : loading ? (
           <SignInCenter cover testID="signin-webview-loading">
-            <Spinner color="needsYou" accessibilityLabel="Loading Google sign-in" />
+            <Spinner accessibilityLabel="Loading Google sign-in" />
             <T v="body" textAlign="center">{squire ? 'Loading Google sign-in…' : `Loading ${connectorName} sign-in…`}</T>
             <Copy small quiet textAlign="center">From {machineName}’s secure browser</Copy>
           </SignInCenter>

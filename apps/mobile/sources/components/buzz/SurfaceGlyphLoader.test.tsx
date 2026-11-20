@@ -69,6 +69,8 @@ vi.mock('react-native-reanimated', async () => {
   };
 });
 
+import { WorkflowStepCircle } from './WorkflowStepCircle';
+import { Spinner } from '@/ui/grammar';
 import { WorkflowWorkingMark } from './WorkflowWorkingMark';
 import { SurfaceGlyphLoader } from './SurfaceGlyphLoader';
 import { PageLoader } from '@/ui/PageLoader';
@@ -173,14 +175,51 @@ describe('Room/thread opening safe area', () => {
 
 describe('workflow execution marks', () => {
   it('spins only for executing work, with static marks for waits and viewer holds', () => {
-    const executing = render(<WorkflowWorkingMark waiting={false} viewerHolds={false} />);
+    const executing = render(<WorkflowWorkingMark kind="handoff" holder={{ id: 'agent', kind: 'agent', name: 'Bee' }} viewerHolds={false} />);
     expect(executing.root.findAll((node: any) => typeof node.type === 'string' && node.props.accessibilityRole === 'progressbar')).toHaveLength(1);
     act(() => executing.unmount());
     for (const viewerHolds of [true, false]) {
-      const waiting = render(<WorkflowWorkingMark waiting viewerHolds={viewerHolds} />);
+      const waiting = render(<WorkflowWorkingMark kind="gate" viewerHolds={viewerHolds} />);
       expect(waiting.root.findAll((node: any) => typeof node.type === 'string' && node.props.accessibilityRole === 'progressbar')).toHaveLength(0);
       expect(waiting.root.findByType('Svg').props.accessibilityLabel).toBe(viewerHolds ? 'needs you' : 'working');
       act(() => waiting.unmount());
     }
+  });
+});
+
+describe('shared workflow rail marks', () => {
+  it('uses a filled disc inside a ring for completed steps', () => {
+    const tree = render(<WorkflowStepCircle status="done" />);
+    const svg = tree.root.findByType('Svg');
+    expect(svg.props.accessibilityLabel).toBe('done');
+    const circles = tree.root.findAllByType('Circle');
+    expect(circles).toHaveLength(2);
+    expect(circles[0].props.fill).toBe('none');
+    expect(circles[1].props.fill).toBe(circles[0].props.stroke);
+    expect(circles[1].props.r).toBeLessThan(circles[0].props.r);
+    expect(tree.root.findAllByType('Path')).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
+  it.each(['current', 'pending'] as const)('draws %s as working or idle, without a done disc', (status) => {
+    const tree = render(<WorkflowStepCircle status={status} />);
+    expect(tree.root.findByType('Svg').props.accessibilityLabel).toBe(status === 'current' ? 'working' : 'idle');
+    expect(tree.root.findAllByType('Circle')).toHaveLength(1);
+    expect(tree.root.findAllByType('Path')).toHaveLength(status === 'current' ? 1 : 0);
+    act(() => tree.unmount());
+  });
+});
+
+describe('spinner colour', () => {
+  it('uses the state ink by default and allows control text ink inside a control', () => {
+    const standalone = render(<Spinner />);
+    const ink = standalone.root.findByType('Circle').props.stroke;
+    expect(ink).toBe('needsYou');
+    act(() => standalone.unmount());
+    const control = render(<button><Spinner color="primaryInk" /></button>);
+    const controlInk = control.root.findByType('Circle').props.stroke;
+    expect(controlInk).toBe('primaryInk');
+    expect(controlInk).not.toBe(ink);
+    act(() => control.unmount());
   });
 });

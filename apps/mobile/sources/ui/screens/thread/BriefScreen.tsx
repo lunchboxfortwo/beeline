@@ -112,7 +112,7 @@ export function BriefScreen({ roomId, close }: { roomId: string; close: () => vo
             {brief ? <BriefBody brief={brief} />
                 : error ? <Copy quiet>{error}</Copy>
                     : view ? <Copy quiet>This thread has no brief yet</Copy>
-                        : <Spinner size="small" color="secondary" />}
+                        : <Spinner size="small" />}
         </Screen>
     );
 }

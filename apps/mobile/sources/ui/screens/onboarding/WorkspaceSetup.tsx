@@ -288,7 +288,7 @@ export function WorkspaceSetup({ route, entry = 'workspace' }: { route: string; 
                     <YStack gap="2">
                         <XStack gap="2" alignItems="center"><Glyph icon={Link} size={16} /><T v="metaStrong" color="secondary">Invite link</T></XStack>
                         {inviteLink ? <CopyLine line={inviteLink} label="Copy invite link" onCopy={copyLine} />
-                            : error ? null : <Spinner color="secondary" testID="invite-link-loader" />}
+                            : error ? null : <Spinner testID="invite-link-loader" />}
                     </YStack>
                 </Rise>
                 <Rise order={2}>
@@ -329,7 +329,7 @@ export function WorkspaceSetup({ route, entry = 'workspace' }: { route: string; 
             <Rise order={1}>
                 <YStack gap="2">
                     {pairCommand ? <CopyLine line={pairCommand} label="Copy connect command" onCopy={copyLine} />
-                        : error ? null : <Spinner color="secondary" testID="pair-command-loader" />}
+                        : error ? null : <Spinner testID="pair-command-loader" />}
                     {problem}
                 </YStack>
             </Rise>
