@@ -60,14 +60,24 @@ const machine = (corner: string, state: string) =>
 
 describe('work item detail', () => {
   const address = { roomId: chat, id: 'detail-task' };
-  const create = () => updateWorkItem(db, { ...address, title: 'youtube-pipeline', objective: 'Private videos until approved.', assigneeId: null }, agent);
+  const create = () =>
+    updateWorkItem(
+      db,
+      {
+        ...address,
+        title: 'youtube-pipeline',
+        objective: 'Private videos until approved.',
+        assigneeId: null,
+      },
+      agent,
+    );
   it('records real creation, assignment and state changes once, with the actor', async () => {
     await create();
     await updateWorkItem(db, { ...address, assigneeId: agent }, person);
     await updateWorkItem(db, { ...address, state: 'in-progress' }, other);
     await updateWorkItem(db, { ...address, state: 'in-progress', assigneeId: agent }, person);
-    const item = (await read()).items.find(i => i.id === address.id)!;
-    expect(item.entries?.map(e => [e.kind, e.author.pubkey, e.text])).toEqual([
+    const item = (await read()).items.find((i) => i.id === address.id)!;
+    expect(item.entries?.map((e) => [e.kind, e.author.pubkey, e.text])).toEqual([
       ['event', agent, 'created this item in Backlog'],
       ['event', person, 'assigned this to Jellybean'],
       ['event', other, 'moved this to In progress'],
@@ -79,9 +89,12 @@ describe('work item detail', () => {
     await phone.execute('addWorkNote', { ...address, text: 'Waiting on owner approval.' }, agent);
     await phone.execute('addWorkNote', { ...address, text: '   ' }, person);
     await updateWorkItem(db, { ...address, state: 'done' }, agent);
-    const item = (await read()).items.find(i => i.id === address.id)!;
-    expect(item.entries?.filter(e => e.kind === 'note').map(e => [e.author.pubkey, e.text])).toEqual([
-      [person, 'Hold until approved.'], [agent, 'Waiting on owner approval.'],
+    const item = (await read()).items.find((i) => i.id === address.id)!;
+    expect(
+      item.entries?.filter((e) => e.kind === 'note').map((e) => [e.author.pubkey, e.text]),
+    ).toEqual([
+      [person, 'Hold until approved.'],
+      [agent, 'Waiting on owner approval.'],
     ]);
     expect((await db.query('SELECT id FROM messages')).rows).toEqual([]);
     expect((await db.query('SELECT id FROM agent_commands')).rows).toEqual([]);
@@ -89,50 +102,103 @@ describe('work item detail', () => {
   it('attaches existing file objects and links, and shares file metadata only with current members', async () => {
     await create();
     const objectId = '77777777-7777-4777-8777-777777777777';
-    await db.query(`INSERT INTO objects(id,owner_id,kind,key,mime,title,size,sha256,state,expires_at)
+    await db.query(
+      `INSERT INTO objects(id,owner_id,kind,key,mime,title,size,sha256,state,expires_at)
       VALUES($1,$2,'media','detail-proof','application/pdf','channel-plan.pdf',123,$3,'ready',now()+interval '1 day')`,
-      [objectId, person, 'f'.repeat(64)]);
-    await phone.execute('attachToWorkItem', { ...address, attachment: { kind: 'file', name: 'channel-plan.pdf', objectId } }, person);
-    await phone.execute('attachToWorkItem', { ...address, attachment: { kind: 'link', name: 'Plan', url: 'https://example.org/plan' } }, agent);
-    const item = (await read()).items.find(i => i.id === address.id)!;
+      [objectId, person, 'f'.repeat(64)],
+    );
+    await phone.execute(
+      'attachToWorkItem',
+      { ...address, attachment: { kind: 'file', name: 'channel-plan.pdf', objectId } },
+      person,
+    );
+    await phone.execute(
+      'attachToWorkItem',
+      { ...address, attachment: { kind: 'link', name: 'Plan', url: 'https://example.org/plan' } },
+      agent,
+    );
+    const item = (await read()).items.find((i) => i.id === address.id)!;
     expect(item.attachments).toMatchObject([
-      { kind: 'file', name: 'channel-plan.pdf', addedBy: { pubkey: person }, file: { mimeType: 'application/pdf', size: 123 } },
+      {
+        kind: 'file',
+        name: 'channel-plan.pdf',
+        addedBy: { pubkey: person },
+        file: { mimeType: 'application/pdf', size: 123 },
+      },
       { kind: 'link', url: 'https://example.org/plan', addedBy: { pubkey: agent } },
     ]);
     expect(await readMediaMetadata(db, objectId, other)).toMatchObject({ objectId, size: 123 });
-    await db.query('UPDATE memberships SET removed_at=now() WHERE identity_id=$1 AND room_id=$2', [other, chat]);
+    await db.query('UPDATE memberships SET removed_at=now() WHERE identity_id=$1 AND room_id=$2', [
+      other,
+      chat,
+    ]);
     await expect(readMediaMetadata(db, objectId, other)).rejects.toThrow();
-    await expect(phone.execute('addWorkNote', { ...address, text: 'No access' }, other)).rejects.toThrow('room access denied');
-    await expect(phone.execute('attachToWorkItem', { ...address, attachment: { kind: 'link', name: 'No access', url: 'https://example.org' } }, other)).rejects.toThrow('room access denied');
+    await expect(
+      phone.execute('addWorkNote', { ...address, text: 'No access' }, other),
+    ).rejects.toThrow('room access denied');
+    await expect(
+      phone.execute(
+        'attachToWorkItem',
+        { ...address, attachment: { kind: 'link', name: 'No access', url: 'https://example.org' } },
+        other,
+      ),
+    ).rejects.toThrow('room access denied');
   });
   it('rejects cross-conversation ids and unseen objects without adding detail', async () => {
     await create();
-    await expect(phone.execute('addWorkNote', { roomId: thread, id: address.id, text: 'Wrong place' }, person)).rejects.toThrow('room access denied');
+    await expect(
+      phone.execute('addWorkNote', { roomId: thread, id: address.id, text: 'Wrong place' }, person),
+    ).rejects.toThrow('room access denied');
     const objectId = '77777777-7777-4777-8777-777777777777';
-    await db.query(`INSERT INTO objects(id,owner_id,kind,key,mime,size,sha256,state,expires_at)
+    await db.query(
+      `INSERT INTO objects(id,owner_id,kind,key,mime,size,sha256,state,expires_at)
       VALUES($1,$2,'media','private-proof','application/pdf',123,$3,'ready',now()+interval '1 day')`,
-      [objectId, other, 'f'.repeat(64)]);
-    await expect(phone.execute('attachToWorkItem', { ...address, attachment: { kind: 'file', name: 'private.pdf', objectId } }, person)).rejects.toThrow();
-    await expect(phone.execute('attachToWorkItem', { ...address, attachment: { kind: 'link', name: 'Script', url: 'javascript:alert(1)' } }, person)).rejects.toThrow();
-    expect((await read()).items.find(i => i.id === address.id)?.attachments).toEqual([]);
+      [objectId, other, 'f'.repeat(64)],
+    );
+    await expect(
+      phone.execute(
+        'attachToWorkItem',
+        { ...address, attachment: { kind: 'file', name: 'private.pdf', objectId } },
+        person,
+      ),
+    ).rejects.toThrow();
+    await expect(
+      phone.execute(
+        'attachToWorkItem',
+        { ...address, attachment: { kind: 'link', name: 'Script', url: 'javascript:alert(1)' } },
+        person,
+      ),
+    ).rejects.toThrow();
+    expect((await read()).items.find((i) => i.id === address.id)?.attachments).toEqual([]);
   });
   it('keeps asking-item notes on that item rather than the thread task', async () => {
-    const posted = await askOwnerQuestion(db, { about: { kind: 'thread', roomId: thread }, question: 'Which surface?', freeText: true }, agent);
-    await phone.execute('addWorkNote', { roomId: thread, id: posted.messageId, text: 'Phone first.' }, person);
-    const ask = (await read()).items.find(item => item.id === posted.messageId)!;
-    expect(ask.entries?.some(entry => entry.text === 'Phone first.')).toBe(true);
+    const posted = await askOwnerQuestion(
+      db,
+      { about: { kind: 'thread', roomId: thread }, question: 'Which surface?', freeText: true },
+      agent,
+    );
+    await phone.execute(
+      'addWorkNote',
+      { roomId: thread, id: posted.messageId, text: 'Phone first.' },
+      person,
+    );
+    const ask = (await read()).items.find((item) => item.id === posted.messageId)!;
+    expect(ask.entries?.some((entry) => entry.text === 'Phone first.')).toBe(true);
     expect(ask.ask?.text).toBe('@ada Which surface?');
     expect((await readWorkThread(db, thread, person))[0]?.entries).toEqual([]);
   });
   it('materializes a thread task for notes and returns bounded chronological tails', async () => {
     await phone.execute('addWorkNote', { roomId: thread, text: 'Thread note' }, person);
-    await db.query(`INSERT INTO work_item_entries(work_item_id,author_id,kind,text,created_at)
-      SELECT $1,$2,'note',n::text,now()+n*interval '1 second' FROM generate_series(1,105) n`, [thread, agent]);
+    await db.query(
+      `INSERT INTO work_item_entries(work_item_id,author_id,kind,text,created_at)
+      SELECT $1,$2,'note',n::text,now()+n*interval '1 second' FROM generate_series(1,105) n`,
+      [thread, agent],
+    );
     const [item] = await readWorkThread(db, thread, person);
     expect(item?.entries).toHaveLength(100);
     expect(item?.entries?.[0]?.text).toBe('6');
     expect(item?.entries?.at(-1)?.text).toBe('105');
-    expect(item).toEqual((await read()).items.find(i => i.id === thread));
+    expect(item).toEqual((await read()).items.find((i) => i.id === thread));
   });
 });
 
@@ -286,95 +352,181 @@ describe('Work board recorded sources and single assignee', () => {
     );
   });
   it('shows only question, brief and buttons on the card, with the full post one tap away, and accepts an ask without a brief', async () => {
-    const text = 'I am researching the launch sources for Ada. '.repeat(16) +
+    const text =
+      'I am researching the launch sources for Ada. '.repeat(16) +
       '\nThe connected sources are missing the vendor report, so I cannot finish the comparison. Should I set up Squire?';
     const question = 'Should I set up Squire?';
-    const brief = 'The vendor report is missing, so the comparison cannot finish. Setup takes two minutes; later leaves it unfinished.';
+    const brief =
+      'The vendor report is missing, so the comparison cannot finish. Setup takes two minutes; later leaves it unfinished.';
     const posted = await sendMessage(db, {
       route: { from: { agent, place: chat }, to: { agent: person, place: chat } },
-      text, ask: { question, brief, options: ['Start setup', 'Later'] },
+      text,
+      ask: { question, brief, options: ['Start setup', 'Later'] },
     });
-    const item = (await read()).items.find(item => item.messageId === posted.id)!;
+    const item = (await read()).items.find((item) => item.messageId === posted.id)!;
     expect(item.brief).toBe(brief);
     expect(item.ask?.text).toBe(`${question}\n\n${brief}`);
     expect(item.ask?.approval).toMatchObject({ kind: 'choice', subject: question });
-    expect(item.ask?.approval?.actions.filter(action => action.kind === 'choice').map(action => action.label))
-      .toEqual(['Start setup', 'Later']);
-    expect((await db.query<{ text: string }>('SELECT text FROM messages WHERE id=$1', [posted.id])).rows[0]?.text).toBe(text);
+    expect(
+      item.ask?.approval?.actions
+        .filter((action) => action.kind === 'choice')
+        .map((action) => action.label),
+    ).toEqual(['Start setup', 'Later']);
+    expect(
+      (await db.query<{ text: string }>('SELECT text FROM messages WHERE id=$1', [posted.id]))
+        .rows[0]?.text,
+    ).toBe(text);
     // An older helper's ask carries no brief: the card shows its question and buttons.
     const legacyPost = await sendMessage(db, {
       route: { from: { agent, place: chat }, to: { agent: person, place: chat } },
-      text, ask: { question, options: ['Start setup', 'Later'] },
+      text,
+      ask: { question, options: ['Start setup', 'Later'] },
     });
-    const legacy = (await read()).items.find(item => item.messageId === legacyPost.id)!;
+    const legacy = (await read()).items.find((item) => item.messageId === legacyPost.id)!;
     expect(legacy.ask?.text).toBe(question);
     expect(legacy).not.toHaveProperty('brief');
-    expect(legacy.ask?.approval?.actions.filter(action => action.kind === 'choice').map(action => action.label))
-      .toEqual(['Start setup', 'Later']);
+    expect(
+      legacy.ask?.approval?.actions
+        .filter((action) => action.kind === 'choice')
+        .map((action) => action.label),
+    ).toEqual(['Start setup', 'Later']);
   });
   it('refuses an over-limit question or brief before writing anything, naming the counts', async () => {
     const route = { from: { agent, place: chat }, to: { agent: person, place: chat } };
-    await expect(sendMessage(db, { route, text: 'Choose',
-      ask: { question: `${'Should I '.repeat(13)}ship?`, brief: 'It is ready.', options: ['Yes', 'No'] } }))
-      .rejects.toThrow('ask.question is 122 characters; the limit is 120');
-    await expect(sendMessage(db, { route, text: 'Choose',
-      ask: { question: 'Ship it?', brief: 'Ready. '.repeat(41).trim(), options: ['Yes', 'No'] } }))
-      .rejects.toThrow('ask.brief is 286 characters; the limit is 280');
+    await expect(
+      sendMessage(db, {
+        route,
+        text: 'Choose',
+        ask: {
+          question: `${'Should I '.repeat(13)}ship?`,
+          brief: 'It is ready.',
+          options: ['Yes', 'No'],
+        },
+      }),
+    ).rejects.toThrow('ask.question is 122 characters; the limit is 120');
+    await expect(
+      sendMessage(db, {
+        route,
+        text: 'Choose',
+        ask: { question: 'Ship it?', brief: 'Ready. '.repeat(41).trim(), options: ['Yes', 'No'] },
+      }),
+    ).rejects.toThrow('ask.brief is 286 characters; the limit is 280');
     expect((await db.query('SELECT message_id FROM work_questions')).rowCount).toBe(0);
   });
-  it.each(['blocked:', 'needs-decision:'])('preserves %s report digests through message and reply', async prefix => {
-    const question = 'Use the signed build?';
-    const brief = 'The build is ready. Signing lets the latency check finish.';
-    const text = `${prefix} ${'Full report details. '.repeat(30)}`.trim();
-    const posted = await sendMessage(db, {
-      route: { from: { agent, place: thread }, to: { agent: person, place: chat } },
-      text, question, brief, options: ['Sign build', 'Wait'],
-    });
-    const request = await sendMessage(db, {
-      route: { from: { agent: person, place: chat }, to: { agent, place: thread } }, text: 'Check latency',
-    });
-    const replied = await replyToMessage(db, agent, { id: request.id, roomId: thread, text, question, brief, options: ['Sign build', 'Wait'] });
-    for (const id of [posted.id, replied.id]) {
-      const item = (await read()).items.find(item => item.messageId === id)!;
-      expect(item).toMatchObject({ brief, ask: { text: `${question}\n\n${brief}` } });
-      expect(item.ask?.approval?.actions.filter(action => action.kind === 'choice').map(action => action.label))
-        .toEqual(['Sign build', 'Wait']);
-      expect((await db.query<{ text: string }>('SELECT text FROM messages WHERE id=$1', [id])).rows[0]?.text).toBe(text);
-      const choice = item.ask!.approval!.actions.find(action => action.kind === 'choice')!;
-      if (choice.kind !== 'choice') throw new Error('choice missing');
-      await phone.execute('answerChoice', { choiceId: choice.choiceId, optionId: choice.optionId }, person);
-      expect((await read()).items.some(item => item.messageId === id && item.ask)).toBe(false);
-    }
-    expect((await readWorkBoard(db, workspace, other)).items.some(item => item.ask)).toBe(false);
-  });
-  it.each(['question', 'brief'] as const)('refuses oversized report %s before message or reply publication', async field => {
-    const request = await sendMessage(db, {
-      route: { from: { agent: person, place: chat }, to: { agent, place: thread } }, text: 'Check latency',
-    });
-    const digest = { [field]: '🐝'.repeat(field === 'question' ? 121 : 281) };
-    const error = `${field} is ${field === 'question' ? 121 : 281} characters; the limit is ${field === 'question' ? 120 : 280}`;
-    await expect(sendMessage(db, { route: { from: { agent, place: thread }, to: { agent: person, place: chat } },
-      text: 'blocked: Build is missing.', ...digest })).rejects.toThrow(error);
-    await expect(replyToMessage(db, agent, { id: request.id, roomId: thread, text: 'blocked: Build is missing.', ...digest })).rejects.toThrow(error);
-    expect((await db.query('SELECT id FROM messages WHERE author_id=$1', [agent])).rows).toEqual([]);
-    expect((await db.query<{ state: string }>('SELECT state FROM agent_commands WHERE id=$1', [request.id])).rows[0]?.state).toBe('pending');
-  });
-  it.each([{ question: 'Use the signed build?' }, { brief: 'Signing unblocks the check.' }])('refuses report digests without decision options: %j', async digest => {
-    await expect(sendMessage(db, {
-      route: { from: { agent, place: chat }, to: { agent: person, place: chat } },
-      text: 'blocked: The signed build is missing.', ...digest,
-    })).rejects.toThrow();
-    expect((await db.query('SELECT id FROM messages')).rowCount).toBe(0);
-  });
+  it.each(['blocked:', 'needs-decision:'])(
+    'preserves %s report digests through message and reply',
+    async (prefix) => {
+      const question = 'Use the signed build?';
+      const brief = 'The build is ready. Signing lets the latency check finish.';
+      const text = `${prefix} ${'Full report details. '.repeat(30)}`.trim();
+      const posted = await sendMessage(db, {
+        route: { from: { agent, place: thread }, to: { agent: person, place: chat } },
+        text,
+        question,
+        brief,
+        options: ['Sign build', 'Wait'],
+      });
+      const request = await sendMessage(db, {
+        route: { from: { agent: person, place: chat }, to: { agent, place: thread } },
+        text: 'Check latency',
+      });
+      const replied = await replyToMessage(db, agent, {
+        id: request.id,
+        roomId: thread,
+        text,
+        question,
+        brief,
+        options: ['Sign build', 'Wait'],
+      });
+      for (const id of [posted.id, replied.id]) {
+        const item = (await read()).items.find((item) => item.messageId === id)!;
+        expect(item).toMatchObject({ brief, ask: { text: `${question}\n\n${brief}` } });
+        expect(
+          item.ask?.approval?.actions
+            .filter((action) => action.kind === 'choice')
+            .map((action) => action.label),
+        ).toEqual(['Sign build', 'Wait']);
+        expect(
+          (await db.query<{ text: string }>('SELECT text FROM messages WHERE id=$1', [id])).rows[0]
+            ?.text,
+        ).toBe(text);
+        const choice = item.ask!.approval!.actions.find((action) => action.kind === 'choice')!;
+        if (choice.kind !== 'choice') throw new Error('choice missing');
+        await phone.execute(
+          'answerChoice',
+          { choiceId: choice.choiceId, optionId: choice.optionId },
+          person,
+        );
+        expect((await read()).items.some((item) => item.messageId === id && item.ask)).toBe(false);
+      }
+      expect((await readWorkBoard(db, workspace, other)).items.some((item) => item.ask)).toBe(
+        false,
+      );
+    },
+  );
+  it.each(['question', 'brief'] as const)(
+    'refuses oversized report %s before message or reply publication',
+    async (field) => {
+      const request = await sendMessage(db, {
+        route: { from: { agent: person, place: chat }, to: { agent, place: thread } },
+        text: 'Check latency',
+      });
+      const digest = { [field]: '🐝'.repeat(field === 'question' ? 121 : 281) };
+      const error = `${field} is ${field === 'question' ? 121 : 281} characters; the limit is ${field === 'question' ? 120 : 280}`;
+      await expect(
+        sendMessage(db, {
+          route: { from: { agent, place: thread }, to: { agent: person, place: chat } },
+          text: 'blocked: Build is missing.',
+          ...digest,
+        }),
+      ).rejects.toThrow(error);
+      await expect(
+        replyToMessage(db, agent, {
+          id: request.id,
+          roomId: thread,
+          text: 'blocked: Build is missing.',
+          ...digest,
+        }),
+      ).rejects.toThrow(error);
+      expect((await db.query('SELECT id FROM messages WHERE author_id=$1', [agent])).rows).toEqual(
+        [],
+      );
+      expect(
+        (
+          await db.query<{ state: string }>('SELECT state FROM agent_commands WHERE id=$1', [
+            request.id,
+          ])
+        ).rows[0]?.state,
+      ).toBe('pending');
+    },
+  );
+  it.each([{ question: 'Use the signed build?' }, { brief: 'Signing unblocks the check.' }])(
+    'refuses report digests without decision options: %j',
+    async (digest) => {
+      await expect(
+        sendMessage(db, {
+          route: { from: { agent, place: chat }, to: { agent: person, place: chat } },
+          text: 'blocked: The signed build is missing.',
+          ...digest,
+        }),
+      ).rejects.toThrow();
+      expect((await db.query('SELECT id FROM messages')).rowCount).toBe(0);
+    },
+  );
   it('keeps the legacy 140-character report sentence without digest fields', async () => {
     const text = `blocked: ${'z'.repeat(200)}. More report context.`;
-    await db.query('INSERT INTO messages(id,room_id,author_id,text,card) VALUES($1,$2,$3,$4,$5::jsonb)',
-      ['legacy-report', chat, agent, text, JSON.stringify({ reportToId: person })]);
-    const item = (await read()).items.find(item => item.messageId === 'legacy-report')!;
+    await db.query(
+      'INSERT INTO messages(id,room_id,author_id,text,card) VALUES($1,$2,$3,$4,$5::jsonb)',
+      ['legacy-report', chat, agent, text, JSON.stringify({ reportToId: person })],
+    );
+    const item = (await read()).items.find((item) => item.messageId === 'legacy-report')!;
     expect(item).not.toHaveProperty('brief');
     expect(Array.from(item.ask!.text).length).toBe(140);
     expect(item.ask!.text).not.toContain('More report context');
-    expect((await db.query<{ text: string }>('SELECT text FROM messages WHERE id=$1', ['legacy-report'])).rows[0]?.text).toBe(text);
+    expect(
+      (await db.query<{ text: string }>('SELECT text FROM messages WHERE id=$1', ['legacy-report']))
+        .rows[0]?.text,
+    ).toBe(text);
   });
   it('never puts a plain mention or keyword in Needs you, only reports addressed to the viewer', async () => {
     await db.query(
@@ -395,8 +547,14 @@ describe('Work board recorded sources and single assignee', () => {
   it('projects an archived working thread as Done for seven days', async () => {
     await updateWorkItem(db, { roomId: thread, state: 'in-progress', assigneeId: agent }, agent);
     await db.query('UPDATE rooms SET archived_at=now() WHERE id=$1', [thread]);
-    expect((await read()).items.find((item) => item.id === thread)).toMatchObject({ state: 'done', roomArchived: true });
-    expect((await readWorkThread(db, thread, person))[0]).toMatchObject({ state: 'done', roomArchived: true });
+    expect((await read()).items.find((item) => item.id === thread)).toMatchObject({
+      state: 'done',
+      roomArchived: true,
+    });
+    expect((await readWorkThread(db, thread, person))[0]).toMatchObject({
+      state: 'done',
+      roomArchived: true,
+    });
     await db.query("UPDATE rooms SET archived_at=now()-interval '8 days' WHERE id=$1", [thread]);
     expect((await read()).items.find((item) => item.id === thread)).toBeUndefined();
     expect((await db.query('SELECT id FROM work_items WHERE room_id=$1', [thread])).rowCount).toBe(
@@ -441,7 +599,7 @@ describe('Work board recorded sources and single assignee', () => {
     // Each question owns its own card and answer.
     const row = before.items.filter((item) => item.ask);
     expect(row).toHaveLength(2);
-    expect(row.map(item=>item.askIds)).toEqual([[first.messageId],[second.messageId]]);
+    expect(row.map((item) => item.askIds)).toEqual([[first.messageId], [second.messageId]]);
     expect(before.items.some((item) => item.id === thread)).toBe(false);
     const option = row[0]!.ask!.approval!.actions![0]!;
     if (option.kind !== 'choice') throw new Error('choice missing');
@@ -453,7 +611,11 @@ describe('Work board recorded sources and single assignee', () => {
     const after = await read();
     expect(after.items.find((item) => item.ask)?.askIds).toEqual([second.messageId]);
     expect((await stored(first.messageId))?.assignee_id).toBe(agent);
-    await phone.execute('clearNeedsYou', { workspaceId: workspace, messageId: second.messageId }, person);
+    await phone.execute(
+      'clearNeedsYou',
+      { workspaceId: workspace, messageId: second.messageId },
+      person,
+    );
     const cleared = await read();
     expect(cleared.items.some((item) => item.ask)).toBe(false);
     expect(cleared.items.find((item) => item.id === thread)?.state).toBe('in-progress');
@@ -484,7 +646,9 @@ describe('Work board recorded sources and single assignee', () => {
     };
     await askOwnerQuestion(db, input, agent);
     await askOwnerQuestion(db, input, agent);
-    expect((await read()).items.filter(item=>item.ask).map(item=>item.askIds)).toHaveLength(2);
+    expect((await read()).items.filter((item) => item.ask).map((item) => item.askIds)).toHaveLength(
+      2,
+    );
     await phone.execute('clearNeedsYouSection', { workspaceId: workspace }, person);
     expect((await read()).items.some((item) => item.ask)).toBe(false);
   });
@@ -503,9 +667,9 @@ describe('Work board recorded sources and single assignee', () => {
       ['latency-coverage', false],
       ['release-corner', true],
     ]);
-    expect(board.items.filter((item) => item.state === 'backlog').map((item) => item.title)).toEqual([
-      'youtube-pipeline',
-    ]);
+    expect(
+      board.items.filter((item) => item.state === 'backlog').map((item) => item.title),
+    ).toEqual(['youtube-pipeline']);
     expect(board.items.every((item) => item.priority === 'none')).toBe(true);
     await machine(thread, 'review');
     expect((await read()).items.find((item) => item.id === thread)).toMatchObject({
@@ -515,13 +679,22 @@ describe('Work board recorded sources and single assignee', () => {
   it('leaves a standing (locked) corner off the board while its stored tasks stay', async () => {
     await machine(thread, 'idle');
     await db.query('UPDATE corner_facts SET locked=true WHERE corner_id=$1', [thread]);
-    await updateWorkItem(db, { id: 'standing-task', roomId: thread, title: 'youtube-pipeline' }, agent);
+    await updateWorkItem(
+      db,
+      { id: 'standing-task', roomId: thread, title: 'youtube-pipeline' },
+      agent,
+    );
     expect((await read()).items.map((item) => item.id)).toEqual(['standing-task']);
   });
   it('carries a started item objective into its thread and shows it only in details', async () => {
     await updateWorkItem(
       db,
-      { id: 'pipeline', roomId: chat, title: 'youtube-pipeline', objective: 'Upload private videos.' },
+      {
+        id: 'pipeline',
+        roomId: chat,
+        title: 'youtube-pipeline',
+        objective: 'Upload private videos.',
+      },
       agent,
     );
     expect((await read()).items.find((item) => item.id === 'pipeline')).toMatchObject({
@@ -548,65 +721,105 @@ describe('Work board recorded sources and single assignee', () => {
     await machine(thread, 'idle');
     await updateWorkItem(db, { roomId: thread, objective: 'Measure reply latency.' }, agent);
     const [header] = await readWorkThread(db, thread, person);
-    expect(header).toMatchObject({ id: thread, state: 'in-progress', idle: true, objective: 'Measure reply latency.' });
+    expect(header).toMatchObject({
+      id: thread,
+      state: 'in-progress',
+      idle: true,
+      objective: 'Measure reply latency.',
+    });
     expect(header).toEqual((await read()).items.find((item) => item.id === thread));
     expect(await readWorkThread(db, chat, person)).toEqual([]);
   });
 });
 
 describe('question retirement', () => {
-  const tasks = async () => (await phone.execute('readNeedsYou', { workspaceId: workspace }, person)).items.map(item => item.messageId);
-  const retirement = async (id: string) => (await db.query(
-    'SELECT cleared_reason,cleared_at IS NOT NULL cleared FROM needs_you_marks WHERE message_id=$1 AND identity_id=$2', [id, person])).rows;
+  const tasks = async () =>
+    (await phone.execute('readNeedsYou', { workspaceId: workspace }, person)).items.map(
+      (item) => item.messageId,
+    );
+  const retirement = async (id: string) =>
+    (
+      await db.query(
+        'SELECT cleared_reason,cleared_at IS NOT NULL cleared FROM needs_you_marks WHERE message_id=$1 AND identity_id=$2',
+        [id, person],
+      )
+    ).rows;
 
-  it.each([true, false])('tracks owner questions and agent closure, options=%s', async options => {
-    const { messageId } = await askOwnerQuestion(db, {
-      about: { kind: 'thread', roomId: thread }, question: 'Which surface?',
-      ...(options ? { options: [{ label: 'Web' }, { label: 'Phone' }] } : { freeText: true }),
-    }, agent);
-    expect(await tasks()).toEqual([messageId]);
-    expect((await agentOpenAsks(db, agent, chat)).text).toContain(messageId);
-    expect(await closeAgentAsk(db, agent, { messageId, reason: 'withdrawn' })).toEqual({ closed: 1 });
-    expect(await retirement(messageId)).toEqual([{ cleared_reason: 'withdrawn', cleared: true }]);
-    expect(await tasks()).toEqual([]);
-    expect((await agentOpenAsks(db, agent, chat)).text).toBe('');
-  });
+  it.each([true, false])(
+    'tracks owner questions and agent closure, options=%s',
+    async (options) => {
+      const { messageId } = await askOwnerQuestion(
+        db,
+        {
+          about: { kind: 'thread', roomId: thread },
+          question: 'Which surface?',
+          ...(options ? { options: [{ label: 'Web' }, { label: 'Phone' }] } : { freeText: true }),
+        },
+        agent,
+      );
+      expect(await tasks()).toEqual([messageId]);
+      expect((await agentOpenAsks(db, agent, chat)).text).toContain(messageId);
+      expect(await closeAgentAsk(db, agent, { messageId, reason: 'withdrawn' })).toEqual({
+        closed: 1,
+      });
+      expect(await retirement(messageId)).toEqual([{ cleared_reason: 'withdrawn', cleared: true }]);
+      expect(await tasks()).toEqual([]);
+      expect((await agentOpenAsks(db, agent, chat)).text).toBe('');
+    },
+  );
 
-  it.each([true, false])('preserves unanswered questions through reassignment, options=%s', async options => {
-    const { messageId } = await askOwnerQuestion(db, {
-      about: { kind: 'thread', roomId: thread }, question: 'Which surface?',
-      ...(options ? { options: [{ label: 'Web' }, { label: 'Phone' }] } : { freeText: true }),
-    }, agent);
-    const otherTasks = async () => (await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items.map(item => item.messageId);
-    const original = await agentOpenAsks(db, agent, chat);
-    expect(await tasks()).toEqual([messageId]);
-    await updateWorkItem(db, { id: messageId, roomId: thread, assigneeId: other }, person);
-    expect(await tasks()).toEqual([]);
-    expect(await otherTasks()).toEqual([messageId]);
-    const reassigned = await agentOpenAsks(db, agent, chat);
-    expect(reassigned.text).toContain('to @juniper:');
-    expect(reassigned.text).not.toContain('to @ada:');
-    expect(reassigned.version).not.toBe(original.version);
-    expect(await retirement(messageId)).toEqual([{ cleared_reason: null, cleared: false }]);
-    await updateWorkItem(db, { id: messageId, roomId: thread, assigneeId: null }, person);
-    expect(await tasks()).toEqual([]);
-    expect(await otherTasks()).toEqual([]);
-    expect((await agentOpenAsks(db, agent, chat)).text).toBe('');
-    await updateWorkItem(db, { id: messageId, roomId: thread, assigneeId: person }, person);
-    expect(await tasks()).toEqual([messageId]);
-    expect(await otherTasks()).toEqual([]);
-    expect((await agentOpenAsks(db, agent, chat)).version).toBe(original.version);
-    await closeAgentAsk(db, agent, { messageId, reason: 'withdrawn' });
-    await updateWorkItem(db, { id: messageId, roomId: thread, assigneeId: other }, person);
-    await updateWorkItem(db, { id: messageId, roomId: thread, assigneeId: person }, person);
-    expect(await tasks()).toEqual([]);
-    expect(await retirement(messageId)).toEqual([{ cleared_reason: 'withdrawn', cleared: true }]);
-  });
+  it.each([true, false])(
+    'preserves unanswered questions through reassignment, options=%s',
+    async (options) => {
+      const { messageId } = await askOwnerQuestion(
+        db,
+        {
+          about: { kind: 'thread', roomId: thread },
+          question: 'Which surface?',
+          ...(options ? { options: [{ label: 'Web' }, { label: 'Phone' }] } : { freeText: true }),
+        },
+        agent,
+      );
+      const otherTasks = async () =>
+        (await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items.map(
+          (item) => item.messageId,
+        );
+      const original = await agentOpenAsks(db, agent, chat);
+      expect(await tasks()).toEqual([messageId]);
+      await updateWorkItem(db, { id: messageId, roomId: thread, assigneeId: other }, person);
+      expect(await tasks()).toEqual([]);
+      expect(await otherTasks()).toEqual([messageId]);
+      const reassigned = await agentOpenAsks(db, agent, chat);
+      expect(reassigned.text).toContain('to @juniper:');
+      expect(reassigned.text).not.toContain('to @ada:');
+      expect(reassigned.version).not.toBe(original.version);
+      expect(await retirement(messageId)).toEqual([{ cleared_reason: null, cleared: false }]);
+      await updateWorkItem(db, { id: messageId, roomId: thread, assigneeId: null }, person);
+      expect(await tasks()).toEqual([]);
+      expect(await otherTasks()).toEqual([]);
+      expect((await agentOpenAsks(db, agent, chat)).text).toBe('');
+      await updateWorkItem(db, { id: messageId, roomId: thread, assigneeId: person }, person);
+      expect(await tasks()).toEqual([messageId]);
+      expect(await otherTasks()).toEqual([]);
+      expect((await agentOpenAsks(db, agent, chat)).version).toBe(original.version);
+      await closeAgentAsk(db, agent, { messageId, reason: 'withdrawn' });
+      await updateWorkItem(db, { id: messageId, roomId: thread, assigneeId: other }, person);
+      await updateWorkItem(db, { id: messageId, roomId: thread, assigneeId: person }, person);
+      expect(await tasks()).toEqual([]);
+      expect(await retirement(messageId)).toEqual([{ cleared_reason: 'withdrawn', cleared: true }]);
+    },
+  );
 
-  it.each([true, false].flatMap(options => [other, null].map(assigneeId => ({ options, assigneeId }))))(
-    'bulk clearing preserves dormant question marks, options=$options assignee=$assigneeId', async ({ options, assigneeId }) => {
+  it.each(
+    [true, false].flatMap((options) =>
+      [other, null].map((assigneeId) => ({ options, assigneeId })),
+    ),
+  )(
+    'bulk clearing preserves dormant question marks, options=$options assignee=$assigneeId',
+    async ({ options, assigneeId }) => {
       const input = {
-        about: { kind: 'thread' as const, roomId: thread }, question: 'Which surface?',
+        about: { kind: 'thread' as const, roomId: thread },
+        question: 'Which surface?',
         ...(options ? { options: [{ label: 'Web' }, { label: 'Phone' }] } : { freeText: true }),
       };
       const dormant = await askOwnerQuestion(db, input, agent);
@@ -614,34 +827,76 @@ describe('question retirement', () => {
       const visible = await askOwnerQuestion(db, input, agent);
       expect(await tasks()).toEqual([visible.messageId]);
       await phone.execute('clearNeedsYouSection', { workspaceId: workspace }, person);
-      expect(await retirement(visible.messageId)).toEqual([{ cleared_reason: 'manual', cleared: true }]);
-      expect(await retirement(dormant.messageId)).toEqual([{ cleared_reason: null, cleared: false }]);
-      await updateWorkItem(db, { id: dormant.messageId, roomId: thread, assigneeId: person }, person);
+      expect(await retirement(visible.messageId)).toEqual([
+        { cleared_reason: 'manual', cleared: true },
+      ]);
+      expect(await retirement(dormant.messageId)).toEqual([
+        { cleared_reason: null, cleared: false },
+      ]);
+      await updateWorkItem(
+        db,
+        { id: dormant.messageId, roomId: thread, assigneeId: person },
+        person,
+      );
       expect(await tasks()).toEqual([dormant.messageId]);
       expect((await agentOpenAsks(db, agent, chat)).text).toContain(dormant.messageId);
     },
   );
 
-  it.each([true, false].flatMap(options => [true, false].map(workspaceAccess => ({ options, workspaceAccess }))))(
-    'records assignments before access is granted, options=$options workspaceAccess=$workspaceAccess', async ({ options, workspaceAccess }) => {
+  it.each(
+    [true, false].flatMap((options) =>
+      [true, false].map((workspaceAccess) => ({ options, workspaceAccess })),
+    ),
+  )(
+    'records assignments before access is granted, options=$options workspaceAccess=$workspaceAccess',
+    async ({ options, workspaceAccess }) => {
       await db.query("UPDATE rooms SET visibility='invite-only' WHERE id=$1", [chat]);
       await phone.execute('removeRoomMember', { roomId: chat, memberId: other }, person);
-      if (!workspaceAccess) await db.query('UPDATE memberships SET removed_at=now() WHERE workspace_id=$1 AND room_id IS NULL AND identity_id=$2', [workspace, other]);
-      const { messageId } = await askOwnerQuestion(db, {
-        about: { kind: 'thread', roomId: thread }, question: 'Which surface?',
-        ...(options ? { options: [{ label: 'Web' }, { label: 'Phone' }] } : { freeText: true }),
-      }, agent);
+      if (!workspaceAccess)
+        await db.query(
+          'UPDATE memberships SET removed_at=now() WHERE workspace_id=$1 AND room_id IS NULL AND identity_id=$2',
+          [workspace, other],
+        );
+      const { messageId } = await askOwnerQuestion(
+        db,
+        {
+          about: { kind: 'thread', roomId: thread },
+          question: 'Which surface?',
+          ...(options ? { options: [{ label: 'Web' }, { label: 'Phone' }] } : { freeText: true }),
+        },
+        agent,
+      );
       await updateWorkItem(db, { id: messageId, roomId: thread, assigneeId: other }, person);
-      expect((await db.query('SELECT cleared_at,cleared_reason FROM needs_you_marks WHERE message_id=$1 AND identity_id=$2', [messageId, other])).rows).toEqual([{ cleared_at: null, cleared_reason: null }]);
+      expect(
+        (
+          await db.query(
+            'SELECT cleared_at,cleared_reason FROM needs_you_marks WHERE message_id=$1 AND identity_id=$2',
+            [messageId, other],
+          )
+        ).rows,
+      ).toEqual([{ cleared_at: null, cleared_reason: null }]);
       if (workspaceAccess) {
-        expect((await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items).toEqual([]);
-        expect(await phone.execute('countNeedsYou', { workspaceId: workspace }, other)).toEqual({ count: 0 });
+        expect(
+          (await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items,
+        ).toEqual([]);
+        expect(await phone.execute('countNeedsYou', { workspaceId: workspace }, other)).toEqual({
+          count: 0,
+        });
       } else {
-        await db.query('UPDATE memberships SET removed_at=NULL WHERE workspace_id=$1 AND room_id IS NULL AND identity_id=$2', [workspace, other]);
+        await db.query(
+          'UPDATE memberships SET removed_at=NULL WHERE workspace_id=$1 AND room_id IS NULL AND identity_id=$2',
+          [workspace, other],
+        );
       }
       await phone.execute('addRoomMember', { roomId: chat, memberId: other }, person);
-      expect((await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items.map(item => item.messageId)).toEqual([messageId]);
-      expect(await phone.execute('countNeedsYou', { workspaceId: workspace }, other)).toEqual({ count: 1 });
+      expect(
+        (await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items.map(
+          (item) => item.messageId,
+        ),
+      ).toEqual([messageId]);
+      expect(await phone.execute('countNeedsYou', { workspaceId: workspace }, other)).toEqual({
+        count: 1,
+      });
       expect((await agentOpenAsks(db, agent, chat)).text).toContain(messageId);
     },
   );
@@ -649,52 +904,136 @@ describe('question retirement', () => {
   it('records an addressed standalone choice before its recipient joins the Room', async () => {
     await db.query("UPDATE rooms SET visibility='invite-only' WHERE id=$1", [chat]);
     await phone.execute('removeRoomMember', { roomId: chat, memberId: other }, person);
-    const choice = await postRoomChoice(db, { roomId: chat, agentId: agent, requesterId: person,
-      mode: 'question', prompt: 'Which surface?', options: [{ label: 'Web', consequence: 'Web' }, { label: 'Phone', consequence: 'Phone' }] });
-    await db.query(`UPDATE messages SET card=jsonb_set(card,'{mentionIds}',to_jsonb(ARRAY[$2::text])) WHERE id=$1`, [choice.messageId, other]);
-    expect((await db.query('SELECT cleared_at FROM needs_you_marks WHERE message_id=$1 AND identity_id=$2', [choice.messageId, other])).rows).toEqual([{ cleared_at: null }]);
-    expect((await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items).toEqual([]);
+    const choice = await postRoomChoice(db, {
+      roomId: chat,
+      agentId: agent,
+      requesterId: person,
+      mode: 'question',
+      prompt: 'Which surface?',
+      options: [
+        { label: 'Web', consequence: 'Web' },
+        { label: 'Phone', consequence: 'Phone' },
+      ],
+    });
+    await db.query(
+      `UPDATE messages SET card=jsonb_set(card,'{mentionIds}',to_jsonb(ARRAY[$2::text])) WHERE id=$1`,
+      [choice.messageId, other],
+    );
+    expect(
+      (
+        await db.query(
+          'SELECT cleared_at FROM needs_you_marks WHERE message_id=$1 AND identity_id=$2',
+          [choice.messageId, other],
+        )
+      ).rows,
+    ).toEqual([{ cleared_at: null }]);
+    expect((await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items).toEqual(
+      [],
+    );
     await phone.execute('addRoomMember', { roomId: chat, memberId: other }, person);
-    expect((await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items.map(item => item.messageId)).toEqual([choice.messageId]);
+    expect(
+      (await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items.map(
+        (item) => item.messageId,
+      ),
+    ).toEqual([choice.messageId]);
   });
 
-  it.each([true, false].flatMap(options => (['answered', 'withdrawn', 'superseded'] as const).map(reason => ({ options, reason }))))(
-    'keeps agent closure for a first-time assignee, options=$options reason=$reason', async ({ options, reason }) => {
-      const { messageId } = await askOwnerQuestion(db, {
-        about: { kind: 'thread', roomId: thread }, question: 'Which surface?',
-        ...(options ? { options: [{ label: 'Web' }, { label: 'Phone' }] } : { freeText: true }),
-      }, agent);
+  it.each(
+    [true, false].flatMap((options) =>
+      (['answered', 'withdrawn', 'superseded'] as const).map((reason) => ({ options, reason })),
+    ),
+  )(
+    'keeps agent closure for a first-time assignee, options=$options reason=$reason',
+    async ({ options, reason }) => {
+      const { messageId } = await askOwnerQuestion(
+        db,
+        {
+          about: { kind: 'thread', roomId: thread },
+          question: 'Which surface?',
+          ...(options ? { options: [{ label: 'Web' }, { label: 'Phone' }] } : { freeText: true }),
+        },
+        agent,
+      );
       expect(await tasks()).toEqual([messageId]);
-      expect((await db.query('SELECT 1 FROM needs_you_marks WHERE message_id=$1 AND identity_id=$2', [messageId, other])).rowCount).toBe(0);
+      expect(
+        (
+          await db.query('SELECT 1 FROM needs_you_marks WHERE message_id=$1 AND identity_id=$2', [
+            messageId,
+            other,
+          ])
+        ).rowCount,
+      ).toBe(0);
       expect(await closeAgentAsk(db, agent, { messageId, reason })).toEqual({ closed: 1 });
       await updateWorkItem(db, { id: messageId, roomId: thread, assigneeId: other }, person);
-      expect((await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items).toEqual([]);
-      expect(await phone.execute('countNeedsYou', { workspaceId: workspace }, other)).toEqual({ count: 0 });
+      expect(
+        (await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items,
+      ).toEqual([]);
+      expect(await phone.execute('countNeedsYou', { workspaceId: workspace }, other)).toEqual({
+        count: 0,
+      });
       expect((await agentOpenAsks(db, agent, chat)).text).toBe('');
       expect((await agentOpenAsks(db, agent, null)).text).toBe('');
-      expect((await db.query('SELECT identity_id,cleared_reason,cleared_at IS NOT NULL cleared FROM needs_you_marks WHERE message_id=$1 ORDER BY identity_id', [messageId])).rows).toEqual([
+      expect(
+        (
+          await db.query(
+            'SELECT identity_id,cleared_reason,cleared_at IS NOT NULL cleared FROM needs_you_marks WHERE message_id=$1 ORDER BY identity_id',
+            [messageId],
+          )
+        ).rows,
+      ).toEqual([
         { identity_id: person, cleared_reason: reason, cleared: true },
         { identity_id: other, cleared_reason: reason, cleared: true },
       ]);
-      expect(await closeAgentAsk(db, agent, { messageId, reason: 'withdrawn' })).toEqual({ closed: 0 });
-      expect((await db.query('SELECT ask_closed_reason FROM messages WHERE id=$1', [messageId])).rows).toEqual([{ ask_closed_reason: reason }]);
+      expect(await closeAgentAsk(db, agent, { messageId, reason: 'withdrawn' })).toEqual({
+        closed: 0,
+      });
+      expect(
+        (await db.query('SELECT ask_closed_reason FROM messages WHERE id=$1', [messageId])).rows,
+      ).toEqual([{ ask_closed_reason: reason }]);
     },
   );
 
   it('preserves standalone choice closure when it is addressed to a new person', async () => {
-    const question = await postRoomChoice(db, { roomId: dm, agentId: agent, requesterId: person,
-      mode: 'question', prompt: 'Which surface?', options: [{ label: 'Web', consequence: 'Web' }, { label: 'Phone', consequence: 'Phone' }] });
+    const question = await postRoomChoice(db, {
+      roomId: dm,
+      agentId: agent,
+      requesterId: person,
+      mode: 'question',
+      prompt: 'Which surface?',
+      options: [
+        { label: 'Web', consequence: 'Web' },
+        { label: 'Phone', consequence: 'Phone' },
+      ],
+    });
     await closeAgentAsk(db, agent, { messageId: question.messageId, reason: 'withdrawn' });
-    await db.query(`UPDATE messages SET card=jsonb_set(card,'{mentionIds}',to_jsonb(ARRAY[$2::text])) WHERE id=$1`, [question.messageId, other]);
-    expect((await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items).toEqual([]);
-    expect((await db.query('SELECT cleared_reason,cleared_at IS NOT NULL cleared FROM needs_you_marks WHERE message_id=$1 AND identity_id=$2', [question.messageId, other])).rows).toEqual([{ cleared_reason: 'withdrawn', cleared: true }]);
+    await db.query(
+      `UPDATE messages SET card=jsonb_set(card,'{mentionIds}',to_jsonb(ARRAY[$2::text])) WHERE id=$1`,
+      [question.messageId, other],
+    );
+    expect((await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items).toEqual(
+      [],
+    );
+    expect(
+      (
+        await db.query(
+          'SELECT cleared_reason,cleared_at IS NOT NULL cleared FROM needs_you_marks WHERE message_id=$1 AND identity_id=$2',
+          [question.messageId, other],
+        )
+      ).rows,
+    ).toEqual([{ cleared_reason: 'withdrawn', cleared: true }]);
   });
 
   it('hides reminders after Room access is revoked, including changed private details', async () => {
     await db.query("UPDATE rooms SET visibility='invite-only' WHERE id=$1", [chat]);
-    const { messageId } = await askOwnerQuestion(db, {
-      about: { kind: 'thread', roomId: thread }, question: 'Which surface?', freeText: true,
-    }, agent);
+    const { messageId } = await askOwnerQuestion(
+      db,
+      {
+        about: { kind: 'thread', roomId: thread },
+        question: 'Which surface?',
+        freeText: true,
+      },
+      agent,
+    );
     const before = await agentOpenAsks(db, agent, dm);
     expect(before.text).toContain(messageId);
     expect((await agentOpenAsks(db, agent, null)).text).toContain(messageId);
@@ -706,71 +1045,174 @@ describe('question retirement', () => {
       expect(after.text).toBe('');
       expect(after.version).not.toBe(before.version);
     }
-    expect((await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items.map(item => item.messageId)).toEqual([messageId]);
+    expect(
+      (await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items.map(
+        (item) => item.messageId,
+      ),
+    ).toEqual([messageId]);
   });
 
-  it.each([true, false])('keeps quote answers terminal for new assignees, options=%s', async options => {
-    const { messageId } = await askOwnerQuestion(db, {
-      about: { kind: 'thread', roomId: thread }, question: 'Which surface?',
-      ...(options ? { options: [{ label: 'Web' }, { label: 'Phone' }] } : { freeText: true }),
-    }, agent);
-    const reply = await phone.execute('sendRoomReply', { roomId: thread, parentMessageId: messageId, text: 'Use Web.' }, person);
-    expect(await retirement(messageId)).toEqual([{ cleared_reason: 'answered', cleared: true }]);
-    await updateWorkItem(db, { id: messageId, roomId: thread, assigneeId: other }, person);
-    expect((await db.query('SELECT cleared_reason,cleared_at IS NOT NULL cleared FROM needs_you_marks WHERE message_id=$1 AND identity_id=$2', [messageId, other])).rows).toEqual([{ cleared_reason: 'answered', cleared: true }]);
-    await db.query('UPDATE messages SET deleted_at=now() WHERE id=$1', [reply.messageId]);
-    expect((await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items).toEqual([]);
-    expect(await phone.execute('countNeedsYou', { workspaceId: workspace }, other)).toEqual({ count: 0 });
-    expect((await agentOpenAsks(db, agent, chat)).text).toBe('');
-    expect((await agentOpenAsks(db, agent, null)).text).toBe('');
-    await updateWorkItem(db, { id: messageId, roomId: thread, assigneeId: person }, person);
-    expect(await tasks()).toEqual([]);
-  });
+  it.each([true, false])(
+    'keeps quote answers terminal for new assignees, options=%s',
+    async (options) => {
+      const { messageId } = await askOwnerQuestion(
+        db,
+        {
+          about: { kind: 'thread', roomId: thread },
+          question: 'Which surface?',
+          ...(options ? { options: [{ label: 'Web' }, { label: 'Phone' }] } : { freeText: true }),
+        },
+        agent,
+      );
+      const reply = await phone.execute(
+        'sendRoomReply',
+        { roomId: thread, parentMessageId: messageId, text: 'Use Web.' },
+        person,
+      );
+      expect(await retirement(messageId)).toEqual([{ cleared_reason: 'answered', cleared: true }]);
+      await updateWorkItem(db, { id: messageId, roomId: thread, assigneeId: other }, person);
+      expect(
+        (
+          await db.query(
+            'SELECT cleared_reason,cleared_at IS NOT NULL cleared FROM needs_you_marks WHERE message_id=$1 AND identity_id=$2',
+            [messageId, other],
+          )
+        ).rows,
+      ).toEqual([{ cleared_reason: 'answered', cleared: true }]);
+      await db.query('UPDATE messages SET deleted_at=now() WHERE id=$1', [reply.messageId]);
+      expect(
+        (await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items,
+      ).toEqual([]);
+      expect(await phone.execute('countNeedsYou', { workspaceId: workspace }, other)).toEqual({
+        count: 0,
+      });
+      expect((await agentOpenAsks(db, agent, chat)).text).toBe('');
+      expect((await agentOpenAsks(db, agent, null)).text).toBe('');
+      await updateWorkItem(db, { id: messageId, roomId: thread, assigneeId: person }, person);
+      expect(await tasks()).toEqual([]);
+    },
+  );
 
   it('settles every recipient of a standalone question when one quote-answers', async () => {
-    const question = await postRoomChoice(db, { roomId: dm, agentId: agent, requesterId: person,
-      mode: 'question', prompt: 'Which surface?', options: [{ label: 'Web', consequence: 'Web' }, { label: 'Phone', consequence: 'Phone' }] });
-    await db.query(`UPDATE messages SET card=jsonb_set(card,'{mentionIds}',to_jsonb($2::text[])) WHERE id=$1`, [question.messageId, [person, other]]);
-    await phone.execute('sendRoomReply', { roomId: dm, parentMessageId: question.messageId, text: 'Use Web.' }, person);
-    expect((await db.query('SELECT identity_id,cleared_reason FROM needs_you_marks WHERE message_id=$1 AND cleared_at IS NOT NULL ORDER BY identity_id', [question.messageId])).rows).toEqual([
-      { identity_id: person, cleared_reason: 'answered' }, { identity_id: other, cleared_reason: 'answered' },
+    const question = await postRoomChoice(db, {
+      roomId: dm,
+      agentId: agent,
+      requesterId: person,
+      mode: 'question',
+      prompt: 'Which surface?',
+      options: [
+        { label: 'Web', consequence: 'Web' },
+        { label: 'Phone', consequence: 'Phone' },
+      ],
+    });
+    await db.query(
+      `UPDATE messages SET card=jsonb_set(card,'{mentionIds}',to_jsonb($2::text[])) WHERE id=$1`,
+      [question.messageId, [person, other]],
+    );
+    await phone.execute(
+      'sendRoomReply',
+      { roomId: dm, parentMessageId: question.messageId, text: 'Use Web.' },
+      person,
+    );
+    expect(
+      (
+        await db.query(
+          'SELECT identity_id,cleared_reason FROM needs_you_marks WHERE message_id=$1 AND cleared_at IS NOT NULL ORDER BY identity_id',
+          [question.messageId],
+        )
+      ).rows,
+    ).toEqual([
+      { identity_id: person, cleared_reason: 'answered' },
+      { identity_id: other, cleared_reason: 'answered' },
     ]);
-    expect((await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items).toEqual([]);
+    expect((await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items).toEqual(
+      [],
+    );
   });
 
-  it.each(['source-closed', 'superseded', 'answered', 'quote', 'section'] as const)('retires a forwarded question on %s', async event => {
-    const question = await sendMessage(db, {
-      route: { from: { agent, place: thread }, to: { agent: person, place: dm } },
-      text: 'Which surface?', ask: { question: 'Which surface?', options: ['Web', 'Phone'], recommended: 'Web' },
-    });
-    expect(await tasks()).toEqual([question.id]);
-    expect((await agentOpenAsks(db, agent, chat)).text).toContain(question.id);
-    if (event === 'source-closed') await db.query('UPDATE rooms SET archived_at=now() WHERE id=$1', [thread]);
-    if (event === 'superseded') await db.query(`INSERT INTO messages(id,room_id,author_id,text,card,created_at)
-      VALUES('new-report',$1,$2,'done: shipped',jsonb_build_object('reportToId',$3::text,'sourceRoomId',$4::text),now()+interval '1 second')`, [dm, agent, person, thread]);
-    if (event === 'answered') {
-      const choice = (await db.query<{ id: string; options: { optionId: string }[] }>('SELECT id,options FROM room_choices WHERE message_id=$1', [question.id])).rows[0]!;
-      await phone.execute('answerChoice', { choiceId: choice.id, optionId: choice.options[0]!.optionId }, person);
-    }
-    if (event === 'quote') {
-      await db.query(`INSERT INTO messages(id,room_id,author_id,text,created_at) VALUES('ordinary',$1,$2,'Unrelated',now()+interval '1 second')`, [dm, person]);
+  it.each(['source-closed', 'superseded', 'answered', 'quote', 'section'] as const)(
+    'retires a forwarded question on %s',
+    async (event) => {
+      const question = await sendMessage(db, {
+        route: { from: { agent, place: thread }, to: { agent: person, place: dm } },
+        text: 'Which surface?',
+        ask: { question: 'Which surface?', options: ['Web', 'Phone'], recommended: 'Web' },
+      });
       expect(await tasks()).toEqual([question.id]);
-      await db.query(`INSERT INTO messages(id,room_id,author_id,text,reply_to_message_id,created_at)
-        VALUES('quoted',$1,$2,'Web',$3,now()+interval '2 seconds')`, [dm, person, question.id]);
-    }
-    if (event === 'section') await phone.execute('clearNeedsYouSection', { workspaceId: workspace }, person);
-    expect(await retirement(question.id)).toEqual([{ cleared_reason: event === 'quote' ? 'answered' : event === 'section' ? 'manual' : event, cleared: true }]);
-    expect(await tasks()).toEqual([]);
-    expect((await agentOpenAsks(db, agent, chat)).text).toBe('');
-  });
+      expect((await agentOpenAsks(db, agent, chat)).text).toContain(question.id);
+      if (event === 'source-closed')
+        await db.query('UPDATE rooms SET archived_at=now() WHERE id=$1', [thread]);
+      if (event === 'superseded')
+        await db.query(
+          `INSERT INTO messages(id,room_id,author_id,text,card,created_at)
+      VALUES('new-report',$1,$2,'done: shipped',jsonb_build_object('reportToId',$3::text,'sourceRoomId',$4::text),now()+interval '1 second')`,
+          [dm, agent, person, thread],
+        );
+      if (event === 'answered') {
+        const choice = (
+          await db.query<{ id: string; options: { optionId: string }[] }>(
+            'SELECT id,options FROM room_choices WHERE message_id=$1',
+            [question.id],
+          )
+        ).rows[0]!;
+        await phone.execute(
+          'answerChoice',
+          { choiceId: choice.id, optionId: choice.options[0]!.optionId },
+          person,
+        );
+      }
+      if (event === 'quote') {
+        await db.query(
+          `INSERT INTO messages(id,room_id,author_id,text,created_at) VALUES('ordinary',$1,$2,'Unrelated',now()+interval '1 second')`,
+          [dm, person],
+        );
+        expect(await tasks()).toEqual([question.id]);
+        await db.query(
+          `INSERT INTO messages(id,room_id,author_id,text,reply_to_message_id,created_at)
+        VALUES('quoted',$1,$2,'Web',$3,now()+interval '2 seconds')`,
+          [dm, person, question.id],
+        );
+      }
+      if (event === 'section')
+        await phone.execute('clearNeedsYouSection', { workspaceId: workspace }, person);
+      expect(await retirement(question.id)).toEqual([
+        {
+          cleared_reason: event === 'quote' ? 'answered' : event === 'section' ? 'manual' : event,
+          cleared: true,
+        },
+      ]);
+      expect(await tasks()).toEqual([]);
+      expect((await agentOpenAsks(db, agent, chat)).text).toBe('');
+    },
+  );
 
   it('tracks addressed standalone choices and preserves their answer reason', async () => {
-    const question = await postRoomChoice(db, { roomId: dm, agentId: agent, requesterId: person,
-      mode: 'question', prompt: 'Which surface?', options: [{ label: 'Web', consequence: 'Web' }, { label: 'Phone', consequence: 'Phone' }] });
+    const question = await postRoomChoice(db, {
+      roomId: dm,
+      agentId: agent,
+      requesterId: person,
+      mode: 'question',
+      prompt: 'Which surface?',
+      options: [
+        { label: 'Web', consequence: 'Web' },
+        { label: 'Phone', consequence: 'Phone' },
+      ],
+    });
     expect(await tasks()).toEqual([question.messageId]);
-    const choice = (await db.query<{ options: { optionId: string }[] }>('SELECT options FROM room_choices WHERE id=$1', [question.choiceId])).rows[0]!;
-    await phone.execute('answerChoice', { choiceId: question.choiceId, optionId: choice.options[0]!.optionId }, person);
-    expect(await retirement(question.messageId)).toEqual([{ cleared_reason: 'answered', cleared: true }]);
+    const choice = (
+      await db.query<{ options: { optionId: string }[] }>(
+        'SELECT options FROM room_choices WHERE id=$1',
+        [question.choiceId],
+      )
+    ).rows[0]!;
+    await phone.execute(
+      'answerChoice',
+      { choiceId: question.choiceId, optionId: choice.options[0]!.optionId },
+      person,
+    );
+    expect(await retirement(question.messageId)).toEqual([
+      { cleared_reason: 'answered', cleared: true },
+    ]);
     expect(await tasks()).toEqual([]);
   });
 });
@@ -779,19 +1221,43 @@ describe('corner report blocks on the board', () => {
   // The blocker decides a column only while the stored machine waits; output in the corner lifts it.
   it('places a worker block by machine state and corner output, in Tasks and thread reads', async () => {
     await machine(thread, 'idle');
-    await db.query('UPDATE corner_facts SET implementer_agent_id=$2 WHERE corner_id=$1', [thread, agent]);
-    const post = (id: string, room: string, minutesAgo: number, fields: { text?: string; card_type?: string; card?: object }) =>
-      db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card,created_at)
-        VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,now()-make_interval(mins=>$8))`, [id, room, agent, fields.text ?? '',
-        fields.card_type ? 'card' : 'message', fields.card_type ?? null, JSON.stringify(fields.card ?? null), minutesAgo]);
+    await db.query('UPDATE corner_facts SET implementer_agent_id=$2 WHERE corner_id=$1', [
+      thread,
+      agent,
+    ]);
+    const post = (
+      id: string,
+      room: string,
+      minutesAgo: number,
+      fields: { text?: string; card_type?: string; card?: object },
+    ) =>
+      db.query(
+        `INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card,created_at)
+        VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,now()-make_interval(mins=>$8))`,
+        [
+          id,
+          room,
+          agent,
+          fields.text ?? '',
+          fields.card_type ? 'card' : 'message',
+          fields.card_type ?? null,
+          JSON.stringify(fields.card ?? null),
+          minutesAgo,
+        ],
+      );
     await post('worker-output-before', thread, 30, { card_type: 'vault-save', card: {} });
-    await post('worker-block', thread, 20, { text: 'blocked: need the staging key', card: { reportToId: person, reportStatus: 'blocked' } });
-    const states = async (viewer: string) => [
-      (await readWorkThread(db, thread, viewer))[0],
-      (await readWorkBoard(db, workspace, viewer)).items.find(item => item.roomId === thread),
-    ].map(item => [item?.state, item?.idle ?? false]);
+    await post('worker-block', thread, 20, {
+      text: 'blocked: need the staging key',
+      card: { reportToId: person, reportStatus: 'blocked' },
+    });
+    const states = async (viewer: string) =>
+      [
+        (await readWorkThread(db, thread, viewer))[0],
+        (await readWorkBoard(db, workspace, viewer)).items.find((item) => item.roomId === thread),
+      ].map((item) => [item?.state, item?.idle ?? false]);
     // [thread read, board row] per viewer. The board lists the viewer's ask in the thread's place.
-    const progress = ['in-progress', true], asked = ['needs-you', false];
+    const progress = ['in-progress', true],
+      asked = ['needs-you', false];
     expect(await states(person)).toEqual([progress, asked]);
     expect(await states(other)).toEqual([progress, progress]);
     await machine(thread, 'waiting');
@@ -807,9 +1273,15 @@ describe('corner report blocks on the board', () => {
 });
 
 describe('viewer-scoped task states', () => {
-  it.each([chat, dm, thread])('scopes stored Needs you to the assignee in %s', async roomId => {
-    await updateWorkItem(db, { id: 'assigned-task', roomId, state: 'needs-you', assigneeId: person }, agent);
-    const stateFor = async (viewer: string) => (await readWorkBoard(db, workspace, viewer)).items.find(item => item.id === 'assigned-task')?.state;
+  it.each([chat, dm, thread])('scopes stored Needs you to the assignee in %s', async (roomId) => {
+    await updateWorkItem(
+      db,
+      { id: 'assigned-task', roomId, state: 'needs-you', assigneeId: person },
+      agent,
+    );
+    const stateFor = async (viewer: string) =>
+      (await readWorkBoard(db, workspace, viewer)).items.find((item) => item.id === 'assigned-task')
+        ?.state;
     expect(await stateFor(person)).toBe('needs-you');
     expect(await stateFor(other)).toBe('in-progress');
     await updateWorkItem(db, { id: 'assigned-task', roomId, assigneeId: other }, person);
@@ -823,24 +1295,56 @@ describe('viewer-scoped task states', () => {
 
   it('uses permission deciders for waiting threads in both Tasks and thread reads', async () => {
     await machine(thread, 'waiting');
-    await db.query(`INSERT INTO permission_authority(permission_id,room_id,principal_id,request_id,scope,status)
-      VALUES('viewer-permission',$1,$2,'permission-turn','{}'::jsonb,'pending')`, [thread, other]);
-    await db.query(`INSERT INTO messages(id,room_id,author_id,text,card_type,presentation,card)
-      VALUES('viewer-permission-card',$1,$2,'Approve spending','permission','card',$3::jsonb)`, [thread, agent, JSON.stringify({
-        permissionId: 'viewer-permission', requestId: 'permission-turn', repository: '', purpose: 'squire-spending', status: 'pending', tool: 'money.spend',
-        agent: { pubkey: agent, kind: 'agent', name: 'Jellybean' }, requester: { pubkey: other, kind: 'human', name: 'Juniper' },
-      })]);
+    await db.query(
+      `INSERT INTO permission_authority(permission_id,room_id,principal_id,request_id,scope,status)
+      VALUES('viewer-permission',$1,$2,'permission-turn','{}'::jsonb,'pending')`,
+      [thread, other],
+    );
+    await db.query(
+      `INSERT INTO messages(id,room_id,author_id,text,card_type,presentation,card)
+      VALUES('viewer-permission-card',$1,$2,'Approve spending','permission','card',$3::jsonb)`,
+      [
+        thread,
+        agent,
+        JSON.stringify({
+          permissionId: 'viewer-permission',
+          requestId: 'permission-turn',
+          repository: '',
+          purpose: 'squire-spending',
+          status: 'pending',
+          tool: 'money.spend',
+          agent: { pubkey: agent, kind: 'agent', name: 'Jellybean' },
+          requester: { pubkey: other, kind: 'human', name: 'Juniper' },
+        }),
+      ],
+    );
     expect((await readWorkThread(db, thread, person))[0]).toMatchObject({ state: 'needs-you' });
-    expect((await readWorkThread(db, thread, other))[0]).toMatchObject({ state: 'in-progress', idle: true });
-    expect((await readWorkBoard(db, workspace, other)).items.find(item => item.id === thread)).toMatchObject({ state: 'in-progress', idle: true });
-    expect((await read()).items.some(item => item.roomId === thread && item.state === 'needs-you')).toBe(true);
+    expect((await readWorkThread(db, thread, other))[0]).toMatchObject({
+      state: 'in-progress',
+      idle: true,
+    });
+    expect(
+      (await readWorkBoard(db, workspace, other)).items.find((item) => item.id === thread),
+    ).toMatchObject({ state: 'in-progress', idle: true });
+    expect(
+      (await read()).items.some((item) => item.roomId === thread && item.state === 'needs-you'),
+    ).toBe(true);
     await db.query(`UPDATE messages SET card=card-'purpose' WHERE id='viewer-permission-card'`);
     for (const viewer of [person, other]) {
       expect((await readWorkThread(db, thread, viewer))[0]).toMatchObject({ state: 'needs-you' });
-      expect((await readWorkBoard(db, workspace, viewer)).items.some(item => item.roomId === thread && item.state === 'needs-you')).toBe(true);
+      expect(
+        (await readWorkBoard(db, workspace, viewer)).items.some(
+          (item) => item.roomId === thread && item.state === 'needs-you',
+        ),
+      ).toBe(true);
     }
-    await db.query(`UPDATE permission_authority SET status='authorized' WHERE permission_id='viewer-permission'`);
+    await db.query(
+      `UPDATE permission_authority SET status='authorized' WHERE permission_id='viewer-permission'`,
+    );
     for (const viewer of [person, other])
-      expect((await readWorkThread(db, thread, viewer))[0]).toMatchObject({ state: 'in-progress', idle: true });
+      expect((await readWorkThread(db, thread, viewer))[0]).toMatchObject({
+        state: 'in-progress',
+        idle: true,
+      });
   });
 });
