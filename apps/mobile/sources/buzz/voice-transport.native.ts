@@ -2,6 +2,10 @@ import { getBuzzRuntimeConfig } from './runtime-config';
 import { Room, RoomEvent, Track } from 'livekit-client';
 import { Linking, NativeEventEmitter, NativeModules, PermissionsAndroid, Platform, TurboModuleRegistry } from 'react-native';
 
+export function loadVoiceClient(): Promise<typeof import('livekit-client')> {
+  return import('livekit-client');
+}
+
 let reportedIOSCapabilityFailure = false;
 let reportedAndroidCapabilityFailure = false;
 

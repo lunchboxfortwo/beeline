@@ -1,11 +1,11 @@
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import * as React from 'react';
 import { AppState, Platform } from 'react-native';
-import { RoomEvent, Track, type Room } from 'livekit-client';
+import type { Room } from 'livekit-client';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { VOICE_DATA_TOPIC, type VoiceBudget, type VoiceJoin, type VoiceSignal, type VoiceCall, type RoomViewIdentity } from '@beeline/api-contract/phone';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
-import { createVoiceRoom, subscribeVoiceMicrophone, subscribeVoiceResume } from './voice-transport';
+import { createVoiceRoom, loadVoiceClient, subscribeVoiceMicrophone, subscribeVoiceResume } from './voice-transport';
 import { reportClientError } from './client-error-report';
 import { sharedLiveConnection } from '@/sync/transport/live-connection';
 import { voiceWaveformLevel } from './waveform-level';
@@ -77,6 +77,8 @@ export function useVoiceCall(roomId: string, enabled: boolean, roomAgents: reado
   }, []);
   React.useEffect(() => () => { void end(); }, [roomId, end]);
   React.useEffect(() => { if (!enabled) void end(); }, [enabled, end]);
+  // Load LiveKit with the call-capable screen, not on the tap: an await before startAudio loses Safari's user activation.
+  React.useEffect(() => { if (enabled) void loadVoiceClient().catch(() => {}); }, [enabled]);
   // Keep the screen on only while a call runs; every end path clears `call` or unmounts.
   const callActive = call !== null;
   React.useEffect(() => {
@@ -104,6 +106,7 @@ export function useVoiceCall(roomId: string, enabled: boolean, roomAgents: reado
     const current = () => version === revision.current;
     try {
       transport = await createVoiceRoom(() => { void end(); }, roomId);
+      const { RoomEvent, Track } = await loadVoiceClient();
       joiningCleanup.current = release;
       if (version !== revision.current) { await release(); return; }
       joined = await monolithPhoneOperation('voiceJoin', { roomId });

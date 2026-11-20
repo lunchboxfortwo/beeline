@@ -1,6 +1,18 @@
-import { Room, RoomEvent, Track } from 'livekit-client';
+import type { Room, Track } from 'livekit-client';
+
+type VoiceClient = typeof import('livekit-client');
+let voiceClient: VoiceClient | undefined;
+let voiceClientLoad: Promise<VoiceClient> | undefined;
+
+/** LiveKit is voice-only, so the entry bundle leaves it out; a call-capable chat loads it on mount. */
+export function loadVoiceClient(): Promise<VoiceClient> {
+  return voiceClientLoad ??= import('livekit-client').then(client => voiceClient = client,
+    cause => { voiceClientLoad = undefined; throw cause; });
+}
 
 export async function createVoiceRoom(_onStop: () => void = () => {}, _roomId?: string): Promise<{ room: Room; closeAudio(): Promise<void>; configureStop(callId: string, token: string): Promise<void> }> {
+  // Preloaded on mount: no await before startAudio, so the mic tap's user activation still applies.
+  const { Room } = voiceClient ?? await loadVoiceClient();
   const room = new Room({ adaptiveStream: false, dynacast: false, publishDefaults: { stopMicTrackOnMute: true },
     reconnectPolicy: { nextRetryDelayInMs: () => null } });
   // Called from the original mic gesture, so browser playback has user activation.
@@ -20,6 +32,7 @@ export async function routeVoiceResumeNotification(_url: unknown, _ready?: () =>
 
 /** Sample every audio source each frame; the loudest speaker drives the waveform. */
 export function subscribeVoiceMicrophone(room: Room, onLevel: (level: number) => void): () => void {
+  const { RoomEvent } = voiceClient!;
   const context = new AudioContext();
   const meters = new Map<Track, { source: MediaStreamAudioSourceNode; analyser: AnalyserNode; samples: Float32Array<ArrayBuffer> }>();
   const update = () => {

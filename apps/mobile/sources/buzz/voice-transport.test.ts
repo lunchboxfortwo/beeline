@@ -6,7 +6,7 @@ const native = vi.hoisted(() => ({
   volumeListener: undefined as ((event: { id: string; volume: number }) => void) | undefined,
   removeVolumeListener: vi.fn(),
   meter: { createVolumeProcessor: vi.fn(() => 'meter-1'), deleteVolumeProcessor: vi.fn() }, roomFailure: null as Error | null, registerGlobals: vi.fn(),
-  roomOptions: undefined as any,
+  roomOptions: undefined as any, startAudio: vi.fn(),
   link: undefined as ((event: {url: string}) => void) | undefined,
   response: undefined as ((event: any) => void) | undefined,
   openURL: vi.fn(async () => {}),
@@ -34,7 +34,7 @@ vi.mock('expo-modules-core', () => ({
 }));
 vi.mock('livekit-client', () => ({
   RoomEvent: { LocalTrackPublished: 'published', LocalTrackUnpublished: 'unpublished', TrackSubscribed: 'subscribed', TrackUnsubscribed: 'unsubscribed', ParticipantDisconnected: 'disconnected', TrackMuted: 'muted', TrackUnmuted: 'unmuted' },
-  Room: class { constructor(options: unknown) { native.roomOptions = options; if (native.roomFailure) throw native.roomFailure; } async startAudio() {} } }));
+  Room: class { constructor(options: unknown) { native.roomOptions = options; if (native.roomFailure) throw native.roomFailure; } async startAudio() { native.startAudio(); } } }));
 import * as nativeTransport from './voice-transport.native';
 import { createVoiceRoom, subscribeVoiceResume, routeVoiceResumeNotification } from './voice-transport.native';
 
@@ -120,6 +120,16 @@ it('disables timed SDK reconnects in the browser adapter too', async () => {
     expect(native.roomOptions.reconnectPolicy.nextRetryDelayInMs({ retryCount })).toBeNull();
 });
 
+
+it('starts browser playback inside the tap once the call screen has loaded LiveKit', async () => {
+  const browser = await import('./voice-transport');
+  await browser.loadVoiceClient();
+  native.startAudio.mockClear();
+  const joining = browser.createVoiceRoom();
+  // No await ran before startAudio, so Safari still counts the tap as user activation.
+  expect(native.startAudio).toHaveBeenCalledOnce();
+  await joining;
+});
 
 it('starts the native microphone meter through the adapter used by conversation join', async () => {
   const track = { isMuted: false, mediaStreamTrack: { id: 'microphone', _peerConnectionId: 3 } };

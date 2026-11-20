@@ -14,6 +14,7 @@ const fixture = vi.hoisted(() => ({
 vi.mock('react-native', () => ({ Platform: { OS: 'web' }, AppState: {} }));
 vi.mock('./voice-transport', () => ({
   subscribeVoiceMicrophone: () => () => {}, subscribeVoiceResume: () => () => {},
+  loadVoiceClient: () => import('livekit-client'),
   createVoiceRoom: async () => ({
     configureStop: async () => {}, closeAudio: fixture.closeAudio,
     room: { on: (event: string, listener: (...args: any[]) => void) => fixture.listeners.set(event, listener),
