@@ -35,12 +35,12 @@ type BeelineGlyphPaintLoop = 'once' | 'release';
 /**
  * The app icon's loop, painting itself. Two loops, one geometry:
  *
- * - `once` is the splash. The stroke paints to the filled mark and holds,
- *   because loading genuinely ends.
- * - `release` is the thinking line. The stroke paints, then immediately
+ * - `once` is the splash. The stroke paints to the filled mark and holds.
+ * - `release` is a brand animation. The stroke paints, then immediately
  *   unwinds to empty and rests there before redrawing. It never holds the
  *   completed stroke, so it cannot read as progress toward an unknown finish.
  *
+ * Loading and working indicators use the grammar Spinner (docs/DESIGN.md).
  * Reduced motion, a backgrounded app, and a settled (non-live) mark are the
  * same completed filled glyph — never a frozen half-draw.
  */
