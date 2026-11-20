@@ -83,7 +83,7 @@ test('Mac proof verifies every packaged Mach-O architecture and signature and pr
   await verifyMacBinaries(directory, 'darwin-arm64', { inspect, execute: (...args) => calls.push(args) });
   assert.equal(calls.filter(([command]) => command === 'lipo').length, 4);
   assert.equal(calls.filter(([command, args]) => command === 'codesign' && args[0] === '--verify').length, 4);
-  assert.ok(calls.filter(([command]) => command === 'lipo').every(([, args]) => args[1] === 'arm64'));
+  assert.ok(calls.filter(([command]) => command === 'lipo').every(([, args]) => args[1] === '-verify_arch' && args[2] === 'arm64'));
   for (const rejected of ['lipo', 'codesign']) await assert.rejects(verifyMacBinaries(directory, 'darwin-arm64', {
     inspect, execute: (command, args) => {
       if (command === rejected && (command === 'lipo' || args[0] === '--verify')) throw new Error('invalid binary');
