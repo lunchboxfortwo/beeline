@@ -215,25 +215,33 @@ function AskCard({ item, actions, now }: { item: WorkItemView; actions: WorkBoar
   );
 }
 /** Backlog, In progress and Done rows: status glyph, the name, the assignee at the right. */
-function WorkRow({ item, onPress }: { item: WorkItemView; onPress: () => void }) {
+/** A task row. Its status mark opens the task sheet, where the state changes. */
+function WorkRow({ item, onPress, onState }: { item: WorkItemView; onPress: () => void; onState: () => void }) {
   return (
-    <ListItem
-      minHeight={44}
-      paddingHorizontal="4"
-      paddingVertical="2"
-      gap="3"
-      backgroundColor="transparent"
-      onPress={onPress}
-      accessibilityRole="button"
-      aria-label={item.title}
-      testID={`work-item-${item.id}`}
-    >
-      <WorkStateMark state={item.state} idle={item.idle} />
-      <T v="meta" flex={1} numberOfLines={1}>
-        {item.title}
-      </T>
-      {item.assignee ? <WorkAvatar person={item.assignee} /> : null}
-    </ListItem>
+    <XStack alignItems="center" paddingLeft="2">
+      <Btn kind="icon" label={`Change state of ${item.title}`} onPress={onState} testID={`work-state-mark-${item.id}`}>
+        <WorkStateMark state={item.state} idle={item.idle} />
+      </Btn>
+      <ListItem
+        flex={1}
+        minWidth={0}
+        minHeight={44}
+        paddingLeft="1"
+        paddingRight="4"
+        paddingVertical="2"
+        gap="3"
+        backgroundColor="transparent"
+        onPress={onPress}
+        accessibilityRole="button"
+        aria-label={item.title}
+        testID={`work-item-${item.id}`}
+      >
+        <T v="meta" flex={1} numberOfLines={1}>
+          {item.title}
+        </T>
+        {item.assignee ? <WorkAvatar person={item.assignee} /> : null}
+      </ListItem>
+    </XStack>
   );
 }
 function SectionHead({
@@ -366,6 +374,7 @@ export function WorkBoard({
         key={item.id}
         item={item}
         onPress={() => (hasThread(item) ? actions.open(item) : setDetail(item))}
+        onState={() => setDetail(item)}
       />
     ));
   const sections = [

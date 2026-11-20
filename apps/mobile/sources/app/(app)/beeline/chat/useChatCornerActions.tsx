@@ -103,13 +103,13 @@ export function useChatCornerActions([
 
 
   /**
-   * Mobile swipe-right asks first, through the shared bottom sheet — the same
+   * Mobile swipe-right (desktop: New thread) asks first, through the shared bottom sheet — the same
    * presentation Room creation uses. The sheet holds the message while it is
    * open; declining creates nothing.
    */
   const handleForwardToNewCorner = useCallback(
     (message: ChatDisplayMessage) => {
-      if (openingRandomCorner.current || isArchived || viewerIsAgent || desktopExperience) return;
+      if (openingRandomCorner.current || isArchived || viewerIsAgent) return;
       if (!transport) {
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         Modal.alert(
@@ -121,7 +121,7 @@ export function useChatCornerActions([
       void Haptics.selectionAsync();
       setForwardCornerPrompt(message);
     },
-    [desktopExperience, isArchived, openingRandomCorner, transport, viewerIsAgent],
+    [isArchived, openingRandomCorner, transport, viewerIsAgent],
   );
 
 
@@ -130,7 +130,7 @@ export function useChatCornerActions([
   ) => {
     const target = retry?.target ?? forwardCornerPrompt;
     if (!target) return;
-    if (openingRandomCorner.current || isArchived || viewerIsAgent || desktopExperience) return;
+    if (openingRandomCorner.current || isArchived || viewerIsAgent) return;
     if (!transport) return;
     setForwardCornerPrompt(null);
     setOpeningRandomCorner(true);

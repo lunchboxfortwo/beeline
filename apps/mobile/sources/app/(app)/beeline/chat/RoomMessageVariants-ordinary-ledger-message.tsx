@@ -73,7 +73,6 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
   onMessageActions,
   onReact = () => undefined,
   onForward = () => undefined,
-  onBookmark = () => undefined,
   onReportIssue,
   onForwardToNewCorner,
   onCornerProposalDecision,
@@ -139,7 +138,6 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
     // The same rule for people and agents: follow-ups sit under the sender line.
     continuedRun &&
     !announcementFeed &&
-    !message.bookmarked &&
     !message.feedbackReported
       ? undefined
       : {
@@ -156,7 +154,6 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
           onLongPress: onMessageActions ? () => onMessageActions(message) : undefined,
           stamp,
           isViewer: isSelfSteer,
-          bookmarked: message.bookmarked,
           feedbackReported: message.feedbackReported,
           ...(announcementFeed
             ? {}
@@ -599,7 +596,6 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
       onReply={replyAvailable ? () => onReply(message) : undefined}
       onReact={(emoji) => onReact(message, emoji)}
       onForward={() => onForward(message)}
-      onBookmark={() => onBookmark(message)}
       {...(onReportIssue && !message.isAgentDraft && !message.isAgentActivity
         ? { onReportIssue: () => onReportIssue(message) }
         : {})}
@@ -607,7 +603,6 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
         ? // A message someone else wrote can carry the swipe-to-corner tip.
           { onSwipeThread: () => onForwardToNewCorner(message) }
         : {})}
-      bookmarked={message.bookmarked}
       isDesktop={desktopLayout}
     >
       {content}

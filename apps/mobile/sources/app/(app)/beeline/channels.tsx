@@ -261,9 +261,12 @@ const BuzzChannels = memo(function BuzzChannels({ session }: { session: DeckSess
           renderRightActions={() => (
             <YStack width={ROW_HEIGHT} backgroundColor="highlight" alignItems="center" justifyContent="center">
               {item.directMessage ? (
-                <Btn kind="icon" label={`Close ${title}`} testID={`chat-close-action-${item.room.id}`}
+                <Btn kind="quiet" label={`Close ${title}`} testID={`chat-close-action-${item.room.id}`}
                   onPress={() => { if (roomListGestures.canInteract()) void handleCloseChat(item); }}>
-                  <Glyph icon={LogOut} />
+                  <YStack alignItems="center" gap="0.5">
+                    <Glyph icon={LogOut} />
+                    <T v="meta" color="secondary" numberOfLines={1}>Close</T>
+                  </YStack>
                 </Btn>
               ) : (
                 <Btn kind="icon" label={`Leave ${title}`} testID={`room-leave-action-${item.room.id}`}

@@ -59,7 +59,7 @@ it('COPY-LINK-1: the message menu copies the message as ¶author-N and confirms 
   const target = { id: 'm1', text: 'Send button stays grey', isUser: false, timestamp: 1, chatSeq: 2773,
     authorIdentity: { pubkey: 'p', name: 'Candy', handle: 'candy', kind: 'agent' } };
   const props = { memberManagement: {}, outbox: { states: new Map(), current: () => new Map() }, renameDraft: '',
-    roomSurface: null, messageIsBookmarked: () => false, canDeleteMessage: () => false,
+    roomSurface: null, canDeleteMessage: () => false,
     setMessageActionsTarget, showCopyToast, messageActionsTarget: target } as unknown as React.ComponentProps<typeof ChatSurfaceOverlays>;
   let tree!: ReturnType<typeof create>;
   act(() => { tree = create(<ChatSurfaceOverlays {...props} />); });
@@ -73,5 +73,35 @@ it('COPY-LINK-1: the message menu copies the message as ¶author-N and confirms 
   // A row the server has not numbered (still sending) offers no link.
   act(() => tree.update(<ChatSurfaceOverlays {...props} messageActionsTarget={{ ...target, chatSeq: undefined } as never} />));
   expect(tree.root.findAllByProps({ testID: 'message-copy-link-action' })).toHaveLength(0);
+  act(() => tree.unmount());
+});
+
+it('DM-CLOSE-1: the direct-message sheet offers Close conversation through closeChat', () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const handleRoomLifecycle = vi.fn(async () => undefined);
+  const props = { memberManagement: {}, outbox: { states: new Map() }, renameDraft: '',
+    roomSurface: null, setDmActionsVisible: vi.fn(), dmActionsVisible: true, handleRoomLifecycle } as unknown as React.ComponentProps<typeof ChatSurfaceOverlays>;
+  let tree!: ReturnType<typeof create>;
+  act(() => { tree = create(<ChatSurfaceOverlays {...props} />); });
+  const row = tree.root.findByProps({ testID: 'dm-close-action' });
+  expect(row.props.label).toBe('Close conversation');
+  act(() => row.props.onPress());
+  expect(handleRoomLifecycle).toHaveBeenCalledExactlyOnceWith('close');
+  act(() => tree.update(<ChatSurfaceOverlays {...props} roomLifecycleBusy />));
+  expect(tree.root.findByProps({ testID: 'dm-close-action' }).props.disabled).toBe(true);
+  act(() => tree.unmount());
+});
+
+it('BOOKMARK-RETIRED-1: the message sheet offers no Bookmark', () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const target = { id: 'm1', text: 'hello', isUser: true, timestamp: 1, chatSeq: 3,
+    authorIdentity: { pubkey: 'p', name: 'Maya', handle: 'maya', kind: 'human' } };
+  const props = { memberManagement: {}, outbox: { states: new Map(), current: () => new Map() }, renameDraft: '',
+    roomSurface: null, canDeleteMessage: () => true, messageActionsTarget: target } as unknown as React.ComponentProps<typeof ChatSurfaceOverlays>;
+  let tree!: ReturnType<typeof create>;
+  act(() => { tree = create(<ChatSurfaceOverlays {...props} />); });
+  const rows = tree.root.findAllByType('Row').map((row: any) => row.props.testID);
+  expect(rows).toEqual(['message-report-action', 'message-copy-action', 'message-copy-link-action',
+    'message-select-action', 'message-forward-action', 'message-delete-action']);
   act(() => tree.unmount());
 });

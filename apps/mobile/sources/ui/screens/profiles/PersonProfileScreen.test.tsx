@@ -81,7 +81,7 @@ async function render(close = vi.fn()) {
 beforeEach(() => { state.viewerRole = 'member'; state.operation.mockReset(); state.navigate.mockClear(); state.prefetch.mockClear(); state.openPlace.mockClear(); });
 
 describe('person profile', () => {
-  it('shows the 72 mark, @handle and role, Message and Invite to chat, connected agents and no Grants', async () => {
+  it('shows the 72 mark, @handle and role, Message, connected agents and no Grants', async () => {
     const tree = await render();
     const mark = tree.root.findAll((node: any) => node.type === 'IdentityMark' && node.props.kind === 'human')[0];
     expect(mark.props.size).toBe(72);
@@ -92,7 +92,6 @@ describe('person profile', () => {
     expect(content).toContain('Connected agents');
     expect(content).not.toContain('Grants');
     expect(byId(tree, 'human-profile-message')).toBeDefined();
-    expect(byId(tree, 'human-profile-invite')).toBeDefined();
     expect(byId(tree, 'edit-person-role')).toBeUndefined();
   });
 
@@ -112,7 +111,14 @@ describe('person profile', () => {
     expect(state.openPlace).toHaveBeenCalledWith({ kind: 'agent', agentId: 'jimmy', workspaceId: 'w' }, false);
   });
 
+  it('INVITE-TO-CHAT-1: offers Invite to chat only to a Workspace manager, the one viewer the server accepts', async () => {
+    expect(byId(await render(), 'human-profile-invite')).toBeUndefined();
+    state.viewerRole = 'admin';
+    expect(byId(await render(), 'human-profile-invite')).toBeDefined();
+  });
+
   it('invites the person to one of your chats', async () => {
+    state.viewerRole = 'admin';
     state.operation.mockResolvedValue(undefined);
     const tree = await render();
     act(() => byId(tree, 'human-profile-invite').props.onPress());

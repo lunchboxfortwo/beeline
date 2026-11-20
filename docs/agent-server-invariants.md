@@ -30,7 +30,7 @@ Paths and commands below are relative to the repository root. Read these invaria
 
 ## Room departure
 
-- **Leaving a Room.** Any human can leave a top-level Room (`PhoneService.leaveRoom`, under the Room row lock); the last Workspace owner/admin in it deletes it for everyone and must pass `confirmDelete: true`. `leaveDeletesRoom` drives `buzz/room-leave.ts`. Swiping a DM writes a per-viewer `chat_dismissals` row hidden only until newer inbound activity.
+- **Leaving a Room.** Any human can leave a top-level Room (`PhoneService.leaveRoom`, under the Room row lock); the last Workspace owner/admin in it deletes it for everyone and must pass `confirmDelete: true`. `leaveDeletesRoom` drives `buzz/room-leave.ts`. Closing a DM (`PhoneService.closeChat`) writes a per-viewer `chat_dismissals` row hidden only until newer inbound activity.
 
 ## Feature contracts
 

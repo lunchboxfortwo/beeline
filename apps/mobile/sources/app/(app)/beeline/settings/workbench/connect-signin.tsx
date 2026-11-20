@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 import { Spinner, YStack } from 'tamagui';
 import * as WebBrowser from 'expo-web-browser';
-import { router, useLocalSearchParams, type Href } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useSandboxWebView } from '@/components/buzz/sandbox-webview';
 import { useInstallObserver } from '@/buzz/use-observed-resource';
 import { getWorkbenchSource } from '@/buzz/workbench-source';
@@ -34,8 +34,8 @@ function AppSignInReturnScreen({ sessionUri }: { sessionUri: string }) {
       if (!destination?.appId) throw new Error('App sign-in could not be matched to a connection');
       await getWorkbenchSource().completeAppSignIn({ sessionUri, appId: destination.appId });
       if (!live) return;
-      router.replace(destination?.roomId ? (connectorOfferCompletionRoute(destination.roomId) as Href )
-            : ({ pathname: '/beeline/settings/workbench', params: { workspaceId: destination?.workspaceId ?? '', viewerId: destination?.viewerId ?? '' } } as Href),
+      router.replace(destination?.roomId ? connectorOfferCompletionRoute(destination.roomId)
+            : { pathname: '/beeline/settings/workbench', params: { workspaceId: destination?.workspaceId ?? '', viewerId: destination?.viewerId ?? '' } },
         );
     }).catch(cause => { if (live) setError(appErrorCopy(cause, 'Sign-in could not be verified')); });
     return () => { live = false; };
@@ -72,9 +72,9 @@ function ConnectorSignInOverlay() {
   const squire = connectorId.startsWith('squire:') || connectorName === 'Trusty Squire';
   const external = signIn.method === 'oauth' || Platform.OS === 'web';
   // A finished Squire sign-in lands on the Trusty Squire page, where the row now reads signed in.
-  const finish = useCallback(() => router.replace(roomId ? (connectorOfferCompletionRoute(roomId) as Href )
-          : squire ? ({ pathname: '/beeline/settings/workbench/service', params: { workspaceId, viewerId, service: 'trusty-squire' } } as Href)
-            : ({ pathname: '/beeline/settings/workbench', params: { workspaceId, viewerId } } as Href),
+  const finish = useCallback(() => router.replace(roomId ? connectorOfferCompletionRoute(roomId)
+          : squire ? { pathname: '/beeline/settings/workbench/service', params: { workspaceId, viewerId, service: 'trusty-squire' } }
+            : { pathname: '/beeline/settings/workbench', params: { workspaceId, viewerId } },
       ), [roomId, squire, viewerId, workspaceId],
   );
   // Android reports a failed load as finished too; only a clean finish counts.

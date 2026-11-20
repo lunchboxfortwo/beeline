@@ -18,8 +18,8 @@ vi.mock('@/components/buzz/LifecycleCard', () => ({ GitHubEventCard: vi.fn(() =>
 vi.mock('@/components/buzz/PrLifecycleCard', () => ({ NotificationLifecycleCard: vi.fn(() => null) }));
 vi.mock('@/components/buzz/TranscriptSwipeable', () => ({ default: vi.fn((props: any) => props.children) }));
 vi.mock('@/components/buzz/TurnProgressLine', () => ({ TurnSettledLine: vi.fn(() => null) }));
-vi.mock('@/components/buzz/DesktopMessageAction', () => ({ DesktopMessageAction: vi.fn(() => null) }));
-vi.mock('@/components/buzz/ButtonRow', () => ({ ButtonRowFrame: vi.fn(() => null) }));
+vi.mock('@/components/buzz/DesktopMessageAction', () => ({ DesktopMessageAction: (props: any) => React.createElement('DesktopMessageAction', props) }));
+vi.mock('@/components/buzz/ButtonRow', () => ({ ButtonRowFrame: ({ children }: any) => children }));
 vi.mock('@/components/buzz/DesktopWorkspacePortal', () => ({ DesktopWorkspacePortal: vi.fn(() => null) }));
 vi.mock('@/components/buzz/AppMark', () => ({ AppMark: vi.fn(() => null) }));
 vi.mock('@/components/buzz/ArtifactMedia', () => ({ ArtifactImage: vi.fn(() => null) }));
@@ -35,7 +35,7 @@ vi.mock('@/components/buzz/Button', () => ({ Button: vi.fn(() => null) }));
 vi.mock('@/components/buzz/MonoHull', () => ({ NewMessageMaterialize: vi.fn(() => null), PixelLoader: vi.fn(() => null) }));
 vi.mock('@/modal', () => ({ Modal: vi.fn(() => null) }));
 vi.mock('@/buzz/chat-list-store', () => ({ readChatList: vi.fn() }));
-vi.mock('@/buzz/room-message-records', () => ({ roomMessageRecord: vi.fn(), writeRoomBookmark: vi.fn() }));
+vi.mock('@/buzz/room-message-records', () => ({ roomMessageRecord: vi.fn() }));
 vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: vi.fn(), phoneOperationFailureReason: vi.fn() }));
 vi.mock('@/buzz/message-forward', async importOriginal => ({ ...await importOriginal<typeof import('@/buzz/message-forward')>(), forwardMessageToRoom: vi.fn(), forwardTargets: vi.fn(), resolveForwardTargetRoom: vi.fn() }));
 
@@ -88,8 +88,9 @@ vi.mock('@/components/buzz/GrantRequestCard', () => ({
 vi.mock('./chat-surface-values', () => ({
   knownAgentPubkeysFor: () => new Set(), rosterAgent: () => undefined, durableFactLine: () => '',
 }));
-vi.mock('@/buzz/room-message-cell', () => ({
-  messageFailureGroups: () => new Map(), archiveActionPresentation: () => ({}),
+vi.mock('@/buzz/room-message-cell', async importOriginal => ({
+  messageFailureGroups: () => new Map(),
+  archiveActionPresentation: (await importOriginal<typeof import('@/buzz/room-message-cell')>()).archiveActionPresentation,
   liveCardPresentation: () => ({}), messageRosterPresentation: () => ({}),
   useRoomMessageRenderItem: ({ render, presentationForMessage }: any) => ({ item }: any) =>
     render(item, presentationForMessage(item)),
@@ -234,13 +235,13 @@ it.each([
       10: { current: { focus } },
     });
     const [, , beginReply] = useChatMessageActions(inputs as Parameters<typeof useChatMessageActions>[0]);
-    const args: unknown[] = Array(69).fill(undefined);
+    const args: unknown[] = Array(68).fill(undefined);
     Object.assign(args, {
       0: false, 4: null, 10: new Map(), 11: new Map(), 12: new Map(),
       13: [], 14: stored.room_id, 15: VIEWER, 17: {}, 20: false,
-      21: onAnswer, 22: onSkip, 42: beginReply, 52: false,
-      53: new Set(), 54: new Set(), 55: new Set(),
-      56: { states: new Map(), retry: vi.fn() }, 57: {}, 58: new Map(), 63: [messageRow],
+      21: onAnswer, 22: onSkip, 42: beginReply, 51: false,
+      52: new Set(), 53: new Set(), 54: new Set(),
+      55: { states: new Map(), retry: vi.fn() }, 56: {}, 57: new Map(), 62: [messageRow],
     });
     const [render] = useChatTranscriptRenderer(args as Parameters<typeof useChatTranscriptRenderer>[0]);
     return render({ item: messageRow });
@@ -307,12 +308,12 @@ it.each([
   };
   const beginReply = vi.fn();
   function Fixture() {
-    const args: unknown[] = Array(69).fill(undefined);
+    const args: unknown[] = Array(68).fill(undefined);
     Object.assign(args, {
       0: false, 10: new Map(), 11: new Map(), 12: new Map(), 13: [],
       14: roomId, 15: VIEWER, 17: {}, 20: !!scenario.desktop, 36: !!scenario.announcement,
-      42: beginReply, 52: !!scenario.desktop, 53: new Set(), 54: new Set(), 55: new Set(),
-      56: { states: new Map(), retry: vi.fn() }, 57: {}, 58: new Map(), 63: [row],
+      42: beginReply, 51: !!scenario.desktop, 52: new Set(), 53: new Set(), 54: new Set(),
+      55: { states: new Map(), retry: vi.fn() }, 56: {}, 57: new Map(), 62: [row],
     });
     const [render] = useChatTranscriptRenderer(args as Parameters<typeof useChatTranscriptRenderer>[0]);
     return render({ item: row });
@@ -392,12 +393,12 @@ it.each(cardRendererCases)('wraps the $name renderer once and replies to that ca
       10: { current: { focus: vi.fn() } },
     });
     const [, , beginReply] = useChatMessageActions(inputs as Parameters<typeof useChatMessageActions>[0]);
-    const args: unknown[] = Array(69).fill(undefined);
+    const args: unknown[] = Array(68).fill(undefined);
     Object.assign(args, {
       0: false, 4: null, 10: new Map(), 11: new Map(), 12: new Map(), 13: [],
       14: source.room_id, 15: VIEWER, 17: {}, 20: false, 21: onAnswer, 22: onSkip,
-      42: beginReply, 52: false, 53: new Set(), 54: new Set(), 55: new Set(),
-      56: { states: new Map(), retry: vi.fn() }, 57: {}, 58: new Map(), 63: [row],
+      42: beginReply, 51: false, 52: new Set(), 53: new Set(), 54: new Set(),
+      55: { states: new Map(), retry: vi.fn() }, 56: {}, 57: new Map(), 62: [row],
     });
     const [render] = useChatTranscriptRenderer(args as Parameters<typeof useChatTranscriptRenderer>[0]);
     return render({ item: row });
@@ -460,13 +461,13 @@ it('renders the morning workflow approval beside its same-time handoff with work
   expect(folded.hostIds.get(askId)).toBe(askId);
   expect(folded.hostIds.get(runId)).toBe(runId);
   function Fixture() {
-    const args: unknown[] = Array(69).fill(undefined);
+    const args: unknown[] = Array(68).fill(undefined);
     Object.assign(args, {
       0: false, 4: null, 10: new Map(), 11: new Map(), 12: new Map(),
       13: [], 14: syntheticImageChoice.room_id, 15: owner, 17: {}, 20: false,
-      21: onAnswer, 22: onSkip, 52: false,
-      53: new Set(), 54: new Set(), 55: new Set(),
-      56: { states: new Map(), retry: vi.fn() }, 57: {}, 58: new Map(), 63: folded.rows,
+      21: onAnswer, 22: onSkip, 51: false,
+      52: new Set(), 53: new Set(), 54: new Set(),
+      55: { states: new Map(), retry: vi.fn() }, 56: {}, 57: new Map(), 62: folded.rows,
     });
     const [render] = useChatTranscriptRenderer(args as Parameters<typeof useChatTranscriptRenderer>[0]);
     return <>{folded.rows.map(item => <React.Fragment key={item.id}>{render({ item })}</React.Fragment>)}</>;
@@ -696,4 +697,30 @@ it.each([false, true])('QUOTE-CLAMP: the original stays within two lines while t
   expect(quote.props.numberOfLines).toBe(2);
   expect(quote.props.children).toContain(original);
   expect(renderer.root.findByType('LedgerSteer').props.bodyText).toBe(reply);
+});
+
+
+it('removes desktop New thread when an ordinary message Room is archived', () => {
+  const row: ChatDisplayMessage = { id: 'message', text: 'Start here', timestamp: 1, isUser: false };
+  const forward = vi.fn();
+  function Fixture({ archived }: { archived: boolean }) {
+    const args: unknown[] = Array(68).fill(undefined);
+    Object.assign(args, {
+      0: false, 10: new Map(), 11: new Map(), 12: new Map(), 13: [],
+      14: 'room', 15: VIEWER, 17: { handleForwardToNewCorner: forward },
+      20: true, 29: true, 47: false, 48: archived, 51: true,
+      52: new Set(), 53: new Set(), 54: new Set(),
+      55: { states: new Map(), retry: vi.fn() }, 56: {}, 57: new Map(), 62: [row],
+    });
+    const [render] = useChatTranscriptRenderer(args as Parameters<typeof useChatTranscriptRenderer>[0]);
+    return render({ item: row });
+  }
+  act(() => { renderer = create(<Fixture archived={false} />); });
+  act(() => renderer.root.findByProps({ testID: 'thread-button-message' }).props.onPress());
+  expect(forward).toHaveBeenCalledWith(row);
+  act(() => { renderer.update(<Fixture archived />); });
+  expect(renderer.root.findAllByProps({ testID: 'thread-button-message' })).toHaveLength(0);
+  act(() => { renderer.update(<Fixture archived={false} />); });
+  act(() => renderer.root.findByProps({ testID: 'thread-button-message' }).props.onPress());
+  expect(forward).toHaveBeenCalledTimes(2);
 });

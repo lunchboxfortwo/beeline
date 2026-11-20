@@ -6,6 +6,7 @@ import { fallbackPersonName, personHandle, isWorkspaceListView, isWorkspaceView,
 import type { PushLevel } from '@beeline/api-contract/phone';
 import { checkNativeUpdate, reloadNativeUpdate } from '@/hooks/useUpdates';
 import { appErrorCopy } from '@/buzz/app-error-copy';
+import { Modal } from '@/modal';
 import { reportClientError } from '@/buzz/client-error-report';
 import { getEffectiveRelayUrl, clearBuzzIdentity, loadBuzzIdentity } from '@/auth/buzz-identity-storage';
 import { useActiveCommunityId } from '@/buzz/use-active-community';
@@ -141,7 +142,7 @@ export function useYouSettings({ linkedWorkspaceId, githubReconnect, githubConne
         })().catch((reason) => setNotice(appErrorCopy(reason)));
     }, [pubkey]);
 
-    const [busy, setBusy] = useState<'google' | 'github' | 'picture' | 'delete' | null>(null);
+    const [busy, setBusy] = useState<'google' | 'github' | 'picture' | 'delete' | 'leave' | null>(null);
     const connectGoogle = async () => {
         if (busy || !pubkey) return;
         setBusy('google');
@@ -196,6 +197,21 @@ export function useYouSettings({ linkedWorkspaceId, githubReconnect, githubConne
             }
             await monolithPhoneOperation('updatePersonProfile', { avatar });
             await publishManagedIdentity(await monolithPhoneOperation('getManagedIdentity', {}));
+        } catch (caught) { setError(appErrorCopy(caught)); } finally { setBusy(null); }
+    };
+
+    /** Settings → You → Leave: every member's way out of the current Workspace. The server refuses a sole owner. */
+    const leaveWorkspace = async () => {
+        if (busy || !workspace) return;
+        const confirmed = await Modal.confirm(`Leave ${workspace.name}?`, 'Other members keep their access.', {
+            cancelText: 'Cancel', confirmText: 'Leave', destructive: true,
+        });
+        if (!confirmed) return;
+        setBusy('leave');
+        setError(null);
+        try {
+            await monolithPhoneOperation('leaveWorkspace', { workspaceId: workspace.id });
+            router.replace('/beeline/channels');
         } catch (caught) { setError(appErrorCopy(caught)); } finally { setBusy(null); }
     };
 
@@ -301,7 +317,7 @@ export function useYouSettings({ linkedWorkspaceId, githubReconnect, githubConne
             failure: pushFailure, retryable: pushRetryable, retry: () => void retryPush(), change: changePushLevel,
         },
         speakingSpeed: managed?.speakingSpeed ?? 1.15, changeSpeakingSpeed,
-        busy, connectGoogle, connectGitHub, changePicture, signOut, deleteAccount,
+        busy, connectGoogle, connectGitHub, changePicture, leaveWorkspace, signOut, deleteAccount,
         update: {
             enabled: Updates.isEnabled, busy: isManualUpdateBusy(manualUpdate), message: manualUpdateMessage(manualUpdate),
             label: manualUpdateButtonLabel(manualUpdate), check: () => void checkForUpdate(),

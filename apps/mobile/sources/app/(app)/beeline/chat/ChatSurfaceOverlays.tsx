@@ -45,8 +45,6 @@ type Props = {
   messageActionsTarget: ChatDisplayMessage | null;
   outbox: import('./useRoomSurfaceSession').RoomSurfaceOutboxHandle;
   handleReactToMessage: (message: ChatDisplayMessage, emoji: MessageReactionEmoji) => Promise<void>;
-  messageIsBookmarked: (message: ChatDisplayMessage) => boolean;
-  handleBookmarkMessage: (message: ChatDisplayMessage) => Promise<void>;
   handleReportMessage: (message: ChatDisplayMessage) => Promise<void>;
   handleCopyLedgerMessage: (text: string) => void;
   /** Confirms a copy in the transcript's toast. */
@@ -99,7 +97,7 @@ type Props = {
   setRoomActionsVisible: (visible: boolean) => void | undefined;
   activeCommunityId: string | null;
   roomLifecycleBusy: boolean;
-  handleRoomLifecycle: (action: "delete" | "leave") => Promise<void>;
+  handleRoomLifecycle: (action: "delete" | "leave" | "close") => Promise<void>;
   renameError: string | null;
   setDmActionsVisible: React.Dispatch<React.SetStateAction<boolean>>;
   dmActionsVisible: boolean;
@@ -130,8 +128,6 @@ export function ChatSurfaceOverlays({
   messageActionsTarget,
   outbox,
   handleReactToMessage,
-  messageIsBookmarked,
-  handleBookmarkMessage,
   handleReportMessage,
   handleCopyLedgerMessage,
   showCopyToast,
@@ -246,20 +242,6 @@ export function ChatSurfaceOverlays({
               setMessageActionsTarget(null);
               if (target) void handleReactToMessage(target, emoji);
             }}
-          />
-        ) : null}
-        {messageActionsTarget && !messageActionsTarget.isAgentActivity ? (
-          <HullActionSheetRow
-            accessibilityLabel={
-              messageIsBookmarked(messageActionsTarget) ? 'Remove bookmark' : 'Bookmark message'
-            }
-            label={messageIsBookmarked(messageActionsTarget) ? 'Remove bookmark' : 'Bookmark'}
-            onPress={() => {
-              const target = messageActionsTarget;
-              setMessageActionsTarget(null);
-              if (target) void handleBookmarkMessage(target);
-            }}
-            testID="message-bookmark-action"
           />
         ) : null}
         {messageActionsTarget && !messageActionsTarget.isAgentActivity ? (
@@ -547,6 +529,13 @@ export function ChatSurfaceOverlays({
             testID="dm-schedules-action"
           />
         )}
+        <HullActionSheetRow
+          accessibilityLabel="Close conversation"
+          disabled={roomLifecycleBusy}
+          label="Close conversation"
+          onPress={() => void handleRoomLifecycle('close')}
+          testID="dm-close-action"
+        />
         {membershipError && (
           <YStack accessibilityRole="alert" marginHorizontal="6" marginTop="2" padding="2" borderWidth={1} borderColor="strongStroke" backgroundColor="highlight">
             <ErrorBanner inline title={membershipError} />

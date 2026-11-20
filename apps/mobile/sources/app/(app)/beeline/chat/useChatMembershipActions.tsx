@@ -1,3 +1,4 @@
+import { readChatList, type ChatListKey } from '@/buzz/chat-list-store';
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import React, { useCallback } from 'react';
 import * as Haptics from 'expo-haptics';
@@ -31,18 +32,19 @@ type Props = [
   setRenameBusy: React.Dispatch<React.SetStateAction<boolean>>,
   renameTextDraft: import("@/buzz/text-draft-store").TextDraft<string>,
   applyRoomName: (name: string, expected?: string) => void,
+  chatListKey: ChatListKey | null,
 ];
 
 export function useChatMembershipActions([
   transport, activeCommunityId, canManageWorkspace, setMembershipError, decodedId, setParticipantPickerVisible,
   setRoomActionsVisible, roomLifecycleBusy, setRoomLifecycleBusy, displayRoomName,
   roomSurface, readRoom, renameBusy, setRenameEditing, setRenameError, renameDraft, isCorner,
-  canRenameTitle, setRenameBusy, renameTextDraft, applyRoomName,
+  canRenameTitle, setRenameBusy, renameTextDraft, applyRoomName, chatListKey,
 ]: Props): [
   closeRoomActions: () => void,
   handleConnectAgent: () => void,
   handleRenameRoom: () => Promise<void>,
-  handleRoomLifecycle: (action: "delete" | "leave") => Promise<void>,
+  handleRoomLifecycle: (action: "delete" | "leave" | "close") => Promise<void>,
 ] {
 
 
@@ -73,7 +75,7 @@ export function useChatMembershipActions([
 
 
   const handleRoomLifecycle = useCallback(
-    async (action: 'delete' | 'leave') => {
+    async (action: 'delete' | 'leave' | 'close') => {
       if (!transport || (action === 'delete' && !canManageWorkspace) || roomLifecycleBusy) return;
       const deleting = action === 'delete';
       setRoomLifecycleBusy(true);
@@ -91,6 +93,9 @@ export function useChatMembershipActions([
           );
           if (!confirmed) return;
           await transport.deleteRoom(decodedId);
+        } else if (action === 'close') {
+          // A direct message closes for this viewer only; the next message reopens it.
+          await transport.closeChat(decodedId);
         } else {
           const title = roomTitle(displayRoomName) ?? displayRoomName;
           const left = await leaveRoomWithConfirmation(
@@ -100,12 +105,15 @@ export function useChatMembershipActions([
           );
           if (!left) return;
         }
+        if (chatListKey) await readChatList(chatListKey, true);
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         returnToRoomList();
       } catch (err) {
         readRoom();
         setMembershipError(
-          appErrorCopy(err, `Could not ${deleting ? 'delete' : 'leave'} ${ROOM_LABEL}.`),
+          action === 'close'
+            ? appErrorCopy(err, 'Could not close chat.')
+            : appErrorCopy(err, `Could not ${deleting ? 'delete' : 'leave'} ${ROOM_LABEL}.`),
         );
       } finally {
         React.startTransition(() => setRoomLifecycleBusy(false));
@@ -113,6 +121,7 @@ export function useChatMembershipActions([
     },
     [
       decodedId,
+      chatListKey,
       displayRoomName,
       canManageWorkspace,
       roomSurface?.leaveDeletesRoom,

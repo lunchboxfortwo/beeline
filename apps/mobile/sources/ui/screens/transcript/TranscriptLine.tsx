@@ -1,6 +1,5 @@
 import React from 'react';
 import { XStack, YStack } from 'tamagui';
-import { Bookmark } from 'lucide-react-native';
 import { Glyph, HEIGHT, T } from '@/ui/grammar';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
 
@@ -25,7 +24,6 @@ export type TranscriptSender = {
     onOpenProfile?: () => void;
     /** Claims a long press before the face's own press can turn it into a tap. */
     onLongPress?: () => void;
-    bookmarked?: boolean;
     feedbackReported?: boolean;
     /** True only for the viewer's own turn: the name is brass, the body stays ink. */
     isViewer?: boolean;
@@ -86,9 +84,6 @@ export function TranscriptLine({ sender, children, testID }: {
                         <T v="meta" color="secondary" numberOfLines={1} testID="chat-byline-stamp">{sender.stamp}</T>
                         {sender.feedbackReported ? (
                             <T v="meta" color="secondary" aria-label="Reported to Beeline" testID="chat-reported-marker">Reported</T>
-                        ) : null}
-                        {sender.bookmarked ? (
-                            <YStack aria-label="Bookmarked" testID="chat-bookmark-marker"><Glyph icon={Bookmark} size={14} accent /></YStack>
                         ) : null}
                     </XStack>
                 ) : null}

@@ -91,10 +91,8 @@ export function SwipeToReply({
   onReply,
   onReact,
   onForward,
-  onBookmark = () => undefined,
   onReportIssue,
   onSwipeThread,
-  bookmarked = false,
   isDesktop,
   replyOnly = false,
 }: {
@@ -102,19 +100,17 @@ export function SwipeToReply({
   messageId: string;
   onLongPress(): void;
   /** Mobile long press — opens the message actions sheet. Desktop long press
-   *  keeps its copy shortcut and reaches the same sheet through its buttons. */
+   *  keeps its copy shortcut and reaches the same sheet through More. */
   onActions?(): void;
   onPress?(): void;
   onReply?(): void;
   onReact(emoji: MessageReactionEmoji): void;
   onForward(): void;
-  onBookmark?(): void;
   /** Report issue — files the message with the Beeline feedback loop. Omitted
    *  where the row offers no report (the desktop work pane's read-only copy). */
   onReportIssue?(): void;
-  /** Mobile swipe right — open a new thread from the message. */
+  /** Mobile swipe right, or the desktop New thread button — open a new thread from the message. */
   onSwipeThread?(): void;
-  bookmarked?: boolean;
   isDesktop: boolean;
   replyOnly?: boolean;
 }) {
@@ -238,12 +234,18 @@ export function SwipeToReply({
           {!replyOnly ? (
             <>
               <DesktopMessageAction action="react" label="React to message" tooltip="React" onPress={() => setReactionPickerVisible((visible) => !visible)} onFocus={() => setDesktopActionsVisible(true)} onBlur={() => setDesktopActionsVisible(false)} testID={`react-button-${messageId}`} />
-              <DesktopMessageAction action="bookmark" label={bookmarked ? 'Remove bookmark' : 'Bookmark message'} tooltip={bookmarked ? 'Remove bookmark' : 'Bookmark'} selected={bookmarked} onPress={onBookmark} onFocus={() => setDesktopActionsVisible(true)} onBlur={() => setDesktopActionsVisible(false)} testID={`bookmark-button-${messageId}`} />
               {onReportIssue ? (
                 <DesktopMessageAction action="report" label="Report an issue with this message" tooltip="Report an issue" onPress={onReportIssue} onFocus={() => setDesktopActionsVisible(true)} onBlur={() => setDesktopActionsVisible(false)} testID={`report-button-${messageId}`} />
               ) : null}
               <DesktopMessageAction action="forward" label="Forward message" tooltip="Forward" onPress={onForward} onFocus={() => setDesktopActionsVisible(true)} onBlur={() => setDesktopActionsVisible(false)} testID={`forward-button-${messageId}`} />
+              {onSwipeThread ? (
+                <DesktopMessageAction action="thread" label="Open a new thread from this message" tooltip="New thread" onPress={onSwipeThread} onFocus={() => setDesktopActionsVisible(true)} onBlur={() => setDesktopActionsVisible(false)} testID={`thread-button-${messageId}`} />
+              ) : null}
             </>
+          ) : null}
+          {onActions ? (
+            // The phone's message sheet: Copy link, Select and Delete among the rest.
+            <DesktopMessageAction action="more" label="More message actions" tooltip="More" onPress={onActions} onFocus={() => setDesktopActionsVisible(true)} onBlur={() => setDesktopActionsVisible(false)} testID={`more-button-${messageId}`} />
           ) : null}
         </ButtonRowFrame>
         {!replyOnly && reactionPickerVisible ? (
@@ -357,14 +359,13 @@ export interface OrdinaryLedgerMessageProps {
   onTapOutsideComposer?(): void;
   onReply(message: ChatDisplayMessage): void;
   onCopy(text: string): void;
-  /** Mobile long press on the row — opens the message actions sheet. */
+  /** Mobile long press or desktop More — opens the message actions sheet. */
   onMessageActions?(message: ChatDisplayMessage): void;
   onReact?(message: ChatDisplayMessage, emoji: MessageReactionEmoji): void;
   onForward?(message: ChatDisplayMessage): void;
-  onBookmark?(message: ChatDisplayMessage): void;
   /** Report issue: prompt for a note and file the message with the feedback loop. */
   onReportIssue?(message: ChatDisplayMessage): void;
-  /** Mobile swipe right — forward the message into a new human-owned corner. */
+  /** Mobile swipe right or desktop New thread — forward into a new human-owned corner. */
   onForwardToNewCorner?(message: ChatDisplayMessage): void;
   onCornerProposalDecision?(message: ChatDisplayMessage, decision: 'open' | 'cancel'): void;
   cornerProposalAction?: 'open' | 'cancel' | null;

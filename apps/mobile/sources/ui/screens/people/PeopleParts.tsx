@@ -33,8 +33,9 @@ export function SectionHead({ title, onAdd, addLabel, testID }: { title: string;
 }
 
 /** One list row: a face, the handle, a role, and one quiet line. */
-function MemberRow({ row, onPress, last, roleAtEnd = false }: {
+function MemberRow({ row, onPress, last, roleAtEnd = false, remove }: {
     row: PeopleRow; onPress?: () => void; last: boolean; roleAtEnd?: boolean;
+    remove?: { label: string; onPress: () => void; disabled?: boolean };
 }) {
     const role = row.role ? <T v="metaStrong" color={row.role.accent ? 'needsYou' : 'secondary'}>{row.role.label}</T> : null;
     const body = (
@@ -56,23 +57,37 @@ function MemberRow({ row, onPress, last, roleAtEnd = false }: {
             {onPress && !roleAtEnd ? <Glyph icon={ChevronRight} size={16} /> : null}
         </XStack>
     );
+    // Beside a Remove the row shares its line; alone it keeps its own height.
+    const fill = remove ? { flex: 1, minWidth: 0 } : null;
+    const item = onPress
+        ? <ListItem {...fill} padding="0" minHeight={HEIGHT.control} backgroundColor="raised" onPress={onPress} aria-label={`Open profile ${row.handle}`} accessibilityRole="button" testID={`member-${row.id}`}>{body}</ListItem>
+        : <XStack {...fill} testID={`member-${row.id}`}>{body}</XStack>;
     return (
         <>
-            {onPress
-                ? <ListItem padding="0" minHeight={HEIGHT.control} backgroundColor="raised" onPress={onPress} aria-label={`Open profile ${row.handle}`} accessibilityRole="button" testID={`member-${row.id}`}>{body}</ListItem>
-                : <XStack testID={`member-${row.id}`}>{body}</XStack>}
+            {remove ? (
+                <XStack alignItems="center" gap="2">
+                    {item}
+                    <Btn kind="quiet" label={remove.label} disabled={remove.disabled} onPress={remove.onPress} testID={`member-remove-${row.id}`}>
+                        <T v="meta" color="removed">Remove</T>
+                    </Btn>
+                </XStack>
+            ) : item}
             {last ? null : <Separator borderColor="stroke" />}
         </>
     );
 }
 
 /** A card of member rows. */
-export function MemberCard({ rows, open, roleAtEnd }: { rows: readonly PeopleRow[]; open: (row: PeopleRow) => (() => void) | undefined; roleAtEnd?: boolean }) {
+export function MemberCard({ rows, open, roleAtEnd, remove }: {
+    rows: readonly PeopleRow[]; open: (row: PeopleRow) => (() => void) | undefined; roleAtEnd?: boolean;
+    /** A trailing Remove for the rows it names; the caller owns the permission. */
+    remove?: (row: PeopleRow) => { label: string; onPress: () => void; disabled?: boolean } | undefined;
+}) {
     if (!rows.length) return null;
     return (
         <Card backgroundColor="raised" borderWidth={1} borderColor="stroke" paddingHorizontal="3" paddingVertical="1">
             {rows.map((row, index) => (
-                <MemberRow key={row.id} row={row} onPress={open(row)} last={index === rows.length - 1} roleAtEnd={roleAtEnd} />
+                <MemberRow key={row.id} row={row} onPress={open(row)} last={index === rows.length - 1} roleAtEnd={roleAtEnd} remove={remove?.(row)} />
             ))}
         </Card>
     );

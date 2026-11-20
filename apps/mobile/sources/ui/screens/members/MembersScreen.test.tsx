@@ -18,7 +18,10 @@ vi.mock('expo-clipboard', () => ({ setStringAsync: vi.fn() }));
 vi.mock('@/buzz/latency-route-hook', () => ({ useLatencyRouteFrame: () => undefined }));
 const panel = vi.hoisted(() => ({ openPlace: vi.fn() }));
 vi.mock('@/ui/shell/panel', () => panel);
-vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: vi.fn() }));
+const operation = vi.hoisted(() => ({ monolithPhoneOperation: vi.fn(async () => undefined) }));
+vi.mock('@/sync/transport/monolith-operation', () => operation);
+const modal = vi.hoisted(() => ({ Modal: { confirm: vi.fn(async () => true) } }));
+vi.mock('@/modal', () => modal);
 vi.mock('@/ui/screens/people/InvitePeopleSheet', () => ({ InvitePeopleSheet: (props: Record<string, unknown>) => React.createElement('InvitePeopleSheet', props) }));
 const data = vi.hoisted(() => ({ room: null as any, roster: null as any, records: new Map<string, any>(), accept: vi.fn(), refresh: vi.fn() }));
 vi.mock('./use-room-view', () => ({ useRoomView: () => ({ room: data.room, viewerPubkey: 'a'.repeat(64), error: null, refresh: data.refresh, accept: data.accept }) }));
@@ -106,5 +109,21 @@ describe('chat Members', () => {
         data.roster = { ...data.roster, surface: { ...data.roster.surface, viewer: { permissions: { manage: false } } } };
         act(() => { tree = create(<MembersScreen roomId={ROOM} close={vi.fn()} />); });
         expect(tree.root.findAll((node: any) => node.type === 'Button' && ['add-people', 'add-agents'].includes(node.props.testID))).toHaveLength(0);
+    });
+
+    it('REMOVE-FROM-CHAT-1: a workspace manager removes someone else from the chat; a member sees no Remove', async () => {
+        let tree: any;
+        act(() => { tree = create(<MembersScreen roomId={ROOM} close={vi.fn()} />); });
+        const removes = () => tree.root.findAll((node: any) => node.type === 'Button' && String(node.props.testID).startsWith('member-remove-'));
+        // Everyone but the viewer: one person and both agents.
+        expect(removes().map((node: any) => node.props.testID)).toEqual([`member-remove-${ADMIN}`, `member-remove-${ALAN}`, `member-remove-${JIMMY}`]);
+        await act(async () => { removes()[0].props.onPress(); });
+        expect(modal.Modal.confirm).toHaveBeenCalledWith('Remove @bananaman614305 from #beeline?', undefined, expect.objectContaining({ confirmText: 'Remove', destructive: true }));
+        expect(operation.monolithPhoneOperation).toHaveBeenCalledWith('removeRoomMember', { roomId: ROOM, memberId: ADMIN });
+        expect(data.refresh).toHaveBeenCalled();
+
+        data.roster = { ...data.roster, surface: { ...data.roster.surface, viewer: { permissions: { manage: false } } } };
+        act(() => { tree.update(<MembersScreen roomId={ROOM} close={vi.fn()} />); });
+        expect(removes()).toHaveLength(0);
     });
 });

@@ -37,6 +37,7 @@ export type WorkItemView = {
   readonly title: string;
   readonly threadName: string;
   readonly state: WorkState;
+  readonly roomArchived?: true;
   /** Retired. Always 'none': the previous app still requires the field. */
   readonly priority?: 'none';
   /** An open thread with nothing running: In progress, drawn as a hollow ring after active work. */
@@ -131,6 +132,7 @@ export function readWorkItem(value: unknown): WorkItemView | undefined {
     title: v.title as string,
     threadName: v.threadName as string,
     state: v.state as WorkState,
+    ...(v.roomArchived === true ? { roomArchived: true as const } : {}),
     ...(v.idle === true ? { idle: true as const } : {}),
     ...(typeof v.objective === 'string' && v.objective ? { objective: v.objective } : {}),
     ...(Array.isArray(v.entries) ? { entries: v.entries.flatMap(readWorkEntry) } : {}),

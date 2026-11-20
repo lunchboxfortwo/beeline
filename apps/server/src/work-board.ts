@@ -23,6 +23,7 @@ type WorkRow = WorkDetailRow & {
   name: string;
   thread_name: string;
   state: WorkState;
+  room_archived: boolean;
   idle: boolean;
   objective: string;
   assignee: PhoneIdentityRow | null;
@@ -110,7 +111,7 @@ export async function updateWorkItem(
  */
 function workColumnsSql(viewer: string): string {
   return `r.id room_id,CASE WHEN r.direct_participants IS NOT NULL THEN 'direct' WHEN r.parent_id IS NOT NULL THEN 'corner' ELSE 'room' END room_kind,
-    COALESCE(p.id,r.id) chat_id,COALESCE(p.name,r.name) chat_name,
+    (r.archived_at IS NOT NULL) room_archived,COALESCE(p.id,r.id) chat_id,COALESCE(p.name,r.name) chat_name,
     CASE WHEN w.id IS NOT NULL AND w.id<>r.id::text THEN COALESCE(w.title,r.name) ELSE r.name END name,r.name thread_name,
     CASE WHEN r.archived_at IS NOT NULL OR w.state='done' THEN 'done'
       WHEN w.state='backlog' OR (r.parent_id IS NULL AND w.state IS NULL) THEN 'backlog'
@@ -311,6 +312,7 @@ function projectWorkRow(row: WorkRow, publicOrigin: string): WorkItemView {
         ? cornerShortTitle(row.chat_name, row.thread_name, row.room_id)
         : row.thread_name,
     state: row.state,
+    ...(row.room_archived ? { roomArchived: true as const } : {}),
     priority: 'none',
     ...(row.idle ? { idle: true as const } : {}),
     ...(row.objective ? { objective: row.objective } : {}),
