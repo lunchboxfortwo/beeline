@@ -811,7 +811,7 @@ export function refuseMessageMembership(message='address requires current member
 /** The only queue-answer exit. Publication and completion share its transaction. */
 export async function answerQueuedMessage(database: SqlDatabase, agentId: string, input: {
   roomId: string; requestId?: string; text: string; report?: boolean; status?: unknown; ask?: string;
-  messageAsk?: MessageAsk; explicitReply?: boolean;
+  messageAsk?: MessageAsk; question?: string; brief?: string; explicitReply?: boolean;
   replyFromPlace?: string;
   steps?: unknown; messageId?: string; replyToMessageId?: string;
   queuedRequestIds?: readonly string[];
@@ -909,7 +909,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
         attachments:[...new Map([...(payload?.attachments ?? []),...(item.answer_attachments ?? [])].map(file=>[file.url,file])).values()],
       }) : await sendMessage(db,{
         route:{from:{agent:agentId,place:input.replyFromPlace ?? input.roomId},to:route.from},text:messageText,
-        ask:input.messageAsk,id:hash(`answer:${item.id}:${route.from.place}:${route.from.agent}${input.messageAsk ? ':ask' : ''}`),parent:item,
+        ask:input.messageAsk,question:input.question,brief:input.brief,id:hash(`answer:${item.id}:${route.from.place}:${route.from.agent}${input.messageAsk ? ':ask' : ''}`),parent:item,
         replyTo:item.id,attachments:[...new Map([...(payload?.attachments ?? []),...(item.answer_attachments ?? [])].map(file=>[file.url,file])).values()],
       });
       completedNow=true;

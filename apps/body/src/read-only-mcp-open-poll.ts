@@ -1,5 +1,5 @@
 import { normalizeApprovalIntent } from '@beeline/api-contract/phone';
-import { validateMessageAsk,type MessageAsk } from '@beeline/api-contract/daemon';
+import { validateMessageDigest,validateMessageAsk,type MessageAsk } from '@beeline/api-contract/daemon';
 import { INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS,REPOSITORY_SUBSCRIPTION_EVENTS,fixCornerText } from "@beeline/api-contract/daemon";
 import { SUBSCRIBABLE_EVENT_KINDS } from "@beeline/api-contract/phone";
 import { builtinBeelineApp } from "@beeline/api-contract/workbench";
@@ -102,6 +102,7 @@ export function advertisedAgentTool(name: string): ToolDefinition {
 
 
 export function validateAdvertisedToolInput(tool: ToolDefinition, args: JsonObject): void {
+  if (tool.name==='message'||tool.name==='reply') validateMessageDigest(args as import('@beeline/api-contract/daemon').MessageDigest);
   if ((tool.name==='message'||tool.name==='reply') && args.ask!==undefined)
     validateMessageAsk(args.ask as MessageAsk);
   if (tool.name==='post') return;

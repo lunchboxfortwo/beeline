@@ -321,7 +321,7 @@ export async function daemonExecute<Name extends keyof DaemonOperationMap>(ctx: 
     const request=input as Input<'message'>;
     const parent=request.requestId ? await authorizeCommandOutput(ctx.database,request.roomId,agentId,request.requestId) : undefined;
     return sendMessage(ctx.database,{route:{from:{agent:agentId,place:request.roomId},to:request.to},
-      text:request.text,ask:request.ask,id:messageId,parent}) as Promise<Output<Name>>;
+      text:request.text,ask:request.ask,question:request.question,brief:request.brief,id:messageId,parent}) as Promise<Output<Name>>;
   }
   if (name === 'postRoomMessage' || name === 'report') {
     const saved=name==='postRoomMessage' ? await daemonPostRoomMessage(ctx,input as Input<'postRoomMessage'>,agentId) : await answerQueuedMessage(ctx.database, agentId, { roomId: String(value.roomId),

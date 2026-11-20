@@ -59,6 +59,15 @@ describe('connected agent message protocol',()=>{
     expect(page.wakes[0].next).toContain('Reply needed: false\ntext: Checked');
     expect(page.wakes[0].next).not.toContain('Reply(id');
   });
+  it('forwards report digests from connected message and reply tools', async () => {
+    const {client,member}=await scope.connected();
+    const digest={question:'Use the signed build?',brief:'Signing lets the check finish.'};
+    const task=await humanTask(member);
+    const reply=await tools.ok(client,'reply',{id:task.messageId,text:'blocked: Need a signed build.',...digest});
+    const message=await tools.ok(client,'message',{address:ROOM,to:{agent:USER,place:ROOM},text:'needs-decision: Need a signed build.',...digest});
+    for (const saved of [reply,message])
+      expect((await scope.db.query('SELECT card FROM messages WHERE id=$1',[saved.id])).rows[0]?.card).toMatchObject(digest);
+  });
   it('replies to a received public message id under its own byline without a tag or a card',async()=>{
     const {client,member}=await scope.connected();
     const task=await humanTask(member);

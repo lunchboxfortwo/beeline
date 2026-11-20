@@ -2,6 +2,7 @@
 export type MessageAddress = { readonly agent: string; readonly place: string };
 /** Existing immutable operator owner; shared so delivery can select its tool set. */
 export const OPERATOR_OWNER_ID = '34cf4160723acd12d205dfbe292614bfec9489b78812d1cd9846c00346903334';
+export type MessageDigest = { readonly question?: string; readonly brief?: string };
 export type MessageAsk = {
   readonly question: string;
   /** Why it matters and what each option means; the card shows it under the question. Older helpers omit it. */
@@ -27,7 +28,7 @@ export const ASK_BRIEF_MAX_CHARACTERS = 280;
 /** The limits every tool that writes an ask states up front. */
 const ASK_LIMITS_TEXT = `Character limits: question at most ${ASK_QUESTION_MAX_CHARACTERS} characters, brief at most ${ASK_BRIEF_MAX_CHARACTERS} characters, both counted in characters; an ask over either limit is refused with its counts, so rewrite it shorter.`;
 /** The ask sentence for every message/reply tool description, before anything else about the tool. */
-export const ASK_TOOL_TEXT = `Add ask only when a person must decide: their Needs you card shows only ask.question, ask.brief and the option buttons, with your full text one tap away. ${ASK_LIMITS_TEXT} Use 2–4 option labels of at most 3 words.`;
+export const ASK_TOOL_TEXT = `Add ask only when a person must decide: their Needs you card shows only ask.question, ask.brief and the option buttons, with your full text one tap away. ${ASK_LIMITS_TEXT} Use 2–4 option labels of at most 3 words. For blocked:/needs-decision: reports, optional top-level question and brief use the same limits and refusals; omit them for the legacy report card.`;
 export const MESSAGE_ASK_SCHEMA = {
   type: 'object', required: ['question', 'options'], additionalProperties: false,
   description: `The person's Needs you card shows only question, brief and the option buttons; the full message text is one tap away. ${ASK_LIMITS_TEXT}`,
@@ -38,6 +39,11 @@ export const MESSAGE_ASK_SCHEMA = {
       items: { type: 'string', pattern: '^\\S+(?:[ \\t]+\\S+){0,2}$' } },
     recommended: { type: 'string', description: 'One of the option labels.' },
   },
+} as const;
+
+export const REPORT_DIGEST_PROPERTIES = {
+  question: { type: 'string', description: `Report question: at most ${ASK_QUESTION_MAX_CHARACTERS} characters, one line ending with ?.` },
+  brief: { type: 'string', description: `Report brief: at most ${ASK_BRIEF_MAX_CHARACTERS} characters, at most 2 sentences explaining why it matters and the options.` },
 } as const;
 
 /** Replies without a question are information, not another request. */
@@ -65,13 +71,17 @@ export function agentMessageText(message: {
 }
 
 /** The plain shortening error is shared by the tool validator and server. */
-export function validateMessageAsk(ask: MessageAsk): void {
+export function validateMessageDigest(ask: MessageDigest, prefix = ''): void {
   const over = ([['question', ask.question, ASK_QUESTION_MAX_CHARACTERS], ['brief', ask.brief, ASK_BRIEF_MAX_CHARACTERS]] as const)
     .flatMap(([field, text, limit]) => {
       const length = typeof text === 'string' ? Array.from(text).length : 0;
-      return length > limit ? [`ask.${field} is ${length} characters; the limit is ${limit}`] : [];
+      return length > limit ? [`${prefix}${field} is ${length} characters; the limit is ${limit}`] : [];
     });
   if (over.length) throw new Error(`${over.join('; ')}. Rewrite it shorter and send the ask again.`);
+}
+
+export function validateMessageAsk(ask: MessageAsk): void {
+  validateMessageDigest(ask, 'ask.');
   const short = (text: unknown, words: number) => typeof text === 'string' &&
     new RegExp(`^\\S+(?:[ \\t]+\\S+){0,${words - 1}}$`).test(text);
   if (!Array.isArray(ask.options) || ask.options.length < 2 || ask.options.length > 4 ||

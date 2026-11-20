@@ -152,7 +152,7 @@ it.each([[false, false], [false, true], [true, false], [true, true]])('shows the
             openedBy: person, assignee: null, createdAt: 1, updatedAt: 2, recommendedOptionId: 'Yes',
             ask: { messageId: 'ask', workspaceId: 'ws', roomId: 'chat', roomName: 'general', roomKind: 'room', author: person,
                 text: fullPost, createdAt: 1,
-                approval: { kind: 'choice', actor: 'Ruby', ask: 'asks', subject: question, literal: false, actions: choices } } }],
+                approval: { kind: 'choice', actor: 'Ruby', ask: 'asks', subject: question, literal: false, actions: choices } }) } }],
     };
     const actions = { open: vi.fn(), reply: vi.fn(), decide: vi.fn(), assign: vi.fn(), clear: vi.fn(), clearAll: vi.fn() };
     let tree: any;
@@ -172,7 +172,7 @@ it.each([[false, false], [false, true], [true, false], [true, true]])('shows the
     } finally { act(() => tree.unmount()); }
 });
 
-it('shows only the question, brief and buttons when the ask has a brief, opening the full post on tap', () => {
+it.each([false, true])('shows question and brief for a digest card (report=%s), opening the full post on tap', report => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
     const person = { pubkey: 'agent', kind: 'agent' as const, name: 'Ruby' };
     const question = 'Open the chat-icon fix as a #beeline thread?';
@@ -183,8 +183,8 @@ it('shows only the question, brief and buttons when the ask has a brief, opening
         items: [{ id: 'ask', roomId: 'chat', chatId: 'chat', chatName: 'general', threadName: 'Icons', title: 'Icons', state: 'needs-you',
             openedBy: person, assignee: null, createdAt: 1, updatedAt: 2, brief,
             ask: { messageId: 'ask', workspaceId: 'ws', roomId: 'chat', roomName: 'general', roomKind: 'room', author: person,
-                text: `${question}\n\n${brief}`, createdAt: 1,
-                approval: { kind: 'choice', actor: 'Ruby', ask: 'asks', subject: question, literal: false, actions: choices } } }],
+                text: report ? question : `${question}\n\n${brief}`, createdAt: 1,
+                ...(report ? {} : { approval: { kind: 'choice', actor: 'Ruby', ask: 'asks', subject: question, literal: false, actions: choices } }) } }],
     };
     const actions = { open: vi.fn(), reply: vi.fn(), decide: vi.fn(), assign: vi.fn(), clear: vi.fn(), clearAll: vi.fn() };
     let tree: any;

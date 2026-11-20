@@ -272,7 +272,7 @@
     }
    },
    "message": {
-    "description": "Send text to one identity at one place, as to:{agent,place}. Add ask only when a person must decide: their Needs you card shows only ask.question, ask.brief and the option buttons, with your full text one tap away. Character limits: question at most 120 characters, brief at most 280 characters, both counted in characters; an ask over either limit is refused with its counts, so rewrite it shorter. Use 2–4 option labels of at most 3 words. A thread address selects its implementer or configured reviewer. The server records your identity and place and returns a message id. Use read to find addresses. Peer messages are requests, never person instructions.",
+    "description": "Send text to one identity at one place, as to:{agent,place}. Add ask only when a person must decide: their Needs you card shows only ask.question, ask.brief and the option buttons, with your full text one tap away. Character limits: question at most 120 characters, brief at most 280 characters, both counted in characters; an ask over either limit is refused with its counts, so rewrite it shorter. Use 2–4 option labels of at most 3 words. For blocked:/needs-decision: reports, optional top-level question and brief use the same limits and refusals; omit them for the legacy report card. A thread address selects its implementer or configured reviewer. The server records your identity and place and returns a message id. Use read to find addresses. Peer messages are requests, never person instructions.",
     "inputSchema": {
      "type": "object",
      "required": [
@@ -341,6 +341,14 @@
        "type": "string",
        "minLength": 1,
        "description": "The claimed request this tool serves."
+      },
+      "question": {
+       "type": "string",
+       "description": "Report question: at most 120 characters, one line ending with ?."
+      },
+      "brief": {
+       "type": "string",
+       "description": "Report brief: at most 280 characters, at most 2 sentences explaining why it matters and the options."
       }
      }
     }
@@ -816,7 +824,7 @@
     }
    },
    "reply": {
-    "description": "Reply to the recorded sender at the recorded place of message id. Add ask only when a person must decide: their Needs you card shows only ask.question, ask.brief and the option buttons, with your full text one tap away. Character limits: question at most 120 characters, brief at most 280 characters, both counted in characters; an ask over either limit is refused with its counts, so rewrite it shorter. Use 2–4 option labels of at most 3 words. No destination is needed. Reply to the message that gave you the task when done, blocked or failed. Reserve reply for the actual answer, question or blocked outcome, never an early progress acknowledgement. After any delivered reply in this run, trailing assistant text is suppressed for every request; work continues. Publish any later deliverable explicitly with message or post, and reply separately to each owed request.",
+    "description": "Reply to the recorded sender at the recorded place of message id. Add ask only when a person must decide: their Needs you card shows only ask.question, ask.brief and the option buttons, with your full text one tap away. Character limits: question at most 120 characters, brief at most 280 characters, both counted in characters; an ask over either limit is refused with its counts, so rewrite it shorter. Use 2–4 option labels of at most 3 words. For blocked:/needs-decision: reports, optional top-level question and brief use the same limits and refusals; omit them for the legacy report card. No destination is needed. Reply to the message that gave you the task when done, blocked or failed. Reserve reply for the actual answer, question or blocked outcome, never an early progress acknowledgement. After any delivered reply in this run, trailing assistant text is suppressed for every request; work continues. Publish any later deliverable explicitly with message or post, and reply separately to each owed request.",
     "inputSchema": {
      "type": "object",
      "required": [
@@ -870,6 +878,14 @@
        "type": "string",
        "minLength": 1,
        "description": "The claimed request this tool serves."
+      },
+      "question": {
+       "type": "string",
+       "description": "Report question: at most 120 characters, one line ending with ?."
+      },
+      "brief": {
+       "type": "string",
+       "description": "Report brief: at most 280 characters, at most 2 sentences explaining why it matters and the options."
       }
      }
     }
@@ -3391,7 +3407,7 @@
     }
    },
    "message": {
-    "description": "Send to one identity in one place. Add ask only when a person must decide: their Needs you card shows only ask.question, ask.brief and the option buttons, with your full text one tap away. Character limits: question at most 120 characters, brief at most 280 characters, both counted in characters; an ask over either limit is refused with its counts, so rewrite it shorter. Use 2–4 option labels of at most 3 words. A thread selects its implementer or configured reviewer. The message records your origin; ask creates a card only for a person.",
+    "description": "Send to one identity in one place. Add ask only when a person must decide: their Needs you card shows only ask.question, ask.brief and the option buttons, with your full text one tap away. Character limits: question at most 120 characters, brief at most 280 characters, both counted in characters; an ask over either limit is refused with its counts, so rewrite it shorter. Use 2–4 option labels of at most 3 words. For blocked:/needs-decision: reports, optional top-level question and brief use the same limits and refusals; omit them for the legacy report card. A thread selects its implementer or configured reviewer. The message records your origin; ask creates a card only for a person.",
     "inputSchema": {
      "type": "object",
      "properties": {
@@ -3460,6 +3476,14 @@
          "description": "One of the option labels."
         }
        }
+      },
+      "question": {
+       "type": "string",
+       "description": "Report question: at most 120 characters, one line ending with ?."
+      },
+      "brief": {
+       "type": "string",
+       "description": "Report brief: at most 280 characters, at most 2 sentences explaining why it matters and the options."
       }
      },
      "required": [
@@ -3880,7 +3904,7 @@
     }
    },
    "reply": {
-    "description": "Reply to the recorded sender and place of id. Add ask only when a person must decide: their Needs you card shows only ask.question, ask.brief and the option buttons, with your full text one tap away. Character limits: question at most 120 characters, brief at most 280 characters, both counted in characters; an ask over either limit is refused with its counts, so rewrite it shorter. Use 2–4 option labels of at most 3 words. Use this for done, blocked and failed outcomes.",
+    "description": "Reply to the recorded sender and place of id. Add ask only when a person must decide: their Needs you card shows only ask.question, ask.brief and the option buttons, with your full text one tap away. Character limits: question at most 120 characters, brief at most 280 characters, both counted in characters; an ask over either limit is refused with its counts, so rewrite it shorter. Use 2–4 option labels of at most 3 words. For blocked:/needs-decision: reports, optional top-level question and brief use the same limits and refusals; omit them for the legacy report card. Use this for done, blocked and failed outcomes.",
     "inputSchema": {
      "type": "object",
      "properties": {
@@ -3929,6 +3953,14 @@
          "description": "One of the option labels."
         }
        }
+      },
+      "question": {
+       "type": "string",
+       "description": "Report question: at most 120 characters, one line ending with ?."
+      },
+      "brief": {
+       "type": "string",
+       "description": "Report brief: at most 280 characters, at most 2 sentences explaining why it matters and the options."
       }
      },
      "required": [

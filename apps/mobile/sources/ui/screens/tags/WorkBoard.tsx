@@ -153,10 +153,10 @@ function AskCard({ item, actions, now }: { item: WorkItemView; actions: WorkBoar
           <Glyph icon={X} size={14} />
         </Btn>
       </XStack>
-      {item.brief && ask.approval?.kind === 'choice' ? (
+      {item.brief && (!ask.approval || ask.approval.kind === 'choice') ? (
         // Question and brief are enough to decide; the full message is one tap away.
         <YStack gap="1">
-          <T v="heading">{ask.approval.subject}</T>
+          <T v="heading">{ask.approval?.subject ?? ask.text}</T>
           <T>{item.brief}</T>
         </YStack>
       ) : (

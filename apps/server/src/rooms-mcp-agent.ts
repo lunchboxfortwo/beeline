@@ -1,7 +1,7 @@
 import { queuedContextText } from './agent-command-context.js';
 import { legacyMessageBody } from './messaging-cutover.js';
 import { recordedMessageRoute } from './message-route.js';
-import { ASK_TOOL_TEXT,MESSAGE_ADDRESS_SCHEMA,MESSAGE_ASK_SCHEMA,OPERATOR_OWNER_ID } from '@beeline/api-contract/daemon';
+import { REPORT_DIGEST_PROPERTIES,ASK_TOOL_TEXT,MESSAGE_ADDRESS_SCHEMA,MESSAGE_ASK_SCHEMA,OPERATOR_OWNER_ID } from '@beeline/api-contract/daemon';
 import { INSTITUTIONAL_HISTORY_RESULT_MAX,INSTITUTIONAL_MEMORY_SEARCH_RESULT_MAX,REPOSITORY_SUBSCRIPTION_EVENTS,WallRefusal } from '@beeline/api-contract/daemon';
 import { SUBSCRIBABLE_EVENT_KINDS } from '@beeline/api-contract/phone';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
@@ -178,10 +178,10 @@ export const MCP_AGENT_TOOLS: Tool[] = [
     name: { type: 'string' }, objective: { type: 'string' }, brief, expectedRevision: { type: 'integer', minimum: 0 }, change: { type: 'string', maxLength: 1000 },
   }, ['address', 'action']),
   tool('message', `Send to one identity in one place. ${ASK_TOOL_TEXT} A thread selects its implementer or configured reviewer. The message records your origin; ask creates a card only for a person.`, {
-    address:address('Your sending place; omit to send from to.place.'),to:MESSAGE_ADDRESS_SCHEMA,text:{type:'string'},ask:MESSAGE_ASK_SCHEMA,
+    address:address('Your sending place; omit to send from to.place.'),to:MESSAGE_ADDRESS_SCHEMA,text:{type:'string'},ask:MESSAGE_ASK_SCHEMA,...REPORT_DIGEST_PROPERTIES,
   }, ['to','text']),
   tool('reply', `Reply to the recorded sender and place of id. ${ASK_TOOL_TEXT} Use this for done, blocked and failed outcomes.`, {
-    id:{type:'string'},text:{type:'string'},ask:MESSAGE_ASK_SCHEMA,
+    id:{type:'string'},text:{type:'string'},ask:MESSAGE_ASK_SCHEMA,...REPORT_DIGEST_PROPERTIES,
   }, ['id','text']),
   tool('create_work_item', 'Create a distinct work item and return its id. State defaults to backlog.', {
     roomId:address(),title:{type:'string'},objective:{type:'string'},state:{enum:['needs-you','in-progress','in-review','backlog','done']},
@@ -372,8 +372,8 @@ export class RoomsMcpAgentTools {
       if (name === 'post' && item?.state==='pending' && (item.return_room_id ?? item.room_id) === target)
         return this.exec(member,'postRoomMessage',{...context,text:args.text,replyToMessageId:args.replyTo});
       return this.exec(member,name === 'post' ? 'postCornerMessage' : name,
-        name === 'message' ? {...context,to:args.to,text:args.text,ask:args.ask}
-        : name === 'reply' ? {id:args.id,text:args.text,ask:args.ask}
+        name === 'message' ? {...context,to:args.to,text:args.text,ask:args.ask,question:args.question,brief:args.brief}
+        : name === 'reply' ? {id:args.id,text:args.text,ask:args.ask,question:args.question,brief:args.brief}
         : {...context,cornerId:target,text:args.text,replyTo:args.replyTo});
     }
     return this.callTool(member,name,args);

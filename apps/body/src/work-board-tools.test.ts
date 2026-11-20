@@ -109,3 +109,13 @@ describe('typed Work board tools', () => {
     }
   });
 });
+
+for (const name of ['message', 'reply']) {
+  it(`${name} accepts optional report digests and refuses over-limit Unicode fields`, () => {
+    const tool = agentToolsFor(true, false, true, true).find(tool => tool.name === name)!;
+    const args = name === 'reply' ? { id: 'task', text: 'blocked: Need a build.' } : { to: { agent: 'owner', place: 'chat' }, text: 'needs-decision: Need a build.' };
+    expect(() => validateAdvertisedToolInput(tool, { ...args, question: '🐝'.repeat(120), brief: '🐝'.repeat(280) })).not.toThrow();
+    expect(() => validateAdvertisedToolInput(tool, { ...args, question: '🐝'.repeat(121) })).toThrow('question is 121 characters; the limit is 120');
+    expect(() => validateAdvertisedToolInput(tool, { ...args, brief: '🐝'.repeat(281) })).toThrow('brief is 281 characters; the limit is 280');
+  });
+}
