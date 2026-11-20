@@ -176,7 +176,11 @@ async function codegraphBundle(platform) {
   return directory;
 }
 
-export async function verifyMacBinaries(staging, platform, { execute = run, inspect = path => capture('file', ['-b', path]) } = {}) {
+export async function verifyMacBinaries(staging, platform, {
+  execute = run,
+  inspect = path => capture('file', ['-b', path]),
+  signed = path => spawnSync('codesign', ['-dv', path], { stdio: 'ignore' }).status === 0,
+} = {}) {
   const arch = platform === 'darwin-arm64' ? 'arm64' : 'x86_64';
   // Sign our Cargo outputs ad hoc; retain vendor signatures on packaged tools.
   for (const binary of ['buzz-agent', 'buzz-dev-mcp'])
@@ -188,6 +192,9 @@ export async function verifyMacBinaries(staging, platform, { execute = run, insp
     if (!description) throw new Error(`Cannot inspect packaged binary ${path}`);
     if (!description.includes('Mach-O')) continue;
     execute('lipo', [path, '-verify_arch', arch]);
+    // Some vendor Mach-O files (e.g. x86_64 native addons) ship unsigned; sign
+    // only those ad hoc and keep existing vendor signatures untouched.
+    if (!signed(path)) execute('codesign', ['--force', '--sign', '-', path]);
     execute('codesign', ['--verify', '--strict', path]);
   }
 }
