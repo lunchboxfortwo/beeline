@@ -55,7 +55,7 @@ export function useChatHeader([
   selectedAgentMentionsRef, selectedMentionsRef, setInputText, setInputSelection, activeCommunityId,
   viewerIsAgent, setAgentConnectVisible, canManageWorkspace, setMembershipError,
   setParticipantPickerKind, openWorkspaceRoster, setParticipantPickerVisible,
-]: Props): [
+]: Props, insertedStarterRef: React.RefObject<string | null>): [
   emptyLedgerVariant: EmptyLedgerVariant,
   displayRoomName: string,
   roomName: string,
@@ -293,12 +293,12 @@ export function useChatHeader([
       detail: prompt.detail,
       testID: prompt.testID,
       onPress: () => {
-        if (prompt.action.kind === 'fill')
-          fillComposer(prompt.action.text, {
+        if (prompt.action.kind === 'fill') {
+          if (fillComposer(prompt.action.text, {
             mention: prompt.action.mention,
             focusOnRefusal: true,
-          });
-        else if (prompt.action.kind === 'add-room-agent') {
+          })) insertedStarterRef.current = prompt.action.text;
+        } else if (prompt.action.kind === 'add-room-agent') {
           setMembershipError(null);
           setParticipantPickerKind('agent');
           openWorkspaceRoster();setParticipantPickerVisible(true);
@@ -313,7 +313,7 @@ export function useChatHeader([
           } as never);
       },
     }));
-  }, [activeCommunityId, connectAgent, fillComposer, starterPromptDefs,openWorkspaceRoster]);
+  }, [activeCommunityId, connectAgent, fillComposer, insertedStarterRef, starterPromptDefs,openWorkspaceRoster]);
   return [
     emptyLedgerVariant, displayRoomName, roomName, firstRoomAgent, startCornerMessage,
     focusComposer, starterPrompts, starterIntro, storedRoomName, headerTitleKind,

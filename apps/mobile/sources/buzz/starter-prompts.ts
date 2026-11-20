@@ -98,3 +98,7 @@ export function roomStarterPrompts(input: {
     ...invite,
   ];
 }
+
+export function isBareStarterTemplate(text: string, insertedTemplate: string | null): boolean {
+  return insertedTemplate !== null && /\s$/.test(insertedTemplate) && text === insertedTemplate;
+}
