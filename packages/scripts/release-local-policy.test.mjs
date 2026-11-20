@@ -12,6 +12,7 @@ import { LocalDelivery, writeToolAdapters } from './release-local-delivery.mjs';
 import { localToolPlan } from './release-local-tools.mjs';
 import { droppedChecks, localWorkflow, quickChecks, releasePlan } from './release-local-policy.mjs';
 import { Processes } from './release-local-process.mjs';
+import { githubMacHelpers } from './release-local-mac-github.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 const read = name => parse(readFileSync(join(root, '.github/workflows', name), 'utf8'));
@@ -287,5 +288,114 @@ test('delivery setup failures retain an inspectable redacted job record', async 
     const [record] = JSON.parse(readFileSync(join(directory, 'records.json'), 'utf8'));
     assert.equal(record.conclusion, 'failure');
     assert.match(readFileSync(record.logFile, 'utf8'), /\*\*\*: clone failed/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('the dispatched Mac workflow builds exactly what unified-release helper_macos builds, minus its carry', () => {
+  const hosted = read('unified-release.yml').jobs.helper_macos, github = read('mac-helpers.yml').jobs.helper_macos;
+  assert.deepEqual(github.strategy, hosted.strategy);
+  assert.equal(github['runs-on'], hosted['runs-on']);
+  assert.equal(github.name, hosted.name);
+  // Drop the hosted-only shipped/carry steps and their conditions; everything else is identical.
+  const unconditional = condition => condition?.replace(/steps\.shipped\.outputs\.shipped != 'true'( && )?/g, '')
+    .replace(/( && )?steps\.carry_bundle\.outcome != 'success'/g, '').replace(/ && $/, '') || undefined;
+  const expected = hosted.steps.filter(step => !['shipped', 'previous_bundle', 'carry_bundle'].includes(step.id)).map(step => {
+    const copy = JSON.parse(JSON.stringify(step).replaceAll('needs.initialize.outputs.release_id', 'inputs.release_version }}-${{ inputs.release_sha')
+      .replaceAll('needs.initialize.outputs.', 'inputs.'));
+    if (unconditional(copy.if)) copy.if = unconditional(copy.if); else delete copy.if;
+    return copy;
+  });
+  assert.deepEqual(github.steps, expected);
+  assert.deepEqual(Object.keys(read('mac-helpers.yml').permissions), ['contents']);
+});
+
+function fakeGithub({ conclusions = { 'darwin-arm64': 'success', 'darwin-x64': 'success' }, pending = 1 } = {}) {
+  const calls = [];
+  let requestId, polls = 0;
+  const run = { id: 77, html_url: 'https://github.com/fixture/repo/actions/runs/77' };
+  const processes = new Processes({ GITHUB_TOKEN: 'fixture-gh-token' }, () => {});
+  processes.run = async (command, args, options) => {
+    calls.push({ command, args, options });
+    assert.equal(command, 'gh');
+    if (args[0] === 'workflow') { requestId = args.at(-1).slice('request_id='.length); return ''; }
+    if (args[0] === 'run' && args[1] === 'download') {
+      const directory = args.at(-1);
+      writeFileSync(join(directory, 'manifest.json'), args[args.indexOf('-n') + 1]);
+      return '';
+    }
+    const path = args[1];
+    if (path.includes('/workflows/mac-helpers.yml/runs')) return JSON.stringify({ workflow_runs: [
+      { id: 5, display_title: 'Mac helpers v1.2.3-rc.1 · another-request' }, { ...run, display_title: `Mac helpers v1.2.3-rc.1 · ${requestId}` }] });
+    if (path.endsWith('/jobs?per_page=10')) return JSON.stringify({ jobs: Object.entries(conclusions).map(([platform, conclusion]) =>
+      ({ name: `HELPER BUILD (${platform})`, conclusion, html_url: `${run.html_url}/job/${platform}` })) });
+    if (path.endsWith('/runs/77')) return JSON.stringify({ ...run, status: ++polls > pending ? 'completed' : 'in_progress' });
+    throw new Error(`unexpected gh call ${args.join(' ')}`);
+  };
+  return { calls, processes };
+}
+
+test('one GitHub run builds both Mac helpers and hands their artifacts to the helper join', async () => {
+  const directory = temporary();
+  try {
+    const { calls, processes } = fakeGithub({ pending: 2 }), artifacts = new Map(), records = new Map(), sha = 'a'.repeat(40);
+    const results = await githubMacHelpers({ processes, token: 'fixture-gh-token', repository: 'fixture/repo', sha, version: 'v1.2.3-rc.1',
+      directory, artifacts, records, sleep: async () => {} });
+    assert.deepEqual(results, { 'darwin-arm64': { result: 'success', outputs: { shipped: 'false' } }, 'darwin-x64': { result: 'success', outputs: { shipped: 'false' } } });
+    const dispatches = calls.filter(call => call.args[0] === 'workflow');
+    assert.equal(dispatches.length, 1);
+    assert.deepEqual(dispatches[0].args.slice(0, 10), ['workflow', 'run', 'mac-helpers.yml', '-R', 'fixture/repo', '--ref', 'main', '-f', `release_sha=${sha}`, '-f']);
+    assert.equal(dispatches[0].options.env.GH_TOKEN, 'fixture-gh-token');
+    for (const platform of ['darwin-arm64', 'darwin-x64']) {
+      const name = `daemon-${platform}-v1.2.3-rc.1-${sha}`;
+      assert.equal(artifacts.get(name), join(directory, 'artifacts', name));
+      assert.equal(readFileSync(join(artifacts.get(name), 'manifest.json'), 'utf8'), name);
+      assert.equal(records.get(`helper_macos-${platform}`).conclusion, 'success');
+    }
+    assert.ok(calls.every(call => !call.args.includes('cancel')));
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('a failed GitHub Mac build fails only its own leg and downloads nothing for it', async () => {
+  const directory = temporary();
+  try {
+    const { calls, processes } = fakeGithub({ conclusions: { 'darwin-arm64': 'success', 'darwin-x64': 'failure' } }), artifacts = new Map();
+    const results = await githubMacHelpers({ processes, token: 't', repository: 'fixture/repo', sha: 'b'.repeat(40), version: 'v1.2.3-rc.1',
+      directory, artifacts, records: new Map(), sleep: async () => {} });
+    assert.equal(results['darwin-arm64'].result, 'success');
+    assert.equal(results['darwin-x64'].result, 'failure');
+    assert.equal(calls.filter(call => call.args[1] === 'download').length, 1);
+    assert.deepEqual([...artifacts.keys()], [`daemon-darwin-arm64-v1.2.3-rc.1-${'b'.repeat(40)}`]);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('a cancelled release cancels its GitHub Mac run, and an unfinished run times out', async () => {
+  const directory = temporary();
+  try {
+    const { calls, processes } = fakeGithub({ pending: Infinity }), abort = new AbortController();
+    let sleeps = 0;
+    await assert.rejects(githubMacHelpers({ processes, token: 't', repository: 'fixture/repo', sha: 'c'.repeat(40), version: 'v1.2.3-rc.1',
+      directory, artifacts: new Map(), signal: abort.signal, sleep: async () => { if (++sleeps === 3) throw new Error('Mac helper build cancelled'); } }), /cancelled/);
+    assert.deepEqual(calls.at(-1).args.slice(0, 3), ['run', 'cancel', '77']);
+    let clock = 0;
+    await assert.rejects(githubMacHelpers({ processes: fakeGithub({ pending: Infinity }).processes, token: 't', repository: 'fixture/repo', sha: 'c'.repeat(40),
+      version: 'v1.2.3-rc.1', directory, artifacts: new Map(), now: () => clock, sleep: async () => { clock += 60 * 60_000; } }), /did not finish within 90 minutes: https:/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('both helper_macos rows of a local release share one GitHub dispatch and never use the Mac queue', async () => {
+  const directory = temporary();
+  try {
+    const { calls, processes } = fakeGithub({ pending: 0 });
+    const engine = new LocalActions({ root, directory, processes, variables: { macHelperMode: 'build' } });
+    const execution = await localHooks(directory, processes).workflow({ file: '.github/workflows/unified-release.yml', workflow: read('unified-release.yml'), inputs: {}, inherited: {}, engine });
+    engine.localDelivery.run = () => assert.fail('GitHub-built Mac helpers must not enter a local or remote Mac queue');
+    const sha = 'd'.repeat(40), needs = { initialize: { outputs: { release_sha: sha, release_version: 'v1.2.3-rc.1', release_id: `v1.2.3-rc.1-${sha}` } } };
+    const rows = await Promise.all(['darwin-arm64', 'darwin-x64'].map(platform => execution.job({}, {
+      github: { job: 'helper_macos', token: 'fixture-gh-token', repository: 'fixture/repo' }, matrix: { platform }, needs }, `helper_macos-${platform}`)));
+    execution.finish();
+    assert.deepEqual(rows.map(row => row.result), ['success', 'success']);
+    assert.equal(calls.filter(call => call.args[0] === 'workflow').length, 1);
+    for (const platform of ['darwin-arm64', 'darwin-x64']) assert.ok(engine.artifacts.has(`daemon-${platform}-${needs.initialize.outputs.release_id}`));
+    assert.equal(JSON.parse(readFileSync(join(directory, 'records.json'), 'utf8')).length, 2);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });

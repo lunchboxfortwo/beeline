@@ -116,9 +116,9 @@ caches, Docker configuration and logs.
 The existing `beeline-ci1..4.slice` parents enforce 3 CPUs / 12 GiB each.
 After the checks verdict, the delivery queue uses at most three local slots
 and one separate capped slot for remote Mac orchestration.
-iOS store compilation and both Mac helpers share the remote orchestration
-slot while server, Linux helper, OTA and web app legs use
-available local slots.
+iOS store compilation uses the remote orchestration slot while server,
+Linux helper, OTA and web app legs use available local slots. Both Mac helpers
+build on GitHub (below) and use no local slot.
 Each delivery worker runs as the operator in its own source checkout and process,
 so production credentials never enter credential-free CI jails.
 Docker build/run containers share their worker's existing parent slice, including
@@ -165,14 +165,26 @@ promotion publishes it. Merging website changes alone does not publish them.
 
 The selected EAS web app leg
 still exports, uploads private source maps when configured, deploys and verifies its canonical
-origin. Both Mac helpers build on the authorized Intel MacBook
-(`dani@100.104.88.126`). Rust cross-compiles the ARM helper for
-`aarch64-apple-darwin`; packaging fetches the locked ARM CodeGraph bundle with
-its npm integrity verified. Every packaged Mach-O passes `lipo -verify_arch`
-and `codesign --verify --strict`; our Cargo binaries receive ad-hoc signatures.
-Intel also runs the installation proof. ARM records
-`verification: architecture-signature` because an executable installation proof
-requires an ARM Mac. `--mac-helpers carry` retains both published Apple helper
+origin. Both Mac helpers build on GitHub-hosted runners: the controller
+dispatches `.github/workflows/mac-helpers.yml` once per release leg (ref `main`,
+building the release SHA), waits for it and downloads its two
+`daemon-darwin-*` artifacts into the leg's private state for the existing
+helper join; publication stays on squire. The ARM helper builds natively on
+`macos-15` and the Intel helper on `macos-15-intel`, with the same steps as
+`unified-release.yml`'s `helper_macos` job minus its carry steps (a test keeps
+them identical). Every packaged Mach-O passes `lipo -verify_arch` and
+`codesign --verify --strict`; our Cargo binaries receive ad-hoc signatures,
+so no Apple certificate is involved. Both builds run the installation proof.
+The run needs only the configured `GITHUB_TOKEN` with workflow authority.
+To prove both builds without publishing anything:
+
+```sh
+node packages/scripts/release-local.mjs --dry-run --leg mac-helpers \
+  --release-sha <full-main-SHA> --release-version vX.Y.Z-rc.N \
+  --env-file ~/.config/beeline-release.env --state-dir /outside/repo/mac-proof
+```
+
+`--mac-helpers carry` retains both published Apple helper
 archives instead. Carry provenance counts consecutive releases, and a fourth
 carry fails the release. Legacy carried archives without a count require a
 rebuild; newly built archives reset the count. The same limit applies when a
@@ -309,7 +321,7 @@ Keep vaulted keys vaulted; suitable provider API calls can use Squire's
 local credential or approved secure injection, not plaintext vault retrieval.
 
 Run the command using Node 22 or newer,
-the pinned Rust toolchain, Docker, Fly, gh, gh-axi and SSH tools. The Mac needs
+the pinned Rust toolchain, Docker, Fly, gh, gh-axi and SSH tools. The iOS build Mac needs
 Git, curl, tar, shasum, rustup and its normal compiler/SDK. The controller downloads
 checksum-verified Node 22.23.2 and installs Rust 1.95.0 into the task's remote
 temporary directory, without changing shared host tools or toolchain defaults.
@@ -666,8 +678,7 @@ submits both Android and iOS, even if only one platform's runtime changed. The `
 
 On hosted releases, iOS store binaries build locally on the self-hosted
 `macbook-pro-7` Mac runner. On squire, iOS uses the authorized
-`dani@100.104.88.126` Mac through its serialized remote queue. Both Mac helpers
-are carried in the local queue during the Actions outage. The remote job
+`dani@100.104.88.126` Mac through its serialized remote queue. The remote job
 receives its Expo/ASC credentials and existing GitHub authority through stdin
 into a temporary job file removed on exit; other local
 delivery secrets stay on squire. The remote runner uses a private

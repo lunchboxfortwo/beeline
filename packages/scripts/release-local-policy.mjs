@@ -63,8 +63,8 @@ export function releasePlan(workflow, checks, options = {}) {
     localCapacity: '3 jobs on existing 3-CPU/12-GiB slices, plus 1 capped Mac orchestration job; iOS store compilation runs remotely',
     checks: { retained: Object.keys(checks.jobs), dropped: [], reusedFrom: options.channel === 'latest' ? 'same-SHA full Checks verdict from next' : undefined },
     jobs: Object.entries(local.jobs).map(([id, job]) => ({ id, needs: [job.needs ?? []].flat(), if: job.if ?? 'success()',
-      placement: id === 'mobile_native_ios' ? 'remote Mac, separate queue' : id === 'helper_macos' && !carryMac ? 'Intel Mac remote queue; both architectures' : id === 'desktop_installers' ? 'native hosts through bounded delivery queues' : 'bounded local queue',
-      policy: id === 'helper_macos' ? carryMac ? 'published Apple-silicon and Intel Mac helpers carried unchanged' : 'Intel and ARM helpers built on MacBook; ARM cross-build verified with lipo and codesign'
+      placement: id === 'mobile_native_ios' ? 'remote Mac, separate queue' : id === 'helper_macos' && !carryMac ? 'GitHub-hosted macOS runners; one dispatched run for both architectures' : id === 'desktop_installers' ? 'native hosts through bounded delivery queues' : 'bounded local queue',
+      policy: id === 'helper_macos' ? carryMac ? 'published Apple-silicon and Intel Mac helpers carried unchanged' : 'ARM and Intel helpers built natively on GitHub-hosted macos-15 and macos-15-intel; publication stays on squire'
         : id === 'desktop_installers' ? carryDesktop ? 'published signed updater set carried unchanged under the existing local recovery policy' : WINDOWS_DESKTOP === 'build' ? 'complete native signed updater set, including Windows, built from the promoted commit' : 'macOS and Linux signed updater set built from the promoted commit; published Windows installers carried unchanged and omitted from the updater manifest' : undefined })),
     coverage: 'no release coverage map is fabricated; PR Checks remain unchanged',
     safety: 'dispatch attribution, exact SHA, full-check verdict or explicit recorded owner skip, migrations, canary/rollback, helper proofs and final result joins retained',
