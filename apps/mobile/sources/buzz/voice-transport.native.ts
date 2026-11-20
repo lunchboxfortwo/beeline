@@ -1,5 +1,5 @@
 import { getBuzzRuntimeConfig } from './runtime-config';
-import * as voiceClient from 'livekit-client';
+import type * as LiveKit from 'livekit-client';
 import {
   Linking,
   NativeEventEmitter,
@@ -9,12 +9,28 @@ import {
   TurboModuleRegistry,
 } from 'react-native';
 
-const { Room, RoomEvent } = voiceClient;
-export type Room = InstanceType<typeof Room>;
-type Track = voiceClient.Track;
+export type Room = LiveKit.Room;
+type Track = LiveKit.Track;
+let voiceClient: typeof LiveKit | undefined;
+let audioSession:
+  { startAudioSession(): Promise<void>; stopAudioSession(): Promise<void> } | undefined;
+let loadingVoiceClient: Promise<typeof LiveKit> | undefined;
 
+/**
+ * livekit-client reads DOMException while it evaluates, so a static import from the root
+ * layout crashes launch. Its polyfill lands when @livekit/react-native evaluates.
+ */
 export function loadVoiceClient() {
-  return Promise.resolve(voiceClient);
+  return (loadingVoiceClient ??= (async () => {
+    const { registerGlobals, AudioSession } = await import('@livekit/react-native');
+    registerGlobals();
+    audioSession = AudioSession;
+    voiceClient = await import('livekit-client');
+    return voiceClient;
+  })().catch((error: unknown) => {
+    loadingVoiceClient = undefined;
+    throw error;
+  }));
 }
 
 let reportedIOSCapabilityFailure = false;
@@ -129,7 +145,8 @@ export async function createVoiceRoom(
     }
   }
   // Lazy: installed binaries without WebRTC can still dictate/use the Room.
-  const { registerGlobals, AudioSession } = await import('@livekit/react-native');
+  const { Room } = await loadVoiceClient();
+  const AudioSession = audioSession!;
   const { requireNativeModule } = await import('expo-modules-core');
   const background = requireNativeModule<{
     configureStop(url: string, token: string, generation: number): Promise<void>;
@@ -146,7 +163,6 @@ export async function createVoiceRoom(
       PermissionsAndroid.RESULTS.GRANTED
   )
     throw new Error('Microphone permission is required for Conversation mode.');
-  registerGlobals();
   let generation: number | undefined;
   const addListener =
     typeof background.addListener === 'function'
@@ -281,6 +297,7 @@ export function subscribeVoiceResume(roomId: string, resume: () => void): () => 
 
 /** Use the same native processor for the microphone and every remote audio track. */
 export function subscribeVoiceMicrophone(room: Room, onLevel: (level: number) => void): () => void {
+  const { RoomEvent } = voiceClient!;
   const native = NativeModules.LivekitReactNativeModule;
   const meters = new Map<
     Track,

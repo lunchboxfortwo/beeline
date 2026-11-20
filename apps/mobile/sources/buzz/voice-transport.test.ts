@@ -11,7 +11,10 @@ const native = vi.hoisted(() => ({
   removeVolumeListener: vi.fn(),
   meter: { createVolumeProcessor: vi.fn(() => 'meter-1'), deleteVolumeProcessor: vi.fn() },
   roomFailure: null as Error | null,
-  registerGlobals: vi.fn(),
+  evaluated: [] as string[],
+  registerGlobals: vi.fn(() => {
+    native.evaluated.push('registerGlobals');
+  }),
   roomOptions: undefined as any,
   startAudio: vi.fn(),
   link: undefined as ((event: { url: string }) => void) | undefined,
@@ -70,32 +73,42 @@ vi.mock('expo-modules-core', () => ({
   requireNativeModule: () => native.background,
   requireOptionalNativeModule: () => native.background,
 }));
-vi.mock('livekit-client', () => ({
-  RoomEvent: {
-    LocalTrackPublished: 'published',
-    LocalTrackUnpublished: 'unpublished',
-    TrackSubscribed: 'subscribed',
-    TrackUnsubscribed: 'unsubscribed',
-    ParticipantDisconnected: 'disconnected',
-    TrackMuted: 'muted',
-    TrackUnmuted: 'unmuted',
-  },
-  Room: class {
-    constructor(options: unknown) {
-      native.roomOptions = options;
-      if (native.roomFailure) throw native.roomFailure;
-    }
-    async startAudio() {
-      native.startAudio();
-    }
-  },
-}));
+vi.mock('livekit-client', () => {
+  native.evaluated.push('livekit-client');
+  return {
+    RoomEvent: {
+      LocalTrackPublished: 'published',
+      LocalTrackUnpublished: 'unpublished',
+      TrackSubscribed: 'subscribed',
+      TrackUnsubscribed: 'unsubscribed',
+      ParticipantDisconnected: 'disconnected',
+      TrackMuted: 'muted',
+      TrackUnmuted: 'unmuted',
+    },
+    Room: class {
+      constructor(options: unknown) {
+        native.roomOptions = options;
+        if (native.roomFailure) throw native.roomFailure;
+      }
+      async startAudio() {
+        native.startAudio();
+      }
+    },
+  };
+});
 import * as nativeTransport from './voice-transport.native';
 import {
   createVoiceRoom,
   subscribeVoiceResume,
   routeVoiceResumeNotification,
 } from './voice-transport.native';
+
+it('evaluates livekit-client only after the call screen loads it behind registerGlobals', async () => {
+  // The root layout imports this module; livekit-client needs the DOMException polyfill first.
+  expect(native.evaluated).toEqual([]);
+  await nativeTransport.loadVoiceClient();
+  expect(native.evaluated).toEqual(['registerGlobals', 'livekit-client']);
+});
 
 it('implements the complete shared voice transport contract on native', () => {
   const contract: typeof import('./voice-transport') = nativeTransport;
