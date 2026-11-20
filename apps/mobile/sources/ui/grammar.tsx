@@ -367,7 +367,7 @@ export function SheetScroll({ children }: { children: React.ReactNode }) {
     return <ScrollView flexShrink={1} minHeight={0} maxHeight={height * 0.7} keyboardShouldPersistTaps="handled">{children}</ScrollView>;
 }
 
-/** One sheet row: an icon column, a label and an optional quiet line, then a chevron when it opens a step. */
+/** One sheet row: an optional icon column, a label and an optional quiet line, then a chevron when it opens a step. */
 export function SheetRow({ icon, label, detail, onPress, testID, right, chevron = false, selected }: {
     /** The leading column; omit it for a row with no leading mark. */
     icon?: React.ReactNode; label: string; detail?: string; onPress: () => void; testID?: string; right?: React.ReactNode; chevron?: boolean; selected?: boolean;
