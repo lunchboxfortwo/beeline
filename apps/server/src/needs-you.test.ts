@@ -300,7 +300,8 @@ describe('PhoneService Needs-you tray', () => {
       VALUES('system-event',$1,$2,'System event','{}'::jsonb,now()-interval '9 minutes')`, [CORNER, VIEWER]);
     expect(await count()).toBe(1);
     const reply = await post(surface === 'corner' ? CORNER : ROOM, VIEWER, 'yes', 5);
-    if (surface === 'thread') await database.query('UPDATE messages SET reply_to_message_id=$2 WHERE id=$1', [reply, id]);
+    expect(await count()).toBe(1);
+    await database.query('UPDATE messages SET reply_to_message_id=$2 WHERE id=$1', [reply, id]);
     expect(await count()).toBe(0);
     expect((await read()).items).toEqual([]);
   });
@@ -372,6 +373,14 @@ describe('PhoneService Needs-you tray', () => {
     await database.query('ALTER TABLE rooms ENABLE TRIGGER room_close_needs_you_marks');
     expect((await read()).items.map(item => item.messageId)).toEqual([open, newer]);
     expect(await count()).toBe(2);
+    expect(await reasons()).toEqual([
+      { message_id: closed, cleared_reason: 'source-closed' },
+      { message_id: replaced, cleared_reason: 'superseded' },
+      { message_id: answered, cleared_reason: 'answered' },
+    ]);
+    await database.query('DELETE FROM messages WHERE id=$1 OR reply_to_message_id=$2', [newer, answered]);
+    expect((await read()).items.map(item => item.messageId)).toEqual([open]);
+    expect(await count()).toBe(1);
   });
 
   it('RETIRED-CLOCK: records the old clock already hid stay cleared, once, and live ones stay open', async () => {
@@ -394,18 +403,18 @@ describe('PhoneService Needs-you tray', () => {
 
   it('uses one database statement and one pool checkout for each tray read and badge count', async () => {
     const id = await report(ROOM, PEER, 'needs-decision: please review this');
+    const before = (await database.query('SELECT * FROM needs_you_marks ORDER BY identity_id,message_id')).rows;
     const query = vi.spyOn(database, 'query');
     expect(await count()).toBe(1);
     expect(query).toHaveBeenCalledTimes(1);
-    expect(query.mock.calls[0]?.[0]).toContain('SELECT count(*)::text count,');
     query.mockClear();
 
     const { items } = await read();
     expect(items.map((item) => item.messageId)).toEqual([id]);
     expect(items[0]?.expiresAt).toBeUndefined();
     expect(query).toHaveBeenCalledTimes(1);
-    expect(query.mock.calls[0]?.[0]).not.toContain('INSERT INTO needs_you_marks');
     query.mockRestore();
+    expect((await database.query('SELECT * FROM needs_you_marks ORDER BY identity_id,message_id')).rows).toEqual(before);
   });
 
   it('rejects a viewer whose Workspace membership was removed even if chat membership remains', async () => {

@@ -33,8 +33,7 @@ import type { SqlDatabase } from './database.js';
  * only the viewer’s uncleared marks. A record leaves, keeping its
  * `cleared_reason`, only on an event, in that event's transaction: its source
  * thread closes, the same agent sends that person a newer report from that
- * thread, the person answers it (a quote reply, or a post in its originating
- * Room/corner), the asking agent closes it (`closeAgentAsk`), the message is
+ * thread, the person answers it (a quote reply or a card answer), the asking agent closes it (`closeAgentAsk`), the message is
  * removed, or the person clears it. Nothing leaves on a timer. An approval
  * leaves when cleared, decided, expired or closed; opening it does not clear it.
  */
@@ -228,19 +227,25 @@ export function questionForSql(viewerId: string): string {
     AND NOT (${needsYouAnsweredSql('m', viewerId)})`;
 }
 
+export function questionRecipientSql(message: string, viewerId: string): string {
+  return `(EXISTS (SELECT 1 FROM work_questions question JOIN work_items work ON work.id=question.message_id
+    WHERE question.message_id=${message}.id AND work.assignee_id=${viewerId})
+    OR (NOT EXISTS (SELECT 1 FROM work_questions question JOIN work_items work ON work.id=question.message_id WHERE question.message_id=${message}.id)
+      AND EXISTS (SELECT 1 FROM room_choices choice WHERE choice.message_id=${message}.id AND choice.mode='question')
+      AND CASE jsonb_array_length(COALESCE(${message}.card->'mentionIds','[]'::jsonb))
+        WHEN 0 THEN ${message}.card->'requester'->>'pubkey'=${viewerId}
+        ELSE COALESCE(${message}.card->'mentionIds','[]'::jsonb) ? ${viewerId} END))`;
+}
+
 /** One answer rule for write-time clearing and the legacy backfill. */
 export function needsYouAnsweredSql(message: string, viewerId: string): string {
-  return `EXISTS (
-    SELECT 1 FROM messages reply
-    WHERE reply.room_id=(${humanReportCornerSql(message)})::uuid AND reply.author_id=${viewerId}
-      AND reply.presentation='message' AND reply.system_event IS NULL AND reply.deleted_at IS NULL
-      AND reply.created_at>${message}.created_at
-    UNION ALL
+  return `(EXISTS (
     SELECT 1 FROM messages reply
     WHERE reply.reply_to_message_id=${message}.id AND reply.author_id=${viewerId}
       AND reply.presentation='message' AND reply.system_event IS NULL AND reply.deleted_at IS NULL
       AND reply.created_at>${message}.created_at
-  )`;
+  ) OR EXISTS (SELECT 1 FROM room_choices choice WHERE choice.message_id=${message}.id
+    AND choice.mode='question' AND choice.status='answered'))`;
 }
 
 /** The thread id `humanReportCornerSql` names, or NULL when it is not a uuid. */
@@ -251,7 +256,7 @@ function reportThreadIdSql(message: string): string {
 
 /** The asking message's source thread is archived. */
 function sourceClosedSql(message: string): string {
-  return `EXISTS (SELECT 1 FROM rooms source WHERE source.id=${reportThreadIdSql(message)}
+  return `EXISTS (SELECT 1 FROM rooms source WHERE (source.id=${reportThreadIdSql(message)} OR source.id=${message}.room_id)
     AND source.archived_at IS NOT NULL)`;
 }
 
@@ -282,11 +287,14 @@ export function supersedesSql(newer: string, message: string, viewerId: string):
 export function settledMarkReasonSql(message: string, viewerId: string): string {
   return `CASE WHEN ${sourceClosedSql(message)} THEN 'source-closed'
     WHEN EXISTS (SELECT 1 FROM messages newer WHERE ${supersedesSql('newer', message, viewerId)}) THEN 'superseded'
-    WHEN ${needsYouAnsweredSql(message, viewerId)} THEN 'answered' END`;
+    WHEN ${needsYouAnsweredSql(message, viewerId)} THEN 'answered'
+    WHEN EXISTS (SELECT 1 FROM room_choices choice WHERE choice.message_id=${message}.id
+      AND choice.mode='question' AND choice.status IN ('skipped','closed')) THEN 'withdrawn' END`;
 }
 
 /** Open records leave only on an event; none expires. */
-const QUESTION_WHERE = `mark.cleared_at IS NULL AND m.presentation='message' AND m.deleted_at IS NULL`;
+const QUESTION_WHERE = `mark.cleared_at IS NULL AND m.deleted_at IS NULL
+  AND (m.presentation='message' OR ${questionRecipientSql('m', 'mark.identity_id')})`;
 
 /** Clear every current question. */
 export async function clearNeedsYouQuestions(
@@ -345,10 +353,8 @@ return [
    JOIN work_items work ON work.id=work_question.message_id AND work.assignee_id=$2
    JOIN messages m ON m.id=work_question.message_id AND m.card_type IS DISTINCT FROM '${CHOICE_CARD_TYPE}'
    ${APPROVAL_JOINS}
-   WHERE m.deleted_at IS NULL
-     AND NOT EXISTS(SELECT 1 FROM messages reply
-     WHERE reply.reply_to_message_id=m.id AND reply.deleted_at IS NULL
-       AND EXISTS(SELECT 1 FROM identities answerer WHERE answerer.id=reply.author_id AND answerer.kind='human'))`,
+   WHERE m.deleted_at IS NULL AND mark.message_id IS NOT NULL AND mark.cleared_at IS NULL
+     AND (${settledMarkReasonSql('m', '$2')}) IS NULL`,
   // Driven from the few pending grants rather than from the transcript, so
   // an old undecided card costs nothing to find. The decider rule is
   // `requireGrantAuthority`'s: the agent's owner for a personal resource, a
@@ -388,13 +394,9 @@ return [
      AND choice.mode='question' AND (choice.closes_at IS NULL OR choice.closes_at>now())
    JOIN messages m ON m.id=choice.message_id AND m.room_id=room.id AND m.card_type='${CHOICE_CARD_TYPE}'
    ${APPROVAL_JOINS}
-   LEFT JOIN work_questions work_question ON work_question.message_id=m.id
-   LEFT JOIN work_items work ON work.id=m.id
-   WHERE m.deleted_at IS NULL
-     AND CASE WHEN work_question.message_id IS NOT NULL THEN work.assignee_id=$2 ELSE CASE jsonb_array_length(COALESCE(m.card->'mentionIds','[]'::jsonb))
-       WHEN 0 THEN m.card->'requester'->>'pubkey'=$2
-       ELSE COALESCE(m.card->'mentionIds','[]'::jsonb) ? $2
-     END END`,
+   WHERE m.deleted_at IS NULL AND mark.message_id IS NOT NULL AND mark.cleared_at IS NULL
+     AND (${settledMarkReasonSql('m', '$2')}) IS NULL
+     AND ${questionRecipientSql('m', '$2')}`,
   // `acceptConnectorOffer`: the addressee, or a Workspace manager except for
   // a wallet, which only its addressee may accept.
   `${APPROVAL_FROM('connector')}
@@ -469,11 +471,19 @@ const questionBranch=(projection:CandidateProjection)=>`
   JOIN messages m ON m.id=mark.message_id
   JOIN viewer_rooms room ON room.id=m.room_id
   ${projection==='cells'?'LEFT JOIN identities author ON author.id=m.author_id':''}
-  WHERE ${QUESTION_WHERE}
+  WHERE ${QUESTION_WHERE} AND m.presentation='message'
+    AND NOT EXISTS (SELECT 1 FROM work_questions question WHERE question.message_id=m.id)
 `;
 
 /** The same authorized candidates drive the tray and its badge. */
 const needsYouCandidates=(projection:CandidateProjection,scoped=false)=>`WITH ${viewerRoomsSql(projection==='cells'?'room.*':'room.id',scoped)},
+  retired_marks AS (
+    UPDATE needs_you_marks mark SET cleared_at=now(),cleared_reason=${settledMarkReasonSql('m', 'mark.identity_id')}
+    FROM messages m WHERE mark.message_id=m.id AND mark.identity_id=$2 AND mark.workspace_id=$1
+      AND mark.cleared_at IS NULL AND ${VIEWER_MEMBER}
+      AND (${settledMarkReasonSql('m', 'mark.identity_id')}) IS NOT NULL
+    RETURNING mark.message_id
+  ),
   open_marks AS MATERIALIZED (
     SELECT mark.* FROM needs_you_marks mark JOIN messages m ON m.id=mark.message_id
     WHERE mark.identity_id=$2 AND mark.workspace_id=$1 AND mark.cleared_at IS NULL
@@ -546,7 +556,7 @@ export async function readNeedsYouOrder(database:SqlDatabase,workspaceId:string,
   return {count:row.ids.length,order:row.ids};
 }
 
-/** Complete rows; reads never write. */
+/** Complete rows, persisting legacy retirement. */
 export async function needsYouItems(database: SqlDatabase, workspaceId: string, viewerId: string, toIdentity: (row: {
     id: string;
     kind: 'human' | 'agent';

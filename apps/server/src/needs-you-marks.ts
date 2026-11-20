@@ -1,14 +1,15 @@
-import { agentReportSql, askingMessageSql, needsYouAnsweredSql, questionForSql, supersedesSql, viewerMemberSql } from './needs-you.js';
+import { agentReportSql, askingMessageSql, needsYouAnsweredSql, questionForSql, questionRecipientSql, settledMarkReasonSql, supersedesSql, viewerMemberSql } from './needs-you.js';
 import { humanReportCornerSql } from './corner-waiting-report.js';
 import { tagsKnownIdentitySql } from './message-mentions.js';
 
 /** Resolve an incoming request once, in the message's own transaction. */
 function requestedSql(message = 'm'): string {
-  return `${message}.presentation='message' AND ${message}.deleted_at IS NULL AND ${message}.author_id<>recipient.id AND (
+  return `${message}.deleted_at IS NULL AND ${message}.author_id<>recipient.id AND (
     (${askingMessageSql(message)} AND ${message}.card->>'reportToId'=recipient.id)
-    OR (${message}.system_event IS NULL AND recipient.kind='human'
+    OR (${message}.presentation='message' AND ${message}.system_event IS NULL AND recipient.kind='human'
       AND EXISTS (SELECT 1 FROM identities sender WHERE sender.id=${message}.author_id AND sender.kind='human')
       AND ${tagsKnownIdentitySql(message, 'recipient.id', 'recipient.handle', 'recipient.kind', false)})
+    OR (recipient.kind='human' AND ${questionRecipientSql(message, 'recipient.id')})
   )`;
 }
 
@@ -17,6 +18,40 @@ export function needsYouMarksSchema(): string {
   return `
 ALTER TABLE needs_you_marks ADD COLUMN IF NOT EXISTS cleared_reason text;
 CREATE INDEX IF NOT EXISTS needs_you_marks_open_identity_idx ON needs_you_marks(identity_id) WHERE cleared_at IS NULL;
+CREATE OR REPLACE FUNCTION refresh_needs_you_mark(asking_id text) RETURNS void LANGUAGE plpgsql AS $$
+BEGIN
+  UPDATE needs_you_marks mark SET cleared_at=now(),
+    cleared_reason=COALESCE(${settledMarkReasonSql('m', 'recipient.id')},'removed')
+  FROM messages m,identities recipient
+  WHERE mark.message_id=asking_id AND mark.cleared_at IS NULL AND m.id=mark.message_id
+    AND recipient.id=mark.identity_id
+    AND ((${requestedSql()}) IS NOT TRUE OR (${settledMarkReasonSql('m', 'recipient.id')}) IS NOT NULL);
+  INSERT INTO needs_you_marks(identity_id,message_id,workspace_id,cleared_at,cleared_reason)
+    SELECT recipient.id,m.id,room.workspace_id,
+      CASE WHEN (${settledMarkReasonSql('m', 'recipient.id')}) IS NOT NULL THEN now() END,
+      ${settledMarkReasonSql('m', 'recipient.id')}
+    FROM messages m JOIN rooms room ON room.id=m.room_id
+    JOIN room_access member ON member.room_id=room.id AND member.removed_at IS NULL
+    JOIN identities recipient ON recipient.id=member.identity_id
+    WHERE m.id=asking_id
+      AND ${viewerMemberSql('room.workspace_id', 'recipient.id')}
+      AND ${requestedSql()}
+    ON CONFLICT(identity_id,message_id) DO NOTHING;
+END $$;
+CREATE OR REPLACE FUNCTION question_needs_you_mark() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  PERFORM refresh_needs_you_mark(CASE WHEN TG_TABLE_NAME='work_items' THEN to_jsonb(NEW)->>'id' ELSE to_jsonb(NEW)->>'message_id' END);
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS question_needs_you_mark ON work_questions;
+CREATE TRIGGER question_needs_you_mark AFTER INSERT OR UPDATE ON work_questions
+  FOR EACH ROW EXECUTE FUNCTION question_needs_you_mark();
+DROP TRIGGER IF EXISTS question_needs_you_mark ON work_items;
+CREATE TRIGGER question_needs_you_mark AFTER INSERT OR UPDATE OF assignee_id ON work_items
+  FOR EACH ROW EXECUTE FUNCTION question_needs_you_mark();
+DROP TRIGGER IF EXISTS question_needs_you_mark ON room_choices;
+CREATE TRIGGER question_needs_you_mark AFTER INSERT OR UPDATE OF status ON room_choices
+  FOR EACH ROW EXECUTE FUNCTION question_needs_you_mark();
 CREATE OR REPLACE FUNCTION maintain_needs_you_marks() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   -- Replies settle only the author's open items, using the former read-time rule.
@@ -31,23 +66,7 @@ BEGIN
     FROM messages m WHERE mark.identity_id=NEW.card->>'reportToId' AND mark.cleared_at IS NULL
       AND m.id=mark.message_id AND ${supersedesSql('NEW', 'm', 'mark.identity_id')};
   END IF;
-  -- Removing or retargeting the requesting message settles its existing records.
-  UPDATE needs_you_marks mark SET cleared_at=now(),
-    cleared_reason=CASE WHEN (${requestedSql()}) IS NOT TRUE THEN 'removed' ELSE 'answered' END
-  FROM messages m,identities recipient
-  WHERE mark.message_id=NEW.id AND mark.cleared_at IS NULL AND m.id=mark.message_id
-    AND recipient.id=mark.identity_id
-    AND ((${requestedSql()}) IS NOT TRUE OR ${needsYouAnsweredSql('m', 'recipient.id')});
-  -- The trigger already owns this row; rejoining messages can scan Room history per write.
-  INSERT INTO needs_you_marks(identity_id,message_id,workspace_id)
-    SELECT recipient.id,NEW.id,room.workspace_id
-    FROM rooms room
-    JOIN room_access member ON member.room_id=room.id AND member.removed_at IS NULL
-    JOIN identities recipient ON recipient.id=member.identity_id
-    WHERE room.id=NEW.room_id AND room.archived_at IS NULL
-      AND ${viewerMemberSql('room.workspace_id', 'recipient.id')}
-      AND ${requestedSql('NEW')} AND NOT (${needsYouAnsweredSql('NEW', 'recipient.id')})
-    ON CONFLICT(identity_id,message_id) DO NOTHING;
+  PERFORM refresh_needs_you_mark(NEW.id);
   RETURN NEW;
 END $$;
 DROP TRIGGER IF EXISTS message_needs_you_marks ON messages;
@@ -71,6 +90,14 @@ ALTER TABLE needs_you_marks ALTER COLUMN first_seen_at DROP DEFAULT;
 -- The message trigger lock keeps new writes outside this one-time legacy snapshot.
 ${backfillOnceSql()}
 ${retireClockOnceSql()}
+DO $question_marks$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM workflow_backfills WHERE name='needs-you-question-marks-v1') THEN
+    PERFORM refresh_needs_you_mark(message_id) FROM (
+      SELECT message_id FROM work_questions UNION SELECT message_id FROM room_choices WHERE mode='question'
+    ) questions;
+    INSERT INTO workflow_backfills(name) VALUES('needs-you-question-marks-v1') ON CONFLICT DO NOTHING;
+  END IF;
+END $question_marks$;
 `;
 }
 
@@ -99,7 +126,7 @@ WHERE room.archived_at IS NULL AND ${viewerMemberSql('room.workspace_id', 'recip
 function backfillOnceSql(): string {
   return `DO $needs_you_backfill$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM workflow_backfills WHERE name='needs-you-open-items-v1') THEN
-      UPDATE needs_you_marks mark SET cleared_at=now(),cleared_reason='removed' FROM messages m
+      UPDATE needs_you_marks mark SET cleared_at=now(),cleared_reason=COALESCE(${settledMarkReasonSql('m', 'mark.identity_id')},'removed') FROM messages m
       WHERE mark.message_id=m.id AND mark.cleared_at IS NULL AND m.presentation='message'
         AND (${questionForSql('mark.identity_id')}) IS NOT TRUE;
       INSERT INTO needs_you_marks(identity_id,message_id,workspace_id)

@@ -49,7 +49,9 @@ describe('person tags in Needs you', () => {
     await post(ROOM, VIEWER, '@ada a note to myself.', 31);
     expect((await read()).items).toMatchObject([{ messageId: tagged, author: { name: 'Juniper', kind: 'human' } }]);
     expect(await count()).toBe(1);
-    await post(ROOM, VIEWER, 'Reviewed the launch note.', 20);
+    const reply = await post(ROOM, VIEWER, 'Reviewed the launch note.', 20);
+    expect(await count()).toBe(1);
+    await database.query('UPDATE messages SET reply_to_message_id=$2 WHERE id=$1', [reply, tagged]);
     expect((await read()).items).toEqual([]);
     expect(await count()).toBe(0);
     const dismissed = await post(ROOM, PEER, '@ada please check the revised note.', 10);
@@ -77,7 +79,7 @@ describe('person tags in Needs you', () => {
       .toEqual([{ first_seen_at: null, cleared_at: null }]);
     expect(await readNeedsYouOrder(database, WORKSPACE, VIEWER)).toEqual({ count: 1, order: [id] });
     expect((await phone.liveNeedsYou(ROOM, VIEWER))?.count).toBe(1);
-    await phone.execute('sendRoomMessage', { roomId: ROOM, messageId: 'e'.repeat(64), text: 'Reviewed.' }, VIEWER);
+    await phone.execute('sendRoomReply', { roomId: ROOM, parentMessageId: id, text: 'Reviewed.' }, VIEWER);
     expect((await database.query('SELECT cleared_at FROM needs_you_marks WHERE message_id=$1', [id])).rows[0]?.cleared_at).toBeInstanceOf(Date);
     expect(await count()).toBe(0);
   });
@@ -88,7 +90,8 @@ describe('person tags in Needs you', () => {
     const retitled = await post(CORNER, AGENT, 'done: no longer a report', 60);
     const answered = await post(ROOM, AGENT, 'blocked: answered report', 50);
     await database.query(`UPDATE messages SET card=jsonb_build_object('reportToId',$1::text) WHERE id=$2`, [VIEWER, answered]);
-    await post(ROOM, VIEWER, 'Resolved.', 40);
+    const reply = await post(ROOM, VIEWER, 'Resolved.', 40);
+    await database.query('UPDATE messages SET reply_to_message_id=$2 WHERE id=$1', [reply, answered]);
     const open = await post(ROOM, AGENT, 'needs-decision: choose a route', 30);
     const seen = await post(CORNER, AGENT, 'blocked: a seen report', 20);
     // In the chat, so this newer report does not supersede the thread's open one.
@@ -124,12 +127,15 @@ describe('person tags in Needs you', () => {
     expect((await database.query('SELECT cleared_at FROM needs_you_marks WHERE message_id=$1', [id])).rows[0]?.cleared_at).toBeInstanceOf(Date);
   });
 
-  it('settles an open report when its recorded origin is updated to an answered corner', async () => {
+  it('keeps an open report after unrelated conversation in its updated origin', async () => {
     const id = await post(ROOM, AGENT, 'blocked: choose a route', 20);
     await database.query(`UPDATE messages SET card=jsonb_build_object('reportToId',$1::text) WHERE id=$2`, [VIEWER, id]);
     await post(CORNER, VIEWER, 'Use the first route.', 5);
     expect(await count()).toBe(1);
     await database.query(`UPDATE messages SET card=card||jsonb_build_object('sourceRoomId',$1::text) WHERE id=$2`, [CORNER, id]);
+    expect(await count()).toBe(1);
+    const reply = await post(CORNER, VIEWER, 'Use the first route.', 1);
+    await database.query('UPDATE messages SET reply_to_message_id=$2 WHERE id=$1', [reply, id]);
     expect(await count()).toBe(0);
   });
 

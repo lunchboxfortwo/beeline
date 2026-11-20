@@ -3,6 +3,8 @@ import { migratedDatabase, type PgliteDatabase } from './test-support.js';
 import { readMediaMetadata } from './phone-media.js';
 import { PhoneService } from './phone-service.js';
 import { replyToMessage, sendMessage } from './agent-messaging.js';
+import { agentOpenAsks, closeAgentAsk } from './agent-open-asks.js';
+import { postRoomChoice } from './room-choice.js';
 import { askOwnerQuestion } from './work-questions.js';
 import { readWorkBoard, readWorkThread, updateWorkItem } from './work-board.js';
 
@@ -549,5 +551,60 @@ describe('Work board recorded sources and single assignee', () => {
     expect(header).toMatchObject({ id: thread, state: 'in-progress', idle: true, objective: 'Measure reply latency.' });
     expect(header).toEqual((await read()).items.find((item) => item.id === thread));
     expect(await readWorkThread(db, chat, person)).toEqual([]);
+  });
+});
+
+describe('question retirement', () => {
+  const tasks = async () => (await phone.execute('readNeedsYou', { workspaceId: workspace }, person)).items.map(item => item.messageId);
+  const retirement = async (id: string) => (await db.query(
+    'SELECT cleared_reason,cleared_at IS NOT NULL cleared FROM needs_you_marks WHERE message_id=$1 AND identity_id=$2', [id, person])).rows;
+
+  it.each([true, false])('tracks owner questions and agent closure, options=%s', async options => {
+    const { messageId } = await askOwnerQuestion(db, {
+      about: { kind: 'thread', roomId: thread }, question: 'Which surface?',
+      ...(options ? { options: [{ label: 'Web' }, { label: 'Phone' }] } : { freeText: true }),
+    }, agent);
+    expect(await tasks()).toEqual([messageId]);
+    expect((await agentOpenAsks(db, agent, chat)).text).toContain(messageId);
+    expect(await closeAgentAsk(db, agent, { messageId, reason: 'withdrawn' })).toEqual({ closed: 1 });
+    expect(await retirement(messageId)).toEqual([{ cleared_reason: 'withdrawn', cleared: true }]);
+    expect(await tasks()).toEqual([]);
+    expect((await agentOpenAsks(db, agent, chat)).text).toBe('');
+  });
+
+  it.each(['source-closed', 'superseded', 'answered', 'quote', 'section'] as const)('retires a forwarded question on %s', async event => {
+    const question = await sendMessage(db, {
+      route: { from: { agent, place: thread }, to: { agent: person, place: dm } },
+      text: 'Which surface?', ask: { question: 'Which surface?', options: ['Web', 'Phone'], recommended: 'Web' },
+    });
+    expect(await tasks()).toEqual([question.id]);
+    expect((await agentOpenAsks(db, agent, chat)).text).toContain(question.id);
+    if (event === 'source-closed') await db.query('UPDATE rooms SET archived_at=now() WHERE id=$1', [thread]);
+    if (event === 'superseded') await db.query(`INSERT INTO messages(id,room_id,author_id,text,card,created_at)
+      VALUES('new-report',$1,$2,'done: shipped',jsonb_build_object('reportToId',$3::text,'sourceRoomId',$4::text),now()+interval '1 second')`, [dm, agent, person, thread]);
+    if (event === 'answered') {
+      const choice = (await db.query<{ id: string; options: { optionId: string }[] }>('SELECT id,options FROM room_choices WHERE message_id=$1', [question.id])).rows[0]!;
+      await phone.execute('answerChoice', { choiceId: choice.id, optionId: choice.options[0]!.optionId }, person);
+    }
+    if (event === 'quote') {
+      await db.query(`INSERT INTO messages(id,room_id,author_id,text,created_at) VALUES('ordinary',$1,$2,'Unrelated',now()+interval '1 second')`, [dm, person]);
+      expect(await tasks()).toEqual([question.id]);
+      await db.query(`INSERT INTO messages(id,room_id,author_id,text,reply_to_message_id,created_at)
+        VALUES('quoted',$1,$2,'Web',$3,now()+interval '2 seconds')`, [dm, person, question.id]);
+    }
+    if (event === 'section') await phone.execute('clearNeedsYouSection', { workspaceId: workspace }, person);
+    expect(await retirement(question.id)).toEqual([{ cleared_reason: event === 'quote' ? 'answered' : event === 'section' ? 'manual' : event, cleared: true }]);
+    expect(await tasks()).toEqual([]);
+    expect((await agentOpenAsks(db, agent, chat)).text).toBe('');
+  });
+
+  it('tracks addressed standalone choices and preserves their answer reason', async () => {
+    const question = await postRoomChoice(db, { roomId: dm, agentId: agent, requesterId: person,
+      mode: 'question', prompt: 'Which surface?', options: [{ label: 'Web', consequence: 'Web' }, { label: 'Phone', consequence: 'Phone' }] });
+    expect(await tasks()).toEqual([question.messageId]);
+    const choice = (await db.query<{ options: { optionId: string }[] }>('SELECT options FROM room_choices WHERE id=$1', [question.choiceId])).rows[0]!;
+    await phone.execute('answerChoice', { choiceId: question.choiceId, optionId: choice.options[0]!.optionId }, person);
+    expect(await retirement(question.messageId)).toEqual([{ cleared_reason: 'answered', cleared: true }]);
+    expect(await tasks()).toEqual([]);
   });
 });

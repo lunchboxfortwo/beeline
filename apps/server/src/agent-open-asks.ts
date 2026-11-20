@@ -23,14 +23,14 @@ function age(createdAt: Date, now: number): string {
  */
 export async function agentOpenAsks(db: SqlDatabase, agentId: string, roomId: string, now = Date.now()): Promise<{ version: string; text: string }> {
   const rows = (await db.query<OpenAsk>(
-    `SELECT m.id,m.created_at,m.text,m.card->>'ask' ask,room.name room_name,
+    `SELECT m.id,m.created_at,m.text,COALESCE(m.card->>'ask',m.card->>'prompt') ask,room.name room_name,
        array_agg(COALESCE(beeline_workspace_handle(mark.identity_id,mark.workspace_id),person.name) ORDER BY mark.identity_id) handles,
        array_agg(mark.identity_id ORDER BY mark.identity_id) recipients
      FROM needs_you_marks mark
      JOIN messages m ON m.id=mark.message_id AND m.author_id=$1
      JOIN rooms room ON room.id=m.room_id AND room.archived_at IS NULL
      JOIN identities person ON person.id=mark.identity_id
-     WHERE mark.cleared_at IS NULL AND m.presentation='message' AND m.deleted_at IS NULL
+     WHERE mark.cleared_at IS NULL AND m.deleted_at IS NULL
        AND mark.workspace_id=(SELECT workspace_id FROM rooms WHERE id=$2)
        AND (${settledMarkReasonSql('m', 'mark.identity_id')}) IS NULL
      GROUP BY m.id,room.name ORDER BY m.created_at,m.id`,
