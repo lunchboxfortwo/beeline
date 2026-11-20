@@ -365,6 +365,11 @@ export class RoomsMcpAgentTools {
   async call(member: string, name: string, args: Args): Promise<unknown> {
     if (name === 'message' || name === 'reply' || name === 'post' && args.progress !== true) {
       validateToolArguments(MCP_AGENT_TOOLS.find(candidate => candidate.name === name)!, args);
+      if (name === 'message') {
+        const to = object(args.to);
+        if (typeof to.agent !== 'string' || typeof to.place !== 'string')
+          throw new McpToolError('to must be {agent, place}: agent name and the chat, thread or DM id');
+      }
       const target = name === 'message' ? addressArg(args.address ?? object(args.to).place)
         : String(args.address ?? args.room ?? '');
       const item = (await this.db.query<import('./agent-command.js').CommandRow>(

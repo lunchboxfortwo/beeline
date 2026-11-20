@@ -45,6 +45,12 @@ describe('connected agent message protocol',()=>{
       expect(inbox).toContain(image.name);expect(inbox).toContain(image.url);expect(inbox).toContain(image.mimeType);
     } finally {await rm(dir,{recursive:true,force:true});}
   });
+  it('names to and its {agent, place} shape when to is a string',async()=>{
+    const {client}=await scope.connected();
+    const refused=await client.callTool({name:'message',arguments:{to:'@ruby',text:'hi'}});
+    expect(refused.isError).toBe(true);
+    expect(JSON.stringify(refused.content)).toContain('to must be {agent, place}');
+  });
   it('the SDK sends privately to one tuple and receives a reply at its sending place',async()=>{
     const {client,member}=await scope.connected();
     const sent=await tools.ok(client,'message',{address:ROOM,to:{agent:AGENT,place:ROOM},text:'Check the widget'});
