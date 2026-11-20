@@ -104,7 +104,7 @@ export function effortCatalogAxis(
 }
 
 export function roomHeader(row: RoomHeaderRow, publicOrigin: string) {
-  const homepageIcon = row.repository_icon_room ? `${publicOrigin}/v1/repository-icons/${row.repository_icon_room}` : undefined;
+  const homepageIcon = row.repository_icon ? `${publicOrigin}/v1/repository-icons/${row.repository_icon}` : undefined;
   return {
     id: row.id,
     ...(homepageIcon ? { homepageIcon } : {}),

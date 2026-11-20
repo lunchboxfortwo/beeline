@@ -16,6 +16,7 @@ import { gitHubOperationsReadPrChecksStatus, gitHubOperationsLandCorner, gitHubO
 import { gitHubOperationsReconcileQueuedCorners, gitHubOperationsRecordConfirmedCornerMerge, gitHubOperationsProcessBaseBranchPush, gitHubOperationsProcessRepositoryEvent, gitHubOperationsProcessCornerEvent } from './github-operations-reconcile-queued-corners.js';
 import { gitHubOperationsRefreshCheckRollup, gitHubOperationsLifecycle, gitHubOperationsUpdateLifecycle, gitHubOperationsSystemNote, gitHubOperationsMergeCorner, gitHubOperationsDeleteCornerBranch, gitHubOperationsSyncInstallation, gitHubOperationsListAdministeredInstallations, gitHubOperationsUserCanAdministerInstallation, gitHubOperationsAssertInstallationAccess } from './github-operations-refresh-check-rollup.js';
 import { gitHubOperationsUserCredential, gitHubOperationsRotateUserCredential, gitHubOperationsStoreRepository } from './github-operations-user-credential.js';
+import { repositoryIconPushTarget, resolveRepositoryIcons } from './repository-icons.js';
 
 export class GitHubOperations {
 
@@ -90,6 +91,16 @@ async starRepository(viewerId: string, fullName: string): Promise<boolean> { ret
 async onboardingSignals(roomId: string): Promise<RepositorySignals> { return gitHubOperationsOnboardingSignals(this, roomId); }
 async createRepository(viewerId: string, input: Input<'createGitHubRepository'>, database: SqlDatabase = this.database) { return gitHubOperationsCreateRepository(this, viewerId, input, database); }
 
+
+  /** Stores linked repositories' chat pictures: those not resolved yet, or `repositoryIds` again. The one
+   * GitHub path for chat icons; chat reads and the icon endpoint only read the stored result. */
+  async resolveRepositoryIcons(repositoryIds?: readonly string[]): Promise<void> {
+    const changed = await resolveRepositoryIcons(this.database, async (repository, path) => {
+      const token = await this.app.installationToken(Number(repository.installation_id), { repositoryIds: [Number(repository.repository_id)] });
+      return this.app.issuesRequest(token.token, repository.full_name, 'GET', path);
+    }, repositoryIds);
+    for (const roomId of changed) this.onRoomChanged?.(roomId);
+  }
 
   async roomToken(roomId: string) {
     const row = (
@@ -268,6 +279,10 @@ async readCornerPullRequest(cornerId: string): Promise<CornerPullRequestResult> 
         await this.processRepositoryEvent(event, body, install.id);
         await this.processCornerEvent(event, body, install.id);
         if (event === 'push') await this.processBaseBranchPush(body, install.id);
+        if (event === 'push') {
+          const iconRepository = await repositoryIconPushTarget(this.database, body);
+          if (iconRepository) await this.resolveRepositoryIcons([iconRepository]);
+        }
         await this.reconcileQueuedCorners();
         return;
       }

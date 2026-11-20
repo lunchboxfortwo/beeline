@@ -307,6 +307,10 @@ export function createPhoneOperationDispatcher(
     if ((name === 'sendRoomMessage' || name === 'sendRoomReply') && typeof input.roomId === 'string')
       void options.github?.onWebhook?.('beeline:human-message', { cornerId: input.roomId })
         .catch(error => console.error('[server] human-triggered merge recovery failed:', error));
+    // Linking a chat to a repository resolves that repository's picture once, after commit.
+    if (name === 'createRoom' || name === 'setRoomRepository')
+      void options.github?.resolveRepositoryIcons?.()
+        .catch(error => console.error('[server] repository icon resolution failed:', error));
     const roomId = typeof input.roomId === 'string' ? input.roomId
       : result && typeof (result as { roomId?: unknown }).roomId === 'string' ? (result as { roomId: string }).roomId : undefined;
     if (roomId && !quiet.has(name)) {

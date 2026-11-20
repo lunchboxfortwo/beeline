@@ -1,6 +1,7 @@
 import { lookup } from 'node:dns/promises';
 import { Agent, get } from 'node:https';
 import { readFileSync } from 'node:fs';
+import { posix } from 'node:path';
 import ipaddr from 'ipaddr.js';
 import sharp from 'sharp';
 import type { CompanyLogo } from '@beeline/api-contract/workbench';
@@ -163,53 +164,107 @@ function cachedIcon(key: string, load: () => Promise<Image | undefined>): Promis
   return pending;
 }
 
-const ICON_NAMES = new Set(['favicon.svg', 'favicon.ico', 'favicon.png', 'apple-touch-icon.png', 'icon.svg', 'icon.png', 'icon-512.png', 'logo.svg', 'logo.png']);
-/** Most blob reads one repository icon lookup spends. */
-const ICON_READS = 8;
-/** Committed icon files in pick order: groups of equal rank, a file at the root or directly in a public/
- * directory first, then the shallowest path. Within a group the best square wins (vector, then largest). */
-export function repositoryIconCandidates(paths: readonly string[]): string[][] {
-  const ranked = paths.flatMap((path) => {
-    const parts = path.split('/');
-    if (!ICON_NAMES.has(parts[parts.length - 1]!.toLowerCase())) return [];
-    const preferred = parts.length === 1 || parts[parts.length - 2]!.toLowerCase() === 'public';
-    return [{ path, rank: `${preferred ? 0 : 1}:${String(parts.length).padStart(4, '0')}` }];
-  }).sort((a, b) => a.rank.localeCompare(b.rank) || a.path.localeCompare(b.path));
-  const groups = new Map<string, string[]>();
-  for (const { path, rank } of ranked) groups.set(rank, [...groups.get(rank) ?? [], path]);
-  return [...groups.values()];
+// The chat picture follows t3code's ProjectFaviconResolver (pingdotgg/t3code
+// apps/server/src/project/ProjectFaviconResolver.ts): its well-known paths in order, first existing file wins;
+// else the first icon <link> in its source files. One step t3 lacks: when the repository root yields nothing,
+// the same search runs under each apps/*/ then packages/*/ directory, first hit wins.
+const FAVICON_CANDIDATES = [
+  'favicon.svg', 'favicon.ico', 'favicon.png', 'public/favicon.svg', 'public/favicon.ico', 'public/favicon.png',
+  'app/favicon.ico', 'app/favicon.png', 'app/icon.svg', 'app/icon.png', 'app/icon.ico', 'src/favicon.ico', 'src/favicon.svg',
+  'src/app/favicon.ico', 'src/app/icon.svg', 'src/app/icon.png', 'assets/icon.svg', 'assets/icon.png', 'assets/logo.svg',
+  'assets/logo.png', '.idea/icon.svg',
+] as const;
+const ICON_SOURCE_FILES = ['index.html', 'public/index.html', 'app/routes/__root.tsx', 'src/routes/__root.tsx',
+  'app/root.tsx', 'src/root.tsx', 'src/index.html'] as const;
+const ICON_SOURCE_SCAN_BYTES = 128 * 1024;
+const HTML_LINK_RE = /<link\b[^<>]*>/gi;
+const HTML_ICON_REL_RE = /\brel=["'](?:icon|shortcut icon)["']/i;
+const HTML_ICON_HREF_RE = /\bhref=["']([^"'?]+)/i;
+const ICON_REL_RE = /\brel\s*:\s*["'](?:icon|shortcut icon)["']/i;
+const ICON_HREF_RE = /\bhref\s*:\s*["']([^"'?]+)/i;
+const ICON_FILE_NAMES = new Set([...FAVICON_CANDIDATES, ...ICON_SOURCE_FILES].map(path => path.slice(path.lastIndexOf('/') + 1)));
+
+/** Whether a changed repository path can change the picked icon: a well-known icon or icon source file name,
+ * at any depth (a monorepo package's files count). A custom `<link>` target is matched by its stored path. */
+export function isRepositoryIconPath(path: string): boolean {
+  return ICON_FILE_NAMES.has(path.slice(path.lastIndexOf('/') + 1));
 }
-type RepositoryRead = (path: string) => Promise<unknown>;
-/** The repository's own committed icon from one tree listing, else none. */
-export function readRepositoryIcon(fullName: string, branch: string, read: RepositoryRead): Promise<Image | undefined> | undefined {
-  return cachedIcon(`github:${fullName.toLowerCase()}`, async () => {
-    const tree = await read(`git/trees/${encodeURIComponent(branch)}?recursive=1`) as { tree?: { path?: unknown; type?: unknown; sha?: unknown }[] } | undefined;
-    const blobs = new Map<string, string>();
-    for (const entry of tree?.tree ?? [])
-      if (entry.type === 'blob' && typeof entry.path === 'string' && typeof entry.sha === 'string') blobs.set(entry.path, entry.sha);
-    let reads = 0;
-    for (const group of repositoryIconCandidates([...blobs.keys()])) {
-      let best: { size: number; bytes: Buffer } | undefined;
-      for (const path of group) {
-        if (reads++ >= ICON_READS) break;
-        try {
-          const blob = await read(`git/blobs/${encodeURIComponent(blobs.get(path)!)}`) as { content?: unknown } | undefined;
-          if (typeof blob?.content !== 'string') continue;
-          const bytes = Buffer.from(blob.content, 'base64');
-          const image = icoImage(bytes) ?? sharp(bytes, { limitInputPixels: 1_000_000, animated: false });
-          const { width, height, format } = await image.clone().metadata();
-          const vector = format === 'svg';
-          const size = vector ? Infinity : width ?? 0;
-          // A raster must be square; a vector scales into the square whatever its aspect.
-          if (!width || (!vector && width !== height) || (best && best.size >= size)) continue;
-          best = { size, bytes: await image.resize(64, 64, { fit: 'inside', withoutEnlargement: !vector }).png().toBuffer() };
-        } catch { /* try the next committed icon */ }
-      }
-      if (best) return { bytes: best.bytes, mime: 'image/png' };
-      if (reads >= ICON_READS) break;
+
+/** t3code's `extractIconHref`: an HTML icon `<link>`, else a `rel: "icon"` object in route source. */
+export function extractIconHref(source: string): string | undefined {
+  for (const [tag] of source.matchAll(HTML_LINK_RE)) {
+    if (!HTML_ICON_REL_RE.test(tag)) continue;
+    const href = tag.match(HTML_ICON_HREF_RE)?.[1];
+    if (href) return href;
+  }
+  for (const run of source.split('}')) {
+    if (!ICON_REL_RE.test(run)) continue;
+    const href = run.match(ICON_HREF_RE)?.[1];
+    if (href) return href;
+  }
+  return undefined;
+}
+
+/** `base` + a repository-relative path, normalized; undefined when it leaves `base`. */
+function within(base: string, relative: string): string | undefined {
+  const joined = posix.normalize(relative);
+  if (joined === '.' || joined.startsWith('../') || joined === '..' || posix.isAbsolute(joined)) return undefined;
+  return base + joined;
+}
+
+/** The project directories searched in order: the root, then each apps/*\/ and packages/*\/ directory. */
+function projectRoots(paths: readonly string[]): string[] {
+  const under = (parent: string) => [...new Set(paths.flatMap(path => {
+    const match = new RegExp(`^${parent}/([^/]+)/`).exec(path);
+    return match ? [`${parent}/${match[1]}/`] : [];
+  }))].sort();
+  return ['', ...under('apps'), ...under('packages')];
+}
+
+type SourceRead = (path: string) => Promise<string | undefined>;
+/** The picked icon file's repository path from one tree listing (`files`), reading only icon source files. */
+export async function pickRepositoryIconPath(files: ReadonlySet<string>, readSource: SourceRead): Promise<string | undefined> {
+  for (const base of projectRoots([...files])) {
+    const known = FAVICON_CANDIDATES.map(candidate => base + candidate).find(path => files.has(path));
+    if (known) return known;
+    for (const sourceFile of ICON_SOURCE_FILES) {
+      if (!files.has(base + sourceFile)) continue;
+      const href = extractIconHref((await readSource(base + sourceFile))?.slice(0, ICON_SOURCE_SCAN_BYTES) ?? '');
+      if (!href) continue;
+      // Browsers strip surrounding whitespace from URL attributes; resolved against public/ first, then the root.
+      const clean = href.trim().replace(/^\//, '');
+      const target = [within(base, posix.join('public', clean)), within(base, clean)].find(path => path && files.has(path));
+      if (target) return target;
     }
-    return undefined;
-  });
+  }
+  return undefined;
+}
+
+type RepositoryRead = (path: string) => Promise<unknown>;
+/** The repository's picked icon file as a 64 px PNG with its path, else none. The caller stores the result;
+ * nothing here caches, so this runs only when a repository is linked or its icon files change. */
+export async function resolveRepositoryIcon(branch: string, read: RepositoryRead): Promise<{ image: Image; path: string } | undefined> {
+  const tree = await read(`git/trees/${encodeURIComponent(branch)}?recursive=1`) as { tree?: { path?: unknown; type?: unknown; sha?: unknown }[] } | undefined;
+  const blobs = new Map<string, string>();
+  for (const entry of tree?.tree ?? [])
+    if (entry.type === 'blob' && typeof entry.path === 'string' && typeof entry.sha === 'string') blobs.set(entry.path, entry.sha);
+  const blob = async (path: string) => {
+    const body = await read(`git/blobs/${encodeURIComponent(blobs.get(path)!)}`) as { content?: unknown } | undefined;
+    return typeof body?.content === 'string' ? Buffer.from(body.content, 'base64') : undefined;
+  };
+  const path = await pickRepositoryIconPath(new Set(blobs.keys()), async source =>
+    (await blob(source))?.subarray(0, ICON_SOURCE_SCAN_BYTES).toString('utf8'));
+  if (!path) return undefined;
+  const bytes = await blob(path);
+  if (!bytes) return undefined;
+  try {
+    const image = icoImage(bytes) ?? sharp(bytes, { limitInputPixels: 1_000_000, animated: false });
+    const { width, format } = await image.clone().metadata();
+    // Stored at 64 px square with transparent padding; a small raster scales up without blur.
+    const png = await image.resize(64, 64, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 },
+      ...(format !== 'svg' && (width ?? 64) < 64 ? { kernel: 'nearest' as const } : {}) }).png().toBuffer();
+    return { image: { bytes: png, mime: 'image/png' }, path };
+  } catch { return undefined; /* the picked file is not a readable image: the chat shows # */ }
 }
 
 /** Native requests physical pixels so Image can display pixel art without resampling. */
