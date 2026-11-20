@@ -160,6 +160,59 @@ export default function SavedRoomDeck() {
 
 const EMPTY_CHATS: readonly ChatListItem[] = [];
 
+// Swipeable re-renders every row when the list is covered or measured; a memoized
+// action keeps those re-renders from rebuilding each row's hidden button.
+const RowSwipeAction = memo(function RowSwipeAction({
+  item,
+  canInteract,
+  onClose,
+  onLeave,
+}: {
+  item: ChatListItem;
+  canInteract: () => boolean;
+  onClose: (item: ChatListItem) => Promise<void>;
+  onLeave: (item: ChatListItem) => Promise<void>;
+}) {
+  const title = `${roomRowName(item).sigil}${roomRowName(item).name}`;
+  return (
+    <YStack
+      width={ROW_HEIGHT}
+      backgroundColor="highlight"
+      alignItems="center"
+      justifyContent="center"
+    >
+      {item.directMessage ? (
+        <Btn
+          kind="quiet"
+          label={`Close ${title}`}
+          testID={`chat-close-action-${item.room.id}`}
+          onPress={() => {
+            if (canInteract()) void onClose(item);
+          }}
+        >
+          <YStack alignItems="center" gap="0.5">
+            <Glyph icon={LogOut} />
+            <T v="meta" color="secondary" numberOfLines={1}>
+              Close
+            </T>
+          </YStack>
+        </Btn>
+      ) : (
+        <Btn
+          kind="icon"
+          label={`Leave ${title}`}
+          testID={`room-leave-action-${item.room.id}`}
+          onPress={() => {
+            if (canInteract()) void onLeave(item);
+          }}
+        >
+          <Glyph icon={LogOut} />
+        </Btn>
+      )}
+    </YStack>
+  );
+});
+
 const BuzzChannels = memo(function BuzzChannels({ session }: { session: DeckSession }) {
   const state = useChannelsRouteState(session);
   const view = useChannelsPresentation(state);
@@ -249,7 +302,6 @@ const BuzzChannels = memo(function BuzzChannels({ session }: { session: DeckSess
       />
     );
     if (viewerIsAgent) return row;
-    const title = `${roomRowName(item).sigil}${roomRowName(item).name}`;
     return (
       <>
         {index === 0 ? null : <ChatRowDivider roomId={item.room.id} />}
@@ -265,22 +317,12 @@ const BuzzChannels = memo(function BuzzChannels({ session }: { session: DeckSess
           overshootRight={false}
           rightThreshold={ROW_HEIGHT}
           renderRightActions={() => (
-            <YStack width={ROW_HEIGHT} backgroundColor="highlight" alignItems="center" justifyContent="center">
-              {item.directMessage ? (
-                <Btn kind="quiet" label={`Close ${title}`} testID={`chat-close-action-${item.room.id}`}
-                  onPress={() => { if (roomListGestures.canInteract()) void handleCloseChat(item); }}>
-                  <YStack alignItems="center" gap="0.5">
-                    <Glyph icon={LogOut} />
-                    <T v="meta" color="secondary" numberOfLines={1}>Close</T>
-                  </YStack>
-                </Btn>
-              ) : (
-                <Btn kind="icon" label={`Leave ${title}`} testID={`room-leave-action-${item.room.id}`}
-                  onPress={() => { if (roomListGestures.canInteract()) void handleLeaveRoom(item); }}>
-                  <Glyph icon={LogOut} />
-                </Btn>
-              )}
-            </YStack>
+            <RowSwipeAction
+              item={item}
+              canInteract={roomListGestures.canInteract}
+              onClose={handleCloseChat}
+              onLeave={handleLeaveRoom}
+            />
           )}
           testID={`chat-close-swipe-${item.room.id}`}
         >

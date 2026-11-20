@@ -122,6 +122,17 @@ export async function migrate(
     if (atomic) await database.transaction(install);
     else await install(database);
   };
+  // A transaction pooler does not apply the pools' startup `-c jit=off`, so
+  // production sessions still JIT-compiled every large read (seconds per read).
+  // A database default reaches every new session, pooled or direct; a role
+  // that does not own the database can still set its own default.
+  await runMigrationStep('database JIT default', async () => {
+    await database.query(`DO $$ BEGIN
+      EXECUTE format('ALTER DATABASE %I SET jit = off', current_database());
+    EXCEPTION WHEN insufficient_privilege THEN
+      ALTER ROLE CURRENT_USER SET jit = off;
+    END $$`);
+  });
   await ddlScript('server schema', SCHEMA);
   await ddlScript('membership roles', MEMBERSHIP_ROLE_SCHEMA, true);
   await ddlScript('Work board', WORK_BOARD_SCHEMA);
