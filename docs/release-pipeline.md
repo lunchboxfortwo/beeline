@@ -49,7 +49,9 @@ Full Checks start alongside the next release's helper and desktop builds.
 The existing release validation join waits for their exact-SHA verdict before
 any helper publication, server migration/rollout, OTA/channel promotion,
 website deployment, store upload or finalization. Latest reuses that same
-successful verdict. Neither leg dispatches GitHub CI. Existing delivery proofs,
+successful verdict. Checks stay on squire; Mac helper builds use the GitHub
+workflow described under [local recovery legs](#local-recovery-legs-during-an-actions-outage).
+Existing delivery proofs,
 canary, rollback and finalization stay with their release legs.
 
 The existing dispatched-by fields default to the invoking user (or `firstmate`),
@@ -175,7 +177,12 @@ helper join; publication stays on squire. The ARM helper builds natively on
 them identical). Every packaged Mach-O passes `lipo -verify_arch` and
 `codesign --verify --strict`; our Cargo binaries receive ad-hoc signatures,
 so no Apple certificate is involved. Both builds run the installation proof.
-The run needs only the configured `GITHUB_TOKEN` with workflow authority.
+The controller needs the configured `GITHUB_TOKEN` (or `GH_TOKEN`) with Actions
+write authority to dispatch and cancel runs, and read access to their status
+and artifacts. The workflow must exist on `main`; it reads the public
+`BEELINE_HELPER_SENTRY_DSN` build input from the repository variable, not the
+controller's env file. If Actions is unavailable, use `--mac-helpers carry`
+subject to the carry limit below.
 To prove both builds without publishing anything:
 
 ```sh
@@ -374,9 +381,11 @@ Other `--dry-run` legs execute build-only commands; `--leg` limits their cost. S
 an image without pushing, migrating or updating Machines. Helper builds the
 Linux archive and runs the existing installer proof. OTA exports locally;
 the web app exports and checks its worker/identity without uploading maps or
-deploying. The Pages leg only builds static files. These are build proofs,
-not evidence of a live canary, native Mac acceptance, channel publication or
-successful production rollback. Those steps remain in real execution. Private
+deploying. The Pages leg only builds static files. The `mac-helpers` leg runs
+the hosted builds and native installation proofs described above, downloading
+their artifacts without publishing them. Other dry-run legs do not prove native
+Mac helper acceptance. Dry runs do not prove a live canary, channel publication
+or successful production rollback. Those steps remain in real execution. Private
 artifacts, summaries and job results stay outside Git, under `--state-dir`.
 Local release records identify their execution as local and record all carries;
 they do not claim a GitHub Actions run ID.
@@ -692,8 +701,8 @@ missing or unfinished builds fail after 20 minutes. The native build evidence ke
 the delivery UUID and App Store build ID. Transport success alone does not
 authorize the native component or OTA promotion. Android store binaries
 build locally on the Linux runner and use the existing Google Play authentication
-and upload path. The helper `darwin-x64` bundle builds on GitHub's hosted
-`macos-15-intel` image, so it never queues behind an iOS store build.
+and upload path. Mac helper placement is described under
+[local recovery legs](#local-recovery-legs-during-an-actions-outage).
 
 Selected jobs build immutable artifacts named with both release version and
 source SHA, promote them, and run bounded checks. A component job that succeeds
