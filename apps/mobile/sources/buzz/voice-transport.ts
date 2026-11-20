@@ -1,8 +1,32 @@
-import { Room, RoomEvent, Track } from 'livekit-client';
+type VoiceClient = Awaited<ReturnType<typeof loadVoiceClient>>;
+export type Room = InstanceType<VoiceClient['Room']>;
+type Track = VoiceClient['Track']['prototype'];
+let voiceClient: VoiceClient | undefined;
 
-export async function createVoiceRoom(_onStop: () => void = () => {}, _roomId?: string): Promise<{ room: Room; closeAudio(): Promise<void>; configureStop(callId: string, token: string): Promise<void> }> {
-  const room = new Room({ adaptiveStream: false, dynacast: false, publishDefaults: { stopMicTrackOnMute: true },
-    reconnectPolicy: { nextRetryDelayInMs: () => null } });
+/** LiveKit is voice-only, so the entry bundle leaves it out; a call-capable chat loads it on mount. */
+export function loadVoiceClient() {
+  return import('livekit-client').then((client) => {
+    voiceClient = client;
+    return client;
+  });
+}
+
+export async function createVoiceRoom(
+  _onStop: () => void = () => {},
+  _roomId?: string,
+): Promise<{
+  room: Room;
+  closeAudio(): Promise<void>;
+  configureStop(callId: string, token: string): Promise<void>;
+}> {
+  // Preloaded on mount: no await before startAudio, so the mic tap's user activation still applies.
+  const { Room } = voiceClient ?? (await loadVoiceClient());
+  const room = new Room({
+    adaptiveStream: false,
+    dynacast: false,
+    publishDefaults: { stopMicTrackOnMute: true },
+    reconnectPolicy: { nextRetryDelayInMs: () => null },
+  });
   // Called from the original mic gesture, so browser playback has user activation.
   void room.startAudio();
   return { room, configureStop: async () => {}, closeAudio: async () => {} };
@@ -12,46 +36,79 @@ export function subscribeVoiceResume(_roomId: string, _resume: () => void): () =
   return () => {};
 }
 
-export async function routeVoiceResumeNotification(_url: unknown, _ready?: () => Promise<void>): Promise<boolean> {
+export async function routeVoiceResumeNotification(
+  _url: unknown,
+  _ready?: () => Promise<void>,
+): Promise<boolean> {
   return false;
 }
 
-
-
 /** Sample every audio source each frame; the loudest speaker drives the waveform. */
 export function subscribeVoiceMicrophone(room: Room, onLevel: (level: number) => void): () => void {
+  const { RoomEvent } = voiceClient!;
   const context = new AudioContext();
-  const meters = new Map<Track, { source: MediaStreamAudioSourceNode; analyser: AnalyserNode; samples: Float32Array<ArrayBuffer> }>();
+  const meters = new Map<
+    Track,
+    {
+      source: MediaStreamAudioSourceNode;
+      analyser: AnalyserNode;
+      samples: Float32Array<ArrayBuffer>;
+    }
+  >();
   const update = () => {
     const tracks = [room.localParticipant, ...room.remoteParticipants.values()]
-      .flatMap(participant => [...participant.audioTrackPublications.values()])
-      .flatMap(publication => publication.track && !publication.track.isMuted ? [publication.track] : []);
+      .flatMap((participant) => [...participant.audioTrackPublications.values()])
+      .flatMap((publication) =>
+        publication.track && !publication.track.isMuted ? [publication.track] : [],
+      );
     const active = new Set<Track>(tracks);
-    for (const [track, meter] of meters) if (!active.has(track)) {
-      meter.source.disconnect(); meters.delete(track);
-    }
-    for (const track of tracks) if (!meters.has(track)) {
-      const source = context.createMediaStreamSource(new MediaStream([track.mediaStreamTrack]));
-      const analyser = context.createAnalyser(); analyser.fftSize = 256; analyser.smoothingTimeConstant = 0;
-      source.connect(analyser);
-      meters.set(track, { source, analyser, samples: new Float32Array(analyser.fftSize) });
-    }
+    for (const [track, meter] of meters)
+      if (!active.has(track)) {
+        meter.source.disconnect();
+        meters.delete(track);
+      }
+    for (const track of tracks)
+      if (!meters.has(track)) {
+        const source = context.createMediaStreamSource(new MediaStream([track.mediaStreamTrack]));
+        const analyser = context.createAnalyser();
+        analyser.fftSize = 256;
+        analyser.smoothingTimeConstant = 0;
+        source.connect(analyser);
+        meters.set(track, { source, analyser, samples: new Float32Array(analyser.fftSize) });
+      }
   };
   let frame = 0;
   const sample = () => {
     let loudest = 0;
     for (const meter of meters.values()) {
       meter.analyser.getFloatTimeDomainData(meter.samples);
-      loudest = Math.max(loudest, Math.sqrt(meter.samples.reduce((sum, value) => sum + value * value, 0) / meter.samples.length));
+      loudest = Math.max(
+        loudest,
+        Math.sqrt(
+          meter.samples.reduce((sum, value) => sum + value * value, 0) / meter.samples.length,
+        ),
+      );
     }
-    onLevel(loudest); frame = requestAnimationFrame(sample);
+    onLevel(loudest);
+    frame = requestAnimationFrame(sample);
   };
-  const events = [RoomEvent.LocalTrackPublished, RoomEvent.LocalTrackUnpublished, RoomEvent.TrackSubscribed,
-    RoomEvent.TrackUnsubscribed, RoomEvent.ParticipantDisconnected, RoomEvent.TrackMuted, RoomEvent.TrackUnmuted];
-  events.forEach(event => room.on(event, update)); update(); sample();
+  const events = [
+    RoomEvent.LocalTrackPublished,
+    RoomEvent.LocalTrackUnpublished,
+    RoomEvent.TrackSubscribed,
+    RoomEvent.TrackUnsubscribed,
+    RoomEvent.ParticipantDisconnected,
+    RoomEvent.TrackMuted,
+    RoomEvent.TrackUnmuted,
+  ];
+  events.forEach((event) => room.on(event, update));
+  update();
+  sample();
   return () => {
-    events.forEach(event => room.off(event, update)); cancelAnimationFrame(frame);
+    events.forEach((event) => room.off(event, update));
+    cancelAnimationFrame(frame);
     for (const meter of meters.values()) meter.source.disconnect();
-    meters.clear(); void context.close();
+    meters.clear();
+    void context.close();
   };
 }

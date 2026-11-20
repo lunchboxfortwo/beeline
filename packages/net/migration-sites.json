@@ -589,14 +589,6 @@
       "phase": "M4"
     },
     {
-      "id": "apps/mobile/sources/buzz/use-voice-call.ts::import:livekit-client",
-      "file": "apps/mobile/sources/buzz/use-voice-call.ts",
-      "kind": "import:livekit-client",
-      "count": 1,
-      "compatibility": "legacy-only",
-      "phase": "M4"
-    },
-    {
       "id": "apps/mobile/sources/buzz/voice-transport.native.ts::import:livekit-client",
       "file": "apps/mobile/sources/buzz/voice-transport.native.ts",
       "kind": "import:livekit-client",

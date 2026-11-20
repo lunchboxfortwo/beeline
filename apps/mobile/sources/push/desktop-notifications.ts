@@ -68,7 +68,8 @@ export function startDesktopNotifications(): () => void {
     const reader = new RoomViewClient({ baseUrl: relayUrl, identity });
     // Each Workspace's Rooms come from the app-level Room list store.
     const lists = new Map<string, { handle: ChatListHandle; stop: () => void }>();
-    let cornerKey = '';
+    // Each parent's corner summary as last read, so a change re-reads only that parent.
+    const cornerKeys = new Map<string, string>();
     let watchKey = '';
     let refreshing = false;
     let pendingRefresh = false;
@@ -211,7 +212,7 @@ export function startDesktopNotifications(): () => void {
           lists.set(id, { handle, stop: handle.subscribe(() => void follow()) });
         }
         // A covering refresh reads the corners again too.
-        cornerKey = '';
+        cornerKeys.clear();
         await follow();
       } catch (error) {
         report(error);
@@ -243,19 +244,21 @@ export function startDesktopNotifications(): () => void {
         const cornerCount = (room: ChatListItem) =>
           getRoomCornerSummary(room.room.id)?.cornerCount ?? 0;
         const cornerParents = rooms.filter((room) => cornerCount(room) > 0);
-        const nextCornerKey = JSON.stringify(
-          cornerParents.map((room) => [room.room.id, getRoomCornerSummary(room.room.id)]),
-        );
-        if (nextCornerKey !== cornerKey) {
-          const marks = cornerParents.map((room) => cornerReadMark(room.room.id));
-          const cornerReads = await Promise.all(
-            cornerParents.map((room) => reader.corners(room.room.id)),
-          );
+        const parentIds = new Set(cornerParents.map((room) => room.room.id));
+        for (const id of cornerKeys.keys()) if (!parentIds.has(id)) cornerKeys.delete(id);
+        const changed = cornerParents.flatMap((room) => {
+          const key = JSON.stringify(getRoomCornerSummary(room.room.id));
+          return cornerKeys.get(room.room.id) === key ? [] : [{ id: room.room.id, key }];
+        });
+        if (changed.length) {
+          const marks = changed.map(({ id }) => cornerReadMark(id));
+          const cornerReads = await Promise.all(changed.map(({ id }) => reader.corners(id)));
           if (disposed || current !== generation) return;
-          cornerReads.forEach((result, index) =>
-            applyCornerListRead(cornerParents[index]!.room.id, result, marks[index]!),
-          );
-          cornerKey = nextCornerKey;
+          cornerReads.forEach((result, index) => {
+            const { id, key } = changed[index]!;
+            applyCornerListRead(id, result, marks[index]!);
+            cornerKeys.set(id, key);
+          });
         }
         const filters = [
           ...views.flatMap((view) => view.watchFilters),
