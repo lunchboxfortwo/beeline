@@ -133,24 +133,34 @@ export function WorkItemDetail({
               {item.idle ? 'Idle' : STATE_LABEL[item.state]}
             </T>
           </XStack>
-          {!item.roomArchived ? <XStack gap="2" flexWrap="wrap" role="radiogroup" aria-label="State" testID="work-state-picker">
-            {SETTABLE_STATES.map((state) => (
-              <Btn
-                key={state}
-                kind={item.state === state ? 'accent' : 'secondary'}
-                label={STATE_LABEL[state]}
-                role="radio"
-                aria-checked={item.state === state}
-                disabled={changingState}
-                onPress={() => {
-                  void changeState(state);
-                }}
-                testID={`work-state-${state}`}
-              >
-                <T v="meta" color={item.state === state ? 'needsYou' : 'ink'}>{STATE_LABEL[state]}</T>
-              </Btn>
-            ))}
-          </XStack> : null}
+          {!item.roomArchived ? (
+            <XStack
+              gap="2"
+              flexWrap="wrap"
+              role="radiogroup"
+              aria-label="State"
+              testID="work-state-picker"
+            >
+              {SETTABLE_STATES.map((state) => (
+                <Btn
+                  key={state}
+                  kind={item.state === state ? 'accent' : 'secondary'}
+                  label={STATE_LABEL[state]}
+                  role="radio"
+                  aria-checked={item.state === state}
+                  disabled={changingState}
+                  onPress={() => {
+                    void changeState(state);
+                  }}
+                  testID={`work-state-${state}`}
+                >
+                  <T v="meta" color={item.state === state ? 'needsYou' : 'ink'}>
+                    {STATE_LABEL[state]}
+                  </T>
+                </Btn>
+              ))}
+            </XStack>
+          ) : null}
           {item.objective ? <T testID="work-sheet-objective">{item.objective}</T> : null}
           <YStack gap="2">
             <T v="meta" color="secondary">

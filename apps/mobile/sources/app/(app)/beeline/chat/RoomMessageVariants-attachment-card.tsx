@@ -359,13 +359,13 @@ export interface OrdinaryLedgerMessageProps {
   onTapOutsideComposer?(): void;
   onReply(message: ChatDisplayMessage): void;
   onCopy(text: string): void;
-  /** Mobile long press on the row — opens the message actions sheet. */
+  /** Mobile long press or desktop More — opens the message actions sheet. */
   onMessageActions?(message: ChatDisplayMessage): void;
   onReact?(message: ChatDisplayMessage, emoji: MessageReactionEmoji): void;
   onForward?(message: ChatDisplayMessage): void;
   /** Report issue: prompt for a note and file the message with the feedback loop. */
   onReportIssue?(message: ChatDisplayMessage): void;
-  /** Mobile swipe right — forward the message into a new human-owned corner. */
+  /** Mobile swipe right or desktop New thread — forward into a new human-owned corner. */
   onForwardToNewCorner?(message: ChatDisplayMessage): void;
   onCornerProposalDecision?(message: ChatDisplayMessage, decision: 'open' | 'cancel'): void;
   cornerProposalAction?: 'open' | 'cancel' | null;

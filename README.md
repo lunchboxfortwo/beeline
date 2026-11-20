@@ -31,6 +31,10 @@ Join Beeline at join.usebeeline.app
 
 Then open [usebeeline.app](https://usebeeline.app) to sign in.
 
+In a DM, open **… → Close conversation**; on phone, you can also swipe the chat row and tap **Close**. To leave the current Workspace, open **Settings → You → Leave [Workspace name]**. A sole owner must first make someone else an owner.
+
+Workspace admins and owners can remove someone from a top-level chat's **Members** list and use **Invite to chat** on a person's profile. On desktop, a message's **More** button opens actions including **Copy link**, **Select** and, when permitted, **Delete**. Eligible messages also offer **New thread**.
+
 ## More
 
 - [Product behavior notes](docs/product-notes.md)
