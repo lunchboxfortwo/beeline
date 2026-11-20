@@ -306,7 +306,7 @@ describe('PhoneService Needs-you tray', () => {
     expect((await read()).items).toEqual([]);
   });
 
-  it('NO-TIMER: an open ask never expires, and no read, count or live projection writes', async () => {
+  it('NO-TIMER: open asks never expire or change during reads, counts or live projections', async () => {
     const first = await report(ROOM, PEER, 'needs-decision: please review this');
     const second = await report(ROOM, PEER, 'needs-decision: can you confirm?');
     const marks = async () => (await database.query(
@@ -371,6 +371,15 @@ describe('PhoneService Needs-you tray', () => {
     await database.query(`UPDATE rooms SET archived_at=now() WHERE id=$1`, [CORNER]);
     await database.query('ALTER TABLE messages ENABLE TRIGGER message_needs_you_marks');
     await database.query('ALTER TABLE rooms ENABLE TRIGGER room_close_needs_you_marks');
+    // Live snapshots and badge queries filter legacy settlements without writing;
+    // only the Tasks read below records their terminal reasons.
+    await database.transaction(async tx => {
+      await tx.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      expect(await needsYou.countNeedsYouItems(tx, WORKSPACE, VIEWER)).toEqual({ count: 2 });
+      expect((await needsYou.readNeedsYouOrder(tx, WORKSPACE, VIEWER)).order.sort()).toEqual([open, newer].sort());
+    });
+    expect((await phone.liveNeedsYou(ROOM, VIEWER))?.items.map(item => item.messageId).sort()).toEqual([open, newer].sort());
+    expect(await reasons()).toEqual([]);
     expect((await read()).items.map(item => item.messageId)).toEqual([open, newer]);
     expect(await count()).toBe(2);
     expect(await reasons()).toEqual([
@@ -428,16 +437,18 @@ describe('PhoneService Needs-you tray', () => {
     await expect(count()).rejects.toThrow('workspace membership required');
   });
 
-  it('clears on tap or dismiss, and when the reader replies in that Room', async () => {
+  it('clears on tap or dismiss, and when the reader quote-replies in that Room', async () => {
     const tapped = await report(ROOM, PEER, 'needs-decision: please check the build', 30);
-    await report(CORNER, AGENT, 'needs-decision: which cohort?', 20);
+    const question = await report(CORNER, AGENT, 'needs-decision: which cohort?', 20);
     expect(await count()).toBe(2);
 
     await phone.execute('clearNeedsYou', { workspaceId: WORKSPACE, messageId: tapped }, VIEWER);
     await phone.execute('clearNeedsYou', { workspaceId: WORKSPACE, messageId: tapped }, VIEWER);
     expect((await read()).items.map((item) => item.roomId)).toEqual([CORNER]);
 
-    await post(CORNER, VIEWER, 'the first one', 1);
+    const reply = await post(CORNER, VIEWER, 'the first one', 1);
+    expect(await count()).toBe(1);
+    await database.query('UPDATE messages SET reply_to_message_id=$2 WHERE id=$1', [reply, question]);
     expect(await count()).toBe(0);
   });
 

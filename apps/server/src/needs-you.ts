@@ -488,13 +488,13 @@ const questionBranch=(projection:CandidateProjection)=>`
 
 /** The same authorized candidates drive the tray and its badge. */
 const needsYouCandidates=(projection:CandidateProjection,scoped=false)=>`WITH ${viewerRoomsSql(projection==='cells'?'room.*':'room.id',scoped)},
-  retired_marks AS (
+  ${projection==='cells'&&!scoped?`retired_marks AS (
     UPDATE needs_you_marks mark SET cleared_at=now(),cleared_reason=${settledMarkReasonSql('m', 'mark.identity_id')}
     FROM messages m WHERE mark.message_id=m.id AND mark.identity_id=$2 AND mark.workspace_id=$1
       AND mark.cleared_at IS NULL AND ${VIEWER_MEMBER}
       AND (${settledMarkReasonSql('m', 'mark.identity_id')}) IS NOT NULL
     RETURNING mark.message_id
-  ),
+  ),`:''}
   open_marks AS MATERIALIZED (
     SELECT mark.* FROM needs_you_marks mark JOIN messages m ON m.id=mark.message_id
     WHERE mark.identity_id=$2 AND mark.workspace_id=$1 AND mark.cleared_at IS NULL

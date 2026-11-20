@@ -314,8 +314,7 @@ import { phoneListRoomWorkflowRuns } from './schedules.js';
   }
 
 
-  /** Current count plus only the changed Room's cells. This is a peek: the
-   * 24-hour first-seen clock starts only on explicit seen commands or legacy tray reads. */
+  /** Current count plus only the changed Room's cells, without legacy retirement writes. */
   export async function phoneLiveNeedsYou(ctx: PhoneContext, roomId: string, viewerId: string): Promise<{
     workspaceId: string; count: number; items: readonly NeedsYouItemView[];
   } | null> {
