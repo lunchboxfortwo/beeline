@@ -1,9 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { isWorkspaceListView } from '@beeline/buzz-client';
 import { getEffectiveRelayUrl, loadBuzzIdentity } from '@/auth/buzz-identity-storage';
 import { loadActiveCommunityId, saveActiveCommunityId, watchActiveCommunityId } from '@/buzz/community-storage';
 import { mobileSurfaceCache, surfaceAddress } from '@/buzz/surface-storage';
-import { subscribeClientReset } from '@/sync/client-reset';
+import { clientResetGeneration, subscribeClientReset } from '@/sync/client-reset';
+import { useSurfaceFocus } from '@/buzz/use-surface-focus';
+import { invalidatesWorkspaceList } from '@/buzz/workspace-list-invalidation';
+import { sharedLiveConnection } from '@/sync/transport/live-connection';
 import { RoomViewClient } from '@/sync/transport/room-view-client';
 
 /** Current Workspace for the signed-in viewer; `undefined` until the first value is known. */
@@ -45,41 +48,42 @@ export function useActiveCommunityId(retryGeneration = 0): string | null | undef
  */
 export function useFallbackWorkspaceId(enabled: boolean): string | null | undefined {
   const [workspaceId, setWorkspaceId] = useState<string | null | undefined>(undefined);
+  const focused = useSurfaceFocus();
+  const reset = useSyncExternalStore(subscribeClientReset, clientResetGeneration);
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !focused) return;
     let cancelled = false;
+    let stop: (() => void) | undefined;
+    setWorkspaceId(undefined);
     void (async () => {
-      const identity = await loadBuzzIdentity();
+      const [identity, relayUrl] = await Promise.all([loadBuzzIdentity(), getEffectiveRelayUrl()]);
       if (cancelled) return;
       if (!identity) {
         setWorkspaceId(null);
         return;
       }
-      const stored = await loadActiveCommunityId(identity.publicKey);
-      if (stored) {
-        if (!cancelled) setWorkspaceId(stored);
-        return;
-      }
-      const relayUrl = await getEffectiveRelayUrl();
-      if (cancelled) return;
       const address = surfaceAddress(relayUrl, identity.publicKey, '/workspaces');
-      const cached = mobileSurfaceCache.peek(address, isWorkspaceListView)
-        ?? await mobileSurfaceCache.read(address, isWorkspaceListView);
-      const list = cached ?? await mobileSurfaceCache.fetch(address, isWorkspaceListView, () =>
-        new RoomViewClient({ baseUrl: relayUrl, identity }).workspaces());
-      const next = list?.workspaces[0]?.id ?? null;
-      if (cancelled) return;
-      const current = await loadActiveCommunityId(identity.publicKey);
-      if (current) {
-        setWorkspaceId(current);
-        return;
-      }
-      if (next) await saveActiveCommunityId(identity.publicKey, next);
-      if (!cancelled) setWorkspaceId(next);
-    })().catch(() => {
-      if (!cancelled) setWorkspaceId(null);
-    });
-    return () => { cancelled = true; };
-  }, [enabled]);
+      const read = async () => {
+        if (cancelled) return;
+        try {
+          const list = await mobileSurfaceCache.fetch(address, isWorkspaceListView, () =>
+            new RoomViewClient({ baseUrl: relayUrl, identity }).workspaces());
+          if (cancelled || !list) return;
+          const current = await loadActiveCommunityId(identity.publicKey);
+          if (cancelled) return;
+          const next = current || list.workspaces[0]?.id || null;
+          if (next && !current) await saveActiveCommunityId(identity.publicKey, next);
+          if (!cancelled) setWorkspaceId(next);
+        } catch { return; }
+      };
+      const release = await sharedLiveConnection().register([], (event) => {
+        if (invalidatesWorkspaceList(event)) void read();
+      });
+      if (cancelled) { release(); return; }
+      stop = release;
+      await read();
+    })().catch(() => undefined);
+    return () => { cancelled = true; stop?.(); };
+  }, [enabled, focused, reset]);
   return enabled ? workspaceId : undefined;
 }
