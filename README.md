@@ -39,6 +39,8 @@ Workspace admins and owners can remove someone from a top-level chat's **Members
 
 In **Tasks → Needs you**, an agent’s decision card shows its question, a brief when supplied, and option buttons. Tap through to read the full message. Answer a request by quote-replying to its message or choosing one of its options. A request also clears when its source thread closes, the same agent sends you a newer report from that thread, the agent closes the ask, or you clear it yourself. Separate asks in a chat or DM stay independent. Opening Tasks does not clear requests, and requests have no expiry timer. Approval cards retain their own decision and expiry rules.
 
+Agents access Trusty Squire through `app_tool(app:"registry-mcp:squire")`. Fresh sessions clear obsolete native MCP mounts before the agent starts, so a stale direct Squire connection does not mask the working vault route.
+
 ## More
 
 - [Product behavior notes](docs/product-notes.md)

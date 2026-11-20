@@ -413,6 +413,15 @@ async function provisionRoomAgentCredentials(
       console.error(`[body] short TMPDIR link unavailable under ${root}:`, error);
     }
 
+  // Clear old native MCP mounts before ACP starts, not during optional setup:
+  // a persisted Squire facade can be dead while registry-mcp:squire works.
+  for (const config of HARNESS_MCP_CONFIGS) await writeIsolatedHarnessFile(
+    resolve(root, config.dir, 'config.toml'),
+    config.roomDefaults ? `${CODEX_ROOM_AGENT_LOCKDOWN_TOML}\n${CODEX_ROOM_WEB_SEARCH_TOML}` : '',
+  );
+  await writeIsolatedHarnessFile(resolve(root, 'claude', '.claude.json'), '{"mcpServers":{}}');
+  await writeIsolatedHarnessFile(resolve(root, 'pi', 'mcp.json'), '{"mcpServers":{}}');
+
   await repairRoomAgentCredentialLinks({ root, operatorHome });
   await mkdir(resolve(root, 'goose/config'), { recursive: true, mode: 0o700 });
   for (const name of GOOSE_SHARED_CONFIG_FILES) {
@@ -438,14 +447,6 @@ export async function prepareRoomAgentHome(input: RoomAgentHomeInput): Promise<R
   const root = dirname(env.HOME);
   await retireNativeLogins(root);
   const operatorHome = input.operatorHome ?? homedir();
-  // A cold process must not start optional MCP providers from a previous
-  // activation. They remain reachable through session tools once loaded.
-  for (const config of HARNESS_MCP_CONFIGS) await writeIsolatedHarnessFile(
-    resolve(root, config.dir, 'config.toml'),
-    config.roomDefaults ? `${CODEX_ROOM_AGENT_LOCKDOWN_TOML}\n${CODEX_ROOM_WEB_SEARCH_TOML}` : '',
-  );
-  await writeIsolatedHarnessFile(resolve(root, 'claude', '.claude.json'), '{"mcpServers":{}}');
-  await writeIsolatedHarnessFile(resolve(root, 'pi', 'mcp.json'), '{"mcpServers":{}}');
   const prior = agentHomeProvisionQueues.get(root) ?? Promise.resolve();
   const provision = prior
     .catch(() => undefined)
