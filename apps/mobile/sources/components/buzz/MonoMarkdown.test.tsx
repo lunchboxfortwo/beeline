@@ -32,6 +32,22 @@ it('reads an empty code fence as its typed text, not an empty code frame', () =>
     expect(parseMarkdown('```ts\nconst a = 1;\n```', false)).toMatchObject([{ type: 'code-block', language: 'ts', content: 'const a = 1;' }]);
 });
 
+it.each([false, true])('preserves closed empty and whitespace fences with document=%s', document => {
+    for (const language of ['', 'ts', 'mermaid']) {
+        for (const content of ['', '  \n\t']) {
+            const markdown = `\`\`\`${language}\n${content}\n\`\`\``;
+            expect(parseMarkdown(markdown, document)).toEqual([
+                language === 'mermaid'
+                    ? { type: 'mermaid', content }
+                    : { type: 'code-block', language: language || null, content },
+            ]);
+        }
+        expect(parseMarkdown(`\`\`\`${language}\n  \n`, document)).toEqual([
+            { type: 'text', content: [{ styles: [], text: `\`\`\`${language}`, url: null }] },
+        ]);
+    }
+});
+
 it('keeps slash commands joined in rendered prose without changing paths or inline code', () => {
     let tree: any;
     act(() => { tree = create(<MonoMarkdown textStyle={{}} markdown={'Try /draw-avatar now. **/draw-avatar** remains joined. /tmp/file and `echo /draw-avatar` stay literal.'} />); });

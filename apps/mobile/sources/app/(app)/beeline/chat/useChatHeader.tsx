@@ -62,7 +62,7 @@ export function useChatHeader([
   firstRoomAgent: import("@beeline/api-contract/phone").RoomViewIdentity | undefined,
   startCornerMessage: () => void,
   focusComposer: () => void,
-  starterPrompts: { lead: string; detail: string; testID: string; onPress: () => void; }[] | undefined,
+  starterPrompts: { lead: string; detail: string; testID: string; onPress: () => void; }[] | null | undefined,
   starterIntro: string | undefined,
   storedRoomName: string,
   headerTitleKind: 'room' | 'dm' | 'corner',
@@ -265,15 +265,15 @@ export function useChatHeader([
   }, []);
 
   const starterPromptDefs = useMemo(() => {
-    if (emptyLedgerVariant !== 'room' || viewerIsAgent || !roomSurface?.viewer.permissions.send)
-      return undefined;
-    // Wait for the Workspace roster: guessing first and correcting later flips the copy on screen.
-    if (!workspaceRoster) return undefined;
+    if (emptyLedgerVariant !== 'room' || viewerIsAgent) return undefined;
+    if (!roomSurface) return null;
+    if (!roomSurface.viewer.permissions.send) return undefined;
+    if (!workspaceRoster) return null;
     return roomStarterPrompts({
       roomAgent: firstRoomAgent,
-      workspaceAgentCount: workspaceRoster ? workspaceRoster.agents.length : null,
+      workspaceAgentCount: workspaceRoster.agents.length,
       canManageWorkspace,
-      workspaceName: workspaceRoster?.workspace.name,
+      workspaceName: workspaceRoster.workspace.name,
     });
   }, [
     canManageWorkspace,
@@ -287,7 +287,7 @@ export function useChatHeader([
   const starterIntro = starterPromptDefs ? roomStarterIntro(starterPromptDefs) : undefined;
 
   const starterPrompts = useMemo(() => {
-    if (!starterPromptDefs) return undefined;
+    if (!starterPromptDefs) return starterPromptDefs;
     return starterPromptDefs.map((prompt) => ({
       lead: prompt.lead,
       detail: prompt.detail,
