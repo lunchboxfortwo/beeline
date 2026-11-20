@@ -29,7 +29,10 @@ export function SurfaceGlyphLoader({
       justifyContent="center"
       testID={testID}
     >
-      <Spinner size={size ?? (compact ? 'small' : 'large')} testID={testID ? `${testID}-glyph` : undefined} />
+      <Spinner
+        size={size ?? (compact ? 'small' : 'large')}
+        testID={testID ? `${testID}-glyph` : undefined}
+      />
     </YStack>
   );
 }

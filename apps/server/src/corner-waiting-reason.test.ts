@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { HUMAN, ROOM, RUBY, WORKER, authority, claim, commands, expect, it, open, rootFixture, worker } from './test-support-commander.integration.test-support.js';
 import { cornerBlockerSql, cornerFactsSql, cornerRowState, chatCornerCounts } from './chat-corner-counts.js';
 import { cornerWaitingReportSql } from './corner-waiting-report.js';
+import { refreshCornerAttention } from './corner-attention.js';
 
 async function blocked(text = 'Need a decision.', status: 'blocked' | 'needs_decision' = 'blocked') {
   const opened = await open(), turn = await worker(opened.cornerId);
@@ -135,6 +136,8 @@ it.each(['corner', 'thread'] as const)('REPORT-REPLY: a forwarded human report c
 
 it('selects each outstanding report recipient for their own corner surfaces', async () => {
   const { cornerId } = await blocked('@captain choose a scope.');
+  // The attention worker commits the state machine before clients reread it.
+  await refreshCornerAttention(rootFixture.db, cornerId);
   const facts = cornerFactsSql('$2');
   const read = async (viewer: string) => (await rootFixture.db.query<any>(
     `SELECT c.id,c.name,c.parent_id,c.archived_at,${facts.columns} FROM rooms c ${facts.joins} WHERE c.id=$1`,

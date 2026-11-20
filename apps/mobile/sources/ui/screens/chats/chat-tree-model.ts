@@ -20,7 +20,7 @@ export function chatPreview(
   return { who: author?.name?.trim() || preview.handle, text: preview.text };
 }
 
-/** The ring around the unread dot: a tag, an approval, or a thread waiting on the viewer. */
+/** Whether the chat needs the viewer’s attention; the shared StatusMark owns its glyph. */
 export function chatTagged(item: ChatListItem): boolean {
   return Boolean(roomRowAttentionReason(item));
 }

@@ -205,10 +205,16 @@ export function cornerWorkSql(): string {
 }
 
 /**
- * Blocking people and recorded commanders. Display picks the oldest; reminders retain newest-first selection.
- * Merge holds rank after every other blocker, so a hold is selected only when nothing else is open.
+ * Blocking people and recorded commanders. Viewer reads prefer their own outstanding blocker;
+ * within that selection, display picks the oldest and reminders retain newest-first selection.
+ * Merge holds rank after other blockers within the selected person scope.
  */
-export function cornerBlockerSql(sourcePredicate = 'true', newestFirst = false, viewerExpr?: string, corner = 'c'): string {
+export function cornerBlockerSql(
+  sourcePredicate = 'true',
+  newestFirst = false,
+  viewerExpr?: string,
+  corner = 'c',
+): string {
   const direction = newestFirst ? 'DESC' : 'ASC';
   return `LEFT JOIN LATERAL (
     SELECT ranked.* FROM (
@@ -235,7 +241,7 @@ export function openCornerFactsSql(parentPredicate: string, viewerExpr: string):
     ORDER BY c.created_at DESC,c.id DESC`;
 }
 
-/** A Room or any corner under it has a pending permission. */
+/** The viewer can decide a pending permission in a Room or any corner under it. */
 export function roomNeedsYouSql(room: string, viewerExpr: string): string {
   return `EXISTS(SELECT 1 FROM permission_authority permission
     ${permissionCardSql()}
@@ -274,7 +280,7 @@ export function roomWorkingSql(room: string): string {
   ) working)`;
 }
 
-/** The agent named on the newest pending permission card in a Room or its corners. */
+/** The agent on the newest pending permission the viewer can decide in a Room or its corners. */
 export function roomAttentionActorSql(room: string, viewerExpr: string): string {
   return `(SELECT agent.name
     FROM permission_authority permission

@@ -601,8 +601,13 @@
       "OpenedCorners",
       "Segment",
       "StepRow",
-      "WorkflowRunLine",
+      "WorkflowRunLine"
+    ],
+    "components/buzz/WorkflowStepCircle.tsx": [
       "WorkflowStepCircle"
+    ],
+    "components/buzz/WorkflowWorkingMark.tsx": [
+      "WorkflowWorkingMark"
     ],
     "components/buzz/WorkspaceSettingsPanel.tsx": [
       "WorkspaceDeleteConfirmDialog",

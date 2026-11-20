@@ -1,4 +1,9 @@
-export function permissionDeciderSql(permission: string, card: string, workspace: string, viewer: string): string {
+export function permissionDeciderSql(
+  permission: string,
+  card: string,
+  workspace: string,
+  viewer: string,
+): string {
   return `CASE WHEN ${card}->>'purpose'='squire-spending' THEN EXISTS (
     SELECT 1 FROM agents spender
     WHERE spender.agent_id=${card}->'agent'->>'pubkey' AND spender.owner_id=${viewer})

@@ -4,8 +4,14 @@ import { YStack, useTheme } from 'tamagui';
 import type { WorkflowLineStatus } from '@/buzz/workflow-graph';
 import { WorkStateMark } from '@/ui/screens/tags/WorkMarks';
 
-export function WorkflowStepCircle({ status, size = 20, testID }: {
-  status: WorkflowLineStatus; size?: number; testID?: string;
+export function WorkflowStepCircle({
+  status,
+  size = 20,
+  testID,
+}: {
+  status: WorkflowLineStatus;
+  size?: number;
+  testID?: string;
 }) {
   const ink = useTheme().needsYou?.val as string;
   return (
@@ -15,7 +21,13 @@ export function WorkflowStepCircle({ status, size = 20, testID }: {
           <Circle cx={10} cy={10} r={8.2} fill="none" stroke={ink} strokeWidth={1.7} />
           <Path d="M7 7l6 6M13 7l-6 6" stroke={ink} strokeLinecap="round" strokeWidth={1.6} />
         </Svg>
-      ) : <WorkStateMark state={status === 'done' ? 'done' : 'in-progress'} idle={status === 'pending'} size={size} />}
+      ) : (
+        <WorkStateMark
+          state={status === 'done' ? 'done' : 'in-progress'}
+          idle={status === 'pending'}
+          size={size}
+        />
+      )}
     </YStack>
   );
 }
