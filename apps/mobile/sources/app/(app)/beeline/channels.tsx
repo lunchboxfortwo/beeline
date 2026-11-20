@@ -162,7 +162,12 @@ const EMPTY_CHATS: readonly ChatListItem[] = [];
 
 // Swipeable re-renders every row when the list is covered or measured; a memoized
 // action keeps those re-renders from rebuilding each row's hidden button.
-const RowSwipeAction = memo(function RowSwipeAction({ item, canInteract, onClose, onLeave }: {
+const RowSwipeAction = memo(function RowSwipeAction({
+  item,
+  canInteract,
+  onClose,
+  onLeave,
+}: {
   item: ChatListItem;
   canInteract: () => boolean;
   onClose: (item: ChatListItem) => Promise<void>;
@@ -170,18 +175,37 @@ const RowSwipeAction = memo(function RowSwipeAction({ item, canInteract, onClose
 }) {
   const title = `${roomRowName(item).sigil}${roomRowName(item).name}`;
   return (
-    <YStack width={ROW_HEIGHT} backgroundColor="highlight" alignItems="center" justifyContent="center">
+    <YStack
+      width={ROW_HEIGHT}
+      backgroundColor="highlight"
+      alignItems="center"
+      justifyContent="center"
+    >
       {item.directMessage ? (
-        <Btn kind="quiet" label={`Close ${title}`} testID={`chat-close-action-${item.room.id}`}
-          onPress={() => { if (canInteract()) void onClose(item); }}>
+        <Btn
+          kind="quiet"
+          label={`Close ${title}`}
+          testID={`chat-close-action-${item.room.id}`}
+          onPress={() => {
+            if (canInteract()) void onClose(item);
+          }}
+        >
           <YStack alignItems="center" gap="0.5">
             <Glyph icon={LogOut} />
-            <T v="meta" color="secondary" numberOfLines={1}>Close</T>
+            <T v="meta" color="secondary" numberOfLines={1}>
+              Close
+            </T>
           </YStack>
         </Btn>
       ) : (
-        <Btn kind="icon" label={`Leave ${title}`} testID={`room-leave-action-${item.room.id}`}
-          onPress={() => { if (canInteract()) void onLeave(item); }}>
+        <Btn
+          kind="icon"
+          label={`Leave ${title}`}
+          testID={`room-leave-action-${item.room.id}`}
+          onPress={() => {
+            if (canInteract()) void onLeave(item);
+          }}
+        >
           <Glyph icon={LogOut} />
         </Btn>
       )}
@@ -293,7 +317,12 @@ const BuzzChannels = memo(function BuzzChannels({ session }: { session: DeckSess
           overshootRight={false}
           rightThreshold={ROW_HEIGHT}
           renderRightActions={() => (
-            <RowSwipeAction item={item} canInteract={roomListGestures.canInteract} onClose={handleCloseChat} onLeave={handleLeaveRoom} />
+            <RowSwipeAction
+              item={item}
+              canInteract={roomListGestures.canInteract}
+              onClose={handleCloseChat}
+              onLeave={handleLeaveRoom}
+            />
           )}
           testID={`chat-close-swipe-${item.room.id}`}
         >
