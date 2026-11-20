@@ -84,6 +84,8 @@ const browser = vi.hoisted(() => ({ open: vi.fn().mockResolvedValue({ type: 'dis
 vi.mock('expo-router', () => ({ router: navigation,
   useLocalSearchParams: () => ({ workspaceId: 'ws', viewerId: 'human-dani', service: params.service, helperId: params.helperId }),
   useFocusEffect: (effect: () => void) => React.useEffect(effect, [effect]) }));
+// Screens take useFocusEffect from React Navigation; this file's mock above stays its focus wiring.
+vi.mock('@react-navigation/native', async () => ({ useFocusEffect: (await import('expo-router')).useFocusEffect }));
 vi.mock('expo-web-browser', () => ({ openBrowserAsync: browser.open }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 vi.mock('react-native', async () => { const R = await import('react');

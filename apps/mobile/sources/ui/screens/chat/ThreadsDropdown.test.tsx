@@ -14,6 +14,8 @@ vi.mock('expo-router', async () => {
     }, [effect]),
   };
 });
+// Screens take useFocusEffect from React Navigation; this file's mock above stays its focus wiring.
+vi.mock('@react-navigation/native', async () => ({ useFocusEffect: (await import('expo-router')).useFocusEffect }));
 vi.mock('react-native', () => ({ Platform: { get OS() { return fixture.platform; } }, useWindowDimensions: () => ({ width: 390, height: 844 }) }));
 vi.mock('tamagui', async () => {
   const R = await import('react');

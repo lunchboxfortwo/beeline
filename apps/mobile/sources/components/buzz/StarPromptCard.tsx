@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { StarPrompt, StarPromptAction } from '@beeline/api-contract/phone';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import { sharedLiveConnection } from '@/sync/transport/live-connection';
@@ -112,7 +112,7 @@ export function useStarPrompt(roomId: string | undefined, enabled: boolean) {
     },
     [busy, prompt, roomId],
   );
-  return { prompt, busy, answer, accept, starred };
+  return useMemo(() => ({ prompt, busy, answer, accept, starred }), [accept, answer, busy, prompt, starred]);
 }
 
 export const StarPromptCard = memo(function StarPromptCard({

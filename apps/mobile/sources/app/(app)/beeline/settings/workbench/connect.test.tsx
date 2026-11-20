@@ -73,6 +73,8 @@ vi.mock('expo-router', () => ({
   useFocusEffect: (effect: () => void | (() => void)) => React.useEffect(effect, [effect]),
   useLocalSearchParams: () => searchParams.params,
 }));
+// Screens take useFocusEffect from React Navigation; this file's mock above stays its focus wiring.
+vi.mock('@react-navigation/native', async () => ({ useFocusEffect: (await import('expo-router')).useFocusEffect }));
 
 vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
 vi.mock('@/components/buzz/SurfaceGlyphLoader', async () => { const R = await import('react'); return { SurfaceGlyphLoader: (props: any) => R.createElement('SurfaceGlyphLoader', props) }; });

@@ -6,6 +6,8 @@ import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
 vi.mock('./chat-surface-values', () => ({ NO_SELECTED_MENTIONS: new Map(), COMPOSER_MIN_HEIGHT: 26 }));
 vi.mock('react-native', () => ({ TextInput: 'input', Platform: { OS: 'web' } }));
 vi.mock('expo-router', () => ({ useFocusEffect: () => undefined }));
+// Screens take useFocusEffect from React Navigation; this file's mock above stays its focus wiring.
+vi.mock('@react-navigation/native', async () => ({ useFocusEffect: (await import('expo-router')).useFocusEffect }));
 vi.mock('@/auth/buzz-identity-storage', () => ({ loadBuzzIdentity: vi.fn() }));
 vi.mock('@/buzz/github-access-surface', () => ({ readGitHubAccess: vi.fn() }));
 vi.mock('@/sync/transport', () => ({ BuzzRigTransport: class {} }));

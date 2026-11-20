@@ -195,6 +195,15 @@ const DesktopSidebarNavigator = React.memo(() => {
   }, [isDesktopLayout, drawerWidth, drawerGround]);
 
   const drawerContent = React.useCallback(() => <SidebarView />, []);
+  // This frame reads the pathname, which changes on every navigation. A new
+  // Drawer element would re-render every navigator and the screen just
+  // mounted for that navigation, so the element changes only with its options.
+  const drawer = React.useMemo(() => (
+    <Drawer
+      screenOptions={drawerNavigationOptions}
+      drawerContent={showSessionChrome ? drawerContent : undefined}
+    />
+  ), [drawerContent, drawerNavigationOptions, showSessionChrome]);
 
   return (
     <YStack flex={1}>
@@ -202,10 +211,7 @@ const DesktopSidebarNavigator = React.memo(() => {
       {showSessionChrome && <PersistentHeader />}
       <XStack flex={1} alignItems="stretch">
         <YStack flex={1} minWidth={0}>
-        <Drawer
-          screenOptions={drawerNavigationOptions}
-          drawerContent={showSessionChrome ? drawerContent : undefined}
-        />
+        {drawer}
         </YStack>
         {document && desktopLayout.availableWidth >= DESKTOP_WORK_PANE_THRESHOLD && (
           <DesktopViewerPane initialShare={0.55}>

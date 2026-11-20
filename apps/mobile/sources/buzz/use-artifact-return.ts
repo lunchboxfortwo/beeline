@@ -1,5 +1,5 @@
 import { useCallback, useRef } from 'react';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 
 import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { restoreTranscriptAnchor } from '@/buzz/transcript-presentation';

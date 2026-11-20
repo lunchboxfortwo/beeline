@@ -56,6 +56,8 @@ import AppDetailScreen from './app';
 const navigation = vi.hoisted(() => ({ back: vi.fn(), push: vi.fn() }));
 const signIn = vi.hoisted(() => ({ open: vi.fn() }));
 vi.mock('expo-router', () => ({ router: navigation, useLocalSearchParams: () => ({ workspaceId: 'ws', viewerId: 'human-dani', appId: 'app-slack' }), useFocusEffect: (effect: () => void) => React.useEffect(effect, [effect]) }));
+// Screens take useFocusEffect from React Navigation; this file's mock above stays its focus wiring.
+vi.mock('@react-navigation/native', async () => ({ useFocusEffect: (await import('expo-router')).useFocusEffect }));
 vi.mock('@/buzz/app-sign-in', () => ({ openAppSignIn: signIn.open }));
 const safeArea = vi.hoisted(() => ({ bottom: 0 }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: safeArea.bottom, left: 0, right: 0 }) }));

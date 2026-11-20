@@ -520,11 +520,13 @@ export function useVoiceCall(
       mutePending.current = false;
     }
   }, []);
-  return {
+  const endingWarning = endingSeconds === null ? undefined : `Ending in ${endingSeconds}s`;
+  // The Room passes this to its memoized composer; equal state keeps it equal.
+  return React.useMemo(() => ({
     budgetWarning,
     muted,
     toggleMute,
-    endingWarning: endingSeconds === null ? undefined : `Ending in ${endingSeconds}s`,
+    endingWarning,
     call,
     agents,
     target,
@@ -537,7 +539,8 @@ export function useVoiceCall(
     join,
     end,
     aim,
-  };
+  }), [agents, aim, budgetWarning, call, connecting, end, endingWarning, error, firstAudioMs, join, level, muted,
+    quotaExhausted, speaker, target, toggleMute]);
 }
 
 export type VoiceCallState = ReturnType<typeof useVoiceCall>;

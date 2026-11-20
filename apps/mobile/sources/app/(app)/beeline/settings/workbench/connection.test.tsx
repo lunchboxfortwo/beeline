@@ -68,6 +68,8 @@ vi.mock('expo-router', () => ({
   router: navigation,
   useLocalSearchParams: () => searchParams.params,
 }));
+// Screens take useFocusEffect from React Navigation; this file's mock above stays its focus wiring.
+vi.mock('@react-navigation/native', async () => ({ useFocusEffect: (await import('expo-router')).useFocusEffect }));
 
 vi.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => safeAreaInsets,

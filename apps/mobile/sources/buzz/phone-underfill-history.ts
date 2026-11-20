@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react';
 import type { TranscriptHistoryStatus } from './room-message-store';
 
 /**
@@ -83,7 +83,7 @@ export function usePhoneUnderfillHistory({
     },
     [check],
   );
-  return { observeListHeight, observeContentHeight };
+  return useMemo(() => ({ observeListHeight, observeContentHeight }), [observeContentHeight, observeListHeight]);
 }
 
 /** Desktop measures the committed DOM rather than native list callbacks. */

@@ -1,5 +1,5 @@
 import React, { useCallback, useContext, useState } from 'react';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { Platform, useWindowDimensions } from 'react-native';
 import { Collapsible, ScrollView, Separator, XStack, YStack } from 'tamagui';
 import { ChevronDown, ChevronUp } from 'lucide-react-native';

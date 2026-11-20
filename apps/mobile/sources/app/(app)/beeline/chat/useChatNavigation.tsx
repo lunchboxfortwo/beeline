@@ -1,7 +1,8 @@
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import React, { useEffect, useRef, useCallback } from 'react';
 import { BackHandler, Platform } from 'react-native';
-import { router, useFocusEffect } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
+import { router } from 'expo-router';
 import { Modal } from '@/modal';
 import { BuzzRigTransport } from '@/sync/transport';
 import { type DesktopWorkPaneEvent } from '@/buzz/desktop-workbench-state';
