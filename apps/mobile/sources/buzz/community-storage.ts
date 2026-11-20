@@ -15,6 +15,7 @@ function lastChannelKey(pubkey: string, communityId: string | null): string {
 }
 
 export async function loadActiveCommunityId(pubkey: string): Promise<string | null> {
+  if (activeCommunityValues.has(pubkey)) return activeCommunityValues.get(pubkey) ?? null;
   const stored = await AsyncStorage.getItem(activeCommunityKey(pubkey));
   return stored && stored !== STANDALONE_SCOPE ? stored : null;
 }
@@ -23,9 +24,11 @@ export async function saveActiveCommunityId(
   pubkey: string,
   communityId: string | null,
 ): Promise<void> {
-  await AsyncStorage.setItem(activeCommunityKey(pubkey), communityId ?? STANDALONE_SCOPE);
+  // Tell mounted tabs immediately. A disk write that finishes after a tab switch
+  // left Tasks and Team reading the empty value for the rest of the session.
   activeCommunityValues.set(pubkey, communityId);
   activeCommunityListeners.get(pubkey)?.forEach((listener) => listener(communityId));
+  await AsyncStorage.setItem(activeCommunityKey(pubkey), communityId ?? STANDALONE_SCOPE);
 }
 
 /** Keep mounted navigation surfaces aligned with a Room opened elsewhere in the app. */
