@@ -187,7 +187,7 @@ export async function verifyMacBinaries(staging, platform, { execute = run, insp
     const description = inspect(path);
     if (!description) throw new Error(`Cannot inspect packaged binary ${path}`);
     if (!description.includes('Mach-O')) continue;
-    execute('lipo', ['-verify_arch', arch, path]);
+    execute('lipo', [path, '-verify_arch', arch]);
     execute('codesign', ['--verify', '--strict', path]);
   }
 }
