@@ -8,16 +8,15 @@ import { RoomSendPreview } from '@/buzz/room-send-list';
 import { useIsDesktop } from '@/utils/responsive';
 import { isDesktopShell } from '@/utils/isDesktopShell';
 
-type Props = [
+type Props = [];
 
-];
-
-export function useChatRoute([
-
-]: Props): [
+export function useChatRoute([]: Props): [
   sendPreview: RoomSendPreview,
   decodedId: string,
-  navigation: Omit<import("@react-navigation/core").NavigationProp<ReactNavigation.RootParamList>, "getState"> & { getState(): import("@react-navigation/routers").NavigationState | undefined; },
+  navigation: Omit<
+    import('@react-navigation/core').NavigationProp<ReactNavigation.RootParamList>,
+    'getState'
+  > & { getState(): import('@react-navigation/routers').NavigationState | undefined },
   desktopExperience: boolean,
   desktopAvailableWidth: number,
   routeParentChannelId: string | undefined,
@@ -28,12 +27,13 @@ export function useChatRoute([
   notificationResponseId: string | undefined,
   notificationMessageId: string | undefined,
   notificationTarget: string | undefined,
-  insets: import("react-native-safe-area-context/lib/typescript/src/SafeArea.types").EdgeInsets,
-  cornerReturnTarget: "room-list" | undefined,
+  insets: import('react-native-safe-area-context/lib/typescript/src/SafeArea.types').EdgeInsets,
+  cornerReturnTarget: 'room-list' | undefined,
   isDesktop: boolean,
-  readOnlyFooterInset: { marginBottom: number; paddingBottom?: undefined; } | { paddingBottom: number; marginBottom?: undefined; },
+  readOnlyFooterInset:
+    | { marginBottom: number; paddingBottom?: undefined }
+    | { paddingBottom: number; marginBottom?: undefined },
 ] {
-
   const isDesktop = useIsDesktop();
 
   // `parent`/`title` are hints, not authority: every surface that opens a
@@ -69,7 +69,6 @@ export function useChatRoute([
     return () => sendPreview.dispose();
   }, [sendPreview]);
 
-
   const messageAnchorId = (notificationMessageId ?? notificationTarget ?? '').trim();
 
   const allowOlderHistoryRef = useRef(false);
@@ -87,28 +86,42 @@ export function useChatRoute([
   // A packaged Tauri window keeps the desktop experience at every width.
   const desktopExperience = isDesktop || isDesktopShell();
 
-
   const routeParentChannelId = parent?.trim() || undefined;
 
   const routeCommunityId = communityId?.trim() || undefined;
 
   const routeChannelTitle = title?.trim() || undefined;
 
-  const cornerReturnTarget =
-    returnTo === 'room-list' ? returnTo : undefined;
+  const cornerReturnTarget = returnTo === 'room-list' ? returnTo : undefined;
 
   const insets = useSafeAreaInsets();
 
-  const readOnlyFooterInset = useMemo(() =>
-    Platform.OS === 'android'
-      ? { marginBottom: insets.bottom }
-      : { paddingBottom: Math.max(insets.bottom, 8) }, [insets.bottom]);
+  const readOnlyFooterInset = useMemo(
+    () =>
+      Platform.OS === 'android'
+        ? { marginBottom: insets.bottom }
+        : { paddingBottom: Math.max(insets.bottom, 8) },
+    [insets.bottom],
+  );
 
   const navigation = useNavigation();
   return [
-    sendPreview, decodedId, navigation, desktopExperience, desktopAvailableWidth,
-    routeParentChannelId, allowOlderHistoryRef, routeChannelTitle, routeCommunityId, messageAnchorId, notificationResponseId,
-    notificationMessageId, notificationTarget, insets, cornerReturnTarget, isDesktop,
+    sendPreview,
+    decodedId,
+    navigation,
+    desktopExperience,
+    desktopAvailableWidth,
+    routeParentChannelId,
+    allowOlderHistoryRef,
+    routeChannelTitle,
+    routeCommunityId,
+    messageAnchorId,
+    notificationResponseId,
+    notificationMessageId,
+    notificationTarget,
+    insets,
+    cornerReturnTarget,
+    isDesktop,
     readOnlyFooterInset,
   ];
 }
