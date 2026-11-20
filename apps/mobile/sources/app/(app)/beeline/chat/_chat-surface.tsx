@@ -621,6 +621,7 @@ export function BuzzChatSurface({
   composerTagHandles={composerTagHandles}
   insertedStarterRef={insertedStarterRef}
   pendingAttachments={pendingAttachments}
+  pendingAttachmentsRef={pendingAttachmentsRef}
   attachmentUploader={attachmentUploader}
   sending={sending}
   replacePendingAttachments={replacePendingAttachments}

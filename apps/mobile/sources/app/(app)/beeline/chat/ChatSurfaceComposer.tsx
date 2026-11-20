@@ -87,6 +87,7 @@ type Props = {
   composerTagHandles: Set<string>;
   insertedStarterRef: React.RefObject<string | null>;
   pendingAttachments: PickedChatAttachment[];
+  pendingAttachmentsRef: React.RefObject<PickedChatAttachment[]>;
   attachmentUploader: { state(attachment: PickedChatAttachment): import("@/buzz/chat-attachment").ChatAttachmentUploadState | undefined; subscribe(listener: () => void): () => void; start(client: import("@beeline/buzz-client").BuzzClient, attachments: readonly PickedChatAttachment[]): void; retain(attachments: readonly PickedChatAttachment[]): void; uploadAll(client: import("@beeline/buzz-client").BuzzClient, attachments: readonly PickedChatAttachment[]): Promise<import("@beeline/buzz-client").AttachmentReference[]>; };
   sending: boolean;
   replacePendingAttachments: (update: PickedChatAttachment[] | ((current: PickedChatAttachment[]) => PickedChatAttachment[])) => void;
@@ -171,6 +172,7 @@ export const ChatSurfaceComposer = React.memo(function ChatSurfaceComposer({
   composerTagHandles,
   insertedStarterRef,
   pendingAttachments,
+  pendingAttachmentsRef,
   attachmentUploader,
   sending,
   replacePendingAttachments,
@@ -226,7 +228,7 @@ export const ChatSurfaceComposer = React.memo(function ChatSurfaceComposer({
   const starterUnfilled =
     !pendingAttachments.length && isBareStarterTemplate(inputText, insertedStarterRef.current);
   const sendComposer = (dictated?: DictatedSend) => {
-    if (!pendingAttachments.length && isBareStarterTemplate(inputTextRef.current, insertedStarterRef.current))
+    if (!pendingAttachmentsRef.current.length && isBareStarterTemplate(inputTextRef.current, insertedStarterRef.current))
       return Promise.resolve(false);
     return handleSend(undefined, dictated);
   };

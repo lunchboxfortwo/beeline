@@ -44,7 +44,7 @@ it('COMPOSER-SIZE-1: settles ref measurements, grows and shrinks, then sends the
     const [text, setText] = React.useState('hello');
     const inputTextRef = React.useRef(text);
     const props = {
-      commandController: {}, desktopExperience: false, pendingAttachments: [], composerTagHandles: new Set(), insertedStarterRef: { current: null },
+      commandController: {}, desktopExperience: false, pendingAttachments: [], pendingAttachmentsRef: { current: [] }, composerTagHandles: new Set(), insertedStarterRef: { current: null },
       voice: {}, roomSurface: { members: [] }, composerInputRevisionRef: { current: 0 },
       composerHeight: height, setComposerHeight: setHeight, inputText: text,
       inputTextRef, setInputText: setText,
@@ -77,6 +77,7 @@ it.each([false, true])('COMPOSER-KEYBOARD-1: desktop=%s, only the phone chrome l
     commandController: {}, desktopExperience: desktop, mentionMenuVisible: true, keyboardHeight: 300,
     mentionSuggestions: { matches: [], overflow: 18 }, personProfileByPubkey: new Map(),
     pendingAttachments: [{ uri: 'file:///29819.jpg', name: '29819.jpg', mimeType: 'image/jpeg', size: 1 }],
+    pendingAttachmentsRef: { current: [{ uri: 'file:///29819.jpg', name: '29819.jpg', mimeType: 'image/jpeg', size: 1 }] },
     attachmentUploader: { state: () => undefined }, composerTagHandles: new Set(), insertedStarterRef: { current: null },
     voice: {}, roomSurface: { members: [] }, composerInputRevisionRef: { current: 0 },
     composerHeight: 26, setComposerHeight: () => undefined, inputText: '@',
@@ -114,7 +115,7 @@ it.each([
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   const voice = { join: vi.fn() };
   const props = {
-    ...location, commandController: {}, desktopExperience: false, pendingAttachments: [], composerTagHandles: new Set(), insertedStarterRef: { current: null },
+    ...location, commandController: {}, desktopExperience: false, pendingAttachments: [], pendingAttachmentsRef: { current: [] }, composerTagHandles: new Set(), insertedStarterRef: { current: null },
     voice, roomSurface: { room: { name: 'crew' }, members: [{ identity: { kind: agent ? 'agent' : 'human' } }] },
     composerInputRevisionRef: { current: 0 }, composerHeight: 26, setComposerHeight: () => {},
     inputText: '', inputTextRef: { current: '' }, setInputText: () => {},
@@ -133,7 +134,7 @@ it('blocks untouched chip text across Send, dictation, and Enter, but permits ma
   const inputTextRef = { current: template };
   const handleSend = vi.fn(async () => true);
   const props = {
-    commandController: {}, desktopExperience: true, pendingAttachments: [],
+    commandController: {}, desktopExperience: true, pendingAttachments: [], pendingAttachmentsRef: { current: [] },
     composerTagHandles: new Set(['ruby']), insertedStarterRef,
     voice: {}, roomSurface: { members: [] }, composerInputRevisionRef: { current: 0 },
     composerHeight: 26, setComposerHeight: () => undefined, inputText: template,
@@ -159,4 +160,53 @@ it('blocks untouched chip text across Send, dictation, and Enter, but permits ma
   handleSend.mockClear();
   await act(async () => { await composer().props.onSend(); enter(); });
   expect(handleSend).toHaveBeenCalledTimes(2);
+});
+
+it.each([false, true].flatMap((initiallyAttached) =>
+  ['Send', 'dictation', 'Enter'].map((action) => ({ initiallyAttached, action })),
+))('uses current attachments for $action when initiallyAttached=$initiallyAttached', async ({ initiallyAttached, action }) => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const template = '@ruby Open a thread to ';
+  const file = { uri: 'file:///photo.jpg', name: 'photo.jpg', mimeType: 'image/jpeg', size: 1 };
+  const pendingAttachments = initiallyAttached ? [file] : [];
+  const pendingAttachmentsRef = { current: pendingAttachments };
+  const sent: { text: string; attachments: typeof pendingAttachments }[] = [];
+  const inputTextRef = { current: template };
+  const handleSend = vi.fn(async () => {
+    sent.push({ text: inputTextRef.current, attachments: pendingAttachmentsRef.current });
+    return true;
+  });
+  const props = {
+    commandController: {}, desktopExperience: true, pendingAttachments, pendingAttachmentsRef,
+    attachmentUploader: { state: () => undefined },
+    composerTagHandles: new Set(['ruby']), insertedStarterRef: { current: template },
+    voice: {}, roomSurface: { members: [] }, composerInputRevisionRef: { current: 0 },
+    composerHeight: 26, setComposerHeight: () => undefined, inputText: template,
+    inputTextRef, setInputText: () => undefined, handleSend,
+  } as unknown as Props;
+  act(() => { renderer = create(<ChatSurfaceComposer {...props} />); });
+  const composer = renderer!.root.findByType('Composer');
+  expect(composer.props.canSend).toBe(initiallyAttached);
+  const onSend = composer.props.onSend;
+  const onKeyPress = composer.props.onKeyPress;
+  const dictated = { cancelled: false, committed: false };
+  let finishSpeech!: (captured: boolean) => void;
+  const speechStopped = new Promise<boolean>((resolve) => { finishSpeech = resolve; });
+  const dictationSend = action === 'dictation'
+    ? speechStopped.then(() => onSend(dictated))
+    : undefined;
+  pendingAttachmentsRef.current = initiallyAttached ? [] : [file];
+  await act(async () => {
+    if (action === 'dictation') {
+      finishSpeech(false);
+      await dictationSend;
+    } else if (action === 'Enter') {
+      onKeyPress({ nativeEvent: { key: 'Enter' }, preventDefault: vi.fn() });
+    } else {
+      await onSend();
+    }
+  });
+  expect(sent).toEqual(initiallyAttached ? [] : [{ text: template, attachments: [file] }]);
+  if (!initiallyAttached && action === 'dictation')
+    expect(handleSend).toHaveBeenCalledWith(undefined, dictated);
 });
