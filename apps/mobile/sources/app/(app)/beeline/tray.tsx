@@ -8,7 +8,7 @@ import { appErrorCopy } from '@/buzz/app-error-copy';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import { navigateToRoom, messageJumpHref } from '@/buzz/corner-navigation';
 import { useIsDesktop } from '@/utils/responsive';
-import { useActiveCommunityId, useFallbackWorkspaceId } from '@/buzz/use-active-community';
+import { useActiveCommunityId, useWorkspaceDiscoveryId } from '@/buzz/use-active-community';
 import { useWorkBoard, useWorkBoardUnavailable, loadWorkBoard } from '@/buzz/work-board-store';
 import { prefetchPushRoom } from '@/push/push-room-prefetch';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
@@ -32,7 +32,7 @@ export default function TrayScreen() {
   }>();
   const active = useActiveCommunityId();
   const routeId = first(params.communityId);
-  const discovered = useFallbackWorkspaceId(active === null && !routeId);
+  const discovered = useWorkspaceDiscoveryId(active === null && !routeId);
   const workspaceId = routeId || active || discovered || '';
   const resolving = !workspaceId && (active === undefined || discovered === undefined);
   const board = useWorkBoard(workspaceId);

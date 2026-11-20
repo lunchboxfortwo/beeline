@@ -50,7 +50,7 @@ export function useActiveCommunityId(retryGeneration = 0): string | null | undef
  * `undefined` while unresolved (including read failures); `null` after confirmed absence.
  * A resolved id is stored so Tasks and Team share it with the chat list.
  */
-export function useFallbackWorkspaceId(enabled: boolean): string | null | undefined {
+export function useWorkspaceDiscoveryId(enabled: boolean): string | null | undefined {
   const [workspaceId, setWorkspaceId] = useState<string | null | undefined>(undefined);
   const focused = useSurfaceFocus();
   const reset = useSyncExternalStore(subscribeClientReset, clientResetGeneration);

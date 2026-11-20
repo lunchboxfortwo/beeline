@@ -8,7 +8,7 @@ import { WORKSPACE_LABEL } from '@/buzz/vocabulary';
 import { openPlace } from '@/ui/shell/panel';
 import { useIsDesktop } from '@/utils/responsive';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
-import { useActiveCommunityId, useFallbackWorkspaceId } from '@/buzz/use-active-community';
+import { useActiveCommunityId, useWorkspaceDiscoveryId } from '@/buzz/use-active-community';
 import { agentRow, personRow, type PeopleRow } from './people-rows';
 import { MemberCard, SectionHead } from './PeopleParts';
 import { InvitePeopleSheet } from './InvitePeopleSheet';
@@ -32,7 +32,7 @@ export function PeopleTabScreen() {
   }>();
   const routeId = first(params.communityId);
   const activeWorkspaceId = useActiveCommunityId();
-  const discovered = useFallbackWorkspaceId(activeWorkspaceId === null && !routeId);
+  const discovered = useWorkspaceDiscoveryId(activeWorkspaceId === null && !routeId);
   const workspaceId = routeId || activeWorkspaceId || discovered || undefined;
   const resolving = !workspaceId && (activeWorkspaceId === undefined || discovered === undefined);
   const roster = useWorkspaceRoster(workspaceId);

@@ -56,7 +56,7 @@ vi.mock('@/buzz/work-board-store', () => ({
 vi.mock('@/utils/responsive', () => ({ useIsDesktop: () => state.desktop }));
 vi.mock('@/buzz/use-active-community', () => ({
   useActiveCommunityId: () => state.workspace,
-  useFallbackWorkspaceId: () => undefined,
+  useWorkspaceDiscoveryId: () => undefined,
 }));
 vi.mock('@/buzz/latency-route-hook', () => ({ useLatencyRouteFrame: () => undefined }));
 vi.mock('@/buzz/corner-navigation', () => ({
