@@ -8,8 +8,6 @@ import {
   REPOSITORY,
   ROOM,
   TRIAGE,
-  TRIAGE_CORNER,
-  WORKSPACE,
   SYSTEM_IDENTITY_ID,
   describe,
   expect,
@@ -181,8 +179,6 @@ describe('feedback fix shipped in a release', () => {
     const command = (await rootFixture.database.query<CommandRow>(
       'SELECT * FROM agent_commands WHERE id=$1', [turn.requestId],
     )).rows[0]!;
-    await rootFixture.database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
-      VALUES($1,$2,$3,'member') ON CONFLICT DO NOTHING`, [WORKSPACE, TRIAGE_CORNER, TRIAGE]);
     await saveWorkflow(rootFixture.database, command, { contract: FEEDBACK_TRIAGE_CONTRACT });
     const { runId } = await startWorkflow(rootFixture.database, command,
       { name: 'feedback-triage', roleBindings: { triager: TRIAGE } });
