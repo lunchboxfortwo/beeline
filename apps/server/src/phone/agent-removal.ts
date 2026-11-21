@@ -57,16 +57,23 @@ import { AGENT_OWNER_AUTHORITY_MESSAGE, ACCESS_POLICY_AUTHORITY_MESSAGE } from '
            AND r.workspace_id=$2 AND r.archived_at IS NULL`,
         [input.agentId, input.workspaceId],
       );
-      await systemLineInRooms(database, input.workspaceId, rooms.rows.map((room) => room.room_id), {
-        subject: { kind: 'person', id: viewerId, name: agent.viewer_name },
-        verb: input.enabled ? systemMessage("phone-service.turned-yolo-on-for") : systemMessage("phone-service.turned-yolo-off-for"),
-        object: { text: agent.agent_name, id: input.agentId },
-        consequence: input.enabled
-          ? systemMessage("phone-service.grant-requests-are-now-approved-automatically")
-          : systemMessage("phone-service.grant-requests-now-ask-before-running"),
-        cardType: 'agent-yolo',
-        card: { agentId: input.agentId, enabled: input.enabled },
-      });
+      await systemLineInRooms(
+        database,
+        input.workspaceId,
+        rooms.rows.map((room) => room.room_id),
+        {
+          subject: { kind: 'person', id: viewerId, name: agent.viewer_name },
+          verb: input.enabled
+            ? systemMessage('phone-service.turned-yolo-on-for')
+            : systemMessage('phone-service.turned-yolo-off-for'),
+          object: { text: agent.agent_name, id: input.agentId },
+          consequence: input.enabled
+            ? systemMessage('phone-service.grant-requests-are-now-approved-automatically')
+            : systemMessage('phone-service.grant-requests-now-ask-before-running'),
+          cardType: 'agent-yolo',
+          card: { agentId: input.agentId, enabled: input.enabled },
+        },
+      );
     });
   }
 

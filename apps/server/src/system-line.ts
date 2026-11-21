@@ -558,7 +558,9 @@ export async function systemLineInRooms(
       authorId,
       text,
       input.cardType ?? null,
-      input.card ? JSON.stringify({ ...input.card, ask: approvalAsk(input.cardType, input.card) }) : null,
+      input.card
+        ? JSON.stringify({ ...input.card, ask: approvalAsk(input.cardType, input.card) })
+        : null,
       JSON.stringify(event),
     ],
   );
