@@ -11,7 +11,6 @@ type ShippedItem = {
   room_id: string | null;
   source_kind: string;
   created_at: Date;
-  fix_title: string | null;
   occurrences: unknown;
 };
 
@@ -58,7 +57,7 @@ async function tellReporters(
 ): Promise<number> {
   const items = (
     await db.query<ShippedItem>(
-      `SELECT id,source_kind,created_at,reporter_identity_id,room_id,fix_title,occurrences FROM feedback_items
+      `SELECT id,source_kind,created_at,reporter_identity_id,room_id,occurrences FROM feedback_items
        WHERE status='resolved' AND agent_resolved_notified_at IS NULL
          AND issue_number=$2 AND lower(issue_repository)=lower($1)
        ORDER BY created_at,id FOR UPDATE`,
@@ -93,7 +92,6 @@ async function tellReporters(
       ])
     ).rows.map((row) => row.id),
   );
-  const title = items.find((item) => item.fix_title)?.fix_title;
   const url = systemMessage('feedback.https-github-com-pull', repository, number);
   let notified = 0;
   if (live.rowCount) await ensureSystemIdentity(db);
@@ -106,10 +104,8 @@ async function tellReporters(
         .digest('hex'),
       roomId,
       authorId: SYSTEM_IDENTITY_ID,
-      subject: { kind: 'agent', id: agentId, name: agentId },
-      verb: systemMessage('feedback.shipped'),
-      object: version,
-      consequence: [title, url].filter(Boolean).join(' '),
+      subject: { kind: 'system', name: '' },
+      verb: systemMessage('feedback.shipped', version, url),
       // Passive and unrouted: it informs the agent and wakes nobody.
       cardType: 'feedback-shipped',
       routeCommands: false,
@@ -121,4 +117,11 @@ async function tellReporters(
     items.map((item) => item.id),
   ]);
   return notified;
+}
+
+export async function reconcileFeedbackShipped(database: SqlDatabase, feedback: FeedbackLoop): Promise<void> {
+  const release = (await database.query<ShippedRelease>(
+    'SELECT version,sha FROM helper_release_notifications WHERE singleton=true',
+  )).rows[0];
+  if (release) await notifyFeedbackShipped(database, feedback, release);
 }

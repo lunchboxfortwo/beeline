@@ -1,6 +1,9 @@
 import { claimRun } from './workflow-runs.js';
 import { SkillRevisionConflict } from './institutional-skills.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
+import { reconcileFeedbackShipped } from './feedback-shipped.js';
+import type { FeedbackLoop } from './feedback.js';
+import { runAfterCommit } from './institutional-memory-embeddings.js';
 import { applyFeedbackDispositions } from './feedback-dispositions.js';
 import { completeServiceReview } from './service-review.js';
 import { CommandRefusalError, ExpectedRefusalError } from './command-refusal.js';
@@ -42,12 +45,15 @@ export async function handoff(
     receipt?: WorkflowReceiptInput;
     attempt?: number;
   },
+  feedback?: FeedbackLoop,
+  afterCommit?: AfterCommit,
 ): Promise<HandoffResult> {
   if (typeof input.runId !== 'string' || !input.runId) throw new Error('runId is required');
   if (input.attempt !== undefined && (!Number.isSafeInteger(input.attempt) || input.attempt < 0))
     throw new Error('attempt must be a whole number from the run wake');
   database = new CornerAccessDatabase(database);
-  return database.transaction(async (db) => {
+  let evidenceChanged = false;
+  const result: HandoffResult = await database.transaction(async (db) => {
     // Resolve prefixes before locking, then serialize the run's state reads
     // and writes against every other writer on the canonical ID.
     // A parent Room answer may name an exact run in one of its corners.
@@ -166,7 +172,7 @@ export async function handoff(
     const dispositions = (input.contents as Record<string, unknown> | undefined)?.dispositions;
     if (scope.contract.name === 'feedback-triage' && stateName === 'pull' && ['ranked', 'nothing_new'].includes(input.outcome) &&
       (contentsState.requires.includes('dispositions') || dispositions !== undefined)) {
-      await applyFeedbackDispositions(db, command, dispositions);
+      evidenceChanged = await applyFeedbackDispositions(db, command, dispositions);
     }
     if (scope.contract.name === 'workspace-walk' && stateName === 'browse' && input.outcome === 'reviewed') {
       await completeServiceReview(db,command.agent_id,input.runId,(input.contents as Record<string, unknown>).receipts);
@@ -189,6 +195,9 @@ export async function handoff(
     });
     return { runId: input.runId, ...result };
   });
+  if (evidenceChanged && feedback)
+    runAfterCommit(afterCommit, database, db => reconcileFeedbackShipped(db, feedback));
+  return result;
 }
 
 

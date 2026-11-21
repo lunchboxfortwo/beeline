@@ -505,7 +505,6 @@ CREATE TABLE IF NOT EXISTS feedback_items (
   created_at timestamptz NOT NULL DEFAULT now(),
   triaged_at timestamptz
 );
-ALTER TABLE feedback_items ADD COLUMN IF NOT EXISTS fix_title text;
 ALTER TABLE feedback_items ADD COLUMN IF NOT EXISTS agent_resolved_notified_at timestamptz;
 ALTER TABLE feedback_items ADD COLUMN IF NOT EXISTS occurrence_count integer NOT NULL DEFAULT 1
   CHECK (occurrence_count > 0);

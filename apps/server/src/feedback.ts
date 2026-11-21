@@ -22,7 +22,8 @@ import type { CommandRow } from './agent-command.js';
 import type { SqlDatabase } from './database.js';
 import { PROHIBITED_SECRET_PATTERNS } from './institutional-memory-shadow.js';
 import { hasSystemReportMention } from './message-mentions.js';
-import { notifyFeedbackShipped } from './feedback-shipped.js';
+import { reconcileFeedbackShipped } from './feedback-shipped.js';
+import { runAfterCommit, type AfterCommit } from './institutional-memory-embeddings.js';
 import { sendSystemDirectMessage } from './system-line.js';
 
 /**
@@ -468,6 +469,7 @@ export async function notifyFeedbackFixed(
   command: CommandRow | undefined,
   agentId: string,
   input: NotifyFeedbackFixedInput,
+  afterCommit?: AfterCommit,
 ): Promise<NotifyFeedbackFixedResult> {
   if (command?.agent_id !== agentId) throw new Error('feedback resolution requires the agent’s own turn');
   const notify = input.notify === true;
@@ -528,12 +530,12 @@ export async function notifyFeedbackFixed(
       // The fixing pull request is the item's link; the release step reads it
       // to tell reporting agents once that fix ships.
       `UPDATE feedback_items SET status='resolved',
-         triaged_at=COALESCE(triaged_at,now()),triage_reason=$2,fix_title=$5,
+         triaged_at=COALESCE(triaged_at,now()),triage_reason=$2,
          issue_repository=$3,issue_number=$4
        WHERE id=ANY($1::text[]) AND status<>'resolved'
        RETURNING source_kind,reporter_identity_id,workspace_id`,
       [itemIds, JSON.stringify({ disposition: 'fixed', reference: url, reason: title }),
-        config.repository, number, title],
+        config.repository, number],
     );
     if (!notify) return { resolved: resolved.rowCount ?? 0, notified: 0 };
     // A later explicit notice order can notify items already resolved silently.
@@ -553,14 +555,7 @@ export async function notifyFeedbackFixed(
     }
     return { resolved: resolved.rowCount ?? 0, notified };
   });
-  try {
-    const release = (await database.query<{ version: string; sha: string }>(
-      'SELECT version,sha FROM helper_release_notifications WHERE singleton=true',
-    )).rows[0];
-    if (release) await notifyFeedbackShipped(database, { config, pullRequests }, release);
-  } catch (error) {
-    console.error('[feedback] shipped notices failed', error);
-  }
+  runAfterCommit(afterCommit, database, db => reconcileFeedbackShipped(db, { config, pullRequests }));
   return result;
 }
 

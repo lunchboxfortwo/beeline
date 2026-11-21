@@ -3,8 +3,9 @@ import type { CommandRow } from './agent-command.js';
 import { containsSecret, feedbackConfigFromEnv } from './feedback.js';
 
 /** Persist the triager's assessment in the same transaction as its handoff. */
-export async function applyFeedbackDispositions(db: SqlDatabase, command: CommandRow, value: unknown): Promise<void> {
+export async function applyFeedbackDispositions(db: SqlDatabase, command: CommandRow, value: unknown): Promise<boolean> {
   if (!Array.isArray(value)) throw new Error('dispositions must be an array');
+  let evidenceChanged = false;
   const seen = new Set<string>();
   const owner = (await db.query<{ owner_id: string }>('SELECT owner_id FROM agents WHERE agent_id=$1', [command.agent_id])).rows[0]?.owner_id;
   const global = Boolean(owner && feedbackConfigFromEnv().systemSenders.includes(owner));
@@ -28,7 +29,10 @@ export async function applyFeedbackDispositions(db: SqlDatabase, command: Comman
       const canonical = (await db.query<{ workspace_id: string; status: string }>(
         'SELECT workspace_id,status FROM feedback_items WHERE id=$1 FOR UPDATE', [reference])).rows[0];
       if (!canonical || (!global && canonical.workspace_id !== workspace) || ['closed', 'dismissed'].includes(canonical.status)) throw new Error('canonical feedback item is unavailable');
-      if (item.status !== 'closed') await db.query(`UPDATE feedback_items target SET
+      if (item.status !== 'closed') {
+        evidenceChanged = true;
+        await db.query(`UPDATE feedback_items target SET
+        agent_resolved_notified_at=NULL,
         occurrence_count=target.occurrence_count+source.occurrence_count,
         last_occurrence_at=GREATEST(target.last_occurrence_at,target.created_at,source.last_occurrence_at,source.created_at),
         occurrences=target.occurrences || jsonb_build_array(jsonb_build_object(
@@ -41,9 +45,11 @@ export async function applyFeedbackDispositions(db: SqlDatabase, command: Comman
           'createdAt',source.created_at,'helperVersion',source.helper_version,'appVersion',source.app_version,
           'appPlatform',source.app_platform,'harness',source.harness,'harnessVersion',source.harness_version)) || source.occurrences
         FROM feedback_items source WHERE target.id=$1 AND source.id=$2`, [reference, itemId]);
+      }
     }
     const status = disposition === 'fixed' ? 'resolved' : disposition === 'duplicate' ? 'closed' : disposition === 'linked' ? 'attached' : 'dismissed';
     await db.query('UPDATE feedback_items SET status=$2,triage_reason=$3,triaged_at=now() WHERE id=$1',
       [itemId, status, JSON.stringify({ disposition, reference, reason })]);
   }
+  return evidenceChanged;
 }

@@ -128,8 +128,8 @@ export const SYSTEM_MESSAGE_DAEMON_SERVICE = {
   },
 
   'feedback.shipped': {
-    parts: ['reported a problem fixed in'],
-    variables: [],
+    parts: ['Fixed in ', ': ', ''],
+    variables: ['release', 'url'],
   },
 
   'first-party-integrations.a-member': {

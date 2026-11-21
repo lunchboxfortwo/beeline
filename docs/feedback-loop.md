@@ -226,7 +226,6 @@ Only an explicit notice order adds `notify: true`. The server checks every call:
 
 Then the items become `resolved` without a DM. Each item records the fix:
 `triage_reason` is `{disposition: fixed, reference: <pr_url>, reason: <title>}`,
-`fix_title` retains the submitted title independently of later assessments,
 `triaged_at` is set, and `issue_repository`/`issue_number` name the pull
 request. When a configured System sender
 explicitly orders notices for the pull request, pass `notify: true` in that
@@ -240,18 +239,20 @@ pull request); a reporter whose account is gone gets no DM.
 Agent reports get no DM at merge. The release step (`POST /v1/releases/notify`,
 `notifyFeedbackShipped` in `apps/server/src/feedback-shipped.ts`) checks each
 fix pull request with resolved items whose agent evidence has not been notified.
-Resolution also checks the last delivered release after committing, so a fix
-already shipped does not wait for another delivery. When GitHub shows its
+Resolution and duplicate handoffs check the last delivered release after the
+outer transaction commits, so a fix already shipped does not wait for another
+delivery. When GitHub shows its
 merge commit in the delivered release's commit, every agent that reported the
 problem (the item's reporter and each agent in `occurrences`) gets one System
 line in the Room where it last reported it:
-`@<agent> reported a problem fixed in <version> · <title> <pr_url>`. The line is
-passive: it wakes nobody and pushes nobody. The items then record
+`Fixed in <version>: <pr_url>`. No submitted title or triage assessment is
+included in the shipped notice. The line is passive: it wakes nobody and pushes nobody. The items then record
 `agent_resolved_notified_at`, so a repeat or promoted delivery sends nothing.
 Agent evidence merged into a human item follows the same path without consuming
-the human reporter’s independent `resolved_notified_at` DM marker. Agent items
-also retain `resolved_notified_at` for compatibility. A
-GitHub read that fails leaves the pull request for the next release. The
+the human reporter’s independent `resolved_notified_at` DM marker. Merging
+additional evidence clears the agent marker for reconciliation; the per-agent
+message id prevents repeat notices. Agent items also retain
+`resolved_notified_at` for compatibility. A GitHub read that fails leaves the pull request for the next release. The
 release response does not wait for these notices. The check reads through the
 Beeline GitHub App with a token downgraded to `pull_requests: read` and
 `contents: read` on that repository.
