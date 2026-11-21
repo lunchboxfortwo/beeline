@@ -127,6 +127,11 @@ export const SYSTEM_MESSAGE_DAEMON_SERVICE = {
     variables: ['title', 'url'],
   },
 
+  'feedback.shipped': {
+    parts: ['reported a problem fixed in'],
+    variables: [],
+  },
+
   'first-party-integrations.a-member': {
     parts: ['A member'],
     variables: [],

@@ -162,8 +162,11 @@ export async function handoff(
       throw new ExpectedRefusalError(`${errors.join('; ')}; outcome must be one of: ${outcomes}${blocked}`);
     }
     if (!await claimRun(db, scope)) return alreadyAdvanced(await openRun(db, command.room_id, input.runId));
-    if (scope.contract.name === 'feedback-triage' && stateName === 'pull' && contentsState.requires.includes('dispositions') && ['ranked', 'nothing_new'].includes(input.outcome)) {
-      await applyFeedbackDispositions(db, command, (input.contents as Record<string, unknown>).dispositions);
+    // A team-saved triage contract may not list dispositions; any it sends are still saved.
+    const dispositions = (input.contents as Record<string, unknown> | undefined)?.dispositions;
+    if (scope.contract.name === 'feedback-triage' && stateName === 'pull' && ['ranked', 'nothing_new'].includes(input.outcome) &&
+      (contentsState.requires.includes('dispositions') || dispositions !== undefined)) {
+      await applyFeedbackDispositions(db, command, dispositions);
     }
     if (scope.contract.name === 'workspace-walk' && stateName === 'browse' && input.outcome === 'reviewed') {
       await completeServiceReview(db,command.agent_id,input.runId,(input.contents as Record<string, unknown>).receipts);

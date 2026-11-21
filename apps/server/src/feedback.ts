@@ -31,7 +31,8 @@ import { sendSystemDirectMessage } from './system-line.js';
  * workflow (docs/workflows/) reads `feedback_items` through a read-only
  * database grant and dispatches fix corners after a human approves. When a
  * fix merges, the triage agent calls `notify_feedback_fixed` and System tells
- * each person who reported the problem themselves.
+ * each person who reported the problem themselves. Reporting agents hear once
+ * a delivered release contains that fix (`feedback-shipped.ts`).
  * Items keep message ids, plus the text of a person's own `@system` report.
  */
 
@@ -46,6 +47,8 @@ export type FeedbackConfig = {
 export interface FeedbackPullRequests {
   /** True only when the pull request exists and has merged. */
   merged(repository: string, number: number): Promise<boolean>;
+  /** True only when the pull request merged and its merge commit is in `sha`'s history. */
+  shipped(repository: string, number: number, sha: string): Promise<boolean>;
 }
 
 /** The feedback loop's server wiring: config plus the GitHub read it needs. */
@@ -88,10 +91,17 @@ function optionalText(value: unknown, field: string, maxBytes: number): string |
   return trimmed;
 }
 
-/** Case, punctuation and spacing never make two reports different. */
+/**
+ * Case, punctuation, spacing, links and ids never make two reports different:
+ * the same error from another run, commit or pull request is a repeat. Short
+ * numbers such as status codes stay, unless they follow `#` or `/`.
+ */
 export function feedbackSummaryKey(summary: string): string {
   return summary
     .toLowerCase()
+    .replace(/https?:\/\/\S+/g, ' url ')
+    .replace(/\b(?=[0-9a-f-]*\d)[0-9a-f]{7,}(?:-[0-9a-f]{4,})*\b/g, ' id ')
+    .replace(/[#/]\d+|\d{4,}/g, ' n ')
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim();
 }
@@ -236,9 +246,10 @@ async function roomWorkspace(database: SqlDatabase, roomId: string): Promise<str
 
 /**
  * `report_feedback`, from an agent's Room. Task command context is evidence,
- * not permission to report a problem with that task. The same
- * category, tool and normalized summary match any open agent item. Every
- * explicit report retains its evidence as an occurrence.
+ * not permission to report a problem with that task. The same category,
+ * tool and normalized error (the summary when there is none) match any open
+ * agent item: agents word the same failure differently, but the tool's error
+ * repeats. Every explicit report retains its evidence as an occurrence.
  */
 export async function reportAgentFeedback(
   database: SqlDatabase,
@@ -262,7 +273,8 @@ export async function reportAgentFeedback(
     : [];
   if (containsSecret([summary, detail, errorExcerpt, toolName].filter(Boolean).join('\n')))
     throw new Error('feedback contains a secret-shaped value; describe the problem without it');
-  const summaryKey = feedbackSummaryKey(summary) || summary.toLowerCase();
+  const summaryKey =
+    feedbackSummaryKey(errorExcerpt ?? '') || feedbackSummaryKey(summary) || summary.toLowerCase();
   const versions = await agentReportVersions(database,agentId);
   const owner = (await database.query<{owner_id:string}>(
     'SELECT owner_id FROM agents WHERE agent_id=$1',[agentId])).rows[0]?.owner_id;
@@ -512,11 +524,15 @@ export async function notifyFeedbackFixed(
       reporter_identity_id: string;
       workspace_id: string;
     }>(
+      // The fixing pull request is the item's link; the release step reads it
+      // to tell reporting agents once that fix ships.
       `UPDATE feedback_items SET status='resolved',
-         triaged_at=COALESCE(triaged_at,now())
+         triaged_at=COALESCE(triaged_at,now()),triage_reason=$2,
+         issue_repository=$3,issue_number=$4
        WHERE id=ANY($1::text[]) AND status<>'resolved'
        RETURNING source_kind,reporter_identity_id,workspace_id`,
-      [itemIds],
+      [itemIds, JSON.stringify({ disposition: 'fixed', reference: url, reason: title }),
+        config.repository, number],
     );
     if (!notify) return { resolved: resolved.rowCount ?? 0, notified: 0 };
     // A later explicit notice order can notify items already resolved silently.

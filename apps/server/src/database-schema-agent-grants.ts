@@ -476,8 +476,8 @@ CREATE TABLE IF NOT EXISTS operation_outcomes_hourly (
 -- here. The saved feedback-triage workflow reads this table through a
 -- read-only grant, and notify_feedback_fixed resolves items once a fix merges.
 -- Message ids only, plus the text of a person's own @system report. The
--- issue_* columns are retired GitHub-filing state, kept for rolling-update
--- compatibility.
+-- issue_* columns name an item's fixing pull request, which the release step
+-- reads to tell reporting agents once that fix ships.
 CREATE TABLE IF NOT EXISTS feedback_items (
   id text PRIMARY KEY,
   source_kind text NOT NULL CHECK (source_kind IN ('agent','human')),

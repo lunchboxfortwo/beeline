@@ -1,4 +1,6 @@
 import type { SqlDatabase } from './database.js';
+import type { FeedbackLoop } from './feedback.js';
+import { notifyFeedbackShipped } from './feedback-shipped.js';
 import type { LiveHub } from './live.js';
 
 export interface ReleaseNotifyInput {
@@ -42,6 +44,8 @@ export interface ReleaseNotifierOptions {
   /** Absent = the notify endpoint refuses like any wrong secret. */
   readonly secret?: string;
   readonly live?: LiveHub;
+  /** Tells reporting agents when a delivered release contains their fix. */
+  readonly feedback?: FeedbackLoop;
 }
 
 /**
@@ -50,6 +54,9 @@ export interface ReleaseNotifierOptions {
  */
 export class ReleaseNotifier {
   readonly secret: string | undefined;
+  /** The latest delivery's feedback notices, which never hold up the release response. */
+  feedbackNotices: Promise<number> = Promise.resolve(0);
+  private readonly feedback: FeedbackLoop | undefined;
   private readonly listeners = new Set<(release: HelperRelease) => void>();
   private readInFlight?: Promise<void>;
   private initialized = false;
@@ -61,6 +68,7 @@ export class ReleaseNotifier {
     options: ReleaseNotifierOptions = {},
   ) {
     this.secret = options.secret;
+    this.feedback = options.feedback;
     options.live?.subscribeAll((event) => {
       if (event.type === 'helper-release') this.accept(event);
     });
@@ -68,13 +76,17 @@ export class ReleaseNotifier {
   }
 
   async notifyReleaseDelivered(input: ReleaseNotifyInput): Promise<ReleaseNotifyResult> {
-    // Release delivery wakes helpers only; it produces no user-facing messages.
+    // Release delivery wakes helpers. Its only message is the feedback notice
+    // for agents whose reported problem this release fixes.
     required(input.changelogUrl, 'changelogUrl');
-    await recordHelperRelease(this.database, {
-      version: required(input.version, 'version'),
-      sha: required(input.sha, 'sha'),
-    });
-    this.accept({ version: input.version.trim(), sha: input.sha.trim() });
+    const release = { version: required(input.version, 'version'), sha: required(input.sha, 'sha') };
+    await recordHelperRelease(this.database, release);
+    this.accept(release);
+    if (this.feedback)
+      this.feedbackNotices = notifyFeedbackShipped(this.database, this.feedback, release).catch((error) => {
+        console.error('[release] feedback notices failed', error);
+        return 0;
+      });
     return { notified: 0, skipped: 0 };
   }
 

@@ -311,6 +311,10 @@ async function main() {
     composio,
     linkWallet,
   );
+  const feedback = {
+    config: feedbackConfigFromEnv(),
+    ...(githubClients ? { pullRequests: new FeedbackGitHub(database, githubClients.app) } : {}),
+  };
   const daemon = new DaemonService(
     database,
     live,
@@ -326,10 +330,7 @@ async function main() {
     mcpRegistry,
     registryMcpOAuth,
     composio,
-    {
-      config: feedbackConfigFromEnv(),
-      ...(githubClients ? { pullRequests: new FeedbackGitHub(database, githubClients.app) } : {}),
-    },
+    feedback,
     objectService,
     linkWallet,
     github ? (cornerId) => github!.refreshStaleMergeability(cornerId) : undefined,
@@ -351,6 +352,7 @@ async function main() {
   // secret, same as the Play review link above.
   const releaseNotify = new ReleaseNotifier(jobsDatabase, {
     live,
+    feedback,
     ...(process.env.BEELINE_RELEASE_NOTIFY_SECRET
       ? { secret: process.env.BEELINE_RELEASE_NOTIFY_SECRET }
       : {}),
