@@ -387,7 +387,7 @@ test('checks-only execution uses the complete reusable release gate without init
     await assert.rejects(releaseChecks(engine, { github: { sha } }), /Release checks failed/);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
-test('checks-only hooks retain the full workflow and cap memory at two existing slots', async () => {
+test('checks-only hooks retain the full workflow and use the four existing slots', async () => {
   const workflow = parse(readFileSync(join(repository, '.github/workflows/checks.yml'), 'utf8'));
   const prepare = LocalChecks.prototype.prepare;
   const execute = LocalChecks.prototype.execute;
@@ -399,7 +399,7 @@ test('checks-only hooks retain the full workflow and cap memory at two existing 
     const execution = await localHooks('/fixture', {}, { fullChecks: true }).workflow({
       file: '.github/workflows/checks.yml', workflow, inherited: {}, engine,
     });
-    assert.deepEqual(slots, [1, 2]);
+    assert.deepEqual(slots, [1, 2, 3, 4]);
     assert.deepEqual(execution.workflow, workflow);
     const inputs = { suite: 'all', release_sha: '', pinned_sha: sha };
     for (const id of ['body-suite', 'server-suite-shard', 'mobile-suite', 'production-corpus-replay', 'server-claim-latency']) {
@@ -509,7 +509,7 @@ test('the dry Checks plan keeps the quick release gate and lists omitted PR suit
   assert.deepEqual(JSON.parse(messages[0]), full);
   assert.deepEqual(full.dropped, []);
   assert.ok(full.jobs.some(job => job.id === 'mobile-suite'));
-  assert.match(full.budget, /24 GiB/);
+  assert.match(full.budget, /48 GiB/);
   assert.match(plan.execution, /three independent quick-check jobs/);
 });
 test('shard transport inherits existing slices and jails without changing their budgets or services', async () => {

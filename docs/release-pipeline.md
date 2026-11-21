@@ -69,9 +69,13 @@ waits for both check and build siblings before releasing its lock or pruning
 private sources. There is no additional nightly check dispatch in this local
 workflow.
 Both published `release.json` records include `checks.sourceSha`, `checks.result`,
-`checks.wallSeconds` and the absolute `checks.resultsPath` for
-`full-checks/release-checks.json`. The private `release-checks-timing.json` also
-records the suite wall-clock, host load and per-job placement.
+`checks.wallSeconds`, `checks.completedAt` and `checks.resultsPath`. A release with full checks
+uploads `release-checks.json` as a release asset beside its `release.json`, and
+`checks.resultsPath` is that asset's download URL. `delivery.live` splits its
+`elapsedSeconds` into `checksSeconds` (waiting for full checks) and
+`deploySeconds` (from the checks verdict to the last live component). The
+private `release-checks-timing.json` also records the suite wall-clock, host
+load and per-job placement.
 For an owner-authorized urgent fix only, pass
 `--skip-full-checks "<owner message id>"`. This explicit exception records
 `checks.result: skipped` and `checks.ownerMessageId` in both release records;
@@ -81,7 +85,7 @@ advisory findings to `prompt-audit/`; it never fails the run.
 
 The checks-only leg runs the complete Checks workflow with `suite: all` and
 `pinned_sha`, leaving `release_sha` empty so the mobile, corpus and latency suites
-are included. It uses two existing queue slots (at most 24 GiB), retaining the
+are included. It uses all four existing queue slots (at most 48 GiB), retaining the
 private CI jails, shared build and per-job logs. It never dispatches Actions or
 reserves a release identity. The obsolete agent schedule for dispatching
 `nightly-checks.yml` is removed independently of the nightly release schedule.

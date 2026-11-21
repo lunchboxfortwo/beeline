@@ -107,7 +107,10 @@ export async function releaseSequence({ source, sha, directory, secrets, dispatc
       }, { repository: source, secrets });
       checks.result = 'success';
     } catch (error) { checks.result = 'failure'; throw error; }
-    finally { checks.wallSeconds = (Date.now() - startedAt) / 1000; }
+    finally {
+      checks.wallSeconds = (Date.now() - startedAt) / 1000;
+      checks.completedAt = new Date().toISOString();
+    }
   });
   const delivery = (async () => {
     for (const channel of ['next', 'latest']) {

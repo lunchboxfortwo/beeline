@@ -3,7 +3,7 @@
 // only plans, builds proofs or executes the checks-only leg. See docs/release-pipeline.md for the outage policy.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -238,7 +238,7 @@ export function localHooks(directory, processes, { fullChecks = false, checksGat
     workflow: async ({ file, workflow, inputs, inherited, engine }) => {
       file = file.replace(/^\.\//, '');
       if (file === checksWorkflow) {
-        const checks = new LocalChecks(engine, { slots: fullChecks ? [1, 2] : undefined });
+        const checks = new LocalChecks(engine);
         await checks.prepare(inherited);
         return { workflow: fullChecks ? workflow : quickChecks(workflow), parallel: true, job: (...args) => checks.queue.run(...args), finish: () => checks.finish() };
       }
@@ -384,14 +384,30 @@ export function localHooks(directory, processes, { fullChecks = false, checksGat
         const record = JSON.parse(readFileSync(path, 'utf8'));
         delete record.runId;
         record.execution = { kind: 'local', id: basename(directory), dispatchedBy: JSON.parse(context.inputs.dispatched_by) };
-        if (engine.variables.releaseChecks) record.checks = engine.variables.releaseChecks;
+        const checks = engine.variables.releaseChecks && { ...engine.variables.releaseChecks };
+        // The release keeps the full-check results; the private state directory does not last.
+        if (checks?.resultsPath && existsSync(checks.resultsPath)) {
+          copyFileSync(checks.resultsPath, join(dirname(path), 'release-checks.json'));
+          const releaseUrl = `https://github.com/${context.github.repository}/releases/download/${record.version}`;
+          checks.resultsPath = `${releaseUrl}/release-checks.json`;
+        }
+        if (checks) record.checks = checks;
+        // Live delivery time split into the wait for full checks and the deploy after them.
+        const live = record.delivery.live;
+        if (live) {
+          const checked = checks?.completedAt
+            ? Math.round(Date.parse(checks.completedAt) / 1000) : live.triggerEpoch;
+          const deployStart = Math.min(live.completedAt, Math.max(live.triggerEpoch, checked));
+          live.checksSeconds = deployStart - live.triggerEpoch;
+          live.deploySeconds = live.completedAt - deployStart;
+        }
         record.delivery.localExceptions = { staticWebsite: 'not released',
           helperArm64: engine.variables.macHelperMode === 'build' ? 'built and install-verified on GitHub-hosted macos-15' : 'carried unchanged',
           helperX64: engine.variables.macHelperMode === 'build' ? 'built and install-verified on GitHub-hosted macos-15-intel' : 'carried unchanged',
           desktop: engine.variables.desktopMode !== 'build' ? 'published signed updater set carried unchanged, including Windows'
             : WINDOWS_DESKTOP === 'build' ? 'native signed updater builds on a GitHub-hosted macOS runner, squire and Windows VM'
               : 'native signed updater builds on a GitHub-hosted macOS runner and squire; Windows installers carried unchanged and omitted from the updater manifest' };
-        record.delivery.localExceptions.checks = engine.variables.releaseChecks ?? (context.inputs.channel === 'latest'
+        record.delivery.localExceptions.checks = checks ?? (context.inputs.channel === 'latest'
           ? { retained: [], reusedFrom: 'successful next release of this commit', coverage: 'no checks run on promotion' }
           : { retained: ['build', 'typecheck', 'dead-code', 'design grammar', 'codecs'], dropped: droppedChecks(engine.read(checksWorkflow)), coverage: 'not produced by quick release checks' });
         const helperManifest = join(directory, 'jobs/helper-local/daemon-release/manifest.json');

@@ -28,6 +28,7 @@ test('full checks overlap builds, gate promotion on the exact SHA and record bot
     assert.equal(args.checks.result, 'success');
     assert.equal(args.checks.resultsPath, '/state/full-checks/release-checks.json');
     assert.equal(typeof args.checks.wallSeconds, 'number');
+    assert.ok(Number.isFinite(Date.parse(args.checks.completedAt)));
   }
 });
 test('checks failure blocks promotion and waits for the build sibling before returning', async () => {
