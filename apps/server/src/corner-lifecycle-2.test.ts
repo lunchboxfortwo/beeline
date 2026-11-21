@@ -250,7 +250,8 @@ describe('each transition wakes the next role exactly once (AC-2)', () => {
     const cornerId = await open('owner/widgets');
     await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
     await pushToCorner(cornerId, SHA);
-    expect(await currentState(cornerId)).toBe('review');
+    // No pull request is open yet, so no checks are underway.
+    expect(await currentState(cornerId)).toBe('idle');
     await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=$2::jsonb WHERE corner_id=$1`, [cornerId, JSON.stringify({
       checks: 'pending', lifecycle: 'in-review',
       pr: { number: 7, url: 'https://github.com/owner/widgets/pull/7', headSha: SHA, title: 'Ship the widget' },

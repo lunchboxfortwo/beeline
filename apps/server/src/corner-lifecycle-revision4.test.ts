@@ -116,3 +116,28 @@ it('Reproduction REVIEW-ORDER: ordering the listed reviewer works and an archive
     VALUES($1,$2,$3,'Archived corner',now())`,[archived,W,R]);
   await expect(rootFixture.daemon.execute('order',{...args,address:archived},A)).rejects.toThrow('archived');
 });
+
+it.each(['reply','silent'])('Reproduction REVIEW-EMPTY-HANDBACK: a %s review with no verdict hands back to the implementer once, privately', async ending => {
+  await rootFixture.phone.execute('updateRoom',{roomId:R,reviewerAgentId:B},H);
+  await greenHead(108,'8'.repeat(40));
+  const [review]=await commands(B,C);
+  await claim(review!);
+  if(ending==='reply') {
+    await result(review!,'The review is complete.');
+    const [reply]=(await commands(A,C)).filter(command=>command.reason==='reply');
+    await claim(reply!);
+    await result(reply!,'');
+  } else await rootFixture.db.query(`SELECT beeline_finish_agent_command($1,'complete',NULL,NULL)`,[review!.id]);
+  for(let replay=0;replay<3;replay++) await reconcileConfiguredCornerReviewers(rootFixture.db,R);
+  const handback=(await commands(A,C)).filter(command=>command.reason==='corner_review_needed');
+  expect(handback).toHaveLength(1);
+  expect(handback[0]!.source.body).toContain('the reviewer gave no verdict; arrange review or report the blocker to its commander');
+  expect(handback[0]!.source.body).not.toContain('FAIL');
+  const lines=(await rootFixture.db.query<{text:string}>(`SELECT text FROM messages WHERE room_id=$1`,[C])).rows;
+  expect(lines.some(line=>/no verdict|arrange review/.test(line.text))).toBe(false);
+  // Answering a System wake posts without waking anyone, and the tool result says so.
+  await claim(handback[0]!);
+  expect(await rootFixture.daemon.execute('reply',{id:handback[0]!.id,text:'Blocked: no reviewer verdict'},A)).toMatchObject({delivered:true,
+    receipt:'Message stored and visible. No agents woken. A reply to a System wake is posted, not delivered to anyone; use message() to reach someone.'});
+  await rootFixture.db.backgroundWork.drain();
+});

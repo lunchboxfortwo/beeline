@@ -4,8 +4,7 @@ import { CornerDownRight } from 'lucide-react-native';
 import type { CornerBlocker, CornerState, CornerStateReason, WorkState } from '@beeline/api-contract/phone';
 import { Copy, Glyph, HEIGHT, MARK, typeStyle, useTextSize } from '@/ui/grammar';
 import { WorkStateMark } from '@/ui/screens/tags/WorkMarks';
-import { threadMark } from '@/ui/screens/chats/chat-tree-model';
-import { threadListLabel } from './thread-status';
+import { threadRow } from '@/ui/screens/chats/chat-tree-model';
 
 /**
  * One thread in a chat's thread list: ↳, the title and its state line, then its state mark
@@ -18,8 +17,8 @@ export function ThreadLine({ title, state, workState, blocker, reason, viewer, o
     viewer?: string;
     onPress: () => void; testID?: string;
 }) {
-    const { word, you: brass } = threadListLabel({ state, blocker, reason }, viewer);
-    const mark = threadMark({ state, workState, blocker }, viewer);
+    const mark = threadRow({ state, workState, blocker, reason }, viewer);
+    const { word, you: brass } = mark;
     const line = typeStyle('body', useTextSize()).lineHeight;
     return (
         <ListItem

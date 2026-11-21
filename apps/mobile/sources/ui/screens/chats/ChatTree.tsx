@@ -20,11 +20,10 @@ import {
   chatTitle,
   joinableTitle,
   shownThreads,
-  threadMark,
+  threadRow,
   threadTitle,
   threadWorkState,
 } from './chat-tree-model';
-import { threadListLabel } from '@/ui/screens/thread/thread-status';
 
 const MARK = 36;
 /** Holding a chat's mark this long opens a new thread in it (today's corner-glyph threshold). */
@@ -107,9 +106,8 @@ function ThreadLine({
   viewer: string | undefined;
   onOpen: (roomId: string, cornerId: string, name: string) => void;
 }) {
-  const { word } = threadListLabel(corner, viewer);
   const title = threadTitle(item, corner);
-  const { state, idle } = threadMark(corner, viewer);
+  const { word, state, idle } = threadRow(corner, viewer);
   const step = useStep();
   return (
     <ListItem

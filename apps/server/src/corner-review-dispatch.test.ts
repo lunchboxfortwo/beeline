@@ -429,6 +429,11 @@ describe('thread message attribution', () => {
         expect(handbacks[0]).toMatchObject({ reason: 'reply', roomId: C, source: { body: verdict } });
         await claim(handbacks[0]!);
         await result(handbacks[0]!, '');
+      } else if (verdict === '') {
+        // A review with neither approval nor findings hands ownership back once, privately.
+        expect(handbacks).toMatchObject([{ reason: 'corner_review_needed', roomId: C }]);
+        await claim(handbacks[0]!);
+        await result(handbacks[0]!, '');
       } else expect(handbacks).toEqual([]);
       expect(await commands(A, R)).toEqual([]);
       expect((await rootFixture.db.query('SELECT 1 FROM messages WHERE room_id=$1 AND author_id=$2', [R, B])).rowCount).toBe(0);

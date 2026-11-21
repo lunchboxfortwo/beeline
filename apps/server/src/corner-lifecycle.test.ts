@@ -67,7 +67,8 @@ const scope2 = fixtureScope2(_name, stored);
     const badges = [await scope2.badge(cornerId)];
     await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
     await pushToCorner(cornerId, SHA);
-    expect(await currentState(cornerId)).toBe('review');
+    // A pushed head with no pull request has no checks to wait on.
+    expect(await currentState(cornerId)).toBe('idle');
     badges.push(await scope2.badge(cornerId));
     await greenHead(cornerId, 7, SHA);
     expect(await currentState(cornerId)).toBe('review');
@@ -87,7 +88,7 @@ const scope2 = fixtureScope2(_name, stored);
     expect(await currentState(cornerId)).toBe('archived');
     expect(await projected(cornerId)).toBe('archived');
     badges.push(await scope2.badge(cornerId, true));
-    expect(badges).toEqual(['working', 'review', 'review', 'idle', 'archived']);
+    expect(badges).toEqual(['working', 'idle', 'review', 'idle', 'archived']);
     // The cards name no workflow and no version.
     for (const card of await cards(cornerId)) {
       expect(card).not.toHaveProperty('workflowSlug');
@@ -309,7 +310,8 @@ describe('checks dispatch (rows 6-8)', () => {
     });
     expect(await currentState(cornerId)).toBe('working');
     await pushToCorner(cornerId, '1'.repeat(40));
-    expect(await currentState(cornerId)).toBe('review');
+    // With the receipt ended and no pull request open, nothing is underway.
+    expect(await currentState(cornerId)).toBe('idle');
   });
 
 
@@ -769,6 +771,20 @@ const scope11 = fixtureScope11();
     expect(await revise(cornerId)).toMatchObject({ wake: { queued: true, agentId: A } });
     expect(await reasons(cornerId, B)).toEqual(reviewerBefore);
     expect(await currentState(cornerId)).toBe('working');
+  });
+
+
+  it('Reproduction REVISION-REPLY: the implementer\'s reply to a revision wakes the reviser at its own place', async () => {
+    const cornerId = await approved();
+    await scope11.implementerOnline();
+    expect(await revise(cornerId)).toMatchObject({ wake: { queued: true, agentId: A } });
+    const [wake] = (await commands(A, cornerId)).filter(command => command.reason === 'corner_brief_revision');
+    await claim(wake!);
+    const sent = await rootFixture.daemon.execute('reply', { id: wake!.id, text: 'Blocked by the revised output contract' }, A);
+    expect(sent).toMatchObject({ delivered: true });
+    expect((await commands(F, R)).filter(command => command.reason === 'reply')).toMatchObject([{ from: { agent: A, place: cornerId } }]);
+    expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND author_id=$2 AND text LIKE 'Blocked by%'
+      AND presentation='message'`, [cornerId, A])).rowCount).toBe(0);
   });
 
 

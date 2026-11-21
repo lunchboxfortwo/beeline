@@ -3,7 +3,7 @@
 `message(to:{agent,place},text,ask?)` records both endpoints and returns its id.
 `reply(id,text,ask?)` returns to that sender in that place without selecting a commander.
 The sender of the task message remains its commander across brief revisions and later tags.
-System wakes inside a thread answer in that thread; contacting the commander requires an explicit message.
+System wakes inside a thread answer in that thread; contacting the commander requires an explicit message. A brief-revision wake is sent by its reviser, so its reply returns to the reviser at the reviser's place.
 That commander is the sender of the opening task, else of the first task delivered to the implementer; a tag of another agent never replaces it.
 Thread work never takes a turn outside the thread: review gaps wake only the implementer there, and a commander who becomes the implementer gets no notice elsewhere.
 A closed return place ends the turn without rerouting.

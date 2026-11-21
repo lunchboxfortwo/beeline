@@ -124,7 +124,7 @@ export function transitionCorner(
   const checksUnderway =
     checks === 'pending' ||
     f.lifecycle?.checksSummary?.checks.some((check) => check.status === 'pending') ||
-    (Boolean(f.lifecycle?.pr || headSha) &&
+    (Boolean(f.lifecycle?.pr) &&
       f.lifecycle?.checksSummary?.status === 'unknown' &&
       f.lifecycle.checksSummary.total === 0 &&
       f.lifecycle.checksSummary.fetchStartedAt === undefined);

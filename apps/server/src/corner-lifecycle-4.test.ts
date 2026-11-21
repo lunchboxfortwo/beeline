@@ -330,7 +330,8 @@ describe('a corner opened before the workflow run existed (AC-10)', () => {
       CORNER_LIFECYCLE_CARD_TYPE,
     ]);
     await pushToCorner(cornerId, SHA);
-    expect(await currentState(cornerId)).toBe('review');
+    // The push advances the opened (working) corner; with no pull request it rests idle.
+    expect(await currentState(cornerId)).toBe('idle');
   });
 });
 describe('Reproduction IDLE-1: thread status says whether its agent runs or waits', () => {

@@ -9,6 +9,7 @@ import {
   filterChats,
   shownThreads,
   threadMark,
+  threadRow,
   threadWord,
 } from './chat-tree-model';
 
@@ -115,6 +116,19 @@ describe('chat rows', () => {
     expect(threadMark({ state: 'waiting', blocker: onAlan } as ChatListCorner, viewer)).toEqual({ state: 'in-progress', idle: true });
     expect(threadMark({ state: 'working', workState: 'in-progress' } as ChatListCorner, viewer)).toEqual({ state: 'in-progress', idle: false });
     expect(threadMark({ state: 'archived' } as ChatListCorner, viewer)).toEqual({ state: 'done', idle: false });
+  });
+
+  it('Reproduction ROW-DONE: a thread row line and mark read one state, so a done thread reads done', () => {
+    const row = (state: ChatListCorner['state'], workState?: ChatListCorner['workState']) =>
+      threadRow({ id: 'r', name: 'r', state, ...(workState ? { workState } : {}) } as ChatListCorner, viewer);
+    // latency-capture-investigation: its Tasks state is done while the machine rests idle.
+    expect(row('idle', 'done')).toEqual({ word: 'done', you: false, state: 'done', idle: false });
+    expect(row('working', 'in-review')).toMatchObject({ word: 'review', state: 'in-review' });
+    expect(row('idle', 'backlog')).toMatchObject({ word: 'backlog', state: 'backlog' });
+    expect(row('idle')).toEqual({ word: 'idle', you: false, state: 'in-progress', idle: true });
+    expect(row('archived')).toMatchObject({ word: 'done', state: 'done' });
+    expect(threadRow({ state: 'waiting', workState: 'needs-you', blocker: onViewer } as ChatListCorner, viewer))
+      .toEqual({ word: 'waiting on you', you: true, state: 'needs-you', idle: false });
   });
 
   it('shows at most three waiting threads, counts the rest, and shows none when none wait', () => {

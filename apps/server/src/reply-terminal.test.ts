@@ -29,6 +29,7 @@ describe('replies without an ask end acknowledgement exchanges', () => {
     expect(session).toContain('Reply needed: false');
     expect(session).not.toMatch(/Reply\(id|tool /);
     const ack = await tools.ok(client, 'reply', { id: replied.id, text: 'Received' });
+    expect(ack.receipt).toBe('Message stored and visible. No agents woken. An acknowledgement of an informational reply wakes no one; add ask or use message() to reach them.');
     expect(await native()).toEqual([]);
     expect((await tools.ok(client, 'list_mentions', {})).wakes).toEqual([]);
     expect((await scope.db.query('SELECT text FROM messages WHERE id=$1', [ack.id])).rows).toEqual([{ text: 'Received' }]);
@@ -90,6 +91,7 @@ describe('replies without an ask end acknowledgement exchanges', () => {
     const args = asked ? {ask} : {};
     const self = await scope.daemon.execute('message', {roomId:ROOM,to:{agent:AGENT,place:ROOM},text:'Note to self',...args}, AGENT);
     expect(await native()).toEqual([]);
+    expect(self).toMatchObject({receipt:'Message stored and visible. No agents woken. You addressed yourself; do the work in this turn.'});
     expect((await scope.db.query('SELECT text FROM messages WHERE id=$1',[self.id])).rows).toEqual([{text:'Note to self'}]);
     // Already queued self-addressed commands from older servers can be answered
     // without feeding another item back to the sender.
@@ -97,6 +99,7 @@ describe('replies without an ask end acknowledgement exchanges', () => {
       privatePayload:{kind:'message',route:{from:{agent:AGENT,place:ROOM},to:{agent:AGENT,place:ROOM}},
         authorId:AGENT,fromRoomId:ROOM,text:modelText('Old self-addressed task')}}))!;
     const replied = await scope.daemon.execute('reply',{id:legacy.id,text:'Recorded',...args}, AGENT);
+    expect(replied).toMatchObject({receipt:expect.stringContaining('You addressed yourself')});
     expect(await native()).toEqual([]);
     expect((await scope.db.query('SELECT text FROM messages WHERE id=$1',[replied.id])).rows).toEqual([{text:'Recorded'}]);
   });

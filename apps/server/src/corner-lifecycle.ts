@@ -596,12 +596,13 @@ async function writeCornerAdvance(
           );
           break;
         case 'review-findings': {
-          if (facts.reviewEnded?.emptyCount) break;
-          const reason = facts.reviewEnded?.findings ?? 'Review failed';
+          // A review with no usable verdict still returns ownership to the implementer once, privately.
+          const text = facts.reviewEnded?.emptyCount ? reviewBlockedText(corner, 'the reviewer gave no verdict')
+            : `FAIL: ${facts.reviewEnded?.findings ?? 'Review failed'}`;
           const command = corner.worker_agent_id ? await createAgentCommand(db,{
             id:createHash('sha256').update(`review-failed:${cornerId}:${head}:${facts.reviewEnded!.id}`).digest('hex'),
             roomId:cornerId,agentId:corner.worker_agent_id,sourceMessageId:null,reason:'corner_review_needed',
-            privatePayload:{kind:'lifecycle',authorId:SYSTEM_AUTHOR_ID,fromRoomId:cornerId,text:systemText(`FAIL: ${reason}`)},
+            privatePayload:{kind:'lifecycle',authorId:SYSTEM_AUTHOR_ID,fromRoomId:cornerId,text:systemText(text)},
           }) : undefined;
           result={ok:true,wake:{queued:Boolean(command),...(command?{agentId:command.agent_id}:{})}};
           break;
@@ -691,6 +692,10 @@ export async function noteMissingReviewer(
 }
 
 
+/** The handback wording for a review gap, shared with a review that ended without a verdict. */
+const reviewBlockedText = (corner: CornerRow, reason: string) =>
+  `${corner.lifecycle.checks === 'passing' ? 'Checks passed; ' : ''}${reason}; arrange review or report the blocker to its commander`;
+
 /**
  * One handback for every review gap, in the thread. The implementer owns
  * arranging another review or replying with the blocker to its commander; the
@@ -711,7 +716,7 @@ export async function noteReviewBlocked(
         agentId: corner.worker_agent_id,
         sourceMessageId: null,
         privatePayload: {
-          text: systemText(`${corner.lifecycle.checks === 'passing' ? 'Checks passed; ' : ''}${reason}; arrange review or report the blocker to its commander`),
+          text: systemText(reviewBlockedText(corner, reason)),
           authorId: SYSTEM_AUTHOR_ID,
           fromRoomId: cornerId,
           kind: 'lifecycle',

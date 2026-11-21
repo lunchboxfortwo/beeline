@@ -32,6 +32,9 @@ export async function messageAddress(db: SqlDatabase, to: MessageAddress, sender
   return { agent: target?.id ?? to.agent, place: place.id };
 }
 
+/** Speech that is stored but wakes no one says why in the same tool result, so the sender can correct it this turn. */
+export const notWokenReceipt = (reason: string) => `Message stored and visible. No agents woken. ${reason}`;
+
 /** Both publication paths commit their route alongside the message itself. */
 export async function sendMessage(db: SqlDatabase, input: {
   route: MessageRoute; text: string; ask?: MessageAsk; question?: string; brief?: string; options?: readonly string[]; id?: string;
@@ -77,7 +80,9 @@ export async function sendMessage(db: SqlDatabase, input: {
       [command?.id ?? id,to.place,route.from.agent,input.text,input.replyTo ? 'reply' : 'message',command?.created_at ?? null,to.agent]);
       const saved = recorded.rows[0] ?? (await tx.query<{id:string;created_at:Date}>(
         'SELECT id,created_at FROM messages WHERE id=$1',[command?.id ?? id])).rows[0]!;
-      return { id:saved.id,createdAt:Math.floor(new Date(saved.created_at).getTime()/1000) };
+      return { id:saved.id,createdAt:Math.floor(new Date(saved.created_at).getTime()/1000),
+        ...(transcriptOnly ? { receipt: notWokenReceipt(to.agent === route.from.agent ? 'You addressed yourself; do the work in this turn.'
+          : 'An acknowledgement of an informational reply wakes no one; add ask or use message() to reach them.') } : {}) };
     }
     if (input.ask) {
       const choice = await postRoomChoice(tx, {

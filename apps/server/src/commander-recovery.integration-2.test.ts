@@ -1,5 +1,4 @@
 import { advanceCorner, createHash, randomUUID, randomBytes, expect, it, vi, MemoryObjectStorage, ObjectService, callAgentTool, postArtifact, createServer, spawn, createInterface, mkdtemp, readFile, writeFile, rm, tmpdir, join, HUMAN, RUBY, WORKER, WS, ROOM, DM, db, daemon, phone, order, claim, authority, commands, open, worker, rootFixture, type AgentCommand, type DaemonApiClient } from './test-support-commander-recovery.integration.test-support.js';
-import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 
 
 it('keeps DM-returned decisions indexed until answered or source membership ends', async () => {
@@ -440,9 +439,10 @@ it('QUEUE-1: a tag, order and brief revision during a running turn retain separa
   expect(next[1]!.source.body).toContain('Second: add rounded edges');
   expect(next[2]!.source.body).toContain('revised the thread brief');
   expect((await rootFixture.db.query('SELECT private_payload FROM agent_commands WHERE id=$1',[next[2]!.id])).rows[0])
-    .toMatchObject({private_payload:{returnIdentityId:SYSTEM_IDENTITY_ID,
-      route:{from:{agent:SYSTEM_IDENTITY_ID,place:opened.cornerId},to:{agent:WORKER,place:opened.cornerId}}}});
-  expect(next[2]!.from).toEqual({agent:SYSTEM_IDENTITY_ID,place:opened.cornerId});
+    .toMatchObject({private_payload:{returnIdentityId:RUBY,
+      route:{from:{agent:RUBY,place:rootFixture.order.roomId},to:{agent:WORKER,place:opened.cornerId}}}});
+  // A revision is sent by its reviser, so the implementer's answer returns there.
+  expect(next[2]!.from).toEqual({agent:RUBY,place:rootFixture.order.roomId});
   for (const command of next) {
     await claim(command);
     await rootFixture.daemon.execute('postRoomMessage', { ...authority(command), text:'Answered this queued request.' }, WORKER);

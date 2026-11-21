@@ -38,7 +38,7 @@ export function joinableTitle(name: string): string {
 
 /** "waiting on you" for the person the server's waiting blocker names, "waiting on <name>" for everyone else. */
 export function threadWord(corner: ChatListCorner, viewer: string | undefined): string {
-  return threadListLabel(corner, viewer).word;
+  return threadRow(corner, viewer).word;
 }
 
 export function threadTitle(item: ChatListItem, corner: ChatListCorner): string {
@@ -66,6 +66,19 @@ export function threadMark(
 ): { state: WorkState; idle: boolean } {
   const state = threadWorkState(corner, viewer);
   return { state, idle: state === 'in-progress' && (corner.state === 'idle' || corner.state === 'waiting') };
+}
+
+/**
+ * A thread row's state line and mark read one state: a Tasks state past working (backlog,
+ * review, done) names itself; otherwise the line words the server's corner state.
+ */
+export function threadRow(
+  corner: ThreadWaitFacts & { workState?: WorkState },
+  viewer: string | undefined,
+): { word: string; you: boolean; state: WorkState; idle: boolean } {
+  const mark = threadMark(corner, viewer);
+  const word = mark.state === 'done' ? 'done' : mark.state === 'in-review' ? 'review' : mark.state === 'backlog' ? 'backlog' : undefined;
+  return { ...(word ? { word, you: false } : threadListLabel(corner, viewer)), ...mark };
 }
 
 /** Chats navigate every thread: waiting ones first, the rest in server order. */
