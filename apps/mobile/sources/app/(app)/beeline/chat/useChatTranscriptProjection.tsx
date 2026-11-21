@@ -6,7 +6,6 @@ import { continuedSpeakerIds, ledgerSpeakerKey } from '@/buzz/ledger-attribution
 import { useCornerHeaderItem } from '@/buzz/use-room-corners';
 import { projectActiveTurnStream } from '@/buzz/live-turn-stream';
 import { resolvePendingAgentDisplay } from '@/buzz/agent-display';
-import { cornerDisplayState, cornerHeaderAgent } from '@/buzz/corner-display-state';
 import { selectWorkingAgents } from '@/buzz/room-indicators';
 import { resolveCornerViewAgentPubkey } from '@/buzz/corner-session';
 import { sameStringSet, shallowEqualRecord, useStable } from '@/buzz/use-stable';
@@ -53,11 +52,7 @@ export function useChatTranscriptProjection([
   dismissComposerKeyboard: () => void,
   speakerWorking: Readonly<Record<string, true>>,
   continuedAttributionIds: Set<string>,
-  cornerOwnerPubkey: string | undefined,
   cornerOwnerDisplay: import("@/buzz/agent-display").AgentDisplayIdentity | null | undefined,
-  cornerOwnerWorking: boolean,
-  cornerHeaderWord: string | undefined,
-  cornerHeaderDisplay: import("@/buzz/corner-display-state").CornerDisplayState | undefined,
   cornerHeaderSource: import("@/buzz/corner-display-state").CornerDisplayItem | undefined,
   emptyLedger: import("react/jsx-runtime").JSX.Element | null,
 ] {
@@ -71,16 +66,13 @@ export function useChatTranscriptProjection([
   }, []);
 
   // The header reads this corner's row from the parent Room's corner record,
-  // the same row the Corners screen and Room list paint. Live turns pick the
-  // name and ring below; they never pick the state.
+  // the same row the Corners screen and Room list paint. Live turns never pick the state.
   const cornerHeaderSource = useCornerHeaderItem(
     isCorner ? (parentChannelId ?? undefined) : undefined,
     decodedId,
     isArchived,
     roomClient,
   );
-
-  const cornerHeaderDisplay = cornerHeaderSource ? cornerDisplayState(cornerHeaderSource) : undefined;
 
   const cornerAgentPubkey = useMemo(
     () =>
@@ -102,32 +94,16 @@ export function useChatTranscriptProjection([
 
   const speakerWorking = useStable(rawSpeakerWorking, shallowEqualRecord);
 
-  // The corner header names the opener from `corner_facts.owner_agent_id`, never
-  // whichever agent currently holds a live turn. While a reviewer works in
-  // the corner the transcript attribution is the reviewer's and stays there;
-  // the corner does not change hands. The transcript-derived identity fills
-  // in only before the server projection has landed. The gold ring on a
-  // byline still names the actual worker (C77).
-  const cornerHeaderAgentView = cornerHeaderAgent({
-    ownerPubkey: cornerAgentPubkey,
-    ...(cornerHeaderDisplay ? { status: cornerHeaderDisplay.status } : {}),
-    ...(cornerHeaderDisplay?.headerSuffix ? { headerSuffix: cornerHeaderDisplay.headerSuffix } : {}),
-    activeTurnPubkeys: activeAgentTurns.map((turn) => turn.agentPubkey),
-  });
-
-  const cornerOwnerPubkey = cornerHeaderAgentView.pubkey;
-
-  const cornerOwnerDisplay = cornerOwnerPubkey
+  // The projected owner stays stable while another agent works in the corner.
+  // Transcript-derived identity fills in only before the server projection lands;
+  // live-turn attribution remains with the actual worker.
+  const cornerOwnerDisplay = cornerAgentPubkey
     ? resolvePendingAgentDisplay(
-        cornerOwnerPubkey,
-        agentByPubkey.get(cornerOwnerPubkey),
+        cornerAgentPubkey,
+        agentByPubkey.get(cornerAgentPubkey),
         participantsHydrated,
       )
     : undefined;
-
-  const cornerHeaderWord = cornerHeaderAgentView.stateWord;
-
-  const cornerOwnerWorking = cornerHeaderAgentView.ownerWorking;
 
   const visibleMessages = useMemo(
     () => projectActiveTurnStream(messages, activeAgentTurns, isArchived).map((message) => {
@@ -204,7 +180,6 @@ export function useChatTranscriptProjection([
   return [
     desktopTranscript, transcriptMessagesRef, transcriptMessages, visibleMessages,
     cornerAgentPubkey, dismissComposerKeyboard, speakerWorking, continuedAttributionIds,
-    cornerOwnerPubkey, cornerOwnerDisplay, cornerOwnerWorking, cornerHeaderWord,
-    cornerHeaderDisplay, cornerHeaderSource, emptyLedger,
+    cornerOwnerDisplay, cornerHeaderSource, emptyLedger,
   ];
 }

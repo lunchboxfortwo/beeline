@@ -6,6 +6,11 @@ import { cornerBlockerSql, cornerScheduledWaitSql, cornerWorkSql,
 
 export type CornerIdleRow = CornerStateRow & {
   id: string;
+  locked: boolean;
+  worker_active: boolean;
+  reviewer_active: boolean;
+  blocking: boolean;
+  last_turn_ended_at: Date | null;
   name: string;
   parent_id: string;
   /** Epoch seconds kept as text to preserve PostgreSQL's microsecond precision. */

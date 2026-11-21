@@ -1,4 +1,4 @@
-import type { CornerLifecycleView,CornerStateFacts,DerivedCornerState } from '@beeline/api-contract/phone';
+import type { CornerBlocker,CornerLifecycleView,CornerStateReason } from '@beeline/api-contract/phone';
 import type { CornerEvent } from './corner-lifecycle-values.js';
 
 export type CornerCheckSummary = NonNullable<CornerLifecycleView['checksSummary']> & {
@@ -36,10 +36,9 @@ export type CornerMachine = {
   /** A person or agent parked the thread in Backlog (update_work); it rests idle with reason backlog. */
   backlog?: true;
 } & (
-  | { state: 'working' | 'archived' }
+  | { state: 'working' | 'waiting' | 'archived' }
   | { state: 'idle'; reason?: 'backlog' }
   | { state: 'review'; phase: 'checks' | 'reviewer' }
-  | { state: 'waiting'; reason: 'blocked' | 'user_action' | 'question' }
 );
 
 export type MachineWake = {
@@ -58,14 +57,24 @@ export type MachineWake = {
 
 export type MachineNotification = { kind: 'idle' | 'waiting'; key: string };
 
-export type CornerMachineFacts = CornerStateFacts & {
+export type CornerMachineFacts = {
+  archived: boolean;
+  locked?: boolean;
+  /** Running worker receipts; reviewer work has its own input. */
+  turnRunning: boolean;
+  reviewerActive?: boolean;
+  lifecycle?: CornerLifecycleView;
+  /**
+   * The selected blocker. Merge holds are selected only when no other blocker
+   * is open, so a `merge-hold` blocker means the hold is all that remains.
+   */
+  blocker?: { reason: CornerStateReason; itemId?: string; blocker?: CornerBlocker };
   headSha?: string;
   approved?: boolean;
   reviewerRequired?: boolean;
   mergeHeld?: boolean;
   mergeConflictDelivered?: boolean;
   lostEffects?: string[];
-  waitReason?: 'blocked' | 'user_action' | 'question';
   reviewerConfigured?: boolean;
   /** Actual implementer admission; peer work still owns the Working badge. */
   implementerActive?: boolean;
@@ -230,15 +239,8 @@ export function transitionCorner(
     (f.blocker.blocker?.kind !== 'merge-hold' ||
       (!f.turnRunning && !f.reviewerActive && !checksUnderway && !wakes.some((w) => w.kind === 'review')))
   ) {
-    const reason =
-      f.waitReason ??
-      (f.blocker.reason === 'question'
-        ? 'question'
-        : f.blocker.reason === 'approve' || f.blocker.reason === 'connect'
-          ? 'user_action'
-          : 'blocked');
-    state = { ...base, state: 'waiting', reason };
-    notify('waiting', `waiting:${f.blocker.itemId ?? reason}`);
+    state = { ...base, state: 'waiting' };
+    notify('waiting', `waiting:${f.blocker.itemId ?? f.blocker.reason}`);
   } else if (f.turnRunning || wakes.some((w) => !['review', 'review-gap', 'land'].includes(w.kind)))
     state = { ...base, state: 'working' };
   else if (
@@ -259,15 +261,6 @@ export function transitionCorner(
     if (f.idleEligible && f.idleSince) notify('idle', `idle:${f.idleSince}`);
   }
   return { state, wakes, notifications };
-}
-
-/** Compatibility input adapter. All badge decisions use the machine above. */
-export function deriveCornerState(facts: CornerStateFacts): DerivedCornerState {
-  const { state } = transitionCorner({ state: 'idle' }, { facts, event: { kind: 'reconcile' } });
-  return {
-    state: state.state,
-    ...(state.state === 'waiting' && facts.blocker ? facts.blocker : {}),
-  };
 }
 
 /** Plan the one settled failure report and retain provider observation metadata. */

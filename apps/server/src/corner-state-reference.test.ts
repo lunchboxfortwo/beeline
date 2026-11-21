@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { deriveCornerState, type CornerStateFacts } from './corner-state.js';
+import { transitionCorner, type CornerMachineFacts } from './corner-machine.js';
 
 /** Owner reference: docs/corner-state-reference.md. No production code or hashes as the oracle. */
 it('CORNER-REFERENCE: exhausts independent activity, ending, CI and blocker facts', () => {
@@ -15,9 +15,8 @@ it('CORNER-REFERENCE: exhausts independent activity, ending, CI and blocker fact
       ? { status: 'unknown' as const, total: ci === 'pending-job' ? 1 : 0,
           failing: [], checks: ci === 'pending-job' ? [{ name: 'check', status: 'pending' as const }] : [],
           updatedAt: 1, ...(ci === 'empty-fetched' ? { fetchStartedAt: 1 } : {}) } : undefined;
-    const facts: CornerStateFacts = {
+    const facts: CornerMachineFacts = {
       archived, locked, turnRunning, reviewerActive,
-      ...(ending === 'closed-run' || ending === 'landed-run' ? { run: { state: ending === 'closed-run' ? 'closed' : 'landed' } } : {}),
       lifecycle: { lifecycle: ending === 'done' ? 'done' : 'working',
         ...(ending === 'abandoned' ? { outcome: 'abandoned' } : {}),
         checks: ci === 'pending' ? 'pending' : ci === 'failing' ? 'failing' : ci === 'passing' ? 'passing' : 'unknown',
@@ -34,7 +33,7 @@ it('CORNER-REFERENCE: exhausts independent activity, ending, CI and blocker fact
       : blocked ? 'waiting'
       : reviewerActive || ['pending', 'unreported', 'pending-job'].includes(ci) ? 'review'
       : blocked ? 'waiting' : 'idle';
-    expect(deriveCornerState(facts).state, JSON.stringify(facts)).toBe(expected);
+    expect(transitionCorner({ state: 'idle' }, { facts, event: { kind: 'reconcile' } }).state.state, JSON.stringify(facts)).toBe(expected);
     cases++;
   }
   expect(cases).toBe(1344);

@@ -1,7 +1,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { deriveCornerState, type CornerStateFacts } from "./corner-state.js";
+import { transitionCorner, type CornerMachineFacts } from "./corner-machine.js";
 
 import type { CornerLifecycleView, CornerState } from "@beeline/api-contract/phone";
 
@@ -25,16 +25,6 @@ type BlockerKind =
   | 'merge-hold'
   | 'agent'
   | 'human+agent';
-
-const RUNS = [
-  undefined,
-  { state: 'landed' },
-  { state: 'closed' },
-  { state: 'ask_human' },
-  { state: 'implement', outcome: 'failed' },
-  { state: 'review' },
-  { state: 'checks' },
-] as const;
 
 const CHECKS: readonly CheckShape[] = ['pending', 'passing', 'failing', 'unknown', 'unreported', 'no-checks'];
 
@@ -79,7 +69,7 @@ function lifecycleFor(shape: CheckShape, prPresent: boolean, closure: Closure): 
   return lifecycle;
 }
 
-function blockerFacts(kind: BlockerKind): Pick<CornerStateFacts, 'blocker'> {
+function blockerFacts(kind: BlockerKind): Pick<CornerMachineFacts, 'blocker'> {
   if (kind === 'none') return {};
   if (kind === 'agent') {
     return {
@@ -97,7 +87,7 @@ function blockerFacts(kind: BlockerKind): Pick<CornerStateFacts, 'blocker'> {
   };
 }
 
-function pendingOnHead(facts: CornerStateFacts): boolean {
+function pendingOnHead(facts: CornerMachineFacts): boolean {
   const lifecycle = facts.lifecycle;
   const checks = lifecycle?.checksSummary?.status ?? lifecycle?.checks;
   const summary = lifecycle?.checksSummary;
@@ -109,7 +99,7 @@ function pendingOnHead(facts: CornerStateFacts): boolean {
   return checks === 'pending' || unreported;
 }
 
-function isClosed(facts: CornerStateFacts): boolean {
+function isClosed(facts: CornerMachineFacts): boolean {
   if (facts.archived) return true;
   const lifecycle = facts.lifecycle;
   const raw = String(lifecycle?.lifecycle ?? '').trim().toLowerCase();
@@ -125,7 +115,7 @@ function scan(
 ): number {
   let count = 0;
   for (const archived of [false, true]) {
-    for (const run of RUNS) {
+    {
       for (const closure of closures) {
         for (const turnRunning of [false, true]) {
             for (const locked of [false, true]) {
@@ -135,16 +125,15 @@ function scan(
                     if (closure === 'merged' && !prPresent) continue;
                     for (const blocker of BLOCKERS) {
                       count += 1;
-                      const facts: CornerStateFacts = {
+                      const facts: CornerMachineFacts = {
                         archived,
                         locked,
                         turnRunning,
                         reviewerActive,
-                        ...(run ? { run } : {}),
                         lifecycle: lifecycleFor(shape, prPresent, closure),
                         ...blockerFacts(blocker),
                       };
-                      const actual: CornerState = deriveCornerState(facts).state;
+                      const actual: CornerState = transitionCorner({ state: 'idle' }, { facts, event: { kind: 'reconcile' } }).state.state;
                       const closed = facts.archived || (!locked && isClosed(facts));
                       const pending = pendingOnHead(facts);
                       const anyBlocker = blocker !== 'none';
@@ -157,7 +146,7 @@ function scan(
                       else expected = 'idle';
                       if (actual !== expected && failures.length < 8) {
                         failures.push(
-                          `got ${actual} expected ${expected} archived=${archived} run=${run?.state ?? '-'} closure=${closure} turn=${turnRunning} locked=${locked} reviewer=${reviewerActive} checks=${shape} pr=${prPresent} blocker=${blocker}`,
+                          `got ${actual} expected ${expected} archived=${archived} closure=${closure} turn=${turnRunning} locked=${locked} reviewer=${reviewerActive} checks=${shape} pr=${prPresent} blocker=${blocker}`,
                         );
                       }
                     }
@@ -172,14 +161,14 @@ function scan(
   return count;
 }
 
-describe('deriveCornerState invariants', () => {
+describe('corner machine state invariants', () => {
   it('enumerates archived, turns, checks, pull requests, and blockers', () => {
     const failures: string[] = [];
     const started = performance.now();
     const count = scan(failures, ['none', 'landed', 'done', 'abandoned', 'merged']);
     const elapsed = performance.now() - started;
     expect(failures).toEqual([]);
-    expect(count).toBeGreaterThan(20_000);
+    expect(count).toBeGreaterThan(5_000);
     expect(elapsed).toBeLessThan(1_000);
   });
 });

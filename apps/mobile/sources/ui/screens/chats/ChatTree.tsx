@@ -5,7 +5,7 @@ import React, { useRef, useState } from 'react';
 import { ListItem, Separator, XStack, YStack } from 'tamagui';
 import { ChevronDown, CornerDownRight, Pin } from 'lucide-react-native';
 import equal from 'fast-deep-equal';
-import { voiceDuration } from '@beeline/api-contract/phone';
+import { threadWorkMark, threadWorkState, voiceDuration } from '@beeline/api-contract/phone';
 import type { ChatListCorner } from '@beeline/api-contract/phone';
 import type { ChatListItem, ChatListView } from '@beeline/buzz-client';
 import { useRoomOutboxFailure } from '@/buzz/message-outbox-observer';
@@ -20,9 +20,7 @@ import {
   chatTitle,
   joinableTitle,
   shownThreads,
-  threadMark,
   threadTitle,
-  threadWorkState,
 } from './chat-tree-model';
 import { threadListLabel } from '@/ui/screens/thread/thread-status';
 
@@ -109,7 +107,7 @@ function ThreadLine({
 }) {
   const { word } = threadListLabel(corner, viewer);
   const title = threadTitle(item, corner);
-  const { state, idle } = threadMark(corner, viewer);
+  const { state, idle } = threadWorkMark(corner, viewer);
   const step = useStep();
   return (
     <ListItem

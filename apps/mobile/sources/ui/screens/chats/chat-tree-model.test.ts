@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatListItem } from '@beeline/buzz-client';
-import type { ChatListCorner } from '@beeline/api-contract/phone';
+import { threadWorkMark, type ChatListCorner } from '@beeline/api-contract/phone';
+import { threadListLabel } from '@/ui/screens/thread/thread-status';
 import {
   chatNameForRepository,
   chatPreview,
@@ -8,9 +9,9 @@ import {
   chatThreads,
   filterChats,
   shownThreads,
-  threadMark,
-  threadWord,
 } from './chat-tree-model';
+
+const threadWord = (corner: ChatListCorner, viewer: string | undefined) => threadListLabel(corner, viewer).word;
 
 const alan = { pubkey: 'a'.repeat(64), kind: 'agent' as const, name: 'Alan', handle: 'alan' };
 
@@ -104,21 +105,21 @@ describe('chat rows', () => {
   it('marks Needs you only for the person a thread waits on; a wait on anyone else is idle', () => {
     const waiting = (blocker: typeof onViewer) =>
       ({ id: 'w', name: 'w', state: 'waiting', blocker }) as ChatListCorner;
-    expect(threadMark(waiting(onViewer), viewer)).toEqual({ state: 'needs-you', idle: false });
-    expect(threadMark(waiting(onAlan), viewer)).toEqual({ state: 'in-progress', idle: true });
-    expect(threadMark({ state: 'waiting', blocker: onAlan } as ChatListCorner, viewer)).toEqual({ state: 'in-progress', idle: true });
-    expect(threadMark({ state: 'working' } as ChatListCorner, viewer)).toEqual({ state: 'in-progress', idle: false });
-    expect(threadMark({ state: 'archived' } as ChatListCorner, viewer)).toEqual({ state: 'done', idle: false });
+    expect(threadWorkMark(waiting(onViewer), viewer)).toEqual({ state: 'needs-you', idle: false });
+    expect(threadWorkMark(waiting(onAlan), viewer)).toEqual({ state: 'in-progress', idle: true });
+    expect(threadWorkMark({ state: 'waiting', blocker: onAlan } as ChatListCorner, viewer)).toEqual({ state: 'in-progress', idle: true });
+    expect(threadWorkMark({ state: 'working' } as ChatListCorner, viewer)).toEqual({ state: 'in-progress', idle: false });
+    expect(threadWorkMark({ state: 'archived' } as ChatListCorner, viewer)).toEqual({ state: 'done', idle: false });
   });
 
   it('Reproduction ROW-DONE: a thread row reads one state, its machine state and reason; a planted second state is ignored', () => {
     // latency-capture-investigation: a stored Done over an idle machine drew Done beside "idle".
     const planted = { id: 'r', name: 'r', state: 'idle', workState: 'done' } as unknown as ChatListCorner;
-    expect([threadMark(planted, viewer), threadWord(planted, viewer)]).toEqual([{ state: 'in-progress', idle: true }, 'idle']);
+    expect([threadWorkMark(planted, viewer), threadWord(planted, viewer)]).toEqual([{ state: 'in-progress', idle: true }, 'idle']);
     const backlog = { id: 'b', name: 'b', state: 'idle', reason: 'backlog' } as ChatListCorner;
-    expect([threadMark(backlog, viewer), threadWord(backlog, viewer)]).toEqual([{ state: 'backlog', idle: false }, 'backlog']);
+    expect([threadWorkMark(backlog, viewer), threadWord(backlog, viewer)]).toEqual([{ state: 'backlog', idle: false }, 'backlog']);
     const review = { id: 'v', name: 'v', state: 'review', workState: 'backlog' } as unknown as ChatListCorner;
-    expect([threadMark(review, viewer), threadWord(review, viewer)]).toEqual([{ state: 'in-review', idle: false }, 'review']);
+    expect([threadWorkMark(review, viewer), threadWord(review, viewer)]).toEqual([{ state: 'in-review', idle: false }, 'review']);
   });
 
   it('shows at most three waiting threads, counts the rest, and shows none when none wait', () => {

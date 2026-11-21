@@ -597,7 +597,7 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
         checks: 'unknown',
       };
       const hasLiveWorkingTurn = corner.latest_turn_status === 'working';
-      const derived = cornerRowState({ ...corner, lifecycle });
+      const derived = cornerRowState(corner);
       const header = roomHeader(corner, ctx.publicOrigin);
       const about = corner.objective?.trim() || header.about;
       return {

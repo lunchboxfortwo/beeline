@@ -1,22 +1,26 @@
 import { describe, it, expect } from 'vitest';
 import { chatCornerCounts } from './chat-corner-counts.js';
 import { threadWorkState, type CornerLifecycleView } from '@beeline/api-contract/phone';
+import type { CornerMachine } from './corner-machine.js';
+/** A corner row as the read selects it; its state is the stored machine. */
 const row = (
   lifecycle: Partial<CornerLifecycleView> = {},
-  latest_turn_status: string | null = null,
+  machine: CornerMachine = { state: 'idle' },
 ) => ({
   id: 'corner',
   name: 'Corner',
   parent_id: 'room',
   archived_at: null,
+  machine,
   lifecycle: { lifecycle: 'open', checks: 'unknown', ...lifecycle } as CornerLifecycleView,
-  latest_turn_status,
-  worker_active: latest_turn_status === 'working',
+  latest_turn_status: machine.state === 'working' ? 'working' : null,
 });
+const working: CornerMachine = { state: 'working' };
+const waiting: CornerMachine = { state: 'waiting' };
 describe('chat corner counts', () => {
   it('marks a waiting corner Needs you only for the person it waits on', () => {
     const waitingOn = (personId: string) => ({
-      ...row({ reason: 'question' }),
+      ...row({ reason: 'question' }, waiting),
       id: personId,
       blocking: true,
       waiting_item_id: 'question',
@@ -36,25 +40,25 @@ describe('chat corner counts', () => {
     const result = chatCornerCounts(
       [
         {
-          ...row({ reason: 'question' }),
+          ...row({ reason: 'question' }, waiting),
           blocking: true,
           waiting_item_id: 'question',
           waiting_reason: 'question' as const,
           waiting_kind: 'message' as const,
         },
         {
-          ...row({ reason: 'failed' }),
+          ...row({ reason: 'failed' }, waiting),
           blocking: true,
           waiting_item_id: 'question',
           waiting_reason: 'question' as const,
           waiting_kind: 'message' as const,
         },
-        row({}, 'working'),
+        row({}, working),
         {
           ...row({
             checks: 'pending',
             pr: { url: 'https://github.com/example/repo/pull/1', number: 1 },
-          } as any),
+          } as any, { state: 'review', phase: 'checks' }),
         },
       ],
       'viewer',
@@ -70,9 +74,9 @@ describe('chat corner counts', () => {
   it('projects only the corner machine: Backlog is its idle reason and a planted stored state is ignored', () => {
     const result = chatCornerCounts(
       [
-        { ...row(), machine: { state: 'idle' as const, reason: 'backlog' as const, backlog: true as const } },
+        row({}, { state: 'idle', reason: 'backlog', backlog: true }),
         // The retired second store, planted: it cannot move the row.
-        { ...row({}, 'working'), work_state: 'done' } as ReturnType<typeof row>,
+        { ...row({}, working), work_state: 'done' } as ReturnType<typeof row>,
         row(),
       ],
       'viewer',
@@ -89,9 +93,9 @@ describe('chat corner counts', () => {
     const result = chatCornerCounts(
       [
         { ...row(), follows_viewer: true },
-        { ...row({}, 'working'), follows_viewer: true },
+        { ...row({}, working), follows_viewer: true },
         {
-          ...row(),
+          ...row({}, waiting),
           blocking: true,
           waiting_item_id: 'question',
           waiting_reason: 'question' as const,
@@ -147,7 +151,7 @@ describe('chat corner counts', () => {
   });
   it('retains every blocked thread even beyond the normal preview and without Mine', () => {
     const blocked = Array.from({ length: 12 }, (_, i) => ({
-      ...row(),
+      ...row({}, waiting),
       id: `blocked-${i}`,
       blocking: true,
       waiting_item_id: `question-${i}`,
@@ -156,7 +160,7 @@ describe('chat corner counts', () => {
     }));
     const result = chatCornerCounts(
       [
-        ...Array.from({ length: 10 }, (_, i) => ({ ...row({}, 'working'), id: `working-${i}` })),
+        ...Array.from({ length: 10 }, (_, i) => ({ ...row({}, working), id: `working-${i}` })),
         ...blocked,
       ],
       'viewer',
@@ -171,7 +175,7 @@ describe('chat corner counts', () => {
       [
         { ...row(), follows_viewer: true, owed_viewer: false, attention: false },
         {
-          ...row(),
+          ...row({}, waiting),
           blocking: true,
           waiting_item_id: 'question',
           waiting_reason: 'question' as const,
@@ -180,7 +184,7 @@ describe('chat corner counts', () => {
           attention: true,
         },
         {
-          ...row(),
+          ...row({}, waiting),
           blocking: true,
           waiting_item_id: 'question',
           waiting_reason: 'question' as const,
@@ -189,7 +193,7 @@ describe('chat corner counts', () => {
           attention: false,
         },
         {
-          ...row({}, 'working'),
+          ...row({}, working),
           blocking: true,
           waiting_item_id: 'question',
           waiting_reason: 'question' as const,
@@ -215,7 +219,7 @@ describe('chat corner counts', () => {
     const result = chatCornerCounts(
       [
         {
-          ...row(),
+          ...row({}, waiting),
           blocking: true,
           waiting_item_id: 'question',
           waiting_reason: 'question' as const,
@@ -223,7 +227,7 @@ describe('chat corner counts', () => {
           follows_viewer: true,
           latest_created_at: at,
         },
-        { ...row({}, 'working'), follows_viewer: true, latest_created_at: at },
+        { ...row({}, working), follows_viewer: true, latest_created_at: at },
         { ...row(), latest_created_at: at },
       ],
       'viewer',
@@ -239,7 +243,7 @@ describe('chat corner counts', () => {
     const result = chatCornerCounts(
       [
         {
-          ...row(),
+          ...row({}, waiting),
           blocking: true,
           waiting_item_id: 'question',
           waiting_reason: 'question' as const,
@@ -247,7 +251,7 @@ describe('chat corner counts', () => {
           follows_viewer: true,
           latest_created_at: at,
         },
-        { ...row({}, 'working'), latest_created_at: at },
+        { ...row({}, working), latest_created_at: at },
         { ...row(), latest_created_at: null },
       ],
       'viewer',
@@ -258,13 +262,12 @@ describe('chat corner counts', () => {
       undefined,
     ]);
   });
-  it('excludes terminal lifecycle even before archived_at is projected', () => {
+  it('lists only corners whose machine is open', () => {
     expect(
       chatCornerCounts(
         [
-          row({ lifecycle: 'done' }),
-          row({ outcome: 'landed' }),
-          { ...row(), archived_at: new Date() },
+          row({ lifecycle: 'done' }, { state: 'archived', outcome: 'closed' }),
+          row({ outcome: 'landed' }, { state: 'archived', outcome: 'landed' }),
           { ...row(), parent_id: 'another' },
         ],
         'viewer',

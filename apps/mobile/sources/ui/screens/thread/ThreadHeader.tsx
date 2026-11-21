@@ -7,9 +7,8 @@ import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import type { View } from 'react-native';
 import { ListItem, XStack, YStack, useThemeName } from 'tamagui';
 import { ArrowLeft, Users, CornerDownRight, GitPullRequest, MoreHorizontal } from 'lucide-react-native';
-import type { CornerState, CornerStateReason } from '@beeline/api-contract/phone';
+import { threadWorkMark, type CornerBlocker, type CornerState, type CornerStateReason } from '@beeline/api-contract/phone';
 import { Btn, Glyph, HEIGHT, SafeTop, T, typeStyle, useTextSize } from '@/ui/grammar';
-import { threadMark } from '../chats/chat-tree-model';
 
 /**
  * Header B (the only thread header). A slim bar keeps Back, the chat (opens
@@ -30,7 +29,9 @@ export type ThreadHeaderData = {
     state?: CornerState;
     /** The machine's reason alongside `state` (`backlog` on an idle thread). */
     reason?: CornerStateReason;
-    waitsOnViewer?: boolean;
+    /** While waiting, whom the thread waits on; it needs `viewer` only when that is them. */
+    blocker?: CornerBlocker;
+    viewer?: string;
     prLine?: string;
     objective?: string;
 };
@@ -54,12 +55,13 @@ function ThreadName({ title, v, regular = false, testID, trail }: {
 }
 
 /** The thread's state mark for this viewer: a wait on anyone else reads idle. */
+function headerMark(h: ThreadHeaderData) {
+    return h.state ? threadWorkMark({ state: h.state, reason: h.reason, blocker: h.blocker }, h.viewer) : undefined;
+}
+
 function HeaderMark({ h }: { h: ThreadHeaderData }) {
-    if (!h.state) return null;
-    const { state, idle } = h.state === 'waiting'
-        ? (h.waitsOnViewer ? { state: 'needs-you' as const, idle: false } : { state: 'in-progress' as const, idle: true })
-        : threadMark({ state: h.state, ...(h.reason ? { reason: h.reason } : {}) }, undefined);
-    return <WorkStateMark state={state} idle={idle} />;
+    const mark = headerMark(h);
+    return mark ? <WorkStateMark state={mark.state} idle={mark.idle} /> : null;
 }
 
 export function ThreadBar({ h, collapsed, expanded, back, openChat, expand, openActions, safeTop = true, barRef, onBarLayout }: {
@@ -93,7 +95,7 @@ export function ThreadBar({ h, collapsed, expanded, back, openChat, expand, open
                                     backgroundColor="transparent" justifyContent="flex-start" onPress={expand}
                                     aria-label={h.title} accessibilityRole={expand ? 'button' : 'text'} testID="thread-bar-title">
                                     <YStack height={lineHeight} alignSelf="flex-start" justifyContent="center" testID="thread-bar-arrow-box"><Glyph icon={CornerDownRight} size={16} /></YStack>
-                                    <ThreadName title={h.title} v={h.waitsOnViewer ? "metaStrong" : "meta"} testID="thread-bar-name" trail={<HeaderMark h={h} />} />
+                                    <ThreadName title={h.title} v={headerMark(h)?.state === 'needs-you' ? "metaStrong" : "meta"} testID="thread-bar-name" trail={<HeaderMark h={h} />} />
                                 </ListItem>
                             ) : null}
                         </YStack>
@@ -124,7 +126,7 @@ export function ThreadTitleBlock({ h, openBrief, openPr, blockRef, onBlockLayout
             testID="thread-title-block">
             <XStack gap="2" alignItems="center" testID="thread-title-row">
                 <YStack height={lineHeight} alignSelf="flex-start" justifyContent="center" testID="thread-arrow-box"><Glyph icon={CornerDownRight} size={18} /></YStack>
-                <YStack flex={1} minWidth={0}><ThreadName title={h.title} v="title" regular={!h.waitsOnViewer} testID="thread-title" trail={<HeaderMark h={h} />} /></YStack>
+                <YStack flex={1} minWidth={0}><ThreadName title={h.title} v="title" regular={headerMark(h)?.state !== 'needs-you'} testID="thread-title" trail={<HeaderMark h={h} />} /></YStack>
                 {h.workItem ? <Btn kind="quiet" label="Change assignee" paddingHorizontal="0" minHeight={0} height={26} hitSlop={10} onPress={() => setAssigneeOpen(!assigneeOpen)}>{h.workItem.assignee ? <WorkAvatar person={h.workItem.assignee} size={26} /> : <Glyph icon={Users} />}</Btn> : null}
             </XStack>
             {h.workItem && assigneeOpen ? <WorkAssigneePicker people={h.people ?? []} onPick={person => {

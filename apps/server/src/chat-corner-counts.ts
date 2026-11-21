@@ -8,7 +8,7 @@ import { cornerImplementerSql } from './corner-worker.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { cornerWaitingReportSql } from './corner-waiting-report.js';
 import { createHash } from 'node:crypto';
-import { deriveCornerState, type DerivedCornerState } from './corner-state.js';
+import type { DerivedCornerState } from '@beeline/api-contract/phone';
 import { cornerOwedLookupSql } from './corner-owed.js';
 import { followsCornerSql } from './corner-follow.js';
 import { visibleChatMessageSql } from './read-cursor.js';
@@ -27,16 +27,8 @@ export type CornerStateRow = {
   waiting_kind?: 'message' | 'merge-hold' | 'report' | null;
   waiting_person_name?: string | null;
   archived_at: Date | null;
-  locked?: boolean;
   lifecycle: CornerLifecycleView | null;
-  /** Internal read aliases of the persisted machine state and terminal outcome. */
-  workflow_state?: string | null;
-  workflow_outcome?: string | null;
   latest_turn_status: string | null;
-  worker_active?: boolean;
-  last_turn_ended_at?: Date | null;
-  reviewer_active?: boolean;
-  blocking?: boolean;
   waiting_item_id?: string | null;
   waiting_reason?: CornerStateReason | null;
   waiting_person_id?: string | null;
@@ -45,56 +37,32 @@ export type CornerStateRow = {
   follows_viewer?: boolean | null;
 };
 
+/** The thread's state is its stored machine; a waiting thread names the blocker this viewer reads. */
 export function cornerRowState(row: CornerStateRow): DerivedCornerState {
-  const observed = deriveCornerState({
-    archived: Boolean(row.archived_at),
-    locked: row.locked,
-    turnRunning: row.worker_active === true,
-    reviewerActive: row.reviewer_active,
-    lifecycle: row.lifecycle ?? undefined,
-    ...(row.waiting_item_id && row.waiting_reason
+  const machine = row.machine ?? { state: 'idle' as const };
+  if (machine.state === 'idle' && machine.reason === 'backlog')
+    return { state: 'idle', reason: 'backlog' };
+  if (machine.state !== 'waiting' || !row.waiting_item_id || !row.waiting_reason)
+    return { state: machine.state };
+  return {
+    state: 'waiting',
+    reason: row.waiting_reason,
+    itemId:
+      row.waiting_kind === 'report'
+        ? createHash('sha256').update(`agent-command-card:${row.waiting_item_id}`).digest('hex')
+        : row.waiting_kind === 'merge-hold'
+          ? createHash('sha256').update(`corner-hold:${row.waiting_item_id}`).digest('hex')
+          : row.waiting_item_id,
+    ...(row.waiting_kind
       ? {
           blocker: {
-            reason: row.waiting_reason,
-            ...{
-              itemId:
-                row.waiting_kind === 'report'
-                  ? createHash('sha256')
-                      .update(`agent-command-card:${row.waiting_item_id}`)
-                      .digest('hex')
-                  : row.waiting_kind === 'merge-hold'
-                    ? createHash('sha256')
-                        .update(`corner-hold:${row.waiting_item_id}`)
-                        .digest('hex')
-                    : row.waiting_item_id,
-            },
-            ...(row.waiting_kind
-              ? {
-                  blocker: {
-                    kind: row.waiting_kind,
-                    ...(row.waiting_person_id ? { personId: row.waiting_person_id } : {}),
-                    ...(row.waiting_person_name ? { personName: row.waiting_person_name } : {}),
-                  },
-                }
-              : {}),
+            kind: row.waiting_kind,
+            ...(row.waiting_person_id ? { personId: row.waiting_person_id } : {}),
+            ...(row.waiting_person_name ? { personName: row.waiting_person_name } : {}),
           },
         }
       : {}),
-  });
-  return row.machine
-    ? {
-        state: row.machine.state,
-        ...(row.machine.state === 'waiting'
-          ? {
-              reason: observed.reason,
-              itemId: observed.itemId,
-              blocker: observed.blocker,
-            }
-          : row.machine.state === 'idle' && row.machine.reason === 'backlog'
-            ? { reason: 'backlog' as const }
-            : {}),
-      }
-    : observed;
+  };
 }
 
 /** Mine is followed or owed to this viewer. */
@@ -111,13 +79,6 @@ export function cornerScheduledWaitSql(corner: string): string {
       AND (schedule.max_runs IS NULL OR schedule.run_count<schedule.max_runs))`;
 }
 
-/** Intrinsic implementer execution history, independent of who created the corner. */
-export function cornerLastTurnEndSql(corner: string): string {
-  return `(SELECT max(turn.ended_at) FROM agent_turns turn WHERE turn.room_id=${corner}.id
-    AND turn.agent_id=(SELECT ${cornerImplementerSql('history_fact', corner)}
-      FROM corner_facts history_fact WHERE history_fact.corner_id=${corner}.id))`;
-}
-
 /** Shared corner facts for `FROM rooms c`; `member` checks the viewer's membership. */
 export function cornerFactsSql(viewerExpr: string): {
   columns: string;
@@ -125,10 +86,8 @@ export function cornerFactsSql(viewerExpr: string): {
   member: string;
 } {
   return {
-    columns: `f.locked,f.machine,gh.lifecycle,
-      activity.worker_active,activity.reviewer_active,
-      ${cornerLastTurnEndSql('c')} last_turn_ended_at,
-      blocker.item_id IS NOT NULL blocking,blocker.item_id waiting_item_id,blocker.reason waiting_reason,
+    columns: `f.machine,gh.lifecycle,
+      blocker.item_id waiting_item_id,blocker.reason waiting_reason,
       blocker.kind waiting_kind,blocker.person_name waiting_person_name,
       blocker.person_id waiting_person_id,
       turn.status latest_turn_status,turn.created_at latest_turn_created_at,
@@ -137,7 +96,6 @@ export function cornerFactsSql(viewerExpr: string): {
       owed.owed_viewer,owed.attention`,
     joins: `LEFT JOIN corner_facts f ON f.corner_id=c.id
     LEFT JOIN corner_github_cache gh ON gh.corner_id=c.id
-    ${cornerWorkSql()}
     ${cornerBlockerSql('true', false, viewerExpr)}
     LEFT JOIN LATERAL (SELECT message.id,message.text,message.author_id,message.created_at,message.presentation FROM messages message WHERE message.room_id=c.id
       AND message.presentation IN ('message','system') AND ${visibleChatMessageSql('message')}

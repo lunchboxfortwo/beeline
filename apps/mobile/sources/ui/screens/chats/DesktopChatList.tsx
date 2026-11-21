@@ -9,7 +9,7 @@ import { roomRowName } from '@/buzz/room-list-row';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
 import { RepositoryMark } from '@/components/buzz/RepositoryMark';
 import { AtMark, Glyph, HEIGHT, MARK, StatusMark, T, typeStyle, useStep, useTextSize } from '@/ui/grammar';
-import { threadWaitsOnViewer } from '@/ui/screens/thread/thread-status';
+import { threadWorkState } from '@beeline/api-contract/phone';
 import { useFinePointer } from '@/utils/use-fine-pointer';
 import { NEW_THREAD_HOLD_MS, PIN_HOLD_MS, useHold } from './ChatTree';
 import { chatTagged, chatTitle, threadTitle } from './chat-tree-model';
@@ -208,7 +208,7 @@ function CappedSection({ title, items, cap, rule, props }: {
  */
 export function DesktopChatList(props: Props) {
   const waiting = props.chats.flatMap((item) => item.directMessage ? [] : (props.corners(item) ?? [])
-    .filter((corner) => threadWaitsOnViewer(corner, props.viewer)).map((corner) => ({ item, corner })));
+    .filter((corner) => threadWorkState(corner, props.viewer) === 'needs-you').map((corner) => ({ item, corner })));
   const chats = props.chats.filter((item) => !item.directMessage);
   const dms = props.chats.filter((item) => item.directMessage);
   return (

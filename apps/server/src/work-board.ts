@@ -165,8 +165,7 @@ function workColumnsSql(viewer: string): string {
     (r.archived_at IS NOT NULL) room_archived,COALESCE(p.id,r.id) chat_id,COALESCE(p.name,r.name) chat_name,
     CASE WHEN w.id IS NOT NULL AND w.id<>r.id::text THEN COALESCE(w.title,r.name) ELSE r.name END name,r.name thread_name,
     (r.parent_id IS NOT NULL AND ref.id=r.id::text) thread,
-    CASE WHEN r.parent_id IS NOT NULL AND ref.id=r.id::text THEN COALESCE(f.machine,
-      CASE WHEN r.archived_at IS NOT NULL THEN '{"state":"archived"}'::jsonb END) END thread_machine,
+    CASE WHEN r.parent_id IS NOT NULL AND ref.id=r.id::text THEN f.machine END thread_machine,
     blocker.person_id thread_blocker_person,
     CASE WHEN r.parent_id IS NOT NULL AND ref.id=r.id::text THEN NULL
       WHEN r.archived_at IS NOT NULL OR w.state='done' THEN 'done'

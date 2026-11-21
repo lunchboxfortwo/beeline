@@ -122,7 +122,7 @@ describe('corner lifecycle recorded event sequences', () => {
       expect(await machine(cornerId)).toMatchObject({ state: 'working' });
       await terminalResult(repair!, 'Awaiting the owner host approval to capture phone screenshots.');
       await advanceCorner(rootFixture.db, cornerId, { kind: 'reconcile' });
-      expect(await machine(cornerId)).toMatchObject({ state: 'waiting', reason: 'user_action' });
+      expect(await machine(cornerId)).toMatchObject({ state: 'waiting' });
       expect((await commands(B, cornerId)).map(command=>({reason:command.reason,body:command.source.body}))).toEqual([{reason:'reply',body:'Awaiting the owner host approval to capture phone screenshots.'}]);
       changes.length = 0;
       await rootFixture.phone.execute('decideAgentGrant', { grantId: ask.grantId, decision: 'always' }, H);

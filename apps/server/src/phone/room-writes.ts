@@ -113,7 +113,7 @@ import { normalizeHumanCornerTitle, UUID_PATTERN } from './values.js';
         if (!replay.rowCount) throw new Error('corner id is already in use');
         return undefined;
       }
-      await createCornerFacts(database, id, true);
+      await createCornerFacts(database, id);
       // Every new corner leaves a static opening in its Room. A resident
       // requesting message anchors it; scratch openings stay at their open time.
       // No kind: a person opening a scratch corner wakes no subscriber.

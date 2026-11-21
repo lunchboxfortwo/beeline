@@ -11,6 +11,7 @@ import { createAgentCommand, readAgentCommands, type CommandRow } from './agent-
 import { answerRoomChoice } from './room-choice.js';
 import { AgentScheduleLoop } from './agent-schedules.js';
 import { PhoneService } from './phone-service.js';
+import { refreshCornerAttention } from './corner-attention.js';
 import { SCHEDULE_SCHEDULER_ID } from '@beeline/api-contract/scheduled-prompts';
 import { archiveWorkflow, assignWorkflowRole, handoff, getWorkflowRun, cancelWorkflowRun, saveWorkflow, startWorkflow } from './workflow-runs.js';
 import { APPROVER, CONTRACT, GATED, IMPLEMENTER, LIST_CONTRACT, OUTSIDER, OWNER, REVIEWER, ROOM, WORKER_A, WORKER_B, WORKSPACE, adminCommand, answerGate, commandFor, createSchedule, database, listRunCard, ownerNotices, pendingCommandsFor, reachGate, reportPresence, rootMessage, runCards, scheduleOccurrence, startedGatedRun, startedListRun, startedRun } from './test-fixtures/workflow-runs.js';
@@ -368,6 +369,8 @@ describe('run owner', () => {
     )).rows[0]!;
     expect(gate.card.requester.pubkey).toBe(OWNER);
     const phone = new PhoneService(database, 'http://test');
+    // The attention worker commits the corner machine before clients reread it.
+    await refreshCornerAttention(database, ROOM);
     expect((await phone.readCorners(parent, OWNER))!.corners.find(item => item.corner.id === ROOM)?.state).toBe('waiting');
     const tray = await phone.execute('readNeedsYou', { workspaceId: WORKSPACE }, OWNER);
     expect(tray.items.some(item => item.messageId === gate.id)).toBe(true);

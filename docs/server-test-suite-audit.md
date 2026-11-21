@@ -39,7 +39,7 @@ This inventory covers every current `apps/server/src/**/*.test.ts` file after th
 | `corner-owed.test.ts` | corner_owed | retained |
 | `corner-review-dispatch.test.ts` | reviewer dispatch, worker attribution, and no-check PR handling | retained |
 | `corner-reviewer-list.test.ts` | a failed review turn; approve_merge with a reviewer list; updateRoom reviewer list; related cases | retained |
-| `corner-state.test.ts` | deriveCornerState from the workflow run; deriveCornerState with the owed fact | retained |
+| `corner-state.test.ts` | a running turn overrides a wait on the owner, then the wait returns | retained |
 | `corner-wake.test.ts` | corner wake (waitForCornerWake); corner wake ignores the corner's own turn narration; the wake is reachable over the daemon route | retained |
 | `corner-watch.test.ts` | Reproduction O-2: a watcher receives a named sibling merge in A; refuses %s and writes nothing; returns all merged PR snapshot fields from corner facts; related cases | retained |
 | `daemon-live.test.ts` | held presence for a live connection; one machine socket for every agent on a helper machine; protocol heartbeat on helper sockets | retained |

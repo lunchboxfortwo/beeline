@@ -1,12 +1,7 @@
-import type { CornerBlocker, CornerLifecycleView, CornerState, CornerStateReason } from '@beeline/api-contract/phone';
+import { threadWorkState, type CornerBlocker, type CornerLifecycleView, type CornerState, type CornerStateReason } from '@beeline/api-contract/phone';
 
 /** The facts a list line reads: the server's state and, while waiting, its blocker. */
 export type ThreadWaitFacts = { readonly state: CornerState; readonly blocker?: CornerBlocker; readonly reason?: CornerStateReason };
-
-/** The thread waits on this viewer: the server's waiting blocker names them. */
-export function threadWaitsOnViewer(thread: ThreadWaitFacts, viewer: string | undefined): boolean {
-  return thread.state === 'waiting' && viewer !== undefined && thread.blocker?.personId === viewer;
-}
 
 /**
  * A thread line's second line in lists, per viewer: "waiting on you" (`you`,
@@ -14,9 +9,10 @@ export function threadWaitsOnViewer(thread: ThreadWaitFacts, viewer: string | un
  * for everyone else, then "review", "working", "backlog", "idle", "done"; one corner state drives both.
  */
 export function threadListLabel(thread: ThreadWaitFacts, viewer: string | undefined): { word: string; you: boolean } {
-  if (thread.state === 'idle' && thread.reason === 'backlog') return { word: 'backlog', you: false };
-  if (thread.state !== 'waiting') return { word: thread.state === 'archived' ? 'done' : thread.state, you: false };
-  if (threadWaitsOnViewer(thread, viewer)) return { word: 'waiting on you', you: true };
+  const work = threadWorkState(thread, viewer);
+  if (work === 'needs-you') return { word: 'waiting on you', you: true };
+  if (work === 'backlog' || work === 'done') return { word: work, you: false };
+  if (thread.state !== 'waiting') return { word: thread.state, you: false };
   const name = thread.blocker?.personName?.trim();
   if (name) return { word: `waiting on ${name}`, you: false };
   if (thread.blocker?.kind === 'ci') return { word: 'waiting on checks', you: false };
