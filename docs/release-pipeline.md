@@ -44,15 +44,17 @@ active release alone. Each identity read fetches tags again, including the rc
 published between the two legs. Version allocation reads release records and
 all versioned OTA branch names, so an orphaned OTA rc cannot be reused.
 
-When the command finishes, whether it succeeded or failed, it removes its own
+When the command finishes, whether it succeeded or failed, it attempts to remove its own
 `/tmp/beeline-release-*` working directory, including logs and the private
 timing files; each published release keeps `release.json` and
 `release-checks.json`. It also removes the Docker images releases built
 (`registry.fly.io/beeline-server` and `registry.fly.io/beeline-free-agents` tags,
 and untagged images labelled with a release SHA) except this release's and the
-newest previous release's. It then prunes dangling Docker images too. Images
-still in use stay. Cleanup never changes the
-release outcome; there is no timer or cron.
+newest previous release's, identified by image creation time. It then prunes
+dangling Docker images regardless of their release labels, including unlabelled
+intermediate build outputs; the current/previous retention applies to the
+labelled-image removal step, not this prune. Images still in use stay.
+Cleanup is best effort and never changes the release outcome; there is no timer or cron.
 
 `npm run release` never uploads store beta builds: next is the OTA beta only. Latest submits production store builds when a pinned native runtime is not the newest one live in its store (or a store cannot be read); `--no-store` skips them.
 Full Checks start alongside the next release's helper and desktop builds.

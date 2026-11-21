@@ -136,9 +136,7 @@ export function removeReleaseDirectory(directory, run = execFileSync) {
   run('sudo', ['-n', 'rm', '-rf', directory], { stdio: 'ignore' });
 }
 
-// The release builds the Fly server and free starter agent images. Each image,
-// and each untagged layer image left by rebuilding a tag, carries the release
-// SHA as a label. Keep this release's and the previous release's images.
+// Docker image ownership and retention: docs/release-pipeline.md.
 const RELEASE_IMAGES = ['registry.fly.io/beeline-server', 'registry.fly.io/beeline-free-agents'];
 const releaseTag = tag => RELEASE_IMAGES.some(repository => tag.startsWith(`${repository}:`));
 export function staleReleaseImages(images, sha) {
