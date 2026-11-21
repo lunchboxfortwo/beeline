@@ -30,7 +30,7 @@ html,body{background:#fafaf9}
 </script>
 <script>
 // While the bundle loads, open the app's live socket with the saved access and
-// send the launch page's first read. LiveConnection adopts this socket and the
+// send only reads without side effects. LiveConnection adopts this socket and the
 // read; nothing here renders or keeps data.
 (function () {
   try {
@@ -40,8 +40,7 @@ html,body{background:#fafaf9}
         !(access.expiresAt > Date.now() + 30000)) return;
     var path = window.location.pathname.replace(/\/+$/, '') || '/';
     var room = /^\/beeline\/chat\/([^/]+)$/.exec(path);
-    var read = room ? { op: 'readRoom', args: { roomId: decodeURIComponent(room[1]) } }
-      : /^\/(beeline\/(channels|community|create-workspace))?$/.test(path) ? { op: 'readWorkspaces', args: {} } : null;
+    var read = room ? { op: 'readRoom', args: { roomId: decodeURIComponent(room[1]) } } : null;
     var url = access.server.replace(/^http/, 'ws') + '/v1/phone/live';
     var socket = new WebSocket(url, ['bearer.' + access.token]);
     var messages = [];
@@ -62,14 +61,13 @@ html,body{background:#fafaf9}
     };
     var opened = function () {
       if (released || !read) return;
-      if (room) socket.send(JSON.stringify({ type: 'subscribe', roomIds: [read.args.roomId], sidebarPreviews: false, roomStateProjections: true }));
-      else sendRead();
+      socket.send(JSON.stringify({ type: 'subscribe', roomIds: [read.args.roomId], sidebarPreviews: false, roomStateProjections: true }));
     };
     socket.addEventListener('message', keep);
     socket.addEventListener('open', opened, { once: true });
     window.__beelineLaunchLive = {
       url: url, token: access.token, path: window.location.pathname, socket: socket,
-      reads: reads,
+      roomId: read ? read.args.roomId : undefined, reads: reads,
       // The adopter takes the frames received so far; later ones are its own.
       release: function () {
         released = true;

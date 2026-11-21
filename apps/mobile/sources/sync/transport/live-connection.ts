@@ -16,7 +16,6 @@ import type { NostrEvent } from '@beeline/nostr';
 import type { LiveWireEvent, MonolithSurfaceEvent } from './monolith-rig-transport';
 import { publishPhoneLiveEvent } from './phone-live-events';
 import { subscribeClientReset } from '@/sync/client-reset';
-import { invalidatesWorkspaceList } from '@/buzz/workspace-list-invalidation';
 
 type MissedUpdates = { type: 'missed-updates'; roomIds: string[]; streams: string[]; workspace: boolean };
 type SurfaceFilters = readonly {
@@ -46,8 +45,7 @@ type PendingRequest = {
 type LaunchRead = {
   id: string;
   key: string;
-  roomId?: string;
-  workspaceList?: boolean;
+  roomId: string;
   claimed?: true;
   unusable?: true;
   served?: true;
@@ -71,8 +69,7 @@ function takeLaunch(): Launch | undefined {
       const earlier = launch.release();
       this.reads = launch.reads.map(({ id, op, args }) => ({
         id, key: readKey(op, args),
-        workspaceList: op === 'readWorkspaces',
-        roomId: op === 'readRoom' ? (args as { roomId: string }).roomId : undefined,
+        roomId: args.roomId,
       }));
       return earlier;
     },
@@ -226,8 +223,6 @@ export class LiveConnection {
       if (read.refresh && read.roomId && registration.roomIds.has(read.roomId)) {
         delete read.refresh;
         this.refreshRoom(read.roomId);
-      } else if (read.refresh && read.workspaceList && registration.roomIds.size === 0) {
-        registration.listener({ monolithLive: { type: 'invalidate', roomId: '', reason: 'reconnect' } });
       }
     }
     return Promise.resolve(() => {
@@ -561,8 +556,6 @@ export class LiveConnection {
       this.endLaunch();
       return undefined;
     }
-    for (const launched of this.launch.reads)
-      if (launched.workspaceList && launched.key === key) delete launched.refresh;
     const read = this.launch.reads.find((launched) => !launched.claimed && !launched.unusable && launched.key === key);
     if (read) read.claimed = true;
     return read;
@@ -572,7 +565,12 @@ export class LiveConnection {
   private endLaunch(): void {
     const launch = this.launch;
     this.launch = undefined;
-    if (!launch || this.socket === launch.socket) return;
+    if (!launch) return;
+    if (this.socket === launch.socket) {
+      if (launch.roomId && !this.roomReferences.has(launch.roomId) && isOpen(launch.socket))
+        launch.socket.send(JSON.stringify({ type: 'unsubscribe', roomId: launch.roomId }));
+      return;
+    }
     launch.release();
     launch.socket.close();
   }
@@ -699,10 +697,9 @@ export class LiveConnection {
 
   private dispatch(live: LiveWireEvent | { type: 'pong' } | MissedUpdates, socket: WebSocket): void {
     for (const read of this.launch?.reads ?? []) {
-      if (live.type !== 'missed-updates' && !(read.workspaceList
-        ? live.type !== 'pong' && invalidatesWorkspaceList({ monolithLive: live })
-        : read.roomId && 'roomId' in live && live.roomId === read.roomId &&
-          !['subscribed', 'draft', 'thought', 'retract', 'presence'].includes(live.type))) continue;
+      if (live.type !== 'missed-updates' &&
+          (!('roomId' in live) || live.roomId !== read.roomId ||
+           ['subscribed', 'draft', 'thought', 'retract', 'presence'].includes(live.type))) continue;
       read.unusable = true;
       delete read.reply;
       if (read.pending) {
@@ -710,7 +707,7 @@ export class LiveConnection {
         delete read.pending;
         this.sendPending(socket);
       }
-      if (read.served && (read.workspaceList || (read.roomId && !this.roomReferences.has(read.roomId)))) read.refresh = true;
+      if (read.served && !this.roomReferences.has(read.roomId)) read.refresh = true;
     }
     switch (live.type) {
       case 'pong':

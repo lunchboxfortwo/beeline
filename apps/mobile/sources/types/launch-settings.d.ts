@@ -7,7 +7,8 @@ interface Window {
     token: string;
     path: string;
     socket: WebSocket;
-    reads: { id: string; op: string; args: unknown }[];
+    roomId?: string;
+    reads: { id: string; op: 'readRoom'; args: { roomId: string } }[];
     release(): MessageEvent[];
   };
 }

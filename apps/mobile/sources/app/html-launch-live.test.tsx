@@ -68,7 +68,7 @@ function launch(pathname: string, saved: Record<string, string | null>, denied =
 const signedIn = { 'buzzy.monolith.access.v1': access(), 'buzzy.monolith.identity.v1': 'viewer' };
 
 it.each([['/'], ['/beeline/channels'], ['/beeline/community'], ['/beeline/create-workspace/']])(
-  'opens the live socket and sends readWorkspaces on %s once it opens',
+  'opens only the live socket on %s',
   (path) => {
     const { window, sockets } = launch(path, signedIn);
     expect(sockets).toHaveLength(1);
@@ -76,14 +76,12 @@ it.each([['/'], ['/beeline/channels'], ['/beeline/community'], ['/beeline/create
     expect(sockets[0]!.protocols).toEqual(['bearer.saved-access']);
     expect(sockets[0]!.sent).toEqual([]);
     sockets[0]!.fire('open');
-    expect(sockets[0]!.sent.map((frame) => JSON.parse(frame))).toEqual([
-      { t: 'req', id: 'launch-1', op: 'readWorkspaces', args: {} },
-    ]);
+    expect(sockets[0]!.sent).toEqual([]);
     expect(window.__beelineLaunchLive).toMatchObject({
       url: 'wss://server.fixture/v1/phone/live',
       token: 'saved-access',
       path,
-      reads: [{ id: 'launch-1', op: 'readWorkspaces', args: {} }],
+      reads: [],
     });
   },
 );
