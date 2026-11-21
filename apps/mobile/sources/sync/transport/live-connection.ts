@@ -34,46 +34,17 @@ type RequestOptions = {
 };
 type PendingRequest = {
   operation: string;
-  key: string;
-  launchRead?: LaunchRead;
   frame: string;
   socket?: WebSocket;
   generation?: number;
   resolve(value: unknown): void;
   reject(reason: unknown, transportFailed?: boolean): void;
 };
-type LaunchRead = {
-  id: string;
-  key: string;
-  roomId: string;
-  claimed?: true;
-  unusable?: true;
-  served?: true;
-  refresh?: true;
-  pending?: PendingRequest;
-  reply?: Record<string, unknown>;
-};
-type Launch = Omit<NonNullable<Window['__beelineLaunchLive']>, 'reads'> & { reads: LaunchRead[] };
-const readKey = (operation: string, args: unknown) =>
-  operation + JSON.stringify(Object.entries(args ?? {}).sort(([a], [b]) => (a < b ? -1 : 1)));
-/** The socket and first read the web page's launch script started (index.html). */
-function takeLaunch(): Launch | undefined {
+function takeLaunch(): Window['__beelineLaunchLive'] {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return undefined;
   const launch = window.__beelineLaunchLive;
   delete window.__beelineLaunchLive;
-  if (!launch) return undefined;
-  return {
-    ...launch,
-    reads: [],
-    release() {
-      const earlier = launch.release();
-      this.reads = launch.reads.map(({ id, op, args }) => ({
-        id, key: readKey(op, args),
-        roomId: args.roomId,
-      }));
-      return earlier;
-    },
-  };
+  return launch;
 }
 type Dependencies = {
   telemetry?: {
@@ -152,8 +123,6 @@ export class LiveConnection {
   // One owner-held connection promise prevents parallel screens opening two sockets.
   private connecting?: { promise: Promise<void>; reject(reason: unknown): void };
   private readonly requests = new Map<string, PendingRequest>();
-  // Adopted by the first socket admission. Its reads answer only the launch
-  // page's own first asks: a page change, drop or new account ends it.
   private launch = takeLaunch();
   private readonly registrations = new Set<Registration>();
   private readonly roomReferences = new Map<string, number>();
@@ -219,12 +188,6 @@ export class LiveConnection {
     // A joining screen asks the server for current pushed state, never a local stream cache.
     if (isOpen(this.socket)) this.sendSubscribe([...registration.roomIds]);
     else void this.ensureSocket().catch(() => undefined);
-    for (const read of this.launch?.reads ?? []) {
-      if (read.refresh && read.roomId && registration.roomIds.has(read.roomId)) {
-        delete read.refresh;
-        this.refreshRoom(read.roomId);
-      }
-    }
     return Promise.resolve(() => {
       if (registration.closed) return;
       registration.closed = true;
@@ -387,12 +350,10 @@ export class LiveConnection {
         clearTimeout(deadline);
         options.signal?.removeEventListener('abort', abort);
         this.requests.delete(id);
-        if (request.launchRead) delete request.launchRead.pending;
         return true;
       };
       const request: PendingRequest = {
         operation,
-        key: readKey(operation, args),
         frame: JSON.stringify({
           t: 'req',
           id,
@@ -436,17 +397,6 @@ export class LiveConnection {
       if (request.socket) continue;
       request.socket = socket;
       request.generation = this.socketGeneration;
-      const launched = this.claimLaunchRead(request.key);
-      if (launched && this.launch) {
-        request.launchRead = launched;
-        launched.pending = request;
-        if (launched.reply) {
-          launched.served = true;
-          this.settle(request, launched.reply, this.launch.token);
-          delete launched.reply;
-        }
-        continue;
-      }
       try {
         socket.send(request.frame);
       } catch {
@@ -477,7 +427,7 @@ export class LiveConnection {
         if (this.connecting !== connection || identity !== this.identity) return;
         const launch = this.launch;
         const adopted = launch && launch.url === this.deps.liveUrl() && launch.token === token &&
-          launch.socket.readyState <= 1 && window.location.pathname === launch.path ? launch.socket : undefined;
+          launch.socket.readyState <= 1 ? launch.socket : undefined;
         if (!adopted) this.endLaunch();
         const socket = adopted ?? new WebSocket(this.deps.liveUrl(), [`bearer.${token}`]);
         this.socket = socket;
@@ -504,14 +454,6 @@ export class LiveConnection {
           if (reply.t === 'res' && typeof reply.id === 'string') {
             const pending = this.requests.get(reply.id);
             if (pending && pending.socket === socket) this.settle(pending, reply, token);
-            else if (this.launch?.socket === socket) {
-              // A launch read waits on its socket until the page first asks for it.
-              const read = this.launch.reads.find((launched) => launched.id === reply.id && !launched.unusable);
-              if (read?.pending) {
-                read.served = true;
-                this.settle(read.pending, reply, token);
-              } else if (read && !read.claimed) read.reply = reply;
-            }
             return;
           }
           this.dispatch(frame as LiveWireEvent | { type: 'pong' }, socket);
@@ -550,27 +492,10 @@ export class LiveConnection {
     }
   }
 
-  private claimLaunchRead(key: string): LaunchRead | undefined {
-    if (!this.launch) return undefined;
-    if (window.location.pathname !== this.launch.path) {
-      this.endLaunch();
-      return undefined;
-    }
-    const read = this.launch.reads.find((launched) => !launched.claimed && !launched.unusable && launched.key === key);
-    if (read) read.claimed = true;
-    return read;
-  }
-
-  /** Unclaimed launch reads are discarded; an unadopted launch socket closes. */
   private endLaunch(): void {
     const launch = this.launch;
     this.launch = undefined;
-    if (!launch) return;
-    if (this.socket === launch.socket) {
-      if (launch.roomId && !this.roomReferences.has(launch.roomId) && isOpen(launch.socket))
-        launch.socket.send(JSON.stringify({ type: 'unsubscribe', roomId: launch.roomId }));
-      return;
-    }
+    if (!launch || this.socket === launch.socket) return;
     launch.release();
     launch.socket.close();
   }
@@ -696,19 +621,6 @@ export class LiveConnection {
   }
 
   private dispatch(live: LiveWireEvent | { type: 'pong' } | MissedUpdates, socket: WebSocket): void {
-    for (const read of this.launch?.reads ?? []) {
-      if (live.type !== 'missed-updates' &&
-          (!('roomId' in live) || live.roomId !== read.roomId ||
-           ['subscribed', 'draft', 'thought', 'retract', 'presence'].includes(live.type))) continue;
-      read.unusable = true;
-      delete read.reply;
-      if (read.pending) {
-        read.pending.socket = undefined;
-        delete read.pending;
-        this.sendPending(socket);
-      }
-      if (read.served && !this.roomReferences.has(read.roomId)) read.refresh = true;
-    }
     switch (live.type) {
       case 'pong':
         return;

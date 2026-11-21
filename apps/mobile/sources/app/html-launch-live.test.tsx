@@ -57,7 +57,7 @@ function launch(pathname: string, saved: Record<string, string | null>, denied =
     },
     __beelineLaunchLive: undefined as
       | undefined
-      | { url: string; token: string; path: string; reads: unknown[]; release(): unknown[] },
+      | { url: string; token: string; release(): unknown[] },
   };
   runInNewContext(script, { window, WebSocket, JSON, Date, decodeURIComponent });
   return {
@@ -67,70 +67,20 @@ function launch(pathname: string, saved: Record<string, string | null>, denied =
 }
 const signedIn = { 'buzzy.monolith.access.v1': access(), 'buzzy.monolith.identity.v1': 'viewer' };
 
-it.each([['/'], ['/beeline/channels'], ['/beeline/community'], ['/beeline/create-workspace/']])(
-  'opens only the live socket on %s',
-  (path) => {
-    const { window, sockets } = launch(path, signedIn);
+it.each(['/', '/beeline/channels', '/beeline/community', '/beeline/create-workspace/', '/beeline/chat/room%20one', '/beeline/tray'])(
+  'opens one live socket and sends no frames on %s',
+  (pathname) => {
+    const { window, sockets } = launch(pathname, signedIn);
     expect(sockets).toHaveLength(1);
-    expect(sockets[0]!.url).toBe('wss://server.fixture/v1/phone/live');
-    expect(sockets[0]!.protocols).toEqual(['bearer.saved-access']);
-    expect(sockets[0]!.sent).toEqual([]);
-    sockets[0]!.fire('open');
-    expect(sockets[0]!.sent).toEqual([]);
-    expect(window.__beelineLaunchLive).toMatchObject({
-      url: 'wss://server.fixture/v1/phone/live',
-      token: 'saved-access',
-      path,
-      reads: [],
-    });
+    const socket = sockets[0]!;
+    expect(socket.url).toBe('wss://server.fixture/v1/phone/live');
+    expect(socket.protocols).toEqual(['bearer.saved-access']);
+    socket.fire('open');
+    socket.fire('message', { data: JSON.stringify({ type: 'subscribed', roomId: 'room one' }) });
+    expect(socket.sent).toEqual([]);
+    expect(window.__beelineLaunchLive).toMatchObject({ url: socket.url, token: 'saved-access' });
   },
 );
-
-it('reads a Room exactly once after its subscription is acknowledged', () => {
-  const { window, sockets } = launch('/beeline/chat/room%20one', signedIn);
-  const socket = sockets[0]!;
-  expect(window.__beelineLaunchLive!.reads).toEqual([]);
-  socket.fire('open');
-  const subscription = { type: 'subscribe', roomIds: ['room one'], sidebarPreviews: false, roomStateProjections: true };
-  expect(socket.sent.map((frame) => JSON.parse(frame))).toEqual([subscription]);
-  expect(window.__beelineLaunchLive!.reads).toEqual([]);
-  socket.fire('message', { data: JSON.stringify({ type: 'subscribed', roomId: 'another-room' }) });
-  expect(socket.sent).toHaveLength(1);
-  socket.fire('message', { data: JSON.stringify({ type: 'subscribed', roomId: 'room one' }) });
-  const read = { id: 'launch-1', op: 'readRoom', args: { roomId: 'room one' } };
-  expect(socket.sent.map((frame) => JSON.parse(frame))).toEqual([subscription, { t: 'req', ...read }]);
-  expect(window.__beelineLaunchLive!.reads).toEqual([read]);
-  socket.fire('message', { data: JSON.stringify({ type: 'subscribed', roomId: 'room one' }) });
-  expect(socket.sent).toHaveLength(2);
-});
-
-it.each([false, true])('stops unsent Room reads on release (opened: %s)', (opened) => {
-  const { window, sockets } = launch('/beeline/chat/room', signedIn);
-  const socket = sockets[0]!;
-  if (opened) socket.fire('open');
-  window.__beelineLaunchLive!.release();
-  const sent = [...socket.sent];
-  socket.fire('open');
-  socket.fire('message', { data: JSON.stringify({ type: 'subscribed', roomId: 'room' }) });
-  expect(socket.sent).toEqual(sent);
-  expect(window.__beelineLaunchLive!.reads).toEqual([]);
-});
-
-it('stops an unsent Workspace read on release', () => {
-  const { window, sockets } = launch('/', signedIn);
-  expect(window.__beelineLaunchLive!.reads).toEqual([]);
-  window.__beelineLaunchLive!.release();
-  sockets[0]!.fire('open');
-  expect(sockets[0]!.sent).toEqual([]);
-  expect(window.__beelineLaunchLive!.reads).toEqual([]);
-});
-
-it('only opens the socket on other pages', () => {
-  const { window, sockets } = launch('/beeline/tray', signedIn);
-  sockets[0]!.fire('open');
-  expect(sockets[0]!.sent).toEqual([]);
-  expect(window.__beelineLaunchLive?.reads).toEqual([]);
-});
 
 it('hands over the frames received before adoption and stops keeping them', () => {
   const { window, sockets } = launch('/', signedIn);

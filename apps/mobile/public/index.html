@@ -29,50 +29,24 @@ html,body{background:#fafaf9}
 })();
 </script>
 <script>
-// While the bundle loads, open the app's live socket with the saved access and
-// send only reads without side effects. LiveConnection adopts this socket and the
-// read; nothing here renders or keeps data.
+// While the bundle loads, only open the app's live connection with saved access.
+// This script sends no frames; LiveConnection adopts the socket and received frames.
 (function () {
   try {
     var access = JSON.parse(window.localStorage.getItem('buzzy.monolith.access.v1') || 'null');
     if (!access || typeof access.server !== 'string' || typeof access.token !== 'string' ||
         access.identityId !== window.localStorage.getItem('buzzy.monolith.identity.v1') ||
         !(access.expiresAt > Date.now() + 30000)) return;
-    var path = window.location.pathname.replace(/\/+$/, '') || '/';
-    var room = /^\/beeline\/chat\/([^/]+)$/.exec(path);
-    var read = room ? { op: 'readRoom', args: { roomId: decodeURIComponent(room[1]) } } : null;
     var url = access.server.replace(/^http/, 'ws') + '/v1/phone/live';
     var socket = new WebSocket(url, ['bearer.' + access.token]);
     var messages = [];
-    var reads = [];
-    var released = false;
-    var sendRead = function () {
-      if (released || !read || reads.length) return;
-      socket.send(JSON.stringify({ t: 'req', id: 'launch-1', op: read.op, args: read.args }));
-      reads.push({ id: 'launch-1', op: read.op, args: read.args });
-    };
-    var keep = function (event) {
-      messages.push(event);
-      if (!room) return;
-      try {
-        var frame = JSON.parse(event.data);
-        if (frame && frame.type === 'subscribed' && frame.roomId === read.args.roomId) sendRead();
-      } catch (e) {}
-    };
-    var opened = function () {
-      if (released || !read) return;
-      socket.send(JSON.stringify({ type: 'subscribe', roomIds: [read.args.roomId], sidebarPreviews: false, roomStateProjections: true }));
-    };
+    var keep = function (event) { messages.push(event); };
     socket.addEventListener('message', keep);
-    socket.addEventListener('open', opened, { once: true });
     window.__beelineLaunchLive = {
-      url: url, token: access.token, path: window.location.pathname, socket: socket,
-      roomId: read ? read.args.roomId : undefined, reads: reads,
+      url: url, token: access.token, socket: socket,
       // The adopter takes the frames received so far; later ones are its own.
       release: function () {
-        released = true;
         socket.removeEventListener('message', keep);
-        socket.removeEventListener('open', opened);
         return messages;
       },
     };
