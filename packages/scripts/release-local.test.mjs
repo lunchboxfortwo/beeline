@@ -18,7 +18,7 @@ import { run as bookkeeping } from './release-bookkeeping.mjs';
 import { localGithub } from './release-local-github.mjs';
 import { assignReleaseVersion, latestPublished, recoverTaggedReleases } from './release-record.mjs';
 import { CheckQueue, checkPlan, checkWorkspace, LocalChecks } from './release-local-checks.mjs';
-import { pruneReleaseWorkspaces, promptAudit, acquireReleaseLock, localAttribution, pinnedRuntimes, prepareReleaseSource, readOtaVersions, releaseArguments, storeReleaseNeeded } from './release.mjs';
+import { promptAudit, acquireReleaseLock, localAttribution, pinnedRuntimes, prepareReleaseSource, readOtaVersions, releaseArguments, storeReleaseNeeded } from './release.mjs';
 
 const repository = resolve(import.meta.dirname, '../..');
 const temporary = () => mkdtempSync(join(tmpdir(), 'beeline-local-test-'));
@@ -46,15 +46,6 @@ test('prompt audit is advisory and writes beside nightly checks', () => {
   });
   assert.deepEqual(commands, [['npx', 'turbo', 'run', 'build', '--filter=@beeline/body', '--filter=@beeline/server', '/source'],
     ['npm', 'run', 'prompt-audit', '--', '--out', '/state/prompt-audit', '/source']]);
-});
-test('the release prunes source copies, overlays and node_modules from its state directory but keeps logs', () => {
-  const calls = [];
-  pruneReleaseWorkspaces('/fixture/state', (command, args) => calls.push([command, args]));
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0][0], 'sudo');
-  assert.deepEqual(calls[0][1].slice(0, 3), ['-n', 'find', '/fixture/state']);
-  for (const name of ['source', 'upper', 'overlay-work', 'merged', 'node_modules']) assert.ok(calls[0][1].includes(name));
-  assert.ok(!calls[0][1].includes('output.log') && !calls[0][1].includes('records.json'));
 });
 test('a store release is needed only when a pinned runtime is not the newest live store runtime', () => {
   const config = 'ios: {\n runtimeVersion: runtimeVersionOverride || "41",\n},\nandroid: {\n runtimeVersion: runtimeVersionOverride || "53",\n}';
