@@ -141,3 +141,32 @@ it.each(['reply','silent'])('Reproduction REVIEW-EMPTY-HANDBACK: a %s review wit
     receipt:'Message stored and visible. No agents woken. A reply to a System wake is posted, not delivered to anyone; use message() to reach someone.'});
   await rootFixture.db.backgroundWork.drain();
 });
+
+it('Reproduction REVIEW-STUCK: a recorded review handback with no command (prod before the fix) is delivered once on the next machine evaluation', async () => {
+  await rootFixture.phone.execute('updateRoom',{roomId:R,reviewerAgentId:B},H);
+  await greenHead(109,'9'.repeat(40));
+  const [review]=await commands(B,C);
+  await claim(review!);
+  await rootFixture.db.query(`SELECT beeline_finish_agent_command($1,'complete',NULL,NULL)`,[review!.id]);
+  await reconcileConfiguredCornerReviewers(rootFixture.db,R);
+  // The old server recorded review-failed:<head>:<review> and queued nothing: recreate that state.
+  const [first]=(await commands(A,C)).filter(command=>command.reason==='corner_review_needed');
+  await rootFixture.db.query('DELETE FROM agent_commands WHERE id=$1',[first!.id]);
+  const effects=async()=>(await rootFixture.db.query<{effects:string[]}>(
+    `SELECT machine->'effects' effects FROM corner_facts WHERE corner_id=$1`,[C])).rows[0]!.effects;
+  expect(await effects()).toContain(`review-failed:${'9'.repeat(40)}:${review!.id}`);
+  expect((await commands(A,C)).filter(command=>command.reason==='corner_review_needed')).toHaveLength(0);
+  // The next evaluation (a startup reconcile or any committed event) delivers it once, under the same id.
+  for(let replay=0;replay<3;replay++) await reconcileConfiguredCornerReviewers(rootFixture.db,R);
+  const [handback,...extra]=(await commands(A,C)).filter(command=>command.reason==='corner_review_needed');
+  expect(extra).toEqual([]);
+  expect(handback!.id).toBe(first!.id);
+  // Once it ran, the receipt is proven and replays never send it again.
+  await claim(handback!);
+  await result(handback!,'');
+  await rootFixture.db.query(`SELECT beeline_finish_agent_command($1,'complete',NULL,NULL)`,[handback!.id]);
+  for(let replay=0;replay<3;replay++) await reconcileConfiguredCornerReviewers(rootFixture.db,R);
+  expect((await rootFixture.db.query(`SELECT id FROM agent_commands WHERE room_id=$1 AND reason='corner_review_needed'`,[C])).rows)
+    .toEqual([{id:first!.id}]);
+  await rootFixture.db.backgroundWork.drain();
+});

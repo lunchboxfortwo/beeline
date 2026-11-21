@@ -351,9 +351,13 @@ async function readCornerAdvance(
     ).rows[0];
     const review = await loadCornerReviewState(db,cornerId,head);
     // Completed commands still prove delivery; only missing IDs invalidate their receipts.
-    const receipts = (corner.machine?.effects ?? []).filter(key => key.startsWith('command:red:')).map(marker => ({
+    // A review handback receipt names its deterministic command: one recorded without that
+    // command (an empty review before the handback was restored) is replanned once.
+    const receipts = [...(corner.machine?.effects ?? []).filter(key => key.startsWith('command:red:')).map(marker => ({
       marker, key: marker.slice('command:'.length, marker.lastIndexOf(':')), id: marker.slice(marker.lastIndexOf(':') + 1),
-    }));
+    })), ...(corner.machine?.effects ?? []).filter(key => key.startsWith('review-failed:')).map(key => ({
+      marker: key, key, id: reviewHandbackId(cornerId, key.split(':')[1]!, key.split(':')[2]!),
+    }))];
     const active = (
       await db.query<{ worker: boolean; conflict: boolean; retained: string[] | null }>(
         `SELECT
@@ -600,7 +604,7 @@ async function writeCornerAdvance(
           const text = facts.reviewEnded?.emptyCount ? reviewBlockedText(corner, 'the reviewer gave no verdict')
             : `FAIL: ${facts.reviewEnded?.findings ?? 'Review failed'}`;
           const command = corner.worker_agent_id ? await createAgentCommand(db,{
-            id:createHash('sha256').update(`review-failed:${cornerId}:${head}:${facts.reviewEnded!.id}`).digest('hex'),
+            id:reviewHandbackId(cornerId, head!, facts.reviewEnded!.id),
             roomId:cornerId,agentId:corner.worker_agent_id,sourceMessageId:null,reason:'corner_review_needed',
             privatePayload:{kind:'lifecycle',authorId:SYSTEM_AUTHOR_ID,fromRoomId:cornerId,text:systemText(text)},
           }) : undefined;
@@ -691,6 +695,10 @@ export async function noteMissingReviewer(
   );
 }
 
+
+/** The once-per-head-and-review handback command for a review without approval. */
+const reviewHandbackId = (cornerId: string, head: string, reviewId: string) =>
+  createHash('sha256').update(`review-failed:${cornerId}:${head}:${reviewId}`).digest('hex');
 
 /** The handback wording for a review gap, shared with a review that ended without a verdict. */
 const reviewBlockedText = (corner: CornerRow, reason: string) =>
