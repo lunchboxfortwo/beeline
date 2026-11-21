@@ -22,9 +22,6 @@ import { cornerImplementerSql } from './corner-worker.js';
 import { cornerObjectiveSql, writeCornerObjective } from './corner-objective.js';
 import { CommandRefusalError } from './command-refusal.js';
 import { advanceCorner, type CornerMachine } from './corner-lifecycle.js';
-import { closeCornerPullRequestBestEffort, closeCornerState } from './corner-close.js';
-import { lockCornerArchivalAuthority, lockCornerLifecycle } from './corner-lifecycle-review-state.js';
-import { deleteCornerBranchBestEffort } from './corner-branch-cleanup.js';
 
 type WorkRow = WorkDetailRow & {
   id: string;
@@ -135,34 +132,19 @@ export async function updateWorkItem(
 }
 
 /**
- * One-time fold of the retired second thread state: a stored Done closes an open, unlocked
- * thread through the system close (PR closed, branch deleted); a stored Backlog becomes the
- * machine's Backlog input. Every thread row's stored state is then cleared, with no exemption.
+ * One-time fold of the retired second thread state: a stored Backlog becomes an open
+ * thread's machine Backlog input. Every thread row's stored state is then cleared.
  */
 export async function foldThreadWorkStates(
   database: SqlDatabase,
-  cleanup?: {
-    closePullRequest(cornerId: string): Promise<{ status: string; blocker?: string }>;
-    deleteCornerBranch(cornerId: string): Promise<unknown>;
-  },
 ): Promise<void> {
   const threadRows = `FROM rooms r WHERE r.id::text=w.id AND r.parent_id IS NOT NULL AND w.state IS NOT NULL`;
-  const rows = (await database.query<{ id: string; state: WorkState; open: boolean; locked: boolean }>(
-    `SELECT w.id,w.state,r.archived_at IS NULL open,COALESCE(f.locked,false) locked FROM work_items w
+  const rows = (await database.query<{ id: string }>(
+    `SELECT w.id FROM work_items w
      JOIN rooms r ON r.id::text=w.id AND r.parent_id IS NOT NULL
-     LEFT JOIN corner_facts f ON f.corner_id=r.id WHERE w.state IS NOT NULL`)).rows;
-  for (const row of rows.filter((candidate) => candidate.open)) {
-    if (row.state === 'backlog') await advanceCorner(database, row.id, { kind: 'backlog', backlog: true });
-    if (row.state !== 'done' || row.locked) continue;
-    const closed = await database.transaction(async (db) => {
-      await lockCornerLifecycle(db, row.id);
-      await lockCornerArchivalAuthority(db);
-      return closeCornerState(db, row.id);
-    });
-    if (!closed.archived) continue;
-    await closeCornerPullRequestBestEffort(database, row.id, cleanup?.closePullRequest);
-    await deleteCornerBranchBestEffort(row.id, cleanup?.deleteCornerBranch);
-  }
+     WHERE w.state='backlog' AND r.archived_at IS NULL`)).rows;
+  for (const row of rows)
+    await advanceCorner(database, row.id, { kind: 'backlog', backlog: true });
   await database.query(`UPDATE work_items w SET state=NULL,completed_at=NULL ${threadRows}`);
 }
 

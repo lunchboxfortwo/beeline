@@ -144,7 +144,7 @@ describe('one thread state: the corner machine', () => {
       board: { state: 'done', idle: false }, header: { state: 'done', idle: false } });
   });
 
-  it('the fold closes a stored-Done thread with the same close, makes stored Backlog a machine input, and clears every thread row', async () => {
+  it('the fold preserves open stored-Done threads, makes stored Backlog a machine input, and clears every thread row', async () => {
     const parked = '55555555-5555-4555-8555-555555555555',
       standing = '66666666-6666-4666-8666-666666666666';
     for (const [id, name] of [[parked, 'parked'], [standing, 'standing']] as const) {
@@ -157,15 +157,13 @@ describe('one thread state: the corner machine', () => {
       [thread, parked, standing, agent, chat, thread, parked, standing],
     );
     await db.query('ALTER TABLE work_items ENABLE TRIGGER thread_work_state');
-    const closePullRequest = vi.fn(async () => ({ status: 'closed' }));
-    const deleteCornerBranch = vi.fn(async () => undefined);
-    await foldThreadWorkStates(db, { closePullRequest, deleteCornerBranch });
+    await foldThreadWorkStates(db);
     const rooms = (await db.query<{ id: string; archived: boolean; machine: unknown }>(
       `SELECT r.id,r.archived_at IS NOT NULL archived,f.machine FROM rooms r JOIN corner_facts f ON f.corner_id=r.id WHERE r.id=ANY($1::uuid[])`,
       [[thread, parked, standing]])).rows;
-    expect(Object.fromEntries(rooms.map((room) => [room.id, room.archived]))).toEqual({ [thread]: true, [parked]: false, [standing]: false });
+    expect(Object.fromEntries(rooms.map((room) => [room.id, room.archived]))).toEqual({ [thread]: false, [parked]: false, [standing]: false });
+    expect(rooms.find((room) => room.id === thread)?.machine).toEqual({ state: 'idle' });
     expect(rooms.find((room) => room.id === parked)?.machine).toMatchObject({ state: 'idle', reason: 'backlog' });
-    expect(deleteCornerBranch).toHaveBeenCalledWith(thread);
     expect((await db.query(`SELECT id,state FROM work_items ORDER BY id`)).rows).toEqual(
       [{ id: thread, state: null }, { id: parked, state: null }, { id: standing, state: null }, { id: 'task', state: 'done' }]
         .sort((a, b) => a.id.localeCompare(b.id)),

@@ -239,12 +239,7 @@ async function main() {
         (roomId) => live.publish({ type: 'invalidate', roomId, reason: githubProviderKey }),
       )
     : undefined;
-  // One state per thread: fold stored Work-board thread states into the corner machine once,
-  // with GitHub available so a stored Done gets the same close (PR closed, branch deleted).
-  await workflowBackfillOnce(jobsDatabase, 'thread-work-state-v1', db => foldThreadWorkStates(db, githubJobs ? {
-    closePullRequest: id => githubJobs.closeCornerPullRequest(id),
-    deleteCornerBranch: id => githubJobs.deleteCornerBranch(id),
-  } : undefined));
+  await workflowBackfillOnce(jobsDatabase, 'thread-work-state-v1', foldThreadWorkStates);
   // Generated procedures are anchored to real code, so the curator's staleness
   // pass needs an installation token and the repository's default branch. With
   // no GitHub App configured there is no anchor to check and no contradiction to
