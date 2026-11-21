@@ -385,3 +385,90 @@ it('uses the final read list left by release rather than the construction-time l
   socket.emit({ t: 'res', id: frame.id, ok: true, result: freshRoom });
   await expect(read).resolves.toEqual(freshRoom);
 });
+
+const membershipChanged = { type: 'invalidate', roomId: '', reason: 'postgres:memberships' };
+const freshWorkspaces = { workspaces: [{ id: 'launch-workspace' }, { id: 'joined-workspace' }] };
+
+it.each(['buffered', 'adopted'])('voids a Workspace launch answer after a %s membership change before claim', async (timing) => {
+  const { socket } = launch({ received: [answer('launch-1', workspaces), ...(timing === 'buffered' ? [event(membershipChanged)] : [])] });
+  const connection = connect();
+  await adopt(connection, socket);
+  if (timing === 'adopted') socket.emit(membershipChanged);
+  const read = connection.request('readWorkspaces', {});
+  await tick();
+  const frame = socket.requests().find((frame) => frame.op === 'readWorkspaces')!;
+  expect(frame).toMatchObject({ op: 'readWorkspaces', args: {} });
+  expect(frame.id).not.toBe('launch-1');
+  socket.onmessage!(answer('launch-1', workspaces));
+  socket.emit({ t: 'res', id: frame.id, ok: true, result: freshWorkspaces });
+  await expect(read).resolves.toEqual(freshWorkspaces);
+  expect(Socket.instances).toEqual([socket]);
+});
+
+it.each([
+  { type: 'invalidate', roomId: '', reason: 'postgres:room_read_marks' },
+  { type: 'invalidate', roomId: 'another-room', reason: 'postgres:memberships' },
+  { type: 'presence', roomId: 'another-room', agentId: 'agent', status: 'online', observedAt: 1 },
+])('retains the Workspace launch answer across unrelated frames: %j', async (frame) => {
+  const { socket } = launch({ received: [answer('launch-1', workspaces), event(frame)] });
+  const connection = connect();
+  await adopt(connection, socket);
+  socket.emit(frame);
+  await expect(connection.request('readWorkspaces', {})).resolves.toEqual(workspaces);
+  expect(socket.requests().filter((frame) => frame.op === 'readWorkspaces')).toEqual([]);
+});
+
+it('replaces an in-flight Workspace launch read when membership changes', async () => {
+  const { socket } = launch();
+  const read = connect().request('readWorkspaces', {});
+  await tick();
+  expect(socket.requests()).toEqual([]);
+  socket.emit(membershipChanged);
+  const [frame] = socket.requests();
+  expect(frame).toMatchObject({ op: 'readWorkspaces', args: {} });
+  expect(frame.id).not.toBe('launch-1');
+  socket.onmessage!(answer('launch-1', workspaces));
+  socket.emit({ t: 'res', id: frame.id, ok: true, result: freshWorkspaces });
+  await expect(read).resolves.toEqual(freshWorkspaces);
+});
+
+it.each(['buffered', 'adopted'])('refreshes a Workspace consumer after a %s change follows a served launch answer', async (timing) => {
+  const { socket } = launch({ received: [answer('launch-1', workspaces), ...(timing === 'buffered' ? [event(membershipChanged)] : [])] });
+  const connection = connect();
+  await expect(connection.request('readWorkspaces', {})).resolves.toEqual(workspaces);
+  if (timing === 'adopted') socket.emit(membershipChanged);
+  await connection.register([], () => {});
+  const roomListener = vi.fn();
+  await connection.register([{ '#h': ['room'] }], roomListener);
+  expect(roomListener).not.toHaveBeenCalled();
+  const listener = vi.fn();
+  await connection.register([], listener);
+  expect(listener).toHaveBeenCalledExactlyOnceWith({ monolithLive: { type: 'invalidate', roomId: '', reason: 'reconnect' } });
+  const fresh = connection.request('readWorkspaces', {});
+  await tick();
+  const [frame] = socket.requests();
+  expect(frame).toMatchObject({ op: 'readWorkspaces', args: {} });
+  socket.emit({ t: 'res', id: frame.id, ok: true, result: freshWorkspaces });
+  await expect(fresh).resolves.toEqual(freshWorkspaces);
+  const later = vi.fn();
+  await connection.register([], later);
+  expect(later).not.toHaveBeenCalled();
+});
+
+it('delivers Workspace changes to a listening consumer through the normal refresh path', async () => {
+  const { socket } = launch({ received: [answer('launch-1', workspaces)] });
+  const connection = connect();
+  await expect(connection.request('readWorkspaces', {})).resolves.toEqual(workspaces);
+  let fresh: Promise<unknown> | undefined;
+  const listener = vi.fn(() => { fresh = connection.request('readWorkspaces', {}); });
+  await connection.register([], listener);
+  socket.emit(membershipChanged);
+  expect(listener).toHaveBeenCalledExactlyOnceWith({ monolithLive: membershipChanged });
+  await tick();
+  const [frame] = socket.requests();
+  socket.emit({ t: 'res', id: frame.id, ok: true, result: freshWorkspaces });
+  await expect(fresh).resolves.toEqual(freshWorkspaces);
+  const later = vi.fn();
+  await connection.register([], later);
+  expect(later).not.toHaveBeenCalled();
+});
