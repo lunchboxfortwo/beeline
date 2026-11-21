@@ -48,6 +48,7 @@ html,body{background:#fafaf9}
     var keep = function (event) { messages.push(event); };
     socket.addEventListener('message', keep);
     if (read) socket.addEventListener('open', function () {
+      if (room) socket.send(JSON.stringify({ type: 'subscribe', roomIds: [read.args.roomId], sidebarPreviews: false, roomStateProjections: true }));
       socket.send(JSON.stringify({ t: 'req', id: 'launch-1', op: read.op, args: read.args }));
     }, { once: true });
     window.__beelineLaunchLive = {

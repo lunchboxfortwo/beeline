@@ -91,12 +91,10 @@ it.each([['/'], ['/beeline/channels'], ['/beeline/community'], ['/beeline/create
 it('reads the Room named by a chat path', () => {
   const { sockets } = launch('/beeline/chat/room%20one', signedIn);
   sockets[0]!.fire('open');
-  expect(JSON.parse(sockets[0]!.sent[0]!)).toEqual({
-    t: 'req',
-    id: 'launch-1',
-    op: 'readRoom',
-    args: { roomId: 'room one' },
-  });
+  expect(sockets[0]!.sent.map((frame) => JSON.parse(frame))).toEqual([
+    { type: 'subscribe', roomIds: ['room one'], sidebarPreviews: false, roomStateProjections: true },
+    { t: 'req', id: 'launch-1', op: 'readRoom', args: { roomId: 'room one' } },
+  ]);
 });
 
 it('only opens the socket on other pages', () => {

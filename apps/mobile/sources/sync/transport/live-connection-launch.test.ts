@@ -68,19 +68,19 @@ const answer = (id: string, result: unknown) => ({
 
 /** What index.html leaves for the app: its socket, the sent read and frames received so far. */
 function launch(
-  options: { token?: string; open?: boolean; received?: { data: string }[]; path?: string } = {},
+  options: { token?: string; open?: boolean; received?: { data: string }[]; path?: string; roomId?: string } = {},
 ) {
   const socket = new Socket(URL, [`bearer.${options.token ?? 'launch-access'}`]);
   if (options.open !== false) socket.readyState = 1;
   const release = vi.fn(() => options.received ?? []);
   const page = {
-    location: { pathname: '/beeline/community' },
+    location: { pathname: options.roomId ? '/beeline/chat/' + options.roomId : '/beeline/community' },
     __beelineLaunchLive: {
       url: URL,
       token: options.token ?? 'launch-access',
-      path: options.path ?? '/beeline/community',
+      path: options.path ?? (options.roomId ? '/beeline/chat/' + options.roomId : '/beeline/community'),
       socket,
-      reads: [{ id: 'launch-1', op: 'readWorkspaces', args: {} }],
+      reads: [{ id: 'launch-1', op: options.roomId ? 'readRoom' : 'readWorkspaces', args: options.roomId ? { roomId: options.roomId } : {} }],
       release,
     } as unknown,
   };
@@ -233,4 +233,113 @@ it('leaves native connections alone', async () => {
   await tick();
   expect(Socket.instances.at(-1)).not.toBe(socket);
   expect((page as { __beelineLaunchLive?: unknown }).__beelineLaunchLive).toBeDefined();
+});
+
+const roomId = 'launch-room';
+const staleRoom = { room: { id: roomId }, messages: [] };
+const freshRoom = { room: { id: roomId }, messages: [{ id: 'committed-message' }] };
+const delta = { type: 'message-delta', roomId, message: { id: 'committed-message' } };
+const event = (frame: unknown) => ({ data: JSON.stringify(frame) });
+async function adopt(connection: LiveConnection, socket: Socket) {
+  const read = connection.request('getAuthCapabilities', {});
+  await tick();
+  const frame = socket.requests().find((frame) => frame.op === 'getAuthCapabilities')!;
+  socket.emit({ t: 'res', id: frame.id, ok: true, result: {} });
+  await read;
+}
+
+it.each(['buffered', 'adopted'])('discards a stale Room launch reply after a %s committed frame before claim', async (timing) => {
+  const { socket } = launch({
+    roomId,
+    received: [answer('launch-1', staleRoom), ...(timing === 'buffered' ? [event(delta)] : [])],
+  });
+  const connection = connect();
+  await adopt(connection, socket);
+  if (timing === 'adopted') socket.emit(delta);
+  const read = connection.request('readRoom', { roomId });
+  await tick();
+  const frame = socket.requests().find((frame) => frame.op === 'readRoom');
+  expect(frame).toMatchObject({ op: 'readRoom', args: { roomId } });
+  expect(frame.id).not.toBe('launch-1');
+  socket.onmessage!(answer('launch-1', staleRoom));
+  socket.emit({ t: 'res', id: frame.id, ok: true, result: freshRoom });
+  await expect(read).resolves.toEqual(freshRoom);
+  expect(Socket.instances).toEqual([socket]);
+});
+
+it.each(['presence', 'draft', 'subscribed', 'thought', 'retract'])('preserves the launch reply across %s frames', async (type) => {
+  const { socket } = launch({ roomId, received: [answer('launch-1', staleRoom), event({ type, roomId })] });
+  const connection = connect();
+  await adopt(connection, socket);
+  socket.emit({ type, roomId });
+  await expect(connection.request('readRoom', { roomId })).resolves.toEqual(staleRoom);
+  expect(socket.requests().filter((frame) => frame.op === 'readRoom')).toEqual([]);
+});
+
+it('sends an ordinary Room read when a committed frame interrupts a claimed launch read', async () => {
+  const { socket } = launch({ roomId });
+  const read = connect().request('readRoom', { roomId });
+  await tick();
+  expect(socket.requests()).toEqual([]);
+  socket.emit(delta);
+  const [frame] = socket.requests();
+  expect(frame).toMatchObject({ op: 'readRoom', args: { roomId } });
+  expect(frame.id).not.toBe('launch-1');
+  socket.onmessage!(answer('launch-1', staleRoom));
+  socket.emit({ t: 'res', id: frame.id, ok: true, result: freshRoom });
+  await expect(read).resolves.toEqual(freshRoom);
+});
+
+it.each(['buffered', 'adopted'])('refreshes a later Room registration once after a %s committed frame follows the launch answer', async (timing) => {
+  const { socket } = launch({ roomId, received: [answer('launch-1', staleRoom), ...(timing === 'buffered' ? [event(delta)] : [])] });
+  const connection = connect();
+  await expect(connection.request('readRoom', { roomId })).resolves.toEqual(staleRoom);
+  if (timing === 'adopted') {
+    socket.emit(delta);
+    socket.emit(delta);
+  }
+  const unrelated = vi.fn();
+  await connection.register([{ '#h': ['another-room'] }], unrelated);
+  expect(unrelated).not.toHaveBeenCalled();
+  const listener = vi.fn();
+  await connection.register([{ '#h': [roomId] }], listener);
+  expect(listener).toHaveBeenCalledExactlyOnceWith({ monolithLive: { type: 'invalidate', roomId, reason: 'resync' } });
+  const later = vi.fn();
+  await connection.register([{ '#d': ['room:' + roomId] }], later);
+  expect(later).not.toHaveBeenCalled();
+});
+
+it('uses normal live delivery when the Room is already registered', async () => {
+  const { socket } = launch({ roomId, received: [answer('launch-1', staleRoom)] });
+  const connection = connect();
+  await expect(connection.request('readRoom', { roomId })).resolves.toEqual(staleRoom);
+  const listener = vi.fn();
+  await connection.register([{ '#h': [roomId] }], listener);
+  socket.emit(delta);
+  expect(listener).toHaveBeenCalledExactlyOnceWith({ monolithLive: delta });
+  const later = vi.fn();
+  await connection.register([{ '#h': [roomId] }], later);
+  expect(later).not.toHaveBeenCalled();
+});
+
+it('ignores committed frames for other Rooms', async () => {
+  const { socket } = launch({ roomId, received: [answer('launch-1', staleRoom)] });
+  const connection = connect();
+  await adopt(connection, socket);
+  socket.emit({ ...delta, roomId: 'another-room' });
+  await expect(connection.request('readRoom', { roomId })).resolves.toEqual(staleRoom);
+});
+
+it.each([undefined, roomId])('voids every launch read on missed updates (Room %s)', async (roomId) => {
+  const { socket } = launch({ roomId });
+  const connection = connect();
+  const read = roomId ? connection.request('readRoom', { roomId }) : connection.request('readWorkspaces', {});
+  await tick();
+  socket.emit({ type: 'missed-updates', roomIds: [], streams: [], workspace: false });
+  const [frame] = socket.requests();
+  expect(frame).toMatchObject({ op: roomId ? 'readRoom' : 'readWorkspaces' });
+  const fresh = roomId ? freshRoom : workspaces;
+  socket.onmessage!(answer('launch-1', {}));
+  socket.emit({ t: 'res', id: frame.id, ok: true, result: fresh });
+  await expect(read).resolves.toEqual(fresh);
 });
