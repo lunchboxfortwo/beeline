@@ -391,7 +391,13 @@ async function executeResourceTool(name: string, args: JsonObject, toolCallId: s
     }
     case 'app_tool': {
       const app = String(args.app ?? '');
-      if (app.startsWith('registry-mcp:')) return execute('call_session_mcp', { app, tool: args.tool, args: args.args ?? args.arguments });
+      if (app.startsWith('registry-mcp:'))
+        return execute('call_session_mcp', {
+          app,
+          tool: args.tool,
+          args: args.args ?? args.arguments,
+          query: args.query,
+        });
       if (app.startsWith('beeline:')) {
         const capability = app.slice('beeline:'.length);
         if (!(await availableCapabilities(app === 'beeline:onboarding')).includes(app)) throw new Error(placeRefusal(app));

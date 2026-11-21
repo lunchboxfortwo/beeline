@@ -24,6 +24,15 @@ it('discovers Squire tools through the existing app_tool route without a Registr
   });
 });
 
+it('sends the discovery query to the session so Squire discovery can be narrowed', async () => {
+  sessionEnv();
+  vi.mocked(sessionToolRequest).mockResolvedValue({ tools: [] });
+  await executeAgentTool('app_tool', { app: 'registry-mcp:squire', query: 'operate_drive' }, 'call');
+  expect(sessionToolRequest).toHaveBeenCalledWith('/session', expect.objectContaining({
+    action: 'mcp', app: 'registry-mcp:squire', query: 'operate_drive',
+  }));
+});
+
 it.each(['', 'corner'])('uses the live session for Squire status and calls (corner: %s)', async corner => {
   sessionEnv();
   vi.stubEnv('BEELINE_DAEMON_CORNER_ID', corner);
