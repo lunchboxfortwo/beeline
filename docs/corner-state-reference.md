@@ -19,11 +19,14 @@ The machine persists one state on `corner_facts.machine`:
   standing corner remains active after a merge.
 
 Red checks wake the implementer with the recorded failing jobs. Green checks wake
-only the independent configured reviewer, inside the corner. Newly completed
-findings and reviews without a usable verdict privately return ownership to the
-implementer once, scoped to the reviewed PR and head; they never automatically
-repeat that review. A missing verdict asks the implementer to arrange review or
-report the blocker to its commander, without posting a chat notice.
+only the independent configured reviewer, inside the corner. Completed findings
+and reviews without a usable verdict privately return ownership to the
+implementer once, scoped to the reviewed PR and head, only while a recorded
+implementer exists; they never automatically repeat that review. A missing verdict
+asks the implementer to arrange review or report the blocker to its commander,
+without posting a chat notice. A handback receipt requires its deterministic
+command to exist; missing commands are replanned, while completed commands still
+prove delivery.
 Reports retain their current order-author return route.
 
 Pending approval grants also keep their recorded `room_id` corner in
@@ -36,8 +39,9 @@ delivery; that committed command event also moves the corner out of Waiting.
 Committed changes to commands, receipts, GitHub facts, waits and holds enter the
 same runtime. Server startup and listener resync replay recorded facts without
 reading GitHub or starting a timer. State and effect receipts commit with their
-commands. Reads render the stored machine state. Existing hidden lifecycle cards
-remain inert history during the expand release; no new cards are written.
+commands. A proposed wake that queues no work does not by itself force an unchanged
+machine write. Reads render the stored machine state. Existing hidden lifecycle
+cards remain inert history during the expand release; no new cards are written.
 
 Coverage: `corner-machine.test.ts`, `corner-lifecycle-event-replay.test.ts`, `corner-state.test.ts`,
 `corner-state.exhaustive.test.ts`, `corner-state-reference.test.ts`,
