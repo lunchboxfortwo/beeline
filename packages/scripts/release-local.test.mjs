@@ -261,6 +261,38 @@ test('Node selection honors an installed compatible repository pin through fnm',
     assert.deepEqual(calls[1][1].slice(0, 4), ['exec', '--using', '24.16.0', 'node']);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
+test('native compiler outputs persist across local releases; other caches still miss', async () => {
+  const directory = temporary(), home = join(directory, 'operator');
+  try {
+    writeFileSync(join(directory, 'workflow.yml'), `jobs:
+  build:
+    steps:
+      - id: native
+        uses: actions/cache@v4
+        with:
+          path: |
+            out/release/buzz-agent
+          key: buzz-agent-v2-linux-x64-identity
+      - id: other
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ci-root-v1-identity
+      - run: |
+          echo "\${{ steps.native.outputs.cache-hit }} \${{ steps.other.outputs.cache-hit }}" >> hits
+          if [ '\${{ steps.native.outputs.cache-hit }}' != true ]; then mkdir -p out/release && echo built > out/release/buzz-agent; fi
+`);
+    const github = { sha, repository: 'owner/repo', event_name: 'workflow_dispatch', run_id: '123' };
+    for (const state of ['first', 'second']) {
+      if (state === 'second') rmSync(join(directory, 'out'), { recursive: true });
+      const engine = new LocalActions({ root: directory, directory: join(directory, state), secrets: {}, processes: new Processes({}, () => {}), baseEnv: { PATH: process.env.PATH, HOME: home } });
+      assert.equal((await engine.workflow('workflow.yml', {}, { github })).build.result, 'success');
+    }
+    assert.equal(readFileSync(join(directory, 'hits'), 'utf8'), 'false false\ntrue false\n');
+    assert.equal(readFileSync(join(directory, 'out/release/buzz-agent'), 'utf8'), 'built\n');
+    assert.equal(readFileSync(join(home, '.cache/beeline-release/native-agent/buzz-agent-v2-linux-x64-identity/out/release/buzz-agent'), 'utf8'), 'built\n');
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
 test('local setup-node accepts Node 24 without fnm and rejects Node below 22', async () => {
   const directory = temporary();
   try {

@@ -1,7 +1,7 @@
 // Local transport for the committed workflow. Release commands, conditions,
 // outputs, matrices and dependency edges continue to belong to its YAML.
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, globSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { cpSync, existsSync, globSync, mkdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
 import { delimiter, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { parse } from 'yaml';
 import { condition, readCommandFile, render } from './release-local-expressions.mjs';
@@ -35,6 +35,8 @@ export function matrixRows(matrix = {}) {
 export class LocalActions {
   constructor({ root, directory, secrets, variables = {}, processes, github, hooks = {}, baseEnv = process.env, isolateTemporary = false }) {
     Object.assign(this, { root, directory, secrets, variables, processes, github, hooks, isolateTemporary });
+    // Native compiler outputs persist across releases, like the hosted Actions cache.
+    this.nativeCache = baseEnv.HOME ? join(baseEnv.HOME, '.cache/beeline-release/native-agent') : undefined;
     this.artifacts = new Map();
     this.records = new Map();
     this.counter = 0;
@@ -162,6 +164,7 @@ export class LocalActions {
       return result;
     };
     context = structuredClone(context);
+    context.job.cacheSaves = [];
     const runner = { name: 'beeline-ci-squire-local-release', os: process.platform === 'darwin' ? 'macOS' : process.platform === 'win32' ? 'Windows' : 'Linux', temp: directory.replaceAll('\\', '/'), arch: process.arch === 'x64' ? 'X64' : 'ARM64' };
     context.runner = runner;
     context.env = {
@@ -214,6 +217,7 @@ export class LocalActions {
       const timeout = (job['timeout-minutes'] ?? 60) * 60_000;
       context.deadline = Date.now() + timeout;
       await this.steps(job.steps, context);
+      if (context.job.status === 'success') for (const save of context.job.cacheSaves) this.saveCache(save);
     } catch (error) {
       context.job.status = 'failure';
       this.processes.log(this.processes.redact(`${label}: ${error.message}`));
@@ -224,6 +228,17 @@ export class LocalActions {
       }
     }
     return finish({ result: job['continue-on-error'] ? 'success' : context.job.status, outputs: this.env(job.outputs, context) });
+  }
+  saveCache({ store, paths }) {
+    if (existsSync(store) || !paths.every(path => existsSync(resolve(this.root, path)))) return;
+    const staging = `${store}.${process.pid}.tmp`;
+    try {
+      for (const path of paths) cpSync(resolve(this.root, path), join(staging, path), { recursive: true });
+      renameSync(staging, store);
+    } catch (error) {
+      rmSync(staging, { recursive: true, force: true });
+      this.processes.log(`Native cache was not saved: ${error.message}`);
+    }
   }
   async steps(steps, context) {
     for (const step of steps) {
@@ -285,9 +300,17 @@ export class LocalActions {
       const head = (await this.processes.run('git', ['rev-parse', 'HEAD'], { cwd: this.root, env, quiet: true })).trim();
       if (sha !== head) throw new Error(`Release checkout mismatch: ${sha} != ${head}; use the exact release checkout`);
     } else if (name.startsWith('actions/cache')) {
-      // Caches are an optimization. Never claim a hit or reuse unverified outputs.
+      // Caches are an optimization. Only native compiler outputs, keyed by their
+      // pinned upstream, toolchain and flags, are reused; bundle proofs still run.
       result.outputs['cache-hit'] = 'false';
       result.outputs['cache-primary-key'] = inputs.key ?? '';
+      if (/^buzz-agent-v\d+-/.test(inputs.key ?? '') && this.nativeCache && name.startsWith('actions/cache@')) {
+        const store = join(this.nativeCache, inputs.key), paths = inputs.path.split('\n').map(path => path.trim()).filter(Boolean);
+        if (paths.every(path => existsSync(join(store, path)))) {
+          for (const path of paths) cpSync(join(store, path), resolve(this.root, path), { recursive: true });
+          result.outputs['cache-hit'] = 'true';
+        } else context.job.cacheSaves?.push({ store, paths });
+      }
     } else if (name.startsWith('actions/setup-node@')) {
       const selected = await this.nodeEnvironment(env, inputs['node-version'] || '22');
       context.env.PATH = selected.PATH;

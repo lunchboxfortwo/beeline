@@ -759,7 +759,11 @@ fetches. The pinned eas-cli installs from `apps/mobile/tools/eas-cli`'s lockfile
 Helper builds cache `buzz-agent` and `buzz-dev-mcp` only in Actions cache,
 keyed by the pinned block/buzz commit, platform, Rust/C/C++ toolchain, SDK and
 build flags. `packages/scripts/native-agent-cache.mjs` owns the shared Cargo recipe and
-cache identity. A miss compiles the pinned upstream. Cache lookup is optional
+cache identity. A miss compiles the pinned upstream. On squire the local runner
+keeps the same keyed outputs under the operator's
+`~/.cache/beeline-release/native-agent/` after a successful job, so the server
+leg's free starter agent image reuses the Linux helper's build (reported as
+`actions`); every other cache still misses locally. Cache lookup is optional
 and bounded to two minutes; native build/install proofs and publication still
 fail normally. No native cache is published to GitHub Releases.
 
