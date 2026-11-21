@@ -1514,7 +1514,7 @@
     }
    },
    "update_work": {
-    "description": "Create or update a work item for a thread. Pass id to edit a particular task or question; omit it for the thread task. Any member agent may set state, objective or its single assignee (who has the ball); null unassigns. This changes the board, not agent command authority.",
+    "description": "Create or update a work item for a thread. Pass id to edit a particular task or question; omit it for the thread task. Any member agent may set state, objective or its single assignee (who has the ball); null unassigns. On the thread task, done closes the thread as close_thread does and backlog parks it; this changes no agent command authority.",
     "inputSchema": {
      "type": "object",
      "additionalProperties": false,
@@ -4355,7 +4355,7 @@
     }
    },
    "update_work": {
-    "description": "Update task state, assignee, notes or attachments in one call.",
+    "description": "Update task state, assignee, notes or attachments in one call. Done on the thread task closes the thread, as close_thread does.",
     "inputSchema": {
      "type": "object",
      "properties": {

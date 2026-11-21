@@ -52,7 +52,7 @@ mutation('a new live stage fails', 'apps/server/src/github-operations-read-pr-ch
 mutation('a new wire stage fails', 'packages/api-contract/src/daemon-operations-daemon-operation-map.ts',
   "stage: 'building'", "stage: 'awaiting-consent' | 'building'");
 mutation('a new machine state fails', 'apps/server/src/corner-machine.ts',
-  "state: 'working' | 'idle'", "state: 'awaiting-consent' | 'working' | 'idle'");
+  "state: 'working' | 'archived'", "state: 'awaiting-consent' | 'working' | 'archived'");
 mutation('a new lifecycle fallback state fails', 'apps/server/src/corner-lifecycle.ts',
   "state: machine?.state ?? 'idle'", "state: machine?.state ?? 'awaiting-consent'");
 mutation('implementer derivation cannot gain an admission gate', 'apps/server/src/corner-worker.ts',
