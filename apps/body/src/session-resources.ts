@@ -15,7 +15,7 @@ type Context = {
   grants: DaemonOperationMap['listAgentGrants']['output'];
 };
 
-/** Same matching as managed apps: an exact slug/name, else every word in the slug, name or description. */
+/** Exact tool names take precedence so unrelated descriptions do not inflate discovery. */
 function toolsMatching(result: unknown, query: unknown): unknown {
   const search = typeof query === 'string' ? query.trim().toLowerCase() : '';
   const list = (result as { tools?: unknown } | null)?.tools;
