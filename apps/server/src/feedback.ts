@@ -22,6 +22,7 @@ import type { CommandRow } from './agent-command.js';
 import type { SqlDatabase } from './database.js';
 import { PROHIBITED_SECRET_PATTERNS } from './institutional-memory-shadow.js';
 import { hasSystemReportMention } from './message-mentions.js';
+import { notifyFeedbackShipped } from './feedback-shipped.js';
 import { sendSystemDirectMessage } from './system-line.js';
 
 /**
@@ -513,7 +514,7 @@ export async function notifyFeedbackFixed(
   // Only a merged fix closes the loop; the agent's word that it merged is not enough.
   if (!(await pullRequests.merged(config.repository, number)))
     throw new Error(`${url} has not merged; nothing was resolved or sent`);
-  return database.transaction(async (db) => {
+  const result = await database.transaction(async (db) => {
     const known = await db.query<{ id: string }>(
       `SELECT id FROM feedback_items WHERE id=ANY($1::text[])`,
       [itemIds],
@@ -527,12 +528,12 @@ export async function notifyFeedbackFixed(
       // The fixing pull request is the item's link; the release step reads it
       // to tell reporting agents once that fix ships.
       `UPDATE feedback_items SET status='resolved',
-         triaged_at=COALESCE(triaged_at,now()),triage_reason=$2,
+         triaged_at=COALESCE(triaged_at,now()),triage_reason=$2,fix_title=$5,
          issue_repository=$3,issue_number=$4
        WHERE id=ANY($1::text[]) AND status<>'resolved'
        RETURNING source_kind,reporter_identity_id,workspace_id`,
       [itemIds, JSON.stringify({ disposition: 'fixed', reference: url, reason: title }),
-        config.repository, number],
+        config.repository, number, title],
     );
     if (!notify) return { resolved: resolved.rowCount ?? 0, notified: 0 };
     // A later explicit notice order can notify items already resolved silently.
@@ -552,6 +553,15 @@ export async function notifyFeedbackFixed(
     }
     return { resolved: resolved.rowCount ?? 0, notified };
   });
+  try {
+    const release = (await database.query<{ version: string; sha: string }>(
+      'SELECT version,sha FROM helper_release_notifications WHERE singleton=true',
+    )).rows[0];
+    if (release) await notifyFeedbackShipped(database, { config, pullRequests }, release);
+  } catch (error) {
+    console.error('[feedback] shipped notices failed', error);
+  }
+  return result;
 }
 
 /** One System DM per person and pull request; a repeat inserts nothing. */

@@ -1,6 +1,7 @@
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { vi } from 'vitest';
 import {
+  AGENT,
   CONFIG,
   CORNER,
   FIX_URL,
@@ -14,9 +15,12 @@ import {
   it,
   report,
   rootFixture,
+  triageTurn,
 } from './test-support-feedback.test-support.js';
 import type { FeedbackLoop, FeedbackPullRequests } from './feedback.js';
 import { notifyFeedbackShipped } from './feedback-shipped.js';
+import { applyFeedbackDispositions } from './feedback-dispositions.js';
+import type { CommandRow } from './agent-command.js';
 import { ReleaseNotifier } from './release-notify.js';
 
 const RELEASE = { version: 'v0.1.243', sha: '1'.repeat(40) };
@@ -112,6 +116,64 @@ describe('feedback fix shipped in a release', () => {
     // A repeat or promoted delivery of the same release sends nothing again.
     await expect(notifyFeedbackShipped(rootFixture.database, loop, RELEASE)).resolves.toBe(0);
     expect(await shippedLines()).toHaveLength(2);
+  });
+
+  async function assess(value: unknown) {
+    const turn = await triageTurn();
+    const command = (await rootFixture.database.query<CommandRow>(
+      'SELECT * FROM agent_commands WHERE id=$1', [turn.requestId],
+    )).rows[0]!;
+    await rootFixture.database.transaction(db => applyFeedbackDispositions(db, command, value));
+  }
+
+  it('reconciles a fix resolved after its containing release was delivered', async () => {
+    const { itemId } = await report({ summary: 'late resolution' });
+    const notifier = new ReleaseNotifier(rootFixture.database, { feedback: loop });
+    await notifier.notifyReleaseDelivered({ ...RELEASE, changelogUrl: 'https://example.test/243' });
+    await expect(notifier.feedbackNotices).resolves.toBe(0);
+    await scope5.notify({ itemIds: [itemId], notify: undefined });
+    expect(await shippedLines()).toEqual([expect.objectContaining({
+      room_id: ROOM,
+      text: `@worker reported a problem fixed in ${RELEASE.version}${SYSTEM_LINE_SEPARATOR}Slow tools ${FIX_URL}`,
+    })]);
+    expect(await notifiedAt(itemId)).toBeTruthy();
+  });
+
+  it.each([false, true])('keeps merged agent and human notices independent (human first: %s)', async (humanFirst) => {
+    const { agentItem, actionItem } = await scope5.reported();
+    await assess([{ itemId: agentItem, disposition: 'duplicate', reference: actionItem, reason: 'Same cause' }]);
+    await scope5.notify({ itemIds: [actionItem], notify: undefined });
+    await assess([{ itemId: actionItem, disposition: 'fixed', reason: 'Private workspace assessment' }]);
+    if (humanFirst) await scope5.notify({ itemIds: [actionItem] });
+    await expect(notifyFeedbackShipped(rootFixture.database, loop, RELEASE)).resolves.toBe(1);
+    expect(await shippedLines()).toEqual([expect.objectContaining({
+      room_id: ROOM,
+      text: `@worker reported a problem fixed in ${RELEASE.version}${SYSTEM_LINE_SEPARATOR}Slow tools ${FIX_URL}`,
+    })]);
+    expect(Boolean(await notifiedAt(actionItem))).toBe(humanFirst);
+    await expect(notifyFeedbackShipped(rootFixture.database, loop, RELEASE)).resolves.toBe(0);
+    await scope5.notify({ itemIds: [actionItem] });
+    expect(await scope5.fixedDms()).toHaveLength(1);
+    expect(await notifiedAt(actionItem)).toBeTruthy();
+    expect(await shippedLines()).toHaveLength(1);
+  });
+
+  it('chooses the latest report timestamp across items and out-of-order merged occurrences', async () => {
+    const first = (await report({ summary: 'first problem' })).itemId;
+    const second = (await report({ summary: 'second problem' }, CORNER)).itemId;
+    const duplicate = (await report({ summary: 'legacy duplicate' }, CORNER)).itemId;
+    await rootFixture.database.query(`UPDATE feedback_items SET created_at=$2 WHERE id=$1`,
+      [first, '2026-01-01T01:00:00Z']);
+    await rootFixture.database.query(`UPDATE feedback_items SET created_at=$2 WHERE id=$1`,
+      [second, '2026-01-01T02:00:00Z']);
+    await rootFixture.database.query(`UPDATE feedback_items SET created_at=$2 WHERE id=$1`,
+      [duplicate, '2026-01-01T03:00:00Z']);
+    await rootFixture.database.query(`UPDATE feedback_items SET occurrences=$2::jsonb WHERE id=$1`,
+      [first, JSON.stringify([{ agentId: AGENT, roomId: ROOM, createdAt: '2026-01-01T05:00:00Z' }])]);
+    await assess([{ itemId: duplicate, disposition: 'duplicate', reference: first, reason: 'Same cause' }]);
+    await scope5.notify({ itemIds: [first, second], notify: undefined });
+    await expect(notifyFeedbackShipped(rootFixture.database, loop, RELEASE)).resolves.toBe(1);
+    expect(await shippedLines()).toEqual([expect.objectContaining({ room_id: ROOM })]);
   });
 
   it('leaves the fix pending when GitHub cannot be read, for the next release to retry', async () => {

@@ -9,20 +9,14 @@ type ShippedItem = {
   id: string;
   reporter_identity_id: string;
   room_id: string | null;
-  triage_reason: string | null;
+  source_kind: string;
+  created_at: Date;
+  fix_title: string | null;
   occurrences: unknown;
 };
 
 type ShippedRelease = { readonly version: string; readonly sha: string };
 
-/**
- * The release step closes the loop for agent reports. Each resolved agent item
- * links its fixing pull request (`notifyFeedbackFixed`). Once a delivered
- * release contains that merge, every agent that reported the problem gets one
- * passive System line in the Room where it last reported it, and the items
- * record `resolved_notified_at` so a later delivery sends nothing again.
- * A failed GitHub read leaves that pull request for the next release.
- */
 export async function notifyFeedbackShipped(
   database: SqlDatabase,
   { config, pullRequests }: FeedbackLoop,
@@ -31,7 +25,7 @@ export async function notifyFeedbackShipped(
   if (!pullRequests) return 0;
   const pending = await database.query<{ issue_number: number }>(
     `SELECT DISTINCT issue_number FROM feedback_items
-     WHERE source_kind='agent' AND status='resolved' AND resolved_notified_at IS NULL
+     WHERE status='resolved' AND agent_resolved_notified_at IS NULL
        AND issue_number IS NOT NULL AND lower(issue_repository)=lower($1)
      ORDER BY issue_number`,
     [config.repository],
@@ -56,16 +50,6 @@ export async function notifyFeedbackShipped(
   return notified;
 }
 
-/** The fix title `notifyFeedbackFixed` stored as the item's triage reason. */
-function fixTitle(reason: string | null): string | undefined {
-  try {
-    const parsed = JSON.parse(reason ?? '') as { reason?: unknown };
-    return typeof parsed.reason === 'string' ? parsed.reason : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 async function tellReporters(
   db: SqlDatabase,
   repository: string,
@@ -74,22 +58,28 @@ async function tellReporters(
 ): Promise<number> {
   const items = (
     await db.query<ShippedItem>(
-      `SELECT id,reporter_identity_id,room_id,triage_reason,occurrences FROM feedback_items
-       WHERE source_kind='agent' AND status='resolved' AND resolved_notified_at IS NULL
+      `SELECT id,source_kind,created_at,reporter_identity_id,room_id,fix_title,occurrences FROM feedback_items
+       WHERE status='resolved' AND agent_resolved_notified_at IS NULL
          AND issue_number=$2 AND lower(issue_repository)=lower($1)
        ORDER BY created_at,id FOR UPDATE`,
       [repository, number],
     )
   ).rows;
   if (!items.length) return 0;
-  // Each reporting agent, with the Room of its latest report of this problem.
-  const reporters = new Map<string, string | null>();
+  const reporters = new Map<string, { roomId: string | null; time: number }>();
+  const addReporter = (agentId: string, roomId: string | null, time: number) => {
+    if (!reporters.has(agentId) || time > reporters.get(agentId)!.time)
+      reporters.set(agentId, { roomId, time });
+  };
   for (const item of items) {
-    reporters.set(item.reporter_identity_id, item.room_id);
+    if (item.source_kind === 'agent')
+      addReporter(item.reporter_identity_id, item.room_id, new Date(item.created_at).getTime());
     for (const occurrence of Array.isArray(item.occurrences) ? item.occurrences : []) {
-      const { agentId, roomId } = (occurrence ?? {}) as { agentId?: unknown; roomId?: unknown };
-      if (typeof agentId === 'string')
-        reporters.set(agentId, typeof roomId === 'string' ? roomId : item.room_id);
+      const { agentId, roomId, createdAt } = (occurrence ?? {}) as {
+        agentId?: unknown; roomId?: unknown; createdAt?: unknown;
+      };
+      if (typeof agentId === 'string' && typeof createdAt === 'string')
+        addReporter(agentId, typeof roomId === 'string' ? roomId : null, Date.parse(createdAt));
     }
   }
   const live = await db.query<{ id: string }>(
@@ -99,16 +89,16 @@ async function tellReporters(
   const rooms = new Set(
     (
       await db.query<{ id: string }>(`SELECT id FROM rooms WHERE id::text=ANY($1::text[])`, [
-        [...new Set([...reporters.values()].filter((id): id is string => Boolean(id)))],
+        [...new Set([...reporters.values()].map(({ roomId }) => roomId).filter((id): id is string => Boolean(id)))],
       ])
     ).rows.map((row) => row.id),
   );
-  const title = fixTitle(items[0]!.triage_reason);
+  const title = items.find((item) => item.fix_title)?.fix_title;
   const url = systemMessage('feedback.https-github-com-pull', repository, number);
   let notified = 0;
   if (live.rowCount) await ensureSystemIdentity(db);
   for (const { id: agentId } of live.rows) {
-    const roomId = reporters.get(agentId);
+    const roomId = reporters.get(agentId)?.roomId;
     if (!roomId || !rooms.has(roomId)) continue;
     const line = await systemLine(db, {
       id: createHash('sha256')
@@ -126,7 +116,8 @@ async function tellReporters(
     });
     if (line.inserted) notified++;
   }
-  await db.query(`UPDATE feedback_items SET resolved_notified_at=now() WHERE id=ANY($1::text[])`, [
+  await db.query(`UPDATE feedback_items SET agent_resolved_notified_at=now(),
+    resolved_notified_at=CASE WHEN source_kind='agent' THEN now() ELSE resolved_notified_at END WHERE id=ANY($1::text[])`, [
     items.map((item) => item.id),
   ]);
   return notified;
