@@ -151,10 +151,10 @@ export function staleReleaseImages(images, sha) {
 
 export function removeStaleReleaseImages(sha, run = execFileSync) {
   try {
-    const ids = [...new Set(run('docker', ['images', '--all', '--quiet', '--no-trunc', '--filter', 'label=app.usebeeline.release.sha'], { encoding: 'utf8' }).split('\n').filter(Boolean))];
+    const ids = [...new Set(run('docker', ['images', '--all', '--quiet', '--no-trunc', '--filter', 'label=app.usebeeline.release.sha'], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }).split('\n').filter(Boolean))];
     if (!ids.length) return;
-    const images = run('docker', ['image', 'inspect', '--format', '{{json .}}', ...ids], { encoding: 'utf8' }).split('\n').filter(Boolean).map(line => JSON.parse(line))
-      .map(image => ({ id: image.Id, tags: image.RepoTags ?? [], created: image.Created, sha: image.Config?.Labels?.['app.usebeeline.release.sha'] ?? '' }));
+    const images = run('docker', ['image', 'inspect', '--format', '{"id":{{json .Id}},"tags":{{json .RepoTags}},"created":{{json .Created}},"sha":{{json (index .Config.Labels "app.usebeeline.release.sha")}}}', ...ids], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }).split('\n').filter(Boolean).map(line => JSON.parse(line))
+      .map(image => ({ ...image, tags: image.tags ?? [], sha: image.sha ?? '' }));
     const stale = staleReleaseImages(images, sha);
     // An image still used by a container, or still the parent of a kept image, stays.
     if (stale.length) try { run('docker', ['image', 'rm', ...stale], { stdio: 'ignore' }); } catch { /* in use */ }

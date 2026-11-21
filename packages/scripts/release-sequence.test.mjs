@@ -87,10 +87,17 @@ test('release image cleanup retains current and previous tags, then prunes dangl
     'sha256:o3',
   ]);
   const calls = [];
-  removeStaleReleaseImages(current, (command, args) => {
+  removeStaleReleaseImages(current, (command, args, options) => {
     calls.push([command, ...args]);
-    if (args[0] === 'images') return images.map(entry => entry.id).join('\n') + '\n';
-    if (args[0] === 'image' && args[1] === 'inspect') return images.map(entry => JSON.stringify({ Id: entry.id, RepoTags: entry.tags, Created: entry.created, Config: { Labels: entry.sha ? { 'app.usebeeline.release.sha': entry.sha } : null } })).join('\n') + '\n';
+    if (args[0] === 'images') {
+      assert.equal(options.maxBuffer, 256 * 1024 * 1024);
+      return images.map(entry => entry.id).join('\n') + '\n';
+    }
+    if (args[0] === 'image' && args[1] === 'inspect') {
+      assert.equal(options.maxBuffer, 256 * 1024 * 1024);
+      assert.equal(args[3], '{"id":{{json .Id}},"tags":{{json .RepoTags}},"created":{{json .Created}},"sha":{{json (index .Config.Labels "app.usebeeline.release.sha")}}}');
+      return images.map(entry => JSON.stringify(entry)).join('\n') + '\n';
+    }
     throw new Error('conflict: image is being used by a running container');
   });
   assert.deepEqual(calls.slice(-2), [
