@@ -136,6 +136,8 @@ import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, br
     for (const row of affected.rows) {
       let changed = false;
       await ctx.database.transaction(async (tx) => {
+        // The cache write mirrors into corner_facts; lock facts before cache.
+        await lockCornerLifecycle(tx, row.corner_id);
         const lifecycle = (
           await tx.query<{ lifecycle: CornerLifecycleView }>(
             `SELECT lifecycle FROM corner_github_cache WHERE corner_id=$1 FOR UPDATE`,
@@ -350,6 +352,7 @@ import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, br
         let differentPr = false;
         if (!merged && url && number && targetBranch && headSha && body.action !== 'closed') {
           await database.transaction(async (tx) => {
+            await lockCornerLifecycle(tx, target.corner_id);
             const previous = (
               await tx.query<{ lifecycle: CornerLifecycleView }>(
                 `SELECT lifecycle FROM corner_github_cache WHERE corner_id=$1 FOR UPDATE`,

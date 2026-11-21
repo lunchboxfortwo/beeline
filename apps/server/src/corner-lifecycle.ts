@@ -860,7 +860,9 @@ export { confirmCornerMergeAuthority } from './corner-lifecycle-review-state.js'
 export { deleteStoredCornerWorkflows } from './corner-lifecycle-review-state.js';
 
 /** The one router for GitHub/helper facts. Callers retain their existing lifecycle
- * locks and emit observations; this owner decides the guarded cache transition. */
+ * locks and emit observations; this owner decides the guarded cache transition.
+ * A cache write mirrors into corner_facts by trigger, so it takes the lifecycle
+ * lock first: every writer locks facts, then cache. */
 export function recordCornerGithubFact(db: SqlDatabase, cornerId: string,
   fact: Extract<CornerGithubFact, { kind: 'pr-forgotten' }>,
 ): Promise<{ archived: boolean; locked: boolean } | undefined>;
@@ -868,6 +870,15 @@ export function recordCornerGithubFact(db: SqlDatabase, cornerId: string,
   fact: Exclude<CornerGithubFact, { kind: 'pr-forgotten' }>,
 ): Promise<boolean>;
 export async function recordCornerGithubFact(db: SqlDatabase, cornerId: string,
+  fact: CornerGithubFact,
+): Promise<boolean | { archived: boolean; locked: boolean } | undefined> {
+  return db.transaction(async tx => {
+    await lockCornerLifecycle(tx, cornerId);
+    return writeCornerGithubFact(tx, cornerId, fact);
+  });
+}
+
+async function writeCornerGithubFact(db: SqlDatabase, cornerId: string,
   fact: CornerGithubFact,
 ): Promise<boolean | { archived: boolean; locked: boolean } | undefined> {
   switch (fact.kind) {

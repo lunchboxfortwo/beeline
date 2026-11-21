@@ -1,6 +1,7 @@
 import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { DatabaseLockDiagnostics } from './database-lock-diagnostics.js';
 import { loadCorner } from './corner-lifecycle-read-state.js';
+import { lockCornerLifecycle, recordCornerGithubFact } from './corner-lifecycle.js';
 import { seedCornerOpening } from './test-fixtures/corner-commands.js';
 import { subscribeConfiguredReviewers } from './agent-subscriptions.js';
 import { seedSquireMachine } from './test-fixtures/squire-machines.js';
@@ -399,5 +400,52 @@ describe.skipIf(!url)('production transaction lock ordering', () => {
     await reconciliation['mergeCorner']({ corner_id: corner, parent_id: room, author_id: agent,
       corner_name: 'Corner', summary: '', repository_id: '101', installation_id: '77' }, pullRequest);
     expect((await first.query(`SELECT count(*)::int count FROM messages WHERE card_type='github-event'`)).rows).toEqual([{ count: 1 }]);
+  });
+
+  // Sentry 7845032581: a merge's own webhooks raced. mergeCorner holds the
+  // facts row and asks for the cache row; a cache write mirrors into facts by
+  // trigger. Each contender must queue on facts before it holds the cache row.
+  it.each([
+    { name: 'a pool GitHub fact write', expected: { checks: 'failing' },
+      contend: (_ops: GitHubOperations, id: string) =>
+        recordCornerGithubFact(second, id, { kind: 'github-observed', patch: { checks: 'failing' } }) },
+    { name: 'the base-branch push', expected: { pr: expect.objectContaining({ baseSha: 'b'.repeat(40) }) },
+      contend: (ops: GitHubOperations) => ops.processBaseBranchPush({ ref: 'refs/heads/main', after: 'b'.repeat(40),
+        repository: { full_name: 'owner/widgets' } }, 77) },
+  ])('Sentry 7845032581: $name waits for a merge that holds corner facts', async ({ contend, expected }) => {
+    const id = randomUUID();
+    await first.query(`INSERT INTO rooms(id,workspace_id,parent_id,created_by,name) VALUES($1,$2,$3,$4,'Merging corner')`, [id, workspace, room, agent]);
+    await first.query('INSERT INTO corner_facts(corner_id) VALUES($1)', [id]);
+    await first.query(`UPDATE corner_github_cache SET lifecycle=$2::jsonb WHERE corner_id=$1`, [id, JSON.stringify({
+      lifecycle: 'in-review', checks: 'pending', pr: { number: 5, headSha: '5'.repeat(40), baseSha: 'a'.repeat(40),
+        targetBranch: 'main', mergeability: 'clean', url: 'https://github.com/owner/widgets/pull/5' },
+    })]);
+    const app = { installationToken: vi.fn().mockResolvedValue({ token: 'fixture' }),
+      readBranchHead: vi.fn().mockResolvedValue('b'.repeat(40)) } as unknown as GitHubAppClient;
+    const ops = new GitHubOperations(second, {} as GitHubOAuthClient, app, 'secret');
+    vi.spyOn(ops, 'refreshStaleMergeability').mockResolvedValue(undefined);
+    // A deadlock victim's pooled connection is replaced; read the current backends.
+    const pid = async (db: PostgresDatabase) => (await db.query<{ pid: number }>('SELECT pg_backend_pid() pid')).rows[0]!.pid;
+    const [mergePid, contenderPid] = [await pid(first), await pid(second)];
+    const contenders: Promise<unknown>[] = [];
+    try {
+      const merge = first.transaction(async tx => {
+        await lockCornerLifecycle(tx, id);
+        contenders.push(contend(ops, id));
+        void contenders[0]!.catch(() => {});
+        await waiting(observer, contenderPid, mergePid);
+        await tx.query(`SELECT gh.lifecycle FROM corner_facts fact JOIN corner_github_cache gh ON gh.corner_id=fact.corner_id
+          WHERE fact.corner_id=$1 FOR UPDATE OF gh,fact`, [id]);
+        await recordCornerGithubFact(tx, id, { kind: 'github-observed', patch: { lifecycle: 'done' } });
+      });
+      const results = [...await Promise.allSettled([merge]), ...await Promise.allSettled(contenders)];
+      expect(results.map(result => result.status === 'rejected'
+        ? (result.reason as { code?: string }).code ?? String(result.reason) : 'ok')).toEqual(['ok', 'ok']);
+      // Neither webhook's update is lost.
+      expect(await ops.lifecycle(id)).toMatchObject({ lifecycle: 'done', ...expected });
+    } finally {
+      await Promise.allSettled(contenders);
+      await first.query('UPDATE rooms SET archived_at=now() WHERE id=$1', [id]);
+    }
   });
 });
