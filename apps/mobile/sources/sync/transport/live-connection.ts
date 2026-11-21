@@ -40,6 +40,17 @@ type PendingRequest = {
   resolve(value: unknown): void;
   reject(reason: unknown, transportFailed?: boolean): void;
 };
+type LaunchRead = { id: string; key: string; claimed?: true; reply?: Record<string, unknown> };
+type Launch = Omit<NonNullable<Window['__beelineLaunchLive']>, 'reads'> & { reads: LaunchRead[] };
+const readKey = (operation: string, args: unknown) =>
+  operation + JSON.stringify(Object.entries(args ?? {}).sort(([a], [b]) => (a < b ? -1 : 1)));
+/** The socket and first read the web page's launch script started (index.html). */
+function takeLaunch(): Launch | undefined {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return undefined;
+  const launch = window.__beelineLaunchLive;
+  delete window.__beelineLaunchLive;
+  return launch && { ...launch, reads: launch.reads.map(({ id, op, args }) => ({ id, key: readKey(op, args) })) };
+}
 type Dependencies = {
   telemetry?: {
     origin(): { deviceId: string; sessionId: string; viewId: string; actionId: string; requestId: string } | undefined;
@@ -117,6 +128,9 @@ export class LiveConnection {
   // One owner-held connection promise prevents parallel screens opening two sockets.
   private connecting?: { promise: Promise<void>; reject(reason: unknown): void };
   private readonly requests = new Map<string, PendingRequest>();
+  // Adopted by the first socket admission. Its reads answer only the launch
+  // page's own first asks: a page change, drop or new account ends it.
+  private launch = takeLaunch();
   private readonly registrations = new Set<Registration>();
   private readonly roomReferences = new Map<string, number>();
   private readonly viewing = new Map<string, number>();
@@ -334,7 +348,8 @@ export class LiveConnection {
     // Native close callbacks can arrive late. Settle the old socket's requests
     // before admitting a replacement, so their deadlines cannot undo recovery.
     if (this.socket && this.socket.readyState > 1) this.dropConnection(true);
-    const id = String(++this.requestId);
+    const launched = this.claimLaunchRead(operation, args);
+    const id = launched?.id ?? String(++this.requestId);
     return new Promise((resolve, reject) => {
       let settled = false;
       const finish = () => {
@@ -376,6 +391,12 @@ export class LiveConnection {
       }, options.timeoutMs ?? 20_000);
       this.requests.set(id, request);
       options.signal?.addEventListener('abort', abort, { once: true });
+      if (launched && this.launch) {
+        // The launch script already sent this read on the socket being adopted.
+        request.socket = this.launch.socket;
+        if (launched.reply) this.settle(request, launched.reply, this.launch.token);
+        if (!this.requests.has(id)) return;
+      }
       if (isOpen(this.socket)) this.sendPending(this.socket);
       else void this.ensureSocket().catch((error) => request.reject(error));
     });
@@ -418,10 +439,14 @@ export class LiveConnection {
       .authorization()
       .then((token) => {
         if (this.connecting !== connection || identity !== this.identity) return;
-        const socket = new WebSocket(this.deps.liveUrl(), [`bearer.${token}`]);
+        const launch = this.launch;
+        const adopted = launch && launch.url === this.deps.liveUrl() && launch.token === token &&
+          launch.socket.readyState <= 1 ? launch.socket : undefined;
+        if (!adopted) this.endLaunch();
+        const socket = adopted ?? new WebSocket(this.deps.liveUrl(), [`bearer.${token}`]);
         this.socket = socket;
         this.socketGeneration++;
-        socket.onopen = () => {
+        const opened = () => {
           if (this.socket !== socket) return;
           this.connecting = undefined;
           this.sendSubscribe([...this.roomReferences.keys()]);
@@ -430,7 +455,7 @@ export class LiveConnection {
           this.publishConnected();
           resolve();
         };
-        socket.onmessage = (event) => {
+        const received = (event: MessageEvent) => {
           if (this.socket !== socket) return;
           let frame: unknown;
           try {
@@ -442,17 +467,18 @@ export class LiveConnection {
           const reply = frame as Record<string, unknown>;
           if (reply.t === 'res' && typeof reply.id === 'string') {
             const pending = this.requests.get(reply.id);
-            if (!pending || pending.socket !== socket) return;
-            if (reply.ok === true) pending.resolve(reply.result);
-            else {
-              const error = reply.error as { code: string; message: string; retryable: boolean };
-              if (error.code === 'unauthorized') this.deps.invalidateAuthorization?.(token);
-              pending.reject(new PhoneSocketError(error.code, error.message, error.retryable));
+            if (pending && pending.socket === socket) this.settle(pending, reply, token);
+            else if (this.launch?.socket === socket) {
+              // A launch read waits on its socket until the page first asks for it.
+              const read = this.launch.reads.find((launched) => launched.id === reply.id && !launched.claimed);
+              if (read) read.reply = reply;
             }
             return;
           }
           this.dispatch(frame as LiveWireEvent | { type: 'pong' }, socket);
         };
+        socket.onopen = opened;
+        socket.onmessage = received;
         const failed = () => {
           if (this.socket !== socket) return;
           // A network failure says nothing about the credential. Forcing an
@@ -461,13 +487,52 @@ export class LiveConnection {
         };
         socket.onerror = failed;
         socket.onclose = failed;
+        if (!adopted || !launch) return;
+        // Same order as a fresh socket: admission first, then frames as received.
+        const earlier = launch.release();
+        if (socket.readyState === 1) opened();
+        for (const event of earlier) received(event);
       })
       .catch((error) => {
         if (this.connecting !== connection) return;
         this.connecting = undefined;
+        this.endLaunch();
         reject(error);
       });
     return promise;
+  }
+
+  private settle(pending: PendingRequest, reply: Record<string, unknown>, token: string): void {
+    if (reply.ok === true) pending.resolve(reply.result);
+    else {
+      const error = reply.error as { code: string; message: string; retryable: boolean };
+      if (error.code === 'unauthorized') this.deps.invalidateAuthorization?.(token);
+      pending.reject(new PhoneSocketError(error.code, error.message, error.retryable));
+    }
+  }
+
+  private claimLaunchRead(operation: string, args: unknown): LaunchRead | undefined {
+    if (!this.launch) return undefined;
+    if (window.location.pathname !== this.launch.path) {
+      this.endLaunch();
+      return undefined;
+    }
+    const key = readKey(operation, args);
+    const read = this.launch.reads.find((launched) => !launched.claimed && launched.key === key);
+    if (read) read.claimed = true;
+    return read;
+  }
+
+  /** Unclaimed launch reads are discarded; an unadopted launch socket closes. */
+  private endLaunch(): void {
+    const launch = this.launch;
+    this.launch = undefined;
+    if (!launch || this.socket === launch.socket) return;
+    launch.release();
+    launch.socket.close();
+    // A read claimed before admission goes out on the replacement socket.
+    for (const request of this.requests.values())
+      if (request.socket === launch.socket) request.socket = undefined;
   }
 
   private socketFailed(socket: WebSocket): void {
@@ -488,6 +553,7 @@ export class LiveConnection {
     }
   }
   private dropConnection(transportFailed = false): void {
+    this.endLaunch();
     const socket = this.socket;
     this.socket = undefined;
     const connecting = this.connecting;

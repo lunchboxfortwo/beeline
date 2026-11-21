@@ -1,6 +1,6 @@
-import { tracking } from './tracking';
+import { tracking } from './analytics';
 
-export { tracking } from './tracking';
+export { tracking } from './analytics';
 
 type OtaEventProperties = {
     ota_version?: string;

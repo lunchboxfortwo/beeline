@@ -28,6 +28,37 @@ html,body{background:#fafaf9}
   } catch (e) {}
 })();
 </script>
+<script>
+// While the bundle loads, open the app's live socket with the saved access and
+// send the launch page's first read. LiveConnection adopts this socket and the
+// read; nothing here renders or keeps data.
+(function () {
+  try {
+    var access = JSON.parse(window.localStorage.getItem('buzzy.monolith.access.v1') || 'null');
+    if (!access || typeof access.server !== 'string' || typeof access.token !== 'string' ||
+        access.identityId !== window.localStorage.getItem('buzzy.monolith.identity.v1') ||
+        !(access.expiresAt > Date.now() + 30000)) return;
+    var path = window.location.pathname.replace(/\/+$/, '') || '/';
+    var room = /^\/beeline\/chat\/([^/]+)$/.exec(path);
+    var read = room ? { op: 'readRoom', args: { roomId: decodeURIComponent(room[1]) } }
+      : /^\/(beeline\/(channels|community|create-workspace))?$/.test(path) ? { op: 'readWorkspaces', args: {} } : null;
+    var url = access.server.replace(/^http/, 'ws') + '/v1/phone/live';
+    var socket = new WebSocket(url, ['bearer.' + access.token]);
+    var messages = [];
+    var keep = function (event) { messages.push(event); };
+    socket.addEventListener('message', keep);
+    if (read) socket.addEventListener('open', function () {
+      socket.send(JSON.stringify({ t: 'req', id: 'launch-1', op: read.op, args: read.args }));
+    }, { once: true });
+    window.__beelineLaunchLive = {
+      url: url, token: access.token, path: window.location.pathname, socket: socket,
+      reads: read ? [{ id: 'launch-1', op: read.op, args: read.args }] : [],
+      // The adopter takes the frames received so far; later ones are its own.
+      release: function () { socket.removeEventListener('message', keep); return messages; },
+    };
+  } catch (e) {}
+})();
+</script>
 </head>
 <body><noscript>You need to enable JavaScript to run this app.</noscript><div id="root"></div></body>
 </html>

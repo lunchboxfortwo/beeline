@@ -2,7 +2,7 @@ import { authDiagnostic, diagnostic, startDiagnosticLifecycle } from './diagnost
 import { useSegments } from "expo-router";
 import { funnelScreenFromSegments } from "@beeline/api-contract/signin-funnel";
 import { funnelScreenShown } from "@/auth/signin-funnel";
-import { tracking } from "./tracking";
+import { tracking } from "./analytics";
 import React from "react";
 
 export function useTrackScreens() {

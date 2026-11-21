@@ -24,8 +24,7 @@ import { AppState, Platform } from 'react-native';
 import { ModalProvider } from '@/modal';
 import { GrammarProvider } from '@/ui/GrammarProvider';
 import { WarmComputerSessionHost } from '@/components/buzz/ComputerSession';
-import { PostHogProvider } from 'posthog-react-native';
-import { tracking } from '@/track/tracking';
+import { TrackingRoot } from '@/track/TrackingRoot';
 import { useTrackScreens } from '@/track/useTrackScreens';
 import { KeyboardShortcutsProvider } from '@/components/KeyboardShortcutsProvider';
 import { StatusBarProvider } from '@/components/StatusBarProvider';
@@ -365,7 +364,7 @@ export default function RootLayout() {
   // its first focused child before an imperative landing replace or push
   // navigation can be dispatched.
 
-  let providers = (
+  const providers = (
     <SafeAreaProvider initialMetrics={initialWindowMetrics}>
       <NavigationRouteEffects onContentLayout={onContentLayout} />
       <KeyboardProvider preload={false}>
@@ -400,11 +399,11 @@ export default function RootLayout() {
       </KeyboardProvider>
     </SafeAreaProvider>
   );
-  if (tracking) {
-    providers = <PostHogProvider client={tracking}>{providers}</PostHogProvider>;
-  }
-
-  return <FirstContentDrawContext.Provider value={onContentLayout}>{providers}</FirstContentDrawContext.Provider>;
+  return (
+    <FirstContentDrawContext.Provider value={onContentLayout}>
+      <TrackingRoot drawn={drawn}>{providers}</TrackingRoot>
+    </FirstContentDrawContext.Provider>
+  );
 }
 
 function BackgroundEffects() {
