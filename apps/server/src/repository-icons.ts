@@ -6,11 +6,11 @@ export type IconRepository = { repository_id: string; installation_id: string; f
 /** One GET under the repository with its installation's token. */
 export type IconRepositoryRead = (repository: IconRepository, path: string) => Promise<unknown>;
 
-/** A repository at least one chat is linked to. Unlinked installed repositories are never read. */
 /** Raised when the stored pick changes meaning; rows below it re-resolve once at the next backfill.
  * 2: the homepage site icon fills in for a repository with no committed icon file. */
 const RESOLVER_REVISION = 2;
 
+/** A repository at least one chat is linked to. Unlinked installed repositories are never read. */
 const LINKED = `r.active AND EXISTS (SELECT 1 FROM rooms chat WHERE chat.parent_id IS NULL
   AND chat.repository_resolution='repository' AND chat.repository_name=r.full_name)`;
 

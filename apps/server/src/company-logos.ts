@@ -241,8 +241,8 @@ export async function pickRepositoryIconPath(files: ReadonlySet<string>, readSou
 }
 
 type RepositoryRead = (path: string) => Promise<unknown>;
-/** The repository's picked icon file as a 64 px PNG with its path, else none. The caller stores the result;
- * nothing here caches, so this runs only when a repository is linked or its icon files change. */
+/** The repository's picked icon file as a 64 px PNG with its path, else none. Uncached;
+ * repository-icons.ts owns storage and when to resolve again. */
 export async function resolveRepositoryIcon(branch: string, read: RepositoryRead): Promise<{ image: Image; path: string } | undefined> {
   const tree = await read(`git/trees/${encodeURIComponent(branch)}?recursive=1`) as { tree?: { path?: unknown; type?: unknown; sha?: unknown }[] } | undefined;
   const blobs = new Map<string, string>();
@@ -258,7 +258,7 @@ export async function resolveRepositoryIcon(branch: string, read: RepositoryRead
   const bytes = await blob(path);
   if (!bytes) return undefined;
   try { return { image: { bytes: await chatPicture(bytes), mime: 'image/png' }, path }; }
-  catch { return undefined; /* the picked file is not a readable image: the chat shows # */ }
+  catch { return undefined; /* unreadable pick: the caller can try the homepage icon */ }
 }
 
 /** An icon file as the stored chat picture: 64 px square with transparent padding; a small raster scales up
