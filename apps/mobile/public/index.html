@@ -45,17 +45,38 @@ html,body{background:#fafaf9}
     var url = access.server.replace(/^http/, 'ws') + '/v1/phone/live';
     var socket = new WebSocket(url, ['bearer.' + access.token]);
     var messages = [];
-    var keep = function (event) { messages.push(event); };
-    socket.addEventListener('message', keep);
-    if (read) socket.addEventListener('open', function () {
-      if (room) socket.send(JSON.stringify({ type: 'subscribe', roomIds: [read.args.roomId], sidebarPreviews: false, roomStateProjections: true }));
+    var reads = [];
+    var released = false;
+    var sendRead = function () {
+      if (released || !read || reads.length) return;
       socket.send(JSON.stringify({ t: 'req', id: 'launch-1', op: read.op, args: read.args }));
-    }, { once: true });
+      reads.push({ id: 'launch-1', op: read.op, args: read.args });
+    };
+    var keep = function (event) {
+      messages.push(event);
+      if (!room) return;
+      try {
+        var frame = JSON.parse(event.data);
+        if (frame && frame.type === 'subscribed' && frame.roomId === read.args.roomId) sendRead();
+      } catch (e) {}
+    };
+    var opened = function () {
+      if (released || !read) return;
+      if (room) socket.send(JSON.stringify({ type: 'subscribe', roomIds: [read.args.roomId], sidebarPreviews: false, roomStateProjections: true }));
+      else sendRead();
+    };
+    socket.addEventListener('message', keep);
+    socket.addEventListener('open', opened, { once: true });
     window.__beelineLaunchLive = {
       url: url, token: access.token, path: window.location.pathname, socket: socket,
-      reads: read ? [{ id: 'launch-1', op: read.op, args: read.args }] : [],
+      reads: reads,
       // The adopter takes the frames received so far; later ones are its own.
-      release: function () { socket.removeEventListener('message', keep); return messages; },
+      release: function () {
+        released = true;
+        socket.removeEventListener('message', keep);
+        socket.removeEventListener('open', opened);
+        return messages;
+      },
     };
   } catch (e) {}
 })();

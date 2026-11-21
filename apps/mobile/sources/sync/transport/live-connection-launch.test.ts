@@ -68,7 +68,7 @@ const answer = (id: string, result: unknown) => ({
 
 /** What index.html leaves for the app: its socket, the sent read and frames received so far. */
 function launch(
-  options: { token?: string; open?: boolean; received?: { data: string }[]; path?: string; roomId?: string } = {},
+  options: { token?: string; open?: boolean; received?: { data: string }[]; path?: string; roomId?: string; unsent?: boolean } = {},
 ) {
   const socket = new Socket(URL, [`bearer.${options.token ?? 'launch-access'}`]);
   if (options.open !== false) socket.readyState = 1;
@@ -80,7 +80,7 @@ function launch(
       token: options.token ?? 'launch-access',
       path: options.path ?? (options.roomId ? '/beeline/chat/' + options.roomId : '/beeline/community'),
       socket,
-      reads: [{ id: 'launch-1', op: options.roomId ? 'readRoom' : 'readWorkspaces', args: options.roomId ? { roomId: options.roomId } : {} }],
+      reads: options.unsent || options.open === false ? [] : [{ id: 'launch-1', op: options.roomId ? 'readRoom' : 'readWorkspaces', args: options.roomId ? { roomId: options.roomId } : {} }],
       release,
     } as unknown,
   };
@@ -157,8 +157,8 @@ it('adopts a launch socket that is still opening', async () => {
   await tick();
   expect(Socket.instances).toEqual([socket]);
   socket.open();
-  expect(socket.requests().map((frame) => frame.op)).toEqual(['readRoom']);
-  socket.onmessage!(answer('launch-1', workspaces));
+  expect(socket.requests().map((frame) => frame.op)).toEqual(['readWorkspaces', 'readRoom']);
+  socket.onmessage!(answer(socket.requests()[0].id, workspaces));
   await expect(read).resolves.toEqual(workspaces);
   expect(connection.commandState().ready).toBe(true);
   void room.catch(() => undefined);
@@ -342,4 +342,46 @@ it.each([undefined, roomId])('voids every launch read on missed updates (Room %s
   socket.onmessage!(answer('launch-1', {}));
   socket.emit({ t: 'res', id: frame.id, ok: true, result: fresh });
   await expect(read).resolves.toEqual(fresh);
+});
+
+it('sends its own Room read when adoption precedes the launch acknowledgement', async () => {
+  const { socket, release } = launch({ roomId, unsent: true });
+  const read = connect().request('readRoom', { roomId });
+  await tick();
+  expect(release).toHaveBeenCalledOnce();
+  const [frame] = socket.requests();
+  expect(frame).toMatchObject({ op: 'readRoom', args: { roomId } });
+  expect(frame.id).not.toBe('launch-1');
+  socket.emit({ type: 'subscribed', roomId });
+  socket.emit({ t: 'res', id: frame.id, ok: true, result: freshRoom });
+  await expect(read).resolves.toEqual(freshRoom);
+  expect(socket.requests()).toHaveLength(1);
+  expect(Socket.instances).toEqual([socket]);
+});
+
+it('takes reads sent after construction from the released launch handoff', async () => {
+  const { socket, page, release } = launch({ roomId, unsent: true, received: [answer('launch-1', staleRoom)] });
+  const connection = connect();
+  const handoff = page.__beelineLaunchLive as { reads: unknown[] };
+  handoff.reads.push({ id: 'launch-1', op: 'readRoom', args: { roomId } });
+  const read = connection.request('readRoom', { roomId });
+  await tick();
+  await expect(read).resolves.toEqual(staleRoom);
+  expect(release).toHaveBeenCalledOnce();
+  expect(socket.requests()).toEqual([]);
+});
+
+it('uses the final read list left by release rather than the construction-time list', async () => {
+  const { socket, page, release } = launch({ roomId });
+  const connection = connect();
+  release.mockImplementation(() => {
+    (page.__beelineLaunchLive as { reads: unknown[] }).reads = [];
+    return [];
+  });
+  const read = connection.request('readRoom', { roomId });
+  await tick();
+  const [frame] = socket.requests();
+  expect(frame).toMatchObject({ op: 'readRoom', args: { roomId } });
+  socket.emit({ t: 'res', id: frame.id, ok: true, result: freshRoom });
+  await expect(read).resolves.toEqual(freshRoom);
 });

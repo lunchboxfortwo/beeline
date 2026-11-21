@@ -88,13 +88,43 @@ it.each([['/'], ['/beeline/channels'], ['/beeline/community'], ['/beeline/create
   },
 );
 
-it('reads the Room named by a chat path', () => {
-  const { sockets } = launch('/beeline/chat/room%20one', signedIn);
+it('reads a Room exactly once after its subscription is acknowledged', () => {
+  const { window, sockets } = launch('/beeline/chat/room%20one', signedIn);
+  const socket = sockets[0]!;
+  expect(window.__beelineLaunchLive!.reads).toEqual([]);
+  socket.fire('open');
+  const subscription = { type: 'subscribe', roomIds: ['room one'], sidebarPreviews: false, roomStateProjections: true };
+  expect(socket.sent.map((frame) => JSON.parse(frame))).toEqual([subscription]);
+  expect(window.__beelineLaunchLive!.reads).toEqual([]);
+  socket.fire('message', { data: JSON.stringify({ type: 'subscribed', roomId: 'another-room' }) });
+  expect(socket.sent).toHaveLength(1);
+  socket.fire('message', { data: JSON.stringify({ type: 'subscribed', roomId: 'room one' }) });
+  const read = { id: 'launch-1', op: 'readRoom', args: { roomId: 'room one' } };
+  expect(socket.sent.map((frame) => JSON.parse(frame))).toEqual([subscription, { t: 'req', ...read }]);
+  expect(window.__beelineLaunchLive!.reads).toEqual([read]);
+  socket.fire('message', { data: JSON.stringify({ type: 'subscribed', roomId: 'room one' }) });
+  expect(socket.sent).toHaveLength(2);
+});
+
+it.each([false, true])('stops unsent Room reads on release (opened: %s)', (opened) => {
+  const { window, sockets } = launch('/beeline/chat/room', signedIn);
+  const socket = sockets[0]!;
+  if (opened) socket.fire('open');
+  window.__beelineLaunchLive!.release();
+  const sent = [...socket.sent];
+  socket.fire('open');
+  socket.fire('message', { data: JSON.stringify({ type: 'subscribed', roomId: 'room' }) });
+  expect(socket.sent).toEqual(sent);
+  expect(window.__beelineLaunchLive!.reads).toEqual([]);
+});
+
+it('stops an unsent Workspace read on release', () => {
+  const { window, sockets } = launch('/', signedIn);
+  expect(window.__beelineLaunchLive!.reads).toEqual([]);
+  window.__beelineLaunchLive!.release();
   sockets[0]!.fire('open');
-  expect(sockets[0]!.sent.map((frame) => JSON.parse(frame))).toEqual([
-    { type: 'subscribe', roomIds: ['room one'], sidebarPreviews: false, roomStateProjections: true },
-    { t: 'req', id: 'launch-1', op: 'readRoom', args: { roomId: 'room one' } },
-  ]);
+  expect(sockets[0]!.sent).toEqual([]);
+  expect(window.__beelineLaunchLive!.reads).toEqual([]);
 });
 
 it('only opens the socket on other pages', () => {

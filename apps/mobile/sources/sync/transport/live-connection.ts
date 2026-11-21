@@ -34,6 +34,8 @@ type RequestOptions = {
 };
 type PendingRequest = {
   operation: string;
+  key: string;
+  launchRead?: LaunchRead;
   frame: string;
   socket?: WebSocket;
   generation?: number;
@@ -59,10 +61,19 @@ function takeLaunch(): Launch | undefined {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return undefined;
   const launch = window.__beelineLaunchLive;
   delete window.__beelineLaunchLive;
-  return launch && { ...launch, reads: launch.reads.map(({ id, op, args }) => ({
-    id, key: readKey(op, args),
-    roomId: op === 'readRoom' ? (args as { roomId: string }).roomId : undefined,
-  })) };
+  if (!launch) return undefined;
+  return {
+    ...launch,
+    reads: [],
+    release() {
+      const earlier = launch.release();
+      this.reads = launch.reads.map(({ id, op, args }) => ({
+        id, key: readKey(op, args),
+        roomId: op === 'readRoom' ? (args as { roomId: string }).roomId : undefined,
+      }));
+      return earlier;
+    },
+  };
 }
 type Dependencies = {
   telemetry?: {
@@ -367,7 +378,6 @@ export class LiveConnection {
     // Native close callbacks can arrive late. Settle the old socket's requests
     // before admitting a replacement, so their deadlines cannot undo recovery.
     if (this.socket && this.socket.readyState > 1) this.dropConnection(true);
-    const launched = this.claimLaunchRead(operation, args);
     const id = String(++this.requestId);
     return new Promise((resolve, reject) => {
       let settled = false;
@@ -377,11 +387,12 @@ export class LiveConnection {
         clearTimeout(deadline);
         options.signal?.removeEventListener('abort', abort);
         this.requests.delete(id);
-        if (launched) delete launched.pending;
+        if (request.launchRead) delete request.launchRead.pending;
         return true;
       };
       const request: PendingRequest = {
         operation,
+        key: readKey(operation, args),
         frame: JSON.stringify({
           t: 'req',
           id,
@@ -411,17 +422,6 @@ export class LiveConnection {
       }, options.timeoutMs ?? 20_000);
       this.requests.set(id, request);
       options.signal?.addEventListener('abort', abort, { once: true });
-      if (launched && this.launch) {
-        // The launch script already sent this read on the socket being adopted.
-        request.socket = this.launch.socket;
-        launched.pending = request;
-        if (launched.reply) {
-          launched.served = true;
-          this.settle(request, launched.reply, this.launch.token);
-          delete launched.reply;
-        }
-        if (!this.requests.has(id)) return;
-      }
       if (isOpen(this.socket)) this.sendPending(this.socket);
       else void this.ensureSocket().catch((error) => request.reject(error));
     });
@@ -436,6 +436,17 @@ export class LiveConnection {
       if (request.socket) continue;
       request.socket = socket;
       request.generation = this.socketGeneration;
+      const launched = this.claimLaunchRead(request.key);
+      if (launched && this.launch) {
+        request.launchRead = launched;
+        launched.pending = request;
+        if (launched.reply) {
+          launched.served = true;
+          this.settle(request, launched.reply, this.launch.token);
+          delete launched.reply;
+        }
+        continue;
+      }
       try {
         socket.send(request.frame);
       } catch {
@@ -466,7 +477,7 @@ export class LiveConnection {
         if (this.connecting !== connection || identity !== this.identity) return;
         const launch = this.launch;
         const adopted = launch && launch.url === this.deps.liveUrl() && launch.token === token &&
-          launch.socket.readyState <= 1 ? launch.socket : undefined;
+          launch.socket.readyState <= 1 && window.location.pathname === launch.path ? launch.socket : undefined;
         if (!adopted) this.endLaunch();
         const socket = adopted ?? new WebSocket(this.deps.liveUrl(), [`bearer.${token}`]);
         this.socket = socket;
@@ -539,13 +550,12 @@ export class LiveConnection {
     }
   }
 
-  private claimLaunchRead(operation: string, args: unknown): LaunchRead | undefined {
+  private claimLaunchRead(key: string): LaunchRead | undefined {
     if (!this.launch) return undefined;
     if (window.location.pathname !== this.launch.path) {
       this.endLaunch();
       return undefined;
     }
-    const key = readKey(operation, args);
     const read = this.launch.reads.find((launched) => !launched.claimed && !launched.unusable && launched.key === key);
     if (read) read.claimed = true;
     return read;
@@ -558,9 +568,6 @@ export class LiveConnection {
     if (!launch || this.socket === launch.socket) return;
     launch.release();
     launch.socket.close();
-    // A read claimed before admission goes out on the replacement socket.
-    for (const request of this.requests.values())
-      if (request.socket === launch.socket) request.socket = undefined;
   }
 
   private socketFailed(socket: WebSocket): void {
