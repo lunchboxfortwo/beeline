@@ -49,7 +49,9 @@ Full Checks start alongside the next release's helper and desktop builds.
 The existing release validation join waits for their exact-SHA verdict before
 any helper publication, server migration/rollout, OTA/channel promotion,
 website deployment, store upload or finalization. Latest reuses that same
-successful verdict. Neither leg dispatches GitHub CI. Existing delivery proofs,
+successful verdict. Checks stay on squire; Mac helper builds use the GitHub
+workflow described under [local recovery legs](#local-recovery-legs-during-an-actions-outage).
+Existing delivery proofs,
 canary, rollback and finalization stay with their release legs.
 
 The existing dispatched-by fields default to the invoking user (or `firstmate`),
@@ -116,9 +118,9 @@ caches, Docker configuration and logs.
 The existing `beeline-ci1..4.slice` parents enforce 3 CPUs / 12 GiB each.
 After the checks verdict, the delivery queue uses at most three local slots
 and one separate capped slot for remote Mac orchestration.
-iOS store compilation and both Mac helpers share the remote orchestration
-slot while server, Linux helper, OTA and web app legs use
-available local slots.
+iOS store compilation uses the remote orchestration slot while server,
+Linux helper, OTA and web app legs use available local slots. Both Mac helpers
+build on GitHub (below) and use no local slot.
 Each delivery worker runs as the operator in its own source checkout and process,
 so production credentials never enter credential-free CI jails.
 Docker build/run containers share their worker's existing parent slice, including
@@ -165,14 +167,31 @@ promotion publishes it. Merging website changes alone does not publish them.
 
 The selected EAS web app leg
 still exports, uploads private source maps when configured, deploys and verifies its canonical
-origin. Both Mac helpers build on the authorized Intel MacBook
-(`dani@100.104.88.126`). Rust cross-compiles the ARM helper for
-`aarch64-apple-darwin`; packaging fetches the locked ARM CodeGraph bundle with
-its npm integrity verified. Every packaged Mach-O passes `lipo -verify_arch`
-and `codesign --verify --strict`; our Cargo binaries receive ad-hoc signatures.
-Intel also runs the installation proof. ARM records
-`verification: architecture-signature` because an executable installation proof
-requires an ARM Mac. `--mac-helpers carry` retains both published Apple helper
+origin. Both Mac helpers build on GitHub-hosted runners: the controller
+dispatches `.github/workflows/mac-helpers.yml` once per release leg (ref `main`,
+building the release SHA), waits for it and downloads its two
+`daemon-darwin-*` artifacts into the leg's private state for the existing
+helper join; publication stays on squire. The ARM helper builds natively on
+`macos-15` and the Intel helper on `macos-15-intel`, with the same steps as
+`unified-release.yml`'s `helper_macos` job minus its carry steps (a test keeps
+them identical). Every packaged Mach-O passes `lipo -verify_arch` and
+`codesign --verify --strict`; our Cargo binaries receive ad-hoc signatures,
+so no Apple certificate is involved. Both builds run the installation proof.
+The controller needs the configured `GITHUB_TOKEN` (or `GH_TOKEN`) with Actions
+write authority to dispatch and cancel runs, and read access to their status
+and artifacts. The workflow must exist on `main`; it reads the public
+`BEELINE_HELPER_SENTRY_DSN` build input from the repository variable, not the
+controller's env file. If Actions is unavailable, use `--mac-helpers carry`
+subject to the carry limit below.
+To prove both builds without publishing anything:
+
+```sh
+node packages/scripts/release-local.mjs --dry-run --leg mac-helpers \
+  --release-sha <full-main-SHA> --release-version vX.Y.Z-rc.N \
+  --env-file ~/.config/beeline-release.env --state-dir /outside/repo/mac-proof
+```
+
+`--mac-helpers carry` retains both published Apple helper
 archives instead. Carry provenance counts consecutive releases, and a fourth
 carry fails the release. Legacy carried archives without a count require a
 rebuild; newly built archives reset the count. The same limit applies when a
@@ -309,7 +328,7 @@ Keep vaulted keys vaulted; suitable provider API calls can use Squire's
 local credential or approved secure injection, not plaintext vault retrieval.
 
 Run the command using Node 22 or newer,
-the pinned Rust toolchain, Docker, Fly, gh, gh-axi and SSH tools. The Mac needs
+the pinned Rust toolchain, Docker, Fly, gh, gh-axi and SSH tools. The iOS build Mac needs
 Git, curl, tar, shasum, rustup and its normal compiler/SDK. The controller downloads
 checksum-verified Node 22.23.2 and installs Rust 1.95.0 into the task's remote
 temporary directory, without changing shared host tools or toolchain defaults.
@@ -362,9 +381,11 @@ Other `--dry-run` legs execute build-only commands; `--leg` limits their cost. S
 an image without pushing, migrating or updating Machines. Helper builds the
 Linux archive and runs the existing installer proof. OTA exports locally;
 the web app exports and checks its worker/identity without uploading maps or
-deploying. The Pages leg only builds static files. These are build proofs,
-not evidence of a live canary, native Mac acceptance, channel publication or
-successful production rollback. Those steps remain in real execution. Private
+deploying. The Pages leg only builds static files. The `mac-helpers` leg runs
+the hosted builds and native installation proofs described above, downloading
+their artifacts without publishing them. Other dry-run legs do not prove native
+Mac helper acceptance. Dry runs do not prove a live canary, channel publication
+or successful production rollback. Those steps remain in real execution. Private
 artifacts, summaries and job results stay outside Git, under `--state-dir`.
 Local release records identify their execution as local and record all carries;
 they do not claim a GitHub Actions run ID.
@@ -666,8 +687,7 @@ submits both Android and iOS, even if only one platform's runtime changed. The `
 
 On hosted releases, iOS store binaries build locally on the self-hosted
 `macbook-pro-7` Mac runner. On squire, iOS uses the authorized
-`dani@100.104.88.126` Mac through its serialized remote queue. Both Mac helpers
-are carried in the local queue during the Actions outage. The remote job
+`dani@100.104.88.126` Mac through its serialized remote queue. The remote job
 receives its Expo/ASC credentials and existing GitHub authority through stdin
 into a temporary job file removed on exit; other local
 delivery secrets stay on squire. The remote runner uses a private
@@ -681,8 +701,8 @@ missing or unfinished builds fail after 20 minutes. The native build evidence ke
 the delivery UUID and App Store build ID. Transport success alone does not
 authorize the native component or OTA promotion. Android store binaries
 build locally on the Linux runner and use the existing Google Play authentication
-and upload path. The helper `darwin-x64` bundle builds on GitHub's hosted
-`macos-15-intel` image, so it never queues behind an iOS store build.
+and upload path. Mac helper placement is described under
+[local recovery legs](#local-recovery-legs-during-an-actions-outage).
 
 Selected jobs build immutable artifacts named with both release version and
 source SHA, promote them, and run bounded checks. A component job that succeeds

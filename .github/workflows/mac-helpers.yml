@@ -1,0 +1,80 @@
+name: Mac helper builds
+# The squire release (packages/scripts/release-local-mac-github.mjs) dispatches
+# this for both Mac helpers and downloads the two artifacts. The build steps
+# are unified-release.yml's helper_macos job without its carry steps; a test
+# keeps them identical. It publishes nothing.
+run-name: Mac helpers ${{ inputs.release_version }} · ${{ inputs.request_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Release commit on main to build
+        type: string
+        required: true
+      release_version:
+        description: Release identity, vX.Y.Z-rc.N or vX.Y.Z
+        type: string
+        required: true
+      request_id:
+        description: Unique dispatch id, so the release finds this run
+        type: string
+        required: true
+env:
+  BEELINE_HELPER_SENTRY_DSN: ${{ vars.BEELINE_HELPER_SENTRY_DSN }}
+permissions:
+  contents: read
+jobs:
+  helper_macos:
+    name: HELPER BUILD (${{ matrix.platform }})
+    runs-on: ${{ matrix.runs_on }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: darwin-arm64
+            machine_arch: arm64
+            runs_on: macos-15
+          - platform: darwin-x64
+            machine_arch: x86_64
+            runs_on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@1.95.0
+      - run: bash packages/scripts/npm-ci-timed.sh
+      - name: Require the native build architecture
+        run: test "$(uname -m)" = "${{ matrix.machine_arch }}"
+      - uses: ./.github/actions/buzz-agent-cache
+        timeout-minutes: 2
+        continue-on-error: true
+        id: native_cache
+        with:
+          platform: ${{ matrix.platform }}
+      - name: Build and install-verify the native helper
+        run: npm run bundle:beeline -- --platform "${{ matrix.platform }}"
+        env:
+          BEELINE_BUNDLE_COMMIT: ${{ inputs.release_sha }}
+          BEELINE_BUNDLE_VERSION: ${{ inputs.release_version }}
+      - name: Install the candidate Intel Mac archive for acceptance
+        if: matrix.platform == 'darwin-x64'
+        run: node packages/scripts/verify-beeline-install.mjs --platform darwin-x64
+        env:
+          BEELINE_INSTALL_VERIFY_ROOT: ${{ runner.temp }}/beeline-install-${{ github.run_id }}-${{ github.run_attempt }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: daemon-${{ matrix.platform }}-${{ inputs.release_version }}-${{ inputs.release_sha }}
+          path: |
+            apps/site/dl/beeline-${{ matrix.platform }}.tar.gz
+            apps/site/dl/beeline-${{ matrix.platform }}.tar.gz.sha256
+            apps/site/dl/manifest.json
+            apps/site/dl/mac-helper-inputs.json
+            apps/site/dl/beeline-bootstrap.mjs
+            apps/site/dl/beeline-bootstrap.mjs.sha256
+          if-no-files-found: error
+          retention-days: 1

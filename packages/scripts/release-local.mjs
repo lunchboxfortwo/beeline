@@ -17,6 +17,7 @@ import { droppedChecks, localWorkflow, quickChecks, releasePlan } from './releas
 import { DesktopBuild, WINDOWS_DESKTOP, carryWindowsInstallers, desktopDryRun, desktopWorkflow } from './release-local-desktop.mjs';
 import { carryHelperPlatform } from './helper-carry.mjs';
 import { macSigningTools } from './release-local-desktop-worker.mjs';
+import { githubMacHelpers } from './release-local-mac-github.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const WORKFLOW = '.github/workflows/unified-release.yml';
@@ -108,17 +109,14 @@ async function carryMacHelper(engine, context) {
   return { result: 'success', outputs: { shipped: 'false' } };
 }
 
-// Local Mac jobs always build from this commit. Native ARM execution is not
-// available on this Intel host; the bundle owns architecture/signature proof.
-export function macHelperJob(job) {
-  const local = structuredClone(job);
-  local.env = { ...local.env, CARGO_BUILD_JOBS: '2', CI_TEST_WORKERS: '2', BEELINE_LOCAL_RELEASE: 'true' };
-  local.steps = local.steps.filter(step => !['previous_bundle', 'carry_bundle', 'native_cache'].includes(step.id));
-  for (const step of local.steps) {
-    if (step.name === 'Require the native build architecture') step.run = 'test "$(uname -m)" = x86_64';
-    if (step.if) step.if = step.if.replace(" && steps.carry_bundle.outcome != 'success'", '');
-  }
-  return local;
+// Both helper_macos matrix rows share one GitHub run of mac-helpers.yml,
+// dispatched by the controller; its artifacts feed the existing helper join.
+function githubMacHelper(engine, context) {
+  const { release_sha: sha, release_version: version } = context.needs.initialize.outputs;
+  engine.macHelpers ??= githubMacHelpers({ processes: engine.processes, token: context.github.token, repository: context.github.repository,
+    sha, version, directory: engine.directory, artifacts: engine.artifacts, records: engine.records, signal: engine.abortController.signal })
+    .finally(() => privateWrite(join(engine.directory, 'records.json'), JSON.stringify([...engine.records.values()], null, 2)));
+  return engine.macHelpers.then(results => results[context.matrix.platform]);
 }
 
 async function macJob({ job, context, label, engine }) {
@@ -127,13 +125,12 @@ async function macJob({ job, context, label, engine }) {
   const tools = await prepareMacTools(engine);
   const local = join(engine.directory, 'remote', label);
   mkdirSync(local, { recursive: true, mode: 0o700 });
-  const secrets = context.github.job === 'mobile_native_ios' ? Object.fromEntries(
+  const secrets = Object.fromEntries(
     ['EXPO_TOKEN', 'EXPO_ASC_KEY_ID', 'EXPO_ASC_ISSUER_ID', 'EXPO_ASC_API_KEY_P8'].map(name => [name, engine.secrets[name] || '']),
-  ) : {};
+  );
   if (secrets.EXPO_ASC_API_KEY_P8?.includes('-----BEGIN')) secrets.EXPO_ASC_API_KEY_P8 = Buffer.from(secrets.EXPO_ASC_API_KEY_P8).toString('base64');
   const spec = {
-    job: context.github.job === 'mobile_native_ios' ? privateIosJob(job)
-      : macHelperJob(job),
+    job: privateIosJob(job),
     label, secrets, context: { ...context, secrets: {}, github: { ...context.github } },
     variables: engine.variables, workflowEnv: engine.read?.(WORKFLOW)?.env,
   };
@@ -257,6 +254,7 @@ export function localHooks(directory, processes, { fullChecks = false, checksGat
               throw new Error('Full checks do not authorize this release SHA');
             return { result: 'success', outputs: {} };
           }
+          if (args[1].github.job === 'helper_macos' && engine.variables?.macHelperMode === 'build') return githubMacHelper(engine, args[1]);
           return delivery.run(...args);
         },
           finish: () => { process.removeListener('SIGINT', delivery.cancel); process.removeListener('SIGTERM', delivery.cancel); } };
@@ -284,10 +282,7 @@ export function localHooks(directory, processes, { fullChecks = false, checksGat
           [`GIT_CONFIG_VALUE_${index}`]: `AUTHORIZATION: basic ${basic}`, GIT_TERMINAL_PROMPT: '0' });
       }
       if (['helper_linux', 'helper_macos', 'server'].includes(context.github.job)) context.env.CARGO_BUILD_JOBS = '2';
-      if (context.github.job === 'helper_macos') {
-        if (engine.variables?.macHelperMode === 'build') return macJob(args);
-        return carryMacHelper(engine, context);
-      }
+      if (context.github.job === 'helper_macos') return carryMacHelper(engine, context);
       if (context.github.job === 'mobile_native_ios') return macJob(args);
       if (context.github.job === 'helper' && engine.variables?.macHelperMode !== 'build') {
         context.env.BEELINE_RELEASE_CARRIED_ARM64_DIR = join(directory, 'carried-arm64');
@@ -391,8 +386,8 @@ export function localHooks(directory, processes, { fullChecks = false, checksGat
         record.execution = { kind: 'local', id: basename(directory), dispatchedBy: JSON.parse(context.inputs.dispatched_by) };
         if (engine.variables.releaseChecks) record.checks = engine.variables.releaseChecks;
         record.delivery.localExceptions = { staticWebsite: 'not released',
-          helperArm64: engine.variables.macHelperMode === 'build' ? 'cross-built on Intel Mac; lipo and codesign verified' : 'carried unchanged',
-          helperX64: engine.variables.macHelperMode === 'build' ? 'built and install-verified on Intel Mac' : 'carried unchanged',
+          helperArm64: engine.variables.macHelperMode === 'build' ? 'built and install-verified on GitHub-hosted macos-15' : 'carried unchanged',
+          helperX64: engine.variables.macHelperMode === 'build' ? 'built and install-verified on GitHub-hosted macos-15-intel' : 'carried unchanged',
           desktop: engine.variables.desktopMode !== 'build' ? 'published signed updater set carried unchanged, including Windows'
             : WINDOWS_DESKTOP === 'build' ? 'native signed updater builds on MacBook, squire and Windows VM'
               : 'native signed updater builds on MacBook and squire; Windows installers carried unchanged and omitted from the updater manifest' };
@@ -435,7 +430,7 @@ export async function remoteJob(path, { platform = process.platform, arch = proc
   } };
   const engine = new LocalActions({ root, directory, secrets, variables: spec.variables, processes, github: localGithub, isolateTemporary: true, hooks });
   Object.assign(spec.context, { secrets, vars: engine.variables });
-  const job = await engine.job(spec.job, spec.context, spec.label || 'helper-darwin-x64', spec.workflowEnv);
+  const job = await engine.job(spec.job, spec.context, spec.label || 'mobile_native_ios-local', spec.workflowEnv);
   privateWrite(join(dirname(path), 'result.json'), JSON.stringify({ job, artifacts: [...engine.artifacts] }));
   if (job.result !== 'success') process.exitCode = 1;
 }
@@ -488,6 +483,20 @@ export async function dryRun(args, engine, context) {
     else if (leg === 'pages') steps = engine.read('.github/actions/pages-leg/action.yml').runs.steps.slice(0, 1);
     else if (leg === 'web-app') steps = engine.read('.github/actions/web-app-leg/action.yml').runs.steps.filter(step => ['Install mobile dependencies', 'Export the production web bundle', 'Verify the push worker is in the export', 'Stamp the immutable release identity'].includes(step.name));
     else if (leg === 'mac-tools') { await prepareMacTools(engine); continue; }
+    else if (leg === 'mac-helpers') {
+      if (!context.github.token) throw new Error('Dry-run mac-helpers requires --env-file with GITHUB_TOKEN or GH_TOKEN');
+      const cancel = () => engine.abortController.abort();
+      process.once('SIGINT', cancel); process.once('SIGTERM', cancel);
+      try {
+        const results = await githubMacHelpers({ processes: engine.processes, token: context.github.token, repository: context.github.repository,
+          sha, version: args['release-version'] || version, directory: engine.directory, artifacts: engine.artifacts, records: engine.records, signal: engine.abortController.signal });
+        privateWrite(join(engine.directory, 'mac-helpers.json'), JSON.stringify({ results, artifacts: [...engine.artifacts] }, null, 2));
+        if (Object.values(results).some(result => result.result !== 'success')) throw new Error('Dry-run mac-helpers failed; no release was attempted');
+      } finally {
+        process.removeListener('SIGINT', cancel); process.removeListener('SIGTERM', cancel);
+      }
+      continue;
+    }
     else if (['eas-cli', 'require-tools'].includes(leg)) steps = [{ uses: `./.github/actions/${leg}`, with: leg === 'require-tools' ? { tools: 'node git docker ssh tar curl' } : {} }];
     else throw new Error(`Unknown dry-run leg: ${leg}`);
     const job = await engine.job({ steps, 'timeout-minutes': 45 }, { ...context, inputs: { release_sha: sha, release_version: version }, matrix: {}, needs: {}, steps: {}, job: { status: 'success', services: {} } }, `dry-${leg}`);
@@ -509,7 +518,7 @@ export async function releaseChecks(engine, context) {
 
 export async function runLocalRelease(args, { repository = root, secrets: providedSecrets, checksGate } = {}) {
   const root = repository;
-  if (args.help) { console.log('node packages/scripts/release-local.mjs [--plan | --dry-run [--leg release|release_checks|initialize|server|helper|mobile-ota|pages|web-app|eas-cli|require-tools|mac-tools|desktop] | --execute --leg release_checks] [--channel next|latest] [--release-sha <40-char SHA>] [--release-version vX.Y.Z] [--desktop-mode build|carry] [--mac-helpers build|carry] [--env-file ~/.config/beeline-release.env] [--run-release-proof] [--store-track none|beta|production] [--state-dir /outside/repo]'); return; }
+  if (args.help) { console.log('node packages/scripts/release-local.mjs [--plan | --dry-run [--leg release|release_checks|initialize|server|helper|mobile-ota|pages|web-app|eas-cli|require-tools|mac-tools|mac-helpers|desktop] | --execute --leg release_checks] [--channel next|latest] [--release-sha <40-char SHA>] [--release-version vX.Y.Z] [--desktop-mode build|carry] [--mac-helpers build|carry] [--env-file ~/.config/beeline-release.env] [--run-release-proof] [--store-track none|beta|production] [--state-dir /outside/repo]'); return; }
   if (args['remote-job']) { await remoteJob(args['remote-job']); return; }
   if (process.platform !== 'linux') throw new Error('Run the release controller on Linux squire');
   const sha = args['release-sha'] || execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
@@ -530,7 +539,7 @@ export async function runLocalRelease(args, { repository = root, secrets: provid
     console.log(`Local ${args.channel} release at ${sha}; no release commands executed.`);
     console.log(JSON.stringify(releasePlan(engine.read(WORKFLOW), engine.read(checksWorkflow), args), null, 2));
     console.log('Selected website delivery publishes static assets to Cloudflare Pages and deploys the EAS web app.');
-    console.log(`Mac helper mode: ${variables.macHelperMode}; Intel and ARM helpers build on MacBook; ARM uses lipo and codesign verification. Desktop mode: ${variables.desktopMode}; builds use MacBook, squire${WINDOWS_DESKTOP === 'build' ? ' and the Windows VM' : '; Windows is skipped and its published installers carried'}; carry retains the entire published version.`);
+    console.log(`Mac helper mode: ${variables.macHelperMode}; ARM and Intel helpers build on GitHub-hosted macos-15 and macos-15-intel runners. Desktop mode: ${variables.desktopMode}; builds use MacBook, squire${WINDOWS_DESKTOP === 'build' ? ' and the Windows VM' : '; Windows is skipped and its published installers carried'}; carry retains the entire published version.`);
     console.log(`iOS store builds use SSH on ${MAC}. Canary, helper update proof, optional device proof, rollback and finalization stay enabled. ${args.channel === 'latest' ? 'Promotion reuses the successful next verdict; no checks run.' : 'Quick checks run before next delivery.'}`);
     return;
   }

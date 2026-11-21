@@ -16,15 +16,38 @@ for (const outcome of ['success', 'failure', 'wrong-sha', 'skipped']) test(`real
   const builds = new Promise(yes => { built = yes; });
   const checks = { sourceSha: outcome === 'wrong-sha' ? 'b'.repeat(40) : sha, result: outcome === 'skipped' ? 'skipped' : 'success', ...(outcome === 'skipped' ? { ownerMessageId: 'owner-42' } : {}) };
   const processes = new Processes({}, () => {}), started = new Set();
+  const markBuild = id => {
+    started.add(id);
+    if (started.has('helper_linux') && started.has('helper_macos')) built();
+  };
+  let requestId;
+  // Only the GitHub process boundary is substituted; execute the real Mac hook.
+  processes.run = async (command, args) => {
+    assert.equal(command, 'gh');
+    if (args[0] === 'workflow') {
+      requestId = args.at(-1).slice('request_id='.length);
+      markBuild('helper_macos');
+      return '';
+    }
+    if (args[0] === 'run' && args[1] === 'download') return '';
+    assert.equal(args[0], 'api');
+    if (args[1].includes('/workflows/mac-helpers.yml/runs')) return JSON.stringify({ workflow_runs: [
+      { id: 77, display_title: `Mac helpers · ${requestId}` },
+    ] });
+    if (args[1].endsWith('/runs/77')) return JSON.stringify({ id: 77, status: 'completed' });
+    assert.ok(args[1].endsWith('/runs/77/jobs?per_page=10'));
+    return JSON.stringify({ jobs: ['darwin-arm64', 'darwin-x64'].map(platform => ({
+      name: `HELPER BUILD (${platform})`, conclusion: 'success',
+    })) });
+  };
   const hooks = localHooks(directory, processes, { checksGate }), original = hooks.workflow;
   hooks.workflow = async args => {
     const execution = await original(args);
     if (args.file.endsWith('unified-release.yml')) args.engine.localDelivery.execute = async (_slot, _job, context) => {
       const id = context.github.job;
-      started.add(id);
-      if (started.has('helper_linux') && started.has('helper_macos')) built();
+      markBuild(id);
       return { result: 'success', outputs: id === 'initialize' ? {
-        run_helper: 'true', run_server: 'true', run_mobile_ota: 'true', run_website: 'true', run_desktop: 'true', release_sha: sha,
+        run_helper: 'true', run_server: 'true', run_mobile_ota: 'true', run_website: 'true', run_desktop: 'true', release_sha: sha, release_version: 'v1.2.3-rc.1',
       } : {} };
     };
     return execution;
@@ -37,6 +60,9 @@ for (const outcome of ['success', 'failure', 'wrong-sha', 'skipped']) test(`real
   for (const id of ['helper', 'server', 'mobile_ota', 'website', 'release_result']) assert.equal(started.has(id), false, id);
   if (outcome === 'failure') rejectGate(new Error('full suite failed')); else resolveGate();
   const results = await run;
+  assert.equal(results.helper_macos.result, 'success');
+  for (const platform of ['darwin-arm64', 'darwin-x64'])
+    assert.ok(engine.artifacts.has(`daemon-${platform}-v1.2.3-rc.1-${sha}`));
   assert.equal(results.release_validation.result, ['failure', 'wrong-sha'].includes(outcome) ? 'failure' : 'success');
   for (const id of ['helper', 'server', 'mobile_ota', 'website']) assert.equal(started.has(id), ['success', 'skipped'].includes(outcome), id);
   assert.equal(started.has('release_checks'), false);

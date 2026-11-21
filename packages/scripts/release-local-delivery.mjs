@@ -31,8 +31,7 @@ export class LocalDelivery {
     };
   }
   run(job, context, label, env) {
-    const remote = context.github.job === 'mobile_native_ios' || (context.github.job === 'helper_macos' && this.engine.variables?.macHelperMode === 'build')
-      || (context.github.job === 'desktop_build' && context.matrix.label === 'macos-universal');
+    const remote = context.github.job === 'mobile_native_ios' || (context.github.job === 'desktop_build' && context.matrix.label === 'macos-universal');
     return (remote ? this.mac : this.queue).run(job, context, label, env);
   }
   async command(command, args, options = {}) { return this.engine.processes.run(command, args, { env: process.env, quiet: true, ...options }); }
