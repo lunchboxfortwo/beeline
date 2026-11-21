@@ -40,8 +40,10 @@ export type CornerStateRow = {
 /** The thread's state is its stored machine; a waiting thread names the blocker this viewer reads. */
 export function cornerRowState(row: CornerStateRow): DerivedCornerState {
   const machine = row.machine ?? { state: 'idle' as const };
-  if (machine.state === 'idle' && machine.reason === 'backlog') return { state: 'idle', reason: 'backlog' };
-  if (machine.state !== 'waiting' || !row.waiting_item_id || !row.waiting_reason) return { state: machine.state };
+  if (machine.state === 'idle' && machine.reason === 'backlog')
+    return { state: 'idle', reason: 'backlog' };
+  if (machine.state !== 'waiting' || !row.waiting_item_id || !row.waiting_reason)
+    return { state: machine.state };
   return {
     state: 'waiting',
     reason: row.waiting_reason,

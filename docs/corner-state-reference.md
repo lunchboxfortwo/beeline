@@ -1,11 +1,13 @@
 # Corner state reference
 
-`apps/server/src/corner-lifecycle.ts` owns the state type, pure `transitionCorner`
-and `advanceCorner` runtime. Close and confirmed merge execute command/workflow/hold cleanup in that same module.
+`apps/server/src/corner-machine.ts` owns the state type and pure `transitionCorner`.
+`apps/server/src/corner-lifecycle.ts` owns the `advanceCorner` runtime.
+Close and confirmed merge execute command/workflow/hold cleanup in that runtime module.
 Every corner command enters that runtime; the generic
 queue retains membership, provenance, deduplication and turn authority.
 
-The machine persists one state on `corner_facts.machine`:
+The machine persists one state on `corner_facts.machine`. Every new corner starts
+Idle; an opening order, if present, supplies its first event:
 
 - **Working:** an implementing command or receipt is active.
 - **Review:** checks are underway (`checks`), or the configured reviewer owns the
@@ -40,7 +42,9 @@ Committed changes to commands, receipts, GitHub facts, waits and holds enter the
 same runtime. Server startup and listener resync replay recorded facts without
 reading GitHub or starting a timer. State and effect receipts commit with their
 commands. A proposed wake that queues no work does not by itself force an unchanged
-machine write. Reads render the stored machine state. Existing hidden lifecycle
+machine write. Reads render the stored machine state, without deriving it from
+turns or the GitHub display cache. Waiting has no separately stored reason;
+read projections attach the current blocker's reason and identity. Existing hidden lifecycle
 cards remain inert history during the expand release; no new cards are written.
 
 Coverage: `corner-machine.test.ts`, `corner-lifecycle-event-replay.test.ts`, `corner-state.test.ts`,

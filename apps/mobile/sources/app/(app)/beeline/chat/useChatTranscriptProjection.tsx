@@ -94,12 +94,9 @@ export function useChatTranscriptProjection([
 
   const speakerWorking = useStable(rawSpeakerWorking, shallowEqualRecord);
 
-  // The corner header names the opener from `corner_facts.owner_agent_id`, never
-  // whichever agent currently holds a live turn. While a reviewer works in
-  // the corner the transcript attribution is the reviewer's and stays there;
-  // the corner does not change hands. The transcript-derived identity fills
-  // in only before the server projection has landed. The gold ring on a
-  // byline still names the actual worker (C77).
+  // The projected owner stays stable while another agent works in the corner.
+  // Transcript-derived identity fills in only before the server projection lands;
+  // live-turn attribution remains with the actual worker.
   const cornerOwnerDisplay = cornerAgentPubkey
     ? resolvePendingAgentDisplay(
         cornerAgentPubkey,
