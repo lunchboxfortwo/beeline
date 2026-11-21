@@ -78,9 +78,15 @@ export async function updateWorkItem(
 ): Promise<void> {
   if (input.state !== undefined && !WORK_STATES.includes(input.state))
     throw new Error('invalid work state');
-  const thread = (input.id ?? input.roomId) === input.roomId && ((await db.query(
-    'SELECT 1 FROM rooms WHERE id::text=$1 AND parent_id IS NOT NULL', [input.roomId])).rowCount ?? 0) > 0;
-  if (thread && input.state === 'done' && !closeThread) throw new Error('a thread is marked done only by its close');
+  const thread =
+    (input.id ?? input.roomId) === input.roomId &&
+    ((
+      await db.query('SELECT 1 FROM rooms WHERE id::text=$1 AND parent_id IS NOT NULL', [
+        input.roomId,
+      ])
+    ).rowCount ?? 0) > 0;
+  if (thread && input.state === 'done' && !closeThread)
+    throw new Error('a thread is marked done only by its close');
   await db.transaction(async (tx) => {
     const previous =
       (
@@ -135,16 +141,16 @@ export async function updateWorkItem(
  * One-time fold of the retired second thread state: a stored Backlog becomes an open
  * thread's machine Backlog input. Every thread row's stored state is then cleared.
  */
-export async function foldThreadWorkStates(
-  database: SqlDatabase,
-): Promise<void> {
+export async function foldThreadWorkStates(database: SqlDatabase): Promise<void> {
   const threadRows = `FROM rooms r WHERE r.id::text=w.id AND r.parent_id IS NOT NULL AND w.state IS NOT NULL`;
-  const rows = (await database.query<{ id: string }>(
-    `SELECT w.id FROM work_items w
+  const rows = (
+    await database.query<{ id: string }>(
+      `SELECT w.id FROM work_items w
      JOIN rooms r ON r.id::text=w.id AND r.parent_id IS NOT NULL
-     WHERE w.state='backlog' AND r.archived_at IS NULL`)).rows;
-  for (const row of rows)
-    await advanceCorner(database, row.id, { kind: 'backlog', backlog: true });
+     WHERE w.state='backlog' AND r.archived_at IS NULL`,
+    )
+  ).rows;
+  for (const row of rows) await advanceCorner(database, row.id, { kind: 'backlog', backlog: true });
   await database.query(`UPDATE work_items w SET state=NULL,completed_at=NULL ${threadRows}`);
 }
 
@@ -359,10 +365,16 @@ function withoutIdle(item: WorkItemView): WorkItemView {
 function projectWorkRow(row: WorkRow, publicOrigin: string, viewerId: string): WorkItemView {
   const machine = row.thread_machine;
   const mark = row.thread
-    ? threadWorkMark({ state: machine?.state ?? 'idle',
-      ...(machine?.state === 'idle' && machine.reason ? { reason: machine.reason } : {}),
-      ...(machine?.state === 'waiting' && row.thread_blocker_person
-        ? { blocker: { kind: 'message' as const, personId: row.thread_blocker_person } } : {}) }, viewerId)
+    ? threadWorkMark(
+        {
+          state: machine?.state ?? 'idle',
+          ...(machine?.state === 'idle' && machine.reason ? { reason: machine.reason } : {}),
+          ...(machine?.state === 'waiting' && row.thread_blocker_person
+            ? { blocker: { kind: 'message' as const, personId: row.thread_blocker_person } }
+            : {}),
+        },
+        viewerId,
+      )
     : { state: row.state ?? 'backlog', idle: false };
   return {
     ...projectWorkDetail(row, publicOrigin),

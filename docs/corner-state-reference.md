@@ -19,9 +19,11 @@ The machine persists one state on `corner_facts.machine`:
   standing corner remains active after a merge.
 
 Red checks wake the implementer with the recorded failing jobs. Green checks wake
-only the independent configured reviewer, inside the corner. Completed findings
-and reviews without a usable verdict return ownership to the implementer once,
-scoped to the reviewed PR and head; they never automatically repeat that review.
+only the independent configured reviewer, inside the corner. Newly completed
+findings and reviews without a usable verdict privately return ownership to the
+implementer once, scoped to the reviewed PR and head; they never automatically
+repeat that review. A missing verdict asks the implementer to arrange review or
+report the blocker to its commander, without posting a chat notice.
 Reports retain their current order-author return route.
 
 Pending approval grants also keep their recorded `room_id` corner in

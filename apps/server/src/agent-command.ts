@@ -244,7 +244,6 @@ export type PrivateCommandPayload = PayloadVoice & {
   /** The explicit public post this command's current generation made. */
   publicPostId?: string;
 };
-
 export type CommandRow = {
   created_at: Date;
   id: string;

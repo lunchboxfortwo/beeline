@@ -90,7 +90,9 @@ export function cornerRowState(row: CornerStateRow): DerivedCornerState {
               itemId: observed.itemId,
               blocker: observed.blocker,
             }
-          : row.machine.state === 'idle' && row.machine.reason === 'backlog' ? { reason: 'backlog' as const } : {}),
+          : row.machine.state === 'idle' && row.machine.reason === 'backlog'
+            ? { reason: 'backlog' as const }
+            : {}),
       }
     : observed;
 }
