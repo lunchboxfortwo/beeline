@@ -1,15 +1,26 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const state = vi.hoisted(() => ({ platform: 'web' }));
 vi.mock('react-native', () => ({
-  Platform: { get OS() { return state.platform; } }, NativeModules: {},
-  NativeEventEmitter: class { addListener() { return { remove() {} }; } },
+  Platform: {
+    get OS() {
+      return state.platform;
+    },
+  },
+  NativeModules: {},
+  NativeEventEmitter: class {
+    addListener() {
+      return { remove() {} };
+    }
+  },
   AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) },
 }));
 vi.mock('@/auth/monolith-session', () => ({
   MonolithRequestTimeoutError: class MonolithRequestTimeoutError extends Error {},
   monolithSession: { authorization: async () => 'launch-access', invalidateAuthorization: vi.fn() },
 }));
-vi.mock('react', () => ({ useSyncExternalStore: (_subscribe: unknown, snapshot: () => unknown) => snapshot() }));
+vi.mock('react', () => ({
+  useSyncExternalStore: (_subscribe: unknown, snapshot: () => unknown) => snapshot(),
+}));
 import { LiveConnection } from './live-connection';
 
 class Socket {
@@ -21,40 +32,84 @@ class Socket {
   onmessage?: (event: { data: string }) => void;
   onclose?: () => void;
   onerror?: () => void;
-  constructor(readonly url: string, readonly protocols: string[]) { Socket.instances.push(this); }
-  send(frame: string) { this.sent.push(frame); }
-  close() { this.readyState = 3; this.closed = true; }
-  open() { this.readyState = 1; this.onopen?.(); }
-  emit(frame: unknown) { this.onmessage?.({ data: JSON.stringify(frame) }); }
-  drop() { this.readyState = 3; this.onclose?.(); }
-  requests() { return this.sent.map((value) => JSON.parse(value)).filter((frame) => frame.t === 'req'); }
+  constructor(
+    readonly url: string,
+    readonly protocols: string[],
+  ) {
+    Socket.instances.push(this);
+  }
+  send(frame: string) {
+    this.sent.push(frame);
+  }
+  close() {
+    this.readyState = 3;
+    this.closed = true;
+  }
+  open() {
+    this.readyState = 1;
+    this.onopen?.();
+  }
+  emit(frame: unknown) {
+    this.onmessage?.({ data: JSON.stringify(frame) });
+  }
+  drop() {
+    this.readyState = 3;
+    this.onclose?.();
+  }
+  requests() {
+    return this.sent.map((value) => JSON.parse(value)).filter((frame) => frame.t === 'req');
+  }
 }
 const URL = 'ws://fixture.invalid/v1/phone/live';
 const workspaces = { workspaces: [{ id: 'launch-workspace' }] };
-const answer = (id: string, result: unknown) => ({ data: JSON.stringify({ t: 'res', id, ok: true, result }) });
+const answer = (id: string, result: unknown) => ({
+  data: JSON.stringify({ t: 'res', id, ok: true, result }),
+});
 
 /** What index.html leaves for the app: its socket, the sent read and frames received so far. */
-function launch(options: { token?: string; open?: boolean; received?: { data: string }[]; path?: string } = {}) {
+function launch(
+  options: { token?: string; open?: boolean; received?: { data: string }[]; path?: string } = {},
+) {
   const socket = new Socket(URL, [`bearer.${options.token ?? 'launch-access'}`]);
   if (options.open !== false) socket.readyState = 1;
   const release = vi.fn(() => options.received ?? []);
-  const page = { location: { pathname: '/beeline/community' }, __beelineLaunchLive: {
-    url: URL, token: options.token ?? 'launch-access', path: options.path ?? '/beeline/community', socket,
-    reads: [{ id: 'launch-1', op: 'readWorkspaces', args: {} }], release,
-  } as unknown };
+  const page = {
+    location: { pathname: '/beeline/community' },
+    __beelineLaunchLive: {
+      url: URL,
+      token: options.token ?? 'launch-access',
+      path: options.path ?? '/beeline/community',
+      socket,
+      reads: [{ id: 'launch-1', op: 'readWorkspaces', args: {} }],
+      release,
+    } as unknown,
+  };
   vi.stubGlobal('window', page);
   return { socket, release, page };
 }
 const connections: LiveConnection[] = [];
 function connect(token = 'launch-access') {
-  const connection = new LiveConnection({ authorization: async () => token, liveUrl: () => URL, subscribeIdentityChange: () => () => {} });
+  const connection = new LiveConnection({
+    authorization: async () => token,
+    liveUrl: () => URL,
+    subscribeIdentityChange: () => () => {},
+  });
   connections.push(connection);
   return connection;
 }
 const tick = () => vi.advanceTimersByTimeAsync(0);
 
-beforeEach(() => { vi.useFakeTimers(); Socket.instances = []; state.platform = 'web'; vi.stubGlobal('WebSocket', Socket); });
-afterEach(() => { for (const connection of connections.splice(0)) connection.dispose(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+beforeEach(() => {
+  vi.useFakeTimers();
+  Socket.instances = [];
+  state.platform = 'web';
+  vi.stubGlobal('WebSocket', Socket);
+});
+afterEach(() => {
+  for (const connection of connections.splice(0)) connection.dispose();
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
 
 it('answers the page first read from the launch socket without a second socket or frame', async () => {
   const { socket, release } = launch({ received: [answer('launch-1', workspaces)] });
@@ -86,7 +141,10 @@ it('keeps an earlier launch answer until the page asks, then serves it once', as
   await expect(connection.request('readWorkspaces', {})).resolves.toEqual(workspaces);
   const again = connection.request('readWorkspaces', {});
   await tick();
-  expect(socket.requests().map((frame) => frame.op)).toEqual(['getAuthCapabilities', 'readWorkspaces']);
+  expect(socket.requests().map((frame) => frame.op)).toEqual([
+    'getAuthCapabilities',
+    'readWorkspaces',
+  ]);
   socket.emit({ t: 'res', id: socket.requests()[1].id, ok: true, result: { workspaces: [] } });
   await expect(again).resolves.toEqual({ workspaces: [] });
 });
@@ -107,7 +165,10 @@ it('adopts a launch socket that is still opening', async () => {
 });
 
 it('closes a launch socket opened with another token and sends the read itself', async () => {
-  const { socket, release } = launch({ token: 'expired-access', received: [answer('launch-1', workspaces)] });
+  const { socket, release } = launch({
+    token: 'expired-access',
+    received: [answer('launch-1', workspaces)],
+  });
   const read = connect('renewed-access').request('readWorkspaces', {});
   await tick();
   expect(socket.closed).toBe(true);
@@ -131,7 +192,12 @@ it('does not answer a read after the page has changed', async () => {
   const replacement = Socket.instances.at(-1)!;
   replacement.open();
   expect(replacement.requests().map((frame) => frame.op)).toEqual(['readWorkspaces']);
-  replacement.emit({ t: 'res', id: replacement.requests()[0].id, ok: true, result: { workspaces: [] } });
+  replacement.emit({
+    t: 'res',
+    id: replacement.requests()[0].id,
+    ok: true,
+    result: { workspaces: [] },
+  });
   await expect(read).resolves.toEqual({ workspaces: [] });
 });
 
@@ -142,7 +208,10 @@ it('discards an unclaimed launch answer when the socket drops', async () => {
   await tick();
   socket.drop();
   let answered = false;
-  const read = connection.request('readWorkspaces', {}).then((value) => { answered = true; return value; });
+  const read = connection.request('readWorkspaces', {}).then((value) => {
+    answered = true;
+    return value;
+  });
   await tick();
   const replacement = Socket.instances.at(-1)!;
   expect(replacement).not.toBe(socket);
@@ -150,14 +219,17 @@ it('discards an unclaimed launch answer when the socket drops', async () => {
   await tick();
   expect(answered).toBe(false);
   const own = replacement.requests().filter((frame) => frame.op === 'readWorkspaces');
-  for (const frame of own) replacement.emit({ t: 'res', id: frame.id, ok: true, result: { workspaces: [] } });
+  for (const frame of own)
+    replacement.emit({ t: 'res', id: frame.id, ok: true, result: { workspaces: [] } });
   await expect(read).resolves.toEqual({ workspaces: [] });
 });
 
 it('leaves native connections alone', async () => {
   state.platform = 'android';
   const { socket, page } = launch({ received: [answer('launch-1', workspaces)] });
-  void connect().request('readWorkspaces', {}).catch(() => undefined);
+  void connect()
+    .request('readWorkspaces', {})
+    .catch(() => undefined);
   await tick();
   expect(Socket.instances.at(-1)).not.toBe(socket);
   expect((page as { __beelineLaunchLive?: unknown }).__beelineLaunchLive).toBeDefined();
