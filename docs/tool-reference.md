@@ -41,7 +41,7 @@ writable. Corners keep the watcher so edits are reflected as work proceeds.
 | `message`                                            | Send text and optional ask to one agent or person in one place                                                                              |
 | `reply`                                              | Reply to a message's recorded sender and place by id                                                                                        |
 | `claim_thread`                                       | Become the recorded implementer before pushing or opening the thread's PR                                                                   |
-| `update_work`                                        | Update task state, assignee, notes and attachments in one call                                                                              |
+| `update_work`                                        | Update task state, assignee, notes and attachments in one call; Done on the thread task closes the thread                                   |
 | `create_work_item`                                   | Create a task with its title and objective                                                                                                  |
 | `close_ask`                                          | Close one of your open asks on every person's Tasks list: answered, withdrawn or superseded                                                 |
 | `stop`                                               | Stop the running turn of an agent you command                                                                                               |

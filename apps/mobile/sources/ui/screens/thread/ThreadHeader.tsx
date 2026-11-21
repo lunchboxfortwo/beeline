@@ -7,7 +7,7 @@ import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import type { View } from 'react-native';
 import { ListItem, XStack, YStack, useThemeName } from 'tamagui';
 import { ArrowLeft, Users, CornerDownRight, GitPullRequest, MoreHorizontal } from 'lucide-react-native';
-import type { CornerState } from '@beeline/api-contract/phone';
+import type { CornerState, CornerStateReason } from '@beeline/api-contract/phone';
 import { Btn, Glyph, HEIGHT, SafeTop, T, typeStyle, useTextSize } from '@/ui/grammar';
 import { threadMark } from '../chats/chat-tree-model';
 
@@ -28,6 +28,8 @@ export type ThreadHeaderData = {
     repositoryHomepageIcon?: string;
     /** Undefined until the parent Room's corner row lands. */
     state?: CornerState;
+    /** The machine's reason alongside `state` (`backlog` on an idle thread). */
+    reason?: CornerStateReason;
     waitsOnViewer?: boolean;
     prLine?: string;
     objective?: string;
@@ -53,12 +55,10 @@ function ThreadName({ title, v, regular = false, testID, trail }: {
 
 /** The thread's state mark for this viewer: a wait on anyone else reads idle. */
 function HeaderMark({ h }: { h: ThreadHeaderData }) {
-    if (h.workItem?.state === 'backlog' || h.workItem?.state === 'done')
-        return <WorkStateMark state={h.workItem.state} idle={false} />;
     if (!h.state) return null;
     const { state, idle } = h.state === 'waiting'
         ? (h.waitsOnViewer ? { state: 'needs-you' as const, idle: false } : { state: 'in-progress' as const, idle: true })
-        : threadMark({ state: h.state }, undefined);
+        : threadMark({ state: h.state, ...(h.reason ? { reason: h.reason } : {}) }, undefined);
     return <WorkStateMark state={state} idle={idle} />;
 }
 

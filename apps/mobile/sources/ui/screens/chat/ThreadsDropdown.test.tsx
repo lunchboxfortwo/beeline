@@ -220,16 +220,16 @@ it('W8 names a single active thread in the trigger', () => {
   act(() => tree.unmount());
 });
 
-it.each(['backlog', 'done'])('preserves %s when full thread rows replace the summary', (workState) => {
-  fixture.summary = { cornerCount: 1, openCorners: [{ id: 'a', name: 'one', state: 'idle', workState }] };
+it('keeps the machine Backlog reason when full thread rows replace the summary', () => {
+  fixture.summary = { cornerCount: 1, openCorners: [{ id: 'a', name: 'one', state: 'idle', reason: 'backlog' }] };
   fixture.corners = { openRows: [], record: {} };
   const element = () => <ThreadsDropdown roomId="r" chatName="general" openThread={vi.fn()} onNewThread={vi.fn()} />;
   let tree: any;
   act(() => { tree = create(element()); });
   act(() => byTestID(tree, 'threads-dropdown-trigger')[0].props.onPress());
-  expect(tree.root.findByType('ThreadLine').props.workState).toBe(workState);
-  fixture.corners = { openRows: [{ corner: { id: 'a', name: 'one' }, state: 'idle', workState }], record: {} };
+  expect(tree.root.findByType('ThreadLine').props).toMatchObject({ state: 'idle', reason: 'backlog' });
+  fixture.corners = { openRows: [{ corner: { id: 'a', name: 'one' }, state: 'idle', reason: 'backlog' }], record: {} };
   act(() => tree.update(element()));
-  expect(tree.root.findByType('ThreadLine').props.workState).toBe(workState);
+  expect(tree.root.findByType('ThreadLine').props).toMatchObject({ state: 'idle', reason: 'backlog' });
   act(() => tree.unmount());
 });

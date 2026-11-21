@@ -42,6 +42,7 @@ export function useChatThreadHeader({
   const parentName = roomSurface?.parent?.name ?? corners?.header?.room.name ?? null;
   const title = resolvedChannelName ?? openingRow?.corner.name ?? openingSummary?.name ?? null;
   const threadState = state ?? openingRow?.state ?? openingSummary?.state;
+  const threadReason = openingRow?.reason ?? openingSummary?.reason;
   const prUrl = roomSurface?.cornerLifecycle?.pr?.url;
   const hasBrief = Boolean(roomSurface?.cornerBrief);
   const visibility = useTitleBlockVisibility(isCorner, positions);
@@ -54,13 +55,14 @@ export function useChatThreadHeader({
       repositoryHomepageIcon: roomSurface?.room.homepageIcon,
       title: cornerShortTitle(parentName, title, decodedId),
       ...(threadState ? { state: threadState } : isArchived ? { state: 'archived' as const } : {}),
+      ...(threadReason ? { reason: threadReason } : {}),
       waitsOnViewer: threadState ? threadWaitsOnViewer({state: threadState, blocker: openingRow?.blocker ?? openingSummary?.blocker}, viewerPubkey) : false,
       workItem:recordedWorkItem??roomSurface?.workItem,
       people:roomSurface?.members.map(member=>member.identity),
       ...(prLine ? { prLine } : {}),
       ...(objective.trim() ? { objective: objective.trim() } : {}),
     };
-  }, [decodedId, isArchived, isCorner, objective, parentName, title, roomSurface?.cornerLifecycle, roomSurface?.room.homepageIcon, roomSurface?.workItem, recordedWorkItem, roomSurface?.members, threadState, openingRow?.blocker, openingSummary?.blocker, viewerPubkey]);
+  }, [decodedId, isArchived, isCorner, objective, parentName, title, roomSurface?.cornerLifecycle, roomSurface?.room.homepageIcon, roomSurface?.workItem, recordedWorkItem, roomSurface?.members, threadState, openingRow?.blocker, openingSummary?.blocker, threadReason, viewerPubkey]);
 
   const openBrief = useMemo(
     () => (isCorner && hasBrief ? () => openPlace({ kind: 'brief', roomId: decodedId }, isDesktop) : undefined),

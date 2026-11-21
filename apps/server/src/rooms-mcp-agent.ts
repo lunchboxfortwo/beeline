@@ -193,7 +193,7 @@ export const MCP_AGENT_TOOLS: Tool[] = [
     roomId:address(),title:{type:'string'},objective:{type:'string'},state:{enum:['needs-you','in-progress','in-review','backlog','done']},
     assigneeId:{type:['string','null']},
   }, ['roomId','title']),
-  tool('update_work', 'Update task state, assignee, notes or attachments in one call.', {
+  tool('update_work', 'Update task state, assignee, notes or attachments in one call. Done on the thread task closes the thread, as close_thread does.', {
     roomId:address(),id:{type:'string'},title:{type:'string'},objective:{type:'string'},
     state:{enum:['needs-you','in-progress','in-review','backlog','done']},assigneeId:{type:['string','null']},
     note:{type:'string'},attachments:{type:'array',items:{type:'object',properties:{kind:{enum:['file','link']},name:{type:'string'},url:{type:'string'},objectId:{type:'string'}},required:['kind','name'],additionalProperties:false}},

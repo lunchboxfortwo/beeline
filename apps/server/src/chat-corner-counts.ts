@@ -23,7 +23,6 @@ export const OPEN_CORNER_PREVIEW = 8;
 
 /** The facts every corner row derives its state and Mine flag from. */
 export type CornerStateRow = {
-  work_state?: import('@beeline/api-contract/phone').WorkState | null;
   machine?: CornerMachine | null;
   waiting_kind?: 'message' | 'merge-hold' | 'report' | null;
   waiting_person_name?: string | null;
@@ -91,7 +90,7 @@ export function cornerRowState(row: CornerStateRow): DerivedCornerState {
               itemId: observed.itemId,
               blocker: observed.blocker,
             }
-          : {}),
+          : row.machine.state === 'idle' && row.machine.reason === 'backlog' ? { reason: 'backlog' as const } : {}),
       }
     : observed;
 }
@@ -124,7 +123,7 @@ export function cornerFactsSql(viewerExpr: string): {
   member: string;
 } {
   return {
-    columns: `f.locked,f.machine,gh.lifecycle,work.state work_state,
+    columns: `f.locked,f.machine,gh.lifecycle,
       activity.worker_active,activity.reviewer_active,
       ${cornerLastTurnEndSql('c')} last_turn_ended_at,
       blocker.item_id IS NOT NULL blocking,blocker.item_id waiting_item_id,blocker.reason waiting_reason,
@@ -134,8 +133,7 @@ export function cornerFactsSql(viewerExpr: string): {
       lm.created_at latest_created_at,
       ${followsCornerSql('c', viewerExpr)} follows_viewer,
       owed.owed_viewer,owed.attention`,
-    joins: `LEFT JOIN work_items work ON work.id=c.id::text
-    LEFT JOIN corner_facts f ON f.corner_id=c.id
+    joins: `LEFT JOIN corner_facts f ON f.corner_id=c.id
     LEFT JOIN corner_github_cache gh ON gh.corner_id=c.id
     ${cornerWorkSql()}
     ${cornerBlockerSql('true', false, viewerExpr)}
@@ -259,14 +257,13 @@ function permissionCardSql(): string {
     ) permission_card ON true`;
 }
 
-/** A Room or any open corner under it has a working turn. */
+/** A Room has a working turn, or an open corner under it is Working by its corner machine. */
 export function roomWorkingSql(room: string): string {
   // Bound each turn lookup by Room before testing status. The OR/IN form
   // otherwise chooses a full turn-table scan once per visible Room.
-  return `EXISTS(SELECT 1 FROM (
-    SELECT ${room}.id UNION ALL
-    SELECT id FROM rooms WHERE parent_id=${room}.id AND archived_at IS NULL
-  ) scope(id) CROSS JOIN LATERAL (
+  return `(EXISTS(SELECT 1 FROM rooms corner JOIN corner_facts fact ON fact.corner_id=corner.id
+    WHERE corner.parent_id=${room}.id AND corner.archived_at IS NULL AND fact.machine->>'state'='working')
+  OR EXISTS(SELECT 1 FROM (SELECT ${room}.id) scope(id) CROSS JOIN LATERAL (
     SELECT 1 FROM agent_turns t WHERE t.room_id=scope.id AND t.status='working' AND ${workingTurnFreshSql('t')}
     UNION ALL
     SELECT 1 FROM agent_commands command
@@ -277,7 +274,7 @@ export function roomWorkingSql(room: string): string {
           AND live.request_id=command.turn_request_id AND live.status='working'
               AND ${workingTurnFreshSql('live')})
     LIMIT 1 OFFSET 0
-  ) working)`;
+  ) working))`;
 }
 
 /** The agent on the newest pending permission the viewer can decide in a Room or its corners. */
@@ -338,15 +335,6 @@ export function chatCornerCounts(
     count.openCorners.push({
       id: row.id,
       name: row.name,
-      // The Work board's rule: only a stored Backlog or Done moves an open thread out of progress.
-      workState:
-        row.work_state === 'backlog' || row.work_state === 'done'
-          ? row.work_state
-          : state === 'review'
-            ? 'in-review'
-            : state === 'waiting' && blocker?.personId === viewerId
-              ? 'needs-you'
-              : 'in-progress',
       state,
       ...(reason ? { reason } : {}),
       ...(blocker ? { blocker } : {}),

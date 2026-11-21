@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { threadWorkState } from '@beeline/api-contract/phone';
 import { backfillCornerOwed, type SqlDatabase } from './database.js';
 import { addressedToPersonSql, cornerOwedBackfillSql, cornerOwedSchemaSql } from './corner-owed.js';
 import { cornerWaitingSql } from './corner-waiting.js';
@@ -182,7 +183,8 @@ describe('corner_owed', () => {
     )).rows;
     expect(waiting).toEqual([{ person_id: OWNER }]);
     expect((await phone.readCorners(ROOM, OWNER))?.corners[0]?.blocker?.personId).toBe(OWNER);
-    expect((await phone.readChats(WORKSPACE, OTHER))?.chats.find(row => row.room.id === ROOM)?.openCorners?.[0]?.workState).toBe('in-progress');
+    const forOther = (await phone.readChats(WORKSPACE, OTHER))?.chats.find(row => row.room.id === ROOM)?.openCorners?.[0];
+    expect(forOther && threadWorkState(forOther, OTHER)).toBe('in-progress');
     await database.query(`DELETE FROM corner_owed WHERE message_id='permission-card'`);
     await database.query(`INSERT INTO corner_owed(corner_id,person_id,message_id,created_at,answerable,blocking)
       VALUES($1,$2,'permission-card',now(),false,true)`, [CORNER, OTHER]);

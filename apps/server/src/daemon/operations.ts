@@ -63,7 +63,9 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
         return daemonWriteResult(ctx) as Output<Name>;
       case 'updateWorkItem': {
         const update={...input as Input<'updateWorkItem'>,roomId:(input as Input<'updateWorkItem'>).targetRoomId};
-        await updateWorkItem(ctx.database,update,authenticatedAgentId);
+        // Done on a thread is the agent's existing close (PR closed, branch deleted, locked refused).
+        await updateWorkItem(ctx.database,update,authenticatedAgentId,authenticatedAgentId,
+          () => daemonArchiveCorner(ctx,{cornerId:update.roomId},authenticatedAgentId));
         return daemonWriteResult(ctx) as Output<Name>;
       }
       case 'closeAgentAsk':

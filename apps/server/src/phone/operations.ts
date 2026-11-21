@@ -178,7 +178,9 @@ import { phoneReadConnectionDetail, phoneRevokeConnectionGrants } from './connec
         ctx.live?.publish({type:'invalidate',roomId:(input as Input<'attachToWorkItem'>).roomId,reason:'work-board'});
         return undefined as Output<Name>;
       case 'updateWorkItem':
-        await updateWorkItem(ctx.database, input as Input<'updateWorkItem'>, viewerId);
+        // Done on a thread is the person's existing close.
+        await updateWorkItem(ctx.database, input as Input<'updateWorkItem'>, viewerId, viewerId,
+          () => phoneRequestCornerClose(ctx, (input as Input<'updateWorkItem'>).roomId, viewerId));
         ctx.live?.publish({type:'invalidate',roomId:(input as Input<'updateWorkItem'>).roomId,reason:'work-board'});
         return undefined as Output<Name>;
       case 'readTray':

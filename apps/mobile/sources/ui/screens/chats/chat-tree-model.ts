@@ -1,9 +1,9 @@
 import { cornerShortTitle, isConnectorIdentity, roomTitle } from '@beeline/api-contract/phone';
-import type { ChatListCorner, WorkState } from '@beeline/api-contract/phone';
+import { threadWorkMark, threadWorkState as machineWorkState, type ChatListCorner, type WorkState } from '@beeline/api-contract/phone';
 import type { ChatListItem } from '@beeline/buzz-client';
 import { roomRowAttentionReason, roomRowName, roomRowPreview } from '@/buzz/room-list-row';
 import type { RepoCandidate } from '@/buzz/room-repo-picker';
-import { threadListLabel, threadWaitsOnViewer, type ThreadWaitFacts } from '@/ui/screens/thread/thread-status';
+import { threadListLabel, type ThreadWaitFacts } from '@/ui/screens/thread/thread-status';
 
 export type SearchChip = 'unread' | 'pinned';
 
@@ -38,47 +38,21 @@ export function joinableTitle(name: string): string {
 
 /** "waiting on you" for the person the server's waiting blocker names, "waiting on <name>" for everyone else. */
 export function threadWord(corner: ChatListCorner, viewer: string | undefined): string {
-  return threadRow(corner, viewer).word;
+  return threadListLabel(corner, viewer).word;
 }
 
 export function threadTitle(item: ChatListItem, corner: ChatListCorner): string {
   return cornerShortTitle(item.room.name, corner.name, corner.id);
 }
 
-/**
- * A thread's Tasks state for this viewer; a row without one reads its corner state.
- * Needs you only when the thread waits on this viewer; a wait on anyone else is in progress.
- */
-export function threadWorkState(
-  corner: ThreadWaitFacts & { workState?: WorkState },
-  viewer: string | undefined,
-): WorkState {
-  if (corner.state === 'archived') return 'done';
-  const state = corner.workState ??
-    (corner.state === 'waiting' ? 'needs-you' : corner.state === 'review' ? 'in-review' : 'in-progress');
-  return state === 'needs-you' && !threadWaitsOnViewer(corner, viewer) ? 'in-progress' : state;
+/** A thread's Tasks state for this viewer: its corner machine state and reason, never a second store. */
+export function threadWorkState(corner: ThreadWaitFacts, viewer: string | undefined): WorkState {
+  return machineWorkState(corner, viewer);
 }
 
 /** The thread's state mark: its Tasks state, drawn idle while nothing runs (a wait on someone else included). */
-export function threadMark(
-  corner: ThreadWaitFacts & { workState?: WorkState },
-  viewer: string | undefined,
-): { state: WorkState; idle: boolean } {
-  const state = threadWorkState(corner, viewer);
-  return { state, idle: state === 'in-progress' && (corner.state === 'idle' || corner.state === 'waiting') };
-}
-
-/**
- * A thread row's state line and mark read one state: a Tasks state past working (backlog,
- * review, done) names itself; otherwise the line words the server's corner state.
- */
-export function threadRow(
-  corner: ThreadWaitFacts & { workState?: WorkState },
-  viewer: string | undefined,
-): { word: string; you: boolean; state: WorkState; idle: boolean } {
-  const mark = threadMark(corner, viewer);
-  const word = mark.state === 'done' ? 'done' : mark.state === 'in-review' ? 'review' : mark.state === 'backlog' ? 'backlog' : undefined;
-  return { ...(word ? { word, you: false } : threadListLabel(corner, viewer)), ...mark };
+export function threadMark(corner: ThreadWaitFacts, viewer: string | undefined): { state: WorkState; idle: boolean } {
+  return threadWorkMark(corner, viewer);
 }
 
 /** Chats navigate every thread: waiting ones first, the rest in server order. */

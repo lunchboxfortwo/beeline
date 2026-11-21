@@ -311,18 +311,19 @@ describe('Work board recorded sources and single assignee', () => {
     expect(await stored(posted.messageId)).toEqual({ state: 'in-progress', assignee_id: agent });
   });
   it('lets another member assign and omits Done older than seven days', async () => {
-    await updateWorkItem(db, { roomId: thread, state: 'done', assigneeId: other }, agent);
-    let board = await read();
-    expect(board.items[0]?.assignee?.pubkey).toBe(other);
-    expect(board.items[0]?.openedBy.pubkey).toBe(agent);
-    await updateWorkItem(db, { roomId: thread, assigneeId: null }, other);
-    board = await read();
-    expect(board.items[0]?.assignee).toBeNull();
-    expect(board.items[0]?.state).toBe('done');
-    await db.query(`UPDATE work_items SET completed_at=now()-interval '8 days' WHERE room_id=$1`, [
-      thread,
+    // A task, not a thread: a thread's Done is its close (see thread-state-single.test.ts).
+    const task = { id: 'assign-task', roomId: chat };
+    const item = async () => (await read()).items.find((entry) => entry.id === task.id);
+    await updateWorkItem(db, { ...task, state: 'done', assigneeId: other }, agent);
+    expect((await item())?.assignee?.pubkey).toBe(other);
+    expect((await item())?.openedBy.pubkey).toBe(agent);
+    await updateWorkItem(db, { ...task, assigneeId: null }, other);
+    expect((await item())?.assignee).toBeNull();
+    expect((await item())?.state).toBe('done');
+    await db.query(`UPDATE work_items SET completed_at=now()-interval '8 days' WHERE id=$1`, [
+      task.id,
     ]);
-    expect((await read()).items.some((item) => item.state === 'done')).toBe(false);
+    expect((await read()).items.some((entry) => entry.state === 'done')).toBe(false);
     expect((await db.query('SELECT room_id FROM work_items')).rowCount).toBe(1);
   });
   it('moves the single question assignee to another person without duplicating the ask', async () => {
