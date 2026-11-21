@@ -29,9 +29,11 @@ async function recordHelperRelease(database: SqlDatabase, release: HelperRelease
 }
 
 async function latestHelperRelease(database: SqlDatabase): Promise<HelperRelease | undefined> {
-  return (await database.query<HelperRelease>(
-    `SELECT version,sha FROM helper_release_notifications WHERE singleton=true`,
-  )).rows[0];
+  return (
+    await database.query<HelperRelease>(
+      `SELECT version,sha FROM helper_release_notifications WHERE singleton=true`,
+    )
+  ).rows[0];
 }
 
 function required(value: string, field: string): string {
@@ -79,14 +81,19 @@ export class ReleaseNotifier {
     // Release delivery wakes helpers. Its only message is the feedback notice
     // for agents whose reported problem this release fixes.
     required(input.changelogUrl, 'changelogUrl');
-    const release = { version: required(input.version, 'version'), sha: required(input.sha, 'sha') };
+    const release = {
+      version: required(input.version, 'version'),
+      sha: required(input.sha, 'sha'),
+    };
     await recordHelperRelease(this.database, release);
     this.accept(release);
     if (this.feedback)
-      this.feedbackNotices = notifyFeedbackShipped(this.database, this.feedback, release).catch((error) => {
-        console.error('[release] feedback notices failed', error);
-        return 0;
-      });
+      this.feedbackNotices = notifyFeedbackShipped(this.database, this.feedback, release).catch(
+        (error) => {
+          console.error('[release] feedback notices failed', error);
+          return 0;
+        },
+      );
     return { notified: 0, skipped: 0 };
   }
 
@@ -108,11 +115,14 @@ export class ReleaseNotifier {
 
   private readOnce(force: boolean): void {
     if (this.readInFlight || (!force && this.initialized)) return;
-    this.readInFlight = this.reconcile().then(() => {
-      this.initialized = true;
-    }).catch((error) => console.error('[release] reconcile failed', error)).finally(() => {
-      this.readInFlight = undefined;
-    });
+    this.readInFlight = this.reconcile()
+      .then(() => {
+        this.initialized = true;
+      })
+      .catch((error) => console.error('[release] reconcile failed', error))
+      .finally(() => {
+        this.readInFlight = undefined;
+      });
   }
 
   private async reconcile(): Promise<void> {

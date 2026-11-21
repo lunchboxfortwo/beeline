@@ -75,7 +75,9 @@ async function tellReporters(
       addReporter(item.reporter_identity_id, item.room_id, new Date(item.created_at).getTime());
     for (const occurrence of Array.isArray(item.occurrences) ? item.occurrences : []) {
       const { agentId, roomId, createdAt } = (occurrence ?? {}) as {
-        agentId?: unknown; roomId?: unknown; createdAt?: unknown;
+        agentId?: unknown;
+        roomId?: unknown;
+        createdAt?: unknown;
       };
       if (typeof agentId === 'string' && typeof createdAt === 'string')
         addReporter(agentId, typeof roomId === 'string' ? roomId : null, Date.parse(createdAt));
@@ -88,7 +90,13 @@ async function tellReporters(
   const rooms = new Set(
     (
       await db.query<{ id: string }>(`SELECT id FROM rooms WHERE id::text=ANY($1::text[])`, [
-        [...new Set([...reporters.values()].map(({ roomId }) => roomId).filter((id): id is string => Boolean(id)))],
+        [
+          ...new Set(
+            [...reporters.values()]
+              .map(({ roomId }) => roomId)
+              .filter((id): id is string => Boolean(id)),
+          ),
+        ],
       ])
     ).rows.map((row) => row.id),
   );
@@ -112,16 +120,22 @@ async function tellReporters(
     });
     if (line.inserted) notified++;
   }
-  await db.query(`UPDATE feedback_items SET agent_resolved_notified_at=now(),
-    resolved_notified_at=CASE WHEN source_kind='agent' THEN now() ELSE resolved_notified_at END WHERE id=ANY($1::text[])`, [
-    items.map((item) => item.id),
-  ]);
+  await db.query(
+    `UPDATE feedback_items SET agent_resolved_notified_at=now(),
+    resolved_notified_at=CASE WHEN source_kind='agent' THEN now() ELSE resolved_notified_at END WHERE id=ANY($1::text[])`,
+    [items.map((item) => item.id)],
+  );
   return notified;
 }
 
-export async function reconcileFeedbackShipped(database: SqlDatabase, feedback: FeedbackLoop): Promise<void> {
-  const release = (await database.query<ShippedRelease>(
-    'SELECT version,sha FROM helper_release_notifications WHERE singleton=true',
-  )).rows[0];
+export async function reconcileFeedbackShipped(
+  database: SqlDatabase,
+  feedback: FeedbackLoop,
+): Promise<void> {
+  const release = (
+    await database.query<ShippedRelease>(
+      'SELECT version,sha FROM helper_release_notifications WHERE singleton=true',
+    )
+  ).rows[0];
   if (release) await notifyFeedbackShipped(database, feedback, release);
 }

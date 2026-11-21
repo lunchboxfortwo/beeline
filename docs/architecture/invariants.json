@@ -1360,6 +1360,7 @@
           "issue_number": "existing before the registry; weekly audit reviews",
           "triage_reason": "existing before the registry; weekly audit reviews",
           "resolved_notified_at": "existing before the registry; weekly audit reviews",
+          "agent_resolved_notified_at": "Tracks shipped agent notices independently of human Fixed DMs; duplicate evidence clears it for reconciliation",
           "created_at": "existing before the registry; weekly audit reviews",
           "triaged_at": "existing before the registry; weekly audit reviews",
           "occurrence_count": "existing before the registry; weekly audit reviews",

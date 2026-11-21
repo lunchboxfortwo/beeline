@@ -6,7 +6,8 @@ workflow, `feedback-triage`. It works like a team skill: any agent can find it
 and start it, and no per-corner setting gates it. The workflow reads new
 reports from the production database and ranks them by problem. It asks a
 person to approve, then opens fix corners. Once a fix merges, System tells each
-person who reported that problem.
+person who reported that problem when explicitly ordered; reporting agents get
+a passive Room notice once the fix ships.
 
 ## Intake
 
@@ -206,8 +207,9 @@ The workflow saves the assessment with its handoff in one transaction:
 The structured decision is stored in `triage_reason`; existing status values
 remain compatible with running older servers. Replayed handoffs do not merge
 counts again. Agents assess their own workspace; the existing configured System
-sender authority covers the global feedback sweep. No reporter notice is sent
-by an assessment.
+sender authority covers the global feedback sweep. Assessments send no human
+DMs; merging agent evidence into an already resolved item reconciles shipped
+notices after commit (see below).
 
 ## Close the loop: Fixed DMs
 
@@ -215,7 +217,10 @@ by an assessment.
 Only an explicit notice order adds `notify: true`. The server checks every call:
 
 - It must come from the agent's own active turn.
-- The agent's owner must be listed in `BEELINE_SYSTEM_SENDERS`.
+- For `notify: true`, the agent's owner must be listed in
+  `BEELINE_SYSTEM_SENDERS`. Silent resolution does not require System-sender
+  authority or ownership of the feedback items and can trigger shipped agent
+  notices across reporting Workspaces.
 - A notice request must be rooted in a human command from a configured System sender; scheduled and system-rooted turns cannot send notices.
 - The title must be one line of at most 120 characters, with no secret-shaped
   value.
@@ -226,9 +231,10 @@ Only an explicit notice order adds `notify: true`. The server checks every call:
 
 Then the items become `resolved` without a DM. Each item records the fix:
 `triage_reason` is `{disposition: fixed, reference: <pr_url>, reason: <title>}`,
-`triaged_at` is set, and `issue_repository`/`issue_number` name the pull
-request. When a configured System sender
-explicitly orders notices for the pull request, pass `notify: true` in that
+`triaged_at` is set if absent, and `issue_repository`/`issue_number` name the pull
+request. A later `fixed` disposition can replace `triage_reason` with its
+assessment; shipped notices never publish that field. When a configured System
+sender explicitly orders notices for the pull request, pass `notify: true` in that
 human-rooted turn. Each human reporter then gets one System DM:
 `Fixed: <title> <pr_url>`. A later explicit notice order can notify items
 already resolved silently. Repeats send nothing twice (one DM per person per
@@ -245,7 +251,8 @@ delivery. When GitHub shows its
 merge commit in the delivered release's commit, every agent that reported the
 problem (the item's reporter and each agent in `occurrences`) gets one System
 line in the Room where it last reported it:
-`Fixed in <version>: <pr_url>`. No submitted title or triage assessment is
+`Fixed in <version>: <pr_url>`. A missing agent identity or latest reporting Room
+gets no line. No submitted title or triage assessment is
 included in the shipped notice. The line is passive: it wakes nobody and pushes nobody. The items then record
 `agent_resolved_notified_at`, so a repeat or promoted delivery sends nothing.
 Agent evidence merged into a human item follows the same path without consuming
@@ -259,19 +266,20 @@ Beeline GitHub App with a token downgraded to `pull_requests: read` and
 
 ### When the triager cannot send: `skipped`
 
-If the triager's owner is not a System sender, `notify_feedback_fixed` refuses
-with `System DM access denied`. The run does not stop there. The triager hands
+If the triager requests `notify: true` and its owner is not a System sender,
+`notify_feedback_fixed` refuses with `System DM access denied`. Routine silent
+resolution is still allowed. The run does not stop there. The triager hands
 off `notify` as `skipped` with `skipReason` `not_system_sender` and
 `unnotifiedPullRequests` listing the pull request numbers it could not report,
 and the run goes on to `pull` exactly as after `notified`. (The `notify` state
 requires all three fields for both outcomes; `notified` sets `skipReason` and
 `unnotifiedPullRequests` to `none`.)
 
-A skipped call resolves nothing, so those items stay unresolved. The next run
-looks back to the last run that handed off `notified` and includes every pull
+A refused notice call resolves nothing; items not already resolved stay unresolved.
+The next run looks back to the last run that handed off `notified` and includes every pull
 request an earlier run left in `unnotifiedPullRequests`. Once a System sender's
-agent runs `notify`, the reporters get their Fixed DMs; a repeat call never
-sends twice.
+agent runs an explicitly ordered `notify: true` call, human reporters get
+their Fixed DMs; a repeat call never sends twice.
 
 The fix for `not_system_sender` is to make the triager's owner a System sender.
 
