@@ -1,4 +1,5 @@
 import { describe, expect, it, SYSTEM_IDENTITY_ID, DAEMON_OPERATION_NAMES, feedbackConfigFromEnv, FEEDBACK_TRIAGE_PULL_SQL, groupFeedback, hasSystemReportMention, taggedIdentityIdsSql, PhoneService, ensureSystemIdentity, PERSON, OTHER, AGENT, TRIAGE, OUTSIDER, CREATOR, WORKSPACE, ROOM, CORNER, TRIAGE_CORNER, REPOSITORY, CONFIG, FIX_URL, merged, database, message, openTurn, daemon, report, items, rootFixture, fixtureScope3, fixtureScope5 } from './test-support-feedback.test-support.js';
+import { feedbackSummaryKey } from './feedback.js';
 
 describe('report_feedback (agent path)', () => {
   it('stores the item with room, trigger, request and prompt sections, in a Room and a corner', async () => {
@@ -94,6 +95,27 @@ describe('report_feedback (agent path)', () => {
       await rootFixture.database.query('DELETE FROM feedback_items WHERE id=$1', [next.itemId]);
     }
     expect(await items()).toHaveLength(4);
+  });
+
+
+  it('groups the same tool error, worded differently and naming other ids, onto one item', async () => {
+    const error = (pull: number, sha: string) =>
+      `daemon operation report failed (503: GitHub PR checks GET /repos/acme/app/pulls/${pull} at ${sha} failed: HTTP 404: Not Found)`;
+    const first = await report({ summary: 'report fails because the PR lookup 404s', toolName: 'report',
+      errorExcerpt: error(4307, 'a1b2c3d4e5f6') });
+    const second = await report({ summary: 'The report tool cannot send a blocked report about pull request 4310',
+      toolName: 'report', errorExcerpt: error(4310, '9f8e7d6c5b4a') }, CORNER, OUTSIDER);
+    expect(second).toEqual({ itemId: first.itemId, duplicate: true });
+    expect((await database.query('SELECT occurrence_count FROM feedback_items WHERE id=$1', [first.itemId])).rows)
+      .toEqual([{ occurrence_count: 2 }]);
+    // Another error from the same tool, or the same error from another tool, is another problem.
+    expect((await report({ summary: 'report fails', toolName: 'report',
+      errorExcerpt: 'daemon operation report failed (403: command output authority rejected)' })).duplicate).toBe(false);
+    expect((await report({ summary: 'read fails', toolName: 'read', errorExcerpt: error(1, 'b'.repeat(40)) })).duplicate)
+      .toBe(false);
+    expect(feedbackSummaryKey('Run 1a2b3c4d5e failed: see https://x.test/a?b=1 after 1500ms (#41)'))
+      .toBe(feedbackSummaryKey('run 9f8e7d6c5b failed see https://y.test/c after 2300ms (#45)'));
+    expect(feedbackSummaryKey('GitHub returned HTTP 404')).not.toBe(feedbackSummaryKey('GitHub returned HTTP 500'));
   });
 
 
@@ -456,8 +478,9 @@ const scope3 = fixtureScope3();
     const errorExcerpt = 'socket reset while sending';
     await scope3.presence(AGENT, 'v0.1.90');
     const older = await report({ summary: 'old helper lost the send', errorExcerpt, toolName: 'read' });
+    // Filed before reports keyed on their error: its key is its own summary.
     await rootFixture.database.query(
-      `UPDATE feedback_items SET occurrence_count=40, occurrences=$2::jsonb WHERE id=$1`,
+      `UPDATE feedback_items SET occurrence_count=40, occurrences=$2::jsonb, summary_key=summary WHERE id=$1`,
       [older.itemId, JSON.stringify([{ helperVersion: 'v0.1.90', harness: 'codex', harnessVersion: null }])],
     );
     const mixed = await report({ summary: 'current and old helpers lost the send', errorExcerpt, toolName: 'read' });
@@ -602,6 +625,27 @@ const scope5 = fixtureScope5();
     );
     await expect(scope5.notify({ itemIds: ids })).resolves.toEqual({ resolved: 0, notified: 0 });
     expect(await scope5.fixedDms()).toHaveLength(2);
+  });
+
+
+  it('links each resolved item to its fixing pull request', async () => {
+    const { agentItem, actionItem } = await scope5.reported();
+    await scope5.notify({ itemIds: [agentItem, actionItem], notify: undefined });
+    const rows = (
+      await rootFixture.database.query<{
+        issue_repository: string;
+        issue_number: number;
+        triaged_at: Date | null;
+      }>(
+        `SELECT issue_repository,issue_number,triaged_at FROM feedback_items WHERE id=ANY($1::text[])`,
+        [[agentItem, actionItem]],
+      )
+    ).rows;
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row).toMatchObject({ issue_repository: REPOSITORY, issue_number: 7 });
+      expect(row.triaged_at).toBeTruthy();
+    }
   });
 
 

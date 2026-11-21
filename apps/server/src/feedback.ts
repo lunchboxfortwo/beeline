@@ -22,6 +22,8 @@ import type { CommandRow } from './agent-command.js';
 import type { SqlDatabase } from './database.js';
 import { PROHIBITED_SECRET_PATTERNS } from './institutional-memory-shadow.js';
 import { hasSystemReportMention } from './message-mentions.js';
+import { reconcileFeedbackShipped } from './feedback-shipped.js';
+import { runAfterCommit, type AfterCommit } from './institutional-memory-embeddings.js';
 import { sendSystemDirectMessage } from './system-line.js';
 
 /**
@@ -31,7 +33,8 @@ import { sendSystemDirectMessage } from './system-line.js';
  * workflow (docs/workflows/) reads `feedback_items` through a read-only
  * database grant and dispatches fix corners after a human approves. When a
  * fix merges, the triage agent calls `notify_feedback_fixed` and System tells
- * each person who reported the problem themselves.
+ * each person who reported the problem themselves. Reporting agents hear once
+ * a delivered release contains that fix (`feedback-shipped.ts`).
  * Items keep message ids, plus the text of a person's own `@system` report.
  */
 
@@ -46,6 +49,8 @@ export type FeedbackConfig = {
 export interface FeedbackPullRequests {
   /** True only when the pull request exists and has merged. */
   merged(repository: string, number: number): Promise<boolean>;
+  /** True only when the pull request merged and its merge commit is in `sha`'s history. */
+  shipped(repository: string, number: number, sha: string): Promise<boolean>;
 }
 
 /** The feedback loop's server wiring: config plus the GitHub read it needs. */
@@ -88,10 +93,17 @@ function optionalText(value: unknown, field: string, maxBytes: number): string |
   return trimmed;
 }
 
-/** Case, punctuation and spacing never make two reports different. */
+/**
+ * Case, punctuation, spacing, links and ids never make two reports different:
+ * the same error from another run, commit or pull request is a repeat. Short
+ * numbers such as status codes stay, unless they follow `#` or `/`.
+ */
 export function feedbackSummaryKey(summary: string): string {
   return summary
     .toLowerCase()
+    .replace(/https?:\/\/\S+/g, ' url ')
+    .replace(/\b(?=[0-9a-f-]*\d)[0-9a-f]{7,}(?:-[0-9a-f]{4,})*\b/g, ' id ')
+    .replace(/[#/]\d+|\d{4,}/g, ' n ')
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim();
 }
@@ -141,7 +153,10 @@ function platformOrNull(value: string | null | undefined): string | null {
  * kind the helper already posted. The harness process version never reaches
  * the server, so it stays null. App fields stay null: this is not a phone.
  */
-async function agentReportVersions(database: SqlDatabase, agentId: string): Promise<ReportVersions> {
+async function agentReportVersions(
+  database: SqlDatabase,
+  agentId: string,
+): Promise<ReportVersions> {
   const row = (
     await database.query<{ helper_version: string | null; harness: string | null }>(
       `SELECT presence.body->>'releaseVersion' AS helper_version, agent.harness
@@ -182,7 +197,8 @@ async function humanReportVersions(
   externalClient: boolean,
   familyId?: string,
 ): Promise<ReportVersions> {
-  if (externalClient || !familyId || !PHONE_FAMILY_ID.test(familyId)) return { ...UNKNOWN_VERSIONS };
+  if (externalClient || !familyId || !PHONE_FAMILY_ID.test(familyId))
+    return { ...UNKNOWN_VERSIONS };
   const row = (
     await database.query<{ app_platform: string | null; app_version: string | null }>(
       `SELECT
@@ -236,9 +252,10 @@ async function roomWorkspace(database: SqlDatabase, roomId: string): Promise<str
 
 /**
  * `report_feedback`, from an agent's Room. Task command context is evidence,
- * not permission to report a problem with that task. The same
- * category, tool and normalized summary match any open agent item. Every
- * explicit report retains its evidence as an occurrence.
+ * not permission to report a problem with that task. The same category,
+ * tool and normalized error (the summary when there is none) match any open
+ * agent item: agents word the same failure differently, but the tool's error
+ * repeats. Every explicit report retains its evidence as an occurrence.
  */
 export async function reportAgentFeedback(
   database: SqlDatabase,
@@ -257,26 +274,50 @@ export async function reportAgentFeedback(
   );
   const toolName = optionalText(input.toolName, 'tool_name', FEEDBACK_TOOL_NAME_MAX_LENGTH);
   const promptSectionIds = Array.isArray(input.promptSectionIds)
-    ? [...new Set(input.promptSectionIds.filter((id) => typeof id === 'string' && id.length <= 120))]
-        .slice(0, FEEDBACK_PROMPT_SECTION_IDS_MAX)
+    ? [
+        ...new Set(
+          input.promptSectionIds.filter((id) => typeof id === 'string' && id.length <= 120),
+        ),
+      ].slice(0, FEEDBACK_PROMPT_SECTION_IDS_MAX)
     : [];
   if (containsSecret([summary, detail, errorExcerpt, toolName].filter(Boolean).join('\n')))
     throw new Error('feedback contains a secret-shaped value; describe the problem without it');
-  const summaryKey = feedbackSummaryKey(summary) || summary.toLowerCase();
-  const versions = await agentReportVersions(database,agentId);
-  const owner = (await database.query<{owner_id:string}>(
-    'SELECT owner_id FROM agents WHERE agent_id=$1',[agentId])).rows[0]?.owner_id;
-  const workspaceId=await roomWorkspace(database,input.roomId);
-  const requestId=input.requestId??null;
-  const triggerMessageId=(await database.query<{source_message_id:string|null}>(
-    `SELECT source_message_id FROM agent_commands
+  const summaryKey =
+    feedbackSummaryKey(errorExcerpt ?? '') || feedbackSummaryKey(summary) || summary.toLowerCase();
+  const versions = await agentReportVersions(database, agentId);
+  const owner = (
+    await database.query<{ owner_id: string }>('SELECT owner_id FROM agents WHERE agent_id=$1', [
+      agentId,
+    ])
+  ).rows[0]?.owner_id;
+  const workspaceId = await roomWorkspace(database, input.roomId);
+  const requestId = input.requestId ?? null;
+  const triggerMessageId =
+    (
+      await database.query<{ source_message_id: string | null }>(
+        `SELECT source_message_id FROM agent_commands
      WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3
-     ORDER BY created_at DESC,id DESC LIMIT 1`,[input.roomId,agentId,requestId])).rows[0]?.source_message_id??null;
-  const messageIds=await evidenceMessageIds(database,input.roomId,triggerMessageId);
-  const occurrence={agentId,roomId:input.roomId,triggerMessageId,
-    requestId,messageIds,promptSectionIds,summary,detail:detail??null,errorExcerpt:errorExcerpt??null,
-    helperVersion:versions.helperVersion,harness:versions.harness,harnessVersion:versions.harnessVersion};
-  const stored = await database.query<{id:string;occurrence_count:number}>(`INSERT INTO feedback_items(
+     ORDER BY created_at DESC,id DESC LIMIT 1`,
+        [input.roomId, agentId, requestId],
+      )
+    ).rows[0]?.source_message_id ?? null;
+  const messageIds = await evidenceMessageIds(database, input.roomId, triggerMessageId);
+  const occurrence = {
+    agentId,
+    roomId: input.roomId,
+    triggerMessageId,
+    requestId,
+    messageIds,
+    promptSectionIds,
+    summary,
+    detail: detail ?? null,
+    errorExcerpt: errorExcerpt ?? null,
+    helperVersion: versions.helperVersion,
+    harness: versions.harness,
+    harnessVersion: versions.harnessVersion,
+  };
+  const stored = await database.query<{ id: string; occurrence_count: number }>(
+    `INSERT INTO feedback_items(
     id,source_kind,reporter_identity_id,reporter_owner_id,workspace_id,room_id,
     trigger_message_id,message_ids,request_id,category,summary,summary_key,detail,
     tool_name,error_excerpt,prompt_section_ids,helper_version,app_version,app_platform,harness,harness_version,last_occurrence_at)
@@ -284,13 +325,32 @@ export async function reportAgentFeedback(
     ON CONFLICT(category,summary_key,tool_name) WHERE source_kind='agent' AND status IN ('new','filed','attached')
       DO UPDATE SET occurrence_count=feedback_items.occurrence_count+1,last_occurrence_at=now(),
         occurrences=feedback_items.occurrences || jsonb_build_array($21::jsonb || jsonb_build_object('createdAt',now()))
-    RETURNING id,occurrence_count`,[
-    feedbackItemId(),agentId,owner??null,workspaceId,input.roomId,triggerMessageId,messageIds,
-    requestId,input.category,summary,summaryKey,detail??null,toolName??null,errorExcerpt??null,
-    promptSectionIds,versions.helperVersion,versions.appVersion,versions.appPlatform,versions.harness,versions.harnessVersion,
-    JSON.stringify(occurrence),
-  ]);
-  return {itemId:stored.rows[0]!.id,duplicate:stored.rows[0]!.occurrence_count>1};
+    RETURNING id,occurrence_count`,
+    [
+      feedbackItemId(),
+      agentId,
+      owner ?? null,
+      workspaceId,
+      input.roomId,
+      triggerMessageId,
+      messageIds,
+      requestId,
+      input.category,
+      summary,
+      summaryKey,
+      detail ?? null,
+      toolName ?? null,
+      errorExcerpt ?? null,
+      promptSectionIds,
+      versions.helperVersion,
+      versions.appVersion,
+      versions.appPlatform,
+      versions.harness,
+      versions.harnessVersion,
+      JSON.stringify(occurrence),
+    ],
+  );
+  return { itemId: stored.rows[0]!.id, duplicate: stored.rows[0]!.occurrence_count > 1 };
 }
 
 const TAG_SUMMARY = 'Reported with @system';
@@ -455,31 +515,37 @@ export async function notifyFeedbackFixed(
   command: CommandRow | undefined,
   agentId: string,
   input: NotifyFeedbackFixedInput,
+  afterCommit?: AfterCommit,
 ): Promise<NotifyFeedbackFixedResult> {
-  if (command?.agent_id !== agentId) throw new Error('feedback resolution requires the agent’s own turn');
+  if (command?.agent_id !== agentId)
+    throw new Error('feedback resolution requires the agent’s own turn');
   const notify = input.notify === true;
-  const owner =
-    notify
-      ? (
-          await database.query<{ owner_id: string }>(
-            `SELECT owner_id FROM agents WHERE agent_id=$1`,
-            [agentId],
-          )
-        ).rows[0]?.owner_id
-      : undefined;
+  const owner = notify
+    ? (
+        await database.query<{ owner_id: string }>(
+          `SELECT owner_id FROM agents WHERE agent_id=$1`,
+          [agentId],
+        )
+      ).rows[0]?.owner_id
+    : undefined;
   if (notify && (!owner || !config.systemSenders.includes(owner)))
     throw new Error(
       'System DM access denied: only agents whose owner is a configured System sender can send Fixed DMs, in their own turn',
     );
   if (notify) {
-    const root = (await database.query<{ author_id: string }>(
-      `SELECT message.author_id FROM messages message
+    const root = (
+      await database.query<{ author_id: string }>(
+        `SELECT message.author_id FROM messages message
        JOIN identities author ON author.id=message.author_id AND author.kind='human'
          AND NOT author.hidden_from_roster
-       WHERE message.id=$1`, [command!.root_source_message_id],
-    )).rows[0];
+       WHERE message.id=$1`,
+        [command!.root_source_message_id],
+      )
+    ).rows[0];
     if (!root || !config.systemSenders.includes(root.author_id))
-      throw new Error('System DM access denied: Fixed notices need an explicit order from a configured System sender');
+      throw new Error(
+        'System DM access denied: Fixed notices need an explicit order from a configured System sender',
+      );
   }
   const itemIds = Array.isArray(input.itemIds)
     ? [...new Set(input.itemIds.filter((id): id is string => typeof id === 'string'))]
@@ -495,47 +561,61 @@ export async function notifyFeedbackFixed(
   if (!pull || pull[1]!.toLowerCase() !== config.repository.toLowerCase())
     throw new Error(`pr_url must be a pull request in ${config.repository}`);
   const number = Number(pull[2]);
-  const url = systemMessage("feedback.https-github-com-pull", config.repository, number);
+  const url = systemMessage('feedback.https-github-com-pull', config.repository, number);
   if (!pullRequests)
     throw new Error('Fixed DMs are unavailable: the Beeline GitHub App is not configured');
   // Only a merged fix closes the loop; the agent's word that it merged is not enough.
   if (!(await pullRequests.merged(config.repository, number)))
     throw new Error(`${url} has not merged; nothing was resolved or sent`);
-  return database.transaction(async (db) => {
+  const result = await database.transaction(async (db) => {
     const known = await db.query<{ id: string }>(
       `SELECT id FROM feedback_items WHERE id=ANY($1::text[])`,
       [itemIds],
     );
-    if (known.rowCount !== itemIds.length) throw new Error('item_ids names an unknown feedback item');
+    if (known.rowCount !== itemIds.length)
+      throw new Error('item_ids names an unknown feedback item');
     const resolved = await db.query<{
       source_kind: string;
       reporter_identity_id: string;
       workspace_id: string;
     }>(
+      // The fixing pull request is the item's link; the release step reads it
+      // to tell reporting agents once that fix ships.
       `UPDATE feedback_items SET status='resolved',
-         triaged_at=COALESCE(triaged_at,now())
+         triaged_at=COALESCE(triaged_at,now()),
+         issue_repository=$2,issue_number=$3
        WHERE id=ANY($1::text[]) AND status<>'resolved'
        RETURNING source_kind,reporter_identity_id,workspace_id`,
-      [itemIds],
+      [itemIds, config.repository, number],
     );
     if (!notify) return { resolved: resolved.rowCount ?? 0, notified: 0 };
     // A later explicit notice order can notify items already resolved silently.
     const reporters = await db.query<{ reporter_identity_id: string; workspace_id: string }>(
       `SELECT reporter_identity_id,workspace_id FROM feedback_items
        WHERE id=ANY($1::text[]) AND status='resolved' AND source_kind='human'
-         AND resolved_notified_at IS NULL`, [itemIds],
+         AND resolved_notified_at IS NULL`,
+      [itemIds],
     );
-    const people = new Map(reporters.rows.map(row => [row.reporter_identity_id, row.workspace_id]));
+    const people = new Map(
+      reporters.rows.map((row) => [row.reporter_identity_id, row.workspace_id]),
+    );
     let notified = 0;
     for (const [person, workspaceId] of people) {
       if (await sendFixedMessage(db, person, workspaceId, title, url)) {
         notified++;
-        await db.query(`UPDATE feedback_items SET resolved_notified_at=now()
-          WHERE id=ANY($1::text[]) AND reporter_identity_id=$2 AND status='resolved'`, [itemIds, person]);
+        await db.query(
+          `UPDATE feedback_items SET resolved_notified_at=now()
+          WHERE id=ANY($1::text[]) AND reporter_identity_id=$2 AND status='resolved'`,
+          [itemIds, person],
+        );
       }
     }
     return { resolved: resolved.rowCount ?? 0, notified };
   });
+  runAfterCommit(afterCommit, database, (db) =>
+    reconcileFeedbackShipped(db, { config, pullRequests }),
+  );
+  return result;
 }
 
 /** One System DM per person and pull request; a repeat inserts nothing. */
@@ -562,6 +642,11 @@ async function sendFixedMessage(
   const id = createHash('sha256')
     .update(`beeline-feedback-fixed:v2:${url.toLowerCase()}:${personId}`)
     .digest('hex');
-  return sendSystemDirectMessage(database, workspace.workspace_id, personId,
-    systemMessage("feedback.fixed", title, url), id);
+  return sendSystemDirectMessage(
+    database,
+    workspace.workspace_id,
+    personId,
+    systemMessage('feedback.fixed', title, url),
+    id,
+  );
 }

@@ -6,7 +6,8 @@ workflow, `feedback-triage`. It works like a team skill: any agent can find it
 and start it, and no per-corner setting gates it. The workflow reads new
 reports from the production database and ranks them by problem. It asks a
 person to approve, then opens fix corners. Once a fix merges, System tells each
-person who reported that problem.
+person who reported that problem when explicitly ordered; reporting agents get
+a passive Room notice once the fix ships.
 
 ## Intake
 
@@ -15,9 +16,14 @@ person who reported that problem.
   `contradiction`, `tooling_gap`, `context_gap`, `bug`. The server attaches the
   Room, the trigger message plus up to 20 preceding message ids, and the
   request id. The Body attaches the turn's assembled prompt section ids.
-  - An exact match on category, normalized summary (case, punctuation and spacing
-    ignored), and tool name returns the existing open agent item, across agents
-    and at any age. Open means `new`, `filed` or `attached`.
+  - An exact match on category, tool name and normalized error excerpt (the
+    summary when there is no excerpt) returns the existing open agent item,
+    across agents and at any age. Agents word the same failure differently,
+    so the tool's error is the match. Case, punctuation, spacing, links, ids,
+    numbers of four or more digits and numbers after `#` or `/` are ignored;
+    shorter numbers such as status codes count. Open means `new`, `filed` or
+    `attached`. Items filed before this rule keep their summary key; triage
+    merges those with the `duplicate` disposition.
   - Each report increments `occurrence_count`; later reports keep their agent,
     Room, time, trigger, request and evidence in `occurrences`. The original
     context stays on the item. Reports have no daily quota or repeat cooldown;
@@ -184,6 +190,8 @@ leaves its reports unresolved forever.
 
 The pull query includes every report still new, including older agent reports.
 At the pull handoff, the triager supplies `dispositions` alongside `problems`.
+A team-saved copy of the workflow whose `pull` step does not require
+`dispositions` still saves any it is sent.
 Each entry names `itemId`, `disposition`, `reason`, and a `reference` when needed.
 The workflow saves the assessment with its handoff in one transaction:
 
@@ -193,13 +201,15 @@ The workflow saves the assessment with its handoff in one transaction:
   context, and closes the duplicate row. Ranking counts agent and human evidence
   against the delivered release even when their canonical report has another source.
 - `dismissed` records why no work is warranted.
-- `fixed` retains `resolved` after the existing merged-PR verification succeeds.
+- `fixed` retains `resolved` after the existing merged-PR verification succeeds
+  (`report_feedback(action:fixed)`, below).
 
-The structured decision is stored in `triage_reason`; existing status values
-remain compatible with running older servers. Replayed handoffs do not merge
-counts again. Agents assess their own workspace; the existing configured System
-sender authority covers the global feedback sweep. No reporter notice is sent
-by an assessment.
+The structured decision and assessment reason remain in the saved workflow
+handoff result; feedback items store the resulting status and triage timestamp.
+Replayed handoffs do not merge counts again. Agents assess their own workspace; the existing configured System
+sender authority covers the global feedback sweep. Assessments send no human
+DMs; merging agent evidence into an already resolved item reconciles shipped
+notices after commit (see below).
 
 ## Close the loop: Fixed DMs
 
@@ -207,7 +217,10 @@ by an assessment.
 Only an explicit notice order adds `notify: true`. The server checks every call:
 
 - It must come from the agent's own active turn.
-- The agent's owner must be listed in `BEELINE_SYSTEM_SENDERS`.
+- For `notify: true`, the agent's owner must be listed in
+  `BEELINE_SYSTEM_SENDERS`. Silent resolution does not require System-sender
+  authority or ownership of the feedback items and can trigger shipped agent
+  notices across reporting Workspaces.
 - A notice request must be rooted in a human command from a configured System sender; scheduled and system-rooted turns cannot send notices.
 - The title must be one line of at most 120 characters, with no secret-shaped
   value.
@@ -216,28 +229,56 @@ Only an explicit notice order adds `notify: true`. The server checks every call:
   (`pull_requests: read`); without the App, or for an open, closed-unmerged or
   missing pull request, nothing is resolved or sent.
 
-Then the items become `resolved` without a DM. When a configured System sender
-explicitly orders notices for the pull request, pass `notify: true` in that
+Then the items become `resolved` without a DM. Each item records the fix:
+`triaged_at` is set if absent, and `issue_repository`/`issue_number` name the pull
+request. The fix title is used only for explicitly requested human DMs; shipped
+agent notices never publish assessment reasons. When a configured System
+sender explicitly orders notices for the pull request, pass `notify: true` in that
 human-rooted turn. Each human reporter then gets one System DM:
-`Fixed: <title> <pr_url>`. Agent reports stay silent. A later explicit notice
-order can notify items already resolved silently. Repeats send nothing twice
-(one DM per person per pull request); a reporter whose account is gone gets no DM.
+`Fixed: <title> <pr_url>`. A later explicit notice order can notify items
+already resolved silently. Repeats send nothing twice (one DM per person per
+pull request); a reporter whose account is gone gets no DM.
+
+### Agent reports: told when the fix ships
+
+Agent reports get no DM at merge. The release step (`POST /v1/releases/notify`,
+`notifyFeedbackShipped` in `apps/server/src/feedback-shipped.ts`) checks each
+fix pull request with resolved items whose agent evidence has not been notified.
+Resolution and duplicate handoffs check the last delivered release after the
+outer transaction commits, so a fix already shipped does not wait for another
+delivery. When GitHub shows its
+merge commit in the delivered release's commit, every agent that reported the
+problem (the item's reporter and each agent in `occurrences`) gets one System
+line in the Room where it last reported it:
+`Fixed in <version>: <pr_url>`. A missing agent identity or latest reporting Room
+gets no line. No submitted title or triage assessment is
+included in the shipped notice. The line is passive: it wakes nobody and pushes nobody. The items then record
+`agent_resolved_notified_at`, so a repeat or promoted delivery sends nothing.
+Agent evidence merged into a human item follows the same path without consuming
+the human reporter’s independent `resolved_notified_at` DM marker. Merging
+additional evidence clears the agent marker for reconciliation; the per-agent
+message id prevents repeat notices. Agent items also retain
+`resolved_notified_at` for compatibility. A GitHub read that fails leaves the pull request for the next release. The
+release response does not wait for these notices. The check reads through the
+Beeline GitHub App with a token downgraded to `pull_requests: read` and
+`contents: read` on that repository.
 
 ### When the triager cannot send: `skipped`
 
-If the triager's owner is not a System sender, `notify_feedback_fixed` refuses
-with `System DM access denied`. The run does not stop there. The triager hands
+If the triager requests `notify: true` and its owner is not a System sender,
+`notify_feedback_fixed` refuses with `System DM access denied`. Routine silent
+resolution is still allowed. The run does not stop there. The triager hands
 off `notify` as `skipped` with `skipReason` `not_system_sender` and
 `unnotifiedPullRequests` listing the pull request numbers it could not report,
 and the run goes on to `pull` exactly as after `notified`. (The `notify` state
 requires all three fields for both outcomes; `notified` sets `skipReason` and
 `unnotifiedPullRequests` to `none`.)
 
-A skipped call resolves nothing, so those items stay unresolved. The next run
-looks back to the last run that handed off `notified` and includes every pull
+A refused notice call resolves nothing; items not already resolved stay unresolved.
+The next run looks back to the last run that handed off `notified` and includes every pull
 request an earlier run left in `unnotifiedPullRequests`. Once a System sender's
-agent runs `notify`, the reporters get their Fixed DMs; a repeat call never
-sends twice.
+agent runs an explicitly ordered `notify: true` call, human reporters get
+their Fixed DMs; a repeat call never sends twice.
 
 The fix for `not_system_sender` is to make the triager's owner a System sender.
 
@@ -277,7 +318,7 @@ triage tools (`list_feedback`, `get_feedback`, `list_feedback_issues`,
 issue filing with its redaction rules, and the `issues` webhook resolver are
 gone. Fix corners replace the public issues. The unused `corner_facts.feedback_triage`
 column and the empty `feedback_issue_comments` table are dropped. The
-`feedback_items.issue_*` columns stay unread for rolling-update compatibility.
+`feedback_items.issue_*` columns now hold an item's fixing pull request.
 
 ## Workspace browsing rollout
 

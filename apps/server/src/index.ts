@@ -11,17 +11,26 @@ import { StarterOnboardingService } from './starter-onboarding-run.js';
 import { RoomsMcp } from './rooms-mcp.js';
 import { RoomsMcpOAuth } from './rooms-mcp-oauth.js';
 import { runMcpWebhookDelivery } from './rooms-mcp-members.js';
-import { deliverOperatorSystemDmBatch,subscribeOperatorSystemDmDeliveries } from './operator-system-dm.js';
+import {
+  deliverOperatorSystemDmBatch,
+  subscribeOperatorSystemDmDeliveries,
+} from './operator-system-dm.js';
 import { captureServerError, flushServerErrors } from './sentry.js';
 
 // Expected voice failures are handled at their task boundary. Report any escape.
-process.on('unhandledRejection', error => {
+process.on('unhandledRejection', (error) => {
   captureServerError(error, { surface: 'unhandled-rejection' });
   console.error('[unhandled-rejection]', error instanceof Error ? error.name : 'Unknown rejection');
 });
 import { sentryTelegramFromEnv } from './sentry-telegram.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { assertSchemaCurrent, markSchemaCurrent, migrate, migrateData, PostgresDatabase } from './database.js';
+import {
+  assertSchemaCurrent,
+  markSchemaCurrent,
+  migrate,
+  migrateData,
+  PostgresDatabase,
+} from './database.js';
 import { runMigrationStep } from './migration-steps.js';
 import { backfillArtifactByteMetadata } from './migrations/artifact-byte-metadata.js';
 import { databaseConnectionBudget } from './database-budget.js';
@@ -30,11 +39,7 @@ import { TokenAuth, verifierFromEnvironment } from './auth.js';
 import { PhoneService } from './phone-service.js';
 import { DaemonService } from './daemon-service.js';
 import { LiveHub } from './live.js';
-import {
-  BackgroundJobRunner,
-  createPushTestSender,
-  PushDeliveryLoop,
-} from './background.js';
+import { BackgroundJobRunner, createPushTestSender, PushDeliveryLoop } from './background.js';
 import { startBackgroundWork } from './background-work.js';
 import { OwnerScheduleClock } from './owner-schedule-clock.js';
 import { backgroundDueKey } from './background-due-source.js';
@@ -67,9 +72,7 @@ import { PostgresLiveListener } from './postgres-live.js';
 import { CornerMachineEvents } from './corner-attention.js';
 import { listenAfterBestEffortRecovery } from './startup.js';
 import { INSTITUTIONAL_MEMORY_ON } from './institutional-memory-shadow.js';
-import {
-  warnIfEmbeddingKeyMissing,
-} from './institutional-memory-embeddings.js';
+import { warnIfEmbeddingKeyMissing } from './institutional-memory-embeddings.js';
 import type { InstitutionalSkillAnchorSource } from './institutional-skill-anchors.js';
 import { retireWelcomeWorkspace, welcomeRetirementPreflight } from './welcome-retirement.js';
 import { feedbackConfigFromEnv } from './feedback.js';
@@ -114,7 +117,9 @@ async function main() {
   const healthDatabase = new PostgresDatabase(connectionString, 1, { mode: 'diagnostics' });
   let budget: ReturnType<typeof databaseConnectionBudget>;
   try {
-    const capacity = await healthDatabase.query<{ max_connections: string }>('SHOW max_connections');
+    const capacity = await healthDatabase.query<{ max_connections: string }>(
+      'SHOW max_connections',
+    );
     budget = databaseConnectionBudget(
       Number(capacity.rows[0]?.max_connections),
       Number(process.env.BEELINE_SERVER_MACHINES ?? '2'),
@@ -125,11 +130,7 @@ async function main() {
     throw error;
   }
   const lockDiagnostics = new DatabaseLockDiagnostics(healthDatabase);
-  const database = new PostgresDatabase(
-    connectionString,
-    budget.app,
-    { lockDiagnostics },
-  );
+  const database = new PostgresDatabase(connectionString, budget.app, { lockDiagnostics });
   try {
     await assertSchemaCurrent(database);
   } catch (error) {
@@ -137,8 +138,14 @@ async function main() {
     await healthDatabase.close();
     throw error;
   }
-  const enrichmentDatabase = new PostgresDatabase(connectionString, budget.enrichment, { mode: 'enrichment', lockDiagnostics });
-  const jobsDatabase = new PostgresDatabase(connectionString, budget.jobs, { mode: 'long-running', lockDiagnostics });
+  const enrichmentDatabase = new PostgresDatabase(connectionString, budget.enrichment, {
+    mode: 'enrichment',
+    lockDiagnostics,
+  });
+  const jobsDatabase = new PostgresDatabase(connectionString, budget.jobs, {
+    mode: 'long-running',
+    lockDiagnostics,
+  });
   warnIfEmbeddingKeyMissing();
   console.log(`[database] connection budget ${JSON.stringify(budget)}`);
   const publicOrigin =
@@ -251,15 +258,15 @@ async function main() {
             }),
         }
       : undefined;
-  const pushSender =
-    process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON
-      ? await createFirebasePushSender(process.env)
-      : undefined;
+  const pushSender = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON
+    ? await createFirebasePushSender(process.env)
+    : undefined;
   const apnsPushSender = createApnsPushSender(process.env);
   const webPushSender = createWebPushSender(jobsDatabase, process.env);
-  const push = pushSender || webPushSender
-    ? new PushDeliveryLoop(jobsDatabase, pushSender, apnsPushSender, webPushSender)
-    : undefined;
+  const push =
+    pushSender || webPushSender
+      ? new PushDeliveryLoop(jobsDatabase, pushSender, apnsPushSender, webPushSender)
+      : undefined;
   const schedules = new AgentScheduleLoop(jobsDatabase, (roomId) =>
     live.publish({ type: 'invalidate', roomId, reason: 'schedule' }),
   );
@@ -274,8 +281,9 @@ async function main() {
   const objectStorage = objectStorageFromEnv();
   // The release migration runs without object storage; the server that owns
   // the bucket repairs octet-stream image metadata once, after it starts.
-  void backfillArtifactByteMetadata(database, objectStorage).catch(error =>
-    console.error('artifact byte metadata backfill failed', error));
+  void backfillArtifactByteMetadata(database, objectStorage).catch((error) =>
+    console.error('artifact byte metadata backfill failed', error),
+  );
   const objectService = new ObjectService(
     database,
     objectStorage,
@@ -285,18 +293,26 @@ async function main() {
   const composio = process.env.BEELINE_COMPOSIO_API_KEY
     ? new ComposioApps(process.env.BEELINE_COMPOSIO_API_KEY)
     : undefined;
-  const linkWallet = process.env.BEELINE_LINK_CLIENT_ID &&
-    process.env.BEELINE_LINK_CLIENT_SECRET && process.env.BEELINE_LINK_PUBLISHABLE_KEY &&
+  const linkWallet =
+    process.env.BEELINE_LINK_CLIENT_ID &&
+    process.env.BEELINE_LINK_CLIENT_SECRET &&
+    process.env.BEELINE_LINK_PUBLISHABLE_KEY &&
     process.env.BEELINE_LINK_TOKEN_KEY
-    ? new LinkAgentWallet(database, process.env.BEELINE_LINK_CLIENT_ID,
-        process.env.BEELINE_LINK_CLIENT_SECRET, process.env.BEELINE_LINK_PUBLISHABLE_KEY,
-        publicOrigin, process.env.BEELINE_LINK_TOKEN_KEY)
-    : undefined;
+      ? new LinkAgentWallet(
+          database,
+          process.env.BEELINE_LINK_CLIENT_ID,
+          process.env.BEELINE_LINK_CLIENT_SECRET,
+          process.env.BEELINE_LINK_PUBLISHABLE_KEY,
+          publicOrigin,
+          process.env.BEELINE_LINK_TOKEN_KEY,
+        )
+      : undefined;
   const mcpRegistry = new McpRegistryClient();
   const registryMcpOAuth = new RegistryMcpOAuth(database, publicOrigin);
-  const sendPushTest = pushSender || webPushSender
-    ? createPushTestSender(database, pushSender, apnsPushSender, webPushSender)
-    : undefined;
+  const sendPushTest =
+    pushSender || webPushSender
+      ? createPushTestSender(database, pushSender, apnsPushSender, webPushSender)
+      : undefined;
   const phone = new PhoneService(
     database,
     publicOrigin,
@@ -311,6 +327,10 @@ async function main() {
     composio,
     linkWallet,
   );
+  const feedback = {
+    config: feedbackConfigFromEnv(),
+    ...(githubClients ? { pullRequests: new FeedbackGitHub(database, githubClients.app) } : {}),
+  };
   const daemon = new DaemonService(
     database,
     live,
@@ -320,16 +340,15 @@ async function main() {
     undefined,
     process.env.LIVE_PAINT_DIAGNOSTICS === 'true',
     process.env.FLY_MACHINE_ID,
-    github ? (input, confirmZeroChecks) => github!.prChecksStatus(input, confirmZeroChecks) : undefined,
+    github
+      ? (input, confirmZeroChecks) => github!.prChecksStatus(input, confirmZeroChecks)
+      : undefined,
     undefined,
     institutionalMemory,
     mcpRegistry,
     registryMcpOAuth,
     composio,
-    {
-      config: feedbackConfigFromEnv(),
-      ...(githubClients ? { pullRequests: new FeedbackGitHub(database, githubClients.app) } : {}),
-    },
+    feedback,
     objectService,
     linkWallet,
     github ? (cornerId) => github!.refreshStaleMergeability(cornerId) : undefined,
@@ -351,50 +370,68 @@ async function main() {
   // secret, same as the Play review link above.
   const releaseNotify = new ReleaseNotifier(jobsDatabase, {
     live,
+    feedback,
     ...(process.env.BEELINE_RELEASE_NOTIFY_SECRET
       ? { secret: process.env.BEELINE_RELEASE_NOTIFY_SECRET }
       : {}),
   });
   const speechTranscriber = speechTranscriberFromEnv();
   const voiceConfig = voiceConfigFromEnv();
-  const voice = voiceConfig ? new VoiceService(database, live, { ...voiceConfig, objects: objectService, publicOrigin }) : undefined;
+  const voice = voiceConfig
+    ? new VoiceService(database, live, { ...voiceConfig, objects: objectService, publicOrigin })
+    : undefined;
   const freeAgentConfig = freeAgentConfigFromEnv(process.env, publicOrigin);
-  const freeAgents = freeAgentConfig && process.env.FLY_FREE_AGENT_API_TOKEN
-    ? new FreeAgentService(
-        database,
-        freeAgentConfig,
-        new FlyMachines(
-          process.env.FLY_FREE_AGENT_API_TOKEN,
-          process.env.FLY_FREE_AGENT_APP || 'beeline-free-agents',
-          fetch,
-          process.env.FLY_FREE_AGENT_API_ORIGIN || undefined,
-        ),
-        (agentId, transaction) => auth.createDaemonExchange(agentId, transaction),
-        undefined, connectionPresence.instanceId,
-      )
-    : undefined;
+  const freeAgents =
+    freeAgentConfig && process.env.FLY_FREE_AGENT_API_TOKEN
+      ? new FreeAgentService(
+          database,
+          freeAgentConfig,
+          new FlyMachines(
+            process.env.FLY_FREE_AGENT_API_TOKEN,
+            process.env.FLY_FREE_AGENT_APP || 'beeline-free-agents',
+            fetch,
+            process.env.FLY_FREE_AGENT_API_ORIGIN || undefined,
+          ),
+          (agentId, transaction) => auth.createDaemonExchange(agentId, transaction),
+          undefined,
+          connectionPresence.instanceId,
+        )
+      : undefined;
   if (freeAgents) phone.setFreeAgents(freeAgents);
-  const freeAgentModel = freeAgentConfig && process.env.BEELINE_FREE_AGENT_MODEL_KEY
-    ? {
-        database,
-        config: freeAgentConfig,
-        upstreamKey: process.env.BEELINE_FREE_AGENT_MODEL_KEY,
-        ...(process.env.BEELINE_FREE_AGENT_MODEL_UPSTREAM
-          ? { upstreamBaseUrl: process.env.BEELINE_FREE_AGENT_MODEL_UPSTREAM }
-          : {}),
-      }
-    : undefined;
+  const freeAgentModel =
+    freeAgentConfig && process.env.BEELINE_FREE_AGENT_MODEL_KEY
+      ? {
+          database,
+          config: freeAgentConfig,
+          upstreamKey: process.env.BEELINE_FREE_AGENT_MODEL_KEY,
+          ...(process.env.BEELINE_FREE_AGENT_MODEL_UPSTREAM
+            ? { upstreamBaseUrl: process.env.BEELINE_FREE_AGENT_MODEL_UPSTREAM }
+            : {}),
+        }
+      : undefined;
   if (freeAgentConfig) {
-    const version='free-agent-v1';
-    const key=createHash('sha256').update('beeline:owned-model:root:v1\0').update(freeAgentConfig.sealSecret).digest();
-    const ownedModel={ credentials:new OwnedModelCredentials({currentVersion:version,key:v=>v===version ? key : undefined},
-      ()=>freeAgentConfig.model),ready:()=>true };
-    if (freeAgentModel) Object.assign(freeAgentModel,{ownedModel});
+    const version = 'free-agent-v1';
+    const key = createHash('sha256')
+      .update('beeline:owned-model:root:v1\0')
+      .update(freeAgentConfig.sealSecret)
+      .digest();
+    const ownedModel = {
+      credentials: new OwnedModelCredentials(
+        { currentVersion: version, key: (v) => (v === version ? key : undefined) },
+        () => freeAgentConfig.model,
+      ),
+      ready: () => true,
+    };
+    if (freeAgentModel) Object.assign(freeAgentModel, { ownedModel });
     // Every queue writer, including background jobs, uses this release's signer.
-    for (const db of [database, jobsDatabase, enrichmentDatabase]) db.ownedModelCredentials = ownedModel.credentials;
+    for (const db of [database, jobsDatabase, enrichmentDatabase])
+      db.ownedModelCredentials = ownedModel.credentials;
     daemon.setOwnedModel(ownedModel);
     // Upgrade previously accepted items once, before any helper can read them.
-    const pending = await database.query<{ id: string; agent_id: string }>(`SELECT command.id,command.agent_id
+    const pending = await database.query<{
+      id: string;
+      agent_id: string;
+    }>(`SELECT command.id,command.agent_id
       FROM agent_commands command JOIN free_agents starter ON starter.agent_id=command.agent_id
       JOIN agents agent ON agent.agent_id=command.agent_id AND agent.owner_id=starter.owner_id
       JOIN rooms room ON room.id=command.room_id
@@ -407,11 +444,23 @@ async function main() {
         AND EXISTS(SELECT 1 FROM memberships member
           WHERE member.identity_id=command.agent_id AND member.removed_at IS NULL
             AND member.room_id=COALESCE(room.parent_id,room.id) AND room.archived_at IS NULL)`);
-    for (const item of pending.rows) await database.transaction(async db => {
-      // A preceding server may answer or stop the item while this server boots.
-      if (!(await db.query(`SELECT 1 FROM agent_commands WHERE id=$1 AND state='pending' FOR UPDATE`, [item.id])).rowCount) return;
-      await ownedModel.credentials.issueInTransaction(db, { agentId: item.agent_id, commandId: item.id });
-    });
+    for (const item of pending.rows)
+      await database.transaction(async (db) => {
+        // A preceding server may answer or stop the item while this server boots.
+        if (
+          !(
+            await db.query(
+              `SELECT 1 FROM agent_commands WHERE id=$1 AND state='pending' FOR UPDATE`,
+              [item.id],
+            )
+          ).rowCount
+        )
+          return;
+        await ownedModel.credentials.issueInTransaction(db, {
+          agentId: item.agent_id,
+          commandId: item.id,
+        });
+      });
   }
   const starterOnboarding = new StarterOnboardingService(database, freeAgentModel);
   phone.setStarterOnboarding(starterOnboarding);
@@ -422,16 +471,37 @@ async function main() {
 
   const server = createBeelineServer({
     operationOutcomes,
-    roomsMcp: new RoomsMcp(new RoomsMcpOAuth(database, publicOrigin, auth, undefined, () => liveListener.projectionHealth().connected), phone, live, daemon, objectService, undefined, () => liveListener.projectionHealth().connected),
+    roomsMcp: new RoomsMcp(
+      new RoomsMcpOAuth(
+        database,
+        publicOrigin,
+        auth,
+        undefined,
+        () => liveListener.projectionHealth().connected,
+      ),
+      phone,
+      live,
+      daemon,
+      objectService,
+      undefined,
+      () => liveListener.projectionHealth().connected,
+    ),
     sentryWakeAgentId,
     database,
     sentryTelegram: sentryTelegramFromEnv(),
-    ...(process.env.BEELINE_SENTRY_CLIENT_SECRET ? { sentryWakeSecret: process.env.BEELINE_SENTRY_CLIENT_SECRET } : {}),
+    ...(process.env.BEELINE_SENTRY_CLIENT_SECRET
+      ? { sentryWakeSecret: process.env.BEELINE_SENTRY_CLIENT_SECRET }
+      : {}),
     cdpWebhookSecrets: cdpWebhookSecretsFromEnv(),
     databaseBudget: budget,
     enrichmentDatabase,
     jobsDatabase,
-    databasePools: { app: database, enrichment: enrichmentDatabase, diagnostics: healthDatabase, jobs: jobsDatabase },
+    databasePools: {
+      app: database,
+      enrichment: enrichmentDatabase,
+      diagnostics: healthDatabase,
+      jobs: jobsDatabase,
+    },
     linkWallet,
     registryMcpOAuth,
     healthDatabase,
@@ -472,24 +542,35 @@ async function main() {
   });
   const eventJob = (name: string, run: () => Promise<unknown>) =>
     startBackgroundWork(() => backgroundJobs.run(name, run));
-  const pushJob = eventJob('push', async () => { await push?.runOnce(); });
-  const sentryJob = eventJob('sentry-wakes', () => flushSentryWakes(jobsDatabase, sentryWakeAgentId));
+  const pushJob = eventJob('push', async () => {
+    await push?.runOnce();
+  });
+  const sentryJob = eventJob('sentry-wakes', () =>
+    flushSentryWakes(jobsDatabase, sentryWakeAgentId),
+  );
   const xJob = eventJob('x-signup-conversions', () => deliverXSignups(jobsDatabase));
   const dmJob = eventJob('operator-system-dms', () => deliverOperatorSystemDmBatch(jobsDatabase));
   const schedulesJob = eventJob('schedules', async () => {
     scheduleClock.stop();
     await schedules.runOnce();
-    await closeInactiveCorners(jobsDatabase, githubJobs ? {
-      closePullRequest: id => githubJobs.closeCornerPullRequest(id),
-      deleteCornerBranch: id => githubJobs.deleteCornerBranch(id),
-    } : undefined);
+    await closeInactiveCorners(
+      jobsDatabase,
+      githubJobs
+        ? {
+            closePullRequest: (id) => githubJobs.closeCornerPullRequest(id),
+            deleteCornerBranch: (id) => githubJobs.deleteCornerBranch(id),
+          }
+        : undefined,
+    );
     const delays = await Promise.all([schedules.nextDelayMs(), nextCornerCloseDelay(jobsDatabase)]);
-    const next = Math.min(...delays.map(delay => delay ?? Infinity));
+    const next = Math.min(...delays.map((delay) => delay ?? Infinity));
     scheduleClock.arm(Number.isFinite(next) ? next : undefined);
   });
   const scheduleClock = new OwnerScheduleClock(() => schedulesJob.wake());
   const mcpStop = new AbortController();
-  const mcpJob = eventJob('mcp-webhooks', () => runMcpWebhookDelivery(jobsDatabase, undefined, mcpStop.signal));
+  const mcpJob = eventJob('mcp-webhooks', () =>
+    runMcpWebhookDelivery(jobsDatabase, undefined, mcpStop.signal),
+  );
   const stops = [
     subscribeCommandCompletion(AGENT_SCHEDULE_DUE_KEY, () => schedulesJob.wake()),
     subscribeCommandCompletion(sentryEligibilityKey(sentryWakeAgentId), () => sentryJob.wake()),
@@ -499,21 +580,34 @@ async function main() {
   ];
   if (push) liveListener.setPushWake(() => pushJob.wake());
   liveListener.setXSignupDeliveryWake(() => xJob.wake());
-  liveListener.setOwedWake(source => { if (source === 'sentry') sentryJob.wake(); });
+  liveListener.setOwedWake((source) => {
+    if (source === 'sentry') sentryJob.wake();
+  });
   liveListener.setMcpWebhookWake(() => mcpJob.wake());
   // A committed wake for a sleeping free agent starts its Machine at once;
-  let stopFreeAgentWake: (()=>void) | undefined;
+  let stopFreeAgentWake: (() => void) | undefined;
   const port = Number(process.env.PORT ?? '8080');
   const host = process.env.HOST ?? '127.0.0.1';
-  await listenAfterBestEffortRecovery(server, async () => {
-    await connectionPresence.start();
-  }, port, host);
-  stopFreeAgentWake=freeAgents?.subscribeToWakes(live);
+  await listenAfterBestEffortRecovery(
+    server,
+    async () => {
+      await connectionPresence.start();
+    },
+    port,
+    host,
+  );
+  stopFreeAgentWake = freeAgents?.subscribeToWakes(live);
   schedulesJob.wake();
   // One-time backfill: linked repositories with no stored chat picture yet. Resolved ones are skipped, so a
   // restart reads nothing from GitHub once every linked repository has a row.
-  void githubJobs?.resolveRepositoryIcons().catch(error => console.error('[server] repository icon backfill failed:', error));
-  const stopOperationOutcomes = startOperationOutcomeFlush(jobsDatabase, operationOutcomes, backgroundJobs);
+  void githubJobs
+    ?.resolveRepositoryIcons()
+    .catch((error) => console.error('[server] repository icon backfill failed:', error));
+  const stopOperationOutcomes = startOperationOutcomeFlush(
+    jobsDatabase,
+    operationOutcomes,
+    backgroundJobs,
+  );
   console.log(`[server] listening on ${host}:${port}; store=postgres; background=events`);
   installShutdown(server, async () => {
     mcpStop.abort();
@@ -521,7 +615,14 @@ async function main() {
     for (const stop of stops) stop();
     await cornerMachine.stop();
     scheduleClock.stop();
-    await Promise.all([pushJob.stop(), sentryJob.stop(), xJob.stop(), dmJob.stop(), schedulesJob.stop(), mcpJob.stop()]);
+    await Promise.all([
+      pushJob.stop(),
+      sentryJob.stop(),
+      xJob.stop(),
+      dmJob.stop(),
+      schedulesJob.stop(),
+      mcpJob.stop(),
+    ]);
     scheduleClock.stop();
     stopFreeAgentWake?.();
     await voice?.close();
@@ -540,24 +641,41 @@ async function main() {
 }
 
 /** Operator creation or release-time warming, using the normal free-agent service. */
-async function runFreeAgentOperation(refresh: boolean, workspaceId: string | undefined): Promise<void> {
+async function runFreeAgentOperation(
+  refresh: boolean,
+  workspaceId: string | undefined,
+): Promise<void> {
   if (!refresh && !workspaceId) throw new Error('--add-free-agent requires a Workspace id');
   const config = freeAgentConfigFromEnv(process.env, required('PUBLIC_ORIGIN'));
   if (!config) throw new Error('free agents are not configured on this server');
   const database = new PostgresDatabase(required('DATABASE_URL'), 1, { mode: 'long-running' });
   try {
     if (refresh) {
-      await notifyLive(database,{table:'free_agents',operation:'RELEASE',roomId:''});
-      console.log('[free-agents] release inventory requested from running server owners; readiness awaits helper connections');
+      await notifyLive(database, { table: 'free_agents', operation: 'RELEASE', roomId: '' });
+      console.log(
+        '[free-agents] release inventory requested from running server owners; readiness awaits helper connections',
+      );
       return;
     }
-    const service = new FreeAgentService(database,config,new FlyMachines(
-      required('FLY_FREE_AGENT_API_TOKEN'),process.env.FLY_FREE_AGENT_APP || 'beeline-free-agents',fetch,
-      process.env.FLY_FREE_AGENT_API_ORIGIN || undefined),async () => { throw new Error('bootstrap is served by the running server'); });
+    const service = new FreeAgentService(
+      database,
+      config,
+      new FlyMachines(
+        required('FLY_FREE_AGENT_API_TOKEN'),
+        process.env.FLY_FREE_AGENT_APP || 'beeline-free-agents',
+        fetch,
+        process.env.FLY_FREE_AGENT_API_ORIGIN || undefined,
+      ),
+      async () => {
+        throw new Error('bootstrap is served by the running server');
+      },
+    );
     const agentId = await addFreeAgentToWorkspace(database, service, workspaceId!);
-    console.log(agentId
-      ? `[free-agents] added free agent ${agentId} to Workspace ${workspaceId}`
-      : `[free-agents] Workspace ${workspaceId} already has a free agent, or its owner is at the limit`);
+    console.log(
+      agentId
+        ? `[free-agents] added free agent ${agentId} to Workspace ${workspaceId}`
+        : `[free-agents] Workspace ${workspaceId} already has a free agent, or its owner is at the limit`,
+    );
   } finally {
     await database.close();
   }
@@ -575,15 +693,17 @@ async function runWelcomeRetirementPreflight(): Promise<void> {
 }
 
 const migrationMode =
-  process.argv[2] === '--migrate' || process.argv[2] === '--welcome-retirement-preflight' ||
-  process.argv[2] === '--add-free-agent' || process.argv[2] === '--refresh-free-agents';
+  process.argv[2] === '--migrate' ||
+  process.argv[2] === '--welcome-retirement-preflight' ||
+  process.argv[2] === '--add-free-agent' ||
+  process.argv[2] === '--refresh-free-agents';
 (process.argv[2] === '--welcome-retirement-preflight'
   ? runWelcomeRetirementPreflight()
   : process.argv[2] === '--add-free-agent' || process.argv[2] === '--refresh-free-agents'
     ? runFreeAgentOperation(process.argv[2] === '--refresh-free-agents', process.argv[3])
-  : migrationMode
-    ? runReleaseMigration()
-    : main()
+    : migrationMode
+      ? runReleaseMigration()
+      : main()
 ).catch(async (error) => {
   console.error(
     migrationMode ? '[migration] failed:' : '[server] startup failed:',

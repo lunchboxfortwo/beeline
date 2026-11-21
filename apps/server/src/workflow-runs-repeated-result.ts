@@ -1,13 +1,30 @@
 import { claimRun } from './workflow-runs.js';
 import { SkillRevisionConflict } from './institutional-skills.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
+import { reconcileFeedbackShipped } from './feedback-shipped.js';
+import type { FeedbackLoop } from './feedback.js';
+import { runAfterCommit } from './institutional-memory-embeddings.js';
 import { applyFeedbackDispositions } from './feedback-dispositions.js';
 import { completeServiceReview } from './service-review.js';
 import { CommandRefusalError, ExpectedRefusalError } from './command-refusal.js';
 import { CornerAccessDatabase } from './corner-access-database.js';
 import { workflowRunIsLiveSql } from './workflow-run-saved-status.js';
 import { humanRoomAdmin, WorkflowAuthorizationError } from './workflow-admin.js';
-import { shortRunId, validateSavedWorkflow, workflowContentsError, workflowReceiptError, type WorkflowReceiptInput, isAgentIdentityReference, WORKFLOW_BLOCKED_OUTCOME, WORKFLOW_ROLE_AGENTS_MAX, type WorkflowContract, type WorkflowReadContract, type WorkflowGateState, type WorkflowHandoffState, type WorkflowRoleBinding } from '@beeline/api-contract/daemon';
+import {
+  shortRunId,
+  validateSavedWorkflow,
+  workflowContentsError,
+  workflowReceiptError,
+  type WorkflowReceiptInput,
+  isAgentIdentityReference,
+  WORKFLOW_BLOCKED_OUTCOME,
+  WORKFLOW_ROLE_AGENTS_MAX,
+  type WorkflowContract,
+  type WorkflowReadContract,
+  type WorkflowGateState,
+  type WorkflowHandoffState,
+  type WorkflowRoleBinding,
+} from '@beeline/api-contract/daemon';
 import { bindWorkflowStepOutput } from './workflow-step-output.js';
 import type { CommandRow } from './agent-command.js';
 import type { SqlDatabase } from './database.js';
@@ -17,9 +34,16 @@ import { answerRoomChoice, skipRoomChoice } from './room-choice.js';
 import { identitySubject } from './system-line.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { RunScope, openRun, loadIdentityRow, loadRun, workflowRequester } from './workflow-runs.js';
-import { HandoffResult, provenanceAttempt, cardByCommand, alreadyAdvanced, isHandoffState, failOver, enterState, closeRun } from './workflow-runs-cancel-run-timers.js';
-
-
+import {
+  HandoffResult,
+  provenanceAttempt,
+  cardByCommand,
+  alreadyAdvanced,
+  isHandoffState,
+  failOver,
+  enterState,
+  closeRun,
+} from './workflow-runs-cancel-run-timers.js';
 
 /** The head card's own result, for an identical repeat of the handoff that wrote it. */
 export function repeatedResult(scope: RunScope): HandoffResult {
@@ -27,10 +51,11 @@ export function repeatedResult(scope: RunScope): HandoffResult {
     runId: scope.runId,
     state: scope.stateName,
     attempt: scope.run.seq,
-    ...(scope.run.status === 'done' || scope.run.status === 'failed' ? { status: scope.run.status } : {}),
+    ...(scope.run.status === 'done' || scope.run.status === 'failed'
+      ? { status: scope.run.status }
+      : {}),
   };
 }
-
 
 export async function handoff(
   database: SqlDatabase,
@@ -42,24 +67,34 @@ export async function handoff(
     receipt?: WorkflowReceiptInput;
     attempt?: number;
   },
+  feedback?: FeedbackLoop,
+  afterCommit?: AfterCommit,
 ): Promise<HandoffResult> {
   if (typeof input.runId !== 'string' || !input.runId) throw new Error('runId is required');
   if (input.attempt !== undefined && (!Number.isSafeInteger(input.attempt) || input.attempt < 0))
     throw new Error('attempt must be a whole number from the run wake');
   database = new CornerAccessDatabase(database);
-  return database.transaction(async (db) => {
+  let evidenceChanged = false;
+  const result: HandoffResult = await database.transaction(async (db) => {
     // Resolve prefixes before locking, then serialize the run's state reads
     // and writes against every other writer on the canonical ID.
     // A parent Room answer may name an exact run in one of its corners.
     // Never search other Rooms or infer which gate the person meant.
-    const child = input.runId.length === 64 ? (await db.query<{ room_id: string }>(
-      `SELECT message.room_id FROM messages message JOIN rooms room ON room.id=message.room_id
+    const child =
+      input.runId.length === 64
+        ? (
+            await db.query<{ room_id: string }>(
+              `SELECT message.room_id FROM messages message JOIN rooms room ON room.id=message.room_id
        WHERE message.id=$1 AND message.card_type='workflow-handoff' AND room.parent_id=$2
-         AND room.archived_at IS NULL`, [input.runId, command.room_id],
-    )).rows[0] : undefined;
+         AND room.archived_at IS NULL`,
+              [input.runId, command.room_id],
+            )
+          ).rows[0]
+        : undefined;
     if (child) command = { ...command, room_id: child.room_id };
     const scope = await openRun(db, command.room_id, input.runId);
-    if (child && scope.state?.kind !== 'gate') throw new ExpectedRefusalError('parent Room answers require a current gate');
+    if (child && scope.state?.kind !== 'gate')
+      throw new ExpectedRefusalError('parent Room answers require a current gate');
     input = { ...input, runId: scope.runId };
     const { run, stateName } = scope;
     const current = run.seq;
@@ -78,18 +113,28 @@ export async function handoff(
       attempt = current;
     }
     if (attempt !== current) {
-      return run.answers === attempt && run.outcome === input.outcome && scope.head.authorId === command.agent_id
+      return run.answers === attempt &&
+        run.outcome === input.outcome &&
+        scope.head.authorId === command.agent_id
         ? repeatedResult(scope)
         : alreadyAdvanced(scope);
     }
     const state = scope.state;
-    if (scope.ended || !state) throw new ExpectedRefusalError('this workflow run has already ended');
+    if (scope.ended || !state)
+      throw new ExpectedRefusalError('this workflow run has already ended');
     if (state.kind === 'gate') {
       const role = state.role;
       const boundAgentId = run.roleBindings[role];
       if (boundAgentId !== command.agent_id)
         throw new Error(`this workflow state is bound to the ${role} role, not you`);
-      const answer = await gateMessageAnswer(db, command, input.runId, current, state, input.outcome);
+      const answer = await gateMessageAnswer(
+        db,
+        command,
+        input.runId,
+        current,
+        state,
+        input.outcome,
+      );
       if (!answer)
         throw new Error(
           `${stateName} is a gate; a person answers it on its card in the Room, and it cannot be handed off`,
@@ -106,25 +151,34 @@ export async function handoff(
         runId: input.runId,
         state: after.stateName,
         attempt: after.run.seq,
-        ...(after.run.status === 'done' || after.run.status === 'failed' ? { status: after.run.status } : {}),
+        ...(after.run.status === 'done' || after.run.status === 'failed'
+          ? { status: after.run.status }
+          : {}),
       };
     }
     const role = (state as WorkflowHandoffState | WorkflowGateState).role;
     const boundAgentId = run.roleBindings[role];
     const on = (state as WorkflowHandoffState).on;
     const builtInBlocked =
-      input.outcome === WORKFLOW_BLOCKED_OUTCOME && isHandoffState(state) && !Object.hasOwn(on, WORKFLOW_BLOCKED_OUTCOME);
+      input.outcome === WORKFLOW_BLOCKED_OUTCOME &&
+      isHandoffState(state) &&
+      !Object.hasOwn(on, WORKFLOW_BLOCKED_OUTCOME);
     if (builtInBlocked) {
-      const reason = input.contents && typeof input.contents === 'object' && !Array.isArray(input.contents)
-        ? (input.contents as Record<string, unknown>).reason
-        : undefined;
+      const reason =
+        input.contents && typeof input.contents === 'object' && !Array.isArray(input.contents)
+          ? (input.contents as Record<string, unknown>).reason
+          : undefined;
       const errors = [
-        ...(boundAgentId !== command.agent_id ? [`this workflow state is bound to the ${role} role, not you`] : []),
+        ...(boundAgentId !== command.agent_id
+          ? [`this workflow state is bound to the ${role} role, not you`]
+          : []),
         ...(typeof reason !== 'string' || !reason.trim() || reason.length > 500
-          ? ['blocked needs contents.reason: why you cannot do this step, 1-500 characters'] : []),
+          ? ['blocked needs contents.reason: why you cannot do this step, 1-500 characters']
+          : []),
       ];
       if (errors.length) throw new ExpectedRefusalError(errors.join('; '));
-      if (!await claimRun(db, scope)) return alreadyAdvanced(await openRun(db, command.room_id, input.runId));
+      if (!(await claimRun(db, scope)))
+        return alreadyAdvanced(await openRun(db, command.room_id, input.runId));
       await bindWorkflowStepOutput(db, command, input.runId);
       const why = `${(reason as string).replace(/\s+/g, ' ').trim().slice(0, 200)}`;
       const result = await failOver(db, scope, {
@@ -134,42 +188,80 @@ export async function handoff(
       });
       return { runId: input.runId, ...result };
     }
-    const declaredTimeout = isHandoffState(state) && input.outcome === 'timeout' && Object.hasOwn(on, 'timeout');
-    const contentsState = declaredTimeout ? { requires: ['reason'] } : state as WorkflowHandoffState;
+    const declaredTimeout =
+      isHandoffState(state) && input.outcome === 'timeout' && Object.hasOwn(on, 'timeout');
+    const contentsState = declaredTimeout
+      ? { requires: ['reason'] }
+      : (state as WorkflowHandoffState);
     const contentsError = workflowContentsError(contentsState, input.contents);
-    const timeoutReason = declaredTimeout && input.contents && typeof input.contents === 'object'
-      ? (input.contents as Record<string, unknown>).reason : undefined;
-    const timeoutError = declaredTimeout &&
+    const timeoutReason =
+      declaredTimeout && input.contents && typeof input.contents === 'object'
+        ? (input.contents as Record<string, unknown>).reason
+        : undefined;
+    const timeoutError =
+      declaredTimeout &&
       (typeof timeoutReason !== 'string' || !timeoutReason.trim() || timeoutReason.length > 500)
-      ? 'timeout needs contents.reason: why this step timed out, 1-500 characters' : undefined;
+        ? 'timeout needs contents.reason: why this step timed out, 1-500 characters'
+        : undefined;
     const receiptError = workflowReceiptError(input.receipt);
     const errors = [
-      ...(boundAgentId !== command.agent_id ? [`this workflow state is bound to the ${role} role, not you`] : []),
+      ...(boundAgentId !== command.agent_id
+        ? [`this workflow state is bound to the ${role} role, not you`]
+        : []),
       ...(!Object.hasOwn(on, input.outcome) ? ['invalid outcome'] : []),
       ...(contentsError ? [contentsError] : []),
       ...(contentsError?.startsWith('contents')
         ? contentsState.requires
-            .filter((field) => !input.contents || typeof input.contents !== 'object' || Array.isArray(input.contents) ||
-              (input.contents as Record<string, unknown>)[field] == null)
-            .map((field) => `${field} is required`) : []),
+            .filter(
+              (field) =>
+                !input.contents ||
+                typeof input.contents !== 'object' ||
+                Array.isArray(input.contents) ||
+                (input.contents as Record<string, unknown>)[field] == null,
+            )
+            .map((field) => `${field} is required`)
+        : []),
       ...(timeoutError ? [timeoutError] : []),
       ...(receiptError ? [receiptError] : []),
     ];
     if (errors.length) {
-      const outcomes = Object.entries(on).map(([outcome, target]) => `${outcome} -> ${target}`).join(', ');
-      const blocked = isHandoffState(state) && !Object.hasOwn(on, WORKFLOW_BLOCKED_OUTCOME)
-        ? ', or blocked with contents.reason' : '';
-      throw new ExpectedRefusalError(`${errors.join('; ')}; outcome must be one of: ${outcomes}${blocked}`);
+      const outcomes = Object.entries(on)
+        .map(([outcome, target]) => `${outcome} -> ${target}`)
+        .join(', ');
+      const blocked =
+        isHandoffState(state) && !Object.hasOwn(on, WORKFLOW_BLOCKED_OUTCOME)
+          ? ', or blocked with contents.reason'
+          : '';
+      throw new ExpectedRefusalError(
+        `${errors.join('; ')}; outcome must be one of: ${outcomes}${blocked}`,
+      );
     }
-    if (!await claimRun(db, scope)) return alreadyAdvanced(await openRun(db, command.room_id, input.runId));
-    if (scope.contract.name === 'feedback-triage' && stateName === 'pull' && contentsState.requires.includes('dispositions') && ['ranked', 'nothing_new'].includes(input.outcome)) {
-      await applyFeedbackDispositions(db, command, (input.contents as Record<string, unknown>).dispositions);
+    if (!(await claimRun(db, scope)))
+      return alreadyAdvanced(await openRun(db, command.room_id, input.runId));
+    // A team-saved triage contract may not list dispositions; any it sends are still saved.
+    const dispositions = (input.contents as Record<string, unknown> | undefined)?.dispositions;
+    if (
+      scope.contract.name === 'feedback-triage' &&
+      stateName === 'pull' &&
+      ['ranked', 'nothing_new'].includes(input.outcome) &&
+      (contentsState.requires.includes('dispositions') || dispositions !== undefined)
+    ) {
+      evidenceChanged = await applyFeedbackDispositions(db, command, dispositions);
     }
-    if (scope.contract.name === 'workspace-walk' && stateName === 'browse' && input.outcome === 'reviewed') {
-      await completeServiceReview(db,command.agent_id,input.runId,(input.contents as Record<string, unknown>).receipts);
+    if (
+      scope.contract.name === 'workspace-walk' &&
+      stateName === 'browse' &&
+      input.outcome === 'reviewed'
+    ) {
+      await completeServiceReview(
+        db,
+        command.agent_id,
+        input.runId,
+        (input.contents as Record<string, unknown>).receipts,
+      );
     }
     await bindWorkflowStepOutput(db, command, input.runId);
-    const actor = await loadIdentityRow(db, command.agent_id,command.room_id);
+    const actor = await loadIdentityRow(db, command.agent_id, command.room_id);
     const result = await enterState(db, scope, {
       outcome: input.outcome,
       contents: input.contents,
@@ -179,15 +271,21 @@ export async function handoff(
       line: (toState) => ({
         authorId: command.agent_id,
         subject: identitySubject(actor),
-        verb: systemMessage("workflow-runs.handed-off"),
+        verb: systemMessage('workflow-runs.handed-off'),
         object: toState,
-        consequence: systemMessage("workflow-runs.run-of", shortRunId(input.runId), run.workflowSlug),
+        consequence: systemMessage(
+          'workflow-runs.run-of',
+          shortRunId(input.runId),
+          run.workflowSlug,
+        ),
       }),
     });
     return { runId: input.runId, ...result };
   });
+  if (evidenceChanged && feedback)
+    runAfterCommit(afterCommit, database, (db) => reconcileFeedbackShipped(db, feedback));
+  return result;
 }
-
 
 /**
  * The person's message that started this turn, resolved to the gate's own
@@ -229,12 +327,13 @@ export async function gateMessageAnswer(
   if (!choice) return undefined;
   const option = choice.options.find((entry) => entry.label === outcome);
   if (!option) {
-    const outcomes = Object.entries(state.on).map(([name, target]) => `${name} -> ${target}`).join(', ');
+    const outcomes = Object.entries(state.on)
+      .map(([name, target]) => `${name} -> ${target}`)
+      .join(', ');
     throw new Error(`outcome must be one of: ${outcomes}`);
   }
   return { choiceId: choice.id, viewerId: author.id, optionId: option.optionId };
 }
-
 
 /**
  * A person's answer or Skip on a workflow gate's card, applied under the run
@@ -245,7 +344,15 @@ export async function gateMessageAnswer(
  */
 export async function settleWorkflowGate(
   db: SqlDatabase,
-  input: { choiceId: string; viewerId: string; optionId?: string; note?: unknown; skip?: boolean; sourceMessageId?: string; outputCommand?: CommandRow },
+  input: {
+    choiceId: string;
+    viewerId: string;
+    optionId?: string;
+    note?: unknown;
+    skip?: boolean;
+    sourceMessageId?: string;
+    outputCommand?: CommandRow;
+  },
 ): Promise<{ choiceId: string; status: 'answered' | 'skipped'; roomId: string } | undefined> {
   const gate = (
     await db.query<{
@@ -264,8 +371,10 @@ export async function settleWorkflowGate(
   const scope = await openRun(db, gate.room_id, gate.run_id);
   const state = scope.state;
   if (
-    scope.ended || state?.kind !== 'gate' ||
-    (gate.attempt === null || Number(gate.attempt) !== scope.run.seq)
+    scope.ended ||
+    state?.kind !== 'gate' ||
+    gate.attempt === null ||
+    Number(gate.attempt) !== scope.run.seq
   )
     throw new Error('choice conflict: this gate already advanced');
   if (input.skip && !state.default) throw new Error('this gate needs an answer');
@@ -273,17 +382,30 @@ export async function settleWorkflowGate(
     ? state.default!
     : gate.options.find((option) => option.optionId === input.optionId)?.label;
   if (!label || !Object.hasOwn(state.on, label)) throw new Error('choice option is invalid');
-  if (!await claimRun(db, scope)) throw new CommandRefusalError('choice conflict: this gate already advanced',409);
-  if (input.outputCommand) await bindWorkflowStepOutput(db,input.outputCommand,scope.runId);
+  if (!(await claimRun(db, scope)))
+    throw new CommandRefusalError('choice conflict: this gate already advanced', 409);
+  if (input.outputCommand) await bindWorkflowStepOutput(db, input.outputCommand, scope.runId);
   const settled = input.skip
-    ? await skipRoomChoice(db, { choiceId: input.choiceId, viewerId: input.viewerId }, { wake: false })
+    ? await skipRoomChoice(
+        db,
+        { choiceId: input.choiceId, viewerId: input.viewerId },
+        { wake: false },
+      )
     : await answerRoomChoice(
         db,
-        { choiceId: input.choiceId, optionId: input.optionId!, viewerId: input.viewerId, note: input.note },
+        {
+          choiceId: input.choiceId,
+          optionId: input.optionId!,
+          viewerId: input.viewerId,
+          note: input.note,
+        },
         { wake: false },
       );
-  const viewer = await loadIdentityRow(db, input.viewerId,scope.roomId);
-  const note = typeof input.note === 'string' && input.note.trim() ? input.note.replace(/\s+/g, ' ').trim() : undefined;
+  const viewer = await loadIdentityRow(db, input.viewerId, scope.roomId);
+  const note =
+    typeof input.note === 'string' && input.note.trim()
+      ? input.note.replace(/\s+/g, ' ').trim()
+      : undefined;
   await enterState(db, scope, {
     outcome: label,
     contents: input.skip
@@ -294,21 +416,46 @@ export async function settleWorkflowGate(
     line: (toState) => ({
       authorId: input.viewerId,
       subject: identitySubject(viewer),
-      verb: input.skip ? systemMessage("workflow-runs.skipped") : input.sourceMessageId ? systemMessage("workflow-runs.answered") : systemMessage("workflow-runs.picked"),
+      verb: input.skip
+        ? systemMessage('workflow-runs.skipped')
+        : input.sourceMessageId
+          ? systemMessage('workflow-runs.answered')
+          : systemMessage('workflow-runs.picked'),
       object: input.skip ? scope.stateName : label,
       consequence: input.skip
-        ? systemMessage("workflow-runs.so-applied-and-run-went-to", label, shortRunId(scope.runId), toState)
+        ? systemMessage(
+            'workflow-runs.so-applied-and-run-went-to',
+            label,
+            shortRunId(scope.runId),
+            toState,
+          )
         : input.sourceMessageId
-          ? systemMessage("workflow-runs.by-message-at-so-run-went-to", scope.stateName, shortRunId(scope.runId), toState)
-          : systemMessage("workflow-runs.at-so-run-went-to", scope.stateName, shortRunId(scope.runId), toState),
+          ? systemMessage(
+              'workflow-runs.by-message-at-so-run-went-to',
+              scope.stateName,
+              shortRunId(scope.runId),
+              toState,
+            )
+          : systemMessage(
+              'workflow-runs.at-so-run-went-to',
+              scope.stateName,
+              shortRunId(scope.runId),
+              toState,
+            ),
     }),
   });
-  return { choiceId: settled.choiceId, status: input.skip ? 'skipped' : 'answered', roomId: settled.roomId };
+  return {
+    choiceId: settled.choiceId,
+    status: input.skip ? 'skipped' : 'answered',
+    roomId: settled.roomId,
+  };
 }
 
-
 /** A closing corner abandons every live saved run inside it. Call within the close transaction. */
-export async function abandonCornerWorkflowRuns(db: SqlDatabase, cornerId: string): Promise<number> {
+export async function abandonCornerWorkflowRuns(
+  db: SqlDatabase,
+  cornerId: string,
+): Promise<number> {
   const live = await db.query<{ id: string }>(
     `SELECT id FROM messages
      WHERE room_id=$1 AND card_type='workflow-handoff' AND ${workflowRunIsLiveSql('card')}
@@ -325,17 +472,23 @@ export async function abandonCornerWorkflowRuns(db: SqlDatabase, cornerId: strin
       reason: 'corner closed',
       line: {
         authorId: SYSTEM_IDENTITY_ID,
-        subject: { kind: 'system', name: systemMessage("workflow-runs.the-workflow") },
-        verb: systemMessage("workflow-runs.closed"),
-        object: systemMessage("workflow-runs.run-of", shortRunId(scope.runId), scope.run.workflowSlug),
-        consequence: systemMessage("workflow-runs.as-abandoned-at-because-its-corner-closed", scope.stateName),
+        subject: { kind: 'system', name: systemMessage('workflow-runs.the-workflow') },
+        verb: systemMessage('workflow-runs.closed'),
+        object: systemMessage(
+          'workflow-runs.run-of',
+          shortRunId(scope.runId),
+          scope.run.workflowSlug,
+        ),
+        consequence: systemMessage(
+          'workflow-runs.as-abandoned-at-because-its-corner-closed',
+          scope.stateName,
+        ),
       },
     });
     if (closed) abandoned += 1;
   }
   return abandoned;
 }
-
 
 /** The live run of `workflowName` in this Room, if one exists. */
 export async function liveWorkflowRun(
@@ -354,13 +507,15 @@ export async function liveWorkflowRun(
   ).rows[0];
   if (!active) return undefined;
   const run = await loadRun(db, roomId, active.id);
-  return { runId: active.id, state: run?.toState ?? systemMessage("workflow-runs.unknown"), status: run?.status ?? systemMessage("workflow-runs.live"), startedAt: active.created_at };
+  return {
+    runId: active.id,
+    state: run?.toState ?? systemMessage('workflow-runs.unknown'),
+    status: run?.status ?? systemMessage('workflow-runs.live'),
+    startedAt: active.created_at,
+  };
 }
 
-
 /** Serializes starts of one workflow in one Room, so the live-run check and the start card commit together. */
-
-
 
 export async function saveWorkflow(
   database: SqlDatabase,
@@ -368,7 +523,7 @@ export async function saveWorkflow(
   input: { contract: unknown },
   afterCommit?: AfterCommit,
 ): Promise<{ slug: string; version: number }> {
-    database = new CornerAccessDatabase(database);
+  database = new CornerAccessDatabase(database);
   const reason = validateSavedWorkflow(input.contract);
   if (reason !== null) throw new Error(`workflow contract is invalid: ${reason}`);
   const contract = input.contract as WorkflowContract;
@@ -380,57 +535,78 @@ export async function saveWorkflow(
   if (!room) throw new Error('workflow room not found');
   const markdown = JSON.stringify(contract);
   assertSkillTextSafe(contract.description, markdown);
-  return database.transaction(async (db) => {
-    const member = await db.query(
-      `SELECT 1 FROM identities identity JOIN memberships member ON member.identity_id=identity.id
+  return database
+    .transaction(async (db) => {
+      const member = await db.query(
+        `SELECT 1 FROM identities identity JOIN memberships member ON member.identity_id=identity.id
     WHERE identity.id=$1 AND identity.kind='agent' AND member.room_id=$2 AND member.removed_at IS NULL`,
-      [command.agent_id, command.room_id],
-    );
-    if (!member.rowCount)
-      throw new Error('workflow saver must be a current agent member of this Room');
-    // New slugs are open to Room agents; changing an existing workflow
-    // requires a human admin. The save compares the version read here.
-    const existing = (await db.query<{ unchanged: boolean; current_version: number }>(
-      `SELECT skill.state='active' AND version.markdown=$3 unchanged,skill.current_version
+        [command.agent_id, command.room_id],
+      );
+      if (!member.rowCount)
+        throw new Error('workflow saver must be a current agent member of this Room');
+      // New slugs are open to Room agents; changing an existing workflow
+      // requires a human admin. The save compares the version read here.
+      const existing = (
+        await db.query<{ unchanged: boolean; current_version: number }>(
+          `SELECT skill.state='active' AND version.markdown=$3 unchanged,skill.current_version
        FROM workspace_skills skill
        LEFT JOIN workspace_skill_versions version ON version.skill_id=skill.id
          AND version.version=skill.current_version
        WHERE skill.workspace_id=$1 AND skill.slug=$2 AND skill.kind='workflow'`,
-      [room.workspace_id, contract.name, markdown],
-    )).rows[0];
-    if (existing?.unchanged) return { slug: contract.name, version: existing.current_version };
-    if (existing && !(await humanRoomAdmin(db, command.room_id, await workflowRequester(db, command))))
-      throw new WorkflowAuthorizationError('workspace admins only: only a workspace admin can change this saved workflow', 403);
-    const { version } = await applySkillRevision(
-      db,
-      {
-        workspaceId: room.workspace_id,
-        sourceRoomId: command.room_id,
-        slug: contract.name,
-        description: contract.description,
-        markdown,
-        kind: 'workflow',
-        sourceMessageIds: [command.root_source_message_id],
-        baseVersion: existing?.current_version ?? null,
-      },
-      afterCommit,
-    );
-    return { slug: contract.name, version };
-  }).catch(async (error: unknown) => {
-    if (!(error instanceof SkillRevisionConflict)) throw error;
-    const current = (await database.query<{ current_version: number; unchanged: boolean }>(
-      `SELECT skill.current_version,skill.state='active' AND version.markdown=$3 unchanged
+          [room.workspace_id, contract.name, markdown],
+        )
+      ).rows[0];
+      if (existing?.unchanged) return { slug: contract.name, version: existing.current_version };
+      if (
+        existing &&
+        !(await humanRoomAdmin(db, command.room_id, await workflowRequester(db, command)))
+      )
+        throw new WorkflowAuthorizationError(
+          'workspace admins only: only a workspace admin can change this saved workflow',
+          403,
+        );
+      const { version } = await applySkillRevision(
+        db,
+        {
+          workspaceId: room.workspace_id,
+          sourceRoomId: command.room_id,
+          slug: contract.name,
+          description: contract.description,
+          markdown,
+          kind: 'workflow',
+          sourceMessageIds: [command.root_source_message_id],
+          baseVersion: existing?.current_version ?? null,
+        },
+        afterCommit,
+      );
+      return { slug: contract.name, version };
+    })
+    .catch(async (error: unknown) => {
+      if (!(error instanceof SkillRevisionConflict)) throw error;
+      const current = (
+        await database.query<{ current_version: number; unchanged: boolean }>(
+          `SELECT skill.current_version,skill.state='active' AND version.markdown=$3 unchanged
        FROM workspace_skills skill JOIN workspace_skill_versions version
          ON version.skill_id=skill.id AND version.version=skill.current_version
        WHERE skill.workspace_id=$1 AND skill.slug=$2 AND skill.kind='workflow'`,
-      [room.workspace_id, contract.name, markdown])).rows[0];
-    if (current?.unchanged) return { slug: contract.name, version: current.current_version };
-    if (!(await humanRoomAdmin(database, command.room_id, await workflowRequester(database, command))))
-      throw new WorkflowAuthorizationError('workspace admins only: only a workspace admin can change this saved workflow', 403);
-    throw new CommandRefusalError('saved workflow changed; no revision was written', 409);
-  });
+          [room.workspace_id, contract.name, markdown],
+        )
+      ).rows[0];
+      if (current?.unchanged) return { slug: contract.name, version: current.current_version };
+      if (
+        !(await humanRoomAdmin(
+          database,
+          command.room_id,
+          await workflowRequester(database, command),
+        ))
+      )
+        throw new WorkflowAuthorizationError(
+          'workspace admins only: only a workspace admin can change this saved workflow',
+          403,
+        );
+      throw new CommandRefusalError('saved workflow changed; no revision was written', 409);
+    });
 }
-
 
 /** One agent id, or 1-WORKFLOW_ROLE_AGENTS_MAX distinct agent ids in order; `null` for anything else. */
 export function roleAgentList(binding: WorkflowRoleBinding): string[] | null {
@@ -440,7 +616,6 @@ export function roleAgentList(binding: WorkflowRoleBinding): string[] | null {
   if (!binding.every(isAgentIdentityReference)) return null;
   return new Set(binding).size === binding.length ? [...binding] : null;
 }
-
 
 /** The schedule occurrence (if any) whose wake message triggered this call. */
 export async function scheduleTriggerPeriod(
@@ -454,12 +629,14 @@ export async function scheduleTriggerPeriod(
     )
   ).rows[0];
   if (row) return { scheduleId: row.schedule_id, period: row.scheduled_for.toISOString() };
-  const wake = (await db.query<{ trigger: { scheduleId: string; period: string } | null }>(
-    `SELECT card->'trigger' trigger FROM messages WHERE id=$1`, [sourceMessageId],
-  )).rows[0];
+  const wake = (
+    await db.query<{ trigger: { scheduleId: string; period: string } | null }>(
+      `SELECT card->'trigger' trigger FROM messages WHERE id=$1`,
+      [sourceMessageId],
+    )
+  ).rows[0];
   return wake?.trigger?.scheduleId && wake.trigger.period ? wake.trigger : undefined;
 }
-
 
 /** Every still-active run id this schedule has ever started (any workflow), for `list_schedules`. */
 export async function activeRunIdsForSchedule(
@@ -477,7 +654,6 @@ export async function activeRunIdsForSchedule(
   return active.rows.map((row) => row.id);
 }
 
-
 /** Collect caller errors before constructing the unchanged workflow start card. */
 export async function validateWorkflowBindings(
   db: SqlDatabase,
@@ -485,34 +661,52 @@ export async function validateWorkflowBindings(
   contract: WorkflowReadContract,
   input: { roleBindings: Readonly<Record<string, WorkflowRoleBinding>> },
 ): Promise<void> {
-  const members = (await db.query<{ identity_id: string; handle: string | null; kind: string }>(
-    `SELECT member.identity_id,beeline_workspace_handle(identity.id,member.workspace_id) handle,identity.kind FROM room_access member
+  const members = (
+    await db.query<{ identity_id: string; handle: string | null; kind: string }>(
+      `SELECT member.identity_id,beeline_workspace_handle(identity.id,member.workspace_id) handle,identity.kind FROM room_access member
      JOIN identities identity ON identity.id=member.identity_id
-     WHERE member.room_id=$1 AND member.removed_at IS NULL`, [roomId],
-  )).rows;
-  const agentMembers = members.filter(member => member.kind === 'agent');
-  const allowed = agentMembers.map(member => member.handle ? `@${member.handle} (${member.identity_id})` : member.identity_id);
-  const memberIds = new Set(agentMembers.map(member => member.identity_id));
+     WHERE member.room_id=$1 AND member.removed_at IS NULL`,
+      [roomId],
+    )
+  ).rows;
+  const agentMembers = members.filter((member) => member.kind === 'agent');
+  const allowed = agentMembers.map((member) =>
+    member.handle ? `@${member.handle} (${member.identity_id})` : member.identity_id,
+  );
+  const memberIds = new Set(agentMembers.map((member) => member.identity_id));
   const errors: string[] = [];
   for (const role of contract.roles) {
     const raw = input.roleBindings[role];
     const entries = typeof raw === 'string' ? [raw] : Array.isArray(raw) ? raw : [];
-    const resolved = entries.map(entry => {
+    const resolved = entries.map((entry) => {
       if (typeof entry !== 'string') return entry;
-      return members.find(member => member.handle?.toLowerCase() === entry.replace(/^@/, '').toLowerCase())?.identity_id ?? entry;
+      return (
+        members.find(
+          (member) => member.handle?.toLowerCase() === entry.replace(/^@/, '').toLowerCase(),
+        )?.identity_id ?? entry
+      );
     });
     const agents = roleAgentList(resolved.length === 1 ? resolved[0] : resolved);
-    if (!agents || agents.some(id => !memberIds.has(id))) {
-      const outsiders = agents?.filter(id => !memberIds.has(id)) ?? [];
-      const reason = raw === undefined ? `role binding is missing for ${role}` : outsiders.length
-        ? `${outsiders.join(', ')} ${outsiders.length === 1 ? 'is' : 'are'} not a current agent member of this Room`
-        : `must be an agent id or a member handle, or a list of 1-${WORKFLOW_ROLE_AGENTS_MAX} distinct ones`;
-      errors.push(`${role}: given ${JSON.stringify(raw) ?? 'missing'}; ${reason}; allowed members: ${allowed.join(', ') || '(none)'}`);
+    if (!agents || agents.some((id) => !memberIds.has(id))) {
+      const outsiders = agents?.filter((id) => !memberIds.has(id)) ?? [];
+      const reason =
+        raw === undefined
+          ? `role binding is missing for ${role}`
+          : outsiders.length
+            ? `${outsiders.join(', ')} ${outsiders.length === 1 ? 'is' : 'are'} not a current agent member of this Room`
+            : `must be an agent id or a member handle, or a list of 1-${WORKFLOW_ROLE_AGENTS_MAX} distinct ones`;
+      errors.push(
+        `${role}: given ${JSON.stringify(raw) ?? 'missing'}; ${reason}; allowed members: ${allowed.join(', ') || '(none)'}`,
+      );
       continue;
     }
   }
   for (const role of Object.keys(input.roleBindings)) {
-    if (!contract.roles.includes(role)) errors.push(`${role}: given ${JSON.stringify(input.roleBindings[role])}; unknown role; allowed roles: ${contract.roles.join(', ')}`);
+    if (!contract.roles.includes(role))
+      errors.push(
+        `${role}: given ${JSON.stringify(input.roleBindings[role])}; unknown role; allowed roles: ${contract.roles.join(', ')}`,
+      );
   }
-  if (errors.length) throw new CommandRefusalError(`Invalid workflow bindings:\n${errors.join('\n')}`, 400);
+  if (errors.length)
+    throw new CommandRefusalError(`Invalid workflow bindings:\n${errors.join('\n')}`, 400);
 }

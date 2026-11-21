@@ -146,6 +146,8 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
           ctx.database,
           ctx.authorizedCommand,
           input as Input<'handoff'>,
+          ctx.feedback,
+          ctx.afterCommit,
         )) as Output<Name>;
       case 'archiveWorkflow':
         if (!ctx.commandTransaction || !ctx.authorizedCommand) {
@@ -872,6 +874,7 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
           ctx.authorizedCommand,
           authenticatedAgentId,
           input as Input<'notifyFeedbackFixed'>,
+          ctx.afterCommit,
         )) as Output<Name>;
       default:
         throw new CommandRefusalError(`unsupported daemon operation: ${String(name)}; use message and reply`, 410);

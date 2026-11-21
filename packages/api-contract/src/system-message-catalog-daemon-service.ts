@@ -68,38 +68,38 @@ export const SYSTEM_MESSAGE_DAEMON_SERVICE = {
   },
 
   'daemon-service.wants-to': {
-    parts: ["wants to"],
+    parts: ['wants to'],
     variables: [],
   },
 
   'daemon-service.run': {
-    parts: ["run"],
+    parts: ['run'],
     variables: [],
   },
 
   'daemon-service.edit': {
-    parts: ["edit"],
+    parts: ['edit'],
     variables: [],
   },
 
   'daemon-service.reach': {
-    parts: ["reach"],
+    parts: ['reach'],
     variables: [],
   },
 
   'daemon-service.spend': {
-    parts: ["spend"],
+    parts: ['spend'],
     variables: [],
   },
 
   'daemon-service.connect-app': {
-    parts: ["connect ", ""],
-    variables: ["app"],
+    parts: ['connect ', ''],
+    variables: ['app'],
   },
 
   'daemon-service.grant-action': {
-    parts: ["", " ", ""],
-    variables: ["verb", "target"],
+    parts: ['', ' ', ''],
+    variables: ['verb', 'target'],
   },
 
   'daemon-service.read': {
@@ -125,6 +125,11 @@ export const SYSTEM_MESSAGE_DAEMON_SERVICE = {
   'feedback.fixed': {
     parts: ['Fixed: ', ' ', ''],
     variables: ['title', 'url'],
+  },
+
+  'feedback.shipped': {
+    parts: ['Fixed in ', ': ', ''],
+    variables: ['release', 'url'],
   },
 
   'first-party-integrations.a-member': {
@@ -158,11 +163,20 @@ export const SYSTEM_MESSAGE_DAEMON_SERVICE = {
   },
 
   'github-operations.commit-pushed': { parts: ['1 commit pushed · ', ''], variables: ['sha7'] },
-  'github-operations.commits-pushed': { parts: ['', ' commits pushed · ', ''], variables: ['count', 'sha7'] },
-  'github-operations.check-failed': { parts: ['Check failed · ', ' · ', ''], variables: ['name', 'sha7'] },
+  'github-operations.commits-pushed': {
+    parts: ['', ' commits pushed · ', ''],
+    variables: ['count', 'sha7'],
+  },
+  'github-operations.check-failed': {
+    parts: ['Check failed · ', ' · ', ''],
+    variables: ['name', 'sha7'],
+  },
   'github-operations.checks-passed': { parts: ['Checks passed · ', ''], variables: ['sha7'] },
   'github-operations.merge-conflict': { parts: ['1 merge conflict'], variables: [] },
-  'github-operations.review-requested': { parts: ['Review requested · ', ''], variables: ['reviewer'] },
+  'github-operations.review-requested': {
+    parts: ['Review requested · ', ''],
+    variables: ['reviewer'],
+  },
 
   'membership-join.joined': {
     parts: ['joined'],
@@ -322,8 +336,6 @@ export const SYSTEM_MESSAGE_DAEMON_SERVICE = {
     parts: ['The request can continue.'],
     variables: [],
   },
-
-
 
   'provider-webhooks.beeline': {
     parts: ['Beeline'],

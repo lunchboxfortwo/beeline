@@ -52,6 +52,7 @@ export let merged: Set<number>;
 
 const pullRequests: FeedbackPullRequests = {
   merged: async (repository, number) => repository === REPOSITORY && merged.has(number),
+  shipped: async (repository, number) => repository === REPOSITORY && merged.has(number),
 };
 
 

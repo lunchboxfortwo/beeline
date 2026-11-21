@@ -266,6 +266,33 @@ describe('feedback-triage workflow', () => {
     expect(start.card.runStatus).toBe('done');
   });
 
+  it('Reproduction TEAM-CONTRACT-DISPOSITIONS: saves assessments sent on a team-saved contract that does not require them', async () => {
+    await database.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES('team-start',$1,$2,'Start triage')`,
+      [TRIAGE_CORNER, CREATOR]);
+    const turn = cornerTurn('team-start');
+    // Production's team-saved copy: pull requires problems only.
+    const handoffs = FEEDBACK_TRIAGE_CONTRACT.handoffs as Record<string, Record<string, unknown>>;
+    const teamContract = { ...FEEDBACK_TRIAGE_CONTRACT, handoffs: { ...handoffs, pull: { ...handoffs.pull, requires: ['problems'] } } };
+    await saveWorkflow(database, turn, { contract: teamContract });
+    const {runId} = await startWorkflow(database, turn, {name:'feedback-triage',roleBindings:{triager:TRIAGER}});
+    await handoff(database, turn, {runId, outcome:'notified', contents:{fixedPullRequests:[],skipReason:'none',unnotifiedPullRequests:[]}});
+    await handoff(database, turn, {runId, attempt:1, outcome:'checked', contents:{signalChecks:[]}});
+    for (const id of ['tracked', 'noise'])
+      await database.query(`INSERT INTO feedback_items(id,source_kind,reporter_identity_id,workspace_id,room_id,category,summary,summary_key)
+        VALUES($1,'agent',$2,$3,$4,'bug',$1,$1)`, [id,TRIAGER,WORKSPACE,ROOM]);
+    await handoff(database, turn, {runId, attempt:2, outcome:'ranked', contents:{problems:[],dispositions:[
+      {itemId:'tracked',disposition:'linked',reference:'https://github.com/lunchboxfortwo/beeline/pull/9',reason:'Fix in review'},
+      {itemId:'noise',disposition:'dismissed',reason:'Expected cancellation'},
+    ]}});
+    const rows = (
+      await database.query<{ id: string; status: string; triaged_at: Date | null }>(
+        'SELECT id,status,triaged_at FROM feedback_items ORDER BY id',
+      )
+    ).rows;
+    expect(rows.map(({id,status}) => ({id,status}))).toEqual([{id:'noise',status:'dismissed'},{id:'tracked',status:'attached'}]);
+    expect(rows.every(row => row.triaged_at)).toBe(true);
+  });
+
   it.each(['agent', 'human'].flatMap(canonicalKind => ['agent', 'human'].flatMap(duplicateKind =>
     ['v0.1.94', 'v0.1.90'].map(duplicateVersion => ({ canonicalKind, duplicateKind, duplicateVersion })))))
   ('Reproduction MERGE-RANKING: retains $duplicateKind $duplicateVersion evidence on a $canonicalKind canonical report', async ({canonicalKind,duplicateKind,duplicateVersion}) => {
