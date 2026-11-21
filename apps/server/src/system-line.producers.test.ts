@@ -315,6 +315,46 @@ describe('system-line producers', () => {
     }
   });
 
+  it('posts one yolo line in each live Room the agent is in', async () => {
+    const database = await fixture();
+    try {
+      const second = '33333333-3333-4333-8333-333333333333';
+      const archived = '44444444-4444-4444-8444-444444444444';
+      const without = '55555555-5555-4555-8555-555555555555';
+      await database.query(
+        `INSERT INTO rooms(id,workspace_id,created_by,name,archived_at) VALUES
+          ($1,$4,$5,'Second',NULL),($2,$4,$5,'Archived',now()),($3,$4,$5,'Without',NULL)`,
+        [second, archived, without, WORKSPACE, OWNER],
+      );
+      await database.query(
+        `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES
+          ($1,$2,$4,'owner'),($1,$2,$5,'member'),($1,$3,$4,'owner'),($1,$3,$5,'member'),($1,$6,$4,'owner')`,
+        [WORKSPACE, second, archived, OWNER, AGENT, without],
+      );
+      await database.query(`UPDATE agents SET yolo_mode=false WHERE agent_id=$1`, [AGENT]);
+      const phone = new PhoneService(database, 'http://local.test');
+      await phone.execute(
+        'updateAgentYolo',
+        { workspaceId: WORKSPACE, agentId: AGENT, enabled: true },
+        OWNER,
+      );
+      const receipt = {
+        author_id: OWNER,
+        text: '@owner turned yolo on for @bee · grant requests are now approved automatically',
+        presentation: 'system',
+        woke: [],
+        card_type: 'agent-yolo',
+        system_event: expect.objectContaining({ object: { text: '@bee', id: AGENT } }),
+      };
+      expect(await lines(database)).toEqual([receipt]);
+      expect(await lines(database, second)).toEqual([receipt]);
+      expect(await lines(database, archived)).toEqual([]);
+      expect(await lines(database, without)).toEqual([]);
+    } finally {
+      await database.close();
+    }
+  });
+
   it('silently retains model, role, and visibility changes', async () => {
     const database = await fixture();
     try {

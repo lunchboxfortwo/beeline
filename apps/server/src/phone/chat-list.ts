@@ -91,11 +91,14 @@ import { turnRootMessageSql } from '../agent-command.js';
           'bookmarked',EXISTS(SELECT 1 FROM message_bookmarks bookmark WHERE bookmark.message_id=lm.id AND bookmark.identity_id=$2),
           'feedback_reported',EXISTS(SELECT 1 FROM feedback_items report WHERE report.trigger_message_id=lm.id AND report.source_kind='human')
         ) END latest_row,
-        COALESCE((SELECT jsonb_agg(to_jsonb(turn) || jsonb_build_object('requested_by',requester.id)) FROM (
-          SELECT DISTINCT ON(agent_id) * FROM agent_turns
+        COALESCE((SELECT jsonb_agg(to_jsonb(turn) || jsonb_build_object('requested_by',requester.id) ORDER BY turn.agent_id) FROM (
+          -- Rank keys from the index; read only each agent's newest row.
+          SELECT DISTINCT ON(agent_id) agent_id,request_id FROM agent_turns
           WHERE room_id=r.id AND (status<>'working' OR ${workingTurnFreshSql('agent_turns')})
           ORDER BY agent_id,(status='working') DESC,created_at DESC,request_id DESC
-        ) turn
+        ) latest
+        JOIN agent_turns turn ON turn.room_id=r.id AND turn.agent_id=latest.agent_id
+          AND turn.request_id=latest.request_id
         LEFT JOIN messages trigger ON trigger.id=${turnRootMessageSql('turn')}
         LEFT JOIN identities requester ON requester.id=trigger.author_id AND requester.kind='human'),'[]'::jsonb) turns,
         COALESCE(lm.author_id<>$2 AND ${tagsKnownIdentitySql('lm', '$2',

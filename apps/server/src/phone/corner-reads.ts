@@ -197,10 +197,13 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
              requester.id requested_by
            FROM authorized_room room
            CROSS JOIN LATERAL (
-             SELECT DISTINCT ON(agent_id) * FROM agent_turns
+             -- Rank keys from the index; read only each agent's newest row.
+             SELECT DISTINCT ON(agent_id) agent_id,request_id FROM agent_turns
              WHERE room_id=room.id AND (status<>'working' OR ${workingTurnFreshSql('agent_turns')})
              ORDER BY agent_id,(status='working') DESC,created_at DESC,request_id DESC
-           ) turn
+           ) latest
+           JOIN agent_turns turn ON turn.room_id=room.id AND turn.agent_id=latest.agent_id
+             AND turn.request_id=latest.request_id
            LEFT JOIN messages trigger ON trigger.id=${turnRootMessageSql('turn')}
            LEFT JOIN identities requester ON requester.id=trigger.author_id AND requester.kind='human'
            ORDER BY turn.agent_id
