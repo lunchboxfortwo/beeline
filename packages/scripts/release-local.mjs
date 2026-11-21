@@ -389,8 +389,8 @@ export function localHooks(directory, processes, { fullChecks = false, checksGat
           helperArm64: engine.variables.macHelperMode === 'build' ? 'built and install-verified on GitHub-hosted macos-15' : 'carried unchanged',
           helperX64: engine.variables.macHelperMode === 'build' ? 'built and install-verified on GitHub-hosted macos-15-intel' : 'carried unchanged',
           desktop: engine.variables.desktopMode !== 'build' ? 'published signed updater set carried unchanged, including Windows'
-            : WINDOWS_DESKTOP === 'build' ? 'native signed updater builds on MacBook, squire and Windows VM'
-              : 'native signed updater builds on MacBook and squire; Windows installers carried unchanged and omitted from the updater manifest' };
+            : WINDOWS_DESKTOP === 'build' ? 'native signed updater builds on a GitHub-hosted macOS runner, squire and Windows VM'
+              : 'native signed updater builds on a GitHub-hosted macOS runner and squire; Windows installers carried unchanged and omitted from the updater manifest' };
         record.delivery.localExceptions.checks = engine.variables.releaseChecks ?? (context.inputs.channel === 'latest'
           ? { retained: [], reusedFrom: 'successful next release of this commit', coverage: 'no checks run on promotion' }
           : { retained: ['build', 'typecheck', 'dead-code', 'design grammar', 'codecs'], dropped: droppedChecks(engine.read(checksWorkflow)), coverage: 'not produced by quick release checks' });
@@ -539,7 +539,7 @@ export async function runLocalRelease(args, { repository = root, secrets: provid
     console.log(`Local ${args.channel} release at ${sha}; no release commands executed.`);
     console.log(JSON.stringify(releasePlan(engine.read(WORKFLOW), engine.read(checksWorkflow), args), null, 2));
     console.log('Selected website delivery publishes static assets to Cloudflare Pages and deploys the EAS web app.');
-    console.log(`Mac helper mode: ${variables.macHelperMode}; ARM and Intel helpers build on GitHub-hosted macos-15 and macos-15-intel runners. Desktop mode: ${variables.desktopMode}; builds use MacBook, squire${WINDOWS_DESKTOP === 'build' ? ' and the Windows VM' : '; Windows is skipped and its published installers carried'}; carry retains the entire published version.`);
+    console.log(`Mac helper mode: ${variables.macHelperMode}; ARM and Intel helpers build on GitHub-hosted macos-15 and macos-15-intel runners. Desktop mode: ${variables.desktopMode}; builds use a GitHub-hosted macOS runner (mac-desktop.yml), squire${WINDOWS_DESKTOP === 'build' ? ' and the Windows VM' : '; Windows is skipped and its published installers carried'}; carry retains the entire published version.`);
     console.log(`iOS store builds use SSH on ${MAC}. Canary, helper update proof, optional device proof, rollback and finalization stay enabled. ${args.channel === 'latest' ? 'Promotion reuses the successful next verdict; no checks run.' : 'Quick checks run before next delivery.'}`);
     return;
   }

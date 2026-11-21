@@ -200,15 +200,25 @@ release carries the entire helper component.
 The desktop updater manifest has one version for all platforms. A normal
 `npm run release -- --no-store` builds the complete installer set from the
 promoted commit using `.github/workflows/desktop.yml`: universal macOS (Apple
-silicon and Intel) on `dani@macbook-pro-7`, Linux x86_64 on Squire, and Windows
+silicon and Intel) on a GitHub-hosted runner, Linux x86_64 on Squire, and Windows
 x86_64 in Chad's existing `win10` VM through SSH and QEMU Guest Agent.
+For macOS the controller dispatches `.github/workflows/mac-desktop.yml` (ref
+`main`, building the release SHA), whose job is `desktop.yml`'s
+`macos-universal` production build (a test keeps the steps identical). It signs
+with the `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD` and
+`APPLE_SIGNING_IDENTITY` repository secrets and notarizes with the existing
+`EXPO_ASC_*` secrets. The controller accepts the run only when its notarization
+and signed-verification steps succeeded, then downloads the
+`beeline-desktop-release-*-macos-universal` artifact and verifies its updater
+signature on squire. Nothing in the desktop leg reaches the Mac host.
 Windows builds use the already logged-in user's interactive Scheduled Task
 token for WiX; no new listener or login policy is provisioned. Windows uses
 the workflow's Tauri updater signing, which has no Authenticode step.
 Mac builds use Developer ID signing, DMG notarization and stapling, then the
 workflow's `codesign`, `spctl`, and `stapler` verification. Updater signatures
 are cryptographically verified before local artifacts enter finalization.
-Apple's `security`, `codesign`, `xcodebuild`, `xcrun` and Fastlane launchers
+For the iOS store build on the Mac host, Apple's `security`, `codesign`,
+`xcodebuild`, `xcrun` and Fastlane launchers
 receive the operator's real HOME through private executable adapters. Their
 native children inherit that HOME, including absolute-path Xcode tools and
 `altool`, with an explicit build/login/System keychain search list. The calling
@@ -217,8 +227,8 @@ tools also retain private cache/config paths. For iOS, the private
 provisioning-profile directory links to the operator's profile directory so
 EAS's temporary profiles and Xcode's identity discovery use the same home.
 The original keychain search list is restored after the job. Successful Mac jobs
-remove their own temporary source/tool directories after collecting local artifacts, so the
-next and latest builds fit on the laptop. Windows file transfer uses Chad's existing
+remove their own temporary source/tool directories after collecting local artifacts, so
+builds fit on the laptop. Windows file transfer uses Chad's existing
 Python libvirt bindings and guest agent, with private transport files and no new
 network listener.
 The existing workflow assigns the next desktop version, stages stable names,
@@ -247,9 +257,12 @@ node packages/scripts/release-local.mjs --dry-run --leg desktop \
 ```
 
 This reads the live desktop version, builds its successor on every enabled
-host (macOS and Linux while Windows is skipped, which carries the published
+host (macOS on GitHub and Linux on squire while Windows is skipped, which carries the published
 Windows installers instead), and writes installers, signatures, `Beeline-latest.json` and `desktop-stage.json`
-under `<state-dir>/desktop-release`. It performs no GitHub or R2 uploads.
+under `<state-dir>/desktop-release`. It performs no GitHub release or R2
+uploads; the macOS build runs as a `mac-desktop.yml` Actions run whose
+artifact expires after seven days. The controller's `GITHUB_TOKEN` needs the
+same Actions authority as the Mac helper dispatch.
 
 Local credentials come only from `~/.config/beeline-release.env` (or an explicit
 `--env-file` outside the checkout), owned by the operator with mode `600`.
@@ -317,11 +330,12 @@ and uploads each manifest after its installers, without additional retries.
 Desktop builds read the permanent updater key, password and public key from
 `/home/lunchbox/firstmate2/data/buzzy-desktop` (override with
 `BEELINE_DESKTOP_KEY_DIRECTORY` in the private release env), or the workflow's
-`TAURI_UPDATER_*` variables. They never regenerate that key. Apple signing uses
-the workflow's `APPLE_*` inputs when supplied, otherwise a temporary export of
-the existing Developer ID certificate/key in `/Users/dani/beeline-devid` on the
-MacBook; notarization uses the existing `EXPO_ASC_*` inputs. Remote desktop
-workers receive only signing inputs, never publication or deployment tokens.
+`TAURI_UPDATER_*` variables. They never regenerate that key. The GitHub macOS
+build uses the repository's `TAURI_UPDATER_*` secrets, and squire verifies its
+updater signature against the local public key. Apple signing uses the
+`APPLE_*` repository secrets and notarization the existing `EXPO_ASC_*`
+secrets, both only inside `mac-desktop.yml`. Remote desktop workers receive
+only signing inputs, never publication or deployment tokens.
 The carried desktop set requires no Apple signing or Tauri private keys.
 Keep vaulted keys vaulted; suitable provider API calls can use Squire's
 `use_credential`. A CLI requiring a raw credential needs a provider-issued

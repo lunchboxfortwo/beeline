@@ -1,0 +1,369 @@
+name: Mac desktop build
+# The squire release (packages/scripts/release-local-mac-github.mjs) dispatches
+# this for the macOS desktop installers and downloads the artifact. The job is
+# desktop.yml's macos-universal build row; a test keeps its steps identical.
+# It signs with the Developer ID secrets, notarizes, and publishes nothing.
+run-name: Mac desktop ${{ inputs.release_version }} · ${{ inputs.request_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: Only production installers are built here
+        type: choice
+        default: production
+        options:
+          - production
+      release_sha:
+        description: Release commit on main to build
+        type: string
+        required: true
+      release_version:
+        description: Release identity, vX.Y.Z-rc.N or vX.Y.Z
+        type: string
+        required: true
+      desktop_version:
+        description: Independent monotonic desktop updater version
+        type: string
+        required: true
+      request_id:
+        description: Unique dispatch id, so the release finds this run
+        type: string
+        required: true
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+jobs:
+  build:
+    name: DESKTOP BUILD (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macos-universal
+            os: macos-latest
+            target: universal-apple-darwin
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+    env:
+      VARIANT: ${{ inputs.variant || 'preview' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_sha || github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install the Linux webview toolchain
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            patchelf \
+            file
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            apps/mobile/src-tauri/target
+          key: desktop-cargo-${{ matrix.label }}-${{ hashFiles('apps/mobile/src-tauri/Cargo.lock') }}
+          restore-keys: |
+            desktop-cargo-${{ matrix.label }}-
+      - run: bash packages/scripts/npm-ci-timed.sh
+      - run: npm run build -w @beeline/nostr && npm run build -w @beeline/api-contract && npm run build -w @beeline/buzz-client && npm run build -w @beeline/net
+      - name: Install mobile dependencies
+        working-directory: apps/mobile
+        run: bash ../../packages/scripts/npm-ci-timed.sh
+      - name: Select the macOS signing mode
+        id: macos_signing
+        env:
+          MACOS_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          MACOS_APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          MACOS_APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          MACOS_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+          MACOS_ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+          MACOS_ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+        run: node packages/scripts/desktop-signing.mjs
+      - name: Materialize the macOS signing credentials
+        if: steps.macos_signing.outputs.enabled == 'true'
+        env:
+          MACOS_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          MACOS_APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          MACOS_APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          EXPO_ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+          MACOS_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+          MACOS_ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          certificate_path="$RUNNER_TEMP/certificate.p12"
+          keychain_path="$RUNNER_TEMP/build.keychain"
+          keychain_password=$(openssl rand -base64 32)
+          key_path="$RUNNER_TEMP/AuthKey_${MACOS_ASC_KEY_ID}.p8"
+          printf '%s' "$MACOS_APPLE_CERTIFICATE" | base64 -d > "$certificate_path"
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$certificate_path" \
+            -k "$keychain_path" \
+            -P "$MACOS_APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$keychain_password" \
+            "$keychain_path"
+          security list-keychains -d user -s "$keychain_path" login.keychain
+          security find-identity -v -p codesigning "$keychain_path" | grep -F "$MACOS_APPLE_SIGNING_IDENTITY"
+          rm -f "$certificate_path"
+          case "$EXPO_ASC_API_KEY_P8" in
+            '-----BEGIN'*) printf '%s\n' "$EXPO_ASC_API_KEY_P8" > "$key_path" ;;
+            *) printf '%s' "$EXPO_ASC_API_KEY_P8" | base64 -d > "$key_path" ;;
+          esac
+          openssl pkey -in "$key_path" -noout >/dev/null || {
+            echo '::error::EXPO_ASC_API_KEY_P8 is not a valid App Store Connect private key'; exit 1;
+          }
+          chmod 600 "$key_path"
+          write_env() {
+            delimiter="BEELINE_$(openssl rand -hex 16)"
+            printf '%s<<%s\n%s\n%s\n' "$1" "$delimiter" "$2" "$delimiter" >> "$GITHUB_ENV"
+          }
+          write_env APPLE_SIGNING_IDENTITY "$MACOS_APPLE_SIGNING_IDENTITY"
+          write_env APPLE_KEYCHAIN "$keychain_path"
+          write_env APPLE_API_KEY "$MACOS_ASC_KEY_ID"
+          write_env APPLE_API_ISSUER "$MACOS_ASC_ISSUER_ID"
+          write_env APPLE_API_KEY_PATH "$key_path"
+      - name: Clear stale bundle output from the restored cache
+        run: rm -rf "apps/mobile/src-tauri/target/${{ matrix.target }}/release/bundle"
+      - name: Prepare the signed production updater configuration
+        if: inputs.variant == 'production'
+        env:
+          DESKTOP_VERSION: ${{ inputs.desktop_version }}
+          TAURI_UPDATER_PUBLIC_KEY: ${{ secrets.TAURI_UPDATER_PUBLIC_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$DESKTOP_VERSION" || { echo '::error::production desktop build has no desktop_version'; exit 1; }
+          test -n "$TAURI_SIGNING_PRIVATE_KEY" || { echo '::error::TAURI_UPDATER_PRIVATE_KEY is not available from the release vault'; exit 1; }
+          updater_config="$RUNNER_TEMP/tauri-production-updater.json"
+          node packages/scripts/desktop-update.mjs config \
+            --version "$DESKTOP_VERSION" \
+            --endpoint 'https://downloads.usebeeline.app/latest/Beeline-latest.json' \
+            --endpoint 'https://github.com/lunchboxfortwo/beeline/releases/latest/download/Beeline-latest.json' \
+            --output "$updater_config"
+          echo "TAURI_UPDATER_CONFIG=$updater_config" >> "$GITHUB_ENV"
+      - name: Build the desktop bundle
+        timeout-minutes: 25
+        working-directory: apps/mobile
+        env:
+          EXPO_PUBLIC_BEELINE_RELEASE_VERSION: ${{ inputs.release_version }}
+          EXPO_PUBLIC_BEELINE_RELEASE_SHA: ${{ inputs.release_sha || github.event.pull_request.head.sha || github.sha }}
+          EXPO_PUBLIC_BEELINE_DESKTOP_UPDATES: ${{ inputs.variant == 'production' && '1' || '0' }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          config=()
+          case "$VARIANT" in
+            production) config=(--config "$TAURI_UPDATER_CONFIG") ;;
+            dev) config=(--config src-tauri/tauri.dev.conf.json) ;;
+            preview) config=(--config src-tauri/tauri.preview.conf.json) ;;
+            *) echo "::error::unknown variant '$VARIANT'"; exit 1 ;;
+          esac
+          env -u APPLE_API_KEY -u APPLE_API_ISSUER -u APPLE_API_KEY_PATH \
+            npx tauri build --target "${{ matrix.target }}" ${config[@]+"${config[@]}"} \
+            2>&1 | tee "$RUNNER_TEMP/tauri-build.log"
+      - name: Capture Windows native notification
+        if: (github.event_name == 'pull_request' || github.event_name == 'merge_group') && runner.os == 'Windows'
+        continue-on-error: true
+        timeout-minutes: 3
+        run: powershell.exe -File packages/scripts/desktop-notification-proof-windows.ps1
+      - name: Upload native notification diagnostics
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        if: (github.event_name == 'pull_request' || github.event_name == 'merge_group') && (runner.os == 'macOS' || runner.os == 'Windows')
+        with:
+          name: desktop-native-notification-${{ matrix.label }}
+          path: ${{ runner.temp }}/desktop-native-notification-*
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Exercise codesign verification on an ad-hoc test copy
+        if: runner.os == 'macOS' && steps.macos_signing.outputs.enabled != 'true'
+        run: |
+          set -euo pipefail
+          bundle="apps/mobile/src-tauri/target/${{ matrix.target }}/release/bundle"
+          app=$(find "$bundle" -type d -name '*.app' -print -quit)
+          test -n "$app" || { echo '::error::macOS build produced no .app'; exit 1; }
+          set +e
+          unsigned_assessment=$(spctl --assess --type execute --verbose "$app" 2>&1)
+          unsigned_status=$?
+          set -e
+          printf 'Unsigned preview assessment (expected rejection):\n%s\n' "$unsigned_assessment"
+          test "$unsigned_status" -ne 0 || {
+            echo '::error::unsigned preview unexpectedly passed Gatekeeper assessment'; exit 1;
+          }
+          test_app="$RUNNER_TEMP/codesign-test/$(basename "$app")"
+          mkdir -p "$(dirname "$test_app")"
+          ditto "$app" "$test_app"
+          codesign --force --deep --sign - "$test_app"
+          codesign --verify --deep --strict --verbose=2 "$test_app"
+          echo '::notice::ad-hoc codesign verification passed; this does not represent Developer ID or notarization'
+      - name: Notarize and staple the macOS disk image
+        if: steps.macos_signing.outputs.enabled == 'true'
+        env:
+          APPLE_API_KEY: ${{ secrets.EXPO_ASC_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          bundle="apps/mobile/src-tauri/target/${{ matrix.target }}/release/bundle"
+          dmg=$(find "$bundle" -type f -name '*.dmg' -print -quit)
+          test -n "$dmg" || { echo '::error::signed macOS build produced no .dmg'; exit 1; }
+
+          result=$(xcrun notarytool submit "$dmg" \
+            --key "$APPLE_API_KEY_PATH" \
+            --key-id "$APPLE_API_KEY" \
+            --issuer "$APPLE_API_ISSUER" \
+            --wait --output-format json)
+          printf '%s\n' "$result"
+          printf '%s\n' "$result" > "$RUNNER_TEMP/dmg-notarization.json"
+          status=$(node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).status ?? "")' "$RUNNER_TEMP/dmg-notarization.json")
+          log_id=$(node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).id ?? "")' "$RUNNER_TEMP/dmg-notarization.json")
+          test "$status" = Accepted || { echo "::error::DMG notarization ended with status '$status'"; exit 1; }
+          test -n "$log_id" || { echo '::error::DMG notarization returned no log id'; exit 1; }
+          echo "Notarization log id: $log_id"
+          xcrun stapler staple -v "$dmg"
+      - name: Verify the signed and notarized macOS download
+        if: steps.macos_signing.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          bundle="apps/mobile/src-tauri/target/${{ matrix.target }}/release/bundle"
+          app=$(find "$bundle" -type d -name '*.app' -print -quit)
+          dmg=$(find "$bundle" -type f -name '*.dmg' -print -quit)
+          test -n "$app" && test -n "$dmg"
+
+          codesign --verify --deep --strict --verbose=2 "$app"
+          set +e
+          assessment=$(spctl --assess --type execute --verbose "$app" 2>&1)
+          assessment_status=$?
+          set -e
+          printf '%s\n' "$assessment"
+          test "$assessment_status" -eq 0 || exit "$assessment_status"
+          printf '%s\n' "$assessment" | grep -qi accepted || {
+            echo '::error::spctl did not report accepted'; exit 1;
+          }
+          xcrun stapler validate "$dmg"
+      - name: Prove the bundled macOS app icon
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          bundle="apps/mobile/src-tauri/target/${{ matrix.target }}/release/bundle"
+          app=$(find "$bundle" -type d -name '*.app' -print -quit)
+          if [ -z "$app" ]; then
+            echo "::error::the macOS bundle has no .app"
+            exit 1
+          fi
+          icon=$(find "$app/Contents/Resources" -type f -name '*.icns' -print -quit)
+          if [ -z "$icon" ]; then
+            echo "::error::$app has no .icns icon"
+            exit 1
+          fi
+          iconset="$RUNNER_TEMP/beeline-app-icon.iconset"
+          iconutil --convert iconset "$icon" --output "$iconset"
+          master="$iconset/icon_512x512@2x.png"
+          {
+            echo '### Bundled macOS app icon'
+            echo
+            echo '```'
+            echo "$icon"
+            sips --getProperty pixelWidth --getProperty pixelHeight --getProperty hasAlpha "$master"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Prove the build produced installers
+        run: |
+          set -euo pipefail
+          dir="apps/mobile/src-tauri/target/${{ matrix.target }}/release/bundle"
+          if [ ! -d "$dir" ]; then
+            echo "::error::no bundle directory at $dir"
+            exit 1
+          fi
+          # The .app bundle is a directory, and it is the only artifact a
+          # macOS `dev` build produces (that variant bundles no installer).
+          found=$(
+            {
+              find "$dir" -type f \
+                \( -name '*.dmg' -o -name '*.app.tar.gz' -o -name '*.deb' -o -name '*.rpm' \
+                   -o -name '*.AppImage' -o -name '*.msi' -o -name '*.exe' \)
+              find "$dir" -type d -name '*.app'
+            } | sort
+          )
+          if [ -z "$found" ]; then
+            echo "::error::$dir contains no installer or app bundle for ${{ matrix.label }}"
+            find "$dir" -type f | head -n 50
+            exit 1
+          fi
+          {
+            echo "### ${{ matrix.label }} ($VARIANT)"
+            echo
+            echo '```'
+            echo "$found"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: inputs.variant != 'production'
+        with:
+          name: beeline-desktop-${{ inputs.variant || 'preview' }}-${{ matrix.label }}
+          path: apps/mobile/src-tauri/target/${{ matrix.target }}/release/bundle/**
+          if-no-files-found: error
+          retention-days: 14
+      - name: Stage stable public installer names
+        if: inputs.variant == 'production'
+        run: |
+          set -euo pipefail
+          bundle="apps/mobile/src-tauri/target/${{ matrix.target }}/release/bundle"
+          release="$RUNNER_TEMP/desktop-release"
+          mkdir -p "$release"
+          one() {
+            count=$(find "$bundle" -type f -name "$1" | awk 'END { print NR }')
+            [ "$count" -eq 1 ] || { echo "::error::expected one $1, found $count"; exit 1; }
+            source=$(find "$bundle" -type f -name "$1" -print -quit)
+            cp "$source" "$release/$2"
+          }
+          case "${{ matrix.label }}" in
+            macos-universal)
+              one '*.dmg' 'Beeline-universal.dmg'
+              one '*.app.tar.gz' 'Beeline-universal.app.tar.gz'
+              one '*.app.tar.gz.sig' 'Beeline-universal.app.tar.gz.sig'
+              ;;
+            windows-x86_64)
+              one '*.exe' 'Beeline-x86_64-setup.exe'
+              one '*.exe.sig' 'Beeline-x86_64-setup.exe.sig'
+              one '*.msi' 'Beeline-x86_64.msi'
+              ;;
+            linux-x86_64)
+              one '*.AppImage' 'Beeline-x86_64.AppImage'
+              one '*.AppImage.sig' 'Beeline-x86_64.AppImage.sig'
+              one '*.deb' 'Beeline-x86_64.deb'
+              one '*.rpm' 'Beeline-x86_64.rpm'
+              ;;
+          esac
+      - uses: actions/upload-artifact@v4
+        if: inputs.variant == 'production'
+        with:
+          name: beeline-desktop-release-${{ inputs.release_version }}-${{ inputs.release_sha }}-${{ matrix.label }}
+          path: ${{ runner.temp }}/desktop-release/*
+          if-no-files-found: error
+          retention-days: 7

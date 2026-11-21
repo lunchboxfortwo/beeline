@@ -1,13 +1,11 @@
 // Runs the committed Desktop job on a source archive, with local-only artifacts.
-import { chmodSync, existsSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { chmodSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { LocalActions } from './release-local-actions.mjs';
 import { Processes, privateWrite } from './release-local-process.mjs';
 
-export function desktopBuildEnvironment({ directory, cargoHome, home }, platform = process.platform) {
-  // Universal macOS builds compile both architectures serially. Two Cargo jobs
-  // consumed the build deadline before DMG creation on the eight-thread Mac.
-  return { CARGO_BUILD_JOBS: platform === 'darwin' ? '4' : '2', CI_TEST_WORKERS: '2', BEELINE_LOCAL_RELEASE: 'true', CARGO_HOME: cargoHome,
+export function desktopBuildEnvironment({ directory, cargoHome, home }) {
+  return { CARGO_BUILD_JOBS: '2', CI_TEST_WORKERS: '2', BEELINE_LOCAL_RELEASE: 'true', CARGO_HOME: cargoHome,
     RUSTUP_HOME: join(directory, 'tools/rustup'), NPM_CONFIG_USERCONFIG: join(home, '.npmrc') };
 }
 
@@ -41,14 +39,6 @@ process.exit(result.status??1);
   return directory;
 }
 
-export function desktopSigningStep(step) {
-  if (step.name !== 'Materialize the macOS signing credentials') return step;
-  return { ...step, run: step.run
-    .replace('keychain_path="$RUNNER_TEMP/build.keychain"', 'keychain_path="$RUNNER_TEMP/build.keychain-db"')
-    .replace('security list-keychains -d user -s "$keychain_path" login.keychain',
-      'security list-keychains -d user -s "$keychain_path" "$BEELINE_OPERATOR_HOME/Library/Keychains/login.keychain-db" /Library/Keychains/System.keychain') };
-}
-
 async function desktopWorker(spec) {
   const secrets = spec.secrets, processes = new Processes(secrets);
   const baseEnv = { ...process.env };
@@ -60,14 +50,8 @@ async function desktopWorker(spec) {
     job: async ({ context }) => {
       Object.assign(context.env, desktopBuildEnvironment({ directory: spec.directory,
         cargoHome: baseEnv.CARGO_HOME || join(baseEnv.HOME, '.cargo'), home: context.env.HOME }));
-      context.env.BEELINE_OPERATOR_HOME = baseEnv.HOME;
-      if (process.platform === 'darwin') {
-        const tools = macSigningTools(join(spec.directory, 'signing-tools'));
-        context.env.PATH = `${tools}:${context.env.PATH}`;
-      }
     },
     step: async ({ step, context, env }) => {
-      if (process.platform === 'darwin') Object.assign(step, desktopSigningStep(step));
       if (step.uses?.startsWith('actions/checkout@')) {
         if (readFileSync(join(spec.root, '.release-source-sha'), 'utf8').trim() !== spec.context.github.sha) throw new Error('Desktop source identity mismatch');
         return true;
@@ -85,22 +69,7 @@ async function desktopWorker(spec) {
     },
   };
   const engine = new LocalActions({ root: spec.root, directory: spec.directory, secrets, processes, hooks, baseEnv });
-  let keychains;
-  if (process.platform === 'darwin') keychains = await processes.run('security', ['list-keychains', '-d', 'user'], { env: process.env, quiet: true });
-  let job;
-  try {
-    job = await engine.job(spec.job, { ...spec.context, secrets }, spec.context.matrix.label, { VARIANT: 'production' });
-  } finally {
-    if (keychains) {
-      await processes.run('security', ['list-keychains', '-d', 'user', '-s', ...[...keychains.matchAll(/"([^"]+)"/g)].map(m => m[1])], { env: process.env, quiet: true });
-      const keychain = join(spec.directory, 'jobs', spec.context.matrix.label, 'build.keychain-db');
-      if (existsSync(keychain)) await processes.run('security', ['delete-keychain', keychain], { env: process.env, quiet: true });
-    }
-    // Only this worker's disposable signing inputs are removed.
-    rmSync(join(spec.directory, 'jobs', spec.context.matrix.label, 'certificate.p12'), { force: true });
-    const temp = join(spec.directory, 'jobs', spec.context.matrix.label);
-    if (secrets.EXPO_ASC_KEY_ID) rmSync(join(temp, `AuthKey_${secrets.EXPO_ASC_KEY_ID}.p8`), { force: true });
-  }
+  const job = await engine.job(spec.job, { ...spec.context, secrets }, spec.context.matrix.label, { VARIANT: 'production' });
   privateWrite(join(spec.directory, 'result.json'), JSON.stringify({ job, artifacts: [...engine.artifacts] }));
   if (job.result !== 'success') throw new Error(`Desktop ${spec.context.matrix.label} failed; see ${spec.directory}`);
 }
