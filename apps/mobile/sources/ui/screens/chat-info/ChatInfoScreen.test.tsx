@@ -318,17 +318,16 @@ describe('Chat info', () => {
     });
 
     it.each([
-        { avatar: 'https://example.com/workspace.png' },
-        { favicon: 'https://example.com/favicon.ico' },
+        { homepageIcon: 'https://example.com/v1/repository-icons/thread' },
         {},
     ])('uses the done thread glyph in finished rows with %j', (images) => {
         data.archived[0].corner = { ...data.archived[0].corner, ...images };
-        data.room.room.avatar = 'https://example.com/chat.png';
+        data.room.room.homepageIcon = 'https://example.com/v1/repository-icons/chat';
         const tree = render();
         const row = pressable(tree, `finished-${CORNER}`);
         expect(row.findByType(WorkStateMark).props.state).toBe('done');
         expect(row.findAll((node: any) => node.type === 'RepositoryMark')).toHaveLength(0);
-        expect(tree.root.findByType('RepositoryMark').props.avatarUrl).toBe(data.room.room.avatar);
+        expect(tree.root.findByType('RepositoryMark').props).toEqual({ homepageIconUrl: data.room.room.homepageIcon, size: 36 });
     });
 
     it("leaves with today's confirmation and returns to Chats", async () => {

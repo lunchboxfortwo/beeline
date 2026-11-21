@@ -161,8 +161,6 @@ export const roomHeaderFields = {
   workspaceId: optional((item) => (uuid(item.workspaceId) ? item.workspaceId : undefined)),
   parentId: optional((item) => (uuid(item.parentId) ? item.parentId : undefined)),
   about: optional((item) => (typeof item.about === 'string' ? item.about : undefined)),
-  avatar: optional((item) => (typeof item.avatar === 'string' ? item.avatar : undefined)),
-  favicon: optional((item) => (typeof item.favicon === 'string' ? item.favicon : undefined)),
   homepageIcon: optional((item) => (typeof item.homepageIcon === 'string' ? item.homepageIcon : undefined)),
   visibility: optional((item) => oneOf(item.visibility, ['public', 'invite-only'])),
   reviewerAgentId: optional((item) => (hex64(item.reviewerAgentId) ? item.reviewerAgentId : undefined)),

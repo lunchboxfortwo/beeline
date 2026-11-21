@@ -88,7 +88,7 @@ function ChatMark({ item, size = MARK }: { size?: number; item: Partial<Pick<Cha
       />
     );
   }
-  // A chat's picture is its repository's committed icon file; without one it is #.
+  // A chat's picture is its repository's stored icon (committed icon file, else homepage site icon); without one it is #.
   return <RepositoryMark homepageIconUrl={item.room?.homepageIcon} size={size} />;
 }
 

@@ -6,7 +6,7 @@ vi.mock('node:dns/promises', () => ({ lookup: mocks.lookup }));
 vi.mock('node:https', () => ({
   Agent: class { constructor(options: unknown) { mocks.agents.push(options); } destroy() {} }, get: mocks.get,
 }));
-import { companyLogo, publicIconResponse, readCompanyLogo, extractIconHref, pickRepositoryIconPath, resolveRepositoryIcon, sizeCompanyLogo } from './company-logos.js';
+import { companyLogo, publicIconResponse, readCompanyLogo, extractIconHref, pickRepositoryIconPath, resolveHomepageIcon, resolveRepositoryIcon, sizeCompanyLogo } from './company-logos.js';
 import { COMPANY_MARK_IDS } from './company-registry.js';
 beforeEach(() => { vi.clearAllMocks(); mocks.agents.length = 0; mocks.lookup.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]); });
 afterEach(() => vi.restoreAllMocks());
@@ -108,6 +108,18 @@ describe('repository homepage icons', () => {
     const colors = new Set<string>();
     for (let offset = 0; offset < data.length; offset += info.channels) colors.add(data.subarray(offset, offset + info.channels).toString('hex'));
     expect(colors).toEqual(new Set(['ffffffff', '000000ff']));
+  });
+  it('resolves a repository homepage\'s site icon as the stored 64 px chat picture, uncached', async () => {
+    response('<link rel="icon" href="/favicon.svg">', 'text/html'); response(svg, 'image/svg+xml');
+    const icon = await resolveHomepageIcon('grunt.example');
+    expect(mocks.get.mock.calls.map(call => call[0].href)).toEqual(['https://grunt.example/', 'https://grunt.example/favicon.svg']);
+    expect(icon?.path).toBe('https://grunt.example/');
+    expect(await sharp(icon!.image.bytes).metadata()).toMatchObject({ format: 'png', width: 64, height: 64 });
+    response('', 'text/html', 404); response('', 'text/html', 404);
+    expect(await resolveHomepageIcon('https://grunt.example')).toBeUndefined();
+    expect(mocks.get).toHaveBeenCalledTimes(4);
+    expect(await resolveHomepageIcon('http://127.0.0.1/')).toBeUndefined();
+    expect(mocks.get).toHaveBeenCalledTimes(4);
   });
   it('shares normalized homepage hits for ten minutes, then fetches again', async () => {
     const clock = vi.spyOn(Date, 'now').mockReturnValue(2_000_000);
