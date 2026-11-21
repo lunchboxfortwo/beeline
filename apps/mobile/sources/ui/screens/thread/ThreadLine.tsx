@@ -1,10 +1,9 @@
 import React from 'react';
 import { ListItem, YStack } from 'tamagui';
 import { CornerDownRight } from 'lucide-react-native';
-import type { CornerBlocker, CornerState, CornerStateReason } from '@beeline/api-contract/phone';
+import { threadWorkMark, type CornerBlocker, type CornerState, type CornerStateReason } from '@beeline/api-contract/phone';
 import { Copy, Glyph, HEIGHT, MARK, typeStyle, useTextSize } from '@/ui/grammar';
 import { WorkStateMark } from '@/ui/screens/tags/WorkMarks';
-import { threadMark } from '@/ui/screens/chats/chat-tree-model';
 import { threadListLabel } from './thread-status';
 
 /**
@@ -19,7 +18,7 @@ export function ThreadLine({ title, state, blocker, reason, viewer, onPress, tes
     onPress: () => void; testID?: string;
 }) {
     const { word, you: brass } = threadListLabel({ state, blocker, reason }, viewer);
-    const mark = threadMark({ state, blocker, reason }, viewer);
+    const mark = threadWorkMark({ state, blocker, reason }, viewer);
     const line = typeStyle('body', useTextSize()).lineHeight;
     return (
         <ListItem

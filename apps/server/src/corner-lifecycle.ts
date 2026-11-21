@@ -54,17 +54,13 @@ CREATE TRIGGER corner_github_cache_mirror AFTER INSERT OR UPDATE OF lifecycle ON
  * The corner's own row: created once with the corner, then changed only by
  * this module (its lock, implementer and reviewer). Its GitHub display cache row starts
  * with it; every GitHub and helper observation is committed by this owner.
+ * The machine starts idle; the opening order, if any, is its first event.
  */
-export async function createCornerFacts(db: SqlDatabase, cornerId: string, humanOpen = false): Promise<void> {
-  // A just-inserted human corner has no commands, checks, receipts or waits to
-  // discover. Seed the same pure transition within its creation transaction.
-  const machine = humanOpen ? transitionCorner({ state: 'idle' }, {
-    facts: { archived: false, turnRunning: false }, event: { kind: 'open' },
-  }).state : null;
+export async function createCornerFacts(db: SqlDatabase, cornerId: string): Promise<void> {
   await db.query(
     `INSERT INTO corner_facts(corner_id,lifecycle,machine)
-     VALUES($1,'{"lifecycle":"working","checks":"unknown"}',$2::jsonb) ON CONFLICT(corner_id) DO NOTHING`,
-    [cornerId, machine ? JSON.stringify(machine) : null],
+     VALUES($1,'{"lifecycle":"working","checks":"unknown"}','{"state":"idle"}') ON CONFLICT(corner_id) DO NOTHING`,
+    [cornerId],
   );
   await db.query(
     `INSERT INTO corner_github_cache(corner_id) VALUES($1) ON CONFLICT(corner_id) DO NOTHING`,
@@ -401,7 +397,6 @@ async function readCornerAdvance(
       mergeConflictDelivered: active?.conflict,
       lostEffects: receipts.filter(receipt => !active?.retained?.includes(receipt.id)).flatMap(receipt => [receipt.key, receipt.marker]),
       reviewerConfigured: independentReviewerConfigured(corner),
-      ...(waiting ? {waitReason:waiting.wait_reason} : {}),
       ...(review.ended ? {reviewEnded:review.ended} : {}),
       ...(waiting ? {blocker:{reason:waiting.reason,itemId:waiting.item_id,
         ...(waiting.kind ? {blocker:{kind:waiting.kind}} : {})}}
@@ -833,21 +828,15 @@ export type { CornerMachine } from './corner-machine.js';
 
 export type { CornerMachineFacts } from './corner-machine.js';
 
-export type { CornerMachineEvent } from './corner-machine.js';
-
 export { transitionCorner } from './corner-machine.js';
-
-export { deriveCornerState } from './corner-machine.js';
 
 export { planCornerCheckObservation } from './corner-machine.js';
 
 export { checksSettled } from './corner-machine.js';
 
-export { checksRestarted } from './corner-machine.js';
-
 export { actionsJobId } from './corner-machine.js';
 
-export type { CornerAdvance,CornerEvent } from './corner-lifecycle-values.js';
+export type { CornerEvent } from './corner-lifecycle-values.js';
 
 export { CORNER_MACHINE_SCHEMA } from './corner-lifecycle-values.js';
 
@@ -858,12 +847,6 @@ export { lockCornerArchivalAuthority } from './corner-lifecycle-review-state.js'
 
 
 export { cornerReviewWokenSql } from './corner-lifecycle-review-state.js';
-
-export { loadCornerReviewState } from './corner-lifecycle-review-state.js';
-
-export type { CornerMergeGate } from './corner-lifecycle-review-state.js';
-
-export type { CornerMergeabilityInput } from './corner-lifecycle-review-state.js';
 
 export { cornerMergeability } from './corner-lifecycle-review-state.js';
 

@@ -30,7 +30,7 @@ prove delivery.
 Reports retain their current order-author return route.
 
 Pending approval grants also keep their recorded `room_id` corner in
-Waiting/user_action, even when the approval card lives in the owner's private
+Waiting, even when the approval card lives in the owner's private
 System DM and cites a message from another Room. The machine reads only the
 pending grant identity; the card and its resource details stay private. An
 owner's decision resumes the requester through the existing grant-decision

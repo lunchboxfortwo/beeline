@@ -546,6 +546,7 @@ describe('Work board recorded sources and single assignee', () => {
   it('projects an archived working thread as Done for seven days', async () => {
     await updateWorkItem(db, { roomId: thread, state: 'in-progress', assigneeId: agent }, agent);
     await db.query('UPDATE rooms SET archived_at=now() WHERE id=$1', [thread]);
+    await machine(thread, 'archived');
     expect((await read()).items.find((item) => item.id === thread)).toMatchObject({
       state: 'done',
       roomArchived: true,

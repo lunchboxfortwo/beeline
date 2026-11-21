@@ -228,8 +228,7 @@ export function BuzzChatSurface({
   const [
     desktopTranscript, transcriptMessagesRef, transcriptMessages, visibleMessages,
     cornerAgentPubkey, dismissComposerKeyboard, speakerWorking, continuedAttributionIds,
-    cornerOwnerPubkey, cornerOwnerDisplay, cornerOwnerWorking, cornerHeaderWord,
-    cornerHeaderDisplay, cornerHeaderSource, emptyLedger,
+    cornerOwnerDisplay, cornerHeaderSource, emptyLedger,
   ] = useChatTranscriptProjection([
     isCorner, parentChannelId, decodedId, isArchived, roomClient, messages, agentByPubkey,
     roomSurface, activeAgentTurns, participantsHydrated, optimisticDeletes, optimisticReactions,
@@ -239,7 +238,7 @@ export function BuzzChatSurface({
   const threadHeader = useChatThreadHeader({
     sourceMessageId:notificationMessageId??notificationTarget, viewerPubkey,
     isCorner, roomSurface, resolvedChannelName, decodedId, parentChannelId,
-    state: cornerHeaderDisplay?.status,
+    state: cornerHeaderSource?.state,
     objective: cornerObjectiveText, isArchived, isDesktop, positions: transcriptPositions,
   });
   const [

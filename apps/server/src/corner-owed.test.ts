@@ -5,6 +5,7 @@ import { addressedToPersonSql, cornerOwedBackfillSql, cornerOwedSchemaSql } from
 import { cornerWaitingSql } from './corner-waiting.js';
 import { PhoneService } from './phone-service.js';
 import { seedCornerOpening, PgliteDatabase, migratedDatabase, insertCornerFacts } from './test-support.js';
+import { refreshCornerAttention } from './corner-attention.js';
 
 const WORKSPACE = '11111111-1111-4111-8111-111111111111';
 const ROOM = '22222222-2222-4222-8222-222222222222';
@@ -64,6 +65,8 @@ describe('corner_owed', () => {
   };
 
   const facts = async (viewer = OWNER): Promise<Facts> => {
+    // The attention worker commits the corner machine before clients reread it.
+    await refreshCornerAttention(database, CORNER);
     const chats = await phone.readChats(WORKSPACE, viewer);
     const listed = chats?.chats
       .find((chat) => chat.room.id === ROOM)
@@ -182,6 +185,7 @@ describe('corner_owed', () => {
       `SELECT waiting.person_id FROM rooms c CROSS JOIN LATERAL (${cornerWaitingSql('c')}) waiting WHERE c.id=$1`, [CORNER],
     )).rows;
     expect(waiting).toEqual([{ person_id: OWNER }]);
+    await refreshCornerAttention(database, CORNER);
     expect((await phone.readCorners(ROOM, OWNER))?.corners[0]?.blocker?.personId).toBe(OWNER);
     const forOther = (await phone.readChats(WORKSPACE, OTHER))?.chats.find(row => row.room.id === ROOM)?.openCorners?.[0];
     expect(forOther && threadWorkState(forOther, OTHER)).toBe('in-progress');
@@ -201,6 +205,7 @@ describe('corner_owed', () => {
     expect(await permissionPeople()).toEqual([OWNER, OTHER]);
     await database.query(`UPDATE memberships SET role='admin' WHERE workspace_id=$1 AND identity_id=$2 AND room_id IS NULL`, [WORKSPACE, LATE]);
     expect(await permissionPeople()).toEqual([OWNER, OTHER, LATE]);
+    await refreshCornerAttention(database, CORNER);
     for (const viewer of [OWNER, OTHER, LATE]) {
       expect((await phone.readCorners(ROOM, viewer))?.corners[0]?.blocker?.personId).toBe(viewer);
     }

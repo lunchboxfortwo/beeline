@@ -436,6 +436,7 @@ it('Reproduction R1: a worker order waiting on an offline helper stays working',
   await wake(WORKER, 'queued-implementer');
   await db.query("UPDATE agent_turns SET created_at=now()-interval '31 seconds' WHERE room_id=$1", [C]);
   await db.query(`DELETE FROM agent_turns WHERE room_id=$1`, [C]);
+  expect(await state()).toBe('working');
   const restore = await daemon.execute('getCornerRestoreState', { cornerId: C }, WORKER);
   expect(restore).toMatchObject({ state: 'working', activity: 'running' });
   expect((await phone.readCorners(ROOM, HUMAN))!.corners[0]).toMatchObject({ state: 'working' });

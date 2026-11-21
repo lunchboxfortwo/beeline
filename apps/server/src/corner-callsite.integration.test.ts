@@ -408,7 +408,7 @@ it.each([false, true])('keeps a human opening static with a resident source=%s',
   const created = await phone.execute('createHumanCorner', input, H);
   await phone.execute('createHumanCorner', input, H);
   expect((await db.query('SELECT machine FROM corner_facts WHERE corner_id=$1', [input.cornerId])).rows[0].machine)
-    .toEqual({ state: 'idle', effects: [] });
+    .toEqual({ state: 'idle' });
   expect((await db.query('SELECT id FROM agent_commands WHERE room_id=$1', [input.cornerId])).rows).toEqual([]);
   const row = (await phone.readRoom(R, OUTSIDER))!.messages.filter(m => m.daemonFact?.cornerId === input.cornerId);
   expect(row).toHaveLength(1);

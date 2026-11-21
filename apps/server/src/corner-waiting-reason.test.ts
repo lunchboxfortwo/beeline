@@ -27,7 +27,7 @@ it.each([
     DO UPDATE SET blocking=true,answerable=false`, [cornerId, HUMAN]);
   const selected = await blocker(cornerId);
   const row = { id: cornerId, name: 'Corner', parent_id: 'parent', archived_at: null,
-    lifecycle: null, latest_turn_status: null, blocking: true,
+    machine: { state: 'waiting' as const }, lifecycle: null, latest_turn_status: null, blocking: true,
     waiting_item_id: selected.item_id, waiting_reason: selected.reason };
   expect(cornerRowState(row)).toEqual({ state: 'waiting', reason, itemId: 'item' });
   expect(chatCornerCounts([row], 'viewer').get('parent')?.openCorners[0]?.state).toBe('waiting');
@@ -91,7 +91,7 @@ it('R1: holds rank behind a real private report, and retain their actual message
   await rootFixture.daemon.execute('report', { ...authority(next), status: 'done', text: 'Finished.' }, WORKER);
   const selected = await blocker(cornerId);
   expect(selected).toMatchObject({ item_id: hold.holdId, kind: 'merge-hold' });
-  expect(cornerRowState({ archived_at: null, lifecycle: null, latest_turn_status: null, blocking: true,
+  expect(cornerRowState({ archived_at: null, machine: { state: 'waiting' }, lifecycle: null, latest_turn_status: null, blocking: true,
     waiting_item_id: selected.item_id, waiting_reason: selected.reason, waiting_kind: selected.kind }))
     .toMatchObject({ itemId: createHash('sha256').update(`corner-hold:${hold.holdId}`).digest('hex') });
 });

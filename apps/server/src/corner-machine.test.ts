@@ -96,10 +96,7 @@ describe('corner transition table', () => {
         lifecycle: { ...green.lifecycle!, checks: 'pending' },
         blocker: { reason, itemId: 'ask' },
       }, observe, result.state);
-      expect(ended.state).toMatchObject({
-        state: 'waiting',
-        reason: reason === 'question' ? 'question' : 'user_action',
-      });
+      expect(ended.state.state).toBe('waiting');
       expect(ended.notifications.map((n) => n.kind)).toEqual(['waiting']);
       expect(run({ ...facts, turnRunning: true }, observe, result.state).state.state).toBe(
         'working',

@@ -1,10 +1,6 @@
 import { cornerWaitingSql } from './corner-waiting.js';
 import type { SqlDatabase } from './database.js';
 
-/** Compatibility entrypoint: every server projection uses the corner machine. */
-export { deriveCornerState } from './corner-lifecycle.js';
-export type { CornerStateFacts, DerivedCornerState } from '@beeline/api-contract/phone';
-
 /** An explicit worker report pauses automatic work until an answer is committed. */
 export async function cornerReportWaiting(db: SqlDatabase, cornerId: string, commandKind?: string): Promise<boolean> {
   // A worker's waiting state pauses automatic work, but must still let reports reach its commander.

@@ -1,9 +1,8 @@
 import { cornerShortTitle, isConnectorIdentity, roomTitle } from '@beeline/api-contract/phone';
-import { threadWorkMark, threadWorkState as machineWorkState, type ChatListCorner, type WorkState } from '@beeline/api-contract/phone';
+import { threadWorkState, type ChatListCorner } from '@beeline/api-contract/phone';
 import type { ChatListItem } from '@beeline/buzz-client';
 import { roomRowAttentionReason, roomRowName, roomRowPreview } from '@/buzz/room-list-row';
 import type { RepoCandidate } from '@/buzz/room-repo-picker';
-import { threadListLabel, type ThreadWaitFacts } from '@/ui/screens/thread/thread-status';
 
 export type SearchChip = 'unread' | 'pinned';
 
@@ -36,23 +35,8 @@ export function joinableTitle(name: string): string {
   return roomTitle(name) ?? `#${name}`;
 }
 
-/** "waiting on you" for the person the server's waiting blocker names, "waiting on <name>" for everyone else. */
-export function threadWord(corner: ChatListCorner, viewer: string | undefined): string {
-  return threadListLabel(corner, viewer).word;
-}
-
 export function threadTitle(item: ChatListItem, corner: ChatListCorner): string {
   return cornerShortTitle(item.room.name, corner.name, corner.id);
-}
-
-/** A thread's Tasks state for this viewer: its corner machine state and reason, never a second store. */
-export function threadWorkState(corner: ThreadWaitFacts, viewer: string | undefined): WorkState {
-  return machineWorkState(corner, viewer);
-}
-
-/** The thread's state mark: its Tasks state, drawn idle while nothing runs (a wait on someone else included). */
-export function threadMark(corner: ThreadWaitFacts, viewer: string | undefined): { state: WorkState; idle: boolean } {
-  return threadWorkMark(corner, viewer);
 }
 
 /** Chats navigate every thread: waiting ones first, the rest in server order. */

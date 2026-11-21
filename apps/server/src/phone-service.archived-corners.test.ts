@@ -49,6 +49,12 @@ async function fixture(seed?: (database: PgliteDatabase) => Promise<unknown>) {
       ($1,NULL,$2,'owner'),($1,$3,$2,'owner')`,
     [WORKSPACE, VIEWER, ROOM],
   );
+  // Each thread's state is its machine: the live one idle, the closed ones archived.
+  await database.query(
+    `INSERT INTO corner_facts(corner_id,machine) VALUES
+      ($1,'{"state":"idle"}'),($2,'{"state":"archived","outcome":"closed"}'),($3,'{"state":"archived","outcome":"closed"}')`,
+    [LIVE, OPENED_FIRST, OPENED_SECOND],
+  );
   await seed?.(database);
   return new PhoneService(database, 'http://local.test');
 }

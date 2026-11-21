@@ -76,7 +76,6 @@ export type BuzzNotificationTarget = BuzzNotificationTargetBase &
 export type NotificationRoomTruth = {
   room: { id: string; workspaceId?: string; parentId?: string; archived?: boolean };
   parent?: { id: string };
-  cornerLifecycle?: { lifecycle: string };
 };
 
 export type BuzzNotificationResolver = {
@@ -153,8 +152,7 @@ export async function resolveBuzzNotificationTarget(
       await resolver.activateWorkspace(workspaceId);
     }
     const parentId = truth.parent?.id ?? truth.room.parentId;
-    const isFinishedCorner =
-      Boolean(parentId) && (truth.room.archived || truth.cornerLifecycle?.lifecycle === 'done');
+    const isFinishedCorner = Boolean(parentId) && truth.room.archived;
     if (isFinishedCorner && parentId) {
       return {
         type: target.type,
