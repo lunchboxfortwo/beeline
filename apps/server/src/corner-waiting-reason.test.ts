@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { threadWorkState } from '@beeline/api-contract/phone';
 import { HUMAN, ROOM, RUBY, WORKER, authority, claim, commands, expect, it, open, rootFixture, worker } from './test-support-commander.integration.test-support.js';
 import { cornerBlockerSql, cornerFactsSql, cornerRowState, chatCornerCounts } from './chat-corner-counts.js';
 import { cornerWaitingReportSql } from './corner-waiting-report.js';
@@ -145,7 +146,7 @@ it('selects each outstanding report recipient for their own corner surfaces', as
   for (const viewer of [HUMAN, RUBY]) {
     const row = await read(viewer);
     expect(row.waiting_person_id).toBe(viewer);
-    expect(chatCornerCounts([row], viewer).get(ROOM)?.openCorners[0]?.workState).toBe('needs-you');
+    expect(threadWorkState(chatCornerCounts([row], viewer).get(ROOM)!.openCorners[0]!, viewer)).toBe('needs-you');
     expect((await rootFixture.phone.readCorners(ROOM, viewer))?.corners.find(row => row.corner.id === cornerId)?.blocker?.personId).toBe(viewer);
   }
   await rootFixture.db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES('recipient-answer',$1,$2,'Yes')`, [cornerId, HUMAN]);
@@ -153,11 +154,14 @@ it('selects each outstanding report recipient for their own corner surfaces', as
   expect((await read(RUBY)).waiting_person_id).toBe(RUBY);
 });
 
-it.each(['backlog', 'done'])('keeps stored %s in both corner rows and deck summaries', async workState => {
+it.each(['backlog', 'done'])('keeps no stored %s for a thread; corner rows and deck summaries read its machine', async workState => {
   const { cornerId } = await open();
   await rootFixture.db.query(`INSERT INTO work_items(id,room_id,state,opened_by) VALUES($1,$2,$3,$4)
     ON CONFLICT(id) DO UPDATE SET state=excluded.state`, [cornerId, ROOM, workState, HUMAN]);
+  expect((await rootFixture.db.query('SELECT state FROM work_items WHERE id=$1', [cornerId])).rows).toEqual([{ state: null }]);
   const view = await rootFixture.phone.readCorners(ROOM, HUMAN);
-  expect(view?.corners.find(row => row.corner.id === cornerId)?.workState).toBe(workState);
-  expect(view?.summary?.openCorners.find(row => row.id === cornerId)?.workState).toBe(workState);
+  const machine = (await rootFixture.db.query<{ state: string }>(`SELECT machine->>'state' state FROM corner_facts WHERE corner_id=$1`, [cornerId])).rows[0]!.state;
+  expect(view?.corners.find(row => row.corner.id === cornerId)).toMatchObject({ state: machine });
+  expect(view?.summary?.openCorners.find(row => row.id === cornerId)).toMatchObject({ state: machine });
+  expect(view?.corners.find(row => row.corner.id === cornerId)).not.toHaveProperty('workState');
 });

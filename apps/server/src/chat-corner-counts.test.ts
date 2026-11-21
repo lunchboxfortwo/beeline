@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { chatCornerCounts } from './chat-corner-counts.js';
-import type { CornerLifecycleView } from '@beeline/api-contract/phone';
+import { threadWorkState, type CornerLifecycleView } from '@beeline/api-contract/phone';
 const row = (
   lifecycle: Partial<CornerLifecycleView> = {},
   latest_turn_status: string | null = null,
@@ -26,7 +26,7 @@ describe('chat corner counts', () => {
     });
     const result = chatCornerCounts([waitingOn('viewer'), waitingOn('someone-else')], 'viewer');
     expect(
-      result.get('room')?.openCorners.map((corner) => [corner.id, corner.state, corner.workState]),
+      result.get('room')?.openCorners.map((corner) => [corner.id, corner.state, threadWorkState(corner, 'viewer')]),
     ).toEqual([
       ['viewer', 'waiting', 'needs-you'],
       ['someone-else', 'waiting', 'in-progress'],
@@ -67,24 +67,23 @@ describe('chat corner counts', () => {
       'review',
     ]);
   });
-  it('projects a stored Backlog or Done and otherwise the live state, without changing execution authority', () => {
+  it('projects only the corner machine: Backlog is its idle reason and a planted stored state is ignored', () => {
     const result = chatCornerCounts(
       [
-        { ...row({}, 'working'), work_state: 'backlog' as const },
-        { ...row({}, 'working'), work_state: 'in-review' as const },
-        { ...row(), work_state: 'done' as const },
+        { ...row(), machine: { state: 'idle' as const, reason: 'backlog' as const, backlog: true as const } },
+        // The retired second store, planted: it cannot move the row.
+        { ...row({}, 'working'), work_state: 'done' } as ReturnType<typeof row>,
         row(),
       ],
       'viewer',
     );
-    expect(
-      result.get('room')?.openCorners.map((corner) => [corner.state, corner.workState]),
-    ).toEqual([
-      ['working', 'backlog'],
-      ['working', 'in-progress'],
-      ['idle', 'done'],
-      ['idle', 'in-progress'],
+    const corners = result.get('room')?.openCorners ?? [];
+    expect(corners.map((corner) => [corner.state, corner.reason])).toEqual([
+      ['idle', 'backlog'],
+      ['working', undefined],
+      ['idle', undefined],
     ]);
+    expect(corners.some((corner) => 'workState' in corner)).toBe(false);
   });
   it('marks corners the viewer follows or that owe them something', () => {
     const result = chatCornerCounts(
@@ -283,7 +282,6 @@ describe('chat corner counts', () => {
                 id: 'corner',
                 name: 'Corner',
                 state: 'idle',
-                workState: 'in-progress',
               },
             ],
           },

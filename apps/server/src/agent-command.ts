@@ -3,7 +3,7 @@ import { legacyCommandPayload } from './messaging-cutover.js';
 import { parseAgentAccessPolicy,senderMayAddressAgent } from '@beeline/api-contract/agent-access';
 import { attachQueuedContext } from './agent-command-context.js';
 import { initializeThreadImplementer } from './corner-lifecycle.js';
-import { sendMessage } from './agent-messaging.js';
+import { notWokenReceipt,sendMessage } from './agent-messaging.js';
 import { recordedMessageRoute } from './message-route.js';
 import { ensureSystemIdentity } from './system-line.js';
 import type { AgentCommand,AgentCommandAction,RoomInboxResult,MessageRoute,MessageAsk } from '@beeline/api-contract/daemon';
@@ -244,7 +244,6 @@ export type PrivateCommandPayload = PayloadVoice & {
   /** The explicit public post this command's current generation made. */
   publicPostId?: string;
 };
-
 export type CommandRow = {
   created_at: Date;
   id: string;
@@ -705,11 +704,12 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
     : handover ? { kind:'lifecycle',authorId:handover.author_id,text:sourceText ?? input.reason,
       fromRoomId:handover.approval_basis.commanderReturnRoomId ?? handover.source_room_id } as PrivateCommandPayload : undefined);
   if (lifecycle && input.reason!=='corner_objective' && !workflowOwner) {
-    const from={agent:input.privatePayload?.authorId ?? (chat.source?.system_event ? SYSTEM_IDENTITY_ID : chat.source?.author_id) ?? SYSTEM_IDENTITY_ID,
-      place:input.privatePayload?.fromRoomId ?? chat.source?.room_id ?? chat.id};
+    const reviser=input.reason==='corner_brief_revision' ? input.parent : undefined, from={agent:input.privatePayload?.authorId ?? reviser?.agent_id
+      ?? (chat.source?.system_event ? SYSTEM_IDENTITY_ID : chat.source?.author_id) ?? SYSTEM_IDENTITY_ID,place:input.privatePayload?.fromRoomId ?? reviser?.room_id ?? chat.source?.room_id ?? chat.id};
     payload={...payload,kind:'lifecycle',authorId:from.agent,
       text:input.privatePayload?.text ?? systemText(sourceText ?? input.reason),fromRoomId:from.place,
       route:{from,to:{agent:input.agentId,place:chat.id}},
+      ...(input.reason==='corner_brief_revision' ? {replyAddress:undefined} : {}),
       ...(input.reason==='corner_review_dispatch' && chat.worker ? {replyAddress:{agent:chat.worker,place:chat.id}} : {}),
     } as PrivateCommandPayload;
   }
@@ -718,7 +718,7 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
   const parentReturn=parent?.private_payload?.returnIdentityId ??
     (parent?.private_payload?.kind==='order'?parent.private_payload.authorId:undefined);
   // An event wake queued in a corner answers in that corner, as does the same agent's continuation
-  // of it; only an explicit report reaches the commander. Orders and brief revisions keep their route.
+  // of it; only an explicit report reaches the commander. Orders and brief revisions (from their reviser) keep their route.
   const continuesCornerWake = parent?.agent_id === input.agentId && parent.return_room_id === chat.id && !parentReturn;
   const cornerWake = Boolean(chat.parent_id) && (lifecycle || continuesCornerWake)
     && payload?.kind !== 'order' && input.reason !== 'corner_brief_revision';
@@ -914,7 +914,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
       });
       completedNow=true;
       if (item.state==='pending' || item.state==='complete') await endAgentTurn(db,item,'complete',null,saved.id);
-      return {...saved,delivered:true};
+      return {...saved,delivered:true,...(!input.sharedReplyId && route.from.agent===SYSTEM_IDENTITY_ID ? {receipt:notWokenReceipt('A reply to a System wake is posted, not delivered to anyone; use message() to reach someone.')} : {})};
     }
     // Cutover only: serving old helper builds keep their original report plumbing.
     const escalation = input.report ? item?.report_address ?? (payload?.kind === 'order' ? payload.escalation : undefined) : undefined;

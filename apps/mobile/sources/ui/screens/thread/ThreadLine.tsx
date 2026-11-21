@@ -1,7 +1,7 @@
 import React from 'react';
 import { ListItem, YStack } from 'tamagui';
 import { CornerDownRight } from 'lucide-react-native';
-import type { CornerBlocker, CornerState, CornerStateReason, WorkState } from '@beeline/api-contract/phone';
+import type { CornerBlocker, CornerState, CornerStateReason } from '@beeline/api-contract/phone';
 import { Copy, Glyph, HEIGHT, MARK, typeStyle, useTextSize } from '@/ui/grammar';
 import { WorkStateMark } from '@/ui/screens/tags/WorkMarks';
 import { threadMark } from '@/ui/screens/chats/chat-tree-model';
@@ -12,14 +12,14 @@ import { threadListLabel } from './thread-status';
  * on the right, both centred on the title's line. A thread waiting on this viewer reads
  * "waiting on you" in semibold; one waiting on anyone else names them, quiet.
  */
-export function ThreadLine({ title, state, workState, blocker, reason, viewer, onPress, testID }: {
-    title: string; state: CornerState; workState?: WorkState; blocker?: CornerBlocker; reason?: CornerStateReason;
+export function ThreadLine({ title, state, blocker, reason, viewer, onPress, testID }: {
+    title: string; state: CornerState; blocker?: CornerBlocker; reason?: CornerStateReason;
     /** The viewer's identity id; the waiting line names them "you". */
     viewer?: string;
     onPress: () => void; testID?: string;
 }) {
     const { word, you: brass } = threadListLabel({ state, blocker, reason }, viewer);
-    const mark = threadMark({ state, workState, blocker }, viewer);
+    const mark = threadMark({ state, blocker, reason }, viewer);
     const line = typeStyle('body', useTextSize()).lineHeight;
     return (
         <ListItem

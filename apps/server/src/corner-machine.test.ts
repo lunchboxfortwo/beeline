@@ -19,9 +19,12 @@ const facts: CornerMachineFacts = { archived: false, turnRunning: false };
 const green: CornerMachineFacts = {
   ...facts,
   headSha: head,
+  implementerAvailable: true,
   reviewerConfigured: true,
   lifecycle: { lifecycle: 'in-review', checks: 'passing', pr },
 };
+/** A push's reset rollup: nothing has been read for the head yet. */
+const unread = { status: 'unknown', total: 0, failing: [], checks: [], updatedAt: 1 } as const;
 const observe: CornerEvent = { kind: 'reconcile' };
 const run = (f: CornerMachineFacts, event: CornerEvent = observe, current: CornerMachine = idle) =>
   transitionCorner(current, { facts: f, event });
@@ -31,6 +34,8 @@ describe('corner transition table', () => {
     ['scratch open', facts, { kind: 'open' }, 'idle', undefined],
     ['worker executing', { ...facts, turnRunning: true }, observe, 'working', undefined],
     ['worker ends without PR', { ...facts, idleSince: '1', idleEligible: true }, observe, 'idle', undefined],
+    ['pushed branch without a PR rests idle', { ...facts, headSha: head, idleSince: '1', idleEligible: true, lifecycle: { lifecycle: 'working', checks: 'unknown', checksSummary: unread } }, observe, 'idle', undefined],
+    ['opened PR before its first check read', { ...facts, headSha: head, lifecycle: { lifecycle: 'in-review', checks: 'unknown', pr, checksSummary: unread } }, observe, 'review', undefined],
     ['push after handoff', { ...green, lifecycle: { ...green.lifecycle!, checks: 'pending' } }, { kind: 'push', headSha: head, contents: {} }, 'review', undefined],
     ['first failing job', { ...green, lifecycle: { ...green.lifecycle!, checks: 'failing' }, checkSourceId: 'red' }, { kind: 'checks', result: 'failing', sourceMessageId: 'red' }, 'working', 'checks-failed'],
     ['all green', green, observe, 'review', 'review'],
@@ -42,6 +47,8 @@ describe('corner transition table', () => {
     ['review requests changes', { ...green, reviewEnded: { id: 'review', findings: 'FAIL: missing test' } }, observe, 'working', 'review-findings'],
     ['first review ends without verdict', { ...green, reviewRequests: 1, reviewEnded: { id: 'review', emptyCount: 1 } }, observe, 'working', 'review-findings'],
     ['second review ends without verdict', { ...green, reviewRequests: 2, reviewEnded: { id: 'review', emptyCount: 2 } }, observe, 'working', 'review-findings'],
+    ['empty review without an implementer rests idle', { ...green, implementerAvailable: false, reviewRequests: 1, reviewEnded: { id: 'review', emptyCount: 1 } }, observe, 'idle', undefined],
+    ['findings without an implementer cannot hand back', { ...green, implementerAvailable: false, reviewRequests: 1, reviewEnded: { id: 'review', findings: 'FAIL: missing test' } }, observe, 'idle', undefined],
     ['no reviewer needs no approval', { ...green, reviewerConfigured: false, reviewerRequired: false }, observe, 'idle', undefined],
     ['green without reviewer lands', { ...green, reviewerConfigured: false, reviewerRequired: false }, { kind: 'checks', result: 'passing' }, 'idle', 'land'],
     ['green event continues landing', { ...green, approved: true }, { kind: 'checks', result: 'passing' }, 'idle', 'land'],

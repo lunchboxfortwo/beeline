@@ -123,7 +123,6 @@ it('shows the repository picture on the chat row and its thread row as ↳, name
         id: 'thread',
         name: 'Thread',
         state: 'waiting',
-        workState: 'needs-you',
         blocker: { kind: 'report', personId: 'viewer', personName: 'Vera' },
         lifecycle: { lifecycle: 'idle', checks: 'unknown' },
         lastActivityAt: 1_700_000_000,
@@ -360,16 +359,14 @@ it('shows up to three waiting threads, then more opens every thread, waiting fir
     id: `blocked-${i}`,
     name: `Needs you ${i}`,
     state: 'waiting',
-    workState: 'needs-you',
     blocker: ON_VIEWER,
   }));
-  const other = ['in-progress', 'in-review', 'backlog', 'done'].map((workState) => ({
-    id: workState,
-    name: workState,
-    state: 'working',
-    workState,
-  }));
-  const idle = { id: 'idle', name: 'idle', state: 'idle', workState: 'in-progress' };
+  const other = [
+    { id: 'in-progress', name: 'in-progress', state: 'working' },
+    { id: 'in-review', name: 'in-review', state: 'review' },
+    { id: 'backlog', name: 'backlog', state: 'idle', reason: 'backlog' },
+  ];
+  const idle = { id: 'idle', name: 'idle', state: 'idle' };
   let tree!: ReactTestRenderer;
   const props = {
     viewer: VIEWER,
@@ -395,14 +392,13 @@ it('shows up to three waiting threads, then more opens every thread, waiting fir
   const ids = () => rows().map((row: any) => row.props.testID.slice('thread-row-'.length));
   expect(ids()).toEqual(['blocked-0', 'blocked-1', 'blocked-2']);
   const more = byTestID(tree, `more-${ROOM}`);
-  expect(more.props['aria-label']).toBe('Show 7 more threads');
+  expect(more.props['aria-label']).toBe('Show 6 more threads');
   act(() => more.props.onPress());
   expect(ids()).toEqual([
     ...blocked.map((corner) => corner.id),
     'in-progress',
     'in-review',
     'backlog',
-    'done',
     'idle',
   ]);
   expect(tree.root.findAll((n: any) => n.props.testID === `more-${ROOM}`)).toHaveLength(0);
@@ -431,7 +427,7 @@ it.each(['small', 'medium', 'large'] as const)(
   (size: TextSize) => {
     const waiting = {
       ...item,
-      openCorners: [{ id: 'w', name: 'waiting', state: 'waiting', workState: 'needs-you', blocker: ON_VIEWER }],
+      openCorners: [{ id: 'w', name: 'waiting', state: 'waiting', blocker: ON_VIEWER }],
     } as unknown as ChatListItem;
     let tree!: ReactTestRenderer;
     act(() => {
@@ -449,7 +445,7 @@ it.each(['small', 'medium', 'large'] as const)(
 );
 
 it('keeps B as the default and permits the local avatar-column C comparison, ↳ leading both', () => {
-  const marked = { ...item, openCorners: [{ id: 'thread', name: 'Thread', state: 'waiting', workState: 'needs-you', blocker: ON_VIEWER }] } as unknown as ChatListItem;
+  const marked = { ...item, openCorners: [{ id: 'thread', name: 'Thread', state: 'waiting', blocker: ON_VIEWER }] } as unknown as ChatListItem;
   const props = { item: marked, viewer: VIEWER, now: 1_700_000_000_000, first: true, onOpen: vi.fn(), onPin: vi.fn(), onOpenThread: vi.fn() };
   let tree!: ReactTestRenderer;
   act(() => { tree = create(<ChatRow {...props} />); });

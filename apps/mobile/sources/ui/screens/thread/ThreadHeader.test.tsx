@@ -214,17 +214,21 @@ for (const [title, parts] of [
   });
 }
 
-for (const workState of ['backlog', 'done'] as const) {
-  it.each(['idle', 'working', 'waiting', 'review', undefined] as const)(`preserves stored ${workState} in both headers over %s`, state => {
-    const assignee = { pubkey: 'agent', kind: 'agent' as const, name: 'Agent' };
-    const h: ThreadHeaderData = { ...reconnect, state, waitsOnViewer: true,
-      workItem: { id: 'thread', roomId: 'thread', chatId: 'chat', chatName: 'beeline', threadName: 'task', title: 'task',
-        state: workState, assignee, openedBy: assignee, createdAt: 1, updatedAt: 1 } };
-    let tree: any;
-    act(() => { tree = create(<><ThreadTitleBlock h={h}/><ThreadBar h={h} collapsed openChat={() => undefined}/></>); });
-    expect(tree.root.findAllByType('WorkStateMark').map((node: any) => node.props)).toEqual([
-      { state: workState, idle: false }, { state: workState, idle: false },
-    ]);
-    act(() => tree.unmount());
-  });
-}
+// One state per thread: both headers draw the corner machine state and reason; a stored
+// task state on the thread's work item (the retired second source) never overrides it.
+it.each([
+  ['idle', undefined, { state: 'in-progress', idle: true }],
+  ['idle', 'backlog', { state: 'backlog', idle: false }],
+  ['working', undefined, { state: 'in-progress', idle: false }],
+  ['review', undefined, { state: 'in-review', idle: false }],
+  ['archived', undefined, { state: 'done', idle: false }],
+] as const)('draws %s (reason %s) from the machine in both headers over a planted stored Done', (state, reason, mark) => {
+  const assignee = { pubkey: 'agent', kind: 'agent' as const, name: 'Agent' };
+  const h: ThreadHeaderData = { ...reconnect, state, ...(reason ? { reason } : {}),
+    workItem: { id: 'thread', roomId: 'thread', chatId: 'chat', chatName: 'beeline', threadName: 'task', title: 'task',
+      state: 'done', assignee, openedBy: assignee, createdAt: 1, updatedAt: 1 } };
+  let tree: any;
+  act(() => { tree = create(<><ThreadTitleBlock h={h}/><ThreadBar h={h} collapsed openChat={() => undefined}/></>); });
+  expect(tree.root.findAllByType('WorkStateMark').map((node: any) => node.props)).toEqual([mark, mark]);
+  act(() => tree.unmount());
+});

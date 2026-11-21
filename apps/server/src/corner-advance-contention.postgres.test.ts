@@ -128,8 +128,9 @@ describe.skipIf(!url)('corner advance under one busy corner', () => {
 
   it('a second event that commits between the unlocked read and the locked write makes the write use the newer facts', async () => {
     const { cornerId } = await seedBusyCorner();
-    // A reviewer PASS lands while a push event is still reading the corner.
-    const second: CornerEvent = { kind: 'approval', headSha: head, by: 'reviewer' };
+    // Parking changes durable state while a push event is still reading the corner.
+    // An approval with no queued handoff can leave the row unchanged.
+    const second: CornerEvent = { kind: 'backlog', backlog: true };
     const first: CornerEvent = { kind: 'push', headSha: head, contents: {} };
     let snapshots = 0;
     let secondResult: Awaited<ReturnType<typeof advanceCorner>> | undefined;
@@ -144,9 +145,9 @@ describe.skipIf(!url)('corner advance under one busy corner', () => {
     const reference = await seedBusyCorner();
     await advanceCorner(database, reference.cornerId, second);
     await advanceCorner(database, reference.cornerId, first);
-    // With no required reviewer the approved green head settles idle (749858090
-    // moved the yes to the merge gate); a write from the stale read would not.
-    expect(await machine(cornerId)).toMatchObject({ state: 'idle', headSha: head, effects: ['idle:<own>:0'] });
+    // update_work's Backlog contract: a later push must preserve the parked state.
+    // A write from the stale read would erase Backlog.
+    expect(await machine(cornerId)).toMatchObject({ state: 'idle', reason: 'backlog', backlog: true, headSha: head });
     expect(await machine(cornerId)).toEqual(await machine(reference.cornerId));
     expect(await commands(cornerId)).toEqual(await commands(reference.cornerId));
     // The first event read the corner again after the second event's commit.

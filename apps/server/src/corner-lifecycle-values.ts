@@ -63,6 +63,8 @@ export type CornerEvent =
   | { kind: 'merge-refused'; headSha: string; reason: string; confirmedUnmerged?: boolean }
   | { kind: 'merged'; contents: Record<string, unknown> }
   | { kind: 'closed' }
+  /** update_work moved the thread into (true) or out of (false) Backlog. */
+  | { kind: 'backlog'; backlog: boolean }
   | { kind: 'merge-conflict'; sourceMessageId: string }
   | { kind: 'reconcile' };
 

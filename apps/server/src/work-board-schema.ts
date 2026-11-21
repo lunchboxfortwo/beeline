@@ -16,6 +16,21 @@ CREATE TABLE IF NOT EXISTS work_items (
 );
 -- priority is retired and kept only for rollout and rollback overlap.
 ALTER TABLE work_items ADD COLUMN IF NOT EXISTS objective text;
+-- One state per thread: a thread's own row stores no state, whoever writes it; its corner
+-- machine (corner_facts.machine) owns that state. Other tasks (requests, questions) keep theirs.
+ALTER TABLE work_items ALTER COLUMN state DROP NOT NULL;
+CREATE OR REPLACE FUNCTION beeline_thread_work_state() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.state IS NOT NULL
+    AND EXISTS(SELECT 1 FROM rooms thread WHERE thread.id::text=NEW.id AND thread.parent_id IS NOT NULL) THEN
+    NEW.state := NULL;
+    NEW.completed_at := NULL;
+  END IF;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS thread_work_state ON work_items;
+CREATE TRIGGER thread_work_state BEFORE INSERT OR UPDATE OF state,completed_at ON work_items
+  FOR EACH ROW EXECUTE FUNCTION beeline_thread_work_state();
 CREATE INDEX IF NOT EXISTS work_items_room_idx ON work_items(room_id);
 CREATE INDEX IF NOT EXISTS work_items_source_idx ON work_items(source_message_id);
 CREATE INDEX IF NOT EXISTS work_items_assignee_idx ON work_items(assignee_id);
@@ -49,12 +64,13 @@ CREATE INDEX IF NOT EXISTS work_item_entries_author_idx ON work_item_entries(aut
 CREATE OR REPLACE FUNCTION beeline_work_item_entry() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE actor text := COALESCE(NULLIF(current_setting('beeline.work_actor',true),''),NEW.opened_by);
 BEGIN
-  IF TG_OP='INSERT' THEN
+  -- A thread's own row stores no state (its corner machine owns it), so it logs no state move.
+  IF TG_OP='INSERT' AND NEW.state IS NOT NULL THEN
     INSERT INTO work_item_entries(work_item_id,author_id,kind,text)
       VALUES(NEW.id,actor,'event','created this item in ' || CASE NEW.state
         WHEN 'backlog' THEN 'Backlog' WHEN 'done' THEN 'Done' WHEN 'needs-you' THEN 'Needs you'
         WHEN 'in-review' THEN 'In review' ELSE 'In progress' END);
-  ELSIF NEW.state IS DISTINCT FROM OLD.state THEN
+  ELSIF TG_OP='UPDATE' AND NEW.state IS NOT NULL AND NEW.state IS DISTINCT FROM OLD.state THEN
     INSERT INTO work_item_entries(work_item_id,author_id,kind,text)
       VALUES(NEW.id,actor,'event','moved this to ' || CASE NEW.state
         WHEN 'backlog' THEN 'Backlog' WHEN 'done' THEN 'Done' WHEN 'needs-you' THEN 'Needs you'

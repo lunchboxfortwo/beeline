@@ -604,7 +604,6 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
         corner: about ? { ...header, about } : header,
         lifecycle,
         ...derived,
-        ...(corner.work_state === 'backlog' || corner.work_state === 'done' ? { workState: corner.work_state } : {}),
         stateAt:
           hasLiveWorkingTurn && corner.latest_turn_created_at
             ? unix(corner.latest_turn_created_at)

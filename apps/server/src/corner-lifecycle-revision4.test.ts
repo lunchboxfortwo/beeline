@@ -116,3 +116,96 @@ it('Reproduction REVIEW-ORDER: ordering the listed reviewer works and an archive
     VALUES($1,$2,$3,'Archived corner',now())`,[archived,W,R]);
   await expect(rootFixture.daemon.execute('order',{...args,address:archived},A)).rejects.toThrow('archived');
 });
+
+it.each(['reply','silent'])('Reproduction REVIEW-EMPTY-HANDBACK: a %s review with no verdict hands back to the implementer once, privately', async ending => {
+  await rootFixture.phone.execute('updateRoom',{roomId:R,reviewerAgentId:B},H);
+  await greenHead(108,'8'.repeat(40));
+  const [review]=await commands(B,C);
+  await claim(review!);
+  if(ending==='reply') {
+    await result(review!,'The review is complete.');
+    const [reply]=(await commands(A,C)).filter(command=>command.reason==='reply');
+    await claim(reply!);
+    await result(reply!,'');
+  } else await rootFixture.db.query(`SELECT beeline_finish_agent_command($1,'complete',NULL,NULL)`,[review!.id]);
+  for(let replay=0;replay<3;replay++) await reconcileConfiguredCornerReviewers(rootFixture.db,R);
+  const handback=(await commands(A,C)).filter(command=>command.reason==='corner_review_needed');
+  expect(handback).toHaveLength(1);
+  expect(handback[0]!.source.body).toContain('the reviewer gave no verdict; arrange review or report the blocker to its commander');
+  expect(handback[0]!.source.body).not.toContain('FAIL');
+  const lines=(await rootFixture.db.query<{text:string}>(`SELECT text FROM messages WHERE room_id=$1`,[C])).rows;
+  expect(lines.some(line=>/no verdict|arrange review/.test(line.text))).toBe(false);
+  // Answering a System wake posts without waking anyone, and the tool result says so.
+  await claim(handback[0]!);
+  expect(await rootFixture.daemon.execute('reply',{id:handback[0]!.id,text:'Blocked: no reviewer verdict'},A)).toMatchObject({delivered:true,
+    receipt:'Message stored and visible. No agents woken. A reply to a System wake is posted, not delivered to anyone; use message() to reach someone.'});
+  await rootFixture.db.backgroundWork.drain();
+});
+
+it('Reproduction REVIEW-STUCK: a recorded review handback with no command (prod before the fix) is delivered once on the next machine evaluation', async () => {
+  await rootFixture.phone.execute('updateRoom',{roomId:R,reviewerAgentId:B},H);
+  await greenHead(109,'9'.repeat(40));
+  const [review]=await commands(B,C);
+  await claim(review!);
+  await rootFixture.db.query(`SELECT beeline_finish_agent_command($1,'complete',NULL,NULL)`,[review!.id]);
+  await reconcileConfiguredCornerReviewers(rootFixture.db,R);
+  // The old server recorded review-failed:<head>:<review> and queued nothing: recreate that state.
+  const [first]=(await commands(A,C)).filter(command=>command.reason==='corner_review_needed');
+  await rootFixture.db.query('DELETE FROM agent_commands WHERE id=$1',[first!.id]);
+  const effects=async()=>(await rootFixture.db.query<{effects:string[]}>(
+    `SELECT machine->'effects' effects FROM corner_facts WHERE corner_id=$1`,[C])).rows[0]!.effects;
+  expect(await effects()).toContain(`review-failed:${'9'.repeat(40)}:${review!.id}`);
+  expect((await commands(A,C)).filter(command=>command.reason==='corner_review_needed')).toHaveLength(0);
+  // The next evaluation (a startup reconcile or any committed event) delivers it once, under the same id.
+  for(let replay=0;replay<3;replay++) await reconcileConfiguredCornerReviewers(rootFixture.db,R);
+  const [handback,...extra]=(await commands(A,C)).filter(command=>command.reason==='corner_review_needed');
+  expect(extra).toEqual([]);
+  expect(handback!.id).toBe(first!.id);
+  // Once it ran, the receipt is proven and replays never send it again.
+  await claim(handback!);
+  await result(handback!,'');
+  await rootFixture.db.query(`SELECT beeline_finish_agent_command($1,'complete',NULL,NULL)`,[handback!.id]);
+  for(let replay=0;replay<3;replay++) await reconcileConfiguredCornerReviewers(rootFixture.db,R);
+  expect((await rootFixture.db.query(`SELECT id FROM agent_commands WHERE room_id=$1 AND reason='corner_review_needed'`,[C])).rows)
+    .toEqual([{id:first!.id}]);
+  await rootFixture.db.backgroundWork.drain();
+});
+
+it.each(['empty', 'findings'])('a locked thread with a completed %s review and no implementer stops writing and queuing', async verdict => {
+  const db = rootFixture.db;
+  const head = 'a'.repeat(40);
+  await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
+  await greenHead(110, head);
+  const [review] = await commands(B, C);
+  await claim(review!);
+  await db.query('UPDATE corner_facts SET locked=true,implementer_agent_id=NULL WHERE corner_id=$1', [C]);
+  try {
+    if (verdict === 'findings') await db.query(`INSERT INTO messages(id,room_id,author_id,text,request_id)
+      VALUES('orphaned-review-findings',$1,$2,'FAIL: missing required evidence.',$3)`, [C, B, review!.turnRequestId]);
+    await db.query(`SELECT beeline_finish_agent_command($1,'complete',NULL,NULL)`, [review!.id]);
+    await db.backgroundWork.drain();
+    expect(await advanceCorner(db, C, { kind: 'reconcile' })).toMatchObject({ state: 'idle' });
+    const before = (await db.query(`SELECT id FROM agent_commands WHERE room_id=$1 ORDER BY id`, [C])).rows;
+    await db.query(`CREATE TEMP TABLE review_noop_writes (corner_id uuid)`);
+    await db.query(`CREATE FUNCTION pg_temp.record_review_noop_write() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN INSERT INTO review_noop_writes VALUES (NEW.corner_id); RETURN NEW; END $$`);
+    await db.query(`CREATE TRIGGER review_noop_write AFTER UPDATE OF machine ON corner_facts
+      FOR EACH ROW EXECUTE FUNCTION pg_temp.record_review_noop_write()`);
+    try {
+      for (let replay = 0; replay < 3; replay++) {
+        await advanceCorner(db, C, { kind: 'reconcile' });
+        await advanceCorner(db, C, { kind: 'merge-refused', headSha: head, reason: 'base moved' });
+      }
+      expect((await db.query('SELECT * FROM review_noop_writes')).rows).toEqual([]);
+      expect((await db.query(`SELECT id FROM agent_commands WHERE room_id=$1 ORDER BY id`, [C])).rows).toEqual(before);
+      expect((await db.query(`SELECT id FROM agent_commands WHERE room_id=$1 AND reason='corner_review_needed'`, [C])).rows).toEqual([]);
+      expect((await db.query(`SELECT archived_at FROM rooms WHERE id=$1`, [C])).rows).toEqual([{ archived_at: null }]);
+    } finally {
+      await db.query('DROP TRIGGER review_noop_write ON corner_facts');
+      await db.query('DROP FUNCTION pg_temp.record_review_noop_write()');
+      await db.query('DROP TABLE review_noop_writes');
+    }
+  } finally {
+    await db.query('UPDATE corner_facts SET locked=false,implementer_agent_id=$2 WHERE corner_id=$1', [C, A]);
+  }
+});

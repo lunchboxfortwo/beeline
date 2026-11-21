@@ -26,6 +26,7 @@ export function cornerIdleSql(cornerId: string): string {
     SELECT rooms.* FROM rooms WHERE id=${cornerId} AND parent_id IS NOT NULL AND archived_at IS NULL
   ) SELECT snapshot.*,
     (machine->>'state'='idle' AND archived_at IS NULL
+      AND machine->>'reason' IS DISTINCT FROM 'backlog'
       AND NOT (worker_active OR reviewer_active OR blocking OR suppressed)) idle_eligible
     FROM (SELECT c.id,c.name,c.parent_id,c.archived_at,gh.lifecycle,f.locked,f.machine,
       activity.worker_active,activity.reviewer_active,NULL::text latest_turn_status,

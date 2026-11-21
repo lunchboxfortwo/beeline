@@ -102,7 +102,8 @@ export type CornerBlocker = {
 };
 
 
-export type CornerStateReason = 'approve' | 'connect' | 'question';
+/** Why a thread waits; `backlog` is an idle thread parked in Backlog by its corner machine. */
+export type CornerStateReason = 'approve' | 'connect' | 'question' | 'backlog';
 
 
 export const ROOM_VIEW_MESSAGE_LIMIT = 30;

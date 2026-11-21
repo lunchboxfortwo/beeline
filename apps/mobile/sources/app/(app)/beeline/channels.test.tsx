@@ -776,7 +776,6 @@ describe('Room deck live path', () => {
             id: `corner-${index + 5}`,
             name,
             state: 'waiting' as const,
-            workState: 'needs-you' as const,
             blocker: { kind: 'report' as const, personId: 'viewer', personName: 'Captain' },
           })),
         ],

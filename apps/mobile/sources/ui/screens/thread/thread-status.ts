@@ -11,9 +11,10 @@ export function threadWaitsOnViewer(thread: ThreadWaitFacts, viewer: string | un
 /**
  * A thread line's second line in lists, per viewer: "waiting on you" (`you`,
  * drawn semibold) for the person the thread waits on, "waiting on Claude"
- * for everyone else, then "review", "working", "done".
+ * for everyone else, then "review", "working", "backlog", "idle", "done"; one corner state drives both.
  */
 export function threadListLabel(thread: ThreadWaitFacts, viewer: string | undefined): { word: string; you: boolean } {
+  if (thread.state === 'idle' && thread.reason === 'backlog') return { word: 'backlog', you: false };
   if (thread.state !== 'waiting') return { word: thread.state === 'archived' ? 'done' : thread.state, you: false };
   if (threadWaitsOnViewer(thread, viewer)) return { word: 'waiting on you', you: true };
   const name = thread.blocker?.personName?.trim();

@@ -131,7 +131,7 @@ const fixture = monolithFixture();
           room: { id: string };
           cornerCount: number;
           waitingCornerCount: number;
-          openCorners: Array<{ id: string; name: string; state: string; workState: string }>;
+          openCorners: Array<{ id: string; name: string; state: string }>;
         }>;
       }
     ).chats.find((item) => item.room.id === ROOM);
@@ -139,7 +139,7 @@ const fixture = monolithFixture();
     // It owes nobody anything, so it is idle, not waiting.
     expect(chat?.waitingCornerCount).toBe(0);
     expect(chat?.openCorners).toEqual([
-      { id: '44444444-4444-4444-8444-444444444444', name: 'Open corner', state: 'idle', workState: 'in-progress' },
+      { id: '44444444-4444-4444-8444-444444444444', name: 'Open corner', state: 'idle' },
     ]);
   });
 

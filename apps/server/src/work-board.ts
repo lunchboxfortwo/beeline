@@ -2,6 +2,7 @@ import { cornerBlockerSql } from './chat-corner-counts.js';
 import {
   cornerShortTitle,
   WORK_STATES,
+  threadWorkMark,
   type UpdateWorkItemInput,
   type WorkBoardView,
   type WorkItemView,
@@ -20,6 +21,7 @@ import { needsYouItems, needsYouRowText } from './needs-you.js';
 import { cornerImplementerSql } from './corner-worker.js';
 import { cornerObjectiveSql, writeCornerObjective } from './corner-objective.js';
 import { CommandRefusalError } from './command-refusal.js';
+import { advanceCorner, type CornerMachine } from './corner-lifecycle.js';
 
 type WorkRow = WorkDetailRow & {
   id: string;
@@ -29,9 +31,12 @@ type WorkRow = WorkDetailRow & {
   chat_name: string;
   name: string;
   thread_name: string;
-  state: WorkState;
+  /** A task's stored state; null for a thread's own row, whose machine decides. */
+  state: WorkState | null;
+  thread: boolean;
+  thread_machine: CornerMachine | null;
+  thread_blocker_person: string | null;
   room_archived: boolean;
-  idle: boolean;
   objective: string;
   assignee: PhoneIdentityRow | null;
   opener: PhoneIdentityRow;
@@ -58,14 +63,30 @@ export async function workBoardScope(
   );
 }
 
+/**
+ * A thread has one state, owned by the corner machine. Its own task row keeps only
+ * assignee, title, objective, notes and attachments. Done on a thread is the caller's
+ * existing close (`closeThread`); every other state moves it into or out of Backlog,
+ * a machine input. Other tasks (requests, questions) keep their stored state.
+ */
 export async function updateWorkItem(
   db: SqlDatabase,
   input: UpdateWorkItemInput,
   actorId: string,
   accessIdentityId = actorId,
+  closeThread?: () => Promise<unknown>,
 ): Promise<void> {
   if (input.state !== undefined && !WORK_STATES.includes(input.state))
     throw new Error('invalid work state');
+  const thread =
+    (input.id ?? input.roomId) === input.roomId &&
+    ((
+      await db.query('SELECT 1 FROM rooms WHERE id::text=$1 AND parent_id IS NOT NULL', [
+        input.roomId,
+      ])
+    ).rowCount ?? 0) > 0;
+  if (thread && input.state === 'done' && !closeThread)
+    throw new Error('a thread is marked done only by its close');
   await db.transaction(async (tx) => {
     const previous =
       (
@@ -78,8 +99,8 @@ export async function updateWorkItem(
     const changed = await tx.query<{ state: WorkState; objective: string | null; corner: boolean }>(
       `INSERT INTO work_items(id,room_id,source_message_id,state,title,objective,assignee_id,opened_by,completed_at)
     SELECT $7,r.id,(SELECT id FROM messages source WHERE source.id=$7 AND source.room_id=r.id),
-      -- A thread's own item is in progress until set otherwise; new work starts in Backlog.
-      COALESCE($2,CASE WHEN $7=r.id::text AND r.parent_id IS NOT NULL THEN 'in-progress' ELSE 'backlog' END),$3,$8,
+      -- A thread's own item stores no state (thread_work_state clears it); new work starts in Backlog.
+      COALESCE($2,'backlog'),$3,$8,
       CASE WHEN $5 THEN $4 ELSE ${cornerImplementerSql('f', 'r')} END,CASE WHEN $7=r.id::text THEN COALESCE(r.created_by,$6) ELSE COALESCE((SELECT author_id FROM messages source WHERE source.id=$7 AND source.room_id=r.id),$6) END,CASE WHEN $2='done' THEN now() END
     FROM rooms r JOIN room_access member ON member.room_id=r.id AND member.identity_id=$9 AND member.removed_at IS NULL
     LEFT JOIN corner_facts f ON f.corner_id=r.id WHERE r.id=$1
@@ -103,35 +124,54 @@ export async function updateWorkItem(
     const item = changed.rows[0];
     if (!item) throw new CommandRefusalError('room access denied', 403);
     // Started work carries its objective into the thread it runs in, unless the thread has its own.
-    if (item.corner && item.objective && item.state !== 'backlog')
+    if (item.corner && item.objective && (thread ? input.state : item.state) !== 'backlog')
       await writeCornerObjective(tx, input.roomId, item.objective, true);
     if (input.note !== undefined) await addWorkNote(tx, { ...input, text: input.note }, actorId);
     for (const attachment of input.attachments ?? [])
       await attachToWorkItem(tx, { ...input, attachment }, actorId);
     await tx.query("SELECT set_config('beeline.work_actor',$1,true)", [previous]);
   });
+  // The thread's own fields land first: a closed thread is no longer open for task edits.
+  if (thread && input.state === 'done') await closeThread!();
+  else if (thread && input.state !== undefined)
+    await advanceCorner(db, input.roomId, { kind: 'backlog', backlog: input.state === 'backlog' });
+}
+
+/**
+ * One-time fold of the retired second thread state: a stored Backlog becomes an open
+ * thread's machine Backlog input. Every thread row's stored state is then cleared.
+ */
+export async function foldThreadWorkStates(database: SqlDatabase): Promise<void> {
+  const threadRows = `FROM rooms r WHERE r.id::text=w.id AND r.parent_id IS NOT NULL AND w.state IS NOT NULL`;
+  const rows = (
+    await database.query<{ id: string }>(
+      `SELECT w.id FROM work_items w
+     JOIN rooms r ON r.id::text=w.id AND r.parent_id IS NOT NULL
+     WHERE w.state='backlog' AND r.archived_at IS NULL`,
+    )
+  ).rows;
+  for (const row of rows) await advanceCorner(database, row.id, { kind: 'backlog', backlog: true });
+  await database.query(`UPDATE work_items w SET state=NULL,completed_at=NULL ${threadRows}`);
 }
 
 /**
  * Board columns for `rooms r` with optional `w` (its work item), `p` (parent) and `f` (corner facts).
- * A corner's live machine places it in progress; only a stored Backlog or Done moves it.
- * An open thread with nothing running stays In progress as idle.
- * The blocker only decides a waiting corner, so other corners skip its lookup.
+ * A thread's own row carries its corner machine output (`thread_machine`, and the waiting
+ * blocker's person); `projectWorkRow` maps it through `threadWorkMark`. Only other tasks
+ * read a stored state. The blocker only decides a waiting corner, so other corners skip its lookup.
  */
 function workColumnsSql(viewer: string): string {
   return `r.id room_id,CASE WHEN r.direct_participants IS NOT NULL THEN 'direct' WHEN r.parent_id IS NOT NULL THEN 'corner' ELSE 'room' END room_kind,
     (r.archived_at IS NOT NULL) room_archived,COALESCE(p.id,r.id) chat_id,COALESCE(p.name,r.name) chat_name,
     CASE WHEN w.id IS NOT NULL AND w.id<>r.id::text THEN COALESCE(w.title,r.name) ELSE r.name END name,r.name thread_name,
-    CASE WHEN r.archived_at IS NOT NULL OR w.state='done' THEN 'done'
-      WHEN w.state='backlog' OR (r.parent_id IS NULL AND w.state IS NULL) THEN 'backlog'
-      WHEN r.parent_id IS NULL OR w.id<>r.id::text THEN
-        CASE WHEN w.state='needs-you' AND w.assignee_id IS DISTINCT FROM ${viewer} THEN 'in-progress' ELSE w.state END
-      WHEN f.machine->>'state'='waiting' AND blocker.person_id=${viewer} THEN 'needs-you'
-      WHEN f.machine->>'state'='review' THEN 'in-review' ELSE 'in-progress' END state,
-    (r.parent_id IS NOT NULL AND r.archived_at IS NULL AND COALESCE(w.id,r.id::text)=r.id::text
-      AND w.state IS DISTINCT FROM 'backlog' AND w.state IS DISTINCT FROM 'done'
-      AND (COALESCE(f.machine->>'state','idle') NOT IN ('working','review','waiting')
-        OR (f.machine->>'state'='waiting' AND blocker.person_id IS DISTINCT FROM ${viewer}))) idle,
+    (r.parent_id IS NOT NULL AND ref.id=r.id::text) thread,
+    CASE WHEN r.parent_id IS NOT NULL AND ref.id=r.id::text THEN COALESCE(f.machine,
+      CASE WHEN r.archived_at IS NOT NULL THEN '{"state":"archived"}'::jsonb END) END thread_machine,
+    blocker.person_id thread_blocker_person,
+    CASE WHEN r.parent_id IS NOT NULL AND ref.id=r.id::text THEN NULL
+      WHEN r.archived_at IS NOT NULL OR w.state='done' THEN 'done'
+      WHEN w.state='backlog' OR w.state IS NULL THEN 'backlog'
+      WHEN w.state='needs-you' AND w.assignee_id IS DISTINCT FROM ${viewer} THEN 'in-progress' ELSE w.state END state,
     COALESCE(NULLIF(CASE WHEN r.parent_id IS NOT NULL AND COALESCE(w.id,r.id::text)=r.id::text
       THEN ${cornerObjectiveSql('r')} END,''),w.objective,'') objective,
     row_to_json(assignee) assignee,row_to_json(opener) opener,
@@ -175,7 +215,8 @@ export async function readWorkBoard(
         -- A standing (locked) corner is a place, not a task; its asks still reach Needs you.
         AND NOT (f.locked IS TRUE AND ref.id=r.id::text)
         AND (r.archived_at IS NULL OR r.archived_at>=now()-interval '7 days')
-        AND (w.state IS DISTINCT FROM 'done' OR w.completed_at>=now()-interval '7 days')`,
+        -- A thread leaves by its machine's archive (above); only other tasks read a stored Done.
+        AND (ref.id=r.id::text AND r.parent_id IS NOT NULL OR w.state IS DISTINCT FROM 'done' OR w.completed_at>=now()-interval '7 days')`,
       [workspaceId, viewerId],
     ),
     needsYouItems(
@@ -228,7 +269,7 @@ export async function readWorkBoard(
       )
     : { rows: [] };
   const questionById = new Map(questions.rows.map((q) => [q.message_id, q]));
-  const items: WorkItemView[] = work.rows.map((row) => projectWorkRow(row, publicOrigin));
+  const items: WorkItemView[] = work.rows.map((row) => projectWorkRow(row, publicOrigin, viewerId));
   const threads = new Map(
     items.filter((item) => item.id === item.roomId).map((item) => [item.roomId, item]),
   );
@@ -312,7 +353,7 @@ export async function readWorkThread(
       [roomId, viewerId],
     )
   ).rows;
-  return rows.map((row) => projectWorkRow(row, publicOrigin));
+  return rows.map((row) => projectWorkRow(row, publicOrigin, viewerId));
 }
 
 function withoutIdle(item: WorkItemView): WorkItemView {
@@ -321,7 +362,20 @@ function withoutIdle(item: WorkItemView): WorkItemView {
   return copy;
 }
 
-function projectWorkRow(row: WorkRow, publicOrigin: string): WorkItemView {
+function projectWorkRow(row: WorkRow, publicOrigin: string, viewerId: string): WorkItemView {
+  const machine = row.thread_machine;
+  const mark = row.thread
+    ? threadWorkMark(
+        {
+          state: machine?.state ?? 'idle',
+          ...(machine?.state === 'idle' && machine.reason ? { reason: machine.reason } : {}),
+          ...(machine?.state === 'waiting' && row.thread_blocker_person
+            ? { blocker: { kind: 'message' as const, personId: row.thread_blocker_person } }
+            : {}),
+        },
+        viewerId,
+      )
+    : { state: row.state ?? 'backlog', idle: false };
   return {
     ...projectWorkDetail(row, publicOrigin),
     id: row.id,
@@ -337,10 +391,10 @@ function projectWorkRow(row: WorkRow, publicOrigin: string): WorkItemView {
       row.chat_id !== row.room_id
         ? cornerShortTitle(row.chat_name, row.thread_name, row.room_id)
         : row.thread_name,
-    state: row.state,
+    state: mark.state,
     ...(row.room_archived ? { roomArchived: true as const } : {}),
     priority: 'none',
-    ...(row.idle ? { idle: true as const } : {}),
+    ...(mark.idle ? { idle: true as const } : {}),
     ...(row.objective ? { objective: row.objective } : {}),
     openedBy: phoneIdentity(row.opener, publicOrigin),
     assignee: row.assignee ? phoneIdentity(row.assignee, publicOrigin) : null,

@@ -158,6 +158,33 @@
       "strict": true
     },
     {
+      "id": "thread.state-store",
+      "module": "Corner lifecycle",
+      "invariant": "A thread has one state, its corner machine (corner_facts.machine). Work-board task state is written only by updateWorkItem, the one-time thread fold and the schema's answered-reply trigger; the store clears it on a thread's own row.",
+      "pattern": "INSERT\\s+INTO\\s+work_items\\b|UPDATE\\s+work_items\\b(?:\\s+(?:AS\\s+)?\\w+)?\\s+SET\\s+(?:(?!\\bWHERE\\b|;|`).)*?\\bstate\\s*=",
+      "flags": "i",
+      "scope": [
+        "apps/server/src"
+      ],
+      "owners": [
+        "apps/server/src/work-board-schema.ts",
+        "apps/server/src/work-board.ts"
+      ],
+      "ownerFunctions": {
+        "apps/server/src/work-board-schema.ts": [
+          "WORK_BOARD_SCHEMA"
+        ],
+        "apps/server/src/work-board.ts": [
+          "updateWorkItem",
+          "foldThreadWorkStates"
+        ]
+      },
+      "ownerSites": 3,
+      "strict": true,
+      "total": 0,
+      "fix": "Change a thread's state through its corner machine: Done is the thread's existing close, Backlog is the machine's backlog event (updateWorkItem routes both). Write task state only through updateWorkItem in apps/server/src/work-board.ts."
+    },
+    {
       "id": "corner.github-cache-writes",
       "module": "Corner state machine",
       "invariant": "Corner GitHub state (PR, checks, merge queue and lifecycle) is written only by the lifecycle owner.",

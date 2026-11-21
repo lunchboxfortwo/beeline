@@ -72,20 +72,14 @@ describe('chat rows', () => {
 
   it('lists every thread, Needs you threads first, without an age cutoff', () => {
     const corners = [
-      {
-        id: 'working',
-        name: 'working',
-        state: 'working' as const,
-        workState: 'in-progress' as const,
-      },
-      { id: 'review', name: 'review', state: 'review' as const, workState: 'in-review' as const },
-      { id: 'backlog', name: 'backlog', state: 'idle' as const, workState: 'backlog' as const },
-      { id: 'done', name: 'done', state: 'idle' as const, workState: 'done' as const },
+      { id: 'working', name: 'working', state: 'working' as const },
+      { id: 'review', name: 'review', state: 'review' as const },
+      { id: 'backlog', name: 'backlog', state: 'idle' as const, reason: 'backlog' as const },
+      { id: 'idle', name: 'idle', state: 'idle' as const },
       ...Array.from({ length: 12 }, (_, i) => ({
         id: `blocked-${i}`,
         name: 'blocked',
         state: 'waiting' as const,
-        workState: 'needs-you' as const,
         blocker: onViewer,
         lastActivityAt: ago(8 * 24),
       })),
@@ -95,7 +89,7 @@ describe('chat rows', () => {
       'working',
       'review',
       'backlog',
-      'done',
+      'idle',
     ]);
     expect(threadWord(corners[4]!, viewer)).toBe('waiting on you');
     expect(chatThreads(chat('dm', { directMessage: { peer: alan } }), corners, viewer)).toEqual([]);
@@ -103,23 +97,33 @@ describe('chat rows', () => {
       'working',
       'review',
       'backlog',
-      'done',
+      'idle',
     ]);
   });
 
   it('marks Needs you only for the person a thread waits on; a wait on anyone else is idle', () => {
     const waiting = (blocker: typeof onViewer) =>
-      ({ id: 'w', name: 'w', state: 'waiting', workState: 'needs-you', blocker }) as ChatListCorner;
+      ({ id: 'w', name: 'w', state: 'waiting', blocker }) as ChatListCorner;
     expect(threadMark(waiting(onViewer), viewer)).toEqual({ state: 'needs-you', idle: false });
     expect(threadMark(waiting(onAlan), viewer)).toEqual({ state: 'in-progress', idle: true });
     expect(threadMark({ state: 'waiting', blocker: onAlan } as ChatListCorner, viewer)).toEqual({ state: 'in-progress', idle: true });
-    expect(threadMark({ state: 'working', workState: 'in-progress' } as ChatListCorner, viewer)).toEqual({ state: 'in-progress', idle: false });
+    expect(threadMark({ state: 'working' } as ChatListCorner, viewer)).toEqual({ state: 'in-progress', idle: false });
     expect(threadMark({ state: 'archived' } as ChatListCorner, viewer)).toEqual({ state: 'done', idle: false });
+  });
+
+  it('Reproduction ROW-DONE: a thread row reads one state, its machine state and reason; a planted second state is ignored', () => {
+    // latency-capture-investigation: a stored Done over an idle machine drew Done beside "idle".
+    const planted = { id: 'r', name: 'r', state: 'idle', workState: 'done' } as unknown as ChatListCorner;
+    expect([threadMark(planted, viewer), threadWord(planted, viewer)]).toEqual([{ state: 'in-progress', idle: true }, 'idle']);
+    const backlog = { id: 'b', name: 'b', state: 'idle', reason: 'backlog' } as ChatListCorner;
+    expect([threadMark(backlog, viewer), threadWord(backlog, viewer)]).toEqual([{ state: 'backlog', idle: false }, 'backlog']);
+    const review = { id: 'v', name: 'v', state: 'review', workState: 'backlog' } as unknown as ChatListCorner;
+    expect([threadMark(review, viewer), threadWord(review, viewer)]).toEqual([{ state: 'in-review', idle: false }, 'review']);
   });
 
   it('shows at most three waiting threads, counts the rest, and shows none when none wait', () => {
     const corner = (id: string, workState: string) =>
-      ({ id, name: id, state: workState === 'needs-you' ? 'waiting' : 'working', workState, blocker: onViewer }) as unknown as ChatListCorner;
+      ({ id, name: id, state: workState === 'needs-you' ? 'waiting' : 'working', blocker: onViewer }) as unknown as ChatListCorner;
     const threads = [
       ...['a', 'b', 'c', 'd'].map((id) => corner(id, 'needs-you')),
       corner('e', 'in-progress'),

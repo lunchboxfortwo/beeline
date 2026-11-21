@@ -155,8 +155,8 @@ export type RoomHistoryOutlineDay = {
 };
 
 
+/** A thread's one state is its corner machine output (`state`, `reason`); see `threadWorkState`. */
 export type ChatListCorner = {
-  readonly workState?: import('./work-board.js').WorkState;
   readonly id: string;
   readonly name: string;
   readonly state: Exclude<CornerState, 'archived'>;
@@ -547,7 +547,6 @@ export type CornerListItem = {
   readonly corner: RoomViewHeader;
   readonly lifecycle: CornerLifecycleView;
   readonly state: CornerState;
-  readonly workState?: import('./work-board.js').WorkState;
   /** Timestamp of the fact that produced `state`. A working state uses the
    * latest child turn receipt rather than the corner metadata timestamp. */
   readonly stateAt?: number;

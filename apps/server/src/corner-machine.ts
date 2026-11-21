@@ -33,8 +33,11 @@ export type CornerMachine = {
   /** A green handoff for this target that has not reached a pending review request. */
   reviewDue?: boolean;
   outcome?: 'landed' | 'closed';
+  /** A person or agent parked the thread in Backlog (update_work); it rests idle with reason backlog. */
+  backlog?: true;
 } & (
-  | { state: 'working' | 'idle' | 'archived' }
+  | { state: 'working' | 'archived' }
+  | { state: 'idle'; reason?: 'backlog' }
   | { state: 'review'; phase: 'checks' | 'reviewer' }
   | { state: 'waiting'; reason: 'blocked' | 'user_action' | 'question' }
 );
@@ -66,6 +69,7 @@ export type CornerMachineFacts = CornerStateFacts & {
   reviewerConfigured?: boolean;
   /** Actual implementer admission; peer work still owns the Working badge. */
   implementerActive?: boolean;
+  implementerAvailable?: boolean;
   /** An actual request for this head; reviewer activity also includes event notices. */
   reviewRequestActive?: boolean;
   reviewRequests?: number;
@@ -107,10 +111,12 @@ export function transitionCorner(
       (key !== `merge-conflict:${headSha ?? ''}` || f.mergeConflictDelivered !== false) &&
       !(f.lostEffects ?? []).includes(key),
   );
-  const base: Pick<CornerMachine, 'headSha' | 'pullRequest' | 'effects' | 'reviewDue'> = {
+  const backlog = event.kind === 'backlog' ? event.backlog : current.backlog === true;
+  const base: Pick<CornerMachine, 'headSha' | 'pullRequest' | 'effects' | 'reviewDue' | 'backlog'> = {
     ...(headSha ? { headSha } : {}),
     ...(pullRequest ? { pullRequest } : {}),
     effects,
+    ...(backlog ? { backlog: true as const } : {}),
   };
   const wakes: MachineWake[] = [];
   const notifications: MachineNotification[] = [];
@@ -124,7 +130,7 @@ export function transitionCorner(
   const checksUnderway =
     checks === 'pending' ||
     f.lifecycle?.checksSummary?.checks.some((check) => check.status === 'pending') ||
-    (Boolean(f.lifecycle?.pr || headSha) &&
+    (Boolean(f.lifecycle?.pr) &&
       f.lifecycle?.checksSummary?.status === 'unknown' &&
       f.lifecycle.checksSummary.total === 0 &&
       f.lifecycle.checksSummary.fetchStartedAt === undefined);
@@ -181,6 +187,7 @@ export function transitionCorner(
     base.reviewDue = true;
   if (
     review &&
+    f.implementerAvailable &&
     headSha &&
     !f.approved &&
     !f.turnRunning &&
@@ -246,6 +253,7 @@ export function transitionCorner(
   )
     state = { ...base, state: 'review', phase: 'reviewer' };
   else if (checksUnderway) state = { ...base, state: 'review', phase: 'checks' };
+  else if (backlog) state = { ...base, state: 'idle', reason: 'backlog' };
   else {
     state = { ...base, state: 'idle' };
     if (f.idleEligible && f.idleSince) notify('idle', `idle:${f.idleSince}`);

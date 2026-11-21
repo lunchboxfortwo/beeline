@@ -231,3 +231,36 @@ it('permits relocating unchanged strict functions, never altered bodies or a sec
     assert.notDeepEqual(check(after),[]);
   } finally { rmSync(root,{recursive:true,force:true}); }
 });
+
+// One thread state: a planted second writer of Work-board task state fails the CI guard,
+// including a new function inside an owner file.
+it('rejects every planted thread-state writer outside the corner machine and Work-board owners', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'thread-state-store-'));
+  const rule = readInvariants(process.cwd()).rules.find(rule => rule.id === 'thread.state-store');
+  const board = 'apps/server/src/work-board.ts';
+  const sources = {
+    [board]: 'export async function updateWorkItem(db) { await db.query(`INSERT INTO work_items(id,room_id,state) VALUES($1,$2,$3)`); }\n'
+      + 'export async function foldThreadWorkStates(db) { await db.query(`UPDATE work_items w SET state=NULL FROM rooms r WHERE r.id::text=w.id`); }\n',
+    'apps/server/src/work-board-schema.ts': "export const WORK_BOARD_SCHEMA = `INSERT INTO work_items(id,room_id,state) VALUES(NEW.id,NEW.room_id,'in-progress')`;\n",
+    // Non-state writes are not thread state.
+    'apps/server/src/phone/account-profile.ts': 'await db.query(`UPDATE work_items SET opened_by=$2 WHERE opened_by=ANY($1)`);\n',
+  };
+  const write = (file, source) => {
+    mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+    writeFileSync(path.join(root, file), source);
+  };
+  try {
+    for (const [file, source] of Object.entries(sources)) write(file, source);
+    assert.deepEqual(judgeTree(root, { rules: [rule] }), []);
+    for (const [file, planted] of [
+      ['apps/server/src/chat-corner-counts.ts', "await db.query(`UPDATE work_items SET state='done' WHERE id=$1`);"],
+      ['apps/server/src/planted.ts', "await db.query(`INSERT INTO work_items(id,room_id,state) VALUES($1,$1,'backlog')`);"],
+      ['apps/server/src/phone/account-profile.ts', "await db.query(`UPDATE work_items item SET title=$3, state = 'done' WHERE id=$1`);"],
+      [board, "export async function markThreadDone(db) { await db.query(`UPDATE work_items SET state='done' WHERE id=$1`); }"],
+    ]) {
+      write(file, (sources[file] ?? '') + planted);
+      assert.match(judgeTree(root, { rules: [rule] }).join('\n'), /\[thread\.state-store\]/, `${file} planted writer was not rejected`);
+      write(file, sources[file] ?? '');
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
