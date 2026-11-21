@@ -1,4 +1,4 @@
-// Pure compiler outputs in Actions cache, never release state or GitHub Releases.
+// Compiler cache policy: docs/release-pipeline.md.
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, appendFileSync } from 'node:fs';

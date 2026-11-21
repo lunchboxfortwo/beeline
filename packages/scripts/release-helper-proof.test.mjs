@@ -10,13 +10,30 @@ test('published local release records include full-check evidence and honest Mac
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   mkdirSync(join(directory, 'release'));
   const path = join(directory, 'release/release.json');
-  const checks = { sourceSha: 'a'.repeat(40), result: 'success', resultsPath: '/private/full-checks/release-checks.json' };
-  writeFileSync(path, JSON.stringify({ runId: 123, components: {}, delivery: {} }));
+  const results = join(directory, 'release-checks.json');
+  writeFileSync(results, '{"typecheck":{"result":"success"}}\n');
+  const checks = { sourceSha: 'a'.repeat(40), result: 'success', resultsPath: results,
+    wallSeconds: 2442.5, completedAt: '2026-11-21T03:56:45.000Z' };
+  const triggerEpoch = Date.parse('2026-11-21T03:16:07Z') / 1000;
+  const checkedEpoch = Date.parse(checks.completedAt) / 1000, completedAt = checkedEpoch + 834;
+  writeFileSync(path, JSON.stringify({ runId: 123, version: 'v0.1.242-rc.1', components: {},
+    delivery: { live: { triggerEpoch, completedAt, elapsedSeconds: completedAt - triggerEpoch } } }));
   await localHooks(directory, {}).afterStep({ step: { name: 'Finalize the release record' }, context: {
-    runner: { temp: directory }, inputs: { channel: 'latest', dispatched_by: '{}' },
+    github: { repository: 'lunchboxfortwo/beeline' }, runner: { temp: directory },
+    inputs: { channel: 'next', dispatched_by: '{}' },
   }, engine: { variables: { releaseChecks: checks, macHelperMode: 'build', desktopMode: 'build' } } });
   const record = JSON.parse(readFileSync(path, 'utf8'));
-  assert.deepEqual(record.checks, checks);
+  const asset = 'https://github.com/lunchboxfortwo/beeline/releases/download/v0.1.242-rc.1/release-checks.json';
+  const published = { ...checks, resultsPath: asset };
+  assert.deepEqual(record.checks, published);
+  assert.deepEqual(record.delivery.localExceptions.checks, published);
+  assert.equal(checks.resultsPath, results);
+  const copied = readFileSync(join(directory, 'release/release-checks.json'), 'utf8');
+  assert.equal(copied, readFileSync(results, 'utf8'));
+  const { live } = record.delivery;
+  assert.equal(live.checksSeconds, checkedEpoch - triggerEpoch);
+  assert.equal(live.deploySeconds, 834);
+  assert.equal(live.checksSeconds + live.deploySeconds, live.elapsedSeconds);
   assert.equal(record.delivery.localExceptions.helperArm64, 'built and install-verified on GitHub-hosted macos-15');
   assert.equal(record.delivery.localExceptions.helperX64, 'built and install-verified on GitHub-hosted macos-15-intel');
 });

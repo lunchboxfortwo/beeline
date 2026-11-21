@@ -107,7 +107,10 @@ export async function releaseSequence({ source, sha, directory, secrets, dispatc
       }, { repository: source, secrets });
       checks.result = 'success';
     } catch (error) { checks.result = 'failure'; throw error; }
-    finally { checks.wallSeconds = (Date.now() - startedAt) / 1000; }
+    finally {
+      checks.wallSeconds = (Date.now() - startedAt) / 1000;
+      checks.completedAt = new Date().toISOString();
+    }
   });
   const delivery = (async () => {
     for (const channel of ['next', 'latest']) {
@@ -126,19 +129,46 @@ export async function releaseSequence({ source, sha, directory, secrets, dispatc
   for (const result of results) if (result.status === 'rejected') throw result.reason;
 }
 
-// Every release leaves full source copies, overlay layers and node_modules in its
-// state directory (hundreds of GB over a day). Logs and records stay.
-export function pruneReleaseWorkspaces(directory, run = execFileSync) {
-  run('sudo', ['-n', 'find', directory, '-type', 'd', '(', '-name', 'source', '-o', '-name', 'upper', '-o', '-name', 'overlay-work',
-    '-o', '-name', 'merged', '-o', '-name', 'node_modules', ')', '-prune', '-exec', 'rm', '-rf', '{}', '+'], { stdio: 'ignore' });
+// A finished release keeps only what it published (release.json and
+// release-checks.json on its GitHub release). Its working directory holds full
+// source copies, overlays, node_modules and logs (tens of GB per release).
+export function removeReleaseDirectory(directory, run = execFileSync) {
+  run('sudo', ['-n', 'rm', '-rf', directory], { stdio: 'ignore' });
+}
+
+// Docker image ownership and retention: docs/release-pipeline.md.
+const RELEASE_IMAGES = ['registry.fly.io/beeline-server', 'registry.fly.io/beeline-free-agents'];
+const releaseTag = tag => RELEASE_IMAGES.some(repository => tag.startsWith(`${repository}:`));
+export function staleReleaseImages(images, sha) {
+  const built = images.filter(image => image.sha && (image.tags.length === 0 || image.tags.some(releaseTag)));
+  const previous = built.filter(image => image.sha !== sha && image.tags.some(releaseTag))
+    .sort((a, b) => Date.parse(b.created) - Date.parse(a.created))[0]?.sha;
+  return built.filter(image => image.sha !== sha && image.sha !== previous)
+    .flatMap(image => image.tags.length ? image.tags.filter(releaseTag) : [image.id]);
+}
+
+export function removeStaleReleaseImages(sha, run = execFileSync) {
+  try {
+    const ids = [...new Set(run('docker', ['images', '--all', '--quiet', '--no-trunc', '--filter', 'label=app.usebeeline.release.sha'], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }).split('\n').filter(Boolean))];
+    if (!ids.length) return;
+    const images = run('docker', ['image', 'inspect', '--format', '{"id":{{json .Id}},"tags":{{json .RepoTags}},"created":{{json .Created}},"sha":{{json (index .Config.Labels "app.usebeeline.release.sha")}}}', ...ids], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }).split('\n').filter(Boolean).map(line => JSON.parse(line))
+      .map(image => ({ ...image, tags: image.tags ?? [], sha: image.sha ?? '' }));
+    const stale = staleReleaseImages(images, sha);
+    // An image still used by a container, or still the parent of a kept image, stays.
+    if (stale.length) try { run('docker', ['image', 'rm', ...stale], { stdio: 'ignore' }); } catch { /* in use */ }
+  } finally {
+    try { run('docker', ['image', 'prune', '-f'], { stdio: 'ignore' }); } catch {}
+  }
 }
 
 async function main(argv) {
   const options = releaseArguments(argv);
   const directory = mkdtempSync(join(tmpdir(), 'beeline-release-'));
   const unlock = acquireReleaseLock(join(tmpdir(), `beeline-unified-release-${userInfo().uid}.lock`), directory);
+  let sha;
   try {
-    const { source, sha } = prepareReleaseSource(root, directory);
+    const prepared = prepareReleaseSource(root, directory), source = prepared.source;
+    sha = prepared.sha;
     execFileSync('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: source, stdio: 'inherit' });
     const { loadEnvironment, attribution, runLocalRelease } = await import(pathToFileURL(join(source, 'packages/scripts/release-local.mjs')));
     const secrets = loadEnvironment(join(homedir(), '.config/beeline-release.env'), source);
@@ -153,9 +183,11 @@ async function main(argv) {
     }
     console.log(store ? 'Store release: production; a pinned native runtime is not live in its store.' : 'Store release: none.');
     await releaseSequence({ source, sha, directory, secrets, dispatchedBy, otaVersions, store, desktopMode: options.desktopMode, macHelpers: options.macHelpers, skipFullChecks: options.skipFullChecks }, runLocalRelease);
-    console.log(`Released ${sha} to next and latest${store ? ' with production store builds' : ''}. Private results: ${directory}`);
+    console.log(`Released ${sha} to next and latest${store ? ' with production store builds' : ''}.`);
   } finally {
-    try { pruneReleaseWorkspaces(directory); } catch { /* leftovers are retried by the next release's own prune */ }
+    // Cleanup never changes the release outcome, whether it succeeded or failed.
+    if (sha) try { removeStaleReleaseImages(sha); } catch { /* Docker unavailable */ }
+    try { removeReleaseDirectory(directory); } catch { /* not removable */ }
     unlock();
   }
 }

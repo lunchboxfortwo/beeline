@@ -57,7 +57,7 @@ export function releasePlan(workflow, checks, options = {}) {
   const carryDesktop = (options['desktop-mode'] || options.desktopMode) === 'carry';
   const carryMac = (options['mac-helpers'] || options.macHelpers) === 'carry';
   return {
-    fullChecks: { suite: 'all', starts: 'alongside helper and desktop builds', gates: 'every promotion and release completion', resultsPath: 'full-checks/release-checks.json', skip: '--skip-full-checks <owner message id>; recorded in release.json' },
+    fullChecks: { suite: 'all', starts: 'alongside helper and desktop builds', gates: 'every promotion and release completion', resultsPath: 'release-checks.json release asset', skip: '--skip-full-checks <owner message id>; recorded in release.json' },
     targetSeconds: 1800,
     target: 'routine squire release; check budget ~5 min + concurrent delivery ~20 min + finalization',
     localCapacity: '3 jobs on existing 3-CPU/12-GiB slices, plus 1 capped Mac orchestration job; iOS store compilation runs remotely',

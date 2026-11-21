@@ -18,7 +18,7 @@ import { run as bookkeeping } from './release-bookkeeping.mjs';
 import { localGithub } from './release-local-github.mjs';
 import { assignReleaseVersion, latestPublished, recoverTaggedReleases } from './release-record.mjs';
 import { CheckQueue, checkPlan, checkWorkspace, LocalChecks } from './release-local-checks.mjs';
-import { pruneReleaseWorkspaces, promptAudit, acquireReleaseLock, localAttribution, pinnedRuntimes, prepareReleaseSource, readOtaVersions, releaseArguments, storeReleaseNeeded } from './release.mjs';
+import { promptAudit, acquireReleaseLock, localAttribution, pinnedRuntimes, prepareReleaseSource, readOtaVersions, releaseArguments, storeReleaseNeeded } from './release.mjs';
 
 const repository = resolve(import.meta.dirname, '../..');
 const temporary = () => mkdtempSync(join(tmpdir(), 'beeline-local-test-'));
@@ -46,15 +46,6 @@ test('prompt audit is advisory and writes beside nightly checks', () => {
   });
   assert.deepEqual(commands, [['npx', 'turbo', 'run', 'build', '--filter=@beeline/body', '--filter=@beeline/server', '/source'],
     ['npm', 'run', 'prompt-audit', '--', '--out', '/state/prompt-audit', '/source']]);
-});
-test('the release prunes source copies, overlays and node_modules from its state directory but keeps logs', () => {
-  const calls = [];
-  pruneReleaseWorkspaces('/fixture/state', (command, args) => calls.push([command, args]));
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0][0], 'sudo');
-  assert.deepEqual(calls[0][1].slice(0, 3), ['-n', 'find', '/fixture/state']);
-  for (const name of ['source', 'upper', 'overlay-work', 'merged', 'node_modules']) assert.ok(calls[0][1].includes(name));
-  assert.ok(!calls[0][1].includes('output.log') && !calls[0][1].includes('records.json'));
 });
 test('a store release is needed only when a pinned runtime is not the newest live store runtime', () => {
   const config = 'ios: {\n runtimeVersion: runtimeVersionOverride || "41",\n},\nandroid: {\n runtimeVersion: runtimeVersionOverride || "53",\n}';
@@ -261,6 +252,38 @@ test('Node selection honors an installed compatible repository pin through fnm',
     assert.deepEqual(calls[1][1].slice(0, 4), ['exec', '--using', '24.16.0', 'node']);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
+test('native compiler outputs persist across local releases; other caches still miss', async () => {
+  const directory = temporary(), home = join(directory, 'operator');
+  try {
+    writeFileSync(join(directory, 'workflow.yml'), `jobs:
+  build:
+    steps:
+      - id: native
+        uses: actions/cache@v4
+        with:
+          path: |
+            out/release/buzz-agent
+          key: buzz-agent-v2-linux-x64-identity
+      - id: other
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ci-root-v1-identity
+      - run: |
+          echo "\${{ steps.native.outputs.cache-hit }} \${{ steps.other.outputs.cache-hit }}" >> hits
+          if [ '\${{ steps.native.outputs.cache-hit }}' != true ]; then mkdir -p out/release && echo built > out/release/buzz-agent; fi
+`);
+    const github = { sha, repository: 'owner/repo', event_name: 'workflow_dispatch', run_id: '123' };
+    for (const state of ['first', 'second']) {
+      if (state === 'second') rmSync(join(directory, 'out'), { recursive: true });
+      const engine = new LocalActions({ root: directory, directory: join(directory, state), secrets: {}, processes: new Processes({}, () => {}), baseEnv: { PATH: process.env.PATH, HOME: home } });
+      assert.equal((await engine.workflow('workflow.yml', {}, { github })).build.result, 'success');
+    }
+    assert.equal(readFileSync(join(directory, 'hits'), 'utf8'), 'false false\ntrue false\n');
+    assert.equal(readFileSync(join(directory, 'out/release/buzz-agent'), 'utf8'), 'built\n');
+    assert.equal(readFileSync(join(home, '.cache/beeline-release/native-agent/buzz-agent-v2-linux-x64-identity/out/release/buzz-agent'), 'utf8'), 'built\n');
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
 test('local setup-node accepts Node 24 without fnm and rejects Node below 22', async () => {
   const directory = temporary();
   try {
@@ -387,7 +410,7 @@ test('checks-only execution uses the complete reusable release gate without init
     await assert.rejects(releaseChecks(engine, { github: { sha } }), /Release checks failed/);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
-test('checks-only hooks retain the full workflow and cap memory at two existing slots', async () => {
+test('checks-only hooks retain the full workflow and use the four existing slots', async () => {
   const workflow = parse(readFileSync(join(repository, '.github/workflows/checks.yml'), 'utf8'));
   const prepare = LocalChecks.prototype.prepare;
   const execute = LocalChecks.prototype.execute;
@@ -399,7 +422,7 @@ test('checks-only hooks retain the full workflow and cap memory at two existing 
     const execution = await localHooks('/fixture', {}, { fullChecks: true }).workflow({
       file: '.github/workflows/checks.yml', workflow, inherited: {}, engine,
     });
-    assert.deepEqual(slots, [1, 2]);
+    assert.deepEqual(slots, [1, 2, 3, 4]);
     assert.deepEqual(execution.workflow, workflow);
     const inputs = { suite: 'all', release_sha: '', pinned_sha: sha };
     for (const id of ['body-suite', 'server-suite-shard', 'mobile-suite', 'production-corpus-replay', 'server-claim-latency']) {
@@ -509,7 +532,7 @@ test('the dry Checks plan keeps the quick release gate and lists omitted PR suit
   assert.deepEqual(JSON.parse(messages[0]), full);
   assert.deepEqual(full.dropped, []);
   assert.ok(full.jobs.some(job => job.id === 'mobile-suite'));
-  assert.match(full.budget, /24 GiB/);
+  assert.match(full.budget, /48 GiB/);
   assert.match(plan.execution, /three independent quick-check jobs/);
 });
 test('shard transport inherits existing slices and jails without changing their budgets or services', async () => {
