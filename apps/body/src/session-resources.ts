@@ -15,6 +15,26 @@ type Context = {
   grants: DaemonOperationMap['listAgentGrants']['output'];
 };
 
+/** Same matching as managed apps: an exact slug/name, else every word in the slug, name or description. */
+function toolsMatching(result: unknown, query: unknown): unknown {
+  const search = typeof query === 'string' ? query.trim().toLowerCase() : '';
+  const list = (result as { tools?: unknown } | null)?.tools;
+  if (!search || !Array.isArray(list)) return result;
+  const field = (tool: unknown, key: string) => {
+    const value = (tool as Record<string, unknown> | null)?.[key];
+    return typeof value === 'string' ? value.toLowerCase() : '';
+  };
+  const exact = list.filter((tool) => field(tool, 'name') === search);
+  const terms = search.split(/\s+/);
+  const tools = exact.length
+    ? exact
+    : list.filter((tool) => {
+        const text = `${field(tool, 'name')} ${field(tool, 'title')} ${field(tool, 'description')}`;
+        return terms.every((term) => text.includes(term));
+      });
+  return { ...(result as object), tools };
+}
+
 /** Optional facts load beside the live session. No caller can wait for a refresh. */
 export class SessionResources {
   readonly context: Partial<Context> = {};
@@ -126,11 +146,13 @@ export class SessionResources {
 
   /** Registry routes join the existing app_tool surface as soon as they load. */
   async mcp(
-    input: { app?: unknown; tool?: unknown; args?: unknown },
+    input: { app?: unknown; tool?: unknown; args?: unknown; query?: unknown },
     turn: { roomId: string; requestId: string },
   ): Promise<unknown> {
-    if (input.app === 'registry-mcp:squire' && this.options.squireMcp)
-      return this.options.squireMcp(input);
+    if (input.app === 'registry-mcp:squire' && this.options.squireMcp) {
+      const result = await this.options.squireMcp(input);
+      return input.tool === undefined ? toolsMatching(result, input.query) : result;
+    }
     const route = this.context.configuration?.registryMcpRoutes?.find(
       (candidate) =>
         input.app === `registry-mcp:${candidate.serverName}` || input.app === candidate.target,
@@ -179,7 +201,7 @@ export class SessionResources {
     }
     const connectionId = await connection;
     return input.tool === undefined
-      ? send(connectionId, 'tools/list', {}, ++this.rpcId)
+      ? toolsMatching(await send(connectionId, 'tools/list', {}, ++this.rpcId), input.query)
       : send(
           connectionId,
           'tools/call',

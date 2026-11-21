@@ -48,6 +48,35 @@ it('returns a tool error until a Registry route loads, then attaches it to the s
   expect(vi.mocked(brokerRequest).mock.calls.filter(([, input]) => JSON.parse(input.line).method === 'initialize')).toHaveLength(1);
 });
 
+it('filters Registry and Squire tool discovery by query, leaving an unqueried list whole', async () => {
+  const catalog = [
+    { name: 'use_credential', description: 'Call an API with a vaulted key', inputSchema: { type: 'object' } },
+    { name: 'operate_drive', description: 'Drive a browser', inputSchema: { type: 'object' } },
+    { name: 'list_credentials', description: 'List vaulted keys', inputSchema: { type: 'object' } },
+  ];
+  const f = await fixture(), turn = { roomId: 'room', requestId: 'item' };
+  vi.mocked(brokerRequest).mockImplementation(async (_socket, request) => {
+    const rpc = JSON.parse(request.line);
+    return rpc.id === undefined ? [] : [JSON.stringify({ id: rpc.id, result: rpc.method === 'tools/list' ? { tools: catalog } : {} })];
+  });
+  f.execute.mockImplementation(name => name === 'getAgentConfiguration' ? Promise.resolve({ commands: [], yoloMode: false, isReviewer: false,
+    registryMcpRoutes: [{ connectorId: 'connector', serverName: 'search', target: 'registry-mcp:search', routeName: 'search' }] }) : new Promise(() => {}));
+  f.resources.refresh();
+  await vi.waitFor(() => expect(f.resources.read()).toMatchObject({ status: { configuration: 'ready' } }));
+  expect(await f.resources.mcp({ app: 'registry-mcp:search' }, turn)).toEqual({ tools: catalog });
+  expect(await f.resources.mcp({ app: 'registry-mcp:search', query: 'operate_drive' }, turn)).toEqual({ tools: [catalog[1]] });
+  expect(await f.resources.mcp({ app: 'registry-mcp:search', query: 'VAULTED key' }, turn)).toEqual({ tools: [catalog[0], catalog[2]] });
+  expect(await f.resources.mcp({ app: 'registry-mcp:search', query: 'nothing here' }, turn)).toEqual({ tools: [] });
+
+  const squireMcp = vi.fn(async () => ({ tools: catalog }));
+  const squire = new SessionResources({ api: { execute: f.execute } as unknown as DaemonApiClient, placeId: 'room', agentId: 'agent',
+    workspaceId: 'workspace', cachePath: f.cachePath, squireMcp });
+  expect(await squire.mcp({ app: 'registry-mcp:squire', query: 'use_credential' }, turn)).toEqual({ tools: [catalog[0]] });
+  expect(await squire.mcp({ app: 'registry-mcp:squire' }, turn)).toEqual({ tools: catalog });
+  squireMcp.mockResolvedValueOnce({ content: [] } as never);
+  expect(await squire.mcp({ app: 'registry-mcp:squire', tool: 'use_credential', args: {}, query: 'x' }, turn)).toEqual({ content: [] });
+});
+
 it('a configuration notification reads only configuration, preserving unrelated optional context', async () => {
   const f=await fixture();
   f.resources.context.roster={members:[]};
