@@ -14,7 +14,10 @@ const jobName = (platform) => `HELPER BUILD (${platform})`;
 const DESKTOP_JOB = 'DESKTOP BUILD (macos-universal)';
 // desktop.yml signs only when every Apple secret is present and otherwise
 // builds unsigned; the release accepts only a run whose signed path ran.
-const DESKTOP_SIGNED_STEPS = ['Notarize and staple the macOS disk image', 'Verify the signed and notarized macOS download'];
+const DESKTOP_SIGNED_STEPS = [
+  'Notarize and staple the macOS disk image',
+  'Verify the signed and notarized macOS download',
+];
 const wait = (what) => (ms, signal) =>
   new Promise((resolve, reject) => {
     if (signal?.aborted) {
@@ -62,7 +65,10 @@ async function githubRun({
     repository,
     '--ref',
     ref,
-    ...Object.entries({ ...inputs, request_id: requestId }).flatMap(([name, value]) => ['-f', `${name}=${value}`]),
+    ...Object.entries({ ...inputs, request_id: requestId }).flatMap(([name, value]) => [
+      '-f',
+      `${name}=${value}`,
+    ]),
   ]);
   let run;
   try {
@@ -113,9 +119,21 @@ export async function githubMacHelpers({
   sleep,
 }) {
   const started = new Date(now()).toISOString();
-  const { run, jobs, gh } = await githubRun({ processes, token, repository, workflow: MAC_HELPERS_WORKFLOW,
-    inputs: { release_sha: sha, release_version: version }, what: 'Mac helper build', building: 'Mac helpers building',
-    signal, ref, poll, timeoutMinutes, now, sleep });
+  const { run, jobs, gh } = await githubRun({
+    processes,
+    token,
+    repository,
+    workflow: MAC_HELPERS_WORKFLOW,
+    inputs: { release_sha: sha, release_version: version },
+    what: 'Mac helper build',
+    building: 'Mac helpers building',
+    signal,
+    ref,
+    poll,
+    timeoutMinutes,
+    now,
+    sleep,
+  });
   const results = {};
   for (const platform of MAC_PLATFORMS) {
     const job = jobs.find((candidate) => candidate.name === jobName(platform)),
@@ -174,14 +192,29 @@ export async function githubMacDesktop({
   now = () => Date.now(),
   sleep,
 }) {
-  const { run, jobs, gh } = await githubRun({ processes, token, repository, workflow: MAC_DESKTOP_WORKFLOW,
+  const { run, jobs, gh } = await githubRun({
+    processes,
+    token,
+    repository,
+    workflow: MAC_DESKTOP_WORKFLOW,
     inputs: { release_sha: sha, release_version: releaseVersion, desktop_version: desktopVersion },
-    what: 'Mac desktop build', building: 'Mac desktop building', signal, ref, poll, timeoutMinutes, now, sleep });
-  const job = jobs.find((candidate) => candidate.name === DESKTOP_JOB), url = job?.html_url ?? run.html_url;
+    what: 'Mac desktop build',
+    building: 'Mac desktop building',
+    signal,
+    ref,
+    poll,
+    timeoutMinutes,
+    now,
+    sleep,
+  });
+  const job = jobs.find((candidate) => candidate.name === DESKTOP_JOB),
+    url = job?.html_url ?? run.html_url;
   if (job?.conclusion !== 'success') throw new Error(`Mac desktop build failed on GitHub: ${url}`);
   for (const step of DESKTOP_SIGNED_STEPS)
     if (job.steps?.find((candidate) => candidate.name === step)?.conclusion !== 'success')
-      throw new Error(`Mac desktop build is not Developer ID signed and notarized (${step} did not run): ${url}`);
+      throw new Error(
+        `Mac desktop build is not Developer ID signed and notarized (${step} did not run): ${url}`,
+      );
   const name = `beeline-desktop-release-${releaseVersion}-${sha}-macos-universal`,
     path = join(directory, name);
   mkdirSync(path, { recursive: true, mode: 0o700 });
