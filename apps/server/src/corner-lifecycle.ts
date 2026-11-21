@@ -389,6 +389,7 @@ async function readCornerAdvance(
       headSha: head,
       turnRunning: row?.worker_active === true || active?.worker === true,
       implementerActive: active?.worker === true,
+      implementerAvailable: Boolean(corner.worker_agent_id),
       reviewerActive: row?.reviewer_active === true || review.pending,
       // Activity owns the displayed state. Only a request sent with passing
       // checks suppresses the first green-head review dispatch.
@@ -663,7 +664,7 @@ async function writeCornerAdvance(
         ...('reason' in status ? { reason: status.reason } : {}), effects } as CornerMachine;
     // Any write here changes the row version, so an event that read before this
     // commit reads again. Only a write-free event leaves the version alone.
-    const wrote = archived || event.kind === 'closed' || plan.wakes.length > 0 ||
+    const wrote = archived || event.kind === 'closed' || queuedWork ||
       plan.notifications.length > 0;
     await db.query(
       `UPDATE corner_facts SET machine=$2::jsonb WHERE corner_id=$1 AND ($3 OR machine IS DISTINCT FROM $2::jsonb)`,

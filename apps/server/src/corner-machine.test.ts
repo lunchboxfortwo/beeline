@@ -19,6 +19,7 @@ const facts: CornerMachineFacts = { archived: false, turnRunning: false };
 const green: CornerMachineFacts = {
   ...facts,
   headSha: head,
+  implementerAvailable: true,
   reviewerConfigured: true,
   lifecycle: { lifecycle: 'in-review', checks: 'passing', pr },
 };
@@ -46,6 +47,8 @@ describe('corner transition table', () => {
     ['review requests changes', { ...green, reviewEnded: { id: 'review', findings: 'FAIL: missing test' } }, observe, 'working', 'review-findings'],
     ['first review ends without verdict', { ...green, reviewRequests: 1, reviewEnded: { id: 'review', emptyCount: 1 } }, observe, 'working', 'review-findings'],
     ['second review ends without verdict', { ...green, reviewRequests: 2, reviewEnded: { id: 'review', emptyCount: 2 } }, observe, 'working', 'review-findings'],
+    ['empty review without an implementer rests idle', { ...green, implementerAvailable: false, reviewRequests: 1, reviewEnded: { id: 'review', emptyCount: 1 } }, observe, 'idle', undefined],
+    ['findings without an implementer cannot hand back', { ...green, implementerAvailable: false, reviewRequests: 1, reviewEnded: { id: 'review', findings: 'FAIL: missing test' } }, observe, 'idle', undefined],
     ['no reviewer needs no approval', { ...green, reviewerConfigured: false, reviewerRequired: false }, observe, 'idle', undefined],
     ['green without reviewer lands', { ...green, reviewerConfigured: false, reviewerRequired: false }, { kind: 'checks', result: 'passing' }, 'idle', 'land'],
     ['green event continues landing', { ...green, approved: true }, { kind: 'checks', result: 'passing' }, 'idle', 'land'],

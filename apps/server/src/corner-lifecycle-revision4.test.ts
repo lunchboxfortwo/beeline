@@ -170,3 +170,42 @@ it('Reproduction REVIEW-STUCK: a recorded review handback with no command (prod 
     .toEqual([{id:first!.id}]);
   await rootFixture.db.backgroundWork.drain();
 });
+
+it.each(['empty', 'findings'])('a locked thread with a completed %s review and no implementer stops writing and queuing', async verdict => {
+  const db = rootFixture.db;
+  const head = 'a'.repeat(40);
+  await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
+  await greenHead(110, head);
+  const [review] = await commands(B, C);
+  await claim(review!);
+  await db.query('UPDATE corner_facts SET locked=true,implementer_agent_id=NULL WHERE corner_id=$1', [C]);
+  try {
+    if (verdict === 'findings') await db.query(`INSERT INTO messages(id,room_id,author_id,text,request_id)
+      VALUES('orphaned-review-findings',$1,$2,'FAIL: missing required evidence.',$3)`, [C, B, review!.turnRequestId]);
+    await db.query(`SELECT beeline_finish_agent_command($1,'complete',NULL,NULL)`, [review!.id]);
+    await db.backgroundWork.drain();
+    expect(await advanceCorner(db, C, { kind: 'reconcile' })).toMatchObject({ state: 'idle' });
+    const before = (await db.query(`SELECT id FROM agent_commands WHERE room_id=$1 ORDER BY id`, [C])).rows;
+    await db.query(`CREATE TEMP TABLE review_noop_writes (corner_id uuid)`);
+    await db.query(`CREATE FUNCTION pg_temp.record_review_noop_write() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN INSERT INTO review_noop_writes VALUES (NEW.corner_id); RETURN NEW; END $$`);
+    await db.query(`CREATE TRIGGER review_noop_write AFTER UPDATE OF machine ON corner_facts
+      FOR EACH ROW EXECUTE FUNCTION pg_temp.record_review_noop_write()`);
+    try {
+      for (let replay = 0; replay < 3; replay++) {
+        await advanceCorner(db, C, { kind: 'reconcile' });
+        await advanceCorner(db, C, { kind: 'merge-refused', headSha: head, reason: 'base moved' });
+      }
+      expect((await db.query('SELECT * FROM review_noop_writes')).rows).toEqual([]);
+      expect((await db.query(`SELECT id FROM agent_commands WHERE room_id=$1 ORDER BY id`, [C])).rows).toEqual(before);
+      expect((await db.query(`SELECT id FROM agent_commands WHERE room_id=$1 AND reason='corner_review_needed'`, [C])).rows).toEqual([]);
+      expect((await db.query(`SELECT archived_at FROM rooms WHERE id=$1`, [C])).rows).toEqual([{ archived_at: null }]);
+    } finally {
+      await db.query('DROP TRIGGER review_noop_write ON corner_facts');
+      await db.query('DROP FUNCTION pg_temp.record_review_noop_write()');
+      await db.query('DROP TABLE review_noop_writes');
+    }
+  } finally {
+    await db.query('UPDATE corner_facts SET locked=false,implementer_agent_id=$2 WHERE corner_id=$1', [C, A]);
+  }
+});

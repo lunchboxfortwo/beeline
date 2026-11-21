@@ -69,6 +69,7 @@ export type CornerMachineFacts = CornerStateFacts & {
   reviewerConfigured?: boolean;
   /** Actual implementer admission; peer work still owns the Working badge. */
   implementerActive?: boolean;
+  implementerAvailable?: boolean;
   /** An actual request for this head; reviewer activity also includes event notices. */
   reviewRequestActive?: boolean;
   reviewRequests?: number;
@@ -186,6 +187,7 @@ export function transitionCorner(
     base.reviewDue = true;
   if (
     review &&
+    f.implementerAvailable &&
     headSha &&
     !f.approved &&
     !f.turnRunning &&
