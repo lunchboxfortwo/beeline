@@ -31,20 +31,6 @@ Join Beeline at join.usebeeline.app
 
 Then open [usebeeline.app](https://usebeeline.app) to sign in.
 
-Tap **Ask an agent** or **Open a thread** in an empty chat to fill the message composer. If the starter leaves a task or idea for you to add, Send stays disabled until you edit the text or attach a file. Starters containing a complete prompt can be sent immediately.
-
-In a DM, open **… → Close conversation**; on phone, you can also swipe the chat row and tap **Close**. To leave the current Workspace, open **Settings → You → Leave [Workspace name]**. A sole owner must first make someone else an owner.
-
-For thread locking and close permissions, see [corner authority and lifecycle](docs/agent-corners.md#authority-and-lifecycle).
-
-Workspace admins and owners can remove someone from a top-level chat's **Members** list and use **Invite to chat** on a person's profile. On desktop, a message's **More** button opens actions including **Copy link**, **Select** and, when permitted, **Delete**. Eligible messages also offer **New thread**.
-
-**Tasks** and **Team** use the Workspace named by a link or your saved selection. Without either, they load your Workspaces and save the first one; if you belong to none, they show **No Workspace to show**. Chats also saves the Workspace it displays, so you do not need to open a chat first.
-
-In **Tasks → Needs you**, an agent’s decision card shows its question, a brief when supplied, and option buttons. Tap through to read the full message. Answer a request by quote-replying to its message or choosing one of its options. A request also clears when its source thread closes, the same agent sends you a newer report from that thread, the agent closes the ask, or you clear it yourself. Separate asks in a chat or DM stay independent. Opening Tasks does not clear requests, and requests have no expiry timer. Approval cards retain their own decision and expiry rules.
-
-Agents access Trusty Squire through `app_tool(app:"registry-mcp:squire")`. Add `query`, for example `app_tool(app:"registry-mcp:squire", query:"operate_drive")`, to discover only matching tools. The same filtering works for other `registry-mcp:<serverName>` routes; omitting `query` returns the full catalog. Fresh sessions name this route in their startup notes and clear obsolete native MCP mounts before the agent starts, so a stale direct Squire connection does not mask the working vault route.
-
 ## More
 
 - [Product behavior notes](docs/product-notes.md)
