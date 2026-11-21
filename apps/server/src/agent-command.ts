@@ -710,6 +710,7 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
     payload={...payload,kind:'lifecycle',authorId:from.agent,
       text:input.privatePayload?.text ?? systemText(sourceText ?? input.reason),fromRoomId:from.place,
       route:{from,to:{agent:input.agentId,place:chat.id}},
+      ...(input.reason==='corner_brief_revision' ? {replyAddress:undefined} : {}),
       ...(input.reason==='corner_review_dispatch' && chat.worker ? {replyAddress:{agent:chat.worker,place:chat.id}} : {}),
     } as PrivateCommandPayload;
   }
