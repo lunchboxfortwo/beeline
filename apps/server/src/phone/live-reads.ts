@@ -97,6 +97,16 @@ import { phoneListRoomWorkflowRuns } from './schedules.js';
                AND workspace_member.identity_id=member.identity_id
                AND workspace_member.removed_at IS NULL
              WHERE room.id=$1
+           ), latest_turn AS MATERIALIZED (
+             -- Every viewer sees the same newest turn. Choose it once, before the
+             -- per-viewer deck columns, not once per turn the agent ever had here.
+             SELECT turn.* FROM (
+               SELECT candidate.request_id FROM agent_turns candidate
+               WHERE candidate.room_id=$1 AND candidate.agent_id=$3 AND EXISTS(SELECT 1 FROM authorized)
+                 AND (candidate.status<>'working' OR ${workingTurnFreshSql('candidate')})
+               ORDER BY (candidate.status='working') DESC,candidate.created_at DESC,candidate.request_id DESC LIMIT 1
+             ) newest
+             JOIN agent_turns turn ON turn.room_id=$1 AND turn.agent_id=$3 AND turn.request_id=newest.request_id
            )
            SELECT DISTINCT ON (authorized.identity_id) turn.request_id,turn.agent_id,turn.status,turn.started_at,turn.created_at,turn.version,
              requester.id requested_by,
@@ -104,14 +114,12 @@ import { phoneListRoomWorkflowRuns } from './schedules.js';
              ${roomNeedsYouSql('room', 'authorized.identity_id')} deck_needs_you,
              ${roomWorkingSql('room')} deck_working,
              ${roomAttentionActorSql('room', 'authorized.identity_id')} deck_attention_actor
-           FROM rooms room CROSS JOIN authorized
-           JOIN agent_turns turn ON turn.room_id=room.id AND turn.agent_id=$3
+           FROM rooms room CROSS JOIN authorized CROSS JOIN latest_turn turn
            LEFT JOIN messages trigger ON trigger.id=${turnRootMessageSql('turn')}
            LEFT JOIN identities requester ON requester.id=trigger.author_id
              AND requester.kind='human'
-           WHERE room.id=$1 AND EXISTS(SELECT 1 FROM authorized)
-             AND (turn.status<>'working' OR ${workingTurnFreshSql('turn')})
-           ORDER BY authorized.identity_id,(turn.status='working') DESC,turn.created_at DESC,turn.request_id DESC`,
+           WHERE room.id=$1
+           ORDER BY authorized.identity_id`,
           [roomId, viewers, target.agentId],
         )
       ).rows;

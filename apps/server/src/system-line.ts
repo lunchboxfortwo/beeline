@@ -530,6 +530,40 @@ export async function systemLine(
   });
 }
 
+/**
+ * The same unkinded line in each of a Workspace's Rooms, as one statement.
+ * Nothing subscribes to a line with no kind and it wakes no one, so each Room
+ * keeps its own row without a label read and an insert per Room.
+ */
+export async function systemLineInRooms(
+  database: SqlDatabase,
+  workspaceId: string,
+  roomIds: readonly string[],
+  input: Pick<SystemLineInput, 'subject' | 'verb' | 'object' | 'consequence' | 'cardType' | 'card'>,
+): Promise<void> {
+  if (!roomIds.length) return;
+  const authorId = input.subject.id;
+  if (!authorId) throw new Error('system line needs an author identity');
+  const { text, event } = composeSystemLine(
+    await canonicalPhrase(database, input, undefined, undefined, undefined, workspaceId),
+  );
+  await database.query(
+    `INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card,system_event,created_at)
+     SELECT line.id,line.room_id,$3,$4,'system',$5,$6::jsonb,$7::jsonb,now()
+     FROM unnest($1::text[],$2::uuid[]) line(id,room_id)
+     ON CONFLICT DO NOTHING`,
+    [
+      roomIds.map(() => randomBytes(32).toString('hex')),
+      roomIds,
+      authorId,
+      text,
+      input.cardType ?? null,
+      input.card ? JSON.stringify({ ...input.card, ask: approvalAsk(input.cardType, input.card) }) : null,
+      JSON.stringify(event),
+    ],
+  );
+}
+
 /** One committed batch of per-offer answers, with the same grammar and resume
  * owner as individual system lines. Per-item decisions have no subscribers. */
 export async function connectorOfferDecisionLines(database: SqlDatabase,

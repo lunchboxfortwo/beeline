@@ -275,6 +275,14 @@ export async function migrate(
      ON messages(room_id,author_id,created_at DESC)
      WHERE presentation='message' AND deleted_at IS NULL`,
   ));
+  // Chat-list, Room and live turn reads keep each agent's newest turn in a
+  // Room. Ranking from index entries reads one heap row per agent, not one
+  // per turn the agent ever had there.
+  await runMigrationStep('room agent latest turn index', () => createIndexConcurrently(
+    database, 'agent_turns_room_agent_latest_idx',
+    `CREATE INDEX CONCURRENTLY agent_turns_room_agent_latest_idx
+     ON agent_turns(room_id,agent_id,created_at DESC,request_id DESC) INCLUDE(status)`,
+  ));
   await runMigrationStep('operator turn history index', () => createIndexConcurrently(
     database, 'agent_turns_operator_history_idx',
     `CREATE INDEX CONCURRENTLY agent_turns_operator_history_idx ON agent_turns(created_at) INCLUDE(status)`,
