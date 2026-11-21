@@ -13,8 +13,10 @@ import { GitHubOperations } from './github-operations.js';
 import { createPhoneOperationDispatcher } from './phone-operations.js';
 import type { ServerOptions } from './server.js';
 import type { TokenAuth } from './auth.js';
+const homepageIcon = vi.hoisted(() => vi.fn());
+vi.mock('./company-logos.js', async original => ({ ...await original<typeof import('./company-logos.js')>(), resolveHomepageIcon: homepageIcon }));
 let db: PgliteDatabase;
-afterEach(async () => db?.close());
+afterEach(async () => { homepageIcon.mockReset(); await db?.close(); });
 
 const owner = 'a'.repeat(64), workspace = '11111111-1111-4111-8111-111111111111';
 const room = '22222222-2222-4222-8222-222222222222', thread = '33333333-3333-4333-8333-333333333333';
@@ -64,7 +66,9 @@ it('stores the icon once at link time; list loads and the endpoint read only the
   app.issuesRequest.mockClear(); app.installationToken.mockClear();
 
   const url = `https://beeline.example/v1/repository-icons/${room}/${stored.icon_hash}`;
-  for (const read of await reads()) { expect(read).toMatchObject({ homepageIcon: url }); expect(read?.avatar).toBeUndefined(); expect(read?.favicon).toBeUndefined(); }
+  // The one chat picture: list rows, the chat page and thread headers all carry this URL and nothing else.
+  for (const read of await reads()) { expect(read).toMatchObject({ homepageIcon: url }); expect(read).not.toHaveProperty('avatar'); expect(read).not.toHaveProperty('favicon'); }
+  expect(homepageIcon).not.toHaveBeenCalled();
   const live = new LiveHub();
   const server = createBeelineServer({ database: db, phone: service, live, auth: {} as TokenAuth, daemon: new DaemonService(db, live), mediaMaximumBytes: 1, github: {} });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -135,5 +139,34 @@ it('linking a chat to a repository resolves its icon after the write commits', a
     targetBranch: 'main', githubInstallationId: 77 }, owner);
   expect(resolve).toHaveBeenCalledTimes(1);
   await vi.waitFor(async () => expect((await reads())[2]?.homepageIcon).toMatch(/\/v1\/repository-icons\/.+\/[0-9a-f]{64}$/));
+  expect(app.issuesRequest).toHaveBeenCalledTimes(2);
+});
+
+it('falls back to the homepage site icon when the repository commits none, stored the same way', async () => {
+  const { files, app, github, reads } = await linkedRepository();
+  delete files['public/favicon.png'];
+  const png = await square('#0a0b0c');
+  homepageIcon.mockResolvedValue({ image: { bytes: png, mime: 'image/png' }, path: 'https://homepage.example/' });
+  await github.resolveRepositoryIcons();
+  expect(homepageIcon.mock.calls).toEqual([['https://homepage.example']]);
+  const stored = (await db.query<{ icon_path: string; icon_hash: string }>('SELECT icon_path,icon_hash FROM repository_icons WHERE repository_id=99')).rows[0]!;
+  expect(stored).toEqual({ icon_path: 'https://homepage.example/', icon_hash: createHash('sha256').update(png).digest('hex') });
+  for (const read of await reads()) expect(read?.homepageIcon).toBe(`https://beeline.example/v1/repository-icons/${room}/${stored.icon_hash}`);
+  // Stored once: later backfills and reads touch neither GitHub nor the site.
+  app.issuesRequest.mockClear(); homepageIcon.mockClear();
+  await github.resolveRepositoryIcons(); await reads();
+  expect(app.issuesRequest).not.toHaveBeenCalled();
+  expect(homepageIcon).not.toHaveBeenCalled();
+});
+
+it('re-resolves rows stored by an older resolver once', async () => {
+  const { app, github, changed } = await linkedRepository();
+  await db.query("INSERT INTO repository_icons(repository_id,icon_path,icon_hash,icon_png) VALUES(99,'public/favicon.png',$1,$2)", ['0'.repeat(64), Buffer.from('old')]);
+  await github.resolveRepositoryIcons();
+  expect(app.issuesRequest).toHaveBeenCalledTimes(2);
+  expect(changed).toEqual([room]);
+  expect((await db.query<{ resolver_revision: number; icon_hash: string }>('SELECT resolver_revision,icon_hash FROM repository_icons')).rows[0])
+    .toMatchObject({ resolver_revision: 2, icon_hash: expect.not.stringMatching(/^0+$/) });
+  await github.resolveRepositoryIcons();
   expect(app.issuesRequest).toHaveBeenCalledTimes(2);
 });

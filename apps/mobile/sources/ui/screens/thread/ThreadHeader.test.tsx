@@ -95,24 +95,26 @@ it('expands the full header from a tap on the slim bar, and shows it under the b
   act(() => tree.unmount());
 });
 
-it('keeps the repository mark beside the parent chat in a thread header', () => {
-  let tree: any;
-  act(() => { tree = create(<ThreadBar h={{...reconnect,repositoryAvatar:'https://avatars.githubusercontent.com/u/42'}} collapsed={false} openChat={vi.fn()} />); });
-  expect(tree.root.findByType('RepositoryMark').props.avatarUrl).toBe('https://avatars.githubusercontent.com/u/42');
-  act(() => tree.unmount());
-});
+for (const repositoryHomepageIcon of ['https://example.com/v1/repository-icons/chat', undefined]) {
+  it.each(['normal', 'collapsed', 'expanded'] as const)(`delegates the parent chat mark and fallback with icon ${repositoryHomepageIcon} in the %s bar`, mode => {
+    let tree: any;
+    act(() => { tree = create(<ThreadBar h={{...reconnect,repositoryHomepageIcon}} collapsed={mode !== 'normal'}
+      expanded={mode === 'expanded' ? <ThreadTitleBlock h={reconnect} /> : undefined} openChat={vi.fn()} />); });
+    expect(tree.root.findByType('RepositoryMark').props).toEqual({ homepageIconUrl: repositoryHomepageIcon, size: 28 });
+    act(() => tree.unmount());
+  });
+}
 
 for (const theme of ['light_stone', 'dark_stone']) {
   for (const [state, glyph, idle] of [['waiting', 'needs-you', false], ['working', 'in-progress', false], ['idle', 'in-progress', true]] as const) {
     it.each([
-      { repositoryAvatar: 'https://avatars.githubusercontent.com/u/42', repositoryFavicon: undefined },
-      { repositoryAvatar: undefined, repositoryFavicon: 'https://example.com/favicon.ico' },
+      { repositoryHomepageIcon: 'https://example.com/v1/repository-icons/chat' },
     ])(`keeps the chat image in the collapsed ${state} bar under ${theme}: %j`, (image) => {
       appearance.name = theme;
       let tree: any;
       act(() => { tree = create(<ThreadBar h={{ ...reconnect, ...image, state, waitsOnViewer: state === 'waiting' }} collapsed back={() => {}} openChat={() => {}} />); });
       expect(tree.root.findByType('RepositoryMark').props).toMatchObject({
-        avatarUrl: image.repositoryAvatar, faviconUrl: image.repositoryFavicon, size: 28,
+        homepageIconUrl: image.repositoryHomepageIcon, size: 28,
       });
       expect(byTestID(tree, 'chat-back')).toHaveLength(1);
       expect(byTestID(tree, 'thread-chat-link')[0].findByType('T').props.children).toBe(reconnect.chatTag);

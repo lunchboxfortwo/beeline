@@ -1503,7 +1503,7 @@
           "updated_at": "existing before the registry; weekly audit reviews",
           "private": "existing before the registry; weekly audit reviews",
           "allow_auto_merge": "existing before the registry; weekly audit reviews",
-          "homepage": "GitHub repository website as GitHub reports it; chat marks use repository_icons, not this"
+          "homepage": "GitHub repository website as GitHub reports it; its site icon is the stored chat picture fallback in repository_icons"
         }
       },
       "github_star_prompts": {
@@ -2293,13 +2293,14 @@
       },
       "repository_icons": {
         "module": "GitHub (apps/server/src/repository-icons.ts)",
-        "reason": "A linked repository's chat picture, resolved once from GitHub so chat list loads never read GitHub.",
+        "reason": "A linked repository's chat picture (committed icon file, else homepage site icon), resolved once so chat reads never read GitHub or the site.",
         "columns": {
           "repository_id": "The linked GitHub repository the picture belongs to; one row per repository.",
-          "icon_path": "Repository path of the picked file, so a push touching a custom <link> target re-resolves it.",
+          "icon_path": "Repository path of the picked file (or the homepage URL for a site icon), so a push touching a custom <link> target re-resolves it.",
           "icon_hash": "SHA-256 of the stored PNG; names the immutable icon URL, NULL when the repository has none.",
           "icon_png": "The picked file as a 64 px PNG, served without GitHub or image work.",
-          "resolved_at": "When the picture was last resolved from GitHub."
+          "resolved_at": "When the picture was last resolved.",
+          "resolver_revision": "Resolver version that stored the row; rows from an older resolver re-resolve once at startup."
         }
       },
       "repository_link_successes": {

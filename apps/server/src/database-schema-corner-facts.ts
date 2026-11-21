@@ -295,8 +295,8 @@ ALTER TABLE github_repositories ADD COLUMN IF NOT EXISTS homepage text;
 -- turn, since GitHub merges on the same green-checks signal that wakes it.
 ALTER TABLE github_repositories ADD COLUMN IF NOT EXISTS allow_auto_merge boolean;
 -- A linked repository's chat picture, resolved once from its committed icon files
--- (repository-icons.ts): the picked file's path, a 64 px PNG and its content hash, or NULL
--- for none. No row means not resolved yet; a default-branch push touching an icon path replaces it.
+-- (repository-icons.ts), else its homepage's site icon: the picked file's path (or the homepage URL),
+-- a 64 px PNG and its content hash, or NULL for none. No row means not resolved yet; a default-branch push touching an icon path replaces it.
 CREATE TABLE IF NOT EXISTS repository_icons (
   repository_id bigint PRIMARY KEY REFERENCES github_repositories(repository_id) ON DELETE CASCADE,
   icon_path text,
@@ -304,6 +304,8 @@ CREATE TABLE IF NOT EXISTS repository_icons (
   icon_png bytea,
   resolved_at timestamptz NOT NULL DEFAULT now()
 );
+-- The resolver that stored the row (repository-icons.ts RESOLVER_REVISION); older rows re-resolve once.
+ALTER TABLE repository_icons ADD COLUMN IF NOT EXISTS resolver_revision smallint NOT NULL DEFAULT 1;
 
 
 -- First confirmed link per person and Workspace, without repository or message content.

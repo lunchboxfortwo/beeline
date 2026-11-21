@@ -31,7 +31,8 @@ RUN npm run build -w @beeline/nostr \
 
 FROM ghcr.io/lunchboxfortwo/ci-node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392 AS runtime
 # rtc-node's Rust/rustls signaling uses the OS trust store, not Node's bundled roots.
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
+# sharp draws text in repository SVG icons with fontconfig fonts; without any it draws empty boxes.
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates fontconfig fonts-dejavu-core \
   && test -s /etc/ssl/certs/ca-certificates.crt \
   && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production

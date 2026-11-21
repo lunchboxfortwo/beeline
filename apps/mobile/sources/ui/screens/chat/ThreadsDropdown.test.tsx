@@ -166,8 +166,7 @@ it('names the active count, then lists every thread inside a list capped at 45% 
     loadMoreOpen,
   };
   let tree: any;
-  act(() => { tree = create(<ThreadsDropdown roomId="r" chatName="beeline" openThread={openThread} onNewThread={vi.fn()}
-    {...{ repositoryAvatar: 'https://example.com/project.png', repositoryFavicon: 'https://example.com/favicon.ico' }} />); });
+  act(() => { tree = create(<ThreadsDropdown roomId="r" chatName="beeline" openThread={openThread} onNewThread={vi.fn()} />); });
   const trigger = byTestID(tree, 'threads-dropdown-trigger')[0];
   expect(trigger.findByType('Copy').props.children).toBe('Threads · 3 active');
   expect(trigger.props.label).toBe('3 active threads in beeline');

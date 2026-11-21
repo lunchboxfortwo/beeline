@@ -109,7 +109,9 @@ function icoImage(bytes: Buffer): sharp.Sharp | undefined {
   return sharp(data, { raw: { width, height, channels: 4 } });
 }
 
-async function siteIcon(homepage: URL): Promise<Image | undefined> {
+const workbenchLogo = (bytes: Buffer) => (icoImage(bytes) ?? sharp(bytes, { limitInputPixels: 1_000_000, animated: false }))
+  .resize(64, 64, { fit: 'inside', withoutEnlargement: true }).png().toBuffer();
+async function siteIcon(homepage: URL, convert: (bytes: Buffer) => Promise<Buffer> = workbenchLogo): Promise<Image | undefined> {
   const urls: URL[] = [];
   const deadline = Date.now() + 10_000;
   try {
@@ -131,9 +133,7 @@ async function siteIcon(homepage: URL): Promise<Image | undefined> {
     try {
       const image = await publicIconResponse(url, 0, deadline);
       if (!image.mime.startsWith('image/')) continue;
-      const bytes = await (icoImage(image.bytes) ?? sharp(image.bytes, { limitInputPixels: 1_000_000, animated: false }))
-        .resize(64, 64, { fit: 'inside', withoutEnlargement: true }).png().toBuffer();
-      return { bytes, mime: 'image/png' };
+      return { bytes: await convert(image.bytes), mime: 'image/png' };
     } catch { /* try the next site-provided icon */ }
   }
   return undefined;
@@ -241,8 +241,8 @@ export async function pickRepositoryIconPath(files: ReadonlySet<string>, readSou
 }
 
 type RepositoryRead = (path: string) => Promise<unknown>;
-/** The repository's picked icon file as a 64 px PNG with its path, else none. The caller stores the result;
- * nothing here caches, so this runs only when a repository is linked or its icon files change. */
+/** The repository's picked icon file as a 64 px PNG with its path, else none. Uncached;
+ * repository-icons.ts owns storage and when to resolve again. */
 export async function resolveRepositoryIcon(branch: string, read: RepositoryRead): Promise<{ image: Image; path: string } | undefined> {
   const tree = await read(`git/trees/${encodeURIComponent(branch)}?recursive=1`) as { tree?: { path?: unknown; type?: unknown; sha?: unknown }[] } | undefined;
   const blobs = new Map<string, string>();
@@ -257,14 +257,25 @@ export async function resolveRepositoryIcon(branch: string, read: RepositoryRead
   if (!path) return undefined;
   const bytes = await blob(path);
   if (!bytes) return undefined;
-  try {
-    const image = icoImage(bytes) ?? sharp(bytes, { limitInputPixels: 1_000_000, animated: false });
-    const { width, format } = await image.clone().metadata();
-    // Stored at 64 px square with transparent padding; a small raster scales up without blur.
-    const png = await image.resize(64, 64, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 },
-      ...(format !== 'svg' && (width ?? 64) < 64 ? { kernel: 'nearest' as const } : {}) }).png().toBuffer();
-    return { image: { bytes: png, mime: 'image/png' }, path };
-  } catch { return undefined; /* the picked file is not a readable image: the chat shows # */ }
+  try { return { image: { bytes: await chatPicture(bytes), mime: 'image/png' }, path }; }
+  catch { return undefined; /* unreadable pick: the caller can try the homepage icon */ }
+}
+
+/** An icon file as the stored chat picture: 64 px square with transparent padding; a small raster scales up
+ * without blur. SVG text needs the server's fonts (the runtime image installs them). */
+async function chatPicture(bytes: Buffer): Promise<Buffer> {
+  const image = icoImage(bytes) ?? sharp(bytes, { limitInputPixels: 1_000_000, animated: false });
+  const { width, format } = await image.clone().metadata();
+  return image.resize(64, 64, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 },
+    ...(format !== 'svg' && (width ?? 64) < 64 ? { kernel: 'nearest' as const } : {}) }).png().toBuffer();
+}
+
+/** The repository homepage's site icon (its icon links, then /favicon.ico) as the chat picture, with the
+ * homepage as its path; none when the homepage is unusable or has no readable icon. Uncached: the caller stores it. */
+export async function resolveHomepageIcon(homepage: string): Promise<{ image: Image; path: string } | undefined> {
+  const url = homepageUrl(homepage);
+  const image = url ? await siteIcon(url, chatPicture) : undefined;
+  return url && image ? { image, path: url.href } : undefined;
 }
 
 /** Native requests physical pixels so Image can display pixel art without resampling. */

@@ -23,8 +23,6 @@ type Props = {
   /** `#beeline` or `@handle`; null while the name has not landed. */
   title: string | null;
   memberCount: number;
-  repositoryAvatar?: string;
-  repositoryFavicon?: string;
   repositoryHomepageIcon?: string;
   openChatInfo: () => void;
   openMembers: () => void;
@@ -77,8 +75,6 @@ export const ChatSurfaceHeaderView = React.memo(function ChatSurfaceHeaderView({
   handleBack,
   title,
   memberCount,
-  repositoryAvatar,
-  repositoryFavicon,
   repositoryHomepageIcon,
   openChatInfo,
   openMembers,
@@ -135,7 +131,7 @@ export const ChatSurfaceHeaderView = React.memo(function ChatSurfaceHeaderView({
       backTestID="chat-back"
       mark={isDirectMessage
         ? dmPeer ? <IdentityMark kind={dmPeer.kind} seed={dmPeer.seed} avatarUrl={dmPeer.avatarUrl} face={dmPeer.face} name={title ?? ''} size={36} /> : null
-        : <RepositoryMark homepageIconUrl={repositoryHomepageIcon} avatarUrl={repositoryAvatar} faviconUrl={repositoryFavicon} size={36} />}
+        : <RepositoryMark homepageIconUrl={repositoryHomepageIcon} size={36} />}
       title={name}
       meta={meta}
       right={right}

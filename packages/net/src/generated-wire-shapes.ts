@@ -121,7 +121,7 @@ export const wireShapes: readonly WireShape[] = [
   shape({"kind":"object","properties":{"label":{"node":1,"optional":false},"value":{"node":1,"optional":false}}}),
   shape({"kind":"union","choices":[6,118]}),
   shape({"kind":"object","properties":{"path":{"node":1,"optional":false},"contents":{"node":1,"optional":false}}}),
-  shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"name":{"node":1,"optional":false},"archived":{"node":20,"optional":true},"createdAt":{"node":17,"optional":true},"updatedAt":{"node":17,"optional":true},"workspaceId":{"node":5,"optional":true},"parentId":{"node":5,"optional":true},"about":{"node":5,"optional":true},"avatar":{"node":5,"optional":true},"favicon":{"node":5,"optional":true},"homepageIcon":{"node":5,"optional":true},"visibility":{"node":120,"optional":true},"reviewerAgentId":{"node":5,"optional":true}}}),
+  shape({"kind":"object","properties":{"id":{"node":1,"optional":false},"name":{"node":1,"optional":false},"archived":{"node":20,"optional":true},"createdAt":{"node":17,"optional":true},"updatedAt":{"node":17,"optional":true},"workspaceId":{"node":5,"optional":true},"parentId":{"node":5,"optional":true},"about":{"node":5,"optional":true},"homepageIcon":{"node":5,"optional":true},"visibility":{"node":120,"optional":true},"reviewerAgentId":{"node":5,"optional":true}}}),
   shape({"kind":"union","choices":[6,121,122]}),
   shape({"kind":"literal","value":"invite-only"}),
   shape({"kind":"literal","value":"public"}),

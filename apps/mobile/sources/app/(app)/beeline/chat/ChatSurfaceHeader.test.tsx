@@ -83,9 +83,10 @@ it('gives a thread header B', () => {
   act(() => tree.unmount());
 });
 
-it('shows the repository owner image on the chat header', () => {
+it('shows the chat list\'s stored repository icon on the chat header, and nothing else', () => {
   let tree: any;
-  act(() => { tree = create(<ChatSurfaceHeaderView {...base} repositoryHomepageIcon="https://api/v1/company-logos/https%3A%2F%2Fgrunt.run%2F" repositoryAvatar="https://avatars.githubusercontent.com/u/42" repositoryFavicon="https://github.githubassets.com/favicons/favicon.png" />); });
-  expect(tree.root.findByType('RepositoryMark').props).toMatchObject({homepageIconUrl:'https://api/v1/company-logos/https%3A%2F%2Fgrunt.run%2F',avatarUrl:'https://avatars.githubusercontent.com/u/42',faviconUrl:'https://github.githubassets.com/favicons/favicon.png'});
+  const icon = `https://api/v1/repository-icons/${'2'.repeat(8)}-2222-4222-8222-${'2'.repeat(12)}/${'a'.repeat(64)}`;
+  act(() => { tree = create(<ChatSurfaceHeaderView {...base} repositoryHomepageIcon={icon} />); });
+  expect(tree.root.findByType('RepositoryMark').props).toEqual({ homepageIconUrl: icon, size: 36 });
   act(() => tree.unmount());
 });

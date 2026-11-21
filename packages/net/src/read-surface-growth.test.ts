@@ -30,11 +30,13 @@ describe('large plain read results',()=>{
   });
 
   it('validates repository marks and the complete finished-thread count on the main wire',()=>{
-    const result={room:{id:room,name:'Repo chat',avatar:'https://avatars.githubusercontent.com/u/42',favicon:'https://github.githubassets.com/favicons/favicon.png'},
+    const result={room:{id:room,name:'Repo chat',homepageIcon:`/v1/repository-icons/${room}/${'a'.repeat(64)}`},
       corners:[],archivedCount:27,viewer:{identity:{pubkey:'a'.repeat(64),kind:'human',name:'Owner'},role:'owner',permissions:{send:true,manage:true}},watchFilters:[]};
     expect(routes['phone.readCorners'].result.parse(result)).toBe(result);
     expect(()=>routes['phone.readCorners'].result.parse({...result,archivedCount:'27'})).toThrow('contract mismatch');
-    expect(()=>routes['phone.readCorners'].result.parse({...result,room:{...result.room,favicon:42}})).toThrow('contract mismatch');
+    expect(()=>routes['phone.readCorners'].result.parse({...result,room:{...result.room,homepageIcon:42}})).toThrow('contract mismatch');
+    const withoutIcon={...result,room:{id:room,name:'Repo chat'}};
+    expect(routes['phone.readCorners'].result.parse(withoutIcon)).toBe(withoutIcon);
   });
 
   it('keeps the existing request input budget',()=>{
