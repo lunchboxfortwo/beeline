@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash, generateKeyPairSync, randomBytes, sign } from 'node:crypto';
 import { execFile, execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -479,17 +479,85 @@ function signer() {
 }
 
 
-test('the dispatched Mac desktop workflow is exactly desktop.yml\'s macos-universal production build', () => {
+test('the dispatched Mac desktop workflow retains the signed macOS production steps', () => {
   const desktop = read('desktop.yml').jobs.build, mac = read('mac-desktop.yml');
   const github = mac.jobs.build;
+  const omitted = new Set([
+    'Install the Linux webview toolchain', 'Select the macOS signing mode',
+    'Capture Windows native notification', 'Upload native notification diagnostics',
+    'Exercise codesign verification on an ad-hoc test copy', 'Prove the build produced installers',
+  ]);
+  const expected = desktop.steps.filter(step => !omitted.has(step.name) && step.if !== "inputs.variant != 'production'")
+    .map(step => {
+      const retained = structuredClone(step);
+      delete retained.if;
+      if (retained.uses === 'actions/checkout@v4') retained.with.ref = '${{ inputs.release_sha }}';
+      if (retained.name === 'Build the desktop bundle') {
+        retained.env.EXPO_PUBLIC_BEELINE_RELEASE_SHA = '${{ inputs.release_sha }}';
+        retained.env.EXPO_PUBLIC_BEELINE_DESKTOP_UPDATES = '1';
+      }
+      return retained;
+    });
   assert.deepEqual(Object.keys(mac.jobs), ['build']);
-  assert.deepEqual(github.steps, desktop.steps);
+  assert.deepEqual(github.steps.map(step => step.name ?? step.uses ?? step.run), expected.map(step => step.name ?? step.uses ?? step.run));
+  for (const [index, step] of github.steps.entries()) {
+    const original = expected[index];
+    if (['Build the desktop bundle', 'Stage stable public installer names'].includes(step.name)) {
+      const { run: actualRun, ...actual } = step, { run: originalRun, ...metadata } = original;
+      assert.deepEqual(actual, metadata);
+    } else assert.deepEqual(step, original);
+  }
   assert.deepEqual(github.strategy.matrix.include, desktop.strategy.matrix.include.filter(row => row.label === 'macos-universal'));
-  for (const key of ['name', 'runs-on', 'timeout-minutes', 'env']) assert.deepEqual(github[key], desktop[key]);
+  for (const key of ['name', 'runs-on', 'timeout-minutes']) assert.deepEqual(github[key], desktop[key]);
+  assert.equal(github.env, undefined);
   assert.deepEqual(mac.permissions, { contents: 'read' });
   assert.deepEqual(mac.defaults, read('desktop.yml').defaults);
-  // The steps read inputs.variant; this workflow only ever builds production installers.
-  assert.deepEqual(mac.on.workflow_dispatch.inputs.variant, { description: 'Only production installers are built here', type: 'choice', default: 'production', options: ['production'] });
+  assert.deepEqual(Object.keys(mac.on), ['workflow_dispatch']);
+  assert.deepEqual(Object.keys(mac.on.workflow_dispatch.inputs), ['release_sha', 'release_version', 'desktop_version', 'request_id']);
+});
+
+test('the Mac production build always uses its updater configuration', async () => {
+  const directory = temporary();
+  try {
+    const bin = join(directory, 'bin'), argsPath = join(directory, 'args.json');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'npx'), `#!/usr/bin/env node
+require('node:fs').writeFileSync(process.env.ARGS_PATH, JSON.stringify({ args: process.argv.slice(2), key: process.env.APPLE_API_KEY }));
+`, { mode: 0o755 });
+    const build = read('mac-desktop.yml').jobs.build.steps.find(step => step.name === 'Build the desktop bundle');
+    await run('bash', ['-c', build.run.replaceAll('${{ matrix.target }}', 'universal-apple-darwin')], {
+      cwd: directory,
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, RUNNER_TEMP: directory, ARGS_PATH: argsPath,
+        TAURI_UPDATER_CONFIG: join(directory, 'production updater.json'), APPLE_API_KEY: 'not-for-tauri', VARIANT: 'dev' },
+    });
+    assert.deepEqual(JSON.parse(readFileSync(argsPath, 'utf8')), {
+      args: ['tauri', 'build', '--target', 'universal-apple-darwin', '--config', join(directory, 'production updater.json')],
+    });
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('the Mac production stage requires exactly the signed macOS installer set', async () => {
+  const directory = temporary();
+  try {
+    const bundle = join(directory, 'apps/mobile/src-tauri/target/universal-apple-darwin/release/bundle');
+    mkdirSync(bundle, { recursive: true });
+    const staging = read('mac-desktop.yml').jobs.build.steps.find(step => step.name === 'Stage stable public installer names');
+    const execute = () => run('bash', ['-c', staging.run.replaceAll('${{ matrix.target }}', 'universal-apple-darwin')], {
+      cwd: directory, env: { ...process.env, RUNNER_TEMP: directory },
+    });
+    for (const name of ['test.dmg', 'test.app.tar.gz', 'extra.exe', 'extra.deb']) writeFileSync(join(bundle, name), name);
+    await assert.rejects(execute());
+    writeFileSync(join(bundle, 'test.app.tar.gz.sig'), 'signature');
+    await execute();
+    assert.deepEqual(readdirSync(join(directory, 'desktop-release')).sort(), [
+      'Beeline-universal.app.tar.gz', 'Beeline-universal.app.tar.gz.sig', 'Beeline-universal.dmg',
+    ]);
+    assert.equal(readFileSync(join(directory, 'desktop-release/Beeline-universal.dmg'), 'utf8'), 'test.dmg');
+    assert.equal(readFileSync(join(directory, 'desktop-release/Beeline-universal.app.tar.gz'), 'utf8'), 'test.app.tar.gz');
+    assert.equal(readFileSync(join(directory, 'desktop-release/Beeline-universal.app.tar.gz.sig'), 'utf8'), 'signature');
+    writeFileSync(join(bundle, 'duplicate.dmg'), 'duplicate');
+    await assert.rejects(execute());
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 const signedSteps = ['Notarize and staple the macOS disk image', 'Verify the signed and notarized macOS download'];

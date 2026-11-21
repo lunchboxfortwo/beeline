@@ -204,7 +204,8 @@ silicon and Intel) on a GitHub-hosted runner, Linux x86_64 on Squire, and Window
 x86_64 in Chad's existing `win10` VM through SSH and QEMU Guest Agent.
 For macOS the controller dispatches `.github/workflows/mac-desktop.yml` (ref
 `main`, building the release SHA), whose job is `desktop.yml`'s
-`macos-universal` production build (a test keeps the steps identical). It signs
+`macos-universal` production build with only its signed macOS production steps
+(a test keeps the retained steps aligned). It signs
 with the `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD` and
 `APPLE_SIGNING_IDENTITY` repository secrets and notarizes with the existing
 `EXPO_ASC_*` secrets. The controller accepts the run only when its notarization
