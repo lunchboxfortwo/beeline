@@ -95,12 +95,15 @@ it('expands the full header from a tap on the slim bar, and shows it under the b
   act(() => tree.unmount());
 });
 
-it('keeps the repository mark beside the parent chat in a thread header', () => {
-  let tree: any;
-  act(() => { tree = create(<ThreadBar h={{...reconnect,repositoryHomepageIcon:'https://example.com/v1/repository-icons/chat'}} collapsed={false} openChat={vi.fn()} />); });
-  expect(tree.root.findByType('RepositoryMark').props).toEqual({ homepageIconUrl: 'https://example.com/v1/repository-icons/chat', size: 28 });
-  act(() => tree.unmount());
-});
+for (const repositoryHomepageIcon of ['https://example.com/v1/repository-icons/chat', undefined]) {
+  it.each(['normal', 'collapsed', 'expanded'] as const)(`delegates the parent chat mark and fallback with icon ${repositoryHomepageIcon} in the %s bar`, mode => {
+    let tree: any;
+    act(() => { tree = create(<ThreadBar h={{...reconnect,repositoryHomepageIcon}} collapsed={mode !== 'normal'}
+      expanded={mode === 'expanded' ? <ThreadTitleBlock h={reconnect} /> : undefined} openChat={vi.fn()} />); });
+    expect(tree.root.findByType('RepositoryMark').props).toEqual({ homepageIconUrl: repositoryHomepageIcon, size: 28 });
+    act(() => tree.unmount());
+  });
+}
 
 for (const theme of ['light_stone', 'dark_stone']) {
   for (const [state, glyph, idle] of [['waiting', 'needs-you', false], ['working', 'in-progress', false], ['idle', 'in-progress', true]] as const) {

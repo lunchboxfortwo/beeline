@@ -78,7 +78,7 @@ export function ThreadBar({ h, collapsed, expanded, back, openChat, expand, open
                 <XStack paddingHorizontal="4" paddingVertical="1" gap="2" alignItems="center" testID="thread-header">
                     {back ? <Btn kind="icon" label="Back" onPress={back} testID="chat-back"><Glyph icon={ArrowLeft} /></Btn> : null}
                     <XStack flex={1} minWidth={0} gap="2" alignItems="center">
-                        {h.repositoryHomepageIcon ? <RepositoryMark homepageIconUrl={h.repositoryHomepageIcon} size={28} /> : null}
+                        <RepositoryMark homepageIconUrl={h.repositoryHomepageIcon} size={28} />
                         {/* The chat and the title stack, so each wraps across the bar's full width and neither starves the other. */}
                         <YStack flex={1} minWidth={0} justifyContent="center" minHeight={HEIGHT.control} testID="thread-bar-names">
                             {h.chatTag ? (
