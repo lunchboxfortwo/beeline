@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
+import { createHash, generateKeyPairSync, randomBytes, sign } from 'node:crypto';
 import { execFile, execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -12,7 +13,8 @@ import { LocalDelivery, writeToolAdapters } from './release-local-delivery.mjs';
 import { localToolPlan } from './release-local-tools.mjs';
 import { droppedChecks, localWorkflow, quickChecks, releasePlan } from './release-local-policy.mjs';
 import { Processes } from './release-local-process.mjs';
-import { githubMacHelpers } from './release-local-mac-github.mjs';
+import { githubMacDesktop, githubMacHelpers } from './release-local-mac-github.mjs';
+import { DesktopBuild } from './release-local-desktop.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 const read = name => parse(readFileSync(join(root, '.github/workflows', name), 'utf8'));
@@ -460,4 +462,158 @@ test('both helper_macos rows of a local release share one GitHub dispatch and ne
     for (const platform of ['darwin-arm64', 'darwin-x64']) assert.ok(engine.artifacts.has(`daemon-${platform}-${needs.initialize.outputs.release_id}`));
     assert.equal(JSON.parse(readFileSync(join(directory, 'records.json'), 'utf8')).length, 2);
   } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+function signer() {
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+  const id = randomBytes(8);
+  const key = Buffer.concat([Buffer.from('Ed'), id, publicKey.export({ type: 'spki', format: 'der' }).subarray(-32)]);
+  const encodedKey = Buffer.from(`untrusted comment: test\n${key.toString('base64')}\n`).toString('base64');
+  return { publicKey: encodedKey, sign(file) {
+    const signature = sign(null, createHash('blake2b512').update(readFileSync(file)).digest(), privateKey);
+    const packet = Buffer.concat([Buffer.from('ED'), id, signature]);
+    const comment = 'timestamp:123\tfile:test';
+    const global = sign(null, Buffer.concat([signature, Buffer.from(comment)]), privateKey);
+    writeFileSync(`${file}.sig`, Buffer.from(`untrusted comment: test\n${packet.toString('base64')}\ntrusted comment: ${comment}\n${global.toString('base64')}\n`).toString('base64'));
+  } };
+}
+
+
+test('the dispatched Mac desktop workflow retains the signed macOS production steps', () => {
+  const desktop = read('desktop.yml').jobs.build, mac = read('mac-desktop.yml');
+  const github = mac.jobs.build;
+  const omitted = new Set([
+    'Install the Linux webview toolchain', 'Select the macOS signing mode',
+    'Capture Windows native notification', 'Upload native notification diagnostics',
+    'Exercise codesign verification on an ad-hoc test copy', 'Prove the build produced installers',
+  ]);
+  const expected = desktop.steps.filter(step => !omitted.has(step.name) && step.if !== "inputs.variant != 'production'")
+    .map(step => {
+      const retained = structuredClone(step);
+      delete retained.if;
+      if (retained.uses === 'actions/checkout@v4') retained.with.ref = '${{ inputs.release_sha }}';
+      if (retained.name === 'Build the desktop bundle') {
+        retained.env.EXPO_PUBLIC_BEELINE_RELEASE_SHA = '${{ inputs.release_sha }}';
+        retained.env.EXPO_PUBLIC_BEELINE_DESKTOP_UPDATES = '1';
+      }
+      return retained;
+    });
+  assert.deepEqual(Object.keys(mac.jobs), ['build']);
+  assert.deepEqual(github.steps.map(step => step.name ?? step.uses ?? step.run), expected.map(step => step.name ?? step.uses ?? step.run));
+  for (const [index, step] of github.steps.entries()) {
+    const original = expected[index];
+    if (['Build the desktop bundle', 'Stage stable public installer names'].includes(step.name)) {
+      const { run: actualRun, ...actual } = step, { run: originalRun, ...metadata } = original;
+      assert.deepEqual(actual, metadata);
+    } else assert.deepEqual(step, original);
+  }
+  assert.deepEqual(github.strategy.matrix.include, desktop.strategy.matrix.include.filter(row => row.label === 'macos-universal'));
+  for (const key of ['name', 'runs-on', 'timeout-minutes']) assert.deepEqual(github[key], desktop[key]);
+  assert.equal(github.env, undefined);
+  assert.deepEqual(mac.permissions, { contents: 'read' });
+  assert.deepEqual(mac.defaults, read('desktop.yml').defaults);
+  assert.deepEqual(Object.keys(mac.on), ['workflow_dispatch']);
+  assert.deepEqual(Object.keys(mac.on.workflow_dispatch.inputs), ['release_sha', 'release_version', 'desktop_version', 'request_id']);
+});
+
+test('the Mac production build always uses its updater configuration', async () => {
+  const directory = temporary();
+  try {
+    const bin = join(directory, 'bin'), argsPath = join(directory, 'args.json');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'npx'), `#!/usr/bin/env node
+require('node:fs').writeFileSync(process.env.ARGS_PATH, JSON.stringify({ args: process.argv.slice(2), key: process.env.APPLE_API_KEY }));
+`, { mode: 0o755 });
+    const build = read('mac-desktop.yml').jobs.build.steps.find(step => step.name === 'Build the desktop bundle');
+    await run('bash', ['-c', build.run.replaceAll('${{ matrix.target }}', 'universal-apple-darwin')], {
+      cwd: directory,
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, RUNNER_TEMP: directory, ARGS_PATH: argsPath,
+        TAURI_UPDATER_CONFIG: join(directory, 'production updater.json'), APPLE_API_KEY: 'not-for-tauri', VARIANT: 'dev' },
+    });
+    assert.deepEqual(JSON.parse(readFileSync(argsPath, 'utf8')), {
+      args: ['tauri', 'build', '--target', 'universal-apple-darwin', '--config', join(directory, 'production updater.json')],
+    });
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('the Mac production stage requires exactly the signed macOS installer set', async () => {
+  const directory = temporary();
+  try {
+    const bundle = join(directory, 'apps/mobile/src-tauri/target/universal-apple-darwin/release/bundle');
+    mkdirSync(bundle, { recursive: true });
+    const staging = read('mac-desktop.yml').jobs.build.steps.find(step => step.name === 'Stage stable public installer names');
+    const execute = () => run('bash', ['-c', staging.run.replaceAll('${{ matrix.target }}', 'universal-apple-darwin')], {
+      cwd: directory, env: { ...process.env, RUNNER_TEMP: directory },
+    });
+    for (const name of ['test.dmg', 'test.app.tar.gz', 'extra.exe', 'extra.deb']) writeFileSync(join(bundle, name), name);
+    await assert.rejects(execute());
+    writeFileSync(join(bundle, 'test.app.tar.gz.sig'), 'signature');
+    await execute();
+    assert.deepEqual(readdirSync(join(directory, 'desktop-release')).sort(), [
+      'Beeline-universal.app.tar.gz', 'Beeline-universal.app.tar.gz.sig', 'Beeline-universal.dmg',
+    ]);
+    assert.equal(readFileSync(join(directory, 'desktop-release/Beeline-universal.dmg'), 'utf8'), 'test.dmg');
+    assert.equal(readFileSync(join(directory, 'desktop-release/Beeline-universal.app.tar.gz'), 'utf8'), 'test.app.tar.gz');
+    assert.equal(readFileSync(join(directory, 'desktop-release/Beeline-universal.app.tar.gz.sig'), 'utf8'), 'signature');
+    writeFileSync(join(bundle, 'duplicate.dmg'), 'duplicate');
+    await assert.rejects(execute());
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+const signedSteps = ['Notarize and staple the macOS disk image', 'Verify the signed and notarized macOS download'];
+function fakeDesktopGithub({ conclusion = 'success', steps = signedSteps.map(name => ({ name, conclusion: 'success' })), artifact = () => {} } = {}) {
+  const calls = [];
+  let requestId;
+  const run = { id: 91, html_url: 'https://github.com/fixture/repo/actions/runs/91' };
+  const processes = new Processes({}, () => {});
+  processes.run = async (command, args, options) => {
+    calls.push({ command, args, options });
+    if (command !== 'gh') throw new Error(`unexpected ${command}`);
+    if (args[0] === 'workflow') { requestId = args.at(-1).slice('request_id='.length); return ''; }
+    if (args[0] === 'run' && args[1] === 'download') { artifact(args.at(-1)); return ''; }
+    if (args[1].includes('/workflows/mac-desktop.yml/runs')) return JSON.stringify({ workflow_runs: [{ ...run, display_title: `Mac desktop v1.2.3 · ${requestId}` }] });
+    if (args[1].endsWith('/jobs?per_page=10')) return JSON.stringify({ jobs: [{ name: 'DESKTOP BUILD (macos-universal)', conclusion, steps, html_url: `${run.html_url}/job/1` }] });
+    if (args[1].endsWith('/runs/91')) return JSON.stringify({ ...run, status: 'completed' });
+    throw new Error(`unexpected gh call ${args.join(' ')}`);
+  };
+  return { calls, processes };
+}
+
+test('the macOS desktop row builds on GitHub, verifies its updater signature and never contacts the Mac host', async () => {
+  const directory = temporary();
+  try {
+    const keys = signer(), sha = 'd'.repeat(40);
+    let downloads = 0;
+    const { calls, processes } = fakeDesktopGithub({ artifact: path => {
+      for (const name of ['Beeline-universal.dmg', 'Beeline-universal.app.tar.gz']) writeFileSync(join(path, name), name);
+      keys.sign(join(path, 'Beeline-universal.app.tar.gz'));
+      // A second run returns a payload that no longer matches its updater signature.
+      if (++downloads === 2) writeFileSync(join(path, 'Beeline-universal.app.tar.gz'), 'tampered');
+    } });
+    const engine = { processes, directory, artifacts: new Map(), abortController: new AbortController(),
+      secrets: { TAURI_UPDATER_PUBLIC_KEY: keys.publicKey, TAURI_UPDATER_PRIVATE_KEY: 'private', TAURI_UPDATER_PRIVATE_KEY_PASSWORD: 'password' } };
+    const context = { github: { token: 'fixture-gh-token', repository: 'fixture/repo' }, matrix: { label: 'macos-universal' },
+      inputs: { release_sha: sha, release_version: 'v1.2.3', desktop_version: '0.2.9' } };
+    assert.deepEqual(await new DesktopBuild(engine).row({}, context, 'desktop/mac'), { result: 'success', outputs: {} });
+    assert.ok(calls.every(call => call.command === 'gh'));
+    const dispatch = calls.find(call => call.args[0] === 'workflow');
+    assert.deepEqual(dispatch.args.slice(0, 13), ['workflow', 'run', 'mac-desktop.yml', '-R', 'fixture/repo', '--ref', 'main',
+      '-f', `release_sha=${sha}`, '-f', 'release_version=v1.2.3', '-f', 'desktop_version=0.2.9']);
+    assert.equal(dispatch.options.env.GH_TOKEN, 'fixture-gh-token');
+    const name = `beeline-desktop-release-v1.2.3-${sha}-macos-universal`;
+    assert.equal(engine.artifacts.get(name), join(directory, 'desktop-macos-universal', name));
+    await assert.rejects(new DesktopBuild(engine).row({}, context, 'desktop/mac'), /Invalid updater signature/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('an unsigned, unnotarized or failed GitHub macOS desktop build is refused before any download', async () => {
+  const options = { token: 't', repository: 'fixture/repo', sha: 'e'.repeat(40), releaseVersion: 'v1.2.3', desktopVersion: '0.2.9', directory: tmpdir(), sleep: async () => {} };
+  const unsigned = signedSteps.map(name => ({ name, conclusion: 'skipped' }));
+  for (const [fixture, message] of [[{ steps: unsigned }, /not Developer ID signed and notarized \(Notarize and staple/],
+    [{ steps: [{ name: signedSteps[0], conclusion: 'success' }] }, /Verify the signed and notarized macOS download did not run/],
+    [{ conclusion: 'failure' }, /Mac desktop build failed on GitHub: https:\/\/github.com\/fixture\/repo\/actions\/runs\/91\/job\/1/]]) {
+    const { calls, processes } = fakeDesktopGithub(fixture);
+    await assert.rejects(githubMacDesktop({ processes, ...options }), message);
+    assert.ok(calls.every(call => call.args[1] !== 'download'));
+  }
 });

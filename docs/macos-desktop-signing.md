@@ -1,12 +1,17 @@
 # macOS desktop signing and notarization
 
-When all signing credentials are present, the unified production release's
-downloadable `Beeline-universal.dmg` is signed with the Moon Rice Limited
-Developer ID, notarized, stapled, and checked with `codesign`, `spctl`, and
-`stapler` before it can reach the GitHub release and the `/dl` download surface.
+The squire release controller dispatches `.github/workflows/mac-desktop.yml`
+on a GitHub-hosted macOS runner. Its downloadable `Beeline-universal.dmg`
+must be signed with the Moon Rice Limited Developer ID, notarized, stapled,
+and checked with `codesign`, `spctl`, and `stapler` before publication.
+Missing credentials fail this build; there is no unsigned fallback. The
+controller requires successful notarization and verification steps before
+downloading the artifact and verifies its updater signature locally.
 
-Trusted in-repo preview builds exercise the signed path when all credentials
-are present, while retaining their separate preview identity. Dev builds are
+The separate `.github/workflows/desktop.yml`, used by the hosted unified
+release and tester dispatches, retains its optional signing policy. Trusted
+in-repo preview builds exercise the signed path when all credentials are
+present, while retaining their separate preview identity. Dev builds are
 intentionally unsigned. Fork previews and production builds with missing
 credentials run fully unsigned; no partial credential set reaches Tauri. Both
 the macOS job summary and unified release report say **macOS artifact UNSIGNED:
@@ -60,7 +65,7 @@ Actions**. Never commit the `.p12`, its password, or the `.p8` file.
 
 ## CI contract
 
-`.github/workflows/desktop.yml` maps the stored credentials to Tauri's standard
+Both desktop workflows map the stored Apple credentials to these build
 variables:
 
 - `APPLE_CERTIFICATE` and `APPLE_CERTIFICATE_PASSWORD` import the `.p12` into a
@@ -69,10 +74,18 @@ variables:
 - `APPLE_API_KEY`, `APPLE_API_ISSUER`, and `APPLE_API_KEY_PATH` authenticate
   `notarytool` with the App Store Connect key.
 
-Tauri signs with the hardened runtime and notarizes/staples the inner `.app`.
-The workflow then notarizes and staples the outer `.dmg`, prints that
-submission's notarization log ID, and verifies the exact app and disk image
-that will be published.
+Tauri signs the app with the hardened runtime. Its build runs without the
+notarization variables so the workflow submits only the outer `.dmg` to
+`notarytool`; that submission covers the app inside it. The workflow staples
+the disk image, prints the submission's notarization log ID, and verifies the
+exact app and disk image that will be published.
+
+`mac-desktop.yml` also uses the repository's permanent
+`TAURI_UPDATER_PUBLIC_KEY` and `TAURI_UPDATER_PRIVATE_KEY` secrets, with
+`TAURI_UPDATER_PRIVATE_KEY_PASSWORD` for an encrypted private key, for its
+production updater configuration and signed updater archive. The public key
+must match the controller's local key used for verification; see the [release credential
+contract](./release-pipeline.md#local-recovery-legs-during-an-actions-outage).
 
 No entitlements file is currently required. The app is not App Sandbox-bound,
 outbound network access needs no entitlement in this distribution model, and

@@ -1,5 +1,5 @@
 // Desktop workflow adapter: native builds on the authorized hosts, no publication.
-import { createHash, createPublicKey, randomBytes, verify } from 'node:crypto';
+import { createHash, createPublicKey, verify } from 'node:crypto';
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { parse } from 'yaml';
@@ -7,8 +7,8 @@ import { privateWrite } from './release-local-process.mjs';
 import { WindowsGuest } from './release-local-windows.mjs';
 import { linuxDesktop } from './release-local-desktop-linux.mjs';
 import { createDesktopUpdateManifest, nextDesktopVersion } from './desktop-update.mjs';
+import { githubMacDesktop } from './release-local-mac-github.mjs';
 
-const DESKTOP_MAC = 'dani@macbook-pro-7';
 // Owner switch (19 Nov 2026): chad's Windows VM is in use elsewhere. 'skip' builds macOS and Linux only,
 // never contacts chad, and carries the published Windows installers unchanged. Set to 'build' to resume.
 export const WINDOWS_DESKTOP = 'skip';
@@ -32,7 +32,6 @@ export async function carryWindowsInstallers(directory, fetchImpl = fetch) {
   }
 }
 const root = resolve(import.meta.dirname, '../..');
-const quote = value => `'${value.replaceAll("'", "'\\''")}'`;
 const runtimeFiles = ['release-local-desktop-worker.mjs', 'release-local-actions.mjs', 'release-local-expressions.mjs', 'release-local-process.mjs', 'release-local-java.mjs'];
 
 function updaterCredentials(secrets, directory = secrets.BEELINE_DESKTOP_KEY_DIRECTORY || '/home/lunchbox/firstmate2/data/buzzy-desktop') {
@@ -95,36 +94,24 @@ export class DesktopBuild {
     await this.command('tar', ['-czf', join(directory, 'runtime.tar.gz'), '-C', directory, 'runtime']);
     return directory;
   }
-  async appleSecrets(directory, provided) {
-    const result = Object.fromEntries(['EXPO_ASC_KEY_ID', 'EXPO_ASC_ISSUER_ID', 'EXPO_ASC_API_KEY_P8', 'APPLE_CERTIFICATE', 'APPLE_CERTIFICATE_PASSWORD', 'APPLE_SIGNING_IDENTITY'].map(name => [name, provided[name] || '']));
-    if (!result.APPLE_CERTIFICATE) {
-      const password = randomBytes(24).toString('hex');
-      this.processes.mask(password);
-      // Re-export the already existing Developer ID key; never generate a key.
-      const body = `set -euo pipefail\numask 077\nmkdir -p ${quote(directory)}\nopenssl pkcs12 -export -inkey /Users/dani/beeline-devid/devid.key -in /Users/dani/beeline-devid/devid.pem -certfile /Users/dani/beeline-devid/chain.pem -out ${quote(directory + '/signing.p12')} -passout stdin >/dev/null 2>&1\nprintf 'BEELINE_CERTIFICATE='\nbase64 < ${quote(directory + '/signing.p12')} | tr -d '\\n'\nprintf '\\n'\nrm -f ${quote(directory + '/signing.p12')}\n`;
-      // Password is stdin data to openssl, never a process argument or log value.
-      const encodedBody = Buffer.from(body).toString('base64');
-      const command = `/bin/bash -c "$(printf %s ${quote(encodedBody)} | base64 -D)"`;
-      const output = await this.command('ssh', ['-o', 'BatchMode=yes', '-o', 'LogLevel=ERROR', DESKTOP_MAC, command], { input: password + '\n' });
-      result.APPLE_CERTIFICATE = /^BEELINE_CERTIFICATE=([A-Za-z0-9+/=]+)\r?$/m.exec(output)?.[1];
-      if (!result.APPLE_CERTIFICATE) throw new Error('Mac did not return a temporary Developer ID export');
-      this.processes.mask(result.APPLE_CERTIFICATE);
-      result.APPLE_CERTIFICATE_PASSWORD = password;
-      result.APPLE_SIGNING_IDENTITY = 'Developer ID Application: Moon Rice Limited (89KT3SWYAF)';
-    }
-    const missing = Object.keys(result).filter(name => !result[name]);
-    if (missing.length) throw new Error(`Missing macOS desktop signing inputs: ${missing.join(', ')}`);
-    return result;
+  // macOS installers build, sign and notarize on a GitHub-hosted runner.
+  async github(context) {
+    const { release_sha: sha, release_version: releaseVersion, desktop_version: desktopVersion } = context.inputs;
+    const { name, path } = await githubMacDesktop({ processes: this.processes, token: context.github.token, repository: context.github.repository,
+      sha, releaseVersion, desktopVersion, directory: join(this.engine.directory, 'desktop-macos-universal'), signal: this.engine.abortController?.signal });
+    verifyUpdaterFile(join(path, 'Beeline-universal.app.tar.gz'), updaterCredentials(this.engine.secrets).TAURI_UPDATER_PUBLIC_KEY);
+    this.engine.artifacts.set(name, path);
+    return { result: 'success', outputs: {} };
   }
   async row(job, context, _label, workflowEnv) {
+    if (context.matrix.label === 'macos-universal') return this.github(context);
     const input = await this.prepare(context), matrix = context.matrix;
     const id = createHash('sha256').update(this.engine.directory + matrix.label + context.inputs.release_sha + context.inputs.desktop_version).digest('hex').slice(0, 16);
     const local = join(this.engine.directory, `desktop-${matrix.label}`);
     mkdirSync(local, { recursive: true, mode: 0o700 });
-    const remote = matrix.label === 'windows-x86_64' ? `C:/beeline-release-${id}` : matrix.label === 'macos-universal' ? `/tmp/beeline-desktop-${id}` : local;
-    let secrets = updaterCredentials(this.engine.secrets);
+    const remote = matrix.label === 'windows-x86_64' ? `C:/beeline-release-${id}` : local;
+    const secrets = updaterCredentials(this.engine.secrets);
     for (const value of Object.values(secrets)) this.processes.mask(value);
-    if (matrix.label === 'macos-universal') secrets = { ...secrets, ...await this.appleSecrets(remote, this.engine.secrets) };
     // This transport needs no GitHub, R2, npm publication or deployment tokens.
     const spec = { root: remote + '/source', directory: remote + '/state', job,
       secrets, context: { ...context, env: {}, secrets: {}, github: { ...context.github, token: '' } } };
@@ -133,7 +120,6 @@ export class DesktopBuild {
     const sourceSha = context.inputs.release_sha;
     try {
       if (matrix.label === 'windows-x86_64') await this.windows(input, local, remote, sourceSha);
-      else if (matrix.label === 'macos-universal') await this.mac(input, local, remote, sourceSha);
       else {
         mkdirSync(spec.root, { recursive: true });
         await this.command('tar', ['-xzf', join(input, 'source.tar.gz'), '-C', spec.root]);
@@ -153,46 +139,7 @@ export class DesktopBuild {
     const path = join(local, 'state/artifacts', artifact[0]);
     for (const name of ['Beeline-universal.app.tar.gz', 'Beeline-x86_64.AppImage', 'Beeline-x86_64-setup.exe']) if (existsSync(join(path, name))) verifyUpdaterFile(join(path, name), secrets.TAURI_UPDATER_PUBLIC_KEY);
     this.engine.artifacts.set(artifact[0], path);
-    if (matrix.label === 'macos-universal') {
-      try { await this.command('ssh', [DESKTOP_MAC, `rm -rf -- ${quote(remote)}`], { timeout: 120_000 }); }
-      catch (error) { this.processes.log(`Mac installers verified locally; temporary workspace cleanup incomplete: ${error.message}`); }
-    }
     return result.job;
-  }
-  async mac(input, local, remote, sha) {
-    await this.command('ssh', [DESKTOP_MAC, `umask 077; mkdir -p ${quote(remote + '/source')}`]);
-    await this.command('scp', ['-q', join(input, 'source.tar.gz'), join(input, 'runtime.tar.gz'), join(local, 'job.json'), `${DESKTOP_MAC}:${remote}/`]);
-    const body = `set -euo pipefail
-export PATH=/usr/local/bin:/opt/homebrew/bin:$HOME/.cargo/bin:$PATH
-umask 077
-trap 'rm -f "${remote}/job.json"' EXIT
-tar -xzf '${remote}/source.tar.gz' -C '${remote}/source'
-tar -xzf '${remote}/runtime.tar.gz' -C '${remote}'
-printf '%s' '${sha}' > '${remote}/source/.release-source-sha'
-if [ ! -x '${remote}/node/bin/node' ]; then
- curl -fsSL https://nodejs.org/dist/v22.23.2/node-v22.23.2-darwin-x64.tar.gz -o '${remote}/node.tar.gz'
- curl -fsSL https://nodejs.org/dist/v22.23.2/SHASUMS256.txt -o '${remote}/SHASUMS256.txt'
- expected=$(awk '$2=="node-v22.23.2-darwin-x64.tar.gz" {print $1}' '${remote}/SHASUMS256.txt')
- actual=$(shasum -a 256 '${remote}/node.tar.gz' | awk '{print $1}')
- test -n "$expected" && test "$expected" = "$actual"
- mkdir -p '${remote}/node'
- tar -xzf '${remote}/node.tar.gz' -C '${remote}/node' --strip-components=1
-fi
-export PATH='${remote}/node/bin':$PATH
-node '${remote}/runtime/release-local-desktop-worker.mjs' '${remote}/job.json'
-`;
-    let failure;
-    try { await this.command('ssh', [DESKTOP_MAC, 'bash -s'], { input: body, quiet: false, timeout: 90 * 60_000 }); } catch (error) { failure = error; }
-    mkdirSync(join(local, 'state'), { recursive: true, mode: 0o700 });
-    try {
-      await this.command('scp', ['-q', `${DESKTOP_MAC}:${remote}/state/result.json`, join(local, 'state/result.json')]);
-      await this.command('scp', ['-q', '-r', `${DESKTOP_MAC}:${remote}/state/artifacts`, join(local, 'state')]);
-      for (const name of ['output.log', 'dmg-notarization.json']) {
-        try { await this.command('scp', ['-q', `${DESKTOP_MAC}:${remote}/state/jobs/macos-universal/${name}`, join(local, name)]); }
-        catch { /* Failed builds may not have reached notarization. */ }
-      }
-    } catch (error) { if (!failure) throw error; }
-    if (failure) throw failure;
   }
   // The guest's disk is small: earlier attempts' work folders filled it and crashed npm (2026-11-16), so every
   // attempt starts from, and returns to, no leftover release folders.

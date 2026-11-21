@@ -11,7 +11,7 @@ import { verifyDesktopUpdateManifest } from './desktop-update.mjs';
 import { localHooks, parseArguments } from './release-local.mjs';
 import { releaseArguments, releaseSequence } from './release.mjs';
 import { LocalDelivery } from './release-local-delivery.mjs';
-import { desktopBuildEnvironment, desktopSigningStep, macSigningTools } from './release-local-desktop-worker.mjs';
+import { desktopBuildEnvironment, macSigningTools } from './release-local-desktop-worker.mjs';
 import { WindowsGuest } from './release-local-windows.mjs';
 import { Processes } from './release-local-process.mjs';
 
@@ -129,20 +129,6 @@ test('release entrypoint executes through a symlink, including macOS /tmp aliase
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
-test('SSH diagnostics cannot become part of the temporary certificate export', async () => {
-  const masked = [];
-  const build = new DesktopBuild({ processes: { mask: value => masked.push(value) } });
-  build.command = async (_command, _args, { input }) => {
-    assert.match(input, /^[a-f0-9]{48}\n$/);
-    return 'Warning: host key diagnostic\nBEELINE_CERTIFICATE=Zml4dHVyZQ==\n';
-  };
-  const credentials = await build.appleSecrets('/tmp/build', { EXPO_ASC_KEY_ID: 'id', EXPO_ASC_ISSUER_ID: 'issuer', EXPO_ASC_API_KEY_P8: 'api-key' });
-  assert.equal(credentials.APPLE_CERTIFICATE, 'Zml4dHVyZQ==');
-  assert.ok(masked.includes(credentials.APPLE_CERTIFICATE));
-  assert.ok(masked.includes(credentials.APPLE_CERTIFICATE_PASSWORD));
-  assert.equal(credentials.APPLE_SIGNING_IDENTITY, 'Developer ID Application: Moon Rice Limited (89KT3SWYAF)');
-});
-
 test('the committed Desktop job runs through the shared delivery queue without rewriting its steps', async () => {
   const calls = [];
   const engine = { localDelivery: { run: async (...args) => { calls.push(args); return { result: 'success' }; } } };
@@ -173,15 +159,6 @@ test('private-HOME native builds do not forward release authorities into their b
   assert.equal(mac.CLOUDFLARE_R2_TOKEN, undefined);
 });
 
-test('universal Mac compilation uses four Cargo jobs without increasing other native host limits', () => {
-  const paths = { directory: '/task/state', cargoHome: '/task/cargo', home: '/task/private-home' };
-  for (const platform of ['darwin', 'linux', 'win32']) {
-    const env = desktopBuildEnvironment(paths, platform);
-    assert.equal(env.CARGO_BUILD_JOBS, platform === 'darwin' ? '4' : '2');
-    assert.equal(env.CI_TEST_WORKERS, '2');
-  }
-});
-
 test('only Apple signing tools receive the operator HOME, preserving arguments and failures', () => {
   const directory = mkdtempSync(join(tmpdir(), 'desktop-signing-home-'));
   try {
@@ -194,16 +171,6 @@ test('only Apple signing tools receive the operator HOME, preserving arguments a
     assert.equal(env.HOME, '/private-build-home');
     assert.throws(() => execFileSync(join(bin, 'security'), ['--fail'], { env, stdio: 'pipe' }), error => error.status === 7);
   } finally { rmSync(directory, { recursive: true, force: true }); }
-});
-
-test('local Mac signing uses the real keychain database and explicit login/system search paths', () => {
-  const workflow = readFileSync(join(import.meta.dirname, '../../.github/workflows/desktop.yml'), 'utf8');
-  const materialization = workflow.slice(workflow.indexOf('      - name: Materialize the macOS signing credentials'), workflow.indexOf('      - name: Clear stale bundle'));
-  const adapted = desktopSigningStep({ name: 'Materialize the macOS signing credentials', run: materialization });
-  assert.match(adapted.run, /keychain_path="\$RUNNER_TEMP\/build\.keychain-db"/);
-  assert.match(adapted.run, /"\$BEELINE_OPERATOR_HOME\/Library\/Keychains\/login\.keychain-db" \/Library\/Keychains\/System\.keychain/);
-  assert.match(adapted.run, /security unlock-keychain -p "\$keychain_password" "\$keychain_path"/);
-  assert.match(materialization, /keychain_path="\$RUNNER_TEMP\/build\.keychain"/);
 });
 
 test('guest-agent failures report the provider reason without leaking release credentials', async () => {
