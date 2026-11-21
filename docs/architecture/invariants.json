@@ -657,7 +657,7 @@
       "apps/server/src",
       "apps/auth/src"
     ],
-    "bootstrapTotal": 1646,
+    "bootstrapTotal": 1645,
     "unusedTotal": 168,
     "tables": {
       "agent_avatars": {
@@ -1358,7 +1358,6 @@
           "status": "existing before the registry; weekly audit reviews",
           "issue_repository": "existing before the registry; weekly audit reviews",
           "issue_number": "existing before the registry; weekly audit reviews",
-          "triage_reason": "existing before the registry; weekly audit reviews",
           "resolved_notified_at": "existing before the registry; weekly audit reviews",
           "agent_resolved_notified_at": "Tracks shipped agent notices independently of human Fixed DMs; duplicate evidence clears it for reconciliation",
           "created_at": "existing before the registry; weekly audit reviews",

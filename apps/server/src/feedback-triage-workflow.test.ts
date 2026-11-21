@@ -284,10 +284,12 @@ describe('feedback-triage workflow', () => {
       {itemId:'tracked',disposition:'linked',reference:'https://github.com/lunchboxfortwo/beeline/pull/9',reason:'Fix in review'},
       {itemId:'noise',disposition:'dismissed',reason:'Expected cancellation'},
     ]}});
-    const rows = (await database.query<{id:string;status:string;triage_reason:string;triaged_at:Date|null}>(
-      'SELECT id,status,triage_reason,triaged_at FROM feedback_items ORDER BY id')).rows;
+    const rows = (
+      await database.query<{ id: string; status: string; triaged_at: Date | null }>(
+        'SELECT id,status,triaged_at FROM feedback_items ORDER BY id',
+      )
+    ).rows;
     expect(rows.map(({id,status}) => ({id,status}))).toEqual([{id:'noise',status:'dismissed'},{id:'tracked',status:'attached'}]);
-    expect(JSON.parse(rows[1]!.triage_reason)).toEqual({disposition:'linked',reference:'https://github.com/lunchboxfortwo/beeline/pull/9',reason:'Fix in review'});
     expect(rows.every(row => row.triaged_at)).toBe(true);
   });
 

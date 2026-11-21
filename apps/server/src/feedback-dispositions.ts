@@ -93,10 +93,10 @@ export async function applyFeedbackDispositions(
           : disposition === 'linked'
             ? 'attached'
             : 'dismissed';
-    await db.query(
-      'UPDATE feedback_items SET status=$2,triage_reason=$3,triaged_at=now() WHERE id=$1',
-      [itemId, status, JSON.stringify({ disposition, reference, reason })],
-    );
+    await db.query('UPDATE feedback_items SET status=$2,triaged_at=now() WHERE id=$1', [
+      itemId,
+      status,
+    ]);
   }
   return evidenceChanged;
 }

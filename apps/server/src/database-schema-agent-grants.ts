@@ -500,11 +500,12 @@ CREATE TABLE IF NOT EXISTS feedback_items (
     ('new','filed','attached','dismissed','resolved','closed')),
   issue_repository text,
   issue_number integer,
-  triage_reason text,
   resolved_notified_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
   triaged_at timestamptz
 );
+-- Assessments remain in workflow handoff results; feedback readers use status and PR links.
+ALTER TABLE feedback_items DROP COLUMN IF EXISTS triage_reason;
 ALTER TABLE feedback_items ADD COLUMN IF NOT EXISTS agent_resolved_notified_at timestamptz;
 ALTER TABLE feedback_items ADD COLUMN IF NOT EXISTS occurrence_count integer NOT NULL DEFAULT 1
   CHECK (occurrence_count > 0);

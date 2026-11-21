@@ -582,16 +582,11 @@ export async function notifyFeedbackFixed(
       // The fixing pull request is the item's link; the release step reads it
       // to tell reporting agents once that fix ships.
       `UPDATE feedback_items SET status='resolved',
-         triaged_at=COALESCE(triaged_at,now()),triage_reason=$2,
-         issue_repository=$3,issue_number=$4
+         triaged_at=COALESCE(triaged_at,now()),
+         issue_repository=$2,issue_number=$3
        WHERE id=ANY($1::text[]) AND status<>'resolved'
        RETURNING source_kind,reporter_identity_id,workspace_id`,
-      [
-        itemIds,
-        JSON.stringify({ disposition: 'fixed', reference: url, reason: title }),
-        config.repository,
-        number,
-      ],
+      [itemIds, config.repository, number],
     );
     if (!notify) return { resolved: resolved.rowCount ?? 0, notified: 0 };
     // A later explicit notice order can notify items already resolved silently.

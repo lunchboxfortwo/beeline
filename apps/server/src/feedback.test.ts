@@ -628,17 +628,23 @@ const scope5 = fixtureScope5();
   });
 
 
-  it('links each resolved item to its fixing pull request with the fix title as its reason', async () => {
+  it('links each resolved item to its fixing pull request', async () => {
     const { agentItem, actionItem } = await scope5.reported();
     await scope5.notify({ itemIds: [agentItem, actionItem], notify: undefined });
-    const rows = (await rootFixture.database.query<{ issue_repository: string; issue_number: number; triage_reason: string; triaged_at: Date | null }>(
-      `SELECT issue_repository,issue_number,triage_reason,triaged_at FROM feedback_items WHERE id=ANY($1::text[])`,
-      [[agentItem, actionItem]])).rows;
+    const rows = (
+      await rootFixture.database.query<{
+        issue_repository: string;
+        issue_number: number;
+        triaged_at: Date | null;
+      }>(
+        `SELECT issue_repository,issue_number,triaged_at FROM feedback_items WHERE id=ANY($1::text[])`,
+        [[agentItem, actionItem]],
+      )
+    ).rows;
     expect(rows).toHaveLength(2);
     for (const row of rows) {
       expect(row).toMatchObject({ issue_repository: REPOSITORY, issue_number: 7 });
       expect(row.triaged_at).toBeTruthy();
-      expect(JSON.parse(row.triage_reason)).toEqual({ disposition: 'fixed', reference: FIX_URL, reason: 'Slow tools' });
     }
   });
 

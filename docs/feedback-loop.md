@@ -204,9 +204,9 @@ The workflow saves the assessment with its handoff in one transaction:
 - `fixed` retains `resolved` after the existing merged-PR verification succeeds
   (`report_feedback(action:fixed)`, below).
 
-The structured decision is stored in `triage_reason`; existing status values
-remain compatible with running older servers. Replayed handoffs do not merge
-counts again. Agents assess their own workspace; the existing configured System
+The structured decision and assessment reason remain in the saved workflow
+handoff result; feedback items store the resulting status and triage timestamp.
+Replayed handoffs do not merge counts again. Agents assess their own workspace; the existing configured System
 sender authority covers the global feedback sweep. Assessments send no human
 DMs; merging agent evidence into an already resolved item reconciles shipped
 notices after commit (see below).
@@ -230,10 +230,9 @@ Only an explicit notice order adds `notify: true`. The server checks every call:
   missing pull request, nothing is resolved or sent.
 
 Then the items become `resolved` without a DM. Each item records the fix:
-`triage_reason` is `{disposition: fixed, reference: <pr_url>, reason: <title>}`,
 `triaged_at` is set if absent, and `issue_repository`/`issue_number` name the pull
-request. A later `fixed` disposition can replace `triage_reason` with its
-assessment; shipped notices never publish that field. When a configured System
+request. The fix title is used only for explicitly requested human DMs; shipped
+agent notices never publish assessment reasons. When a configured System
 sender explicitly orders notices for the pull request, pass `notify: true` in that
 human-rooted turn. Each human reporter then gets one System DM:
 `Fixed: <title> <pr_url>`. A later explicit notice order can notify items
