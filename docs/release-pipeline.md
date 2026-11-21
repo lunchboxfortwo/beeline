@@ -69,11 +69,13 @@ waits for both check and build siblings before releasing its lock or pruning
 private sources. There is no additional nightly check dispatch in this local
 workflow.
 Both published `release.json` records include `checks.sourceSha`, `checks.result`,
-`checks.wallSeconds`, `checks.completedAt` and `checks.resultsPath`. A release with full checks
-uploads `release-checks.json` as a release asset beside its `release.json`, and
-`checks.resultsPath` is that asset's download URL. `delivery.live` splits its
-`elapsedSeconds` into `checksSeconds` (waiting for full checks) and
-`deploySeconds` (from the checks verdict to the last live component). The
+`checks.wallSeconds`, `checks.completedAt` and `checks.resultsPath`. A release
+with full checks uploads `release-checks.json` as a release asset beside its
+`release.json`, and `checks.resultsPath` is that asset's download URL.
+`delivery.live` splits its `elapsedSeconds` into `checksSeconds` (waiting for
+full checks within that release leg) and `deploySeconds` (the remaining time
+to the last live component). When the checks verdict predates the leg, as on
+latest promotion, `checksSeconds` is zero. The
 private `release-checks-timing.json` also records the suite wall-clock, host
 load and per-job placement.
 For an owner-authorized urgent fix only, pass
@@ -756,7 +758,7 @@ Jobs that compile source set up Node 22 once and install once with
 `packages/scripts/npm-ci-timed.sh`, which prints the install's wall time, cache misses, and slowest registry
 fetches. The pinned eas-cli installs from `apps/mobile/tools/eas-cli`'s lockfile.
 
-Helper builds cache `buzz-agent` and `buzz-dev-mcp` only in Actions cache,
+Hosted helper builds cache `buzz-agent` and `buzz-dev-mcp` in Actions cache,
 keyed by the pinned block/buzz commit, platform, Rust/C/C++ toolchain, SDK and
 build flags. `packages/scripts/native-agent-cache.mjs` owns the shared Cargo recipe and
 cache identity. A miss compiles the pinned upstream. On squire the local runner

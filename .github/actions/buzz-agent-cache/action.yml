@@ -1,5 +1,5 @@
-# Compiler outputs live only in Actions cache. A miss compiles the pinned
-# upstream; every restored binary still goes through bundle install proof.
+# Cache policy: docs/release-pipeline.md. Every restored binary still goes
+# through bundle install proof.
 name: Restore the native agent binaries
 description: Cache native binaries by upstream, platform, compiler and build flags
 inputs:
