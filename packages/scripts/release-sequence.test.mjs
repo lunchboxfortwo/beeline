@@ -67,7 +67,7 @@ test('a finished release removes its whole working directory', () => {
   removeReleaseDirectory('/tmp/beeline-release-427CG5', (command, args) => calls.push([command, ...args]));
   assert.deepEqual(calls, [['sudo', '-n', 'rm', '-rf', '/tmp/beeline-release-427CG5']]);
 });
-test('release image cleanup keeps the current and previous release and never touches other images', () => {
+test('release image cleanup retains current and previous tags, then prunes dangling images', () => {
   const [current, previous, older, oldest] = ['95eae3e06540', '90e4770917fe', '8a75d2ee5b27', 'a8dc3a6492d0'].map(short => short.padEnd(40, '0'));
   const image = (id, sha, created, ...tags) => ({ id: `sha256:${id}`, sha, created, tags });
   const images = [
@@ -93,5 +93,22 @@ test('release image cleanup keeps the current and previous release and never tou
     if (args[0] === 'image' && args[1] === 'inspect') return images.map(entry => JSON.stringify({ Id: entry.id, RepoTags: entry.tags, Created: entry.created, Config: { Labels: entry.sha ? { 'app.usebeeline.release.sha': entry.sha } : null } })).join('\n') + '\n';
     throw new Error('conflict: image is being used by a running container');
   });
-  assert.deepEqual(calls.at(-1), ['docker', 'image', 'rm', 'registry.fly.io/beeline-server:0.1.241-rc.2-8a75d2ee5b27', 'registry.fly.io/beeline-free-agents:0.1.241-rc.1-a8dc3a6492d0', 'sha256:o3']);
+  assert.deepEqual(calls.slice(-2), [
+    ['docker', 'image', 'rm', 'registry.fly.io/beeline-server:0.1.241-rc.2-8a75d2ee5b27', 'registry.fly.io/beeline-free-agents:0.1.241-rc.1-a8dc3a6492d0', 'sha256:o3'],
+    ['docker', 'image', 'prune', '-f'],
+  ]);
+});
+test('dangling image pruning is attempted with no labelled images or failed inventory', () => {
+  for (const failure of [null, 'images', 'inspect']) {
+    const calls = [];
+    const cleanup = () => removeStaleReleaseImages(sha, (command, args) => {
+      calls.push([command, ...args]);
+      if (args[0] === failure || args[1] === failure) throw new Error('inventory unavailable');
+      if (args[0] === 'images') return failure === 'inspect' ? 'sha256:old\n' : '';
+      throw new Error('pruning unavailable');
+    });
+    if (failure) assert.throws(cleanup, /inventory unavailable/);
+    else assert.doesNotThrow(cleanup);
+    assert.deepEqual(calls.at(-1), ['docker', 'image', 'prune', '-f']);
+  }
 });

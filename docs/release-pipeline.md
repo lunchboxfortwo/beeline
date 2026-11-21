@@ -50,7 +50,8 @@ timing files; each published release keeps `release.json` and
 `release-checks.json`. It also removes the Docker images releases built
 (`registry.fly.io/beeline-server` and `registry.fly.io/beeline-free-agents` tags,
 and untagged images labelled with a release SHA) except this release's and the
-newest previous release's. Images still in use stay. Cleanup never changes the
+newest previous release's. It then prunes dangling Docker images too. Images
+still in use stay. Cleanup never changes the
 release outcome; there is no timer or cron.
 
 `npm run release` never uploads store beta builds: next is the OTA beta only. Latest submits production store builds when a pinned native runtime is not the newest one live in its store (or a store cannot be read); `--no-store` skips them.
