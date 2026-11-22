@@ -8,6 +8,7 @@ import type { SqlDatabase } from './database.js';
 import { isTransientDatabaseConnectionError } from './database.js';
 import { applyHelperOverlay,helperOverlayEnabled,subscribeHelperOverlayDemand } from './helper-overlay.js';
 import { helperUsageEnabled } from './helper-usage.js';
+import { stoppedAnsweredCommandIds } from './agent-turn-end.js';
 import type { HelperVersionGate } from './helper-version-gate.js';
 import type { LiveHub } from './live.js';
 import { MachineRequestResults } from './machine-request-results.js';
@@ -425,6 +426,8 @@ export class DaemonAgentSession {
           `SELECT id FROM agent_commands WHERE agent_id=$1 AND id=ANY($2::text[]) AND state='complete'`,
           [this.agentId, removed],
         )).rows.map(row => row.id) : [];
+        // Stop after a reply leaves nothing to remove; name the stopped items instead.
+        const stoppedCommandIds = await stoppedAnsweredCommandIds(this.deps.database, this.agentId);
         if (this.#closed || !this.transport.isOpen()) return;
         for (const command of page.commands) {
           this.#places.add(command.roomId);
@@ -436,7 +439,8 @@ export class DaemonAgentSession {
             }));
           }
         }
-        this.transport.send({ type: 'commands', commandProtocol: page.commandProtocol, commands: page.commands, completedCommandIds });
+        this.transport.send({ type: 'commands', commandProtocol: page.commandProtocol, commands: page.commands, completedCommandIds,
+          ...(stoppedCommandIds.length ? { stoppedCommandIds } : {}) });
         this.#queueCommandIds = current;
       } while (this.#queueRequested);
     } catch (error) {

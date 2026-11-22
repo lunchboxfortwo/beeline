@@ -1,6 +1,6 @@
 import { dropQueuedOrdersForStop } from '../agent-command-queue.js';
 import { lockAgentCommandQueue } from '../agent-command-queue.js';
-import { endAgentTurn, PERSON_STOP_REASON } from '../agent-turn-end.js';
+import { endAgentTurn, PERSON_STOP_REASON, stopAnsweredAgentTurn } from '../agent-turn-end.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { deleteCornerBranchBestEffort } from '../corner-branch-cleanup.js';
 import { cornerKindSql } from '../corner-opening.js';
@@ -82,12 +82,23 @@ export async function phoneCancelAgentTurn(
          AND EXISTS(SELECT 1 FROM messages source WHERE source.id=agent_commands.root_source_message_id) ORDER BY created_at DESC,id DESC FOR UPDATE`,
       [input.roomId, input.agentId, input.requestId],
     );
+    let dropped = 0;
     const command = commands.rows[0];
-    if (!command) throw new Error('running turn not found');
-    // Stop cancels every pending item of this turn. The helper running one
-    // sees it leave the queue and cancels that session's turn.
-    for (const item of commands.rows) await endAgentTurn(database, item, 'cancelled', PERSON_STOP_REASON);
-    const dropped = await dropQueuedOrdersForStop(database, command);
+    if (command) {
+      // Stop cancels every pending item of this turn. The helper running one
+      // sees it leave the queue and cancels that session's turn.
+      for (const item of commands.rows) await endAgentTurn(database, item, 'cancelled', PERSON_STOP_REASON);
+      dropped = await dropQueuedOrdersForStop(database, command);
+    } else {
+      // The agent already replied but its line still says working. Stop ends
+      // that line and its run; no other request or queued order is touched.
+      const answered = (await database.query<CommandRow>(
+        `SELECT agent_commands.* FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3
+           AND action='input' AND state='complete' ORDER BY created_at DESC,id DESC LIMIT 1 FOR UPDATE`,
+        [input.roomId, input.agentId, input.requestId],
+      )).rows[0];
+      if (!answered || !await stopAnsweredAgentTurn(database, answered)) throw new Error('running turn not found');
+    }
     await systemLine(database, {
       roomId: input.roomId,
       authorId: viewerId,

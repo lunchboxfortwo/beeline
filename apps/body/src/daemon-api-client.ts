@@ -168,7 +168,7 @@ export class DaemonApiClient {
   private channelStateListener?: (connected: boolean, refusal?: string) => void;
   private inFlight = 0;
   private requestCount = 0;
-  private queueListener?: (commands: readonly AgentCommand[], completedCommandIds: readonly string[]) => void;
+  private queueListener?: (commands: readonly AgentCommand[], completedCommandIds: readonly string[], stoppedCommandIds: readonly string[]) => void;
   private queueCommandIds: readonly string[] = [];
   private queueDemanded = false;
   private roomsChangedListener?: (event?: RoomMembershipChange) => void;
@@ -290,7 +290,7 @@ export class DaemonApiClient {
   }
 
   /** The one listener for this agent's queue: every undone item, oldest first. */
-  setQueueListener(listener: (commands: readonly AgentCommand[], completedCommandIds: readonly string[]) => void): void {
+  setQueueListener(listener: (commands: readonly AgentCommand[], completedCommandIds: readonly string[], stoppedCommandIds: readonly string[]) => void): void {
     this.queueListener = listener;
   }
 
@@ -511,8 +511,10 @@ export class DaemonApiClient {
       );
       const completed = Array.isArray(event.completedCommandIds)
         ? event.completedCommandIds.filter((id): id is string => typeof id === 'string') : [];
+      const stopped = Array.isArray(event.stoppedCommandIds)
+        ? event.stoppedCommandIds.filter((id): id is string => typeof id === 'string') : [];
       this.queueCommandIds = commands.map(command => command.id);
-      this.queueListener?.(commands, completed);
+      this.queueListener?.(commands, completed, stopped);
       return;
     }
     if (!DAEMON_LIVE_EVENT_TYPES.has(event.type)) this.logUnknownLiveEvent(event.type);

@@ -168,9 +168,7 @@ export async function startAgentTurnOperation<Name extends keyof DaemonOperation
         if(source && !connection.rowCount) return;
         if (request.invocationId) await beginAgentInvocation(db,authenticatedAgentId,request.roomId,request.requestId,request.invocationId);
         await db.query(`WITH delivered AS (SELECT * FROM agent_commands
-          WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3
-            AND (state='pending' OR (state='complete' AND EXISTS(SELECT 1 FROM agent_invocations invocation
-              WHERE invocation.command_id=agent_commands.id AND NOT invocation.ended))) FOR SHARE),
+          WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3 AND state='pending' FOR SHARE),
           ${workflowOutputBindingCtes('delivered')}
           INSERT INTO agent_turns(room_id,request_id,agent_id,status,connection_epoch,invocation_id)
           SELECT command.room_id,command.turn_request_id,command.agent_id,'working',$4::bigint,$5::text FROM delivered command

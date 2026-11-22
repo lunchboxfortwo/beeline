@@ -7,6 +7,7 @@ import { PhoneService } from './phone-service.js';
 import { LiveHub } from './live.js';
 import { cancelCornerAgentCommands } from './corner-close.js';
 import { claimAgentConnection, releaseAgentConnection } from './connection-presence.js';
+import { stoppedAnsweredCommandIds } from './agent-turn-end.js';
 import type { HelperTurnOwnershipSource } from '@beeline/api-contract/helper-turn-ownership';
 
 const W='11111111-1111-4111-8111-111111111111',R='22222222-2222-4222-8222-222222222222';
@@ -240,39 +241,64 @@ it('a delivered terminal report keeps its order resumable in the same generation
   expect((await notices()).rowCount).toBe(0);
 });
 
-it('keeps an answered invocation working indefinitely until its session returns', async () => {
-  const c = await ask();
-  const invocation = { id: 'running-session', requestId: c.turnRequestId };
-  await daemon.execute('startAgentTurn', { roomId: R, requestId: c.turnRequestId, invocationId: invocation.id }, A);
-  await daemon.execute('postRoomMessage', { roomId: R, requestId: c.turnRequestId, text: 'An answer during work.' }, A);
+const working=async()=>(await phone.readRoom(R,H))?.latestAgentTurns?.some(turn=>turn.status==='working');
+async function answeredWhileRunning(invocationId:string){
+  const c=await ask();
+  const invocation={id:invocationId,requestId:c.turnRequestId};
+  await daemon.execute('startAgentTurn',{roomId:R,requestId:c.turnRequestId,invocationId},A);
+  await daemon.execute('postRoomMessage',{roomId:R,requestId:c.turnRequestId,text:'An answer during work.'},A);
   await db.backgroundWork.drain();
-  await db.query("UPDATE agent_turns SET started_at=now()-interval '30 days',created_at=now()-interval '30 days' WHERE request_id=$1", [c.turnRequestId]);
-  expect((await phone.readRoom(R, H))?.latestAgentTurns).toContainEqual(expect.objectContaining({ status: 'working' }));
-  await daemon.execute('postAgentActivity', { roomId: R, requestId: c.turnRequestId,
-    activity: [{ kind: 'tool', title: 'Completed live step', status: 'completed' }] }, A);
-  expect((await phone.readRoom(R, H))?.messages.some(message => message.activity?.some(step => step.title === 'Completed live step'))).toBe(true);
-  await daemon.execute('postRoomMessage', { roomId: R, requestId: c.turnRequestId, text: '', harnessEnded: true, invocation }, A);
-  expect((await phone.readRoom(R, H))?.latestAgentTurns?.some(turn => turn.status === 'working')).toBe(false);
+  return {c,invocation};
+}
+
+it('ends the working line at the reply while the run stays open, and later work cannot bring it back', async () => {
+  const {c,invocation}=await answeredWhileRunning('running-session');
+  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[c.id])).rows).toEqual([{state:'complete'}]);
+  expect((await db.query(`SELECT ended FROM agent_invocations WHERE invocation_id=$1`,[invocation.id])).rows).toEqual([{ended:false}]);
+  expect(await working()).toBe(false);
+  await daemon.execute('postAgentActivity',{roomId:R,requestId:c.turnRequestId,
+    activity:[{kind:'tool',title:'Completed live step',status:'completed'}]},A);
+  expect(await working()).toBe(false);
+  await releaseAgentConnection(db,live,A,owner.connectionId);
+  await claimAgentConnection(db,live,A,{},{connectionId:'resumed',instanceId:'test-server'});
+  await daemon.execute('startAgentTurn',{roomId:R,requestId:c.turnRequestId},A);
+  expect(await working()).toBe(false);
+  await daemon.execute('postRoomMessage',{roomId:R,requestId:c.turnRequestId,text:'',harnessEnded:true,invocation},A);
+  expect(await working()).toBe(false);
 });
 
-it('clears an answered running session on host disconnect and shows the offline fact', async () => {
-  const c = await ask();
-  await daemon.execute('startAgentTurn', { roomId: R, requestId: c.turnRequestId, invocationId: 'offline-run' }, A);
-  await daemon.execute('postRoomMessage', { roomId: R, requestId: c.turnRequestId, text: 'Still working.' }, A);
-  await releaseAgentConnection(db, live, A, owner.connectionId);
-  expect((await phone.readRoom(R, H))?.latestAgentTurns?.some(turn => turn.status === 'working')).toBe(false);
-  expect((await db.query("SELECT text FROM messages WHERE room_id=$1 AND presentation='system'", [R])).rows)
-    .toContainEqual({ text: expect.stringContaining('has an offline host') });
+it('Stop on a line still working after the reply ends it and asks the helper to cancel that run', async () => {
+  const {c,invocation}=await answeredWhileRunning('stale-line');
+  // A line left working by a run that outlived its reply (the state before this fix).
+  await db.query(`UPDATE agent_turns SET status='working' WHERE request_id=$1`,[c.turnRequestId]);
+  expect(await working()).toBe(true);
+  expect(await stoppedAnsweredCommandIds(db,A)).toEqual([]);
+  await phone.execute('cancelAgentTurn',{roomId:R,agentId:A,requestId:c.turnRequestId},H);
+  expect(await working()).toBe(false);
+  expect((await db.query('SELECT status FROM agent_turns WHERE request_id=$1',[c.turnRequestId])).rows).toEqual([{status:'cancelled'}]);
+  expect(await stoppedAnsweredCommandIds(db,A)).toEqual([c.id]);
+  expect((await db.query("SELECT text FROM messages WHERE room_id=$1 AND presentation='system'",[R])).rows)
+    .toContainEqual({text:expect.stringContaining('stopped')});
+  // The cancelled run's closing receipt ends the invocation and the request.
+  await daemon.execute('postRoomMessage',{roomId:R,requestId:c.turnRequestId,text:'',harnessEnded:true,invocation},A);
+  expect(await stoppedAnsweredCommandIds(db,A)).toEqual([]);
+  expect(await working()).toBe(false);
 });
 
-it('reasserts an answered session when its live helper reconnects', async () => {
-  const c = await ask();
-  await daemon.execute('startAgentTurn', { roomId: R, requestId: c.turnRequestId, invocationId: 'reconnect-after-answer' }, A);
-  await daemon.execute('postRoomMessage', { roomId: R, requestId: c.turnRequestId, text: 'Continuing.' }, A);
-  await releaseAgentConnection(db, live, A, owner.connectionId);
-  await claimAgentConnection(db, live, A, {}, { connectionId: 'resumed', instanceId: 'test-server' });
-  await daemon.execute('startAgentTurn', { roomId: R, requestId: c.turnRequestId }, A);
-  expect((await phone.readRoom(R, H))?.latestAgentTurns).toContainEqual(expect.objectContaining({ status: 'working' }));
+it('Stop on an answered request leaves a newer pending request for the same agent alone', async () => {
+  const {c}=await answeredWhileRunning('older-run');
+  await db.query(`UPDATE agent_turns SET status='working' WHERE request_id=$1`,[c.turnRequestId]);
+  const newer=await ask();
+  await phone.execute('cancelAgentTurn',{roomId:R,agentId:A,requestId:c.turnRequestId},H);
+  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[newer.id])).rows).toEqual([{state:'pending'}]);
+  expect((await readAgentCommands(db,A,R)).commands.map(item=>item.id)).toEqual([newer.id]);
+  expect((await phone.readRoom(R,H))?.latestAgentTurns).toContainEqual(expect.objectContaining({status:'working',requestId:newer.turnRequestId}));
+});
+
+it('Stop with no working line still reports that nothing was running', async () => {
+  const {c}=await answeredWhileRunning('finished-line');
+  await expect(phone.execute('cancelAgentTurn',{roomId:R,agentId:A,requestId:c.turnRequestId},H)).rejects.toThrow('running turn not found');
+  expect(await stoppedAnsweredCommandIds(db,A)).toEqual([]);
 });
 
 it('a late old session final cannot clear a newer invocation of the same unanswered request', async () => {

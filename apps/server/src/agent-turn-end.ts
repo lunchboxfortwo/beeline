@@ -19,6 +19,10 @@ CREATE TABLE IF NOT EXISTS agent_invocations (
 );
 ALTER TABLE agent_invocations ADD COLUMN IF NOT EXISTS ended boolean NOT NULL DEFAULT false;
 ALTER TABLE agent_turns ADD COLUMN IF NOT EXISTS connection_epoch bigint;
+-- Stop after the reply: the item is complete but its run is still open.
+ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS stop_requested_at timestamptz;
+CREATE INDEX IF NOT EXISTS agent_commands_stop_requested ON agent_commands(agent_id)
+  WHERE stop_requested_at IS NOT NULL AND state='complete';
 ALTER TABLE agent_turns ADD COLUMN IF NOT EXISTS invocation_id text;
 -- Lifecycle projections may finish their reads in a different order. Keep a
 -- revision even when two executions start in one second. The constant column
@@ -72,18 +76,34 @@ BEGIN
 END; $$;
 
 -- Optional projection after publication; this function never completes an item.
+-- The working line ends with the item, even while the agent's run continues.
 CREATE OR REPLACE FUNCTION beeline_record_agent_answer(command_id text, failed boolean, reason text)
 RETURNS void LANGUAGE plpgsql AS $$
 DECLARE ended agent_commands%ROWTYPE;
 BEGIN
   SELECT * INTO ended FROM agent_commands WHERE id=command_id AND state<>'pending';
   IF NOT FOUND THEN RETURN; END IF;
-  IF ended.state<>'cancelled' AND EXISTS(SELECT 1 FROM agent_invocations invocation
-    WHERE invocation.command_id=ended.id AND NOT invocation.ended) THEN RETURN; END IF;
   PERFORM beeline_project_agent_turn(ended.agent_id,ended.room_id,ended.turn_request_id,
     CASE WHEN failed OR ended.report_outcome='failed' THEN 'failed' ELSE ended.state END,reason,NULL,NULL,false);
   DELETE FROM live_outputs WHERE room_id=ended.room_id AND agent_id=ended.agent_id
     AND turn_id=ended.turn_request_id AND kind IN ('draft','thought');
+END; $$;
+
+-- Stop after the reply: the item is already complete, so the line and the
+-- still-open run are what remain. End the working line now and record the
+-- request so the agent's helper cancels that run (daemon-live.ts).
+CREATE OR REPLACE FUNCTION beeline_stop_answered_agent_turn(command_id text)
+RETURNS SETOF agent_turns LANGUAGE plpgsql AS $$
+DECLARE answered agent_commands%ROWTYPE;
+BEGIN
+  SELECT * INTO answered FROM agent_commands WHERE id=command_id AND state='complete';
+  IF NOT FOUND THEN RETURN; END IF;
+  UPDATE agent_commands stopped SET stop_requested_at=clock_timestamp() WHERE stopped.id=answered.id
+    AND EXISTS(SELECT 1 FROM agent_invocations invocation WHERE invocation.command_id=answered.id AND NOT invocation.ended);
+  RETURN QUERY SELECT * FROM beeline_project_agent_turn(answered.agent_id,answered.room_id,answered.turn_request_id,
+    'cancelled',NULL,NULL,NULL,true);
+  DELETE FROM live_outputs output WHERE output.room_id=answered.room_id AND output.agent_id=answered.agent_id
+    AND output.turn_id=answered.turn_request_id AND output.kind IN ('draft','thought');
 END; $$;
 
 -- An execution may end while its answer is still owed. Connection replacement
@@ -148,6 +168,20 @@ export async function endAgentTurn(db: SqlDatabase, command: Pick<CommandRow, 'i
   const ended = await db.query('SELECT * FROM beeline_finish_agent_command($1,$2,$3,$4)',
     [command.id, outcome, reason ?? null, resultMessageId ?? null]);
   return ended.rowCount > 0;
+}
+
+/** Stop on a working line whose item was already answered. False when no line was working. */
+export async function stopAnsweredAgentTurn(db: SqlDatabase, command: Pick<CommandRow, 'id'>): Promise<boolean> {
+  const ended = await db.query('SELECT * FROM beeline_stop_answered_agent_turn($1)', [command.id]);
+  return ended.rowCount > 0;
+}
+
+/** Answered items whose run a person stopped; the helper cancels a run it still has. */
+export async function stoppedAnsweredCommandIds(db: SqlDatabase, agentId: string): Promise<string[]> {
+  return (await db.query<{ id: string }>(`SELECT command.id FROM agent_commands command
+    WHERE command.agent_id=$1 AND command.stop_requested_at IS NOT NULL AND command.state='complete'
+      AND EXISTS(SELECT 1 FROM agent_invocations invocation WHERE invocation.command_id=command.id AND NOT invocation.ended)`,
+    [agentId])).rows.map(row => row.id);
 }
 
 /** A hosted turn that fails ends with its visible System line and reason. */

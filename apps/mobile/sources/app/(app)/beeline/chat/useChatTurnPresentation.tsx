@@ -1,12 +1,10 @@
 import { type PendingComposerAck } from '@/buzz/room-indicators';
-import { MonolithRequestTimeoutError } from '@/auth/monolith-session';
 import React, { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { transcriptBylineOpeners } from '@/buzz/message-dates';
 import { Platform } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { useKeyboardState, useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
 import { useAnimatedStyle } from 'react-native-reanimated';
-import { Modal } from '@/modal';
 import { type ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { cornerProposalDecision } from '@/buzz/corner-proposal';
 import { selectComposerAckPresentation, type ComposerAckPresentation } from '@/buzz/room-indicators';
@@ -14,7 +12,7 @@ import { useSendConfirmationReceipts } from './send-confirmation';
 import { formatTerminalTurnOverlay, type TurnVerb } from '@/buzz/turn-clock';
 import { useScrollFollowOnLayoutChange } from '@/buzz/room-scroll-follow';
 import { composerBottomPadding } from '@/buzz/composer-keyboard';
-import { monolithPhoneOperation, phoneOperationFailureReason } from '@/sync/transport/monolith-operation';
+import { requestAgentTurnStop } from './stop-agent-turn';
 import { isAgentTurnActive, nextAgentPresenceTransitionAt } from '@/buzz/agent-presence';
 import { sameMessageRefMap, sameRecordValueMap, sameStringSet, useStable } from '@/buzz/use-stable';
 
@@ -226,29 +224,17 @@ export function useChatTurnPresentation([
   const handleStopTurn = useCallback(
     async (stop: { agentPubkey: string; requestId: string }) => {
       setStoppingTurn(stop);
-      try {
-        await monolithPhoneOperation('cancelAgentTurn', {
-          roomId: decodedId,
-          requestId: stop.requestId,
-          agentId: stop.agentPubkey,
-        });
+      const stopped = await requestAgentTurnStop(decodedId, stop, readRoom);
+      if (stopped) {
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
         return true;
-      } catch (err) {
-        setStoppingTurn((current) =>
-          current?.requestId === stop.requestId && current.agentPubkey === stop.agentPubkey
-            ? null
-            : current,
-        );
-        // A turn that settled while the press was in the air is the ordinary
-        // race, not a failure worth a dialog: the line is already gone.
-        if (err instanceof MonolithRequestTimeoutError) {
-          readRoom();
-          Modal.alert('Stop result unknown', phoneOperationFailureReason(err));
-        }
-        console.warn('Stopping the turn failed:', err);
-        return false;
       }
+      setStoppingTurn((current) =>
+        current?.requestId === stop.requestId && current.agentPubkey === stop.agentPubkey
+          ? null
+          : current,
+      );
+      return false;
     },
     [decodedId],
   );

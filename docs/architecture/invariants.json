@@ -772,6 +772,7 @@
           "report_address": "The original commander escalation address is frozen at append so later orders or transcript changes cannot redirect a report.",
           "message": "The delivered source text, author and attachments must survive transcript edits and be readable without optional context joins.",
           "posted_reply_id": "A committed mid-turn reply suppresses closing-message publication and survives helper/server replacement.",
+          "stop_requested_at": "A person stopped an answered item's still-open run; the helper must still cancel it after a reconnect.",
           "generation_id": {
             "reason": "Retired queue ownership storage; current requests do not read or write it, retained for preceding serving and rollback images.",
             "drop": "docs/release-pipeline.md#release-memory - beeline-drop-retired-turn-schema contract release"
@@ -3700,7 +3701,7 @@
           "invocation_id": "Fresh helper attempt nonce.",
           "replied": "Committed explicit reply delivered during this attempt.",
           "final_suppressed": "Accepted final suppression, distinct from an answer.",
-          "ended": "Harness return is independent of reply delivery and must survive reconnects until the session ends."
+          "ended": "Harness return is independent of reply delivery; a person's Stop after the reply cancels the run until it ends."
         }
       }
     },
