@@ -847,7 +847,7 @@ it('writes a completed thread tool while the harness prompt remains unresolved',
     // Wait for its protocol event, not a polling deadline tied to host speed.
     await Promise.race([activity, answer.then(() => { throw new Error('Session returned before its live step'); })]);
     expect(f.execute).toHaveBeenCalledWith('postAgentActivity', expect.objectContaining({
-      cornerActivityKey: 'live-invocation:0', activity: [expect.objectContaining({ title: 'Read source' })],
+      cornerActivityKey: expect.stringMatching(/^[a-f0-9]{64}$/), activity: [expect.objectContaining({ title: 'Read source' })],
     }));
     expect(returned).toBe(false);
   } finally {

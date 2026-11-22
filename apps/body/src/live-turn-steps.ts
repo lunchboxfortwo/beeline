@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { ToolCallEntry, AgentTurnStep } from './acp.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
 import { roomReplySteps } from './room-turn-steps.js';
@@ -23,14 +24,18 @@ export class LiveTurnSteps {
       const key = call.id ?? `anonymous-${index}`;
       if (this.seen.has(key)) return;
       this.seen.add(key);
-      const activity = roomReplySteps([{ kind: 'tool', call }]);
+      // ACP appends background tasks after ordinary calls; snapshot positions move.
+      const activityKey = createHash('sha256').update(JSON.stringify([this.turn.invocationId, key])).digest('hex');
+      // A result may retain the earlier in-progress status until another update.
+      const finished = { ...call, status: call.status === 'failed' ? 'failed' : 'completed' };
+      const activity = roomReplySteps([{ kind: 'tool', call: finished }]);
       this.pending = this.pending
         .then(async () => {
           await this.api.execute('postAgentActivity', {
             agentId: this.turn.agentId,
             roomId: this.turn.roomId,
             requestId: this.turn.requestId,
-            cornerActivityKey: `${this.turn.invocationId}:${index}`,
+            cornerActivityKey: activityKey,
             activity,
           });
           this.saved.add(key);

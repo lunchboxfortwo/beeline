@@ -17,7 +17,7 @@ for(const version of ['before','after']) {
   b.onResolve({filter:/^@tamagui\/image$/},()=>({path:join(mobile,'node_modules/@tamagui/image/dist/esm/index.native.js')}));
   b.onResolve({filter:/^react-native-svg$/},()=>({path:join(mobile,'node_modules/react-native-svg/lib/module/ReactNativeSVG.web.js')}));
   b.onResolve({filter:/^@\//},a=>({path:source(join(mobile,'sources',a.path.slice(2)))}));
-  if(version==='before') b.onLoad({filter:/\/(ThreadHeader|ThreadLine|TurnProgressLine)\.tsx$/},a=>({contents:execFileSync('git',['show',`d36b8d2babb2dc47d85d3a4ff7bdec4c103d7d44:${a.path.slice(root.length+1)}`],{cwd:root,encoding:'utf8'}),loader:'tsx',resolveDir:dirname(a.path)}));
+  if(version==='before') b.onLoad({filter:/\/(?:(ThreadHeader|ThreadLine|TurnProgressLine)\.tsx|turn-clock\.ts)$/},a=>({contents:execFileSync('git',['show',`d36b8d2babb2dc47d85d3a4ff7bdec4c103d7d44:${a.path.slice(root.length+1)}`],{cwd:root,encoding:'utf8'}),loader:'tsx',resolveDir:dirname(a.path)}));
  }}]});
 }
 let fonts='';for(const f of ['SpaceGrotesk-Regular','SpaceGrotesk-SemiBold','IBMPlexMono-Regular']){copyFileSync(join(mobile,`sources/assets/fonts/${f}.ttf`),join(out,`${f}.ttf`));fonts+=`@font-face{font-family:'${f}';src:url('/${f}.ttf')}`;}
