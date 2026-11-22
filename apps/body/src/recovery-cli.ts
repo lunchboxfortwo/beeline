@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { progress } from './update-progress.js';
+import { convergeDependencies } from './recovery-dependencies.js';
 import { spawn } from 'node:child_process';
 import { readFile, readdir, stat, unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -12,13 +14,14 @@ import {
   resolveBundleEntrypoint,
   hostPlatformKey,
   activateRelease,
+  fetchText,
 } from './self-update.js';
 import {
   resolveManifestUrl,
   parseUpdateManifest,
   compareBundleIdentity,
 } from './self-update-manifest.js';
-import { requestMachine } from './machine-control.js';
+import { helperAbsent, requestMachine } from './machine-control.js';
 import { nativeHelperStatus } from './native-helper.js';
 import { runManagedUpdateWorker, withInstallLock } from './managed-update.js';
 
@@ -26,7 +29,6 @@ async function main(): Promise<void> {
   process.env.BEELINE_RECOVERY_ENTRY = process.argv[1];
   const args = process.argv.slice(2);
   const command = args[0];
-  const deadlineAt = Date.now() + 600_000;
   // A running coding session joins Beeline without installing the helper.
   if (command === 'join' || command === 'session') {
     const { runSessionCommand } = await import('./session-join/command.js');
@@ -56,23 +58,15 @@ async function main(): Promise<void> {
   }
   if (command === 'helper-bootstrap')
     throw new Error('helper-bootstrap must run through the installed native launcher');
+  if (command === 'native-converge-worker') {
+    const { runNativeConvergenceWorker } = await import('./native-helper.js');
+    console.log(JSON.stringify({ pid: await runNativeConvergenceWorker() }));
+    return;
+  }
   if (command === 'managed-update-worker') {
     if (process.env.BEELINE_UPDATE_GROUP_OWNER !== '1')
       throw new Error('release worker requires its recovery owner');
-    const lostOwner = () => {
-      try {
-        process.kill(-process.pid, 'SIGKILL');
-      } catch {
-        process.exit(75);
-      }
-    };
-    if (process.send) process.on('disconnect', lostOwner);
-    try {
-      console.log(JSON.stringify(await runManagedUpdateWorker()));
-    } finally {
-      process.removeListener('disconnect', lostOwner);
-      process.disconnect?.();
-    }
+    console.log(JSON.stringify(await runManagedUpdateWorker()));
     return;
   }
   if (command === 'update' || command === 'install-only') {
@@ -90,7 +84,10 @@ async function main(): Promise<void> {
     if (args.includes('--status')) {
       const [native, helper] = await Promise.all([
         nativeHelperStatus(),
-        requestMachine(stateRoot, { operation: 'status' }, () => true, 2000).catch(() => undefined),
+        requestMachine(stateRoot, { operation: 'status' }, () => true, 2000).catch(error => {
+          if (helperAbsent(error)) return undefined;
+          throw error;
+        }),
       ]);
       const root = resolve(stateRoot, 'beeline/agents');
       const agents = await Promise.all(
@@ -127,9 +124,7 @@ async function main(): Promise<void> {
     const index = args.indexOf('--manifest-url');
     const url = index >= 0 ? args[index + 1]! : resolveManifestUrl();
     if (args.includes('--check')) {
-      const response = await fetch(url, { signal: undefined });
-      if (!response.ok) throw new Error(`manifest fetch failed: HTTP ${response.status}`);
-      const bundle = parseUpdateManifest(await response.text(), hostPlatformKey()).bundle;
+      const bundle = parseUpdateManifest(await fetchText(url, fetch), hostPlatformKey()).bundle;
       console.log(compareBundleIdentity(await readInstalledBundleIdentity(layout), bundle));
       return;
     }
@@ -138,11 +133,10 @@ async function main(): Promise<void> {
       target = await prepareMachineRelease(layout, {
         env: { ...process.env, BEELINE_UPDATE_MANIFEST_URL: url },
         force: args.includes('--force'),
-        deadlineAt,
       });
     } catch (error) {
       if (command === 'install-only') throw error;
-      await convergeMachine({ layout, deadlineAt });
+      await convergeMachine({ layout, waitForAgents: false });
       throw new Error(
         `helper recovered on the verified installed release; freshness unconfirmed: ${String(error)}`,
       );
@@ -156,11 +150,13 @@ async function main(): Promise<void> {
       console.log('[beeline] verified bundle installed for isolated artifact verification');
       return;
     }
-    const status = await convergeMachine({ layout, releaseId: target.releaseId, deadlineAt,
-      force: args.includes('--force') });
-    await convergeDependencies(layout, deadlineAt);
+    await convergeDependencies(layout, target.releaseId);
+    const status = await convergeMachine({ layout, releaseId: target.releaseId,
+      waitForAgents: false, force: args.includes('--force') });
+    for (const [id, agent] of Object.entries(status.agents))
+      progress(`agent ${id}: ${agent.state} since ${agent.since}; ${agent.lastError ?? agent.status}; snapshot ${status.updatedAt}`);
     console.log(
-      `[beeline] executing release ${status.loadedRelease}; helper ${status.pid}; every enabled agent serving`,
+      `[beeline] executing release ${status.loadedRelease}; helper ${status.pid}; target release serving`,
     );
     return;
   }
@@ -199,15 +195,15 @@ async function main(): Promise<void> {
       });
     let target: Awaited<ReturnType<typeof prepareMachineRelease>>;
     try {
-      target = await prepareMachineRelease(layout, { deadlineAt });
+      target = await prepareMachineRelease(layout);
     } catch (error) {
-      await convergeMachine({ layout, deadlineAt });
+      await convergeMachine({ layout });
       throw new Error(
         `helper recovered on the verified installed release; freshness unconfirmed: ${String(error)}`,
       );
     }
-    const status = await convergeMachine({ layout, releaseId: target.releaseId, deadlineAt });
-    await convergeDependencies(layout, deadlineAt);
+    await convergeDependencies(layout, target.releaseId);
+    const status = await convergeMachine({ layout, releaseId: target.releaseId });
     console.log(
       `[beeline] executing release ${status.loadedRelease}; helper ${status.pid}; every enabled agent serving`,
     );
@@ -217,7 +213,7 @@ async function main(): Promise<void> {
       !(await resolveBundleEntrypoint(layout.libDir))) {
     // Install only on a new machine. Pairing starts/converges the helper after
     // writing the new agent's configuration, without selecting a release.
-    const target = await prepareMachineRelease(layout, { deadlineAt });
+    const target = await prepareMachineRelease(layout);
     await withInstallLock(layout, () => activateRelease(layout, target.releaseId));
   }
   const entry = await resolveBundleEntrypoint(layout.libDir);
@@ -232,27 +228,6 @@ async function main(): Promise<void> {
   process.exitCode = await new Promise<number>((done, reject) => {
     child.once('error', reject);
     child.once('exit', (code) => done(code ?? 1));
-  });
-}
-async function convergeDependencies(
-  layout: ReturnType<typeof discoveredBeelineInstallLayout>,
-  _deadlineAt: number,
-): Promise<void> {
-  const entry = await resolveBundleEntrypoint(layout.libDir);
-  if (!entry) throw new Error('dependency phase has no selected body');
-  await new Promise<void>((done, reject) => {
-    const child = spawn(process.execPath, [entry, 'converge-dependencies'], {
-      env: { ...process.env, BEELINE_LIB_DIR: layout.libDir, BEELINE_INTERNAL_RECOVERY: '1' },
-      stdio: 'inherit',
-    });
-    child.once('error', (error) => {
-      reject(error);
-    });
-    child.once('exit', (code) => {
-      code === 0
-        ? done()
-        : reject(new Error(`dependency convergence exited ${code}; helper remains supervised`));
-    });
   });
 }
 main().catch((error) => {

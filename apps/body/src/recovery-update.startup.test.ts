@@ -6,6 +6,8 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { requestMachine } from './machine-control.js';
 import { prepareMachineRelease } from './recovery.js';
 
+vi.mock('./update-child.js', () => ({ observeChild: vi.fn(async () => '') }));
+
 vi.mock('./machine-control.js', () => ({ requestMachine: vi.fn() }));
 vi.mock('./native-helper.js', async original => ({
   ...await original<typeof import('./native-helper.js')>(),
@@ -34,6 +36,8 @@ it.each([false, true])('carries CLI force=%s through convergence to the live hel
   const lib = join(home, 'lib/beeline');
   await mkdir(join(lib, 'lib/beeline'), { recursive: true });
   await writeFile(join(lib, 'lib/beeline/beeline-cli.mjs'), '');
+  await mkdir(join(home, 'lib/beeline-releases/new/lib/beeline'), { recursive: true });
+  await writeFile(join(home, 'lib/beeline-releases/new/lib/beeline/beeline-cli.mjs'), '');
   vi.stubEnv('HOME', home);
   vi.stubEnv('XDG_CONFIG_HOME', join(home, 'config'));
   vi.stubEnv('XDG_STATE_HOME', join(home, 'state'));
