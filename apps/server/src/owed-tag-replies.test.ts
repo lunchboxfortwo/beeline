@@ -209,13 +209,16 @@ describe('owed chat tags', () => {
     }
     expect((await db.query('SELECT 1 FROM messages WHERE reply_to_message_id=$1',[message])).rowCount).toBe(2);
   });
-  it('R1 a second reply confirms the terminal answer; a deliberate later message publishes explicitly', async () => {
+  it('R1 a repeated reply confirms the terminal answer; a later different reply posts in the transcript', async () => {
     const message=await tag(member,'desktop audit request');
     const first=await call('reply',{id:message,text:'@owner blocked for now'});
-    const retry=await call('reply',{id:message,text:'A later result requires explicit publication'});
+    const retry=await call('reply',{id:message,text:'@owner blocked for now'});
     expect(retry.id).toBe(first.id);
-    expect((await db.query('SELECT id FROM messages WHERE reply_to_message_id=$1',[message])).rows).toEqual([{id:first.id}]);
-    expect((await call('read_messages',{room})).messages.map((m:any)=>m.id)).toContain(first.id);
+    const late=await call('reply',{id:message,text:'The later result is ready'});
+    expect(late.id).not.toBe(first.id);
+    const transcript=(await call('read_messages',{room})).messages;
+    expect(transcript.map((m:any)=>m.id)).toEqual(expect.arrayContaining([first.id,late.id]));
+    expect(transcript.find((m:any)=>m.id===late.id)).toMatchObject({text:'The later result is ready'});
   });
   it('an unanswered tag remains owed until its own reply is posted', async () => {
     await db.query("UPDATE agent_commands SET state='complete' WHERE agent_id=$1 AND state='pending'", [helper]);
@@ -316,14 +319,16 @@ describe('owed chat tags', () => {
     expect((await owedMentions(db, member)).map(m => m.messageId)).not.toContain(unanswered);
   });
 
-  it('repeated explicit replies to a real queued tag confirm the first delivery',async()=>{
+  it('repeated explicit replies to a real queued tag confirm the first delivery; a later different reply posts once',async()=>{
     const handle=(await db.query<{handle:string}>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1',[member,room])).rows[0]!.handle;
     const source=await phone.execute('sendRoomMessage',{roomId:room,text:`@${handle} review this`},owner);
     const first=await call('reply',{id:source.messageId,text:'First answer'});
+    expect((await call('reply',{id:source.messageId,text:'First answer'})).id).toBe(first.id);
     const second=await call('reply',{id:source.messageId,text:'Additional explicit message'});
-    expect(second.id).toBe(first.id);
+    expect(second.id).not.toBe(first.id);
     expect((await call('reply',{id:source.messageId,text:'Additional explicit message'})).id).toBe(second.id);
     expect((await db.query('SELECT count(*)::int n FROM messages WHERE author_id=$1 AND reply_to_message_id=$2',[member,source.messageId])).rows[0]).toEqual({n:1});
+    expect((await db.query('SELECT count(*)::int n FROM messages WHERE author_id=$1 AND room_id=$2 AND text=$3',[member,room,'Additional explicit message'])).rows[0]).toEqual({n:1});
     expect((await db.query('SELECT state FROM agent_commands WHERE agent_id=$1 AND source_message_id=$2',[member,source.messageId])).rows[0]).toEqual({state:'complete'});
   });
 

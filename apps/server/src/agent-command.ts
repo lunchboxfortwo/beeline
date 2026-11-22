@@ -849,10 +849,10 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
   let history: {id:string;roomId:string;text:string} | undefined;
   let completedNow = false;
   const published = await database.transaction(async db => {
-    const item = (await db.query<CommandRow & { parent_row: CommandRow | null; root_command_row: CommandRow | null; public_reply_id: string | null;
+    const item = (await db.query<CommandRow & { parent_row: CommandRow | null; root_command_row: CommandRow | null; public_reply_id: string | null; public_reply_text: string | null;
       root_author: string | null; source_author: string | null; name: string }>(
       `SELECT item.*,row_to_json(parent) parent_row,row_to_json(root_command) root_command_row,root.author_id root_author,
-         source.author_id source_author,identity.name,posted.id public_reply_id
+         source.author_id source_author,identity.name,posted.id public_reply_id,posted.text public_reply_text
        FROM agent_commands item JOIN identities identity ON identity.id=item.agent_id
        LEFT JOIN agent_commands parent ON parent.id=item.parent_command_id
        LEFT JOIN agent_commands root_command ON root_command.id=item.root_command_id
@@ -863,6 +863,10 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
        WHERE item.agent_id=$1 AND item.room_id::text=$2 AND item.id=$3 FOR UPDATE OF item`,
       [agentId, input.roomId, input.requestId ?? null],
     )).rows[0];
+    // A later, different reply to an answered command posts as an ordinary message where the answer went.
+    const late = item?.state === 'complete' && item.public_reply_id && input.explicitReply && !input.messageAsk ? repairAgentPost(input.text).text.trim() : '';
+    if (item && late && late !== item.public_reply_text?.trim()) { const saved = await queueMessage(db,{kind:'post',roomId:item.return_room_id ?? input.roomId,
+      authorId:agentId,text:modelText(late),id:input.messageId ?? hash(`late-reply:${item.id}:${late}`)}); return {id:saved.id,createdAt:saved.createdAt,delivered:true}; }
     // A confirmed answer suppresses duplicate delivery; a follow-up ask remains a distinct delivery.
     if (item?.state === 'complete' && !input.messageAsk && (item.public_reply_id || (!input.explicitReply &&
       (item.private_payload?.automatic || isBackgroundCommand(item.reason)))))
