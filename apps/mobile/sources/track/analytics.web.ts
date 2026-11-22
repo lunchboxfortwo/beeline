@@ -1,8 +1,8 @@
 import type { PostHog } from 'posthog-react-native';
 import { postHogKey } from './analytics-key';
 
-// Web keeps PostHog out of the startup bundle. TrackingRoot starts it after
-// the first screen draws; events captured before then wait for the client.
+// Web defers PostHog evaluation until TrackingRoot observes the first screen
+// draw; events captured before then wait for the client.
 let start: () => void = () => {};
 const drawn = new Promise<void>((resolve) => {
   start = resolve;
