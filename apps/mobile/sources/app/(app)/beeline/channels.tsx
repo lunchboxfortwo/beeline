@@ -25,7 +25,7 @@ import { MessageMatches } from '@/ui/screens/chats/MessageMatches';
 import { NewChatSheet } from '@/ui/screens/chats/NewChatSheet';
 import { isWorkspaceListView, type ChatListItem, type Identity } from '@beeline/buzz-client';
 import { router, useLocalSearchParams, usePathname, type Href } from 'expo-router';
-import { memo, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useContext, useEffect, useRef, useState, type MutableRefObject, type ReactElement } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { FlatList } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
@@ -210,6 +210,63 @@ export default function SavedRoomDeck() {
 }
 
 const EMPTY_CHATS: readonly ChatListItem[] = [];
+
+/** A list re-render on navigation reaches every visible row. The memo keeps an
+ * unchanged row's swipe and gesture handlers from rendering again. */
+const SwipeableChatRow = memo(function SwipeableChatRow({
+  item,
+  swipesEnabled,
+  canInteract,
+  swipeableRefs,
+  onClose,
+  onLeave,
+  children,
+}: {
+  item: ChatListItem;
+  swipesEnabled: boolean;
+  canInteract: () => boolean;
+  swipeableRefs: MutableRefObject<Map<string, Swipeable | null>>;
+  onClose: (item: ChatListItem) => Promise<void>;
+  onLeave: (item: ChatListItem) => Promise<void>;
+  children: ReactElement;
+}) {
+  const roomId = item.room.id;
+  const setRef = useCallback(
+    (ref: Swipeable | null) => {
+      if (ref) swipeableRefs.current.set(roomId, ref);
+      else swipeableRefs.current.delete(roomId);
+    },
+    [roomId, swipeableRefs],
+  );
+  const renderRightActions = useCallback(
+    () => <RowSwipeAction item={item} canInteract={canInteract} onClose={onClose} onLeave={onLeave} />,
+    [item, canInteract, onClose, onLeave],
+  );
+  return (
+    <Swipeable
+      enabled={swipesEnabled}
+      activeOffsetX={[-15, 15]}
+      failOffsetY={[-10, 10]}
+      ref={setRef}
+      friction={1}
+      overshootRight={false}
+      rightThreshold={ROW_HEIGHT}
+      renderRightActions={renderRightActions}
+      testID={`chat-close-swipe-${roomId}`}
+    >
+      {children}
+    </Swipeable>
+  );
+}, (previous, next) => {
+  // The row element is rebuilt on every list render; its memoized ChatRow
+  // decides its own update, so compare the props it was built from instead.
+  const a = previous.children.props as Record<string, unknown>;
+  const b = next.children.props as Record<string, unknown>;
+  return previous.item === next.item && previous.swipesEnabled === next.swipesEnabled
+    && previous.canInteract === next.canInteract && previous.swipeableRefs === next.swipeableRefs
+    && previous.onClose === next.onClose && previous.onLeave === next.onLeave
+    && Object.keys(b).length === Object.keys(a).length && Object.keys(b).every((key) => a[key] === b[key]);
+});
 
 // Swipeable re-renders every row when the list is covered or measured; a memoized
 // action keeps those re-renders from rebuilding each row's hidden button.
@@ -400,29 +457,16 @@ const BuzzChannels = memo(function BuzzChannels({ session }: { session: DeckSess
     return (
       <>
         {index === 0 ? null : <ChatRowDivider roomId={item.room.id} />}
-        <Swipeable
-          enabled={roomListGestures.swipesEnabled}
-          activeOffsetX={[-15, 15]}
-          failOffsetY={[-10, 10]}
-          ref={(ref) => {
-            if (ref) swipeableRefs.current.set(item.room.id, ref);
-            else swipeableRefs.current.delete(item.room.id);
-          }}
-          friction={1}
-          overshootRight={false}
-          rightThreshold={ROW_HEIGHT}
-          renderRightActions={() => (
-            <RowSwipeAction
-              item={item}
-              canInteract={roomListGestures.canInteract}
-              onClose={handleCloseChat}
-              onLeave={handleLeaveRoom}
-            />
-          )}
-          testID={`chat-close-swipe-${item.room.id}`}
+        <SwipeableChatRow
+          item={item}
+          swipesEnabled={roomListGestures.swipesEnabled}
+          canInteract={roomListGestures.canInteract}
+          swipeableRefs={swipeableRefs}
+          onClose={handleCloseChat}
+          onLeave={handleLeaveRoom}
         >
           {row}
-        </Swipeable>
+        </SwipeableChatRow>
       </>
     );
   };
