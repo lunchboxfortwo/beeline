@@ -3667,6 +3667,16 @@
           "created_at": "When the entry occurred, preserving activity order."
         }
       },
+      "work_item_threads": {
+        "module": "Rooms and messages",
+        "reason": "Which task an agent opened a thread to build is its explicit choice at open time; nothing in the task or thread text records it.",
+        "columns": {
+          "work_item_id": "The chat task the thread was opened to build.",
+          "thread_id": "The thread opened to build it.",
+          "landed": "Whether that thread merged, so a task with several threads is Done once the last closes and any landed.",
+          "created_at": "When the link was made at thread open."
+        }
+      },
       "work_questions": {
         "module": "Rooms and messages",
         "reason": "Typed source references and recommendations cannot be recovered from free-text messages.",

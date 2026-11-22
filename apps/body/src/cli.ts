@@ -157,6 +157,11 @@ async function main(): Promise<void> {
   }
   if (command === '--help' || command === '-h') usage(0);
 
+  if (command === 'native-converge-worker') {
+    const { runNativeConvergenceWorker } = await import('./native-helper.js');
+    console.log(JSON.stringify({ pid: await runNativeConvergenceWorker() }));
+    return;
+  }
   if (command === 'managed-update-worker') {
     if (process.env.BEELINE_INTERNAL_UPDATE_WORKER !== '1') {
       throw new Error('managed-update-worker is an internal command');

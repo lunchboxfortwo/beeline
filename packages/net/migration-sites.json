@@ -365,14 +365,6 @@
       "phase": "M5"
     },
     {
-      "id": "apps/body/src/self-update.ts::fetch-impl",
-      "file": "apps/body/src/self-update.ts",
-      "kind": "fetch-impl",
-      "count": 2,
-      "compatibility": "legacy-only",
-      "phase": "M5"
-    },
-    {
       "id": "apps/body/src/self-update.ts::fetch",
       "file": "apps/body/src/self-update.ts",
       "kind": "fetch",
@@ -1165,6 +1157,24 @@
       "compatibility": "legacy-only",
       "phase": "M5",
       "reason": "Consolidates existing sandbox loopback session/workspace calls; conversational tools forward through the parent helper native connection instead of another server HTTP credential check."
+    },
+    {
+      "id": "apps/body/src/update-download.ts::fetch",
+      "file": "apps/body/src/update-download.ts",
+      "kind": "fetch",
+      "count": 1,
+      "compatibility": "legacy-only",
+      "phase": "M5",
+      "reason": "Moves existing manifest/archive download calls from self-update.ts into the approved update progress and inactivity observer; no additional destination or credential access."
+    },
+    {
+      "id": "apps/body/src/update-download.ts::fetch-impl",
+      "file": "apps/body/src/update-download.ts",
+      "kind": "fetch-impl",
+      "count": 1,
+      "compatibility": "legacy-only",
+      "phase": "M5",
+      "reason": "Moves existing manifest/archive download calls from self-update.ts into the approved update progress and inactivity observer; no additional destination or credential access."
     }
   ]
 }

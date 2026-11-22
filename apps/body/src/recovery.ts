@@ -1,6 +1,6 @@
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { requestMachine } from './machine-control.js';
+import { helperAbsent, requestMachine } from './machine-control.js';
 import {
   convergeNativeHelper,
   nativeHelperStatus,
@@ -57,6 +57,7 @@ export async function convergeMachine(
     layout?: BeelineInstallLayout;
     releaseId?: string;
     force?: boolean;
+    waitForAgents?: boolean;
     run?: NativeRunner;
     timeoutMs?: number;
     agentIds?: string[];
@@ -66,7 +67,7 @@ export async function convergeMachine(
   const env = options.env ?? process.env;
   assertLifecycleTestIsolation(env, Boolean(options.run));
   const layout = options.layout ?? beelineInstallLayout(env) ?? discoveredBeelineInstallLayout(env);
-  const deadlineAt = options.deadlineAt ?? Date.now() + (options.timeoutMs ?? 600_000);
+  const deadlineAt = Number.isFinite(options.deadlineAt) ? options.deadlineAt! : Date.now() + (options.timeoutMs ?? 600_000);
   const stateRoot = env.XDG_STATE_HOME || resolve(env.HOME || '', '.local/state');
   const root = resolve(stateRoot, 'beeline/agents');
   const configured = await Promise.all(
@@ -85,11 +86,11 @@ export async function convergeMachine(
           : undefined,
       ),
   );
-  // Pairing waits for its agent alone; update/start without a selection still
-  // prove every enabled runtime. A sibling's sign-in cannot hold connect open.
+  // Pairing and start retain their agent gates. Update observes the helper
+  // target and reports agents as a snapshot instead.
   const required = new Set(options.agentIds ?? configured.filter((id): id is string => Boolean(id)));
   const current = await requestMachine(stateRoot, { operation: 'status' }, () => true, 1000).catch(
-    () => undefined,
+    error => { if (helperAbsent(error)) return undefined; throw error; },
   );
   const hasControl = Boolean(current);
   // Repair current-release anchors and forwarders even while its body is live.
@@ -107,7 +108,7 @@ export async function convergeMachine(
     restart: !hasControl,
     deadlineAt,
   });
-  let expectedRelease = options.releaseId;
+  const expectedRelease = options.releaseId;
   const targetIdentity = options.releaseId
     ? await readInstalledBundleIdentity({
         ...layout,
@@ -127,8 +128,8 @@ export async function convergeMachine(
     stateRoot,
     request,
     (status) => {
-      if (options.releaseId && status.generation === current?.generation && status.desiredRelease)
-        expectedRelease = status.desiredRelease;
+      // Only accept the selected target (or a strictly newer successor). The
+      // predecessor's desired selection is not an acknowledgment of execution.
       if (
         expectedRelease &&
         status.loadedRelease !== expectedRelease &&
@@ -140,6 +141,7 @@ export async function convergeMachine(
         )
       )
         return false;
+      if (options.waitForAgents === false) return status.processState === 'serving';
       const agents = Object.entries(status.agents).filter(
         ([id, agent]) => required.has(id) || (!options.agentIds && agent.enabled !== false),
       );

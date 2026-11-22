@@ -178,6 +178,8 @@ export const MCP_AGENT_TOOLS: Tool[] = [
     objective: { type: 'string', maxLength: 2000, description: 'At most 24 words.' }, brief,
     implementer: { type: 'string', minLength: 1, description: 'Worker handle without @.' },
     hold: { type: 'boolean' }, sourceMessageId: { type: 'string' },
+    workItems: { type: 'array', maxItems: 8, items: { type: 'string', minLength: 1 },
+      description: 'Ids of the parent chat\'s backlog tasks this thread builds: In progress now, Done when it lands, Backlog if it closes unmerged.' },
   }, ['room', 'brief', 'implementer']),
   tool('revise_thread', 'Revise a thread. metadata needs name; install_brief needs name and brief; brief needs brief, expectedRevision and change. Except for commander-direct revisions, brief.approval.sourceMessageId must cite an approving human message or active commander message; the current commander delivery can supply its message/resume ID or forwarded root human message ID.', {
     address: address('Thread id.'), action: { type: 'string', enum: ['metadata', 'brief', 'install_brief'] }, reviewer: { type: 'string' },
@@ -571,6 +573,7 @@ export class RoomsMcpAgentTools {
         name: args.name ?? (words.slice(0, 3).join('-') || 'Work'),
         objective: args.objective ?? (words.slice(0, 24).join(' ') || 'Carry out the brief'),
         implementer, sourceMessageId: args.sourceMessageId, hold: args.hold === true ? true : undefined, brief: briefDraft(args.brief),
+        ...(Array.isArray(args.workItems) && args.workItems.length ? { workItems: args.workItems.map(String) } : {}),
         ...(repository.resolution === 'repository' ? { repository: repository.key, targetBranch: repository.targetBranch } : {}),
       }) as { cornerId?: string; watch?: unknown; warnings?: unknown };
       // Creation is a receipt, not evidence that a helper or checkout started.

@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { observeChild } from './update-child.js';
 import { resolve } from 'node:path';
 import { withKernelLock } from './kernel-lock.js';
 import {
@@ -20,18 +20,8 @@ export function withInstallLock<T>(
   return withKernelLock(`beeline-install:${resolve(layout.libDir)}`, work, options.waitMs);
 }
 
-export function versionAtLeast(actual: string, minimum: string): boolean {
-  const parse = (value: string) => {
-    const match = /^v?(\d+)\.(\d+)\.(\d+)(?:-rc\.(\d+))?$/.exec(value);
-    return match ? [...match.slice(1, 4).map(Number), match[4] === undefined ? Infinity : Number(match[4])] : undefined;
-  };
-  const left = parse(actual),
-    right = parse(minimum);
-  if (!left || !right) return false;
-  for (let index = 0; index < 4; index++)
-    if (left[index] !== right[index]) return left[index]! > right[index]!;
-  return true;
-}
+export { versionAtLeast } from './self-update-manifest.js';
+import { versionAtLeast } from './self-update-manifest.js';
 
 /** One cancellable update attempt; no agent or control request awaits it. */
 export class ReleaseTransaction {
@@ -126,7 +116,18 @@ export class ReleaseTransaction {
       }) : undefined;
       if (identity?.version && loaded?.version && identity.version !== loaded.version &&
           versionAtLeast(loaded.version, identity.version) && !versionAtLeast(identity.version, loaded.version))
-        throw new Error(`requested helper ${identity.version} is older than running ${loaded.version}`);
+      {
+        await withInstallLock(this.options.layout, async () => {
+          const state = await readUpdateState(this.options.layout);
+          if (state.stagedReleaseId === releaseId)
+            await writeUpdateState(this.options.layout, { ...state, stagedReleaseId: undefined,
+              lastCheckResult: 'current' });
+        });
+        this.#prepared = undefined;
+        this.options.changed(undefined);
+        if (!this.#pendingCheck) this.dispose();
+        return;
+      }
       if (this.#minimum) {
         if (!identity?.version || !versionAtLeast(identity.version, this.#minimum))
           throw new Error(`published helper ${identity?.version ?? 'unknown'} is below required ${this.#minimum}`);
@@ -191,57 +192,19 @@ export async function runManagedUpdateWorker(): Promise<{
 
 export async function prepareReleaseInWorker(
   env: NodeJS.ProcessEnv,
-  deadlineAt: number,
+  _deadlineAt: number,
   entrypoint?: string,
   signal?: AbortSignal,
 ): Promise<{ releaseId: string; identity: { version?: string; commit?: string } }> {
   const layout = beelineInstallLayout(env)!;
   const bootstrap = entrypoint ?? resolve(layout.libDir, '../beeline-bootstrap.mjs');
-  return new Promise((done, reject) => {
-    const child = spawn(process.execPath, [bootstrap, 'managed-update-worker'], {
-      detached: true,
-      env: {
-        ...env,
-        BEELINE_INTERNAL_UPDATE_WORKER: '1',
-        BEELINE_UPDATE_GROUP_OWNER: '1',
-        BEELINE_PREPARE_DEADLINE_AT: String(deadlineAt),
-      },
-      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-    });
-    const abort = () => {
-      try {
-        if (child.pid && child.exitCode === null && child.signalCode === null)
-          process.kill(-child.pid, 'SIGKILL');
-      }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') reject(error); }
-      reject(signal?.reason ?? new Error('update handoff abandoned'));
-    };
-    signal?.addEventListener('abort', abort, { once: true });
-    if (signal?.aborted) abort();
-    child.once('close', () => signal?.removeEventListener('abort', abort));
-    let stdout = '',
-      stderr = '';
-    child.stdout!.setEncoding('utf8');
-    child.stderr!.setEncoding('utf8');
-    child.stdout!.on('data', (chunk: string) => {
-      stdout = (stdout + chunk).slice(-16_000);
-    });
-    child.stderr!.on('data', (chunk: string) => {
-      stderr = (stderr + chunk).slice(-16_000);
-    });
-    child.once('error', (error) => {
-      reject(error);
-    });
-    child.once('exit', (code) => {
-      if (code !== 0)
-        return reject(new Error(`release preparation failed (${code}): ${stderr.trim()}`));
-      try {
-        const result = JSON.parse(stdout);
-        if (!result.releaseId) throw new Error('no verified release');
-        done(result);
-      } catch (error) {
-        reject(error);
-      }
-    });
+  const stdout = await observeChild({
+    step: 'preparing verified release',
+    args: [bootstrap, 'managed-update-worker'],
+    env: { ...env, BEELINE_INTERNAL_UPDATE_WORKER: '1', BEELINE_UPDATE_GROUP_OWNER: '1' },
+    signal,
   });
+  const result = JSON.parse(stdout);
+  if (!result.releaseId) throw new Error('release preparation: no verified release');
+  return result;
 }

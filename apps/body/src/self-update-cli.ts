@@ -1,10 +1,12 @@
+import { convergeDependencies } from './recovery-dependencies.js';
+import { progress } from './update-progress.js';
 import { convergeMachine, prepareMachineRelease } from './recovery.js';
 /**
  * `beeline update` — the on-demand half of the daemon self-update path.
  *
  * Downloads and verifies the published bundle. A serving helper activates it
  * and restarts through its service manager in a quiet gap between turns.
- * With no helper running, native convergence starts it and awaits serving agents.
+ * With no helper running, native convergence starts it and awaits the selected release.
  */
 import pc from 'picocolors';
 import type { AdapterUpdateOptions } from './adapter-update.js';
@@ -27,6 +29,7 @@ import {
   describeIdentity,
   discoveredBeelineInstallLayout,
   hostPlatformKey,
+  fetchText,
   readInstalledBundleIdentity,
   readUpdateState,
   type BeelineInstallLayout,
@@ -158,24 +161,11 @@ export async function runUpdateCommand(args: string[]): Promise<void> {
     return;
   }
 
-  // `--check` is explicitly report-only. Every mutating update, including the
-  // update pass `beeline start` performs before launching its fan-out, also
-  // advances installed ACP adapters to the registry's current release.
-  if (!checkOnly)
-    await refreshRuntimeHarnessAdapters({
-      env: { ...process.env, BEELINE_LIB_DIR: layout.libDir },
-    });
-
   const installed = await readInstalledBundleIdentity(layout);
   console.log(`[beeline] installed bundle: ${describeIdentity(installed)}`);
 
   if (checkOnly) {
-    const raw = await fetch(manifestUrl, { signal: undefined }).then(
-      (response) => {
-        if (!response.ok) throw new Error(`manifest fetch failed: HTTP ${response.status}`);
-        return response.text();
-      },
-    );
+    const raw = await fetchText(manifestUrl, fetch);
     const { bundle } = parseUpdateManifest(raw, hostPlatformKey());
     const verdict = compareBundleIdentity(installed, bundle);
     if (verdict.kind === 'update-available') {
@@ -189,20 +179,31 @@ export async function runUpdateCommand(args: string[]): Promise<void> {
       );
     return;
   }
-  const target = await prepareMachineRelease(layout, {
+  let target: Awaited<ReturnType<typeof prepareMachineRelease>>;
+  try {
+    target = await prepareMachineRelease(layout, {
     env: {
       ...process.env,
       BEELINE_LIB_DIR: layout.libDir,
       BEELINE_UPDATE_MANIFEST_URL: manifestUrl,
     },
     force,
-  });
+    });
+  } catch (error) {
+    await convergeMachine({ layout, waitForAgents: false });
+    throw new Error(`helper recovered on the verified installed release; freshness unconfirmed: ${String(error)}`);
+  }
+  await convergeDependencies(layout, target.releaseId);
   const status = await convergeMachine({
     layout,
     env: { ...process.env, BEELINE_LIB_DIR: layout.libDir },
     releaseId: target.releaseId,
+    waitForAgents: false,
+    force,
   });
+  for (const [id, agent] of Object.entries(status.agents))
+    progress(`agent ${id}: ${agent.state} since ${agent.since}; ${agent.lastError ?? agent.status}; snapshot ${status.updatedAt}`);
   console.log(
-    `[beeline] executing release ${status.loadedRelease}; helper pid ${status.pid}; all enabled agents serving`,
+    `[beeline] executing release ${status.loadedRelease}; helper pid ${status.pid}; target release serving`,
   );
 }

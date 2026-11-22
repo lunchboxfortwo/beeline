@@ -25,6 +25,7 @@ import { daemonBriefAttachmentRooms } from './corner-reports.js';
 import { Input } from './values.js';
 import { modelText } from '../message-origin.js';
 import { recordedMessageRoute } from '../message-route.js';
+import { linkThreadWorkItems,normalizedThreadWorkItems } from '../work-item-threads.js';
 
 
 
@@ -147,7 +148,13 @@ import { recordedMessageRoute } from '../message-route.js';
             existing.brief_change === (input.brief.change ?? null) &&
             sameAttachments
           : existing.brief_revision === null;
+        // A retry names the same tasks the first open linked, or it is a different assignment.
+        const linked = (await db.query<{ id: string }>(
+          `SELECT work_item_id id FROM work_item_threads WHERE thread_id=$1`,
+          [existing.corner_id])).rows.map(row => row.id).sort().join('\n');
+        const sameWorkItems = linked === normalizedThreadWorkItems(input.workItems).join('\n');
         if (
+          !sameWorkItems ||
           existing.owner_agent_id !== implementerAgentId ||
           existing.created_by !== agentId ||
           existing.request_id !== input.requestId ||
@@ -166,6 +173,7 @@ import { recordedMessageRoute } from '../message-route.js';
             existing.repository_key !== (input.repository ?? null) && 'repository',
             existing.repository_target_branch !== (input.targetBranch ?? 'main') && 'target branch',
             !sameBrief && 'brief',
+            !sameWorkItems && 'work items',
           ].filter(Boolean);
           throw new Error(
             `thread assignment conflict: idempotency key was already used for a different assignment (${mismatches.join(', ')})`,
@@ -261,6 +269,9 @@ import { recordedMessageRoute } from '../message-route.js';
           ],
         );
       }
+      // The chat tasks this thread builds move to In progress with the open.
+      if (input.workItems?.length) await linkThreadWorkItems(db, { threadId: cornerId, chatId: roomId,
+        workspaceId: parent.workspace_id, threadName: name, itemIds: input.workItems, actorId: agentId });
       const from=implementerAgentId===agentId
         ? (await recordedMessageRoute(db,parentCommand)).from : {agent:agentId,place:commandRoomId};
       const taskText=implementerAgentId===agentId

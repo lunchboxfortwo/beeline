@@ -290,7 +290,6 @@ export async function runAdapterInstall(
       ...(opts.cwd ? { cwd: opts.cwd } : {}),
       env: opts.env ?? process.env,
       stdio: opts.stdio ?? 'inherit',
-      timeout: 2 * 60_000,
     });
     child.once('error', rejectInstall);
     child.once('exit', (code, signal) => {
