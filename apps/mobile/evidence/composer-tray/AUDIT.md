@@ -31,6 +31,8 @@ Total: (16/20), with the remaining uncertainty in native-device verification rat
 
 The house’s approved (44 pt) close targets take precedence over the audit reference’s generic Android (48 dp) recommendation. The approved product font and icon set likewise take precedence over the generic platform font/icon recommendations.
 
+Android component fixture evidence is in `native/`: both themes with the native keyboard, sideways scrolling, attachment removal and reply cancellation. The keyboard remains open during these controls; the outer keyboard coordinator is a fixture, so full chat integration still needs device verification.
+
 ## Verification boundaries
 
 The host is Linux and has no `xcrun` command or iOS Simulator. A supplemental WebKit route downloaded successfully but could not launch because host GTK/GStreamer/AVIF libraries are absent; a WebKit browser would not establish native iOS correctness anyway. Native iOS horizontal scrolling with the keyboard open remains a device verification step before release.
