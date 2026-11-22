@@ -105,6 +105,32 @@ it('acceptance 8: batches share the established socket, never recurse, poll or w
   const events=socket.requests().filter(r=>r.op==='reportDiagnostics').flatMap(r=>r.args.events);
   expect(events.some(e=>e.operation==='reportDiagnostics')).toBe(false);
 });
+it('telemetry waits until the person’s reads and writes, including a follow-up read, are answered',async()=>{
+  const {connection}=setup();
+  const create=connection.request('createHumanCorner',{roomId:'room',title:'Thread'} as never);
+  const socket=await open();
+  let idle=false;
+  void connection.whenIdle().then(()=>{idle=true;});
+  // The created thread's first read starts in the write's own continuation.
+  const read=create.then(()=>connection.request('readRoom',{roomId:'thread'}));
+  socket.reply({id:'thread'});
+  await tick();
+  expect(socket.requests().map(frame=>frame.op)).toEqual(['createHumanCorner','readRoom']);
+  expect(idle).toBe(false);
+  socket.reply({room:{id:'thread'}},1);
+  await read;
+  await tick();
+  expect(idle).toBe(true);
+  await expect(connection.whenIdle()).resolves.toBeUndefined();
+});
+it('disposal releases telemetry still waiting for an answer',async()=>{
+  const {connection}=setup();
+  void connection.request('readRoom',{roomId:'room'}).catch(()=>undefined);
+  await open();
+  const waiting=connection.whenIdle();
+  connection.dispose();
+  await expect(waiting).resolves.toBeUndefined();
+});
 async function open() { await tick(); const socket=Socket.instances.at(-1)!;socket.open();return socket; }
 function appState(next: string) { state.currentState=next;for(const listener of state.listeners)listener(next); }
 beforeEach(()=>{vi.useFakeTimers();Socket.instances=[];state.currentState='active';state.platform='android';vi.stubGlobal('WebSocket',Socket);});

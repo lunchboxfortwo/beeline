@@ -10,6 +10,7 @@ const controls = vi.hoisted(() => ({
   authorization: vi.fn(),
   invalidateAuthorization: vi.fn(),
   identityListeners: new Set<() => void>(),
+  publishOpenedRoom: vi.fn(),
 }));
 const mmkv = vi.hoisted(() => ({ stores: new Map<string, Map<string, string>>() }));
 
@@ -27,6 +28,9 @@ vi.mock('@/buzz/runtime-config', () => ({
     monolithUrl: 'https://server.example',
     relayUrl: 'wss://legacy.example',
   }),
+}));
+vi.mock('@/buzz/opened-room-cache', () => ({
+  publishOpenedRoom: controls.publishOpenedRoom,
 }));
 vi.mock('@/auth/monolith-session', () => ({
   MONOLITH_REQUEST_TIMEOUT_MS: 15_000,
@@ -108,6 +112,7 @@ async function driveHandleSendPath(
 
 // HTTP-shaped response fixtures feed the socket seam; uploads keep their HTTP seam.
 beforeEach(() => {
+  controls.publishOpenedRoom.mockReset();
   controls.request.mockReset();
   controls.request.mockImplementation(async (name, input) => {
     const response = await controls.fetch(name, input);
@@ -522,9 +527,23 @@ describe('monolith Room send path', () => {
     );
     expect(controls.request).toHaveBeenCalledWith(
       "createHumanCorner",
-      { roomId: ROOM, title: 'Release notes' },
+      { roomId: ROOM, title: 'Release notes', includeRoomView: true },
       { timeoutMs: 15_000 },
     );
+    expect(controls.publishOpenedRoom).not.toHaveBeenCalled();
+  });
+
+  it('publishes the first read a new corner returns with its creation', async () => {
+    const roomView = { room: { id: 'human-corner-id' } };
+    controls.fetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ id: 'human-corner-id', roomView }), { status: 200 }),
+    );
+    const transport = new MonolithRigTransport(identity);
+
+    await expect(transport.createHumanCorner(ROOM, 'Release notes')).resolves.toBe(
+      'human-corner-id',
+    );
+    expect(controls.publishOpenedRoom).toHaveBeenCalledWith(roomView, expect.any(Number));
   });
 
   it('names the message a swiped corner was opened from', async () => {
@@ -550,6 +569,7 @@ describe('monolith Room send path', () => {
           sourceMessageId,
           titleGenerated: true,
           cornerId,
+          includeRoomView: true,
         },
       { timeoutMs: 15_000 },
     );

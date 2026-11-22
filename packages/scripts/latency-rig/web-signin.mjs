@@ -28,11 +28,18 @@ export async function fixtureContext(
             'access-control-allow-methods': '*',
           },
         });
-      const response = await route.fetch();
-      return route.fulfill({
-        response,
-        headers: { ...response.headers(), 'access-control-allow-origin': origin.origin },
-      });
+      // A sample can close its page while an image request is still in flight.
+      // That request belongs to no measurement; ending it must not stop the run.
+      try {
+        const response = await route.fetch();
+        return await route.fulfill({
+          response,
+          headers: { ...response.headers(), 'access-control-allow-origin': origin.origin },
+        });
+      } catch (error) {
+        if (error?.name?.startsWith('TargetClosedError') || /closed|disposed/i.test(error?.message ?? '')) return;
+        throw error;
+      }
     }
     blockedRequests.push({ capture, origin: url.origin });
     await route.abort();

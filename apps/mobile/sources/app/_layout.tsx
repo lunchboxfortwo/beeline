@@ -23,7 +23,7 @@ import { SidebarNavigator } from '@/components/SidebarNavigator';
 import { AppState, Platform } from 'react-native';
 import { ModalProvider } from '@/modal';
 import { GrammarProvider } from '@/ui/GrammarProvider';
-import { WarmComputerSessionHost } from '@/components/buzz/ComputerSession';
+import { WarmComputerSessionHost } from '@/components/buzz/WarmComputerSessionHost';
 import { TrackingRoot } from '@/track/TrackingRoot';
 import { useTrackScreens } from '@/track/useTrackScreens';
 import { KeyboardShortcutsProvider } from '@/components/KeyboardShortcutsProvider';

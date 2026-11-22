@@ -97,8 +97,10 @@ import { turnRootMessageSql } from '../agent-command.js';
           WHERE room_id=r.id AND (status<>'working' OR ${workingTurnFreshSql('agent_turns')})
           ORDER BY agent_id,(status='working') DESC,created_at DESC,request_id DESC
         ) latest
-        JOIN agent_turns turn ON turn.room_id=r.id AND turn.agent_id=latest.agent_id
-          AND turn.request_id=latest.request_id
+        -- One primary-key read per agent. A plain join let the planner read and
+        -- sort every turn in the Room a second time.
+        CROSS JOIN LATERAL (SELECT * FROM agent_turns turn WHERE turn.room_id=r.id
+          AND turn.request_id=latest.request_id AND turn.agent_id=latest.agent_id LIMIT 1) turn
         LEFT JOIN messages trigger ON trigger.id=${turnRootMessageSql('turn')}
         LEFT JOIN identities requester ON requester.id=trigger.author_id AND requester.kind='human'),'[]'::jsonb) turns,
         COALESCE(lm.author_id<>$2 AND ${tagsKnownIdentitySql('lm', '$2',

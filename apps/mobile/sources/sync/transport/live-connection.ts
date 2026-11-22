@@ -22,6 +22,7 @@ type SurfaceFilters = readonly {
   readonly '#h'?: readonly string[];
   readonly '#d'?: readonly string[];
 }[];
+const TELEMETRY_OPERATIONS: readonly string[] = ['reportDiagnostics', 'reportSigninFunnel'];
 type SurfaceListener = (event: NostrEvent | MonolithSurfaceEvent) => void;
 type Registration = { roomIds: ReadonlySet<string>; listener: SurfaceListener; closed: boolean };
 type RequestOptions = {
@@ -123,6 +124,9 @@ export class LiveConnection {
   // One owner-held connection promise prevents parallel screens opening two sockets.
   private connecting?: { promise: Promise<void>; reject(reason: unknown): void };
   private readonly requests = new Map<string, PendingRequest>();
+  /** Telemetry uploads waiting for the person's own requests to finish. */
+  private idleWaiters: (() => void)[] = [];
+  private idleCheck?: ReturnType<typeof setTimeout>;
   private launch = takeLaunch();
   private readonly registrations = new Set<Registration>();
   private readonly roomReferences = new Map<string, number>();
@@ -220,7 +224,7 @@ export class LiveConnection {
       generation = socketGeneration;
     };
     const current = () => !this.disposed && this.foreground && identity === this.identity && session === failureSession;
-    const observed = !['reportDiagnostics','reportSigninFunnel'].includes(operation);
+    const observed = !TELEMETRY_OPERATIONS.includes(operation);
     const startedAt=Date.now();
     let diagnostic=observed ? this.deps.telemetry?.origin() : undefined;
     if (diagnostic && operation==='createWorkspace') {
@@ -350,6 +354,7 @@ export class LiveConnection {
         clearTimeout(deadline);
         options.signal?.removeEventListener('abort', abort);
         this.requests.delete(id);
+        this.releaseIdleWaiters();
         return true;
       };
       const request: PendingRequest = {
@@ -387,6 +392,33 @@ export class LiveConnection {
       else void this.ensureSocket().catch((error) => request.reject(error));
     });
   }
+  private busy(): boolean {
+    return [...this.requests.values()].some(request => !TELEMETRY_OPERATIONS.includes(request.operation));
+  }
+
+  /**
+   * Resolves once no request the person is waiting on is in flight. A tap's
+   * reads and writes then get the server's connections first; the queued
+   * telemetry goes out as one later upload.
+   */
+  whenIdle(): Promise<void> {
+    if (!this.busy()) return Promise.resolve();
+    return new Promise(resolve => { this.idleWaiters.push(resolve); });
+  }
+
+  private releaseIdleWaiters(): void {
+    if (!this.idleWaiters.length || this.idleCheck || this.busy()) return;
+    // A reply often starts the next read in its own continuation, for example a
+    // created thread's first read. Look again after that has had a chance to start.
+    this.idleCheck = setTimeout(() => {
+      this.idleCheck = undefined;
+      if (this.busy()) return;
+      const waiters = this.idleWaiters;
+      this.idleWaiters = [];
+      for (const resolve of waiters) resolve();
+    }, 0);
+  }
+
   private abortError(): Error {
     const error = new Error('The request was aborted.');
     error.name = 'AbortError';
@@ -504,7 +536,7 @@ export class LiveConnection {
     if (this.socket !== socket) return;
     const wasConnected = !this.connecting;
     const requestOwnsRecovery = [...this.requests.values()].some(request =>
-      !['reportDiagnostics', 'reportSigninFunnel'].includes(request.operation));
+      !TELEMETRY_OPERATIONS.includes(request.operation));
     this.dropConnection(true);
     // Every open surface lost coverage, even when an unrelated request was
     // pending. Telemetry intentionally cannot reconnect itself; a diagnostic
@@ -680,6 +712,12 @@ export class LiveConnection {
     this.registrations.clear();
     this.roomReferences.clear();
     this.viewing.clear();
+    // Waiting telemetry must not hold the diagnostics queue on a closed connection.
+    clearTimeout(this.idleCheck);
+    this.idleCheck = undefined;
+    const waiters = this.idleWaiters;
+    this.idleWaiters = [];
+    for (const resolve of waiters) resolve();
   }
 }
 let shared: LiveConnection | undefined;
@@ -700,7 +738,7 @@ export function sharedLiveConnection(): LiveConnection {
   const connection = shared;
   void import('@/track/diagnostics').then(async t=>{
     telemetryOrigin=t.diagnosticOrigin;
-    t.attachDiagnosticSocket({ready:()=>connection.commandState().ready,send:batch=>connection.request('reportDiagnostics',batch,{reconnectOwnedByOutbox:true})});
+    t.attachDiagnosticSocket({ready:()=>connection.commandState().ready,send:batch=>connection.whenIdle().then(()=>connection.request('reportDiagnostics',batch,{reconnectOwnedByOutbox:true}))});
     await t.identifyDiagnostics(await monolithSession.identityId());
     t.flushDiagnostics();
   }).catch(()=>undefined);

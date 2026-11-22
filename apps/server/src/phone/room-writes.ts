@@ -141,7 +141,9 @@ import { normalizeHumanCornerTitle, UUID_PATTERN } from './values.js';
 
       return opening.id;
     });
-    return { id, ...(messageId ? { messageId } : {}) };
+    // Read after commit, as the opening screen's own read would.
+    const roomView = input.includeRoomView ? await ctx.readRoom(id, viewerId) : null;
+    return { id, ...(messageId ? { messageId } : {}), ...(roomView ? { roomView } : {}) };
   }
 
   export async function phoneRenameCorner(ctx: PhoneContext, roomId: string, name: string | undefined, viewerId: string) {
