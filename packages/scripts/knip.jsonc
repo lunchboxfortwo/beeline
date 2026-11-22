@@ -74,6 +74,8 @@
         "packages/scripts/prove-rollout-overlap.mjs",
         // Isolated built-service reproduction invoked by path in PR #4162.
         "packages/scripts/prove-commander-handover.mjs",
+        // Implementer blocks use this isolated built-service reproduction.
+        "packages/scripts/prove-implementer-blocks.mjs",
         // Reproduction handle-1 invokes this isolated built-service proof by path.
         "packages/scripts/prove-workspace-handles.mjs",
         // Reproduction muse-wake-1 invokes this isolated built-service proof by path.

@@ -173,7 +173,7 @@ it.each(['done', 'blocked', 'failed', 'needs_decision'])('Reproduction report-co
   expect((await db.query(`SELECT state,parent_command_id,review_context FROM agent_commands WHERE id=$1`, [reply.id])).rows[0])
     .toMatchObject({ state: 'pending', parent_command_id: order.id, review_context: null });
   expect((await db.query(`SELECT 1 FROM agent_commands WHERE reason='report' AND agent_id=$1`, [CANDY])).rowCount).toBe(0);
-  expect((await db.query(`SELECT 1 FROM messages WHERE text=$1`, [text])).rowCount).toBe(0);
+  expect((await db.query(`SELECT 1 FROM messages WHERE text=$1`, [text])).rowCount).toBe(status === 'blocked' || status === 'needs_decision' ? 1 : 0);
   // A changed head remains context; it cannot discard a report.
   await daemon.execute('report', { roomId: incoming.roomId, requestId: incoming.turnRequestId, status: 'done', text: 'done: stale review verdict' }, CANDY);
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [incoming.id])).rows).toEqual([{ state: 'complete' }]);

@@ -918,10 +918,6 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
       ? String(input.status).replace('_', '-') : 'done';
     if (input.report) {
       await refuseDoneWithBlocks(db,agentId,input.roomId,`${status}: ${input.text}`);
-      if (recipientId) {
-        const recipient = await blockRecipient(db,{agent:agentId,place:input.roomId},{agent:recipientId,place:roomId},`${status}: ${input.text}`);
-        roomId=recipient.place; recipientId=recipient.agent;
-      }
     }
     const publicText = repairAgentPost(item?.reason==='voice_order' ? cleanVoiceReply(input.text,item.name) : input.text).text.replace(input.report ? /^(?:done|blocked|failed|needs[-_]decision):\s*/ : /^$/, '').trim();
     const publicReplyId = item?.public_reply_id ?? input.sharedReplyId;
