@@ -2,7 +2,7 @@ import { cornerBlockerSql } from './chat-corner-counts.js';
 import {
   cornerShortTitle,
   WORK_STATES,
-  threadWorkMark,
+  threadWorkState,
   type UpdateWorkItemInput,
   type WorkBoardView,
   type WorkItemView,
@@ -363,8 +363,9 @@ function withoutIdle(item: WorkItemView): WorkItemView {
 
 function projectWorkRow(row: WorkRow, publicOrigin: string, viewerId: string): WorkItemView {
   const machine = row.thread_machine;
-  const mark = row.thread
-    ? threadWorkMark(
+  // Tasks stays per viewer: a wait is Needs you only for whom it asks, and never idle.
+  const threadState = row.thread
+    ? threadWorkState(
         {
           state: machine?.state ?? 'idle',
           ...(machine?.state === 'idle' && machine.reason ? { reason: machine.reason } : {}),
@@ -374,6 +375,12 @@ function projectWorkRow(row: WorkRow, publicOrigin: string, viewerId: string): W
         },
         viewerId,
       )
+    : undefined;
+  const mark = threadState
+    ? {
+        state: threadState,
+        idle: threadState === 'in-progress' && (machine?.state ?? 'idle') === 'idle',
+      }
     : { state: row.state ?? 'backlog', idle: false };
   return {
     ...projectWorkDetail(row, publicOrigin),

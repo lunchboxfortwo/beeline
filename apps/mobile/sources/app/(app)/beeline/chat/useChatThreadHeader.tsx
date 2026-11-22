@@ -20,10 +20,9 @@ import { findRoomCornerRow, useRoomCornerRecord } from '@/buzz/room-corner-store
  */
 export function useChatThreadHeader({
   isCorner, roomSurface, resolvedChannelName, decodedId, parentChannelId, state,
-  objective, isArchived, isDesktop, positions,sourceMessageId, viewerPubkey,
+  objective, isArchived, isDesktop, positions,sourceMessageId,
 }: {
   isCorner: boolean;
-  viewerPubkey?: string;
   sourceMessageId?:string;
   roomSurface: RoomView | null;
   resolvedChannelName: string | null;
@@ -43,7 +42,6 @@ export function useChatThreadHeader({
   const title = resolvedChannelName ?? openingRow?.corner.name ?? openingSummary?.name ?? null;
   const threadState = state ?? openingRow?.state ?? openingSummary?.state;
   const threadReason = openingRow?.reason ?? openingSummary?.reason;
-  const threadBlocker = openingRow?.blocker ?? openingSummary?.blocker;
   const prUrl = roomSurface?.cornerLifecycle?.pr?.url;
   const hasBrief = Boolean(roomSurface?.cornerBrief);
   const visibility = useTitleBlockVisibility(isCorner, positions);
@@ -58,14 +56,12 @@ export function useChatThreadHeader({
       title: cornerShortTitle(parentName, title, decodedId),
       ...(threadState ? { state: threadState } : isArchived ? { state: 'archived' as const } : {}),
       ...(threadReason ? { reason: threadReason } : {}),
-      ...(threadBlocker ? { blocker: threadBlocker } : {}),
-      ...(viewerPubkey ? { viewer: viewerPubkey } : {}),
       workItem:recordedWorkItem??roomSurface?.workItem,
       people:roomSurface?.members.map(member=>member.identity),
       ...(prLine ? { prLine } : {}),
       ...(objective.trim() ? { objective: objective.trim() } : {}),
     };
-  }, [openingRow?.workingAgentName, openingSummary?.workingAgentName, decodedId, isArchived, isCorner, objective, parentName, title, roomSurface?.cornerLifecycle, roomSurface?.room.homepageIcon, roomSurface?.workItem, recordedWorkItem, roomSurface?.members, threadState, threadBlocker, threadReason, viewerPubkey]);
+  }, [openingRow?.workingAgentName, openingSummary?.workingAgentName, decodedId, isArchived, isCorner, objective, parentName, title, roomSurface?.cornerLifecycle, roomSurface?.room.homepageIcon, roomSurface?.workItem, recordedWorkItem, roomSurface?.members, threadState, threadReason]);
 
   const openBrief = useMemo(
     () => (isCorner && hasBrief ? () => openPlace({ kind: 'brief', roomId: decodedId }, isDesktop) : undefined),

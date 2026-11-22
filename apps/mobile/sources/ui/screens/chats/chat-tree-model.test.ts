@@ -102,24 +102,35 @@ describe('chat rows', () => {
     ]);
   });
 
-  it('marks Needs you only for the person a thread waits on; a wait on anyone else is idle', () => {
+  it('marks every waiting thread with the waiting @ for every viewer, whoever it waits on', () => {
     const waiting = (blocker: typeof onViewer) =>
       ({ id: 'w', name: 'w', state: 'waiting', blocker }) as ChatListCorner;
-    expect(threadWorkMark(waiting(onViewer), viewer)).toEqual({ state: 'needs-you', idle: false });
-    expect(threadWorkMark(waiting(onAlan), viewer)).toEqual({ state: 'in-progress', idle: true });
-    expect(threadWorkMark({ state: 'waiting', blocker: onAlan } as ChatListCorner, viewer)).toEqual({ state: 'in-progress', idle: true });
-    expect(threadWorkMark({ state: 'working' } as ChatListCorner, viewer)).toEqual({ state: 'in-progress', idle: false });
-    expect(threadWorkMark({ state: 'archived' } as ChatListCorner, viewer)).toEqual({ state: 'done', idle: false });
+    expect(threadWorkMark(waiting(onViewer))).toEqual({ state: 'needs-you', idle: false });
+    expect(threadWorkMark(waiting(onAlan))).toEqual({ state: 'needs-you', idle: false });
+    expect(threadWorkMark({ state: 'waiting' } as ChatListCorner)).toEqual({ state: 'needs-you', idle: false });
+    expect(threadWorkMark({ state: 'working' } as ChatListCorner)).toEqual({ state: 'in-progress', idle: false });
+    expect(threadWorkMark({ state: 'archived' } as ChatListCorner)).toEqual({ state: 'done', idle: false });
+  });
+
+  it('Reproduction WAITING-NOT-IDLE: a pending grant or a block reported to the commander draws waiting for the owner', () => {
+    // composer-tray waited on its commander Ruby; latency-rig-patch on a pending run-script grant. Both drew idle.
+    const ruby = { kind: 'report' as const, personId: 'r'.repeat(64), personName: 'Ruby' };
+    const reported = { id: 'b', name: 'b', state: 'waiting', blocker: ruby } as ChatListCorner;
+    expect([threadWorkMark(reported), threadWord(reported, viewer)]).toEqual([{ state: 'needs-you', idle: false }, 'waiting on Ruby']);
+    const grant = { id: 'g', name: 'g', state: 'waiting', reason: 'approve' } as ChatListCorner;
+    expect([threadWorkMark(grant), threadWord(grant, viewer)]).toEqual([{ state: 'needs-you', idle: false }, 'waiting on approval']);
+    const idle = { id: 'i', name: 'i', state: 'idle' } as ChatListCorner;
+    expect([threadWorkMark(idle), threadWord(idle, viewer)]).toEqual([{ state: 'in-progress', idle: true }, 'idle']);
   });
 
   it('Reproduction ROW-DONE: a thread row reads one state, its machine state and reason; a planted second state is ignored', () => {
     // latency-capture-investigation: a stored Done over an idle machine drew Done beside "idle".
     const planted = { id: 'r', name: 'r', state: 'idle', workState: 'done' } as unknown as ChatListCorner;
-    expect([threadWorkMark(planted, viewer), threadWord(planted, viewer)]).toEqual([{ state: 'in-progress', idle: true }, 'idle']);
+    expect([threadWorkMark(planted), threadWord(planted, viewer)]).toEqual([{ state: 'in-progress', idle: true }, 'idle']);
     const backlog = { id: 'b', name: 'b', state: 'idle', reason: 'backlog' } as ChatListCorner;
-    expect([threadWorkMark(backlog, viewer), threadWord(backlog, viewer)]).toEqual([{ state: 'backlog', idle: false }, 'backlog']);
+    expect([threadWorkMark(backlog), threadWord(backlog, viewer)]).toEqual([{ state: 'backlog', idle: false }, 'backlog']);
     const review = { id: 'v', name: 'v', state: 'review', workState: 'backlog' } as unknown as ChatListCorner;
-    expect([threadWorkMark(review, viewer), threadWord(review, viewer)]).toEqual([{ state: 'in-review', idle: false }, 'review']);
+    expect([threadWorkMark(review), threadWord(review, viewer)]).toEqual([{ state: 'in-review', idle: false }, 'review']);
   });
 
   it('shows at most three waiting threads, counts the rest, and shows none when none wait', () => {

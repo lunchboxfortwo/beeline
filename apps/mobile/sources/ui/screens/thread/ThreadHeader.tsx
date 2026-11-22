@@ -7,7 +7,7 @@ import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import type { View } from 'react-native';
 import { ListItem, XStack, YStack, useThemeName } from 'tamagui';
 import { ArrowLeft, Users, CornerDownRight, GitPullRequest, MoreHorizontal } from 'lucide-react-native';
-import { threadWorkMark, type CornerBlocker, type CornerState, type CornerStateReason } from '@beeline/api-contract/phone';
+import { threadWorkMark, type CornerState, type CornerStateReason } from '@beeline/api-contract/phone';
 import { Btn, Glyph, HEIGHT, SafeTop, T, typeStyle, useTextSize } from '@/ui/grammar';
 
 /**
@@ -30,9 +30,6 @@ export type ThreadHeaderData = {
     workingAgentName?: string;
     /** The machine's reason alongside `state` (`backlog` on an idle thread). */
     reason?: CornerStateReason;
-    /** While waiting, whom the thread waits on; it needs `viewer` only when that is them. */
-    blocker?: CornerBlocker;
-    viewer?: string;
     prLine?: string;
     objective?: string;
 };
@@ -55,9 +52,9 @@ function ThreadName({ title, v, regular = false, testID, trail }: {
     );
 }
 
-/** The thread's state mark for this viewer: a wait on anyone else reads idle. */
+/** The thread's state mark, the same for every viewer: a waiting thread draws the waiting @. */
 function headerMark(h: ThreadHeaderData) {
-    return h.state ? threadWorkMark({ state: h.state, reason: h.reason, blocker: h.blocker }, h.viewer) : undefined;
+    return h.state ? threadWorkMark({ state: h.state, reason: h.reason }) : undefined;
 }
 
 function HeaderMark({ h }: { h: ThreadHeaderData }) {

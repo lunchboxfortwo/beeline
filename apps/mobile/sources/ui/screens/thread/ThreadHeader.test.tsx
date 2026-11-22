@@ -22,9 +22,6 @@ const reconnect: ThreadHeaderData = {
   objective: 'Keep the transcript still when the connection returns.',
 };
 
-/** A wait on this viewer, and one on someone else, as the server's blocker names them. */
-const onViewer = { blocker: { kind: 'message' as const, personId: 'me' }, viewer: 'me' };
-const onOther = { blocker: { kind: 'message' as const, personId: 'someone' }, viewer: 'me' };
 
 beforeEach(() => { appearance.name='light_brass'; (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; });
 
@@ -116,7 +113,7 @@ for (const theme of ['light_stone', 'dark_stone']) {
     ])(`keeps the chat image in the collapsed ${state} bar under ${theme}: %j`, (image) => {
       appearance.name = theme;
       let tree: any;
-      act(() => { tree = create(<ThreadBar h={{ ...reconnect, ...image, state, ...(state === 'waiting' ? onViewer : {}) }} collapsed back={() => {}} openChat={() => {}} />); });
+      act(() => { tree = create(<ThreadBar h={{ ...reconnect, ...image, state }} collapsed back={() => {}} openChat={() => {}} />); });
       expect(tree.root.findByType('RepositoryMark').props).toMatchObject({
         homepageIconUrl: image.repositoryHomepageIcon, size: 28,
       });
@@ -147,7 +144,7 @@ it('shows only a title-row assignee and preserves the existing picker',async()=>
 for (const [state, glyph, idle] of [['waiting', 'needs-you', false], ['working', 'in-progress', false], ['idle', 'in-progress', true], ['review', 'in-review', false], ['archived', 'done', false]] as const) {
   it(`maps ${state} through the shared state graph in both headers`, () => {
     let tree: any;
-    act(() => { tree = create(<><ThreadTitleBlock h={{...reconnect,state,...(state === 'waiting' ? onViewer : {})}}/><ThreadBar h={{...reconnect,state,...(state === 'waiting' ? onViewer : {})}} collapsed openChat={() => undefined}/></>); });
+    act(() => { tree = create(<><ThreadTitleBlock h={{...reconnect,state}}/><ThreadBar h={{...reconnect,state}} collapsed openChat={() => undefined}/></>); });
     expect(tree.root.findAllByType('WorkStateMark').map((node:any) => node.props)).toEqual([{state:glyph,idle},{state:glyph,idle}]);
     expect(byTestID(tree,'thread-title')[0].findByType('T').props.regular).toBe(state !== 'waiting');
     expect(byTestID(tree,'thread-objective')[0].props.v).toBe('meta');
@@ -156,13 +153,6 @@ for (const [state, glyph, idle] of [['waiting', 'needs-you', false], ['working',
     act(() => tree.unmount());
   });
 }
-
-it('reads a wait on someone else as idle in both headers, never needs you', () => {
-  let tree: any;
-  act(() => { tree = create(<><ThreadTitleBlock h={{...reconnect,state:'waiting',...onOther}}/><ThreadBar h={{...reconnect,state:'waiting',...onOther}} collapsed openChat={() => undefined}/></>); });
-  expect(tree.root.findAllByType('WorkStateMark').map((node:any) => node.props)).toEqual([{state:'in-progress',idle:true},{state:'in-progress',idle:true}]);
-  act(() => tree.unmount());
-});
 
 it('sets the state mark right after the thread name, centred on its line, with the arrow first', () => {
   let tree:any;

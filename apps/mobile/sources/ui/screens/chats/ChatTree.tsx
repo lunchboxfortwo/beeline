@@ -91,7 +91,7 @@ function ChatMark({ item, size = MARK }: { size?: number; item: Partial<Pick<Cha
 }
 
 /** One thread under its chat: ↳, its name at the meta size, then its state mark in the chat's
- * mark column; a thread waiting on the viewer is semibold ink, the others regular and quieter. */
+ * mark column; a waiting thread is semibold ink, the others regular and quieter. */
 function ThreadLine({
   item,
   corner,
@@ -107,7 +107,7 @@ function ThreadLine({
 }) {
   const { word } = threadListLabel(corner, viewer);
   const title = threadTitle(item, corner);
-  const { state, idle } = threadWorkMark(corner, viewer);
+  const { state, idle } = threadWorkMark(corner);
   const step = useStep();
   return (
     <ListItem

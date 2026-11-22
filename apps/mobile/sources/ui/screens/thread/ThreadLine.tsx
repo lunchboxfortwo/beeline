@@ -19,7 +19,7 @@ export function ThreadLine({ title, state, blocker, reason, workingAgentName, vi
     onPress: () => void; testID?: string;
 }) {
     const { word, you: brass } = threadListLabel({ state, blocker, reason, workingAgentName }, viewer);
-    const mark = threadWorkMark({ state, blocker, reason }, viewer);
+    const mark = threadWorkMark({ state, reason });
     const line = typeStyle('body', useTextSize()).lineHeight;
     return (
         <ListItem
