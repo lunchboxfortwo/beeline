@@ -92,7 +92,7 @@ it('a configuration change refreshes configuration without rereading every optio
   expect(f.execute).toHaveBeenCalledWith('postAgentTurnReceipt', expect.objectContaining({ requestId: 'active' }));
 });
 
-it('a place first seen after a configuration change reads the changed settings before it starts', async () => {
+it('a place first seen after a configuration change starts reading the changed settings before its first start', async () => {
   const f=await fixture();
   f.changed([f.item('before')]);
   await vi.waitFor(()=>expect(harness.deliver).toHaveBeenCalledOnce());
