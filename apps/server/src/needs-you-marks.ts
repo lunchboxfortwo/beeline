@@ -87,6 +87,15 @@ CREATE TRIGGER question_needs_you_mark AFTER INSERT OR UPDATE OF status ON room_
 CREATE OR REPLACE FUNCTION maintain_needs_you_marks() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE reasked_block text;
 BEGIN
+  -- A new receipt that is not a message or an agent command (an approval-mode
+  -- line, for example) asks no one: no mark exists for it yet, and only a
+  -- message, an agent command or a question row can raise or clear one.
+  -- Question rows refresh the mark from their own trigger.
+  IF TG_OP='INSERT' AND NEW.presentation IS DISTINCT FROM 'message' AND NEW.card_type IS DISTINCT FROM 'agent-command'
+    AND NOT EXISTS (SELECT 1 FROM work_questions question WHERE question.message_id=NEW.id)
+    AND NOT EXISTS (SELECT 1 FROM room_choices choice WHERE choice.message_id=NEW.id AND choice.mode='question') THEN
+    RETURN NEW;
+  END IF;
   IF (NEW.presentation='message' OR NEW.card_type='agent-command') AND NEW.system_event IS NULL AND NEW.deleted_at IS NULL THEN
     UPDATE needs_you_marks mark SET cleared_at=now(),cleared_reason='answered'
     FROM messages m WHERE (mark.identity_id=NEW.author_id OR mark.message_id=NEW.reply_to_message_id)
