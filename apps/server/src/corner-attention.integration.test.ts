@@ -193,6 +193,23 @@ it('a running turn of an agent that is not the implementer keeps the thread from
   expect(await state()).toBe('idle');
 });
 
+it.each(['person', 'agent'])('a %s stop of a running thread turn decides whether the commander hears it is idle', async stopper => {
+  await turn();
+  const idleNotices = async () => (await commanderFlags()).filter(command => command.source.body.includes(' is idle.'));
+  if (stopper === 'person') await phone.execute('sendRoomMessage', { roomId: C, text: '@worker stop' }, HUMAN);
+  else await db.query(`SELECT beeline_finish_agent_command(id,'cancelled','stop',NULL) FROM agent_commands
+    WHERE room_id=$1 AND agent_id=$2 AND state='pending'`, [C, WORKER]);
+  expect((await db.query('SELECT status FROM agent_turns WHERE room_id=$1 AND agent_id=$2', [C, WORKER])).rows)
+    .toEqual([{ status: 'cancelled' }]);
+  await refreshCornerAttention(db, C);
+  expect(await idleNotices()).toHaveLength(stopper === 'person' ? 0 : 1);
+  if (stopper === 'agent') return;
+  // The hold ends with the person's next post in the thread.
+  await post('after-stop', 'Never mind, carry on later', HUMAN);
+  await refreshCornerAttention(db, C);
+  expect(await idleNotices()).toHaveLength(1);
+});
+
 it('a pre-claim failure cannot end queued work; its owner can report a plain failure after claim', async () => {
   const command=(await wake())!;
   await daemon.execute('postAgentTurnReceipt',{roomId:C,requestId:command.turn_request_id,status:'failed',reason:'git fetch failed: cannot lock ref'},WORKER);
