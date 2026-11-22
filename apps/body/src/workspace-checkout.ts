@@ -1,9 +1,12 @@
 import { execFile, type ExecFileOptions } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, realpath, rename, rm } from 'node:fs/promises';
+import { mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { basename, dirname, resolve } from 'node:path';
 import { promisify } from 'node:util';
+import { credentialMaskPaths, siblingAgentMaskPaths, wrapAgentCommand } from './bwrap-sandbox.js';
+import { runtimeDirectory } from './runtime.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
 import { agentGitIdentity } from './agent-git-identity.js';
 import { agentCornerCheckoutPaths, materializeAgentCornerCheckout } from './agent-corner-checkout.js';
@@ -132,6 +135,81 @@ export async function materializeRoomCheckout(input: {
 }
 
 /**
+ * Install the checkout's packages and run its build step in the same OS
+ * sandbox as the agent's own commands. A repository's `corner:prepare` is its
+ * whole step; otherwise `npm ci` and `npm run build` when defined. Returns why
+ * the checkout is not ready, or undefined once it is.
+ */
+async function readyCheckout(input: {
+  path: string;
+  config: BodyConfig;
+  supervisorRoot: string;
+  agentId: string;
+}): Promise<string | undefined> {
+  const { path, config } = input;
+  const manifest = await readFile(resolve(path, 'package.json'), 'utf8').catch(() => undefined);
+  if (manifest === undefined) return undefined;
+  const scripts = (JSON.parse(manifest) as { scripts?: Record<string, unknown> }).scripts ?? {};
+  const steps = scripts['corner:prepare']
+    ? [['run', 'corner:prepare']]
+    : [
+        ...(existsSync(resolve(path, 'package-lock.json')) ? [['ci']] : []),
+        ...(scripts.build ? [['run', 'build']] : []),
+      ];
+  if (!steps.length) return undefined;
+  if (!config.bwrapPath)
+    return 'packages were not installed and the build step did not run: this host has no OS sandbox to run the repository scripts in.';
+  const git = (args: string[]) => execFileAsync('git', ['-C', path, ...args], { encoding: 'utf8' });
+  // An unchanged clean tree keeps the packages and build it was prepared with.
+  const marker = resolve(
+    path,
+    (await git(['rev-parse', '--git-path', 'beeline-prepared'])).stdout.trim(),
+  );
+  const tree = (await git(['rev-parse', 'HEAD^{tree}'])).stdout.trim();
+  if (
+    (await readFile(marker, 'utf8').catch(() => '')) === tree &&
+    !(await git(['status', '--porcelain'])).stdout.trim()
+  )
+    return undefined;
+  await rm(marker, { force: true });
+  const cache = resolve(input.supervisorRoot, 'beeline', 'npm-cache');
+  await mkdir(cache, { recursive: true, mode: 0o700 });
+  for (const args of steps) {
+    const command = wrapAgentCommand({
+      bwrapPath: config.bwrapPath,
+      spec: {
+        mode: 'readonly',
+        cwd: path,
+        additionalWritablePaths: [path, cache],
+        maskPaths: [
+          ...credentialMaskPaths(config.sandboxMaskPaths, config.operatorHome ?? homedir()),
+          ...siblingAgentMaskPaths(runtimeDirectory(input.supervisorRoot, input.agentId)),
+        ],
+      },
+      command: 'npm',
+      args,
+    });
+    await execFileAsync(command.command, command.args, {
+      cwd: path,
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+      // Turbo otherwise caches beside a linked worktree's Git storage, outside the checkout.
+      env: {
+        PATH: process.env.PATH ?? '',
+        HOME: '/tmp',
+        npm_config_cache: cache,
+        TURBO_CACHE_DIR: resolve(path, '.turbo', 'cache'),
+      },
+    }).catch((error: { stderr?: string; stdout?: string; message?: string }) => {
+      const output = (error.stderr || error.stdout || error.message || '').trim().slice(-1500);
+      throw new Error(`Checkout at ${path} is not ready: npm ${args.join(' ')} failed:\n${output}`);
+    });
+  }
+  await writeFile(marker, tree);
+  return undefined;
+}
+
+/**
  * The `workspace` tool: make (or refresh) this agent's copy of the place's
  * repository and index it. It runs only when the agent asks, and every
  * failure comes back to the agent as text.
@@ -162,6 +240,15 @@ export async function prepareWorkspace(input: {
       cornerId: input.placeId, remote: repository.remote, targetBranch, featureBranch: branch,
       token: token ?? '', supervisorRoot: input.supervisorRoot, committer: input.agent,
     })).path;
+    // A checkout with no work of its own moves to the base just fetched.
+    const base = `refs/remotes/origin/${targetBranch}`;
+    if (
+      await execFileAsync('git', ['-C', path, 'merge-base', '--is-ancestor', 'HEAD', base]).then(
+        () => true,
+        () => false,
+      )
+    )
+      await execFileAsync('git', ['-C', path, 'merge', '--ff-only', '--quiet', base]);
     await rememberStorageOwner(input.supervisorRoot, { workspaceId: input.workspaceId, roomId: input.placeId,
       kind: 'corners', itemId: basename(path), agentId: input.agent.publicKey, ended: false });
     if (!restore.lifecycle?.branch && !restore.lifecycle?.pr)
@@ -173,9 +260,25 @@ export async function prepareWorkspace(input: {
       remote: repository.remote, targetBranch, ...(token ? { token } : {}),
     });
   }
+  const ready = () =>
+    readyCheckout({
+      path,
+      config: input.config,
+      supervisorRoot: input.supervisorRoot,
+      agentId: input.agent.publicKey,
+    });
+  // Agents in one Room share its checkout; one prepares it at a time.
+  const notReady = input.parentRoomId
+    ? await ready()
+    : await withKernelLock(`room-checkout:${path}`, ready);
   const indexed = await prepareCodegraphIndex(input.config, path);
+  const where = input.parentRoomId
+    ? `branch ${branch} (target ${targetBranch})`
+    : `${targetBranch} (read-only)`;
   return [
-    `Checkout ready at ${path} on ${input.parentRoomId ? `branch ${branch} (target ${targetBranch})` : `${targetBranch} (read-only)`}.`,
+    notReady
+      ? `Checkout at ${path} on ${where} is not ready: ${notReady}`
+      : `Checkout ready at ${path} on ${where}.`,
     indexed ? 'The code index is ready.' : 'The code index was not built; use the shell and file tools.',
   ].join(' ');
 }
