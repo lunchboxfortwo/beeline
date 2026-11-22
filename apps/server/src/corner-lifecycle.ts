@@ -324,7 +324,8 @@ async function readCornerAdvance(
       facts: { archived: corner.archived, locked: corner.locked, lifecycle: corner.lifecycle,
         headSha: head, turnRunning: false } };
     await ensureSystemIdentity(db);
-    const row = (await db.query<CornerIdleRow>(cornerIdleSql('$1'), [cornerId])).rows[0];
+    // Named so each connection plans this large read once instead of on every event.
+    const row = (await db.query<CornerIdleRow>(cornerIdleSql('$1'), [cornerId], 'corner-idle')).rows[0];
     const sourceHead =
       event.kind === 'checks' && event.sourceMessageId
         ? (

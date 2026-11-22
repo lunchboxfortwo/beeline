@@ -533,6 +533,15 @@ export async function migrate(
      ((CASE WHEN private_payload->>'originCornerId' ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
        THEN (private_payload->>'originCornerId')::uuid ELSE room_id END))`,
   ));
+  // The idle read counts Beeline's own idle notices for one thread. Without
+  // this index it scans every command row on each read.
+  await runMigrationStep('idle notice budget index', () => createIndexConcurrently(
+    database, 'agent_commands_idle_notice_idx',
+    `CREATE INDEX CONCURRENTLY agent_commands_idle_notice_idx ON agent_commands
+     ((private_payload->>'fromRoomId'),created_at)
+     WHERE private_payload->>'authorId'='${SYSTEM_IDENTITY_ID}'
+       AND private_payload->>'kind' IN ('report','message')`,
+  ));
   await ddlScript('corner person state', CORNER_PERSON_STATE_SCHEMA);
   await ddlScript('corner membership guard', CORNER_MEMBERSHIPS_SCHEMA);
   await runMigrationStep('corner human report return index', () => createIndexConcurrently(

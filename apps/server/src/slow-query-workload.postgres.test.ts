@@ -70,6 +70,8 @@ describe.skipIf(!url)('production-shaped slow-query regression', () => {
         expect(node['Actual Rows'], 'local history already covered by the human boundary stays out of owed candidates').toBeLessThan(500);
       expect(Math.max(...executed(idle.Plan).map(node => node['Actual Rows'] * node['Actual Loops'])),
         'idle history must not expand local messages across unrelated memberships').toBeLessThan(50_000);
+      expect(executed(idle.Plan).filter(node => node['Node Type'] === 'Seq Scan' && node['Relation Name'] === 'agent_commands'),
+        'the idle notice budget reads its own index, not every command row').toEqual([]);
       const closed = await explain('archived idle', cornerIdleSql('$1'), [archived]);
       expect(executed(closed.Plan).filter(node => ['messages', 'agent_turns'].includes(node['Relation Name'] ?? ''))).toEqual([]);
       await explain('idle report fence', `SELECT ${currentIdleReportSql('command')}
