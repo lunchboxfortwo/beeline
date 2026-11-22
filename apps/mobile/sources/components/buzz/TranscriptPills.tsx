@@ -29,7 +29,7 @@ type PillHandlers = {
   cornerId?: string;
 };
 
-function pillItem(message: ChatDisplayMessage, resolve: PillIdentityResolver, handlers: PillHandlers, inRun = false): PillItem {
+function pillItem(message: ChatDisplayMessage, resolve: PillIdentityResolver, handlers: PillHandlers): PillItem {
   const time = ledgerStamp(message.timestamp);
   const author = message.authorIdentity?.pubkey ?? message.pubkey;
   const stop = stopNotice(message);
@@ -65,10 +65,8 @@ function pillItem(message: ChatDisplayMessage, resolve: PillIdentityResolver, ha
   const to = recipient
     ? resolve(recipient.id, recipient.name, 'agent')
     : firstMention ? resolve(firstMention, '', 'agent') : undefined;
-  // Inside an opened run the face → face heading already names the recipient.
-  const text = recipient
-    ? inRun ? message.agentCommand!.text : `@${(recipient.handle ?? recipient.name).replace(/^@/, '')} ${message.agentCommand!.text}`
-    : message.text;
+  // Every opened pill reads as a run row: the face → face heading already names the recipient.
+  const text = recipient ? message.agentCommand!.text : message.text;
   return {
     id: message.id,
     system: false,
@@ -76,8 +74,8 @@ function pillItem(message: ChatDisplayMessage, resolve: PillIdentityResolver, ha
     to,
     time,
     body: (
-      // The settled agent-prose tone: body in ink; a run's messages read one step quieter.
-      <TypedView view={MonoMarkdown} v="body" color={inRun ? 'secondary' : 'ink'} markdown={text} testID={`pill-message-${message.id}`} />
+      // An opened pill's messages read one step quieter than the transcript's own.
+      <TypedView view={MonoMarkdown} v="body" color="secondary" markdown={text} testID={`pill-message-${message.id}`} />
     ),
   };
 }
@@ -98,8 +96,7 @@ export function pillItems(run: readonly ChatDisplayMessage[], resolve: PillIdent
     } else items.push(...entries);
   };
   const flushSteps = () => {
-    fold(steps.length > 1 ? steps.map((message) => pillItem(message, resolve, handlers, true))
-      : steps.map((message) => pillItem(message, resolve, handlers)), false);
+    fold(steps.map((message) => pillItem(message, resolve, handlers)), false);
     steps = [];
   };
   const flushNotices = () => { fold(notices, true); notices = []; };

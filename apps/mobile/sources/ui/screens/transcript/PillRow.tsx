@@ -176,7 +176,7 @@ export function PillRow({ items, testID }: { items: readonly PillItem[]; testID?
     const [openId, setOpenId] = useState<string | null>(null);
     const open = items.find((item) => item.id === openId);
     return (
-        <YStack gap={open?.run ? '3' : '2'} width="100%" minWidth={0} testID={testID ?? 'pill-row'}>
+        <YStack gap="3" width="100%" minWidth={0} testID={testID ?? 'pill-row'}>
             <XStack gap="2" flexWrap="wrap" alignItems="flex-start">
                 {items.map((item) => {
                     const expanded = item.id === openId;
@@ -210,12 +210,8 @@ export function PillRow({ items, testID }: { items: readonly PillItem[]; testID?
                     );
                 })}
             </XStack>
-            {open?.run ? <RunList run={open.run} /> : open ? (
-                <YStack paddingLeft="2" borderLeftWidth={2} borderColor="stroke" gap="1" testID="pill-open">
-                    <Copy small quiet>{`${heading(open)} · ${open.time}`}</Copy>
-                    {open.body}
-                </YStack>
-            ) : null}
+            {/* A lone pill opens exactly like a run of one: same column, same heading, same tone. */}
+            {open ? <RunList run={open.run ?? [open]} /> : null}
         </YStack>
     );
 }

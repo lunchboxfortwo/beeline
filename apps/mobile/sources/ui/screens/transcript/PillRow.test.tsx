@@ -37,12 +37,16 @@ describe('PillRow', () => {
         const pill = () => tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'agent-pill');
         expect(pill().props['aria-label']).toBe('Read message from Alan → Jimmy, 10:00');
         act(() => pill().props.onPress());
-        const open = tree.root.find((node: any) => node.type === 'YStack' && node.props.testID === 'pill-open');
-        expect(open.findByProps({ testID: 'a2a-body' }).props.children).toBe('@jimmy Keep it visible');
-        expect(open.find((node: any) => node.type === 'Text' && node.props.color === 'secondary').props.children).toBe('Alan → Jimmy · 10:00');
+        // A lone pill opens exactly like a run of one: the run list's face → face row in the transcript column.
+        const open = tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'pill-open');
+        const entry = open.find((node: any) => node.type === 'YStack' && node.props.testID === 'pill-run-entry-a2a');
+        expect(entry.findAll((node: any) => node.type === 'IdentityMark').map((face: any) => face.props.seed)).toEqual(['alan', 'jimmy']);
+        expect(entry.findAll((node: any) => node.type === 'Icon.ArrowRight')).toHaveLength(1);
+        expect(entry.findByProps({ testID: 'a2a-body' }).props.children).toBe('@jimmy Keep it visible');
+        expect(text(entry)).toContain('· 10:00');
         expect(pill().props['aria-expanded']).toBe(true);
         act(() => pill().props.onPress());
-        expect(tree.root.findAll((node: any) => node.type === 'YStack' && node.props.testID === 'pill-open')).toHaveLength(0);
+        expect(tree.root.findAll((node: any) => typeof node.type === 'string' && node.props.testID === 'pill-open')).toHaveLength(0);
     });
     it('W5 folds a system pill to the ringed Beeline logo, its text only in the label', () => {
         let tree: any;

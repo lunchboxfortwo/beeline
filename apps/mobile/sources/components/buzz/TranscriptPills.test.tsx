@@ -44,7 +44,7 @@ it.each(['message', 'reply'] as const)('renders an addressed %s with the recorde
   const [item] = tree.root.findByType(PillRow).props.items;
   expect(item).toMatchObject({ id: 'addressed', system: false,
     from: { seed: 'ruby', name: 'Ruby' }, to: { seed: 'claude', name: 'Claude' } });
-  expect(item.body.props.markdown).toBe('@claude Please review the phone layout');
+  expect(item.body.props.markdown).toBe('Please review the phone layout');
   act(() => tree.unmount());
 });
 
@@ -70,9 +70,9 @@ it('folds agent runs into one PillRow pill and keeps person stops and other syst
   expect(items[0]!.run![1]).toMatchObject({ stop: true, from: { seed: 'ruby' }, to: { seed: 'claude' } });
   expect(items[1]).toMatchObject({ stop: true, from: { kind: 'human', seed: 'owner' }, to: { seed: 'ruby' } });
   expect(items[3]).toMatchObject({ system: true, summary: 'Nerd joined', from: { kind: 'system' } });
-  // Inside a run the heading names the recipient, so the body drops the @mention and reads quieter.
+  // Every opened pill reads as a run row: the heading names the recipient, so the body drops the @mention and reads quieter.
   expect(items[0]!.run![0]!.body).toMatchObject({ props: { markdown: 'm1', color: 'secondary' } });
-  expect(items[4]!.body).toMatchObject({ props: { markdown: '@nerd m5', color: 'ink' } });
+  expect(items[4]!.body).toMatchObject({ props: { markdown: 'm5', color: 'secondary' } });
   let tree: any;
   act(() => { tree = create(<TranscriptPills run={run} resolve={resolve} />); });
   expect(tree.root.findByType(PillRow).props.items.map((item: any) => item.id)).toEqual(['m1', 's2', 'm3', 'joined', 'm5']);
