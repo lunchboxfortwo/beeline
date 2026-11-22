@@ -3,6 +3,7 @@ import { XStack, YStack } from 'tamagui';
 import { ArrowRight, Square } from 'lucide-react-native';
 import { Btn, Copy, Glyph, HEIGHT } from '@/ui/grammar';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
+import { TranscriptLine } from './TranscriptLine';
 import { SYSTEM_IDENTITY_PUBKEY } from '@/buzz/system-identity';
 
 const PILL_FACE_SIZE = 22;
@@ -85,27 +86,33 @@ function Pair({ from, to, stop, summary }: { from: PillFace; to?: PillFace; stop
         <>
             <Face face={from} />
             {summary ? <Copy small quiet numberOfLines={1} flexShrink={1}>{summary}</Copy> : null}
-            {to ? <Glyph icon={stop ? Square : ArrowRight} size={14} /> : null}
+            {to ? (stop ? <Glyph icon={Square} size={14} accent filled /> : <Glyph icon={ArrowRight} size={14} />) : null}
             {to ? <Face face={to} /> : null}
         </>
     );
 }
 
-/** The opened run: every message in send order under its own face → face heading. */
+/**
+ * The opened run: every message in send order under its own face → face
+ * heading, in the transcript's text column (`TranscriptLine` with no sender).
+ * Rows sit the same-speaker 12 apart; a heading sits 4 above its body.
+ */
 function RunList({ run }: { run: readonly PillRunEntry[] }) {
     return (
-        <>
-            {run.map((entry) => (
-                <YStack key={entry.id} gap="1" testID={`pill-run-entry-${entry.id}`}
-                    aria-label={entry.stop ? `${entry.from.name} stopped ${entry.to?.name ?? ''}` : heading(entry)}>
-                    <XStack gap="1" alignItems="center">
-                        <Pair from={entry.from} to={entry.to} stop={entry.stop} />
-                        <Copy small quiet>{` · ${entry.time}`}</Copy>
-                    </XStack>
-                    {entry.stop ? null : entry.body}
-                </YStack>
-            ))}
-        </>
+        <TranscriptLine testID="pill-open">
+            <YStack gap="3" minWidth={0}>
+                {run.map((entry) => (
+                    <YStack key={entry.id} gap="1" minWidth={0} testID={`pill-run-entry-${entry.id}`}
+                        aria-label={entry.stop ? `${entry.from.name} stopped ${entry.to?.name ?? ''}` : heading(entry)}>
+                        <XStack gap="1" alignItems="center">
+                            <Pair from={entry.from} to={entry.to} stop={entry.stop} />
+                            <Copy small quiet>{`· ${entry.time}`}</Copy>
+                        </XStack>
+                        {entry.stop ? null : entry.body}
+                    </YStack>
+                ))}
+            </YStack>
+        </TranscriptLine>
     );
 }
 
@@ -131,7 +138,7 @@ export function PillRow({ items, testID }: { items: readonly PillItem[]; testID?
                             minHeight={HEIGHT.control}
                             maxWidth="100%"
                             paddingHorizontal="2"
-                            gap="1"
+                            gap={item.run ? '2' : '1'}
                             borderRadius="full"
                             borderColor={expanded ? 'strongStroke' : 'stroke'}
                             backgroundColor="raised"
@@ -143,7 +150,9 @@ export function PillRow({ items, testID }: { items: readonly PillItem[]; testID?
                                 <>
                                     <XStack>
                                         {runFaces(item.run).map((face, index) => (
-                                            <YStack key={faceKey(face)} marginLeft={index ? -4 : 0}><Face face={face} /></YStack>
+                                            // A 2 px ring in the pill's own fill keeps overlapped faces apart.
+                                            <YStack key={faceKey(face)} marginLeft={index ? '-2' : '0'} borderWidth={2}
+                                                borderColor="raised" borderRadius="sm"><Face face={face} /></YStack>
                                         ))}
                                     </XStack>
                                     <Copy small quiet numberOfLines={1}>{`${item.run.length} messages`}</Copy>
@@ -156,14 +165,10 @@ export function PillRow({ items, testID }: { items: readonly PillItem[]; testID?
                     );
                 })}
             </XStack>
-            {open ? (
-                <YStack paddingLeft="2" borderLeftWidth={2} borderColor="stroke" gap={open.run ? '2' : '1'} testID="pill-open">
-                    {open.run ? <RunList run={open.run} /> : (
-                        <>
-                            <Copy small quiet>{`${heading(open)} · ${open.time}`}</Copy>
-                            {open.body}
-                        </>
-                    )}
+            {open?.run ? <RunList run={open.run} /> : open ? (
+                <YStack paddingLeft="2" borderLeftWidth={2} borderColor="stroke" gap="1" testID="pill-open">
+                    <Copy small quiet>{`${heading(open)} · ${open.time}`}</Copy>
+                    {open.body}
                 </YStack>
             ) : null}
         </YStack>

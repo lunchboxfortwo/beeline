@@ -85,19 +85,19 @@ describe('PillRow', () => {
         act(() => { tree = create(<PillRow items={[runItem]} />); });
         const pill = () => tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'run-pill');
         act(() => pill().props.onPress());
-        const open = tree.root.find((node: any) => node.type === 'YStack' && node.props.testID === 'pill-open');
+        const open = tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'pill-open');
         const entries = open.findAll((node: any) => node.type === 'YStack' && String(node.props.testID).startsWith('pill-run-entry-'));
         expect(entries.map((entry: any) => entry.props.testID)).toEqual(['m1', 's1', 'm2', 'm3'].map(id => `pill-run-entry-${id}`));
         const m2 = entries[2];
         expect(m2.findAll((node: any) => node.type === 'IdentityMark').map((face: any) => face.props.seed)).toEqual(['claude', 'ruby']);
         expect(m2.findAll((node: any) => node.type === 'Icon.ArrowRight')).toHaveLength(1);
-        expect(text(m2)).toEqual([' · 09:38', 'Stopped']);
+        expect(text(m2)).toEqual(['· 09:38', 'Stopped']);
         const stop = entries[1];
         expect(stop.findAll((node: any) => node.type === 'Icon.Square')).toHaveLength(1);
-        expect(text(stop)).toEqual([' · 09:37']);
+        expect(text(stop)).toEqual(['· 09:37']);
         expect(stop.props['aria-label']).toBe('Ruby stopped Claude');
         act(() => pill().props.onPress());
-        expect(tree.root.findAll((node: any) => node.type === 'YStack' && node.props.testID === 'pill-open')).toHaveLength(0);
+        expect(tree.root.findAll((node: any) => typeof node.type === 'string' && node.props.testID === 'pill-open')).toHaveLength(0);
     });
 
     it('draws a stop as face, stop glyph, face, with no text', () => {
@@ -107,7 +107,9 @@ describe('PillRow', () => {
         act(() => { tree = create(<PillRow items={[stop]} />); });
         const pill = tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'stop-pill');
         expect(pill.findAll((node: any) => node.type === 'IdentityMark').map((face: any) => face.props.seed)).toEqual(['owner', 'ruby']);
-        expect(pill.findAll((node: any) => node.type === 'Icon.Square')).toHaveLength(1);
+        const [glyph] = pill.findAll((node: any) => node.type === 'Icon.Square');
+        expect(glyph.props.fill).toBeDefined();
+        expect(glyph.props.fill).toBe(glyph.props.color);
         expect(pill.findAll((node: any) => node.type === 'Icon.ArrowRight')).toHaveLength(0);
         expect(text(pill)).toEqual([]);
         expect(pill.props['aria-label']).toBe('Owner stopped Ruby');

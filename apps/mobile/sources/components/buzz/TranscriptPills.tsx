@@ -1,12 +1,11 @@
 import React, { useMemo } from 'react';
-import { YStack } from 'tamagui';
 import { TypedView } from '@/ui/grammar';
 import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { ledgerStamp } from '@/buzz/relative-time';
 import { SYSTEM_IDENTITY_PUBKEY } from '@/buzz/system-identity';
 import { isAgentRunStep, stopNotice } from '@/buzz/transcript-pills';
 import { PillRow, type PillFace, type PillItem } from '@/ui/screens/transcript/PillRow';
-import { LedgerSystemLine } from './Ledger';
+import { LedgerEntryFrame, LedgerSystemLine } from './Ledger';
 import { MonoMarkdown } from './MonoMarkdown';
 import { NotificationLifecycleCard } from './PrLifecycleCard';
 
@@ -30,7 +29,7 @@ type PillHandlers = {
   cornerId?: string;
 };
 
-function pillItem(message: ChatDisplayMessage, resolve: PillIdentityResolver, handlers: PillHandlers): PillItem {
+function pillItem(message: ChatDisplayMessage, resolve: PillIdentityResolver, handlers: PillHandlers, inRun = false): PillItem {
   const time = ledgerStamp(message.timestamp);
   const author = message.authorIdentity?.pubkey ?? message.pubkey;
   const stop = stopNotice(message);
@@ -66,8 +65,9 @@ function pillItem(message: ChatDisplayMessage, resolve: PillIdentityResolver, ha
   const to = recipient
     ? resolve(recipient.id, recipient.name, 'agent')
     : firstMention ? resolve(firstMention, '', 'agent') : undefined;
+  // Inside an opened run the face → face heading already names the recipient.
   const text = recipient
-    ? `@${(recipient.handle ?? recipient.name).replace(/^@/, '')} ${message.agentCommand!.text}`
+    ? inRun ? message.agentCommand!.text : `@${(recipient.handle ?? recipient.name).replace(/^@/, '')} ${message.agentCommand!.text}`
     : message.text;
   return {
     id: message.id,
@@ -76,8 +76,8 @@ function pillItem(message: ChatDisplayMessage, resolve: PillIdentityResolver, ha
     to,
     time,
     body: (
-      // The settled agent-prose tone: body in ink.
-      <TypedView view={MonoMarkdown} v="body" color="ink" markdown={text} testID={`pill-message-${message.id}`} />
+      // The settled agent-prose tone: body in ink; a run's messages read one step quieter.
+      <TypedView view={MonoMarkdown} v="body" color={inRun ? 'secondary' : 'ink'} markdown={text} testID={`pill-message-${message.id}`} />
     ),
   };
 }
@@ -88,19 +88,19 @@ function pillItem(message: ChatDisplayMessage, resolve: PillIdentityResolver, ha
  */
 export function pillItems(run: readonly ChatDisplayMessage[], resolve: PillIdentityResolver, handlers: PillHandlers): PillItem[] {
   const items: PillItem[] = [];
-  let steps: PillItem[] = [];
+  let steps: ChatDisplayMessage[] = [];
   const flush = () => {
     if (steps.length > 1) {
-      items.push({ id: steps[0]!.id, system: false, from: steps[0]!.from, to: steps[0]!.to,
-        time: steps.at(-1)!.time, run: steps, body: null });
-    } else items.push(...steps);
+      const entries = steps.map((message) => pillItem(message, resolve, handlers, true));
+      items.push({ id: entries[0]!.id, system: false, from: entries[0]!.from, to: entries[0]!.to,
+        time: entries.at(-1)!.time, run: entries, body: null });
+    } else items.push(...steps.map((message) => pillItem(message, resolve, handlers)));
     steps = [];
   };
   for (const message of run) {
-    const item = pillItem(message, resolve, handlers);
-    if (isAgentRunStep(message)) { steps.push(item); continue; }
+    if (isAgentRunStep(message)) { steps.push(message); continue; }
     flush();
-    items.push(item);
+    items.push(pillItem(message, resolve, handlers));
   }
   flush();
   return items;
@@ -124,12 +124,12 @@ export function TranscriptPills({
     [run, resolve, onOpenIdentity, onOpenUrl, onOpenBrief, onOpenCorner, cornerId],
   );
   return (
-    // The ledger's bylined entry rhythm: the speaker-change air on top.
-    <YStack width="100%" minWidth={0} paddingTop="4" paddingBottom="2" testID={`chat-message-${run[0]?.id ?? ''}`}>
+    // The ledger's bylined entry rhythm: 24 at a speaker change on both sides of the pills.
+    <LedgerEntryFrame hasByline testID={`chat-message-${run[0]?.id ?? ''}`}>
       {run.length === 1 && run[0]?.notificationLifecycleRun ? (
         <NotificationLifecycleCard message={run[0]} cornerId={cornerId}
           onOpenCorner={onOpenCorner ?? (() => {})} onOpenUrl={onOpenUrl ?? (() => {})} />
       ) : <PillRow items={items} testID={`pill-row-${run[0]?.id ?? ''}`} />}
-    </YStack>
+    </LedgerEntryFrame>
   );
 }

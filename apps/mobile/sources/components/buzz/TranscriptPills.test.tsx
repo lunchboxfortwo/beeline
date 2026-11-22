@@ -12,7 +12,8 @@ vi.mock('react-native-unistyles', () => ({
   StyleSheet: { create: () => ({}) },
   useUnistyles: () => ({ theme: { buzz: {} } }),
 }));
-vi.mock('./Ledger', () => ({ ledgerEntryRhythm: () => ({}), LedgerSystemLine: () => null }));
+vi.mock('./Ledger', () => ({ ledgerEntryRhythm: () => ({}), LedgerSystemLine: () => null,
+  LedgerEntryFrame: ({ children, testID }: any) => React.createElement('View', { testID }, children) }));
 vi.mock('./Ledger-styles', () => ({ settledAgentProseStyle: () => ({}) }));
 vi.mock('./MonoMarkdown', () => ({ MonoMarkdown: () => null }));
 vi.mock('@/ui/screens/transcript/PillRow', () => ({ PillRow: () => <React.Fragment /> }));
@@ -69,6 +70,9 @@ it('folds agent runs into one PillRow pill and keeps person stops and other syst
   expect(items[0]!.run![1]).toMatchObject({ stop: true, from: { seed: 'ruby' }, to: { seed: 'claude' } });
   expect(items[1]).toMatchObject({ stop: true, from: { kind: 'human', seed: 'owner' }, to: { seed: 'ruby' } });
   expect(items[3]).toMatchObject({ system: true, summary: 'Nerd joined', from: { kind: 'system' } });
+  // Inside a run the heading names the recipient, so the body drops the @mention and reads quieter.
+  expect(items[0]!.run![0]!.body).toMatchObject({ props: { markdown: 'm1', color: 'secondary' } });
+  expect(items[4]!.body).toMatchObject({ props: { markdown: '@nerd m5', color: 'ink' } });
   let tree: any;
   act(() => { tree = create(<TranscriptPills run={run} resolve={resolve} />); });
   expect(tree.root.findByType(PillRow).props.items.map((item: any) => item.id)).toEqual(['m1', 's2', 'm3', 'joined', 'm5']);
