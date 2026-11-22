@@ -1,3 +1,4 @@
+import { blockReminder } from './implementer-blocks.js';
 import { generatedThreadRenamePrompt } from '@beeline/api-contract/daemon';
 import { cornerKindSql } from './corner-opening.js';
 import { agentOpenAsks } from './agent-open-asks.js';
@@ -206,6 +207,7 @@ async function attachQueuedConversation(
   // The agent's own open asks: in full for a fresh session, otherwise only when
   // the set changed since this place's previous command.
   const asks = await agentOpenAsks(db, command.agent_id, command.room_id);
+  const blocks = await blockReminder(db, command.agent_id, command.room_id);
   const asksChanged = previous
     ? (previous.openAsksVersion ?? NO_OPEN_ASKS) !== asks.version
     : Boolean(asks.text);
@@ -221,7 +223,7 @@ async function attachQueuedConversation(
     ...(delta ? { conversationContext: delta } : {}),
     ...(full !== delta ? { conversationWindow: full } : {}),
     ...(asks.text ? { openAsks: asks.text } : {}),
-    ...(asksChanged ? { openAsksChanged: asks.text || 'You have no open asks now.' } : {}),
+    ...((asksChanged || blocks) ? { openAsksChanged: [asksChanged ? asks.text || 'You have no open asks now.' : '', blocks].filter(Boolean).join('\n\n') } : {}),
   };
   return { ...command, message };
 }

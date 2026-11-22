@@ -141,6 +141,8 @@ export type PhoneOperationMap = PhoneRouteOperationMap & {
   /** The tray badge count. */
   countNeedsYou: { input: WorkspaceInput; output: NeedsYouCountResult };
   /** Tapped or dismissed: the cell leaves the viewer's tray on every device. */
+  /** Explicit block override; tray dismissal remains separate. */
+  closeAgentAsk: { input: { readonly messageId: string; readonly reason: 'answered' | 'withdrawn' | 'superseded' }; output: { readonly closed: number } };
   clearNeedsYou: { input: ClearNeedsYouInput; output: void };
   /** Clear every question in one Workspace, including rows beyond the display limit; approvals remain. */
   clearNeedsYouSection: { input: WorkspaceInput; output: void };

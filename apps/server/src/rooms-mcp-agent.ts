@@ -200,7 +200,7 @@ export const MCP_AGENT_TOOLS: Tool[] = [
     state:{enum:['needs-you','in-progress','in-review','backlog','done']},assigneeId:{type:['string','null']},
     note:{type:'string'},attachments:{type:'array',items:{type:'object',properties:{kind:{enum:['file','link']},name:{type:'string'},url:{type:'string'},objectId:{type:'string'}},required:['kind','name'],additionalProperties:false}},
   }, ['roomId']),
-  tool('close_ask', 'Close one of your open asks on every person\'s Tasks list: answered (settled elsewhere), withdrawn (no longer needed) or superseded (a newer ask replaces it).', {
+  tool('close_ask', 'Explicitly clear an ask or block: answered, withdrawn or superseded. A thread block belongs to its current implementer; its commander or a higher-standing person may override. Replies clear Tasks, not blocks.', {
     address: address(), id: { type: 'string', description: 'The ask id from your open asks.' }, reason: { enum: ['answered', 'withdrawn', 'superseded'] },
   }, ['address', 'id', 'reason']),
   tool('stop', 'Stop the running turn of an agent you messaged, or one working in a thread you opened.', {

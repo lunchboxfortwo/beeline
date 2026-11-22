@@ -100,6 +100,15 @@ function columnEvidence(root, storage) {
       for (const column of Object.keys(table.columns))
         if (new RegExp(`(?<![\\w.])${column}\\s*=`).test(match[2])) at(match[1], column).writes += 1;
     }
+    // BEFORE triggers persist NEW assignments on their installed table.
+    for (const trigger of rest.matchAll(/CREATE\s+TRIGGER\s+\w+\s+BEFORE\b[^;]*?\bON\s+(\w+)\b[^;]*?EXECUTE\s+FUNCTION\s+(\w+)\s*\(/gi)) {
+      const table = tables[trigger[1]];
+      if (!table) continue;
+      const body = rest.match(new RegExp(`CREATE\\s+(?:OR\\s+REPLACE\\s+)?FUNCTION\\s+${trigger[2]}\\s*\\([^)]*\\)[^;]*?AS\\s+\\$\\$([\\s\\S]*?)\\$\\$`, 'i'))?.[1];
+      if (!body) continue;
+      for (const column of Object.keys(table.columns))
+        if (new RegExp(`\\bNEW\\.${column}\\s*:=`, 'i').test(body)) at(trigger[1], column).writes += 1;
+    }
     const tokens = new Map();
     for (const token of rest.match(/[A-Za-z_]\w*/g) ?? []) tokens.set(token, (tokens.get(token) ?? 0) + 1);
     for (const [name, table] of Object.entries(tables))

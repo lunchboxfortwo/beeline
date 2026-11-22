@@ -11,7 +11,7 @@ const tray=async()=>(await needsYouItems(db,W,H,row=>phoneIdentity(row,''))).ite
 it('S4: asks to a person create independent cards; answering clears that card alone, and plain replies create none',async()=>{
   const first=await sendMessage(db,{route:{from:{agent:B,place:THREAD},to:{agent:H,place:CHAT}},text:'Choose output',ask});
   const second=await sendMessage(db,{route:{from:{agent:B,place:THREAD},to:{agent:H,place:CHAT}},text:'Choose next output',ask});
-  await sendMessage(db,{route:{from:{agent:B,place:THREAD},to:{agent:H,place:CHAT}},text:'blocked: plain progress without an ask'});
+  await sendMessage(db,{route:{from:{agent:B,place:THREAD},to:{agent:H,place:CHAT}},text:'Plain progress without an ask'});
   expect((await tray()).map(item=>item.messageId)).toEqual([first.id,second.id]);
   const cards=(await readWorkBoard(db,W,H)).items.filter(item=>item.ask);
   expect(cards.map(item=>item.askIds)).toEqual([[first.id],[second.id]]);
@@ -23,14 +23,14 @@ it('S4: asks to a person create independent cards; answering clears that card al
   expect((await tray()).map(item=>item.messageId)).toEqual([second.id]);
   expect(await queued()).toEqual([[B,THREAD]]);
 });
-it('S4: an ask to an agent commander keeps the thread waiting until that recipient replies',async()=>{
-  const question=await sendMessage(db,{route:{from:{agent:B,place:THREAD},to:{agent:A,place:CHAT}},text:'Need a choice',ask});
+it('S4: an ask to an agent commander keeps the thread waiting after that recipient replies',async()=>{
+  const question=await sendMessage(db,{route:{from:{agent:B,place:THREAD},to:{agent:A,place:CHAT}},text:'blocked: Need a choice',ask});
   const waiting=async()=>(await db.query(`SELECT waiting.person_id FROM rooms thread
     CROSS JOIN LATERAL (${cornerWaitingReportSql('thread')}) waiting WHERE thread.id=$1`,[THREAD])).rows;
   expect(await waiting()).toEqual([{person_id:A}]);
   expect(await tray()).toEqual([]);
   await replyToMessage(db,A,{id:question.id,text:'Web'});
-  expect(await waiting()).toEqual([]);
+  expect(await waiting()).toEqual([{person_id:A}]);
   expect(await queued()).toEqual([[B,THREAD]]);
 });
 

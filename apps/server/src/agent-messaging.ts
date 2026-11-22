@@ -1,3 +1,4 @@
+import { blockRecipient, refuseDoneWithBlocks } from './implementer-blocks.js';
 import { lockAgentInvocation } from './agent-invocation.js';
 import { Check, Errors } from 'typebox/value';
 import { isInformationalReply, MESSAGE_ASK_SCHEMA, validateMessageAsk, reportMessageAsk, type MessageAddress, type MessageAsk, type MessageRoute } from '@beeline/api-contract/daemon';
@@ -45,7 +46,10 @@ export async function sendMessage(db: SqlDatabase, input: {
   input = { ...input, ask: input.ask ?? reportAsk };
   if (input.ask) validateAskInput(input.ask);
   return db.transaction(async tx => {
-    const to = input.replyTo ? input.route.to : await messageAddress(tx,input.route.to,input.route.from.agent);
+    await refuseDoneWithBlocks(tx,input.route.from.agent,input.route.from.place,input.text);
+    const reportStatus = /^(blocked|needs-decision):/i.exec(input.text.trim())?.[1]?.toLowerCase();
+    const destination = await blockRecipient(tx,input.route.from,input.route.to,input.text);
+    const to = input.replyTo ? destination : await messageAddress(tx,destination,input.route.from.agent);
     // A recorded reply can cross a private call site the worker never joined.
     // Its recipient still belongs there; the responder belongs at its own origin.
     const route = { from: input.route.from, to };
@@ -61,7 +65,7 @@ export async function sendMessage(db: SqlDatabase, input: {
         (await tx.query(`SELECT 1 FROM rooms corner JOIN corner_facts fact ON fact.corner_id=corner.id
           WHERE corner.id=$1 AND corner.archived_at IS NULL
             AND $2 IN (fact.implementer_agent_id,${cornerCommanderIdSql('corner')})`,[to.place,to.agent])).rowCount > 0;
-      const transcriptOnly = self && !selfWake || Boolean(input.replyTo && !input.ask &&
+      const transcriptOnly = self && !selfWake || Boolean(!reportStatus && input.replyTo && !input.ask &&
         isInformationalReply(input.parent?.reason, input.parent?.private_payload?.messageAsk));
       if (transcriptOnly && !(await tx.query(`SELECT 1 FROM room_access member
         JOIN rooms room ON room.id=member.room_id AND room.archived_at IS NULL
@@ -70,7 +74,7 @@ export async function sendMessage(db: SqlDatabase, input: {
       const command = transcriptOnly ? undefined : await queueMessage(tx, {
         id, roomId: to.place, agentId: to.agent,sourceMessageId:null,
         audienceId:input.replyTo ? to.agent : undefined,
-        reason:input.replyTo ? 'reply' : 'message',parent:input.parent,
+        reason:reportStatus ? 'message' : input.replyTo ? 'reply' : 'message',parent:input.parent,
         privatePayload:{kind:input.replyTo ? 'reply' : 'message',route,messageAsk:input.ask,inReplyTo:input.replyTo,
           text:modelText(input.text),authorId:route.from.agent,fromRoomId:route.from.place,
           returnIdentityId:route.from.agent,attachments:input.attachments,...(selfWake ? {selfWake:true} : {})},
@@ -78,14 +82,14 @@ export async function sendMessage(db: SqlDatabase, input: {
       // A transcript reference shares a delivered command's identity, but is
       // never a source message or another wake. Room reads enforce place access;
       // card presentation keeps this reference out of agent conversation context.
-      const recorded = await tx.query<{id:string;created_at:Date}>(`INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card,created_at)
-        SELECT $1,$2,$3,$4,'card','agent-command',jsonb_build_object(
+      const recorded = await tx.query<{id:string;created_at:Date}>(`INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card,created_at,reply_to_message_id)
+        SELECT $1,$2,$3,$4,CASE WHEN $8::text IS NULL THEN 'card' ELSE 'message' END,CASE WHEN $8::text IS NULL THEN 'agent-command' END,jsonb_build_object(
           'kind',$5::text,'text',$4::text,'recipient',jsonb_build_object(
             'id',recipient.id,'name',recipient.name,'kind',recipient.kind,
-            'handle',beeline_room_handle(recipient.id,$2))),COALESCE($6::timestamptz,now())
+            'handle',beeline_room_handle(recipient.id,$2))) || CASE WHEN $8::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('reportToId',$7::text,'reportStatus',$8::text,'sourceRoomId',$9::text) END,COALESCE($6::timestamptz,now()),(SELECT id FROM messages WHERE id=$10)
         FROM identities recipient WHERE recipient.id=$7
         ON CONFLICT(id) DO NOTHING RETURNING id,created_at`,
-      [command?.id ?? id,to.place,route.from.agent,input.text,input.replyTo ? 'reply' : 'message',command?.created_at ?? null,to.agent]);
+      [command?.id ?? id,to.place,route.from.agent,input.text,input.replyTo ? 'reply' : 'message',command?.created_at ?? null,to.agent,reportStatus ?? null,route.from.place,input.replyTo ?? (reportStatus ? input.parent?.id : undefined) ?? null]);
       const saved = recorded.rows[0] ?? (await tx.query<{id:string;created_at:Date}>(
         'SELECT id,created_at FROM messages WHERE id=$1',[command?.id ?? id])).rows[0]!;
       return { id:saved.id,createdAt:Math.floor(new Date(saved.created_at).getTime()/1000),
@@ -95,7 +99,7 @@ export async function sendMessage(db: SqlDatabase, input: {
     if (input.ask) {
       const choice = await postRoomChoice(tx, {
         roomId: to.place, agentId: route.from.agent, requesterId: to.agent, mode: 'question',
-        messageId: id, messageText: modelText(input.text), messageCard: { route, sourceRoomId: route.from.place },
+        messageId: id, messageText: modelText(input.text), messageCard: { route, sourceRoomId: route.from.place, ...(reportStatus ? {reportStatus,reportToId:to.agent}: {}) },
         messageAttachments:input.attachments,messageOrigin:route.from,messageAudienceId:input.replyTo ? to.agent : undefined,
         prompt: input.ask.question, ask: input.ask.question, requestId: input.parent?.turn_request_id,
         options: input.ask.options.map(label => ({ label, consequence: label })),
@@ -113,8 +117,8 @@ export async function sendMessage(db: SqlDatabase, input: {
       return { id, createdAt: Math.floor(Date.now()/1000) };
     }
     const saved = await queueMessage(tx,{kind:'post',id,roomId:to.place,authorId:route.from.agent,
-      origin:route.from,text:modelText(input.text),card:{route,sourceRoomId:route.from.place},agentIds:[],audienceId:input.replyTo ? to.agent : undefined,
-      attachments:input.attachments,parent:input.parent,replyTo:input.parent?.source_message_id ?? input.replyTo,
+      origin:route.from,text:modelText(input.text),card:{route,sourceRoomId:route.from.place,...(reportStatus ? {reportStatus,reportToId:to.agent}: {})},agentIds:[],audienceId:input.replyTo ? to.agent : undefined,
+      attachments:input.attachments,parent:input.parent,replyTo:input.parent?.source_message_id ?? input.replyTo ?? (reportStatus ? input.parent?.id : undefined),
       requestId:input.parent?.turn_request_id,commandRoomId:input.parent?.room_id});
     return { id:saved.id,createdAt:saved.createdAt };
   });

@@ -1,3 +1,4 @@
+import { closeAgentAsk } from './agent-open-asks.js';
 import { createHash } from 'node:crypto';
 import { threadWorkState } from '@beeline/api-contract/phone';
 import { HUMAN, ROOM, RUBY, WORKER, authority, claim, commands, expect, it, open, rootFixture, worker } from './test-support-commander.integration.test-support.js';
@@ -49,7 +50,7 @@ it.each(['done:', 'failed:', 'unreachable', 'addressed message'])(
   },
 );
 
-it.each(['blocked', 'needs_decision'] as const)('REPORT-WAITING-DERIVED: real %s delivery opens a wait without a transcript copy', async status => {
+it.each(['blocked', 'needs_decision'] as const)('REPORT-WAITING-DERIVED: real %s delivery opens a closeable wait', async status => {
   const { cornerId, report } = await blocked('@captain choose a scope.', status);
   expect((await rootFixture.db.query(`SELECT private_payload->>'reportStatus' status FROM agent_commands WHERE id=$1`, [report.id])).rows)
     .toEqual([{ status: status.replace('_', '-') }]);
@@ -57,7 +58,7 @@ it.each(['blocked', 'needs_decision'] as const)('REPORT-WAITING-DERIVED: real %s
   expect(await blocker(cornerId)).toMatchObject({ item_id: report.id, kind: 'report' });
   const waiting = (await rootFixture.db.query<{ person_id: string }>(`SELECT waiting.* FROM rooms c
     CROSS JOIN LATERAL (${cornerWaitingReportSql('c')}) waiting WHERE c.id=$1 ORDER BY person_id`, [cornerId])).rows;
-  expect(waiting.map(row => row.person_id)).toEqual([HUMAN, RUBY].sort());
+  expect(waiting.map(row => row.person_id)).toEqual([RUBY]);
 });
 
 it('REPORT-WAITING-DERIVED: commander orders and old answered markers cannot clear a worker block', async () => {
@@ -68,16 +69,17 @@ it('REPORT-WAITING-DERIVED: commander orders and old answered markers cannot cle
   await rootFixture.db.query(`UPDATE agent_commands SET private_payload=jsonb_set(private_payload,'{waitingAnswered}','true') WHERE id=$1`, [report.id]);
   expect(await blocker(cornerId)).toMatchObject({ item_id: report.id });
   const next = await worker(cornerId);
+  await closeAgentAsk(rootFixture.db,WORKER,{messageId:report.id,reason:'answered'});
   await rootFixture.daemon.execute('report', { ...authority(next), status: 'done', text: 'Work completed.' }, WORKER);
   expect((await blocker(cornerId)).item_id).toBeNull();
 });
 
-it('REPORT-WAITING-DERIVED: automatic blocked final prose creates no explicit report wait', async () => {
+it('REPORT-WAITING-DERIVED: blocked final reply opens an explicit report wait', async () => {
   const { cornerId } = await open(), turn = await worker(cornerId);
   await rootFixture.daemon.execute('postRoomMessage', { ...authority(turn), text: 'blocked: progress note' }, WORKER);
   const waiting = await rootFixture.db.query(`SELECT waiting.* FROM rooms c
     CROSS JOIN LATERAL (${cornerWaitingReportSql('c')}) waiting WHERE c.id=$1`, [cornerId]);
-  expect(waiting.rows).toEqual([]);
+  expect(waiting.rows).toHaveLength(1);
 });
 
 it('R1: holds rank behind a real private report, and retain their actual message target', async () => {
@@ -88,6 +90,7 @@ it('R1: holds rank behind a real private report, and retain their actual message
   await claim(delivery);
   await rootFixture.daemon.execute('order', { ...authority(delivery), address: cornerId, text: 'Finish.' }, RUBY);
   const next = await worker(cornerId);
+  await closeAgentAsk(rootFixture.db,WORKER,{messageId:report.id,reason:'answered'});
   await rootFixture.daemon.execute('report', { ...authority(next), status: 'done', text: 'Finished.' }, WORKER);
   const selected = await blocker(cornerId);
   expect(selected).toMatchObject({ item_id: hold.holdId, kind: 'merge-hold' });
@@ -100,14 +103,14 @@ const waitingPeople = async (cornerId: string) => (await rootFixture.db.query<{ 
   `SELECT waiting.person_id FROM rooms c CROSS JOIN LATERAL (${cornerWaitingReportSql('c')}) waiting
     WHERE c.id=$1 ORDER BY waiting.person_id`, [cornerId])).rows.map(row => row.person_id);
 
-it.each((['blocked', 'needs_decision'] as const).flatMap(status => [true, false].map(humanFirst => ({ status, humanFirst }))))('REPORT-REPLY: $status clears separately for the commander and tagged human (humanFirst=$humanFirst)', async ({ status, humanFirst }) => {
+it.each((['blocked', 'needs_decision'] as const).flatMap(status => [true, false].map(humanFirst => ({ status, humanFirst }))))('REPORT-REPLY: $status retains its commander block through unrelated answers (humanFirst=$humanFirst)', async ({ status, humanFirst }) => {
   const { cornerId } = await blocked('@captain choose a scope.', status);
   await rootFixture.db.query(`INSERT INTO messages(id,room_id,author_id,text)
     VALUES('first-answer',$1,$2,'yes')`, [cornerId, humanFirst ? HUMAN : RUBY]);
-  expect(await waitingPeople(cornerId)).toEqual([humanFirst ? RUBY : HUMAN]);
+  expect(await waitingPeople(cornerId)).toEqual([RUBY]);
   await rootFixture.db.query(`INSERT INTO messages(id,room_id,author_id,text)
     VALUES('second-answer',$1,$2,'Acknowledged.')`, [cornerId, humanFirst ? RUBY : HUMAN]);
-  expect(await waitingPeople(cornerId)).toEqual([]);
+  expect(await waitingPeople(cornerId)).toEqual([RUBY]);
 });
 
 it('REPORT-REPLY: other people, worker prose, orders and System lines cannot answer for the addressee', async () => {
@@ -132,6 +135,8 @@ it.each(['corner', 'thread'] as const)('REPORT-REPLY: a forwarded human report c
   await rootFixture.db.query(`INSERT INTO messages(id,room_id,author_id,text,reply_to_message_id)
     VALUES('forwarded-answer',$1,$2,'yes',$3)`, [surface === 'corner' ? cornerId : ROOM, HUMAN,
       surface === 'thread' ? 'forwarded-report' : null]);
+  expect(await waitingPeople(cornerId)).toEqual([HUMAN]);
+  await closeAgentAsk(rootFixture.db,WORKER,{messageId:'forwarded-report',reason:'answered'});
   expect(await waitingPeople(cornerId)).toEqual([]);
 });
 
@@ -145,9 +150,9 @@ it('selects each outstanding report recipient for their own corner surfaces', as
     [cornerId, viewer])).rows[0];
   for (const viewer of [HUMAN, RUBY]) {
     const row = await read(viewer);
-    expect(row.waiting_person_id).toBe(viewer);
-    expect(threadWorkState(chatCornerCounts([row], viewer).get(ROOM)!.openCorners[0]!, viewer)).toBe('needs-you');
-    expect((await rootFixture.phone.readCorners(ROOM, viewer))?.corners.find(row => row.corner.id === cornerId)?.blocker?.personId).toBe(viewer);
+    expect(row.waiting_person_id).toBe(RUBY);
+    expect(threadWorkState(chatCornerCounts([row], viewer).get(ROOM)!.openCorners[0]!, viewer)).toBe(viewer===RUBY?'needs-you':'in-progress');
+    expect((await rootFixture.phone.readCorners(ROOM, viewer))?.corners.find(row => row.corner.id === cornerId)?.blocker?.personId).toBe(RUBY);
   }
   await rootFixture.db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES('recipient-answer',$1,$2,'Yes')`, [cornerId, HUMAN]);
   expect((await read(HUMAN)).waiting_person_id).toBe(RUBY);

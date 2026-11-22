@@ -2,7 +2,7 @@ import { cornerImplementerSql } from './corner-worker.js';
 import { cornerWaitingReportSql } from './corner-waiting-report.js';
 import type { SqlDatabase } from './database.js';
 
-/** Worker blocks end on recipient replies or worker output; native requests keep their own terminal owners. */
+/** Explicit closure owns worker blocks; native requests keep their terminal owners. */
 export function cornerWaitingSql(corner: string): string {
   const worker = cornerImplementerSql('waiting_fact', corner);
   return `SELECT waiting.*
@@ -40,11 +40,12 @@ export function cornerWaitingSql(corner: string): string {
 export async function loadCornerWaiting(db: SqlDatabase, cornerId: string) {
   return (
     await db.query<{
+      persistent_block: boolean;
       item_id: string;
       reason: 'question' | 'approve' | 'connect';
       kind: 'message' | 'report' | null;
     }>(
-      `SELECT waiting.* FROM rooms waiting_corner CROSS JOIN LATERAL (${cornerWaitingSql('waiting_corner')}) waiting
+      `SELECT waiting.*,EXISTS(SELECT 1 FROM messages block WHERE block.id=waiting.item_id AND block.block_corner_id IS NOT NULL AND block.ask_closed_reason IS NULL) persistent_block FROM rooms waiting_corner CROSS JOIN LATERAL (${cornerWaitingSql('waiting_corner')}) waiting
      WHERE waiting_corner.id=$1 ORDER BY waiting.created_at,waiting.item_id LIMIT 1`,
       [cornerId],
     )

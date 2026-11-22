@@ -255,7 +255,7 @@ it('the same corner can order and report privately to its parent Room commander'
   await rootFixture.daemon.execute('report', { ...authority(child), status: 'blocked', text: 'blocked: need the commander decision' }, WORKER);
   expect((await commands(opened.cornerId, RUBY)).find(command => command.reason === 'report'))
     .toMatchObject({ private: true, source: { authorId: WORKER, body: 'blocked: need the commander decision' } });
-  expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE text=$1`, ['blocked: need the commander decision'])).rowCount).toBe(0);
+  expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE text=$1 AND block_corner_id IS NOT NULL`, ['blocked: need the commander decision'])).rowCount).toBe(1);
 });
 
 

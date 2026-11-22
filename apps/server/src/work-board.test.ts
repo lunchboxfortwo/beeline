@@ -782,7 +782,7 @@ describe('corner report blocks on the board', () => {
     expect(await states(person)).toEqual([asked, asked]);
     expect(await states(other)).toEqual([progress, progress]);
     await post('worker-output-after', thread, 10, { card_type: 'vault-save', card: {} });
-    expect(await states(person)).toEqual([progress, asked]);
+    expect(await states(person)).toEqual([asked, asked]);
     expect(await states(other)).toEqual([progress, progress]);
   });
 });

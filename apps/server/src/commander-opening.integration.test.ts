@@ -112,7 +112,7 @@ it('a stale recipient field cannot redirect a worker report into the corner', as
     text: 'Choose the endpoint', to: '@captain' } as never, WORKER);
   expect((await commands(opened.cornerId, RUBY)).find(command => command.id === result.id))
     .toMatchObject({ private: true, source: { authorId: WORKER, body: 'needs-decision: Choose the endpoint' } });
-  expect((await rootFixture.db.query(`SELECT id FROM messages WHERE id=$1 AND presentation='message'`, [result.id])).rows).toEqual([]);
+  expect((await rootFixture.db.query(`SELECT id FROM messages WHERE id=$1 AND presentation='message' AND block_corner_id IS NOT NULL`, [result.id])).rows).toEqual([{id:result.id}]);
 });
 
 it('a self-opened thread keeps the task sender as commander and never wakes itself', async () => {

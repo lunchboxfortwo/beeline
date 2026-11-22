@@ -17,8 +17,8 @@ async function firstTask(place: string, opening: boolean) {
 }
 
 /** System wakes answer in the thread; task replies retain their sender's place. */
-describe('C2: blocked replies retain the addressed message destination', () => {
-  it.each(cases)('commander in the %s; a later thread tag; a blocked reply to the %s wake stays in the thread', async (place, reason, worker) => {
+describe('C2: implementer blocks default to the opening commander', () => {
+  it.each(cases)('commander in the %s; a later thread tag; a blocked reply to the %s wake reaches the commander', async (place, reason, worker) => {
     for (const opening of [false, true]) {
       await db.query('DELETE FROM agent_commands');
       await firstTask(PLACES[place], opening);
@@ -30,9 +30,9 @@ describe('C2: blocked replies retain the addressed message destination', () => {
       await settle();
       const answer = await daemon.execute('reply', { id: wake.id, text: 'blocked: need a decision', ask }, worker);
       expect((await inbox()).map(row => [row.agent_id, row.room_id, row.from, Boolean(row.ask)]), `opening=${opening}`)
-        .toEqual(reason === 'corner_review_dispatch' ? [[B, THREAD, { agent: C, place: THREAD }, true]] : []);
+        .toEqual(reason === 'corner_review_dispatch' ? [[B, THREAD, { agent: C, place: THREAD }, true]] : [[A,PLACES[place],{agent:worker,place:THREAD},true]]);
       if (reason !== 'corner_review_dispatch') expect((await db.query('SELECT room_id,author_id FROM messages WHERE id=$1', [answer.id])).rows)
-        .toEqual([{ room_id: THREAD, author_id: worker }]);
+        .toEqual([{ room_id: PLACES[place], author_id: worker }]);
     }
   });
 

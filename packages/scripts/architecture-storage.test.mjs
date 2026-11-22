@@ -23,3 +23,26 @@ it('partition leaves inherit real parent writers and readers without waiving unu
     assert.match(errors,/journal_default.event_id has no writer/);
   } finally { rmSync(root,{recursive:true,force:true}); }
 });
+
+it('trigger assignments count as writers only for their installed table',()=>{
+  mkdirSync('.beeline-proof',{recursive:true});
+  const root=mkdtempSync(path.resolve('.beeline-proof/storage-trigger-'));
+  const storage={scope:['src'],bootstrapTotal:0,unusedTotal:0,tables:{
+    messages:{module:'Blocks',reason:'Stores explicit escalation lineage.',columns:{block_parent_id:'Keeps the original block across escalation.'}},
+  },jsonb:{}};
+  try {
+    mkdirSync(path.join(root,'src'));
+    const file=path.join(root,'src/blocks.ts');
+    const source=`CREATE FUNCTION identify_block() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN NEW.block_parent_id := source_block; RETURN NEW; END $$;
+      SELECT block_parent_id FROM messages;`;
+    writeFileSync(file,source);
+    assert.match(judgeStorage(root,storage).join('\n'),/messages.block_parent_id has no writer/);
+    writeFileSync(file,source+` CREATE TRIGGER identify_block BEFORE INSERT ON unrelated
+      FOR EACH ROW EXECUTE FUNCTION identify_block();`);
+    assert.match(judgeStorage(root,storage).join('\n'),/messages.block_parent_id has no writer/);
+    writeFileSync(file,source+` CREATE TRIGGER identify_block BEFORE INSERT ON messages
+      FOR EACH ROW EXECUTE FUNCTION identify_block();`);
+    assert.deepEqual(judgeStorage(root,storage),[]);
+  } finally { rmSync(root,{recursive:true,force:true}); }
+});

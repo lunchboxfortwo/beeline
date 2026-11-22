@@ -1,3 +1,4 @@
+import { IMPLEMENTER_BLOCKS_SCHEMA } from './implementer-blocks.js';
 import { agentReportSql, askingMessageSql, needsYouAnsweredSql, questionForSql, questionRecipientSql, settledMarkReasonSql, supersedesSql, viewerMemberSql } from './needs-you.js';
 import { humanReportCornerSql } from './corner-waiting-report.js';
 import { tagsKnownIdentitySql } from './message-mentions.js';
@@ -17,6 +18,22 @@ function requestedSql(message = 'm'): string {
 export function needsYouMarksSchema(): string {
   return `
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS ask_closed_reason text;
+${IMPLEMENTER_BLOCKS_SCHEMA}
+CREATE OR REPLACE FUNCTION reply_block_root(reply_id text) RETURNS text LANGUAGE sql STABLE AS $root$
+  WITH RECURSIVE chain AS (
+    SELECT id,reply_to_message_id,block_corner_id,block_parent_id FROM messages WHERE id=reply_id
+    UNION
+    SELECT m.id,m.reply_to_message_id,m.block_corner_id,m.block_parent_id FROM messages m JOIN chain c ON m.id=c.reply_to_message_id
+  ) SELECT id FROM chain WHERE block_corner_id IS NOT NULL OR block_parent_id IS NOT NULL LIMIT 1
+$root$;
+CREATE OR REPLACE FUNCTION block_reply_items(root_id text) RETURNS text[] LANGUAGE sql STABLE AS $items$
+  WITH RECURSIVE chain AS (
+    SELECT id FROM messages WHERE id=root_id
+    UNION
+    SELECT reply.id FROM messages reply JOIN chain parent ON reply.reply_to_message_id=parent.id
+      WHERE reply.deleted_at IS NULL
+  ) SELECT array_agg(id) FROM chain
+$items$;
 ALTER TABLE needs_you_marks ADD COLUMN IF NOT EXISTS cleared_reason text;
 CREATE INDEX IF NOT EXISTS needs_you_marks_open_identity_idx ON needs_you_marks(identity_id) WHERE cleared_at IS NULL;
 CREATE OR REPLACE FUNCTION refresh_needs_you_mark(asking_id text) RETURNS void LANGUAGE plpgsql AS $$
@@ -68,8 +85,9 @@ DROP TRIGGER IF EXISTS question_needs_you_mark ON room_choices;
 CREATE TRIGGER question_needs_you_mark AFTER INSERT OR UPDATE OF status ON room_choices
   FOR EACH ROW EXECUTE FUNCTION question_needs_you_mark();
 CREATE OR REPLACE FUNCTION maintain_needs_you_marks() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE reasked_block text;
 BEGIN
-  IF NEW.presentation='message' AND NEW.system_event IS NULL AND NEW.deleted_at IS NULL THEN
+  IF (NEW.presentation='message' OR NEW.card_type='agent-command') AND NEW.system_event IS NULL AND NEW.deleted_at IS NULL THEN
     UPDATE needs_you_marks mark SET cleared_at=now(),cleared_reason='answered'
     FROM messages m WHERE (mark.identity_id=NEW.author_id OR mark.message_id=NEW.reply_to_message_id)
       AND mark.cleared_at IS NULL
@@ -80,6 +98,17 @@ BEGIN
     UPDATE needs_you_marks mark SET cleared_at=now(),cleared_reason='superseded'
     FROM messages m WHERE mark.identity_id=NEW.card->>'reportToId' AND mark.cleared_at IS NULL
       AND m.id=mark.message_id AND ${supersedesSql('NEW', 'm', 'mark.identity_id')};
+  END IF;
+  IF NEW.reply_to_message_id IS NOT NULL AND (NEW.presentation='message' OR NEW.card_type='agent-command') THEN
+    UPDATE messages block SET block_reasked_at=NEW.created_at
+      FROM corner_facts fact WHERE block.id=reply_block_root(NEW.reply_to_message_id)
+      AND ((fact.corner_id=block.block_corner_id AND fact.implementer_agent_id=NEW.author_id)
+        OR (block.block_corner_id IS NULL AND block.block_parent_id IS NOT NULL AND block.author_id=NEW.author_id))
+      AND block.ask_closed_reason IS NULL AND NEW.created_at>COALESCE(block.block_reasked_at,block.created_at)
+      RETURNING block.id INTO reasked_block;
+    IF reasked_block IS NOT NULL THEN
+      UPDATE needs_you_marks SET cleared_at=NULL,cleared_reason=NULL WHERE message_id=reasked_block;
+    END IF;
   END IF;
   PERFORM refresh_needs_you_mark(NEW.id);
   RETURN NEW;
@@ -99,6 +128,59 @@ DROP TRIGGER IF EXISTS room_close_needs_you_marks ON rooms;
 CREATE TRIGGER room_close_needs_you_marks AFTER UPDATE OF archived_at ON rooms
   FOR EACH ROW WHEN (OLD.archived_at IS NULL AND NEW.archived_at IS NOT NULL)
   EXECUTE FUNCTION close_source_needs_you_marks();
+CREATE OR REPLACE FUNCTION identify_implementer_block() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE source_block text;
+BEGIN
+  source_block := reply_block_root(NEW.reply_to_message_id);
+  IF source_block IS NOT NULL THEN
+    IF EXISTS(SELECT 1 FROM messages b LEFT JOIN corner_facts f ON f.corner_id=b.block_corner_id
+      WHERE b.id=source_block AND (f.implementer_agent_id=NEW.author_id
+        OR (b.block_corner_id IS NULL AND b.block_parent_id IS NOT NULL AND b.author_id=NEW.author_id))) THEN
+      RETURN NEW;
+    END IF;
+    IF NEW.card->>'reportStatus' IN ('blocked','needs-decision') THEN
+      IF EXISTS(WITH RECURSIVE sources AS (SELECT id,author_id,block_parent_id FROM messages WHERE id=source_block
+        UNION SELECT b.id,b.author_id,b.block_parent_id FROM messages b JOIN sources s ON b.id=s.block_parent_id)
+        SELECT 1 FROM sources WHERE author_id=NEW.card->>'reportToId') THEN
+        RAISE EXCEPTION 'A linked block cannot target its source implementer';
+      END IF;
+      NEW.block_parent_id := source_block;
+    END IF;
+  END IF;
+  IF (NEW.card->>'reportStatus' IN ('blocked','needs-decision') OR NEW.text ~ '^(blocked|needs-decision):') AND NEW.card->>'reportToId' IS NOT NULL AND NEW.block_corner_id IS NULL THEN
+    SELECT room.id INTO NEW.block_corner_id FROM rooms room JOIN corner_facts fact ON fact.corner_id=room.id
+      WHERE room.id::text=COALESCE(NEW.card->>'sourceRoomId',NEW.room_id::text) AND fact.implementer_agent_id=NEW.author_id;
+  END IF;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS identify_implementer_block ON messages;
+CREATE TRIGGER identify_implementer_block BEFORE INSERT OR UPDATE OF card ON messages
+  FOR EACH ROW EXECUTE FUNCTION identify_implementer_block();
+DO $blocks$ BEGIN
+  IF NOT EXISTS(SELECT 1 FROM workflow_backfills WHERE name='implementer-blocks-v1') THEN
+    INSERT INTO messages(id,room_id,author_id,text,presentation,card,created_at,ask_closed_reason)
+      SELECT command.id,command.room_id,command.private_payload->>'authorId',command.private_payload->>'text','message',
+        jsonb_build_object('sourceRoomId',command.private_payload->>'originCornerId','reportToId',command.agent_id,
+          'reportStatus',command.private_payload->>'reportStatus'),command.created_at,
+        CASE WHEN EXISTS(SELECT 1 FROM agent_commands newer WHERE newer.private_payload->>'originCornerId'=command.private_payload->>'originCornerId'
+          AND newer.private_payload->>'kind'='report' AND newer.private_payload->>'authorId'=command.private_payload->>'authorId'
+          AND (newer.created_at,newer.id)>(command.created_at,command.id)) THEN 'superseded' END
+      FROM agent_commands command JOIN rooms room ON room.id::text=command.private_payload->>'originCornerId'
+      WHERE command.private_payload->>'kind'='report' AND command.private_payload->>'reportStatus' IN ('blocked','needs-decision')
+        AND command.private_payload->>'automatic' IS DISTINCT FROM 'true' AND room.archived_at IS NULL
+      ON CONFLICT(id) DO NOTHING;
+    UPDATE messages m SET block_corner_id=room.id FROM rooms room,corner_facts fact
+    WHERE room.id=fact.corner_id AND room.archived_at IS NULL
+      AND m.author_id IN (fact.implementer_agent_id,fact.owner_agent_id) AND ${humanReportCornerSql('m')}=room.id::text
+      AND m.ask_closed_reason IS NULL AND m.deleted_at IS NULL
+      AND COALESCE(m.card->>'reportStatus',substring(m.text FROM '^([^:]+):')) IN ('blocked','needs-decision')
+      AND m.card->>'reportToId' IS NOT NULL
+      AND NOT EXISTS(SELECT 1 FROM messages newer WHERE newer.author_id=m.author_id
+        AND ${humanReportCornerSql('newer')}=room.id::text AND ${agentReportSql('newer')}
+        AND (newer.created_at,newer.id)>(m.created_at,m.id));
+    INSERT INTO workflow_backfills(name) VALUES('implementer-blocks-v1');
+  END IF;
+END $blocks$;
 -- The retired paint clock stays for rollback overlap; no write starts it.
 ALTER TABLE needs_you_marks ALTER COLUMN first_seen_at DROP NOT NULL;
 ALTER TABLE needs_you_marks ALTER COLUMN first_seen_at DROP DEFAULT;

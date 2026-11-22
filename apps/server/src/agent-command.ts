@@ -1,3 +1,4 @@
+import { refuseDoneWithBlocks, blockRecipient, wakeBlockAnswer } from './implementer-blocks.js';
 import { finalizeAgentInvocation } from './agent-invocation.js';
 import { legacyCommandPayload } from './messaging-cutover.js';
 import { parseAgentAccessPolicy,senderMayAddressAgent } from '@beeline/api-contract/agent-access';
@@ -271,7 +272,6 @@ export type CommandRow = {
   wake_context?: { briefRevision: number } | null;
   recovery_context: string | null;
 };
-
 /**
  * Reasons that ask a reviewer to look at a pull request head.
  * `createAgentCommand` inserts every one of them, so the refusal below is the
@@ -284,7 +284,6 @@ export const REVIEWER_DISPATCH_REASONS = [
   'order',
   'report',
 ] as const;
-
 /**
  * Automatic dispatch and returning verdicts must not repeat a reviewed head.
  * An explicit tag or order may request another review after a repair that
@@ -300,7 +299,6 @@ export function reviewerDispatchCarriesHead(
   if (!reviewContext) return false;
   return reason === 'report' && reviewContext.purpose === 'verdict';
 }
-
 /** Only a pending green-head request suppresses another automatic review request. */
 export async function hasPendingCornerReview(db: SqlDatabase, roomId: string, agentId: string,
   headSha: string, pullRequest?: number | null): Promise<boolean> {
@@ -313,13 +311,10 @@ export async function hasPendingCornerReview(db: SqlDatabase, roomId: string, ag
         (SELECT lifecycle->'pr'->'number' FROM corner_github_cache WHERE corner_id=$1)) LIMIT 1`,
     [roomId,agentId,headSha,pullRequest == null ? null : json(pullRequest)])).rowCount > 0;
 }
-
 export { turnRootMessageSql } from './message-route.js';
-
 export function nextAgentDepth(parentDepth: number): number {
   return parentDepth + 1;
 }
-
 /** Exact-target eligibility shared by dispatch, the machine snapshot and delivery, including reports. */
 export function currentCornerCommandTargetSql(command: string): string {
   const corner = `COALESCE((${command}.review_context->>'cornerId')::uuid,${command}.room_id)`;
@@ -339,7 +334,6 @@ export function currentCornerCommandTargetSql(command: string): string {
       AND target_source.system_event->'object'->>'headSha' IS NOT NULL
       AND target_source.system_event->'object'->>'headSha' IS DISTINCT FROM ${cache}->'pr'->>'headSha'))`;
 }
-
 /** An explicit app call gets its own queue item, without notifying a helper;
  * the historical requester provenance remain the app-call contract. */
 export async function createMcpAgentCommand(db: SqlDatabase, input: {
@@ -352,7 +346,6 @@ export async function createMcpAgentCommand(db: SqlDatabase, input: {
     scheduledHumanCommandMessageId: input.requesterMessageId });
   return command!.id;
 }
-
 export type AgentCommandInput = {
     roomId: string;
     agentId: string;
@@ -378,16 +371,13 @@ export type AgentCommandInput = {
     /** A line appended to a lifecycle wake's text, fixed at dispatch. */
     wakeNote?: string;
   };
-
 export { isTaggedLoginText,parseTaggedAgentLifecycleCommand,TAGGED_AGENT_LIFECYCLE_COMMANDS } from './agent-command-create-agent-command.js';
 export type { TaggedAgentLifecycleCommand } from './agent-command-create-agent-command.js';
 export { dropQueuedOrdersForStop,lockAgentCommandQueue } from './agent-command-queue.js';
 export { commandInbox,queueCornerMergeConflict,readAgentCommands,reconcileCornerMergeBlockers,routeSystemCommand } from './agent-command-read-agent-commands.js';
 export { reconcileConfiguredCornerReviewers } from './agent-command-reconcile-configured-corner-reviewers.js';
 export { authorizeCommandOutput,CORNER_AGENT_UNREACHABLE_CARD_TYPE,CORNER_CHECKS_BLOCKED_CARD_TYPE,CORNER_MERGE_YES_CARD_TYPE,CORNER_REVIEW_DEADLOCK_CARD_TYPE,dismissAgentCommandWakes,selectMcpMessage } from './agent-command-route-agent-result.js';
-
 export { queueMessage as createAgentCommand };
-
 /** Transport adapters supply data; this is the only conversational write entry. */
 export type QueuedPost = {
   /** A member posts under its own name: a person's words or its agent's model text. */
@@ -424,9 +414,7 @@ type Chat = { id: string; parent_id: string | null; archived: boolean; direct_pa
   review: {agentId:string;headSha:string;pullRequest:number;briefRevision:number;checks:unknown;cornerId:string} | null };
 export type QueuedPostReceipt = { id: string; createdAt: number; commands: CommandRow[]; woken: string[];
   notWoken: { handle: string; reason: string }[]; stopped: boolean; stored: boolean; visible: boolean; receipt: string };
-type OrderFeedback = { id:string; createdAt:number; feedback:string };
-type DeliveryInput = AgentCommandInput & { audienceId?: string; stopped?: boolean };
-
+type OrderFeedback = { id:string; createdAt:number; feedback:string };type DeliveryInput = AgentCommandInput & { audienceId?: string; stopped?: boolean };
 export function queueMessage(db: SqlDatabase, input: QueuedPost): Promise<QueuedPostReceipt>;
 export function queueMessage(db: SqlDatabase, input: QueuedDelivery): Promise<{ id: string; createdAt: number; delivered: boolean; receipt: string; woken?: string[]; notWoken?: {handle:string;reason:string}[] }>;
 export function queueMessage(db: SqlDatabase, input: QueuedOrder): Promise<CommandRow | OrderFeedback>;
@@ -534,6 +522,11 @@ export async function queueMessage(database: SqlDatabase, raw: QueuedPost | Queu
             reportStatus: input.reportStatus,
             originCornerId: chat.source_parent_id ? input.sourceRoomId : input.sourceItem.private_payload?.originCornerId, attachments: input.attachments ? [...input.attachments] : undefined },
         }, wakeHere ? {...chat,id:input.sourceRoomId,parent_id:chat.source_parent_id} : chat);
+        if (input.reportStatus === 'blocked' || input.reportStatus === 'needs-decision') {
+          await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,card,request_id)
+            VALUES($1,$2,$3,$4,'message',jsonb_build_object('reportToId',$5::text,'reportStatus',$6::text,'sourceRoomId',$7::text),$8)
+            ON CONFLICT(id) DO NOTHING`,[queued!.id,chat.id,input.authorId,input.text,input.recipientId,input.reportStatus,input.sourceRoomId,input.sourceItem.turn_request_id]);
+        }
         return { id: queued!.id, createdAt: new Date(queued!.created_at).getTime() / 1000, delivered: true, receipt: 'Report queued privately; not confirmation of execution.' };
       }
       const saved = await postMessage(db, { kind: 'post', roomId: chat.id, authorId: input.authorId,
@@ -560,7 +553,6 @@ export async function queueMessage(database: SqlDatabase, raw: QueuedPost | Queu
     return insertAgentCommand(db, command!, chat);
   });
 }
-
 /** A System-authored report to a person posts here under the System identity. */
 type PublicPost = Omit<QueuedPost, 'text'> & { text: MemberText | Composed<'system'> };
 async function postMessage(db: SqlDatabase, input: PublicPost, chat: Chat): Promise<QueuedPostReceipt> {
@@ -610,6 +602,7 @@ async function postMessage(db: SqlDatabase, input: PublicPost, chat: Chat): Prom
        message_created_at=EXCLUDED.message_created_at,message_id=EXCLUDED.message_id
        WHERE (EXCLUDED.message_created_at,EXCLUDED.message_id)>(room_read_marks.message_created_at,room_read_marks.message_id)`,
     [chat.id, input.authorId, saved.created_at, id]);
+  const blockAnswer = human ? await wakeBlockAnswer(db,saved.id,chat.id,input.authorId) : undefined;
   const handles = [...typedMentionHandles(input.text)];
   const stops = human ? chat.members.filter(member => member.kind === 'agent' &&
     parseTaggedAgentLifecycleCommand(input.text, member.handle) === 'stop') : [];
@@ -624,7 +617,7 @@ async function postMessage(db: SqlDatabase, input: PublicPost, chat: Chat): Prom
   const solo = !chat.direct_participants && !chat.parent_id && chat.members.filter(member => member.kind === 'human').length === 1 &&
     (agents.length === 1 ? agents[0] : agents.length === 2 && agents.some(member => member.starter === 'luna')
       ? agents.find(member => member.starter === 'beebee') : undefined);
-  const commands: CommandRow[] = [], woken: string[] = [];
+  const commands: CommandRow[] = blockAnswer ? [blockAnswer] : [], woken: string[] = blockAnswer ? [blockAnswer.agent_id] : [];
   const lifecycle = human && !stops.length && input.presentation !== 'card' && await routeTaggedLifecycleCommand(db,
     { room_id: chat.id, author_id: input.authorId, text: input.text, tagged_ids: explicit.filter(member => member.kind === 'agent' && !member.mcp).map(member => member.id) }, id,
     async (command, retry) => {
@@ -641,7 +634,7 @@ async function postMessage(db: SqlDatabase, input: PublicPost, chat: Chat): Prom
     ...(human ? explicit : []),
     ...(human && !hasSystemReportMention(input.text) && chat.direct_participants ? agents.filter(member=>chat.direct_participants!.includes(member.id)) : []),
     ...(human && !explicit.length && solo ? [solo] : []),
-  ].filter(member => member.kind === 'agent' && member.id !== input.authorId && member.id !== SYSTEM_IDENTITY_ID).map(member => [member.id, member])).values()]).filter(member => !human || member.access_policy == null ||
+  ].filter(member => member.kind === 'agent' && member.id !== input.authorId && member.id !== SYSTEM_IDENTITY_ID).map(member => [member.id, member])).values()]).filter(member => member.id!==blockAnswer?.agent_id).filter(member => !human || member.access_policy == null ||
     senderMayAddressAgent(parseAgentAccessPolicy(member.access_policy), input.authorId, member.owner_id ?? undefined));
   const avatarJob = human && /^(?:@[^\s]+\s+)?\/draw-avatar(?:\s|$)/i.test(input.text.trim());
   // The owner's creator/allowlist setting decides which people address a hosted agent; others are not its targets.
@@ -659,7 +652,6 @@ async function postMessage(db: SqlDatabase, input: PublicPost, chat: Chat): Prom
       .map(handle => ({ handle, reason: 'not a current member' })),
     stored: true, visible: true, receipt: 'Message stored and visible.' + (author?.kind === 'agent' && !woken.length ? ' No agents woken.' : '') };
 }
-
 /** Appending is private to the entry above; it never checks membership again. */
 async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, chat: Chat): Promise<CommandRow | undefined> {
   const sender = chat.members.find(member => member.id === (input.privatePayload?.authorId ?? chat.source?.author_id));
@@ -802,7 +794,6 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
     webhookSource ? sourceText ?? '' : `${payload?.kind === 'order' ? 'Order' : 'Wake'} (${input.reason}): ${payload?.text ?? sourceText ?? ''}`);
   return saved;
 }
-
 const hash = (text: string) => createHash('sha256').update(text).digest('hex');
 /** Every message adapter shares the queue owner's existing membership refusal. */
 export function refuseMessageMembership(message='address requires current membership'):never {
@@ -885,13 +876,15 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
     }
     const payload = item?.private_payload;
     if (item && item.state!=='cancelled' && !input.report && (!item.public_reply_id || input.explicitReply) && (item.message?.route || payload?.route || input.explicitReply)) {
-      const route = await recordedMessageRoute(db,item);
+      let route = await recordedMessageRoute(db,item);
       const messageText=repairAgentPost(item.reason==='voice_order' ? cleanVoiceReply(input.text,item.name) : input.text).text.trim();
       if (!messageText && !item.answer_attachments?.length && !input.sharedReplyId && (payload?.automatic || isBackgroundCommand(item.reason) || isInformationalReply(item.reason,payload?.messageAsk))) {
         completedNow=true;
         await endAgentTurn(db,item,'complete');
         return {id:item.id,createdAt:Math.floor(Date.now()/1000)};
       }
+      await refuseDoneWithBlocks(db,agentId,input.roomId,messageText);
+      route = {...route,from:await blockRecipient(db,{agent:agentId,place:input.replyFromPlace ?? input.roomId},route.from,messageText)};
       if ((await db.query('SELECT 1 FROM rooms WHERE id=$1 AND archived_at IS NOT NULL',[route.from.place])).rowCount) {
         if (item.state==='pending') await endAgentTurn(db,item,'cancelled','return_address_archived');
         return {id:item.id,createdAt:Math.floor(Date.now()/1000)};
@@ -918,11 +911,14 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
     }
     // Cutover only: serving old helper builds keep their original report plumbing.
     const escalation = input.report ? item?.report_address ?? (payload?.kind === 'order' ? payload.escalation : undefined) : undefined;
-    const roomId = escalation?.roomId ?? item?.return_room_id ?? payload?.fromRoomId ?? input.roomId;
-    const recipientId = escalation?.identityId ?? (payload ? payload.returnIdentityId ??
+    let roomId = escalation?.roomId ?? item?.return_room_id ?? payload?.fromRoomId ?? input.roomId;
+    let recipientId = escalation?.identityId ?? (payload ? payload.returnIdentityId ??
       (payload.kind === 'order' ? payload.authorId : undefined) : input.report ? item?.source_author ?? item?.root_author ?? undefined : undefined);
     const status = ['done', 'blocked', 'failed', 'needs_decision'].includes(String(input.status))
       ? String(input.status).replace('_', '-') : 'done';
+    if (input.report) {
+      await refuseDoneWithBlocks(db,agentId,input.roomId,`${status}: ${input.text}`);
+    }
     const publicText = repairAgentPost(item?.reason==='voice_order' ? cleanVoiceReply(input.text,item.name) : input.text).text.replace(input.report ? /^(?:done|blocked|failed|needs[-_]decision):\s*/ : /^$/, '').trim();
     const publicReplyId = item?.public_reply_id ?? input.sharedReplyId;
     // A closed return address refuses delivery like Stop, so it ends the item
@@ -962,7 +958,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
       root_source_message_id: answerId, turn_request_id: input.requestId ?? answerId } as CommandRow;
     const saved = await queueMessage(db, { kind: 'delivery', roomId, authorId: agentId, recipientId,
       sourceRoomId: input.roomId, sourceItem, parent: item?.root_command_row && item.root_command_row.agent_id === recipientId ? item.root_command_row : item?.parent_row ?? undefined,
-      stopped: item?.state === 'cancelled', id: answerId, postedReplyId: input.sharedReplyId, text, attachments, ask: input.ask, replyTo: input.replyToMessageId ?? item?.source_message_id ?? undefined,
+      stopped: item?.state === 'cancelled', id: answerId, postedReplyId: input.sharedReplyId, text, attachments, ask: input.ask, replyTo: input.replyToMessageId ?? item?.source_message_id ?? (input.report ? item?.id : undefined),
       reportStatus: input.report ? status as PrivateCommandPayload['reportStatus'] : undefined,
     });
     completedNow = true;
