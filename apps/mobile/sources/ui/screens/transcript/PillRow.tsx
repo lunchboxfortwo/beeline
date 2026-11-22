@@ -149,9 +149,10 @@ export function PillRow({ items, testID }: { items: readonly PillItem[]; testID?
                             {item.run ? (
                                 <>
                                     <XStack>
-                                        {runFaces(item.run).map((face, index) => (
-                                            // A 2 px ring in the pill's own fill keeps overlapped faces apart.
-                                            <YStack key={faceKey(face)} marginLeft={index ? '-2' : '0'} borderWidth={2}
+                                        {runFaces(item.run).map((face) => (
+                                            // A 2 px ring in the pill's own fill keeps adjacent faces apart
+                                            // (the grammar has no negative spacing, so faces sit side by side).
+                                            <YStack key={faceKey(face)} borderWidth={2}
                                                 borderColor="raised" borderRadius="sm"><Face face={face} /></YStack>
                                         ))}
                                     </XStack>
