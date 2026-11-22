@@ -19,6 +19,8 @@ export const CORNER_ROW_MESSAGE_COLUMNS = [
   'id', 'room_id', 'author_id', 'text', 'created_at', 'presentation', 'deleted_at', 'card_type', 'card', 'system_event',
   // A human report's originating corner is read through its request (`humanReportCornerSql`).
   'request_id', 'activity',
+  // Persistent waits and their answer boundary affect the projected corner state.
+  'block_corner_id', 'ask_closed_reason', 'block_reasked_at',
 ] as const;
 
 /** For a row trigger: the row was inserted or deleted, or one of `columns` changed. */
