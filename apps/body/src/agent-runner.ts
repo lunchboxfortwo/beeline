@@ -264,6 +264,10 @@ export class AgentRunner {
       }
     } catch (error) {
       console.error(`[body] place ${placeId} could not answer ${item.id}:`, error);
+      if (started && this.completed.has(item.id) && !this.stopped &&
+        !batch.some(next => this.latest.some(listed => listed.id === next.id))) await this.store({
+        itemId: item.id, roomId: item.roomId, requestId: item.turnRequestId, text: '', harnessEnded: true, invocation,
+      });
       if (batch.some(next => this.latest.some(listed => listed.id === next.id) && !this.answered.has(next.id))) {
         if (!this.stopped && !item.modelCredential) this.reportOwnerBlocker(item, error);
         if (started && !this.stopped) {

@@ -75,6 +75,11 @@ async function fixture(saved?: import('./answer-store.js').StoredAnswer) {
 
 it('a configuration change refreshes configuration without rereading every optional resource', async () => {
   const f=await fixture(),answering=deferred<Record<string,unknown>>();
+  const receipt = deferred<void>();
+  f.execute.mockImplementation(async name => {
+    if (name === 'postAgentTurnReceipt') receipt.resolve();
+    return { id: 'posted', createdAt: 1 };
+  });
   harness.deliver.mockReturnValueOnce(answering.promise);
   f.changed([f.item('active')]);
   await vi.waitFor(()=>expect(harness.deliver).toHaveBeenCalledOnce());
@@ -83,7 +88,8 @@ it('a configuration change refreshes configuration without rereading every optio
   expect(harness.refreshConfiguration).toHaveBeenCalledOnce();
   expect(harness.stop).not.toHaveBeenCalled();
   answering.resolve({text:'answer',steps:[],toolCalls:[],cleanup:async()=>{}});
-  await vi.waitFor(()=>expect(f.execute).toHaveBeenCalledWith('postAgentTurnReceipt',expect.anything()));
+  await receipt.promise;
+  expect(f.execute).toHaveBeenCalledWith('postAgentTurnReceipt', expect.objectContaining({ requestId: 'active' }));
 });
 
 it('a place first seen after a configuration change reads the changed settings before it starts', async () => {
@@ -645,4 +651,17 @@ it('failure after the original anchor replied still finalizes and resumes the ow
  f.execute.mockImplementation(async()=>({id:'posted',createdAt:1}));
  next.resolve({text:'Sibling result',steps:[],toolCalls:[],cleanup:async()=>{}});
  await vi.waitFor(()=>expect(f.execute).toHaveBeenCalledWith('postRoomMessage',expect.objectContaining({text:'Sibling result'})),{timeout:5000});
+});
+
+it('records session end when the harness fails after its only request was answered', async () => {
+  const f = await fixture(), item = f.item('answered-before-failure');
+  let fail!: (error: Error) => void;
+  harness.deliver.mockReturnValueOnce(new Promise((_resolve, reject) => { fail = reject; }));
+  f.changed([item]);
+  await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledOnce());
+  f.changed([], [item.id]);
+  fail(new Error('session lost after reply'));
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({
+    requestId: item.id, harnessEnded: true, invocation: { id: expect.any(String), requestId: item.turnRequestId },
+  })));
 });

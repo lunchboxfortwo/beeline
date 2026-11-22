@@ -1,8 +1,4 @@
 
-
-/** One spinner step, ~8 steps per second. */
-export const SPINNER_STEP_MS = 125;
-
 /**
  * The gerund shown while working, and its past tense on the settled line.
  * Picked once per turn (seeded by the turn's identity), never per tick.
@@ -40,23 +36,9 @@ export function elapsedSeconds(startedAtMs: number, nowMs: number): number {
   return Math.max(0, Math.floor((nowMs - startedAtMs) / 1_000));
 }
 
-/** The live counter phase; only the exceptional stopping state needs a label. */
-export type WorkingPhase = 'thinking' | 'stopping';
-
 function formatElapsedDuration(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
   return minutes > 0 ? `${minutes}m ${seconds % 60}s` : `${seconds}s`;
-}
-
-/** `Ns` below a minute, then `Nm Ns`; append stopping when requested. */
-export function formatWorkingCounter(
-  startedAtMs: number,
-  nowMs: number,
-  phase: WorkingPhase = 'thinking',
-): string {
-  const elapsed = elapsedSeconds(startedAtMs, nowMs);
-  const duration = formatElapsedDuration(elapsed);
-  return phase === 'stopping' ? `${duration} \u00b7 stopping` : duration;
 }
 
 /** Local wall clock as the settled line's "done h:MM" stamp. */

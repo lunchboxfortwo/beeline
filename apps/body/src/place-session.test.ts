@@ -913,3 +913,37 @@ it('retires a session before its next turn when a fresh read carries a newer sel
   await vi.waitFor(() => expect(f.session.stale).toBe(true));
   await f.session.dispose();
 });
+
+it('writes a completed thread tool while the harness prompt remains unresolved', async () => {
+  const f = await fixture(true);
+  let activityWritten!: () => void;
+  const activity = new Promise<void>(resolve => { activityWritten = resolve; });
+  f.execute.mockImplementation(async name => {
+    if (name === 'postAgentActivity') activityWritten();
+    return {};
+  });
+  let finish!: (result: any) => void;
+  const promptResult = new Promise<any>(resolve => { finish = resolve; });
+  f.prompt.mockImplementation((...args: any[]) => {
+    const onTools = args[4];
+    onTools([{ id: 'live-tool', title: 'Read source', status: 'completed' }]);
+    return promptResult;
+  });
+  await f.session.start(f.item);
+  let returned = false;
+  const answer = f.session.deliver(f.item, [], { id: 'live-invocation', requestId: f.item.turnRequestId })
+    .then(result => { returned = true; return result; });
+  try {
+    // Delivery includes asynchronous context writes before the prompt starts.
+    // Wait for its protocol event, not a polling deadline tied to host speed.
+    await Promise.race([activity, answer.then(() => { throw new Error('Session returned before its live step'); })]);
+    expect(f.execute).toHaveBeenCalledWith('postAgentActivity', expect.objectContaining({
+      cornerActivityKey: expect.stringMatching(/^[a-f0-9]{64}$/), activity: [expect.objectContaining({ title: 'Read source' })],
+    }));
+    expect(returned).toBe(false);
+  } finally {
+    finish({ agentText: 'Done', stopReason: 'end_turn', updates: [], toolCalls: [] });
+    try { await answer; }
+    finally { await f.session.dispose(); }
+  }
+});

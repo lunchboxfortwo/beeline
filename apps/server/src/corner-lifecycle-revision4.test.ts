@@ -183,6 +183,7 @@ it.each(['empty', 'findings'])('a locked thread with a completed %s review and n
     if (verdict === 'findings') await db.query(`INSERT INTO messages(id,room_id,author_id,text,request_id)
       VALUES('orphaned-review-findings',$1,$2,'FAIL: missing required evidence.',$3)`, [C, B, review!.turnRequestId]);
     await db.query(`SELECT beeline_finish_agent_command($1,'complete',NULL,NULL)`, [review!.id]);
+    await db.query(`SELECT beeline_interrupt_agent_turn($1,$2,$3,NULL,NULL)`, [B,C,review!.turnRequestId]);
     await db.backgroundWork.drain();
     expect(await advanceCorner(db, C, { kind: 'reconcile' })).toMatchObject({ state: 'idle' });
     const before = (await db.query(`SELECT id FROM agent_commands WHERE room_id=$1 ORDER BY id`, [C])).rows;

@@ -1023,6 +1023,7 @@
           "tool_calls": "existing before the registry; weekly audit reviews",
           "input_tokens": "existing before the registry; weekly audit reviews",
           "output_tokens": "existing before the registry; weekly audit reviews",
+          "invocation_id": "Current harness attempt identifies which session final may end this turn; a request can have multiple attempts.",
           "connection_epoch": "Recorded helper connection epoch at start; replacements interrupt only earlier executions.",
           "version": "Database write sequence orders committed turn projections across live delivery and covering reads; arrival order cannot recover it.",
           "ended_at": "when a turn ended; set by the turn's own status change, so idle timing never reads a mutable corner span",
@@ -3684,7 +3685,8 @@
           "command_id": "Executing command; cascade owns retention.",
           "invocation_id": "Fresh helper attempt nonce.",
           "replied": "Committed explicit reply delivered during this attempt.",
-          "final_suppressed": "Accepted final suppression, distinct from an answer."
+          "final_suppressed": "Accepted final suppression, distinct from an answer.",
+          "ended": "Harness return is independent of reply delivery and must survive reconnects until the session ends."
         }
       }
     },

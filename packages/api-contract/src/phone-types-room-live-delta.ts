@@ -157,6 +157,7 @@ export type RoomHistoryOutlineDay = {
 
 /** A thread's one state is its corner machine output (`state`, `reason`); see `threadWorkState`. */
 export type ChatListCorner = {
+  readonly workingAgentName?: string;
   readonly id: string;
   readonly name: string;
   readonly state: Exclude<CornerState, 'archived'>;
@@ -554,6 +555,7 @@ export type AgentPairingAbandonView = {
 
 
 export type CornerListItem = {
+  readonly workingAgentName?: string;
   readonly corner: RoomViewHeader;
   readonly lifecycle: CornerLifecycleView;
   readonly state: CornerState;
