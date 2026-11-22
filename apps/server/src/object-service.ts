@@ -188,6 +188,18 @@ export class ObjectService {
     return bytes ?? undefined;
   }
 
+  /** A ready object's bytes, for a caller whose message read already authorized it. */
+  async readReadyBytes(objectId: string): Promise<Uint8Array | undefined> {
+    const row = (
+      await this.database.query<{ key: string }>(
+        `SELECT key FROM objects WHERE id=$1 AND state='ready'`,
+        [objectId],
+      )
+    ).rows[0];
+    if (!row) return undefined;
+    return (await this.#requireStorage().getObject(row.key)) ?? undefined;
+  }
+
   /**
    * A ready object this Room can see, for an app tool upload: attached to a
    * message in the Room, or queued there by this agent's `post_artifact`. An

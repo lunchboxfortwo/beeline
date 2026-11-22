@@ -14,7 +14,7 @@ import type { ObjectService } from './object-service.js';
 import { OWED_MENTION_OPEN_SQL,mentionRouting } from './owed-mentions.js';
 import type { PhoneService } from './phone-service.js';
 import { visibleChatMessageSql } from './read-cursor.js';
-import { MCP_AGENT_EXCLUSIONS,MCP_AGENT_TOOLS,MCP_OPERATOR_TOOLS,MCP_RETIRED_TOOLS,RoomsMcpAgentTools,mcpRefusal,pendingMcpWakes } from './rooms-mcp-agent.js';
+import { MCP_AGENT_EXCLUSIONS,MCP_AGENT_TOOLS,MCP_OPERATOR_TOOLS,MCP_RETIRED_TOOLS,McpContent,RoomsMcpAgentTools,mcpRefusal,pendingMcpWakes } from './rooms-mcp-agent.js';
 import { MCP_FULL_SCOPE } from './rooms-mcp-connections.js';
 import { connectorHostAcceptedSql,confirmMemberDelivery,failMemberDelivery,localDeliveryProbe,prepareLocalDelivery,readMemberDelivery,recoverMemberDelivery,setupMemberDelivery } from './rooms-mcp-delivery.js';
 import { mcpEndpoint,resourceMetadataUrl } from './rooms-mcp-endpoints.js';
@@ -238,6 +238,7 @@ export class RoomsMcp {
     try {
       const result = await this.call(principal, name, args);
       void this.audit(principal, name, 'succeeded');
+      if (result instanceof McpContent) return { content: result.content };
       return { content: [{ type: 'text' as const, text: JSON.stringify({ data: result }) }] };
     } catch (error) {
       void this.audit(principal, name, 'refused');
