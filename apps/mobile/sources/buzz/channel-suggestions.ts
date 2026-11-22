@@ -1,6 +1,6 @@
 /**
- * The composer's `#` picker. This chat's threads come first, newest activity
- * on top, then the other Rooms. Picking a thread inserts `↳name` (a thread
+ * The composer's `#` picker. This chat comes first, followed by its threads
+ * with newest activity on top, then the other Rooms. Picking a thread inserts `↳name` (a thread
  * link the server resolves); picking a Room inserts `#room`, the token
  * `findChannelReferences` links once the message is sent.
  */
@@ -41,7 +41,7 @@ export function activeChannelAtCursor(text: string, cursor: number): ActiveChann
   return { start: cursor - query.length - 1, end: cursor, query };
 }
 
-/** Rooms first, then the current Room's corners; duplicate ids keep their first entry. */
+/** Current chat, its threads, then other chats; duplicate ids keep their first entry. */
 export function channelSuggestionCandidates(
   rooms: readonly {
     readonly id: string;
@@ -107,7 +107,7 @@ export function filterChannelSuggestions(
       return { candidate, index, prefix: token.startsWith(folded) || name.startsWith(folded) };
     })
     .filter((item): item is NonNullable<typeof item> => item !== null)
-    // This chat's threads stay above Rooms; within each, prefix matches lead.
+    // The current chat leads its threads, then other chats; prefix matches lead within each.
     .sort((a, b) => Number(Boolean(b.candidate.currentChat)) - Number(Boolean(a.candidate.currentChat))
       || Number(b.candidate.kind === 'corner') - Number(a.candidate.kind === 'corner')
       || Number(b.prefix) - Number(a.prefix) || a.index - b.index);

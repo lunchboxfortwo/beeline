@@ -221,7 +221,7 @@ export function ChannelSuggestionMenu({
       >
         {matches.map((suggestion, index) => {
           const thread = suggestion.kind === 'corner';
-          const name = thread ? suggestion.name ?? suggestion.token : `#${suggestion.token}`;
+          const name = thread ? suggestion.name ?? suggestion.token : suggestion.token;
           const age = thread ? compactRelativeTime(suggestion.activityAt, nowMs) : '';
           const row = (
             <SuggestionRow

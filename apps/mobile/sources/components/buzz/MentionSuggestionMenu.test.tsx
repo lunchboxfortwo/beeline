@@ -54,13 +54,13 @@ it('names the chat above its threads, then lists the other rooms', () => {
     tree = create(<ChannelSuggestionMenu query="be" overflow={3} highlightedIndex={0} keyboardOpen onSelect={() => undefined}
       matches={[{ kind: 'room', id: 'r1', token: 'beeline', subtitle: 'Beeline-Work/beeline' }, corner]} />);
   });
-  expect(texts()).toEqual(expect.arrayContaining(['Chats', '#beeline', 'Beeline-Work/beeline', 'and 3 others']));
+  expect(texts()).toEqual(expect.arrayContaining(['Chats', 'beeline', 'Beeline-Work/beeline', 'and 3 others']));
   act(() => tree.unmount());
   act(() => {
     tree = create(<ChannelSuggestionMenu query="" overflow={0} highlightedIndex={0} keyboardOpen onSelect={() => undefined}
       nowMs={(1_000_000 + 120) * 1000} matches={[{ ...corner, activityAt: 1_000_000 }, { kind: 'room', id: 'r2', token: 'issues-triage' }]} />);
   });
-  expect(texts()).toEqual(['In #beeline', 'one-row-header', '2m', '#issues-triage']);
+  expect(texts()).toEqual(['In #beeline', 'one-row-header', '2m', 'issues-triage']);
 });
 
 it('uses one title and keeps the keyboard window at three rows with this chat first', () => {
@@ -69,6 +69,7 @@ it('uses one title and keeps the keyboard window at three rows with this chat fi
   act(() => { tree = create(<ChannelSuggestionMenu query="beeline" matches={matches} overflow={2} highlightedIndex={0} keyboardOpen onSelect={() => undefined} />); });
   expect(texts().filter((text: string) => text === 'In #beeline')).toHaveLength(1);
   expect(texts()).toContain('this chat');
+  expect(texts()).toContain('and 5 others');
   expect(texts()).not.toContain('Other rooms');
   const scroll = tree.root.find((node: any) => node.type === 'ScrollView');
   expect(scroll.props.maxHeight).toBe(3 * 56);
