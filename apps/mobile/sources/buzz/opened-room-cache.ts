@@ -15,8 +15,16 @@ export function publishOpenedRoom(view: unknown, stamp: number): void {
   const viewer = peekBuzzViewerContext();
   const config = getBuzzRuntimeConfig();
   if (!viewer || viewer.relayUrl !== config.monolithUrl) return;
-  const address = surfaceAddress(config.monolithUrl, viewer.viewerPubkey, `/room/${(view as RoomView).room.id}`);
-  const published = mobileSurfaceCache.publish(address,
-    reconcileRoomView(mobileSurfaceCache.peek(address, isRoomView), view), isRoomView, stamp);
+  const address = surfaceAddress(
+    config.monolithUrl,
+    viewer.viewerPubkey,
+    `/room/${(view as RoomView).room.id}`,
+  );
+  const published = mobileSurfaceCache.publish(
+    address,
+    reconcileRoomView(mobileSurfaceCache.peek(address, isRoomView), view),
+    isRoomView,
+    stamp,
+  );
   void mobileSurfaceCache.persist(address, published, isRoomView).catch(() => undefined);
 }
