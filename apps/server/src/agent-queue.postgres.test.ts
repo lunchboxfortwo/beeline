@@ -19,7 +19,18 @@ import { DaemonService } from './daemon-service.js';
 import { LiveHub } from './live.js';
 import { groupBPostgresDatabase } from './test-fixtures/test-support-router-group-b-postgres.js';
 
-const harness = vi.hoisted(() => ({ deliver: vi.fn() }));
+// Waits re-check on each delivery and settled helper operation instead of a
+// wall-clock poll, so a loaded machine only makes a test slower.
+const harness = vi.hoisted(() => ({ deliver: vi.fn(), progress: new Set<() => void>() }));
+function progressed() { for (const check of [...harness.progress]) check(); }
+function until(ready: () => boolean): Promise<void> {
+  return new Promise(resolve => {
+    const check = () => { if (ready()) { harness.progress.delete(check); resolve(); } };
+    harness.progress.add(check);
+    check();
+  });
+}
+const delivered = () => harness.deliver.mock.calls.map(([item]: [AgentCommand]) => item);
 vi.mock('../../body/src/place-session.js', () => ({ PlaceSession: class {
   alive = false;
   stale = false;
@@ -27,7 +38,9 @@ vi.mock('../../body/src/place-session.js', () => ({ PlaceSession: class {
   current?: AgentCommand;
   async deliver(item: AgentCommand, batch: readonly AgentCommand[]) {
     this.current = item;
-    try { return await harness.deliver(item, batch); }
+    const answering = harness.deliver(item, batch);
+    progressed();
+    try { return await answering; }
     finally { this.current = undefined; }
   }
   async stop() {}
@@ -149,9 +162,16 @@ describe.skipIf(!url)('pending work reaches the helper on PostgreSQL', () => {
   let server: ReturnType<typeof createBeelineServer>, baseUrl: string, root: string;
   let client: DaemonApiClient | undefined;
   let abort: AbortController | undefined, running: Promise<unknown> | undefined;
+  let settled: {name: string; input: Record<string, unknown>; ok: boolean; output?: unknown}[] = [];
+  /** Every id has an answer the server accepted; a refused empty answer leaves it owed. */
+  const answered = (...ids: string[]) => until(() => ids.every(id => settled.some(op => op.ok &&
+    op.name === 'postRoomMessage' && (op.output as {answered?: boolean}).answered !== false &&
+    [op.input.requestId,...(op.input.queuedRequestIds as string[] | undefined ?? [])].includes(id))));
 
   beforeEach(async () => {
     harness.deliver.mockReset().mockImplementation(async () => answer());
+    harness.progress.clear();
+    settled = [];
     fixture = await groupBPostgresDatabase(url!);
     root = await mkdtemp(join(tmpdir(), 'queue-postgres-helper-'));
     const db = fixture.database, live = new LiveHub();
@@ -179,7 +199,7 @@ describe.skipIf(!url)('pending work reaches the helper on PostgreSQL', () => {
   }, 60_000);
 
   afterEach(async () => {
-    await vi.waitFor(() => expect(client?.metrics().inFlight ?? 0).toBe(0));
+    await until(() => (client?.metrics().inFlight ?? 0) === 0);
     abort?.abort();
     await running;
     client?.closeLive();
@@ -193,6 +213,12 @@ describe.skipIf(!url)('pending work reaches the helper on PostgreSQL', () => {
 
   async function connect() {
     client = new DaemonApiClient(baseUrl,'bdt_queue',agent);
+    const execute = client.execute.bind(client);
+    client.execute = (async (name: string, input: Record<string, unknown>) => {
+      const record = (ok: boolean, output?: unknown) => { settled.push({name,input,ok,output}); progressed(); };
+      try { const output = await execute(name as never,input as never); record(true,output); return output; }
+      catch (error) { record(false); throw error; }
+    }) as typeof client.execute;
     const runtime = { agent:{publicKey:agent,secretKeyHex,name:'Worker'}, communityId:workspace,
       rooms:[],supervisorRoot:root } as unknown as AgentRuntimeRecord;
     const runner = new AgentRunner(runtime,join(root,'runtime.json'),{
@@ -223,7 +249,7 @@ describe.skipIf(!url)('pending work reaches the helper on PostgreSQL', () => {
     const held = deferred<ReturnType<typeof answer>>();
     harness.deliver.mockReturnValueOnce(held.promise);
     await connect();
-    await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(1));
+    await until(() => delivered().length === 1);
     if (phase === 'finishing') {
       // A tool reply commits before the harness finishes returning.
       await daemon.execute('postRoomMessage',{roomId:room,requestId:first.id,text:'First reply'},agent);
@@ -232,9 +258,10 @@ describe.skipIf(!url)('pending work reaches the helper on PostgreSQL', () => {
     expect(next.agent_depth).toBe(4);
     expect((await readAgentCommands(fixture.database,agent)).commands.map(item => item.id)).toContain(next.id);
     held.resolve(answer());
-    await vi.waitFor(() => expect(harness.deliver.mock.calls.map(([item]) => item.id)).toContain(next.id));
-    await vi.waitFor(async () => expect((await fixture.database.query('SELECT state FROM agent_commands WHERE id=$1',[next.id])).rows)
-      .toEqual([{state:'complete'}]));
+    await answered(next.id);
+    expect(delivered().map(item => item.id)).toContain(next.id);
+    expect((await fixture.database.query('SELECT state FROM agent_commands WHERE id=$1',[next.id])).rows)
+      .toEqual([{state:'complete'}]);
   });
 
   it('delivers every pending depth-four item after helper reconnect without another insert', async () => {
@@ -242,8 +269,9 @@ describe.skipIf(!url)('pending work reaches the helper on PostgreSQL', () => {
     client!.closeLive();
     const backlog = await ask('Queued while disconnected',4);
     client!.subscribeQueue();
-    await vi.waitFor(() => expect(harness.deliver.mock.calls.map(([item]) => item.id)).toContain(backlog.id));
-    await vi.waitFor(async () => expect((await readAgentCommands(fixture.database,agent)).commands).toEqual([]));
+    await answered(backlog.id);
+    expect(delivered().map(item => item.id)).toContain(backlog.id);
+    expect((await readAgentCommands(fixture.database,agent)).commands).toEqual([]);
   });
 
   it('delivers the next item in a cancelled place after restart with an empty saved answer', async () => {
@@ -256,8 +284,9 @@ describe.skipIf(!url)('pending work reaches the helper on PostgreSQL', () => {
       requestId:interrupted.id,text:'',harnessEnded:true});
     const next = await ask('Next request after release restart');
     await connect();
-    await vi.waitFor(() => expect(harness.deliver.mock.calls.map(([item]) => item.id)).toContain(next.id));
-    await vi.waitFor(async () => expect((await readAgentCommands(fixture.database,agent)).commands).toEqual([]));
+    await answered(interrupted.id,next.id);
+    expect(delivered().map(item => item.id)).toContain(next.id);
+    expect((await readAgentCommands(fixture.database,agent)).commands).toEqual([]);
   });
 
   it('keeps the working status after reconnect while the same harness continues its turn', async () => {
@@ -266,7 +295,9 @@ describe.skipIf(!url)('pending work reaches the helper on PostgreSQL', () => {
     harness.deliver.mockReturnValueOnce(held.promise);
     await connect();
     const state = async () => (await phone.readLiveDelta(room,human,{type:'turn',agentId:agent,requestId:item.id}));
-    await vi.waitFor(async () => expect(await state()).toMatchObject({turn:{status:'working'}}));
+    const started = () => settled.filter(op => op.ok && op.name === 'startAgentTurn' && op.input.requestId === item.id).length;
+    await until(() => started() === 1);
+    expect(await state()).toMatchObject({turn:{status:'working'}});
     const epoch = (await fixture.database.query('SELECT epoch FROM agent_connections WHERE agent_id=$1',[agent])).rows[0]!.epoch;
     const reopened = deferred<void>(), release = client!.onLiveOpen(() => reopened.resolve());
     client!.reconnectLive();
@@ -274,10 +305,13 @@ describe.skipIf(!url)('pending work reaches the helper on PostgreSQL', () => {
       await reopened.promise;
       expect((await fixture.database.query('SELECT epoch FROM agent_connections WHERE agent_id=$1',[agent])).rows[0]!.epoch)
         .not.toBe(epoch);
-      await vi.waitFor(async () => expect(await state()).toMatchObject({turn:{status:'working'}}));
+      // The reopened socket re-announces the running turn.
+      await until(() => started() === 2);
+      expect(await state()).toMatchObject({turn:{status:'working'}});
       expect(harness.deliver).toHaveBeenCalledTimes(1);
     } finally { release(); held.resolve(answer()); }
-    await vi.waitFor(async () => expect((await readAgentCommands(fixture.database,agent)).commands).toEqual([]));
+    await answered(item.id);
+    expect((await readAgentCommands(fixture.database,agent)).commands).toEqual([]);
     expect(await state()).toMatchObject({agentState:null,turn:{status:'complete'}});
   });
 
@@ -286,11 +320,12 @@ describe.skipIf(!url)('pending work reaches the helper on PostgreSQL', () => {
     const held = deferred<ReturnType<typeof answer> & {stopReason:string}>();
     harness.deliver.mockReturnValueOnce(held.promise);
     await connect();
-    await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(1));
+    await until(() => delivered().length === 1);
     const next = await ask('After cancellation');
     held.resolve({...answer(),text:'',stopReason:'cancelled'});
-    await vi.waitFor(() => expect(harness.deliver.mock.calls.map(([item]) => item.id)).toContain(next.id));
-    await vi.waitFor(async () => expect((await readAgentCommands(fixture.database,agent)).commands).toEqual([]));
+    await answered(first.id,next.id);
+    expect(delivered().map(item => item.id)).toContain(next.id);
+    expect((await readAgentCommands(fixture.database,agent)).commands).toEqual([]);
     expect(harness.deliver.mock.calls[0]![0].id).toBe(first.id);
   });
 
@@ -299,19 +334,19 @@ describe.skipIf(!url)('pending work reaches the helper on PostgreSQL', () => {
     const held = deferred<ReturnType<typeof answer>>();
     harness.deliver.mockReturnValueOnce(held.promise);
     await connect();
-    await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(1));
+    await until(() => delivered().length === 1);
     const source = await ask('Open this thread',depth,opener);
     const spec = 'Implement the approved queue fix';
     const {cornerId} = await daemon.execute('createCorner',{roomId:room,requestId:source.id,
       idempotencyKey:randomUUID(),name:'Queue-brief',objective:spec,implementer:'worker',
       brief:{spec,approval:{sourceMessageId:source.source_message_id!}}},opener);
+    const brief = () => delivered().find(item => item.roomId === cornerId);
     try {
-      await vi.waitFor(() => expect(harness.deliver.mock.calls.map(([item]) => item.roomId)).toContain(cornerId));
-      expect(harness.deliver.mock.calls.find(([item]) => item.roomId === cornerId)![0])
-        .toMatchObject({reason:'corner_objective',agentDepth:depth,source:{body:expect.stringContaining(spec)}});
-      const commands = harness.deliver.mock.calls.map(([item]: [AgentCommand]) => item.id);
-      expect(commands).toContain(first.id);
+      await until(() => brief() !== undefined);
+      expect(brief()).toMatchObject({reason:'corner_objective',agentDepth:depth,source:{body:expect.stringContaining(spec)}});
+      expect(delivered().map(item => item.id)).toContain(first.id);
     } finally { held.resolve(answer()); }
-    await vi.waitFor(async () => expect((await readAgentCommands(fixture.database,agent)).commands).toEqual([]));
+    await answered(first.id,brief()!.id);
+    expect((await readAgentCommands(fixture.database,agent)).commands).toEqual([]);
   });
 });
