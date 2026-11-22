@@ -89,6 +89,27 @@ function runFaces(run: readonly PillRunEntry[]): PillFace[] {
     return [...seen.values()];
 }
 
+const BEELINE_FACE: PillFace = { kind: 'system', name: 'Beeline' };
+
+/**
+ * The faces a folded run shows, at most `RUN_FACES`. A system stack always
+ * leads with the ringed Beeline logo, then whoever stopped a turn, then the
+ * other subjects, so a person's stop stays visible while folded.
+ */
+function foldedFaces(item: PillItem): PillFace[] {
+    const run = item.run ?? [];
+    if (!item.system) return runFaces(run).slice(0, RUN_FACES);
+    const stoppers = run.filter((entry) => entry.stop).map((entry) => entry.from);
+    const seen = new Set<string>();
+    const ordered = [BEELINE_FACE, ...stoppers, ...runFaces(run)].filter((face) => {
+        const key = faceKey(face);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+    return ordered.slice(0, RUN_FACES);
+}
+
 function names(faces: readonly PillFace[]): string {
     const all = faces.map((face) => face.name);
     return all.length <= 1 ? all.join('') : `${all.slice(0, -1).join(', ')} and ${all.at(-1)}`;
@@ -178,7 +199,7 @@ export function PillRow({ items, testID }: { items: readonly PillItem[]; testID?
                             {item.run ? (
                                 <>
                                     <XStack gap="1" alignItems="center">
-                                        {runFaces(item.run).slice(0, RUN_FACES).map((face) => <Face key={faceKey(face)} face={face} />)}
+                                        {foldedFaces(item).map((face) => <Face key={faceKey(face)} face={face} />)}
                                     </XStack>
                                     <Copy small quiet numberOfLines={1}>{`${item.run.length} messages`}</Copy>
                                 </>

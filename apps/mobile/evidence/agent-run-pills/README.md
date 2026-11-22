@@ -2,7 +2,7 @@
 
 Before/after captures of one chat that holds a 1→1 run (2 messages), a 1→5
 fan-out, a many-to-many run with an agent stop inside it (7 messages), a person
-stop, a lone system notice, and four system notices in a row (a merge hold, a
+stop, two person stops in a row, a lone system notice, and four system notices in a row (a merge hold, a
 join, a person stop and a call with no subject), folded and then opened. Bone and Obsidian, at phone width
 (390 px) and desktop web width (1100 px).
 

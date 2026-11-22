@@ -117,6 +117,26 @@ describe('PillRow', () => {
         expect(tree.root.findAll((node: any) => typeof node.type === 'string' && node.props.testID === 'pill-open')).toHaveLength(0);
     });
 
+    it.each([
+        ['a stop after other notices', [
+            { id: 'n1', from: { kind: 'system', name: 'Beeline' }, to: ruby, time: '09:40' },
+            { id: 'n2', from: { kind: 'system', name: 'Beeline' }, to: jelly, time: '09:41' },
+            { id: 's1', from: owner, to: claude, time: '09:42', stop: true },
+        ], [SYSTEM_IDENTITY_PUBKEY, 'owner', 'ruby']],
+        ['only person stops', [
+            { id: 's1', from: owner, to: ruby, time: '09:42', stop: true },
+            { id: 's2', from: owner, to: claude, time: '09:43', stop: true },
+        ], [SYSTEM_IDENTITY_PUBKEY, 'owner', 'ruby']],
+    ] as const)('folds a system stack with %s to the ringed logo first and keeps the stopper', (_name, run, seeds) => {
+        let tree: any;
+        const stack: PillItem = { id: run[0]!.id, system: true, from: run[0]!.from, to: run[0]!.to, time: '09:43', body: null, run };
+        act(() => { tree = create(<PillRow items={[stack]} />); });
+        const pill = tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'run-pill');
+        expect(pill.findAll((node: any) => node.type === 'YStack' && node.props.testID === 'pill-system-face')).toHaveLength(1);
+        expect(pill.findAll((node: any) => node.type === 'IdentityMark').map((face: any) => face.props.seed)).toEqual(seeds);
+        expect(text(pill)).toEqual([`${run.length} messages`]);
+    });
+
     it('draws a stop as face, stop glyph, face, with no text', () => {
         let tree: any;
         const stop: PillItem = { id: 'stop', system: true, stop: true, from: owner, to: ruby, time: '09:42',
