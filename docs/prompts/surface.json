@@ -1111,7 +1111,6 @@
        "enum": [
         "path",
         "host",
-        "secret",
         "device",
         "command",
         "mcp"
@@ -1121,7 +1120,7 @@
        "type": "string",
        "minLength": 1,
        "maxLength": 512,
-       "description": "What you need: a path, host, secret name, device, or command line (optional --with SECRET_NAME suffixes). For inline code use a JSON argv array; for interpreter stdin use a JSON object with argv and stdin. MCP targets name the host server."
+       "description": "What you need: a path, an SSH login as user@host (then run_granted_command argv ['ssh', 'user@host', '<command>']), a device, or a command line (optional --with SECRET_NAME suffixes for secrets). For inline code use a JSON argv array; for interpreter stdin use a JSON object with argv and stdin. MCP targets name the host server."
       },
       "touches": {
        "type": "string",
@@ -1327,7 +1326,7 @@
     }
    },
    "run_granted_command": {
-    "description": "Run a command under an approved command grant, only when an approved grant matches the exact argv, word for word and the same length; extra or missing words never match. In a top-level chat it runs on the SAME read-only filesystem the chat promises — you can read anything and write only your own scratch, so open a thread for work that changes files. A thread can do everything a chat can and more: its worktree is writable and a command there may act on the live host, next to the branch and the transcript that explain it. The named secrets are in its environment and never in the output. Ten-minute timeout, capped output, one ledger row per run.",
+    "description": "Run a command under an approved command grant, only when an approved grant matches the exact argv, word for word and the same length; extra or missing words never match. An approved host grant for user@host also runs argv ['ssh', 'user@host', '<command>', ...] with fixed ssh options; pass no ssh options. In a top-level chat it runs on the SAME read-only filesystem the chat promises — you can read anything and write only your own scratch, so open a thread for work that changes files. A thread can do everything a chat can and more: its worktree is writable and a command there may act on the live host, next to the branch and the transcript that explain it. The named secrets are in its environment and never in the output. Ten-minute timeout, capped output, one ledger row per run.",
     "inputSchema": {
      "type": "object",
      "required": [

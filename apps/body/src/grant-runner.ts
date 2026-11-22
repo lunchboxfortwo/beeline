@@ -58,6 +58,9 @@ import {
   interpreterScriptArgument,
   parseCommandGrantTarget,
   type CommandGrantRule,
+  hostGrantSshArgv,
+  parseHostGrantTarget,
+  type HostGrantLogin,
 } from '@beeline/api-contract/agent-grants';
 import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { killChildProcessGroup } from './acp-stderr-tail-max-chars.js';
@@ -396,6 +399,43 @@ export function matchCommandGrant(
   return undefined;
 }
 
+function liveHostGrant(grant: LiveGrant, workspaceId: string): HostGrantLogin | undefined {
+  if (grant.kind !== 'host' || grant.workspaceId !== workspaceId) return undefined;
+  if (grant.status !== 'approved' && grant.status !== 'once') return undefined;
+  if (grant.expiresAt && grant.expiresAt <= Date.now() / 1000) return undefined;
+  return parseHostGrantTarget(grant.target.trim());
+}
+
+/**
+ * `ssh user@host <command...>` runs under a live host grant for exactly that
+ * login. The agent supplies no ssh options; the runner adds its own fixed set.
+ */
+export function matchHostGrant(
+  grants: readonly LiveGrant[],
+  workspaceId: string,
+  argv: readonly string[],
+): { grant: LiveGrant; login: HostGrantLogin } | undefined {
+  if (argv[0] !== 'ssh' || argv.length < 3) return undefined;
+  for (const grant of grants) {
+    const login = liveHostGrant(grant, workspaceId);
+    if (login && argv[1] === `${login.user}@${login.host}`) return { grant, login };
+  }
+  return undefined;
+}
+
+/** Why an ssh argv found no host grant, or undefined when no host grant is live. */
+function hostGrantRefusal(grants: readonly LiveGrant[], workspaceId: string, argv: readonly string[]): string | undefined {
+  const logins = grants.flatMap((grant) => {
+    const login = liveHostGrant(grant, workspaceId);
+    return login ? [`${login.user}@${login.host}`] : [];
+  });
+  if (!logins.length) return undefined;
+  return `no approved host grant matches ${argv[1] ?? '(no login)'}. Live host grants: ${logins.join(', ')}. ${HOST_GRANT_ARGV_HINT}`;
+}
+
+const HOST_GRANT_ARGV_HINT =
+  'Call it as ["ssh", "user@host", "<command>", ...] with no ssh options; Beeline adds its own.';
+
 function capOutput(value: string, cap: number): string {
   if (Buffer.byteLength(value) <= cap) return value;
   const half = Math.floor(cap / 2);
@@ -544,22 +584,31 @@ export class GrantCommandRunner {
       match = possible;
       break;
     }
-    if (!match) {
+    // An exact command grant wins; otherwise `ssh user@host <command>` may run
+    // under an approved host grant for exactly that login.
+    const hostMatch = match || bindingFailure ? undefined : matchHostGrant(live.grants, room.workspaceId, argv);
+    if (!match && !hostMatch) {
       if (bindingFailure) throw bindingFailure;
+      const hostRefusal = argv[0] === 'ssh' ? hostGrantRefusal(live.grants, room.workspaceId, argv) : undefined;
+      if (hostRefusal) throw new Error(hostRefusal);
       const history = await this.options.api.execute('listAgentGrantRequests', {
         agentId: this.options.agentId,
         roomId: input.roomId,
       });
       const nearest = closestCommandGrant(history.grants ?? live.grants, room.workspaceId, argv);
       throw new Error(
-        `no approved command grant matches.${nearest} Check the named mismatch before asking again with request_grant kind=command for this argv.`,
+        `no approved command grant matches.${nearest} Check the named mismatch before asking again with request_grant kind=command for this argv.` +
+          (argv[0] === 'ssh'
+            ? ` No live host grant is approved for this session either; to run commands on one login, ask with request_grant kind=host target=user@host. ${HOST_GRANT_ARGV_HINT}`
+            : ''),
       );
     }
-    const { grant, rule } = match;
+    const grant = match?.grant ?? hostMatch!.grant;
     // Use the same surface policy for the entire run.
-    await this.checkScriptBinding(grant, room.cwd, checkEnv, argv, stdin);
+    if (match) await this.checkScriptBinding(grant, room.cwd, checkEnv, argv, stdin);
+    const execArgv = hostMatch ? hostGrantSshArgv(hostMatch.login, argv.slice(2)) : argv;
     const secrets = new Map<string, string>();
-    for (const name of rule.secrets) {
+    for (const name of match?.rule.secrets ?? []) {
       const value = await this.resolveSecret(name);
       if (!value) throw new Error(`secret ${name} is not in the operator key store`);
       secrets.set(name, value);
@@ -570,7 +619,12 @@ export class GrantCommandRunner {
       await this.options.api.execute('consumeAgentGrant', { grantId: grant.grantId });
     }
     const source = this.options.env ?? process.env;
-    const env: Record<string, string> = {
+    // ssh needs the owner's real HOME for its keys and known hosts, so a host
+    // run gets only PATH and HOME, never the session's tool environment.
+    const env: Record<string, string> = hostMatch ? {
+      ...(source.PATH ? { PATH: source.PATH } : {}),
+      ...(source.HOME ? { HOME: source.HOME } : {}),
+    } : {
       ...(source.PATH ? { PATH: source.PATH } : {}),
       ...(source.HOME ? { HOME: source.HOME } : {}),
       XDG_RUNTIME_DIR: source.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid?.() ?? 0}`,
@@ -584,12 +638,14 @@ export class GrantCommandRunner {
     // plainly; a Room may not, so it spawns into the very mount table an
     // ordinary Room session gets — whole host readable, writable only in its own
     // scratch and home overlay.
-    const runsOnHost = surfaceAllows(policy.surface, 'run-host-command');
+    // A host grant acts on the remote login it names; a Room sandbox hides the
+    // keys ssh needs, so that run spawns plainly with the fixed options.
+    const runsOnHost = hostMatch !== undefined || surfaceAllows(policy.surface, 'run-host-command');
     const sandboxMarker = runsOnHost
       ? undefined
       : `[beeline-sandbox-started:${randomBytes(16).toString('hex')}]`;
     const spawn = runsOnHost
-      ? { command: argv[0]!, args: argv.slice(1) }
+      ? { command: execArgv[0]!, args: execArgv.slice(1) }
       : roomSandboxCommand(
           policy,
           room.cwd,
@@ -600,7 +656,7 @@ export class GrantCommandRunner {
           grantedSandboxDevices(live),
         );
     // Re-check after secret resolution and Once consumption, immediately before exec.
-    await this.checkScriptBinding(grant, room.cwd, env, argv, stdin);
+    if (match) await this.checkScriptBinding(grant, room.cwd, env, argv, stdin);
     const outcome = await new Promise<{
       exitCode: number | null;
       signal?: string;
@@ -707,12 +763,12 @@ export class GrantCommandRunner {
       activity: [
         {
           kind: 'tool',
-          title: `ran ${argv.join(' ')} under grant ${grant.grantId} · asked by ${
+          title: `ran ${execArgv.join(' ')} under grant ${grant.grantId} · asked by ${
             requester.name ?? requester.pubkey.slice(0, 12)
           }`,
           operation: 'execute',
           status,
-          command: argv.join(' '),
+          command: execArgv.join(' '),
           ...(output ? { output } : {}),
           requestedBy: requester,
         },

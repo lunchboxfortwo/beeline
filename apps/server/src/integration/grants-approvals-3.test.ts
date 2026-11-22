@@ -352,8 +352,10 @@ const fixture = monolithFixture();
             ...(kind === 'path' ? { capabilities: 'read and write' } : {}),
           })
         ).json()) as { grantId: string; status: string; auto: boolean; messageId?: string };
-        expect(grant).toMatchObject({ status: yolo ? 'approved' : 'pending', auto: yolo });
-        if (yolo) expect(grant.messageId).toBeUndefined();
+        // A host grant lets the agent run any command on that login, so yolo never approves it.
+        const auto = yolo && kind !== 'host';
+        expect(grant).toMatchObject({ status: auto ? 'approved' : 'pending', auto });
+        if (auto) expect(grant.messageId).toBeUndefined();
         else expect(grant.messageId).toEqual(expect.any(String));
         if (kind === 'path' && yolo) {
           const live = await (await fixture.daemonOperation('listAgentGrants', { roomId: ROOM })).json();
@@ -371,10 +373,39 @@ const fixture = monolithFixture();
       }
       expect(
         (await fixture.database.query(`SELECT id FROM messages WHERE card_type='grant-request'`)).rows,
-      ).toHaveLength(yolo ? 0 : 1);
+      ).toHaveLength(1);
     },
   );
 
+
+  it('lists a host login for the same turn once the owner approves its card, and never after revoke', async () => {
+    await fixture.database.query(`UPDATE agents SET yolo_mode=true WHERE agent_id=$1`, [AGENT]);
+    const source = (await (await fixture.operation('sendRoomMessage', {
+      roomId: ROOM, text: '@bee check Chad', mentions: [AGENT],
+    })).json()) as { messageId: string };
+    const request = async () => (await (await fixture.daemonOperation('requestAgentGrant', {
+      roomId: ROOM, requestId: source.messageId, kind: 'host', target: 'do@100.126.74.60',
+      reason: 'check Chad', purpose: 'Check Chad',
+    })).json()) as { grantId: string; status: string; auto: boolean };
+    const live = async () => ((await (await fixture.daemonOperation('listTurnAgentGrants', {
+      roomId: ROOM, requestId: source.messageId,
+    })).json()) as { grants: Array<{ grantId: string }> }).grants.map(grant => grant.grantId);
+    // Even under yolo a host login waits for the owner, whose card names how broad it is.
+    const ask = await request();
+    expect(ask).toMatchObject({ status: 'pending', auto: false });
+    const tray = await (await fixture.operation('readNeedsYou', { workspaceId: WORKSPACE })).json();
+    expect(JSON.stringify(tray)).toContain('Run any command on 100.126.74.60 as do');
+    expect(await live()).not.toContain(ask.grantId);
+    expect((await fixture.operation('decideAgentGrant', { grantId: ask.grantId, decision: 'always' })).status).toBe(200);
+    expect(await live()).toContain(ask.grantId);
+    expect((await fixture.operation('revokeAgentGrant', { grantId: ask.grantId })).status).toBe(200);
+    expect(await live()).not.toContain(ask.grantId);
+    // A host row approved automatically before this rule never authorizes ssh.
+    const old = await request();
+    expect((await fixture.operation('decideAgentGrant', { grantId: old.grantId, decision: 'always' })).status).toBe(200);
+    await fixture.database.query(`UPDATE agent_grants SET auto=true WHERE id::text=$1`, [old.grantId]);
+    expect(await live()).not.toContain(old.grantId);
+  });
 
   it.each(['host', 'command'] as const)('%s refusal stays visible to the agent without granting access', async kind => {
     await fixture.database.query(`UPDATE agents SET yolo_mode=false WHERE agent_id=$1`, [AGENT]);

@@ -411,6 +411,7 @@ import { daemonWriteResult } from './corner-messages.js';
                WHERE app.id=g.app_id AND app.state='active' AND app.owner_identity_id=a.owner_id))
          ))
          AND g.kind<>'shared_asset'
+         AND NOT (g.kind='host' AND g.auto AND g.target<>$3)
          AND (g.kind IN ('repository','shared_asset') OR g.auto OR g.decided_by=(
            SELECT owner_id FROM agents WHERE agent_id=g.agent_id
          ) OR (g.app_id IS NOT NULL AND EXISTS (

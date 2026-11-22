@@ -512,12 +512,12 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
       "properties": {
         "mode": {"type": "string", "enum": ["request", "list"]},
         "action": APPROVAL_ACTION_SCHEMA,
-        "kind": {"type": "string", "enum": ["path", "host", "secret", "device", "command", "mcp"]},
+        "kind": {"type": "string", "enum": ["path", "host", "device", "command", "mcp"]},
         "target": {
           "type": "string",
           "minLength": 1,
           "maxLength": 512,
-          "description": "What you need: a path, host, secret name, device, or command line (optional --with SECRET_NAME suffixes). For inline code use a JSON argv array; for interpreter stdin use a JSON object with argv and stdin. MCP targets name the host server."
+          "description": "What you need: a path, an SSH login as user@host (then run_granted_command argv ['ssh', 'user@host', '<command>']), a device, or a command line (optional --with SECRET_NAME suffixes for secrets). For inline code use a JSON argv array; for interpreter stdin use a JSON object with argv and stdin. MCP targets name the host server."
         },
         "touches": { "type": "string", "minLength": 1, "maxLength": 240, "description": "Files or resources this command touches, in plain language. Omit when unknown." },
         "capabilities": { "type": "string", "minLength": 1, "maxLength": 240, "description": "What this command can do, for example Delete files. Omit when unknown; never invent a scope." },
