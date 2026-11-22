@@ -14,6 +14,7 @@
     "exports:apps/mobile/plugins/android-splash-theme.js:android12SplashThemeGaps",
     "exports:apps/mobile/plugins/android-splash-theme.js:applyAndroid12SplashTheme",
     "exports:apps/mobile/plugins/android-splash-theme.js:styleItems",
+    "exports:apps/mobile/sources/components/buzz/WarmComputerSessionHost.web.tsx:WarmComputerSessionHost",
     "exports:apps/mobile/sources/components/buzz/decorative-glyph.web.ts:DECORATIVE_GLYPH_PROPS",
     "exports:apps/mobile/sources/utils/readFileBytes.web.ts:readFileBytes"
   ]

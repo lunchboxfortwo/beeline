@@ -595,6 +595,12 @@
     "components/buzz/WalletQr.tsx": [
       "WalletQr"
     ],
+    "components/buzz/WarmComputerSessionHost.tsx": [
+      "WarmComputerSessionHost"
+    ],
+    "components/buzz/WarmComputerSessionHost.web.tsx": [
+      "WarmComputerSessionHost"
+    ],
     "components/buzz/WorkflowRunLine.tsx": [
       "ASSIGNEE_MARK",
       "Assignee",
