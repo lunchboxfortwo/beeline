@@ -12,6 +12,13 @@ export async function fixtureContext(
     serviceWorkers: 'block',
     storageState,
   });
+  // Let routed requests finish or be ignored before disposing their API context.
+  // Otherwise a refresh racing teardown can reject outside the capture promise.
+  const close = context.close.bind(context);
+  context.close = async (...args) => {
+    await context.unrouteAll({ behavior: 'ignoreErrors' });
+    return close(...args);
+  };
   // Only this known local API gets CORS headers. No production host, asset,
   // analytics endpoint or OAuth page may escape the isolated fixture.
   await context.route('**/*', async (route) => {

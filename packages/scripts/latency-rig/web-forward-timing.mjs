@@ -8,6 +8,9 @@ export function armForwardTiming({ messageText } = {}) {
   const mark = (name) => {
     timing.events[name] ??= performance.now();
   };
+  const pointerdown = (event) => {
+    if (picker.contains(event.target)) { mark('pointerdown'); performance.mark?.('latency-input-forward'); }
+  };
   const click = (event) => {
     if (picker.contains(event.target)) mark('click');
   };
@@ -43,6 +46,7 @@ export function armForwardTiming({ messageText } = {}) {
     return send.call(this, data);
   }
   WebSocket.prototype.send = observeSend;
+  document.addEventListener('pointerdown', pointerdown, { capture: true, passive: true });
   document.addEventListener('click', click, { capture: true, passive: true });
   document.addEventListener('animationstart', animation, true);
   document.addEventListener('animationend', animation, true);
@@ -104,6 +108,7 @@ export function armForwardTiming({ messageText } = {}) {
     observer.disconnect();
     if (WebSocket.prototype.send === observeSend) WebSocket.prototype.send = send;
     if (socket && reply) socket.removeEventListener('message', reply);
+    document.removeEventListener('pointerdown', pointerdown, true);
     document.removeEventListener('click', click, true);
     document.removeEventListener('animationstart', animation, true);
     document.removeEventListener('animationend', animation, true);
@@ -115,18 +120,17 @@ export function readForwardTiming() {
   const timing = window.__forwardTiming;
   if (!timing?.complete) throw new Error('Forward removal frame was not observed');
   const e = timing.events,
-    start = e.click;
+    start = e.pointerdown ?? e.click;
   const required = [
     'click',
     'send',
     'reply',
-    'animationstart',
-    'animationend',
     'removed',
     'resultFrame',
   ];
   if (!Number.isFinite(start) || required.some((name) => !Number.isFinite(e[name])))
     throw new Error('Forward profile is incomplete');
+  const delta = (end, start) => Number.isFinite(end) && Number.isFinite(start) ? end - start : null;
   return {
     durationMs: (e.acceptedResultFrame ?? e.resultFrame) - start,
     acceptedResultMs: e.acceptedResultFrame === undefined ? null : e.acceptedResultFrame - start,
@@ -135,16 +139,16 @@ export function readForwardTiming() {
     dispatchMs: e.click - start,
     clickToSendMs: e.send - e.click,
     sendToReplyMs: e.reply - e.send,
-    replyToAnimationMs: e.animationstart - e.reply,
-    animationMs: e.animationend - e.animationstart,
+    replyToAnimationMs: delta(e.animationstart, e.reply),
+    animationMs: delta(e.animationend, e.animationstart),
     configuredAnimationMs: timing.animationDurationMs,
-    closeStartMs: e.animationstart - start,
-    animationEndMs: e.animationend - start,
+    closeStartMs: delta(e.animationstart, start),
+    animationEndMs: delta(e.animationend, start),
     tapToGoneMs: e.removed - e.click,
-    closeToGoneMs: e.removed - e.animationstart,
+    closeToGoneMs: delta(e.removed, e.animationstart),
     sourceMessageVisibleMs:
       e.sourceMessageVisible === undefined ? null : e.sourceMessageVisible - start,
-    animationEndToRemovalMs: e.removed - e.animationend,
+    animationEndToRemovalMs: delta(e.removed, e.animationend),
     removalToFrameMs: e.resultFrame - e.removed,
   };
 }

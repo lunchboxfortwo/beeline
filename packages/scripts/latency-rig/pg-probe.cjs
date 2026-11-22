@@ -3,6 +3,7 @@
  */
 'use strict';
 const fs = require('node:fs');
+const { createHash } = require('node:crypto');
 const http = require('node:http');
 const { AsyncLocalStorage } = require('node:async_hooks');
 const { syncBuiltinESMExports } = require('node:module');
@@ -110,13 +111,18 @@ pg.Client.prototype.query = function (...args) {
   const scope = context.getStore();
   const poolWaitMs = waits.get(this) ?? 0;
   waits.delete(this);
+  const sqlText = typeof args[0] === 'string' ? args[0] : args[0]?.text;
+  const sqlShape = process.env.LATENCY_RIG_SQL_SHAPES === '1' && typeof sqlText === 'string'
+    ? { queryHash: createHash('sha256').update(sqlText).digest('hex'),
+        queryShape: sqlText.replace(/'([^']|'')*'/g, "'?'").replace(/\s+/g, ' ').slice(0, 180) }
+    : {};
   let finished = false;
   const finish = (result, error) => {
     if (finished) return;
     finished = true;
     emit({ type: 'sql', traceId: scope?.traceId ?? null,
       operation: scope?.operation ?? 'background', startMs, endMs: Date.now(),
-      poolWaitMs, rows: result?.rowCount ?? null, failed: Boolean(error) });
+      poolWaitMs, rows: result?.rowCount ?? null, failed: Boolean(error), ...sqlShape });
   };
   const callback = args.at(-1);
   if (typeof callback === 'function') {

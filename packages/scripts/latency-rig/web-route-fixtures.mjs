@@ -1,4 +1,5 @@
 /** Explicit content checks: a route header or a mounted loader is never completion. */
+import { readFileSync } from 'node:fs';
 import { fixture, workspace, viewer, agent, peer, hash, uuid } from './web-fixtures.mjs';
 const room = fixture('open-room');
 const corners = fixture('open-corner');
@@ -95,7 +96,7 @@ export const routeFixtures = {
     params: { error: 'local-fixture' },
     state: 'legacy-connection-error',
   }),
-  '/changelog': text('RELEASE LEDGER'),
+  '/changelog': text(JSON.parse(readFileSync(new URL('../../../apps/mobile/sources/changelog/changelog.json', import.meta.url), 'utf8')).entries[0]?.title ?? 'No changelog entries available.'),
   '/join/[token]': content(id('invite-unavailable'), { state: 'invalid-invite' }),
   '/review/[secret]': { ...deck, state: 'review-signin-redirect' },
   '/settings': { ...settings, state: 'settings-redirect' },

@@ -324,7 +324,7 @@ export async function resetWebFixture(db, f, activateTurn = true) {
     }
     if (f.scenario === 'turn' && activateTurn)
       await db.query(
-        `INSERT INTO agent_commands(id,room_id,agent_id,source_message_id,turn_request_id,action,reason,root_command_id,root_source_message_id,agent_depth,state) VALUES($1,$2,$3,$4,$4,'input','human_tag',$1,$4,0,'claimed') ON CONFLICT(id) DO UPDATE SET state='claimed',completed_at=NULL`,
+        `INSERT INTO agent_commands(id,room_id,agent_id,source_message_id,turn_request_id,action,reason,root_command_id,root_source_message_id,agent_depth,state) VALUES($1,$2,$3,$4,$4,'input','human_tag',$1,$4,0,'pending') ON CONFLICT(id) DO UPDATE SET state='pending',completed_at=NULL`,
         [hash('stop-command'), f.roomId, agent, f.messageId],
       );
     if (f.scenario === 'turn' && activateTurn)

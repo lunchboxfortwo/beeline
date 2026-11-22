@@ -1,13 +1,15 @@
 /** Document loads through explicit content plus two frames; one fresh context per document sample. */
-import { writeFile } from 'node:fs/promises';
+import { writeFile, rename } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { routeFixture, waitForRouteContent } from './web-route-fixtures.mjs';
 import { summarize } from './web-capture.mjs';
 import { readWebResources } from './web-resources.mjs';
 import { armTapTiming } from './web-tap-timing.mjs';
 import { fixtureContext } from './web-signin.mjs';
+import { fixture, resetWebFixture } from './web-fixtures.mjs';
 
 export async function captureRoutes({
+  db,
   browser,
   routes,
   origin,
@@ -17,6 +19,8 @@ export async function captureRoutes({
   blockedRequests,
   storageState,
 }) {
+  // The approval tap consumes this grant; the tray route needs it pending again.
+  await resetWebFixture(db, fixture('answer-approval'), false);
   const captures = [];
 
   const count = Number(
@@ -101,6 +105,19 @@ export async function captureRoutes({
             },
           });
           const page = await context.newPage();
+          let finishTrace;
+          if (sample === 0 && process.env.LATENCY_RIG_CAPTURE_TRACES === '1') {
+            const trace = await context.newCDPSession(page);
+            const traceEvents = [];
+            trace.on('Tracing.dataCollected', ({value}) => traceEvents.push(...value));
+            await trace.send('Tracing.start', {categories:'devtools.timeline,blink.user_timing,v8.execute',transferMode:'ReportEvents'});
+            finishTrace = async () => {
+              const complete = new Promise(resolve => trace.once('Tracing.tracingComplete', resolve));
+              await trace.send('Tracing.end'); await complete;
+              await writeFile(resolve(out, `route-${routes.findIndex(r => r.path === path)}-${variant}-${capture}-trace.json`), JSON.stringify({traceEvents}));
+              await trace.detach();
+            };
+          }
           page.setDefaultTimeout(5000);
           page.setDefaultNavigationTimeout(15000);
           try {
@@ -160,6 +177,7 @@ export async function captureRoutes({
               if (!Number.isFinite(timing.durationMs) || timing.durationMs <= 0)
                 throw new Error('Route content frame was not observed');
               record.samples.push(timing.durationMs);
+              record.observedAt = new Date().toISOString();
               record.timings.push({ ...timing, driverObservedMs: performance.now() - started });
               record.resources.push({ before, after: await readWebResources(context, page) });
               if (sample === 0 && capture === 1)
@@ -184,16 +202,17 @@ export async function captureRoutes({
               break;
             }
           } finally {
+            await finishTrace?.();
             await context.close();
           }
         }
         console.log(
           `${record.name} capture=${capture} samples=${record.samples.length}${record.reason ? ` ${record.reason}` : ''}`,
         );
-        await writeFile(
-          resolve(out, 'route-captures.json'),
-          JSON.stringify(captures, null, 2) + '\n',
-        );
+        await writeFile(resolve(out, `route-record-${routes.findIndex(r => r.path === path)}-${variant}-${capture}.json`), JSON.stringify(record));
+        const checkpoint=resolve(out, 'route-captures.json');
+        await writeFile(`${checkpoint}.tmp`, JSON.stringify(captures, null, 2) + '\n');
+        await rename(`${checkpoint}.tmp`, checkpoint);
       }
     }
   }
