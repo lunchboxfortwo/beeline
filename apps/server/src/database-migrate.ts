@@ -1,3 +1,4 @@
+import { IMPLEMENTER_BLOCKS_SCHEMA } from './implementer-blocks.js';
 import { needsYouMarksSchema } from './needs-you-marks.js';
 import { backfillThreadImplementers } from './corner-lifecycle.js';
 import { cleanupConnectHandles } from './migrations/connect-handle-cleanup.js';
@@ -551,6 +552,7 @@ export async function migrate(
     `CREATE INDEX CONCURRENTLY agent_commands_review_repair_parent_v2_idx ON agent_commands(parent_command_id)
      WHERE reason IN ('order','message','reply') AND parent_command_id IS NOT NULL`,
   ));
+  await ddlScript('implementer block columns', 'ALTER TABLE messages ADD COLUMN IF NOT EXISTS ask_closed_reason text;'+IMPLEMENTER_BLOCKS_SCHEMA);
   await ddlScript('corner explicit wait function', cornerWaitingFunctionSql());
   // The idle function is built from the corner idle query. Import it after this
   // module has finished loading the command schema.

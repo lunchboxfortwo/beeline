@@ -46,6 +46,7 @@ export const PHONE_OPERATION_NAMES = new Set<keyof PhoneOperationMap>([
       'attachToWorkItem',
       'updateWorkItem',
   'countNeedsYou',
+  'closeAgentAsk',
   'clearNeedsYou',
   'clearNeedsYouSection',
   'listRoomSchedules',

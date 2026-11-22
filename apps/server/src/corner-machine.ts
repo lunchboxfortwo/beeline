@@ -62,6 +62,8 @@ export type CornerMachineFacts = {
   locked?: boolean;
   /** Running worker receipts; reviewer work has its own input. */
   turnRunning: boolean;
+  /** A durable implementer block stays visible until explicitly closed. */
+  implementerBlocked?: boolean;
   reviewerActive?: boolean;
   /** Another agent's running turn; it shows working only where the thread would otherwise be idle. */
   peerActive?: boolean;
@@ -183,7 +185,7 @@ export function transitionCorner(
       'merge-refused',
       `refused:${event.headSha}:${event.reason}:${event.confirmedUnmerged ? f.checkSourceId : ''}`,
     );
-  // Explicit waits remain visible during CI, but a running worker owns Working.
+  // Explicit blocks remain visible until closure; native waits yield to running work.
   // Red and green facts retain their existing admission through the wait.
   const review = f.reviewEnded;
   const exhausted = (review?.emptyCount ?? 0) >= 1;
@@ -237,7 +239,7 @@ export function transitionCorner(
   let state: CornerMachine;
   if (
     f.blocker &&
-    !f.turnRunning &&
+    (!f.turnRunning || f.implementerBlocked) &&
     (f.blocker.blocker?.kind !== 'merge-hold' ||
       (!f.turnRunning && !f.reviewerActive && !checksUnderway && !wakes.some((w) => w.kind === 'review')))
   ) {

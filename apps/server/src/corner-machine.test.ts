@@ -51,6 +51,7 @@ describe('corner transition table', () => {
     ['findings without an implementer cannot hand back', { ...green, implementerAvailable: false, reviewRequests: 1, reviewEnded: { id: 'review', findings: 'FAIL: missing test' } }, observe, 'idle', undefined],
     ['no reviewer needs no approval', { ...green, reviewerConfigured: false, reviewerRequired: false }, observe, 'idle', undefined],
     ['green without reviewer lands', { ...green, reviewerConfigured: false, reviewerRequired: false }, { kind: 'checks', result: 'passing' }, 'idle', 'land'],
+    ['an open implementer block does not gate landing', { ...green, approved: true, turnRunning:true, implementerBlocked:true, blocker:{reason:'question',itemId:'block'} }, {kind:'approval',headSha:head,by:'reviewer'}, 'waiting', 'land'],
     ['green event continues landing', { ...green, approved: true }, { kind: 'checks', result: 'passing' }, 'idle', 'land'],
     ['reconcile never initiates landing', { ...green, approved: true }, observe, 'idle', undefined],
     ['approval lands while reviewer is active', { ...green, approved: true, reviewerActive: true }, { kind: 'approval', headSha: head, by: 'reviewer' }, 'review', 'land'],

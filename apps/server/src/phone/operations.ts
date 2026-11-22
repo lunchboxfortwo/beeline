@@ -1,3 +1,4 @@
+import { closeAgentAsk } from '../agent-open-asks.js';
 import { requestPersonalGitHubCatalog } from '../github-account-catalog.js';
 import { addWorkNote, attachToWorkItem } from '../work-item-detail.js';
 import { readWorkBoard, updateWorkItem } from '../work-board.js';
@@ -190,6 +191,8 @@ import { phoneReadConnectionDetail, phoneRevokeConnectionGrants } from './connec
           input as Input<'countNeedsYou'>,
           viewerId,
         )) as Output<Name>;
+      case 'closeAgentAsk':
+        return await closeAgentAsk(ctx.database,viewerId,input as Input<'closeAgentAsk'>) as Output<Name>;
       case 'clearNeedsYou':
         await phoneClearNeedsYou(ctx, input as Input<'clearNeedsYou'>, viewerId);
         return undefined as Output<Name>;

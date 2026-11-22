@@ -1,3 +1,4 @@
+import { closeAgentAsk } from './agent-open-asks.js';
 import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { advanceCorner } from './corner-lifecycle.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
@@ -513,7 +514,7 @@ it('Reproduction R1: a worker order waiting on an offline helper stays working',
   expect(await state()).toBe('idle');
 });
 
-it('WORKER-BLOCK: the addressee’s threaded answer clears a report in its return Room', async () => {
+it('WORKER-BLOCK: the addressee’s threaded answer retains the block until explicit closure', async () => {
   await db.query(`UPDATE agent_commands SET private_payload=jsonb_set(private_payload,'{authorId}',to_jsonb($1::text)) WHERE room_id=$2 AND reason='corner_objective'`,[HUMAN,C]);
   const command = (await wake())!;
   await startQueuedCommand(daemon, { roomId: C, commandId: command.id }, WORKER);
@@ -522,7 +523,9 @@ it('WORKER-BLOCK: the addressee’s threaded answer clears a report in its retur
   expect(await cornerReportWaiting(db, C)).toBe(true);
   await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,reply_to_message_id)
     VALUES('human-report-answer',$1,$2,'Narrow scope','message',$3)`,[ROOM,HUMAN,report.id]);
-  expect(await cornerReportWaiting(db, C)).toBe(false);
+  expect(await cornerReportWaiting(db, C)).toBe(true);
+  await closeAgentAsk(db,WORKER,{messageId:report.id,reason:'answered'});
+  expect(await cornerReportWaiting(db,C)).toBe(false);
   expect(await state()).toBe('idle');
 });
 

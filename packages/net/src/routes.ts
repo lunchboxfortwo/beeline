@@ -28,6 +28,7 @@ const phoneOperations = {
   clearMessageBookmarks: true,
   clearNeedsYou: true,
   clearNeedsYouSection: true,
+  closeAgentAsk: true,
   closeChat: true,
   completeAgentSignIn: true,
   completeAppSignIn: true,

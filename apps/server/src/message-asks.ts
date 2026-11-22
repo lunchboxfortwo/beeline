@@ -18,6 +18,7 @@ export function messageAsksSql(corner:string):string {
       item.agent_id recipient
     FROM agent_commands item
     WHERE item.private_payload->'messageAsk' IS NOT NULL
+      AND NOT EXISTS(SELECT 1 FROM messages block WHERE block.id=item.id AND block.block_corner_id IS NOT NULL)
       AND item.private_payload->'route'->'from'->>'place'=${corner}.id::text
       AND NOT EXISTS(SELECT 1 FROM agent_commands answer
         WHERE answer.private_payload->>'inReplyTo'=item.id
@@ -28,6 +29,6 @@ export function messageAsksSql(corner:string):string {
     FROM messages message JOIN work_questions question ON question.message_id=message.id
     JOIN room_choices choice ON choice.message_id=message.id
     WHERE message.card->'route'->'from'->>'place'=${corner}.id::text
-      AND choice.status='open' AND message.deleted_at IS NULL
+      AND choice.status='open' AND message.deleted_at IS NULL AND message.block_corner_id IS NULL
   ) question WHERE asking_fact.corner_id=${corner}.id`;
 }

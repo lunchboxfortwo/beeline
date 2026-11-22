@@ -48,12 +48,12 @@ describe('C4: external agents route like native agents', () => {
       await settle();
       await scope.daemon.execute('reply', { id: sent.id, text: 'Done' }, worker);
       await scope.daemon.execute('reply', { id: sent.id, text: 'blocked: need a choice', ask }, worker);
-      // A System wake answers in the thread without notifying the commander.
+      // A block after a System wake still reaches the implementer’s commander.
       if (role === 'implementer') await scope.daemon.execute('reply', { id: (await wake(worker)).id, text: 'blocked: build access', ask }, worker);
       const wakes = (await tools.ok(client, 'list_mentions', {})).wakes as { address: string; from: unknown }[];
       expect(wakes.map(item => [item.address, item.from])).toEqual(
-        Array(2).fill([place, { agent: worker, place: THREAD }]));
-      expect((await pending(member)).map(row => Boolean(row.ask))).toEqual([false, true]);
+        Array(role === 'implementer' ? 3 : 2).fill([place, { agent: worker, place: THREAD }]));
+      expect((await pending(member)).map(row => Boolean(row.ask))).toEqual(role === 'implementer' ? [false, true, true] : [false, true]);
     });
 
   it.each(Object.entries(places))('an external thread implementer replies over MCP to a native commander in the %s, including after a System wake', async (_place, place) => {
@@ -68,6 +68,7 @@ describe('C4: external agents route like native agents', () => {
     await tools.ok(client, 'reply', { id: system.id, text: 'blocked: build access', ask });
     expect((await pending(AGENT)).map(row => [row.room_id, row.from, Boolean(row.ask)])).toEqual([
       [place, { agent: member, place: THREAD }, false],
+      [place, { agent: member, place: THREAD }, true],
     ]);
     // Condition 3 for an external worker: none of its work was queued outside the thread.
     expect((await db().query("SELECT room_id FROM agent_commands WHERE agent_id=$1 AND room_id<>$2 AND reason<>'mcp_call'", [member, THREAD])).rows).toEqual([]);
@@ -88,7 +89,7 @@ describe('C4: external agents route like native agents', () => {
     await session('reply', { id: sent.id, text: 'Done' });
     await session('reply', { id: (await wake(member)).id, text: 'blocked: build access' });
     const asked = await session('message', { address: THREAD, to: { agent: 'reviewer', place: THREAD }, text: 'Please review', ask });
-    expect((await pending(AGENT)).map(row => row.room_id)).toEqual([ROOM]);
+    expect((await pending(AGENT)).map(row => row.room_id)).toEqual([ROOM,ROOM]);
     await scope.daemon.execute('reply', { id: asked.id, text: 'Approved' }, REVIEWER);
     expect((await session('list_mentions', {})).wakes.map((item: { address: string; from: unknown }) => [item.address, item.from]))
       .toEqual([[THREAD, { agent: REVIEWER, place: THREAD }]]);
