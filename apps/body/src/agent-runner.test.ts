@@ -332,6 +332,38 @@ it.each(['end_turn', 'cancelled'])('closes only background items in an empty rec
   expect(harness.deliver).toHaveBeenCalledTimes(2);
 });
 
+it('a schedule queued behind a running one keeps its own request', async () => {
+  const f = await fixture();
+  const health = { ...f.item('codebase-health'), reason: 'schedule', scheduleId: 'code-health' };
+  const ci = { ...f.item('ci-loop'), reason: 'schedule', scheduleId: 'ci-loop' };
+  const tag = f.item('tag-after-ci');
+  const running = deferred<Record<string, unknown>>();
+  harness.deliver.mockReturnValueOnce(running.promise);
+  f.changed([health]);
+  await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(1));
+  f.changed([health, ci, tag]);
+  running.resolve({ text: 'health done', steps: [], toolCalls: [], cleanup: async () => {} });
+  await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(2));
+  expect(harness.deliver.mock.calls[1]).toEqual([ci, [ci, tag]]);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({
+    requestId: ci.id, queuedRequestIds: [tag.id], text: 'answer' })));
+  expect(f.execute).toHaveBeenCalledWith('startAgentTurn', expect.objectContaining({ requestId: ci.turnRequestId }));
+});
+
+it('Reproduction R5: two different pending schedules in one chat never share a turn', async () => {
+  // Jellybean, 21 and 22 Nov: the 08:30Z codebase-health run was still queued
+  // in the chat when the 09:15Z CI loop fired. Both ran as one turn under the
+  // health request, so the CI thread opened in that turn got the health
+  // instructions as its task, with the CI brief beside them.
+  const f = await fixture();
+  const health = { ...f.item('health-pending'), reason: 'schedule', scheduleId: 'code-health' };
+  const ci = { ...f.item('ci-pending'), reason: 'schedule', scheduleId: 'ci-loop' };
+  const personal = { ...f.item('person-made'), reason: 'schedule' };
+  f.changed([health, ci, personal]);
+  await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(3));
+  expect(harness.deliver.mock.calls).toEqual([[health, [health]], [ci, [ci]], [personal, [personal]]]);
+});
+
 it('keeps the genuine answer durable when optional cleanup fails', async () => {
   const saved=vi.spyOn(AnswerStore.prototype,'save');
   const cleanup=vi.fn(async()=>{

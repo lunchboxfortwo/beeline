@@ -33,6 +33,26 @@ interface Place {
 }
 
 /**
+ * The items one prompt answers: the head and the waiting input after it, up
+ * to a restart. A turn holds runs of at most one schedule. Tools act for the
+ * head's request, so a second schedule batched behind another would open its
+ * threads and replies under the first schedule's request and instructions.
+ */
+function turnBatch(item: AgentCommand, waiting: readonly AgentCommand[]): AgentCommand[] {
+  const batch = [item];
+  let schedule = item.reason === 'schedule' ? item : undefined;
+  for (const next of waiting) {
+    if (next.action === 'restart') break;
+    if (next.reason === 'schedule') {
+      if (schedule && (!schedule.scheduleId || schedule.scheduleId !== next.scheduleId)) break;
+      schedule = next;
+    }
+    batch.push(next);
+  }
+  return batch;
+}
+
+/**
  * One agent's runner. The server keeps the agent's queue; this hands each
  * undone item to the live session for its place, stores the answer, posts it
  * to the item's return address and forgets it once the server has it. Rooms,
@@ -210,8 +230,7 @@ export class AgentRunner {
     // Input arriving during a prompt belongs to the next prompt. Steering
     // acceptance does not prove the running answer covered that new request.
     // Controls form a boundary: a restart never becomes harness input or consumes later work.
-    const restartIndex = place.waiting.findIndex(next => next.action === 'restart');
-    const batch = item.action === 'restart' ? [item] : [item, ...place.waiting.slice(0, restartIndex < 0 ? undefined : restartIndex)];
+    const batch = item.action === 'restart' ? [item] : turnBatch(item, place.waiting);
     const batched = new Set(batch.map(next => next.id));
     let started = false;
     const invocation = {id:randomUUID(),requestId:item.turnRequestId};
