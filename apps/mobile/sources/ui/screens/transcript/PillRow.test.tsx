@@ -100,6 +100,28 @@ describe('PillRow', () => {
         expect(pill.props['aria-label']).toBe('Read 5 messages between Ruby, A, B, C, D and E, 10:00');
     });
 
+    it('leads a mixed run with the ringed Beeline logo and the person who stopped a turn', () => {
+        let tree: any;
+        const beeline = { kind: 'system', name: 'Beeline' } as const;
+        const owner = { kind: 'human', seed: 'owner', name: 'owner' } as const;
+        const claude = { kind: 'agent', seed: 'claude', name: 'Claude' } as const;
+        const mixed: PillItem = { id: 'mix', system: false, from: ruby, to: claude, time: '10:02', body: null, run: [
+            { id: 'x1', from: ruby, to: claude, time: '10:00', body: null },
+            { id: 'x2', system: true, from: beeline, to: ruby, time: '10:01', body: null },
+            { id: 'x3', system: true, stop: true, from: owner, to: claude, time: '10:02', body: null },
+        ] };
+        act(() => { tree = create(<PillRow items={[mixed]} />); });
+        const pill = tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'run-pill');
+        expect(pill.findAll((node: any) => node.type === 'YStack' && node.props.testID === 'pill-system-face')).toHaveLength(1);
+        expect(pill.findAll((node: any) => node.type === 'IdentityMark' && node.props.size === 22).map((face: any) => face.props.seed))
+            .toEqual(['owner', 'ruby']);
+        expect(text(pill)).toEqual(['3 messages']);
+        expect(pill.props['aria-label']).toBe('Read 3 messages between Ruby, Claude and owner, 2 from Beeline, 10:02');
+        act(() => pill.props.onPress());
+        expect(tree.root.findAll((node: any) => node.type === 'YStack' && node.props.testID?.startsWith?.('pill-run-entry-')).map((node: any) => node.props.testID))
+            .toEqual(['pill-run-entry-x1', 'pill-run-entry-x2', 'pill-run-entry-x3']);
+    });
+
     it('opens every run message in send order under a face → face heading, and folds again', () => {
         let tree: any;
         act(() => { tree = create(<PillRow items={[runItem]} />); });

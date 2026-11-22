@@ -27,6 +27,8 @@ export type PillRunEntry = {
     time: string;
     /** A stop: drawn face, stop glyph, face, with no text. */
     stop?: boolean;
+    /** A system message: it puts the ringed Beeline logo on the folded pill. */
+    system?: boolean;
     body?: React.ReactNode;
 };
 
@@ -37,7 +39,7 @@ export type PillItem = {
     time: string;
     /** A stop of an agent's turn: face, stop glyph, face, with no text. */
     stop?: boolean;
-    /** Consecutive agent-to-agent messages, or consecutive system notices, folded into one pill: faces and a count. */
+    /** Consecutive pill messages (agent-to-agent, stops, system notices) folded into one pill: faces and a count. */
     run?: readonly PillRunEntry[];
     /** A system fact's text: the folded pill's accessibility label; it shows only once opened. */
     summary?: string;
@@ -91,15 +93,21 @@ function runFaces(run: readonly PillRunEntry[]): PillFace[] {
 
 const BEELINE_FACE: PillFace = { kind: 'system', name: 'Beeline' };
 
+/** A Beeline notice, a person's stop included; an agent's stop reads as part of the agents' talk. */
+export function isNotice(entry: PillRunEntry): boolean {
+    return Boolean(entry.system) && !(entry.stop && entry.from.kind === 'agent');
+}
+
 /**
- * The faces a folded run shows, at most `RUN_FACES`. A system stack always
- * leads with the ringed Beeline logo, then whoever stopped a turn, then the
- * other subjects, so a person's stop stays visible while folded.
+ * The faces a folded run shows, at most `RUN_FACES`. A run that holds a Beeline
+ * notice leads with the ringed Beeline logo, then whoever stopped a turn, then
+ * everyone else, so a person's stop stays visible while folded.
  */
 function foldedFaces(item: PillItem): PillFace[] {
     const run = item.run ?? [];
-    if (!item.system) return runFaces(run).slice(0, RUN_FACES);
-    const stoppers = run.filter((entry) => entry.stop).map((entry) => entry.from);
+    const notice = (entry: PillRunEntry) => item.system || isNotice(entry);
+    if (!run.some(notice)) return runFaces(run).slice(0, RUN_FACES);
+    const stoppers = run.filter((entry) => entry.stop && notice(entry)).map((entry) => entry.from);
     const seen = new Set<string>();
     const ordered = [BEELINE_FACE, ...stoppers, ...runFaces(run)].filter((face) => {
         const key = faceKey(face);
@@ -121,7 +129,11 @@ function pillLabel(item: PillItem, expanded: boolean): string {
         const about = runFaces(item.run).filter((face) => face.kind !== 'system');
         return `${verb} ${item.run.length} system messages${about.length ? ` about ${names(about)}` : ''}, ${item.time}`;
     }
-    if (item.run) return `${verb} ${item.run.length} messages between ${names(runFaces(item.run))}, ${item.time}`;
+    if (item.run) {
+        const between = names(runFaces(item.run).filter((face) => face.kind !== 'system'));
+        const notices = item.run.filter(isNotice).length;
+        return `${verb} ${item.run.length} messages between ${between}${notices ? `, ${notices} from Beeline` : ''}, ${item.time}`;
+    }
     if (item.stop) return `${item.from.name} stopped ${item.to?.name ?? ''}`;
     if (item.system && item.summary) return `${verb} ${item.summary}, ${item.time}`;
     return `${verb} message from ${heading(item)}, ${item.time}`;

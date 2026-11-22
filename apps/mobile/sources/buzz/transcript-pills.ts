@@ -93,14 +93,3 @@ export function stopNotice(message: Pick<ChatDisplayMessage, 'systemEvent'>):
     stopped: { id: event.object.id, name: event.object.text },
   };
 }
-
-/**
- * One step of an agent run: a message() from one agent to another, or one
- * agent stopping another. A person's stop, any other system line and a message
- * to a person all end the run.
- */
-export function isAgentRunStep(message: PillFields & Pick<ChatDisplayMessage, 'systemEvent'>): boolean {
-  if (!isPillMessage(message) || message.notificationLifecycleRun) return false;
-  if (message.agentCommand) return message.agentCommand.recipient.kind === 'agent';
-  return stopNotice(message)?.stopper.kind === 'agent';
-}

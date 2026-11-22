@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatDisplayMessage } from './room-view-presentation';
 import { SYSTEM_IDENTITY_PUBKEY } from './system-identity';
-import { foldPillRuns, isAgentRunStep, isPillMessage, stopNotice } from './transcript-pills';
+import { foldPillRuns, isPillMessage, stopNotice } from './transcript-pills';
 import { ledgerSpeakerKey } from './ledger-attribution';
 import { transcriptBylineOpeners } from './message-dates';
 
@@ -86,22 +86,9 @@ describe('transcript pills', () => {
   const stop = (id: string, kind: 'person' | 'agent') => row(id, { isSystemNotice: true, pubkey: 'x',
     systemEvent: { kind: 'turn-cancelled', subject: { kind, id: 'x', name: 'X' }, verb: 'stopped',
       object: { text: 'Jimmy', id: 'jimmy' }, consequence: 'turn cancelled' } });
-  const toAgent = (id: string) => row(id, { pubkey: 'alan',
-    agentCommand: { kind: 'message', recipient: { id: 'jimmy', name: 'Jimmy', kind: 'agent' }, text: 'Go' } });
-
   it('reads who stopped whom from a turn-cancelled line', () => {
     expect(stopNotice(stop('s', 'person'))).toEqual({
       stopper: { id: 'x', name: 'X', kind: 'human' }, stopped: { id: 'jimmy', name: 'Jimmy' } });
     expect(stopNotice(system('joined'))).toBeUndefined();
-  });
-
-  it('keeps agent messages and agent stops in a run; a person stop, other system lines and person messages end it', () => {
-    expect(isAgentRunStep(toAgent('a'))).toBe(true);
-    expect(isAgentRunStep(stop('agent-stop', 'agent'))).toBe(true);
-    expect(isAgentRunStep(stop('person-stop', 'person'))).toBe(false);
-    expect(isAgentRunStep(system('joined'))).toBe(false);
-    expect(isAgentRunStep(row('person', { pubkey: 'dan' }))).toBe(false);
-    expect(isAgentRunStep(row('report', { pubkey: 'alan',
-      agentCommand: { kind: 'report', recipient: { id: 'p', name: 'P', kind: 'human' }, text: 'Pick one' } }))).toBe(false);
   });
 });

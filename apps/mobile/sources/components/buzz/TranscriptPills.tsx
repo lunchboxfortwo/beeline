@@ -3,8 +3,8 @@ import { TypedView } from '@/ui/grammar';
 import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { ledgerStamp } from '@/buzz/relative-time';
 import { SYSTEM_IDENTITY_PUBKEY } from '@/buzz/system-identity';
-import { isAgentRunStep, stopNotice } from '@/buzz/transcript-pills';
-import { PillRow, type PillFace, type PillItem } from '@/ui/screens/transcript/PillRow';
+import { stopNotice } from '@/buzz/transcript-pills';
+import { isNotice, PillRow, type PillFace, type PillItem } from '@/ui/screens/transcript/PillRow';
 import { LedgerEntryFrame, LedgerSystemLine } from './Ledger';
 import { MonoMarkdown } from './MonoMarkdown';
 import { NotificationLifecycleCard } from './PrLifecycleCard';
@@ -81,36 +81,15 @@ function pillItem(message: ChatDisplayMessage, resolve: PillIdentityResolver, ha
 }
 
 /**
- * Consecutive agent run steps (agent-to-agent messages and agent stops) fold
- * into one pill that opens as a list in send order. Consecutive system notices
- * (person stops included) fold the same way. A lone step or notice keeps its own pill.
+ * Consecutive pill messages (agent-to-agent messages, stops and system
+ * notices) fold into one pill that opens as a list in send order. A lone
+ * message keeps its own pill. Anything else in the transcript ends the stretch.
  */
 export function pillItems(run: readonly ChatDisplayMessage[], resolve: PillIdentityResolver, handlers: PillHandlers): PillItem[] {
-  const items: PillItem[] = [];
-  let steps: ChatDisplayMessage[] = [];
-  let notices: PillItem[] = [];
-  const fold = (entries: readonly PillItem[], system: boolean) => {
-    if (entries.length > 1) {
-      items.push({ id: entries[0]!.id, system, from: entries[0]!.from, to: entries[0]!.to,
-        time: entries.at(-1)!.time, run: entries, body: null });
-    } else items.push(...entries);
-  };
-  const flushSteps = () => {
-    fold(steps.map((message) => pillItem(message, resolve, handlers)), false);
-    steps = [];
-  };
-  const flushNotices = () => { fold(notices, true); notices = []; };
-  for (const message of run) {
-    if (isAgentRunStep(message)) { flushNotices(); steps.push(message); continue; }
-    flushSteps();
-    const item = pillItem(message, resolve, handlers);
-    if (item.system) { notices.push(item); continue; }
-    flushNotices();
-    items.push(item);
-  }
-  flushSteps();
-  flushNotices();
-  return items;
+  const entries = run.map((message) => pillItem(message, resolve, handlers));
+  if (entries.length < 2) return entries;
+  return [{ id: entries[0]!.id, system: entries.every(isNotice), from: entries[0]!.from, to: entries[0]!.to,
+    time: entries.at(-1)!.time, run: entries, body: null }];
 }
 
 /** One transcript row of pills: system lines, lone agent messages, stops and folded agent runs. */
