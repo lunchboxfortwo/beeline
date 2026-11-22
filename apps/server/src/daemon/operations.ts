@@ -45,7 +45,7 @@ import { daemonIdentitySuccession, daemonConfiguration, daemonPresence } from '.
 import { daemonCompletion, daemonPostAgentAttachment, daemonLiveOutput, daemonRetract } from './messages.js';
 import { daemonTurnReceipt, daemonActivity } from './turn-receipts.js';
 import { daemonSquireApproval, daemonSquireLoginWall, daemonSquireApprovalDecision, daemonPermissionRequest, daemonPermissionExecution } from './approvals.js';
-import { daemonPostMandate, daemonAgentAvatar, daemonCommands, daemonModelCatalog, daemonMachineReport } from './models.js';
+import { daemonPostMandate, daemonAgentAvatar, daemonCommands, daemonModelCatalog, daemonRunningModel, daemonMachineReport } from './models.js';
 import { daemonConnectorAssignments, daemonConnectorInstall, daemonConnectorStatusReport, daemonConnectorVaultReport, daemonConnectorStatusView, daemonConnectorVaultList, daemonConnectionDetail, daemonConnectionGrantRevoke, daemonConnectionUsage } from './connectors.js';
 import { daemonAuthorizeResource, daemonConnectMcpServer, daemonOfferConnector } from './connector-offers.js';
 import { daemonAgentWorkbench, daemonSearchMcpRegistry } from './workbench.js';
@@ -569,6 +569,11 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
       case 'postAgentModelCatalog':
         return (await daemonModelCatalog(ctx,
           input as Input<'postAgentModelCatalog'>,
+          authenticatedAgentId,
+        )) as Output<Name>;
+      case 'postAgentRunningModel':
+        return (await daemonRunningModel(ctx,
+          input as Input<'postAgentRunningModel'>,
           authenticatedAgentId,
         )) as Output<Name>;
       case 'postAgentMachineReport':

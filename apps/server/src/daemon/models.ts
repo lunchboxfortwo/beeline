@@ -88,6 +88,18 @@ import { daemonWriteResult } from './corner-messages.js';
     });
   }
 
+  /** One live session's report of the model it runs; the latest report wins. */
+  export async function daemonRunningModel(ctx: DaemonContext, input: Input<'postAgentRunningModel'>, agentId: string) {
+    const text = (value: unknown, max: number) =>
+      typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : null;
+    await ctx.database.query(
+      `UPDATE agents SET running_model=$2,running_model_selected=$3,running_model_reason=$4,updated_at=now()
+       WHERE agent_id=$1`,
+      [agentId, text(input.model, 200), text(input.selected, 200), text(input.reason, 500)],
+    );
+    return daemonWriteResult(ctx);
+  }
+
   export async function daemonMachineReport(ctx: DaemonContext, input: Input<'postAgentMachineReport'>, agentId: string) {
     await ctx.database.query(
       `UPDATE agents SET machine_id=$2,machine_name=$3,updated_at=now(),

@@ -43,12 +43,7 @@ import { harnessEnforcement, roomShellCapability } from './harness-capabilities.
 import { postChangedAgentUsage } from './helper-usage-binding.js';
 import { grantedHostRouteWires, grantedSquireHostRouteNames } from './host-mcp-route.js';
 import { CODE_OWNED_HOST_MCP_NAMES } from './mcp-route-class.js';
-import {
-  agentArgsWithModelSelection,
-  applyAgentModelSelectionWithUpdatedCatalog,
-  filterAllowedModelConfigOptions,
-  parseAdvertisedConfigOptions,
-} from './model-config.js';
+import { agentArgsWithModelSelection } from './model-config.js';
 import { agentOpenRouterKey } from './openrouter-key-usage.js';
 import { openRouterRoutingInput } from './openrouter-routing.js';
 import { OwnedModelFiles } from './owned-model-files.js';
@@ -64,6 +59,7 @@ import { roomReplySteps } from './room-turn-steps.js';
 import type { AgentRuntimeRecord } from './runtime.js';
 import { runtimeDirectory } from './runtime.js';
 import { SessionResources } from './session-resources.js';
+import { RunningModelReporter, reconcileStartupModel, switchLiveModel, type RunningModelReport } from './session-running-model.js';
 import { SquireTaskRelay } from './squire-task-relay.js';
 import { CLIPROXY_SIGNED_OUT } from './turn-failure-reason.js';
 import { AgentTurnStream, durableReplyText } from './turn-stream.js';
@@ -117,6 +113,8 @@ export class PlaceSession {
   sessionId?: string;
   /** Configuration changed; start fresh before the next item. */
   stale = false;
+  /** The model selection this session started with, to spot a newer one. */
+  private activeSelection?: string;
   private notes: string[] = [];
   /** This session has received the bounded recent window. */
   private windowDelivered = false;
@@ -133,6 +131,7 @@ export class PlaceSession {
   private stopping = false;
   private model?: OwnedModelFiles;
   readonly resources: SessionResources;
+  private readonly running: RunningModelReporter;
   readonly contextPath: string;
 
   constructor(readonly options: PlaceSessionOptions) {
@@ -160,7 +159,9 @@ export class PlaceSession {
           ...(options.parentRoomId ? { parentRoomId: options.parentRoomId } : {}),
         }),
       squireMcp: (input) => this.requestSquire(input),
+      onConfiguration: (configuration) => this.selectionRead(configuration),
     });
+    this.running = new RunningModelReporter(options.api, options.agent.publicKey);
     this.warm = new WarmTranscript({ path: resolve(root, 'agent-home', 'warm-transcript.json') });
     const api = options.api;
     const roomId = options.placeId;
@@ -238,6 +239,74 @@ export class PlaceSession {
     };
   }
 
+  /**
+   * The owner changed this agent's configuration: read it now, and start the
+   * next item fresh. Nothing waits for the read; `selectionRead` switches a
+   * session that started before it landed.
+   */
+  configurationChanged(): void {
+    this.stale = true;
+    this.resources.refreshConfiguration();
+  }
+
+  /**
+   * A fresh read names the owner's current selection. A live session that
+   * started with an older one (a cached read, or one racing a change) switches
+   * its model at once, the same unawaited way startup reconciles, so the next
+   * turn runs the new choice without holding delivery.
+   */
+  private selectionRead(configuration: SessionResources['context']['configuration']): void {
+    const selection = this.selectionFrom(configuration);
+    const next = JSON.stringify(selection);
+    if (this.activeSelection === undefined || this.activeSelection === next) return;
+    const { client, sessionId } = this;
+    if (!client || !sessionId || !this.alive) {
+      this.stale = true;
+      return;
+    }
+    this.activeSelection = next;
+    console.log(`[body] place ${this.options.placeId}: model selection changed; switching the live session`);
+    switchLiveModel({
+      client, sessionId, selection, catalog: this.resources.context.modelCatalog ?? [],
+      applied: (options) => { if (this.client === client) this.resources.rememberModelCatalog(options); },
+      report: (report) => this.reportRunningModel(client, report),
+    });
+  }
+
+  /**
+   * The queue item carries the owner's choice as the server read it with the
+   * item. It outranks any configuration read, and a live session that runs
+   * another choice starts fresh before answering, so no turn waits for a read.
+   */
+  private queuedSelection(item: AgentCommand): void {
+    if (!item.modelSelection) return;
+    this.queued = item.modelSelection;
+    if (this.activeSelection !== undefined && this.activeSelection !== JSON.stringify(this.selectionFrom(undefined)))
+      this.stale = true;
+  }
+
+  private queued?: AgentCommand['modelSelection'];
+
+  private selectionFrom(configuration: SessionResources['context']['configuration']) {
+    const { config } = this.options;
+    const owner = this.queued ?? configuration;
+    return {
+      model: owner?.model ?? config.modelSelection?.model,
+      effort: owner?.effort ?? config.modelSelection?.effort,
+      fastMode: owner?.fastMode,
+    };
+  }
+
+  /** The harness has answered the model setter, applied or refused. */
+  private modelSwitch(switching: Promise<void>): Promise<void> {
+    return switching;
+  }
+
+  /** Only the current session's reports reach the server. */
+  private reportRunningModel(client: AcpClient, report: RunningModelReport): void {
+    if (this.client === client) this.running.report(report);
+  }
+
   get alive(): boolean {
     return this.client?.isAlive === true && Boolean(this.sessionId);
   }
@@ -303,6 +372,7 @@ export class PlaceSession {
     if (item) {
       this.model = await this.hostedModel(item);
       await this.writeContext(item, [], this.model?.paths().directory);
+      this.queuedSelection(item);
     }
     if (!this.alive || this.stale) await this.startFresh();
     await this.prepareGitHubLaunchers();
@@ -311,6 +381,7 @@ export class PlaceSession {
   private async startFresh(): Promise<void> {
     await this.stop();
     this.stale = false;
+    this.running.reset();
     this.notes = [
       'Trusty Squire uses app_tool(app:"registry-mcp:squire"); discover operate_drive and use_credential there. A direct squire MCP startup failure does not establish that this route is unavailable.',
     ];
@@ -345,11 +416,8 @@ export class PlaceSession {
     const { configuration, roster, repository, restore } = this.resources.context;
     this.names = new Map((roster?.members ?? []).map((member) => [member.identityId, member.name]));
     const self = roster?.members.find((member) => member.identityId === agent.publicKey);
-    const selection = {
-      model: configuration?.model ?? config.modelSelection?.model,
-      effort: configuration?.effort ?? config.modelSelection?.effort,
-      fastMode: configuration?.fastMode,
-    };
+    const selection = this.selectionFrom(configuration);
+    this.activeSelection = JSON.stringify(selection);
     const operatorHome = config.operatorHome ?? homedir();
     const homeOverlay = config.agentHomeRoot
       ? await prepareRoomAgentCredentials({
@@ -622,58 +690,17 @@ export class PlaceSession {
     });
     this.warm.rememberSession(opened.sessionId, fingerprint);
     this.sessionId = opened.sessionId;
-    const catalog = filterAllowedModelConfigOptions(parseAdvertisedConfigOptions(opened.raw));
-    this.resources.rememberModelCatalog(catalog);
-    const advertisedDefault = catalog.find((option) => option.category === 'model')?.currentValue;
-    const runningModel = advertisedDefault ?? 'the agent default';
-    const available = catalog.some(
-      (option) =>
-        option.category === 'model' && option.options.some((value) => value.id === selection.model),
-    );
-    const reconcilingModel = Boolean(
-      selection.model && selection.model !== runningModel && available,
-    );
-    const sessionNotes = this.notes;
-    const configurationNote = `persona and reviewer skills use ${configuration ? 'cached configuration' : 'the agent default'}. Optional context and capability status: read(facet:session).`;
-    const effortAxis = catalog.find((option) =>
-      ['thought_level', 'effort', 'reasoning_effort'].includes(option.category),
-    );
-    const fastAxis = catalog.find((option) => option.id === 'fast-mode');
-    // Effort and Fast Mode apply on their own when the model already runs.
-    const axesDiffer =
-      Boolean(selection.effort && effortAxis && effortAxis.currentValue !== selection.effort) ||
-      Boolean(
-        selection.fastMode !== undefined &&
-        fastAxis &&
-        fastAxis.currentValue !== (selection.fastMode ? 'on' : 'off'),
-      );
-    const modelChange = Boolean(selection.model && selection.model !== runningModel);
-    if (modelChange || axesDiffer) {
-      if (!modelChange || available) {
-        // Send the setter before the first prompt, but never hold delivery on
-        // an optional harness request. The live catalog owns this verdict.
-        void applyAgentModelSelectionWithUpdatedCatalog(
-          client,
-          opened.sessionId,
-          catalog,
-          modelChange ? selection : { effort: selection.effort, fastMode: selection.fastMode },
-        )
-          .then((applied) => {
-            if (this.client === client) this.resources.rememberModelCatalog(applied.options);
-            const index = this.client === client ? sessionNotes.indexOf(configurationNote) : -1;
-            if (index !== -1 && applied.appliedSelection.model)
-              sessionNotes[index] =
-                `This session uses ${applied.appliedSelection.model}; ${configurationNote}`;
-          })
-          .catch((error) => console.warn('[body] model selection could not be applied:', error));
-      } else
-        this.notes.push(
-          `Selected model ${selection.model} is unavailable at startup; this session runs with ${runningModel}.`,
-        );
-    }
-    this.notes.push(
-      `${reconcilingModel ? '' : `This session uses ${runningModel}; `}${configurationNote}`,
-    );
+    // The owner asked that a commanded model switch simply take effect
+    // (22 Nov 2026): the first prompt after a model change follows the
+    // harness's answer to the setter.
+    const switching = reconcileStartupModel({
+      client, sessionId: opened.sessionId, raw: opened.raw, selection, notes: this.notes,
+      cached: Boolean(configuration), placeId,
+      current: () => this.client === client,
+      remember: (catalog) => this.resources.rememberModelCatalog(catalog),
+      report: (report) => this.reportRunningModel(client, report),
+    });
+    if (switching) await this.modelSwitch(switching);
     if (agentOpenRouterKey(config.agentKind, selection.model, config.agentEnv))
       console.log(`[body] place ${placeId} uses an OpenRouter key`);
   }
@@ -814,6 +841,7 @@ export class PlaceSession {
         liveSteps?.onToolCalls,
       );
       this.resources.refresh();
+      this.running.prompt();
       result = await answering;
       const reply = result.agentText.trim();
       if (CLIPROXY_SIGNED_OUT.exec(reply)?.[0] === reply) throw wall('signed-in', reply);

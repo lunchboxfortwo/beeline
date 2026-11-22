@@ -56,6 +56,8 @@ export class SessionResources {
       /** The `workspace` tool's checkout; returns its result text. */
       checkout?(): Promise<string>;
       squireMcp?(input: { tool?: unknown; args?: unknown }): Promise<unknown>;
+      /** A fresh configuration read landed. */
+      onConfiguration?(value: Context['configuration'] | undefined): void;
     },
   ) {
     // A cache miss or corrupt cache cannot delay the first message. Grants
@@ -90,12 +92,24 @@ export class SessionResources {
 
   refreshConfiguration(): void {
     const { api, agentId, placeId } = this.options;
-    this.load('configuration', () =>
-      api.execute('getAgentConfiguration', { agentId, roomId: placeId }),
+    const read = ++this.configurationReads;
+    this.load(
+      'configuration',
+      () => api.execute('getAgentConfiguration', { agentId, roomId: placeId }),
+      // Only the newest read speaks for the owner's current choice.
+      (value) => {
+        if (read === this.configurationReads) this.options.onConfiguration?.(value);
+      },
     );
   }
 
-  private load<K extends keyof Context>(key: K, read: () => Promise<Context[K]>): void {
+  private configurationReads = 0;
+
+  private load<K extends keyof Context>(
+    key: K,
+    read: () => Promise<Context[K]>,
+    loaded?: (value: Context[K]) => void,
+  ): void {
     this.status[key] = 'loading';
     void Promise.resolve()
       .then(read)
@@ -103,6 +117,7 @@ export class SessionResources {
         this.context[key] = value;
         this.status[key] = 'ready';
         this.persist();
+        loaded?.(value);
       })
       .catch((error) => {
         this.status[key] = error instanceof Error ? error.message : String(error);

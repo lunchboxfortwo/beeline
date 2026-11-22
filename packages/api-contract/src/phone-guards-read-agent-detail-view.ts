@@ -82,6 +82,7 @@ export function readAgentDetailView(value: unknown): AgentDetailView | null {
     ...field('runtimeSelection', readModelSelection(item.runtimeSelection)),
     ...field('selected', readModelSelection(item.selected)),
     ...field('modelUnavailable', oneOf(item.modelUnavailable, ['model', 'effort', 'selection'])),
+    ...field('modelMismatch', readModelMismatch(item.modelMismatch)),
     ...field('fastMode', typeof item.fastMode === 'boolean' ? item.fastMode : undefined),
     ...field('canLogin', typeof item.canLogin === 'boolean' ? item.canLogin : undefined),
     ...field('yolo', readAgentYolo(item.yolo)),
@@ -91,6 +92,17 @@ export function readAgentDetailView(value: unknown): AgentDetailView | null {
       'canManageGrants',
       typeof item.canManageGrants === 'boolean' ? item.canManageGrants : undefined,
     ),
+  };
+}
+
+
+function readModelMismatch(value: unknown): AgentDetailView['modelMismatch'] {
+  const item = record(value);
+  if (!item || !nonempty(item.selected)) return undefined;
+  return {
+    selected: item.selected,
+    ...field('running', nonempty(item.running) ? item.running : undefined),
+    ...field('reason', nonempty(item.reason) ? item.reason : undefined),
   };
 }
 

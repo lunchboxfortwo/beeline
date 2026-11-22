@@ -191,6 +191,10 @@ const SESSION_OPERATIONS = new Set(['this.repairCredentialLinks', 'this.startFre
   // Owner-requested pre-turn steps: a thread checkout picks up the feature
   // branch before its turn, and received pictures ride inline as before.
   'this.refreshFeatureBranch', 'deliverAttachments',
+  // Owner-approved (lunchboxfortwo, 22 Nov 2026, applied-model-truth thread,
+  // message b89f12c2): a commanded model switch takes effect before the first
+  // prompt it governs.
+  'this.modelSwitch',
   // Final history drains the protocol writes already emitted during the session.
   'liveSteps.remaining']);
 

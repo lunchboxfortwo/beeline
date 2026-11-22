@@ -546,6 +546,18 @@ export type PostAgentModelCatalogInput = AgentInput & {
   readonly harness?: string;
 };
 
+/**
+ * What one live session reports it runs after startup reconciliation. `model`
+ * is the model the harness says is active (absent: the harness did not say).
+ * `selected` is the selection the session tried to apply; `reason` says why
+ * it is not running, when it is not.
+ */
+export type PostAgentRunningModelInput = AgentInput & {
+  readonly model?: string;
+  readonly selected?: string;
+  readonly reason?: string;
+};
+
 export type CornerWatchKind = 'opened' | 'merged';
 
 export type CornerWatchResult = {

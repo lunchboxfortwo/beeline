@@ -320,6 +320,7 @@ export const DAEMON_OPERATION_ROUTES: Record<keyof DaemonOperationMap, true> = {
   answerUsageRefresh: true,
   postAgentCommands: true,
   postAgentModelCatalog: true,
+  postAgentRunningModel: true,
   postAgentMachineReport: true,
   getConnectorAssignments: true,
   completeProviderWebhookAssignment: true,

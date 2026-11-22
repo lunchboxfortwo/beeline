@@ -77,11 +77,17 @@ export function reviveDates<Row extends object>(row: Row, fields: readonly strin
 }
 
 
+/**
+ * The model an agent's label names: what its latest live session reported
+ * running, else the published catalog's current value. Never the stored
+ * choice alone, which a session may not have applied.
+ */
 export function runtimeModelLabel(
   catalog: AgentDetailView['catalog'],
+  running?: string | null,
 ): string | undefined {
   const axis = catalog.find((candidate) => candidate.category === 'model');
-  return modelChoiceLabel(axis, axis?.currentValue);
+  return modelChoiceLabel(axis, running || axis?.currentValue);
 }
 
 /**

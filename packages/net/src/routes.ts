@@ -295,6 +295,7 @@ const daemonOperations = {
   postAgentDraft: true,
   postAgentMachineReport: true,
   postAgentModelCatalog: true,
+  postAgentRunningModel: true,
   postAgentThought: true,
   postAgentToolMandate: true,
   postAgentTurnReceipt: true,

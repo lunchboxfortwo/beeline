@@ -157,7 +157,7 @@ import { phoneProjectMemberGrantRows } from './agent-reads.js';
       ), owned AS (
         SELECT i.id,i.kind,i.name,beeline_workspace_handle(i.id,m.workspace_id) handle,i.avatar,i.face_id,m.role,
           NULL::jsonb presence_body,NULL::timestamptz presence_updated_at,
-          agent.selected_model,agent.model_catalog,
+          agent.selected_model,agent.model_catalog,agent.running_model,
           ${mcpClientIdentitySql('agent.agent_id')} mcp_client,
           owner.id owner_id,owner.name owner_name,beeline_workspace_handle(owner.id,m.workspace_id) owner_handle
         FROM agents agent JOIN identities i ON i.id=agent.agent_id

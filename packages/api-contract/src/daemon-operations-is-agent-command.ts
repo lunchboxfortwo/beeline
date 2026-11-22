@@ -29,6 +29,13 @@ export function isAgentCommand(value: unknown): value is AgentCommand {
   if (c.offlineSeconds !== undefined && (typeof c.offlineSeconds !== 'number' ||
       !Number.isFinite(c.offlineSeconds) || c.offlineSeconds < 0)) return false;
   if (c.modelCredential !== undefined && !isOwnedModelCredential(c.modelCredential)) return false;
+  if (c.modelSelection !== undefined) {
+    const selection = c.modelSelection as Record<string, unknown> | null;
+    if (!selection || typeof selection !== 'object' ||
+        (selection.model !== undefined && typeof selection.model !== 'string') ||
+        (selection.effort !== undefined && typeof selection.effort !== 'string') ||
+        (selection.fastMode !== undefined && typeof selection.fastMode !== 'boolean')) return false;
+  }
   for (const key of ['roomName', 'returnRoomName'])
     if (c[key] !== undefined && typeof c[key] !== 'string') return false;
   if (c.from !== undefined) {

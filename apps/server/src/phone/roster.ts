@@ -62,7 +62,7 @@ import { reviveDates, runtimeModelLabel, projectAgentPresence } from './read-pro
       ), agent_rows AS (
         SELECT i.id,i.kind,i.name,beeline_workspace_handle(i.id,m.workspace_id) handle,i.avatar,i.face_id,m.role,
           NULL::jsonb presence_body,NULL::timestamptz presence_updated_at,
-          agent.selected_model,agent.model_catalog,
+          agent.selected_model,agent.model_catalog,agent.running_model,
           ${mcpClientIdentitySql('agent.agent_id')} mcp_client,
           owner.id owner_id,owner.name owner_name,beeline_workspace_handle(owner.id,m.workspace_id) owner_handle,
           ${(agentUsageColumns('agent', '$7'))}
@@ -150,7 +150,7 @@ import { reviveDates, runtimeModelLabel, projectAgentPresence } from './read-pro
     const agentConfig = new Map(configs.map((row) => [row.id, row]));
     return phoneProjectMembers(ctx, rows, null).map((member) => {
       const config = agentConfig.get(member.identity.pubkey);
-      const model = config ? runtimeModelLabel(config.model_catalog ?? []) : undefined;
+      const model = config ? runtimeModelLabel(config.model_catalog ?? [], config.running_model) : undefined;
       // Usage columns are owner-filtered in SQL; other viewers' rows carry nulls.
       const usage = (config) ? projectAgentUsage(config) : undefined;
       return {
@@ -174,7 +174,7 @@ import { reviveDates, runtimeModelLabel, projectAgentPresence } from './read-pro
     const rows = await ctx.database.query<MemberRow>(
       `SELECT i.id,
          i.kind,i.name,beeline_workspace_handle(i.id,m.workspace_id) handle,i.avatar,
-         i.face_id,agent.selected_model,agent.model_catalog,
+         i.face_id,agent.selected_model,agent.model_catalog,agent.running_model,
          ${mcpClientIdentitySql('i.id')} mcp_client,
          COALESCE(workspace_member.role,m.role) role,NULL::jsonb presence_body,
          NULL::timestamptz presence_updated_at
@@ -217,7 +217,7 @@ import { reviveDates, runtimeModelLabel, projectAgentPresence } from './read-pro
 
   export function phoneProjectMembers(ctx: PhoneContext, rows: readonly MemberRow[], roomId: string | null): RoomViewMember[] {
     return rows.map((row) => {
-      const model = row.kind === 'agent' ? runtimeModelLabel(row.model_catalog ?? []) : undefined;
+      const model = row.kind === 'agent' ? runtimeModelLabel(row.model_catalog ?? [], row.running_model) : undefined;
       return {
         identity: identity(row, ctx.publicOrigin),
         role: row.role,

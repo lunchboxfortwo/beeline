@@ -136,17 +136,30 @@ function ModelSection({ p, detail }: { p: AgentProfile; detail: AgentDetailView 
     const model = axisValue(detail, 'model', modelAxis);
     const effort = axisValue(detail, 'effort', effortAxis);
     const modelLabel = model ? displayModel(modelChoiceLabel(modelAxis, model) ?? '') || '—' : 'Not available';
+    const nameOf = (id: string) => displayModel(modelChoiceLabel(modelAxis, id) ?? '') || id;
+    const mismatch = detail.modelMismatch;
+    const mismatchLine = mismatch
+        ? `${nameOf(mismatch.selected)} selected · running ${mismatch.running ? nameOf(mismatch.running) : 'the agent default'}`
+        : undefined;
     const effortLabel = p.working === 'model-catalog' ? 'Refreshing…' : effortAxis?.options.find((option) => option.id === effort)?.name ?? effort ?? 'Not available';
     const unavailable = (kind: Axis) => detail.modelUnavailable === kind || detail.modelUnavailable === 'selection'
         ? <T v="metaStrong" color="removed" aria-label={`${kind} unavailable`} testID={`model-unavailable-${kind}`}>!</T> : undefined;
     const open = p.openModelAxis;
     const sheetAxis = open === 'model' ? p.modelAxes.model : open === 'effort' ? p.modelAxes.effort : undefined;
-    const current = open && sheetAxis ? axisValue(detail, open, sheetAxis) : undefined;
+    // The picker marks the stored choice; the row above names what runs.
+    const current = open && sheetAxis
+        ? (open === 'model' ? detail.selected?.model : undefined) ?? axisValue(detail, open, sheetAxis)
+        : undefined;
     const choices = !sheetAxis ? [] : open === 'model' ? filterAgentModelOptions(sheetAxis.options, p.modelSearchQuery) : sheetAxis.options;
     return (
         <Section title="Model / difficulty">
             <Row label="Model" value={modelLabel} right={unavailable('model')} testID="model-axis-model"
                 onPress={editable && !p.busy && p.modelAxes.model ? () => void p.toggleModelAxis('model', open === 'model', p.modelAxes.model) : undefined} />
+            {mismatchLine ? (
+                mismatch?.reason
+                    ? <T v="meta" color="removed" testID="model-mismatch">{`${mismatchLine}. ${mismatch.reason}`}</T>
+                    : <Copy small quiet testID="model-mismatch">{mismatchLine}</Copy>
+            ) : null}
             {p.modelAppliesNote === 'model' ? <Copy small quiet testID="model-applies-model">Applies at the next session</Copy> : null}
             {p.modelAxisError === 'model' ? <T v="meta" color="removed" testID="model-axis-error-model">Could not open these choices. Try again.</T> : null}
             <Row label="Thinking level" value={effortLabel} right={unavailable('effort')} testID="model-axis-effort" last={!p.modelAxes.fast}

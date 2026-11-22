@@ -139,6 +139,33 @@ describe('agent profile', () => {
     expect(byId(tree, 'model-axis-effort').props.value).toBe('High');
   });
 
+  it('names the running model and says plainly when the selected one was not applied', async () => {
+    const catalog = [{ id: 'model', category: 'model', currentValue: 'gpt-6.2-astra',
+      options: [{ id: 'gpt-6.2-astra', name: '6.2 Astra' }, { id: 'gpt-6-sol', name: '6 Sol' }] }];
+    profile.value = agent({ detail: detail({
+      catalog, selected: { model: 'gpt-6.2-astra' }, runtimeSelection: { model: 'gpt-6-sol' }, modelUnavailable: 'model',
+      modelMismatch: { selected: 'gpt-6.2-astra', running: 'gpt-6-sol', reason: "This agent's harness does not offer gpt-6.2-astra." },
+    }) });
+    let tree = await render();
+    expect(byId(tree, 'model-axis-model').props.value).toBe('6 Sol');
+    expect(byId(tree, 'model-mismatch').props.children)
+      .toBe("6.2 Astra selected · running 6 Sol. This agent's harness does not offer gpt-6.2-astra.");
+    expect(byId(tree, 'model-unavailable-model')).toBeDefined();
+    // The picker still marks the stored choice.
+    profile.value = agent({ editing: true, openModelAxis: 'model', modelAxes: { model: catalog[0], effort: undefined, fast: undefined },
+      detail: detail({ catalog, selected: { model: 'gpt-6.2-astra' }, runtimeSelection: { model: 'gpt-6-sol' },
+        modelMismatch: { selected: 'gpt-6.2-astra', running: 'gpt-6-sol' } }) });
+    tree = await render();
+    expect(byId(tree, 'model-option-model-gpt-6.2-astra').props.icon).not.toBeNull();
+    expect(byId(tree, 'model-option-model-gpt-6-sol').props.icon).toBeNull();
+    expect(byId(tree, 'model-mismatch').props.children).toBe('6.2 Astra selected · running 6 Sol');
+  });
+
+  it('shows no mismatch line when the selected model runs', async () => {
+    const tree = await render();
+    expect(byId(tree, 'model-mismatch')).toBeUndefined();
+  });
+
   it('does not present a saved selection as a running model when the runtime has not reported', async () => {
     profile.value = agent({ detail: detail({ selected: {model:'next-model',effort:'high'},catalog:[] }) });
     const tree = await render();

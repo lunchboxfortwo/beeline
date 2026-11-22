@@ -551,3 +551,11 @@ it.each(['human_tag', 'order', 'schedule'])('an empty harness completion keeps %
   expect((await db.query('SELECT count(*)::int n FROM messages')).rows).toEqual(before);
   expect((await db.query("SELECT id FROM agent_commands WHERE reason='report'")).rows).toEqual([]);
 });
+
+it('carries the owner\'s current model choice on each queued item, so a turn never waits for a configuration read', async () => {
+  await db.query(`UPDATE agents SET selected_model='gpt-6.2-astra',selected_effort='high',fast_mode=false WHERE agent_id=$1`, [A]);
+  await ask(R1, 'after the change');
+  const items = await queue();
+  expect(items.at(-1)!.modelSelection).toEqual({ model: 'gpt-6.2-astra', effort: 'high', fastMode: false });
+  expect(isAgentCommand(items.at(-1))).toBe(true);
+});

@@ -437,7 +437,7 @@ it('discloses a chosen model absent from a cold pi session’s fresh catalog and
   await f.session.dispose();
 });
 
-it('reconciles a cold pi session with its chosen model from the fresh catalog without blocking delivery', async () => {
+it('switches a cold pi session to its chosen model from the fresh catalog before its first prompt', async () => {
   const f = await fixture();
   f.config.agentKind = 'pi';
   f.config.modelSelection = { model: 'grunt/grunt' };
@@ -452,13 +452,14 @@ it('reconciles a cold pi session with its chosen model from the fresh catalog wi
     return { configOptions: [models] };
   });
   Object.assign(f.client, { setConfigOption: setter });
-  await f.session.start();
-  expect(setter).toHaveBeenCalledWith('live', 'model', 'grunt/grunt');
+  const starting = f.session.start();
+  await vi.waitFor(() => expect(setter).toHaveBeenCalledWith('live', 'model', 'grunt/grunt'));
+  finish();
+  await starting;
+  expect(f.session.resources.context.modelCatalog?.find(option => option.category === 'model')?.currentValue).toBe('grunt/grunt');
   expect((await f.session.deliver(f.item, [])).text).toBe('The answer');
   expect(f.prompt.mock.calls[0]?.[1]).not.toContain('is unavailable at startup');
-  expect(f.prompt.mock.calls[0]?.[1]).not.toContain('This session uses default-model');
-  finish();
-  await vi.waitFor(() => expect(f.session.resources.context.modelCatalog?.find(option => option.category === 'model')?.currentValue).toBe('grunt/grunt'));
+  expect(f.prompt.mock.calls[0]?.[1]).toContain('This session uses grunt/grunt');
   await f.session.dispose();
 });
 
@@ -823,6 +824,128 @@ it.runIf(process.platform !== 'win32')('Stop kills granted commands and descenda
   }
 });
 
+const twoModels = { sessionId: 'live', raw: { configOptions: [
+  { id: 'model', category: 'model', currentValue: 'sol', options: [{ value: 'sol' }, { value: 'astra' }] },
+] } };
+const runningReports = (execute: ReturnType<typeof vi.fn>) =>
+  execute.mock.calls.filter(([name]) => name === 'postAgentRunningModel').map(([, input]) => input);
+
+it('reports the running model and the reason when the harness refuses the selected model', async () => {
+  const f = await fixture();
+  f.session.resources.context.configuration = { model: 'astra', commands: [], yoloMode: false };
+  f.client.sessionNew.mockResolvedValue(twoModels);
+  Object.assign(f.client, { setConfigOption: vi.fn(async () => { throw new Error('astra is not on this plan'); }) });
+  await f.session.start(f.item);
+  await f.session.deliver(f.item, []);
+  await vi.waitFor(() => expect(runningReports(f.execute)).toContainEqual({
+    agentId: 'a'.repeat(64), model: 'sol', selected: 'astra',
+    reason: expect.stringContaining('astra is not on this plan'),
+  }));
+  await f.session.dispose();
+});
+
+it('reports the running model when the selected model is not offered, without holding delivery', async () => {
+  const f = await fixture();
+  f.session.resources.context.configuration = { model: 'gpt-astra', commands: [], yoloMode: false };
+  f.client.sessionNew.mockResolvedValue(twoModels);
+  await f.session.start(f.item);
+  expect(runningReports(f.execute)).toEqual([]);
+  await f.session.deliver(f.item, []);
+  expect(f.prompt.mock.calls[0]?.[1]).toContain('Selected model gpt-astra is unavailable at startup');
+  expect(runningReports(f.execute)).toEqual([{ agentId: 'a'.repeat(64), model: 'sol', selected: 'gpt-astra',
+    reason: "This agent's harness does not offer gpt-astra." }]);
+  await f.session.dispose();
+});
+
+it('runs a changed model on the very next turn while the configuration read is still unresolved', async () => {
+  const f = await fixture();
+  f.session.resources.context.configuration = { model: 'sol', commands: [], yoloMode: false };
+  f.client.sessionNew.mockResolvedValue(twoModels);
+  const setter = vi.fn(async () => ({}));
+  Object.assign(f.client, { setConfigOption: setter });
+  await f.session.start(f.item);
+  await f.session.deliver(f.item, []);
+  expect(setter).not.toHaveBeenCalled();
+  // The owner picks Astra and a message follows at once. The configuration
+  // read never answers; the queue item carries the choice.
+  f.execute.mockImplementation(() => new Promise(() => {}));
+  f.session.configurationChanged();
+  const next = { ...f.item, id: 'next', turnRequestId: 'next', modelSelection: { model: 'astra' } } as AgentCommand;
+  await f.session.start(next);
+  await f.session.deliver(next, []);
+  expect(f.client.sessionNew).toHaveBeenCalledTimes(2);
+  expect(setter).toHaveBeenCalledWith('live', 'model', 'astra');
+  expect(setter.mock.invocationCallOrder[0]).toBeLessThan(f.prompt.mock.invocationCallOrder[1]!);
+  await f.session.dispose();
+});
+
+it('runs the first prompt after a model change on the new model, even when the switch answers late', async () => {
+  const f = await fixture();
+  f.client.sessionNew.mockResolvedValue(twoModels);
+  let running = 'sol';
+  let confirm!: () => void;
+  const setter = vi.fn((_session: string, id: string, value: string) => new Promise(resolve => {
+    confirm = () => { if (id === 'model') running = value; resolve({}); };
+  }));
+  const usedModel: string[] = [];
+  f.prompt.mockImplementation(async () => {
+    usedModel.push(running);
+    return { agentText: 'The answer', stopReason: 'end_turn', updates: [], toolCalls: [] };
+  });
+  Object.assign(f.client, { setConfigOption: setter });
+  const item = { ...f.item, modelSelection: { model: 'astra' } } as AgentCommand;
+  const starting = f.session.start(item);
+  await vi.waitFor(() => expect(setter).toHaveBeenCalledWith('live', 'model', 'astra'));
+  await new Promise(resolve => setTimeout(resolve, 50));
+  expect(f.prompt).not.toHaveBeenCalled();
+  confirm();
+  await starting;
+  await f.session.deliver(item, []);
+  expect(usedModel).toEqual(['astra']);
+  await f.session.dispose();
+});
+
+it('still answers on the running model when the harness refuses the switch', async () => {
+  const f = await fixture();
+  f.client.sessionNew.mockResolvedValue(twoModels);
+  Object.assign(f.client, { setConfigOption: vi.fn(async () => { throw new Error('astra is not on this plan'); }) });
+  const item = { ...f.item, modelSelection: { model: 'astra' } } as AgentCommand;
+  await f.session.start(item);
+  expect(await f.session.deliver(item, [])).toMatchObject({ text: 'The answer' });
+  expect(runningReports(f.execute)).toContainEqual(expect.objectContaining({ model: 'sol', selected: 'astra' }));
+  await f.session.dispose();
+});
+
+it('restarts a live session whose model differs from the choice a queue item carries', async () => {
+  const f = await fixture();
+  f.session.resources.context.configuration = { model: 'sol', commands: [], yoloMode: false };
+  f.client.sessionNew.mockResolvedValue(twoModels);
+  Object.assign(f.client, { setConfigOption: vi.fn(async () => ({})) });
+  await f.session.start(f.item);
+  await f.session.deliver(f.item, []);
+  await f.session.start({ ...f.item, modelSelection: { model: 'sol' } } as AgentCommand);
+  expect(f.client.sessionNew).toHaveBeenCalledTimes(1);
+  await f.session.start({ ...f.item, modelSelection: { model: 'astra' } } as AgentCommand);
+  expect(f.client.sessionNew).toHaveBeenCalledTimes(2);
+  await f.session.dispose();
+});
+
+it('reports the refusal when a live session cannot switch to a newer selection', async () => {
+  const f = await fixture();
+  f.session.resources.context.configuration = { model: 'sol', commands: [], yoloMode: false };
+  f.client.sessionNew.mockResolvedValue(twoModels);
+  Object.assign(f.client, { setConfigOption: vi.fn(async () => { throw new Error('astra is not on this plan'); }) });
+  let answer!: (value: unknown) => void;
+  f.execute.mockImplementation((name: string) => name === 'getAgentConfiguration'
+    ? new Promise(resolve => { answer = resolve; }) : new Promise(() => {}));
+  await f.session.start(f.item);
+  await f.session.deliver(f.item, []);
+  answer({ model: 'astra', commands: [], yoloMode: false });
+  await vi.waitFor(() => expect(runningReports(f.execute).at(-1)).toEqual({ agentId: 'a'.repeat(64), model: 'sol',
+    selected: 'astra', reason: expect.stringContaining('astra is not on this plan') }));
+  await f.session.dispose();
+});
+
 it('writes a completed thread tool while the harness prompt remains unresolved', async () => {
   const f = await fixture(true);
   let activityWritten!: () => void;
@@ -855,4 +978,23 @@ it('writes a completed thread tool while the harness prompt remains unresolved',
     try { await answer; }
     finally { await f.session.dispose(); }
   }
+});
+
+it('reports the model that did switch when a later setting is refused', async () => {
+  const f = await fixture();
+  f.session.resources.context.configuration = { model: 'astra', effort: 'high', commands: [], yoloMode: false };
+  f.client.sessionNew.mockResolvedValue({ sessionId: 'live', raw: { configOptions: [
+    { id: 'model', category: 'model', currentValue: 'sol', options: [{ value: 'sol' }, { value: 'astra' }] },
+    { id: 'effort', category: 'effort', currentValue: 'low', options: [{ value: 'low' }, { value: 'high' }] },
+  ] } });
+  const setter = vi.fn(async (_session: string, id: string) => {
+    if (id === 'effort') throw new Error('high effort is not on this plan');
+    return {};
+  });
+  Object.assign(f.client, { setConfigOption: setter });
+  await f.session.start(f.item);
+  await f.session.deliver(f.item, []);
+  await vi.waitFor(() => expect(runningReports(f.execute).at(-1)).toEqual({ agentId: 'a'.repeat(64), model: 'astra',
+    selected: 'astra', reason: expect.stringContaining('high effort is not on this plan') }));
+  await f.session.dispose();
 });

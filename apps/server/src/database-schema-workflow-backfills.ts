@@ -305,6 +305,10 @@ ALTER TABLE agents ADD COLUMN IF NOT EXISTS yolo_mode boolean NOT NULL DEFAULT t
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS yolo_set_by text;
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS yolo_set_at timestamptz;
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS model_unavailable text;
+-- What the agent's latest live session reported running, beside the stored choice.
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS running_model text;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS running_model_selected text;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS running_model_reason text;
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS fast_mode boolean NOT NULL DEFAULT false;
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS machine_id text;
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS machine_name text;

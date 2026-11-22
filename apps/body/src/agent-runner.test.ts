@@ -8,7 +8,7 @@ import { AnswerStore } from './answer-store.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
 import { identityFromKey,type AgentRuntimeRecord } from './runtime.js';
 
-const harness = vi.hoisted(() => ({ start: vi.fn(), deliver: vi.fn(), stop: vi.fn(), steer: vi.fn(), cancel: vi.fn(), refresh: vi.fn(), refreshConfiguration: vi.fn() }));
+const harness = vi.hoisted(() => ({ start: vi.fn(), deliver: vi.fn(), stop: vi.fn(), steer: vi.fn(), cancel: vi.fn(), refresh: vi.fn(), refreshConfiguration: vi.fn(), configurationChanged: vi.fn() }));
 vi.mock('./place-session.js', () => ({ PlaceSession: class {
   alive = false;
   stale = false;
@@ -23,6 +23,7 @@ vi.mock('./place-session.js', () => ({ PlaceSession: class {
   stop = harness.stop;
   cancel = harness.cancel;
   resources={refresh:harness.refresh,refreshConfiguration:harness.refreshConfiguration};
+  configurationChanged(){harness.configurationChanged(this);this.stale=true;void this.resources.refreshConfiguration();}
   grantPlace() { return {}; }
   async writeContext() {}
 } }));
@@ -36,6 +37,7 @@ beforeEach(() => {
   harness.cancel.mockReset();
   harness.refresh.mockReset();
   harness.refreshConfiguration.mockReset();
+  harness.configurationChanged.mockReset();
 });
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 
@@ -88,6 +90,21 @@ it('a configuration change refreshes configuration without rereading every optio
   answering.resolve({text:'answer',steps:[],toolCalls:[],cleanup:async()=>{}});
   await receipt.promise;
   expect(f.execute).toHaveBeenCalledWith('postAgentTurnReceipt', expect.objectContaining({ requestId: 'active' }));
+});
+
+it('a place first seen after a configuration change starts reading the changed settings before its first start', async () => {
+  const f=await fixture();
+  f.changed([f.item('before')]);
+  await vi.waitFor(()=>expect(harness.deliver).toHaveBeenCalledOnce());
+  f.configChanged();
+  expect(harness.configurationChanged).toHaveBeenCalledOnce();
+  f.changed([{...f.item('elsewhere'),roomId:'other-room',returnRoomId:'other-room'}]);
+  await vi.waitFor(()=>expect(harness.deliver).toHaveBeenCalledTimes(2));
+  // The new place was marked before its first start, so it cannot start from
+  // a cached selection that predates the change.
+  expect(harness.configurationChanged).toHaveBeenCalledTimes(2);
+  expect(harness.configurationChanged.mock.invocationCallOrder[1]).toBeLessThan(
+    harness.start.mock.invocationCallOrder.at(-1)!);
 });
 
 it('reannounces an active turn after registration without delivering its prompt again', async () => {
