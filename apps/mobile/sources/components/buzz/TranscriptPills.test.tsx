@@ -79,6 +79,22 @@ it('folds agent runs into one PillRow pill and keeps person stops and other syst
   act(() => tree.unmount());
 });
 
+it('folds consecutive system notices, person stops included, into one pill that opens in send order', () => {
+  const resolve = (id: string, name: string, kind?: 'agent' | 'human') => ({ kind: kind ?? 'agent', seed: id, name });
+  const base = (id: string, fields: Partial<ChatDisplayMessage>): ChatDisplayMessage =>
+    ({ id, text: id, isUser: false, timestamp: 1_800_000_000, ...fields });
+  const notice = (id: string, who?: string) => base(id, { isSystemNotice: true,
+    ...(who ? { systemEvent: { subject: { kind: 'agent', id: who, name: who }, verb: 'joined' } } : {}) });
+  const personStop = base('s1', { isSystemNotice: true, pubkey: 'owner',
+    systemEvent: { kind: 'turn-cancelled', subject: { kind: 'person', id: 'owner', name: 'owner' }, verb: 'stopped', object: { text: 'ruby', id: 'ruby' } } });
+  const say = (id: string, from: string, to: string) => base(id, { pubkey: from, authorIdentity: { pubkey: from, name: from, kind: 'agent' },
+    agentCommand: { kind: 'message', recipient: { id: to, name: to, kind: 'agent' }, text: id } });
+  const items = pillItems([notice('n1', 'nerd'), personStop, notice('n2'), say('m1', 'ruby', 'claude'), notice('n3', 'jelly')], resolve, {});
+  expect(items.map(item => [item.id, item.system, item.run?.map(entry => entry.id) ?? null])).toEqual([
+    ['n1', true, ['n1', 's1', 'n2']], ['m1', false, null], ['n3', true, null]]);
+  expect(items[0]!.run![1]).toMatchObject({ stop: true, from: { kind: 'human', seed: 'owner' }, to: { seed: 'ruby' } });
+});
+
 it('MERGE-ROWS-1 shows the merge count immediately and expands every stored event and destination', () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   const events: ChatDisplayMessage[] = Array.from({ length: 14 }, (_, index) => ({

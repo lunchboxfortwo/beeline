@@ -84,25 +84,35 @@ function pillItem(message: ChatDisplayMessage, resolve: PillIdentityResolver, ha
 
 /**
  * Consecutive agent run steps (agent-to-agent messages and agent stops) fold
- * into one pill that opens as a list in send order. A lone step keeps its own pill.
+ * into one pill that opens as a list in send order. Consecutive system notices
+ * (person stops included) fold the same way. A lone step or notice keeps its own pill.
  */
 export function pillItems(run: readonly ChatDisplayMessage[], resolve: PillIdentityResolver, handlers: PillHandlers): PillItem[] {
   const items: PillItem[] = [];
   let steps: ChatDisplayMessage[] = [];
-  const flush = () => {
-    if (steps.length > 1) {
-      const entries = steps.map((message) => pillItem(message, resolve, handlers, true));
-      items.push({ id: entries[0]!.id, system: false, from: entries[0]!.from, to: entries[0]!.to,
+  let notices: PillItem[] = [];
+  const fold = (entries: readonly PillItem[], system: boolean) => {
+    if (entries.length > 1) {
+      items.push({ id: entries[0]!.id, system, from: entries[0]!.from, to: entries[0]!.to,
         time: entries.at(-1)!.time, run: entries, body: null });
-    } else items.push(...steps.map((message) => pillItem(message, resolve, handlers)));
+    } else items.push(...entries);
+  };
+  const flushSteps = () => {
+    fold(steps.length > 1 ? steps.map((message) => pillItem(message, resolve, handlers, true))
+      : steps.map((message) => pillItem(message, resolve, handlers)), false);
     steps = [];
   };
+  const flushNotices = () => { fold(notices, true); notices = []; };
   for (const message of run) {
-    if (isAgentRunStep(message)) { steps.push(message); continue; }
-    flush();
-    items.push(pillItem(message, resolve, handlers));
+    if (isAgentRunStep(message)) { flushNotices(); steps.push(message); continue; }
+    flushSteps();
+    const item = pillItem(message, resolve, handlers);
+    if (item.system) { notices.push(item); continue; }
+    flushNotices();
+    items.push(item);
   }
-  flush();
+  flushSteps();
+  flushNotices();
   return items;
 }
 

@@ -37,7 +37,7 @@ export type PillItem = {
     time: string;
     /** A stop of an agent's turn: face, stop glyph, face, with no text. */
     stop?: boolean;
-    /** Consecutive agent-to-agent messages folded into one pill: faces and a count. */
+    /** Consecutive agent-to-agent messages, or consecutive system notices, folded into one pill: faces and a count. */
     run?: readonly PillRunEntry[];
     /** A system fact's text: the folded pill's accessibility label; it shows only once opened. */
     summary?: string;
@@ -96,6 +96,10 @@ function names(faces: readonly PillFace[]): string {
 
 function pillLabel(item: PillItem, expanded: boolean): string {
     const verb = expanded ? 'Hide' : 'Read';
+    if (item.run && item.system) {
+        const about = runFaces(item.run).filter((face) => face.kind !== 'system');
+        return `${verb} ${item.run.length} system messages${about.length ? ` about ${names(about)}` : ''}, ${item.time}`;
+    }
     if (item.run) return `${verb} ${item.run.length} messages between ${names(runFaces(item.run))}, ${item.time}`;
     if (item.stop) return `${item.from.name} stopped ${item.to?.name ?? ''}`;
     if (item.system && item.summary) return `${verb} ${item.summary}, ${item.time}`;
