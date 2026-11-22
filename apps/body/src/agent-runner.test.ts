@@ -52,7 +52,7 @@ async function fixture(saved?: import('./answer-store.js').StoredAnswer) {
   const identity = identityFromKey(secretKeyHex, 'Agent');
   const agent = { publicKey: identity.publicKey, secretKeyHex, name: identity.name };
   const runtime = { agent, communityId: 'workspace', rooms: [], supervisorRoot: root } as unknown as AgentRuntimeRecord;
-  let changed!: (commands: readonly AgentCommand[], completed: readonly string[]) => void;
+  let changed!: (commands: readonly AgentCommand[], completed: readonly string[], stopped: readonly string[]) => void;
   let opened!: () => void;
   let configChanged!: () => void;
   const execute = vi.fn(async (_name: string, _input: Record<string, unknown>) => ({ id: 'posted', createdAt: 1 }));
@@ -70,7 +70,7 @@ async function fixture(saved?: import('./answer-store.js').StoredAnswer) {
     rootSourceMessageId: id, sourceMessageId: id, agentDepth: 0,
     source: { id, authorId: 'human', body: id, attachments: [], createdAt: 1, type: 'message' },
   });
-  return { root, execute, opened: () => opened(), configChanged:()=>configChanged(), changed: (commands: AgentCommand[], completed: readonly string[] = []) => changed(commands, completed), item };
+  return { root, execute, opened: () => opened(), configChanged:()=>configChanged(), changed: (commands: AgentCommand[], completed: readonly string[] = [], stopped: readonly string[] = []) => changed(commands, completed, stopped), item };
 }
 
 it('a configuration change refreshes configuration without rereading every optional resource', async () => {
@@ -138,6 +138,22 @@ it('lets a committed reply finish while its harness continues, then records supp
   await vi.waitFor(()=>expect(cleanup).toHaveBeenCalledOnce());
   expect(harness.deliver).toHaveBeenCalledOnce();
   await vi.waitFor(async()=>expect(await new AnswerStore(join(f.root,'answers')).all()).toEqual([]));
+});
+
+it('Stop after a committed reply cancels the still-running harness and closes its invocation', async () => {
+  const f=await fixture(),item=f.item('stopped-after-reply');
+  const answering=deferred<Record<string,unknown>>(),cleanup=vi.fn(async()=>{});
+  harness.deliver.mockReturnValueOnce(answering.promise);
+  f.execute.mockImplementation(async name=>name==='postRoomMessage'?{id:item.id,createdAt:1,suppressed:true,answered:false}:{id:'ok',createdAt:1});
+  f.changed([item]);await vi.waitFor(()=>expect(harness.deliver).toHaveBeenCalledOnce());
+  f.changed([],[item.id]);await Promise.resolve();
+  expect(harness.cancel).not.toHaveBeenCalled();
+  f.changed([],[],['another-item']);await Promise.resolve();
+  expect(harness.cancel).not.toHaveBeenCalled();
+  f.changed([],[],[item.id]);
+  await vi.waitFor(()=>expect(harness.cancel).toHaveBeenCalledOnce());
+  answering.resolve({text:'',stopReason:'cancelled',steps:[],toolCalls:[],cleanup});
+  await vi.waitFor(()=>expect(f.execute).toHaveBeenCalledWith('postRoomMessage',expect.objectContaining({requestId:item.id,harnessEnded:true,invocation:{id:expect.any(String),requestId:item.turnRequestId}})),{timeout:5000});
 });
 
 it('writes the harness-reported token usage on the turn receipt after the answer', async () => {

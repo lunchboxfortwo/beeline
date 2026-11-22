@@ -125,7 +125,7 @@ export class AgentRunner {
       agentId: this.agent.publicKey, api: options.daemonApi,
       live: placeId => this.places.get(placeId)?.session.alive === true,
     });
-    options.daemonApi.setQueueListener((commands, completed) => this.queueChanged(commands, completed));
+    options.daemonApi.setQueueListener((commands, completed, stopped) => this.queueChanged(commands, completed, stopped));
     options.daemonApi.setConfigChangedListener(() => this.configChanged());
     options.daemonApi.setRoomsChangedListener(() => { this.pendingBootstrap = true; this.wake?.(); });
     options.daemonApi.setCornerCompleteListener(cornerId => void this.cornerComplete(cornerId));
@@ -177,8 +177,12 @@ export class AgentRunner {
   }
 
   /** The server's whole list of this agent's undone items, oldest first. */
-  private queueChanged(commands: readonly AgentCommand[], completed: readonly string[] = []): void {
+  private queueChanged(commands: readonly AgentCommand[], completed: readonly string[] = [], stopped: readonly string[] = []): void {
     for (const id of completed) this.completed.add(id);
+    // A person stopped a run after its reply: the item is already done, so
+    // queue absence cannot carry the Stop. Its closing receipt still follows.
+    for (const place of this.places.values())
+      if (place.running && stopped.includes(place.running.id)) place.session.cancel();
     // A new server delivery is the normal retry boundary, including reconnect.
     this.awaitingInput.clear();
     this.latest = commands;
