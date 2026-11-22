@@ -513,7 +513,14 @@ test('concurrent job logs and temporary files stay private and retain secret mas
       assert.equal(log.includes('secret-fixture-token'), false);
       assert.equal(readFileSync(join(directory, 'jobs', label, 'tmp/fixture'), 'utf8'), 'private\n');
     }
-    assert.equal(JSON.parse(readFileSync(join(directory, 'records.json'), 'utf8')).length, 2);
+    const records = JSON.parse(readFileSync(join(directory, 'records.json'), 'utf8'));
+    assert.equal(records.length, 2);
+    // Each job record carries its per-step profile for the published evidence.
+    for (const record of records) {
+      assert.equal(record.steps.length, 1);
+      assert.equal(record.steps[0].outcome, 'success');
+      assert.ok(record.steps[0].seconds >= 0.05);
+    }
     const delivery = new LocalActions({ root: directory, directory, secrets: {}, processes: new Processes({}, () => {}), baseEnv: { PATH: process.env.PATH, TMPDIR: '/tmp' } });
     const ordinary = await delivery.job({ steps: [{ run: 'test "$TMPDIR" = /tmp' }] }, context, 'delivery');
     assert.equal(ordinary.result, 'success');

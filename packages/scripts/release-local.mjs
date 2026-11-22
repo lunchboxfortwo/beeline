@@ -12,8 +12,8 @@ import { Processes, privateWrite, appendSummary } from './release-local-process.
 import { localGithub } from './release-local-github.mjs';
 import { downloadPagesChannel } from './pages-channel.mjs';
 import { checksWorkflow, checkPlan, LocalChecks } from './release-local-checks.mjs';
-import { LocalDelivery } from './release-local-delivery.mjs';
-import { droppedChecks, localWorkflow, quickChecks, releasePlan } from './release-local-policy.mjs';
+import { LocalDelivery, writeChecksVerdict } from './release-local-delivery.mjs';
+import { droppedChecks, localWorkflow, preVerdictSteps, quickChecks, releasePlan } from './release-local-policy.mjs';
 import { DesktopBuild, WINDOWS_DESKTOP, carryWindowsInstallers, desktopDryRun, desktopWorkflow } from './release-local-desktop.mjs';
 import { carryHelperPlatform } from './helper-carry.mjs';
 import { macSigningTools } from './release-local-desktop-worker.mjs';
@@ -233,6 +233,13 @@ rustup run 1.95.0 rustc --version
   return directory;
 }
 
+// Evidence files hold job names, times, shards and local log paths. Publish one
+// only when no release secret or credential-shaped value appears in it.
+const CREDENTIAL = /gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\w{20,}|FlyV1 |-----BEGIN [A-Z ]*PRIVATE KEY|npm_[A-Za-z0-9]{30,}|AKIA[0-9A-Z]{16}|eyJ[\w-]{10,}\.[\w-]{10,}\./;
+export function publishableEvidence(text, secrets = []) {
+  return !CREDENTIAL.test(text) && !secrets.some(secret => secret.length >= 8 && text.includes(secret));
+}
+
 export function localHooks(directory, processes, { fullChecks = false, checksGate } = {}) {
   return {
     workflow: async ({ file, workflow, inputs, inherited, engine }) => {
@@ -246,13 +253,24 @@ export function localHooks(directory, processes, { fullChecks = false, checksGat
         const delivery = new LocalDelivery(engine);
         engine.localDelivery = delivery;
         process.once('SIGINT', delivery.cancel); process.once('SIGTERM', delivery.cancel);
+        const authorize = async () => {
+          await checksGate;
+          const checks = engine.variables.releaseChecks;
+          if (checks.sourceSha !== inherited.github.sha || !(checks.result === 'success' || (checks.result === 'skipped' && checks.ownerMessageId)))
+            throw new Error('Full checks do not authorize this release SHA');
+        };
         return { workflow: localWorkflow(workflow, { ...inputs, parallelChecks: Boolean(checksGate) }), parallel: true, job: async (...args) => {
           if (checksGate && args[1].github.job === 'release_validation') {
-            await checksGate;
-            const checks = engine.variables.releaseChecks;
-            if (checks.sourceSha !== inherited.github.sha || !(checks.result === 'success' || (checks.result === 'skipped' && checks.ownerMessageId)))
-              throw new Error('Full checks do not authorize this release SHA');
+            await authorize();
             return { result: 'success', outputs: {} };
+          }
+          if (checksGate && Object.hasOwn(preVerdictSteps, args[1].github.job)) {
+            // Started before the verdict: the worker builds, then waits for this file.
+            const verdictFile = join(engine.directory, 'jobs', args[2].replaceAll('/', '-'), 'checks-verdict.json');
+            authorize().then(() => ({ authorized: true }), error => ({ authorized: false, reason: error.message }))
+              .then(verdict => writeChecksVerdict(verdictFile, verdict))
+              .catch(error => engine.processes.log(`Could not hand the checks verdict to ${args[2]}: ${error.message}`));
+            return delivery.run(...args, { verdictFile });
           }
           if (args[1].github.job === 'helper_macos' && engine.variables?.macHelperMode === 'build') return githubMacHelper(engine, args[1]);
           return delivery.run(...args);
@@ -389,6 +407,18 @@ export function localHooks(directory, processes, { fullChecks = false, checksGat
         if (checks?.resultsPath && existsSync(checks.resultsPath)) {
           copyFileSync(checks.resultsPath, join(dirname(path), 'release-checks.json'));
           const releaseUrl = `https://github.com/${context.github.repository}/releases/download/${record.version}`;
+          // Per-job attempts and timing let CI history work from release assets alone.
+          for (const [name, key] of [['records.json', 'recordsPath'], ['release-checks-timing.json', 'timingPath']]) {
+            const evidence = join(dirname(checks.resultsPath), name);
+            if (!existsSync(evidence)) continue;
+            const text = readFileSync(evidence, 'utf8');
+            if (!publishableEvidence(text, [...(processes.masks ?? [])])) {
+              (processes.log ?? console.warn)(`${name} is not published: it contains a credential-shaped value.`);
+              continue;
+            }
+            privateWrite(join(dirname(path), name), text);
+            checks[key] = `${releaseUrl}/${name}`;
+          }
           checks.resultsPath = `${releaseUrl}/release-checks.json`;
         }
         if (checks) record.checks = checks;
@@ -400,6 +430,15 @@ export function localHooks(directory, processes, { fullChecks = false, checksGat
           const deployStart = Math.min(live.completedAt, Math.max(live.triggerEpoch, checked));
           live.checksSeconds = deployStart - live.triggerEpoch;
           live.deploySeconds = live.completedAt - deployStart;
+          // Per-step seconds of the live legs, including any wait for the checks verdict.
+          const records = join(directory, 'records.json');
+          if (existsSync(records)) {
+            const legs = { 'server-local': 'server', 'mobile_ota-local': 'mobile-ota' };
+            const profile = Object.fromEntries(JSON.parse(readFileSync(records, 'utf8'))
+              .filter(job => legs[job.id] && job.steps?.length)
+              .map(job => [legs[job.id], job.steps.map(({ name, seconds }) => ({ name, seconds }))]));
+            if (Object.keys(profile).length) live.profile = profile;
+          }
         }
         record.delivery.localExceptions = { staticWebsite: 'not released',
           helperArm64: engine.variables.macHelperMode === 'build' ? 'built and install-verified on GitHub-hosted macos-15' : 'carried unchanged',

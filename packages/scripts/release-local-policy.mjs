@@ -17,6 +17,22 @@ export function droppedChecks(workflow) {
   return Object.keys(workflow.jobs).filter(id => !localChecks.includes(id));
 }
 
+// Leg steps that only build, push unreferenced images or read production may
+// run while full checks are still running. Every other step of the job's leg
+// script waits for the checks verdict, and every later step runs after it.
+export const preVerdictSteps = {
+  server: { script: 'server-leg.sh', steps: ['step0', 'fleet', 'step2', 'step3', 'free_agent_image', 'step8', 'step9'] },
+  mobile_ota: { script: 'mobile-ota-leg.sh', steps: ['step0', 'step1'] },
+};
+// A verdict that never arrives fails the job instead of holding its slot.
+export const VERDICT_WAIT_MINUTES = 120;
+
+export function awaitsVerdict(job, step) {
+  const leg = preVerdictSteps[job];
+  const match = leg && step?.run?.match(/release-steps\/([\w-]+\.sh)"? (\w+)/);
+  return Boolean(match) && match[1] === leg.script && !leg.steps.includes(match[2]);
+}
+
 export function localWorkflow(workflow, { channel = 'next', parallelChecks = false } = {}) {
   const local = structuredClone(workflow);
   // This edge reserved hosted capacity; helper publication consumes only its
@@ -40,9 +56,11 @@ export function localWorkflow(workflow, { channel = 'next', parallelChecks = fal
   }
   if (parallelChecks) {
     delete local.jobs.nightly_checks;
-    // Pure build jobs can overlap Checks. Every promotion and finalization job
-    // retains its existing release_validation dependency and verdict condition.
-    for (const id of ['helper_linux', 'helper_macos', 'desktop_installers']) {
+    // Pure build jobs can overlap Checks. The server and OTA legs also start
+    // early, but only their build and read steps run before the verdict
+    // (preVerdictSteps). Every other promotion and finalization job retains
+    // its existing release_validation dependency and verdict condition.
+    for (const id of ['helper_linux', 'helper_macos', 'desktop_installers', ...Object.keys(preVerdictSteps)]) {
       const job = local.jobs[id];
       job.needs = job.needs.filter(id => id !== 'release_validation');
       job.if = job.if.replace("needs.release_validation.result == 'success' && ", '');

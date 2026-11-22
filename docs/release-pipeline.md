@@ -46,8 +46,8 @@ all versioned OTA branch names, so an orphaned OTA rc cannot be reused.
 
 When the command finishes, whether it succeeded or failed, it attempts to remove its own
 `/tmp/beeline-release-*` working directory, including logs and the private
-timing files; each published release keeps `release.json` and
-`release-checks.json`. It also removes the Docker images releases built
+timing files; each published release keeps `release.json`,
+`release-checks.json`, `records.json` and `release-checks-timing.json`. It also removes the Docker images releases built
 (`registry.fly.io/beeline-server` and `registry.fly.io/beeline-free-agents` tags,
 and untagged images labelled with a release SHA) except this release's and the
 newest previous release's, identified by image creation time. It then prunes
@@ -83,12 +83,18 @@ workflow.
 Both published `release.json` records include `checks.sourceSha`, `checks.result`,
 `checks.wallSeconds`, `checks.completedAt` and `checks.resultsPath`. A release
 with full checks uploads `release-checks.json` as a release asset beside its
-`release.json`, and `checks.resultsPath` is that asset's download URL.
+`release.json`, and `checks.resultsPath` is that asset's download URL. It also
+uploads the per-job check records (`records.json`, with each job's attempts,
+times and per-step seconds) and `release-checks-timing.json`; `checks.recordsPath`
+and `checks.timingPath` name them. Either file is withheld, with a log line, when
+it contains a release secret or a credential-shaped value, and a failed upload of
+either only logs a warning.
 `delivery.live` splits its `elapsedSeconds` into `checksSeconds` (waiting for
 full checks within that release leg) and `deploySeconds` (the remaining time
 to the last live component). When the checks verdict predates the leg, as on
-latest promotion, `checksSeconds` is zero. The
-private `release-checks-timing.json` also records the suite wall-clock, host
+latest promotion, `checksSeconds` is zero. `delivery.live.profile` lists the
+per-step seconds of the server and OTA legs, including the wait for the checks
+verdict. `release-checks-timing.json` also records the suite wall-clock, host
 load and per-job placement.
 For an owner-authorized urgent fix only, pass
 `--skip-full-checks "<owner message id>"`. This explicit exception records
@@ -145,7 +151,13 @@ Docker build/run containers share their worker's existing parent slice, includin
 Fly local image builds; no daemon, listener, shard service or slice configuration changes.
 Metro uses two workers during local release exports.
 
-All real dependency joins remain: checks precede delivery, helper publication
+The server and OTA legs start alongside the checks. Before the verdict they only
+install, build, push release-labelled images no Machine uses yet and read
+production state (`preVerdictSteps` in `release-local-policy.mjs`). Their worker
+then waits for the verdict before the first step that may change production:
+migrations, the canary rollout, free-agent refresh and OTA publication. That wait
+does not count against the job's timeout.
+All real dependency joins remain: checks precede every production change, helper publication
 waits for both helper builds, proof-selected OTA waits for its proof, and release
 finalization waits for every selected leg.
 The helper's hosted capacity-only wait for `delivery_result` is removed locally.
@@ -153,7 +165,7 @@ Canary, migration, rollback, helper download/update proofs, exact-SHA checks and
 dispatch attribution still run through the existing owners.
 Completed outputs, artifacts and failure logs keep the existing local handoff.
 `release-checks-timing.json` records wall time, sampled host load and shard
-placement under the private state directory.
+placement; the release publishes it with the check records.
 Cache misses rebuild; unknown action types fail.
 
 The canonical product repository is `lunchboxfortwo/beeline`. Historical PR and

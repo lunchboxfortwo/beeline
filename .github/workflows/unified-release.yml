@@ -1438,6 +1438,10 @@ jobs:
           # A local release keeps its full-check results beside its record.
           checks="$RUNNER_TEMP/release/release-checks.json"
           [ ! -f "$checks" ] || ghr_upload_verified "$RELEASE_VERSION" "$checks"
+          # Per-job check evidence is useful, not required: a failed upload is logged.
+          for evidence in records.json release-checks-timing.json; do
+            [ ! -f "$RUNNER_TEMP/release/$evidence" ] || ghr_upload_verified "$RELEASE_VERSION" "$RUNNER_TEMP/release/$evidence" || echo "::warning::$evidence was not uploaded"
+          done
           # The memory the next release and every rollback read. Written
           # before publication, so a published release always carries it.
           ghr_upload_verified "$RELEASE_VERSION" "$state"
@@ -1480,6 +1484,10 @@ jobs:
           . packages/scripts/gh-release-retry.sh
           checks="$RUNNER_TEMP/release/release-checks.json"
           [ ! -f "$checks" ] || ghr_upload_verified "$RELEASE_VERSION" "$checks"
+          # Per-job check evidence is useful, not required: a failed upload is logged.
+          for evidence in records.json release-checks-timing.json; do
+            [ ! -f "$RUNNER_TEMP/release/$evidence" ] || ghr_upload_verified "$RELEASE_VERSION" "$RUNNER_TEMP/release/$evidence" || echo "::warning::$evidence was not uploaded"
+          done
           ghr_upload_verified "$RELEASE_VERSION" "$RUNNER_TEMP/release/release.json"
           gh release edit "$RELEASE_VERSION" --draft=false --prerelease --latest=false --notes 'Next dogfood release; production OTA, desktop and website await owner-commanded latest promotion.'
       - name: Remove drafts this release supersedes

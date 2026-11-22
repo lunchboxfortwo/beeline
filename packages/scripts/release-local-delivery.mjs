@@ -5,6 +5,7 @@ import { existsSync, globSync, mkdirSync, readFileSync, realpathSync, writeFileS
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { CheckQueue } from './release-local-checks.mjs';
+import { VERDICT_WAIT_MINUTES } from './release-local-policy.mjs';
 import { appendSummary, privateWrite } from './release-local-process.mjs';
 
 const runnerRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -30,9 +31,9 @@ export class LocalDelivery {
       for (const unit of this.active) this.command('sudo', ['-n', 'systemctl', 'stop', unit]).catch(() => {});
     };
   }
-  run(job, context, label, env) {
+  run(job, context, label, env, options) {
     const remote = context.github.job === 'mobile_native_ios' || (context.github.job === 'desktop_build' && context.matrix.label === 'macos-universal');
-    return (remote ? this.mac : this.queue).run(job, context, label, env);
+    return (remote ? this.mac : this.queue).run(job, context, label, env, options);
   }
   async command(command, args, options = {}) { return this.engine.processes.run(command, args, { env: process.env, quiet: true, ...options }); }
   async source(directory, context) {
@@ -50,12 +51,12 @@ export class LocalDelivery {
     }
     return target;
   }
-  async execute(slot, job, context, label, workflowEnv = {}) {
+  async execute(slot, job, context, label, workflowEnv = {}, options = {}) {
     if (this.engine.cancelled) return { result: 'failure', outputs: {} };
     const directory = join(this.engine.directory, 'jobs', label.replaceAll('/', '-'));
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     const started = new Date().toISOString();
-    try { return await this.worker(slot, job, context, label, workflowEnv, directory); }
+    try { return await this.worker(slot, job, context, label, workflowEnv, directory, options); }
     catch (error) {
       const message = this.engine.processes.redact(`${label}: ${error.message}`);
       const logFile = join(directory, 'output.log');
@@ -67,11 +68,11 @@ export class LocalDelivery {
       return { result: 'failure', outputs: {} };
     }
   }
-  async worker(slot, job, context, label, workflowEnv, directory) {
+  async worker(slot, job, context, label, workflowEnv, directory, { verdictFile } = {}) {
     const carry = context.github.job === 'helper_macos' && this.engine.variables?.macHelperMode !== 'build';
     const source = carry ? this.engine.root : await this.source(directory, context), slice = `beeline-ci${slot}.slice`;
     const { secrets: _secrets, ...safeContext } = context;
-    const spec = { delivery: true, job, context: safeContext, label, workflowEnv, root: source, directory,
+    const spec = { delivery: true, job, context: safeContext, label, workflowEnv, root: source, directory, verdictFile,
       runDirectory: this.engine.directory, secrets: this.engine.secrets, variables: this.engine.variables, artifacts: [...this.engine.artifacts],
       tools: { slice, docker: '/usr/bin/docker', flyctl: await this.command('bash', ['-c', 'command -v flyctl']) } };
     spec.tools.flyctl = spec.tools.flyctl.trim();
@@ -84,7 +85,8 @@ export class LocalDelivery {
       process.execPath, join(runnerRoot, 'packages/scripts/release-local-check-worker.mjs'), join(directory, 'spec.json')];
     this.active.add(unit);
     let failure;
-    try { await this.command('sudo', args, { quiet: false, timeout: (job['timeout-minutes'] ?? 60) * 60_000 }); }
+    const timeout = ((job['timeout-minutes'] ?? 60) + (verdictFile ? VERDICT_WAIT_MINUTES : 0)) * 60_000;
+    try { await this.command('sudo', args, { quiet: false, timeout }); }
     catch (error) { failure = error; await this.command('sudo', ['-n', 'systemctl', 'stop', unit]).catch(() => {}); }
     finally { this.active.delete(unit); }
     const path = join(directory, 'result.json');
@@ -95,4 +97,23 @@ export class LocalDelivery {
     privateWrite(join(this.engine.directory, 'records.json'), JSON.stringify([...this.engine.records.values()], null, 2));
     return failure ? { ...result.job, result: 'failure' } : result.job;
   }
+}
+
+// The parent writes the full-checks verdict for an early-started leg; the
+// worker reads it before the first step that may change production.
+export function writeChecksVerdict(file, verdict) {
+  mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+  privateWrite(file, JSON.stringify(verdict));
+}
+
+export async function awaitChecksVerdict(file, { signal, pollMs = 2000, limitMs = VERDICT_WAIT_MINUTES * 60_000 } = {}) {
+  const deadline = Date.now() + limitMs;
+  while (!existsSync(file)) {
+    if (signal?.aborted) throw new Error('Cancelled while waiting for the full-checks verdict');
+    if (Date.now() >= deadline) throw new Error(`No full-checks verdict within ${Math.round(limitMs / 60_000)} minutes`);
+    await new Promise(resolveWait => setTimeout(resolveWait, pollMs));
+  }
+  const verdict = JSON.parse(readFileSync(file, 'utf8'));
+  if (verdict.authorized !== true) throw new Error(verdict.reason || 'Full checks do not authorize this release SHA');
+  return verdict;
 }

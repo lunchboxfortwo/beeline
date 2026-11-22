@@ -9,9 +9,9 @@ import test from 'node:test';
 import { parse } from 'yaml';
 import { dryRun, localHooks } from './release-local.mjs';
 import { LocalActions } from './release-local-actions.mjs';
-import { LocalDelivery, writeToolAdapters } from './release-local-delivery.mjs';
+import { LocalDelivery, awaitChecksVerdict, writeChecksVerdict, writeToolAdapters } from './release-local-delivery.mjs';
 import { localToolPlan } from './release-local-tools.mjs';
-import { droppedChecks, localWorkflow, quickChecks, releasePlan } from './release-local-policy.mjs';
+import { awaitsVerdict, droppedChecks, localWorkflow, preVerdictSteps, quickChecks, releasePlan } from './release-local-policy.mjs';
 import { Processes } from './release-local-process.mjs';
 import { githubMacDesktop, githubMacHelpers } from './release-local-mac-github.mjs';
 import { DesktopBuild } from './release-local-desktop.mjs';
@@ -616,4 +616,47 @@ test('an unsigned, unnotarized or failed GitHub macOS desktop build is refused b
     await assert.rejects(githubMacDesktop({ processes, ...options }), message);
     assert.ok(calls.every(call => call.args[1] !== 'download'));
   }
+});
+
+// Expands local composite actions so the test sees the steps a worker runs.
+const expandSteps = steps => steps.flatMap(step => step.uses?.startsWith('./')
+  ? expandSteps(parse(readFileSync(join(root, step.uses, 'action.yml'), 'utf8')).runs.steps) : [step]);
+test('early server and OTA legs run only build and read steps before the checks verdict', () => {
+  const local = localWorkflow(read('unified-release.yml'), { parallelChecks: true });
+  const before = {};
+  for (const id of Object.keys(preVerdictSteps)) {
+    assert.equal(local.jobs[id].needs.includes('release_validation'), false, id);
+    assert.equal(local.jobs[id].if.includes('release_validation'), false, id);
+    const steps = expandSteps(local.jobs[id].steps), gate = steps.findIndex(step => awaitsVerdict(id, step));
+    assert.ok(gate > 0, id);
+    before[id] = steps.slice(0, gate).map(step => step.name ?? step.uses ?? step.run.trim().split('\n')[0]);
+  }
+  // Adding a step here lets it run before full checks pass; it must not change production.
+  assert.deepEqual(before, {
+    server: ['actions/checkout@v4', 'actions/setup-node@v4', 'bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/require-tools.sh" step0', 'Log in to GHCR for the pinned server base image',
+      'Verify Fly.io deployment authority', 'Ask Fly whether this release already runs', 'This release already runs on every Machine',
+      'Install the free starter agent image build dependencies', 'dtolnay/rust-toolchain@1.95.0', 'node packages/scripts/native-agent-cache.mjs "$PLATFORM"', 'actions/cache@v4', 'cache_source=miss',
+      'Publish the matching free starter agent image', 'Build the exact Fly image and capture the two-Machine rollback plan',
+      'Guard schema overlap with the serving and rollback images'],
+    mobile_ota: ['actions/checkout@v4', 'actions/setup-node@v4', 'bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/require-tools.sh" step0',
+      'bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/eas-cli.sh" step0',
+      'Install mobile dependencies and build SDKs', 'Read the live store runtimes'],
+  });
+  // Promotion jobs keep the verdict join.
+  for (const id of ['helper', 'website', 'release_result']) assert.ok([local.jobs[id].needs].flat().includes('release_validation'), id);
+});
+test('an early leg waits for the checks verdict file and refuses a failed verdict', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'checks-verdict-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const file = join(directory, 'jobs/server-local/checks-verdict.json');
+  const waiting = awaitChecksVerdict(file, { pollMs: 5 });
+  let settled = false;
+  waiting.then(() => { settled = true; }, () => { settled = true; });
+  await new Promise(resolveWait => setTimeout(resolveWait, 30));
+  assert.equal(settled, false);
+  writeChecksVerdict(file, { authorized: true });
+  assert.equal((await waiting).authorized, true);
+  writeChecksVerdict(file, { authorized: false, reason: 'Full checks do not authorize this release SHA' });
+  await assert.rejects(awaitChecksVerdict(file, { pollMs: 5 }), /do not authorize/);
+  await assert.rejects(awaitChecksVerdict(join(directory, 'absent.json'), { pollMs: 5, limitMs: 20 }), /No full-checks verdict/);
 });
