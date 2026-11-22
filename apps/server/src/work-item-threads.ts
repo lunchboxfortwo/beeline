@@ -1,5 +1,7 @@
 import { CommandRefusalError } from './command-refusal.js';
+import type { WorkState } from '@beeline/api-contract/phone';
 import type { SqlDatabase } from './database.js';
+import { updateWorkItem } from './work-board.js';
 
 /** At most this many chat tasks per opened thread. */
 export const MAX_THREAD_WORK_ITEMS = 8;
@@ -7,17 +9,6 @@ export const MAX_THREAD_WORK_ITEMS = 8;
 /** The web address of a thread, the link a task shows for the thread that builds it. */
 export function threadWebUrl(threadId: string, workspaceId: string): string {
   return `https://web.usebeeline.app/beeline/chat/${encodeURIComponent(threadId)}?communityId=${encodeURIComponent(workspaceId)}`;
-}
-
-async function asActor<T>(db: SqlDatabase, actorId: string | null, write: () => Promise<T>): Promise<T> {
-  const previous = (await db.query<{ actor: string | null }>(
-    "SELECT current_setting('beeline.work_actor',true) actor")).rows[0]?.actor ?? '';
-  if (actorId) await db.query("SELECT set_config('beeline.work_actor',$1,true)", [actorId]);
-  try {
-    return await write();
-  } finally {
-    if (actorId) await db.query("SELECT set_config('beeline.work_actor',$1,true)", [previous]);
-  }
 }
 
 /**
@@ -43,18 +34,13 @@ export async function linkThreadWorkItems(db: SqlDatabase, input: {
   const missing = ids.filter(id => !found.has(id));
   if (missing.length)
     throw new CommandRefusalError(`workItems must be task ids in the thread's parent chat: ${missing.join(', ')}`, 400);
-  await asActor(db, input.actorId, async () => {
-    await db.query(
-      `INSERT INTO work_item_threads(work_item_id,thread_id) SELECT id,$2 FROM unnest($1::text[]) id
-       ON CONFLICT DO NOTHING`, [ids, input.threadId]);
-    await db.query(
-      `UPDATE work_items SET state='in-progress',completed_at=NULL,updated_at=now()
-       WHERE id=ANY($1::text[]) AND state IS DISTINCT FROM 'in-progress'`, [ids]);
-    await db.query(
-      `INSERT INTO work_item_attachments(work_item_id,kind,name,url,added_by)
-       SELECT id,'link',$2,$3,$4 FROM unnest($1::text[]) id`,
-      [ids, `Thread: ${input.threadName}`, threadWebUrl(input.threadId, input.workspaceId), input.actorId]);
-  });
+  await db.query(
+    `INSERT INTO work_item_threads(work_item_id,thread_id) SELECT id,$2 FROM unnest($1::text[]) id
+     ON CONFLICT DO NOTHING`, [ids, input.threadId]);
+  const link = { kind: 'link' as const, name: `Thread: ${input.threadName}`,
+    url: threadWebUrl(input.threadId, input.workspaceId) };
+  for (const id of ids)
+    await updateWorkItem(db, { roomId: input.chatId, id, state: 'in-progress', attachments: [link] }, input.actorId);
 }
 
 /**
@@ -62,24 +48,24 @@ export async function linkThreadWorkItems(db: SqlDatabase, input: {
  * open; otherwise they move to Done when any linked thread landed, else to Backlog.
  */
 export async function settleThreadWorkItems(db: SqlDatabase, threadId: string, landed: boolean): Promise<void> {
-  const implementer = (await db.query<{ id: string | null }>(
-    'SELECT implementer_agent_id id FROM corner_facts WHERE corner_id=$1', [threadId])).rows[0]?.id ?? null;
-  await asActor(db, implementer, async () => {
-    // The CTE's write is not visible to the outer statement, so this thread's
-    // own outcome is read from $2 and only other links are read from the table.
-    await db.query(
-      `WITH settled AS (
-         UPDATE work_item_threads SET landed=$2 WHERE thread_id=$1 RETURNING work_item_id
-       ), next AS (
-         SELECT w.id,CASE WHEN $2 OR EXISTS(SELECT 1 FROM work_item_threads other
-           WHERE other.work_item_id=w.id AND other.thread_id<>$1 AND other.landed) THEN 'done' ELSE 'backlog' END state
-         FROM work_items w WHERE w.id IN (SELECT work_item_id FROM settled)
-           AND NOT EXISTS(SELECT 1 FROM work_item_threads other JOIN rooms thread ON thread.id=other.thread_id
-             WHERE other.work_item_id=w.id AND other.thread_id<>$1 AND thread.archived_at IS NULL)
-       )
-       UPDATE work_items w SET state=next.state,updated_at=now(),
-         completed_at=CASE WHEN next.state='done' THEN COALESCE(w.completed_at,now()) END
-       FROM next WHERE w.id=next.id AND w.state IS DISTINCT FROM next.state`,
-      [threadId, landed]);
-  });
+  const settled = (await db.query<{ id: string; room_id: string; state: WorkState; access_id: string | null; actor_id: string | null }>(
+    `WITH settled AS (
+       UPDATE work_item_threads SET landed=$2 WHERE thread_id=$1 RETURNING work_item_id
+     ), implementer AS (SELECT implementer_agent_id id FROM corner_facts WHERE corner_id=$1)
+     SELECT w.id,w.room_id,
+       CASE WHEN $2 OR EXISTS(SELECT 1 FROM work_item_threads other
+         WHERE other.work_item_id=w.id AND other.thread_id<>$1 AND other.landed) THEN 'done' ELSE 'backlog' END state,
+       access.identity_id access_id,COALESCE((SELECT id FROM implementer),access.identity_id) actor_id
+     FROM work_items w
+     -- updateWorkItem writes as a current chat member: the implementer, else the opener, else anyone.
+     LEFT JOIN LATERAL (SELECT a.identity_id FROM room_access a WHERE a.room_id=w.room_id AND a.removed_at IS NULL
+       ORDER BY a.identity_id IS NOT DISTINCT FROM (SELECT id FROM implementer) DESC,a.identity_id=w.opened_by DESC,a.identity_id
+       LIMIT 1) access ON true
+     WHERE w.id IN (SELECT work_item_id FROM settled)
+       AND NOT EXISTS(SELECT 1 FROM work_item_threads other JOIN rooms thread ON thread.id=other.thread_id
+         WHERE other.work_item_id=w.id AND other.thread_id<>$1 AND thread.archived_at IS NULL)`,
+    [threadId, landed])).rows;
+  for (const item of settled)
+    if (item.access_id && item.actor_id)
+      await updateWorkItem(db, { roomId: item.room_id, id: item.id, state: item.state }, item.actor_id, item.access_id);
 }
