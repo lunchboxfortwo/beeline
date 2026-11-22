@@ -71,14 +71,6 @@ export function unreadMessageSql(alias: string): string {
       AND ${column('author_id')} IS DISTINCT FROM $2`;
 }
 
-/** Rows strictly newer than the viewer's mark, by the ordering the mark stores. */
-function newerThanMarkSql(alias: string): string {
-  return `(${alias}.created_at,${alias}.id)>(
-        COALESCE((SELECT message_created_at FROM room_read_marks WHERE room_id=room.id AND identity_id=$2),'-infinity'::timestamptz),
-        COALESCE((SELECT message_id FROM room_read_marks WHERE room_id=room.id AND identity_id=$2),'')
-      )`;
-}
-
 /**
  * One viewer's read boundary, correlated with the authorized Room (`room.id`)
  * and the viewer (`$2`): where they are, what the first thing they have not
@@ -91,22 +83,21 @@ function newerThanMarkSql(alias: string): string {
  */
 export function viewerReadCursorSql(): string {
   // Built on call: the corner idle reads import this module inside a cycle.
-  return `jsonb_build_object(
-  'messageId',(SELECT message_id FROM room_read_marks WHERE room_id=room.id AND identity_id=$2),
-  'firstUnreadMessageId',(
-    SELECT message.id FROM messages message
+  return `(WITH mark AS (
+    SELECT message_id,message_created_at FROM room_read_marks
+    WHERE room_id=room.id AND identity_id=$2
+  ), unread AS MATERIALIZED (
+    SELECT message.id,message.created_at FROM messages message
     WHERE message.room_id=room.id
       AND ${unreadMessageSql('message')}
-      AND ${newerThanMarkSql('message')}
-    ORDER BY message.created_at,message.id LIMIT 1
-  ),
-  'unreadCount',(
-    SELECT count(*)::int FROM (
-      SELECT 1 FROM messages message
-      WHERE message.room_id=room.id
-        AND ${unreadMessageSql('message')}
-        AND ${newerThanMarkSql('message')}
-      LIMIT ${UNREAD_COUNT_CAP}
-    ) capped
-  ))`;
+      AND (message.created_at,message.id)>(
+        COALESCE((SELECT message_created_at FROM mark),'-infinity'::timestamptz),
+        COALESCE((SELECT message_id FROM mark),'')
+      )
+    ORDER BY message.created_at,message.id LIMIT ${UNREAD_COUNT_CAP}
+  ) SELECT jsonb_build_object(
+    'messageId',(SELECT message_id FROM mark),
+    'firstUnreadMessageId',(array_agg(id ORDER BY created_at,id))[1],
+    'unreadCount',count(*)::int
+  ) FROM unread)`;
 }
