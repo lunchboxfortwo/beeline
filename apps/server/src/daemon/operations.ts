@@ -1,4 +1,5 @@
 import { becomeThreadImplementer } from '../corner-lifecycle.js';
+import { cornerReviewerSql } from '../corner-reviewer.js';
 import { addWorkNote, attachToWorkItem } from '../work-item-detail.js';
 import { askOwnerQuestion } from '../work-questions.js';
 import { updateWorkItem } from '../work-board.js';
@@ -392,8 +393,13 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
         const claim = input as Input<'becomeImplementer'>;
         const cornerId = claim.cornerId ?? claim.roomId;
         if (cornerId !== claim.roomId) await daemonAccess(ctx, cornerId, authenticatedAgentId);
-        if (!(await ctx.database.query('SELECT 1 FROM corner_facts WHERE corner_id=$1', [cornerId])).rowCount)
-          throw new CommandRefusalError('claim_thread needs a thread address.', 400);
+        const thread = (await ctx.database.query<{ reviewer: boolean }>(
+          `SELECT ${cornerReviewerSql('corner', 'parent')} IS NOT DISTINCT FROM $2 reviewer
+           FROM rooms corner JOIN corner_facts fact ON fact.corner_id=corner.id
+           LEFT JOIN rooms parent ON parent.id=corner.parent_id WHERE corner.id=$1`,
+          [cornerId, authenticatedAgentId])).rows[0];
+        if (!thread) throw new CommandRefusalError('claim_thread needs a thread address.', 400);
+        if (thread.reviewer) throw new CommandRefusalError('The thread reviewer cannot claim the implementer role.', 403);
         await becomeThreadImplementer(ctx.database, cornerId, authenticatedAgentId);
         return daemonWriteResult(ctx) as Output<Name>;
       }

@@ -75,3 +75,17 @@ it('S3: thread role addresses resolve the recorded role even when a peer has tha
       .toEqual([{agent_id:B,room_id:THREAD}]);
   } finally {await db.query("UPDATE identities SET handle='sol' WHERE id=$1",[C]);}
 });
+
+it('S3: the MCP claim_thread path refuses the thread reviewer',async()=>{
+  await db.query('UPDATE corner_facts SET reviewer_agent_id=$2 WHERE corner_id=$1',[THREAD,A]);
+  try {
+    const sent=await sendMessage(db,{route:{from:{agent:B,place:CHAT},to:{agent:A,place:THREAD}},text:'Take over widget'});
+    const mcp=new RoomsMcpAgentTools(db,daemon);
+    await expect(mcp.call(A,'claim_thread',{address:THREAD,commandId:sent.id}))
+      .rejects.toThrow('The thread reviewer cannot claim the implementer role.');
+    expect((await db.query('SELECT implementer_agent_id FROM corner_facts WHERE corner_id=$1',[THREAD])).rows)
+      .toEqual([{implementer_agent_id:B}]);
+  } finally {
+    await db.query('UPDATE corner_facts SET reviewer_agent_id=NULL WHERE corner_id=$1',[THREAD]);
+  }
+});
