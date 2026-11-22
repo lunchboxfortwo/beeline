@@ -364,6 +364,18 @@ it('Reproduction R5: two different pending schedules in one chat never share a t
   expect(harness.deliver.mock.calls).toEqual([[health, [health]], [ci, [ci]], [personal, [personal]]]);
 });
 
+it('Reproduction R5: a schedule waiting behind an unrelated tag gets its own turn request', async () => {
+  const f = await fixture();
+  const tag = f.item('unrelated-tag');
+  const health = { ...f.item('health-behind-tag'), reason: 'schedule', scheduleId: 'code-health' };
+  f.changed([tag, health]);
+  await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(2));
+  expect(harness.deliver.mock.calls).toEqual([[tag, [tag]], [health, [health]]]);
+  expect(f.execute).toHaveBeenCalledWith('startAgentTurn', expect.objectContaining({ requestId: health.turnRequestId }));
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({
+    requestId: health.id, text: 'answer' })));
+});
+
 it('keeps the genuine answer durable when optional cleanup fails', async () => {
   const saved=vi.spyOn(AnswerStore.prototype,'save');
   const cleanup=vi.fn(async()=>{
@@ -386,7 +398,7 @@ it('stores and posts one answer for every item in an offline chat batch', async 
   const f = await fixture();
   const batch = Array.from({ length: 28 }, (_, n) => ({ ...f.item(`offline-${n}`),
     offlineSeconds: 18 * 3600,
-    ...(n >= 3 ? { reason: 'schedule', scheduleId: 'one-schedule' } : {}),
+    ...(n < 25 ? { reason: 'schedule', scheduleId: 'one-schedule' } : {}),
   }));
   const answering = deferred<Record<string, unknown>>();
   harness.deliver.mockReturnValueOnce(answering.promise);

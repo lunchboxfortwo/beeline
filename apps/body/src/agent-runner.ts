@@ -34,19 +34,17 @@ interface Place {
 
 /**
  * The items one prompt answers: the head and the waiting input after it, up
- * to a restart. A turn holds runs of at most one schedule. Tools act for the
- * head's request, so a second schedule batched behind another would open its
- * threads and replies under the first schedule's request and instructions.
+ * to a restart. Tools act for the head's request, so a schedule batched
+ * behind other input would open its threads and replies under that input's
+ * request and instructions. A schedule joins a batch only behind a run of the
+ * same schedule.
  */
 function turnBatch(item: AgentCommand, waiting: readonly AgentCommand[]): AgentCommand[] {
   const batch = [item];
-  let schedule = item.reason === 'schedule' ? item : undefined;
+  const schedule = item.reason === 'schedule' ? item.scheduleId : undefined;
   for (const next of waiting) {
     if (next.action === 'restart') break;
-    if (next.reason === 'schedule') {
-      if (schedule && (!schedule.scheduleId || schedule.scheduleId !== next.scheduleId)) break;
-      schedule = next;
-    }
+    if (next.reason === 'schedule' && (!schedule || next.scheduleId !== schedule)) break;
     batch.push(next);
   }
   return batch;
