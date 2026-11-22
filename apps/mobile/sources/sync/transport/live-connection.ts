@@ -40,6 +40,12 @@ type PendingRequest = {
   resolve(value: unknown): void;
   reject(reason: unknown, transportFailed?: boolean): void;
 };
+function takeLaunch(): Window['__beelineLaunchLive'] {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return undefined;
+  const launch = window.__beelineLaunchLive;
+  delete window.__beelineLaunchLive;
+  return launch;
+}
 type Dependencies = {
   telemetry?: {
     origin(): { deviceId: string; sessionId: string; viewId: string; actionId: string; requestId: string } | undefined;
@@ -117,6 +123,7 @@ export class LiveConnection {
   // One owner-held connection promise prevents parallel screens opening two sockets.
   private connecting?: { promise: Promise<void>; reject(reason: unknown): void };
   private readonly requests = new Map<string, PendingRequest>();
+  private launch = takeLaunch();
   private readonly registrations = new Set<Registration>();
   private readonly roomReferences = new Map<string, number>();
   private readonly viewing = new Map<string, number>();
@@ -418,10 +425,14 @@ export class LiveConnection {
       .authorization()
       .then((token) => {
         if (this.connecting !== connection || identity !== this.identity) return;
-        const socket = new WebSocket(this.deps.liveUrl(), [`bearer.${token}`]);
+        const launch = this.launch;
+        const adopted = launch && launch.url === this.deps.liveUrl() && launch.token === token &&
+          launch.socket.readyState <= 1 ? launch.socket : undefined;
+        if (!adopted) this.endLaunch();
+        const socket = adopted ?? new WebSocket(this.deps.liveUrl(), [`bearer.${token}`]);
         this.socket = socket;
         this.socketGeneration++;
-        socket.onopen = () => {
+        const opened = () => {
           if (this.socket !== socket) return;
           this.connecting = undefined;
           this.sendSubscribe([...this.roomReferences.keys()]);
@@ -430,7 +441,7 @@ export class LiveConnection {
           this.publishConnected();
           resolve();
         };
-        socket.onmessage = (event) => {
+        const received = (event: MessageEvent) => {
           if (this.socket !== socket) return;
           let frame: unknown;
           try {
@@ -442,17 +453,13 @@ export class LiveConnection {
           const reply = frame as Record<string, unknown>;
           if (reply.t === 'res' && typeof reply.id === 'string') {
             const pending = this.requests.get(reply.id);
-            if (!pending || pending.socket !== socket) return;
-            if (reply.ok === true) pending.resolve(reply.result);
-            else {
-              const error = reply.error as { code: string; message: string; retryable: boolean };
-              if (error.code === 'unauthorized') this.deps.invalidateAuthorization?.(token);
-              pending.reject(new PhoneSocketError(error.code, error.message, error.retryable));
-            }
+            if (pending && pending.socket === socket) this.settle(pending, reply, token);
             return;
           }
           this.dispatch(frame as LiveWireEvent | { type: 'pong' }, socket);
         };
+        socket.onopen = opened;
+        socket.onmessage = received;
         const failed = () => {
           if (this.socket !== socket) return;
           // A network failure says nothing about the credential. Forcing an
@@ -461,13 +468,36 @@ export class LiveConnection {
         };
         socket.onerror = failed;
         socket.onclose = failed;
+        if (!adopted || !launch) return;
+        // Same order as a fresh socket: admission first, then frames as received.
+        const earlier = launch.release();
+        if (socket.readyState === 1) opened();
+        for (const event of earlier) received(event);
       })
       .catch((error) => {
         if (this.connecting !== connection) return;
         this.connecting = undefined;
+        this.endLaunch();
         reject(error);
       });
     return promise;
+  }
+
+  private settle(pending: PendingRequest, reply: Record<string, unknown>, token: string): void {
+    if (reply.ok === true) pending.resolve(reply.result);
+    else {
+      const error = reply.error as { code: string; message: string; retryable: boolean };
+      if (error.code === 'unauthorized') this.deps.invalidateAuthorization?.(token);
+      pending.reject(new PhoneSocketError(error.code, error.message, error.retryable));
+    }
+  }
+
+  private endLaunch(): void {
+    const launch = this.launch;
+    this.launch = undefined;
+    if (!launch || this.socket === launch.socket) return;
+    launch.release();
+    launch.socket.close();
   }
 
   private socketFailed(socket: WebSocket): void {
@@ -488,6 +518,7 @@ export class LiveConnection {
     }
   }
   private dropConnection(transportFailed = false): void {
+    this.endLaunch();
     const socket = this.socket;
     this.socket = undefined;
     const connecting = this.connecting;

@@ -583,6 +583,8 @@ export class MonolithSession {
             token: tokens.accessToken,
             expiresAt: tokens.accessExpiresAt,
             identityId: tokens.identityId,
+            // The web launch script opens the live socket to the issuing server.
+            server: this.baseUrl,
             ...(reviewSecretHash ? { reviewSecretHash } : {}),
           }),
         ),

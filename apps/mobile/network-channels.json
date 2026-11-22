@@ -45,13 +45,6 @@
       "why": "Native \"Leave call\" from the call notification; must work while JavaScript is suspended."
     },
     {
-      "file": "apps/mobile/sources/app/_layout.tsx",
-      "kind": "import:posthog-react-native",
-      "count": 1,
-      "fate": "exception",
-      "why": "PostHog provider for the analytics client."
-    },
-    {
       "file": "apps/mobile/sources/auth/github-auth-session.ts",
       "kind": "fetch",
       "count": 1,

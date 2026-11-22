@@ -28,6 +28,31 @@ html,body{background:#fafaf9}
   } catch (e) {}
 })();
 </script>
+<script>
+// While the bundle loads, only open the app's live connection with saved access.
+// This script sends no frames; LiveConnection adopts the socket and received frames.
+(function () {
+  try {
+    var access = JSON.parse(window.localStorage.getItem('buzzy.monolith.access.v1') || 'null');
+    if (!access || typeof access.server !== 'string' || typeof access.token !== 'string' ||
+        access.identityId !== window.localStorage.getItem('buzzy.monolith.identity.v1') ||
+        !(access.expiresAt > Date.now() + 30000)) return;
+    var url = access.server.replace(/^http/, 'ws') + '/v1/phone/live';
+    var socket = new WebSocket(url, ['bearer.' + access.token]);
+    var messages = [];
+    var keep = function (event) { messages.push(event); };
+    socket.addEventListener('message', keep);
+    window.__beelineLaunchLive = {
+      url: url, token: access.token, socket: socket,
+      // The adopter takes the frames received so far; later ones are its own.
+      release: function () {
+        socket.removeEventListener('message', keep);
+        return messages;
+      },
+    };
+  } catch (e) {}
+})();
+</script>
 </head>
 <body><noscript>You need to enable JavaScript to run this app.</noscript><div id="root"></div></body>
 </html>
